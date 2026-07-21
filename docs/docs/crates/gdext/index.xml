@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>godopty</title>
+    <title>godopty-gdext on godopty</title>
     <link>https://godopty.github.io/godopty/docs/crates/gdext/</link>
-    <description>Recent content on godopty</description>
+    <description>Recent content in godopty-gdext on godopty</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
     <copyright>© 2026 godopty</copyright>

@@ -4,7 +4,7 @@
   dir="ltr"
   class="scroll-smooth"
   data-default-appearance="light"
-  data-auto-appearance="true"><head><script src="/godopty/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=godopty/livereload" data-no-instant defer></script>
+  data-auto-appearance="true"><head>
   <meta charset="utf-8">
   
     <meta http-equiv="content-language" content="en-us">
@@ -15,8 +15,8 @@
 
   
   
-    <title> &middot; godopty</title>
-    <meta name="title" content=" &middot; godopty">
+    <title>Overview &middot; godopty</title>
+    <meta name="title" content="Overview &middot; godopty">
   
 
   
@@ -34,7 +34,7 @@
   
   
   
-  <link rel="canonical" href="http://localhost:1313/godopty/docs/readme/">
+  <link rel="canonical" href="https://godopty.github.io/godopty/docs/readme/">
   
   
 
@@ -45,10 +45,10 @@
   
 
   
-  <meta property="og:url" content="http://localhost:1313/godopty/docs/readme/">
+  <meta property="og:url" content="https://godopty.github.io/godopty/docs/readme/">
 	<meta property="og:site_name" content="godopty">
-	<meta property="og:title" content="godopty">
-	<meta property="og:description" content="� godopty # godopty (goh-doh-tee), a Godot-based Rust multi-PTY emulator desktop application for creating, expanding, and orchestrating terminal sessions in a grid-based GUI.
+	<meta property="og:title" content="Overview">
+	<meta property="og:description" content="godopty # godopty (goh-doh-tee), a Godot-based Rust multi-PTY emulator desktop application for creating, expanding, and orchestrating terminal sessions in a grid-based GUI.
 Overview # Reactive Automation: Rather than acting as a passive text pipe, the terminal reads its own output. The built-in pub-sub engine detects matched patterns and automatically executes actions (fixes, restarts, or notifications) in adjacent panes. Unrestricted Aesthetics: Built on Godot to support fluid animations, instant theming, and rich UI overlays without the memory overhead of an embedded browser. Zero-Friction Tiling: Managing multiple panes relies on a native graphical grid and drag-and-drop (coming soon) mechanics, bypassing the need to memorize complex keyboard multiplexer bindings. Open source, no telemetry, no logins. Component Choice Rationale PTY library portable-pty Cross-platform (Linux /dev/ptmx &#43; Windows ConPTY) with a single API ANSI parsing vte crate Fast Rust ANSI state machine Async runtime tokio Native broadcast channel for 1:N pub-sub I/O threading Dedicated std::thread per PTY Predictable blocking reads; bridges to tokio via mpsc Pub-sub tokio::sync::broadcast(1024) 1:N fan-out, lagged-receiver protection, self-reaction prevention Grid rendering alacritty_terminal Full DEC STD 070 grid state machine; pass arrays to Godot _draw() Godot bridge gdext 0.5 Native GDExtension for Godot 4.7&#43; Rust edition 2024 Requires Rust &gt;= 1.85 Installation # Standalone binaries (no Godot install required) are published on GitHub Releases for Linux, macOS, and Windows.">
 	<meta property="og:locale" content="en_us">
 	<meta property="og:type" content="article">
@@ -56,8 +56,8 @@ Overview # Reactive Automation: Rather than acting as a passive text pipe, the t
 
   
 	<meta name="twitter:card" content="summary">
-	<meta name="twitter:title" content="godopty">
-	<meta name="twitter:description" content="� godopty # godopty (goh-doh-tee), a Godot-based Rust multi-PTY emulator desktop application for creating, expanding, and orchestrating terminal sessions in a grid-based GUI.
+	<meta name="twitter:title" content="Overview">
+	<meta name="twitter:description" content="godopty # godopty (goh-doh-tee), a Godot-based Rust multi-PTY emulator desktop application for creating, expanding, and orchestrating terminal sessions in a grid-based GUI.
 Overview # Reactive Automation: Rather than acting as a passive text pipe, the terminal reads its own output. The built-in pub-sub engine detects matched patterns and automatically executes actions (fixes, restarts, or notifications) in adjacent panes. Unrestricted Aesthetics: Built on Godot to support fluid animations, instant theming, and rich UI overlays without the memory overhead of an embedded browser. Zero-Friction Tiling: Managing multiple panes relies on a native graphical grid and drag-and-drop (coming soon) mechanics, bypassing the need to memorize complex keyboard multiplexer bindings. Open source, no telemetry, no logins. Component Choice Rationale PTY library portable-pty Cross-platform (Linux /dev/ptmx &#43; Windows ConPTY) with a single API ANSI parsing vte crate Fast Rust ANSI state machine Async runtime tokio Native broadcast channel for 1:N pub-sub I/O threading Dedicated std::thread per PTY Predictable blocking reads; bridges to tokio via mpsc Pub-sub tokio::sync::broadcast(1024) 1:N fan-out, lagged-receiver protection, self-reaction prevention Grid rendering alacritty_terminal Full DEC STD 070 grid state machine; pass arrays to Godot _draw() Godot bridge gdext 0.5 Native GDExtension for Godot 4.7&#43; Rust edition 2024 Requires Rust &gt;= 1.85 Installation # Standalone binaries (no Godot install required) are published on GitHub Releases for Linux, macOS, and Windows.">
 
   
@@ -95,6 +95,8 @@ Overview # Reactive Automation: Rather than acting as a passive text pipe, the t
   
   
   
+  
+    
   
   
     
@@ -103,8 +105,8 @@ Overview # Reactive Automation: Rather than acting as a passive text pipe, the t
   <link
     type="text/css"
     rel="stylesheet"
-    href="/godopty/css/main.bundle.min.8b635699ff201db155d7e239930418611b7de415f50e04c952a897ef057a60acc1a135b3379030909274ceb51225168bdc21ee027c91668514f7a6bb5066d9b6.css"
-    integrity="sha512-i2NWmf8gHbFV1&#43;I5kwQYYRt95BX1DgTJUqiX7wV6YKzBoTWzN5AwkJJ0zrUSJRaL3CHuAnyRZoUU96a7UGbZtg==">
+    href="/godopty/css/main.bundle.min.a4c597d38925df90fbd3e86c12fc62c0abb94a5376de20e89befb63ac95fccbf1c2db522fbdc3e0f8120ffd3b8a6888684c456eed46e3177d259a3900f9874bc.css"
+    integrity="sha512-pMWX04kl35D70&#43;hsEvxiwKu5SlN23iDom&#43;&#43;2OslfzL8cLbUi&#43;9w&#43;D4Eg/9O4poiGhMRW7tRuMXfSWaOQD5h0vA==">
 
   
   
@@ -214,11 +216,11 @@ Overview # Reactive Automation: Rather than acting as a passive text pipe, the t
     "@context": "https://schema.org",
     "@type": "Article",
     "articleSection": "Documentation",
-    "name": "",
-    "headline": "",
+    "name": "Overview",
+    "headline": "Overview",
     
     "inLanguage": "en-us",
-    "url" : "http://localhost:1313/godopty/docs/readme/",
+    "url" : "https://godopty.github.io/godopty/docs/readme/",
     "author" : {
       "@type": "Person",
       "name": "godopty"
@@ -231,14 +233,20 @@ Overview # Reactive Automation: Rather than acting as a passive text pipe, the t
     
     
     
-    "mainEntityOfPage": "http://localhost:1313/godopty/docs/readme/",
-    "wordCount": "892"
+    "mainEntityOfPage": "https://godopty.github.io/godopty/docs/readme/",
+    "wordCount": "890"
   }]
   </script>
 
 
 
   
+  
+    
+
+
+
+
   
 
   
@@ -538,7 +546,7 @@ Overview # Reactive Automation: Rather than acting as a passive text pipe, the t
     <header id="single_header" class="mt-5 max-w-prose">
       
       <h1 class="mt-0 text-4xl font-extrabold text-neutral-900 dark:text-neutral">
-        
+        Overview
       </h1>
       <div class="mt-1 mb-6 text-base text-neutral-500 dark:text-neutral-400 print:hidden">
         
@@ -590,7 +598,7 @@ Overview # Reactive Automation: Rather than acting as a passive text pipe, the t
   <div class="flex flex-row flex-wrap items-center">
     
     
-      <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time><span class="px-2 text-primary-500">&middot;</span><span>892 words</span><span class="px-2 text-primary-500">&middot;</span><span title="Reading time">5 mins</span>
+      <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time><span class="px-2 text-primary-500">&middot;</span><span>890 words</span><span class="px-2 text-primary-500">&middot;</span><span title="Reading time">5 mins</span>
     
 
     
@@ -659,7 +667,7 @@ Overview # Reactive Automation: Rather than acting as a passive text pipe, the t
         
 
         <div class="article-content max-w-prose mb-20">
-          <p>�
+          
 
 
   
@@ -1021,7 +1029,7 @@ Overview # Reactive Automation: Rather than acting as a passive text pipe, the t
 <p>This project is licensed under the Apache License, Version 2.0 &ndash; see <a href="LICENSE" >LICENSE</a> for details.</p>
 
 
-�</p>
+
 
           
           
@@ -1040,6 +1048,34 @@ Overview # Reactive Automation: Rather than acting as a passive text pipe, the t
     
     <footer class="pt-8 max-w-prose print:hidden">
       
+  
+    
+    
+    
+    <div class="pt-8">
+      <hr class="border-dotted border-neutral-300 dark:border-neutral-600">
+      <div class="flex justify-between pt-3">
+        <span class="flex flex-col">
+          
+            <a
+              class="flex text-neutral-700 hover:text-primary-600 dark:text-neutral dark:hover:text-primary-400"
+              href="/godopty/docs/changelog/">
+              <span class="leading-6">
+                <span class="inline-block rtl:rotate-180">&larr;</span>&ensp;Changelog
+              </span>
+            </a>
+            
+              <span class="ms-6 mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time>
+              </span>
+            
+          
+        </span>
+        <span class="flex flex-col items-end">
+          
+        </span>
+      </div>
+    </div>
   
 
 

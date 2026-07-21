@@ -1,5 +1,5 @@
 ---
-ntitle: "Changelog"
+title: "Changelog"
 weight: 2
 ---
 
