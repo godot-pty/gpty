@@ -1,7 +1,6 @@
 ---
-build:
-  list: never
-  render: always
+ntitle: "Agent Guide"
+weight: 4
 ---
 
 {{< readfile "repo/AGENTS.md" >}}

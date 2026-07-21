@@ -1,7 +1,6 @@
 ---
-build:
-  list: never
-  render: always
+ntitle: "Overview"
+weight: 1
 ---
 
 {{< readfile "repo/README.md" >}}

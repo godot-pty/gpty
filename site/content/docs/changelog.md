@@ -1,7 +1,6 @@
 ---
-build:
-  list: never
-  render: always
+ntitle: "Changelog"
+weight: 2
 ---
 
 {{< readfile "repo/CHANGELOG.md" >}}
