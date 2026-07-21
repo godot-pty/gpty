@@ -1,7 +1,10 @@
 {{ $path := .Get 0 }}
 {{ $file := printf "content/%s" $path }}
 {{ if fileExists $file }}
-  {{ $file | readFile | markdownify }}
+  {{ $raw := $file | readFile }}
+  {{ $fixed := $raw | replaceRE `\[([^]]+)\]\(CHANGELOG\.md\)` "[${1}](/docs/changelog/)" }}
+  {{ $fixed = $fixed | replaceRE `\[([^]]+)\]\(ROADMAP\.md\)` "[${1}](/docs/roadmap/)" }}
+  {{ $fixed | markdownify }}
 {{ else }}
   > File `{{ $path }}` not found.
 {{ end }}
