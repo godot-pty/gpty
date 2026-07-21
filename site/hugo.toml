@@ -1,11 +1,12 @@
 baseURL = "https://godopty.github.io/godopty/"
-languageCode = "en-us"
+locale = "en-us"
 title = "godopty"
 theme = "blowfish"
 publishDir = "../docs"
 
 [params]
-  author = "godopty"
+  [params.author]
+    name = "godopty"
   defaultTheme = "dark"
   showCopyright = true
   showBreadcrumbs = true
