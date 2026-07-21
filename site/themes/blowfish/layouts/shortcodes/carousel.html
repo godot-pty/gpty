@@ -1,0 +1,182 @@
+{{ $id := delimit (slice "carousel" (partial "functions/uid.html" .) (now.UnixNano)) "-" }}
+{{ $aspect := (split (.Get "aspectRatio") "-") }}
+{{ $aspectx := default "16" (index $aspect  0) }}
+{{ $aspecty := default "9" (index $aspect  1) }}
+{{ $interval := default "2000" (.Get "interval") }}
+
+{{ $page := .Page.Resources }}
+{{ $imagesTemp := .Get "images" }}
+{{ $imagesTemp = strings.TrimPrefix "{" $imagesTemp }}
+{{ $imagesTemp = strings.TrimSuffix "}" $imagesTemp }}
+{{ $imagesTemp := strings.Split $imagesTemp "," }}
+{{ $images := slice }}
+{{ range $imagesTemp }}
+  {{ if or (strings.HasPrefix . "http:") (strings.HasPrefix . "https:") }}
+    {{ $images = $images | append (dict "resource" (resources.GetRemote .) "key" .) }}
+  {{ else }}
+    {{ range ($page.Match .) }}
+      {{ $images = $images | append (dict "resource" . "key" .Name) }}
+    {{ end }}
+  {{ end }}
+{{ end }}
+
+{{ $captionsParam := .Get "captions" }}
+{{ $captions := dict }}
+{{ if $captionsParam }}
+  {{ $captionsTemp := strings.TrimPrefix "{" $captionsParam }}
+  {{ $captionsTemp = strings.TrimSuffix "}" $captionsTemp }}
+  {{ range (strings.Split $captionsTemp ",") }}
+    {{ $pair := strings.Split . ":" }}
+    {{ if ge (len $pair) 2 }}
+      {{ $key := strings.TrimSpace (index $pair 0) }}
+      {{ $value := strings.TrimSpace (delimit (after 1 $pair) ":") }}
+      {{ $captions = merge $captions (dict $key $value) }}
+    {{ end }}
+  {{ end }}
+{{ end }}
+
+{{ if not .Parent }}<div class="width-patch"></div>{{ end }}
+<div
+  id="{{ $id }}"
+  class="relative"
+  style="container-type: inline-size;"
+  data-twe-carousel-init
+  data-twe-ride="carousel"
+  data-twe-interval="{{ $interval }}">
+  <div
+    class="absolute right-0 left-0 z-2 mx-[15%] mb-10 flex list-none justify-center p-0"
+    style="top: calc(100cqi * {{ $aspecty }} / {{ $aspectx }} - 2.5rem);"
+    data-twe-carousel-indicators>
+    {{ $num := 0 }}
+    {{ range $images }}
+      <button
+        type="button"
+        data-twe-target="#{{ $id }}"
+        data-twe-slide-to="{{ $num }}"
+        {{ if eq $num 0 }}data-twe-carousel-active aria-current="true"{{ end }}
+        class="mx-[3px] box-content h-[3px] w-[30px] flex-initial cursor-pointer border-0 border-y-[10px] border-solid border-transparent bg-neutral bg-clip-padding p-0 -indent-[999px] opacity-50 transition-opacity duration-[600ms] ease-[cubic-bezier(0.25,0.1,0.25,1.0)] motion-reduce:transition-none"
+        aria-label="Slide {{ $num }}"></button>
+      {{ $num = add $num 1 }}
+    {{ end }}
+  </div>
+
+  <div
+    class="relative w-full after:clear-both after:block after:content-['']"
+    style="overflow-x: clip; overflow-y: visible;">
+    {{ range $index, $image := $images }}
+    {{ $hiddenClass := cond (eq $index 0) "" "hidden" }}
+    {{ $resource := index $image "resource" }}
+    {{ $key := index $image "key" }}
+    {{ $caption := "" }}
+    {{ $candidates := slice }}
+    {{ if $resource }}
+    {{ $candidates = $candidates | append $resource.Name (path.Base $resource.Name) $resource.RelPermalink (path.Base $resource.RelPermalink) }}
+    {{ end }}
+    {{ if $key }}
+    {{ $candidates = $candidates | append $key (path.Base $key) }}
+    {{ end }}
+    {{ range $candidates }}
+    {{ if and (not $caption) . }}
+    {{ with (index $captions .) }}{{ $caption = . }}{{ end }}
+    {{ end }}
+    {{ end }}
+    <div
+      class="relative float-left -mr-[100%] {{ $hiddenClass }} w-full transition-transform ease-in-out motion-reduce:transition-none"
+      data-twe-carousel-item
+      style="transition-duration: {{ $interval }}ms;"
+      {{ if eq $index 0 }}data-twe-carousel-active{{ end }}>
+        <div class="single_hero_background relative overflow-hidden" style="aspect-ratio: {{ $aspectx }} / {{ $aspecty }};">
+          <img
+            src="{{ $resource.RelPermalink }}"
+            class="block absolute top-0 object-cover w-full h-full not-prose nozoom"
+            alt="carousel image {{ add $index 1 }}">
+        </div>
+        {{ if or $caption $captionsParam }}
+        <figcaption
+          class="mt-1 {{ if not $caption }}invisible{{ end }}"
+          {{ if not $caption }}aria-hidden="true"{{ end }}
+        >{{ if $caption }}{{ $caption | markdownify }}{{ else }}&nbsp;{{ end }}</figcaption>
+        {{ end }}
+    </div>
+    {{ end }}
+  </div>
+
+  <button
+    class="absolute top-0 left-0 z-2 flex w-[15%] items-center justify-center border-0 bg-none p-0 text-center opacity-50 transition-opacity duration-150 ease-[cubic-bezier(0.25,0.1,0.25,1.0)] hover:no-underline hover:opacity-90 hover:outline-none focus:no-underline focus:opacity-90 focus:outline-none motion-reduce:transition-none"
+    style="height: calc(100cqi * {{ $aspecty }} / {{ $aspectx }});"
+    type="button"
+    data-twe-target="#{{ $id }}"
+    data-twe-slide="prev">
+    <span class="inline-block h-8 w-8">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke-width="4.5"
+        stroke="currentColor"
+        class="h-6 w-6">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+      </svg>
+    </span>
+    <span
+      class="!absolute !-m-px !h-px !w-px !overflow-hidden !whitespace-nowrap !border-0 !p-0 ![clip:rect(0,0,0,0)]"
+      >Previous</span
+    >
+  </button>
+
+  <button
+    class="absolute top-0 right-0 z-[1] flex w-[15%] items-center justify-center border-0 bg-none p-0 text-center opacity-50 transition-opacity duration-150 ease-[cubic-bezier(0.25,0.1,0.25,1.0)] hover:no-underline hover:opacity-90 hover:outline-none focus:no-underline focus:opacity-90 focus:outline-none motion-reduce:transition-none"
+    style="height: calc(100cqi * {{ $aspecty }} / {{ $aspectx }});"
+    type="button"
+    data-twe-target="#{{ $id }}"
+    data-twe-slide="next">
+    <span class="inline-block h-8 w-8">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke-width="4.5"
+        stroke="currentColor"
+        class="h-6 w-6">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+      </svg>
+    </span>
+    <span
+      class="!absolute !-m-px !h-px !w-px !overflow-hidden !whitespace-nowrap !border-0 !p-0 ![clip:rect(0,0,0,0)]"
+      >Next</span
+    >
+  </button>
+</div>
+
+  {{ if $captionsParam }}
+  <script>
+    (() => {
+      const root = document.getElementById("{{ $id }}");
+      if (!root) return;
+
+      const items = Array.from(root.querySelectorAll("[data-twe-carousel-item]"));
+      const captions = items
+        .map((item) => item.querySelector("figcaption"))
+        .filter((caption) => caption);
+      if (captions.length < 2) return;
+
+      const measureAndFixCaptionHeight = () => {
+        const hiddenItems = items.filter((item) => item.classList.contains("hidden"));
+        hiddenItems.forEach((item) => item.classList.remove("hidden"));
+
+        const maxHeight = Math.max(
+          ...captions.map((caption) => Math.ceil(caption.getBoundingClientRect().height)),
+        );
+
+        hiddenItems.forEach((item) => item.classList.add("hidden"));
+        captions.forEach((caption) => {
+          caption.style.minHeight = `${maxHeight}px`;
+        });
+      };
+
+      window.requestAnimationFrame(measureAndFixCaptionHeight);
+      window.addEventListener("load", measureAndFixCaptionHeight, { once: true });
+      window.addEventListener("resize", measureAndFixCaptionHeight);
+    })();
+  </script>
+  {{ end }}

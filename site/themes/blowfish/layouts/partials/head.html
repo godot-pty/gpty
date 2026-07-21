@@ -1,0 +1,232 @@
+<head>
+  <meta charset="utf-8">
+  {{ with .Site.Language.Params.htmlCode | default .Site.Language.Locale }}
+    <meta http-equiv="content-language" content="{{ . }}">
+  {{ end }}
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <meta name="theme-color">
+
+  {{/* Title */}}
+  {{ if .IsHome }}
+    <title>{{ .Site.Title | emojify }}</title>
+    <meta name="title" content="{{ .Site.Title | emojify }}">
+  {{ else }}
+    <title>{{ .Title | plainify | emojify }} &middot; {{ .Site.Title | emojify }}</title>
+    <meta name="title" content="{{ .Title | plainify | emojify }} &middot; {{ .Site.Title | emojify }}">
+  {{ end }}
+
+  {{/* Metadata */}}
+  {{ $metaDescriptionOrder := .Site.Params.seo.metaDescriptionOrder | default (slice "summary" "description" "site") }}
+  {{ $metaDescriptionSources := dict
+    "summary" .Params.Summary
+    "description" .Params.Description
+    "site" .Site.Params.description
+  }}
+  {{ $metaDescription := "" }}
+  {{ range $metaDescriptionOrder }}
+    {{ $metaDescription = $metaDescription | default (index $metaDescriptionSources (lower .)) }}
+  {{ end }}
+  {{ with $metaDescription }}
+    <meta name="description" content="{{ . | plainify }}">
+  {{ end }}
+  {{ with  .Params.Tags | default .Site.Params.keywords }}
+    <meta name="keywords" content="{{ range . }}{{ . }},{{ end }}">
+  {{ end }}
+  {{ with .Site.Params.robots }}
+    <meta name="robots" content="{{ . }}">
+  {{ end }}
+  {{ with .Params.robots }}
+    <meta name="robots" content="{{ . }}">
+  {{ end }}
+  <link rel="canonical" href="{{ .Permalink }}">
+  {{ if .IsTranslated }}
+    {{ range .AllTranslations }}
+      {{ $hreflang := .Language.Locale | default .Language.Lang }}
+      {{ if $hreflang }}
+        <link rel="alternate" hreflang="{{ $hreflang }}" href="{{ .Permalink }}">
+      {{ end }}
+    {{ end }}
+  {{ end }}
+  {{ range .AlternativeOutputFormats }}
+    {{ printf `
+      <link rel="%s" type="%s" href="%s" title="%s" />` .Rel .MediaType.Type .RelPermalink ($.Site.Title | emojify) |
+      safeHTML
+    }}
+  {{ end }}
+
+  {{/* Me */}}
+  {{ with .Site.Params.Author.name }}
+    <meta name="author" content="{{ . }}">
+  {{ end }}
+  {{ with .Site.Params.Author.links }}
+    {{ range $links := . }}
+      {{ range $name, $url := $links }}
+        {{ if not (strings.HasPrefix $url "mailto:") }}
+          <link href="{{ $url }}" rel="me">
+        {{ end }}
+      {{ end }}
+    {{ end }}
+  {{ end }}
+
+  {{/* Social */}}
+  {{ template "_internal/opengraph.html" . }}
+  {{ template "_internal/twitter_cards.html" . }}
+  {{/* Use defaultSocialImage if feature image does not exist */}}
+  {{ $featureImage := "" }}
+  {{ $pageImages := .Resources.ByType "image" }}
+  {{ range slice "*featured*" "*cover*" "*thumbnail*" }}
+    {{ if not $featureImage }}
+      {{ $featureImage = $pageImages.GetMatch . }}
+    {{ end }}
+  {{ end }}
+  {{ if not $featureImage }}
+    {{ with .Site.Params.defaultSocialImage }}
+      {{ $socialImage := "" }}
+      {{ if or (strings.HasPrefix . "http:") (strings.HasPrefix . "https:") }}
+        {{ $socialImage = resources.GetRemote . }}
+      {{ else }}
+        {{ $socialImage = resources.Get . }}
+      {{ end }}
+      {{ with $socialImage }}
+        <meta name="twitter:image" content="{{ .RelPermalink | absURL }}">
+        <meta property="og:image" content="{{ .RelPermalink | absURL }}">
+      {{ end }}
+    {{ end }}
+  {{ end }}
+
+  {{/* Site Verification */}}
+  {{ with .Site.Params.verification.google }}
+    <meta name="google-site-verification" content="{{ . }}">
+  {{ end }}
+  {{ with .Site.Params.verification.bing }}
+    <meta name="msvalidate.01" content="{{ . }}">
+  {{ end }}
+  {{ with .Site.Params.verification.pinterest }}
+    <meta name="p:domain_verify" content="{{ . }}">
+  {{ end }}
+  {{ with .Site.Params.verification.yandex }}
+    <meta name="yandex-verification" content="{{ . }}">
+  {{ end }}
+  {{ with .Site.Params.verification.fediverse }}
+    <meta name="fediverse:creator" content="{{ . }}">
+  {{ end }}
+
+  {{ $alg := .Site.Params.fingerprintAlgorithm | default "sha512" }}
+
+  {{/* CSS */}}
+  {{ $cssResources := slice }}
+  {{ $schemeName := .Site.Params.colorScheme | default "blowfish" }}
+  {{ $cssScheme := resources.Get (printf "css/schemes/%s.css" (lower $schemeName)) | default (resources.Get "css/schemes/blowfish.css") }}
+  {{ $cssResources = $cssResources | append $cssScheme }}
+  {{ $cssResources = $cssResources | append (resources.Get "css/compiled/main.css") }}
+  {{ with resources.Get "css/custom.css" }}
+    {{ $cssResources = $cssResources | append . }}
+  {{ end }}
+  {{ if not .Site.Params.disableImageZoom | default true }}
+    {{ $cssResources = $cssResources | append (resources.Get "lib/zoom/style.css") }}
+  {{ end }}
+  {{ $bundleCSS := $cssResources | resources.Concat "css/main.bundle.css" | resources.Minify | resources.Fingerprint $alg }}
+  <link
+    type="text/css"
+    rel="stylesheet"
+    href="{{ $bundleCSS.RelPermalink }}"
+    integrity="{{ $bundleCSS.Data.Integrity }}">
+
+  {{/* JS loaded immediately */}}
+  {{ $jsAppearance := resources.Get "js/appearance.js" | resources.ExecuteAsTemplate "js/appearance.js" . | resources.Minify | resources.Fingerprint $alg }}
+  <script
+    type="text/javascript"
+    src="{{ $jsAppearance.RelPermalink }}"
+    integrity="{{ $jsAppearance.Data.Integrity }}"></script>
+  {{ partial "language-redirect.html" . }}
+  {{ $enableA11y := .Site.Params.enableA11y | default false }}
+  {{ if $enableA11y }}
+    {{ $jsA11y := resources.Get "js/a11y.js" | resources.Minify | resources.Fingerprint $alg }}
+    <script src="{{ $jsA11y.RelPermalink }}" integrity="{{ $jsA11y.Data.Integrity }}"></script>
+  {{ end }}
+  {{ $showZenMode := .Params.showZenMode | default (.Site.Params.article.showZenMode | default false) }}
+  {{ $shouldIncludeZenMode := or $enableA11y $showZenMode }}
+  {{ if and .IsPage $shouldIncludeZenMode }}
+    {{ $jsZenMode := resources.Get "js/zen-mode.js" | resources.Minify | resources.Fingerprint $alg }}
+    <script
+      type="text/javascript"
+      src="{{ $jsZenMode.RelPermalink }}"
+      integrity="{{ $jsZenMode.Data.Integrity }}"></script>
+  {{ end }}
+  {{ if not .Site.Params.disableImageZoom | default true }}
+    {{ $zoomJS := resources.Get "lib/zoom/zoom.min.umd.js" | resources.Fingerprint $alg }}
+    <script src="{{ $zoomJS.RelPermalink }}" integrity="{{ $zoomJS.Data.Integrity }}"></script>
+  {{ end }}
+
+  {{/* JS deferred */}}
+  {{ $jsResources := slice }}
+  {{ if site.Params.footer.showScrollToTop | default true }}
+    {{ $jsResources = $jsResources | append (resources.Get "js/scroll-to-top.js") }}
+  {{ end }}
+  {{ if .Site.Params.enableSearch | default false }}
+    {{ $fuseRaw := resources.Get "lib/fuse/fuse.min.cjs" }}
+    {{ $fuse := resources.FromString "lib/fuse/fuse.min.js" (replace $fuseRaw.Content "module.exports=" "window.Fuse=") }}
+    {{ $jsResources = $jsResources | append $fuse | append (resources.Get "js/search.js") }}
+  {{ end }}
+  {{ if .Site.Params.enableCodeCopy | default false }}
+    {{ $jsResources = $jsResources | append (resources.Get "js/code.js") }}
+  {{ end }}
+  {{ if .Site.Params.rtl | default false }}
+    {{ $jsResources = $jsResources | append (resources.Get "js/rtl.js") }}
+  {{ end }}
+  {{ $jsResources = $jsResources | append (resources.Get "js/katex-render.js") }}
+  {{ $jsResources = $jsResources | append (resources.Get "js/print-support.js") }}
+  {{ $jsResources = $jsResources | append (resources.Get "js/email.js") }}
+  {{ if $jsResources }}
+    {{ $bundleJS := $jsResources | resources.Concat "js/main.bundle.js" | resources.Minify | resources.Fingerprint $alg }}
+    <script
+      defer
+      type="text/javascript"
+      id="script-bundle"
+      src="{{ $bundleJS.RelPermalink }}"
+      integrity="{{ $bundleJS.Data.Integrity }}"
+      data-copy="{{ i18n "code.copy" }}"
+      data-copied="{{ i18n "code.copied" }}"></script>
+  {{ end }}
+
+  {{/* Conditional loaded resources */}}
+  {{ partial "vendor.html" . }}
+
+  {{/* Icons */}}
+  {{ if templates.Exists "partials/favicons.html" }}
+    {{ partialCached "favicons.html" .Site }}
+  {{ else }}
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ "apple-touch-icon.png" | relURL }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ "favicon-32x32.png" | relURL }}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ "favicon-16x16.png" | relURL }}">
+    <link rel="manifest" href="{{ "site.webmanifest" | relURL }}">
+  {{ end }}
+
+  {{/* Schema */}}
+  {{ partial "schema.html" . }}
+
+  {{/* Analytics */}}
+  {{ if hugo.IsProduction }}
+    {{ partial "analytics/main.html" . }}
+  {{ end }}
+
+  {{/* Extend head - eg. for custom analytics scripts, etc. */}}
+  {{ if templates.Exists "partials/extend-head.html" }}
+    {{ partialCached "extend-head.html" .Site }}
+  {{ end }}
+
+  {{/* Uncached extend head - Example: https://gohugo.io/methods/page/hasshortcode/ */}}
+  {{ if templates.Exists "partials/extend-head-uncached.html" }}
+    {{ partial "extend-head-uncached.html" . }}
+  {{ end }}
+
+  {{/* Advertisement */}}
+  {{ with .Site.Params.advertisement.adsense }}
+    <meta name="google-adsense-account" content="{{ . }}">
+    <script
+      async
+      src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client={{ . }}"
+      crossorigin="anonymous"></script>
+  {{ end }}
+</head>

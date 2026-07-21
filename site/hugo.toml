@@ -1,0 +1,26 @@
+baseURL = "https://godopty.github.io/godopty/"
+languageCode = "en-us"
+title = "godopty"
+theme = "blowfish"
+publishDir = "../docs"
+
+[params]
+  author = "godopty"
+  defaultTheme = "dark"
+  showCopyright = true
+  showBreadcrumbs = true
+
+[[menu.main]]
+  name = "Docs"
+  pageRef = "/docs"
+  weight = 10
+
+[[menu.main]]
+  name = "Releases"
+  url = "https://github.com/godopty/godopty/releases"
+  weight = 20
+
+[[menu.main]]
+  name = "GitHub"
+  url = "https://github.com/godopty/godopty"
+  weight = 30

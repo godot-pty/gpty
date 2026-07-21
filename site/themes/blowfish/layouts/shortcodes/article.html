@@ -1,0 +1,17 @@
+{{ $link := printf "%s%s" site.LanguagePrefix (.Get "link") }}
+{{ $showSummary := .Get "showSummary" }}
+{{ $compactSummary := .Get "compactSummary" | default false }}
+{{ $target := .Page }}
+{{ if ne $link .Page.RelPermalink }}
+  {{ $pages := slice }}
+  {{ range hugo.Sites }}
+    {{ $pages = $pages | append .Pages }}
+  {{ end }}
+  {{ $target = index (first 1 (where $pages "RelPermalink" $link)) 0 }}
+{{ end }}
+{{ if $target }}
+  <section class="space-y-10 w-full">
+    {{ $context := dict "target" $target "showSummary" $showSummary "compactSummary" $compactSummary }}
+    {{ partial "article-link/_shortcode.html" $context }}
+  </section>
+{{ end }}

@@ -1,0 +1,21 @@
+{{ $isRTL := .Site.Params.rtl | default false }}
+{{ $coffeeIsRight := and (eq (lower site.Params.buymeacoffee.globalWidgetPosition) "right") .Site.Params.buymeacoffee.globalWidget }}
+{{ if not $coffeeIsRight }}
+  {{ $coffeeIsRight = false }}
+{{ end }}
+
+{{ $needAvoidCoffee := ne $coffeeIsRight $isRTL }}
+{{ $toTopYOffset := cond $needAvoidCoffee "bottom-24" "bottom-6" }}
+
+
+<div
+  id="scroll-to-top"
+  class="fixed {{ $toTopYOffset }} end-6 z-50 transform translate-y-4 opacity-0 duration-200">
+  <a
+    href="#the-top"
+    class="pointer-events-auto flex h-12 w-12 items-center justify-center rounded-full bg-neutral/50 text-xl text-neutral-700 hover:text-primary-600 dark:bg-neutral-800/50 dark:text-neutral dark:hover:text-primary-400"
+    aria-label="{{ i18n "nav.scroll_to_top_title" }}"
+    title="{{ i18n "nav.scroll_to_top_title" }}">
+    &uarr;
+  </a>
+</div>

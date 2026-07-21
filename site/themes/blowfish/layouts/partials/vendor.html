@@ -1,0 +1,197 @@
+{{/* Mermaid */}}
+{{ if .Page.HasShortcode "mermaid" }}
+  {{ $mermaidLib := resources.Get "lib/mermaid/mermaid.min.js" }}
+  {{ $mermaidConfig := resources.Get "js/mermaid.js" }}
+  {{ $mermaidConfig := $mermaidConfig | resources.Minify }}
+  {{ $mermaidJS := slice $mermaidLib $mermaidConfig | resources.Concat "js/mermaid.bundle.js" | resources.Fingerprint (.Site.Params.fingerprintAlgorithm | default "sha512") }}
+  <script
+    defer
+    type="text/javascript"
+    src="{{ $mermaidJS.RelPermalink }}"
+    integrity="{{ $mermaidJS.Data.Integrity }}"></script>
+{{ end }}
+
+{{/* Chart */}}
+{{ if .Page.HasShortcode "chart" }}
+  {{ $chartLib := resources.Get "lib/chart/chart.min.js" }}
+  {{ $chartConfig := resources.Get "js/chart.js" }}
+  {{ $chartConfig := $chartConfig | resources.Minify }}
+  {{ $chartJS := slice $chartLib $chartConfig | resources.Concat "js/chart.bundle.js" | resources.Fingerprint (.Site.Params.fingerprintAlgorithm | default "sha512") }}
+  <script
+    defer
+    type="text/javascript"
+    src="{{ $chartJS.RelPermalink }}"
+    integrity="{{ $chartJS.Data.Integrity }}"></script>
+{{ end }}
+
+{{/* Katex */}}
+{{ if .Page.HasShortcode "katex" }}
+  {{ $katexCSS := resources.Get "lib/katex/katex.min.css" }}
+  {{ $katexCSS := $katexCSS | resources.Fingerprint (.Site.Params.fingerprintAlgorithm | default "sha512") }}
+  <link
+    type="text/css"
+    rel="stylesheet"
+    href="{{ $katexCSS.RelPermalink }}"
+    integrity="{{ $katexCSS.Data.Integrity }}">
+  {{ $katexLib := resources.Get "lib/katex/katex.min.js" }}
+  {{ $katexRenderLib := resources.Get "lib/katex/auto-render.min.js" }}
+  {{ $katexJS := slice $katexLib $katexRenderLib | resources.Concat "js/katex.bundle.js" | resources.Fingerprint (.Site.Params.fingerprintAlgorithm | default "sha512") }}
+  <script
+    defer
+    type="text/javascript"
+    src="{{ $katexJS.RelPermalink }}"
+    integrity="{{ $katexJS.Data.Integrity }}"
+    id="katex-render"></script>
+  {{ $katexFonts := resources.Match "lib/katex/fonts/*" }}
+  {{ range $katexFonts }}
+    <!-- {{ .RelPermalink }} -->
+  {{ end }}
+{{ end }}
+
+{{/* TypeIt */}}
+{{ if .Page.HasShortcode "typeit" }}
+  {{ $typeitLib := resources.Get "lib/typeit/typeit.umd.js" | resources.Fingerprint (.Site.Params.fingerprintAlgorithm | default "sha512") }}
+  <script defer src="{{ $typeitLib.RelPermalink }}" integrity="{{ $typeitLib.Data.Integrity }}"></script>
+{{ end }}
+
+{{/* Packery */}}
+{{ if .Page.HasShortcode "gallery" }}
+  {{ $galleryCSS := resources.Get "css/components/gallery.css" }}
+  {{ $galleryCSS = $galleryCSS | resources.Fingerprint (.Site.Params.fingerprintAlgorithm | default "sha512") }}
+  <link
+    type="text/css"
+    rel="stylesheet"
+    href="{{ $galleryCSS.RelPermalink }}"
+    integrity="{{ $galleryCSS.Data.Integrity }}">
+  {{ $packeryLib := resources.Get "lib/packery/packery.pkgd.min.js" }}
+  {{ $packeryLib = $packeryLib | resources.Fingerprint (.Site.Params.fingerprintAlgorithm | default "sha512") }}
+  <script
+    defer
+    type="text/javascript"
+    src="{{ $packeryLib.RelPermalink }}"
+    integrity="{{ $packeryLib.Data.Integrity }}"></script>
+
+  {{ $jsShortcodeGallery := resources.Get "js/shortcodes/gallery.js" }}
+  {{ $jsShortcodeGallery = $jsShortcodeGallery | resources.Minify | resources.Fingerprint (.Site.Params.fingerprintAlgorithm | default "sha512") }}
+  <script
+    type="text/javascript"
+    src="{{ $jsShortcodeGallery.RelPermalink }}"
+    integrity="{{ $jsShortcodeGallery.Data.Integrity }}"></script>
+{{ end }}
+
+{{/* tw-elements */}}
+{{ if or (.Page.HasShortcode "carousel") (.Page.HasShortcode "timeline") }}
+  {{ $carouselCSS := resources.Get "css/components/carousel.css" }}
+  {{ $carouselCSS = $carouselCSS | resources.Fingerprint (.Site.Params.fingerprintAlgorithm | default "sha512") }}
+  <link
+    type="text/css"
+    rel="stylesheet"
+    href="{{ $carouselCSS.RelPermalink }}"
+    integrity="{{ $carouselCSS.Data.Integrity }}">
+  {{ $twelementsLib := resources.Get "lib/tw-elements/index.min.js" }}
+  {{ $twelementsLib = $twelementsLib | resources.Fingerprint (.Site.Params.fingerprintAlgorithm | default "sha512") }}
+  <script
+    defer
+    type="text/javascript"
+    src="{{ $twelementsLib.RelPermalink }}"
+    integrity="{{ $twelementsLib.Data.Integrity }}"></script>
+{{ end }}
+
+{{/* youtubeLite */}}
+{{ if .Page.HasShortcode "youtubeLite" }}
+  {{ $youtubeLiteCSS := resources.Get "lib/lite-youtube-embed/lite-yt-embed.css" }}
+  {{ $youtubeLiteCSS = $youtubeLiteCSS | resources.Fingerprint (.Site.Params.fingerprintAlgorithm | default "sha512") }}
+  <link
+    type="text/css"
+    rel="stylesheet"
+    href="{{ $youtubeLiteCSS.RelPermalink }}"
+    integrity="{{ $youtubeLiteCSS.Data.Integrity }}">
+  {{ $youtubeLiteLib := resources.Get "lib/lite-youtube-embed/lite-yt-embed.js" }}
+  {{ $youtubeLiteLib = $youtubeLiteLib | resources.Fingerprint (.Site.Params.fingerprintAlgorithm | default "sha512") }}
+  <script
+    type="text/javascript"
+    src="{{ $youtubeLiteLib.RelPermalink }}"
+    integrity="{{ $youtubeLiteLib.Data.Integrity }}"></script>
+{{ end }}
+
+{{/* Repo cards */}}
+{{ $repoCards := slice "codeberg" "forgejo" "gitea" "github" "hugging-face" }}
+{{ $hasRepoCards := false }}
+{{ range $repoCards }}
+  {{ if $.Page.HasShortcode . }}
+    {{ $hasRepoCards = true }}
+  {{ end }}
+{{ end }}
+
+{{ if $hasRepoCards }}
+  {{ $repoColors := hugo.Data.repoColors }}
+  {{ $cssRules := slice }}
+
+  {{/* default color */}}
+  {{ $cssRules = $cssRules | append ".language-dot[data-language=\"default\"] { background-color: #0077b6; }" }}
+
+  {{/* Hugging Face model color */}}
+  {{ $cssRules = $cssRules | append ".language-dot[data-language=\"model\"] { background-color: #ff6b35; }" }}
+
+  {{ range $lang, $color := $repoColors }}
+    {{ if $color }}
+      {{ $cssRules = $cssRules | append (printf ".language-dot[data-language=\"%s\"] { background-color: %s; }" $lang $color) }}
+    {{ end }}
+  {{ end }}
+  {{ $repoCardCSS := resources.FromString "css/repo-cards.css" (delimit $cssRules "\n")
+    | minify | resources.Fingerprint (.Site.Params.fingerprintAlgorithm | default "sha512")
+  }}
+  <link rel="stylesheet" href="{{ $repoCardCSS.RelPermalink }}" integrity="{{ $repoCardCSS.Data.Integrity }}">
+{{ end }}
+
+{{/* tabs */}}
+{{ if .Page.HasShortcode "tabs" }}
+  {{ $tabJS := resources.Get "js/shortcodes/tabs.js" }}
+  {{ with $tabJS | minify | resources.Fingerprint (.Site.Params.fingerprintAlgorithm | default "sha512") }}
+    <script src="{{ .RelPermalink }}" integrity="{{ .Data.Integrity }}" crossorigin="anonymous"></script>
+  {{ end }}
+{{ end }}
+
+{{/* Firebase */}}
+{{ if site.Params.firebase.apiKey }}
+  {{ $firebase := resources.Get "js/firebase.js" }}
+  {{ $firebase = $firebase | resources.Minify | resources.Fingerprint (site.Params.fingerprintAlgorithm | default "sha512") }}
+  <script type="module" src="{{ $firebase.RelPermalink }}" integrity="{{ $firebase.Data.Integrity }}"></script>
+
+  {{ if in (slice "page" "section") .Kind }}
+    {{ $translations := .AllTranslations }}
+    {{ with .File }}
+      {{ $path := .Path }}
+      {{ range $translations }}
+        {{ $path = replace $path (print "." .Lang ".md") ".md" }}
+      {{ end }}
+      {{ partial "inline/firebase-config.html" (dict "views" (printf "views_%s" $path) "likes" (printf "likes_%s" $path)) }}
+    {{ end }}
+  {{ else if eq .Kind "term" }}
+    {{ partial "inline/firebase-config.html" (dict "views" (printf "views_term_%s" .Data.Term) "likes" (printf "likes_term_%s" .Data.Term)) }}
+  {{ else if eq .Kind "taxonomy" }}
+    {{ partial "inline/firebase-config.html" (dict "views" (printf "views_taxonomy_%s" .Data.Plural) "likes" (printf "likes_taxonomy_%s" .Data.Plural)) }}
+  {{ else if eq .Kind "home" }}
+    {{ partial "inline/firebase-config.html" (dict "views" "views_home" "likes" "likes_home") }}
+  {{ end }}
+
+{{ end }}
+
+{{ define "_partials/inline/firebase-config.html" }}
+<script id="firebase-config" 
+        type="application/json"
+        data-views="{{ .views }}"
+        data-likes="{{ .likes }}">
+  {
+    "config": {
+      "apiKey": "{{ site.Params.firebase.apiKey }}",
+      "authDomain": "{{ site.Params.firebase.authDomain }}",
+      "projectId": "{{ site.Params.firebase.projectId }}",
+      "storageBucket": "{{ site.Params.firebase.storageBucket }}",
+      "messagingSenderId": "{{ site.Params.firebase.messagingSenderId }}",
+      "appId": "{{ site.Params.firebase.appId }}",
+      "measurementId": "{{ site.Params.firebase.measurementId }}"
+    }
+  }
+</script>
+{{ end }}

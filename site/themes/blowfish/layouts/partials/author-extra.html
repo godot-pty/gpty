@@ -1,0 +1,66 @@
+{{ $disableImageOptimization := .Site.Params.disableImageOptimization | default false }}
+<div class="flex author author-extra mt-4">
+  {{ with .data.image }}
+    {{ $authorImage := "" }}
+    {{ if or (hasPrefix . "http://") (hasPrefix . "https://") }}
+      {{ $authorImage = resources.GetRemote . }}
+    {{ else }}
+      {{ $authorImage = resources.Get . }}
+    {{ end }}
+    {{ if $authorImage }}
+      {{ $final := $authorImage }}
+      {{ $squareImage := $authorImage }}
+      {{ if not (or $disableImageOptimization (eq $authorImage.MediaType.SubType "svg")) }}
+        {{ $final = $authorImage.Fill "192x192" }}
+        {{ $shortSide := int (math.Min $authorImage.Width $authorImage.Height) }}
+        {{ $squareImage = $authorImage.Crop (printf "%dx%d" $shortSide $shortSide ) }}
+      {{ end }}
+      <img
+        class="!mt-0 !mb-0 h-24 w-24 rounded-full me-4"
+        width="96"
+        height="96"
+        alt="{{ $.Site.Params.Author.name | default " Author" }}"
+        src="{{ $final.RelPermalink }}"
+        data-zoom-src="{{ $squareImage.RelPermalink }}" />
+    {{ end }}
+  {{ end }}
+  <div class="place-self-center">
+    {{ $link := .link }}
+    {{ with .data.name | markdownify | emojify }}
+      <div class="text-[0.6rem] uppercase leading-3 text-neutral-500 dark:text-neutral-400">
+        {{ i18n "author.byline_title" | markdownify }}
+      </div>
+      <a
+        {{ if $link }}href="{{ $link }}"{{ end }}
+        class="font-semibold leading-6 text-neutral-800 dark:text-neutral-300">
+        {{ . }}
+      </a>
+    {{ end }}
+    {{ with .data.bio | markdownify }}
+      <div class="text-sm text-neutral-700 dark:text-neutral-400">{{ . }}</div>
+    {{ end }}
+    <div class="text-2xl sm:text-lg">
+      <div class="flex flex-wrap text-neutral-400 dark:text-neutral-500 space-x-2">
+        {{ range .data.social }}
+          {{ range $name, $link := . }}
+            {{ $isEmail := eq $name "email" }}
+            <a
+              class="{{ cond $isEmail "email-link" "" }} hover:text-primary-700 dark:hover:text-primary-400"
+              href="{{ cond $isEmail "#" ($link | safeURL) }}"
+              {{ if $isEmail }}
+                data-email="{{ $link | base64Encode }}" data-subject="Contact"
+              {{ end }}
+              target="_blank"
+              aria-label="{{ $name | title }}"
+              title="{{ $name | title }}"
+              rel="me noopener noreferrer">
+              <span class="inline-block align-text-bottom">
+                {{ partial "icon.html" $name }}
+              </span>
+            </a>
+          {{ end }}
+        {{ end }}
+      </div>
+    </div>
+  </div>
+</div>

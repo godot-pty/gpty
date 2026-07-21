@@ -1,0 +1,104 @@
+global:
+  language: "NB"
+
+article:
+  anchor_label: "Anker"
+  date: "{{ .Date }}"
+  date_updated: "Oppdatert: {{ .Date }}"
+  draft: "Kladd"
+  edit_title: "Rediger innhold"
+  reading_time:
+    one: "{{ .Count }} minutt"
+    other: "{{ .Count }} minutter"
+  reading_time_title: "Lesetid"
+  table_of_contents: "Innholdsfortegnelse"
+  word_count:
+    one: "{{ .Count }} ord"
+    other: "{{ .Count }} ord"
+  views:
+    one: "{{ .Count }} visning"
+    other: "{{ .Count }} visninger"
+  likes:
+    one: "{{ .Count }} like"
+    other: "{{ .Count }} likes"
+  part_of_series: "Denne artikkelen er del av en serie."
+  part: "Del"
+  this_article: "Denne artikkelen"
+  related_articles: "Relatert"
+  reply_by_email: "Svar med e-post"
+  zen_mode_title:
+    enable: "Skru på zen modus"
+    disable: "Skru av zen modus"
+
+a11y:
+  title: "Innstillinger for tilgjengelighet"
+  disable_blur: "Skru av uskarphet"
+  disable_images: "Skru av bakgrunnsbilde"
+  show_link_underline: "Vis strek under link"
+  font_size: "Størrelse skrifttype"
+
+author:
+  byline_title: "Forfatter"
+
+code:
+  copy: "Kopier"
+  copied: "Kopiert"
+
+error:
+  404_title: "Fant ikke side :confused:"
+  404_error: "Feilmelding 404"
+  404_description: "Det ser ut til at siden du ber om ikke finnes."
+
+footer:
+  dark_appearance: "Bytt til mørkt utseende"
+  light_appearance: "Bytt til lyst utseende"
+  powered_by: "Laget med {{ .Hugo }} &amp; {{ .Theme }}"
+
+list:
+  externalurl_title: "Link til ekstern nettside"
+  no_articles: "Intet innhold å vise ennå."
+
+nav:
+  scroll_to_top_title: "Gå til toppen"
+  skip_to_main: "Gå til hovedinnhold"
+
+search:
+  open_button_title: "Søk (/)"
+  close_button_title: "Steng (Esc)"
+  input_placeholder: "Søk"
+
+sharing:
+  email: "Send via e-post"
+  facebook: "Del på Facebook"
+  line: "Del på LINE"
+  linkedin: "Del på LinkedIn"
+  pinterest: "Pin på Pinterest"
+  reddit: "Send til Reddit"
+  twitter: "Tweet på Twitter"
+  bluesky: "Send til Bluesky"
+  whatsapp: "Del på WhatsApp"
+  telegram: "Del på Telegram"
+  mastodon: "Del på Mastodon"
+
+shortcode:
+  recent_articles: "Nylige"
+
+recent:
+  show_more: "Vis flere"
+
+admonition:
+  abstract: "Sammendrag"
+  bug: "Programvarefeil"
+  caution: "Forsiktig"
+  danger: "Fare"
+  example: "Eksempel"
+  failure: "Fiasko"
+  important: "Viktig"
+  info: "Info"
+  note: "Merk"
+  question: "Spørsmål"
+  quote: "Sitat"
+  success: "Suksess"
+  tip: "Tips"
+  todo: "Gjøremål"
+  warning: "Advarsel"

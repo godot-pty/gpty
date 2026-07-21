@@ -1,0 +1,44 @@
+{{- $content := split .Inner "\n" -}}
+{{- $initialString := .Get "initialString" | default "" -}}
+{{- $speed := .Get "speed" | default 100 -}}
+{{- $lifeLike := .Get "lifeLike" | default false -}}
+{{- $startDelay := .Get "startDelay" | default 0 -}}
+{{- $breakLines := .Get "breakLines" | default true -}}
+{{- $waitUntilVisible := .Get "waitUntilVisible" | default true -}}
+{{- $loop := .Get "loop" | default false -}}
+{{- $randomLines := .Get "randomLines" | default false -}}
+{{- $classList := slice -}}
+{{- with .Get "class" -}}
+  {{- $classList = $classList | append . -}}
+{{- end -}}
+{{- $tag := .Get "tag" | default "div" -}}
+
+{{ $id := delimit (slice "typeit" (partial "functions/uid.html" .)) "-" }}
+
+{{- $attrs := printf `id="%v"` $id -}}
+{{- with $classList -}}
+  {{- $attrs = delimit $classList " " | printf `%v class="%v"` $attrs -}}
+{{- end -}}
+
+{{ printf `<%v %v>%s</%v>` $tag $attrs $initialString $tag | safeHTML }}
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+      var strings = {{ $content }};
+      {{ if $randomLines }}
+      for (var i = strings.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        [strings[i], strings[j]] = [strings[j], strings[i]];
+      }
+      {{ end }}
+      new TypeIt("#{{ $id }}", {
+        strings: strings,
+        speed: {{ $speed }},
+        lifeLike: {{ $lifeLike }},
+        startDelay: {{ $startDelay }},
+        breakLines: {{ $breakLines }},
+        waitUntilVisible: {{ $waitUntilVisible }},
+        loop: {{ $loop }}
+      }).go();
+    });
+</script>

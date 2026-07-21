@@ -1,0 +1,95 @@
+global:
+  language: "DE"
+
+article:
+  anchor_label: "Anker"
+  date: "{{ .Date }}"
+  date_updated: "Aktualisiert: {{ .Date }}"
+  draft: "Entwurf"
+  edit_title: "Inhalt bearbeiten"
+  reading_time:
+    one: "{{ .Count }} min"
+    other: "{{ .Count }} min"
+  reading_time_title: "Lesezeit"
+  table_of_contents: "Inhaltsverzeichnis"
+  word_count:
+    one: "{{ .Count }} Wort"
+    other: "{{ .Count }} Wörter"
+  views:
+    one: "{{ .Count }} Ansicht"
+    other: "{{ .Count }} Ansichten"
+  likes:
+    one: "{{ .Count }} Like"
+    other: "{{ .Count }} Likes"
+  part_of_series: "Dieser Artikel ist Teil einer Serie."
+  part: "Teil"
+  this_article: "Dieser Artikel"
+  related_articles: "Verwandte Artikel"
+  reply_by_email: "Per E-Mail antworten"
+  reply_to: "Antwort auf {{ .Title }}"
+  zen_mode_title:
+    enable: "Zen-Modus aktivieren"
+    disable: "Zen-Modus deaktivieren"
+
+a11y:
+  title: "Einstellungen zur Barrierefreiheit"
+  disable_blur: "Blur deaktivieren"
+  disable_images: "Bilder deaktivieren"
+  show_link_underline: "Links unterstreichen"
+  font_size: "Schriftgröße"
+
+author:
+  byline_title: "Autor"
+
+code:
+  copy: "Kopieren"
+  copied: "Kopiert"
+
+error:
+  404_title: "Seite nicht gefunden :confused:"
+  404_error: "Fehler 404"
+  404_description: "Es sieht so aus, als ob es diese Seite nicht gibt."
+
+footer:
+  dark_appearance: "Zum dunklen Erscheinungsbild wechseln"
+  light_appearance: "Zum hellen Erscheinungsbild wechseln"
+  powered_by: "Erstellt mit {{ .Hugo }} &amp; {{ .Theme }}"
+
+list:
+  externalurl_title: "Link zu einer externen Seite"
+  no_articles: "Es gibt hier noch keine Beiträge."
+
+nav:
+  scroll_to_top_title: "Zum Anfang scrollen"
+  skip_to_main: "Zum Hauptinhalt springen"
+
+search:
+  open_button_title: "Suche (/)"
+  close_button_title: "Schließen (Esc)"
+  input_placeholder: "Suchen"
+
+sharing:
+  email: "Per E-Mail teilen"
+  facebook: "Auf Facebook teilen"
+  line: "Auf LINE teilen"
+  linkedin: "Auf LinkedIn teilen"
+  pinterest: "Auf Pinterest pinnen"
+  reddit: "An Reddit senden"
+  twitter: "Auf Twitter teilen"
+  bluesky: "Auf Bluesky posten"
+  whatsapp: "Über WhatsApp teilen"
+  telegram: "Über Telegram teilen"
+  mastodon: "Auf Mastodon teilen"
+
+shortcode:
+  recent_articles: "Neue Beiträge"
+
+recent:
+  show_more: "Zeige Mehr"
+
+cookie_notice:
+  message_with_link: "Diese Website verwendet Cookies und ähnliche Technologien. Lesen Sie unsere Datenschutzerklärung"
+  message: "Diese Website verwendet Cookies und ähnliche Technologien. Mit der Nutzung dieser Website akzeptierst du das."
+  privacy_policy: "Datenschutzerklärung"
+  button: "Verstanden"
+  image_alt: "Cookie-Symbol"

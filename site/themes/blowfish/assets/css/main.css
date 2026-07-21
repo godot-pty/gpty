@@ -1,0 +1,356 @@
+/*! Blowfish | MIT License | https://github.com/nunocoracao/blowfish */
+
+@config "../../tailwind.config.js";
+
+@import "tailwindcss";
+@import "./components/chroma.css" layer(utilities);
+@import "./components/tabs.css" layer(utilities);
+@import "./components/zen-mode.css";
+@import "./components/gist.css";
+@import "./components/a11y.css";
+@import "./components/admonition.css" layer(components);
+
+html:not(.dark) {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body a,
+body button {
+  @apply transition-colors;
+}
+
+button,
+[role="button"] {
+  cursor: pointer;
+}
+
+/* Scale SVG icons to text size */
+.icon svg {
+  @apply h-[1em] w-[1em];
+}
+
+/* Scale SVG logos to appropriate size */
+.logo svg {
+  @apply h-[5rem] w-[5rem];
+}
+
+/* Search */
+#search-query::-webkit-search-cancel-button,
+#search-query::-webkit-search-decoration,
+#search-query::-webkit-search-results-button,
+#search-query::-webkit-search-results-decoration {
+  @apply hidden;
+}
+
+/* RTL support */
+.prose blockquote {
+  @apply rtl:pr-4 rtl:border-l-0 rtl:border-r-4;
+}
+
+.prose ul > li,
+.prose ol > li {
+  @apply rtl:pl-0 rtl:pr-2 rtl:mr-7;
+}
+
+.prose ol > li:before,
+.prose ul > li:before {
+  @apply rtl:left-auto rtl:right-1;
+}
+
+.prose thead td:first-child,
+.prose thead th:first-child {
+  @apply rtl:pr-0;
+}
+
+.prose thead td:last-child,
+.prose thead th:last-child {
+  @apply rtl:pl-0;
+}
+
+/* Adjust first child within prose */
+.prose div.min-w-0.max-w-prose > *:first-child {
+  @apply mt-3;
+}
+
+/* Table of Contents */
+#TOCView {
+  max-height: calc(100vh - 150px);
+  min-height: 0;
+  overflow-x: hidden;
+}
+
+.toc ul,
+.toc li {
+  @apply px-0 leading-snug list-none;
+}
+
+.toc ul ul {
+  @apply ltr:pl-4 rtl:pr-4;
+}
+
+.toc a {
+  @apply font-normal text-neutral-700 dark:text-neutral-300;
+}
+
+.toc ul > li {
+  @apply rtl:mr-0;
+}
+
+/* Code Copy */
+.highlight {
+  @apply relative z-0;
+}
+
+.highlight-wrapper:hover > .copy-button {
+  @apply visible;
+}
+
+.copy-button {
+  @apply absolute top-0 right-0 z-10 invisible w-20 py-1 font-mono text-sm cursor-pointer
+  opacity-90 bg-neutral-200 whitespace-nowrap rounded-bl-md rounded-tr-md text-neutral-700
+  dark:bg-neutral-600 dark:text-neutral-200 overflow-hidden truncate;
+}
+
+.copy-button:hover,
+.copy-button:focus,
+.copy-button:active,
+.copy-button:active:hover {
+  @apply bg-primary-100 dark:bg-primary-600;
+}
+
+.copy-textarea {
+  @apply absolute opacity-5 -z-10;
+}
+
+/* Fix long KaTeX equations on mobile (see https://katex.org/docs/issues.html#css-customization) */
+.katex-display {
+  overflow: auto hidden;
+}
+
+/* Fix katex overflow https://github.com/nunocoracao/blowfish/issues/2138 */
+.katex-display {
+  padding: 1em;
+  width: calc(100% - 1em);
+}
+
+/* Fix long tables breaking out of article on mobile */
+table {
+  display: block;
+  overflow: auto;
+}
+
+/* Fix long inline code sections breaking out of article on mobile */
+code {
+  word-wrap: break-word; /* All browsers since IE 5.5+ */
+  overflow-wrap: break-word; /* Renamed property in CSS3 draft spec */
+}
+
+/* Fix long URLs breaking out of article bounds on mobile */
+a {
+  word-break: break-word;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.prose-invert .highlight pre > code {
+  background-color: unset;
+}
+
+/* Custom */
+
+pre {
+  text-align: left;
+}
+
+.single_hero_round {
+  max-height: 50vh;
+  object-fit: cover;
+}
+
+.single_hero_background {
+  width: calc(100% + 1px); /* patch for very small gap at right edge on mobile devices */
+  z-index: -10;
+}
+
+.hero_gradient {
+  width: 100%;
+  height: 100%;
+}
+
+.thumbnail_card {
+  min-width: 300px;
+  aspect-ratio: var(--thumbnail-aspect-ratio, 1.5);
+  height: auto;
+}
+
+.thumbnail_card_related {
+  aspect-ratio: var(--thumbnail-aspect-ratio, 1.5);
+  height: auto;
+}
+
+.thumbnail {
+  width: 300px;
+  min-height: 180px;
+}
+
+@variant max-md {
+  .thumbnail {
+    width: 100%;
+  }
+}
+
+.thumbnail-shadow {
+  box-shadow: 5px 5px 20px 1px rgba(0, 0, 0, 0.3);
+}
+
+/* placeholder for gallery/carousel */
+@variant max-md {
+  .width-patch {
+    width: 80vw;
+  }
+}
+@variant min-md {
+  .width-patch {
+    width: 65ch;
+  }
+}
+
+.anchor {
+  display: block;
+  position: relative;
+  top: -150px;
+  height: 0px;
+  visibility: hidden;
+}
+
+/* Offset scroll position to avoid header overlap */
+[id^="fn"],
+[id^="fnref"] {
+  scroll-margin-top: 145px;
+}
+
+/* patch for skip to main content */
+#main-content {
+  scroll-margin-top: -125px;
+}
+
+@variant sm {
+  .article {
+    flex-wrap: wrap;
+  }
+}
+
+@variant md {
+  .article {
+    flex-wrap: nowrap;
+  }
+}
+
+.medium-zoom-image--opened {
+  z-index: 100;
+}
+
+@layer utilities {
+  .bf-border-color {
+    @apply border-neutral-300 dark:border-neutral-700;
+  }
+
+  .bf-border-color-hover {
+    @apply hover:border-primary-600 dark:hover:border-primary-400;
+  }
+
+  .bf-icon-color-hover {
+    @apply hover:text-primary-600 dark:hover:text-primary-400;
+  }
+
+  .bf-scrollbar {
+    &::-webkit-scrollbar-track {
+      background-color: var(--scrollbar-track);
+      border-radius: var(--scrollbar-track-radius);
+    }
+    &::-webkit-scrollbar-thumb {
+      background-color: var(--scrollbar-thumb);
+      border-radius: var(--scrollbar-thumb-radius);
+    }
+    &::-webkit-scrollbar-corner {
+      background-color: var(--scrollbar-corner);
+      border-radius: var(--scrollbar-corner-radius);
+    }
+    @supports (-moz-appearance:none) {
+      scrollbar-width: thin;
+      scrollbar-color: var(--scrollbar-thumb, initial) var(--scrollbar-track, initial);
+    }
+    &::-webkit-scrollbar {
+      display: block;
+      width: 8px;
+      height: 8px;
+    }
+    --scrollbar-thumb: oklch(70.8% 0 0);
+    --scrollbar-track: oklch(92.2% 0 0);
+    &:is(.dark *) {
+      --scrollbar-thumb: oklch(43.9% 0 0);
+    }
+    &:is(.dark *) {
+      --scrollbar-track: oklch(26.9% 0 0);
+    }
+  }
+}
+
+@layer base {
+  * {
+    @supports (-moz-appearance:none) {
+      scrollbar-color: initial;
+      scrollbar-width: initial;
+    }
+  }
+}
+
+/* Prevent body scroll when mobile menu is open */
+body:has(#mobile-menu-toggle:checked) {
+  overflow: hidden;
+}
+
+/* Reset body position for desktop after it was modified on mobile */
+@media (min-width: 853px) {
+  body:has(#mobile-menu-toggle:checked) {
+    overflow: visible;
+  }
+}
+
+/* Hide buy me a coffee in mobile menu */
+#bmc-wbtn {
+  z-index: 50 !important;
+}
+
+.nested-menu {
+  position: relative;
+}
+
+.menuhide {
+  position: absolute;
+  z-index: 1000;
+  white-space: nowrap;
+
+  opacity: 0;
+  visibility: hidden;
+
+  transition:
+    visibility 0.3s,
+    opacity 0.3s ease-in-out;
+}
+
+.nested-menu:hover .menuhide,
+.nested-menu:focus-within .menuhide {
+  opacity: 1;
+  visibility: visible;
+}
+
+.active {
+  text-decoration-line: underline;
+  text-decoration-thickness: 3px;
+  text-underline-offset: 4px;
+}

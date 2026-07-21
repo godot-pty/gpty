@@ -1,0 +1,110 @@
+const fs = require("fs/promises");
+const crypto = require("crypto");
+const puppeteer = require("puppeteer");
+
+const configDir = "./exampleSite/config/_default";
+const defaultLang = "en";
+const usersFolderPath = "./exampleSite/content/users/";
+
+function generateDirName(seed, index) {
+  const hash = crypto.createHash("md5");
+  hash.update(seed);
+  return index + "-" + hash.digest("hex");
+}
+
+(async () => {
+  const targetLangs = [];
+  const configFiles = await fs.readdir(configDir);
+  for (const file of configFiles) {
+    if (file.indexOf("languages.") > -1) {
+      const lang = file.split(".")[1];
+      if (lang !== defaultLang) {
+        targetLangs.push(lang);
+      }
+    }
+  }
+
+  const indexFiles = await fs.readdir(usersFolderPath);
+  for (const lang of targetLangs) {
+    const targetFile = `_index.${lang}.md`;
+    if (!indexFiles.includes(targetFile)) {
+      await fs.copyFile(
+        usersFolderPath + "_index.md",
+        usersFolderPath + targetFile
+      );
+    }
+  }
+
+  const rawdata = await fs.readFile(usersFolderPath + "users.json", "utf8");
+  const users = JSON.parse(rawdata);
+  const userDict = {};
+  var index = 0;
+  for (const user of users) {
+    userDict[generateDirName(user.url, index)] = true;
+    index++;
+  }
+
+  const files = await fs.readdir(usersFolderPath);
+  for (const file of files) {
+    const stats = await fs.stat(usersFolderPath + file);
+    if (file !== "users.json" && file.indexOf("_index.") === -1) {
+      if (stats.isDirectory()) {
+        if (!userDict[file]) {
+          console.log("deleting: ", file);
+          await fs.rm(usersFolderPath + file, { recursive: true, force: true });
+        }
+      } else {
+        console.log("deleting: ", file);
+        await fs.unlink(usersFolderPath + file);
+      }
+    }
+  }
+
+  const browser = await puppeteer.launch({
+    defaultViewport: {
+      width: 1280,
+      height: 800,
+    },
+  });
+  const page = await browser.newPage();
+
+  for (let i = 0; i < users.length; i++) {
+    const user = users[i];
+    const userMDFile =
+      "---\n" +
+      `                title: "${user.title}"\n` +
+      `                tags: [${user.tags}]\n` +
+      `                externalUrl: "${user.url}"\n` +
+      `                weight: ${i + 1}\n` +
+      "                showDate: false\n" +
+      "                showAuthor: false\n" +
+      "                showReadingTime: false\n" +
+      "                showEdit: false\n" +
+      "                showLikes: false\n" +
+      "                showViews: false\n" +
+      "                layoutBackgroundHeaderSpace: false\n" +
+      "                \r---\n";
+
+    const dir = usersFolderPath + generateDirName(user.url, i);
+
+    try {
+      await fs.access(dir);
+    } catch {
+      await fs.mkdir(dir);
+    
+
+    console.log(i, user.title, dir);
+    await fs.writeFile(dir + "/index.md", userMDFile);
+    for (const lang of targetLangs) {
+      await fs.writeFile(dir + `/index.${lang}.md`, userMDFile);
+    }
+    await page.goto(user.url, { waitUntil: "networkidle2", timeout: 30000 });
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    await page.screenshot({ path: dir + "/feature.webp", type: "webp", quality: 50 });
+    }
+  }
+
+
+  await browser.close();
+})();
+

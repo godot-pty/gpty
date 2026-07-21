@@ -1,0 +1,70 @@
+{{ $disableImageOptimization := .Page.Site.Params.disableImageOptimization | default false }}
+
+{{ $featured := "" }}
+{{ $featuredURL := "" }}
+{{ $thumbnailAspectRatio := site.Params.thumbnailAspectRatio | default "1.5" }}
+{{ $thumbnailAspectRatio = replaceRE "[^0-9.]" "" $thumbnailAspectRatio }}
+{{ if eq $thumbnailAspectRatio "" }}{{ $thumbnailAspectRatio = "1.5" }}{{ end }}
+{{ with .Page.Params.featureimage }}
+  {{ if or (strings.HasPrefix . "http:") (strings.HasPrefix . "https:") }}
+    {{ $featured = resources.GetRemote . }}
+  {{ else }}
+    {{ $featured = page.Resources.Get . }}
+  {{ end }}
+{{ end }}
+
+{{ if not $featured }}
+  {{ $images := .Page.Resources.ByType "image" }}
+  {{ range slice "*feature*" "*cover*" "*thumbnail*" }}
+    {{ if not $featured }}{{ $featured = $images.GetMatch . }}{{ end }}
+  {{ end }}
+{{ end }}
+
+{{ with $featured }}
+  {{ $featuredURL = .RelPermalink }}
+  {{ if not (or $disableImageOptimization (eq .MediaType.SubType "svg")) }}
+    {{ $featuredURL = (.Resize "600x").RelPermalink }}
+  {{ end }}
+{{ end }}
+
+
+<div class="min-w-full">
+  <div class="border-neutral-200 dark:border-neutral-700 border-2 rounded overflow-hidden shadow-2xl relative">
+    {{ with $featuredURL }}
+      <figure class="not-prose flex-none relative overflow-hidden thumbnail_card" style="--thumbnail-aspect-ratio: {{ $thumbnailAspectRatio }}">
+        <img
+          src="{{ . }}"
+          alt="{{ $.Page.Title }}"
+          loading="lazy"
+          decoding="async"
+          fetchpriority="low"
+          class="not-prose absolute inset-0 w-full h-full object-cover">
+      </figure>
+    {{ end }}
+    {{ if site.Params.taxonomy.showTermCount | default true }}
+      <span class="absolute bottom-0 right-0 m-2">
+        <span class="flex">
+          <span
+            class="rounded-md border border-primary-400 px-1 py-[1px] text-xl font-normal text-primary-700 dark:border-primary-600 dark:text-primary-400">
+            {{ .Count }}
+          </span>
+        </span>
+      </span>
+    {{ end }}
+    <div class="px-6 py-4">
+      <a
+        {{ with .Page.Params.externalUrl }}
+          href="{{ . }}" target="_blank" rel="external"
+        {{ else }}
+          href="{{ .Page.RelPermalink }}"
+        {{ end }}
+        class="not-prose before:absolute before:inset-0 decoration-primary-500 dark:text-neutral text-xl font-bold text-neutral-800 hover:underline hover:underline-offset-2">
+        <div
+          class="font-bold text-xl text-neutral-800 decoration-primary-500 hover:underline hover:underline-offset-2 dark:text-neutral">
+          {{ .Page.Title | emojify }}
+        </div>
+      </a>
+    </div>
+    <div class="px-6 pt-4 pb-2"></div>
+  </div>
+</div>
