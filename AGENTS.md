@@ -106,30 +106,17 @@ cargo test -p godopty-core      # core library only
 
 ### GDScript (GUT)
 
-Tests live in `godot/tests/` — `unit/` for pure-logic classes, `integration/` for scene-tree tests.
-cargo test --workspace          # Tests across core, gdext, cli
-cargo test -p godopty-core      # core library only
 godot --headless --path godot --import         # required before first run
 godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
   -gdir=res://tests/unit -gdir=res://tests/integration
 ```
 
-Mocking autoloads: Use `MockAutoloads.setup()` / `teardown()` in `before_each`/`after_each`.
-Persistence managers (`SettingsManager`, `ProfileManager`, `LayoutManager`) are mocked via
-`set_script()` on the existing autoload node, redirecting `_read_file`/`_write_file` to an
-in-memory Dictionary. This avoids touching disk and preserves Godot 4 global name bindings
-(`SettingsManager` etc. are static constants — never `free()` autoload nodes).
-
-Signal testing: GDScript lambdas cannot capture outer primitives. Use GUT's
-`watch_signals(node)` + `assert_signal_emitted(node, "signal_name")` instead of
-`node.signal.connect(func(): captured_var = true)`.
-
-Type checks: `body is SomeClass` requires a compile-time class name. For runtime type
-discrimination, use `body._pane_type()` string discriminators.
-
-Headless resource leaks: GUT warnings about unfreed children and GDExtension `RID`/`ObjectDB`
-leaks are benign in headless mode — the dummy render server doesn't track GDExtension resources.
-Production renderer handles these correctly.
+- Tests live in `godot/tests/` — `unit/` for pure-logic classes, `integration/` for scene-tree tests.
+- Mocking autoloads: Use `MockAutoloads.setup()` / `teardown()` in `before_each`/`after_each`.
+- Persistence managers (`SettingsManager`, `ProfileManager`, `LayoutManager`) are mocked via `set_script()` on the existing autoload node, redirecting `_read_file`/`_write_file` to an in-memory Dictionary - avoids touching disk and preserves Godot 4 global name bindings. (`SettingsManager` etc. are static constants — never `free()` autoload nodes).
+- Signal testing: GDScript lambdas cannot capture outer primitives. Use GUT's `watch_signals(node)` + `assert_signal_emitted(node, "signal_name")` instead of `node.signal.connect(func(): captured_var = true)`.
+- Type checks: `body is SomeClass` requires a compile-time class name. For runtime type discrimination, use `body._pane_type()` string discriminators.
+- Headless resource leaks: GUT warnings about unfreed children and GDExtension `RID`/`ObjectDB` leaks are benign in headless mode — the dummy render server doesn't track GDExtension resources. Production renderer handles these correctly.
 
 ## Conventions
 
@@ -189,9 +176,9 @@ Production renderer handles these correctly.
 - Concept regex on PTY output vs. stdin: Command-detection concepts (like `cat`) must match on user input (Enter produces `StdinInput::Line`), not terminal output (which includes echoed characters, prompts, and shell noise). Tab completion never produces `StdinInput::Line`. Not yet implemented — current approach uses pending capture with `chunk_ends_with_prompt` detection.
 - Shell prompt has no trailing `\n`: `LineParser::feed()` only returns completed lines. Prompts like `$ ` remain buffered internally. To extract the prompt from raw bytes, scan for the last `\n` and take everything after it.
 - Tab completion triggers concept matches: When bash shows autocomplete candidates, it reprints the prompt and partial command. This reprinted line has no trailing `\n`, so `LineParser` never emits it. The concept matches the original command line, and the reprint arrives in the next chunk. Use `chunk_ends_with_prompt()` to scan raw bytes for `$ ` / `# ` / `> ` and cancel the pending capture.
-- `\r\n` vs `\n` for manual grid feeding: `\n` (LF) moves cursor down but stays in the same column. `\r\n` (CR+LF) moves to column 0 of the next line. Always use `\r\n` when injecting bytes into the grid for proper cursor positioning.
+- Tab completion triggers concept matches: When bash shows autocomplete candidates, it reprints the prompt and partial command. This reprinted line has no trailing `\n`, so `LineParser` never emits it. The concept matches the original command line, and the reprint arrives in the next chunk. Use `chunk_ends_with_prompt()` to scan raw bytes for `$ ` / `# ` / `> ` and cancel capture. Alternatively, match `UntilStop` concepts on `StdinInput::Line` (user input) to avoid PTY output noise entirely.
 - GDScript `///` comments: GDScript uses `#` or `##` for comments. Rust-style `///` causes a parse error. Always use `##` for doc comments in GDScript.
-- **Edit tool on structured formats (YAML, TOML, Markdown frontmatter)**: the line-based `edit` tool can corrupt delimiter-sensitive files (YAML `---` blocks, TOML `[sections]`, frontmatter bounds). When editing config files, workflow YAML, or Hugo content, prefer `eval` with Python (`yaml.safe_load`, `tomllib`) to parse → modify → serialize. Reserve `edit` for Rust, GDScript, and plain Markdown where line semantics hold.
+- Edit tool on structured formats (YAML, TOML, Markdown frontmatter): the line-based `edit` tool can corrupt delimiter-sensitive files (YAML `---` blocks, TOML `[sections]`, frontmatter bounds). When editing config files, workflow YAML, or Hugo content, prefer `eval` with Python (`yaml.safe_load`, `tomllib`) to parse → modify → serialize. Reserve `edit` for Rust, GDScript, and plain Markdown where line semantics hold.
 - Raw-byte buffering for grid replay: Never buffer parsed lines for later grid replay — the alacritty_terminal ANSI state machine needs raw bytes with escape sequences intact. Buffer `Vec<Vec<u8>>` (chunks), replay with `feed_grid(board, chunk)`.
 - Rendering Performance: GDScript `_draw` is slow when calling `draw_rect`/`draw_string` character-by-character. Avoid generating heavy data structures (like `Dictionary`) per-cell across the FFI boundary. Prefer packing data into flat arrays (`PackedByteArray`, `PackedInt32Array`) in Rust, and batch rendering operations line-by-line in Godot.
 - Resize Rate Limiting: Firing SIGWINCH heavily on every frame during window drag will overwhelm the child PTY process. Always debounce or rate-limit terminal `_on_resize` events before passing them to the backend.
