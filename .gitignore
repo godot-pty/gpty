@@ -40,3 +40,4 @@ reasonix.toml
 
 # Local audit (delete when resolved)
 AUDIT.md
+.omp/
