@@ -1,0 +1,7 @@
+{{ $path := .Get 0 }}
+{{ $file := printf "content/%s" $path }}
+{{ if fileExists $file }}
+  {{ $file | readFile | markdownify }}
+{{ else }}
+  > File `{{ $path }}` not found.
+{{ end }}

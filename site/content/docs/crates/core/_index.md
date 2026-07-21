@@ -2,4 +2,4 @@
 title: "godopty-core"
 ---
 
-{{< reporoot "crates/godopty-core/README.md" >}}
+{{< readfile "repo/crates/godopty-core/README.md" >}}

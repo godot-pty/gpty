@@ -3,7 +3,31 @@
   xmlns:xhtml="http://www.w3.org/1999/xhtml">
 
   <url>
-    <loc>https://godopty.github.io/godopty/docs/</loc>
+    <loc>https://godopty.github.io/godopty/repo/agents/</loc>
+  </url>
+  <url>
+    <loc>https://godopty.github.io/godopty/repo/changelog/</loc>
+  </url>
+  <url>
+    <loc>https://godopty.github.io/godopty/repo/crates/godopty-cli/readme/</loc>
+  </url>
+  <url>
+    <loc>https://godopty.github.io/godopty/repo/crates/godopty-core/readme/</loc>
+  </url>
+  <url>
+    <loc>https://godopty.github.io/godopty/repo/crates/godopty-gdext/readme/</loc>
+  </url>
+  <url>
+    <loc>https://godopty.github.io/godopty/repo/readme/</loc>
+  </url>
+  <url>
+    <loc>https://godopty.github.io/godopty/repo/roadmap/</loc>
+  </url>
+  <url>
+    <loc>https://godopty.github.io/godopty/docs/agents/</loc>
+  </url>
+  <url>
+    <loc>https://godopty.github.io/godopty/docs/changelog/</loc>
   </url>
   <url>
     <loc>https://godopty.github.io/godopty/</loc>
@@ -21,10 +45,7 @@
     <loc>https://godopty.github.io/godopty/docs/readme/</loc>
   </url>
   <url>
-    <loc>https://godopty.github.io/godopty/docs/agents/</loc>
-  </url>
-  <url>
-    <loc>https://godopty.github.io/godopty/docs/changelog/</loc>
+    <loc>https://godopty.github.io/godopty/repo/</loc>
   </url>
   <url>
     <loc>https://godopty.github.io/godopty/docs/roadmap/</loc>

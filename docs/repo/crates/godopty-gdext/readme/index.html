@@ -15,8 +15,8 @@
 
   
   
-    <title>godopty-gdext &middot; godopty</title>
-    <meta name="title" content="godopty-gdext &middot; godopty">
+    <title> &middot; godopty</title>
+    <meta name="title" content=" &middot; godopty">
   
 
   
@@ -34,11 +34,8 @@
   
   
   
-  <link rel="canonical" href="https://godopty.github.io/godopty/docs/crates/gdext/">
+  <link rel="canonical" href="https://godopty.github.io/godopty/repo/crates/godopty-gdext/readme/">
   
-  
-    
-      <link rel="alternate" type="application/rss+xml" href="/godopty/docs/crates/gdext/index.xml" title="godopty" />
   
 
   
@@ -48,17 +45,18 @@
   
 
   
-  <meta property="og:url" content="https://godopty.github.io/godopty/docs/crates/gdext/">
+  <meta property="og:url" content="https://godopty.github.io/godopty/repo/crates/godopty-gdext/readme/">
 	<meta property="og:site_name" content="godopty">
-	<meta property="og:title" content="godopty-gdext">
+	<meta property="og:title" content="godopty">
 	<meta property="og:description" content="godopty-gdext # Godot 4 GDExtension that bridges the Rust terminal engine to Godot’s renderer.
 Building # # From the workspace root cargo build -p godopty-gdext # The shared library is at: target/debug/libgodopty_gdext.so Running in Godot # Open the godot/ directory in the Godot editor The .gdextension file auto-loads the shared library Open scenes/main.tscn and press F5 GDScript API # GodoptyTerminal (extends Node2D) # Terminal lifecycle # Method Returns Description start_shell(cmd: String, rows: int, cols: int, envs: String) void Start a PTY session send_text(text: String) void Send raw text to PTY (no newline) send_line(text: String) void Send a line to PTY (appends \n) resize_grid(rows: int, cols: int) void Resize grid &#43; send SIGWINCH set_palette(hex_csv: String) void Load color scheme (16 hex colors, CSV) Grid &amp; rendering # Method Returns Description get_grid_updates_packed(force_full: bool) Dictionary Incremental damage tracking or full grid pack (is_full, chars packed bytes, fg, bg, attrs, indices) get_grid_generation() int Monotonic counter, changes on grid update get_cursor_row() int Cursor row (0-based, -1 if none) get_cursor_col() int Cursor column (0-based) get_cursor_shape() int 0=Block, 1=Underline, 2=Beam get_title() String Terminal window title (OSC) get_rows() int Grid row count get_cols() int Grid column count Scrollback &amp; search # Method Returns Description scroll_up(lines: int) void Scroll back in history scroll_down(lines: int) void Scroll forward in history scroll_reset() void Reset scroll to follow output get_scroll_offset() int Lines above visible viewport get_history_size() int Total scrollback lines available search_grid(pattern: String) Dictionary Search scrollback for regex pattern key_to_bytes(keycode, shift, alt, ctrl, meta) PackedByteArray Convert key event to terminal byte sequence Concept engine # Method Returns Description set_global_concepts(concepts: Array) void Replace all concepts in the engine get_global_concepts() Array Get all concepts as Dict array drain_concept_events() Array Drain completed capture events from this terminal acknowledge_capture(event_id: int) void Discard captured bytes (receiver consumed output) flush_capture(event_id: int) void Feed captured bytes to grid (no receiver) Grid Cell Dictionary # { &#34;ch&#34;: &#34;A&#34;, # String — the character &#34;fg&#34;: Color(0.8, 0.8, 0.8), # Color — foreground &#34;bg&#34;: Color(0.12, 0.12, 0.12) # Color — background } Tips # Use get_grid_generation() to skip redundant grid polls when idle The renderer uses get_grid_updates_packed() to fetch only damaged cells, merging into _cell_cache If the grid mutex is held by the background task, get_grid_rows() returns []">
 	<meta property="og:locale" content="en_us">
-	<meta property="og:type" content="website">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="repo">
 
   
 	<meta name="twitter:card" content="summary">
-	<meta name="twitter:title" content="godopty-gdext">
+	<meta name="twitter:title" content="godopty">
 	<meta name="twitter:description" content="godopty-gdext # Godot 4 GDExtension that bridges the Rust terminal engine to Godot’s renderer.
 Building # # From the workspace root cargo build -p godopty-gdext # The shared library is at: target/debug/libgodopty_gdext.so Running in Godot # Open the godot/ directory in the Godot editor The .gdextension file auto-loads the shared library Open scenes/main.tscn and press F5 GDScript API # GodoptyTerminal (extends Node2D) # Terminal lifecycle # Method Returns Description start_shell(cmd: String, rows: int, cols: int, envs: String) void Start a PTY session send_text(text: String) void Send raw text to PTY (no newline) send_line(text: String) void Send a line to PTY (appends \n) resize_grid(rows: int, cols: int) void Resize grid &#43; send SIGWINCH set_palette(hex_csv: String) void Load color scheme (16 hex colors, CSV) Grid &amp; rendering # Method Returns Description get_grid_updates_packed(force_full: bool) Dictionary Incremental damage tracking or full grid pack (is_full, chars packed bytes, fg, bg, attrs, indices) get_grid_generation() int Monotonic counter, changes on grid update get_cursor_row() int Cursor row (0-based, -1 if none) get_cursor_col() int Cursor column (0-based) get_cursor_shape() int 0=Block, 1=Underline, 2=Beam get_title() String Terminal window title (OSC) get_rows() int Grid row count get_cols() int Grid column count Scrollback &amp; search # Method Returns Description scroll_up(lines: int) void Scroll back in history scroll_down(lines: int) void Scroll forward in history scroll_reset() void Reset scroll to follow output get_scroll_offset() int Lines above visible viewport get_history_size() int Total scrollback lines available search_grid(pattern: String) Dictionary Search scrollback for regex pattern key_to_bytes(keycode, shift, alt, ctrl, meta) PackedByteArray Convert key event to terminal byte sequence Concept engine # Method Returns Description set_global_concepts(concepts: Array) void Replace all concepts in the engine get_global_concepts() Array Get all concepts as Dict array drain_concept_events() Array Drain completed capture events from this terminal acknowledge_capture(event_id: int) void Discard captured bytes (receiver consumed output) flush_capture(event_id: int) void Feed captured bytes to grid (no receiver) Grid Cell Dictionary # { &#34;ch&#34;: &#34;A&#34;, # String — the character &#34;fg&#34;: Color(0.8, 0.8, 0.8), # Color — foreground &#34;bg&#34;: Color(0.12, 0.12, 0.12) # Color — background } Tips # Use get_grid_generation() to skip redundant grid polls when idle The renderer uses get_grid_updates_packed() to fetch only damaged cells, merging into _cell_cache If the grid mutex is held by the background task, get_grid_rows() returns []">
 
@@ -215,12 +213,12 @@ Building # # From the workspace root cargo build -p godopty-gdext # The shared l
   [{
     "@context": "https://schema.org",
     "@type": "Article",
-    "articleSection": "Documentation",
-    "name": "godopty-gdext",
-    "headline": "godopty-gdext",
+    "articleSection": "Repoes",
+    "name": "",
+    "headline": "",
     
     "inLanguage": "en-us",
-    "url" : "https://godopty.github.io/godopty/docs/crates/gdext/",
+    "url" : "https://godopty.github.io/godopty/repo/crates/godopty-gdext/readme/",
     "author" : {
       "@type": "Person",
       "name": "godopty"
@@ -233,7 +231,7 @@ Building # # From the workspace root cargo build -p godopty-gdext # The shared l
     
     
     
-    "mainEntityOfPage": "https://godopty.github.io/godopty/docs/crates/gdext/",
+    "mainEntityOfPage": "https://godopty.github.io/godopty/repo/crates/godopty-gdext/readme/",
     "wordCount": "366"
   }]
   </script>
@@ -538,20 +536,18 @@ Building # # From the workspace root cargo build -p godopty-gdext # The shared l
       <main id="main-content" class="grow">
         
   
-  
-  
-
-  
-  
-
-  
-  <header>
+  <article>
     
-      <h1 class="mt-5 text-4xl font-extrabold text-neutral-900 dark:text-neutral">
-        godopty-gdext
-      </h1>
-      <div class="mt-1 mb-2 text-base text-neutral-500 dark:text-neutral-400 print:hidden">
+    
+
+    
+    <header id="single_header" class="mt-5 max-w-prose">
       
+      <h1 class="mt-0 text-4xl font-extrabold text-neutral-900 dark:text-neutral">
+        
+      </h1>
+      <div class="mt-1 mb-6 text-base text-neutral-500 dark:text-neutral-400 print:hidden">
+        
 
 
 
@@ -561,6 +557,30 @@ Building # # From the workspace root cargo build -p godopty-gdext # The shared l
   
 
 
+
+  
+
+  
+  
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+    
+  
 
   
 
@@ -576,22 +596,77 @@ Building # # From the workspace root cargo build -p godopty-gdext # The shared l
   <div class="flex flex-row flex-wrap items-center">
     
     
+      <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time><span class="px-2 text-primary-500">&middot;</span><span>366 words</span><span class="px-2 text-primary-500">&middot;</span><span title="Reading time">2 mins</span>
+    
+
+    
+    
   </div>
 
-
-    </div>
-  </header>
+  
 
   
   
+
+
+      </div>
+      
+        
   
-  <section class="mt-0 prose flex max-w-full flex-col dark:prose-invert lg:flex-row mb-10">
+  
+  
+  
+  
+  
+
+  
+
+  
     
-    <div class="min-w-0 min-h-0 max-w-prose w-full">
+    
+<div class="flex author">
+  
+  <div class="place-self-center">
+    
+      <div class="text-[0.6rem] uppercase leading-3 text-neutral-500 dark:text-neutral-400">
+        Author
+      </div>
+      <div class="font-semibold leading-6 text-neutral-800 dark:text-neutral-300">
+        godopty
+      </div>
+    
+    
+    <div class="text-2xl sm:text-lg">
+</div>
+  </div>
+</div>
+
+  
+
+  
+
+  
+    <div class="mb-5"></div>
+  
+
+      
+    </header>
+
+    
+    <section class="flex flex-col max-w-full mt-0 prose dark:prose-invert lg:flex-row">
+      
+      
+      
+      
       
 
 
-  <h1 class="relative group">godopty-gdext
+      <div class="min-w-0 min-h-0 max-w-fit">
+        
+
+        <div class="article-content max-w-prose mb-20">
+          
+<h1 class="relative group">godopty-gdext
     <div id="godopty-gdext" class="anchor"></div>
     
     <span
@@ -891,20 +966,70 @@ Building # # From the workspace root cargo build -p godopty-gdext # The shared l
 <li>If the grid mutex is held by the background task, <code>get_grid_rows()</code> returns <code>[]</code></li>
 </ul>
 
+          
+          
+          
+        </div>
+        
+        
 
+        
 
-    </div>
-  </section>
+        
 
-  
-  
-    <section class="mt-10 prose dark:prose-invert">
-      <p class="py-8 border-t">
-        <em>There are no articles to list here yet.</em>
-      </p>
+      </div>
     </section>
+
+    
+    <footer class="pt-8 max-w-prose print:hidden">
+      
   
+    
+    
+    
+    <div class="pt-8">
+      <hr class="border-dotted border-neutral-300 dark:border-neutral-600">
+      <div class="flex justify-between pt-3">
+        <span class="flex flex-col">
+          
+            <a
+              class="flex text-neutral-700 hover:text-primary-600 dark:text-neutral dark:hover:text-primary-400"
+              href="/godopty/repo/readme/">
+              <span class="leading-6">
+                <span class="inline-block rtl:rotate-180">&larr;</span>&ensp;
+              </span>
+            </a>
+            
+              <span class="ms-6 mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time>
+              </span>
+            
+          
+        </span>
+        <span class="flex flex-col items-end">
+          
+            <a
+              class="flex text-right text-neutral-700 hover:text-primary-600 dark:text-neutral dark:hover:text-primary-400"
+              href="/godopty/repo/crates/godopty-core/readme/">
+              <span class="leading-6">
+                &ensp;<span class="inline-block rtl:rotate-180">&rarr;</span>
+              </span>
+            </a>
+            
+              <span class="me-6 mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time>
+              </span>
+            
+          
+        </span>
+      </div>
+    </div>
   
+
+
+      
+    </footer>
+  </article>
 
         
 

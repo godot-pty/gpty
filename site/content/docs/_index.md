@@ -1,6 +1,9 @@
 ---
 title: "Documentation"
 description: "godopty documentation and guides"
+build:
+  list: never
+  render: always
 ---
 
 ## Documentation

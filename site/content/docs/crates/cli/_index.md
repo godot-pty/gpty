@@ -2,4 +2,4 @@
 title: "godopty-cli"
 ---
 
-{{< reporoot "crates/godopty-cli/README.md" >}}
+{{< readfile "repo/crates/godopty-cli/README.md" >}}

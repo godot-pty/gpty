@@ -1,6 +1,5 @@
 ---
-title: "Uchangelog"
-description: ""
+title: "Changelog"
 ---
 
-{{< reporoot "CHANGELOG.md" >}}
+{{< readfile "repo/CHANGELOG.md" >}}

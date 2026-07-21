@@ -15,8 +15,8 @@
 
   
   
-    <title>godopty-cli &middot; godopty</title>
-    <meta name="title" content="godopty-cli &middot; godopty">
+    <title>Repoes &middot; godopty</title>
+    <meta name="title" content="Repoes &middot; godopty">
   
 
   
@@ -34,11 +34,11 @@
   
   
   
-  <link rel="canonical" href="https://godopty.github.io/godopty/docs/crates/cli/">
+  <link rel="canonical" href="https://godopty.github.io/godopty/repo/">
   
   
     
-      <link rel="alternate" type="application/rss+xml" href="/godopty/docs/crates/cli/index.xml" title="godopty" />
+      <link rel="alternate" type="application/rss+xml" href="/godopty/repo/index.xml" title="godopty" />
   
 
   
@@ -48,19 +48,15 @@
   
 
   
-  <meta property="og:url" content="https://godopty.github.io/godopty/docs/crates/cli/">
+  <meta property="og:url" content="https://godopty.github.io/godopty/repo/">
 	<meta property="og:site_name" content="godopty">
-	<meta property="og:title" content="godopty-cli">
-	<meta property="og:description" content="godopty-cli # Headless CLI prototype — validates the godopty Rust engine without Godot.
-Usage # # Mock terminals — validates the pub-sub engine with synthetic output cargo run --bin godopty-cli # Real PTYs — validates the full PTY → vte → pub-sub pipeline cargo run --bin godopty-cli -- --pty # Terminal grid — validates alacritty_terminal ANSI processing &#43; color grid cargo run --bin godopty-cli -- --term # Verbose logging RUST_LOG=debug cargo run --bin godopty-cli Demo Descriptions # Mock (default): 3 labelled terminals, 2 concepts (crash_detected, port_conflict). Verifies regex matching, broadcast routing, and label-gated action delivery — no PTY involved. PTY (--pty): Spawns 2 real bash sessions. Injects a trigger command into Terminal 1; verifies that Terminal 2 receives and executes the matching action. Term (--term): Feeds a crafted ANSI string (with SGR colors and formatting) into alacritty_terminal::Term. Prints the resulting grid with ANSI-colored output for visual verification. Concept Definitions # Concepts are built in build_concepts() in main.rs. They use the full Concept struct with enabled, capture_mode, and destinations fields.">
+	<meta property="og:title" content="Repoes">
 	<meta property="og:locale" content="en_us">
 	<meta property="og:type" content="website">
 
   
 	<meta name="twitter:card" content="summary">
-	<meta name="twitter:title" content="godopty-cli">
-	<meta name="twitter:description" content="godopty-cli # Headless CLI prototype — validates the godopty Rust engine without Godot.
-Usage # # Mock terminals — validates the pub-sub engine with synthetic output cargo run --bin godopty-cli # Real PTYs — validates the full PTY → vte → pub-sub pipeline cargo run --bin godopty-cli -- --pty # Terminal grid — validates alacritty_terminal ANSI processing &#43; color grid cargo run --bin godopty-cli -- --term # Verbose logging RUST_LOG=debug cargo run --bin godopty-cli Demo Descriptions # Mock (default): 3 labelled terminals, 2 concepts (crash_detected, port_conflict). Verifies regex matching, broadcast routing, and label-gated action delivery — no PTY involved. PTY (--pty): Spawns 2 real bash sessions. Injects a trigger command into Terminal 1; verifies that Terminal 2 receives and executes the matching action. Term (--term): Feeds a crafted ANSI string (with SGR colors and formatting) into alacritty_terminal::Term. Prints the resulting grid with ANSI-colored output for visual verification. Concept Definitions # Concepts are built in build_concepts() in main.rs. They use the full Concept struct with enabled, capture_mode, and destinations fields.">
+	<meta name="twitter:title" content="Repoes">
 
   
   
@@ -215,12 +211,12 @@ Usage # # Mock terminals — validates the pub-sub engine with synthetic output 
   [{
     "@context": "https://schema.org",
     "@type": "Article",
-    "articleSection": "Documentation",
-    "name": "godopty-cli",
-    "headline": "godopty-cli",
+    "articleSection": "Repoes",
+    "name": "Repoes",
+    "headline": "Repoes",
     
     "inLanguage": "en-us",
-    "url" : "https://godopty.github.io/godopty/docs/crates/cli/",
+    "url" : "https://godopty.github.io/godopty/repo/",
     "author" : {
       "@type": "Person",
       "name": "godopty"
@@ -233,8 +229,8 @@ Usage # # Mock terminals — validates the pub-sub engine with synthetic output 
     
     
     
-    "mainEntityOfPage": "https://godopty.github.io/godopty/docs/crates/cli/",
-    "wordCount": "169"
+    "mainEntityOfPage": "https://godopty.github.io/godopty/repo/",
+    "wordCount": "0"
   }]
   </script>
 
@@ -548,7 +544,7 @@ Usage # # Mock terminals — validates the pub-sub engine with synthetic output 
   <header>
     
       <h1 class="mt-5 text-4xl font-extrabold text-neutral-900 dark:text-neutral">
-        godopty-cli
+        Repoes
       </h1>
       <div class="mt-1 mb-2 text-base text-neutral-500 dark:text-neutral-400 print:hidden">
       
@@ -589,80 +585,978 @@ Usage # # Mock terminals — validates the pub-sub engine with synthetic output 
     
     <div class="min-w-0 min-h-0 max-w-prose w-full">
       
-
-
-  
-<h1 class="relative group">godopty-cli
-    <div id="godopty-cli" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#godopty-cli" aria-label="Anchor">#</a>
-    </span>
-    
-</h1>
-<p>Headless CLI prototype — validates the godopty Rust engine without Godot.</p>
-
-<h2 class="relative group">Usage
-    <div id="usage" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#usage" aria-label="Anchor">#</a>
-    </span>
-    
-</h2>
-<div class="highlight-wrapper"><div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e"># Mock terminals — validates the pub-sub engine with synthetic output</span>
-</span></span><span style="display:flex;"><span>cargo run --bin godopty-cli
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Real PTYs — validates the full PTY → vte → pub-sub pipeline</span>
-</span></span><span style="display:flex;"><span>cargo run --bin godopty-cli -- --pty
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Terminal grid — validates alacritty_terminal ANSI processing + color grid</span>
-</span></span><span style="display:flex;"><span>cargo run --bin godopty-cli -- --term
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Verbose logging</span>
-</span></span><span style="display:flex;"><span>RUST_LOG<span style="color:#f92672">=</span>debug cargo run --bin godopty-cli</span></span></code></pre></div></div>
-
-<h2 class="relative group">Demo Descriptions
-    <div id="demo-descriptions" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#demo-descriptions" aria-label="Anchor">#</a>
-    </span>
-    
-</h2>
-<ul>
-<li>Mock (<code>default</code>): 3 labelled terminals, 2 concepts (<code>crash_detected</code>, <code>port_conflict</code>). Verifies regex matching, broadcast routing, and label-gated action delivery — no PTY involved.</li>
-<li>PTY (<code>--pty</code>): Spawns 2 real bash sessions. Injects a trigger command into Terminal 1; verifies that Terminal 2 receives and executes the matching action.</li>
-<li>Term (<code>--term</code>): Feeds a crafted ANSI string (with SGR colors and formatting) into <code>alacritty_terminal::Term</code>. Prints the resulting grid with ANSI-colored output for visual verification.</li>
-</ul>
-
-<h2 class="relative group">Concept Definitions
-    <div id="concept-definitions" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#concept-definitions" aria-label="Anchor">#</a>
-    </span>
-    
-</h2>
-<p>Concepts are built in <code>build_concepts()</code> in <code>main.rs</code>. They use the full <code>Concept</code> struct with <code>enabled</code>, <code>capture_mode</code>, and <code>destinations</code> fields.</p>
-
-
-
-
     </div>
   </section>
 
   
   
-    <section class="mt-10 prose dark:prose-invert">
-      <p class="py-8 border-t">
-        <em>There are no articles to list here yet.</em>
-      </p>
-    </section>
+    
+    
+    
+    
+    
+
+    
+      <section class="space-y-10 w-full">
+        
+          
+            
+              <h2 class="mt-12 text-2xl font-bold text-neutral-700 first:mt-8 dark:text-neutral-300">
+                0001
+              </h2>
+            
+            
+              
+
+
+
+
+
+
+
+
+  
+  
+  
+
+
+
+
+
+
+
+
+  
+  
+    
+    
+
+    
+    
+      
+      
+        
+      
+        
+      
+        
+      
+    
+
+    
+    
+      
+      
+    
+
+    
+    
+      
+    
+  
+
+
+
+<article class="article-link--simple flex flex-col md:flex-row relative">
+  
+  <div class=" mt-3 md:mt-0">
+    <header class="items-center text-start text-xl font-semibold">
+      <a
+        
+          href="/godopty/repo/roadmap/"
+        
+        class="not-prose before:absolute before:inset-0 decoration-primary-500 dark:text-neutral text-xl font-bold text-neutral-800 hover:underline hover:underline-offset-2">
+        <h2>
+          
+          
+        </h2>
+      </a>
+      
+      
+    </header>
+    <div class="text-sm text-neutral-500 dark:text-neutral-400">
+      
+
+
+
+
+
+
+
+  
+
+  
+  
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+    
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+
+  <div class="flex flex-row flex-wrap items-center">
+    
+    
+      <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time><span class="px-2 text-primary-500">&middot;</span><span>157 words</span><span class="px-2 text-primary-500">&middot;</span><span title="Reading time">1 min</span>
+    
+
+    
+    
+  </div>
+
+  
+
+  
+  
+
+
+    </div>
+    
+  </div>
+  <div class="px-6 pt-4 pb-2"></div>
+</article>
+
+            
+              
+
+
+
+
+
+
+
+
+  
+  
+  
+
+
+
+
+
+
+
+
+  
+  
+    
+    
+
+    
+    
+      
+      
+        
+      
+        
+      
+        
+      
+    
+
+    
+    
+      
+      
+    
+
+    
+    
+      
+    
+  
+
+
+
+<article class="article-link--simple flex flex-col md:flex-row relative">
+  
+  <div class=" mt-3 md:mt-0">
+    <header class="items-center text-start text-xl font-semibold">
+      <a
+        
+          href="/godopty/repo/readme/"
+        
+        class="not-prose before:absolute before:inset-0 decoration-primary-500 dark:text-neutral text-xl font-bold text-neutral-800 hover:underline hover:underline-offset-2">
+        <h2>
+          
+          
+        </h2>
+      </a>
+      
+      
+    </header>
+    <div class="text-sm text-neutral-500 dark:text-neutral-400">
+      
+
+
+
+
+
+
+
+  
+
+  
+  
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+    
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+
+  <div class="flex flex-row flex-wrap items-center">
+    
+    
+      <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time><span class="px-2 text-primary-500">&middot;</span><span>890 words</span><span class="px-2 text-primary-500">&middot;</span><span title="Reading time">5 mins</span>
+    
+
+    
+    
+  </div>
+
+  
+
+  
+  
+
+
+    </div>
+    
+  </div>
+  <div class="px-6 pt-4 pb-2"></div>
+</article>
+
+            
+              
+
+
+
+
+
+
+
+
+  
+  
+  
+
+
+
+
+
+
+
+
+  
+  
+    
+    
+
+    
+    
+      
+      
+        
+      
+        
+      
+        
+      
+    
+
+    
+    
+      
+      
+    
+
+    
+    
+      
+    
+  
+
+
+
+<article class="article-link--simple flex flex-col md:flex-row relative">
+  
+  <div class=" mt-3 md:mt-0">
+    <header class="items-center text-start text-xl font-semibold">
+      <a
+        
+          href="/godopty/repo/crates/godopty-gdext/readme/"
+        
+        class="not-prose before:absolute before:inset-0 decoration-primary-500 dark:text-neutral text-xl font-bold text-neutral-800 hover:underline hover:underline-offset-2">
+        <h2>
+          
+          
+        </h2>
+      </a>
+      
+      
+    </header>
+    <div class="text-sm text-neutral-500 dark:text-neutral-400">
+      
+
+
+
+
+
+
+
+  
+
+  
+  
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+    
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+
+  <div class="flex flex-row flex-wrap items-center">
+    
+    
+      <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time><span class="px-2 text-primary-500">&middot;</span><span>366 words</span><span class="px-2 text-primary-500">&middot;</span><span title="Reading time">2 mins</span>
+    
+
+    
+    
+  </div>
+
+  
+
+  
+  
+
+
+    </div>
+    
+  </div>
+  <div class="px-6 pt-4 pb-2"></div>
+</article>
+
+            
+              
+
+
+
+
+
+
+
+
+  
+  
+  
+
+
+
+
+
+
+
+
+  
+  
+    
+    
+
+    
+    
+      
+      
+        
+      
+        
+      
+        
+      
+    
+
+    
+    
+      
+      
+    
+
+    
+    
+      
+    
+  
+
+
+
+<article class="article-link--simple flex flex-col md:flex-row relative">
+  
+  <div class=" mt-3 md:mt-0">
+    <header class="items-center text-start text-xl font-semibold">
+      <a
+        
+          href="/godopty/repo/crates/godopty-core/readme/"
+        
+        class="not-prose before:absolute before:inset-0 decoration-primary-500 dark:text-neutral text-xl font-bold text-neutral-800 hover:underline hover:underline-offset-2">
+        <h2>
+          
+          
+        </h2>
+      </a>
+      
+      
+    </header>
+    <div class="text-sm text-neutral-500 dark:text-neutral-400">
+      
+
+
+
+
+
+
+
+  
+
+  
+  
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+    
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+
+  <div class="flex flex-row flex-wrap items-center">
+    
+    
+      <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time><span class="px-2 text-primary-500">&middot;</span><span>313 words</span><span class="px-2 text-primary-500">&middot;</span><span title="Reading time">2 mins</span>
+    
+
+    
+    
+  </div>
+
+  
+
+  
+  
+
+
+    </div>
+    
+  </div>
+  <div class="px-6 pt-4 pb-2"></div>
+</article>
+
+            
+              
+
+
+
+
+
+
+
+
+  
+  
+  
+
+
+
+
+
+
+
+
+  
+  
+    
+    
+
+    
+    
+      
+      
+        
+      
+        
+      
+        
+      
+    
+
+    
+    
+      
+      
+    
+
+    
+    
+      
+    
+  
+
+
+
+<article class="article-link--simple flex flex-col md:flex-row relative">
+  
+  <div class=" mt-3 md:mt-0">
+    <header class="items-center text-start text-xl font-semibold">
+      <a
+        
+          href="/godopty/repo/crates/godopty-cli/readme/"
+        
+        class="not-prose before:absolute before:inset-0 decoration-primary-500 dark:text-neutral text-xl font-bold text-neutral-800 hover:underline hover:underline-offset-2">
+        <h2>
+          
+          
+        </h2>
+      </a>
+      
+      
+    </header>
+    <div class="text-sm text-neutral-500 dark:text-neutral-400">
+      
+
+
+
+
+
+
+
+  
+
+  
+  
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+    
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+
+  <div class="flex flex-row flex-wrap items-center">
+    
+    
+      <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time><span class="px-2 text-primary-500">&middot;</span><span>169 words</span><span class="px-2 text-primary-500">&middot;</span><span title="Reading time">1 min</span>
+    
+
+    
+    
+  </div>
+
+  
+
+  
+  
+
+
+    </div>
+    
+  </div>
+  <div class="px-6 pt-4 pb-2"></div>
+</article>
+
+            
+              
+
+
+
+
+
+
+
+
+  
+  
+  
+
+
+
+
+
+
+
+
+  
+  
+    
+    
+
+    
+    
+      
+      
+        
+      
+        
+      
+        
+      
+    
+
+    
+    
+      
+      
+    
+
+    
+    
+      
+    
+  
+
+
+
+<article class="article-link--simple flex flex-col md:flex-row relative">
+  
+  <div class=" mt-3 md:mt-0">
+    <header class="items-center text-start text-xl font-semibold">
+      <a
+        
+          href="/godopty/repo/changelog/"
+        
+        class="not-prose before:absolute before:inset-0 decoration-primary-500 dark:text-neutral text-xl font-bold text-neutral-800 hover:underline hover:underline-offset-2">
+        <h2>
+          
+          
+        </h2>
+      </a>
+      
+      
+    </header>
+    <div class="text-sm text-neutral-500 dark:text-neutral-400">
+      
+
+
+
+
+
+
+
+  
+
+  
+  
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+    
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+
+  <div class="flex flex-row flex-wrap items-center">
+    
+    
+      <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time><span class="px-2 text-primary-500">&middot;</span><span>263 words</span><span class="px-2 text-primary-500">&middot;</span><span title="Reading time">2 mins</span>
+    
+
+    
+    
+  </div>
+
+  
+
+  
+  
+
+
+    </div>
+    
+  </div>
+  <div class="px-6 pt-4 pb-2"></div>
+</article>
+
+            
+              
+
+
+
+
+
+
+
+
+  
+  
+  
+
+
+
+
+
+
+
+
+  
+  
+    
+    
+
+    
+    
+      
+      
+        
+      
+        
+      
+        
+      
+    
+
+    
+    
+      
+      
+    
+
+    
+    
+      
+    
+  
+
+
+
+<article class="article-link--simple flex flex-col md:flex-row relative">
+  
+  <div class=" mt-3 md:mt-0">
+    <header class="items-center text-start text-xl font-semibold">
+      <a
+        
+          href="/godopty/repo/agents/"
+        
+        class="not-prose before:absolute before:inset-0 decoration-primary-500 dark:text-neutral text-xl font-bold text-neutral-800 hover:underline hover:underline-offset-2">
+        <h2>
+          
+          
+        </h2>
+      </a>
+      
+      
+    </header>
+    <div class="text-sm text-neutral-500 dark:text-neutral-400">
+      
+
+
+
+
+
+
+
+  
+
+  
+  
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+    
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+
+  <div class="flex flex-row flex-wrap items-center">
+    
+    
+      <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time><span class="px-2 text-primary-500">&middot;</span><span>2287 words</span><span class="px-2 text-primary-500">&middot;</span><span title="Reading time">11 mins</span>
+    
+
+    
+    
+  </div>
+
+  
+
+  
+  
+
+
+    </div>
+    
+  </div>
+  <div class="px-6 pt-4 pb-2"></div>
+</article>
+
+            
+          
+        
+      </section>
+    
+    
+  
   
   
 

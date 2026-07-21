@@ -15,8 +15,8 @@
 
   
   
-    <title>godopty-cli &middot; godopty</title>
-    <meta name="title" content="godopty-cli &middot; godopty">
+    <title> &middot; godopty</title>
+    <meta name="title" content=" &middot; godopty">
   
 
   
@@ -34,11 +34,8 @@
   
   
   
-  <link rel="canonical" href="https://godopty.github.io/godopty/docs/crates/cli/">
+  <link rel="canonical" href="https://godopty.github.io/godopty/repo/changelog/">
   
-  
-    
-      <link rel="alternate" type="application/rss+xml" href="/godopty/docs/crates/cli/index.xml" title="godopty" />
   
 
   
@@ -48,19 +45,22 @@
   
 
   
-  <meta property="og:url" content="https://godopty.github.io/godopty/docs/crates/cli/">
+  <meta property="og:url" content="https://godopty.github.io/godopty/repo/changelog/">
 	<meta property="og:site_name" content="godopty">
-	<meta property="og:title" content="godopty-cli">
-	<meta property="og:description" content="godopty-cli # Headless CLI prototype — validates the godopty Rust engine without Godot.
-Usage # # Mock terminals — validates the pub-sub engine with synthetic output cargo run --bin godopty-cli # Real PTYs — validates the full PTY → vte → pub-sub pipeline cargo run --bin godopty-cli -- --pty # Terminal grid — validates alacritty_terminal ANSI processing &#43; color grid cargo run --bin godopty-cli -- --term # Verbose logging RUST_LOG=debug cargo run --bin godopty-cli Demo Descriptions # Mock (default): 3 labelled terminals, 2 concepts (crash_detected, port_conflict). Verifies regex matching, broadcast routing, and label-gated action delivery — no PTY involved. PTY (--pty): Spawns 2 real bash sessions. Injects a trigger command into Terminal 1; verifies that Terminal 2 receives and executes the matching action. Term (--term): Feeds a crafted ANSI string (with SGR colors and formatting) into alacritty_terminal::Term. Prints the resulting grid with ANSI-colored output for visual verification. Concept Definitions # Concepts are built in build_concepts() in main.rs. They use the full Concept struct with enabled, capture_mode, and destinations fields.">
+	<meta property="og:title" content="godopty">
+	<meta property="og:description" content="Changelog # All notable changes to godopty.
+The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
+0.1.0 — 2026-07-21 # Added # Multi-PTY terminal emulator with tiling grid GUI godopty-core library: PTY spawning (portable-pty), ANSI parsing (vte), terminal grid (alacritty_terminal), concept pub-sub engine godopty-gdext GDExtension: GodoptyTerminal GodotClass with damage-tracked grid rendering godopty-cli binary: mock, --pty, and --term demo modes Tiling grid: split vertically/horizontally, kill, expand, and nested SplitContainer layout Pane types: terminal, code viewer (CodeEdit), file tree (Tree), observer Concept engine: regex triggers → labelled actions with {payload}/{N} variable substitution Concept capture: UntilStop mode buffers command output and routes to receiver panes with bidirectional handshake; prompt restoration on acknowledge Default concepts shipped (concepts.default.json) with enable/disable toggle and deep-merge migration from user overrides Settings persistence: cursor shape/blink/thickness, scroll sensitivity, default dimensions, font family/size, UI theme colors, color palette schemes — all auto-saved to user://settings.json Profile manager: named layout snapshots saved to user://profiles.json Layout auto-save/restore via user://layout.json Scrollback with scroll_up/scroll_down, scrollback indicator, and Ctrl&#43;F regex search Wrapped text selection for copy/paste Toast notification system (info, warn, error) with replace-on-new behavior Centralized icon system (icons.gd) using Phosphor icon font Keyboard shortcuts: Ctrl&#43;N (spawn), Ctrl&#43;W (close), Ctrl&#43;B (sidebar), Ctrl&#43;P (command palette), Ctrl&#43;Shift&#43;R (reset) Alt&#43;Arrow geographic pane focus navigation Sidebar: pane list with focus, minimize/maximize, swap, kill, and profile save/load Command palette with fuzzy command matching Title bar per pane with label prefix and action buttons Scrollback history stored in SQLite Standalone export presets (Linux, macOS, Windows) with CI release workflow 60 Rust tests (core &#43; integration) and 40&#43; GDScript unit/integration tests">
 	<meta property="og:locale" content="en_us">
-	<meta property="og:type" content="website">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="repo">
 
   
 	<meta name="twitter:card" content="summary">
-	<meta name="twitter:title" content="godopty-cli">
-	<meta name="twitter:description" content="godopty-cli # Headless CLI prototype — validates the godopty Rust engine without Godot.
-Usage # # Mock terminals — validates the pub-sub engine with synthetic output cargo run --bin godopty-cli # Real PTYs — validates the full PTY → vte → pub-sub pipeline cargo run --bin godopty-cli -- --pty # Terminal grid — validates alacritty_terminal ANSI processing &#43; color grid cargo run --bin godopty-cli -- --term # Verbose logging RUST_LOG=debug cargo run --bin godopty-cli Demo Descriptions # Mock (default): 3 labelled terminals, 2 concepts (crash_detected, port_conflict). Verifies regex matching, broadcast routing, and label-gated action delivery — no PTY involved. PTY (--pty): Spawns 2 real bash sessions. Injects a trigger command into Terminal 1; verifies that Terminal 2 receives and executes the matching action. Term (--term): Feeds a crafted ANSI string (with SGR colors and formatting) into alacritty_terminal::Term. Prints the resulting grid with ANSI-colored output for visual verification. Concept Definitions # Concepts are built in build_concepts() in main.rs. They use the full Concept struct with enabled, capture_mode, and destinations fields.">
+	<meta name="twitter:title" content="godopty">
+	<meta name="twitter:description" content="Changelog # All notable changes to godopty.
+The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
+0.1.0 — 2026-07-21 # Added # Multi-PTY terminal emulator with tiling grid GUI godopty-core library: PTY spawning (portable-pty), ANSI parsing (vte), terminal grid (alacritty_terminal), concept pub-sub engine godopty-gdext GDExtension: GodoptyTerminal GodotClass with damage-tracked grid rendering godopty-cli binary: mock, --pty, and --term demo modes Tiling grid: split vertically/horizontally, kill, expand, and nested SplitContainer layout Pane types: terminal, code viewer (CodeEdit), file tree (Tree), observer Concept engine: regex triggers → labelled actions with {payload}/{N} variable substitution Concept capture: UntilStop mode buffers command output and routes to receiver panes with bidirectional handshake; prompt restoration on acknowledge Default concepts shipped (concepts.default.json) with enable/disable toggle and deep-merge migration from user overrides Settings persistence: cursor shape/blink/thickness, scroll sensitivity, default dimensions, font family/size, UI theme colors, color palette schemes — all auto-saved to user://settings.json Profile manager: named layout snapshots saved to user://profiles.json Layout auto-save/restore via user://layout.json Scrollback with scroll_up/scroll_down, scrollback indicator, and Ctrl&#43;F regex search Wrapped text selection for copy/paste Toast notification system (info, warn, error) with replace-on-new behavior Centralized icon system (icons.gd) using Phosphor icon font Keyboard shortcuts: Ctrl&#43;N (spawn), Ctrl&#43;W (close), Ctrl&#43;B (sidebar), Ctrl&#43;P (command palette), Ctrl&#43;Shift&#43;R (reset) Alt&#43;Arrow geographic pane focus navigation Sidebar: pane list with focus, minimize/maximize, swap, kill, and profile save/load Command palette with fuzzy command matching Title bar per pane with label prefix and action buttons Scrollback history stored in SQLite Standalone export presets (Linux, macOS, Windows) with CI release workflow 60 Rust tests (core &#43; integration) and 40&#43; GDScript unit/integration tests">
 
   
   
@@ -215,12 +215,12 @@ Usage # # Mock terminals — validates the pub-sub engine with synthetic output 
   [{
     "@context": "https://schema.org",
     "@type": "Article",
-    "articleSection": "Documentation",
-    "name": "godopty-cli",
-    "headline": "godopty-cli",
+    "articleSection": "Repoes",
+    "name": "",
+    "headline": "",
     
     "inLanguage": "en-us",
-    "url" : "https://godopty.github.io/godopty/docs/crates/cli/",
+    "url" : "https://godopty.github.io/godopty/repo/changelog/",
     "author" : {
       "@type": "Person",
       "name": "godopty"
@@ -233,8 +233,8 @@ Usage # # Mock terminals — validates the pub-sub engine with synthetic output 
     
     
     
-    "mainEntityOfPage": "https://godopty.github.io/godopty/docs/crates/cli/",
-    "wordCount": "169"
+    "mainEntityOfPage": "https://godopty.github.io/godopty/repo/changelog/",
+    "wordCount": "263"
   }]
   </script>
 
@@ -538,20 +538,18 @@ Usage # # Mock terminals — validates the pub-sub engine with synthetic output 
       <main id="main-content" class="grow">
         
   
-  
-  
-
-  
-  
-
-  
-  <header>
+  <article>
     
-      <h1 class="mt-5 text-4xl font-extrabold text-neutral-900 dark:text-neutral">
-        godopty-cli
-      </h1>
-      <div class="mt-1 mb-2 text-base text-neutral-500 dark:text-neutral-400 print:hidden">
+    
+
+    
+    <header id="single_header" class="mt-5 max-w-prose">
       
+      <h1 class="mt-0 text-4xl font-extrabold text-neutral-900 dark:text-neutral">
+        
+      </h1>
+      <div class="mt-1 mb-6 text-base text-neutral-500 dark:text-neutral-400 print:hidden">
+        
 
 
 
@@ -561,6 +559,30 @@ Usage # # Mock terminals — validates the pub-sub engine with synthetic output 
   
 
 
+
+  
+
+  
+  
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+
+  
+    
+  
+
+  
+    
+  
 
   
 
@@ -576,95 +598,199 @@ Usage # # Mock terminals — validates the pub-sub engine with synthetic output 
   <div class="flex flex-row flex-wrap items-center">
     
     
+      <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time><span class="px-2 text-primary-500">&middot;</span><span>263 words</span><span class="px-2 text-primary-500">&middot;</span><span title="Reading time">2 mins</span>
+    
+
+    
+    
   </div>
 
-
-    </div>
-  </header>
+  
 
   
   
+
+
+      </div>
+      
+        
   
-  <section class="mt-0 prose flex max-w-full flex-col dark:prose-invert lg:flex-row mb-10">
+  
+  
+  
+  
+  
+
+  
+
+  
     
-    <div class="min-w-0 min-h-0 max-w-prose w-full">
+    
+<div class="flex author">
+  
+  <div class="place-self-center">
+    
+      <div class="text-[0.6rem] uppercase leading-3 text-neutral-500 dark:text-neutral-400">
+        Author
+      </div>
+      <div class="font-semibold leading-6 text-neutral-800 dark:text-neutral-300">
+        godopty
+      </div>
+    
+    
+    <div class="text-2xl sm:text-lg">
+</div>
+  </div>
+</div>
+
+  
+
+  
+
+  
+    <div class="mb-5"></div>
+  
+
+      
+    </header>
+
+    
+    <section class="flex flex-col max-w-full mt-0 prose dark:prose-invert lg:flex-row">
+      
+      
+      
+      
       
 
 
-  
-<h1 class="relative group">godopty-cli
-    <div id="godopty-cli" class="anchor"></div>
+      <div class="min-w-0 min-h-0 max-w-fit">
+        
+
+        <div class="article-content max-w-prose mb-20">
+          
+<h1 class="relative group">Changelog
+    <div id="changelog" class="anchor"></div>
     
     <span
         class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#godopty-cli" aria-label="Anchor">#</a>
+        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#changelog" aria-label="Anchor">#</a>
     </span>
     
 </h1>
-<p>Headless CLI prototype — validates the godopty Rust engine without Godot.</p>
+<p>All notable changes to godopty.</p>
+<p>The format is based on <a href="https://keepachangelog.com/en/1.1.0/"  target="_blank" rel="noreferrer">Keep a Changelog</a>,
+and this project adheres to <a href="https://semver.org/spec/v2.0.0.html"  target="_blank" rel="noreferrer">Semantic Versioning</a>.</p>
 
-<h2 class="relative group">Usage
-    <div id="usage" class="anchor"></div>
+<h2 class="relative group"><a href="https://github.com/godopty/godopty/releases/tag/v0.1.0"  target="_blank" rel="noreferrer">0.1.0</a> — 2026-07-21
+    <div id="010--2026-07-21" class="anchor"></div>
     
     <span
         class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#usage" aria-label="Anchor">#</a>
+        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#010--2026-07-21" aria-label="Anchor">#</a>
     </span>
     
 </h2>
-<div class="highlight-wrapper"><div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e"># Mock terminals — validates the pub-sub engine with synthetic output</span>
-</span></span><span style="display:flex;"><span>cargo run --bin godopty-cli
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Real PTYs — validates the full PTY → vte → pub-sub pipeline</span>
-</span></span><span style="display:flex;"><span>cargo run --bin godopty-cli -- --pty
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Terminal grid — validates alacritty_terminal ANSI processing + color grid</span>
-</span></span><span style="display:flex;"><span>cargo run --bin godopty-cli -- --term
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Verbose logging</span>
-</span></span><span style="display:flex;"><span>RUST_LOG<span style="color:#f92672">=</span>debug cargo run --bin godopty-cli</span></span></code></pre></div></div>
 
-<h2 class="relative group">Demo Descriptions
-    <div id="demo-descriptions" class="anchor"></div>
+<h3 class="relative group">Added
+    <div id="added" class="anchor"></div>
     
     <span
         class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#demo-descriptions" aria-label="Anchor">#</a>
+        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#added" aria-label="Anchor">#</a>
     </span>
     
-</h2>
+</h3>
 <ul>
-<li>Mock (<code>default</code>): 3 labelled terminals, 2 concepts (<code>crash_detected</code>, <code>port_conflict</code>). Verifies regex matching, broadcast routing, and label-gated action delivery — no PTY involved.</li>
-<li>PTY (<code>--pty</code>): Spawns 2 real bash sessions. Injects a trigger command into Terminal 1; verifies that Terminal 2 receives and executes the matching action.</li>
-<li>Term (<code>--term</code>): Feeds a crafted ANSI string (with SGR colors and formatting) into <code>alacritty_terminal::Term</code>. Prints the resulting grid with ANSI-colored output for visual verification.</li>
+<li>Multi-PTY terminal emulator with tiling grid GUI</li>
+<li><code>godopty-core</code> library: PTY spawning (<code>portable-pty</code>), ANSI parsing (<code>vte</code>), terminal grid (<code>alacritty_terminal</code>), concept pub-sub engine</li>
+<li><code>godopty-gdext</code> GDExtension: <code>GodoptyTerminal</code> GodotClass with damage-tracked grid rendering</li>
+<li><code>godopty-cli</code> binary: mock, <code>--pty</code>, and <code>--term</code> demo modes</li>
+<li>Tiling grid: split vertically/horizontally, kill, expand, and nested <code>SplitContainer</code> layout</li>
+<li>Pane types: terminal, code viewer (<code>CodeEdit</code>), file tree (<code>Tree</code>), observer</li>
+<li>Concept engine: regex triggers → labelled actions with <code>{payload}</code>/<code>{N}</code> variable substitution</li>
+<li>Concept capture: <code>UntilStop</code> mode buffers command output and routes to receiver panes with bidirectional handshake; prompt restoration on acknowledge</li>
+<li>Default concepts shipped (<code>concepts.default.json</code>) with enable/disable toggle and deep-merge migration from user overrides</li>
+<li>Settings persistence: cursor shape/blink/thickness, scroll sensitivity, default dimensions, font family/size, UI theme colors, color palette schemes — all auto-saved to <code>user://settings.json</code></li>
+<li>Profile manager: named layout snapshots saved to <code>user://profiles.json</code></li>
+<li>Layout auto-save/restore via <code>user://layout.json</code></li>
+<li>Scrollback with <code>scroll_up</code>/<code>scroll_down</code>, scrollback indicator, and <code>Ctrl+F</code> regex search</li>
+<li>Wrapped text selection for copy/paste</li>
+<li>Toast notification system (info, warn, error) with replace-on-new behavior</li>
+<li>Centralized icon system (<code>icons.gd</code>) using Phosphor icon font</li>
+<li>Keyboard shortcuts: <code>Ctrl+N</code> (spawn), <code>Ctrl+W</code> (close), <code>Ctrl+B</code> (sidebar), <code>Ctrl+P</code> (command palette), <code>Ctrl+Shift+R</code> (reset)</li>
+<li><code>Alt+Arrow</code> geographic pane focus navigation</li>
+<li>Sidebar: pane list with focus, minimize/maximize, swap, kill, and profile save/load</li>
+<li>Command palette with fuzzy command matching</li>
+<li>Title bar per pane with label prefix and action buttons</li>
+<li>Scrollback history stored in SQLite</li>
+<li>Standalone export presets (Linux, macOS, Windows) with CI release workflow</li>
+<li>60 Rust tests (core + integration) and 40+ GDScript unit/integration tests</li>
 </ul>
 
-<h2 class="relative group">Concept Definitions
-    <div id="concept-definitions" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#concept-definitions" aria-label="Anchor">#</a>
-    </span>
-    
-</h2>
-<p>Concepts are built in <code>build_concepts()</code> in <code>main.rs</code>. They use the full <code>Concept</code> struct with <code>enabled</code>, <code>capture_mode</code>, and <code>destinations</code> fields.</p>
+          
+          
+          
+        </div>
+        
+        
 
+        
 
+        
 
-
-    </div>
-  </section>
-
-  
-  
-    <section class="mt-10 prose dark:prose-invert">
-      <p class="py-8 border-t">
-        <em>There are no articles to list here yet.</em>
-      </p>
+      </div>
     </section>
+
+    
+    <footer class="pt-8 max-w-prose print:hidden">
+      
   
+    
+    
+    
+    <div class="pt-8">
+      <hr class="border-dotted border-neutral-300 dark:border-neutral-600">
+      <div class="flex justify-between pt-3">
+        <span class="flex flex-col">
+          
+            <a
+              class="flex text-neutral-700 hover:text-primary-600 dark:text-neutral dark:hover:text-primary-400"
+              href="/godopty/repo/crates/godopty-cli/readme/">
+              <span class="leading-6">
+                <span class="inline-block rtl:rotate-180">&larr;</span>&ensp;
+              </span>
+            </a>
+            
+              <span class="ms-6 mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time>
+              </span>
+            
+          
+        </span>
+        <span class="flex flex-col items-end">
+          
+            <a
+              class="flex text-right text-neutral-700 hover:text-primary-600 dark:text-neutral dark:hover:text-primary-400"
+              href="/godopty/repo/agents/">
+              <span class="leading-6">
+                &ensp;<span class="inline-block rtl:rotate-180">&rarr;</span>
+              </span>
+            </a>
+            
+              <span class="me-6 mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time>
+              </span>
+            
+          
+        </span>
+      </div>
+    </div>
   
+
+
+      
+    </footer>
+  </article>
 
         
 

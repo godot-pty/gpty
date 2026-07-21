@@ -1,6 +1,5 @@
 ---
-title: "Uagents"
-description: ""
+title: "Agents"
 ---
 
-{{< reporoot "AGENTS.md" >}}
+{{< readfile "repo/AGENTS.md" >}}

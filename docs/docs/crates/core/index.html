@@ -51,14 +51,16 @@
   <meta property="og:url" content="https://godopty.github.io/godopty/docs/crates/core/">
 	<meta property="og:site_name" content="godopty">
 	<meta property="og:title" content="godopty-core">
-	<meta property="og:description" content="&gt; File `crates/godopty-core/README.md` not found.">
+	<meta property="og:description" content="godopty-core # Library crate for the godopty multi-PTY emulator. This is the engine — all terminal lifecycle, ANSI parsing, concept matching, capture buffering, and grid management live here.
+Module Layout # Module Purpose Key Types types Data vocabulary shared across all modules Concept, Event, Action, TerminalConfig, CaptureMode, CapturedOutput concept Pure functions for regex matching and command routing match_and_broadcast(), matching_commands() engine Runtime orchestrator; spawns terminal tasks, capture state machine WorkspaceEngine, PtyTerminalHandle, SpawnedTerminal, TaskContext pty Cross-platform PTY lifecycle via portable-pty PtyHandle parser Strips ANSI escape sequences; extracts plain-text lines LineParser term Full terminal grid &#43; damage tracking via alacritty_terminal TermGrid, CellInfo, GridUpdate color ANSI color mapping — named, indexed, true-color → RGB color_to_rgb() keymap Keyboard event → byte sequence translation key_event_to_bytes() history SQLite-backed scrollback history store HistoryStore Concept Capture System # The engine supports two capture modes:">
 	<meta property="og:locale" content="en_us">
 	<meta property="og:type" content="website">
 
   
 	<meta name="twitter:card" content="summary">
 	<meta name="twitter:title" content="godopty-core">
-	<meta name="twitter:description" content="&gt; File `crates/godopty-core/README.md` not found.">
+	<meta name="twitter:description" content="godopty-core # Library crate for the godopty multi-PTY emulator. This is the engine — all terminal lifecycle, ANSI parsing, concept matching, capture buffering, and grid management live here.
+Module Layout # Module Purpose Key Types types Data vocabulary shared across all modules Concept, Event, Action, TerminalConfig, CaptureMode, CapturedOutput concept Pure functions for regex matching and command routing match_and_broadcast(), matching_commands() engine Runtime orchestrator; spawns terminal tasks, capture state machine WorkspaceEngine, PtyTerminalHandle, SpawnedTerminal, TaskContext pty Cross-platform PTY lifecycle via portable-pty PtyHandle parser Strips ANSI escape sequences; extracts plain-text lines LineParser term Full terminal grid &#43; damage tracking via alacritty_terminal TermGrid, CellInfo, GridUpdate color ANSI color mapping — named, indexed, true-color → RGB color_to_rgb() keymap Keyboard event → byte sequence translation key_event_to_bytes() history SQLite-backed scrollback history store HistoryStore Concept Capture System # The engine supports two capture modes:">
 
   
   
@@ -232,7 +234,7 @@
     
     
     "mainEntityOfPage": "https://godopty.github.io/godopty/docs/crates/core/",
-    "wordCount": "5"
+    "wordCount": "313"
   }]
   </script>
 
@@ -589,7 +591,162 @@
       
 
 
-  > File `crates/godopty-core/README.md` not found.
+  
+<h1 class="relative group">godopty-core
+    <div id="godopty-core" class="anchor"></div>
+    
+    <span
+        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
+        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#godopty-core" aria-label="Anchor">#</a>
+    </span>
+    
+</h1>
+<p>Library crate for the godopty multi-PTY emulator. This is the engine — all terminal lifecycle, ANSI parsing, concept matching, capture buffering, and grid management live here.</p>
+
+<h2 class="relative group">Module Layout
+    <div id="module-layout" class="anchor"></div>
+    
+    <span
+        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
+        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#module-layout" aria-label="Anchor">#</a>
+    </span>
+    
+</h2>
+<table>
+	<thead>
+			<tr>
+					<th>Module</th>
+					<th>Purpose</th>
+					<th>Key Types</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><a href="src/types.rs" ><code>types</code></a></td>
+					<td>Data vocabulary shared across all modules</td>
+					<td><code>Concept</code>, <code>Event</code>, <code>Action</code>, <code>TerminalConfig</code>, <code>CaptureMode</code>, <code>CapturedOutput</code></td>
+			</tr>
+			<tr>
+					<td><a href="src/concept.rs" ><code>concept</code></a></td>
+					<td>Pure functions for regex matching and command routing</td>
+					<td><code>match_and_broadcast()</code>, <code>matching_commands()</code></td>
+			</tr>
+			<tr>
+					<td><a href="src/engine.rs" ><code>engine</code></a></td>
+					<td>Runtime orchestrator; spawns terminal tasks, capture state machine</td>
+					<td><code>WorkspaceEngine</code>, <code>PtyTerminalHandle</code>, <code>SpawnedTerminal</code>, <code>TaskContext</code></td>
+			</tr>
+			<tr>
+					<td><a href="src/pty.rs" ><code>pty</code></a></td>
+					<td>Cross-platform PTY lifecycle via <code>portable-pty</code></td>
+					<td><code>PtyHandle</code></td>
+			</tr>
+			<tr>
+					<td><a href="src/parser.rs" ><code>parser</code></a></td>
+					<td>Strips ANSI escape sequences; extracts plain-text lines</td>
+					<td><code>LineParser</code></td>
+			</tr>
+			<tr>
+					<td><a href="src/term.rs" ><code>term</code></a></td>
+					<td>Full terminal grid + damage tracking via <code>alacritty_terminal</code></td>
+					<td><code>TermGrid</code>, <code>CellInfo</code>, <code>GridUpdate</code></td>
+			</tr>
+			<tr>
+					<td><a href="src/color.rs" ><code>color</code></a></td>
+					<td>ANSI color mapping — named, indexed, true-color → RGB</td>
+					<td><code>color_to_rgb()</code></td>
+			</tr>
+			<tr>
+					<td><a href="src/keymap.rs" ><code>keymap</code></a></td>
+					<td>Keyboard event → byte sequence translation</td>
+					<td><code>key_event_to_bytes()</code></td>
+			</tr>
+			<tr>
+					<td><a href="src/history.rs" ><code>history</code></a></td>
+					<td>SQLite-backed scrollback history store</td>
+					<td><code>HistoryStore</code></td>
+			</tr>
+	</tbody>
+</table>
+
+<h2 class="relative group">Concept Capture System
+    <div id="concept-capture-system" class="anchor"></div>
+    
+    <span
+        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
+        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#concept-capture-system" aria-label="Anchor">#</a>
+    </span>
+    
+</h2>
+<p>The engine supports two capture modes:</p>
+<ul>
+<li><code>SingleLine</code>: Per-line regex matching. On match, broadcasts an <code>Event</code> on the pub-sub channel. Receiving terminals with matching labels inject the action&rsquo;s command template into their PTY stdin.</li>
+<li><code>UntilStop { stop_timeout_ms, stop_on_input }</code>: Command-output capture. On match, the terminal enters capture mode — all subsequent PTY output is buffered as raw bytes (never fed to the grid). The capture ends on timeout (silence for N ms) or user input. The captured output is routed via GDScript to a receiver pane (e.g., code viewer) or flushed back to the terminal grid.</li>
+</ul>
+<p>Key functions: <code>finalize_capture()</code>, <code>handle_command()</code>, <code>capture_stops_on_input()</code>, <code>feed_grid()</code>, <code>store_line()</code>.</p>
+
+<h2 class="relative group">Why Flat?
+    <div id="why-flat" class="anchor"></div>
+    
+    <span
+        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
+        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#why-flat" aria-label="Anchor">#</a>
+    </span>
+    
+</h2>
+<p>All modules are single files in <code>src/</code>. When a module grows beyond ~200 lines or needs helper files, it will be promoted to <code>src/&lt;name&gt;/mod.rs</code>. This keeps navigation simple during prototyping while leaving room for future nesting.</p>
+
+<h2 class="relative group">Key Dependencies
+    <div id="key-dependencies" class="anchor"></div>
+    
+    <span
+        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
+        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#key-dependencies" aria-label="Anchor">#</a>
+    </span>
+    
+</h2>
+<table>
+	<thead>
+			<tr>
+					<th>Crate</th>
+					<th>Version</th>
+					<th>Role</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>portable-pty</code></td>
+					<td>0.9</td>
+					<td>Cross-platform PTY (Linux <code>/dev/ptmx</code>, Windows ConPTY)</td>
+			</tr>
+			<tr>
+					<td><code>vte</code></td>
+					<td>0.15</td>
+					<td>ANSI/VT100 escape sequence parser</td>
+			</tr>
+			<tr>
+					<td><code>alacritty_terminal</code></td>
+					<td>0.26</td>
+					<td>Full terminal grid emulator</td>
+			</tr>
+			<tr>
+					<td><code>tokio</code></td>
+					<td>1.52</td>
+					<td>Async runtime + broadcast channel</td>
+			</tr>
+			<tr>
+					<td><code>regex</code></td>
+					<td>1.12</td>
+					<td>Concept trigger patterns</td>
+			</tr>
+			<tr>
+					<td><code>rusqlite</code></td>
+					<td>0.31</td>
+					<td>SQLite history storage</td>
+			</tr>
+	</tbody>
+</table>
+
 
 
 

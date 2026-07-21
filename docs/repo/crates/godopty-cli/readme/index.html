@@ -5,7 +5,6 @@
   class="scroll-smooth"
   data-default-appearance="light"
   data-auto-appearance="true"><head>
-	<meta name="generator" content="Hugo 0.164.0">
   <meta charset="utf-8">
   
     <meta http-equiv="content-language" content="en-us">
@@ -16,8 +15,8 @@
 
   
   
-    <title>godopty</title>
-    <meta name="title" content="godopty">
+    <title> &middot; godopty</title>
+    <meta name="title" content=" &middot; godopty">
   
 
   
@@ -32,16 +31,11 @@
     
   
   
-    <meta name="description" content="Multi-PTY terminal emulator with tiling grid GUI">
   
   
   
+  <link rel="canonical" href="https://godopty.github.io/godopty/repo/crates/godopty-cli/readme/">
   
-  <link rel="canonical" href="https://godopty.github.io/godopty/">
-  
-  
-    
-      <link rel="alternate" type="application/rss+xml" href="/godopty/index.xml" title="godopty" />
   
 
   
@@ -51,17 +45,20 @@
   
 
   
-  <meta property="og:url" content="https://godopty.github.io/godopty/">
+  <meta property="og:url" content="https://godopty.github.io/godopty/repo/crates/godopty-cli/readme/">
 	<meta property="og:site_name" content="godopty">
 	<meta property="og:title" content="godopty">
-	<meta property="og:description" content="Multi-PTY terminal emulator with tiling grid GUI">
+	<meta property="og:description" content="godopty-cli # Headless CLI prototype — validates the godopty Rust engine without Godot.
+Usage # # Mock terminals — validates the pub-sub engine with synthetic output cargo run --bin godopty-cli # Real PTYs — validates the full PTY → vte → pub-sub pipeline cargo run --bin godopty-cli -- --pty # Terminal grid — validates alacritty_terminal ANSI processing &#43; color grid cargo run --bin godopty-cli -- --term # Verbose logging RUST_LOG=debug cargo run --bin godopty-cli Demo Descriptions # Mock (default): 3 labelled terminals, 2 concepts (crash_detected, port_conflict). Verifies regex matching, broadcast routing, and label-gated action delivery — no PTY involved. PTY (--pty): Spawns 2 real bash sessions. Injects a trigger command into Terminal 1; verifies that Terminal 2 receives and executes the matching action. Term (--term): Feeds a crafted ANSI string (with SGR colors and formatting) into alacritty_terminal::Term. Prints the resulting grid with ANSI-colored output for visual verification. Concept Definitions # Concepts are built in build_concepts() in main.rs. They use the full Concept struct with enabled, capture_mode, and destinations fields.">
 	<meta property="og:locale" content="en_us">
-	<meta property="og:type" content="website">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="repo">
 
   
 	<meta name="twitter:card" content="summary">
 	<meta name="twitter:title" content="godopty">
-	<meta name="twitter:description" content="Multi-PTY terminal emulator with tiling grid GUI">
+	<meta name="twitter:description" content="godopty-cli # Headless CLI prototype — validates the godopty Rust engine without Godot.
+Usage # # Mock terminals — validates the pub-sub engine with synthetic output cargo run --bin godopty-cli # Real PTYs — validates the full PTY → vte → pub-sub pipeline cargo run --bin godopty-cli -- --pty # Terminal grid — validates alacritty_terminal ANSI processing &#43; color grid cargo run --bin godopty-cli -- --term # Verbose logging RUST_LOG=debug cargo run --bin godopty-cli Demo Descriptions # Mock (default): 3 labelled terminals, 2 concepts (crash_detected, port_conflict). Verifies regex matching, broadcast routing, and label-gated action delivery — no PTY involved. PTY (--pty): Spawns 2 real bash sessions. Injects a trigger command into Terminal 1; verifies that Terminal 2 receives and executes the matching action. Term (--term): Feeds a crafted ANSI string (with SGR colors and formatting) into alacritty_terminal::Term. Prints the resulting grid with ANSI-colored output for visual verification. Concept Definitions # Concepts are built in build_concepts() in main.rs. They use the full Concept struct with enabled, capture_mode, and destinations fields.">
 
   
   
@@ -213,20 +210,30 @@
 
   
   <script type="application/ld+json">
-  {
+  [{
     "@context": "https://schema.org",
-    "@type": "WebSite",
-    "@id": "https://godopty.github.io/godopty/",
-    "name": "godopty",
+    "@type": "Article",
+    "articleSection": "Repoes",
+    "name": "",
+    "headline": "",
     
     "inLanguage": "en-us",
-    "url": "https://godopty.github.io/godopty/",
-    
-    "publisher" : {
+    "url" : "https://godopty.github.io/godopty/repo/crates/godopty-cli/readme/",
+    "author" : {
       "@type": "Person",
       "name": "godopty"
-    }
-  }
+    },
+    
+    
+    
+    
+    
+    
+    
+    
+    "mainEntityOfPage": "https://godopty.github.io/godopty/repo/crates/godopty-cli/readme/",
+    "wordCount": "169"
+  }]
   </script>
 
 
@@ -529,393 +536,258 @@
       <main id="main-content" class="grow">
         
   
+  <article>
+    
+    
+
+    
+    <header id="single_header" class="mt-5 max-w-prose">
+      
+      <h1 class="mt-0 text-4xl font-extrabold text-neutral-900 dark:text-neutral">
+        
+      </h1>
+      <div class="mt-1 mb-6 text-base text-neutral-500 dark:text-neutral-400 print:hidden">
+        
+
+
+
+
+
+  
+  
+
+
+
+  
+
+  
+  
   
     
-<article
-  class="
-    h-full
-   flex flex-col items-center justify-center text-center">
-  <header class="relative px-1 py-1 flex flex-col items-center mb-3">
+  
+
+  
+
+  
     
-    <h1 class="text-4xl font-extrabold">
-      godopty
-    </h1>
+  
+
+  
+
+  
     
-    <div class="mt-1 text-2xl">
+  
+
+  
+    
+  
+
+  
+
+  
+
+  
+
+  
+
+  
+
+
+  <div class="flex flex-row flex-wrap items-center">
+    
+    
+      <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time><span class="px-2 text-primary-500">&middot;</span><span>169 words</span><span class="px-2 text-primary-500">&middot;</span><span title="Reading time">1 min</span>
+    
+
+    
+    
+  </div>
+
+  
+
+  
+  
+
+
+      </div>
+      
+        
+  
+  
+  
+  
+  
+  
+
+  
+
+  
+    
+    
+<div class="flex author">
+  
+  <div class="place-self-center">
+    
+      <div class="text-[0.6rem] uppercase leading-3 text-neutral-500 dark:text-neutral-400">
+        Author
+      </div>
+      <div class="font-semibold leading-6 text-neutral-800 dark:text-neutral-300">
+        godopty
+      </div>
+    
+    
+    <div class="text-2xl sm:text-lg">
+</div>
+  </div>
+</div>
+
+  
+
+  
+
+  
+    <div class="mb-5"></div>
+  
+
+      
+    </header>
+
+    
+    <section class="flex flex-col max-w-full mt-0 prose dark:prose-invert lg:flex-row">
+      
+      
+      
+      
       
 
-    </div>
-  </header>
-  <section class="prose dark:prose-invert w-full">
 
+      <div class="min-w-0 min-h-0 max-w-fit">
+        
 
-  
-<h1 class="relative group">godopty
-    <div id="godopty" class="anchor"></div>
+        <div class="article-content max-w-prose mb-20">
+          
+<h1 class="relative group">godopty-cli
+    <div id="godopty-cli" class="anchor"></div>
     
     <span
         class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#godopty" aria-label="Anchor">#</a>
+        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#godopty-cli" aria-label="Anchor">#</a>
     </span>
     
 </h1>
-<p>godopty (goh-doh-tee), a Godot-based Rust multi-PTY emulator desktop application for creating, expanding, and orchestrating terminal sessions in a grid-based GUI.</p>
+<p>Headless CLI prototype — validates the godopty Rust engine without Godot.</p>
 
-<h2 class="relative group">Overview
-    <div id="overview" class="anchor"></div>
+<h2 class="relative group">Usage
+    <div id="usage" class="anchor"></div>
     
     <span
         class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#overview" aria-label="Anchor">#</a>
+        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#usage" aria-label="Anchor">#</a>
     </span>
     
 </h2>
-<ul>
-<li>Reactive Automation: Rather than acting as a passive text pipe, the terminal reads its own output. The built-in pub-sub engine detects matched patterns and automatically executes actions (fixes, restarts, or notifications) in adjacent panes.</li>
-<li>Unrestricted Aesthetics: Built on Godot to support fluid animations, instant theming, and rich UI overlays without the memory overhead of an embedded browser.</li>
-<li>Zero-Friction Tiling: Managing multiple panes relies on a native graphical grid and drag-and-drop (coming soon) mechanics, bypassing the need to memorize complex keyboard multiplexer bindings.</li>
-<li>Open source, no telemetry, no logins.</li>
-</ul>
-<hr>
-<table>
-	<thead>
-			<tr>
-					<th>Component</th>
-					<th>Choice</th>
-					<th>Rationale</th>
-			</tr>
-	</thead>
-	<tbody>
-			<tr>
-					<td>PTY library</td>
-					<td><code>portable-pty</code></td>
-					<td>Cross-platform (Linux <code>/dev/ptmx</code> + Windows ConPTY) with a single API</td>
-			</tr>
-			<tr>
-					<td>ANSI parsing</td>
-					<td><code>vte</code> crate</td>
-					<td>Fast Rust ANSI state machine</td>
-			</tr>
-			<tr>
-					<td>Async runtime</td>
-					<td><code>tokio</code></td>
-					<td>Native <code>broadcast</code> channel for 1:N pub-sub</td>
-			</tr>
-			<tr>
-					<td>I/O threading</td>
-					<td>Dedicated <code>std::thread</code> per PTY</td>
-					<td>Predictable blocking reads; bridges to tokio via <code>mpsc</code></td>
-			</tr>
-			<tr>
-					<td>Pub-sub</td>
-					<td><code>tokio::sync::broadcast(1024)</code></td>
-					<td>1:N fan-out, lagged-receiver protection, self-reaction prevention</td>
-			</tr>
-			<tr>
-					<td>Grid rendering</td>
-					<td><code>alacritty_terminal</code></td>
-					<td>Full DEC STD 070 grid state machine; pass arrays to Godot <code>_draw()</code></td>
-			</tr>
-			<tr>
-					<td>Godot bridge</td>
-					<td><code>gdext 0.5</code></td>
-					<td>Native GDExtension for Godot 4.7+</td>
-			</tr>
-			<tr>
-					<td>Rust edition</td>
-					<td>2024</td>
-					<td>Requires Rust &gt;= 1.85</td>
-			</tr>
-	</tbody>
-</table>
-<hr>
-
-<h2 class="relative group">Installation
-    <div id="installation" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#installation" aria-label="Anchor">#</a>
-    </span>
-    
-</h2>
-<p>Standalone binaries (no Godot install required) are published on <a href="https://github.com/godopty/godopty/releases"  target="_blank" rel="noreferrer">GitHub Releases</a> for Linux, macOS, and Windows.</p>
-<table>
-	<thead>
-			<tr>
-					<th>Platform</th>
-					<th>Package</th>
-			</tr>
-	</thead>
-	<tbody>
-			<tr>
-					<td>Linux</td>
-					<td><code>godopty-v0.1.0-linux-x86_64.tar.gz</code> — extract and run <code>./godopty</code></td>
-			</tr>
-			<tr>
-					<td>macOS</td>
-					<td><code>godopty-v0.1.0-macos.zip</code> — unzip, right-click the <code>.app</code> → Open</td>
-			</tr>
-			<tr>
-					<td>Windows</td>
-					<td><code>godopty-v0.1.0-windows-x86_64.zip</code> — unzip and run <code>godopty.exe</code></td>
-			</tr>
-	</tbody>
-</table>
-<hr>
-
-<h2 class="relative group">Features
-    <div id="features" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#features" aria-label="Anchor">#</a>
-    </span>
-    
-</h2>
-
-<h3 class="relative group">Terminals
-    <div id="terminals" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#terminals" aria-label="Anchor">#</a>
-    </span>
-    
-</h3>
-<ul>
-<li>Multi-PTY grid with split, kill, and expand operations</li>
-<li>Full DEC STD 070 terminal emulation via <code>alacritty_terminal</code></li>
-<li>Color schemes with configurable palettes (16-color, 256-color, true color)</li>
-<li>Scrollback with regex search (<code>Ctrl+F</code>)</li>
-<li>Wrapped text selection for copy/paste</li>
-<li>Configurable cursor shape, blink, and thickness</li>
-</ul>
-
-<h3 class="relative group">Automation
-    <div id="automation" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#automation" aria-label="Anchor">#</a>
-    </span>
-    
-</h3>
-<ul>
-<li>Concept engine: regex triggers fire actions (command injection or output capture)</li>
-<li>Capture mode routes command output to code viewer panes</li>
-<li>Default concepts shipped; user concepts persisted and editable via settings UI</li>
-<li><code>{payload}</code> and <code>{N}</code> variable substitution in action templates</li>
-</ul>
-
-<h3 class="relative group">UI
-    <div id="ui" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#ui" aria-label="Anchor">#</a>
-    </span>
-    
-</h3>
-<ul>
-<li>Hardware-accelerated Godot renderer with damage tracking</li>
-<li>Tiling grid with nested <code>SplitContainer</code> layout</li>
-<li>Sidebar with pane list, profile management, and quick actions</li>
-<li>Settings panel: fonts, colors, cursor, scroll, concept editor</li>
-<li>Toast notifications (info, warn, error)</li>
-<li>Command palette (<code>Ctrl+P</code>)</li>
-</ul>
-
-<h3 class="relative group">Persistence
-    <div id="persistence" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#persistence" aria-label="Anchor">#</a>
-    </span>
-    
-</h3>
-<ul>
-<li>Settings auto-save/load via <code>user://settings.json</code></li>
-<li>Layout auto-save/restore on startup via <code>user://layout.json</code></li>
-<li>Named profile snapshots via <code>user://profiles.json</code></li>
-<li>Scrollback history stored in SQLite</li>
-</ul>
-
-<h3 class="relative group">Pane Types
-    <div id="pane-types" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#pane-types" aria-label="Anchor">#</a>
-    </span>
-    
-</h3>
-<ul>
-<li>Terminal — PTY-backed shell sessions</li>
-<li>Code Viewer — read-only <code>CodeEdit</code> display, receives concept captures</li>
-<li>File Tree — directory listing via <code>DirAccess</code></li>
-<li>Observer — display-only pane for monitoring output</li>
-</ul>
-<p>See <a href="CHANGELOG.md" >CHANGELOG.md</a> for version history and <a href="ROADMAP.md" >ROADMAP.md</a> for planned features.</p>
-<hr>
-
-<h2 class="relative group">Development Setup
-    <div id="development-setup" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#development-setup" aria-label="Anchor">#</a>
-    </span>
-    
-</h2>
-
-<h3 class="relative group">Prerequisites
-    <div id="prerequisites" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#prerequisites" aria-label="Anchor">#</a>
-    </span>
-    
-</h3>
-<ul>
-<li>Rust &gt;= 1.85 (currently being developed on 1.96.0)</li>
-<li>Linux (primary target) or Windows 11 (ConPTY supported via <code>portable-pty</code>)</li>
-<li>Godot 4.4+ (currently being developed on 4.7) with GDExtension support</li>
-</ul>
-
-<h3 class="relative group">Development Command Reference
-    <div id="development-command-reference" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#development-command-reference" aria-label="Anchor">#</a>
-    </span>
-    
-</h3>
-<div class="highlight-wrapper"><div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e"># Clone</span>
-</span></span><span style="display:flex;"><span>git clone https://github.com/godopty/godopty.git godopty
-</span></span><span style="display:flex;"><span>cd godopty
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Build</span>
-</span></span><span style="display:flex;"><span>cargo build
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Rust tests</span>
-</span></span><span style="display:flex;"><span>cargo test --workspace
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Rust checks</span>
-</span></span><span style="display:flex;"><span>cargo check
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Godot tests</span>
-</span></span><span style="display:flex;"><span>godot --headless --path godot --import
-</span></span><span style="display:flex;"><span>godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir<span style="color:#f92672">=</span>res://tests/unit -gdir<span style="color:#f92672">=</span>res://tests/integration
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Mock terminal demo (demonstrates pub-sub engine)</span>
+<div class="highlight-wrapper"><div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e"># Mock terminals — validates the pub-sub engine with synthetic output</span>
 </span></span><span style="display:flex;"><span>cargo run --bin godopty-cli
 </span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Real-PTY demo (requires Linux or Windows 11)</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># Real PTYs — validates the full PTY → vte → pub-sub pipeline</span>
 </span></span><span style="display:flex;"><span>cargo run --bin godopty-cli -- --pty
 </span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Terminal grid demo (validates alacritty_terminal ANSI + color processing)</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># Terminal grid — validates alacritty_terminal ANSI processing + color grid</span>
 </span></span><span style="display:flex;"><span>cargo run --bin godopty-cli -- --term
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Build the GDExtension</span>
-</span></span><span style="display:flex;"><span>cargo build -p godopty-gdext
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Release build + local export</span>
-</span></span><span style="display:flex;"><span>cargo build -p godopty-gdext --release
-</span></span><span style="display:flex;"><span>cp target/release/libgodopty_gdext.so godot/bin/libgodopty_gdext.linux.x86_64.so
-</span></span><span style="display:flex;"><span>godot --headless --path godot --export-release <span style="color:#e6db74">&#34;Linux/X11&#34;</span> dist/godopty
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Open in Godot editor</span>
-</span></span><span style="display:flex;"><span>cd godot <span style="color:#f92672">&amp;&amp;</span> godot -e
 </span></span><span style="display:flex;"><span>
 </span></span><span style="display:flex;"><span><span style="color:#75715e"># Verbose logging</span>
 </span></span><span style="display:flex;"><span>RUST_LOG<span style="color:#f92672">=</span>debug cargo run --bin godopty-cli</span></span></code></pre></div></div>
 
-<h2 class="relative group">Concept System
-    <div id="concept-system" class="anchor"></div>
+<h2 class="relative group">Demo Descriptions
+    <div id="demo-descriptions" class="anchor"></div>
     
     <span
         class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#concept-system" aria-label="Anchor">#</a>
+        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#demo-descriptions" aria-label="Anchor">#</a>
     </span>
     
 </h2>
-<p>Concepts are the core orchestration primitive: a regular expression trigger paired with labelled actions.</p>
-<div class="highlight-wrapper"><div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-rust" data-lang="rust"><span style="display:flex;"><span>Concept {
-</span></span><span style="display:flex;"><span>    name: <span style="color:#e6db74">&#34;port_conflict&#34;</span>,
-</span></span><span style="display:flex;"><span>    trigger_regex: <span style="color:#a6e22e">Regex</span>::new(<span style="color:#e6db74">r</span><span style="color:#e6db74">&#34;(?i)address.*already.*in\s*use&#34;</span>).unwrap(),
-</span></span><span style="display:flex;"><span>    destinations: <span style="color:#a6e22e">vec</span><span style="color:#f92672">!</span>[Action {
-</span></span><span style="display:flex;"><span>        command_template: <span style="color:#e6db74">&#34;echo &#39;[Auto] Port conflict detected - consider lsof -i&#39;&#34;</span>,
-</span></span><span style="display:flex;"><span>        target_label: <span style="color:#e6db74">&#34;observer&#34;</span>,
-</span></span><span style="display:flex;"><span>    }],
-</span></span><span style="display:flex;"><span>}</span></span></code></pre></div></div>
-<p>How it works:</p>
-<ol>
-<li>PTY output bytes stream through the <code>vte</code> parser</li>
-<li>The parser strips ANSI escape sequences and extracts visible text lines</li>
-<li>Each line is tested against every registered concept&rsquo;s <code>trigger_regex</code></li>
-<li>On match, an <code>Event</code> is broadcast on the <code>tokio::sync::broadcast</code> channel</li>
-<li>Every terminal task receives the event, checks its labels against each action&rsquo;s <code>target_label</code></li>
-<li>Matching terminals inject the <code>command_template</code> into their PTY&rsquo;s stdin</li>
-</ol>
-<p>Self-reaction loops are prevented: a terminal ignores events where <code>source_pane == my_id</code>.</p>
-<p>Security Warning: The Concept Engine is designed to execute commands automatically based on terminal output. Do not bind destructive or high-privilege actions (like <code>rm</code> or <code>sudo</code>) to easily spoofable regex triggers. An attacker could intentionally print matching text to trick your terminal into executing the action payload.</p>
-
-<h3 class="relative group">Use Cases
-    <div id="use-cases" class="anchor"></div>
-    
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#use-cases" aria-label="Anchor">#</a>
-    </span>
-    
-</h3>
 <ul>
-<li>Auto-Restarting Watchers: Detect a segmentation fault or panic string in a backend server pane, and automatically inject a restart command into an adjacent management pane.</li>
-<li>Port Conflict Resolution: Detect an &ldquo;Address already in use&rdquo; error and immediately run an <code>lsof</code> or <code>kill</code> command to clear the bound port.</li>
-<li>AI Observer: Pipe error blocks (such as a Python traceback or Rust compiler error) to a local language model, displaying a plain-English explanation and a proposed fix in a secondary pane.</li>
-<li>Automated Documentation: Match specific compiler error codes and automatically open the relevant local or web documentation in an adjacent window.</li>
+<li>Mock (<code>default</code>): 3 labelled terminals, 2 concepts (<code>crash_detected</code>, <code>port_conflict</code>). Verifies regex matching, broadcast routing, and label-gated action delivery — no PTY involved.</li>
+<li>PTY (<code>--pty</code>): Spawns 2 real bash sessions. Injects a trigger command into Terminal 1; verifies that Terminal 2 receives and executes the matching action.</li>
+<li>Term (<code>--term</code>): Feeds a crafted ANSI string (with SGR colors and formatting) into <code>alacritty_terminal::Term</code>. Prints the resulting grid with ANSI-colored output for visual verification.</li>
 </ul>
-<hr>
 
-<h2 class="relative group">Contributing
-    <div id="contributing" class="anchor"></div>
+<h2 class="relative group">Concept Definitions
+    <div id="concept-definitions" class="anchor"></div>
     
     <span
         class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#contributing" aria-label="Anchor">#</a>
+        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#concept-definitions" aria-label="Anchor">#</a>
     </span>
     
 </h2>
-<p>See <a href="CONTRIBUTING.md" >CONTRIBUTING.md</a> for setup instructions, code style, and the pull request process.</p>
-<hr>
+<p>Concepts are built in <code>build_concepts()</code> in <code>main.rs</code>. They use the full <code>Concept</code> struct with <code>enabled</code>, <code>capture_mode</code>, and <code>destinations</code> fields.</p>
 
-<h2 class="relative group">License
-    <div id="license" class="anchor"></div>
+          
+          
+          
+        </div>
+        
+        
+
+        
+
+        
+
+      </div>
+    </section>
+
     
-    <span
-        class="absolute top-0 w-6 transition-opacity opacity-0 -start-6 not-prose group-hover:opacity-100 select-none">
-        <a class="text-primary-300 dark:text-neutral-700 !no-underline" href="#license" aria-label="Anchor">#</a>
-    </span>
+    <footer class="pt-8 max-w-prose print:hidden">
+      
+  
     
-</h2>
-<p>This project is licensed under the Apache License, Version 2.0 &ndash; see <a href="LICENSE" >LICENSE</a> for details.</p>
-
-
-
-</section>
-</article>
-<section>
+    
+    
+    <div class="pt-8">
+      <hr class="border-dotted border-neutral-300 dark:border-neutral-600">
+      <div class="flex justify-between pt-3">
+        <span class="flex flex-col">
+          
+            <a
+              class="flex text-neutral-700 hover:text-primary-600 dark:text-neutral dark:hover:text-primary-400"
+              href="/godopty/repo/crates/godopty-core/readme/">
+              <span class="leading-6">
+                <span class="inline-block rtl:rotate-180">&larr;</span>&ensp;
+              </span>
+            </a>
+            
+              <span class="ms-6 mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time>
+              </span>
+            
+          
+        </span>
+        <span class="flex flex-col items-end">
+          
+            <a
+              class="flex text-right text-neutral-700 hover:text-primary-600 dark:text-neutral dark:hover:text-primary-400"
+              href="/godopty/repo/changelog/">
+              <span class="leading-6">
+                &ensp;<span class="inline-block rtl:rotate-180">&rarr;</span>
+              </span>
+            </a>
+            
+              <span class="me-6 mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time>
+              </span>
+            
+          
+        </span>
+      </div>
+    </div>
   
 
 
-
-</section>
-
-  
+      
+    </footer>
+  </article>
 
         
 

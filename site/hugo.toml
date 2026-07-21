@@ -10,6 +10,10 @@ publishDir = "../docs"
   defaultTheme = "dark"
   showCopyright = true
   showBreadcrumbs = true
+  [params.list]
+    showBreadcrumbs = false
+  [params.homepage]
+    showRecent = false
 
 [[menu.main]]
   name = "Docs"
