@@ -15,8 +15,8 @@
 
   
   
-    <title>Agents &middot; godopty</title>
-    <meta name="title" content="Agents &middot; godopty">
+    <title> &middot; godopty</title>
+    <meta name="title" content=" &middot; godopty">
   
 
   
@@ -47,7 +47,7 @@
   
   <meta property="og:url" content="https://godopty.github.io/godopty/docs/agents/">
 	<meta property="og:site_name" content="godopty">
-	<meta property="og:title" content="Agents">
+	<meta property="og:title" content="godopty">
 	<meta property="og:description" content="godopty — Agent Guide # Rust &#43; Godot multi-PTY terminal emulator with a tiling grid GUI.
 Project # Stack: Rust (edition 2024) backend &#43; Godot (4.7) GDScript frontend via gdext (0.5) Entry point: godot/scenes/main.tscn → workspace.gd (root Control node) godopty/ ├── Cargo.toml # Workspace root ├── AGENTS.md ├── LICENSE ├── crates/ │ ├── godopty-core/ # Library: PTY, ANSI, grid, concepts, pub-sub │ │ └── src/ │ │ ├── lib.rs # Module map &#43; data-flow diagram │ │ ├── types.rs # Concept, Event, Action, CaptureMode, CapturedOutput │ │ ├── concept.rs # Regex matching &#43; label routing (pure fns) │ │ ├── engine.rs # WorkspaceEngine, capture state machine, SpawnedTerminal │ │ ├── pty.rs # portable-pty spawn &#43; dedicated I/O thread │ │ ├── parser.rs # vte → plain-text LineParser │ │ ├── term.rs # alacritty_terminal grid &#43; CellInfo &#43; damage tracking │ │ ├── color.rs # ANSI color → RGB │ │ ├── keymap.rs # Key event → byte sequence │ │ └── history.rs # SQLite scrollback store │ ├── godopty-cli/ # CLI demos (mock, --pty, --term) │ │ └── src/main.rs │ └── godopty-gdext/ # GDExtension cdylib: GodoptyTerminal GodotClass │ └── src/lib.rs └── godot/ # Godot 4.7 project ├── project.godot ├── godopty.gdextension ├── concepts.default.json # Shipped default concepts ├── fonts/ # DejaVu Sans Mono &#43; Phosphor icons └── scenes/ ├── main.tscn ├── autoloads/ # Singleton managers │ ├── base_persistence_manager.gd │ ├── settings_manager.gd │ ├── profile_manager.gd │ ├── concept_manager.gd │ ├── layout_manager.gd │ ├── focus_manager.gd │ ├── toast_manager.gd │ ├── shortcut_manager.gd │ └── update_checker.gd ├── terminal/ │ ├── workspace.gd # Root controller, concept routing, profile restore │ ├── terminal_pane.gd # Control-based renderer, keyboard, selection │ └── terminal_manager.gd # Tile lifecycle, split/kill/swap/spawn ├── ui/ │ ├── sidebar.gd │ ├── settings_panel.gd │ ├── toast_overlay.gd │ └── icons.gd # Phosphor icon constants └── panes/ ├── pane_body.gd # Base class ├── code_viewer.gd ├── file_tree.gd └── observer_pane.gd Commands # # Build the GDExtension shared library cargo build -p godopty-gdext # Copy to the Godot project for local development cp target/debug/libgodopty_gdext.so godot/bin/libgodopty_gdext.linux.x86_64.so # Run all Rust tests (across core, gdext, cli) cargo test --workspace # Type-check Rust only (fast, no codegen) cargo check # Run all GDScript tests (unit &#43; integration, headless) godot --headless --path godot --import godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration # CLI demos (no Godot needed) cargo run --bin godopty-cli # mock pub-sub cargo run --bin godopty-cli -- --pty # real PTY cargo run --bin godopty-cli -- --term # alacritty_terminal grid # Open in Godot editor (after building gdext) cd godot &amp;&amp; godot -e Data flow # Shell → PTY I/O thread → vte parser → alacritty_terminal grid → Arc&lt;Mutex&lt;TermGrid&gt;&gt; → GodoptyTerminal (gdext) → GDScript _draw() Testing # Rust # cargo test --workspace # Tests across core, gdext, cli cargo test -p godopty-core # core library only GDScript (GUT) # Tests live in godot/tests/ — unit/ for pure-logic classes, integration/ for scene-tree tests. cargo test –workspace # Tests across core, gdext, cli cargo test -p godopty-core # core library only godot –headless –path godot –import # required before first run godot –headless –path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration">
 	<meta property="og:locale" content="en_us">
@@ -56,7 +56,7 @@ Project # Stack: Rust (edition 2024) backend &#43; Godot (4.7) GDScript frontend
 
   
 	<meta name="twitter:card" content="summary">
-	<meta name="twitter:title" content="Agents">
+	<meta name="twitter:title" content="godopty">
 	<meta name="twitter:description" content="godopty — Agent Guide # Rust &#43; Godot multi-PTY terminal emulator with a tiling grid GUI.
 Project # Stack: Rust (edition 2024) backend &#43; Godot (4.7) GDScript frontend via gdext (0.5) Entry point: godot/scenes/main.tscn → workspace.gd (root Control node) godopty/ ├── Cargo.toml # Workspace root ├── AGENTS.md ├── LICENSE ├── crates/ │ ├── godopty-core/ # Library: PTY, ANSI, grid, concepts, pub-sub │ │ └── src/ │ │ ├── lib.rs # Module map &#43; data-flow diagram │ │ ├── types.rs # Concept, Event, Action, CaptureMode, CapturedOutput │ │ ├── concept.rs # Regex matching &#43; label routing (pure fns) │ │ ├── engine.rs # WorkspaceEngine, capture state machine, SpawnedTerminal │ │ ├── pty.rs # portable-pty spawn &#43; dedicated I/O thread │ │ ├── parser.rs # vte → plain-text LineParser │ │ ├── term.rs # alacritty_terminal grid &#43; CellInfo &#43; damage tracking │ │ ├── color.rs # ANSI color → RGB │ │ ├── keymap.rs # Key event → byte sequence │ │ └── history.rs # SQLite scrollback store │ ├── godopty-cli/ # CLI demos (mock, --pty, --term) │ │ └── src/main.rs │ └── godopty-gdext/ # GDExtension cdylib: GodoptyTerminal GodotClass │ └── src/lib.rs └── godot/ # Godot 4.7 project ├── project.godot ├── godopty.gdextension ├── concepts.default.json # Shipped default concepts ├── fonts/ # DejaVu Sans Mono &#43; Phosphor icons └── scenes/ ├── main.tscn ├── autoloads/ # Singleton managers │ ├── base_persistence_manager.gd │ ├── settings_manager.gd │ ├── profile_manager.gd │ ├── concept_manager.gd │ ├── layout_manager.gd │ ├── focus_manager.gd │ ├── toast_manager.gd │ ├── shortcut_manager.gd │ └── update_checker.gd ├── terminal/ │ ├── workspace.gd # Root controller, concept routing, profile restore │ ├── terminal_pane.gd # Control-based renderer, keyboard, selection │ └── terminal_manager.gd # Tile lifecycle, split/kill/swap/spawn ├── ui/ │ ├── sidebar.gd │ ├── settings_panel.gd │ ├── toast_overlay.gd │ └── icons.gd # Phosphor icon constants └── panes/ ├── pane_body.gd # Base class ├── code_viewer.gd ├── file_tree.gd └── observer_pane.gd Commands # # Build the GDExtension shared library cargo build -p godopty-gdext # Copy to the Godot project for local development cp target/debug/libgodopty_gdext.so godot/bin/libgodopty_gdext.linux.x86_64.so # Run all Rust tests (across core, gdext, cli) cargo test --workspace # Type-check Rust only (fast, no codegen) cargo check # Run all GDScript tests (unit &#43; integration, headless) godot --headless --path godot --import godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration # CLI demos (no Godot needed) cargo run --bin godopty-cli # mock pub-sub cargo run --bin godopty-cli -- --pty # real PTY cargo run --bin godopty-cli -- --term # alacritty_terminal grid # Open in Godot editor (after building gdext) cd godot &amp;&amp; godot -e Data flow # Shell → PTY I/O thread → vte parser → alacritty_terminal grid → Arc&lt;Mutex&lt;TermGrid&gt;&gt; → GodoptyTerminal (gdext) → GDScript _draw() Testing # Rust # cargo test --workspace # Tests across core, gdext, cli cargo test -p godopty-core # core library only GDScript (GUT) # Tests live in godot/tests/ — unit/ for pure-logic classes, integration/ for scene-tree tests. cargo test –workspace # Tests across core, gdext, cli cargo test -p godopty-core # core library only godot –headless –path godot –import # required before first run godot –headless –path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration">
 
@@ -96,6 +96,8 @@ Project # Stack: Rust (edition 2024) backend &#43; Godot (4.7) GDScript frontend
   
   
   
+    
+  
   
     
   
@@ -103,8 +105,8 @@ Project # Stack: Rust (edition 2024) backend &#43; Godot (4.7) GDScript frontend
   <link
     type="text/css"
     rel="stylesheet"
-    href="/godopty/css/main.bundle.min.8b635699ff201db155d7e239930418611b7de415f50e04c952a897ef057a60acc1a135b3379030909274ceb51225168bdc21ee027c91668514f7a6bb5066d9b6.css"
-    integrity="sha512-i2NWmf8gHbFV1&#43;I5kwQYYRt95BX1DgTJUqiX7wV6YKzBoTWzN5AwkJJ0zrUSJRaL3CHuAnyRZoUU96a7UGbZtg==">
+    href="/godopty/css/main.bundle.min.a4c597d38925df90fbd3e86c12fc62c0abb94a5376de20e89befb63ac95fccbf1c2db522fbdc3e0f8120ffd3b8a6888684c456eed46e3177d259a3900f9874bc.css"
+    integrity="sha512-pMWX04kl35D70&#43;hsEvxiwKu5SlN23iDom&#43;&#43;2OslfzL8cLbUi&#43;9w&#43;D4Eg/9O4poiGhMRW7tRuMXfSWaOQD5h0vA==">
 
   
   
@@ -214,8 +216,8 @@ Project # Stack: Rust (edition 2024) backend &#43; Godot (4.7) GDScript frontend
     "@context": "https://schema.org",
     "@type": "Article",
     "articleSection": "Documentation",
-    "name": "Agents",
-    "headline": "Agents",
+    "name": "",
+    "headline": "",
     
     "inLanguage": "en-us",
     "url" : "https://godopty.github.io/godopty/docs/agents/",
@@ -544,7 +546,7 @@ Project # Stack: Rust (edition 2024) backend &#43; Godot (4.7) GDScript frontend
     <header id="single_header" class="mt-5 max-w-prose">
       
       <h1 class="mt-0 text-4xl font-extrabold text-neutral-900 dark:text-neutral">
-        Agents
+        
       </h1>
       <div class="mt-1 mb-6 text-base text-neutral-500 dark:text-neutral-400 print:hidden">
         
@@ -948,7 +950,7 @@ godot &ndash;headless &ndash;path godot -s addons/gut/gut_cmdln.gd -d <br>
               class="flex text-neutral-700 hover:text-primary-600 dark:text-neutral dark:hover:text-primary-400"
               href="/godopty/docs/changelog/">
               <span class="leading-6">
-                <span class="inline-block rtl:rotate-180">&larr;</span>&ensp;Changelog
+                <span class="inline-block rtl:rotate-180">&larr;</span>&ensp;
               </span>
             </a>
             
