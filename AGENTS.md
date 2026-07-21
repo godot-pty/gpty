@@ -4,8 +4,8 @@ Rust + Godot multi-PTY terminal emulator with a tiling grid GUI.
 
 ## Project
 
-- Stack: Rust (edition 2024) backend + Godot (4.7) GDScript frontend via `gdext` (0.5)
-- Entry point: `godot/scenes/main.tscn` → `workspace.gd` (root Control node)
+- Stack: Rust (edition 2024) backend + Godot (4.7) with a GDScript frontend via `gdext` (0.5)
+- Entry point: `godot/scenes/main.tscn` → `workspace.gd` (root `Control` node)
 
 ```
 godopty/
@@ -70,15 +70,8 @@ cargo build -p godopty-gdext
 # Copy to the Godot project for local development
 cp target/debug/libgodopty_gdext.so godot/bin/libgodopty_gdext.linux.x86_64.so
 
-# Run all Rust tests (across core, gdext, cli)
-cargo test --workspace
-
 # Type-check Rust only (fast, no codegen)
 cargo check
-
-# Run all GDScript tests (unit + integration, headless)
-godot --headless --path godot --import
-godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration
 
 # CLI demos (no Godot needed)
 cargo run --bin godopty-cli              # mock pub-sub
@@ -106,6 +99,7 @@ cargo test -p godopty-core      # core library only
 
 ### GDScript (GUT)
 
+```bash
 godot --headless --path godot --import         # required before first run
 godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
   -gdir=res://tests/unit -gdir=res://tests/integration
@@ -120,14 +114,22 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 
 ## Conventions
 
+### Rust
+- Edition: 2024 (requires Rust ≥ 1.85)
+- Format: standard `rustfmt`
+- Async runtime: `tokio` (global `LazyLock` runtime in gdext)
+- Grid sharing: `Arc<Mutex<TermGrid>>` — lock briefly, clone the grid, release
+- Thread Safety: Godot's SceneTree is strictly single-threaded. NEVER call Godot methods, mutate nodes, or emit signals directly from background `tokio` threads. Instead, queue the state changes for GDScript to poll, or use Godot's thread-safe `call_deferred()`.
+- Lifecycle & Teardown: When a `GodoptyTerminal` is destroyed (e.g., `queue_free()` in Godot), the Rust side MUST ensure the spawned shell and background `tokio` tasks are cleanly terminated (via the `Drop` trait) to prevent zombie processes or memory leaks.
+
 ### GDScript
 - Indentation: tabs
-- Icons: ALL UI icon glyphs live in `icons.gd` as `const` strings sourced from Phosphor Regular (MIT). Each constant maps to a BMP PUA codepoint via `\uXXXX`. Adding a new icon: pick from [Phosphor](https://phosphoricons.com), get the codepoint from `@phosphor-icons/core`, add a `const` to `icons.gd`. Changing the glyph for every instance: one edit. To make icon buttons render correctly, call `Icons.style_button(btn)` after setting `btn.text = Icons.<X>`.
+- Icons: All glyphs live in `icons.gd` as `const` strings (Phosphor Regular PUA codepoints via `\uXXXX`). To add: pick from phosphoricons.com, get the codepoint, add a `const`. Call `Icons.style_button(btn)` after setting `btn.text`.
 - Profiles: named terminal-layout snapshots (`user://profiles.json`). `ProfileManager` autoload manages CRUD + `profiles_changed` signal. Save dialog is built inline in `workspace.gd` (not a separate scene). Profile activation clears the workspace (`_reset()`) then rebuilds tiles — follows `_do_restore()` pattern.
 - JSON → typed arrays: `JSON.parse()` returns untyped `Array`. Assignment to `Array[Dictionary]` fails at runtime. Always iterate and build the typed array element-by-element: `for item in raw: if item is Dictionary: typed.append(item)`.
 - Private members: underscore prefix (`_cell_w`, `_settings_panel`)
 - Config vars: `_cfg_` prefix (`_cfg_cursor_shape`)
-- Persistence: All persistent user data follows the same autoload pattern. Each manager extends `BasePersistenceManager`, which provides `_read_file(path)` / `_write_file(path, data)` and sets `PROCESS_MODE_ALWAYS`. Subclasses override `_on_init()` instead of `_ready()`. Four managers: `SettingsManager`, `ProfileManager`, `ConceptManager`, `LayoutManager`. Never inline `FileAccess.open()` in UI code — go through `_read_file`/`_write_file`.
+- Persistence: Managers extend `BasePersistenceManager` — provides `_read_file(path)` / `_write_file(path, data)`, sets `PROCESS_MODE_ALWAYS`. Subclasses override `_on_init()` instead of `_ready()`. Never inline `FileAccess.open()` — use `_read_file`/`_write_file`.
 - Directory layout: Scripts are grouped by role: `autoloads/` (7 managers + 1 base), `terminal/` (core terminal), `ui/` (sidebar, settings, toast), `panes/` (specialty pane types). `project.godot` autoload paths and `preload()`/`load()` calls use the full `res://scenes/<dir>/<file>.gd` path.
 - Settings pipeline: `_cfg_*` → `_save_settings()` → `user://settings.json`. To add a new setting: (1) add `_cfg_` var, (2) add UI control, (3) add one line to `_apply_settings_to()`. `_build_wrapper()` calls it automatically — no other wiring needed.
 - Terminal spawning: `_build_wrapper()` is the sole entry point; all paths go through it
@@ -136,19 +138,15 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 
 ### Concept Capture System
 - Two capture modes: `SingleLine` (broadcast Event for command injection) and `UntilStop { stop_timeout_ms, stop_on_input }` (buffer output until timeout or user input).
-- Capture lifecycle: On concept match → pending capture (deferred one chunk to avoid Tab completion noise) → confirmed on next non-prompt chunk → buffer raw bytes (NOT fed to grid) → timeout fires or user types → `finalize_capture()` → `CapturedOutput` pushed to per-terminal queue → GDScript drains via `drain_concept_events()`.
+- Capture lifecycle:
+  - Match: Concept triggers → pending capture deferred one chunk (avoids Tab noise).
+  - Buffer: Confirmed on next non-prompt chunk; raw bytes held, grid suppressed.
+  - Finalize: Timeout or user input → `finalize_capture()` → `CapturedOutput` queued.
+  - Drain: GDScript polls via `drain_concept_events()`.
 - Grid suppression via buffering: During capture, raw `Vec<u8>` chunks are held in `capture_buffer`. Grid is never fed. On `acknowledge_capture` (receiver found), bytes discarded except trailing prompt (after last `\n`). On `flush_capture` (no receiver), all bytes replayed to grid.
 - Prompt restoration: Shell prompts lack trailing `\n` so `LineParser` never emits them. On acknowledge, raw bytes after last `\n` are extracted and fed to grid with `\r\n` prefix for correct cursor positioning.
 - Default concepts: Shipped in `godot/concepts.default.json`. `ConceptManager._merge_concepts()` deep-merges defaults + user concepts (user keys overlay default keys). Trigger migration updates old regex patterns to new ones.
 - Concept event routing: `workspace.gd._process()` polls all terminal panes, drains events, routes to receiver pane by `_pane_type()`. No receiver → toast + flush.
-
-### Rust
-- Edition: 2024 (requires Rust ≥ 1.85)
-- Format: standard `rustfmt`
-- Async runtime: `tokio` (global `LazyLock` runtime in gdext)
-- Grid sharing: `Arc<Mutex<TermGrid>>` — lock briefly, clone the grid, release
-- Thread Safety: Godot's SceneTree is strictly single-threaded. NEVER call Godot methods, mutate nodes, or emit signals directly from background `tokio` threads. Instead, queue the state changes for GDScript to poll, or use Godot's thread-safe `call_deferred()`.
-- Lifecycle & Teardown: When a `GodoptyTerminal` is destroyed (e.g., `queue_free()` in Godot), the Rust side MUST ensure the spawned shell and background `tokio` tasks are cleanly terminated (via the `Drop` trait) to prevent zombie processes or memory leaks.
 
 ### Security
 - Concept Engine ReDoS: The `godopty-core` crate MUST always use the standard Rust `regex` crate. PCRE or back-tracking engines are strictly prohibited to prevent ReDoS (Regex Denial of Service) attacks when parsing large amounts of terminal output.
@@ -173,19 +171,18 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 - `tokio::time::Instant::now() + Duration::MAX` panics: The addition overflows. Use a safe large constant like `Duration::from_secs(86400 * 365)` (1 year) for inactive timeout sleeps.
 - `tokio::pin!` + `reset()` for capture timeouts: Use `tokio::pin!(sleep)` and `sleep.as_mut().reset(deadline)` to re-arm a timeout without recreating it each iteration. One `select!` branch, no code duplication.
 - `continue` in `for` does not skip trailing code: A `continue` inside a `for` loop only skips the current iteration — code BELOW the loop still executes. Use `break` + a boolean flag to conditionally skip post-loop grid feeding.
-- Concept regex on PTY output vs. stdin: Command-detection concepts (like `cat`) must match on user input (Enter produces `StdinInput::Line`), not terminal output (which includes echoed characters, prompts, and shell noise). Tab completion never produces `StdinInput::Line`. Not yet implemented — current approach uses pending capture with `chunk_ends_with_prompt` detection.
-- Shell prompt has no trailing `\n`: `LineParser::feed()` only returns completed lines. Prompts like `$ ` remain buffered internally. To extract the prompt from raw bytes, scan for the last `\n` and take everything after it.
-- Tab completion triggers concept matches: When bash shows autocomplete candidates, it reprints the prompt and partial command. This reprinted line has no trailing `\n`, so `LineParser` never emits it. The concept matches the original command line, and the reprint arrives in the next chunk. Use `chunk_ends_with_prompt()` to scan raw bytes for `$ ` / `# ` / `> ` and cancel the pending capture.
-- Tab completion triggers concept matches: When bash shows autocomplete candidates, it reprints the prompt and partial command. This reprinted line has no trailing `\n`, so `LineParser` never emits it. The concept matches the original command line, and the reprint arrives in the next chunk. Use `chunk_ends_with_prompt()` to scan raw bytes for `$ ` / `# ` / `> ` and cancel capture. Alternatively, match `UntilStop` concepts on `StdinInput::Line` (user input) to avoid PTY output noise entirely.
-- GDScript `///` comments: GDScript uses `#` or `##` for comments. Rust-style `///` causes a parse error. Always use `##` for doc comments in GDScript.
-- Edit tool on structured formats (YAML, TOML, Markdown frontmatter): the line-based `edit` tool can corrupt delimiter-sensitive files (YAML `---` blocks, TOML `[sections]`, frontmatter bounds). When editing config files, workflow YAML, or Hugo content, prefer `eval` with Python (`yaml.safe_load`, `tomllib`) to parse → modify → serialize. Reserve `edit` for Rust, GDScript, and plain Markdown where line semantics hold.
+- Concept regex on PTY output vs. stdin: `UntilStop` concepts match on `StdinInput::Line` (user presses Enter), avoiding Tab completion noise, command echo, and shell output entirely. `SingleLine` concepts match on PTY output via `concept.rs`. Tab completion never produces `StdinInput::Line`.
+- Tab completion triggers concept matches: Bash reprints the prompt and partial command when showing autocomplete candidates. This reprinted line has no trailing `\n`, so `LineParser` never emits it — but a `SingleLine` concept matching on PTY output would fire on the original command, then the reprint cancels the pending capture. `UntilStop` concepts matching on `StdinInput::Line` (see above) avoid this entirely since Tab never produces a `Line` event.
 - Raw-byte buffering for grid replay: Never buffer parsed lines for later grid replay — the alacritty_terminal ANSI state machine needs raw bytes with escape sequences intact. Buffer `Vec<Vec<u8>>` (chunks), replay with `feed_grid(board, chunk)`.
 - Rendering Performance: GDScript `_draw` is slow when calling `draw_rect`/`draw_string` character-by-character. Avoid generating heavy data structures (like `Dictionary`) per-cell across the FFI boundary. Prefer packing data into flat arrays (`PackedByteArray`, `PackedInt32Array`) in Rust, and batch rendering operations line-by-line in Godot.
 - Resize Rate Limiting: Firing SIGWINCH heavily on every frame during window drag will overwhelm the child PTY process. Always debounce or rate-limit terminal `_on_resize` events before passing them to the backend.
 
+### Agent Tool Notes
+- GDScript `///` comments: GDScript uses `#` or `##` for comments. Rust-style `///` causes a parse error. Always use `##` for doc comments in GDScript.
+- Edit tool on structured formats (YAML, TOML, Markdown frontmatter): the line-based `edit` tool can corrupt delimiter-sensitive files (YAML `---` blocks, TOML `[sections]`, frontmatter bounds). When editing config files, workflow YAML, or Hugo content, prefer `eval` with Python (`yaml.safe_load`, `tomllib`) to parse → modify → serialize. Reserve `edit` for Rust, GDScript, and plain Markdown where line semantics hold.
+
 ## Notes
 
-- The ESC key handler on the settings panel exists but `gui_input` never receives the event (see README roadmap).
 - `terminal_pane.gd` is the sole renderer (Control-based); the legacy Node2D `terminal.gd` was removed.
 - Font-size changes now auto-recalculate cell metrics via a setter on `font_size` — no need to recreate terminals.
 - The global tokio runtime is initialized once at GDExtension init and shared across all GodoptyTerminal nodes.
