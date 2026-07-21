@@ -1,0 +1,10 @@
+baseURL = "https://godopty.github.io/godopty/"
+theme = "blowfish"
+publishDir = "../docs"
+
+enableRobotsTXT = true
+summaryLength = 0
+pagination.pagerSize = 10
+
+[outputs]
+  home = ["HTML", "RSS", "JSON"]

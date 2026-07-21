@@ -1,6 +1,6 @@
 <!doctype html>
 <html
-  lang="en-us"
+  lang="en-US"
   dir="ltr"
   class="scroll-smooth"
   data-default-appearance="light"
@@ -48,17 +48,19 @@
   <meta property="og:url" content="https://godopty.github.io/godopty/docs/agents/">
 	<meta property="og:site_name" content="godopty">
 	<meta property="og:title" content="Agent Guide">
-	<meta property="og:description" content="godopty — Agent Guide # Rust &#43; Godot multi-PTY terminal emulator with a tiling grid GUI.
-Project # Stack: Rust (edition 2024) backend &#43; Godot (4.7) GDScript frontend via gdext (0.5) Entry point: godot/scenes/main.tscn → workspace.gd (root Control node) godopty/ ├── Cargo.toml # Workspace root ├── AGENTS.md ├── LICENSE ├── crates/ │ ├── godopty-core/ # Library: PTY, ANSI, grid, concepts, pub-sub │ │ └── src/ │ │ ├── lib.rs # Module map &#43; data-flow diagram │ │ ├── types.rs # Concept, Event, Action, CaptureMode, CapturedOutput │ │ ├── concept.rs # Regex matching &#43; label routing (pure fns) │ │ ├── engine.rs # WorkspaceEngine, capture state machine, SpawnedTerminal │ │ ├── pty.rs # portable-pty spawn &#43; dedicated I/O thread │ │ ├── parser.rs # vte → plain-text LineParser │ │ ├── term.rs # alacritty_terminal grid &#43; CellInfo &#43; damage tracking │ │ ├── color.rs # ANSI color → RGB │ │ ├── keymap.rs # Key event → byte sequence │ │ └── history.rs # SQLite scrollback store │ ├── godopty-cli/ # CLI demos (mock, --pty, --term) │ │ └── src/main.rs │ └── godopty-gdext/ # GDExtension cdylib: GodoptyTerminal GodotClass │ └── src/lib.rs └── godot/ # Godot 4.7 project ├── project.godot ├── godopty.gdextension ├── concepts.default.json # Shipped default concepts ├── fonts/ # DejaVu Sans Mono &#43; Phosphor icons └── scenes/ ├── main.tscn ├── autoloads/ # Singleton managers │ ├── base_persistence_manager.gd │ ├── settings_manager.gd │ ├── profile_manager.gd │ ├── concept_manager.gd │ ├── layout_manager.gd │ ├── focus_manager.gd │ ├── toast_manager.gd │ ├── shortcut_manager.gd │ └── update_checker.gd ├── terminal/ │ ├── workspace.gd # Root controller, concept routing, profile restore │ ├── terminal_pane.gd # Control-based renderer, keyboard, selection │ └── terminal_manager.gd # Tile lifecycle, split/kill/swap/spawn ├── ui/ │ ├── sidebar.gd │ ├── settings_panel.gd │ ├── toast_overlay.gd │ └── icons.gd # Phosphor icon constants └── panes/ ├── pane_body.gd # Base class ├── code_viewer.gd ├── file_tree.gd └── observer_pane.gd Commands # # Build the GDExtension shared library cargo build -p godopty-gdext # Copy to the Godot project for local development cp target/debug/libgodopty_gdext.so godot/bin/libgodopty_gdext.linux.x86_64.so # Run all Rust tests (across core, gdext, cli) cargo test --workspace # Type-check Rust only (fast, no codegen) cargo check # Run all GDScript tests (unit &#43; integration, headless) godot --headless --path godot --import godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration # CLI demos (no Godot needed) cargo run --bin godopty-cli # mock pub-sub cargo run --bin godopty-cli -- --pty # real PTY cargo run --bin godopty-cli -- --term # alacritty_terminal grid # Open in Godot editor (after building gdext) cd godot &amp;&amp; godot -e Data flow # Shell → PTY I/O thread → vte parser → alacritty_terminal grid → Arc&lt;Mutex&lt;TermGrid&gt;&gt; → GodoptyTerminal (gdext) → GDScript _draw() Testing # Rust # cargo test --workspace # Tests across core, gdext, cli cargo test -p godopty-core # core library only GDScript (GUT) # Tests live in godot/tests/ — unit/ for pure-logic classes, integration/ for scene-tree tests. cargo test –workspace # Tests across core, gdext, cli cargo test -p godopty-core # core library only godot –headless –path godot –import # required before first run godot –headless –path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration">
 	<meta property="og:locale" content="en_us">
 	<meta property="og:type" content="article">
 		<meta property="article:section" content="docs">
+			<meta property="og:see_also" content="https://godopty.github.io/godopty/docs/readme/">
+			<meta property="og:see_also" content="https://godopty.github.io/godopty/docs/changelog/">
+			<meta property="og:see_also" content="https://godopty.github.io/godopty/docs/roadmap/">
+			<meta property="og:see_also" content="https://godopty.github.io/godopty/docs/crates/core/">
+			<meta property="og:see_also" content="https://godopty.github.io/godopty/docs/crates/gdext/">
+			<meta property="og:see_also" content="https://godopty.github.io/godopty/docs/crates/cli/">
 
   
 	<meta name="twitter:card" content="summary">
 	<meta name="twitter:title" content="Agent Guide">
-	<meta name="twitter:description" content="godopty — Agent Guide # Rust &#43; Godot multi-PTY terminal emulator with a tiling grid GUI.
-Project # Stack: Rust (edition 2024) backend &#43; Godot (4.7) GDScript frontend via gdext (0.5) Entry point: godot/scenes/main.tscn → workspace.gd (root Control node) godopty/ ├── Cargo.toml # Workspace root ├── AGENTS.md ├── LICENSE ├── crates/ │ ├── godopty-core/ # Library: PTY, ANSI, grid, concepts, pub-sub │ │ └── src/ │ │ ├── lib.rs # Module map &#43; data-flow diagram │ │ ├── types.rs # Concept, Event, Action, CaptureMode, CapturedOutput │ │ ├── concept.rs # Regex matching &#43; label routing (pure fns) │ │ ├── engine.rs # WorkspaceEngine, capture state machine, SpawnedTerminal │ │ ├── pty.rs # portable-pty spawn &#43; dedicated I/O thread │ │ ├── parser.rs # vte → plain-text LineParser │ │ ├── term.rs # alacritty_terminal grid &#43; CellInfo &#43; damage tracking │ │ ├── color.rs # ANSI color → RGB │ │ ├── keymap.rs # Key event → byte sequence │ │ └── history.rs # SQLite scrollback store │ ├── godopty-cli/ # CLI demos (mock, --pty, --term) │ │ └── src/main.rs │ └── godopty-gdext/ # GDExtension cdylib: GodoptyTerminal GodotClass │ └── src/lib.rs └── godot/ # Godot 4.7 project ├── project.godot ├── godopty.gdextension ├── concepts.default.json # Shipped default concepts ├── fonts/ # DejaVu Sans Mono &#43; Phosphor icons └── scenes/ ├── main.tscn ├── autoloads/ # Singleton managers │ ├── base_persistence_manager.gd │ ├── settings_manager.gd │ ├── profile_manager.gd │ ├── concept_manager.gd │ ├── layout_manager.gd │ ├── focus_manager.gd │ ├── toast_manager.gd │ ├── shortcut_manager.gd │ └── update_checker.gd ├── terminal/ │ ├── workspace.gd # Root controller, concept routing, profile restore │ ├── terminal_pane.gd # Control-based renderer, keyboard, selection │ └── terminal_manager.gd # Tile lifecycle, split/kill/swap/spawn ├── ui/ │ ├── sidebar.gd │ ├── settings_panel.gd │ ├── toast_overlay.gd │ └── icons.gd # Phosphor icon constants └── panes/ ├── pane_body.gd # Base class ├── code_viewer.gd ├── file_tree.gd └── observer_pane.gd Commands # # Build the GDExtension shared library cargo build -p godopty-gdext # Copy to the Godot project for local development cp target/debug/libgodopty_gdext.so godot/bin/libgodopty_gdext.linux.x86_64.so # Run all Rust tests (across core, gdext, cli) cargo test --workspace # Type-check Rust only (fast, no codegen) cargo check # Run all GDScript tests (unit &#43; integration, headless) godot --headless --path godot --import godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration # CLI demos (no Godot needed) cargo run --bin godopty-cli # mock pub-sub cargo run --bin godopty-cli -- --pty # real PTY cargo run --bin godopty-cli -- --term # alacritty_terminal grid # Open in Godot editor (after building gdext) cd godot &amp;&amp; godot -e Data flow # Shell → PTY I/O thread → vte parser → alacritty_terminal grid → Arc&lt;Mutex&lt;TermGrid&gt;&gt; → GodoptyTerminal (gdext) → GDScript _draw() Testing # Rust # cargo test --workspace # Tests across core, gdext, cli cargo test -p godopty-core # core library only GDScript (GUT) # Tests live in godot/tests/ — unit/ for pure-logic classes, integration/ for scene-tree tests. cargo test –workspace # Tests across core, gdext, cli cargo test -p godopty-core # core library only godot –headless –path godot –import # required before first run godot –headless –path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration">
 
   
   
@@ -571,17 +573,11 @@ Project # Stack: Rust (edition 2024) backend &#43; Godot (4.7) GDScript frontend
   
 
   
-    
-  
 
   
 
   
-    
-  
 
-  
-    
   
 
   
@@ -598,8 +594,6 @@ Project # Stack: Rust (edition 2024) backend &#43; Godot (4.7) GDScript frontend
   <div class="flex flex-row flex-wrap items-center">
     
     
-      <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time><span class="px-2 text-primary-500">&middot;</span><span>2287 words</span><span class="px-2 text-primary-500">&middot;</span><span title="Reading time">11 mins</span>
-    
 
     
     
@@ -624,31 +618,9 @@ Project # Stack: Rust (edition 2024) backend &#43; Godot (4.7) GDScript frontend
   
 
   
-    
-    
-<div class="flex author">
-  
-  <div class="place-self-center">
-    
-      <div class="text-[0.6rem] uppercase leading-3 text-neutral-500 dark:text-neutral-400">
-        Author
-      </div>
-      <div class="font-semibold leading-6 text-neutral-800 dark:text-neutral-300">
-        godopty
-      </div>
-    
-    
-    <div class="text-2xl sm:text-lg">
-</div>
-  </div>
-</div>
 
   
 
-  
-
-  
-    <div class="mb-5"></div>
   
 
       
@@ -665,6 +637,89 @@ Project # Stack: Rust (edition 2024) backend &#43; Godot (4.7) GDScript frontend
 
       <div class="min-w-0 min-h-0 max-w-fit">
         
+  <details
+    class="mt-2 mb-5 overflow-hidden rounded-lg ms-0 ps-5"
+    >
+    
+  <summary
+    class="py-1 text-lg font-semibold cursor-pointer bg-primary-200 text-neutral-800 -ms-5 ps-5 dark:bg-primary-800 dark:text-neutral-100">
+    Documentation -
+    This article is part of a series.
+  </summary>
+  
+  
+    
+      <div
+        class="py-1 border-dotted border-neutral-300 border-s-1 -ms-5 ps-5 dark:border-neutral-600">
+        <a href="/godopty/docs/readme/">
+          Part 1:
+          Overview
+        </a>
+      </div>
+    
+  
+    
+      <div
+        class="py-1 border-dotted border-neutral-300 border-s-1 -ms-5 ps-5 dark:border-neutral-600">
+        <a href="/godopty/docs/changelog/">
+          Part 2:
+          Changelog
+        </a>
+      </div>
+    
+  
+    
+      <div
+        class="py-1 border-dotted border-neutral-300 border-s-1 -ms-5 ps-5 dark:border-neutral-600">
+        <a href="/godopty/docs/roadmap/">
+          Part 3:
+          Roadmap
+        </a>
+      </div>
+    
+  
+    
+      <div
+        class="py-1 border-dotted border-neutral-300 border-s-1 -ms-5 ps-5 dark:border-neutral-600">
+        Part 4:
+        This Article
+      </div>
+    
+  
+    
+      <div
+        class="py-1 border-dotted border-neutral-300 border-s-1 -ms-5 ps-5 dark:border-neutral-600">
+        <a href="/godopty/docs/crates/core/">
+          Part 6:
+          godopty-core
+        </a>
+      </div>
+    
+  
+    
+      <div
+        class="py-1 border-dotted border-neutral-300 border-s-1 -ms-5 ps-5 dark:border-neutral-600">
+        <a href="/godopty/docs/crates/gdext/">
+          Part 7:
+          godopty-gdext
+        </a>
+      </div>
+    
+  
+    
+      <div
+        class="py-1 border-dotted border-neutral-300 border-s-1 -ms-5 ps-5 dark:border-neutral-600">
+        <a href="/godopty/docs/crates/cli/">
+          Part 8:
+          godopty-cli
+        </a>
+      </div>
+    
+  
+
+
+  </details>
+
 
         <div class="article-content max-w-prose mb-20">
           
@@ -929,6 +984,87 @@ godot &ndash;headless &ndash;path godot -s addons/gut/gut_cmdln.gd -d <br>
         </div>
         
         
+  <details class="mt-2 mb-5 overflow-hidden rounded-lg ms-0 ps-5">
+    
+  <summary
+    class="py-1 text-lg font-semibold cursor-pointer bg-primary-200 text-neutral-800 -ms-5 ps-5 dark:bg-primary-800 dark:text-neutral-100">
+    Documentation -
+    This article is part of a series.
+  </summary>
+  
+  
+    
+      <div
+        class="py-1 border-dotted border-neutral-300 border-s-1 -ms-5 ps-5 dark:border-neutral-600">
+        <a href="/godopty/docs/readme/">
+          Part 1:
+          Overview
+        </a>
+      </div>
+    
+  
+    
+      <div
+        class="py-1 border-dotted border-neutral-300 border-s-1 -ms-5 ps-5 dark:border-neutral-600">
+        <a href="/godopty/docs/changelog/">
+          Part 2:
+          Changelog
+        </a>
+      </div>
+    
+  
+    
+      <div
+        class="py-1 border-dotted border-neutral-300 border-s-1 -ms-5 ps-5 dark:border-neutral-600">
+        <a href="/godopty/docs/roadmap/">
+          Part 3:
+          Roadmap
+        </a>
+      </div>
+    
+  
+    
+      <div
+        class="py-1 border-dotted border-neutral-300 border-s-1 -ms-5 ps-5 dark:border-neutral-600">
+        Part 4:
+        This Article
+      </div>
+    
+  
+    
+      <div
+        class="py-1 border-dotted border-neutral-300 border-s-1 -ms-5 ps-5 dark:border-neutral-600">
+        <a href="/godopty/docs/crates/core/">
+          Part 6:
+          godopty-core
+        </a>
+      </div>
+    
+  
+    
+      <div
+        class="py-1 border-dotted border-neutral-300 border-s-1 -ms-5 ps-5 dark:border-neutral-600">
+        <a href="/godopty/docs/crates/gdext/">
+          Part 7:
+          godopty-gdext
+        </a>
+      </div>
+    
+  
+    
+      <div
+        class="py-1 border-dotted border-neutral-300 border-s-1 -ms-5 ps-5 dark:border-neutral-600">
+        <a href="/godopty/docs/crates/cli/">
+          Part 8:
+          godopty-cli
+        </a>
+      </div>
+    
+  
+
+
+  </details>
+
 
         
 
@@ -940,36 +1076,6 @@ godot &ndash;headless &ndash;path godot -s addons/gut/gut_cmdln.gd -d <br>
     
     <footer class="pt-8 max-w-prose print:hidden">
       
-  
-    
-    
-    
-    <div class="pt-8">
-      <hr class="border-dotted border-neutral-300 dark:border-neutral-600">
-      <div class="flex justify-between pt-3">
-        <span class="flex flex-col">
-          
-        </span>
-        <span class="flex flex-col items-end">
-          
-            <a
-              class="flex text-right text-neutral-700 hover:text-primary-600 dark:text-neutral dark:hover:text-primary-400"
-              href="/godopty/docs/roadmap/">
-              <span class="leading-6">
-                Roadmap&ensp;<span class="inline-block rtl:rotate-180">&rarr;</span>
-              </span>
-            </a>
-            
-              <span class="me-6 mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-                <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time>
-              </span>
-            
-          
-        </span>
-      </div>
-    </div>
-  
-
 
       
     </footer>

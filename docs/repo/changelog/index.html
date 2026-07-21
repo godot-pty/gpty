@@ -1,6 +1,6 @@
 <!doctype html>
 <html
-  lang="en-us"
+  lang="en-US"
   dir="ltr"
   class="scroll-smooth"
   data-default-appearance="light"
@@ -48,9 +48,6 @@
   <meta property="og:url" content="https://godopty.github.io/godopty/repo/changelog/">
 	<meta property="og:site_name" content="godopty">
 	<meta property="og:title" content="godopty">
-	<meta property="og:description" content="Changelog # All notable changes to godopty.
-The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
-0.1.0 — 2026-07-21 # Added # Multi-PTY terminal emulator with tiling grid GUI godopty-core library: PTY spawning (portable-pty), ANSI parsing (vte), terminal grid (alacritty_terminal), concept pub-sub engine godopty-gdext GDExtension: GodoptyTerminal GodotClass with damage-tracked grid rendering godopty-cli binary: mock, --pty, and --term demo modes Tiling grid: split vertically/horizontally, kill, expand, and nested SplitContainer layout Pane types: terminal, code viewer (CodeEdit), file tree (Tree), observer Concept engine: regex triggers → labelled actions with {payload}/{N} variable substitution Concept capture: UntilStop mode buffers command output and routes to receiver panes with bidirectional handshake; prompt restoration on acknowledge Default concepts shipped (concepts.default.json) with enable/disable toggle and deep-merge migration from user overrides Settings persistence: cursor shape/blink/thickness, scroll sensitivity, default dimensions, font family/size, UI theme colors, color palette schemes — all auto-saved to user://settings.json Profile manager: named layout snapshots saved to user://profiles.json Layout auto-save/restore via user://layout.json Scrollback with scroll_up/scroll_down, scrollback indicator, and Ctrl&#43;F regex search Wrapped text selection for copy/paste Toast notification system (info, warn, error) with replace-on-new behavior Centralized icon system (icons.gd) using Phosphor icon font Keyboard shortcuts: Ctrl&#43;N (spawn), Ctrl&#43;W (close), Ctrl&#43;B (sidebar), Ctrl&#43;P (command palette), Ctrl&#43;Shift&#43;R (reset) Alt&#43;Arrow geographic pane focus navigation Sidebar: pane list with focus, minimize/maximize, swap, kill, and profile save/load Command palette with fuzzy command matching Title bar per pane with label prefix and action buttons Scrollback history stored in SQLite Standalone export presets (Linux, macOS, Windows) with CI release workflow 60 Rust tests (core &#43; integration) and 40&#43; GDScript unit/integration tests">
 	<meta property="og:locale" content="en_us">
 	<meta property="og:type" content="article">
 		<meta property="article:section" content="repo">
@@ -58,9 +55,6 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   
 	<meta name="twitter:card" content="summary">
 	<meta name="twitter:title" content="godopty">
-	<meta name="twitter:description" content="Changelog # All notable changes to godopty.
-The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
-0.1.0 — 2026-07-21 # Added # Multi-PTY terminal emulator with tiling grid GUI godopty-core library: PTY spawning (portable-pty), ANSI parsing (vte), terminal grid (alacritty_terminal), concept pub-sub engine godopty-gdext GDExtension: GodoptyTerminal GodotClass with damage-tracked grid rendering godopty-cli binary: mock, --pty, and --term demo modes Tiling grid: split vertically/horizontally, kill, expand, and nested SplitContainer layout Pane types: terminal, code viewer (CodeEdit), file tree (Tree), observer Concept engine: regex triggers → labelled actions with {payload}/{N} variable substitution Concept capture: UntilStop mode buffers command output and routes to receiver panes with bidirectional handshake; prompt restoration on acknowledge Default concepts shipped (concepts.default.json) with enable/disable toggle and deep-merge migration from user overrides Settings persistence: cursor shape/blink/thickness, scroll sensitivity, default dimensions, font family/size, UI theme colors, color palette schemes — all auto-saved to user://settings.json Profile manager: named layout snapshots saved to user://profiles.json Layout auto-save/restore via user://layout.json Scrollback with scroll_up/scroll_down, scrollback indicator, and Ctrl&#43;F regex search Wrapped text selection for copy/paste Toast notification system (info, warn, error) with replace-on-new behavior Centralized icon system (icons.gd) using Phosphor icon font Keyboard shortcuts: Ctrl&#43;N (spawn), Ctrl&#43;W (close), Ctrl&#43;B (sidebar), Ctrl&#43;P (command palette), Ctrl&#43;Shift&#43;R (reset) Alt&#43;Arrow geographic pane focus navigation Sidebar: pane list with focus, minimize/maximize, swap, kill, and profile save/load Command palette with fuzzy command matching Title bar per pane with label prefix and action buttons Scrollback history stored in SQLite Standalone export presets (Linux, macOS, Windows) with CI release workflow 60 Rust tests (core &#43; integration) and 40&#43; GDScript unit/integration tests">
 
   
   
@@ -573,17 +567,11 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   
 
   
-    
-  
 
   
 
   
-    
-  
 
-  
-    
   
 
   
@@ -599,8 +587,6 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
   <div class="flex flex-row flex-wrap items-center">
     
-    
-      <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time><span class="px-2 text-primary-500">&middot;</span><span>263 words</span><span class="px-2 text-primary-500">&middot;</span><span title="Reading time">2 mins</span>
     
 
     
@@ -626,31 +612,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   
 
   
-    
-    
-<div class="flex author">
-  
-  <div class="place-self-center">
-    
-      <div class="text-[0.6rem] uppercase leading-3 text-neutral-500 dark:text-neutral-400">
-        Author
-      </div>
-      <div class="font-semibold leading-6 text-neutral-800 dark:text-neutral-300">
-        godopty
-      </div>
-    
-    
-    <div class="text-2xl sm:text-lg">
-</div>
-  </div>
-</div>
 
   
 
-  
-
-  
-    <div class="mb-5"></div>
   
 
       
@@ -746,49 +710,6 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html"  targe
     
     <footer class="pt-8 max-w-prose print:hidden">
       
-  
-    
-    
-    
-    <div class="pt-8">
-      <hr class="border-dotted border-neutral-300 dark:border-neutral-600">
-      <div class="flex justify-between pt-3">
-        <span class="flex flex-col">
-          
-            <a
-              class="flex text-neutral-700 hover:text-primary-600 dark:text-neutral dark:hover:text-primary-400"
-              href="/godopty/repo/crates/godopty-cli/readme/">
-              <span class="leading-6">
-                <span class="inline-block rtl:rotate-180">&larr;</span>&ensp;
-              </span>
-            </a>
-            
-              <span class="ms-6 mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-                <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time>
-              </span>
-            
-          
-        </span>
-        <span class="flex flex-col items-end">
-          
-            <a
-              class="flex text-right text-neutral-700 hover:text-primary-600 dark:text-neutral dark:hover:text-primary-400"
-              href="/godopty/repo/agents/">
-              <span class="leading-6">
-                &ensp;<span class="inline-block rtl:rotate-180">&rarr;</span>
-              </span>
-            </a>
-            
-              <span class="me-6 mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-                <time datetime="0001-01-01T00:00:00&#43;00:00">January 1, 1</time>
-              </span>
-            
-          
-        </span>
-      </div>
-    </div>
-  
-
 
       
     </footer>

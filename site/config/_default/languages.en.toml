@@ -1,0 +1,9 @@
+locale = "en-us"
+label = "English"
+weight = 1
+title = "godopty"
+
+[params]
+  displayName = "EN"
+  isoCode = "en-US"
+  dateFormat = "2 January 2006"

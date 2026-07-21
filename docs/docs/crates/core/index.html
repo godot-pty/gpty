@@ -1,6 +1,6 @@
 <!doctype html>
 <html
-  lang="en-us"
+  lang="en-US"
   dir="ltr"
   class="scroll-smooth"
   data-default-appearance="light"
@@ -51,16 +51,18 @@
   <meta property="og:url" content="https://godopty.github.io/godopty/docs/crates/core/">
 	<meta property="og:site_name" content="godopty">
 	<meta property="og:title" content="godopty-core">
-	<meta property="og:description" content="godopty-core # Library crate for the godopty multi-PTY emulator. This is the engine — all terminal lifecycle, ANSI parsing, concept matching, capture buffering, and grid management live here.
-Module Layout # Module Purpose Key Types types Data vocabulary shared across all modules Concept, Event, Action, TerminalConfig, CaptureMode, CapturedOutput concept Pure functions for regex matching and command routing match_and_broadcast(), matching_commands() engine Runtime orchestrator; spawns terminal tasks, capture state machine WorkspaceEngine, PtyTerminalHandle, SpawnedTerminal, TaskContext pty Cross-platform PTY lifecycle via portable-pty PtyHandle parser Strips ANSI escape sequences; extracts plain-text lines LineParser term Full terminal grid &#43; damage tracking via alacritty_terminal TermGrid, CellInfo, GridUpdate color ANSI color mapping — named, indexed, true-color → RGB color_to_rgb() keymap Keyboard event → byte sequence translation key_event_to_bytes() history SQLite-backed scrollback history store HistoryStore Concept Capture System # The engine supports two capture modes:">
 	<meta property="og:locale" content="en_us">
 	<meta property="og:type" content="website">
+			<meta property="og:see_also" content="https://godopty.github.io/godopty/docs/readme/">
+			<meta property="og:see_also" content="https://godopty.github.io/godopty/docs/changelog/">
+			<meta property="og:see_also" content="https://godopty.github.io/godopty/docs/roadmap/">
+			<meta property="og:see_also" content="https://godopty.github.io/godopty/docs/agents/">
+			<meta property="og:see_also" content="https://godopty.github.io/godopty/docs/crates/gdext/">
+			<meta property="og:see_also" content="https://godopty.github.io/godopty/docs/crates/cli/">
 
   
 	<meta name="twitter:card" content="summary">
 	<meta name="twitter:title" content="godopty-core">
-	<meta name="twitter:description" content="godopty-core # Library crate for the godopty multi-PTY emulator. This is the engine — all terminal lifecycle, ANSI parsing, concept matching, capture buffering, and grid management live here.
-Module Layout # Module Purpose Key Types types Data vocabulary shared across all modules Concept, Event, Action, TerminalConfig, CaptureMode, CapturedOutput concept Pure functions for regex matching and command routing match_and_broadcast(), matching_commands() engine Runtime orchestrator; spawns terminal tasks, capture state machine WorkspaceEngine, PtyTerminalHandle, SpawnedTerminal, TaskContext pty Cross-platform PTY lifecycle via portable-pty PtyHandle parser Strips ANSI escape sequences; extracts plain-text lines LineParser term Full terminal grid &#43; damage tracking via alacritty_terminal TermGrid, CellInfo, GridUpdate color ANSI color mapping — named, indexed, true-color → RGB color_to_rgb() keymap Keyboard event → byte sequence translation key_event_to_bytes() history SQLite-backed scrollback history store HistoryStore Concept Capture System # The engine supports two capture modes:">
 
   
   

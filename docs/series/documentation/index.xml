@@ -2,12 +2,12 @@
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>Documentation on godopty</title>
-    <link>https://godopty.github.io/godopty/docs/</link>
+    <link>https://godopty.github.io/godopty/series/documentation/</link>
     <description>Recent content in Documentation on godopty</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
     <copyright>© 2026 godopty</copyright>
-    <atom:link href="https://godopty.github.io/godopty/docs/index.xml" rel="self" type="application/rss+xml" />
+    <atom:link href="https://godopty.github.io/godopty/series/documentation/index.xml" rel="self" type="application/rss+xml" />
     
     <item>
       <title>Overview</title>
@@ -45,6 +45,36 @@
       <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
       
       <guid>https://godopty.github.io/godopty/docs/agents/</guid>
+      <description></description>
+      
+    </item>
+    
+    <item>
+      <title>godopty-core</title>
+      <link>https://godopty.github.io/godopty/docs/crates/core/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      
+      <guid>https://godopty.github.io/godopty/docs/crates/core/</guid>
+      <description></description>
+      
+    </item>
+    
+    <item>
+      <title>godopty-gdext</title>
+      <link>https://godopty.github.io/godopty/docs/crates/gdext/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      
+      <guid>https://godopty.github.io/godopty/docs/crates/gdext/</guid>
+      <description></description>
+      
+    </item>
+    
+    <item>
+      <title>godopty-cli</title>
+      <link>https://godopty.github.io/godopty/docs/crates/cli/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      
+      <guid>https://godopty.github.io/godopty/docs/crates/cli/</guid>
       <description></description>
       
     </item>
