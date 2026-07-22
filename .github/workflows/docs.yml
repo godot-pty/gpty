@@ -1,0 +1,44 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "README.md"
+      - "CHANGELOG.md"
+      - "ROADMAP.md"
+      - "AGENTS.md"
+      - "crates/**/README.md"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Hugo
+        run: |
+          wget -q https://github.com/gohugoio/hugo/releases/download/v0.164.0/hugo_extended_0.164.0_linux-amd64.tar.gz
+          tar -xzf hugo_extended_0.164.0_linux-amd64.tar.gz
+          sudo mv hugo /usr/local/bin/
+
+      - name: Copy repo docs into site
+        run: cd docs && ./setup.sh
+
+      - name: Build site
+        run: cd docs && hugo
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/public/
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4

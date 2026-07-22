@@ -41,3 +41,9 @@ reasonix.toml
 # Local audit (delete when resolved)
 AUDIT.md
 .omp/
+
+# Hugo
+docs/public/
+docs/.hugo_build.lock
+docs/resources/
+docs/assets/repo/

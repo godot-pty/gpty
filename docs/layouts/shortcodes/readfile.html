@@ -1,0 +1,7 @@
+{{ $path := .Get 0 }}
+{{ $resource := resources.Get (printf "repo/%s" $path) }}
+{{ if $resource }}
+  {{ $resource.Content | markdownify }}
+{{ else }}
+  > File `{{ $path }}` not found.
+{{ end }}

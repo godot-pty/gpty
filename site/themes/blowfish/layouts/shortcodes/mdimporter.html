@@ -1,6 +1,0 @@
-{{ $url := .Get "url" }}
-{{ with resources.GetRemote (urls.Parse $url) }}
-  {{ .Content | markdownify }}
-{{ else }}
-  {{ warnf "mdimporter shortcode: unable to fetch %q: %s" $url .Position }}
-{{ end }}
