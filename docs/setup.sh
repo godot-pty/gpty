@@ -5,6 +5,7 @@ cd "$(dirname "$0")"
 # Copy repo docs into assets/repo/ for Hugo resources.Get
 mkdir -p assets/repo/crates/godopty-core
 mkdir -p assets/repo/crates/godopty-gdext
+mkdir -p assets/repo/crates/godopty-cli
 mkdir -p assets/repo/godot
 
 cp ../README.md assets/repo/
@@ -15,6 +16,7 @@ cp ../LICENSE assets/repo/
 cp ../AGENTS.md assets/repo/
 cp ../crates/godopty-core/README.md assets/repo/crates/godopty-core/
 cp ../crates/godopty-gdext/README.md assets/repo/crates/godopty-gdext/
+cp ../crates/godopty-cli/README.md assets/repo/crates/godopty-cli/
 cp ../godot/README.md assets/repo/godot/
 
 # ── Generate Versions dropdown from GitHub releases API ──────────────────
