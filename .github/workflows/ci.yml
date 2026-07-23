@@ -14,11 +14,8 @@ jobs:
   lint-workflows:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Validate YAML syntax
-        run: python3 -c "import yaml; [yaml.safe_load(open(f'.github/workflows/{w}')) for w in ['ci.yml','release.yml']]"
+        run: python3 -c "import yaml; [yaml.safe_load(open(f'.github/workflows/{w}')) for w in ['ci.yml','release.yml','docs.yml']]"
 
   # ── Rust tests (core + gdext + cli) ──────────────────────────────────
   rust-tests:
@@ -36,7 +33,8 @@ jobs:
           path: |
             ~/.cargo/registry
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run clippy
+        run: cargo clippy --workspace -- -D warnings
 
       - name: Run Rust tests
         run: cargo test --workspace
@@ -61,3 +59,30 @@ jobs:
 
       - name: Run GUT tests
         run: godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration
+
+  # ── Rust formatting ───────────────────────────────────────────────────
+  rust-fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  # ── Dependency audit ──────────────────────────────────────────────────
+  cargo-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run cargo-audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
