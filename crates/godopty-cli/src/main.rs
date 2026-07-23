@@ -1,7 +1,6 @@
 //! # godopty-cli
 //!
-//! Phase 1+2a CLI prototype. Runs without Godot — validates the Rust engine
-//! in isolation.
+//! CLI prototype. Runs without Godot to validate the Rust engine in isolation.
 //!
 //! ## Modes
 //!
@@ -53,7 +52,10 @@ async fn run_mock_demo() {
 
     engine
         .spawn_mock_terminal(
-            TerminalConfig { id: 1, labels: vec!["backend".into()] },
+            TerminalConfig {
+                id: 1,
+                labels: vec!["backend".into()],
+            },
             vec![
                 "INFO  server: listening on 0.0.0.0:8080".into(),
                 "ERROR server: Address 8080 already in use".into(),
@@ -67,7 +69,10 @@ async fn run_mock_demo() {
 
     engine
         .spawn_mock_terminal(
-            TerminalConfig { id: 2, labels: vec!["observer".into()] },
+            TerminalConfig {
+                id: 2,
+                labels: vec!["observer".into()],
+            },
             vec!["[observer] watching for events...".into()],
             OBSERVER_INTERVAL_MS,
         )
@@ -75,14 +80,19 @@ async fn run_mock_demo() {
 
     engine
         .spawn_mock_terminal(
-            TerminalConfig { id: 3, labels: vec!["backend".into()] },
+            TerminalConfig {
+                id: 3,
+                labels: vec!["backend".into()],
+            },
             vec!["[backend standby] waiting for restart signal...".into()],
             STANDBY_INTERVAL_MS,
         )
         .await;
 
     log::info!("Engine running. Press Ctrl+C to stop.");
-    tokio::signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to install Ctrl+C handler");
     log::info!("Shutting down.");
 }
 
@@ -96,7 +106,10 @@ async fn run_pty_demo() {
 
     let term1 = engine
         .spawn_pty_terminal(
-            TerminalConfig { id: 1, labels: vec!["backend".into()] },
+            TerminalConfig {
+                id: 1,
+                labels: vec!["backend".into()],
+            },
             "/bin/bash",
             &["--norc"],
             &[],
@@ -106,7 +119,10 @@ async fn run_pty_demo() {
 
     let _term2 = engine
         .spawn_pty_terminal(
-            TerminalConfig { id: 2, labels: vec!["observer".into()] },
+            TerminalConfig {
+                id: 2,
+                labels: vec!["observer".into()],
+            },
             "/bin/bash",
             &["--norc"],
             &[],
@@ -197,7 +213,8 @@ fn build_concepts() -> Vec<Concept> {
     vec![
         Concept {
             name: "crash_detected".into(),
-            trigger_regex: Regex::new(r"(?i)crash|panic|segfault|SIGSEGV").expect("invalid crash_detected regex"),
+            trigger_regex: Regex::new(r"(?i)crash|panic|segfault|SIGSEGV")
+                .expect("invalid crash_detected regex"),
             enabled: true,
             capture_mode: CaptureMode::SingleLine,
             destinations: vec![Action {
@@ -207,7 +224,8 @@ fn build_concepts() -> Vec<Concept> {
         },
         Concept {
             name: "port_conflict".into(),
-            trigger_regex: Regex::new(r"(?i)address.*already.*in\s*use").expect("invalid port_conflict regex"),
+            trigger_regex: Regex::new(r"(?i)address.*already.*in\s*use")
+                .expect("invalid port_conflict regex"),
             enabled: true,
             capture_mode: CaptureMode::SingleLine,
             destinations: vec![Action {
