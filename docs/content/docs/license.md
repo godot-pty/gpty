@@ -1,6 +1,7 @@
 ---
 title: License
-weight: 9
+weight: 8
+noHeading: true
 ---
 
 {{< readfile "LICENSE" >}}

@@ -1,6 +1,7 @@
 ---
 title: Contributing
-weight: 8
+weight: 7
+noHeading: true
 ---
 
 {{< readfile "CONTRIBUTING.md" >}}
