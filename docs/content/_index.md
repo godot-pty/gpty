@@ -7,6 +7,8 @@ toc: false
 
 **godopty** is a tiling grid terminal emulator built with Rust and Godot. Run multiple PTY sessions side by side, capture command output via regex concepts, and manage layouts with profiles.
 
+![godopty terminal grid](/images/v0.1.0_1.png)
+
 {{< cards >}}
   {{< card link="/godopty/docs" title="Documentation" icon="book-open" subtitle="Learn how godopty works, from the PTY engine to the Godot GUI." >}}
   {{< card link="/godopty/blog" title="Blog" icon="pencil" subtitle="Release notes, tips, and development updates." >}}
