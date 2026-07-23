@@ -54,6 +54,15 @@ jobs:
           chmod +x Godot_v4.7-stable_linux.x86_64
           sudo mv Godot_v4.7-stable_linux.x86_64 /usr/local/bin/godot
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build GDExtension
+        run: cargo build -p godopty-gdext
+
+      - name: Install GDExtension library
+        run: cp target/debug/libgodopty_gdext.so godot/bin/libgodopty_gdext.linux.x86_64.so
+
       - name: Import project
         run: godot --headless --path godot --import
 
