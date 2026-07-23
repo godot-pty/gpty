@@ -10,6 +10,8 @@ mkdir -p assets/repo/godot
 cp ../README.md assets/repo/
 cp ../CHANGELOG.md assets/repo/
 cp ../ROADMAP.md assets/repo/
+cp ../CONTRIBUTING.md assets/repo/
+cp ../LICENSE assets/repo/
 cp ../AGENTS.md assets/repo/
 cp ../crates/godopty-core/README.md assets/repo/crates/godopty-core/
 cp ../crates/godopty-gdext/README.md assets/repo/crates/godopty-gdext/

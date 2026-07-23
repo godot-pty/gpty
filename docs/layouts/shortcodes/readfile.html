@@ -1,7 +1,15 @@
 {{ $path := .Get 0 }}
 {{ $resource := resources.Get (printf "repo/%s" $path) }}
 {{ if $resource }}
-  {{ $resource.Content | markdownify }}
+  {{ $raw := $resource.Content }}
+  {{/* Strip source-code links: [text](src/...) → text */}}
+  {{ $raw = $raw | replaceRE `\[([^\]]+)\]\(src/[^)]+\)` "$1" }}
+  {{/* Rewrite repo-relative links to doc pages */}}
+  {{ $raw = $raw | replaceRE `\[CHANGELOG\.md\]\(CHANGELOG\.md\)` "[Changelog](/docs/changelog/)" }}
+  {{ $raw = $raw | replaceRE `\[ROADMAP\.md\]\(ROADMAP\.md\)` "[Roadmap](/docs/roadmap/)" }}
+  {{ $raw = $raw | replaceRE `\[CONTRIBUTING\.md\]\(CONTRIBUTING\.md\)` "[Contributing](/docs/contributing/)" }}
+  {{ $raw = $raw | replaceRE `\[LICENSE\]\(LICENSE\)` "[License](/docs/license/)" }}
+  {{ $raw | markdownify }}
 {{ else }}
   > File `{{ $path }}` not found.
 {{ end }}
