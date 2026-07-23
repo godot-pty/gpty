@@ -42,8 +42,9 @@ reasonix.toml
 AUDIT.md
 .omp/
 
-# Hugo
 docs/public/
 docs/.hugo_build.lock
 docs/resources/
 docs/assets/repo/
+docs/data/
+docs/.cache/

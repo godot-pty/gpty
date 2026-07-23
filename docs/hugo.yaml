@@ -17,14 +17,6 @@ menu:
     - identifier: versions
       name: Versions
       weight: 3
-    - name: Development
-      parent: versions
-      url: https://github.com/godopty/godopty
-      weight: 1
-    - name: v0.1.0
-      parent: versions
-      url: https://github.com/godopty/godopty/releases/tag/v0.1.0
-      weight: 2
     - name: Search
       weight: 4
       params:
