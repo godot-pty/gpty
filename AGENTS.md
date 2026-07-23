@@ -1,4 +1,4 @@
-# godopty — Agent Guide
+# Agent Guide
 
 Rust + Godot multi-PTY terminal emulator with a tiling grid GUI.
 
@@ -115,6 +115,7 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 ## Conventions
 
 ### Rust
+
 - Edition: 2024 (requires Rust ≥ 1.85)
 - Format: standard `rustfmt`
 - Async runtime: `tokio` (global `LazyLock` runtime in gdext)
@@ -123,6 +124,7 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 - Lifecycle & Teardown: When a `GodoptyTerminal` is destroyed (e.g., `queue_free()` in Godot), the Rust side MUST ensure the spawned shell and background `tokio` tasks are cleanly terminated (via the `Drop` trait) to prevent zombie processes or memory leaks.
 
 ### GDScript
+
 - Indentation: tabs
 - Icons: All glyphs live in `icons.gd` as `const` strings (Phosphor Regular PUA codepoints via `\uXXXX`). To add: pick from phosphoricons.com, get the codepoint, add a `const`. Call `Icons.style_button(btn)` after setting `btn.text`.
 - Profiles: named terminal-layout snapshots (`user://profiles.json`). `ProfileManager` autoload manages CRUD + `profiles_changed` signal. Save dialog is built inline in `workspace.gd` (not a separate scene). Profile activation clears the workspace (`_reset()`) then rebuilds tiles — follows `_do_restore()` pattern.
@@ -137,6 +139,7 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 - Pub-Sub Bridge: To handle `WorkspaceEngine` events (like regex concept triggers) in Godot, GDScript must poll the Rust backend in `_process()` or rely on Rust calling `call_deferred("emit_signal", ...)`.
 
 ### Concept Capture System
+
 - Two capture modes: `SingleLine` (broadcast Event for command injection) and `UntilStop { stop_timeout_ms, stop_on_input }` (buffer output until timeout or user input).
 - Capture lifecycle:
   - Match: Concept triggers → pending capture deferred one chunk (avoids Tab noise).
@@ -149,14 +152,17 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 - Concept event routing: `workspace.gd._process()` polls all terminal panes, drains events, routes to receiver pane by `_pane_type()`. No receiver → toast + flush.
 
 ### Security
+
 - Concept Engine ReDoS: The `godopty-core` crate MUST always use the standard Rust `regex` crate. PCRE or back-tracking engines are strictly prohibited to prevent ReDoS (Regex Denial of Service) attacks when parsing large amounts of terminal output.
 - OSC 52 Clipboard Syncing: `parser.rs` currently discards all terminal escape sequences, keeping copy/paste safely bound to Godot UI inputs. Do NOT implement OSC 52 clipboard injection/syncing without placing it behind an explicit Godot confirmation dialog to prevent drive-by clipboard hijacking.
 
 ### Commits
+
 - Format: [Conventional Commits](https://www.conventionalcommits.org/) — `feat(scope):`, `fix(scope):`, `chore(scope):`
 - Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `profiles`, `concepts`, `icons`
 
 ### Pitfalls
+
 - `Drop` impl for external resources: Any Rust struct holding a child process (`portable_pty::Child`) or I/O thread MUST implement `Drop` to call `.kill()`. Otherwise closing a terminal in Godot orphans the shell process and reader thread.
 - `tokio::select!` None branches: When a channel returns `None` (closed), `select!` disables that branch but keeps polling others instantly — causing 100% CPU. Bind to a variable first (`msg = rx.recv()`), then `let Ok(v) = msg else { break; }`.
 - vte `Perform::execute` CR/LF: PTY output uses CRLF pairs. The vte parser calls `execute` per byte. If you commit on both `\r` and `\n`, every line produces a spurious empty string. Track `last_was_cr` and skip the `\n` commit when preceded by `\r`.
@@ -178,6 +184,7 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 - Resize Rate Limiting: Firing SIGWINCH heavily on every frame during window drag will overwhelm the child PTY process. Always debounce or rate-limit terminal `_on_resize` events before passing them to the backend.
 
 ### Agent Tool Notes
+
 - GDScript `///` comments: GDScript uses `#` or `##` for comments. Rust-style `///` causes a parse error. Always use `##` for doc comments in GDScript.
 - Edit tool on structured formats (YAML, TOML, Markdown frontmatter): the line-based `edit` tool can corrupt delimiter-sensitive files (YAML `---` blocks, TOML `[sections]`, frontmatter bounds). When editing config files, workflow YAML, or Hugo content, prefer `eval` with Python (`yaml.safe_load`, `tomllib`) to parse → modify → serialize. Reserve `edit` for Rust, GDScript, and plain Markdown where line semantics hold.
 

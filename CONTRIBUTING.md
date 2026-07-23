@@ -1,6 +1,4 @@
-# Contributing to godopty
-
-Thanks for your interest in contributing! godopty is a Godot 4.7 + Rust multi-PTY terminal emulator with a tiling grid GUI.
+# Contributing
 
 ## Setup
 
@@ -30,12 +28,14 @@ cd godot && godot -e
 ## Code Style
 
 ### GDScript
+
 - **Indentation**: tabs
 - **Private members**: underscore prefix (`_cell_w`, `_settings_panel`)
 - **Config vars**: `_cfg_` prefix (`_cfg_cursor_shape`)
 - **Export pattern**: `@export var` for Inspector-settable properties
 
 ### Rust
+
 - **Edition**: 2024
 - **Format**: standard `rustfmt`
 - **Async runtime**: `tokio`
@@ -54,7 +54,7 @@ cd godot && godot -e
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Run `cargo test -p godopty-core` to ensure tests pass
+4. Ensure tests pass (add new tests as applicable)
 5. Submit a pull request
 
 ### Commit Format
