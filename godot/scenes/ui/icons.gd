@@ -17,3 +17,6 @@ const ADD      = "\uE3D4"  # plus
 const SETTINGS = "\uE272"  # gear-six
 const RESET    = "\uE038"  # arrow-counter-clockwise
 const SWAP     = "\uE0A0"  # arrows-left-right
+const MAXIMIZE_WIN = "\uE3C8"  # arrows-out (maximize to fullscreen)
+const RESTORE_WIN = "\uE3C6"  # arrows-in (restore from fullscreen)
+const WINDOW_MODE = "\uE24A"  # monitor (window mode cycling)

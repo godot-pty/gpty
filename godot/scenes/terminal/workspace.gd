@@ -6,6 +6,7 @@ class_name Workspace
 const GRID = 12
 const MIN_WINDOW_W = 500
 const MIN_WINDOW_H = 300
+const TITLEBAR_HEIGHT = 30.0
 
 # Palette commands are built dynamically from PaneTypes.ALL
 static func _build_palette_commands() -> Array[String]:
@@ -24,6 +25,7 @@ var _tm: TerminalManager = TerminalManager.new()
 
 func _ready():
 	show()
+	_build_titlebar()
 	DisplayServer.window_set_min_size(Vector2i(MIN_WINDOW_W, MIN_WINDOW_H))
 
 	_grid = Control.new()
@@ -53,12 +55,17 @@ func _ready():
 	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _toggle_sidebar)
 	ShortcutManager.register("app:toggle_palette", "Ctrl+Shift+P", _toggle_palette)
 	ShortcutManager.register("app:toggle_fps", "Ctrl+Shift+F", _toggle_fps)
+	ShortcutManager.register("app:toggle_fullscreen", "F11", _toggle_fullscreen)
+	ShortcutManager.register("app:toggle_borderless", "Ctrl+Shift+F11", _toggle_borderless)
+	ShortcutManager.register("app:toggle_fullscreen_alt", "Ctrl+Shift+M", _toggle_fullscreen)
 	ShortcutManager.register("app:reset_workspace", "Ctrl+Shift+R", func():
 		_reset(); _apply_layout(); _list()
 	)
 
 	SettingsManager.settings_changed.connect(_on_settings_changed)
 	_on_settings_changed()
+	_apply_window_mode()
+	if SettingsManager.cfg_window_mode == 0: _restore_window_position()
 
 func _on_settings_changed():
 	for t in _tm.tiles:
@@ -76,17 +83,149 @@ func _apply_fps_setting():
 
 func _notification(what):
 	if what == NOTIFICATION_RESIZED: _apply_layout()
-	if what == NOTIFICATION_WM_CLOSE_REQUEST: _save()
+	if what == NOTIFICATION_WM_CLOSE_REQUEST: _save_window_position(); _save()
 
+var _titlebar: Control = null
+
+func _apply_window_mode():
+	match SettingsManager.cfg_window_mode:
+		0:  # Decorated windowed
+			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+			if _titlebar: _titlebar.visible = false
+		1:  # Borderless windowed
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, true)
+			if _titlebar: _titlebar.visible = true
+		2:  # Fullscreen
+			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+			if _titlebar: _titlebar.visible = false
+	_apply_layout()
+func _toggle_fullscreen():
+	if SettingsManager.cfg_window_mode == 2:
+		SettingsManager.cfg_window_mode = 0
+		_restore_window_position()
+	else:
+		_save_window_position()
+		SettingsManager.cfg_window_mode = 2
+	_apply_window_mode()
+	SettingsManager.save_settings()
+
+func _toggle_borderless():
+	if SettingsManager.cfg_window_mode == 1:
+		SettingsManager.cfg_window_mode = 0
+		_restore_window_position()
+	else:
+		_save_window_position()
+		SettingsManager.cfg_window_mode = 1
+	_apply_window_mode()
+	SettingsManager.save_settings()
+
+func _cycle_window_mode():
+	SettingsManager.cfg_window_mode = (SettingsManager.cfg_window_mode + 1) % 3
+	_apply_window_mode()
+	SettingsManager.save_settings()
+
+func _save_window_position():
+	if SettingsManager.cfg_window_mode == 0:
+		SettingsManager.cfg_window_position = DisplayServer.window_get_position()
+		SettingsManager.cfg_window_size = DisplayServer.window_get_size()
+
+func _restore_window_position():
+	var pos = SettingsManager.cfg_window_position
+	var sz = SettingsManager.cfg_window_size
+	if pos.x >= 0 and pos.y >= 0:
+		DisplayServer.window_set_position(pos)
+	if sz.x >= MIN_WINDOW_W and sz.y >= MIN_WINDOW_H:
+		DisplayServer.window_set_size(sz)
+
+func _build_titlebar():
+	_titlebar = Control.new()
+	_titlebar.name = "GlobalTitleBar"
+	_titlebar.mouse_filter = Control.MOUSE_FILTER_STOP
+	_titlebar.anchor_left = 0.0
+	_titlebar.anchor_right = 1.0
+	_titlebar.anchor_top = 0.0
+	_titlebar.offset_top = 0
+	_titlebar.offset_bottom = TITLEBAR_HEIGHT
+
+	var bg = ColorRect.new()
+	bg.name = "TitleBarBg"
+	bg.color = SettingsManager.cfg_title_bar_bg
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_titlebar.add_child(bg)
+
+	var label = Label.new()
+	label.name = "AppTitle"
+	label.text = "godopty"
+	label.add_theme_color_override("font_color", Color.WHITE)
+	label.anchor_left = 0.0
+	label.anchor_right = 0.0
+	label.offset_left = 10
+	label.offset_right = 200
+	label.offset_top = 0
+	label.offset_bottom = TITLEBAR_HEIGHT
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_titlebar.add_child(label)
+
+	var btn_cont = HBoxContainer.new()
+	btn_cont.name = "WinControls"
+	btn_cont.anchor_left = 1.0
+	btn_cont.anchor_right = 1.0
+	btn_cont.offset_left = -120
+	btn_cont.offset_right = 0
+	btn_cont.offset_top = 0
+	btn_cont.offset_bottom = TITLEBAR_HEIGHT
+	btn_cont.alignment = BoxContainer.ALIGNMENT_END
+
+	var min_btn = _make_titlebar_button(Icons.MINIMIZE, func():
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MINIMIZED))
+	btn_cont.add_child(min_btn)
+
+	var max_btn = _make_titlebar_button(Icons.MAXIMIZE_WIN, _toggle_fullscreen)
+	btn_cont.add_child(max_btn)
+	_titlebar.set_meta("_max_btn", max_btn)
+
+	var close_btn = _make_titlebar_button(Icons.CLOSE, func(): get_tree().quit())
+	btn_cont.add_child(close_btn)
+
+	_titlebar.add_child(btn_cont)
+	_titlebar.gui_input.connect(_on_titlebar_gui_input)
+
+	add_child(_titlebar)
+	_titlebar.visible = false
+
+func _make_titlebar_button(icon: String, callback: Callable) -> Button:
+	var btn = Button.new()
+	btn.text = icon
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	btn.custom_minimum_size = Vector2(36, TITLEBAR_HEIGHT)
+	btn.flat = true
+	btn.add_theme_color_override("font_color", Color.WHITE)
+	btn.add_theme_color_override("font_hover_color", Color.WHITE)
+	btn.add_theme_color_override("font_pressed_color", Color.WHITE)
+	Icons.style_button(btn)
+	btn.pressed.connect(callback)
+	return btn
+
+func _on_titlebar_gui_input(event: InputEvent):
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			DisplayServer.window_start_drag()
+		elif event.double_click and event.button_index == MOUSE_BUTTON_LEFT:
+			_toggle_fullscreen()
 # ═══════════════════════════════════════════════════════════════════════
 # Layout
 # ═══════════════════════════════════════════════════════════════════════
 
 func _apply_layout():
 	if _grid == null: return
+	var top_offset = TITLEBAR_HEIGHT if (_titlebar and _titlebar.visible) else 0.0
 	var m = _sidebar_bg.size.x if (_sidebar_bg and _sidebar_bg.visible) else 0.0
 	_grid.offset_left = m; _grid.offset_right = 0
-	_grid.offset_top = 0; _grid.offset_bottom = 0
+	_grid.offset_top = top_offset; _grid.offset_bottom = 0
 	_grid.anchor_left = 0.0; _grid.anchor_right = 1.0
 	_grid.anchor_top = 0.0; _grid.anchor_bottom = 1.0
 
@@ -373,6 +512,7 @@ func _wire_sidebar_signals():
 	_sidebar.request_focus.connect(func(body: Control): body.grab_focus())
 	_sidebar.toggled.connect(func(): _apply_layout())
 	_sidebar.request_profile.connect(_activate_profile)
+	_sidebar.request_toggle_window_mode.connect(_cycle_window_mode)
 	_sidebar.request_save_profile.connect(_save_current_as_profile)
 	_sidebar.request_delete_profile.connect(_delete_profile)
 	ProfileManager.profiles_changed.connect(_refresh_profile_buttons)

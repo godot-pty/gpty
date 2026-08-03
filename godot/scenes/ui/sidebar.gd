@@ -11,6 +11,7 @@ signal toggled
 signal request_profile(name: String)
 signal request_save_profile
 signal request_delete_profile(index: int)
+signal request_toggle_window_mode
 
 
 var bg: ColorRect
@@ -89,6 +90,14 @@ func _add_fps(v: VBoxContainer):
 func _add_buttons(v: VBoxContainer):
 	# Add Pane button with PopupMenu listing all pane types
 	_add_pane_buttons(v)
+
+	# Window mode toggle button
+	var wm_btn = Button.new()
+	wm_btn.text = Icons.WINDOW_MODE + " Window"
+	Icons.style_button(wm_btn)
+	wm_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wm_btn.pressed.connect(func(): request_toggle_window_mode.emit())
+	v.add_child(wm_btn)
 
 	# Remaining actions
 	for b in [
