@@ -1,0 +1,23 @@
+[package]
+name = "godopty-ipc"
+version = "0.3.0"
+edition = "2024"
+description = "JSON-RPC IPC transport, client, and server for godopty workspace control"
+
+[dependencies]
+godopty-core = { path = "../godopty-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["net", "io-util", "time", "rt", "sync"] }
+thiserror = "2"
+log = "0.4"
+parking_lot = "0.12"
+
+[target.'cfg(unix)'.dependencies.tokio]
+version = "1"
+features = ["net"]
+
+[target.'cfg(windows)'.dependencies.tokio]
+version = "1"
+features = ["net"]
+
