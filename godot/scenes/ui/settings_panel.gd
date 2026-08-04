@@ -70,7 +70,7 @@ func _build_ui():
 	# Tab 3: System
 	var t_sys = _create_tab(tabs, "System")
 	_add_fps_control(t_sys)
-
+	var win_mode_opt = _add_window_mode_control(t_sys)
 	# Tab 4: Concepts
 	var t_con = _create_tab(tabs, "Concepts")
 	_add_concept_section(t_con)
@@ -91,6 +91,7 @@ func _build_ui():
 		SettingsManager.cfg_default_cols = int(dims[1].value)
 		SettingsManager.cfg_beam_width = int(cursor_px[0].value)
 		SettingsManager.cfg_underline_height = int(cursor_px[1].value)
+		SettingsManager.cfg_window_mode = win_mode_opt.selected
 		SettingsManager.save_settings()
 	)
 	bg.add_child(_debounce_timer)
@@ -101,7 +102,7 @@ func _build_ui():
 	fs_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	scroll_spin.value_changed.connect(func(_v): _debounce_timer.start())
 
-	_add_reset_button(v, shape_opt, blink_cb, blink_spin, scroll_spin, dims, cursor_px, color_btns, fs_spin)
+	_add_reset_button(v, shape_opt, blink_cb, blink_spin, scroll_spin, dims, cursor_px, color_btns, fs_spin, win_mode_opt)
 
 func _create_tab(tabs: TabContainer, title: String) -> VBoxContainer:
 	var sc = ScrollContainer.new()
@@ -262,6 +263,19 @@ func _add_fps_control(v: VBoxContainer):
 	hf.add_child(fps_opt)
 	v.add_child(hf)
 
+func _add_window_mode_control(v: VBoxContainer) -> OptionButton:
+	var hb = HBoxContainer.new()
+	hb.add_child(_lbl("Window Mode:"))
+	var opt = OptionButton.new()
+	opt.add_item("Decorated")
+	opt.add_item("Borderless")
+	opt.add_item("Fullscreen")
+	opt.selected = SettingsManager.cfg_window_mode
+	opt.item_selected.connect(func(_idx): _debounce_timer.start())
+	hb.add_child(opt)
+	v.add_child(hb)
+	return opt
+
 func _add_scheme_picker(v: VBoxContainer):
 	_add_file_picker(v, "Color scheme:", SettingsManager.cfg_color_scheme_path, [["*.txt; *.json; *.csv", "Scheme files"]], func(path: String):
 		SettingsManager.cfg_color_scheme_path = path
@@ -320,8 +334,7 @@ func _reset_colors(btns: Array):
 			(btns[i][1] as ColorPickerButton).color = defaults[i]
 		else:
 			(btns[i] as ColorPickerButton).color = defaults[i]
-
-func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: CheckBox, blink_spin: SpinBox, scroll_spin: SpinBox, dims: Array, cursor_px: Array, color_btns: Array, fs_spin: SpinBox):
+func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: CheckBox, blink_spin: SpinBox, scroll_spin: SpinBox, dims: Array, cursor_px: Array, color_btns: Array, fs_spin: SpinBox, win_mode_opt: OptionButton):
 	var btn = Button.new(); btn.text = "Reset to defaults"
 	btn.add_theme_font_size_override("font_size", 12)
 	btn.pressed.connect(func():
@@ -354,6 +367,8 @@ func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: Chec
 		cursor_px[1].value = 3
 		_reset_colors(color_btns)
 		fs_spin.value = 14
+		SettingsManager.cfg_window_mode = 0
+		win_mode_opt.selected = 0
 	)
 	v.add_child(btn)
 

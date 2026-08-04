@@ -2,18 +2,26 @@
 
 Planned features for future releases. Tracked in detail via [GitHub Issues](https://github.com/godopty/godopty/issues).
 
-## v0.2.0
+## v0.2.0 — UI/UX
 
-- [ ] Standalone export — first successful CI release for Linux, macOS, Windows
-- [ ] Drag-and-drop pane swapping
-- [ ] Drag-to-resize tile edges
-- [ ] Session auto-save — restore PTY sessions with scrollback on relaunch
-- [ ] SQLite + FTS5 history backend — infinite scrollback with full-text search
-- [ ] Workspace Trust — warn before spawning PTY from untrusted layout files
+- [x] Standalone export — first successful CI release for Linux, macOS, Windows
+- [x] Full-screen mode — decorated, borderless, and fullscreen with custom titlebar
+- [x] Drag-and-drop pane swapping
+- [x] Drag-to-resize tile edges
+- [x] Session auto-save — restore PTY sessions with scrollback on relaunch
+- [x] Workspace Trust — warn before spawning PTY from untrusted layout files
 
-## v0.3.0
+## v0.3.0 — CLI & AI Integration
 
+- [ ] CLI binary — `godopty` for pane control, IPC via Unix socket / named pipe
+- [ ] MCP server — Model Context Protocol integration for Gemini CLI
+- [ ] Daemon mode — CLI spawns GUI if not running
+- [ ] JSON Schema — `godopty schema` for AI tool discovery
 - [ ] Tab/workspace switching — multiple named workspaces per session
+
+## v0.4.0
+
+- [ ] SQLite + FTS5 history backend — infinite scrollback with full-text search
 - [ ] Visual Concept Graph — build concept automations visually using Godot's GraphEdit
 - [ ] In-app update checker
 - [ ] GPU-accelerated rendering — rasterize grid to single texture (fontdue)

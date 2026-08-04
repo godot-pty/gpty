@@ -21,7 +21,7 @@ var on_swap: Callable    # set by workspace to handle pane type swap
 
 var tiles: Array[Dictionary] = []
 var last_body: Control
-
+signal tiles_resized
 var _pane_counters: Dictionary = {}  # type_name -> next int
 
 var _pane_settings_panel  # set by workspace
@@ -140,6 +140,7 @@ func _build_wrapper_body(body: Control, title: String) -> Control:
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(body)
 
+	root.gui_input.connect(func(event: InputEvent): _on_tile_edge_drag(event, root))
 	return root
 
 func _make_vbox() -> VBoxContainer:
@@ -155,9 +156,11 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	bar.name = "TitleBar"
 	bar.custom_minimum_size = Vector2(0, TITLE_BAR_HEIGHT)
 	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.mouse_filter = Control.MOUSE_FILTER_STOP
 	parent.add_child(bar)
 
 	var tbg = ColorRect.new()
+	tbg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tbg.color = SettingsManager.cfg_title_bar_bg
 	bar.add_child(tbg)
 	tbg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -165,11 +168,18 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	var lbl = Label.new()
 	lbl.name = "TitleLabel"
 	lbl.text = " " + title
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	bar.add_child(lbl)
 	lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
+	bar.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.double_click and event.button_index == MOUSE_BUTTON_LEFT:
+			var body = _find_body(root)
+			if body:
+				_show_swap_popup(body, bar, event.global_position)
+	)
 	var btn_hbox = HBoxContainer.new()
 	btn_hbox.add_theme_constant_override("separation", 2)
 	btn_hbox.anchor_left = 1.0; btn_hbox.anchor_right = 1.0
@@ -360,6 +370,215 @@ func _open_pane_settings(body: Control):
 	_pane_settings_panel.open_for(body)
 
 
+
+func _show_swap_popup(body: Control, bar: Control, pos: Vector2):
+	var this_ti = -1
+	for i in tiles.size():
+		if _find_body(tiles[i].wrapper) == body: this_ti = i; break
+	if this_ti == -1: return
+
+	var menu = PopupMenu.new()
+	menu.name = "SwapTargetMenu"
+	for i in tiles.size():
+		if i == this_ti: continue
+		var other = _find_body(tiles[i].wrapper)
+		if other == null: continue
+		var label = other.get("pane_label")
+		if label == null or label == "":
+			var type_name = other._pane_type() if other.has_method("_pane_type") else "?"
+			label = PaneTypes.ALL.get(type_name, {}).get("name", type_name)
+		menu.add_item(String(label))
+		menu.set_item_metadata(menu.item_count - 1, i)
+	menu.index_pressed.connect(func(idx: int):
+		var other_ti = menu.get_item_metadata(idx)
+		_swap_tile_positions(this_ti, other_ti)
+		tiles_resized.emit()
+		menu.queue_free()
+	)
+	# Menu must be added to root so it can receive input
+	var root = bar.get_parent().get_parent()  # BodyVBox -> PanelContainer
+	if root is PanelContainer:
+		root.add_child(menu)
+	menu.position = pos
+	menu.reset_size()
+	menu.popup()
+	menu.popup_hide.connect(menu.queue_free)
+
+func _swap_tile_positions(a: int, b: int):
+	var ta = tiles[a]
+	var tb = tiles[b]
+	var tmp = {"col": ta.col, "row": ta.row, "cspan": ta.cspan, "rspan": ta.rspan}
+	ta.col = tb.col; ta.row = tb.row; ta.cspan = tb.cspan; ta.rspan = tb.rspan
+	tb.col = tmp.col; tb.row = tmp.row; tb.cspan = tmp.cspan; tb.rspan = tmp.rspan
 func _handle_swap(body: Control, new_type_name: String, _menu: PopupMenu):
 	if on_swap.is_valid():
 		on_swap.call(body, new_type_name)
+
+
+# ── Edge Drag Resize ───────────────────────────────────────────────────
+
+var _drag_edge: String = ""
+var _drag_wrapper: Control = null
+
+const EDGE_THRESHOLD = 4
+
+func _on_tile_edge_drag(event: InputEvent, wrapper: Control):
+	if event is InputEventMouseMotion and _drag_edge == "":
+		var e = _edge_at(wrapper, event.position)
+		if e != "":
+			match e:
+				"left", "right": DisplayServer.cursor_set_shape(DisplayServer.CURSOR_HSIZE)
+				"top", "bottom": DisplayServer.cursor_set_shape(DisplayServer.CURSOR_VSIZE)
+		else:
+			DisplayServer.cursor_set_shape(DisplayServer.CURSOR_ARROW)
+	elif event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			var e = _edge_at(wrapper, event.position)
+			if e != "":
+				_drag_edge = e
+				_drag_wrapper = wrapper
+				_drag_start_pos = event.global_position
+				_save_drag_initial_sizes()
+		elif event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+			if _drag_edge != "":
+				_drag_edge = ""
+				_drag_wrapper = null
+				DisplayServer.cursor_set_shape(DisplayServer.CURSOR_ARROW)
+				tiles_resized.emit()
+	elif event is InputEventMouseMotion and _drag_edge != "":
+		var delta = event.global_position - _drag_start_pos
+		_resize_tile(_drag_wrapper, _drag_edge, delta)
+		_drag_start_pos = event.global_position
+
+var _drag_start_pos: Vector2
+var _drag_saved_sizes: Dictionary = {}
+
+func _save_drag_initial_sizes():
+	_drag_saved_sizes.clear()
+	for i in tiles.size():
+		var t = tiles[i]
+		_drag_saved_sizes[t.wrapper] = {"col": t.col, "row": t.row, "cspan": t.cspan, "rspan": t.rspan}
+
+func _edge_at(wrapper: Control, pos: Vector2) -> String:
+	var s = wrapper.size
+	if pos.x <= EDGE_THRESHOLD: return "left"
+	if pos.x >= s.x - EDGE_THRESHOLD: return "right"
+	if pos.y <= EDGE_THRESHOLD: return "top"
+	if pos.y >= s.y - EDGE_THRESHOLD: return "bottom"
+	return ""
+
+func _resize_tile(wrapper: Control, edge: String, delta: Vector2):
+	var ti = -1
+	for i in tiles.size():
+		if tiles[i].wrapper == wrapper: ti = i; break
+	if ti == -1: return
+
+	var t = tiles[ti]
+	var saved = _drag_saved_sizes.get(wrapper, {})
+	if saved.is_empty(): return
+
+	# Reset both tiles to saved positions before applying delta
+	t.col = saved.get("col", t.col)
+	t.row = saved.get("row", t.row)
+	t.cspan = saved.get("cspan", t.cspan)
+	t.rspan = saved.get("rspan", t.rspan)
+
+	match edge:
+		"left":
+			var adj = _adjacent_left(t)
+			if adj == null: return
+			# Reset adjacent too
+			var as = _drag_saved_sizes.get(adj.wrapper, {})
+			if as.is_empty(): return
+			adj.col = as.get("col", adj.col)
+			adj.cspan = as.get("cspan", adj.cspan)
+			# Compute delta in grid units (approximate)
+			var total_w = maxf(wrapper.size.x, 1.0)
+			var grid_px = total_w / float(maxi(t.cspan + adj.cspan, 1))
+			var dg = int(round(delta.x / grid_px))
+			if dg >= 0: return  # dragging left edge left means shrinking self
+			dg = maxi(dg, -(t.cspan - MIN_TILE))  # don't push past MIN_TILE on self
+			dg = mini(dg, adj.cspan - MIN_TILE)   # don't push past MIN_TILE on adj
+			if dg == 0: return
+			t.col += dg
+			t.cspan -= dg
+			adj.cspan += dg
+		"right":
+			var adj = _adjacent_right(t)
+			if adj == null: return
+			var as = _drag_saved_sizes.get(adj.wrapper, {})
+			if as.is_empty(): return
+			adj.col = as.get("col", adj.col)
+			adj.cspan = as.get("cspan", adj.cspan)
+			var total_w = maxf(wrapper.size.x, 1.0)
+			var grid_px = total_w / float(maxi(t.cspan + adj.cspan, 1))
+			var dg = int(round(delta.x / grid_px))
+			if dg <= 0: return  # dragging right edge right means growing self
+			dg = mini(dg, GRID - t.col - t.cspan)  # don't go past grid
+			dg = mini(dg, adj.cspan - MIN_TILE)    # don't push past MIN_TILE on adj
+			if dg == 0: return
+			t.cspan += dg
+			adj.col += dg
+			adj.cspan -= dg
+		"top":
+			var adj = _adjacent_above(t)
+			if adj == null: return
+			var as = _drag_saved_sizes.get(adj.wrapper, {})
+			if as.is_empty(): return
+			adj.row = as.get("row", adj.row)
+			adj.rspan = as.get("rspan", adj.rspan)
+			var total_h = maxf(wrapper.size.y, 1.0)
+			var grid_px = total_h / float(maxi(t.rspan + adj.rspan, 1))
+			var dg = int(round(delta.y / grid_px))
+			if dg >= 0: return
+			dg = maxi(dg, -(t.rspan - MIN_TILE))
+			dg = mini(dg, adj.rspan - MIN_TILE)
+			if dg == 0: return
+			t.row += dg
+			t.rspan -= dg
+			adj.rspan += dg
+		"bottom":
+			var adj = _adjacent_below(t)
+			if adj == null: return
+			var as = _drag_saved_sizes.get(adj.wrapper, {})
+			if as.is_empty(): return
+			adj.row = as.get("row", adj.row)
+			adj.rspan = as.get("rspan", adj.rspan)
+			var total_h = maxf(wrapper.size.y, 1.0)
+			var grid_px = total_h / float(maxi(t.rspan + adj.rspan, 1))
+			var dg = int(round(delta.y / grid_px))
+			if dg <= 0: return
+			dg = mini(dg, GRID - t.row - t.rspan)
+			dg = mini(dg, adj.rspan - MIN_TILE)
+			if dg == 0: return
+			t.rspan += dg
+			adj.row += dg
+			adj.rspan -= dg
+
+func _adjacent_left(t: Dictionary):
+	for o in tiles:
+		if o == t: continue
+		if o.col + o.cspan == t.col and o.row == t.row and o.rspan == t.rspan:
+			return o
+	return null
+
+func _adjacent_right(t: Dictionary):
+	for o in tiles:
+		if o == t: continue
+		if o.col == t.col + t.cspan and o.row == t.row and o.rspan == t.rspan:
+			return o
+	return null
+
+func _adjacent_above(t: Dictionary):
+	for o in tiles:
+		if o == t: continue
+		if o.row + o.rspan == t.row and o.col == t.col and o.cspan == t.cspan:
+			return o
+	return null
+
+func _adjacent_below(t: Dictionary):
+	for o in tiles:
+		if o == t: continue
+		if o.row == t.row + t.rspan and o.col == t.col and o.cspan == t.cspan:
+			return o
+	return null

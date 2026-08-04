@@ -101,6 +101,14 @@ func _apply_window_mode():
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 			if _titlebar: _titlebar.visible = false
+	# Swap titlebar maximize/restore icon
+	if _titlebar:
+		var max_btn = _titlebar.get_meta("_max_btn", null)
+		if max_btn != null:
+			if SettingsManager.cfg_window_mode == 2 and max_btn.text == Icons.MAXIMIZE_WIN:
+				max_btn.text = Icons.RESTORE_WIN
+			elif SettingsManager.cfg_window_mode != 2 and max_btn.text == Icons.RESTORE_WIN:
+				max_btn.text = Icons.MAXIMIZE_WIN
 	_apply_layout()
 func _toggle_fullscreen():
 	if SettingsManager.cfg_window_mode == 2:
@@ -515,6 +523,7 @@ func _wire_sidebar_signals():
 	_sidebar.request_toggle_window_mode.connect(_cycle_window_mode)
 	_sidebar.request_save_profile.connect(_save_current_as_profile)
 	_sidebar.request_delete_profile.connect(_delete_profile)
+	_tm.tiles_resized.connect(_apply_layout)
 	ProfileManager.profiles_changed.connect(_refresh_profile_buttons)
 
 func _list():
@@ -691,6 +700,39 @@ func _activate_profile(p_name: String):
 	if idx == -1: return
 	var profile = profs[idx]
 
+	# Workspace trust: check for shell mismatch in profile tiles
+	var profile_tiles = profile.get("tiles", [])
+	var untrusted := false
+	for td in profile_tiles:
+		if not (td is Dictionary): continue
+		var settings = td.get("settings", {})
+		var sh = settings.get("shell", td.get("shell", ""))
+		if sh != "" and sh != SettingsManager.cfg_shell_command:
+			untrusted = true
+			break
+
+	if untrusted:
+		_show_profile_trust_dialog(profile, profile_tiles)
+		return
+
+	_do_profile_activate(profile)
+
+func _show_profile_trust_dialog(profile: Dictionary, tiles: Array):
+	var dialog = ConfirmationDialog.new()
+	dialog.title = "Workspace Trust"
+	dialog.dialog_text = "This profile contains panes with a different shell than your current default (%s).\n\nDo you want to activate it anyway?" % SettingsManager.cfg_shell_command
+	dialog.ok_button_text = "Activate"
+	dialog.cancel_button_text = "Cancel"
+	dialog.confirmed.connect(func():
+		_do_profile_activate(profile)
+		dialog.queue_free()
+	)
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered()
+
+func _do_profile_activate(profile: Dictionary):
+	var tiles = profile.get("tiles", [])
 	# Confirm if workspace has existing panes
 	if _tm.tiles.size() > 0:
 		var dialog = ConfirmationDialog.new()
