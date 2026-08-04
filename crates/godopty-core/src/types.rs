@@ -4,6 +4,7 @@
 //! form the contract between the PTY layer, the concept engine, and the
 //! terminal tasks. Every type is `Clone` so it can be fanned out to
 //! multiple receivers.
+use serde::{Deserialize, Serialize};
 
 
 /// How a triggered concept captures terminal output.
@@ -26,6 +27,42 @@ impl Default for CaptureMode {
     }
 }
 use regex::Regex;
+
+/// Pane type discriminator — mirrors GDScript PaneTypes.ALL keys.
+///
+/// Used across the IPC boundary to identify which type of pane to spawn
+/// or query. The `as_str()` method returns the GDScript-compatible key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PaneType {
+    Terminal,
+    CodeViewer,
+    FileTree,
+    Observer,
+}
+
+impl PaneType {
+    /// Returns the GDScript `PaneTypes.ALL` dictionary key for this type.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Terminal => "terminal",
+            Self::CodeViewer => "code_viewer",
+            Self::FileTree => "file_tree",
+            Self::Observer => "observer",
+        }
+    }
+
+    /// Parse from a GDScript type string (case-sensitive).
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "terminal" => Some(Self::Terminal),
+            "code_viewer" => Some(Self::CodeViewer),
+            "file_tree" => Some(Self::FileTree),
+            "observer" => Some(Self::Observer),
+            _ => None,
+        }
+    }
+}
 
 /// Identifies and labels a distinct terminal pane.
 ///

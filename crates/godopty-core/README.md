@@ -6,7 +6,7 @@ Library crate for the godopty multi-PTY emulator. This is the engine — all ter
 
 | Module | Purpose | Key Types |
 |--------|---------|-----------|
-| [`types`](src/types.rs) | Data vocabulary shared across all modules | `Concept`, `Event`, `Action`, `TerminalConfig`, `CaptureMode`, `CapturedOutput` |
+| [`types`](src/types.rs) | Data vocabulary shared across all modules | `Concept`, `Event`, `Action`, `TerminalConfig`, `CaptureMode`, `CapturedOutput`, `PaneType` |
 | [`concept`](src/concept.rs) | Pure functions for regex matching and command routing | `match_and_broadcast()`, `matching_commands()` |
 | [`engine`](src/engine.rs) | Runtime orchestrator; spawns terminal tasks, capture state machine | `WorkspaceEngine`, `PtyTerminalHandle`, `SpawnedTerminal`, `TaskContext` |
 | [`pty`](src/pty.rs) | Cross-platform PTY lifecycle via `portable-pty` | `PtyHandle` |
@@ -39,3 +39,5 @@ All modules are single files in `src/`. When a module grows beyond ~200 lines or
 | `tokio` | 1.52 | Async runtime + broadcast channel |
 | `regex` | 1.12 | Concept trigger patterns |
 | `rusqlite` | 0.31 | SQLite history storage |
+| `serde` | 1 | Serialization framework (derive support) |
+| `serde_json` | 1 | JSON encoding for IPC + schema output |
