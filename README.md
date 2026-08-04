@@ -20,9 +20,9 @@ godopty (goh-doh-tee), a Godot-based Rust multi-PTY emulator desktop application
 | Pub-sub | `tokio::sync::broadcast(1024)` | 1:N fan-out, lagged-receiver protection, self-reaction prevention |
 | Grid rendering | `alacritty_terminal` | Full DEC STD 070 grid state machine; pass arrays to Godot `_draw()` |
 | Godot bridge | `gdext 0.5` | Native GDExtension for Godot 4.7+ |
+| IPC | JSON-RPC 2.0 over Unix socket | CLI ↔ GUI control protocol |
+| CLI | `clap` 4 | Subcommand tree with schema auto-generation |
 | Rust edition | 2024 | Requires Rust >= 1.85 |
-
----
 
 ## Installation
 
@@ -30,9 +30,9 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 
 | Platform | Package |
 |---|---|
-| Linux | `godopty-v0.1.0-linux-x86_64.tar.gz` — extract and run `./godopty` |
-| macOS | `godopty-v0.1.0-macos.zip` — unzip, right-click the `.app` → Open |
-| Windows | `godopty-v0.1.0-windows-x86_64.zip` — unzip and run `godopty.exe` |
+| Linux | `godopty-v0.3.0-linux-x86_64.tar.gz` — extract and run `./godopty` |
+| macOS | `godopty-v0.3.0-macos.zip` — unzip, right-click the `.app` → Open |
+| Windows | `godopty-v0.3.0-windows-x86_64.zip` — unzip and run `godopty.exe` |
 
 ---
 
@@ -103,15 +103,12 @@ cargo check
 # Godot tests
 godot --headless --path godot --import
 godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration
-
-# Mock terminal demo (demonstrates pub-sub engine)
-cargo run --bin godopty-cli
-
-# Real-PTY demo (requires Linux or Windows 11)
-cargo run --bin godopty-cli -- --pty
-
-# Terminal grid demo (validates alacritty_terminal ANSI + color processing)
-cargo run --bin godopty-cli -- --term
+# CLI (control running godopty GUI)
+cargo run --bin godopty-cli -- new-pane --type terminal
+cargo run --bin godopty-cli -- list-panes
+cargo run --bin godopty-cli -- schema          # JSON Schema for AI tools
+cargo run --bin godopty-cli -- schema --format mcp  # MCP tools manifest
+cargo run --bin godopty-cli -- mcp             # MCP server over stdio
 
 # Build the GDExtension
 cargo build -p godopty-gdext

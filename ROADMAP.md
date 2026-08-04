@@ -13,10 +13,10 @@ Planned features for future releases. Tracked in detail via [GitHub Issues](http
 
 ## v0.3.0 — CLI & AI Integration
 
-- [ ] CLI binary — `godopty` for pane control, IPC via Unix socket / named pipe
-- [ ] MCP server — Model Context Protocol integration for Gemini CLI
-- [ ] Daemon mode — CLI spawns GUI if not running
-- [ ] JSON Schema — `godopty schema` for AI tool discovery
+- [x] CLI binary — `godopty` for pane control, IPC via Unix socket / named pipe
+- [x] MCP server — Model Context Protocol integration
+- [x] Daemon mode — CLI spawns GUI if not running
+- [x] JSON Schema — `godopty schema` for AI tool discovery
 - [ ] Tab/workspace switching — multiple named workspaces per session
 
 ## v0.4.0
