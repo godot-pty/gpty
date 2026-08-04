@@ -67,6 +67,13 @@ target/debug/libgodopty_gdext.so
 | `acknowledge_capture(event_id: int)` | void | Discard captured bytes (receiver consumed output) |
 | `flush_capture(event_id: int)` | void | Feed captured bytes to grid (no receiver) |
 
+#### IPC bridge (static methods)
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `drain_ipc_requests()` | `Array` | Drain queued IPC requests for GDScript dispatch |
+| `respond_ipc(id, success, result_json)` | void | Respond to a drained IPC request |
+
 #### Grid Cell Dictionary
 
 ```gdscript

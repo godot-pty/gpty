@@ -17,6 +17,13 @@ use godot::prelude::*;
 use godot::global::Key;
 use godopty_core::engine::{SpawnedTerminal, WorkspaceEngine};
 use godopty_core::types::TerminalConfig;
+use std::collections::HashMap;
+use parking_lot::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
+use godopty_ipc::protocol::JsonRpcError;
+use godopty_ipc::server::IpcServer;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
@@ -40,6 +47,25 @@ static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
 
 static ENGINE: LazyLock<WorkspaceEngine> =
     LazyLock::new(|| WorkspaceEngine::new(Vec::new()));
+
+// ═══════════════════════════════════════════════════════════════════════
+// IPC dispatch bridge — connects tokio IPC handlers to GDScript main thread
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Unique request ID counter for the IPC bridge.
+static NEXT_IPC_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Queued IPC requests waiting for GDScript dispatch.
+/// Each entry: (request_id, method_name, params_json).
+static PENDING_IPC: LazyLock<Mutex<Vec<(u64, String, serde_json::Value)>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// Pending oneshot responders keyed by request ID.
+/// The IPC handler awaits on the oneshot receiver; GDScript
+/// sends the response through the sender.
+type IpcResponder = tokio::sync::oneshot::Sender<Result<serde_json::Value, JsonRpcError>>;
+static IPC_RESPONDERS: LazyLock<Mutex<HashMap<u64, IpcResponder>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 // ═══════════════════════════════════════════════════════════════════════
 // GodoptyTerminal — a Godot node backed by a Rust PTY session
@@ -696,6 +722,53 @@ impl GodoptyTerminal {
 		}
 	}
 
+	// ── IPC bridge (polled from GDScript) ──────────────────────
+
+	/// Drain queued IPC requests for GDScript to dispatch.
+	///
+	/// Returns an array of dictionaries, each with keys:
+	/// `id` (int), `method` (String), `params` (String — JSON).
+	/// Called from `workspace.gd._process()`.
+	#[func]
+	fn drain_ipc_requests() -> Array<Variant> {
+		let mut pending = PENDING_IPC.lock();
+		let mut arr = Array::new();
+		for (id, method, params) in pending.drain(..) {
+			let mut d = Dictionary::<Variant, Variant>::new();
+			d.set("id", &Variant::from(id as i64));
+			d.set("method", &Variant::from(method));
+			let json = serde_json::to_string(&params).unwrap_or_default();
+			d.set("params", &Variant::from(GString::from(&json)));
+			arr.push(&Variant::from(d));
+		}
+		arr
+	}
+
+	/// Respond to an IPC request previously obtained via `drain_ipc_requests()`.
+	///
+	/// `success` indicates whether `result_json` is a normal result
+	/// or an error object (with `{"error": {"code": …, "message": …}}` shape).
+	#[func]
+	fn respond_ipc(id: i64, success: bool, result_json: GString) {
+		let mut responders = IPC_RESPONDERS.lock();
+		if let Some(tx) = responders.remove(&(id as u64)) {
+			if success {
+				let val: serde_json::Value = serde_json::from_str(&result_json.to_string())
+					.unwrap_or(serde_json::Value::Null);
+				let _ = tx.send(Ok(val));
+			} else {
+				let err: JsonRpcError = serde_json::from_str(&result_json.to_string())
+					.unwrap_or_else(|_| {
+						JsonRpcError::new(
+							JsonRpcError::INTERNAL_ERROR,
+							"unknown error from GDScript",
+						)
+					});
+				let _ = tx.send(Err(err));
+			}
+		}
+	}
+
 }
 
 /// Map Godot `Key` enum values to Linux evdev scancodes.
@@ -773,6 +846,67 @@ fn godot_key_to_evdev(kc: i64) -> u32 {
 	k
 }
 
+// ── IPC server helpers ────────────────────────────────────
+
+/// Returns the default IPC socket path, respecting `GODOPTY_SOCKET` env var.
+fn default_socket_path() -> String {
+    godopty_ipc::transport::default_socket_path()
+}
+
+/// Register all IPC handlers on the server.
+///
+/// Each handler deserializes params, queues a request for GDScript
+/// via `PENDING_IPC`, and awaits the response on `IPC_RESPONDERS`.
+fn register_handlers(server: &mut IpcServer) {
+    use std::sync::Arc;
+
+    // Helper: create a handler that delegates to GDScript polling.
+    let dispatch = |method: &'static str| -> godopty_ipc::server::HandlerFn {
+        let method = method.to_string();
+        Arc::new(move |params| {
+            let method = method.clone();
+            Box::pin(dispatch_ipc(method, params))
+        })
+    };
+
+    server.register("newPane", dispatch("newPane"));
+    server.register("listPanes", dispatch("listPanes"));
+    server.register("killPane", dispatch("killPane"));
+    server.register("focusPane", dispatch("focusPane"));
+    server.register("inject", dispatch("inject"));
+    server.register("layoutSave", dispatch("layoutSave"));
+    server.register("layoutLoad", dispatch("layoutLoad"));
+    server.register("layoutList", dispatch("layoutList"));
+    server.register("version", dispatch("version"));
+}
+
+/// Enqueue an IPC request for GDScript and await the response.
+async fn dispatch_ipc(
+    method: String,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let id = NEXT_IPC_ID.fetch_add(1, Ordering::Relaxed);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+
+    IPC_RESPONDERS.lock().insert(id, tx);
+    PENDING_IPC.lock().push((id, method, params));
+
+    match tokio::time::timeout(Duration::from_secs(30), rx).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err(JsonRpcError::new(
+            JsonRpcError::INTERNAL_ERROR,
+            "responder dropped before response",
+        )),
+        Err(_) => {
+            IPC_RESPONDERS.lock().remove(&id);
+            Err(JsonRpcError::new(
+                JsonRpcError::INTERNAL_ERROR,
+                "IPC request timed out (30s)",
+            ))
+        }
+    }
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════
 // Extension entry point
@@ -781,4 +915,18 @@ fn godot_key_to_evdev(kc: i64) -> u32 {
 struct GodoptyExtension;
 
 #[gdextension]
-unsafe impl ExtensionLibrary for GodoptyExtension {}
+unsafe impl ExtensionLibrary for GodoptyExtension {
+    fn on_stage_init(stage: godot::init::InitStage) {
+        if stage == godot::init::InitStage::Scene {
+            // GDScript singletons are now available — start the IPC server.
+            log::info!("Starting IPC server on {}", default_socket_path());
+            RUNTIME.spawn(async {
+                let mut server = IpcServer::new(default_socket_path());
+                register_handlers(&mut server);
+                if let Err(e) = server.serve().await {
+                    log::error!("IPC server failed: {e}");
+                }
+            });
+        }
+    }
+}

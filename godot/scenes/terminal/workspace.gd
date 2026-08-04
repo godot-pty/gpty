@@ -544,6 +544,7 @@ func _toggle_sidebar():
 func _process(_delta: float):
 	# Concept event polling — must run even before sidebar is ready
 	_poll_concept_events()
+	_poll_ipc_requests()
 	if _sidebar == null: return
 	# FPS counter update (throttled to ~4 Hz)
 	if Engine.get_process_frames() % 15 == 0:
@@ -588,6 +589,116 @@ func _find_pane_of_type(type_name: String) -> Control:
 	for t in _tm.tiles:
 		var body = _tm._find_body(t.wrapper)
 		if body and body._pane_type() == type_name:
+			return body
+	return null
+
+# ═══════════════════════════════════════════════════════════════════════
+# IPC bridge — polls Rust IPC requests from _process
+# ═══════════════════════════════════════════════════════════════════════
+
+func _poll_ipc_requests():
+	# GodoptyTerminal is a GodotClass — call static methods on the class
+	var reqs = GodoptyTerminal.drain_ipc_requests()
+	if reqs.is_empty():
+		return
+	for req in reqs:
+		var id = req["id"]
+		var method = req["method"]
+		var params_str = req["params"]
+		var params = {}
+		if params_str != "":
+			params = JSON.parse_string(params_str)
+			if params == null:
+				params = {}
+		var result = _handle_ipc_method(method, params)
+		var success = not (result is Dictionary and result.has("error"))
+		var result_json = JSON.stringify(result) if typeof(result) != TYPE_STRING else result
+		GodoptyTerminal.respond_ipc(id, success, result_json)
+
+func _handle_ipc_method(method: String, params):
+	match method:
+		"newPane":
+			var type_name = str(params.get("type", "terminal"))
+			var shell = params.get("command", SettingsManager.cfg_shell_command)
+			var body = _spawn_pane(type_name, {"shell_command": shell})
+			if body == null:
+				return _ipc_error("Grid is full")
+			return {"pane_id": body.pane_label, "type": type_name}
+		"listPanes":
+			var panes = []
+			for t in _tm.tiles:
+				var body = _tm._find_body(t.wrapper)
+				if body == null:
+					continue
+				panes.append({
+					"id": body.pane_label,
+					"type": body._pane_type(),
+					"title": body.get("_last_title") if "_last_title" in body else "",
+					"col": t.col, "row": t.row, "cspan": t.cspan, "rspan": t.rspan,
+					"focused": body == _tm.last_body,
+				})
+			return {"panes": panes, "count": panes.size()}
+		"killPane":
+			var pane_id = str(params.get("pane_id", ""))
+			if pane_id == "active" and _tm.last_body:
+				_kill(_tm.last_body)
+			else:
+				var body = _find_pane_by_label(pane_id)
+				if body:
+					_kill(body)
+				else:
+					return _ipc_error("Pane '%s' not found" % pane_id)
+			return {"success": true}
+		"focusPane":
+			var pane_id = str(params.get("pane_id", ""))
+			var body = _find_pane_by_label(pane_id)
+			if body == null:
+				return _ipc_error("Pane '%s' not found" % pane_id)
+			body.grab_focus()
+			return {"success": true}
+		"inject":
+			var pane_id = str(params.get("pane_id", ""))
+			var text = str(params.get("text", ""))
+			var body = _find_pane_by_label(pane_id)
+			if body == null:
+				return _ipc_error("Pane '%s' not found" % pane_id)
+			if not body is TerminalPane:
+				return _ipc_error("Pane '%s' is not a terminal" % pane_id)
+			body._terminal.send_line(text)
+			return {"success": true}
+		"layoutSave":
+			var name = str(params.get("name", ""))
+			if name == "":
+				return _ipc_error("Profile name required")
+			ProfileManager.add_profile(name, _gather_tiles())
+			return {"success": true, "name": name}
+		"layoutLoad":
+			var name = str(params.get("name", ""))
+			for p in ProfileManager.profiles:
+				if p.get("name", "") == name:
+					_do_activate(p)
+					return {"success": true}
+			return _ipc_error("Profile '%s' not found" % name)
+		"layoutList":
+			var names = []
+			for p in ProfileManager.profiles:
+				names.append(p.get("name", ""))
+			return {"layouts": names}
+		"version":
+			return {"version": "0.3.0", "protocol": "2.0"}
+		"shutdown":
+			get_tree().quit()
+			return {"success": true}
+		_:
+			return _ipc_error("Unknown method: %s" % method, -32601)
+
+func _ipc_error(msg: String, code := -32000):
+	return {"error": {"code": code, "message": msg}}
+
+func _find_pane_by_label(label: String) -> Control:
+	for t in _tm.tiles:
+		var body = _tm._find_body(t.wrapper)
+		if body and body.get("pane_label") == label:
 			return body
 	return null
 func _toggle_settings():
