@@ -25,9 +25,18 @@ godopty/
 │   │       ├── color.rs        # ANSI color → RGB
 │   │       ├── keymap.rs       # Key event → byte sequence
 │   │       └── history.rs      # SQLite scrollback store
-│   ├── godopty-cli/            # CLI demos (mock, --pty, --term)
-│   │   └── src/main.rs
-│   └── godopty-gdext/          # GDExtension cdylib: GodoptyTerminal GodotClass
+│   ├── godopty-cli/            # CLI client for workspace control (JSON-RPC IPC)
+│   │   └── src/
+│   │       ├── main.rs         # clap CLI with subcommands
+│   │       └── commands/       # Subcommand handlers (new_pane, schema, mcp, daemon, …)
+│   ├── godopty-ipc/            # Shared IPC types, transport, client, and server
+│   │   └── src/
+│   │       ├── protocol.rs     # JSON-RPC 2.0 Request, Response, JsonRpcError
+│   │       ├── types.rs        # IPC domain types (NewPaneParams, PaneInfo, …)
+│   │       ├── transport.rs    # Platform socket connection (Unix, named pipe)
+│   │       ├── server.rs       # Async IPC server with handler registry
+│   │       └── client.rs       # Async IPC client with connect/call/timeout
+│   └── godopty-gdext/          # GDExtension cdylib: GodoptyTerminal + IPC server
 │       └── src/lib.rs
 └── godot/                      # Godot 4.7 project
     ├── project.godot
@@ -73,10 +82,11 @@ cp target/debug/libgodopty_gdext.so godot/bin/libgodopty_gdext.linux.x86_64.so
 # Type-check Rust only (fast, no codegen)
 cargo check
 
-# CLI demos (no Godot needed)
-cargo run --bin godopty-cli              # mock pub-sub
-cargo run --bin godopty-cli -- --pty     # real PTY
-cargo run --bin godopty-cli -- --term    # alacritty_terminal grid
+# CLI (control running godopty GUI over IPC)
+cargo run --bin godopty -- new-pane --type terminal
+cargo run --bin godopty -- list-panes
+cargo run --bin godopty -- schema          # JSON Schema for AI tools
+cargo run --bin godopty -- schema --format mcp  # MCP tools manifest
 
 # Open in Godot editor (after building gdext)
 cd godot && godot -e
@@ -86,6 +96,8 @@ cd godot && godot -e
 
 ```
 Shell → PTY I/O thread → vte parser → alacritty_terminal grid → Arc<Mutex<TermGrid>> → GodoptyTerminal (gdext) → GDScript _draw()
+
+CLI → Unix socket → IpcServer (tokio) → PENDING_IPC queue → GDScript _poll_ipc_requests() → workspace methods → IPC_RESPONDERS → CLI response
 ```
 
 ## Testing
@@ -158,8 +170,7 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 
 ### Commits
 
-- Format: [Conventional Commits](https://www.conventionalcommits.org/) — `feat(scope):`, `fix(scope):`, `chore(scope):`
-- Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `profiles`, `concepts`, `icons`
+- Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `ipc`, `profiles`, `concepts`, `icons`
 
 ### Pitfalls
 
@@ -182,6 +193,15 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 - Raw-byte buffering for grid replay: Never buffer parsed lines for later grid replay — the alacritty_terminal ANSI state machine needs raw bytes with escape sequences intact. Buffer `Vec<Vec<u8>>` (chunks), replay with `feed_grid(board, chunk)`.
 - Rendering Performance: GDScript `_draw` is slow when calling `draw_rect`/`draw_string` character-by-character. Avoid generating heavy data structures (like `Dictionary`) per-cell across the FFI boundary. Prefer packing data into flat arrays (`PackedByteArray`, `PackedInt32Array`) in Rust, and batch rendering operations line-by-line in Godot.
 - Resize Rate Limiting: Firing SIGWINCH heavily on every frame during window drag will overwhelm the child PTY process. Always debounce or rate-limit terminal `_on_resize` events before passing them to the backend.
+
+### IPC Bridge
+
+- `on_stage_init` not `on_level_init`: godot 0.5's `ExtensionLibrary` trait uses `fn on_stage_init(stage: InitStage)`, not `on_level_init`. The `InitStage::Scene` variant fires when GDScript singletons are ready.
+- `parking_lot::Mutex` for IPC statics: `PENDING_IPC` and `IPC_RESPONDERS` use `parking_lot::Mutex` (no poisoning, direct guard return). NEVER use `std::sync::Mutex` with `.unwrap()` on every lock — it's both slower and noisier.
+- Oneshot channel timeout: `dispatch_ipc()` waits on a `tokio::sync::oneshot` with a 30s timeout. If GDScript never calls `respond_ipc()`, the handler times out and cleans up the responder entry — preventing a slow memory leak from abandoned requests.
+- IPC responds in `_process()`: The IPC bridge relies on workspace.gd polling `drain_ipc_requests()` every frame. Heavy `_process()` work that blocks too long can cause IPC timeouts. Keep `_process()` work minimal; defer expensive operations.
+- GDScript `GodoptyTerminal` static method calls: `drain_ipc_requests()` and `respond_ipc()` are `#[func]` associated functions (no `&self`). In GDScript they are called as `GodoptyTerminal.drain_ipc_requests()` (class-level, not instance).
+- Version alignment: All workspace crates SHARE the same version (`0.3.0`). When bumping for a release, bump all `crates/*/Cargo.toml` files together. `godopty-cli` binary name is `[[bin]] name = "godopty"`, not the crate name.
 
 ### Agent Tool Notes
 
