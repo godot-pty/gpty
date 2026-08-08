@@ -86,8 +86,11 @@ func _apply_fps_setting():
 
 func _notification(what):
 	if what == NOTIFICATION_RESIZED: _apply_layout()
-	if what == NOTIFICATION_WM_CLOSE_REQUEST: _save_window_position(); _save()
+	if what == NOTIFICATION_WM_CLOSE_REQUEST: _save_window_position()
 
+func _exit_tree():
+	_save_window_position()
+	_save()
 var _titlebar: Control = null
 
 func _apply_window_mode():
@@ -397,7 +400,6 @@ func _reset():
 
 func _gather_tiles() -> Array[Dictionary]:
 	var ts: Array[Dictionary] = []
-	print("[DEBUG] _gather_tiles: _tm.tiles.size() = ", _tm.tiles.size())
 	for t in _tm.tiles:
 		var body = _tm._find_body(t.wrapper)
 		var settings = body._get_layout_state() if body and body.has_method("_get_layout_state") else {}
@@ -406,7 +408,6 @@ func _gather_tiles() -> Array[Dictionary]:
 			"cspan": t.cspan, "rspan": t.rspan,
 			"settings": settings,
 		})
-	print("[DEBUG] _gather_tiles: gathered ", ts.size(), " tiles")
 	return ts
 
 func _save():
