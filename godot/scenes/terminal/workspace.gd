@@ -107,7 +107,6 @@ func _exit_tree():
 var _titlebar: Control = null
 
 func _apply_window_mode():
-	print("[DEBUG] _apply_window_mode: cfg_window_mode=", SettingsManager.cfg_window_mode, " cfg_show_titlebar=", SettingsManager.cfg_show_titlebar)
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	match SettingsManager.cfg_window_mode:
 		0:  # Decorated windowed

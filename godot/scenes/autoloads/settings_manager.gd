@@ -59,6 +59,7 @@ func load_settings():
 	cfg_scrollback_indicator = _color_from_hex(d.get("scrollback_indicator", ""), Color(1.0, 1.0, 0.0))
 	cfg_color_scheme_path = d.get("color_scheme", "")
 	cfg_max_fps = d.get("max_fps", 0)
+	cfg_window_mode = d.get("window_mode", 0)
 	cfg_show_titlebar = d.get("show_titlebar", true)
 	var wp = d.get("window_position", {})
 	cfg_window_position = Vector2i(wp.get("x", 100), wp.get("y", 100))
