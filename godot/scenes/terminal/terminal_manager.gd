@@ -174,17 +174,12 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	bar.add_child(lbl)
 	lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	bar.gui_input.connect(func(event: InputEvent):
-		if event is InputEventMouseButton and event.double_click and event.button_index == MOUSE_BUTTON_LEFT:
-			var body = _find_body(root)
-			if body:
-				_show_swap_popup(body, bar, event.global_position)
-	)
+
 	var btn_hbox = HBoxContainer.new()
 	btn_hbox.add_theme_constant_override("separation", 2)
 	btn_hbox.anchor_left = 1.0; btn_hbox.anchor_right = 1.0
 	btn_hbox.anchor_top = 0.0; btn_hbox.anchor_bottom = 1.0
-	var btn_total = 4 * BUTTON_MIN_WIDTH + 10
+	var btn_total = 5 * BUTTON_MIN_WIDTH + 12
 	btn_hbox.offset_left = -btn_total
 	btn_hbox.offset_right = -2
 	bar.add_child(btn_hbox)
@@ -195,6 +190,18 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	min_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	min_btn.pressed.connect(func(): _toggle_minimize(root, min_btn))
 	btn_hbox.add_child(min_btn)
+
+	var pos_swap_btn = Button.new()
+	pos_swap_btn.text = Icons.POSITION_SWAP; pos_swap_btn.focus_mode = Control.FOCUS_NONE
+	Icons.style_button(pos_swap_btn)
+	pos_swap_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
+	pos_swap_btn.tooltip_text = "Swap position with another pane"
+	pos_swap_btn.pressed.connect(func():
+		var b = _find_body(root)
+		if b:
+			_show_swap_popup(b, bar, pos_swap_btn.get_screen_position() + Vector2(0, pos_swap_btn.size.y))
+	)
+	btn_hbox.add_child(pos_swap_btn)
 
 	var swap_btn = Button.new()
 	swap_btn.text = Icons.SWAP; swap_btn.focus_mode = Control.FOCUS_NONE
