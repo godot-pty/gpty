@@ -22,6 +22,7 @@ var _grid: Control
 var _settings_panel: SettingsPanel
 var _tm: TerminalManager = TerminalManager.new()
 var _status_bar: StatusBar
+var _titlebar: Control = null
 
 func _ready():
 	show()
@@ -49,7 +50,7 @@ func _ready():
 	_refresh_profile_buttons()
 	_tm.on_close = func(body: Control): _kill(body)
 	_tm.on_swap = _swap_pane
-	_restore(); _sync_pane_titlebars()
+	_restore(); _sync_pane_titlebars(); if _tm.tiles.is_empty(): _spawn_pane("terminal")
 
 	# Per-type keyboard shortcuts
 	for key in PaneTypes.ALL:
@@ -59,7 +60,6 @@ func _ready():
 	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _toggle_sidebar)
 	ShortcutManager.register("app:toggle_palette", "Ctrl+Shift+P", _toggle_palette)
 	ShortcutManager.register("app:toggle_fullscreen", "F11", _toggle_fullscreen)
-	ShortcutManager.register("app:toggle_borderless", "Ctrl+Shift+F11", _toggle_borderless)
 	ShortcutManager.register("app:toggle_fullscreen_alt", "Ctrl+Shift+M", _toggle_fullscreen)
 	ShortcutManager.register("app:reset_workspace", "Ctrl+Shift+R", func():
 		_reset(); _apply_layout(); _list()
@@ -104,7 +104,6 @@ func _exit_tree():
 	_save_window_position()
 	_save()
 	SettingsManager.save_settings()
-var _titlebar: Control = null
 
 func _apply_window_mode():
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
@@ -135,16 +134,6 @@ func _toggle_fullscreen():
 	else:
 		_save_window_position()
 		SettingsManager.cfg_window_mode = 2
-	_apply_window_mode()
-	SettingsManager.save_settings()
-
-func _toggle_borderless():
-	if SettingsManager.cfg_window_mode == 1:
-		SettingsManager.cfg_window_mode = 0
-		_restore_window_position()
-	else:
-		_save_window_position()
-		SettingsManager.cfg_window_mode = 1
 	_apply_window_mode()
 	SettingsManager.save_settings()
 
