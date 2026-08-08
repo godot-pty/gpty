@@ -28,6 +28,7 @@ var cfg_font_path := "res://fonts/DejaVuSansMono.ttf"
 var cfg_font_size := 14
 var cfg_shell_command := "/bin/bash"
 var cfg_window_mode := 0
+var cfg_show_titlebar := true
 var cfg_window_position := Vector2i(100, 100)
 var cfg_window_size := Vector2i(1920, 1080)
 var cfg_shell_env := ""
@@ -57,7 +58,7 @@ func load_settings():
 	cfg_scrollback_indicator = _color_from_hex(d.get("scrollback_indicator", ""), Color(1.0, 1.0, 0.0))
 	cfg_color_scheme_path = d.get("color_scheme", "")
 	cfg_max_fps = d.get("max_fps", 0)
-	cfg_window_mode = d.get("window_mode", 0)
+	cfg_show_titlebar = d.get("show_titlebar", true)
 	var wp = d.get("window_position", {})
 	cfg_window_position = Vector2i(wp.get("x", 100), wp.get("y", 100))
 	var ws = d.get("window_size", {})
@@ -68,7 +69,7 @@ func load_settings():
 	cfg_shell_env = d.get("shell_env", "")
 
 func save_settings():
-	var d = {"cursor_shape": cfg_cursor_shape, "cursor_blink": cfg_cursor_blink, "cursor_blink_speed": cfg_cursor_blink_speed, "scroll_lines": cfg_scroll_lines, "default_rows": cfg_default_rows, "default_cols": cfg_default_cols, "beam_width": cfg_beam_width, "underline_height": cfg_underline_height, "wrapper_bg": cfg_wrapper_bg.to_html(), "title_bar_bg": cfg_title_bar_bg.to_html(), "wrapper_border": cfg_wrapper_border.to_html(), "sidebar_bg": cfg_sidebar_bg.to_html(), "focus_border": cfg_focus_border.to_html(), "selection": cfg_selection.to_html(), "scrollback_indicator": cfg_scrollback_indicator.to_html(), "color_scheme": cfg_color_scheme_path, "max_fps": cfg_max_fps, "font_path": cfg_font_path, "font_size": cfg_font_size, "shell_command": cfg_shell_command, "shell_env": cfg_shell_env, "window_mode": cfg_window_mode, "window_position": {"x": cfg_window_position.x, "y": cfg_window_position.y}, "window_size": {"x": cfg_window_size.x, "y": cfg_window_size.y}}
+	var d = {"cursor_shape": cfg_cursor_shape, "cursor_blink": cfg_cursor_blink, "cursor_blink_speed": cfg_cursor_blink_speed, "scroll_lines": cfg_scroll_lines, "default_rows": cfg_default_rows, "default_cols": cfg_default_cols, "beam_width": cfg_beam_width, "underline_height": cfg_underline_height, "wrapper_bg": cfg_wrapper_bg.to_html(), "title_bar_bg": cfg_title_bar_bg.to_html(), "wrapper_border": cfg_wrapper_border.to_html(), "sidebar_bg": cfg_sidebar_bg.to_html(), "focus_border": cfg_focus_border.to_html(), "selection": cfg_selection.to_html(), "scrollback_indicator": cfg_scrollback_indicator.to_html(), "color_scheme": cfg_color_scheme_path, "max_fps": cfg_max_fps, "font_path": cfg_font_path, "font_size": cfg_font_size, "shell_command": cfg_shell_command, "shell_env": cfg_shell_env, "show_titlebar": cfg_show_titlebar, "window_mode": cfg_window_mode, "window_position": {"x": cfg_window_position.x, "y": cfg_window_position.y}, "window_size": {"x": cfg_window_size.x, "y": cfg_window_size.y}}
 	_write_file(SETTINGS_FILE, d)
 	settings_changed.emit()
 

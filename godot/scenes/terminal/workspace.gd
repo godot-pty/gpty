@@ -76,6 +76,7 @@ func _on_settings_changed():
 		if body and body is TerminalPane:
 			SettingsManager.apply_to_terminal(body)
 	_apply_fps_setting()
+	_apply_window_mode()
 
 func _apply_fps_setting():
 	if SettingsManager.cfg_max_fps == -1:
@@ -99,6 +100,7 @@ func _exit_tree():
 var _titlebar: Control = null
 
 func _apply_window_mode():
+	var show = SettingsManager.cfg_show_titlebar
 	match SettingsManager.cfg_window_mode:
 		0:  # Decorated windowed
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
@@ -107,11 +109,11 @@ func _apply_window_mode():
 		1:  # Borderless windowed
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, true)
-			if _titlebar: _titlebar.visible = true
+			if _titlebar: _titlebar.visible = show
 		2:  # Fullscreen (with custom titlebar for mode control)
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
-			if _titlebar: _titlebar.visible = true
+			if _titlebar: _titlebar.visible = show
 	# Swap titlebar maximize/restore icon
 	if _titlebar:
 		var max_btn = _titlebar.get_meta("_max_btn", null)
