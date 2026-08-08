@@ -21,7 +21,7 @@ var _sidebar_bg: ColorRect
 var _palette: Control
 var _grid: Control
 var _settings_panel: SettingsPanel
-var _tm: TerminalManager = TerminalManager.new()
+var _status_bar: StatusBar
 
 func _ready():
 	show()
@@ -39,8 +39,12 @@ func _ready():
 	_tm._pane_settings_panel = pane_settings
 
 	_build_sidebar()
+
+	_status_bar = StatusBar.new()
+	_status_bar.name = "StatusBar"
+	add_child(_status_bar)
+
 	ProfileManager.load_profiles()
-	_apply_layout()
 	_wire_sidebar_signals()
 	_refresh_profile_buttons()
 	_tm.on_close = func(body: Control): _kill(body)
@@ -259,11 +263,17 @@ func _on_titlebar_gui_input(event: InputEvent):
 func _apply_layout():
 	if _grid == null: return
 	var top_offset = TITLEBAR_HEIGHT if (_titlebar and _titlebar.visible) else 0.0
+	var bottom_offset = StatusBar.HEIGHT if _status_bar else 0.0
 	var m = _sidebar_bg.size.x if (_sidebar_bg and _sidebar_bg.visible) else 0.0
 	_grid.offset_left = m; _grid.offset_right = 0
-	_grid.offset_top = top_offset; _grid.offset_bottom = 0
+	_grid.offset_top = top_offset; _grid.offset_bottom = -bottom_offset
 	_grid.anchor_left = 0.0; _grid.anchor_right = 1.0
 	_grid.anchor_top = 0.0; _grid.anchor_bottom = 1.0
+
+	if _status_bar:
+		_status_bar.anchor_left = 0.0; _status_bar.anchor_right = 1.0
+		_status_bar.anchor_top = 1.0; _status_bar.anchor_bottom = 1.0
+		_status_bar.offset_top = -StatusBar.HEIGHT; _status_bar.offset_bottom = 0
 
 	var cw = maxf(_grid.size.x, 1.0) / GRID
 	var ch = maxf(_grid.size.y, 1.0) / GRID
@@ -572,7 +582,6 @@ func _toggle_sidebar():
 func _process(_delta: float):
 	# Concept event polling — must run even before sidebar is ready
 	_poll_concept_events()
-	if _sidebar == null: return
 	# FPS counter update (throttled to ~4 Hz)
 	if Engine.get_process_frames() % 15 == 0:
 		var fps = Engine.get_frames_per_second()
@@ -581,8 +590,18 @@ func _process(_delta: float):
 		if body and body.has_method("_draw"):
 			fetch_ms = body.get("_fetch_ms") if "_fetch_ms" in body else -1
 			draw_ms = body.get("_draw_ms") if "_draw_ms" in body else -1
-		_sidebar.update_fps(fps, fetch_ms, draw_ms)
+		if _status_bar:
+			_status_bar.set_fps(fps, fetch_ms, draw_ms)
+	_refresh_status_bar()
 
+func _refresh_status_bar():
+	if _status_bar == null: return
+	var body = _tm.last_body
+	if body:
+		_status_bar.set_pane_info(body.pane_label, body._pane_type())
+	else:
+		_status_bar.set_pane_info("", "")
+	_status_bar.set_window_mode(SettingsManager.cfg_window_mode)
 # ═══════════════════════════════════════════════════════════════════════
 # Concept event routing
 # ═══════════════════════════════════════════════════════════════════════

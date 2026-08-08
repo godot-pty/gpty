@@ -15,7 +15,6 @@ signal request_window_mode(mode: int)
 
 
 var bg: ColorRect
-var _fps_label: Label
 var _pane_list: VBoxContainer
 var _profile_list: VBoxContainer
 
@@ -34,18 +33,10 @@ func build(bg_rect: ColorRect):
 
 	_add_header(v)
 	_add_window_mode(v)
-	_add_fps(v)
 	_add_buttons(v)
 	_add_profile_section(v)
 	_add_pane_list_ui(v)
 	_add_collapsed_button()
-
-func update_fps(fps: int, fetch_ms: int = -1, draw_ms: int = -1):
-	if not _fps_label: return
-	var txt = "FPS: %d" % fps
-	if fetch_ms >= 0:
-		txt += "\nFetch: %dms\nDraw: %dms" % [fetch_ms, draw_ms]
-	_fps_label.text = txt
 
 func update_pane_list(panes: Array):
 	if not _pane_list: return
@@ -78,15 +69,6 @@ func _add_header(v: VBoxContainer):
 	arrow.pressed.connect(_toggle_sidebar)
 	h.add_child(arrow)
 	v.add_child(h)
-
-func _add_fps(v: VBoxContainer):
-	_fps_label = Label.new()
-	_fps_label.name = "FpsLabel"
-	_fps_label.add_theme_font_size_override("font_size", 11)
-	_fps_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
-	_fps_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_fps_label.text = "FPS: --"
-	v.add_child(_fps_label)
 
 func _add_buttons(v: VBoxContainer):
 	_add_pane_buttons(v)
