@@ -75,6 +75,8 @@ func _on_settings_changed():
 		var body = _tm._find_body(t.wrapper)
 		if body and body is TerminalPane:
 			SettingsManager.apply_to_terminal(body)
+		var tb = t.wrapper.get_node_or_null("BodyVBox/TitleBar")
+		if tb: tb.visible = SettingsManager.cfg_show_titlebar
 	_apply_fps_setting()
 	_apply_window_mode()
 

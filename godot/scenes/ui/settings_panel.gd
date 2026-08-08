@@ -278,9 +278,8 @@ func _add_window_mode_control(v: VBoxContainer) -> OptionButton:
 	var hb = HBoxContainer.new()
 	hb.add_child(_lbl("Window Mode:"))
 	var opt = OptionButton.new()
-	opt.add_item("Decorated")
-	opt.add_item("Borderless")
-	opt.add_item("Fullscreen")
+	for label in SettingsManager.WINDOW_MODE_LABELS:
+		opt.add_item(label)
 	opt.selected = SettingsManager.cfg_window_mode
 	opt.item_selected.connect(func(_idx): _debounce_timer.start())
 	hb.add_child(opt)

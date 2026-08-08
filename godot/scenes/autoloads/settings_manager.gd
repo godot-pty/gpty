@@ -6,6 +6,7 @@ const WRAPPER_BG_COLOR = Color(0.1, 0.1, 0.1, 1.0)
 const TITLE_BAR_BG_COLOR = Color(0.18, 0.18, 0.20, 1.0)
 const WRAPPER_BORDER_COLOR = Color(0.25, 0.25, 0.25, 0.6)
 const SIDEBAR_BG_COLOR = Color(0.12, 0.12, 0.15, 1.0)
+const WINDOW_MODE_LABELS := ["OS", "Windowed", "Windowless"]
 
 var cfg_cursor_shape := 0
 var cfg_cursor_blink := true

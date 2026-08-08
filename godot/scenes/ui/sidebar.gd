@@ -18,6 +18,7 @@ signal request_window_mode(mode: int)
 
 
 var bg: ColorRect
+var _wm_dropdown: OptionButton
 var _pane_list: VBoxContainer
 var _profile_list: VBoxContainer
 
@@ -40,6 +41,8 @@ func build(bg_rect: ColorRect):
 	_add_profile_section(v)
 	_add_pane_list_ui(v)
 	_add_collapsed_button()
+
+	SettingsManager.settings_changed.connect(_sync_window_mode)
 func update_pane_list(panes: Array):
 	if not _pane_list: return
 	for c in _pane_list.get_children(): c.queue_free()
@@ -121,14 +124,14 @@ func _add_window_mode(v: VBoxContainer):
 	var wm_dropdown = OptionButton.new()
 	wm_dropdown.name = "WindowModeDropdown"
 	wm_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	wm_dropdown.add_item("OS")
-	wm_dropdown.add_item("Windowed")
-	wm_dropdown.add_item("Windowless")
+	for label in SettingsManager.WINDOW_MODE_LABELS:
+		wm_dropdown.add_item(label)
 	wm_dropdown.select(SettingsManager.cfg_window_mode)
 	wm_dropdown.item_selected.connect(func(idx: int): request_window_mode.emit(idx))
 	v.add_child(wm_dropdown)
+	_wm_dropdown = wm_dropdown
+
 func _add_pane_buttons(v: VBoxContainer):
-	# Pane type buttons row
 	var new_lbl = Label.new()
 	new_lbl.text = " New:"
 	new_lbl.add_theme_font_size_override("font_size", 11)
@@ -152,7 +155,9 @@ func _add_pane_buttons(v: VBoxContainer):
 
 	v.add_child(row)
 
-
+func _sync_window_mode():
+	if _wm_dropdown:
+		_wm_dropdown.select(SettingsManager.cfg_window_mode)
 func _add_pane_list_ui(v: VBoxContainer):
 	var lbl = Label.new(); lbl.text = " Panes:"; lbl.add_theme_font_size_override("font_size", 12)
 	v.add_child(lbl)
