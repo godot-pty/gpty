@@ -8,12 +8,11 @@ const MIN_WINDOW_W = 500
 const MIN_WINDOW_H = 300
 const TITLEBAR_HEIGHT = 30.0
 
-# Palette commands are built dynamically from PaneTypes.ALL
 static func _build_palette_commands() -> Array[String]:
 	var cmds: Array[String] = []
 	for key in PaneTypes.ALL:
 		cmds.append("new " + PaneTypes.ALL[key]["name"].to_lower())
-	cmds.append_array(["close active", "settings", "reset layout", "save", "load"])
+	cmds.append_array(["close active", "spawn 16 terminals", "settings", "reset layout", "save", "load"])
 	return cmds
 
 var _sidebar: Sidebar
@@ -535,6 +534,7 @@ func _execute_command(cmd: String):
 		return
 	match cmd:
 		"close active": _kill_last()
+		"spawn 16 terminals": _spawn_bulk(16)
 		"settings": _toggle_settings()
 		"reset layout": _reset()
 		"save": _save()
@@ -549,7 +549,6 @@ func _execute_command(cmd: String):
 
 func _wire_sidebar_signals():
 	_sidebar.request_new_pane.connect(_spawn_pane)
-	_sidebar.request_bulk_spawn.connect(func(count: int): _spawn_bulk(count))
 	_sidebar.request_close.connect(func(body: Control): _kill(body))
 	_sidebar.request_settings.connect(_toggle_settings)
 	_sidebar.request_reset.connect(func(): _reset(); _apply_layout(); _list())

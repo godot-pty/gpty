@@ -2,7 +2,6 @@ extends Control
 class_name Sidebar
 
 signal request_new_pane(type_name: String)
-signal request_bulk_spawn(count: int)
 signal request_close(body: Control)
 signal request_settings
 signal request_reset
@@ -111,15 +110,6 @@ func _add_pane_buttons(v: VBoxContainer):
 
 	v.add_child(row)
 
-	# Bulk spawn (compact, below the row)
-	var bulk_btn = Button.new()
-	bulk_btn.text = "+16"
-	bulk_btn.tooltip_text = "Spawn 16 terminals"
-	bulk_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bulk_btn.custom_minimum_size = Vector2(0, 22)
-	bulk_btn.add_theme_font_size_override("font_size", 10)
-	bulk_btn.pressed.connect(func(): request_bulk_spawn.emit(16))
-	v.add_child(bulk_btn)
 
 func _add_pane_list_ui(v: VBoxContainer):
 	var lbl = Label.new(); lbl.text = " Panes:"; lbl.add_theme_font_size_override("font_size", 12)
