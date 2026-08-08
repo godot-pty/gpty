@@ -54,7 +54,7 @@ func update_pane_list(panes: Array):
 		btn.pressed.connect(func(): request_focus.emit(body))
 		row.add_child(btn)
 
-		var min_btn = Button.new(); min_btn.text = Icons.MINIMIZE; min_btn.flat = true
+		var min_btn = Button.new(); min_btn.text = Icons.RESTORE if not body.visible else Icons.MINIMIZE; min_btn.flat = true
 		min_btn.tooltip_text = "Minimize / Restore"
 		min_btn.custom_minimum_size = Vector2(20, 0)
 		Icons.style_button(min_btn)
