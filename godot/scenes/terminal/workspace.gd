@@ -67,7 +67,7 @@ func _ready():
 
 	SettingsManager.settings_changed.connect(_on_settings_changed)
 	_on_settings_changed()
-	_apply_window_mode()
+	_apply_window_mode.call_deferred()
 	if SettingsManager.cfg_window_mode == 0: _restore_window_position()
 
 func _on_settings_changed():
@@ -107,7 +107,7 @@ func _exit_tree():
 var _titlebar: Control = null
 
 func _apply_window_mode():
-	# Always exit any special mode first, then apply desired mode + flags
+	print("[DEBUG] _apply_window_mode: cfg_window_mode=", SettingsManager.cfg_window_mode, " cfg_show_titlebar=", SettingsManager.cfg_show_titlebar)
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	match SettingsManager.cfg_window_mode:
 		0:  # Decorated windowed
