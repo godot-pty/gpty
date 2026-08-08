@@ -45,7 +45,6 @@ func build(bg_rect: ColorRect):
 	SettingsManager.settings_changed.connect(_sync_window_mode)
 func update_pane_list(panes: Array):
 	if not _pane_list: return
-	print("[DEBUG] update_pane_list: %d panes, _pane_list=%s" % [panes.size(), _pane_list])
 	for c in _pane_list.get_children(): c.queue_free()
 	for i in panes.size():
 		var body = panes[i]
@@ -77,6 +76,7 @@ func update_pane_list(panes: Array):
 		var cls_btn = _make_pane_action_button(Icons.CLOSE, "Close pane")
 		cls_btn.pressed.connect(func(): request_close.emit(body))
 		row.add_child(cls_btn)
+		_pane_list.add_child(row)
 
 func _make_pane_action_button(icon: String, tooltip: String) -> Button:
 	var btn = Button.new()
