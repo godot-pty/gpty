@@ -28,11 +28,13 @@ static func setup():
 	_override_script("SettingsManager", _MockSettingsManager)
 	_override_script("ProfileManager", _MockProfileManager)
 	_override_script("LayoutManager", _MockLayoutManager)
+	_override_script("ConceptManager", _MockConceptManager)
 
 	# For node-only autoloads, just ensure they're valid nodes
 	# (they exist from project.godot autoload registration)
 
 static func teardown():
+	_restore_script("ConceptManager")
 	_restore_script("SettingsManager")
 	_restore_script("ProfileManager")
 	_restore_script("LayoutManager")
@@ -71,6 +73,15 @@ class _MockProfileManager extends "res://scenes/autoloads/profile_manager.gd":
 		pass
 
 class _MockLayoutManager extends "res://scenes/autoloads/layout_manager.gd":
+	func _read_file(path: String) -> Dictionary:
+		return MockAutoloads.get_store(path)
+	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.set_store(path, data)
+	func _on_init():
+		pass
+
+
+class _MockConceptManager extends "res://scenes/autoloads/concept_manager.gd":
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):

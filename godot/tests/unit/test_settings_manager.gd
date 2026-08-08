@@ -54,8 +54,7 @@ func test_save_load_roundtrip():
 	SettingsManager.cfg_cursor_shape = 2  # underline
 	SettingsManager.save_settings()
 
-	# Create a fresh SettingsManager to test load
-	# (the mock's _read_file uses in-memory store, so it will see saved data)
+	# Overwrite and reload — should restore saved values
 	SettingsManager.cfg_shell_command = "overwritten"
 	SettingsManager.cfg_font_size = 0
 	SettingsManager.cfg_cursor_shape = 0
@@ -64,6 +63,22 @@ func test_save_load_roundtrip():
 	assert_eq(SettingsManager.cfg_shell_command, "/bin/zsh")
 	assert_eq(SettingsManager.cfg_font_size, 20)
 	assert_eq(SettingsManager.cfg_cursor_shape, 2)
+
+func test_save_load_window_mode():
+	# Bug: cfg_window_mode was missing from load_settings (fixed 589a485)
+	SettingsManager.cfg_window_mode = 2  # fullscreen
+	SettingsManager.save_settings()
+	SettingsManager.cfg_window_mode = 0
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_window_mode, 2)
+
+func test_save_load_show_titlebar():
+	# Bug: cfg_show_titlebar needed decoupling from global titlebar (071b650)
+	SettingsManager.cfg_show_titlebar = false
+	SettingsManager.save_settings()
+	SettingsManager.cfg_show_titlebar = true
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_show_titlebar, false)
 
 func test_load_settings_uses_defaults_when_empty():
 	# Clear store and load — should keep compiled defaults
