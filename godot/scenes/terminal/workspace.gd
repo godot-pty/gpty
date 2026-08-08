@@ -726,7 +726,7 @@ func _show_profile_trust_dialog(profile: Dictionary, tiles: Array):
 	dialog.ok_button_text = "Activate"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():
-		_do_profile_activate(profile)
+		_do_activate(profile)
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)
