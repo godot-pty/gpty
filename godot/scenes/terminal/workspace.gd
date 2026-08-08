@@ -21,6 +21,7 @@ var _sidebar_bg: ColorRect
 var _palette: Control
 var _grid: Control
 var _settings_panel: SettingsPanel
+var _tm: TerminalManager = TerminalManager.new()
 var _status_bar: StatusBar
 
 func _ready():
@@ -58,7 +59,6 @@ func _ready():
 	ShortcutManager.register("app:close_pane", "Ctrl+Shift+W", func(): _kill_last())
 	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _toggle_sidebar)
 	ShortcutManager.register("app:toggle_palette", "Ctrl+Shift+P", _toggle_palette)
-	ShortcutManager.register("app:toggle_fps", "Ctrl+Shift+F", _toggle_fps)
 	ShortcutManager.register("app:toggle_fullscreen", "F11", _toggle_fullscreen)
 	ShortcutManager.register("app:toggle_borderless", "Ctrl+Shift+F11", _toggle_borderless)
 	ShortcutManager.register("app:toggle_fullscreen_alt", "Ctrl+Shift+M", _toggle_fullscreen)
@@ -481,8 +481,6 @@ func _toggle_palette():
 		var inp = _palette.find_child("*", true, false) as LineEdit
 		if inp: inp.grab_focus()
 
-func _toggle_fps():
-	pass
 
 func _build_palette() -> Control:
 	var bg = Panel.new()
