@@ -88,6 +88,11 @@ func _notification(what):
 	if what == NOTIFICATION_RESIZED: _apply_layout()
 	if what == NOTIFICATION_WM_CLOSE_REQUEST: _save_window_position()
 
+# NOTE: We save in _exit_tree(), not NOTIFICATION_WM_CLOSE_REQUEST.
+# WM_CLOSE_REQUEST does not fire when the Godot editor stops the game,
+# only on actual window close in standalone builds. _exit_tree() fires
+# reliably whenever the scene tree is torn down.
+
 func _exit_tree():
 	_save_window_position()
 	_save()
