@@ -163,6 +163,7 @@ func _build_titlebar():
 	bg.color = SettingsManager.cfg_title_bar_bg
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_titlebar.add_child(bg)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var label = Label.new()
 	label.name = "AppTitle"
@@ -176,6 +177,7 @@ func _build_titlebar():
 	label.offset_bottom = TITLEBAR_HEIGHT
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_titlebar.add_child(label)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var btn_cont = HBoxContainer.new()
 	btn_cont.name = "WinControls"
