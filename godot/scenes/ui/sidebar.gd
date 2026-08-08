@@ -93,6 +93,12 @@ func _add_window_mode(v: VBoxContainer):
 	v.add_child(wm_dropdown)
 func _add_pane_buttons(v: VBoxContainer):
 	# Pane type buttons row
+	var new_lbl = Label.new()
+	new_lbl.text = " New:"
+	new_lbl.add_theme_font_size_override("font_size", 11)
+	new_lbl.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+	v.add_child(new_lbl)
+
 	var row = HBoxContainer.new()
 	row.name = "PaneTypeRow"
 	row.add_theme_constant_override("separation", 2)
