@@ -580,6 +580,10 @@ func _toggle_sidebar():
 	_sidebar._toggle_sidebar()
 	# Sync background rect to sidebar's new width
 	_sidebar_bg.offset_right = _sidebar.offset_right
+	# Show titlebar label only when sidebar is expanded
+	if _titlebar:
+		var lbl = _titlebar.get_node_or_null("AppTitle")
+		if lbl: lbl.visible = _sidebar.offset_right > 50
 	_apply_layout()
 
 func _process(_delta: float):
