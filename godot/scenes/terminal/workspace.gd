@@ -148,19 +148,6 @@ func _on_window_mode_selected(mode: int):
 	_apply_window_mode()
 	SettingsManager.save_settings()
 
-func _toggle_custom_window_mode():
-	match SettingsManager.cfg_window_mode:
-		0:
-			SettingsManager.cfg_window_mode = 1
-		1:
-			_save_window_position()
-			SettingsManager.cfg_window_mode = 2
-		2:
-			SettingsManager.cfg_window_mode = 1
-			_restore_window_position()
-	_apply_window_mode()
-	SettingsManager.save_settings()
-
 func _save_window_position():
 	if SettingsManager.cfg_window_mode == 0 or SettingsManager.cfg_window_mode == 1:
 		SettingsManager.cfg_window_position = DisplayServer.window_get_position()
