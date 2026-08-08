@@ -488,10 +488,10 @@ func _resize_tile(wrapper: Control, edge: String, delta: Vector2):
 			var adj = _adjacent_left(t)
 			if adj == null: return
 			# Reset adjacent too
-			var as = _drag_saved_sizes.get(adj.wrapper, {})
-			if as.is_empty(): return
-			adj.col = as.get("col", adj.col)
-			adj.cspan = as.get("cspan", adj.cspan)
+			var adj_saved = _drag_saved_sizes.get(adj.wrapper, {})
+			if adj_saved.is_empty(): return
+			adj.col = adj_saved.get("col", adj.col)
+			adj.cspan = adj_saved.get("cspan", adj.cspan)
 			# Compute delta in grid units (approximate)
 			var total_w = maxf(wrapper.size.x, 1.0)
 			var grid_px = total_w / float(maxi(t.cspan + adj.cspan, 1))
@@ -506,10 +506,10 @@ func _resize_tile(wrapper: Control, edge: String, delta: Vector2):
 		"right":
 			var adj = _adjacent_right(t)
 			if adj == null: return
-			var as = _drag_saved_sizes.get(adj.wrapper, {})
-			if as.is_empty(): return
-			adj.col = as.get("col", adj.col)
-			adj.cspan = as.get("cspan", adj.cspan)
+			var adj_saved = _drag_saved_sizes.get(adj.wrapper, {})
+			if adj_saved.is_empty(): return
+			adj.col = adj_saved.get("col", adj.col)
+			adj.cspan = adj_saved.get("cspan", adj.cspan)
 			var total_w = maxf(wrapper.size.x, 1.0)
 			var grid_px = total_w / float(maxi(t.cspan + adj.cspan, 1))
 			var dg = int(round(delta.x / grid_px))
@@ -523,10 +523,10 @@ func _resize_tile(wrapper: Control, edge: String, delta: Vector2):
 		"top":
 			var adj = _adjacent_above(t)
 			if adj == null: return
-			var as = _drag_saved_sizes.get(adj.wrapper, {})
-			if as.is_empty(): return
-			adj.row = as.get("row", adj.row)
-			adj.rspan = as.get("rspan", adj.rspan)
+			var adj_saved = _drag_saved_sizes.get(adj.wrapper, {})
+			if adj_saved.is_empty(): return
+			adj.row = adj_saved.get("row", adj.row)
+			adj.rspan = adj_saved.get("rspan", adj.rspan)
 			var total_h = maxf(wrapper.size.y, 1.0)
 			var grid_px = total_h / float(maxi(t.rspan + adj.rspan, 1))
 			var dg = int(round(delta.y / grid_px))
@@ -540,10 +540,10 @@ func _resize_tile(wrapper: Control, edge: String, delta: Vector2):
 		"bottom":
 			var adj = _adjacent_below(t)
 			if adj == null: return
-			var as = _drag_saved_sizes.get(adj.wrapper, {})
-			if as.is_empty(): return
-			adj.row = as.get("row", adj.row)
-			adj.rspan = as.get("rspan", adj.rspan)
+			var adj_saved = _drag_saved_sizes.get(adj.wrapper, {})
+			if adj_saved.is_empty(): return
+			adj.row = adj_saved.get("row", adj.row)
+			adj.rspan = adj_saved.get("rspan", adj.rspan)
 			var total_h = maxf(wrapper.size.y, 1.0)
 			var grid_px = total_h / float(maxi(t.rspan + adj.rspan, 1))
 			var dg = int(round(delta.y / grid_px))
