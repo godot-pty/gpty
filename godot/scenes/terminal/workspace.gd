@@ -375,6 +375,17 @@ func _kill_last():
 	_apply_layout()
 	_list()
 
+func _on_pane_minimize(body: Control):
+	body.visible = not body.visible
+	_apply_layout()
+	_list()  # refresh sidebar to update minimize icon
+
+func _on_pane_position_swap(body: Control, source_btn: Button):
+	_tm.show_position_swap_popup(body, self, source_btn.get_screen_position() + Vector2(0, source_btn.size.y))
+
+func _on_pane_type_swap(body: Control, source_btn: Button):
+	_tm.show_type_swap_popup(body, self, source_btn.get_screen_position() + Vector2(0, source_btn.size.y))
+
 func _reset():
 	_tm.reset()
 	_apply_layout()
@@ -553,6 +564,10 @@ func _wire_sidebar_signals():
 	_sidebar.request_settings.connect(_toggle_settings)
 	_sidebar.request_reset.connect(func(): _reset(); _apply_layout(); _list())
 	_sidebar.request_focus.connect(func(body: Control): body.grab_focus())
+	_sidebar.request_minimize.connect(func(body: Control): _on_pane_minimize(body))
+	_sidebar.request_position_swap.connect(func(body: Control, btn: Button): _on_pane_position_swap(body, btn))
+	_sidebar.request_type_swap.connect(func(body: Control, btn: Button): _on_pane_type_swap(body, btn))
+	_sidebar.request_pane_settings.connect(func(body: Control): _tm._open_pane_settings(body))
 	_sidebar.toggled.connect(func(): _apply_layout())
 	_sidebar.request_profile.connect(_activate_profile)
 	_sidebar.request_window_mode.connect(_on_window_mode_selected)

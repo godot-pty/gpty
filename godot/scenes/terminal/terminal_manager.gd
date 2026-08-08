@@ -186,6 +186,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 
 	var min_btn = Button.new()
 	min_btn.text = Icons.MINIMIZE; min_btn.focus_mode = Control.FOCUS_NONE
+	min_btn.tooltip_text = "Minimize / Restore"
 	Icons.style_button(min_btn)
 	min_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	min_btn.pressed.connect(func(): _toggle_minimize(root, min_btn))
@@ -202,9 +203,9 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 			_show_swap_popup(b, bar, pos_swap_btn.get_screen_position() + Vector2(0, pos_swap_btn.size.y))
 	)
 	btn_hbox.add_child(pos_swap_btn)
-
 	var swap_btn = Button.new()
 	swap_btn.text = Icons.RESET; swap_btn.focus_mode = Control.FOCUS_NONE
+	swap_btn.tooltip_text = "Change pane type"
 	Icons.style_button(swap_btn)
 	swap_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	# PopupMenu listing all pane types
@@ -228,6 +229,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 
 	var settings_btn = Button.new()
 	settings_btn.text = Icons.SETTINGS; settings_btn.focus_mode = Control.FOCUS_NONE
+	settings_btn.tooltip_text = "Pane settings"
 	Icons.style_button(settings_btn)
 	settings_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	settings_btn.pressed.connect(func(): _open_pane_settings(_find_body(root)))
@@ -235,6 +237,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 
 	var close_btn = Button.new()
 	close_btn.text = Icons.CLOSE; close_btn.focus_mode = Control.FOCUS_NONE
+	close_btn.tooltip_text = "Close pane"
 	Icons.style_button(close_btn)
 	close_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	close_btn.pressed.connect(func(): _handle_close(_find_body(root)))
@@ -421,6 +424,52 @@ func _handle_swap(body: Control, new_type_name: String, _menu: PopupMenu):
 	if on_swap.is_valid():
 		on_swap.call(body, new_type_name)
 
+
+func show_position_swap_popup(for_body: Control, menu_parent: Control, at_pos: Vector2):
+	var this_ti = -1
+	for i in tiles.size():
+		if _find_body(tiles[i].wrapper) == for_body: this_ti = i; break
+	if this_ti == -1: return
+
+	var menu = PopupMenu.new()
+	menu.name = "SwapTargetMenu"
+	for i in tiles.size():
+		if i == this_ti: continue
+		var other = _find_body(tiles[i].wrapper)
+		if other == null: continue
+		var label = other.get("pane_label")
+		if label == null or label == "":
+			var type_name = other._pane_type() if other.has_method("_pane_type") else "?"
+			label = PaneTypes.ALL.get(type_name, {}).get("name", type_name)
+		menu.add_item(String(label))
+		menu.set_item_metadata(menu.item_count - 1, i)
+	menu.index_pressed.connect(func(idx: int):
+		var other_ti = menu.get_item_metadata(idx)
+		_swap_tile_positions(this_ti, other_ti)
+		tiles_resized.emit()
+		menu.queue_free()
+	)
+	menu_parent.add_child(menu)
+	menu.position = at_pos
+	menu.reset_size()
+	menu.popup()
+	menu.popup_hide.connect(menu.queue_free)
+
+func show_type_swap_popup(for_body: Control, menu_parent: Control, at_pos: Vector2):
+	var menu = PopupMenu.new()
+	menu.name = "SwapTypeMenu"
+	for key in PaneTypes.ALL:
+		menu.add_item(PaneTypes.ALL[key]["name"])
+		menu.set_item_metadata(menu.item_count - 1, key)
+	menu.index_pressed.connect(func(idx: int):
+		var type_name = menu.get_item_metadata(idx)
+		_handle_swap(for_body, type_name, menu)
+	)
+	menu_parent.add_child(menu)
+	menu.position = at_pos
+	menu.reset_size()
+	menu.popup()
+	menu.popup_hide.connect(menu.queue_free)
 
 # ── Edge Drag Resize ───────────────────────────────────────────────────
 

@@ -6,6 +6,10 @@ signal request_close(body: Control)
 signal request_settings
 signal request_reset
 signal request_focus(body: Control)
+signal request_minimize(body: Control)
+signal request_position_swap(body: Control, source_btn: Button)
+signal request_type_swap(body: Control, source_btn: Button)
+signal request_pane_settings(body: Control)
 signal toggled
 signal request_profile(name: String)
 signal request_save_profile
@@ -36,23 +40,55 @@ func build(bg_rect: ColorRect):
 	_add_profile_section(v)
 	_add_pane_list_ui(v)
 	_add_collapsed_button()
-
 func update_pane_list(panes: Array):
 	if not _pane_list: return
 	for c in _pane_list.get_children(): c.queue_free()
 	for i in panes.size():
 		var body = panes[i]
 		var row = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 1)
+
 		var btn = Button.new()
 		btn.text = body.get("pane_label") if body.get("pane_label") != "" else "%s?" % PaneTypes.ALL.get(body._pane_type(), {}).get("label_prefix", "?")
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.pressed.connect(func(): request_focus.emit(body))
 		row.add_child(btn)
-		var x = Button.new(); x.text = Icons.CLOSE; x.flat = true
-		Icons.style_button(x)
-		x.custom_minimum_size = Vector2(22, 0)
-		x.pressed.connect(func(): request_close.emit(body))
-		row.add_child(x)
+
+		var min_btn = Button.new(); min_btn.text = Icons.MINIMIZE; min_btn.flat = true
+		min_btn.tooltip_text = "Minimize / Restore"
+		min_btn.custom_minimum_size = Vector2(20, 0)
+		Icons.style_button(min_btn)
+		min_btn.pressed.connect(func(): request_minimize.emit(body))
+		row.add_child(min_btn)
+
+		var pos_btn = Button.new(); pos_btn.text = Icons.SWAP; pos_btn.flat = true
+		pos_btn.tooltip_text = "Swap position"
+		pos_btn.custom_minimum_size = Vector2(20, 0)
+		Icons.style_button(pos_btn)
+		pos_btn.pressed.connect(func(): request_position_swap.emit(body, pos_btn))
+		row.add_child(pos_btn)
+
+		var type_btn = Button.new(); type_btn.text = Icons.RESET; type_btn.flat = true
+		type_btn.tooltip_text = "Change pane type"
+		type_btn.custom_minimum_size = Vector2(20, 0)
+		Icons.style_button(type_btn)
+		type_btn.pressed.connect(func(): request_type_swap.emit(body, type_btn))
+		row.add_child(type_btn)
+
+		var set_btn = Button.new(); set_btn.text = Icons.SETTINGS; set_btn.flat = true
+		set_btn.tooltip_text = "Pane settings"
+		set_btn.custom_minimum_size = Vector2(20, 0)
+		Icons.style_button(set_btn)
+		set_btn.pressed.connect(func(): request_pane_settings.emit(body))
+		row.add_child(set_btn)
+
+		var cls_btn = Button.new(); cls_btn.text = Icons.CLOSE; cls_btn.flat = true
+		cls_btn.tooltip_text = "Close pane"
+		cls_btn.custom_minimum_size = Vector2(20, 0)
+		Icons.style_button(cls_btn)
+		cls_btn.pressed.connect(func(): request_close.emit(body))
+		row.add_child(cls_btn)
+
 		_pane_list.add_child(row)
 
 func _add_header(v: VBoxContainer):
