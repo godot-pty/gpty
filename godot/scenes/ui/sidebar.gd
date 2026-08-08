@@ -45,6 +45,7 @@ func build(bg_rect: ColorRect):
 	SettingsManager.settings_changed.connect(_sync_window_mode)
 func update_pane_list(panes: Array):
 	if not _pane_list: return
+	print("[DEBUG] update_pane_list: %d panes, _pane_list=%s" % [panes.size(), _pane_list])
 	for c in _pane_list.get_children(): c.queue_free()
 	for i in panes.size():
 		var body = panes[i]
