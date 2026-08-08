@@ -192,7 +192,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	btn_hbox.add_child(min_btn)
 
 	var pos_swap_btn = Button.new()
-	pos_swap_btn.text = Icons.POSITION_SWAP; pos_swap_btn.focus_mode = Control.FOCUS_NONE
+	pos_swap_btn.text = Icons.SWAP; pos_swap_btn.focus_mode = Control.FOCUS_NONE
 	Icons.style_button(pos_swap_btn)
 	pos_swap_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	pos_swap_btn.tooltip_text = "Swap position with another pane"
@@ -204,7 +204,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	btn_hbox.add_child(pos_swap_btn)
 
 	var swap_btn = Button.new()
-	swap_btn.text = Icons.SWAP; swap_btn.focus_mode = Control.FOCUS_NONE
+	swap_btn.text = Icons.RESET; swap_btn.focus_mode = Control.FOCUS_NONE
 	Icons.style_button(swap_btn)
 	swap_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	# PopupMenu listing all pane types
