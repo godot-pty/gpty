@@ -32,3 +32,38 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - 60 Rust tests (core + integration) and 40+ GDScript unit/integration tests
 
 [0.1.0]: https://github.com/godopty/godopty/releases/tag/v0.1.0
+
+## [0.2.0] — unreleased
+
+### Added
+
+- Three-mode window system: OS decorated, borderless windowed, fullscreen — all with custom titlebar in non-OS modes
+- Per-pane titlebar buttons: minimize, position-swap (shows popup to swap with another pane), type-swap (changes pane type), settings, close
+- Sidebar pane rows with full action button set matching the titlebar
+- Bottom status bar showing active pane info, FPS/ms, and window mode indicator
+- "Show titlebar" toggle in Settings → System to hide per-pane titlebars
+- Window mode dropdown in sidebar and Settings panel, synced via shared `WINDOW_MODE_LABELS`
+- Auto-spawn one terminal on first launch (no saved layout)
+- Workspace Trust dialog: warns before restoring layouts saved with a different shell
+
+### Changed
+
+- System tab moved to first position in Settings panel
+- Window mode dropdown labels unified to "OS" / "Windowed" / "Windowless"
+- FPS/metrics moved from sidebar to bottom status bar
+- Sidebar "Add Pane" dropdown replaced with 4 icon buttons per pane type + "+16" bulk spawn via command palette
+- Titlebar mode-toggle button removed; mode switching via sidebar/settings dropdown only
+- `_toggle_borderless` shortcut (Ctrl+Shift+F11) and `_toggle_custom_window_mode` removed
+
+### Fixed
+
+- Layout persistence: save on `_exit_tree()` instead of unreliable `WM_CLOSE_REQUEST`
+- Window mode persisted correctly on restart (was silently defaulting to 0)
+- Settings persisted on exit (were not saved in `_exit_tree`)
+- Window mode application order: always reset to `WINDOW_MODE_WINDOWED` before applying target mode
+- Titlebar Phosphor icon rendering via `Label` child nodes
+- Profile trust dialog no longer shows redundant "replace layout?" confirmation
+- `as` keyword renamed to `adj_saved` in terminal_manager.gd
+- Titlebar drag-to-move: background and label `mouse_filter` set to `IGNORE`
+
+[0.2.0]: https://github.com/godopty/godopty/releases/tag/v0.2.0

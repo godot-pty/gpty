@@ -57,42 +57,33 @@ func update_pane_list(panes: Array):
 		btn.pressed.connect(func(): request_focus.emit(body))
 		row.add_child(btn)
 
-		var min_btn = Button.new(); min_btn.text = Icons.RESTORE if not body.visible else Icons.MINIMIZE; min_btn.flat = true
-		min_btn.tooltip_text = "Minimize / Restore"
-		min_btn.custom_minimum_size = Vector2(20, 0)
-		Icons.style_button(min_btn)
+		var min_btn = _make_pane_action_button(Icons.RESTORE if not body.visible else Icons.MINIMIZE, "Minimize / Restore")
 		min_btn.pressed.connect(func(): request_minimize.emit(body))
 		row.add_child(min_btn)
 
-		var pos_btn = Button.new(); pos_btn.text = Icons.SWAP; pos_btn.flat = true
-		pos_btn.tooltip_text = "Swap position"
-		pos_btn.custom_minimum_size = Vector2(20, 0)
-		Icons.style_button(pos_btn)
+		var pos_btn = _make_pane_action_button(Icons.SWAP, "Swap position")
 		pos_btn.pressed.connect(func(): request_position_swap.emit(body, pos_btn))
 		row.add_child(pos_btn)
 
-		var type_btn = Button.new(); type_btn.text = Icons.RESET; type_btn.flat = true
-		type_btn.tooltip_text = "Change pane type"
-		type_btn.custom_minimum_size = Vector2(20, 0)
-		Icons.style_button(type_btn)
+		var type_btn = _make_pane_action_button(Icons.RESET, "Change pane type")
 		type_btn.pressed.connect(func(): request_type_swap.emit(body, type_btn))
 		row.add_child(type_btn)
 
-		var set_btn = Button.new(); set_btn.text = Icons.SETTINGS; set_btn.flat = true
-		set_btn.tooltip_text = "Pane settings"
-		set_btn.custom_minimum_size = Vector2(20, 0)
-		Icons.style_button(set_btn)
+		var set_btn = _make_pane_action_button(Icons.SETTINGS, "Pane settings")
 		set_btn.pressed.connect(func(): request_pane_settings.emit(body))
 		row.add_child(set_btn)
 
-		var cls_btn = Button.new(); cls_btn.text = Icons.CLOSE; cls_btn.flat = true
-		cls_btn.tooltip_text = "Close pane"
-		cls_btn.custom_minimum_size = Vector2(20, 0)
-		Icons.style_button(cls_btn)
+		var cls_btn = _make_pane_action_button(Icons.CLOSE, "Close pane")
 		cls_btn.pressed.connect(func(): request_close.emit(body))
 		row.add_child(cls_btn)
 
-		_pane_list.add_child(row)
+func _make_pane_action_button(icon: String, tooltip: String) -> Button:
+	var btn = Button.new()
+	btn.text = icon; btn.flat = true
+	btn.tooltip_text = tooltip
+	btn.custom_minimum_size = Vector2(20, 0)
+	Icons.style_button(btn)
+	return btn
 
 func _add_header(v: VBoxContainer):
 	var h = HBoxContainer.new(); h.name = "Header"

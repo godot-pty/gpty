@@ -382,37 +382,9 @@ func _open_pane_settings(body: Control):
 
 
 func _show_swap_popup(body: Control, bar: Control, pos: Vector2):
-	var this_ti = -1
-	for i in tiles.size():
-		if _find_body(tiles[i].wrapper) == body: this_ti = i; break
-	if this_ti == -1: return
-
-	var menu = PopupMenu.new()
-	menu.name = "SwapTargetMenu"
-	for i in tiles.size():
-		if i == this_ti: continue
-		var other = _find_body(tiles[i].wrapper)
-		if other == null: continue
-		var label = other.get("pane_label")
-		if label == null or label == "":
-			var type_name = other._pane_type() if other.has_method("_pane_type") else "?"
-			label = PaneTypes.ALL.get(type_name, {}).get("name", type_name)
-		menu.add_item(String(label))
-		menu.set_item_metadata(menu.item_count - 1, i)
-	menu.index_pressed.connect(func(idx: int):
-		var other_ti = menu.get_item_metadata(idx)
-		_swap_tile_positions(this_ti, other_ti)
-		tiles_resized.emit()
-		menu.queue_free()
-	)
-	# Menu must be added to root so it can receive input
 	var root = bar.get_parent().get_parent()  # BodyVBox -> PanelContainer
 	if root is PanelContainer:
-		root.add_child(menu)
-	menu.position = pos
-	menu.reset_size()
-	menu.popup()
-	menu.popup_hide.connect(menu.queue_free)
+		show_position_swap_popup(body, root, pos)
 
 func _swap_tile_positions(a: int, b: int):
 	var ta = tiles[a]

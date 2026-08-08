@@ -54,9 +54,12 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 
 ### UI
 - Hardware-accelerated Godot renderer with damage tracking
-- Tiling grid with nested `SplitContainer` layout
-- Sidebar with pane list, profile management, and quick actions
-- Settings panel: fonts, colors, cursor, scroll, concept editor
+- Three-mode window system: OS decorated, borderless, fullscreen
+- Custom titlebar with minimize, maximize/restore, close
+- Tiling grid with drag-to-resize edges and pane position swapping
+- Sidebar with window mode dropdown, per-pane-type spawn buttons, and full per-pane action buttons
+- Bottom status bar showing active pane info, FPS, and window mode
+- Settings panel: fonts, colors, cursor, scroll, window mode, titlebar toggle, concept editor
 - Toast notifications (info, warn, error)
 - Command palette (`Ctrl+P`)
 
