@@ -69,10 +69,10 @@ impl PtyHandle {
         Ok(Self { id, writer, master, _child: child, _read_thread: read_thread })
     }
 
-    /// Write a line to the PTY (appends `\n`).
+    /// Write a line to the PTY (appends `\r` = Enter).
     pub fn write_line(&mut self, line: &str) -> Result<(), std::io::Error> {
         self.writer.write_all(line.as_bytes())?;
-        self.writer.write_all(b"\n")?;
+        self.writer.write_all(b"\r")?;
         self.writer.flush()
     }
 
