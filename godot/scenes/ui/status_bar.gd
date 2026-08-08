@@ -41,13 +41,23 @@ func _ready():
 	_right_label.text = ""
 	add_child(_right_label)
 
+	var clock_timer = Timer.new()
+	clock_timer.name = "ClockTimer"
+	clock_timer.wait_time = 1.0
+	clock_timer.timeout.connect(_right_update)
+	add_child(clock_timer)
+	clock_timer.start()
+
 	_right_update()
 
 func _right_update():
-	_right_label.text = _fps_text + "  |  " + _mode_text
+	var t = Time.get_time_dict_from_system()
+	_clock_text = "%02d:%02d:%02d" % [t.hour, t.minute, t.second]
+	_right_label.text = _clock_text + "  |  " + _fps_text + "  |  " + _mode_text
 
 var _fps_text: String = ""
 var _mode_text: String = ""
+var _clock_text: String = ""
 
 func set_pane_info(label: String, type_name: String):
 	var icon = PaneTypes.ALL.get(type_name, {}).get("icon", "?")
