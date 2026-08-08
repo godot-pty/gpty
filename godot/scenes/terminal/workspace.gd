@@ -49,7 +49,7 @@ func _ready():
 	_refresh_profile_buttons()
 	_tm.on_close = func(body: Control): _kill(body)
 	_tm.on_swap = _swap_pane
-	_restore()
+	_restore(); _sync_pane_titlebars()
 
 	# Per-type keyboard shortcuts
 	for key in PaneTypes.ALL:
@@ -75,10 +75,14 @@ func _on_settings_changed():
 		var body = _tm._find_body(t.wrapper)
 		if body and body is TerminalPane:
 			SettingsManager.apply_to_terminal(body)
-		var tb = t.wrapper.get_node_or_null("BodyVBox/TitleBar")
-		if tb: tb.visible = SettingsManager.cfg_show_titlebar
+	_sync_pane_titlebars()
 	_apply_fps_setting()
 	_apply_window_mode()
+
+func _sync_pane_titlebars():
+	for t in _tm.tiles:
+		var tb = t.wrapper.get_node_or_null("BodyVBox/TitleBar")
+		if tb: tb.visible = SettingsManager.cfg_show_titlebar
 
 func _apply_fps_setting():
 	if SettingsManager.cfg_max_fps == -1:
@@ -102,7 +106,6 @@ func _exit_tree():
 var _titlebar: Control = null
 
 func _apply_window_mode():
-	var show = SettingsManager.cfg_show_titlebar
 	match SettingsManager.cfg_window_mode:
 		0:  # Decorated windowed
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
@@ -111,11 +114,11 @@ func _apply_window_mode():
 		1:  # Borderless windowed
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, true)
-			if _titlebar: _titlebar.visible = show
+			if _titlebar: _titlebar.visible = true
 		2:  # Fullscreen (with custom titlebar for mode control)
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
-			if _titlebar: _titlebar.visible = show
+			if _titlebar: _titlebar.visible = true
 	# Swap titlebar maximize/restore icon
 	if _titlebar:
 		var max_btn = _titlebar.get_meta("_max_btn", null)
