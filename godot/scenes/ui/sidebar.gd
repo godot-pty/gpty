@@ -11,7 +11,7 @@ signal toggled
 signal request_profile(name: String)
 signal request_save_profile
 signal request_delete_profile(index: int)
-signal request_toggle_window_mode
+signal request_window_mode(mode: int)
 
 
 var bg: ColorRect
@@ -33,6 +33,7 @@ func build(bg_rect: ColorRect):
 	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	_add_header(v)
+	_add_window_mode(v)
 	_add_fps(v)
 	_add_buttons(v)
 	_add_profile_section(v)
@@ -88,18 +89,8 @@ func _add_fps(v: VBoxContainer):
 	v.add_child(_fps_label)
 
 func _add_buttons(v: VBoxContainer):
-	# Add Pane button with PopupMenu listing all pane types
 	_add_pane_buttons(v)
 
-	# Window mode toggle button
-	var wm_btn = Button.new()
-	wm_btn.text = Icons.WINDOW_MODE + " Window"
-	Icons.style_button(wm_btn)
-	wm_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	wm_btn.pressed.connect(func(): request_toggle_window_mode.emit())
-	v.add_child(wm_btn)
-
-	# Remaining actions
 	for b in [
 		[Icons.SETTINGS + " Settings", func(): request_settings.emit()],
 		[Icons.RESET + " Reset", func(): request_reset.emit()],
@@ -109,29 +100,44 @@ func _add_buttons(v: VBoxContainer):
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.pressed.connect(b[1]); v.add_child(btn)
 
+func _add_window_mode(v: VBoxContainer):
+	var wm_dropdown = OptionButton.new()
+	wm_dropdown.name = "WindowModeDropdown"
+	wm_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wm_dropdown.add_item("OS")
+	wm_dropdown.add_item("Windowed")
+	wm_dropdown.add_item("Windowless")
+	wm_dropdown.select(SettingsManager.cfg_window_mode)
+	wm_dropdown.item_selected.connect(func(idx: int): request_window_mode.emit(idx))
+	v.add_child(wm_dropdown)
 func _add_pane_buttons(v: VBoxContainer):
-	var add_btn = Button.new()
-	add_btn.text = Icons.ADD + " Add Pane"
-	Icons.style_button(add_btn)
-	add_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	add_btn.pressed.connect(func():
-		var menu = PopupMenu.new()
-		var keys = PaneTypes.ALL.keys()
-		for i in keys.size():
-			var info = PaneTypes.ALL[keys[i]]
-			menu.add_item(info["icon"] + " " + info["name"])
-		menu.add_separator()
-		menu.add_item("Terminal (x16)")
-		menu.id_pressed.connect(func(id: int):
-			if id < keys.size():
-				request_new_pane.emit(keys[id])
-			else:
-				request_bulk_spawn.emit(16)
-		)
-		add_child(menu)
-		menu.popup(Rect2(add_btn.get_screen_position(), add_btn.size))
-	)
-	v.add_child(add_btn)
+	# Pane type buttons row
+	var row = HBoxContainer.new()
+	row.name = "PaneTypeRow"
+	row.add_theme_constant_override("separation", 2)
+
+	for key in PaneTypes.ALL:
+		var info = PaneTypes.ALL[key]
+		var btn = Button.new()
+		btn.text = info["icon"]
+		btn.tooltip_text = "New " + info["name"] + " (" + info["shortcut"] + ")"
+		Icons.style_button(btn)
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.custom_minimum_size = Vector2(0, 28)
+		btn.pressed.connect(func(): request_new_pane.emit(key))
+		row.add_child(btn)
+
+	v.add_child(row)
+
+	# Bulk spawn (compact, below the row)
+	var bulk_btn = Button.new()
+	bulk_btn.text = "+16"
+	bulk_btn.tooltip_text = "Spawn 16 terminals"
+	bulk_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bulk_btn.custom_minimum_size = Vector2(0, 22)
+	bulk_btn.add_theme_font_size_override("font_size", 10)
+	bulk_btn.pressed.connect(func(): request_bulk_spawn.emit(16))
+	v.add_child(bulk_btn)
 
 func _add_pane_list_ui(v: VBoxContainer):
 	var lbl = Label.new(); lbl.text = " Panes:"; lbl.add_theme_font_size_override("font_size", 12)

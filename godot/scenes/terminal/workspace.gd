@@ -97,10 +97,10 @@ func _apply_window_mode():
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, true)
 			if _titlebar: _titlebar.visible = true
-		2:  # Fullscreen
+		2:  # Fullscreen (with custom titlebar for mode control)
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
-			if _titlebar: _titlebar.visible = false
+			if _titlebar: _titlebar.visible = true
 	# Swap titlebar maximize/restore icon
 	if _titlebar:
 		var max_btn = _titlebar.get_meta("_max_btn", null)
@@ -112,7 +112,7 @@ func _apply_window_mode():
 	_apply_layout()
 func _toggle_fullscreen():
 	if SettingsManager.cfg_window_mode == 2:
-		SettingsManager.cfg_window_mode = 0
+		SettingsManager.cfg_window_mode = 1
 		_restore_window_position()
 	else:
 		_save_window_position()
@@ -130,13 +130,32 @@ func _toggle_borderless():
 	_apply_window_mode()
 	SettingsManager.save_settings()
 
-func _cycle_window_mode():
-	SettingsManager.cfg_window_mode = (SettingsManager.cfg_window_mode + 1) % 3
+func _on_window_mode_selected(mode: int):
+	if mode == SettingsManager.cfg_window_mode:
+		return
+	if SettingsManager.cfg_window_mode == 0:
+		_save_window_position()
+	if mode == 0:
+		_restore_window_position()
+	SettingsManager.cfg_window_mode = mode
+	_apply_window_mode()
+	SettingsManager.save_settings()
+
+func _toggle_custom_window_mode():
+	match SettingsManager.cfg_window_mode:
+		0:
+			SettingsManager.cfg_window_mode = 1
+		1:
+			_save_window_position()
+			SettingsManager.cfg_window_mode = 2
+		2:
+			SettingsManager.cfg_window_mode = 1
+			_restore_window_position()
 	_apply_window_mode()
 	SettingsManager.save_settings()
 
 func _save_window_position():
-	if SettingsManager.cfg_window_mode == 0:
+	if SettingsManager.cfg_window_mode == 0 or SettingsManager.cfg_window_mode == 1:
 		SettingsManager.cfg_window_position = DisplayServer.window_get_position()
 		SettingsManager.cfg_window_size = DisplayServer.window_get_size()
 
@@ -147,7 +166,6 @@ func _restore_window_position():
 		DisplayServer.window_set_position(pos)
 	if sz.x >= MIN_WINDOW_W and sz.y >= MIN_WINDOW_H:
 		DisplayServer.window_set_size(sz)
-
 func _build_titlebar():
 	_titlebar = Control.new()
 	_titlebar.name = "GlobalTitleBar"
@@ -208,16 +226,24 @@ func _build_titlebar():
 
 func _make_titlebar_button(icon: String, callback: Callable) -> Button:
 	var btn = Button.new()
-	btn.text = icon
 	btn.focus_mode = Control.FOCUS_NONE
 	btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	btn.custom_minimum_size = Vector2(36, TITLEBAR_HEIGHT)
 	btn.flat = true
 	btn.add_theme_color_override("font_color", Color.WHITE)
-	btn.add_theme_color_override("font_hover_color", Color.WHITE)
-	btn.add_theme_color_override("font_pressed_color", Color.WHITE)
-	Icons.style_button(btn)
 	btn.pressed.connect(callback)
+	# Use a Label child for the icon glyph — Button text with theme font
+	# overrides doesn't reliably render PUA codepoints in Godot 4.
+	var lbl = Label.new()
+	lbl.text = icon
+	lbl.add_theme_font_override("font", Icons.font_resource)
+	lbl.add_theme_font_size_override("font_size", 14)
+	lbl.add_theme_color_override("font_color", Color.WHITE)
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(lbl)
 	return btn
 
 func _on_titlebar_gui_input(event: InputEvent):
@@ -522,7 +548,7 @@ func _wire_sidebar_signals():
 	_sidebar.request_focus.connect(func(body: Control): body.grab_focus())
 	_sidebar.toggled.connect(func(): _apply_layout())
 	_sidebar.request_profile.connect(_activate_profile)
-	_sidebar.request_toggle_window_mode.connect(_cycle_window_mode)
+	_sidebar.request_window_mode.connect(_on_window_mode_selected)
 	_sidebar.request_save_profile.connect(_save_current_as_profile)
 	_sidebar.request_delete_profile.connect(_delete_profile)
 	_tm.tiles_resized.connect(_apply_layout)

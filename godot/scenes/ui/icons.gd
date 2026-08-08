@@ -2,10 +2,10 @@ class_name Icons
 
 # All icons sourced from Phosphor Regular (MIT). Codepoints are BMP PUA (U+E000-U+F8FF).
 
-const _font := preload("res://assets/fonts/Phosphor-Regular.ttf")
+const font_resource := preload("res://assets/fonts/Phosphor-Regular.ttf")
 
 static func style_button(btn: Button) -> void:
-	btn.add_theme_font_override("font", _font)
+	btn.add_theme_font_override("font", font_resource)
 
 const CLOSE    = "\uE4F6"  # x
 const DELETE   = "\uE4A6"  # trash
