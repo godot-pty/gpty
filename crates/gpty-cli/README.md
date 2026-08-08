@@ -1,31 +1,31 @@
-# godopty-cli
+# gpty-cli
 
-Headless CLI prototype that validates the godopty Rust engine in isolation — no Godot, no GUI. Every subsystem is exercised through three self-contained demo modes.
+Headless CLI prototype that validates the gpty Rust engine in isolation — no Godot, no GUI. Every subsystem is exercised through three self-contained demo modes.
 
 ## Role in the Workspace
 
 | Crate | Role | Depends On |
 |-------|------|------------|
-| `godopty-core` | Engine library (PTY, ANSI, grid, concepts) | — |
-| `godopty-gdext` | Godot 4 GDExtension bridge | `godopty-core` |
-| **`godopty-cli`** | **Headless integration tests** | `godopty-core` |
+| `gpty-core` | Engine library (PTY, ANSI, grid, concepts) | — |
+| `gpty-gdext` | Godot 4 GDExtension bridge | `gpty-core` |
+| **`gpty-cli`** | **Headless integration tests** | `gpty-core` |
 
-Unlike `godopty-gdext` which wraps the engine for Godot's renderer, the CLI exercises the engine directly — useful for rapid iteration, debugging regressions, and validating protocol-level behavior without launching Godot.
+Unlike `gpty-gdext` which wraps the engine for Godot's renderer, the CLI exercises the engine directly — useful for rapid iteration, debugging regressions, and validating protocol-level behavior without launching Godot.
 
 ## Usage
 
 ```bash
 # Mock terminals — validates the pub-sub engine with synthetic output
-cargo run --bin godopty-cli
+cargo run --bin gpty
 
 # Real PTYs — validates the full PTY → vte → pub-sub pipeline
-cargo run --bin godopty-cli -- --pty
+cargo run --bin gpty -- --pty
 
 # Terminal grid — validates alacritty_terminal ANSI processing + color grid
-cargo run --bin godopty-cli -- --term
+cargo run --bin gpty -- --term
 
 # Verbose logging
-RUST_LOG=debug cargo run --bin godopty-cli
+RUST_LOG=debug cargo run --bin gpty
 ```
 
 ## Demo Modes
@@ -74,7 +74,7 @@ Both concepts use `CaptureMode::SingleLine` — each matching line broadcasts an
 
 | Crate | Version | Role |
 |-------|---------|------|
-| `godopty-core` | path | Engine library (all terminal logic) |
+| `gpty-core` | path | Engine library (all terminal logic) |
 | `tokio` | 1 | Async runtime (multi-threaded) |
 | `regex` | 1 | Concept trigger patterns |
 | `env_logger` | 0.11 | Logging (RUST_LOG) |

@@ -1,11 +1,11 @@
-//! Godot 4 GDExtension for godopty — bridges the Rust terminal engine
+//! Godot 4 GDExtension for gpty — bridges the Rust terminal engine
 //! to Godot's rendering pipeline.
 //!
 //! ## Architecture
 //!
 //! - A **global tokio runtime** is started at extension init and shared
 //!   across all terminal nodes.
-//! - Each [`GodoptyTerminal`] node wraps a [`SpawnedTerminal`], which runs
+//! - Each [`GptyTerminal`] node wraps a [`SpawnedTerminal`], which runs
 //!   a background task feeding PTY output into a renderable grid.
 //! - GDScript polls the grid in `_process()` and renders it in `_draw()`.
 //! - Keyboard input flows GDScript → Rust → PTY stdin.
@@ -15,8 +15,8 @@ use std::sync::{Arc, LazyLock};
 use godot::prelude::*;
 
 use godot::global::Key;
-use godopty_core::engine::{SpawnedTerminal, WorkspaceEngine};
-use godopty_core::types::TerminalConfig;
+use gpty_core::engine::{SpawnedTerminal, WorkspaceEngine};
+use gpty_core::types::TerminalConfig;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
@@ -42,19 +42,19 @@ static ENGINE: LazyLock<WorkspaceEngine> =
     LazyLock::new(|| WorkspaceEngine::new(Vec::new()));
 
 // ═══════════════════════════════════════════════════════════════════════
-// GodoptyTerminal — a Godot node backed by a Rust PTY session
+// GptyTerminal — a Godot node backed by a Rust PTY session
 // ═══════════════════════════════════════════════════════════════════════
 
 #[derive(GodotClass)]
 #[class(base = Node2D)]
-struct GodoptyTerminal {
+struct GptyTerminal {
     spawned: Option<SpawnedTerminal>,
     next_id: u32,
-    capture_queue: Option<Arc<std::sync::Mutex<Vec<godopty_core::types::CapturedOutput>>>>,
+    capture_queue: Option<Arc<std::sync::Mutex<Vec<gpty_core::types::CapturedOutput>>>>,
 }
 
 #[godot_api]
-impl INode2D for GodoptyTerminal {
+impl INode2D for GptyTerminal {
     fn init(_base: Base<Node2D>) -> Self {
         Self {
             spawned: None,
@@ -65,7 +65,7 @@ impl INode2D for GodoptyTerminal {
 }
 
 #[godot_api]
-impl GodoptyTerminal {
+impl GptyTerminal {
     /// Start a shell in this terminal pane.
     ///
     /// Spawns a PTY at `rows × cols`. Call once during `_ready()`.
@@ -110,7 +110,7 @@ impl GodoptyTerminal {
                     let db_path = godot::classes::ProjectSettings::singleton()
                         .globalize_path("user://history.db")
                         .to_string();
-                    match godopty_core::history::HistoryStore::open(&db_path, id) {
+                    match gpty_core::history::HistoryStore::open(&db_path, id) {
                         Ok(store) => {
                             grid.history = Some(Arc::new(std::sync::Mutex::new(store)));
                         }
@@ -155,12 +155,12 @@ impl GodoptyTerminal {
 
     /// Lock the grid immutably, call `f`, return its result.
     /// Returns `default` if no shell started or the mutex is poisoned.
-    fn with_grid<T>(&self, f: impl FnOnce(&godopty_core::term::TermGrid) -> T, default: T) -> T {
+    fn with_grid<T>(&self, f: impl FnOnce(&gpty_core::term::TermGrid) -> T, default: T) -> T {
         if let Some(ref spawned) = self.spawned {
             match spawned.grid.lock() {
                 Ok(g) => f(&g),
                 Err(e) => {
-                    godot_error!("godopty: TermGrid lock poisoned: {e}");
+                    godot_error!("gpty: TermGrid lock poisoned: {e}");
                     default
                 }
             }
@@ -168,12 +168,12 @@ impl GodoptyTerminal {
             default
         }
     }
-    fn with_grid_mut_ret<T>(&self, f: impl FnOnce(&mut godopty_core::term::TermGrid) -> T, default: T) -> T {
+    fn with_grid_mut_ret<T>(&self, f: impl FnOnce(&mut gpty_core::term::TermGrid) -> T, default: T) -> T {
         if let Some(ref spawned) = self.spawned {
             match spawned.grid.lock() {
                 Ok(mut g) => f(&mut g),
                 Err(e) => {
-                    godot_error!("godopty: TermGrid lock poisoned: {e}");
+                    godot_error!("gpty: TermGrid lock poisoned: {e}");
                     default
                 }
             }
@@ -184,11 +184,11 @@ impl GodoptyTerminal {
 
 
     /// Lock the grid mutably and call `f`. No-op if no shell or lock poisoned.
-    fn with_grid_mut(&self, f: impl FnOnce(&mut godopty_core::term::TermGrid)) {
+    fn with_grid_mut(&self, f: impl FnOnce(&mut gpty_core::term::TermGrid)) {
         if let Some(ref spawned) = self.spawned {
             match spawned.grid.lock() {
                 Ok(mut g) => f(&mut g),
-                Err(e) => godot_error!("godopty: TermGrid lock poisoned: {e}"),
+                Err(e) => godot_error!("gpty: TermGrid lock poisoned: {e}"),
             }
         }
     }
@@ -300,7 +300,7 @@ impl GodoptyTerminal {
             Err(_) => return,
         };
         if hex_csv.is_empty() {
-            grid.palette = godopty_core::color::SYSTEM_COLORS;
+            grid.palette = gpty_core::color::SYSTEM_COLORS;
             grid.generation += 1;
             grid.palette_changed = true;
             return;
@@ -370,7 +370,7 @@ impl GodoptyTerminal {
             |g| {
                 let updates = g.get_grid_updates(force_full);
                 match updates {
-                    godopty_core::term::GridUpdate::Full(rows) => {
+                    gpty_core::term::GridUpdate::Full(rows) => {
                         let n_rows = rows.len();
                         let n_cols = if n_rows > 0 { rows[0].len() } else { 0 };
                         let mut chars: Array<Variant> = Array::new();
@@ -396,7 +396,7 @@ impl GodoptyTerminal {
                         dict.set("bg", &Variant::from(bg)); dict.set("attrs", &Variant::from(attrs));
                         dict
                     }
-                    godopty_core::term::GridUpdate::Partial(cells) => {
+                    gpty_core::term::GridUpdate::Partial(cells) => {
                         let mut indices: Array<Variant> = Array::new();
                         let mut chars: Array<Variant> = Array::new();
                         let mut fg: Array<Variant> = Array::new();
@@ -436,7 +436,7 @@ impl GodoptyTerminal {
 				let updates = g.get_grid_updates(force_full);
 				let mut dict = Dictionary::<Variant, Variant>::new();
 				match updates {
-					godopty_core::term::GridUpdate::Full(rows) => {
+					gpty_core::term::GridUpdate::Full(rows) => {
 						let n_rows = rows.len();
 						let n_cols = if n_rows > 0 { rows[0].len() } else { 0 };
 						let mut chars: Array<Variant> = Array::new();
@@ -475,7 +475,7 @@ impl GodoptyTerminal {
 						dict.set("bg", &Variant::from(bg_arr));
 						dict.set("attrs", &Variant::from(attrs_arr));
 					}
-					godopty_core::term::GridUpdate::Partial(cells) => {
+					gpty_core::term::GridUpdate::Partial(cells) => {
 						let mut indices_arr = PackedInt32Array::new();
 						let mut chars: Array<Variant> = Array::new();
 						let mut fg_arr = PackedColorArray::new();
@@ -556,14 +556,14 @@ impl GodoptyTerminal {
 	#[func]
 	fn key_to_bytes(&self, keycode: i64, shift: bool, alt: bool, ctrl: bool, meta: bool) -> PackedByteArray {
 		let mut m: u8 = 0;
-		if shift { m |= godopty_core::keymap::Modifiers::SHIFT; }
-		if alt   { m |= godopty_core::keymap::Modifiers::ALT; }
-		if ctrl  { m |= godopty_core::keymap::Modifiers::CTRL; }
-		if meta  { m |= godopty_core::keymap::Modifiers::SUPER; }
+		if shift { m |= gpty_core::keymap::Modifiers::SHIFT; }
+		if alt   { m |= gpty_core::keymap::Modifiers::ALT; }
+		if ctrl  { m |= gpty_core::keymap::Modifiers::CTRL; }
+		if meta  { m |= gpty_core::keymap::Modifiers::SUPER; }
 
 		// Translate Godot KEY_* constants to evdev scancodes
 		let evdev = godot_key_to_evdev(keycode);
-		match godopty_core::keymap::key_event_to_bytes(evdev, m) {
+		match gpty_core::keymap::key_event_to_bytes(evdev, m) {
 			Some(bytes) => PackedByteArray::from(bytes.as_slice()),
 			None => PackedByteArray::new(),
 		}
@@ -577,7 +577,7 @@ impl GodoptyTerminal {
 	///   "actions": Array[{"cmd":String,"target":String}]
 	#[func]
 	fn set_global_concepts(&self, concepts_array: Array<Variant>) {
-		use godopty_core::types::{CaptureMode, Concept, Action};
+		use gpty_core::types::{CaptureMode, Concept, Action};
 		let mut concepts = Vec::new();
 		for item in concepts_array.iter_shared() {
 			let obj: Dictionary<Variant, Variant> = item.to();
@@ -618,7 +618,7 @@ impl GodoptyTerminal {
 	/// Get all concepts as an Array of Dictionaries.
 	#[func]
 	fn get_global_concepts(&self) -> Array<Variant> {
-		use godopty_core::types::CaptureMode;
+		use gpty_core::types::CaptureMode;
 		let concepts = ENGINE.get_concepts();
 		let mut arr = Array::<Variant>::new();
 		for c in &concepts {
@@ -778,7 +778,7 @@ fn godot_key_to_evdev(kc: i64) -> u32 {
 // Extension entry point
 // ═══════════════════════════════════════════════════════════════════════
 
-struct GodoptyExtension;
+struct GptyExtension;
 
 #[gdextension]
-unsafe impl ExtensionLibrary for GodoptyExtension {}
+unsafe impl ExtensionLibrary for GptyExtension {}

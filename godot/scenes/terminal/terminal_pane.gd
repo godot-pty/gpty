@@ -1,6 +1,6 @@
 extends PaneBody
 class_name TerminalPane
-# godopty Terminal Pane — Control-based node for focus + rendering.
+# gpty Terminal Pane — Control-based node for focus + rendering.
 
 const CURSOR_BLINK_INTERVAL = 0.5
 const SCROLL_LINES = 3
@@ -58,7 +58,7 @@ var color_scheme_path: String = "":
 		var target = float(max_fps) if max_fps > 0 else (DisplayServer.screen_get_refresh_rate() if DisplayServer.screen_get_refresh_rate() > 0 else 60.0)
 		_sync_interval = 1.0 / target
 
-var _terminal: GodoptyTerminal
+var _terminal: GptyTerminal
 var _font_bold: Font
 var _font_italic: Font
 var _cell_cache: Dictionary = {}
@@ -86,8 +86,8 @@ var _sync_interval: float = 1.0 / 60.0
 
 func _ready():
 	super._ready()
-	_terminal = GodoptyTerminal.new()
-	_terminal.name = "GodoptyTerminal"
+	_terminal = GptyTerminal.new()
+	_terminal.name = "GptyTerminal"
 	add_child(_terminal)
 	_terminal.start_shell(shell_command, rows, cols, shell_env)
 

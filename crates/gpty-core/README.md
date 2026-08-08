@@ -1,6 +1,6 @@
-# godopty-core
+# gpty-core
 
-Library crate for the godopty multi-PTY emulator. This is the engine — all terminal lifecycle, ANSI parsing, concept matching, capture buffering, and grid management live here.
+Library crate for the gpty multi-PTY emulator. This is the engine — all terminal lifecycle, ANSI parsing, concept matching, capture buffering, and grid management live here.
 
 ## Module Layout
 

@@ -416,7 +416,7 @@ func _add_env_control(v: VBoxContainer) -> TextEdit:
 	return te
 
 var _concept_list: VBoxContainer
-var _concept_terminal: GodoptyTerminal  # any terminal for global concept FFI
+var _concept_terminal: GptyTerminal  # any terminal for global concept FFI
 
 func _add_concept_section(v: VBoxContainer):
 	_concept_terminal = _workspace.get_terminal_for_ffi()

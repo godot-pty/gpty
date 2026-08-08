@@ -4,7 +4,7 @@ class_name ObserverPane
 
 @export var label_name := "observer"
 
-var _terminal: GodoptyTerminal
+var _terminal: GptyTerminal
 var _display: RichTextLabel
 var _shell_command := "/bin/bash"
 
@@ -22,8 +22,8 @@ func _ready():
 	_display.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	# Spawn a shell with the observer label so concept events target it
-	_terminal = GodoptyTerminal.new()
-	_terminal.name = "GodoptyTerminal"
+	_terminal = GptyTerminal.new()
+	_terminal.name = "GptyTerminal"
 	add_child(_terminal)
 	_terminal.start_shell(_shell_command, 24, 80, "")
 	

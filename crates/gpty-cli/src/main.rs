@@ -1,4 +1,4 @@
-//! # godopty-cli
+//! # gpty
 //!
 //! CLI prototype. Runs without Godot to validate the Rust engine in isolation.
 //!
@@ -10,9 +10,9 @@
 //! | `--pty` | Real PTYs | End-to-end PTY+vte+pub-sub pipeline |
 //! | `--term` | Terminal grid | alacritty_terminal grid rendering in the console |
 
-use godopty_core::engine::WorkspaceEngine;
-use godopty_core::term::TermGrid;
-use godopty_core::types::{Action, CaptureMode, Concept, TerminalConfig};
+use gpty_core::engine::WorkspaceEngine;
+use gpty_core::term::TermGrid;
+use gpty_core::types::{Action, CaptureMode, Concept, TerminalConfig};
 use regex::Regex;
 
 // ── Demo constants ─────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ async fn main() {
 // ── Mock demo ──────────────────────────────────────────────────────────
 
 async fn run_mock_demo() {
-    log::info!("=== godopty Phase 1: Mock Terminal Demo ===");
+    log::info!("=== gpty Phase 1: Mock Terminal Demo ===");
 
     let concepts = build_concepts();
     let engine = WorkspaceEngine::new(concepts);
@@ -99,7 +99,7 @@ async fn run_mock_demo() {
 // ── Real-PTY demo ──────────────────────────────────────────────────────
 
 async fn run_pty_demo() {
-    log::info!("=== godopty Phase 1: Real-PTY Demo ===");
+    log::info!("=== gpty Phase 1: Real-PTY Demo ===");
 
     let concepts = build_concepts();
     let engine = WorkspaceEngine::new(concepts);
@@ -152,7 +152,7 @@ async fn run_pty_demo() {
 /// grid to stdout with ANSI color codes so the user can visually verify
 /// correctness.
 fn run_term_demo() {
-    println!("=== godopty Phase 2a: Terminal Grid Demo ===\n");
+    println!("=== gpty Phase 2a: Terminal Grid Demo ===\n");
 
     let mut grid = TermGrid::new(GRID_ROWS, GRID_COLS);
 

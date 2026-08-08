@@ -1,6 +1,6 @@
-//! # godopty-core
+//! # gpty-core
 //!
-//! The engine behind godopty: a cross-platform multi-PTY emulator.
+//! The engine behind gpty: a cross-platform multi-PTY emulator.
 //!
 //! ## Module Map
 //!

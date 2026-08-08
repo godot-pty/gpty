@@ -1,6 +1,6 @@
 extends Control
 class_name Workspace
-# godopty Workspace — tiling grid of panes with title bars.
+# gpty Workspace — tiling grid of panes with title bars.
 # Tile lifecycle is delegated to TerminalManager.
 
 const GRID = 12
@@ -179,7 +179,7 @@ func _build_titlebar():
 
 	var label = Label.new()
 	label.name = "AppTitle"
-	label.text = "godopty"
+	label.text = "gpty"
 	label.add_theme_color_override("font_color", Color.WHITE)
 	label.anchor_left = 0.0
 	label.anchor_right = 0.0

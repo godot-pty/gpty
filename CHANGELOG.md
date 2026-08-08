@@ -7,9 +7,9 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 ### Added
 
 - Multi-PTY terminal emulator with tiling grid GUI
-- `godopty-core` library: PTY spawning (`portable-pty`), ANSI parsing (`vte`), terminal grid (`alacritty_terminal`), concept pub-sub engine
-- `godopty-gdext` GDExtension: `GodoptyTerminal` GodotClass with damage-tracked grid rendering
-- `godopty-cli` binary: mock, `--pty`, and `--term` demo modes
+- `gpty-core` library: PTY spawning (`portable-pty`), ANSI parsing (`vte`), terminal grid (`alacritty_terminal`), concept pub-sub engine
+- `gpty-gdext` GDExtension: `GptyTerminal` GodotClass with damage-tracked grid rendering
+- `gpty-cli` binary: mock, `--pty`, and `--term` demo modes
 - Tiling grid: split vertically/horizontally, kill, expand, and nested `SplitContainer` layout
 - Pane types: terminal, code viewer (`CodeEdit`), file tree (`Tree`), observer
 - Concept engine: regex triggers → labelled actions with `{payload}`/`{N}` variable substitution
@@ -31,7 +31,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - Standalone export presets (Linux, macOS, Windows) with CI release workflow
 - 60 Rust tests (core + integration) and 40+ GDScript unit/integration tests
 
-[0.1.0]: https://github.com/godopty/godopty/releases/tag/v0.1.0
+[0.1.0]: https://github.com/gpty/gpty/releases/tag/v0.1.0
 
 ## [0.2.0] — unreleased
 
@@ -66,4 +66,4 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - `as` keyword renamed to `adj_saved` in terminal_manager.gd
 - Titlebar drag-to-move: background and label `mouse_filter` set to `IGNORE`
 
-[0.2.0]: https://github.com/godopty/godopty/releases/tag/v0.2.0
+[0.2.0]: https://github.com/gpty/gpty/releases/tag/v0.2.0

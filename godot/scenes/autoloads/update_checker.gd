@@ -3,7 +3,7 @@ extends Node
 # Non-blocking — runs in background, degrades silently on network errors.
 
 const REPO_OWNER := "you"
-const REPO_NAME := "godopty"
+const REPO_NAME := "gpty"
 const RELEASES_URL := "https://api.github.com/repos/%s/%s/releases/latest"
 
 const REQUEST_TIMEOUT := 5.0

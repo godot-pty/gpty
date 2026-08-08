@@ -1,6 +1,6 @@
 extends RefCounted
 class_name TerminalManager
-# godopty Terminal Manager — owns tile lifecycle and pane building.
+# gpty Terminal Manager — owns tile lifecycle and pane building.
 # Now supports any PaneBody type via spawn_pane().
 
 const GRID = 12

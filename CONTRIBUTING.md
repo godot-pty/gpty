@@ -4,22 +4,22 @@
 
 - **Rust**: Edition 2024, requires Rust ≥ 1.85
 - **Godot**: 4.7 with GDExtension support
-- **Build**: `cargo build -p godopty-gdext`
+- **Build**: `cargo build -p gpty-gdext`
 
 ```bash
 # Build the GDExtension shared library
-cargo build -p godopty-gdext
+cargo build -p gpty-gdext
 
 # Run all Rust unit tests
-cargo test -p godopty-core
+cargo test -p gpty-core
 
 # Type-check Rust only (fast)
 cargo check
 
 # CLI demos (no Godot needed)
-cargo run --bin godopty-cli              # mock pub-sub
-cargo run --bin godopty-cli -- --pty     # real PTY
-cargo run --bin godopty-cli -- --term    # alacritty_terminal grid
+cargo run --bin gpty              # mock pub-sub
+cargo run --bin gpty -- --pty     # real PTY
+cargo run --bin gpty -- --term    # alacritty_terminal grid
 
 # Open in Godot editor (after building gdext)
 cd godot && godot -e
@@ -45,9 +45,9 @@ cd godot && godot -e
 
 |Crate|Role|
 |---|---|
-|`godopty-core`|Library: PTY spawning, ANSI parsing, alacritty_terminal grid, concept/pub-sub engine|
-|`godopty-cli`|CLI binary: three demo modes (mock, `--pty`, `--term`)|
-|`godopty-gdext`|GDExtension cdylib: `GodoptyTerminal` GodotClass bridging Rust ↔ GDScript|
+|`gpty-core`|Library: PTY spawning, ANSI parsing, alacritty_terminal grid, concept/pub-sub engine|
+|`gpty-cli`|CLI binary: three demo modes (mock, `--pty`, `--term`)|
+|`gpty-gdext`|GDExtension cdylib: `GptyTerminal` GodotClass bridging Rust ↔ GDScript|
 
 ## PR Process
 

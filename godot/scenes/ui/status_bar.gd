@@ -1,6 +1,6 @@
 class_name StatusBar
 extends Control
-# godopty Status Bar — bottom bar showing pane info, FPS, and window mode.
+# gpty Status Bar — bottom bar showing pane info, FPS, and window mode.
 
 const HEIGHT = 22.0
 const BG_COLOR = Color(0.12, 0.12, 0.14, 1.0)

@@ -1,0 +1,12 @@
+[package]
+name = "gpty"
+version = "0.1.0"
+edition = "2024"
+description = "CLI for gpty — validates the concept orchestration engine"
+
+[dependencies]
+gpty-core = { path = "../gpty-core" }
+tokio = { version = "1", features = ["full"] }
+env_logger = "0.11"
+regex = "1"
+log = "0.4"

@@ -1,20 +1,20 @@
-# Maintainer: godopty contributors
-# GitHub: https://github.com/godopty/godopty
-pkgname=godopty-bin
+# Maintainer: gpty contributors
+# GitHub: https://github.com/gpty/gpty
+pkgname=gpty-bin
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="Multi-PTY terminal emulator with tiling grid GUI"
 arch=('x86_64')
-url="https://github.com/godopty/godopty"
+url="https://github.com/gpty/gpty"
 license=('Apache-2.0')
 depends=()
-source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/godopty-v$pkgver-linux-x86_64.tar.gz"
-        "godopty.desktop")
+source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/gpty-v$pkgver-linux-x86_64.tar.gz"
+        "gpty.desktop")
 sha256sums=('SKIP'
             'SKIP')
 
 package() {
     tar -xzf "$srcdir/$pkgname-$pkgver.tar.gz" -C "$srcdir"
-    install -Dm755 "$srcdir/godopty-v$pkgver-linux-x86_64/godopty" "$pkgdir/usr/bin/godopty"
-    install -Dm644 "$srcdir/godopty.desktop" "$pkgdir/usr/share/applications/godopty.desktop"
+    install -Dm755 "$srcdir/gpty-v$pkgver-linux-x86_64/gpty" "$pkgdir/usr/bin/gpty"
+    install -Dm644 "$srcdir/gpty.desktop" "$pkgdir/usr/share/applications/gpty.desktop"
 }

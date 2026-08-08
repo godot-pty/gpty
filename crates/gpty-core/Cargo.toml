@@ -1,8 +1,8 @@
 [package]
-name = "godopty-core"
+name = "gpty-core"
 version = "0.1.0"
 edition = "2024"
-description = "Core library for godopty: PTY management, terminal parsing, and concept-based orchestration"
+description = "Core library for gpty: PTY management, terminal parsing, and concept-based orchestration"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

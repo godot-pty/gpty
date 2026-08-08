@@ -88,7 +88,7 @@ func _make_pane_action_button(icon: String, tooltip: String) -> Button:
 func _add_header(v: VBoxContainer):
 	var h = HBoxContainer.new(); h.name = "Header"
 	h.add_theme_constant_override("separation", 0)
-	var title = Label.new(); title.text = " godopty"; title.add_theme_font_size_override("font_size", 16)
+	var title = Label.new(); title.text = " gpty"; title.add_theme_font_size_override("font_size", 16)
 	title.name = "SidebarTitle"; title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(title)
 	var arrow = Button.new()

@@ -1,10 +1,10 @@
-# godopty — Godot Project
+# gpty — Godot Project
 
 ## Running
 
 ```bash
 # Build the Rust extension first
-cd .. && cargo build -p godopty-gdext
+cd .. && cargo build -p gpty-gdext
 
 # Launch Godot (editor)
 cd godot && godot -e
@@ -17,7 +17,7 @@ cd godot && godot -e
 ```
 godot/
 ├── project.godot            # Godot 4.7 project config
-├── godopty.gdextension      # GDExtension library config
+├── gpty.gdextension      # GDExtension library config
 ├── concepts.default.json    # Shipped default concepts
 ├── fonts/                   # Bundled fonts (DejaVu Sans Mono + Phosphor icons)
 │   ├── DejaVuSansMono.ttf
