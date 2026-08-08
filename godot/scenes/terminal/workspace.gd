@@ -559,7 +559,7 @@ func _wire_sidebar_signals():
 	_sidebar.request_position_swap.connect(func(body: Control, btn: Button): _on_pane_position_swap(body, btn))
 	_sidebar.request_type_swap.connect(func(body: Control, btn: Button): _on_pane_type_swap(body, btn))
 	_sidebar.request_pane_settings.connect(func(body: Control): _tm._open_pane_settings(body))
-	_sidebar.toggled.connect(func(): _apply_layout())
+	_sidebar.toggled.connect(func(): _on_sidebar_toggled())
 	_sidebar.request_profile.connect(_activate_profile)
 	_sidebar.request_window_mode.connect(_on_window_mode_selected)
 	_sidebar.request_save_profile.connect(_save_current_as_profile)
@@ -576,8 +576,9 @@ func _list():
 	_sidebar.update_pane_list(panes)
 
 func _toggle_sidebar():
-	if _sidebar == null: return
-	_sidebar._toggle_sidebar()
+	if _sidebar: _sidebar._toggle_sidebar()
+
+func _on_sidebar_toggled():
 	# Sync background rect to sidebar's new width
 	_sidebar_bg.offset_right = _sidebar.offset_right
 	# Show titlebar label only when sidebar is expanded
