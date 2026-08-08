@@ -103,16 +103,17 @@ func _notification(what):
 func _exit_tree():
 	_save_window_position()
 	_save()
+	SettingsManager.save_settings()
 var _titlebar: Control = null
 
 func _apply_window_mode():
+	# Always exit any special mode first, then apply desired mode + flags
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	match SettingsManager.cfg_window_mode:
 		0:  # Decorated windowed
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
-			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 			if _titlebar: _titlebar.visible = false
 		1:  # Borderless windowed
-			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, true)
 			if _titlebar: _titlebar.visible = true
 		2:  # Fullscreen (with custom titlebar for mode control)
