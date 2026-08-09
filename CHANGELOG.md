@@ -3,7 +3,7 @@
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [0.3.0] — Unreleased
+## [0.3.0] — 2026-08-09
 
 ### Added
 
@@ -17,7 +17,13 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - `gpty-ipc` crate: shared IPC protocol, client, server, and platform transport
 - `gpty --version` reports protocol version
 
-[0.3.0]: https://github.com/godot-pty/gpty/releases/tag/v0.3.0 (unreleased)
+
+### Changed
+
+- Reset button moved from between Settings and Profiles to below the pane list, with red destructive styling
+- Settings and Reset buttons decouple Phosphor icon rendering from ASCII text using Label+HBox pattern
+- "New:" pane button label renamed to "Add Pane:" with updated styling
+[0.3.0]: https://github.com/godot-pty/gpty/releases/tag/v0.3.0
 
 ## [0.2.0] — 2026-08-08
 
