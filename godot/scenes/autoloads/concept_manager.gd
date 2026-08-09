@@ -10,10 +10,15 @@ func _on_init():
 
 func _push_to_rust():
 	var concepts = _merge_concepts()
-	if concepts.is_empty():
+	# Filter out disabled concepts before pushing to Rust
+	var enabled_only: Array = []
+	for c in concepts:
+		if c is Dictionary and c.get("enabled", true) != false:
+			enabled_only.append(c)
+	if enabled_only.is_empty():
 		return
 	var t = GptyTerminal.new()
-	t.set_global_concepts(concepts)
+	t.set_global_concepts(enabled_only)
 
 func _merge_concepts() -> Array:
 	var defaults = _load_defaults()
@@ -91,6 +96,27 @@ func _load_from_file() -> Array:
 	if not (raw is Array):
 		return []
 	return raw
+
+## Return merged concepts with enabled status for IPC/MCP.
+func get_concepts() -> Array:
+	return _merge_concepts()
+
+## Toggle a concept's enabled flag in the user overrides file.
+func toggle_concept(name: String) -> bool:
+	var user = _load_from_file()
+	var found = false
+	for c in user:
+		if c is Dictionary and c.get("name", "") == name:
+			c["enabled"] = not c.get("enabled", true)
+			found = true
+			break
+	if not found:
+		# Concept not in user file — add it with enabled=false
+		var entry: Dictionary = {"name": name, "enabled": false}
+		user.append(entry)
+	save_concepts(user)
+	return true
+
 
 func save_concepts(concepts: Array):
 	var d = {"concepts": concepts}

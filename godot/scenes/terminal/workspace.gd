@@ -746,6 +746,16 @@ func _handle_ipc_method(method: String, params):
 		"shutdown":
 			get_tree().quit()
 			return {"success": true}
+		"conceptList":
+			var concepts = ConceptManager.get_concepts()
+			return {"concepts": concepts}
+		"conceptToggle":
+			var name = str(params.get("name", ""))
+			if name == "":
+				return _ipc_error("Concept name required")
+			ConceptManager.toggle_concept(name)
+			ConceptManager._push_to_rust()
+			return {"success": true, "name": name}
 		_:
 			return _ipc_error("Unknown method: %s" % method, -32601)
 

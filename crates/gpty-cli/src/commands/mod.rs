@@ -1,5 +1,6 @@
 //! Command dispatch — maps CLI subcommands to IPC RPC calls.
 
+pub mod concept;
 pub mod daemon;
 mod focus_pane;
 mod inject;
@@ -40,6 +41,7 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
         Commands::FocusPane { pane_id } => focus_pane::run(client, pane_id, json).await,
         Commands::Inject { pane_id, text } => inject::run(client, pane_id, text, json).await,
         Commands::Daemon { action } => daemon::run_action(action, client, json).await,
+        Commands::Concept { action } => concept::run(client, action, json).await,
         Commands::Layout { action } => layout::run(client, action, json).await,
         Commands::Schema { .. } | Commands::Version | Commands::Mcp => {
             unreachable!("handled before dispatch")

@@ -114,11 +114,28 @@ enum Commands {
         action: LayoutAction,
     },
 
+    /// List, enable, or disable concept triggers
+    Concept {
+        #[command(subcommand)]
+        action: ConceptAction,
+    },
+
     /// Run as MCP server over stdio
     Mcp,
 
     /// Print version info
     Version,
+}
+
+#[derive(clap::Subcommand)]
+enum ConceptAction {
+    /// List all concepts with enabled/disabled status
+    List,
+    /// Enable or disable a concept by name
+    Toggle {
+        /// Concept name
+        name: String,
+    },
 }
 
 #[derive(clap::Subcommand)]

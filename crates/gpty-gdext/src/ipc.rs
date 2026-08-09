@@ -157,6 +157,8 @@ pub async fn start_ipc_server_inner(socket_path: &str) {
         "layoutSave",
         "layoutLoad",
         "layoutList",
+        "conceptList",
+        "conceptToggle",
     ];
     for method_name in gdscript_methods {
         server.register(method_name, make_gdscript_handler(method_name.to_string()));
