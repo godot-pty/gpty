@@ -58,16 +58,31 @@ godot/
 
 ## Key Bindings
 
+### Terminal
+
 | Shortcut | Action |
 |----------|--------|
-| Ctrl+N | Spawn new terminal |
-| Ctrl+W | Close focused terminal |
-| Ctrl+B | Toggle sidebar |
-| Ctrl+P | Command palette |
-| Ctrl+Shift+R | Emergency reset |
-| Ctrl+Shift+C | Copy selection |
-| Ctrl+Shift+V | Paste from clipboard |
-| Alt+←↑↓→ | Jump to adjacent pane |
+| `Ctrl+Shift+C` | Copy selection |
+| `Ctrl+Shift+V` | Paste from clipboard |
+| `Ctrl+F` | Toggle scrollback search |
+| `PageUp` / `PageDown` | Scroll through history |
+
+### Workspace
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Shift+N` | Spawn terminal |
+| `Ctrl+Shift+C` | Spawn code viewer |
+| `Ctrl+Shift+T` | Spawn file tree |
+| `Ctrl+Shift+O` | Spawn observer |
+| `Ctrl+Shift+W` | Close focused pane |
+| `Ctrl+Shift+B` | Toggle sidebar |
+| `Ctrl+Shift+P` | Command palette |
+| `Ctrl+Shift+R` | Reset workspace |
+| `F11` / `Ctrl+Shift+M` | Toggle fullscreen |
+| `Alt+←↑↓→` | Jump to adjacent pane |
+
+> **Note:** `Ctrl+Shift+C` copies when text is selected in a terminal; otherwise spawns a code viewer.
 
 ## Sidebar
 

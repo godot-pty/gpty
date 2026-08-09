@@ -437,12 +437,16 @@ func _handle_keyboard(event: InputEventKey):
 		accept_event(); return
 	if event.keycode == KEY_C and event.ctrl_pressed and event.shift_pressed:
 		var st = _get_selected_text()
-		if st != "": DisplayServer.clipboard_set(st)
-		_sel_start = Vector2i(-1, -1); _sel_end = Vector2i(-1, -1); queue_redraw(); accept_event(); return
+		if st != "":
+			DisplayServer.clipboard_set(st)
+			_sel_start = Vector2i(-1, -1); _sel_end = Vector2i(-1, -1); queue_redraw()
+			accept_event()
+		return
 	if event.keycode == KEY_V and event.ctrl_pressed and event.shift_pressed:
 		var cl = DisplayServer.clipboard_get()
 		if cl != "": _terminal.send_text(cl)
 		accept_event(); return
+
 	_sel_start = Vector2i(-1, -1); _sel_end = Vector2i(-1, -1)
 	if event.keycode == KEY_PAGEUP: _terminal.scroll_up(rows); accept_event(); return
 	if event.keycode == KEY_PAGEDOWN: _terminal.scroll_down(rows); accept_event(); return
