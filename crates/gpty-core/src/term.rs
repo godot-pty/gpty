@@ -13,13 +13,13 @@
 
 use std::sync::{Arc, Mutex};
 
+use alacritty_terminal::Term;
 use alacritty_terminal::event::{Event as TermEvent, EventListener};
 use alacritty_terminal::grid::{Dimensions, Grid, Scroll};
 use alacritty_terminal::index::{Column, Line};
+use alacritty_terminal::term::Config;
 use alacritty_terminal::term::cell::Cell;
 use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::term::Config;
-use alacritty_terminal::Term;
 
 /// Cursor shape returned by the terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,11 +129,24 @@ impl TermGrid {
         let config = Config::default();
         let size = GridSize { rows, cols };
         let title = Arc::new(Mutex::new(String::new()));
-        let listener = TitleListener { title: Arc::clone(&title) };
+        let listener = TitleListener {
+            title: Arc::clone(&title),
+        };
         let term = Term::new(config, &size, listener);
         let processor = vte::ansi::Processor::new();
-        Self { term, processor, title, rows, cols, generation: 0, palette_changed: false, last_full_offset: 0, palette: crate::color::SYSTEM_COLORS, line_count: 0, history: None }
-
+        Self {
+            term,
+            processor,
+            title,
+            rows,
+            cols,
+            generation: 0,
+            palette_changed: false,
+            last_full_offset: 0,
+            palette: crate::color::SYSTEM_COLORS,
+            line_count: 0,
+            history: None,
+        }
     }
 
     /// Feed raw PTY output bytes into the terminal state machine.
@@ -156,8 +169,7 @@ impl TermGrid {
     pub fn renderable_rows(&self) -> Vec<Vec<CellInfo>> {
         let content = self.term.renderable_content();
         let offset = self.term.grid().display_offset() as i32;
-        let mut rows: Vec<Vec<CellInfo>> =
-            vec![vec![CellInfo::default(); self.cols]; self.rows];
+        let mut rows: Vec<Vec<CellInfo>> = vec![vec![CellInfo::default(); self.cols]; self.rows];
 
         for indexed in content.display_iter {
             // display_iter reports negative line numbers for history rows;
@@ -287,13 +299,17 @@ impl TermGrid {
 
     /// Scroll up (back in history) by `lines`.
     pub fn scroll_up(&mut self, lines: usize) {
-        self.term.grid_mut().scroll_display(Scroll::Delta(lines as i32));
+        self.term
+            .grid_mut()
+            .scroll_display(Scroll::Delta(lines as i32));
         self.generation += 1;
     }
 
     /// Scroll down (forward in history) by `lines`.
     pub fn scroll_down(&mut self, lines: usize) {
-        self.term.grid_mut().scroll_display(Scroll::Delta(-(lines as i32)));
+        self.term
+            .grid_mut()
+            .scroll_display(Scroll::Delta(-(lines as i32)));
         self.generation += 1;
     }
 
@@ -303,45 +319,45 @@ impl TermGrid {
         self.generation += 1;
     }
 
-	/// Store a completed output line in the optional SQLite history.
-	pub fn store_line(&mut self, line: &str) {
-		self.line_count += 1;
-		if let Some(ref history) = self.history {
-			if let Ok(h) = history.lock() {
-				let _ = h.append(self.line_count as i64, line);
-			}
-		}
-	}
-	/// Search the full grid (scrollback + visible) for lines matching `pattern`.
-	///
-	/// Returns a list of `(line_idx, col)` positions. `line_idx` is 0-based
-	/// from the top of scrollback history (0 = oldest history line).
-	/// `col` is the byte offset of the match within the line's text.
-	///
-	/// Uses the standard `regex` crate — no backtracking engine, ReDoS-safe.
-	pub fn search(&self, pattern: &str) -> Result<Vec<(i32, i32)>, regex::Error> {
-		let re = regex::Regex::new(pattern)?;
-		let grid = self.term.grid();
-		let history = grid.history_size() as i32;
-		let screen = grid.screen_lines() as i32;
-		let mut results = Vec::new();
+    /// Store a completed output line in the optional SQLite history.
+    pub fn store_line(&mut self, line: &str) {
+        self.line_count += 1;
+        if let Some(ref history) = self.history {
+            if let Ok(h) = history.lock() {
+                let _ = h.append(self.line_count as i64, line);
+            }
+        }
+    }
+    /// Search the full grid (scrollback + visible) for lines matching `pattern`.
+    ///
+    /// Returns a list of `(line_idx, col)` positions. `line_idx` is 0-based
+    /// from the top of scrollback history (0 = oldest history line).
+    /// `col` is the byte offset of the match within the line's text.
+    ///
+    /// Uses the standard `regex` crate — no backtracking engine, ReDoS-safe.
+    pub fn search(&self, pattern: &str) -> Result<Vec<(i32, i32)>, regex::Error> {
+        let re = regex::Regex::new(pattern)?;
+        let grid = self.term.grid();
+        let history = grid.history_size() as i32;
+        let screen = grid.screen_lines() as i32;
+        let mut results = Vec::new();
 
-		// Grid uses negative Line for scrollback: Line(-history) .. Line(screen-1)
-		for raw_line in -history..screen {
-			let row = &grid[Line(raw_line)];
-			let mut text = String::with_capacity(self.cols);
-			for col in 0..self.cols {
-				text.push(row[Column(col)].c);
-			}
-			// Trim trailing spaces — terminal lines are space-padded to width
-			let trimmed_len = text.trim_end().len();
-			for m in re.find_iter(&text[..trimmed_len]) {
-				// Report line as 0-based from top of scrollback
-				results.push(((raw_line + history) as i32, m.start() as i32));
-			}
-		}
-		Ok(results)
-	}
+        // Grid uses negative Line for scrollback: Line(-history) .. Line(screen-1)
+        for raw_line in -history..screen {
+            let row = &grid[Line(raw_line)];
+            let mut text = String::with_capacity(self.cols);
+            for col in 0..self.cols {
+                text.push(row[Column(col)].c);
+            }
+            // Trim trailing spaces — terminal lines are space-padded to width
+            let trimmed_len = text.trim_end().len();
+            for m in re.find_iter(&text[..trimmed_len]) {
+                // Report line as 0-based from top of scrollback
+                results.push(((raw_line + history) as i32, m.start() as i32));
+            }
+        }
+        Ok(results)
+    }
 }
 
 // ── CellInfo helpers ───────────────────────────────────────────────────
@@ -430,7 +446,7 @@ mod tests {
         g.feed(b"\x1b[31mRED\x1b[0m\r\n");
         let rows = g.renderable_rows();
         assert_eq!(rows[0][0].ch, 'R');
-        assert_eq!(rows[0][0].fg, [205, 0, 0]);  // \x1b[31m = Red
+        assert_eq!(rows[0][0].fg, [205, 0, 0]); // \x1b[31m = Red
     }
 
     #[test]
@@ -448,16 +464,32 @@ mod tests {
         let hist = g.history_size();
         assert_eq!(hist, 3, "5 lines + trailing CRLF = 3 history");
         // Before scroll, visible rows should be the last 3 lines
-        let before: Vec<String> = g.renderable_rows().iter()
-            .map(|r| r.iter().map(|c| c.ch).collect::<String>().trim_end().to_string())
+        let before: Vec<String> = g
+            .renderable_rows()
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|c| c.ch)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
             .collect();
         assert_eq!(before[0], "line4", "visible row 0 before scroll");
         assert_eq!(before[1], "line5", "visible row 1 before scroll");
         assert_eq!(before[2], "", "visible row 2 before scroll");
         // After scrolling up, we should see history
         g.scroll_up(2);
-        let after: Vec<String> = g.renderable_rows().iter()
-            .map(|r| r.iter().map(|c| c.ch).collect::<String>().trim_end().to_string())
+        let after: Vec<String> = g
+            .renderable_rows()
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|c| c.ch)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
             .collect();
         assert_eq!(after[0], "line2", "row 0 after scroll_up(2)");
         assert_eq!(after[1], "line3", "row 1 after scroll_up(2)");
@@ -498,11 +530,15 @@ mod tests {
         g.feed(b"line1\r\nline2\r\nline3\r\n");
         let gen_before = g.generation;
         g.scroll_up(1);
-		assert_eq!(g.generation, gen_before + 1);
+        assert_eq!(g.generation, gen_before + 1);
         g.scroll_down(1);
-		assert_eq!(g.generation, gen_before + 2);
+        assert_eq!(g.generation, gen_before + 2);
         g.scroll_reset();
-        assert_eq!(g.generation, gen_before + 3, "scroll operations should increment generation");
+        assert_eq!(
+            g.generation,
+            gen_before + 3,
+            "scroll operations should increment generation"
+        );
     }
 
     #[test]

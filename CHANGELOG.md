@@ -31,7 +31,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - Standalone export presets (Linux, macOS, Windows) with CI release workflow
 - 60 Rust tests (core + integration) and 40+ GDScript unit/integration tests
 
-[0.1.0]: https://github.com/gpty/gpty/releases/tag/v0.1.0
+[0.1.0]: https://github.com/godot-pty/gpty/releases/tag/v0.1.0
 
 ## [0.2.0] — unreleased
 
@@ -66,4 +66,4 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - `as` keyword renamed to `adj_saved` in terminal_manager.gd
 - Titlebar drag-to-move: background and label `mouse_filter` set to `IGNORE`
 
-[0.2.0]: https://github.com/gpty/gpty/releases/tag/v0.2.0
+[0.2.0]: https://github.com/godot-pty/gpty/releases/tag/v0.2.0

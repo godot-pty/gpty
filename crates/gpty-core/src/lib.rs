@@ -29,12 +29,12 @@
 //!                                              (check labels → inject command)
 //! ```
 
-pub mod types;
+pub mod color;
 pub mod concept;
 pub mod engine;
-pub mod pty;
-pub mod parser;
-pub mod term;
-pub mod color;
-pub mod keymap;
 pub mod history;
+pub mod keymap;
+pub mod parser;
+pub mod pty;
+pub mod term;
+pub mod types;

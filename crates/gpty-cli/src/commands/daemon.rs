@@ -1,8 +1,8 @@
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use godopty_ipc::client::IpcClient;
 use crate::DaemonAction;
+use gpty_ipc::client::IpcClient;
 
 pub async fn ensure_running(socket_path: &str, timeout: Duration) -> anyhow::Result<()> {
     let client = IpcClient::new(socket_path, Duration::from_secs(1));
@@ -27,26 +27,34 @@ pub async fn ensure_running(socket_path: &str, timeout: Duration) -> anyhow::Res
             }
         }
     }
-    Err(anyhow::anyhow!("could not connect to godopty GUI"))
+    Err(anyhow::anyhow!("could not connect to gpty GUI"))
 }
 
 fn find_gui_binary() -> Option<std::path::PathBuf> {
-    if let Ok(path) = std::env::var("GODOPTY_GUI") {
+    if let Ok(path) = std::env::var("GPTY_GUI") {
         let p = std::path::PathBuf::from(path);
-        if p.exists() { return Some(p); }
+        if p.exists() {
+            return Some(p);
+        }
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            for name in &["godopty-editor", "godopty-gui"] {
+            for name in &["gpty-editor", "gpty-gui"] {
                 let p = dir.join(name);
-                if p.exists() { return Some(p); }
+                if p.exists() {
+                    return Some(p);
+                }
             }
         }
     }
     None
 }
 
-pub async fn run_action(action: &DaemonAction, client: &IpcClient, json: bool) -> anyhow::Result<()> {
+pub async fn run_action(
+    action: &DaemonAction,
+    client: &IpcClient,
+    json: bool,
+) -> anyhow::Result<()> {
     match action {
         DaemonAction::Start => {
             println!("GUI daemon should already be running (or auto-spawned).");
@@ -55,24 +63,25 @@ pub async fn run_action(action: &DaemonAction, client: &IpcClient, json: bool) -
         DaemonAction::Stop => {
             super::call_and_format(client, "shutdown", serde_json::json!({}), json).await
         }
-        DaemonAction::Status => {
-            match client.call("version", None).await {
-                Ok(resp) => {
-                    if json {
-                        println!("{}", serde_json::to_string_pretty(&resp)?);
-                    } else if let Some(ref result) = resp.result {
-                        let v = result.get("version").and_then(|v| v.as_str()).unwrap_or("unknown");
-                        println!("godopty GUI is running (v{v})");
-                    } else {
-                        println!("godopty GUI is running.");
-                    }
-                    Ok(())
+        DaemonAction::Status => match client.call("version", None).await {
+            Ok(resp) => {
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&resp)?);
+                } else if let Some(ref result) = resp.result {
+                    let v = result
+                        .get("version")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    println!("gpty GUI is running (v{v})");
+                } else {
+                    println!("gpty GUI is running.");
                 }
-                Err(_) => {
-                    println!("godopty GUI is not running.");
-                    std::process::exit(1);
-                }
+                Ok(())
             }
-        }
+            Err(_) => {
+                println!("gpty GUI is not running.");
+                std::process::exit(1);
+            }
+        },
     }
 }

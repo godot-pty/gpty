@@ -22,12 +22,14 @@ pub async fn connect_unix(path: &Path) -> io::Result<tokio::net::UnixStream> {
 }
 
 #[cfg(windows)]
-pub async fn connect_named_pipe(path: &str) -> io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
+pub async fn connect_named_pipe(
+    path: &str,
+) -> io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
     // On Windows, named pipes are used instead of Unix sockets.
     tokio::net::windows::named_pipe::ClientOptions::new().open(path)
 }
 
-/// Open a connection to the running godopty IPC socket.
+/// Open a connection to the running gpty IPC socket.
 ///
 /// The `socket_path` is the platform-specific socket address.
 pub async fn connect(socket_path: &str) -> io::Result<Box<dyn IpcTransport>> {
@@ -54,9 +56,9 @@ pub async fn connect(socket_path: &str) -> io::Result<Box<dyn IpcTransport>> {
 
 /// Returns the default IPC socket path for the current platform.
 ///
-/// Respects the `GODOPTY_SOCKET` environment variable if set.
+/// Respects the `GPTY_SOCKET` environment variable if set.
 pub fn default_socket_path() -> String {
-    if let Ok(val) = std::env::var("GODOPTY_SOCKET") {
+    if let Ok(val) = std::env::var("GPTY_SOCKET") {
         if !val.is_empty() {
             return val;
         }
@@ -64,25 +66,25 @@ pub fn default_socket_path() -> String {
 
     #[cfg(target_os = "linux")]
     {
-        "/tmp/godopty.sock".into()
+        "/tmp/gpty.sock".into()
     }
 
     #[cfg(target_os = "macos")]
     {
         format!(
-            "{}/godopty.sock",
+            "{}/gpty.sock",
             std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into())
         )
     }
 
     #[cfg(windows)]
     {
-        r"\\.\pipe\godopty".into()
+        r"\\.\pipe\gpty".into()
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
-        "/tmp/godopty.sock".into()
+        "/tmp/gpty.sock".into()
     }
 }
 
@@ -99,18 +101,18 @@ mod tests {
     }
     #[test]
     fn env_var_overrides_default() {
-        // SAFETY: test runs in single-threaded context, no other tests read GODOPTY_SOCKET concurrently.
-        unsafe { std::env::set_var("GODOPTY_SOCKET", "/custom/path.sock") };
+        // SAFETY: test runs in single-threaded context, no other tests read GPTY_SOCKET concurrently.
+        unsafe { std::env::set_var("GPTY_SOCKET", "/custom/path.sock") };
         assert_eq!(default_socket_path(), "/custom/path.sock");
-        unsafe { std::env::remove_var("GODOPTY_SOCKET") };
+        unsafe { std::env::remove_var("GPTY_SOCKET") };
     }
 
     #[test]
     fn env_var_empty_falls_back() {
-        unsafe { std::env::set_var("GODOPTY_SOCKET", "") };
+        unsafe { std::env::set_var("GPTY_SOCKET", "") };
         let path = default_socket_path();
         assert!(!path.is_empty());
         assert_ne!(path, "");
-        unsafe { std::env::remove_var("GODOPTY_SOCKET") };
+        unsafe { std::env::remove_var("GPTY_SOCKET") };
     }
 }

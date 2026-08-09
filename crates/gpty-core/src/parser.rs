@@ -31,7 +31,10 @@ pub struct LineParser {
 
 impl LineParser {
     pub fn new() -> Self {
-        Self { parser: Parser::new(), handler: Handler::default() }
+        Self {
+            parser: Parser::new(),
+            handler: Handler::default(),
+        }
     }
 
     /// Feed raw PTY bytes into the parser.
@@ -107,14 +110,7 @@ impl Perform for Handler {
     fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {}
 
     /// DCS: device control strings — enter.
-    fn hook(
-        &mut self,
-        _params: &Params,
-        _intermediates: &[u8],
-        _ignore: bool,
-        _action: char,
-    ) {
-    }
+    fn hook(&mut self, _params: &Params, _intermediates: &[u8], _ignore: bool, _action: char) {}
 
     /// DCS: device control strings — data byte.
     fn put(&mut self, _byte: u8) {}
@@ -193,7 +189,11 @@ mod tests {
     fn crlf_produces_single_line() {
         let mut p = LineParser::new();
         let lines = p.feed(b"hello\r\nworld\r\n");
-        assert_eq!(lines, vec!["hello", "world"], "CRLF should not produce empty lines");
+        assert_eq!(
+            lines,
+            vec!["hello", "world"],
+            "CRLF should not produce empty lines"
+        );
     }
 
     #[test]

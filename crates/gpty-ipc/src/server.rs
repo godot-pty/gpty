@@ -20,8 +20,9 @@ use crate::protocol::{JsonRpcError, Request};
 /// Receives the parsed `params` value (or `Value::Null` when absent)
 /// and returns either a result value or a JSON-RPC error.
 pub type HandlerFn = Arc<
-    dyn Fn(serde_json::Value)
-            -> Pin<Box<dyn Future<Output = Result<serde_json::Value, JsonRpcError>> + Send>>
+    dyn Fn(
+            serde_json::Value,
+        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, JsonRpcError>> + Send>>
         + Send
         + Sync,
 >;
@@ -118,10 +119,7 @@ async fn handle_connection(
         Err(e) => {
             let resp = protocol::build_error(
                 0,
-                JsonRpcError::new(
-                    JsonRpcError::PARSE_ERROR,
-                    format!("Parse error: {e}"),
-                ),
+                JsonRpcError::new(JsonRpcError::PARSE_ERROR, format!("Parse error: {e}")),
             );
             let json = serde_json::to_string(&resp).unwrap_or_default();
             writer.write_all(json.as_bytes()).await?;
@@ -170,9 +168,7 @@ mod tests {
         let mut server = IpcServer::new("/tmp/test.sock");
         server.register(
             "version",
-            Arc::new(|_params| {
-                Box::pin(async { Ok(serde_json::json!({"version": "0.3.0"})) })
-            }),
+            Arc::new(|_params| Box::pin(async { Ok(serde_json::json!({"version": "0.3.0"})) })),
         );
         // Handler is registered — integration test below verifies dispatch.
     }
@@ -182,10 +178,7 @@ mod tests {
         use super::*;
         use crate::protocol::{Request, Response};
 
-        async fn send_request(
-            socket_path: &str,
-            req: &Request,
-        ) -> io::Result<Response> {
+        async fn send_request(socket_path: &str, req: &Request) -> io::Result<Response> {
             use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
             let mut stream = tokio::net::UnixStream::connect(socket_path).await?;
             let json = serde_json::to_string(req).unwrap();
@@ -201,22 +194,18 @@ mod tests {
 
         #[tokio::test]
         async fn round_trip() {
-            let socket_path = format!("/tmp/godopty-ipc-test-{}.sock", std::process::id());
+            let socket_path = format!("/tmp/gpty-ipc-test-{}.sock", std::process::id());
             let _ = std::fs::remove_file(&socket_path);
 
             let mut server = IpcServer::new(&socket_path);
             server.register(
                 "echo",
-                Arc::new(|params| {
-                    Box::pin(async move { Ok(params) })
-                }),
+                Arc::new(|params| Box::pin(async move { Ok(params) })),
             );
             server.register(
                 "fail",
                 Arc::new(|_params| {
-                    Box::pin(async {
-                        Err(JsonRpcError::new(-32001, "intentional failure"))
-                    })
+                    Box::pin(async { Err(JsonRpcError::new(-32001, "intentional failure")) })
                 }),
             );
 
@@ -238,10 +227,7 @@ mod tests {
             let resp = send_request(&server_path, &req).await.unwrap();
             assert_eq!(resp.id, 1);
             assert!(resp.error.is_none());
-            assert_eq!(
-                resp.result.unwrap(),
-                serde_json::json!({"hello": "world"})
-            );
+            assert_eq!(resp.result.unwrap(), serde_json::json!({"hello": "world"}));
 
             // Error call.
             let req = Request {

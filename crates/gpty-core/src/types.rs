@@ -6,7 +6,6 @@
 //! multiple receivers.
 use serde::{Deserialize, Serialize};
 
-
 /// How a triggered concept captures terminal output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureMode {

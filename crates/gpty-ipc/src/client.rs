@@ -1,6 +1,6 @@
 //! JSON-RPC over IPC client.
 //!
-//! Connects to a running godopty IPC server, sends a single
+//! Connects to a running gpty IPC server, sends a single
 //! JSON-RPC request, and reads back the response.
 
 use std::io;
@@ -43,7 +43,7 @@ impl ClientError {
     }
 }
 
-/// A client for the godopty IPC server.
+/// A client for the gpty IPC server.
 pub struct IpcClient {
     socket_path: String,
     timeout: Duration,
@@ -123,9 +123,8 @@ impl IpcClient {
             return Err(ClientError::InvalidResponse("empty response".into()));
         }
 
-        let resp: Response = serde_json::from_str(&line).map_err(|e| {
-            ClientError::InvalidResponse(format!("failed to parse response: {e}"))
-        })?;
+        let resp: Response = serde_json::from_str(&line)
+            .map_err(|e| ClientError::InvalidResponse(format!("failed to parse response: {e}")))?;
 
         Ok(resp)
     }
@@ -163,8 +162,7 @@ mod tests {
 
         #[tokio::test]
         async fn client_server_round_trip() {
-            let socket_path =
-                format!("/tmp/godopty-ipc-client-test-{}.sock", std::process::id());
+            let socket_path = format!("/tmp/gpty-ipc-client-test-{}.sock", std::process::id());
             let _ = std::fs::remove_file(&socket_path);
 
             let mut server = IpcServer::new(&socket_path);
@@ -190,24 +188,20 @@ mod tests {
 
             let client = IpcClient::new(&server_path, Duration::from_secs(5));
             let resp = client
-                .call(
-                    "greet",
-                    Some(serde_json::json!({"name": "godopty"})),
-                )
+                .call("greet", Some(serde_json::json!({"name": "gpty"})))
                 .await
                 .unwrap();
 
             assert!(resp.error.is_none());
             assert_eq!(
                 resp.result.unwrap(),
-                serde_json::json!({"greeting": "hello, godopty"})
+                serde_json::json!({"greeting": "hello, gpty"})
             );
         }
 
         #[tokio::test]
         async fn client_timeout() {
-            let socket_path =
-                format!("/tmp/godopty-ipc-timeout-test-{}.sock", std::process::id());
+            let socket_path = format!("/tmp/gpty-ipc-timeout-test-{}.sock", std::process::id());
             let client = IpcClient::new(&socket_path, Duration::from_millis(100));
             let result = client.call("version", None).await;
             assert!(result.is_err());

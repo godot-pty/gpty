@@ -1,4 +1,4 @@
-use godopty_ipc::client::IpcClient;
+use gpty_ipc::client::IpcClient;
 
 /// Valid pane type names.
 const VALID_TYPES: &[&str] = &["terminal", "code_viewer", "file_tree", "observer"];

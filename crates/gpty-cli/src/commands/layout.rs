@@ -1,5 +1,5 @@
-use godopty_ipc::client::IpcClient;
 use crate::LayoutAction;
+use gpty_ipc::client::IpcClient;
 
 pub async fn run(client: &IpcClient, action: &LayoutAction, json: bool) -> anyhow::Result<()> {
     match action {

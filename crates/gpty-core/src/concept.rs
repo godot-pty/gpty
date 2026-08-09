@@ -236,7 +236,10 @@ mod tests {
         let concepts = vec![c];
         let (tx, _rx) = broadcast::channel(8);
         let result = match_and_broadcast(1, &concepts, &tx, "cat file.txt");
-        assert!(result.is_some(), "UntilStop concept should return capture info");
+        assert!(
+            result.is_some(),
+            "UntilStop concept should return capture info"
+        );
         let (name, mode) = result.unwrap();
         assert_eq!(name, "cat_cmd");
         assert_eq!(

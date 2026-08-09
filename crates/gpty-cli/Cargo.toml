@@ -1,12 +1,20 @@
 [package]
 name = "gpty"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
-description = "CLI for gpty — validates the concept orchestration engine"
+description = "gpty CLI — control the terminal workspace over JSON-RPC IPC"
+
+[[bin]]
+name = "gpty"
+path = "src/main.rs"
 
 [dependencies]
 gpty-core = { path = "../gpty-core" }
+gpty-ipc = { path = "../gpty-ipc" }
 tokio = { version = "1", features = ["full"] }
-env_logger = "0.11"
-regex = "1"
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+anyhow = "1"
 log = "0.4"
+env_logger = "0.11"

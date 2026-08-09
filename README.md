@@ -26,7 +26,7 @@ gpty, a Godot-based Rust multi-PTY emulator desktop application for creating, ex
 
 ## Installation
 
-Standalone binaries (no Godot install required) are published on [GitHub Releases](https://github.com/gpty/gpty/releases) for Linux, macOS, and Windows.
+Standalone binaries (no Godot install required) are published on [GitHub Releases](https://github.com/godot-pty/gpty/releases) for Linux, macOS, and Windows.
 
 | Platform | Package |
 |---|---|
@@ -91,7 +91,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and [ROADMAP.md](ROADMAP.md
 
 ```bash
 # Clone
-git clone https://github.com/gpty/gpty.git gpty
+git clone https://github.com/godot-pty/gpty.git gpty
 cd gpty
 
 # Build

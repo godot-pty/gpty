@@ -1,4 +1,4 @@
-module github.com/gpty/gpty
+module github.com/godot-pty/gpty
 
 go 1.26.5
 

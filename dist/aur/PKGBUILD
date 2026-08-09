@@ -1,11 +1,11 @@
 # Maintainer: gpty contributors
-# GitHub: https://github.com/gpty/gpty
+# GitHub: https://github.com/godot-pty/gpty
 pkgname=gpty-bin
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="Multi-PTY terminal emulator with tiling grid GUI"
 arch=('x86_64')
-url="https://github.com/gpty/gpty"
+url="https://github.com/godot-pty/gpty"
 license=('Apache-2.0')
 depends=()
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/gpty-v$pkgver-linux-x86_64.tar.gz"

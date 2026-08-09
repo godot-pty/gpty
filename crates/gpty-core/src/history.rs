@@ -52,17 +52,20 @@ impl HistoryStore {
     }
 
     /// Search all history lines for `pattern` using FTS5.
-    pub fn search(&self, pattern: &str, limit: usize) -> Result<Vec<(i64, String)>, rusqlite::Error> {
+    pub fn search(
+        &self,
+        pattern: &str,
+        limit: usize,
+    ) -> Result<Vec<(i64, String)>, rusqlite::Error> {
         let mut stmt = self.conn.prepare(
             "SELECT l.line_num, l.text FROM lines l
              JOIN lines_fts f ON l.rowid = f.rowid
              WHERE l.pane_id = ?1 AND lines_fts MATCH ?2
-             ORDER BY l.line_num DESC LIMIT ?3"
+             ORDER BY l.line_num DESC LIMIT ?3",
         )?;
-        let rows = stmt.query_map(
-            params![self.pane_id, pattern, limit as i64],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
+        let rows = stmt.query_map(params![self.pane_id, pattern, limit as i64], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
         let mut results = Vec::new();
         for row in rows {
             results.push(row?);
@@ -75,12 +78,11 @@ impl HistoryStore {
         let mut stmt = self.conn.prepare(
             "SELECT line_num, text FROM lines
              WHERE pane_id = ?1 AND line_num BETWEEN ?2 AND ?3
-             ORDER BY line_num"
+             ORDER BY line_num",
         )?;
-        let rows = stmt.query_map(
-            params![self.pane_id, start, end],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
+        let rows = stmt.query_map(params![self.pane_id, start, end], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
         let mut results = Vec::new();
         for row in rows {
             results.push(row?);

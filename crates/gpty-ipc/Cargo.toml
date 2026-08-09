@@ -1,11 +1,11 @@
 [package]
-name = "godopty-ipc"
+name = "gpty-ipc"
 version = "0.3.0"
 edition = "2024"
-description = "JSON-RPC IPC transport, client, and server for godopty workspace control"
+description = "JSON-RPC IPC transport, client, and server for gpty workspace control"
 
 [dependencies]
-godopty-core = { path = "../godopty-core" }
+gpty-core = { path = "../gpty-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["net", "io-util", "time", "rt", "sync"] }

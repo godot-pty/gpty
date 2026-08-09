@@ -1,4 +1,4 @@
-use godopty_ipc::client::IpcClient;
+use gpty_ipc::client::IpcClient;
 
 pub async fn run(client: &IpcClient, json: bool) -> anyhow::Result<()> {
     let resp = client.call("listPanes", None).await?;
@@ -12,7 +12,10 @@ pub async fn run(client: &IpcClient, json: bool) -> anyhow::Result<()> {
             if panes.is_empty() {
                 println!("No panes.");
             } else {
-                println!("{:<6} {:<14} {:<20} {:>3} {:>3} {:>3} {:>3}  FOCUS", "ID", "TYPE", "TITLE", "COL", "ROW", "CW", "RH");
+                println!(
+                    "{:<6} {:<14} {:<20} {:>3} {:>3} {:>3} {:>3}  FOCUS",
+                    "ID", "TYPE", "TITLE", "COL", "ROW", "CW", "RH"
+                );
                 println!("{}", "-".repeat(80));
                 for p in panes {
                     let id = p.get("id").and_then(|v| v.as_str()).unwrap_or("?");
@@ -24,7 +27,9 @@ pub async fn run(client: &IpcClient, json: bool) -> anyhow::Result<()> {
                     let rspan = p.get("rspan").and_then(|v| v.as_i64()).unwrap_or(0);
                     let focused = p.get("focused").and_then(|v| v.as_bool()).unwrap_or(false);
                     let mark = if focused { "*" } else { " " };
-                    println!("{mark:<1}{id:<5} {ty:<14} {title:<20} {col:>3} {row:>3} {cspan:>3} {rspan:>3}  {focused}");
+                    println!(
+                        "{mark:<1}{id:<5} {ty:<14} {title:<20} {col:>3} {row:>3} {cspan:>3} {rspan:>3}  {focused}"
+                    );
                 }
             }
         } else {

@@ -131,9 +131,15 @@ mod tests {
         assert_eq!(named_to_rgb(&NamedColor::Background, &palette), palette[0]);
         assert_eq!(named_to_rgb(&NamedColor::Foreground, &palette), palette[7]);
         // Verify they are NOT the DEFAULT_BG/DEFAULT_FG constants
-        assert_ne!(named_to_rgb(&NamedColor::Background, &palette), CellInfo::DEFAULT_BG,
-            "Background should use palette, not hardcoded DEFAULT_BG");
-        assert_ne!(named_to_rgb(&NamedColor::Foreground, &palette), CellInfo::DEFAULT_FG,
-            "Foreground should use palette, not hardcoded DEFAULT_FG");
+        assert_ne!(
+            named_to_rgb(&NamedColor::Background, &palette),
+            CellInfo::DEFAULT_BG,
+            "Background should use palette, not hardcoded DEFAULT_BG"
+        );
+        assert_ne!(
+            named_to_rgb(&NamedColor::Foreground, &palette),
+            CellInfo::DEFAULT_FG,
+            "Foreground should use palette, not hardcoded DEFAULT_FG"
+        );
     }
 }

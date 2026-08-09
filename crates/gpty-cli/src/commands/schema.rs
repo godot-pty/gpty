@@ -1,5 +1,5 @@
-use clap::CommandFactory;
 use crate::Cli;
+use clap::CommandFactory;
 
 pub fn run(format: &str) -> anyhow::Result<()> {
     match format {
@@ -24,8 +24,12 @@ fn clap_command_to_json_schema(cmd: &clap::Command) -> serde_json::Value {
         for arg in sub.get_arguments() {
             let id = arg.get_id().to_string();
             let mut arg_schema = serde_json::json!({"type": "string", "description": arg.get_help().unwrap_or_default().to_string()});
-            let vals = arg.get_possible_values(); if !vals.is_empty() {
-                let enums: Vec<_> = vals.iter().map(|v| serde_json::Value::String(v.get_name().to_string())).collect();
+            let vals = arg.get_possible_values();
+            if !vals.is_empty() {
+                let enums: Vec<_> = vals
+                    .iter()
+                    .map(|v| serde_json::Value::String(v.get_name().to_string()))
+                    .collect();
                 arg_schema["enum"] = serde_json::Value::Array(enums);
             }
             if arg.is_required_set() {
@@ -49,7 +53,7 @@ fn clap_command_to_json_schema(cmd: &clap::Command) -> serde_json::Value {
     }
     serde_json::json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "title": "godopty CLI",
+        "title": "gpty CLI",
         "description": cmd.get_about().unwrap_or_default().to_string(),
         "type": "object",
         "oneOf": one_of,
@@ -66,8 +70,12 @@ pub fn build_mcp_tools_inline(cmd: &clap::Command) -> serde_json::Value {
         for arg in sub.get_arguments() {
             let id = arg.get_id().to_string();
             let mut arg_schema = serde_json::json!({"type": "string", "description": arg.get_help().unwrap_or_default().to_string()});
-            let vals = arg.get_possible_values(); if !vals.is_empty() {
-                let enums: Vec<_> = vals.iter().map(|v| serde_json::Value::String(v.get_name().to_string())).collect();
+            let vals = arg.get_possible_values();
+            if !vals.is_empty() {
+                let enums: Vec<_> = vals
+                    .iter()
+                    .map(|v| serde_json::Value::String(v.get_name().to_string()))
+                    .collect();
                 arg_schema["enum"] = serde_json::Value::Array(enums);
             }
             properties.insert(id.clone(), arg_schema);

@@ -37,7 +37,12 @@ fn split_largest(tiles: &mut Vec<Tile>) -> Option<Tile> {
             return None;
         }
         s.cspan = half;
-        let new_tile = Tile { col: oc + half, row: or_, cspan: os - half, rspan: ot };
+        let new_tile = Tile {
+            col: oc + half,
+            row: or_,
+            cspan: os - half,
+            rspan: ot,
+        };
         tiles.push(new_tile.clone());
         Some(new_tile)
     } else {
@@ -46,7 +51,12 @@ fn split_largest(tiles: &mut Vec<Tile>) -> Option<Tile> {
             return None;
         }
         s.rspan = half;
-        let new_tile = Tile { col: oc, row: or_ + half, cspan: os, rspan: ot - half };
+        let new_tile = Tile {
+            col: oc,
+            row: or_ + half,
+            cspan: os,
+            rspan: ot - half,
+        };
         tiles.push(new_tile.clone());
         Some(new_tile)
     }
@@ -176,7 +186,12 @@ mod tests {
     use super::*;
 
     fn make_grid() -> Vec<Tile> {
-        vec![Tile { col: 0, row: 0, cspan: GRID, rspan: GRID }]
+        vec![Tile {
+            col: 0,
+            row: 0,
+            cspan: GRID,
+            rspan: GRID,
+        }]
     }
 
     #[test]
@@ -233,7 +248,10 @@ mod tests {
         // 4 tiles: T1(0,0,6,6), T3(0,6,6,6), T2(6,0,6,6), T4(6,6,6,6)
 
         // Remove T2
-        let idx = tiles.iter().position(|t| t.col == 6 && t.row == 0 && t.cspan == 6 && t.rspan == 6).unwrap();
+        let idx = tiles
+            .iter()
+            .position(|t| t.col == 6 && t.row == 0 && t.cspan == 6 && t.rspan == 6)
+            .unwrap();
         kill_tile(&mut tiles, idx);
 
         assert_eq!(tiles.len(), 3);
@@ -266,17 +284,36 @@ mod tests {
 
         // Kill tiles in reverse order
         while tiles.len() > 1 {
-            let last = tiles.len() - 1; kill_tile(&mut tiles, last);
-            assert!(no_overlap(&tiles), "overlap after kill, {} tiles left", tiles.len());
-            assert!(full_coverage(&tiles), "gap after kill, {} tiles left", tiles.len());
+            let last = tiles.len() - 1;
+            kill_tile(&mut tiles, last);
+            assert!(
+                no_overlap(&tiles),
+                "overlap after kill, {} tiles left",
+                tiles.len()
+            );
+            assert!(
+                full_coverage(&tiles),
+                "gap after kill, {} tiles left",
+                tiles.len()
+            );
         }
     }
 
     #[test]
     fn exact_expand_horizontal() {
         let mut tiles = vec![
-            Tile { col: 0, row: 0, cspan: 6, rspan: GRID },
-            Tile { col: 6, row: 0, cspan: 6, rspan: GRID },
+            Tile {
+                col: 0,
+                row: 0,
+                cspan: 6,
+                rspan: GRID,
+            },
+            Tile {
+                col: 6,
+                row: 0,
+                cspan: 6,
+                rspan: GRID,
+            },
         ];
         kill_tile(&mut tiles, 1); // remove right tile
         assert_eq!(tiles.len(), 1);
@@ -287,8 +324,18 @@ mod tests {
     #[test]
     fn exact_expand_vertical() {
         let mut tiles = vec![
-            Tile { col: 0, row: 0, cspan: GRID, rspan: 6 },
-            Tile { col: 0, row: 6, cspan: GRID, rspan: 6 },
+            Tile {
+                col: 0,
+                row: 0,
+                cspan: GRID,
+                rspan: 6,
+            },
+            Tile {
+                col: 0,
+                row: 6,
+                cspan: GRID,
+                rspan: 6,
+            },
         ];
         kill_tile(&mut tiles, 1); // remove bottom tile
         assert_eq!(tiles.len(), 1);
@@ -299,9 +346,24 @@ mod tests {
     fn partial_expand_from_mixed_split() {
         // Scenario: 3 tiles after T1 split vertically, T2 on right
         let mut tiles = vec![
-            Tile { col: 0, row: 0, cspan: 6, rspan: 6 },  // T1 top-left
-            Tile { col: 0, row: 6, cspan: 6, rspan: 6 },  // T3 bottom-left
-            Tile { col: 6, row: 0, cspan: 6, rspan: GRID }, // T2 full right
+            Tile {
+                col: 0,
+                row: 0,
+                cspan: 6,
+                rspan: 6,
+            }, // T1 top-left
+            Tile {
+                col: 0,
+                row: 6,
+                cspan: 6,
+                rspan: 6,
+            }, // T3 bottom-left
+            Tile {
+                col: 6,
+                row: 0,
+                cspan: 6,
+                rspan: GRID,
+            }, // T2 full right
         ];
         let rm_idx = 2; // remove T2
         kill_tile(&mut tiles, rm_idx);
@@ -320,9 +382,24 @@ mod tests {
         // T1(0,0,4,12) left, T2(4,0,8,6) top-right, T3(4,6,8,6) bottom-right.
         // Remove T1 — T2 and T3 should expand left to fill the gap.
         let mut tiles = vec![
-            Tile { col: 0, row: 0, cspan: 4, rspan: GRID },
-            Tile { col: 4, row: 0, cspan: 8, rspan: 6 },
-            Tile { col: 4, row: 6, cspan: 8, rspan: 6 },
+            Tile {
+                col: 0,
+                row: 0,
+                cspan: 4,
+                rspan: GRID,
+            },
+            Tile {
+                col: 4,
+                row: 0,
+                cspan: 8,
+                rspan: 6,
+            },
+            Tile {
+                col: 4,
+                row: 6,
+                cspan: 8,
+                rspan: 6,
+            },
         ];
         kill_tile(&mut tiles, 0); // remove left tile
         assert_eq!(tiles.len(), 2);
@@ -340,9 +417,24 @@ mod tests {
         // T1(0,0,12,4) top, T2(0,4,6,8) bottom-left, T3(6,4,6,8) bottom-right.
         // Remove T1 — T2 and T3 should expand up to fill the gap.
         let mut tiles = vec![
-            Tile { col: 0, row: 0, cspan: GRID, rspan: 4 },
-            Tile { col: 0, row: 4, cspan: 6, rspan: 8 },
-            Tile { col: 6, row: 4, cspan: 6, rspan: 8 },
+            Tile {
+                col: 0,
+                row: 0,
+                cspan: GRID,
+                rspan: 4,
+            },
+            Tile {
+                col: 0,
+                row: 4,
+                cspan: 6,
+                rspan: 8,
+            },
+            Tile {
+                col: 6,
+                row: 4,
+                cspan: 6,
+                rspan: 8,
+            },
         ];
         kill_tile(&mut tiles, 0); // remove top tile
         assert_eq!(tiles.len(), 2);

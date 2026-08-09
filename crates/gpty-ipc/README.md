@@ -1,15 +1,15 @@
-# godopty-ipc
+# gpty-ipc
 
-JSON-RPC 2.0 IPC transport, client, and server for godopty workspace control.
+JSON-RPC 2.0 IPC transport, client, and server for gpty workspace control.
 
 ## Role in the Workspace
 
 | Crate | Role | Depends On |
 |-------|------|------------|
-| `godopty-core` | Engine library (PTY, ANSI, grid, concepts) | — |
-| **`godopty-ipc`** | **IPC transport + protocol** | `godopty-core` |
-| `godopty-gdext` | Godot 4 GDExtension bridge + IPC server | `godopty-core`, `godopty-ipc` |
-| `godopty-cli` | CLI client for workspace control | `godopty-ipc` |
+| `gpty-core` | Engine library (PTY, ANSI, grid, concepts) | — |
+| **`gpty-ipc`** | **IPC transport + protocol** | `gpty-core` |
+| `gpty-gdext` | Godot 4 GDExtension bridge + IPC server | `gpty-core`, `gpty-ipc` |
+| `gpty-cli` | CLI client for workspace control | `gpty-ipc` |
 
 ## Modules
 
@@ -25,9 +25,9 @@ JSON-RPC 2.0 IPC transport, client, and server for godopty workspace control.
 
 All communication is newline-delimited JSON-RPC 2.0 over a platform socket:
 
-- **Linux**: Unix domain socket at `/tmp/godopty.sock` (override with `GODOPTY_SOCKET`)
-- **macOS**: `$TMPDIR/godopty.sock`
-- **Windows**: Named pipe `\\.\pipe\godopty`
+- **Linux**: Unix domain socket at `/tmp/gpty.sock` (override with `GPTY_SOCKET`)
+- **macOS**: `$TMPDIR/gpty.sock`
+- **Windows**: Named pipe `\\.\pipe\gpty`
 
 ### Example
 
@@ -65,7 +65,7 @@ Error:
 
 | Crate | Version | Role |
 |-------|---------|------|
-| `godopty-core` | path | Engine types (`PaneType`, `TerminalConfig`) |
+| `gpty-core` | path | Engine types (`PaneType`, `TerminalConfig`) |
 | `serde` | 1 | Serialization framework |
 | `serde_json` | 1 | JSON encoding |
 | `tokio` | 1 | Async I/O + sync primitives |

@@ -38,8 +38,7 @@ static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
         .expect("failed to start tokio runtime")
 });
 
-static ENGINE: LazyLock<WorkspaceEngine> =
-    LazyLock::new(|| WorkspaceEngine::new(Vec::new()));
+static ENGINE: LazyLock<WorkspaceEngine> = LazyLock::new(|| WorkspaceEngine::new(Vec::new()));
 
 // ═══════════════════════════════════════════════════════════════════════
 // GptyTerminal — a Godot node backed by a Rust PTY session
@@ -88,7 +87,8 @@ impl GptyTerminal {
         let cols = cols.max(MIN_DIM) as usize;
 
         // Parse "KEY=value" lines into Vec<String>
-        let env_list: Vec<String> = envs.to_string()
+        let env_list: Vec<String> = envs
+            .to_string()
             .lines()
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty() && l.contains('='))
@@ -168,7 +168,11 @@ impl GptyTerminal {
             default
         }
     }
-    fn with_grid_mut_ret<T>(&self, f: impl FnOnce(&mut gpty_core::term::TermGrid) -> T, default: T) -> T {
+    fn with_grid_mut_ret<T>(
+        &self,
+        f: impl FnOnce(&mut gpty_core::term::TermGrid) -> T,
+        default: T,
+    ) -> T {
         if let Some(ref spawned) = self.spawned {
             match spawned.grid.lock() {
                 Ok(mut g) => f(&mut g),
@@ -181,7 +185,6 @@ impl GptyTerminal {
             default
         }
     }
-
 
     /// Lock the grid mutably and call `f`. No-op if no shell or lock poisoned.
     fn with_grid_mut(&self, f: impl FnOnce(&mut gpty_core::term::TermGrid)) {
@@ -343,20 +346,46 @@ impl GptyTerminal {
                     let mut line = String::with_capacity(n_cols);
                     for cell in row.iter() {
                         line.push(cell.ch);
-                        fg.push(&Variant::from(Color::from_rgb(cell.fg[0] as f32 * RGB_SCALE, cell.fg[1] as f32 * RGB_SCALE, cell.fg[2] as f32 * RGB_SCALE)));
-                        bg.push(&Variant::from(Color::from_rgb(cell.bg[0] as f32 * RGB_SCALE, cell.bg[1] as f32 * RGB_SCALE, cell.bg[2] as f32 * RGB_SCALE)));
+                        fg.push(&Variant::from(Color::from_rgb(
+                            cell.fg[0] as f32 * RGB_SCALE,
+                            cell.fg[1] as f32 * RGB_SCALE,
+                            cell.fg[2] as f32 * RGB_SCALE,
+                        )));
+                        bg.push(&Variant::from(Color::from_rgb(
+                            cell.bg[0] as f32 * RGB_SCALE,
+                            cell.bg[1] as f32 * RGB_SCALE,
+                            cell.bg[2] as f32 * RGB_SCALE,
+                        )));
                         let mut a: i64 = 0;
-                        if cell.bold { a |= 1; } if cell.italic { a |= 2; } if cell.underline { a |= 4; } if cell.inverse { a |= 8; } if cell.wide { a |= 16; }
+                        if cell.bold {
+                            a |= 1;
+                        }
+                        if cell.italic {
+                            a |= 2;
+                        }
+                        if cell.underline {
+                            a |= 4;
+                        }
+                        if cell.inverse {
+                            a |= 8;
+                        }
+                        if cell.wide {
+                            a |= 16;
+                        }
                         attrs.push(&Variant::from(a));
                     }
                     chars.push(&Variant::from(line));
                 }
                 let mut dict = Dictionary::<Variant, Variant>::new();
-                dict.set("rows", &Variant::from(n_rows as i64)); dict.set("cols", &Variant::from(n_cols as i64));
-                dict.set("chars", &Variant::from(chars)); dict.set("fg", &Variant::from(fg));
-                dict.set("bg", &Variant::from(bg)); dict.set("attrs", &Variant::from(attrs));
+                dict.set("rows", &Variant::from(n_rows as i64));
+                dict.set("cols", &Variant::from(n_cols as i64));
+                dict.set("chars", &Variant::from(chars));
+                dict.set("fg", &Variant::from(fg));
+                dict.set("bg", &Variant::from(bg));
+                dict.set("attrs", &Variant::from(attrs));
                 dict
-            }, Dictionary::<Variant, Variant>::new(),
+            },
+            Dictionary::<Variant, Variant>::new(),
         )
     }
     /// Fetches grid updates incrementally using damage tracking.
@@ -381,19 +410,44 @@ impl GptyTerminal {
                             let mut line = String::with_capacity(n_cols);
                             for cell in row.iter() {
                                 line.push(cell.ch);
-                                fg.push(&Variant::from(Color::from_rgb(cell.fg[0] as f32 * RGB_SCALE, cell.fg[1] as f32 * RGB_SCALE, cell.fg[2] as f32 * RGB_SCALE)));
-                                bg.push(&Variant::from(Color::from_rgb(cell.bg[0] as f32 * RGB_SCALE, cell.bg[1] as f32 * RGB_SCALE, cell.bg[2] as f32 * RGB_SCALE)));
+                                fg.push(&Variant::from(Color::from_rgb(
+                                    cell.fg[0] as f32 * RGB_SCALE,
+                                    cell.fg[1] as f32 * RGB_SCALE,
+                                    cell.fg[2] as f32 * RGB_SCALE,
+                                )));
+                                bg.push(&Variant::from(Color::from_rgb(
+                                    cell.bg[0] as f32 * RGB_SCALE,
+                                    cell.bg[1] as f32 * RGB_SCALE,
+                                    cell.bg[2] as f32 * RGB_SCALE,
+                                )));
                                 let mut a: i64 = 0;
-                                if cell.bold { a |= 1; } if cell.italic { a |= 2; } if cell.underline { a |= 4; } if cell.inverse { a |= 8; } if cell.wide { a |= 16; }
+                                if cell.bold {
+                                    a |= 1;
+                                }
+                                if cell.italic {
+                                    a |= 2;
+                                }
+                                if cell.underline {
+                                    a |= 4;
+                                }
+                                if cell.inverse {
+                                    a |= 8;
+                                }
+                                if cell.wide {
+                                    a |= 16;
+                                }
                                 attrs.push(&Variant::from(a));
                             }
                             chars.push(&Variant::from(line));
                         }
                         let mut dict = Dictionary::<Variant, Variant>::new();
                         dict.set("is_full", &Variant::from(true));
-                        dict.set("rows", &Variant::from(n_rows as i64)); dict.set("cols", &Variant::from(n_cols as i64));
-                        dict.set("chars", &Variant::from(chars)); dict.set("fg", &Variant::from(fg));
-                        dict.set("bg", &Variant::from(bg)); dict.set("attrs", &Variant::from(attrs));
+                        dict.set("rows", &Variant::from(n_rows as i64));
+                        dict.set("cols", &Variant::from(n_cols as i64));
+                        dict.set("chars", &Variant::from(chars));
+                        dict.set("fg", &Variant::from(fg));
+                        dict.set("bg", &Variant::from(bg));
+                        dict.set("attrs", &Variant::from(attrs));
                         dict
                     }
                     gpty_core::term::GridUpdate::Partial(cells) => {
@@ -406,10 +460,32 @@ impl GptyTerminal {
                         for u in cells {
                             indices.push(&Variant::from((u.row * cols + u.col) as i64));
                             chars.push(&Variant::from(u.cell.ch.to_string()));
-                            fg.push(&Variant::from(Color::from_rgb(u.cell.fg[0] as f32 * RGB_SCALE, u.cell.fg[1] as f32 * RGB_SCALE, u.cell.fg[2] as f32 * RGB_SCALE)));
-                            bg.push(&Variant::from(Color::from_rgb(u.cell.bg[0] as f32 * RGB_SCALE, u.cell.bg[1] as f32 * RGB_SCALE, u.cell.bg[2] as f32 * RGB_SCALE)));
+                            fg.push(&Variant::from(Color::from_rgb(
+                                u.cell.fg[0] as f32 * RGB_SCALE,
+                                u.cell.fg[1] as f32 * RGB_SCALE,
+                                u.cell.fg[2] as f32 * RGB_SCALE,
+                            )));
+                            bg.push(&Variant::from(Color::from_rgb(
+                                u.cell.bg[0] as f32 * RGB_SCALE,
+                                u.cell.bg[1] as f32 * RGB_SCALE,
+                                u.cell.bg[2] as f32 * RGB_SCALE,
+                            )));
                             let mut a: i64 = 0;
-                            if u.cell.bold { a |= 1; } if u.cell.italic { a |= 2; } if u.cell.underline { a |= 4; } if u.cell.inverse { a |= 8; } if u.cell.wide { a |= 16; }
+                            if u.cell.bold {
+                                a |= 1;
+                            }
+                            if u.cell.italic {
+                                a |= 2;
+                            }
+                            if u.cell.underline {
+                                a |= 4;
+                            }
+                            if u.cell.inverse {
+                                a |= 8;
+                            }
+                            if u.cell.wide {
+                                a |= 16;
+                            }
                             attrs.push(&Variant::from(a));
                         }
                         let mut dict = Dictionary::<Variant, Variant>::new();
@@ -422,280 +498,356 @@ impl GptyTerminal {
                         dict
                     }
                 }
-            }, Dictionary::<Variant, Variant>::new(),
+            },
+            Dictionary::<Variant, Variant>::new(),
         )
     }
 
-	/// Same as `get_grid_updates` but returns PackedColorArray and PackedInt32Array
-	/// instead of generic Array, avoiding per-element Variant boxing overhead.
-	/// This is the preferred path for GDScript rendering.
-	#[func]
-	fn get_grid_updates_packed(&self, force_full: bool) -> Dictionary<Variant, Variant> {
-		self.with_grid_mut_ret(
-			|g| {
-				let updates = g.get_grid_updates(force_full);
-				let mut dict = Dictionary::<Variant, Variant>::new();
-				match updates {
-					gpty_core::term::GridUpdate::Full(rows) => {
-						let n_rows = rows.len();
-						let n_cols = if n_rows > 0 { rows[0].len() } else { 0 };
-						let mut chars: Array<Variant> = Array::new();
-						let mut fg_arr = PackedColorArray::new();
-						let mut bg_arr = PackedColorArray::new();
-						let mut attrs_arr = PackedInt32Array::new();
-						for row in rows.iter() {
-							let mut line = String::with_capacity(n_cols);
-							for cell in row.iter() {
-								line.push(cell.ch);
-								fg_arr.push(Color::from_rgb(
-									cell.fg[0] as f32 * RGB_SCALE,
-									cell.fg[1] as f32 * RGB_SCALE,
-									cell.fg[2] as f32 * RGB_SCALE,
-								));
-								bg_arr.push(Color::from_rgb(
-									cell.bg[0] as f32 * RGB_SCALE,
-									cell.bg[1] as f32 * RGB_SCALE,
-									cell.bg[2] as f32 * RGB_SCALE,
-								));
-								let mut a: i32 = 0;
-								if cell.bold { a |= 1; }
-								if cell.italic { a |= 2; }
-								if cell.underline { a |= 4; }
-								if cell.inverse { a |= 8; }
-								if cell.wide { a |= 16; }
-								attrs_arr.push(a);
-							}
-							chars.push(&Variant::from(line));
-						}
-						dict.set("is_full", &Variant::from(true));
-						dict.set("rows", &Variant::from(n_rows as i64));
-						dict.set("cols", &Variant::from(n_cols as i64));
-						dict.set("chars", &Variant::from(chars));
-						dict.set("fg", &Variant::from(fg_arr));
-						dict.set("bg", &Variant::from(bg_arr));
-						dict.set("attrs", &Variant::from(attrs_arr));
-					}
-					gpty_core::term::GridUpdate::Partial(cells) => {
-						let mut indices_arr = PackedInt32Array::new();
-						let mut chars: Array<Variant> = Array::new();
-						let mut fg_arr = PackedColorArray::new();
-						let mut bg_arr = PackedColorArray::new();
-						let mut attrs_arr = PackedInt32Array::new();
-						let cols = g.num_cols();
-						for u in cells {
-							indices_arr.push((u.row * cols + u.col) as i32);
-							chars.push(&Variant::from(u.cell.ch.to_string()));
-							fg_arr.push(Color::from_rgb(
-								u.cell.fg[0] as f32 * RGB_SCALE,
-								u.cell.fg[1] as f32 * RGB_SCALE,
-								u.cell.fg[2] as f32 * RGB_SCALE,
-							));
-							bg_arr.push(Color::from_rgb(
-								u.cell.bg[0] as f32 * RGB_SCALE,
-								u.cell.bg[1] as f32 * RGB_SCALE,
-								u.cell.bg[2] as f32 * RGB_SCALE,
-							));
-							let mut a: i32 = 0;
-							if u.cell.bold { a |= 1; }
-							if u.cell.italic { a |= 2; }
-							if u.cell.underline { a |= 4; }
-							if u.cell.inverse { a |= 8; }
-							if u.cell.wide { a |= 16; }
-							attrs_arr.push(a);
-						}
-						dict.set("is_full", &Variant::from(false));
-						dict.set("indices", &Variant::from(indices_arr));
-						dict.set("chars", &Variant::from(chars));
-						dict.set("fg", &Variant::from(fg_arr));
-						dict.set("bg", &Variant::from(bg_arr));
-						dict.set("attrs", &Variant::from(attrs_arr));
-					}
-				}
-				dict
-			},
-			Dictionary::<Variant, Variant>::new(),
-		)
-	}
+    /// Same as `get_grid_updates` but returns PackedColorArray and PackedInt32Array
+    /// instead of generic Array, avoiding per-element Variant boxing overhead.
+    /// This is the preferred path for GDScript rendering.
+    #[func]
+    fn get_grid_updates_packed(&self, force_full: bool) -> Dictionary<Variant, Variant> {
+        self.with_grid_mut_ret(
+            |g| {
+                let updates = g.get_grid_updates(force_full);
+                let mut dict = Dictionary::<Variant, Variant>::new();
+                match updates {
+                    gpty_core::term::GridUpdate::Full(rows) => {
+                        let n_rows = rows.len();
+                        let n_cols = if n_rows > 0 { rows[0].len() } else { 0 };
+                        let mut chars: Array<Variant> = Array::new();
+                        let mut fg_arr = PackedColorArray::new();
+                        let mut bg_arr = PackedColorArray::new();
+                        let mut attrs_arr = PackedInt32Array::new();
+                        for row in rows.iter() {
+                            let mut line = String::with_capacity(n_cols);
+                            for cell in row.iter() {
+                                line.push(cell.ch);
+                                fg_arr.push(Color::from_rgb(
+                                    cell.fg[0] as f32 * RGB_SCALE,
+                                    cell.fg[1] as f32 * RGB_SCALE,
+                                    cell.fg[2] as f32 * RGB_SCALE,
+                                ));
+                                bg_arr.push(Color::from_rgb(
+                                    cell.bg[0] as f32 * RGB_SCALE,
+                                    cell.bg[1] as f32 * RGB_SCALE,
+                                    cell.bg[2] as f32 * RGB_SCALE,
+                                ));
+                                let mut a: i32 = 0;
+                                if cell.bold {
+                                    a |= 1;
+                                }
+                                if cell.italic {
+                                    a |= 2;
+                                }
+                                if cell.underline {
+                                    a |= 4;
+                                }
+                                if cell.inverse {
+                                    a |= 8;
+                                }
+                                if cell.wide {
+                                    a |= 16;
+                                }
+                                attrs_arr.push(a);
+                            }
+                            chars.push(&Variant::from(line));
+                        }
+                        dict.set("is_full", &Variant::from(true));
+                        dict.set("rows", &Variant::from(n_rows as i64));
+                        dict.set("cols", &Variant::from(n_cols as i64));
+                        dict.set("chars", &Variant::from(chars));
+                        dict.set("fg", &Variant::from(fg_arr));
+                        dict.set("bg", &Variant::from(bg_arr));
+                        dict.set("attrs", &Variant::from(attrs_arr));
+                    }
+                    gpty_core::term::GridUpdate::Partial(cells) => {
+                        let mut indices_arr = PackedInt32Array::new();
+                        let mut chars: Array<Variant> = Array::new();
+                        let mut fg_arr = PackedColorArray::new();
+                        let mut bg_arr = PackedColorArray::new();
+                        let mut attrs_arr = PackedInt32Array::new();
+                        let cols = g.num_cols();
+                        for u in cells {
+                            indices_arr.push((u.row * cols + u.col) as i32);
+                            chars.push(&Variant::from(u.cell.ch.to_string()));
+                            fg_arr.push(Color::from_rgb(
+                                u.cell.fg[0] as f32 * RGB_SCALE,
+                                u.cell.fg[1] as f32 * RGB_SCALE,
+                                u.cell.fg[2] as f32 * RGB_SCALE,
+                            ));
+                            bg_arr.push(Color::from_rgb(
+                                u.cell.bg[0] as f32 * RGB_SCALE,
+                                u.cell.bg[1] as f32 * RGB_SCALE,
+                                u.cell.bg[2] as f32 * RGB_SCALE,
+                            ));
+                            let mut a: i32 = 0;
+                            if u.cell.bold {
+                                a |= 1;
+                            }
+                            if u.cell.italic {
+                                a |= 2;
+                            }
+                            if u.cell.underline {
+                                a |= 4;
+                            }
+                            if u.cell.inverse {
+                                a |= 8;
+                            }
+                            if u.cell.wide {
+                                a |= 16;
+                            }
+                            attrs_arr.push(a);
+                        }
+                        dict.set("is_full", &Variant::from(false));
+                        dict.set("indices", &Variant::from(indices_arr));
+                        dict.set("chars", &Variant::from(chars));
+                        dict.set("fg", &Variant::from(fg_arr));
+                        dict.set("bg", &Variant::from(bg_arr));
+                        dict.set("attrs", &Variant::from(attrs_arr));
+                    }
+                }
+                dict
+            },
+            Dictionary::<Variant, Variant>::new(),
+        )
+    }
 
-	/// Search the full grid (scrollback + visible) for `pattern`.
-	///
-	/// Returns a Dictionary: `{count: int, rows: Array[int], cols: Array[int], error: String}`.
-	/// `rows[i]` is the 0-based line index from top of scrollback history.
-	/// `cols[i]` is the byte offset within that line.
-	/// On regex error, `error` is set and `count` is 0.
-	#[func]
-	fn search_grid(&self, pattern: GString) -> Dictionary<Variant, Variant> {
-		self.with_grid(
-			|g| {
-				let mut dict = Dictionary::<Variant, Variant>::new();
-				match g.search(&pattern.to_string()) {
-					Ok(matches) => {
-						let mut rows: Array<Variant> = Array::new();
-						let mut cols: Array<Variant> = Array::new();
-						for (row, col) in matches {
-							rows.push(&Variant::from(row));
-							cols.push(&Variant::from(col));
-						}
-						dict.set("count", &Variant::from(rows.len() as i64));
-						dict.set("rows", &Variant::from(rows));
-						dict.set("cols", &Variant::from(cols));
-					}
-					Err(e) => {
-						dict.set("error", &Variant::from(e.to_string()));
-						dict.set("count", &Variant::from(0i64));
-					}
-				}
-				dict
-			},
-			Dictionary::<Variant, Variant>::new(),
-		)
-	}
+    /// Search the full grid (scrollback + visible) for `pattern`.
+    ///
+    /// Returns a Dictionary: `{count: int, rows: Array[int], cols: Array[int], error: String}`.
+    /// `rows[i]` is the 0-based line index from top of scrollback history.
+    /// `cols[i]` is the byte offset within that line.
+    /// On regex error, `error` is set and `count` is 0.
+    #[func]
+    fn search_grid(&self, pattern: GString) -> Dictionary<Variant, Variant> {
+        self.with_grid(
+            |g| {
+                let mut dict = Dictionary::<Variant, Variant>::new();
+                match g.search(&pattern.to_string()) {
+                    Ok(matches) => {
+                        let mut rows: Array<Variant> = Array::new();
+                        let mut cols: Array<Variant> = Array::new();
+                        for (row, col) in matches {
+                            rows.push(&Variant::from(row));
+                            cols.push(&Variant::from(col));
+                        }
+                        dict.set("count", &Variant::from(rows.len() as i64));
+                        dict.set("rows", &Variant::from(rows));
+                        dict.set("cols", &Variant::from(cols));
+                    }
+                    Err(e) => {
+                        dict.set("error", &Variant::from(e.to_string()));
+                        dict.set("count", &Variant::from(0i64));
+                    }
+                }
+                dict
+            },
+            Dictionary::<Variant, Variant>::new(),
+        )
+    }
 
-	/// Convert a Godot key event to the raw PTY bytes (escape sequences for
-	/// special keys, empty for unhandled keys that should use the unicode path).
-	#[func]
-	fn key_to_bytes(&self, keycode: i64, shift: bool, alt: bool, ctrl: bool, meta: bool) -> PackedByteArray {
-		let mut m: u8 = 0;
-		if shift { m |= gpty_core::keymap::Modifiers::SHIFT; }
-		if alt   { m |= gpty_core::keymap::Modifiers::ALT; }
-		if ctrl  { m |= gpty_core::keymap::Modifiers::CTRL; }
-		if meta  { m |= gpty_core::keymap::Modifiers::SUPER; }
+    /// Convert a Godot key event to the raw PTY bytes (escape sequences for
+    /// special keys, empty for unhandled keys that should use the unicode path).
+    #[func]
+    fn key_to_bytes(
+        &self,
+        keycode: i64,
+        shift: bool,
+        alt: bool,
+        ctrl: bool,
+        meta: bool,
+    ) -> PackedByteArray {
+        let mut m: u8 = 0;
+        if shift {
+            m |= gpty_core::keymap::Modifiers::SHIFT;
+        }
+        if alt {
+            m |= gpty_core::keymap::Modifiers::ALT;
+        }
+        if ctrl {
+            m |= gpty_core::keymap::Modifiers::CTRL;
+        }
+        if meta {
+            m |= gpty_core::keymap::Modifiers::SUPER;
+        }
 
-		// Translate Godot KEY_* constants to evdev scancodes
-		let evdev = godot_key_to_evdev(keycode);
-		match gpty_core::keymap::key_event_to_bytes(evdev, m) {
-			Some(bytes) => PackedByteArray::from(bytes.as_slice()),
-			None => PackedByteArray::new(),
-		}
-	}
+        // Translate Godot KEY_* constants to evdev scancodes
+        let evdev = godot_key_to_evdev(keycode);
+        match gpty_core::keymap::key_event_to_bytes(evdev, m) {
+            Some(bytes) => PackedByteArray::from(bytes.as_slice()),
+            None => PackedByteArray::new(),
+        }
+    }
 
-	/// Replace all concepts in the global engine.
-	/// `concepts_array` is an Array of Dictionaries, each with:
-	///   "name": String, "trigger": String (regex),
-	///   "enabled": bool, "capture_mode": String,
-	///   "stop_timeout_ms": int, "stop_on_input": bool,
-	///   "actions": Array[{"cmd":String,"target":String}]
-	#[func]
-	fn set_global_concepts(&self, concepts_array: Array<Variant>) {
-		use gpty_core::types::{CaptureMode, Concept, Action};
-		let mut concepts = Vec::new();
-		for item in concepts_array.iter_shared() {
-			let obj: Dictionary<Variant, Variant> = item.to();
-			let name = obj.get("name").and_then(|v| v.try_to::<GString>().ok()).map(|s| s.to_string()).unwrap_or_default();
-			let trigger = obj.get("trigger").and_then(|v| v.try_to::<GString>().ok()).map(|s| s.to_string()).unwrap_or_default();
-			let Ok(re) = regex::Regex::new(&trigger) else { continue; };
-			let enabled = obj.get("enabled")
-				.and_then(|v| v.try_to::<bool>().ok())
-				.unwrap_or(true);
-			let capture_mode = obj.get("capture_mode")
-				.and_then(|v| v.try_to::<GString>().ok())
-				.map(|s| s.to_string())
-				.unwrap_or_default();
-			let cap_mode = if capture_mode == "until_stop" {
-				let stop_ms = obj.get("stop_timeout_ms")
-					.and_then(|v| v.try_to::<i64>().ok())
-					.unwrap_or(300) as u64;
-				let stop_input = obj.get("stop_on_input")
-					.and_then(|v| v.try_to::<bool>().ok())
-					.unwrap_or(true);
-				CaptureMode::UntilStop { stop_timeout_ms: stop_ms, stop_on_input: stop_input }
-			} else {
-				CaptureMode::SingleLine
-			};
-			let mut actions = Vec::new();
-			if let Some(acts) = obj.get("actions").and_then(|v| v.try_to::<Array<Variant>>().ok()) {
-				for a in acts.iter_shared() {
-					let ad: Dictionary<Variant, Variant> = a.to();
-					let cmd = ad.get("cmd").and_then(|v| v.try_to::<GString>().ok()).map(|s| s.to_string()).unwrap_or_default();
-					let target = ad.get("target").and_then(|v| v.try_to::<GString>().ok()).map(|s| s.to_string()).unwrap_or_default();
-					actions.push(Action { command_template: cmd, target_label: target });
-				}
-			}
-			concepts.push(Concept { name, trigger_regex: re, enabled, capture_mode: cap_mode, destinations: actions });
-		}
-		ENGINE.set_concepts(concepts);
-	}
-	/// Get all concepts as an Array of Dictionaries.
-	#[func]
-	fn get_global_concepts(&self) -> Array<Variant> {
-		use gpty_core::types::CaptureMode;
-		let concepts = ENGINE.get_concepts();
-		let mut arr = Array::<Variant>::new();
-		for c in &concepts {
-			let mut obj = Dictionary::<Variant, Variant>::new();
-			obj.set("name", &Variant::from(c.name.clone()));
-			obj.set("trigger", &Variant::from(c.trigger_regex.as_str()));
-			obj.set("enabled", &Variant::from(c.enabled));
-			match &c.capture_mode {
-				CaptureMode::SingleLine => {
-					obj.set("capture_mode", &Variant::from("single_line"));
-				}
-				CaptureMode::UntilStop { stop_timeout_ms, stop_on_input } => {
-					obj.set("capture_mode", &Variant::from("until_stop"));
-					obj.set("stop_timeout_ms", &Variant::from(*stop_timeout_ms as i64));
-					obj.set("stop_on_input", &Variant::from(*stop_on_input));
-				}
-			}
-			let mut acts = Array::<Variant>::new();
-			for a in &c.destinations {
-				let mut ad = Dictionary::<Variant, Variant>::new();
-				ad.set("cmd", &Variant::from(a.command_template.clone()));
-				ad.set("target", &Variant::from(a.target_label.clone()));
-				acts.push(&Variant::from(ad));
-			}
-			obj.set("actions", &Variant::from(acts));
-			arr.push(&Variant::from(obj));
-		}
-		arr
-	}
+    /// Replace all concepts in the global engine.
+    /// `concepts_array` is an Array of Dictionaries, each with:
+    ///   "name": String, "trigger": String (regex),
+    ///   "enabled": bool, "capture_mode": String,
+    ///   "stop_timeout_ms": int, "stop_on_input": bool,
+    ///   "actions": Array[{"cmd":String,"target":String}]
+    #[func]
+    fn set_global_concepts(&self, concepts_array: Array<Variant>) {
+        use gpty_core::types::{Action, CaptureMode, Concept};
+        let mut concepts = Vec::new();
+        for item in concepts_array.iter_shared() {
+            let obj: Dictionary<Variant, Variant> = item.to();
+            let name = obj
+                .get("name")
+                .and_then(|v| v.try_to::<GString>().ok())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            let trigger = obj
+                .get("trigger")
+                .and_then(|v| v.try_to::<GString>().ok())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            let Ok(re) = regex::Regex::new(&trigger) else {
+                continue;
+            };
+            let enabled = obj
+                .get("enabled")
+                .and_then(|v| v.try_to::<bool>().ok())
+                .unwrap_or(true);
+            let capture_mode = obj
+                .get("capture_mode")
+                .and_then(|v| v.try_to::<GString>().ok())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            let cap_mode = if capture_mode == "until_stop" {
+                let stop_ms = obj
+                    .get("stop_timeout_ms")
+                    .and_then(|v| v.try_to::<i64>().ok())
+                    .unwrap_or(300) as u64;
+                let stop_input = obj
+                    .get("stop_on_input")
+                    .and_then(|v| v.try_to::<bool>().ok())
+                    .unwrap_or(true);
+                CaptureMode::UntilStop {
+                    stop_timeout_ms: stop_ms,
+                    stop_on_input: stop_input,
+                }
+            } else {
+                CaptureMode::SingleLine
+            };
+            let mut actions = Vec::new();
+            if let Some(acts) = obj
+                .get("actions")
+                .and_then(|v| v.try_to::<Array<Variant>>().ok())
+            {
+                for a in acts.iter_shared() {
+                    let ad: Dictionary<Variant, Variant> = a.to();
+                    let cmd = ad
+                        .get("cmd")
+                        .and_then(|v| v.try_to::<GString>().ok())
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    let target = ad
+                        .get("target")
+                        .and_then(|v| v.try_to::<GString>().ok())
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    actions.push(Action {
+                        command_template: cmd,
+                        target_label: target,
+                    });
+                }
+            }
+            concepts.push(Concept {
+                name,
+                trigger_regex: re,
+                enabled,
+                capture_mode: cap_mode,
+                destinations: actions,
+            });
+        }
+        ENGINE.set_concepts(concepts);
+    }
+    /// Get all concepts as an Array of Dictionaries.
+    #[func]
+    fn get_global_concepts(&self) -> Array<Variant> {
+        use gpty_core::types::CaptureMode;
+        let concepts = ENGINE.get_concepts();
+        let mut arr = Array::<Variant>::new();
+        for c in &concepts {
+            let mut obj = Dictionary::<Variant, Variant>::new();
+            obj.set("name", &Variant::from(c.name.clone()));
+            obj.set("trigger", &Variant::from(c.trigger_regex.as_str()));
+            obj.set("enabled", &Variant::from(c.enabled));
+            match &c.capture_mode {
+                CaptureMode::SingleLine => {
+                    obj.set("capture_mode", &Variant::from("single_line"));
+                }
+                CaptureMode::UntilStop {
+                    stop_timeout_ms,
+                    stop_on_input,
+                } => {
+                    obj.set("capture_mode", &Variant::from("until_stop"));
+                    obj.set("stop_timeout_ms", &Variant::from(*stop_timeout_ms as i64));
+                    obj.set("stop_on_input", &Variant::from(*stop_on_input));
+                }
+            }
+            let mut acts = Array::<Variant>::new();
+            for a in &c.destinations {
+                let mut ad = Dictionary::<Variant, Variant>::new();
+                ad.set("cmd", &Variant::from(a.command_template.clone()));
+                ad.set("target", &Variant::from(a.target_label.clone()));
+                acts.push(&Variant::from(ad));
+            }
+            obj.set("actions", &Variant::from(acts));
+            arr.push(&Variant::from(obj));
+        }
+        arr
+    }
 
-	/// Drain all completed capture events from this terminal's queue.
-	///
-	/// Returns an Array of Dictionaries with keys:
-	/// - `id` (int): capture ID for acknowledge/flush
-	/// - `concept_name` (String)
-	/// - `lines` (PackedStringArray): captured output lines
-	/// - `target_pane_type` (String)
-	#[func]
-	fn drain_concept_events(&self) -> Array<Variant> {
-		let mut arr = Array::<Variant>::new();
-		if let Some(ref queue) = self.capture_queue {
-			if let Ok(mut events) = queue.lock() {
-				for ev in events.drain(..) {
-					let mut obj = Dictionary::<Variant, Variant>::new();
-					obj.set("id", &Variant::from(ev.id as i64));
-					obj.set("concept_name", &Variant::from(ev.concept_name));
-					let lines_arr = PackedStringArray::from_iter(ev.lines.iter().map(|s| GString::from(s)));
-					obj.set("lines", &Variant::from(lines_arr));
-					obj.set("target_pane_type", &Variant::from(ev.target_pane_type));
-					arr.push(&Variant::from(obj));
-				}
-			}
-		}
-		arr
-	}
+    /// Drain all completed capture events from this terminal's queue.
+    ///
+    /// Returns an Array of Dictionaries with keys:
+    /// - `id` (int): capture ID for acknowledge/flush
+    /// - `concept_name` (String)
+    /// - `lines` (PackedStringArray): captured output lines
+    /// - `target_pane_type` (String)
+    #[func]
+    fn drain_concept_events(&self) -> Array<Variant> {
+        let mut arr = Array::<Variant>::new();
+        if let Some(ref queue) = self.capture_queue {
+            if let Ok(mut events) = queue.lock() {
+                for ev in events.drain(..) {
+                    let mut obj = Dictionary::<Variant, Variant>::new();
+                    obj.set("id", &Variant::from(ev.id as i64));
+                    obj.set("concept_name", &Variant::from(ev.concept_name));
+                    let lines_arr =
+                        PackedStringArray::from_iter(ev.lines.iter().map(|s| GString::from(s)));
+                    obj.set("lines", &Variant::from(lines_arr));
+                    obj.set("target_pane_type", &Variant::from(ev.target_pane_type));
+                    arr.push(&Variant::from(obj));
+                }
+            }
+        }
+        arr
+    }
 
-	/// Acknowledge that GDScript routed a capture to a receiver.
-	///
-	/// Discards the buffered raw bytes — they will NOT appear on the terminal.
-	#[func]
-	fn acknowledge_capture(&self, event_id: i64) {
-		if let Some(ref spawned) = self.spawned {
-			spawned.handle.acknowledge_capture(event_id as u64);
-		}
-	}
+    /// Acknowledge that GDScript routed a capture to a receiver.
+    ///
+    /// Discards the buffered raw bytes — they will NOT appear on the terminal.
+    #[func]
+    fn acknowledge_capture(&self, event_id: i64) {
+        if let Some(ref spawned) = self.spawned {
+            spawned.handle.acknowledge_capture(event_id as u64);
+        }
+    }
 
-	/// Flush a capture's buffered bytes to the terminal grid.
-	///
-	/// Called when no receiver pane was available — the output
-	/// appears normally on the terminal.
-	#[func]
-	fn flush_capture(&self, event_id: i64) {
-		if let Some(ref spawned) = self.spawned {
-			spawned.handle.flush_capture(event_id as u64);
-		}
-	}
-
+    /// Flush a capture's buffered bytes to the terminal grid.
+    ///
+    /// Called when no receiver pane was available — the output
+    /// appears normally on the terminal.
+    #[func]
+    fn flush_capture(&self, event_id: i64) {
+        if let Some(ref spawned) = self.spawned {
+            spawned.handle.flush_capture(event_id as u64);
+        }
+    }
 }
 
 /// Map Godot `Key` enum values to Linux evdev scancodes.
@@ -705,74 +857,159 @@ impl GptyTerminal {
 /// Printable ASCII keys use the Unicode code point (same in all Godot versions).
 /// Special keys compare against [`godot::global::Key`] ordinals.
 fn godot_key_to_evdev(kc: i64) -> u32 {
-	let k = kc as u32;
-	// Printable ASCII range — same values in all Godot versions
-	match k {
-		0x20 => return 57,  // Space
-		0x21..=0x2F => return k, // ! " # $ % & ' ( ) * + , - . / → raw
-		0x30..=0x39 => return k - 0x30 + 2,  // 0-9 → evdev 2-11
-		0x3A..=0x40 => return k, // : ; < = > ? @ → raw
-		0x41..=0x5A => return k - 0x41 + 30, // A-Z → evdev 30-55
-		0x5B..=0x60 => return k, // [ \ ] ^ _ ` → raw
-		0x61..=0x7A => return k - 0x61 + 30, // a-z → evdev 30-55
-		0x7B..=0x7E => return k, // { | } ~ → raw
-		_ => {}
-	}
+    let k = kc as u32;
+    // Printable ASCII range — same values in all Godot versions
+    match k {
+        0x20 => return 57,                   // Space
+        0x21..=0x2F => return k,             // ! " # $ % & ' ( ) * + , - . / → raw
+        0x30..=0x39 => return k - 0x30 + 2,  // 0-9 → evdev 2-11
+        0x3A..=0x40 => return k,             // : ; < = > ? @ → raw
+        0x41..=0x5A => return k - 0x41 + 30, // A-Z → evdev 30-55
+        0x5B..=0x60 => return k,             // [ \ ] ^ _ ` → raw
+        0x61..=0x7A => return k - 0x61 + 30, // a-z → evdev 30-55
+        0x7B..=0x7E => return k,             // { | } ~ → raw
+        _ => {}
+    }
 
-	// Special keys — use Godot 4 Key enum ordinals so we stay correct
-	// across engine upgrades.
-	if k == Key::ESCAPE.ord() as u32 { return 1; }
-	if k == Key::TAB.ord() as u32 { return 15; }
-	if k == Key::BACKSPACE.ord() as u32 { return 14; }
-	if k == Key::ENTER.ord() as u32 { return 28; }
-	if k == Key::KP_ENTER.ord() as u32 { return 96; }
-	if k == Key::DELETE.ord() as u32 { return 111; }
-	if k == Key::INSERT.ord() as u32 { return 110; }
-	if k == Key::HOME.ord() as u32 { return 102; }
-	if k == Key::END.ord() as u32 { return 107; }
-	if k == Key::LEFT.ord() as u32 { return 105; }
-	if k == Key::UP.ord() as u32 { return 103; }
-	if k == Key::RIGHT.ord() as u32 { return 106; }
-	if k == Key::DOWN.ord() as u32 { return 108; }
-	if k == Key::PAGEUP.ord() as u32 { return 104; }
-	if k == Key::PAGEDOWN.ord() as u32 { return 109; }
-	if k == Key::PAUSE.ord() as u32 { return 119; }
+    // Special keys — use Godot 4 Key enum ordinals so we stay correct
+    // across engine upgrades.
+    if k == Key::ESCAPE.ord() as u32 {
+        return 1;
+    }
+    if k == Key::TAB.ord() as u32 {
+        return 15;
+    }
+    if k == Key::BACKSPACE.ord() as u32 {
+        return 14;
+    }
+    if k == Key::ENTER.ord() as u32 {
+        return 28;
+    }
+    if k == Key::KP_ENTER.ord() as u32 {
+        return 96;
+    }
+    if k == Key::DELETE.ord() as u32 {
+        return 111;
+    }
+    if k == Key::INSERT.ord() as u32 {
+        return 110;
+    }
+    if k == Key::HOME.ord() as u32 {
+        return 102;
+    }
+    if k == Key::END.ord() as u32 {
+        return 107;
+    }
+    if k == Key::LEFT.ord() as u32 {
+        return 105;
+    }
+    if k == Key::UP.ord() as u32 {
+        return 103;
+    }
+    if k == Key::RIGHT.ord() as u32 {
+        return 106;
+    }
+    if k == Key::DOWN.ord() as u32 {
+        return 108;
+    }
+    if k == Key::PAGEUP.ord() as u32 {
+        return 104;
+    }
+    if k == Key::PAGEDOWN.ord() as u32 {
+        return 109;
+    }
+    if k == Key::PAUSE.ord() as u32 {
+        return 119;
+    }
 
-	// Function keys
-	if k == Key::F1.ord() as u32 { return 59; }
-	if k == Key::F2.ord() as u32 { return 60; }
-	if k == Key::F3.ord() as u32 { return 61; }
-	if k == Key::F4.ord() as u32 { return 62; }
-	if k == Key::F5.ord() as u32 { return 63; }
-	if k == Key::F6.ord() as u32 { return 64; }
-	if k == Key::F7.ord() as u32 { return 65; }
-	if k == Key::F8.ord() as u32 { return 66; }
-	if k == Key::F9.ord() as u32 { return 67; }
-	if k == Key::F10.ord() as u32 { return 68; }
-	if k == Key::F11.ord() as u32 { return 87; }
-	if k == Key::F12.ord() as u32 { return 88; }
+    // Function keys
+    if k == Key::F1.ord() as u32 {
+        return 59;
+    }
+    if k == Key::F2.ord() as u32 {
+        return 60;
+    }
+    if k == Key::F3.ord() as u32 {
+        return 61;
+    }
+    if k == Key::F4.ord() as u32 {
+        return 62;
+    }
+    if k == Key::F5.ord() as u32 {
+        return 63;
+    }
+    if k == Key::F6.ord() as u32 {
+        return 64;
+    }
+    if k == Key::F7.ord() as u32 {
+        return 65;
+    }
+    if k == Key::F8.ord() as u32 {
+        return 66;
+    }
+    if k == Key::F9.ord() as u32 {
+        return 67;
+    }
+    if k == Key::F10.ord() as u32 {
+        return 68;
+    }
+    if k == Key::F11.ord() as u32 {
+        return 87;
+    }
+    if k == Key::F12.ord() as u32 {
+        return 88;
+    }
 
-	// Numpad
-	if k == Key::KP_MULTIPLY.ord() as u32 { return 55; }
-	if k == Key::KP_DIVIDE.ord() as u32 { return 98; }
-	if k == Key::KP_SUBTRACT.ord() as u32 { return 74; }
-	if k == Key::KP_ADD.ord() as u32 { return 78; }
-	if k == Key::KP_PERIOD.ord() as u32 { return 83; }
-	if k == Key::KP_7.ord() as u32 { return 71; }
-	if k == Key::KP_8.ord() as u32 { return 72; }
-	if k == Key::KP_9.ord() as u32 { return 73; }
-	if k == Key::KP_4.ord() as u32 { return 75; }
-	if k == Key::KP_5.ord() as u32 { return 76; }
-	if k == Key::KP_6.ord() as u32 { return 77; }
-	if k == Key::KP_1.ord() as u32 { return 79; }
-	if k == Key::KP_2.ord() as u32 { return 80; }
-	if k == Key::KP_3.ord() as u32 { return 81; }
-	if k == Key::KP_0.ord() as u32 { return 82; }
+    // Numpad
+    if k == Key::KP_MULTIPLY.ord() as u32 {
+        return 55;
+    }
+    if k == Key::KP_DIVIDE.ord() as u32 {
+        return 98;
+    }
+    if k == Key::KP_SUBTRACT.ord() as u32 {
+        return 74;
+    }
+    if k == Key::KP_ADD.ord() as u32 {
+        return 78;
+    }
+    if k == Key::KP_PERIOD.ord() as u32 {
+        return 83;
+    }
+    if k == Key::KP_7.ord() as u32 {
+        return 71;
+    }
+    if k == Key::KP_8.ord() as u32 {
+        return 72;
+    }
+    if k == Key::KP_9.ord() as u32 {
+        return 73;
+    }
+    if k == Key::KP_4.ord() as u32 {
+        return 75;
+    }
+    if k == Key::KP_5.ord() as u32 {
+        return 76;
+    }
+    if k == Key::KP_6.ord() as u32 {
+        return 77;
+    }
+    if k == Key::KP_1.ord() as u32 {
+        return 79;
+    }
+    if k == Key::KP_2.ord() as u32 {
+        return 80;
+    }
+    if k == Key::KP_3.ord() as u32 {
+        return 81;
+    }
+    if k == Key::KP_0.ord() as u32 {
+        return 82;
+    }
 
-	// Fallback: return as-is (won't match keymap but won't crash)
-	k
+    // Fallback: return as-is (won't match keymap but won't crash)
+    k
 }
-
 
 // ═══════════════════════════════════════════════════════════════════════
 // Extension entry point

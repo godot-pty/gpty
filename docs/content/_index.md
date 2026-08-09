@@ -12,7 +12,7 @@ toc: false
 {{< cards >}}
   {{< card link="/gpty/docs" title="Documentation" icon="book-open" subtitle="Learn how gpty works, from the PTY engine to the Godot GUI." >}}
   {{< card link="/gpty/blog" title="Blog" icon="pencil" subtitle="Release notes, tips, and development updates." >}}
-  {{< card link="https://github.com/gpty/gpty" title="GitHub" icon="github" subtitle="Star, fork, or open an issue on GitHub." >}}
+  {{< card link="https://github.com/godot-pty/gpty" title="GitHub" icon="github" subtitle="Star, fork, or open an issue on GitHub." >}}
 {{< /cards >}}
 
 ## Features

@@ -7,7 +7,7 @@
 use std::io::{Read, Write};
 use std::thread;
 
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tokio::sync::mpsc::UnboundedSender;
 
 const DEFAULT_ROWS: u16 = 24;
@@ -33,7 +33,11 @@ impl PtyHandle {
     /// Spawn a shell process in a new PTY and start a reader thread.
     /// Output bytes are sent to `tx` as `Vec<u8>` chunks.
     pub fn spawn(
-        id: u32, command: &str, args: &[&str], envs: &[String], tx: UnboundedSender<Vec<u8>>,
+        id: u32,
+        command: &str,
+        args: &[&str],
+        envs: &[String],
+        tx: UnboundedSender<Vec<u8>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let pty_system = native_pty_system();
         let mut cmd = CommandBuilder::new(command);
@@ -46,7 +50,10 @@ impl PtyHandle {
         }
 
         let pty_pair = pty_system.openpty(PtySize {
-            rows: DEFAULT_ROWS, cols: DEFAULT_COLS, pixel_width: 0, pixel_height: 0,
+            rows: DEFAULT_ROWS,
+            cols: DEFAULT_COLS,
+            pixel_width: 0,
+            pixel_height: 0,
         })?;
         let child = pty_pair.slave.spawn_command(cmd)?;
         let mut reader = pty_pair.master.try_clone_reader()?;
@@ -60,13 +67,26 @@ impl PtyHandle {
                 loop {
                     match reader.read(&mut buf) {
                         Ok(0) => break,
-                        Ok(n) => { if tx.send(buf[..n].to_vec()).is_err() { break; } }
-                        Err(e) => { log::error!("[PTY {id}] Read error: {e}"); break; }
+                        Ok(n) => {
+                            if tx.send(buf[..n].to_vec()).is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("[PTY {id}] Read error: {e}");
+                            break;
+                        }
                     }
                 }
             })?;
 
-        Ok(Self { id, writer, master, _child: child, _read_thread: read_thread })
+        Ok(Self {
+            id,
+            writer,
+            master,
+            _child: child,
+            _read_thread: read_thread,
+        })
     }
 
     /// Write a line to the PTY (appends `\r` = Enter).
@@ -83,8 +103,17 @@ impl PtyHandle {
     }
 
     /// Resize the PTY — sends SIGWINCH to the child process.
-    pub fn resize(&self, rows: u16, cols: u16) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })?;
+    pub fn resize(
+        &self,
+        rows: u16,
+        cols: u16,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.master.resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })?;
         Ok(())
     }
 }

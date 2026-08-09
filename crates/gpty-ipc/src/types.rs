@@ -8,7 +8,7 @@ use crate::protocol::JsonRpcError;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NewPaneParams {
     #[serde(rename = "type")]
-    pub pane_type: godopty_core::types::PaneType,
+    pub pane_type: gpty_core::types::PaneType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
     #[serde(default = "default_split")]

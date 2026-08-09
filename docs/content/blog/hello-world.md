@@ -14,4 +14,4 @@ Welcome to the blog!
 
 **gpty** is a tiling grid terminal emulator that combines the power of Rust's async PTY handling with Godot's flexible UI framework. It supports multiple terminals in a resizable grid, regex-based command capture, scrollback history, and profile-based layout management.
 
-Check out the [Documentation](/docs) to learn more, or head over to [GitHub](https://github.com/gpty/gpty).
+Check out the [Documentation](/docs) to learn more, or head over to [GitHub](https://github.com/godot-pty/gpty).

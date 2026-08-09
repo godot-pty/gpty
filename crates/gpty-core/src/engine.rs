@@ -26,7 +26,10 @@ enum StdinInput {
     Line(String),
     Raw(Vec<u8>),
     /// Resize the PTY — sends SIGWINCH to the child process.
-    Resize { rows: u16, cols: u16 },
+    Resize {
+        rows: u16,
+        cols: u16,
+    },
     /// Flush captured bytes to the grid (GDScript had no receiver).
     FlushCapture(u64),
     /// Discard captured bytes (GDScript routed them to a receiver).
@@ -52,7 +55,9 @@ impl PtyTerminalHandle {
     }
 
     pub fn send_text(&self, text: &str) {
-        let _ = self.stdin_tx.send(StdinInput::Raw(text.as_bytes().to_vec()));
+        let _ = self
+            .stdin_tx
+            .send(StdinInput::Raw(text.as_bytes().to_vec()));
     }
 
     pub fn resize_pty(&self, rows: u16, cols: u16) {
@@ -147,7 +152,9 @@ impl WorkspaceEngine {
             self.tx.clone(),
         );
 
-        tokio::spawn(run_terminal_task(task_ctx, pty_handle, pty_rx, stdin_rx, None));
+        tokio::spawn(run_terminal_task(
+            task_ctx, pty_handle, pty_rx, stdin_rx, None,
+        ));
 
         Ok(PtyTerminalHandle {
             id: config.id,
@@ -186,7 +193,11 @@ impl WorkspaceEngine {
         task_ctx.capture_buffers = Arc::clone(&capture_buffers);
 
         let task = tokio::spawn(run_terminal_task(
-            task_ctx, pty_handle, pty_rx, stdin_rx, Some(grid_clone),
+            task_ctx,
+            pty_handle,
+            pty_rx,
+            stdin_rx,
+            Some(grid_clone),
         ));
 
         Ok(SpawnedTerminal {
@@ -286,7 +297,6 @@ fn finalize_capture(ctx: &mut TaskContext) {
         lines.extend(parsed);
     }
 
-
     let concept_name = ctx.active_capture_name.take().unwrap_or_default();
     let target = ctx.active_capture_target.take().unwrap_or_default();
     let raw_bytes = std::mem::take(&mut ctx.capture_buffer);
@@ -307,7 +317,11 @@ fn finalize_capture(ctx: &mut TaskContext) {
 }
 
 /// Handle a command (FlushCapture / AcknowledgeCapture) from GDScript.
-fn handle_command(input: &StdinInput, grid: &Option<Arc<Mutex<TermGrid>>>, capture_buffers: &Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>>) {
+fn handle_command(
+    input: &StdinInput,
+    grid: &Option<Arc<Mutex<TermGrid>>>,
+    capture_buffers: &Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>>,
+) {
     match input {
         StdinInput::FlushCapture(id) => {
             if let Ok(mut bufs) = capture_buffers.lock() {
@@ -359,7 +373,13 @@ fn capture_stops_on_input(ctx: &TaskContext) -> bool {
         if let Ok(concepts) = ctx.concepts.read() {
             return concepts.iter().any(|c| {
                 c.name == *name
-                    && matches!(c.capture_mode, CaptureMode::UntilStop { stop_on_input: true, .. })
+                    && matches!(
+                        c.capture_mode,
+                        CaptureMode::UntilStop {
+                            stop_on_input: true,
+                            ..
+                        }
+                    )
             });
         }
     }
@@ -544,12 +564,18 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
             if let Ok(grid) = spawned.grid.lock() {
                 let rows = grid.renderable_rows();
-                if rows.iter().any(|r| r.iter().any(|c| c.ch == 'e' || c.ch == 'h')) {
+                if rows
+                    .iter()
+                    .any(|r| r.iter().any(|c| c.ch == 'e' || c.ch == 'h'))
+                {
                     found = true;
                     break;
                 }
             }
         }
-        assert!(found, "Grid should have received and rendered the input text");
+        assert!(
+            found,
+            "Grid should have received and rendered the input text"
+        );
     }
 }

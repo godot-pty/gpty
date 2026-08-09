@@ -1,43 +1,46 @@
 //! Command dispatch — maps CLI subcommands to IPC RPC calls.
 
-mod new_pane;
-mod list_panes;
-mod kill_pane;
+pub mod daemon;
 mod focus_pane;
 mod inject;
-pub mod schema;
-pub mod mcp;
-pub mod daemon;
+mod kill_pane;
 mod layout;
+mod list_panes;
+pub mod mcp;
+mod new_pane;
+pub mod schema;
 
 use crate::Commands;
-use godopty_ipc::client::IpcClient;
-use godopty_ipc::protocol::Response;
+use gpty_ipc::client::IpcClient;
+use gpty_ipc::protocol::Response;
 
 /// Dispatch a CLI command to the appropriate handler.
 pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow::Result<()> {
     match cmd {
-        Commands::NewPane { pane_type, command, split, title, focus } => {
-            new_pane::run(client, pane_type, command.as_deref(), split, title.as_deref(), *focus, json).await
+        Commands::NewPane {
+            pane_type,
+            command,
+            split,
+            title,
+            focus,
+        } => {
+            new_pane::run(
+                client,
+                pane_type,
+                command.as_deref(),
+                split,
+                title.as_deref(),
+                *focus,
+                json,
+            )
+            .await
         }
-        Commands::ListPanes => {
-            list_panes::run(client, json).await
-        }
-        Commands::KillPane { pane_id } => {
-            kill_pane::run(client, pane_id, json).await
-        }
-        Commands::FocusPane { pane_id } => {
-            focus_pane::run(client, pane_id, json).await
-        }
-        Commands::Inject { pane_id, text } => {
-            inject::run(client, pane_id, text, json).await
-        }
-        Commands::Daemon { action } => {
-            daemon::run_action(action, client, json).await
-        }
-        Commands::Layout { action } => {
-            layout::run(client, action, json).await
-        }
+        Commands::ListPanes => list_panes::run(client, json).await,
+        Commands::KillPane { pane_id } => kill_pane::run(client, pane_id, json).await,
+        Commands::FocusPane { pane_id } => focus_pane::run(client, pane_id, json).await,
+        Commands::Inject { pane_id, text } => inject::run(client, pane_id, text, json).await,
+        Commands::Daemon { action } => daemon::run_action(action, client, json).await,
+        Commands::Layout { action } => layout::run(client, action, json).await,
         Commands::Schema { .. } | Commands::Version | Commands::Mcp => {
             unreachable!("handled before dispatch")
         }

@@ -159,8 +159,7 @@ mod tests {
 
     #[test]
     fn error_with_data() {
-        let err =
-            JsonRpcError::with_data(-32001, "custom", serde_json::json!({"hint": "retry"}));
+        let err = JsonRpcError::with_data(-32001, "custom", serde_json::json!({"hint": "retry"}));
         assert!(err.data.is_some());
     }
 }
