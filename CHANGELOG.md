@@ -2,7 +2,24 @@
 
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] — unreleased
+
+## [0.3.0] — Unreleased
+
+### Added
+
+- CLI binary (`gpty`) for pane control over JSON-RPC IPC via Unix socket / named pipe
+- IPC bridge: Rust `IpcServer` ↔ GDScript polling via `drain_ipc_requests`/`respond_ipc`
+- `gpty new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject` subcommands
+- `gpty layout save/load/list` for named workspace profiles
+- MCP server (`gpty mcp`) — Model Context Protocol over stdio for AI tool integration (tools/list, tools/call, initialize)
+- Daemon mode (`gpty daemon start/stop/status`) — CLI auto-spawns GUI if not running via `GPTY_GUI`
+- JSON Schema generation (`gpty schema`) for AI tool discovery (`--format json-schema` and `--format mcp`)
+- `gpty-ipc` crate: shared IPC protocol, client, server, and platform transport
+- `gpty --version` reports protocol version
+
+[0.3.0]: https://github.com/godot-pty/gpty/releases/tag/v0.3.0 (unreleased)
+
+## [0.2.0] — 2026-08-08
 
 ### Added
 

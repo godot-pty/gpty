@@ -7,7 +7,7 @@ toc: false
 
 **gpty** is a tiling grid terminal emulator built with Rust and Godot. Run multiple PTY sessions side by side, capture command output via regex concepts, and manage layouts with profiles.
 
-![gpty terminal grid](/images/v0.1.0_1.png)
+![gpty terminal grid](/images/v0.2.0_1.png)
 
 {{< cards >}}
   {{< card link="/gpty/docs" title="Documentation" icon="book-open" subtitle="Learn how gpty works, from the PTY engine to the Godot GUI." >}}

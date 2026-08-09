@@ -12,8 +12,8 @@ cd godot && godot -e
 # Press F5 to run the application
 ```
 
-The workspace starts an IPC server on startup (`/tmp/godopty.sock` on Linux)
-that accepts JSON-RPC 2.0 commands. Use the `godopty` CLI to control it
+The workspace starts an IPC server on startup (`/tmp/gpty.sock` on Linux)
+that accepts JSON-RPC 2.0 commands. Use the `gpty` CLI to control it
 from the terminal:
 
 ## Structure

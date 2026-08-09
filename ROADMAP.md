@@ -15,6 +15,7 @@ Planned features for future releases. Tracked in detail via [GitHub Issues](http
 ## v0.4.0
 
 - [ ] SQLite + FTS5 history backend — infinite scrollback with full-text search
+- [ ] Tab/workspace switching — multiple named workspaces per session (deferred from v0.3.0)
 - [ ] Visual Concept Graph — build concept automations visually using Godot's GraphEdit
 - [ ] In-app update checker
 - [ ] GPU-accelerated rendering — rasterize grid to single texture (fontdue)
@@ -22,11 +23,11 @@ Planned features for future releases. Tracked in detail via [GitHub Issues](http
 
 ## v0.3.0 — CLI & AI Integration
 
-- [ ] CLI binary — `gpty` for pane control, IPC via Unix socket / named pipe
-- [ ] MCP server — Model Context Protocol integration for Gemini CLI
-- [ ] Daemon mode — CLI spawns GUI if not running
-- [ ] JSON Schema — `gpty schema` for AI tool discovery
-- [ ] Tab/workspace switching — multiple named workspaces per session
+- [x] CLI binary — `gpty` for pane control, IPC via Unix socket / named pipe
+- [x] MCP server — Model Context Protocol integration for Gemini CLI (`gpty mcp`)
+- [x] Daemon mode — CLI spawns GUI if not running (`gpty daemon`)
+- [x] JSON Schema — `gpty schema` for AI tool discovery
+- [x] IPC bridge — Rust server ↔ GDScript polling via `drain_ipc_requests`/`respond_ipc`
 
 ## v0.2.0 — UI/UX
 

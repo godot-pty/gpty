@@ -1,81 +1,93 @@
 # gpty-cli
 
-Headless CLI prototype that validates the gpty Rust engine in isolation — no Godot, no GUI. Every subsystem is exercised through three self-contained demo modes.
+CLI for controlling the gpty terminal workspace over JSON-RPC IPC. Connects to a running gpty GUI instance (auto-spawns one unless `--no-daemon` is passed).
 
 ## Role in the Workspace
 
 | Crate | Role | Depends On |
 |-------|------|------------|
 | `gpty-core` | Engine library (PTY, ANSI, grid, concepts) | — |
-| `gpty-gdext` | Godot 4 GDExtension bridge | `gpty-core` |
-| **`gpty-cli`** | **Headless integration tests** | `gpty-core` |
-
-Unlike `gpty-gdext` which wraps the engine for Godot's renderer, the CLI exercises the engine directly — useful for rapid iteration, debugging regressions, and validating protocol-level behavior without launching Godot.
+| `gpty-ipc` | IPC transport + protocol | `gpty-core` |
+| `gpty-gdext` | Godot 4 GDExtension bridge + IPC server | `gpty-core`, `gpty-ipc` |
+| **`gpty-cli`** | **CLI for workspace control** | `gpty-ipc` |
 
 ## Usage
 
 ```bash
-# Mock terminals — validates the pub-sub engine with synthetic output
-cargo run --bin gpty
+# Open a new terminal pane
+gpty new-pane --type terminal
 
-# Real PTYs — validates the full PTY → vte → pub-sub pipeline
-cargo run --bin gpty -- --pty
+# Open a new pane with a custom command and focus
+gpty new-pane -t terminal -c "htop" -f
 
-# Terminal grid — validates alacritty_terminal ANSI processing + color grid
-cargo run --bin gpty -- --term
+# List all active panes
+gpty list-panes
 
-# Verbose logging
-RUST_LOG=debug cargo run --bin gpty
+# Close a pane
+gpty kill-pane T1
+
+# Focus a pane
+gpty focus-pane T2
+
+# Send text to a terminal pane
+gpty inject T1 --text "ls -la"
+
+# Output JSON Schema for AI tool integration
+gpty schema
+gpty schema --format mcp
+
+# Run as MCP server over stdio
+gpty mcp
+
+# Manage the GUI daemon
+gpty daemon start
+gpty daemon status
+gpty daemon stop
+
+# Save, load, and list workspace layouts
+gpty layout save mysetup
+gpty layout load mysetup
+gpty layout list
+
+# Machine-readable JSON output
+gpty list-panes --json
+
+# Print version info
+gpty version
 ```
 
-## Demo Modes
+## Subcommands
 
-### Mock (`default`)
+| Command | Description |
+|---------|-------------|
+| `new-pane` | Open a new pane (`-t` type, `-c` command, `-s` split, `-f` focus) |
+| `list-panes` | List all active panes with IDs, types, and positions |
+| `kill-pane` | Close a pane by ID or `"active"` |
+| `focus-pane` | Focus a pane by ID |
+| `inject` | Send text to a terminal pane by ID |
+| `schema` | Output JSON Schema describing all commands (`--format mcp` for MCP manifest) |
+| `mcp` | Run as MCP server over stdio (for AI tool integration) |
+| `daemon` | Manage the GUI: `start`, `stop`, `status` |
+| `layout` | Layout management: `save <name>`, `load <name>`, `list` |
+| `version` | Print version info |
 
-Spawns 3 labelled terminals (`backend`, `frontend`, `observer`) with synthetic output on a timer. Verifies:
+## Global Flags
 
-- Regex matching (`crash_detected`, `port_conflict`)
-- Broadcast routing to the correct terminal by label
-- Label-gated action delivery (wrong label → action ignored)
-- Engine lifecycle (spawn, tick, shutdown)
-
-No PTY involved — the engine is fed `Vec<u8>` directly.
-
-### Real PTY (`--pty`)
-
-Spawns 2 real bash sessions. Terminal 1 receives a trigger command; Terminal 2 receives and executes the matching action injected into its PTY stdin. Verifies:
-
-- `portable-pty` cross-platform PTY spawn (`/dev/ptmx` on Linux)
-- vte ANSI escape sequence parsing
-- `LineParser` plain-text line extraction
-- End-to-end concept routing through a live shell
-
-### Terminal Grid (`--term`)
-
-Feeds a crafted ANSI string (with SGR colors, bold, italic, underline) into `alacritty_terminal::Term`. Prints the resulting grid to stdout with ANSI color codes for visual verification of:
-
-- SGR foreground/background color parsing
-- Bold, italic, underline attribute flags
-- Grid damage tracking (no-op on non-damaged cells)
-- Cursor positioning and line wrapping
-
-## Concept Definitions
-
-Concepts are defined in `build_concepts()` and shared across all demo modes:
-
-| Concept | Trigger (regex) | Mode | Destinations |
-|---------|-----------------|------|-------------|
-| `crash_detected` | `(?i)crash\|panic\|segfault\|SIGSEGV` | `SingleLine` | `backend` ← `echo '[Auto] Restart attempt triggered by crash'` |
-| `port_conflict` | `(?i)address.*already.*in\s*use` | `SingleLine` | `observer` ← `echo '[Auto] Port conflict detected — consider lsof -i'` |
-
-Both concepts use `CaptureMode::SingleLine` — each matching line broadcasts an `Event` on the pub-sub channel. The receiving terminal with the matching label injects the command template into its PTY stdin.
+| Flag | Description |
+|------|-------------|
+| `--json` | Machine-readable JSON output |
+| `--socket <path>` | Override IPC socket path |
+| `--timeout <ms>` | Connection timeout in milliseconds (default 5000) |
+| `--no-daemon` | Don't auto-spawn the GUI if not running |
+| `-v`, `--verbose` | Verbose output to stderr |
 
 ## Key Dependencies
 
 | Crate | Version | Role |
 |-------|---------|------|
-| `gpty-core` | path | Engine library (all terminal logic) |
-| `tokio` | 1 | Async runtime (multi-threaded) |
-| `regex` | 1 | Concept trigger patterns |
-| `env_logger` | 0.11 | Logging (RUST_LOG) |
-| `log` | 0.4 | Log facade |
+| `gpty-ipc` | path | IPC transport + client |
+| `clap` | 4 | CLI argument parsing |
+| `anyhow` | 1 | Error handling |
+| `serde_json` | 1 | JSON output |
+| `dirs` | 6 | Platform directories (GUI binary discovery) |
+| `tokio` | 1 | Async runtime |

@@ -25,8 +25,28 @@ gpty/
 │   │       ├── color.rs        # ANSI color → RGB
 │   │       ├── keymap.rs       # Key event → byte sequence
 │   │       └── history.rs      # SQLite scrollback store
-│   ├── gpty-cli/            # CLI demos (mock, --pty, --term)
-│   │   └── src/main.rs
+│   ├── gpty-cli/            # CLI workspace control over JSON-RPC IPC
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── main.rs         # clap CLI entry point
+│   │       └── commands/       # Subcommand handlers
+│   │           ├── mod.rs
+│   │           ├── new_pane.rs
+│   │           ├── list_panes.rs
+│   │           ├── kill_pane.rs
+│   │           ├── focus_pane.rs
+│   │           ├── inject.rs
+│   │           ├── schema.rs
+│   │           ├── mcp.rs
+│   │           ├── daemon.rs
+│   │           └── layout.rs
+│   ├── gpty-ipc/            # Shared IPC types, transport, client, and server
+│   │   └── src/
+│   │       ├── protocol.rs     # JSON-RPC 2.0 Request, Response, JsonRpcError
+│   │       ├── types.rs        # IPC domain types (NewPaneParams, PaneInfo, …)
+│   │       ├── transport.rs    # Platform socket connection (Unix, named pipe)
+│   │       ├── server.rs       # Async IPC server with handler registry
+│   │       └── client.rs       # Async IPC client with connect/call/timeout
 │   └── gpty-gdext/          # GDExtension cdylib: GptyTerminal GodotClass
 │       └── src/lib.rs
 └── godot/                      # Godot 4.7 project
@@ -73,10 +93,11 @@ cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
 # Type-check Rust only (fast, no codegen)
 cargo check
 
-# CLI demos (no Godot needed)
-cargo run --bin gpty              # mock pub-sub
-cargo run --bin gpty -- --pty     # real PTY
-cargo run --bin gpty -- --term    # alacritty_terminal grid
+# CLI (control running gpty GUI over IPC)
+cargo run --bin gpty -- new-pane --type terminal
+cargo run --bin gpty -- list-panes
+cargo run --bin gpty -- schema          # JSON Schema for AI tools
+cargo run --bin gpty -- schema --format mcp  # MCP tools manifest
 
 # Open in Godot editor (after building gdext)
 cd godot && godot -e
@@ -87,6 +108,44 @@ cd godot && godot -e
 ```
 Shell → PTY I/O thread → vte parser → alacritty_terminal grid → Arc<Mutex<TermGrid>> → GptyTerminal (gdext) → GDScript _draw()
 ```
+
+CLI → Unix socket → IpcServer (tokio) → PENDING_IPC queue → GDScript _poll_ipc_requests() → workspace methods → IPC_RESPONDERS → CLI response
+
+## Local Development
+
+Build the GDExtension library and copy it into the Godot project:
+
+```bash
+cargo build -p gpty-gdext
+cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
+```
+
+Launch the GUI (headless or editor):
+
+```bash
+godot --path godot &          # headless, daemonized
+# or: godot -e --path godot    # editor
+```
+
+The GUI starts an IPC server on `/tmp/gpty.sock` (or `GPTY_SOCKET` env var if set).
+Once running, control it with the CLI:
+
+```bash
+GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- version
+GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- new-pane -t terminal
+GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- list-panes
+GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- inject T1 -t "echo hello"
+GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- daemon stop
+```
+
+Standalone commands (no GUI needed):
+
+```bash
+cargo run --bin gpty -- schema                    # JSON Schema
+cargo run --bin gpty -- schema --format mcp       # MCP tools manifest
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | cargo run --bin gpty -- mcp
+```
+
 
 ## Testing
 
@@ -159,7 +218,7 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 ### Commits
 
 - Format: [Conventional Commits](https://www.conventionalcommits.org/) — `feat(scope):`, `fix(scope):`, `chore(scope):`
-- Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `profiles`, `concepts`, `icons`
+- Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `ipc`, `profiles`, `concepts`, `icons`
 
 ### Pitfalls
 

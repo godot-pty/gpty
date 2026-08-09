@@ -83,9 +83,9 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and [ROADMAP.md](ROADMAP.md
 
 ### Prerequisites
 
-- Rust >= 1.85 (currently being developed on 1.96.0)
+- Rust >= 1.85 (tested with 1.96)
 - Linux (primary target) or Windows 11 (ConPTY supported via `portable-pty`)
-- Godot 4.4+ (currently being developed on 4.7) with GDExtension support
+- Godot 4.4+ (tested with 4.7) with GDExtension support
 
 ### Development Command Reference
 

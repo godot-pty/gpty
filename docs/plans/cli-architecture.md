@@ -1,12 +1,12 @@
-# godopty CLI Architecture
+# gpty CLI Architecture
 
 ## 1. North Star
 
-A single `godopty` binary that:
+A single `gpty` binary that:
 
 1. **Controls the Godot GUI** — opens/splits/closes panes, queries layout state, injects commands into terminals
 2. **Is AI-tool-native** — exposes its capabilities as JSON Schema, always accepts `--json` for machine-readable output
-3. **Is self-documenting** — `--help` at every level, "did you mean?" suggestions on typos, `godopty schema` outputs a complete JSON Schema
+3. **Is self-documenting** — `--help` at every level, "did you mean?" suggestions on typos, `gpty schema` outputs a complete JSON Schema
 4. **Works from anywhere** — if the GUI isn't running, it spawns it; if the env var isn't set, it finds the socket at a well-known path
 
 ## 2. Architecture
@@ -15,29 +15,29 @@ A single `godopty` binary that:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  godopty (Godot GUI)                                     │
+│  gpty (Godot GUI)                                     │
 │  ┌──────────────────────┐  ┌──────────────────────────┐  │
 │  │  GDScript workspace  │  │  GDExtension (Rust)      │  │
 │  │                      │◄─┤  - WorkspaceEngine        │  │
-│  │  - TerminalManager   │  │  - GodoptyTerminal nodes  │  │
+│  │  - TerminalManager   │  │  - GptyTerminal nodes  │  │
 │  │  - Sidebar           │  │  - tokio runtime          │  │
 │  └────────┬─────────────┘  │  - IPC server (UNIX/TCP)  │  │
 │           │                └──────────┬───────────────┘  │
 │           │                           │                   │
 │           │  GDScript → Rust FFI      │  IPC socket       │
-│           │  (existing, unchanged)    │  /tmp/godopty.sock│
+│           │  (existing, unchanged)    │  /tmp/gpty.sock│
 │           │                           │                   │
 └───────────┼───────────────────────────┼───────────────────┘
             │                           │
             │                           ▼
             │               ┌───────────────────────┐
-            │               │  godopty CLI binary   │
+            │               │  gpty CLI binary   │
             │               │  (same Rust workspace)│
             │               │                       │
-            │               │  godopty new-pane     │
-            │               │  godopty list-panes   │
-            │               │  godopty schema       │
-            │               │  godopty daemon       │
+            │               │  gpty new-pane     │
+            │               │  gpty list-panes   │
+            │               │  gpty schema       │
+            │               │  gpty daemon       │
             │               └───────────────────────┘
             │
             ▼
@@ -51,17 +51,17 @@ The GUI owns the **single source of truth** for pane state. The CLI is a **state
 
 | Platform | Transport | Default Path |
 |----------|-----------|-------------|
-| Linux    | Unix domain socket | `/tmp/godopty.sock` |
-| macOS    | Unix domain socket | `$TMPDIR/godopty.sock` |
-| Windows  | Named pipe | `\\.\pipe\godopty` |
+| Linux    | Unix domain socket | `/tmp/gpty.sock` |
+| macOS    | Unix domain socket | `$TMPDIR/gpty.sock` |
+| Windows  | Named pipe | `\\\.\\pipe\\gpty` |
 
 The GUI binds the socket at startup. The CLI connects, sends a JSON-RPC 2.0 request, reads the response, and exits. No persistent connection needed — stateless request/response is simpler and avoids connection management bugs.
 
-**Fallback discovery**: `GODOPTY_SOCKET` env var overrides the default path. The GUI sets this for child PTY sessions it spawns, so shells launched *inside* GodoPTY always find the socket.
+**Fallback discovery**: `GPTY_SOCKET` env var overrides the default path. The GUI sets this for child PTY sessions it spawns, so shells launched *inside* gpty always find the socket.
 
 ### 2.3 JSON-RPC 2.0 Protocol
 
-Every CLI command maps to a JSON-RPC method. The protocol is versioned — `godopty.listPanes` etc.
+Every CLI command maps to a JSON-RPC method. The protocol is versioned — `gpty.listPanes` etc.
 
 **Request** (CLI → GUI):
 ```json
@@ -100,7 +100,7 @@ Every CLI command maps to a JSON-RPC method. The protocol is versioned — `godo
     "code": -32001,
     "message": "Grid is full — cannot split further",
     "data": {
-      "suggestion": "Close a pane first with 'godopty kill-pane <id>'",
+      "suggestion": "Close a pane first with 'gpty kill-pane <id>'",
       "current_panes": 4,
       "max_panes": 16
     }
@@ -121,14 +121,14 @@ CLI start
        │
        ├─ GUI binary exists? ──▶ spawn GUI, poll socket, send command, exit
        │
-       └─ No binary ──▶ Print error: "godopty GUI not running and binary not found at /usr/bin/godopty-gui. Start the GUI first or set GODOPTY_SOCKET."
+       └─ No binary ──▶ Print error: "gpty GUI not running and binary not found at /usr/bin/gpty-gui. Start the GUI first or set GPTY_SOCKET."
                         Exit 1
 ```
 
 **Important constraint**: The CLI does NOT link against Godot or Godot libraries. It spawns the GUI as a separate OS process. The daemon binary path is discovered via:
 
-1. `GODOPTY_GUI` env var (explicit override)
-2. Same directory as the CLI binary (`godopty-gui` / `godopty-gui.exe`)
+1. `GPTY_GUI` env var (explicit override)
+2. Same directory as the CLI binary (`gpty-gui` / `gpty-gui.exe`)
 3. `$PATH` lookup
 
 This keeps the CLI binary small (< 10 MB) and avoids pulling Godot's ~80 MB runtime into every tool invocation.
@@ -138,7 +138,7 @@ This keeps the CLI binary small (< 10 MB) and avoids pulling Godot's ~80 MB runt
 ### 3.1 Subcommand Tree
 
 ```
-godopty
+gpty
 ├── new-pane       Open a new pane in the current workspace
 │   --type, -t     Pane type: terminal, code-viewer, file-tree, observer
 │   --command, -c  Initial command (terminal/observer only)
@@ -194,7 +194,7 @@ When `--json` is present, stdout is a single JSON object or array. stderr is sup
 
 **Human output** (no `--json`):
 ```
-$ godopty list-panes
+$ gpty list-panes
 T1  Terminal    bash          col:0 row:0  12x6
 O2  Observer    tail -f log   col:6 row:0  6x6
 C3  Code Viewer README.md     col:0 row:6  12x6
@@ -214,13 +214,13 @@ C3  Code Viewer README.md     col:0 row:6  12x6
 
 ### 3.4 Schema Auto-Generation
 
-`godopty schema` walks the `clap` `Command` tree and generates a JSON Schema:
+`gpty schema` walks the `clap` `Command` tree and generates a JSON Schema:
 
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "godopty CLI",
-  "description": "Control the godopty terminal workspace",
+  "title": "gpty CLI",
+  "description": "Control the gpty terminal workspace",
   "type": "object",
   "properties": {
     "subcommand": {
@@ -246,14 +246,14 @@ C3  Code Viewer README.md     col:0 row:6  12x6
 }
 ```
 
-This is the machine-readable contract AI tools consume. They run `godopty schema` once at startup and cache the result.
+This is the machine-readable contract AI tools consume. They run `gpty schema` once at startup and cache the result.
 
 ### 3.5 Error Hints (Did You Mean?)
 
 Clap's built-in suggestions are good but only work for flag names. We add suggestion logic for pane IDs and type names:
 
 ```
-$ godopty new-pane --type obsever
+$ gpty new-pane --type obsever
 error: invalid value 'obsever' for '--type <TYPE>'
   Did you mean 'observer'?
 
@@ -261,7 +261,7 @@ error: invalid value 'obsever' for '--type <TYPE>'
 ```
 
 ```
-$ godopty kill-pane T5
+$ gpty kill-pane T5
 error: no pane with id 'T5'
   Active panes: T1, O2, C3
   Did you mean 'T1'?
@@ -273,21 +273,21 @@ These run on the CLI side (not requiring an IPC round-trip for type validation).
 
 ### 4.1 MCP Server
 
-The `godopty` binary itself acts as an MCP server via stdio transport. When invoked as `godopty mcp`, it:
+The `gpty` binary itself acts as an MCP server via stdio transport. When invoked as `gpty mcp`, it:
 
 1. Reads JSON-RPC MCP messages from stdin
 2. Translates them to our IPC commands
 3. Writes MCP responses to stdout
 4. Logs to stderr
 
-**MCP tool definitions** (auto-generated from `godopty schema --format mcp`):
+**MCP tool definitions** (auto-generated from `gpty schema --format mcp`):
 
 ```json
 {
   "tools": [
     {
-      "name": "godopty_new_pane",
-      "description": "Split the godopty workspace and open a new pane. Opens a new terminal, code viewer, or observer pane.",
+      "name": "gpty_new_pane",
+      "description": "Split the gpty workspace and open a new pane. Opens a new terminal, code viewer, or observer pane.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -300,15 +300,15 @@ The `godopty` binary itself acts as an MCP server via stdio transport. When invo
       }
     },
     {
-      "name": "godopty_list_panes",
-      "description": "List all active panes in the godopty workspace with their IDs, types, and positions.",
+      "name": "gpty_list_panes",
+      "description": "List all active panes in the gpty workspace with their IDs, types, and positions.",
       "inputSchema": {
         "type": "object",
         "properties": {}
       }
     },
     {
-      "name": "godopty_inject",
+      "name": "gpty_inject",
       "description": "Send a command or text to an existing terminal pane. Use to run commands without blocking.",
       "inputSchema": {
         "type": "object",
@@ -325,12 +325,12 @@ The `godopty` binary itself acts as an MCP server via stdio transport. When invo
 
 ### 4.2 Gemini CLI Integration Pattern
 
-Gemini's MCP client connects to `godopty mcp` via stdio. When the user says "watch the logs while I run tests", Gemini:
+Gemini's MCP client connects to `gpty mcp` via stdio. When the user says "watch the logs while I run tests", Gemini:
 
-1. Calls `godopty_list_panes` to check current state
-2. Calls `godopty_new_pane` with `type: observer, command: "tail -f test.log", split: right`
-3. Calls `godopty_new_pane` with `type: terminal, command: "cargo test", split: bottom`
-4. Calls `godopty_inject` with `pane_id: T2, text: "cargo test"` (alternative path)
+1. Calls `gpty_list_panes` to check current state
+2. Calls `gpty_new_pane` with `type: observer, command: "tail -f test.log", split: right`
+3. Calls `gpty_new_pane` with `type: terminal, command: "cargo test", split: bottom`
+4. Calls `gpty_inject` with `pane_id: T2, text: "cargo test"` (alternative path)
 
 ### 4.3 Claude Code Integration Pattern
 
@@ -355,14 +355,14 @@ Claude Code doesn't speak MCP natively — it uses a bash tool. Integration is v
 
 **`.claude/instructions.md`**:
 ```
-You have access to the `godopty` CLI for managing terminal panes in the
-godopty workspace. Use it to keep long-running commands from blocking
+You have access to the `gpty` CLI for managing terminal panes in the
+gpty workspace. Use it to keep long-running commands from blocking
 the chat.
 
-- `godopty new-pane --type observer --command "tail -f <file>"` — watch logs
-- `godopty new-pane --type terminal --command "<cmd>"` — run a command
-- `godopty list-panes --json` — check current layout
-- `godopty inject <id> --text "<cmd>"` — send command to existing terminal
+- `gpty new-pane --type observer --command "tail -f <file>"` — watch logs
+- `gpty new-pane --type terminal --command "<cmd>"` — run a command
+- `gpty list-panes --json` — check current layout
+- `gpty inject <id> --text "<cmd>"` — send command to existing terminal
 
 Prefer splitting long builds/tests into their own pane so you can
 continue working.
@@ -370,27 +370,27 @@ continue working.
 
 ### 4.4 OMP (Oh My Pi) Integration Pattern
 
-OMP's subagent task runner calls `godopty` deterministically. In a managed skill:
+OMP's subagent task runner calls `gpty` deterministically. In a managed skill:
 
 ```bash
 # When OMP spawns a subagent worker, wrap it in an observer pane
-godopty new-pane --type observer --command "omp agent $AGENT_ID --watch" --title "agent:$AGENT_ID"
+gpty new-pane --type observer --command "omp agent $AGENT_ID --watch" --title "agent:$AGENT_ID"
 ```
 
-The LLM never decides to use godopty — the framework always routes worker output there.
+The LLM never decides to use gpty — the framework always routes worker output there.
 
 ## 5. Implementation Plan
 
-### Phase 1: IPC Foundation (crate: `godopty-ipc`)
+### Phase 1: IPC Foundation (crate: `gpty-ipc`)
 
-**New crate**: `crates/godopty-ipc/`
+**New crate**: `crates/gpty-ipc/`
 
 - `mod transport` — Unix socket + Windows named pipe abstraction behind a `trait IpcTransport`
 - `mod protocol` — JSON-RPC 2.0 types: `Request`, `Response`, `Error`, `Params`
 - `mod server` — `IpcServer` that binds, accepts, dispatches to a handler registry
 - `mod client` — `IpcClient` with connect timeout, retry, daemon-fallback logic
 
-**Server integration** (in `godopty-gdext`):
+**Server integration** (in `gpty-gdext`):
 - At GDExtension init, spawn a tokio task that runs `IpcServer::bind()`
 - Register handlers that call into GDScript via `call_deferred`:
   - `newPane` → `workspace._spawn_pane(type, opts)`
@@ -401,19 +401,19 @@ The LLM never decides to use godopty — the framework always routes worker outp
   - `layoutSave/Load/List` → `ProfileManager`
 - `call_deferred` constraint: GDScript runs on the main thread, so IPC handlers must be async and resolve their JSON-RPC responses when GDScript signals completion. Use oneshot channels: IPC handler → `call_deferred` → GDScript fn → Rust callback → oneshot sender → IPC response.
 
-**Client implementation** (in `godopty-cli`):
+**Client implementation** (in `gpty-cli`):
 - Replace the current demo code with `clap` derive-based CLI
 - Each subcommand handler creates an `IpcClient`, sends a request, prints the response
 - `--json` mode: serialize the `Response`/`Error` directly
 - Human mode: format with `termion`/`crossterm` tables
 
-### Phase 2: CLI Rebuild (crate: `godopty-cli`)
+### Phase 2: CLI Rebuild (crate: `gpty-cli`)
 
 **Rewrite `main.rs`** around `clap`:
 
 ```rust
 #[derive(Parser)]
-#[command(name = "godopty", version, about)]
+#[command(name = "gpty", version, about)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -445,22 +445,22 @@ struct Cli {
 - `Daemon::spawn()` — `std::process::Command` with `std::process::Stdio::null()` for stdin, detached
 - `Daemon::poll_socket(timeout)` — exponential backoff, max 5s
 
-### Phase 3: MCP Server (crate: `godopty-mcp`)
+### Phase 3: MCP Server (crate: `gpty-mcp`)
 
-**New crate**: `crates/godopty-mcp/`
+**New crate**: `crates/gpty-mcp/`
 
 This is a thin layer. It:
 1. Reads MCP JSON-RPC from stdin line-by-line
 2. Translates MCP tool calls to our IPC methods
 3. Writes MCP responses to stdout
 
-Alternatively, fold this into `godopty-cli` as a `godopty mcp` subcommand — avoids a separate binary. The MCP stdio transport is just our existing JSON-RPC protocol over stdin/stdout instead of a Unix socket.
+Alternatively, fold this into `gpty-cli` as a `gpty mcp` subcommand — avoids a separate binary. The MCP stdio transport is just our existing JSON-RPC protocol over stdin/stdout instead of a Unix socket.
 
 **Decision**: Fold into CLI as `mcp` subcommand. The IPC client already handles JSON-RPC; MCP is just a different transport with the same payloads. Reuse the `IpcClient` against a virtual transport backed by stdin/stdout.
 
 ### Phase 4: Schema & Self-Documentation
 
-**`godopty schema`**:
+**`gpty schema`**:
 - Walks `clap`'s `Command` at runtime (clap exposes this via `Command::get_subcommands()`, arg metadata)
 - Recursively builds JSON Schema with `oneOf` dispatch on subcommand
 - `--format mcp` emits MCP tool definitions
@@ -472,8 +472,8 @@ Alternatively, fold this into `godopty-cli` as a `godopty mcp` subcommand — av
 
 ### Phase 5: Daemon + Packaging
 
-- The Godot export pipeline produces `godopty-gui` (the Godot executable)
-- The Rust workspace builds `godopty` (the CLI)
+- The Godot export pipeline produces `gpty-gui` (the Godot executable)
+- The Rust workspace builds `gpty` (the CLI)
 - Both are installed side-by-side so the CLI can find the GUI
 - CI: build both, bundle in release archives
 
@@ -481,13 +481,13 @@ Alternatively, fold this into `godopty-cli` as a `godopty mcp` subcommand — av
 
 ```
 crates/
-├── godopty-core/       # Unchanged — engine, PTY, parser, term, types
-├── godopty-ipc/        # NEW — transport, protocol, client, server
-├── godopty-cli/        # REWRITTEN — clap CLI + subcommand handlers + daemon logic + MCP
-└── godopty-gdext/      # MODIFIED — adds IpcServer at init, handler registry
+├── gpty-core/       # Unchanged — engine, PTY, parser, term, types
+├── gpty-ipc/        # NEW — transport, protocol, client, server
+├── gpty-cli/        # REWRITTEN — clap CLI + subcommand handlers + daemon logic + MCP
+└── gpty-gdext/      # MODIFIED — adds IpcServer at init, handler registry
 ```
 
-`godopty-ipc` depends on `godopty-core` (for `TerminalConfig`, `PaneType` etc. as shared types). `godopty-cli` depends on `godopty-ipc` (client-side). `godopty-gdext` depends on `godopty-ipc` (server-side).
+`gpty-ipc` depends on `gpty-core` (for `TerminalConfig`, `PaneType` etc. as shared types). `gpty-cli` depends on `gpty-ipc` (client-side). `gpty-gdext` depends on `gpty-ipc` (server-side).
 
 ## 7. Key Design Decisions
 
@@ -505,10 +505,10 @@ crates/
 ### 8.1 Discoverability
 
 ```
-$ godopty --help
-Control the godopty terminal workspace from the command line.
+$ gpty --help
+Control the gpty terminal workspace from the command line.
 
-Usage: godopty <COMMAND>
+Usage: gpty <COMMAND>
 
 Commands:
   new-pane    Open a new pane in the workspace
@@ -525,7 +525,7 @@ Commands:
 
 Options:
       --json         Machine-readable JSON output
-      --socket <PATH>  Override IPC socket path [env: GODOPTY_SOCKET]
+      --socket <PATH>  Override IPC socket path [env: GPTY_SOCKET]
       --timeout <MS>   Max wait for socket connection [default: 5000]
       --no-daemon    Don't spawn GUI if not running
   -v, --verbose      Print connection lifecycle to stderr
@@ -536,20 +536,20 @@ Options:
 ### 8.2 Graceful Degradation
 
 ```
-$ godopty new-pane --type terminal
-error: Could not connect to godopty GUI
-  Socket: /tmp/godopty.sock (not found)
+$ gpty new-pane --type terminal
+error: Could not connect to gpty GUI
+  Socket: /tmp/gpty.sock (not found)
   The GUI is not running and --no-daemon is set.
   Start the GUI manually or run without --no-daemon.
 
-$ godopty new-pane --type terminal
-Starting godopty GUI...
-Waiting for socket /tmp/godopty.sock... connected.
+$ gpty new-pane --type terminal
+Starting gpty GUI...
+Waiting for socket /tmp/gpty.sock... connected.
 ✓ Terminal T1 opened (bash)
 
-$ godopty new-pane --type terminal --command "htop"
+$ gpty new-pane --type terminal --command "htop"
 ✗ T2 opened, but htop is a full-screen TUI — it may not render correctly
-  via IPC. Use godopty focus-pane T2 to interact with it directly.
+  via IPC. Use gpty focus-pane T2 to interact with it directly.
 ```
 
 ### 8.3 AI Tool Workflows
@@ -558,24 +558,24 @@ $ godopty new-pane --type terminal --command "htop"
 
 ```bash
 # Claude runs these via its bash tool:
-godopty new-pane --type terminal --title "Test Suite" --command "cargo test 2>&1 | tee /tmp/test-output.txt"
-godopty new-pane --type observer --title "Failures" --command "grep 'FAILED' /tmp/test-output.txt"
+gpty new-pane --type terminal --title "Test Suite" --command "cargo test 2>&1 | tee /tmp/test-output.txt"
+gpty new-pane --type observer --title "Failures" --command "grep 'FAILED' /tmp/test-output.txt"
 ```
 
 **Gemini CLI: "set up a dev environment for this Rust project"**
 
-Gemini reads `godopty schema --format mcp`, sees the tool definitions, and:
+Gemini reads `gpty schema --format mcp`, sees the tool definitions, and:
 1. Opens a terminal running `cargo watch -x check`
 2. Opens a code viewer on `src/main.rs`
 3. Opens a terminal for ad-hoc commands
-4. All by calling `godopty_new_pane` with appropriate params
+4. All by calling `gpty_new_pane` with appropriate params
 
 **OMP: "delegate this refactor to 3 subagents"**
 
 OMP's task runner, configured with a skill:
 ```bash
 for agent in AuthLoader DbMigrator UiRefactor; do
-  godopty new-pane --type observer --command "omp agent $agent --watch" --title "$agent"
+  gpty new-pane --type observer --command "omp agent $agent --watch" --title "$agent"
 done
 ```
 
@@ -585,7 +585,7 @@ done
 |----------|----------|
 | GUI not running, `--no-daemon` | Error with socket path, exit 1 |
 | GUI not running, daemon mode | Spawn GUI, poll socket (5s timeout), retry command |
-| GUI binary not found | Error with search paths, suggest `GODOPTY_GUI` env var |
+| GUI binary not found | Error with search paths, suggest `GPTY_GUI` env var |
 | Grid full (max tiles) | Error with suggestion to close a pane first |
 | Invalid pane type | "Did you mean?" before IPC round trip |
 | Invalid pane ID | Server-side validation, returns active pane list in error data |
@@ -605,10 +605,10 @@ done
 
 | Layer | How |
 |-------|-----|
-| `godopty-ipc` transport | Unit tests with Unix socket pairs (`socketpair`) |
-| `godopty-ipc` protocol | Round-trip serialize/deserialize with `serde_json` |
-| `godopty-ipc` server | In-process mock handler registry |
-| `godopty-cli` commands | Integration tests: spawn real GUI in CI, run CLI commands, assert JSON output |
-| MCP integration | `echo '{"jsonrpc":"2.0",...}' \| godopty mcp` smoke test |
-| Schema generation | Assert `godopty schema` outputs valid JSON Schema that passes `jsonschema` validation |
+| `gpty-ipc` transport | Unit tests with Unix socket pairs (`socketpair`) |
+| `gpty-ipc` protocol | Round-trip serialize/deserialize with `serde_json` |
+| `gpty-ipc` server | In-process mock handler registry |
+| `gpty-cli` commands | Integration tests: spawn real GUI in CI, run CLI commands, assert JSON output |
+| MCP integration | `echo '{"jsonrpc":"2.0",...}' \| gpty mcp` smoke test |
+| Schema generation | Assert `gpty schema` outputs valid JSON Schema that passes `jsonschema` validation |
 | Daemon lifecycle | Mock the spawn, assert fallback paths |

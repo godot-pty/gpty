@@ -16,10 +16,11 @@ cargo test -p gpty-core
 # Type-check Rust only (fast)
 cargo check
 
-# CLI demos (no Godot needed)
-cargo run --bin gpty              # mock pub-sub
-cargo run --bin gpty -- --pty     # real PTY
-cargo run --bin gpty -- --term    # alacritty_terminal grid
+# CLI (control running gpty GUI over IPC)
+cargo run --bin gpty -- new-pane --type terminal
+cargo run --bin gpty -- list-panes
+cargo run --bin gpty -- schema          # JSON Schema for AI tools
+cargo run --bin gpty -- schema --format mcp  # MCP tools manifest
 
 # Open in Godot editor (after building gdext)
 cd godot && godot -e
@@ -46,7 +47,8 @@ cd godot && godot -e
 |Crate|Role|
 |---|---|
 |`gpty-core`|Library: PTY spawning, ANSI parsing, alacritty_terminal grid, concept/pub-sub engine|
-|`gpty-cli`|CLI binary: three demo modes (mock, `--pty`, `--term`)|
+|`gpty-ipc`|JSON-RPC 2.0 IPC transport, client, and server for workspace control|
+|`gpty-cli`|CLI binary: workspace control over JSON-RPC IPC|
 |`gpty-gdext`|GDExtension cdylib: `GptyTerminal` GodotClass bridging Rust ↔ GDScript|
 
 ## PR Process
@@ -61,7 +63,7 @@ cd godot && godot -e
 
 [Conventional Commits](https://www.conventionalcommits.org/): `feat(scope):`, `fix(scope):`, `chore(scope):`
 
-Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`
+Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `ipc`
 
 ## Security
 
