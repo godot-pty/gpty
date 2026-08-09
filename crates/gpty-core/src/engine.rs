@@ -473,14 +473,24 @@ async fn run_terminal_task(
                         }
                     }
                 } else {
-                    // Normal mode: run match_and_broadcast for SingleLine
-                    // concepts (event broadcast for command injection).
-                    // UntilStop concepts are matched on stdin, not here.
+                    // Normal mode: match concepts against output lines.
+                    // SingleLine concepts broadcast events for command injection.
+                    // UntilStop concepts start capture mode to buffer subsequent output.
                     for line in &lines {
                         let concepts_guard = ctx.concepts.read().unwrap();
-                        let _ = concept::match_and_broadcast(
+                        let capture = concept::match_and_broadcast(
                             ctx.id, &concepts_guard, &ctx.tx, line,
                         );
+                        if ctx.active_capture_name.is_none() {
+                            if let Some((name, CaptureMode::UntilStop { stop_timeout_ms, .. }, target)) = capture {
+                                ctx.active_capture_name = Some(name);
+                                ctx.active_capture_target = Some(target);
+                                let deadline = tokio::time::Instant::now()
+                                    + Duration::from_millis(stop_timeout_ms);
+                                ctx.capture_deadline = Some(deadline);
+                                timeout_sleep.as_mut().reset(deadline);
+                            }
+                        }
                         drop(concepts_guard);
                     }
                     feed_grid(&grid, &bytes);

@@ -24,7 +24,7 @@ pub fn match_and_broadcast(
     concepts: &[Concept],
     tx: &broadcast::Sender<Event>,
     line: &str,
-) -> Option<(String, CaptureMode)> {
+) -> Option<(String, CaptureMode, String)> {
     let mut capture = None;
     for concept in concepts {
         if !concept.enabled {
@@ -45,7 +45,10 @@ pub fn match_and_broadcast(
             let _ = tx.send(ev);
             // Only the first capture-mode concept wins
             if capture.is_none() && concept.capture_mode != CaptureMode::SingleLine {
-                capture = Some((concept.name.clone(), concept.capture_mode));
+                let target = concept.destinations.first()
+                    .map(|a| a.target_label.clone())
+                    .unwrap_or_default();
+                capture = Some((concept.name.clone(), concept.capture_mode, target));
             }
         }
     }
@@ -240,8 +243,9 @@ mod tests {
             result.is_some(),
             "UntilStop concept should return capture info"
         );
-        let (name, mode) = result.unwrap();
+        let (name, mode, target) = result.unwrap();
         assert_eq!(name, "cat_cmd");
+        assert_eq!(target, "code_viewer");
         assert_eq!(
             mode,
             CaptureMode::UntilStop {
