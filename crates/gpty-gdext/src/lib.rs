@@ -802,10 +802,9 @@ impl GptyTerminal {
         if let Some(ref queue) = self.capture_queue
             && let Ok(mut events) = queue.lock()
         {
-            if !events.is_empty() {
-                godot_print!("[gpty-gdext] drain_concept_events: {} events", events.len());
-            }
-            for ev in events.drain(..) {
+            let drained: Vec<_> = events.drain(..).collect();
+            for ev in drained {
+                godot_print!("[gpty-gdext] drain: {} target={}", ev.concept_name, ev.target_pane_type);
                 let mut obj = Dictionary::<Variant, Variant>::new();
                 obj.set("id", &Variant::from(ev.id as i64));
                 obj.set("concept_name", &Variant::from(ev.concept_name));
