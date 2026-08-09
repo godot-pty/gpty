@@ -43,6 +43,7 @@ func build(bg_rect: ColorRect):
 	_add_collapsed_button()
 
 	SettingsManager.settings_changed.connect(_sync_window_mode)
+
 func update_pane_list(panes: Array):
 	if not _pane_list: return
 	for c in _pane_list.get_children(): c.queue_free()
@@ -103,14 +104,50 @@ func _add_header(v: VBoxContainer):
 func _add_buttons(v: VBoxContainer):
 	_add_pane_buttons(v)
 
-	for b in [
-		[Icons.SETTINGS + " Settings", func(): request_settings.emit()],
-		[Icons.RESET + " Reset", func(): request_reset.emit()],
-	]:
-		var btn = Button.new(); btn.text = b[0]
-		Icons.style_button(btn)
-		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.pressed.connect(b[1]); v.add_child(btn)
+	var wrapper = HBoxContainer.new()
+	wrapper.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wrapper.add_theme_constant_override("separation", 4)
+
+	var icon_lbl = Label.new()
+	icon_lbl.text = Icons.SETTINGS
+	icon_lbl.add_theme_font_override("font", Icons.font_resource)
+	icon_lbl.add_theme_font_size_override("font_size", 14)
+	icon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	icon_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wrapper.add_child(icon_lbl)
+
+	var btn = Button.new()
+	btn.text = "Settings"
+	btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn.pressed.connect(func(): request_settings.emit())
+	wrapper.add_child(btn)
+
+	v.add_child(wrapper)
+
+	var rwrapper = HBoxContainer.new()
+	rwrapper.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rwrapper.add_theme_constant_override("separation", 4)
+
+	var icon_rlbl = Label.new()
+	icon_rlbl.text = Icons.RESET
+	icon_rlbl.add_theme_font_override("font", Icons.font_resource)
+	icon_rlbl.add_theme_font_size_override("font_size", 14)
+	icon_rlbl.add_theme_color_override("font_color", Color(0.85, 0.2, 0.2, 1.0))
+	icon_rlbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	icon_rlbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rwrapper.add_child(icon_rlbl)
+
+	var rbtn = Button.new()
+	rbtn.text = " Reset"
+	rbtn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	rbtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rbtn.add_theme_color_override("font_color", Color(0.85, 0.2, 0.2, 1.0))
+	rbtn.add_theme_color_override("font_hover_color", Color(1.0, 0.3, 0.3, 1.0))
+	rbtn.pressed.connect(func(): request_reset.emit())
+	rwrapper.add_child(rbtn)
+
+	v.add_child(rwrapper)
 
 func _add_window_mode(v: VBoxContainer):
 	var wm_dropdown = OptionButton.new()
@@ -124,11 +161,11 @@ func _add_window_mode(v: VBoxContainer):
 	_wm_dropdown = wm_dropdown
 
 func _add_pane_buttons(v: VBoxContainer):
-	var new_lbl = Label.new()
-	new_lbl.text = " New:"
-	new_lbl.add_theme_font_size_override("font_size", 11)
-	new_lbl.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
-	v.add_child(new_lbl)
+	var lbl = Label.new()
+	lbl.text = " Add Pane:"
+	lbl.add_theme_font_size_override("font_size", 12)
+	lbl.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
+	v.add_child(lbl)
 
 	var row = HBoxContainer.new()
 	row.name = "PaneTypeRow"
@@ -150,13 +187,22 @@ func _add_pane_buttons(v: VBoxContainer):
 func _sync_window_mode():
 	if _wm_dropdown:
 		_wm_dropdown.select(SettingsManager.cfg_window_mode)
+
 func _add_pane_list_ui(v: VBoxContainer):
-	var lbl = Label.new(); lbl.text = " Panes:"; lbl.add_theme_font_size_override("font_size", 12)
+	var lbl = Label.new()
+	lbl.text = " Panes:"
+	lbl.add_theme_font_size_override("font_size", 12)
 	v.add_child(lbl)
-	var sc = ScrollContainer.new(); sc.name = "PaneScroll"
-	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL; v.add_child(sc)
-	_pane_list = VBoxContainer.new(); _pane_list.name = "PaneList"
-	_pane_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL; sc.add_child(_pane_list)
+
+	var sc = ScrollContainer.new()
+	sc.name = "PaneScroll"
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(sc)
+
+	_pane_list = VBoxContainer.new()
+	_pane_list.name = "PaneList"
+	_pane_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sc.add_child(_pane_list)
 
 func _add_collapsed_button():
 	var btn = Button.new()
@@ -192,7 +238,8 @@ func _add_profile_section(parent: VBoxContainer):
 	var section = VBoxContainer.new(); section.name = "ProfileSection"
 
 	var header = HBoxContainer.new(); header.name = "ProfileHeader"
-	var lbl = Label.new(); lbl.text = "Profiles:"; lbl.add_theme_font_size_override("font_size", 12)
+	var lbl = Label.new(); lbl.text = "Profiles:"
+	lbl.add_theme_font_size_override("font_size", 12)
 	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(lbl)
 	var save_btn = Button.new(); save_btn.text = Icons.ADD; save_btn.name = "SaveProfileBtn"
