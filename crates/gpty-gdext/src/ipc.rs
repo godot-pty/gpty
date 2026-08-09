@@ -32,8 +32,9 @@ pub static PENDING_REQUESTS: std::sync::LazyLock<Mutex<VecDeque<IpcRequest>>> =
 
 /// Pending response channels keyed by request ID.
 #[allow(clippy::type_complexity)]
-pub static PENDING_RESPONSES: std::sync::LazyLock<Mutex<HashMap<u64, oneshot::Sender<(bool, String)>>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+pub static PENDING_RESPONSES: std::sync::LazyLock<
+    Mutex<HashMap<u64, oneshot::Sender<(bool, String)>>>,
+> = std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 /// Remove and return all pending requests.
 pub fn drain_requests() -> Vec<IpcRequest> {
     let mut queue = PENDING_REQUESTS.lock().unwrap();
@@ -82,10 +83,9 @@ fn make_gdscript_handler(method: String) -> HandlerFn {
                 Ok(Ok((true, result))) => {
                     Ok(serde_json::from_str(&result).unwrap_or(serde_json::Value::Null))
                 }
-                Ok(Ok((false, result))) => Err(gpty_ipc::protocol::JsonRpcError::new(
-                    -32000,
-                    result,
-                )),
+                Ok(Ok((false, result))) => {
+                    Err(gpty_ipc::protocol::JsonRpcError::new(-32000, result))
+                }
                 Ok(Err(_)) => Err(gpty_ipc::protocol::JsonRpcError::new(
                     -32000,
                     "internal error: response channel closed",
@@ -126,7 +126,6 @@ fn shutdown_handler() -> HandlerFn {
         })
     })
 }
-
 
 static STARTED: AtomicBool = AtomicBool::new(false);
 
@@ -275,7 +274,10 @@ mod integration_tests {
     async fn version_handler_responds_locally() {
         let socket_path = start_test_server();
         let client = make_client(&socket_path);
-        let resp = client.call("version", None).await.expect("version should succeed");
+        let resp = client
+            .call("version", None)
+            .await
+            .expect("version should succeed");
         assert!(resp.error.is_none());
         let result = resp.result.expect("should have result");
         assert_eq!(result["version"], env!("CARGO_PKG_VERSION"));
@@ -288,7 +290,10 @@ mod integration_tests {
     async fn gdscript_method_times_out() {
         let socket_path = start_test_server();
         let client = make_client(&socket_path);
-        let resp = client.call("listPanes", None).await.expect("should get response");
+        let resp = client
+            .call("listPanes", None)
+            .await
+            .expect("should get response");
         assert!(resp.result.is_none(), "expected error, not success");
         let err = resp.error.expect("should have error");
         assert_eq!(err.code, -32000);
