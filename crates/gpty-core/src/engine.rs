@@ -292,6 +292,7 @@ fn store_line(grid: &Option<Arc<Mutex<TermGrid>>>, line: &str) {
 /// Emit a completed capture to the queue and store raw bytes for
 /// later flush/acknowledge.
 fn finalize_capture(ctx: &mut TaskContext) {
+    eprintln!("[ENGINE] finalize_capture called, buffer_chunks={}", ctx.capture_buffer.len());
     /// Maximum number of buffered captures before dropping oldest.
     /// Prevents unbounded memory growth if GDScript stops polling.
     const MAX_BUFFERED: usize = 64;
@@ -322,6 +323,7 @@ fn finalize_capture(ctx: &mut TaskContext) {
         if queue.len() >= MAX_BUFFERED {
             queue.remove(0);
         }
+        eprintln!("[ENGINE] finalize_capture done: id={id}, name={concept_name}, target={target}, lines={}", lines.len());
         queue.push(CapturedOutput {
             id,
             concept_name,
@@ -483,6 +485,7 @@ async fn run_terminal_task(
                         );
                         if ctx.active_capture_name.is_none() {
                             if let Some((name, CaptureMode::UntilStop { stop_timeout_ms, .. }, target)) = capture {
+                                eprintln!("[ENGINE] Starting UntilStop capture: name={name}, target={target}, timeout={stop_timeout_ms}ms");
                                 ctx.active_capture_name = Some(name);
                                 ctx.active_capture_target = Some(target);
                                 let deadline = tokio::time::Instant::now()
