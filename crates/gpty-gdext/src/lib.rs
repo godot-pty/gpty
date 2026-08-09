@@ -695,6 +695,7 @@ impl GptyTerminal {
         use gpty_core::types::{Action, CaptureMode, Concept};
         godot_print!("[gpty-gdext] set_global_concepts called");
         let json_str = concepts_json.to_string();
+        godot_print!("[gpty-gdext] set_global_concepts JSON: {}", &json_str[..json_str.len().min(500)]);
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_str) else {
             godot_print!("[gpty-gdext] set_global_concepts: failed to parse JSON");
             return;
