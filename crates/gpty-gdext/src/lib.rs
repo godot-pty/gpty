@@ -691,75 +691,54 @@ impl GptyTerminal {
     ///   "stop_timeout_ms": int, "stop_on_input": bool,
     ///   "actions": Array[{"cmd":String,"target":String}]
     #[func]
-    fn set_global_concepts(&self, concepts_array: Variant) {
+    fn set_global_concepts(&self, concepts_json: GString) {
         use gpty_core::types::{Action, CaptureMode, Concept};
         godot_print!("[gpty-gdext] set_global_concepts called");
-        let Ok(arr) = concepts_array.try_to::<Array<Variant>>() else {
-            godot_print!("[gpty-gdext] set_global_concepts: FAILED to convert variant to array");
+        let json_str = concepts_json.to_string();
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_str) else {
+            godot_print!("[gpty-gdext] set_global_concepts: failed to parse JSON");
             return;
         };
+        let arr = match &value {
+            serde_json::Value::Array(a) => a,
+            _ => {
+                godot_print!("[gpty-gdext] set_global_concepts: JSON root is not an array");
+                return;
+            }
+        };
         let mut concepts = Vec::new();
-        for item in arr.iter_shared() {
-            let obj: Dictionary<Variant, Variant> = item.to();
-            let name = obj
-                .get("name")
-                .and_then(|v| v.try_to::<GString>().ok())
-                .map(|s| s.to_string())
-                .unwrap_or_default();
-            let trigger = obj
-                .get("trigger")
-                .and_then(|v| v.try_to::<GString>().ok())
-                .map(|s| s.to_string())
-                .unwrap_or_default();
-            let Ok(re) = regex::Regex::new(&trigger) else {
+        for item in arr {
+            let name = item["name"].as_str().unwrap_or("").to_string();
+            if name.is_empty() {
+                continue;
+            }
+            let trigger = item["trigger"].as_str().unwrap_or("");
+            let Ok(re) = regex::Regex::new(trigger) else {
                 continue;
             };
-            let enabled = obj
-                .get("enabled")
-                .and_then(|v| v.try_to::<bool>().ok())
-                .unwrap_or(true);
-            let capture_mode = obj
-                .get("capture_mode")
-                .and_then(|v| v.try_to::<GString>().ok())
-                .map(|s| s.to_string())
-                .unwrap_or_default();
-            let cap_mode = if capture_mode == "until_stop" {
-                let stop_ms = obj
-                    .get("stop_timeout_ms")
-                    .and_then(|v| v.try_to::<i64>().ok())
-                    .unwrap_or(300) as u64;
-                let stop_input = obj
-                    .get("stop_on_input")
-                    .and_then(|v| v.try_to::<bool>().ok())
-                    .unwrap_or(true);
-                CaptureMode::UntilStop {
-                    stop_timeout_ms: stop_ms,
-                    stop_on_input: stop_input,
+            let enabled = item["enabled"].as_bool().unwrap_or(true);
+            let cap_mode = match item["capture_mode"].as_str() {
+                Some("until_stop") => {
+                    let stop_ms = item["stop_timeout_ms"].as_u64().unwrap_or(300);
+                    let stop_input = item["stop_on_input"].as_bool().unwrap_or(true);
+                    CaptureMode::UntilStop {
+                        stop_timeout_ms: stop_ms,
+                        stop_on_input: stop_input,
+                    }
                 }
-            } else {
-                CaptureMode::SingleLine
+                _ => CaptureMode::SingleLine,
             };
             let mut actions = Vec::new();
-            if let Some(acts) = obj
-                .get("actions")
-                .and_then(|v| v.try_to::<Array<Variant>>().ok())
-            {
-                for a in acts.iter_shared() {
-                    let ad: Dictionary<Variant, Variant> = a.to();
-                    let cmd = ad
-                        .get("cmd")
-                        .and_then(|v| v.try_to::<GString>().ok())
-                        .map(|s| s.to_string())
-                        .unwrap_or_default();
-                    let target = ad
-                        .get("target")
-                        .and_then(|v| v.try_to::<GString>().ok())
-                        .map(|s| s.to_string())
-                        .unwrap_or_default();
-                    actions.push(Action {
-                        command_template: cmd,
-                        target_label: target,
-                    });
+            if let Some(acts) = item["actions"].as_array() {
+                for a in acts {
+                    let cmd = a["cmd"].as_str().unwrap_or("").to_string();
+                    let target = a["target"].as_str().unwrap_or("").to_string();
+                    if !cmd.is_empty() && !target.is_empty() {
+                        actions.push(Action {
+                            command_template: cmd,
+                            target_label: target,
+                        });
+                    }
                 }
             }
             concepts.push(Concept {

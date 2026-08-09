@@ -23,7 +23,7 @@ func _push_to_rust():
 	if t == null:
 		push_warning("[ConceptManager] Failed to instantiate GptyTerminal, concepts not pushed")
 		return
-	t.set_global_concepts(enabled_only)
+	t.set_global_concepts(JSON.stringify(enabled_only))
 
 func _merge_concepts() -> Array:
 	var defaults = _load_defaults()

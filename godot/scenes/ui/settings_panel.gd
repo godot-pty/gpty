@@ -445,7 +445,7 @@ func _refresh_concept_list():
 			var all = _concept_terminal.get_global_concepts()
 			if i < all.size():
 				all[i]["enabled"] = on
-			_concept_terminal.set_global_concepts(all)
+			_concept_terminal.set_global_concepts(JSON.stringify(all))
 			ConceptManager.save_concepts(all)
 		)
 		h.add_child(toggle)
@@ -545,7 +545,7 @@ func _save_concept(idx: int, p_name: String, regex_pat: String, cmd: String, tar
 		concepts[idx] = entry
 	else:
 		concepts.append(entry)
-	_concept_terminal.set_global_concepts(concepts)
+	_concept_terminal.set_global_concepts(JSON.stringify(concepts))
 	ConceptManager.save_concepts(concepts)
 	_refresh_concept_list()
 
@@ -554,6 +554,6 @@ func _delete_concept(idx: int):
 	var concepts = _concept_terminal.get_global_concepts()
 	if idx >= 0 and idx < concepts.size():
 		concepts.remove_at(idx)
-		_concept_terminal.set_global_concepts(concepts)
+		_concept_terminal.set_global_concepts(JSON.stringify(concepts))
 		ConceptManager.save_concepts(concepts)
 		_refresh_concept_list()
