@@ -13,12 +13,11 @@ func _push_to_rust():
 	# Filter out disabled concepts before pushing to Rust
 	var enabled_only: Array = []
 	for c in concepts:
-		if c is Dictionary and c.get("enabled", true) != false:
+		if c is Dictionary and c.get("enabled", true) == true:
 			enabled_only.append(c)
 	if enabled_only.is_empty():
 		return
-	var t = GptyTerminal.new()
-	t.set_global_concepts(enabled_only)
+	GptyTerminal.set_global_concepts(enabled_only)
 
 func _merge_concepts() -> Array:
 	var defaults = _load_defaults()

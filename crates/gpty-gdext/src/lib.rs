@@ -691,7 +691,7 @@ impl GptyTerminal {
     ///   "stop_timeout_ms": int, "stop_on_input": bool,
     ///   "actions": Array[{"cmd":String,"target":String}]
     #[func]
-    fn set_global_concepts(&self, concepts_array: Array<Variant>) {
+    fn set_global_concepts(concepts_array: Array<Variant>) {
         use gpty_core::types::{Action, CaptureMode, Concept};
         let mut concepts = Vec::new();
         for item in concepts_array.iter_shared() {
