@@ -147,6 +147,24 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | cargo run --bin gpty -- 
 ```
 
 
+## MCP / OMP Integration
+
+gpty ships an MCP server (`gpty mcp`) that exposes 12 tools for AI agent integration. OMP (Oh My Pi) discovers it via `mcp.json` in the repo root.
+
+```json
+// mcp.json — OMP discovers this automatically
+{"mcpServers": {"gpty": {"command": "gpty", "args": ["mcp"]}}}
+```
+
+Tools: `new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `layout-save`, `layout-load`, `layout-list`, `daemon-start`, `daemon-stop`, `daemon-status`, `version`.
+
+Generate the current tools manifest: `cargo run --bin gpty -- schema --format mcp`
+
+The MCP tool schemas are auto-generated from clap command definitions in `crates/gpty-cli/src/commands/schema.rs`. Nested subcommands (`daemon`, `layout`) are flattened into prefixed tools. Self-referential tools (`mcp`, `schema`) are excluded.
+
+See `skill://gpty-omp-integration` for usage patterns.
+
+
 ## Testing
 
 ### Rust
