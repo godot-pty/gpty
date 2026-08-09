@@ -267,19 +267,19 @@ impl TaskContext {
 
 /// Feed raw bytes to the grid if present.
 fn feed_grid(grid: &Option<Arc<Mutex<TermGrid>>>, bytes: &[u8]) {
-    if let Some(g) = grid {
-        if let Ok(mut locked) = g.lock() {
-            locked.feed(bytes);
-        }
+    if let Some(g) = grid
+        && let Ok(mut locked) = g.lock()
+    {
+        locked.feed(bytes);
     }
 }
 
 /// Store a line in the grid history.
 fn store_line(grid: &Option<Arc<Mutex<TermGrid>>>, line: &str) {
-    if let Some(g) = grid {
-        if let Ok(mut locked) = g.lock() {
-            locked.store_line(line);
-        }
+    if let Some(g) = grid
+        && let Ok(mut locked) = g.lock()
+    {
+        locked.store_line(line);
     }
 }
 
@@ -317,6 +317,7 @@ fn finalize_capture(ctx: &mut TaskContext) {
 }
 
 /// Handle a command (FlushCapture / AcknowledgeCapture) from GDScript.
+#[allow(clippy::type_complexity)]
 fn handle_command(
     input: &StdinInput,
     grid: &Option<Arc<Mutex<TermGrid>>>,
@@ -324,43 +325,43 @@ fn handle_command(
 ) {
     match input {
         StdinInput::FlushCapture(id) => {
-            if let Ok(mut bufs) = capture_buffers.lock() {
-                if let Some(chunks) = bufs.remove(id) {
-                    let mut lp = crate::parser::LineParser::new();
-                    for chunk in &chunks {
-                        feed_grid(grid, chunk);
-                        let parsed_lines = lp.feed(chunk);
-                        for line in &parsed_lines {
-                            store_line(grid, line);
-                        }
+            if let Ok(mut bufs) = capture_buffers.lock()
+                && let Some(chunks) = bufs.remove(id)
+            {
+                let mut lp = crate::parser::LineParser::new();
+                for chunk in &chunks {
+                    feed_grid(grid, chunk);
+                    let parsed_lines = lp.feed(chunk);
+                    for line in &parsed_lines {
+                        store_line(grid, line);
                     }
                 }
             }
         }
         StdinInput::AcknowledgeCapture(id) => {
-            if let Ok(mut bufs) = capture_buffers.lock() {
-                if let Some(chunks) = bufs.remove(id) {
-                    let mut all_bytes: Vec<u8> = Vec::new();
-                    for chunk in &chunks {
-                        all_bytes.extend_from_slice(chunk);
-                    }
-                    // The shell prompt has no trailing newline and was
-                    // never emitted by the line parser. Extract the raw
-                    // bytes after the last \n and feed them to the grid.
-                    if let Some(pos) = all_bytes.iter().rposition(|&b| b == b'\n') {
-                        let prompt_bytes = &all_bytes[pos + 1..];
-                        if !prompt_bytes.is_empty() {
-                            // The \r\n from Enter was buffered with the trigger
-                            // chunk and never reached the grid. Prepend \n so
-                            // the prompt starts on a fresh line.
-                            feed_grid(grid, b"\r\n");
-                            feed_grid(grid, prompt_bytes);
-                        }
-                    } else {
-                        // No newline at all — entire buffer is the prompt
+            if let Ok(mut bufs) = capture_buffers.lock()
+                && let Some(chunks) = bufs.remove(id)
+            {
+                let mut all_bytes: Vec<u8> = Vec::new();
+                for chunk in &chunks {
+                    all_bytes.extend_from_slice(chunk);
+                }
+                // The shell prompt has no trailing newline and was
+                // never emitted by the line parser. Extract the raw
+                // bytes after the last \n and feed them to the grid.
+                if let Some(pos) = all_bytes.iter().rposition(|&b| b == b'\n') {
+                    let prompt_bytes = &all_bytes[pos + 1..];
+                    if !prompt_bytes.is_empty() {
+                        // The \r\n from Enter was buffered with the trigger
+                        // chunk and never reached the grid. Prepend \n so
+                        // the prompt starts on a fresh line.
                         feed_grid(grid, b"\r\n");
-                        feed_grid(grid, &all_bytes);
+                        feed_grid(grid, prompt_bytes);
                     }
+                } else {
+                    // No newline at all — entire buffer is the prompt
+                    feed_grid(grid, b"\r\n");
+                    feed_grid(grid, &all_bytes);
                 }
             }
         }
@@ -369,19 +370,19 @@ fn handle_command(
 }
 /// Check whether the active capture concept has `stop_on_input` set.
 fn capture_stops_on_input(ctx: &TaskContext) -> bool {
-    if let Some(ref name) = ctx.active_capture_name {
-        if let Ok(concepts) = ctx.concepts.read() {
-            return concepts.iter().any(|c| {
-                c.name == *name
-                    && matches!(
-                        c.capture_mode,
-                        CaptureMode::UntilStop {
-                            stop_on_input: true,
-                            ..
-                        }
-                    )
-            });
-        }
+    if let Some(ref name) = ctx.active_capture_name
+        && let Ok(concepts) = ctx.concepts.read()
+    {
+        return concepts.iter().any(|c| {
+            c.name == *name
+                && matches!(
+                    c.capture_mode,
+                    CaptureMode::UntilStop {
+                        stop_on_input: true,
+                        ..
+                    }
+                )
+        });
     }
     false
 }
@@ -478,8 +479,8 @@ async fn run_terminal_task(
                             let concepts_guard = ctx.concepts.read().unwrap();
                             for concept in concepts_guard.iter() {
                                 if !concept.enabled { continue; }
-                                if concept.trigger_regex.is_match(line) {
-                                    if let CaptureMode::UntilStop { stop_timeout_ms, .. } = &concept.capture_mode {
+                                if concept.trigger_regex.is_match(line)
+                                    && let CaptureMode::UntilStop { stop_timeout_ms, .. } = &concept.capture_mode {
                                         let target = concept.destinations.first()
                                             .map(|a| a.target_label.clone())
                                             .unwrap_or_default();
@@ -491,7 +492,6 @@ async fn run_terminal_task(
                                         timeout_sleep.as_mut().reset(deadline);
                                         break;
                                     }
-                                }
                             }
                             drop(concepts_guard);
                         }
@@ -502,11 +502,10 @@ async fn run_terminal_task(
                     }
                     StdinInput::Resize { rows, cols } => {
                         let _ = pty_handle.resize(*rows, *cols);
-                        if let Some(g) = &grid {
-                            if let Ok(mut locked) = g.lock() {
+                        if let Some(g) = &grid
+                            && let Ok(mut locked) = g.lock() {
                                 locked.resize(*rows as usize, *cols as usize);
                             }
-                        }
                     }
                     StdinInput::FlushCapture(_) | StdinInput::AcknowledgeCapture(_) => {
                         handle_command(&input, &grid, &ctx.capture_buffers);

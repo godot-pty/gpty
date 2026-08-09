@@ -37,13 +37,13 @@ fn find_gui_binary() -> Option<std::path::PathBuf> {
             return Some(p);
         }
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            for name in &["gpty-editor", "gpty-gui"] {
-                let p = dir.join(name);
-                if p.exists() {
-                    return Some(p);
-                }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        for name in &["gpty-editor", "gpty-gui"] {
+            let p = dir.join(name);
+            if p.exists() {
+                return Some(p);
             }
         }
     }

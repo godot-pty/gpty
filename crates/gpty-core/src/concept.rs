@@ -73,6 +73,7 @@ pub fn matching_commands(
         return Vec::new();
     }
     let mut commands = Vec::new();
+    let re_braces = regex::Regex::new(r"\{\d+\}").unwrap();
     for concept in concepts.iter().filter(|c| c.name == event.topic) {
         for action in &concept.destinations {
             if my_labels.contains(&action.target_label) {
@@ -85,8 +86,7 @@ pub fn matching_commands(
                     cmd = cmd.replace(&format!("{{{i}}}"), cap);
                 }
                 // Clear remaining {N} for missing capture groups
-                let re = regex::Regex::new(r"\{\d+\}").unwrap();
-                cmd = re.replace_all(&cmd, "").to_string();
+                cmd = re_braces.replace_all(&cmd, "").to_string();
                 cmd = cmd.replace(ph, "{");
                 commands.push(cmd);
             }

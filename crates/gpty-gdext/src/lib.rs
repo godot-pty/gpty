@@ -312,15 +312,16 @@ impl GptyTerminal {
         let mut changed = false;
         for (i, hex) in s.split(',').enumerate().take(16) {
             let h = hex.trim();
-            if h.len() == 7 && h.starts_with('#') {
-                if let (Ok(r), Ok(g), Ok(b)) = (
+            if h.len() == 7
+                && h.starts_with('#')
+                && let (Ok(r), Ok(g), Ok(b)) = (
                     u8::from_str_radix(&h[1..3], 16),
                     u8::from_str_radix(&h[3..5], 16),
                     u8::from_str_radix(&h[5..7], 16),
-                ) {
-                    grid.palette[i] = [r, g, b];
-                    changed = true;
-                }
+                )
+            {
+                grid.palette[i] = [r, g, b];
+                changed = true;
             }
         }
         if changed {
@@ -811,18 +812,17 @@ impl GptyTerminal {
     #[func]
     fn drain_concept_events(&self) -> Array<Variant> {
         let mut arr = Array::<Variant>::new();
-        if let Some(ref queue) = self.capture_queue {
-            if let Ok(mut events) = queue.lock() {
-                for ev in events.drain(..) {
-                    let mut obj = Dictionary::<Variant, Variant>::new();
-                    obj.set("id", &Variant::from(ev.id as i64));
-                    obj.set("concept_name", &Variant::from(ev.concept_name));
-                    let lines_arr =
-                        PackedStringArray::from_iter(ev.lines.iter().map(|s| GString::from(s)));
-                    obj.set("lines", &Variant::from(lines_arr));
-                    obj.set("target_pane_type", &Variant::from(ev.target_pane_type));
-                    arr.push(&Variant::from(obj));
-                }
+        if let Some(ref queue) = self.capture_queue
+            && let Ok(mut events) = queue.lock()
+        {
+            for ev in events.drain(..) {
+                let mut obj = Dictionary::<Variant, Variant>::new();
+                obj.set("id", &Variant::from(ev.id as i64));
+                obj.set("concept_name", &Variant::from(ev.concept_name));
+                let lines_arr = PackedStringArray::from_iter(ev.lines.iter().map(GString::from));
+                obj.set("lines", &Variant::from(lines_arr));
+                obj.set("target_pane_type", &Variant::from(ev.target_pane_type));
+                arr.push(&Variant::from(obj));
             }
         }
         arr

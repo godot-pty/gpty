@@ -58,10 +58,10 @@ pub async fn connect(socket_path: &str) -> io::Result<Box<dyn IpcTransport>> {
 ///
 /// Respects the `GPTY_SOCKET` environment variable if set.
 pub fn default_socket_path() -> String {
-    if let Ok(val) = std::env::var("GPTY_SOCKET") {
-        if !val.is_empty() {
-            return val;
-        }
+    if let Ok(val) = std::env::var("GPTY_SOCKET")
+        && !val.is_empty()
+    {
+        return val;
     }
 
     #[cfg(target_os = "linux")]

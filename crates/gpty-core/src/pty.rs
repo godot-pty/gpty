@@ -14,7 +14,6 @@ const DEFAULT_ROWS: u16 = 24;
 const DEFAULT_COLS: u16 = 80;
 const READ_BUF_SIZE: usize = 4096;
 /// A handle to a spawned PTY: shell process + I/O thread.
-
 pub struct PtyHandle {
     pub id: u32,
     writer: Box<dyn Write + Send>,

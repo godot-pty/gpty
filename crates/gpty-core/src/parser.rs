@@ -29,6 +29,12 @@ pub struct LineParser {
     handler: Handler,
 }
 
+impl Default for LineParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LineParser {
     pub fn new() -> Self {
         Self {

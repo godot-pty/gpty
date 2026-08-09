@@ -17,12 +17,12 @@ pub async fn run(client: &IpcClient, action: &LayoutAction, json: bool) -> anyho
                 println!("{}", serde_json::to_string_pretty(&resp)?);
             } else if let Some(ref err) = resp.error {
                 anyhow::bail!("rpc error {}: {}", err.code, err.message);
-            } else if let Some(ref result) = resp.result {
-                if let Some(layouts) = result.get("layouts").and_then(|v| v.as_array()) {
-                    for l in layouts {
-                        if let Some(s) = l.as_str() {
-                            println!("{s}");
-                        }
+            } else if let Some(ref result) = resp.result
+                && let Some(layouts) = result.get("layouts").and_then(|v| v.as_array())
+            {
+                for l in layouts {
+                    if let Some(s) = l.as_str() {
+                        println!("{s}");
                     }
                 }
             }

@@ -94,10 +94,10 @@ struct TitleListener {
 
 impl EventListener for TitleListener {
     fn send_event(&self, event: TermEvent) {
-        if let TermEvent::Title(t) = event {
-            if let Ok(mut title) = self.title.lock() {
-                *title = t;
-            }
+        if let TermEvent::Title(t) = event
+            && let Ok(mut title) = self.title.lock()
+        {
+            *title = t;
         }
     }
 }
@@ -175,7 +175,7 @@ impl TermGrid {
             // display_iter reports negative line numbers for history rows;
             // add the display offset to shift them into 0..self.rows range
             let line = (indexed.point.line.0 + offset) as usize;
-            let col = indexed.point.column.0 as usize;
+            let col = indexed.point.column.0;
 
             if line < self.rows && col < self.cols {
                 rows[line][col] = CellInfo::from_cell(indexed.cell, &self.palette);
@@ -185,12 +185,12 @@ impl TermGrid {
         rows
     }
     pub fn get_grid_updates(&mut self, force_full: bool) -> GridUpdate {
-        let offset_changed = self.term.grid().display_offset() as usize != self.last_full_offset;
+        let offset_changed = self.term.grid().display_offset() != self.last_full_offset;
         if force_full || self.palette_changed || offset_changed {
             self.palette_changed = false;
             self.term.reset_damage();
             let rows = self.renderable_rows();
-            self.last_full_offset = self.term.grid().display_offset() as usize;
+            self.last_full_offset = self.term.grid().display_offset();
             return GridUpdate::Full(rows);
         }
 
@@ -198,7 +198,7 @@ impl TermGrid {
             alacritty_terminal::term::TermDamage::Full => {
                 self.term.reset_damage();
                 let rows = self.renderable_rows();
-                self.last_full_offset = self.term.grid().display_offset() as usize;
+                self.last_full_offset = self.term.grid().display_offset();
                 return GridUpdate::Full(rows);
             }
             alacritty_terminal::term::TermDamage::Partial(iter) => iter.collect(),
@@ -267,7 +267,7 @@ impl TermGrid {
         let content = self.term.renderable_content();
         let point = content.cursor.point;
         let line = point.line.0 as usize;
-        let col = point.column.0 as usize;
+        let col = point.column.0;
         if line < self.rows && col < self.cols {
             Some((line, col))
         } else {
@@ -322,10 +322,10 @@ impl TermGrid {
     /// Store a completed output line in the optional SQLite history.
     pub fn store_line(&mut self, line: &str) {
         self.line_count += 1;
-        if let Some(ref history) = self.history {
-            if let Ok(h) = history.lock() {
-                let _ = h.append(self.line_count as i64, line);
-            }
+        if let Some(ref history) = self.history
+            && let Ok(h) = history.lock()
+        {
+            let _ = h.append(self.line_count as i64, line);
         }
     }
     /// Search the full grid (scrollback + visible) for lines matching `pattern`.
@@ -353,7 +353,7 @@ impl TermGrid {
             let trimmed_len = text.trim_end().len();
             for m in re.find_iter(&text[..trimmed_len]) {
                 // Report line as 0-based from top of scrollback
-                results.push(((raw_line + history) as i32, m.start() as i32));
+                results.push((raw_line + history, m.start() as i32));
             }
         }
         Ok(results)

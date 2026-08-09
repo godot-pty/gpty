@@ -7,9 +7,10 @@
 use serde::{Deserialize, Serialize};
 
 /// How a triggered concept captures terminal output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CaptureMode {
     /// Match and capture only the triggering line (backward-compatible default).
+    #[default]
     SingleLine,
     /// Capture all subsequent output until stop conditions are met.
     UntilStop {
@@ -20,11 +21,6 @@ pub enum CaptureMode {
     },
 }
 
-impl Default for CaptureMode {
-    fn default() -> Self {
-        Self::SingleLine
-    }
-}
 use regex::Regex;
 
 /// Pane type discriminator — mirrors GDScript PaneTypes.ALL keys.
@@ -52,13 +48,21 @@ impl PaneType {
     }
 
     /// Parse from a GDScript type string (case-sensitive).
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
+        s.parse().ok()
+    }
+}
+
+impl std::str::FromStr for PaneType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "terminal" => Some(Self::Terminal),
-            "code_viewer" => Some(Self::CodeViewer),
-            "file_tree" => Some(Self::FileTree),
-            "observer" => Some(Self::Observer),
-            _ => None,
+            "terminal" => Ok(Self::Terminal),
+            "code_viewer" => Ok(Self::CodeViewer),
+            "file_tree" => Ok(Self::FileTree),
+            "observer" => Ok(Self::Observer),
+            _ => Err(()),
         }
     }
 }
