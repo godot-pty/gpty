@@ -801,8 +801,30 @@ func _build_sidebar():
 
 func _push_concepts_to_engine():
 	print("[Workspace] _push_concepts_to_engine called, tiles=", _tm.tiles.size())
+	for t in _tm.tiles:
+		var body = _tm._find_body(t.wrapper)
+		if body == null:
+			print("[Workspace]   body is null, skipping")
+			continue
+		print("[Workspace]   body=", body._pane_type(), " has _terminal=", "_terminal" in body)
+		if body is TerminalPane:
+			var term = body.get("_terminal")
+			if term == null:
+				print("[Workspace]   _terminal is null!")
+				continue
+			var concepts = ConceptManager._merge_concepts()
+			var enabled: Array = []
+			for c in concepts:
+				if c is Dictionary and c.get("enabled", true) == true:
+					enabled.append(c)
+			print("[Workspace]   pushing %d enabled concepts" % enabled.size())
+			term.set_global_concepts(enabled)
+			print("[Workspace]   push done")
+			return
+	print("[Workspace] No terminal found to push concepts!")
 func _push_concepts_deferred():
-	await get_tree().process_frame
+	# Wait for the scene tree to fully settle (GDExtension + terminal nodes ready)
+	await get_tree().create_timer(2.0).timeout
 	_push_concepts_to_engine()
 func get_terminal_for_ffi() -> Node:
 	for t in _tm.tiles:
