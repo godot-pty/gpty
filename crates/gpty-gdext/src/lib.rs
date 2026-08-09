@@ -693,8 +693,9 @@ impl GptyTerminal {
     #[func]
     fn set_global_concepts(&self, concepts_array: Variant) {
         use gpty_core::types::{Action, CaptureMode, Concept};
+        godot_print!("[gpty-gdext] set_global_concepts called");
         let Ok(arr) = concepts_array.try_to::<Array<Variant>>() else {
-            log::warn!("[gpty-gdext] set_global_concepts: failed to convert variant to array");
+            godot_print!("[gpty-gdext] set_global_concepts: FAILED to convert variant to array");
             return;
         };
         let mut concepts = Vec::new();
