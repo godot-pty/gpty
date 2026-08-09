@@ -20,17 +20,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build GDExtension (release)
-        run: cargo build -p godopty-gdext --release
+        run: cargo build -p gpty-gdext --release
 
       - name: Package
         run: |
           mkdir -p release
-          cp target/release/libgodopty_gdext.so release/libgodopty_gdext.linux.x86_64.so
+          cp target/release/libgpty_gdext.so release/libgpty_gdext.linux.x86_64.so
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: godopty-linux-x86_64
+          name: gpty-linux-x86_64
           path: release/
 
   build-macos:
@@ -50,17 +50,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build GDExtension (release)
-        run: cargo build -p godopty-gdext --release
+        run: cargo build -p gpty-gdext --release
 
       - name: Package
         run: |
           mkdir -p release
-          cp target/release/libgodopty_gdext.dylib release/libgodopty_gdext.macos.${{ matrix.target.arch }}.dylib
+          cp target/release/libgpty_gdext.dylib release/libgpty_gdext.macos.${{ matrix.target.arch }}.dylib
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: godopty-macos-${{ matrix.target.arch }}
+          name: gpty-macos-${{ matrix.target.arch }}
           path: release/
 
   build-windows:
@@ -73,17 +73,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build GDExtension (release)
-        run: cargo build -p godopty-gdext --release
+        run: cargo build -p gpty-gdext --release
 
       - name: Package
         run: |
           mkdir release
-          copy target\release\godopty_gdext.dll release\godopty_gdext.windows.x86_64.dll
+          copy target\release\gpty_gdext.dll release\gpty_gdext.windows.x86_64.dll
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: godopty-windows-x86_64
+          name: gpty-windows-x86_64
           path: release/
 
   # ── Export standalone app + create GitHub Release ─────────────────────
@@ -141,20 +141,20 @@ jobs:
 
       - name: Export Linux
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/dist/godopty-${VERSION}-linux-x86_64"
-          godot --headless --path godot --export-release "Linux/X11" "$GITHUB_WORKSPACE/dist/godopty-${VERSION}-linux-x86_64/godopty"
-          tar -czf "$GITHUB_WORKSPACE/dist/godopty-${VERSION}-linux-x86_64.tar.gz" -C "$GITHUB_WORKSPACE/dist" "godopty-${VERSION}-linux-x86_64"
+          mkdir -p "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64"
+          godot --headless --path godot --export-release "Linux/X11" "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64/gpty"
+          tar -czf "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64.tar.gz" -C "$GITHUB_WORKSPACE/dist" "gpty-${VERSION}-linux-x86_64"
 
       - name: Export Windows
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/dist/godopty-${VERSION}-windows-x86_64"
-          godot --headless --path godot --export-release "Windows Desktop" "$GITHUB_WORKSPACE/dist/godopty-${VERSION}-windows-x86_64/godopty.exe"
-          cp godot/bin/godopty_gdext.windows.x86_64.dll "$GITHUB_WORKSPACE/dist/godopty-${VERSION}-windows-x86_64/" 2>/dev/null || true
-          cd "$GITHUB_WORKSPACE/dist" && zip -r "godopty-${VERSION}-windows-x86_64.zip" "godopty-${VERSION}-windows-x86_64"
+          mkdir -p "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64"
+          godot --headless --path godot --export-release "Windows Desktop" "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64/gpty.exe"
+          cp godot/bin/gpty_gdext.windows.x86_64.dll "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64/" 2>/dev/null || true
+          cd "$GITHUB_WORKSPACE/dist" && zip -r "gpty-${VERSION}-windows-x86_64.zip" "gpty-${VERSION}-windows-x86_64"
 
       - name: Export macOS
         run: |
-          godot --headless --path godot --export-release "macOS" "$GITHUB_WORKSPACE/dist/godopty-${VERSION}-macos.zip"
+          godot --headless --path godot --export-release "macOS" "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip"
 
       - name: Copy GDExtension artifacts for release
         run: |
@@ -165,8 +165,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/godopty-${{ github.ref_name }}-linux-x86_64.tar.gz
-            dist/godopty-${{ github.ref_name }}-windows-x86_64.zip
-            dist/godopty-${{ github.ref_name }}-macos.zip
+            dist/gpty-${{ github.ref_name }}-linux-x86_64.tar.gz
+            dist/gpty-${{ github.ref_name }}-windows-x86_64.zip
+            dist/gpty-${{ github.ref_name }}-macos.zip
             dist/gdextension/*
           generate_release_notes: true

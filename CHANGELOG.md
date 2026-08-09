@@ -2,59 +2,14 @@
 
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] — unreleased
-
-### Added
-
-- **CLI rewrite**: `godopty` binary for workspace control over JSON-RPC IPC
-  - Subcommands: `new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `layout`, `daemon`, `schema`, `mcp`, `version`
-  - `--json` flag for machine-readable output; human-formatted tables for `list-panes`
-  - `--no-daemon` flag to skip auto-spawning the GUI
-  - Levenshtein-based "did you mean?" suggestions for invalid pane types
-- **`godopty-ipc` crate**: JSON-RPC 2.0 transport, protocol, client, and server
-  - Unix domain socket transport (Linux/macOS) with named pipe stub (Windows)
-  - Handler registry with async dispatch; newline-delimited JSON framing
-  - `GODOPTY_SOCKET` env var override for socket path
-- **IPC server in gdext**: tokio server bridges JSON-RPC to GDScript main thread
-  - `on_stage_init(InitStage::Scene)` auto-starts the IPC server
-  - `drain_ipc_requests()` / `respond_ipc()` static methods polled from `_process()`
-  - Oneshot channel dispatch with 30s timeout; 10 registered IPC methods
-- **`godopty schema`**: JSON Schema (draft 2020-12) and MCP tools manifest generation from clap command tree
-- **MCP server**: `godopty mcp` runs over stdio, forwarding tools/list and tools/call to IPC
-- **Daemon management**: `godopty daemon start/stop/status`, auto-spawn GUI on CLI use
-- **PaneType enum** in `godopty-core`: Terminal, CodeViewer, FileTree, Observer with serde support
-- **`parking_lot::Mutex`** for IPC statics (no poisoning overhead)
-
-### Changed
-
-- Binary renamed from `godopty-cli` to `godopty`
-- All crate versions aligned to `0.3.0`
-- CLI dependencies: replaced `regex` with `clap`, `serde_json`, `anyhow`, `dirs`
-
-## [0.2.0] — unreleased
-
-### Added
-
-- Three-mode window system: decorated, borderless (with custom titlebar), fullscreen
-- Drag-to-resize tile edges with 4px edge detection and cursor change
-- Pane swapping: double-click title bar → popup menu to swap pane types
-- Workspace Trust dialog: warns before spawning PTYs from untrusted layout files
-- Window mode control in Settings UI (System tab) with debounced apply
-- Window position/size persistence across decorated ↔ fullscreen transitions
-
-### Changed
-
-- Titlebar maximize/restore icon toggles based on current window mode
-- Profile activation now checks workspace trust before restoring PTY sessions
-
 ## [0.1.0] — 2026-07-21
 
 ### Added
 
 - Multi-PTY terminal emulator with tiling grid GUI
-- `godopty-core` library: PTY spawning (`portable-pty`), ANSI parsing (`vte`), terminal grid (`alacritty_terminal`), concept pub-sub engine
-- `godopty-gdext` GDExtension: `GodoptyTerminal` GodotClass with damage-tracked grid rendering
-- `godopty-cli` binary: mock, `--pty`, and `--term` demo modes
+- `gpty-core` library: PTY spawning (`portable-pty`), ANSI parsing (`vte`), terminal grid (`alacritty_terminal`), concept pub-sub engine
+- `gpty-gdext` GDExtension: `GptyTerminal` GodotClass with damage-tracked grid rendering
+- `gpty-cli` binary: mock, `--pty`, and `--term` demo modes
 - Tiling grid: split vertically/horizontally, kill, expand, and nested `SplitContainer` layout
 - Pane types: terminal, code viewer (`CodeEdit`), file tree (`Tree`), observer
 - Concept engine: regex triggers → labelled actions with `{payload}`/`{N}` variable substitution
@@ -76,6 +31,39 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - Standalone export presets (Linux, macOS, Windows) with CI release workflow
 - 60 Rust tests (core + integration) and 40+ GDScript unit/integration tests
 
-[0.3.0]: https://github.com/godopty/godopty/releases/tag/v0.3.0
-[0.2.0]: https://github.com/godopty/godopty/releases/tag/v0.2.0
-[0.1.0]: https://github.com/godopty/godopty/releases/tag/v0.1.0
+[0.1.0]: https://github.com/gpty/gpty/releases/tag/v0.1.0
+
+## [0.2.0] — unreleased
+
+### Added
+
+- Three-mode window system: OS decorated, borderless windowed, fullscreen — all with custom titlebar in non-OS modes
+- Per-pane titlebar buttons: minimize, position-swap (shows popup to swap with another pane), type-swap (changes pane type), settings, close
+- Sidebar pane rows with full action button set matching the titlebar
+- Bottom status bar showing active pane info, FPS/ms, and window mode indicator
+- "Show titlebar" toggle in Settings → System to hide per-pane titlebars
+- Window mode dropdown in sidebar and Settings panel, synced via shared `WINDOW_MODE_LABELS`
+- Auto-spawn one terminal on first launch (no saved layout)
+- Workspace Trust dialog: warns before restoring layouts saved with a different shell
+
+### Changed
+
+- System tab moved to first position in Settings panel
+- Window mode dropdown labels unified to "OS" / "Windowed" / "Windowless"
+- FPS/metrics moved from sidebar to bottom status bar
+- Sidebar "Add Pane" dropdown replaced with 4 icon buttons per pane type + "+16" bulk spawn via command palette
+- Titlebar mode-toggle button removed; mode switching via sidebar/settings dropdown only
+- `_toggle_borderless` shortcut (Ctrl+Shift+F11) and `_toggle_custom_window_mode` removed
+
+### Fixed
+
+- Layout persistence: save on `_exit_tree()` instead of unreliable `WM_CLOSE_REQUEST`
+- Window mode persisted correctly on restart (was silently defaulting to 0)
+- Settings persisted on exit (were not saved in `_exit_tree`)
+- Window mode application order: always reset to `WINDOW_MODE_WINDOWED` before applying target mode
+- Titlebar Phosphor icon rendering via `Label` child nodes
+- Profile trust dialog no longer shows redundant "replace layout?" confirmation
+- `as` keyword renamed to `adj_saved` in terminal_manager.gd
+- Titlebar drag-to-move: background and label `mouse_filter` set to `IGNORE`
+
+[0.2.0]: https://github.com/gpty/gpty/releases/tag/v0.2.0

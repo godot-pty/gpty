@@ -1,11 +1,11 @@
-//! Godot 4 GDExtension for godopty — bridges the Rust terminal engine
+//! Godot 4 GDExtension for gpty — bridges the Rust terminal engine
 //! to Godot's rendering pipeline.
 //!
 //! ## Architecture
 //!
 //! - A **global tokio runtime** is started at extension init and shared
 //!   across all terminal nodes.
-//! - Each [`GodoptyTerminal`] node wraps a [`SpawnedTerminal`], which runs
+//! - Each [`GptyTerminal`] node wraps a [`SpawnedTerminal`], which runs
 //!   a background task feeding PTY output into a renderable grid.
 //! - GDScript polls the grid in `_process()` and renders it in `_draw()`.
 //! - Keyboard input flows GDScript → Rust → PTY stdin.
@@ -15,15 +15,8 @@ use std::sync::{Arc, LazyLock};
 use godot::prelude::*;
 
 use godot::global::Key;
-use godopty_core::engine::{SpawnedTerminal, WorkspaceEngine};
-use godopty_core::types::TerminalConfig;
-use std::collections::HashMap;
-use parking_lot::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
-
-use godopty_ipc::protocol::JsonRpcError;
-use godopty_ipc::server::IpcServer;
+use gpty_core::engine::{SpawnedTerminal, WorkspaceEngine};
+use gpty_core::types::TerminalConfig;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
@@ -49,38 +42,19 @@ static ENGINE: LazyLock<WorkspaceEngine> =
     LazyLock::new(|| WorkspaceEngine::new(Vec::new()));
 
 // ═══════════════════════════════════════════════════════════════════════
-// IPC dispatch bridge — connects tokio IPC handlers to GDScript main thread
-// ═══════════════════════════════════════════════════════════════════════
-
-/// Unique request ID counter for the IPC bridge.
-static NEXT_IPC_ID: AtomicU64 = AtomicU64::new(1);
-
-/// Queued IPC requests waiting for GDScript dispatch.
-/// Each entry: (request_id, method_name, params_json).
-static PENDING_IPC: LazyLock<Mutex<Vec<(u64, String, serde_json::Value)>>> =
-    LazyLock::new(|| Mutex::new(Vec::new()));
-
-/// Pending oneshot responders keyed by request ID.
-/// The IPC handler awaits on the oneshot receiver; GDScript
-/// sends the response through the sender.
-type IpcResponder = tokio::sync::oneshot::Sender<Result<serde_json::Value, JsonRpcError>>;
-static IPC_RESPONDERS: LazyLock<Mutex<HashMap<u64, IpcResponder>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-// ═══════════════════════════════════════════════════════════════════════
-// GodoptyTerminal — a Godot node backed by a Rust PTY session
+// GptyTerminal — a Godot node backed by a Rust PTY session
 // ═══════════════════════════════════════════════════════════════════════
 
 #[derive(GodotClass)]
 #[class(base = Node2D)]
-struct GodoptyTerminal {
+struct GptyTerminal {
     spawned: Option<SpawnedTerminal>,
     next_id: u32,
-    capture_queue: Option<Arc<std::sync::Mutex<Vec<godopty_core::types::CapturedOutput>>>>,
+    capture_queue: Option<Arc<std::sync::Mutex<Vec<gpty_core::types::CapturedOutput>>>>,
 }
 
 #[godot_api]
-impl INode2D for GodoptyTerminal {
+impl INode2D for GptyTerminal {
     fn init(_base: Base<Node2D>) -> Self {
         Self {
             spawned: None,
@@ -91,7 +65,7 @@ impl INode2D for GodoptyTerminal {
 }
 
 #[godot_api]
-impl GodoptyTerminal {
+impl GptyTerminal {
     /// Start a shell in this terminal pane.
     ///
     /// Spawns a PTY at `rows × cols`. Call once during `_ready()`.
@@ -136,7 +110,7 @@ impl GodoptyTerminal {
                     let db_path = godot::classes::ProjectSettings::singleton()
                         .globalize_path("user://history.db")
                         .to_string();
-                    match godopty_core::history::HistoryStore::open(&db_path, id) {
+                    match gpty_core::history::HistoryStore::open(&db_path, id) {
                         Ok(store) => {
                             grid.history = Some(Arc::new(std::sync::Mutex::new(store)));
                         }
@@ -181,12 +155,12 @@ impl GodoptyTerminal {
 
     /// Lock the grid immutably, call `f`, return its result.
     /// Returns `default` if no shell started or the mutex is poisoned.
-    fn with_grid<T>(&self, f: impl FnOnce(&godopty_core::term::TermGrid) -> T, default: T) -> T {
+    fn with_grid<T>(&self, f: impl FnOnce(&gpty_core::term::TermGrid) -> T, default: T) -> T {
         if let Some(ref spawned) = self.spawned {
             match spawned.grid.lock() {
                 Ok(g) => f(&g),
                 Err(e) => {
-                    godot_error!("godopty: TermGrid lock poisoned: {e}");
+                    godot_error!("gpty: TermGrid lock poisoned: {e}");
                     default
                 }
             }
@@ -194,12 +168,12 @@ impl GodoptyTerminal {
             default
         }
     }
-    fn with_grid_mut_ret<T>(&self, f: impl FnOnce(&mut godopty_core::term::TermGrid) -> T, default: T) -> T {
+    fn with_grid_mut_ret<T>(&self, f: impl FnOnce(&mut gpty_core::term::TermGrid) -> T, default: T) -> T {
         if let Some(ref spawned) = self.spawned {
             match spawned.grid.lock() {
                 Ok(mut g) => f(&mut g),
                 Err(e) => {
-                    godot_error!("godopty: TermGrid lock poisoned: {e}");
+                    godot_error!("gpty: TermGrid lock poisoned: {e}");
                     default
                 }
             }
@@ -210,11 +184,11 @@ impl GodoptyTerminal {
 
 
     /// Lock the grid mutably and call `f`. No-op if no shell or lock poisoned.
-    fn with_grid_mut(&self, f: impl FnOnce(&mut godopty_core::term::TermGrid)) {
+    fn with_grid_mut(&self, f: impl FnOnce(&mut gpty_core::term::TermGrid)) {
         if let Some(ref spawned) = self.spawned {
             match spawned.grid.lock() {
                 Ok(mut g) => f(&mut g),
-                Err(e) => godot_error!("godopty: TermGrid lock poisoned: {e}"),
+                Err(e) => godot_error!("gpty: TermGrid lock poisoned: {e}"),
             }
         }
     }
@@ -326,7 +300,7 @@ impl GodoptyTerminal {
             Err(_) => return,
         };
         if hex_csv.is_empty() {
-            grid.palette = godopty_core::color::SYSTEM_COLORS;
+            grid.palette = gpty_core::color::SYSTEM_COLORS;
             grid.generation += 1;
             grid.palette_changed = true;
             return;
@@ -396,7 +370,7 @@ impl GodoptyTerminal {
             |g| {
                 let updates = g.get_grid_updates(force_full);
                 match updates {
-                    godopty_core::term::GridUpdate::Full(rows) => {
+                    gpty_core::term::GridUpdate::Full(rows) => {
                         let n_rows = rows.len();
                         let n_cols = if n_rows > 0 { rows[0].len() } else { 0 };
                         let mut chars: Array<Variant> = Array::new();
@@ -422,7 +396,7 @@ impl GodoptyTerminal {
                         dict.set("bg", &Variant::from(bg)); dict.set("attrs", &Variant::from(attrs));
                         dict
                     }
-                    godopty_core::term::GridUpdate::Partial(cells) => {
+                    gpty_core::term::GridUpdate::Partial(cells) => {
                         let mut indices: Array<Variant> = Array::new();
                         let mut chars: Array<Variant> = Array::new();
                         let mut fg: Array<Variant> = Array::new();
@@ -462,7 +436,7 @@ impl GodoptyTerminal {
 				let updates = g.get_grid_updates(force_full);
 				let mut dict = Dictionary::<Variant, Variant>::new();
 				match updates {
-					godopty_core::term::GridUpdate::Full(rows) => {
+					gpty_core::term::GridUpdate::Full(rows) => {
 						let n_rows = rows.len();
 						let n_cols = if n_rows > 0 { rows[0].len() } else { 0 };
 						let mut chars: Array<Variant> = Array::new();
@@ -501,7 +475,7 @@ impl GodoptyTerminal {
 						dict.set("bg", &Variant::from(bg_arr));
 						dict.set("attrs", &Variant::from(attrs_arr));
 					}
-					godopty_core::term::GridUpdate::Partial(cells) => {
+					gpty_core::term::GridUpdate::Partial(cells) => {
 						let mut indices_arr = PackedInt32Array::new();
 						let mut chars: Array<Variant> = Array::new();
 						let mut fg_arr = PackedColorArray::new();
@@ -582,14 +556,14 @@ impl GodoptyTerminal {
 	#[func]
 	fn key_to_bytes(&self, keycode: i64, shift: bool, alt: bool, ctrl: bool, meta: bool) -> PackedByteArray {
 		let mut m: u8 = 0;
-		if shift { m |= godopty_core::keymap::Modifiers::SHIFT; }
-		if alt   { m |= godopty_core::keymap::Modifiers::ALT; }
-		if ctrl  { m |= godopty_core::keymap::Modifiers::CTRL; }
-		if meta  { m |= godopty_core::keymap::Modifiers::SUPER; }
+		if shift { m |= gpty_core::keymap::Modifiers::SHIFT; }
+		if alt   { m |= gpty_core::keymap::Modifiers::ALT; }
+		if ctrl  { m |= gpty_core::keymap::Modifiers::CTRL; }
+		if meta  { m |= gpty_core::keymap::Modifiers::SUPER; }
 
 		// Translate Godot KEY_* constants to evdev scancodes
 		let evdev = godot_key_to_evdev(keycode);
-		match godopty_core::keymap::key_event_to_bytes(evdev, m) {
+		match gpty_core::keymap::key_event_to_bytes(evdev, m) {
 			Some(bytes) => PackedByteArray::from(bytes.as_slice()),
 			None => PackedByteArray::new(),
 		}
@@ -603,7 +577,7 @@ impl GodoptyTerminal {
 	///   "actions": Array[{"cmd":String,"target":String}]
 	#[func]
 	fn set_global_concepts(&self, concepts_array: Array<Variant>) {
-		use godopty_core::types::{CaptureMode, Concept, Action};
+		use gpty_core::types::{CaptureMode, Concept, Action};
 		let mut concepts = Vec::new();
 		for item in concepts_array.iter_shared() {
 			let obj: Dictionary<Variant, Variant> = item.to();
@@ -644,7 +618,7 @@ impl GodoptyTerminal {
 	/// Get all concepts as an Array of Dictionaries.
 	#[func]
 	fn get_global_concepts(&self) -> Array<Variant> {
-		use godopty_core::types::CaptureMode;
+		use gpty_core::types::CaptureMode;
 		let concepts = ENGINE.get_concepts();
 		let mut arr = Array::<Variant>::new();
 		for c in &concepts {
@@ -719,53 +693,6 @@ impl GodoptyTerminal {
 	fn flush_capture(&self, event_id: i64) {
 		if let Some(ref spawned) = self.spawned {
 			spawned.handle.flush_capture(event_id as u64);
-		}
-	}
-
-	// ── IPC bridge (polled from GDScript) ──────────────────────
-
-	/// Drain queued IPC requests for GDScript to dispatch.
-	///
-	/// Returns an array of dictionaries, each with keys:
-	/// `id` (int), `method` (String), `params` (String — JSON).
-	/// Called from `workspace.gd._process()`.
-	#[func]
-	fn drain_ipc_requests() -> Array<Variant> {
-		let mut pending = PENDING_IPC.lock();
-		let mut arr = Array::new();
-		for (id, method, params) in pending.drain(..) {
-			let mut d = Dictionary::<Variant, Variant>::new();
-			d.set("id", &Variant::from(id as i64));
-			d.set("method", &Variant::from(method));
-			let json = serde_json::to_string(&params).unwrap_or_default();
-			d.set("params", &Variant::from(GString::from(&json)));
-			arr.push(&Variant::from(d));
-		}
-		arr
-	}
-
-	/// Respond to an IPC request previously obtained via `drain_ipc_requests()`.
-	///
-	/// `success` indicates whether `result_json` is a normal result
-	/// or an error object (with `{"error": {"code": …, "message": …}}` shape).
-	#[func]
-	fn respond_ipc(id: i64, success: bool, result_json: GString) {
-		let mut responders = IPC_RESPONDERS.lock();
-		if let Some(tx) = responders.remove(&(id as u64)) {
-			if success {
-				let val: serde_json::Value = serde_json::from_str(&result_json.to_string())
-					.unwrap_or(serde_json::Value::Null);
-				let _ = tx.send(Ok(val));
-			} else {
-				let err: JsonRpcError = serde_json::from_str(&result_json.to_string())
-					.unwrap_or_else(|_| {
-						JsonRpcError::new(
-							JsonRpcError::INTERNAL_ERROR,
-							"unknown error from GDScript",
-						)
-					});
-				let _ = tx.send(Err(err));
-			}
 		}
 	}
 
@@ -846,87 +773,12 @@ fn godot_key_to_evdev(kc: i64) -> u32 {
 	k
 }
 
-// ── IPC server helpers ────────────────────────────────────
-
-/// Returns the default IPC socket path, respecting `GODOPTY_SOCKET` env var.
-fn default_socket_path() -> String {
-    godopty_ipc::transport::default_socket_path()
-}
-
-/// Register all IPC handlers on the server.
-///
-/// Each handler deserializes params, queues a request for GDScript
-/// via `PENDING_IPC`, and awaits the response on `IPC_RESPONDERS`.
-fn register_handlers(server: &mut IpcServer) {
-    use std::sync::Arc;
-
-    // Helper: create a handler that delegates to GDScript polling.
-    let dispatch = |method: &'static str| -> godopty_ipc::server::HandlerFn {
-        let method = method.to_string();
-        Arc::new(move |params| {
-            let method = method.clone();
-            Box::pin(dispatch_ipc(method, params))
-        })
-    };
-
-    server.register("newPane", dispatch("newPane"));
-    server.register("listPanes", dispatch("listPanes"));
-    server.register("killPane", dispatch("killPane"));
-    server.register("focusPane", dispatch("focusPane"));
-    server.register("inject", dispatch("inject"));
-    server.register("layoutSave", dispatch("layoutSave"));
-    server.register("layoutLoad", dispatch("layoutLoad"));
-    server.register("layoutList", dispatch("layoutList"));
-    server.register("version", dispatch("version"));
-}
-
-/// Enqueue an IPC request for GDScript and await the response.
-async fn dispatch_ipc(
-    method: String,
-    params: serde_json::Value,
-) -> Result<serde_json::Value, JsonRpcError> {
-    let id = NEXT_IPC_ID.fetch_add(1, Ordering::Relaxed);
-    let (tx, rx) = tokio::sync::oneshot::channel();
-
-    IPC_RESPONDERS.lock().insert(id, tx);
-    PENDING_IPC.lock().push((id, method, params));
-
-    match tokio::time::timeout(Duration::from_secs(30), rx).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(_)) => Err(JsonRpcError::new(
-            JsonRpcError::INTERNAL_ERROR,
-            "responder dropped before response",
-        )),
-        Err(_) => {
-            IPC_RESPONDERS.lock().remove(&id);
-            Err(JsonRpcError::new(
-                JsonRpcError::INTERNAL_ERROR,
-                "IPC request timed out (30s)",
-            ))
-        }
-    }
-}
-
 
 // ═══════════════════════════════════════════════════════════════════════
 // Extension entry point
 // ═══════════════════════════════════════════════════════════════════════
 
-struct GodoptyExtension;
+struct GptyExtension;
 
 #[gdextension]
-unsafe impl ExtensionLibrary for GodoptyExtension {
-    fn on_stage_init(stage: godot::init::InitStage) {
-        if stage == godot::init::InitStage::Scene {
-            // GDScript singletons are now available — start the IPC server.
-            log::info!("Starting IPC server on {}", default_socket_path());
-            RUNTIME.spawn(async {
-                let mut server = IpcServer::new(default_socket_path());
-                register_handlers(&mut server);
-                if let Err(e) = server.serve().await {
-                    log::error!("IPC server failed: {e}");
-                }
-            });
-        }
-    }
-}
+unsafe impl ExtensionLibrary for GptyExtension {}

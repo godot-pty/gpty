@@ -1,5 +1,5 @@
 ---
-title: godopty v0.1.0
+title: gpty v0.1.0
 date: 2026-07-21
 ---
 
@@ -11,7 +11,7 @@ First release!
 
 **Terminal engine**
 
-- `godopty-core` handles PTY spawning via `portable-pty`
+- `gpty-core` handles PTY spawning via `portable-pty`
 - ANSI parsing via `vte`
 - A full terminal grid via `alacritty_terminal`. 
 - Damage-tracked rendering keeps the Godot frontend fast.
@@ -35,6 +35,6 @@ First release!
 
 **Release**
 
-- Download the standalone binary for your platform from [GitHub Releases](https://github.com/godopty/godopty/releases/tag/v0.1.0).
-- Changelog: [github.com/godopty/godopty/CHANGELOG](https://github.com/godopty/godopty/blob/main/CHANGELOG.md).
-- Source: [github.com/godopty/godopty](https://github.com/godopty/godopty).
+- Download the standalone binary for your platform from [GitHub Releases](https://github.com/gpty/gpty/releases/tag/v0.1.0).
+- Changelog: [github.com/gpty/gpty/CHANGELOG](https://github.com/gpty/gpty/blob/main/CHANGELOG.md).
+- Source: [github.com/gpty/gpty](https://github.com/gpty/gpty).

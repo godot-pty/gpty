@@ -1,6 +1,6 @@
-# godopty
+# gpty
 
-godopty (goh-doh-tee), a Godot-based Rust multi-PTY emulator desktop application for creating, expanding, and orchestrating terminal sessions in a grid-based GUI.
+gpty, a Godot-based Rust multi-PTY emulator desktop application for creating, expanding, and orchestrating terminal sessions in a grid-based GUI.
 
 ## Overview
 
@@ -20,19 +20,19 @@ godopty (goh-doh-tee), a Godot-based Rust multi-PTY emulator desktop application
 | Pub-sub | `tokio::sync::broadcast(1024)` | 1:N fan-out, lagged-receiver protection, self-reaction prevention |
 | Grid rendering | `alacritty_terminal` | Full DEC STD 070 grid state machine; pass arrays to Godot `_draw()` |
 | Godot bridge | `gdext 0.5` | Native GDExtension for Godot 4.7+ |
-| IPC | JSON-RPC 2.0 over Unix socket | CLI ↔ GUI control protocol |
-| CLI | `clap` 4 | Subcommand tree with schema auto-generation |
 | Rust edition | 2024 | Requires Rust >= 1.85 |
+
+---
 
 ## Installation
 
-Standalone binaries (no Godot install required) are published on [GitHub Releases](https://github.com/godopty/godopty/releases) for Linux, macOS, and Windows.
+Standalone binaries (no Godot install required) are published on [GitHub Releases](https://github.com/gpty/gpty/releases) for Linux, macOS, and Windows.
 
 | Platform | Package |
 |---|---|
-| Linux | `godopty-v0.3.0-linux-x86_64.tar.gz` — extract and run `./godopty` |
-| macOS | `godopty-v0.3.0-macos.zip` — unzip, right-click the `.app` → Open |
-| Windows | `godopty-v0.3.0-windows-x86_64.zip` — unzip and run `godopty.exe` |
+| Linux | `gpty-v0.1.0-linux-x86_64.tar.gz` — extract and run `./gpty` |
+| macOS | `gpty-v0.1.0-macos.zip` — unzip, right-click the `.app` → Open |
+| Windows | `gpty-v0.1.0-windows-x86_64.zip` — unzip and run `gpty.exe` |
 
 ---
 
@@ -54,9 +54,12 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 
 ### UI
 - Hardware-accelerated Godot renderer with damage tracking
-- Tiling grid with nested `SplitContainer` layout
-- Sidebar with pane list, profile management, and quick actions
-- Settings panel: fonts, colors, cursor, scroll, concept editor
+- Three-mode window system: OS decorated, borderless, fullscreen
+- Custom titlebar with minimize, maximize/restore, close
+- Tiling grid with drag-to-resize edges and pane position swapping
+- Sidebar with window mode dropdown, per-pane-type spawn buttons, and full per-pane action buttons
+- Bottom status bar showing active pane info, FPS, and window mode
+- Settings panel: fonts, colors, cursor, scroll, window mode, titlebar toggle, concept editor
 - Toast notifications (info, warn, error)
 - Command palette (`Ctrl+P`)
 
@@ -88,8 +91,8 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and [ROADMAP.md](ROADMAP.md
 
 ```bash
 # Clone
-git clone https://github.com/godopty/godopty.git godopty
-cd godopty
+git clone https://github.com/gpty/gpty.git gpty
+cd gpty
 
 # Build
 cargo build
@@ -103,26 +106,29 @@ cargo check
 # Godot tests
 godot --headless --path godot --import
 godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration
-# CLI (control running godopty GUI)
-cargo run --bin godopty-cli -- new-pane --type terminal
-cargo run --bin godopty-cli -- list-panes
-cargo run --bin godopty-cli -- schema          # JSON Schema for AI tools
-cargo run --bin godopty-cli -- schema --format mcp  # MCP tools manifest
-cargo run --bin godopty-cli -- mcp             # MCP server over stdio
+
+# Mock terminal demo (demonstrates pub-sub engine)
+cargo run --bin gpty
+
+# Real-PTY demo (requires Linux or Windows 11)
+cargo run --bin gpty -- --pty
+
+# Terminal grid demo (validates alacritty_terminal ANSI + color processing)
+cargo run --bin gpty -- --term
 
 # Build the GDExtension
-cargo build -p godopty-gdext
+cargo build -p gpty-gdext
 
 # Release build + local export
-cargo build -p godopty-gdext --release
-cp target/release/libgodopty_gdext.so godot/bin/libgodopty_gdext.linux.x86_64.so
-godot --headless --path godot --export-release "Linux/X11" dist/godopty
+cargo build -p gpty-gdext --release
+cp target/release/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
+godot --headless --path godot --export-release "Linux/X11" dist/gpty
 
 # Open in Godot editor
 cd godot && godot -e
 
 # Verbose logging
-RUST_LOG=debug cargo run --bin godopty-cli
+RUST_LOG=debug cargo run --bin gpty
 ```
 
 ## Concept System

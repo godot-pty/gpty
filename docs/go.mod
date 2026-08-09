@@ -1,4 +1,4 @@
-module github.com/godopty/godopty
+module github.com/gpty/gpty
 
 go 1.26.5
 

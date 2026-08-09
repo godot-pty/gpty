@@ -45,7 +45,13 @@ func _build_ui():
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(tabs)
 
-	# Tab 1: Terminal
+	# Tab 1: System
+	var t_sys = _create_tab(tabs, "System")
+	_add_fps_control(t_sys)
+	var show_tb_cb = _add_show_titlebar_control(t_sys)
+	var win_mode_opt = _add_window_mode_control(t_sys)
+
+	# Tab 2: Terminal
 	var t_term = _create_tab(tabs, "Terminal")
 	var shape_opt = _add_cursor_control(t_term)
 	var blink_cb = _add_blink_control(t_term)
@@ -58,7 +64,7 @@ func _build_ui():
 	_add_shell_control(t_term)
 	_add_env_control(t_term)
 
-	# Tab 2: Appearance
+	# Tab 3: Appearance
 	var t_app = _create_tab(tabs, "Appearance")
 	_add_font_picker(t_app)
 	var fs_spin = _add_font_control(t_app)
@@ -67,10 +73,6 @@ func _build_ui():
 	t_app.add_child(HSeparator.new())
 	var color_btns = _add_color_section(t_app)
 
-	# Tab 3: System
-	var t_sys = _create_tab(tabs, "System")
-	_add_fps_control(t_sys)
-	var win_mode_opt = _add_window_mode_control(t_sys)
 	# Tab 4: Concepts
 	var t_con = _create_tab(tabs, "Concepts")
 	_add_concept_section(t_con)
@@ -91,6 +93,7 @@ func _build_ui():
 		SettingsManager.cfg_default_cols = int(dims[1].value)
 		SettingsManager.cfg_beam_width = int(cursor_px[0].value)
 		SettingsManager.cfg_underline_height = int(cursor_px[1].value)
+		SettingsManager.cfg_show_titlebar = show_tb_cb.button_pressed
 		SettingsManager.cfg_window_mode = win_mode_opt.selected
 		SettingsManager.save_settings()
 	)
@@ -101,8 +104,9 @@ func _build_ui():
 	blink_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	fs_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	scroll_spin.value_changed.connect(func(_v): _debounce_timer.start())
+	show_tb_cb.toggled.connect(func(_pressed): _debounce_timer.start())
 
-	_add_reset_button(v, shape_opt, blink_cb, blink_spin, scroll_spin, dims, cursor_px, color_btns, fs_spin, win_mode_opt)
+	_add_reset_button(v, shape_opt, blink_cb, blink_spin, scroll_spin, dims, cursor_px, color_btns, fs_spin, show_tb_cb, win_mode_opt)
 
 func _create_tab(tabs: TabContainer, title: String) -> VBoxContainer:
 	var sc = ScrollContainer.new()
@@ -263,13 +267,19 @@ func _add_fps_control(v: VBoxContainer):
 	hf.add_child(fps_opt)
 	v.add_child(hf)
 
+func _add_show_titlebar_control(v: VBoxContainer) -> CheckBox:
+	var cb = CheckBox.new(); cb.name = "ShowTitlebarCb"; cb.text = "Show titlebar"
+	cb.add_theme_font_size_override("font_size", 12)
+	cb.button_pressed = SettingsManager.cfg_show_titlebar
+	v.add_child(cb)
+	return cb
+
 func _add_window_mode_control(v: VBoxContainer) -> OptionButton:
 	var hb = HBoxContainer.new()
 	hb.add_child(_lbl("Window Mode:"))
 	var opt = OptionButton.new()
-	opt.add_item("Decorated")
-	opt.add_item("Borderless")
-	opt.add_item("Fullscreen")
+	for label in SettingsManager.WINDOW_MODE_LABELS:
+		opt.add_item(label)
 	opt.selected = SettingsManager.cfg_window_mode
 	opt.item_selected.connect(func(_idx): _debounce_timer.start())
 	hb.add_child(opt)
@@ -334,7 +344,7 @@ func _reset_colors(btns: Array):
 			(btns[i][1] as ColorPickerButton).color = defaults[i]
 		else:
 			(btns[i] as ColorPickerButton).color = defaults[i]
-func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: CheckBox, blink_spin: SpinBox, scroll_spin: SpinBox, dims: Array, cursor_px: Array, color_btns: Array, fs_spin: SpinBox, win_mode_opt: OptionButton):
+func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: CheckBox, blink_spin: SpinBox, scroll_spin: SpinBox, dims: Array, cursor_px: Array, color_btns: Array, fs_spin: SpinBox, show_tb_cb: CheckBox, win_mode_opt: OptionButton):
 	var btn = Button.new(); btn.text = "Reset to defaults"
 	btn.add_theme_font_size_override("font_size", 12)
 	btn.pressed.connect(func():
@@ -356,6 +366,7 @@ func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: Chec
 		SettingsManager.cfg_color_scheme_path = ""
 		SettingsManager.cfg_font_path = "res://fonts/DejaVuSansMono.ttf"
 		SettingsManager.cfg_font_size = 14
+		SettingsManager.cfg_show_titlebar = true
 		SettingsManager.save_settings()
 		shape_opt.selected = 0
 		blink_cb.button_pressed = true
@@ -367,6 +378,7 @@ func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: Chec
 		cursor_px[1].value = 3
 		_reset_colors(color_btns)
 		fs_spin.value = 14
+		show_tb_cb.button_pressed = true
 		SettingsManager.cfg_window_mode = 0
 		win_mode_opt.selected = 0
 	)
@@ -404,7 +416,7 @@ func _add_env_control(v: VBoxContainer) -> TextEdit:
 	return te
 
 var _concept_list: VBoxContainer
-var _concept_terminal: GodoptyTerminal  # any terminal for global concept FFI
+var _concept_terminal: GptyTerminal  # any terminal for global concept FFI
 
 func _add_concept_section(v: VBoxContainer):
 	_concept_terminal = _workspace.get_terminal_for_ffi()

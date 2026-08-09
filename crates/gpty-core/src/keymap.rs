@@ -76,7 +76,7 @@ const KP_DECIMAL: u32 = 83;
 /// # Examples
 ///
 /// ```
-/// # use godopty_core::keymap::{key_event_to_bytes, Modifiers};
+/// # use gpty_core::keymap::{key_event_to_bytes, Modifiers};
 /// assert_eq!(key_event_to_bytes(103, Modifiers::CTRL), Some(b"\x1b[1;5A".to_vec()));
 /// assert_eq!(key_event_to_bytes(1, 0), Some(b"\x1b".to_vec()));
 /// assert_eq!(key_event_to_bytes(30, 0), None); // 'a' → unicode path

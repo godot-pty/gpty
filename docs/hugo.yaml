@@ -1,6 +1,6 @@
-baseURL: https://godopty.github.io/godopty/
+baseURL: https://gpty.github.io/gpty/
 locale: en-us
-title: godopty
+title: gpty
 
 module:
   imports:
@@ -23,7 +23,7 @@ menu:
         type: search
     - name: GitHub
       weight: 5
-      url: https://github.com/godopty/godopty
+      url: https://github.com/gpty/gpty
       params:
         icon: github
 

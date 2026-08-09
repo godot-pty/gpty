@@ -71,10 +71,10 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build GDExtension
-        run: cargo build -p godopty-gdext
+        run: cargo build -p gpty-gdext
 
       - name: Install GDExtension library
-        run: cp target/debug/libgodopty_gdext.so godot/bin/libgodopty_gdext.linux.x86_64.so
+        run: cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
 
       - name: Import project
         run: godot --headless --path godot --import

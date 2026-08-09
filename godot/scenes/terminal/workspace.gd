@@ -1,6 +1,6 @@
 extends Control
 class_name Workspace
-# godopty Workspace — tiling grid of panes with title bars.
+# gpty Workspace — tiling grid of panes with title bars.
 # Tile lifecycle is delegated to TerminalManager.
 
 const GRID = 12
@@ -8,12 +8,11 @@ const MIN_WINDOW_W = 500
 const MIN_WINDOW_H = 300
 const TITLEBAR_HEIGHT = 30.0
 
-# Palette commands are built dynamically from PaneTypes.ALL
 static func _build_palette_commands() -> Array[String]:
 	var cmds: Array[String] = []
 	for key in PaneTypes.ALL:
 		cmds.append("new " + PaneTypes.ALL[key]["name"].to_lower())
-	cmds.append_array(["close active", "settings", "reset layout", "save", "load"])
+	cmds.append_array(["close active", "spawn 16 terminals", "settings", "reset layout", "save", "load"])
 	return cmds
 
 var _sidebar: Sidebar
@@ -22,6 +21,8 @@ var _palette: Control
 var _grid: Control
 var _settings_panel: SettingsPanel
 var _tm: TerminalManager = TerminalManager.new()
+var _status_bar: StatusBar
+var _titlebar: Control = null
 
 func _ready():
 	show()
@@ -39,13 +40,17 @@ func _ready():
 	_tm._pane_settings_panel = pane_settings
 
 	_build_sidebar()
+
+	_status_bar = StatusBar.new()
+	_status_bar.name = "StatusBar"
+	add_child(_status_bar)
+
 	ProfileManager.load_profiles()
-	_apply_layout()
 	_wire_sidebar_signals()
 	_refresh_profile_buttons()
 	_tm.on_close = func(body: Control): _kill(body)
 	_tm.on_swap = _swap_pane
-	_restore()
+	_restore(); _sync_pane_titlebars(); if _tm.tiles.is_empty(): _spawn_pane("terminal")
 
 	# Per-type keyboard shortcuts
 	for key in PaneTypes.ALL:
@@ -54,9 +59,7 @@ func _ready():
 	ShortcutManager.register("app:close_pane", "Ctrl+Shift+W", func(): _kill_last())
 	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _toggle_sidebar)
 	ShortcutManager.register("app:toggle_palette", "Ctrl+Shift+P", _toggle_palette)
-	ShortcutManager.register("app:toggle_fps", "Ctrl+Shift+F", _toggle_fps)
 	ShortcutManager.register("app:toggle_fullscreen", "F11", _toggle_fullscreen)
-	ShortcutManager.register("app:toggle_borderless", "Ctrl+Shift+F11", _toggle_borderless)
 	ShortcutManager.register("app:toggle_fullscreen_alt", "Ctrl+Shift+M", _toggle_fullscreen)
 	ShortcutManager.register("app:reset_workspace", "Ctrl+Shift+R", func():
 		_reset(); _apply_layout(); _list()
@@ -64,7 +67,7 @@ func _ready():
 
 	SettingsManager.settings_changed.connect(_on_settings_changed)
 	_on_settings_changed()
-	_apply_window_mode()
+	_apply_window_mode.call_deferred()
 	if SettingsManager.cfg_window_mode == 0: _restore_window_position()
 
 func _on_settings_changed():
@@ -72,7 +75,14 @@ func _on_settings_changed():
 		var body = _tm._find_body(t.wrapper)
 		if body and body is TerminalPane:
 			SettingsManager.apply_to_terminal(body)
+	_sync_pane_titlebars()
 	_apply_fps_setting()
+	_apply_window_mode()
+
+func _sync_pane_titlebars():
+	for t in _tm.tiles:
+		var tb = t.wrapper.get_node_or_null("BodyVBox/TitleBar")
+		if tb: tb.visible = SettingsManager.cfg_show_titlebar
 
 func _apply_fps_setting():
 	if SettingsManager.cfg_max_fps == -1:
@@ -83,24 +93,31 @@ func _apply_fps_setting():
 
 func _notification(what):
 	if what == NOTIFICATION_RESIZED: _apply_layout()
-	if what == NOTIFICATION_WM_CLOSE_REQUEST: _save_window_position(); _save()
+	if what == NOTIFICATION_WM_CLOSE_REQUEST: _save_window_position()
 
-var _titlebar: Control = null
+# NOTE: We save in _exit_tree(), not NOTIFICATION_WM_CLOSE_REQUEST.
+# WM_CLOSE_REQUEST does not fire when the Godot editor stops the game,
+# only on actual window close in standalone builds. _exit_tree() fires
+# reliably whenever the scene tree is torn down.
+
+func _exit_tree():
+	_save_window_position()
+	_save()
+	SettingsManager.save_settings()
 
 func _apply_window_mode():
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	match SettingsManager.cfg_window_mode:
 		0:  # Decorated windowed
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
-			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 			if _titlebar: _titlebar.visible = false
 		1:  # Borderless windowed
-			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, true)
 			if _titlebar: _titlebar.visible = true
-		2:  # Fullscreen
+		2:  # Fullscreen (with custom titlebar for mode control)
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
-			if _titlebar: _titlebar.visible = false
+			if _titlebar: _titlebar.visible = true
 	# Swap titlebar maximize/restore icon
 	if _titlebar:
 		var max_btn = _titlebar.get_meta("_max_btn", null)
@@ -112,7 +129,7 @@ func _apply_window_mode():
 	_apply_layout()
 func _toggle_fullscreen():
 	if SettingsManager.cfg_window_mode == 2:
-		SettingsManager.cfg_window_mode = 0
+		SettingsManager.cfg_window_mode = 1
 		_restore_window_position()
 	else:
 		_save_window_position()
@@ -120,23 +137,19 @@ func _toggle_fullscreen():
 	_apply_window_mode()
 	SettingsManager.save_settings()
 
-func _toggle_borderless():
-	if SettingsManager.cfg_window_mode == 1:
-		SettingsManager.cfg_window_mode = 0
-		_restore_window_position()
-	else:
+func _on_window_mode_selected(mode: int):
+	if mode == SettingsManager.cfg_window_mode:
+		return
+	if SettingsManager.cfg_window_mode == 0:
 		_save_window_position()
-		SettingsManager.cfg_window_mode = 1
-	_apply_window_mode()
-	SettingsManager.save_settings()
-
-func _cycle_window_mode():
-	SettingsManager.cfg_window_mode = (SettingsManager.cfg_window_mode + 1) % 3
+	if mode == 0:
+		_restore_window_position()
+	SettingsManager.cfg_window_mode = mode
 	_apply_window_mode()
 	SettingsManager.save_settings()
 
 func _save_window_position():
-	if SettingsManager.cfg_window_mode == 0:
+	if SettingsManager.cfg_window_mode == 0 or SettingsManager.cfg_window_mode == 1:
 		SettingsManager.cfg_window_position = DisplayServer.window_get_position()
 		SettingsManager.cfg_window_size = DisplayServer.window_get_size()
 
@@ -147,7 +160,6 @@ func _restore_window_position():
 		DisplayServer.window_set_position(pos)
 	if sz.x >= MIN_WINDOW_W and sz.y >= MIN_WINDOW_H:
 		DisplayServer.window_set_size(sz)
-
 func _build_titlebar():
 	_titlebar = Control.new()
 	_titlebar.name = "GlobalTitleBar"
@@ -167,7 +179,7 @@ func _build_titlebar():
 
 	var label = Label.new()
 	label.name = "AppTitle"
-	label.text = "godopty"
+	label.text = "gpty"
 	label.add_theme_color_override("font_color", Color.WHITE)
 	label.anchor_left = 0.0
 	label.anchor_right = 0.0
@@ -208,16 +220,24 @@ func _build_titlebar():
 
 func _make_titlebar_button(icon: String, callback: Callable) -> Button:
 	var btn = Button.new()
-	btn.text = icon
 	btn.focus_mode = Control.FOCUS_NONE
 	btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	btn.custom_minimum_size = Vector2(36, TITLEBAR_HEIGHT)
 	btn.flat = true
 	btn.add_theme_color_override("font_color", Color.WHITE)
-	btn.add_theme_color_override("font_hover_color", Color.WHITE)
-	btn.add_theme_color_override("font_pressed_color", Color.WHITE)
-	Icons.style_button(btn)
 	btn.pressed.connect(callback)
+	# Use a Label child for the icon glyph — Button text with theme font
+	# overrides doesn't reliably render PUA codepoints in Godot 4.
+	var lbl = Label.new()
+	lbl.text = icon
+	lbl.add_theme_font_override("font", Icons.font_resource)
+	lbl.add_theme_font_size_override("font_size", 14)
+	lbl.add_theme_color_override("font_color", Color.WHITE)
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(lbl)
 	return btn
 
 func _on_titlebar_gui_input(event: InputEvent):
@@ -233,11 +253,17 @@ func _on_titlebar_gui_input(event: InputEvent):
 func _apply_layout():
 	if _grid == null: return
 	var top_offset = TITLEBAR_HEIGHT if (_titlebar and _titlebar.visible) else 0.0
+	var bottom_offset = StatusBar.HEIGHT if _status_bar else 0.0
 	var m = _sidebar_bg.size.x if (_sidebar_bg and _sidebar_bg.visible) else 0.0
 	_grid.offset_left = m; _grid.offset_right = 0
-	_grid.offset_top = top_offset; _grid.offset_bottom = 0
+	_grid.offset_top = top_offset; _grid.offset_bottom = -bottom_offset
 	_grid.anchor_left = 0.0; _grid.anchor_right = 1.0
 	_grid.anchor_top = 0.0; _grid.anchor_bottom = 1.0
+
+	if _status_bar:
+		_status_bar.anchor_left = 0.0; _status_bar.anchor_right = 1.0
+		_status_bar.anchor_top = 1.0; _status_bar.anchor_bottom = 1.0
+		_status_bar.offset_top = -StatusBar.HEIGHT; _status_bar.offset_bottom = 0
 
 	var cw = maxf(_grid.size.x, 1.0) / GRID
 	var ch = maxf(_grid.size.y, 1.0) / GRID
@@ -339,6 +365,17 @@ func _kill_last():
 	_tm.kill_last()
 	_apply_layout()
 	_list()
+
+func _on_pane_minimize(body: Control):
+	body.visible = not body.visible
+	_apply_layout()
+	_list()  # refresh sidebar to update minimize icon
+
+func _on_pane_position_swap(body: Control, source_btn: Button):
+	_tm.show_position_swap_popup(body, self, source_btn.get_screen_position() + Vector2(0, source_btn.size.y))
+
+func _on_pane_type_swap(body: Control, source_btn: Button):
+	_tm.show_type_swap_popup(body, self, source_btn.get_screen_position() + Vector2(0, source_btn.size.y))
 
 func _reset():
 	_tm.reset()
@@ -445,8 +482,6 @@ func _toggle_palette():
 		var inp = _palette.find_child("*", true, false) as LineEdit
 		if inp: inp.grab_focus()
 
-func _toggle_fps():
-	pass
 
 func _build_palette() -> Control:
 	var bg = Panel.new()
@@ -501,6 +536,7 @@ func _execute_command(cmd: String):
 		return
 	match cmd:
 		"close active": _kill_last()
+		"spawn 16 terminals": _spawn_bulk(16)
 		"settings": _toggle_settings()
 		"reset layout": _reset()
 		"save": _save()
@@ -515,14 +551,17 @@ func _execute_command(cmd: String):
 
 func _wire_sidebar_signals():
 	_sidebar.request_new_pane.connect(_spawn_pane)
-	_sidebar.request_bulk_spawn.connect(func(count: int): _spawn_bulk(count))
 	_sidebar.request_close.connect(func(body: Control): _kill(body))
 	_sidebar.request_settings.connect(_toggle_settings)
 	_sidebar.request_reset.connect(func(): _reset(); _apply_layout(); _list())
 	_sidebar.request_focus.connect(func(body: Control): body.grab_focus())
-	_sidebar.toggled.connect(func(): _apply_layout())
+	_sidebar.request_minimize.connect(func(body: Control): _on_pane_minimize(body))
+	_sidebar.request_position_swap.connect(func(body: Control, btn: Button): _on_pane_position_swap(body, btn))
+	_sidebar.request_type_swap.connect(func(body: Control, btn: Button): _on_pane_type_swap(body, btn))
+	_sidebar.request_pane_settings.connect(func(body: Control): _tm._open_pane_settings(body))
+	_sidebar.toggled.connect(func(): _on_sidebar_toggled())
 	_sidebar.request_profile.connect(_activate_profile)
-	_sidebar.request_toggle_window_mode.connect(_cycle_window_mode)
+	_sidebar.request_window_mode.connect(_on_window_mode_selected)
 	_sidebar.request_save_profile.connect(_save_current_as_profile)
 	_sidebar.request_delete_profile.connect(_delete_profile)
 	_tm.tiles_resized.connect(_apply_layout)
@@ -537,10 +576,15 @@ func _list():
 	_sidebar.update_pane_list(panes)
 
 func _toggle_sidebar():
-	if _sidebar == null: return
-	_sidebar._toggle_sidebar()
+	if _sidebar: _sidebar._toggle_sidebar()
+
+func _on_sidebar_toggled():
 	# Sync background rect to sidebar's new width
 	_sidebar_bg.offset_right = _sidebar.offset_right
+	# Show titlebar label only when sidebar is expanded
+	if _titlebar:
+		var lbl = _titlebar.get_node_or_null("AppTitle")
+		if lbl: lbl.visible = _sidebar.offset_right > 50
 	_apply_layout()
 
 func _process(_delta: float):
@@ -556,8 +600,18 @@ func _process(_delta: float):
 		if body and body.has_method("_draw"):
 			fetch_ms = body.get("_fetch_ms") if "_fetch_ms" in body else -1
 			draw_ms = body.get("_draw_ms") if "_draw_ms" in body else -1
-		_sidebar.update_fps(fps, fetch_ms, draw_ms)
+		if _status_bar:
+			_status_bar.set_fps(fps, fetch_ms, draw_ms)
+	_refresh_status_bar()
 
+func _refresh_status_bar():
+	if _status_bar == null: return
+	var body = _tm.last_body
+	if body:
+		_status_bar.set_pane_info(body.pane_label, body._pane_type())
+	else:
+		_status_bar.set_pane_info("", "")
+	_status_bar.set_window_mode(SettingsManager.cfg_window_mode)
 # ═══════════════════════════════════════════════════════════════════════
 # Concept event routing
 # ═══════════════════════════════════════════════════════════════════════
@@ -837,7 +891,7 @@ func _show_profile_trust_dialog(profile: Dictionary, tiles: Array):
 	dialog.ok_button_text = "Activate"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():
-		_do_profile_activate(profile)
+		_do_activate(profile)
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)

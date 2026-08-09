@@ -1,6 +1,6 @@
 extends RefCounted
 class_name TerminalManager
-# godopty Terminal Manager — owns tile lifecycle and pane building.
+# gpty Terminal Manager — owns tile lifecycle and pane building.
 # Now supports any PaneBody type via spawn_pane().
 
 const GRID = 12
@@ -174,30 +174,38 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	bar.add_child(lbl)
 	lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	bar.gui_input.connect(func(event: InputEvent):
-		if event is InputEventMouseButton and event.double_click and event.button_index == MOUSE_BUTTON_LEFT:
-			var body = _find_body(root)
-			if body:
-				_show_swap_popup(body, bar, event.global_position)
-	)
+
 	var btn_hbox = HBoxContainer.new()
 	btn_hbox.add_theme_constant_override("separation", 2)
 	btn_hbox.anchor_left = 1.0; btn_hbox.anchor_right = 1.0
 	btn_hbox.anchor_top = 0.0; btn_hbox.anchor_bottom = 1.0
-	var btn_total = 4 * BUTTON_MIN_WIDTH + 10
+	var btn_total = 5 * BUTTON_MIN_WIDTH + 12
 	btn_hbox.offset_left = -btn_total
 	btn_hbox.offset_right = -2
 	bar.add_child(btn_hbox)
 
 	var min_btn = Button.new()
 	min_btn.text = Icons.MINIMIZE; min_btn.focus_mode = Control.FOCUS_NONE
+	min_btn.tooltip_text = "Minimize / Restore"
 	Icons.style_button(min_btn)
 	min_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	min_btn.pressed.connect(func(): _toggle_minimize(root, min_btn))
 	btn_hbox.add_child(min_btn)
 
+	var pos_swap_btn = Button.new()
+	pos_swap_btn.text = Icons.SWAP; pos_swap_btn.focus_mode = Control.FOCUS_NONE
+	Icons.style_button(pos_swap_btn)
+	pos_swap_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
+	pos_swap_btn.tooltip_text = "Swap position with another pane"
+	pos_swap_btn.pressed.connect(func():
+		var b = _find_body(root)
+		if b:
+			_show_swap_popup(b, bar, pos_swap_btn.get_screen_position() + Vector2(0, pos_swap_btn.size.y))
+	)
+	btn_hbox.add_child(pos_swap_btn)
 	var swap_btn = Button.new()
-	swap_btn.text = Icons.SWAP; swap_btn.focus_mode = Control.FOCUS_NONE
+	swap_btn.text = Icons.RESET; swap_btn.focus_mode = Control.FOCUS_NONE
+	swap_btn.tooltip_text = "Change pane type"
 	Icons.style_button(swap_btn)
 	swap_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	# PopupMenu listing all pane types
@@ -221,6 +229,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 
 	var settings_btn = Button.new()
 	settings_btn.text = Icons.SETTINGS; settings_btn.focus_mode = Control.FOCUS_NONE
+	settings_btn.tooltip_text = "Pane settings"
 	Icons.style_button(settings_btn)
 	settings_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	settings_btn.pressed.connect(func(): _open_pane_settings(_find_body(root)))
@@ -228,6 +237,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 
 	var close_btn = Button.new()
 	close_btn.text = Icons.CLOSE; close_btn.focus_mode = Control.FOCUS_NONE
+	close_btn.tooltip_text = "Close pane"
 	Icons.style_button(close_btn)
 	close_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	close_btn.pressed.connect(func(): _handle_close(_find_body(root)))
@@ -372,9 +382,25 @@ func _open_pane_settings(body: Control):
 
 
 func _show_swap_popup(body: Control, bar: Control, pos: Vector2):
+	var root = bar.get_parent().get_parent()  # BodyVBox -> PanelContainer
+	if root is PanelContainer:
+		show_position_swap_popup(body, root, pos)
+
+func _swap_tile_positions(a: int, b: int):
+	var ta = tiles[a]
+	var tb = tiles[b]
+	var tmp = {"col": ta.col, "row": ta.row, "cspan": ta.cspan, "rspan": ta.rspan}
+	ta.col = tb.col; ta.row = tb.row; ta.cspan = tb.cspan; ta.rspan = tb.rspan
+	tb.col = tmp.col; tb.row = tmp.row; tb.cspan = tmp.cspan; tb.rspan = tmp.rspan
+func _handle_swap(body: Control, new_type_name: String, _menu: PopupMenu):
+	if on_swap.is_valid():
+		on_swap.call(body, new_type_name)
+
+
+func show_position_swap_popup(for_body: Control, menu_parent: Control, at_pos: Vector2):
 	var this_ti = -1
 	for i in tiles.size():
-		if _find_body(tiles[i].wrapper) == body: this_ti = i; break
+		if _find_body(tiles[i].wrapper) == for_body: this_ti = i; break
 	if this_ti == -1: return
 
 	var menu = PopupMenu.new()
@@ -395,25 +421,27 @@ func _show_swap_popup(body: Control, bar: Control, pos: Vector2):
 		tiles_resized.emit()
 		menu.queue_free()
 	)
-	# Menu must be added to root so it can receive input
-	var root = bar.get_parent().get_parent()  # BodyVBox -> PanelContainer
-	if root is PanelContainer:
-		root.add_child(menu)
-	menu.position = pos
+	menu_parent.add_child(menu)
+	menu.position = at_pos
 	menu.reset_size()
 	menu.popup()
 	menu.popup_hide.connect(menu.queue_free)
 
-func _swap_tile_positions(a: int, b: int):
-	var ta = tiles[a]
-	var tb = tiles[b]
-	var tmp = {"col": ta.col, "row": ta.row, "cspan": ta.cspan, "rspan": ta.rspan}
-	ta.col = tb.col; ta.row = tb.row; ta.cspan = tb.cspan; ta.rspan = tb.rspan
-	tb.col = tmp.col; tb.row = tmp.row; tb.cspan = tmp.cspan; tb.rspan = tmp.rspan
-func _handle_swap(body: Control, new_type_name: String, _menu: PopupMenu):
-	if on_swap.is_valid():
-		on_swap.call(body, new_type_name)
-
+func show_type_swap_popup(for_body: Control, menu_parent: Control, at_pos: Vector2):
+	var menu = PopupMenu.new()
+	menu.name = "SwapTypeMenu"
+	for key in PaneTypes.ALL:
+		menu.add_item(PaneTypes.ALL[key]["name"])
+		menu.set_item_metadata(menu.item_count - 1, key)
+	menu.index_pressed.connect(func(idx: int):
+		var type_name = menu.get_item_metadata(idx)
+		_handle_swap(for_body, type_name, menu)
+	)
+	menu_parent.add_child(menu)
+	menu.position = at_pos
+	menu.reset_size()
+	menu.popup()
+	menu.popup_hide.connect(menu.queue_free)
 
 # ── Edge Drag Resize ───────────────────────────────────────────────────
 

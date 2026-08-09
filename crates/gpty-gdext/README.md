@@ -1,4 +1,4 @@
-# godopty-gdext
+# gpty-gdext
 
 Godot 4 GDExtension that bridges the Rust terminal engine to Godot's renderer.
 
@@ -6,10 +6,10 @@ Godot 4 GDExtension that bridges the Rust terminal engine to Godot's renderer.
 
 ```bash
 # From the workspace root
-cargo build -p godopty-gdext
+cargo build -p gpty-gdext
 
 # The shared library is at:
-target/debug/libgodopty_gdext.so
+target/debug/libgpty_gdext.so
 ```
 
 ## Running in Godot
@@ -20,7 +20,7 @@ target/debug/libgodopty_gdext.so
 
 ## GDScript API
 
-### GodoptyTerminal (extends Node2D)
+### GptyTerminal (extends Node2D)
 
 #### Terminal lifecycle
 

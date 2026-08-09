@@ -1,9 +1,0 @@
-[configuration]
-entry_symbol = "gdext_rust_init"
-compatibility_minimum = "4.4"
-
-[libraries]
-linux.x86_64 = "res://bin/libgodopty_gdext.linux.x86_64.so"
-macos.x86_64 = "res://bin/libgodopty_gdext.macos.x86_64.dylib"
-macos.arm64 = "res://bin/libgodopty_gdext.macos.arm64.dylib"
-windows.x86_64 = "res://bin/godopty_gdext.windows.x86_64.dll"

@@ -8,12 +8,12 @@ Rust + Godot multi-PTY terminal emulator with a tiling grid GUI.
 - Entry point: `godot/scenes/main.tscn` → `workspace.gd` (root `Control` node)
 
 ```
-godopty/
+gpty/
 ├── Cargo.toml                  # Workspace root
 ├── AGENTS.md
 ├── LICENSE
 ├── crates/
-│   ├── godopty-core/           # Library: PTY, ANSI, grid, concepts, pub-sub
+│   ├── gpty-core/           # Library: PTY, ANSI, grid, concepts, pub-sub
 │   │   └── src/
 │   │       ├── lib.rs          # Module map + data-flow diagram
 │   │       ├── types.rs        # Concept, Event, Action, CaptureMode, CapturedOutput
@@ -25,22 +25,13 @@ godopty/
 │   │       ├── color.rs        # ANSI color → RGB
 │   │       ├── keymap.rs       # Key event → byte sequence
 │   │       └── history.rs      # SQLite scrollback store
-│   ├── godopty-cli/            # CLI client for workspace control (JSON-RPC IPC)
-│   │   └── src/
-│   │       ├── main.rs         # clap CLI with subcommands
-│   │       └── commands/       # Subcommand handlers (new_pane, schema, mcp, daemon, …)
-│   ├── godopty-ipc/            # Shared IPC types, transport, client, and server
-│   │   └── src/
-│   │       ├── protocol.rs     # JSON-RPC 2.0 Request, Response, JsonRpcError
-│   │       ├── types.rs        # IPC domain types (NewPaneParams, PaneInfo, …)
-│   │       ├── transport.rs    # Platform socket connection (Unix, named pipe)
-│   │       ├── server.rs       # Async IPC server with handler registry
-│   │       └── client.rs       # Async IPC client with connect/call/timeout
-│   └── godopty-gdext/          # GDExtension cdylib: GodoptyTerminal + IPC server
+│   ├── gpty-cli/            # CLI demos (mock, --pty, --term)
+│   │   └── src/main.rs
+│   └── gpty-gdext/          # GDExtension cdylib: GptyTerminal GodotClass
 │       └── src/lib.rs
 └── godot/                      # Godot 4.7 project
     ├── project.godot
-    ├── godopty.gdextension
+    ├── gpty.gdextension
     ├── concepts.default.json   # Shipped default concepts
     ├── fonts/                  # DejaVu Sans Mono + Phosphor icons
     └── scenes/
@@ -75,18 +66,17 @@ godopty/
 
 ```bash
 # Build the GDExtension shared library
-cargo build -p godopty-gdext
+cargo build -p gpty-gdext
 # Copy to the Godot project for local development
-cp target/debug/libgodopty_gdext.so godot/bin/libgodopty_gdext.linux.x86_64.so
+cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
 
 # Type-check Rust only (fast, no codegen)
 cargo check
 
-# CLI (control running godopty GUI over IPC)
-cargo run --bin godopty -- new-pane --type terminal
-cargo run --bin godopty -- list-panes
-cargo run --bin godopty -- schema          # JSON Schema for AI tools
-cargo run --bin godopty -- schema --format mcp  # MCP tools manifest
+# CLI demos (no Godot needed)
+cargo run --bin gpty              # mock pub-sub
+cargo run --bin gpty -- --pty     # real PTY
+cargo run --bin gpty -- --term    # alacritty_terminal grid
 
 # Open in Godot editor (after building gdext)
 cd godot && godot -e
@@ -95,9 +85,7 @@ cd godot && godot -e
 ### Data flow
 
 ```
-Shell → PTY I/O thread → vte parser → alacritty_terminal grid → Arc<Mutex<TermGrid>> → GodoptyTerminal (gdext) → GDScript _draw()
-
-CLI → Unix socket → IpcServer (tokio) → PENDING_IPC queue → GDScript _poll_ipc_requests() → workspace methods → IPC_RESPONDERS → CLI response
+Shell → PTY I/O thread → vte parser → alacritty_terminal grid → Arc<Mutex<TermGrid>> → GptyTerminal (gdext) → GDScript _draw()
 ```
 
 ## Testing
@@ -106,7 +94,7 @@ CLI → Unix socket → IpcServer (tokio) → PENDING_IPC queue → GDScript _po
 
 ```bash
 cargo test --workspace          # Tests across core, gdext, cli
-cargo test -p godopty-core      # core library only
+cargo test -p gpty-core      # core library only
 ```
 
 ### GDScript (GUT)
@@ -133,7 +121,7 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 - Async runtime: `tokio` (global `LazyLock` runtime in gdext)
 - Grid sharing: `Arc<Mutex<TermGrid>>` — lock briefly, clone the grid, release
 - Thread Safety: Godot's SceneTree is strictly single-threaded. NEVER call Godot methods, mutate nodes, or emit signals directly from background `tokio` threads. Instead, queue the state changes for GDScript to poll, or use Godot's thread-safe `call_deferred()`.
-- Lifecycle & Teardown: When a `GodoptyTerminal` is destroyed (e.g., `queue_free()` in Godot), the Rust side MUST ensure the spawned shell and background `tokio` tasks are cleanly terminated (via the `Drop` trait) to prevent zombie processes or memory leaks.
+- Lifecycle & Teardown: When a `GptyTerminal` is destroyed (e.g., `queue_free()` in Godot), the Rust side MUST ensure the spawned shell and background `tokio` tasks are cleanly terminated (via the `Drop` trait) to prevent zombie processes or memory leaks.
 
 ### GDScript
 
@@ -165,12 +153,13 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 
 ### Security
 
-- Concept Engine ReDoS: The `godopty-core` crate MUST always use the standard Rust `regex` crate. PCRE or back-tracking engines are strictly prohibited to prevent ReDoS (Regex Denial of Service) attacks when parsing large amounts of terminal output.
+- Concept Engine ReDoS: The `gpty-core` crate MUST always use the standard Rust `regex` crate. PCRE or back-tracking engines are strictly prohibited to prevent ReDoS (Regex Denial of Service) attacks when parsing large amounts of terminal output.
 - OSC 52 Clipboard Syncing: `parser.rs` currently discards all terminal escape sequences, keeping copy/paste safely bound to Godot UI inputs. Do NOT implement OSC 52 clipboard injection/syncing without placing it behind an explicit Godot confirmation dialog to prevent drive-by clipboard hijacking.
 
 ### Commits
 
-- Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `ipc`, `profiles`, `concepts`, `icons`
+- Format: [Conventional Commits](https://www.conventionalcommits.org/) — `feat(scope):`, `fix(scope):`, `chore(scope):`
+- Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `profiles`, `concepts`, `icons`
 
 ### Pitfalls
 
@@ -182,7 +171,7 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 - Typed arrays break Rust FFI: gdext `Array<Variant>` parameters reject GDScript's `Array[Dictionary]` at runtime ("expected array of type Untyped, got Builtin(DICTIONARY)"). Always pass untyped `Array` across the FFI boundary. Prefer `func f(arr: Array)` over `func f(arr: Array[Dictionary])` when the array originates from or goes to Rust.
 - Multi-line `for` array colon: `for x in [...]` with a multi-line array literal requires `]:` at the end. Forgetting the colon produces a parse error at an unrelated line. Double-check after replacing inline array content.
 - Godot typed Arrays: `Array[T]` won't accept plain `Array`. If you type a parameter, check all call sites use matching types (`var x: Array[Control] = []`).
-- GDExtension rebuilds: After changing `#[func]` signatures or adding methods, rebuild with `cargo build -p godopty-gdext` and restart Godot.
+- GDExtension rebuilds: After changing `#[func]` signatures or adding methods, rebuild with `cargo build -p gpty-gdext` and restart Godot.
 - GDScript default params: Evaluated at definition time, not call time. `func f(x := some_var)` captures the value of `some_var` when the script loads. Use `func f(x := -1)` and check `if x < 0: x = some_var` inside the body for runtime-evaluated defaults.
 - `extends Node` won't render `Control` children: Only `Control` nodes can render child `Control`s (Labels, Buttons, etc.). If you add a Label to a plain `Node`, it's invisible. Use `extends Control` for UI containers and set `z_index` for layering.
 - `tokio::time::Instant::now() + Duration::MAX` panics: The addition overflows. Use a safe large constant like `Duration::from_secs(86400 * 365)` (1 year) for inactive timeout sleeps.
@@ -193,15 +182,9 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 - Raw-byte buffering for grid replay: Never buffer parsed lines for later grid replay — the alacritty_terminal ANSI state machine needs raw bytes with escape sequences intact. Buffer `Vec<Vec<u8>>` (chunks), replay with `feed_grid(board, chunk)`.
 - Rendering Performance: GDScript `_draw` is slow when calling `draw_rect`/`draw_string` character-by-character. Avoid generating heavy data structures (like `Dictionary`) per-cell across the FFI boundary. Prefer packing data into flat arrays (`PackedByteArray`, `PackedInt32Array`) in Rust, and batch rendering operations line-by-line in Godot.
 - Resize Rate Limiting: Firing SIGWINCH heavily on every frame during window drag will overwhelm the child PTY process. Always debounce or rate-limit terminal `_on_resize` events before passing them to the backend.
-
-### IPC Bridge
-
-- `on_stage_init` not `on_level_init`: godot 0.5's `ExtensionLibrary` trait uses `fn on_stage_init(stage: InitStage)`, not `on_level_init`. The `InitStage::Scene` variant fires when GDScript singletons are ready.
-- `parking_lot::Mutex` for IPC statics: `PENDING_IPC` and `IPC_RESPONDERS` use `parking_lot::Mutex` (no poisoning, direct guard return). NEVER use `std::sync::Mutex` with `.unwrap()` on every lock — it's both slower and noisier.
-- Oneshot channel timeout: `dispatch_ipc()` waits on a `tokio::sync::oneshot` with a 30s timeout. If GDScript never calls `respond_ipc()`, the handler times out and cleans up the responder entry — preventing a slow memory leak from abandoned requests.
-- IPC responds in `_process()`: The IPC bridge relies on workspace.gd polling `drain_ipc_requests()` every frame. Heavy `_process()` work that blocks too long can cause IPC timeouts. Keep `_process()` work minimal; defer expensive operations.
-- GDScript `GodoptyTerminal` static method calls: `drain_ipc_requests()` and `respond_ipc()` are `#[func]` associated functions (no `&self`). In GDScript they are called as `GodoptyTerminal.drain_ipc_requests()` (class-level, not instance).
-- Version alignment: All workspace crates SHARE the same version (`0.3.0`). When bumping for a release, bump all `crates/*/Cargo.toml` files together. `godopty-cli` binary name is `[[bin]] name = "godopty"`, not the crate name.
+- Scrollback vs. PageUp/Down: `terminal_pane.gd:_handle_keyboard` intercepts PageUp/Down for scrollback navigation. These never reach the PTY, so programs like `less` or `vim` cannot receive them. Users must use alternative keys (`b`/`f` in `less`, `Ctrl+B`/`Ctrl+F` in vim).
+- Alt key handling: For Alt+letter combos, the Rust keymap returns `None`, expecting the GDScript layer to prepend `\x1b` (ESC). `_handle_keyboard` does this in the `_key_to_text` fallback path.
+- PTY Enter key: The Enter key MUST send `\r` (CR) to the PTY, not `\n`. `pty.rs:write_line` appends `\r`. The PTY terminal driver translates `\r` → `\n` in canonical mode; raw-mode programs read `\r` directly.
 
 ### Agent Tool Notes
 
@@ -212,4 +195,4 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 
 - `terminal_pane.gd` is the sole renderer (Control-based); the legacy Node2D `terminal.gd` was removed.
 - Font-size changes now auto-recalculate cell metrics via a setter on `font_size` — no need to recreate terminals.
-- The global tokio runtime is initialized once at GDExtension init and shared across all GodoptyTerminal nodes.
+- The global tokio runtime is initialized once at GDExtension init and shared across all GptyTerminal nodes.

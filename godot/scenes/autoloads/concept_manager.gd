@@ -12,7 +12,7 @@ func _push_to_rust():
 	var concepts = _merge_concepts()
 	if concepts.is_empty():
 		return
-	var t = GodoptyTerminal.new()
+	var t = GptyTerminal.new()
 	t.set_global_concepts(concepts)
 
 func _merge_concepts() -> Array:

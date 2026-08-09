@@ -4,4 +4,4 @@ weight: 3
 noHeading: true
 ---
 
-{{< readfile "crates/godopty-gdext/README.md" >}}
+{{< readfile "crates/gpty-gdext/README.md" >}}

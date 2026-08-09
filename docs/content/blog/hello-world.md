@@ -12,6 +12,6 @@ Welcome to the blog!
 
 ## What is it?
 
-**godopty** is a tiling grid terminal emulator that combines the power of Rust's async PTY handling with Godot's flexible UI framework. It supports multiple terminals in a resizable grid, regex-based command capture, scrollback history, and profile-based layout management.
+**gpty** is a tiling grid terminal emulator that combines the power of Rust's async PTY handling with Godot's flexible UI framework. It supports multiple terminals in a resizable grid, regex-based command capture, scrollback history, and profile-based layout management.
 
-Check out the [Documentation](/docs) to learn more, or head over to [GitHub](https://github.com/godopty/godopty).
+Check out the [Documentation](/docs) to learn more, or head over to [GitHub](https://github.com/gpty/gpty).

@@ -2,20 +2,23 @@ extends Control
 class_name Sidebar
 
 signal request_new_pane(type_name: String)
-signal request_bulk_spawn(count: int)
 signal request_close(body: Control)
 signal request_settings
 signal request_reset
 signal request_focus(body: Control)
+signal request_minimize(body: Control)
+signal request_position_swap(body: Control, source_btn: Button)
+signal request_type_swap(body: Control, source_btn: Button)
+signal request_pane_settings(body: Control)
 signal toggled
 signal request_profile(name: String)
 signal request_save_profile
 signal request_delete_profile(index: int)
-signal request_toggle_window_mode
+signal request_window_mode(mode: int)
 
 
 var bg: ColorRect
-var _fps_label: Label
+var _wm_dropdown: OptionButton
 var _pane_list: VBoxContainer
 var _profile_list: VBoxContainer
 
@@ -33,41 +36,60 @@ func build(bg_rect: ColorRect):
 	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	_add_header(v)
-	_add_fps(v)
+	_add_window_mode(v)
 	_add_buttons(v)
 	_add_profile_section(v)
 	_add_pane_list_ui(v)
 	_add_collapsed_button()
 
-func update_fps(fps: int, fetch_ms: int = -1, draw_ms: int = -1):
-	if not _fps_label: return
-	var txt = "FPS: %d" % fps
-	if fetch_ms >= 0:
-		txt += "\nFetch: %dms\nDraw: %dms" % [fetch_ms, draw_ms]
-	_fps_label.text = txt
-
+	SettingsManager.settings_changed.connect(_sync_window_mode)
 func update_pane_list(panes: Array):
 	if not _pane_list: return
 	for c in _pane_list.get_children(): c.queue_free()
 	for i in panes.size():
 		var body = panes[i]
 		var row = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 1)
+
 		var btn = Button.new()
 		btn.text = body.get("pane_label") if body.get("pane_label") != "" else "%s?" % PaneTypes.ALL.get(body._pane_type(), {}).get("label_prefix", "?")
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.pressed.connect(func(): request_focus.emit(body))
 		row.add_child(btn)
-		var x = Button.new(); x.text = Icons.CLOSE; x.flat = true
-		Icons.style_button(x)
-		x.custom_minimum_size = Vector2(22, 0)
-		x.pressed.connect(func(): request_close.emit(body))
-		row.add_child(x)
+
+		var min_btn = _make_pane_action_button(Icons.RESTORE if not body.visible else Icons.MINIMIZE, "Minimize / Restore")
+		min_btn.pressed.connect(func(): request_minimize.emit(body))
+		row.add_child(min_btn)
+
+		var pos_btn = _make_pane_action_button(Icons.SWAP, "Swap position")
+		pos_btn.pressed.connect(func(): request_position_swap.emit(body, pos_btn))
+		row.add_child(pos_btn)
+
+		var type_btn = _make_pane_action_button(Icons.RESET, "Change pane type")
+		type_btn.pressed.connect(func(): request_type_swap.emit(body, type_btn))
+		row.add_child(type_btn)
+
+		var set_btn = _make_pane_action_button(Icons.SETTINGS, "Pane settings")
+		set_btn.pressed.connect(func(): request_pane_settings.emit(body))
+		row.add_child(set_btn)
+
+		var cls_btn = _make_pane_action_button(Icons.CLOSE, "Close pane")
+		cls_btn.pressed.connect(func(): request_close.emit(body))
+		row.add_child(cls_btn)
 		_pane_list.add_child(row)
+
+func _make_pane_action_button(icon: String, tooltip: String) -> Button:
+	var btn = Button.new()
+	btn.text = icon; btn.flat = true
+	btn.tooltip_text = tooltip
+	btn.custom_minimum_size = Vector2(20, 0)
+	Icons.style_button(btn)
+	return btn
 
 func _add_header(v: VBoxContainer):
 	var h = HBoxContainer.new(); h.name = "Header"
 	h.add_theme_constant_override("separation", 0)
-	var title = Label.new(); title.text = " godopty"; title.add_theme_font_size_override("font_size", 16)
+	var title = Label.new(); title.text = " gpty"; title.add_theme_font_size_override("font_size", 16)
 	title.name = "SidebarTitle"; title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(title)
 	var arrow = Button.new()
@@ -78,28 +100,9 @@ func _add_header(v: VBoxContainer):
 	h.add_child(arrow)
 	v.add_child(h)
 
-func _add_fps(v: VBoxContainer):
-	_fps_label = Label.new()
-	_fps_label.name = "FpsLabel"
-	_fps_label.add_theme_font_size_override("font_size", 11)
-	_fps_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
-	_fps_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_fps_label.text = "FPS: --"
-	v.add_child(_fps_label)
-
 func _add_buttons(v: VBoxContainer):
-	# Add Pane button with PopupMenu listing all pane types
 	_add_pane_buttons(v)
 
-	# Window mode toggle button
-	var wm_btn = Button.new()
-	wm_btn.text = Icons.WINDOW_MODE + " Window"
-	Icons.style_button(wm_btn)
-	wm_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	wm_btn.pressed.connect(func(): request_toggle_window_mode.emit())
-	v.add_child(wm_btn)
-
-	# Remaining actions
 	for b in [
 		[Icons.SETTINGS + " Settings", func(): request_settings.emit()],
 		[Icons.RESET + " Reset", func(): request_reset.emit()],
@@ -109,30 +112,44 @@ func _add_buttons(v: VBoxContainer):
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.pressed.connect(b[1]); v.add_child(btn)
 
-func _add_pane_buttons(v: VBoxContainer):
-	var add_btn = Button.new()
-	add_btn.text = Icons.ADD + " Add Pane"
-	Icons.style_button(add_btn)
-	add_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	add_btn.pressed.connect(func():
-		var menu = PopupMenu.new()
-		var keys = PaneTypes.ALL.keys()
-		for i in keys.size():
-			var info = PaneTypes.ALL[keys[i]]
-			menu.add_item(info["icon"] + " " + info["name"])
-		menu.add_separator()
-		menu.add_item("Terminal (x16)")
-		menu.id_pressed.connect(func(id: int):
-			if id < keys.size():
-				request_new_pane.emit(keys[id])
-			else:
-				request_bulk_spawn.emit(16)
-		)
-		add_child(menu)
-		menu.popup(Rect2(add_btn.get_screen_position(), add_btn.size))
-	)
-	v.add_child(add_btn)
+func _add_window_mode(v: VBoxContainer):
+	var wm_dropdown = OptionButton.new()
+	wm_dropdown.name = "WindowModeDropdown"
+	wm_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for label in SettingsManager.WINDOW_MODE_LABELS:
+		wm_dropdown.add_item(label)
+	wm_dropdown.select(SettingsManager.cfg_window_mode)
+	wm_dropdown.item_selected.connect(func(idx: int): request_window_mode.emit(idx))
+	v.add_child(wm_dropdown)
+	_wm_dropdown = wm_dropdown
 
+func _add_pane_buttons(v: VBoxContainer):
+	var new_lbl = Label.new()
+	new_lbl.text = " New:"
+	new_lbl.add_theme_font_size_override("font_size", 11)
+	new_lbl.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+	v.add_child(new_lbl)
+
+	var row = HBoxContainer.new()
+	row.name = "PaneTypeRow"
+	row.add_theme_constant_override("separation", 2)
+
+	for key in PaneTypes.ALL:
+		var info = PaneTypes.ALL[key]
+		var btn = Button.new()
+		btn.text = info["icon"]
+		btn.tooltip_text = "New " + info["name"] + " (" + info["shortcut"] + ")"
+		Icons.style_button(btn)
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.custom_minimum_size = Vector2(0, 28)
+		btn.pressed.connect(func(): request_new_pane.emit(key))
+		row.add_child(btn)
+
+	v.add_child(row)
+
+func _sync_window_mode():
+	if _wm_dropdown:
+		_wm_dropdown.select(SettingsManager.cfg_window_mode)
 func _add_pane_list_ui(v: VBoxContainer):
 	var lbl = Label.new(); lbl.text = " Panes:"; lbl.add_theme_font_size_override("font_size", 12)
 	v.add_child(lbl)
