@@ -30,10 +30,9 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 
 | Platform | Package |
 |---|---|
-| Linux | `gpty-v0.1.0-linux-x86_64.tar.gz` — extract and run `./gpty` |
-| macOS | `gpty-v0.1.0-macos.zip` — unzip, right-click the `.app` → Open |
-| Windows | `gpty-v0.1.0-windows-x86_64.zip` — unzip and run `gpty.exe` |
-
+| Linux | `gpty-v0.2.0-linux-x86_64.tar.gz` — extract and run `./gpty` |
+| macOS | `gpty-v0.2.0-macos.zip` — unzip, right-click the `.app` → Open |
+| Windows | `gpty-v0.2.0-windows-x86_64.zip` — unzip and run `gpty.exe` |
 ---
 
 ## Features
@@ -94,30 +93,19 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and [ROADMAP.md](ROADMAP.md
 git clone https://github.com/godot-pty/gpty.git gpty
 cd gpty
 
-# Build
-cargo build
+# Build the GDExtension library (required before running Godot)
+cargo build -p gpty-gdext
+cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
 
 # Rust tests
 cargo test --workspace
 
-# Rust checks
+# Rust type-check (fast, no codegen)
 cargo check
 
 # Godot tests
 godot --headless --path godot --import
 godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration
-
-# Mock terminal demo (demonstrates pub-sub engine)
-cargo run --bin gpty
-
-# Real-PTY demo (requires Linux or Windows 11)
-cargo run --bin gpty -- --pty
-
-# Terminal grid demo (validates alacritty_terminal ANSI + color processing)
-cargo run --bin gpty -- --term
-
-# Build the GDExtension
-cargo build -p gpty-gdext
 
 # Release build + local export
 cargo build -p gpty-gdext --release
@@ -128,8 +116,49 @@ godot --headless --path godot --export-release "Linux/X11" dist/gpty
 cd godot && godot -e
 
 # Verbose logging
-RUST_LOG=debug cargo run --bin gpty
+RUST_LOG=debug cargo run --bin gpty -- version
 ```
+
+## CLI Usage
+
+The `gpty` binary controls a running GUI over JSON-RPC IPC. Build it with `cargo build -p gpty-cli` (or `cargo build --workspace`).
+
+Once the GUI is running (launched from Godot or a release binary), the CLI connects over a Unix socket (`/tmp/gpty.sock` on Linux, or `GPTY_SOCKET` env var):
+
+```bash
+# Check if the GUI is running
+gpty version
+
+# Spawn a new terminal pane
+gpty new-pane --pane-type terminal
+
+# List all active panes
+gpty list-panes
+
+# Send text to a pane (by label, e.g. T1)
+gpty inject T1 --text "echo hello"
+
+# Close a pane
+gpty kill-pane T1
+
+# Save and load named layouts
+gpty layout save my-setup
+gpty layout load my-setup
+gpty layout list
+
+# Manage the GUI daemon
+gpty daemon status
+gpty daemon stop
+
+# Generate AI tool manifests (no GUI needed)
+gpty schema
+gpty schema --format mcp
+
+# Run as MCP server over stdio (no GUI needed)
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | gpty mcp
+```
+
+See `gpty --help` for all subcommands and flags.
 
 ## Concept System
 

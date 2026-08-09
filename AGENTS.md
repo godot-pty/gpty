@@ -94,7 +94,7 @@ cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
 cargo check
 
 # CLI (control running gpty GUI over IPC)
-cargo run --bin gpty -- new-pane --type terminal
+cargo run --bin gpty -- new-pane --pane-type terminal
 cargo run --bin gpty -- list-panes
 cargo run --bin gpty -- schema          # JSON Schema for AI tools
 cargo run --bin gpty -- schema --format mcp  # MCP tools manifest
