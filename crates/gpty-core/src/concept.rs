@@ -91,7 +91,9 @@ pub fn matching_commands(
                 // Clear remaining {N} for missing capture groups
                 cmd = re_braces.replace_all(&cmd, "").to_string();
                 cmd = cmd.replace(ph, "{");
-                commands.push(cmd);
+                if !cmd.is_empty() {
+                    commands.push(cmd);
+                }
             }
         }
     }

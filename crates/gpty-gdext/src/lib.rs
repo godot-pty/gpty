@@ -733,7 +733,7 @@ impl GptyTerminal {
                 for a in acts {
                     let cmd = a["cmd"].as_str().unwrap_or("").to_string();
                     let target = a["target"].as_str().unwrap_or("").to_string();
-                    if !cmd.is_empty() && !target.is_empty() {
+                    if !target.is_empty() {
                         actions.push(Action {
                             command_template: cmd,
                             target_label: target,
