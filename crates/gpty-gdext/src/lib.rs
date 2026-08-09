@@ -691,10 +691,14 @@ impl GptyTerminal {
     ///   "stop_timeout_ms": int, "stop_on_input": bool,
     ///   "actions": Array[{"cmd":String,"target":String}]
     #[func]
-    fn set_global_concepts(&self, concepts_array: Array<Variant>) {
+    fn set_global_concepts(concepts_array: Variant) {
         use gpty_core::types::{Action, CaptureMode, Concept};
+        let Ok(arr) = concepts_array.try_to::<Array<Variant>>() else {
+            log::warn!("[gpty-gdext] set_global_concepts: failed to convert variant to array");
+            return;
+        };
         let mut concepts = Vec::new();
-        for item in concepts_array.iter_shared() {
+        for item in arr.iter_shared() {
             let obj: Dictionary<Variant, Variant> = item.to();
             let name = obj
                 .get("name")
