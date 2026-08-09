@@ -17,7 +17,8 @@ func _push_to_rust():
 			enabled_only.append(c)
 	if enabled_only.is_empty():
 		return
-	GptyTerminal.set_global_concepts(enabled_only)
+	var t = GptyTerminal.new()
+	t.set_global_concepts(enabled_only)
 
 func _merge_concepts() -> Array:
 	var defaults = _load_defaults()
