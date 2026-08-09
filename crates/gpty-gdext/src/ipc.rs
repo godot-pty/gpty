@@ -91,8 +91,11 @@ fn make_gdscript_handler(method: String) -> HandlerFn {
                     "internal error: response channel closed",
                 )),
                 Err(_elapsed) => {
+                    // Clean up both the response channel and the queue entry
                     let mut map = PENDING_RESPONSES.lock().unwrap();
                     map.remove(&id);
+                    let mut queue = PENDING_REQUESTS.lock().unwrap();
+                    queue.retain(|req| req.id != id);
                     Err(gpty_ipc::protocol::JsonRpcError::new(
                         -32000,
                         "timeout waiting for GUI response",
@@ -115,6 +118,16 @@ fn version_handler() -> HandlerFn {
     })
 }
 
+/// Shutdown handler — responds instantly then exits the process.
+fn shutdown_handler() -> HandlerFn {
+    std::sync::Arc::new(|_params| {
+        Box::pin(async move {
+            std::process::exit(0);
+        })
+    })
+}
+
+
 static STARTED: StdMutex<bool> = StdMutex::new(false);
 
 /// Ensure the IPC server is started (idempotent).
@@ -135,6 +148,7 @@ pub async fn start_ipc_server_inner(socket_path: &str) {
 
     // version is handled locally — needed by daemon ensure_running().
     server.register("version", version_handler());
+    server.register("shutdown", shutdown_handler());
 
     // All other methods route through GDScript.
     let gdscript_methods = [
@@ -146,7 +160,6 @@ pub async fn start_ipc_server_inner(socket_path: &str) {
         "layoutSave",
         "layoutLoad",
         "layoutList",
-        "shutdown",
     ];
     for method_name in gdscript_methods {
         server.register(method_name, make_gdscript_handler(method_name.to_string()));

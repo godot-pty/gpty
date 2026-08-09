@@ -43,7 +43,7 @@ jobs:
         run: cargo clippy --workspace -- -D warnings
 
       - name: Run Rust tests
-        run: cargo test --workspace
+        run: cargo test --workspace -- --test-threads=1
 
   # ── GDScript tests (GUT headless) ────────────────────────────────────
   gut-tests:
