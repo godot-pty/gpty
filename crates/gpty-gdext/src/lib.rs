@@ -769,7 +769,7 @@ impl GptyTerminal {
                 destinations: actions,
             });
         }
-        log::info!("[gpty-gdext] Setting {} global concepts", concepts.len());
+        godot_print!("[gpty-gdext] Setting {} global concepts", concepts.len());
         ENGINE.set_concepts(concepts);
     }
     /// Get all concepts as an Array of Dictionaries.
