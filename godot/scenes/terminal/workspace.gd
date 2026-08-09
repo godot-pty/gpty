@@ -653,8 +653,8 @@ func _find_pane_of_type(type_name: String) -> Control:
 # ═══════════════════════════════════════════════════════════════════════
 
 func _poll_ipc_requests():
-	# GodoptyTerminal is a GodotClass — call static methods on the class
-	var reqs = GodoptyTerminal.drain_ipc_requests()
+	# GptyTerminal is a GodotClass — call static methods on the class
+	var reqs = GptyTerminal.drain_ipc_requests()
 	if reqs.is_empty():
 		return
 	for req in reqs:
@@ -669,7 +669,7 @@ func _poll_ipc_requests():
 		var result = _handle_ipc_method(method, params)
 		var success = not (result is Dictionary and result.has("error"))
 		var result_json = JSON.stringify(result) if typeof(result) != TYPE_STRING else result
-		GodoptyTerminal.respond_ipc(id, success, result_json)
+		GptyTerminal.respond_ipc(id, success, result_json)
 
 func _handle_ipc_method(method: String, params):
 	match method:

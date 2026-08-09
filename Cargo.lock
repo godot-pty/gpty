@@ -496,8 +496,10 @@ version = "0.1.0"
 dependencies = [
  "godot",
  "gpty-core",
+ "gpty-ipc",
  "log",
  "regex",
+ "serde_json",
  "tokio",
 ]
 

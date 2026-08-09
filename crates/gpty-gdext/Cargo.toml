@@ -13,3 +13,6 @@ gpty-core = { path = "../gpty-core" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 log = "0.4"
 regex = "1"
+
+gpty-ipc = { path = "../gpty-ipc" }
+serde_json = "1"

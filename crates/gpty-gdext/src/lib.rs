@@ -18,6 +18,8 @@ use godot::global::Key;
 use gpty_core::engine::{SpawnedTerminal, WorkspaceEngine};
 use gpty_core::types::TerminalConfig;
 
+mod ipc;
+
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
 // ═══════════════════════════════════════════════════════════════════════
@@ -847,6 +849,33 @@ impl GptyTerminal {
         if let Some(ref spawned) = self.spawned {
             spawned.handle.flush_capture(event_id as u64);
         }
+    }
+
+    // ── IPC bridge ────────────────────────────────────────────
+    // Polled from GDScript each frame. Requests arrive via the
+    // IpcServer → PENDING_REQUESTS → drain_ipc_requests.
+
+    /// Drain pending IPC requests into an Array of Dictionaries.
+    /// Returns `[{id: int, method: String, params: String}]`.
+    #[func]
+    fn drain_ipc_requests() -> Array<Dictionary<Variant, Variant>> {
+        crate::ipc::ensure_server_started();
+        let requests = crate::ipc::drain_requests();
+        let mut arr = Array::new();
+        for req in requests {
+            let mut dict = Dictionary::new();
+            dict.set("id", &Variant::from(req.id as i64));
+            dict.set("method", &Variant::from(req.method));
+            dict.set("params", &Variant::from(req.params));
+            arr.push(&dict);
+        }
+        arr
+    }
+
+    /// Respond to an IPC request identified by `id`.
+    #[func]
+    fn respond_ipc(id: i64, success: bool, result_json: String) {
+        crate::ipc::complete_response(id as u64, success, result_json);
     }
 }
 
