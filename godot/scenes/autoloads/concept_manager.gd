@@ -103,16 +103,23 @@ func get_concepts() -> Array:
 
 ## Toggle a concept's enabled flag in the user overrides file.
 func toggle_concept(name: String) -> bool:
+	# Find the current enabled state from merged concepts
+	var merged = _merge_concepts()
+	var current_enabled = true
+	for c in merged:
+		if c is Dictionary and c.get("name", "") == name:
+			current_enabled = c.get("enabled", true)
+			break
+	var new_enabled = not current_enabled
 	var user = _load_from_file()
 	var found = false
 	for c in user:
 		if c is Dictionary and c.get("name", "") == name:
-			c["enabled"] = not c.get("enabled", true)
+			c["enabled"] = new_enabled
 			found = true
 			break
 	if not found:
-		# Concept not in user file — add it with enabled=false
-		var entry: Dictionary = {"name": name, "enabled": false}
+		var entry: Dictionary = {"name": name, "enabled": new_enabled}
 		user.append(entry)
 	save_concepts(user)
 	return true
