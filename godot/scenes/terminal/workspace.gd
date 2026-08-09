@@ -52,8 +52,19 @@ func _ready():
 	_tm.on_swap = _swap_pane
 	_restore(); _sync_pane_titlebars(); if _tm.tiles.is_empty(): _spawn_pane("terminal")
 
-	# Push concepts to Rust engine — autoload init is too early for GDExtension
-	ConceptManager._push_to_rust()
+	# Push concepts to Rust engine using a real terminal — dummy instances fail at startup
+	for t in _tm.tiles:
+		var body = _tm._find_body(t.wrapper)
+		if body and body is TerminalPane:
+			var term = body.get("_terminal")
+			if term:
+				var concepts = ConceptManager._merge_concepts()
+				var enabled: Array = []
+				for c in concepts:
+					if c is Dictionary and c.get("enabled", true) == true:
+						enabled.append(c)
+				term.set_global_concepts(enabled)
+			break
 
 	# Per-type keyboard shortcuts
 	for key in PaneTypes.ALL:
