@@ -218,12 +218,13 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 ### Concept Capture System
 
 - Two capture modes: `SingleLine` (broadcast Event for command injection) and `UntilStop { stop_timeout_ms, stop_on_input }` (buffer output until timeout or user input).
+- UntilStop matching: `match_and_broadcast` matches on PTY output lines. When it returns `Some((name, UntilStop{..}, target))`, the engine enters capture mode — subsequent PTY output is buffered, not fed to the grid. On timeout or user input, `finalize_capture()` queues a `CapturedOutput` event.
 - Capture lifecycle:
-  - Match: Concept triggers → pending capture deferred one chunk (avoids Tab noise).
-  - Buffer: Confirmed on next non-prompt chunk; raw bytes held, grid suppressed.
-  - Finalize: Timeout or user input → `finalize_capture()` → `CapturedOutput` queued.
-  - Drain: GDScript polls via `drain_concept_events()`.
-- Grid suppression via buffering: During capture, raw `Vec<u8>` chunks are held in `capture_buffer`. Grid is never fed. On `acknowledge_capture` (receiver found), bytes discarded except trailing prompt (after last `\n`). On `flush_capture` (no receiver), all bytes replayed to grid.
+  - PTY output feeds `LineParser` → lines flow to `match_and_broadcast` (engine.rs PTY output handler).
+  - If a concept matches and has `UntilStop` capture mode → engine enters capture state, buffers raw bytes, suppresses grid feed.
+  - Timeout or user input → `finalize_capture()` queues `CapturedOutput` with plain-text lines and target label.
+  - GDScript polls via `drain_concept_events()` each frame, routes to receiver pane by `target_pane_type`.
+  - Receiver found → `acknowledge_capture` (bytes discarded). No receiver → `flush_capture` (bytes replayed to grid) + toast.
 - Prompt restoration: Shell prompts lack trailing `\n` so `LineParser` never emits them. On acknowledge, raw bytes after last `\n` are extracted and fed to grid with `\r\n` prefix for correct cursor positioning.
 - Default concepts: Shipped in `godot/concepts.default.json`. `ConceptManager._merge_concepts()` deep-merges defaults + user concepts (user keys overlay default keys). Trigger migration updates old regex patterns to new ones.
 - Concept event routing: `workspace.gd._process()` polls all terminal panes, drains events, routes to receiver pane by `_pane_type()`. No receiver → toast + flush.
@@ -254,8 +255,8 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 - `tokio::time::Instant::now() + Duration::MAX` panics: The addition overflows. Use a safe large constant like `Duration::from_secs(86400 * 365)` (1 year) for inactive timeout sleeps.
 - `tokio::pin!` + `reset()` for capture timeouts: Use `tokio::pin!(sleep)` and `sleep.as_mut().reset(deadline)` to re-arm a timeout without recreating it each iteration. One `select!` branch, no code duplication.
 - `continue` in `for` does not skip trailing code: A `continue` inside a `for` loop only skips the current iteration — code BELOW the loop still executes. Use `break` + a boolean flag to conditionally skip post-loop grid feeding.
-- Concept regex on PTY output vs. stdin: `UntilStop` concepts match on `StdinInput::Line` (user presses Enter), avoiding Tab completion noise, command echo, and shell output entirely. `SingleLine` concepts match on PTY output via `concept.rs`. Tab completion never produces `StdinInput::Line`.
-- Tab completion triggers concept matches: Bash reprints the prompt and partial command when showing autocomplete candidates. This reprinted line has no trailing `\n`, so `LineParser` never emits it — but a `SingleLine` concept matching on PTY output would fire on the original command, then the reprint cancels the pending capture. `UntilStop` concepts matching on `StdinInput::Line` (see above) avoid this entirely since Tab never produces a `Line` event.
+- Concept regex on PTY output: `match_and_broadcast` checks every line of PTY output against all concepts. `SingleLine` concepts broadcast events for command injection. `UntilStop` concepts start capture mode — their return value from `match_and_broadcast` MUST be used to set `active_capture_name` and `active_capture_target`. Ignoring the return value (`let _ = match_and_broadcast(...)`) silently disables UntilStop capture.
+- Tab completion triggers concept matches: Bash reprints the prompt and partial command when showing autocomplete candidates. This reprinted line has no trailing `\n`, so `LineParser` never emits it. Tab completion never triggers concept matching.
 - Raw-byte buffering for grid replay: Never buffer parsed lines for later grid replay — the alacritty_terminal ANSI state machine needs raw bytes with escape sequences intact. Buffer `Vec<Vec<u8>>` (chunks), replay with `feed_grid(board, chunk)`.
 - Rendering Performance: GDScript `_draw` is slow when calling `draw_rect`/`draw_string` character-by-character. Avoid generating heavy data structures (like `Dictionary`) per-cell across the FFI boundary. Prefer packing data into flat arrays (`PackedByteArray`, `PackedInt32Array`) in Rust, and batch rendering operations line-by-line in Godot.
 - Resize Rate Limiting: Firing SIGWINCH heavily on every frame during window drag will overwhelm the child PTY process. Always debounce or rate-limit terminal `_on_resize` events before passing them to the backend.
@@ -267,6 +268,10 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 - `std::sync::Once` poisoning: if the closure passed to `Once::call_once` panics, the `Once` is permanently poisoned — all subsequent calls panic too. For lazy init that spawns fallible work, use `AtomicBool::swap(true, Relaxed)` or `Mutex<Option<...>>` instead.
 - Shared static state in integration tests: tests that mutate shared `static` state (queues, maps) must clean up in ALL exit paths — including timeout, error, and panic branches. A stale queue entry from one test will break the next test. Write a `clear_state()` helper and call it in every test.
 ### Agent Tool Notes
+
+- **gdext `#[func]` parameter types: ONLY `GString`, `bool`, and `i64` are reliably marshaled as input parameters.** `Array<Variant>`, `Dictionary`, and bare `Variant` all silently fail — the GDScript call succeeds but the Rust body never executes. Workaround: serialize complex data to JSON in GDScript (`JSON.stringify()`), pass as `GString`, deserialize in Rust with `serde_json::from_str`.
+- **Empty `cmd` in concept actions: concept actions with `"cmd": ""` are valid (capture-only — output is captured but no command is injected). Do NOT filter them out with `!cmd.is_empty()` guards — the `target` label is needed for routing even when `cmd` is empty. Only require `!target.is_empty()`.
+- **Concept push startup race: GDExtension classes aren't registered when autoloads initialize.** `ConceptManager._on_init()` must defer its push via `call_deferred("_push_to_rust")`. A `GptyTerminal.new()` created during autoload init produces a zombie object whose `#[func]` methods silently no-op. Use `ClassDB.instantiate("GptyTerminal")` inside `call_deferred` — this works once Godot's class database is ready. A secondary push from `workspace.gd` via `await create_timer(2.0)` serves as fallback.
 
 - GDScript `///` comments: GDScript uses `#` or `##` for comments. Rust-style `///` causes a parse error. Always use `##` for doc comments in GDScript.
 - Edit tool on structured formats (YAML, TOML, Markdown frontmatter): the line-based `edit` tool can corrupt delimiter-sensitive files (YAML `---` blocks, TOML `[sections]`, frontmatter bounds). When editing config files, workflow YAML, or Hugo content, prefer `eval` with Python (`yaml.safe_load`, `tomllib`) to parse → modify → serialize. Reserve `edit` for Rust, GDScript, and plain Markdown where line semantics hold.
