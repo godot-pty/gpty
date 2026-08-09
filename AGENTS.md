@@ -245,6 +245,9 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 - Alt key handling: For Alt+letter combos, the Rust keymap returns `None`, expecting the GDScript layer to prepend `\x1b` (ESC). `_handle_keyboard` does this in the `_key_to_text` fallback path.
 - PTY Enter key: The Enter key MUST send `\r` (CR) to the PTY, not `\n`. `pty.rs:write_line` appends `\r`. The PTY terminal driver translates `\r` → `\n` in canonical mode; raw-mode programs read `\r` directly.
 
+- `tokio::task::JoinHandle` drop detaches: dropping a `JoinHandle` does NOT abort the task — it keeps running until it exits naturally. For explicit cleanup (e.g., in a `Drop` impl), call `handle.abort()`.
+- `std::sync::Once` poisoning: if the closure passed to `Once::call_once` panics, the `Once` is permanently poisoned — all subsequent calls panic too. For lazy init that spawns fallible work, use `AtomicBool::swap(true, Relaxed)` or `Mutex<Option<...>>` instead.
+- Shared static state in integration tests: tests that mutate shared `static` state (queues, maps) must clean up in ALL exit paths — including timeout, error, and panic branches. A stale queue entry from one test will break the next test. Write a `clear_state()` helper and call it in every test.
 ### Agent Tool Notes
 
 - GDScript `///` comments: GDScript uses `#` or `##` for comments. Rust-style `///` causes a parse error. Always use `##` for doc comments in GDScript.

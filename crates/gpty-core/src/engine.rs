@@ -84,6 +84,12 @@ pub struct SpawnedTerminal {
     _task: tokio::task::JoinHandle<()>,
 }
 
+impl Drop for SpawnedTerminal {
+    fn drop(&mut self) {
+        self._task.abort();
+    }
+}
+
 // ── WorkspaceEngine ───────────────────────────────────────────────────
 
 impl WorkspaceEngine {
@@ -286,6 +292,9 @@ fn store_line(grid: &Option<Arc<Mutex<TermGrid>>>, line: &str) {
 /// Emit a completed capture to the queue and store raw bytes for
 /// later flush/acknowledge.
 fn finalize_capture(ctx: &mut TaskContext) {
+    /// Maximum number of buffered captures before dropping oldest.
+    /// Prevents unbounded memory growth if GDScript stops polling.
+    const MAX_BUFFERED: usize = 64;
     let id = ctx.capture_event_id;
     ctx.capture_event_id += 1;
 
@@ -301,10 +310,18 @@ fn finalize_capture(ctx: &mut TaskContext) {
     let target = ctx.active_capture_target.take().unwrap_or_default();
     let raw_bytes = std::mem::take(&mut ctx.capture_buffer);
     if let Ok(mut bufs) = ctx.capture_buffers.lock() {
+        if bufs.len() >= MAX_BUFFERED
+            && let Some(oldest) = bufs.keys().min().copied()
+        {
+            bufs.remove(&oldest);
+        }
         bufs.insert(id, raw_bytes);
     }
 
     if let Ok(mut queue) = ctx.capture_queue.lock() {
+        if queue.len() >= MAX_BUFFERED {
+            queue.remove(0);
+        }
         queue.push(CapturedOutput {
             id,
             concept_name,

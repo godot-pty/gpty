@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
-use std::sync::Mutex as StdMutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpty_ipc::server::{HandlerFn, IpcServer};
 use gpty_ipc::transport;
@@ -128,13 +128,11 @@ fn shutdown_handler() -> HandlerFn {
 }
 
 
-static STARTED: StdMutex<bool> = StdMutex::new(false);
+static STARTED: AtomicBool = AtomicBool::new(false);
 
 /// Ensure the IPC server is started (idempotent).
 pub fn ensure_server_started() {
-    let mut started = STARTED.lock().unwrap();
-    if !*started {
-        *started = true;
+    if !STARTED.swap(true, Ordering::Relaxed) {
         let socket_path = default_socket();
         crate::RUNTIME.spawn(async move {
             start_ipc_server_inner(&socket_path).await;
