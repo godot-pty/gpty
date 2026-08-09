@@ -29,6 +29,11 @@ Planned features for future releases. Tracked in detail via [GitHub Issues](http
 - [x] JSON Schema — `gpty schema` for AI tool discovery
 - [x] IPC bridge — Rust server ↔ GDScript polling via `drain_ipc_requests`/`respond_ipc`
 
+## v0.3.1
+
+- [ ] 
+
+
 ## v0.2.0 — UI/UX
 
 - [x] Standalone export — first successful CI release for Linux, macOS, Windows

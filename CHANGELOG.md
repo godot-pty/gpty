@@ -3,6 +3,15 @@
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+
+## [0.3.1] — Unreleased
+### Fixed
+
+- Paste (`Ctrl+Shift+V`) now works in terminals — code viewer shortcut moved to `Ctrl+Shift+C` to resolve input conflict
+
+
+[0.3.1]: https://github.com/godot-pty/gpty/releases/tag/v0.3.1 (unreleased)
+
 ## [0.3.0] — 2026-08-09
 
 ### Added
