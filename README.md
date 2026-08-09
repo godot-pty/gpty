@@ -199,7 +199,7 @@ Security Warning: The Concept Engine is designed to execute commands automatical
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, code style, and the pull request process.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, code style, and the pull request process. See [docs/content/docs/testing.md](docs/content/docs/testing.md) for the manual pre-release test checklist.
 
 ---
 

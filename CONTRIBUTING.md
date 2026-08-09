@@ -59,6 +59,12 @@ cd godot && godot -e
 4. Ensure tests pass (add new tests as applicable)
 5. Submit a pull request
 
+## Testing
+
+- **Automated**: `cargo test --workspace` (Rust) + `godot --headless --path godot -s addons/gut/gut_cmdln.gd ...` (GDScript). CI runs on every push.
+- **Manual pre-release**: [docs/content/docs/testing.md](docs/content/docs/testing.md) — smoke tests for CLI bridge, daemon lifecycle, UI shortcuts, and error paths that require a running GUI.
+- Test format: `Given / When / Then` with expected output. See the manual checklist for examples.
+
 ### Commit Format
 
 [Conventional Commits](https://www.conventionalcommits.org/): `feat(scope):`, `fix(scope):`, `chore(scope):`
