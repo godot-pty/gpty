@@ -6,7 +6,8 @@ const DEFAULTS_FILE = "res://concepts.default.json"
 signal concepts_changed
 
 func _on_init():
-	_push_to_rust()
+	# Defer push — GDExtension may not be registered yet during autoload init
+	call_deferred("_push_to_rust")
 
 func _push_to_rust():
 	var concepts = _merge_concepts()
