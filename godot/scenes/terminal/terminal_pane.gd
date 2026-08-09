@@ -401,7 +401,7 @@ func _get_selected_text() -> String:
 	return "\n".join(lines)
 
 func _gui_input(event):
-	if event is InputEventKey and ShortcutManager.is_shortcut(event):
+	if event is InputEventKey and ShortcutManager.is_shortcut(event) and not _is_copy_paste(event):
 		return
 	if event is InputEventMouseButton or event is InputEventMouseMotion:
 		_handle_mouse(event)
@@ -422,6 +422,10 @@ func _handle_mouse(event: InputEvent):
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed: _terminal.scroll_down(scroll_lines)
 	if event is InputEventMouseMotion and _selecting:
 		_sel_end = _mouse_to_cell(event.position); queue_redraw()
+
+func _is_copy_paste(event: InputEventKey) -> bool:
+	return (event.keycode == KEY_C or event.keycode == KEY_V) and event.ctrl_pressed and event.shift_pressed
+
 func _handle_keyboard(event: InputEventKey):
 	# Search bar escape — close search
 	if _search_visible and event.keycode == KEY_ESCAPE:

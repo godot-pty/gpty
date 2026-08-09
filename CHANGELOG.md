@@ -7,7 +7,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 ## [0.3.1] — Unreleased
 ### Fixed
 
-- Paste (`Ctrl+Shift+V`) now works in terminals — code viewer shortcut moved to `Ctrl+Shift+C` to resolve input conflict
+- Paste (`Ctrl+Shift+V`) and copy (`Ctrl+Shift+C`) now work in terminals — code viewer shortcut moved to `Ctrl+Shift+C`, and `_gui_input` exempts copy/paste from the ShortcutManager intercept check
 
 
 [0.3.1]: https://github.com/godot-pty/gpty/releases/tag/v0.3.1 (unreleased)
