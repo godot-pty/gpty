@@ -41,7 +41,6 @@ pub fn match_and_broadcast(
                 source_pane: source_id,
                 captures,
             };
-            eprintln!("[CONCEPT] match_and_broadcast: Pane {source_id}, topic={}, line='{line}'", concept.name);
             let _ = tx.send(ev);
             // Only the first capture-mode concept wins
             if capture.is_none() && concept.capture_mode != CaptureMode::SingleLine {

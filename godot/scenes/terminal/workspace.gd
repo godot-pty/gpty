@@ -816,7 +816,6 @@ func _push_concepts_to_engine():
 			if enabled.is_empty():
 				return
 			term.set_global_concepts(JSON.stringify(enabled))
-			print("[Workspace] Pushed concepts to engine")
 			return
 func _push_concepts_deferred():
 	# Wait for the scene tree to fully settle (GDExtension + terminal nodes ready)

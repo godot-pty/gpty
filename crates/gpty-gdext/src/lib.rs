@@ -693,22 +693,15 @@ impl GptyTerminal {
     #[func]
     fn set_global_concepts(&self, concepts_json: GString) {
         use gpty_core::types::{Action, CaptureMode, Concept};
-        godot_print!("[gpty-gdext] set_global_concepts called");
         let json_str = concepts_json.to_string();
-        godot_print!("[gpty-gdext] set_global_concepts JSON: {}", &json_str[..json_str.len().min(500)]);
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_str) else {
-            godot_print!("[gpty-gdext] set_global_concepts: failed to parse JSON");
             return;
         };
-        let arr = match &value {
-            serde_json::Value::Array(a) => a,
-            _ => {
-                godot_print!("[gpty-gdext] set_global_concepts: JSON root is not an array");
-                return;
-            }
+        let serde_json::Value::Array(arr) = value else {
+            return;
         };
         let mut concepts = Vec::new();
-        for item in arr {
+        for item in &arr {
             let name = item["name"].as_str().unwrap_or("").to_string();
             if name.is_empty() {
                 continue;
@@ -750,7 +743,6 @@ impl GptyTerminal {
                 destinations: actions,
             });
         }
-        godot_print!("[gpty-gdext] Setting {} global concepts", concepts.len());
         ENGINE.set_concepts(concepts);
     }
     /// Get all concepts as an Array of Dictionaries.
@@ -803,9 +795,7 @@ impl GptyTerminal {
         if let Some(ref queue) = self.capture_queue
             && let Ok(mut events) = queue.lock()
         {
-            let drained: Vec<_> = events.drain(..).collect();
-            for ev in drained {
-                godot_print!("[gpty-gdext] drain: {} target={}", ev.concept_name, ev.target_pane_type);
+            for ev in events.drain(..) {
                 let mut obj = Dictionary::<Variant, Variant>::new();
                 obj.set("id", &Variant::from(ev.id as i64));
                 obj.set("concept_name", &Variant::from(ev.concept_name));
