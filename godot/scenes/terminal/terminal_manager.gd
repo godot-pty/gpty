@@ -63,6 +63,10 @@ func spawn_pane(type_name: String, opts: Dictionary = {}) -> Control:
 	var title = opts.get("title_label", PaneTypes.ALL.get(type_name, {}).get("name", type_name))
 	var w = _build_wrapper_body(body, title)
 
+	# Apply global titlebar setting to the new wrapper
+	var tb = w.get_node_or_null("BodyVBox/TitleBar")
+	if tb: tb.visible = SettingsManager.cfg_show_titlebar
+
 	if tiles.is_empty():
 		tiles.append({wrapper = w, col = 0, row = 0, cspan = GRID, rspan = GRID})
 	else:

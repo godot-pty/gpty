@@ -193,3 +193,31 @@ func test_reset_clears_counters():
 	var t1 = _tm.spawn_pane("terminal", {})
 	assert_not_null(t1)
 	assert_eq(t1.pane_label, "T1", "label should restart at T1 after reset")
+
+# ── Settings respect ─────────────────────────────────────────────────
+
+func test_spawn_respects_show_titlebar_false():
+	# Given: titlebar setting is off
+	SettingsManager.cfg_show_titlebar = false
+
+	# When: spawning a code_viewer pane (no terminal dependency)
+	var body = _tm.spawn_pane("code_viewer", {})
+	assert_not_null(body)
+
+	# Then: titlebar should be hidden on the wrapper
+	var tb = _tm.tiles[0].wrapper.get_node_or_null("BodyVBox/TitleBar")
+	assert_not_null(tb, "titlebar node should exist")
+	assert_false(tb.visible, "titlebar should be hidden when setting is false")
+
+func test_spawn_respects_show_titlebar_true():
+	# Given: titlebar setting is on (default)
+	SettingsManager.cfg_show_titlebar = true
+
+	# When: spawning a code_viewer pane
+	var body = _tm.spawn_pane("code_viewer", {})
+	assert_not_null(body)
+
+	# Then: titlebar should be visible
+	var tb = _tm.tiles[0].wrapper.get_node_or_null("BodyVBox/TitleBar")
+	assert_not_null(tb, "titlebar node should exist")
+	assert_true(tb.visible, "titlebar should be visible when setting is true")

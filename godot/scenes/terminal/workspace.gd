@@ -294,6 +294,7 @@ func _spawn_pane(type_name: String, opts := {}) -> Control:
 func _add_body_to_grid(w: Control, body: Control, label: String):
 	_grid.add_child(w)
 	body.focus_entered.connect(func(): _tm.last_body = body)
+	_sync_pane_titlebars()
 	_apply_layout()
 	_list()
 	ToastManager.info("%s spawned" % label)
