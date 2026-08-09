@@ -1,6 +1,18 @@
 # Roadmap
 
-Planned features for future releases. Tracked in detail via [GitHub Issues](https://github.com/gpty/gpty/issues).
+Planned features for future releases. Tracked in detail via [GitHub Issues](https://github.com/godot-pty/gpty/issues).
+
+## v0.1.0 — Core Engine
+
+- [x] Multi-PTY terminal emulator — spawn and manage multiple shell sessions
+- [x] Tiling grid layout — split panes horizontally/vertically, resize by dragging
+- [x] ANSI/vte parsing — full SGR color, cursor positioning via alacritty_terminal
+- [x] Concept engine — regex-based trigger/action matching with label routing
+- [x] SingleLine capture mode — broadcast matched lines to designated terminals
+- [x] Settings persistence — font size, cursor shape, window mode saved to disk
+- [x] Phosphor icon set — 100+ icons for toolbar, sidebar, and pane buttons
+- [x] Sidebar with pane list — overview of all tiles, focus/kill/minimize per pane
+- [x] Control-based renderer — terminal grid drawn in GDScript with CellInfo FFI
 
 ## v0.2.0 — UI/UX
 

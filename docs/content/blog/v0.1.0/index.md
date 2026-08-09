@@ -35,6 +35,6 @@ First release!
 
 **Release**
 
-- Download the standalone binary for your platform from [GitHub Releases](https://github.com/gpty/gpty/releases/tag/v0.1.0).
-- Changelog: [github.com/gpty/gpty/CHANGELOG](https://github.com/gpty/gpty/blob/main/CHANGELOG.md).
-- Source: [github.com/gpty/gpty](https://github.com/gpty/gpty).
+- Download the standalone binary for your platform from [GitHub Releases](https://github.com/godot-pty/gpty/releases/tag/v0.1.0).
+- Changelog: [github.com/godot-pty/gpty/CHANGELOG](https://github.com/godot-pty/gpty/blob/main/CHANGELOG.md).
+- Source: [github.com/godot-pty/gpty](https://github.com/godot-pty/gpty).

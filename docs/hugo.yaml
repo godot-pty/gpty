@@ -23,7 +23,7 @@ menu:
         type: search
     - name: GitHub
       weight: 5
-      url: https://github.com/gpty/gpty
+      url: https://github.com/godot-pty/gpty
       params:
         icon: github
 
