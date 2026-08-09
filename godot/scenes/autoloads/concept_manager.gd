@@ -19,7 +19,10 @@ func _push_to_rust():
 	print("[ConceptManager] Pushing %d enabled concepts (of %d total)" % [enabled_only.size(), concepts.size()])
 	if enabled_only.is_empty():
 		return
-	var t = GptyTerminal.new()
+	var t = ClassDB.instantiate("GptyTerminal")
+	if t == null:
+		push_warning("[ConceptManager] Failed to instantiate GptyTerminal, concepts not pushed")
+		return
 	t.set_global_concepts(enabled_only)
 
 func _merge_concepts() -> Array:
