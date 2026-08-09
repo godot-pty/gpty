@@ -162,4 +162,29 @@ mod tests {
         let err = JsonRpcError::with_data(-32001, "custom", serde_json::json!({"hint": "retry"}));
         assert!(err.data.is_some());
     }
+
+    #[test]
+    fn deserialize_error_from_raw_json() {
+        // Simulates a real error response from the wire
+        let raw = r#"{"jsonrpc":"2.0","id":3,"error":{"code":-32600,"message":"Invalid Request"}}"#;
+        let resp: Response = serde_json::from_str(raw).unwrap();
+        assert_eq!(resp.id, 3);
+        assert!(resp.result.is_none());
+        let err = resp.error.unwrap();
+        assert_eq!(err.code, -32600);
+        assert_eq!(err.message, "Invalid Request");
+        assert!(err.data.is_none());
+    }
+
+    #[test]
+    fn deserialize_error_with_data_from_raw_json() {
+        let raw = r#"{"jsonrpc":"2.0","id":5,"error":{"code":-32001,"message":"Custom","data":{"hint":"retry","attempt":3}}}"#;
+        let resp: Response = serde_json::from_str(raw).unwrap();
+        let err = resp.error.unwrap();
+        assert_eq!(err.code, -32001);
+        assert!(err.data.is_some());
+        let data = err.data.unwrap();
+        assert_eq!(data["hint"], "retry");
+        assert_eq!(data["attempt"], 3);
+    }
 }

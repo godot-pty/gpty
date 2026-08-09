@@ -25,6 +25,10 @@ pub struct PtyHandle {
 impl Drop for PtyHandle {
     fn drop(&mut self) {
         let _ = self._child.kill();
+        // Non-blocking reap: try_wait returns immediately.
+        // If the child hasn't exited yet (brief race after kill),
+        // the zombie is reaped when the process eventually exits.
+        let _ = self._child.try_wait();
     }
 }
 

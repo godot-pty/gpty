@@ -45,6 +45,20 @@ func test_merge_concepts_preserves_default_keys_not_in_user():
 	ConceptManager.save_concepts(user)
 	var merged = ConceptManager._merge_concepts()
 	var cat = _find_by_name(merged, "cat_command")
+	assert_not_null(cat, "cat_command should exist in merged concepts")
+	assert_eq(cat.get("trigger", ""), "custom_regex",
+		"user trigger override should take effect")
+	assert_eq(cat.get("capture_mode", ""), "until_stop",
+		"capture_mode should be preserved from defaults when not overridden")
+	assert_true(cat.get("enabled", false),
+		"enabled should be preserved from defaults when not overridden")
+	assert_ne(cat.get("stop_timeout_ms", -1), -1,
+		"stop_timeout_ms should be preserved from defaults")
+	var actions = cat.get("actions", [])
+	assert_true(actions is Array, "actions should be present from defaults")
+	assert_gt(actions.size(), 0, "actions array should not be empty from defaults")
+	assert_eq(actions[0].get("cmd", ""), "",
+		"default action command should be preserved")
 # ── Save/load roundtrip ─────────────────────────────────────────────────
 
 func test_save_concepts_stores_to_file():

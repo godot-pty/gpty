@@ -316,6 +316,16 @@ fn finalize_capture(ctx: &mut TaskContext) {
     ctx.capture_deadline = None;
 }
 
+/// Remove buffered chunks for a capture ID from the shared buffer map.
+#[allow(clippy::type_complexity)]
+fn take_capture_chunks(
+    id: &u64,
+    capture_buffers: &Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>>,
+) -> Option<Vec<Vec<u8>>> {
+    let mut bufs = capture_buffers.lock().ok()?;
+    bufs.remove(id)
+}
+
 /// Handle a command (FlushCapture / AcknowledgeCapture) from GDScript.
 #[allow(clippy::type_complexity)]
 fn handle_command(
@@ -325,9 +335,7 @@ fn handle_command(
 ) {
     match input {
         StdinInput::FlushCapture(id) => {
-            if let Ok(mut bufs) = capture_buffers.lock()
-                && let Some(chunks) = bufs.remove(id)
-            {
+            if let Some(chunks) = take_capture_chunks(id, capture_buffers) {
                 let mut lp = crate::parser::LineParser::new();
                 for chunk in &chunks {
                     feed_grid(grid, chunk);
@@ -339,10 +347,9 @@ fn handle_command(
             }
         }
         StdinInput::AcknowledgeCapture(id) => {
-            if let Ok(mut bufs) = capture_buffers.lock()
-                && let Some(chunks) = bufs.remove(id)
-            {
-                let mut all_bytes: Vec<u8> = Vec::new();
+            if let Some(chunks) = take_capture_chunks(id, capture_buffers) {
+                let total: usize = chunks.iter().map(|c| c.len()).sum();
+                let mut all_bytes = Vec::with_capacity(total);
                 for chunk in &chunks {
                     all_bytes.extend_from_slice(chunk);
                 }
@@ -353,7 +360,7 @@ fn handle_command(
                     let prompt_bytes = &all_bytes[pos + 1..];
                     if !prompt_bytes.is_empty() {
                         // The \r\n from Enter was buffered with the trigger
-                        // chunk and never reached the grid. Prepend \n so
+                        // chunk and never reached the grid. Prepend \r\n so
                         // the prompt starts on a fresh line.
                         feed_grid(grid, b"\r\n");
                         feed_grid(grid, prompt_bytes);
@@ -420,7 +427,9 @@ async fn run_terminal_task(
                         );
                         drop(concepts_guard);
                         for cmd in cmds {
-                            let _ = pty_handle.write_line(&cmd);
+                            if let Err(e) = pty_handle.write_line(&cmd) {
+                                log::error!("[Pane {}] PTY write error (concept cmd): {e}", ctx.id);
+                            }
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
@@ -495,13 +504,19 @@ async fn run_terminal_task(
                             }
                             drop(concepts_guard);
                         }
-                        let _ = pty_handle.write_line(line);
+                        if let Err(e) = pty_handle.write_line(line) {
+                            log::error!("[Pane {}] PTY write error (stdin): {e}", ctx.id);
+                        }
                     }
                     StdinInput::Raw(data) => {
-                        let _ = pty_handle.write_bytes(data);
+                        if let Err(e) = pty_handle.write_bytes(data) {
+                            log::error!("[Pane {}] PTY write error (raw): {e}", ctx.id);
+                        }
                     }
                     StdinInput::Resize { rows, cols } => {
-                        let _ = pty_handle.resize(*rows, *cols);
+                        if let Err(e) = pty_handle.resize(*rows, *cols) {
+                            log::error!("[Pane {}] PTY resize error: {e}", ctx.id);
+                        }
                         if let Some(g) = &grid
                             && let Ok(mut locked) = g.lock() {
                                 locked.resize(*rows as usize, *cols as usize);
@@ -522,6 +537,7 @@ mod tests {
     use crate::types::TerminalConfig;
     use std::time::Duration;
 
+    #[ignore = "spawns real shell — run on demand with --ignored"]
     #[tokio::test]
     async fn test_spawn_terminal_and_resize() {
         let engine = WorkspaceEngine::new(vec![]);
@@ -576,5 +592,107 @@ mod tests {
             found,
             "Grid should have received and rendered the input text"
         );
+    }
+
+    #[test]
+    fn test_take_capture_chunks_empty() {
+        let bufs: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let result = take_capture_chunks(&42, &bufs);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_take_capture_chunks_removes_entry() {
+        let bufs: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        {
+            let mut locked = bufs.lock().unwrap();
+            locked.insert(7, vec![b"hello".to_vec(), b"world".to_vec()]);
+        }
+        let result = take_capture_chunks(&7, &bufs);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().len(), 2);
+        // Entry should be removed
+        assert!(bufs.lock().unwrap().get(&7).is_none());
+    }
+
+    #[test]
+    fn test_handle_command_flush_replays_to_grid() {
+        let grid = Arc::new(Mutex::new(TermGrid::new(24, 80)));
+        let grid_opt = Some(grid.clone());
+        let bufs: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        {
+            let mut locked = bufs.lock().unwrap();
+            locked.insert(1, vec![b"hello\r\n".to_vec()]);
+        }
+        let input = StdinInput::FlushCapture(1);
+        handle_command(&input, &grid_opt, &bufs);
+        // After flush, chunks are consumed
+        assert!(bufs.lock().unwrap().get(&1).is_none());
+        // Grid should have the flushed content
+        let locked = grid.lock().unwrap();
+        let rows = locked.renderable_rows();
+        let has_hello = rows.iter().any(|r| r.iter().any(|c| c.ch == 'h'));
+        assert!(has_hello, "Grid should contain flushed text");
+    }
+
+    #[test]
+    fn test_handle_command_acknowledge_restores_prompt() {
+        let grid = Arc::new(Mutex::new(TermGrid::new(24, 80)));
+        let grid_opt = Some(grid.clone());
+        let bufs: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        {
+            let mut locked = bufs.lock().unwrap();
+            // Simulate buffered output with a trailing prompt line (no \n)
+            locked.insert(2, vec![b"some output\nmore output\n$ prompt here".to_vec()]);
+        }
+        let input = StdinInput::AcknowledgeCapture(2);
+        handle_command(&input, &grid_opt, &bufs);
+        assert!(bufs.lock().unwrap().get(&2).is_none());
+        let locked = grid.lock().unwrap();
+        let rows = locked.renderable_rows();
+        let prompt_found = rows.iter().any(|r| r.iter().any(|c| c.ch == 'p'));
+        assert!(prompt_found, "Grid should contain the restored prompt");
+    }
+
+    #[test]
+    fn test_handle_command_acknowledge_no_newline() {
+        let grid = Arc::new(Mutex::new(TermGrid::new(24, 80)));
+        let grid_opt = Some(grid.clone());
+        let bufs: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        {
+            let mut locked = bufs.lock().unwrap();
+            // Entire buffer has no newline -- prompt only
+            locked.insert(3, vec![b"$ ".to_vec()]);
+        }
+        let input = StdinInput::AcknowledgeCapture(3);
+        handle_command(&input, &grid_opt, &bufs);
+        assert!(bufs.lock().unwrap().get(&3).is_none());
+    }
+
+    #[test]
+    fn test_handle_command_unknown_variant_preserves_state() {
+        let grid = Arc::new(Mutex::new(TermGrid::new(24, 80)));
+        let grid_opt = Some(grid.clone());
+        let bufs: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        // Pre-populate capture buffers with known data
+        {
+            let mut locked = bufs.lock().unwrap();
+            locked.insert(1, vec![b"captured data".to_vec()]);
+        }
+        // Feed content into the grid so we can verify it's untouched
+        feed_grid(&grid_opt, b"original content\r\n");
+        // Line variant is not FlushCapture or AcknowledgeCapture
+        let input = StdinInput::Line("some command".into());
+        handle_command(&input, &grid_opt, &bufs);
+        // Buffers must be unchanged (unknown variant doesn't consume)
+        assert!(
+            bufs.lock().unwrap().get(&1).is_some(),
+            "Unknown variant must not touch capture buffers"
+        );
+        // Grid content must be unchanged
+        let locked = grid.lock().unwrap();
+        let rows = locked.renderable_rows();
+        let has_original = rows.iter().any(|r| r.iter().any(|c| c.ch == 'o'));
+        assert!(has_original, "Unknown variant must not alter the grid");
     }
 }

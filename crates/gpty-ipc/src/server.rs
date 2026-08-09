@@ -163,16 +163,6 @@ async fn handle_connection(
 mod tests {
     use super::*;
 
-    #[test]
-    fn server_register_and_has_handler() {
-        let mut server = IpcServer::new("/tmp/test.sock");
-        server.register(
-            "version",
-            Arc::new(|_params| Box::pin(async { Ok(serde_json::json!({"version": "0.3.0"})) })),
-        );
-        // Handler is registered — integration test below verifies dispatch.
-    }
-
     #[cfg(unix)]
     mod unix {
         use super::*;
