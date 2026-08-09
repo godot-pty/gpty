@@ -16,6 +16,7 @@ func _push_to_rust():
 	for c in concepts:
 		if c is Dictionary and c.get("enabled", true) == true:
 			enabled_only.append(c)
+	print("[ConceptManager] Pushing %d enabled concepts (of %d total)" % [enabled_only.size(), concepts.size()])
 	if enabled_only.is_empty():
 		return
 	var t = GptyTerminal.new()

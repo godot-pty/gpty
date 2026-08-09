@@ -52,6 +52,9 @@ func _ready():
 	_tm.on_swap = _swap_pane
 	_restore(); _sync_pane_titlebars(); if _tm.tiles.is_empty(): _spawn_pane("terminal")
 
+	# Push concepts to Rust engine — autoload init is too early for GDExtension
+	ConceptManager._push_to_rust()
+
 	# Per-type keyboard shortcuts
 	for key in PaneTypes.ALL:
 		var info = PaneTypes.ALL[key]
