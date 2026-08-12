@@ -481,15 +481,15 @@ async fn run_terminal_task(
                         let capture = concept::match_and_broadcast(
                             ctx.id, &concepts_guard, &ctx.tx, line,
                         );
-                        if ctx.active_capture_name.is_none() {
-                            if let Some((name, CaptureMode::UntilStop { stop_timeout_ms, .. }, target)) = capture {
-                                ctx.active_capture_name = Some(name);
-                                ctx.active_capture_target = Some(target);
-                                let deadline = tokio::time::Instant::now()
-                                    + Duration::from_millis(stop_timeout_ms);
-                                ctx.capture_deadline = Some(deadline);
-                                timeout_sleep.as_mut().reset(deadline);
-                            }
+                        if ctx.active_capture_name.is_none()
+                            && let Some((name, CaptureMode::UntilStop { stop_timeout_ms, .. }, target)) = capture
+                        {
+                            ctx.active_capture_name = Some(name);
+                            ctx.active_capture_target = Some(target);
+                            let deadline = tokio::time::Instant::now()
+                                + Duration::from_millis(stop_timeout_ms);
+                            ctx.capture_deadline = Some(deadline);
+                            timeout_sleep.as_mut().reset(deadline);
                         }
                         drop(concepts_guard);
                     }

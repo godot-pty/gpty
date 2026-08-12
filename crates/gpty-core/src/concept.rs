@@ -44,7 +44,9 @@ pub fn match_and_broadcast(
             let _ = tx.send(ev);
             // Only the first capture-mode concept wins
             if capture.is_none() && concept.capture_mode != CaptureMode::SingleLine {
-                let target = concept.destinations.first()
+                let target = concept
+                    .destinations
+                    .first()
                     .map(|a| a.target_label.clone())
                     .unwrap_or_default();
                 capture = Some((concept.name.clone(), concept.capture_mode, target));
