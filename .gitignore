@@ -39,6 +39,7 @@ reasonix.toml
 .reasonix/
 
 # Local audit (delete when resolved)
+TEMP*
 AUDIT.md
 .omp/
 
