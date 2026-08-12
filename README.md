@@ -1,6 +1,6 @@
 # gpty
 
-gpty, a Godot-based Rust multi-PTY emulator desktop application for creating, expanding, and orchestrating terminal sessions in a grid-based GUI.
+gPTY, a Godot-based Rust multi-PTY emulator desktop application for creating, expanding, and orchestrating terminal sessions in a grid-based GUI.
 
 ## Overview
 
@@ -78,46 +78,9 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and [ROADMAP.md](ROADMAP.md
 
 ---
 
-## Development Setup
+## Development
 
-### Prerequisites
-
-- Rust >= 1.85 (tested with 1.96)
-- Linux (primary target) or Windows 11 (ConPTY supported via `portable-pty`)
-- Godot 4.4+ (tested with 4.7) with GDExtension support
-
-### Development Command Reference
-
-```bash
-# Clone
-git clone https://github.com/godot-pty/gpty.git gpty
-cd gpty
-
-# Build the GDExtension library (required before running Godot)
-cargo build -p gpty-gdext
-cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
-
-# Rust tests
-cargo test --workspace
-
-# Rust type-check (fast, no codegen)
-cargo check
-
-# Godot tests
-godot --headless --path godot --import
-godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration
-
-# Release build + local export
-cargo build -p gpty-gdext --release
-cp target/release/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
-godot --headless --path godot --export-release "Linux/X11" dist/gpty
-
-# Open in Godot editor
-cd godot && godot -e
-
-# Verbose logging
-RUST_LOG=debug cargo run --bin gpty -- version
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, build commands, testing, code style, and the pull request process.
 
 ## CLI Usage
 
@@ -199,7 +162,7 @@ Security Warning: The Concept Engine is designed to execute commands automatical
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, code style, and the pull request process. See [docs/content/docs/testing.md](docs/content/docs/testing.md) for the manual pre-release test checklist.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, code style, and the pull request process.
 
 ---
 

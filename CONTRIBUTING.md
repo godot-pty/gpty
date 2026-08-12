@@ -2,80 +2,112 @@
 
 ## Setup
 
-- **Rust**: Edition 2024, requires Rust ≥ 1.85
-- **Godot**: 4.7 with GDExtension support
-- **Build**: `cargo build -p gpty-gdext`
+**Prerequisites**: Rust >= 1.85 (tested with 1.96), Godot 4.4+ (tested with 4.7) with GDExtension support, Linux (primary target) or Windows 11.
 
 ```bash
-# Build the GDExtension shared library
+# Clone
+git clone https://github.com/godot-pty/gpty.git gpty
+cd gpty
+```
+
+### Install git hooks (one-time per clone)
+
+```bash
+./scripts/install-hooks
+```
+
+This installs pre-commit (fast checks: fmt, lint, clippy), commit-msg (Conventional Commits enforcement), and pre-push (full CI suite). Run `./scripts/ci-check` directly to validate changes before committing.
+
+### Build and test
+
+```bash
+# Build the GDExtension library (required before running Godot)
 cargo build -p gpty-gdext
+cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
 
-# Run all Rust unit tests
-cargo test -p gpty-core
+# Run all CI checks locally (fmt, clippy, tests, GUT, audit)
+./scripts/ci-check
 
-# Type-check Rust only (fast)
+# Fast checks only (fmt, clippy)
+./scripts/ci-check --fast
+
+# Rust tests only
+cargo test --workspace
+
+# Rust type-check (fast, no codegen)
 cargo check
 
-# CLI (control running gpty GUI over IPC)
-cargo run --bin gpty -- new-pane --type terminal
-cargo run --bin gpty -- list-panes
-cargo run --bin gpty -- schema          # JSON Schema for AI tools
-cargo run --bin gpty -- schema --format mcp  # MCP tools manifest
+# Godot (GUT) tests only
+godot --headless --path godot --import
+godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration
 
-# Open in Godot editor (after building gdext)
+# Release build + local export
+cargo build -p gpty-gdext --release
+cp target/release/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
+godot --headless --path godot --export-release "Linux/X11" dist/gpty
+
+# Open in Godot editor
 cd godot && godot -e
 ```
 
-## Code Style
+### CLI (control a running GUI)
 
-### GDScript
+```bash
+cargo run --bin gpty -- new-pane --pane-type terminal
+cargo run --bin gpty -- list-panes
+cargo run --bin gpty -- schema          # JSON Schema for AI tools
+cargo run --bin gpty -- schema --format mcp  # MCP tools manifest
+```
 
-- **Indentation**: tabs
-- **Private members**: underscore prefix (`_cell_w`, `_settings_panel`)
-- **Config vars**: `_cfg_` prefix (`_cfg_cursor_shape`)
-- **Export pattern**: `@export var` for Inspector-settable properties
-
-### Rust
-
-- **Edition**: 2024
-- **Format**: standard `rustfmt`
-- **Async runtime**: `tokio`
-- **Thread safety**: Never call Godot methods from background threads. Queue state changes for GDScript to poll, or use `call_deferred()`.
+Verbose logging: `RUST_LOG=debug cargo run --bin gpty -- version`
 
 ## Project Structure
 
-|Crate|Role|
+| Crate | Role |
 |---|---|
-|`gpty-core`|Library: PTY spawning, ANSI parsing, alacritty_terminal grid, concept/pub-sub engine|
-|`gpty-ipc`|JSON-RPC 2.0 IPC transport, client, and server for workspace control|
-|`gpty-cli`|CLI binary: workspace control over JSON-RPC IPC|
-|`gpty-gdext`|GDExtension cdylib: `GptyTerminal` GodotClass bridging Rust ↔ GDScript|
+| `gpty-core` | Library: PTY spawning, ANSI parsing, alacritty_terminal grid, concept/pub-sub engine |
+| `gpty-ipc` | JSON-RPC 2.0 IPC transport, client, and server for workspace control |
+| `gpty-cli` | CLI binary: workspace control over JSON-RPC IPC |
+| `gpty-gdext` | GDExtension cdylib: `GptyTerminal` GodotClass bridging Rust ↔ GDScript |
 
-## PR Process
+See [AGENTS.md](AGENTS.md) for the full directory tree, module-level documentation, and detailed coding conventions.
+
+## Code Style
+
+See [AGENTS.md](AGENTS.md) for the complete GDScript and Rust conventions, pitfalls, and patterns. Key highlights:
+
+- **GDScript**: tabs, `_` prefix for private members, `_cfg_` prefix for config vars
+- **Rust**: edition 2024, `rustfmt`, `tokio` async runtime, never call Godot from background threads
+
+## Pull Request Process
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Ensure tests pass (add new tests as applicable)
-5. Submit a pull request
+4. Run `./scripts/ci-check` — ensure all checks pass
+5. Add or update tests as applicable
+6. Submit a pull request
+
+## Commit Format
+
+[Conventional Commits](https://www.conventionalcommits.org/): `type(scope): description`
+
+Types: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`, `style`, `ci`
+
+Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `ipc`, `profiles`, `concepts`, `icons`, `ci`
+
+Use the commit skill (`skill://commit`) for the recommended workflow. The commit-msg hook enforces this format automatically.
 
 ## Testing
 
-- **Automated**: `cargo test --workspace` (Rust) + `godot --headless --path godot -s addons/gut/gut_cmdln.gd ...` (GDScript). CI runs on every push.
+- **Automated**: `./scripts/ci-check` runs the full suite (Rust + GUT + audit). CI runs on every push to `main` and every PR.
 - **Manual pre-release**: [docs/content/docs/testing.md](docs/content/docs/testing.md) — smoke tests for CLI bridge, daemon lifecycle, UI shortcuts, and error paths that require a running GUI.
 - Test format: `Given / When / Then` with expected output. See the manual checklist for examples.
 
-### Commit Format
-
-[Conventional Commits](https://www.conventionalcommits.org/): `feat(scope):`, `fix(scope):`, `chore(scope):`
-
-Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `ipc`
-
 ## Security
 
-- **Concept Engine ReDoS**: Always use the standard Rust `regex` crate. PCRE or back-tracking engines are prohibited.
-- **OSC 52 Clipboard**: Do not implement OSC 52 clipboard injection/syncing without placing it behind an explicit Godot confirmation dialog.
+See [AGENTS.md](AGENTS.md) for the full security rules, including Concept Engine ReDoS prevention and OSC 52 clipboard restrictions.
 
 ## License
 
-Apache 2.0 (see `LICENSE`).
+Apache 2.0 (see [LICENSE](LICENSE)).
