@@ -1,6 +1,6 @@
 baseURL: https://gpty.github.io/gpty/
 locale: en-us
-title: gpty
+title: gPTY
 
 module:
   imports:

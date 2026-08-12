@@ -1,5 +1,3 @@
-# gpty
-
 [gPTY](https://godot-pty.github.io/gpty/) is a multi-terminal emulator built on Godot and Rust providing a graphical tiling grid and a pub-sub engine that lets terminals react to each other's output.
 
 ## Overview
@@ -11,8 +9,6 @@
 - **Persistence** — settings, layouts, and named profiles auto-save and restore on restart.
 - **Cross-platform** — standalone binaries for Linux, macOS, and Windows. No Godot or Rust toolchain required to run.
 - **Documentation** — https://godot-pty.github.io/gpty/
-
----
 
 | Component | Choice | Rationale |
 |----------|--------|-----------|
