@@ -17,8 +17,13 @@ func before_each():
 	SettingsManager.cfg_cursor_shape = 1
 
 func after_each():
+	# Free synchronously while mocks are still active: _exit_tree() → _save()
+	# would otherwise write the real layout/settings after teardown restores
+	# the real persistence scripts.
 	if _ws:
-		_ws.queue_free()
+		if _ws.get_parent():
+			_ws.get_parent().remove_child(_ws)
+		_ws.free()
 		_ws = null
 	MockAutoloads.teardown()
 
