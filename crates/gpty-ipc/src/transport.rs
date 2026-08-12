@@ -5,6 +5,7 @@
 //! socket on Linux/macOS, named pipe on Windows).
 
 use std::io;
+#[cfg(unix)]
 use std::path::Path;
 
 /// Marker trait for any async-readable, async-writable, sendable,

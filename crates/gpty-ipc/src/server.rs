@@ -52,45 +52,82 @@ impl IpcServer {
     /// Cleans up the socket file on Unix before binding.
     /// Never returns unless an unrecoverable I/O error occurs.
     pub async fn serve(&self) -> io::Result<()> {
-        // Clean up stale socket file on Unix.
         #[cfg(unix)]
         {
+            // Clean up stale socket file on Unix.
             let _ = std::fs::remove_file(&self.socket_path);
-        }
 
-        let listener = self.bind().await?;
-        log::info!("IPC server listening on {}", self.socket_path);
+            let listener = tokio::net::UnixListener::bind(&self.socket_path)?;
+            log::info!("IPC server listening on {}", self.socket_path);
 
-        loop {
-            match listener.accept().await {
-                Ok((stream, _addr)) => {
-                    let handlers = self.handlers.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = handle_connection(stream, &handlers).await {
-                            log::warn!("IPC connection error: {e}");
-                        }
-                    });
-                }
-                Err(e) => {
-                    log::error!("IPC accept error: {e}");
+            loop {
+                match listener.accept().await {
+                    Ok((stream, _addr)) => {
+                        let handlers = self.handlers.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = handle_connection(stream, &handlers).await {
+                                log::warn!("IPC connection error: {e}");
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        log::error!("IPC accept error: {e}");
+                    }
                 }
             }
         }
-    }
 
-    #[cfg(unix)]
-    async fn bind(&self) -> io::Result<tokio::net::UnixListener> {
-        tokio::net::UnixListener::bind(&self.socket_path)
+        #[cfg(windows)]
+        {
+            log::info!("IPC server listening on {}", self.socket_path);
+
+            loop {
+                // A Windows named pipe instance serves exactly one client.
+                // Create a fresh instance, wait for a client, then spawn its
+                // handler and prepare the next instance. Multiple instances
+                // of the same pipe name may coexist, so in-flight connections
+                // do not block new ones.
+                let server = match self.create_pipe_instance().await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::error!("IPC pipe create error: {e}");
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        continue;
+                    }
+                };
+                if let Err(e) = server.connect().await {
+                    log::error!("IPC pipe connect error: {e}");
+                    continue;
+                }
+                let handlers = self.handlers.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = handle_connection(server, &handlers).await {
+                        log::warn!("IPC connection error: {e}");
+                    }
+                });
+            }
+        }
+
+        #[cfg(not(any(unix, windows)))]
+        {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "unsupported platform for IPC server",
+            ))
+        }
     }
 
     #[cfg(windows)]
-    async fn bind(&self) -> io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
-        // Windows uses named pipes; for a simple implementation we
-        // accept one connection at a time.
+    async fn create_pipe_instance(
+        &self,
+    ) -> io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
         use tokio::net::windows::named_pipe;
-        let mut opts = named_pipe::ServerOptions::new();
-        opts.first_pipe_instance(true);
-        opts.create(&self.socket_path)
+
+        // Named pipes are network-reachable by default; this daemon is
+        // local-only, so reject remote clients.
+        named_pipe::ServerOptions::new()
+            .reject_remote_clients(true)
+            .create(&self.socket_path)
     }
 }
 
