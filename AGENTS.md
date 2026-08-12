@@ -266,6 +266,8 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 
 - `tokio::task::JoinHandle` drop detaches: dropping a `JoinHandle` does NOT abort the task — it keeps running until it exits naturally. For explicit cleanup (e.g., in a `Drop` impl), call `handle.abort()`.
 - `std::sync::Once` poisoning: if the closure passed to `Once::call_once` panics, the `Once` is permanently poisoned — all subsequent calls panic too. For lazy init that spawns fallible work, use `AtomicBool::swap(true, Relaxed)` or `Mutex<Option<...>>` instead.
+
+- **Resize cascades from layout changes**: When panes are added/removed, remaining terminals receive multiple `NOTIFICATION_RESIZED` events in rapid succession. Even when calculated rows×cols are identical, each `resize_grid()` call triggers a full grid re-wrap and sync, producing a visible "scrolling through history" animation. Fix: `TermGrid::resize()` must return early if dimensions are unchanged. Also apply a pixel-level check in the GDScript debounce to avoid redundant calls.
 - Shared static state in integration tests: tests that mutate shared `static` state (queues, maps) must clean up in ALL exit paths — including timeout, error, and panic branches. A stale queue entry from one test will break the next test. Write a `clear_state()` helper and call it in every test.
 ### Agent Tool Notes
 
