@@ -4,6 +4,7 @@ cd "$(dirname "$0")"
 
 # Copy repo docs into assets/repo/ for Hugo resources.Get
 mkdir -p assets/repo/crates/gpty-core
+mkdir -p assets/repo/crates/gpty-ipc
 mkdir -p assets/repo/crates/gpty-gdext
 mkdir -p assets/repo/crates/gpty-cli
 mkdir -p assets/repo/godot
@@ -15,6 +16,7 @@ cp ../CONTRIBUTING.md assets/repo/
 cp ../LICENSE assets/repo/
 cp ../AGENTS.md assets/repo/
 cp ../crates/gpty-core/README.md assets/repo/crates/gpty-core/
+cp ../crates/gpty-ipc/README.md assets/repo/crates/gpty-ipc/
 cp ../crates/gpty-gdext/README.md assets/repo/crates/gpty-gdext/
 cp ../crates/gpty-cli/README.md assets/repo/crates/gpty-cli/
 cp ../godot/README.md assets/repo/godot/
