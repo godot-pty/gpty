@@ -5,9 +5,29 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 
 
 ## [0.3.1] — Unreleased
+
+### Added
+
+- `gpty concept list` / `gpty concept toggle` CLI subcommands for managing concept automations
+- `concept-list` / `concept-toggle` MCP tools exposing concept management to AI agents
+- Pre-push CI gate — git hooks (pre-commit, commit-msg, pre-push) and the local `scripts/ci-check` runner
+- Windows compile check in CI — a `rust-windows` job on windows-latest, so platform-specific errors surface on push, not at tag time
+
+### Changed
+
+- MCP tool schemas tightened; nested `daemon` and `layout` subcommands flattened into prefixed tools; `mcp.json` added at the repo root for coding-harness auto-discovery
+- Documentation restructured — crate READMEs nested under Overview in the docs sidebar, dev setup consolidated into CONTRIBUTING.md, gPTY naming made consistent
+
 ### Fixed
 
-- Paste (`Ctrl+Shift+V`) and copy (`Ctrl+Shift+C`) now work in terminals — code viewer shortcut moved to `Ctrl+Shift+C`, and `_gui_input` exempts copy/paste from the ShortcutManager intercept check
+- Windows release build — the IPC server now serves per-connection named-pipe instances (`connect()` per instance) instead of the nonexistent `accept()`; fixes the v0.3.0 Windows build failure
+- Concept startup race — concepts pushed via `ClassDB.instantiate` on the first frame instead of a dummy `GptyTerminal` whose `#[func]` calls silently no-op'd
+- Concept capture — `UntilStop` mode triggers from PTY output rather than stdin echo; capture-only concepts with an empty `cmd` are honored
+- Concept enable/disable toggle applies state correctly
+- Concepts cross the gdext FFI boundary as JSON strings, bypassing the `Array[Dictionary]` marshaling bug
+- Terminal copy/paste — `Ctrl+Shift+V` paste restored, `Ctrl+Shift+C` copy exempt from the ShortcutManager intercept, code viewer spawn moved to `Ctrl+Shift+C`
+- MCP kebab-case tool names mapped to camelCase IPC methods; daemon tools handled locally
+- Pane resize cascade — no-op `resize_grid` skipped when dimensions are unchanged, removing the scroll-through-history artifact when panes close
 
 
 [0.3.1]: https://github.com/godot-pty/gpty/releases/tag/v0.3.1 (unreleased)

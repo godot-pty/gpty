@@ -22,9 +22,13 @@ GitHub Issues are used for user-reported bugs and discussions, not roadmap track
 - [ ] GPU-accelerated rendering — rasterize terminal cells to a single GPU texture using fontdue for glyph rasterization, replacing the per-cell GDScript `_draw()` loop
 - [ ] UI Thread DoS mitigation — rate-limit terminal rendering when a PTY floods output (e.g., `cat /dev/urandom`), preventing the UI thread from locking up
 
-## v0.3.1
+## v0.3.1 — Stability & Windows Support
 
-- [ ]
+- [x] Windows named-pipe IPC — per-connection named-pipe instances on the server (v0.3.0 never compiled on Windows); local cross-check via xwin/clang-cl plus the CI `rust-windows` job keep it green
+- [x] Concept engine reliability — startup registration race fixed (`ClassDB.instantiate` on first frame), `UntilStop` capture triggers from PTY output, capture-only concepts with empty `cmd` supported
+- [x] Concept management via CLI and MCP — `gpty concept list` / `gpty concept toggle` plus matching `concept-list`/`concept-toggle` MCP tools
+- [x] Release-quality CI gate — pre-push git hooks, local `scripts/ci-check` runner, and a Windows compile job catching platform breakage before tagging
+- [x] Documentation hub — docs sidebar restructure (crate READMEs under Overview), dev setup consolidated into CONTRIBUTING.md
 
 ## v0.3.0 — CLI & AI Integration
 
