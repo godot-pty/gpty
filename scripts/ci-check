@@ -88,6 +88,39 @@ if $FAST; then
     exit $FAILED
 fi
 
+# ── Step 3.5: Windows cross-check ─────────────────────────────────────
+# Release parity check: release.yml builds on windows-latest; CI job
+# rust-windows enforces this in the cloud. Locally it runs when the
+# toolchain is available, otherwise it is skipped with a hint.
+header "windows cross-check"
+WIN_TARGET="x86_64-pc-windows-msvc"
+WIN_OK=true
+if rustup target list --installed 2>/dev/null | grep -q "^${WIN_TARGET}$" \
+    && command -v clang-cl >/dev/null 2>&1 \
+    && command -v llvm-lib >/dev/null 2>&1 \
+    && [ -d "$HOME/.xwin/crt" ]; then
+    XWIN_CC="$HOME/.local/bin/xwin-clang-cl"
+    if [ ! -x "$XWIN_CC" ]; then
+        printf '#!/bin/sh\nexec clang-cl --target=x86_64-pc-windows-msvc "$@"\n' > "$XWIN_CC"
+        chmod +x "$XWIN_CC"
+    fi
+    XWIN_INCLUDE="$HOME/.xwin/crt/include;$HOME/.xwin/sdk/include/ucrt;$HOME/.xwin/sdk/include/um;$HOME/.xwin/sdk/include/shared"
+    XWIN_LIB="$HOME/.xwin/crt/lib/x86_64;$HOME/.xwin/sdk/lib/ucrt/x86_64;$HOME/.xwin/sdk/lib/um/x86_64"
+    if CC_x86_64_pc_windows_msvc="$XWIN_CC" \
+        CXX_x86_64_pc_windows_msvc="$XWIN_CC" \
+        AR_x86_64_pc_windows_msvc="llvm-lib" \
+        INCLUDE="$XWIN_INCLUDE" \
+        LIB="$XWIN_LIB" \
+        cargo check --workspace --target "$WIN_TARGET" 2>&1; then
+        pass "windows cross-check"
+    else
+        fail "windows cross-check"
+        check_failed
+    fi
+else
+    warn "windows cross-check — needs: rustup target add ${WIN_TARGET}; clang-cl + llvm-lib; xwin splat into ~/.xwin (enforced by CI job rust-windows)"
+fi
+
 # ── Step 4: cargo test ─────────────────────────────────────────────────
 header "cargo test"
 if cargo test --workspace -- --test-threads=1 2>&1; then
