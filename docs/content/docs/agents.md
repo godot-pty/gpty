@@ -1,6 +1,6 @@
 ---
 title: Agent Guide
-weight: 6
+weight: 3
 noHeading: true
 ---
 
