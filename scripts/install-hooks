@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# install-hooks: symlink githooks/ into .git/hooks/
+# Idempotent — skips hooks already pointing to the correct target.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+HOOKS_DIR="$REPO_ROOT/githooks"
+GIT_HOOKS="$REPO_ROOT/.git/hooks"
+
+HOOKS=(
+    pre-commit
+    pre-push
+    commit-msg
+)
+
+INSTALLED=0
+SKIPPED=0
+
+for hook in "${HOOKS[@]}"; do
+    SRC="../../githooks/$hook"
+    DST="$GIT_HOOKS/$hook"
+
+    if [[ -L "$DST" ]]; then
+        CURRENT="$(readlink "$DST")"
+        if [[ "$CURRENT" == "$SRC" ]]; then
+            echo "  SKIP $hook (already installed)"
+            SKIPPED=$((SKIPPED + 1))
+            continue
+        fi
+        echo "  REPLACE $hook (points to $CURRENT, updating to $SRC)"
+        rm "$DST"
+    elif [[ -f "$DST" ]]; then
+        echo "  REPLACE $hook (existing file, backing up to $hook.bak)"
+        mv "$DST" "$DST.bak"
+    fi
+
+    ln -s "$SRC" "$DST"
+    echo "  INSTALL $hook"
+    INSTALLED=$((INSTALLED + 1))
+done
+
+echo ""
+echo "Done: $INSTALLED installed, $SKIPPED already present."
+echo "Verify: ls -la .git/hooks/{pre-commit,pre-push,commit-msg}"

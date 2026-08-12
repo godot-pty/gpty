@@ -12,6 +12,13 @@ gpty/
 ├── Cargo.toml                  # Workspace root
 ├── AGENTS.md
 ├── LICENSE
+├── scripts/                   # CI runner and setup scripts
+│   ├── ci-check               # Run all CI checks locally (--fast for quick)
+│   └── install-hooks          # Symlink githooks into .git/hooks/
+├── githooks/                  # Git hook scripts
+│   ├── pre-commit             # Fast checks (fmt, workflow lint, clippy)
+│   ├── pre-push               # Full CI suite before push
+│   └── commit-msg             # Conventional Commits enforcement
 ├── crates/
 │   ├── gpty-core/           # Library: PTY, ANSI, grid, concepts, pub-sub
 │   │   └── src/
@@ -237,7 +244,20 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 ### Commits
 
 - Format: [Conventional Commits](https://www.conventionalcommits.org/) — `feat(scope):`, `fix(scope):`, `chore(scope):`
-- Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `ipc`, `profiles`, `concepts`, `icons`
+- Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `ipc`, `profiles`, `concepts`, `icons`, `ci`
+- Workflow: Use the commit skill (`skill://commit`) to discover changes, group them logically, and produce correctly-formatted messages. The git hooks (pre-commit, commit-msg, pre-push) are the enforcement layer that catches bypasses.
+- CI gates: `pre-commit` runs fast checks (fmt, workflow lint, clippy). `pre-push` runs the full `./scripts/ci-check` suite. Install with `./scripts/install-hooks` once per clone.
+
+### Commit Discipline
+
+- Use the commit skill (`skill://commit`) as the normal workflow — it handles grouping, README freshness, and Conventional Commits.
+- The git hooks are the safety net: pre-commit catches fmt/lint issues, commit-msg enforces message format, pre-push runs the full CI suite.
+- NEVER commit without running `./scripts/ci-check` first. If it fails, fix the failures before committing.
+- `cargo fmt` and `cargo clippy` run automatically in the pre-commit hook — but run them explicitly before staging to avoid amend churn.
+- If a test fails: fix the SOURCE code, not the test. Only update a test if the behavior change is intentional AND documented in the commit message body.
+- Test-only commits without corresponding source changes are a red flag. If you find yourself tweaking a test "just to make it pass," STOP — the test is catching a real issue or the test expectations are wrong. Either way, a commit must include both the source fix and the test update together.
+- Push only after the full suite passes. The pre-push hook enforces this; `git push --no-verify` bypasses it — use ONLY in emergencies, and expect CI to catch what you skipped.
+- If you must bypass: document why in the commit message body.
 
 ### Pitfalls
 

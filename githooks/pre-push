@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# pre-push: full CI suite before pushing
+# Delegates to scripts/ci-check (full mode)
+# Receives remote name/URL from git on stdin but ignores them.
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CI_CHECK="$REPO_ROOT/scripts/ci-check"
+
+if [[ -x "$CI_CHECK" ]]; then
+    "$CI_CHECK"
+    STATUS=$?
+    if [[ $STATUS -ne 0 ]]; then
+        echo ""
+        echo "Push blocked. Fix failures or bypass with: git push --no-verify"
+    fi
+    exit $STATUS
+else
+    echo "ERROR: scripts/ci-check not found or not executable" >&2
+    echo "Run: ./scripts/install-hooks first" >&2
+    exit 1
+fi

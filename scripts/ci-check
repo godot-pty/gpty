@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── ci-check: Run all CI checks locally in fast-fail order ──────────────
+# Usage: ./scripts/ci-check [--fast]
+#   --fast   Only fmt + workflow lint + clippy (pre-commit)
+#   (no flag)  Full suite: fmt + lint + clippy + tests + GUT + audit
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
+FAST=false
+if [[ "${1:-}" == "--fast" ]]; then
+    FAST=true
+fi
+
+# ── Color helpers ───────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m'       # No Color
+BOLD='\033[1m'
+
+pass()  { printf "  ${GREEN}PASS${NC} %s\n" "$1"; }
+fail()  { printf "  ${RED}FAIL${NC} %s\n" "$1"; }
+warn()  { printf "  ${YELLOW}SKIP${NC} %s\n" "$1"; }
+header(){ printf "\n${BOLD}── %s ──${NC}\n" "$1"; }
+detail(){ printf "%s\n" "$1" | sed 's/^/    /'; }
+
+FAILED=0
+
+check_failed() {
+    FAILED=1
+    return 1
+}
+
+# ── Step 1: cargo fmt ──────────────────────────────────────────────────
+header "cargo fmt --check"
+if cargo fmt --all -- --check 2>&1; then
+    pass "rustfmt"
+else
+    fail "rustfmt — run 'cargo fmt --all' to fix"
+    check_failed
+fi
+
+# ── Step 2: Workflow YAML lint ─────────────────────────────────────────
+header "workflow YAML lint"
+YAML_OUT="$(python3 -c "
+import yaml, sys
+errs = []
+for w in ['ci.yml','release.yml','docs.yml']:
+    try:
+        yaml.safe_load(open(f'.github/workflows/{w}'))
+        print(f'  OK: {w}')
+    except Exception as e:
+        errs.append(f'  ERROR: {w}: {e}')
+if errs:
+    for e in errs:
+        print(e, file=sys.stderr)
+    sys.exit(1)
+" 2>&1)" && YAML_OK=true || YAML_OK=false
+
+if $YAML_OK; then
+    pass "workflow YAML"
+else
+    fail "workflow YAML"
+    detail "$YAML_OUT"
+    check_failed
+fi
+
+# ── Step 3: cargo clippy ───────────────────────────────────────────────
+header "cargo clippy"
+if cargo clippy --workspace -- -D warnings 2>&1; then
+    pass "clippy"
+else
+    fail "clippy"
+    check_failed
+fi
+
+# ── Fast mode stops here ───────────────────────────────────────────────
+if $FAST; then
+    printf "\n"
+    if [[ $FAILED -eq 0 ]]; then
+        printf "${GREEN}${BOLD}All fast checks passed.${NC}\n"
+    else
+        printf "${RED}${BOLD}Fast checks failed.${NC}\n"
+    fi
+    exit $FAILED
+fi
+
+# ── Step 4: cargo test ─────────────────────────────────────────────────
+header "cargo test"
+if cargo test --workspace -- --test-threads=1 2>&1; then
+    pass "cargo test"
+else
+    fail "cargo test"
+    check_failed
+fi
+
+# ── Step 5: GUT (GDScript) tests ───────────────────────────────────────
+header "GUT tests"
+GODOT="$(command -v godot 2>/dev/null || echo "")"
+if [[ -z "$GODOT" ]]; then
+    warn "godot not found — skipping GUT tests"
+else
+    echo "  Building GDExtension..."
+    cargo build -p gpty-gdext 2>&1 || { fail "gdext build"; check_failed; }
+    echo "  Installing GDExtension library..."
+    cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so 2>&1 || {
+        fail "copy libgpty_gdext.so — check target path"
+        check_failed
+    }
+    echo "  Importing Godot project..."
+    godot --headless --path godot --import 2>&1 || { fail "godot import"; check_failed; }
+    echo "  Running GUT tests..."
+    if godot --headless --path godot \
+        -s addons/gut/gut_cmdln.gd -d \
+        -gdir=res://tests/unit \
+        -gdir=res://tests/integration 2>&1; then
+        pass "GUT tests"
+    else
+        fail "GUT tests"
+        check_failed
+    fi
+fi
+
+# ── Step 6: cargo audit ────────────────────────────────────────────────
+header "cargo audit"
+if command -v cargo-audit &>/dev/null; then
+    # cargo-audit needs a lockfile with exact versions; ensure it exists
+    cargo generate-lockfile 2>&1 || true
+    if cargo audit 2>&1; then
+        pass "cargo audit"
+    else
+        fail "cargo audit"
+        check_failed
+    fi
+else
+    warn "cargo-audit not installed — run: cargo install cargo-audit"
+fi
+
+# ── Summary ────────────────────────────────────────────────────────────
+printf "\n"
+if [[ $FAILED -eq 0 ]]; then
+    printf "${GREEN}${BOLD}All checks passed. Ready to push.${NC}\n"
+else
+    printf "${RED}${BOLD}Some checks failed. Fix before pushing.${NC}\n"
+fi
+exit $FAILED

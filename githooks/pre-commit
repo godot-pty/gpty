@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# pre-commit: fast CI checks (fmt + workflow lint + clippy)
+# Delegates to scripts/ci-check --fast
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CI_CHECK="$REPO_ROOT/scripts/ci-check"
+
+if [[ -x "$CI_CHECK" ]]; then
+    exec "$CI_CHECK" --fast
+else
+    echo "ERROR: scripts/ci-check not found or not executable" >&2
+    echo "Run: ./scripts/install-hooks first" >&2
+    exit 1
+fi

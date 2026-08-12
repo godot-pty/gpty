@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# commit-msg: enforce Conventional Commits format
+# Validates the commit message against the exact types and scopes from AGENTS.md.
+
+COMMIT_MSG_FILE="$1"
+COMMIT_MSG="$(cat "$COMMIT_MSG_FILE")"
+
+# Types and scopes from AGENTS.md
+TYPES="feat|fix|chore|docs|style|refactor|perf|test|ci|build|revert"
+SCOPES="settings|terminal|layout|sidebar|gdext|core|cli|ipc|profiles|concepts|icons|ci"
+
+# Regex: type(scope): description  — scope is optional
+PATTERN="^(${TYPES})(\((${SCOPES})\))?!?: .+"
+
+if echo "$COMMIT_MSG" | grep -qE "$PATTERN"; then
+    exit 0
+fi
+
+echo "ERROR: Commit message does not match Conventional Commits format." >&2
+echo "" >&2
+echo "Expected: type(scope): description" >&2
+echo "  type:  $TYPES" >&2
+echo "  scope: $SCOPES" >&2
+echo "" >&2
+echo "Examples:" >&2
+echo "  feat(core): add streaming output capture" >&2
+echo "  fix(terminal): repair resize cascade" >&2
+echo "  chore(deps): bump tokio to 1.43" >&2
+echo "  docs: update README for v0.3.0" >&2
+echo "" >&2
+echo "Bypass: git commit -n (not recommended)" >&2
+exit 1
