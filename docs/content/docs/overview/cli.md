@@ -1,6 +1,6 @@
 ---
 title: CLI
-weight: 5
+weight: 4
 noHeading: true
 ---
 
