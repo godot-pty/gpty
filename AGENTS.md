@@ -1,8 +1,8 @@
 # Agent Guide
 
-Rust + Godot multi-PTY terminal emulator with a tiling grid GUI.
+Rust + Godot multi PTY emulator with a tiling grid GUI.
 
-## Project
+## Project Structure
 
 - Stack: Rust (edition 2024) backend + Godot (4.7) with a GDScript frontend via `gdext` (0.5)
 - Entry point: `godot/scenes/main.tscn` → `workspace.gd` (root `Control` node)
@@ -12,15 +12,15 @@ gpty/
 ├── Cargo.toml                  # Workspace root
 ├── AGENTS.md
 ├── LICENSE
-├── scripts/                   # CI runner and setup scripts
-│   ├── ci-check               # Run all CI checks locally (--fast for quick)
-│   └── install-hooks          # Symlink githooks into .git/hooks/
-├── githooks/                  # Git hook scripts
-│   ├── pre-commit             # Fast checks (fmt, workflow lint, clippy)
-│   ├── pre-push               # Full CI suite before push
-│   └── commit-msg             # Conventional Commits enforcement
+├── scripts/                    # CI runner and setup scripts
+│   ├── ci-check                # Run all CI checks locally (--fast for quick)
+│   └── install-hooks           # Symlink githooks into .git/hooks/
+├── githooks/                   # Git hook scripts
+│   ├── pre-commit              # Fast checks (fmt, workflow lint, clippy)
+│   ├── pre-push                # Full CI suite before push
+│   └── commit-msg              # Conventional Commits enforcement
 ├── crates/
-│   ├── gpty-core/           # Library: PTY, ANSI, grid, concepts, pub-sub
+│   ├── gpty-core/              # PTY spawning, ANSI parsing, alacritty_terminal grid, pub-sub
 │   │   └── src/
 │   │       ├── lib.rs          # Module map + data-flow diagram
 │   │       ├── types.rs        # Concept, Event, Action, CaptureMode, CapturedOutput
@@ -32,7 +32,7 @@ gpty/
 │   │       ├── color.rs        # ANSI color → RGB
 │   │       ├── keymap.rs       # Key event → byte sequence
 │   │       └── history.rs      # SQLite scrollback store
-│   ├── gpty-cli/            # CLI workspace control over JSON-RPC IPC
+│   ├── gpty-cli/               # CLI workspace control over JSON-RPC IPC
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── main.rs         # clap CLI entry point
@@ -47,14 +47,14 @@ gpty/
 │   │           ├── mcp.rs
 │   │           ├── daemon.rs
 │   │           └── layout.rs
-│   ├── gpty-ipc/            # Shared IPC types, transport, client, and server
+│   ├── gpty-ipc/               # Shared JSON-RPC 2.0 IPC transport, client, and server
 │   │   └── src/
 │   │       ├── protocol.rs     # JSON-RPC 2.0 Request, Response, JsonRpcError
 │   │       ├── types.rs        # IPC domain types (NewPaneParams, PaneInfo, …)
 │   │       ├── transport.rs    # Platform socket connection (Unix, named pipe)
 │   │       ├── server.rs       # Async IPC server with handler registry
 │   │       └── client.rs       # Async IPC client with connect/call/timeout
-│   └── gpty-gdext/          # GDExtension cdylib: GptyTerminal GodotClass
+│   └── gpty-gdext/             # GDExtension cdylib: GptyTerminal GodotClass
 │       └── src/lib.rs
 └── godot/                      # Godot 4.7 project
     ├── project.godot
@@ -91,103 +91,35 @@ gpty/
 
 ## Commands
 
-```bash
-# Build the GDExtension shared library
-cargo build -p gpty-gdext
-# Copy to the Godot project for local development
-cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
+See [CONTRIBUTING.md](CONTRIBUTING.md) for all development, build, test, and CLI commands.
 
-# Type-check Rust only (fast, no codegen)
-cargo check
-
-# CLI (control running gpty GUI over IPC)
-cargo run --bin gpty -- new-pane --pane-type terminal
-cargo run --bin gpty -- list-panes
-cargo run --bin gpty -- schema          # JSON Schema for AI tools
-cargo run --bin gpty -- schema --format mcp  # MCP tools manifest
-
-# Open in Godot editor (after building gdext)
-cd godot && godot -e
-```
-
-### Data flow
+### Data Flow
 
 ```
 Shell → PTY I/O thread → vte parser → alacritty_terminal grid → Arc<Mutex<TermGrid>> → GptyTerminal (gdext) → GDScript _draw()
 ```
 
+```
 CLI → Unix socket → IpcServer (tokio) → PENDING_IPC queue → GDScript _poll_ipc_requests() → workspace methods → IPC_RESPONDERS → CLI response
-
-## Local Development
-
-Build the GDExtension library and copy it into the Godot project:
-
-```bash
-cargo build -p gpty-gdext
-cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
 ```
 
-Launch the GUI (headless or editor):
+## MCP Integration
 
-```bash
-godot --path godot &          # headless, daemonized
-# or: godot -e --path godot    # editor
-```
-
-The GUI starts an IPC server on `/tmp/gpty.sock` (or `GPTY_SOCKET` env var if set).
-Once running, control it with the CLI:
-
-```bash
-GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- version
-GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- new-pane -t terminal
-GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- list-panes
-GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- inject T1 -t "echo hello"
-GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- daemon stop
-```
-
-Standalone commands (no GUI needed):
-
-```bash
-cargo run --bin gpty -- schema                    # JSON Schema
-cargo run --bin gpty -- schema --format mcp       # MCP tools manifest
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | cargo run --bin gpty -- mcp
-```
-
-
-## MCP / OMP Integration
-
-gpty ships an MCP server (`gpty mcp`) that exposes 12 tools for AI agent integration. OMP (Oh My Pi) discovers it via `mcp.json` in the repo root.
+gpty ships an MCP server (`gpty mcp`) that exposes 12 tools for AI agent integration.
+AI agents and coding harnesses can discover these via the `mcp.json` that's at the root of the repository.
 
 ```json
-// mcp.json — OMP discovers this automatically
+// mcp.json — Coding harnesses should discover this automatically
 {"mcpServers": {"gpty": {"command": "gpty", "args": ["mcp"]}}}
 ```
 
 Tools: `new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `layout-save`, `layout-load`, `layout-list`, `daemon-start`, `daemon-stop`, `daemon-status`, `version`.
 
-Generate the current tools manifest: `cargo run --bin gpty -- schema --format mcp`
-
 The MCP tool schemas are auto-generated from clap command definitions in `crates/gpty-cli/src/commands/schema.rs`. Nested subcommands (`daemon`, `layout`) are flattened into prefixed tools. Self-referential tools (`mcp`, `schema`) are excluded.
 
 See `skill://gpty-omp-integration` for usage patterns.
 
-
 ## Testing
-
-### Rust
-
-```bash
-cargo test --workspace          # Tests across core, gdext, cli
-cargo test -p gpty-core      # core library only
-```
-
-### GDScript (GUT)
-
-```bash
-godot --headless --path godot --import         # required before first run
-godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
-  -gdir=res://tests/unit -gdir=res://tests/integration
-```
 
 - Tests live in `godot/tests/` — `unit/` for pure-logic classes, `integration/` for scene-tree tests.
 - Mocking autoloads: Use `MockAutoloads.setup()` / `teardown()` in `before_each`/`after_each`.
@@ -289,6 +221,7 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 
 - **Resize cascades from layout changes**: When panes are added/removed, remaining terminals receive multiple `NOTIFICATION_RESIZED` events in rapid succession. Even when calculated rows×cols are identical, each `resize_grid()` call triggers a full grid re-wrap and sync, producing a visible "scrolling through history" animation. Fix: `TermGrid::resize()` must return early if dimensions are unchanged. Also apply a pixel-level check in the GDScript debounce to avoid redundant calls.
 - Shared static state in integration tests: tests that mutate shared `static` state (queues, maps) must clean up in ALL exit paths — including timeout, error, and panic branches. A stale queue entry from one test will break the next test. Write a `clear_state()` helper and call it in every test.
+
 ### Agent Tool Notes
 
 - **gdext `#[func]` parameter types: ONLY `GString`, `bool`, and `i64` are reliably marshaled as input parameters.** `Array<Variant>`, `Dictionary`, and bare `Variant` all silently fail — the GDScript call succeeds but the Rust body never executes. Workaround: serialize complex data to JSON in GDScript (`JSON.stringify()`), pass as `GString`, deserialize in Rust with `serde_json::from_str`.

@@ -3,8 +3,6 @@ title: Testing
 weight: 10
 ---
 
-# Testing
-
 gpty's test strategy combines automated CI checks with a manual pre-release smoke test suite. Automated tests cover all pure-logic paths in Rust and GDScript; manual tests cover GUI interaction, IPC bridge roundtrips, and daemon lifecycle that require a running Godot instance.
 
 ## Automated (CI)

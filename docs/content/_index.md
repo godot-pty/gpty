@@ -1,16 +1,14 @@
 ---
-title: gpty
+title: gPTY
 toc: false
 ---
 
-## Multi-PTY Emulator
+[gPTY](https://godot-pty.github.io/gpty/) is a multi-terminal emulator built on Godot and Rust providing a graphical tiling grid and a pub-sub engine that lets terminals react to each other's output.
 
-**gpty** is a tiling grid terminal emulator built with Rust and Godot. Run multiple PTY sessions side by side, capture command output via regex concepts, and manage layouts with profiles.
-
-![gpty terminal grid](/images/v0.2.0_1.png)
+![gpty terminal grid](/images/v0.3.0_1.png)
 
 {{< cards >}}
-  {{< card link="/gpty/docs" title="Documentation" icon="book-open" subtitle="Learn how gpty works, from the PTY engine to the Godot GUI." >}}
+  {{< card link="/gpty/docs" title="Documentation" icon="book-open" subtitle="Learn how gPTY works, from the PTY engine to the Godot GUI." >}}
   {{< card link="/gpty/blog" title="Blog" icon="pencil" subtitle="Release notes, tips, and development updates." >}}
   {{< card link="https://github.com/godot-pty/gpty" title="GitHub" icon="github" subtitle="Star, fork, or open an issue on GitHub." >}}
 {{< /cards >}}
@@ -22,7 +20,7 @@ toc: false
 {{< hextra/feature-grid >}}
   {{< hextra/feature-card
     title="Multi-PTY Grid"
-    subtitle="Tile multiple terminals in a resizable grid. Split, swap, and kill panes with keyboard shortcuts."
+    subtitle="Tile multiple terminals in a resizable grid. Split, swap, and kill panes."
     icon="terminal"
   >}}
   {{< hextra/feature-card
@@ -32,7 +30,7 @@ toc: false
   >}}
   {{< hextra/feature-card
     title="Profiles"
-    subtitle="Save and restore terminal layouts as named profiles. Switch contexts instantly."
+    subtitle="Save and restore terminal layouts as named profiles."
     icon="bookmark"
   >}}
 {{< /hextra/feature-grid >}}

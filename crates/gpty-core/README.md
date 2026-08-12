@@ -16,14 +16,46 @@ Library crate for the gpty multi-PTY emulator. This is the engine — all termin
 | [`keymap`](src/keymap.rs) | Keyboard event → byte sequence translation | `key_event_to_bytes()` |
 | [`history`](src/history.rs) | SQLite-backed scrollback history store | `HistoryStore` |
 
-## Concept Capture System
+## Concept System
 
-The engine supports two capture modes:
+Concepts are the core orchestration primitive: a regular expression trigger paired with labelled actions.
+
+```rust
+Concept {
+    name: "port_conflict",
+    trigger_regex: Regex::new(r"(?i)address.*already.*in\s*use").unwrap(),
+    destinations: vec![Action {
+        command_template: "echo '[Auto] Port conflict detected - consider lsof -i'",
+        target_label: "observer",
+    }],
+}
+```
+
+How it works:
+1. PTY output bytes stream through the `vte` parser
+2. The parser strips ANSI escape sequences and extracts visible text lines
+3. Each line is tested against every registered concept's `trigger_regex`
+4. On match, an `Event` is broadcast on the `tokio::sync::broadcast` channel
+5. Every terminal task receives the event, checks its labels against each action's `target_label`
+6. Matching terminals inject the `command_template` into their PTY's stdin
+
+Self-reaction loops are prevented: a terminal ignores events where `source_pane == my_id`.
+
+Security Warning: The Concept Engine is designed to execute commands automatically based on terminal output. Do not bind destructive or high-privilege actions (like `rm` or `sudo`) to easily spoofable regex triggers. An attacker could intentionally print matching text to trick your terminal into executing the action payload.
+
+The engine supports two concept capture modes:
 
 - `SingleLine`: Per-line regex matching. On match, broadcasts an `Event` on the pub-sub channel. Receiving terminals with matching labels inject the action's command template into their PTY stdin.
 - `UntilStop { stop_timeout_ms, stop_on_input }`: Command-output capture. On match, the terminal enters capture mode — all subsequent PTY output is buffered as raw bytes (never fed to the grid). The capture ends on timeout (silence for N ms) or user input. The captured output is routed via GDScript to a receiver pane (e.g., code viewer) or flushed back to the terminal grid.
 
 Key functions: `finalize_capture()`, `handle_command()`, `capture_stops_on_input()`, `feed_grid()`, `store_line()`.
+
+### Use Cases
+
+- Auto-Restarting Watchers: Detect a segmentation fault or panic string in a backend server pane, and automatically inject a restart command into an adjacent management pane.
+- Port Conflict Resolution: Detect an "Address already in use" error and immediately run an `lsof` or `kill` command to clear the bound port.
+- AI Observer: Pipe error blocks (such as a Python traceback or Rust compiler error) to a local language model, displaying a plain-English explanation and a proposed fix in a secondary pane.
+- Automated Documentation: Match specific compiler error codes and automatically open the relevant local or web documentation in an adjacent window.
 
 ## Why Flat?
 

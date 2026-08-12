@@ -1,13 +1,16 @@
 # gpty
 
-gPTY, a Godot-based Rust multi-PTY emulator desktop application for creating, expanding, and orchestrating terminal sessions in a grid-based GUI.
+[gPTY](https://godot-pty.github.io/gpty/) is a multi-terminal emulator built on Godot and Rust providing a graphical tiling grid and a pub-sub engine that lets terminals react to each other's output.
 
 ## Overview
 
-- Reactive Automation: Rather than acting as a passive text pipe, the terminal reads its own output. The built-in pub-sub engine detects matched patterns and automatically executes actions (fixes, restarts, or notifications) in adjacent panes.
-- Unrestricted Aesthetics: Built on Godot to support fluid animations, instant theming, and rich UI overlays without the memory overhead of an embedded browser.
-- Zero-Friction Tiling: Managing multiple panes relies on a native graphical grid and drag-and-drop (coming soon) mechanics, bypassing the need to memorize complex keyboard multiplexer bindings.
-- Open source, no telemetry, no logins.
+- **Tiling grid** — split, resize, kill, and swap panes in a graphical layout.
+- **Terminal emulation** — full DEC STD 070 via `alacritty_terminal`. `16`/`256`/`true color`, scrollback with regex search, wrapped text selection.
+- **Concept engine** — regex triggers on PTY output automatically inject commands or capture output into adjacent panes. Ship defaults or write your own.
+- **CLI + MCP** — control the GUI over JSON-RPC IPC (`gpty new-pane`, `gpty inject`, etc.). AI agents can spawn panes, send text, and manage layouts via the MCP server.
+- **Persistence** — settings, layouts, and named profiles auto-save and restore on restart.
+- **Cross-platform** — standalone binaries for Linux, macOS, and Windows. No Godot or Rust toolchain required to run.
+- **Documentation** — https://godot-pty.github.io/gpty/
 
 ---
 
@@ -24,7 +27,7 @@ gPTY, a Godot-based Rust multi-PTY emulator desktop application for creating, ex
 
 ---
 
-## Installation
+## Installation & Usage
 
 Standalone binaries (no Godot install required) are published on [GitHub Releases](https://github.com/godot-pty/gpty/releases) for Linux, macOS, and Windows.
 
@@ -33,56 +36,8 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 | Linux | `gpty-v0.3.0-linux-x86_64.tar.gz` — extract and run `./gpty` |
 | macOS | `gpty-v0.3.0-macos.zip` — unzip, right-click the `.app` → Open |
 | Windows | `gpty-v0.3.0-windows-x86_64.zip` — unzip and run `gpty.exe` |
----
 
-## Features
-
-### Terminals
-- Multi-PTY grid with split, kill, and expand operations
-- Full DEC STD 070 terminal emulation via `alacritty_terminal`
-- Color schemes with configurable palettes (16-color, 256-color, true color)
-- Scrollback with regex search (`Ctrl+F`)
-- Wrapped text selection for copy/paste
-- Configurable cursor shape, blink, and thickness
-
-### Automation
-- Concept engine: regex triggers fire actions (command injection or output capture)
-- Capture mode routes command output to code viewer panes
-- Default concepts shipped; user concepts persisted and editable via settings UI
-- `{payload}` and `{N}` variable substitution in action templates
-
-### UI
-- Hardware-accelerated Godot renderer with damage tracking
-- Three-mode window system: OS decorated, borderless, fullscreen
-- Custom titlebar with minimize, maximize/restore, close
-- Tiling grid with drag-to-resize edges and pane position swapping
-- Sidebar with window mode dropdown, per-pane-type spawn buttons, and full per-pane action buttons
-- Bottom status bar showing active pane info, FPS, and window mode
-- Settings panel: fonts, colors, cursor, scroll, window mode, titlebar toggle, concept editor
-- Toast notifications (info, warn, error)
-- Command palette (`Ctrl+P`)
-
-### Persistence
-- Settings auto-save/load via `user://settings.json`
-- Layout auto-save/restore on startup via `user://layout.json`
-- Named profile snapshots via `user://profiles.json`
-- Scrollback history stored in SQLite
-
-### Pane Types
-- Terminal — PTY-backed shell sessions
-- Code Viewer — read-only `CodeEdit` display, receives concept captures
-- File Tree — directory listing via `DirAccess`
-- Observer — display-only pane for monitoring output
-
-See [CHANGELOG.md](CHANGELOG.md) for version history and [ROADMAP.md](ROADMAP.md) for planned features.
-
----
-
-## Development
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, build commands, testing, code style, and the pull request process.
-
-## CLI Usage
+### CLI
 
 The `gpty` binary controls a running GUI over JSON-RPC IPC. Build it with `cargo build -p gpty-cli` (or `cargo build --workspace`).
 
@@ -123,46 +78,23 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | gpty mcp
 
 See `gpty --help` for all subcommands and flags.
 
-## Concept System
+---
 
-Concepts are the core orchestration primitive: a regular expression trigger paired with labelled actions.
+## Roadmap
 
-```rust
-Concept {
-    name: "port_conflict",
-    trigger_regex: Regex::new(r"(?i)address.*already.*in\s*use").unwrap(),
-    destinations: vec![Action {
-        command_template: "echo '[Auto] Port conflict detected - consider lsof -i'",
-        target_label: "observer",
-    }],
-}
-```
-
-How it works:
-1. PTY output bytes stream through the `vte` parser
-2. The parser strips ANSI escape sequences and extracts visible text lines
-3. Each line is tested against every registered concept's `trigger_regex`
-4. On match, an `Event` is broadcast on the `tokio::sync::broadcast` channel
-5. Every terminal task receives the event, checks its labels against each action's `target_label`
-6. Matching terminals inject the `command_template` into their PTY's stdin
-
-Self-reaction loops are prevented: a terminal ignores events where `source_pane == my_id`.
-
-Security Warning: The Concept Engine is designed to execute commands automatically based on terminal output. Do not bind destructive or high-privilege actions (like `rm` or `sudo`) to easily spoofable regex triggers. An attacker could intentionally print matching text to trick your terminal into executing the action payload.
-
-### Use Cases
-
-- Auto-Restarting Watchers: Detect a segmentation fault or panic string in a backend server pane, and automatically inject a restart command into an adjacent management pane.
-- Port Conflict Resolution: Detect an "Address already in use" error and immediately run an `lsof` or `kill` command to clear the bound port.
-- AI Observer: Pipe error blocks (such as a Python traceback or Rust compiler error) to a local language model, displaying a plain-English explanation and a proposed fix in a secondary pane.
-- Automated Documentation: Match specific compiler error codes and automatically open the relevant local or web documentation in an adjacent window.
+See [ROADMAP.md](ROADMAP.md) for the full feature inventory.
 
 ---
 
-
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, code style, and the pull request process.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, build commands, testing, code style, and the pull request process.
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 
 ---
 

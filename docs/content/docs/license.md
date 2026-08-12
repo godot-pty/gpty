@@ -1,6 +1,6 @@
 ---
 title: License
-weight: 9
+weight: 99
 noHeading: true
 ---
 

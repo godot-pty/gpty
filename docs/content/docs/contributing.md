@@ -1,6 +1,6 @@
 ---
 title: Contributing
-weight: 8
+weight: 98
 noHeading: true
 ---
 
