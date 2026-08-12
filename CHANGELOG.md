@@ -3,8 +3,7 @@
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-
-## [0.3.1] — Unreleased
+## [0.3.1] — 2026-08-12
 
 ### Added
 
@@ -29,8 +28,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - MCP kebab-case tool names mapped to camelCase IPC methods; daemon tools handled locally
 - Pane resize cascade — no-op `resize_grid` skipped when dimensions are unchanged, removing the scroll-through-history artifact when panes close
 
-
-[0.3.1]: https://github.com/godot-pty/gpty/releases/tag/v0.3.1 (unreleased)
+[0.3.1]: https://github.com/godot-pty/gpty/releases/tag/v0.3.1
 
 ## [0.3.0] — 2026-08-09
 
@@ -45,7 +43,6 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - JSON Schema generation (`gpty schema`) for AI tool discovery (`--format json-schema` and `--format mcp`)
 - `gpty-ipc` crate: shared IPC protocol, client, server, and platform transport
 - `gpty --version` reports protocol version
-
 
 ### Changed
 

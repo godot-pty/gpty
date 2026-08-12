@@ -29,9 +29,9 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 
 | Platform | Package |
 |---|---|
-| Linux | `gpty-v0.3.0-linux-x86_64.tar.gz` — extract and run `./gpty` |
-| macOS | `gpty-v0.3.0-macos.zip` — unzip, right-click the `.app` → Open |
-| Windows | `gpty-v0.3.0-windows-x86_64.zip` — unzip and run `gpty.exe` |
+| Linux | `gpty-v0.3.1-linux-x86_64.tar.gz` — extract and run `./gpty` |
+| macOS | `gpty-v0.3.1-macos.zip` — unzip, right-click the `.app` → Open |
+| Windows | `gpty-v0.3.1-windows-x86_64.zip` — unzip and run `gpty.exe` |
 
 ### CLI
 

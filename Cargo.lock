@@ -463,7 +463,7 @@ dependencies = [
 
 [[package]]
 name = "gpty"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -505,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "gpty-ipc"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "gpty-core",
  "log",
