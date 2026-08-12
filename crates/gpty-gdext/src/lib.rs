@@ -96,8 +96,6 @@ impl GptyTerminal {
             .filter(|l| !l.is_empty() && l.contains('='))
             .collect();
 
-        godot_print!("[GDExt] Starting PTY {id}: {command} ({rows}×{cols})");
-
         match RUNTIME.block_on(ENGINE.spawn_terminal_with_grid(
             config,
             &command.to_string(),
