@@ -240,6 +240,9 @@ impl TermGrid {
     /// underlying PTY must also be notified with `ioctl(TIOCSWINSZ)` —
     /// that is handled by [`crate::pty::PtyHandle`].
     pub fn resize(&mut self, rows: usize, cols: usize) {
+        if self.rows == rows && self.cols == cols {
+            return;
+        }
         self.rows = rows;
         self.cols = cols;
         self.term.resize(GridSize { rows, cols });
