@@ -350,10 +350,8 @@ func _swap_pane(body: Control, new_type_name: String):
 	# Wire signals (same pattern as _add_body_to_grid).
 	new_body.focus_entered.connect(func(): _tm.last_body = new_body)
 
-	# For terminals: apply global defaults and wire dynamic title.
+	# For terminals: wire dynamic title (global defaults applied in swap_pane).
 	if new_type_name == "terminal":
-		if new_body.has_method("_terminal"):
-			SettingsManager.apply_to_terminal(new_body)
 		new_body.title_changed.connect(func(t: String):
 			var lbl = new_wrapper.get_node_or_null("BodyVBox/TitleBar/TitleLabel")
 			if lbl: lbl.text = " " + t

@@ -62,12 +62,11 @@ func test_create_body_all_types():
 		assert_not_null(body, "create_body(%s) should return non-null" % key)
 
 func test_spawn_pane_uses_default_shell():
-	# A fresh TerminalPane from preload script has default shell_command "/bin/bash".
-	# spawn_pane sets shell_command from cfg_shell_command only if the body
-	# has a _terminal (i.e., _ready has run). Fresh body: default applies.
+	# spawn_pane applies global settings to fresh terminal bodies, so the
+	# shell defaults to cfg_shell_command (mocked to "/bin/sh" in before_each).
 	var body = _tm.spawn_pane("terminal", {})
 	assert_not_null(body)
-	assert_eq(body.shell_command, "/bin/bash")
+	assert_eq(body.shell_command, CannedShell)
 
 # ── Kill ────────────────────────────────────────────────────────────────
 

@@ -58,14 +58,13 @@ func spawn_pane(type_name: String, opts: Dictionary = {}) -> Control:
 	var body: Control = script.new()
 	body.name = "Body"
 	body.pane_label = _next_label(type_name)
+	# Global defaults first so explicit per-pane opts win.
+	if type_name == "terminal" and body is TerminalPane:
+		SettingsManager.apply_to_terminal(body)
 	body.apply_settings(opts)
 
 	var title = opts.get("title_label", PaneTypes.ALL.get(type_name, {}).get("name", type_name))
 	var w = _build_wrapper_body(body, title)
-
-	# Apply global titlebar setting to the new wrapper
-	var tb = w.get_node_or_null("BodyVBox/TitleBar")
-	if tb: tb.visible = SettingsManager.cfg_show_titlebar
 
 	if tiles.is_empty():
 		tiles.append({wrapper = w, col = 0, row = 0, cspan = GRID, rspan = GRID})
@@ -74,12 +73,10 @@ func spawn_pane(type_name: String, opts: Dictionary = {}) -> Control:
 			w.queue_free()
 			return null
 
-	# For terminal panes, apply global defaults and wire dynamic title
+	# For terminal panes, resolve the shell override and wire dynamic title.
 	if type_name == "terminal":
-		if body.has_method("_terminal"):
-			SettingsManager.apply_to_terminal(body)
-			var s = opts.get("shell_command", SettingsManager.cfg_shell_command)
-			body.shell_command = s if s != "" else SettingsManager.cfg_shell_command
+		var s = opts.get("shell_command", SettingsManager.cfg_shell_command)
+		body.shell_command = s if s != "" else SettingsManager.cfg_shell_command
 		body.title_changed.connect(func(t: String):
 			var lbl = w.get_node_or_null("BodyVBox/TitleBar/TitleLabel")
 			if lbl: lbl.text = " " + t
@@ -158,6 +155,7 @@ func _make_vbox() -> VBoxContainer:
 func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Label:
 	var bar = Control.new()
 	bar.name = "TitleBar"
+	bar.visible = SettingsManager.cfg_show_titlebar
 	bar.custom_minimum_size = Vector2(0, TITLE_BAR_HEIGHT)
 	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -283,8 +281,11 @@ func swap_pane(body: Control, new_type_name: String) -> Control:
 	var new_body = create_body(new_type_name)
 	if new_body == null:
 		push_error("swap_pane: unknown type '%s'" % new_type_name)
-		return null
 	new_body.name = "Body"
+
+	# Global defaults first so per-pane settings from the old body win.
+	if new_type_name == "terminal" and new_body is TerminalPane:
+		SettingsManager.apply_to_terminal(new_body)
 
 	# Copy compatible settings from the old body to the new one.
 	if body.has_method("_get_layout_state"):
