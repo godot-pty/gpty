@@ -25,7 +25,7 @@ A single `gpty` binary that:
 │           │                └──────────┬───────────────┘  │
 │           │                           │                   │
 │           │  GDScript → Rust FFI      │  IPC socket       │
-│           │  (existing, unchanged)    │  /tmp/gpty.sock│
+│           │  (existing, unchanged)    │  $XDG_RUNTIME_DIR/gpty.sock│
 │           │                           │                   │
 └───────────┼───────────────────────────┼───────────────────┘
             │                           │
@@ -51,7 +51,7 @@ The GUI owns the **single source of truth** for pane state. The CLI is a **state
 
 | Platform | Transport | Default Path |
 |----------|-----------|-------------|
-| Linux    | Unix domain socket | `/tmp/gpty.sock` |
+| Linux    | Unix domain socket | `$XDG_RUNTIME_DIR/gpty.sock` |
 | macOS    | Unix domain socket | `$TMPDIR/gpty.sock` |
 | Windows  | Named pipe | `\\\.\\pipe\\gpty` |
 
@@ -538,13 +538,13 @@ Options:
 ```
 $ gpty new-pane --type terminal
 error: Could not connect to gpty GUI
-  Socket: /tmp/gpty.sock (not found)
+  Socket: $XDG_RUNTIME_DIR/gpty.sock (not found)
   The GUI is not running and --no-daemon is set.
   Start the GUI manually or run without --no-daemon.
 
 $ gpty new-pane --type terminal
 Starting gpty GUI...
-Waiting for socket /tmp/gpty.sock... connected.
+Waiting for socket $XDG_RUNTIME_DIR/gpty.sock... connected.
 ✓ Terminal T1 opened (bash)
 
 $ gpty new-pane --type terminal --command "htop"

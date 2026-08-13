@@ -142,6 +142,11 @@ pub fn ensure_server_started() {
 /// Start the IPC server on the given socket path (must run inside the tokio runtime).
 pub async fn start_ipc_server_inner(socket_path: &str) {
     let mut server = IpcServer::new(socket_path);
+    if let Ok(secret) = std::env::var("GPTY_SECRET")
+        && !secret.is_empty()
+    {
+        server.set_secret(secret);
+    }
 
     // version is handled locally — needed by daemon ensure_running().
     server.register("version", version_handler());

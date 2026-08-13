@@ -41,7 +41,7 @@ cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
 godot --path godot &
 ```
 
-All CLI commands below assume `GPTY_SOCKET=/tmp/gpty.sock` (the default on Linux) or the `GPTY_SOCKET` env var is set.
+All CLI commands below use the default socket path (`$XDG_RUNTIME_DIR/gpty.sock` on Linux) or the `GPTY_SOCKET` env var if set.
 
 ---
 

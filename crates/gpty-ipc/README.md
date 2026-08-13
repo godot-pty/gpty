@@ -25,8 +25,8 @@ JSON-RPC 2.0 IPC transport, client, and server for gpty workspace control.
 
 All communication is newline-delimited JSON-RPC 2.0 over a platform socket:
 
-- **Linux**: Unix domain socket at `/tmp/gpty.sock` (override with `GPTY_SOCKET`)
-- **macOS**: `$TMPDIR/gpty.sock`
+- **Linux**: Unix domain socket at `$XDG_RUNTIME_DIR/gpty.sock` (fallbacks: `/run/user/<uid>/gpty.sock`, `/tmp/gpty-<uid>.sock`; override with `GPTY_SOCKET`)
+- **macOS**: `$TMPDIR/gpty.sock` (fallback `/tmp/gpty-<uid>.sock`; override with `GPTY_SOCKET`)
 - **Windows**: Named pipe `\\.\pipe\gpty`
 
 ### Example
@@ -45,6 +45,23 @@ Error:
 ```json
 {"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"Unknown method: badMethod"}}
 ```
+
+## Security
+
+The IPC channel controls the whole workspace, so the server hardens the
+channel against other local users:
+
+- **Socket placement**: Linux defaults to `$XDG_RUNTIME_DIR/gpty.sock` (a
+  per-user, 0700 directory); the socket file itself is chmod 0600.
+- **Peer UID check**: on Linux/macOS the server verifies the connecting
+  process runs as the same effective UID as the server and drops mismatches.
+- **Shared secret (optional)**: set `GPTY_SECRET` when launching the GUI and
+  for every client (CLI, MCP). The server rejects requests with a missing or
+  mismatched `gpty_secret` field (`-32001`).
+- **Request size cap**: request lines over 64 KiB get an `-32600` error.
+- **Connection cap**: at most 16 concurrent connections; slow connections
+  are dropped after 30 s.
+
 
 ## Methods
 

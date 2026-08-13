@@ -10,6 +10,10 @@ pub struct Request {
     pub method: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
+    /// Shared secret presented by the client (GPTY_SECRET). Required when
+    /// the server has a secret configured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpty_secret: Option<String>,
 }
 
 /// A JSON-RPC 2.0 response.
@@ -41,6 +45,8 @@ impl JsonRpcError {
     pub const INTERNAL_ERROR: i64 = -32603;
     /// Application-level errors start here.
     pub const SERVER_ERROR: i64 = -32000;
+    /// Authentication failure (missing or invalid gpty_secret).
+    pub const UNAUTHORIZED: i64 = -32001;
 
     pub fn new(code: i64, message: impl Into<String>) -> Self {
         Self {
@@ -101,6 +107,7 @@ mod tests {
             id: 1,
             method: "newPane".into(),
             params: Some(serde_json::json!({"type": "terminal"})),
+            gpty_secret: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let parsed: Request = serde_json::from_str(&json).unwrap();
@@ -116,6 +123,7 @@ mod tests {
             id: 0,
             method: "ping".into(),
             params: None,
+            gpty_secret: None,
         };
         assert!(req.is_notification());
     }

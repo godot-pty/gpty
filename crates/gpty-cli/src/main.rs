@@ -202,9 +202,9 @@ async fn main() {
 
     // Ensure daemon is running (unless --no-daemon).
     if !cli.no_daemon
-        && let Err(_) = commands::daemon::ensure_running(&socket_path, timeout).await
+        && let Err(e) = commands::daemon::ensure_running(&socket_path, timeout).await
     {
-        eprintln!("error: could not connect to gpty GUI");
+        eprintln!("error: {e}");
         eprintln!("  Is gpty running? Start it or pass --no-daemon to skip.");
         process::exit(1);
     }

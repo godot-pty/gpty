@@ -37,7 +37,7 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 
 The `gpty` binary controls a running GUI over JSON-RPC IPC. Build it with `cargo build -p gpty-cli` (or `cargo build --workspace`).
 
-Once the GUI is running (launched from Godot or a release binary), the CLI connects over a Unix socket (`/tmp/gpty.sock` on Linux, or `GPTY_SOCKET` env var):
+Once the GUI is running (launched from Godot or a release binary), the CLI connects over a Unix socket (`$XDG_RUNTIME_DIR/gpty.sock` on Linux, or `GPTY_SOCKET` env var):
 
 ```bash
 # Check if the GUI is running

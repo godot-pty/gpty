@@ -3,6 +3,18 @@
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+
+### Added
+
+- IPC hardening — optional `GPTY_SECRET` shared-secret authentication for the IPC channel; mismatched or missing secrets are rejected with `-32001`
+- IPC hardening — request-size cap (64 KiB, `-32600` on overflow) and connection cap (16 concurrent, 30 s timeout) on the IPC server
+
+### Changed
+
+- Default IPC socket path moved from `/tmp/gpty.sock` to a per-user runtime directory (`$XDG_RUNTIME_DIR/gpty.sock`, fallbacks `/run/user/<uid>/gpty.sock` and `/tmp/gpty-<uid>.sock`; macOS `$TMPDIR`); the socket file is chmod 0600 and cross-UID peers are rejected on Linux/macOS
+- `gpty daemon` auto-spawn no longer launches a second GUI when the running one requires authentication; `daemon status` reports the auth state
+
 ## [0.3.1] — 2026-08-12
 
 ### Added
@@ -28,6 +40,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - MCP kebab-case tool names mapped to camelCase IPC methods; daemon tools handled locally
 - Pane resize cascade — no-op `resize_grid` skipped when dimensions are unchanged, removing the scroll-through-history artifact when panes close
 
+[unreleased]: https://github.com/godot-pty/gpty/compare/v0.3.1...HEAD
 [0.3.1]: https://github.com/godot-pty/gpty/releases/tag/v0.3.1
 
 ## [0.3.0] — 2026-08-09

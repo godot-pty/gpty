@@ -508,6 +508,7 @@ name = "gpty-ipc"
 version = "0.3.1"
 dependencies = [
  "gpty-core",
+ "libc",
  "log",
  "parking_lot",
  "serde",

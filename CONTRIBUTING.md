@@ -70,15 +70,15 @@ cd godot && godot -e
 godot --path godot &
 ```
 
-The GUI starts an IPC server on `/tmp/gpty.sock` (or `GPTY_SOCKET` env var if set).
+The GUI starts an IPC server on `$XDG_RUNTIME_DIR/gpty.sock` (or `GPTY_SOCKET` env var if set).
 Once running, control it with the CLI:
 
 ```bash
-GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- version
-GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- new-pane -t terminal
-GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- list-panes
-GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- inject T1 -t "echo hello"
-GPTY_SOCKET=/tmp/gpty.sock cargo run --bin gpty -- daemon stop
+cargo run --bin gpty -- version
+cargo run --bin gpty -- new-pane -t terminal
+cargo run --bin gpty -- list-panes
+cargo run --bin gpty -- inject T1 -t "echo hello"
+cargo run --bin gpty -- daemon stop
 ```
 
 Standalone commands (no GUI needed):

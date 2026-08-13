@@ -13,9 +13,9 @@ thiserror = "2"
 log = "0.4"
 parking_lot = "0.12"
 
-[target.'cfg(unix)'.dependencies.tokio]
-version = "1"
-features = ["net"]
+[target.'cfg(unix)'.dependencies]
+tokio = { version = "1", features = ["net"] }
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies.tokio]
 version = "1"

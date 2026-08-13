@@ -47,6 +47,7 @@ impl ClientError {
 pub struct IpcClient {
     socket_path: String,
     timeout: Duration,
+    secret: Option<String>,
 }
 
 impl IpcClient {
@@ -55,9 +56,11 @@ impl IpcClient {
     /// `socket_path` is the platform-specific socket address.
     /// `timeout` is the connection + read timeout.
     pub fn new(socket_path: impl Into<String>, timeout: Duration) -> Self {
+        let secret = std::env::var("GPTY_SECRET").ok().filter(|s| !s.is_empty());
         Self {
             socket_path: socket_path.into(),
             timeout,
+            secret,
         }
     }
 
@@ -85,6 +88,7 @@ impl IpcClient {
             id: counter,
             method: method.to_string(),
             params,
+            gpty_secret: self.secret.clone(),
         };
 
         let json = serde_json::to_string(&req).map_err(|e| {
@@ -197,6 +201,41 @@ mod tests {
                 resp.result.unwrap(),
                 serde_json::json!({"greeting": "hello, gpty"})
             );
+        }
+
+        #[tokio::test]
+        async fn client_authenticates_with_secret() {
+            let socket_path = format!("/tmp/gpty-ipc-secret-test-{}.sock", std::process::id());
+            let _ = std::fs::remove_file(&socket_path);
+
+            let mut server = IpcServer::new(&socket_path);
+            server.set_secret("s3cret".into());
+            server.register(
+                "greet",
+                std::sync::Arc::new(|_params| {
+                    Box::pin(async move { Ok(serde_json::json!({"greeting": "hello"})) })
+                }),
+            );
+
+            let server_path = socket_path.clone();
+            tokio::spawn(async move {
+                let _ = server.serve().await;
+            });
+
+            tokio::time::sleep(Duration::from_millis(200)).await;
+
+            // With GPTY_SECRET set, the client presents the secret and succeeds.
+            unsafe { std::env::set_var("GPTY_SECRET", "s3cret") };
+            let client = IpcClient::new(&server_path, Duration::from_secs(5));
+            let resp = client.call("greet", None).await.unwrap();
+            assert!(resp.error.is_none());
+
+            // Without the env var, a fresh client fails with UNAUTHORIZED.
+            unsafe { std::env::remove_var("GPTY_SECRET") };
+            let client = IpcClient::new(&server_path, Duration::from_secs(5));
+            let resp = client.call("greet", None).await.unwrap();
+            let err = resp.error.unwrap();
+            assert_eq!(err.code, JsonRpcError::UNAUTHORIZED);
         }
 
         #[tokio::test]

@@ -55,9 +55,25 @@ pub async fn connect(socket_path: &str) -> io::Result<Box<dyn IpcTransport>> {
 
 // ── Default socket path ──────────────────────────────────
 
+/// True when `path` is a directory owned by `uid` with no group/other access.
+#[cfg(unix)]
+fn is_secure_runtime_dir(path: &str, uid: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match std::fs::metadata(path) {
+        Ok(m) => m.is_dir() && m.uid() == uid && m.mode() & 0o077 == 0,
+        Err(_) => false,
+    }
+}
+
 /// Returns the default IPC socket path for the current platform.
 ///
-/// Respects the `GPTY_SOCKET` environment variable if set.
+/// Respects the `GPTY_SOCKET` environment variable if set (explicit
+/// override; bypasses directory validation).
+///
+/// Resolution order (Linux): `$XDG_RUNTIME_DIR/gpty.sock` when the directory
+/// is user-owned and has no group/other access, then `/run/user/<uid>/gpty.sock`,
+/// then `/tmp/gpty-<uid>.sock` as a last resort. macOS: `$TMPDIR/gpty.sock`
+/// when secure, else `/tmp/gpty-<uid>.sock`. Windows: `\\.\pipe\gpty`.
 pub fn default_socket_path() -> String {
     if let Ok(val) = std::env::var("GPTY_SOCKET")
         && !val.is_empty()
@@ -67,15 +83,30 @@ pub fn default_socket_path() -> String {
 
     #[cfg(target_os = "linux")]
     {
-        "/tmp/gpty.sock".into()
+        let uid = unsafe { libc::geteuid() };
+        if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR")
+            && dir.starts_with('/')
+            && is_secure_runtime_dir(&dir, uid)
+        {
+            return format!("{dir}/gpty.sock");
+        }
+        let run_user = format!("/run/user/{uid}");
+        if is_secure_runtime_dir(&run_user, uid) {
+            return format!("{run_user}/gpty.sock");
+        }
+        // Last resort: uid-suffixed path in /tmp. The server chmods the socket
+        // to 0600 and enforces a peer-UID check, so this stays private.
+        format!("/tmp/gpty-{uid}.sock")
     }
 
     #[cfg(target_os = "macos")]
     {
-        format!(
-            "{}/gpty.sock",
-            std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into())
-        )
+        let uid = unsafe { libc::geteuid() };
+        let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
+        if is_secure_runtime_dir(&tmp, uid) {
+            return format!("{tmp}/gpty.sock");
+        }
+        format!("/tmp/gpty-{uid}.sock")
     }
 
     #[cfg(windows)]
@@ -115,5 +146,45 @@ mod tests {
         assert!(!path.is_empty());
         assert_ne!(path, "");
         unsafe { std::env::remove_var("GPTY_SOCKET") };
+    }
+
+    #[cfg(unix)]
+    mod xdg {
+        use super::*;
+        use std::os::unix::fs::PermissionsExt;
+
+        #[test]
+        fn xdg_runtime_dir_is_preferred() {
+            let dir = std::env::temp_dir().join(format!("gpty-xdg-test-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+            // SAFETY: single-threaded test context; removed in all paths.
+            unsafe { std::env::set_var("XDG_RUNTIME_DIR", &dir) };
+            assert_eq!(
+                default_socket_path(),
+                format!("{}/gpty.sock", dir.display())
+            );
+            unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
+            std::fs::remove_dir(&dir).unwrap();
+        }
+
+        #[test]
+        fn insecure_xdg_runtime_dir_is_rejected() {
+            let dir =
+                std::env::temp_dir().join(format!("gpty-xdg-insecure-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+
+            unsafe { std::env::set_var("XDG_RUNTIME_DIR", &dir) };
+            let path = default_socket_path();
+            unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
+            std::fs::remove_dir(&dir).unwrap();
+
+            assert!(
+                !path.starts_with(&format!("{}/", dir.display())),
+                "insecure XDG_RUNTIME_DIR {dir:?} must not be used; got {path}"
+            );
+        }
     }
 }

@@ -173,6 +173,7 @@ See `skill://gpty-omp-integration` for usage patterns.
 
 - Concept Engine ReDoS: The `gpty-core` crate MUST always use the standard Rust `regex` crate. PCRE or back-tracking engines are strictly prohibited to prevent ReDoS (Regex Denial of Service) attacks when parsing large amounts of terminal output.
 - OSC 52 Clipboard Syncing: `parser.rs` currently discards all terminal escape sequences, keeping copy/paste safely bound to Godot UI inputs. Do NOT implement OSC 52 clipboard injection/syncing without placing it behind an explicit Godot confirmation dialog to prevent drive-by clipboard hijacking.
+- IPC hardening: the IPC socket defaults to `$XDG_RUNTIME_DIR/gpty.sock` (fallbacks `/run/user/<uid>/gpty.sock`, `/tmp/gpty-<uid>.sock`; macOS `$TMPDIR`; `GPTY_SOCKET` overrides). The server chmods the socket 0600, rejects cross-UID peers on Linux/macOS (fail-closed), caps requests at 64 KiB (`-32600`) and connections at 16 (30 s timeout). When `GPTY_SECRET` is set on the GUI, clients MUST present it (mismatch → `-32001`); tests/scripts probing a secret-configured GUI must set the same env var. Do NOT weaken these gates when editing `server.rs`/`transport.rs`.
 
 ### Commits
 
@@ -231,6 +232,7 @@ See `skill://gpty-omp-integration` for usage patterns.
 
 - GDScript `///` comments: GDScript uses `#` or `##` for comments. Rust-style `///` causes a parse error. Always use `##` for doc comments in GDScript.
 - Edit tool on structured formats (YAML, TOML, Markdown frontmatter): the line-based `edit` tool can corrupt delimiter-sensitive files (YAML `---` blocks, TOML `[sections]`, frontmatter bounds). When editing config files, workflow YAML, or Hugo content, prefer `eval` with Python (`yaml.safe_load`, `tomllib`) to parse → modify → serialize. Reserve `edit` for Rust, GDScript, and plain Markdown where line semantics hold.
+- CLI `gpty version` is local-only: it prints the CLI's own crate version and exits without touching IPC. It cannot probe a running GUI. Use `gpty daemon status` or `list-panes` to test connectivity/auth.
 
 ## Notes
 
