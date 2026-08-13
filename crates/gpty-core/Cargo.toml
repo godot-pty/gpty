@@ -1,6 +1,6 @@
 [package]
 name = "gpty-core"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 description = "Core library for gpty: PTY management, terminal parsing, and concept-based orchestration"
 

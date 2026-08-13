@@ -3,13 +3,14 @@
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [Unreleased]
+## [0.3.2] — 2026-08-13
 
 ### Added
 
 - IPC hardening — optional `GPTY_SECRET` shared-secret authentication for the IPC channel; mismatched or missing secrets are rejected with `-32001`
 - IPC hardening — request-size cap (64 KiB, `-32600` on overflow) and connection cap (16 concurrent, 30 s timeout) on the IPC server
 - Workspace cleanup script — `scripts/clean` removes stale IPC sockets (skipping live listeners), Godot import caches, and standalone `dist/` outputs; `--dry-run` preview and `--all` deep mode; user data never touched
+- Standalone app builder — `scripts/build` produces a runnable application bundle for the host platform
 
 ### Security
 
@@ -23,14 +24,21 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 
 - Default IPC socket path moved from `/tmp/gpty.sock` to a per-user runtime directory (`$XDG_RUNTIME_DIR/gpty.sock`, fallbacks `/run/user/<uid>/gpty.sock` and `/tmp/gpty-<uid>.sock`; macOS `$TMPDIR`); the socket file is chmod 0600 and cross-UID peers are rejected on Linux/macOS
 - `gpty daemon` auto-spawn no longer launches a second GUI when the running one requires authentication; `daemon status` reports the auth state
+- App name displayed as gPTY across the UI, docs, and tooling
+- Documentation overhaul — MCP integration section in the root README, accurate GDExtension API tables, IPC architecture and method docs, and a test-coverage guide with explicit gaps; the superseded CLI architecture plan was consolidated into the crate READMEs
+- Test suite expansion — capture lifecycle extracted into a unit-testable `CaptureSession`, CLI commands round-trip against a mock IPC server, concept routing extracted into a GUT-testable `ConceptRouter`, gdext IPC tests serialized with per-test sockets, and a GDExtension FFI smoke test (135 GUT tests total)
 
 ### Fixed
 
 - Keyboard — printable keys no longer collide with special-key scancodes in the Godot→evdev mapping (`z`/`Z` sent a keypad-multiply sequence, `;` `<` `=` `>` `?` `@` sent F1–F6, `` ` `` sent keypad-enter); they now reach the shell as themselves
 - Terminal shortcuts documented — `Ctrl+V` is passed through to the shell as a literal `^V` (readline quoted-insert, vim visual-block); paste remains `Ctrl+Shift+V`
 - Shortcut decoupling — `Ctrl+Shift+C` is now copy-only (silent no-op without a selection); code-viewer spawn moved to `Ctrl+Shift+D`. The dual copy-or-spawn binding is gone.
+- Text selection survives modifier presses — pressing Shift/Ctrl/Alt no longer clears the current selection
+- Global settings apply to every terminal, and the titlebar setting is honored in all spawn and restore paths
+- Cursor blink toggle redraws the terminal immediately
+- Concept editor no longer crashes when opened with an empty workspace (no terminal panes) — the Add Concept button is disabled until a terminal exists
 
-[unreleased]: https://github.com/godot-pty/gpty/compare/v0.3.1...HEAD
+[0.3.2]: https://github.com/godot-pty/gpty/compare/v0.3.1...v0.3.2
 
 ## [0.3.1] — 2026-08-12
 

@@ -2,12 +2,12 @@
 
 ## Overview
 
-- **Tiling grid** — split, resize, kill, and swap panes in a graphical layout.
-- **Terminal emulation** — full DEC STD 070 via `alacritty_terminal`. `16`/`256`/`true color`, scrollback with regex search, wrapped text selection.
-- **Concept engine** — regex triggers on PTY output automatically inject commands or capture output into adjacent panes. Ship defaults or write your own.
-- **CLI + MCP** — control the GUI over JSON-RPC IPC (`gpty new-pane`, `gpty inject`, etc.). AI agents can spawn panes, send text, and manage layouts via the MCP server.
-- **Persistence** — settings, layouts, and named profiles auto-save and restore on restart.
-- **Cross-platform** — standalone binaries for Linux, macOS, and Windows. No Godot or Rust toolchain required to run.
+- **Tiling grid** — Split, resize, kill, and swap panes in a graphical layout.
+- **Terminal emulation** — Full DEC STD 070 via `alacritty_terminal`. `16`/`256`/`true color`, scrollback with regex search, wrapped text selection.
+- **Concept engine** — RegEx triggers on PTY output automatically inject commands or capture output into adjacent panes. Ship defaults or write your own.
+- **CLI + MCP** — Control the GUI over JSON-RPC IPC (`gpty new-pane`, `gpty inject`, etc.). AI agents can spawn panes, send text, and manage layouts via the MCP server.
+- **Persistence** — Settings, layouts, and named profiles auto-save and restore on restart.
+- **Cross-platform** — Standalone binaries for Linux, macOS, and Windows. No Godot or Rust toolchain required to run.
 - **Documentation** — https://godot-pty.github.io/gpty/
 
 | Component | Choice | Rationale |
@@ -29,9 +29,9 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 
 | Platform | Package |
 |---|---|
-| Linux | `gpty-v0.3.1-linux-x86_64.tar.gz` — extract and run `./gpty` |
-| macOS | `gpty-v0.3.1-macos.zip` — unzip, right-click the `.app` → Open |
-| Windows | `gpty-v0.3.1-windows-x86_64.zip` — unzip and run `gpty.exe` |
+| Linux | `gpty-v0.3.2-linux-x86_64.tar.gz` — extract and run `./gpty` |
+| macOS | `gpty-v0.3.2-macos.zip` — unzip, right-click the `.app` → Open |
+| Windows | `gpty-v0.3.2-windows-x86_64.zip` — unzip and run `gpty.exe` |
 
 ### CLI
 

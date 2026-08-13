@@ -1,6 +1,6 @@
 [package]
 name = "gpty-gdext"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 description = "Godot 4 GDExtension for gpty — bridges the Rust terminal engine to Godot's renderer"
 

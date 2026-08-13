@@ -19,13 +19,20 @@ GitHub Issues are used for user-reported bugs and discussions, not roadmap track
 - [ ] Tab/workspace switching — switch between independent sets of panes within the same window. Each workspace has its own layout, profile, and scrollback. Deferred from v0.3.0.
 - [ ] Visual Concept Graph — build concept automations visually using Godot's GraphEdit node editor. Drag-and-drop nodes for triggers, conditions, and actions without writing regex by hand.
 - [ ] In-app update checker — check for new GitHub releases on startup and notify users when an update is available
+- [ ] App version & build info — display the running app version (matching `gpty version` and the IPC protocol version) and build information in the app UI, e.g. in Settings or an About dialog
 - [ ] GPU-accelerated rendering — rasterize terminal cells to a single GPU texture using fontdue for glyph rasterization, replacing the per-cell GDScript `_draw()` loop
 - [ ] UI Thread DoS mitigation — rate-limit terminal rendering when a PTY floods output (e.g., `cat /dev/urandom`), preventing the UI thread from locking up
 
-## v0.3.2 — App Version & Build Info
+## v0.3.2 — Security Hardening & Test Coverage
 
-- [x] Workspace cleanup script — `scripts/clean` removes stale IPC sockets (test leftovers and old default paths; live listeners are skipped), Godot import caches, and standalone `dist/` build outputs. `--dry-run` previews, `--all` adds full-build artifacts, and user data (`user://`) is never touched.
-- [ ] App version & build info — display the running app version (matching `gpty version` and the IPC protocol version) and build information in the app UI, e.g. in Settings or an About dialog
+- [x] IPC security — peer-UID check, optional `GPTY_SECRET`, request/connection caps, and client-side `GPTY_SOCKET`/`GPTY_GUI` validation against env hijacking
+- [x] Concept engine security — shell-quoted template substitution, parse caps (count, lengths, timeout clamp), line and capture bounds
+- [x] PTY env sanitization — dynamic-loader variable blocklist applied at spawn
+- [x] Layout restore trust — tile validation, typed settings application, absolute pane paths
+- [x] Workspace cleanup script — `scripts/clean` removes stale sockets, import caches, and build outputs
+- [x] Standalone app builder — `scripts/build` produces a runnable bundle for the host platform
+- [x] Documentation overhaul — MCP integration, crate README accuracy, testing guide with explicit gaps
+- [x] Test coverage expansion — capture lifecycle, CLI mock-server roundtrips, concept routing, gdext FFI smoke
 
 ## v0.3.1 — Stability & Windows Support
 
