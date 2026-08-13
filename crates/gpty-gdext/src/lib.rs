@@ -660,6 +660,16 @@ impl GptyTerminal {
         ctrl: bool,
         meta: bool,
     ) -> PackedByteArray {
+        // Printable ASCII keys (letters, digits, punctuation) are handled by
+        // the GDScript unicode path (`_key_to_text`). Routing them through the
+        // evdev keymap fabricates scancodes that collide with special keys —
+        // 'z' → 55 = KP_MULTIPLY, ';' → 59 = F1, '`' → 96 = KP_ENTER — which
+        // silently swallowed those characters. Space stays in the keymap for
+        // Ctrl+Space → NUL.
+        if (0x21..=0x7E).contains(&(keycode as u32)) {
+            return PackedByteArray::new();
+        }
+
         let mut m: u8 = 0;
         if shift {
             m |= gpty_core::keymap::Modifiers::SHIFT;
@@ -859,21 +869,16 @@ impl GptyTerminal {
 ///
 /// Convert a Godot 4 Key ordinal to a Linux evdev scancode.
 ///
-/// Printable ASCII keys use the Unicode code point (same in all Godot versions).
+/// Only special keys are mapped — printable ASCII is handled by the
+/// GDScript unicode path and never reaches this function (see
+/// `key_to_bytes`). The exception is Space, which the keymap needs for
+/// Ctrl+Space → NUL.
+///
 /// Special keys compare against [`godot::global::Key`] ordinals.
 fn godot_key_to_evdev(kc: i64) -> u32 {
     let k = kc as u32;
-    // Printable ASCII range — same values in all Godot versions
-    match k {
-        0x20 => return 57,                   // Space
-        0x21..=0x2F => return k,             // ! " # $ % & ' ( ) * + , - . / → raw
-        0x30..=0x39 => return k - 0x30 + 2,  // 0-9 → evdev 2-11
-        0x3A..=0x40 => return k,             // : ; < = > ? @ → raw
-        0x41..=0x5A => return k - 0x41 + 30, // A-Z → evdev 30-55
-        0x5B..=0x60 => return k,             // [ \ ] ^ _ ` → raw
-        0x61..=0x7A => return k - 0x61 + 30, // a-z → evdev 30-55
-        0x7B..=0x7E => return k,             // { | } ~ → raw
-        _ => {}
+    if k == 0x20 {
+        return 57; // Space
     }
 
     // Special keys — use Godot 4 Key enum ordinals so we stay correct

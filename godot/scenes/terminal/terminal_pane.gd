@@ -430,6 +430,14 @@ func _handle_mouse(event: InputEvent):
 func _is_copy_paste(event: InputEventKey) -> bool:
 	return (event.keycode == KEY_C or event.keycode == KEY_V) and event.ctrl_pressed and event.shift_pressed
 
+func _get_clipboard_text() -> String:
+	return DisplayServer.clipboard_get()
+
+func _send_to_term(text: String):
+	_terminal.send_text(text)
+
+func _send_line_to_term(text: String):
+	_terminal.send_line(text)
 func _handle_keyboard(event: InputEventKey):
 	# Search bar escape — close search
 	if _search_visible and event.keycode == KEY_ESCAPE:
@@ -447,27 +455,27 @@ func _handle_keyboard(event: InputEventKey):
 			accept_event()
 		return
 	if event.keycode == KEY_V and event.ctrl_pressed and event.shift_pressed:
-		var cl = DisplayServer.clipboard_get()
-		if cl != "": _terminal.send_text(cl)
+		var cl = _get_clipboard_text()
+		if cl != "": _send_to_term(cl)
 		accept_event(); return
 
 	_sel_start = Vector2i(-1, -1); _sel_end = Vector2i(-1, -1)
 	if event.keycode == KEY_PAGEUP: _terminal.scroll_up(rows); accept_event(); return
 	if event.keycode == KEY_PAGEDOWN: _terminal.scroll_down(rows); accept_event(); return
 	if event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
-		_terminal.send_line(""); _terminal.scroll_reset(); accept_event(); return
+		_send_line_to_term(""); _terminal.scroll_reset(); accept_event(); return
 	_terminal.scroll_reset()
 	# Try Rust keymap first (arrows, F-keys, Home, End, etc.)
 	var bytes = _terminal.key_to_bytes(event.keycode, event.shift_pressed, event.alt_pressed, event.ctrl_pressed, event.meta_pressed)
 	if bytes.size() > 0:
-		_terminal.send_text(bytes.get_string_from_ascii())
+		_send_to_term(bytes.get_string_from_ascii())
 		accept_event(); return
 	# Fall back to unicode + Ctrl+letter path
 	var tx = _key_to_text(event)
 	if tx != "":
 		if event.alt_pressed and not event.ctrl_pressed:
 			tx = char(0x1b) + tx
-		_terminal.send_text(tx)
+		_send_to_term(tx)
 	accept_event()
 
 func _mouse_to_cell(pos: Vector2) -> Vector2i:
@@ -603,7 +611,7 @@ func _check_click_concept(pos: Vector2):
 					cmd = cmd.replace("{payload}", result.get_string())
 					for gi in result.get_group_count():
 						cmd = cmd.replace("{%d}" % gi, result.get_string(gi))
-					_terminal.send_line(cmd)
+					_send_line_to_term(cmd)
 			return
 
 func _pane_type() -> String:
