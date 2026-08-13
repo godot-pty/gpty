@@ -56,6 +56,19 @@ godot --headless --path godot --import
 godot --headless --path godot --export-release "Linux/X11" ../dist/gpty
 ```
 
+### Clean
+
+Remove build/test artifacts for a clean slate — stale IPC sockets, Godot import caches, and standalone `dist/` outputs:
+
+```bash
+./scripts/clean             # default: transient artifacts
+./scripts/clean --dry-run   # list what would be removed
+./scripts/clean --all       # also remove target/ and built gdext libraries
+```
+
+Sockets with a live listener (a running GUI or an in-flight test run) are never touched, and user data (`user://` settings, profiles, layouts, history.db) is preserved. Tracked files such as `dist/aur/` and `godot/.gutconfig.json` are left alone.
+
+
 ### MCP
 
 Generate the current tools manifest: `cargo run --bin gpty -- schema --format mcp`

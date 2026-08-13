@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── clean: remove build/test artifacts for a clean slate ────────────────
+# Usage: ./scripts/clean [--dry-run] [--all]
+#
+# Removes regenerable artifacts:
+#   - stale IPC socket files (test leftovers and old default paths)
+#   - Godot import/cache directories (godot/.godot, godot/.import, export/)
+#   - standalone build outputs in dist/ (tracked files like dist/aur are kept)
+#
+# --all additionally removes full-build artifacts:
+#   - target/ (cargo build artifacts)
+#   - godot/bin built GDExtension libraries (rebuild + copy required
+#     before the project runs again — see ./scripts/build)
+#
+# Safety:
+#   - Socket files with a live listener are skipped, so a running GUI or
+#     an in-flight test run is never disturbed.
+#   - User data (user:// settings, profiles, layouts, history.db) is
+#     never touched.
+#   - Close the Godot editor before running; it recreates .godot on open.
+#
+# Env overrides: none.
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# ── Color helpers ───────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m'       # No Color
+BOLD='\033[1m'
+
+step()  { printf "\n${BOLD}── %s ──${NC}\n" "$1"; }
+ok()    { printf "  ${GREEN}OK${NC} %s\n" "$1"; }
+warn()  { printf "  ${YELLOW}NOTE${NC} %s\n" "$1"; }
+die()   { printf "  ${RED}ERROR${NC} %s\n" "$1" >&2; exit 1; }
+
+# ── Arguments ───────────────────────────────────────────────────────────
+DRY_RUN=false
+DEEP=false
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run|-n) DRY_RUN=true ;;
+        --all|--deep) DEEP=true ;;
+        -h|--help)    sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *)            die "unknown argument: $arg (see --help)" ;;
+    esac
+done
+
+if [[ "$DRY_RUN" == "true" ]]; then
+    warn "dry run — nothing will be removed"
+fi
+
+# ── Removal helpers ─────────────────────────────────────────────────────
+REMOVED=0
+SKIPPED=0
+
+remove() {
+    local target="$1"
+    if [[ ! -e "$target" && ! -L "$target" ]]; then
+        return
+    fi
+    if [[ "$DRY_RUN" == "true" ]]; then
+        printf "  would remove ${YELLOW}%s${NC}\n" "$target"
+    else
+        rm -rf -- "$target"
+        printf "  removed %s\n" "$target"
+    fi
+    REMOVED=$((REMOVED + 1))
+}
+
+# ── Live-socket detection ───────────────────────────────────────────────
+# Collect paths of listening unix sockets once; files that appear here are
+# left alone (a running GUI or an in-flight test owns them).
+LISTENING=""
+if command -v ss >/dev/null 2>&1; then
+    LISTENING="$(ss -xl 2>/dev/null | grep -oE '/[^ ]+' || true)"
+elif command -v lsof >/dev/null 2>&1; then
+    LISTENING="$(lsof -U 2>/dev/null | awk '{print $NF}' | grep '^/' || true)"
+else
+    warn "neither ss nor lsof found — default-path sockets will only be removed if ss-like detection is unavailable"
+fi
+
+clean_socket() {
+    local path="$1"
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
+        return
+    fi
+    if [[ -n "$LISTENING" ]] && grep -Fqx "$path" <<<"$LISTENING"; then
+        printf "  ${YELLOW}skip (live)${NC} %s\n" "$path"
+        SKIPPED=$((SKIPPED + 1))
+        return
+    fi
+    remove "$path"
+}
+
+# ── Step 1: stale IPC sockets ───────────────────────────────────────────
+step "Stale IPC sockets"
+
+shopt -s nullglob
+
+TMP_DIR="${TMPDIR:-/tmp}"
+# Test-run leftovers from the gpty-ipc test suite (PID-keyed, never reused).
+for sock in "$TMP_DIR"/gpty-ipc-*.sock; do
+    clean_socket "$sock"
+done
+# Default-path sockets from current and previous gpty versions.
+clean_socket "$TMP_DIR/gpty.sock"          # pre-hardening default
+clean_socket "$TMP_DIR/gpty-$(id -u).sock" # hardening fallback
+if [[ -n "${XDG_RUNTIME_DIR:-}" && "$XDG_RUNTIME_DIR" == /* ]]; then
+    clean_socket "$XDG_RUNTIME_DIR/gpty.sock"
+fi
+if [[ -d "/run/user/$(id -u)" && "${XDG_RUNTIME_DIR:-}" != "/run/user/$(id -u)" ]]; then
+    clean_socket "/run/user/$(id -u)/gpty.sock"
+fi
+
+shopt -u nullglob
+ok "sockets checked"
+
+# ── Step 2: Godot import/cache directories ──────────────────────────────
+step "Godot caches"
+
+remove "godot/.godot"
+remove "godot/.import"
+remove "godot/export"
+remove "godot/.mono"
+shopt -s nullglob
+for crash in godot/mono_crash.*.json; do
+    remove "$crash"
+done
+shopt -u nullglob
+ok "godot caches checked"
+
+# ── Step 3: standalone build outputs (dist/) ────────────────────────────
+# Only the known build artifacts are removed; tracked files (e.g.
+# dist/aur/PKGBUILD) are left untouched.
+step "Standalone build outputs (dist/)"
+
+for out in gpty gpty.pck gpty.exe gpty.zip gpty_gdext.windows.x86_64.dll gpty.sh; do
+    remove "dist/$out"
+done
+shopt -s nullglob
+for lib in dist/*.so dist/*.dylib dist/*.dll; do
+    remove "$lib"
+done
+shopt -u nullglob
+ok "dist checked"
+
+# ── Step 4: full-build artifacts (--all) ────────────────────────────────
+if [[ "$DEEP" == "true" ]]; then
+    step "Full-build artifacts (--all)"
+
+    remove "target"
+    shopt -s nullglob
+    for lib in godot/bin/*.so godot/bin/*.dylib godot/bin/*.dll; do
+        remove "$lib"
+    done
+    shopt -u nullglob
+    ok "build artifacts checked"
+    warn "gpty-gdext libraries removed — run ./scripts/build (or cargo build -p gpty-gdext + copy) before launching again"
+fi
+
+# ── Summary ─────────────────────────────────────────────────────────────
+printf "\n${GREEN}${BOLD}Clean complete.${NC}\n"
+printf "  removed: ${BOLD}%d${NC}  skipped (live): ${BOLD}%d${NC}\n" "$REMOVED" "$SKIPPED"
+if [[ "$DRY_RUN" == "true" ]]; then
+    warn "dry run — rerun without --dry-run to apply"
+fi
+printf "user:// data (settings, profiles, layouts, history.db) was not touched.\n"
