@@ -216,6 +216,8 @@ See `skill://gpty-omp-integration` for usage patterns.
 - Resize Rate Limiting: Firing SIGWINCH heavily on every frame during window drag will overwhelm the child PTY process. Always debounce or rate-limit terminal `_on_resize` events before passing them to the backend.
 - Scrollback vs. PageUp/Down: `terminal_pane.gd:_handle_keyboard` intercepts PageUp/Down for scrollback navigation. These never reach the PTY, so programs like `less` or `vim` cannot receive them. Users must use alternative keys (`b`/`f` in `less`, `Ctrl+B`/`Ctrl+F` in vim).
 - Alt key handling: For Alt+letter combos, the Rust keymap returns `None`, expecting the GDScript layer to prepend `\x1b` (ESC). `_handle_keyboard` does this in the `_key_to_text` fallback path.
+- Printable keys and the evdev keymap: `GptyTerminal.key_to_bytes` MUST early-return empty for printable ASCII keycodes (0x21–0x7E). Routing them through `godot_key_to_evdev` fabricates scancodes that collide with special keys (`z`→55=KP_MULTIPLY, `;`→59=F1, `` ` ``→96=KP_ENTER) and silently swallows the characters. Only Space (→57, for Ctrl+Space→NUL) and true special keys may reach the keymap.
+- Ctrl+V passthrough: `Ctrl+V` MUST reach the shell as a literal `^V` (readline quoted-insert, vim visual-block). Paste is `Ctrl+Shift+V` only — never bind plain `Ctrl+V` to paste.
 - PTY Enter key: The Enter key MUST send `\r` (CR) to the PTY, not `\n`. `pty.rs:write_line` appends `\r`. The PTY terminal driver translates `\r` → `\n` in canonical mode; raw-mode programs read `\r` directly.
 
 - `tokio::task::JoinHandle` drop detaches: dropping a `JoinHandle` does NOT abort the task — it keeps running until it exits naturally. For explicit cleanup (e.g., in a `Drop` impl), call `handle.abort()`.

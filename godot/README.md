@@ -83,6 +83,8 @@ godot/
 | `Alt+←↑↓→` | Jump to adjacent pane |
 
 > **Note:** `Ctrl+Shift+C` copies when text is selected in a terminal; otherwise spawns a code viewer.
+>
+> **Note:** `Ctrl+V` is deliberately passed through to the shell as a literal `^V` — shells and TUIs use it (readline quoted-insert, vim visual-block mode). Paste uses `Ctrl+Shift+V`.
 
 ## Sidebar
 
