@@ -21,13 +21,20 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
   -gdir=res://tests/unit -gdir=res://tests/integration
 ```
 
-**Rust coverage:** core engine (parser, keymap, grid, concept routing, capture state machine, history), IPC types + protocol, CLI schema generation, GDExtension FFI functions.
+**Rust coverage:** core engine (parser, keymap, grid, concept routing, capture state machine, history), IPC types + protocol, CLI schema generation, GDExtension FFI functions. Tile layout algorithms are integration-tested in `crates/gpty-core/tests/tile_layout.rs`, which mirrors the GDScript split/kill/expand logic in `godot/scenes/terminal/terminal_manager.gd` — algorithm changes must be mirrored in both files.
 
 **GDScript coverage:** concept merge/save/load, terminal manager tile lifecycle (spawn, kill, swap, labels, grid-full refusal), settings save/load roundtrip, profile CRUD, layout save/restore, sidebar signal emission, pane settings application, IPC routing logic (error format, listPanes, killPane, layoutList), palette command generation.
 
 **Known gaps (not automatable in headless CI):**
 - `Workspace` class cannot be instantiated in headless GUT (depends on `GptyTerminal` GDExtension class). Workspace-level logic (concept event routing, IPC polling dispatch) is tested manually.
 - Real PTY spawning is `#[ignore]` in Rust tests — slow and environment-dependent. Tested manually on Linux and Windows.
+
+**Files without automated coverage** (manual checklist only):
+- `godot/scenes/terminal/workspace.gd` — restore/sanitize wiring, concept event routing, IPC dispatch (routing patterns are unit-tested via the `test_ipc_routing.gd` mirror)
+- `godot/scenes/terminal/terminal_pane.gd` — renderer and input paths are partially covered by `test_keyboard.gd`/`test_copy_routing.gd` mocks; real rendering is manual-only
+- `godot/scenes/ui/settings_panel.gd`, `godot/scenes/ui/pane_settings_panel.gd`, `godot/scenes/ui/status_bar.gd`, `godot/scenes/ui/toast_overlay.gd`, `godot/scenes/ui/icons.gd`
+- `godot/scenes/panes/code_viewer.gd`, `godot/scenes/panes/file_tree.gd`, `godot/scenes/panes/observer_pane.gd`
+- `godot/scenes/autoloads/focus_manager.gd`, `godot/scenes/autoloads/shortcut_manager.gd`, `godot/scenes/autoloads/toast_manager.gd`, `godot/scenes/autoloads/update_checker.gd`
 
 ## Manual pre-release checklist
 

@@ -2,6 +2,11 @@
 
 Godot 4 GDExtension that bridges the Rust terminal engine to Godot's renderer.
 
+`GptyTerminal` is a headless `Node2D` bridge owning the Rust grid; the visible
+terminal is the `Control`-based renderer
+`godot/scenes/terminal/terminal_pane.gd`, which polls
+`get_grid_updates_packed()` and draws in `_draw()`.
+
 ## Building
 
 ```bash
@@ -36,7 +41,7 @@ target/debug/libgpty_gdext.so
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `get_grid_updates_packed(force_full: bool)` | `Dictionary` | Incremental damage tracking or full grid pack (`is_full`, `chars` packed bytes, `fg`, `bg`, `attrs`, `indices`) |
+| `get_grid_updates_packed(force_full: bool)` | `Dictionary` | Grid update in packed arrays — see [Grid Update Dictionary](#grid-update-dictionary) |
 | `get_grid_generation()` | `int` | Monotonic counter, changes on grid update |
 | `get_cursor_row()` | `int` | Cursor row (0-based, -1 if none) |
 | `get_cursor_col()` | `int` | Cursor column (0-based) |
@@ -61,7 +66,7 @@ target/debug/libgpty_gdext.so
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `set_global_concepts(concepts: Array)` | void | Replace all concepts in the engine |
+| `set_global_concepts(concepts_json: String)` | void | Replace all concepts in the engine (JSON array of concept objects; parse caps and timeout clamp in `gpty_core::concept::concepts_from_json`) |
 | `get_global_concepts()` | `Array` | Get all concepts as Dict array |
 | `match_concepts_on_line(line: String)` | `Array` | Match concepts against a line; returns `[{name, cmd}]` with shell-quoted substitution |
 | `drain_concept_events()` | `Array` | Drain completed capture events from this terminal |
@@ -75,13 +80,34 @@ target/debug/libgpty_gdext.so
 | `drain_ipc_requests()` | `Array` | Drain queued IPC requests for GDScript dispatch |
 | `respond_ipc(id, success, result_json)` | void | Respond to a drained IPC request |
 
-#### Grid Cell Dictionary
+#### Grid Update Dictionary
 
+`get_grid_updates_packed()` returns one of two shapes. Both carry flat
+per-cell arrays: `fg`/`bg` are `PackedColorArray`, `attrs` is
+`PackedInt32Array` (bit flags: 1 bold, 2 italic, 4 underline, 8 inverse,
+16 wide), and `chars` is an `Array` of strings.
+
+Full update (`is_full = true`, first fetch or `force_full`):
 ```gdscript
 {
-    "ch": "A",                     # String — the character
-    "fg": Color(0.8, 0.8, 0.8),   # Color — foreground
-    "bg": Color(0.12, 0.12, 0.12) # Color — background
+    "is_full": true,
+    "rows": 24, "cols": 80,          # int — grid dimensions
+    "chars": ["line0", "line1", …],  # Array[String] — one string per row
+    "fg": PackedColorArray(…),       # len = rows × cols
+    "bg": PackedColorArray(…),
+    "attrs": PackedInt32Array(…),
+}
+```
+
+Partial update (`is_full = false`, damaged cells only):
+```gdscript
+{
+    "is_full": false,
+    "indices": PackedInt32Array(…),  # cell index = row * cols + col
+    "chars": ["A", "B", …],          # Array[String] — one string per cell
+    "fg": PackedColorArray(…),
+    "bg": PackedColorArray(…),
+    "attrs": PackedInt32Array(…),
 }
 ```
 

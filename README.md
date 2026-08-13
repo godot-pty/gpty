@@ -74,6 +74,19 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | gpty mcp
 
 See `gpty --help` for all subcommands and flags.
 
+### MCP integration
+
+gpty ships an MCP (Model Context Protocol) server so AI agents and coding harnesses can control the workspace. The repo-root [`mcp.json`](mcp.json) declares it for auto-discovery:
+
+```json
+{"mcpServers": {"gpty": {"command": "gpty", "args": ["mcp"]}}}
+```
+
+- **Direct**: run `gpty mcp` over stdio — exposes a tool per CLI subcommand (`new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `layout-*`, `daemon-*`, `concept-*`, `version`).
+- **Manifest**: `gpty schema --format mcp` prints the MCP tool manifest (JSON Schema, works without a running GUI) for hand-off to agent configurations.
+
+Tool schemas are generated from the same clap definitions as the CLI (`crates/gpty-cli/src/commands/schema.rs`), so they cannot drift from `gpty --help`.
+
 ---
 
 ## Roadmap

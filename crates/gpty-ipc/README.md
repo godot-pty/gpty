@@ -75,6 +75,8 @@ channel against other local users:
 | `layoutSave` | `name` | `{success, name}` |
 | `layoutLoad` | `name` | `{success}` |
 | `layoutList` | — | `{layouts: [string]}` |
+| `conceptList` | — | `{concepts: [{name, enabled, trigger, actions, …}]}` |
+| `conceptToggle` | `name` | `{success, name}` |
 | `version` | — | `{version, protocol}` |
 | `shutdown` | — | `{success: true}` |
 
