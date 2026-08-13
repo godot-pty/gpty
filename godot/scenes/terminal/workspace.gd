@@ -821,12 +821,12 @@ func _push_concepts_deferred():
 	# Wait for the scene tree to fully settle (GDExtension + terminal nodes ready)
 	await get_tree().create_timer(2.0).timeout
 	_push_concepts_to_engine()
-func get_terminal_for_ffi() -> Node:
+func get_terminal_for_ffi() -> GptyTerminal:
 	for t in _tm.tiles:
 		var body = _tm._find_body(t.wrapper)
 		if body and body._terminal:
 			return body._terminal
-	return Node.new()
+	return null
 
 func _save_current_as_profile():
 	# Gather current tiles

@@ -423,12 +423,11 @@ func _add_concept_section(v: VBoxContainer):
 
 	var add_btn = Button.new()
 	add_btn.text = "Add Concept"
+	# No terminal → no FFI vehicle for concepts; adding would silently
+	# no-op on save, so disable the button instead.
+	add_btn.disabled = _concept_terminal == null
 	add_btn.pressed.connect(_show_concept_dialog.bind(-1))
 	v.add_child(add_btn)
-
-	_concept_list = VBoxContainer.new()
-	v.add_child(_concept_list)
-	_refresh_concept_list()
 
 func _refresh_concept_list():
 	for c in _concept_list.get_children(): c.queue_free()
@@ -441,6 +440,8 @@ func _refresh_concept_list():
 		var toggle = CheckButton.new()
 		toggle.button_pressed = enabled
 		toggle.toggled.connect(func(on: bool):
+			if _concept_terminal == null:
+				return
 			c["enabled"] = on
 			var all = _concept_terminal.get_global_concepts()
 			if i < all.size():
