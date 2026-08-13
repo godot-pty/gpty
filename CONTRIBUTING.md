@@ -32,8 +32,7 @@ Run `./scripts/ci-check` directly to validate changes before committing.
 
 ### Build
 
-One-shot standalone build (detects the host platform, builds gpty-gdext in
-release mode, and exports the app into `dist/`):
+One-shot standalone build (detects the host platform, builds gpty-gdext in release mode, and exports the app into `dist/`):
 
 ```bash
 ./scripts/build
@@ -52,6 +51,7 @@ cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
 # Release build + local export
 cargo build -p gpty-gdext --release
 cp target/release/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
+
 godot --headless --path godot --import
 godot --headless --path godot --export-release "Linux/X11" ../dist/gpty
 ```
@@ -146,7 +146,7 @@ See [AGENTS.md](AGENTS.md) for the complete GDScript and Rust conventions, pitfa
 
 ## Security
 
-See [AGENTS.md](AGENTS.md) for the full security rules, including Concept Engine ReDoS prevention and OSC 52 clipboard restrictions.
+See [AGENTS.md](AGENTS.md) for full security rules, including Concept Engine ReDoS prevention and OSC 52 clipboard restrictions.
 
 ## License
 
