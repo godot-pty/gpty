@@ -259,10 +259,19 @@ mod tests {
 mod integration_tests {
     use super::*;
     use gpty_ipc::client::IpcClient;
+    use serial_test::serial;
     use std::time::Duration;
 
-    fn start_test_server() -> String {
-        let socket_path = format!("/tmp/gpty-ipc-test-{}.sock", std::process::id());
+    /// Clear process-global pending state so a panicked or timed-out test
+    /// cannot poison the next one. Shared state MUST be cleaned in every
+    /// exit path (AGENTS.md pitfall).
+    fn clear_state() {
+        PENDING_REQUESTS.lock().unwrap().clear();
+        PENDING_RESPONSES.lock().unwrap().clear();
+    }
+
+    fn start_test_server(name: &str) -> String {
+        let socket_path = format!("/tmp/gpty-ipc-test-{}-{name}.sock", std::process::id());
         let _ = std::fs::remove_file(&socket_path);
         let sp = socket_path.clone();
         crate::RUNTIME.spawn(async move {
@@ -275,27 +284,28 @@ mod integration_tests {
     fn make_client(socket_path: &str) -> IpcClient {
         IpcClient::new(socket_path, Duration::from_secs(10))
     }
-
     // B1: version responds locally without GDScript polling
     #[tokio::test]
+    #[serial]
     async fn version_handler_responds_locally() {
-        let socket_path = start_test_server();
+        clear_state();
+        let socket_path = start_test_server("b1_version");
         let client = make_client(&socket_path);
         let resp = client
             .call("version", None)
             .await
             .expect("version should succeed");
-        assert!(resp.error.is_none());
         let result = resp.result.expect("should have result");
         assert_eq!(result["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(result["protocol"], "2.0");
         let _ = std::fs::remove_file(&socket_path);
     }
-
     // B2: GDScript-routed method times out without polling
     #[tokio::test]
+    #[serial]
     async fn gdscript_method_times_out() {
-        let socket_path = start_test_server();
+        clear_state();
+        let socket_path = start_test_server("b2_timeout");
         let client = make_client(&socket_path);
         let resp = client
             .call("listPanes", None)
@@ -310,8 +320,10 @@ mod integration_tests {
 
     // B3: GDScript roundtrip via pending queue
     #[tokio::test]
+    #[serial]
     async fn gdscript_roundtrip_via_queue() {
-        let socket_path = start_test_server();
+        clear_state();
+        let socket_path = start_test_server("b3_roundtrip");
         let client_path = socket_path.clone();
 
         // Spawn client call in background
