@@ -82,6 +82,12 @@ See [ROADMAP.md](ROADMAP.md) for the full feature inventory.
 
 ---
 
+## Security
+
+See [AGENTS.md](AGENTS.md#security) for full security rules, including Concept Engine ReDoS prevention and OSC 52 clipboard restrictions.
+
+---
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, build commands, testing, code style, and the pull request process.
