@@ -9,11 +9,14 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 
 - IPC hardening — optional `GPTY_SECRET` shared-secret authentication for the IPC channel; mismatched or missing secrets are rejected with `-32001`
 - IPC hardening — request-size cap (64 KiB, `-32600` on overflow) and connection cap (16 concurrent, 30 s timeout) on the IPC server
+- Workspace cleanup script — `scripts/clean` removes stale IPC sockets (skipping live listeners), Godot import caches, and standalone `dist/` outputs; `--dry-run` preview and `--all` deep mode; user data never touched
 
 ### Changed
 
 - Default IPC socket path moved from `/tmp/gpty.sock` to a per-user runtime directory (`$XDG_RUNTIME_DIR/gpty.sock`, fallbacks `/run/user/<uid>/gpty.sock` and `/tmp/gpty-<uid>.sock`; macOS `$TMPDIR`); the socket file is chmod 0600 and cross-UID peers are rejected on Linux/macOS
 - `gpty daemon` auto-spawn no longer launches a second GUI when the running one requires authentication; `daemon status` reports the auth state
+
+[unreleased]: https://github.com/godot-pty/gpty/compare/v0.3.1...HEAD
 
 ## [0.3.1] — 2026-08-12
 
@@ -40,7 +43,6 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - MCP kebab-case tool names mapped to camelCase IPC methods; daemon tools handled locally
 - Pane resize cascade — no-op `resize_grid` skipped when dimensions are unchanged, removing the scroll-through-history artifact when panes close
 
-[unreleased]: https://github.com/godot-pty/gpty/compare/v0.3.1...HEAD
 [0.3.1]: https://github.com/godot-pty/gpty/releases/tag/v0.3.1
 
 ## [0.3.0] — 2026-08-09
@@ -62,6 +64,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - Reset button moved from between Settings and Profiles to below the pane list, with red destructive styling
 - Settings and Reset buttons decouple Phosphor icon rendering from ASCII text using Label+HBox pattern
 - "New:" pane button label renamed to "Add Pane:" with updated styling
+
 [0.3.0]: https://github.com/godot-pty/gpty/releases/tag/v0.3.0
 
 ## [0.2.0] — 2026-08-08

@@ -24,6 +24,7 @@ GitHub Issues are used for user-reported bugs and discussions, not roadmap track
 
 ## v0.3.2 — App Version & Build Info
 
+- [x] Workspace cleanup script — `scripts/clean` removes stale IPC sockets (test leftovers and old default paths; live listeners are skipped), Godot import caches, and standalone `dist/` build outputs. `--dry-run` previews, `--all` adds full-build artifacts, and user data (`user://`) is never touched.
 - [ ] App version & build info — display the running app version (matching `gpty version` and the IPC protocol version) and build information in the app UI, e.g. in Settings or an About dialog
 
 ## v0.3.1 — Stability & Windows Support
