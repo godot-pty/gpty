@@ -72,7 +72,7 @@ godot/
 | Shortcut | Action |
 |----------|--------|
 | `Ctrl+Shift+N` | Spawn terminal |
-| `Ctrl+Shift+C` | Spawn code viewer |
+| `Ctrl+Shift+D` | Spawn code viewer |
 | `Ctrl+Shift+T` | Spawn file tree |
 | `Ctrl+Shift+O` | Spawn observer |
 | `Ctrl+Shift+W` | Close focused pane |
@@ -82,7 +82,7 @@ godot/
 | `F11` / `Ctrl+Shift+M` | Toggle fullscreen |
 | `Alt+←↑↓→` | Jump to adjacent pane |
 
-> **Note:** `Ctrl+Shift+C` copies when text is selected in a terminal; otherwise spawns a code viewer.
+> **Note:** `Ctrl+Shift+C` copies the terminal selection; with no selection it does nothing.
 >
 > **Note:** `Ctrl+V` is deliberately passed through to the shell as a literal `^V` — shells and TUIs use it (readline quoted-insert, vim visual-block mode). Paste uses `Ctrl+Shift+V`.
 

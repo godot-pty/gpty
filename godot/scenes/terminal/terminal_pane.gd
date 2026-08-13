@@ -448,11 +448,13 @@ func _handle_keyboard(event: InputEventKey):
 		_toggle_search()
 		accept_event(); return
 	if event.keycode == KEY_C and event.ctrl_pressed and event.shift_pressed:
+		# Copy-only: always consume the event so it can never fall through
+		# to a workspace shortcut. No selection → silent no-op.
 		var st = _get_selected_text()
 		if st != "":
 			DisplayServer.clipboard_set(st)
 			_sel_start = Vector2i(-1, -1); _sel_end = Vector2i(-1, -1); queue_redraw()
-			accept_event()
+		accept_event()
 		return
 	if event.keycode == KEY_V and event.ctrl_pressed and event.shift_pressed:
 		var cl = _get_clipboard_text()

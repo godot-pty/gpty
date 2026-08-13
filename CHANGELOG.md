@@ -20,6 +20,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 
 - Keyboard — printable keys no longer collide with special-key scancodes in the Godot→evdev mapping (`z`/`Z` sent a keypad-multiply sequence, `;` `<` `=` `>` `?` `@` sent F1–F6, `` ` `` sent keypad-enter); they now reach the shell as themselves
 - Terminal shortcuts documented — `Ctrl+V` is passed through to the shell as a literal `^V` (readline quoted-insert, vim visual-block); paste remains `Ctrl+Shift+V`
+- Shortcut decoupling — `Ctrl+Shift+C` is now copy-only (silent no-op without a selection); code-viewer spawn moved to `Ctrl+Shift+D`. The dual copy-or-spawn binding is gone.
 
 [unreleased]: https://github.com/godot-pty/gpty/compare/v0.3.1...HEAD
 
