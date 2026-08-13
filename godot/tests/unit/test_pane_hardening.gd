@@ -80,7 +80,7 @@ func test_sanitize_shell_falls_back_on_bad_values():
 	assert_eq(PaneTypes.sanitize_shell("", "/bin/bash"), "/bin/bash")
 
 func test_sanitize_shell_rejects_nul_and_oversized():
-	assert_eq(PaneTypes.sanitize_shell("sh\x00rm", "/bin/bash"), "/bin/bash")
+	assert_eq(PaneTypes.sanitize_shell("sh\u0000rm", "/bin/bash"), "/bin/bash")
 	var long: String = "x".repeat(2048)
 	assert_eq(PaneTypes.sanitize_shell(long, "/bin/bash"), "/bin/bash")
 

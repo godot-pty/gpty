@@ -141,3 +141,17 @@ func test_ctrl_shift_c_with_selection_copies_without_leaking():
 	_pane._sel_end = Vector2i(0, 2)
 	_pane._handle_keyboard(_key_event(KEY_C, 0, true, true))
 	assert_eq(_pane.sent, [], "copy with selection must not send bytes to the shell")
+
+func test_alt_letter_prepends_escape():
+	_pane._handle_keyboard(_key_event(KEY_A, 97, false, false, true))
+	assert_eq(_pane.sent, ["\u001ba"], "Alt+A sends ESC then 'a'")
+
+
+func test_alt_shift_letter_prepends_escape():
+	_pane._handle_keyboard(_key_event(KEY_A, 65, false, true, true))
+	assert_eq(_pane.sent, ["\u001bA"], "Alt+Shift+A sends ESC then 'A'")
+
+
+func test_ctrl_alt_letter_no_escape_prefix():
+	_pane._handle_keyboard(_key_event(KEY_A, 0, true, false, true))
+	assert_eq(_pane.sent, ["\u0001"], "Ctrl+Alt+A sends the control char without ESC prefix")

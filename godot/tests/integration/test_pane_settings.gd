@@ -72,3 +72,26 @@ func test_code_viewer_get_layout_state_has_type():
 	_scene.add_child(body)
 	var state = body._get_layout_state()
 	assert_eq(state.get("type"), "code_viewer")
+
+# ── spawn_pane applies global settings ─────────────────────────────────
+
+func test_spawn_pane_applies_global_settings():
+	SettingsManager.cfg_font_size = 18
+	SettingsManager.cfg_shell_command = "/bin/sh"
+	var body = _tm.spawn_pane("terminal", {})
+	assert_not_null(body)
+	assert_eq(body.font_size, 18, "spawn_pane must apply global font size")
+	assert_eq(body.shell_command, "/bin/sh", "spawn_pane must apply global shell")
+	for t in _tm.tiles:
+		t.wrapper.free()
+	_tm.tiles.clear()
+
+func test_spawn_pane_opts_override_globals():
+	SettingsManager.cfg_font_size = 18
+	var body = _tm.spawn_pane("terminal", {"font_size": 22, "shell_command": "/bin/zsh"})
+	assert_not_null(body)
+	assert_eq(body.font_size, 22, "per-pane font_size must override global")
+	assert_eq(body.shell_command, "/bin/zsh", "per-pane shell must override global")
+	for t in _tm.tiles:
+		t.wrapper.free()
+	_tm.tiles.clear()

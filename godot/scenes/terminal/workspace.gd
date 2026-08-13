@@ -623,10 +623,16 @@ func _refresh_status_bar():
 # ═══════════════════════════════════════════════════════════════════════
 
 func _poll_concept_events():
+	var all_bodies: Array[Control] = []
+	var terms: Array[Control] = []
 	for t in _tm.tiles:
 		var body = _tm._find_body(t.wrapper)
-		if not body or not body is TerminalPane:
+		if body == null:
 			continue
+		all_bodies.append(body)
+		if body is TerminalPane:
+			terms.append(body)
+	for body in terms:
 		var term = body.get("_terminal")
 		if term == null:
 			continue
@@ -634,25 +640,10 @@ func _poll_concept_events():
 		for ev in events:
 			if not (ev is Dictionary):
 				continue
-			route_concept_event(term, ev)
-
-func route_concept_event(source_term, ev: Dictionary):
-	var target_type: String = ev.get("target_pane_type", "")
-	var receiver = _find_pane_of_type(target_type)
-	if receiver and receiver.has_method("receive_content"):
-		var lines: PackedStringArray = ev.get("lines", PackedStringArray())
-		receiver.receive_content("\n".join(lines))
-		source_term.acknowledge_capture(ev.get("id", 0))
-	else:
-		ToastManager.warn("No %s pane open for '%s' output" % [target_type, ev.get("concept_name", "")])
-		source_term.flush_capture(ev.get("id", 0))
-
-func _find_pane_of_type(type_name: String) -> Control:
-	for t in _tm.tiles:
-		var body = _tm._find_body(t.wrapper)
-		if body and body._pane_type() == type_name:
-			return body
-	return null
+			var ok = ConceptRouter.route_capture_event(all_bodies, ev, term)
+			if not ok:
+				ToastManager.warn("No %s pane open for '%s' output" % [
+					ev.get("target_pane_type", ""), ev.get("concept_name", "")])
 
 # ═══════════════════════════════════════════════════════════════════════
 # IPC bridge — polls Rust IPC requests from _process
