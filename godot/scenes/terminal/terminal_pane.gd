@@ -200,6 +200,7 @@ func _process(delta):
 		if _cursor_blink_timer > cursor_blink_speed:
 			_cursor_blink_timer = 0.0
 			_cursor_visible = not _cursor_visible
+			_request_cursor_redraw()
 	else:
 		_cursor_visible = true
 
@@ -253,6 +254,9 @@ func _process(delta):
 		_last_title = t
 		var display_title = pane_name if pane_name != "" else t
 		title_changed.emit(display_title)
+
+func _request_cursor_redraw() -> void:
+	queue_redraw()
 
 func _grid_offset() -> Vector2:
 	var gc: int = _cell_cache["cols"]
