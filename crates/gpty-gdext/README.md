@@ -63,6 +63,7 @@ target/debug/libgpty_gdext.so
 |--------|---------|-------------|
 | `set_global_concepts(concepts: Array)` | void | Replace all concepts in the engine |
 | `get_global_concepts()` | `Array` | Get all concepts as Dict array |
+| `match_concepts_on_line(line: String)` | `Array` | Match concepts against a line; returns `[{name, cmd}]` with shell-quoted substitution |
 | `drain_concept_events()` | `Array` | Drain completed capture events from this terminal |
 | `acknowledge_capture(event_id: int)` | void | Discard captured bytes (receiver consumed output) |
 | `flush_capture(event_id: int)` | void | Feed captured bytes to grid (no receiver) |

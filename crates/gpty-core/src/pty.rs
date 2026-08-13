@@ -10,6 +10,46 @@ use std::thread;
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tokio::sync::mpsc::UnboundedSender;
 
+/// Environment variables that may not be set via pane/profile config.
+/// These are dynamic-loader injection vectors: a shared or imported
+/// layout carrying one of them would run arbitrary code in every shell
+/// spawned from it. Users can still set them manually inside a shell.
+const BLOCKED_ENV_KEYS: &[&str] = &[
+    "LD_PRELOAD",
+    "LD_AUDIT",
+    "LD_LIBRARY_PATH",
+    "LD_ORIGIN_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_FALLBACK_LIBRARY_PATH",
+    "DYLD_FORCE_FLAT_NAMESPACE",
+];
+
+/// Filter `KEY=VALUE` environment entries from settings/layouts/profiles.
+///
+/// Drops entries without `=`, with an empty or malformed key (must match
+/// `[A-Za-z_][A-Za-z0-9_]*`), and keys in [`BLOCKED_ENV_KEYS`] (exact
+/// case match — case variants are inert for the dynamic loaders).
+pub fn sanitize_envs(envs: &[String]) -> Vec<(String, String)> {
+    let mut out = Vec::with_capacity(envs.len());
+    for e in envs {
+        let Some((k, v)) = e.split_once('=') else {
+            continue;
+        };
+        let k = k.trim();
+        let v = v.trim();
+        let mut chars = k.chars();
+        let valid = chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !valid || BLOCKED_ENV_KEYS.contains(&k) {
+            continue;
+        }
+        out.push((k.to_string(), v.to_string()));
+    }
+    out
+}
 const DEFAULT_ROWS: u16 = 24;
 const DEFAULT_COLS: u16 = 80;
 const READ_BUF_SIZE: usize = 4096;
@@ -46,10 +86,8 @@ impl PtyHandle {
         let mut cmd = CommandBuilder::new(command);
         cmd.args(args);
         cmd.env("TERM", "xterm-256color");
-        for e in envs {
-            if let Some((k, v)) = e.split_once('=') {
-                cmd.env(k.trim(), v.trim());
-            }
+        for (k, v) in sanitize_envs(envs) {
+            cmd.env(k, v);
         }
 
         let pty_pair = pty_system.openpty(PtySize {
@@ -118,5 +156,63 @@ impl PtyHandle {
             pixel_height: 0,
         })?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(v: &str) -> String {
+        v.to_string()
+    }
+
+    #[test]
+    fn sanitize_envs_drops_blocked_keys() {
+        let envs = vec![
+            s("LD_PRELOAD=/evil.so"),
+            s("LD_AUDIT=/evil.so"),
+            s("DYLD_INSERT_LIBRARIES=/evil.dylib"),
+            s("PATH=/usr/bin"),
+        ];
+        assert_eq!(
+            sanitize_envs(&envs),
+            vec![("PATH".to_string(), "/usr/bin".to_string())]
+        );
+    }
+
+    #[test]
+    fn sanitize_envs_blocklist_is_case_sensitive() {
+        // Lowercase variants are inert for the dynamic loaders.
+        let envs = vec![s("ld_preload=/x.so")];
+        assert_eq!(
+            sanitize_envs(&envs),
+            vec![("ld_preload".to_string(), "/x.so".to_string())]
+        );
+    }
+
+    #[test]
+    fn sanitize_envs_drops_malformed_keys() {
+        let envs = vec![
+            s("-X=y"),
+            s("1A=b"),
+            s("=novalue"),
+            s("no_equals"),
+            s("A B=c"),
+            s("OK=yes"),
+        ];
+        assert_eq!(
+            sanitize_envs(&envs),
+            vec![("OK".to_string(), "yes".to_string())]
+        );
+    }
+
+    #[test]
+    fn sanitize_envs_trims_key_and_value() {
+        let envs = vec![s("  PATH = /usr/bin  ")];
+        assert_eq!(
+            sanitize_envs(&envs),
+            vec![("PATH".to_string(), "/usr/bin".to_string())]
+        );
     }
 }

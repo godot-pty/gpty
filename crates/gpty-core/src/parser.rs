@@ -50,7 +50,11 @@ impl LineParser {
     }
 }
 
-// ── vte Perform implementation ─────────────────────────────────────────
+/// Maximum bytes buffered for a single output line before the parser
+/// stops collecting. Bounds memory when a program floods output without
+/// newlines; concept matching is additionally gated on this length in
+/// the engine. The grid still receives raw bytes (separate path).
+pub const MAX_LINE_LEN: usize = 16 * 1024;
 
 /// Private vte handler that collects printable text and ignores everything else.
 #[derive(Default)]
@@ -63,7 +67,9 @@ struct Handler {
 impl Perform for Handler {
     /// Printable character — append to current line.
     fn print(&mut self, c: char) {
-        self.current_line.push(c);
+        if self.current_line.len() < MAX_LINE_LEN {
+            self.current_line.push(c);
+        }
         self.last_was_cr = false;
     }
 

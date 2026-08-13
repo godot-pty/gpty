@@ -90,9 +90,12 @@ pub struct Event {
 
 /// A command to inject into a target terminal, gated by a label.
 ///
-/// The `command_template` is written to the target PTY's stdin as-is
-/// (with `\n` appended). Variable substitution (e.g., `{payload}`)
-/// could be added in a future iteration.
+/// `{payload}` and `{N}` tokens in `command_template` are substituted
+/// with the triggering line and regex capture groups (group 0 = full
+/// match) before the command is written to the target PTY. Substituted
+/// values are single-quote-escaped (see `concept::substitute_template`),
+/// so templates must not pre-quote them: write `echo {payload}`, not
+/// `echo '{payload}'`.
 #[derive(Debug, Clone)]
 pub struct Action {
     pub command_template: String,

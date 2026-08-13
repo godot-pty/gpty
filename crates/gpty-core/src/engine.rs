@@ -238,6 +238,7 @@ struct TaskContext {
     tx: broadcast::Sender<Event>,
     // Capture state
     capture_buffer: Vec<Vec<u8>>,
+    capture_bytes: usize,
     active_capture_name: Option<String>,
     active_capture_target: Option<String>,
     capture_deadline: Option<tokio::time::Instant>,
@@ -261,6 +262,7 @@ impl TaskContext {
             rx,
             tx,
             capture_buffer: Vec::new(),
+            capture_bytes: 0,
             active_capture_name: None,
             active_capture_target: None,
             capture_deadline: None,
@@ -289,6 +291,10 @@ fn store_line(grid: &Option<Arc<Mutex<TermGrid>>>, line: &str) {
     }
 }
 
+/// Maximum raw bytes buffered per capture before it is finalized early.
+/// Bounds memory when a capture-mode concept matches an output flood.
+const MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
+
 /// Emit a completed capture to the queue and store raw bytes for
 /// later flush/acknowledge.
 fn finalize_capture(ctx: &mut TaskContext) {
@@ -309,6 +315,7 @@ fn finalize_capture(ctx: &mut TaskContext) {
     let concept_name = ctx.active_capture_name.take().unwrap_or_default();
     let target = ctx.active_capture_target.take().unwrap_or_default();
     let raw_bytes = std::mem::take(&mut ctx.capture_buffer);
+    ctx.capture_bytes = 0;
     if let Ok(mut bufs) = ctx.capture_buffers.lock() {
         if bufs.len() >= MAX_BUFFERED
             && let Some(oldest) = bufs.keys().min().copied()
@@ -461,15 +468,25 @@ async fn run_terminal_task(
 
                 if ctx.active_capture_name.is_some() {
                     // In capture mode: buffer raw bytes, don't feed grid
+                    ctx.capture_bytes += bytes.len();
                     ctx.capture_buffer.push(bytes);
-                    if let Some(deadline) = ctx.capture_deadline {
+                    if ctx.capture_bytes > MAX_CAPTURE_BYTES {
+                        // Output flood during capture — finalize early to
+                        // bound memory; capture mode ends like a timeout.
+                        finalize_capture(&mut ctx);
+                        timeout_sleep
+                            .as_mut()
+                            .reset(tokio::time::Instant::now() + INACTIVE_DURATION);
+                    } else if let Some(deadline) = ctx.capture_deadline {
                         let now = tokio::time::Instant::now();
                         if deadline > now {
                             timeout_sleep.as_mut().reset(deadline);
                         } else {
                             // Deadline passed — finalize now
                             finalize_capture(&mut ctx);
-                            timeout_sleep.as_mut().reset(tokio::time::Instant::now() + INACTIVE_DURATION);
+                            timeout_sleep
+                                .as_mut()
+                                .reset(tokio::time::Instant::now() + INACTIVE_DURATION);
                         }
                     }
                 } else {
@@ -477,6 +494,11 @@ async fn run_terminal_task(
                     // SingleLine concepts broadcast events for command injection.
                     // UntilStop concepts start capture mode to buffer subsequent output.
                     for line in &lines {
+                        if line.len() > crate::parser::MAX_LINE_LEN {
+                            // Oversized line — skip concept matching to bound
+                            // regex cost. Grid and history still get it.
+                            continue;
+                        }
                         let concepts_guard = ctx.concepts.read().unwrap();
                         let capture = concept::match_and_broadcast(
                             ctx.id, &concepts_guard, &ctx.tx, line,
@@ -511,7 +533,9 @@ async fn run_terminal_task(
                         // Match UntilStop concepts on user input (Enter).
                         // This avoids false triggers from Tab completion,
                         // command echo, and shell output noise.
-                        if ctx.active_capture_name.is_none() {
+                        if ctx.active_capture_name.is_none()
+                            && line.len() <= crate::parser::MAX_LINE_LEN
+                        {
                             let concepts_guard = ctx.concepts.read().unwrap();
                             for concept in concepts_guard.iter() {
                                 if !concept.enabled { continue; }

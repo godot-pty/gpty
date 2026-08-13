@@ -77,6 +77,12 @@ impl GptyTerminal {
     /// - `rows` and `cols` are clamped to ≥1.
     #[func]
     fn start_shell(&mut self, command: GString, rows: i64, cols: i64, envs: GString) {
+        let command = command.to_string();
+        if command.is_empty() || command.len() > 1024 || command.contains('\0') {
+            godot_error!("Refusing to spawn invalid shell command (empty, oversized, or NUL)");
+            return;
+        }
+
         let id = self.next_id;
         self.next_id += 1;
 
@@ -88,17 +94,19 @@ impl GptyTerminal {
         let rows = rows.max(MIN_DIM) as usize;
         let cols = cols.max(MIN_DIM) as usize;
 
-        // Parse "KEY=value" lines into Vec<String>
+        // Parse "KEY=value" lines into Vec<String> — capped so hostile
+        // layout data cannot blow up the env list.
         let env_list: Vec<String> = envs
             .to_string()
             .lines()
             .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty() && l.contains('='))
+            .filter(|l| !l.is_empty() && l.contains('=') && l.len() <= 4096)
+            .take(64)
             .collect();
 
         match RUNTIME.block_on(ENGINE.spawn_terminal_with_grid(
             config,
-            &command.to_string(),
+            &command,
             &[],
             &env_list,
             rows,
@@ -693,64 +701,16 @@ impl GptyTerminal {
     }
 
     /// Replace all concepts in the global engine.
-    /// `concepts_array` is an Array of Dictionaries, each with:
+    /// `concepts_json` is a JSON Array of objects, each with:
     ///   "name": String, "trigger": String (regex),
     ///   "enabled": bool, "capture_mode": String,
     ///   "stop_timeout_ms": int, "stop_on_input": bool,
     ///   "actions": Array[{"cmd":String,"target":String}]
+    /// Parsing and caps (count, lengths, timeout clamp) live in
+    /// `gpty_core::concept::concepts_from_json`.
     #[func]
     fn set_global_concepts(&self, concepts_json: GString) {
-        use gpty_core::types::{Action, CaptureMode, Concept};
-        let json_str = concepts_json.to_string();
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_str) else {
-            return;
-        };
-        let serde_json::Value::Array(arr) = value else {
-            return;
-        };
-        let mut concepts = Vec::new();
-        for item in &arr {
-            let name = item["name"].as_str().unwrap_or("").to_string();
-            if name.is_empty() {
-                continue;
-            }
-            let trigger = item["trigger"].as_str().unwrap_or("");
-            let Ok(re) = regex::Regex::new(trigger) else {
-                continue;
-            };
-            let enabled = item["enabled"].as_bool().unwrap_or(true);
-            let cap_mode = match item["capture_mode"].as_str() {
-                Some("until_stop") => {
-                    let stop_ms = item["stop_timeout_ms"].as_u64().unwrap_or(300);
-                    let stop_input = item["stop_on_input"].as_bool().unwrap_or(true);
-                    CaptureMode::UntilStop {
-                        stop_timeout_ms: stop_ms,
-                        stop_on_input: stop_input,
-                    }
-                }
-                _ => CaptureMode::SingleLine,
-            };
-            let mut actions = Vec::new();
-            if let Some(acts) = item["actions"].as_array() {
-                for a in acts {
-                    let cmd = a["cmd"].as_str().unwrap_or("").to_string();
-                    let target = a["target"].as_str().unwrap_or("").to_string();
-                    if !target.is_empty() {
-                        actions.push(Action {
-                            command_template: cmd,
-                            target_label: target,
-                        });
-                    }
-                }
-            }
-            concepts.push(Concept {
-                name,
-                trigger_regex: re,
-                enabled,
-                capture_mode: cap_mode,
-                destinations: actions,
-            });
-        }
+        let concepts = gpty_core::concept::concepts_from_json(&concepts_json.to_string());
         ENGINE.set_concepts(concepts);
     }
     /// Get all concepts as an Array of Dictionaries.
@@ -785,6 +745,45 @@ impl GptyTerminal {
                 acts.push(&Variant::from(ad));
             }
             obj.set("actions", &Variant::from(acts));
+            arr.push(&Variant::from(obj));
+        }
+        arr
+    }
+
+    /// Match every enabled concept against `line` and return, for each
+    /// matching concept, the substituted command from its first action.
+    ///
+    /// Returns an Array of Dictionaries `{"name": String, "cmd": String}`.
+    /// `cmd` is the template with `{payload}`/`{N}` substituted and
+    /// shell-quoted; it may be empty (e.g. capture-only concepts).
+    /// GDScript decides whether to inject it. Uses the Rust `regex` crate
+    /// only — no backtracking engine.
+    #[func]
+    fn match_concepts_on_line(&self, line: GString) -> Array<Variant> {
+        let line = line.to_string();
+        let concepts = ENGINE.get_concepts();
+        let mut arr = Array::<Variant>::new();
+        for c in &concepts {
+            if !c.enabled {
+                continue;
+            }
+            let Some(caps) = c.trigger_regex.captures(&line) else {
+                continue;
+            };
+            let mut captures = Vec::with_capacity(caps.len());
+            for m in caps.iter() {
+                captures.push(m.map(|m| m.as_str().to_string()).unwrap_or_default());
+            }
+            let payload = captures.first().cloned().unwrap_or_default();
+            let template = c
+                .destinations
+                .first()
+                .map(|a| a.command_template.clone())
+                .unwrap_or_default();
+            let cmd = gpty_core::concept::substitute_template(&template, &payload, &captures);
+            let mut obj = Dictionary::<Variant, Variant>::new();
+            obj.set("name", &Variant::from(c.name.clone()));
+            obj.set("cmd", &Variant::from(cmd));
             arr.push(&Variant::from(obj));
         }
         arr
