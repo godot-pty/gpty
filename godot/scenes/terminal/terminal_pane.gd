@@ -433,6 +433,11 @@ func _is_copy_paste(event: InputEventKey) -> bool:
 func _get_clipboard_text() -> String:
 	return DisplayServer.clipboard_get()
 
+func _clear_selection():
+	_sel_start = Vector2i(-1, -1)
+	_sel_end = Vector2i(-1, -1)
+	queue_redraw()
+
 func _send_to_term(text: String):
 	_terminal.send_text(text)
 
@@ -453,7 +458,7 @@ func _handle_keyboard(event: InputEventKey):
 		var st = _get_selected_text()
 		if st != "":
 			DisplayServer.clipboard_set(st)
-			_sel_start = Vector2i(-1, -1); _sel_end = Vector2i(-1, -1); queue_redraw()
+		_clear_selection()
 		accept_event()
 		return
 	if event.keycode == KEY_V and event.ctrl_pressed and event.shift_pressed:
@@ -461,20 +466,22 @@ func _handle_keyboard(event: InputEventKey):
 		if cl != "": _send_to_term(cl)
 		accept_event(); return
 
-	_sel_start = Vector2i(-1, -1); _sel_end = Vector2i(-1, -1)
 	if event.keycode == KEY_PAGEUP: _terminal.scroll_up(rows); accept_event(); return
 	if event.keycode == KEY_PAGEDOWN: _terminal.scroll_down(rows); accept_event(); return
 	if event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
+		_clear_selection()
 		_send_line_to_term(""); _terminal.scroll_reset(); accept_event(); return
 	_terminal.scroll_reset()
 	# Try Rust keymap first (arrows, F-keys, Home, End, etc.)
 	var bytes = _terminal.key_to_bytes(event.keycode, event.shift_pressed, event.alt_pressed, event.ctrl_pressed, event.meta_pressed)
 	if bytes.size() > 0:
+		_clear_selection()
 		_send_to_term(bytes.get_string_from_ascii())
 		accept_event(); return
 	# Fall back to unicode + Ctrl+letter path
 	var tx = _key_to_text(event)
 	if tx != "":
+		_clear_selection()
 		if event.alt_pressed and not event.ctrl_pressed:
 			tx = char(0x1b) + tx
 		_send_to_term(tx)

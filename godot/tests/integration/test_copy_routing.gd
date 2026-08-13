@@ -56,6 +56,17 @@ func _press_copy() -> InputEventKey:
 	return _press(KEY_C)
 
 
+func _press_mod(keycode: int) -> InputEventKey:
+	var ev = InputEventKey.new()
+	ev.keycode = keycode
+	ev.unicode = 0
+	ev.ctrl_pressed = keycode == KEY_CTRL
+	ev.shift_pressed = keycode == KEY_SHIFT
+	ev.alt_pressed = keycode == KEY_ALT
+	ev.pressed = true
+	return ev
+
+
 func _fake_cache() -> Dictionary:
 	return {
 		"rows": 1, "cols": 3, "chars": ["abc"],
@@ -98,3 +109,39 @@ func test_code_viewer_shortcut_spawns_on_new_binding():
 	ShortcutManager.register("test:code_viewer", "Ctrl+Shift+D", func(): _spawns += 1)
 	await _dispatch(_press(KEY_D))
 	assert_eq(_spawns, 1, "Ctrl+Shift+D spawns the code viewer")
+
+func test_modifier_presses_do_not_clear_selection():
+	_pane._cell_cache = _fake_cache()
+	_pane._sel_start = Vector2i(0, 0)
+	_pane._sel_end = Vector2i(0, 2)
+	await _dispatch(_press_mod(KEY_CTRL))
+	assert_eq(_pane._sel_start, Vector2i(0, 0), "Ctrl press must not clear the selection")
+	await _dispatch(_press_mod(KEY_SHIFT))
+	assert_eq(_pane._sel_start, Vector2i(0, 0), "Shift press must not clear the selection")
+	await _dispatch(_press_mod(KEY_ALT))
+	assert_eq(_pane._sel_start, Vector2i(0, 0), "Alt press must not clear the selection")
+
+
+func test_rapid_modifier_sequence_then_copy():
+	# The reported flow: select, then press Ctrl, Shift, and C in rapid
+	# succession. Modifiers must not clear the selection; the C chord copies.
+	_pane._cell_cache = _fake_cache()
+	_pane._sel_start = Vector2i(0, 0)
+	_pane._sel_end = Vector2i(0, 2)
+	await _dispatch(_press_mod(KEY_CTRL))
+	await _dispatch(_press_mod(KEY_SHIFT))
+	await _dispatch(_press_copy())
+	assert_eq(_spawns, 0, "copy chord must not spawn the code viewer")
+	assert_eq(_pane._sel_start, Vector2i(-1, -1), "copy chord consumed and cleared the selection")
+
+
+func test_typing_clears_selection():
+	_pane._cell_cache = _fake_cache()
+	_pane._sel_start = Vector2i(0, 0)
+	_pane._sel_end = Vector2i(0, 2)
+	var ev = InputEventKey.new()
+	ev.keycode = KEY_X
+	ev.unicode = 120
+	ev.pressed = true
+	await _dispatch(ev)
+	assert_eq(_pane._sel_start, Vector2i(-1, -1), "typing still clears the selection")
