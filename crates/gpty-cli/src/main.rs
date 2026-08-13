@@ -5,6 +5,8 @@
 //! (unless `--no-daemon` is passed).
 
 mod commands;
+#[cfg(test)]
+mod tests;
 
 use std::process;
 use std::time::Duration;

@@ -2,13 +2,13 @@
 
 pub mod concept;
 pub mod daemon;
-mod focus_pane;
-mod inject;
-mod kill_pane;
-mod layout;
-mod list_panes;
+pub(crate) mod focus_pane;
+pub(crate) mod inject;
+pub(crate) mod kill_pane;
+pub(crate) mod layout;
+pub(crate) mod list_panes;
 pub mod mcp;
-mod new_pane;
+pub(crate) mod new_pane;
 pub mod schema;
 
 use crate::Commands;
