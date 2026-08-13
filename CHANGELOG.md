@@ -11,6 +11,14 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - IPC hardening — request-size cap (64 KiB, `-32600` on overflow) and connection cap (16 concurrent, 30 s timeout) on the IPC server
 - Workspace cleanup script — `scripts/clean` removes stale IPC sockets (skipping live listeners), Godot import caches, and standalone `dist/` outputs; `--dry-run` preview and `--all` deep mode; user data never touched
 
+### Security
+
+- Concept command injection fixed — `{payload}`/`{N}` template values are shell-quoted (POSIX single quotes) before injection, and substitution is single-pass so payload text cannot trigger nested substitutions. Existing user templates that pre-quote values (`echo '{payload}'`) must drop their own quotes.
+- Concept cost bounded — concept count (128), trigger/command lengths, action counts, and `stop_timeout_ms` are capped at parse time; output lines over 16 KiB are never regex-matched; capture buffers finalize early past 4 MiB.
+- PTY env sanitized — dynamic-loader variables (`LD_PRELOAD`, `LD_AUDIT`, `LD_LIBRARY_PATH`, `DYLD_*`) and malformed keys are dropped from pane/profile envs at spawn.
+- `GPTY_SOCKET`/`GPTY_GUI` hijacking mitigated — the CLI/MCP refuse insecure socket files (wrong owner or open permissions) before sending anything, and `GPTY_GUI` auto-spawn validates the binary.
+- Layout restore hardened — malformed tile data (wrong types, unknown pane types, out-of-range grid geometry) is skipped or clamped instead of crashing; code viewer and file tree pane paths must be absolute.
+
 ### Changed
 
 - Default IPC socket path moved from `/tmp/gpty.sock` to a per-user runtime directory (`$XDG_RUNTIME_DIR/gpty.sock`, fallbacks `/run/user/<uid>/gpty.sock` and `/tmp/gpty-<uid>.sock`; macOS `$TMPDIR`); the socket file is chmod 0600 and cross-UID peers are rejected on Linux/macOS
