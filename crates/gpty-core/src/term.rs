@@ -550,4 +550,59 @@ mod tests {
         g.feed(b"\x1b]0;Test Title\x07");
         assert_eq!(g.title(), "Test Title");
     }
+
+    #[test]
+    fn partial_damage_tracks_fed_cells() {
+        let mut g = TermGrid::new(3, 20);
+        // Initial state carries full damage — flush it the way the
+        // renderer's first force_full fetch does.
+        let _ = g.get_grid_updates(false);
+        g.feed(b"hi");
+        match g.get_grid_updates(false) {
+            GridUpdate::Partial(ups) => {
+                // Fed cells plus the always-damaged cursor cell.
+                let at = |col: usize| ups.iter().find(|u| u.row == 0 && u.col == col);
+                assert_eq!(at(0).map(|u| u.cell.ch), Some('h'));
+                assert_eq!(at(1).map(|u| u.cell.ch), Some('i'));
+            }
+            _ => panic!("expected partial update after feed"),
+        }
+        // Fed-cell damage consumed — only the cursor cell may remain
+        // (alacritty always damages the current cursor position).
+        match g.get_grid_updates(false) {
+            GridUpdate::Partial(ups) => assert!(
+                ups.iter().all(|u| u.cell.ch != 'h' && u.cell.ch != 'i'),
+                "fed-cell damage must be reset"
+            ),
+            _ => panic!("expected partial update"),
+        }
+    }
+
+    #[test]
+    fn force_full_returns_all_cells_and_resets_damage() {
+        let mut g = TermGrid::new(2, 10);
+        g.feed(b"abc");
+        match g.get_grid_updates(true) {
+            GridUpdate::Full(rows) => {
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0][0].ch, 'a');
+                assert_eq!(rows[0][2].ch, 'c');
+            }
+            _ => panic!("expected full update when forced"),
+        }
+        // The next partial fetch still spans the old-cursor → new-cursor
+        // range (alacritty damages everything the cursor crossed; the
+        // forced-full branch never reads damage(), so last_cursor was
+        // still the construction default). Fetch once to stabilize, then
+        // assert fed-cell damage is gone.
+        let _ = g.get_grid_updates(false);
+        match g.get_grid_updates(false) {
+            GridUpdate::Partial(ups) => assert!(
+                ups.iter()
+                    .all(|u| u.cell.ch != 'a' && u.cell.ch != 'b' && u.cell.ch != 'c'),
+                "fed-cell damage must be reset by forced full"
+            ),
+            _ => panic!("expected partial after forced full"),
+        }
+    }
 }

@@ -195,8 +195,8 @@ impl WorkspaceEngine {
             self.tx.subscribe(),
             self.tx.clone(),
         );
-        task_ctx.capture_queue = Arc::clone(&capture_queue);
-        task_ctx.capture_buffers = Arc::clone(&capture_buffers);
+        task_ctx.session =
+            CaptureSession::new(Arc::clone(&capture_buffers), Arc::clone(&capture_queue));
 
         let task = tokio::spawn(run_terminal_task(
             task_ctx,
@@ -236,15 +236,7 @@ struct TaskContext {
     concepts: Arc<std::sync::RwLock<Vec<Concept>>>,
     rx: broadcast::Receiver<Event>,
     tx: broadcast::Sender<Event>,
-    // Capture state
-    capture_buffer: Vec<Vec<u8>>,
-    capture_bytes: usize,
-    active_capture_name: Option<String>,
-    active_capture_target: Option<String>,
-    capture_deadline: Option<tokio::time::Instant>,
-    capture_event_id: u64,
-    capture_buffers: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>>,
-    capture_queue: Arc<Mutex<Vec<CapturedOutput>>>,
+    session: CaptureSession,
 }
 
 impl TaskContext {
@@ -261,14 +253,10 @@ impl TaskContext {
             concepts,
             rx,
             tx,
-            capture_buffer: Vec::new(),
-            capture_bytes: 0,
-            active_capture_name: None,
-            active_capture_target: None,
-            capture_deadline: None,
-            capture_event_id: 0,
-            capture_buffers: Arc::new(Mutex::new(HashMap::new())),
-            capture_queue: Arc::new(Mutex::new(Vec::new())),
+            session: CaptureSession::new(
+                Arc::new(Mutex::new(HashMap::new())),
+                Arc::new(Mutex::new(Vec::new())),
+            ),
         }
     }
 }
@@ -295,71 +283,184 @@ fn store_line(grid: &Option<Arc<Mutex<TermGrid>>>, line: &str) {
 /// Bounds memory when a capture-mode concept matches an output flood.
 const MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
 
-/// Emit a completed capture to the queue and store raw bytes for
-/// later flush/acknowledge.
-fn finalize_capture(ctx: &mut TaskContext) {
-    /// Maximum number of buffered captures before dropping oldest.
-    /// Prevents unbounded memory growth if GDScript stops polling.
-    const MAX_BUFFERED: usize = 64;
-    let id = ctx.capture_event_id;
-    ctx.capture_event_id += 1;
+/// Owns the UntilStop capture state machine: buffering, deadline, and
+/// finalization into the shared chunk store and event queue.
+///
+/// Extracted from `run_terminal_task` so the capture lifecycle is
+/// unit-testable without a real PTY.
+struct CaptureSession {
+    buffer: Vec<Vec<u8>>,
+    bytes: usize,
+    active_name: Option<String>,
+    active_target: Option<String>,
+    deadline: Option<tokio::time::Instant>,
+    next_event_id: u64,
+    buffers: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>>,
+    queue: Arc<Mutex<Vec<CapturedOutput>>>,
+}
 
-    // Extract plain-text lines from buffered raw bytes
-    let mut lp = crate::parser::LineParser::new();
-    let mut lines = Vec::new();
-    for chunk in &ctx.capture_buffer {
-        let parsed = lp.feed(chunk);
-        lines.extend(parsed);
+impl CaptureSession {
+    fn new(
+        buffers: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>>,
+        queue: Arc<Mutex<Vec<CapturedOutput>>>,
+    ) -> Self {
+        Self {
+            buffer: Vec::new(),
+            bytes: 0,
+            active_name: None,
+            active_target: None,
+            deadline: None,
+            next_event_id: 0,
+            buffers,
+            queue,
+        }
     }
 
-    let concept_name = ctx.active_capture_name.take().unwrap_or_default();
-    let target = ctx.active_capture_target.take().unwrap_or_default();
-    let raw_bytes = std::mem::take(&mut ctx.capture_buffer);
-    ctx.capture_bytes = 0;
-    if let Ok(mut bufs) = ctx.capture_buffers.lock() {
-        if bufs.len() >= MAX_BUFFERED
-            && let Some(oldest) = bufs.keys().min().copied()
-        {
-            bufs.remove(&oldest);
-        }
-        bufs.insert(id, raw_bytes);
+    fn is_active(&self) -> bool {
+        self.active_name.is_some()
     }
 
-    if let Ok(mut queue) = ctx.capture_queue.lock() {
-        if queue.len() >= MAX_BUFFERED {
-            queue.remove(0);
+    fn begin(&mut self, name: String, target: String, deadline: tokio::time::Instant) {
+        self.active_name = Some(name);
+        self.active_target = Some(target);
+        self.deadline = Some(deadline);
+    }
+
+    fn deadline(&self) -> Option<tokio::time::Instant> {
+        self.deadline
+    }
+
+    /// Feed PTY output while capturing. Returns true when the session
+    /// finalized itself (byte cap exceeded or deadline passed).
+    fn feed_output(&mut self, bytes: Vec<u8>, now: tokio::time::Instant) -> bool {
+        if !self.is_active() {
+            return false;
         }
-        queue.push(CapturedOutput {
+        self.bytes += bytes.len();
+        self.buffer.push(bytes);
+        let over_cap = self.bytes > MAX_CAPTURE_BYTES;
+        let past_deadline = self.deadline.is_some_and(|d| now >= d);
+        if over_cap || past_deadline {
+            self.finalize();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Emit the completed capture to the queue and store raw bytes for
+    /// later flush/acknowledge. Resets all capture state.
+    fn finalize(&mut self) -> Option<CapturedOutput> {
+        /// Maximum number of buffered captures before dropping oldest.
+        /// Prevents unbounded memory growth if GDScript stops polling.
+        const MAX_BUFFERED: usize = 64;
+        if !self.is_active() {
+            return None;
+        }
+        let id = self.next_event_id;
+        self.next_event_id += 1;
+
+        // Extract plain-text lines from buffered raw bytes
+        let mut lp = crate::parser::LineParser::new();
+        let mut lines = Vec::new();
+        for chunk in &self.buffer {
+            let parsed = lp.feed(chunk);
+            lines.extend(parsed);
+        }
+
+        let concept_name = self.active_name.take().unwrap_or_default();
+        let target = self.active_target.take().unwrap_or_default();
+        let raw_bytes = std::mem::take(&mut self.buffer);
+        self.bytes = 0;
+        if let Ok(mut bufs) = self.buffers.lock() {
+            if bufs.len() >= MAX_BUFFERED
+                && let Some(oldest) = bufs.keys().min().copied()
+            {
+                bufs.remove(&oldest);
+            }
+            bufs.insert(id, raw_bytes);
+        }
+
+        let event = CapturedOutput {
             id,
             concept_name,
             lines,
             target_pane_type: target,
-        });
+        };
+        if let Ok(mut queue) = self.queue.lock() {
+            if queue.len() >= MAX_BUFFERED {
+                queue.remove(0);
+            }
+            queue.push(event.clone());
+        }
+
+        self.deadline = None;
+        Some(event)
     }
 
-    ctx.capture_deadline = None;
-}
+    /// True when the active concept's `UntilStop` mode stops on user input.
+    fn stops_on_input(&self, concepts: &[Concept]) -> bool {
+        let Some(name) = self.active_name.as_deref() else {
+            return false;
+        };
+        concepts.iter().any(|c| {
+            c.name == name
+                && matches!(
+                    c.capture_mode,
+                    CaptureMode::UntilStop {
+                        stop_on_input: true,
+                        ..
+                    }
+                )
+        })
+    }
 
-/// Remove buffered chunks for a capture ID from the shared buffer map.
-#[allow(clippy::type_complexity)]
-fn take_capture_chunks(
-    id: &u64,
-    capture_buffers: &Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>>,
-) -> Option<Vec<Vec<u8>>> {
-    let mut bufs = capture_buffers.lock().ok()?;
-    bufs.remove(id)
+    /// Remove buffered chunks for a capture ID from the shared buffer map.
+    fn take_chunks(&self, id: &u64) -> Option<Vec<Vec<u8>>> {
+        let mut bufs = self.buffers.lock().ok()?;
+        bufs.remove(id)
+    }
+
+    /// Match typed input against enabled UntilStop concepts; returns the
+    /// (name, target, timeout duration) to start a capture session.
+    fn match_until_stop(
+        concepts: &[Concept],
+        line: &str,
+    ) -> Option<(String, String, std::time::Duration)> {
+        for concept in concepts {
+            if !concept.enabled {
+                continue;
+            }
+            if concept.trigger_regex.is_match(line)
+                && let CaptureMode::UntilStop {
+                    stop_timeout_ms, ..
+                } = &concept.capture_mode
+            {
+                let target = concept
+                    .destinations
+                    .first()
+                    .map(|a| a.target_label.clone())
+                    .unwrap_or_default();
+                return Some((
+                    concept.name.clone(),
+                    target,
+                    std::time::Duration::from_millis(*stop_timeout_ms),
+                ));
+            }
+        }
+        None
+    }
 }
 
 /// Handle a command (FlushCapture / AcknowledgeCapture) from GDScript.
-#[allow(clippy::type_complexity)]
 fn handle_command(
     input: &StdinInput,
     grid: &Option<Arc<Mutex<TermGrid>>>,
-    capture_buffers: &Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>>,
+    session: &CaptureSession,
 ) {
     match input {
         StdinInput::FlushCapture(id) => {
-            if let Some(chunks) = take_capture_chunks(id, capture_buffers) {
+            if let Some(chunks) = session.take_chunks(id) {
                 let mut lp = crate::parser::LineParser::new();
                 for chunk in &chunks {
                     feed_grid(grid, chunk);
@@ -371,7 +472,7 @@ fn handle_command(
             }
         }
         StdinInput::AcknowledgeCapture(id) => {
-            if let Some(chunks) = take_capture_chunks(id, capture_buffers) {
+            if let Some(chunks) = session.take_chunks(id) {
                 let total: usize = chunks.iter().map(|c| c.len()).sum();
                 let mut all_bytes = Vec::with_capacity(total);
                 for chunk in &chunks {
@@ -399,24 +500,6 @@ fn handle_command(
         _ => {}
     }
 }
-/// Check whether the active capture concept has `stop_on_input` set.
-fn capture_stops_on_input(ctx: &TaskContext) -> bool {
-    if let Some(ref name) = ctx.active_capture_name
-        && let Ok(concepts) = ctx.concepts.read()
-    {
-        return concepts.iter().any(|c| {
-            c.name == *name
-                && matches!(
-                    c.capture_mode,
-                    CaptureMode::UntilStop {
-                        stop_on_input: true,
-                        ..
-                    }
-                )
-        });
-    }
-    false
-}
 
 async fn run_terminal_task(
     mut ctx: TaskContext,
@@ -437,8 +520,8 @@ async fn run_terminal_task(
         tokio::select! {
             _ = &mut timeout_sleep => {
                 // Capture timeout fired
-                if ctx.active_capture_name.is_some() {
-                    finalize_capture(&mut ctx);
+                if ctx.session.is_active() {
+                    ctx.session.finalize();
                 }
                 timeout_sleep.as_mut().reset(tokio::time::Instant::now() + INACTIVE_DURATION);
             }
@@ -466,28 +549,15 @@ async fn run_terminal_task(
                 let Some(bytes) = msg else { break; };
                 let lines = line_parser.feed(&bytes);
 
-                if ctx.active_capture_name.is_some() {
-                    // In capture mode: buffer raw bytes, don't feed grid
-                    ctx.capture_bytes += bytes.len();
-                    ctx.capture_buffer.push(bytes);
-                    if ctx.capture_bytes > MAX_CAPTURE_BYTES {
-                        // Output flood during capture — finalize early to
-                        // bound memory; capture mode ends like a timeout.
-                        finalize_capture(&mut ctx);
+                if ctx.session.is_active() {
+                    // In capture mode: buffer raw bytes, don't feed grid.
+                    // feed_output finalizes on byte cap or deadline.
+                    if ctx.session.feed_output(bytes, tokio::time::Instant::now()) {
                         timeout_sleep
                             .as_mut()
                             .reset(tokio::time::Instant::now() + INACTIVE_DURATION);
-                    } else if let Some(deadline) = ctx.capture_deadline {
-                        let now = tokio::time::Instant::now();
-                        if deadline > now {
-                            timeout_sleep.as_mut().reset(deadline);
-                        } else {
-                            // Deadline passed — finalize now
-                            finalize_capture(&mut ctx);
-                            timeout_sleep
-                                .as_mut()
-                                .reset(tokio::time::Instant::now() + INACTIVE_DURATION);
-                        }
+                    } else if let Some(deadline) = ctx.session.deadline() {
+                        timeout_sleep.as_mut().reset(deadline);
                     }
                 } else {
                     // Normal mode: match concepts against output lines.
@@ -503,14 +573,12 @@ async fn run_terminal_task(
                         let capture = concept::match_and_broadcast(
                             ctx.id, &concepts_guard, &ctx.tx, line,
                         );
-                        if ctx.active_capture_name.is_none()
+                        if !ctx.session.is_active()
                             && let Some((name, CaptureMode::UntilStop { stop_timeout_ms, .. }, target)) = capture
                         {
-                            ctx.active_capture_name = Some(name);
-                            ctx.active_capture_target = Some(target);
                             let deadline = tokio::time::Instant::now()
                                 + Duration::from_millis(stop_timeout_ms);
-                            ctx.capture_deadline = Some(deadline);
+                            ctx.session.begin(name, target, deadline);
                             timeout_sleep.as_mut().reset(deadline);
                         }
                         drop(concepts_guard);
@@ -524,34 +592,31 @@ async fn run_terminal_task(
             msg = stdin_rx.recv() => {
                 let Some(input) = msg else { break; };
                 // Check if user input should stop capture
-                if ctx.active_capture_name.is_some() && capture_stops_on_input(&ctx) {
-                    finalize_capture(&mut ctx);
-                    timeout_sleep.as_mut().reset(tokio::time::Instant::now() + INACTIVE_DURATION);
+                if ctx.session.is_active() {
+                    let concepts_guard = ctx.concepts.read().unwrap();
+                    if ctx.session.stops_on_input(&concepts_guard) {
+                        ctx.session.finalize();
+                        timeout_sleep
+                            .as_mut()
+                            .reset(tokio::time::Instant::now() + INACTIVE_DURATION);
+                    }
+                    drop(concepts_guard);
                 }
                 match &input {
                     StdinInput::Line(line) => {
                         // Match UntilStop concepts on user input (Enter).
                         // This avoids false triggers from Tab completion,
                         // command echo, and shell output noise.
-                        if ctx.active_capture_name.is_none()
+                        if !ctx.session.is_active()
                             && line.len() <= crate::parser::MAX_LINE_LEN
                         {
                             let concepts_guard = ctx.concepts.read().unwrap();
-                            for concept in concepts_guard.iter() {
-                                if !concept.enabled { continue; }
-                                if concept.trigger_regex.is_match(line)
-                                    && let CaptureMode::UntilStop { stop_timeout_ms, .. } = &concept.capture_mode {
-                                        let target = concept.destinations.first()
-                                            .map(|a| a.target_label.clone())
-                                            .unwrap_or_default();
-                                        ctx.active_capture_name = Some(concept.name.clone());
-                                        ctx.active_capture_target = Some(target);
-                                        let deadline = tokio::time::Instant::now()
-                                            + Duration::from_millis(*stop_timeout_ms);
-                                        ctx.capture_deadline = Some(deadline);
-                                        timeout_sleep.as_mut().reset(deadline);
-                                        break;
-                                    }
+                            if let Some((name, target, dur)) =
+                                CaptureSession::match_until_stop(&concepts_guard, line)
+                            {
+                                let deadline = tokio::time::Instant::now() + dur;
+                                ctx.session.begin(name, target, deadline);
+                                timeout_sleep.as_mut().reset(deadline);
                             }
                             drop(concepts_guard);
                         }
@@ -574,21 +639,18 @@ async fn run_terminal_task(
                             }
                     }
                     StdinInput::FlushCapture(_) | StdinInput::AcknowledgeCapture(_) => {
-                        handle_command(&input, &grid, &ctx.capture_buffers);
+                        handle_command(&input, &grid, &ctx.session);
                     }
                 }
             }
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::TerminalConfig;
-    use std::time::Duration;
-
-    #[ignore = "spawns real shell — run on demand with --ignored"]
+    use crate::types::{CaptureMode, Concept, TerminalConfig};
+    use regex::Regex;
     #[tokio::test]
     async fn test_spawn_terminal_and_resize() {
         let engine = WorkspaceEngine::new(vec![]);
@@ -645,21 +707,31 @@ mod tests {
         );
     }
 
+    fn test_session() -> (
+        CaptureSession,
+        Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>>,
+        Arc<Mutex<Vec<CapturedOutput>>>,
+    ) {
+        let bufs: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let queue: Arc<Mutex<Vec<CapturedOutput>>> = Arc::new(Mutex::new(Vec::new()));
+        let session = CaptureSession::new(Arc::clone(&bufs), Arc::clone(&queue));
+        (session, bufs, queue)
+    }
+
     #[test]
     fn test_take_capture_chunks_empty() {
-        let bufs: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
-        let result = take_capture_chunks(&42, &bufs);
-        assert!(result.is_none());
+        let (session, _, _) = test_session();
+        assert!(session.take_chunks(&42).is_none());
     }
 
     #[test]
     fn test_take_capture_chunks_removes_entry() {
-        let bufs: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let (session, bufs, _) = test_session();
         {
             let mut locked = bufs.lock().unwrap();
             locked.insert(7, vec![b"hello".to_vec(), b"world".to_vec()]);
         }
-        let result = take_capture_chunks(&7, &bufs);
+        let result = session.take_chunks(&7);
         assert!(result.is_some());
         assert_eq!(result.unwrap().len(), 2);
         // Entry should be removed
@@ -670,13 +742,13 @@ mod tests {
     fn test_handle_command_flush_replays_to_grid() {
         let grid = Arc::new(Mutex::new(TermGrid::new(24, 80)));
         let grid_opt = Some(grid.clone());
-        let bufs: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let (session, bufs, _) = test_session();
         {
             let mut locked = bufs.lock().unwrap();
             locked.insert(1, vec![b"hello\r\n".to_vec()]);
         }
         let input = StdinInput::FlushCapture(1);
-        handle_command(&input, &grid_opt, &bufs);
+        handle_command(&input, &grid_opt, &session);
         // After flush, chunks are consumed
         assert!(bufs.lock().unwrap().get(&1).is_none());
         // Grid should have the flushed content
@@ -690,14 +762,14 @@ mod tests {
     fn test_handle_command_acknowledge_restores_prompt() {
         let grid = Arc::new(Mutex::new(TermGrid::new(24, 80)));
         let grid_opt = Some(grid.clone());
-        let bufs: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let (session, bufs, _) = test_session();
         {
             let mut locked = bufs.lock().unwrap();
             // Simulate buffered output with a trailing prompt line (no \n)
             locked.insert(2, vec![b"some output\nmore output\n$ prompt here".to_vec()]);
         }
         let input = StdinInput::AcknowledgeCapture(2);
-        handle_command(&input, &grid_opt, &bufs);
+        handle_command(&input, &grid_opt, &session);
         assert!(bufs.lock().unwrap().get(&2).is_none());
         let locked = grid.lock().unwrap();
         let rows = locked.renderable_rows();
@@ -709,14 +781,14 @@ mod tests {
     fn test_handle_command_acknowledge_no_newline() {
         let grid = Arc::new(Mutex::new(TermGrid::new(24, 80)));
         let grid_opt = Some(grid.clone());
-        let bufs: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let (session, bufs, _) = test_session();
         {
             let mut locked = bufs.lock().unwrap();
             // Entire buffer has no newline -- prompt only
             locked.insert(3, vec![b"$ ".to_vec()]);
         }
         let input = StdinInput::AcknowledgeCapture(3);
-        handle_command(&input, &grid_opt, &bufs);
+        handle_command(&input, &grid_opt, &session);
         assert!(bufs.lock().unwrap().get(&3).is_none());
     }
 
@@ -724,7 +796,7 @@ mod tests {
     fn test_handle_command_unknown_variant_preserves_state() {
         let grid = Arc::new(Mutex::new(TermGrid::new(24, 80)));
         let grid_opt = Some(grid.clone());
-        let bufs: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let (session, bufs, _) = test_session();
         // Pre-populate capture buffers with known data
         {
             let mut locked = bufs.lock().unwrap();
@@ -734,7 +806,7 @@ mod tests {
         feed_grid(&grid_opt, b"original content\r\n");
         // Line variant is not FlushCapture or AcknowledgeCapture
         let input = StdinInput::Line("some command".into());
-        handle_command(&input, &grid_opt, &bufs);
+        handle_command(&input, &grid_opt, &session);
         // Buffers must be unchanged (unknown variant doesn't consume)
         assert!(
             bufs.lock().unwrap().get(&1).is_some(),
@@ -745,5 +817,101 @@ mod tests {
         let rows = locked.renderable_rows();
         let has_original = rows.iter().any(|r| r.iter().any(|c| c.ch == 'o'));
         assert!(has_original, "Unknown variant must not alter the grid");
+    }
+
+    // ── CaptureSession lifecycle ─────────────────────────────────
+
+    #[test]
+    fn session_begin_feed_finalize_queues_event() {
+        let (mut session, bufs, queue) = test_session();
+        let now = tokio::time::Instant::now();
+        session.begin(
+            "cat_cmd".into(),
+            "code_viewer".into(),
+            now + Duration::from_millis(300),
+        );
+        assert!(session.is_active());
+        assert!(!session.feed_output(b"hi\n".to_vec(), now));
+        let event = session.finalize().expect("finalize should emit event");
+        assert_eq!(event.id, 0);
+        assert_eq!(event.concept_name, "cat_cmd");
+        assert_eq!(event.target_pane_type, "code_viewer");
+        assert_eq!(event.lines, vec!["hi".to_string()]);
+        assert!(!session.is_active());
+        assert_eq!(queue.lock().unwrap().len(), 1);
+        assert!(bufs.lock().unwrap().contains_key(&0));
+    }
+
+    #[test]
+    fn session_feed_output_finalizes_on_deadline() {
+        let (mut session, bufs, queue) = test_session();
+        let now = tokio::time::Instant::now();
+        session.begin("c".into(), "t".into(), now); // deadline == now
+        assert!(session.feed_output(b"x".to_vec(), now));
+        assert!(!session.is_active());
+        assert_eq!(queue.lock().unwrap().len(), 1);
+        assert!(bufs.lock().unwrap().contains_key(&0));
+    }
+
+    #[test]
+    fn session_feed_output_finalizes_on_cap() {
+        let (mut session, _, queue) = test_session();
+        let now = tokio::time::Instant::now();
+        session.begin("c".into(), "t".into(), now + Duration::from_secs(60));
+        let flood = vec![b'x'; MAX_CAPTURE_BYTES + 1];
+        assert!(session.feed_output(flood, now));
+        assert_eq!(queue.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn session_feed_output_ignores_when_inactive() {
+        let (mut session, bufs, queue) = test_session();
+        let now = tokio::time::Instant::now();
+        assert!(!session.feed_output(b"x".to_vec(), now));
+        assert!(queue.lock().unwrap().is_empty());
+        assert!(bufs.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn session_stops_on_input_matches_flag() {
+        let mut c = Concept::new("cat", Regex::new("cat").unwrap(), vec![]);
+        c.capture_mode = CaptureMode::UntilStop {
+            stop_timeout_ms: 300,
+            stop_on_input: true,
+        };
+        let mut c2 = Concept::new("other", Regex::new("other").unwrap(), vec![]);
+        c2.capture_mode = CaptureMode::UntilStop {
+            stop_timeout_ms: 300,
+            stop_on_input: false,
+        };
+        let (mut session, _, _) = test_session();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        session.begin("cat".into(), "t".into(), deadline);
+        assert!(session.stops_on_input(&[c]));
+        assert!(!session.stops_on_input(&[c2]));
+    }
+
+    #[test]
+    fn session_match_until_stop_returns_target_and_duration() {
+        let mut c = Concept::new("cat", Regex::new("^cat").unwrap(), vec![]);
+        c.capture_mode = CaptureMode::UntilStop {
+            stop_timeout_ms: 300,
+            stop_on_input: true,
+        };
+        let mut single = Concept::new("echo", Regex::new("^echo").unwrap(), vec![]);
+        single.capture_mode = CaptureMode::SingleLine;
+        let mut disabled = Concept::new("off", Regex::new("^off").unwrap(), vec![]);
+        disabled.enabled = false;
+        disabled.capture_mode = CaptureMode::UntilStop {
+            stop_timeout_ms: 300,
+            stop_on_input: true,
+        };
+        let concepts = vec![c, single, disabled];
+        let m = CaptureSession::match_until_stop(&concepts, "cat file").expect("cat should match");
+        assert_eq!(m.0, "cat");
+        assert_eq!(m.1, "");
+        assert_eq!(m.2, Duration::from_millis(300));
+        assert!(CaptureSession::match_until_stop(&concepts, "echo hi").is_none());
+        assert!(CaptureSession::match_until_stop(&concepts, "off thing").is_none());
     }
 }
