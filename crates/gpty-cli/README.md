@@ -1,6 +1,6 @@
 # gpty-cli
 
-CLI for controlling the gpty terminal workspace over JSON-RPC IPC. Connects to a running gpty GUI instance (auto-spawns one unless `--no-daemon` is passed).
+CLI for controlling the gpty terminal workspace over JSON-RPC IPC. Connects to a running gpty GUI instance (auto-spawns one unless `--no-daemon` is passed). Pane types are validated client-side with "did you mean?" suggestions before any IPC round-trip.
 
 ## Role in the Workspace
 

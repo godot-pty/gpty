@@ -21,6 +21,34 @@ JSON-RPC 2.0 IPC transport, client, and server for gpty workspace control.
 | [`server`](src/server.rs) | Async IPC server: bind socket, accept connections, dispatch to handlers |
 | [`client`](src/client.rs) | Async IPC client: connect, send request, read response with timeout |
 
+## Architecture
+
+The GUI owns the workspace state — the CLI is a **stateless client**: each
+invocation connects, sends one JSON-RPC request, reads the response, and
+exits. No persistent connection, no connection management.
+
+```text
+gpty CLI ──▶ socket / named pipe ──▶ IpcServer (gdext, tokio task)
+                                     │  queues PENDING_REQUESTS
+                                     ▼
+                     GDScript _process() polls drain_ipc_requests()
+                     → workspace._handle_ipc_method() mutates the scene
+                     → respond_ipc() completes the pending oneshot
+```
+
+The GUI scene tree is single-threaded, so requests are never handled on
+the socket thread: the server queues them and GDScript polls each frame
+(`crates/gpty-gdext/src/ipc.rs`). `version` and `shutdown` are answered
+locally in Rust; every other method round-trips through GDScript with a
+5-second fallback timeout, and the response flows back through a oneshot
+channel.
+
+**Daemon auto-spawn** (`gpty-cli`): when the socket isn't reachable, the
+CLI spawns the GUI as a separate OS process — the CLI never links Godot —
+and polls the socket until ready. The GUI binary is discovered via the
+`GPTY_GUI` env var (validated before use) or beside the CLI executable
+(`gpty-gui`, `gpty-editor`).
+
 ## Protocol
 
 All communication is newline-delimited JSON-RPC 2.0 over a platform socket:
