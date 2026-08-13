@@ -24,13 +24,46 @@ func _recompute_cell_metrics():
 
 func apply_settings(settings: Dictionary):
 	for key in settings:
+		if not (key is String):
+			continue
 		var v = settings[key]
 		match key:
-			"pane_name": pane_name = v
-			"font_size":  font_size = v
-			_:            set(key, v)
-	if settings.has("pane_name"):
+			"pane_name":
+				if v is String:
+					pane_name = v
+			"font_size":
+				if v is int or v is float:
+					font_size = int(v)
+			"type":
+				pass
+			_:
+				_set_typed(key, v)
+	if settings.has("pane_name") and settings.get("pane_name") is String:
 		title_changed.emit(pane_name if pane_name != "" else _default_title())
+
+## Set a property only when the incoming value's type matches the
+## property's declared type — layout JSON is untrusted and may carry
+## strings where numbers belong (or vice versa).
+func _set_typed(key: String, v):
+	if not (key in self):
+		return
+	var t = typeof(self.get(key))
+	match t:
+		TYPE_INT:
+			if v is int or v is float:
+				set(key, int(v))
+		TYPE_FLOAT:
+			if v is int or v is float:
+				set(key, float(v))
+		TYPE_STRING:
+			if v is String:
+				set(key, v)
+		TYPE_BOOL:
+			if v is bool:
+				set(key, v)
+		_:
+			if typeof(v) == t:
+				set(key, v)
 
 func _default_title() -> String:
 	return get_class()

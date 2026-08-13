@@ -412,8 +412,9 @@ func _restore():
 	for td in tiles:
 		if not (td is Dictionary): continue
 		var settings = td.get("settings", {})
+		if not (settings is Dictionary): continue
 		var sh = settings.get("shell", td.get("shell", ""))
-		if sh != "" and sh != SettingsManager.cfg_shell_command:
+		if sh is String and sh != "" and sh != SettingsManager.cfg_shell_command:
 			untrusted = true
 			break
 	if untrusted:
@@ -436,8 +437,10 @@ func _do_restore(tiles: Array[Dictionary]):
 	_tm.reset()
 	for td in tiles:
 		if not (td is Dictionary): continue
-		var settings = td.get("settings", {})
-		var type_name = settings.get("type", "terminal")
+		var st = PaneTypes.sanitize_tile(td, GRID)
+		if st.is_empty(): continue
+		var settings: Dictionary = st["settings"]
+		var type_name: String = st["type_name"]
 
 		var body = _tm.create_body(type_name)
 		if body == null: continue
@@ -445,8 +448,9 @@ func _do_restore(tiles: Array[Dictionary]):
 
 		# For terminals: apply global defaults and shell override
 		if type_name == "terminal":
-			var sh = settings.get("shell", td.get("shell", SettingsManager.cfg_shell_command))
-			if sh == null or sh == "": sh = SettingsManager.cfg_shell_command
+			var sh: String = PaneTypes.sanitize_shell(
+				settings.get("shell", td.get("shell", "")),
+				SettingsManager.cfg_shell_command)
 			SettingsManager.apply_to_terminal(body)
 			body.shell_command = sh
 
@@ -461,8 +465,8 @@ func _do_restore(tiles: Array[Dictionary]):
 
 		_grid.add_child(w)
 		body.focus_entered.connect(func(): _tm.last_body = body)
-		_tm.tiles.append({wrapper = w, col = td.get("col", 0), row = td.get("row", 0),
-			cspan = td.get("cspan", GRID), rspan = td.get("rspan", GRID)})
+		_tm.tiles.append({wrapper = w, col = st["col"], row = st["row"],
+			cspan = st["cspan"], rspan = st["rspan"]})
 	_apply_layout(); _list()
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -677,7 +681,10 @@ func _handle_ipc_method(method: String, params):
 	match method:
 		"newPane":
 			var type_name = str(params.get("type", "terminal"))
-			var shell = params.get("command", SettingsManager.cfg_shell_command)
+			if not PaneTypes.ALL.has(type_name):
+				return _ipc_error("Unknown pane type: %s" % type_name)
+			var shell: String = PaneTypes.sanitize_shell(
+				params.get("command"), SettingsManager.cfg_shell_command)
 			var body = _spawn_pane(type_name, {"shell_command": shell})
 			if body == null:
 				return _ipc_error("Grid is full")
@@ -717,6 +724,8 @@ func _handle_ipc_method(method: String, params):
 		"inject":
 			var pane_id = str(params.get("pane_id", ""))
 			var text = str(params.get("text", ""))
+			if text.length() > 65536:
+				return _ipc_error("Injected text exceeds 64 KiB limit")
 			var body = _find_pane_by_label(pane_id)
 			if body == null:
 				return _ipc_error("Pane '%s' not found" % pane_id)
@@ -728,6 +737,8 @@ func _handle_ipc_method(method: String, params):
 			var name = str(params.get("name", ""))
 			if name == "":
 				return _ipc_error("Profile name required")
+			if name.length() > 128:
+				return _ipc_error("Profile name too long")
 			ProfileManager.add_profile(name, _gather_tiles())
 			return {"success": true, "name": name}
 		"layoutLoad":
@@ -957,16 +968,19 @@ func _do_activate(profile: Dictionary):
 	var tiles = profile.get("tiles", [])
 	for td in tiles:
 		if not (td is Dictionary): continue
-		var settings = td.get("settings", {})
-		var type_name = settings.get("type", "terminal")
+		var st = PaneTypes.sanitize_tile(td, GRID)
+		if st.is_empty(): continue
+		var settings: Dictionary = st["settings"]
+		var type_name: String = st["type_name"]
 
 		var body = _tm.create_body(type_name)
 		if body == null: continue
 		body.apply_settings(settings)
 
 		if type_name == "terminal":
-			var sh = settings.get("shell", td.get("shell", SettingsManager.cfg_shell_command))
-			if sh == null or sh == "": sh = SettingsManager.cfg_shell_command
+			var sh: String = PaneTypes.sanitize_shell(
+				settings.get("shell", td.get("shell", "")),
+				SettingsManager.cfg_shell_command)
 			SettingsManager.apply_to_terminal(body)
 			body.shell_command = sh
 
@@ -981,8 +995,8 @@ func _do_activate(profile: Dictionary):
 
 		_grid.add_child(w)
 		body.focus_entered.connect(func(): _tm.last_body = body)
-		_tm.tiles.append({wrapper = w, col = td.get("col", 0), row = td.get("row", 0),
-			cspan = td.get("cspan", GRID), rspan = td.get("rspan", GRID)})
+		_tm.tiles.append({wrapper = w, col = st["col"], row = st["row"],
+			cspan = st["cspan"], rspan = st["rspan"]})
 	_apply_layout(); _list()
 	ToastManager.info("Profile '%s' activated" % profile.get("name", ""))
 

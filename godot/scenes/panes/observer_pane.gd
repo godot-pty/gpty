@@ -56,13 +56,13 @@ func _get_layout_state() -> Dictionary:
 
 func apply_settings(settings: Dictionary):
 	super.apply_settings(settings)
-	if settings.has("shell_command"):
+	if settings.get("shell_command") is String:
 		_shell_command = settings["shell_command"]
-	if settings.has("shell"):
+	if settings.get("shell") is String:
 		_shell_command = settings["shell"]
-	if settings.has("label"):
+	if settings.get("label") is String:
 		label_name = settings["label"]
-	if settings.has("label_name"):
+	if settings.get("label_name") is String:
 		label_name = settings["label_name"]
 
 func _build_pane_settings_ui(panel: Control) -> Control:

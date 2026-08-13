@@ -53,9 +53,16 @@ func test_apply_settings_font_size():
 func test_apply_settings_unknown_key():
 	var body = PaneBody.new()
 	_scene.add_child(body)
-	# Should not crash — set() is called for unknown keys
+	# Unknown keys are ignored — layout JSON is untrusted input.
 	body.apply_settings({"bogus": 42})
 	assert_not_null(body, "body should still exist after unknown key set")
+
+func test_apply_settings_bad_type_ignored():
+	var body = PaneBody.new()
+	_scene.add_child(body)
+	body.font_size = 14
+	body.apply_settings({"font_size": "big"})
+	assert_eq(body.font_size, 14, "string font_size must not overwrite int property")
 
 func test_apply_settings_emits_title_changed():
 	var body = PaneBody.new()

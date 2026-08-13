@@ -36,6 +36,8 @@ func _ready():
 	)
 
 func _populate(parent: TreeItem, path: String):
+	if path == "" or not path.is_absolute_path() or not DirAccess.dir_exists_absolute(path):
+		return
 	var dir = DirAccess.open(path)
 	if not dir: return
 	dir.list_dir_begin()
@@ -61,10 +63,10 @@ func _get_layout_state() -> Dictionary:
 
 func apply_settings(settings: Dictionary):
 	super.apply_settings(settings)
-	if settings.has("root_path") and _tree != null:
+	if settings.has("root_path") and settings["root_path"] is String and _tree != null:
 		_tree.clear()
 		_tree.create_item()
-		_populate(_tree.get_root(), root_path)
+		_populate(_tree.get_root(), settings["root_path"])
 
 func _build_pane_settings_ui(panel: Control) -> Control:
 	var v = VBoxContainer.new()

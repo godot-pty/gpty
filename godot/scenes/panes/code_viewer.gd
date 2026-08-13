@@ -24,6 +24,8 @@ func _ready():
 		load_file(file_path)
 
 func load_file(path: String):
+	if path == "" or not path.is_absolute_path():
+		return
 	file_path = path
 	if not FileAccess.file_exists(path): return
 	var f = FileAccess.open(path, FileAccess.READ)
@@ -56,7 +58,7 @@ func _get_layout_state() -> Dictionary:
 
 func apply_settings(settings: Dictionary):
 	super.apply_settings(settings)
-	if settings.has("file_path") and _editor != null:
+	if settings.has("file_path") and settings["file_path"] is String and _editor != null:
 		load_file(settings["file_path"])
 
 func _build_pane_settings_ui(panel: Control) -> Control:

@@ -604,23 +604,13 @@ func _check_click_concept(pos: Vector2):
 	# Trim trailing spaces to get the meaningful text
 	var line = row_str.strip_edges(false, true)
 	if line == "": return
-	# Ask the terminal to check if any concept triggers on this line
-	var concepts = _terminal.get_global_concepts()
-	for concept in concepts:
-		var trigger: String = concept.get("trigger", "")
-		if trigger == "": continue
-		var re = RegEx.new()
-		if re.compile(trigger) != OK: continue
-		var result = re.search(line)
-		if result:
-			var actions = concept.get("actions", [])
-			if actions.size() > 0:
-				var cmd: String = actions[0].get("cmd", "")
-				if cmd != "":
-					cmd = cmd.replace("{payload}", result.get_string())
-					for gi in result.get_group_count():
-						cmd = cmd.replace("{%d}" % gi, result.get_string(gi))
-					_send_line_to_term(cmd)
+	# Match against the Rust engine's compiled regexes (Rust regex only —
+	# no PCRE backtracking). Values are shell-quoted by the engine.
+	var hits = _terminal.match_concepts_on_line(line)
+	for hit in hits:
+		var cmd: String = hit.get("cmd", "")
+		if cmd != "":
+			_send_line_to_term(cmd)
 			return
 
 func _pane_type() -> String:
