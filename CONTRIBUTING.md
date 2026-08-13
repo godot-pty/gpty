@@ -32,6 +32,17 @@ Run `./scripts/ci-check` directly to validate changes before committing.
 
 ### Build
 
+One-shot standalone build (detects the host platform, builds gpty-gdext in
+release mode, and exports the app into `dist/`):
+
+```bash
+./scripts/build
+```
+
+Requires Godot on PATH with export templates installed for its version.
+The manual steps below are what the script does internally.
+
+
 ```bash
 # Build the GDExtension library (required before running Godot)
 cargo build -p gpty-gdext
@@ -41,7 +52,8 @@ cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
 # Release build + local export
 cargo build -p gpty-gdext --release
 cp target/release/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
-godot --headless --path godot --export-release "Linux/X11" dist/gpty
+godot --headless --path godot --import
+godot --headless --path godot --export-release "Linux/X11" ../dist/gpty
 ```
 
 ### MCP

@@ -49,3 +49,11 @@ docs/resources/
 docs/assets/repo/
 docs/data/
 docs/.cache/
+
+# ── Local build output (scripts/build) ────────────────────────────────────
+dist/gpty
+dist/gpty.pck
+dist/gpty.exe
+dist/gpty.zip
+dist/gpty_gdext.windows.x86_64.dll
+dist/gpty.sh

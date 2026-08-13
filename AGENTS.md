@@ -14,7 +14,8 @@ gpty/
 ├── LICENSE
 ├── scripts/                    # CI runner and setup scripts
 │   ├── ci-check                # Run all CI checks locally (--fast for quick)
-│   └── install-hooks           # Symlink githooks into .git/hooks/
+│   ├── install-hooks           # Symlink githooks into .git/hooks/
+│   └── build                   # Build standalone app for the host platform
 ├── githooks/                   # Git hook scripts
 │   ├── pre-commit              # Fast checks (fmt, workflow lint, clippy)
 │   ├── pre-push                # Full CI suite before push

@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── build: Build the standalone gpty app for the host platform ──────────
+# Usage: ./scripts/build
+# Detects the host OS + architecture, builds gpty-gdext in release mode,
+# installs the library into godot/bin/, and exports the Godot project
+# into dist/ for the platform this script runs on.
+#
+# Requirements: Rust toolchain, godot on PATH with export templates for
+# your Godot version installed.
+#
+# Env overrides:
+#   GODOT_BIN   Godot executable (default: godot)
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# ── Color helpers ───────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m'       # No Color
+BOLD='\033[1m'
+
+step()  { printf "\n${BOLD}── %s ──${NC}\n" "$1"; }
+ok()    { printf "  ${GREEN}OK${NC} %s\n" "$1"; }
+warn()  { printf "  ${YELLOW}NOTE${NC} %s\n" "$1"; }
+die()   { printf "  ${RED}ERROR${NC} %s\n" "$1" >&2; exit 1; }
+
+# ── Detect host platform ────────────────────────────────────────────────
+OS_NAME="$(uname -s)"
+ARCH="$(uname -m)"
+case "$ARCH" in
+    amd64|x86_64) ARCH="x86_64" ;;
+    aarch64)      ARCH="arm64" ;;
+esac
+
+case "$OS_NAME" in
+    Linux*)  PLATFORM="linux" ;;
+    Darwin*) PLATFORM="macos" ;;
+    MINGW*|MSYS*|CYGWIN*)
+        PLATFORM="windows"
+        ;;
+    *)
+        die "unsupported OS: $OS_NAME"
+        ;;
+esac
+
+# Only architectures referenced in godot/gpty.gdextension are buildable.
+case "$PLATFORM-$ARCH" in
+    linux-x86_64|windows-x86_64|macos-x86_64|macos-arm64) ;;
+    *)
+        die "unsupported platform: $PLATFORM/$ARCH (godot/gpty.gdextension has no library entry for it)"
+        ;;
+esac
+
+# ── Per-platform build parameters ───────────────────────────────────────
+case "$PLATFORM" in
+    linux)
+        LIB_SRC="target/release/libgpty_gdext.so"
+        LIB_DST="godot/bin/libgpty_gdext.linux.x86_64.so"
+        EXPORT_PRESET="Linux/X11"
+        EXPORT_DST="dist/gpty"
+        ;;
+    macos)
+        LIB_SRC="target/release/libgpty_gdext.dylib"
+        LIB_DST="godot/bin/libgpty_gdext.macos.$ARCH.dylib"
+        EXPORT_PRESET="macOS"
+        EXPORT_DST="dist/gpty.zip"
+        ;;
+    windows)
+        LIB_SRC="target/release/gpty_gdext.dll"
+        LIB_DST="godot/bin/gpty_gdext.windows.x86_64.dll"
+        EXPORT_PRESET="Windows Desktop"
+        EXPORT_DST="dist/gpty.exe"
+        ;;
+esac
+
+GODOT_BIN="${GODOT_BIN:-godot}"
+
+printf "${BOLD}Building gpty for %s/%s${NC}\n" "$PLATFORM" "$ARCH"
+
+# ── Step 1: GDExtension library ────────────────────────────────────────
+step "cargo build -p gpty-gdext --release"
+cargo build -p gpty-gdext --release
+ok "gdext release build"
+
+step "Install library into godot/bin/"
+mkdir -p godot/bin
+cp "$LIB_SRC" "$LIB_DST"
+ok "$LIB_DST"
+
+# ── Step 2: Godot export ───────────────────────────────────────────────
+command -v "$GODOT_BIN" >/dev/null 2>&1 \
+    || die "godot not found on PATH — set GODOT_BIN or install Godot"
+
+step "Import Godot project"
+"$GODOT_BIN" --headless --path godot --import
+ok "project imported"
+
+step "Export $EXPORT_PRESET"
+mkdir -p dist
+"$GODOT_BIN" --headless --path godot --export-release "$EXPORT_PRESET" "$REPO_ROOT/$EXPORT_DST"
+ok "$EXPORT_DST"
+
+# Windows: Godot does not pack the GDExtension dll into the export, so it
+# must sit next to the executable (mirrors release.yml).
+if [[ "$PLATFORM" == "windows" ]]; then
+    cp "$LIB_DST" "dist/"
+    ok "dist/gpty_gdext.windows.x86_64.dll"
+fi
+
+# ── Summary ────────────────────────────────────────────────────────────
+printf "\n${GREEN}${BOLD}Build complete.${NC}\n"
+case "$PLATFORM" in
+    linux)
+        warn "Linux export is a bare executable + .pck — keep dist/gpty.pck next to dist/gpty"
+        ;;
+    macos)
+        warn "macOS export is single-arch ($ARCH); CI stages both arm64 and x86_64 libraries"
+        ;;
+    windows)
+        warn "run dist/gpty.exe from dist/ (the gdext dll must stay alongside it)"
+        ;;
+esac
+printf "Artifact: ${BOLD}%s${NC}\n" "$EXPORT_DST"
