@@ -16,6 +16,11 @@ const AUTH_HINT: &str =
     "GUI requires GPTY_SECRET authentication; set GPTY_SECRET to match the running GUI";
 
 pub async fn ensure_running(socket_path: &str, timeout: Duration) -> anyhow::Result<()> {
+    // Fail fast on insecure socket files (GPTY_SOCKET env hijack) instead
+    // of quietly trying to spawn a GUI on a socket we refuse to use.
+    if let Err(e) = gpty_ipc::transport::validate_socket_path(socket_path) {
+        anyhow::bail!("refusing to use {socket_path}: {e}");
+    }
     let client = IpcClient::new(socket_path, Duration::from_secs(1));
     match client.call("version", None).await {
         Ok(resp) if resp.error.is_none() => return Ok(()),
@@ -47,9 +52,14 @@ pub async fn ensure_running(socket_path: &str, timeout: Duration) -> anyhow::Res
 fn find_gui_binary() -> Option<std::path::PathBuf> {
     if let Ok(path) = std::env::var("GPTY_GUI") {
         let p = std::path::PathBuf::from(path);
-        if p.exists() {
+        if gpty_ipc::transport::validate_gui_binary(&p) {
+            log::warn!("spawning GUI from GPTY_GUI override: {}", p.display());
             return Some(p);
         }
+        log::warn!(
+            "ignoring GPTY_GUI override (failed validation): {}",
+            p.display()
+        );
     }
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()

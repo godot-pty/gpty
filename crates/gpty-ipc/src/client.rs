@@ -95,6 +95,10 @@ impl IpcClient {
             ClientError::InvalidResponse(format!("failed to serialize request: {e}"))
         })?;
 
+        // Refuse insecure socket files before sending anything (including
+        // GPTY_SECRET) — guards against GPTY_SOCKET env hijacking.
+        transport::validate_socket_path(&self.socket_path).map_err(ClientError::Connection)?;
+
         // Connect with timeout.
         let connect_fut = transport::connect(&self.socket_path);
         let mut stream = tokio::time::timeout(self.timeout, connect_fut)

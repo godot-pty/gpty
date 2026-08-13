@@ -78,6 +78,14 @@ pub fn default_socket_path() -> String {
     if let Ok(val) = std::env::var("GPTY_SOCKET")
         && !val.is_empty()
     {
+        #[cfg(unix)]
+        {
+            if val.starts_with('/') {
+                return val;
+            }
+            log::warn!("ignoring relative GPTY_SOCKET path ({val}); using default resolution");
+        }
+        #[cfg(not(unix))]
         return val;
     }
 
@@ -120,6 +128,78 @@ pub fn default_socket_path() -> String {
     }
 }
 
+/// Validate a Unix-domain socket path before connecting to it.
+///
+/// Guards against `GPTY_SOCKET` env hijacking: an attacker who controls a
+/// victim's environment could point the CLI/MCP at a fake socket, which
+/// would receive every command (and `GPTY_SECRET`, if set). A legitimate
+/// gpty socket is owned by the current user and inaccessible to
+/// group/other (the server chmods it 0600).
+///
+/// A missing file is NOT an error — the socket may not exist yet (the
+/// daemon auto-spawns the GUI); `connect` fails naturally in that case.
+pub fn validate_socket_path(path: &str) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+        if !path.starts_with('/') {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "refusing relative GPTY_SOCKET path",
+            ));
+        }
+        let meta = match std::fs::metadata(path) {
+            Err(_) => return Ok(()),
+            Ok(m) => m,
+        };
+        if !meta.file_type().is_socket() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "refusing to connect: GPTY_SOCKET is not a socket",
+            ));
+        }
+        let uid = unsafe { libc::geteuid() };
+        if meta.uid() != uid {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "refusing to connect: GPTY_SOCKET owned by another user (possible env hijack)",
+            ));
+        }
+        if meta.mode() & 0o077 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "refusing to connect: GPTY_SOCKET permissions too open (possible env hijack)",
+            ));
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
+/// Validate a GUI binary path before spawning it (GPTY_GUI override).
+///
+/// True when the path is an absolute, regular, user-owned file that is
+/// not writable by group or others. On non-Unix platforms only absolute
+/// path and file type are checked (no ownership metadata).
+pub fn validate_gui_binary(path: &std::path::Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if !path.is_absolute() {
+            return false;
+        }
+        let Ok(meta) = std::fs::metadata(path) else {
+            return false;
+        };
+        meta.is_file() && meta.uid() == unsafe { libc::geteuid() } && meta.mode() & 0o022 == 0
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_absolute() && std::fs::metadata(path).is_ok_and(|m| m.is_file())
+    }
+}
+
 // ── Tests ────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -146,6 +226,74 @@ mod tests {
         assert!(!path.is_empty());
         assert_ne!(path, "");
         unsafe { std::env::remove_var("GPTY_SOCKET") };
+    }
+
+    #[cfg(unix)]
+    mod socket_validation {
+        use super::*;
+        use std::os::unix::fs::PermissionsExt;
+
+        fn tmp_socket(mode: u32) -> std::path::PathBuf {
+            let path =
+                std::env::temp_dir().join(format!("gpty-val-test-{}-{}", std::process::id(), mode));
+            let _ = std::fs::remove_file(&path);
+            let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            drop(listener);
+            path
+        }
+
+        #[test]
+        fn insecure_mode_socket_rejected() {
+            let path = tmp_socket(0o666);
+            assert!(validate_socket_path(path.to_str().unwrap()).is_err());
+            std::fs::remove_file(&path).unwrap();
+        }
+
+        #[test]
+        fn secure_mode_socket_accepted() {
+            let path = tmp_socket(0o600);
+            assert!(validate_socket_path(path.to_str().unwrap()).is_ok());
+            std::fs::remove_file(&path).unwrap();
+        }
+
+        #[test]
+        fn missing_file_is_ok() {
+            let path = std::env::temp_dir().join("gpty-val-missing-99999.sock");
+            let _ = std::fs::remove_file(&path);
+            assert!(validate_socket_path(path.to_str().unwrap()).is_ok());
+        }
+
+        #[test]
+        fn regular_file_rejected() {
+            let path = std::env::temp_dir().join(format!("gpty-val-reg-{}", std::process::id()));
+            std::fs::write(&path, b"x").unwrap();
+            assert!(validate_socket_path(path.to_str().unwrap()).is_err());
+            std::fs::remove_file(&path).unwrap();
+        }
+
+        #[test]
+        fn relative_path_rejected() {
+            assert!(validate_socket_path("relative/path.sock").is_err());
+        }
+
+        #[test]
+        fn gui_binary_world_writable_rejected() {
+            let path = std::env::temp_dir().join(format!("gpty-val-bin-{}", std::process::id()));
+            std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o777)).unwrap();
+            assert!(!validate_gui_binary(&path));
+            std::fs::remove_file(&path).unwrap();
+        }
+
+        #[test]
+        fn gui_binary_private_owned_accepted() {
+            let path = std::env::temp_dir().join(format!("gpty-val-bin-ok-{}", std::process::id()));
+            std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            assert!(validate_gui_binary(&path));
+            std::fs::remove_file(&path).unwrap();
+        }
     }
 
     #[cfg(unix)]
