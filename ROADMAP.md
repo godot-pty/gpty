@@ -22,6 +22,10 @@ GitHub Issues are used for user-reported bugs and discussions, not roadmap track
 - [ ] GPU-accelerated rendering — rasterize terminal cells to a single GPU texture using fontdue for glyph rasterization, replacing the per-cell GDScript `_draw()` loop
 - [ ] UI Thread DoS mitigation — rate-limit terminal rendering when a PTY floods output (e.g., `cat /dev/urandom`), preventing the UI thread from locking up
 
+## v0.3.2 — App Version & Build Info
+
+- [ ] App version & build info — display the running app version (matching `gpty version` and the IPC protocol version) and build information in the app UI, e.g. in Settings or an About dialog
+
 ## v0.3.1 — Stability & Windows Support
 
 - [x] Windows named-pipe IPC — per-connection named-pipe instances on the server (v0.3.0 never compiled on Windows); local cross-check via xwin/clang-cl plus the CI `rust-windows` job keeps it green
