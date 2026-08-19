@@ -4,23 +4,36 @@
 //! terminal capability can only append bounded observability events for that
 //! terminal; it cannot create panes, inject input, or stop gpty.
 
+#[cfg(unix)]
 use std::collections::{HashMap, VecDeque};
+#[cfg(unix)]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(unix)]
 use std::sync::{LazyLock, Mutex};
 
+#[cfg(unix)]
 use gpty_ipc::server::{HandlerFn, IpcServer};
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(unix)]
+use serde_json::json;
 #[cfg(unix)]
 use std::time::Duration;
 
+#[cfg(unix)]
 const PROTOCOL_VERSION: u64 = 1;
+#[cfg(unix)]
 const MAX_GLOBAL_EVENTS: usize = 256;
+#[cfg(unix)]
 const MAX_SESSION_EVENTS: usize = 64;
+#[cfg(unix)]
 const MAX_ID_LEN: usize = 128;
+#[cfg(unix)]
 const MAX_THINKING_BYTES: usize = 8 * 1024;
 /// Extension `seq` counters reset in each new omp process; accept the rollover.
+#[cfg(unix)]
 const SEQ_RESET_CEILING: u64 = 128;
 
+#[cfg(unix)]
 const ALLOWED_EVENTS: &[&str] = &[
     "omp.session.bound",
     "omp.session.shutdown",
@@ -33,6 +46,7 @@ const ALLOWED_EVENTS: &[&str] = &[
     "omp.reasoning.delta",
 ];
 
+#[cfg(unix)]
 #[derive(Debug)]
 struct SessionCapability {
     capability: String,
@@ -47,10 +61,13 @@ pub struct OmpSemanticEvent {
     pub event: Value,
 }
 
+#[cfg(unix)]
 static SESSIONS: LazyLock<Mutex<HashMap<String, SessionCapability>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+#[cfg(unix)]
 static EVENTS: LazyLock<Mutex<VecDeque<OmpSemanticEvent>>> =
     LazyLock::new(|| Mutex::new(VecDeque::new()));
+#[cfg(unix)]
 static STARTED: AtomicBool = AtomicBool::new(false);
 
 /// Register one PTY lifetime and return its unguessable session/capability.
@@ -76,6 +93,7 @@ pub fn register_terminal() -> std::io::Result<(String, String)> {
     ))
 }
 
+#[cfg(unix)]
 pub fn unregister_terminal(session_id: &str) {
     SESSIONS.lock().unwrap().remove(session_id);
     EVENTS
@@ -84,8 +102,17 @@ pub fn unregister_terminal(session_id: &str) {
         .retain(|event| event.terminal_session_id != session_id);
 }
 
+#[cfg(not(unix))]
+pub fn unregister_terminal(_session_id: &str) {}
+
+#[cfg(unix)]
 pub fn drain_events() -> Vec<OmpSemanticEvent> {
     EVENTS.lock().unwrap().drain(..).collect()
+}
+
+#[cfg(not(unix))]
+pub fn drain_events() -> Vec<OmpSemanticEvent> {
+    Vec::new()
 }
 
 #[cfg(unix)]
@@ -101,6 +128,7 @@ fn random_hex(bytes: usize) -> std::io::Result<String> {
     Ok(out)
 }
 
+#[cfg(unix)]
 fn constant_time_eq(left: &str, right: &str) -> bool {
     if left.len() != right.len() {
         return false;
@@ -111,10 +139,12 @@ fn constant_time_eq(left: &str, right: &str) -> bool {
         == 0
 }
 
+#[cfg(unix)]
 fn bounded_string<'a>(value: &'a Value, key: &str, max: usize) -> Option<&'a str> {
     value.get(key)?.as_str().filter(|text| text.len() <= max)
 }
 
+#[cfg(unix)]
 fn accept_event_seq(session: &mut SessionCapability, seq: u64) -> bool {
     if seq <= session.last_seq {
         if seq >= session.last_seq || seq > SEQ_RESET_CEILING {
@@ -126,6 +156,7 @@ fn accept_event_seq(session: &mut SessionCapability, seq: u64) -> bool {
     true
 }
 
+#[cfg(unix)]
 fn event_handler() -> HandlerFn {
     std::sync::Arc::new(|params| {
         Box::pin(async move {
@@ -244,7 +275,7 @@ pub fn ensure_server_started() {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

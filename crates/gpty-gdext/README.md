@@ -155,9 +155,10 @@ no event listener starts, **`GPTY_EVENT_*` is not injected**, and
 work; only the Reasoning / `@gpty/omp-events` path is unavailable until a
 Windows transport lands (likely named pipes, mirroring control IPC).
 
-The Windows CI `rust-windows` job compiles this crate with `#[cfg(unix)]`
-event code disabled, which produces expected dead-code warnings in
-`omp_events.rs` — not a runtime failure on Linux builds.
+The Windows CI `rust-windows` job compiles this crate with `RUSTFLAGS:
+-Dwarnings`. All Unix-only event code (listener, capability store, and
+helpers) is `#[cfg(unix)]`-gated so the Windows build stays warning-free;
+`register_terminal()` and `drain_events()` keep fail-closed stubs.
 
 ### Tips
 
