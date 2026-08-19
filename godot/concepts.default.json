@@ -21,6 +21,28 @@
       "actions": [
         {"cmd": "", "target": "code_viewer"}
       ]
+    },
+    {
+      "name": "git_log",
+      "trigger": "(?:^|[$#>]\\s)\\bgit\\s+log",
+      "enabled": false,
+      "capture_mode": "until_stop",
+      "stop_timeout_ms": 600,
+      "stop_on_input": true,
+      "actions": [
+        {"cmd": "", "target": "inspector"}
+      ]
+    },
+    {
+      "name": "cargo_check",
+      "trigger": "(?:^|[$#>]\\s)\\bcargo\\s+(?:check|test|build)\\b",
+      "enabled": false,
+      "capture_mode": "until_stop",
+      "stop_timeout_ms": 2000,
+      "stop_on_input": true,
+      "actions": [
+        {"cmd": "", "target": "inspector"}
+      ]
     }
   ]
 }

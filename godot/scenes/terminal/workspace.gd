@@ -58,7 +58,10 @@ func _ready():
 	# Per-type keyboard shortcuts
 	for key in PaneTypes.ALL:
 		var info = PaneTypes.ALL[key]
-		ShortcutManager.register("app:new_" + key, info["shortcut"], func(): var b = _spawn_pane(key); if b: b.grab_focus())
+		var shortcut := str(info.get("shortcut", ""))
+		if shortcut.strip_edges() == "":
+			continue
+		ShortcutManager.register("app:new_" + key, shortcut, func(): var b = _spawn_pane(key); if b: b.grab_focus())
 	ShortcutManager.register("app:close_pane", "Ctrl+Shift+W", func(): _kill_last())
 	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _toggle_sidebar)
 	ShortcutManager.register("app:toggle_palette", "Ctrl+Shift+P", _toggle_palette)
@@ -69,6 +72,7 @@ func _ready():
 	)
 
 	SettingsManager.settings_changed.connect(_on_settings_changed)
+	ConceptManager.concepts_changed.connect(_push_concepts_to_engine)
 	_on_settings_changed()
 	_apply_window_mode.call_deferred()
 	if SettingsManager.cfg_window_mode == 0: _restore_window_position()
@@ -595,6 +599,7 @@ func _on_sidebar_toggled():
 
 func _process(_delta: float):
 	# Concept event polling — must run even before sidebar is ready
+	_poll_agent_events()
 	_poll_concept_events()
 	_poll_ipc_requests()
 	if _sidebar == null: return
@@ -618,6 +623,37 @@ func _refresh_status_bar():
 	else:
 		_status_bar.set_pane_info("", "")
 	_status_bar.set_window_mode(SettingsManager.cfg_window_mode)
+
+func _poll_agent_events():
+	var raw := str(GptyTerminal.drain_agent_events())
+	if raw == "" or raw == "[]":
+		return
+	var events = JSON.parse_string(raw)
+	if not (events is Array):
+		return
+	# One pass per drain: session-id → source map plus receiver list, so each
+	# event no longer re-scans every tile twice (O(E×T²) → O(T + E×R)).
+	var source_by_session := {}
+	var receivers: Array[Control] = []
+	for tile in _tm.tiles:
+		var body = _tm._find_body(tile.wrapper)
+		if body == null:
+			continue
+		if body.has_method("receive_agent_event"):
+			receivers.append(body)
+		if body is TerminalPane and body.get("_terminal") != null:
+			var session_id := str(body._terminal.get_terminal_session_id())
+			if session_id != "":
+				source_by_session[session_id] = body.attachment_id if body.attachment_id != "" else body.pane_label
+	for envelope in events:
+		if not (envelope is Dictionary):
+			continue
+		var source_id: String = source_by_session.get(str(envelope.get("terminal_session_id", "")), "")
+		if source_id == "":
+			continue
+		for receiver in receivers:
+			receiver.receive_agent_event(envelope, source_id)
+
 # ═══════════════════════════════════════════════════════════════════════
 # Concept event routing
 # ═══════════════════════════════════════════════════════════════════════
@@ -642,8 +678,11 @@ func _poll_concept_events():
 				continue
 			var ok = ConceptRouter.route_capture_event(all_bodies, ev, term)
 			if not ok:
-				ToastManager.warn("No %s pane open for '%s' output" % [
-					ev.get("target_pane_type", ""), ev.get("concept_name", "")])
+				var target := str(ev.get("target_pane_type", ""))
+				var pane_label := str(PaneTypes.ALL.get(target, {}).get("name", target))
+				var source := str(body.pane_label) if body.get("pane_label") != null else "?"
+				ToastManager.warn("No %s pane open for '%s' output (from %s)" % [
+					pane_label, ev.get("concept_name", ""), source])
 
 # ═══════════════════════════════════════════════════════════════════════
 # IPC bridge — polls Rust IPC requests from _process
@@ -687,7 +726,7 @@ func _handle_ipc_method(method: String, params):
 				if body == null:
 					continue
 				panes.append({
-					"id": body.pane_label,
+					"id": body.attachment_id if body.attachment_id != "" else body.pane_label,
 					"type": body._pane_type(),
 					"title": body.get("_last_title") if "_last_title" in body else "",
 					"col": t.col, "row": t.row, "cspan": t.cspan, "rspan": t.rspan,
@@ -768,7 +807,7 @@ func _ipc_error(msg: String, code := -32000):
 func _find_pane_by_label(label: String) -> Control:
 	for t in _tm.tiles:
 		var body = _tm._find_body(t.wrapper)
-		if body and body.get("pane_label") == label:
+		if body and (body.attachment_id == label or body.get("pane_label") == label):
 			return body
 	return null
 func _toggle_settings():

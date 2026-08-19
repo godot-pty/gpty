@@ -51,7 +51,7 @@ struct Cli {
 enum Commands {
     /// Open a new pane
     NewPane {
-        /// Pane type: terminal, code_viewer, file_tree, observer
+        /// Pane type: terminal, code_viewer, file_tree, inspector, reasoning
         #[arg(short = 't', long, default_value = "terminal")]
         pane_type: String,
 

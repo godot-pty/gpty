@@ -13,7 +13,8 @@ const _PaneScripts := {
 	"terminal":    preload("res://scenes/terminal/terminal_pane.gd"),
 	"code_viewer": preload("res://scenes/panes/code_viewer.gd"),
 	"file_tree":   preload("res://scenes/panes/file_tree.gd"),
-	"observer":    preload("res://scenes/panes/observer_pane.gd"),
+	"inspector":   preload("res://scenes/panes/inspector_pane.gd"),
+	"reasoning":   preload("res://scenes/panes/reasoning_pane.gd"),
 }
 
 var on_close: Callable  # set by workspace to refresh layout after kill
@@ -22,7 +23,7 @@ var on_swap: Callable    # set by workspace to handle pane type swap
 var tiles: Array[Dictionary] = []
 var last_body: Control
 signal tiles_resized
-var _pane_counters: Dictionary = {}  # type_name -> next int
+
 
 var _pane_settings_panel  # set by workspace
 
@@ -96,11 +97,19 @@ func create_body(type_name: String) -> Control:
 	return body
 
 func _next_label(type_name: String) -> String:
-	var count = _pane_counters.get(type_name, 0) + 1
-	_pane_counters[type_name] = count
 	var prefix = PaneTypes.ALL.get(type_name, {}).get("label_prefix", "?")
-	return "%s%d" % [prefix, count]
-
+	# max(existing) + 1: closing the newest pane reuses its number, but a
+	# middle gap is never filled — T1,T3 exist, the next pane is T4 (no
+	# confusing reordering), while T1,T2 minus T2 yields T2 again.
+	var highest := 0
+	for t in tiles:
+		var body = _find_body(t.wrapper)
+		if body == null:
+			continue
+		var label: String = body.get("pane_label")
+		if label != null and label.begins_with(prefix):
+			highest = maxi(highest, label.substr(prefix.length()).to_int())
+	return "%s%d" % [prefix, highest + 1]
 # ── Legacy wrapper builder (for backward compat during transition) ─────
 
 func build_wrapper(shell: String, rows: int, cols: int) -> Control:
@@ -310,7 +319,6 @@ func reset():
 	for t in tiles: t.wrapper.queue_free()
 	tiles.clear()
 	last_body = null
-	_pane_counters.clear()
 
 # ── Tiling ─────────────────────────────────────────────────────────────
 

@@ -18,7 +18,7 @@ func test_concepts_roundtrip_through_ffi():
 	_t.set_global_concepts(JSON.stringify([
 		{"name": "c1", "trigger": "^testcmd", "enabled": true,
 		 "capture_mode": "single_line",
-		 "actions": [{"cmd": "echo {payload}", "target": "observer"}]},
+		 "actions": [{"cmd": "echo {payload}", "target": "inspector"}]},
 	]))
 	var back = _t.get_global_concepts()
 	assert_eq(back.size(), 1, "one concept should roundtrip")
@@ -38,3 +38,12 @@ func test_unstarted_grid_functions_are_safe():
 	_t.scroll_reset()
 	_t.resize_grid(30, 100)
 	pass # no crash is the assertion
+
+func test_markdown_renderer_formats_and_sanitizes():
+	var renderer = ClassDB.instantiate("GptyMarkdown")
+	assert_not_null(renderer, "GptyMarkdown must be registered")
+	var rendered: String = renderer.render("# Title\n\n**bold** [raw]\n\n[x](javascript:bad)")
+	assert_string_contains(rendered, "[font_size=26][b]Title")
+	assert_string_contains(rendered, "[b]bold[/b]")
+	assert_string_contains(rendered, "[lb]raw]")
+	assert_false("[url=javascript:" in rendered)

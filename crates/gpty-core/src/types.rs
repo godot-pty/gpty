@@ -33,7 +33,9 @@ pub enum PaneType {
     Terminal,
     CodeViewer,
     FileTree,
-    Observer,
+    #[serde(alias = "observer")]
+    Inspector,
+    Reasoning,
 }
 
 impl PaneType {
@@ -43,7 +45,8 @@ impl PaneType {
             Self::Terminal => "terminal",
             Self::CodeViewer => "code_viewer",
             Self::FileTree => "file_tree",
-            Self::Observer => "observer",
+            Self::Inspector => "inspector",
+            Self::Reasoning => "reasoning",
         }
     }
 
@@ -61,7 +64,8 @@ impl std::str::FromStr for PaneType {
             "terminal" => Ok(Self::Terminal),
             "code_viewer" => Ok(Self::CodeViewer),
             "file_tree" => Ok(Self::FileTree),
-            "observer" => Ok(Self::Observer),
+            "inspector" | "observer" => Ok(Self::Inspector),
+            "reasoning" => Ok(Self::Reasoning),
             _ => Err(()),
         }
     }
@@ -118,7 +122,7 @@ pub struct Action {
 ///     trigger_regex: Regex::new(r"(?i)address.*already.*in\s*use").unwrap(),
 ///     destinations: vec![Action {
 ///         command_template: "echo 'Port conflict detected'".into(),
-///         target_label: "observer".into(),
+///         target_label: "inspector".into(),
 ///     }],
 /// }
 /// ```

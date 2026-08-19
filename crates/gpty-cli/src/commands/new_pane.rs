@@ -1,7 +1,14 @@
 use gpty_ipc::client::IpcClient;
 
 /// Valid pane type names.
-const VALID_TYPES: &[&str] = &["terminal", "code_viewer", "file_tree", "observer"];
+const VALID_TYPES: &[&str] = &[
+    "terminal",
+    "code_viewer",
+    "file_tree",
+    "inspector",
+    "reasoning",
+    "observer",
+];
 
 pub async fn run(
     client: &IpcClient,
@@ -25,8 +32,14 @@ pub async fn run(
         );
     }
 
+    let wire_type = if pane_type == "observer" {
+        eprintln!("warning: pane type \"observer\" is deprecated; using \"inspector\"");
+        "inspector"
+    } else {
+        pane_type
+    };
     let mut params = serde_json::json!({
-        "type": pane_type,
+        "type": wire_type,
         "split": split,
         "focus": focus,
     });

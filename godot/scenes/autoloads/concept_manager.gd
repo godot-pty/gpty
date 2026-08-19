@@ -60,6 +60,10 @@ func _merge_concepts() -> Array:
 		if c.get("name", "") in _default_names(defaults):
 			continue
 		merged.append(c)
+	# Rewrite legacy observer targets — its active role is now Inspector.
+	for entry in merged:
+		if entry is Dictionary:
+			_migrate_actions_target(entry)
 	return merged
 
 func _default_names(defaults: Array) -> Dictionary:
@@ -130,9 +134,16 @@ func toggle_concept(name: String) -> bool:
 
 
 func save_concepts(concepts: Array):
-	var d = {"concepts": concepts}
+	var sanitized: Array = []
+	for entry in concepts:
+		if entry is Dictionary:
+			var copy: Dictionary = entry.duplicate(true)
+			_migrate_actions_target(copy)
+			sanitized.append(copy)
+	var d = {"concepts": sanitized}
 	_write_file(CONCEPTS_FILE, d)
 	concepts_changed.emit()
+	call_deferred("_push_to_rust")
 
 # Migrate old default trigger patterns to the new ones.
 const TRIGGER_MIGRATIONS := {
@@ -149,3 +160,15 @@ func _migrate_trigger(entry: Dictionary, default: Dictionary):
 	var olds: Array = mig["old"] if mig["old"] is Array else [mig["old"]]
 	if trigger in olds:
 		entry["trigger"] = mig["new"]
+
+# Legacy concepts routed captures to the removed "observer" pane. Inspector
+# is private Q&A (not wired to the terminal OMP session). Reasoning never
+# accepts captures. Disable legacy observer-target concepts so terminal
+# redraws cannot silently start Inspector jobs.
+func _migrate_actions_target(entry: Dictionary):
+	var actions = entry.get("actions", [])
+	if not (actions is Array):
+		return
+	for action in actions:
+		if action is Dictionary and action.get("target", "") == "observer":
+			entry["enabled"] = false

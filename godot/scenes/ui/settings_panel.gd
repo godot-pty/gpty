@@ -73,9 +73,14 @@ func _build_ui():
 	t_app.add_child(HSeparator.new())
 	var color_btns = _add_color_section(t_app)
 
-	# Tab 4: Concepts
+	# Tab 4: Reasoning
+	var t_reas = _create_tab(tabs, "Reasoning")
+	var reason_spins = _add_reasoning_control(t_reas)
+
+	# Tab 5: Concepts
 	var t_con = _create_tab(tabs, "Concepts")
 	_add_concept_section(t_con)
+
 
 	v.add_child(HSeparator.new())
 
@@ -95,6 +100,8 @@ func _build_ui():
 		SettingsManager.cfg_underline_height = int(cursor_px[1].value)
 		SettingsManager.cfg_show_titlebar = show_tb_cb.button_pressed
 		SettingsManager.cfg_window_mode = win_mode_opt.selected
+		SettingsManager.cfg_reasoning_max_turns = int(reason_spins[0].value)
+		SettingsManager.cfg_reasoning_max_turn_bytes = int(reason_spins[1].value)
 		SettingsManager.save_settings()
 	)
 	bg.add_child(_debounce_timer)
@@ -104,9 +111,11 @@ func _build_ui():
 	blink_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	fs_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	scroll_spin.value_changed.connect(func(_v): _debounce_timer.start())
+	reason_spins[0].value_changed.connect(func(_v): _debounce_timer.start())
+	reason_spins[1].value_changed.connect(func(_v): _debounce_timer.start())
 	show_tb_cb.toggled.connect(func(_pressed): _debounce_timer.start())
 
-	_add_reset_button(v, shape_opt, blink_cb, blink_spin, scroll_spin, dims, cursor_px, color_btns, fs_spin, show_tb_cb, win_mode_opt)
+	_add_reset_button(v, shape_opt, blink_cb, blink_spin, scroll_spin, dims, cursor_px, color_btns, fs_spin, show_tb_cb, win_mode_opt, reason_spins)
 
 func _create_tab(tabs: TabContainer, title: String) -> VBoxContainer:
 	var sc = ScrollContainer.new()
@@ -179,6 +188,30 @@ func _add_font_control(v: VBoxContainer) -> SpinBox:
 	hf.add_child(spin)
 	v.add_child(hf)
 	return spin
+
+func _add_reasoning_control(v: VBoxContainer) -> Array:
+	var h1 = HBoxContainer.new()
+	h1.add_child(_lbl("Max turns:"))
+	var turns = SpinBox.new()
+	turns.name = "ReasonTurnsSpin"
+	turns.min_value = 1
+	turns.max_value = 64
+	turns.step = 1
+	turns.value = SettingsManager.cfg_reasoning_max_turns
+	h1.add_child(turns)
+	v.add_child(h1)
+
+	var h2 = HBoxContainer.new()
+	h2.add_child(_lbl("Max turn bytes:"))
+	var bytes = SpinBox.new()
+	bytes.name = "ReasonBytesSpin"
+	bytes.min_value = 4096
+	bytes.max_value = 1048576
+	bytes.step = 4096
+	bytes.value = SettingsManager.cfg_reasoning_max_turn_bytes
+	h2.add_child(bytes)
+	v.add_child(h2)
+	return [turns, bytes]
 
 func _add_scroll_control(v: VBoxContainer) -> SpinBox:
 	var hs = HBoxContainer.new()
@@ -344,7 +377,7 @@ func _reset_colors(btns: Array):
 			(btns[i][1] as ColorPickerButton).color = defaults[i]
 		else:
 			(btns[i] as ColorPickerButton).color = defaults[i]
-func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: CheckBox, blink_spin: SpinBox, scroll_spin: SpinBox, dims: Array, cursor_px: Array, color_btns: Array, fs_spin: SpinBox, show_tb_cb: CheckBox, win_mode_opt: OptionButton):
+func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: CheckBox, blink_spin: SpinBox, scroll_spin: SpinBox, dims: Array, cursor_px: Array, color_btns: Array, fs_spin: SpinBox, show_tb_cb: CheckBox, win_mode_opt: OptionButton, reason_spins: Array):
 	var btn = Button.new(); btn.text = "Reset to defaults"
 	btn.add_theme_font_size_override("font_size", 12)
 	btn.pressed.connect(func():
@@ -367,6 +400,8 @@ func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: Chec
 		SettingsManager.cfg_font_path = "res://fonts/DejaVuSansMono.ttf"
 		SettingsManager.cfg_font_size = 14
 		SettingsManager.cfg_show_titlebar = true
+		SettingsManager.cfg_reasoning_max_turns = 16
+		SettingsManager.cfg_reasoning_max_turn_bytes = 65536
 		SettingsManager.save_settings()
 		shape_opt.selected = 0
 		blink_cb.button_pressed = true
@@ -379,6 +414,8 @@ func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: Chec
 		_reset_colors(color_btns)
 		fs_spin.value = 14
 		show_tb_cb.button_pressed = true
+		reason_spins[0].value = 16
+		reason_spins[1].value = 65536
 		SettingsManager.cfg_window_mode = 0
 		win_mode_opt.selected = 0
 	)
@@ -429,9 +466,17 @@ func _add_concept_section(v: VBoxContainer):
 	add_btn.pressed.connect(_show_concept_dialog.bind(-1))
 	v.add_child(add_btn)
 
+	_concept_list = VBoxContainer.new()
+	_concept_list.name = "ConceptList"
+	v.add_child(_concept_list)
+	_refresh_concept_list()
+
 func _refresh_concept_list():
-	for c in _concept_list.get_children(): c.queue_free()
-	var concepts = _concept_terminal.get_global_concepts() if _concept_terminal else []
+	if _concept_list == null:
+		return
+	for c in _concept_list.get_children():
+		c.queue_free()
+	var concepts = ConceptManager.get_concepts() if _concept_terminal else []
 	for i in concepts.size():
 		var c = concepts[i]
 		var enabled: bool = c.get("enabled", true)
@@ -442,12 +487,8 @@ func _refresh_concept_list():
 		toggle.toggled.connect(func(on: bool):
 			if _concept_terminal == null:
 				return
-			c["enabled"] = on
-			var all = _concept_terminal.get_global_concepts()
-			if i < all.size():
-				all[i]["enabled"] = on
-			_concept_terminal.set_global_concepts(JSON.stringify(all))
-			ConceptManager.save_concepts(all)
+			ConceptManager.toggle_concept(str(c.get("name", "")))
+			_refresh_concept_list()
 		)
 		h.add_child(toggle)
 		var lbl = Label.new()
@@ -491,8 +532,8 @@ func _show_concept_dialog(idx: int):
 		timeout_spin.visible = (sel == 1)
 		stop_on_input_cb.visible = (sel == 1)
 	)
-	if idx >= 0 and _concept_terminal:
-		var concepts = _concept_terminal.get_global_concepts()
+	if idx >= 0:
+		var concepts = ConceptManager.get_concepts()
 		if idx < concepts.size():
 			var c = concepts[idx]
 			name_le.text = c.get("name", "")
@@ -530,31 +571,45 @@ func _show_concept_dialog(idx: int):
 func _save_concept(idx: int, p_name: String, regex_pat: String, cmd: String, target: String,
 	p_enabled: bool = true, p_capture_mode: String = "single_line",
 	stop_ms: int = 300, stop_input: bool = true):
-	if not _concept_terminal: return
-	var concepts = _concept_terminal.get_global_concepts()
+	if p_name.strip_edges() == "":
+		return
 	var entry: Dictionary = {
-		"name": p_name,
+		"name": p_name.strip_edges(),
 		"trigger": regex_pat,
 		"enabled": p_enabled,
 		"capture_mode": p_capture_mode,
-		"actions": [{"cmd": cmd, "target": target}],
+		"actions": [{"cmd": cmd, "target": target.strip_edges()}],
 	}
 	if p_capture_mode == "until_stop":
 		entry["stop_timeout_ms"] = stop_ms
 		entry["stop_on_input"] = stop_input
-	if idx >= 0 and idx < concepts.size():
-		concepts[idx] = entry
-	else:
-		concepts.append(entry)
-	_concept_terminal.set_global_concepts(JSON.stringify(concepts))
-	ConceptManager.save_concepts(concepts)
+	ConceptManager._migrate_actions_target(entry)
+	var user = ConceptManager._load_from_file()
+	var replaced := false
+	for i in user.size():
+		if user[i] is Dictionary and user[i].get("name", "") == entry["name"]:
+			user[i] = entry
+			replaced = true
+			break
+	if not replaced:
+		user.append(entry)
+	ConceptManager.save_concepts(user)
 	_refresh_concept_list()
 
 func _delete_concept(idx: int):
-	if not _concept_terminal: return
-	var concepts = _concept_terminal.get_global_concepts()
-	if idx >= 0 and idx < concepts.size():
-		concepts.remove_at(idx)
-		_concept_terminal.set_global_concepts(JSON.stringify(concepts))
-		ConceptManager.save_concepts(concepts)
-		_refresh_concept_list()
+	var concepts = ConceptManager.get_concepts()
+	if idx < 0 or idx >= concepts.size():
+		return
+	var name: String = str(concepts[idx].get("name", ""))
+	if name == "":
+		return
+	var user = ConceptManager._load_from_file()
+	var kept: Array = []
+	for c in user:
+		if c is Dictionary and c.get("name", "") == name:
+			continue
+		kept.append(c)
+	if ConceptManager._default_names(ConceptManager._load_defaults()).has(name):
+		kept.append({"name": name, "enabled": false})
+	ConceptManager.save_concepts(kept)
+	_refresh_concept_list()

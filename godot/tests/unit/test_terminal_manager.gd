@@ -57,7 +57,7 @@ func test_spawn_pane_code_viewer():
 # conflicts with GUT's error tracking. Covered by integration tests.
 
 func test_create_body_all_types():
-	for key in ["terminal", "code_viewer", "file_tree", "observer"]:
+	for key in ["terminal", "code_viewer", "file_tree", "inspector", "reasoning"]:
 		var body = _tm.create_body(key)
 		assert_not_null(body, "create_body(%s) should return non-null" % key)
 
@@ -170,19 +170,22 @@ func test_pane_labels_per_type():
 	assert_not_null(t2)
 	assert_eq(t2.pane_label, "T2", "second terminal should be T2")
 
-func test_pane_labels_persist_after_kill():
+func test_pane_labels_reuse_newest_but_not_middle_gaps():
 	var t1 = _tm.spawn_pane("terminal", {})
 	var t2 = _tm.spawn_pane("terminal", {})
 	assert_eq(t1.pane_label, "T1")
 	assert_eq(t2.pane_label, "T2")
 
-	_tm.kill(t1)
+	# Close the newest: its number is reused.
 	_tm.kill(t2)
-	assert_eq(_tm.tiles.size(), 0)
+	var t2b = _tm.spawn_pane("terminal", {})
+	assert_not_null(t2b)
+	assert_eq(t2b.pane_label, "T2", "newest closed label must be reused")
 
+	# Middle gaps are never filled: T1,T2 exist, close T1, next is T3.
+	_tm.kill(t1)
 	var t3 = _tm.spawn_pane("terminal", {})
-	assert_not_null(t3)
-	assert_eq(t3.pane_label, "T3", "label should be T3, not recycled T1")
+	assert_eq(t3.pane_label, "T3", "middle gap must not be filled")
 
 func test_reset_clears_counters():
 	_tm.spawn_pane("terminal", {})

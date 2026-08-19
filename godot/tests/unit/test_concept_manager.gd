@@ -1,6 +1,5 @@
 extends GutTest
-# Unit tests for ConceptManager — merge, save, load, and trigger migration.
-
+# Unit tests for ConceptManager — merge, save, load, trigger and target migration.
 var _scene: Control
 
 func before_each():
@@ -87,8 +86,62 @@ func test_migrate_trigger_does_not_touch_unrecognized():
 	assert_eq(entry["trigger"], "something_else",
 		"unrecognized concepts should not be migrated")
 
-# ── Helpers ────────────────────────────────────────────────────────────
+# ── Target migration ────────────────────────────────────────────────────
 
+func test_migrate_actions_target_disables_observer():
+	var entry: Dictionary = {
+		"name": "boom",
+		"enabled": true,
+		"actions": [{"cmd": "", "target": "observer"}],
+	}
+	ConceptManager._migrate_actions_target(entry)
+	assert_eq(entry["actions"][0]["target"], "observer")
+	assert_eq(entry["enabled"], false)
+
+func test_migrate_actions_target_leaves_other_targets():
+	var entry: Dictionary = {
+		"name": "boom",
+		"actions": [
+			{"cmd": "", "target": "code_viewer"},
+			{"cmd": "echo x", "target": "terminal"},
+		],
+	}
+	ConceptManager._migrate_actions_target(entry)
+	assert_eq(entry["actions"][0]["target"], "code_viewer")
+	assert_eq(entry["actions"][1]["target"], "terminal")
+
+func test_migrate_actions_target_survives_malformed_actions():
+	var entry: Dictionary = {"name": "odd", "actions": "not-an-array"}
+	ConceptManager._migrate_actions_target(entry)
+	pass # no crash is the assertion
+
+func test_merge_disables_user_concept_observer_target():
+	var user = [
+		{"name": "legacy_observe", "trigger": "err", "enabled": true,
+		 "capture_mode": "single_line", "stop_timeout_ms": 0, "stop_on_input": false,
+		 "actions": [{"cmd": "", "target": "observer"}]}
+	]
+	ConceptManager.save_concepts(user)
+	var merged = ConceptManager._merge_concepts()
+	var legacy = _find_by_name(merged, "legacy_observe")
+	assert_not_null(legacy, "user-only concept should survive merge")
+	assert_eq(legacy.get("enabled", true), false)
+	assert_eq(legacy["actions"][0].get("target", ""), "observer")
+
+func test_merge_preserves_inspector_targets():
+	var user = [
+		{"name": "modern", "trigger": "err", "enabled": true,
+		 "capture_mode": "single_line", "stop_timeout_ms": 0, "stop_on_input": false,
+		 "actions": [{"cmd": "", "target": "inspector"}]}
+	]
+	ConceptManager.save_concepts(user)
+	var merged = ConceptManager._merge_concepts()
+	var modern = _find_by_name(merged, "modern")
+	var actions = modern.get("actions", [])
+	assert_eq(actions[0].get("target", ""), "inspector",
+		"inspector targets should pass through unchanged")
+
+# ── Helpers ────────────────────────────────────────────────────────────
 func _find_by_name(arr: Array, name: String):
 	for item in arr:
 		if item is Dictionary and item.get("name", "") == name:

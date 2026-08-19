@@ -175,7 +175,10 @@ func _add_pane_buttons(v: VBoxContainer):
 		var info = PaneTypes.ALL[key]
 		var btn = Button.new()
 		btn.text = info["icon"]
-		btn.tooltip_text = "New " + info["name"] + " (" + info["shortcut"] + ")"
+		var shortcut := str(info.get("shortcut", ""))
+		btn.tooltip_text = "New " + info["name"]
+		if shortcut != "":
+			btn.tooltip_text += " (" + shortcut + ")"
 		Icons.style_button(btn)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.custom_minimum_size = Vector2(0, 28)

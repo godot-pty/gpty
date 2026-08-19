@@ -658,6 +658,11 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	name_le.placeholder_text = _default_title()
 	_make_row(v, "Name:", name_le, panel)
 
+	var attach_le = LineEdit.new()
+	attach_le.text = attachment_id
+	attach_le.placeholder_text = "omp-terminal"
+	_make_row(v, "Attachment ID:", attach_le, panel)
+
 	var font_spin = SpinBox.new()
 	font_spin.min_value = 8; font_spin.max_value = 32
 	font_spin.value = font_size
@@ -790,6 +795,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	panel._gather_func = func():
 		return {
 			"pane_name": name_le.text.strip_edges(),
+			"attachment_id": PaneTypes.sanitize_attachment_id(attach_le.text.strip_edges()),
 			"font_size": int(font_spin.value),
 			"shell_env": env_te.text,
 			"cursor_shape": cursor_shape_opt.selected,

@@ -300,7 +300,7 @@ mod tests {
     fn matching_commands_label_mismatch() {
         let concepts = vec![make_concept("crash", "crash", "backend", "restart")];
         let event = make_event("crash", 1);
-        let labels = vec!["observer".to_string()];
+        let labels = vec!["inspector".to_string()];
         let cmds = matching_commands(2, &labels, &concepts, &event);
         assert!(cmds.is_empty());
     }
@@ -509,6 +509,17 @@ mod tests {
         let concepts = concepts_from_json(json);
         assert_eq!(concepts.len(), 1);
         assert_eq!(concepts[0].name, "good");
+    }
+
+    #[test]
+    fn concepts_from_json_preserves_legacy_observer_target() {
+        let json = r#"[
+            {"name": "test_failure", "trigger": "fail", "capture_mode": "until_stop",
+             "actions": [{"cmd": "", "target": "observer"}]}
+        ]"#;
+        let concepts = concepts_from_json(json);
+        assert_eq!(concepts.len(), 1);
+        assert_eq!(concepts[0].destinations[0].target_label, "observer");
     }
 
     #[test]

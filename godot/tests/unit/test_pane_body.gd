@@ -44,6 +44,16 @@ func test_apply_settings_pane_name():
 	body.apply_settings({"pane_name": "test"})
 	assert_eq(body.pane_name, "test")
 
+func test_apply_settings_attachment_id_is_independent_of_pane_name():
+	var body = PaneBody.new()
+	_scene.add_child(body)
+	body.apply_settings({
+		"pane_name": "OMP Terminal",
+		"attachment_id": "omp-terminal",
+	})
+	assert_eq(body.pane_name, "OMP Terminal")
+	assert_eq(body.attachment_id, "omp-terminal")
+
 func test_apply_settings_font_size():
 	var body = PaneBody.new()
 	_scene.add_child(body)

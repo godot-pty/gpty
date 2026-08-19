@@ -76,11 +76,11 @@ func test_sanitize_shell_accepts_valid_string():
 
 func test_sanitize_shell_falls_back_on_bad_values():
 	assert_eq(PaneTypes.sanitize_shell(null, "/bin/bash"), "/bin/bash")
-	assert_eq(PaneTypes.sanitize_shell("sh\u0000rm", "/bin/bash"), "/bin/bash")
+	assert_eq(PaneTypes.sanitize_shell("sh\uFFFDrm", "/bin/bash"), "/bin/bash")
 	assert_eq(PaneTypes.sanitize_shell("", "/bin/bash"), "/bin/bash")
 
-func test_sanitize_shell_rejects_nul_and_oversized():
-	assert_eq(PaneTypes.sanitize_shell("sh\u0000rm", "/bin/bash"), "/bin/bash")
+func test_sanitize_shell_rejects_invalid_unicode_and_oversized():
+	assert_eq(PaneTypes.sanitize_shell("sh\uFFFDrm", "/bin/bash"), "/bin/bash")
 	var long: String = "x".repeat(2048)
 	assert_eq(PaneTypes.sanitize_shell(long, "/bin/bash"), "/bin/bash")
 
@@ -94,3 +94,26 @@ func test_pane_body_ignores_unknown_and_bad_type_keys():
 	body.apply_settings({"font_size": "big", "pane_name": 99, "bogus": true})
 	assert_eq(body.font_size, 14)
 	assert_eq(body.pane_name, "keep")
+
+func test_migrate_observer_answer_becomes_inspector():
+	var st = PaneTypes.sanitize_tile({
+		"settings": {"type": "observer", "stream": "answer", "backend": "omp"},
+		"col": 0, "row": 0, "cspan": 6, "rspan": 12,
+	})
+	assert_eq(st["type_name"], "inspector")
+	assert_eq(st["settings"]["type"], "inspector")
+	assert_false(st["settings"].has("stream"))
+
+func test_migrate_observer_thinking_becomes_reasoning():
+	var st = PaneTypes.sanitize_tile({
+		"settings": {"type": "observer", "stream": "thinking"},
+		"col": 0, "row": 0, "cspan": 6, "rspan": 12,
+	})
+	assert_eq(st["type_name"], "reasoning")
+	assert_eq(st["settings"]["type"], "reasoning")
+	assert_false(st["settings"].has("stream"))
+
+func test_sanitize_attachment_id_rejects_invalid():
+	assert_eq(PaneTypes.sanitize_attachment_id("OMP"), "")
+	assert_eq(PaneTypes.sanitize_attachment_id("omp-terminal"), "omp-terminal")
+	assert_eq(PaneTypes.sanitize_attachment_id("1bad"), "")

@@ -6,6 +6,9 @@ extends Control
 signal title_changed(new_title: String)
 
 @export var pane_name := ""
+## Stable logical link used by profiles and companion panes. Unlike
+## `pane_label`, this value survives save/restore.
+@export var attachment_id := ""
 @export var font_size: int = 14:
 	set(value):
 		font_size = value
@@ -69,10 +72,26 @@ func _default_title() -> String:
 	return get_class()
 
 func _get_layout_state() -> Dictionary:
-	return {"type": _pane_type(), "pane_name": pane_name, "font_size": font_size}
+	return {
+		"type": _pane_type(),
+		"pane_name": pane_name,
+		"attachment_id": attachment_id,
+		"font_size": font_size,
+	}
 
 func _pane_type() -> String:
 	return "base"  # overridden by concrete types
+
+## Routed-content capability contract.
+##
+## Routers must ask before delivery, and acknowledge source data only when
+## receive_content() returns true. Receivers may decline because of their
+## role, state, or a runtime failure; routers should then try the next match.
+func can_receive_content(_event: Dictionary = {}) -> bool:
+	return false
+
+func receive_content(_text: String, _event: Dictionary = {}) -> bool:
+	return false
 
 # Override to add type-specific settings controls.
 # `panel` provides `_debounce_timer` and `_gather_func` (set by each type).

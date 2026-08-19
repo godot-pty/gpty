@@ -14,6 +14,8 @@ func register(action_name: String, default_bind: String, callback: Callable):
 	_actions[action_name] = callback
 
 func _parse_bind(bind_str: String) -> InputEventKey:
+	if bind_str.strip_edges() == "":
+		return null
 	var parts = bind_str.split("+")
 	var ev = InputEventKey.new()
 	for p in parts:

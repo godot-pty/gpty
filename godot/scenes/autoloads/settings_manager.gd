@@ -33,6 +33,8 @@ var cfg_show_titlebar := true
 var cfg_window_position := Vector2i(100, 100)
 var cfg_window_size := Vector2i(1920, 1080)
 var cfg_shell_env := ""
+var cfg_reasoning_max_turns := 16
+var cfg_reasoning_max_turn_bytes := 65536
 
 signal settings_changed
 
@@ -69,9 +71,13 @@ func load_settings():
 	cfg_font_size = d.get("font_size", 14)
 	cfg_shell_command = d.get("shell_command", "/bin/bash")
 	cfg_shell_env = d.get("shell_env", "")
+	cfg_reasoning_max_turns = clampi(int(d.get("reasoning_max_turns", 16)), 1, 64)
+	cfg_reasoning_max_turn_bytes = clampi(int(d.get("reasoning_max_turn_bytes", 65536)), 4096, 1048576)
 
 func save_settings():
 	var d = {"cursor_shape": cfg_cursor_shape, "cursor_blink": cfg_cursor_blink, "cursor_blink_speed": cfg_cursor_blink_speed, "scroll_lines": cfg_scroll_lines, "default_rows": cfg_default_rows, "default_cols": cfg_default_cols, "beam_width": cfg_beam_width, "underline_height": cfg_underline_height, "wrapper_bg": cfg_wrapper_bg.to_html(), "title_bar_bg": cfg_title_bar_bg.to_html(), "wrapper_border": cfg_wrapper_border.to_html(), "sidebar_bg": cfg_sidebar_bg.to_html(), "focus_border": cfg_focus_border.to_html(), "selection": cfg_selection.to_html(), "scrollback_indicator": cfg_scrollback_indicator.to_html(), "color_scheme": cfg_color_scheme_path, "max_fps": cfg_max_fps, "font_path": cfg_font_path, "font_size": cfg_font_size, "shell_command": cfg_shell_command, "shell_env": cfg_shell_env, "show_titlebar": cfg_show_titlebar, "window_mode": cfg_window_mode, "window_position": {"x": cfg_window_position.x, "y": cfg_window_position.y}, "window_size": {"x": cfg_window_size.x, "y": cfg_window_size.y}}
+	d["reasoning_max_turns"] = cfg_reasoning_max_turns
+	d["reasoning_max_turn_bytes"] = cfg_reasoning_max_turn_bytes
 	_write_file(SETTINGS_FILE, d)
 	settings_changed.emit()
 
