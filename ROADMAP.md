@@ -10,11 +10,12 @@ GitHub Issues are used for user-reported bugs and discussions, not roadmap track
 - [ ] Windows code signing — Authenticode sign the Windows .exe to avoid SmartScreen warnings
 - [ ] Dynamic Shaders — GPU shader-based visual effects for terminal backgrounds and overlays (CRT scanlines, glassmorphism, noise)
 - [ ] Reactive Environments — ambient visual feedback triggered by concept engine events (e.g., red tint when a test fails, green particles on build success)
-- [ ] Native AI Observer Pane — a dedicated pane type that sends captured output to an LLM and renders the Markdown response
+- [ ] Inspector / Reasoning follow-ups — host-tools bridge and OpenAI-compatible HTTP still planned. Claude/Gemini adapters only after OMP is stable, using each CLI's documented hooks (never token reuse or TUI scraping).
 - [ ] FFI fuzz testing — automated fuzz testing of the terminal grid's binary interface to catch crashes and security issues
 
 ## v0.4.0
 
+- [x] Inspector + Reasoning panes — private tool-free OMP Q&A and passive documented-reasoning projection, with a dedicated event socket and `@gpty/omp-events` extension
 - [ ] SQLite + FTS5 history backend — wire the existing `HistoryStore` (SQLite + FTS5, tested but unused in production) into pane lifecycle and session restore. Scrollback is currently lost on restart; this makes it persistent and full-text searchable.
 - [ ] Tab/workspace switching — switch between independent sets of panes within the same window. Each workspace has its own layout, profile, and scrollback. Deferred from v0.3.0.
 - [ ] Visual Concept Graph — build concept automations visually using Godot's GraphEdit node editor. Drag-and-drop nodes for triggers, conditions, and actions without writing regex by hand.

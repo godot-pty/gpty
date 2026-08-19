@@ -11,19 +11,40 @@ terminal is the `Control`-based renderer
 
 ```bash
 # From the workspace root
-cargo build -p gpty-gdext
-
-# The shared library is at:
-target/debug/libgpty_gdext.so
+cargo build -p gpty-gdext && cd godot && godot -e
 ```
 
-## Running in Godot
-
-1. Open the `godot/` directory in the Godot editor
-2. The `.gdextension` file auto-loads the shared library
-3. Open `scenes/main.tscn` and press F5
+`gpty.gdextension` always loads `res://bin/libgpty_gdext.linux.x86_64.so`.
+For editor work, that file should be a symlink to `target/debug/libgpty_gdext.so`
+so `cargo build -p gpty-gdext` is enough. Restart Godot after each rebuild.
+`./scripts/build` replaces the symlink with a release copy for export.
 
 ## GDScript API
+
+### GptyMarkdown (extends RefCounted)
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `render(markdown: String)` | `String` | Convert untrusted CommonMark/GFM to sanitized `RichTextLabel` BBCode |
+
+Raw BBCode and HTML are escaped, images render as alt text, and only
+`http`, `https`, and `mailto` links become metadata. Godot asks for
+confirmation before `MarkdownView` opens a link.
+
+### GptyAi (extends Node)
+
+One private Inspector session. There is no process-global subscriber bus.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `session_open(request_json: String)` | `String` | Open a mock/omp session. JSON: `{backend, system_prompt, cwd, model}` |
+| `session_prompt(request_json: String)` | `String` | Submit one turn. JSON: `{session_id, capture, concept_name, source_pane}` |
+| `session_poll(request_json: String)` | `String` | Drain correlated envelopes. JSON: `{session_id, max_events}` |
+| `session_cancel(request_json: String)` | `String` | Cancel the active turn. JSON: `{session_id}` |
+| `session_close(request_json: String)` | `String` | Tear down the backend process. JSON: `{session_id}` |
+| `list_backends()` | `String` | JSON array of `{kind, name, available}` |
+
+Inspector omp is launched as `omp --mode rpc --no-session --no-tools --no-extensions --no-skills --no-rules`.
 
 ### GptyTerminal (extends Node2D)
 
@@ -31,11 +52,12 @@ target/debug/libgpty_gdext.so
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `start_shell(cmd: String, rows: int, cols: int, envs: String)` | void | Start a PTY session |
+| `start_shell(cmd: String, rows: int, cols: int, envs: String)` | void | Start a PTY session (injects per-PTY event capability) |
 | `send_text(text: String)` | void | Send raw text to PTY (no newline) |
 | `send_line(text: String)` | void | Send a line to PTY (appends `\n`) |
 | `resize_grid(rows: int, cols: int)` | void | Resize grid + send SIGWINCH |
 | `set_palette(hex_csv: String)` | void | Load color scheme (16 hex colors, CSV) |
+| `get_terminal_session_id()` | `String` | Opaque id for the current PTY lifetime |
 
 #### Grid & rendering
 
@@ -77,8 +99,9 @@ target/debug/libgpty_gdext.so
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `drain_ipc_requests()` | `Array` | Drain queued IPC requests for GDScript dispatch |
+| `drain_ipc_requests()` | `Array` | Drain queued **control** IPC requests for GDScript dispatch |
 | `respond_ipc(id, success, result_json)` | void | Respond to a drained IPC request |
+| `drain_agent_events()` | `String` | Drain bounded OMP extension events from `gpty-events.sock` (JSON array). **Unix only** — see [OMP event socket](#omp-event-socket-reasoning-pane) |
 
 #### Grid Update Dictionary
 
@@ -110,6 +133,31 @@ Partial update (`is_full = false`, damaged cells only):
     "attrs": PackedInt32Array(…),
 }
 ```
+
+## OMP event socket (Reasoning pane)
+
+Passive OMP observability uses a **second** local IPC listener beside the
+workspace-control socket (`gpty.sock` → `gpty-events.sock`). Implementation:
+`src/omp_events.rs`. Protocol details: `crates/gpty-ipc/README.md`.
+
+| Platform | Control IPC (`gpty.sock`) | OMP event socket (`gpty-events.sock`) |
+|----------|---------------------------|----------------------------------------|
+| Linux / macOS (Unix) | Unix domain socket | **Supported** — `ompEvent` JSON-RPC |
+| Windows | Named pipe | **Not supported yet** — fail-closed |
+
+On Unix, each PTY spawn registers an ephemeral capability and injects
+`GPTY_EVENT_*` into the shell. `@gpty/omp-events` forwards semantic events;
+`workspace.gd` polls `drain_agent_events()` into the Reasoning pane.
+
+On Windows, `register_terminal()` and `ensure_server_started()` are no-ops:
+no event listener starts, **`GPTY_EVENT_*` is not injected**, and
+`drain_agent_events()` always returns `[]`. Terminals and Inspector still
+work; only the Reasoning / `@gpty/omp-events` path is unavailable until a
+Windows transport lands (likely named pipes, mirroring control IPC).
+
+The Windows CI `rust-windows` job compiles this crate with `#[cfg(unix)]`
+event code disabled, which produces expected dead-code warnings in
+`omp_events.rs` — not a runtime failure on Linux builds.
 
 ### Tips
 

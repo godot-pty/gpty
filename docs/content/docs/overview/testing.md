@@ -33,7 +33,7 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
 - `godot/scenes/terminal/workspace.gd` — restore/sanitize wiring, concept event routing, IPC dispatch (routing patterns are unit-tested via the `test_ipc_routing.gd` mirror)
 - `godot/scenes/terminal/terminal_pane.gd` — renderer and input paths are partially covered by `test_keyboard.gd`/`test_copy_routing.gd` mocks; real rendering is manual-only
 - `godot/scenes/ui/settings_panel.gd`, `godot/scenes/ui/pane_settings_panel.gd`, `godot/scenes/ui/status_bar.gd`, `godot/scenes/ui/toast_overlay.gd`, `godot/scenes/ui/icons.gd`
-- `godot/scenes/panes/code_viewer.gd`, `godot/scenes/panes/file_tree.gd`, `godot/scenes/panes/observer_pane.gd`
+- `godot/scenes/panes/code_viewer.gd`, `godot/scenes/panes/file_tree.gd`, `godot/scenes/panes/inspector_pane.gd`, `godot/scenes/panes/reasoning_pane.gd` — unit-tested for routing/session contracts; real OMP/Markdown rendering is manual
 - `godot/scenes/autoloads/focus_manager.gd`, `godot/scenes/autoloads/shortcut_manager.gd`, `godot/scenes/autoloads/toast_manager.gd`, `godot/scenes/autoloads/update_checker.gd`
 
 ## Manual pre-release checklist
@@ -63,15 +63,16 @@ All CLI commands below use the default socket path (`$XDG_RUNTIME_DIR/gpty.sock`
 | 1 | `gpty version` | `gpty 0.3.0` / `protocol: 2.0` |
 | 2 | `gpty new-pane --pane-type code_viewer` | Pane `C1` appears in sidebar |
 | 3 | `gpty new-pane --pane-type file_tree` | Pane `F1` appears in sidebar |
-| 4 | `gpty new-pane --pane-type observer` | Pane `O1` appears in sidebar |
-| 5 | `gpty list-panes` | JSON array with 4 entries (T1, C1, F1, O1), correct `type` fields |
-| 6 | `gpty inject T1 --text "echo hello"` | "hello" appears in T1 terminal |
-| 7 | `gpty focus-pane C1` | C1 highlighted in sidebar |
-| 8 | `gpty kill-pane F1` | F1 removed, `list-panes` shows 3 panes |
-| 9 | `gpty kill-pane NOPE` | Error: "Pane 'NOPE' not found" |
-| 10 | `gpty layout save my-setup` | Returns `{"success":true,"name":"my-setup"}` |
-| 11 | `gpty layout list` | "my-setup" in layouts array |
-| 12 | `gpty layout load my-setup` | Workspace restored to saved state |
+| 4 | `gpty new-pane --pane-type inspector` | Pane `I1` appears in sidebar |
+| 5 | `gpty new-pane --pane-type reasoning` | Pane `R1` appears in sidebar |
+| 6 | `gpty list-panes` | JSON array with 5 entries (T1, C1, F1, I1, R1), correct `type` fields |
+| 7 | `gpty inject T1 --text "echo hello"` | "hello" appears in T1 terminal |
+| 8 | `gpty focus-pane C1` | C1 highlighted in sidebar |
+| 9 | `gpty kill-pane F1` | F1 removed, `list-panes` shows 4 panes |
+| 10 | `gpty kill-pane NOPE` | Error: "Pane 'NOPE' not found" |
+| 11 | `gpty layout save my-setup` | Returns `{"success":true,"name":"my-setup"}` |
+| 12 | `gpty layout list` | "my-setup" in layouts array |
+| 13 | `gpty layout load my-setup` | Workspace restored to saved state |
 
 ---
 

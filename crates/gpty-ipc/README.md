@@ -90,6 +90,28 @@ channel against other local users:
 - **Connection cap**: at most 16 concurrent connections; slow connections
   are dropped after 30 s.
 
+## Event socket (OMP observability)
+
+A **second** listener, `default_event_socket_path()`, sits beside the
+control socket (`gpty.sock` → `gpty-events.sock`). It accepts only the
+JSON-RPC method `ompEvent`. It does not honor `GPTY_SOCKET` or
+`GPTY_SECRET`, is not an MCP tool, and cannot create panes, inject
+input, or shut down gpty.
+
+Each PTY receives ephemeral `GPTY_TERMINAL_SESSION_ID`,
+`GPTY_EVENT_CAPABILITY`, `GPTY_EVENT_SOCKET`, and `GPTY_EVENT_PROTOCOL=1`
+at spawn. A leaked capability is scoped to that terminal.
+
+**Platform:** event submission is **Unix-only** (Linux/macOS). gpty starts
+the `gpty-events.sock` listener and injects `GPTY_EVENT_*` only on Unix
+(`gpty-gdext/src/omp_events.rs`). On Windows, control IPC uses named pipes
+and works; the event listener is not implemented yet, activation variables
+are not injected, and Reasoning / `@gpty/omp-events` stay dormant
+(fail-closed). A future Windows port will likely mirror control IPC with a
+separate named pipe, not `GPTY_SOCKET`.
+
+See `crates/gpty-gdext/src/omp_events.rs` and
+`extensions/gpty-omp-events/`.
 
 ## Methods
 

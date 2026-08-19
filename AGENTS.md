@@ -21,6 +21,7 @@ gpty/
 │   ├── pre-push                # Full CI suite before push
 │   └── commit-msg              # Conventional Commits enforcement
 ├── crates/
+│   ├── gpty-ai/                # Inspector backends (mock + private OMP RPC; no tools)
 │   ├── gpty-core/              # PTY spawning, ANSI parsing, alacritty_terminal grid, pub-sub
 │   │   └── src/
 │   │       ├── lib.rs          # Module map + data-flow diagram
@@ -55,12 +56,20 @@ gpty/
 │   │       ├── transport.rs    # Platform socket connection (Unix, named pipe)
 │   │       ├── server.rs       # Async IPC server with handler registry
 │   │       └── client.rs       # Async IPC client with connect/call/timeout
-│   └── gpty-gdext/             # GDExtension cdylib: GptyTerminal GodotClass
-│       └── src/lib.rs
+│   └── gpty-gdext/             # GDExtension cdylib: GptyTerminal + GptyAi + GptyMarkdown
+│       └── src/
+│           ├── lib.rs          # GptyTerminal GodotClass
+│           ├── ai.rs           # Per-pane GptyAi session bridge
+│           ├── ipc.rs          # Workspace-control IPC server
+│           ├── omp_events.rs   # Capability-scoped OMP event socket
+│           └── markdown.rs     # Markdown → sanitized BBCode
+├── extensions/
+│   └── gpty-omp-events/        # Explicit OMP plugin; dormant unless GPTY_EVENT_* is set
 └── godot/                      # Godot 4.7 project
     ├── project.godot
     ├── gpty.gdextension
     ├── concepts.default.json   # Shipped default concepts
+    ├── profiles.default.json   # Shipped recommended layouts (OMP Workspace)
     ├── fonts/                  # DejaVu Sans Mono + Phosphor icons
     └── scenes/
         ├── main.tscn
@@ -82,12 +91,14 @@ gpty/
         │   ├── sidebar.gd
         │   ├── settings_panel.gd
         │   ├── toast_overlay.gd
+        │   ├── markdown_view.gd     # Safe, debounced Markdown RichTextLabel
         │   └── icons.gd            # Phosphor icon constants
         └── panes/
-            ├── pane_body.gd        # Base class
+            ├── pane_body.gd        # Base class + routed-content contract
             ├── code_viewer.gd
             ├── file_tree.gd
-            └── observer_pane.gd
+            ├── inspector_pane.gd   # Private read-only OMP Q&A
+            └── reasoning_pane.gd   # Passive OMP reasoning projection
 ```
 
 ## Commands
@@ -101,7 +112,15 @@ Shell → PTY I/O thread → vte parser → alacritty_terminal grid → Arc<Mute
 ```
 
 ```
-CLI → Unix socket → IpcServer (tokio) → PENDING_IPC queue → GDScript _poll_ipc_requests() → workspace methods → IPC_RESPONDERS → CLI response
+CLI → Unix socket (gpty.sock) → IpcServer (tokio) → PENDING_IPC queue → GDScript _poll_ipc_requests() → workspace methods → IPC_RESPONDERS → CLI response
+```
+
+```
+OMP TUI (user-launched in a terminal) → @gpty/omp-events extension → gpty-events.sock (ompEvent) → GptyTerminal.drain_agent_events() → Reasoning pane
+```
+
+```
+Inspector prompt → GptyAi.session_open/session_prompt → private omp --mode rpc --no-tools --no-session process → session_poll envelopes
 ```
 
 ## MCP Integration
@@ -144,13 +163,14 @@ See `skill://gpty-omp-integration` for usage patterns.
 
 - Indentation: tabs
 - Icons: All glyphs live in `icons.gd` as `const` strings (Phosphor Regular PUA codepoints via `\uXXXX`). To add: pick from phosphoricons.com, get the codepoint, add a `const`. Call `Icons.style_button(btn)` after setting `btn.text`.
-- Profiles: named terminal-layout snapshots (`user://profiles.json`). `ProfileManager` autoload manages CRUD + `profiles_changed` signal. Save dialog is built inline in `workspace.gd` (not a separate scene). Profile activation clears the workspace (`_reset()`) then rebuilds tiles — follows `_do_restore()` pattern.
+- Profiles: named terminal-layout snapshots. User data lives in `user://profiles.json`; shipped layouts live in `res://profiles.default.json` and are never written back. `ProfileManager.get_all_profiles()` returns built-ins first. Save dialog is built inline in `workspace.gd`. Activation clears the workspace (`_reset()`) then rebuilds tiles — follows `_do_restore()` pattern. Built-in profiles cannot be deleted from the sidebar.
+- Attachment IDs: persist `attachment_id` (`[a-z][a-z0-9_-]{0,31}`) on panes. Companion panes (Reasoning) attach by this stable id, not ephemeral labels like `T1`. `pane_label` is reassigned on restore and must not be used as a saved link.
 - JSON → typed arrays: `JSON.parse()` returns untyped `Array`. Assignment to `Array[Dictionary]` fails at runtime. Always iterate and build the typed array element-by-element: `for item in raw: if item is Dictionary: typed.append(item)`.
 - Private members: underscore prefix (`_cell_w`, `_settings_panel`)
 - Config vars: `_cfg_` prefix (`_cfg_cursor_shape`)
 - Persistence: Managers extend `BasePersistenceManager` — provides `_read_file(path)` / `_write_file(path, data)`, sets `PROCESS_MODE_ALWAYS`. Subclasses override `_on_init()` instead of `_ready()`. Never inline `FileAccess.open()` — use `_read_file`/`_write_file`.
 - Directory layout: Scripts are grouped by role: `autoloads/` (7 managers + 1 base), `terminal/` (core terminal), `ui/` (sidebar, settings, toast), `panes/` (specialty pane types). `project.godot` autoload paths and `preload()`/`load()` calls use the full `res://scenes/<dir>/<file>.gd` path.
-- Settings pipeline: `_cfg_*` → `_save_settings()` → `user://settings.json`. To add a new setting: (1) add `_cfg_` var, (2) add UI control, (3) add one line to `_apply_settings_to()`. `_build_wrapper()` calls it automatically — no other wiring needed.
+- Settings pipeline: `_cfg_*` → `_save_settings()` → `user://settings.json`. To add a new setting: (1) add `_cfg_` var, (2) add UI control, (3) add one line to `_apply_settings_to()`. `_build_wrapper()` calls it automatically — no other wiring needed. Pane-local settings that are NOT terminal settings (e.g. `cfg_reasoning_max_turns`, `cfg_reasoning_max_turn_bytes`) are read by the pane from `SettingsManager` at `_ready` with clamps — changes apply to panes created afterward; no `_apply_settings_to` wiring.
 - Terminal spawning: `_build_wrapper()` is the sole entry point; all paths go through it
 - Layout Constraints: The tiling grid relies on Godot `Control` nodes. Prefer using Godot's built-in Size Flags (Expand/Fill) inside containers (`HBoxContainer`/`VBoxContainer`) over manual pixel math. When manual math is absolutely required (like terminal cell reflows), hook into `_notification(NOTIFICATION_RESIZED)`.
 - Pub-Sub Bridge: To handle `WorkspaceEngine` events (like regex concept triggers) in Godot, GDScript must poll the Rust backend in `_process()` or rely on Rust calling `call_deferred("emit_signal", ...)`.
@@ -167,23 +187,50 @@ See `skill://gpty-omp-integration` for usage patterns.
   - Receiver found → `acknowledge_capture` (bytes discarded). No receiver → `flush_capture` (bytes replayed to grid) + toast.
 - Prompt restoration: Shell prompts lack trailing `\n` so `LineParser` never emits them. On acknowledge, raw bytes after last `\n` are extracted and fed to grid with `\r\n` prefix for correct cursor positioning.
 - Default concepts: Shipped in `godot/concepts.default.json`. `ConceptManager._merge_concepts()` deep-merges defaults + user concepts (user keys overlay default keys). Trigger migration updates old regex patterns to new ones.
-- Concept event routing: `workspace.gd._process()` polls all terminal panes, drains events, routes to receiver pane by `_pane_type()`. No receiver → toast + flush.
+- Routed-content contract: `PaneBody.can_receive_content(event)` advertises current capability and `receive_content(text, event)` returns whether delivery succeeded. Routers must continue past declines and acknowledge source bytes only after `true`; if all receivers decline, flush the capture back to the terminal.
+- Concepts that target Inspector (`git_log`, `cargo_check`) ship **disabled**. Do not re-enable them in defaults: captured terminal output must not be sent to an AI backend without explicit user opt-in. Inspector additionally gates captures behind its own `accept_concept_captures` export (default `false`).
+- Legacy observer-target **concepts** are NOT migrated to inspector: `ConceptManager._migrate_actions_target` sets `enabled = false` on any concept whose action targets `observer` (at merge and save time), so a stale capture can never start an Inspector job.
+- Alt-screen suppression: the engine skips `match_and_broadcast` while the grid is in alternate-screen mode (`TermGrid::is_alt_screen()`). Full-screen apps repaint themselves; their redraw lines are presentation, not shell output (an OMP TUI repaint re-emitting a transcript line containing `cat` must not fire the cat concept).
+- Resize is not user input: only `StdinInput::Line` and `StdinInput::Raw` may stop an active `UntilStop` capture. `Resize`/`FlushCapture`/`AcknowledgeCapture` share the stdin channel but are internal plumbing; letting them finalize a capture replays old bytes into the grid and fires spurious "no receiver" toasts. There is also a 750 ms post-resize concept-match suppression window (`POST_RESIZE_CONCEPT_SUPPRESS_MS`) for the shell's SIGWINCH redraw.
+- Concept event routing: `workspace.gd._process()` polls all terminal panes, drains events, and tries matching receivers by `_pane_type()` until one accepts. No accepting receiver → toast + flush.
+- Layout migration: `PaneTypes.migrate_pane_settings()` runs **before** type validation. Legacy `type: observer` + `stream: thinking` becomes `reasoning`; other observer tiles become `inspector`. Removing `observer` from `PaneTypes.ALL` without this step silently drops saved layouts.
+
+### Inspector, Reasoning, and OMP
+
+gpty is a terminal multiplexer with an observability layer. It does **not** recreate agent TUIs, scrape PTY output for agent semantics, or host the user's interactive OMP/Claude/Gemini session.
+
+| Surface | Role |
+|---------|------|
+| Terminal | User launches `omp` (or any CLI) normally. The CLI owns its TUI, auth, tools, and permissions. |
+| Inspector | Private, tool-free, iterative Q&A. Owns one in-memory `GptyAi` session (`omp --mode rpc --no-session --no-tools --no-extensions --no-skills --no-rules`). Does not attach to the terminal OMP process. |
+| Reasoning | Passive view of documented reasoning/lifecycle events from **one** terminal, selected by `source_attachment_id`. Never starts jobs or accepts concept captures. Turn history is an in-memory accordion for the current OMP session only. |
+| `@gpty/omp-events` | Explicitly installed OMP extension. Dormant unless all four `GPTY_EVENT_*` vars are present. Forwards bounded session/turn/tool metadata plus `thinking_delta` text only. |
+
+- Inspector and Reasoning are **different sessions**. The shipped "OMP Workspace" profile opens Terminal + Inspector + Reasoning; only Reasoning is attached to the terminal.
+- Reasoning history is session-scoped RAM (collapsed previous turns, live turn streaming). Closing the pane, changing `source_attachment_id`, or binding a new `omp_session_id` drops it. Do not write thinking text or OMP session IDs into layout/profile JSON.
+- **OMP event socket is Unix-only.** Workspace control IPC works on Windows (named pipes); the separate `gpty-events.sock` listener and per-PTY `GPTY_EVENT_*` injection are implemented only on Unix (`omp_events.rs`). On Windows, Reasoning stays idle and `@gpty/omp-events` is dormant because gpty never injects activation vars.
+- `GptyAi` is instance-owned: `session_open` / `session_prompt` / `session_poll` / `session_cancel` / `session_close`. There is no process-global subscriber bus. Polled envelopes carry `session_id`, `turn_id`, `run_id`, `sequence`, `channel`.
+- Reasoning caps are user settings (Settings → Reasoning tab): `cfg_reasoning_max_turns` (clamped 1–64, default 16) and `cfg_reasoning_max_turn_bytes` (clamped 4 KiB–1 MiB, default 64 KiB). `reasoning_pane.gd` reads them at `_ready` into `max_turns`/`max_turn_bytes` (not consts). When truncating accumulated raw Markdown at the cap, re-close an odd number of ``` fences (`_close_open_fences`) — an unclosed fence re-renders the tail as code.
+- Do not add Claude/Gemini/Antigravity adapters that read OAuth tokens, call private endpoints, or parse undocumented TUI output. Future adapters may use only that CLI's documented hooks/extensions, with a fresh terms review.
 
 ### Security
 
 - Concept Engine ReDoS: The `gpty-core` crate MUST always use the standard Rust `regex` crate. PCRE or back-tracking engines are strictly prohibited to prevent ReDoS (Regex Denial of Service) attacks when parsing large amounts of terminal output.
 - OSC 52 Clipboard Syncing: `parser.rs` currently discards all terminal escape sequences, keeping copy/paste safely bound to Godot UI inputs. Do NOT implement OSC 52 clipboard injection/syncing without placing it behind an explicit Godot confirmation dialog to prevent drive-by clipboard hijacking.
-- IPC hardening: the IPC socket defaults to `$XDG_RUNTIME_DIR/gpty.sock` (fallbacks `/run/user/<uid>/gpty.sock`, `/tmp/gpty-<uid>.sock`; macOS `$TMPDIR`; `GPTY_SOCKET` overrides). The server chmods the socket 0600, rejects cross-UID peers on Linux/macOS (fail-closed), caps requests at 64 KiB (`-32600`) and connections at 16 (30 s timeout). When `GPTY_SECRET` is set on the GUI, clients MUST present it (mismatch → `-32001`); tests/scripts probing a secret-configured GUI must set the same env var. Do NOT weaken these gates when editing `server.rs`/`transport.rs`.
+- IPC hardening: the **control** socket defaults to `$XDG_RUNTIME_DIR/gpty.sock` (fallbacks `/run/user/<uid>/gpty.sock`, `/tmp/gpty-<uid>.sock`; macOS `$TMPDIR`; `GPTY_SOCKET` overrides). The server chmods the socket 0600, rejects cross-UID peers on Linux/macOS (fail-closed), caps requests at 64 KiB (`-32600`) and connections at 16 (30 s timeout). When `GPTY_SECRET` is set on the GUI, clients MUST present it (mismatch → `-32001`); tests/scripts probing a secret-configured GUI must set the same env var. Do NOT weaken these gates when editing `server.rs`/`transport.rs`.
+- OMP event socket: a **second** listener (`gpty-events.sock` / `default_event_socket_path()`) accepts only `ompEvent`. It does not honor `GPTY_SOCKET` or `GPTY_SECRET`. Each PTY gets an ephemeral `GPTY_TERMINAL_SESSION_ID` + `GPTY_EVENT_CAPABILITY` injected at spawn; a leaked capability cannot inject text, create panes, or shut down gpty. Do not register `ompEvent` on the control socket, and do not expose event submission as an MCP tool. **Unix-only today** — `register_terminal()` / `ensure_server_started()` are `#[cfg(unix)]`; Windows builds omit the listener and skip `GPTY_EVENT_*` injection (Reasoning fail-closed, not control IPC).
 - IPC trust model: the IPC channel is local-only and trusts same-UID processes — a process running as the user can already control that user's session, so this is the accepted threat model for a single-user dev machine. On multi-user/shared hosts, set `GPTY_SECRET` on the GUI and every client. Anyone controlling a process's environment controls that process: env-var attacks are mitigated at the socket/binary boundary (`validate_socket_path`/`validate_gui_binary`), not by treating the environment itself as trusted.
 - Concept template substitution: `{payload}`/`{N}` values are shell-quoted (POSIX single quotes) by `concept::substitute_template` before injection — terminal output is untrusted and must never reach a shell unescaped. Substitution is single-pass (`{{` escapes a literal brace; substituted text is never re-scanned). Concept parsing caps count (128), trigger length (1024), cmd length (4096), actions (32), and clamps `stop_timeout_ms` to ≤ 600 000 ms (`concept::concepts_from_json`). Lines over 16 KiB are never regex-matched; capture buffers are capped at 4 MiB.
-- PTY env sanitization: `pty::sanitize_envs` runs at spawn — the single choke point for settings, per-pane env, layouts, and profiles. Keys must match `[A-Za-z_][A-Za-z0-9_]*`; dynamic-loader injection vectors (`LD_PRELOAD`, `LD_AUDIT`, `LD_LIBRARY_PATH`, `LD_ORIGIN_PATH`, `DYLD_*`) are dropped. Do NOT remove entries from `BLOCKED_ENV_KEYS` without a security review.
+- PTY env sanitization: `pty::sanitize_envs` runs at spawn — the single choke point for settings, per-pane env, layouts, and profiles. Keys must match `[A-Za-z_][A-Za-z0-9_]*`; dynamic-loader injection vectors (`LD_PRELOAD`, `LD_AUDIT`, `LD_LIBRARY_PATH`, `LD_ORIGIN_PATH`, `DYLD_*`) and event-channel keys (`GPTY_EVENT_SOCKET`, `GPTY_EVENT_PROTOCOL`, `GPTY_TERMINAL_SESSION_ID`, `GPTY_EVENT_CAPABILITY`) are dropped from untrusted env. Trusted runtime event vars are injected last by `GptyTerminal.start_shell()`. Inherited control credentials (`GPTY_SECRET`, `GPTY_SOCKET`, `GPTY_GUI`) are stripped via `CommandBuilder::env_remove` so child shells cannot control the workspace. Do NOT remove entries from `BLOCKED_ENV_KEYS` without a security review.
+- Agent observability allowlist: the OMP extension may forward session/turn/tool **metadata** and bounded `thinking_delta` text. Never forward prompts, answer text, tool arguments/results, provider payloads, credentials, or session file paths. Never persist `GPTY_EVENT_*`, OMP session IDs, or thinking text in layout/profile JSON. Reasoning accordion records stay in RAM until a later `feat(history)` SQLite path exists.
+- Third-party AI CLIs: do not read or reuse OAuth tokens, call backing services with harvested credentials, bundle proprietary CLIs, or scrape TUI output. Users launch agents in terminal panes; gpty only consumes documented hooks/extensions.
 - Env-var hijacking: `GPTY_SOCKET` must be an absolute path owned by the current UID with mode `0o600`-style privacy — `transport::validate_socket_path` runs client-side before connect and refuses insecure sockets (they would receive commands and `GPTY_SECRET`). `GPTY_GUI` binaries are validated by `transport::validate_gui_binary` (absolute, regular file, own UID, not group/other-writable) before auto-spawn. Do NOT weaken these checks when editing `client.rs`/`daemon.rs`/`transport.rs`.
 - Layout restore trust: saved tiles from `layout.json`/profiles are untrusted input — `PaneTypes.sanitize_tile` validates the pane type, settings dict, and clamps grid geometry; `PaneBody.apply_settings` applies values only when types match; code_viewer/file_tree pane paths must be absolute. Do NOT remove these guards when adding pane settings.
 
 ### Commits
 
 - Format: [Conventional Commits](https://www.conventionalcommits.org/) — `feat(scope):`, `fix(scope):`, `chore(scope):`
-- Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `ipc`, `profiles`, `concepts`, `icons`, `ci`
+- Scopes: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `ipc`, `profiles`, `concepts`, `icons`, `ci`, `ai`, `inspector`
 - Workflow: Use the commit skill (`skill://commit`) to discover changes, group them logically, and produce correctly-formatted messages. The git hooks (pre-commit, commit-msg, pre-push) are the enforcement layer that catches bypasses.
 - CI gates: `pre-commit` runs fast checks (fmt, workflow lint, clippy). `pre-push` runs the full `./scripts/ci-check` suite. Install with `./scripts/install-hooks` once per clone.
 
@@ -208,7 +255,7 @@ See `skill://gpty-omp-integration` for usage patterns.
 - Typed arrays break Rust FFI: gdext `Array<Variant>` parameters reject GDScript's `Array[Dictionary]` at runtime ("expected array of type Untyped, got Builtin(DICTIONARY)"). Always pass untyped `Array` across the FFI boundary. Prefer `func f(arr: Array)` over `func f(arr: Array[Dictionary])` when the array originates from or goes to Rust.
 - Multi-line `for` array colon: `for x in [...]` with a multi-line array literal requires `]:` at the end. Forgetting the colon produces a parse error at an unrelated line. Double-check after replacing inline array content.
 - Godot typed Arrays: `Array[T]` won't accept plain `Array`. If you type a parameter, check all call sites use matching types (`var x: Array[Control] = []`).
-- GDExtension rebuilds: After changing `#[func]` signatures or adding methods, rebuild with `cargo build -p gpty-gdext` and restart Godot.
+- GDExtension rebuilds: After changing `#[func]` signatures or adding methods, `cargo build -p gpty-gdext` and fully restart Godot. Keep `godot/bin/libgpty_gdext.linux.x86_64.so` as a symlink to `../../target/debug/libgpty_gdext.so` so the editor sees Cargo output. Godot 4.7.1 stable is a release editor (`linux.debug.*` keys do not match). `./scripts/build` overwrites the symlink with a release copy.
 - GDScript default params: Evaluated at definition time, not call time. `func f(x := some_var)` captures the value of `some_var` when the script loads. Use `func f(x := -1)` and check `if x < 0: x = some_var` inside the body for runtime-evaluated defaults.
 - `extends Node` won't render `Control` children: Only `Control` nodes can render child `Control`s (Labels, Buttons, etc.). If you add a Label to a plain `Node`, it's invisible. Use `extends Control` for UI containers and set `z_index` for layering.
 - `tokio::time::Instant::now() + Duration::MAX` panics: The addition overflows. Use a safe large constant like `Duration::from_secs(86400 * 365)` (1 year) for inactive timeout sleeps.
@@ -224,25 +271,28 @@ See `skill://gpty-omp-integration` for usage patterns.
 - Printable keys and the evdev keymap: `GptyTerminal.key_to_bytes` MUST early-return empty for printable ASCII keycodes (0x21–0x7E). Routing them through `godot_key_to_evdev` fabricates scancodes that collide with special keys (`z`→55=KP_MULTIPLY, `;`→59=F1, `` ` ``→96=KP_ENTER) and silently swallows the characters. Only Space (→57, for Ctrl+Space→NUL) and true special keys may reach the keymap.
 - Ctrl+V passthrough: `Ctrl+V` MUST reach the shell as a literal `^V` (readline quoted-insert, vim visual-block). Paste is `Ctrl+Shift+V` only — never bind plain `Ctrl+V` to paste.
 - PTY Enter key: The Enter key MUST send `\r` (CR) to the PTY, not `\n`. `pty.rs:write_line` appends `\r`. The PTY terminal driver translates `\r` → `\n` in canonical mode; raw-mode programs read `\r` directly.
-
 - `tokio::task::JoinHandle` drop detaches: dropping a `JoinHandle` does NOT abort the task — it keeps running until it exits naturally. For explicit cleanup (e.g., in a `Drop` impl), call `handle.abort()`.
 - `std::sync::Once` poisoning: if the closure passed to `Once::call_once` panics, the `Once` is permanently poisoned — all subsequent calls panic too. For lazy init that spawns fallible work, use `AtomicBool::swap(true, Relaxed)` or `Mutex<Option<...>>` instead.
-
-- **Resize cascades from layout changes**: When panes are added/removed, remaining terminals receive multiple `NOTIFICATION_RESIZED` events in rapid succession. Even when calculated rows×cols are identical, each `resize_grid()` call triggers a full grid re-wrap and sync, producing a visible "scrolling through history" animation. Fix: `TermGrid::resize()` must return early if dimensions are unchanged. Also apply a pixel-level check in the GDScript debounce to avoid redundant calls.
+- Resize cascades from layout changes: When panes are added/removed, remaining terminals receive multiple `NOTIFICATION_RESIZED` events in rapid succession. Even when calculated rows×cols are identical, each `resize_grid()` call triggers a full grid re-wrap and sync, producing a visible "scrolling through history" animation. Fix: `TermGrid::resize()` must return early if dimensions are unchanged. Also apply a pixel-level check in the GDScript debounce to avoid redundant calls.
 - Shared static state in integration tests: tests that mutate shared `static` state (queues, maps) must clean up in ALL exit paths — including timeout, error, and panic branches. A stale queue entry from one test will break the next test. Write a `clear_state()` helper and call it in every test.
+- Do not scrape agent TUIs: PTY bytes are presentation, not structured events. Semantic observability comes only from documented OMP/Claude/Gemini hooks or extensions. Regex concepts remain valid for ordinary shell output (e.g. `cat` → code viewer).
+- Emulator PTY replies: alacritty_terminal emits `Event::PtyWrite` for terminal queries (DSR cursor-position `ESC[6n` → `ESC[row;colR`, mode reports). gpty's event proxy MUST queue these and the engine MUST write them to the child PTY (`TermGrid::drain_replies()` drained each loop iteration). Dropping them breaks TUIs that query the cursor after SIGWINCH — the OMP TUI re-anchors its transcript and appears to "scroll through history" on every resize, while vim/btop (which never query) are unaffected. Never drop non-`Title` events.
+- Transient pane sizes collapse the grid: during split/spawn layout churn, panes transiently report ~38×40 px (4×2 cells). Applying that rewraps the grid to 2×4 — the terminal looks dead. `terminal_pane.gd` must skip resize when `size < custom_minimum_size` OR computed `cols < 8` OR `rows < 3` at BOTH event and apply time, and must recompute dims from the CURRENT size when the debounce fires. `resize_grid` (gdext) must also no-op when dims are unchanged (no redundant SIGWINCH).
+- Resize anchoring surgery: `TermGrid::resize` deletes the rows alacritty pulls in on row-growth and restores the cursor (xterm behavior). Run it ONLY when `display_offset == 0 && rows grew && !is_alt_screen() && history_size > 0`. Full-screen apps that paint the PRIMARY screen without smcup (the OMP TUI) have no scrollback and must never be row-deleted.
+- Empty grid cache: `_grid_offset()`/`_mouse_to_cell()` run on mouse events before the first grid sync — guard `_cell_cache.is_empty()` or the editor pauses on a script error and the app appears frozen.
+- Pane labels: `_next_label` takes `max(existing numeric suffix) + 1` — closing the newest pane reuses its number, middle gaps are never filled (T1,T3 → next is T4). Do not reintroduce monotonic counters.
+- Event vs control sockets: `ompEvent` lives on `gpty-events.sock`. Putting it on the control socket would require giving the extension `GPTY_SECRET` (workspace control) or weakening auth. Keep them separate.
+- Event capability is per-PTY: unregister on spawn failure and `Drop`. A capability for terminal A must never be accepted for terminal B. Compare capabilities in constant time.
+- Inspector close must tear down its OMP child: call `session_cancel` + `session_close` from `_exit_tree()`. Dropping a Godot node without closing the session leaves `omp` running.
+- `stream=thinking` observers are not job owners: after migration they become Reasoning panes and must keep `can_receive_content() == false`. Acknowledging a capture without starting analysis discards terminal output.
 
 ### Agent Tool Notes
 
-- **gdext `#[func]` parameter types: ONLY `GString`, `bool`, and `i64` are reliably marshaled as input parameters.** `Array<Variant>`, `Dictionary`, and bare `Variant` all silently fail — the GDScript call succeeds but the Rust body never executes. Workaround: serialize complex data to JSON in GDScript (`JSON.stringify()`), pass as `GString`, deserialize in Rust with `serde_json::from_str`.
-- **Empty `cmd` in concept actions: concept actions with `"cmd": ""` are valid (capture-only — output is captured but no command is injected). Do NOT filter them out with `!cmd.is_empty()` guards — the `target` label is needed for routing even when `cmd` is empty. Only require `!target.is_empty()`.
-- **Concept push startup race: GDExtension classes aren't registered when autoloads initialize.** `ConceptManager._on_init()` must defer its push via `call_deferred("_push_to_rust")`. A `GptyTerminal.new()` created during autoload init produces a zombie object whose `#[func]` methods silently no-op. Use `ClassDB.instantiate("GptyTerminal")` inside `call_deferred` — this works once Godot's class database is ready. A secondary push from `workspace.gd` via `await create_timer(2.0)` serves as fallback.
-
+- gdext `#[func]` parameter types: ONLY `GString`, `bool`, and `i64` are reliably marshaled as input parameters. `Array<Variant>`, `Dictionary`, and bare `Variant` all silently fail — the GDScript call succeeds but the Rust body never executes. Workaround: serialize complex data to JSON in GDScript (`JSON.stringify()`), pass as `GString`, deserialize in Rust with `serde_json::from_str`.
+- Empty `cmd` in concept actions: concept actions with `"cmd": ""` are valid (capture-only — output is captured but no command is injected). Do NOT filter them out with `!cmd.is_empty()` guards — the `target` label is needed for routing even when `cmd` is empty. Only require `!target.is_empty()`.
+- Concept push startup race: GDExtension classes aren't registered when autoloads initialize. `ConceptManager._on_init()` must defer its push via `call_deferred("_push_to_rust")`. A `GptyTerminal.new()` created during autoload init produces a zombie object whose `#[func]` methods silently no-op. Use `ClassDB.instantiate("GptyTerminal")` inside `call_deferred` — this works once Godot's class database is ready. A secondary push from `workspace.gd` via `await create_timer(2.0)` serves as fallback.
 - GDScript `///` comments: GDScript uses `#` or `##` for comments. Rust-style `///` causes a parse error. Always use `##` for doc comments in GDScript.
 - Edit tool on structured formats (YAML, TOML, Markdown frontmatter): the line-based `edit` tool can corrupt delimiter-sensitive files (YAML `---` blocks, TOML `[sections]`, frontmatter bounds). When editing config files, workflow YAML, or Hugo content, prefer `eval` with Python (`yaml.safe_load`, `tomllib`) to parse → modify → serialize. Reserve `edit` for Rust, GDScript, and plain Markdown where line semantics hold.
 - CLI `gpty version` is local-only: it prints the CLI's own crate version and exits without touching IPC. It cannot probe a running GUI. Use `gpty daemon status` or `list-panes` to test connectivity/auth.
-
-## Notes
-
-- `terminal_pane.gd` is the sole renderer (Control-based); the legacy Node2D `terminal.gd` was removed.
 - Font-size changes now auto-recalculate cell metrics via a setter on `font_size` — no need to recreate terminals.
 - The global tokio runtime is initialized once at GDExtension init and shared across all GptyTerminal nodes.

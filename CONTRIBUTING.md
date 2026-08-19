@@ -32,7 +32,16 @@ Run `./scripts/ci-check` directly to validate changes before committing.
 
 ### Build
 
-One-shot standalone build (detects the host platform, builds gpty-gdext in release mode, and exports the app into `dist/`):
+**Editor / day-to-day** (`res://bin/*.so` should symlink to `target/debug/`):
+
+```bash
+ln -sfn ../../target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
+cargo build -p gpty-gdext && cd godot && godot -e
+```
+
+Restart the editor after a rebuild so it remaps the `.so`.
+
+One-shot standalone build (detects the host platform, builds gpty-gdext in release mode, stages it into `godot/bin/`, and exports into `dist/`):
 
 ```bash
 ./scripts/build
@@ -45,10 +54,8 @@ The manual steps below are what the script does internally.
 ```bash
 # Build the GDExtension library (required before running Godot)
 cargo build -p gpty-gdext
-# Copy to the Godot project for local development
-cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
 
-# Release build + local export
+# Release build + stage into godot/bin for export
 cargo build -p gpty-gdext --release
 cp target/release/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
 
@@ -120,6 +127,12 @@ cargo check
 godot --headless --path godot --import # Required before first run
 godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration
 
+# OMP extension unit tests (no omp install required)
+(cd extensions/gpty-omp-events && node --test)
+
+# Explicitly link the OMP observability plugin (user action; gpty never auto-installs)
+omp plugin link "$(pwd)/extensions/gpty-omp-events"
+
 # Run all CI checks locally (fmt, clippy, tests, GUT, audit)
 ./scripts/ci-check
 
@@ -131,6 +144,8 @@ godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/un
 
 ```bash
 cargo run --bin gpty -- new-pane --pane-type terminal  # Create a new terminal pane
+cargo run --bin gpty -- new-pane --pane-type inspector # Private Inspector Q&A pane
+cargo run --bin gpty -- new-pane --pane-type reasoning # Passive Reasoning pane
 cargo run --bin gpty -- list-panes                     # List active panes
 cargo run --bin gpty -- schema                         # JSON Schema for AI tools
 cargo run --bin gpty -- schema --format mcp            # MCP tools manifest

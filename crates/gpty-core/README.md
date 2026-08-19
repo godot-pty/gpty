@@ -26,7 +26,7 @@ Concept {
     trigger_regex: Regex::new(r"(?i)address.*already.*in\s*use").unwrap(),
     destinations: vec![Action {
         command_template: "echo '[Auto] Port conflict detected - consider lsof -i'",
-        target_label: "observer",
+        target_label: "inspector",
     }],
 }
 ```
@@ -54,7 +54,7 @@ Key functions: `finalize_capture()`, `handle_command()`, `capture_stops_on_input
 
 - Auto-Restarting Watchers: Detect a segmentation fault or panic string in a backend server pane, and automatically inject a restart command into an adjacent management pane.
 - Port Conflict Resolution: Detect an "Address already in use" error and immediately run an `lsof` or `kill` command to clear the bound port.
-- AI Observer: Pipe error blocks (such as a Python traceback or Rust compiler error) to a local language model, displaying a plain-English explanation and a proposed fix in a secondary pane.
+- Inspector: Optionally route captured error blocks (a Python traceback or Rust compiler error) to a private, tool-free Inspector session. Shipped concepts that do this are disabled until the user opts in.
 - Automated Documentation: Match specific compiler error codes and automatically open the relevant local or web documentation in an adjacent window.
 
 ## Why Flat?

@@ -22,38 +22,41 @@ from the terminal:
 godot/
 ├── project.godot            # Godot 4.7 project config
 ├── gpty.gdextension      # GDExtension library config
-├── concepts.default.json    # Shipped default concepts
-├── fonts/                   # Bundled fonts (DejaVu Sans Mono + Phosphor icons)
-│   ├── DejaVuSansMono.ttf
-│   ├── DejaVuSansMono-Bold.ttf
-│   ├── DejaVuSansMono-Oblique.ttf
-│   └── Phosphor-Regular.ttf
-└── scenes/
-    ├── main.tscn            # Root scene (Workspace)
-    ├── autoloads/           # 9 singleton managers
-    │   ├── base_persistence_manager.gd  # Shared JSON I/O base
-    │   ├── settings_manager.gd
-    │   ├── profile_manager.gd
-    │   ├── concept_manager.gd
-    │   ├── layout_manager.gd
-    │   ├── focus_manager.gd
-    │   ├── toast_manager.gd
-    │   ├── shortcut_manager.gd
-    │   └── update_checker.gd
-    ├── terminal/            # Core terminal logic
-    │   ├── workspace.gd     # Grid layout, sidebar, profiles, concept routing
-    │   ├── terminal_pane.gd # Control-based renderer, keyboard, selection
-    │   └── terminal_manager.gd
-    ├── ui/                  # UI components
-    │   ├── sidebar.gd
-    │   ├── settings_panel.gd
-    │   ├── toast_overlay.gd
-    │   └── icons.gd         # Phosphor icon constants
-    └── panes/               # Specialty pane types
-        ├── pane_body.gd
-        ├── code_viewer.gd
-        ├── file_tree.gd
-        └── observer_pane.gd
+    ├── concepts.default.json    # Shipped default concepts
+    ├── profiles.default.json    # Shipped recommended layouts (OMP Workspace)
+    ├── fonts/                   # Bundled fonts (DejaVu Sans Mono + Phosphor icons)
+    │   ├── DejaVuSansMono.ttf
+    │   ├── DejaVuSansMono-Bold.ttf
+    │   ├── DejaVuSansMono-Oblique.ttf
+    │   └── Phosphor-Regular.ttf
+    └── scenes/
+        ├── main.tscn            # Root scene (Workspace)
+        ├── autoloads/           # 9 singleton managers
+        │   ├── base_persistence_manager.gd  # Shared JSON I/O base
+        │   ├── settings_manager.gd
+        │   ├── profile_manager.gd
+        │   ├── concept_manager.gd
+        │   ├── layout_manager.gd
+        │   ├── focus_manager.gd
+        │   ├── toast_manager.gd
+        │   ├── shortcut_manager.gd
+        │   └── update_checker.gd
+        ├── terminal/            # Core terminal logic
+        │   ├── workspace.gd     # Grid layout, sidebar, profiles, concept routing
+        │   ├── terminal_pane.gd # Control-based renderer, keyboard, selection
+        │   └── terminal_manager.gd
+        ├── ui/                  # UI components
+        │   ├── sidebar.gd
+        │   ├── settings_panel.gd
+        │   ├── toast_overlay.gd
+        │   ├── markdown_view.gd # Safe shared Markdown renderer
+        │   └── icons.gd         # Phosphor icon constants
+        └── panes/               # Specialty pane types
+            ├── pane_body.gd
+            ├── code_viewer.gd
+            ├── file_tree.gd
+            ├── inspector_pane.gd
+            └── reasoning_pane.gd
 ```
 
 ## Key Bindings
@@ -74,7 +77,7 @@ godot/
 | `Ctrl+Shift+N` | Spawn terminal |
 | `Ctrl+Shift+D` | Spawn code viewer |
 | `Ctrl+Shift+T` | Spawn file tree |
-| `Ctrl+Shift+O` | Spawn observer |
+| `Ctrl+Shift+O` | Spawn inspector |
 | `Ctrl+Shift+W` | Close focused pane |
 | `Ctrl+Shift+B` | Toggle sidebar |
 | `Ctrl+Shift+P` | Command palette |
@@ -94,6 +97,13 @@ godot/
 
 Layout is auto-saved on close and auto-restored on startup via `user://layout.json`.
 
-## Command Palette (Ctrl+P)
+The shipped **OMP Workspace** profile opens a normal terminal plus separate
+Inspector (private Q&A) and Reasoning (passive OMP thinking) panes. It does
+not install the OMP extension or launch `omp`; the user does that in the
+terminal. Inspector does not follow the terminal conversation. Reasoning
+requires the `@gpty/omp-events` extension and gpty's Unix event socket
+(`gpty-events.sock`); it is not available on Windows builds yet.
+
+## Command Palette (Ctrl+Shift+P)
 
 Type partial commands: `new`, `close`, `settings`, `reset`, `save`, `load`.
