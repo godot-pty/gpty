@@ -7,7 +7,7 @@ COMMIT_MSG="$(cat "$COMMIT_MSG_FILE")"
 
 # Types and scopes from AGENTS.md
 TYPES="feat|fix|chore|docs|style|refactor|perf|test|ci|build|revert"
-SCOPES="settings|terminal|layout|sidebar|gdext|core|cli|ipc|profiles|concepts|icons|ci"
+SCOPES="settings|terminal|layout|sidebar|gdext|core|cli|ipc|profiles|concepts|icons|ci|ai|inspector"
 
 # Regex: type(scope): description  — scope is optional
 PATTERN="^(${TYPES})(\((${SCOPES})\))?!?: .+"
