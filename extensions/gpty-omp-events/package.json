@@ -1,0 +1,19 @@
+{
+  "name": "@gpty/omp-events",
+  "version": "0.1.0",
+  "description": "Opt-in semantic event bridge from Oh-My-Pi to gpty",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "omp": {
+    "extensions": [
+      "./src/index.js"
+    ]
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
