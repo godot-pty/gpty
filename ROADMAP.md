@@ -13,9 +13,12 @@ GitHub Issues are used for user-reported bugs and discussions, not roadmap track
 - [ ] Inspector / Reasoning follow-ups — host-tools bridge and OpenAI-compatible HTTP still planned. Claude/Gemini adapters only after OMP is stable, using each CLI's documented hooks (never token reuse or TUI scraping).
 - [ ] FFI fuzz testing — automated fuzz testing of the terminal grid's binary interface to catch crashes and security issues
 
-## v0.4.0
+## v0.4.0 — Inspector & Reasoning
 
 - [x] Inspector + Reasoning panes — private tool-free OMP Q&A and passive documented-reasoning projection, with a dedicated event socket and `@gpty/omp-events` extension
+
+## v0.5.0 — Persistence, Workspaces & Rendering
+
 - [ ] SQLite + FTS5 history backend — wire the existing `HistoryStore` (SQLite + FTS5, tested but unused in production) into pane lifecycle and session restore. Scrollback is currently lost on restart; this makes it persistent and full-text searchable.
 - [ ] Tab/workspace switching — switch between independent sets of panes within the same window. Each workspace has its own layout, profile, and scrollback. Deferred from v0.3.0.
 - [ ] Visual Concept Graph — build concept automations visually using Godot's GraphEdit node editor. Drag-and-drop nodes for triggers, conditions, and actions without writing regex by hand.

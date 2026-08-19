@@ -3,7 +3,7 @@
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [Unreleased]
+## [0.4.0] — 2026-08-19
 
 ### Added
 
@@ -67,7 +67,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - Cursor blink toggle redraws the terminal immediately
 - Concept editor no longer crashes when opened with an empty workspace (no terminal panes) — the Add Concept button is disabled until a terminal exists
 
-[unreleased]: https://github.com/godot-pty/gpty/compare/v0.3.2...HEAD
+[0.4.0]: https://github.com/godot-pty/gpty/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/godot-pty/gpty/compare/v0.3.1...v0.3.2
 
 ## [0.3.1] — 2026-08-12

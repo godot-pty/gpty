@@ -1,6 +1,6 @@
 [package]
 name = "gpty-ai"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2024"
 description = "Pluggable AI backends for gpty Inspector panes (mock, Oh-My-Pi RPC, future LLM providers)"
 license = "Apache-2.0"

@@ -1,6 +1,6 @@
 [package]
 name = "gpty-ipc"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2024"
 description = "JSON-RPC IPC transport, client, and server for gpty workspace control"
 
