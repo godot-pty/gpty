@@ -1,0 +1,19 @@
+[package]
+name = "gpty-ai"
+version = "0.3.2"
+edition = "2024"
+description = "Pluggable AI backends for gpty Inspector panes (mock, Oh-My-Pi RPC, future LLM providers)"
+license = "Apache-2.0"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "process", "io-util", "macros", "time"] }
+log = "0.4"
+thiserror = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
