@@ -18,7 +18,9 @@ use godot::global::Key;
 use gpty_core::engine::{SpawnedTerminal, WorkspaceEngine};
 use gpty_core::types::TerminalConfig;
 
+mod ai;
 mod ipc;
+mod markdown;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
