@@ -272,13 +272,16 @@ func update_profile_list(profiles: Array[Dictionary]):
 		var row = HBoxContainer.new()
 		var btn = Button.new(); btn.text = p_name
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.tooltip_text = str(p.get("description", ""))
 		btn.pressed.connect(func(): request_profile.emit(p_name))
 		row.add_child(btn)
-		var x = Button.new(); x.text = Icons.DELETE; x.flat = true
-		Icons.style_button(x)
-		x.custom_minimum_size = Vector2(22, 0)
-		x.pressed.connect(func(): request_delete_profile.emit(i))
-		row.add_child(x)
+		if not p.get("builtin", false):
+			var x = Button.new(); x.text = Icons.DELETE; x.flat = true
+			Icons.style_button(x)
+			x.custom_minimum_size = Vector2(22, 0)
+			var user_index := int(p.get("_user_index", i))
+			x.pressed.connect(func(): request_delete_profile.emit(user_index))
+			row.add_child(x)
 		_profile_list.add_child(row)
 
 	var sc = _profile_list.get_parent() as ScrollContainer

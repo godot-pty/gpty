@@ -1,0 +1,47 @@
+{
+  "profiles": [
+    {
+      "id": "omp-workspace",
+      "name": "OMP Workspace",
+      "builtin": true,
+      "description": "A normal OMP terminal with separate Inspector and Reasoning panes.",
+      "tiles": [
+        {
+          "col": 0,
+          "row": 0,
+          "cspan": 7,
+          "rspan": 12,
+          "settings": {
+            "type": "terminal",
+            "pane_name": "OMP Terminal",
+            "attachment_id": "omp-terminal"
+          }
+        },
+        {
+          "col": 7,
+          "row": 0,
+          "cspan": 5,
+          "rspan": 6,
+          "settings": {
+            "type": "inspector",
+            "pane_name": "Inspector",
+            "attachment_id": "omp-inspector",
+            "backend": "omp"
+          }
+        },
+        {
+          "col": 7,
+          "row": 6,
+          "cspan": 5,
+          "rspan": 6,
+          "settings": {
+            "type": "reasoning",
+            "pane_name": "Reasoning",
+            "attachment_id": "omp-reasoning",
+            "source_attachment_id": "omp-terminal"
+          }
+        }
+      ]
+    }
+  ]
+}

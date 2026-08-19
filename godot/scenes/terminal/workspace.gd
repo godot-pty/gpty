@@ -773,14 +773,14 @@ func _handle_ipc_method(method: String, params):
 			return {"success": true, "name": name}
 		"layoutLoad":
 			var name = str(params.get("name", ""))
-			for p in ProfileManager.profiles:
-				if p.get("name", "") == name:
-					_do_activate(p)
-					return {"success": true}
+			var profile := ProfileManager.find_profile(name)
+			if not profile.is_empty():
+				_do_activate(profile)
+				return {"success": true}
 			return _ipc_error("Profile '%s' not found" % name)
 		"layoutList":
 			var names = []
-			for p in ProfileManager.profiles:
+			for p in ProfileManager.get_all_profiles():
 				names.append(p.get("name", ""))
 			return {"layouts": names}
 		"version":
@@ -934,14 +934,9 @@ func _save_current_as_profile():
 	name_inp.text_changed.emit("")
 
 func _activate_profile(p_name: String):
-	var idx = -1
-	var profs = ProfileManager.profiles
-	for i in profs.size():
-		if profs[i].get("name", "") == p_name:
-			idx = i
-			break
-	if idx == -1: return
-	var profile = profs[idx]
+	var profile := ProfileManager.find_profile(p_name)
+	if profile.is_empty():
+		return
 
 	# Workspace trust: check for shell mismatch in profile tiles
 	var profile_tiles = profile.get("tiles", [])
@@ -1036,4 +1031,4 @@ func _delete_profile(idx: int):
 
 func _refresh_profile_buttons():
 	if _sidebar:
-		_sidebar.update_profile_list(ProfileManager.get_profiles())
+		_sidebar.update_profile_list(ProfileManager.get_all_profiles())
