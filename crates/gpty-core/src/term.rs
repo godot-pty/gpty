@@ -87,17 +87,29 @@ impl Dimensions for GridSize {
 /// assert_eq!(rows[0][7].ch, 'w');
 /// assert_eq!(rows[0][7].fg, [255, 0, 0]); // bright red via \\x1b[91m
 /// ```
-/// A custom event listener that captures OSC window title sequences.
+/// Terminal event proxy: captures OSC window titles and forwards PTY
+/// replies (cursor-position reports, mode reports) to the engine so they
+/// reach the child process. Dropping them breaks TUIs that query the
+/// terminal after SIGWINCH (e.g. the OMP TUI's cursor-position request).
 struct TitleListener {
     title: Arc<Mutex<String>>,
+    replies: Arc<Mutex<std::collections::VecDeque<Vec<u8>>>>,
 }
 
 impl EventListener for TitleListener {
     fn send_event(&self, event: TermEvent) {
-        if let TermEvent::Title(t) = event
-            && let Ok(mut title) = self.title.lock()
-        {
-            *title = t;
+        match event {
+            TermEvent::Title(t) => {
+                if let Ok(mut title) = self.title.lock() {
+                    *title = t;
+                }
+            }
+            TermEvent::PtyWrite(text) => {
+                if let Ok(mut replies) = self.replies.lock() {
+                    replies.push_back(text.into_bytes());
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -106,6 +118,10 @@ pub struct TermGrid {
     term: Term<TitleListener>,
     processor: vte::ansi::Processor,
     title: Arc<Mutex<String>>,
+    /// Bytes the terminal emulator generated as replies to application
+    /// queries (DSR cursor position, mode reports). The engine drains
+    /// these and writes them to the PTY.
+    replies: Arc<Mutex<std::collections::VecDeque<Vec<u8>>>>,
     rows: usize,
     cols: usize,
     pub generation: u64,
@@ -129,8 +145,10 @@ impl TermGrid {
         let config = Config::default();
         let size = GridSize { rows, cols };
         let title = Arc::new(Mutex::new(String::new()));
+        let replies = Arc::new(Mutex::new(std::collections::VecDeque::new()));
         let listener = TitleListener {
             title: Arc::clone(&title),
+            replies: Arc::clone(&replies),
         };
         let term = Term::new(config, &size, listener);
         let processor = vte::ansi::Processor::new();
@@ -138,6 +156,7 @@ impl TermGrid {
             term,
             processor,
             title,
+            replies,
             rows,
             cols,
             generation: 0,
@@ -147,6 +166,15 @@ impl TermGrid {
             line_count: 0,
             history: None,
         }
+    }
+
+    /// Take pending emulator-generated PTY replies (cursor reports, mode
+    /// reports). The engine writes them to the child PTY.
+    pub fn drain_replies(&mut self) -> Vec<Vec<u8>> {
+        self.replies
+            .lock()
+            .map(|mut q| q.drain(..).collect())
+            .unwrap_or_default()
     }
 
     /// Feed raw PTY output bytes into the terminal state machine.
@@ -243,10 +271,44 @@ impl TermGrid {
         if self.rows == rows && self.cols == cols {
             return;
         }
+        let old_rows = self.rows;
+        let was_following = self.term.grid().display_offset() == 0;
+        let cursor = self.cursor_position();
+        let alt_screen = self.is_alt_screen();
         self.rows = rows;
         self.cols = cols;
         self.term.resize(GridSize { rows, cols });
+
+        // xterm-style anchoring: alacritty's resize pulls scrollback into
+        // the new top rows and moves the cursor to the new bottom, so the
+        // visible text appears to "scroll through the past". When the grid
+        // GREW and the user was following output, undo that: delete the
+        // revealed rows and return the cursor to its previous row, leaving
+        // the text in view untouched and blank rows below the cursor.
+        // Full-screen apps (alternate screen, or primary-screen TUIs like
+        // the OMP TUI that have no scrollback) own their layout and repaint
+        // themselves on SIGWINCH; the row deletion would destroy their
+        // content. Only anchor when there is scrollback to hide.
+        if was_following && rows > old_rows && !alt_screen && self.term.grid().history_size() > 0 {
+            let growth = rows - old_rows;
+            let mut seq = String::from("\x1b[H"); // cursor home
+            seq.push_str(&format!("\x1b[{growth}M")); // delete revealed history
+            if let Some((cursor_row, cursor_col)) = cursor {
+                seq.push_str(&format!("\x1b[{cursor_row}B")); // back to old row
+                seq.push_str(&format!("\x1b[{}G", cursor_col + 1)); // restore column
+            }
+            self.processor.advance(&mut self.term, seq.as_bytes());
+        }
         self.generation += 1;
+    }
+
+    /// True while the terminal runs a full-screen application (alternate
+    /// screen buffer, e.g. vim, less, OMP TUI). There is no scrollback and
+    /// concept engines must not treat redraw output as shell lines.
+    pub fn is_alt_screen(&self) -> bool {
+        self.term
+            .mode()
+            .contains(alacritty_terminal::term::TermMode::ALT_SCREEN)
     }
 
     /// Current terminal title (set via OSC escape sequences, e.g. bash prompt).
@@ -422,6 +484,118 @@ mod tests {
         let g = TermGrid::new(24, 80);
         assert_eq!(g.num_rows(), 24);
         assert_eq!(g.num_cols(), 80);
+    }
+
+    #[test]
+    fn resize_growth_keeps_viewport_anchored() {
+        let mut grid = TermGrid::new(5, 20);
+        for i in 0..20 {
+            let line = format!("line-{:02}-{}", i, "x".repeat(12));
+            grid.feed(format!("{line}\r\n").as_bytes());
+        }
+        let top_before: String = grid.renderable_rows()[0]
+            .iter()
+            .map(|c| c.ch)
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+        let cursor_before = grid.cursor_position();
+
+        grid.resize(8, 30);
+
+        let rows = grid.renderable_rows();
+        let top_after: String = rows[0]
+            .iter()
+            .map(|c| c.ch)
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+        assert_eq!(
+            top_before, top_after,
+            "top row must not change when the grid grows"
+        );
+        assert_eq!(
+            cursor_before,
+            grid.cursor_position(),
+            "cursor row/column must not move when the grid grows"
+        );
+        if let Some((cursor_row, _)) = grid.cursor_position() {
+            for row in &rows[cursor_row + 1..] {
+                let text: String = row.iter().map(|c| c.ch).collect();
+                assert_eq!(
+                    text.trim_end(),
+                    "",
+                    "rows below the cursor must stay blank after growth"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn resize_growth_without_scrollback_keeps_content() {
+        let mut grid = TermGrid::new(5, 20);
+        grid.feed(b"line one\r\nline two\r\nline three\r\n");
+        assert_eq!(grid.history_size(), 0, "fresh grid has no scrollback");
+        let top_before: String = grid.renderable_rows()[0]
+            .iter()
+            .map(|c| c.ch)
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+
+        grid.resize(8, 30);
+
+        let top_after: String = grid.renderable_rows()[0]
+            .iter()
+            .map(|c| c.ch)
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+        assert_eq!(
+            top_before, top_after,
+            "primary-screen apps without scrollback must not lose rows"
+        );
+    }
+    #[test]
+    fn resize_growth_skips_alternate_screen() {
+        let mut grid = TermGrid::new(5, 20);
+        grid.feed(b"\x1b[?1049h"); // enter alternate screen (full-screen TUI)
+        grid.feed(b"TUI content\r\n");
+        grid.feed(b"more TUI\r\n");
+        assert!(grid.is_alt_screen(), "alt screen mode must be active");
+        let top_before: String = grid.renderable_rows()[0]
+            .iter()
+            .map(|c| c.ch)
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+
+        grid.resize(8, 30);
+
+        let top_after: String = grid.renderable_rows()[0]
+            .iter()
+            .map(|c| c.ch)
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+        assert_eq!(
+            top_before, top_after,
+            "resize must not delete rows on the alternate screen"
+        );
+    }
+
+    #[test]
+    fn dsr_cursor_query_produces_reply() {
+        let mut g = TermGrid::new(5, 20);
+        g.feed(b"abc"); // cursor at row 0, column 3
+        g.feed(b"\x1b[6n"); // device status report: cursor position
+        let replies = g.drain_replies();
+        assert_eq!(
+            replies,
+            vec![b"\x1b[1;4R".to_vec()],
+            "DSR must produce a 1-based cursor report"
+        );
+        assert!(g.drain_replies().is_empty(), "queue must drain");
     }
 
     #[test]

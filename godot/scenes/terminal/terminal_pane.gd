@@ -77,6 +77,8 @@ var _draw_ms: int = 0
 var _resize_pending: bool = false
 var _resize_timer: float = 0.0
 const RESIZE_DEBOUNCE = 0.05
+const MIN_COLS = 8
+const MIN_ROWS = 3
 var _time_since_sync: float = 0.0
 var _search_bar: LineEdit
 var _search_visible: bool = false
@@ -118,12 +120,16 @@ func _ready():
 
 func _on_resize():
 	if _terminal == null or _cell_w == 0: return
-	var new_cols = maxi(int((size.x - PADDING) / _cell_w), 1)
-	var new_rows = maxi(int((size.y - PADDING) / _cell_h), 1)
-	if new_cols != cols or new_rows != rows:
-		cols = new_cols; rows = new_rows
-		_resize_pending = true
-		_resize_timer = 0.0
+	# Transient layout states (collapsed sizes during splits, minimize, or
+	# restore) must not collapse the grid into a tiny rewrap. Layout noise
+	# computes to 4x2 cells; a real tile (grid layout guarantees >= 1/6 of
+	# the window) is never below these floors, so reject anything smaller.
+	if size.x < custom_minimum_size.x or size.y < custom_minimum_size.y:
+		return
+	if int((size.x - PADDING) / _cell_w) < MIN_COLS or int((size.y - PADDING) / _cell_h) < MIN_ROWS:
+		return
+	_resize_pending = true
+	_resize_timer = 0.0
 
 func _notification(what):
 	if what == NOTIFICATION_RESIZED: _on_resize()
@@ -207,8 +213,25 @@ func _process(delta):
 	if _resize_pending:
 		_resize_timer += delta
 		if _resize_timer >= RESIZE_DEBOUNCE:
-			_resize_pending = false
-			_terminal.resize_grid(rows, cols)
+			if (
+				size.x < custom_minimum_size.x
+				or size.y < custom_minimum_size.y
+				or int((size.x - PADDING) / _cell_w) < MIN_COLS
+				or int((size.y - PADDING) / _cell_h) < MIN_ROWS
+			):
+				# Size collapsed between event and apply — keep waiting for
+				# the stable geometry instead of applying a tiny grid.
+				_resize_timer = 0.0
+			else:
+				_resize_pending = false
+				# Recompute from the CURRENT size so the grid applies the
+				# final stable geometry, never an intermediate cascade size.
+				var new_cols = maxi(int((size.x - PADDING) / _cell_w), MIN_COLS)
+				var new_rows = maxi(int((size.y - PADDING) / _cell_h), MIN_ROWS)
+				if new_cols != cols or new_rows != rows:
+					cols = new_cols
+					rows = new_rows
+					_terminal.resize_grid(rows, cols)
 
 	_time_since_sync += delta
 	if _time_since_sync >= _sync_interval:
@@ -259,6 +282,10 @@ func _request_cursor_redraw() -> void:
 	queue_redraw()
 
 func _grid_offset() -> Vector2:
+	# Before the first grid sync the cache is empty; return a neutral
+	# offset so mouse handling and hit-testing stay safe.
+	if _cell_cache.is_empty():
+		return Vector2(2, 2)
 	var gc: int = _cell_cache["cols"]
 	var gr: int = _cell_cache["rows"]
 	var tw = gc * _cell_w; var th = gr * _cell_h
@@ -488,6 +515,8 @@ func _handle_keyboard(event: InputEventKey):
 	accept_event()
 
 func _mouse_to_cell(pos: Vector2) -> Vector2i:
+	if _cell_cache.is_empty() or _cell_w == 0:
+		return Vector2i(-1, -1)
 	var off = _grid_offset()
 	return Vector2i(int((pos.x - off.x) / _cell_w), int((pos.y - off.y) / _cell_h))
 

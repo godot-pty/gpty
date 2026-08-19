@@ -230,10 +230,17 @@ impl GptyTerminal {
 
     /// Resize the terminal grid and PTY to `rows × cols`.
     /// Sends SIGWINCH to the child process so bash/zsh reflows.
+    ///
+    /// No-op when the grid already has these dimensions: re-sending
+    /// SIGWINCH makes the shell redraw (and re-echo its input line) for
+    /// nothing, which surfaces as scrollback churn during resize cascades.
     #[func]
     fn resize_grid(&mut self, rows: i64, cols: i64) {
         let rows = rows.max(MIN_DIM) as usize;
         let cols = cols.max(MIN_DIM) as usize;
+        if self.with_grid(|g| g.num_rows() == rows && g.num_cols() == cols, false) {
+            return;
+        }
         self.with_grid_mut(|g| g.resize(rows, cols));
         if let Some(ref spawned) = self.spawned {
             spawned.handle.resize_pty(rows as u16, cols as u16);

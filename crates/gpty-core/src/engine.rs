@@ -230,6 +230,18 @@ impl WorkspaceEngine {
 
 // ── Shared terminal task ──────────────────────────────────────────────
 
+/// After SIGWINCH, TUIs redraw and re-emit visible screen content as fresh
+/// PTY bytes. Skip concept matching on those lines — they are not new shell
+/// events. User-initiated UntilStop triggers (typed Enter) are unaffected.
+const POST_RESIZE_CONCEPT_SUPPRESS_MS: u64 = 750;
+
+fn concept_match_suppressed(
+    deadline: Option<tokio::time::Instant>,
+    now: tokio::time::Instant,
+) -> bool {
+    deadline.is_some_and(|d| now < d)
+}
+
 struct TaskContext {
     id: u32,
     labels: Vec<String>,
@@ -237,9 +249,13 @@ struct TaskContext {
     rx: broadcast::Receiver<Event>,
     tx: broadcast::Sender<Event>,
     session: CaptureSession,
+    suppress_pty_concept_match_until: Option<tokio::time::Instant>,
 }
 
 impl TaskContext {
+    fn pty_concept_match_suppressed(&self, now: tokio::time::Instant) -> bool {
+        concept_match_suppressed(self.suppress_pty_concept_match_until, now)
+    }
     fn new(
         id: u32,
         labels: Vec<String>,
@@ -257,6 +273,7 @@ impl TaskContext {
                 Arc::new(Mutex::new(HashMap::new())),
                 Arc::new(Mutex::new(Vec::new())),
             ),
+            suppress_pty_concept_match_until: None,
         }
     }
 }
@@ -563,25 +580,36 @@ async fn run_terminal_task(
                     // Normal mode: match concepts against output lines.
                     // SingleLine concepts broadcast events for command injection.
                     // UntilStop concepts start capture mode to buffer subsequent output.
-                    for line in &lines {
-                        if line.len() > crate::parser::MAX_LINE_LEN {
-                            // Oversized line — skip concept matching to bound
-                            // regex cost. Grid and history still get it.
-                            continue;
+                    let now = tokio::time::Instant::now();
+                    // Full-screen applications repaint themselves; their redraw
+                    // lines are presentation, not shell output (e.g. an OMP TUI
+                    // redrawing a transcript line containing "cat"). Never
+                    // concept-match alternate-screen output.
+                    let alt_screen = grid
+                        .as_ref()
+                        .and_then(|g| g.lock().ok())
+                        .is_some_and(|g| g.is_alt_screen());
+                    if !alt_screen && !ctx.pty_concept_match_suppressed(now) {
+                        for line in &lines {
+                            if line.len() > crate::parser::MAX_LINE_LEN {
+                                // Oversized line — skip concept matching to bound
+                                // regex cost. Grid and history still get it.
+                                continue;
+                            }
+                            let concepts_guard = ctx.concepts.read().unwrap();
+                            let capture = concept::match_and_broadcast(
+                                ctx.id, &concepts_guard, &ctx.tx, line,
+                            );
+                            if !ctx.session.is_active()
+                                && let Some((name, CaptureMode::UntilStop { stop_timeout_ms, .. }, target)) = capture
+                            {
+                                let deadline = tokio::time::Instant::now()
+                                    + Duration::from_millis(stop_timeout_ms);
+                                ctx.session.begin(name, target, deadline);
+                                timeout_sleep.as_mut().reset(deadline);
+                            }
+                            drop(concepts_guard);
                         }
-                        let concepts_guard = ctx.concepts.read().unwrap();
-                        let capture = concept::match_and_broadcast(
-                            ctx.id, &concepts_guard, &ctx.tx, line,
-                        );
-                        if !ctx.session.is_active()
-                            && let Some((name, CaptureMode::UntilStop { stop_timeout_ms, .. }, target)) = capture
-                        {
-                            let deadline = tokio::time::Instant::now()
-                                + Duration::from_millis(stop_timeout_ms);
-                            ctx.session.begin(name, target, deadline);
-                            timeout_sleep.as_mut().reset(deadline);
-                        }
-                        drop(concepts_guard);
                     }
                     feed_grid(&grid, &bytes);
                     for line in &lines {
@@ -591,8 +619,16 @@ async fn run_terminal_task(
             }
             msg = stdin_rx.recv() => {
                 let Some(input) = msg else { break; };
-                // Check if user input should stop capture
-                if ctx.session.is_active() {
+                // Only real user input (typed lines or raw keys) may stop an
+                // active capture. Resize (SIGWINCH) and flush/acknowledge
+                // commands share this channel but are internal plumbing —
+                // letting them finalize a capture replays old output into
+                // the grid and fires spurious "no receiver" toasts.
+                let is_user_input = matches!(
+                    &input,
+                    StdinInput::Line(_) | StdinInput::Raw(_)
+                );
+                if is_user_input && ctx.session.is_active() {
                     let concepts_guard = ctx.concepts.read().unwrap();
                     if ctx.session.stops_on_input(&concepts_guard) {
                         ctx.session.finalize();
@@ -637,10 +673,26 @@ async fn run_terminal_task(
                             && let Ok(mut locked) = g.lock() {
                                 locked.resize(*rows as usize, *cols as usize);
                             }
+                        ctx.suppress_pty_concept_match_until = Some(
+                            tokio::time::Instant::now()
+                                + Duration::from_millis(POST_RESIZE_CONCEPT_SUPPRESS_MS),
+                        );
                     }
                     StdinInput::FlushCapture(_) | StdinInput::AcknowledgeCapture(_) => {
                         handle_command(&input, &grid, &ctx.session);
                     }
+                }
+            }
+        }
+        // Deliver emulator-generated replies (DSR cursor-position reports,
+        // mode reports) to the child process. TUIs query the cursor after
+        // SIGWINCH and fall back to broken re-anchoring without the answer.
+        if let Some(g) = &grid
+            && let Ok(mut locked) = g.lock()
+        {
+            for reply in locked.drain_replies() {
+                if let Err(e) = pty_handle.write_bytes(&reply) {
+                    log::error!("[Pane {}] PTY write error (reply): {e}", ctx.id);
                 }
             }
         }
@@ -889,6 +941,20 @@ mod tests {
         session.begin("cat".into(), "t".into(), deadline);
         assert!(session.stops_on_input(&[c]));
         assert!(!session.stops_on_input(&[c2]));
+    }
+
+    #[test]
+    fn concept_match_suppressed_honors_post_resize_deadline() {
+        let now = tokio::time::Instant::now();
+        assert!(!concept_match_suppressed(None, now));
+        assert!(concept_match_suppressed(
+            Some(now + Duration::from_millis(100)),
+            now,
+        ));
+        assert!(!concept_match_suppressed(
+            Some(now - Duration::from_millis(1)),
+            now,
+        ));
     }
 
     #[test]
