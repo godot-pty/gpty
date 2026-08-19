@@ -21,6 +21,7 @@ use gpty_core::types::TerminalConfig;
 mod ai;
 mod ipc;
 mod markdown;
+mod omp_events;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
@@ -54,6 +55,7 @@ struct GptyTerminal {
     spawned: Option<SpawnedTerminal>,
     next_id: u32,
     capture_queue: Option<Arc<std::sync::Mutex<Vec<gpty_core::types::CapturedOutput>>>>,
+    terminal_session_id: String,
 }
 
 #[godot_api]
@@ -63,6 +65,15 @@ impl INode2D for GptyTerminal {
             spawned: None,
             next_id: 1,
             capture_queue: None,
+            terminal_session_id: String::new(),
+        }
+    }
+}
+
+impl Drop for GptyTerminal {
+    fn drop(&mut self) {
+        if !self.terminal_session_id.is_empty() {
+            omp_events::unregister_terminal(&self.terminal_session_id);
         }
     }
 }
@@ -88,6 +99,26 @@ impl GptyTerminal {
         let id = self.next_id;
         self.next_id += 1;
 
+        if !self.terminal_session_id.is_empty() {
+            omp_events::unregister_terminal(&self.terminal_session_id);
+            self.terminal_session_id.clear();
+        }
+        omp_events::ensure_server_started();
+        let event_registration = omp_events::register_terminal().ok();
+        let trusted_envs = if let Some((session_id, capability)) = &event_registration {
+            vec![
+                (
+                    "GPTY_EVENT_SOCKET".to_string(),
+                    gpty_ipc::transport::default_event_socket_path(),
+                ),
+                ("GPTY_EVENT_PROTOCOL".to_string(), "1".to_string()),
+                ("GPTY_TERMINAL_SESSION_ID".to_string(), session_id.clone()),
+                ("GPTY_EVENT_CAPABILITY".to_string(), capability.clone()),
+            ]
+        } else {
+            Vec::new()
+        };
+
         let config = TerminalConfig {
             id,
             labels: Vec::new(),
@@ -111,6 +142,7 @@ impl GptyTerminal {
             &command,
             &[],
             &env_list,
+            &trusted_envs,
             rows,
             cols,
         )) {
@@ -131,8 +163,14 @@ impl GptyTerminal {
                 }
                 self.capture_queue = Some(Arc::clone(&spawned.capture_queue));
                 self.spawned = Some(spawned);
+                if let Some((session_id, _)) = event_registration {
+                    self.terminal_session_id = session_id;
+                }
             }
             Err(e) => {
+                if let Some((session_id, _)) = event_registration {
+                    omp_events::unregister_terminal(&session_id);
+                }
                 godot_error!("Failed to spawn PTY for '{command}': {e}");
             }
         }
@@ -864,6 +902,30 @@ impl GptyTerminal {
             arr.push(&dict);
         }
         arr
+    }
+
+    /// Stable opaque identifier for the current PTY lifetime.
+    #[func]
+    fn get_terminal_session_id(&self) -> GString {
+        GString::from(&self.terminal_session_id)
+    }
+
+    /// Drain semantic events emitted by explicitly installed agent extensions.
+    #[func]
+    fn drain_agent_events() -> GString {
+        omp_events::ensure_server_started();
+        let values: Vec<serde_json::Value> = omp_events::drain_events()
+            .into_iter()
+            .map(|event| {
+                serde_json::json!({
+                    "terminal_session_id": event.terminal_session_id,
+                    "omp_session_id": event.omp_session_id,
+                    "seq": event.seq,
+                    "event": event.event,
+                })
+            })
+            .collect();
+        GString::from(&serde_json::to_string(&values).unwrap_or_else(|_| "[]".into()))
     }
 
     /// Respond to an IPC request identified by `id`.

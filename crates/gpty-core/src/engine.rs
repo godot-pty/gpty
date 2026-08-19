@@ -145,9 +145,11 @@ impl WorkspaceEngine {
         command: &str,
         args: &[&str],
         envs: &[String],
+        trusted_envs: &[(String, String)],
     ) -> Result<PtyTerminalHandle, Box<dyn std::error::Error + Send + Sync>> {
         let (pty_tx, pty_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-        let pty_handle = crate::pty::PtyHandle::spawn(config.id, command, args, envs, pty_tx)?;
+        let pty_handle =
+            crate::pty::PtyHandle::spawn(config.id, command, args, envs, trusted_envs, pty_tx)?;
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<StdinInput>();
 
         let task_ctx = TaskContext::new(
@@ -168,17 +170,20 @@ impl WorkspaceEngine {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn spawn_terminal_with_grid(
         &self,
         config: TerminalConfig,
         command: &str,
         args: &[&str],
         envs: &[String],
+        trusted_envs: &[(String, String)],
         rows: usize,
         cols: usize,
     ) -> Result<SpawnedTerminal, Box<dyn std::error::Error + Send + Sync>> {
         let (pty_tx, pty_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-        let pty_handle = crate::pty::PtyHandle::spawn(config.id, command, args, envs, pty_tx)?;
+        let pty_handle =
+            crate::pty::PtyHandle::spawn(config.id, command, args, envs, trusted_envs, pty_tx)?;
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<StdinInput>();
 
         let grid = Arc::new(Mutex::new(TermGrid::new(rows, cols)));
@@ -701,7 +706,7 @@ async fn run_terminal_task(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{CaptureMode, Concept, TerminalConfig};
+    use crate::types::{Action, CaptureMode, Concept, TerminalConfig};
     use regex::Regex;
     #[tokio::test]
     async fn test_spawn_terminal_and_resize() {
@@ -717,7 +722,7 @@ mod tests {
         let cmd = "sh";
 
         let spawned = engine
-            .spawn_terminal_with_grid(config, cmd, &[], &[], 24, 80)
+            .spawn_terminal_with_grid(config, cmd, &[], &[], &[], 24, 80)
             .await
             .expect("Failed to spawn terminal");
 
@@ -808,6 +813,59 @@ mod tests {
         let rows = locked.renderable_rows();
         let has_hello = rows.iter().any(|r| r.iter().any(|c| c.ch == 'h'));
         assert!(has_hello, "Grid should contain flushed text");
+    }
+
+    /// A resize (SIGWINCH) must NOT finalize an active UntilStop capture.
+    /// Regression: resize shares the stdin channel with user input; the
+    /// old code treated it as stop-on-input, which flushed the capture,
+    /// replayed its bytes into the grid, and surfaced a spurious
+    /// "no receiver" toast on every resize while a capture was live.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn resize_does_not_finalize_active_capture() {
+        let concept = Concept {
+            name: "cat_test".into(),
+            trigger_regex: Regex::new("cat").unwrap(),
+            enabled: true,
+            capture_mode: CaptureMode::UntilStop {
+                stop_timeout_ms: 1000,
+                stop_on_input: true,
+            },
+            destinations: vec![Action {
+                command_template: String::new(),
+                target_label: "code_viewer".into(),
+            }],
+        };
+        let engine = WorkspaceEngine::new(vec![concept]);
+        let config = TerminalConfig {
+            id: 77,
+            labels: vec![],
+        };
+        let spawned = engine
+            .spawn_terminal_with_grid(config, "sh", &[], &[], &[], 24, 80)
+            .await
+            .expect("spawn");
+
+        // Typed line matches the concept → capture begins (1 s timeout).
+        spawned.handle.send_line("cat /dev/null");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // Resize while the capture is live must not finalize it.
+        spawned.handle.resize_pty(20, 60);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            spawned.capture_queue.lock().unwrap().len(),
+            0,
+            "resize must not finalize an active capture"
+        );
+
+        // The timeout still finalizes it normally.
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        assert_eq!(
+            spawned.capture_queue.lock().unwrap().len(),
+            1,
+            "capture timeout should still finalize"
+        );
     }
 
     #[test]

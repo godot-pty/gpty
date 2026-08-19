@@ -128,6 +128,19 @@ pub fn default_socket_path() -> String {
     }
 }
 
+/// Returns the dedicated local socket for passive agent semantic events.
+///
+/// This socket deliberately does not honor `GPTY_SOCKET`: event producers
+/// receive its exact path through a per-terminal trusted environment variable.
+pub fn default_event_socket_path() -> String {
+    let control = default_socket_path();
+    if let Some(prefix) = control.strip_suffix(".sock") {
+        format!("{prefix}-events.sock")
+    } else {
+        format!("{control}-events")
+    }
+}
+
 /// Validate a Unix-domain socket path before connecting to it.
 ///
 /// Guards against `GPTY_SOCKET` env hijacking: an attacker who controls a
