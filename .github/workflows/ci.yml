@@ -45,6 +45,17 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace -- --test-threads=1
 
+  # ── OMP extension tests (Node, no omp install) ────────────────────────
+  omp-events-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run @gpty/omp-events tests
+        run: node --test
+        working-directory: extensions/gpty-omp-events
+
   # ── Rust Windows compile check (release parity) ───────────────────────
   # The release workflow builds gpty-gdext on windows-latest; without this
   # job, Windows-only compile errors only surface at tag time.

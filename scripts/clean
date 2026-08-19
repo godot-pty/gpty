@@ -116,6 +116,15 @@ fi
 if [[ -d "/run/user/$(id -u)" && "${XDG_RUNTIME_DIR:-}" != "/run/user/$(id -u)" ]]; then
     clean_socket "/run/user/$(id -u)/gpty.sock"
 fi
+# Dedicated OMP event socket (gpty-events.sock) — current default paths only;
+# it never existed under the pre-hardening /tmp/gpty.sock default.
+clean_socket "$TMP_DIR/gpty-$(id -u)-events.sock" # hardening fallback
+if [[ -n "${XDG_RUNTIME_DIR:-}" && "$XDG_RUNTIME_DIR" == /* ]]; then
+    clean_socket "$XDG_RUNTIME_DIR/gpty-events.sock"
+fi
+if [[ -d "/run/user/$(id -u)" && "${XDG_RUNTIME_DIR:-}" != "/run/user/$(id -u)" ]]; then
+    clean_socket "/run/user/$(id -u)/gpty-events.sock"
+fi
 
 shopt -u nullglob
 ok "sockets checked"

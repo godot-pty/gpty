@@ -120,6 +120,31 @@ if rustup target list --installed 2>/dev/null | grep -q "^${WIN_TARGET}$" \
 else
     warn "windows cross-check — needs: rustup target add ${WIN_TARGET}; clang-cl + llvm-lib; xwin splat into ~/.xwin (enforced by CI job rust-windows)"
 fi
+# ── Step 3.6: uniform crate versions ───────────────────────────────────
+# Release convention: every workspace crate ships the same version
+# (release skill step 5). One stale manifest = forgotten bump.
+header "crate versions"
+if python3 -c 'import tomllib' 2>/dev/null; then
+    if python3 - <<'EOF' 2>&1
+import glob, tomllib
+versions = {}
+for path in sorted(glob.glob("crates/*/Cargo.toml")):
+    with open(path, "rb") as fh:
+        data = tomllib.load(fh)
+    versions[data["package"]["name"]] = data["package"]["version"]
+distinct = sorted(set(versions.values()))
+print("  " + ", ".join(f"{name}={ver}" for name, ver in versions.items()))
+raise SystemExit(0 if len(distinct) == 1 else 1)
+EOF
+    then
+        pass "crate versions uniform"
+    else
+        fail "crate versions differ — bump every crates/*/Cargo.toml to the same version"
+        check_failed
+    fi
+else
+    warn "crate version check needs python3 >= 3.11 (tomllib) — skipped"
+fi
 
 # ── Step 4: cargo test ─────────────────────────────────────────────────
 header "cargo test"
@@ -128,6 +153,19 @@ if cargo test --workspace -- --test-threads=1 2>&1; then
 else
     fail "cargo test"
     check_failed
+fi
+
+# ── Step 4.5: OMP extension tests ──────────────────────────────────────
+header "OMP extension tests"
+if command -v node >/dev/null 2>&1; then
+    if (cd extensions/gpty-omp-events && node --test) 2>&1; then
+        pass "gpty-omp-events"
+    else
+        fail "gpty-omp-events"
+        check_failed
+    fi
+else
+    warn "node not found — skipping OMP extension tests"
 fi
 
 # ── Step 5: GUT (GDScript) tests ───────────────────────────────────────
@@ -139,8 +177,9 @@ else
     echo "  Building GDExtension..."
     cargo build -p gpty-gdext 2>&1 || { fail "gdext build"; check_failed; }
     echo "  Installing GDExtension library..."
-    cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so 2>&1 || {
-        fail "copy libgpty_gdext.so — check target path"
+    mkdir -p godot/bin
+    ln -sf ../../target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so 2>&1 || {
+        fail "link libgpty_gdext.so — check target path"
         check_failed
     }
     echo "  Importing Godot project..."
