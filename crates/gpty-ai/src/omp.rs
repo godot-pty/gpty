@@ -504,7 +504,7 @@ fn decode_base64_into(input: &str, output: &mut Vec<u8>, limit: usize) -> Result
     if !input.len().is_multiple_of(4) {
         return Err(BackendError::Message("invalid rpc_chunk base64".into()));
     }
-    for chunk in input.as_bytes().chunks_exact(4) {
+    for chunk in input.as_bytes().as_chunks::<4>().0 {
         let a = base64_value(chunk[0])?;
         let b = base64_value(chunk[1])?;
         let c_pad = chunk[2] == b'=';
