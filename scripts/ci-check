@@ -91,7 +91,9 @@ fi
 # ── Step 3.5: Windows cross-check ─────────────────────────────────────
 # Release parity check: release.yml builds on windows-latest; CI job
 # rust-windows enforces this in the cloud. Locally it runs when the
-# toolchain is available, otherwise it is skipped with a hint.
+# toolchain is available, otherwise it is skipped with a hint. Mirrors
+# the CI job's RUSTFLAGS=-Dwarnings so Windows-only dead code fails here
+# too instead of surfacing first on GitHub.
 header "windows cross-check"
 WIN_TARGET="x86_64-pc-windows-msvc"
 WIN_OK=true
@@ -111,6 +113,7 @@ if rustup target list --installed 2>/dev/null | grep -q "^${WIN_TARGET}$" \
         AR_x86_64_pc_windows_msvc="llvm-lib" \
         INCLUDE="$XWIN_INCLUDE" \
         LIB="$XWIN_LIB" \
+        RUSTFLAGS="-Dwarnings" \
         cargo check --workspace --target "$WIN_TARGET" 2>&1; then
         pass "windows cross-check"
     else
