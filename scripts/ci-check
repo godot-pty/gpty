@@ -201,9 +201,13 @@ fi
 
 # ── Step 6: cargo audit ────────────────────────────────────────────────
 header "cargo audit"
+
 if command -v cargo-audit &>/dev/null; then
-    # cargo-audit needs a lockfile with exact versions; ensure it exists
-    cargo generate-lockfile 2>&1 || true
+    # cargo-audit needs a lockfile with exact versions; create one only if
+    # missing. Never regenerate over an existing file: generate-lockfile
+    # re-resolves to latest compatible versions and silently rewrites the
+    # repo's pinned Cargo.lock on every run.
+    [ -f Cargo.lock ] || cargo generate-lockfile 2>&1 || true
     if cargo audit 2>&1; then
         pass "cargo audit"
     else
