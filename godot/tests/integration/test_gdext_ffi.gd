@@ -32,6 +32,15 @@ func test_key_to_bytes_arrow():
 	var b = _t.key_to_bytes(KEY_LEFT, false, false, false, false)
 	assert_eq(b.get_string_from_ascii(), "\u001b[D", "Left arrow maps to ESC[D")
 
+func test_get_app_version_returns_semver():
+	# Static method — call on the class, not an instance.
+	var ver: String = GptyTerminal.get_app_version()
+	assert_true(ver.length() > 0, "version must not be empty")
+	# Must be a valid semver triple (e.g. "0.4.0"), never the stale literal.
+	var parts := ver.split(".")
+	assert_eq(parts.size(), 3, "version must have exactly three dot-separated parts")
+	assert_ne(ver, "0.3.0", "version must not be the stale 0.3.0 literal")
+
 func test_unstarted_grid_functions_are_safe():
 	assert_eq(_t.get_rows(), 0, "unstarted grid has 0 rows")
 	assert_eq(_t.get_cols(), 0, "unstarted grid has 0 cols")

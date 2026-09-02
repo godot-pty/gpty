@@ -910,6 +910,16 @@ impl GptyTerminal {
         GString::from(&self.terminal_session_id)
     }
 
+    /// Return the application version baked in at compile time (CARGO_PKG_VERSION).
+    ///
+    /// This is a static method — call it as `GptyTerminal.get_app_version()` from
+    /// GDScript. It never changes at runtime and is safe to call before any
+    /// terminal is spawned.
+    #[func]
+    fn get_app_version() -> GString {
+        GString::from(env!("CARGO_PKG_VERSION"))
+    }
+
     /// Drain semantic events emitted by explicitly installed agent extensions.
     #[func]
     fn drain_agent_events() -> GString {

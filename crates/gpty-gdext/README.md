@@ -59,6 +59,12 @@ Inspector omp is launched as `omp --mode rpc --no-session --no-tools --no-extens
 | `set_palette(hex_csv: String)` | void | Load color scheme (16 hex colors, CSV) |
 | `get_terminal_session_id()` | `String` | Opaque id for the current PTY lifetime |
 
+#### App metadata
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_app_version()` | `String` | App version from `CARGO_PKG_VERSION` (static — call as `GptyTerminal.get_app_version()`) |
+
 #### Grid & rendering
 
 | Method | Returns | Description |

@@ -784,7 +784,7 @@ func _handle_ipc_method(method: String, params):
 				names.append(p.get("name", ""))
 			return {"layouts": names}
 		"version":
-			return {"version": "0.3.0", "protocol": "2.0"}
+			return {"version": GptyTerminal.get_app_version(), "protocol": "2.0"}
 		"shutdown":
 			get_tree().quit()
 			return {"success": true}
