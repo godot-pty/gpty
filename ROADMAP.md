@@ -13,7 +13,7 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [ ] FFI fuzz testing — automated fuzz testing of the terminal grid's binary interface to catch crashes and security issues
 - [ ] Instanced-quad renderer (alacritty-style glyph atlas + per-instance color) — evidence-gated: revisit only if render batching plus flood rate-limiting still shows frame-time pain. Godot already GPU-composites the canvas; a full Rust-side texture pipeline is deep custom work (atlas management, eviction, per-cell truecolor uploads) for a small incremental gain.
 - [ ] Rust-side IPC param validation — deserialize and validate IPC request params in Rust (`gpty-ipc`) before queuing to GDScript; GDScript handlers remain untyped. (TEMP1 P2 carryover.)
-- [ ] Palette test dedup — `test_palette.gd` rebuilds the palette command list instead of asserting against `workspace.gd`'s builder; extract the list to one place. (TEMP1 test-hygiene carryover.)
+- [x] Palette test dedup — `test_palette.gd` now asserts against `PaneTypes.build_palette_commands()`; the command list lives in one place. (TEMP1 test-hygiene carryover.)
 
 ## v1.0.0 — Public Launch
 
@@ -53,14 +53,14 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 
 ## v0.5.0 — ADE Foundation & Persistence
 
-- [ ] Rebranding & positioning — README, docs landing, and CLI copy reposition gpty as an ADE ("graphical ADE: a PTY foundation with a public API"). De-OMP the shipped defaults: rename the "OMP Workspace" profile to "Agent Workspace"; `@gpty/omp-events` remains the first adapter, not the identity. Name stays `gpty` (positioning, not renaming). Same commit: update every "OMP Workspace" reference in AGENTS.md (structure comment + Inspector/Reasoning section) and the docs site.
+- [x] Rebranding & positioning — README, docs landing, and CLI copy reposition gpty as an ADE ("graphical ADE: a PTY foundation with a public API"). De-OMP the shipped defaults: "OMP Workspace" profile renamed to "Agent Workspace"; `@gpty/omp-events` remains the first adapter, not the identity. Name stays `gpty` (positioning, not renaming). Same commit: updated every "OMP Workspace" reference in AGENTS.md (structure comment + Inspector/Reasoning section) and the docs site.
 - [ ] Ecosystem presets — shipped profiles for herdr, lazygit, nvim, claude, and OMP in `profiles.default.json`, backed by per-tile `command` support in profile restore (`NewPaneParams.command` already exists; wire the restore path).
 - [ ] Stable public pane IDs — `attachment_id` becomes the primary public id, auto-generated for every pane; `newPane` returns it and `listPanes` reports it. Same commit: update the AGENTS.md attachment-id bullet to describe the public-id semantics.
 - [ ] Pane env markers — inject `GPTY_ENV=1` + `GPTY_PANE_ID` as trusted runtime vars at spawn (same mechanism as `GPTY_EVENT_*`; stripped everywhere else), so an agent inside a pane can prove it's inside. Same commit: update the AGENTS.md env-sanitization bullet with the new trusted vars.
 - [ ] Pane read/status/run/wait IPC — `paneRead` (plain text from grid/scrollback), `paneStatus` (tiered state model per AGENTS.md: events authoritative, OSC declared, heuristics display-only), `paneRun` (command + exit code), `waitForOutput` (server-owned pattern wait with timeout). Substrate primitives only — no agent state machine in core.
 - [ ] Event subscription — `eventsSubscribe` on the event socket (never the control socket) for concept and pane lifecycle events.
 - [x] Agent skill — ship `skills/gpty/SKILL.md` + `gpty --skill` printing the release-matched copy (`include_str!`), with a `GPTY_ENV=1` guardrail; install locations documented for Claude Code, codex, opencode, and OMP. MCP schema verified free of a `skill` tool.
-- [ ] IPC version sourcing — the IPC `version` response is hardcoded to "0.3.0" in `workspace.gd:787` while the app ships 0.4.0; source it from the crate (`env!("CARGO_PKG_VERSION")` via `gpty-gdext` ipc.rs) instead of the GDScript literal. (TEMP1 carryover.)
+- [x] IPC version sourcing — the IPC `version` response now comes from the crate via the static `GptyTerminal.get_app_version()` (`env!("CARGO_PKG_VERSION")`, `crates/gpty-gdext/src/lib.rs`); `workspace.gd` no longer hardcodes "0.3.0". (TEMP1 carryover.)
 - [ ] MCP expansion — `pane-read`, `pane-status`, `pane-wait`, `agent-status-list`, `broadcast-input` (tagged pane set; see AGENTS.md security), and pane tags (persisted, sanitized like `attachment_id`). Same commit: refresh the AGENTS.md MCP tools list and count (14 → 19).
 - [x] ADE boundary & security rules in AGENTS.md — layer model, non-goals, and OSC/plugin/broadcast constraints (the "why not" record).
 - [ ] SQLite + FTS5 history backend — wire the existing `HistoryStore` (SQLite + FTS5, tested but unused in production) into pane lifecycle and session restore. Scrollback is currently lost on restart; this makes it persistent and full-text searchable, and backs `paneRead` across restarts.
