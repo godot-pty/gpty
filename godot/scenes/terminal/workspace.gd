@@ -8,12 +8,6 @@ const MIN_WINDOW_W = 500
 const MIN_WINDOW_H = 300
 const TITLEBAR_HEIGHT = 30.0
 
-static func _build_palette_commands() -> Array[String]:
-	var cmds: Array[String] = []
-	for key in PaneTypes.ALL:
-		cmds.append("new " + PaneTypes.ALL[key]["name"].to_lower())
-	cmds.append_array(["close active", "spawn 16 terminals", "settings", "reset layout", "save", "load"])
-	return cmds
 
 var _sidebar: Sidebar
 var _sidebar_bg: ColorRect
@@ -514,7 +508,7 @@ func _build_palette() -> Control:
 	var results = VBoxContainer.new()
 	v.add_child(results)
 
-	var cmds = _build_palette_commands()
+	var cmds = PaneTypes.build_palette_commands()
 	inp.text_changed.connect(func(t: String):
 		for c in results.get_children(): c.queue_free()
 		for cmd in cmds:

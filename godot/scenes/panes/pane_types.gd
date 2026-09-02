@@ -64,6 +64,21 @@ static func sanitize_attachment_id(v) -> String:
 	valid.compile("^[a-z][a-z0-9_-]{0,31}$")
 	return v if valid.search(v) != null else ""
 
+## Action commands appended after the pane-type entries in the palette.
+const PALETTE_ACTIONS: Array[String] = [
+	"close active", "spawn 16 terminals", "settings", "reset layout", "save", "load",
+]
+
+## Build the full palette command list: one "new <type>" entry per pane type
+## (in ALL iteration order) followed by PALETTE_ACTIONS.
+## Single source of truth — workspace.gd and tests both call this.
+static func build_palette_commands() -> Array[String]:
+	var cmds: Array[String] = []
+	for key in ALL:
+		cmds.append("new " + ALL[key]["name"].to_lower())
+	cmds.append_array(PALETTE_ACTIONS)
+	return cmds
+
 ## Validate a shell command from layout/profile data. Non-strings,
 ## empty, oversized, or invalid-Unicode values fall back to `fallback`.
 ## Godot replaces decoded NUL bytes with U+FFFD before GDScript can inspect
