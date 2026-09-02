@@ -3,29 +3,73 @@
 The source of truth for all gpty features — past, present, and planned.
 GitHub Issues are used for user-reported bugs and discussions, not roadmap tracking.
 
+Strategic direction: gpty evolves from a multi-terminal emulator into an Agent Development Environment (ADE) — a graphical PTY foundation with a public, agent-facing API. Boundary rules and non-goals live in AGENTS.md under "ADE Architecture Boundary"; this file tracks the release plan.
+
 ## Future
 
-- [ ] Package-managed installs — distribute gpty through system package managers (AUR, apt, dnf, Flatpak) for native installation and updates
-- [ ] macOS code signing + notarization — sign and notarize the macOS .app bundle to satisfy Gatekeeper requirements
-- [ ] Windows code signing — Authenticode sign the Windows .exe to avoid SmartScreen warnings
 - [ ] Dynamic Shaders — GPU shader-based visual effects for terminal backgrounds and overlays (CRT scanlines, glassmorphism, noise)
 - [ ] Reactive Environments — ambient visual feedback triggered by concept engine events (e.g., red tint when a test fails, green particles on build success)
-- [ ] Inspector / Reasoning follow-ups — host-tools bridge and OpenAI-compatible HTTP still planned. Claude/Gemini adapters only after OMP is stable, using each CLI's documented hooks (never token reuse or TUI scraping).
+- [ ] Inspector / Reasoning follow-ups — host-tools bridge and OpenAI-compatible HTTP still planned. Provider-specific CLI adapters follow the v0.5.1 generic `CliBackend` lane: documented hooks/extensions only, never token reuse or TUI scraping.
 - [ ] FFI fuzz testing — automated fuzz testing of the terminal grid's binary interface to catch crashes and security issues
+- [ ] Instanced-quad renderer (alacritty-style glyph atlas + per-instance color) — evidence-gated: revisit only if render batching plus flood rate-limiting still shows frame-time pain. Godot already GPU-composites the canvas; a full Rust-side texture pipeline is deep custom work (atlas management, eviction, per-cell truecolor uploads) for a small incremental gain.
+
+## v1.0.0 — Public Launch
+
+- [ ] Distribution — install.sh, Homebrew tap, AUR, winget (promoted from Future: launch blockers), and GitHub releases.
+- [ ] Code signing — macOS notarization + Windows Authenticode (promoted from Future: SmartScreen/Gatekeeper warnings are launch-killers).
+- [ ] Docs — agent guide, plugin authoring guide, socket API reference (from the existing schema generator), 60-second quick start.
+- [ ] Community infrastructure — plugin registry live, examples repo, community channel.
+- [ ] Launch criteria — 3+ first-class agent adapters, 10+ example plugins, the reference workflow demo (agent runs tests in a pane while the user watches in the GUI), and a working headless reattach story — all verified before the public launch post.
+
+## v0.6.0 — Headless Daemon & Reattach
+
+- [ ] `gptyd` extraction spike — move `WorkspaceEngine` + `IpcServer` + event socket into a standalone Rust daemon; the Godot app becomes a rendering client over the same JSON-RPC (Godot-headless mode is the interim only, not the destination). PTYs survive GUI close.
+- [ ] Grid wire protocol — `term_get_diff` / `term_input` over the socket, reusing `TermGrid`'s packed flat arrays as the wire format.
+- [ ] Attach/reattach — GUI close leaves the daemon running; reopen attaches to the live workspace; `gpty attach` over SSH; `HistoryStore` serves pane read and scrollback across restarts.
+
+## v0.5.2 — Plugin Ecosystem
+
+- [ ] Plugin manifest — `gpty-plugin.toml` (id, name, version, min_gpty_version, platforms, build/startup commands, actions, events, link handlers) plus gpty-native `[[concepts]]` and `[[profiles]]` sections so a plugin can be pure JSON — zero code.
+- [ ] Plugin install & lifecycle — `gpty plugin install <owner>/<repo>@ref` (clone, manifest validation with size/count/path caps, review dialog reusing the Workspace Trust pattern, pinned revision, per-plugin log dir) and `list` / `enable` / `disable` / `run` / `logs`. The entire CLI is the plugin API (`GPTY_BIN_PATH`); commands are argv arrays, never shell-evaluated.
+- [ ] `cli_view` pane — runs a command and streams stdout into a pane body: plugin UI v1 without a Godot SDK. Native third-party GDScript/Rust pane plugins deferred to a future SDK (`PaneTypes.ALL` is the layout-trust anchor; see AGENTS.md).
+- [ ] Pane contract extension — `on_agent_state_changed(state)` in `PaneBody` for custom panes.
+- [ ] Plugin registry — JSON index repo + browse page on the docs site; submission by PR.
+
+## v0.5.1 — Agent State & Adapters
+
+- [ ] AgentState model — `AgentState` enum (Idle / Working / NeedsAttention / Completed / Failed) in `gpty-core`, with tiered detection: Tier 1 capability-authenticated events (authoritative), Tier 2 OSC state declaration (published standard; AGENTS.md constraints), Tier 3 regex/idle/exit heuristics (display-only). No `ToolRunning`-via-exit-code — foreground-command exits are not reliably attributable in a PTY.
+- [ ] Titlebar state badges — Phosphor status badges on pane titlebars in `terminal_pane.gd` (pulsing amber = NeedsAttention, spinner = Working, check = Completed, warning = Failed). Display only; badge state never feeds decisions.
+- [ ] Generic event vocabulary — adapter-neutral event names (`agent.started`, `turn.started`, `tool.call`, `thinking.delta`) mapped from the OMP extension's allowlist; Reasoning consumes the generic contract. Same commit: update the AGENTS.md OMP-only data-flow diagram.
+- [ ] Windows event listener — named-pipe event listener closes the Unix-only gap (`omp_events.rs`); Reasoning stops being fail-closed on Windows.
+- [ ] Generic CLI backend — `CliBackend` in `gpty-ai` (subprocess NDJSON bridge) beside Mock/Omp, with a backend/model picker in Inspector pane settings. Adapters use only each CLI's documented hooks — never tokens, never TUI scraping.
+- [ ] Visual Concept Graph — build concept automations visually using Godot's GraphEdit node editor. Drag-and-drop nodes for triggers, conditions, and actions without writing regex by hand. (Deferred from v0.5.0.)
+- [ ] In-app update checker — check for new GitHub releases on startup and notify users when an update is available. (Deferred from v0.5.0.)
+- [ ] App version & build info — display the running app version (matching `gpty version` and the IPC protocol version) and build information in the app UI, e.g. in Settings or an About dialog. (Deferred from v0.5.0.)
+- [ ] Render batching — merge consecutive same-attribute cell runs into single draw calls (glyph-run batching) in `terminal_pane.gd` `_draw()`, cutting the per-frame canvas-item count; measure frame time under flood output and scroll before/after. (Deferred from v0.5.0.)
+- [ ] UI Thread DoS mitigation — rate-limit terminal rendering when a PTY floods output (e.g., `cat /dev/urandom`), preventing the UI thread from locking up. (Deferred from v0.5.0.)
+
+## v0.5.0 — ADE Foundation & Persistence
+
+- [ ] Rebranding & positioning — README, docs landing, and CLI copy reposition gpty as an ADE ("graphical ADE: a PTY foundation with a public API"). De-OMP the shipped defaults: rename the "OMP Workspace" profile to "Agent Workspace"; `@gpty/omp-events` remains the first adapter, not the identity. Name stays `gpty` (positioning, not renaming). Same commit: update every "OMP Workspace" reference in AGENTS.md (structure comment + Inspector/Reasoning section) and the docs site.
+- [ ] Ecosystem presets — shipped profiles for herdr, lazygit, nvim, claude, and OMP in `profiles.default.json`, backed by per-tile `command` support in profile restore (`NewPaneParams.command` already exists; wire the restore path).
+- [ ] Stable public pane IDs — `attachment_id` becomes the primary public id, auto-generated for every pane; `newPane` returns it and `listPanes` reports it. Same commit: update the AGENTS.md attachment-id bullet to describe the public-id semantics.
+- [ ] Pane env markers — inject `GPTY_ENV=1` + `GPTY_PANE_ID` as trusted runtime vars at spawn (same mechanism as `GPTY_EVENT_*`; stripped everywhere else), so an agent inside a pane can prove it's inside. Same commit: update the AGENTS.md env-sanitization bullet with the new trusted vars.
+- [ ] Pane read/status/run/wait IPC — `paneRead` (plain text from grid/scrollback), `paneStatus` (tiered state model per AGENTS.md: events authoritative, OSC declared, heuristics display-only), `paneRun` (command + exit code), `waitForOutput` (server-owned pattern wait with timeout). Substrate primitives only — no agent state machine in core.
+- [ ] Event subscription — `eventsSubscribe` on the event socket (never the control socket) for concept and pane lifecycle events.
+- [ ] Agent skill — ship `skills/gpty/SKILL.md` + `gpty --skill` printing the release-matched copy, with a `GPTY_ENV=1` guardrail; document install into Claude Code, codex, opencode, and OMP.
+- [ ] MCP expansion — `pane-read`, `pane-status`, `pane-wait`, `agent-status-list`, `broadcast-input` (tagged pane set; see AGENTS.md security), and pane tags (persisted, sanitized like `attachment_id`). Same commit: refresh the AGENTS.md MCP tools list and count (14 → 19).
+- [x] ADE boundary & security rules in AGENTS.md — layer model, non-goals, and OSC/plugin/broadcast constraints (the "why not" record).
+- [ ] SQLite + FTS5 history backend — wire the existing `HistoryStore` (SQLite + FTS5, tested but unused in production) into pane lifecycle and session restore. Scrollback is currently lost on restart; this makes it persistent and full-text searchable, and backs `paneRead` across restarts.
+- [ ] Tab/workspace switching — switch between independent sets of panes within the same window. Each workspace has its own layout, profile, and scrollback. Deferred from v0.3.0; prerequisite for the daemon-era workspace model.
 
 ## v0.4.0 — Inspector & Reasoning
 
-- [x] Inspector + Reasoning panes — private tool-free OMP Q&A and passive documented-reasoning projection, with a dedicated event socket and `@gpty/omp-events` extension
-
-## v0.5.0 — Persistence, Workspaces & Rendering
-
-- [ ] SQLite + FTS5 history backend — wire the existing `HistoryStore` (SQLite + FTS5, tested but unused in production) into pane lifecycle and session restore. Scrollback is currently lost on restart; this makes it persistent and full-text searchable.
-- [ ] Tab/workspace switching — switch between independent sets of panes within the same window. Each workspace has its own layout, profile, and scrollback. Deferred from v0.3.0.
-- [ ] Visual Concept Graph — build concept automations visually using Godot's GraphEdit node editor. Drag-and-drop nodes for triggers, conditions, and actions without writing regex by hand.
-- [ ] In-app update checker — check for new GitHub releases on startup and notify users when an update is available
-- [ ] App version & build info — display the running app version (matching `gpty version` and the IPC protocol version) and build information in the app UI, e.g. in Settings or an About dialog
-- [ ] GPU-accelerated rendering — rasterize terminal cells to a single GPU texture using fontdue for glyph rasterization, replacing the per-cell GDScript `_draw()` loop
-- [ ] UI Thread DoS mitigation — rate-limit terminal rendering when a PTY floods output (e.g., `cat /dev/urandom`), preventing the UI thread from locking up
+- [x] Inspector pane — private, tool-free, iterative OMP Q&A via a session-owned `GptyAi` (`session_open` / `session_prompt` / `session_poll` / `session_cancel` / `session_close`); does not attach to a terminal-hosted OMP TUI; pane `backend` setting (default `omp`)
+- [x] Reasoning pane — passive projection of documented OMP reasoning from one terminal, selected by `source_attachment_id`; never starts jobs or accepts concept captures
+- [x] OMP event channel — second local socket (`gpty-events.sock`) accepting only `ompEvent`, authenticated with a per-PTY capability injected at spawn; shipped `@gpty/omp-events` extension dormant unless all four `GPTY_EVENT_*` vars are present
+- [x] "OMP Workspace" profile — shipped built-in (Terminal + Inspector + Reasoning), never written to the user store and not deletable
+- [x] Stable pane `attachment_id` — persisted companion links across save/restore (not ephemeral labels like `T1`)
+- [x] Safe Markdown rendering — CommonMark/GFM converted to sanitized Godot BBCode in Rust; render-debounced streams; code-viewer rendered/source toggle
 
 ## v0.3.2 — Security Hardening & Test Coverage
 
