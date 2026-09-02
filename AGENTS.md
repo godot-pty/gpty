@@ -133,7 +133,7 @@ AI agents and coding harnesses can discover these via the `mcp.json` that's at t
 {"mcpServers": {"gpty": {"command": "gpty", "args": ["mcp"]}}}
 ```
 
-Tools: `new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `layout-save`, `layout-load`, `layout-list`, `daemon-start`, `daemon-stop`, `daemon-status`, `version`.
+Tools: `new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `layout-save`, `layout-load`, `layout-list`, `daemon-start`, `daemon-stop`, `daemon-status`, `concept-list`, `concept-toggle`, `version`.
 
 The MCP tool schemas are auto-generated from clap command definitions in `crates/gpty-cli/src/commands/schema.rs`. Nested subcommands (`daemon`, `layout`) are flattened into prefixed tools. Self-referential tools (`mcp`, `schema`) are excluded.
 
@@ -213,6 +213,29 @@ gpty is a terminal multiplexer with an observability layer. It does **not** recr
 - Reasoning caps are user settings (Settings → Reasoning tab): `cfg_reasoning_max_turns` (clamped 1–64, default 16) and `cfg_reasoning_max_turn_bytes` (clamped 4 KiB–1 MiB, default 64 KiB). `reasoning_pane.gd` reads them at `_ready` into `max_turns`/`max_turn_bytes` (not consts). When truncating accumulated raw Markdown at the cap, re-close an odd number of ``` fences (`_close_open_fences`) — an unclosed fence re-renders the tail as code.
 - Do not add Claude/Gemini/Antigravity adapters that read OAuth tokens, call private endpoints, or parse undocumented TUI output. Future adapters may use only that CLI's documented hooks/extensions, with a fresh terms review.
 
+### ADE Architecture Boundary
+
+gpty is evolving from a multi-terminal emulator into an ADE — a graphical PTY foundation with a public, agent-facing API:
+
+| Layer | Owner | Content |
+|---|---|---|
+| L4 | ecosystem | Agent CLIs & apps: claude code, codex, opencode, OMP, vim, btop |
+| L3 | ecosystem (open market) | Orchestration: agent waits, pane states, plugin workflows (herdr-class) |
+| L2 | gpty | Control surface: JSON-RPC socket, CLI, MCP, event socket |
+| L1 | gpty | PTY foundation: PTY lifecycle, grid, capture, history, security |
+| L0 | OS | /dev/ptmx, ConPTY, sockets |
+
+- **gpty owns L0–L2; L3 is an open market.** gpty ships a thin built-in L3 (concept routing, Inspector sessions, profile restore) but never absorbs an orchestrator's state machine into core. Herdr-class tools are guests (they run in panes today) and substrate consumers (they drive the public API), not competitors to clone.
+- **Observe/display, never orchestrate.** Core observes and displays agent state (badges, status); it never manages or orchestrates it (no agent runtime, no wait/block state machine). Primitives only: `paneStatus`, `waitForOutput`, events.
+- **Non-goals** (do not re-propose without new evidence):
+  - `pane-pipe` MCP tool — the concept engine already routes pane output; a generic pipe is a broad-trigger concept.
+  - `layout-apply-preset` workflow automation — plugin territory (events + actions).
+  - First-party `gpty herdr *` subcommands — couples gpty core to a foreign, versioned socket protocol with an auth model gpty does not control (L3 creep).
+  - Native third-party GDScript/Rust pane plugins in v1 — `PaneTypes.ALL` is the layout-trust anchor; a plugin-registered registry lets profile files instantiate arbitrary code at restore time. `cli_view` (stdout streaming) is the v1 plugin UI; a native pane SDK needs its own trust design.
+  - `ToolRunning` state via exit codes — foreground-command exits are not reliably attributable in a PTY.
+  - Webview/WebSocket panes — a new trust boundary; not v1.
+- **Positioning & naming:** the wedge is GUI + public-API PTY foundation + concept engine + Windows + hardening. Keep the `gpty` name (2026-09 decision): rebranding is positioning, not renaming.
+
 ### Security
 
 - Concept Engine ReDoS: The `gpty-core` crate MUST always use the standard Rust `regex` crate. PCRE or back-tracking engines are strictly prohibited to prevent ReDoS (Regex Denial of Service) attacks when parsing large amounts of terminal output.
@@ -226,6 +249,9 @@ gpty is a terminal multiplexer with an observability layer. It does **not** recr
 - Third-party AI CLIs: do not read or reuse OAuth tokens, call backing services with harvested credentials, bundle proprietary CLIs, or scrape TUI output. Users launch agents in terminal panes; gpty only consumes documented hooks/extensions.
 - Env-var hijacking: `GPTY_SOCKET` must be an absolute path owned by the current UID with mode `0o600`-style privacy — `transport::validate_socket_path` runs client-side before connect and refuses insecure sockets (they would receive commands and `GPTY_SECRET`). `GPTY_GUI` binaries are validated by `transport::validate_gui_binary` (absolute, regular file, own UID, not group/other-writable) before auto-spawn. Do NOT weaken these checks when editing `client.rs`/`daemon.rs`/`transport.rs`.
 - Layout restore trust: saved tiles from `layout.json`/profiles are untrusted input — `PaneTypes.sanitize_tile` validates the pane type, settings dict, and clamps grid geometry; `PaneBody.apply_settings` applies values only when types match; code_viewer/file_tree pane paths must be absolute. Do NOT remove these guards when adding pane settings.
+- OSC agent-state declaration: a published `gpty_state=<value>` OSC sequence is the Tier 2 agent-state channel. Recognize it at the `LineParser` level only (the first interpreted sequence in a discard-only parser — do not expand the parser further without a security review). Strictly whitelist enum values; single-shot; rate-limited. It is spoofable by design — pasted text and `cat`-ed files can emit it — so it may set UI display state ONLY and must never trigger actions, concepts, layouts, or IPC without explicit user opt-in. Apply the same alt-screen and capture-replay suppression as concept matching. Tier 1 (capability-authenticated event socket) remains authoritative; Tier 3 (regex/idle heuristics) is display-only and never a decision input.
+- `broadcast-input`: a fan-out of `inject` over the `GPTY_SECRET`-gated control socket. Text is written to each PTY verbatim, exactly as `inject` does (the target shell interprets it — no additional interpolation by gpty). Pane tags used for targeting must be sanitized like `attachment_id` (`[a-z][a-z0-9_-]{0,31}`).
+- Plugin trust model: plugins are arbitrary code running as the user — the same trust as any editor extension. Review-then-run (reuse the Workspace Trust confirmation dialog), pin revisions, per-plugin config/state/log dirs, manifest validation with size/count/path caps (reuse concept parse caps and `sanitize_tile` rules). Never claim sandboxing.
 
 ### Commits
 
@@ -264,7 +290,7 @@ gpty is a terminal multiplexer with an observability layer. It does **not** recr
 - Concept regex on PTY output: `match_and_broadcast` checks every line of PTY output against all concepts. `SingleLine` concepts broadcast events for command injection. `UntilStop` concepts start capture mode — their return value from `match_and_broadcast` MUST be used to set `active_capture_name` and `active_capture_target`. Ignoring the return value (`let _ = match_and_broadcast(...)`) silently disables UntilStop capture.
 - Tab completion triggers concept matches: Bash reprints the prompt and partial command when showing autocomplete candidates. This reprinted line has no trailing `\n`, so `LineParser` never emits it. Tab completion never triggers concept matching.
 - Raw-byte buffering for grid replay: Never buffer parsed lines for later grid replay — the alacritty_terminal ANSI state machine needs raw bytes with escape sequences intact. Buffer `Vec<Vec<u8>>` (chunks), replay with `feed_grid(board, chunk)`.
-- Rendering Performance: GDScript `_draw` is slow when calling `draw_rect`/`draw_string` character-by-character. Avoid generating heavy data structures (like `Dictionary`) per-cell across the FFI boundary. Prefer packing data into flat arrays (`PackedByteArray`, `PackedInt32Array`) in Rust, and batch rendering operations line-by-line in Godot.
+- Rendering Performance: GDScript `_draw` is slow when calling `draw_rect`/`draw_string` character-by-character. Avoid generating heavy data structures (like `Dictionary`) per-cell across the FFI boundary. Prefer packing data into flat arrays (`PackedByteArray`, `PackedInt32Array`) in Rust, and batch rendering into glyph runs — consecutive same-attribute cells merged into one draw call; per-line batching is the floor, not the ceiling. Do NOT re-propose a custom GPU texture pipeline (fontdue glyph atlas / instanced quads) without new evidence: Godot already GPU-composites canvas items, the bottleneck is CPU-side command generation, and fontdue would duplicate Godot's existing glyph atlasing. The instanced-quad renderer is evidence-gated in ROADMAP Future — revisit only if render batching plus flood rate-limiting still shows frame-time pain.
 - Resize Rate Limiting: Firing SIGWINCH heavily on every frame during window drag will overwhelm the child PTY process. Always debounce or rate-limit terminal `_on_resize` events before passing them to the backend.
 - Scrollback vs. PageUp/Down: `terminal_pane.gd:_handle_keyboard` intercepts PageUp/Down for scrollback navigation. These never reach the PTY, so programs like `less` or `vim` cannot receive them. Users must use alternative keys (`b`/`f` in `less`, `Ctrl+B`/`Ctrl+F` in vim).
 - Alt key handling: For Alt+letter combos, the Rust keymap returns `None`, expecting the GDScript layer to prepend `\x1b` (ESC). `_handle_keyboard` does this in the `_key_to_text` fallback path.
