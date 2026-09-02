@@ -12,6 +12,8 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [ ] Inspector / Reasoning follow-ups — host-tools bridge and OpenAI-compatible HTTP still planned. Provider-specific CLI adapters follow the v0.5.1 generic `CliBackend` lane: documented hooks/extensions only, never token reuse or TUI scraping.
 - [ ] FFI fuzz testing — automated fuzz testing of the terminal grid's binary interface to catch crashes and security issues
 - [ ] Instanced-quad renderer (alacritty-style glyph atlas + per-instance color) — evidence-gated: revisit only if render batching plus flood rate-limiting still shows frame-time pain. Godot already GPU-composites the canvas; a full Rust-side texture pipeline is deep custom work (atlas management, eviction, per-cell truecolor uploads) for a small incremental gain.
+- [ ] Rust-side IPC param validation — deserialize and validate IPC request params in Rust (`gpty-ipc`) before queuing to GDScript; GDScript handlers remain untyped. (TEMP1 P2 carryover.)
+- [ ] Palette test dedup — `test_palette.gd` rebuilds the palette command list instead of asserting against `workspace.gd`'s builder; extract the list to one place. (TEMP1 test-hygiene carryover.)
 
 ## v1.0.0 — Public Launch
 
@@ -34,6 +36,7 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [ ] `cli_view` pane — runs a command and streams stdout into a pane body: plugin UI v1 without a Godot SDK. Native third-party GDScript/Rust pane plugins deferred to a future SDK (`PaneTypes.ALL` is the layout-trust anchor; see AGENTS.md).
 - [ ] Pane contract extension — `on_agent_state_changed(state)` in `PaneBody` for custom panes.
 - [ ] Plugin registry — JSON index repo + browse page on the docs site; submission by PR.
+- [ ] God-object split — split `workspace.gd` (1034 lines) / `terminal_pane.gd` (833) / `terminal_manager.gd` (624) into focused files (IPC dispatch, profile/layout restore, search subsystem); concept routing already lives in `concept_router.gd`. Do it alongside the plugin work, which touches `workspace.gd` heavily. (TEMP1 modularization carryover.)
 
 ## v0.5.1 — Agent State & Adapters
 
@@ -56,7 +59,8 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [ ] Pane env markers — inject `GPTY_ENV=1` + `GPTY_PANE_ID` as trusted runtime vars at spawn (same mechanism as `GPTY_EVENT_*`; stripped everywhere else), so an agent inside a pane can prove it's inside. Same commit: update the AGENTS.md env-sanitization bullet with the new trusted vars.
 - [ ] Pane read/status/run/wait IPC — `paneRead` (plain text from grid/scrollback), `paneStatus` (tiered state model per AGENTS.md: events authoritative, OSC declared, heuristics display-only), `paneRun` (command + exit code), `waitForOutput` (server-owned pattern wait with timeout). Substrate primitives only — no agent state machine in core.
 - [ ] Event subscription — `eventsSubscribe` on the event socket (never the control socket) for concept and pane lifecycle events.
-- [ ] Agent skill — ship `skills/gpty/SKILL.md` + `gpty --skill` printing the release-matched copy, with a `GPTY_ENV=1` guardrail; document install into Claude Code, codex, opencode, and OMP.
+- [x] Agent skill — ship `skills/gpty/SKILL.md` + `gpty --skill` printing the release-matched copy (`include_str!`), with a `GPTY_ENV=1` guardrail; install locations documented for Claude Code, codex, opencode, and OMP. MCP schema verified free of a `skill` tool.
+- [ ] IPC version sourcing — the IPC `version` response is hardcoded to "0.3.0" in `workspace.gd:787` while the app ships 0.4.0; source it from the crate (`env!("CARGO_PKG_VERSION")` via `gpty-gdext` ipc.rs) instead of the GDScript literal. (TEMP1 carryover.)
 - [ ] MCP expansion — `pane-read`, `pane-status`, `pane-wait`, `agent-status-list`, `broadcast-input` (tagged pane set; see AGENTS.md security), and pane tags (persisted, sanitized like `attachment_id`). Same commit: refresh the AGENTS.md MCP tools list and count (14 → 19).
 - [x] ADE boundary & security rules in AGENTS.md — layer model, non-goals, and OSC/plugin/broadcast constraints (the "why not" record).
 - [ ] SQLite + FTS5 history backend — wire the existing `HistoryStore` (SQLite + FTS5, tested but unused in production) into pane lifecycle and session restore. Scrollback is currently lost on restart; this makes it persistent and full-text searchable, and backs `paneRead` across restarts.
