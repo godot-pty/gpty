@@ -11,9 +11,12 @@ mod tests;
 use std::process;
 use std::time::Duration;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use gpty_ipc::client::IpcClient;
 use gpty_ipc::transport;
+
+/// Bundled agent skill, shipped at `skills/gpty/SKILL.md` and printed by `gpty --skill`.
+const SKILL: &str = include_str!("../../../skills/gpty/SKILL.md");
 
 #[derive(Parser)]
 #[command(
@@ -24,7 +27,11 @@ use gpty_ipc::transport;
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
+
+    /// Print the bundled agent skill (SKILL.md) and exit
+    #[arg(long)]
+    skill: bool,
 
     /// Machine-readable JSON output
     #[arg(long, global = true)]
@@ -168,6 +175,12 @@ async fn main() {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     }
 
+    // `--skill` prints the bundled agent skill and exits; no IPC, no daemon.
+    if cli.skill {
+        print!("{SKILL}");
+        process::exit(0);
+    }
+
     let socket_path = cli
         .socket
         .or_else(|| std::env::var("GPTY_SOCKET").ok())
@@ -176,7 +189,7 @@ async fn main() {
 
     // Handle commands that don't need IPC.
     match &cli.command {
-        Commands::Schema { format } => {
+        Some(Commands::Schema { format }) => {
             let result = commands::schema::run(format);
             match result {
                 Ok(()) => process::exit(0),
@@ -186,18 +199,22 @@ async fn main() {
                 }
             }
         }
-        Commands::Version => {
+        Some(Commands::Version) => {
             println!("gpty {}", env!("CARGO_PKG_VERSION"));
             println!("protocol: 2.0");
             process::exit(0);
         }
-        Commands::Mcp => {
+        Some(Commands::Mcp) => {
             let client = IpcClient::new(&socket_path, timeout);
             if let Err(e) = commands::mcp::run(&client).await {
                 eprintln!("mcp error: {e}");
                 process::exit(1);
             }
             process::exit(0);
+        }
+        None => {
+            Cli::command().print_help().ok();
+            process::exit(2);
         }
         _ => {}
     }
@@ -212,7 +229,10 @@ async fn main() {
     }
 
     let client = IpcClient::new(&socket_path, timeout);
-    let result = commands::dispatch(&cli.command, &client, cli.json).await;
+    let Some(command) = &cli.command else {
+        unreachable!("handled above");
+    };
+    let result = commands::dispatch(command, &client, cli.json).await;
 
     match result {
         Ok(()) => process::exit(0),

@@ -175,3 +175,12 @@ async fn layout_list_roundtrip() {
         "layout list must reach the server exactly once"
     );
 }
+
+#[test]
+fn skill_flag_output_contains_guardrail() {
+    let skill = crate::SKILL;
+    assert!(
+        skill.contains("GPTY_ENV"),
+        "bundled SKILL.md must carry the GPTY_ENV guardrail"
+    );
+}
