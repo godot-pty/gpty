@@ -69,7 +69,7 @@ gpty/
     ├── project.godot
     ├── gpty.gdextension
     ├── concepts.default.json   # Shipped default concepts
-    ├── profiles.default.json   # Shipped recommended layouts (OMP Workspace)
+    ├── profiles.default.json   # Shipped recommended layouts (Agent Workspace)
     ├── fonts/                  # DejaVu Sans Mono + Phosphor icons
     └── scenes/
         ├── main.tscn
@@ -206,7 +206,7 @@ gpty is a terminal multiplexer with an observability layer. It does **not** recr
 | Reasoning | Passive view of documented reasoning/lifecycle events from **one** terminal, selected by `source_attachment_id`. Never starts jobs or accepts concept captures. Turn history is an in-memory accordion for the current OMP session only. |
 | `@gpty/omp-events` | Explicitly installed OMP extension. Dormant unless all four `GPTY_EVENT_*` vars are present. Forwards bounded session/turn/tool metadata plus `thinking_delta` text only. |
 
-- Inspector and Reasoning are **different sessions**. The shipped "OMP Workspace" profile opens Terminal + Inspector + Reasoning; only Reasoning is attached to the terminal.
+- Inspector and Reasoning are **different sessions**. The shipped "Agent Workspace" profile opens Terminal + Inspector + Reasoning; only Reasoning is attached to the terminal.
 - Reasoning history is session-scoped RAM (collapsed previous turns, live turn streaming). Closing the pane, changing `source_attachment_id`, or binding a new `omp_session_id` drops it. Do not write thinking text or OMP session IDs into layout/profile JSON.
 - **OMP event socket is Unix-only.** Workspace control IPC works on Windows (named pipes); the separate `gpty-events.sock` listener and per-PTY `GPTY_EVENT_*` injection are implemented only on Unix (`omp_events.rs`). On Windows, Reasoning stays idle and `@gpty/omp-events` is dormant because gpty never injects activation vars.
 - `GptyAi` is instance-owned: `session_open` / `session_prompt` / `session_poll` / `session_cancel` / `session_close`. There is no process-global subscriber bus. Polled envelopes carry `session_id`, `turn_id`, `run_id`, `sequence`, `channel`.

@@ -1,10 +1,10 @@
 {
   "profiles": [
     {
-      "id": "omp-workspace",
-      "name": "OMP Workspace",
+      "id": "agent-workspace",
+      "name": "Agent Workspace",
       "builtin": true,
-      "description": "A normal OMP terminal with separate Inspector and Reasoning panes.",
+      "description": "A terminal with separate Inspector and Reasoning panes.",
       "tiles": [
         {
           "col": 0,
@@ -13,7 +13,7 @@
           "rspan": 12,
           "settings": {
             "type": "terminal",
-            "pane_name": "OMP Terminal",
+            "pane_name": "Agent Terminal",
             "attachment_id": "omp-terminal"
           }
         },

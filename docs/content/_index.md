@@ -3,12 +3,12 @@ title: gPTY
 toc: false
 ---
 
-[gPTY](https://godot-pty.github.io/gpty/) is a multi-terminal emulator built on Godot and Rust providing a graphical tiling grid and a pub-sub engine that lets terminals react to each other's output.
+[gPTY](https://godot-pty.github.io/gpty/) is a graphical Agent Development Environment (ADE) — a PTY foundation with a public, agent-facing API — built on Godot and Rust. Spawn terminals, drive them over JSON-RPC/MCP, and let agents observe output without scraping a TUI.
 
 ![gpty terminal grid](/images/v0.3.0_1.png)
 
 {{< cards >}}
-  {{< card link="/gpty/docs" title="Documentation" icon="book-open" subtitle="Learn how gPTY works, from the PTY engine to the Godot GUI." >}}
+  {{< card link="/gpty/docs" title="Documentation" icon="book-open" subtitle="Learn how gPTY works, from the PTY engine to the public agent API." >}}
   {{< card link="/gpty/blog" title="Blog" icon="pencil" subtitle="Release notes, tips, and development updates." >}}
   {{< card link="https://github.com/godot-pty/gpty" title="GitHub" icon="github" subtitle="Star, fork, or open an issue on GitHub." >}}
 {{< /cards >}}
@@ -19,18 +19,18 @@ toc: false
 
 {{< hextra/feature-grid >}}
   {{< hextra/feature-card
-    title="Multi-PTY Grid"
-    subtitle="Tile multiple terminals in a resizable grid. Split, swap, and kill panes."
+    title="PTY Foundation & Public API"
+    subtitle="Spawn and manage shell sessions over a documented JSON-RPC socket, CLI, and MCP server — the same protocol AI agents use."
     icon="terminal"
   >}}
   {{< hextra/feature-card
-    title="Concept Capture"
-    subtitle="Define regex patterns to detect commands and automatically capture their output."
+    title="Concept Engine"
+    subtitle="RegEx triggers on PTY output inject commands or capture output into adjacent panes — no polling required."
     icon="sparkles"
   >}}
   {{< hextra/feature-card
-    title="Profiles"
-    subtitle="Save and restore terminal layouts as named profiles."
+    title="Agent Observability"
+    subtitle="Reasoning and Inspector panes surface agent lifecycle events and private Q&A without orchestrating agent state."
     icon="bookmark"
   >}}
 {{< /hextra/feature-grid >}}

@@ -23,7 +23,7 @@ godot/
 ├── project.godot            # Godot 4.7 project config
 ├── gpty.gdextension      # GDExtension library config
     ├── concepts.default.json    # Shipped default concepts
-    ├── profiles.default.json    # Shipped recommended layouts (OMP Workspace)
+    ├── profiles.default.json    # Shipped recommended layouts (Agent Workspace)
     ├── fonts/                   # Bundled fonts (DejaVu Sans Mono + Phosphor icons)
     │   ├── DejaVuSansMono.ttf
     │   ├── DejaVuSansMono-Bold.ttf
@@ -97,8 +97,8 @@ godot/
 
 Layout is auto-saved on close and auto-restored on startup via `user://layout.json`.
 
-The shipped **OMP Workspace** profile opens a normal terminal plus separate
-Inspector (private Q&A) and Reasoning (passive OMP thinking) panes. It does
+The shipped **Agent Workspace** profile opens a normal terminal plus separate
+Inspector (private Q&A) and Reasoning (passive agent thinking) panes. It does
 not install the OMP extension or launch `omp`; the user does that in the
 terminal. Inspector does not follow the terminal conversation. Reasoning
 requires the `@gpty/omp-events` extension and gpty's Unix event socket

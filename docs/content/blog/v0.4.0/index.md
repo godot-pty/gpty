@@ -15,7 +15,7 @@ Seventh release — private Inspector Q&A, passive Reasoning projection, and the
 
 **OMP event channel.** A second local socket (`gpty-events.sock`) accepts only the `ompEvent` method, authenticated with a per-terminal capability injected at spawn. The shipped `@gpty/omp-events` extension is dormant unless explicitly linked and all four activation variables are present. Unix-only for now; Windows fails closed.
 
-**OMP Workspace profile.** A built-in recommended layout — Terminal, Inspector, and Reasoning side by side. Built-in profiles can't be overwritten or deleted from the sidebar.
+**Agent Workspace profile.** A built-in recommended layout — Terminal, Inspector, and Reasoning side by side. Built-in profiles can't be overwritten or deleted from the sidebar.
 
 **Safe Markdown everywhere.** Inspector and Reasoning streams render through a Rust CommonMark→BBCode converter with HTML and BBCode escaped; code-viewer panes gain a rendered/source toggle for Markdown files.
 

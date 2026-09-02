@@ -22,7 +22,7 @@ const SKILL: &str = include_str!("../../../skills/gpty/SKILL.md");
 #[command(
     name = "gpty",
     version,
-    about = "Control the gpty terminal workspace",
+    about = "Control the gpty ADE — a graphical PTY foundation with a public API",
     long_about = None
 )]
 struct Cli {

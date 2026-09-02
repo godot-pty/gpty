@@ -1,11 +1,11 @@
-[gPTY](https://godot-pty.github.io/gpty/) is a multi-terminal emulator built on Godot and Rust providing a graphical tiling grid and a pub-sub engine that lets terminals react to each other's output.
+[gPTY](https://godot-pty.github.io/gpty/) is a graphical Agent Development Environment (ADE) — a PTY foundation with a public, agent-facing API — built on Godot and Rust. It provides a tiling terminal grid, a pub-sub concept engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output without scraping a TUI.
 
 ## Overview
 
-- **Tiling grid** — Split, resize, kill, and swap panes in a graphical layout.
-- **Terminal emulation** — Full DEC STD 070 via `alacritty_terminal`. `16`/`256`/`true color`, scrollback with regex search, wrapped text selection.
-- **Concept engine** — RegEx triggers on PTY output automatically inject commands or capture output into adjacent panes. Ship defaults or write your own.
-- **CLI + MCP** — Control the GUI over JSON-RPC IPC (`gpty new-pane`, `gpty inject`, etc.). AI agents can spawn panes, send text, and manage layouts via the MCP server.
+- **PTY foundation** — Spawn and manage independent shell sessions in a resizable tiling grid. Full DEC STD 070 via `alacritty_terminal`: 16/256/true color, scrollback with regex search, wrapped text selection.
+- **Public API** — JSON-RPC IPC socket + CLI (`gpty new-pane`, `gpty inject`, …) + MCP server. AI agents, scripts, and orchestrators drive the workspace over a documented, versioned protocol.
+- **Concept engine** — RegEx triggers on PTY output automatically inject commands or capture output into adjacent panes. Write your own or ship defaults.
+- **Agent observability** — Reasoning pane passively projects documented agent lifecycle events (OMP, extensible); Inspector pane runs a private, tool-free Q&A session. Observability only — gpty never orchestrates agent state.
 - **Persistence** — Settings, layouts, and named profiles auto-save and restore on restart.
 - **Cross-platform** — Standalone binaries for Linux, macOS, and Windows. No Godot or Rust toolchain required to run.
 - **Documentation** — https://godot-pty.github.io/gpty/
