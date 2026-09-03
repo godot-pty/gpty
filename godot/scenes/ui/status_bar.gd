@@ -48,16 +48,18 @@ func _ready():
 	add_child(clock_timer)
 	clock_timer.start()
 
+	_version_text = "v" + GptyTerminal.get_app_version()
 	_right_update()
 
 func _right_update():
 	var t = Time.get_time_dict_from_system()
 	_clock_text = "%02d:%02d:%02d" % [t.hour, t.minute, t.second]
-	_right_label.text = _clock_text + "  |  " + _fps_text + "  |  " + _mode_text
+	_right_label.text = _clock_text + "  |  " + _fps_text + "  |  " + _mode_text + "  |  " + _version_text
 
 var _fps_text: String = ""
 var _mode_text: String = ""
 var _clock_text: String = ""
+var _version_text: String = ""
 
 func set_pane_info(label: String, type_name: String):
 	var icon = PaneTypes.ALL.get(type_name, {}).get("icon", "?")
