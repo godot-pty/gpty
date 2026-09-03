@@ -2,7 +2,7 @@ extends Node
 # Autoload: polls GitHub Releases on startup, notifies if update available.
 # Non-blocking — runs in background, degrades silently on network errors.
 
-const REPO_OWNER := "you"
+const REPO_OWNER := "godot-pty"
 const REPO_NAME := "gpty"
 const RELEASES_URL := "https://api.github.com/repos/%s/%s/releases/latest"
 
@@ -15,14 +15,19 @@ func _ready():
 	_check()
 
 func _check():
-	var current = ProjectSettings.get_setting("application/config/version", "0.0.0")
-	if current == "0.0.0":
-		return  # dev build, skip
+	# Skip in editor and headless GUT runs — no network calls needed.
+	if OS.has_feature("editor"):
+		return
+
+	# Skip when the user has disabled update checks in settings.
+	if not SettingsManager.cfg_check_updates:
+		return
 
 	# Skip update check when installed via system package manager
 	# (AUR, apt, dnf, etc.) — updates come through the package manager.
 	if OS.get_executable_path().begins_with("/usr/"):
 		return
+	var current: String = GptyTerminal.get_app_version()
 	_http = HTTPRequest.new()
 	_http.timeout = REQUEST_TIMEOUT
 	add_child(_http)

@@ -50,6 +50,7 @@ func _build_ui():
 	_add_fps_control(t_sys)
 	var show_tb_cb = _add_show_titlebar_control(t_sys)
 	var win_mode_opt = _add_window_mode_control(t_sys)
+	var check_updates_cb = _add_check_updates_control(t_sys)
 
 	# Tab 2: Terminal
 	var t_term = _create_tab(tabs, "Terminal")
@@ -81,6 +82,9 @@ func _build_ui():
 	var t_con = _create_tab(tabs, "Concepts")
 	_add_concept_section(t_con)
 
+	# Tab 6: About
+	var t_about = _create_tab(tabs, "About")
+	_add_about_section(t_about)
 
 	v.add_child(HSeparator.new())
 
@@ -102,6 +106,7 @@ func _build_ui():
 		SettingsManager.cfg_window_mode = win_mode_opt.selected
 		SettingsManager.cfg_reasoning_max_turns = int(reason_spins[0].value)
 		SettingsManager.cfg_reasoning_max_turn_bytes = int(reason_spins[1].value)
+		SettingsManager.cfg_check_updates = check_updates_cb.button_pressed
 		SettingsManager.save_settings()
 	)
 	bg.add_child(_debounce_timer)
@@ -114,8 +119,9 @@ func _build_ui():
 	reason_spins[0].value_changed.connect(func(_v): _debounce_timer.start())
 	reason_spins[1].value_changed.connect(func(_v): _debounce_timer.start())
 	show_tb_cb.toggled.connect(func(_pressed): _debounce_timer.start())
+	check_updates_cb.toggled.connect(func(_pressed): _debounce_timer.start())
 
-	_add_reset_button(v, shape_opt, blink_cb, blink_spin, scroll_spin, dims, cursor_px, color_btns, fs_spin, show_tb_cb, win_mode_opt, reason_spins)
+	_add_reset_button(v, shape_opt, blink_cb, blink_spin, scroll_spin, dims, cursor_px, color_btns, fs_spin, show_tb_cb, win_mode_opt, reason_spins, check_updates_cb)
 
 func _create_tab(tabs: TabContainer, title: String) -> VBoxContainer:
 	var sc = ScrollContainer.new()
@@ -319,6 +325,13 @@ func _add_window_mode_control(v: VBoxContainer) -> OptionButton:
 	v.add_child(hb)
 	return opt
 
+func _add_check_updates_control(v: VBoxContainer) -> CheckBox:
+	var cb = CheckBox.new(); cb.name = "CheckUpdatesCb"; cb.text = "Check for updates on startup"
+	cb.add_theme_font_size_override("font_size", 12)
+	cb.button_pressed = SettingsManager.cfg_check_updates
+	v.add_child(cb)
+	return cb
+
 func _add_scheme_picker(v: VBoxContainer):
 	_add_file_picker(v, "Color scheme:", SettingsManager.cfg_color_scheme_path, [["*.txt; *.json; *.csv", "Scheme files"]], func(path: String):
 		SettingsManager.cfg_color_scheme_path = path
@@ -377,7 +390,7 @@ func _reset_colors(btns: Array):
 			(btns[i][1] as ColorPickerButton).color = defaults[i]
 		else:
 			(btns[i] as ColorPickerButton).color = defaults[i]
-func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: CheckBox, blink_spin: SpinBox, scroll_spin: SpinBox, dims: Array, cursor_px: Array, color_btns: Array, fs_spin: SpinBox, show_tb_cb: CheckBox, win_mode_opt: OptionButton, reason_spins: Array):
+func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: CheckBox, blink_spin: SpinBox, scroll_spin: SpinBox, dims: Array, cursor_px: Array, color_btns: Array, fs_spin: SpinBox, show_tb_cb: CheckBox, win_mode_opt: OptionButton, reason_spins: Array, check_updates_cb: CheckBox):
 	var btn = Button.new(); btn.text = "Reset to defaults"
 	btn.add_theme_font_size_override("font_size", 12)
 	btn.pressed.connect(func():
@@ -402,6 +415,7 @@ func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: Chec
 		SettingsManager.cfg_show_titlebar = true
 		SettingsManager.cfg_reasoning_max_turns = 16
 		SettingsManager.cfg_reasoning_max_turn_bytes = 65536
+		SettingsManager.cfg_check_updates = true
 		SettingsManager.save_settings()
 		shape_opt.selected = 0
 		blink_cb.button_pressed = true
@@ -416,6 +430,7 @@ func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: Chec
 		show_tb_cb.button_pressed = true
 		reason_spins[0].value = 16
 		reason_spins[1].value = 65536
+		check_updates_cb.button_pressed = true
 		SettingsManager.cfg_window_mode = 0
 		win_mode_opt.selected = 0
 	)
@@ -452,8 +467,32 @@ func _add_env_control(v: VBoxContainer) -> TextEdit:
 	v.add_child(te)
 	return te
 
+var _version_label: Label
 var _concept_list: VBoxContainer
 var _concept_terminal: GptyTerminal  # any terminal for global concept FFI
+
+func _add_about_section(v: VBoxContainer):
+	_version_label = Label.new()
+	_version_label.name = "VersionLabel"
+	_version_label.text = "gpty v" + GptyTerminal.get_app_version()
+	_version_label.add_theme_font_size_override("font_size", 14)
+	v.add_child(_version_label)
+
+	v.add_child(HSeparator.new())
+
+	var ipc_row = HBoxContainer.new()
+	ipc_row.add_child(_lbl("IPC protocol:"))
+	var ipc_val = Label.new()
+	ipc_val.text = "2.0"
+	ipc_val.add_theme_font_size_override("font_size", 12)
+	ipc_row.add_child(ipc_val)
+	v.add_child(ipc_row)
+
+	var url_lbl = Label.new()
+	url_lbl.name = "RepoUrl"
+	url_lbl.text = "github.com/godot-pty/gpty"
+	url_lbl.add_theme_font_size_override("font_size", 12)
+	v.add_child(url_lbl)
 
 func _add_concept_section(v: VBoxContainer):
 	_concept_terminal = _workspace.get_terminal_for_ffi()
