@@ -3,7 +3,7 @@ title: gpty v0.1.0
 date: 2026-07-21
 ---
 
-First release!
+First release! 6 days, 193 commits. Feels like we're in a state that could be pushed up to remote. The app launches and we have the basics in place. A terminal! And a tiling grid! Concepts engine still very alpha and a work in progress.
 
 <!--more-->
 
