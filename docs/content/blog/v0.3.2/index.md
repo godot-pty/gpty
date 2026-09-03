@@ -3,7 +3,7 @@ title: gpty v0.3.2
 date: 2026-08-13
 ---
 
-Fifth release — security hardening from an external audit, plus a round of test-coverage and documentation work.
+Fifth release — security hardening, plus a round of test-coverage and documentation work. Ran an external audit to weed out any egregious mishaps (no guarantee that all were caught). Added some much-needed test coverage. And onwards we go, at vibe-speed!
 
 <!--more-->
 
