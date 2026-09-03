@@ -3,7 +3,7 @@ title: gpty v0.2.0
 date: 2026-08-08
 ---
 
-Second release.
+Second release. Minor improvements, still a very alpha feel to it. Experimenting with window modes, a status bar - VS Code has been the inspiration for the status bar.
 
 <!--more-->
 
