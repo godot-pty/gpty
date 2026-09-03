@@ -3,7 +3,7 @@ title: gpty v0.3.1
 date: 2026-08-12
 ---
 
-Fourth release — stability, Windows support, and concept management.
+Fourth release — stability, Windows support, and concept management. Minor release - exploring concept management and extensibility. Added some basic QoL features and tested out the Windows build. I don't own a Mac so I'll have to rely on the community (if anyone ever finds this piece of software that is).
 
 <!--more-->
 
