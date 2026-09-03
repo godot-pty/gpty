@@ -7,7 +7,7 @@
 #[cfg(unix)]
 use std::collections::{HashMap, VecDeque};
 #[cfg(unix)]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(unix)]
 use std::sync::{LazyLock, Mutex};
 
@@ -67,6 +67,84 @@ static SESSIONS: LazyLock<Mutex<HashMap<String, SessionCapability>>> =
 #[cfg(unix)]
 static EVENTS: LazyLock<Mutex<VecDeque<OmpSemanticEvent>>> =
     LazyLock::new(|| Mutex::new(VecDeque::new()));
+
+// ── Event subscriptions (gpty → clients over the event socket) ─────────
+// Subscribers receive bounded JSON event lines via `eventsPoll`. Push
+// transport (server-initiated writes on a held connection) is not v1.
+#[cfg(unix)]
+static SUBSCRIPTIONS: LazyLock<Mutex<HashMap<String, VecDeque<String>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+#[cfg(unix)]
+static NEXT_SUB_ID: AtomicU64 = AtomicU64::new(1);
+#[cfg(unix)]
+const MAX_SUBSCRIPTIONS: usize = 64;
+#[cfg(unix)]
+const MAX_QUEUED_EVENTS: usize = 256;
+
+/// Fan an event out to every active subscription queue (bounded).
+/// No-op on Windows (no event listener there).
+#[cfg_attr(not(unix), allow(unused_variables))]
+pub fn emit_event(event_json: &str) {
+    #[cfg(unix)]
+    if let Ok(mut subs) = SUBSCRIPTIONS.lock() {
+        for queue in subs.values_mut() {
+            if queue.len() >= MAX_QUEUED_EVENTS {
+                queue.pop_front();
+            }
+            queue.push_back(event_json.to_string());
+        }
+    }
+}
+
+#[cfg(unix)]
+fn subscribe_handler() -> HandlerFn {
+    std::sync::Arc::new(|_params| {
+        Box::pin(async move {
+            let sub_id = format!("sub-{}", NEXT_SUB_ID.fetch_add(1, Ordering::Relaxed));
+            if let Ok(mut subs) = SUBSCRIPTIONS.lock()
+                && subs.len() < MAX_SUBSCRIPTIONS
+            {
+                subs.insert(sub_id.clone(), VecDeque::new());
+                return Ok(json!({ "subscription_id": sub_id }));
+            }
+            Err(gpty_ipc::protocol::JsonRpcError::new(
+                -32001,
+                "subscription limit reached",
+            ))
+        })
+    })
+}
+
+#[cfg(unix)]
+fn events_poll_handler() -> HandlerFn {
+    std::sync::Arc::new(|params| {
+        Box::pin(async move {
+            let sub_id = params
+                .get("subscription_id")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let limit = params
+                .get("limit")
+                .and_then(Value::as_u64)
+                .unwrap_or(64)
+                .min(256) as usize;
+            if let Ok(mut subs) = SUBSCRIPTIONS.lock()
+                && let Some(queue) = subs.get_mut(sub_id)
+            {
+                let events: Vec<Value> = queue
+                    .drain(..limit.min(queue.len()))
+                    .filter_map(|s| serde_json::from_str(&s).ok())
+                    .collect();
+                return Ok(json!({ "events": events }));
+            }
+            Err(gpty_ipc::protocol::JsonRpcError::new(
+                -32002,
+                "unknown subscription",
+            ))
+        })
+    })
+}
+
 #[cfg(unix)]
 static STARTED: AtomicBool = AtomicBool::new(false);
 
@@ -264,6 +342,8 @@ pub fn ensure_server_started() {
             loop {
                 let mut server = IpcServer::new(&socket_path);
                 server.register("ompEvent", event_handler());
+                server.register("subscribe", subscribe_handler());
+                server.register("eventsPoll", events_poll_handler());
                 log::info!("OMP event server starting on {socket_path}");
                 if let Err(error) = server.serve().await {
                     log::error!("OMP event server error: {error}; retrying in {backoff:?}");

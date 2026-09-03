@@ -325,6 +325,64 @@ impl GptyTerminal {
         self.with_grid(|g| GString::from(&g.title()), GString::new())
     }
 
+    /// Plain-text snapshot of the pane: screen plus scrollback, oldest
+    /// first, newline-joined, capped at `limit` lines (1..=2000).
+    #[func]
+    fn get_plain_text(&self, limit: i64) -> GString {
+        self.with_grid(
+            |g| {
+                let joined = g.plain_text(limit.clamp(1, 2000) as usize).join("\n");
+                GString::from(joined.as_str())
+            },
+            GString::new(),
+        )
+    }
+
+    /// Process status primitives as JSON: pid, running, exit_code, idle_ms.
+    #[func]
+    fn get_status(&self) -> GString {
+        self.with_grid(
+            |g| {
+                let s = &g.status;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let idle_ms = s.last_output_unix_ms.map(|t| now.saturating_sub(t));
+                let json = serde_json::json!({
+                    "pid": s.pid,
+                    "running": s.exit_code.is_none(),
+                    "exit_code": s.exit_code,
+                    "idle_ms": idle_ms,
+                })
+                .to_string();
+                GString::from(json.as_str())
+            },
+            GString::from("{}"),
+        )
+    }
+
+    /// Newest-first scan of the recent-lines ring for `pattern` (standard
+    /// Rust `regex` — ReDoS-safe, 1024-char cap). Returns the first matching
+    /// line or an empty string. Backs `waitForOutput`.
+    #[func]
+    fn check_lines(&self, pattern: GString) -> GString {
+        self.with_grid(
+            |g| {
+                g.first_matching_line(&pattern.to_string())
+                    .map(|l| GString::from(l.as_str()))
+                    .unwrap_or_default()
+            },
+            GString::new(),
+        )
+    }
+
+    /// Fan a JSON event out to event-socket subscribers. No-op on Windows.
+    #[func]
+    fn emit_event(event_json: GString) {
+        omp_events::emit_event(&event_json.to_string());
+    }
+
     // ── Scrollback ──────────────────────────────────────────────────
 
     /// Scroll up by `lines` (back in terminal history).
