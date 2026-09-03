@@ -9,7 +9,7 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 
 - [ ] Dynamic Shaders — GPU shader-based visual effects for terminal backgrounds and overlays (CRT scanlines, glassmorphism, noise)
 - [ ] Reactive Environments — ambient visual feedback triggered by concept engine events (e.g., red tint when a test fails, green particles on build success)
-- [ ] Inspector / Reasoning follow-ups — host-tools bridge and OpenAI-compatible HTTP still planned. Provider-specific CLI adapters follow the v0.5.1 generic `CliBackend` lane: documented hooks/extensions only, never token reuse or TUI scraping.
+- [ ] Inspector / Reasoning follow-ups — host-tools bridge and OpenAI-compatible HTTP still planned. Provider-specific CLI adapters follow the v0.5.2 generic `CliBackend` lane: documented hooks/extensions only, never token reuse or TUI scraping.
 - [ ] FFI fuzz testing — automated fuzz testing of the terminal grid's binary interface to catch crashes and security issues
 - [ ] Instanced-quad renderer (alacritty-style glyph atlas + per-instance color) — evidence-gated: revisit only if render batching plus flood rate-limiting still shows frame-time pain. Godot already GPU-composites the canvas; a full Rust-side texture pipeline is deep custom work (atlas management, eviction, per-cell truecolor uploads) for a small incremental gain.
 - [ ] Rust-side IPC param validation — deserialize and validate IPC request params in Rust (`gpty-ipc`) before queuing to GDScript; GDScript handlers remain untyped. (TEMP1 P2 carryover.)
@@ -29,7 +29,7 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [ ] Grid wire protocol — `term_get_diff` / `term_input` over the socket, reusing `TermGrid`'s packed flat arrays as the wire format.
 - [ ] Attach/reattach — GUI close leaves the daemon running; reopen attaches to the live workspace; `gpty attach` over SSH; `HistoryStore` serves pane read and scrollback across restarts.
 
-## v0.5.2 — Plugin Ecosystem
+## v0.5.3 — Plugin Ecosystem
 
 - [ ] Plugin manifest — `gpty-plugin.toml` (id, name, version, min_gpty_version, platforms, build/startup commands, actions, events, link handlers) plus gpty-native `[[concepts]]` and `[[profiles]]` sections so a plugin can be pure JSON — zero code.
 - [ ] Plugin install & lifecycle — `gpty plugin install <owner>/<repo>@ref` (clone, manifest validation with size/count/path caps, review dialog reusing the Workspace Trust pattern, pinned revision, per-plugin log dir) and `list` / `enable` / `disable` / `run` / `logs`. The entire CLI is the plugin API (`GPTY_BIN_PATH`); commands are argv arrays, never shell-evaluated.
@@ -38,7 +38,7 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [ ] Plugin registry — JSON index repo + browse page on the docs site; submission by PR.
 - [ ] God-object split — split `workspace.gd` (1034 lines) / `terminal_pane.gd` (833) / `terminal_manager.gd` (624) into focused files (IPC dispatch, profile/layout restore, search subsystem); concept routing already lives in `concept_router.gd`. Do it alongside the plugin work, which touches `workspace.gd` heavily. (TEMP1 modularization carryover.)
 
-## v0.5.1 — Agent State & Adapters
+## v0.5.2 — Agent State & Adapters
 
 - [ ] AgentState model — `AgentState` enum (Idle / Working / NeedsAttention / Completed / Failed) in `gpty-core`, with tiered detection: Tier 1 capability-authenticated events (authoritative), Tier 2 OSC state declaration (published standard; AGENTS.md constraints), Tier 3 regex/idle/exit heuristics (display-only). No `ToolRunning`-via-exit-code — foreground-command exits are not reliably attributable in a PTY.
 - [ ] Titlebar state badges — Phosphor status badges on pane titlebars in `terminal_pane.gd` (pulsing amber = NeedsAttention, spinner = Working, check = Completed, warning = Failed). Display only; badge state never feeds decisions.
@@ -50,8 +50,17 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [x] App version & build info — Settings gains an About tab showing `gpty v<get_app_version()>`, the pinned IPC protocol version, and the repo URL; the status bar shows the live version as the rightmost entry. (Deferred from v0.5.0.)
 - [ ] Render batching — merge consecutive same-attribute cell runs into single draw calls (glyph-run batching) in `terminal_pane.gd` `_draw()`, cutting the per-frame canvas-item count; measure frame time under flood output and scroll before/after. (Deferred from v0.5.0.)
 - [ ] UI Thread DoS mitigation — rate-limit terminal rendering when a PTY floods output (e.g., `cat /dev/urandom`), preventing the UI thread from locking up. (Deferred from v0.5.0.)
+- [ ] Terminal mouse reporting — forward mouse events to the PTY when apps enable tracking (DECSET 1000/1002/1006, SGR-encoded), so herdr's built-in pop-ups, lazygit, and nvim mouse mode work inside panes. Mode state comes from `alacritty_terminal`; UI selection/scroll behavior unchanged when reporting is off.
 
-## v0.5.0 — ADE Foundation & Persistence
+## v0.5.1 — Persistence
+
+- [ ] SQLite + FTS5 history backend — wire the existing `HistoryStore` (SQLite + FTS5, tested but unused in production) into pane lifecycle and session restore. Scrollback is currently lost on restart; this makes it persistent and full-text searchable, and backs `paneRead` across restarts.
+- [ ] Tab/workspace switching — switch between independent sets of panes within the same window. Each workspace has its own layout, profile, and scrollback. Deferred from v0.3.0; prerequisite for the daemon-era workspace model.
+- [ ] Scrollback restore on restart — reload persisted history lines by `attachment_id` when a pane reopens, so scrollback survives restarts (builds on the v0.5.0 stable public pane IDs).
+- [ ] History full-text search — surface the FTS5 store's `search()` in the terminal search UI so old output stays findable after restart.
+- [ ] History retention setting — `cfg_history_lines` (default 10 000) clamping the per-pane cap.
+
+## v0.5.0 — ADE Foundation
 
 - [x] Rebranding & positioning — README, docs landing, and CLI copy reposition gpty as an ADE ("graphical ADE: a PTY foundation with a public API"). De-OMP the shipped defaults: "OMP Workspace" profile renamed to "Agent Workspace"; `@gpty/omp-events` remains the first adapter, not the identity. Name stays `gpty` (positioning, not renaming). Same commit: updated every "OMP Workspace" reference in AGENTS.md (structure comment + Inspector/Reasoning section) and the docs site.
 - [x] Ecosystem presets — shipped profiles for herdr, lazygit, nvim, claude, and OMP in `profiles.default.json`, backed by per-tile `command` support in profile restore (`command` > legacy `shell` > default, all through `sanitize_shell`).
@@ -63,8 +72,6 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [x] IPC version sourcing — the IPC `version` response now comes from the crate via the static `GptyTerminal.get_app_version()` (`env!("CARGO_PKG_VERSION")`, `crates/gpty-gdext/src/lib.rs`); `workspace.gd` no longer hardcodes "0.3.0". (TEMP1 carryover.)
 - [ ] MCP expansion — `pane-read`, `pane-status`, `pane-wait`, `agent-status-list`, `broadcast-input` (tagged pane set; see AGENTS.md security), and pane tags (persisted, sanitized like `attachment_id`). Same commit: refresh the AGENTS.md MCP tools list and count (14 → 19).
 - [x] ADE boundary & security rules in AGENTS.md — layer model, non-goals, and OSC/plugin/broadcast constraints (the "why not" record).
-- [ ] SQLite + FTS5 history backend — wire the existing `HistoryStore` (SQLite + FTS5, tested but unused in production) into pane lifecycle and session restore. Scrollback is currently lost on restart; this makes it persistent and full-text searchable, and backs `paneRead` across restarts.
-- [ ] Tab/workspace switching — switch between independent sets of panes within the same window. Each workspace has its own layout, profile, and scrollback. Deferred from v0.3.0; prerequisite for the daemon-era workspace model.
 
 ## v0.4.0 — Inspector & Reasoning
 
