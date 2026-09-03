@@ -42,6 +42,106 @@
           }
         }
       ]
+    },
+    {
+      "id": "herdr",
+      "name": "Herdr",
+      "builtin": true,
+      "description": "Run the herdr agent orchestrator in a full-screen terminal.",
+      "tiles": [
+        {
+          "col": 0,
+          "row": 0,
+          "cspan": 12,
+          "rspan": 12,
+          "settings": {
+            "type": "terminal",
+            "pane_name": "Herdr",
+            "attachment_id": "herdr",
+            "command": "herdr"
+          }
+        }
+      ]
+    },
+    {
+      "id": "lazygit",
+      "name": "Lazygit",
+      "builtin": true,
+      "description": "Run lazygit, the terminal UI for Git, in a full-screen terminal.",
+      "tiles": [
+        {
+          "col": 0,
+          "row": 0,
+          "cspan": 12,
+          "rspan": 12,
+          "settings": {
+            "type": "terminal",
+            "pane_name": "Lazygit",
+            "attachment_id": "lazygit",
+            "command": "lazygit"
+          }
+        }
+      ]
+    },
+    {
+      "id": "nvim",
+      "name": "Neovim",
+      "builtin": true,
+      "description": "Open Neovim in a full-screen terminal.",
+      "tiles": [
+        {
+          "col": 0,
+          "row": 0,
+          "cspan": 12,
+          "rspan": 12,
+          "settings": {
+            "type": "terminal",
+            "pane_name": "Neovim",
+            "attachment_id": "nvim",
+            "command": "nvim"
+          }
+        }
+      ]
+    },
+    {
+      "id": "claude",
+      "name": "Claude Code",
+      "builtin": true,
+      "description": "Run Claude Code in a full-screen terminal.",
+      "tiles": [
+        {
+          "col": 0,
+          "row": 0,
+          "cspan": 12,
+          "rspan": 12,
+          "settings": {
+            "type": "terminal",
+            "pane_name": "Claude Code",
+            "attachment_id": "claude",
+            "command": "claude"
+          }
+        }
+      ]
+    },
+    {
+      "id": "omp",
+      "name": "OMP",
+      "builtin": true,
+      "description": "Run OMP in a full-screen terminal.",
+      "tiles": [
+        {
+          "col": 0,
+          "row": 0,
+          "cspan": 12,
+          "rspan": 12,
+          "settings": {
+            "type": "terminal",
+            "pane_name": "OMP",
+            "attachment_id": "omp",
+            "command": "omp"
+          }
+        }
+      ]
     }
   ]
 }

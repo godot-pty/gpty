@@ -444,11 +444,13 @@ func _do_restore(tiles: Array[Dictionary]):
 		if body == null: continue
 		body.apply_settings(settings)
 
-		# For terminals: apply global defaults and shell override
+		# For terminals: apply global defaults, then the per-tile command.
+		# "command" carries a tool override (e.g. "herdr", "lazygit", "nvim");
+		# "shell" is the legacy shell-binary key.  Priority: command > shell > default.
+		# Both run through sanitize_shell — profile data is untrusted.
 		if type_name == "terminal":
-			var sh: String = PaneTypes.sanitize_shell(
-				settings.get("shell", td.get("shell", "")),
-				SettingsManager.cfg_shell_command)
+			var raw = settings.get("command", settings.get("shell", td.get("shell", "")))
+			var sh: String = PaneTypes.sanitize_shell(raw, SettingsManager.cfg_shell_command)
 			SettingsManager.apply_to_terminal(body)
 			body.shell_command = sh
 
@@ -996,10 +998,10 @@ func _do_activate(profile: Dictionary):
 		if body == null: continue
 		body.apply_settings(settings)
 
+		# Same command-priority logic as _do_restore (kept in sync).
 		if type_name == "terminal":
-			var sh: String = PaneTypes.sanitize_shell(
-				settings.get("shell", td.get("shell", "")),
-				SettingsManager.cfg_shell_command)
+			var raw = settings.get("command", settings.get("shell", td.get("shell", "")))
+			var sh: String = PaneTypes.sanitize_shell(raw, SettingsManager.cfg_shell_command)
 			SettingsManager.apply_to_terminal(body)
 			body.shell_command = sh
 
