@@ -113,6 +113,15 @@ impl EventListener for TitleListener {
         }
     }
 }
+/// Process status primitives for the terminal, updated by the engine task
+/// and read by the gdext bridge. Display-oriented; never a decision input.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TermStatus {
+    pub pid: Option<u32>,
+    pub exit_code: Option<i32>,
+    pub last_output_unix_ms: Option<u64>,
+    pub started_unix_ms: u64,
+}
 
 pub struct TermGrid {
     term: Term<TitleListener>,
@@ -134,7 +143,15 @@ pub struct TermGrid {
     line_count: u64,
     /// Optional SQLite-backed history store for persistent scrollback.
     pub history: Option<Arc<std::sync::Mutex<crate::history::HistoryStore>>>,
+    /// Process/liveness primitives written by the engine task.
+    pub status: TermStatus,
+    /// Bounded ring of recent committed plain-text lines (newest last).
+    /// Backs `waitForOutput`.
+    pub recent_lines: std::collections::VecDeque<String>,
 }
+
+/// Cap on `recent_lines` per terminal.
+pub const RECENT_LINE_CAP: usize = 512;
 
 impl TermGrid {
     /// Create a new terminal grid at the given dimensions.
@@ -165,6 +182,8 @@ impl TermGrid {
             palette: crate::color::SYSTEM_COLORS,
             line_count: 0,
             history: None,
+            status: TermStatus::default(),
+            recent_lines: std::collections::VecDeque::new(),
         }
     }
 
@@ -209,8 +228,39 @@ impl TermGrid {
                 rows[line][col] = CellInfo::from_cell(indexed.cell, &self.palette);
             }
         }
-
         rows
+    }
+
+    /// Plain-text lines of the visible screen plus scrollback, oldest
+    /// first, most recent last. No ANSI, no trailing spaces, wide-char
+    /// spacers skipped. Capped at `limit` lines (most recent kept).
+    /// This backs `paneRead`.
+    pub fn plain_text(&self, limit: usize) -> Vec<String> {
+        let content = self.term.renderable_content();
+        let mut by_line: std::collections::BTreeMap<i32, String> =
+            std::collections::BTreeMap::new();
+        for indexed in content.display_iter {
+            let ch = indexed.cell.c;
+            if ch == '\0' {
+                // Zero-width spacer following a wide character.
+                continue;
+            }
+            by_line.entry(indexed.point.line.0).or_default().push(ch);
+        }
+        let mut out: Vec<String> = by_line
+            .into_values()
+            .map(|mut s| {
+                while s.ends_with(' ') {
+                    s.pop();
+                }
+                s
+            })
+            .collect();
+        if out.len() > limit {
+            let skip = out.len() - limit;
+            out.drain(..skip);
+        }
+        out
     }
     pub fn get_grid_updates(&mut self, force_full: bool) -> GridUpdate {
         let offset_changed = self.term.grid().display_offset() != self.last_full_offset;
@@ -384,14 +434,36 @@ impl TermGrid {
         self.generation += 1;
     }
 
-    /// Store a completed output line in the optional SQLite history.
+    /// Store a completed output line in the optional SQLite history and the
+    /// recent-lines ring (backs `waitForOutput`).
     pub fn store_line(&mut self, line: &str) {
         self.line_count += 1;
-        if let Some(ref history) = self.history
+        self.recent_lines.push_back(line.to_string());
+        if self.recent_lines.len() > RECENT_LINE_CAP {
+            self.recent_lines.pop_front();
+        }
+        if let Some(history) = &self.history
             && let Ok(h) = history.lock()
         {
             let _ = h.append(self.line_count as i64, line);
         }
+    }
+
+    /// First recent line (newest-first scan) matching `pattern`, or `None`.
+    /// Uses the standard `regex` crate — ReDoS-safe. Pattern capped at 1024
+    /// chars; invalid patterns yield `None`.
+    pub fn first_matching_line(&self, pattern: &str) -> Option<String> {
+        if pattern.is_empty() || pattern.len() > 1024 {
+            return None;
+        }
+        let Ok(re) = regex::Regex::new(pattern) else {
+            return None;
+        };
+        self.recent_lines
+            .iter()
+            .rev()
+            .find(|l| re.is_match(l))
+            .cloned()
     }
     /// Search the full grid (scrollback + visible) for lines matching `pattern`.
     ///

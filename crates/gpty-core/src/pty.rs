@@ -73,6 +73,21 @@ pub struct PtyHandle {
     _read_thread: thread::JoinHandle<()>,
 }
 
+impl PtyHandle {
+    /// OS process id of the child shell, when the platform exposes one.
+    pub fn process_id(&self) -> Option<u32> {
+        self._child.process_id()
+    }
+
+    /// Non-blocking exit reaping. `None` while the child is still running.
+    pub fn try_wait(&mut self) -> Option<i32> {
+        self._child
+            .try_wait()
+            .ok()
+            .flatten()
+            .map(|s| s.exit_code() as i32)
+    }
+}
 impl Drop for PtyHandle {
     fn drop(&mut self) {
         let _ = self._child.kill();

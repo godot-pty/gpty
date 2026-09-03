@@ -240,6 +240,13 @@ impl WorkspaceEngine {
 /// events. User-initiated UntilStop triggers (typed Enter) are unaffected.
 const POST_RESIZE_CONCEPT_SUPPRESS_MS: u64 = 750;
 
+/// Current wall-clock time in unix milliseconds, for status primitives.
+fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 fn concept_match_suppressed(
     deadline: Option<tokio::time::Instant>,
     now: tokio::time::Instant,
@@ -530,6 +537,14 @@ async fn run_terminal_task(
     mut stdin_rx: mpsc::UnboundedReceiver<StdinInput>,
     grid: Option<Arc<Mutex<TermGrid>>>,
 ) {
+    // Initialize status primitives: pid and start time are known at spawn.
+    if let Some(g) = &grid
+        && let Ok(mut locked) = g.lock()
+    {
+        locked.status.pid = pty_handle.process_id();
+        locked.status.started_unix_ms = unix_ms();
+    }
+
     let mut line_parser = crate::parser::LineParser::new();
 
     // A safe "inactive" deadline (1 year from now) that won't overflow.
@@ -569,6 +584,12 @@ async fn run_terminal_task(
             }
             msg = pty_rx.recv() => {
                 let Some(bytes) = msg else { break; };
+                // Update liveness: any PTY output means the pane was active.
+                if let Some(g) = &grid
+                    && let Ok(mut locked) = g.lock()
+                {
+                    locked.status.last_output_unix_ms = Some(unix_ms());
+                }
                 let lines = line_parser.feed(&bytes);
 
                 if ctx.session.is_active() {
@@ -701,6 +722,14 @@ async fn run_terminal_task(
                 }
             }
         }
+    }
+
+    // Task exit: the PTY read side closed, so the child has exited (or the
+    // pane was torn down). Record the exit code for paneStatus/paneRun.
+    if let Some(g) = &grid
+        && let Ok(mut locked) = g.lock()
+    {
+        locked.status.exit_code = pty_handle.try_wait();
     }
 }
 #[cfg(test)]
