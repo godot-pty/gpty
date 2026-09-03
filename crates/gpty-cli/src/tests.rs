@@ -72,6 +72,7 @@ async fn new_pane_roundtrip_params_and_output() {
         "bottom",
         None,
         true,
+        &["ci".to_string()],
         true,
     )
     .await
@@ -132,7 +133,7 @@ async fn invalid_pane_type_never_reaches_server() {
     )
     .await;
     let client = IpcClient::new(&socket, Duration::from_secs(5));
-    let err = commands::new_pane::run(&client, "obsever", None, "bottom", None, true, true)
+    let err = commands::new_pane::run(&client, "obsever", None, "bottom", None, true, &[], true)
         .await
         .expect_err("invalid pane type must fail client-side");
     let _ = std::fs::remove_file(&socket);

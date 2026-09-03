@@ -122,6 +122,7 @@ func build_wrapper(shell: String, rows: int, cols: int) -> Control:
 	var w = _build_wrapper_body(body, title)
 
 	SettingsManager.apply_to_terminal(body)
+	body.ensure_attachment_id()
 	body.shell_command = shell if shell != "" else SettingsManager.cfg_shell_command
 
 	body.title_changed.connect(func(t: String):

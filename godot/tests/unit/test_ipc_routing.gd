@@ -72,8 +72,10 @@ func test_list_panes_each_entry_has_required_fields():
 	# Then: each entry has id, type, title, col, row, cspan, rspan, focused
 	var entry = result.panes[0]
 	assert_true(entry.has("id"), "pane entry should have id")
+	assert_true(entry.has("label"), "pane entry should have label")
 	assert_true(entry.has("type"), "pane entry should have type")
 	assert_true(entry.has("title"), "pane entry should have title")
+	assert_true(entry.has("tags"), "pane entry should have tags")
 	assert_true(entry.has("col"), "pane entry should have col")
 	assert_true(entry.has("row"), "pane entry should have row")
 	assert_true(entry.has("cspan"), "pane entry should have cspan")
@@ -167,11 +169,12 @@ func _build_list_panes_response() -> Dictionary:
 		if body == null:
 			continue
 		panes.append({
-			"id": body.pane_label,
+			"id": body.attachment_id,
+			"label": body.pane_label,
 			"type": body._pane_type(),
 			"title": body.get("_last_title") if "_last_title" in body else "",
 			"col": t.col, "row": t.row, "cspan": t.cspan, "rspan": t.rspan,
-			"focused": body == _tm.last_body,
+			"tags": body.tags,
 		})
 	return {"panes": panes, "count": panes.size()}
 

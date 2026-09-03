@@ -15,6 +15,9 @@ pub struct NewPaneParams {
     pub split: SplitDirection,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Pane tags for broadcast targeting (each sanitized like attachment_id).
+    #[serde(default)]
+    pub tags: Vec<String>,
     #[serde(default = "default_true")]
     pub focus: bool,
 }
@@ -72,6 +75,7 @@ pub struct LayoutLoadParams {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NewPaneResponse {
     pub pane_id: String,
+    pub label: String,
     #[serde(rename = "type")]
     pub pane_type: String,
 }
@@ -80,6 +84,7 @@ pub struct NewPaneResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PaneInfo {
     pub id: String,
+    pub label: String,
     #[serde(rename = "type")]
     pub pane_type: String,
     pub title: String,
@@ -90,6 +95,15 @@ pub struct PaneInfo {
     pub cspan: i64,
     pub rspan: i64,
     pub focused: bool,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+/// Parameters for the `broadcast` method.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BroadcastParams {
+    pub tags: Vec<String>,
+    pub text: String,
 }
 
 /// Response for `listPanes`.
@@ -144,6 +158,7 @@ mod tests {
             split: SplitDirection::Bottom,
             title: Some("My Pane".into()),
             focus: true,
+            tags: vec![],
         };
         let json = serde_json::to_string(&params).unwrap();
         let back: NewPaneParams = serde_json::from_str(&json).unwrap();
@@ -220,19 +235,22 @@ mod tests {
     #[test]
     fn roundtrip_new_pane_response() {
         let resp = NewPaneResponse {
-            pane_id: "T5".into(),
+            pane_id: "pane-abc12345".into(),
+            label: "T5".into(),
             pane_type: "code_viewer".into(),
         };
         let json = serde_json::to_string(&resp).unwrap();
         let back: NewPaneResponse = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.pane_id, "T5");
+        assert_eq!(back.pane_id, "pane-abc12345");
+        assert_eq!(back.label, "T5");
         assert_eq!(back.pane_type, "code_viewer");
     }
 
     #[test]
     fn roundtrip_pane_info() {
         let info = PaneInfo {
-            id: "T1".into(),
+            id: "pane-abc12345".into(),
+            label: "T1".into(),
             pane_type: "terminal".into(),
             title: "bash".into(),
             command: Some("/bin/zsh".into()),
@@ -241,10 +259,11 @@ mod tests {
             cspan: 1,
             rspan: 1,
             focused: true,
+            tags: vec!["ci".into()],
         };
         let json = serde_json::to_string(&info).unwrap();
         let back: PaneInfo = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.id, "T1");
+        assert_eq!(back.id, "pane-abc12345");
         assert_eq!(back.command.as_deref(), Some("/bin/zsh"));
     }
 
@@ -252,7 +271,8 @@ mod tests {
     fn roundtrip_list_panes_response() {
         let resp = ListPanesResponse {
             panes: vec![PaneInfo {
-                id: "T1".into(),
+                id: "pane-abc12345".into(),
+                label: "T1".into(),
                 pane_type: "terminal".into(),
                 title: "bash".into(),
                 command: None,
@@ -261,6 +281,7 @@ mod tests {
                 cspan: 1,
                 rspan: 1,
                 focused: true,
+                tags: vec![],
             }],
             count: 1,
         };
@@ -336,6 +357,7 @@ mod tests {
             split: SplitDirection::Right,
             title: None,
             focus: false,
+            tags: vec!["ci".into()],
         };
         let v = serde_json::to_value(&params).unwrap();
         assert_eq!(v["type"], "terminal");
@@ -356,6 +378,7 @@ mod tests {
             split: SplitDirection::Bottom,
             title: None,
             focus: true,
+            tags: vec![],
         };
         let v = serde_json::to_value(&params).unwrap();
         assert_eq!(v["type"], "code-viewer");
@@ -381,7 +404,8 @@ mod tests {
     #[test]
     fn wire_pane_info_skips_optional() {
         let info = PaneInfo {
-            id: "T1".into(),
+            id: "pane-abc12345".into(),
+            label: "T1".into(),
             pane_type: "terminal".into(),
             title: "bash".into(),
             command: None,
@@ -390,9 +414,10 @@ mod tests {
             cspan: 1,
             rspan: 1,
             focused: true,
+            tags: vec![],
         };
         let v = serde_json::to_value(&info).unwrap();
-        assert_eq!(v["id"], "T1");
+        assert_eq!(v["id"], "pane-abc12345");
         assert_eq!(v["type"], "terminal");
         assert!(
             v.get("command").is_none(),
@@ -403,7 +428,8 @@ mod tests {
     #[test]
     fn wire_pane_info_with_command() {
         let info = PaneInfo {
-            id: "T2".into(),
+            id: "pane-abc67890".into(),
+            label: "T2".into(),
             pane_type: "terminal".into(),
             title: "zsh".into(),
             command: Some("/bin/zsh".into()),
@@ -412,6 +438,7 @@ mod tests {
             cspan: 1,
             rspan: 1,
             focused: false,
+            tags: vec!["backend".into()],
         };
         let v = serde_json::to_value(&info).unwrap();
         assert_eq!(v["command"], "/bin/zsh");
@@ -420,11 +447,13 @@ mod tests {
     #[test]
     fn wire_new_pane_response_shape() {
         let resp = NewPaneResponse {
-            pane_id: "T5".into(),
+            pane_id: "pane-abc12345".into(),
+            label: "T5".into(),
             pane_type: "code_viewer".into(),
         };
         let v = serde_json::to_value(&resp).unwrap();
-        assert_eq!(v["pane_id"], "T5");
+        assert_eq!(v["pane_id"], "pane-abc12345");
+        assert_eq!(v["label"], "T5");
         assert_eq!(v["type"], "code_viewer");
     }
 

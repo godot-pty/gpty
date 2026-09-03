@@ -64,6 +64,26 @@ static func sanitize_attachment_id(v) -> String:
 	valid.compile("^[a-z][a-z0-9_-]{0,31}$")
 	return v if valid.search(v) != null else ""
 
+## Generate a stable public id for panes created without a saved one.
+## Matches the attachment_id pattern ([a-z][a-z0-9_-]{0,31}).
+static func generate_attachment_id() -> String:
+	const CHARS := "abcdefghijklmnopqrstuvwxyz0123456789"
+	var s := "pane-"
+	for _i in 8:
+		s += CHARS[randi() % CHARS.length()]
+	return s
+
+## Sanitize a pane-tag list from untrusted layout/profile/IPC data.
+## Each tag follows the attachment_id pattern; oversize/foreign values drop.
+static func sanitize_tags(raw: Array) -> Array:
+	var out: Array = []
+	for t in raw:
+		if t is String and out.size() < 16:
+			var clean := sanitize_attachment_id(t)
+			if clean != "" and not out.has(clean):
+				out.append(clean)
+	return out
+
 ## Action commands appended after the pane-type entries in the palette.
 const PALETTE_ACTIONS: Array[String] = [
 	"close active", "spawn 16 terminals", "settings", "reset layout", "save", "load",

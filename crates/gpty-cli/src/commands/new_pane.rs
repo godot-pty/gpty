@@ -9,7 +9,8 @@ const VALID_TYPES: &[&str] = &[
     "reasoning",
     "observer",
 ];
-
+// Mirrors the IPC request shape one-to-one; grouping would obscure dispatch.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     client: &IpcClient,
     pane_type: &str,
@@ -17,6 +18,7 @@ pub async fn run(
     split: &str,
     title: Option<&str>,
     focus: bool,
+    tags: &[String],
     json: bool,
 ) -> anyhow::Result<()> {
     // Validate pane type with "did you mean?" suggestions.
@@ -49,6 +51,11 @@ pub async fn run(
     if let Some(t) = title {
         params["title"] = serde_json::Value::String(t.to_string());
     }
+    params["tags"] = serde_json::Value::Array(
+        tags.iter()
+            .map(|t| serde_json::Value::String(t.clone()))
+            .collect(),
+    );
     super::call_and_format(client, "newPane", params, json).await
 }
 

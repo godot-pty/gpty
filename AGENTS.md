@@ -133,7 +133,7 @@ AI agents and coding harnesses can discover these via the `mcp.json` that's at t
 {"mcpServers": {"gpty": {"command": "gpty", "args": ["mcp"]}}}
 ```
 
-Tools: `new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `layout-save`, `layout-load`, `layout-list`, `daemon-start`, `daemon-stop`, `daemon-status`, `concept-list`, `concept-toggle`, `version`.
+Tools: `new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `layout-save`, `layout-load`, `layout-list`, `daemon-start`, `daemon-stop`, `daemon-status`, `concept-list`, `concept-toggle`, `pane-read`, `pane-status`, `pane-run`, `pane-wait`, `broadcast`, `version`.
 
 The MCP tool schemas are auto-generated from clap command definitions in `crates/gpty-cli/src/commands/schema.rs`. Nested subcommands (`daemon`, `layout`) are flattened into prefixed tools. Self-referential tools (`mcp`, `schema`) are excluded.
 
@@ -164,7 +164,7 @@ See `skill://gpty-omp-integration` for usage patterns.
 - Indentation: tabs
 - Icons: All glyphs live in `icons.gd` as `const` strings (Phosphor Regular PUA codepoints via `\uXXXX`). To add: pick from phosphoricons.com, get the codepoint, add a `const`. Call `Icons.style_button(btn)` after setting `btn.text`.
 - Profiles: named terminal-layout snapshots. User data lives in `user://profiles.json`; shipped layouts live in `res://profiles.default.json` and are never written back. `ProfileManager.get_all_profiles()` returns built-ins first. Save dialog is built inline in `workspace.gd`. Activation clears the workspace (`_reset()`) then rebuilds tiles — follows `_do_restore()` pattern. Built-in profiles cannot be deleted from the sidebar.
-- Attachment IDs: persist `attachment_id` (`[a-z][a-z0-9_-]{0,31}`) on panes. Companion panes (Reasoning) attach by this stable id, not ephemeral labels like `T1`. `pane_label` is reassigned on restore and must not be used as a saved link.
+- Attachment IDs: persist `attachment_id` (`[a-z][a-z0-9_-]{0,31}`) on panes. Companion panes (Reasoning) attach by this stable id, not ephemeral labels like `T1`. `pane_label` is reassigned on restore and must not be used as a saved link. It is also the **public IPC id**: every pane has one (auto-generated `pane-XXXXXXXX` via `PaneTypes.generate_attachment_id()` when none was saved — `PaneBody.apply_settings` is the choke point), `newPane` returns it and `listPanes` reports it as `id` alongside the display `label`. IPC pane targeting accepts either `id` or the legacy `label`.
 - JSON → typed arrays: `JSON.parse()` returns untyped `Array`. Assignment to `Array[Dictionary]` fails at runtime. Always iterate and build the typed array element-by-element: `for item in raw: if item is Dictionary: typed.append(item)`.
 - Private members: underscore prefix (`_cell_w`, `_settings_panel`)
 - Config vars: `_cfg_` prefix (`_cfg_cursor_shape`)

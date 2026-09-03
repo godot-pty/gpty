@@ -9,6 +9,8 @@ signal title_changed(new_title: String)
 ## Stable logical link used by profiles and companion panes. Unlike
 ## `pane_label`, this value survives save/restore.
 @export var attachment_id := ""
+## Broadcast-targeting tags; each sanitized like attachment_id.
+@export var tags: Array = []
 @export var font_size: int = 14:
 	set(value):
 		font_size = value
@@ -37,12 +39,22 @@ func apply_settings(settings: Dictionary):
 			"font_size":
 				if v is int or v is float:
 					font_size = int(v)
+			"tags":
+				if v is Array:
+					tags = PaneTypes.sanitize_tags(v)
 			"type":
 				pass
 			_:
 				_set_typed(key, v)
+	ensure_attachment_id()
 	if settings.has("pane_name") and settings.get("pane_name") is String:
 		title_changed.emit(pane_name if pane_name != "" else _default_title())
+
+## Every pane has a stable public id. Generate one when no saved
+## attachment_id was applied (fresh panes, legacy wrappers).
+func ensure_attachment_id():
+	if attachment_id == "":
+		attachment_id = PaneTypes.generate_attachment_id()
 
 ## Set a property only when the incoming value's type matches the
 ## property's declared type — layout JSON is untrusted and may carry
@@ -65,8 +77,7 @@ func _set_typed(key: String, v):
 			if v is bool:
 				set(key, v)
 		_:
-			if typeof(v) == t:
-				set(key, v)
+			pass
 
 func _default_title() -> String:
 	return get_class()
@@ -76,6 +87,7 @@ func _get_layout_state() -> Dictionary:
 		"type": _pane_type(),
 		"pane_name": pane_name,
 		"attachment_id": attachment_id,
+		"tags": tags.duplicate(),
 		"font_size": font_size,
 	}
 

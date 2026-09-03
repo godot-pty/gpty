@@ -77,6 +77,10 @@ enum Commands {
         /// Focus the new pane
         #[arg(short, long, default_value = "true")]
         focus: bool,
+
+        /// Comma-separated pane tags for broadcast targeting
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
     },
 
     /// List all active panes
@@ -127,6 +131,54 @@ enum Commands {
     Concept {
         #[command(subcommand)]
         action: ConceptAction,
+    },
+
+    /// Read pane output (screen plus scrollback)
+    PaneRead {
+        /// Target pane ID or label
+        pane_id: String,
+
+        /// Max lines (1-2000)
+        #[arg(long, default_value = "200")]
+        lines: i64,
+    },
+
+    /// Pane status; omit the pane for every pane's status
+    PaneStatus {
+        /// Target pane ID or label (omit for all panes)
+        pane_id: Option<String>,
+    },
+
+    /// Run a command in a new terminal pane
+    PaneRun {
+        /// Command to run
+        #[arg(long)]
+        command: String,
+    },
+
+    /// Wait for a pane's output to match a regex pattern
+    PaneWait {
+        /// Target pane ID or label
+        pane_id: String,
+
+        /// Regex pattern (Rust regex syntax, max 1024 chars)
+        #[arg(long)]
+        pattern: String,
+
+        /// Server-side deadline in ms (100-60000)
+        #[arg(long, default_value = "10000")]
+        timeout_ms: u64,
+    },
+
+    /// Inject text into every tagged terminal pane
+    Broadcast {
+        /// Comma-separated pane tags
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+
+        /// Text to send
+        #[arg(short, long)]
+        text: String,
     },
 
     /// Run as MCP server over stdio

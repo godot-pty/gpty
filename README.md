@@ -85,7 +85,7 @@ gpty ships an MCP (Model Context Protocol) server so AI agents and coding harnes
 {"mcpServers": {"gpty": {"command": "gpty", "args": ["mcp"]}}}
 ```
 
-- **Direct**: run `gpty mcp` over stdio — exposes a tool per CLI subcommand (`new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `layout-*`, `daemon-*`, `concept-*`, `version`).
+- **Direct**: run `gpty mcp` over stdio — exposes a tool per CLI subcommand (`new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `pane-read`, `pane-status`, `pane-run`, `pane-wait`, `broadcast`, `layout-*`, `daemon-*`, `concept-*`, `version`).
 - **Manifest**: `gpty schema --format mcp` prints the MCP tool manifest (JSON Schema, works without a running GUI) for hand-off to agent configurations.
 
 Tool schemas are generated from the same clap definitions as the CLI (`crates/gpty-cli/src/commands/schema.rs`), so they cannot drift from `gpty --help`.

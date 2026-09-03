@@ -42,15 +42,36 @@ gpty new-pane --pane-type terminal --command "cargo test" --title "tests"
 
 ### Read another pane's output
 
-`gpty list-panes` reports every pane and its id. Direct scrollback reads are not yet shipped; until they are, watch the target pane's grid directly or route its output to a concept capture.
+`gpty list-panes` reports every pane by stable id (`id`) and display label (`label`).
+Read a pane's screen plus scrollback:
 
-### Waiting for output patterns (upcoming)
+```
+gpty pane-read <pane> --lines 200
+```
 
-These tools are not yet available and must not be relied on:
+### Run a command and watch its status
 
-- `waitForOutput` — server-owned pattern wait with a timeout.
-- `agent-status-list` — list agent state across panes.
-- `broadcast-input` — send input to a tagged set of panes.
+```
+gpty pane-run --command "cargo test"
+gpty pane-status <pane>        # pid, running, exit_code, idle_ms
+gpty pane-status               # every pane (agent-status-list)
+```
+
+### Waiting for output patterns
+
+`gpty pane-wait <pane> --pattern "tests passed" --timeout-ms 30000` blocks until the
+pane's recent output matches (Rust regex syntax), then prints the matching line.
+
+### Fan-out with tags
+
+Create panes with tags (`gpty new-pane --tags ci,backend`), then inject into every
+matching pane at once: `gpty broadcast --tags ci --text "make test"`. Text is written
+verbatim — the target shell interprets it.
+
+### Subscribe to events
+
+Over the event socket (`gpty-events.sock`): `subscribe` returns a `subscription_id`;
+`eventsPoll` drains bounded JSON events (concept matches, pane spawn/kill).
 
 ## Installation
 

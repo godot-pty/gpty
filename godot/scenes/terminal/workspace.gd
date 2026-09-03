@@ -593,11 +593,14 @@ func _on_sidebar_toggled():
 		if lbl: lbl.visible = _sidebar.offset_right > 50
 	_apply_layout()
 
+var _pending_waits: Dictionary = {}
+
 func _process(_delta: float):
 	# Concept event polling — must run even before sidebar is ready
 	_poll_agent_events()
 	_poll_concept_events()
 	_poll_ipc_requests()
+	_poll_pending_waits()
 	if _sidebar == null: return
 	# FPS counter update (throttled to ~4 Hz)
 	if Engine.get_process_frames() % 15 == 0:
@@ -679,7 +682,12 @@ func _poll_concept_events():
 				var source := str(body.pane_label) if body.get("pane_label") != null else "?"
 				ToastManager.warn("No %s pane open for '%s' output (from %s)" % [
 					pane_label, ev.get("concept_name", ""), source])
-
+			GptyTerminal.emit_event(JSON.stringify({
+				"type": "concept",
+				"name": str(ev.get("concept_name", "")),
+				"source": str(body.attachment_id),
+				"target": str(ev.get("target_pane_type", "")),
+			}))
 # ═══════════════════════════════════════════════════════════════════════
 # IPC bridge — polls Rust IPC requests from _process
 # ═══════════════════════════════════════════════════════════════════════
@@ -698,10 +706,50 @@ func _poll_ipc_requests():
 			params = JSON.parse_string(params_str)
 			if params == null:
 				params = {}
+		if method == "paneWait":
+			var w_body = _find_pane_by_label(str(params.get("pane_id", "")))
+			if w_body == null or not w_body.has_method("_terminal"):
+				GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error("Pane '%s' not found" % params.get("pane_id", ""))))
+				continue
+			var w_pattern = str(params.get("pattern", ""))
+			if w_pattern == "" or w_pattern.length() > 1024:
+				GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error("Invalid wait pattern")))
+				continue
+			var w_timeout = clampi(int(params.get("timeout_ms", 10000)), 100, 60000)
+			_pending_waits[str(id)] = {
+				"attachment_id": w_body.attachment_id,
+				"pattern": w_pattern,
+				"deadline_ms": Time.get_ticks_msec() + w_timeout,
+			}
+			continue
 		var result = _handle_ipc_method(method, params)
 		var success = not (result is Dictionary and result.has("error"))
 		var result_json = JSON.stringify(result) if typeof(result) != TYPE_STRING else result
 		GptyTerminal.respond_ipc(id, success, result_json)
+
+# Poll registered paneWait requests each frame: respond on first regex match
+# or deadline. Matching happens in Rust (standard regex crate) per pane.
+func _poll_pending_waits():
+	if _pending_waits.is_empty():
+		return
+	var now = Time.get_ticks_msec()
+	var done: Array = []
+	for wid in _pending_waits:
+		var w = _pending_waits[wid]
+		var wbody = _find_pane_by_label(str(w.get("attachment_id", "")))
+		if wbody == null or not wbody.has_method("_terminal"):
+			GptyTerminal.respond_ipc(int(wid), false, JSON.stringify(_ipc_error("Pane gone")))
+			done.append(wid)
+			continue
+		var line = str(wbody._terminal.check_lines(w["pattern"]))
+		if line != "":
+			GptyTerminal.respond_ipc(int(wid), true, JSON.stringify({"matched": true, "line": line}))
+			done.append(wid)
+		elif now >= w["deadline_ms"]:
+			GptyTerminal.respond_ipc(int(wid), true, JSON.stringify({"matched": false, "timed_out": true}))
+			done.append(wid)
+	for wid in done:
+		_pending_waits.erase(wid)
 
 func _handle_ipc_method(method: String, params):
 	match method:
@@ -711,10 +759,34 @@ func _handle_ipc_method(method: String, params):
 				return _ipc_error("Unknown pane type: %s" % type_name)
 			var shell: String = PaneTypes.sanitize_shell(
 				params.get("command"), SettingsManager.cfg_shell_command)
-			var body = _spawn_pane(type_name, {"shell_command": shell})
+			var np_tags: Array = PaneTypes.sanitize_tags(params.get("tags", []))
+			var body = _spawn_pane(type_name, {"shell_command": shell, "tags": np_tags})
 			if body == null:
 				return _ipc_error("Grid is full")
-			return {"pane_id": body.pane_label, "type": type_name}
+			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "spawned", "pane_id": body.attachment_id, "label": body.pane_label}))
+			return {"pane_id": body.attachment_id, "label": body.pane_label, "type": type_name}
+		"paneRead":
+			var pr_body = _find_pane_by_label(str(params.get("pane_id", "")))
+			if pr_body == null or not pr_body.has_method("_terminal"):
+				return _ipc_error("Pane '%s' not found" % params.get("pane_id", ""))
+			var pr_lines = int(params.get("lines", 200))
+			return {"text": str(pr_body._terminal.get_plain_text(clampi(pr_lines, 1, 2000)))}
+		"paneStatus":
+			var ps_body = _find_pane_by_label(str(params.get("pane_id", "")))
+			if ps_body == null or not ps_body.has_method("_terminal"):
+				return _ipc_error("Pane '%s' not found" % params.get("pane_id", ""))
+			var ps_status = JSON.parse_string(str(ps_body._terminal.get_status()))
+			if not (ps_status is Dictionary):
+				return _ipc_error("Pane status unavailable")
+			return ps_status
+		"paneRun":
+			var run_cmd: String = PaneTypes.sanitize_shell(
+				params.get("command", ""), SettingsManager.cfg_shell_command)
+			var run_body = _spawn_pane("terminal", {"shell_command": run_cmd})
+			if run_body == null:
+				return _ipc_error("Grid is full")
+			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "spawned", "pane_id": run_body.attachment_id, "label": run_body.pane_label}))
+			return {"pane_id": run_body.attachment_id, "label": run_body.pane_label, "type": "terminal"}
 		"listPanes":
 			var panes = []
 			for t in _tm.tiles:
@@ -722,23 +794,26 @@ func _handle_ipc_method(method: String, params):
 				if body == null:
 					continue
 				panes.append({
-					"id": body.attachment_id if body.attachment_id != "" else body.pane_label,
+					"id": body.attachment_id,
+					"label": body.pane_label,
 					"type": body._pane_type(),
 					"title": body.get("_last_title") if "_last_title" in body else "",
 					"col": t.col, "row": t.row, "cspan": t.cspan, "rspan": t.rspan,
 					"focused": body == _tm.last_body,
+					"tags": body.tags,
 				})
 			return {"panes": panes, "count": panes.size()}
 		"killPane":
-			var pane_id = str(params.get("pane_id", ""))
-			if pane_id == "active" and _tm.last_body:
-				_kill(_tm.last_body)
+			var kp_pane_id = str(params.get("pane_id", ""))
+			var kp_target = null
+			if kp_pane_id == "active" and _tm.last_body:
+				kp_target = _tm.last_body
 			else:
-				var body = _find_pane_by_label(pane_id)
-				if body:
-					_kill(body)
-				else:
-					return _ipc_error("Pane '%s' not found" % pane_id)
+				kp_target = _find_pane_by_label(kp_pane_id)
+			if kp_target == null:
+				return _ipc_error("Pane '%s' not found" % kp_pane_id)
+			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "killed", "pane_id": kp_target.attachment_id, "label": kp_target.pane_label}))
+			_kill(kp_target)
 			return {"success": true}
 		"focusPane":
 			var pane_id = str(params.get("pane_id", ""))
@@ -759,6 +834,25 @@ func _handle_ipc_method(method: String, params):
 				return _ipc_error("Pane '%s' is not a terminal" % pane_id)
 			body._terminal.send_line(text)
 			return {"success": true}
+		"broadcast":
+			var b_tags: Array = PaneTypes.sanitize_tags(params.get("tags", []))
+			var b_text = str(params.get("text", ""))
+			if b_tags.is_empty() or b_text == "" or b_text.length() > 65536:
+				return _ipc_error("Invalid broadcast request")
+			var b_count = 0
+			for t in _tm.tiles:
+				var b_body = _tm._find_body(t.wrapper)
+				if b_body == null or not (b_body is TerminalPane):
+					continue
+				var b_hit = false
+				for tag in b_tags:
+					if b_body.tags.has(tag):
+						b_hit = true
+						break
+				if b_hit:
+					b_body._terminal.send_line(b_text)
+					b_count += 1
+			return {"success": true, "count": b_count}
 		"layoutSave":
 			var name = str(params.get("name", ""))
 			if name == "":

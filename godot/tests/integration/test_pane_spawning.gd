@@ -82,6 +82,11 @@ func test_pane_name_overrides_title():
 	assert_string_contains(lbl.text, "MyTerm")
 
 
+func test_spawn_applies_sanitized_tags():
+	var body = _tm.spawn_pane("terminal", {"tags": ["ci", "BAD TAG", "ci", "x" * 40]})
+	assert_not_null(body)
+	assert_eq(body.tags, ["ci"], "tags must be sanitized and deduplicated")
+
 # ── Swap via TerminalManager ──────────────────────────────────────────
 
 func test_swap_pane_preserves_tile():

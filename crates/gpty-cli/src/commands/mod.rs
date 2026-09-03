@@ -1,5 +1,6 @@
 //! Command dispatch — maps CLI subcommands to IPC RPC calls.
 
+pub(crate) mod broadcast;
 pub mod concept;
 pub mod daemon;
 pub(crate) mod focus_pane;
@@ -9,13 +10,15 @@ pub(crate) mod layout;
 pub(crate) mod list_panes;
 pub mod mcp;
 pub(crate) mod new_pane;
+pub(crate) mod pane_read;
+pub(crate) mod pane_run;
+pub(crate) mod pane_status;
+pub(crate) mod pane_wait;
 pub mod schema;
 
 use crate::Commands;
 use gpty_ipc::client::IpcClient;
 use gpty_ipc::protocol::Response;
-
-/// Dispatch a CLI command to the appropriate handler.
 pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow::Result<()> {
     match cmd {
         Commands::NewPane {
@@ -24,6 +27,7 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
             split,
             title,
             focus,
+            tags,
         } => {
             new_pane::run(
                 client,
@@ -32,6 +36,7 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
                 split,
                 title.as_deref(),
                 *focus,
+                tags,
                 json,
             )
             .await
@@ -40,6 +45,19 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
         Commands::KillPane { pane_id } => kill_pane::run(client, pane_id, json).await,
         Commands::FocusPane { pane_id } => focus_pane::run(client, pane_id, json).await,
         Commands::Inject { pane_id, text } => inject::run(client, pane_id, text, json).await,
+        Commands::PaneRead { pane_id, lines } => {
+            pane_read::run(client, pane_id, *lines, json).await
+        }
+        Commands::PaneStatus { pane_id } => {
+            pane_status::run(client, pane_id.as_deref(), json).await
+        }
+        Commands::PaneRun { command } => pane_run::run(client, command, json).await,
+        Commands::PaneWait {
+            pane_id,
+            pattern,
+            timeout_ms,
+        } => pane_wait::run(pane_id, pattern, *timeout_ms, json).await,
+        Commands::Broadcast { tags, text } => broadcast::run(client, tags, text, json).await,
         Commands::Daemon { action } => daemon::run_action(action, client, json).await,
         Commands::Concept { action } => concept::run(client, action, json).await,
         Commands::Layout { action } => layout::run(client, action, json).await,
