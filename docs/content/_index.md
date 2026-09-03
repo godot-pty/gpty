@@ -11,6 +11,7 @@ toc: false
   {{< card link="/gpty/docs" title="Documentation" icon="book-open" subtitle="Learn how gPTY works, from the PTY engine to the public agent API." >}}
   {{< card link="/gpty/blog" title="Blog" icon="pencil" subtitle="Release notes, tips, and development updates." >}}
   {{< card link="https://github.com/godot-pty/gpty" title="GitHub" icon="github" subtitle="Star, fork, or open an issue on GitHub." >}}
+  {{< card link="https://github.com/godot-pty/gpty/releases/latest" title="Download" icon="cloud-download" subtitle="Download the latest release." >}}
 {{< /cards >}}
 
 ## Features
