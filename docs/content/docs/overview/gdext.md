@@ -1,6 +1,6 @@
 ---
 title: GDExtension
-weight: 2
+weight: 4
 noHeading: true
 ---
 

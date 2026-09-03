@@ -1,6 +1,6 @@
 ---
 title: Godot Frontend
-weight: 3
+weight: 5
 noHeading: true
 ---
 
