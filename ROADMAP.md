@@ -46,8 +46,8 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [ ] Windows event listener — named-pipe event listener closes the Unix-only gap (`omp_events.rs`); Reasoning stops being fail-closed on Windows.
 - [ ] Generic CLI backend — `CliBackend` in `gpty-ai` (subprocess NDJSON bridge) beside Mock/Omp, with a backend/model picker in Inspector pane settings. Adapters use only each CLI's documented hooks — never tokens, never TUI scraping.
 - [ ] Visual Concept Graph — build concept automations visually using Godot's GraphEdit node editor. Drag-and-drop nodes for triggers, conditions, and actions without writing regex by hand. (Deferred from v0.5.0.)
-- [ ] In-app update checker — check for new GitHub releases on startup and notify users when an update is available. (Deferred from v0.5.0.)
-- [ ] App version & build info — display the running app version (matching `gpty version` and the IPC protocol version) and build information in the app UI, e.g. in Settings or an About dialog. (Deferred from v0.5.0.)
+- [x] In-app update checker — checks GitHub releases on startup and toasts when an update is available. Fixed the placeholder repo owner, sourced the current version from `GptyTerminal.get_app_version()`, gated on `OS.has_feature("editor")` (headless/test-safe), added the `check_updates` setting, and covered `_is_newer` with GUT tests. (Deferred from v0.5.0.)
+- [x] App version & build info — Settings gains an About tab showing `gpty v<get_app_version()>`, the pinned IPC protocol version, and the repo URL; the status bar shows the live version as the rightmost entry. (Deferred from v0.5.0.)
 - [ ] Render batching — merge consecutive same-attribute cell runs into single draw calls (glyph-run batching) in `terminal_pane.gd` `_draw()`, cutting the per-frame canvas-item count; measure frame time under flood output and scroll before/after. (Deferred from v0.5.0.)
 - [ ] UI Thread DoS mitigation — rate-limit terminal rendering when a PTY floods output (e.g., `cat /dev/urandom`), preventing the UI thread from locking up. (Deferred from v0.5.0.)
 
