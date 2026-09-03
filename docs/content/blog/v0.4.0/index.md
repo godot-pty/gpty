@@ -3,7 +3,7 @@ title: gpty v0.4.0
 date: 2026-08-19
 ---
 
-Seventh release — private Inspector Q&A, passive Reasoning projection, and the first OMP observability bridge.
+v0.4.0! Private Inspector Q&A, passive Reasoning projection, and the first OMP observability bridge are the highlights of this release.
 
 <!--more-->
 
