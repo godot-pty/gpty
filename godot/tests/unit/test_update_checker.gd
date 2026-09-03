@@ -1,10 +1,62 @@
 extends GutTest
-# Unit tests for UpdateChecker._is_newer — pure version comparison logic.
+# Unit tests for UpdateChecker pure helpers:
+#   _is_valid_semver — gate for any remote version string before use
+#   _is_newer        — version comparison
 # No network calls: OS.has_feature("editor") returns true in headless GUT runs.
 
-# Convenience wrapper so tests stay readable.
+# Convenience wrappers so tests stay readable.
+func _is_valid_semver(s: String) -> bool:
+	return UpdateChecker._is_valid_semver(s)
+
 func _is_newer(latest: String, current: String) -> bool:
 	return UpdateChecker._is_newer(latest, current)
+
+# ── _is_valid_semver: valid inputs ─────────────────────────────────────
+
+func test_valid_three_part():
+	assert_true(_is_valid_semver("1.2.3"))
+
+func test_valid_two_part():
+	assert_true(_is_valid_semver("0.4"))
+
+func test_valid_single_part():
+	assert_true(_is_valid_semver("5"))
+
+func test_valid_four_part():
+	assert_true(_is_valid_semver("1.2.3.4"))
+
+func test_valid_zero_release():
+	assert_true(_is_valid_semver("0.0.0"))
+
+# ── _is_valid_semver: invalid inputs ──────────────────────────────────
+
+func test_invalid_empty():
+	assert_false(_is_valid_semver(""))
+
+func test_invalid_v_prefix_not_stripped():
+	# Caller must lstrip("v") before validating — raw "v1.2.3" is rejected.
+	assert_false(_is_valid_semver("v1.2.3"))
+
+func test_invalid_alpha_component():
+	assert_false(_is_valid_semver("1.2.a"))
+
+func test_invalid_prerelease_suffix():
+	assert_false(_is_valid_semver("1.2.0-beta"))
+
+func test_invalid_negative_component():
+	assert_false(_is_valid_semver("1.-1.0"))
+
+func test_invalid_empty_component():
+	assert_false(_is_valid_semver("1..0"))
+
+func test_invalid_trailing_dot():
+	assert_false(_is_valid_semver("1.2."))
+
+func test_invalid_leading_dot():
+	assert_false(_is_valid_semver(".1.2"))
+
+func test_invalid_injection_attempt():
+	assert_false(_is_valid_semver("1.2.3; rm -rf /"))
 
 # ── equal ──────────────────────────────────────────────────────────────
 

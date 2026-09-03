@@ -54,13 +54,27 @@ func _on_response(result: int, code: int, _headers: PackedStringArray, body: Pac
 	if json == null:
 		return
 	var latest = json.get("tag_name", "").lstrip("v")
-	if latest == "" or latest == current:
+	if not _is_valid_semver(latest):
+		return
+	if latest == current:
 		return
 
 	if not _is_newer(latest, current):
 		return
 
 	ToastManager.info("Update available: v%s → v%s" % [current, latest])
+
+## Validates that _s_ is a non-empty, dot-separated string of non-negative
+## integers (e.g. "1.2.3", "0.4", "1.2.3.4").  Strips any leading "v" before
+## calling this.  Use this as the gate before _is_newer or any future action
+## (download, changelog link, etc.) that consumes a remote version string.
+func _is_valid_semver(s: String) -> bool:
+	if s.is_empty():
+		return false
+	for part in s.split("."):
+		if part.is_empty() or not part.is_valid_int() or part.to_int() < 0:
+			return false
+	return true
 
 func _is_newer(latest: String, current: String) -> bool:
 	var la = latest.split(".")
