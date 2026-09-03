@@ -27,6 +27,10 @@ const BLOCKED_ENV_KEYS: &[&str] = &[
     "GPTY_EVENT_PROTOCOL",
     "GPTY_TERMINAL_SESSION_ID",
     "GPTY_EVENT_CAPABILITY",
+    // Pane-marker vars injected as trusted runtime values by start_shell().
+    // Untrusted env (pane settings / layouts / profiles) must not override them.
+    "GPTY_ENV",
+    "GPTY_PANE_ID",
 ];
 
 /// Process-wide control credentials must never leak into child shells.
@@ -232,5 +236,59 @@ mod tests {
             sanitize_envs(&envs),
             vec![("PATH".to_string(), "/usr/bin".to_string())]
         );
+    }
+
+    // ── Pane-marker vars (GPTY_ENV, GPTY_PANE_ID) ───────────────────────────
+    // These must be dropped from *untrusted* env (pane settings, layouts,
+    // profiles) so a malicious layout cannot fake GPTY_ENV=1 to impersonate
+    // a pane. They are injected as *trusted* runtime values by start_shell(),
+    // bypassing sanitize_envs — the same two-part pattern as GPTY_EVENT_*.
+
+    #[test]
+    fn sanitize_envs_drops_gpty_env_from_untrusted() {
+        // An attacker-controlled "GPTY_ENV=1" in pane settings must be dropped.
+        let envs = vec![s("GPTY_ENV=1"), s("HOME=/root")];
+        let out = sanitize_envs(&envs);
+        assert!(
+            !out.iter().any(|(k, _)| k == "GPTY_ENV"),
+            "GPTY_ENV must be blocked from untrusted env"
+        );
+        // Unrelated key survives.
+        assert!(out.iter().any(|(k, _)| k == "HOME"));
+    }
+
+    #[test]
+    fn sanitize_envs_drops_gpty_pane_id_from_untrusted() {
+        // An attacker-controlled "GPTY_PANE_ID=spoofed" in pane settings
+        // must be dropped.
+        let envs = vec![s("GPTY_PANE_ID=spoofed"), s("HOME=/root")];
+        let out = sanitize_envs(&envs);
+        assert!(
+            !out.iter().any(|(k, _)| k == "GPTY_PANE_ID"),
+            "GPTY_PANE_ID must be blocked from untrusted env"
+        );
+        assert!(out.iter().any(|(k, _)| k == "HOME"));
+    }
+
+    #[test]
+    fn trusted_envs_contain_gpty_env_and_pane_id() {
+        // The trusted_envs vector constructed by start_shell() bypasses
+        // sanitize_envs and is applied last by PtyHandle::spawn().
+        // Verify the expected shape — both keys are valid and non-empty.
+        let attachment_id = "my-pane".to_string();
+        let trusted: Vec<(String, String)> = vec![
+            ("GPTY_ENV".to_string(), "1".to_string()),
+            ("GPTY_PANE_ID".to_string(), attachment_id.clone()),
+        ];
+        // Neither key should appear if passed through sanitize_envs
+        // (confirming they ARE blocked from the untrusted path).
+        let as_untrusted: Vec<String> = trusted.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        assert!(
+            sanitize_envs(&as_untrusted).is_empty(),
+            "GPTY_ENV and GPTY_PANE_ID must be blocked from untrusted env"
+        );
+        // But the trusted vec is well-formed for direct injection.
+        assert_eq!(trusted[0], ("GPTY_ENV".to_string(), "1".to_string()));
+        assert_eq!(trusted[1], ("GPTY_PANE_ID".to_string(), attachment_id));
     }
 }

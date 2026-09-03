@@ -84,12 +84,24 @@ impl GptyTerminal {
     ///
     /// Spawns a PTY at `rows × cols`. Call once during `_ready()`.
     ///
+    /// `pane_id` is the pane's stable `attachment_id` from GDScript. It is
+    /// injected as `GPTY_PANE_ID` so agents running inside the shell can
+    /// identify the pane they are in. If empty, the function falls back to
+    /// the per-PTY session id used for `GPTY_TERMINAL_SESSION_ID`.
+    ///
     /// # Edge cases
     /// - Calling twice replaces the previous session.
     /// - If spawning fails, the grid stays empty and `get_grid_rows()` returns `[]`.
     /// - `rows` and `cols` are clamped to ≥1.
     #[func]
-    fn start_shell(&mut self, command: GString, rows: i64, cols: i64, envs: GString) {
+    fn start_shell(
+        &mut self,
+        command: GString,
+        rows: i64,
+        cols: i64,
+        envs: GString,
+        pane_id: GString,
+    ) {
         let command = command.to_string();
         if command.is_empty() || command.len() > 1024 || command.contains('\0') {
             godot_error!("Refusing to spawn invalid shell command (empty, oversized, or NUL)");
@@ -105,19 +117,39 @@ impl GptyTerminal {
         }
         omp_events::ensure_server_started();
         let event_registration = omp_events::register_terminal().ok();
-        let trusted_envs = if let Some((session_id, capability)) = &event_registration {
-            vec![
-                (
-                    "GPTY_EVENT_SOCKET".to_string(),
-                    gpty_ipc::transport::default_event_socket_path(),
-                ),
-                ("GPTY_EVENT_PROTOCOL".to_string(), "1".to_string()),
-                ("GPTY_TERMINAL_SESSION_ID".to_string(), session_id.clone()),
-                ("GPTY_EVENT_CAPABILITY".to_string(), capability.clone()),
-            ]
+
+        let mut trusted_envs: Vec<(String, String)> = Vec::new();
+
+        // OMP event-channel vars — Unix-only; conditional on successful registration.
+        if let Some((session_id, capability)) = &event_registration {
+            trusted_envs.push((
+                "GPTY_EVENT_SOCKET".to_string(),
+                gpty_ipc::transport::default_event_socket_path(),
+            ));
+            trusted_envs.push(("GPTY_EVENT_PROTOCOL".to_string(), "1".to_string()));
+            trusted_envs.push(("GPTY_TERMINAL_SESSION_ID".to_string(), session_id.clone()));
+            trusted_envs.push(("GPTY_EVENT_CAPABILITY".to_string(), capability.clone()));
+        }
+
+        // Pane-marker vars: always injected as trusted runtime values so agents
+        // inside the shell can prove they are running inside a gpty pane.
+        // BLOCKED_ENV_KEYS prevents untrusted env (pane settings / layouts /
+        // profiles) from spoofing these values.
+        trusted_envs.push(("GPTY_ENV".to_string(), "1".to_string()));
+
+        // GPTY_PANE_ID: prefer the stable attachment_id; fall back to the
+        // per-PTY ephemeral session_id when no attachment_id was supplied.
+        let pane_id_str = pane_id.to_string();
+        let pane_id_value = if !pane_id_str.is_empty() {
+            pane_id_str
+        } else if let Some((session_id, _)) = &event_registration {
+            session_id.clone()
         } else {
-            Vec::new()
+            String::new()
         };
+        if !pane_id_value.is_empty() {
+            trusted_envs.push(("GPTY_PANE_ID".to_string(), pane_id_value));
+        }
 
         let config = TerminalConfig {
             id,

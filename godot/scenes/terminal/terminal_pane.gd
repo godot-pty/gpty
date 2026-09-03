@@ -91,7 +91,7 @@ func _ready():
 	_terminal = GptyTerminal.new()
 	_terminal.name = "GptyTerminal"
 	add_child(_terminal)
-	_terminal.start_shell(shell_command, rows, cols, shell_env)
+	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id)
 
 	if color_scheme_path != "":
 		_apply_stored_scheme()
