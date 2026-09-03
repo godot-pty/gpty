@@ -3,7 +3,7 @@ title: gpty v0.3.0
 date: 2026-08-09
 ---
 
-Third release — CLI, MCP, and AI integration.
+Third release — CLI, MCP, and AI integration. The highlight of this release is the CLI control - daemon mode. A lot of kinks and bugs to iron out, but a milestone (personal only) nevertheless.
 
 <!--more-->
 
