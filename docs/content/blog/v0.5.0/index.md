@@ -3,7 +3,7 @@ title: gpty v0.5.0
 date: 2026-09-03
 ---
 
-gpty v0.5.0 is the ADE release: a public, agent-facing API on top of the PTY foundation — stable pane IDs, pane read/status/run/wait, event subscriptions, broadcast, and a shipped agent skill.
+v0.5.0 marks the ADE release milestone - an agent-facing API on top of the PTY foundation; stable pane IDs, pane read/status/run/wait, event subscriptions, broadcast, and a shipped agent skill.
 
 <!--more-->
 
