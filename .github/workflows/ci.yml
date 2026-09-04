@@ -148,8 +148,12 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Generate Cargo.lock
-        run: cargo generate-lockfile
+      # Audit the committed Cargo.lock. Never regenerate here:
+      # generate-lockfile re-resolves to latest-compatible versions and
+      # silently rewrites the pinned graph, letting a fresh advisory in an
+      # unpinned dependency fail CI independently of what we ship.
+      - name: Verify Cargo.lock exists
+        run: test -f Cargo.lock
 
       - name: Run cargo-audit
         uses: rustsec/audit-check@v2
