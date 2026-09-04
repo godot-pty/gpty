@@ -1,5 +1,9 @@
 [gPTY](https://godot-pty.github.io/gpty/) is a graphical Agent Development Environment (ADE) — a PTY foundation with a public, agent-facing API — built on Godot and Rust. It provides a tiling terminal grid, a pub-sub concept engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output without scraping a TUI.
 
+## Built With
+
+![DeepSeek](https://shields.io) ![Gemini](https://shields.io) ![Claude](https://shields.io)
+
 ## Overview
 
 - **PTY foundation** — Spawn and manage independent shell sessions in a resizable tiling grid. Full DEC STD 070 via `alacritty_terminal`: 16/256/true color, scrollback with regex search, wrapped text selection.
