@@ -45,8 +45,14 @@ gpty/
 │   │           ├── kill_pane.rs
 │   │           ├── focus_pane.rs
 │   │           ├── inject.rs
+│   │           ├── pane_read.rs
+│   │           ├── pane_status.rs
+│   │           ├── pane_run.rs
+│   │           ├── pane_wait.rs
+│   │           ├── broadcast.rs
 │   │           ├── schema.rs
 │   │           ├── mcp.rs
+│   │           ├── concept.rs
 │   │           ├── daemon.rs
 │   │           └── layout.rs
 │   ├── gpty-ipc/               # Shared JSON-RPC 2.0 IPC transport, client, and server
@@ -65,6 +71,8 @@ gpty/
 │           └── markdown.rs     # Markdown → sanitized BBCode
 ├── extensions/
 │   └── gpty-omp-events/        # Explicit OMP plugin; dormant unless GPTY_EVENT_* is set
+├── skills/
+│   └── gpty/SKILL.md           # Bundled agent skill, printed by `gpty --skill`
 └── godot/                      # Godot 4.7 project
     ├── project.godot
     ├── gpty.gdextension
@@ -85,16 +93,19 @@ gpty/
         │   └── update_checker.gd
         ├── terminal/
         │   ├── workspace.gd        # Root controller, concept routing, profile restore
+        │   ├── concept_router.gd   # Pure concept-event routing (extracted, testable)
         │   ├── terminal_pane.gd    # Control-based renderer, keyboard, selection
         │   └── terminal_manager.gd # Tile lifecycle, split/kill/swap/spawn
         ├── ui/
         │   ├── sidebar.gd
         │   ├── settings_panel.gd
+        │   ├── status_bar.gd
         │   ├── toast_overlay.gd
         │   ├── markdown_view.gd     # Safe, debounced Markdown RichTextLabel
         │   └── icons.gd            # Phosphor icon constants
         └── panes/
             ├── pane_body.gd        # Base class + routed-content contract
+            ├── pane_types.gd       # Pane registry, sanitizers, palette command list
             ├── code_viewer.gd
             ├── file_tree.gd
             ├── inspector_pane.gd   # Private read-only OMP Q&A

@@ -3,6 +3,34 @@
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.5.0] — 2026-09-03
+
+### Added
+
+- ADE repositioning — gpty is now positioned as a graphical Agent Development Environment: a PTY foundation with a public, agent-facing API. README, docs site, and CLI copy updated; the shipped "OMP Workspace" profile is now "Agent Workspace" (attachment ids unchanged).
+- Ecosystem presets — built-in profiles for herdr, lazygit, nvim, claude, and OMP, backed by per-tile `command` support in profile restore (every command routed through `sanitize_shell`).
+- Pane env markers — `GPTY_ENV=1` and `GPTY_PANE_ID` injected as trusted runtime vars at spawn (blocked from untrusted env), so agents inside a pane can prove where they are.
+- Stable public pane IDs — every pane gets a persisted `attachment_id` (auto-generated when absent); `new-pane` returns it and `list-panes` reports `id` plus the display `label`. Targeting accepts either.
+- Pane API — `pane-read` (plain-text screen plus scrollback), `pane-status` (pid, running, exit code, idle time; no argument lists every pane), `pane-run` (spawn a command), and `pane-wait` (waitForOutput: server-held wait on a Rust `regex` scan of recent output, up to 60 s).
+- Event subscriptions — `subscribe` / `eventsPoll` on the event socket for concept matches and pane spawn/kill, with bounded per-subscriber queues.
+- Broadcast and pane tags — panes carry sanitized tags; `broadcast` injects text into every tagged terminal pane. MCP tools grow from 14 to 19.
+- Agent skill — `skills/gpty/SKILL.md` (shipped with the CLI via `gpty --skill`) teaches coding agents the full control surface, guarded by `GPTY_ENV=1`.
+- In-app update checker — startup GitHub-release check with a `check_updates` setting; notify-only and silent on failure.
+- About tab — Settings shows the live app version, the pinned IPC protocol version, and the repo URL; the status bar shows the version as well.
+
+### Changed
+
+- The IPC `version` response is sourced from the crate (`CARGO_PKG_VERSION`) instead of a hardcoded literal.
+- The palette command list lives in one place (`PaneTypes.build_palette_commands()`).
+- Remote `tag_name` values are validated as semver before any display.
+- Docs baseURL points at the current org; origin-story page and re-sequenced overview added.
+
+### Fixed
+
+- OMP `rpc_chunk` base64 decoding hardened (`as_chunks` handling).
+- README build instructions corrected (`cargo build -p gpty`).
+- MCP tool enumeration in the agent guide matches the shipped tools.
+
 ## [0.4.0] — 2026-08-19
 
 ### Added
@@ -67,6 +95,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - Cursor blink toggle redraws the terminal immediately
 - Concept editor no longer crashes when opened with an empty workspace (no terminal panes) — the Add Concept button is disabled until a terminal exists
 
+[0.5.0]: https://github.com/godot-pty/gpty/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/godot-pty/gpty/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/godot-pty/gpty/compare/v0.3.1...v0.3.2
 

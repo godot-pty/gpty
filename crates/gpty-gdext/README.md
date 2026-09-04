@@ -52,7 +52,7 @@ Inspector omp is launched as `omp --mode rpc --no-session --no-tools --no-extens
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `start_shell(cmd: String, rows: int, cols: int, envs: String)` | void | Start a PTY session (injects per-PTY event capability) |
+| `start_shell(cmd: String, rows: int, cols: int, envs: String, pane_id: String)` | void | Start a PTY session (injects per-PTY event capability, `GPTY_ENV=1`, `GPTY_PANE_ID`) |
 | `send_text(text: String)` | void | Send raw text to PTY (no newline) |
 | `send_line(text: String)` | void | Send a line to PTY (appends `\n`) |
 | `resize_grid(rows: int, cols: int)` | void | Resize grid + send SIGWINCH |
@@ -64,6 +64,15 @@ Inspector omp is launched as `omp --mode rpc --no-session --no-tools --no-extens
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `get_app_version()` | `String` | App version from `CARGO_PKG_VERSION` (static — call as `GptyTerminal.get_app_version()`) |
+
+#### Pane API & status
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_plain_text(limit: int)` | `String` | Plain-text snapshot of screen + scrollback, newline-joined, capped 1–2000 lines (backs `paneRead`) |
+| `get_status()` | `String` | JSON: `{pid, running, exit_code, idle_ms}` (backs `paneStatus`) |
+| `check_lines(pattern: String)` | `String` | First recent line matching the Rust-regex pattern, or empty (backs `waitForOutput`) |
+| `emit_event(json: String)` | void | Static — fan a JSON event out to event-socket subscribers (no-op on Windows) |
 
 #### Grid & rendering
 

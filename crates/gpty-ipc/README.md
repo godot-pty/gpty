@@ -117,11 +117,16 @@ See `crates/gpty-gdext/src/omp_events.rs` and
 
 | Method | Params | Result |
 |--------|--------|--------|
-| `newPane` | `type`, `command?`, `split?`, `title?`, `focus?` | `{pane_id, type}` |
-| `listPanes` | — | `{panes: [{id, type, title, col, row, ...}], count}` |
+| `newPane` | `type`, `command?`, `split?`, `title?`, `focus?`, `tags?` | `{pane_id, label, type}` |
+| `listPanes` | — | `{panes: [{id, label, type, title, col, row, tags, …}], count}` |
 | `killPane` | `pane_id` | `{success: true}` |
 | `focusPane` | `pane_id` | `{success: true}` |
 | `inject` | `pane_id`, `text` | `{success: true}` |
+| `paneRead` | `pane_id`, `lines?` (1–2000) | `{text}` |
+| `paneStatus` | `pane_id` | `{pid, running, exit_code, idle_ms}` |
+| `paneRun` | `command` | `{pane_id, label, type}` (exit code via `paneStatus`) |
+| `paneWait` | `pane_id`, `pattern`, `timeout_ms?` (100–60000) | `{matched, line?}` / `{matched: false, timed_out}` — response held server-side until match or deadline |
+| `broadcast` | `tags`, `text` | `{success, count}` |
 | `layoutSave` | `name` | `{success, name}` |
 | `layoutLoad` | `name` | `{success}` |
 | `layoutList` | — | `{layouts: [string]}` |
@@ -129,6 +134,9 @@ See `crates/gpty-gdext/src/omp_events.rs` and
 | `conceptToggle` | `name` | `{success, name}` |
 | `version` | — | `{version, protocol}` |
 | `shutdown` | — | `{success: true}` |
+
+The event socket additionally serves `subscribe` (→ `{subscription_id}`) and
+`eventsPoll` (→ `{events}`), draining bounded concept/pane events.
 
 ## Key Dependencies
 

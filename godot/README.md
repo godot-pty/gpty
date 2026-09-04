@@ -44,6 +44,7 @@ godot/
         ├── terminal/            # Core terminal logic
         │   ├── workspace.gd     # Grid layout, sidebar, profiles, concept routing
         │   ├── terminal_pane.gd # Control-based renderer, keyboard, selection
+        │   ├── concept_router.gd # Pure concept-event routing (extracted, testable)
         │   └── terminal_manager.gd
         ├── ui/                  # UI components
         │   ├── sidebar.gd
@@ -53,6 +54,7 @@ godot/
         │   └── icons.gd         # Phosphor icon constants
         └── panes/               # Specialty pane types
             ├── pane_body.gd
+            ├── pane_types.gd    # Pane registry, sanitizers, palette command list
             ├── code_viewer.gd
             ├── file_tree.gd
             ├── inspector_pane.gd
@@ -98,9 +100,11 @@ godot/
 Layout is auto-saved on close and auto-restored on startup via `user://layout.json`.
 
 The shipped **Agent Workspace** profile opens a normal terminal plus separate
-Inspector (private Q&A) and Reasoning (passive agent thinking) panes. It does
-not install the OMP extension or launch `omp`; the user does that in the
-terminal. Inspector does not follow the terminal conversation. Reasoning
+Inspector (private Q&A) and Reasoning (passive agent thinking) panes. Five
+single-pane ecosystem presets ship alongside it: herdr, lazygit, nvim,
+claude, and OMP — each restores one full-screen terminal running that tool.
+None of them install the OMP extension or launch `omp`; the user does that in
+the terminal. Inspector does not follow the terminal conversation. Reasoning
 requires the `@gpty/omp-events` extension and gpty's Unix event socket
 (`gpty-events.sock`); it is not available on Windows builds yet.
 

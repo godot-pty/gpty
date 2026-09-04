@@ -32,6 +32,30 @@ gpty focus-pane T2
 # Send text to a terminal pane
 gpty inject T1 --text "ls -la"
 
+# Read a pane's output (screen + scrollback)
+gpty pane-read T1 --lines 200
+
+# Pane status; no pane = every pane's status
+gpty pane-status T1
+gpty pane-status
+
+# Run a command in a new pane
+gpty pane-run --command "cargo test"
+
+# Wait for output matching a regex (Rust syntax, up to 60 s)
+gpty pane-wait T1 --pattern "tests passed" --timeout-ms 30000
+
+# Inject into every pane carrying a tag
+gpty new-pane --tags ci
+gpty broadcast --tags ci --text "make test"
+
+# Manage concept triggers
+gpty concept list
+gpty concept toggle cat_command
+
+# Print the bundled agent skill (for coding agents inside a pane)
+gpty --skill
+
 # Output JSON Schema for AI tool integration
 gpty schema
 gpty schema --format mcp
@@ -60,11 +84,17 @@ gpty version
 
 | Command | Description |
 |---------|-------------|
-| `new-pane` | Open a new pane (`-t, --pane-type` terminal/code_viewer/file_tree/inspector/reasoning, `-c, --command` command, `-s, --split` split, `-f, --focus` focus). `observer` is a deprecated alias for `inspector`. |
-| `list-panes` | List all active panes with IDs, types, and positions |
-| `kill-pane` | Close a pane by ID or `"active"` |
-| `focus-pane` | Focus a pane by ID |
-| `inject` | Send text to a terminal pane by ID |
+| `new-pane` | Open a new pane (`-t, --pane-type` terminal/code_viewer/file_tree/inspector/reasoning, `-c, --command` command, `-s, --split` split, `-f, --focus` focus, `--tags` broadcast tags). `observer` is a deprecated alias for `inspector`. |
+| `list-panes` | List all active panes with stable ids, labels, types, and positions |
+| `kill-pane` | Close a pane by id or `"active"` |
+| `focus-pane` | Focus a pane by id |
+| `inject` | Send text to a terminal pane by id |
+| `pane-read` | Read a pane's plain-text output (screen + scrollback, `--lines` 1–2000) |
+| `pane-status` | Status primitives for a pane (`pid`, `running`, `exit_code`, `idle_ms`); no argument lists every pane |
+| `pane-run` | Run a command in a new terminal pane (`--command`) |
+| `pane-wait` | Wait for a pane's output to match a regex (`--pattern`, `--timeout-ms` 100–60000) |
+| `broadcast` | Inject text into every pane carrying one of the given `--tags` |
+| `concept` | List or toggle concept triggers (`list`, `toggle <name>`) |
 | `schema` | Output JSON Schema describing all commands (`--format mcp` for MCP manifest) |
 | `mcp` | Run as MCP server over stdio (for AI tool integration) |
 | `daemon` | Manage the GUI: `start`, `stop`, `status` |
@@ -75,6 +105,7 @@ gpty version
 
 | Flag | Description |
 |------|-------------|
+| `--skill` | Print the bundled agent skill (SKILL.md) and exit |
 | `--json` | Machine-readable JSON output |
 | `--socket <path>` | Override IPC socket path |
 | `--timeout <ms>` | Connection timeout in milliseconds (default 5000) |
