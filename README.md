@@ -2,7 +2,11 @@
 
 ## Built With
 
-![DeepSeek](https://shields.io) ![Gemini](https://shields.io) ![Claude](https://shields.io)
+<p align="center">
+  <img src="https://img.shields.io/badge/DeepSeek-4D6BFE?style=for-the-badge&logo=deepseek&logoColor=white" alt="DeepSeek">
+  <img src="https://img.shields.io/badge/Gemini-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Gemini">
+  <img src="https://img.shields.io/badge/Claude-D97757?style=for-the-badge&logo=claude&logoColor=white" alt="Claude">
+</p>
 
 ## Overview
 
@@ -122,4 +126,4 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
 
 ## License
 
-This project is licensed under the Apache License, Version 2.0 -- see [LICENSE](LICENSE) for details.
+This project is licensed under the Apache License, Version 2.0 - see [LICENSE](LICENSE) for details.
