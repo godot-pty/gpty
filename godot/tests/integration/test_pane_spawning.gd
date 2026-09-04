@@ -83,7 +83,7 @@ func test_pane_name_overrides_title():
 
 
 func test_spawn_applies_sanitized_tags():
-	var body = _tm.spawn_pane("terminal", {"tags": ["ci", "BAD TAG", "ci", "x" * 40]})
+	var body = _tm.spawn_pane("terminal", {"tags": ["ci", "BAD TAG", "ci", "x".repeat(40)]})
 	assert_not_null(body)
 	assert_eq(body.tags, ["ci"], "tags must be sanitized and deduplicated")
 
