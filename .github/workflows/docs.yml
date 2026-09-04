@@ -38,8 +38,16 @@ jobs:
 
       - name: Verify mirrored README baked into overview
         run: |
-          grep -q "Agent Development Environment" docs/public/docs/overview/index.html
-          ! grep -q "static site generator" docs/public/docs/overview/index.html
+          OVERVIEW=docs/public/docs/overview/index.html
+          if ! grep -q "Agent Development Environment" "$OVERVIEW"; then
+            echo "=== built overview head (first 1200 bytes) ==="
+            head -c 1200 "$OVERVIEW"
+            echo
+            echo "=== assets/repo/README.md head (first 300 bytes) ==="
+            head -c 300 docs/assets/repo/README.md 2>/dev/null || echo "(missing)"
+            exit 1
+          fi
+          ! grep -q "static site generator" "$OVERVIEW"
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
