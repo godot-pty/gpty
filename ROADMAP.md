@@ -59,6 +59,7 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [ ] Scrollback restore on restart — reload persisted history lines by `attachment_id` when a pane reopens, so scrollback survives restarts (builds on the v0.5.0 stable public pane IDs).
 - [ ] History full-text search — surface the FTS5 store's `search()` in the terminal search UI so old output stays findable after restart.
 - [ ] History retention setting — `cfg_history_lines` (default 10 000) clamping the per-pane cap.
+- [ ] Live pane-API smoke — exercise the v0.5.0 surface end-to-end against a running GUI: `new-pane` → `inject` → `pane-read` → `pane-wait` → `broadcast` over tagged panes, plus `pane-status` exit codes from `pane-run`. Unit/GUT covered but never smoke-tested live.
 
 ## v0.5.0 — ADE Foundation
 
