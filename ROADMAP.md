@@ -1,9 +1,9 @@
 # Roadmap
 
-The source of truth for all gpty features — past, present, and planned.
-GitHub Issues are used for user-reported bugs and discussions, not roadmap tracking.
+The source of truth for all `gPTY` features; past, present, and planned.
 
-Strategic direction: gpty evolves from a multi-terminal emulator into an Agent Development Environment (ADE) — a graphical PTY foundation with a public, agent-facing API. Boundary rules and non-goals live in AGENTS.md under "ADE Architecture Boundary"; this file tracks the release plan.
+- GitHub Issues will be used for user-reported bugs and discussions, not roadmap tracking.
+- Boundary rules and non-goals live in AGENTS.md under "ADE Architecture Boundary".
 
 ## Future
 
@@ -15,13 +15,13 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 
 ## v1.0.0 — Public Launch
 
-Launch is deferred: gpty stays below 1.0.0 until either the project gains a growing, active userbase or the 0.x feature-set is exhausted — code signing and broad distribution are only worth pursuing once one of those is true.
+Launch is deferred: `gPTY` stays below 1.0.0 until either the project gains a growing, active userbase or the 0.x feature-set is exhausted — code signing and broad distribution are only worth pursuing once one of those is true.
 
 - [ ] Distribution — install.sh, Homebrew tap, AUR, winget (promoted from Future: launch blockers), and GitHub releases.
 - [ ] Code signing — macOS notarization + Windows Authenticode (promoted from Future: SmartScreen/Gatekeeper warnings are launch-killers).
 - [ ] Docs — agent guide, plugin authoring guide, socket API reference (from the existing schema generator), 60-second quick start.
 - [ ] Community infrastructure — plugin registry live, examples repo, community channel.
-- [ ] Launch criteria — 3+ first-class agent adapters, 10+ example plugins, the reference workflow demo (agent runs tests in a pane while the user watches in the GUI), and a working headless reattach story — all verified before the public launch post.
+- [ ] Launch criteria — first-class agent adapters, example plugins, the reference workflow demo (agent runs tests in a pane while the user watches in the GUI), and a working headless reattach story — all verified before the public launch post.
 
 ## v0.8.0 — Headless Daemon & Reattach
 
@@ -30,18 +30,7 @@ Launch is deferred: gpty stays below 1.0.0 until either the project gains a grow
 - [ ] Attach/reattach — GUI close leaves the daemon running; reopen attaches to the live workspace; `gpty attach` over SSH; `HistoryStore` serves pane read and scrollback across restarts.
 - [ ] Rust-side IPC param validation — deserialize and validate IPC request params in Rust (`gpty-ipc`) before dispatch. Promoted from Future: the daemon refactor is the natural home (Rust owns the request path end-to-end), and validating the pre-daemon GUI queue would be throwaway work. GDScript handlers remain untyped.
 
-## v0.7.0 — Knowledge Base & Wiki
-
-- [ ] Wiki pane type — `wiki` in `PaneTypes.ALL`; opens a vault at an absolute directory path validated by `sanitize_tile` (same trust rule as code_viewer/file_tree).
-- [ ] Vault model — local-first directory of plain Markdown files (potentially Obsidian-compatible: `.md` on disk, no proprietary format), indexed with full-text search in SQLite FTS5 (reuses the v0.5.1 history engine).
-- [ ] Markdown editor & preview — edit notes with live preview through the existing sanitized Markdown→BBCode pipeline (v0.4.0); source/rendered toggle like code_viewer.
-- [ ] Wikilinks & backlinks — `[[note-name]]` linking, per-note backlink panel, unresolved-link detection.
-- [ ] Link graph view — Godot-drawn graph of notes as nodes and wikilinks as edges (GraphEdit experience from the v0.5.2 Visual Concept Graph).
-- [ ] Agent access — vault search/read exposed via CLI and MCP so agents can query the knowledge base through the public pane-API primitives.
-- [ ] Wiki security notes in AGENTS.md — vault content is user data but untrusted input to the renderer: sanitized Markdown pipeline only; wikilinks resolve within the vault (no arbitrary file reads).
-- [ ] Placement note — scheduled ahead of v1.0.0: all prerequisites land earlier (v0.4.0 Markdown rendering, v0.5.1 FTS5, v0.5.2 GraphEdit), and the wiki is not gated on any v1.0.0 launch criterion.
-
-## v0.6.0 — Media Pane
+## v0.7.0 — Media Pane
 
 - [ ] Media pane type — `media` in `PaneTypes.ALL`; plays local audio/video from an absolute file path validated by `sanitize_tile` (same trust rule as code_viewer/file_tree). Remote/URL streaming deferred — a separate trust boundary.
 - [ ] Rust media backend — demux/decode in Rust: `symphonia` for audio; video decoding via pure-Rust codec crates or `ffmpeg` bindings (license review at design time: LGPL build vs pure-Rust). Output is packed flat arrays of decoded frames/samples — the same FFI packing pattern as the terminal grid.
@@ -52,7 +41,18 @@ Launch is deferred: gpty stays below 1.0.0 until either the project gains a grow
 - [ ] Media security notes in AGENTS.md — media files are untrusted input: memory-safe/audited decoders only (the concept-engine ReDoS stance extended to codec parsing), demux/decode size caps, no sandboxing claims (plugin trust-model language).
 - [ ] Standalone by design — ships alone with no dependency on or coupling with any other feature, so its A/V infrastructure risk gates nothing else.
 
-## v0.5.3 — Plugin Ecosystem
+## v0.6.0 — Knowledge Base & Wiki
+
+- [ ] Wiki pane type — `wiki` in `PaneTypes.ALL`; opens a vault at an absolute directory path validated by `sanitize_tile` (same trust rule as code_viewer/file_tree).
+- [ ] Vault model — local-first directory of plain Markdown files (potentially Obsidian-compatible: `.md` on disk, no proprietary format), indexed with full-text search in SQLite FTS5 (reuses the v0.5.1 history engine).
+- [ ] Markdown editor & preview — edit notes with live preview through the existing sanitized Markdown→BBCode pipeline (v0.4.0); source/rendered toggle like code_viewer.
+- [ ] Wikilinks & backlinks — `[[note-name]]` linking, per-note backlink panel, unresolved-link detection.
+- [ ] Link graph view — Godot-drawn graph of notes as nodes and wikilinks as edges (GraphEdit experience from the v0.5.4 Visual Concept Graph).
+- [ ] Agent access — vault search/read exposed via CLI and MCP so agents can query the knowledge base through the public pane-API primitives.
+- [ ] Wiki security notes in AGENTS.md — vault content is user data but untrusted input to the renderer: sanitized Markdown pipeline only; wikilinks resolve within the vault (no arbitrary file reads).
+- [ ] Placement note — scheduled ahead of v1.0.0: all prerequisites land earlier (v0.4.0 Markdown rendering, v0.5.1 FTS5, v0.5.4 Visual Concept Graph), and the wiki is not gated on any v1.0.0 launch criterion.
+
+## v0.5.5 — Plugin Ecosystem
 
 - [ ] Plugin manifest — `gpty-plugin.toml` (id, name, version, min_gpty_version, platforms, build/startup commands, actions, events, link handlers) plus gpty-native `[[concepts]]` and `[[profiles]]` sections so a plugin can be pure JSON — zero code.
 - [ ] Plugin install & lifecycle — `gpty plugin install <owner>/<repo>@ref` (clone, manifest validation with size/count/path caps, review dialog reusing the Workspace Trust pattern, pinned revision, per-plugin log dir) and `list` / `enable` / `disable` / `run` / `logs`. The entire CLI is the plugin API (`GPTY_BIN_PATH`); commands are argv arrays, never shell-evaluated.
@@ -61,6 +61,16 @@ Launch is deferred: gpty stays below 1.0.0 until either the project gains a grow
 - [ ] Plugin registry — JSON index repo + browse page on the docs site; submission by PR.
 - [ ] God-object split — split `workspace.gd` (1034 lines) / `terminal_pane.gd` (833) / `terminal_manager.gd` (624) into focused files (IPC dispatch, profile/layout restore, search subsystem); concept routing already lives in `concept_router.gd`. Do it alongside the plugin work, which touches `workspace.gd` heavily.
 
+## v0.5.4 — Visual Concept Graph
+
+- [ ] Visual Concept Graph — build concept automations visually using Godot's GraphEdit node editor. Drag-and-drop nodes for triggers, conditions, and actions without writing regex by hand. (Deferred from v0.5.0.)
+
+## v0.5.3 — Terminal Performance & Mouse
+
+- [ ] Render batching — merge consecutive same-attribute cell runs into single draw calls (glyph-run batching) in `terminal_pane.gd` `_draw()`, cutting the per-frame canvas-item count; measure frame time under flood output and scroll before/after. (Deferred from v0.5.0.)
+- [ ] UI Thread DoS mitigation — rate-limit terminal rendering when a PTY floods output (e.g., `cat /dev/urandom`), preventing the UI thread from locking up. (Deferred from v0.5.0.)
+- [ ] Terminal mouse reporting — forward mouse events to the PTY when apps enable tracking (DECSET 1000/1002/1006, SGR-encoded), so herdr's built-in pop-ups, lazygit, and nvim mouse mode work inside panes. Mode state comes from `alacritty_terminal`; UI selection/scroll behavior unchanged when reporting is off.
+
 ## v0.5.2 — Agent State & Adapters
 
 - [ ] AgentState model — `AgentState` enum (Idle / Working / NeedsAttention / Completed / Failed) in `gpty-core`, with tiered detection: Tier 1 capability-authenticated events (authoritative), Tier 2 OSC state declaration (published standard; AGENTS.md constraints), Tier 3 regex/idle/exit heuristics (display-only). No `ToolRunning`-via-exit-code — foreground-command exits are not reliably attributable in a PTY.
@@ -68,12 +78,8 @@ Launch is deferred: gpty stays below 1.0.0 until either the project gains a grow
 - [ ] Generic event vocabulary — adapter-neutral event names (`agent.started`, `turn.started`, `tool.call`, `thinking.delta`) mapped from the OMP extension's allowlist; Reasoning consumes the generic contract. Same commit: update the AGENTS.md OMP-only data-flow diagram.
 - [ ] Windows event listener — named-pipe event listener closes the Unix-only gap (`omp_events.rs`); Reasoning stops being fail-closed on Windows.
 - [ ] Generic CLI backend — `CliBackend` in `gpty-ai` (subprocess NDJSON bridge) beside Mock/Omp, with a backend/model picker in Inspector pane settings. Adapters use only each CLI's documented hooks — never tokens, never TUI scraping.
-- [ ] Visual Concept Graph — build concept automations visually using Godot's GraphEdit node editor. Drag-and-drop nodes for triggers, conditions, and actions without writing regex by hand. (Deferred from v0.5.0.)
 - [x] In-app update checker — checks GitHub releases on startup and toasts when an update is available. Fixed the placeholder repo owner, sourced the current version from `GptyTerminal.get_app_version()`, gated on `OS.has_feature("editor")` (headless/test-safe), added the `check_updates` setting, and covered `_is_newer` with GUT tests. (Deferred from v0.5.0.)
 - [x] App version & build info — Settings gains an About tab showing `gpty v<get_app_version()>`, the pinned IPC protocol version, and the repo URL; the status bar shows the live version as the rightmost entry. (Deferred from v0.5.0.)
-- [ ] Render batching — merge consecutive same-attribute cell runs into single draw calls (glyph-run batching) in `terminal_pane.gd` `_draw()`, cutting the per-frame canvas-item count; measure frame time under flood output and scroll before/after. (Deferred from v0.5.0.)
-- [ ] UI Thread DoS mitigation — rate-limit terminal rendering when a PTY floods output (e.g., `cat /dev/urandom`), preventing the UI thread from locking up. (Deferred from v0.5.0.)
-- [ ] Terminal mouse reporting — forward mouse events to the PTY when apps enable tracking (DECSET 1000/1002/1006, SGR-encoded), so herdr's built-in pop-ups, lazygit, and nvim mouse mode work inside panes. Mode state comes from `alacritty_terminal`; UI selection/scroll behavior unchanged when reporting is off.
 
 ## v0.5.1 — Persistence
 
@@ -87,7 +93,7 @@ Launch is deferred: gpty stays below 1.0.0 until either the project gains a grow
 
 ## v0.5.0 — ADE Foundation
 
-- [x] Rebranding & positioning — README, docs landing, and CLI copy reposition gpty as an ADE ("graphical ADE: a PTY foundation with a public API"). De-OMP the shipped defaults: "OMP Workspace" profile renamed to "Agent Workspace"; `@gpty/omp-events` remains the first adapter, not the identity. Name stays `gpty` (positioning, not renaming). Same commit: updated every "OMP Workspace" reference in AGENTS.md (structure comment + Inspector/Reasoning section) and the docs site.
+- [x] Rebranding & positioning — README, docs landing, and CLI copy reposition gPTY as an ADE ("graphical ADE: a PTY foundation with a public API"). De-OMP the shipped defaults: "OMP Workspace" profile renamed to "Agent Workspace"; `@gpty/omp-events` remains the first adapter, not the identity. Name stays `gpty` (positioning, not renaming). Same commit: updated every "OMP Workspace" reference in AGENTS.md (structure comment + Inspector/Reasoning section) and the docs site.
 - [x] Ecosystem presets — shipped profiles for herdr, lazygit, nvim, claude, and OMP in `profiles.default.json`, backed by per-tile `command` support in profile restore (`command` > legacy `shell` > default, all through `sanitize_shell`).
 - [x] Stable public pane IDs — every pane auto-generates a persisted `attachment_id` (`pane-XXXXXXXX` via `PaneTypes.generate_attachment_id()`, `PaneBody.apply_settings` choke point); `newPane` returns it and `listPanes` reports `id` alongside the display `label`. AGENTS.md attachment-id bullet documents the public-id semantics.
 - [x] Pane env markers — `GPTY_ENV=1` + `GPTY_PANE_ID` injected as trusted runtime vars at spawn (`start_shell` pane_id param; `GPTY_PANE_ID` falls back to the per-PTY session id); both keys blocked from untrusted env. AGENTS.md env-sanitization bullet updated with the new trusted vars.
