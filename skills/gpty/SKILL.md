@@ -1,17 +1,17 @@
 ---
 name: gpty
-description: Control the gpty terminal workspace from inside a gpty-managed pane.
+description: Control the gPTY terminal workspace from inside a gPTY-managed pane.
 ---
 
-# gpty
+# gPTY
 
 ## Guardrail
 
-If the environment variable `GPTY_ENV` is not set to `1`, stop and state that you are not inside a gpty-managed pane. Everything below assumes `GPTY_ENV=1`.
+If the environment variable `GPTY_ENV` is not set to `1`, stop and state that you are not inside a gPTY-managed pane. Everything below assumes `GPTY_ENV=1`.
 
 ## Overview
 
-You are running inside one pane of a gpty terminal workspace. Use the `gpty` CLI (or the gpty MCP server) to create, inspect, and drive the other panes in the grid. `GPTY_PANE_ID` identifies the pane you currently occupy.
+You are running inside one pane of a gPTY terminal workspace. Use the `gpty` CLI (or the gpty MCP server) to create, inspect, and drive the other panes in the grid. `GPTY_PANE_ID` identifies the pane you currently occupy.
 
 ## MCP tools and CLI equivalents
 
