@@ -12,10 +12,10 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [ ] Inspector / Reasoning follow-ups — host-tools bridge and OpenAI-compatible HTTP still planned. Provider-specific CLI adapters follow the v0.5.2 generic `CliBackend` lane: documented hooks/extensions only, never token reuse or TUI scraping.
 - [ ] FFI fuzz testing — automated fuzz testing of the terminal grid's binary interface to catch crashes and security issues
 - [ ] Instanced-quad renderer (alacritty-style glyph atlas + per-instance color) — evidence-gated: revisit only if render batching plus flood rate-limiting still shows frame-time pain. Godot already GPU-composites the canvas; a full Rust-side texture pipeline is deep custom work (atlas management, eviction, per-cell truecolor uploads) for a small incremental gain.
-- [ ] Rust-side IPC param validation — deserialize and validate IPC request params in Rust (`gpty-ipc`) before queuing to GDScript; GDScript handlers remain untyped. (TEMP1 P2 carryover.)
-- [x] Palette test dedup — `test_palette.gd` now asserts against `PaneTypes.build_palette_commands()`; the command list lives in one place. (TEMP1 test-hygiene carryover.)
 
 ## v1.0.0 — Public Launch
+
+Launch is deferred: gpty stays below 1.0.0 until either the project gains a growing, active userbase or the 0.x feature-set is exhausted — code signing and broad distribution are only worth pursuing once one of those is true.
 
 - [ ] Distribution — install.sh, Homebrew tap, AUR, winget (promoted from Future: launch blockers), and GitHub releases.
 - [ ] Code signing — macOS notarization + Windows Authenticode (promoted from Future: SmartScreen/Gatekeeper warnings are launch-killers).
@@ -23,11 +23,34 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [ ] Community infrastructure — plugin registry live, examples repo, community channel.
 - [ ] Launch criteria — 3+ first-class agent adapters, 10+ example plugins, the reference workflow demo (agent runs tests in a pane while the user watches in the GUI), and a working headless reattach story — all verified before the public launch post.
 
-## v0.6.0 — Headless Daemon & Reattach
+## v0.8.0 — Headless Daemon & Reattach
 
 - [ ] `gptyd` extraction spike — move `WorkspaceEngine` + `IpcServer` + event socket into a standalone Rust daemon; the Godot app becomes a rendering client over the same JSON-RPC (Godot-headless mode is the interim only, not the destination). PTYs survive GUI close.
 - [ ] Grid wire protocol — `term_get_diff` / `term_input` over the socket, reusing `TermGrid`'s packed flat arrays as the wire format.
 - [ ] Attach/reattach — GUI close leaves the daemon running; reopen attaches to the live workspace; `gpty attach` over SSH; `HistoryStore` serves pane read and scrollback across restarts.
+- [ ] Rust-side IPC param validation — deserialize and validate IPC request params in Rust (`gpty-ipc`) before dispatch. Promoted from Future: the daemon refactor is the natural home (Rust owns the request path end-to-end), and validating the pre-daemon GUI queue would be throwaway work. GDScript handlers remain untyped.
+
+## v0.7.0 — Knowledge Base & Wiki
+
+- [ ] Wiki pane type — `wiki` in `PaneTypes.ALL`; opens a vault at an absolute directory path validated by `sanitize_tile` (same trust rule as code_viewer/file_tree).
+- [ ] Vault model — local-first directory of plain Markdown files (potentially Obsidian-compatible: `.md` on disk, no proprietary format), indexed with full-text search in SQLite FTS5 (reuses the v0.5.1 history engine).
+- [ ] Markdown editor & preview — edit notes with live preview through the existing sanitized Markdown→BBCode pipeline (v0.4.0); source/rendered toggle like code_viewer.
+- [ ] Wikilinks & backlinks — `[[note-name]]` linking, per-note backlink panel, unresolved-link detection.
+- [ ] Link graph view — Godot-drawn graph of notes as nodes and wikilinks as edges (GraphEdit experience from the v0.5.2 Visual Concept Graph).
+- [ ] Agent access — vault search/read exposed via CLI and MCP so agents can query the knowledge base through the public pane-API primitives.
+- [ ] Wiki security notes in AGENTS.md — vault content is user data but untrusted input to the renderer: sanitized Markdown pipeline only; wikilinks resolve within the vault (no arbitrary file reads).
+- [ ] Placement note — scheduled ahead of v1.0.0: all prerequisites land earlier (v0.4.0 Markdown rendering, v0.5.1 FTS5, v0.5.2 GraphEdit), and the wiki is not gated on any v1.0.0 launch criterion.
+
+## v0.6.0 — Media Pane
+
+- [ ] Media pane type — `media` in `PaneTypes.ALL`; plays local audio/video from an absolute file path validated by `sanitize_tile` (same trust rule as code_viewer/file_tree). Remote/URL streaming deferred — a separate trust boundary.
+- [ ] Rust media backend — demux/decode in Rust: `symphonia` for audio; video decoding via pure-Rust codec crates or `ffmpeg` bindings (license review at design time: LGPL build vs pure-Rust). Output is packed flat arrays of decoded frames/samples — the same FFI packing pattern as the terminal grid.
+- [ ] Video rendering — decoded frames uploaded as `ImageTexture` in GDScript; bounded frame queue so a high-bitrate stream cannot stall the UI thread (same discipline as PTY flood rate-limiting).
+- [ ] Audio playback — decoded PCM streamed into Godot `AudioStreamGenerator`; A/V sync against the Godot clock; volume/mute controls.
+- [ ] Playback controls — play/pause/seek/loop per pane; transport state surfaced through the existing `paneStatus` primitives.
+- [ ] Format matrix — MP4/WebM/MKV containers, H.264/H.265/VP9/AV1 video, MP3/FLAC/Ogg/Opus audio; codec support documented per platform.
+- [ ] Media security notes in AGENTS.md — media files are untrusted input: memory-safe/audited decoders only (the concept-engine ReDoS stance extended to codec parsing), demux/decode size caps, no sandboxing claims (plugin trust-model language).
+- [ ] Standalone by design — ships alone with no dependency on or coupling with any other feature, so its A/V infrastructure risk gates nothing else.
 
 ## v0.5.3 — Plugin Ecosystem
 
@@ -36,7 +59,7 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [ ] `cli_view` pane — runs a command and streams stdout into a pane body: plugin UI v1 without a Godot SDK. Native third-party GDScript/Rust pane plugins deferred to a future SDK (`PaneTypes.ALL` is the layout-trust anchor; see AGENTS.md).
 - [ ] Pane contract extension — `on_agent_state_changed(state)` in `PaneBody` for custom panes.
 - [ ] Plugin registry — JSON index repo + browse page on the docs site; submission by PR.
-- [ ] God-object split — split `workspace.gd` (1034 lines) / `terminal_pane.gd` (833) / `terminal_manager.gd` (624) into focused files (IPC dispatch, profile/layout restore, search subsystem); concept routing already lives in `concept_router.gd`. Do it alongside the plugin work, which touches `workspace.gd` heavily. (TEMP1 modularization carryover.)
+- [ ] God-object split — split `workspace.gd` (1034 lines) / `terminal_pane.gd` (833) / `terminal_manager.gd` (624) into focused files (IPC dispatch, profile/layout restore, search subsystem); concept routing already lives in `concept_router.gd`. Do it alongside the plugin work, which touches `workspace.gd` heavily.
 
 ## v0.5.2 — Agent State & Adapters
 
@@ -60,6 +83,7 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [ ] History full-text search — surface the FTS5 store's `search()` in the terminal search UI so old output stays findable after restart.
 - [ ] History retention setting — `cfg_history_lines` (default 10 000) clamping the per-pane cap.
 - [ ] Live pane-API smoke — exercise the v0.5.0 surface end-to-end against a running GUI: `new-pane` → `inject` → `pane-read` → `pane-wait` → `broadcast` over tagged panes, plus `pane-status` exit codes from `pane-run`. Unit/GUT covered but never smoke-tested live.
+- [x] Palette test dedup — `test_palette.gd` now asserts against `PaneTypes.build_palette_commands()`; the command list lives in one place.
 
 ## v0.5.0 — ADE Foundation
 
@@ -70,7 +94,7 @@ Strategic direction: gpty evolves from a multi-terminal emulator into an Agent D
 - [x] Pane read/status/run/wait IPC — `paneRead` (plain text from grid + scrollback, capped), `paneStatus` (pid / running / exit_code / idle_ms primitives), `paneRun` (command spawn; exit via `paneStatus`), `waitForOutput` (`paneWait`: server-held response, Rust `regex` scan of a 512-line ring buffer, 60 s deadline). Substrate primitives only — no agent state machine in core.
 - [x] Event subscription — `subscribe` / `eventsPoll` on the event socket (never the control socket); bounded per-subscriber queues fed by `GptyTerminal.emit_event` from concept matches and pane spawn/kill. Push transport deferred.
 - [x] Agent skill — ship `skills/gpty/SKILL.md` + `gpty --skill` printing the release-matched copy (`include_str!`), with a `GPTY_ENV=1` guardrail; install locations documented for Claude Code, codex, opencode, and OMP. MCP schema verified free of a `skill` tool.
-- [x] IPC version sourcing — the IPC `version` response now comes from the crate via the static `GptyTerminal.get_app_version()` (`env!("CARGO_PKG_VERSION")`, `crates/gpty-gdext/src/lib.rs`); `workspace.gd` no longer hardcodes "0.3.0". (TEMP1 carryover.)
+- [x] IPC version sourcing — the IPC `version` response now comes from the crate via the static `GptyTerminal.get_app_version()` (`env!("CARGO_PKG_VERSION")`, `crates/gpty-gdext/src/lib.rs`); `workspace.gd` no longer hardcodes "0.3.0".
 - [x] MCP expansion — `pane-read`, `pane-status` (no-arg = agent-status-list), `pane-run`, `pane-wait`, `broadcast` (tagged fan-out) auto-generated from the new CLI commands; pane tags persist and sanitize like `attachment_id`. AGENTS.md MCP list updated (14 → 19).
 - [x] ADE boundary & security rules in AGENTS.md — layer model, non-goals, and OSC/plugin/broadcast constraints (the "why not" record).
 
