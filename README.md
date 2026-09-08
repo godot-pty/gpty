@@ -1,4 +1,4 @@
-[gPTY](https://godot-pty.github.io/gpty/) is a graphical Agent Development Environment (ADE) — a PTY foundation with a public, agent-facing API — built on Godot and Rust. It provides a tiling terminal grid, a pub-sub concept engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output without scraping a TUI.
+[gPTY](https://godot-pty.github.io/gpty/) - a graphical Agent Development Environment (ADE); a PTY foundation built on Godot and Rust. Provides a tiling terminal grid, a pub-sub concept engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output without scraping a TUI.
 
 ## Built With
 
@@ -10,13 +10,13 @@
 
 ## Overview
 
-- **PTY foundation** — Spawn and manage independent shell sessions in a resizable tiling grid. Full DEC STD 070 via `alacritty_terminal`: 16/256/true color, scrollback with regex search, wrapped text selection.
-- **Public API** — JSON-RPC IPC socket + CLI (`gpty new-pane`, `gpty inject`, …) + MCP server. AI agents, scripts, and orchestrators drive the workspace over a documented, versioned protocol.
-- **Concept engine** — RegEx triggers on PTY output automatically inject commands or capture output into adjacent panes. Write your own or ship defaults.
-- **Agent observability** — Reasoning pane passively projects documented agent lifecycle events (OMP, extensible); Inspector pane runs a private, tool-free Q&A session. Observability only — gpty never orchestrates agent state.
-- **Persistence** — Settings, layouts, and named profiles auto-save and restore on restart.
-- **Cross-platform** — Standalone binaries for Linux, macOS, and Windows. No Godot or Rust toolchain required to run.
-- **Documentation** — https://godot-pty.github.io/gpty/
+- **PTY foundation** - Spawn and manage independent shell sessions in a resizable tiling grid. Full DEC STD 070 via `alacritty_terminal`: 16/256/true color, scrollback with regex search, wrapped text selection.
+- **Public API** - JSON-RPC IPC socket + CLI (`gpty new-pane`, `gpty inject`, …) + MCP server. AI agents, scripts, and orchestrators drive the workspace over a documented, versioned protocol.
+- **Concept engine** - RegEx triggers on PTY output automatically inject commands or capture output into adjacent panes. Write your own or ship defaults.
+- **Agent observability** - Reasoning pane passively projects documented agent lifecycle events (OMP, extensible); Inspector pane runs a private, tool-free Q&A session. Observability only - gpty never orchestrates agent state.
+- **Persistence** - Settings, layouts, and named profiles auto-save and restore on restart.
+- **Cross-platform** - Standalone binaries for Linux, macOS, and Windows. No Godot or Rust toolchain required to run.
+- **Documentation** - https://godot-pty.github.io/gpty/
 
 | Component | Choice | Rationale |
 |----------|--------|-----------|
@@ -37,9 +37,9 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 
 | Platform | Package |
 |---|---|
-| Linux | `gpty-v0.5.0-linux-x86_64.tar.gz` — extract and run `./gpty` |
-| macOS | `gpty-v0.5.0-macos.zip` — unzip, right-click the `.app` → Open |
-| Windows | `gpty-v0.5.0-windows-x86_64.zip` — unzip and run `gpty.exe` |
+| Linux | `gpty-v0.5.0-linux-x86_64.tar.gz` - extract and run `./gpty` |
+| macOS | `gpty-v0.5.0-macos.zip` - unzip, right-click the `.app` → Open |
+| Windows | `gpty-v0.5.0-windows-x86_64.zip` - unzip and run `gpty.exe` |
 
 ### CLI
 
@@ -93,7 +93,7 @@ gpty ships an MCP (Model Context Protocol) server so AI agents and coding harnes
 {"mcpServers": {"gpty": {"command": "gpty", "args": ["mcp"]}}}
 ```
 
-- **Direct**: run `gpty mcp` over stdio — exposes a tool per CLI subcommand (`new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `pane-read`, `pane-status`, `pane-run`, `pane-wait`, `broadcast`, `layout-*`, `daemon-*`, `concept-*`, `version`).
+- **Direct**: run `gpty mcp` over stdio - exposes a tool per CLI subcommand (`new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `pane-read`, `pane-status`, `pane-run`, `pane-wait`, `broadcast`, `layout-*`, `daemon-*`, `concept-*`, `version`).
 - **Manifest**: `gpty schema --format mcp` prints the MCP tool manifest (JSON Schema, works without a running GUI) for hand-off to agent configurations.
 
 Tool schemas are generated from the same clap definitions as the CLI (`crates/gpty-cli/src/commands/schema.rs`), so they cannot drift from `gpty --help`.
@@ -108,7 +108,7 @@ See [ROADMAP.md](ROADMAP.md) for the full feature inventory.
 
 ## Security
 
-See [AGENTS.md](AGENTS.md#security) for full security rules, including Concept Engine ReDoS prevention and OSC 52 clipboard restrictions.
+See [AGENTS.md](AGENTS.md#security) for current security rules, including concerns around the Concept Engine, ReDoS prevention and OSC 52 clipboard restrictions.
 
 ---
 
@@ -120,7 +120,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, build commands, t
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the complete version history.
+See [CHANGELOG.md](CHANGELOG.md) for the complete versioned changes and history.
 
 ---
 
