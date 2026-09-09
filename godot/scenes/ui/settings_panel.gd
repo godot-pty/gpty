@@ -23,7 +23,12 @@ func _build_ui():
 	cc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	var bg = Panel.new()
-	bg.custom_minimum_size = Vector2(420, 540)
+	# Wide enough that all six tabs fit the TabContainer without clipping.
+	# When tabs overflow, Godot hides trailing tabs behind a dropdown; a
+	# clipped tab only becomes visible in the bar after being clicked,
+	# stretching the tab bar while the panel keeps its old width (mangled
+	# layout). Keep every tab visible from the start.
+	bg.custom_minimum_size = Vector2(540, 560)
 	cc.add_child(bg)
 
 	var mc = MarginContainer.new()
@@ -42,15 +47,27 @@ func _build_ui():
 	v.add_child(HSeparator.new())
 
 	var tabs = TabContainer.new()
+	tabs.add_theme_font_size_override("font_size", 13)
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(tabs)
 
 	# Tab 1: System
 	var t_sys = _create_tab(tabs, "System")
-	_add_fps_control(t_sys)
+	var fps_opt = _add_fps_control(t_sys)
 	var show_tb_cb = _add_show_titlebar_control(t_sys)
 	var win_mode_opt = _add_window_mode_control(t_sys)
 	var check_updates_cb = _add_check_updates_control(t_sys)
+	_add_tab_reset(t_sys, func():
+		SettingsManager.cfg_max_fps = 0
+		SettingsManager.cfg_show_titlebar = true
+		SettingsManager.cfg_window_mode = 0
+		SettingsManager.cfg_check_updates = true
+		fps_opt.selected = 6  # "Unlimited" (0)
+		show_tb_cb.button_pressed = true
+		win_mode_opt.selected = 0
+		check_updates_cb.button_pressed = true
+		SettingsManager.save_settings()
+	)
 
 	# Tab 2: Terminal
 	var t_term = _create_tab(tabs, "Terminal")
@@ -63,21 +80,70 @@ func _build_ui():
 	var scroll_spin = _add_scroll_control(t_term)
 	var history_spin = _add_history_control(t_term)
 	t_term.add_child(HSeparator.new())
-	_add_shell_control(t_term)
-	_add_env_control(t_term)
+	var shell_le = _add_shell_control(t_term)
+	var env_te = _add_env_control(t_term)
+	_add_tab_reset(t_term, func():
+		SettingsManager.cfg_cursor_shape = 0
+		SettingsManager.cfg_cursor_blink = true
+		SettingsManager.cfg_cursor_blink_speed = 0.5
+		SettingsManager.cfg_beam_width = 2
+		SettingsManager.cfg_underline_height = 3
+		SettingsManager.cfg_scroll_lines = 3
+		SettingsManager.cfg_history_lines = 10000
+		SettingsManager.cfg_default_rows = 24
+		SettingsManager.cfg_default_cols = 80
+		SettingsManager.cfg_shell_command = "/bin/bash"
+		SettingsManager.cfg_shell_env = ""
+		shape_opt.selected = 0
+		blink_cb.button_pressed = true
+		blink_spin.value = 0.5
+		cursor_px[0].value = 2
+		cursor_px[1].value = 3
+		scroll_spin.value = 3
+		history_spin.value = 10000
+		dims[0].value = 24
+		dims[1].value = 80
+		shell_le.text = "/bin/bash"
+		env_te.text = ""
+		SettingsManager.save_settings()
+	)
 
 	# Tab 3: Appearance
 	var t_app = _create_tab(tabs, "Appearance")
-	_add_font_picker(t_app)
+	var font_btn = _add_font_picker(t_app)
 	var fs_spin = _add_font_control(t_app)
 	t_app.add_child(HSeparator.new())
-	_add_scheme_picker(t_app)
+	var scheme_btn = _add_scheme_picker(t_app)
 	t_app.add_child(HSeparator.new())
 	var color_btns = _add_color_section(t_app)
+	_add_tab_reset(t_app, func():
+		SettingsManager.cfg_font_path = "res://fonts/DejaVuSansMono.ttf"
+		SettingsManager.cfg_font_size = 14
+		SettingsManager.cfg_color_scheme_path = ""
+		SettingsManager.cfg_wrapper_bg = SettingsManager.WRAPPER_BG_COLOR
+		SettingsManager.cfg_title_bar_bg = SettingsManager.TITLE_BAR_BG_COLOR
+		SettingsManager.cfg_wrapper_border = SettingsManager.WRAPPER_BORDER_COLOR
+		SettingsManager.cfg_sidebar_bg = SettingsManager.SIDEBAR_BG_COLOR
+		SettingsManager.cfg_focus_border = SettingsManager.FOCUS_BORDER_COLOR
+		SettingsManager.cfg_selection = SettingsManager.SELECTION_COLOR
+		SettingsManager.cfg_scrollback_indicator = SettingsManager.SCROLLBACK_INDICATOR_COLOR
+		font_btn.text = "DejaVuSansMono.ttf"
+		scheme_btn.text = "(none)"
+		fs_spin.value = 14
+		_reset_colors(color_btns)
+		SettingsManager.save_settings()
+	)
 
 	# Tab 4: Reasoning
 	var t_reas = _create_tab(tabs, "Reasoning")
 	var reason_spins = _add_reasoning_control(t_reas)
+	_add_tab_reset(t_reas, func():
+		SettingsManager.cfg_reasoning_max_turns = 16
+		SettingsManager.cfg_reasoning_max_turn_bytes = 65536
+		reason_spins[0].value = 16
+		reason_spins[1].value = 65536
+		SettingsManager.save_settings()
+	)
 
 	# Tab 5: Concepts
 	var t_con = _create_tab(tabs, "Concepts")
@@ -123,8 +189,6 @@ func _build_ui():
 	reason_spins[1].value_changed.connect(func(_v): _debounce_timer.start())
 	show_tb_cb.toggled.connect(func(_pressed): _debounce_timer.start())
 	check_updates_cb.toggled.connect(func(_pressed): _debounce_timer.start())
-
-	_add_reset_button(v, shape_opt, blink_cb, blink_spin, scroll_spin, history_spin, dims, cursor_px, color_btns, fs_spin, show_tb_cb, win_mode_opt, reason_spins, check_updates_cb)
 
 func _create_tab(tabs: TabContainer, title: String) -> VBoxContainer:
 	var sc = ScrollContainer.new()
@@ -261,22 +325,54 @@ func _add_dims_control(v: VBoxContainer) -> Array:
 	v.add_child(hr)
 	return [rspin, cspin]
 
-func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: Callable) -> ColorPickerButton:
+func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: Callable, default_color: Color) -> ColorPickerButton:
 	var h = HBoxContainer.new()
-	h.add_child(_lbl(label))
+	var lbl = _lbl(label)
+	# Uniform label column: without a fixed width the expand-fill picker
+	# stretches differently per row (long labels → short pickers).
+	lbl.custom_minimum_size = Vector2(96, 0)
+	h.add_child(lbl)
 	var btn = ColorPickerButton.new()
 	btn.color = value
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn.color_changed.connect(setter)
 	h.add_child(btn)
+	var reset = Button.new()
+	reset.text = Icons.RESET
+	reset.flat = true
+	reset.tooltip_text = "Reset to default"
+	Icons.style_button(reset)
+	# ColorPickerButton.color assignment does not emit color_changed when set
+	# programmatically — call the setter explicitly so cfg + debounced save run.
+	reset.pressed.connect(func():
+		btn.color = default_color
+		setter.call(default_color)
+	)
+	h.add_child(reset)
 	v.add_child(h)
 	return btn
 
-func _add_file_picker(v: VBoxContainer, label: String, current_path: String, filters: Array, on_selected: Callable) -> void:
+func _add_color_section(v: VBoxContainer) -> Array:
+	v.add_child(_lbl("UI Colors:"))
+	var btns = []
+	for item in [
+		["Wrapper bg", SettingsManager.cfg_wrapper_bg, SettingsManager.WRAPPER_BG_COLOR, func(c: Color): SettingsManager.cfg_wrapper_bg = c; _debounce_timer.start()],
+		["Title bar", SettingsManager.cfg_title_bar_bg, SettingsManager.TITLE_BAR_BG_COLOR, func(c: Color): SettingsManager.cfg_title_bar_bg = c; _debounce_timer.start()],
+		["Border", SettingsManager.cfg_wrapper_border, SettingsManager.WRAPPER_BORDER_COLOR, func(c: Color): SettingsManager.cfg_wrapper_border = c; _debounce_timer.start()],
+		["Sidebar", SettingsManager.cfg_sidebar_bg, SettingsManager.SIDEBAR_BG_COLOR, func(c: Color): SettingsManager.cfg_sidebar_bg = c; _debounce_timer.start()],
+		["Focus", SettingsManager.cfg_focus_border, SettingsManager.FOCUS_BORDER_COLOR, func(c: Color): SettingsManager.cfg_focus_border = c; _debounce_timer.start()],
+		["Selection", SettingsManager.cfg_selection, SettingsManager.SELECTION_COLOR, func(c: Color): SettingsManager.cfg_selection = c; _debounce_timer.start()],
+		["Scroll", SettingsManager.cfg_scrollback_indicator, SettingsManager.SCROLLBACK_INDICATOR_COLOR, func(c: Color): SettingsManager.cfg_scrollback_indicator = c; _debounce_timer.start()],
+	]:
+		var b = _add_color_control(v, item[0], item[1], item[3], item[2])
+		btns.append([item[0], b, item[2]])
+	return btns
+
+func _add_file_picker(v: VBoxContainer, label: String, current_path: String, filters: Array, on_selected: Callable, reset_to_default: Callable = Callable()) -> Button:
 	var h = HBoxContainer.new()
 	h.add_child(_lbl(label))
 	var btn = Button.new()
-	btn.text = current_path.get_file()
+	btn.text = current_path.get_file() if current_path != "" else "(none)"
 	btn.add_theme_font_size_override("font_size", 12)
 	btn.clip_text = true
 	btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -295,9 +391,21 @@ func _add_file_picker(v: VBoxContainer, label: String, current_path: String, fil
 		add_child(dlg)
 		dlg.popup_centered())
 	h.add_child(btn)
+	if reset_to_default.is_valid():
+		var reset = Button.new()
+		reset.text = Icons.RESET
+		reset.flat = true
+		reset.tooltip_text = "Reset to default"
+		Icons.style_button(reset)
+		reset.pressed.connect(func():
+			btn.text = "(none)"
+			reset_to_default.call()
+		)
+		h.add_child(reset)
 	v.add_child(h)
+	return btn
 
-func _add_fps_control(v: VBoxContainer):
+func _add_fps_control(v: VBoxContainer) -> OptionButton:
 	var hf = HBoxContainer.new()
 	hf.add_child(_lbl("Max FPS:"))
 	
@@ -319,6 +427,7 @@ func _add_fps_control(v: VBoxContainer):
 	)
 	hf.add_child(fps_opt)
 	v.add_child(hf)
+	return fps_opt
 
 func _add_show_titlebar_control(v: VBoxContainer) -> CheckBox:
 	var cb = CheckBox.new(); cb.name = "ShowTitlebarCb"; cb.text = "Show titlebar"
@@ -346,33 +455,21 @@ func _add_check_updates_control(v: VBoxContainer) -> CheckBox:
 	v.add_child(cb)
 	return cb
 
-func _add_scheme_picker(v: VBoxContainer):
-	_add_file_picker(v, "Color scheme:", SettingsManager.cfg_color_scheme_path, [["*.txt; *.json; *.csv", "Scheme files"]], func(path: String):
+func _add_scheme_picker(v: VBoxContainer) -> Button:
+	return _add_file_picker(v, "Color scheme:", SettingsManager.cfg_color_scheme_path, [["*.txt; *.json; *.csv", "Scheme files"]], func(path: String):
 		SettingsManager.cfg_color_scheme_path = path
+		SettingsManager.save_settings()
+	, func():
+		# Empty path = the built-in default palette (terminals revert live).
+		SettingsManager.cfg_color_scheme_path = ""
 		SettingsManager.save_settings()
 	)
 
-func _add_font_picker(v: VBoxContainer):
-	_add_file_picker(v, "Font:", SettingsManager.cfg_font_path, [["*.ttf", "TrueType Fonts"]], func(path: String):
+func _add_font_picker(v: VBoxContainer) -> Button:
+	return _add_file_picker(v, "Font:", SettingsManager.cfg_font_path, [["*.ttf", "TrueType Fonts"]], func(path: String):
 		SettingsManager.cfg_font_path = path
 		SettingsManager.save_settings()
 	)
-
-func _add_color_section(v: VBoxContainer) -> Array:
-	v.add_child(_lbl("UI Colors:"))
-	var btns = []
-	for item in [
-		["Wrapper bg", SettingsManager.cfg_wrapper_bg, func(c: Color): SettingsManager.cfg_wrapper_bg = c; _debounce_timer.start()],
-		["Title bar", SettingsManager.cfg_title_bar_bg, func(c: Color): SettingsManager.cfg_title_bar_bg = c; _debounce_timer.start()],
-		["Border", SettingsManager.cfg_wrapper_border, func(c: Color): SettingsManager.cfg_wrapper_border = c; _debounce_timer.start()],
-		["Sidebar", SettingsManager.cfg_sidebar_bg, func(c: Color): SettingsManager.cfg_sidebar_bg = c; _debounce_timer.start()],
-		["Focus", SettingsManager.cfg_focus_border, func(c: Color): SettingsManager.cfg_focus_border = c; _debounce_timer.start()],
-		["Selection", SettingsManager.cfg_selection, func(c: Color): SettingsManager.cfg_selection = c; _debounce_timer.start()],
-		["Scroll", SettingsManager.cfg_scrollback_indicator, func(c: Color): SettingsManager.cfg_scrollback_indicator = c; _debounce_timer.start()],
-	]:
-		var b = _add_color_control(v, item[0], item[1], item[2])
-		btns.append([item[0], b])
-	return btns
 
 func _add_cursor_thickness_control(v: VBoxContainer) -> Array:
 	var h1 = HBoxContainer.new()
@@ -398,58 +495,19 @@ func _add_cursor_thickness_control(v: VBoxContainer) -> Array:
 	return [bspin, uspin]
 
 func _reset_colors(btns: Array):
-	var defaults = [SettingsManager.WRAPPER_BG_COLOR, SettingsManager.TITLE_BAR_BG_COLOR, SettingsManager.WRAPPER_BORDER_COLOR, SettingsManager.SIDEBAR_BG_COLOR, Color(0.4, 0.7, 1.0, 0.3), Color(0.3, 0.5, 1.0, 0.4), Color(1.0, 1.0, 0.0)]
-	for i in btns.size():
-		if btns[i] is Array:
-			(btns[i][1] as ColorPickerButton).color = defaults[i]
-		else:
-			(btns[i] as ColorPickerButton).color = defaults[i]
-func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: CheckBox, blink_spin: SpinBox, scroll_spin: SpinBox, history_spin: SpinBox, dims: Array, cursor_px: Array, color_btns: Array, fs_spin: SpinBox, show_tb_cb: CheckBox, win_mode_opt: OptionButton, reason_spins: Array, check_updates_cb: CheckBox):
-	var btn = Button.new(); btn.text = "Reset to defaults"
+	# Entries are [label, ColorPickerButton, default_color]; assigning
+	# btn.color fires color_changed → setter → cfg + debounced save.
+	for entry in btns:
+		if entry is Array and entry.size() >= 3:
+			(entry[1] as ColorPickerButton).color = entry[2]
+
+## Per-tab reset: each tab's button restores ONLY that tab's settings.
+func _add_tab_reset(v: VBoxContainer, reset_func: Callable):
+	v.add_child(HSeparator.new())
+	var btn = Button.new(); btn.text = "Reset tab to defaults"
 	btn.add_theme_font_size_override("font_size", 12)
-	btn.pressed.connect(func():
-		SettingsManager.cfg_cursor_shape = 0
-		SettingsManager.cfg_cursor_blink = true
-		SettingsManager.cfg_cursor_blink_speed = 0.5
-		SettingsManager.cfg_scroll_lines = 3
-		SettingsManager.cfg_history_lines = 10000
-		SettingsManager.cfg_default_rows = 24
-		SettingsManager.cfg_default_cols = 80
-		SettingsManager.cfg_beam_width = 2
-		SettingsManager.cfg_underline_height = 3
-		SettingsManager.cfg_wrapper_bg = SettingsManager.WRAPPER_BG_COLOR
-		SettingsManager.cfg_title_bar_bg = SettingsManager.TITLE_BAR_BG_COLOR
-		SettingsManager.cfg_wrapper_border = SettingsManager.WRAPPER_BORDER_COLOR
-		SettingsManager.cfg_sidebar_bg = SettingsManager.SIDEBAR_BG_COLOR
-		SettingsManager.cfg_focus_border = Color(0.4, 0.7, 1.0, 0.3)
-		SettingsManager.cfg_selection = Color(0.3, 0.5, 1.0, 0.4)
-		SettingsManager.cfg_scrollback_indicator = Color(1.0, 1.0, 0.0)
-		SettingsManager.cfg_color_scheme_path = ""
-		SettingsManager.cfg_font_path = "res://fonts/DejaVuSansMono.ttf"
-		SettingsManager.cfg_font_size = 14
-		SettingsManager.cfg_show_titlebar = true
-		SettingsManager.cfg_reasoning_max_turns = 16
-		SettingsManager.cfg_reasoning_max_turn_bytes = 65536
-		SettingsManager.cfg_check_updates = true
-		SettingsManager.save_settings()
-		shape_opt.selected = 0
-		blink_cb.button_pressed = true
-		blink_spin.value = 0.5
-		scroll_spin.value = 3
-		history_spin.value = 10000
-		dims[0].value = 24
-		dims[1].value = 80
-		cursor_px[0].value = 2
-		cursor_px[1].value = 3
-		_reset_colors(color_btns)
-		fs_spin.value = 14
-		show_tb_cb.button_pressed = true
-		reason_spins[0].value = 16
-		reason_spins[1].value = 65536
-		check_updates_cb.button_pressed = true
-		SettingsManager.cfg_window_mode = 0
-		win_mode_opt.selected = 0
-	)
+	btn.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	btn.pressed.connect(reset_func)
 	v.add_child(btn)
 
 func _add_shell_control(v: VBoxContainer) -> LineEdit:

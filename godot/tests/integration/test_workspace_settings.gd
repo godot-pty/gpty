@@ -159,6 +159,40 @@ func test_pane_run_executes_through_configured_shell():
 	# Wait out the deferred concept push timer so it doesn't resume after free.
 	await get_tree().create_timer(2.1).timeout
 
+func test_ui_colors_apply_live_to_existing_wrappers():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var tm: TerminalManager = ws._tm
+	var wrapper: PanelContainer = tm.tiles[0].wrapper
+	var sb = wrapper.get_theme_stylebox("panel") as StyleBoxFlat
+	assert_not_null(sb, "wrapper must carry a panel stylebox")
+	assert_eq(sb.bg_color, SettingsManager.cfg_wrapper_bg,
+		"startup must apply the configured wrapper bg")
+
+	# save_settings() emits settings_changed → workspace must re-apply the
+	# chrome colors to existing panes (no app restart required).
+	SettingsManager.cfg_wrapper_bg = Color(0.9, 0.1, 0.1)
+	SettingsManager.cfg_title_bar_bg = Color(0.1, 0.9, 0.1)
+	SettingsManager.cfg_sidebar_bg = Color(0.1, 0.1, 0.9)
+	SettingsManager.save_settings()
+
+	assert_eq(sb.bg_color, Color(0.9, 0.1, 0.1),
+		"wrapper bg must update live on existing panes")
+	var tb = wrapper.get_node_or_null("BodyVBox/TitleBar")
+	var tbg = tb.get_node_or_null("TitleBarBg")
+	assert_not_null(tbg, "pane titlebar must carry a named bg rect")
+	assert_eq(tbg.color, Color(0.1, 0.9, 0.1),
+		"pane titlebar bg must update live on existing panes")
+	assert_eq(ws._sidebar_bg.color, Color(0.1, 0.1, 0.9),
+		"sidebar bg must update live")
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
 func test_pane_settings_open_above_second_workspace_grid():
 	var ws = WorkspaceScript.new()
 	_ws = ws

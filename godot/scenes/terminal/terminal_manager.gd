@@ -19,6 +19,7 @@ const _PaneScripts := {
 
 var on_close: Callable  # set by workspace to refresh layout after kill
 var on_swap: Callable    # set by workspace to handle pane type swap
+var on_open_pane_settings: Callable  # workspace closes conflicting overlays first
 
 var tiles: Array[Dictionary] = []
 var last_body: Control
@@ -172,6 +173,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	parent.add_child(bar)
 
 	var tbg = ColorRect.new()
+	tbg.name = "TitleBarBg"
 	tbg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tbg.color = SettingsManager.cfg_title_bar_bg
 	bar.add_child(tbg)
@@ -389,9 +391,18 @@ func _handle_close(body: Control):
 		on_close.call(body)
 
 func _open_pane_settings(body: Control):
+	# The panel itself is owned by the workspace (shared across all
+	# workspaces, one z-ordered overlay in the tree). Creating a fresh one
+	# here would orphan it outside the tree — invisible and dead. The
+	# workspace wires on_open_pane_settings to also close conflicting
+	# overlays (global settings) before the popup opens.
 	if _pane_settings_panel == null:
-		_pane_settings_panel = load("res://scenes/ui/pane_settings_panel.gd").new()
-	_pane_settings_panel.open_for(body)
+		push_warning("_open_pane_settings: no panel assigned by workspace")
+		return
+	if on_open_pane_settings.is_valid():
+		on_open_pane_settings.call(body)
+	else:
+		_pane_settings_panel.open_for(body)
 
 
 

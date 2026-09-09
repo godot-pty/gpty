@@ -89,9 +89,34 @@ func _on_settings_changed():
 		var body = _tm._find_body(t.wrapper)
 		if body and body is TerminalPane:
 			SettingsManager.apply_to_terminal(body)
+	_apply_ui_colors()
 	_sync_pane_titlebars()
 	_apply_fps_setting()
 	_apply_window_mode()
+
+## UI chrome colors (wrapper bg/border, pane titlebars, sidebar, window
+## titlebar) are read at build time; without a live re-apply they'd only
+## take effect for panes spawned after the change. Update every wrapper
+## in every workspace (hidden workspaces keep their panes alive).
+func _apply_ui_colors():
+	if _sidebar_bg:
+		_sidebar_bg.color = SettingsManager.cfg_sidebar_bg
+	if _titlebar:
+		var chrome_bg := _titlebar.get_node_or_null("TitleBarBg")
+		if chrome_bg is ColorRect:
+			chrome_bg.color = SettingsManager.cfg_title_bar_bg
+	for ws in _workspaces:
+		for t in ws.tm.tiles:
+			var wrapper: Control = t.wrapper
+			var sb := wrapper.get_theme_stylebox("panel") as StyleBoxFlat
+			if sb:
+				sb.bg_color = SettingsManager.cfg_wrapper_bg
+				sb.border_color = SettingsManager.cfg_wrapper_border
+			var tb := wrapper.get_node_or_null("BodyVBox/TitleBar")
+			if tb:
+				var tbg := tb.get_node_or_null("TitleBarBg")
+				if tbg is ColorRect:
+					tbg.color = SettingsManager.cfg_title_bar_bg
 
 func _sync_pane_titlebars():
 	for t in _tm.tiles:
@@ -207,9 +232,19 @@ func _kill(body: Control):
 	if ws.is_empty():
 		return
 	ws.tm.kill(body)
+	_close_pane_settings_for(body)
 	_apply_layout()
 	_list()
 	ToastManager.info("Pane closed")
+
+## Close the pane settings popup when its target pane is torn down. The
+## panel also self-closes via _process when its target is freed by other
+## paths (swap, reset, restore, workspace close) — this is the immediate,
+## explicit close on the primary kill path.
+func _close_pane_settings_for(body: Control):
+	var panel: Control = _tm._pane_settings_panel
+	if panel and panel.visible and panel._target == body:
+		panel.close()
 
 func _swap_pane(body: Control, new_type_name: String):
 	var ws := _workspace_for_body(body)
@@ -224,6 +259,8 @@ func _swap_pane(body: Control, new_type_name: String):
 
 	var new_body = tm.swap_pane(body, new_type_name)
 	if new_body == null: return
+	# The old body is freed by the swap; close its settings popup like a kill.
+	_close_pane_settings_for(body)
 
 	# Find the new wrapper (tile's wrapper was replaced in-place)
 	var new_wrapper = null
@@ -314,6 +351,13 @@ func _body_of_focus_owner(owner: Control) -> Control:
 func _wire_tm(tm: TerminalManager):
 	tm.on_close = func(body: Control): _kill(body)
 	tm.on_swap = _swap_pane
+	tm.on_open_pane_settings = func(body: Control):
+		# The pane settings popup and the global settings panel are sibling
+		# overlays; opening one closes the other so they never stack.
+		if _settings_panel and _settings_panel.visible:
+			_settings_panel.visible = false
+		if tm._pane_settings_panel:
+			tm._pane_settings_panel.open_for(body)
 
 func _active_workspace() -> Dictionary:
 	if _workspaces.is_empty() or _active < 0 or _active >= _workspaces.size():
@@ -607,6 +651,12 @@ func _input(event):
 func _activate_pane_under_mouse(mouse: Vector2):
 	var ws := _active_workspace()
 	if ws.is_empty():
+		return
+	# A visible pane settings popup owns its clicks: activating (or
+	# releasing focus from) panes underneath the overlay while the user
+	# interacts with it corrupts the interaction.
+	var panel: Control = ws.tm._pane_settings_panel
+	if panel and panel.visible:
 		return
 	for t in ws.tm.tiles:
 		var w: Control = t.wrapper
@@ -970,6 +1020,12 @@ func _toggle_settings():
 		_settings_panel.z_index = 100
 		add_child(_settings_panel)
 		_settings_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	if not _settings_panel.visible:
+		# Opening global settings closes the pane settings overlay so the
+		# two z=100 sibling overlays never stack.
+		var panel: Control = _tm._pane_settings_panel
+		if panel and panel.visible:
+			panel.close()
 	_settings_panel.visible = not _settings_panel.visible
 
 func _build_sidebar():
@@ -1012,6 +1068,10 @@ func _push_concepts_to_engine():
 func _push_concepts_deferred():
 	# Wait for the scene tree to fully settle (GDExtension + terminal nodes ready)
 	await get_tree().create_timer(2.0).timeout
+	# The workspace may have been torn down (tests, quick quit) while waiting;
+	# resuming on a freed instance would raise a script error.
+	if not is_instance_valid(self) or not is_inside_tree():
+		return
 	_push_concepts_to_engine()
 func get_terminal_for_ffi() -> GptyTerminal:
 	for t in _tm.tiles:

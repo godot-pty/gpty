@@ -11,20 +11,39 @@ func _ready():
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	visible = false
 
+func _process(_delta: float):
+	# The popup is a shared workspace-level overlay: its target pane can be
+	# torn down through kill, type swap, reset, workspace close, or layout
+	# restore without the popup being told. A freed target makes every
+	# interaction a script error (dead popup). Auto-close as soon as the
+	# target dies — covers every pane type and teardown path.
+	if visible and (_target == null or not is_instance_valid(_target)):
+		close()
+
 func _unhandled_input(event):
 	if visible and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		visible = false
+		close()
 		get_viewport().set_input_as_handled()
 
 func open_for(body: Control):
 	_target = body
-	if _target == null: return
+	if _target == null or not is_instance_valid(_target):
+		close()
+		return
 	_build_ui()
 	visible = true
 
+func close():
+	visible = false
+	_target = null
+	_gather_func = Callable()
+
 func _build_ui():
+	# Free immediately: queue_free would leave the previous build's subtree
+	# (with its stale target wiring) alive and interactive for a frame when
+	# reopening for another pane.
 	for c in get_children():
-		c.queue_free()
+		c.free()
 
 	var cc = CenterContainer.new()
 	add_child(cc)
@@ -53,7 +72,7 @@ func _build_ui():
 	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL; h.add_child(t)
 	var x = Button.new(); x.text = Icons.CLOSE; x.flat = true
 	Icons.style_button(x)
-	x.pressed.connect(func(): visible = false); h.add_child(x)
+	x.pressed.connect(close); h.add_child(x)
 	v.add_child(h)
 	v.add_child(HSeparator.new())
 
@@ -74,5 +93,6 @@ func _build_ui():
 	bg.add_child(_debounce_timer)
 
 func _apply_to_target():
-	if _target == null or not _gather_func.is_valid(): return
+	if _target == null or not is_instance_valid(_target): return
+	if not _gather_func.is_valid(): return
 	_target.apply_settings(_gather_func.call())
