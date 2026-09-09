@@ -272,7 +272,7 @@ gPTY is evolving from a multi-terminal emulator into an ADE — a graphical PTY 
 ### Commits
 
 - Format: [Conventional Commits](https://www.conventionalcommits.org/) — `feat(scope):`, `fix(scope):`, `chore(scope):`
-- Scopes: `settings`, `terminal`, `layout`, `workspace`, `sidebar`, `gdext`, `core`, `cli`, `ipc`, `profiles`, `concepts`, `icons`, `ci`, `ai`, `inspector`
+- Scopes: `settings`, `terminal`, `layout`, `workspace`, `sidebar`, `ui`, `gdext`, `core`, `cli`, `ipc`, `profiles`, `concepts`, `icons`, `ci`, `ai`, `inspector`
 - Workflow: Use the commit skill (`skill://commit`) to discover changes, group them logically, and produce correctly-formatted messages. The git hooks (pre-commit, commit-msg, pre-push) are the enforcement layer that catches bypasses.
 - CI gates: `pre-commit` runs fast checks (fmt, workflow lint, clippy). `pre-push` runs the full `./scripts/ci-check` suite. Install with `./scripts/install-hooks` once per clone.
 
