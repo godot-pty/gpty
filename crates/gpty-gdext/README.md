@@ -119,6 +119,8 @@ Inspector omp is launched as `omp --mode rpc --no-session --no-tools --no-extens
 | `respond_ipc(id, success, result_json)` | void | Respond to a drained IPC request |
 | `drain_agent_events()` | `String` | Drain bounded OMP extension events from `gpty-events.sock` (JSON array). **Unix only** — see [OMP event socket](#omp-event-socket-reasoning-pane) |
 
+The control server registers `version`/`shutdown` locally; every other method (`newPane`, `paneRead`, `paneStatus`, `paneRun`, `paneWait`, `broadcast`, layout, concepts) is listed in `ipc.rs` `gdscript_methods` and routed to GDScript — `workspace.gd` delegates dispatch to `WorkspaceIpcHandlers` (`ipc_handlers.gd`). New pane-API methods must be added to **both** the registration list and the handler module.
+
 #### Grid Update Dictionary
 
 `get_grid_updates_packed()` returns one of two shapes. Both carry flat
