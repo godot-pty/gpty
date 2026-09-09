@@ -73,7 +73,7 @@ Launch is deferred: `gPTY` stays below 1.0.0 until either the project gains a gr
 
 ## v0.5.2 — Agent State & Adapters
 
-- [ ] AgentState model — `AgentState` enum (Idle / Working / NeedsAttention / Completed / Failed) in `gpty-core`, with tiered detection: Tier 1 capability-authenticated events (authoritative), Tier 2 OSC state declaration (published standard; AGENTS.md constraints), Tier 3 regex/idle/exit heuristics (display-only). No `ToolRunning`-via-exit-code — foreground-command exits are not reliably attributable in a PTY.
+- [ ] AgentState model — `AgentState` enum (Idle / Working / NeedsAttention / Completed / Failed) in `gpty-core`, with tiered detection: Tier 1 capability-authenticated events (authoritative), Tier 2 OSC state declaration (published standard; AGENTS.md constraints), Tier 3 regex/idle/exit heuristics (display-only). No `ToolRunning`-via-exit-code — foreground-command exits are not reliably attributable in a PTY. (Progress: Tier 2 + Tier 3 + `paneStatus` exposure landed; Tier 1 event mapping ships with the generic event vocabulary.)
 - [ ] Titlebar state badges — Phosphor status badges on pane titlebars in `terminal_pane.gd` (pulsing amber = NeedsAttention, spinner = Working, check = Completed, warning = Failed). Display only; badge state never feeds decisions.
 - [ ] Generic event vocabulary — adapter-neutral event names (`agent.started`, `turn.started`, `tool.call`, `thinking.delta`) mapped from the OMP extension's allowlist; Reasoning consumes the generic contract. Same commit: update the AGENTS.md OMP-only data-flow diagram.
 - [ ] Windows event listener — named-pipe event listener closes the Unix-only gap (`omp_events.rs`); Reasoning stops being fail-closed on Windows.

@@ -8,6 +8,7 @@
 //! |--------|------|
 //! | [`types`]  | Data vocabulary: `Concept`, `Event`, `Action`, `TerminalConfig` |
 //! | [`concept`]| Regex trigger → labelled action routing (pure functions, no I/O) |
+//! | [`agent_state`] | Tiered, display-only agent-state detection (events / OSC / heuristics) |
 //! | [`engine`] | Central pub-sub orchestrator; spawns terminal tasks on the tokio runtime |
 //! | [`pty`]    | Cross-platform PTY lifecycle via `portable-pty`; one OS thread per PTY |
 //! | [`parser`] | Strips ANSI escape sequences from PTY output; extracts plain-text lines |
@@ -29,6 +30,7 @@
 //!                                              (check labels → inject command)
 //! ```
 
+pub mod agent_state;
 pub mod color;
 pub mod concept;
 pub mod engine;

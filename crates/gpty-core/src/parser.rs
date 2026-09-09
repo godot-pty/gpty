@@ -48,6 +48,13 @@ impl LineParser {
         self.parser.advance(&mut self.handler, bytes);
         std::mem::take(&mut self.handler.completed_lines)
     }
+
+    /// Consume the Tier 2 agent-state declaration seen in the bytes fed
+    /// since the last take. Returns `None` when no whitelisted
+    /// `gpty_state=<value>` sequence was parsed.
+    pub fn take_declared_state(&mut self) -> Option<crate::agent_state::AgentState> {
+        self.handler.declared_state.take()
+    }
 }
 
 /// Maximum bytes buffered for a single output line before the parser
@@ -67,6 +74,10 @@ struct Handler {
     /// LF → CRLF pair, the stashed text IS the completed line; any
     /// printable → the stashed text was overwritten (reprint), drop it.
     cr_stash: Option<String>,
+    /// Tier 2 agent-state declaration from an OSC `gpty_state=<value>`
+    /// sequence. Single-shot: only the first declaration in a parse
+    /// applies; the engine consumes it via [`LineParser::take_declared_state`].
+    declared_state: Option<crate::agent_state::AgentState>,
 }
 
 impl Perform for Handler {
@@ -118,7 +129,27 @@ impl Perform for Handler {
     }
 
     /// OSC: `ESC ]` — window title, clipboard, etc.
-    fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
+    ///
+    /// The ONE interpreted sequence in this discard-only parser: the
+    /// published Tier 2 agent-state declaration `gpty_state=<value>`.
+    /// Strictly whitelisted, single-shot, consumed by the engine with the
+    /// same alt-screen / capture-replay / resize suppression as concept
+    /// matching. Do not interpret further OSC sequences here without a
+    /// security review — everything else stays discarded.
+    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        if self.declared_state.is_some() || params.is_empty() {
+            return;
+        }
+        let mut kv = params[0].splitn(2, |b| *b == b'=');
+        let key = kv.next();
+        let value = kv.next();
+        if key == Some(b"gpty_state")
+            && let Some(text) = value.and_then(|v| std::str::from_utf8(v).ok())
+            && let Some(state) = crate::agent_state::AgentState::from_declaration(text)
+        {
+            self.declared_state = Some(state);
+        }
+    }
 
     /// ESC: single-character escape sequences.
     fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {}
@@ -241,6 +272,56 @@ mod tests {
             vec!["hello", "world"],
             "CRLF should not produce empty lines"
         );
+    }
+
+    #[test]
+    fn osc_state_declaration_recognized() {
+        use crate::agent_state::AgentState;
+        let mut p = LineParser::new();
+        let lines = p.feed(b"\x1b]gpty_state=working\x07");
+        assert!(lines.is_empty(), "declaration must not commit a line");
+        assert_eq!(p.take_declared_state(), Some(AgentState::Working));
+    }
+
+    #[test]
+    fn osc_state_declaration_whitelist_only() {
+        let mut p = LineParser::new();
+        p.feed(b"\x1b]gpty_state=rm -rf /\x07");
+        assert_eq!(
+            p.take_declared_state(),
+            None,
+            "unknown values must be ignored"
+        );
+        p.feed(b"\x1b]gpty_state=failed\x07");
+        assert_eq!(
+            p.take_declared_state(),
+            Some(crate::agent_state::AgentState::Failed)
+        );
+    }
+
+    #[test]
+    fn osc_state_declaration_single_shot() {
+        use crate::agent_state::AgentState;
+        let mut p = LineParser::new();
+        p.feed(b"\x1b]gpty_state=working\x07\x1b]gpty_state=failed\x07");
+        assert_eq!(
+            p.take_declared_state(),
+            Some(AgentState::Working),
+            "only the first declaration in a parse applies"
+        );
+        assert_eq!(
+            p.take_declared_state(),
+            None,
+            "declaration is consumed once"
+        );
+    }
+
+    #[test]
+    fn osc_other_sequences_still_stripped() {
+        let mut p = LineParser::new();
+        let lines = p.feed(b"\x1b]0;mytitle\x07prompt$\n");
+        assert_eq!(lines, vec!["prompt$"]);
+        assert_eq!(p.take_declared_state(), None);
     }
 
     #[test]

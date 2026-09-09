@@ -145,6 +145,10 @@ pub struct TermGrid {
     pub history: Option<Arc<std::sync::Mutex<crate::history::HistoryStore>>>,
     /// Process/liveness primitives written by the engine task.
     pub status: TermStatus,
+    /// Tiered agent-state tracker (display only) written by the engine
+    /// task from OSC declarations and heuristics, and by the gdext bridge
+    /// from capability-authenticated events.
+    pub agent_state: crate::agent_state::AgentStateTracker,
     /// Bounded ring of recent committed plain-text lines (newest last).
     /// Backs `waitForOutput`.
     pub recent_lines: std::collections::VecDeque<String>,
@@ -194,6 +198,7 @@ impl TermGrid {
             line_count: 0,
             history: None,
             status: TermStatus::default(),
+            agent_state: crate::agent_state::AgentStateTracker::default(),
             recent_lines: std::collections::VecDeque::new(),
         }
     }

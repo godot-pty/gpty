@@ -8,6 +8,7 @@ Library crate for the gpty multi-PTY emulator. This is the engine — all termin
 |--------|---------|-----------|
 | [`types`](src/types.rs) | Data vocabulary shared across all modules | `Concept`, `Event`, `Action`, `TerminalConfig`, `CaptureMode`, `CapturedOutput`, `PaneType` |
 | [`concept`](src/concept.rs) | Pure functions for regex matching and command routing | `match_and_broadcast()`, `matching_commands()` |
+| [`agent_state`](src/agent_state.rs) | Tiered, display-only agent-state detection (events / OSC / heuristics) | `AgentState`, `StateTier`, `AgentStateTracker` |
 | [`engine`](src/engine.rs) | Runtime orchestrator; spawns terminal tasks, capture state machine | `WorkspaceEngine`, `PtyTerminalHandle`, `SpawnedTerminal`, `TaskContext` |
 | [`pty`](src/pty.rs) | Cross-platform PTY lifecycle via `portable-pty` | `PtyHandle` |
 | [`parser`](src/parser.rs) | Strips ANSI escape sequences; extracts plain-text lines | `LineParser` |

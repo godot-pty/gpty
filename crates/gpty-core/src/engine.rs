@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 
+use crate::agent_state::{AgentState, StateTier};
 use crate::concept;
 use crate::term::TermGrid;
 use crate::types::{CaptureMode, CapturedOutput, Concept, Event, TerminalConfig};
@@ -591,6 +592,11 @@ async fn run_terminal_task(
                     locked.status.last_output_unix_ms = Some(unix_ms());
                 }
                 let lines = line_parser.feed(&bytes);
+                // Tier 2 OSC declaration — spoofable by design, display
+                // state only. Consumed here so the capture branch below
+                // never sees stale declarations (capture-replay
+                // suppression) and replayed bytes cannot re-declare state.
+                let declared = line_parser.take_declared_state();
 
                 if ctx.session.is_active() {
                     // In capture mode: buffer raw bytes, don't feed grid.
@@ -635,6 +641,54 @@ async fn run_terminal_task(
                                 timeout_sleep.as_mut().reset(deadline);
                             }
                             drop(concepts_guard);
+                        }
+                        // Tier 2: OSC `gpty_state=<value>` declarations.
+                        // Rate-limited — a prompt that reprints the
+                        // declaration (or pasted text) must not churn the
+                        // display state.
+                        if let Some(state) = declared
+                            && let Some(g) = &grid
+                            && let Ok(mut locked) = g.lock()
+                        {
+                            let ok = locked
+                                .agent_state
+                                .last_declaration_unix_ms
+                                .map(|t| {
+                                    unix_ms().saturating_sub(t)
+                                        >= crate::agent_state::DECLARATION_MIN_INTERVAL_MS
+                                })
+                                .unwrap_or(true);
+                            if ok {
+                                locked
+                                    .agent_state
+                                    .observe(StateTier::Tier2, state, unix_ms());
+                                locked.agent_state.last_declaration_unix_ms =
+                                    Some(unix_ms());
+                            }
+                        }
+                        // Tier 3: conservative failure patterns + TTL decay.
+                        if let Some(g) = &grid
+                            && let Ok(mut locked) = g.lock()
+                        {
+                            for line in &lines {
+                                if line.len() > crate::parser::MAX_LINE_LEN {
+                                    continue;
+                                }
+                                if crate::agent_state::tier3_failure_match(line) {
+                                    locked.agent_state.observe(
+                                        StateTier::Tier3,
+                                        AgentState::Failed,
+                                        unix_ms(),
+                                    );
+                                    locked.agent_state.last_t3_signal_unix_ms =
+                                        Some(unix_ms());
+                                    break;
+                                }
+                            }
+                            locked.agent_state.decay_t3(
+                                unix_ms(),
+                                crate::agent_state::TIER3_TTL_MS,
+                            );
                         }
                     }
                     feed_grid(&grid, &bytes);
@@ -730,6 +784,15 @@ async fn run_terminal_task(
         && let Ok(mut locked) = g.lock()
     {
         locked.status.exit_code = pty_handle.try_wait();
+        // Tier 3 exit heuristic (display only): a shell that died with a
+        // non-zero code failed; zero exits fall back to Idle.
+        if let Some(code) = locked.status.exit_code
+            && code != 0
+        {
+            locked
+                .agent_state
+                .observe(StateTier::Tier3, AgentState::Failed, unix_ms());
+        }
     }
 }
 #[cfg(test)]
@@ -790,6 +853,130 @@ mod tests {
         assert!(
             found,
             "Grid should have received and rendered the input text"
+        );
+    }
+
+    /// Poll the spawned terminal's agent state until it leaves Idle.
+    async fn wait_for_state(spawned: &SpawnedTerminal) -> crate::agent_state::AgentState {
+        for _ in 0..100 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            if let Ok(grid) = spawned.grid.lock() {
+                let state = grid.agent_state.state;
+                if state != crate::agent_state::AgentState::Idle {
+                    return state;
+                }
+                if grid.status.exit_code.is_some() {
+                    return state;
+                }
+            }
+        }
+        crate::agent_state::AgentState::Idle
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn osc_declaration_sets_tier2_state() {
+        use crate::agent_state::AgentState;
+        let engine = WorkspaceEngine::new(vec![]);
+        let config = TerminalConfig {
+            id: 51,
+            labels: vec![],
+        };
+        let spawned = engine
+            .spawn_terminal_with_grid(
+                config,
+                "sh",
+                &["-c", "printf '\\033]gpty_state=working\\007'; sleep 1"],
+                &[],
+                &[],
+                24,
+                80,
+            )
+            .await
+            .expect("Failed to spawn terminal");
+        assert_eq!(
+            wait_for_state(&spawned).await,
+            AgentState::Working,
+            "an OSC gpty_state=working declaration must set Tier 2 state"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn osc_declaration_ignores_unknown_values() {
+        use crate::agent_state::AgentState;
+        let engine = WorkspaceEngine::new(vec![]);
+        let config = TerminalConfig {
+            id: 52,
+            labels: vec![],
+        };
+        let spawned = engine
+            .spawn_terminal_with_grid(
+                config,
+                "sh",
+                &["-c", "printf '\\033]gpty_state=evi1\\007'; sleep 1"],
+                &[],
+                &[],
+                24,
+                80,
+            )
+            .await
+            .expect("Failed to spawn terminal");
+        assert_eq!(
+            wait_for_state(&spawned).await,
+            AgentState::Idle,
+            "non-whitelisted declaration values must be ignored"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn tier3_failure_pattern_sets_failed() {
+        use crate::agent_state::AgentState;
+        let engine = WorkspaceEngine::new(vec![]);
+        let config = TerminalConfig {
+            id: 53,
+            labels: vec![],
+        };
+        let spawned = engine
+            .spawn_terminal_with_grid(
+                config,
+                "sh",
+                &[
+                    "-c",
+                    "echo 'test result: FAILED. 2 passed; 1 failed'; sleep 1",
+                ],
+                &[],
+                &[],
+                24,
+                80,
+            )
+            .await
+            .expect("Failed to spawn terminal");
+        assert_eq!(
+            wait_for_state(&spawned).await,
+            AgentState::Failed,
+            "a Tier 3 failure pattern must set Failed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shell_exit_nonzero_sets_failed() {
+        use crate::agent_state::AgentState;
+        let engine = WorkspaceEngine::new(vec![]);
+        let config = TerminalConfig {
+            id: 54,
+            labels: vec![],
+        };
+        let spawned = engine
+            .spawn_terminal_with_grid(config, "sh", &["-c", "exit 3"], &[], &[], 24, 80)
+            .await
+            .expect("Failed to spawn terminal");
+        assert_eq!(
+            wait_for_state(&spawned).await,
+            AgentState::Failed,
+            "a shell exiting non-zero must set Failed (Tier 3)"
         );
     }
 

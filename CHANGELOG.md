@@ -2,6 +2,12 @@
 
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Agent-state detection — a display-only `AgentState` (idle/working/needs-attention/completed/failed) per terminal with tiered detection: Tier 2 accepts the published `gpty_state=<value>` OSC declaration (whitelisted, single-shot, rate-limited, alt-screen/capture-replay/resize suppressed); Tier 3 adds conservative failure regex patterns with 60 s TTL decay and non-zero shell exits. The state and its detection tier surface through `pane-status` (`agent_state`, `agent_state_tier`). Tier 1 (capability-authenticated events) lands with the generic event vocabulary.
+
 
 ## [0.5.1] — 2026-09-09
 

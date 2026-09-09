@@ -436,7 +436,8 @@ impl GptyTerminal {
         )
     }
 
-    /// Process status primitives as JSON: pid, running, exit_code, idle_ms.
+    /// Process status primitives as JSON: pid, running, exit_code, idle_ms,
+    /// agent_state, agent_state_tier.
     #[func]
     fn get_status(&self) -> GString {
         self.with_grid(
@@ -452,11 +453,24 @@ impl GptyTerminal {
                     "running": s.exit_code.is_none(),
                     "exit_code": s.exit_code,
                     "idle_ms": idle_ms,
+                    "agent_state": g.agent_state.state.as_str(),
+                    "agent_state_tier": g.agent_state.tier.map(|t| t as u8),
                 })
                 .to_string();
                 GString::from(json.as_str())
             },
             GString::from("{}"),
+        )
+    }
+
+    /// Display-only agent state for this terminal: idle, working,
+    /// needs-attention, completed, or failed. Cheap string getter — the
+    /// badge layer polls it every frame.
+    #[func]
+    fn get_agent_state(&self) -> GString {
+        self.with_grid(
+            |g| GString::from(g.agent_state.state.as_str()),
+            GString::from("idle"),
         )
     }
 

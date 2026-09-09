@@ -193,6 +193,25 @@ func test_ui_colors_apply_live_to_existing_wrappers():
 	# Wait out the deferred concept push timer so it doesn't resume after free.
 	await get_tree().create_timer(2.1).timeout
 
+func test_pane_status_includes_agent_state():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var run = WorkspaceIpcHandlers.handle(ws, "paneRun", {"command": "echo hi"})
+	assert_true(run is Dictionary and run.has("pane_id"), "paneRun must return a pane id")
+	var st = WorkspaceIpcHandlers.handle(ws, "paneStatus", {"pane_id": str(run.get("pane_id"))})
+	assert_true(st is Dictionary and not st.has("error"), "paneStatus must succeed")
+	assert_true(st.has("agent_state"), "paneStatus must expose agent_state")
+	assert_eq(str(st.get("agent_state", "")), "idle",
+		"a fresh terminal must report idle agent state")
+	assert_true(st.has("agent_state_tier"), "paneStatus must expose the detection tier")
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
 func test_pane_settings_open_above_second_workspace_grid():
 	var ws = WorkspaceScript.new()
 	_ws = ws
