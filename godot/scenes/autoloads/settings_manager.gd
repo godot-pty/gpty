@@ -12,6 +12,7 @@ var cfg_cursor_shape := 0
 var cfg_cursor_blink := true
 var cfg_cursor_blink_speed := 0.5
 var cfg_scroll_lines := 3
+var cfg_history_lines := 10000
 var cfg_default_rows := 24
 var cfg_default_cols := 80
 var cfg_beam_width := 2
@@ -49,6 +50,7 @@ func load_settings():
 	cfg_cursor_blink = d.get("cursor_blink", true)
 	cfg_cursor_blink_speed = d.get("cursor_blink_speed", 0.5)
 	cfg_scroll_lines = d.get("scroll_lines", 3)
+	cfg_history_lines = clampi(int(d.get("history_lines", 10000)), 100, 100000)
 	cfg_default_rows = d.get("default_rows", 24)
 	cfg_default_cols = d.get("default_cols", 80)
 	cfg_beam_width = d.get("beam_width", 2)
@@ -81,6 +83,7 @@ func save_settings():
 	d["reasoning_max_turns"] = cfg_reasoning_max_turns
 	d["reasoning_max_turn_bytes"] = cfg_reasoning_max_turn_bytes
 	d["check_updates"] = cfg_check_updates
+	d["history_lines"] = cfg_history_lines
 	_write_file(SETTINGS_FILE, d)
 	settings_changed.emit()
 

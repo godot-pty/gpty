@@ -89,6 +89,13 @@ impl GptyTerminal {
     /// identify the pane they are in. If empty, the function falls back to
     /// the per-PTY session id used for `GPTY_TERMINAL_SESSION_ID`.
     ///
+    /// `history_lines` caps persisted scrollback per pane (clamped to
+    /// 100..=100_000). History is keyed by the stable `attachment_id`
+    /// ONLY — when `pane_id` is empty, no persistent store is attached
+    /// (ephemeral session ids must never write rows that orphan across
+    /// restarts). The newest `history_lines` rows are restored into the
+    /// grid's scrollback on spawn.
+    ///
     /// # Edge cases
     /// - Calling twice replaces the previous session.
     /// - If spawning fails, the grid stays empty and `get_grid_rows()` returns `[]`.
@@ -101,6 +108,7 @@ impl GptyTerminal {
         cols: i64,
         envs: GString,
         pane_id: GString,
+        history_lines: i64,
     ) {
         let command = command.to_string();
         if command.is_empty() || command.len() > 1024 || command.contains('\0') {
@@ -140,6 +148,8 @@ impl GptyTerminal {
         // GPTY_PANE_ID: prefer the stable attachment_id; fall back to the
         // per-PTY ephemeral session_id when no attachment_id was supplied.
         let pane_id_str = pane_id.to_string();
+        // History persistence key: the stable attachment_id ONLY (see doc).
+        let history_key = pane_id_str.clone();
         let pane_id_value = if !pane_id_str.is_empty() {
             pane_id_str
         } else if let Some((session_id, _)) = &event_registration {
@@ -179,17 +189,55 @@ impl GptyTerminal {
             cols,
         )) {
             Ok(spawned) => {
-                // Attach SQLite history store for persistent scrollback
+                // Attach the SQLite history store and restore the scrollback
+                // tail. All inside one grid lock so the engine's store_line
+                // cannot interleave between the line-number read and the
+                // restored feed.
                 if let Ok(mut grid) = spawned.grid.lock() {
-                    let db_path = godot::classes::ProjectSettings::singleton()
-                        .globalize_path("user://history.db")
-                        .to_string();
-                    match gpty_core::history::HistoryStore::open(&db_path, id) {
-                        Ok(store) => {
-                            grid.history = Some(Arc::new(std::sync::Mutex::new(store)));
-                        }
-                        Err(e) => {
-                            godot_warn!("[GDExt] Could not open history store for pane {id}: {e}");
+                    let history_lines = history_lines.clamp(100, 100_000) as u32;
+                    if !history_key.is_empty() {
+                        let db_path = godot::classes::ProjectSettings::singleton()
+                            .globalize_path("user://history.db")
+                            .to_string();
+                        match gpty_core::history::HistoryStore::open(
+                            &db_path,
+                            &history_key,
+                            history_lines,
+                        ) {
+                            Ok(store) => {
+                                let history = Arc::new(std::sync::Mutex::new(store));
+                                let max_ln = match history.lock() {
+                                    Ok(h) => match h.max_line_num() {
+                                        Ok(n) => Some(n),
+                                        Err(e) => {
+                                            godot_warn!(
+                                                "[GDExt] Could not read history for pane {history_key}: {e}"
+                                            );
+                                            None
+                                        }
+                                    },
+                                    Err(_) => None,
+                                };
+                                if let Some(max_ln) = max_ln {
+                                    let start = (max_ln - history_lines as i64).max(1);
+                                    let restored: Vec<String> = history
+                                        .lock()
+                                        .ok()
+                                        .and_then(|h| h.get_lines(start, max_ln).ok())
+                                        .map(|rows| {
+                                            rows.into_iter().map(|(_, text)| text).collect()
+                                        })
+                                        .unwrap_or_default();
+                                    grid.seed_line_count(max_ln as u64);
+                                    grid.feed_restore_lines(&restored);
+                                }
+                                grid.history = Some(history);
+                            }
+                            Err(e) => {
+                                godot_warn!(
+                                    "[GDExt] Could not open history store for pane {history_key}: {e}"
+                                );
+                            }
                         }
                     }
                 }
@@ -206,6 +254,40 @@ impl GptyTerminal {
                 godot_error!("Failed to spawn PTY for '{command}': {e}");
             }
         }
+    }
+
+    /// Search this pane's persisted scrollback history with FTS5.
+    ///
+    /// `pattern` is passed to FTS5 `MATCH` verbatim (raw query syntax:
+    /// bare words, quoted phrases, `NEAR`, prefix `*`). Returns JSON
+    /// `{"results": [[line_num, text], ...]}` newest-first, or
+    /// `{"results": []}` when no store is attached or nothing matches.
+    /// `limit` is clamped to 1..=500.
+    #[func]
+    fn search_history(&self, pattern: GString, limit: i64) -> GString {
+        let Some(spawned) = &self.spawned else {
+            return GString::from("{\"results\":[]}");
+        };
+        let history = if let Ok(grid) = spawned.grid.lock() {
+            grid.history.clone()
+        } else {
+            None
+        };
+        let Some(history) = history else {
+            return GString::from("{\"results\":[]}");
+        };
+        let results = match history.lock() {
+            Ok(h) => h
+                .search(&pattern.to_string(), limit.clamp(1, 500) as usize)
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        let rows: Vec<Vec<serde_json::Value>> = results
+            .into_iter()
+            .map(|(n, t)| vec![serde_json::json!(n), serde_json::json!(t)])
+            .collect();
+        let json = serde_json::json!({ "results": rows }).to_string();
+        GString::from(json.as_str())
     }
 
     /// Send raw text to the PTY — NO newline appended.

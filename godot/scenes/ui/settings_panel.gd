@@ -61,6 +61,7 @@ func _build_ui():
 	t_term.add_child(HSeparator.new())
 	var dims = _add_dims_control(t_term)
 	var scroll_spin = _add_scroll_control(t_term)
+	var history_spin = _add_history_control(t_term)
 	t_term.add_child(HSeparator.new())
 	_add_shell_control(t_term)
 	_add_env_control(t_term)
@@ -98,6 +99,7 @@ func _build_ui():
 		SettingsManager.cfg_font_size = int(fs_spin.value)
 		SettingsManager.cfg_cursor_blink_speed = blink_spin.value
 		SettingsManager.cfg_scroll_lines = int(scroll_spin.value)
+		SettingsManager.cfg_history_lines = int(history_spin.value)
 		SettingsManager.cfg_default_rows = int(dims[0].value)
 		SettingsManager.cfg_default_cols = int(dims[1].value)
 		SettingsManager.cfg_beam_width = int(cursor_px[0].value)
@@ -116,12 +118,13 @@ func _build_ui():
 	blink_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	fs_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	scroll_spin.value_changed.connect(func(_v): _debounce_timer.start())
+	history_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	reason_spins[0].value_changed.connect(func(_v): _debounce_timer.start())
 	reason_spins[1].value_changed.connect(func(_v): _debounce_timer.start())
 	show_tb_cb.toggled.connect(func(_pressed): _debounce_timer.start())
 	check_updates_cb.toggled.connect(func(_pressed): _debounce_timer.start())
 
-	_add_reset_button(v, shape_opt, blink_cb, blink_spin, scroll_spin, dims, cursor_px, color_btns, fs_spin, show_tb_cb, win_mode_opt, reason_spins, check_updates_cb)
+	_add_reset_button(v, shape_opt, blink_cb, blink_spin, scroll_spin, history_spin, dims, cursor_px, color_btns, fs_spin, show_tb_cb, win_mode_opt, reason_spins, check_updates_cb)
 
 func _create_tab(tabs: TabContainer, title: String) -> VBoxContainer:
 	var sc = ScrollContainer.new()
@@ -226,6 +229,17 @@ func _add_scroll_control(v: VBoxContainer) -> SpinBox:
 	spin.get_line_edit().add_theme_font_size_override("font_size", 12)
 	spin.min_value = 1; spin.max_value = 10; spin.step = 1
 	spin.value = SettingsManager.cfg_scroll_lines
+	hs.add_child(spin)
+	v.add_child(hs)
+	return spin
+
+func _add_history_control(v: VBoxContainer) -> SpinBox:
+	var hs = HBoxContainer.new()
+	hs.add_child(_lbl("History lines:"))
+	var spin = SpinBox.new(); spin.name = "HistorySpin"
+	spin.get_line_edit().add_theme_font_size_override("font_size", 12)
+	spin.min_value = 100; spin.max_value = 100000; spin.step = 100
+	spin.value = SettingsManager.cfg_history_lines
 	hs.add_child(spin)
 	v.add_child(hs)
 	return spin
@@ -390,7 +404,7 @@ func _reset_colors(btns: Array):
 			(btns[i][1] as ColorPickerButton).color = defaults[i]
 		else:
 			(btns[i] as ColorPickerButton).color = defaults[i]
-func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: CheckBox, blink_spin: SpinBox, scroll_spin: SpinBox, dims: Array, cursor_px: Array, color_btns: Array, fs_spin: SpinBox, show_tb_cb: CheckBox, win_mode_opt: OptionButton, reason_spins: Array, check_updates_cb: CheckBox):
+func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: CheckBox, blink_spin: SpinBox, scroll_spin: SpinBox, history_spin: SpinBox, dims: Array, cursor_px: Array, color_btns: Array, fs_spin: SpinBox, show_tb_cb: CheckBox, win_mode_opt: OptionButton, reason_spins: Array, check_updates_cb: CheckBox):
 	var btn = Button.new(); btn.text = "Reset to defaults"
 	btn.add_theme_font_size_override("font_size", 12)
 	btn.pressed.connect(func():
@@ -398,6 +412,7 @@ func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: Chec
 		SettingsManager.cfg_cursor_blink = true
 		SettingsManager.cfg_cursor_blink_speed = 0.5
 		SettingsManager.cfg_scroll_lines = 3
+		SettingsManager.cfg_history_lines = 10000
 		SettingsManager.cfg_default_rows = 24
 		SettingsManager.cfg_default_cols = 80
 		SettingsManager.cfg_beam_width = 2
@@ -421,6 +436,7 @@ func _add_reset_button(v: VBoxContainer, shape_opt: OptionButton, blink_cb: Chec
 		blink_cb.button_pressed = true
 		blink_spin.value = 0.5
 		scroll_spin.value = 3
+		history_spin.value = 10000
 		dims[0].value = 24
 		dims[1].value = 80
 		cursor_px[0].value = 2
@@ -523,7 +539,7 @@ func _refresh_concept_list():
 		# Enabled toggle
 		var toggle = CheckButton.new()
 		toggle.button_pressed = enabled
-		toggle.toggled.connect(func(on: bool):
+		toggle.toggled.connect(func(_on: bool):
 			if _concept_terminal == null:
 				return
 			ConceptManager.toggle_concept(str(c.get("name", "")))
@@ -639,16 +655,16 @@ func _delete_concept(idx: int):
 	var concepts = ConceptManager.get_concepts()
 	if idx < 0 or idx >= concepts.size():
 		return
-	var name: String = str(concepts[idx].get("name", ""))
-	if name == "":
+	var concept_name: String = str(concepts[idx].get("name", ""))
+	if concept_name == "":
 		return
 	var user = ConceptManager._load_from_file()
 	var kept: Array = []
 	for c in user:
-		if c is Dictionary and c.get("name", "") == name:
+		if c is Dictionary and c.get("name", "") == concept_name:
 			continue
 		kept.append(c)
-	if ConceptManager._default_names(ConceptManager._load_defaults()).has(name):
-		kept.append({"name": name, "enabled": false})
+	if ConceptManager._default_names(ConceptManager._load_defaults()).has(concept_name):
+		kept.append({"name": concept_name, "enabled": false})
 	ConceptManager.save_concepts(kept)
 	_refresh_concept_list()

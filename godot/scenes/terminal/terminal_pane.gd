@@ -84,6 +84,11 @@ var _search_bar: LineEdit
 var _search_visible: bool = false
 var _search_results: Dictionary = {}  # {count, rows: Array, cols: Array, current: int}
 var _search_error: String = ""
+var _scope_btn: Button
+var _scope_history: bool = false
+var _history_results: Array = []  # [[line_num, text], ...]
+var _history_panel: ScrollContainer
+var _history_list: VBoxContainer
 var _sync_interval: float = 1.0 / 60.0
 
 func _ready():
@@ -91,7 +96,7 @@ func _ready():
 	_terminal = GptyTerminal.new()
 	_terminal.name = "GptyTerminal"
 	add_child(_terminal)
-	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id)
+	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines)
 
 	if color_scheme_path != "":
 		_apply_stored_scheme()
@@ -112,11 +117,38 @@ func _ready():
 	_search_bar.visible = false
 	_search_bar.anchor_left = 0.0; _search_bar.anchor_right = 1.0
 	_search_bar.anchor_bottom = 1.0; _search_bar.offset_bottom = 0
+	_search_bar.offset_left = 68
 	_search_bar.offset_top = -36
 	_search_bar.text_changed.connect(_on_search_text_changed)
 	_search_bar.text_submitted.connect(_on_search_submitted)
 	_search_bar.gui_input.connect(_on_search_bar_input)
 	add_child(_search_bar)
+
+	# Search scope toggle (Live grid / persisted history)
+	_scope_btn = Button.new()
+	_scope_btn.name = "ScopeBtn"
+	_scope_btn.text = "Live"
+	_scope_btn.tooltip_text = "Search scope"
+	_scope_btn.visible = false
+	_scope_btn.anchor_left = 0.0; _scope_btn.anchor_bottom = 1.0
+	_scope_btn.offset_left = 4; _scope_btn.offset_right = 64
+	_scope_btn.offset_top = -36; _scope_btn.offset_bottom = 0
+	_scope_btn.pressed.connect(_on_scope_toggled)
+	add_child(_scope_btn)
+
+	# History search results panel (above the search bar)
+	_history_panel = ScrollContainer.new()
+	_history_panel.name = "HistoryResults"
+	_history_panel.visible = false
+	_history_panel.anchor_left = 0.0; _history_panel.anchor_right = 1.0
+	_history_panel.anchor_bottom = 1.0
+	_history_panel.offset_left = 4; _history_panel.offset_right = -4
+	_history_panel.offset_top = -240; _history_panel.offset_bottom = -40
+	_history_list = VBoxContainer.new()
+	_history_list.name = "Results"
+	_history_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_history_panel.add_child(_history_list)
+	add_child(_history_panel)
 
 func _on_resize():
 	if _terminal == null or _cell_w == 0: return
@@ -537,6 +569,8 @@ func _on_search_bar_input(event):
 func _toggle_search():
 	_search_visible = not _search_visible
 	_search_bar.visible = _search_visible
+	_scope_btn.visible = _search_visible
+	_history_panel.visible = _search_visible and _scope_history and _history_results.size() > 0
 	if _search_visible:
 		_search_bar.grab_focus()
 		_search_bar.select_all()
@@ -548,8 +582,10 @@ func _toggle_search():
 func _close_search():
 	_search_visible = false
 	_search_bar.visible = false
+	_scope_btn.visible = false
 	_search_results.clear()
 	_search_error = ""
+	_clear_history_results()
 	queue_redraw()
 	grab_focus()
 
@@ -557,14 +593,30 @@ func _on_search_text_changed(new_text: String):
 	_do_search(new_text)
 
 func _on_search_submitted(_new_text: String):
+	if _scope_history:
+		return
 	if _search_results.get("count", 0) > 0:
 		_jump_to_match(1)  # next match
+
+func _on_scope_toggled():
+	_scope_history = not _scope_history
+	_scope_btn.text = "History" if _scope_history else "Live"
+	_search_bar.placeholder_text = "Search (FTS5)..." if _scope_history else "Search (regex)..."
+	_search_results.clear()
+	_clear_history_results()
+	queue_redraw()
+	if _search_visible and _search_bar.text != "":
+		_do_search(_search_bar.text)
 
 func _do_search(pattern: String):
 	if pattern == "":
 		_search_results.clear()
 		_search_error = ""
+		_clear_history_results()
 		queue_redraw()
+		return
+	if _scope_history:
+		_do_history_search(pattern)
 		return
 	var result = _terminal.search_grid(pattern)
 	if result.has("error"):
@@ -575,6 +627,42 @@ func _do_search(pattern: String):
 		_search_results = result
 		_search_results["current"] = -1
 	queue_redraw()
+
+func _do_history_search(pattern: String):
+	var parsed = JSON.parse_string(str(_terminal.search_history(pattern, 100)))
+	if parsed == null or not parsed is Dictionary or parsed.has("error"):
+		_search_error = "FTS5 query failed"
+		_clear_history_results()
+		return
+	_search_error = ""
+	_history_results = parsed.get("results", [])
+	_rebuild_history_panel()
+
+func _rebuild_history_panel():
+	for c in _history_list.get_children():
+		c.queue_free()
+	for entry in _history_results:
+		var line_num: int = int(entry[0])
+		var full_text: String = str(entry[1])
+		var btn = Button.new()
+		btn.text = "line %d: %s" % [line_num, full_text.left(200)]
+		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		btn.focus_mode = Control.FOCUS_NONE
+		btn.clip_text = true
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.pressed.connect(_on_history_result_clicked.bind(full_text, line_num))
+		_history_list.add_child(btn)
+	_history_panel.visible = _scope_history and _search_visible and _history_results.size() > 0
+
+func _clear_history_results():
+	_history_results.clear()
+	for c in _history_list.get_children():
+		c.queue_free()
+	_history_panel.visible = false
+
+func _on_history_result_clicked(text: String, line_num: int):
+	DisplayServer.clipboard_set(text)
+	ToastManager.info("Copied line %d" % line_num)
 
 func _jump_to_match(direction: int):
 	var count: int = _search_results.get("count", 0)

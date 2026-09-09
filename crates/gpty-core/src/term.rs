@@ -159,7 +159,18 @@ impl TermGrid {
     /// The cell area is `rows × cols`. The default alacritty config is
     /// used; a custom `Config` can be substituted later if needed.
     pub fn new(rows: usize, cols: usize) -> Self {
-        let config = Config::default();
+        Self::new_with_history(rows, cols, 10_000)
+    }
+
+    /// Create a new terminal grid with a bounded scrollback history.
+    ///
+    /// `max_history` caps how many scrolled-off lines alacritty retains in
+    /// memory; the persistent SQLite store has its own independent cap.
+    pub fn new_with_history(rows: usize, cols: usize, max_history: usize) -> Self {
+        let config = Config {
+            scrolling_history: max_history,
+            ..Config::default()
+        };
         let size = GridSize { rows, cols };
         let title = Arc::new(Mutex::new(String::new()));
         let replies = Arc::new(Mutex::new(std::collections::VecDeque::new()));
@@ -204,6 +215,24 @@ impl TermGrid {
     pub fn feed(&mut self, bytes: &[u8]) {
         self.generation += 1;
         self.processor.advance(&mut self.term, bytes);
+    }
+
+    /// Seed the internal line counter to continue numbering after restored
+    /// history rows (`max_line_num` of the pane's store). Prevents line
+    /// number collisions between restored and freshly appended rows.
+    pub fn seed_line_count(&mut self, n: u64) {
+        self.line_count = n;
+    }
+
+    /// Feed restored history lines into the grid's scrollback.
+    ///
+    /// Uses the ANSI path so escape sequences in restored lines are
+    /// interpreted correctly. Never calls `store_line` — restored rows
+    /// already live in the database and must not be re-appended.
+    pub fn feed_restore_lines(&mut self, lines: &[String]) {
+        for line in lines {
+            self.feed(format!("{line}\r\n").as_bytes());
+        }
     }
 
     /// Return the full grid as row-major `Vec<Vec<CellInfo>>`.
@@ -446,6 +475,11 @@ impl TermGrid {
             && let Ok(h) = history.lock()
         {
             let _ = h.append(self.line_count as i64, line);
+            // Amortize retention: trim oldest rows beyond the store's cap
+            // every 100 committed lines instead of on every append.
+            if self.line_count.is_multiple_of(100) {
+                let _ = h.enforce_cap();
+            }
         }
     }
 
@@ -556,6 +590,20 @@ mod tests {
         let g = TermGrid::new(24, 80);
         assert_eq!(g.num_rows(), 24);
         assert_eq!(g.num_cols(), 80);
+    }
+
+    #[test]
+    fn restore_feed_does_not_duplicate_history_rows() {
+        let mut g = TermGrid::new_with_history(24, 80, 100);
+        let store = crate::history::HistoryStore::open(":memory:", "pane-t", 100).unwrap();
+        g.history = Some(Arc::new(std::sync::Mutex::new(store)));
+        g.seed_line_count(5);
+        g.feed_restore_lines(&["old line 1".to_string(), "old line 2".to_string()]);
+        g.store_line("new line");
+        let hist = g.history.as_ref().unwrap().lock().unwrap();
+        // Restored rows are not re-appended; numbering continues at 6.
+        assert_eq!(hist.max_line_num().unwrap(), 6);
+        assert_eq!(hist.line_count().unwrap(), 1);
     }
 
     #[test]

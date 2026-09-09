@@ -3,6 +3,28 @@
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.5.1] — Unreleased
+
+### Added
+
+- Persistent scrollback — the SQLite+FTS5 history store is wired into pane lifecycle, keyed by stable `attachment_id` (schema v2; pre-v2 rows dropped as unrecoverable). The newest `history_lines` rows are restored into each pane's scrollback on restart and back `pane-read` across restarts.
+- `history_lines` setting — caps persisted scrollback per pane (default 10 000, clamped 100–100 000) in Settings → Terminal.
+- History search — the terminal search bar gains a Live/History scope toggle; History mode runs FTS5 queries against the pane's persisted scrollback and lists matching lines (click copies to clipboard).
+- Workspaces — named tab sets (up to 8) with keep-alive panes: switching hides/shows grids instead of killing PTYs, so background commands keep running. Add/close/rename via the tab strip (`Ctrl+PageUp`/`Ctrl+PageDown` to switch); saved to `user://workspaces.json`, with one-shot migration of the legacy `layout.json` (replaces the `LayoutManager` autoload). Concept captures and agent events keep routing from hidden workspaces.
+- Live pane-API smoke — `scripts/smoke-pane-api` boots the GUI headless with sandboxed user data and drives new-pane, pane-status, inject, pane-wait, pane-read, broadcast, pane-run (exit code), and kill-pane end-to-end; wired into `ci-check` and the CI `gut-tests` job.
+
+### Changed
+
+- History retention trims the oldest rows beyond `history_lines` amortized over every 100 committed lines.
+- `start_shell` no longer attaches a history store keyed by the per-node `id` counter (rows collided across panes and orphaned across restarts).
+
+### Fixed
+
+- Pane API unreachable: `pane-read`, `pane-status`, `pane-run`, `pane-wait`, and `broadcast` were never registered on the GUI IPC server, so every CLI call returned `Unknown method`.
+- Targeted pane API calls always failed with "not found": `paneRead`/`paneStatus`/`paneWait` guarded on `has_method("_terminal")`, but `_terminal` is a property, not a method. Guards now check `is TerminalPane`.
+- `test_ipc_routing.gd` listPanes mirror was missing the `focused` field the handler always emits.
+- GDScript warnings-as-errors on fresh caches (unused params, `name` shadowing `Node.name`) silenced in `settings_panel.gd` and `workspace.gd`.
+
 ## [0.5.0] — 2026-09-03
 
 ### Added
