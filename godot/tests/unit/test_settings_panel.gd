@@ -149,3 +149,77 @@ func test_color_labels_have_uniform_minimum_width():
 	for lbl in labels:
 		assert_eq(lbl.custom_minimum_size.x, 96.0,
 			"color row labels must share one minimum width so pickers align")
+
+# ── Reset button layout ────────────────────────────────────────────────
+
+func test_reset_buttons_are_tab_wide_and_centered():
+	for tab_name in ["System", "Terminal", "Appearance", "Reasoning"]:
+		var btn := _tab_reset_button(tab_name)
+		assert_not_null(btn, "%s tab must have a reset button" % tab_name)
+		assert_eq(btn.size_flags_horizontal, Control.SIZE_EXPAND_FILL,
+			"%s reset must span the tab width" % tab_name)
+		assert_eq(btn.alignment, HORIZONTAL_ALIGNMENT_CENTER,
+			"%s reset text must be centered" % tab_name)
+
+# ── Color picker OK/Cancel ─────────────────────────────────────────────
+
+func _color_picker_for(label_text: String) -> ColorPickerButton:
+	var lbl := _row_label(label_text)
+	assert_not_null(lbl, "row label must exist: " + label_text)
+	for c in lbl.get_parent().get_children():
+		if c is ColorPickerButton:
+			return c
+	return null
+
+func _row_label(label_text: String) -> Label:
+	for lbl in _panel.find_children("*", "Label", true, false):
+		if lbl.text == label_text:
+			return lbl
+	return null
+
+func test_color_pickers_have_ok_cancel_buttons():
+	var picker := _color_picker_for("Wrapper bg")
+	assert_not_null(picker, "wrapper bg row must carry a ColorPickerButton")
+	picker.pressed.emit()  # first press creates the picker pane
+	assert_not_null(picker.get_picker(), "pressing must create the picker")
+	var texts: Array[String] = []
+	for b in picker.get_picker().find_children("*", "Button", true, false):
+		texts.append(b.text)
+	assert_has(texts, "OK", "picker pane must offer an OK button")
+	assert_has(texts, "Cancel", "picker pane must offer a Cancel button")
+
+func test_color_picker_cancel_restores_pre_open_color():
+	var picker := _color_picker_for("Wrapper bg")
+	assert_not_null(picker)
+	var pre_open := picker.color
+	picker.pressed.emit()
+	assert_not_null(picker.get_picker())
+	# Simulate the popup-open capture and a live pick.
+	picker.set_meta("_pre_open_color", pre_open)
+	picker.color = Color(0.9, 0.1, 0.2)
+	var cancel: Button = null
+	for b in picker.get_picker().find_children("*", "Button", true, false):
+		if b.text == "Cancel":
+			cancel = b
+			break
+	assert_not_null(cancel)
+	cancel.pressed.emit()
+	assert_eq(picker.color, pre_open, "Cancel must restore the pre-open color")
+
+# ── Concept dialog width ───────────────────────────────────────────────
+
+func _find_accept_dialog(node: Node) -> AcceptDialog:
+	for c in node.get_children():
+		if c is AcceptDialog:
+			return c
+		var found := _find_accept_dialog(c)
+		if found != null:
+			return found
+	return null
+
+func test_concept_dialog_is_90_percent_of_menu_width():
+	_panel._show_concept_dialog(-1)
+	var dlg := _find_accept_dialog(_panel)
+	assert_not_null(dlg, "concept dialog must exist after opening")
+	assert_almost_eq(float(dlg.min_size.x), _panel._menu_width * 0.9, 0.01,
+		"concept dialog must be 90 percent of the settings menu width")

@@ -3,6 +3,7 @@ class_name SettingsPanel
 
 var _debounce_timer: Timer = null
 var _workspace: Control
+var _menu_width: float = 540.0  # settings panel width — dialogs size relative to it
 
 func _init(workspace: Control):
 	_workspace = workspace
@@ -29,6 +30,7 @@ func _build_ui():
 	# stretching the tab bar while the panel keeps its old width (mangled
 	# layout). Keep every tab visible from the start.
 	bg.custom_minimum_size = Vector2(540, 560)
+	_menu_width = bg.custom_minimum_size.x
 	cc.add_child(bg)
 
 	var mc = MarginContainer.new()
@@ -336,6 +338,7 @@ func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: C
 	btn.color = value
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn.color_changed.connect(setter)
+	btn.picker_created.connect(_attach_color_picker_buttons.bind(btn))
 	h.add_child(btn)
 	var reset = Button.new()
 	reset.text = Icons.RESET
@@ -351,6 +354,32 @@ func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: C
 	h.add_child(reset)
 	v.add_child(h)
 	return btn
+
+## Add explicit OK/Cancel buttons to a ColorPickerButton's popup pane.
+## Colors apply live while picking; Cancel restores the pre-open color so
+## dismissing by clicking elsewhere is never the only way out.
+func _attach_color_picker_buttons(btn: ColorPickerButton):
+	var picker := btn.get_picker()
+	if picker == null:
+		return
+	var popup := btn.get_popup()
+	popup.about_to_popup.connect(func():
+		btn.set_meta("_pre_open_color", btn.color)
+	)
+	var hb = HBoxContainer.new()
+	hb.alignment = BoxContainer.ALIGNMENT_END
+	var cancel = Button.new()
+	cancel.text = "Cancel"
+	cancel.pressed.connect(func():
+		btn.color = btn.get_meta("_pre_open_color", btn.color)
+		popup.hide()
+	)
+	var ok = Button.new()
+	ok.text = "OK"
+	ok.pressed.connect(func(): popup.hide())
+	hb.add_child(cancel)
+	hb.add_child(ok)
+	picker.add_child(hb)
 
 func _add_color_section(v: VBoxContainer) -> Array:
 	v.add_child(_lbl("UI Colors:"))
@@ -502,11 +531,13 @@ func _reset_colors(btns: Array):
 			(entry[1] as ColorPickerButton).color = entry[2]
 
 ## Per-tab reset: each tab's button restores ONLY that tab's settings.
+## The button spans the tab's full width with centered text.
 func _add_tab_reset(v: VBoxContainer, reset_func: Callable):
 	v.add_child(HSeparator.new())
 	var btn = Button.new(); btn.text = "Reset tab to defaults"
 	btn.add_theme_font_size_override("font_size", 12)
-	btn.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	btn.pressed.connect(reset_func)
 	v.add_child(btn)
 
@@ -623,6 +654,9 @@ func _refresh_concept_list():
 func _show_concept_dialog(idx: int):
 	var dlg = AcceptDialog.new()
 	dlg.title = "Edit Concept" if idx >= 0 else "Add Concept"
+	# 90% of the settings menu width — the default dialog is cramped for
+	# regex triggers and commands.
+	dlg.min_size = Vector2i(int(_menu_width * 0.9), 0)
 	var v = VBoxContainer.new()
 	dlg.add_child(v)
 	var name_le = LineEdit.new(); name_le.placeholder_text = "Concept name"
