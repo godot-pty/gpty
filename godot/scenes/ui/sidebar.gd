@@ -26,6 +26,7 @@ var _wm_dropdown: OptionButton
 var _pane_list: VBoxContainer
 var _profile_list: VBoxContainer
 var _workspace_list: VBoxContainer
+var _active_pane: Control = null
 
 
 func _ready():
@@ -60,17 +61,20 @@ func build(bg_rect: ColorRect):
 
 	SettingsManager.settings_changed.connect(_sync_window_mode)
 
-func update_pane_list(panes: Array):
+func update_pane_list(panes: Array, active_body: Control = null):
 	if not _pane_list: return
+	_active_pane = active_body
 	for c in _pane_list.get_children(): c.queue_free()
 	for i in panes.size():
 		var body = panes[i]
 		var row = HBoxContainer.new()
 		row.add_theme_constant_override("separation", 1)
+		row.set_meta("body", body)
 
 		var btn = Button.new()
 		btn.text = body.get("pane_label") if body.get("pane_label") != "" else "%s?" % PaneTypes.ALL.get(body._pane_type(), {}).get("label_prefix", "?")
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_apply_row_accent(btn, body == active_body)
 		btn.pressed.connect(func(): request_focus.emit(body))
 		row.add_child(btn)
 
@@ -94,6 +98,18 @@ func update_pane_list(panes: Array):
 		cls_btn.pressed.connect(func(): request_close.emit(body))
 		row.add_child(cls_btn)
 		_pane_list.add_child(row)
+
+## Move the active-row accent without rebuilding the list — called on pane
+## focus changes (the workspace polls `_tm.last_body` each frame).
+func set_active_pane(body: Control):
+	if body == _active_pane:
+		return
+	_active_pane = body
+	for row in _pane_list.get_children():
+		var btn = row.get_child(0) as Button
+		if btn == null:
+			continue
+		_apply_row_accent(btn, row.get_meta("body") == body)
 
 func _make_pane_action_button(icon: String, tooltip: String) -> Button:
 	var btn = Button.new()
@@ -144,6 +160,7 @@ func _make_icon_text_button(icon: String, text: String, tint := Color.WHITE) -> 
 	h.add_theme_constant_override("separation", 6)
 	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	h.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	h.offset_left = 6  # breathing room before the icon (nbsp-equivalent)
 	h.alignment = BoxContainer.ALIGNMENT_BEGIN
 	btn.add_child(h)
 
@@ -210,8 +227,12 @@ func _sync_window_mode():
 	if _wm_dropdown:
 		_wm_dropdown.select(SettingsManager.cfg_window_mode)
 
-const WORKSPACE_MAX_ROWS = 5
-const PROFILE_MAX_ROWS = 5
+## Every section list (workspaces, profiles, panes) shares these: a
+## five-row visibility cap before an inner scrollbar, one accent color for
+## the active row, and measured (not hard-coded) section heights.
+const SECTION_MAX_VISIBLE_ROWS = 5
+const ACCENT_COLOR = Color(0.45, 0.7, 1.0)
+const ACCENT_HOVER_COLOR = Color(0.6, 0.8, 1.0)
 
 func _add_workspace_section(parent: VBoxContainer):
 	var section = VBoxContainer.new(); section.name = "WorkspaceSection"
@@ -252,20 +273,36 @@ func update_workspace_list(names: Array[String], active: int):
 		rows.append(row)
 	var sc = _workspace_list.get_parent() as ScrollContainer
 	if sc:
-		sc.custom_minimum_size.y = _measured_section_height(_workspace_list, rows, WORKSPACE_MAX_ROWS)
+		sc.custom_minimum_size.y = _measured_section_height(_workspace_list, rows)
 
 ## Sum the real combined minimum heights of `rows` (plus the list's
-## separation), capped at `max_rows` fully-visible rows. No hard-coded row
-## heights — theme metrics decide, so a row can never be truncated.
-func _measured_section_height(list: VBoxContainer, rows: Array[Control], max_rows: int) -> int:
+## separation), capped at SECTION_MAX_VISIBLE_ROWS fully-visible rows. No
+## hard-coded row heights — theme metrics decide, so a row can never be
+## truncated.
+func _measured_section_height(list: VBoxContainer, rows: Array[Control]) -> int:
 	var separation := float(list.get_theme_constant("separation"))
-	var shown := mini(rows.size(), max_rows)
+	var shown := mini(rows.size(), SECTION_MAX_VISIBLE_ROWS)
 	var total := 0.0
 	for i in shown:
 		total += rows[i].get_combined_minimum_size().y
 	if shown > 0:
 		total += separation * (shown - 1)
 	return int(total)
+
+## Style a section-row button as the active row (accent text + pressed
+## look) or clear it. Shared by workspace, profile, and pane rows so the
+## active-row semantics stay identical across sections.
+func _apply_row_accent(btn: Button, active: bool):
+	# `button_pressed` only sticks on toggle-mode buttons; row state is
+	# managed by this helper on every refresh, so clicks never corrupt it.
+	btn.toggle_mode = true
+	btn.button_pressed = active
+	if active:
+		btn.add_theme_color_override("font_color", ACCENT_COLOR)
+		btn.add_theme_color_override("font_hover_color", ACCENT_HOVER_COLOR)
+	else:
+		btn.remove_theme_color_override("font_color")
+		btn.remove_theme_color_override("font_hover_color")
 
 func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close: bool) -> HBoxContainer:
 	var row = HBoxContainer.new()
@@ -274,12 +311,8 @@ func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close:
 	var btn = Button.new()
 	btn.text = ws_name
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn.button_pressed = is_active
 	btn.tooltip_text = "Switch workspace (double-click to rename)"
-	if is_active:
-		# Pressed-state tint alone is too subtle in the default theme.
-		btn.add_theme_color_override("font_color", Color(0.45, 0.7, 1.0))
-		btn.add_theme_color_override("font_hover_color", Color(0.6, 0.8, 1.0))
+	_apply_row_accent(btn, is_active)
 	btn.pressed.connect(func(): request_workspace_switch.emit(idx))
 	btn.gui_input.connect(func(ev: InputEvent): _on_workspace_row_input(idx, btn, ev))
 	row.add_child(btn)
@@ -386,7 +419,7 @@ func _add_profile_section(parent: VBoxContainer):
 
 	parent.add_child(section)
 
-func update_profile_list(profiles: Array[Dictionary]):
+func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 	if not _profile_list: return
 	for c in _profile_list.get_children(): c.queue_free()
 	var rows: Array[Control] = []
@@ -397,7 +430,13 @@ func update_profile_list(profiles: Array[Dictionary]):
 		var btn = Button.new(); btn.text = p_name
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.tooltip_text = str(p.get("description", ""))
-		btn.pressed.connect(func(): request_profile.emit(p_name))
+		_apply_row_accent(btn, p_name == active_name)
+		# Toggle-mode buttons flip on click; re-assert so a canceled
+		# activation dialog doesn't leave a phantom pressed row.
+		btn.pressed.connect(func():
+			request_profile.emit(p_name)
+			_apply_row_accent(btn, p_name == active_name)
+		)
 		row.add_child(btn)
 		if not p.get("builtin", false):
 			var x = Button.new(); x.text = Icons.DELETE; x.flat = true
@@ -409,7 +448,7 @@ func update_profile_list(profiles: Array[Dictionary]):
 		_profile_list.add_child(row)
 		rows.append(row)
 
-	# Show up to 5 rows at full measured height; a scrollbar appears only
-	# beyond that.
+	# Show up to SECTION_MAX_VISIBLE_ROWS rows at full measured height; a
+	# scrollbar appears only beyond that.
 	var sc = _profile_list.get_parent() as ScrollContainer
-	if sc: sc.custom_minimum_size.y = _measured_section_height(_profile_list, rows, PROFILE_MAX_ROWS)
+	if sc: sc.custom_minimum_size.y = _measured_section_height(_profile_list, rows)

@@ -79,3 +79,41 @@ func test_update_pane_list_replaces_previous():
 	_sidebar.update_pane_list([body1])
 	var focus_btn = pane_list.get_child(pane_list.get_child_count() - 1).get_child(0)
 	assert_eq(focus_btn.text, "T1", "replacement should show updated label")
+
+func test_update_pane_list_accents_active_body():
+	var b1 = PaneBody.new(); b1.pane_label = "T1"
+	var b2 = PaneBody.new(); b2.pane_label = "T2"
+	_sidebar.update_pane_list([b1, b2], b2)
+
+	var rows = _sidebar._pane_list.get_children()
+	var btn1: Button = rows[0].get_child(0)
+	var btn2: Button = rows[1].get_child(0)
+	assert_false(btn1.button_pressed, "inactive pane row must not be pressed")
+	assert_true(btn2.button_pressed, "active pane row must be pressed")
+	assert_true(btn2.has_theme_color_override("font_color"), "active pane row must carry the accent")
+	assert_false(btn1.has_theme_color_override("font_color"), "inactive pane row must not carry the accent")
+
+func test_set_active_pane_moves_accent_without_rebuild():
+	var b1 = PaneBody.new(); b1.pane_label = "T1"
+	var b2 = PaneBody.new(); b2.pane_label = "T2"
+	_sidebar.update_pane_list([b1, b2], b1)
+	var rows = _sidebar._pane_list.get_children()
+
+	_sidebar.set_active_pane(b2)
+	assert_false((rows[0].get_child(0) as Button).button_pressed)
+	assert_true((rows[1].get_child(0) as Button).button_pressed)
+	# Same row instances — the accent moved, the list was not rebuilt.
+	assert_eq(rows, _sidebar._pane_list.get_children())
+
+func test_update_profile_list_accents_active_profile():
+	var profiles: Array[Dictionary] = [
+		{"name": "A", "description": ""},
+		{"name": "B", "description": "", "builtin": true},
+	]
+	_sidebar.update_profile_list(profiles, "B")
+
+	var rows = _sidebar._profile_list.get_children()
+	assert_false((rows[0].get_child(0) as Button).button_pressed, "unactivated profile must not be pressed")
+	assert_true((rows[1].get_child(0) as Button).button_pressed, "active profile row must be pressed")
+	assert_true((rows[1].get_child(0) as Button).has_theme_color_override("font_color"),
+		"active profile row must carry the accent")

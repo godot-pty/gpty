@@ -19,6 +19,7 @@ var _status_bar: StatusBar
 var _titlebar: Control = null
 var _workspaces: Array[Dictionary] = []  # {name: String, grid: Control, tm: TerminalManager}
 var _active: int = 0
+var _active_profile: String = ""  # last successfully activated profile (sidebar accent)
 
 func _ready():
 	show()
@@ -63,7 +64,7 @@ func _ready():
 	ShortcutManager.register("app:toggle_fullscreen", "F11", _toggle_fullscreen)
 	ShortcutManager.register("app:toggle_fullscreen_alt", "Ctrl+Shift+M", _toggle_fullscreen)
 	ShortcutManager.register("app:reset_workspace", "Ctrl+Shift+R", func():
-		_reset(); _apply_layout(); _list()
+		_do_reset()
 	)
 	ShortcutManager.register("app:next_workspace", "Ctrl+PageDown", func():
 		if not _workspaces.is_empty():
@@ -410,6 +411,13 @@ func _reset():
 	_tm.reset()
 	_apply_layout()
 	_list()
+
+## User-facing reset: clears the active workspace's panes AND the
+## profile-accent state (a reset layout is no longer "that profile").
+func _do_reset():
+	_reset()
+	_active_profile = ""
+	_refresh_profile_buttons()
 
 # ═══════════════════════════════════════════════════════════════════════
 # Workspaces — independent pane sets, keep-alive
@@ -784,7 +792,7 @@ func _wire_sidebar_signals():
 	_sidebar.request_new_pane.connect(_spawn_pane)
 	_sidebar.request_close.connect(func(body: Control): _kill(body))
 	_sidebar.request_settings.connect(_toggle_settings)
-	_sidebar.request_reset.connect(func(): _reset(); _apply_layout(); _list())
+	_sidebar.request_reset.connect(func(): _do_reset())
 	_sidebar.request_focus.connect(func(body: Control): body.grab_focus())
 	_sidebar.request_minimize.connect(func(body: Control): _on_pane_minimize(body))
 	_sidebar.request_position_swap.connect(func(body: Control, btn: Button): _on_pane_position_swap(body, btn))
@@ -808,7 +816,8 @@ func _list():
 	for t in _tm.tiles:
 		var body = _tm._find_body(t.wrapper)
 		if body: panes.append(body)
-	_sidebar.update_pane_list(panes)
+	var active_body: Control = _tm.last_body if (_tm.last_body and is_instance_valid(_tm.last_body)) else null
+	_sidebar.update_pane_list(panes, active_body)
 
 func _toggle_sidebar():
 	if _sidebar: _sidebar._toggle_sidebar()
@@ -851,6 +860,9 @@ func _refresh_status_bar():
 	else:
 		_status_bar.set_pane_info("", "")
 	_status_bar.set_window_mode(SettingsManager.cfg_window_mode)
+	# Sidebar pane accent follows focus (deduped inside the sidebar).
+	if _sidebar:
+		_sidebar.set_active_pane(body if (body and is_instance_valid(body)) else null)
 
 func _poll_agent_events():
 	var raw := str(GptyTerminal.drain_agent_events())
@@ -1342,12 +1354,21 @@ func _do_activate(profile: Dictionary):
 		if td is Dictionary:
 			tiles.append(td)
 	_restore_into(ws, tiles)
+	_active_profile = str(profile.get("name", ""))
+	_refresh_profile_buttons()
 	ToastManager.info("Profile '%s' activated" % profile.get("name", ""))
 
 func _delete_profile(idx: int):
+	var profiles := ProfileManager.get_all_profiles()
+	var deleted_name := ""
+	if idx >= 0 and idx < profiles.size():
+		deleted_name = str(profiles[idx].get("name", ""))
 	ProfileManager.delete_profile(idx)
+	if deleted_name != "" and deleted_name == _active_profile:
+		_active_profile = ""
+	_refresh_profile_buttons()
 	ToastManager.info("Profile deleted")
 
 func _refresh_profile_buttons():
 	if _sidebar:
-		_sidebar.update_profile_list(ProfileManager.get_all_profiles())
+		_sidebar.update_profile_list(ProfileManager.get_all_profiles(), _active_profile)
