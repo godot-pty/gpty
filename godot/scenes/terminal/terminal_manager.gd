@@ -188,6 +188,21 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	bar.add_child(lbl)
 	lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
+	# Agent-state badge (display only) — written by TerminalPane from the
+	# tiered AgentState tracker; hidden while idle. Never a decision input.
+	var state_badge = Label.new()
+	state_badge.name = "StateBadge"
+	state_badge.text = Icons.CHECK_CIRCLE
+	state_badge.visible = false
+	state_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	state_badge.add_theme_font_override("font", Icons.font_resource)
+	state_badge.add_theme_font_size_override("font_size", 12)
+	state_badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	state_badge.anchor_left = 0.0; state_badge.anchor_right = 0.0
+	state_badge.anchor_top = 0.0; state_badge.anchor_bottom = 1.0
+	state_badge.offset_left = 6; state_badge.offset_right = 24
+	bar.add_child(state_badge)
+
 
 	var btn_hbox = HBoxContainer.new()
 	btn_hbox.add_theme_constant_override("separation", 2)

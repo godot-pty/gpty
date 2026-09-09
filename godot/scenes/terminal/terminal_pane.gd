@@ -319,6 +319,73 @@ func _process(delta):
 		_last_title = t
 		var display_title = pane_name if pane_name != "" else t
 		title_changed.emit(display_title)
+	_update_badge(delta)
+
+# ── Agent-state badge (display only) ───────────────────────────────────
+# Mirrors the tiered AgentState tracker from the engine. The badge never
+# feeds decisions — it is a projection of what the terminal declared.
+var _badge_label: Label = null
+var _badge_state := ""
+var _badge_anim := 0.0
+
+const BADGE_COMPLETED_COLOR := Color(0.36, 0.83, 0.45)
+const BADGE_FAILED_COLOR := Color(0.95, 0.35, 0.32)
+const BADGE_ATTENTION_COLOR := Color(1.0, 0.78, 0.25)
+const BADGE_WORKING_COLOR := Color(0.5, 0.75, 1.0)
+const BADGE_SPINNER_FRAMES := [Icons.SPINNER, Icons.SPINNER_GAP, Icons.CIRCLE_NOTCH]
+
+func _update_badge(delta: float):
+	var state := _terminal.get_agent_state()
+	if state != _badge_state:
+		_badge_state = state
+		_apply_badge(state)
+	_badge_anim += delta
+	match _badge_state:
+		"working":
+			if _badge_label and _badge_label.visible:
+				# Spinner illusion: cycle three notch glyphs at ~8 fps.
+				var frame := int(_badge_anim * 8.0) % BADGE_SPINNER_FRAMES.size()
+				_badge_label.text = BADGE_SPINNER_FRAMES[frame]
+		"needs-attention":
+			if _badge_label and _badge_label.visible:
+				# Pulsing amber at ~1.2 Hz.
+				_badge_label.modulate.a = 0.55 + 0.45 * sin(_badge_anim * TAU * 1.2)
+
+func _apply_badge(state: String):
+	var label := _resolve_badge()
+	if label == null:
+		return
+	_badge_label = label
+	_badge_anim = 0.0
+	match state:
+		"completed":
+			_badge_label.visible = true
+			_badge_label.text = Icons.CHECK_CIRCLE
+			_badge_label.modulate = BADGE_COMPLETED_COLOR
+		"failed":
+			_badge_label.visible = true
+			_badge_label.text = Icons.WARNING_CIRCLE
+			_badge_label.modulate = BADGE_FAILED_COLOR
+		"needs-attention":
+			_badge_label.visible = true
+			_badge_label.text = Icons.WARNING_CIRCLE
+			_badge_label.modulate = BADGE_ATTENTION_COLOR
+		"working":
+			_badge_label.visible = true
+			_badge_label.text = Icons.SPINNER_GAP
+			_badge_label.modulate = BADGE_WORKING_COLOR
+		_:
+			_badge_label.visible = false
+			_badge_label.modulate = Color.WHITE
+
+func _resolve_badge() -> Label:
+	var parent := get_parent()
+	if parent == null:
+		return null
+	var tb := parent.get_node_or_null("TitleBar")
+	if tb == null:
+		return null
+	return tb.get_node_or_null("StateBadge")
 
 func _request_cursor_redraw() -> void:
 	queue_redraw()
