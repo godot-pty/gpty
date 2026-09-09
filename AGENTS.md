@@ -92,7 +92,7 @@ gpty/
         │   ├── shortcut_manager.gd
         │   └── update_checker.gd
         ├── terminal/
-        │   ├── workspace.gd        # Root controller, workspace tabs, concept routing, profile restore
+        │   ├── workspace.gd        # Root controller, workspace switching, concept routing, profile restore
         │   ├── concept_router.gd   # Pure concept-event routing (extracted, testable)
         │   ├── terminal_pane.gd    # Control-based renderer, keyboard, selection, history search
         │   └── terminal_manager.gd # Tile lifecycle, split/kill/swap/spawn
@@ -101,7 +101,6 @@ gpty/
         │   ├── settings_panel.gd
         │   ├── status_bar.gd
         │   ├── toast_overlay.gd
-        │   ├── workspace_tabs.gd   # Workspace tab strip (switch/add/close/rename)
         │   ├── markdown_view.gd     # Safe, debounced Markdown RichTextLabel
         │   └── icons.gd            # Phosphor icon constants
         └── panes/
@@ -175,6 +174,7 @@ See `skill://gpty-omp-integration` for usage patterns.
 
 - Indentation: tabs
 - Icons: All glyphs live in `icons.gd` as `const` strings (Phosphor Regular PUA codepoints via `\uXXXX`). To add: pick from phosphoricons.com, get the codepoint, add a `const`. Call `Icons.style_button(btn)` after setting `btn.text`.
+- Sidebar layout: the sidebar owns every persistent switcher (workspaces, profiles, panes) as vertical sections in its VBox — never add full-window top strips or overlays, they cover sidebar chrome (the window-mode dropdown sits at the sidebar's top). Sidebar content lives inside a `MarginContainer` (8px left/right ≈ scrollbar width, 6px vertical) so rows never touch the sidebar's edges. Icon+text actions are a single `Button` with a child `HBox` (icon `Label` + text `Label`), both labels at the same font size, plus an explicit `custom_minimum_size.y` (a textless Button does not size from its children and collapses). Section lists show up to 5 rows; their scroll-container height is measured, never hard-coded: sum each row's `get_combined_minimum_size().y` plus the list's `separation` for the first `mini(n, 5)` rows (`_measured_section_height`). Hard-coded row-height guesses always drift from theme metrics and truncate the last row. The pane list absorbs leftover height via `SIZE_EXPAND_FILL`.
 - Profiles: named terminal-layout snapshots. User data lives in `user://profiles.json`; shipped layouts live in `res://profiles.default.json` and are never written back. `ProfileManager.get_all_profiles()` returns built-ins first. Save dialog is built inline in `workspace.gd`. Activation clears the workspace (`_reset()`) then rebuilds tiles — follows the `_restore_into()` pattern. Built-in profiles cannot be deleted from the sidebar.
 - Attachment IDs: persist `attachment_id` (`[a-z][a-z0-9_-]{0,31}`) on panes. Companion panes (Reasoning) attach by this stable id, not ephemeral labels like `T1`. `pane_label` is reassigned on restore and must not be used as a saved link. It is also the **public IPC id**: every pane has one (auto-generated `pane-XXXXXXXX` via `PaneTypes.generate_attachment_id()` when none was saved — `PaneBody.apply_settings` is the choke point), `newPane` returns it and `listPanes` reports it as `id` alongside the display `label`. IPC pane targeting accepts either `id` or the legacy `label`. With multiple workspaces, `attachment_id`s remain globally unique; label targeting resolves active-workspace-first (`workspace.gd:_find_pane_by_label`). IPC methods operate on the active workspace's pane set unless an id targets another workspace's pane.
 - JSON → typed arrays: `JSON.parse()` returns untyped `Array`. Assignment to `Array[Dictionary]` fails at runtime. Always iterate and build the typed array element-by-element: `for item in raw: if item is Dictionary: typed.append(item)`.

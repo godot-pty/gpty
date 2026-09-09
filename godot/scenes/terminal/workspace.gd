@@ -19,7 +19,6 @@ var _status_bar: StatusBar
 var _titlebar: Control = null
 var _workspaces: Array[Dictionary] = []  # {name: String, grid: Control, tm: TerminalManager}
 var _active: int = 0
-var _ws_tabs: WorkspaceTabs
 
 func _ready():
 	show()
@@ -46,7 +45,6 @@ func _ready():
 	_wire_sidebar_signals()
 	_refresh_profile_buttons()
 	_wire_tm(_tm)
-	_build_workspace_tabs()
 	_init_workspaces()
 
 	# Push concepts to Rust engine — must wait for first frame (GDExtension ready)
@@ -268,14 +266,6 @@ func _apply_layout():
 	var bottom_offset = StatusBar.HEIGHT if _status_bar else 0.0
 	var m = _sidebar_bg.size.x if (_sidebar_bg and _sidebar_bg.visible) else 0.0
 
-	if _ws_tabs:
-		_ws_tabs.anchor_left = 0.0; _ws_tabs.anchor_right = 1.0
-		_ws_tabs.anchor_top = 0.0; _ws_tabs.anchor_bottom = 0.0
-		_ws_tabs.offset_left = 0.0; _ws_tabs.offset_right = 0.0
-		_ws_tabs.offset_top = top_offset
-		_ws_tabs.offset_bottom = top_offset + WorkspaceTabs.HEIGHT
-		top_offset += WorkspaceTabs.HEIGHT
-
 	_grid.offset_left = m; _grid.offset_right = 0
 	_grid.offset_top = top_offset; _grid.offset_bottom = -bottom_offset
 	_grid.anchor_left = 0.0; _grid.anchor_right = 1.0
@@ -425,14 +415,9 @@ func _reset():
 # Workspaces — independent pane sets, keep-alive
 # ═══════════════════════════════════════════════════════════════════════
 
-func _build_workspace_tabs():
-	_ws_tabs = load("res://scenes/ui/workspace_tabs.gd").new()
-	_ws_tabs.name = "WorkspaceTabs"
-	add_child(_ws_tabs)
-	_ws_tabs.switch_requested.connect(_switch_workspace)
-	_ws_tabs.add_requested.connect(_add_workspace)
-	_ws_tabs.close_requested.connect(_close_workspace)
-	_ws_tabs.rename_requested.connect(_rename_workspace)
+func _update_workspace_ui():
+	if _sidebar:
+		_sidebar.update_workspace_list(_workspace_names(), _active)
 
 func _wire_tm(tm: TerminalManager):
 	tm.on_close = func(body: Control): _kill(body)
@@ -485,7 +470,7 @@ func _apply_active_workspace_view():
 	for i in _workspaces.size():
 		_workspaces[i].grid.visible = (i == _active)
 		_workspaces[i].grid.process_mode = Node.PROCESS_MODE_INHERIT if i == _active else Node.PROCESS_MODE_DISABLED
-	_ws_tabs.update(_workspace_names(), _active)
+	_update_workspace_ui()
 	_apply_layout()
 	_list()
 	_sync_pane_titlebars()
@@ -531,14 +516,14 @@ func _close_workspace(idx: int):
 		_on_settings_changed()
 	elif idx < _active:
 		_active -= 1
-	_ws_tabs.update(_workspace_names(), _active)
+	_update_workspace_ui()
 	_save_workspaces_to_store()
 
 func _rename_workspace(idx: int, new_name: String):
 	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size():
 		return
 	_workspaces[idx].name = WorkspaceStore.sanitize_name(new_name)
-	_ws_tabs.update(_workspace_names(), _active)
+	_update_workspace_ui()
 	_save_workspaces_to_store()
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -808,6 +793,10 @@ func _wire_sidebar_signals():
 	_sidebar.toggled.connect(func(): _on_sidebar_toggled())
 	_sidebar.request_profile.connect(_activate_profile)
 	_sidebar.request_window_mode.connect(_on_window_mode_selected)
+	_sidebar.request_workspace_switch.connect(_switch_workspace)
+	_sidebar.request_workspace_add.connect(_add_workspace)
+	_sidebar.request_workspace_close.connect(_close_workspace)
+	_sidebar.request_workspace_rename.connect(_rename_workspace)
 	_sidebar.request_save_profile.connect(_save_current_as_profile)
 	_sidebar.request_delete_profile.connect(_delete_profile)
 	_tm.tiles_resized.connect(_apply_layout)

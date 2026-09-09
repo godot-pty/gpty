@@ -47,10 +47,9 @@ godot/
         │   ├── concept_router.gd # Pure concept-event routing (extracted, testable)
         │   └── terminal_manager.gd
         ├── ui/                  # UI components
-        │   ├── sidebar.gd
+        │   ├── sidebar.gd       # Vertical stack: window mode, workspaces, panes, profiles
         │   ├── settings_panel.gd
         │   ├── toast_overlay.gd
-        │   ├── workspace_tabs.gd # Workspace tab strip (switch/add/close/rename)
         │   ├── markdown_view.gd # Safe shared Markdown renderer
         │   └── icons.gd         # Phosphor icon constants
         └── panes/               # Specialty pane types

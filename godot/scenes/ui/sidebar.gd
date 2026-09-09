@@ -15,12 +15,17 @@ signal request_profile(name: String)
 signal request_save_profile
 signal request_delete_profile(index: int)
 signal request_window_mode(mode: int)
+signal request_workspace_switch(index: int)
+signal request_workspace_add
+signal request_workspace_close(index: int)
+signal request_workspace_rename(index: int, name: String)
 
 
 var bg: ColorRect
 var _wm_dropdown: OptionButton
 var _pane_list: VBoxContainer
 var _profile_list: VBoxContainer
+var _workspace_list: VBoxContainer
 
 
 func _ready():
@@ -30,14 +35,25 @@ func _ready():
 
 func build(bg_rect: ColorRect):
 	bg = bg_rect
+	var margin = MarginContainer.new()
+	margin.name = "SidebarMargin"
+	# Left/right 8px ≈ scrollbar width: rows never start at the sidebar's
+	# edge, and an appearing scrollbar fills the reserved space.
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_top", 6)
+	margin.add_theme_constant_override("margin_bottom", 6)
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(margin)
+
 	var v = VBoxContainer.new(); v.name = "SidebarContent"
 	v.add_theme_constant_override("separation", 4)
-	add_child(v)
-	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	margin.add_child(v)
 
 	_add_header(v)
 	_add_window_mode(v)
 	_add_buttons(v)
+	_add_workspace_section(v)
 	_add_profile_section(v)
 	_add_pane_list_ui(v)
 	_add_collapsed_button()
@@ -104,50 +120,53 @@ func _add_header(v: VBoxContainer):
 func _add_buttons(v: VBoxContainer):
 	_add_pane_buttons(v)
 
-	var wrapper = HBoxContainer.new()
-	wrapper.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	wrapper.add_theme_constant_override("separation", 4)
+	var settings_btn = _make_icon_text_button(Icons.SETTINGS, "Settings")
+	settings_btn.pressed.connect(func(): request_settings.emit())
+	v.add_child(settings_btn)
 
-	var icon_lbl = Label.new()
-	icon_lbl.text = Icons.SETTINGS
-	icon_lbl.add_theme_font_override("font", Icons.font_resource)
-	icon_lbl.add_theme_font_size_override("font_size", 14)
-	icon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	icon_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	wrapper.add_child(icon_lbl)
+	var reset_btn = _make_icon_text_button(Icons.RESET, "Reset", Color(0.85, 0.2, 0.2, 1.0))
+	reset_btn.pressed.connect(func(): request_reset.emit())
+	v.add_child(reset_btn)
 
+## One clickable button holding an icon Label and a text Label in an HBox —
+## the container aligns the PUA glyph and the label on the same baseline,
+## which a sibling-icon layout could never do reliably.
+func _make_icon_text_button(icon: String, text: String, tint := Color.WHITE) -> Button:
 	var btn = Button.new()
-	btn.text = "Settings"
 	btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn.pressed.connect(func(): request_settings.emit())
-	wrapper.add_child(btn)
+	# A Button does not derive its minimum size from child Controls and this
+	# one has no text of its own — without an explicit height it collapses.
+	btn.custom_minimum_size.y = 28
 
-	v.add_child(wrapper)
+	var h = HBoxContainer.new()
+	h.name = "IconTextRow"
+	h.add_theme_constant_override("separation", 6)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	h.alignment = BoxContainer.ALIGNMENT_BEGIN
+	btn.add_child(h)
 
-	var rwrapper = HBoxContainer.new()
-	rwrapper.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	rwrapper.add_theme_constant_override("separation", 4)
+	var icon_lbl = Label.new()
+	icon_lbl.text = icon
+	icon_lbl.add_theme_font_override("font", Icons.font_resource)
+	# Same size as the text label so both center on the same axis in the
+	# stretched full-height labels (a smaller glyph font centers on a
+	# different baseline and looks misaligned).
+	icon_lbl.add_theme_font_size_override("font_size", 16)
+	icon_lbl.add_theme_color_override("font_color", tint)
+	icon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	icon_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(icon_lbl)
 
-	var icon_rlbl = Label.new()
-	icon_rlbl.text = Icons.RESET
-	icon_rlbl.add_theme_font_override("font", Icons.font_resource)
-	icon_rlbl.add_theme_font_size_override("font_size", 14)
-	icon_rlbl.add_theme_color_override("font_color", Color(0.85, 0.2, 0.2, 1.0))
-	icon_rlbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	icon_rlbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	rwrapper.add_child(icon_rlbl)
-
-	var rbtn = Button.new()
-	rbtn.text = " Reset"
-	rbtn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	rbtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	rbtn.add_theme_color_override("font_color", Color(0.85, 0.2, 0.2, 1.0))
-	rbtn.add_theme_color_override("font_hover_color", Color(1.0, 0.3, 0.3, 1.0))
-	rbtn.pressed.connect(func(): request_reset.emit())
-	rwrapper.add_child(rbtn)
-
-	v.add_child(rwrapper)
+	var text_lbl = Label.new()
+	text_lbl.text = text
+	text_lbl.add_theme_font_size_override("font_size", 16)
+	text_lbl.add_theme_color_override("font_color", tint)
+	text_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	text_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(text_lbl)
+	return btn
 
 func _add_window_mode(v: VBoxContainer):
 	var wm_dropdown = OptionButton.new()
@@ -191,6 +210,110 @@ func _sync_window_mode():
 	if _wm_dropdown:
 		_wm_dropdown.select(SettingsManager.cfg_window_mode)
 
+const WORKSPACE_MAX_ROWS = 5
+const PROFILE_MAX_ROWS = 5
+
+func _add_workspace_section(parent: VBoxContainer):
+	var section = VBoxContainer.new(); section.name = "WorkspaceSection"
+
+	var header = HBoxContainer.new(); header.name = "WorkspaceHeader"
+	var lbl = Label.new(); lbl.text = "Workspaces:"
+	lbl.add_theme_font_size_override("font_size", 12)
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(lbl)
+	var add_btn = Button.new(); add_btn.text = Icons.ADD; add_btn.name = "AddWorkspaceBtn"
+	Icons.style_button(add_btn)
+	add_btn.tooltip_text = "New workspace (max 8)"
+	add_btn.flat = true
+	add_btn.custom_minimum_size = Vector2(22, 0)
+	add_btn.pressed.connect(func(): request_workspace_add.emit())
+	header.add_child(add_btn)
+	section.add_child(header)
+
+	# No fixed cap on visible rows beyond 5: five rows fully shown, an
+	# inner scrollbar appears only when there are more.
+	var sc = ScrollContainer.new(); sc.name = "WorkspaceScroll"
+	section.add_child(sc)
+
+	_workspace_list = VBoxContainer.new(); _workspace_list.name = "WorkspaceList"
+	_workspace_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sc.add_child(_workspace_list)
+
+	parent.add_child(section)
+
+func update_workspace_list(names: Array[String], active: int):
+	if not _workspace_list: return
+	for c in _workspace_list.get_children(): c.queue_free()
+	var show_close := names.size() > 1
+	var rows: Array[Control] = []
+	for i in names.size():
+		var row := _make_workspace_row(i, names[i], i == active, show_close)
+		_workspace_list.add_child(row)
+		rows.append(row)
+	var sc = _workspace_list.get_parent() as ScrollContainer
+	if sc:
+		sc.custom_minimum_size.y = _measured_section_height(_workspace_list, rows, WORKSPACE_MAX_ROWS)
+
+## Sum the real combined minimum heights of `rows` (plus the list's
+## separation), capped at `max_rows` fully-visible rows. No hard-coded row
+## heights — theme metrics decide, so a row can never be truncated.
+func _measured_section_height(list: VBoxContainer, rows: Array[Control], max_rows: int) -> int:
+	var separation := float(list.get_theme_constant("separation"))
+	var shown := mini(rows.size(), max_rows)
+	var total := 0.0
+	for i in shown:
+		total += rows[i].get_combined_minimum_size().y
+	if shown > 0:
+		total += separation * (shown - 1)
+	return int(total)
+
+func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close: bool) -> HBoxContainer:
+	var row = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 2)
+
+	var btn = Button.new()
+	btn.text = ws_name
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn.button_pressed = is_active
+	btn.tooltip_text = "Switch workspace (double-click to rename)"
+	if is_active:
+		# Pressed-state tint alone is too subtle in the default theme.
+		btn.add_theme_color_override("font_color", Color(0.45, 0.7, 1.0))
+		btn.add_theme_color_override("font_hover_color", Color(0.6, 0.8, 1.0))
+	btn.pressed.connect(func(): request_workspace_switch.emit(idx))
+	btn.gui_input.connect(func(ev: InputEvent): _on_workspace_row_input(idx, btn, ev))
+	row.add_child(btn)
+
+	# Close button only when more than one workspace exists (min-1 invariant).
+	if show_close:
+		var x = Button.new(); x.text = Icons.CLOSE; x.flat = true
+		Icons.style_button(x)
+		x.tooltip_text = "Close workspace"
+		x.custom_minimum_size = Vector2(22, 0)
+		x.pressed.connect(func(): request_workspace_close.emit(idx))
+		row.add_child(x)
+	return row
+
+func _on_workspace_row_input(idx: int, btn: Button, ev: InputEvent):
+	if not (ev is InputEventMouseButton):
+		return
+	if not ev.double_click or ev.button_index != MOUSE_BUTTON_LEFT:
+		return
+	var le = LineEdit.new()
+	le.text = btn.text
+	le.custom_minimum_size.y = btn.size.y
+	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn.get_parent().add_child(le)
+	btn.visible = false
+	le.grab_focus()
+	le.select_all()
+	le.text_submitted.connect(func(t: String): request_workspace_rename.emit(idx, t))
+	le.focus_exited.connect(func(): request_workspace_rename.emit(idx, le.text))
+	le.gui_input.connect(func(e2: InputEvent):
+		if e2 is InputEventKey and e2.pressed and e2.keycode == KEY_ESCAPE:
+			request_workspace_rename.emit(idx, btn.text)
+	)
+
 func _add_pane_list_ui(v: VBoxContainer):
 	var lbl = Label.new()
 	lbl.text = " Panes:"
@@ -219,9 +342,9 @@ func _add_collapsed_button():
 
 func _toggle_sidebar():
 	var on = (offset_right != 180)
-	var content = get_node_or_null("SidebarContent")
-	var title = get_node_or_null("SidebarContent/Header/SidebarTitle")
-	var a = get_node_or_null("SidebarContent/Header/SidebarArrow")
+	var content = get_node_or_null("SidebarMargin/SidebarContent")
+	var title = get_node_or_null("SidebarMargin/SidebarContent/Header/SidebarTitle")
+	var a = get_node_or_null("SidebarMargin/SidebarContent/Header/SidebarArrow")
 	var coll = get_node_or_null("SidebarCollapsedBtn")
 	if on:
 		offset_right = 180; bg.size.x = 180
@@ -266,6 +389,7 @@ func _add_profile_section(parent: VBoxContainer):
 func update_profile_list(profiles: Array[Dictionary]):
 	if not _profile_list: return
 	for c in _profile_list.get_children(): c.queue_free()
+	var rows: Array[Control] = []
 	for i in profiles.size():
 		var p = profiles[i]
 		var p_name = p.get("name", "Unnamed")
@@ -283,6 +407,9 @@ func update_profile_list(profiles: Array[Dictionary]):
 			x.pressed.connect(func(): request_delete_profile.emit(user_index))
 			row.add_child(x)
 		_profile_list.add_child(row)
+		rows.append(row)
 
+	# Show up to 5 rows at full measured height; a scrollbar appears only
+	# beyond that.
 	var sc = _profile_list.get_parent() as ScrollContainer
-	if sc: sc.custom_minimum_size.y = mini(200, profiles.size() * 35)
+	if sc: sc.custom_minimum_size.y = _measured_section_height(_profile_list, rows, PROFILE_MAX_ROWS)
