@@ -53,8 +53,10 @@ func _show_next():
 
 	add_child(lbl)
 	lbl.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	lbl.offset_top = -40
-	lbl.offset_bottom = 0
+	# Float above the status bar (which occupies the window's bottom
+	# StatusBar.HEIGHT pixels) or the toast is half-hidden underneath it.
+	lbl.offset_top = -(StatusBar.HEIGHT + 44)
+	lbl.offset_bottom = -(StatusBar.HEIGHT + 4)
 
 	_current_label = lbl
 	var duration: float = data.get("duration", 3.0)
