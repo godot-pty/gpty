@@ -4,36 +4,31 @@
 //! terminal capability can only append bounded observability events for that
 //! terminal; it cannot create panes, inject input, or stop gpty.
 
-#[cfg(unix)]
 use std::collections::{HashMap, VecDeque};
-#[cfg(unix)]
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-#[cfg(unix)]
+
 use std::sync::{LazyLock, Mutex};
 
-#[cfg(unix)]
 use gpty_ipc::server::{HandlerFn, IpcServer};
 use serde_json::Value;
-#[cfg(unix)]
+
 use serde_json::json;
-#[cfg(unix)]
+
 use std::time::Duration;
 
-#[cfg(unix)]
 const PROTOCOL_VERSION: u64 = 1;
-#[cfg(unix)]
+
 const MAX_GLOBAL_EVENTS: usize = 256;
-#[cfg(unix)]
+
 const MAX_SESSION_EVENTS: usize = 64;
-#[cfg(unix)]
+
 const MAX_ID_LEN: usize = 128;
-#[cfg(unix)]
+
 const MAX_THINKING_BYTES: usize = 8 * 1024;
 /// Extension `seq` counters reset in each new omp process; accept the rollover.
-#[cfg(unix)]
 const SEQ_RESET_CEILING: u64 = 128;
 
-#[cfg(unix)]
 const ALLOWED_EVENTS: &[&str] = &[
     "omp.session.bound",
     "omp.session.shutdown",
@@ -50,7 +45,6 @@ const ALLOWED_EVENTS: &[&str] = &[
 /// names on the wire (protocol v1); gpty translates them at this trust
 /// boundary so everything downstream — Reasoning, AgentState Tier 1,
 /// future adapters — consumes one generic contract.
-#[cfg(unix)]
 const GENERIC_EVENT_NAMES: &[(&str, &str)] = &[
     ("omp.session.bound", "session.bound"),
     ("omp.session.shutdown", "session.shutdown"),
@@ -65,8 +59,6 @@ const GENERIC_EVENT_NAMES: &[(&str, &str)] = &[
 
 /// Translate a wire event name to the generic vocabulary. Unknown names
 /// pass through unchanged — the allowlist gates what reaches this point.
-/// Unix-only like the event listener itself (see the Windows listener gap).
-#[cfg(unix)]
 pub fn to_generic_name(name: &str) -> &str {
     for (wire, generic) in GENERIC_EVENT_NAMES {
         if *wire == name {
@@ -77,7 +69,6 @@ pub fn to_generic_name(name: &str) -> &str {
 }
 
 /// Rewrite the event's `name` field to the generic vocabulary.
-#[cfg(unix)]
 fn translate_event_names(mut event: Value) -> Value {
     if let Some(obj) = event.as_object_mut()
         && let Some(name_val) = obj.get_mut("name")
@@ -88,7 +79,6 @@ fn translate_event_names(mut event: Value) -> Value {
     event
 }
 
-#[cfg(unix)]
 #[derive(Debug)]
 struct SessionCapability {
     capability: String,
@@ -103,31 +93,27 @@ pub struct OmpSemanticEvent {
     pub event: Value,
 }
 
-#[cfg(unix)]
 static SESSIONS: LazyLock<Mutex<HashMap<String, SessionCapability>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-#[cfg(unix)]
+
 static EVENTS: LazyLock<Mutex<VecDeque<OmpSemanticEvent>>> =
     LazyLock::new(|| Mutex::new(VecDeque::new()));
 
 // ── Event subscriptions (gpty → clients over the event socket) ─────────
 // Subscribers receive bounded JSON event lines via `eventsPoll`. Push
 // transport (server-initiated writes on a held connection) is not v1.
-#[cfg(unix)]
+
 static SUBSCRIPTIONS: LazyLock<Mutex<HashMap<String, VecDeque<String>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-#[cfg(unix)]
+
 static NEXT_SUB_ID: AtomicU64 = AtomicU64::new(1);
-#[cfg(unix)]
+
 const MAX_SUBSCRIPTIONS: usize = 64;
-#[cfg(unix)]
+
 const MAX_QUEUED_EVENTS: usize = 256;
 
 /// Fan an event out to every active subscription queue (bounded).
-/// No-op on Windows (no event listener there).
-#[cfg_attr(not(unix), allow(unused_variables))]
 pub fn emit_event(event_json: &str) {
-    #[cfg(unix)]
     if let Ok(mut subs) = SUBSCRIPTIONS.lock() {
         for queue in subs.values_mut() {
             if queue.len() >= MAX_QUEUED_EVENTS {
@@ -138,7 +124,6 @@ pub fn emit_event(event_json: &str) {
     }
 }
 
-#[cfg(unix)]
 fn subscribe_handler() -> HandlerFn {
     std::sync::Arc::new(|_params| {
         Box::pin(async move {
@@ -157,7 +142,6 @@ fn subscribe_handler() -> HandlerFn {
     })
 }
 
-#[cfg(unix)]
 fn events_poll_handler() -> HandlerFn {
     std::sync::Arc::new(|params| {
         Box::pin(async move {
@@ -187,11 +171,9 @@ fn events_poll_handler() -> HandlerFn {
     })
 }
 
-#[cfg(unix)]
 static STARTED: AtomicBool = AtomicBool::new(false);
 
 /// Register one PTY lifetime and return its unguessable session/capability.
-#[cfg(unix)]
 pub fn register_terminal() -> std::io::Result<(String, String)> {
     let session_id = random_hex(16)?;
     let capability = random_hex(32)?;
@@ -205,15 +187,6 @@ pub fn register_terminal() -> std::io::Result<(String, String)> {
     Ok((session_id, capability))
 }
 
-#[cfg(not(unix))]
-pub fn register_terminal() -> std::io::Result<(String, String)> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "OMP event bridge is not yet supported on this platform",
-    ))
-}
-
-#[cfg(unix)]
 pub fn unregister_terminal(session_id: &str) {
     SESSIONS.lock().unwrap().remove(session_id);
     EVENTS
@@ -222,24 +195,13 @@ pub fn unregister_terminal(session_id: &str) {
         .retain(|event| event.terminal_session_id != session_id);
 }
 
-#[cfg(not(unix))]
-pub fn unregister_terminal(_session_id: &str) {}
-
-#[cfg(unix)]
 pub fn drain_events() -> Vec<OmpSemanticEvent> {
     EVENTS.lock().unwrap().drain(..).collect()
 }
 
-#[cfg(not(unix))]
-pub fn drain_events() -> Vec<OmpSemanticEvent> {
-    Vec::new()
-}
-
-#[cfg(unix)]
 fn random_hex(bytes: usize) -> std::io::Result<String> {
-    use std::io::Read;
     let mut raw = vec![0_u8; bytes];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut raw)?;
+    getrandom::getrandom(&mut raw).map_err(std::io::Error::other)?;
     let mut out = String::with_capacity(bytes * 2);
     for byte in raw {
         use std::fmt::Write;
@@ -248,7 +210,6 @@ fn random_hex(bytes: usize) -> std::io::Result<String> {
     Ok(out)
 }
 
-#[cfg(unix)]
 fn constant_time_eq(left: &str, right: &str) -> bool {
     if left.len() != right.len() {
         return false;
@@ -259,12 +220,10 @@ fn constant_time_eq(left: &str, right: &str) -> bool {
         == 0
 }
 
-#[cfg(unix)]
 fn bounded_string<'a>(value: &'a Value, key: &str, max: usize) -> Option<&'a str> {
     value.get(key)?.as_str().filter(|text| text.len() <= max)
 }
 
-#[cfg(unix)]
 fn accept_event_seq(session: &mut SessionCapability, seq: u64) -> bool {
     if seq <= session.last_seq {
         if seq >= session.last_seq || seq > SEQ_RESET_CEILING {
@@ -276,7 +235,6 @@ fn accept_event_seq(session: &mut SessionCapability, seq: u64) -> bool {
     true
 }
 
-#[cfg(unix)]
 fn event_handler() -> HandlerFn {
     std::sync::Arc::new(|params| {
         Box::pin(async move {
@@ -376,7 +334,6 @@ fn event_handler() -> HandlerFn {
 /// failure). The spawned supervisor retries with bounded backoff, so the
 /// channel recovers without needing a new terminal spawn to re-trigger it.
 pub fn ensure_server_started() {
-    #[cfg(unix)]
     if !STARTED.swap(true, Ordering::Relaxed) {
         let socket_path = gpty_ipc::transport::default_event_socket_path();
         crate::RUNTIME.spawn(async move {

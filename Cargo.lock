@@ -551,6 +551,7 @@ dependencies = [
 name = "gpty-gdext"
 version = "0.5.1"
 dependencies = [
+ "getrandom",
  "godot",
  "gpty-ai",
  "gpty-core",
