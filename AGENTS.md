@@ -129,7 +129,7 @@ CLI → Unix socket (gpty.sock) → IpcServer (tokio) → PENDING_IPC queue → 
 ```
 
 ```
-OMP TUI (user-launched in a terminal) → @gpty/omp-events extension → gpty-events.sock (ompEvent) → GptyTerminal.drain_agent_events() → Reasoning pane
+OMP TUI (user-launched in a terminal) → @gpty/omp-events extension → gpty-events.sock (ompEvent) → omp_events.rs translates to the generic vocabulary (session.bound, agent.started, turn.started, tool.call, thinking.delta, …) → GptyTerminal.drain_agent_events() → Reasoning pane + Tier 1 agent-state badges
 ```
 
 ```

@@ -165,15 +165,15 @@ func receive_agent_event(envelope: Dictionary, source_id: String):
 		return
 	var incoming := str(envelope.get("omp_session_id", ""))
 	match str(event.get("name", "")):
-		"omp.session.bound":
+		"session.bound":
 			_bind_session(incoming, _event_ms(event))
-		"omp.session.shutdown":
+		"session.shutdown":
 			if _ignore_shutdown(incoming, _event_ms(event)):
 				return
 			_freeze_live(_event_ms(event))
 			_session_ended = true
 			_status.text = "OMP session ended"
-		"omp.agent.started":
+		"agent.started":
 			if _session_ended:
 				_bind_session(incoming, _event_ms(event))
 			else:
@@ -191,14 +191,14 @@ func receive_agent_event(envelope: Dictionary, source_id: String):
 				return
 			_start_turn(_event_ms(event))
 			_status.text = "Reasoning…"
-		"omp.reasoning.delta":
+		"thinking.delta":
 			if _session_ended:
 				_bind_session(incoming, _event_ms(event))
 			var text := str(event.get("text", ""))
 			if text != "":
 				_append_live_text(text)
 				_status.text = "Reasoning…"
-		"omp.agent.settled":
+		"agent.settled":
 			var had_live := (
 				not _live_turn().is_empty()
 				and str(_live_turn().get("status", "")) == "streaming"

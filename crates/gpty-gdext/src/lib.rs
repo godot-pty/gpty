@@ -474,6 +474,25 @@ impl GptyTerminal {
         )
     }
 
+    /// Tier 1 (authoritative) agent-state observation from a
+    /// capability-authenticated event. Values outside the whitelist are
+    /// ignored. Display state only — never a decision input.
+    #[func]
+    fn set_agent_state(&self, state: GString) {
+        let Some(state) = gpty_core::agent_state::AgentState::from_declaration(&state.to_string())
+        else {
+            return;
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        self.with_grid_mut(|g| {
+            g.agent_state
+                .observe(gpty_core::agent_state::StateTier::Tier1, state, now);
+        });
+    }
+
     /// Newest-first scan of the recent-lines ring for `pattern` (standard
     /// Rust `regex` — ReDoS-safe, 1024-char cap). Returns the first matching
     /// line or an empty string. Backs `waitForOutput`.

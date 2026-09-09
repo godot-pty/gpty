@@ -46,6 +46,48 @@ const ALLOWED_EVENTS: &[&str] = &[
     "omp.reasoning.delta",
 ];
 
+/// Adapter-neutral event vocabulary. The extension speaks OMP-specific
+/// names on the wire (protocol v1); gpty translates them at this trust
+/// boundary so everything downstream — Reasoning, AgentState Tier 1,
+/// future adapters — consumes one generic contract.
+#[cfg(unix)]
+const GENERIC_EVENT_NAMES: &[(&str, &str)] = &[
+    ("omp.session.bound", "session.bound"),
+    ("omp.session.shutdown", "session.shutdown"),
+    ("omp.agent.started", "agent.started"),
+    ("omp.agent.settled", "agent.settled"),
+    ("omp.turn.started", "turn.started"),
+    ("omp.turn.finished", "turn.finished"),
+    ("omp.tool.started", "tool.call"),
+    ("omp.tool.finished", "tool.finished"),
+    ("omp.reasoning.delta", "thinking.delta"),
+];
+
+/// Translate a wire event name to the generic vocabulary. Unknown names
+/// pass through unchanged — the allowlist gates what reaches this point.
+/// Unix-only like the event listener itself (see the Windows listener gap).
+#[cfg(unix)]
+pub fn to_generic_name(name: &str) -> &str {
+    for (wire, generic) in GENERIC_EVENT_NAMES {
+        if *wire == name {
+            return generic;
+        }
+    }
+    name
+}
+
+/// Rewrite the event's `name` field to the generic vocabulary.
+#[cfg(unix)]
+fn translate_event_names(mut event: Value) -> Value {
+    if let Some(obj) = event.as_object_mut()
+        && let Some(name_val) = obj.get_mut("name")
+        && let Some(name) = name_val.as_str()
+    {
+        *name_val = Value::String(to_generic_name(name).to_string());
+    }
+    event
+}
+
 #[cfg(unix)]
 #[derive(Debug)]
 struct SessionCapability {
@@ -319,7 +361,7 @@ fn event_handler() -> HandlerFn {
                     terminal_session_id: terminal_id.to_string(),
                     omp_session_id: omp_session_id.to_string(),
                     seq,
-                    event: event_value,
+                    event: translate_event_names(event_value),
                 });
             }
 
@@ -391,6 +433,37 @@ mod tests {
         };
         assert!(!accept_event_seq(&mut session, 5));
         assert_eq!(session.last_seq, 5);
+    }
+
+    #[test]
+    fn generic_vocabulary_mapping() {
+        for (wire, generic) in [
+            ("omp.session.bound", "session.bound"),
+            ("omp.session.shutdown", "session.shutdown"),
+            ("omp.agent.started", "agent.started"),
+            ("omp.agent.settled", "agent.settled"),
+            ("omp.turn.started", "turn.started"),
+            ("omp.turn.finished", "turn.finished"),
+            ("omp.tool.started", "tool.call"),
+            ("omp.tool.finished", "tool.finished"),
+            ("omp.reasoning.delta", "thinking.delta"),
+        ] {
+            assert_eq!(to_generic_name(wire), generic, "wire name {wire}");
+        }
+        assert_eq!(to_generic_name("omp.unknown"), "omp.unknown");
+    }
+
+    #[test]
+    fn event_translation_rewrites_name_field() {
+        let translated = translate_event_names(json!({
+            "name": "omp.agent.started",
+            "reason": "start"
+        }));
+        assert_eq!(translated["name"], "agent.started");
+        assert_eq!(translated["reason"], "start");
+        // Events without a name object pass through untouched.
+        let untouched = translate_event_names(json!({"foo": 1}));
+        assert_eq!(untouched, json!({"foo": 1}));
     }
 
     #[test]

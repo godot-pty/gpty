@@ -873,15 +873,39 @@ func _poll_agent_events():
 			if body is TerminalPane and body.get("_terminal") != null:
 				var session_id := str(body._terminal.get_terminal_session_id())
 				if session_id != "":
-					source_by_session[session_id] = body.attachment_id if body.attachment_id != "" else body.pane_label
+					source_by_session[session_id] = body
 	for envelope in events:
 		if not (envelope is Dictionary):
 			continue
-		var source_id: String = source_by_session.get(str(envelope.get("terminal_session_id", "")), "")
-		if source_id == "":
+		var source: Control = source_by_session.get(str(envelope.get("terminal_session_id", "")), null)
+		if source == null:
 			continue
+		var event = envelope.get("event", {})
+		# Tier 1 (authoritative): capability-authenticated events set the
+		# terminal's agent state before routing. Display state only.
+		var state: String = Workspace.agent_state_for_event(event)
+		if state != "" and source.get("_terminal") != null:
+			source._terminal.set_agent_state(state)
+		var source_id: String = source.attachment_id if source.attachment_id != "" else source.pane_label
 		for receiver in receivers:
 			receiver.receive_agent_event(envelope, source_id)
+
+## Map a generic-vocabulary event to the Tier 1 agent state it declares.
+## Empty string = the event carries no state declaration.
+static func agent_state_for_event(event: Dictionary) -> String:
+	if not (event is Dictionary):
+		return ""
+	match str(event.get("name", "")):
+		"agent.started":
+			return "working"
+		"agent.settled":
+			return "completed"
+		"session.bound", "session.shutdown":
+			return "idle"
+		"tool.finished":
+			if bool(event.get("is_error", false)):
+				return "needs-attention"
+	return ""
 
 # ═══════════════════════════════════════════════════════════════════════
 # Concept event routing

@@ -91,3 +91,31 @@ func test_badge_is_display_only_projection():
 		return b != null and b.visible))
 	var tm: TerminalManager = ws._tm
 	assert_true(tm.tiles.size() == 1, "badge state must never spawn or remove panes")
+
+func test_generic_event_to_state_mapping():
+	var W = WorkspaceScript
+	assert_eq(W.agent_state_for_event({"name": "agent.started"}), "working")
+	assert_eq(W.agent_state_for_event({"name": "agent.settled"}), "completed")
+	assert_eq(W.agent_state_for_event({"name": "session.bound"}), "idle")
+	assert_eq(W.agent_state_for_event({"name": "session.shutdown"}), "idle")
+	assert_eq(W.agent_state_for_event({"name": "tool.finished", "is_error": true}),
+		"needs-attention")
+	assert_eq(W.agent_state_for_event({"name": "tool.finished", "is_error": false}), "")
+	assert_eq(W.agent_state_for_event({"name": "thinking.delta"}), "")
+	assert_eq(W.agent_state_for_event({"name": "turn.started"}), "")
+	assert_eq(W.agent_state_for_event({}), "")
+
+func test_tier1_overrides_tier2_declaration():
+	var ws = await _make_workspace()
+	var body = _first_body(ws)
+	# Authoritative Tier 1 observation from a capability event.
+	body._terminal.set_agent_state("working")
+	# A later Tier 2 OSC declaration must not override it.
+	await _declare_after_settle(body, "completed")
+	await get_tree().create_timer(0.5).timeout
+	var st = JSON.parse_string(str(body._terminal.get_status()))
+	assert_true(st is Dictionary)
+	assert_eq(str(st.get("agent_state", "")), "working",
+		"Tier 2 must never override an authoritative Tier 1 state")
+	assert_eq(int(st.get("agent_state_tier", 0)), 1, "the state must stay Tier 1")
+	assert_true(_badge(ws).visible, "the badge must mirror the Tier 1 state")

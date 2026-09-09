@@ -6,7 +6,8 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 
 ### Added
 
-- Agent-state detection — a display-only `AgentState` (idle/working/needs-attention/completed/failed) per terminal with tiered detection: Tier 2 accepts the published `gpty_state=<value>` OSC declaration (whitelisted, single-shot, rate-limited, alt-screen/capture-replay/resize suppressed); Tier 3 adds conservative failure regex patterns with 60 s TTL decay and non-zero shell exits. The state and its detection tier surface through `pane-status` (`agent_state`, `agent_state_tier`). Tier 1 (capability-authenticated events) lands with the generic event vocabulary.
+- Agent-state detection — a display-only `AgentState` (idle/working/needs-attention/completed/failed) per terminal with tiered detection: Tier 1 accepts capability-authenticated events (authoritative: `agent.started` → working, `agent.settled` → completed, tool errors → needs-attention, session end → idle); Tier 2 accepts the published `gpty_state=<value>` OSC declaration (whitelisted, single-shot, rate-limited, alt-screen/capture-replay/resize suppressed); Tier 3 adds conservative failure regex patterns with 60 s TTL decay and non-zero shell exits. The state and its detection tier surface through `pane-status` (`agent_state`, `agent_state_tier`).
+- Generic event vocabulary — the event socket translates the OMP extension's wire names to adapter-neutral names at the trust boundary (`session.bound`, `agent.started`, `agent.settled`, `turn.started`, `turn.finished`, `tool.call`, `tool.finished`, `thinking.delta`); Reasoning and Tier 1 agent-state detection consume the generic contract.
 - Titlebar agent-state badges — a Phosphor badge on each terminal titlebar mirrors the agent state: spinner (Working), check (Completed), warning (Failed), pulsing amber (NeedsAttention); hidden while Idle. Display only.
 
 
