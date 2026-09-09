@@ -8,6 +8,9 @@ class_name InspectorPane
 @export var accept_concept_captures := false
 @export var system_prompt := ""
 @export var model := ""
+## Backend == "cli": the adapter command as argv (whitespace-split,
+## sanitized like shell_args — never shell-evaluated).
+@export var command: Array = []
 
 var _display: MarkdownView
 var _status: Label
@@ -200,6 +203,7 @@ func _ensure_session() -> bool:
 		"system_prompt": system_prompt,
 		"cwd": "",
 		"model": model,
+		"command": command,
 	})))
 	var resp = JSON.parse_string(raw)
 	if resp is Dictionary and bool(resp.get("ok", false)):
@@ -274,6 +278,7 @@ func _get_layout_state() -> Dictionary:
 		"accept_concept_captures": accept_concept_captures,
 		"system_prompt": system_prompt,
 		"model": model,
+		"command": command.duplicate(),
 	})
 	return state
 
@@ -281,6 +286,7 @@ func apply_settings(settings: Dictionary):
 	var prev_backend = backend
 	var prev_model = model
 	var prev_prompt = system_prompt
+	var prev_command = command.duplicate()
 	super.apply_settings(settings)
 	if settings.get("backend") is String:
 		backend = settings["backend"]
@@ -292,8 +298,11 @@ func apply_settings(settings: Dictionary):
 		system_prompt = settings["system_prompt"]
 	if settings.get("model") is String:
 		model = settings["model"]
+	if settings.get("command") is Array:
+		command = PaneTypes.sanitize_shell_args(settings["command"])
 	if is_inside_tree() and (
 		backend != prev_backend or model != prev_model or system_prompt != prev_prompt
+		or command != prev_command
 	):
 		_close_session()
 
@@ -330,7 +339,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 
 	var backend_le = LineEdit.new()
 	backend_le.text = backend
-	backend_le.placeholder_text = "mock | omp"
+	backend_le.placeholder_text = "mock | omp | cli"
 	backend_le.text_changed.connect(func(_s): panel._debounce_timer.start())
 	_add_setting_row(v, "Backend:", backend_le)
 
@@ -339,6 +348,12 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	model_le.placeholder_text = "optional omp --model"
 	model_le.text_changed.connect(func(_s): panel._debounce_timer.start())
 	_add_setting_row(v, "Model:", model_le)
+
+	var command_le = LineEdit.new()
+	command_le.text = " ".join(command)
+	command_le.placeholder_text = "cli backend: adapter command (argv, no shell)"
+	command_le.text_changed.connect(func(_s): panel._debounce_timer.start())
+	_add_setting_row(v, "Command:", command_le)
 
 	var auto_cb = CheckButton.new()
 	auto_cb.button_pressed = auto_run
@@ -377,6 +392,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"font_size": int(font_spin.value),
 			"backend": backend_le.text.strip_edges(),
 			"model": model_le.text.strip_edges(),
+			"command": command_le.text.strip_edges().split(" ", false),
 			"auto_run": auto_cb.button_pressed,
 			"accept_concept_captures": capture_cb.button_pressed,
 			"system_prompt": sys_te.text,

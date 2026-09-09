@@ -72,3 +72,51 @@ func test_done_keeps_prompt_quote():
 func test_pane_type_is_inspector():
 	assert_eq(_pane._pane_type(), "inspector")
 	assert_eq(_pane._default_title(), "Inspector")
+
+func test_cli_backend_requires_command():
+	if _pane._ai == null:
+		pending("GptyAi GDExtension class not registered")
+		return
+	_pane.backend = "cli"
+	_pane.command = []
+	assert_false(_pane._ensure_session(), "cli without a command must not open")
+	assert_string_contains(_pane._status.text, "requires a command")
+
+func test_command_setting_roundtrips_through_layout_state():
+	_pane.apply_settings({"command": ["my-adapter", "--model", "x y"]})
+	var state = _pane._get_layout_state()
+	assert_true(state.has("command"), "layout state must persist the command")
+	assert_eq(state["command"], ["my-adapter", "--model", "x y"],
+		"command must roundtrip as argv through the layout state")
+
+func test_cli_backend_streams_from_fake_adapter():
+	if _pane._ai == null:
+		pending("GptyAi GDExtension class not registered")
+		return
+	if OS.get_name() == "Windows":
+		pending("fake adapter needs a POSIX shell")
+		return
+	var script := "#!/bin/sh\nread line\n" \
+		+ "printf '%s\\n' '{\"type\":\"thinking\",\"text\":\"t\"}'\n" \
+		+ "printf '%s\\n' '{\"type\":\"delta\",\"text\":\"cli said hi\"}'\n" \
+		+ "printf '%s\\n' '{\"type\":\"done\",\"text\":\"cli said hi\"}'\n"
+	var path := "user://fake_cli_adapter.sh"
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	assert_true(f != null, "must write the adapter script")
+	f.store_string(script)
+	f.close()
+	var abs := ProjectSettings.globalize_path(path)
+	OS.execute("chmod", ["+x", abs])
+	_pane.backend = "cli"
+	_pane.command = [abs]
+	_pane.auto_run = false
+	assert_true(_pane._start_turn("inspect this"), "cli turn must start")
+	var saw_done := false
+	for _i in 80:
+		await get_tree().process_frame
+		if _pane._status.text == "Done":
+			saw_done = true
+			break
+	assert_true(saw_done, "the fake cli adapter must stream to completion")
+	assert_string_contains(_pane._assembled, "cli said hi")
+	DirAccess.remove_absolute(abs)

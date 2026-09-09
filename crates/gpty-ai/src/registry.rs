@@ -9,6 +9,7 @@ use tokio::task::JoinHandle;
 
 use crate::backend::BackendInfo;
 use crate::binary::resolve_omp_binary;
+use crate::cli::run_cli_session;
 use crate::mock::run_mock_session;
 use crate::omp::run_omp_session;
 use crate::types::{
@@ -117,6 +118,9 @@ impl AiSession {
         if config.backend == BackendKind::Omp && resolve_omp_binary().is_none() {
             return Err("omp backend unavailable (install Oh-My-Pi or set GPTY_OMP)".into());
         }
+        if config.backend == BackendKind::Cli && config.command.is_empty() {
+            return Err("cli backend requires a command (Inspector pane settings)".into());
+        }
         if !config.cwd.is_empty() && !std::path::Path::new(&config.cwd).is_absolute() {
             return Err("cwd must be absolute when set".into());
         }
@@ -136,6 +140,7 @@ impl AiSession {
         let task = match config.backend {
             BackendKind::Mock => runtime.spawn(run_mock_session(command_rx, sink, worker_config)),
             BackendKind::Omp => runtime.spawn(run_omp_session(command_rx, sink, worker_config)),
+            BackendKind::Cli => runtime.spawn(run_cli_session(command_rx, sink, worker_config)),
         };
 
         Ok(Arc::new(Self {
@@ -230,6 +235,11 @@ impl AiSession {
                 kind: BackendKind::Omp,
                 name: "Oh-My-Pi (omp RPC)",
                 available: resolve_omp_binary().is_some(),
+            },
+            BackendInfo {
+                kind: BackendKind::Cli,
+                name: "CLI bridge (NDJSON)",
+                available: true,
             },
         ]
     }

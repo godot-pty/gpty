@@ -21,7 +21,7 @@ gpty/
 │   ├── pre-push                # Full CI suite before push
 │   └── commit-msg              # Conventional Commits enforcement
 ├── crates/
-│   ├── gpty-ai/                # Inspector backends (mock + private OMP RPC; no tools)
+│   ├── gpty-ai/                # Inspector backends (mock, private OMP RPC, CLI NDJSON bridge; no tools)
 │   ├── gpty-core/              # PTY spawning, ANSI parsing, alacritty_terminal grid, pub-sub
 │   │   └── src/
 │   │       ├── lib.rs          # Module map + data-flow diagram
@@ -217,7 +217,7 @@ gPTY is a terminal multiplexer with an observability layer. It does **not** recr
 | Surface | Role |
 |---------|------|
 | Terminal | User launches `omp` (or any CLI) normally. The CLI owns its TUI, auth, tools, and permissions. |
-| Inspector | Private, tool-free, iterative Q&A. Owns one in-memory `GptyAi` session (`omp --mode rpc --no-session --no-tools --no-extensions --no-skills --no-rules`). Does not attach to the terminal OMP process. |
+| Inspector | Private, tool-free, iterative Q&A. Owns one in-memory `GptyAi` session; backends: `omp` (private `omp --mode rpc --no-session --no-tools --no-extensions --no-skills --no-rules`), `mock`, or `cli` (subprocess NDJSON bridge — a configured adapter command, argv never shell-evaluated, documented hooks only). Does not attach to the terminal OMP process. |
 | Reasoning | Passive view of documented reasoning/lifecycle events from **one** terminal, selected by `source_attachment_id`. Never starts jobs or accepts concept captures. Turn history is an in-memory accordion for the current OMP session only. |
 | `@gpty/omp-events` | Explicitly installed OMP extension. Dormant unless all four `GPTY_EVENT_*` vars are present. Forwards bounded session/turn/tool metadata plus `thinking_delta` text only. |
 

@@ -8,6 +8,7 @@
 //! |------|--------------|------|
 //! | [`BackendKind::Mock`] | [`mock`] | Offline / tests — deterministic Markdown |
 //! | [`BackendKind::Omp`] | [`omp`] | Oh-My-Pi via `omp --mode rpc` |
+//! | [`BackendKind::Cli`] | [`cli`] | Any CLI via a subprocess NDJSON bridge |
 //!
 //! Future: OpenAI-compatible HTTP, Anthropic, other harnesses (ACP, print mode).
 //!
@@ -17,6 +18,7 @@
 
 pub mod backend;
 pub mod binary;
+pub mod cli;
 pub mod mock;
 pub mod omp;
 pub mod prompt;
@@ -26,6 +28,7 @@ pub mod types;
 
 pub use backend::{BackendError, BackendInfo};
 pub use binary::{GPTY_OMP_ENV, resolve_omp_binary, validate_omp_binary};
+pub use cli::CliBackend;
 pub use mock::MockBackend;
 pub use omp::OmpBackend;
 pub use registry::AiSession;

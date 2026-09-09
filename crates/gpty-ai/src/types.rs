@@ -8,6 +8,7 @@ pub enum BackendKind {
     #[default]
     Mock,
     Omp,
+    Cli,
 }
 
 impl BackendKind {
@@ -15,6 +16,7 @@ impl BackendKind {
         match self {
             Self::Mock => "mock",
             Self::Omp => "omp",
+            Self::Cli => "cli",
         }
     }
 
@@ -22,6 +24,7 @@ impl BackendKind {
         match s.trim().to_ascii_lowercase().as_str() {
             "mock" => Some(Self::Mock),
             "omp" | "oh-my-pi" | "pi" => Some(Self::Omp),
+            "cli" => Some(Self::Cli),
             _ => None,
         }
     }
@@ -38,6 +41,10 @@ pub struct SessionOpenRequest {
     pub cwd: String,
     #[serde(default)]
     pub model: String,
+    /// `BackendKind::Cli` only: the adapter command as argv (never
+    /// shell-evaluated). Each prompt runs one child process.
+    #[serde(default)]
+    pub command: Vec<String>,
 }
 
 /// One prompt in an already-open session.

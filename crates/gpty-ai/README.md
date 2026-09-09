@@ -17,8 +17,25 @@ Network / harness I/O lives here on tokio — Godot only polls envelopes.
 |------|--------|-------|
 | `mock` | Ready | Deterministic local pass-through; used by CI / offline tests |
 | `omp` | Ready | One long-lived, tool-free OMP RPC process per Inspector session |
+| `cli` | Ready | Subprocess NDJSON bridge — any CLI via a small adapter |
 | OpenAI-compatible HTTP | Planned | Same session API |
 | Other harnesses (ACP, `omp -p`) | Planned | Thin adapters |
+
+### CLI bridge contract
+
+The `cli` backend runs a user-configured command (argv from the Inspector
+pane's Command setting, whitespace-split, never shell-evaluated). One
+child process serves one prompt:
+
+- Request (stdin, one JSON line per prompt):
+  `{"capture","concept_name","source_pane","system_prompt","model"}`
+- Response (stdout, one JSON line per event):
+  `{"type":"thinking"|"delta"|"done"|"error"|"status", ...}` with
+  `text`/`message` payloads.
+
+Cancelling kills the child; the next prompt spawns a fresh one
+(`kill_on_drop` guarantees no orphans). Adapters translate a CLI's
+documented hooks into this contract — never tokens, never TUI scraping.
 
 ### Oh-My-Pi surfaces
 
