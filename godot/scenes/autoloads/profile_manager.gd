@@ -62,6 +62,28 @@ func delete_profile(index: int):
 	profiles.remove_at(index)
 	save_profiles()
 
+
+## Rename a user profile by its index (builtins are not in this list).
+## Follows the add_profile dedupe convention: colliding names get a
+## " (n)" suffix. Returns the final name, or "" when the index/name is
+## invalid. Renaming to its own name is a no-op.
+func rename_profile(index: int, p_name: String) -> String:
+	if index < 0 or index >= profiles.size():
+		return ""
+	var base := p_name.strip_edges()
+	if base == "" or base.length() > 128:
+		return ""
+	if base == str(profiles[index].get("name", "")):
+		return base
+	var result_name = base
+	var n = 1
+	while _name_exists(result_name):
+		n += 1
+		result_name = "%s (%d)" % [base, n]
+	profiles[index]["name"] = result_name
+	save_profiles()
+	return result_name
+
 func get_profiles() -> Array[Dictionary]:
 	return profiles
 

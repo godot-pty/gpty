@@ -130,6 +130,8 @@ func _ready():
 	_scope_btn.name = "ScopeBtn"
 	_scope_btn.text = "Live"
 	_scope_btn.tooltip_text = "Search scope"
+	# Never steal focus from the search bar — typing continues after toggling.
+	_scope_btn.focus_mode = Control.FOCUS_NONE
 	_scope_btn.visible = false
 	_scope_btn.anchor_left = 0.0; _scope_btn.anchor_bottom = 1.0
 	_scope_btn.offset_left = 4; _scope_btn.offset_right = 64

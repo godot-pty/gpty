@@ -159,6 +159,43 @@ func test_pane_run_executes_through_configured_shell():
 	# Wait out the deferred concept push timer so it doesn't resume after free.
 	await get_tree().create_timer(2.1).timeout
 
+func test_pane_settings_open_above_second_workspace_grid():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	ws._add_workspace()
+	assert_eq(ws._workspaces.size(), 2, "add_workspace must create a second workspace")
+	var body = ws._spawn_pane("terminal")
+	assert_not_null(body, "spawning into the second workspace must work")
+
+	ws._tm._open_pane_settings(body)
+	var panel = ws._tm._pane_settings_panel
+	assert_true(panel.visible, "pane settings popup must open on a non-first workspace")
+	assert_gt(panel.z_index, ws._grid.z_index,
+		"overlay panels must render above later-added workspace grids")
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
+func test_search_button_opens_active_terminal_search():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	ws._open_active_search()
+	var tm: TerminalManager = ws._tm
+	var body = tm._find_body(tm.tiles[0].wrapper)
+	assert_true(body is TerminalPane, "startup must spawn a terminal")
+	assert_true(body._search_visible, "search button must open the terminal search UI")
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
 func test_profile_activation_refreshes_layout_and_pane_list():
 	var ws = WorkspaceScript.new()
 	_ws = ws

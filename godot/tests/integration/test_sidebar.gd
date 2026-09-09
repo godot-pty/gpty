@@ -98,6 +98,40 @@ func test_workspace_row_double_click_renames():
 	le.text_submitted.emit("Renamed")
 	assert_signal_emitted_with_parameters(_sidebar, "request_workspace_rename", [0, "Renamed"])
 
+	# A subsequent blur (focus_exited fires again after the list rebuild
+	# frees the editor) must NOT corrupt the rebuilt rows — regression for
+	# the "rows disappear after Enter" bug.
+	le.focus_exited.emit()
+	await get_tree().process_frame
+	assert_eq(_sidebar._workspace_list.get_child_count(), 2,
+		"workspace rows must survive the post-commit blur")
+
+func test_profile_row_double_click_renames():
+	var profiles: Array[Dictionary] = [
+		{"name": "Mine", "description": "", "_user_index": 0},
+	]
+	_sidebar.update_profile_list(profiles, "")
+	var row = _sidebar._profile_list.get_child(0)
+	var btn: Button = row.get_child(0)
+
+	var ev = InputEventMouseButton.new()
+	ev.button_index = MOUSE_BUTTON_LEFT
+	ev.pressed = true
+	ev.double_click = true
+	btn.gui_input.emit(ev)
+
+	var le: LineEdit = null
+	for c in row.get_children():
+		if c is LineEdit:
+			le = c
+			break
+	assert_not_null(le, "double-click must open an inline rename editor on user profiles")
+
+	watch_signals(_sidebar)
+	le.text = "NewName"
+	le.text_submitted.emit("NewName")
+	assert_signal_emitted_with_parameters(_sidebar, "request_profile_rename", [0, "NewName"])
+
 func test_update_pane_list_replaces_previous():
 	var body1 = PaneBody.new(); body1.pane_label = "T1"
 	var body2 = PaneBody.new(); body2.pane_label = "C1"

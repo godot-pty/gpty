@@ -66,3 +66,24 @@ func test_profiles_changed_emits():
 	watch_signals(ProfileManager)
 	ProfileManager.add_profile("Test", [])
 	assert_signal_emitted(ProfileManager, "profiles_changed")
+
+func test_rename_profile_roundtrip():
+	ProfileManager.add_profile("Old Name", [])
+	var idx = ProfileManager.profiles.size() - 1
+	var renamed = ProfileManager.rename_profile(idx, "New Name")
+	assert_eq(renamed, "New Name")
+	assert_eq(ProfileManager.profiles[idx].get("name"), "New Name")
+
+func test_rename_profile_dedupes_collisions():
+	ProfileManager.add_profile("Alpha", [])
+	ProfileManager.add_profile("Beta", [])
+	var renamed = ProfileManager.rename_profile(1, "Alpha")
+	assert_eq(renamed, "Alpha (2)", "colliding rename must get the dedupe suffix")
+
+func test_rename_profile_rejects_invalid():
+	assert_eq(ProfileManager.rename_profile(99, "X"), "", "out-of-range index must fail")
+	ProfileManager.add_profile("Real", [])
+	var idx = ProfileManager.profiles.size() - 1
+	assert_eq(ProfileManager.rename_profile(idx, "   "), "", "blank name must fail")
+	# Renaming to its own name is a no-op returning the same name.
+	assert_eq(ProfileManager.rename_profile(idx, "Real"), "Real")

@@ -59,7 +59,7 @@ Launch is deferred: `gPTY` stays below 1.0.0 until either the project gains a gr
 - [ ] `cli_view` pane — runs a command and streams stdout into a pane body: plugin UI v1 without a Godot SDK. Native third-party GDScript/Rust pane plugins deferred to a future SDK (`PaneTypes.ALL` is the layout-trust anchor; see AGENTS.md).
 - [ ] Pane contract extension — `on_agent_state_changed(state)` in `PaneBody` for custom panes.
 - [ ] Plugin registry — JSON index repo + browse page on the docs site; submission by PR.
-- [ ] God-object split — split `workspace.gd` (1034 lines) / `terminal_pane.gd` (833) / `terminal_manager.gd` (624) into focused files (IPC dispatch, profile/layout restore, search subsystem); concept routing already lives in `concept_router.gd`. Do it alongside the plugin work, which touches `workspace.gd` heavily.
+- [ ] God-object split — continue splitting `workspace.gd` (~1165 lines) / `terminal_pane.gd` / `terminal_manager.gd` into focused files (workspaces block, persistence, polling, palette, profile/layout restore). IPC dispatch (`ipc_handlers.gd`) and window chrome (`window_chrome.gd`) were already extracted in v0.5.1; concept routing lives in `concept_router.gd`. Do it alongside the plugin work, which touches `workspace.gd` heavily.
 
 ## v0.5.4 — Visual Concept Graph
 
@@ -88,7 +88,8 @@ Launch is deferred: `gPTY` stays below 1.0.0 until either the project gains a gr
 - [ ] Scrollback restore on restart — reload persisted history lines by `attachment_id` when a pane reopens, so scrollback survives restarts (builds on the v0.5.0 stable public pane IDs).
 - [ ] History full-text search — surface the FTS5 store's `search()` in the terminal search UI so old output stays findable after restart.
 - [ ] History retention setting — `cfg_history_lines` (default 10 000) clamping the per-pane cap.
-- [ ] Live pane-API smoke — exercise the v0.5.0 surface end-to-end against a running GUI: `new-pane` → `inject` → `pane-read` → `pane-wait` → `broadcast` over tagged panes, plus `pane-status` exit codes from `pane-run`. Unit/GUT covered but never smoke-tested live.
+- [ ] Live pane-API smoke — exercise the v0.5.0 surface end-to-end against a running GUI: `new-pane` → `inject` → `pane-read` → `pane-wait` → `broadcast` over tagged panes, plus `pane-status` exit codes from `pane-run` (Unit/GUT covered, but not smoke-tested live).
+- [ ] Event-socket smoke — extend the live smoke to cover `subscribe`/`eventsPoll` on `gpty-events.sock` (concept matches, pane spawn/kill events). The control-socket pane API is smoke-covered; the event socket is not.
 - [x] Palette test dedup — `test_palette.gd` now asserts against `PaneTypes.build_palette_commands()`; the command list lives in one place.
 
 ## v0.5.0 — ADE Foundation

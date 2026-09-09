@@ -12,9 +12,11 @@ signal request_type_swap(body: Control, source_btn: Button)
 signal request_pane_settings(body: Control)
 signal toggled
 signal request_profile(name: String)
+signal request_profile_rename(index: int, name: String)
 signal request_save_profile
 signal request_delete_profile(index: int)
 signal request_window_mode(mode: int)
+signal request_search
 signal request_workspace_switch(index: int)
 signal request_workspace_add
 signal request_workspace_close(index: int)
@@ -135,6 +137,11 @@ func _add_header(v: VBoxContainer):
 
 func _add_buttons(v: VBoxContainer):
 	_add_pane_buttons(v)
+
+	var search_btn = _make_icon_text_button(Icons.SEARCH, "Search")
+	search_btn.tooltip_text = "Search the active terminal (Ctrl+F)"
+	search_btn.pressed.connect(func(): request_search.emit())
+	v.add_child(search_btn)
 
 	var settings_btn = _make_icon_text_button(Icons.SETTINGS, "Settings")
 	settings_btn.pressed.connect(func(): request_settings.emit())
@@ -332,11 +339,12 @@ func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close:
 		row.add_child(x)
 	return row
 
-func _on_workspace_row_input(idx: int, btn: Button, ev: InputEvent):
-	if not (ev is InputEventMouseButton):
-		return
-	if not ev.double_click or ev.button_index != MOUSE_BUTTON_LEFT:
-		return
+## Swap a row label Button for an inline LineEdit; commits exactly once
+## (Enter, blur, or Escape — Escape restores the original name). The
+## once-only guard matters: after a commit rebuilds the list, the freed
+## LineEdit still fires focus_exited, and a second commit on a freed
+## object corrupted the rebuild (rows vanished until restart).
+func _begin_inline_rename(btn: Button, on_commit: Callable):
 	var le = LineEdit.new()
 	le.text = btn.text
 	le.custom_minimum_size.y = btn.size.y
@@ -345,12 +353,33 @@ func _on_workspace_row_input(idx: int, btn: Button, ev: InputEvent):
 	btn.visible = false
 	le.grab_focus()
 	le.select_all()
-	le.text_submitted.connect(func(t: String): request_workspace_rename.emit(idx, t))
-	le.focus_exited.connect(func(): request_workspace_rename.emit(idx, le.text))
+	var committed := [false]
+	le.text_submitted.connect(func(t: String):
+		if committed[0]:
+			return
+		committed[0] = true
+		on_commit.call(t)
+	)
+	le.focus_exited.connect(func():
+		if committed[0] or not is_instance_valid(le):
+			return
+		committed[0] = true
+		on_commit.call(le.text)
+	)
 	le.gui_input.connect(func(e2: InputEvent):
 		if e2 is InputEventKey and e2.pressed and e2.keycode == KEY_ESCAPE:
-			request_workspace_rename.emit(idx, btn.text)
+			if committed[0]:
+				return
+			committed[0] = true
+			on_commit.call(btn.text)
 	)
+
+func _on_workspace_row_input(idx: int, btn: Button, ev: InputEvent):
+	if not (ev is InputEventMouseButton):
+		return
+	if not ev.double_click or ev.button_index != MOUSE_BUTTON_LEFT:
+		return
+	_begin_inline_rename(btn, func(t: String): request_workspace_rename.emit(idx, t))
 
 func _add_pane_list_ui(v: VBoxContainer):
 	var lbl = Label.new()
@@ -444,10 +473,17 @@ func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 		)
 		row.add_child(btn)
 		if not p.get("builtin", false):
+			var user_index := int(p.get("_user_index", i))
+			btn.tooltip_text += "\nDouble-click to rename"
+			btn.gui_input.connect(func(ev: InputEvent):
+				if ev is InputEventMouseButton and ev.double_click \
+						and ev.button_index == MOUSE_BUTTON_LEFT:
+					_begin_inline_rename(btn, func(t: String):
+						request_profile_rename.emit(user_index, t))
+			)
 			var x = Button.new(); x.text = Icons.DELETE; x.flat = true
 			Icons.style_button(x)
 			x.custom_minimum_size = Vector2(22, 0)
-			var user_index := int(p.get("_user_index", i))
 			x.pressed.connect(func(): request_delete_profile.emit(user_index))
 			row.add_child(x)
 		_profile_list.add_child(row)

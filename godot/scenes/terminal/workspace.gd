@@ -30,9 +30,13 @@ func _ready():
 
 	var overlay = load("res://scenes/ui/toast_overlay.gd").new()
 	add_child(overlay)
+	# Workspace grids are added later (extra workspaces at restore time);
+	# without a z bump these panels render UNDER them and appear broken.
+	overlay.z_index = 100
 
 	var pane_settings = load("res://scenes/ui/pane_settings_panel.gd").new()
 	add_child(pane_settings)
+	pane_settings.z_index = 100
 	_tm._pane_settings_panel = pane_settings
 
 	_build_sidebar()
@@ -409,7 +413,10 @@ func _close_workspace(idx: int):
 func _rename_workspace(idx: int, new_name: String):
 	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size():
 		return
-	_workspaces[idx].name = WorkspaceStore.sanitize_name(new_name)
+	var clean := WorkspaceStore.sanitize_name(new_name)
+	if _workspaces[idx].name == clean:
+		return  # no-op — also absorbs the duplicate blur/enter commit
+	_workspaces[idx].name = clean
 	_update_workspace_ui()
 	_save_workspaces_to_store()
 
@@ -618,6 +625,7 @@ func _activate_pane_under_mouse(mouse: Vector2):
 func _toggle_palette():
 	if _palette == null:
 		_palette = _build_palette()
+		_palette.z_index = 100
 		add_child(_palette)
 		_palette.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	_palette.visible = not _palette.visible
@@ -716,7 +724,9 @@ func _wire_sidebar_signals():
 	_sidebar.request_pane_settings.connect(func(body: Control): _tm._open_pane_settings(body))
 	_sidebar.toggled.connect(func(): _on_sidebar_toggled())
 	_sidebar.request_profile.connect(_activate_profile)
+	_sidebar.request_profile_rename.connect(_rename_profile)
 	_sidebar.request_window_mode.connect(_chrome.on_window_mode_selected)
+	_sidebar.request_search.connect(_open_active_search)
 	_sidebar.request_workspace_switch.connect(_switch_workspace)
 	_sidebar.request_workspace_add.connect(_add_workspace)
 	_sidebar.request_workspace_close.connect(_close_workspace)
@@ -957,6 +967,7 @@ func _toggle_settings():
 		_settings_panel = SettingsPanel.new(self)
 		_settings_panel.name = "SettingsPanel"
 		_settings_panel.visible = false
+		_settings_panel.z_index = 100
 		add_child(_settings_panel)
 		_settings_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_settings_panel.visible = not _settings_panel.visible
@@ -1158,6 +1169,35 @@ func _delete_profile(idx: int):
 		_active_profile = ""
 	_refresh_profile_buttons()
 	ToastManager.info("Profile deleted")
+
+func _rename_profile(idx: int, new_name: String):
+	var profiles := ProfileManager.get_all_profiles()
+	var old_name := ""
+	if idx >= 0 and idx < profiles.size():
+		old_name = str(profiles[idx].get("name", ""))
+	var renamed := ProfileManager.rename_profile(idx, new_name)
+	if renamed == "":
+		ToastManager.warn("Cannot rename profile")
+	else:
+		if old_name != "" and old_name == _active_profile:
+			_active_profile = renamed
+		ToastManager.info("Profile renamed to '%s'" % renamed)
+	_refresh_profile_buttons()
+
+func _open_active_search():
+	var ws := _active_workspace()
+	if ws.is_empty():
+		return
+	var body: Control = ws.tm.last_body if (ws.tm.last_body and is_instance_valid(ws.tm.last_body)) else null
+	if not (body is TerminalPane):
+		# Fall back to the first terminal in the active workspace.
+		for t in ws.tm.tiles:
+			var b = ws.tm._find_body(t.wrapper)
+			if b is TerminalPane:
+				body = b
+				break
+	if body is TerminalPane:
+		body._toggle_search()
 
 func _refresh_profile_buttons():
 	if _sidebar:

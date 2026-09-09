@@ -9,6 +9,7 @@ static func style_button(btn: Button) -> void:
 
 const CLOSE    = "\uE4F6"  # x
 const DELETE   = "\uE4A6"  # trash
+const SEARCH   = "\uE30C"  # magnifying-glass
 const MINIMIZE = "\uE32A"  # minus
 const RESTORE  = "\uE0A2"  # arrows-out
 const COLLAPSE = "\uE138"  # caret-left
