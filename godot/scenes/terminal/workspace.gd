@@ -317,7 +317,7 @@ func _add_body_to_grid_into(ws: Dictionary, w: Control, body: Control, label: St
 	if ws.is_empty():
 		return
 	ws.grid.add_child(w)
-	body.focus_entered.connect(func(): ws.tm.last_body = body)
+	_wire_pane_activation(ws, w, body)
 	_sync_pane_titlebars()
 	_apply_layout()
 	_list()
@@ -376,7 +376,7 @@ func _swap_pane(body: Control, new_type_name: String):
 		ws.grid.add_child(new_wrapper)
 
 	# Wire signals (same pattern as _add_body_to_grid).
-	new_body.focus_entered.connect(func(): tm.last_body = new_body)
+	_wire_pane_activation(ws, new_wrapper, new_body)
 
 	# For terminals: wire dynamic title (global defaults applied in swap_pane).
 	if new_type_name == "terminal":
@@ -426,6 +426,24 @@ func _do_reset():
 func _update_workspace_ui():
 	if _sidebar:
 		_sidebar.update_workspace_list(_workspace_names(), _active)
+
+func _wire_pane_activation(ws: Dictionary, _w: Control, body: Control):
+	# Pane activation on plain clicks is handled in _unhandled_input via
+	# wrapper hit-testing — container ancestors skip gui_input propagation,
+	# so wiring the wrapper does not work. This covers the focusable case.
+	body.focus_entered.connect(func(): ws.tm.last_body = body)
+
+func _body_of_focus_owner(owner: Control) -> Control:
+	# A focusable child (e.g. the Inspector's input field) owns keyboard
+	# focus without firing the pane's focus_entered — walk up to the pane.
+	var node = owner
+	while node != null:
+		for t in _tm.tiles:
+			var b = _tm._find_body(t.wrapper)
+			if b == node:
+				return b
+		node = node.get_parent()
+	return null
 
 func _wire_tm(tm: TerminalManager):
 	tm.on_close = func(body: Control): _kill(body)
@@ -656,7 +674,7 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 			)
 
 		grid.add_child(w)
-		body.focus_entered.connect(func(): tm.last_body = body)
+		_wire_pane_activation(ws, w, body)
 		tm.tiles.append({wrapper = w, col = st["col"], row = st["row"],
 			cspan = st["cspan"], rspan = st["rspan"]})
 	if tm.tiles.is_empty():
@@ -710,6 +728,38 @@ func _unhandled_input(event):
 	if _palette and _palette.visible and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		_palette.visible = false
 		get_viewport().set_input_as_handled()
+
+func _input(event):
+	# Raw input — fires before GUI consumption, which is required: pane
+	# bodies contain RichTextLabels/ScrollContainers that consume clicks,
+	# and _unhandled_input would never see them. The workspace fills the
+	# window, so the event's viewport position maps 1:1 to canvas space.
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_activate_pane_under_mouse(event.position)
+
+## Uniform click-to-activate: any left click inside a pane (body, titlebar
+## background, or an inner widget) makes that pane the active one. The
+## sidebar/status bar are not tile wrappers, so their clicks are no-ops.
+## Non-terminal panes release the old keyboard owner so keystrokes stop
+## flowing to a terminal the user just left (read-only panes swallow keys
+## by design).
+func _activate_pane_under_mouse(mouse: Vector2):
+	var ws := _active_workspace()
+	if ws.is_empty():
+		return
+	for t in ws.tm.tiles:
+		var w: Control = t.wrapper
+		if not w.get_global_rect().has_point(mouse):
+			continue
+		var body = ws.tm._find_body(w)
+		if body == null:
+			continue
+		ws.tm.last_body = body
+		if not (body is TerminalPane):
+			var owner := get_viewport().gui_get_focus_owner()
+			if owner:
+				owner.release_focus()
+		return
 
 func _toggle_palette():
 	if _palette == null:
@@ -793,7 +843,19 @@ func _wire_sidebar_signals():
 	_sidebar.request_close.connect(func(body: Control): _kill(body))
 	_sidebar.request_settings.connect(_toggle_settings)
 	_sidebar.request_reset.connect(func(): _do_reset())
-	_sidebar.request_focus.connect(func(body: Control): body.grab_focus())
+	_sidebar.request_focus.connect(func(body: Control):
+		# Same uniform semantics as clicking the pane itself: the row click
+		# activates the pane; only terminals take keyboard focus.
+		var bws := _workspace_for_body(body)
+		if not bws.is_empty():
+			bws.tm.last_body = body
+		if body is TerminalPane:
+			body.grab_focus()
+		else:
+			var owner := get_viewport().gui_get_focus_owner()
+			if owner:
+				owner.release_focus()
+	)
 	_sidebar.request_minimize.connect(func(body: Control): _on_pane_minimize(body))
 	_sidebar.request_position_swap.connect(func(body: Control, btn: Button): _on_pane_position_swap(body, btn))
 	_sidebar.request_type_swap.connect(func(body: Control, btn: Button): _on_pane_type_swap(body, btn))
@@ -855,6 +917,13 @@ func _process(_delta: float):
 func _refresh_status_bar():
 	if _status_bar == null: return
 	var body = _tm.last_body
+	# A focusable child (Inspector input) owns keyboard focus without the
+	# pane's focus_entered ever firing — resolve the owning pane.
+	var owner := get_viewport().gui_get_focus_owner()
+	var owner_body := _body_of_focus_owner(owner)
+	if owner_body:
+		_tm.last_body = owner_body
+		body = owner_body
 	if body:
 		_status_bar.set_pane_info(body.pane_label, body._pane_type())
 	else:
@@ -1356,6 +1425,10 @@ func _do_activate(profile: Dictionary):
 	_restore_into(ws, tiles)
 	_active_profile = str(profile.get("name", ""))
 	_refresh_profile_buttons()
+	# Same refresh path as workspace switching: layout, pane list, titlebars,
+	# and focus. Skipping it leaves restored wrappers unlaid-out and the
+	# sidebar pane list stale until the user switches workspaces.
+	_apply_active_workspace_view()
 	ToastManager.info("Profile '%s' activated" % profile.get("name", ""))
 
 func _delete_profile(idx: int):
