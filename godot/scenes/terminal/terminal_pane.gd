@@ -31,6 +31,7 @@ var color_scheme_path: String = "":
 
 
 @export var shell_command: String = "/bin/bash"
+@export var shell_args: Array = []  # program arguments; ["-c", cmd] = run through shell
 @export var shell_env := ""
 @export var rows: int = 24
 @export var cols: int = 80
@@ -96,7 +97,7 @@ func _ready():
 	_terminal = GptyTerminal.new()
 	_terminal.name = "GptyTerminal"
 	add_child(_terminal)
-	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines)
+	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines, JSON.stringify(shell_args))
 
 	if color_scheme_path != "":
 		_apply_stored_scheme()
@@ -169,7 +170,8 @@ func _notification(what):
 func _get_layout_state() -> Dictionary:
 	var state = super._get_layout_state()
 	state.merge({
-		"shell": shell_command, "rows": rows, "cols": cols,
+		"shell": shell_command, "shell_args": shell_args.duplicate(),
+		"rows": rows, "cols": cols,
 		"shell_env": shell_env, "font_path": font_path,
 		"color_scheme_path": color_scheme_path,
 		"cursor_shape": cursor_shape, "cursor_blink": cursor_blink,
@@ -186,6 +188,9 @@ func apply_settings(settings: Dictionary):
 	# Layout JSON stores Colors as "(r, g, b, a)" strings.
 	_restore_color_strings(settings)
 	super.apply_settings(settings)
+	if settings.has("shell_args"):
+		# Untrusted layout data: sanitize before it reaches a spawn.
+		shell_args = PaneTypes.sanitize_shell_args(settings.get("shell_args"))
 	if settings.has("rows") or settings.has("cols"):
 		if _terminal != null:
 			_terminal.resize_grid(rows, cols)

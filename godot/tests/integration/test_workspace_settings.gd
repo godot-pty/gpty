@@ -130,6 +130,35 @@ func test_add_workspace_starts_blank():
 	# Wait out the deferred concept push timer so it doesn't resume after free.
 	await get_tree().create_timer(2.1).timeout
 
+func test_pane_run_executes_through_configured_shell():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var result = WorkspaceIpcHandlers.handle(ws, "paneRun", {"command": "echo hi && exit 7"})
+	assert_true(result is Dictionary and result.has("pane_id"), "paneRun must return a pane id")
+
+	var tm: TerminalManager = ws._tm
+	var body = null
+	for t in tm.tiles:
+		var b = tm._find_body(t.wrapper)
+		if b is TerminalPane and b.attachment_id == str(result.get("pane_id", "")):
+			body = b
+			break
+	assert_not_null(body, "paneRun must spawn a terminal pane")
+	assert_eq(body.shell_command, SettingsManager.cfg_shell_command,
+		"paneRun must use the configured shell as the program")
+	assert_eq(body.shell_args, ["-c", "echo hi && exit 7"],
+		"the command must run as shell arguments, not the program")
+
+	var err = WorkspaceIpcHandlers.handle(ws, "paneRun", {"command": "   "})
+	assert_true(err is Dictionary and err.has("error"), "empty command must error")
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
 func test_profile_activation_refreshes_layout_and_pane_list():
 	var ws = WorkspaceScript.new()
 	_ws = ws

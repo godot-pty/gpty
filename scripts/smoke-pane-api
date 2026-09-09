@@ -109,9 +109,8 @@ jq_assert "$BW_JSON" '.result.matched == true' "broadcast text must reach the pa
 
 # ── pane-run + exit code ───────────────────────────────────────────────
 step "pane-run"
-# pane-run spawns the command as a single executable (no shell) — use
-# a real binary with a known exit code.
-RUN_JSON="$("$GPTY" pane-run --command false --json)"
+# pane-run executes through the configured shell: compound commands work.
+RUN_JSON="$("$GPTY" pane-run --command 'echo SMOKE_COMPOUND && exit 7' --json)"
 RUN_ID="$(jq -r '.result.pane_id' <<<"$RUN_JSON")"
 [[ -n "$RUN_ID" && "$RUN_ID" != "null" ]] || fail "no pane_id in pane-run response"
 RUN_ST=""
@@ -121,7 +120,10 @@ for _ in $(seq 1 30); do
     sleep 0.5
 done
 jq_assert "$RUN_ST" '.result.running == false' "pane-run pane must exit"
-jq_assert "$RUN_ST" '.result.exit_code == 1' "pane-run exit code must be 1"
+jq_assert "$RUN_ST" '.result.exit_code == 7' "pane-run compound command must exit 7"
+COMP_READ="$("$GPTY" pane-read "$RUN_ID" --lines 50 --json)"
+jq -e '.result.text | contains("SMOKE_COMPOUND")' <<<"$COMP_READ" >/dev/null \
+    || fail "pane-run output must contain the compound marker"
 "$GPTY" kill-pane "$RUN_ID" --json >/dev/null
 
 # ── kill-pane ──────────────────────────────────────────────────────────

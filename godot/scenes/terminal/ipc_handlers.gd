@@ -40,9 +40,18 @@ static func handle(ws, method: String, params: Dictionary):
 				return error("Pane status unavailable")
 			return ps_status
 		"paneRun":
-			var run_cmd: String = PaneTypes.sanitize_shell(
-				params.get("command", ""), SettingsManager.cfg_shell_command)
-			var run_body = ws._spawn_pane("terminal", {"shell_command": run_cmd})
+			var run_cmd := str(params.get("command", "")).strip_edges()
+			if run_cmd == "":
+				return error("Command required")
+			if run_cmd.length() > 1024 or run_cmd.contains("\uFFFD"):
+				return error("Invalid command")
+			# Execute through the configured shell so compound commands
+			# (&&, pipes, globs) work like a normal CLI invocation. The
+			# command is an argument, never the program itself.
+			var run_body = ws._spawn_pane("terminal", {
+				"shell_command": SettingsManager.cfg_shell_command,
+				"shell_args": ["-c", run_cmd],
+			})
 			if run_body == null:
 				return error("Grid is full")
 			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "spawned", "pane_id": run_body.attachment_id, "label": run_body.pane_label}))

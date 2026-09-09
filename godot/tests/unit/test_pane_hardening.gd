@@ -84,6 +84,23 @@ func test_sanitize_shell_rejects_invalid_unicode_and_oversized():
 	var long: String = "x".repeat(2048)
 	assert_eq(PaneTypes.sanitize_shell(long, "/bin/bash"), "/bin/bash")
 
+# ── PaneTypes.sanitize_shell_args ──────────────────────────────────────
+
+func test_sanitize_shell_args_accepts_valid_strings():
+	var out = PaneTypes.sanitize_shell_args(["-c", "echo hi && exit 7"])
+	assert_eq(out, ["-c", "echo hi && exit 7"], "valid string args must pass through")
+
+func test_sanitize_shell_args_rejects_junk_and_caps():
+	var big := []
+	for i in 40:
+		big.append("arg%d" % i)
+	var out = PaneTypes.sanitize_shell_args(
+		big + ["", 42, null, {"x": 1}, "bad\uFFFDevil", "x".repeat(5000)])
+	assert_eq(out.size(), 32, "shell args must cap at 32")
+	assert_false(str(out).contains("bad\uFFFD"), "U+FFFD args must be dropped")
+	# Non-array input degrades to an empty list.
+	assert_eq(PaneTypes.sanitize_shell_args("not-an-array"), [])
+
 # ── PaneBody typed settings application ────────────────────────────────
 
 func test_pane_body_ignores_unknown_and_bad_type_keys():

@@ -96,10 +96,16 @@ impl GptyTerminal {
     /// restarts). The newest `history_lines` rows are restored into the
     /// grid's scrollback on spawn.
     ///
+    /// `args_json` is a JSON array of strings passed as the program's
+    /// arguments (e.g. `["-c", "echo hi && exit 7"]` for shell wrapping).
+    /// Capped at 32 args of ≤4096 chars each.
+    ///
     /// # Edge cases
     /// - Calling twice replaces the previous session.
     /// - If spawning fails, the grid stays empty and `get_grid_rows()` returns `[]`.
     /// - `rows` and `cols` are clamped to ≥1.
+    // FFI boundary: GDScript callers pass positionally; no object to group into.
+    #[allow(clippy::too_many_arguments)]
     #[func]
     fn start_shell(
         &mut self,
@@ -109,6 +115,7 @@ impl GptyTerminal {
         envs: GString,
         pane_id: GString,
         history_lines: i64,
+        args_json: GString,
     ) {
         let command = command.to_string();
         if command.is_empty() || command.len() > 1024 || command.contains('\0') {
@@ -179,10 +186,19 @@ impl GptyTerminal {
             .take(64)
             .collect();
 
+        // Program arguments (JSON array) — capped like other untrusted input.
+        let args: Vec<String> = serde_json::from_str::<Vec<String>>(&args_json.to_string())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|a| !a.is_empty() && a.len() <= 4096)
+            .take(32)
+            .collect();
+        let args_refs: Vec<&str> = args.iter().map(|a| a.as_str()).collect();
+
         match RUNTIME.block_on(ENGINE.spawn_terminal_with_grid(
             config,
             &command,
-            &[],
+            &args_refs,
             &env_list,
             &trusted_envs,
             rows,

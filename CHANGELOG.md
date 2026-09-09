@@ -17,6 +17,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 
 - History retention trims the oldest rows beyond `history_lines` amortized over every 100 committed lines.
 - `start_shell` no longer attaches a history store keyed by the per-node `id` counter (rows collided across panes and orphaned across restarts).
+- `pane-run` executes commands through the configured shell (`<shell> -c <command>`) — compound commands (`&&`, pipes, globs) now work; the command is passed as a sanitized argument (`shell_args`), never as the program itself. Empty commands are rejected.
 
 ### Fixed
 

@@ -107,3 +107,17 @@ static func sanitize_shell(v, fallback: String) -> String:
 	if v is String and v != "" and v.length() <= 1024 and not v.contains("\uFFFD"):
 		return v
 	return fallback
+
+
+## Sanitize program arguments from untrusted layout/profile data: array of
+## non-empty strings ≤4096 chars without U+FFFD, capped at 32 entries.
+static func sanitize_shell_args(raw) -> Array:
+	var out: Array = []
+	if not (raw is Array):
+		return out
+	for a in raw:
+		if a is String and a != "" and a.length() <= 4096 and not a.contains("\uFFFD"):
+			out.append(a)
+		if out.size() >= 32:
+			break
+	return out

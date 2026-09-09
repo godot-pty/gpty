@@ -149,7 +149,7 @@ enum Commands {
         pane_id: Option<String>,
     },
 
-    /// Run a command in a new terminal pane
+    /// Run a command in a new terminal pane (executed through the configured shell)
     PaneRun {
         /// Command to run
         #[arg(long)]
