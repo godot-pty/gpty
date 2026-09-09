@@ -196,6 +196,30 @@ func test_search_button_opens_active_terminal_search():
 	# Wait out the deferred concept push timer so it doesn't resume after free.
 	await get_tree().create_timer(2.1).timeout
 
+func test_search_bar_is_compact_bottom_strip():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var tm: TerminalManager = ws._tm
+	var body = tm._find_body(tm.tiles[0].wrapper)
+	assert_true(body is TerminalPane, "startup must spawn a terminal")
+	body._toggle_search()
+	await get_tree().process_frame
+
+	# Regression: a missing anchor_top made every search control stretch to
+	# full pane height — the bar covered the whole terminal as an overlay.
+	assert_gt(body._search_bar.size.y, 20.0, "search bar must have real height")
+	assert_lt(body._search_bar.size.y, 50.0, "search bar must be a compact strip, not a full-pane overlay")
+	assert_lt(body._scope_btn.size.y, 50.0, "scope button must be a compact strip")
+	assert_lt(body._history_panel.size.y, 250.0, "results panel must be bounded above the bar")
+	assert_gt(body._search_bar.size.x, 400.0, "search bar must span most of the pane width")
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
 func test_profile_activation_refreshes_layout_and_pane_list():
 	var ws = WorkspaceScript.new()
 	_ws = ws

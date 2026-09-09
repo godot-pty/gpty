@@ -111,15 +111,17 @@ func _ready():
 	focus_mode = Control.FOCUS_CLICK
 	clip_contents = true
 
-	# Search bar (hidden by default)
+	# Search bar (hidden by default) — anchored to the pane's BOTTOM EDGE.
+	# anchor_top MUST be 1.0 alongside anchor_bottom: with the default 0.0
+	# the control stretches to full pane height (giant overlay).
 	_search_bar = LineEdit.new()
 	_search_bar.name = "SearchBar"
 	_search_bar.placeholder_text = "Search (regex)..."
 	_search_bar.visible = false
 	_search_bar.anchor_left = 0.0; _search_bar.anchor_right = 1.0
-	_search_bar.anchor_bottom = 1.0; _search_bar.offset_bottom = 0
-	_search_bar.offset_left = 68
-	_search_bar.offset_top = -36
+	_search_bar.anchor_top = 1.0; _search_bar.anchor_bottom = 1.0
+	_search_bar.offset_left = 68; _search_bar.offset_right = 0
+	_search_bar.offset_top = -36; _search_bar.offset_bottom = 0
 	_search_bar.text_changed.connect(_on_search_text_changed)
 	_search_bar.text_submitted.connect(_on_search_submitted)
 	_search_bar.gui_input.connect(_on_search_bar_input)
@@ -133,7 +135,8 @@ func _ready():
 	# Never steal focus from the search bar — typing continues after toggling.
 	_scope_btn.focus_mode = Control.FOCUS_NONE
 	_scope_btn.visible = false
-	_scope_btn.anchor_left = 0.0; _scope_btn.anchor_bottom = 1.0
+	_scope_btn.anchor_left = 0.0; _scope_btn.anchor_right = 0.0
+	_scope_btn.anchor_top = 1.0; _scope_btn.anchor_bottom = 1.0
 	_scope_btn.offset_left = 4; _scope_btn.offset_right = 64
 	_scope_btn.offset_top = -36; _scope_btn.offset_bottom = 0
 	_scope_btn.pressed.connect(_on_scope_toggled)
@@ -144,7 +147,7 @@ func _ready():
 	_history_panel.name = "HistoryResults"
 	_history_panel.visible = false
 	_history_panel.anchor_left = 0.0; _history_panel.anchor_right = 1.0
-	_history_panel.anchor_bottom = 1.0
+	_history_panel.anchor_top = 1.0; _history_panel.anchor_bottom = 1.0
 	_history_panel.offset_left = 4; _history_panel.offset_right = -4
 	_history_panel.offset_top = -240; _history_panel.offset_bottom = -40
 	_history_list = VBoxContainer.new()
