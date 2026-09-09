@@ -229,9 +229,21 @@ impl TermGrid {
     /// Uses the ANSI path so escape sequences in restored lines are
     /// interpreted correctly. Never calls `store_line` — restored rows
     /// already live in the database and must not be re-appended.
+    ///
+    /// Consecutive identical non-empty lines collapse to one: builds before
+    /// the bare-CR parser fix committed the shell prompt on every SIGWINCH
+    /// redraw, stamping runs of identical prompt rows into history. Those
+    /// rows carry no information (a redraw run, not real output) and
+    /// restoring them makes the terminal look like Enter was pressed
+    /// dozens of times.
     pub fn feed_restore_lines(&mut self, lines: &[String]) {
+        let mut prev: Option<&str> = None;
         for line in lines {
+            if !line.is_empty() && prev == Some(line.as_str()) {
+                continue;
+            }
             self.feed(format!("{line}\r\n").as_bytes());
+            prev = Some(line.as_str());
         }
     }
 
@@ -604,6 +616,36 @@ mod tests {
         // Restored rows are not re-appended; numbering continues at 6.
         assert_eq!(hist.max_line_num().unwrap(), 6);
         assert_eq!(hist.line_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn restore_collapses_identical_prompt_runs() {
+        let mut g = TermGrid::new(10, 60);
+        let mut lines: Vec<String> = vec!["line-a".to_string(), "line-b".to_string()];
+        for _ in 0..25 {
+            lines.push("[neilp@cachyos-x8664 ~]$ ".to_string());
+        }
+        lines.push("line-c".to_string());
+        g.feed_restore_lines(&lines);
+        let rows = g.renderable_rows();
+        let text: Vec<String> = rows
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|c| c.ch)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(text[0], "line-a", "first restored line must survive");
+        assert_eq!(text[1], "line-b", "second restored line must survive");
+        assert_eq!(
+            text[2], "[neilp@cachyos-x8664 ~]$",
+            "a run of 25 identical prompt rows must collapse to one"
+        );
+        assert_eq!(text[3], "line-c", "content after the run must survive");
+        assert_eq!(text[4], "", "nothing else may follow");
     }
 
     #[test]

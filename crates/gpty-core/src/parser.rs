@@ -61,45 +61,47 @@ pub const MAX_LINE_LEN: usize = 16 * 1024;
 struct Handler {
     current_line: String,
     completed_lines: Vec<String>,
-    last_was_cr: bool,
+    /// Line stashed by a CR. CR alone never commits: bash reprints its
+    /// prompt on SIGWINCH as `\r\x1b[K\r<prompt>` and a commit-per-CR
+    /// would stamp a history row for every resize. The next byte decides:
+    /// LF → CRLF pair, the stashed text IS the completed line; any
+    /// printable → the stashed text was overwritten (reprint), drop it.
+    cr_stash: Option<String>,
 }
 
 impl Perform for Handler {
     /// Printable character — append to current line.
     fn print(&mut self, c: char) {
+        // A printable after a bare CR means the stashed text was
+        // overwritten (redraw/reprint, progress-bar update) — discard it.
+        if self.cr_stash.take().is_some() {
+            self.current_line.clear();
+        }
         if self.current_line.len() < MAX_LINE_LEN {
             self.current_line.push(c);
         }
-        self.last_was_cr = false;
     }
 
     /// C0 control character.
     fn execute(&mut self, byte: u8) {
         match byte {
-            // Line-feed: commit even if the line is empty (some programs
-            // output blank lines intentionally). Skip if preceded by CR
-            // to avoid spurious empty lines from \r\n pairs.
+            // Line-feed: ends the line. After a CR (CRLF pair) the stashed
+            // text is the line; a bare LF commits the buffer directly.
+            // Commits even when empty — blank lines are real output.
             b'\n' => {
-                if !self.last_was_cr {
+                if let Some(stashed) = self.cr_stash.take() {
+                    self.completed_lines.push(stashed);
+                } else {
                     self.completed_lines
                         .push(std::mem::take(&mut self.current_line));
                 }
-                self.last_was_cr = false;
             }
-            // Carriage-return: commit only if the line has content.
-            // Some programs (e.g., progress bars) output status lines
-            // terminated only by CR without a following LF.
+            // Carriage-return: stash, never commit (see cr_stash doc).
             b'\r' => {
-                let line = std::mem::take(&mut self.current_line);
-                if !line.is_empty() {
-                    self.completed_lines.push(line);
-                }
-                self.last_was_cr = true;
+                self.cr_stash = Some(std::mem::take(&mut self.current_line));
             }
-            // BEL, BS, HT, VT, FF — reset the CR flag and ignore.
-            _ => {
-                self.last_was_cr = false;
-            }
+            // BEL, BS, HT, VT, FF — ignore.
+            _ => {}
         }
     }
 
@@ -156,8 +158,10 @@ mod tests {
     #[test]
     fn cr_then_text_then_lf() {
         let mut p = LineParser::new();
+        // Terminal semantics: the CR returns to column 0 and the following
+        // text overwrites — "hello" is gone, only "world" completes.
         let lines = p.feed(b"hello\rworld\n");
-        assert_eq!(lines, vec!["hello", "world"]);
+        assert_eq!(lines, vec!["world"]);
     }
 
     #[test]
@@ -178,10 +182,41 @@ mod tests {
     }
 
     #[test]
-    fn carriage_return_commits() {
+    fn bare_cr_does_not_commit() {
         let mut p = LineParser::new();
+        // Progress bars / prompt redraws terminate with bare CR — the
+        // pending text is not a completed line and must not hit history
+        // or concept matching.
         let lines = p.feed(b"progress 50%\r");
-        assert_eq!(lines, vec!["progress 50%"]);
+        assert!(lines.is_empty(), "bare CR must not commit a line");
+    }
+
+    #[test]
+    fn crlf_commits_stashed_line() {
+        let mut p = LineParser::new();
+        let lines = p.feed(b"[neilp@cachyos-x8664 ~]$ \r\n");
+        assert_eq!(lines, vec!["[neilp@cachyos-x8664 ~]$ "]);
+    }
+
+    #[test]
+    fn redraw_sequence_does_not_commit() {
+        let mut p = LineParser::new();
+        // bash's SIGWINCH redraw: \r, clear-to-EOL, \r, prompt reprint.
+        // Each redraw must not stamp another history row.
+        let redraw = b"\r\x1b[K\r[neilp@cachyos-x8664 ~]$ ";
+        for _ in 0..3 {
+            assert!(p.feed(redraw).is_empty(), "redraw must not commit");
+        }
+        // Only a real line end commits — once, with the final text.
+        assert_eq!(p.feed(b"\r\n"), vec!["[neilp@cachyos-x8664 ~]$ "]);
+    }
+
+    #[test]
+    fn crlf_empty_line_commits() {
+        let mut p = LineParser::new();
+        // "\r\n" is one real (blank) line.
+        let lines = p.feed(b"\r\n");
+        assert_eq!(lines, vec![""]);
     }
 
     #[test]
