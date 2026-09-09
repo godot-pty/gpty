@@ -69,6 +69,21 @@ jq_assert() { # jq_assert <json> <jq-expr> <what>
     fi
 }
 
+# ── Event socket: subscribe → eventsPoll ───────────────────────────────
+# Read-only observability fan-out on gpty-events.sock (path derives from
+# GPTY_SOCKET, so it is sandboxed like the control socket). Pane spawn
+# events emitted by new-pane below prove the channel end-to-end.
+step "event socket"
+EVENT_SOCK="$TMP/gpty-events.sock"
+for _ in $(seq 1 30); do
+    [[ -S "$EVENT_SOCK" ]] && break
+    sleep 0.5
+done
+[[ -S "$EVENT_SOCK" ]] || fail "event socket did not appear"
+SUB_JSON="$(python3 "$ROOT/scripts/smoke_event_client.py" "$EVENT_SOCK" subscribe)"
+jq_assert "$SUB_JSON" '.result.subscription_id != null' "subscribe must return a subscription id"
+SUB_ID="$(jq -r '.result.subscription_id' <<<"$SUB_JSON")"
+
 # ── new-pane + status ──────────────────────────────────────────────────
 step "new-pane"
 NEW_JSON=""
@@ -79,6 +94,10 @@ for _ in $(seq 1 5); do
 done
 jq_assert "$NEW_JSON" '.result.pane_id != null' "new-pane must return pane_id"
 ID="$(jq -r '.result.pane_id' <<<"$NEW_JSON")"
+
+# The pane spawn above must have fanned out to our subscription.
+EV_JSON="$(python3 "$ROOT/scripts/smoke_event_client.py" "$EVENT_SOCK" eventsPoll "$SUB_ID")"
+jq_assert "$EV_JSON" '.result.events | length >= 1' "eventsPoll must deliver the pane spawn event"
 
 step "pane-status (running)"
 ST=""
@@ -134,6 +153,11 @@ AFTER="$("$GPTY" list-panes --json)"
 BCOUNT="$(jq '.result.count' <<<"$BEFORE")"
 ACOUNT="$(jq '.result.count' <<<"$AFTER")"
 [[ "$ACOUNT" == "$((BCOUNT - 1))" ]] || fail "kill-pane must decrement pane count ($BCOUNT → $ACOUNT)"
+
+# The kill above must also have fanned out to the subscription.
+EV2_JSON="$(python3 "$ROOT/scripts/smoke_event_client.py" "$EVENT_SOCK" eventsPoll "$SUB_ID")"
+jq -e '.result.events[] | select(.type == "pane" and .event == "killed")' <<<"$EV2_JSON" >/dev/null \
+    || fail "eventsPoll must deliver the pane killed event"
 
 step "teardown"
 echo "PASS"
