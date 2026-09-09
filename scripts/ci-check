@@ -199,6 +199,20 @@ else
     fi
 fi
 
+# ── Step 5.5: Live pane-API smoke ─────────────────────────────────────
+header "pane-API smoke"
+if [[ -z "$GODOT" ]]; then
+    warn "godot not found — skipping smoke test"
+else
+    echo "  Running live pane-API smoke (headless GUI)..."
+    if ./scripts/smoke-pane-api 2>&1; then
+        pass "pane-API smoke"
+    else
+        fail "pane-API smoke"
+        check_failed
+    fi
+fi
+
 # ── Step 6: cargo audit ────────────────────────────────────────────────
 header "cargo audit"
 

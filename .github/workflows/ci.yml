@@ -123,6 +123,12 @@ jobs:
       - name: Run GUT tests
         run: godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration
 
+      - name: Live pane-API smoke
+        run: |
+          sudo apt-get install -y jq
+          cargo build -p gpty
+          ./scripts/smoke-pane-api
+
   # ── Rust formatting ───────────────────────────────────────────────────
   rust-fmt:
     runs-on: ubuntu-latest
