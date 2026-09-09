@@ -194,5 +194,5 @@ func test_six_builtins_in_default_profiles_file():
 	for p in raw:
 		if p is Dictionary:
 			names.append(p.get("name", ""))
-	for expected in ["Agent Workspace", "Herdr", "Lazygit", "Neovim", "Claude Code", "OMP"]:
+	for expected in ["OMP", "OMP Workspace", "Herdr", "Lazygit", "Neovim", "Claude"]:
 		assert_true(expected in names, "\"%s\" must be a built-in profile" % expected)

@@ -3,8 +3,8 @@
 ## Built With
 
 <p align="center">
-  <img src="https://img.shields.io/badge/DeepSeek-4D6BFE?style=for-the-badge&logo=deepseek&logoColor=white" alt="DeepSeek">
   <img src="https://img.shields.io/badge/Gemini-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Gemini">
+  <img src="https://img.shields.io/badge/DeepSeek-4D6BFE?style=for-the-badge&logo=deepseek&logoColor=white" alt="DeepSeek">
   <img src="https://img.shields.io/badge/Claude-D97757?style=for-the-badge&logo=claude&logoColor=white" alt="Claude">
 </p>
 
@@ -37,9 +37,9 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 
 | Platform | Package |
 |---|---|
-| Linux | `gpty-v0.5.0-linux-x86_64.tar.gz` - extract and run `./gpty` |
-| macOS | `gpty-v0.5.0-macos.zip` - unzip, right-click the `.app` → Open |
-| Windows | `gpty-v0.5.0-windows-x86_64.zip` - unzip and run `gpty.exe` |
+| Linux | `gpty-v0.5.1-linux-x86_64.tar.gz` - extract and run `./gpty` |
+| macOS | `gpty-v0.5.1-macos.zip` - unzip, right-click the `.app` → Open |
+| Windows | `gpty-v0.5.1-windows-x86_64.zip` - unzip and run `gpty.exe` |
 
 ### CLI
 

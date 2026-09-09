@@ -83,13 +83,13 @@ Launch is deferred: `gPTY` stays below 1.0.0 until either the project gains a gr
 
 ## v0.5.1 — Persistence
 
-- [ ] SQLite + FTS5 history backend — wire the existing `HistoryStore` (SQLite + FTS5, tested but unused in production) into pane lifecycle and session restore. Scrollback is currently lost on restart; this makes it persistent and full-text searchable, and backs `paneRead` across restarts.
-- [ ] Tab/workspace switching — switch between independent sets of panes within the same window. Each workspace has its own layout, profile, and scrollback. Deferred from v0.3.0; prerequisite for the daemon-era workspace model.
-- [ ] Scrollback restore on restart — reload persisted history lines by `attachment_id` when a pane reopens, so scrollback survives restarts (builds on the v0.5.0 stable public pane IDs).
-- [ ] History full-text search — surface the FTS5 store's `search()` in the terminal search UI so old output stays findable after restart.
-- [ ] History retention setting — `cfg_history_lines` (default 10 000) clamping the per-pane cap.
-- [ ] Live pane-API smoke — exercise the v0.5.0 surface end-to-end against a running GUI: `new-pane` → `inject` → `pane-read` → `pane-wait` → `broadcast` over tagged panes, plus `pane-status` exit codes from `pane-run` (Unit/GUT covered, but not smoke-tested live).
-- [ ] Event-socket smoke — extend the live smoke to cover `subscribe`/`eventsPoll` on `gpty-events.sock` (concept matches, pane spawn/kill events). The control-socket pane API is smoke-covered; the event socket is not.
+- [x] SQLite + FTS5 history backend — wire the existing `HistoryStore` (SQLite + FTS5, tested but unused in production) into pane lifecycle and session restore. Scrollback is currently lost on restart; this makes it persistent and full-text searchable, and backs `paneRead` across restarts.
+- [x] Workspace switching — switch between independent pane sets within the same window (sidebar Workspaces section, keep-alive PTYs). Each workspace has its own layout, profile, and scrollback. Deferred from v0.3.0; prerequisite for the daemon-era workspace model.
+- [x] Scrollback restore on restart — reload persisted history lines by `attachment_id` when a pane reopens, so scrollback survives restarts (builds on the v0.5.0 stable public pane IDs).
+- [x] History full-text search — surface the FTS5 store's `search()` in the terminal search UI so old output stays findable after restart.
+- [x] History retention setting — `cfg_history_lines` (default 10 000) clamping the per-pane cap.
+- [x] Live pane-API smoke — exercise the v0.5.0 surface end-to-end against a running GUI: `new-pane` → `inject` → `pane-read` → `pane-wait` → `broadcast` over tagged panes, plus `pane-status` exit codes from `pane-run` (Unit/GUT covered, but not smoke-tested live).
+- [x] Event-socket smoke — extend the live smoke to cover `subscribe`/`eventsPoll` on `gpty-events.sock` (pane spawn/kill events). The control-socket pane API is smoke-covered; the event socket is not.
 - [x] Palette test dedup — `test_palette.gd` now asserts against `PaneTypes.build_palette_commands()`; the command list lives in one place.
 
 ## v0.5.0 — ADE Foundation

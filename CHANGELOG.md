@@ -3,28 +3,32 @@
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [0.5.1] — Unreleased
+## [0.5.1] — 2026-09-09
 
 ### Added
 
 - Persistent scrollback — the SQLite+FTS5 history store is wired into pane lifecycle, keyed by stable `attachment_id` (schema v2; pre-v2 rows dropped as unrecoverable). The newest `history_lines` rows are restored into each pane's scrollback on restart and back `pane-read` across restarts.
 - `history_lines` setting — caps persisted scrollback per pane (default 10 000, clamped 100–100 000) in Settings → Terminal.
 - History search — the terminal search bar gains a Live/History scope toggle; History mode runs FTS5 queries against the pane's persisted scrollback and lists matching lines (click copies to clipboard).
-- Workspaces — named tab sets (up to 8) with keep-alive panes: switching hides/shows grids instead of killing PTYs, so background commands keep running. Add/switch/close/rename via the sidebar's Workspaces section (`Ctrl+PageUp`/`Ctrl+PageDown` to switch); saved to `user://workspaces.json`, with one-shot migration of the legacy `layout.json` (replaces the `LayoutManager` autoload). Concept captures and agent events keep routing from hidden workspaces.
-- Live pane-API smoke — `scripts/smoke-pane-api` boots the GUI headless with sandboxed user data and drives new-pane, pane-status, inject, pane-wait, pane-read, broadcast, pane-run (exit code), and kill-pane end-to-end; wired into `ci-check` and the CI `gut-tests` job.
+- Workspaces — named pane sets (up to 8) with keep-alive panes: switching hides/shows grids instead of killing PTYs, so background commands keep running. Add/switch/close/rename via the sidebar's Workspaces section (`Ctrl+PageUp`/`Ctrl+PageDown` to switch); saved to `user://workspaces.json`, with one-shot migration of the legacy `layout.json` (replaces the `LayoutManager` autoload). Concept captures and agent events keep routing from hidden workspaces.
+- Sidebar polish — content margins (right ≈ scrollbar width), measured section heights that never truncate rows, icon+text action buttons (Settings/Reset/Search), and active-row accents across the workspaces, profiles, and panes sections.
+- Profile rename — double-click a user profile in the sidebar to rename it inline (persisted, dedupe-suffixed like profile creation).
+- Live pane-API smoke — `scripts/smoke-pane-api` boots the GUI headless with sandboxed user data and drives new-pane, pane-status, inject, pane-wait, pane-read, broadcast, pane-run (exit code), and kill-pane end-to-end, plus the event socket's `subscribe`/`eventsPoll` fan-out; wired into `ci-check` and the CI `gut-tests` job.
 
 ### Changed
 
 - History retention trims the oldest rows beyond `history_lines` amortized over every 100 committed lines.
 - `start_shell` no longer attaches a history store keyed by the per-node `id` counter (rows collided across panes and orphaned across restarts).
 - `pane-run` executes commands through the configured shell (`<shell> -c <command>`) — compound commands (`&&`, pipes, globs) now work; the command is passed as a sanitized argument (`shell_args`), never as the program itself. Empty commands are rejected.
+- Clicking any pane makes it the active pane — the status bar and sidebar accent follow. Only terminals take keyboard focus; read-only panes (Reasoning, code viewer, file tree) swallow keys, so typing no longer reaches a terminal you just left.
+- New workspaces start as a blank slate instead of auto-spawning a terminal.
 
 ### Fixed
 
 - Pane API unreachable: `pane-read`, `pane-status`, `pane-run`, `pane-wait`, and `broadcast` were never registered on the GUI IPC server, so every CLI call returned `Unknown method`.
 - Targeted pane API calls always failed with "not found": `paneRead`/`paneStatus`/`paneWait` guarded on `has_method("_terminal")`, but `_terminal` is a property, not a method. Guards now check `is TerminalPane`.
-- `test_ipc_routing.gd` listPanes mirror was missing the `focused` field the handler always emits.
-- GDScript warnings-as-errors on fresh caches (unused params, `name` shadowing `Node.name`) silenced in `settings_panel.gd` and `workspace.gd`.
+- Toasts rendered half-hidden under the status bar — they now float above it.
+- The docs site could bake Hugo's own README as the project overview — the deploy now extracts only the `hugo` binary and smoke-checks the baked overview.
 
 ## [0.5.0] — 2026-09-03
 
@@ -118,6 +122,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - Cursor blink toggle redraws the terminal immediately
 - Concept editor no longer crashes when opened with an empty workspace (no terminal panes) — the Add Concept button is disabled until a terminal exists
 
+[0.5.1]: https://github.com/godot-pty/gpty/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/godot-pty/gpty/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/godot-pty/gpty/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/godot-pty/gpty/compare/v0.3.1...v0.3.2

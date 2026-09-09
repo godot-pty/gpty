@@ -1,10 +1,30 @@
 {
   "profiles": [
     {
-      "id": "agent-workspace",
-      "name": "Agent Workspace",
+      "id": "omp",
+      "name": "OMP",
       "builtin": true,
-      "description": "A terminal with separate Inspector and Reasoning panes.",
+      "description": "Run OMP in a single terminal.",
+      "tiles": [
+        {
+          "col": 0,
+          "row": 0,
+          "cspan": 12,
+          "rspan": 12,
+          "settings": {
+            "type": "terminal",
+            "pane_name": "OMP",
+            "attachment_id": "omp",
+            "command": "omp"
+          }
+        }
+      ]
+    },
+    {
+      "id": "omp-workspace",
+      "name": "OMP Workspace",
+      "builtin": true,
+      "description": "A agent workspace for OMP with separate Inspector and Reasoning panes.",
       "tiles": [
         {
           "col": 0,
@@ -47,7 +67,7 @@
       "id": "herdr",
       "name": "Herdr",
       "builtin": true,
-      "description": "Run the herdr agent orchestrator in a full-screen terminal.",
+      "description": "Run the herdr agent orchestrator in a single terminal.",
       "tiles": [
         {
           "col": 0,
@@ -67,7 +87,7 @@
       "id": "lazygit",
       "name": "Lazygit",
       "builtin": true,
-      "description": "Run lazygit, the terminal UI for Git, in a full-screen terminal.",
+      "description": "Run lazygit, the terminal UI for Git, in a single terminal.",
       "tiles": [
         {
           "col": 0,
@@ -87,7 +107,7 @@
       "id": "nvim",
       "name": "Neovim",
       "builtin": true,
-      "description": "Open Neovim in a full-screen terminal.",
+      "description": "Open Neovim in a single terminal.",
       "tiles": [
         {
           "col": 0,
@@ -105,9 +125,9 @@
     },
     {
       "id": "claude",
-      "name": "Claude Code",
+      "name": "Claude",
       "builtin": true,
-      "description": "Run Claude Code in a full-screen terminal.",
+      "description": "Run Claude Code in a single terminal.",
       "tiles": [
         {
           "col": 0,
@@ -119,26 +139,6 @@
             "pane_name": "Claude Code",
             "attachment_id": "claude",
             "command": "claude"
-          }
-        }
-      ]
-    },
-    {
-      "id": "omp",
-      "name": "OMP",
-      "builtin": true,
-      "description": "Run OMP in a full-screen terminal.",
-      "tiles": [
-        {
-          "col": 0,
-          "row": 0,
-          "cspan": 12,
-          "rspan": 12,
-          "settings": {
-            "type": "terminal",
-            "pane_name": "OMP",
-            "attachment_id": "omp",
-            "command": "omp"
           }
         }
       ]
