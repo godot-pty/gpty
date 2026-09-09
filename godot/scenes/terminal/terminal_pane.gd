@@ -120,8 +120,8 @@ func _ready():
 	_search_bar.visible = false
 	_search_bar.anchor_left = 0.0; _search_bar.anchor_right = 1.0
 	_search_bar.anchor_top = 1.0; _search_bar.anchor_bottom = 1.0
-	_search_bar.offset_left = 68; _search_bar.offset_right = 0
-	_search_bar.offset_top = -36; _search_bar.offset_bottom = 0
+	_search_bar.offset_left = 74; _search_bar.offset_right = -6
+	_search_bar.offset_top = -42; _search_bar.offset_bottom = -6
 	_search_bar.text_changed.connect(_on_search_text_changed)
 	_search_bar.text_submitted.connect(_on_search_submitted)
 	_search_bar.gui_input.connect(_on_search_bar_input)
@@ -137,8 +137,8 @@ func _ready():
 	_scope_btn.visible = false
 	_scope_btn.anchor_left = 0.0; _scope_btn.anchor_right = 0.0
 	_scope_btn.anchor_top = 1.0; _scope_btn.anchor_bottom = 1.0
-	_scope_btn.offset_left = 4; _scope_btn.offset_right = 64
-	_scope_btn.offset_top = -36; _scope_btn.offset_bottom = 0
+	_scope_btn.offset_left = 6; _scope_btn.offset_right = 66
+	_scope_btn.offset_top = -42; _scope_btn.offset_bottom = -6
 	_scope_btn.pressed.connect(_on_scope_toggled)
 	add_child(_scope_btn)
 
@@ -148,8 +148,8 @@ func _ready():
 	_history_panel.visible = false
 	_history_panel.anchor_left = 0.0; _history_panel.anchor_right = 1.0
 	_history_panel.anchor_top = 1.0; _history_panel.anchor_bottom = 1.0
-	_history_panel.offset_left = 4; _history_panel.offset_right = -4
-	_history_panel.offset_top = -240; _history_panel.offset_bottom = -40
+	_history_panel.offset_left = 6; _history_panel.offset_right = -6
+	_history_panel.offset_top = -246; _history_panel.offset_bottom = -48
 	_history_list = VBoxContainer.new()
 	_history_list.name = "Results"
 	_history_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
