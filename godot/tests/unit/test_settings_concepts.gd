@@ -32,4 +32,10 @@ func test_refresh_concept_list_does_not_crash_without_terminal():
 func test_refresh_survives_null_list():
 	_panel._concept_list = null
 	_panel._refresh_concept_list()
-	pass # no crash is the assertion
+	assert_null(_panel._concept_list, "refresh must not resurrect a null list")
+	# Recovery: a freshly assigned list still refreshes cleanly.
+	_panel._concept_list = VBoxContainer.new()
+	_panel._concept_terminal = null
+	_panel._refresh_concept_list()
+	assert_eq(_panel._concept_list.get_child_count(), 0,
+		"refresh with no terminal must yield no rows")

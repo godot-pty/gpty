@@ -384,8 +384,7 @@ func _add_workspace():
 	var ws_name = "Workspace %d" % _next_workspace_number()
 	var ws = _new_workspace_container(ws_name)
 	_workspaces.append(ws)
-	var empty: Array[Dictionary] = []
-	_restore_into(ws, empty)  # fresh workspace: one default terminal
+	# Blank slate: no auto-spawned terminal — the user decides what fills it.
 	_switch_workspace(_workspaces.size() - 1)
 
 func _close_workspace(idx: int):

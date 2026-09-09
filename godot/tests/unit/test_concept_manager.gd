@@ -111,9 +111,19 @@ func test_migrate_actions_target_leaves_other_targets():
 	assert_eq(entry["actions"][1]["target"], "terminal")
 
 func test_migrate_actions_target_survives_malformed_actions():
+	# Non-array actions: migration must leave the entry untouched.
 	var entry: Dictionary = {"name": "odd", "actions": "not-an-array"}
 	ConceptManager._migrate_actions_target(entry)
-	pass # no crash is the assertion
+	assert_eq(entry, {"name": "odd", "actions": "not-an-array"},
+		"non-array actions must pass through unchanged")
+
+	# Mixed array with junk entries: the observer-targeted dict still
+	# disables the concept; junk items are skipped without crashing.
+	var mixed: Dictionary = {"name": "mixed", "enabled": true,
+		"actions": [{"target": "observer"}, "junk", 42, null]}
+	ConceptManager._migrate_actions_target(mixed)
+	assert_eq(mixed.get("enabled"), false,
+		"observer target inside malformed actions must still disable the concept")
 
 func test_merge_disables_user_concept_observer_target():
 	var user = [

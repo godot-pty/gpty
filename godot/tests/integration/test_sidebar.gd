@@ -67,6 +67,37 @@ func test_update_pane_list_shows_label():
 	assert_true(focus_btn is Button, "first child should be focus Button")
 	assert_eq(focus_btn.text, "T1", "focus button should show pane label")
 
+func test_workspace_row_double_click_renames():
+	_sidebar.update_workspace_list(["Workspace 1", "Workspace 2"], 0)
+	var row = _sidebar._workspace_list.get_child(0)
+	var btn: Button = row.get_child(0)
+
+	var ev = InputEventMouseButton.new()
+	ev.button_index = MOUSE_BUTTON_LEFT
+	ev.pressed = true
+	ev.double_click = true
+	_sidebar._on_workspace_row_input(0, btn, ev)
+
+	# The label button swaps for an inline LineEdit.
+	var found_edit := false
+	for c in row.get_children():
+		if c is LineEdit:
+			found_edit = true
+			break
+	assert_true(found_edit, "double-click must open an inline rename editor")
+	assert_true(not btn.visible, "the label button must hide during rename")
+
+	# Submitting emits request_workspace_rename with the index and new name.
+	watch_signals(_sidebar)
+	var le: LineEdit = null
+	for c in row.get_children():
+		if c is LineEdit:
+			le = c
+			break
+	le.text = "Renamed"
+	le.text_submitted.emit("Renamed")
+	assert_signal_emitted_with_parameters(_sidebar, "request_workspace_rename", [0, "Renamed"])
+
 func test_update_pane_list_replaces_previous():
 	var body1 = PaneBody.new(); body1.pane_label = "T1"
 	var body2 = PaneBody.new(); body2.pane_label = "C1"

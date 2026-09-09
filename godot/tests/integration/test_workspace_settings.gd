@@ -114,6 +114,22 @@ func test_click_activates_non_terminal_pane():
 	# Wait out the deferred concept push timer so it doesn't resume after free.
 	await get_tree().create_timer(2.1).timeout
 
+func test_add_workspace_starts_blank():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	ws._add_workspace()
+	assert_eq(ws._workspaces.size(), 2, "add_workspace must create a second workspace")
+	var new_ws: Dictionary = ws._workspaces[1]
+	assert_eq((new_ws.tm as TerminalManager).tiles.size(), 0,
+		"a new workspace must be a blank slate — no auto-spawned terminal")
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
 func test_profile_activation_refreshes_layout_and_pane_list():
 	var ws = WorkspaceScript.new()
 	_ws = ws
