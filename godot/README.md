@@ -36,13 +36,13 @@ godot/
         │   ├── settings_manager.gd
         │   ├── profile_manager.gd
         │   ├── concept_manager.gd
-        │   ├── layout_manager.gd
+        │   ├── workspace_store.gd  # Named workspace (tab set) persistence
         │   ├── focus_manager.gd
         │   ├── toast_manager.gd
         │   ├── shortcut_manager.gd
         │   └── update_checker.gd
         ├── terminal/            # Core terminal logic
-        │   ├── workspace.gd     # Grid layout, sidebar, profiles, concept routing
+        │   ├── workspace.gd     # Grid layout, workspace tabs, sidebar, profiles, concept routing
         │   ├── terminal_pane.gd # Control-based renderer, keyboard, selection
         │   ├── concept_router.gd # Pure concept-event routing (extracted, testable)
         │   └── terminal_manager.gd
@@ -50,6 +50,7 @@ godot/
         │   ├── sidebar.gd
         │   ├── settings_panel.gd
         │   ├── toast_overlay.gd
+        │   ├── workspace_tabs.gd # Workspace tab strip (switch/add/close/rename)
         │   ├── markdown_view.gd # Safe shared Markdown renderer
         │   └── icons.gd         # Phosphor icon constants
         └── panes/               # Specialty pane types

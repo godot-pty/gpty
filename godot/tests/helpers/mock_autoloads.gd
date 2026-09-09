@@ -27,7 +27,7 @@ static func setup():
 
 	_override_script("SettingsManager", _MockSettingsManager)
 	_override_script("ProfileManager", _MockProfileManager)
-	_override_script("LayoutManager", _MockLayoutManager)
+	_override_script("WorkspaceStore", _MockWorkspaceStore)
 	_override_script("ConceptManager", _MockConceptManager)
 
 	# For node-only autoloads, just ensure they're valid nodes
@@ -37,7 +37,7 @@ static func teardown():
 	_restore_script("ConceptManager")
 	_restore_script("SettingsManager")
 	_restore_script("ProfileManager")
-	_restore_script("LayoutManager")
+	_restore_script("WorkspaceStore")
 	_store.clear()
 	_original_scripts.clear()
 
@@ -72,7 +72,7 @@ class _MockProfileManager extends "res://scenes/autoloads/profile_manager.gd":
 	func _on_init():
 		pass
 
-class _MockLayoutManager extends "res://scenes/autoloads/layout_manager.gd":
+class _MockWorkspaceStore extends "res://scenes/autoloads/workspace_store.gd":
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):

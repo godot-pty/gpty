@@ -24,7 +24,7 @@ SettingsManager="*res://scenes/autoloads/settings_manager.gd"
 ProfileManager="*res://scenes/autoloads/profile_manager.gd"
 ConceptManager="*res://scenes/autoloads/concept_manager.gd"
 UpdateChecker="*res://scenes/autoloads/update_checker.gd"
-LayoutManager="*res://scenes/autoloads/layout_manager.gd"
+WorkspaceStore="*res://scenes/autoloads/workspace_store.gd"
 
 [display]
 

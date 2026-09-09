@@ -14,7 +14,7 @@
 - **Public API** - JSON-RPC IPC socket + CLI (`gpty new-pane`, `gpty inject`, …) + MCP server. AI agents, scripts, and orchestrators drive the workspace over a documented, versioned protocol.
 - **Concept engine** - RegEx triggers on PTY output automatically inject commands or capture output into adjacent panes. Write your own or ship defaults.
 - **Agent observability** - Reasoning pane passively projects documented agent lifecycle events (OMP, extensible); Inspector pane runs a private, tool-free Q&A session. Observability only - gpty never orchestrates agent state.
-- **Persistence** - Settings, layouts, and named profiles auto-save and restore on restart.
+- **Persistence** - Scrollback, settings, workspaces (named tab sets), and profiles auto-save to SQLite/JSON and restore on restart; full-text search across each pane's persisted history.
 - **Cross-platform** - Standalone binaries for Linux, macOS, and Windows. No Godot or Rust toolchain required to run.
 - **Documentation** - https://godot-pty.github.io/gpty/
 

@@ -15,7 +15,22 @@ func after_each():
 	_tm.reset()
 	MockAutoloads.teardown()
 
-# ── Helper: gather tiles in LayoutManager format ───────────────────────
+# ── Helper: gather tiles in WorkspaceStore format ──────────────────────
+
+func _save_tiles(tiles: Array[Dictionary]):
+	WorkspaceStore.save(0, [{"name": "Workspace 1", "layout": tiles}])
+
+func _load_tiles() -> Array[Dictionary]:
+	var store = WorkspaceStore.load()
+	var wss: Array = store.get("workspaces", [])
+	if wss.is_empty():
+		return []
+	var first: Dictionary = wss[0]
+	var out: Array[Dictionary] = []
+	for td in first.get("layout", []):
+		if td is Dictionary:
+			out.append(td)
+	return out
 
 func _gather_tiles() -> Array[Dictionary]:
 	var ts: Array[Dictionary] = []
@@ -38,8 +53,8 @@ func test_save_restore_terminal():
 	assert_eq(saved.size(), 1)
 	assert_eq(saved[0].get("settings", {}).get("type"), "terminal")
 
-	LayoutManager.save_tiles(saved)
-	var loaded = LayoutManager.load_tiles()
+	_save_tiles(saved)
+	var loaded = _load_tiles()
 	assert_eq(loaded.size(), 1)
 	assert_eq(loaded[0].get("settings", {}).get("type"), "terminal")
 
@@ -52,8 +67,8 @@ func test_save_restore_mixed_types():
 	var saved = _gather_tiles()
 	assert_eq(saved.size(), 2)
 
-	LayoutManager.save_tiles(saved)
-	var loaded = LayoutManager.load_tiles()
+	_save_tiles(saved)
+	var loaded = _load_tiles()
 	assert_eq(loaded.size(), 2)
 
 	var types := []
@@ -67,8 +82,8 @@ func test_restore_preserves_settings():
 	assert_not_null(body)
 
 	var saved = _gather_tiles()
-	LayoutManager.save_tiles(saved)
-	var loaded = LayoutManager.load_tiles()
+	_save_tiles(saved)
+	var loaded = _load_tiles()
 
 	var settings = loaded[0].get("settings", {})
 	assert_eq(settings.get("pane_name"), "Custom")
@@ -81,14 +96,14 @@ func test_restore_legacy_no_type_key():
 		"col": 0, "row": 0, "cspan": 12, "rspan": 12,
 		"settings": {"shell": "/bin/bash", "pane_name": "OldPane"},
 	}]
-	LayoutManager.save_tiles(legacy)
-	var loaded = LayoutManager.load_tiles()
+	_save_tiles(legacy)
+	var loaded = _load_tiles()
 	assert_eq(loaded.size(), 1)
 	# No "type" key: workspace defaults to "terminal"
 	assert_eq(loaded[0].get("settings", {}).get("type", "terminal"), "terminal")
 
 func test_load_tiles_empty_when_no_file():
-	var loaded = LayoutManager.load_tiles()
+	var loaded = _load_tiles()
 	assert_eq(loaded, [], "should return empty when no file exists")
 
 # ── Per-tile command field (ecosystem presets) ─────────────────────────

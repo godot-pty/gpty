@@ -17,6 +17,9 @@ var _settings_panel: SettingsPanel
 var _tm: TerminalManager = TerminalManager.new()
 var _status_bar: StatusBar
 var _titlebar: Control = null
+var _workspaces: Array[Dictionary] = []  # {name: String, grid: Control, tm: TerminalManager}
+var _active: int = 0
+var _ws_tabs: WorkspaceTabs
 
 func _ready():
 	show()
@@ -42,9 +45,9 @@ func _ready():
 	ProfileManager.load_profiles()
 	_wire_sidebar_signals()
 	_refresh_profile_buttons()
-	_tm.on_close = func(body: Control): _kill(body)
-	_tm.on_swap = _swap_pane
-	_restore(); _sync_pane_titlebars(); if _tm.tiles.is_empty(): _spawn_pane("terminal")
+	_wire_tm(_tm)
+	_build_workspace_tabs()
+	_init_workspaces()
 
 	# Push concepts to Rust engine — must wait for first frame (GDExtension ready)
 	_push_concepts_deferred()
@@ -63,6 +66,14 @@ func _ready():
 	ShortcutManager.register("app:toggle_fullscreen_alt", "Ctrl+Shift+M", _toggle_fullscreen)
 	ShortcutManager.register("app:reset_workspace", "Ctrl+Shift+R", func():
 		_reset(); _apply_layout(); _list()
+	)
+	ShortcutManager.register("app:next_workspace", "Ctrl+PageDown", func():
+		if not _workspaces.is_empty():
+			_switch_workspace(clampi(_active + 1, 0, _workspaces.size() - 1))
+	)
+	ShortcutManager.register("app:prev_workspace", "Ctrl+PageUp", func():
+		if not _workspaces.is_empty():
+			_switch_workspace(clampi(_active - 1, 0, _workspaces.size() - 1))
 	)
 
 	SettingsManager.settings_changed.connect(_on_settings_changed)
@@ -256,6 +267,15 @@ func _apply_layout():
 	var top_offset = TITLEBAR_HEIGHT if (_titlebar and _titlebar.visible) else 0.0
 	var bottom_offset = StatusBar.HEIGHT if _status_bar else 0.0
 	var m = _sidebar_bg.size.x if (_sidebar_bg and _sidebar_bg.visible) else 0.0
+
+	if _ws_tabs:
+		_ws_tabs.anchor_left = 0.0; _ws_tabs.anchor_right = 1.0
+		_ws_tabs.anchor_top = 0.0; _ws_tabs.anchor_bottom = 0.0
+		_ws_tabs.offset_left = 0.0; _ws_tabs.offset_right = 0.0
+		_ws_tabs.offset_top = top_offset
+		_ws_tabs.offset_bottom = top_offset + WorkspaceTabs.HEIGHT
+		top_offset += WorkspaceTabs.HEIGHT
+
 	_grid.offset_left = m; _grid.offset_right = 0
 	_grid.offset_top = top_offset; _grid.offset_bottom = -bottom_offset
 	_grid.anchor_left = 0.0; _grid.anchor_right = 1.0
@@ -284,17 +304,29 @@ func _spawn(shell := "") -> Control:
 	return _spawn_pane("terminal", {"shell_command": shell})
 
 func _spawn_pane(type_name: String, opts := {}) -> Control:
-	var body = _tm.spawn_pane(type_name, opts)
+	var ws := _active_workspace()
+	if ws.is_empty():
+		return null
+	return _spawn_pane_into(ws, type_name, opts)
+
+func _spawn_pane_into(ws: Dictionary, type_name: String, opts := {}) -> Control:
+	var tm: TerminalManager = ws.tm
+	var body = tm.spawn_pane(type_name, opts)
 	if body == null:
 		ToastManager.warn("Cannot add pane — grid is full")
 		return null
-	var w = _tm.tiles[-1].wrapper
-	_add_body_to_grid(w, body, PaneTypes.ALL[type_name]["name"])
+	var w = tm.tiles[-1].wrapper
+	_add_body_to_grid_into(ws, w, body, PaneTypes.ALL[type_name]["name"])
 	return body
 
 func _add_body_to_grid(w: Control, body: Control, label: String):
-	_grid.add_child(w)
-	body.focus_entered.connect(func(): _tm.last_body = body)
+	_add_body_to_grid_into(_active_workspace(), w, body, label)
+
+func _add_body_to_grid_into(ws: Dictionary, w: Control, body: Control, label: String):
+	if ws.is_empty():
+		return
+	ws.grid.add_child(w)
+	body.focus_entered.connect(func(): ws.tm.last_body = body)
 	_sync_pane_titlebars()
 	_apply_layout()
 	_list()
@@ -317,36 +349,43 @@ func _spawn_bulk(count: int, shell := ""):
 	if bodies.size() > 0: bodies[-1].grab_focus()
 
 func _kill(body: Control):
-	_tm.kill(body)
+	var ws := _workspace_for_body(body)
+	if ws.is_empty():
+		return
+	ws.tm.kill(body)
 	_apply_layout()
 	_list()
 	ToastManager.info("Pane closed")
 
 func _swap_pane(body: Control, new_type_name: String):
+	var ws := _workspace_for_body(body)
+	if ws.is_empty():
+		return
+	var tm: TerminalManager = ws.tm
 	var old_wrapper = null
-	for t in _tm.tiles:
-		if _tm._find_body(t.wrapper) == body:
+	for t in tm.tiles:
+		if tm._find_body(t.wrapper) == body:
 			old_wrapper = t.wrapper
 			break
 
-	var new_body = _tm.swap_pane(body, new_type_name)
+	var new_body = tm.swap_pane(body, new_type_name)
 	if new_body == null: return
 
 	# Find the new wrapper (tile's wrapper was replaced in-place)
 	var new_wrapper = null
-	for t in _tm.tiles:
-		if _tm._find_body(t.wrapper) == new_body:
+	for t in tm.tiles:
+		if tm._find_body(t.wrapper) == new_body:
 			new_wrapper = t.wrapper
 			break
 
 	# Remove old wrapper from grid, add new one.
 	if old_wrapper:
-		_grid.remove_child(old_wrapper)
+		ws.grid.remove_child(old_wrapper)
 	if new_wrapper:
-		_grid.add_child(new_wrapper)
+		ws.grid.add_child(new_wrapper)
 
 	# Wire signals (same pattern as _add_body_to_grid).
-	new_body.focus_entered.connect(func(): _tm.last_body = new_body)
+	new_body.focus_entered.connect(func(): tm.last_body = new_body)
 
 	# For terminals: wire dynamic title (global defaults applied in swap_pane).
 	if new_type_name == "terminal":
@@ -383,13 +422,136 @@ func _reset():
 	_list()
 
 # ═══════════════════════════════════════════════════════════════════════
+# Workspaces — independent pane sets, keep-alive
+# ═══════════════════════════════════════════════════════════════════════
+
+func _build_workspace_tabs():
+	_ws_tabs = load("res://scenes/ui/workspace_tabs.gd").new()
+	_ws_tabs.name = "WorkspaceTabs"
+	add_child(_ws_tabs)
+	_ws_tabs.switch_requested.connect(_switch_workspace)
+	_ws_tabs.add_requested.connect(_add_workspace)
+	_ws_tabs.close_requested.connect(_close_workspace)
+	_ws_tabs.rename_requested.connect(_rename_workspace)
+
+func _wire_tm(tm: TerminalManager):
+	tm.on_close = func(body: Control): _kill(body)
+	tm.on_swap = _swap_pane
+
+func _active_workspace() -> Dictionary:
+	if _workspaces.is_empty() or _active < 0 or _active >= _workspaces.size():
+		return {}
+	return _workspaces[_active]
+
+func _workspace_for_body(body: Control) -> Dictionary:
+	for ws in _workspaces:
+		for t in ws.tm.tiles:
+			if ws.tm._find_body(t.wrapper) == body:
+				return ws
+	return {}
+
+func _new_workspace_container(ws_name: String) -> Dictionary:
+	var grid = Control.new()
+	grid.name = "Grid%d" % _workspaces.size()
+	grid.anchor_left = 0.0; grid.anchor_right = 1.0
+	grid.anchor_top = 0.0; grid.anchor_bottom = 1.0
+	add_child(grid)
+	var tm = TerminalManager.new()
+	tm._pane_settings_panel = _tm._pane_settings_panel
+	_wire_tm(tm)
+	grid.visible = false
+	grid.process_mode = Node.PROCESS_MODE_DISABLED
+	return {"name": ws_name, "grid": grid, "tm": tm}
+
+func _workspace_names() -> Array[String]:
+	var out: Array[String] = []
+	for ws in _workspaces:
+		out.append(str(ws.name))
+	return out
+
+func _next_workspace_number() -> int:
+	var max_n := 0
+	for ws in _workspaces:
+		var ws_name: String = str(ws.name)
+		if ws_name.begins_with("Workspace "):
+			max_n = maxi(max_n, ws_name.substr("Workspace ".length()).to_int())
+	return max_n + 1
+
+func _apply_active_workspace_view():
+	if _workspaces.is_empty():
+		return
+	_tm = _workspaces[_active].tm
+	_grid = _workspaces[_active].grid
+	for i in _workspaces.size():
+		_workspaces[i].grid.visible = (i == _active)
+		_workspaces[i].grid.process_mode = Node.PROCESS_MODE_INHERIT if i == _active else Node.PROCESS_MODE_DISABLED
+	_ws_tabs.update(_workspace_names(), _active)
+	_apply_layout()
+	_list()
+	_sync_pane_titlebars()
+	_refresh_status_bar()
+	if _tm.last_body and is_instance_valid(_tm.last_body):
+		_tm.last_body.grab_focus()
+
+func _switch_workspace(idx: int):
+	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size() or idx == _active:
+		return
+	_save_workspaces_to_store()
+	_active = idx
+	_apply_active_workspace_view()
+	# Hidden panes missed settings broadcasts; re-apply to the incoming set.
+	_on_settings_changed()
+
+func _add_workspace():
+	if _workspaces.is_empty():
+		return
+	if _workspaces.size() >= 8:
+		ToastManager.warn("Maximum 8 workspaces")
+		return
+	var ws_name = "Workspace %d" % _next_workspace_number()
+	var ws = _new_workspace_container(ws_name)
+	_workspaces.append(ws)
+	var empty: Array[Dictionary] = []
+	_restore_into(ws, empty)  # fresh workspace: one default terminal
+	_switch_workspace(_workspaces.size() - 1)
+
+func _close_workspace(idx: int):
+	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size():
+		return
+	if _workspaces.size() <= 1:
+		ToastManager.info("Cannot close the last workspace")
+		return
+	var ws = _workspaces[idx]
+	_workspaces.remove_at(idx)
+	ws.tm.reset()
+	ws.grid.queue_free()
+	if idx == _active:
+		_active = clampi(idx, 0, _workspaces.size() - 1)
+		_apply_active_workspace_view()
+		_on_settings_changed()
+	elif idx < _active:
+		_active -= 1
+	_ws_tabs.update(_workspace_names(), _active)
+	_save_workspaces_to_store()
+
+func _rename_workspace(idx: int, new_name: String):
+	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size():
+		return
+	_workspaces[idx].name = WorkspaceStore.sanitize_name(new_name)
+	_ws_tabs.update(_workspace_names(), _active)
+	_save_workspaces_to_store()
+
+# ═══════════════════════════════════════════════════════════════════════
 # Persistence
 # ═══════════════════════════════════════════════════════════════════════
 
 func _gather_tiles() -> Array[Dictionary]:
+	return _gather_tiles_from(_tm)
+
+func _gather_tiles_from(tm: TerminalManager) -> Array[Dictionary]:
 	var ts: Array[Dictionary] = []
-	for t in _tm.tiles:
-		var body = _tm._find_body(t.wrapper)
+	for t in tm.tiles:
+		var body = tm._find_body(t.wrapper)
 		var settings = body._get_layout_state() if body and body.has_method("_get_layout_state") else {}
 		ts.append({
 			"col": t.col, "row": t.row,
@@ -399,40 +561,77 @@ func _gather_tiles() -> Array[Dictionary]:
 	return ts
 
 func _save():
-	LayoutManager.save_tiles(_gather_tiles())
+	_save_workspaces_to_store()
 
-func _restore():
-	var tiles = LayoutManager.load_tiles()
-	if tiles.is_empty(): return
-
-	# Workspace trust: warn if saved shells differ from configured default
-	var untrusted := false
-	for td in tiles:
-		if not (td is Dictionary): continue
-		var settings = td.get("settings", {})
-		if not (settings is Dictionary): continue
-		var sh = settings.get("shell", td.get("shell", ""))
-		if sh is String and sh != "" and sh != SettingsManager.cfg_shell_command:
-			untrusted = true
-			break
-	if untrusted:
-		_show_trust_dialog(tiles)
+func _save_workspaces_to_store():
+	if _workspaces.is_empty():
 		return
-	_do_restore(tiles)
+	WorkspaceStore.save(_active, _all_layouts())
 
-func _show_trust_dialog(tiles: Array[Dictionary]):
-	var dialog = ConfirmationDialog.new()
-	dialog.title = "Workspace Trust"
-	dialog.dialog_text = "This layout was saved with a different shell than your current default (%s).\n\nDo you want to restore it anyway?" % SettingsManager.cfg_shell_command
-	dialog.ok_button_text = "Restore"
-	dialog.cancel_button_text = "Cancel"
-	dialog.confirmed.connect(func(): _do_restore(tiles); dialog.queue_free())
-	dialog.canceled.connect(dialog.queue_free)
-	add_child(dialog)
-	dialog.popup_centered()
+func _all_layouts() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for ws in _workspaces:
+		out.append({"name": ws.name, "layout": _gather_tiles_from(ws.tm)})
+	return out
 
-func _do_restore(tiles: Array[Dictionary]):
-	_tm.reset()
+# ── Workspace (tab set) lifecycle ─────────────────────────────────────
+
+func _init_workspaces():
+	_teardown_workspaces()
+	var store = WorkspaceStore.load()
+	var wss: Array = store.get("workspaces", [])
+	if wss.is_empty():
+		var legacy = WorkspaceStore.import_legacy_layout()
+		if not legacy.is_empty():
+			wss = [{"name": "Workspace 1", "layout": legacy}]
+	var entries: Array[Dictionary] = []
+	for entry in wss:
+		if not (entry is Dictionary):
+			continue
+		entries.append({
+			"name": WorkspaceStore.sanitize_name(str(entry.get("name", ""))),
+			"layout": _tiles_from(entry.get("layout", [])),
+		})
+	if entries.is_empty():
+		entries = [{"name": "Workspace 1", "layout": []}]
+	var active: int = clampi(int(store.get("active", 0)), 0, entries.size() - 1)
+
+	# Workspace trust: warn if any saved shell differs from the configured
+	# default. Cancel keeps the layout but swaps untrusted shells out —
+	# every workspace is rebuilt with the default shell instead.
+	var untrusted: Array = []
+	for i in entries.size():
+		if _tiles_untrusted(_tiles_from(entries[i].get("layout", []))):
+			untrusted.append(i)
+	if not untrusted.is_empty():
+		_show_multi_trust_dialog(entries, active, untrusted)
+		return
+	_build_workspaces(entries, active)
+
+func _teardown_workspaces():
+	for i in _workspaces.size():
+		var ws = _workspaces[i]
+		ws.tm.reset()
+		if i > 0:
+			ws.grid.queue_free()
+	_workspaces.clear()
+
+func _build_workspaces(entries: Array[Dictionary], active: int):
+	for i in entries.size():
+		var ws: Dictionary
+		if i == 0:
+			ws = {"name": entries[i].get("name", "Workspace 1"), "grid": _grid, "tm": _tm}
+		else:
+			ws = _new_workspace_container(str(entries[i].get("name", "")))
+		_workspaces.append(ws)
+		_restore_into(ws, _tiles_from(entries[i].get("layout", [])))
+	_active = clampi(active, 0, _workspaces.size() - 1)
+	_apply_active_workspace_view()
+
+func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
+	var tm: TerminalManager = ws.tm
+	var grid: Control = ws.grid
+	tm.reset()
 	for td in tiles:
 		if not (td is Dictionary): continue
 		var st = PaneTypes.sanitize_tile(td, GRID)
@@ -440,7 +639,7 @@ func _do_restore(tiles: Array[Dictionary]):
 		var settings: Dictionary = st["settings"]
 		var type_name: String = st["type_name"]
 
-		var body = _tm.create_body(type_name)
+		var body = tm.create_body(type_name)
 		if body == null: continue
 		body.apply_settings(settings)
 
@@ -455,7 +654,7 @@ func _do_restore(tiles: Array[Dictionary]):
 			body.shell_command = sh
 
 		var title = PaneTypes.ALL.get(type_name, {}).get("name", type_name)
-		var w = _tm._build_wrapper_body(body, title)
+		var w = tm._build_wrapper_body(body, title)
 
 		if type_name == "terminal":
 			body.title_changed.connect(func(t: String):
@@ -463,11 +662,52 @@ func _do_restore(tiles: Array[Dictionary]):
 				if lbl: lbl.text = " " + t
 			)
 
-		_grid.add_child(w)
-		body.focus_entered.connect(func(): _tm.last_body = body)
-		_tm.tiles.append({wrapper = w, col = st["col"], row = st["row"],
+		grid.add_child(w)
+		body.focus_entered.connect(func(): tm.last_body = body)
+		tm.tiles.append({wrapper = w, col = st["col"], row = st["row"],
 			cspan = st["cspan"], rspan = st["rspan"]})
-	_apply_layout(); _list()
+	if tm.tiles.is_empty():
+		_spawn_pane_into(ws, "terminal")
+
+func _tiles_from(raw: Array) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for td in raw:
+		if td is Dictionary:
+			out.append(td)
+	return out
+
+func _tiles_untrusted(tiles: Array[Dictionary]) -> bool:
+	for td in tiles:
+		var settings = td.get("settings", {})
+		if not (settings is Dictionary): continue
+		var sh = settings.get("shell", td.get("shell", ""))
+		if sh is String and sh != "" and sh != SettingsManager.cfg_shell_command:
+			return true
+	return false
+
+func _show_multi_trust_dialog(entries: Array[Dictionary], active: int, untrusted: Array):
+	var dialog = ConfirmationDialog.new()
+	dialog.title = "Workspace Trust"
+	dialog.dialog_text = "This layout contains %d workspace(s) with a different shell than your current default (%s).\n\nRestore them anyway?" % [untrusted.size(), SettingsManager.cfg_shell_command]
+	dialog.ok_button_text = "Restore"
+	dialog.cancel_button_text = "Cancel"
+	dialog.confirmed.connect(func():
+		_build_workspaces(entries, active)
+		dialog.queue_free()
+	)
+	dialog.canceled.connect(func():
+		for i in untrusted:
+			var empty: Array[Dictionary] = []
+			entries[i]["layout"] = empty
+		_build_workspaces(entries, active)
+		dialog.queue_free()
+	)
+	add_child(dialog)
+	dialog.popup_centered()
+
+func _restore():
+	# Palette "load": reload the saved workspace set from disk.
+	_init_workspaces()
 
 # ═══════════════════════════════════════════════════════════════════════
 # Palette
@@ -632,18 +872,20 @@ func _poll_agent_events():
 		return
 	# One pass per drain: session-id → source map plus receiver list, so each
 	# event no longer re-scans every tile twice (O(E×T²) → O(T + E×R)).
+	# Hidden workspaces keep receiving events (their PTYs stay alive).
 	var source_by_session := {}
 	var receivers: Array[Control] = []
-	for tile in _tm.tiles:
-		var body = _tm._find_body(tile.wrapper)
-		if body == null:
-			continue
-		if body.has_method("receive_agent_event"):
-			receivers.append(body)
-		if body is TerminalPane and body.get("_terminal") != null:
-			var session_id := str(body._terminal.get_terminal_session_id())
-			if session_id != "":
-				source_by_session[session_id] = body.attachment_id if body.attachment_id != "" else body.pane_label
+	for ws in _workspaces:
+		for tile in ws.tm.tiles:
+			var body = ws.tm._find_body(tile.wrapper)
+			if body == null:
+				continue
+			if body.has_method("receive_agent_event"):
+				receivers.append(body)
+			if body is TerminalPane and body.get("_terminal") != null:
+				var session_id := str(body._terminal.get_terminal_session_id())
+				if session_id != "":
+					source_by_session[session_id] = body.attachment_id if body.attachment_id != "" else body.pane_label
 	for envelope in events:
 		if not (envelope is Dictionary):
 			continue
@@ -658,10 +900,17 @@ func _poll_agent_events():
 # ═══════════════════════════════════════════════════════════════════════
 
 func _poll_concept_events():
+	# Hidden workspaces keep routing captures: UntilStop timeouts run in
+	# Rust regardless of process_mode, and routing stays within each
+	# workspace's pane set.
+	for ws in _workspaces:
+		_poll_concept_events_for(ws)
+
+func _poll_concept_events_for(ws: Dictionary):
 	var all_bodies: Array[Control] = []
 	var terms: Array[Control] = []
-	for t in _tm.tiles:
-		var body = _tm._find_body(t.wrapper)
+	for t in ws.tm.tiles:
+		var body = ws.tm._find_body(t.wrapper)
 		if body == null:
 			continue
 		all_bodies.append(body)
@@ -708,7 +957,7 @@ func _poll_ipc_requests():
 				params = {}
 		if method == "paneWait":
 			var w_body = _find_pane_by_label(str(params.get("pane_id", "")))
-			if w_body == null or not w_body.has_method("_terminal"):
+			if w_body == null or not (w_body is TerminalPane):
 				GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error("Pane '%s' not found" % params.get("pane_id", ""))))
 				continue
 			var w_pattern = str(params.get("pattern", ""))
@@ -737,7 +986,7 @@ func _poll_pending_waits():
 	for wid in _pending_waits:
 		var w = _pending_waits[wid]
 		var wbody = _find_pane_by_label(str(w.get("attachment_id", "")))
-		if wbody == null or not wbody.has_method("_terminal"):
+		if wbody == null or not (wbody is TerminalPane):
 			GptyTerminal.respond_ipc(int(wid), false, JSON.stringify(_ipc_error("Pane gone")))
 			done.append(wid)
 			continue
@@ -767,13 +1016,13 @@ func _handle_ipc_method(method: String, params):
 			return {"pane_id": body.attachment_id, "label": body.pane_label, "type": type_name}
 		"paneRead":
 			var pr_body = _find_pane_by_label(str(params.get("pane_id", "")))
-			if pr_body == null or not pr_body.has_method("_terminal"):
+			if pr_body == null or not (pr_body is TerminalPane):
 				return _ipc_error("Pane '%s' not found" % params.get("pane_id", ""))
 			var pr_lines = int(params.get("lines", 200))
 			return {"text": str(pr_body._terminal.get_plain_text(clampi(pr_lines, 1, 2000)))}
 		"paneStatus":
 			var ps_body = _find_pane_by_label(str(params.get("pane_id", "")))
-			if ps_body == null or not ps_body.has_method("_terminal"):
+			if ps_body == null or not (ps_body is TerminalPane):
 				return _ipc_error("Pane '%s' not found" % params.get("pane_id", ""))
 			var ps_status = JSON.parse_string(str(ps_body._terminal.get_status()))
 			if not (ps_status is Dictionary):
@@ -854,20 +1103,20 @@ func _handle_ipc_method(method: String, params):
 					b_count += 1
 			return {"success": true, "count": b_count}
 		"layoutSave":
-			var name = str(params.get("name", ""))
-			if name == "":
+			var profile_name = str(params.get("name", ""))
+			if profile_name == "":
 				return _ipc_error("Profile name required")
-			if name.length() > 128:
+			if profile_name.length() > 128:
 				return _ipc_error("Profile name too long")
-			ProfileManager.add_profile(name, _gather_tiles())
-			return {"success": true, "name": name}
+			ProfileManager.add_profile(profile_name, _gather_tiles())
+			return {"success": true, "name": profile_name}
 		"layoutLoad":
-			var name = str(params.get("name", ""))
-			var profile := ProfileManager.find_profile(name)
+			var profile_name = str(params.get("name", ""))
+			var profile := ProfileManager.find_profile(profile_name)
 			if not profile.is_empty():
 				_do_activate(profile)
 				return {"success": true}
-			return _ipc_error("Profile '%s' not found" % name)
+			return _ipc_error("Profile '%s' not found" % profile_name)
 		"layoutList":
 			var names = []
 			for p in ProfileManager.get_all_profiles():
@@ -882,12 +1131,12 @@ func _handle_ipc_method(method: String, params):
 			var concepts = ConceptManager.get_concepts()
 			return {"concepts": concepts}
 		"conceptToggle":
-			var name = str(params.get("name", ""))
-			if name == "":
+			var concept_name = str(params.get("name", ""))
+			if concept_name == "":
 				return _ipc_error("Concept name required")
-			ConceptManager.toggle_concept(name)
+			ConceptManager.toggle_concept(concept_name)
 			ConceptManager._push_to_rust()
-			return {"success": true, "name": name}
+			return {"success": true, "name": concept_name}
 		_:
 			return _ipc_error("Unknown method: %s" % method, -32601)
 
@@ -895,8 +1144,24 @@ func _ipc_error(msg: String, code := -32000):
 	return {"error": {"code": code, "message": msg}}
 
 func _find_pane_by_label(label: String) -> Control:
-	for t in _tm.tiles:
-		var body = _tm._find_body(t.wrapper)
+	# Labels (T1) can collide across workspaces; attachment_ids are
+	# globally unique. Resolve active-workspace-first for label targeting.
+	var ws := _active_workspace()
+	if not ws.is_empty():
+		var body = _find_in_tm(ws.tm, label)
+		if body:
+			return body
+	for i in _workspaces.size():
+		if i == _active:
+			continue
+		var other = _find_in_tm(_workspaces[i].tm, label)
+		if other:
+			return other
+	return null
+
+func _find_in_tm(tm: TerminalManager, label: String) -> Control:
+	for t in tm.tiles:
+		var body = tm._find_body(t.wrapper)
 		if body and (body.attachment_id == label or body.get("pane_label") == label):
 			return body
 	return null
@@ -1045,7 +1310,7 @@ func _activate_profile(p_name: String):
 
 	_do_profile_activate(profile)
 
-func _show_profile_trust_dialog(profile: Dictionary, tiles: Array):
+func _show_profile_trust_dialog(profile: Dictionary, _tiles: Array):
 	var dialog = ConfirmationDialog.new()
 	dialog.title = "Workspace Trust"
 	dialog.dialog_text = "This profile contains panes with a different shell than your current default (%s).\n\nDo you want to activate it anyway?" % SettingsManager.cfg_shell_command
@@ -1079,40 +1344,15 @@ func _do_profile_activate(profile: Dictionary):
 		_do_activate(profile)
 
 func _do_activate(profile: Dictionary):
+	var ws := _active_workspace()
+	if ws.is_empty():
+		return
 	_reset()
-	var tiles = profile.get("tiles", [])
-	for td in tiles:
-		if not (td is Dictionary): continue
-		var st = PaneTypes.sanitize_tile(td, GRID)
-		if st.is_empty(): continue
-		var settings: Dictionary = st["settings"]
-		var type_name: String = st["type_name"]
-
-		var body = _tm.create_body(type_name)
-		if body == null: continue
-		body.apply_settings(settings)
-
-		# Same command-priority logic as _do_restore (kept in sync).
-		if type_name == "terminal":
-			var raw = settings.get("command", settings.get("shell", td.get("shell", "")))
-			var sh: String = PaneTypes.sanitize_shell(raw, SettingsManager.cfg_shell_command)
-			SettingsManager.apply_to_terminal(body)
-			body.shell_command = sh
-
-		var title = PaneTypes.ALL.get(type_name, {}).get("name", type_name)
-		var w = _tm._build_wrapper_body(body, title)
-
-		if type_name == "terminal":
-			body.title_changed.connect(func(t: String):
-				var lbl = w.get_node_or_null("BodyVBox/TitleBar/TitleLabel")
-				if lbl: lbl.text = " " + t
-			)
-
-		_grid.add_child(w)
-		body.focus_entered.connect(func(): _tm.last_body = body)
-		_tm.tiles.append({wrapper = w, col = st["col"], row = st["row"],
-			cspan = st["cspan"], rspan = st["rspan"]})
-	_apply_layout(); _list()
+	var tiles: Array[Dictionary] = []
+	for td in profile.get("tiles", []):
+		if td is Dictionary:
+			tiles.append(td)
+	_restore_into(ws, tiles)
 	ToastManager.info("Profile '%s' activated" % profile.get("name", ""))
 
 func _delete_profile(idx: int):
