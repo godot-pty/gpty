@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Capture a screenshot of a running gpty app window.
+#
+# Launches the app in a sandboxed user-data dir (fresh home screen),
+# finds its window on the X server (XWayland), waits for first frames,
+# captures it with ImageMagick, and tears everything down.
+#
+# Usage: scripts/screenshot-gpty <output.png> <app-command...>
+#   e.g. scripts/screenshot-gpty docs/static/images/v0.5.1_1.png godot --path godot
+#
+# Requires: ImageMagick (`import`), python3 + python-xlib, a graphical
+# session with XWayland (DISPLAY set). Used by the release skill.
+set -euo pipefail
+
+OUT="${1:?output path}"
+shift
+[[ $# -ge 1 ]] || { echo "usage: screenshot-gpty <out.png> <app-command...>" >&2; exit 2; }
+
+for t in import python3; do
+    command -v "$t" >/dev/null || { echo "missing tool: $t (need imagemagick + python3/python-xlib)" >&2; exit 3; }
+done
+[[ -n "${DISPLAY:-}" ]] || { echo "no DISPLAY — the app window must exist on X11/XWayland" >&2; exit 3; }
+
+TMP="$(mktemp -d)"
+export XDG_DATA_HOME="$TMP/data"
+export XDG_CONFIG_HOME="$TMP/config"
+APP_PID=""
+cleanup() {
+    [[ -n "$APP_PID" ]] && kill "$APP_PID" 2>/dev/null || true
+    [[ -n "$APP_PID" ]] && wait "$APP_PID" 2>/dev/null || true
+    rm -rf "$TMP"
+}
+trap cleanup EXIT
+
+"$@" >"$TMP/app.log" 2>&1 &
+APP_PID=$!
+
+WID=""
+for _ in $(seq 1 40); do
+    WID="$(APP_PID="$APP_PID" python3 - <<'PY' 2>/dev/null
+import os, sys
+from Xlib import display
+target_pid = int(os.environ["APP_PID"])
+d = display.Display()
+root = d.screen().root
+found = [None]
+def walk(w):
+    if found[0]:
+        return
+    try:
+        name = w.get_wm_name()
+    except Exception:
+        name = None
+    if name and "gpty" in (name or "").lower():
+        try:
+            pid = w.get_full_property(d.intern_atom("_NET_WM_PID"), 0)
+            if pid and pid.value[0] == target_pid:
+                found[0] = w.id
+                return
+        except Exception:
+            pass
+    try:
+        for c in w.query_tree().children:
+            walk(c)
+    except Exception:
+        pass
+walk(root)
+print(hex(found[0]) if found[0] else "")
+PY
+)"
+    [[ -n "$WID" ]] && break
+    sleep 0.5
+done
+
+[[ -n "$WID" ]] || {
+    echo "gpty window not found (XWayland required). App log tail:" >&2
+    tail -20 "$TMP/app.log" >&2
+    exit 4
+}
+
+sleep 2  # let the first frames settle
+import -window "$WID" "$OUT"
+echo "captured: $OUT"
