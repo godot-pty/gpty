@@ -4,9 +4,7 @@ class_name Workspace
 # Tile lifecycle is delegated to TerminalManager.
 
 const GRID = 12
-const MIN_WINDOW_W = 500
-const MIN_WINDOW_H = 300
-const TITLEBAR_HEIGHT = 30.0
+const TITLEBAR_HEIGHT = WindowChrome.HEIGHT
 
 
 var _sidebar: Sidebar
@@ -17,14 +15,15 @@ var _settings_panel: SettingsPanel
 var _tm: TerminalManager = TerminalManager.new()
 var _status_bar: StatusBar
 var _titlebar: Control = null
+var _chrome: WindowChrome = null
 var _workspaces: Array[Dictionary] = []  # {name: String, grid: Control, tm: TerminalManager}
 var _active: int = 0
 var _active_profile: String = ""  # last successfully activated profile (sidebar accent)
 
 func _ready():
 	show()
-	_build_titlebar()
-	DisplayServer.window_set_min_size(Vector2i(MIN_WINDOW_W, MIN_WINDOW_H))
+	_chrome = WindowChrome.new()
+	_titlebar = _chrome.build(self)
 
 	_grid = Control.new()
 	add_child(_grid)
@@ -61,8 +60,8 @@ func _ready():
 	ShortcutManager.register("app:close_pane", "Ctrl+Shift+W", func(): _kill_last())
 	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _toggle_sidebar)
 	ShortcutManager.register("app:toggle_palette", "Ctrl+Shift+P", _toggle_palette)
-	ShortcutManager.register("app:toggle_fullscreen", "F11", _toggle_fullscreen)
-	ShortcutManager.register("app:toggle_fullscreen_alt", "Ctrl+Shift+M", _toggle_fullscreen)
+	ShortcutManager.register("app:toggle_fullscreen", "F11", _chrome.toggle_fullscreen)
+	ShortcutManager.register("app:toggle_fullscreen_alt", "Ctrl+Shift+M", _chrome.toggle_fullscreen)
 	ShortcutManager.register("app:reset_workspace", "Ctrl+Shift+R", func():
 		_do_reset()
 	)
@@ -79,7 +78,7 @@ func _ready():
 	ConceptManager.concepts_changed.connect(_push_concepts_to_engine)
 	_on_settings_changed()
 	_apply_window_mode.call_deferred()
-	if SettingsManager.cfg_window_mode == 0: _restore_window_position()
+	if SettingsManager.cfg_window_mode == 0: _chrome.restore_position()
 
 func _on_settings_changed():
 	for t in _tm.tiles:
@@ -104,7 +103,7 @@ func _apply_fps_setting():
 
 func _notification(what):
 	if what == NOTIFICATION_RESIZED: _apply_layout()
-	if what == NOTIFICATION_WM_CLOSE_REQUEST: _save_window_position()
+	if what == NOTIFICATION_WM_CLOSE_REQUEST: _chrome.save_position()
 
 # NOTE: We save in _exit_tree(), not NOTIFICATION_WM_CLOSE_REQUEST.
 # WM_CLOSE_REQUEST does not fire when the Godot editor stops the game,
@@ -112,151 +111,12 @@ func _notification(what):
 # reliably whenever the scene tree is torn down.
 
 func _exit_tree():
-	_save_window_position()
+	_chrome.save_position()
 	_save()
 	SettingsManager.save_settings()
 
 func _apply_window_mode():
-	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-	match SettingsManager.cfg_window_mode:
-		0:  # Decorated windowed
-			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
-			if _titlebar: _titlebar.visible = false
-		1:  # Borderless windowed
-			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, true)
-			if _titlebar: _titlebar.visible = true
-		2:  # Fullscreen (with custom titlebar for mode control)
-			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
-			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
-			if _titlebar: _titlebar.visible = true
-	# Swap titlebar maximize/restore icon
-	if _titlebar:
-		var max_btn = _titlebar.get_meta("_max_btn", null)
-		if max_btn != null:
-			if SettingsManager.cfg_window_mode == 2 and max_btn.text == Icons.MAXIMIZE_WIN:
-				max_btn.text = Icons.RESTORE_WIN
-			elif SettingsManager.cfg_window_mode != 2 and max_btn.text == Icons.RESTORE_WIN:
-				max_btn.text = Icons.MAXIMIZE_WIN
-	_apply_layout()
-func _toggle_fullscreen():
-	if SettingsManager.cfg_window_mode == 2:
-		SettingsManager.cfg_window_mode = 1
-		_restore_window_position()
-	else:
-		_save_window_position()
-		SettingsManager.cfg_window_mode = 2
-	_apply_window_mode()
-	SettingsManager.save_settings()
-
-func _on_window_mode_selected(mode: int):
-	if mode == SettingsManager.cfg_window_mode:
-		return
-	if SettingsManager.cfg_window_mode == 0:
-		_save_window_position()
-	if mode == 0:
-		_restore_window_position()
-	SettingsManager.cfg_window_mode = mode
-	_apply_window_mode()
-	SettingsManager.save_settings()
-
-func _save_window_position():
-	if SettingsManager.cfg_window_mode == 0 or SettingsManager.cfg_window_mode == 1:
-		SettingsManager.cfg_window_position = DisplayServer.window_get_position()
-		SettingsManager.cfg_window_size = DisplayServer.window_get_size()
-
-func _restore_window_position():
-	var pos = SettingsManager.cfg_window_position
-	var sz = SettingsManager.cfg_window_size
-	if pos.x >= 0 and pos.y >= 0:
-		DisplayServer.window_set_position(pos)
-	if sz.x >= MIN_WINDOW_W and sz.y >= MIN_WINDOW_H:
-		DisplayServer.window_set_size(sz)
-func _build_titlebar():
-	_titlebar = Control.new()
-	_titlebar.name = "GlobalTitleBar"
-	_titlebar.mouse_filter = Control.MOUSE_FILTER_STOP
-	_titlebar.anchor_left = 0.0
-	_titlebar.anchor_right = 1.0
-	_titlebar.anchor_top = 0.0
-	_titlebar.offset_top = 0
-	_titlebar.offset_bottom = TITLEBAR_HEIGHT
-
-	var bg = ColorRect.new()
-	bg.name = "TitleBarBg"
-	bg.color = SettingsManager.cfg_title_bar_bg
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_titlebar.add_child(bg)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	var label = Label.new()
-	label.name = "AppTitle"
-	label.text = "gpty"
-	label.add_theme_color_override("font_color", Color.WHITE)
-	label.anchor_left = 0.0
-	label.anchor_right = 0.0
-	label.offset_left = 10
-	label.offset_right = 200
-	label.offset_top = 0
-	label.offset_bottom = TITLEBAR_HEIGHT
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_titlebar.add_child(label)
-	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	var btn_cont = HBoxContainer.new()
-	btn_cont.name = "WinControls"
-	btn_cont.anchor_left = 1.0
-	btn_cont.anchor_right = 1.0
-	btn_cont.offset_left = -120
-	btn_cont.offset_right = 0
-	btn_cont.offset_top = 0
-	btn_cont.offset_bottom = TITLEBAR_HEIGHT
-	btn_cont.alignment = BoxContainer.ALIGNMENT_END
-
-	var min_btn = _make_titlebar_button(Icons.MINIMIZE, func():
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MINIMIZED))
-	btn_cont.add_child(min_btn)
-
-	var max_btn = _make_titlebar_button(Icons.MAXIMIZE_WIN, _toggle_fullscreen)
-	btn_cont.add_child(max_btn)
-	_titlebar.set_meta("_max_btn", max_btn)
-
-	var close_btn = _make_titlebar_button(Icons.CLOSE, func(): get_tree().quit())
-	btn_cont.add_child(close_btn)
-
-	_titlebar.add_child(btn_cont)
-	_titlebar.gui_input.connect(_on_titlebar_gui_input)
-
-	add_child(_titlebar)
-	_titlebar.visible = false
-
-func _make_titlebar_button(icon: String, callback: Callable) -> Button:
-	var btn = Button.new()
-	btn.focus_mode = Control.FOCUS_NONE
-	btn.mouse_filter = Control.MOUSE_FILTER_STOP
-	btn.custom_minimum_size = Vector2(36, TITLEBAR_HEIGHT)
-	btn.flat = true
-	btn.add_theme_color_override("font_color", Color.WHITE)
-	btn.pressed.connect(callback)
-	# Use a Label child for the icon glyph — Button text with theme font
-	# overrides doesn't reliably render PUA codepoints in Godot 4.
-	var lbl = Label.new()
-	lbl.text = icon
-	lbl.add_theme_font_override("font", Icons.font_resource)
-	lbl.add_theme_font_size_override("font_size", 14)
-	lbl.add_theme_color_override("font_color", Color.WHITE)
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	btn.add_child(lbl)
-	return btn
-
-func _on_titlebar_gui_input(event: InputEvent):
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			DisplayServer.window_start_drag()
-		elif event.double_click and event.button_index == MOUSE_BUTTON_LEFT:
-			_toggle_fullscreen()
+	_chrome.apply_mode()
 # ═══════════════════════════════════════════════════════════════════════
 # Layout
 # ═══════════════════════════════════════════════════════════════════════
@@ -316,8 +176,7 @@ func _add_body_to_grid(w: Control, body: Control, label: String):
 func _add_body_to_grid_into(ws: Dictionary, w: Control, body: Control, label: String):
 	if ws.is_empty():
 		return
-	ws.grid.add_child(w)
-	_wire_pane_activation(ws, w, body)
+	_attach_pane_into(ws, w, body)
 	_sync_pane_titlebars()
 	_apply_layout()
 	_list()
@@ -373,17 +232,7 @@ func _swap_pane(body: Control, new_type_name: String):
 	if old_wrapper:
 		ws.grid.remove_child(old_wrapper)
 	if new_wrapper:
-		ws.grid.add_child(new_wrapper)
-
-	# Wire signals (same pattern as _add_body_to_grid).
-	_wire_pane_activation(ws, new_wrapper, new_body)
-
-	# For terminals: wire dynamic title (global defaults applied in swap_pane).
-	if new_type_name == "terminal":
-		new_body.title_changed.connect(func(t: String):
-			var lbl = new_wrapper.get_node_or_null("BodyVBox/TitleBar/TitleLabel")
-			if lbl: lbl.text = " " + t
-		)
+		_attach_pane_into(ws, new_wrapper, new_body)
 
 	_apply_layout()
 	_list()
@@ -427,10 +276,23 @@ func _update_workspace_ui():
 	if _sidebar:
 		_sidebar.update_workspace_list(_workspace_names(), _active)
 
+## Single choke point where a pane enters a workspace: adds the wrapper to
+## the grid, wires activation tracking, and (for terminals) the dynamic
+## title. Spawn, restore, and swap all funnel through here so a new pane
+## type is wired correctly everywhere.
+func _attach_pane_into(ws: Dictionary, w: Control, body: Control):
+	ws.grid.add_child(w)
+	_wire_pane_activation(ws, w, body)
+	if body is TerminalPane:
+		body.title_changed.connect(func(t: String):
+			var lbl = w.get_node_or_null("BodyVBox/TitleBar/TitleLabel")
+			if lbl: lbl.text = " " + t
+		)
+
 func _wire_pane_activation(ws: Dictionary, _w: Control, body: Control):
-	# Pane activation on plain clicks is handled in _unhandled_input via
-	# wrapper hit-testing — container ancestors skip gui_input propagation,
-	# so wiring the wrapper does not work. This covers the focusable case.
+	# Pane activation on plain clicks is handled in _input via wrapper
+	# hit-testing — container ancestors skip gui_input propagation, so
+	# wiring the wrapper does not work. This covers the focusable case.
 	body.focus_entered.connect(func(): ws.tm.last_body = body)
 
 func _body_of_focus_owner(owner: Control) -> Control:
@@ -667,14 +529,7 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 		var title = PaneTypes.ALL.get(type_name, {}).get("name", type_name)
 		var w = tm._build_wrapper_body(body, title)
 
-		if type_name == "terminal":
-			body.title_changed.connect(func(t: String):
-				var lbl = w.get_node_or_null("BodyVBox/TitleBar/TitleLabel")
-				if lbl: lbl.text = " " + t
-			)
-
-		grid.add_child(w)
-		_wire_pane_activation(ws, w, body)
+		_attach_pane_into(ws, w, body)
 		tm.tiles.append({wrapper = w, col = st["col"], row = st["row"],
 			cspan = st["cspan"], rspan = st["rspan"]})
 	if tm.tiles.is_empty():
@@ -862,7 +717,7 @@ func _wire_sidebar_signals():
 	_sidebar.request_pane_settings.connect(func(body: Control): _tm._open_pane_settings(body))
 	_sidebar.toggled.connect(func(): _on_sidebar_toggled())
 	_sidebar.request_profile.connect(_activate_profile)
-	_sidebar.request_window_mode.connect(_on_window_mode_selected)
+	_sidebar.request_window_mode.connect(_chrome.on_window_mode_selected)
 	_sidebar.request_workspace_switch.connect(_switch_workspace)
 	_sidebar.request_workspace_add.connect(_add_workspace)
 	_sidebar.request_workspace_close.connect(_close_workspace)
@@ -1071,147 +926,10 @@ func _poll_pending_waits():
 		_pending_waits.erase(wid)
 
 func _handle_ipc_method(method: String, params):
-	match method:
-		"newPane":
-			var type_name = str(params.get("type", "terminal"))
-			if not PaneTypes.ALL.has(type_name):
-				return _ipc_error("Unknown pane type: %s" % type_name)
-			var shell: String = PaneTypes.sanitize_shell(
-				params.get("command"), SettingsManager.cfg_shell_command)
-			var np_tags: Array = PaneTypes.sanitize_tags(params.get("tags", []))
-			var body = _spawn_pane(type_name, {"shell_command": shell, "tags": np_tags})
-			if body == null:
-				return _ipc_error("Grid is full")
-			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "spawned", "pane_id": body.attachment_id, "label": body.pane_label}))
-			return {"pane_id": body.attachment_id, "label": body.pane_label, "type": type_name}
-		"paneRead":
-			var pr_body = _find_pane_by_label(str(params.get("pane_id", "")))
-			if pr_body == null or not (pr_body is TerminalPane):
-				return _ipc_error("Pane '%s' not found" % params.get("pane_id", ""))
-			var pr_lines = int(params.get("lines", 200))
-			return {"text": str(pr_body._terminal.get_plain_text(clampi(pr_lines, 1, 2000)))}
-		"paneStatus":
-			var ps_body = _find_pane_by_label(str(params.get("pane_id", "")))
-			if ps_body == null or not (ps_body is TerminalPane):
-				return _ipc_error("Pane '%s' not found" % params.get("pane_id", ""))
-			var ps_status = JSON.parse_string(str(ps_body._terminal.get_status()))
-			if not (ps_status is Dictionary):
-				return _ipc_error("Pane status unavailable")
-			return ps_status
-		"paneRun":
-			var run_cmd: String = PaneTypes.sanitize_shell(
-				params.get("command", ""), SettingsManager.cfg_shell_command)
-			var run_body = _spawn_pane("terminal", {"shell_command": run_cmd})
-			if run_body == null:
-				return _ipc_error("Grid is full")
-			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "spawned", "pane_id": run_body.attachment_id, "label": run_body.pane_label}))
-			return {"pane_id": run_body.attachment_id, "label": run_body.pane_label, "type": "terminal"}
-		"listPanes":
-			var panes = []
-			for t in _tm.tiles:
-				var body = _tm._find_body(t.wrapper)
-				if body == null:
-					continue
-				panes.append({
-					"id": body.attachment_id,
-					"label": body.pane_label,
-					"type": body._pane_type(),
-					"title": body.get("_last_title") if "_last_title" in body else "",
-					"col": t.col, "row": t.row, "cspan": t.cspan, "rspan": t.rspan,
-					"focused": body == _tm.last_body,
-					"tags": body.tags,
-				})
-			return {"panes": panes, "count": panes.size()}
-		"killPane":
-			var kp_pane_id = str(params.get("pane_id", ""))
-			var kp_target = null
-			if kp_pane_id == "active" and _tm.last_body:
-				kp_target = _tm.last_body
-			else:
-				kp_target = _find_pane_by_label(kp_pane_id)
-			if kp_target == null:
-				return _ipc_error("Pane '%s' not found" % kp_pane_id)
-			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "killed", "pane_id": kp_target.attachment_id, "label": kp_target.pane_label}))
-			_kill(kp_target)
-			return {"success": true}
-		"focusPane":
-			var pane_id = str(params.get("pane_id", ""))
-			var body = _find_pane_by_label(pane_id)
-			if body == null:
-				return _ipc_error("Pane '%s' not found" % pane_id)
-			body.grab_focus()
-			return {"success": true}
-		"inject":
-			var pane_id = str(params.get("pane_id", ""))
-			var text = str(params.get("text", ""))
-			if text.length() > 65536:
-				return _ipc_error("Injected text exceeds 64 KiB limit")
-			var body = _find_pane_by_label(pane_id)
-			if body == null:
-				return _ipc_error("Pane '%s' not found" % pane_id)
-			if not body is TerminalPane:
-				return _ipc_error("Pane '%s' is not a terminal" % pane_id)
-			body._terminal.send_line(text)
-			return {"success": true}
-		"broadcast":
-			var b_tags: Array = PaneTypes.sanitize_tags(params.get("tags", []))
-			var b_text = str(params.get("text", ""))
-			if b_tags.is_empty() or b_text == "" or b_text.length() > 65536:
-				return _ipc_error("Invalid broadcast request")
-			var b_count = 0
-			for t in _tm.tiles:
-				var b_body = _tm._find_body(t.wrapper)
-				if b_body == null or not (b_body is TerminalPane):
-					continue
-				var b_hit = false
-				for tag in b_tags:
-					if b_body.tags.has(tag):
-						b_hit = true
-						break
-				if b_hit:
-					b_body._terminal.send_line(b_text)
-					b_count += 1
-			return {"success": true, "count": b_count}
-		"layoutSave":
-			var profile_name = str(params.get("name", ""))
-			if profile_name == "":
-				return _ipc_error("Profile name required")
-			if profile_name.length() > 128:
-				return _ipc_error("Profile name too long")
-			ProfileManager.add_profile(profile_name, _gather_tiles())
-			return {"success": true, "name": profile_name}
-		"layoutLoad":
-			var profile_name = str(params.get("name", ""))
-			var profile := ProfileManager.find_profile(profile_name)
-			if not profile.is_empty():
-				_do_activate(profile)
-				return {"success": true}
-			return _ipc_error("Profile '%s' not found" % profile_name)
-		"layoutList":
-			var names = []
-			for p in ProfileManager.get_all_profiles():
-				names.append(p.get("name", ""))
-			return {"layouts": names}
-		"version":
-			return {"version": GptyTerminal.get_app_version(), "protocol": "2.0"}
-		"shutdown":
-			get_tree().quit()
-			return {"success": true}
-		"conceptList":
-			var concepts = ConceptManager.get_concepts()
-			return {"concepts": concepts}
-		"conceptToggle":
-			var concept_name = str(params.get("name", ""))
-			if concept_name == "":
-				return _ipc_error("Concept name required")
-			ConceptManager.toggle_concept(concept_name)
-			ConceptManager._push_to_rust()
-			return {"success": true, "name": concept_name}
-		_:
-			return _ipc_error("Unknown method: %s" % method, -32601)
+	return WorkspaceIpcHandlers.handle(self, method, params)
 
 func _ipc_error(msg: String, code := -32000):
-	return {"error": {"code": code, "message": msg}}
+	return WorkspaceIpcHandlers.error(msg, code)
 
 func _find_pane_by_label(label: String) -> Control:
 	# Labels (T1) can collide across workspaces; attachment_ids are

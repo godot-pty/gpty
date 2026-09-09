@@ -93,6 +93,7 @@ gpty/
         │   └── update_checker.gd
         ├── terminal/
         │   ├── workspace.gd        # Root controller, workspace switching, concept routing, profile restore
+        │   ├── ipc_handlers.gd     # WorkspaceIpcHandlers — pane-API/IPC method dispatch (extracted)
         │   ├── concept_router.gd   # Pure concept-event routing (extracted, testable)
         │   ├── terminal_pane.gd    # Control-based renderer, keyboard, selection, history search
         │   └── terminal_manager.gd # Tile lifecycle, split/kill/swap/spawn
@@ -101,6 +102,7 @@ gpty/
         │   ├── settings_panel.gd
         │   ├── status_bar.gd
         │   ├── toast_overlay.gd
+        │   ├── window_chrome.gd    # Titlebar + window-mode/fullscreen handling (extracted)
         │   ├── markdown_view.gd     # Safe, debounced Markdown RichTextLabel
         │   └── icons.gd            # Phosphor icon constants
         └── panes/

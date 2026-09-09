@@ -43,6 +43,7 @@ godot/
         │   └── update_checker.gd
         ├── terminal/            # Core terminal logic
         │   ├── workspace.gd     # Grid layout, workspace tabs, sidebar, profiles, concept routing
+        │   ├── ipc_handlers.gd  # WorkspaceIpcHandlers — IPC/pane-API method dispatch
         │   ├── terminal_pane.gd # Control-based renderer, keyboard, selection
         │   ├── concept_router.gd # Pure concept-event routing (extracted, testable)
         │   └── terminal_manager.gd
@@ -50,6 +51,7 @@ godot/
         │   ├── sidebar.gd       # Vertical stack: window mode, workspaces, panes, profiles
         │   ├── settings_panel.gd
         │   ├── toast_overlay.gd
+        │   ├── window_chrome.gd # Titlebar + window-mode/fullscreen handling
         │   ├── markdown_view.gd # Safe shared Markdown renderer
         │   └── icons.gd         # Phosphor icon constants
         └── panes/               # Specialty pane types
