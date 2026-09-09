@@ -86,21 +86,22 @@ gpty/
         │   ├── settings_manager.gd
         │   ├── profile_manager.gd
         │   ├── concept_manager.gd
-        │   ├── layout_manager.gd
+        │   ├── workspace_store.gd  # Named workspace (tab set) persistence
         │   ├── focus_manager.gd
         │   ├── toast_manager.gd
         │   ├── shortcut_manager.gd
         │   └── update_checker.gd
         ├── terminal/
-        │   ├── workspace.gd        # Root controller, concept routing, profile restore
+        │   ├── workspace.gd        # Root controller, workspace tabs, concept routing, profile restore
         │   ├── concept_router.gd   # Pure concept-event routing (extracted, testable)
-        │   ├── terminal_pane.gd    # Control-based renderer, keyboard, selection
+        │   ├── terminal_pane.gd    # Control-based renderer, keyboard, selection, history search
         │   └── terminal_manager.gd # Tile lifecycle, split/kill/swap/spawn
         ├── ui/
         │   ├── sidebar.gd
         │   ├── settings_panel.gd
         │   ├── status_bar.gd
         │   ├── toast_overlay.gd
+        │   ├── workspace_tabs.gd   # Workspace tab strip (switch/add/close/rename)
         │   ├── markdown_view.gd     # Safe, debounced Markdown RichTextLabel
         │   └── icons.gd            # Phosphor icon constants
         └── panes/
