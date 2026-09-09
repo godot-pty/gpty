@@ -174,6 +174,7 @@ func _build_list_panes_response() -> Dictionary:
 			"type": body._pane_type(),
 			"title": body.get("_last_title") if "_last_title" in body else "",
 			"col": t.col, "row": t.row, "cspan": t.cspan, "rspan": t.rspan,
+			"focused": body == _tm.last_body,
 			"tags": body.tags,
 		})
 	return {"panes": panes, "count": panes.size()}
