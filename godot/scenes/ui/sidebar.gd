@@ -298,11 +298,16 @@ func _apply_row_accent(btn: Button, active: bool):
 	btn.toggle_mode = true
 	btn.button_pressed = active
 	if active:
+		# A pressed button resolves text from font_pressed_color, which
+		# otherwise falls back to the theme default — override all three
+		# states or the accent vanishes exactly when the row is active.
 		btn.add_theme_color_override("font_color", ACCENT_COLOR)
 		btn.add_theme_color_override("font_hover_color", ACCENT_HOVER_COLOR)
+		btn.add_theme_color_override("font_pressed_color", ACCENT_COLOR)
 	else:
 		btn.remove_theme_color_override("font_color")
 		btn.remove_theme_color_override("font_hover_color")
+		btn.remove_theme_color_override("font_pressed_color")
 
 func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close: bool) -> HBoxContainer:
 	var row = HBoxContainer.new()

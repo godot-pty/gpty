@@ -91,6 +91,8 @@ func test_update_pane_list_accents_active_body():
 	assert_false(btn1.button_pressed, "inactive pane row must not be pressed")
 	assert_true(btn2.button_pressed, "active pane row must be pressed")
 	assert_true(btn2.has_theme_color_override("font_color"), "active pane row must carry the accent")
+	assert_true(btn2.has_theme_color_override("font_pressed_color"),
+		"pressed active row must keep the accent (font_pressed_color falls back to theme otherwise)")
 	assert_false(btn1.has_theme_color_override("font_color"), "inactive pane row must not carry the accent")
 
 func test_set_active_pane_moves_accent_without_rebuild():
@@ -117,3 +119,5 @@ func test_update_profile_list_accents_active_profile():
 	assert_true((rows[1].get_child(0) as Button).button_pressed, "active profile row must be pressed")
 	assert_true((rows[1].get_child(0) as Button).has_theme_color_override("font_color"),
 		"active profile row must carry the accent")
+	assert_true((rows[1].get_child(0) as Button).has_theme_color_override("font_pressed_color"),
+		"pressed active profile row must keep the accent")
