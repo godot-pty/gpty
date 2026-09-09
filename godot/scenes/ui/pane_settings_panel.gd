@@ -31,6 +31,14 @@ func open_for(body: Control):
 		close()
 		return
 	_build_ui()
+	# Godot 4 GUI input picking ignores z_index: among siblings, the LAST
+	# child in tree order receives clicks first (reverse tree order).
+	# Rendering DOES honor z_index, which is why the popup drew on top
+	# while later-added workspace grids/sidebar/status bar ate its input.
+	# Move to the end of the workspace's children so it is topmost for
+	# both picking and rendering while open.
+	if get_parent():
+		get_parent().move_child(self, -1)
 	visible = true
 
 func close():

@@ -107,6 +107,39 @@ func test_open_for_null_target_stays_closed():
 	panel.open_for(null)
 	assert_false(panel.visible, "a null target must not open the popup")
 
+func test_popup_moves_to_end_of_tree_when_opened():
+	# Godot 4 GUI input picking ignores z_index and uses reverse tree
+	# order — the LAST sibling gets clicks first. Workspace grids are
+	# added after the panel, so the popup must move to the end of the
+	# workspace's children or later grids would eat its input while
+	# z_index still renders it on top (visible-but-dead popup).
+	var ws = await _make_workspace()
+	ws._add_workspace()  # a grid added AFTER the pane settings panel
+	var body = ws._spawn_pane("terminal")
+	assert_not_null(body, "spawning into the second workspace must work")
+	var panel = _panel(ws)
+	ws._tm._open_pane_settings(body)
+	assert_eq(panel.get_index(), ws.get_child_count() - 1,
+		"open popup must be the last child so tree-order picking hits it first")
+
+func test_settings_panel_moves_to_end_of_tree_when_opened():
+	var ws = await _make_workspace()
+	ws._add_workspace()
+	await get_tree().process_frame
+	ws._toggle_settings()
+	assert_true(ws._settings_panel.visible, "global settings must open")
+	assert_eq(ws._settings_panel.get_index(), ws.get_child_count() - 1,
+		"open settings panel must be the last child for tree-order picking")
+
+func test_palette_moves_to_end_of_tree_when_opened():
+	var ws = await _make_workspace()
+	ws._add_workspace()
+	await get_tree().process_frame
+	ws._toggle_palette()
+	assert_true(ws._palette.visible, "palette must open")
+	assert_eq(ws._palette.get_index(), ws.get_child_count() - 1,
+		"open palette must be the last child for tree-order picking")
+
 func test_popup_does_not_activate_panes_underneath():
 	var ws = await _make_workspace()
 	var body = _first_body(ws)

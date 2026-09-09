@@ -675,11 +675,15 @@ func _activate_pane_under_mouse(mouse: Vector2):
 func _toggle_palette():
 	if _palette == null:
 		_palette = _build_palette()
+		_palette.visible = false  # start hidden — the first toggle must OPEN it
 		_palette.z_index = 100
 		add_child(_palette)
 		_palette.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	_palette.visible = not _palette.visible
 	if _palette.visible:
+		# Input picking uses reverse tree order (z_index is rendering-only);
+		# keep the palette topmost over workspaces added after first use.
+		move_child(_palette, -1)
 		var inp = _palette.find_child("*", true, false) as LineEdit
 		if inp: inp.grab_focus()
 
@@ -1022,10 +1026,13 @@ func _toggle_settings():
 		_settings_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	if not _settings_panel.visible:
 		# Opening global settings closes the pane settings overlay so the
-		# two z=100 sibling overlays never stack.
+		# two overlays never stack.
 		var panel: Control = _tm._pane_settings_panel
 		if panel and panel.visible:
 			panel.close()
+		# Input picking uses reverse tree order (z_index is rendering-only);
+		# stay topmost even when workspaces were added after first open.
+		move_child(_settings_panel, -1)
 	_settings_panel.visible = not _settings_panel.visible
 
 func _build_sidebar():
