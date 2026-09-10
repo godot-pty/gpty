@@ -23,12 +23,14 @@
 //! one prompt; cancelling kills it (`kill_on_drop` guarantees no orphans
 //! when the session closes), and the next prompt spawns a fresh child.
 
+use std::collections::VecDeque;
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::Value;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
@@ -40,6 +42,10 @@ const PROMPT_TIMEOUT: Duration = Duration::from_secs(120);
 /// Read timeout for a single frame line from the child.
 const FRAME_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_FRAME_BYTES: usize = 64 * 1024;
+/// Adapter stderr lines retained for the exit-status error message.
+const MAX_STDERR_LINES: usize = 20;
+/// Per-line cap on that retained stderr, so a chatty adapter cannot grow it.
+const MAX_STDERR_LINE_BYTES: usize = 2048;
 
 pub struct CliBackend {
     pub timeout: Duration,
@@ -157,6 +163,60 @@ struct CliChild {
     child: Child,
     stdin: ChildStdin,
     lines: tokio::io::Lines<BufReader<ChildStdout>>,
+    /// Keeps the adapter's stderr pipe drained for the child's whole life.
+    stderr_task: tokio::task::JoinHandle<()>,
+    /// Bounded tail of that stderr, surfaced when the adapter exits non-zero.
+    stderr_tail: Arc<Mutex<VecDeque<String>>>,
+}
+
+impl CliChild {
+    /// The adapter's own account of a failure, for the exit-status error.
+    fn stderr_summary(&self) -> String {
+        match self.stderr_tail.lock() {
+            Ok(tail) => tail.iter().cloned().collect::<Vec<_>>().join(" | "),
+            Err(_) => String::new(),
+        }
+    }
+}
+
+/// Continuously drain the adapter's stderr into a bounded tail.
+///
+/// The pipe has to be read for the child's whole life. Once the kernel
+/// buffer (~64 KiB) fills, the adapter blocks on its next stderr write and
+/// can never finish the turn — it stalls until the 10 s frame timeout
+/// fires, and the failure surfaces as "stopped emitting frames" rather
+/// than as the adapter's own error. `wait()` does not drain it; only a
+/// reader that keeps up does.
+fn spawn_stderr_drain(
+    stderr: ChildStderr,
+) -> (Arc<Mutex<VecDeque<String>>>, tokio::task::JoinHandle<()>) {
+    let tail: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
+    let sink = Arc::clone(&tail);
+    let task = tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr);
+        let mut buffer = [0_u8; 4096];
+        loop {
+            match reader.read(&mut buffer).await {
+                Ok(0) | Err(_) => break,
+                Ok(count) => {
+                    // Lossy: a non-UTF-8 adapter must not stop the drain,
+                    // and chunk boundaries may split a line in two.
+                    let text = String::from_utf8_lossy(&buffer[..count]);
+                    for line in text.lines() {
+                        let line = truncate_utf8(line, MAX_STDERR_LINE_BYTES);
+                        log::warn!("cli backend stderr: {line}");
+                        if let Ok(mut retained) = sink.lock() {
+                            if retained.len() == MAX_STDERR_LINES {
+                                retained.pop_front();
+                            }
+                            retained.push_back(line);
+                        }
+                    }
+                }
+            }
+        }
+    });
+    (tail, task)
 }
 
 async fn drive_child(
@@ -176,10 +236,17 @@ async fn drive_child(
         .stdout
         .take()
         .ok_or_else(|| "cli backend: no stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "cli backend: no stderr".to_string())?;
+    let (stderr_tail, stderr_task) = spawn_stderr_drain(stderr);
     let mut bridge = CliChild {
         child,
         stdin,
         lines: BufReader::new(stdout).lines(),
+        stderr_task,
+        stderr_tail,
     };
 
     let request_line = serde_json::json!({
@@ -205,11 +272,13 @@ async fn drive_child(
         if cancel.is_cancelled() {
             bridge.child.kill().await.ok();
             bridge.child.wait().await.ok();
+            bridge.stderr_task.abort();
             return Ok(());
         }
         let line = match timeout(FRAME_TIMEOUT, bridge.lines.next_line()).await {
             Err(_) => {
                 bridge.child.kill().await.ok();
+                bridge.stderr_task.abort();
                 return Err("cli backend stopped emitting frames".into());
             }
             Ok(Err(e)) => return Err(format!("cli backend read: {e}")),
@@ -225,13 +294,16 @@ async fn drive_child(
         .await
         .map_err(|e| format!("cli backend wait: {e}"))?;
     if !status.success() {
-        return Err(format!(
-            "cli backend exited with {}",
-            status
-                .code()
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| "signal".into())
-        ));
+        let code = status
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "signal".into());
+        let detail = bridge.stderr_summary();
+        return Err(if detail.is_empty() {
+            format!("cli backend exited with {code}")
+        } else {
+            format!("cli backend exited with {code}: {detail}")
+        });
     }
     Ok(())
 }
@@ -416,5 +488,71 @@ mod tests {
         );
         assert_eq!(argv_from_string("  a   b  "), vec!["a", "b"]);
         assert_eq!(argv_from_string(""), Vec::<String>::new());
+    }
+
+    /// An adapter that logs more than a pipe buffer to stderr before
+    /// answering must still complete. Without a reader the child blocks on
+    /// its next stderr write, never emits a frame, and the turn dies on the
+    /// frame timeout instead of returning an answer.
+    #[tokio::test]
+    async fn cli_session_drains_adapter_stderr() {
+        let (_path, command) = fake_adapter(
+            "#!/bin/sh\nread line\n\
+             i=0\n\
+             while [ $i -lt 2000 ]; do\n\
+               echo \"noise line $i padding padding padding padding padding\" >&2\n\
+               i=$((i + 1))\n\
+             done\n\
+             printf '%s\\n' '{\"type\":\"done\",\"text\":\"survived\"}'\n",
+        );
+        let session = AiSession::open(
+            &tokio::runtime::Handle::current(),
+            SessionOpenRequest {
+                backend: BackendKind::Cli,
+                command,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        session.prompt(prompt("output here")).unwrap();
+        let events = wait_terminal(&session).await;
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(&e.event, AiEvent::Done { text } if text == "survived")),
+            "adapter must answer after flooding stderr: {events:?}"
+        );
+        session.close();
+    }
+
+    /// A failing adapter's own diagnostics must reach the user instead of
+    /// being discarded with the pipe.
+    #[tokio::test]
+    async fn cli_session_reports_adapter_stderr_on_failure() {
+        let (_path, command) = fake_adapter(
+            "#!/bin/sh\nread line\n\
+             echo 'adapter: model backend unreachable' >&2\n\
+             exit 3\n",
+        );
+        let session = AiSession::open(
+            &tokio::runtime::Handle::current(),
+            SessionOpenRequest {
+                backend: BackendKind::Cli,
+                command,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        session.prompt(prompt("x")).unwrap();
+        let events = wait_terminal(&session).await;
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(&e.event, AiEvent::Error { message }
+                if message.contains("exited with 3")
+                    && message.contains("model backend unreachable"))),
+            "exit error must carry the adapter's stderr: {events:?}"
+        );
+        session.close();
     }
 }
