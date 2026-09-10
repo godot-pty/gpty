@@ -384,10 +384,25 @@ impl TermGrid {
         // GREW and the user was following output, undo that: delete the
         // revealed rows and return the cursor to its previous row, leaving
         // the text in view untouched and blank rows below the cursor.
-        // Full-screen apps (alternate screen, or primary-screen TUIs like
-        // the OMP TUI that have no scrollback) own their layout and repaint
-        // themselves on SIGWINCH; the row deletion would destroy their
-        // content. Only anchor when there is scrollback to hide.
+        //
+        // The `history_size() > 0` test is read from the POST-resize grid,
+        // and alacritty's `grow_lines` ends with
+        // `decrease_scroll_limit(lines_added)`: the growth consumes
+        // scrollback first, so post-resize history is
+        // `pre_history.saturating_sub(growth)`. It passes only when the
+        // scrollback was longer than the growth — exactly when every new row
+        // was recovered from history and no visible row was pushed off. The
+        // deleted rows are therefore recovered scrollback rows, never
+        // on-screen content; scrollback shorter than the growth is zeroed by
+        // that same call, so the guard fails and the surgery is skipped.
+        //
+        // That is a guarantee about which rows can be deleted, not about
+        // what the pane is running: it cannot distinguish a shell from a
+        // full-screen app. A primary-screen app that paints without smcup
+        // (the OMP TUI) is only safe on a fresh pane — launched after the
+        // pane had more scrollback than the row growth, it passes every test
+        // here and these raw CUP/DL escapes land in its screen. Only the
+        // alternate-screen check catches real full-screen apps.
         if was_following && rows > old_rows && !alt_screen && self.term.grid().history_size() > 0 {
             let growth = rows - old_rows;
             let mut seq = String::from("\x1b[H"); // cursor home
@@ -401,9 +416,14 @@ impl TermGrid {
         self.generation += 1;
     }
 
-    /// True while the terminal runs a full-screen application (alternate
-    /// screen buffer, e.g. vim, less, OMP TUI). There is no scrollback and
-    /// concept engines must not treat redraw output as shell lines.
+    /// True while the terminal runs a full-screen application in the
+    /// alternate screen buffer (smcup users: vim, less, btop, …). The
+    /// alternate screen keeps no scrollback, and concept engines must not
+    /// treat its redraw output as shell lines. This check is what keeps
+    /// `resize()`'s row-deletion surgery off full-screen apps; it does not
+    /// cover apps that paint the PRIMARY screen without entering smcup (the
+    /// OMP TUI), which is why that surgery's own guard must stay
+    /// conservative.
     pub fn is_alt_screen(&self) -> bool {
         self.term
             .mode()
