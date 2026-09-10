@@ -190,6 +190,7 @@ pub fn default_socket() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     /// Clear all static state between tests.
     fn clear_state() {
@@ -199,6 +200,7 @@ mod tests {
 
     // A1. drain_returns_empty_when_no_requests
     #[test]
+    #[serial]
     fn drain_returns_empty_when_no_requests() {
         clear_state();
         let result = drain_requests();
@@ -207,6 +209,7 @@ mod tests {
 
     // A2. drain_returns_all_queued_requests
     #[test]
+    #[serial]
     fn drain_returns_all_queued_requests() {
         clear_state();
         {
@@ -234,6 +237,7 @@ mod tests {
 
     // A3. respond_completes_oneshot
     #[tokio::test]
+    #[serial]
     async fn respond_completes_oneshot() {
         clear_state();
         let (tx, mut rx) = oneshot::channel();
@@ -249,6 +253,7 @@ mod tests {
 
     // A4. respond_unknown_id_does_not_panic
     #[test]
+    #[serial]
     fn respond_unknown_id_does_not_panic() {
         clear_state();
         complete_response(999, false, String::new());
