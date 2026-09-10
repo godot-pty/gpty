@@ -4,20 +4,27 @@ use clap::CommandFactory;
 use gpty_ipc::client::IpcClient;
 use gpty_ipc::protocol::{JsonRpcError, Request, build_error, build_response};
 
-/// Map kebab-case MCP tool names to camelCase IPC method names.
-fn tool_to_ipc_method(tool_name: &str) -> &str {
-    match tool_name {
-        "new-pane" => "newPane",
-        "list-panes" => "listPanes",
-        "kill-pane" => "killPane",
-        "focus-pane" => "focusPane",
-        "inject" => "inject",
-        "layout-save" => "layoutSave",
-        "layout-load" => "layoutLoad",
-        "layout-list" => "layoutList",
-        "version" => "version",
-        other => other,
+/// Map a kebab-case MCP tool name to the camelCase IPC method the GUI
+/// registers: `pane-read` → `paneRead`, `broadcast` → `broadcast`.
+///
+/// Derived rather than table-driven: the tool name and the method name are
+/// the same identifier in two conventions, and a table silently drifts as
+/// soon as a command is added. The previous table omitted `pane-*` and
+/// `concept-*`, so six tools answered -32601.
+fn tool_to_ipc_method(tool_name: &str) -> String {
+    let mut out = String::with_capacity(tool_name.len());
+    let mut upper_next = false;
+    for ch in tool_name.chars() {
+        match ch {
+            '-' => upper_next = true,
+            _ if upper_next => {
+                out.extend(ch.to_uppercase());
+                upper_next = false;
+            }
+            _ => out.push(ch),
+        }
     }
+    out
 }
 
 /// Handle daemon tools locally (no IPC needed). Returns Some(result) if handled, None if not a daemon tool.
@@ -87,7 +94,7 @@ pub async fn run(client: &IpcClient) -> anyhow::Result<()> {
                 } else {
                     // Map kebab-case tool name to camelCase IPC method
                     let ipc_method = tool_to_ipc_method(tool_name);
-                    match client.call(ipc_method, Some(args)).await {
+                    match client.call(&ipc_method, Some(args)).await {
                         Ok(r) => {
                             if let Some(err) = r.error {
                                 build_error(req.id, err)
@@ -123,4 +130,67 @@ pub async fn run(client: &IpcClient) -> anyhow::Result<()> {
         stdout.flush()?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Methods the GUI registers on the control socket
+    /// (`crates/gpty-gdext/src/ipc.rs`). A tool that resolves to anything
+    /// else fails at runtime with -32601 and no test would notice.
+    const WORKSPACE_METHODS: &[&str] = &[
+        "newPane",
+        "listPanes",
+        "killPane",
+        "focusPane",
+        "inject",
+        "paneRead",
+        "paneStatus",
+        "paneRun",
+        "paneWait",
+        "broadcast",
+        "layoutSave",
+        "layoutLoad",
+        "layoutList",
+        "conceptList",
+        "conceptToggle",
+        "version",
+    ];
+
+    /// Every advertised MCP tool must resolve to a registered IPC method.
+    /// `daemon-*` tools are answered locally and never reach the socket.
+    #[test]
+    fn every_mcp_tool_maps_to_a_registered_ipc_method() {
+        let tools = crate::commands::schema::build_mcp_tools_inline(&crate::Cli::command());
+        let names: Vec<&str> = tools["tools"]
+            .as_array()
+            .expect("schema exposes a tools array")
+            .iter()
+            .map(|t| t["name"].as_str().expect("every tool has a name"))
+            .collect();
+        assert!(!names.is_empty(), "schema must expose tools");
+
+        let mut mapped = Vec::new();
+        for name in &names {
+            if name.starts_with("daemon-") {
+                continue;
+            }
+            let method = tool_to_ipc_method(name);
+            assert!(
+                WORKSPACE_METHODS.contains(&method.as_str()),
+                "MCP tool '{name}' maps to IPC method '{method}', which the GUI does not register"
+            );
+            mapped.push(method);
+        }
+
+        // No two tools may collapse onto the same method, and the mapping
+        // must cover every registered method — both would silently make one
+        // tool unreachable while the per-name assertions above still passed.
+        let mut unique = mapped.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), mapped.len(), "two tools map to one method");
+        assert_eq!(unique.len(), WORKSPACE_METHODS.len());
+    }
 }
