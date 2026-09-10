@@ -767,13 +767,20 @@ async fn run_terminal_task(
         // Deliver emulator-generated replies (DSR cursor-position reports,
         // mode reports) to the child process. TUIs query the cursor after
         // SIGWINCH and fall back to broken re-anchoring without the answer.
-        if let Some(g) = &grid
-            && let Ok(mut locked) = g.lock()
-        {
-            for reply in locked.drain_replies() {
-                if let Err(e) = pty_handle.write_bytes(&reply) {
-                    log::error!("[Pane {}] PTY write error (reply): {e}", ctx.id);
-                }
+        // Collect the replies under the lock, then write them with the guard
+        // dropped: write_bytes blocks, and holding the grid mutex across a
+        // blocking write stalls every consumer of that grid — including the
+        // GDScript render poll — whenever the child stops draining its stdin.
+        let replies = match &grid {
+            Some(g) => g
+                .lock()
+                .map(|mut locked| locked.drain_replies())
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
+        for reply in replies {
+            if let Err(e) = pty_handle.write_bytes(&reply) {
+                log::error!("[Pane {}] PTY write error (reply): {e}", ctx.id);
             }
         }
     }
