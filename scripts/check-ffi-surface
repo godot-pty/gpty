@@ -114,6 +114,18 @@ def gdscript_handles(text: str, classes: set[str]) -> dict[str, str]:
         ):
             for m in re.finditer(pattern, text):
                 handles[m.group(1)] = cls
+    # Handles handed out at runtime rather than constructed in place: a pane
+    # body owns its terminal and exposes it as `_terminal`, and
+    # `get_terminal_for_ffi()` returns one. Without these two rules every
+    # `term.<method>()` call in workspace.gd went unchecked — which is exactly
+    # where a renamed export would fail at runtime with no test noticing.
+    if "GptyTerminal" in classes:
+        for pattern in (
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[^\n=]*\.get\(\s*\"_terminal\"\s*\)",
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*get_terminal_for_ffi\s*\(\s*\)",
+        ):
+            for m in re.finditer(pattern, text):
+                handles[m.group(1)] = "GptyTerminal"
     return handles
 
 
