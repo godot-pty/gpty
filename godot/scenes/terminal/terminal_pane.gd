@@ -199,6 +199,9 @@ func apply_settings(settings: Dictionary):
 	if settings.has("rows") or settings.has("cols"):
 		if _terminal != null:
 			_terminal.resize_grid(rows, cols)
+	# Colors, cursor shape and metrics are all read in _draw(); the grid
+	# generation does not move for them, so repaint once here.
+	queue_redraw()
 
 func _restore_color_strings(dict: Dictionary):
 	for key in ["default_fg", "default_bg", "cursor_color", "focus_border_color", "selection_color", "scrollback_indicator_color"]:
@@ -241,6 +244,9 @@ func _recompute_cell_metrics():
 	_cell_w = _font.get_char_size('W'.unicode_at(0), font_size).x
 	_cell_h = _font.get_height(font_size)
 	custom_minimum_size = Vector2(PADDING * _cell_w + PADDING, _cell_h * 2 + PADDING)
+	# Glyph metrics changed: existing cells must be redrawn even when the
+	# derived rows/cols happen to be unchanged.
+	queue_redraw()
 
 func _process(delta):
 	if cursor_blink:
@@ -312,7 +318,13 @@ func _process(delta):
 			_fetch_ms = Time.get_ticks_msec() - t0
 			_cursor_visible = true
 			_cursor_blink_timer = 0.0
-		queue_redraw()
+			# Repaint only when the grid actually changed. Every other
+			# visual trigger queues its own redraw (cursor blink, selection,
+			# search, settings, metric changes), and scroll/resize/palette
+			# all bump the generation. Repainting unconditionally here made
+			# every visible pane rebuild its full canvas command list every
+			# frame — the fetch was damage-tracked, the draw was not.
+			queue_redraw()
 	_draw_ms = 0  # will be set on next _draw() call
 	var t = _terminal.get_title()
 	if t != _last_title and t != "":
