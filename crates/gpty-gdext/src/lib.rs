@@ -962,7 +962,10 @@ impl GptyTerminal {
 
         // Translate Godot KEY_* constants to evdev scancodes
         let evdev = godot_key_to_evdev(keycode);
-        match gpty_core::keymap::key_event_to_bytes(evdev, m) {
+        // The numpad's byte sequence depends on whether the running
+        // application enabled DECPAM; the grid tracks that mode.
+        let app_keypad = self.with_grid(|g| g.is_app_keypad(), false);
+        match gpty_core::keymap::key_event_to_bytes(evdev, m, app_keypad) {
             Some(bytes) => PackedByteArray::from(bytes.as_slice()),
             None => PackedByteArray::new(),
         }

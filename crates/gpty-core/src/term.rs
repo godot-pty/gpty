@@ -410,6 +410,15 @@ impl TermGrid {
             .contains(alacritty_terminal::term::TermMode::ALT_SCREEN)
     }
 
+    /// True while the application has enabled application keypad mode
+    /// (DECPAM/DECKPAM). Numpad keys send SS3 sequences in that mode, and
+    /// the characters printed on the keys otherwise.
+    pub fn is_app_keypad(&self) -> bool {
+        self.term
+            .mode()
+            .contains(alacritty_terminal::term::TermMode::APP_KEYPAD)
+    }
+
     /// Current terminal title (set via OSC escape sequences, e.g. bash prompt).
     pub fn title(&self) -> String {
         self.title.lock().map(|t| t.clone()).unwrap_or_default()

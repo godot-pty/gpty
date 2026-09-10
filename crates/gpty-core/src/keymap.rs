@@ -76,6 +76,11 @@ const KP_DECIMAL: u32 = 83;
 /// Convert a hardware scancode + modifiers into the raw bytes that
 /// should be written to the PTY.
 ///
+/// `app_keypad` is the terminal's DECPAM/DECKPAM state. When false (a plain
+/// shell) the numpad sends the characters printed on its keys; when true (a
+/// full-screen app that enabled application keypad mode) it sends the SS3
+/// sequences that app expects.
+///
 /// Returns `None` for keys that should be handled by the caller (e.g.
 /// plain printable characters, which are delivered via the Unicode path).
 ///
@@ -83,11 +88,12 @@ const KP_DECIMAL: u32 = 83;
 ///
 /// ```
 /// # use gpty_core::keymap::{key_event_to_bytes, Modifiers};
-/// assert_eq!(key_event_to_bytes(103, Modifiers::CTRL), Some(b"\x1b[1;5A".to_vec()));
-/// assert_eq!(key_event_to_bytes(1, 0), Some(b"\x1b".to_vec()));
-/// assert_eq!(key_event_to_bytes(30, 0), None); // 'a' → unicode path
+/// assert_eq!(key_event_to_bytes(103, Modifiers::CTRL, false), Some(b"\x1b[1;5A".to_vec()));
+/// assert_eq!(key_event_to_bytes(1, 0, false), Some(b"\x1b".to_vec()));
+/// assert_eq!(key_event_to_bytes(30, 0, false), None); // 'a' → unicode path
+/// assert_eq!(key_event_to_bytes(71, 0, false), Some(b"7".to_vec())); // numpad 7
 /// ```
-pub fn key_event_to_bytes(scancode: u32, modifiers: u8) -> Option<Vec<u8>> {
+pub fn key_event_to_bytes(scancode: u32, modifiers: u8, app_keypad: bool) -> Option<Vec<u8>> {
     let m = Modifiers(modifiers);
     let param = m.xterm_param();
 
@@ -127,26 +133,27 @@ pub fn key_event_to_bytes(scancode: u32, modifiers: u8) -> Option<Vec<u8>> {
         88 => xterm_csi_tilde(24, param), // F12
 
         // ── Numpad ────────────────────────────────────────────
-        // Numpad keys produce distinct escape sequences when NumLock is off
-        // (application keypad mode) vs. when it's on (same as regular keys).
-        // In application mode (DECPNM / DECKPAM), they send SS3 sequences.
-        // We assume application keypad mode here — the application can toggle.
-        71 => Some(b"\x1bOq".to_vec()),         // KP_Home  / KP_7
-        72 => Some(b"\x1bOr".to_vec()),         // KP_Up    / KP_8
-        73 => Some(b"\x1bOs".to_vec()),         // KP_PgUp  / KP_9
-        75 => Some(b"\x1bOt".to_vec()),         // KP_Left  / KP_4
-        76 => Some(b"\x1bOu".to_vec()),         // KP_Begin / KP_5
-        77 => Some(b"\x1bOv".to_vec()),         // KP_Right / KP_6
-        79 => Some(b"\x1bOw".to_vec()),         // KP_End   / KP_1
-        80 => Some(b"\x1bOx".to_vec()),         // KP_Down  / KP_2
-        81 => Some(b"\x1bOy".to_vec()),         // KP_PgDn  / KP_3
-        82 => Some(b"\x1bOp".to_vec()),         // KP_Insert/ KP_0
-        KP_DECIMAL => Some(b"\x1bOn".to_vec()), // KP_Del   / KP_.
-        KP_ENTER => Some(b"\x1bOM".to_vec()),
-        KP_DIVIDE => Some(b"\x1bOo".to_vec()),
-        KP_MULTIPLY => Some(b"\x1bOj".to_vec()),
-        KP_SUBTRACT => Some(b"\x1bOm".to_vec()),
-        KP_ADD => Some(b"\x1bOk".to_vec()),
+        // Application keypad mode (DECPAM/DECKPAM, enabled by the running
+        // application) sends SS3 sequences; otherwise the numpad sends the
+        // characters printed on the keys, which is what a plain shell,
+        // readline or vim insert mode expects. The mode comes from the grid,
+        // so a shell no longer receives ESC O q for a numpad 7.
+        71 => numpad(app_keypad, b"\x1bOq", b"7"), // KP_Home  / KP_7
+        72 => numpad(app_keypad, b"\x1bOr", b"8"), // KP_Up    / KP_8
+        73 => numpad(app_keypad, b"\x1bOs", b"9"), // KP_PgUp  / KP_9
+        75 => numpad(app_keypad, b"\x1bOt", b"4"), // KP_Left  / KP_4
+        76 => numpad(app_keypad, b"\x1bOu", b"5"), // KP_Begin / KP_5
+        77 => numpad(app_keypad, b"\x1bOv", b"6"), // KP_Right / KP_6
+        79 => numpad(app_keypad, b"\x1bOw", b"1"), // KP_End   / KP_1
+        80 => numpad(app_keypad, b"\x1bOx", b"2"), // KP_Down  / KP_2
+        81 => numpad(app_keypad, b"\x1bOy", b"3"), // KP_PgDn  / KP_3
+        82 => numpad(app_keypad, b"\x1bOp", b"0"), // KP_Insert/ KP_0
+        KP_DECIMAL => numpad(app_keypad, b"\x1bOn", b"."), // KP_Del / KP_.
+        KP_ENTER => numpad(app_keypad, b"\x1bOM", b"\r"),
+        KP_DIVIDE => numpad(app_keypad, b"\x1bOo", b"/"),
+        KP_MULTIPLY => numpad(app_keypad, b"\x1bOj", b"*"),
+        KP_SUBTRACT => numpad(app_keypad, b"\x1bOm", b"-"),
+        KP_ADD => numpad(app_keypad, b"\x1bOk", b"+"),
 
         // ── Misc ───────────────────────────────────────────────
         119 => Some(b"\x1b".to_vec()), // Pause/Break → ESC
@@ -195,6 +202,12 @@ fn xterm_csi_tilde(num: u8, param: Option<&str>) -> Option<Vec<u8>> {
     v.push(b'~');
     Some(v)
 }
+
+/// Numpad bytes: the SS3 sequence when the application enabled keypad mode,
+/// the character printed on the key otherwise.
+fn numpad(app_keypad: bool, ss3: &[u8], plain: &[u8]) -> Option<Vec<u8>> {
+    Some(if app_keypad { ss3 } else { plain }.to_vec())
+}
 // Tests
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -208,12 +221,12 @@ mod tests {
 
     #[test]
     fn basic_special_keys() {
-        assert_eq!(key_event_to_bytes(1, 0), Some(b"\x1b".to_vec())); // Escape
-        assert_eq!(key_event_to_bytes(14, 0), Some(b"\x7f".to_vec())); // Backspace
-        assert_eq!(key_event_to_bytes(15, 0), Some(b"\t".to_vec())); // Tab
-        assert_eq!(key_event_to_bytes(28, 0), Some(b"\r".to_vec())); // Enter
+        assert_eq!(key_event_to_bytes(1, 0, false), Some(b"\x1b".to_vec())); // Escape
+        assert_eq!(key_event_to_bytes(14, 0, false), Some(b"\x7f".to_vec())); // Backspace
+        assert_eq!(key_event_to_bytes(15, 0, false), Some(b"\t".to_vec())); // Tab
+        assert_eq!(key_event_to_bytes(28, 0, false), Some(b"\r".to_vec())); // Enter
         assert_eq!(
-            key_event_to_bytes(15, Modifiers::SHIFT),
+            key_event_to_bytes(15, Modifiers::SHIFT, false),
             Some(b"\x1b[Z".to_vec())
         ); // Shift+Tab
     }
@@ -221,54 +234,57 @@ mod tests {
     #[test]
     fn ctrl_combinations() {
         assert_eq!(
-            key_event_to_bytes(57, Modifiers::CTRL),
+            key_event_to_bytes(57, Modifiers::CTRL, false),
             Some(b"\0".to_vec())
         ); // Ctrl+Space
         // Ctrl+digit is not standard terminal behavior — falls through to unicode path
-        assert_eq!(key_event_to_bytes(2, Modifiers::CTRL), None); // Ctrl+1
-        assert_eq!(key_event_to_bytes(11, Modifiers::CTRL), None); // Ctrl+0
+        assert_eq!(key_event_to_bytes(2, Modifiers::CTRL, false), None); // Ctrl+1
+        assert_eq!(key_event_to_bytes(11, Modifiers::CTRL, false), None); // Ctrl+0
         // Ctrl+Alt+digit: Ctrl takes precedence, but still falls through
         assert_eq!(
-            key_event_to_bytes(2, Modifiers::CTRL | Modifiers::ALT),
+            key_event_to_bytes(2, Modifiers::CTRL | Modifiers::ALT, false),
             None
         );
     }
 
     #[test]
     fn arrow_keys() {
-        assert_eq!(key_event_to_bytes(103, 0), Some(esc(b"[A"))); // Up
+        assert_eq!(key_event_to_bytes(103, 0, false), Some(esc(b"[A"))); // Up
         assert_eq!(
-            key_event_to_bytes(103, Modifiers::CTRL),
+            key_event_to_bytes(103, Modifiers::CTRL, false),
             Some(esc(b"[1;5A"))
         ); // Ctrl+Up
         assert_eq!(
-            key_event_to_bytes(103, Modifiers::SHIFT),
+            key_event_to_bytes(103, Modifiers::SHIFT, false),
             Some(esc(b"[1;2A"))
         ); // Shift+Up
         assert_eq!(
-            key_event_to_bytes(105, Modifiers::CTRL | Modifiers::ALT),
+            key_event_to_bytes(105, Modifiers::CTRL | Modifiers::ALT, false),
             Some(esc(b"[1;7D"))
         ); // Ctrl+Alt+Left
     }
 
     #[test]
     fn navigation_keys() {
-        assert_eq!(key_event_to_bytes(102, 0), Some(esc(b"[H"))); // Home
+        assert_eq!(key_event_to_bytes(102, 0, false), Some(esc(b"[H"))); // Home
         assert_eq!(
-            key_event_to_bytes(102, Modifiers::CTRL),
+            key_event_to_bytes(102, Modifiers::CTRL, false),
             Some(esc(b"[1;5H"))
         ); // Ctrl+Home
-        assert_eq!(key_event_to_bytes(107, 0), Some(esc(b"[F"))); // End
-        assert_eq!(key_event_to_bytes(111, 0), Some(esc(b"[3~"))); // Delete
-        assert_eq!(key_event_to_bytes(110, 0), Some(esc(b"[2~"))); // Insert
+        assert_eq!(key_event_to_bytes(107, 0, false), Some(esc(b"[F"))); // End
+        assert_eq!(key_event_to_bytes(111, 0, false), Some(esc(b"[3~"))); // Delete
+        assert_eq!(key_event_to_bytes(110, 0, false), Some(esc(b"[2~"))); // Insert
     }
 
     #[test]
     fn function_keys() {
-        assert_eq!(key_event_to_bytes(59, 0), Some(esc(b"[P"))); // F1
-        assert_eq!(key_event_to_bytes(63, 0), Some(esc(b"[15~"))); // F5
-        assert_eq!(key_event_to_bytes(88, 0), Some(esc(b"[24~"))); // F12
-        assert_eq!(key_event_to_bytes(59, Modifiers::CTRL), Some(esc(b"[1;5P"))); // Ctrl+F1
+        assert_eq!(key_event_to_bytes(59, 0, false), Some(esc(b"[P"))); // F1
+        assert_eq!(key_event_to_bytes(63, 0, false), Some(esc(b"[15~"))); // F5
+        assert_eq!(key_event_to_bytes(88, 0, false), Some(esc(b"[24~"))); // F12
+        assert_eq!(
+            key_event_to_bytes(59, Modifiers::CTRL, false),
+            Some(esc(b"[1;5P"))
+        ); // Ctrl+F1
     }
 
     #[test]
@@ -277,43 +293,67 @@ mod tests {
         // convention — produced `\e[1;53~` for Ctrl+Delete, which consumers
         // read as an unknown parameter and ignore.
         assert_eq!(
-            key_event_to_bytes(111, Modifiers::CTRL),
+            key_event_to_bytes(111, Modifiers::CTRL, false),
             Some(esc(b"[3;5~"))
         ); // Ctrl+Delete
         assert_eq!(
-            key_event_to_bytes(104, Modifiers::SHIFT),
+            key_event_to_bytes(104, Modifiers::SHIFT, false),
             Some(esc(b"[5;2~"))
         ); // Shift+PageUp
         assert_eq!(
-            key_event_to_bytes(63, Modifiers::CTRL),
+            key_event_to_bytes(63, Modifiers::CTRL, false),
             Some(esc(b"[15;5~"))
         ); // Ctrl+F5
         assert_eq!(
-            key_event_to_bytes(109, Modifiers::CTRL | Modifiers::ALT),
+            key_event_to_bytes(109, Modifiers::CTRL | Modifiers::ALT, false),
             Some(esc(b"[6;7~"))
         ); // Ctrl+Alt+PageDown
-        assert_eq!(key_event_to_bytes(110, Modifiers::ALT), Some(esc(b"[2;3~"))); // Alt+Insert
+        assert_eq!(
+            key_event_to_bytes(110, Modifiers::ALT, false),
+            Some(esc(b"[2;3~"))
+        ); // Alt+Insert
     }
 
     #[test]
-    fn numpad_application_mode() {
-        assert_eq!(key_event_to_bytes(71, 0), Some(esc(b"Oq"))); // KP_Home / KP_7
-        assert_eq!(key_event_to_bytes(72, 0), Some(esc(b"Or"))); // KP_Up / KP_8
-        assert_eq!(key_event_to_bytes(KP_ENTER, 0), Some(esc(b"OM")));
-        assert_eq!(key_event_to_bytes(KP_ADD, 0), Some(esc(b"Ok")));
+    fn numpad_follows_application_keypad_mode() {
+        // Application keypad mode (DECPAM, set by a full-screen app).
+        assert_eq!(key_event_to_bytes(71, 0, true), Some(esc(b"Oq"))); // KP_Home / KP_7
+        assert_eq!(key_event_to_bytes(72, 0, true), Some(esc(b"Or"))); // KP_Up / KP_8
+        assert_eq!(key_event_to_bytes(KP_ENTER, 0, true), Some(esc(b"OM")));
+        assert_eq!(key_event_to_bytes(KP_ADD, 0, true), Some(esc(b"Ok")));
+
+        // Plain shell: the characters printed on the keys. Sending ESC O q
+        // here makes readline read ESC as a meta prefix and lose the digit.
+        assert_eq!(key_event_to_bytes(71, 0, false), Some(b"7".to_vec()));
+        assert_eq!(key_event_to_bytes(82, 0, false), Some(b"0".to_vec()));
+        assert_eq!(
+            key_event_to_bytes(KP_DECIMAL, 0, false),
+            Some(b".".to_vec())
+        );
+        assert_eq!(key_event_to_bytes(KP_ADD, 0, false), Some(b"+".to_vec()));
+        assert_eq!(
+            key_event_to_bytes(KP_MULTIPLY, 0, false),
+            Some(b"*".to_vec())
+        );
+        assert_eq!(key_event_to_bytes(KP_DIVIDE, 0, false), Some(b"/".to_vec()));
+        assert_eq!(
+            key_event_to_bytes(KP_SUBTRACT, 0, false),
+            Some(b"-".to_vec())
+        );
+        assert_eq!(key_event_to_bytes(KP_ENTER, 0, false), Some(b"\r".to_vec()));
     }
 
     #[test]
     fn unicode_path_none() {
         // Printable characters without modifiers → None (caller handles via unicode)
-        assert_eq!(key_event_to_bytes(30, 0), None); // 'a'
-        assert_eq!(key_event_to_bytes(57, 0), None); // Space
-        assert_eq!(key_event_to_bytes(16, 0), None); // 'q'
+        assert_eq!(key_event_to_bytes(30, 0, false), None); // 'a'
+        assert_eq!(key_event_to_bytes(57, 0, false), None); // Space
+        assert_eq!(key_event_to_bytes(16, 0, false), None); // 'q'
     }
 
     #[test]
     fn alt_prefix_none() {
         // Alt without Ctrl → caller should prepend ESC + char
-        assert_eq!(key_event_to_bytes(30, Modifiers::ALT), None); // Alt+a
+        assert_eq!(key_event_to_bytes(30, Modifiers::ALT, false), None); // Alt+a
     }
 }
