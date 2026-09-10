@@ -669,15 +669,32 @@ func _show_concept_dialog(idx: int):
 	dlg.add_child(v)
 	var name_le = LineEdit.new(); name_le.placeholder_text = "Concept name"
 	var regex_le = LineEdit.new(); regex_le.placeholder_text = "Regex trigger"
-	var target_le = LineEdit.new(); target_le.placeholder_text = "Target pane type"
+	var target_row := _lbl("Target:"); var target_le = LineEdit.new()
+	target_le.placeholder_text = "Target pane type (e.g. code_viewer)"
 	var enabled_cb = CheckButton.new(); enabled_cb.text = "Enabled"
 	enabled_cb.button_pressed = true
-	# Stop conditions for the capture this trigger starts.
+	# Mode: capture-and-route, or notify-only (publish the match, keep output).
+	var mode_opt = OptionButton.new()
+	mode_opt.add_item("Capture output (route to a pane)")
+	mode_opt.add_item("Notify only (no capture, no routing)")
+	var stop_row := _lbl("Stop after (ms):")
 	var timeout_spin = SpinBox.new()
 	timeout_spin.min_value = 50; timeout_spin.max_value = 5000
 	timeout_spin.step = 50; timeout_spin.value = 300
 	var stop_on_input_cb = CheckButton.new(); stop_on_input_cb.text = "Stop on input"
 	stop_on_input_cb.button_pressed = true
+
+	# Notify-only concepts have no receiver, so the target and the capture stop
+	# conditions are meaningless for them — hide rather than collect.
+	var _apply_mode_visibility := func():
+		var capturing: bool = mode_opt.selected == 0
+		target_row.visible = capturing
+		target_le.visible = capturing
+		stop_row.visible = capturing
+		timeout_spin.visible = capturing
+		stop_on_input_cb.visible = capturing
+	mode_opt.item_selected.connect(func(_sel: int): _apply_mode_visibility.call())
+
 	if idx >= 0:
 		var concepts = ConceptManager.get_concepts()
 		if idx < concepts.size():
@@ -688,37 +705,43 @@ func _show_concept_dialog(idx: int):
 			var acts = c.get("actions", [])
 			if acts.size() > 0:
 				target_le.text = acts[0].get("target", "")
+			mode_opt.selected = 1 if c.get("capture_mode", "until_stop") == "single_line" else 0
 			timeout_spin.value = c.get("stop_timeout_ms", 300)
 			stop_on_input_cb.button_pressed = c.get("stop_on_input", true)
 	v.add_child(_lbl("Name:")); v.add_child(name_le)
 	v.add_child(_lbl("Regex:")); v.add_child(regex_le)
-	v.add_child(_lbl("Target:")); v.add_child(target_le)
+	v.add_child(_lbl("Mode:")); v.add_child(mode_opt)
+	v.add_child(target_row); v.add_child(target_le)
 	v.add_child(enabled_cb)
-	v.add_child(_lbl("Stop after (ms):")); v.add_child(timeout_spin)
+	v.add_child(stop_row); v.add_child(timeout_spin)
 	v.add_child(stop_on_input_cb)
+	_apply_mode_visibility.call()
 	dlg.confirmed.connect(func():
 		_save_concept(idx, name_le.text, regex_le.text, target_le.text,
-			enabled_cb.button_pressed, int(timeout_spin.value), stop_on_input_cb.button_pressed)
+			enabled_cb.button_pressed, "single_line" if mode_opt.selected == 1 else "until_stop",
+			int(timeout_spin.value), stop_on_input_cb.button_pressed)
 		dlg.queue_free()
 	)
 	add_child(dlg)
 	dlg.popup_centered()
 
-## Persist a concept. Concepts capture output and route it to a pane type;
-## they never carry a command, so no command field is collected here.
+## Persist a concept. Concepts capture-and-route or notify; they never carry a
+## command, so no command field is collected.
 func _save_concept(idx: int, p_name: String, regex_pat: String, target: String,
-	p_enabled: bool = true, stop_ms: int = 300, stop_input: bool = true):
+	p_enabled: bool = true, p_capture_mode: String = "until_stop",
+	stop_ms: int = 300, stop_input: bool = true):
 	if p_name.strip_edges() == "":
 		return
 	var entry: Dictionary = {
 		"name": p_name.strip_edges(),
 		"trigger": regex_pat,
 		"enabled": p_enabled,
-		"capture_mode": "until_stop",
-		"stop_timeout_ms": stop_ms,
-		"stop_on_input": stop_input,
+		"capture_mode": p_capture_mode,
 		"actions": [{"target": target.strip_edges()}],
 	}
+	if p_capture_mode == "until_stop":
+		entry["stop_timeout_ms"] = stop_ms
+		entry["stop_on_input"] = stop_input
 	ConceptManager._migrate_actions_target(entry)
 	var user = ConceptManager._load_from_file()
 	var replaced := false

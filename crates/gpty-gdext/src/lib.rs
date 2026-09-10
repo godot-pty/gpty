@@ -904,13 +904,19 @@ impl GptyTerminal {
             obj.set("name", &Variant::from(c.name.clone()));
             obj.set("trigger", &Variant::from(c.trigger_regex.as_str()));
             obj.set("enabled", &Variant::from(c.enabled));
-            let CaptureMode::UntilStop {
-                stop_timeout_ms,
-                stop_on_input,
-            } = c.capture_mode;
-            obj.set("capture_mode", &Variant::from("until_stop"));
-            obj.set("stop_timeout_ms", &Variant::from(stop_timeout_ms as i64));
-            obj.set("stop_on_input", &Variant::from(stop_on_input));
+            match c.capture_mode {
+                CaptureMode::SingleLine => {
+                    obj.set("capture_mode", &Variant::from("single_line"));
+                }
+                CaptureMode::UntilStop {
+                    stop_timeout_ms,
+                    stop_on_input,
+                } => {
+                    obj.set("capture_mode", &Variant::from("until_stop"));
+                    obj.set("stop_timeout_ms", &Variant::from(stop_timeout_ms as i64));
+                    obj.set("stop_on_input", &Variant::from(stop_on_input));
+                }
+            }
             let mut acts = Array::<Variant>::new();
             for a in &c.destinations {
                 let mut ad = Dictionary::<Variant, Variant>::new();
@@ -943,6 +949,28 @@ impl GptyTerminal {
                 let lines_arr = PackedStringArray::from_iter(ev.lines.iter().map(GString::from));
                 obj.set("lines", &Variant::from(lines_arr));
                 obj.set("target_pane_type", &Variant::from(ev.target_pane_type));
+                arr.push(&Variant::from(obj));
+            }
+        }
+        arr
+    }
+
+    /// Drain notify-only concept matches (`CaptureMode::SingleLine`).
+    ///
+    /// Returns an Array of Dictionaries with keys:
+    /// - `concept_name` (String)
+    ///
+    /// Metadata only: the matched line is never included, so the event
+    /// channel carries facts about the workspace, not what was printed.
+    #[func]
+    fn drain_concept_notices(&self) -> Array<Variant> {
+        let mut arr = Array::<Variant>::new();
+        if let Some(ref spawned) = self.spawned
+            && let Ok(mut notices) = spawned.notice_queue.lock()
+        {
+            for notice in notices.drain(..) {
+                let mut obj = Dictionary::<Variant, Variant>::new();
+                obj.set("concept_name", &Variant::from(notice.concept_name));
                 arr.push(&Variant::from(obj));
             }
         }

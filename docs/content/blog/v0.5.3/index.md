@@ -51,16 +51,20 @@ with the plugin trust model rather than a config file. Concretely:
 - `command_template`, the template substitution and shell-quoting helpers, the label-routing
   function, the engine's injection branch, the pub-sub channel that existed to carry it, the
   Rust click-match export, and the Ctrl+click handler are all deleted.
-- The `SingleLine` capture mode went with them — its only meaning was "inject a command", so a
-  concept that used it would have silently done nothing.
+- `SingleLine` keeps its name and gets a different job: a **notify-only** match. The trigger fires,
+  the match is published on the event socket (`{type: concept, event: matched, mode: single_line, …}`),
+  and nothing else happens — no capture, no routing, no output taken from the pane. That is the mode
+  for an orchestrator that wants to know a pattern appeared without stealing the output, and it is
+  metadata only: the matched line is never published.
 - A legacy `cmd` key in an existing user file is ignored when the file is parsed and dropped the
   next time the app saves it. Your concepts keep working; they just capture.
 - The Settings → Concepts dialog no longer offers a command field.
 
-**What remains is the part that was always safe:** a trigger starts a capture, gpty buffers the raw
-bytes, and the captured output is delivered to the first pane that advertises the concept's target
-(kind) — the code viewer, the Inspector. If no pane accepts it, the bytes are replayed into the
-terminal as if nothing happened. Concepts observe and route; they never act.
+**What remains is the part that was always safe.** A concept either captures — gpty buffers the raw
+bytes and delivers them to the first pane that advertises the concept's target (the code viewer, the
+Inspector), replaying them into the terminal when no pane accepts — or it notifies, which publishes a
+match event and leaves the output exactly where it was. Concepts observe, route, and announce. They
+never act.
 
 ## The audit
 

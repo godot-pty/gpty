@@ -1029,6 +1029,20 @@ func _poll_concept_events_for(ws: Dictionary):
 				"source": str(body.attachment_id),
 				"target": str(ev.get("target_pane_type", "")),
 			}))
+		# Notify-only concepts (`capture_mode: single_line`): the trigger fired,
+		# nothing was captured and no pane received anything. Subscribers get the
+		# match; the output stays in the terminal. Metadata only — the matched
+		# line is deliberately not published.
+		for notice in term.drain_concept_notices():
+			if not (notice is Dictionary):
+				continue
+			GptyTerminal.emit_event(JSON.stringify({
+				"type": "concept",
+				"event": "matched",
+				"mode": "single_line",
+				"name": str(notice.get("concept_name", "")),
+				"source": str(body.attachment_id),
+			}))
 # ═══════════════════════════════════════════════════════════════════════
 # IPC bridge — polls Rust IPC requests from _process
 # ═══════════════════════════════════════════════════════════════════════

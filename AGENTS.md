@@ -194,11 +194,11 @@ See `skill://gpty-omp-integration` for usage patterns.
 
 ### Concept Capture System
 
-- One capture mode: `UntilStop { stop_timeout_ms, stop_on_input }` — buffer output until timeout or user input. `SingleLine` no longer exists: it only ever meant "inject a command", and that capability is gone. Legacy `capture_mode: "single_line"` parses as `UntilStop` with default stop knobs.
+- Two modes: `UntilStop { stop_timeout_ms, stop_on_input }` (buffer output until timeout or user input, then route it to a pane) and `SingleLine` (notify-only: publish the match on the event socket, capture nothing, route nothing, leave the output in the terminal). A missing or unknown `capture_mode` is `UntilStop`; a legacy `cmd` key is ignored on parse.
 - Matching: `concept::match_line` tests PTY output lines (first enabled match wins). When it returns `Some((name, mode, target))`, the engine enters capture mode — subsequent PTY output is buffered, not fed to the grid. On timeout or user input, `finalize_capture()` queues a `CapturedOutput` event.
 - Capture lifecycle:
   - PTY output feeds `LineParser` → lines flow to `concept::match_line` (engine.rs PTY output handler).
-  - On a match → engine enters capture state, buffers raw bytes, suppresses grid feed. A typed line that matches is handled on the stdin path the same way.
+  - On an `UntilStop` match → engine enters capture state, buffers raw bytes, suppresses grid feed. A typed line that matches is handled on the stdin path the same way. On a `SingleLine` match → the concept name is queued (`ConceptNotice`, bounded at 64, drop-oldest) and nothing else happens; `workspace.gd` drains it and emits `{type: concept, event: matched, mode: single_line, name, source}` on the event socket. Metadata only — never the matched line.
   - Timeout or user input → `finalize_capture()` queues `CapturedOutput` with plain-text lines and target label.
   - GDScript polls via `drain_concept_events()` each frame, routes to receiver pane by `target_pane_type`.
   - Receiver found → `acknowledge_capture` (bytes discarded). No receiver → `flush_capture` (bytes replayed to grid) + toast.

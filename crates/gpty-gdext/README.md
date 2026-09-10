@@ -107,6 +107,7 @@ Inspector omp is launched as `omp --mode rpc --no-session --no-tools --no-extens
 | `set_global_concepts(concepts_json: String)` | void | Replace all concepts in the engine (JSON array of concept objects; parse caps and timeout clamp in `gpty_core::concept::concepts_from_json`) |
 | `get_global_concepts()` | `Array` | Get all concepts as Dict array |
 | `drain_concept_events()` | `Array` | Drain completed capture events from this terminal |
+| `drain_concept_notices()` | `Array` | Drain notify-only concept matches (`capture_mode: "single_line"`); returns `[{concept_name}]`. Metadata only — the matched line is never published |
 | `acknowledge_capture(event_id: int)` | void | Discard captured bytes (receiver consumed output) |
 | `flush_capture(event_id: int)` | void | Feed captured bytes to grid (no receiver) |
 

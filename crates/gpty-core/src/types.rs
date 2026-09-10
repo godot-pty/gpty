@@ -5,14 +5,21 @@
 //! can be handed to more than one owner.
 use serde::{Deserialize, Serialize};
 
-/// How a triggered concept captures terminal output.
+/// What a trigger match does.
 ///
-/// A concept never executes anything: a trigger match starts a capture and
-/// the captured text is routed to a pane that advertises the concept's
-/// target type. `UntilStop` is therefore the only mode — a match without a
-/// subsequent capture would produce no observable effect at all.
+/// A concept never executes anything. The two modes differ only in what the
+/// emulator does with the match itself:
+///
+/// - [`CaptureMode::UntilStop`] buffers the output that follows the trigger and
+///   hands it to a receiver pane (code viewer, Inspector).
+/// - [`CaptureMode::SingleLine`] is notify-only: the match is published as an
+///   event on the event socket and nothing else happens — no capture, no
+///   routing, no pane involvement. It is the mode for orchestrators that want
+///   to know a pattern appeared without stealing the output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureMode {
+    /// Publish the match as an event; capture nothing.
+    SingleLine,
     /// Capture all subsequent output until stop conditions are met.
     UntilStop {
         /// Silence for this many ms stops the capture.
@@ -158,4 +165,17 @@ pub struct CapturedOutput {
     pub lines: Vec<String>,
     /// Which pane type this output should be routed to.
     pub target_pane_type: String,
+}
+
+/// A notify-only concept match (`CaptureMode::SingleLine`).
+///
+/// Metadata only — deliberately never the matched line. The GDScript layer
+/// forwards it to the event socket, where subscribers (plugins, orchestrators)
+/// learn that a trigger fired without any pane receiving output. Terminal
+/// content stays in the terminal; the event channel carries facts about the
+/// workspace, not what was printed.
+#[derive(Debug, Clone)]
+pub struct ConceptNotice {
+    /// The concept whose trigger matched.
+    pub concept_name: String,
 }

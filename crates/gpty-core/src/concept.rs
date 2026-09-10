@@ -78,18 +78,21 @@ pub fn concepts_from_json(json: &str) -> Vec<Concept> {
             continue;
         };
         let enabled = item["enabled"].as_bool().unwrap_or(true);
-        // Every concept captures until a stop condition. The legacy
-        // `capture_mode` key is ignored (a `single_line` concept used to
-        // mean "inject a command"; that capability is gone), but the stop
-        // knobs are still read so existing files keep their timeouts.
+        // `single_line` is notify-only: the match is published as an event and
+        // nothing is captured or routed. Anything else (including a missing or
+        // unknown value) captures until a stop condition, because capture is
+        // what the concept editor writes and what the shipped set uses.
         let stop_ms = item["stop_timeout_ms"]
             .as_u64()
             .unwrap_or(300)
             .clamp(1, MAX_STOP_TIMEOUT_MS);
         let stop_input = item["stop_on_input"].as_bool().unwrap_or(true);
-        let cap_mode = CaptureMode::UntilStop {
-            stop_timeout_ms: stop_ms,
-            stop_on_input: stop_input,
+        let cap_mode = match item["capture_mode"].as_str() {
+            Some("single_line") => CaptureMode::SingleLine,
+            _ => CaptureMode::UntilStop {
+                stop_timeout_ms: stop_ms,
+                stop_on_input: stop_input,
+            },
         };
         // Only the routing target is read. A legacy `cmd` key is ignored —
         // concept definitions are data, never something to execute.
@@ -232,16 +235,25 @@ mod tests {
         assert_eq!(concepts[0].destinations[0].target_label, "code_viewer");
     }
 
-    /// Legacy `single_line` concepts used to mean "inject a command". They
-    /// now capture like every other concept rather than doing nothing.
+    /// `single_line` is notify-only: the match is published as an event and
+    /// nothing is captured.
     #[test]
-    fn concepts_from_json_legacy_single_line_becomes_capture() {
+    fn concepts_from_json_single_line_is_notify_only() {
         let json = r#"[
             {"name": "c", "trigger": "x", "capture_mode": "single_line",
              "actions": [{"target": "inspector"}]}
         ]"#;
         let concepts = concepts_from_json(json);
         assert_eq!(concepts.len(), 1);
+        assert_eq!(concepts[0].capture_mode, CaptureMode::SingleLine);
+    }
+
+    /// A missing or unknown `capture_mode` captures — the concept editor writes
+    /// `until_stop` explicitly, and capture is the shipped behaviour.
+    #[test]
+    fn concepts_from_json_defaults_to_capture() {
+        let json = r#"[{"name": "c", "trigger": "x", "capture_mode": "typo"}]"#;
+        let concepts = concepts_from_json(json);
         assert_eq!(
             concepts[0].capture_mode,
             CaptureMode::UntilStop {
@@ -287,7 +299,10 @@ mod tests {
         let concepts = concepts_from_json(json);
         let CaptureMode::UntilStop {
             stop_timeout_ms, ..
-        } = concepts[0].capture_mode;
+        } = concepts[0].capture_mode
+        else {
+            panic!("an until_stop concept must parse as a capture");
+        };
         assert_eq!(stop_timeout_ms, MAX_STOP_TIMEOUT_MS);
     }
 

@@ -36,7 +36,8 @@ How it works:
 1. PTY output bytes stream through the `vte` parser
 2. The parser strips ANSI escape sequences and extracts visible text lines
 3. Each line is tested against every registered concept's `trigger_regex`
-4. On match, the terminal enters capture mode and buffers raw bytes
+4. On an `UntilStop` match the terminal enters capture mode and buffers raw
+   bytes; a `SingleLine` match is queued as a notice and stops here
 5. The capture ends on timeout (silence for N ms) or user input
 6. GDScript drains the completed capture and routes its text to the first pane
    whose type matches the action's `target_label` — with no receiver, the raw
@@ -46,9 +47,10 @@ How it works:
 capture and chooses which pane kind displays the result. It cannot write to a
 PTY. That is deliberate — the trigger is a regex over terminal output, which is
 untrusted, so a concept that could act would be an execution primitive driven by
-whatever a program happens to print. `capture_mode` is always `UntilStop`; the
-legacy `single_line` value parses as a capture with default stop knobs, and a
-legacy `cmd` key in an action is ignored.
+whatever a program happens to print. `capture_mode` is `UntilStop` (capture and route) or `SingleLine`
+(notify-only: the match is published on the event socket and nothing is
+captured, routed, or shown); a missing or unknown value captures, and a legacy
+`cmd` key in an action is ignored.
 
 Key functions: `match_line()`, `finalize_capture()`, `handle_command()`, `feed_grid()`, `store_line()`.
 

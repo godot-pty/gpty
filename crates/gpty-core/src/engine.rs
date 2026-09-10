@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 use crate::agent_state::{AgentState, StateTier};
 use crate::concept;
 use crate::term::TermGrid;
-use crate::types::{CaptureMode, CapturedOutput, Concept, TerminalConfig};
+use crate::types::{CaptureMode, CapturedOutput, Concept, ConceptNotice, TerminalConfig};
 
 // ── Stdin input discrimination ────────────────────────────────────────
 
@@ -83,6 +83,9 @@ pub struct SpawnedTerminal {
     pub grid: Arc<Mutex<TermGrid>>,
     /// Queue of completed captures that GDScript drains.
     pub capture_queue: Arc<Mutex<Vec<CapturedOutput>>>,
+    /// Queue of notify-only concept matches (`CaptureMode::SingleLine`) that
+    /// GDScript drains and forwards to the event socket.
+    pub notice_queue: Arc<Mutex<Vec<ConceptNotice>>>,
     _task: tokio::task::JoinHandle<()>,
 }
 
@@ -149,9 +152,12 @@ impl WorkspaceEngine {
         let capture_buffers: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
+        let notice_queue: Arc<Mutex<Vec<ConceptNotice>>> = Arc::new(Mutex::new(Vec::new()));
+
         let mut task_ctx = TaskContext::new(config.id, Arc::clone(&self.concepts));
         task_ctx.session =
             CaptureSession::new(Arc::clone(&capture_buffers), Arc::clone(&capture_queue));
+        task_ctx.notices = Arc::clone(&notice_queue);
 
         let task = tokio::spawn(run_terminal_task(
             task_ctx,
@@ -168,6 +174,7 @@ impl WorkspaceEngine {
             },
             grid,
             capture_queue,
+            notice_queue,
             _task: task,
         })
     }
@@ -208,12 +215,57 @@ struct TaskContext {
     id: u32,
     concepts: Arc<std::sync::RwLock<Vec<Concept>>>,
     session: CaptureSession,
+    /// Notify-only matches, drained by GDScript and forwarded to the event
+    /// socket. Dropped oldest-first, like the capture queue: a broad trigger
+    /// must not grow memory if nobody is polling.
+    notices: Arc<Mutex<Vec<ConceptNotice>>>,
     suppress_pty_concept_match_until: Option<tokio::time::Instant>,
 }
 
 impl TaskContext {
     fn pty_concept_match_suppressed(&self, now: tokio::time::Instant) -> bool {
         concept_match_suppressed(self.suppress_pty_concept_match_until, now)
+    }
+
+    /// Apply a concept match.
+    ///
+    /// `CaptureMode::SingleLine` is notify-only: the match is queued for the
+    /// event channel and nothing else happens — no capture, no grid
+    /// suppression, no pane involvement. `CaptureMode::UntilStop` starts a
+    /// capture and returns its deadline so the caller can re-arm its timeout.
+    fn apply_match(
+        &mut self,
+        matched: Option<(String, CaptureMode, String)>,
+    ) -> Option<tokio::time::Instant> {
+        match matched? {
+            (name, CaptureMode::SingleLine, _) => {
+                self.push_notice(name);
+                None
+            }
+            (
+                name,
+                CaptureMode::UntilStop {
+                    stop_timeout_ms, ..
+                },
+                target,
+            ) if !self.session.is_active() => {
+                let deadline = tokio::time::Instant::now() + Duration::from_millis(stop_timeout_ms);
+                self.session.begin(name, target, deadline);
+                Some(deadline)
+            }
+            _ => None,
+        }
+    }
+
+    /// Queue a notify-only match, dropping the oldest when nobody has polled.
+    fn push_notice(&self, concept_name: String) {
+        const MAX_NOTICES: usize = 64;
+        if let Ok(mut notices) = self.notices.lock() {
+            if notices.len() >= MAX_NOTICES {
+                notices.remove(0);
+            }
+            notices.push(ConceptNotice { concept_name });
+        }
     }
     fn new(id: u32, concepts: Arc<std::sync::RwLock<Vec<Concept>>>) -> Self {
         Self {
@@ -223,6 +275,7 @@ impl TaskContext {
                 Arc::new(Mutex::new(HashMap::new())),
                 Arc::new(Mutex::new(Vec::new())),
             ),
+            notices: Arc::new(Mutex::new(Vec::new())),
             suppress_pty_concept_match_until: None,
         }
     }
@@ -515,16 +568,11 @@ async fn run_terminal_task(
                                 continue;
                             }
                             let concepts_guard = ctx.concepts.read().unwrap();
-                            let capture = concept::match_line(&concepts_guard, line);
-                            if !ctx.session.is_active()
-                                && let Some((name, CaptureMode::UntilStop { stop_timeout_ms, .. }, target)) = capture
-                            {
-                                let deadline = tokio::time::Instant::now()
-                                    + Duration::from_millis(stop_timeout_ms);
-                                ctx.session.begin(name, target, deadline);
+                            let matched = concept::match_line(&concepts_guard, line);
+                            drop(concepts_guard);
+                            if let Some(deadline) = ctx.apply_match(matched) {
                                 timeout_sleep.as_mut().reset(deadline);
                             }
-                            drop(concepts_guard);
                         }
                         // Tier 2: OSC `gpty_state=<value>` declarations.
                         // Rate-limited — a prompt that reprints the
@@ -611,13 +659,9 @@ async fn run_terminal_task(
                             && line.len() <= crate::parser::MAX_LINE_LEN
                         {
                             let concepts_guard = ctx.concepts.read().unwrap();
-                            let capture = concept::match_line(&concepts_guard, line);
+                            let matched = concept::match_line(&concepts_guard, line);
                             drop(concepts_guard);
-                            if let Some((name, CaptureMode::UntilStop { stop_timeout_ms, .. }, target)) = capture
-                            {
-                                let deadline = tokio::time::Instant::now()
-                                    + Duration::from_millis(stop_timeout_ms);
-                                ctx.session.begin(name, target, deadline);
+                            if let Some(deadline) = ctx.apply_match(matched) {
                                 timeout_sleep.as_mut().reset(deadline);
                             }
                         }
@@ -962,6 +1006,59 @@ mod tests {
             spawned.capture_queue.lock().unwrap().len(),
             1,
             "capture timeout should still finalize"
+        );
+    }
+
+    /// A `SingleLine` concept publishes the match and captures nothing: no
+    /// capture event, no grid suppression, no pane involvement.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn single_line_concept_notifies_without_capturing() {
+        let concept = Concept {
+            name: "notify_me".into(),
+            trigger_regex: Regex::new("^notify me").unwrap(),
+            enabled: true,
+            capture_mode: CaptureMode::SingleLine,
+            destinations: vec![],
+        };
+        let engine = WorkspaceEngine::new(vec![concept]);
+        let config = TerminalConfig { id: 78 };
+        let spawned = engine
+            .spawn_terminal_with_grid(
+                config,
+                "sh",
+                &["-c", "echo 'notify me now'; sleep 1"],
+                &[],
+                &[],
+                24,
+                80,
+            )
+            .await
+            .expect("spawn");
+
+        for _ in 0..50 {
+            if !spawned.notice_queue.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        {
+            let notices = spawned.notice_queue.lock().unwrap();
+            assert_eq!(notices.len(), 1, "the match must be published once");
+            assert_eq!(notices[0].concept_name, "notify_me");
+        }
+
+        // Nothing was captured, and the matched line still reached the grid —
+        // a notify-only match must not take the pane's output away.
+        assert_eq!(
+            spawned.capture_queue.lock().unwrap().len(),
+            0,
+            "a notify-only concept must not start a capture"
+        );
+        let rows = spawned.grid.lock().unwrap().renderable_rows();
+        assert!(
+            rows.iter().any(|r| r.iter().any(|c| c.ch == 'n')),
+            "the matched line must still land in the grid"
         );
     }
 
