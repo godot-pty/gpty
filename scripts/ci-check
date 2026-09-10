@@ -108,6 +108,19 @@ else
     check_failed
 fi
 
+# ── Step 3.1: GDExtension surface ──────────────────────────────────────
+# A renamed or removed #[func] does not fail at GDScript parse time: the call
+# breaks at runtime, in whichever pane exercises it, often visible only in a
+# log line. This cross-checks every GDScript call on a GDExtension handle
+# against the exported surface (name and arity). Static, no build.
+header "GDExtension surface"
+if ./scripts/check-ffi-surface 2>&1; then
+    pass "GDExtension surface"
+else
+    fail "GDExtension surface — a GDScript call does not match any #[func]"
+    check_failed
+fi
+
 # ── Fast mode stops here ───────────────────────────────────────────────
 if $FAST; then
     printf "\n"
@@ -186,6 +199,20 @@ if cargo test --workspace -- --test-threads=1 2>&1; then
     pass "cargo test"
 else
     fail "cargo test"
+    check_failed
+fi
+
+# ── Step 4.2: Rust tests, default parallelism ─────────────────────────
+# The serial pass above is the gate; this one catches tests that only pass
+# because nothing else runs at the same time (shared statics, fixed paths,
+# files in a shared temp dir). A bug of exactly that kind — one module's
+# queue tests clearing state another module was using — stayed invisible
+# for as long as the suite was only ever run serialised.
+header "cargo test (parallel)"
+if cargo test --workspace 2>&1; then
+    pass "cargo test (parallel)"
+else
+    fail "cargo test (parallel) — the suite must also pass with default parallelism"
     check_failed
 fi
 

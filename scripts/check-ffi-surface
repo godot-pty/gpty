@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""Check the GDExtension boundary: GDScript call sites against `#[func]` exports.
+
+A renamed or removed `#[func]` does not fail at GDScript parse time — the call
+fails at runtime, in whichever pane happens to exercise it, and often only in a
+log line. The same is true of a call with the wrong number of arguments.
+
+This walks the exported surface out of `crates/gpty-gdext/src/*.rs`, finds the
+identifiers that GDScript holds a GDExtension class in, and checks every
+`handle.method(...)` call against that surface.
+
+Exit codes: 0 clean, 1 problems found. Reads only; never writes.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+GEXT_SRC = ROOT / "crates" / "gpty-gdext" / "src"
+GODOT_SCENES = ROOT / "godot" / "scenes"
+
+FUNC_RE = re.compile(r"#\[func\]")
+FN_RE = re.compile(r"\bfn\s+([a-z_][a-z0-9_]*)\s*\(")
+CLASS_RE = re.compile(r"struct\s+([A-Z][A-Za-z0-9_]*)")
+
+# Members GDScript may legitimately call on a GDExtension object without a
+# `#[func]`: they come from Godot's Object/Node rather than the class itself.
+# Fail-closed on purpose — a name that is neither an export nor listed here is
+# reported, so a newly used inherited member shows up once and gets added
+# deliberately instead of the check silently widening.
+INHERITED_MEMBERS = {
+    "add_child",
+    "call_deferred",
+    "connect",
+    "disconnect",
+    "emit_signal",
+    "free",
+    "get",
+    "get_instance_id",
+    "get_meta",
+    "has_method",
+    "has_meta",
+    "is_inside_tree",
+    "is_queued_for_deletion",
+    "queue_free",
+    "set",
+    "set_meta",
+}
+
+
+def balanced_args(text: str, open_paren: int) -> str:
+    """Return the argument list of a call whose '(' is at `open_paren`."""
+    depth = 0
+    for i in range(open_paren, len(text)):
+        ch = text[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return text[open_paren + 1 : i]
+    return ""
+
+
+def split_args(arglist: str) -> list[str]:
+    """Split on top-level commas (generics and nested calls included)."""
+    out, depth, current = [], 0, []
+    for ch in arglist:
+        if ch in "(<[{":
+            depth += 1
+        elif ch in ")>]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    if current:
+        out.append("".join(current))
+    return [a.strip() for a in out if a.strip()]
+
+
+def exported_surface() -> dict[str, dict[str, int]]:
+    """class name -> {method: arity}, arity counting only non-self parameters."""
+    surface: dict[str, dict[str, int]] = {}
+    for path in sorted(GEXT_SRC.glob("*.rs")):
+        text = path.read_text()
+        class_match = CLASS_RE.search(text)
+        if not class_match:
+            continue
+        methods: dict[str, int] = {}
+        for marker in FUNC_RE.finditer(text):
+            fn = FN_RE.search(text, marker.end())
+            if not fn:
+                continue
+            params = split_args(balanced_args(text, text.index("(", fn.end() - 1)))
+            params = [p for p in params if p not in ("&self", "&mut self", "self", "mut self")]
+            methods[fn.group(1)] = len(params)
+        if methods:
+            surface[class_match.group(1)] = methods
+    return surface
+
+
+def gdscript_handles(text: str, classes: set[str]) -> dict[str, str]:
+    """identifier -> class name, for locals/handles holding an FFI class."""
+    handles: dict[str, str] = {}
+    for cls in classes:
+        for pattern in (
+            rf"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*{cls}\.new\s*\(",
+            rf"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*ClassDB\.instantiate\(\s*\"{cls}\"\s*\)",
+        ):
+            for m in re.finditer(pattern, text):
+                handles[m.group(1)] = cls
+    return handles
+
+
+def main() -> int:
+    surface = exported_surface()
+    if not surface:
+        print("check-ffi-surface: no #[func] exports found — wrong directory?")
+        return 1
+
+    total_calls = 0
+    problems: list[str] = []
+
+    for path in sorted(GODOT_SCENES.rglob("*.gd")):
+        text = path.read_text()
+        # Strip comments so prose mentioning a call is not mistaken for one.
+        stripped = "\n".join(re.sub(r"#.*$", "", line) for line in text.splitlines())
+        rel = path.relative_to(ROOT)
+        for handle, cls in gdscript_handles(stripped, set(surface)).items():
+            methods = surface[cls]
+            for call in re.finditer(rf"\b{re.escape(handle)}\.([a-z_][a-z0-9_]*)\s*\(", stripped):
+                name = call.group(1)
+                total_calls += 1
+                if name in INHERITED_MEMBERS:
+                    continue
+                if name not in methods:
+                    problems.append(
+                        f"{rel}: {handle}.{name}() — {cls} has no #[func] '{name}'"
+                    )
+                    continue
+                args = split_args(balanced_args(stripped, call.end() - 1))
+                if len(args) != methods[name]:
+                    problems.append(
+                        f"{rel}: {handle}.{name}() called with {len(args)} args, "
+                        f"but the #[func] takes {methods[name]}"
+                    )
+
+    if problems:
+        print(f"check-ffi-surface: {len(problems)} problem(s) across {total_calls} calls")
+        for problem in problems:
+            print(f"  {problem}")
+        return 1
+
+    classes = ", ".join(f"{c} ({len(m)})" for c, m in sorted(surface.items()))
+    print(f"check-ffi-surface: {total_calls} calls match the export surface — {classes}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

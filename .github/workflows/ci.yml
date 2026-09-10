@@ -45,6 +45,12 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace -- --test-threads=1
 
+      # Serial first (deterministic baseline), then default parallelism:
+      # the second pass is what catches tests that only pass because nothing
+      # else runs concurrently (shared statics, fixed paths).
+      - name: Run Rust tests (parallel)
+        run: cargo test --workspace
+
   # ── OMP extension tests (Node, no omp install) ────────────────────────
   omp-events-tests:
     runs-on: ubuntu-latest
