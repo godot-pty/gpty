@@ -354,6 +354,12 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	command_le.placeholder_text = "cli backend: adapter command (argv, no shell)"
 	command_le.text_changed.connect(func(_s): panel._debounce_timer.start())
 	_add_setting_row(v, "Command:", command_le)
+	# The field renders argv joined by spaces, which cannot represent an
+	# argument that contains a space. Re-splitting it on every gather would
+	# therefore fragment such an argument whenever any *other* setting was
+	# edited; keep the argv and only re-parse a field the user actually changed.
+	var command_text: String = command_le.text
+	var command_argv: Array = command.duplicate()
 
 	var auto_cb = CheckButton.new()
 	auto_cb.button_pressed = auto_run
@@ -392,13 +398,25 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"font_size": int(font_spin.value),
 			"backend": backend_le.text.strip_edges(),
 			"model": model_le.text.strip_edges(),
-			"command": command_le.text.strip_edges().split(" ", false),
+			"command": _command_from_field(command_le.text, command_text, command_argv),
 			"auto_run": auto_cb.button_pressed,
 			"accept_concept_captures": capture_cb.button_pressed,
 			"system_prompt": sys_te.text,
 		}
 
 	return v
+
+## Parse the Command field back into argv.
+##
+## The field shows argv joined by spaces, so an argument containing a space
+## cannot be represented in it. When the text is still exactly what was
+## rendered, the original argv is authoritative and is returned unchanged;
+## only an actual edit is parsed, with the documented v1 limitation of
+## whitespace separation and no quoting.
+func _command_from_field(text: String, shown_text: String, shown_argv: Array) -> Array:
+	if text.strip_edges() == shown_text:
+		return shown_argv.duplicate()
+	return text.strip_edges().split(" ", false)
 
 func _add_setting_row(parent: VBoxContainer, label: String, control: Control):
 	var hb = HBoxContainer.new()

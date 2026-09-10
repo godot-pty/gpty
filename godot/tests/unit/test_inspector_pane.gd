@@ -89,6 +89,21 @@ func test_command_setting_roundtrips_through_layout_state():
 	assert_eq(state["command"], ["my-adapter", "--model", "x y"],
 		"command must roundtrip as argv through the layout state")
 
+func test_command_field_only_reparses_when_edited():
+	# The Command field joins argv with spaces, so it cannot show an argument
+	# containing a space. Gathering settings while that field is untouched --
+	# which happens whenever any other setting is edited -- must not re-split
+	# the argv, or the pane silently starts launching a different program and
+	# persists the mangled value back to the profile.
+	var argv = ["/opt/my adapters/run.sh", "--flag"]
+	var shown = " ".join(argv)
+	assert_eq(_pane._command_from_field(shown, shown, argv), argv,
+		"an untouched Command field must keep the original argv")
+	assert_eq(
+		_pane._command_from_field("my-adapter --x", shown, argv),
+		["my-adapter", "--x"],
+		"an edited Command field is parsed as whitespace-separated argv")
+
 func test_cli_backend_streams_from_fake_adapter():
 	if _pane._ai == null:
 		pending("GptyAi GDExtension class not registered")
