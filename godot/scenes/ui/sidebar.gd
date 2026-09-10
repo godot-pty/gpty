@@ -139,7 +139,7 @@ func _add_buttons(v: VBoxContainer):
 	_add_pane_buttons(v)
 
 	var search_btn = _make_icon_text_button(Icons.SEARCH, "Search")
-	search_btn.tooltip_text = "Search the active terminal (Ctrl+F)"
+	search_btn.tooltip_text = "Search the active terminal (Ctrl+Shift+F)"
 	search_btn.pressed.connect(func(): request_search.emit())
 	v.add_child(search_btn)
 

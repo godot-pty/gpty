@@ -159,11 +159,19 @@ func test_held_paste_sends_clipboard_once():
 	assert_eq(_pane.sent, ["clip-payload"], "a held Ctrl+Shift+V pastes exactly once")
 
 
-func test_held_ctrl_f_toggles_search_once():
+func test_held_ctrl_shift_f_toggles_search_once():
+	_pane._handle_keyboard(_key_event(KEY_F, 0, true, true))
+	_pane._handle_keyboard(_key_event(KEY_F, 6, true, true, false, true))
+	_pane._handle_keyboard(_key_event(KEY_F, 6, true, true, false, true))
+	assert_eq(_pane.search_toggles, 1, "a held Ctrl+Shift+F must not flip the search bar per repeat")
+
+
+func test_plain_ctrl_f_reaches_shell_as_page_forward():
+	# The search toggle moved to Ctrl+Shift+F precisely so this chord is never
+	# swallowed: vim/less page-forward (and readline forward-char) need ^F.
 	_pane._handle_keyboard(_key_event(KEY_F, 0, true))
-	_pane._handle_keyboard(_key_event(KEY_F, 6, true, false, false, true))
-	_pane._handle_keyboard(_key_event(KEY_F, 6, true, false, false, true))
-	assert_eq(_pane.search_toggles, 1, "a held Ctrl+F must not flip the search bar per repeat")
+	assert_eq(_pane.sent, ["\u0006"], "plain Ctrl+F must reach the PTY as ACK (0x06)")
+	assert_eq(_pane.search_toggles, 0, "plain Ctrl+F must not open the search bar")
 
 func test_alt_letter_prepends_escape():
 	_pane._handle_keyboard(_key_event(KEY_A, 97, false, false, true))

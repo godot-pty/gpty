@@ -71,7 +71,7 @@ godot/
 |----------|--------|
 | `Ctrl+Shift+C` | Copy selection |
 | `Ctrl+Shift+V` | Paste from clipboard |
-| `Ctrl+F` | Toggle scrollback search |
+| `Ctrl+Shift+F` | Toggle scrollback search |
 | `PageUp` / `PageDown` | Scroll through history |
 
 ### Workspace

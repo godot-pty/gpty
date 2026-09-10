@@ -614,9 +614,11 @@ func _handle_keyboard(event: InputEventKey):
 	if _search_visible and event.keycode == KEY_ESCAPE:
 		_close_search()
 		accept_event(); return
-	# Ctrl+F toggles search bar. Auto-repeat is consumed but ignored: holding
-	# the chord must not flip the bar on every repeat.
-	if event.keycode == KEY_F and event.ctrl_pressed:
+	# Ctrl+Shift+F toggles the search bar. Plain Ctrl+F is deliberately NOT
+	# intercepted: it must keep flowing to the PTY (vim/less page-forward)
+	# through the keymap/unicode path below. Auto-repeat is consumed but
+	# ignored: holding the chord must not flip the bar on every repeat.
+	if event.keycode == KEY_F and event.ctrl_pressed and event.shift_pressed:
 		if not event.echo:
 			_toggle_search()
 		accept_event(); return
