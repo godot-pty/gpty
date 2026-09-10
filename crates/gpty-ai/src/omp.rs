@@ -54,6 +54,22 @@ pub(crate) async fn run_omp_session(
         else {
             break;
         };
+
+        // A prompt timeout or an unconfirmed cancel kills the child, and a
+        // closed or self-exited child finishes it. Re-spawn before serving the
+        // next turn so one bad turn degrades only itself instead of leaving
+        // every later prompt writing into a corpse for the life of the session.
+        let stale = match process.as_mut() {
+            Ok(existing) => existing.is_dead(),
+            Err(_) => true,
+        };
+        if stale {
+            if process.is_ok() {
+                log::warn!("omp child is gone; re-spawning for the next prompt");
+            }
+            process = OmpProcess::spawn(&config, &[]).await;
+        }
+
         sink.emit(
             turn_id,
             &run_id,
@@ -98,9 +114,23 @@ struct OmpProcess {
     lines: Lines<BufReader<ChildStdout>>,
     decoder: RpcFrameDecoder,
     stderr_task: JoinHandle<()>,
+    /// Set once the child can no longer serve a prompt: killed by an abort,
+    /// or its stdout closed. The session re-spawns before the next turn.
+    dead: bool,
 }
 
 impl OmpProcess {
+    /// True once the child can no longer serve a prompt: an abort killed it,
+    /// its stdout closed, or it exited on its own after answering.
+    fn is_dead(&mut self) -> bool {
+        if self.dead {
+            return true;
+        }
+        // A child that answers and then exits is never observed by the read
+        // loop, so probe for a reaped process rather than trusting the flag.
+        matches!(self.child.try_wait(), Ok(Some(_)))
+    }
+
     async fn spawn(config: &SessionOpenRequest, extra_args: &[String]) -> Result<Self, String> {
         let binary = resolve_omp_binary().ok_or_else(|| {
             "omp binary not found (install Oh-My-Pi or set GPTY_OMP to an absolute path)"
@@ -173,6 +203,7 @@ impl OmpProcess {
             lines: BufReader::new(stdout).lines(),
             decoder: RpcFrameDecoder::default(),
             stderr_task,
+            dead: false,
         };
         let ready = tokio::time::timeout(START_TIMEOUT, process.next_frame())
             .await
@@ -313,8 +344,16 @@ impl OmpProcess {
 
     async fn next_frame(&mut self) -> Result<Option<Value>, BackendError> {
         loop {
-            let Some(line) = self.lines.next_line().await? else {
-                return Ok(None);
+            let line = match self.lines.next_line().await {
+                Ok(Some(line)) => line,
+                Ok(None) => {
+                    self.dead = true;
+                    return Ok(None);
+                }
+                Err(error) => {
+                    self.dead = true;
+                    return Err(error.into());
+                }
             };
             if line.trim().is_empty() {
                 continue;
@@ -379,6 +418,7 @@ impl OmpProcess {
     }
 
     async fn kill_and_wait(&mut self) {
+        self.dead = true;
         let _ = self.child.kill().await;
         let _ = tokio::time::timeout(CANCEL_WAIT, self.child.wait()).await;
     }
@@ -590,5 +630,89 @@ mod tests {
                 }))
                 .is_err()
         );
+    }
+
+    /// A child that answers and then exits must not brick the session. The
+    /// next prompt has to re-spawn; without that, every later turn writes
+    /// into a dead pipe and the pane only recovers by being reopened.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn omp_session_respawns_after_child_exits() {
+        use crate::registry::AiSession;
+        use crate::types::{AiEventEnvelope, SessionOpenRequest, SessionPromptRequest};
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        // A fake omp: greets, ignores the handshake, answers one prompt, exits.
+        let script = std::env::temp_dir().join(format!("gpty_fake_omp_{}.sh", std::process::id()));
+        let mut file = std::fs::File::create(&script).unwrap();
+        file.write_all(
+            b"#!/bin/sh\n\
+              echo '{\"type\":\"ready\"}'\n\
+              while IFS= read -r line; do\n\
+                case \"$line\" in\n\
+                  *'\"prompt\"'*) echo '{\"type\":\"agent_end\"}'; exit 0 ;;\n\
+                esac\n\
+              done\n",
+        )
+        .unwrap();
+        // Close the write handle: exec'ing a file held open for writing
+        // fails with ETXTBSY.
+        drop(file);
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // resolve_omp_binary accepts GPTY_OMP when it is absolute, owned by
+        // this user, and not group/other writable — the helper satisfies all
+        // three, and no other test in this crate reads the override.
+        unsafe { std::env::set_var("GPTY_OMP", &script) };
+
+        let session = AiSession::open(
+            &tokio::runtime::Handle::current(),
+            SessionOpenRequest {
+                backend: BackendKind::Omp,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let request = |text: &str| SessionPromptRequest {
+            capture: text.into(),
+            concept_name: "test".into(),
+            source_pane: "T1".into(),
+        };
+
+        async fn drain(session: &AiSession) -> Vec<AiEventEnvelope> {
+            let mut all = Vec::new();
+            for _ in 0..400 {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                all.extend(session.poll(128));
+                if all.iter().any(|event| event.event.is_terminal()) {
+                    return all;
+                }
+            }
+            panic!("omp session did not finish a turn");
+        }
+
+        session.prompt(request("first")).unwrap();
+        let first = drain(&session).await;
+        assert!(
+            first
+                .iter()
+                .any(|e| matches!(e.event, AiEvent::Done { .. })),
+            "first turn must answer: {first:?}"
+        );
+
+        session.prompt(request("second")).unwrap();
+        let second = drain(&session).await;
+        assert!(
+            second
+                .iter()
+                .any(|e| matches!(e.event, AiEvent::Done { .. })),
+            "second turn must survive the child exiting: {second:?}"
+        );
+
+        session.close();
+        unsafe { std::env::remove_var("GPTY_OMP") };
+        let _ = std::fs::remove_file(&script);
     }
 }
