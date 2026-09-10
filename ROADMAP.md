@@ -59,7 +59,7 @@ Launch is deferred: `gPTY` stays below 1.0.0 until either the project gains a gr
 - [ ] `cli_view` pane — runs a command and streams stdout into a pane body: plugin UI v1 without a Godot SDK. Native third-party GDScript/Rust pane plugins deferred to a future SDK (`PaneTypes.ALL` is the layout-trust anchor; see AGENTS.md).
 - [ ] Pane contract extension — `on_agent_state_changed(state)` in `PaneBody` for custom panes.
 - [ ] Plugin registry — JSON index repo + browse page on the docs site; submission by PR.
-- [ ] God-object split — continue splitting `workspace.gd` (~1165 lines) / `terminal_pane.gd` / `terminal_manager.gd` into focused files (workspaces block, persistence, polling, palette, profile/layout restore). IPC dispatch (`ipc_handlers.gd`) and window chrome (`window_chrome.gd`) were already extracted in v0.5.1; concept routing lives in `concept_router.gd`. Do it alongside the plugin work, which touches `workspace.gd` heavily.
+- [ ] God-object split — continue splitting `workspace.gd` (~1350 lines) / `terminal_pane.gd` / `terminal_manager.gd` into focused files (workspaces block, persistence, polling, palette, profile/layout restore). IPC dispatch (`ipc_handlers.gd`) and window chrome (`window_chrome.gd`) were already extracted in v0.5.1; concept routing lives in `concept_router.gd`. Do it alongside the plugin work, which touches `workspace.gd` heavily. Two specific seams first: the duplicated enabled-concept filter (`ConceptManager._push_to_rust` vs `workspace.gd._push_concepts_to_engine` — the same defect had to be fixed twice, and only one copy is reached on each path) collapsing to one entry point; and the `GptyTerminal` `#[func]` surface (~38 exports on one class) splitting into grid/capture/IPC facets, since a plugin author otherwise has to reason about all of it to touch any of it.
 
 ## v0.5.4 — Visual Concept Graph
 
@@ -67,9 +67,17 @@ Launch is deferred: `gPTY` stays below 1.0.0 until either the project gains a gr
 
 ## v0.5.3 — Terminal Performance & Mouse
 
-- [ ] Render batching — merge consecutive same-attribute cell runs into single draw calls (glyph-run batching) in `terminal_pane.gd` `_draw()`, cutting the per-frame canvas-item count; measure frame time under flood output and scroll before/after. (Deferred from v0.5.0.)
-- [ ] UI Thread DoS mitigation — rate-limit terminal rendering when a PTY floods output (e.g., `cat /dev/urandom`), preventing the UI thread from locking up. (Deferred from v0.5.0.)
+- [ ] Render batching — merge consecutive same-attribute cell runs into single draw calls (glyph-run batching) in `terminal_pane.gd` `_draw()`, cutting the per-frame canvas-item count; measure frame time under flood output and scroll before/after. (Deferred from v0.5.0.) Baseline from the v0.5.3 prep work: idle panes no longer repaint at all (the repaint is gated on the grid generation — measured 48–49 gate ticks/s per pane against 0 generation changes), so this item is now only about cost *under load*.
+- [ ] UI Thread DoS mitigation — rate-limit terminal rendering when a PTY floods output (e.g., `cat /dev/urandom`), preventing the UI thread from locking up. (Deferred from v0.5.0.) Made more pressing by the same prep work: under flood the generation changes on every chunk, so the repaint gate is open every frame by definition — rate-limiting is the remaining lever, not an optimisation.
 - [ ] Terminal mouse reporting — forward mouse events to the PTY when apps enable tracking (DECSET 1000/1002/1006, SGR-encoded), so herdr's built-in pop-ups, lazygit, and nvim mouse mode work inside panes. Mode state comes from `alacritty_terminal`; UI selection/scroll behavior unchanged when reporting is off.
+
+### Hardening (audit follow-ups folded into this milestone)
+
+- [ ] Restored-executable parent-directory check — `pty::validate_executable` stats the program file only. A binary whose own mode is safe (0755) can still be swapped by another user when it sits in a group/other-writable directory without the sticky bit; `/tmp` is protected by default, other shared directories are not. Walk the parent chain and reject when any directory is writable by others without `+t`, then extend the existing test.
+- [ ] Parallel test job in CI — `scripts/ci-check` runs `cargo test --test-threads=1`, and that serialisation hid a shared-static isolation bug in `crates/gpty-gdext/src/ipc.rs` until a multi-threaded run surfaced it. Add a CI job (or a ci-check step) that runs the workspace suite with default parallelism so this class fails loudly instead of intermittently.
+- [ ] Windows runtime smoke — the named-pipe event listener and the `first_pipe_instance` fix are verified by `cargo check` and source reading only: CI compiles the Windows target but never runs Godot on it. Add a `windows-latest` job that boots the GUI headless and drives the pane-API/CLI path, so Windows behaviour is observed rather than inferred.
+- [ ] Scrollback retention across pane ids — history is keyed by `attachment_id` and rows for ids that no longer exist are never reclaimed (one development database: 3 311 rows across 556 ids, 56 MB, of which only 3 ids are live). Prune rows whose id appears in no workspace, or add a global cap, and surface the store's size in Settings.
+- [ ] Seam contract tests — the audit's recurring defect shape was a documented contract with no test spanning the boundary where it is implemented (MCP tool name → IPC method, `paneRead`'s scrollback claim, the concept-routing label/id pair). Add one contract test per cross-module seam where both sides exist in-repo, starting with the `#[func]` export surface (name + arity) against its GDScript call sites.
 
 ## v0.5.2 — Agent State & Adapters
 
