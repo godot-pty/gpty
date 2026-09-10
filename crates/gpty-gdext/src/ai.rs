@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use godot::prelude::*;
-use gpty_ai::{AiSession, SessionOpenRequest, SessionPromptRequest};
+use gpty_ai::{AiSession, BackendKind, SessionOpenRequest, SessionPromptRequest};
 use serde_json::{Value, json};
 
 use crate::RUNTIME;
@@ -37,6 +37,16 @@ impl GptyAi {
             Ok(config) => config,
             Err(error) => return json_error(format!("invalid session_open JSON: {error}")),
         };
+        // The adapter command comes from pane settings, which a saved profile
+        // or workspace can supply, and it is executed as argv. Hold it to the
+        // same standard as a terminal's command: an absolute path must not
+        // name a file another user could have written.
+        if config.backend == BackendKind::Cli
+            && let Some(program) = config.command.first()
+            && let Err(error) = gpty_core::pty::validate_executable(program)
+        {
+            return json_error(format!("adapter command rejected: {error}"));
+        }
         match AiSession::open(RUNTIME.handle(), config) {
             Ok(session) => {
                 if let Some(previous) = self.session.replace(Arc::clone(&session)) {

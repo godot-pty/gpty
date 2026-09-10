@@ -120,6 +120,26 @@ func test_envelopes_from_other_runs_are_ignored():
 	})
 	assert_string_contains(_pane._status.text, "3 earlier events dropped")
 
+func test_cli_adapter_path_another_user_controls_is_refused():
+	# The adapter command comes from pane settings, which a profile or
+	# workspace file can supply, and it is executed as argv — so an absolute
+	# path must not point at a file another user could have written.
+	if _pane._ai == null:
+		pending("GptyAi GDExtension class not registered")
+		return
+	var path := "/tmp/gpty_inspector_probe_%d" % OS.get_process_id()
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string("#!/bin/sh\n")
+	f.close()
+	OS.execute("chmod", ["777", path])
+
+	_pane.backend = "cli"
+	_pane.command = [path]
+	assert_false(_pane._ensure_session(), "a world-writable adapter must not open")
+	assert_string_contains(_pane._status.text, "rejected")
+
+	DirAccess.remove_absolute(path)
+
 func test_command_field_only_reparses_when_edited():
 	# The Command field joins argv with spaces, so it cannot show an argument
 	# containing a space. Gathering settings while that field is untouched --
