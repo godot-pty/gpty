@@ -30,6 +30,14 @@ pub enum CursorShape {
     Beam = 2,
 }
 
+/// Mouse-tracking bits returned by [`TermGrid::mouse_mode`]. The values are
+/// part of the FFI contract with the pane's `MOUSE_MODE_*` constants: the UI
+/// both checks them and encodes the bytes it forwards from them.
+pub const MOUSE_MODE_CLICK: u8 = 1;
+pub const MOUSE_MODE_DRAG: u8 = 2;
+pub const MOUSE_MODE_MOTION: u8 = 4;
+pub const MOUSE_MODE_SGR: u8 = 8;
+
 use crate::color::color_to_rgb;
 
 /// A character cell ready for rendering.
@@ -445,6 +453,30 @@ impl TermGrid {
             .contains(alacritty_terminal::term::TermMode::APP_KEYPAD)
     }
 
+    /// Mouse reporting the child process has enabled, as a bitmask of the
+    /// `MOUSE_MODE_*` constants (DECSET 1000/1002/1003 for the tracking mode,
+    /// 1006 for SGR encoding). Zero means the pane owns mouse events:
+    /// selection and scrollback behave as usual. The UI encodes what it
+    /// forwards from these same bits, so the FFI value and the emitted bytes
+    /// can never disagree.
+    pub fn mouse_mode(&self) -> u8 {
+        let mode = self.term.mode();
+        let mut bits = 0u8;
+        if mode.contains(alacritty_terminal::term::TermMode::MOUSE_REPORT_CLICK) {
+            bits |= MOUSE_MODE_CLICK;
+        }
+        if mode.contains(alacritty_terminal::term::TermMode::MOUSE_DRAG) {
+            bits |= MOUSE_MODE_DRAG;
+        }
+        if mode.contains(alacritty_terminal::term::TermMode::MOUSE_MOTION) {
+            bits |= MOUSE_MODE_MOTION;
+        }
+        if mode.contains(alacritty_terminal::term::TermMode::SGR_MOUSE) {
+            bits |= MOUSE_MODE_SGR;
+        }
+        bits
+    }
+
     /// Current terminal title (set via OSC escape sequences, e.g. bash prompt).
     pub fn title(&self) -> String {
         self.title.lock().map(|t| t.clone()).unwrap_or_default()
@@ -678,6 +710,41 @@ mod tests {
         let g = TermGrid::new(24, 80);
         assert_eq!(g.num_rows(), 24);
         assert_eq!(g.num_cols(), 80);
+    }
+
+    /// DECSET 1000/1002/1003 pick one tracking mode (the newest wins) and
+    /// 1006 is independent of it — the UI both checks these bits and encodes
+    /// the bytes it forwards from them.
+    #[test]
+    fn mouse_mode_tracks_decset_and_reset() {
+        let mut g = TermGrid::new(24, 80);
+        assert_eq!(g.mouse_mode(), 0, "a fresh grid owns its own mouse events");
+
+        g.feed(b"\x1b[?1000h");
+        assert_eq!(g.mouse_mode(), MOUSE_MODE_CLICK);
+
+        g.feed(b"\x1b[?1002h");
+        assert_eq!(
+            g.mouse_mode(),
+            MOUSE_MODE_DRAG,
+            "a tracking mode replaces the previous one"
+        );
+
+        g.feed(b"\x1b[?1006h");
+        assert_eq!(g.mouse_mode(), MOUSE_MODE_DRAG | MOUSE_MODE_SGR);
+
+        g.feed(b"\x1b[?1002l");
+        assert_eq!(
+            g.mouse_mode(),
+            MOUSE_MODE_SGR,
+            "encoding outlives the tracking mode"
+        );
+
+        g.feed(b"\x1b[?1006l");
+        assert_eq!(g.mouse_mode(), 0, "all reporting off");
+
+        g.feed(b"\x1b[?1003h");
+        assert_eq!(g.mouse_mode(), MOUSE_MODE_MOTION);
     }
 
     #[test]

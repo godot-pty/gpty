@@ -134,6 +134,81 @@ var _view_input_ms: int = -1_000_000
 func _note_view_input():
 	_view_input_ms = Time.get_ticks_msec()
 
+## Mouse reporting the child process has enabled, read from the grid
+## (`GptyTerminal.get_mouse_mode`). The bit values are the FFI contract with
+## `gpty_core::term::MOUSE_MODE_*`: click = DECSET 1000, drag = 1002,
+## motion = 1003, SGR encoding = 1006. Zero — the common case — means the pane
+## owns mouse events.
+const MOUSE_MODE_CLICK := 1
+const MOUSE_MODE_DRAG := 2
+const MOUSE_MODE_MOTION := 4
+const MOUSE_MODE_SGR := 8
+## Protocol button codes. 64+ are the wheel; 3 is "no button" in a motion
+## report, and the legacy encoding's release code.
+const WHEEL_BUTTON_BASE := 64
+const NO_BUTTON := 3
+## Modifier bits for the encoder (the protocol adds 4/8/16 for shift/alt/ctrl).
+const MOD_SHIFT := 1
+const MOD_ALT := 2
+const MOD_CTRL := 4
+## Highest cell the legacy X10 encoding can address.
+const LEGACY_CELL_MAX := 223
+
+## Encode one mouse report for the child process.
+##
+## `button` is the protocol button code, `cell` is 1-based, `mods` is the
+## `MOD_*` bitmask, and `released` selects the release form. SGR (DECSET 1006)
+## is used when the app asked for it; otherwise the legacy X10 form. Returns
+## "" when the event cannot be expressed: X10 offsets coordinates by 32 and
+## caps them at 223, and reporting a different cell than the one clicked would
+## be worse than dropping the event.
+static func encode_mouse_report(
+	mode: int, released: bool, button: int, cell: Vector2i, mods: int
+) -> String:
+	var addends := 0
+	if mods & MOD_SHIFT != 0: addends += 4
+	if mods & MOD_ALT != 0: addends += 8
+	if mods & MOD_CTRL != 0: addends += 16
+	if mode & MOUSE_MODE_SGR != 0:
+		return "\u001b[<%d;%d;%d%s" % [
+			button + addends, cell.x, cell.y, "m" if released else "M"]
+	if cell.x > LEGACY_CELL_MAX or cell.y > LEGACY_CELL_MAX:
+		return ""
+	var cb := (NO_BUTTON if released else button) + addends
+	return "\u001b[M%s%s%s" % [char(32 + cb), char(32 + cell.x), char(32 + cell.y)]
+
+## Protocol button code for a Godot mouse button, or -1 when the button is not
+## part of the mouse protocol.
+static func _protocol_button(button_index: int) -> int:
+	match button_index:
+		MOUSE_BUTTON_LEFT: return 0
+		MOUSE_BUTTON_MIDDLE: return 1
+		MOUSE_BUTTON_RIGHT: return 2
+		MOUSE_BUTTON_WHEEL_UP: return 64
+		MOUSE_BUTTON_WHEEL_DOWN: return 65
+		MOUSE_BUTTON_WHEEL_LEFT: return 66
+		MOUSE_BUTTON_WHEEL_RIGHT: return 67
+	return -1
+
+## Protocol button code for the buttons held during a motion event.
+static func _motion_button(button_mask: int) -> int:
+	if button_mask & MOUSE_BUTTON_MASK_LEFT != 0: return 0
+	if button_mask & MOUSE_BUTTON_MASK_MIDDLE != 0: return 1
+	if button_mask & MOUSE_BUTTON_MASK_RIGHT != 0: return 2
+	return NO_BUTTON
+
+## Mouse reporting the child process has enabled (the grid's bitmask). A plain
+## GDScript method so tests can drive the pane without a live child process.
+func _mouse_mode() -> int:
+	return _terminal.get_mouse_mode() if _terminal != null else 0
+
+## Take keyboard focus if this pane is in the tree. Synthesized events (tests)
+## and events during layout churn reach a pane that is not in the tree yet,
+## where grab_focus() is an engine error and does nothing anyway.
+func _take_focus():
+	if is_inside_tree():
+		grab_focus()
+
 func _ready():
 	super._ready()
 	_terminal = GptyTerminal.new()
@@ -669,10 +744,18 @@ func _gui_input(event):
 		_handle_keyboard(event)
 
 func _handle_mouse(event: InputEvent):
+	# A child process that turned on mouse tracking (DECSET 1000/1002/1003)
+	# owns these events: they are its input, not the pane's. Shift bypasses
+	# reporting (the xterm convention) so text selection stays reachable, and
+	# events the tracking mode does not cover fall through to the pane.
+	var mode := _mouse_mode()
+	if mode != 0 and not event.shift_pressed:
+		if _report_mouse_event(event, mode):
+			return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
-				grab_focus(); _selecting = true
+				_take_focus(); _selecting = true
 				_sel_start = _mouse_to_cell(event.position); _sel_end = _sel_start; queue_redraw()
 			else: _selecting = false; queue_redraw()
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
@@ -683,6 +766,48 @@ func _handle_mouse(event: InputEvent):
 			_terminal.scroll_down(scroll_lines)
 	if event is InputEventMouseMotion and _selecting:
 		_sel_end = _mouse_to_cell(event.position); queue_redraw()
+
+## Forward a mouse event to the child process. Returns true when the event
+## went to the app — the pane then leaves selection and scrollback alone.
+##
+## Only the events the enabled tracking mode covers are forwarded: with 1000
+## (click) a drag still selects text, with 1002 a drag belongs to the app, and
+## 1003 additionally reports motion with no button held.
+func _report_mouse_event(event: InputEvent, mode: int) -> bool:
+	var tracking := mode & (MOUSE_MODE_CLICK | MOUSE_MODE_DRAG | MOUSE_MODE_MOTION)
+	if tracking == 0:
+		return false
+	var cell := _mouse_to_cell(event.position)
+	if cell.x < 0 or cell.y < 0:
+		return false
+	var mods := 0
+	if event.shift_pressed: mods |= MOD_SHIFT
+	if event.alt_pressed: mods |= MOD_ALT
+	if event.ctrl_pressed: mods |= MOD_CTRL
+	var point := cell + Vector2i.ONE  # the protocol is 1-based
+	if event is InputEventMouseButton:
+		var button := _protocol_button(event.button_index)
+		if button < 0:
+			return false
+		if event.pressed:
+			_take_focus()
+		if button >= WHEEL_BUTTON_BASE:
+			# Wheel events are press-only; their release is swallowed.
+			if event.pressed:
+				_send_to_term(encode_mouse_report(mode, false, button, point, mods))
+			return true
+		_send_to_term(encode_mouse_report(mode, not event.pressed, button, point, mods))
+		return true
+	if event is InputEventMouseMotion:
+		var button := _motion_button(event.button_mask)
+		var held := button != NO_BUTTON
+		if held and mode & (MOUSE_MODE_DRAG | MOUSE_MODE_MOTION) == 0:
+			return false
+		if not held and mode & MOUSE_MODE_MOTION == 0:
+			return false
+		_send_to_term(encode_mouse_report(mode, false, button, point, mods))
+		return true
+	return false
 
 func _is_copy_paste(event: InputEventKey) -> bool:
 	return (event.keycode == KEY_C or event.keycode == KEY_V) and event.ctrl_pressed and event.shift_pressed

@@ -95,7 +95,7 @@ gpty/
         │   ├── workspace.gd        # Root controller, workspace switching, concept routing, profile restore
         │   ├── ipc_handlers.gd     # WorkspaceIpcHandlers — pane-API/IPC method dispatch (extracted)
         │   ├── concept_router.gd   # Pure concept-event routing (extracted, testable)
-        │   ├── terminal_pane.gd    # Control-based renderer, keyboard, selection, history search
+        │   ├── terminal_pane.gd    # Control-based renderer, keyboard, mouse, selection, history search
         │   └── terminal_manager.gd # Tile lifecycle, split/kill/swap/spawn
         ├── ui/
         │   ├── sidebar.gd
@@ -344,6 +344,8 @@ Policy (threat model, supported versions, reporting, what gpty does not defend a
 - Event capability is per-PTY: unregister on spawn failure and `Drop`. A capability for terminal A must never be accepted for terminal B. Compare capabilities in constant time.
 - Inspector close must tear down its OMP child: call `session_cancel` + `session_close` from `_exit_tree()`. Dropping a Godot node without closing the session leaves `omp` running.
 - `stream=thinking` observers are not job owners: after migration they become Reasoning panes and must keep `can_receive_content() == false`. Acknowledging a capture without starting analysis discards terminal output.
+- Terminal mouse reporting: the grid's mouse-mode bits (`GptyTerminal.get_mouse_mode`, `gpty_core::term::MOUSE_MODE_*`) are the single source of truth for whether the child owns the mouse. The pane forwards only what the enabled modes cover (DECSET 1000 click, 1002 drag, 1003 any-motion), encodes SGR when 1006 is set and the legacy X10 form otherwise, and must leave selection/scrollback untouched when the bits are zero. `Shift` bypasses reporting (xterm's convention) so text selection stays reachable — removing that traps the user in any full-screen app that grabs the mouse.
+- Mouse reports are cells, 1-based, mapped through the same `_grid_offset()`/cell metrics as selection. The legacy X10 form offsets by 32 and cannot address past cell 223: drop such an event rather than clamping, or the app receives a click on a cell the user never touched. The report has no trailing newline, so a child that has mouse tracking on but left the PTY in canonical mode never sees it (that is the app's bug, not the pane's — the automated check drives a raw-mode child).
 
 ### Agent Tool Notes
 

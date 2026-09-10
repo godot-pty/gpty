@@ -638,6 +638,15 @@ impl GptyTerminal {
         self.with_grid(|g| g.display_offset() as i64, 0)
     }
 
+    /// Mouse reporting the child process has enabled, as a bitmask: bit 0
+    /// click (DECSET 1000), bit 1 drag (1002), bit 2 any-motion (1003), bit 3
+    /// SGR encoding (1006). Zero — the common case — means the pane owns
+    /// mouse events and selection/scrollback behave as usual.
+    #[func]
+    fn get_mouse_mode(&self) -> i64 {
+        self.with_grid(|g| g.mouse_mode() as i64, 0)
+    }
+
     /// Total lines of scrollback history available.
     #[func]
     fn get_history_size(&self) -> i64 {
