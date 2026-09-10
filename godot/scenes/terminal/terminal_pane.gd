@@ -88,6 +88,9 @@ var _search_error: String = ""
 var _scope_btn: Button
 var _scope_history: bool = false
 var _history_results: Array = []  # [[line_num, text], ...]
+## Lines persisted for this pane, so an empty result can say whether the pane
+## has any history at all.
+var _history_stored_lines: int = 0
 var _history_panel: ScrollContainer
 var _history_list: VBoxContainer
 var _sync_interval: float = 1.0 / 60.0
@@ -759,29 +762,51 @@ func _do_search(pattern: String):
 
 func _do_history_search(pattern: String):
 	var parsed = JSON.parse_string(str(_terminal.search_history(pattern, 100)))
-	if parsed == null or not parsed is Dictionary or parsed.has("error"):
-		_search_error = "FTS5 query failed"
-		_clear_history_results()
+	if parsed == null or not parsed is Dictionary:
+		_search_error = "History search returned an unreadable response"
+		_history_results = []
+		_history_stored_lines = 0
+		_rebuild_history_panel()
 		return
-	_search_error = ""
+	_search_error = str(parsed.get("error", ""))
+	_history_stored_lines = int(parsed.get("stored_lines", 0))
 	_history_results = parsed.get("results", [])
 	_rebuild_history_panel()
 
 func _rebuild_history_panel():
 	for c in _history_list.get_children():
 		c.queue_free()
-	for entry in _history_results:
-		var line_num: int = int(entry[0])
-		var full_text: String = str(entry[1])
-		var btn = Button.new()
-		btn.text = "line %d: %s" % [line_num, full_text.left(200)]
-		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		btn.focus_mode = Control.FOCUS_NONE
-		btn.clip_text = true
-		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.pressed.connect(_on_history_result_clicked.bind(full_text, line_num))
-		_history_list.add_child(btn)
-	_history_panel.visible = _scope_history and _search_visible and _history_results.size() > 0
+	if _history_results.is_empty():
+		# A failed query, a missing store and a genuine no-match all used to
+		# look identical: an empty panel that never even appeared. Say which.
+		var msg := _search_error
+		if msg == "":
+			msg = (
+				"No line in this pane's saved history matches."
+				if _history_stored_lines > 0
+				else "No history stored for this pane yet."
+			)
+		var lbl := Label.new()
+		lbl.text = msg
+		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		lbl.add_theme_font_size_override("font_size", 12)
+		lbl.custom_minimum_size = Vector2(0, 24)
+		_history_list.add_child(lbl)
+	else:
+		for entry in _history_results:
+			var line_num: int = int(entry[0])
+			var full_text: String = str(entry[1])
+			var btn = Button.new()
+			btn.text = "line %d: %s" % [line_num, full_text.left(200)]
+			btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			btn.focus_mode = Control.FOCUS_NONE
+			btn.clip_text = true
+			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			btn.pressed.connect(_on_history_result_clicked.bind(full_text, line_num))
+			_history_list.add_child(btn)
+	# Shown whenever the History scope is active with a query, so the
+	# explanation for an empty list is visible rather than implied.
+	_history_panel.visible = _scope_history and _search_visible
 
 func _clear_history_results():
 	_history_results.clear()

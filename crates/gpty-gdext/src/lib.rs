@@ -303,17 +303,23 @@ impl GptyTerminal {
         }
     }
 
-    /// Search this pane's persisted scrollback history with FTS5.
+    /// Search this pane's persisted scrollback (SQLite + FTS5).
     ///
-    /// `pattern` is passed to FTS5 `MATCH` verbatim (raw query syntax:
-    /// bare words, quoted phrases, `NEAR`, prefix `*`). Returns JSON
-    /// `{"results": [[line_num, text], ...]}` newest-first, or
-    /// `{"results": []}` when no store is attached or nothing matches.
+    /// `pattern` is free text as a user typed it, not an FTS5 query: it is
+    /// sanitised first, because raw `MATCH` rejects ordinary searches such as
+    /// `main.rs` (syntax error near ".") or `error: x` (read as a column
+    /// filter). Terms are ANDed. Returns JSON
+    /// `{"results": [[line_num, text], ...], "stored_lines": N}` newest-first;
+    /// `error` is present only when the query could not run at all, so a
+    /// caller can distinguish "no match" from "this pane has no history" (the
+    /// common case when a pane is not restored under its saved id).
     /// `limit` is clamped to 1..=500.
     #[func]
     fn search_history(&self, pattern: GString, limit: i64) -> GString {
         let Some(spawned) = &self.spawned else {
-            return GString::from("{\"results\":[]}");
+            return GString::from(
+                "{\"results\":[],\"stored_lines\":0,\"error\":\"pane is not running\"}",
+            );
         };
         let history = if let Ok(grid) = spawned.grid.lock() {
             grid.history.clone()
@@ -321,20 +327,35 @@ impl GptyTerminal {
             None
         };
         let Some(history) = history else {
-            return GString::from("{\"results\":[]}");
+            return GString::from(
+                "{\"results\":[],\"stored_lines\":0,\"error\":\"no history store for this pane\"}",
+            );
         };
-        let results = match history.lock() {
-            Ok(h) => h
-                .search(&pattern.to_string(), limit.clamp(1, 500) as usize)
-                .unwrap_or_default(),
-            Err(_) => Vec::new(),
+        let limit = limit.clamp(1, 500) as usize;
+        let text = pattern.to_string();
+        let (results, stored, error) = match history.lock() {
+            Ok(h) => {
+                let stored = h.line_count().unwrap_or(0);
+                match h.search_user_text(&text, limit) {
+                    Ok(rows) => (rows, stored, None),
+                    Err(e) => (Vec::new(), stored, Some(e.to_string())),
+                }
+            }
+            Err(e) => (
+                Vec::new(),
+                0,
+                Some(format!("history store lock poisoned: {e}")),
+            ),
         };
         let rows: Vec<Vec<serde_json::Value>> = results
             .into_iter()
             .map(|(n, t)| vec![serde_json::json!(n), serde_json::json!(t)])
             .collect();
-        let json = serde_json::json!({ "results": rows }).to_string();
-        GString::from(json.as_str())
+        let mut json = serde_json::json!({ "results": rows, "stored_lines": stored });
+        if let Some(error) = error {
+            json["error"] = serde_json::json!(error);
+        }
+        GString::from(json.to_string().as_str())
     }
 
     /// Send raw text to the PTY — NO newline appended.

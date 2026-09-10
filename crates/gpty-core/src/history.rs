@@ -9,6 +9,34 @@
 
 use rusqlite::{Connection, params};
 
+/// Maximum terms carried from user input into an FTS5 query.
+const MAX_QUERY_TERMS: usize = 32;
+
+/// Reduce free text to a valid FTS5 query.
+///
+/// FTS5's `MATCH` takes a query language, not a search string, so raw user
+/// input rejects ordinary searches: `main.rs` (syntax error near "."),
+/// `error: x` (read as a column filter), `warning:`, `*`, `"unclosed`. Keeping
+/// only word characters and quoting each term makes any input valid, and
+/// space-separated quoted terms keep FTS5's implicit AND.
+pub fn sanitize_fts_query(input: &str) -> String {
+    input
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .take(MAX_QUERY_TERMS)
+        .map(|term| format!("\"{term}\""))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Manages scrollback persistence for terminal panes.
 pub struct HistoryStore {
     conn: Connection,
@@ -92,6 +120,27 @@ impl HistoryStore {
             results.push(row?);
         }
         Ok(results)
+    }
+
+    /// Search using free text as a user typed it.
+    ///
+    /// The search box takes a search *string*; FTS5's `MATCH` takes a query
+    /// language. Left raw, ordinary input fails: `main.rs` is a syntax error
+    /// (near "."), `error: x` is read as a column filter, `warning:` and `*`
+    /// fail too — and a syntax error reported as an empty result set is
+    /// indistinguishable from "no match". Sanitising first makes any input
+    /// valid, keeping AND between terms.
+    pub fn search_user_text(
+        &self,
+        text: &str,
+        limit: usize,
+    ) -> Result<Vec<(i64, String)>, rusqlite::Error> {
+        let query = sanitize_fts_query(text);
+        if query.is_empty() {
+            // Nothing searchable was typed; an empty MATCH is itself invalid.
+            return Ok(Vec::new());
+        }
+        self.search(&query, limit)
     }
 
     /// Retrieve a range of history lines by absolute line number.
@@ -178,6 +227,57 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, 1);
         assert!(results[0].1.contains("error"));
+    }
+
+    #[test]
+    fn sanitize_fts_query_accepts_ordinary_search_text() {
+        // Each of these is a syntax error or a column filter when handed to
+        // FTS5 raw — which is how the search box reported "no results" for
+        // perfectly ordinary input.
+        assert_eq!(sanitize_fts_query("main.rs"), "\"main\" \"rs\"");
+        assert_eq!(sanitize_fts_query("src/main.rs"), "\"src\" \"main\" \"rs\"");
+        assert_eq!(
+            sanitize_fts_query("error: something"),
+            "\"error\" \"something\""
+        );
+        assert_eq!(sanitize_fts_query("warning:"), "\"warning\"");
+        assert_eq!(sanitize_fts_query("-x"), "\"x\"");
+        assert_eq!(sanitize_fts_query("\"unbalanced"), "\"unbalanced\"");
+        // Operators lose their meaning instead of raising a syntax error.
+        assert_eq!(sanitize_fts_query("a OR b*"), "\"a\" \"OR\" \"b\"");
+        // Underscores survive, so identifiers stay searchable.
+        assert_eq!(sanitize_fts_query("GPTY_SOCKET"), "\"GPTY_SOCKET\"");
+    }
+
+    #[test]
+    fn sanitize_fts_query_yields_nothing_for_punctuation_only() {
+        // Callers must treat this as "nothing to search", not as a query.
+        assert_eq!(sanitize_fts_query("*"), "");
+        assert_eq!(sanitize_fts_query("   "), "");
+        assert_eq!(sanitize_fts_query("..."), "");
+    }
+
+    #[test]
+    fn search_user_text_handles_punctuated_input() {
+        let store = HistoryStore::open(":memory:", "pane-a", 100).unwrap();
+        store.append(0, "compiling src/main.rs").unwrap();
+        store.append(1, "error: cannot find value").unwrap();
+        store.append(2, "unrelated line").unwrap();
+
+        // Raw FTS5 rejects both of these outright.
+        assert!(store.search("main.rs", 10).is_err());
+        assert!(store.search("error: cannot", 10).is_err());
+
+        let hits = store.search_user_text("main.rs", 10).unwrap();
+        assert_eq!(hits.len(), 1, "expected the src/main.rs line: {hits:?}");
+        assert_eq!(hits[0].1, "compiling src/main.rs");
+
+        let hits = store.search_user_text("error: cannot", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].1, "error: cannot find value");
+
+        // Punctuation-only input is an empty search, not an error.
+        assert!(store.search_user_text("*", 10).unwrap().is_empty());
     }
 
     #[test]
