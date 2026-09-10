@@ -185,14 +185,24 @@ impl IpcServer {
     async fn create_pipe_instance(
         &self,
     ) -> io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
+        use std::sync::atomic::{AtomicBool, Ordering};
         use tokio::net::windows::named_pipe;
 
+        // FILE_FLAG_FIRST_PIPE_INSTANCE makes create() fail when *any*
+        // instance of the name already exists, so it only guards the very
+        // first instance this process creates — that is what blocks another
+        // local process from squatting on the pipe name. Applying it to every
+        // instance would instead make the accept loop fail with
+        // "pipe create error" until the previous client disconnects,
+        // serializing the daemon to one live connection.
+        static FIRST_PIPE_INSTANCE: AtomicBool = AtomicBool::new(true);
+        let first = FIRST_PIPE_INSTANCE.swap(false, Ordering::SeqCst);
+
         // Named pipes are network-reachable by default; this daemon is
-        // local-only, so reject remote clients. first_pipe_instance guards
-        // against another local process squatting on the pipe name.
+        // local-only, so reject remote clients.
         named_pipe::ServerOptions::new()
             .reject_remote_clients(true)
-            .first_pipe_instance(true)
+            .first_pipe_instance(first)
             .create(&self.socket_path)
     }
 }
