@@ -57,12 +57,18 @@ static func migrate_pane_settings(raw: Dictionary) -> Dictionary:
 	settings["attachment_id"] = sanitize_attachment_id(attachment)
 	return settings
 
+static var _attachment_id_re: RegEx = null
+
 static func sanitize_attachment_id(v) -> String:
 	if not (v is String) or v.length() > 32:
 		return ""
-	var valid := RegEx.new()
-	valid.compile("^[a-z][a-z0-9_-]{0,31}$")
-	return v if valid.search(v) != null else ""
+	# Compiled once and cached: this runs for every tag and every restored
+	# pane, so building the pattern per call was repeated work on the
+	# layout-restore and profile-activation paths.
+	if _attachment_id_re == null:
+		_attachment_id_re = RegEx.new()
+		_attachment_id_re.compile("^[a-z][a-z0-9_-]{0,31}$")
+	return v if _attachment_id_re.search(v) != null else ""
 
 ## Generate a stable public id for panes created without a saved one.
 ## Matches the attachment_id pattern ([a-z][a-z0-9_-]{0,31}).
