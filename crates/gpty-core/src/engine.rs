@@ -815,11 +815,25 @@ async fn run_terminal_task(
     // would lose the very output the concept was capturing.
     ctx.session.finalize();
 
-    // Record the exit code for paneStatus/paneRun.
+    // Record the exit code for paneStatus/paneRun. The pty read side closing
+    // is not the same instant as the process becoming reapable: a child that
+    // closed its pty fds a moment before it exited answers a single
+    // non-blocking probe with None, which reports "no exit code" for a command
+    // that did exit — `paneRun`'s whole contract. Poll briefly instead; a
+    // child that outlives its pty (a daemon that closed its fds) keeps None,
+    // and the task is ending anyway.
+    let mut exit_code = pty_handle.try_wait();
+    for _ in 0..200 {
+        if exit_code.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        exit_code = pty_handle.try_wait();
+    }
     if let Some(g) = &grid
         && let Ok(mut locked) = g.lock()
     {
-        locked.status.exit_code = pty_handle.try_wait();
+        locked.status.exit_code = exit_code;
         // Tier 3 exit heuristic (display only): a shell that died with a
         // non-zero code failed; zero exits fall back to Idle.
         if let Some(code) = locked.status.exit_code
