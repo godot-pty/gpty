@@ -314,37 +314,99 @@ mod tests {
         use super::*;
         use std::os::unix::fs::PermissionsExt;
 
-        #[test]
-        fn xdg_runtime_dir_is_preferred() {
-            let dir = std::env::temp_dir().join(format!("gpty-xdg-test-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        /// Serialises the tests below: `XDG_RUNTIME_DIR` is process-global, and
+        /// cargo runs the tests in one binary on parallel threads.
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-            // SAFETY: single-threaded test context; removed in all paths.
-            unsafe { std::env::set_var("XDG_RUNTIME_DIR", &dir) };
-            assert_eq!(
-                default_socket_path(),
-                format!("{}/gpty.sock", dir.display())
-            );
-            unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
-            std::fs::remove_dir(&dir).unwrap();
+        /// Sets or clears `XDG_RUNTIME_DIR` while holding [`ENV_LOCK`], and
+        /// restores the previous value (releasing the lock) on drop — including
+        /// on panic, which is how this module used to leave the variable set for
+        /// every later test in a parallel run.
+        struct XdgRuntimeDir {
+            previous: Option<std::ffi::OsString>,
+            _lock: std::sync::MutexGuard<'static, ()>,
+        }
+
+        impl XdgRuntimeDir {
+            fn lock() -> std::sync::MutexGuard<'static, ()> {
+                // A panicking test poisons the lock; the environment is restored
+                // by that test's guard, so the value is still consistent.
+                ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+            }
+
+            fn set(path: &std::path::Path) -> Self {
+                let lock = Self::lock();
+                let previous = std::env::var_os("XDG_RUNTIME_DIR");
+                // SAFETY: the lock makes this the only test touching the
+                // variable, and the guard restores it on drop.
+                unsafe { std::env::set_var("XDG_RUNTIME_DIR", path) };
+                Self {
+                    previous,
+                    _lock: lock,
+                }
+            }
+
+            fn clear() -> Self {
+                let lock = Self::lock();
+                let previous = std::env::var_os("XDG_RUNTIME_DIR");
+                unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
+                Self {
+                    previous,
+                    _lock: lock,
+                }
+            }
+        }
+
+        impl Drop for XdgRuntimeDir {
+            fn drop(&mut self) {
+                match self.previous.take() {
+                    Some(previous) => unsafe { std::env::set_var("XDG_RUNTIME_DIR", previous) },
+                    None => unsafe { std::env::remove_var("XDG_RUNTIME_DIR") },
+                }
+            }
+        }
+
+        fn make_dir(name: &str, mode: u32) -> std::path::PathBuf {
+            let dir = std::env::temp_dir().join(format!("{name}-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap();
+            dir
+        }
+
+        #[test]
+        fn default_socket_path_follows_a_secure_xdg_runtime_dir() {
+            let secure = make_dir("gpty-xdg-test", 0o700);
+            {
+                let _env = XdgRuntimeDir::set(&secure);
+                assert_eq!(
+                    default_socket_path(),
+                    format!("{}/gpty.sock", secure.display())
+                );
+            }
+            std::fs::remove_dir_all(&secure).unwrap();
         }
 
         #[test]
         fn insecure_xdg_runtime_dir_is_rejected() {
-            let dir =
-                std::env::temp_dir().join(format!("gpty-xdg-insecure-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+            let insecure = make_dir("gpty-xdg-insecure", 0o777);
+            {
+                let _env = XdgRuntimeDir::set(&insecure);
+                let path = default_socket_path();
+                assert!(
+                    !path.starts_with(&format!("{}/", insecure.display())),
+                    "insecure XDG_RUNTIME_DIR {insecure:?} must not be used; got {path}"
+                );
+            }
+            std::fs::remove_dir_all(&insecure).unwrap();
+        }
 
-            unsafe { std::env::set_var("XDG_RUNTIME_DIR", &dir) };
+        #[test]
+        fn unset_xdg_runtime_dir_still_names_the_socket() {
+            let _env = XdgRuntimeDir::clear();
             let path = default_socket_path();
-            unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
-            std::fs::remove_dir(&dir).unwrap();
-
             assert!(
-                !path.starts_with(&format!("{}/", dir.display())),
-                "insecure XDG_RUNTIME_DIR {dir:?} must not be used; got {path}"
+                path.ends_with("gpty.sock"),
+                "fallback must still name the control socket: {path}"
             );
         }
     }
