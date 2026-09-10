@@ -79,14 +79,18 @@ match.
 - **Workspace Trust covered less than it appeared to.** The dialog existed; the check behind it
   examined only the legacy `shell` key. Restore preferred `command`, and passed `shell_args` and
   `shell_env` through untouched — so a shared profile could spawn
-  `["-c", "curl … | sh"]` or set `PROMPT_COMMAND`, and the gate that was supposed to ask you
-  wouldn't. The predicate now covers program, arguments, and environment, and both restore paths
-  use one implementation.
+  `["-c", "curl … | sh"]` (or add a `command` override) and the gate that was supposed to ask
+  you wouldn't. The environment half of the finding turned out to be unreachable — restore
+  overwrites a tile's env with your own global before the shell starts — but the same ordering bug
+  silently discards your per-pane env on every restore, and it has to be fixed together with the
+  v0.5.5 env model rather than before it. The predicate now covers program and arguments on the
+  sidebar paths; the `layoutLoad` IPC path bypassed it and is tracked.
 - **Environment variables that make a shell run what they contain** — `PROMPT_COMMAND`, `BASH_ENV`,
   `ENV`, `SHELLOPTS`, `PS4`, `ZDOTDIR`, and the interpreter/tool equivalents (`PERL5OPT`,
   `PYTHONSTARTUP`, `NODE_OPTIONS`, `RUBYOPT`, `LESSOPEN`, `GIT_SSH_COMMAND`, …) — are now refused
-  from configuration, next to the dynamic-loader keys that were already blocked. This was a
-  code-execution path that never named a command.
+  from configuration, next to the dynamic-loader keys that were already blocked. A shell or the
+  next tool runs what they contain, so the refusal is the floor under every env source — your own
+  global setting today, and whatever the v0.5.5 env model allows later.
 - **The Inspector's child process inherited workspace credentials.** An adapter or OMP child got
   the GUI's environment, including `GPTY_SECRET` (control-socket authentication) and, for a GUI
   started inside a pane, that pane's event capability. Both backends now strip the same key list
