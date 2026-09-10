@@ -786,7 +786,14 @@ async fn run_terminal_task(
     }
 
     // Task exit: the PTY read side closed, so the child has exited (or the
-    // pane was torn down). Record the exit code for paneStatus/paneRun.
+    // pane was torn down). A capture still in flight is finalized first: the
+    // child is gone, so no timeout or keystroke will arrive to stop it and
+    // its buffered output would otherwise be dropped unreported. This is the
+    // `pane-run` case, where a command that triggers a concept and then exits
+    // would lose the very output the concept was capturing.
+    ctx.session.finalize();
+
+    // Record the exit code for paneStatus/paneRun.
     if let Some(g) = &grid
         && let Ok(mut locked) = g.lock()
     {
