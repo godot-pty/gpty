@@ -31,6 +31,14 @@ const BLOCKED_ENV_KEYS: &[&str] = &[
     // Untrusted env (pane settings / layouts / profiles) must not override them.
     "GPTY_ENV",
     "GPTY_PANE_ID",
+    // Process-wide control credentials. These are also stripped from the
+    // inherited environment (see STRIPPED_INHERITED_ENV_KEYS) *before*
+    // sanitize_envs() runs, so listing them here is what stops a persisted
+    // pane/profile `shell_env` from re-adding them afterwards and letting a
+    // child shell steer the workspace's control socket.
+    "GPTY_SECRET",
+    "GPTY_SOCKET",
+    "GPTY_GUI",
 ];
 
 /// Process-wide control credentials must never leak into child shells.
@@ -289,6 +297,19 @@ mod tests {
             "GPTY_PANE_ID must be blocked from untrusted env"
         );
         assert!(out.iter().any(|(k, _)| k == "HOME"));
+    }
+
+    #[test]
+    fn sanitize_envs_drops_control_credentials_from_untrusted() {
+        // PtyHandle::spawn() strips these from the inherited environment, but
+        // that runs *before* sanitize_envs(). Without the blocklist entry a
+        // persisted pane/profile `shell_env` could re-add GPTY_SOCKET and let
+        // the child shell point at an attacker-controlled control socket.
+        let envs = vec![s("GPTY_SOCKET=/tmp/x"), s("HOME=/root")];
+        assert_eq!(
+            sanitize_envs(&envs),
+            vec![("HOME".to_string(), "/root".to_string())]
+        );
     }
 
     #[test]
