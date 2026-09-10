@@ -14,25 +14,37 @@ use crate::types::{CaptureMode, Concept};
 
 /// Test every concept's regex against `line`.
 ///
-/// Returns the name, capture mode, and target label of the first enabled
-/// concept that matches, so the engine can enter capture state. Later
-/// concepts are not evaluated: one trigger, one capture. Disabled concepts
-/// are skipped entirely.
+/// Returns the name, capture mode, and target label of the concept that should
+/// handle the line, so the engine can start a capture or publish a notice.
+/// Disabled concepts are skipped entirely.
+///
+/// Precedence is deliberate: a **capture outranks a notify**. Both modes are
+/// "first match wins" within their own class, but when a notify-only concept
+/// and a capturing concept both match the same line, the capture is returned —
+/// otherwise a broad notify-only concept ordered first would silently consume
+/// every line and the capture would never fire (the notify event still being
+/// published made that look like normal operation).
 pub fn match_line(concepts: &[Concept], line: &str) -> Option<(String, CaptureMode, String)> {
+    let mut notify = None;
     for concept in concepts {
-        if !concept.enabled {
+        if !concept.enabled || !concept.trigger_regex.is_match(line) {
             continue;
         }
-        if concept.trigger_regex.is_match(line) {
-            let target = concept
-                .destinations
-                .first()
-                .map(|a| a.target_label.clone())
-                .unwrap_or_default();
-            return Some((concept.name.clone(), concept.capture_mode, target));
+        let target = concept
+            .destinations
+            .first()
+            .map(|a| a.target_label.clone())
+            .unwrap_or_default();
+        match concept.capture_mode {
+            CaptureMode::UntilStop { .. } => {
+                return Some((concept.name.clone(), concept.capture_mode, target));
+            }
+            CaptureMode::SingleLine => {
+                notify.get_or_insert_with(|| (concept.name.clone(), concept.capture_mode, target));
+            }
         }
     }
-    None
+    notify
 }
 
 /// Caps applied when parsing concept definitions from JSON.
@@ -183,6 +195,31 @@ mod tests {
         let (name, _, target) = match_line(&concepts, "alpha release").expect("should match");
         assert_eq!(name, "a");
         assert_eq!(target, "x");
+    }
+
+    #[test]
+    fn match_line_prefers_a_capture_over_a_notify() {
+        // A broad notify-only concept ordered first must not consume the line:
+        // the capture would never fire, and the notify event still being
+        // published made that look like normal operation.
+        let mut notify = make_concept("broad_notify", "alpha", "none");
+        notify.capture_mode = CaptureMode::SingleLine;
+        let capture = make_concept("narrow_capture", "alpha", "code_viewer");
+        let concepts = vec![notify, capture];
+
+        let (name, mode, target) = match_line(&concepts, "alpha release").expect("should match");
+        assert_eq!(name, "narrow_capture", "capture outranks notify");
+        assert_eq!(target, "code_viewer");
+        assert!(matches!(mode, CaptureMode::UntilStop { .. }));
+    }
+
+    #[test]
+    fn match_line_returns_a_notify_when_nothing_captures() {
+        let mut notify = make_concept("broad_notify", "alpha", "none");
+        notify.capture_mode = CaptureMode::SingleLine;
+        let (name, mode, _) = match_line(&[notify], "alpha release").expect("should match");
+        assert_eq!(name, "broad_notify");
+        assert_eq!(mode, CaptureMode::SingleLine);
     }
 
     #[test]
