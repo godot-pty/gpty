@@ -93,22 +93,34 @@ channel against other local users:
 ## Event socket (OMP observability)
 
 A **second** listener, `default_event_socket_path()`, sits beside the
-control socket (`gpty.sock` → `gpty-events.sock`). It accepts only the
-JSON-RPC method `ompEvent`. It does not honor `GPTY_SOCKET` or
-`GPTY_SECRET`, is not an MCP tool, and cannot create panes, inject
-input, or shut down gpty.
+control socket (`gpty.sock` → `gpty-events.sock`). It does not honor
+`GPTY_SOCKET` or `GPTY_SECRET`, is not an MCP tool, and cannot create
+panes, inject input, or shut down gpty.
+
+It registers three methods:
+
+| Method | Auth | Purpose |
+|--------|------|---------|
+| `ompEvent` | `GPTY_EVENT_CAPABILITY` | Submit an event for a terminal |
+| `subscribe` | none | Open a read-only subscription (max 64) |
+| `eventsPoll` | none | Drain events for a subscription id |
+
+Only submission is capability-gated. `subscribe`/`eventsPoll` are open to
+any same-UID process: the event channel is not confidential from a peer
+that already runs as this user, and the documented threat model accepts
+that — but do not treat "only `ompEvent`" as the surface, and do not put
+anything on this channel that must stay private from same-UID code.
 
 Each PTY receives ephemeral `GPTY_TERMINAL_SESSION_ID`,
 `GPTY_EVENT_CAPABILITY`, `GPTY_EVENT_SOCKET`, and `GPTY_EVENT_PROTOCOL=1`
 at spawn. A leaked capability is scoped to that terminal.
 
-**Platform:** event submission is **Unix-only** (Linux/macOS). gpty starts
-the `gpty-events.sock` listener and injects `GPTY_EVENT_*` only on Unix
-(`gpty-gdext/src/omp_events.rs`). On Windows, control IPC uses named pipes
-and works; the event listener is not implemented yet, activation variables
-are not injected, and Reasoning / `@gpty/omp-events` stay dormant
-(fail-closed). A future Windows port will likely mirror control IPC with a
-separate named pipe, not `GPTY_SOCKET`.
+**Platform:** the listener runs on Linux, macOS **and** Windows — it
+serves `gpty-events.sock` on Unix and `\\.\pipe\gpty-events` on Windows,
+and `GPTY_EVENT_*` is injected at spawn on every platform. The shipped
+`@gpty/omp-events` extension still speaks only to a Unix socket, so on
+Windows Reasoning stays dormant until an adapter with a named-pipe
+transport exists. Control IPC is unaffected on either platform.
 
 See `crates/gpty-gdext/src/omp_events.rs` and
 `extensions/gpty-omp-events/`.
