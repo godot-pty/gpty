@@ -4,6 +4,10 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 
 ## [Unreleased]
 
+### Security
+
+- **Workspace Trust shows what it will run.** The dialog named a category — "a different program, pass extra arguments, or set a different environment" — without naming the values, so approving it was a guess. It now lists the program, the argv, and each `environment:` entry, escaped and capped (the content comes from the file, not from us). `layoutLoad` over the control socket refuses an untrusted profile outright, since a CLI or MCP caller cannot answer a dialog.
+
 ### Added
 
 - `single_line` concepts mean **notify-only**: a trigger match is published on the event socket (`{type: concept, event: matched, mode: single_line, name, source}`) and nothing else happens — no capture, no routing, no output taken from the pane. The Settings → Concepts editor offers the mode again, and hides the target and stop-condition fields for it. A missing or unknown `capture_mode` still captures. Metadata only: the matched line is never published.

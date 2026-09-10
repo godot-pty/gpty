@@ -83,7 +83,7 @@ Launch is deferred: `gPTY` stays below 1.0.0 until either the project gains a gr
 - [x] MCP tool allowlist — `tools/call` mapped *any* name to an IPC method, reaching methods that were never published as tools (e.g. `shutdown`). It now rejects anything outside the advertised schema.
 - [x] CI least privilege — every job inherited the repository default token scope; `ci.yml` now declares `permissions: contents: read`.
 - [x] Security policy published — `SECURITY.md` records the threat model, the reporting process, the hardening that must not be weakened, and the known limitations.
-- [ ] Workspace Trust shows what it will run — the dialog must name the program, the arguments, and each `environment:` entry it is asking the user to approve (escaped and capped by `PaneTypes.untrusted_plan`, fed by `_untrusted_details()` into both the profile-activation and workspace-restore dialogs). Today it says "a different environment" without saying which, so the consent is uninformed.
+- [x] Workspace Trust shows what it will run — `PaneTypes.untrusted_plan` renders the program, the argv, and each `environment:` entry it is asking the user to approve (control characters escaped, env lines capped at 8/tile and 24 dialog lines, every env line keeping its label so a value cannot forge a `program:` line), and `_untrusted_details()` feeds it into both the profile-activation and workspace-restore dialogs. 4 unit tests cover content, trusted→empty, labelling, escaping, and the caps.
 
 ### Security follow-ups (found by the same audit, not yet addressed)
 

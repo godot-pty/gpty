@@ -670,10 +670,35 @@ func _tiles_untrusted(tiles: Array[Dictionary]) -> bool:
 			return true
 	return false
 
+## What the untrusted tiles in `tiles` would run, for the trust dialog. Capped
+## in PaneTypes — the content is file data, not something we render raw.
+func _untrusted_details(tiles: Array[Dictionary]) -> String:
+	var lines: Array[String] = []
+	for td in tiles:
+		var plan := PaneTypes.untrusted_plan(
+			td, SettingsManager.cfg_shell_command, SettingsManager.cfg_shell_env)
+		if plan.is_empty():
+			continue
+		var settings = td.get("settings", {})
+		var kind := "terminal" if not (settings is Dictionary) else str(settings.get("type", "terminal"))
+		lines.append("%s pane:" % kind)
+		for line in plan:
+			lines.append("  " + line)
+		if lines.size() >= PaneTypes.TRUST_MAX_DETAIL_LINES:
+			lines.resize(PaneTypes.TRUST_MAX_DETAIL_LINES)
+			lines.append("  … more panes not shown")
+			break
+	return "\n".join(lines)
+
 func _show_multi_trust_dialog(entries: Array[Dictionary], active: int, untrusted: Array):
 	var dialog = ConfirmationDialog.new()
 	dialog.title = "Workspace Trust"
-	dialog.dialog_text = "This layout contains %d workspace(s) whose panes start a different program, pass extra arguments, or set a different environment than your current default shell (%s).\n\nRestore them anyway?" % [untrusted.size(), SettingsManager.cfg_shell_command]
+	var details_tiles: Array[Dictionary] = []
+	for i in untrusted:
+		for td in _tiles_from(entries[i].get("layout", [])):
+			details_tiles.append(td)
+	var details := _untrusted_details(details_tiles)
+	dialog.dialog_text = "This layout contains %d workspace(s) whose panes start a different program, pass extra arguments, or set a different environment than your current default shell (%s).\n\n%s\n\nRestore them anyway?" % [untrusted.size(), SettingsManager.cfg_shell_command, details]
 	dialog.ok_button_text = "Restore"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():
@@ -1324,10 +1349,15 @@ func _activate_profile(p_name: String):
 
 	_do_profile_activate(profile)
 
-func _show_profile_trust_dialog(profile: Dictionary, _tiles: Array):
+func _show_profile_trust_dialog(profile: Dictionary, tiles: Array):
 	var dialog = ConfirmationDialog.new()
 	dialog.title = "Workspace Trust"
-	dialog.dialog_text = "This profile contains panes that start a different program, pass extra arguments, or set a different environment than your current default shell (%s).\n\nDo you want to activate it anyway?" % SettingsManager.cfg_shell_command
+	var details_tiles: Array[Dictionary] = []
+	for td in tiles:
+		if td is Dictionary:
+			details_tiles.append(td)
+	var details := _untrusted_details(details_tiles)
+	dialog.dialog_text = "This profile contains panes that start a different program, pass extra arguments, or set a different environment than your current default shell (%s).\n\n%s\n\nDo you want to activate it anyway?" % [SettingsManager.cfg_shell_command, details]
 	dialog.ok_button_text = "Activate"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():
