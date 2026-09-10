@@ -512,14 +512,25 @@ impl TermGrid {
         if self.recent_lines.len() > RECENT_LINE_CAP {
             self.recent_lines.pop_front();
         }
-        if let Some(history) = &self.history
-            && let Ok(h) = history.lock()
-        {
-            let _ = h.append(self.line_count as i64, line);
-            // Amortize retention: trim oldest rows beyond the store's cap
-            // every 100 committed lines instead of on every append.
-            if self.line_count.is_multiple_of(100) {
-                let _ = h.enforce_cap();
+        if let Some(history) = &self.history {
+            match history.lock() {
+                Ok(h) => {
+                    if let Err(e) = h.append(self.line_count as i64, line) {
+                        // A dropped row leaves a hole in the persisted
+                        // scrollback; failing silently means a later restore
+                        // shows unexplained gaps (or nothing at all) with no
+                        // clue that the write ever failed.
+                        log::warn!("history append failed (line {}): {e}", self.line_count);
+                    }
+                    // Amortize retention: trim oldest rows beyond the store's
+                    // cap every 100 committed lines instead of on every append.
+                    if self.line_count.is_multiple_of(100)
+                        && let Err(e) = h.enforce_cap()
+                    {
+                        log::warn!("history retention failed: {e}");
+                    }
+                }
+                Err(e) => log::warn!("history store lock poisoned: {e}"),
             }
         }
     }
