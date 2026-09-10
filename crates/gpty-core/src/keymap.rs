@@ -105,26 +105,26 @@ pub fn key_event_to_bytes(scancode: u32, modifiers: u8) -> Option<Vec<u8>> {
         105 => xterm_csi("D", param), // Left
 
         // ── Navigation ────────────────────────────────────────
-        102 => xterm_csi("H", param),  // Home
-        107 => xterm_csi("F", param),  // End
-        104 => xterm_csi("5~", param), // PageUp
-        109 => xterm_csi("6~", param), // PageDown
-        110 => xterm_csi("2~", param), // Insert
-        111 => xterm_csi("3~", param), // Delete
+        102 => xterm_csi("H", param),     // Home
+        107 => xterm_csi("F", param),     // End
+        104 => xterm_csi_tilde(5, param), // PageUp
+        109 => xterm_csi_tilde(6, param), // PageDown
+        110 => xterm_csi_tilde(2, param), // Insert
+        111 => xterm_csi_tilde(3, param), // Delete
 
         // ── Function keys ─────────────────────────────────────
-        59 => xterm_csi("P", param),   // F1
-        60 => xterm_csi("Q", param),   // F2
-        61 => xterm_csi("R", param),   // F3
-        62 => xterm_csi("S", param),   // F4
-        63 => xterm_csi("15~", param), // F5
-        64 => xterm_csi("17~", param), // F6
-        65 => xterm_csi("18~", param), // F7
-        66 => xterm_csi("19~", param), // F8
-        67 => xterm_csi("20~", param), // F9
-        68 => xterm_csi("21~", param), // F10
-        87 => xterm_csi("23~", param), // F11
-        88 => xterm_csi("24~", param), // F12
+        59 => xterm_csi("P", param),      // F1
+        60 => xterm_csi("Q", param),      // F2
+        61 => xterm_csi("R", param),      // F3
+        62 => xterm_csi("S", param),      // F4
+        63 => xterm_csi_tilde(15, param), // F5
+        64 => xterm_csi_tilde(17, param), // F6
+        65 => xterm_csi_tilde(18, param), // F7
+        66 => xterm_csi_tilde(19, param), // F8
+        67 => xterm_csi_tilde(20, param), // F9
+        68 => xterm_csi_tilde(21, param), // F10
+        87 => xterm_csi_tilde(23, param), // F11
+        88 => xterm_csi_tilde(24, param), // F12
 
         // ── Numpad ────────────────────────────────────────────
         // Numpad keys produce distinct escape sequences when NumLock is off
@@ -160,7 +160,9 @@ pub fn key_event_to_bytes(scancode: u32, modifiers: u8) -> Option<Vec<u8>> {
     }
 }
 
-/// Build a CSI sequence `\e[{param}{suffix}`.
+/// Build a CSI sequence `\e[{param}{suffix}` for the letter-suffixed keys
+/// (arrows, Home/End, F1-F4), where xterm's modified form is
+/// `\e[1;{mod}{letter}`.
 fn xterm_csi(suffix: &str, param: Option<&str>) -> Option<Vec<u8>> {
     let mut v = Vec::with_capacity(3 + suffix.len() + param.map(|p| p.len()).unwrap_or(0));
     v.push(0x1b);
@@ -171,6 +173,26 @@ fn xterm_csi(suffix: &str, param: Option<&str>) -> Option<Vec<u8>> {
         v.extend(p.as_bytes());
     }
     v.extend(suffix.as_bytes());
+    Some(v)
+}
+
+/// Build a CSI sequence for the `~`-suffixed keys (Insert, Delete, PageUp,
+/// PageDown, F5-F12), where xterm puts the key number *first*:
+/// `\e[3~`, or `\e[3;5~` with modifiers.
+///
+/// The letter form's `1` prefix is wrong here — concatenating it with the
+/// modifier and the key number produced `\e[1;53~` for Ctrl+Delete, a
+/// parameter consumers read as "unknown" and ignore, so the keystroke did
+/// nothing.
+fn xterm_csi_tilde(num: u8, param: Option<&str>) -> Option<Vec<u8>> {
+    let mut v = Vec::with_capacity(8);
+    v.push(0x1b);
+    v.push(b'[');
+    v.extend(num.to_string().as_bytes());
+    if let Some(p) = param {
+        v.extend(p.as_bytes());
+    }
+    v.push(b'~');
     Some(v)
 }
 // Tests
@@ -247,6 +269,30 @@ mod tests {
         assert_eq!(key_event_to_bytes(63, 0), Some(esc(b"[15~"))); // F5
         assert_eq!(key_event_to_bytes(88, 0), Some(esc(b"[24~"))); // F12
         assert_eq!(key_event_to_bytes(59, Modifiers::CTRL), Some(esc(b"[1;5P"))); // Ctrl+F1
+    }
+
+    #[test]
+    fn modified_tilde_keys_put_the_key_number_first() {
+        // xterm's `~` family is `\e[{num};{mod}~`. Prefixing "1" — the letter
+        // convention — produced `\e[1;53~` for Ctrl+Delete, which consumers
+        // read as an unknown parameter and ignore.
+        assert_eq!(
+            key_event_to_bytes(111, Modifiers::CTRL),
+            Some(esc(b"[3;5~"))
+        ); // Ctrl+Delete
+        assert_eq!(
+            key_event_to_bytes(104, Modifiers::SHIFT),
+            Some(esc(b"[5;2~"))
+        ); // Shift+PageUp
+        assert_eq!(
+            key_event_to_bytes(63, Modifiers::CTRL),
+            Some(esc(b"[15;5~"))
+        ); // Ctrl+F5
+        assert_eq!(
+            key_event_to_bytes(109, Modifiers::CTRL | Modifiers::ALT),
+            Some(esc(b"[6;7~"))
+        ); // Ctrl+Alt+PageDown
+        assert_eq!(key_event_to_bytes(110, Modifiers::ALT), Some(esc(b"[2;3~"))); // Alt+Insert
     }
 
     #[test]
