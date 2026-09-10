@@ -9,7 +9,6 @@ name = "gpty"
 path = "src/main.rs"
 
 [dependencies]
-gpty-core = { path = "../gpty-core" }
 gpty-ipc = { path = "../gpty-ipc" }
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
