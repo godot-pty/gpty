@@ -437,12 +437,24 @@ impl TermGrid {
     /// Cursor position as `(row, col)`, or `None` if the cursor is hidden
     /// or outside the visible viewport.
     pub fn cursor_position(&self) -> Option<(usize, usize)> {
+        // A hidden cursor (\x1b[?25l, which most TUIs emit while redrawing)
+        // must not be painted at all.
+        if !self
+            .term
+            .mode()
+            .contains(alacritty_terminal::term::TermMode::SHOW_CURSOR)
+        {
+            return None;
+        }
         let content = self.term.renderable_content();
-        let point = content.cursor.point;
-        let line = point.line.0 as usize;
+        // Report viewport coordinates. While scrolled back the cursor sits
+        // below the viewport, and painting it at its grid row draws it over
+        // an unrelated line; past the viewport this yields None.
+        let offset = self.term.grid().display_offset();
+        let point = alacritty_terminal::term::point_to_viewport(offset, content.cursor.point)?;
         let col = point.column.0;
-        if line < self.rows && col < self.cols {
-            Some((line, col))
+        if point.line < self.rows && col < self.cols {
+            Some((point.line, col))
         } else {
             None
         }
@@ -841,6 +853,43 @@ mod tests {
         g.feed(b"abc");
         let pos = g.cursor_position().expect("cursor should be visible");
         assert_eq!(pos, (0, 3));
+    }
+
+    #[test]
+    fn cursor_position_respects_visibility() {
+        let mut g = TermGrid::new(5, 20);
+        g.feed(b"abc");
+        assert!(g.cursor_position().is_some());
+
+        g.feed(b"\x1b[?25l"); // DECTCEM off — hide cursor
+        assert!(
+            g.cursor_position().is_none(),
+            "a hidden cursor must not be reported for drawing"
+        );
+
+        g.feed(b"\x1b[?25h"); // show again
+        assert!(g.cursor_position().is_some());
+    }
+
+    #[test]
+    fn cursor_position_is_viewport_relative_when_scrolled() {
+        let mut g = TermGrid::new(5, 20);
+        for i in 0..10 {
+            g.feed(format!("L{i}\r\n").as_bytes());
+        }
+        g.feed(b"\x1b[H"); // cursor to the top row of the screen
+        assert_eq!(g.cursor_position(), Some((0, 0)));
+
+        g.scroll_up(3);
+        // The grid row is unchanged, but the viewport moved: the cursor now
+        // sits three rows lower on screen, and past the viewport it is gone.
+        assert_eq!(g.cursor_position(), Some((3, 0)));
+
+        g.scroll_up(5);
+        assert!(
+            g.cursor_position().is_none(),
+            "a cursor scrolled below the viewport must not be drawn"
+        );
     }
 
     #[test]
