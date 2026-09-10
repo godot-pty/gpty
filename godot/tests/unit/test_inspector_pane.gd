@@ -89,6 +89,37 @@ func test_command_setting_roundtrips_through_layout_state():
 	assert_eq(state["command"], ["my-adapter", "--model", "x y"],
 		"command must roundtrip as argv through the layout state")
 
+func test_envelopes_from_other_runs_are_ignored():
+	# A late delta from a finished or aborted turn carries that turn's run_id.
+	# Once _finish_turn() cleared _run_id, the old guard only compared while
+	# _run_id was non-empty and let the stale delta through, appending another
+	# turn's tokens to the current answer.
+	_pane._session_id = "s1"
+	_pane._run_id = ""
+	_pane._assembled = ""
+	_pane._handle_envelope({
+		"session_id": "s1", "run_id": "finished-run",
+		"event": {"type": "delta", "text": "stale"},
+	})
+	assert_eq(_pane._assembled, "", "a finished turn's late delta must be dropped")
+
+	_pane._run_id = "live-run"
+	_pane._handle_envelope({
+		"session_id": "s1", "run_id": "live-run",
+		"event": {"type": "delta", "text": "fresh"},
+	})
+	assert_eq(_pane._assembled, "fresh", "the live run's deltas still apply")
+
+	# Run-less notices (a dropped-events report, session status) carry no run
+	# and must still reach the pane, or the gap would be announced and then
+	# discarded here.
+	_pane._run_id = ""
+	_pane._handle_envelope({
+		"session_id": "s1", "run_id": "",
+		"event": {"type": "status", "message": "3 earlier events dropped"},
+	})
+	assert_string_contains(_pane._status.text, "3 earlier events dropped")
+
 func test_command_field_only_reparses_when_edited():
 	# The Command field joins argv with spaces, so it cannot show an argument
 	# containing a space. Gathering settings while that field is untouched --

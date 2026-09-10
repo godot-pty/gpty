@@ -331,6 +331,12 @@ impl OmpProcess {
                         Some("agent_end" | "prompt_result")
                     ) =>
                 {
+                    // The abort is acknowledged, but frames already in flight
+                    // cannot be attributed to a turn -- omp's stream is typed,
+                    // not id-correlated, so a trailing frame would be read as
+                    // the next turn's first frame. Retire the process and let
+                    // the session re-spawn, so each turn reads a clean stream.
+                    self.dead = true;
                     return;
                 }
                 Ok(Some(_)) => {}

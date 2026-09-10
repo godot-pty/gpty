@@ -110,7 +110,13 @@ func _handle_envelope(env: Dictionary):
 	if str(env.get("session_id", "")) != _session_id:
 		return
 	var run_id := str(env.get("run_id", ""))
-	if _run_id != "" and run_id != "" and run_id != _run_id:
+	# Envelopes belong to a run, and a turn that has finished (or was aborted)
+	# leaves frames in flight carrying its own run_id. _finish_turn() clears
+	# _run_id, so the previous guard -- which only compared while _run_id was
+	# non-empty -- let those through and appended another turn's tokens to the
+	# current answer. Run-less notices (dropped events, session status) still
+	# arrive because they carry no run.
+	if run_id != "" and run_id != _run_id:
 		return
 	var event = env.get("event", {})
 	if not (event is Dictionary):
