@@ -157,6 +157,12 @@ pub struct TermGrid {
 /// Cap on `recent_lines` per terminal.
 pub const RECENT_LINE_CAP: usize = 512;
 
+/// Cap on matches collected by [`TermGrid::search`]. The pane re-runs the
+/// search on every keystroke and walks every result on every frame, so a
+/// one-character pattern over a full scrollback must not be able to hand the
+/// UI thread millions of positions.
+pub const MAX_SEARCH_RESULTS: usize = 10_000;
+
 impl TermGrid {
     /// Create a new terminal grid at the given dimensions.
     ///
@@ -577,6 +583,13 @@ impl TermGrid {
     /// from the top of scrollback history (0 = oldest history line).
     /// `col` is the byte offset of the match within the line's text.
     ///
+    /// Collection stops at [`MAX_SEARCH_RESULTS`]: a one-character pattern
+    /// matches every character of every line, and the pane re-runs the search
+    /// on each keystroke and walks every result each frame, so an uncapped
+    /// result set is a UI-thread stall. Terminal content is attacker-influenced
+    /// (a program can print repetitive output) even though the pattern is typed
+    /// by the user.
+    ///
     /// Uses the standard `regex` crate — no backtracking engine, ReDoS-safe.
     pub fn search(&self, pattern: &str) -> Result<Vec<(i32, i32)>, regex::Error> {
         let re = regex::Regex::new(pattern)?;
@@ -586,7 +599,7 @@ impl TermGrid {
         let mut results = Vec::new();
 
         // Grid uses negative Line for scrollback: Line(-history) .. Line(screen-1)
-        for raw_line in -history..screen {
+        'rows: for raw_line in -history..screen {
             let row = &grid[Line(raw_line)];
             let mut text = String::with_capacity(self.cols);
             for col in 0..self.cols {
@@ -597,6 +610,9 @@ impl TermGrid {
             for m in re.find_iter(&text[..trimmed_len]) {
                 // Report line as 0-based from top of scrollback
                 results.push((raw_line + history, m.start() as i32));
+                if results.len() >= MAX_SEARCH_RESULTS {
+                    break 'rows;
+                }
             }
         }
         Ok(results)
