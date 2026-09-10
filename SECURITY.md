@@ -42,7 +42,7 @@ This is a single-maintainer project, so these are best-effort targets, not a con
 | ----- | ------ |
 | Acknowledgement of the report | ~7 days |
 | First assessment (in scope / not, severity, planned fix) | ~14 days |
-| Fix for confirmed issues | next scheduled release |
+| Fix for confirmed issues | Next scheduled release |
 | Public disclosure | a GitHub security advisory published with the fix |
 
 We credit reporters in the advisory unless you prefer otherwise. If a reported behaviour turns out
@@ -122,8 +122,12 @@ These are load-bearing guards. Reports that require removing one of them should 
   configuration. Absolute programs restored from files must not be group/other-writable and must be
   owned by you or root.
 - **Restored layouts and profiles**: tile types, settings, and grid geometry are validated; a tile
-  that starts a different program, passes extra arguments, or sets a different environment raises the
-  Workspace Trust prompt before it runs.
+  that starts a different program or passes extra arguments raises the Workspace Trust prompt before
+  it runs, and `layoutLoad` over the control socket refuses such a profile outright (a caller cannot
+  answer a dialog, so naming the profile is not consent to what the file asks for). A tile's
+  `shell_env` is currently overwritten by your own global environment setting before the shell
+  starts, so it neither runs nor needs consent; the ordering that discards it is tracked in
+  [ROADMAP.md](ROADMAP.md) with the v0.5.5 environment model.
 - **Concepts**: the standard Rust `regex` crate only (no backtracking engine), bounded counts and
   lengths, a 16 KiB line cap before matching, 4 MiB capture buffers, and a 64 KiB OSC cap in the
   parser.
@@ -132,12 +136,13 @@ These are load-bearing guards. Reports that require removing one of them should 
 
 ## Known limitations
 
-Recorded honestly; each is either accepted for the current scope or tracked as a roadmap item.
+Each is either accepted for the current scope or tracked as a roadmap item.
 
 - **Windows peer verification.** The control socket rejects remote clients and lives in the user's
   named-pipe namespace, but Windows pipes have no peer-UID check to fail closed on; on Windows the
-  same-UID trust model is the whole gate. Windows runtime behaviour is compile-checked, not yet
-  exercised in CI.
+  same-UID trust model is the whole gate. Windows environment keys are case-insensitive (and the PTY
+  layer normalises them), so the `GPTY_*` credential and marker namespace is not case-sensitive
+  there. Windows runtime behaviour is compile-checked, not yet exercised in CI.
 - **Other Unix platforms.** `peer_uid_matches` fails *open* on Unix systems that are neither Linux,
   Android, nor macOS (no portable peer-credential API is wired up), leaving file permissions as the
   gate.
@@ -145,6 +150,12 @@ Recorded honestly; each is either accepted for the current scope or tracked as a
   control socket falls back to a predictable path in a world-writable directory. Socket ownership
   and mode are validated before use, but another user can pre-create the path and deny service (not
   read or spoof traffic).
+- **A pane inherits your environment.** The PTY layer snapshots the GUI process's environment and
+  strips only the `GPTY_*` keys, so everything else reaches every pane: `SSH_AUTH_SOCK`, cloud
+  credential pointers, proxy variables, `DISPLAY`. Launch gPTY from a shell that holds credentials
+  you would not hand to a pane (or from inside a pane, or over SSH) and those panes inherit them.
+  This is the user's own context, not a file's — but it bounds what any per-pane environment model
+  can claim, and it is why the roadmap treats environment as authority rather than configuration.
 - **Scrollback is plaintext** in `user://` and the file mode follows your umask. Anything printed in
   a pane — tokens included — is stored on disk the same way a shell history file would be.
 - **The update check is notify-only.** It fetches release metadata over TLS and shows a toast; it
@@ -163,6 +174,6 @@ We will not pursue or support legal action against researchers who, in good fait
 - test against their own installation and their own data;
 - avoid accessing, modifying, or exfiltrating data that is not theirs;
 - report a discovered issue privately and give us a reasonable window to fix it before disclosing;
-- do not degrade the service of anyone else.
+- do not degrade the service for anyone else.
 
-Security research that follows this policy is welcome. Thank you.
+Security research that follows this policy is welcome.
