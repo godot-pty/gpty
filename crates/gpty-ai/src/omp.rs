@@ -85,13 +85,34 @@ pub(crate) async fn run_omp_session(
             },
         );
 
-        let result = match process.as_mut() {
-            Ok(process) => {
-                process
-                    .prompt(&config, &request, &cancel, turn_id, &run_id, &sink)
-                    .await
+        let result = {
+            let mut respawned = false;
+            loop {
+                let attempt = match process.as_mut() {
+                    Ok(process) => {
+                        process
+                            .prompt(&config, &request, &cancel, turn_id, &run_id, &sink)
+                            .await
+                    }
+                    Err(message) => Err(BackendError::Message(message.clone())),
+                };
+                // The liveness probe above can pass and the child still be
+                // gone by the time the prompt is written: a child that answers
+                // and exits closes its pipes on the way out, and it is not
+                // reapable for that instant. Re-spawn and ask a fresh child
+                // rather than failing a turn nothing ever received.
+                match attempt {
+                    Err(error) if !respawned && error.is_child_gone() => {
+                        log::warn!("omp child died before the prompt landed; re-spawning");
+                        respawned = true;
+                        if let Ok(stale) = process.as_mut() {
+                            stale.kill_and_wait().await;
+                        }
+                        process = OmpProcess::spawn(&config, &[]).await;
+                    }
+                    result => break result,
+                }
             }
-            Err(message) => Err(BackendError::Message(message.clone())),
         };
         if let Err(error) = result {
             sink.emit(
@@ -600,6 +621,26 @@ mod tests {
     use super::*;
     use crate::test_temp_script::TempScript;
 
+    /// Poll a session until a terminal event arrives.
+    ///
+    /// The budget is wall-clock, so it has to survive a loaded machine: a
+    /// parallel `cargo test --workspace` run forks children from every module
+    /// at once, and a spawned `sh` can take seconds to greet. A tight budget
+    /// then reports a protocol failure that is not there.
+    async fn drain_turn(
+        session: &crate::registry::AiSession,
+    ) -> Vec<crate::types::AiEventEnvelope> {
+        let mut all = Vec::new();
+        for _ in 0..2400 {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            all.extend(session.poll(128));
+            if all.iter().any(|event| event.event.is_terminal()) {
+                return all;
+            }
+        }
+        panic!("omp session did not finish a turn");
+    }
+
     #[test]
     fn rpc_chunks_reassemble_strictly() {
         let mut decoder = RpcFrameDecoder::default();
@@ -642,22 +683,34 @@ mod tests {
         );
     }
 
+    /// The OMP session tests both drive the OMP backend, which resolves its
+    /// binary from the process-global `GPTY_OMP`. Tests run on parallel
+    /// threads, so they must not clobber each other's override — without this
+    /// lock one test's session spawns the other test's script.
+    static OMP_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     /// A child that answers and then exits must not brick the session. The
     /// next prompt has to re-spawn; without that, every later turn writes
     /// into a dead pipe and the pane only recovers by being reopened.
     #[cfg(unix)]
     #[tokio::test]
     async fn omp_session_respawns_after_child_exits() {
+        let _guard = OMP_ENV_LOCK.lock().await;
         use crate::registry::AiSession;
-        use crate::types::{AiEventEnvelope, SessionOpenRequest, SessionPromptRequest};
+        use crate::types::{SessionOpenRequest, SessionPromptRequest};
         use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
 
         // A fake omp: greets, ignores the handshake, answers one prompt, exits.
         // The guard removes it on drop, including if an assertion panics.
-        let script = TempScript::new(
-            std::env::temp_dir().join(format!("gpty_fake_omp_{}.sh", std::process::id())),
-        );
+        let script = TempScript::new(std::env::temp_dir().join(format!(
+                "gpty_fake_omp_{}_{}.sh",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.subsec_nanos())
+                    .unwrap_or(0)
+            )));
         let mut file = std::fs::File::create(script.path()).unwrap();
         file.write_all(
             b"#!/bin/sh\n\
@@ -694,20 +747,8 @@ mod tests {
             source_pane: "T1".into(),
         };
 
-        async fn drain(session: &AiSession) -> Vec<AiEventEnvelope> {
-            let mut all = Vec::new();
-            for _ in 0..400 {
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-                all.extend(session.poll(128));
-                if all.iter().any(|event| event.event.is_terminal()) {
-                    return all;
-                }
-            }
-            panic!("omp session did not finish a turn");
-        }
-
         session.prompt(request("first")).unwrap();
-        let first = drain(&session).await;
+        let first = drain_turn(&session).await;
         assert!(
             first
                 .iter()
@@ -716,12 +757,89 @@ mod tests {
         );
 
         session.prompt(request("second")).unwrap();
-        let second = drain(&session).await;
+        let second = drain_turn(&session).await;
         assert!(
             second
                 .iter()
                 .any(|e| matches!(e.event, AiEvent::Done { .. })),
             "second turn must survive the child exiting: {second:?}"
+        );
+
+        session.close();
+        unsafe { std::env::remove_var("GPTY_OMP") };
+    }
+
+    /// The window between "the child answered" and "the child is gone" is real:
+    /// an exiting process closes its pipes before it becomes reapable, so the
+    /// liveness probe sees a live child and the next write gets EPIPE. That
+    /// turn must be served by a fresh child, not failed — the deterministic
+    /// reproduction keeps the child alive with its pipes closed.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn omp_session_survives_a_child_that_closed_its_pipes() {
+        let _guard = OMP_ENV_LOCK.lock().await;
+        use crate::registry::AiSession;
+        use crate::types::{SessionOpenRequest, SessionPromptRequest};
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let script = TempScript::new(std::env::temp_dir().join(format!(
+                "gpty_fake_omp_pipes_{}_{}.sh",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.subsec_nanos())
+                    .unwrap_or(0)
+            )));
+        let mut file = std::fs::File::create(script.path()).unwrap();
+        file.write_all(
+            b"#!/bin/sh\n\
+              echo '{\"type\":\"ready\"}'\n\
+              while IFS= read -r line; do\n\
+                case \"$line\" in\n\
+                  *'\"prompt\"'*)\n\
+                    echo '{\"type\":\"agent_end\"}'\n\
+                    exec 0<&- 1>&-\n\
+                    sleep 30\n\
+                    ;;\n\
+                esac\n\
+              done\n",
+        )
+        .unwrap();
+        drop(file);
+        std::fs::set_permissions(script.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        unsafe { std::env::set_var("GPTY_OMP", script.path()) };
+
+        let session = AiSession::open(
+            &tokio::runtime::Handle::current(),
+            SessionOpenRequest {
+                backend: BackendKind::Omp,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let request = |text: &str| SessionPromptRequest {
+            capture: text.into(),
+            concept_name: "test".into(),
+            source_pane: "T1".into(),
+        };
+
+        session.prompt(request("first")).unwrap();
+        let first = drain_turn(&session).await;
+        assert!(
+            first
+                .iter()
+                .any(|e| matches!(e.event, AiEvent::Done { .. })),
+            "first turn must answer: {first:?}"
+        );
+
+        session.prompt(request("second")).unwrap();
+        let second = drain_turn(&session).await;
+        assert!(
+            second
+                .iter()
+                .any(|e| matches!(e.event, AiEvent::Done { .. })),
+            "a turn whose prompt hit a closed pipe must be re-served: {second:?}"
         );
 
         session.close();
