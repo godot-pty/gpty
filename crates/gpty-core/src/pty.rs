@@ -131,9 +131,15 @@ impl PtyHandle {
             pixel_width: 0,
             pixel_height: 0,
         })?;
-        let child = pty_pair.slave.spawn_command(cmd)?;
+        // Take the reader and writer BEFORE spawning. Both are fallible, and
+        // doing them after spawn_command left a successfully-spawned shell
+        // behind with no handle to kill it: portable-pty's child has no Drop
+        // impl, so the process only dies if closing the master happens to
+        // deliver SIGHUP (a child that ignores it would survive). With this
+        // order nothing has been spawned when either call can still fail.
         let mut reader = pty_pair.master.try_clone_reader()?;
         let writer = pty_pair.master.take_writer()?;
+        let child = pty_pair.slave.spawn_command(cmd)?;
         let master = pty_pair.master;
 
         let read_thread = thread::Builder::new()
