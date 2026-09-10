@@ -215,6 +215,8 @@ impl WorkspaceEngine {
 /// After SIGWINCH, TUIs redraw and re-emit visible screen content as fresh
 /// PTY bytes. Skip concept matching on those lines — they are not new shell
 /// events. User-initiated UntilStop triggers (typed Enter) are unaffected.
+/// An active capture drops them too: it withholds output from the grid, so
+/// the repaint draws a screen the grid never had.
 const POST_RESIZE_CONCEPT_SUPPRESS_MS: u64 = 750;
 
 /// Current wall-clock time in unix milliseconds, for status primitives.
@@ -621,7 +623,18 @@ async fn run_terminal_task(
                 if ctx.session.is_active() {
                     // In capture mode: buffer raw bytes, don't feed grid.
                     // feed_output finalizes on byte cap or deadline.
-                    if ctx.session.feed_output(bytes, tokio::time::Instant::now()) {
+                    let now = tokio::time::Instant::now();
+                    if ctx.pty_concept_match_suppressed(now) {
+                        // A capture withholds PTY output from the grid, so it
+                        // never sees what it is buffering. Bytes printed right
+                        // after SIGWINCH are the child's repaint of a screen
+                        // the grid never had: not new output, and buffering
+                        // them would put a duplicate prompt into the routed
+                        // capture and spend the 4 MiB budget on redraws under
+                        // repeated resizes. Drop them — the alternative,
+                        // feeding the repaint into the frozen grid, paints it
+                        // onto stale content.
+                    } else if ctx.session.feed_output(bytes, now) {
                         timeout_sleep
                             .as_mut()
                             .reset(tokio::time::Instant::now() + INACTIVE_DURATION);
@@ -1086,6 +1099,74 @@ mod tests {
             spawned.capture_queue.lock().unwrap().len(),
             1,
             "capture timeout should still finalize"
+        );
+    }
+
+    /// Bytes printed inside the post-SIGWINCH window are the child's repaint,
+    /// not capture content. The window is scoped: output after it is captured
+    /// normally, so this pins both the drop and its boundary.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn post_resize_window_is_not_buffered_into_a_capture() {
+        let concept = Concept {
+            name: "begin_marker".into(),
+            trigger_regex: Regex::new("^BEGIN$").unwrap(),
+            enabled: true,
+            capture_mode: CaptureMode::UntilStop {
+                stop_timeout_ms: 2000,
+                stop_on_input: false,
+            },
+            destinations: vec![Action {
+                target_label: "code_viewer".into(),
+            }],
+        };
+        let engine = WorkspaceEngine::new(vec![concept]);
+        let config = TerminalConfig { id: 80 };
+        let spawned = engine
+            .spawn_terminal_with_grid(
+                config,
+                "sh",
+                &[
+                    "-c",
+                    "printf 'BEGIN\\n'; sleep 0.3; printf 'DURING_WINDOW\\n'; \
+                     sleep 1.2; printf 'AFTER_WINDOW\\n'; sleep 5",
+                ],
+                &[],
+                &[],
+                24,
+                80,
+            )
+            .await
+            .expect("spawn");
+
+        for _ in 0..100 {
+            if spawned.capture.is_active() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(spawned.capture.is_active(), "BEGIN must start a capture");
+
+        // The window opens when the resize is applied: 750 ms from here.
+        spawned.handle.resize_pty(20, 60);
+
+        let mut events = Vec::new();
+        for _ in 0..200 {
+            events = lock(&spawned.capture_queue).drain(..).collect();
+            if !events.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            events.len(),
+            1,
+            "the capture deadline must finalize the capture"
+        );
+        assert_eq!(
+            events[0].lines,
+            vec!["AFTER_WINDOW".to_string()],
+            "only output printed after the post-resize window is capture content"
         );
     }
 
