@@ -9,6 +9,10 @@
 //!    output until a stop condition (timeout or user input)
 //! 3. Queues the captured block for GDScript to route to a receiver pane
 //!
+//! A capture still in flight when its pane is torn down is finalized by
+//! [`SpawnedTerminal`]'s `Drop` into the engine's orphan queue, which
+//! GDScript drains and routes the same way.
+//!
 //! Nothing here writes to a child's stdin except real user input
 //! ([`PtyTerminalHandle::send_line`] / `send_text`) and the resize control.
 
@@ -43,6 +47,10 @@ enum StdinInput {
 
 pub struct WorkspaceEngine {
     concepts: Arc<std::sync::RwLock<Vec<Concept>>>,
+    /// Captures finalized after their source pane was torn down. The pane's
+    /// own queue dies with it, so this is the only way a capture that was
+    /// still in flight when the pane closed reaches the workspace.
+    orphaned_captures: Arc<Mutex<Vec<CapturedOutput>>>,
 }
 
 /// A handle to a spawned PTY terminal, allowing the caller to inject input.
@@ -86,12 +94,33 @@ pub struct SpawnedTerminal {
     /// Queue of notify-only concept matches (`CaptureMode::SingleLine`) that
     /// GDScript drains and forwards to the event socket.
     pub notice_queue: Arc<Mutex<Vec<ConceptNotice>>>,
+    /// Shared with the terminal task — see `Drop`.
+    capture: CaptureSession,
+    /// Sink for a capture that is still in flight when the pane goes away.
+    orphaned: Arc<Mutex<Vec<CapturedOutput>>>,
     _task: tokio::task::JoinHandle<()>,
 }
 
 impl Drop for SpawnedTerminal {
     fn drop(&mut self) {
+        // Aborting drops the task future, so the finalize-on-exit path at
+        // the end of `run_terminal_task` — the one a closed pane relies on —
+        // never runs. Finalize what the task had buffered into the engine's
+        // orphan queue instead: the workspace keeps draining that queue and
+        // routes the capture like any other.
         self._task.abort();
+        self.capture.finalize_to(Arc::clone(&self.orphaned));
+        // If the task did finalize on its own (a deadline or the byte cap
+        // can fire between the abort and its next poll), the event sits on
+        // the pane queue, which nothing polls for a pane that no longer
+        // exists. Carry it over.
+        if let Ok(mut queue) = self.capture_queue.lock()
+            && !queue.is_empty()
+        {
+            for event in queue.drain(..) {
+                push_bounded(&self.orphaned, event);
+            }
+        }
     }
 }
 
@@ -101,32 +130,18 @@ impl WorkspaceEngine {
     pub fn new(concepts: Vec<Concept>) -> Self {
         Self {
             concepts: Arc::new(std::sync::RwLock::new(concepts)),
+            orphaned_captures: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
-    pub async fn spawn_pty_terminal(
-        &self,
-        config: TerminalConfig,
-        command: &str,
-        args: &[&str],
-        envs: &[String],
-        trusted_envs: &[(String, String)],
-    ) -> Result<PtyTerminalHandle, Box<dyn std::error::Error + Send + Sync>> {
-        let (pty_tx, pty_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-        let pty_handle =
-            crate::pty::PtyHandle::spawn(config.id, command, args, envs, trusted_envs, pty_tx)?;
-        let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<StdinInput>();
-
-        let task_ctx = TaskContext::new(config.id, Arc::clone(&self.concepts));
-
-        tokio::spawn(run_terminal_task(
-            task_ctx, pty_handle, pty_rx, stdin_rx, None,
-        ));
-
-        Ok(PtyTerminalHandle {
-            id: config.id,
-            stdin_tx,
-        })
+    /// Take the captures whose pane was torn down while they were still in
+    /// flight. The events are complete — there is nothing to acknowledge or
+    /// flush, because the pane, its grid, and its raw-byte store died with it.
+    pub fn drain_orphaned_captures(&self) -> Vec<CapturedOutput> {
+        self.orphaned_captures
+            .lock()
+            .map(|mut queue| std::mem::take(&mut *queue))
+            .unwrap_or_default()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -151,13 +166,16 @@ impl WorkspaceEngine {
         let capture_queue: Arc<Mutex<Vec<CapturedOutput>>> = Arc::new(Mutex::new(Vec::new()));
         let capture_buffers: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        let session = CaptureSession::new(capture_buffers, Arc::clone(&capture_queue));
 
         let notice_queue: Arc<Mutex<Vec<ConceptNotice>>> = Arc::new(Mutex::new(Vec::new()));
 
-        let mut task_ctx = TaskContext::new(config.id, Arc::clone(&self.concepts));
-        task_ctx.session =
-            CaptureSession::new(Arc::clone(&capture_buffers), Arc::clone(&capture_queue));
-        task_ctx.notices = Arc::clone(&notice_queue);
+        let task_ctx = TaskContext::new(
+            config.id,
+            Arc::clone(&self.concepts),
+            session.clone(),
+            Arc::clone(&notice_queue),
+        );
 
         let task = tokio::spawn(run_terminal_task(
             task_ctx,
@@ -175,6 +193,8 @@ impl WorkspaceEngine {
             grid,
             capture_queue,
             notice_queue,
+            capture: session,
+            orphaned: Arc::clone(&self.orphaned_captures),
             _task: task,
         })
     }
@@ -267,15 +287,17 @@ impl TaskContext {
             notices.push(ConceptNotice { concept_name });
         }
     }
-    fn new(id: u32, concepts: Arc<std::sync::RwLock<Vec<Concept>>>) -> Self {
+    fn new(
+        id: u32,
+        concepts: Arc<std::sync::RwLock<Vec<Concept>>>,
+        session: CaptureSession,
+        notices: Arc<Mutex<Vec<ConceptNotice>>>,
+    ) -> Self {
         Self {
             id,
             concepts,
-            session: CaptureSession::new(
-                Arc::new(Mutex::new(HashMap::new())),
-                Arc::new(Mutex::new(Vec::new())),
-            ),
-            notices: Arc::new(Mutex::new(Vec::new())),
+            session,
+            notices,
             suppress_pty_concept_match_until: None,
         }
     }
@@ -303,124 +325,181 @@ fn store_line(grid: &Option<Arc<Mutex<TermGrid>>>, line: &str) {
 /// Bounds memory when a capture-mode concept matches an output flood.
 const MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
 
-/// Owns the UntilStop capture state machine: buffering, deadline, and
-/// finalization into the shared chunk store and event queue.
+/// Maximum captures held by a queue nobody polls (a pane queue while
+/// GDScript stalls, the engine's orphan queue). Drop-oldest.
+const MAX_BUFFERED_CAPTURES: usize = 64;
+
+/// Mutable capture state, shared between the terminal task and the
+/// `SpawnedTerminal` handle.
 ///
-/// Extracted from `run_terminal_task` so the capture lifecycle is
-/// unit-testable without a real PTY.
-struct CaptureSession {
+/// The task buffers PTY output here; `SpawnedTerminal::drop` finalizes what
+/// is still in flight, because aborting the task skips its own
+/// finalize-on-exit path.
+struct CaptureState {
     buffer: Vec<Vec<u8>>,
     bytes: usize,
     active_name: Option<String>,
     active_target: Option<String>,
     deadline: Option<tokio::time::Instant>,
     next_event_id: u64,
+    /// Where finalized captures go: normally the pane's queue, which
+    /// GDScript polls every frame.
+    sink: Arc<Mutex<Vec<CapturedOutput>>>,
+    /// Raw bytes of finalized captures, kept for flush/acknowledge.
     buffers: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>>,
-    queue: Arc<Mutex<Vec<CapturedOutput>>>,
+}
+
+/// Shared handle to a pane's capture state machine: buffering, deadline, and
+/// finalization into the sink and the raw-chunk store.
+///
+/// Extracted from `run_terminal_task` so the capture lifecycle is
+/// unit-testable without a real PTY, and shared with `SpawnedTerminal` so
+/// tearing a pane down can finalize a capture the task still holds.
+#[derive(Clone)]
+struct CaptureSession {
+    state: Arc<Mutex<CaptureState>>,
+}
+
+/// Push onto a bounded capture queue, dropping the oldest.
+fn push_bounded(queue: &Arc<Mutex<Vec<CapturedOutput>>>, event: CapturedOutput) {
+    if let Ok(mut queue) = queue.lock() {
+        if queue.len() >= MAX_BUFFERED_CAPTURES {
+            queue.remove(0);
+        }
+        queue.push(event);
+    }
+}
+
+/// Finalize the state behind an already-held lock: parse the buffered chunks
+/// into plain-text lines, hand the raw bytes to the chunk store, and publish
+/// the event to the sink. Resets all capture state.
+fn finalize_state(state: &mut CaptureState) -> Option<CapturedOutput> {
+    // Inactive session: nothing was buffered, nothing to emit.
+    state.active_name.as_ref()?;
+    let id = state.next_event_id;
+    state.next_event_id += 1;
+
+    // Extract plain-text lines from buffered raw bytes
+    let mut lp = crate::parser::LineParser::new();
+    let mut lines = Vec::new();
+    for chunk in &state.buffer {
+        let parsed = lp.feed(chunk);
+        lines.extend(parsed);
+    }
+
+    let concept_name = state.active_name.take().unwrap_or_default();
+    let target = state.active_target.take().unwrap_or_default();
+    let raw_bytes = std::mem::take(&mut state.buffer);
+    state.bytes = 0;
+    if let Ok(mut bufs) = state.buffers.lock() {
+        if bufs.len() >= MAX_BUFFERED_CAPTURES
+            && let Some(oldest) = bufs.keys().min().copied()
+        {
+            bufs.remove(&oldest);
+        }
+        bufs.insert(id, raw_bytes);
+    }
+
+    let event = CapturedOutput {
+        id,
+        concept_name,
+        lines,
+        target_pane_type: target,
+    };
+    push_bounded(&state.sink, event.clone());
+
+    state.deadline = None;
+    Some(event)
 }
 
 impl CaptureSession {
     fn new(
         buffers: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>>,
-        queue: Arc<Mutex<Vec<CapturedOutput>>>,
+        sink: Arc<Mutex<Vec<CapturedOutput>>>,
     ) -> Self {
         Self {
-            buffer: Vec::new(),
-            bytes: 0,
-            active_name: None,
-            active_target: None,
-            deadline: None,
-            next_event_id: 0,
-            buffers,
-            queue,
+            state: Arc::new(Mutex::new(CaptureState {
+                buffer: Vec::new(),
+                bytes: 0,
+                active_name: None,
+                active_target: None,
+                deadline: None,
+                next_event_id: 0,
+                sink,
+                buffers,
+            })),
         }
     }
 
     fn is_active(&self) -> bool {
-        self.active_name.is_some()
+        self.state
+            .lock()
+            .map(|state| state.active_name.is_some())
+            .unwrap_or(false)
     }
 
-    fn begin(&mut self, name: String, target: String, deadline: tokio::time::Instant) {
-        self.active_name = Some(name);
-        self.active_target = Some(target);
-        self.deadline = Some(deadline);
+    fn begin(&self, name: String, target: String, deadline: tokio::time::Instant) {
+        if let Ok(mut state) = self.state.lock() {
+            state.active_name = Some(name);
+            state.active_target = Some(target);
+            state.deadline = Some(deadline);
+        }
     }
 
     fn deadline(&self) -> Option<tokio::time::Instant> {
-        self.deadline
+        self.state.lock().ok().and_then(|state| state.deadline)
     }
 
     /// Feed PTY output while capturing. Returns true when the session
     /// finalized itself (byte cap exceeded or deadline passed).
-    fn feed_output(&mut self, bytes: Vec<u8>, now: tokio::time::Instant) -> bool {
-        if !self.is_active() {
+    fn feed_output(&self, bytes: Vec<u8>, now: tokio::time::Instant) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if state.active_name.is_none() {
             return false;
         }
-        self.bytes += bytes.len();
-        self.buffer.push(bytes);
-        let over_cap = self.bytes > MAX_CAPTURE_BYTES;
-        let past_deadline = self.deadline.is_some_and(|d| now >= d);
+        state.bytes += bytes.len();
+        state.buffer.push(bytes);
+        let over_cap = state.bytes > MAX_CAPTURE_BYTES;
+        let past_deadline = state.deadline.is_some_and(|d| now >= d);
         if over_cap || past_deadline {
-            self.finalize();
+            finalize_state(&mut state);
             true
         } else {
             false
         }
     }
 
-    /// Emit the completed capture to the queue and store raw bytes for
+    /// Emit the completed capture to the sink and store raw bytes for
     /// later flush/acknowledge. Resets all capture state.
-    fn finalize(&mut self) -> Option<CapturedOutput> {
-        /// Maximum number of buffered captures before dropping oldest.
-        /// Prevents unbounded memory growth if GDScript stops polling.
-        const MAX_BUFFERED: usize = 64;
-        if !self.is_active() {
+    fn finalize(&self) -> Option<CapturedOutput> {
+        let Ok(mut state) = self.state.lock() else {
             return None;
-        }
-        let id = self.next_event_id;
-        self.next_event_id += 1;
-
-        // Extract plain-text lines from buffered raw bytes
-        let mut lp = crate::parser::LineParser::new();
-        let mut lines = Vec::new();
-        for chunk in &self.buffer {
-            let parsed = lp.feed(chunk);
-            lines.extend(parsed);
-        }
-
-        let concept_name = self.active_name.take().unwrap_or_default();
-        let target = self.active_target.take().unwrap_or_default();
-        let raw_bytes = std::mem::take(&mut self.buffer);
-        self.bytes = 0;
-        if let Ok(mut bufs) = self.buffers.lock() {
-            if bufs.len() >= MAX_BUFFERED
-                && let Some(oldest) = bufs.keys().min().copied()
-            {
-                bufs.remove(&oldest);
-            }
-            bufs.insert(id, raw_bytes);
-        }
-
-        let event = CapturedOutput {
-            id,
-            concept_name,
-            lines,
-            target_pane_type: target,
         };
-        if let Ok(mut queue) = self.queue.lock() {
-            if queue.len() >= MAX_BUFFERED {
-                queue.remove(0);
-            }
-            queue.push(event.clone());
-        }
+        finalize_state(&mut state)
+    }
 
-        self.deadline = None;
-        Some(event)
+    /// Finalize an in-flight capture into `sink` instead of this session's
+    /// own queue.
+    ///
+    /// `SpawnedTerminal::drop` uses this: the pane's queue dies with the
+    /// struct, so the capture goes to the engine's orphan queue, which the
+    /// workspace keeps draining.
+    fn finalize_to(&self, sink: Arc<Mutex<Vec<CapturedOutput>>>) -> Option<CapturedOutput> {
+        let Ok(mut state) = self.state.lock() else {
+            return None;
+        };
+        state.sink = sink;
+        finalize_state(&mut state)
     }
 
     /// True when the active concept's `UntilStop` mode stops on user input.
     fn stops_on_input(&self, concepts: &[Concept]) -> bool {
-        let Some(name) = self.active_name.as_deref() else {
+        let Ok(state) = self.state.lock() else {
+            return false;
+        };
+        let Some(name) = state.active_name.as_deref() else {
             return false;
         };
         concepts.iter().any(|c| {
@@ -437,7 +516,8 @@ impl CaptureSession {
 
     /// Remove buffered chunks for a capture ID from the shared buffer map.
     fn take_chunks(&self, id: &u64) -> Option<Vec<Vec<u8>>> {
-        let mut bufs = self.buffers.lock().ok()?;
+        let state = self.state.lock().ok()?;
+        let mut bufs = state.buffers.lock().ok()?;
         bufs.remove(id)
     }
 }
@@ -1127,7 +1207,7 @@ mod tests {
 
     #[test]
     fn session_begin_feed_finalize_queues_event() {
-        let (mut session, bufs, queue) = test_session();
+        let (session, bufs, queue) = test_session();
         let now = tokio::time::Instant::now();
         session.begin(
             "cat_cmd".into(),
@@ -1148,7 +1228,7 @@ mod tests {
 
     #[test]
     fn session_feed_output_finalizes_on_deadline() {
-        let (mut session, bufs, queue) = test_session();
+        let (session, bufs, queue) = test_session();
         let now = tokio::time::Instant::now();
         session.begin("c".into(), "t".into(), now); // deadline == now
         assert!(session.feed_output(b"x".to_vec(), now));
@@ -1157,9 +1237,102 @@ mod tests {
         assert!(bufs.lock().unwrap().contains_key(&0));
     }
 
+    /// Lock one of the shared test queues. Recovers from poisoning so an
+    /// assertion failure in an earlier test cannot cascade into later ones
+    /// as a `PoisonError` instead of the failure being reported.
+    fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+        mutex
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[test]
+    fn session_finalize_to_publishes_into_the_orphan_sink() {
+        let (session, bufs, queue) = test_session();
+        let orphan: Arc<Mutex<Vec<CapturedOutput>>> = Arc::new(Mutex::new(Vec::new()));
+        let now = tokio::time::Instant::now();
+        session.begin(
+            "cat_cmd".into(),
+            "code_viewer".into(),
+            now + Duration::from_secs(60),
+        );
+        assert!(!session.feed_output(b"orphaned output\n".to_vec(), now));
+
+        let event = session
+            .finalize_to(Arc::clone(&orphan))
+            .expect("finalize should emit the in-flight capture");
+        assert_eq!(event.concept_name, "cat_cmd");
+        assert_eq!(event.lines, vec!["orphaned output".to_string()]);
+
+        let orphaned = lock(&orphan);
+        assert_eq!(
+            orphaned.len(),
+            1,
+            "the orphan sink must receive the capture"
+        );
+        assert!(lock(&queue).is_empty(), "the pane queue must stay empty");
+        assert!(lock(&bufs).contains_key(&0));
+        assert!(!session.is_active());
+    }
+
+    /// Closing a pane mid-capture must not lose the capture: `SpawnedTerminal`
+    /// aborts its task before the finalize-on-exit path can run, so `Drop`
+    /// hands what the task had buffered to the engine's orphan queue, which
+    /// the workspace keeps draining.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dropping_a_pane_finalizes_an_in_flight_capture() {
+        let concept = Concept {
+            name: "cat_test".into(),
+            trigger_regex: Regex::new("cat").unwrap(),
+            enabled: true,
+            capture_mode: CaptureMode::UntilStop {
+                stop_timeout_ms: 60_000,
+                stop_on_input: true,
+            },
+            destinations: vec![Action {
+                target_label: "code_viewer".into(),
+            }],
+        };
+        let engine = WorkspaceEngine::new(vec![concept]);
+        let config = TerminalConfig { id: 79 };
+        let spawned = engine
+            .spawn_terminal_with_grid(config, "sh", &[], &[], &[], 24, 80)
+            .await
+            .expect("spawn");
+
+        // Typed line matches the concept → capture begins and stays live.
+        spawned.handle.send_line("cat /dev/null");
+        for _ in 0..50 {
+            if spawned.capture.is_active() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            spawned.capture.is_active(),
+            "the typed line must start a capture"
+        );
+
+        drop(spawned);
+
+        let orphaned = engine.drain_orphaned_captures();
+        assert_eq!(
+            orphaned.len(),
+            1,
+            "a capture in flight when the pane is dropped must survive it"
+        );
+        assert_eq!(orphaned[0].concept_name, "cat_test");
+        assert_eq!(orphaned[0].target_pane_type, "code_viewer");
+        assert!(
+            engine.drain_orphaned_captures().is_empty(),
+            "draining must consume the orphaned capture"
+        );
+    }
+
     #[test]
     fn session_feed_output_finalizes_on_cap() {
-        let (mut session, _, queue) = test_session();
+        let (session, _, queue) = test_session();
         let now = tokio::time::Instant::now();
         session.begin("c".into(), "t".into(), now + Duration::from_secs(60));
         let flood = vec![b'x'; MAX_CAPTURE_BYTES + 1];
@@ -1169,7 +1342,7 @@ mod tests {
 
     #[test]
     fn session_feed_output_ignores_when_inactive() {
-        let (mut session, bufs, queue) = test_session();
+        let (session, bufs, queue) = test_session();
         let now = tokio::time::Instant::now();
         assert!(!session.feed_output(b"x".to_vec(), now));
         assert!(queue.lock().unwrap().is_empty());
@@ -1188,7 +1361,7 @@ mod tests {
             stop_timeout_ms: 300,
             stop_on_input: false,
         };
-        let (mut session, _, _) = test_session();
+        let (session, _, _) = test_session();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
         session.begin("cat".into(), "t".into(), deadline);
         assert!(session.stops_on_input(&[c]));

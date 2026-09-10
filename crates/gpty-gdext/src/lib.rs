@@ -58,6 +58,21 @@ static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
 
 static ENGINE: LazyLock<WorkspaceEngine> = LazyLock::new(|| WorkspaceEngine::new(Vec::new()));
 
+/// The GDScript shape of a capture event, shared by `drain_concept_events`
+/// and `drain_orphaned_captures`.
+fn capture_event_dict(ev: &gpty_core::types::CapturedOutput) -> Variant {
+    let mut obj = Dictionary::<Variant, Variant>::new();
+    obj.set("id", &Variant::from(ev.id as i64));
+    obj.set("concept_name", &Variant::from(ev.concept_name.clone()));
+    let lines_arr = PackedStringArray::from_iter(ev.lines.iter().map(GString::from));
+    obj.set("lines", &Variant::from(lines_arr));
+    obj.set(
+        "target_pane_type",
+        &Variant::from(ev.target_pane_type.clone()),
+    );
+    Variant::from(obj)
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // GptyTerminal — a Godot node backed by a Rust PTY session
 // ═══════════════════════════════════════════════════════════════════════
@@ -939,18 +954,29 @@ impl GptyTerminal {
     #[func]
     fn drain_concept_events(&self) -> Array<Variant> {
         let mut arr = Array::<Variant>::new();
-        if let Some(ref queue) = self.capture_queue
+        if let Some(queue) = &self.capture_queue
             && let Ok(mut events) = queue.lock()
         {
             for ev in events.drain(..) {
-                let mut obj = Dictionary::<Variant, Variant>::new();
-                obj.set("id", &Variant::from(ev.id as i64));
-                obj.set("concept_name", &Variant::from(ev.concept_name));
-                let lines_arr = PackedStringArray::from_iter(ev.lines.iter().map(GString::from));
-                obj.set("lines", &Variant::from(lines_arr));
-                obj.set("target_pane_type", &Variant::from(ev.target_pane_type));
-                arr.push(&Variant::from(obj));
+                arr.push(&capture_event_dict(&ev));
             }
+        }
+        arr
+    }
+
+    /// Drain captures whose source pane was torn down while they were still
+    /// in flight (closed, swapped, or the layout reset).
+    ///
+    /// The events are complete — there is nothing to acknowledge or flush,
+    /// because the pane, its grid, and its raw-byte store died with it. The
+    /// caller routes them like any other capture and reports a missed route
+    /// without replaying bytes. Returns the same Dictionaries as
+    /// `drain_concept_events`.
+    #[func]
+    fn drain_orphaned_captures() -> Array<Variant> {
+        let mut arr = Array::<Variant>::new();
+        for ev in ENGINE.drain_orphaned_captures() {
+            arr.push(&capture_event_dict(&ev));
         }
         arr
     }

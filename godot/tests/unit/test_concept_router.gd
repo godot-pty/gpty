@@ -136,6 +136,26 @@ func test_flushes_when_all_matching_receivers_decline():
 	assert_eq(term.flushed, [7], "declined capture must return to the terminal")
 	thinking.free()
 
+# ── Orphaned captures (source pane torn down mid-capture) ─────────────
+
+func test_orphaned_capture_routes_without_a_source_terminal():
+	var receiver = _receiver("code_viewer")
+	var ok: bool = ConceptRouter.route_orphaned_capture(
+		[receiver] as Array[Control], _event())
+	assert_true(ok, "a matching receiver must accept an orphaned capture")
+	assert_eq(receiver.received, "a\nb", "receiver should get the joined lines")
+	receiver.free()
+
+
+func test_orphaned_capture_reports_a_missed_route():
+	var receiver = _receiver("inspector")
+	var ok: bool = ConceptRouter.route_orphaned_capture(
+		[receiver] as Array[Control], _event())
+	assert_false(ok, "no matching receiver must report a missed route")
+	assert_eq(receiver.received, "", "non-matching receiver must not get content")
+	receiver.free()
+
+
 func test_legacy_observer_target_does_not_route_to_inspector():
 	var inspector = _receiver("inspector")
 	var term = MockTerminal.new()

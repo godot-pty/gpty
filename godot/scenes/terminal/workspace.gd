@@ -1022,6 +1022,48 @@ func _poll_concept_events():
 	# workspace's pane set.
 	for ws in _workspaces:
 		_poll_concept_events_for(ws)
+	_poll_orphaned_captures()
+
+## Route captures whose source pane was torn down mid-capture (closed,
+## swapped, or the layout reset). Rust finalizes those into the engine's
+## orphan queue; there is no source terminal left to acknowledge or flush —
+## its grid and raw-byte store went with the pane — so a missed route means
+## only that the captured output is gone.
+func _poll_orphaned_captures():
+	var events = GptyTerminal.drain_orphaned_captures()
+	if events.is_empty():
+		return
+	# Which workspace the capture came from is unknown. Offer the active one
+	# first: a visible receiver is the likeliest home for it.
+	var order: Array[int] = []
+	if _active >= 0 and _active < _workspaces.size():
+		order.append(_active)
+	for i in _workspaces.size():
+		if i != _active:
+			order.append(i)
+	var bodies: Array[Control] = []
+	for i in order:
+		var ws: Dictionary = _workspaces[i]
+		for t in ws.tm.tiles:
+			var body = ws.tm._find_body(t.wrapper)
+			if body != null:
+				bodies.append(body)
+	for ev in events:
+		if not (ev is Dictionary):
+			continue
+		if not ConceptRouter.route_orphaned_capture(bodies, ev):
+			var target := str(ev.get("target_pane_type", ""))
+			var pane_label := str(PaneTypes.ALL.get(target, {}).get("name", target))
+			ToastManager.warn("No %s pane open for '%s' output (the source pane closed)" % [
+				pane_label, ev.get("concept_name", "")])
+		# `source` is empty: the pane that produced the capture no longer
+		# exists, and the event schema keeps the same keys for subscribers.
+		GptyTerminal.emit_event(JSON.stringify({
+			"type": "concept",
+			"name": str(ev.get("concept_name", "")),
+			"source": "",
+			"target": str(ev.get("target_pane_type", "")),
+		}))
 
 func _poll_concept_events_for(ws: Dictionary):
 	var all_bodies: Array[Control] = []

@@ -19,6 +19,21 @@ static func route_capture_event(bodies: Array[Control], ev: Dictionary, source_t
 	source_term.flush_capture(ev.get("id", 0))
 	return false
 
+## Route a capture whose source pane was torn down while it was in flight.
+##
+## There is no source terminal to acknowledge or flush — the pane, its grid,
+## and its raw-byte store went with it, so the buffered bytes no longer exist
+## anywhere. Only delivery matters: a receiver gets the capture, or the
+## captured output is gone.
+static func route_orphaned_capture(bodies: Array[Control], ev: Dictionary) -> bool:
+	var target_type: String = str(ev.get("target_pane_type", ""))
+	var lines: PackedStringArray = ev.get("lines", PackedStringArray())
+	var text := "\n".join(lines)
+	for receiver in _matching_receivers(bodies, target_type):
+		if receiver.can_receive_content(ev) and receiver.receive_content(text, ev):
+			return true
+	return false
+
 static func _matching_receivers(bodies: Array[Control], type_name: String) -> Array[Control]:
 	var matches: Array[Control] = []
 	for body in bodies:
