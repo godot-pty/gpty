@@ -282,26 +282,29 @@ impl TermGrid {
     /// spacers skipped. Capped at `limit` lines (most recent kept).
     /// This backs `paneRead`.
     pub fn plain_text(&self, limit: usize) -> Vec<String> {
-        let content = self.term.renderable_content();
-        let mut by_line: std::collections::BTreeMap<i32, String> =
-            std::collections::BTreeMap::new();
-        for indexed in content.display_iter {
-            let ch = indexed.cell.c;
-            if ch == '\0' {
+        let grid = self.term.grid();
+        let history = grid.history_size() as i32;
+        let screen = grid.screen_lines() as i32;
+        let mut out: Vec<String> = Vec::with_capacity((history + screen) as usize);
+        // Grid uses negative Line for scrollback: Line(-history) .. Line(screen-1).
+        // `display_iter` would cover the viewport only, which silently dropped
+        // every scrolled-off line from `paneRead`.
+        for raw_line in -history..screen {
+            let row = &grid[Line(raw_line)];
+            let mut text = String::with_capacity(self.cols);
+            for col in 0..self.cols {
+                let ch = row[Column(col)].c;
                 // Zero-width spacer following a wide character.
-                continue;
-            }
-            by_line.entry(indexed.point.line.0).or_default().push(ch);
-        }
-        let mut out: Vec<String> = by_line
-            .into_values()
-            .map(|mut s| {
-                while s.ends_with(' ') {
-                    s.pop();
+                if ch == '\0' {
+                    continue;
                 }
-                s
-            })
-            .collect();
+                text.push(ch);
+            }
+            while text.ends_with(' ') {
+                text.pop();
+            }
+            out.push(text);
+        }
         if out.len() > limit {
             let skip = out.len() - limit;
             out.drain(..skip);
@@ -772,6 +775,36 @@ mod tests {
         let rows = g.renderable_rows();
         assert_eq!(rows[0][0].ch, 'h');
         assert_eq!(rows[0][4].ch, 'o');
+    }
+
+    #[test]
+    fn plain_text_includes_scrollback() {
+        let mut g = TermGrid::new(5, 20);
+        for i in 0..8 {
+            g.feed(format!("L{i}\r\n").as_bytes());
+        }
+
+        let lines = g.plain_text(50);
+        assert!(
+            lines.iter().any(|l| l == "L0"),
+            "scrolled-off line must stay readable through paneRead: {lines:?}"
+        );
+        assert!(
+            lines.len() > 5,
+            "result must cover more than one viewport: {lines:?}"
+        );
+
+        // `limit` keeps the most recent lines, so the oldest must fall off.
+        let recent = g.plain_text(3);
+        assert_eq!(recent.len(), 3);
+        assert!(
+            !recent.iter().any(|l| l == "L0"),
+            "limit must drop the oldest lines first: {recent:?}"
+        );
+        assert!(
+            recent.iter().any(|l| l == "L7"),
+            "limit must retain the newest lines: {recent:?}"
+        );
     }
 
     #[test]
