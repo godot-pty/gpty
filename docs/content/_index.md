@@ -26,7 +26,7 @@ toc: false
   >}}
   {{< hextra/feature-card
     title="Concept Engine"
-    subtitle="RegEx triggers on PTY output inject commands or capture output into adjacent panes — no polling required."
+    subtitle="RegEx triggers on PTY output capture the reply and route it into adjacent panes — code viewer, Inspector — with no polling."
     icon="sparkles"
   >}}
   {{< hextra/feature-card

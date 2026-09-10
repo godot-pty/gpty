@@ -6,8 +6,8 @@ Library crate for the gpty multi-PTY emulator. This is the engine — all termin
 
 | Module | Purpose | Key Types |
 |--------|---------|-----------|
-| [`types`](src/types.rs) | Data vocabulary shared across all modules | `Concept`, `Event`, `Action`, `TerminalConfig`, `CaptureMode`, `CapturedOutput`, `PaneType` |
-| [`concept`](src/concept.rs) | Pure functions for regex matching and command routing | `match_and_broadcast()`, `matching_commands()` |
+| [`types`](src/types.rs) | Data vocabulary shared across all modules | `Concept`, `Action`, `TerminalConfig`, `CaptureMode`, `CapturedOutput`, `PaneType` |
+| [`concept`](src/concept.rs) | Pure functions for trigger matching and capture routing | `match_line()` |
 | [`agent_state`](src/agent_state.rs) | Tiered, display-only agent-state detection (events / OSC / heuristics) | `AgentState`, `StateTier`, `AgentStateTracker` |
 | [`engine`](src/engine.rs) | Runtime orchestrator; spawns terminal tasks, capture state machine | `WorkspaceEngine`, `PtyTerminalHandle`, `SpawnedTerminal`, `TaskContext` |
 | [`pty`](src/pty.rs) | Cross-platform PTY lifecycle via `portable-pty` | `PtyHandle` |
@@ -19,16 +19,16 @@ Library crate for the gpty multi-PTY emulator. This is the engine — all termin
 
 ## Concept System
 
-Concepts are the core orchestration primitive: a regular expression trigger paired with labelled actions.
+Concepts capture terminal output and route it to a pane: a regular expression
+trigger, a stop condition, and a target pane kind.
 
 ```rust
 Concept {
-    name: "port_conflict",
-    trigger_regex: Regex::new(r"(?i)address.*already.*in\s*use").unwrap(),
-    destinations: vec![Action {
-        command_template: "echo '[Auto] Port conflict detected - consider lsof -i'",
-        target_label: "inspector",
-    }],
+    name: "cat_command",
+    trigger_regex: Regex::new(r"(?:^|[$#>]\s)\bcat\s+\S").unwrap(),
+    enabled: true,
+    capture_mode: CaptureMode::UntilStop { stop_timeout_ms: 300, stop_on_input: true },
+    destinations: vec![Action { target_label: "code_viewer".into() }],
 }
 ```
 
@@ -36,27 +36,28 @@ How it works:
 1. PTY output bytes stream through the `vte` parser
 2. The parser strips ANSI escape sequences and extracts visible text lines
 3. Each line is tested against every registered concept's `trigger_regex`
-4. On match, an `Event` is broadcast on the `tokio::sync::broadcast` channel
-5. Every terminal task receives the event, checks its labels against each action's `target_label`
-6. Matching terminals inject the `command_template` into their PTY's stdin
+4. On match, the terminal enters capture mode and buffers raw bytes
+5. The capture ends on timeout (silence for N ms) or user input
+6. GDScript drains the completed capture and routes its text to the first pane
+   whose type matches the action's `target_label` — with no receiver, the raw
+   bytes are replayed into the grid
 
-Self-reaction loops are prevented: a terminal ignores events where `source_pane == my_id`.
+**Concepts never execute anything.** A concept definition is data: it starts a
+capture and chooses which pane kind displays the result. It cannot write to a
+PTY. That is deliberate — the trigger is a regex over terminal output, which is
+untrusted, so a concept that could act would be an execution primitive driven by
+whatever a program happens to print. `capture_mode` is always `UntilStop`; the
+legacy `single_line` value parses as a capture with default stop knobs, and a
+legacy `cmd` key in an action is ignored.
 
-Security Warning: The Concept Engine is designed to execute commands automatically based on terminal output. Do not bind destructive or high-privilege actions (like `rm` or `sudo`) to easily spoofable regex triggers. An attacker could intentionally print matching text to trick your terminal into executing the action payload.
-
-The engine supports two concept capture modes:
-
-- `SingleLine`: Per-line regex matching. On match, broadcasts an `Event` on the pub-sub channel. Receiving terminals with matching labels inject the action's command template into their PTY stdin.
-- `UntilStop { stop_timeout_ms, stop_on_input }`: Command-output capture. On match, the terminal enters capture mode — all subsequent PTY output is buffered as raw bytes (never fed to the grid). The capture ends on timeout (silence for N ms) or user input. The captured output is routed via GDScript to a receiver pane (e.g., code viewer) or flushed back to the terminal grid.
-
-Key functions: `finalize_capture()`, `handle_command()`, `capture_stops_on_input()`, `feed_grid()`, `store_line()`.
+Key functions: `match_line()`, `finalize_capture()`, `handle_command()`, `feed_grid()`, `store_line()`.
 
 ### Use Cases
 
-- Auto-Restarting Watchers: Detect a segmentation fault or panic string in a backend server pane, and automatically inject a restart command into an adjacent management pane.
-- Port Conflict Resolution: Detect an "Address already in use" error and immediately run an `lsof` or `kill` command to clear the bound port.
-- Inspector: Optionally route captured error blocks (a Python traceback or Rust compiler error) to a private, tool-free Inspector session. Shipped concepts that do this are disabled until the user opts in.
-- Automated Documentation: Match specific compiler error codes and automatically open the relevant local or web documentation in an adjacent window.
+- Read the code you just catted: `cat README.md` in a shell pane opens the file in a code viewer pane.
+- Error triage: route a compiler error block, a traceback, or a failing test log to the Inspector — gated behind its own opt-in (`accept_concept_captures`), because captured output leaves the terminal.
+- Diff and log review: `git diff` / `git log` output lands in a viewer pane instead of eating scrollback.
+- Documentation lookup: match a compiler error code and open the relevant snippet or link in an adjacent pane.
 
 ## Why Flat?
 

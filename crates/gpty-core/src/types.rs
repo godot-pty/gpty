@@ -1,17 +1,18 @@
 //! Shared data vocabulary — the strict data boundaries of the application.
 //!
-//! These types are passed through the `tokio::sync::broadcast` channel and
-//! form the contract between the PTY layer, the concept engine, and the
-//! terminal tasks. Every type is `Clone` so it can be fanned out to
-//! multiple receivers.
+//! These types form the contract between the PTY layer, the concept
+//! capture engine, and the terminal tasks. Every type is `Clone` so it
+//! can be handed to more than one owner.
 use serde::{Deserialize, Serialize};
 
 /// How a triggered concept captures terminal output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+///
+/// A concept never executes anything: a trigger match starts a capture and
+/// the captured text is routed to a pane that advertises the concept's
+/// target type. `UntilStop` is therefore the only mode — a match without a
+/// subsequent capture would produce no observable effect at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureMode {
-    /// Match and capture only the triggering line (backward-compatible default).
-    #[default]
-    SingleLine,
     /// Capture all subsequent output until stop conditions are met.
     UntilStop {
         /// Silence for this many ms stops the capture.
@@ -19,6 +20,15 @@ pub enum CaptureMode {
         /// User typing a command stops the capture.
         stop_on_input: bool,
     },
+}
+
+impl Default for CaptureMode {
+    fn default() -> Self {
+        Self::UntilStop {
+            stop_timeout_ms: 300,
+            stop_on_input: true,
+        }
+    }
 }
 
 use regex::Regex;
@@ -71,59 +81,41 @@ impl std::str::FromStr for PaneType {
     }
 }
 
-/// Identifies and labels a distinct terminal pane.
+/// Identifies a distinct terminal pane.
 ///
-/// `id` must be unique across all terminals in a workspace.
-/// `labels` are used by the concept engine to route actions — a terminal
-/// only receives an action if its labels contain the action's `target_label`.
+/// `id` must be unique across all terminals in a workspace: it keys capture
+/// state, status lookups, and log lines.
 #[derive(Debug, Clone)]
 pub struct TerminalConfig {
     pub id: u32,
-    pub labels: Vec<String>,
 }
 
-/// The payload broadcast through the pub-sub channel when a concept triggers.
-#[derive(Debug, Clone)]
-pub struct Event {
-    pub topic: String,
-    pub payload: String,
-    pub source_pane: u32,
-    /// Regex capture groups from the trigger match (group 0 = full match).
-    pub captures: Vec<String>,
-}
-
-/// A command to inject into a target terminal, gated by a label.
+/// Where a concept's captured output is delivered.
 ///
-/// `{payload}` and `{N}` tokens in `command_template` are substituted
-/// with the triggering line and regex capture groups (group 0 = full
-/// match) before the command is written to the target PTY. Substituted
-/// values are single-quote-escaped (see `concept::substitute_template`),
-/// so templates must not pre-quote them: write `echo {payload}`, not
-/// `echo '{payload}'`.
+/// The label names a pane kind (e.g. `code_viewer`, `inspector`): the
+/// GDScript router matches it against each pane's `_pane_type()` and the
+/// first pane that accepts the content receives it. Concepts never carry a
+/// command to run — capture-and-route is the whole vocabulary.
 #[derive(Debug, Clone)]
 pub struct Action {
-    pub command_template: String,
-    /// Only terminals whose `TerminalConfig::labels` contain this label
-    /// will receive and execute the command.
     pub target_label: String,
 }
 
-/// A business-logic concept: regex trigger → labelled actions.
+/// A display concept: regex trigger → capture, routed to a target pane kind.
 ///
-/// Concepts are the core orchestration primitive. When a terminal produces
-/// a line of output matching `trigger_regex`, every `Action` in `destinations`
-/// is routed to terminals with the matching `target_label`.
+/// When a terminal produces a line matching `trigger_regex`, the engine
+/// enters capture mode; the captured output is later routed to the first
+/// pane advertising the `target_label` of the concept's first destination.
 ///
 /// # Example
 ///
 /// ```ignore
 /// Concept {
-///     name: "port_conflict".into(),
-///     trigger_regex: Regex::new(r"(?i)address.*already.*in\s*use").unwrap(),
-///     destinations: vec![Action {
-///         command_template: "echo 'Port conflict detected'".into(),
-///         target_label: "inspector".into(),
-///     }],
+///     name: "cat_command".into(),
+///     trigger_regex: Regex::new(r"(?:^|[$#>]\s)\bcat\s+\S").unwrap(),
+///     enabled: true,
+///     capture_mode: CaptureMode::UntilStop { stop_timeout_ms: 300, stop_on_input: true },
+///     destinations: vec![Action { target_label: "code_viewer".into() }],
 /// }
 /// ```
 #[derive(Debug, Clone)]

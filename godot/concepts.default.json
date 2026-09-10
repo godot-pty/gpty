@@ -8,7 +8,7 @@
       "stop_timeout_ms": 300,
       "stop_on_input": true,
       "actions": [
-        {"cmd": "", "target": "code_viewer"}
+        {"target": "code_viewer"}
       ]
     },
     {
@@ -19,7 +19,7 @@
       "stop_timeout_ms": 500,
       "stop_on_input": true,
       "actions": [
-        {"cmd": "", "target": "code_viewer"}
+        {"target": "code_viewer"}
       ]
     },
     {
@@ -30,7 +30,7 @@
       "stop_timeout_ms": 600,
       "stop_on_input": true,
       "actions": [
-        {"cmd": "", "target": "inspector"}
+        {"target": "inspector"}
       ]
     },
     {
@@ -41,7 +41,7 @@
       "stop_timeout_ms": 2000,
       "stop_on_input": true,
       "actions": [
-        {"cmd": "", "target": "inspector"}
+        {"target": "inspector"}
       ]
     }
   ]

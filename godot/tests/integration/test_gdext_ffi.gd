@@ -17,16 +17,20 @@ func after_each():
 func test_concepts_roundtrip_through_ffi():
 	_t.set_global_concepts(JSON.stringify([
 		{"name": "c1", "trigger": "^testcmd", "enabled": true,
-		 "capture_mode": "single_line",
-		 "actions": [{"cmd": "echo {payload}", "target": "inspector"}]},
+		 "capture_mode": "until_stop", "stop_timeout_ms": 450, "stop_on_input": false,
+		 "actions": [{"target": "inspector"}]},
 	]))
 	var back = _t.get_global_concepts()
 	assert_eq(back.size(), 1, "one concept should roundtrip")
 	assert_eq(back[0]["name"], "c1")
 	assert_eq(back[0]["trigger"], "^testcmd")
-	var hits = _t.match_concepts_on_line("testcmd x")
-	assert_eq(hits.size(), 1, "matching line should produce one hit")
-	assert_eq(hits[0]["cmd"], "echo 'testcmd'", "payload must be the full regex match, shell-quoted")
+	assert_eq(back[0]["stop_timeout_ms"], 450, "stop timeout must roundtrip")
+	assert_eq(back[0]["stop_on_input"], false, "stop-on-input must roundtrip")
+	var actions: Array = back[0]["actions"]
+	assert_eq(actions.size(), 1, "the routing target must roundtrip")
+	assert_eq(actions[0]["target"], "inspector")
+	assert_false(actions[0].has("cmd"),
+		"a concept action must never carry a command template")
 
 func test_key_to_bytes_arrow():
 	var b = _t.key_to_bytes(KEY_LEFT, false, false, false, false)

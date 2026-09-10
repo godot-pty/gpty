@@ -99,26 +99,12 @@ var _sync_interval: float = 1.0 / 60.0
 const SLOW_POLL_INTERVAL := 0.25
 var _slow_poll_timer: float = 0.0
 
-## Labels the concept engine routes actions by: this pane's stable public id
-## plus its tags. `pane_label` is deliberately absent — it is reassigned on
-## restore and is not a stable link. An id is generated if the pane does not
-## have one yet, so a pane is addressable from the moment its shell starts.
-func _concept_labels() -> Array:
-	ensure_attachment_id()
-	var out: Array = []
-	if attachment_id != "":
-		out.append(attachment_id)
-	for tag in tags:
-		if tag is String and tag != "" and not out.has(tag):
-			out.append(tag)
-	return out
-
 func _ready():
 	super._ready()
 	_terminal = GptyTerminal.new()
 	_terminal.name = "GptyTerminal"
 	add_child(_terminal)
-	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines, JSON.stringify(shell_args), JSON.stringify(_concept_labels()))
+	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines, JSON.stringify(shell_args))
 
 	if color_scheme_path != "":
 		_apply_stored_scheme()
@@ -599,9 +585,6 @@ func _handle_mouse(event: InputEvent):
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
-				if event.ctrl_pressed:
-					_check_click_concept(event.position)
-					accept_event(); return
 				grab_focus(); _selecting = true
 				_sel_start = _mouse_to_cell(event.position); _sel_end = _sel_start; queue_redraw()
 			else: _selecting = false; queue_redraw()
@@ -881,28 +864,6 @@ func _draw_search_highlights(off: Vector2):
 		if match_col < 0 or match_col >= n_cols: continue
 		var color = SEARCH_ACTIVE_COLOR if i == current else SEARCH_HIGHLIGHT_COLOR
 		draw_rect(Rect2(off.x + match_col * _cell_w, off.y + display_row * _cell_h, _cell_w, _cell_h), color)
-
-# ── Clickable concepts ────────────────────────────────────────────────
-
-func _check_click_concept(pos: Vector2):
-	var cell = _mouse_to_cell(pos)
-	var r = cell.y; var c = cell.x
-	if r < 0 or c < 0: return
-	var chars: Array = _cell_cache.get("chars", [])
-	if r >= chars.size(): return
-	var row_str: String = chars[r]
-	if c >= row_str.length(): return
-	# Trim trailing spaces to get the meaningful text
-	var line = row_str.strip_edges(false, true)
-	if line == "": return
-	# Match against the Rust engine's compiled regexes (Rust regex only —
-	# no PCRE backtracking). Values are shell-quoted by the engine.
-	var hits = _terminal.match_concepts_on_line(line)
-	for hit in hits:
-		var cmd: String = hit.get("cmd", "")
-		if cmd != "":
-			_send_line_to_term(cmd)
-			return
 
 func _pane_type() -> String:
 	return "terminal"

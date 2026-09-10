@@ -139,12 +139,24 @@ func save_concepts(concepts: Array):
 	for entry in concepts:
 		if entry is Dictionary:
 			var copy: Dictionary = entry.duplicate(true)
+			_strip_legacy_commands(copy)
 			_migrate_actions_target(copy)
 			sanitized.append(copy)
 	var d = {"concepts": sanitized}
 	_write_file(CONCEPTS_FILE, d)
 	concepts_changed.emit()
 	call_deferred("_push_to_rust")
+
+## Concepts never carry a command. A `cmd` key can only come from the release
+## where a concept action could inject one into a PTY, so it is dropped
+## whenever a user file passes through the app and never carried forward.
+func _strip_legacy_commands(entry: Dictionary) -> void:
+	var actions = entry.get("actions", [])
+	if not (actions is Array):
+		return
+	for action in actions:
+		if action is Dictionary:
+			action.erase("cmd")
 
 # Migrate old default trigger patterns to the new ones.
 const TRIGGER_MIGRATIONS := {

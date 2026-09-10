@@ -52,7 +52,7 @@ Inspector omp is launched as `omp --mode rpc --no-session --no-tools --no-extens
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `start_shell(cmd: String, rows: int, cols: int, envs: String, pane_id: String, history_lines: int, args_json: String, labels_json: String)` | void | Start a PTY session (injects per-PTY event capability, `GPTY_ENV=1`, `GPTY_PANE_ID`); attaches the SQLite history store keyed by `pane_id` and restores the newest `history_lines` rows into scrollback. `args_json` is a JSON array of program arguments (≤32 entries, ≤4096 chars each) — `["-c", cmd]` runs through a shell. `labels_json` is a JSON array of concept-routing labels (`[pane_id, …tags]`, ≤32 entries of ≤64 chars) that the concept engine matches an action's `target` against. An absolute `cmd` must name a regular file that is not group/other-writable and is owned by this user or root; bare names resolve through `PATH` |
+| `start_shell(cmd: String, rows: int, cols: int, envs: String, pane_id: String, history_lines: int, args_json: String)` | void | Start a PTY session (injects per-PTY event capability, `GPTY_ENV=1`, `GPTY_PANE_ID`); attaches the SQLite history store keyed by `pane_id` and restores the newest `history_lines` rows into scrollback. `args_json` is a JSON array of program arguments (≤32 entries, ≤4096 chars each) — `["-c", cmd]` runs through a shell. An absolute `cmd` must name a regular file that is not group/other-writable and is owned by this user or root; bare names resolve through `PATH` |
 | `send_text(text: String)` | void | Send raw text to PTY (no newline) |
 | `send_line(text: String)` | void | Send a line to PTY (appends `\n`) |
 | `resize_grid(rows: int, cols: int)` | void | Resize grid + send SIGWINCH |
@@ -106,7 +106,6 @@ Inspector omp is launched as `omp --mode rpc --no-session --no-tools --no-extens
 |--------|---------|-------------|
 | `set_global_concepts(concepts_json: String)` | void | Replace all concepts in the engine (JSON array of concept objects; parse caps and timeout clamp in `gpty_core::concept::concepts_from_json`) |
 | `get_global_concepts()` | `Array` | Get all concepts as Dict array |
-| `match_concepts_on_line(line: String)` | `Array` | Match concepts against a line; returns `[{name, cmd}]` with shell-quoted substitution |
 | `drain_concept_events()` | `Array` | Drain completed capture events from this terminal |
 | `acknowledge_capture(event_id: int)` | void | Discard captured bytes (receiver consumed output) |
 | `flush_capture(event_id: int)` | void | Feed captured bytes to grid (no receiver) |

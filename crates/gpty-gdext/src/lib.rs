@@ -30,14 +30,11 @@ mod omp_events;
 
 const TOKIO_WORKERS: usize = 2;
 const MIN_DIM: i64 = 1;
-/// Terminal ids must be unique across every pane in the process: the engine
-/// compares an event's `source_pane` against each receiver's id to suppress
-/// self-reaction, so a collision makes every pane look like the source and
-/// silently discards every concept action. A per-instance counter gave every
-/// pane id 1 — one GptyTerminal is created per pane and each is started once.
+/// Terminal ids identify a pane in engine state, capture lookups, and logs.
+/// They must stay unique across the process (a per-instance counter once gave
+/// every pane id 1 — one GptyTerminal is created per pane and each is
+/// started once).
 static NEXT_TERMINAL_ID: AtomicU32 = AtomicU32::new(1);
-/// Maximum concept-routing labels accepted per pane (the pane id plus tags).
-const MAX_LABELS: usize = 32;
 const RGB_SCALE: f32 = 1.0 / 255.0;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -123,7 +120,6 @@ impl GptyTerminal {
         pane_id: GString,
         history_lines: i64,
         args_json: GString,
-        labels_json: GString,
     ) {
         let command = command.to_string();
         if command.is_empty() || command.len() > 1024 || command.contains('\0') {
@@ -177,32 +173,11 @@ impl GptyTerminal {
         } else {
             String::new()
         };
-        // Labels the concept engine matches an action's `target` against: the
-        // pane's stable public id plus its user tags. Without these every
-        // concept action was unreachable — `matching_commands` compares the
-        // action target against this list, so an empty list meant no action
-        // could ever be delivered. Sanitized in GDScript; capped again here
-        // because this is the FFI boundary.
-        let mut labels: Vec<String> = Vec::new();
-        if !pane_id_value.is_empty() {
-            labels.push(pane_id_value.clone());
-        }
-        if let Ok(parsed) = serde_json::from_str::<Vec<String>>(&labels_json.to_string()) {
-            for label in parsed {
-                if label.is_empty() || label.len() > 64 || labels.len() >= MAX_LABELS {
-                    continue;
-                }
-                if !labels.contains(&label) {
-                    labels.push(label);
-                }
-            }
-        }
-
         if !pane_id_value.is_empty() {
             trusted_envs.push(("GPTY_PANE_ID".to_string(), pane_id_value));
         }
 
-        let config = TerminalConfig { id, labels };
+        let config = TerminalConfig { id };
 
         let rows = rows.max(MIN_DIM) as usize;
         let cols = cols.max(MIN_DIM) as usize;
@@ -922,66 +897,20 @@ impl GptyTerminal {
             obj.set("name", &Variant::from(c.name.clone()));
             obj.set("trigger", &Variant::from(c.trigger_regex.as_str()));
             obj.set("enabled", &Variant::from(c.enabled));
-            match &c.capture_mode {
-                CaptureMode::SingleLine => {
-                    obj.set("capture_mode", &Variant::from("single_line"));
-                }
-                CaptureMode::UntilStop {
-                    stop_timeout_ms,
-                    stop_on_input,
-                } => {
-                    obj.set("capture_mode", &Variant::from("until_stop"));
-                    obj.set("stop_timeout_ms", &Variant::from(*stop_timeout_ms as i64));
-                    obj.set("stop_on_input", &Variant::from(*stop_on_input));
-                }
-            }
+            let CaptureMode::UntilStop {
+                stop_timeout_ms,
+                stop_on_input,
+            } = c.capture_mode;
+            obj.set("capture_mode", &Variant::from("until_stop"));
+            obj.set("stop_timeout_ms", &Variant::from(stop_timeout_ms as i64));
+            obj.set("stop_on_input", &Variant::from(stop_on_input));
             let mut acts = Array::<Variant>::new();
             for a in &c.destinations {
                 let mut ad = Dictionary::<Variant, Variant>::new();
-                ad.set("cmd", &Variant::from(a.command_template.clone()));
                 ad.set("target", &Variant::from(a.target_label.clone()));
                 acts.push(&Variant::from(ad));
             }
             obj.set("actions", &Variant::from(acts));
-            arr.push(&Variant::from(obj));
-        }
-        arr
-    }
-
-    /// Match every enabled concept against `line` and return, for each
-    /// matching concept, the substituted command from its first action.
-    ///
-    /// Returns an Array of Dictionaries `{"name": String, "cmd": String}`.
-    /// `cmd` is the template with `{payload}`/`{N}` substituted and
-    /// shell-quoted; it may be empty (e.g. capture-only concepts).
-    /// GDScript decides whether to inject it. Uses the Rust `regex` crate
-    /// only — no backtracking engine.
-    #[func]
-    fn match_concepts_on_line(&self, line: GString) -> Array<Variant> {
-        let line = line.to_string();
-        let concepts = ENGINE.get_concepts();
-        let mut arr = Array::<Variant>::new();
-        for c in &concepts {
-            if !c.enabled {
-                continue;
-            }
-            let Some(caps) = c.trigger_regex.captures(&line) else {
-                continue;
-            };
-            let mut captures = Vec::with_capacity(caps.len());
-            for m in caps.iter() {
-                captures.push(m.map(|m| m.as_str().to_string()).unwrap_or_default());
-            }
-            let payload = captures.first().cloned().unwrap_or_default();
-            let template = c
-                .destinations
-                .first()
-                .map(|a| a.command_template.clone())
-                .unwrap_or_default();
-            let cmd = gpty_core::concept::substitute_template(&template, &payload, &captures);
-            let mut obj = Dictionary::<Variant, Variant>::new();
-            obj.set("name", &Variant::from(c.name.clone()));
-            obj.set("cmd", &Variant::from(cmd));
             arr.push(&Variant::from(obj));
         }
         arr

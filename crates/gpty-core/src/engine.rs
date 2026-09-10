@@ -1,28 +1,30 @@
-//! The central pub-sub orchestrator.
+//! The terminal-task orchestrator.
 //!
-//! [`WorkspaceEngine`] is the runtime coordinator. It owns the broadcast
-//! channel, the concept registry, and spawns every terminal task (mock or
-//! real-PTY-backed) as an isolated tokio task. Each task:
+//! [`WorkspaceEngine`] is the runtime coordinator. It owns the concept
+//! registry and spawns every terminal task (mock or real-PTY-backed) as an
+//! isolated tokio task. Each task:
 //!
-//! 1. **Listens** for incoming [`Event`]s on the broadcast channel
-//! 2. **Produces** events by running its output through [`crate::concept::match_and_broadcast`]
-//! 3. **Injects** commands via the PTY writer when a matching event arrives
-//! 4. **Captures** output when a `UntilStop` concept fires, buffering
-//!    subsequent output until a stop condition (timeout or user input).
+//! 1. Feeds PTY output through [`crate::concept::match_line`]
+//! 2. **Captures** output when a concept fires, buffering subsequent
+//!    output until a stop condition (timeout or user input)
+//! 3. Queues the captured block for GDScript to route to a receiver pane
+//!
+//! Nothing here writes to a child's stdin except real user input
+//! ([`PtyTerminalHandle::send_line`] / `send_text`) and the resize control.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 
 use crate::agent_state::{AgentState, StateTier};
 use crate::concept;
 use crate::term::TermGrid;
-use crate::types::{CaptureMode, CapturedOutput, Concept, Event, TerminalConfig};
+use crate::types::{CaptureMode, CapturedOutput, Concept, TerminalConfig};
 
 // ── Stdin input discrimination ────────────────────────────────────────
 
-/// Commands sent to a PTY from the outside (keyboard or concept actions).
+/// Commands sent to a PTY from the outside (keyboard or IPC injection).
 enum StdinInput {
     Line(String),
     Raw(Vec<u8>),
@@ -40,7 +42,6 @@ enum StdinInput {
 // ── Public types ──────────────────────────────────────────────────────
 
 pub struct WorkspaceEngine {
-    tx: broadcast::Sender<Event>,
     concepts: Arc<std::sync::RwLock<Vec<Concept>>>,
 }
 
@@ -95,49 +96,9 @@ impl Drop for SpawnedTerminal {
 
 impl WorkspaceEngine {
     pub fn new(concepts: Vec<Concept>) -> Self {
-        let (tx, _) = broadcast::channel(1024);
         Self {
-            tx,
             concepts: Arc::new(std::sync::RwLock::new(concepts)),
         }
-    }
-
-    pub async fn spawn_mock_terminal(
-        &self,
-        config: TerminalConfig,
-        mock_outputs: Vec<String>,
-        interval_ms: u64,
-    ) {
-        let mut rx = self.tx.subscribe();
-        let tx = self.tx.clone();
-        let concepts = Arc::clone(&self.concepts);
-        let id = config.id;
-        let labels = config.labels;
-
-        tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(tokio::time::Duration::from_millis(interval_ms));
-            let mut idx = 0usize;
-            loop {
-                tokio::select! {
-                    event = rx.recv() => {
-                        if let Ok(event) = event {
-                            let commands =
-                                concept::matching_commands(id, &labels, &concepts.read().unwrap(), &event);
-                            for cmd in commands {
-                                log::info!("[Pane {id}] Received '{:?}'. Would execute: {cmd}", event.topic);
-                            }
-                        }
-                    }
-                    _ = interval.tick() => {
-                        if let Some(line) = mock_outputs.get(idx) {
-                            concept::match_and_broadcast(id, &concepts.read().unwrap(), &tx, line);
-                            idx = (idx + 1) % mock_outputs.len();
-                        }
-                    }
-                }
-            }
-        });
     }
 
     pub async fn spawn_pty_terminal(
@@ -153,13 +114,7 @@ impl WorkspaceEngine {
             crate::pty::PtyHandle::spawn(config.id, command, args, envs, trusted_envs, pty_tx)?;
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<StdinInput>();
 
-        let task_ctx = TaskContext::new(
-            config.id,
-            config.labels,
-            Arc::clone(&self.concepts),
-            self.tx.subscribe(),
-            self.tx.clone(),
-        );
+        let task_ctx = TaskContext::new(config.id, Arc::clone(&self.concepts));
 
         tokio::spawn(run_terminal_task(
             task_ctx, pty_handle, pty_rx, stdin_rx, None,
@@ -194,13 +149,7 @@ impl WorkspaceEngine {
         let capture_buffers: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
-        let mut task_ctx = TaskContext::new(
-            config.id,
-            config.labels,
-            Arc::clone(&self.concepts),
-            self.tx.subscribe(),
-            self.tx.clone(),
-        );
+        let mut task_ctx = TaskContext::new(config.id, Arc::clone(&self.concepts));
         task_ctx.session =
             CaptureSession::new(Arc::clone(&capture_buffers), Arc::clone(&capture_queue));
 
@@ -257,10 +206,7 @@ fn concept_match_suppressed(
 
 struct TaskContext {
     id: u32,
-    labels: Vec<String>,
     concepts: Arc<std::sync::RwLock<Vec<Concept>>>,
-    rx: broadcast::Receiver<Event>,
-    tx: broadcast::Sender<Event>,
     session: CaptureSession,
     suppress_pty_concept_match_until: Option<tokio::time::Instant>,
 }
@@ -269,19 +215,10 @@ impl TaskContext {
     fn pty_concept_match_suppressed(&self, now: tokio::time::Instant) -> bool {
         concept_match_suppressed(self.suppress_pty_concept_match_until, now)
     }
-    fn new(
-        id: u32,
-        labels: Vec<String>,
-        concepts: Arc<std::sync::RwLock<Vec<Concept>>>,
-        rx: broadcast::Receiver<Event>,
-        tx: broadcast::Sender<Event>,
-    ) -> Self {
+    fn new(id: u32, concepts: Arc<std::sync::RwLock<Vec<Concept>>>) -> Self {
         Self {
             id,
-            labels,
             concepts,
-            rx,
-            tx,
             session: CaptureSession::new(
                 Arc::new(Mutex::new(HashMap::new())),
                 Arc::new(Mutex::new(Vec::new())),
@@ -450,36 +387,6 @@ impl CaptureSession {
         let mut bufs = self.buffers.lock().ok()?;
         bufs.remove(id)
     }
-
-    /// Match typed input against enabled UntilStop concepts; returns the
-    /// (name, target, timeout duration) to start a capture session.
-    fn match_until_stop(
-        concepts: &[Concept],
-        line: &str,
-    ) -> Option<(String, String, std::time::Duration)> {
-        for concept in concepts {
-            if !concept.enabled {
-                continue;
-            }
-            if concept.trigger_regex.is_match(line)
-                && let CaptureMode::UntilStop {
-                    stop_timeout_ms, ..
-                } = &concept.capture_mode
-            {
-                let target = concept
-                    .destinations
-                    .first()
-                    .map(|a| a.target_label.clone())
-                    .unwrap_or_default();
-                return Some((
-                    concept.name.clone(),
-                    target,
-                    std::time::Duration::from_millis(*stop_timeout_ms),
-                ));
-            }
-        }
-        None
-    }
 }
 
 /// Handle a command (FlushCapture / AcknowledgeCapture) from GDScript.
@@ -563,26 +470,6 @@ async fn run_terminal_task(
                 }
                 timeout_sleep.as_mut().reset(tokio::time::Instant::now() + INACTIVE_DURATION);
             }
-            msg = ctx.rx.recv() => {
-                match msg {
-                    Ok(event) => {
-                        let concepts_guard = ctx.concepts.read().unwrap();
-                        let cmds = concept::matching_commands(
-                            ctx.id, &ctx.labels, &concepts_guard, &event,
-                        );
-                        drop(concepts_guard);
-                        for cmd in cmds {
-                            if let Err(e) = pty_handle.write_line(&cmd) {
-                                log::error!("[Pane {}] PTY write error (concept cmd): {e}", ctx.id);
-                            }
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        log::warn!("[Pane {}] Lagged behind broadcast, skipped {skipped} events", ctx.id);
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
             msg = pty_rx.recv() => {
                 let Some(bytes) = msg else { break; };
                 // Update liveness: any PTY output means the pane was active.
@@ -609,9 +496,8 @@ async fn run_terminal_task(
                         timeout_sleep.as_mut().reset(deadline);
                     }
                 } else {
-                    // Normal mode: match concepts against output lines.
-                    // SingleLine concepts broadcast events for command injection.
-                    // UntilStop concepts start capture mode to buffer subsequent output.
+                    // Normal mode: match concepts against output lines. A
+                    // match starts a capture — nothing is ever injected.
                     let now = tokio::time::Instant::now();
                     // Full-screen applications repaint themselves; their redraw
                     // lines are presentation, not shell output (e.g. an OMP TUI
@@ -629,9 +515,7 @@ async fn run_terminal_task(
                                 continue;
                             }
                             let concepts_guard = ctx.concepts.read().unwrap();
-                            let capture = concept::match_and_broadcast(
-                                ctx.id, &concepts_guard, &ctx.tx, line,
-                            );
+                            let capture = concept::match_line(&concepts_guard, line);
                             if !ctx.session.is_active()
                                 && let Some((name, CaptureMode::UntilStop { stop_timeout_ms, .. }, target)) = capture
                             {
@@ -727,14 +611,15 @@ async fn run_terminal_task(
                             && line.len() <= crate::parser::MAX_LINE_LEN
                         {
                             let concepts_guard = ctx.concepts.read().unwrap();
-                            if let Some((name, target, dur)) =
-                                CaptureSession::match_until_stop(&concepts_guard, line)
+                            let capture = concept::match_line(&concepts_guard, line);
+                            drop(concepts_guard);
+                            if let Some((name, CaptureMode::UntilStop { stop_timeout_ms, .. }, target)) = capture
                             {
-                                let deadline = tokio::time::Instant::now() + dur;
+                                let deadline = tokio::time::Instant::now()
+                                    + Duration::from_millis(stop_timeout_ms);
                                 ctx.session.begin(name, target, deadline);
                                 timeout_sleep.as_mut().reset(deadline);
                             }
-                            drop(concepts_guard);
                         }
                         if let Err(e) = pty_handle.write_line(line) {
                             log::error!("[Pane {}] PTY write error (stdin): {e}", ctx.id);
@@ -817,10 +702,7 @@ mod tests {
     #[tokio::test]
     async fn test_spawn_terminal_and_resize() {
         let engine = WorkspaceEngine::new(vec![]);
-        let config = TerminalConfig {
-            id: 42,
-            labels: vec![],
-        };
+        let config = TerminalConfig { id: 42 };
 
         #[cfg(windows)]
         let cmd = "cmd.exe";
@@ -836,10 +718,11 @@ mod tests {
 
         for _ in 0..10 {
             tokio::time::sleep(Duration::from_millis(10)).await;
-            if let Ok(grid) = spawned.grid.lock() {
-                if grid.num_rows() == 50 && grid.num_cols() == 100 {
-                    break;
-                }
+            if let Ok(grid) = spawned.grid.lock()
+                && grid.num_rows() == 50
+                && grid.num_cols() == 100
+            {
+                break;
             }
         }
 
@@ -892,10 +775,7 @@ mod tests {
     async fn osc_declaration_sets_tier2_state() {
         use crate::agent_state::AgentState;
         let engine = WorkspaceEngine::new(vec![]);
-        let config = TerminalConfig {
-            id: 51,
-            labels: vec![],
-        };
+        let config = TerminalConfig { id: 51 };
         let spawned = engine
             .spawn_terminal_with_grid(
                 config,
@@ -920,10 +800,7 @@ mod tests {
     async fn osc_declaration_ignores_unknown_values() {
         use crate::agent_state::AgentState;
         let engine = WorkspaceEngine::new(vec![]);
-        let config = TerminalConfig {
-            id: 52,
-            labels: vec![],
-        };
+        let config = TerminalConfig { id: 52 };
         let spawned = engine
             .spawn_terminal_with_grid(
                 config,
@@ -948,10 +825,7 @@ mod tests {
     async fn tier3_failure_pattern_sets_failed() {
         use crate::agent_state::AgentState;
         let engine = WorkspaceEngine::new(vec![]);
-        let config = TerminalConfig {
-            id: 53,
-            labels: vec![],
-        };
+        let config = TerminalConfig { id: 53 };
         let spawned = engine
             .spawn_terminal_with_grid(
                 config,
@@ -979,10 +853,7 @@ mod tests {
     async fn shell_exit_nonzero_sets_failed() {
         use crate::agent_state::AgentState;
         let engine = WorkspaceEngine::new(vec![]);
-        let config = TerminalConfig {
-            id: 54,
-            labels: vec![],
-        };
+        let config = TerminalConfig { id: 54 };
         let spawned = engine
             .spawn_terminal_with_grid(config, "sh", &["-c", "exit 3"], &[], &[], 24, 80)
             .await
@@ -1062,15 +933,11 @@ mod tests {
                 stop_on_input: true,
             },
             destinations: vec![Action {
-                command_template: String::new(),
                 target_label: "code_viewer".into(),
             }],
         };
         let engine = WorkspaceEngine::new(vec![concept]);
-        let config = TerminalConfig {
-            id: 77,
-            labels: vec![],
-        };
+        let config = TerminalConfig { id: 77 };
         let spawned = engine
             .spawn_terminal_with_grid(config, "sh", &[], &[], &[], 24, 80)
             .await
@@ -1243,29 +1110,5 @@ mod tests {
             Some(now - Duration::from_millis(1)),
             now,
         ));
-    }
-
-    #[test]
-    fn session_match_until_stop_returns_target_and_duration() {
-        let mut c = Concept::new("cat", Regex::new("^cat").unwrap(), vec![]);
-        c.capture_mode = CaptureMode::UntilStop {
-            stop_timeout_ms: 300,
-            stop_on_input: true,
-        };
-        let mut single = Concept::new("echo", Regex::new("^echo").unwrap(), vec![]);
-        single.capture_mode = CaptureMode::SingleLine;
-        let mut disabled = Concept::new("off", Regex::new("^off").unwrap(), vec![]);
-        disabled.enabled = false;
-        disabled.capture_mode = CaptureMode::UntilStop {
-            stop_timeout_ms: 300,
-            stop_on_input: true,
-        };
-        let concepts = vec![c, single, disabled];
-        let m = CaptureSession::match_until_stop(&concepts, "cat file").expect("cat should match");
-        assert_eq!(m.0, "cat");
-        assert_eq!(m.1, "");
-        assert_eq!(m.2, Duration::from_millis(300));
-        assert!(CaptureSession::match_until_stop(&concepts, "echo hi").is_none());
-        assert!(CaptureSession::match_until_stop(&concepts, "off thing").is_none());
     }
 }
