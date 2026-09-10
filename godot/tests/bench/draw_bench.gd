@@ -35,12 +35,45 @@ var _pane
 func _initialize():
 	var cols := int(OS.get_environment("BENCH_COLS")) if OS.get_environment("BENCH_COLS") != "" else 90
 	var rows := int(OS.get_environment("BENCH_ROWS")) if OS.get_environment("BENCH_ROWS") != "" else 30
-	_measure(cols, rows)
+	if OS.get_environment("BENCH_FLOOD") != "":
+		_measure_flood(cols, rows)
+	else:
+		_measure(cols, rows)
 
-func _measure(cols: int, rows: int):
+## Flood mode: a pane repaints its whole screen in a loop (clear + home +
+## a screenful of lines). Every frame sees full-grid damage — the case that
+## makes a pane expensive — while the write rate stays bounded, so this
+## measures the UI-thread cost rather than the unbounded output channel.
+func _measure_flood(cols: int, rows: int):
+	await _new_pane(cols, rows, "while :; do printf '\\033[2J\\033[H'; seq -f 'flood %g 0123456789 abcdefghijklmnopqrstuvwxyz' 1 35; done")
+	var start := Time.get_ticks_usec()
+	var frames := 0
+	var work := 0
+	var busy_frames := 0
+	var gen_changes := 0
+	var last_gen := -1
+	while frames < FRAMES and (Time.get_ticks_usec() - start) / 1000 < DEADLINE_MS:
+		await process_frame
+		var frame_work: int = _pane._fetch_ms + _pane._draw_ms
+		work += frame_work
+		if frame_work > 0:
+			busy_frames += 1
+		var gen: int = _pane._terminal.get_grid_generation()
+		if gen != last_gen:
+			gen_changes += 1
+			last_gen = gen
+		frames += 1
+	var elapsed_ms := float(Time.get_ticks_usec() - start) / 1000.0
+	print("flood grid=%dx%d frames=%d fps=%.1f avg_frame_ms=%.2f avg_work_ms=%.3f busy_frames=%d gen_changes=%d" % [
+		cols, rows, frames, float(frames) * 1000.0 / elapsed_ms,
+		elapsed_ms / maxf(float(frames), 1.0), float(work) / maxf(float(frames), 1.0),
+		busy_frames, gen_changes])
+	quit()
+
+func _new_pane(cols: int, rows: int, cmd: String):
 	_pane = load("res://scenes/terminal/terminal_pane.gd").new()
 	_pane.shell_command = "/bin/sh"
-	_pane.shell_args = ["-c", CONTENT]
+	_pane.shell_args = ["-c", cmd]
 	_pane.font_size = 14
 	_pane.cursor_blink = false
 	root.add_child(_pane)
@@ -51,6 +84,9 @@ func _measure(cols: int, rows: int):
 	_pane._terminal.resize_grid(rows, cols)
 	_pane.rows = rows
 	_pane.cols = cols
+
+func _measure(cols: int, rows: int):
+	await _new_pane(cols, rows, CONTENT)
 
 	# Let the content land and the grid settle.
 	var last := -1

@@ -106,6 +106,34 @@ var _sync_interval: float = 1.0 / 60.0
 const SLOW_POLL_INTERVAL := 0.25
 var _slow_poll_timer: float = 0.0
 
+## Grid work (fetch + repaint) a pane may spend per frame before it starts
+## looking at the grid less often, in ms. Under flood the damage covers the
+## screen every frame: the fetch packs thousands of cells across the FFI and
+## the merge rebuilds a row string per damaged cell — that, not the drawing,
+## is what locks the UI thread up. A quarter of a 60 Hz frame, so four panes
+## may each be at their limit and still leave the frame mostly free. The pane
+## is unreadable at that rate, and the damage tracker coalesces everything
+## into the newest grid state, so a slower cadence costs latency and nothing
+## else.
+const PANE_WORK_BUDGET_MS := 4
+## Longest grid cadence the flood back-off may stretch a pane to (~10/s).
+const MAX_SYNC_INTERVAL := 0.1
+## How long a scroll or search jump keeps the pane exempt from the back-off.
+const VIEW_INPUT_GRACE_MS := 500
+## Stretch added to `_sync_interval` while a pane is over budget. Grows
+## geometrically, recovers as soon as a sync finds nothing new.
+var _sync_backoff: float = 0.0
+## When the user last changed the view themselves. Autonomous output must not
+## push a pane the user is scrolling into the flood cadence: that work is
+## bounded by how fast the user scrolls, and it is the one case where the
+## repaint rate is visible. Starts far in the past so a fresh pane is never
+## exempt.
+var _view_input_ms: int = -1_000_000
+
+## Mark a view change the user asked for (wheel, PageUp/Down, search jump).
+func _note_view_input():
+	_view_input_ms = Time.get_ticks_msec()
+
 func _ready():
 	super._ready()
 	_terminal = GptyTerminal.new()
@@ -301,7 +329,7 @@ func _process(delta):
 					_terminal.resize_grid(rows, cols)
 
 	_time_since_sync += delta
-	if _time_since_sync >= _sync_interval:
+	if _time_since_sync >= _sync_interval + _sync_backoff:
 		_time_since_sync = 0.0
 		var gen = _terminal.get_grid_generation()
 		if gen != _last_grid_gen:
@@ -335,6 +363,15 @@ func _process(delta):
 					cc_bg[idx] = bg[i]
 					cc_attrs[idx] = attrs[i]
 			_fetch_ms = Time.get_ticks_msec() - t0
+			# A sync that cost more than the pane's frame budget (measured:
+			# this fetch plus the repaint it just queued, which is the
+			# previous frame's `_draw_ms`) stretches the next cadence — unless
+			# the user is the one driving the view right now.
+			var user_driving := Time.get_ticks_msec() - _view_input_ms < VIEW_INPUT_GRACE_MS
+			if not user_driving and _fetch_ms + _draw_ms > PANE_WORK_BUDGET_MS:
+				_sync_backoff = minf(
+					maxf(_sync_backoff * 2.0, _sync_interval),
+					maxf(MAX_SYNC_INTERVAL - _sync_interval, 0.0))
 			_cursor_visible = true
 			_cursor_blink_timer = 0.0
 			# Repaint only when the grid actually changed. Every other
@@ -344,6 +381,10 @@ func _process(delta):
 			# every visible pane rebuild its full canvas command list every
 			# frame — the fetch was damage-tracked, the draw was not.
 			queue_redraw()
+		else:
+			# Nothing new since the last look: the pane has caught up, so walk
+			# the cadence back toward the configured interval.
+			_sync_backoff = maxf(_sync_backoff * 0.5 - _sync_interval, 0.0)
 	_draw_ms = 0  # will be set on next _draw() call
 	_slow_poll_timer += delta
 	if _slow_poll_timer >= SLOW_POLL_INTERVAL:
@@ -634,8 +675,12 @@ func _handle_mouse(event: InputEvent):
 				grab_focus(); _selecting = true
 				_sel_start = _mouse_to_cell(event.position); _sel_end = _sel_start; queue_redraw()
 			else: _selecting = false; queue_redraw()
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed: _terminal.scroll_up(scroll_lines)
-		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed: _terminal.scroll_down(scroll_lines)
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+			_note_view_input()
+			_terminal.scroll_up(scroll_lines)
+		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+			_note_view_input()
+			_terminal.scroll_down(scroll_lines)
 	if event is InputEventMouseMotion and _selecting:
 		_sel_end = _mouse_to_cell(event.position); queue_redraw()
 
@@ -686,8 +731,12 @@ func _handle_keyboard(event: InputEventKey):
 			if cl != "": _send_to_term(cl)
 		accept_event(); return
 
-	if event.keycode == KEY_PAGEUP: _terminal.scroll_up(rows); accept_event(); return
-	if event.keycode == KEY_PAGEDOWN: _terminal.scroll_down(rows); accept_event(); return
+	if event.keycode == KEY_PAGEUP:
+		_note_view_input()
+		_terminal.scroll_up(rows); accept_event(); return
+	if event.keycode == KEY_PAGEDOWN:
+		_note_view_input()
+		_terminal.scroll_down(rows); accept_event(); return
 	if event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
 		_clear_selection()
 		_send_line_to_term(""); _terminal.scroll_reset(); accept_event(); return
@@ -883,8 +932,10 @@ func _jump_to_match(direction: int):
 	var cur_offset: int = _terminal.get_scroll_offset()
 	var delta: int = target_offset - cur_offset
 	if delta > 0:
+		_note_view_input()
 		_terminal.scroll_up(delta)
 	elif delta < 0:
+		_note_view_input()
 		_terminal.scroll_down(-delta)
 	queue_redraw()
 
