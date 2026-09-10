@@ -419,15 +419,23 @@ mod tests {
     use std::io::Write;
 
     /// Write an executable fake adapter script that speaks the NDJSON
-    /// contract, returning its path and argv. Unique per call — tests run
-    /// in parallel and must never share a script file.
+    /// contract, returning its path and argv.
+    ///
+    /// Unique per call *and* per run: tests run in parallel, and a stale file
+    /// from an earlier (killed) run must not be picked up — a path that is
+    /// still the image of a leftover process makes exec fail with ETXTBSY.
     fn fake_adapter(script: &str) -> (TempScript, Vec<String>) {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let dir = std::env::temp_dir();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
         let path = dir.join(format!(
-            "gpty_fake_adapter_{}_{}.sh",
+            "gpty_fake_adapter_{}_{}_{}.sh",
             std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            nanos
         ));
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(script.as_bytes()).unwrap();
@@ -447,9 +455,14 @@ mod tests {
         }
     }
 
+    /// Poll until a terminal event arrives. The deadline is wall-clock, so it
+    /// has to survive a loaded machine: under a parallel CI run (`cargo test
+    /// --workspace` with the rest of the suite spawning its own children) a
+    /// child process can take seconds to start, and a tight budget made this
+    /// look like a protocol failure.
     async fn wait_terminal(session: &AiSession) -> Vec<AiEventEnvelope> {
         let mut all = Vec::new();
-        for _ in 0..200 {
+        for _ in 0..2400 {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             all.extend(session.poll(128));
             if all.iter().any(|event| event.event.is_terminal()) {
@@ -513,10 +526,13 @@ mod tests {
         .unwrap();
         session.prompt(prompt("x")).unwrap();
         let events = wait_terminal(&session).await;
-        assert!(events
-            .iter()
-            .any(|e| matches!(&e.event, AiEvent::Error { message } if message.contains("adapter exploded")
-                || message.contains("exited with"))));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(&e.event, AiEvent::Error { message } if message.contains("adapter exploded")
+                    || message.contains("exited with"))),
+            "expected the adapter's error frame or the non-zero exit, got: {events:?}"
+        );
         session.close();
     }
 

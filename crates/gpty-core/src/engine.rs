@@ -867,16 +867,15 @@ mod tests {
 
         spawned.handle.resize_pty(50, 100);
 
-        for _ in 0..10 {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            if let Ok(grid) = spawned.grid.lock()
-                && grid.num_rows() == 50
-                && grid.num_cols() == 100
-            {
-                break;
-            }
-        }
-
+        let resized = wait_until(Duration::from_secs(10), || {
+            spawned
+                .grid
+                .lock()
+                .map(|grid| grid.num_rows() == 50 && grid.num_cols() == 100)
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(resized, "the grid must follow the PTY resize");
         if let Ok(grid) = spawned.grid.lock() {
             assert_eq!(grid.num_rows(), 50);
             assert_eq!(grid.num_cols(), 100);
@@ -884,41 +883,63 @@ mod tests {
 
         spawned.handle.send_line("echo hello");
 
-        let mut found = false;
-        for _ in 0..50 {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-            if let Ok(grid) = spawned.grid.lock() {
-                let rows = grid.renderable_rows();
-                if rows
-                    .iter()
-                    .any(|r| r.iter().any(|c| c.ch == 'e' || c.ch == 'h'))
-                {
-                    found = true;
-                    break;
-                }
-            }
-        }
+        let rendered = wait_until(Duration::from_secs(10), || {
+            spawned
+                .grid
+                .lock()
+                .map(|grid| {
+                    grid.renderable_rows()
+                        .iter()
+                        .any(|r| r.iter().any(|c| c.ch == 'e' || c.ch == 'h'))
+                })
+                .unwrap_or(false)
+        })
+        .await;
         assert!(
-            found,
+            rendered,
             "Grid should have received and rendered the input text"
         );
     }
 
+    /// Wait for a state that a real PTY and a real child process produce.
+    ///
+    /// These budgets are wall-clock, so they must survive a loaded machine: a
+    /// parallel `cargo test --workspace` run has the rest of the suite
+    /// forking children at the same time, which slows spawn and the reader
+    /// thread by an order of magnitude. A tight budget then reports a product
+    /// bug that is not there — which is exactly how this suite flaked.
+    async fn wait_until(budget: Duration, mut check: impl FnMut() -> bool) -> bool {
+        let deadline = tokio::time::Instant::now() + budget;
+        loop {
+            if check() {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
     /// Poll the spawned terminal's agent state until it leaves Idle.
     async fn wait_for_state(spawned: &SpawnedTerminal) -> crate::agent_state::AgentState {
-        for _ in 0..100 {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-            if let Ok(grid) = spawned.grid.lock() {
-                let state = grid.agent_state.state;
-                if state != crate::agent_state::AgentState::Idle {
-                    return state;
-                }
-                if grid.status.exit_code.is_some() {
-                    return state;
-                }
+        let observed = wait_until(Duration::from_secs(20), || match spawned.grid.lock() {
+            Ok(grid) => {
+                grid.agent_state.state != crate::agent_state::AgentState::Idle
+                    || grid.status.exit_code.is_some()
             }
-        }
-        crate::agent_state::AgentState::Idle
+            Err(_) => false,
+        })
+        .await;
+        assert!(
+            observed,
+            "the pane never reached a non-Idle agent state or exited"
+        );
+        spawned
+            .grid
+            .lock()
+            .map(|grid| grid.agent_state.state)
+            .unwrap_or(crate::agent_state::AgentState::Idle)
     }
 
     #[cfg(unix)]
@@ -1096,24 +1117,25 @@ mod tests {
 
         // Typed line matches the concept → capture begins (1 s timeout).
         spawned.handle.send_line("cat /dev/null");
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        let capturing = wait_until(Duration::from_secs(10), || spawned.capture.is_active()).await;
+        assert!(capturing, "the typed line must start a capture");
 
-        // Resize while the capture is live must not finalize it.
+        // Resize while the capture is live must not finalize it. The settle
+        // window stays far shorter than the capture's own timeout so a late
+        // finalize cannot be mistaken for the resize's doing.
         spawned.handle.resize_pty(20, 60);
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        assert_eq!(
-            spawned.capture_queue.lock().unwrap().len(),
-            0,
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            lock(&spawned.capture_queue).is_empty(),
             "resize must not finalize an active capture"
         );
 
         // The timeout still finalizes it normally.
-        tokio::time::sleep(Duration::from_millis(1200)).await;
-        assert_eq!(
-            spawned.capture_queue.lock().unwrap().len(),
-            1,
-            "capture timeout should still finalize"
-        );
+        let finalized = wait_until(Duration::from_secs(20), || {
+            !lock(&spawned.capture_queue).is_empty()
+        })
+        .await;
+        assert!(finalized, "capture timeout should still finalize");
     }
 
     /// Bytes printed inside the post-SIGWINCH window are the child's repaint,
@@ -1153,25 +1175,18 @@ mod tests {
             .await
             .expect("spawn");
 
-        for _ in 0..100 {
-            if spawned.capture.is_active() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(spawned.capture.is_active(), "BEGIN must start a capture");
+        let capturing = wait_until(Duration::from_secs(10), || spawned.capture.is_active()).await;
+        assert!(capturing, "BEGIN must start a capture");
 
         // The window opens when the resize is applied: 750 ms from here.
         spawned.handle.resize_pty(20, 60);
 
-        let mut events = Vec::new();
-        for _ in 0..200 {
-            events = lock(&spawned.capture_queue).drain(..).collect();
-            if !events.is_empty() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        let finalized = wait_until(Duration::from_secs(20), || {
+            !lock(&spawned.capture_queue).is_empty()
+        })
+        .await;
+        assert!(finalized, "the capture deadline must finalize the capture");
+        let events: Vec<_> = lock(&spawned.capture_queue).drain(..).collect();
         assert_eq!(
             events.len(),
             1,
@@ -1211,12 +1226,15 @@ mod tests {
             .await
             .expect("spawn");
 
-        for _ in 0..50 {
-            if !spawned.notice_queue.lock().unwrap().is_empty() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        let notified = wait_until(Duration::from_secs(10), || {
+            !spawned
+                .notice_queue
+                .lock()
+                .map(|q| q.is_empty())
+                .unwrap_or(true)
+        })
+        .await;
+        assert!(notified, "the match must be published");
         {
             let notices = spawned.notice_queue.lock().unwrap();
             assert_eq!(notices.len(), 1, "the match must be published once");
@@ -1224,17 +1242,28 @@ mod tests {
         }
 
         // Nothing was captured, and the matched line still reached the grid —
-        // a notify-only match must not take the pane's output away.
+        // a notify-only match must not take the pane's output away. The notice
+        // is queued and the grid is fed in the same task iteration but not
+        // atomically, so this side has to wait for the grid rather than read
+        // it the instant the notice shows up.
         assert_eq!(
-            spawned.capture_queue.lock().unwrap().len(),
+            lock(&spawned.capture_queue).len(),
             0,
             "a notify-only concept must not start a capture"
         );
-        let rows = spawned.grid.lock().unwrap().renderable_rows();
-        assert!(
-            rows.iter().any(|r| r.iter().any(|c| c.ch == 'n')),
-            "the matched line must still land in the grid"
-        );
+        let rendered = wait_until(Duration::from_secs(10), || {
+            spawned
+                .grid
+                .lock()
+                .map(|grid| {
+                    grid.renderable_rows()
+                        .iter()
+                        .any(|r| r.iter().any(|c| c.ch == 'n'))
+                })
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(rendered, "the matched line must still land in the grid");
     }
 
     #[test]
@@ -1398,16 +1427,8 @@ mod tests {
 
         // Typed line matches the concept → capture begins and stays live.
         spawned.handle.send_line("cat /dev/null");
-        for _ in 0..50 {
-            if spawned.capture.is_active() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        assert!(
-            spawned.capture.is_active(),
-            "the typed line must start a capture"
-        );
+        let capturing = wait_until(Duration::from_secs(10), || spawned.capture.is_active()).await;
+        assert!(capturing, "the typed line must start a capture");
 
         drop(spawned);
 
