@@ -79,9 +79,14 @@ const READ_BUF_SIZE: usize = 4096;
 /// executed verbatim. Bare names are left alone — the shipped profiles launch
 /// tools by name through `PATH` (`omp`, `lazygit`, `nvim`) — but an absolute
 /// path must be a regular file that is neither group- nor other-writable and
-/// is owned either by this user or by root. That is the same standard
-/// `validate_gui_binary` and `resolve_omp_binary` hold their binaries to, and
-/// it rejects the shared-`/tmp` payload a hostile layout would point at.
+/// is owned either by this user or by root. The whole parent chain is held to
+/// the same rule: a safe file can still be swapped for a hostile one when a
+/// directory above it is group/other-writable without the sticky bit, so every
+/// ancestor up to the filesystem root must be non-writable by others (a sticky
+/// directory such as `/tmp` is allowed — only its owner may unlink entries).
+/// That is the same standard `validate_gui_binary` and `resolve_omp_binary`
+/// hold their binaries to, and it rejects the shared-`/tmp` payload a hostile
+/// layout would point at.
 pub fn validate_executable(program: &str) -> Result<(), String> {
     if program.is_empty() || !program.contains('/') {
         // PATH-resolved, as the shipped profiles do.
@@ -111,6 +116,27 @@ pub fn validate_executable(program: &str) -> Result<(), String> {
             return Err(format!(
                 "executable belongs to another user (uid {owner}): {program}"
             ));
+        }
+        // The file can be replaced rather than written to: a directory above
+        // it that group or others may write to lets another user swap the
+        // binary, even though the binary itself is 0755. /tmp is spared only
+        // by its sticky bit, so walk to the root and refuse the first
+        // non-sticky writable ancestor.
+        let mut dir = path.parent();
+        while let Some(current) = dir {
+            // A component we cannot stat cannot be shown to be unsafe, and a
+            // lazy/missing component must not turn into a false rejection.
+            let Ok(dir_meta) = std::fs::metadata(current) else {
+                break;
+            };
+            let dir_mode = dir_meta.mode();
+            if dir_mode & 0o022 != 0 && dir_mode & 0o1000 == 0 {
+                return Err(format!(
+                    "executable lives in a group/other-writable directory ({}): {program}",
+                    current.display()
+                ));
+            }
+            dir = current.parent();
         }
     }
     Ok(())
@@ -380,6 +406,41 @@ mod tests {
         std::fs::set_permissions(&path, perms).unwrap();
         assert!(validate_executable(&path.to_string_lossy()).is_ok());
         let _ = std::fs::remove_file(&path);
+
+        // A safe 0755 binary is still replaceable when its *directory* is
+        // writable by group or others. This is the /tmp-without-`t` case.
+        let shared = std::env::temp_dir().join(format!("gpty_exec_dir_{}", std::process::id()));
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let inner = shared.join("payload");
+        std::fs::write(&inner, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&inner, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let in_open_dir = validate_executable(&inner.to_string_lossy());
+        // The sticky bit restores /tmp semantics: only the entry's owner may
+        // rename or unlink it, so a writable directory is acceptable again.
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o1777)).unwrap();
+        let in_sticky_dir = validate_executable(&inner.to_string_lossy());
+
+        // Restore and remove before asserting: an unconditional cleanup that
+        // runs first cannot leave a world-writable directory behind.
+        let _ = std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o700));
+        let _ = std::fs::remove_dir_all(&shared);
+        assert!(
+            in_open_dir.is_err(),
+            "0755 file in a 0777 non-sticky directory must be refused"
+        );
+        // The refusal must come from the directory rule and name that
+        // directory — the 0755 file itself is fine in both runs.
+        let refusal = in_open_dir.unwrap_err();
+        assert!(
+            refusal.contains("group/other-writable directory")
+                && refusal.contains(&shared.display().to_string()),
+            "refusal must name the directory at fault, got: {refusal}"
+        );
+        assert!(
+            in_sticky_dir.is_ok(),
+            "0755 file in a 1777 sticky directory must be accepted"
+        );
 
         // Not a regular file, and not absolute.
         assert!(validate_executable("/tmp").is_err());
