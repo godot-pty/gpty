@@ -133,10 +133,24 @@ static func handle(ws, method: String, params: Dictionary):
 		"layoutLoad":
 			var profile_name = str(params.get("name", ""))
 			var profile := ProfileManager.find_profile(profile_name)
-			if not profile.is_empty():
-				ws._do_activate(profile)
-				return {"success": true}
-			return error("Profile '%s' not found" % profile_name)
+			if profile.is_empty():
+				return error("Profile '%s' not found" % profile_name)
+			# Restoring a profile can start a different program, pass argv, or set
+			# an environment — the same decision the sidebar gates behind the
+			# Workspace Trust dialog. A caller cannot answer that dialog, and
+			# naming the profile is not consent to what a file asks for, so
+			# untrusted profiles are refused here and the user activates them in
+			# the GUI.
+			var profile_tiles: Array[Dictionary] = []
+			for td in profile.get("tiles", []):
+				if td is Dictionary:
+					profile_tiles.append(td)
+			if ws._tiles_untrusted(profile_tiles):
+				return error(
+					"Profile '%s' needs confirmation in the GUI (it starts a different program, passes arguments, or sets an environment)"
+					% profile_name)
+			ws._do_activate(profile)
+			return {"success": true}
 		"layoutList":
 			var names = []
 			for p in ProfileManager.get_all_profiles():
