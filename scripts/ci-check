@@ -5,6 +5,11 @@ set -euo pipefail
 # Usage: ./scripts/ci-check [--fast]
 #   --fast   Only fmt + workflow lint + clippy (pre-commit)
 #   (no flag)  Full suite: fmt + lint + clippy + tests + GUT + audit
+#
+# A missing optional toolchain (node, godot, python3 >= 3.11, cargo-audit)
+# SKIPs with a warning on a dev machine, but FAILS the run when the CI or
+# GITHUB_ACTIONS environment variable is set: a CI build must not go green
+# having run no GDScript tests and no dependency audit.
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -33,6 +38,32 @@ check_failed() {
     FAILED=1
     return 1
 }
+
+# Missing toolchains are a friendly SKIP on a dev machine, but a green build
+# that ran zero GDScript tests on CI. CI is detected via the conventional
+# CI / GITHUB_ACTIONS environment variables.
+CI_MODE=false
+if [[ -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
+    CI_MODE=true
+fi
+
+# skip_gate <message>: warn locally, hard-fail in CI.
+skip_gate() {
+    if $CI_MODE; then
+        fail "$1 (CI: a missing gate is a failure)"
+        check_failed
+    else
+        warn "$1"
+    fi
+}
+
+# ── Mode banner ────────────────────────────────────────────────────────
+header "ci-check"
+if $CI_MODE; then
+    printf "  %bMode: CI%b — a missing toolchain fails the build\n" "$BOLD" "$NC"
+else
+    printf "  %bMode: local%b — a missing toolchain skips with a warning\n" "$BOLD" "$NC"
+fi
 
 # ── Step 1: cargo fmt ──────────────────────────────────────────────────
 header "cargo fmt --check"
@@ -146,7 +177,7 @@ EOF
         check_failed
     fi
 else
-    warn "crate version check needs python3 >= 3.11 (tomllib) — skipped"
+    skip_gate "crate version check needs python3 >= 3.11 (tomllib) — skipped"
 fi
 
 # ── Step 4: cargo test ─────────────────────────────────────────────────
@@ -168,14 +199,14 @@ if command -v node >/dev/null 2>&1; then
         check_failed
     fi
 else
-    warn "node not found — skipping OMP extension tests"
+    skip_gate "node not found — skipping OMP extension tests"
 fi
 
 # ── Step 5: GUT (GDScript) tests ───────────────────────────────────────
 header "GUT tests"
 GODOT="$(command -v godot 2>/dev/null || echo "")"
 if [[ -z "$GODOT" ]]; then
-    warn "godot not found — skipping GUT tests"
+    skip_gate "godot not found — skipping GUT tests"
 else
     echo "  Building GDExtension..."
     cargo build -p gpty-gdext 2>&1 || { fail "gdext build"; check_failed; }
@@ -202,7 +233,7 @@ fi
 # ── Step 5.5: Live pane-API smoke ─────────────────────────────────────
 header "pane-API smoke"
 if [[ -z "$GODOT" ]]; then
-    warn "godot not found — skipping smoke test"
+    skip_gate "godot not found — skipping smoke test"
 else
     echo "  Running live pane-API smoke (headless GUI)..."
     if ./scripts/smoke-pane-api 2>&1; then
@@ -229,7 +260,7 @@ if command -v cargo-audit &>/dev/null; then
         check_failed
     fi
 else
-    warn "cargo-audit not installed — run: cargo install cargo-audit"
+    skip_gate "cargo-audit not installed — run: cargo install cargo-audit"
 fi
 
 # ── Summary ────────────────────────────────────────────────────────────
