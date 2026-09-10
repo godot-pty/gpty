@@ -13,11 +13,63 @@ use crate::cli::run_cli_session;
 use crate::mock::run_mock_session;
 use crate::omp::run_omp_session;
 use crate::types::{
-    AiEvent, AiEventEnvelope, BackendKind, SessionOpenRequest, SessionPromptRequest,
+    AiEvent, AiEventEnvelope, BackendKind, EventChannel, SessionOpenRequest, SessionPromptRequest,
 };
 
 const MAX_QUEUED_EVENTS: usize = 2048;
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Bounded outbound queue with accounting for what the bound costs.
+///
+/// An adapter can emit faster than the pane drains, and the queue has to stay
+/// bounded, so the oldest envelopes are evicted. Counting the evictions is
+/// what lets the consumer be told its answer is missing its beginning instead
+/// of rendering a silently truncated reply.
+#[derive(Default)]
+struct EventQueue {
+    events: VecDeque<AiEventEnvelope>,
+    dropped: u64,
+}
+
+impl EventQueue {
+    fn push(&mut self, envelope: AiEventEnvelope) {
+        if self.events.len() == MAX_QUEUED_EVENTS {
+            self.events.pop_front();
+            self.dropped += 1;
+        }
+        self.events.push_back(envelope);
+    }
+
+    /// Drain up to `max` envelopes, prefixing a notice when earlier events
+    /// were dropped. The notice is itself an envelope so it travels the same
+    /// path as everything else and the pane renders it without special cases.
+    fn drain(
+        &mut self,
+        max: usize,
+        session_id: &str,
+        sequence: &AtomicU64,
+    ) -> Vec<AiEventEnvelope> {
+        let dropped = std::mem::take(&mut self.dropped);
+        let count = max.clamp(1, MAX_QUEUED_EVENTS).min(self.events.len());
+        let mut out: Vec<AiEventEnvelope> = self.events.drain(..count).collect();
+        if dropped > 0 {
+            out.insert(
+                0,
+                AiEventEnvelope {
+                    session_id: session_id.to_string(),
+                    turn_id: 0,
+                    run_id: String::new(),
+                    sequence: sequence.fetch_add(1, Ordering::Relaxed),
+                    channel: EventChannel::Lifecycle,
+                    event: AiEvent::Status {
+                        message: format!("{dropped} earlier events dropped (output arrived faster than it could be read)"),
+                    },
+                },
+            );
+        }
+        out
+    }
+}
 
 pub(crate) struct CancelSignal {
     cancelled: AtomicBool,
@@ -62,7 +114,7 @@ pub(crate) enum SessionCommand {
 #[derive(Clone)]
 pub(crate) struct EventSink {
     session_id: String,
-    queue: Arc<Mutex<VecDeque<AiEventEnvelope>>>,
+    queue: Arc<Mutex<EventQueue>>,
     sequence: Arc<AtomicU64>,
     active: Arc<Mutex<Option<ActiveRun>>>,
 }
@@ -79,10 +131,7 @@ impl EventSink {
             event,
         };
         if let Ok(mut queue) = self.queue.lock() {
-            if queue.len() == MAX_QUEUED_EVENTS {
-                queue.pop_front();
-            }
-            queue.push_back(envelope);
+            queue.push(envelope);
         }
         if terminal
             && let Ok(mut active) = self.active.lock()
@@ -102,7 +151,8 @@ struct ActiveRun {
 pub struct AiSession {
     id: String,
     config: SessionOpenRequest,
-    queue: Arc<Mutex<VecDeque<AiEventEnvelope>>>,
+    queue: Arc<Mutex<EventQueue>>,
+    sequence: Arc<AtomicU64>,
     next_turn: AtomicU64,
     active: Arc<Mutex<Option<ActiveRun>>>,
     command_tx: mpsc::UnboundedSender<SessionCommand>,
@@ -126,13 +176,13 @@ impl AiSession {
         }
 
         let id = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed).to_string();
-        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        let queue = Arc::new(Mutex::new(EventQueue::default()));
         let active = Arc::new(Mutex::new(None));
         let sequence = Arc::new(AtomicU64::new(1));
         let sink = EventSink {
             session_id: id.clone(),
             queue: Arc::clone(&queue),
-            sequence,
+            sequence: Arc::clone(&sequence),
             active: Arc::clone(&active),
         };
         let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -147,6 +197,7 @@ impl AiSession {
             id,
             config,
             queue,
+            sequence,
             next_turn: AtomicU64::new(1),
             active,
             command_tx,
@@ -201,8 +252,7 @@ impl AiSession {
         let Ok(mut queue) = self.queue.lock() else {
             return Vec::new();
         };
-        let count = max_events.clamp(1, MAX_QUEUED_EVENTS).min(queue.len());
-        queue.drain(..count).collect()
+        queue.drain(max_events, &self.id, &self.sequence)
     }
 
     pub fn cancel(&self) -> bool {
@@ -329,5 +379,62 @@ mod tests {
             session.prompt(prompt("two")).unwrap_err(),
             "a turn is already running"
         );
+    }
+
+    fn delta_envelope(text: &str) -> AiEventEnvelope {
+        AiEventEnvelope {
+            session_id: "s".into(),
+            turn_id: 1,
+            run_id: "r".into(),
+            sequence: 0,
+            channel: EventChannel::Answer,
+            event: AiEvent::Delta { text: text.into() },
+        }
+    }
+
+    #[test]
+    fn eviction_is_counted_and_announced_once() {
+        let mut queue = EventQueue::default();
+        for i in 0..(MAX_QUEUED_EVENTS + 3) {
+            queue.push(delta_envelope(&i.to_string()));
+        }
+        assert_eq!(
+            queue.events.len(),
+            MAX_QUEUED_EVENTS,
+            "queue must stay bounded"
+        );
+        assert_eq!(queue.dropped, 3);
+
+        let sequence = AtomicU64::new(10);
+        let drained = queue.drain(4, "s", &sequence);
+
+        // The notice precedes the surviving events, so a consumer that fell
+        // behind is told its answer is missing its beginning.
+        assert_eq!(drained.len(), 5);
+        assert!(
+            matches!(&drained[0].event, AiEvent::Status { message } if message.contains('3')),
+            "first envelope must announce the gap, got {:?}",
+            drained[0].event
+        );
+        assert_eq!(drained[0].sequence, 10);
+        assert!(
+            matches!(&drained[1].event, AiEvent::Delta { text } if text == "3"),
+            "the oldest surviving event follows the notice"
+        );
+        assert_eq!(
+            queue.dropped, 0,
+            "the gap is reported once, not on every drain"
+        );
+    }
+
+    #[test]
+    fn drain_without_drops_has_no_notice() {
+        let mut queue = EventQueue::default();
+        queue.push(delta_envelope("a"));
+        let sequence = AtomicU64::new(1);
+
+        let drained = queue.drain(4, "s", &sequence);
+        assert_eq!(drained.len(), 1);
+        assert!(matches!(&drained[0].event, AiEvent::Delta { .. }));
     }
 }
