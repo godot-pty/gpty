@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main, master]
 
+# Least privilege: every job here only reads the repository. Without this
+# block each job inherits the repository default token scope, which is handed
+# to third-party actions (the dependency-audit job passes it explicitly), so a
+# compromised action would hold whatever write scopes the default grants.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
