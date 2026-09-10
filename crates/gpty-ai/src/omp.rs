@@ -595,6 +595,7 @@ fn base64_value(byte: u8) -> Result<u8, BackendError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_temp_script::TempScript;
 
     #[test]
     fn rpc_chunks_reassemble_strictly() {
@@ -650,8 +651,11 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         // A fake omp: greets, ignores the handshake, answers one prompt, exits.
-        let script = std::env::temp_dir().join(format!("gpty_fake_omp_{}.sh", std::process::id()));
-        let mut file = std::fs::File::create(&script).unwrap();
+        // The guard removes it on drop, including if an assertion panics.
+        let script = TempScript::new(
+            std::env::temp_dir().join(format!("gpty_fake_omp_{}.sh", std::process::id())),
+        );
+        let mut file = std::fs::File::create(script.path()).unwrap();
         file.write_all(
             b"#!/bin/sh\n\
               echo '{\"type\":\"ready\"}'\n\
@@ -665,12 +669,12 @@ mod tests {
         // Close the write handle: exec'ing a file held open for writing
         // fails with ETXTBSY.
         drop(file);
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(script.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
 
         // resolve_omp_binary accepts GPTY_OMP when it is absolute, owned by
         // this user, and not group/other writable — the helper satisfies all
         // three, and no other test in this crate reads the override.
-        unsafe { std::env::set_var("GPTY_OMP", &script) };
+        unsafe { std::env::set_var("GPTY_OMP", script.path()) };
 
         let session = AiSession::open(
             &tokio::runtime::Handle::current(),
@@ -719,6 +723,5 @@ mod tests {
 
         session.close();
         unsafe { std::env::remove_var("GPTY_OMP") };
-        let _ = std::fs::remove_file(&script);
     }
 }

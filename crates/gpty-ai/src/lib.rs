@@ -24,6 +24,8 @@ pub mod omp;
 pub mod prompt;
 pub mod registry;
 pub mod stream;
+#[cfg(test)]
+pub(crate) mod test_temp_script;
 pub mod types;
 
 pub use backend::{BackendError, BackendInfo};

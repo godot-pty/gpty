@@ -411,13 +411,14 @@ fn relay_frame(line: &str, turn_id: u64, run_id: &str, sink: &EventSink) -> Resu
 mod tests {
     use super::*;
     use crate::registry::AiSession;
+    use crate::test_temp_script::TempScript;
     use crate::types::{AiEventEnvelope, SessionPromptRequest};
     use std::io::Write;
 
     /// Write an executable fake adapter script that speaks the NDJSON
     /// contract, returning its path and argv. Unique per call — tests run
     /// in parallel and must never share a script file.
-    fn fake_adapter(script: &str) -> (std::path::PathBuf, Vec<String>) {
+    fn fake_adapter(script: &str) -> (TempScript, Vec<String>) {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let dir = std::env::temp_dir();
         let path = dir.join(format!(
@@ -429,7 +430,10 @@ mod tests {
         file.write_all(script.as_bytes()).unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        (path.clone(), vec![path.to_string_lossy().to_string()])
+        (
+            TempScript::new(path.clone()),
+            vec![path.to_string_lossy().to_string()],
+        )
     }
 
     fn prompt(text: &str) -> SessionPromptRequest {
@@ -454,7 +458,7 @@ mod tests {
 
     #[tokio::test]
     async fn cli_session_relays_ndjson_frames() {
-        let (_path, command) = fake_adapter(
+        let (_script, command) = fake_adapter(
             "#!/bin/sh\nread line\n\
              printf '%s\\n' '{\"type\":\"thinking\",\"text\":\"inspecting\"}'\n\
              printf '%s\\n' '{\"type\":\"delta\",\"text\":\"found one error\"}'\n\
@@ -490,7 +494,7 @@ mod tests {
 
     #[tokio::test]
     async fn cli_session_surfaces_child_error_frame() {
-        let (_path, command) = fake_adapter(
+        let (_script, command) = fake_adapter(
             "#!/bin/sh\nread line\n\
              printf '%s\\n' '{\"type\":\"error\",\"message\":\"adapter exploded\"}'\n\
              exit 1\n",
@@ -535,7 +539,7 @@ mod tests {
     /// fired ten seconds later.
     #[tokio::test]
     async fn cli_session_caps_oversized_frames_while_reading() {
-        let (_path, command) = fake_adapter(
+        let (_script, command) = fake_adapter(
             "#!/bin/sh\nread line\n\
              yes x | tr -d '\\n'\n",
         );
@@ -576,7 +580,7 @@ mod tests {
     /// frame timeout instead of returning an answer.
     #[tokio::test]
     async fn cli_session_drains_adapter_stderr() {
-        let (_path, command) = fake_adapter(
+        let (_script, command) = fake_adapter(
             "#!/bin/sh\nread line\n\
              i=0\n\
              while [ $i -lt 2000 ]; do\n\
@@ -609,7 +613,7 @@ mod tests {
     /// being discarded with the pipe.
     #[tokio::test]
     async fn cli_session_reports_adapter_stderr_on_failure() {
-        let (_path, command) = fake_adapter(
+        let (_script, command) = fake_adapter(
             "#!/bin/sh\nread line\n\
              echo 'adapter: model backend unreachable' >&2\n\
              exit 3\n",
