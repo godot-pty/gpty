@@ -143,6 +143,52 @@ async fn run_one_prompt(
     }
 }
 
+/// Read one newline-terminated frame, failing as soon as it exceeds `limit`
+/// bytes.
+///
+/// `Lines::next_line` buffers a whole line before returning it, so a size
+/// check applied afterwards bounds nothing: a wedged adapter that streams
+/// bytes without a newline grows the buffer for the entire frame timeout.
+/// Filling and consuming in bounded steps caps the memory instead.
+async fn read_frame(
+    reader: &mut BufReader<ChildStdout>,
+    limit: usize,
+) -> Result<Option<String>, String> {
+    let mut line: Vec<u8> = Vec::new();
+    loop {
+        let chunk = reader
+            .fill_buf()
+            .await
+            .map_err(|e| format!("cli backend read: {e}"))?;
+        if chunk.is_empty() {
+            // EOF: a final unterminated line is still delivered.
+            break;
+        }
+        let take = match chunk.iter().position(|&b| b == b'\n') {
+            Some(pos) => pos + 1,
+            None => chunk.len(),
+        };
+        line.extend_from_slice(&chunk[..take]);
+        reader.consume(take);
+        if line.len() > limit {
+            return Err(format!("cli backend frame exceeds {limit} bytes"));
+        }
+        if line.last() == Some(&b'\n') {
+            break;
+        }
+    }
+    if line.is_empty() {
+        return Ok(None);
+    }
+    line.pop(); // trailing newline
+    if line.last() == Some(&b'\r') {
+        line.pop();
+    }
+    String::from_utf8(line)
+        .map(Some)
+        .map_err(|e| format!("cli backend frame not UTF-8: {e}"))
+}
+
 fn spawn_child(config: &SessionOpenRequest) -> Result<Child, String> {
     let mut command = Command::new(&config.command[0]);
     command
@@ -162,7 +208,7 @@ fn spawn_child(config: &SessionOpenRequest) -> Result<Child, String> {
 struct CliChild {
     child: Child,
     stdin: ChildStdin,
-    lines: tokio::io::Lines<BufReader<ChildStdout>>,
+    stdout: BufReader<ChildStdout>,
     /// Keeps the adapter's stderr pipe drained for the child's whole life.
     stderr_task: tokio::task::JoinHandle<()>,
     /// Bounded tail of that stderr, surfaced when the adapter exits non-zero.
@@ -244,7 +290,7 @@ async fn drive_child(
     let mut bridge = CliChild {
         child,
         stdin,
-        lines: BufReader::new(stdout).lines(),
+        stdout: BufReader::new(stdout),
         stderr_task,
         stderr_tail,
     };
@@ -275,13 +321,18 @@ async fn drive_child(
             bridge.stderr_task.abort();
             return Ok(());
         }
-        let line = match timeout(FRAME_TIMEOUT, bridge.lines.next_line()).await {
+        let line = match timeout(
+            FRAME_TIMEOUT,
+            read_frame(&mut bridge.stdout, MAX_FRAME_BYTES),
+        )
+        .await
+        {
             Err(_) => {
                 bridge.child.kill().await.ok();
                 bridge.stderr_task.abort();
                 return Err("cli backend stopped emitting frames".into());
             }
-            Ok(Err(e)) => return Err(format!("cli backend read: {e}")),
+            Ok(Err(e)) => return Err(e),
             Ok(Ok(None)) => break,
             Ok(Ok(Some(line))) => line,
         };
@@ -311,9 +362,7 @@ async fn drive_child(
 /// Validate one NDJSON frame line and relay it as an AiEvent. Unknown
 /// frame types are ignored (forward-compatible); malformed lines error.
 fn relay_frame(line: &str, turn_id: u64, run_id: &str, sink: &EventSink) -> Result<(), String> {
-    if line.len() > MAX_FRAME_BYTES {
-        return Err(format!("cli backend frame exceeds {MAX_FRAME_BYTES} bytes"));
-    }
+    // Size is capped while reading (see read_frame); this only validates.
     let frame: Value =
         serde_json::from_str(line).map_err(|e| format!("cli backend frame not JSON: {e}"))?;
     let event = match frame.get("type").and_then(Value::as_str) {
@@ -478,6 +527,37 @@ mod tests {
             Err(message) => assert!(message.contains("requires a command")),
             Ok(_) => panic!("open must fail"),
         }
+    }
+
+    /// A frame larger than the cap must fail as soon as the cap is crossed,
+    /// not after buffering the whole line. The adapter here never emits a
+    /// newline, so an unbounded read would grow until the frame timeout
+    /// fired ten seconds later.
+    #[tokio::test]
+    async fn cli_session_caps_oversized_frames_while_reading() {
+        let (_path, command) = fake_adapter(
+            "#!/bin/sh\nread line\n\
+             yes x | tr -d '\\n'\n",
+        );
+        let session = AiSession::open(
+            &tokio::runtime::Handle::current(),
+            SessionOpenRequest {
+                backend: BackendKind::Cli,
+                command,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        session.prompt(prompt("x")).unwrap();
+        let events = wait_terminal(&session).await;
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(&e.event, AiEvent::Error { message }
+                if message.contains("exceeds"))),
+            "an oversized frame must fail on the cap, not on the timeout: {events:?}"
+        );
+        session.close();
     }
 
     #[test]
