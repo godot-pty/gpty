@@ -130,6 +130,12 @@ impl GptyTerminal {
             godot_error!("Refusing to spawn invalid shell command (empty, oversized, or NUL)");
             return;
         }
+        // Saved tiles and profiles choose this program, so an absolute path
+        // must not name a file another user could have written.
+        if let Err(e) = gpty_core::pty::validate_executable(&command) {
+            godot_error!("Refusing to spawn: {e}");
+            return;
+        }
 
         let id = NEXT_TERMINAL_ID.fetch_add(1, Ordering::Relaxed);
 

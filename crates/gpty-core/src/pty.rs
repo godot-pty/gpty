@@ -72,6 +72,50 @@ pub fn sanitize_envs(envs: &[String]) -> Vec<(String, String)> {
 const DEFAULT_ROWS: u16 = 24;
 const DEFAULT_COLS: u16 = 80;
 const READ_BUF_SIZE: usize = 4096;
+/// Reject a program path that the untrusted layout/profile data could have
+/// aimed at a file another user controls.
+///
+/// Saved tiles choose the program a terminal spawns, and that value is
+/// executed verbatim. Bare names are left alone — the shipped profiles launch
+/// tools by name through `PATH` (`omp`, `lazygit`, `nvim`) — but an absolute
+/// path must be a regular file that is neither group- nor other-writable and
+/// is owned either by this user or by root. That is the same standard
+/// `validate_gui_binary` and `resolve_omp_binary` hold their binaries to, and
+/// it rejects the shared-`/tmp` payload a hostile layout would point at.
+pub fn validate_executable(program: &str) -> Result<(), String> {
+    if program.is_empty() || !program.contains('/') {
+        // PATH-resolved, as the shipped profiles do.
+        return Ok(());
+    }
+    let path = std::path::Path::new(program);
+    if !path.is_absolute() {
+        return Err(format!("relative executable path: {program}"));
+    }
+    // Follow symlinks: on Arch and Fedora /bin is a symlink to /usr/bin, so
+    // an lstat would reject the default shell outright. The checks below then
+    // apply to the file that will actually be executed.
+    let meta =
+        std::fs::metadata(path).map_err(|e| format!("cannot stat executable {program}: {e}"))?;
+    if !meta.is_file() {
+        return Err(format!("executable is not a regular file: {program}"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if meta.mode() & 0o022 != 0 {
+            return Err(format!("group/other-writable executable: {program}"));
+        }
+        let owner = meta.uid();
+        let me = unsafe { libc::geteuid() };
+        if owner != me && owner != 0 {
+            return Err(format!(
+                "executable belongs to another user (uid {owner}): {program}"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// A handle to a spawned PTY: shell process + I/O thread.
 pub struct PtyHandle {
     pub id: u32,
@@ -307,6 +351,39 @@ mod tests {
             "GPTY_PANE_ID must be blocked from untrusted env"
         );
         assert!(out.iter().any(|(k, _)| k == "HOME"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_executable_refuses_paths_another_user_controls() {
+        use std::os::unix::fs::PermissionsExt;
+        // Bare names are PATH-resolved — the shipped profiles launch `omp`,
+        // `lazygit` and `nvim` that way, so they must stay allowed.
+        assert!(validate_executable("omp").is_ok());
+        assert!(validate_executable("").is_ok());
+        // A system binary owned by root is fine.
+        assert!(validate_executable("/bin/sh").is_ok());
+
+        // An absolute path in a shared, writable location is not.
+        let path = std::env::temp_dir().join(format!("gpty_exec_{}", std::process::id()));
+        std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o777);
+        std::fs::set_permissions(&path, perms.clone()).unwrap();
+        assert!(
+            validate_executable(&path.to_string_lossy()).is_err(),
+            "group/other-writable executable must be refused"
+        );
+
+        // The same file, private to its owner, is accepted.
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+        assert!(validate_executable(&path.to_string_lossy()).is_ok());
+        let _ = std::fs::remove_file(&path);
+
+        // Not a regular file, and not absolute.
+        assert!(validate_executable("/tmp").is_err());
+        assert!(validate_executable("./relative").is_err());
     }
 
     #[test]
