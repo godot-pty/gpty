@@ -197,6 +197,9 @@ fn spawn_child(config: &SessionOpenRequest) -> Result<Child, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // An adapter is a third-party CLI: never hand it workspace-control
+    // credentials the GUI itself inherited (see `SessionOpenRequest::strip_env`).
+    crate::types::strip_child_env(&mut command, &config.strip_env);
     if !config.cwd.is_empty() {
         command.current_dir(&config.cwd);
     }

@@ -45,6 +45,26 @@ pub struct SessionOpenRequest {
     /// shell-evaluated). Each prompt runs one child process.
     #[serde(default)]
     pub command: Vec<String>,
+    /// Environment keys to remove from the child before it starts.
+    ///
+    /// The Inspector and its adapters are third-party CLIs that have no
+    /// business holding workspace-control credentials: a GUI started from a
+    /// gpty pane inherits `GPTY_SECRET`, `GPTY_SOCKET`, and that pane's
+    /// event capability, and an adapter that inherited them could drive the
+    /// whole workspace. The caller (the Godot extension bridge) supplies the
+    /// list so there is one authoritative definition.
+    #[serde(default)]
+    pub strip_env: Vec<String>,
+}
+
+/// Remove `keys` from a child's environment before it is spawned.
+///
+/// Shared by every backend that starts a child process, so a credential the
+/// GUI inherited can never reach an adapter or the private OMP session.
+pub(crate) fn strip_child_env(command: &mut tokio::process::Command, keys: &[String]) {
+    for key in keys {
+        command.env_remove(key);
+    }
 }
 
 /// One prompt in an already-open session.
@@ -147,3 +167,25 @@ You are gpty's Inspector. You receive captured terminal output from \
 a concept trigger or a user prompt. Summarize what happened, call out errors or next steps, \
 and reply in concise Markdown. Do not invent files or commands that are not \
 supported by the capture. Do not request secrets.";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_child_env_removes_every_key() {
+        let mut command = tokio::process::Command::new("sh");
+        strip_child_env(
+            &mut command,
+            &["GPTY_SECRET".to_string(), "GPTY_SOCKET".to_string()],
+        );
+        let removals: Vec<String> = command
+            .as_std()
+            .get_envs()
+            .filter(|(_, value)| value.is_none())
+            .map(|(key, _)| key.to_string_lossy().into_owned())
+            .collect();
+        assert!(removals.contains(&"GPTY_SECRET".to_string()));
+        assert!(removals.contains(&"GPTY_SOCKET".to_string()));
+    }
+}

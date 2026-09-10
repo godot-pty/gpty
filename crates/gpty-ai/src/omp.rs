@@ -160,6 +160,9 @@ impl OmpProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        // The private omp child must not inherit workspace-control
+        // credentials the GUI process itself was started with.
+        crate::types::strip_child_env(&mut command, &config.strip_env);
         if !config.cwd.is_empty() {
             command.arg("--cwd").arg(&config.cwd);
             command.current_dir(&config.cwd);

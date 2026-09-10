@@ -20,11 +20,6 @@ impl TempScript {
     pub(crate) fn path(&self) -> &Path {
         &self.0
     }
-
-    /// The path as an argv entry, for a subprocess command.
-    pub(crate) fn as_command(&self) -> Vec<String> {
-        vec![self.0.to_string_lossy().to_string()]
-    }
 }
 
 impl Drop for TempScript {

@@ -33,10 +33,18 @@ impl GptyAi {
     /// Output: `{"ok":true,"session_id":"...","backend":"..."}` or an error object.
     #[func]
     fn session_open(&mut self, request_json: GString) -> GString {
-        let config: SessionOpenRequest = match serde_json::from_str(&request_json.to_string()) {
+        let mut config: SessionOpenRequest = match serde_json::from_str(&request_json.to_string()) {
             Ok(config) => config,
             Err(error) => return json_error(format!("invalid session_open JSON: {error}")),
         };
+        // The child is a third-party CLI. Whatever credentials this GUI
+        // process inherited (a GUI started from a gpty pane carries
+        // GPTY_SECRET, GPTY_SOCKET, and that pane's event capability) must not
+        // reach it — the list is defined once, next to the terminal-spawn gate.
+        config.strip_env = gpty_core::pty::STRIPPED_INHERITED_ENV_KEYS
+            .iter()
+            .map(|k| k.to_string())
+            .collect();
         // The adapter command comes from pane settings, which a saved profile
         // or workspace can supply, and it is executed as argv. Hold it to the
         // same standard as a terminal's command: an absolute path must not
