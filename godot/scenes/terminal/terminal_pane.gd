@@ -16,6 +16,13 @@ const PRINTABLE_ASCII_MIN = 32
 const SEARCH_HIGHLIGHT_COLOR = Color(1.0, 0.8, 0.0, 0.35)
 const SEARCH_ACTIVE_COLOR = Color(1.0, 0.5, 0.0, 0.5)
 const PRINTABLE_ASCII_MAX = 126
+## Cell attribute bits, packed by the Rust grid reader (`get_grid_updates_packed`).
+const ATTR_BOLD := 1
+const ATTR_ITALIC := 2
+const ATTR_UNDERLINE := 4
+const ATTR_INVERSE := 8
+## Set on the first cell of a wide character; the next cell is its spacer.
+const ATTR_WIDE := 16
 
 @export var beam_cursor_width: int = BEAM_CURSOR_WIDTH
 @export var underline_cursor_height: int = UNDERLINE_CURSOR_HEIGHT
@@ -493,29 +500,68 @@ func _draw_cells(off: Vector2, baseline: float):
 			# One rect for the entire run of same-background cells
 			draw_rect(Rect2(off.x + start_c * _cell_w, off.y + r * _cell_h, (c - start_c) * _cell_w, _cell_h), bg)
 
-	# ── Full text + underline pass ──
-	var skip_next = false
+	# ── Text + underline pass: glyph runs ──
+	# Consecutive cells that share font, color, and underline state go out as
+	# ONE draw_string. Per-cell calls were the per-frame cost: a full 80×24
+	# pane issued up to ~1 900 canvas items per repaint, nearly all of them a
+	# single glyph in a color the neighbor already used.
 	for r in n_rows:
-		skip_next = false
-		for c in n_cols:
-			if skip_next:
-				skip_next = false
-				continue
-			var idx = r * n_cols + c
-			var ch: String = chars[r][c]
-			var fg: Color = fg_arr[idx] as Color
+		var c := 0
+		# The cell after a wide character is its zero-width spacer.
+		var wide_prev := false
+		while c < n_cols:
+			var idx: int = r * n_cols + c
 			var a: int = attrs[idx]
-			if a & 16 != 0: skip_next = true
-			if a & 8 != 0: var _tmp = fg; fg = bg_arr[idx] as Color
+			var ch: String = chars[r][c]
+			if wide_prev or ch == " " or ch == "":
+				# The old per-cell pass drew an underline for EVERY cell
+				# carrying the attribute, spaces included; a text run stops at
+				# a space, so an underlined space inside an underlined phrase
+				# is drawn here. A wide character's spacer is not a cell of
+				# its own and never was.
+				if a & ATTR_UNDERLINE != 0 and not wide_prev:
+					var seg_fg: Color = fg_arr[idx] as Color
+					if a & ATTR_INVERSE != 0: seg_fg = bg_arr[idx] as Color
+					var seg_y: float = off.y + r * _cell_h + baseline + 2
+					draw_line(Vector2(off.x + c * _cell_w, seg_y),
+						Vector2(off.x + (c + 1) * _cell_w, seg_y), seg_fg, 1.0)
+				wide_prev = a & ATTR_WIDE != 0
+				c += 1
+				continue
+			var run_font = _font
+			if a & ATTR_BOLD != 0: run_font = _font_bold
+			if a & ATTR_ITALIC != 0: run_font = _font_italic
+			var run_fg: Color = fg_arr[idx] as Color
+			if a & ATTR_INVERSE != 0: run_fg = bg_arr[idx] as Color
+			var run_underline: bool = a & ATTR_UNDERLINE != 0
+			var text := ch
+			var wide: bool = a & ATTR_WIDE != 0
+			var run_end := c + 1
+			# Extend while the next cell matches — and stop on a wide
+			# character, whose spacer must not be drawn.
+			while run_end < n_cols and not wide:
+				var nidx: int = r * n_cols + run_end
+				var nch: String = chars[r][run_end]
+				if nch == " " or nch == "": break
+				var na: int = attrs[nidx]
+				var nfg: Color = fg_arr[nidx] as Color
+				if na & ATTR_INVERSE != 0: nfg = bg_arr[nidx] as Color
+				if nfg != run_fg or (na & ATTR_UNDERLINE != 0) != run_underline: break
+				var nfont = _font
+				if na & ATTR_BOLD != 0: nfont = _font_bold
+				if na & ATTR_ITALIC != 0: nfont = _font_italic
+				if nfont != run_font: break
+				text += nch
+				wide = na & ATTR_WIDE != 0
+				run_end += 1
+			var x: float = off.x + c * _cell_w
+			var y: float = off.y + r * _cell_h + baseline
+			draw_string(run_font, Vector2(x, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, run_fg)
+			if run_underline:
+				draw_line(Vector2(x, y + 2), Vector2(x + text.length() * _cell_w, y + 2), run_fg, 1.0)
+			wide_prev = wide
+			c = run_end
 
-			if ch != " " and ch != "":
-				var uf = _font
-				if a & 1 != 0: uf = _font_bold
-				if a & 2 != 0: uf = _font_italic
-				draw_string(uf, Vector2(off.x + c * _cell_w, off.y + r * _cell_h + baseline), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, fg)
-
-			if a & 4 != 0:  # underline
-				draw_line(Vector2(off.x + c * _cell_w, off.y + r * _cell_h + baseline + 2), Vector2(off.x + (c + 1) * _cell_w, off.y + r * _cell_h + baseline + 2), fg, 1.0)
 func _draw_cursor(off: Vector2, baseline: float):
 	var cr = _terminal.get_cursor_row(); var cc = _terminal.get_cursor_col()
 	if cr < 0 or cc < 0: return

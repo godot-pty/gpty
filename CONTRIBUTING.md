@@ -138,7 +138,15 @@ omp plugin link "$(pwd)/extensions/gpty-omp-events"
 
 # Fast checks only (fmt, clippy)
 ./scripts/ci-check --fast
+
+# Terminal renderer cost (needs a display; see the script header)
+godot --path godot --disable-vsync -s res://tests/bench/draw_bench.gd
 ```
+
+The render benchmark fills a pane with a deterministic ANSI-rich screen, prints
+the cost of a forced full repaint against an idle frame, and saves the rendered
+frame to `/tmp/gpty_draw_<BENCH_TAG>.png`. Two revisions must render
+byte-identical pixels, so diff the two PNGs before trusting a timing delta.
 
 ### CLI (control a running GUI)
 
