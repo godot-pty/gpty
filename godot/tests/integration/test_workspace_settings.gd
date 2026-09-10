@@ -304,6 +304,37 @@ func test_profile_activation_refreshes_layout_and_pane_list():
 	await get_tree().create_timer(2.1).timeout
 
 
+func test_killing_the_focused_pane_hands_focus_to_a_survivor():
+	# Closing the active pane used to leave keyboard focus unowned: the freed
+	# node released it, last_body went null, and typing reached nothing until
+	# the user clicked a pane.
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var victim = ws._spawn_pane("terminal")
+	assert_not_null(victim)
+	victim.grab_focus()
+	await get_tree().process_frame
+	ws._tm.last_body = victim
+	assert_true(victim.has_focus(), "precondition: the pane to close holds focus")
+
+	ws._kill(victim)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var survivor = ws._tm.last_body
+	assert_not_null(survivor, "some pane must hold focus after the active one is closed")
+	assert_true(is_instance_valid(survivor))
+	assert_ne(survivor, victim, "focus must not stay on the closed pane")
+	assert_true(survivor is TerminalPane, "only terminals take keyboard focus")
+	assert_true(survivor.has_focus(), "the surviving terminal must hold keyboard focus")
+
+	await get_tree().create_timer(2.1).timeout
+
+
 func test_restore_renames_duplicate_attachment_ids():
 	# Every pane is addressed over IPC by attachment_id and resolution returns
 	# the first match, so a saved layout naming one id twice would make inject,

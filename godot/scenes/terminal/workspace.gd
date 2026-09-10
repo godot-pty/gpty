@@ -232,10 +232,23 @@ func _kill(body: Control):
 	var ws := _workspace_for_body(body)
 	if ws.is_empty():
 		return
+	# _refresh_status_bar keeps last_body synced to the focus owner, so this
+	# tells us whether the pane being closed was the one holding the keyboard.
+	var held_focus: bool = ws.tm.last_body == body
 	ws.tm.kill(body)
 	_close_pane_settings_for(body)
 	_apply_layout()
 	_list()
+	if held_focus:
+		# Otherwise the freed node takes focus with it and typing reaches
+		# nothing until the user clicks a pane. Only terminals take keyboard
+		# focus, so hand it to a surviving terminal.
+		for t in ws.tm.tiles:
+			var survivor = ws.tm._find_body(t.wrapper)
+			if survivor is TerminalPane:
+				ws.tm.last_body = survivor
+				survivor.grab_focus()
+				break
 	ToastManager.info("Pane closed")
 
 ## Close the pane settings popup when its target pane is torn down. The
