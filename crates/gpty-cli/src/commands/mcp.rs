@@ -50,6 +50,10 @@ pub async fn run(client: &IpcClient) -> anyhow::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 
+    // Computed once: `tools/call` must reject any name that is not an
+    // advertised tool (see `mcp_tool_names`).
+    let allowed_tools = super::schema::mcp_tool_names(&crate::Cli::command());
+
     for line in stdin.lock().lines() {
         let line = line?;
         let line = line.trim().to_string();
@@ -92,8 +96,16 @@ pub async fn run(client: &IpcClient) -> anyhow::Result<()> {
                     .cloned()
                     .unwrap_or(serde_json::Value::Null);
 
+                if !allowed_tools.iter().any(|name| name == tool_name) {
+                    build_error(
+                        id,
+                        JsonRpcError::new(
+                            JsonRpcError::INVALID_PARAMS,
+                            format!("Unknown tool: {tool_name}"),
+                        ),
+                    )
                 // Daemon tools are handled locally (no GUI needed)
-                if let Some(result) = run_daemon_tool(tool_name, client).await {
+                } else if let Some(result) = run_daemon_tool(tool_name, client).await {
                     build_response(id, result)
                 } else {
                     // Map kebab-case tool name to camelCase IPC method

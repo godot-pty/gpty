@@ -86,6 +86,26 @@ pub fn build_mcp_tools_inline(cmd: &clap::Command) -> serde_json::Value {
     serde_json::json!({ "tools": tools })
 }
 
+/// Names of every advertised MCP tool, in schema order.
+///
+/// `tools/call` validates against this list: the kebab→camel mapping turns
+/// *any* string into an IPC method name, so without the gate a client reaches
+/// methods that were never published as tools (e.g. `shutdown`, which only the
+/// `daemon-stop` tool should trigger).
+pub fn mcp_tool_names(cmd: &clap::Command) -> Vec<String> {
+    build_mcp_tools_inline(cmd)
+        .get("tools")
+        .and_then(|tools| tools.as_array())
+        .map(|tools| {
+            tools
+                .iter()
+                .filter_map(|tool| tool.get("name").and_then(|n| n.as_str()))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn build_args_schema(
     sub: &clap::Command,
 ) -> (serde_json::Map<String, serde_json::Value>, Vec<String>) {
