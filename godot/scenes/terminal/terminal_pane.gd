@@ -596,22 +596,28 @@ func _handle_keyboard(event: InputEventKey):
 	if _search_visible and event.keycode == KEY_ESCAPE:
 		_close_search()
 		accept_event(); return
-	# Ctrl+F toggles search bar
+	# Ctrl+F toggles search bar. Auto-repeat is consumed but ignored: holding
+	# the chord must not flip the bar on every repeat.
 	if event.keycode == KEY_F and event.ctrl_pressed:
-		_toggle_search()
+		if not event.echo:
+			_toggle_search()
 		accept_event(); return
 	if event.keycode == KEY_C and event.ctrl_pressed and event.shift_pressed:
 		# Copy-only: always consume the event so it can never fall through
 		# to a workspace shortcut. No selection → silent no-op.
-		var st = _get_selected_text()
-		if st != "":
-			DisplayServer.clipboard_set(st)
-		_clear_selection()
+		if not event.echo:
+			var st = _get_selected_text()
+			if st != "":
+				DisplayServer.clipboard_set(st)
+			_clear_selection()
 		accept_event()
 		return
 	if event.keycode == KEY_V and event.ctrl_pressed and event.shift_pressed:
-		var cl = _get_clipboard_text()
-		if cl != "": _send_to_term(cl)
+		# Consume repeats as well: falling through would reach _key_to_text
+		# and send a literal ^V for every repeat of the chord.
+		if not event.echo:
+			var cl = _get_clipboard_text()
+			if cl != "": _send_to_term(cl)
 		accept_event(); return
 
 	if event.keycode == KEY_PAGEUP: _terminal.scroll_up(rows); accept_event(); return

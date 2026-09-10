@@ -14,6 +14,7 @@ class RecordingPane:
 	var sent: Array[String] = []
 	var sent_lines: Array[String] = []
 	var clip := "clip-payload"
+	var search_toggles := 0
 
 	func _send_to_term(text: String):
 		sent.append(text)
@@ -23,6 +24,10 @@ class RecordingPane:
 
 	func _get_clipboard_text() -> String:
 		return clip
+
+	# _toggle_search() dereferences _ready()-built nodes; count calls instead.
+	func _toggle_search():
+		search_toggles += 1
 
 
 var _pane: RecordingPane
@@ -44,13 +49,14 @@ func after_each():
 	_pane = null
 
 
-func _key_event(keycode: int, unicode: int, ctrl := false, shift := false, alt := false) -> InputEventKey:
+func _key_event(keycode: int, unicode: int, ctrl := false, shift := false, alt := false, echo := false) -> InputEventKey:
 	var ev = InputEventKey.new()
 	ev.keycode = keycode
 	ev.unicode = unicode
 	ev.ctrl_pressed = ctrl
 	ev.shift_pressed = shift
 	ev.alt_pressed = alt
+	ev.echo = echo
 	ev.pressed = true
 	return ev
 
@@ -141,6 +147,23 @@ func test_ctrl_shift_c_with_selection_copies_without_leaking():
 	_pane._sel_end = Vector2i(0, 2)
 	_pane._handle_keyboard(_key_event(KEY_C, 0, true, true))
 	assert_eq(_pane.sent, [], "copy with selection must not send bytes to the shell")
+
+
+func test_held_paste_sends_clipboard_once():
+	# Holding the chord repeats the key event. Each repeat must be consumed
+	# but ignored: re-pasting floods the shell, and letting it fall through
+	# would reach _key_to_text and emit a literal ^V per repeat.
+	_pane._gui_input(_key_event(KEY_V, 22, true, true))
+	_pane._gui_input(_key_event(KEY_V, 22, true, true, false, true))
+	_pane._gui_input(_key_event(KEY_V, 22, true, true, false, true))
+	assert_eq(_pane.sent, ["clip-payload"], "a held Ctrl+Shift+V pastes exactly once")
+
+
+func test_held_ctrl_f_toggles_search_once():
+	_pane._handle_keyboard(_key_event(KEY_F, 0, true))
+	_pane._handle_keyboard(_key_event(KEY_F, 6, true, false, false, true))
+	_pane._handle_keyboard(_key_event(KEY_F, 6, true, false, false, true))
+	assert_eq(_pane.search_toggles, 1, "a held Ctrl+F must not flip the search bar per repeat")
 
 func test_alt_letter_prepends_escape():
 	_pane._handle_keyboard(_key_event(KEY_A, 97, false, false, true))
