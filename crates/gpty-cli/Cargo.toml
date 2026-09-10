@@ -1,6 +1,6 @@
 [package]
 name = "gpty"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2024"
 description = "gpty CLI — control the terminal workspace over JSON-RPC IPC"
 

@@ -2,7 +2,7 @@
 
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.2] — 2026-09-09
 
 ### Added
 
@@ -11,6 +11,19 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - Windows event listener — the OMP event socket now serves on Windows as a named pipe (`\\.\pipe\gpty-events`) with per-PTY `GPTY_EVENT_*` injection on every platform; capability entropy comes from `getrandom` instead of `/dev/urandom`. The shipped extension still needs a named-pipe transport to use it there (ecosystem follow-up), but Reasoning is no longer fail-closed at the gPTY layer.
 - CLI backend for Inspector — a `cli` backend beside `mock`/`omp`: runs a configured adapter command (argv, never shell-evaluated) as a subprocess NDJSON bridge — one JSON request line per prompt in, `thinking`/`delta`/`done`/`error`/`status` frames out. Cancelling kills the child (`kill_on_drop`, no orphans); the next prompt respawns. Inspector pane settings gain a Command row; the command persists in the layout state (sanitized like shell args).
 - Titlebar agent-state badges — a Phosphor badge on each terminal titlebar mirrors the agent state: spinner (Working), check (Completed), warning (Failed), pulsing amber (NeedsAttention); hidden while Idle. Display only.
+- Settings panel polish — per-tab "Reset tab to defaults" buttons (full-width, centered) replace the all-tabs reset; the color scheme row gains a reset button; every UI color gains an individual reset; Appearance color pickers gain OK/Cancel (Cancel restores the pre-open color); the Edit/Add Concept dialog opens at 90% of the settings menu width.
+
+### Changed
+
+- UI chrome colors (wrapper background/border, pane titlebars, sidebar, window titlebar) now live-apply to existing panes when changed — no app restart required.
+- Color row labels share a fixed-width column so all color pickers align.
+- The settings panel is wider and its tab font slightly smaller so all six tabs always fit without clipping into the overflow dropdown.
+
+### Fixed
+
+- Pane settings popup could render but ignore every click: Godot 4 GUI input picking uses reverse tree order and ignores `z_index`, so later-added workspace grids ate the popup's input. Overlays now move to the end of the tree when opened; the same fix covers the global settings panel and command palette. The palette also had its first toggle inverted (created visible, first press hid it).
+- Pane settings popup stayed open over a killed/swapped pane and every interaction then errored on the freed body. The popup now closes on kill and type-swap and self-closes whenever its target is torn down.
+- Restarted terminals showed a growing pile of old prompt lines ("as if Enter was pressed"): the plain-text parser committed a history row on every bare carriage return, and shells reprint the prompt on each resize. Bare CR no longer commits, and scrollback restore collapses runs of identical rows.
 
 
 ## [0.5.1] — 2026-09-09
@@ -132,6 +145,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - Cursor blink toggle redraws the terminal immediately
 - Concept editor no longer crashes when opened with an empty workspace (no terminal panes) — the Add Concept button is disabled until a terminal exists
 
+[0.5.2]: https://github.com/godot-pty/gpty/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/godot-pty/gpty/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/godot-pty/gpty/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/godot-pty/gpty/compare/v0.3.2...v0.4.0
