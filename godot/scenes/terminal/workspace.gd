@@ -1115,8 +1115,7 @@ func _push_concepts_to_engine():
 			for c in concepts:
 				if c is Dictionary and c.get("enabled", true) == true:
 					enabled.append(c)
-			if enabled.is_empty():
-				return
+			# Push the empty set too — see ConceptManager._push_to_rust.
 			term.set_global_concepts(JSON.stringify(enabled))
 			return
 func _push_concepts_deferred():

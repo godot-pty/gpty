@@ -11,13 +11,14 @@ func _on_init():
 
 func _push_to_rust():
 	var concepts = _merge_concepts()
-	# Filter out disabled concepts before pushing to Rust
+	# Filter out disabled concepts before pushing to Rust. An empty set is
+	# pushed as `[]` rather than skipped: returning early would leave the
+	# engine running whatever was pushed last, so disabling every concept
+	# would not actually stop the captures the user just turned off.
 	var enabled_only: Array = []
 	for c in concepts:
 		if c is Dictionary and c.get("enabled", true) == true:
 			enabled_only.append(c)
-	if enabled_only.is_empty():
-		return
 	var t = ClassDB.instantiate("GptyTerminal")
 	if t == null:
 		push_warning("[ConceptManager] Failed to instantiate GptyTerminal, concepts not pushed")

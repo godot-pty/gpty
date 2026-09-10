@@ -151,6 +151,37 @@ func test_merge_preserves_inspector_targets():
 	assert_eq(actions[0].get("target", ""), "inspector",
 		"inspector targets should pass through unchanged")
 
+# ── Engine push ────────────────────────────────────────────────────────
+
+func test_push_clears_the_engine_when_every_concept_is_disabled():
+	# Seed the engine with a concept so the clearing push is observable.
+	var seed = '[{"name":"seed","trigger":"zzz","enabled":true,"capture_mode":"single_line","actions":[{"cmd":"","target":"terminal"}]}]'
+	var seeded = ClassDB.instantiate("GptyTerminal")
+	seeded.set_global_concepts(seed)
+	assert_eq(seeded.get_global_concepts().size(), 1,
+		"precondition: engine holds the seeded concept")
+
+	# User data disables cat_command, the only concept shipped enabled, so the
+	# merged set is empty. Pushing nothing here would leave the engine running
+	# the previous set and the captures the user turned off would keep firing.
+	ConceptManager.save_concepts([
+		{"name": "cat_command", "trigger": "custom", "enabled": false,
+		 "capture_mode": "until_stop", "stop_timeout_ms": 300, "stop_on_input": true,
+		 "actions": []},
+	])
+	ConceptManager._push_to_rust()
+
+	var readback = ClassDB.instantiate("GptyTerminal")
+	assert_eq(readback.get_global_concepts().size(), 0,
+		"disabling every concept must clear the engine set")
+
+	# The concept set is engine-global and outlives this test: restore defaults.
+	ConceptManager.save_concepts([])
+	ConceptManager._push_to_rust()
+
+	seeded.free()
+	readback.free()
+
 # ── Helpers ────────────────────────────────────────────────────────────
 func _find_by_name(arr: Array, name: String):
 	for item in arr:
