@@ -197,7 +197,12 @@ func apply_settings(settings: Dictionary):
 		# Untrusted layout data: sanitize before it reaches a spawn.
 		shell_args = PaneTypes.sanitize_shell_args(settings.get("shell_args"))
 	if settings.has("rows") or settings.has("cols"):
-		if _terminal != null:
+		# Apply-time guard, mirroring the debounce path: a stored size may only
+		# seed the grid before the tile is laid out. Once the tile has a real
+		# size the pixel-derived resize owns rows/cols — applying a larger
+		# stored grid draws content the tile cannot show (the cursor lands
+		# off-screen behind clip_contents) and the next resize reverts it.
+		if _terminal != null and size.x < custom_minimum_size.x:
 			_terminal.resize_grid(rows, cols)
 	# Colors, cursor shape and metrics are all read in _draw(); the grid
 	# generation does not move for them, so repaint once here.
