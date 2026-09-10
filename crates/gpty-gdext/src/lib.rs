@@ -10,6 +10,7 @@
 //! - GDScript polls the grid in `_process()` and renders it in `_draw()`.
 //! - Keyboard input flows GDScript → Rust → PTY stdin.
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use godot::prelude::*;
@@ -29,6 +30,14 @@ mod omp_events;
 
 const TOKIO_WORKERS: usize = 2;
 const MIN_DIM: i64 = 1;
+/// Terminal ids must be unique across every pane in the process: the engine
+/// compares an event's `source_pane` against each receiver's id to suppress
+/// self-reaction, so a collision makes every pane look like the source and
+/// silently discards every concept action. A per-instance counter gave every
+/// pane id 1 — one GptyTerminal is created per pane and each is started once.
+static NEXT_TERMINAL_ID: AtomicU32 = AtomicU32::new(1);
+/// Maximum concept-routing labels accepted per pane (the pane id plus tags).
+const MAX_LABELS: usize = 32;
 const RGB_SCALE: f32 = 1.0 / 255.0;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -53,7 +62,6 @@ static ENGINE: LazyLock<WorkspaceEngine> = LazyLock::new(|| WorkspaceEngine::new
 #[class(base = Node2D)]
 struct GptyTerminal {
     spawned: Option<SpawnedTerminal>,
-    next_id: u32,
     capture_queue: Option<Arc<std::sync::Mutex<Vec<gpty_core::types::CapturedOutput>>>>,
     terminal_session_id: String,
 }
@@ -63,7 +71,6 @@ impl INode2D for GptyTerminal {
     fn init(_base: Base<Node2D>) -> Self {
         Self {
             spawned: None,
-            next_id: 1,
             capture_queue: None,
             terminal_session_id: String::new(),
         }
@@ -116,6 +123,7 @@ impl GptyTerminal {
         pane_id: GString,
         history_lines: i64,
         args_json: GString,
+        labels_json: GString,
     ) {
         let command = command.to_string();
         if command.is_empty() || command.len() > 1024 || command.contains('\0') {
@@ -123,8 +131,7 @@ impl GptyTerminal {
             return;
         }
 
-        let id = self.next_id;
-        self.next_id += 1;
+        let id = NEXT_TERMINAL_ID.fetch_add(1, Ordering::Relaxed);
 
         if !self.terminal_session_id.is_empty() {
             omp_events::unregister_terminal(&self.terminal_session_id);
@@ -164,14 +171,32 @@ impl GptyTerminal {
         } else {
             String::new()
         };
+        // Labels the concept engine matches an action's `target` against: the
+        // pane's stable public id plus its user tags. Without these every
+        // concept action was unreachable — `matching_commands` compares the
+        // action target against this list, so an empty list meant no action
+        // could ever be delivered. Sanitized in GDScript; capped again here
+        // because this is the FFI boundary.
+        let mut labels: Vec<String> = Vec::new();
+        if !pane_id_value.is_empty() {
+            labels.push(pane_id_value.clone());
+        }
+        if let Ok(parsed) = serde_json::from_str::<Vec<String>>(&labels_json.to_string()) {
+            for label in parsed {
+                if label.is_empty() || label.len() > 64 || labels.len() >= MAX_LABELS {
+                    continue;
+                }
+                if !labels.contains(&label) {
+                    labels.push(label);
+                }
+            }
+        }
+
         if !pane_id_value.is_empty() {
             trusted_envs.push(("GPTY_PANE_ID".to_string(), pane_id_value));
         }
 
-        let config = TerminalConfig {
-            id,
-            labels: Vec::new(),
-        };
+        let config = TerminalConfig { id, labels };
 
         let rows = rows.max(MIN_DIM) as usize;
         let cols = cols.max(MIN_DIM) as usize;

@@ -96,12 +96,26 @@ var _sync_interval: float = 1.0 / 60.0
 const SLOW_POLL_INTERVAL := 0.25
 var _slow_poll_timer: float = 0.0
 
+## Labels the concept engine routes actions by: this pane's stable public id
+## plus its tags. `pane_label` is deliberately absent — it is reassigned on
+## restore and is not a stable link. An id is generated if the pane does not
+## have one yet, so a pane is addressable from the moment its shell starts.
+func _concept_labels() -> Array:
+	ensure_attachment_id()
+	var out: Array = []
+	if attachment_id != "":
+		out.append(attachment_id)
+	for tag in tags:
+		if tag is String and tag != "" and not out.has(tag):
+			out.append(tag)
+	return out
+
 func _ready():
 	super._ready()
 	_terminal = GptyTerminal.new()
 	_terminal.name = "GptyTerminal"
 	add_child(_terminal)
-	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines, JSON.stringify(shell_args))
+	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines, JSON.stringify(shell_args), JSON.stringify(_concept_labels()))
 
 	if color_scheme_path != "":
 		_apply_stored_scheme()
