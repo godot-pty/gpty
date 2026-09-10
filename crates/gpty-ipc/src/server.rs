@@ -241,6 +241,23 @@ fn peer_uid_matches(_stream: &tokio::net::UnixStream) -> bool {
     true
 }
 
+/// Byte-wise equality that does not short-circuit on the first mismatch.
+///
+/// Defence-in-depth for the local control socket: it keeps a presented
+/// `GPTY_SECRET` from being recovered a byte at a time by timing the
+/// comparison. Access to the socket is still gated by the peer-UID check and
+/// file permissions — this only removes the timing side channel.
+fn constant_time_eq(provided: &[u8], expected: &[u8]) -> bool {
+    if provided.len() != expected.len() {
+        return false;
+    }
+    provided
+        .iter()
+        .zip(expected)
+        .fold(0_u8, |diff, (a, b)| diff | (a ^ b))
+        == 0
+}
+
 /// Handle a single connection: read one JSON-RPC request, dispatch, respond.
 async fn handle_connection(
     stream: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -304,7 +321,7 @@ async fn handle_connection(
     // Auth: when the server has a secret configured, require a match.
     if let Some(expected) = secret {
         let provided = req.gpty_secret.as_deref().unwrap_or("");
-        if provided != expected {
+        if !constant_time_eq(provided.as_bytes(), expected.as_bytes()) {
             let resp = protocol::build_error(
                 id,
                 JsonRpcError::new(
@@ -348,6 +365,18 @@ async fn handle_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn constant_time_eq_matches_bytes_exactly() {
+        assert!(constant_time_eq(b"s3cret", b"s3cret"));
+        // Differing at the first byte and at the last byte are both false.
+        assert!(!constant_time_eq(b"x3cret", b"s3cret"));
+        assert!(!constant_time_eq(b"s3creX", b"s3cret"));
+        // Length mismatch is false, including empty vs non-empty.
+        assert!(!constant_time_eq(b"s3cre", b"s3cret"));
+        assert!(!constant_time_eq(b"", b"s3cret"));
+        assert!(constant_time_eq(b"", b""));
+    }
 
     #[cfg(unix)]
     mod unix {
