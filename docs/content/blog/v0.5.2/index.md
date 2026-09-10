@@ -3,7 +3,7 @@ title: gpty v0.5.2
 date: 2026-09-09
 ---
 
-v0.5.2 is the Agent State & Adapters release: terminals now *report* what an agent is doing — through authenticated events, a published OSC declaration, or plain heuristics — and the titlebar shows it at a glance. The event channel speaks an adapter-neutral vocabulary on every platform, and Inspector gains a generic CLI backend so any agent CLI can answer questions.
+v0.5.2 is the Agent State & Adapters release: terminals can now *report* what an agent is doing through authenticated events, a published OSC declaration, or plain heuristics; and the titlebar shows it at a glance. The event channel speaks an adapter-neutral vocabulary on every platform, and Inspector gains a generic CLI backend so any agent CLI can answer questions.
 
 <!--more-->
 
