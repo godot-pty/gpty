@@ -449,7 +449,15 @@ func _add_fps_control(v: VBoxContainer) -> OptionButton:
 	fps_opt.add_item("Unlimited");
 	
 	var presets = [60, 120, 144, 165, 240, -1, 0]
-	fps_opt.selected = presets.find(SettingsManager.cfg_max_fps)
+	var fps_idx: int = presets.find(SettingsManager.cfg_max_fps)
+	if fps_idx < 0:
+		# Hand-edited / unsupported value: find() returns -1, and selected = -1
+		# leaves the dropdown blank with no way to see the current value. Show
+		# the actual setting as its own trailing entry instead.
+		presets.append(SettingsManager.cfg_max_fps)
+		fps_opt.add_item(str(SettingsManager.cfg_max_fps) + " (custom)")
+		fps_idx = presets.size() - 1
+	fps_opt.selected = fps_idx
 	fps_opt.item_selected.connect(func(idx: int):
 		SettingsManager.cfg_max_fps = presets[idx]
 		SettingsManager.save_settings()
