@@ -220,6 +220,7 @@ func _spawn_bulk(count: int, shell := ""):
 	for i in bodies.size():
 		var w = _tm.tiles[start_size + i].wrapper
 		var body = bodies[i]
+		_ensure_unique_attachment_id(body)
 		_grid.add_child(w)
 		body.focus_entered.connect(func(): _tm.last_body = body)
 	_apply_layout()
@@ -317,11 +318,44 @@ func _update_workspace_ui():
 	if _sidebar:
 		_sidebar.update_workspace_list(_workspace_names(), _active)
 
+## Every pane is addressed over IPC by its `attachment_id`, and resolution
+## returns the first match — so two panes sharing an id make inject, read,
+## status, wait, kill and focus silently act on the wrong one. Duplicates
+## come from saved tiles (a profile or workspace file naming the same id
+## twice) or ids typed into the pane settings; regenerate on collision.
+func _ensure_unique_attachment_id(body: Control):
+	var id: String = str(body.get("attachment_id"))
+	if id == "":
+		return
+	if not _attachment_id_in_use(id, body):
+		return
+	var replacement := PaneTypes.generate_attachment_id()
+	for _i in 32:
+		if not _attachment_id_in_use(replacement, body):
+			break
+		replacement = PaneTypes.generate_attachment_id()
+	body.attachment_id = replacement
+	ToastManager.warn("Duplicate pane id '%s' renamed to '%s'" % [id, replacement])
+
+## True when any *other* pane in any workspace already carries `id`.
+func _attachment_id_in_use(id: String, except: Control) -> bool:
+	for ws in _workspaces:
+		if ws.is_empty() or not ws.has("tm"):
+			continue
+		for t in ws.tm.tiles:
+			var other = ws.tm._find_body(t.wrapper)
+			if other == null or other == except:
+				continue
+			if str(other.get("attachment_id")) == id:
+				return true
+	return false
+
 ## Single choke point where a pane enters a workspace: adds the wrapper to
 ## the grid, wires activation tracking, and (for terminals) the dynamic
 ## title. Spawn, restore, and swap all funnel through here so a new pane
 ## type is wired correctly everywhere.
 func _attach_pane_into(ws: Dictionary, w: Control, body: Control):
+	_ensure_unique_attachment_id(body)
 	ws.grid.add_child(w)
 	_wire_pane_activation(ws, w, body)
 	if body is TerminalPane:

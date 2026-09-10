@@ -302,3 +302,35 @@ func test_profile_activation_refreshes_layout_and_pane_list():
 		"activated wrapper must be laid out with real width")
 	# Wait out the deferred concept push timer so it doesn't resume after free.
 	await get_tree().create_timer(2.1).timeout
+
+
+func test_restore_renames_duplicate_attachment_ids():
+	# Every pane is addressed over IPC by attachment_id and resolution returns
+	# the first match, so a saved layout naming one id twice would make inject,
+	# read, status, wait, kill and focus all silently act on the same pane.
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	ws._build_workspaces([
+		{"name": "W1", "layout": [
+			{"col": 0, "row": 0, "cspan": 6, "rspan": 12,
+			 "settings": {"type": "terminal", "attachment_id": "shared-id"}},
+			{"col": 6, "row": 0, "cspan": 6, "rspan": 12,
+			 "settings": {"type": "terminal", "attachment_id": "shared-id"}},
+		]},
+	], 0)
+
+	var ids: Array = []
+	for t in ws._tm.tiles:
+		var body = ws._tm._find_body(t.wrapper)
+		if body:
+			ids.append(body.attachment_id)
+	assert_eq(ids.size(), 2, "both saved tiles must restore")
+	assert_ne(ids[0], ids[1], "duplicate attachment_ids must be made unique")
+	assert_eq(ids[0], "shared-id", "the first pane keeps the saved id")
+	assert_ne(ids[1], "", "the renamed pane must still have an id")
+
+	await get_tree().create_timer(2.1).timeout
