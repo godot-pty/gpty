@@ -278,9 +278,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 
 func kill(body: Control):
 	if last_body == body: last_body = null
-	var wi = -1
-	for i in tiles.size():
-		if _find_body(tiles[i].wrapper) == body: wi = i; break
+	var wi := _tile_index_of(body)
 	if wi == -1: return
 	var rm = tiles[wi]
 	tiles.remove_at(wi)
@@ -294,9 +292,7 @@ func kill_last():
 
 func swap_pane(body: Control, new_type_name: String) -> Control:
 	# Find the tile owning this body.
-	var ti = -1
-	for i in tiles.size():
-		if _find_body(tiles[i].wrapper) == body: ti = i; break
+	var ti := _tile_index_of(body)
 	if ti == -1:
 		push_error("swap_pane: body not found in tiles")
 		return null
@@ -395,6 +391,15 @@ func _expand_partial(rm: Dictionary):
 func _find_body(w: Control) -> Control:
 	return w.get_node_or_null("BodyVBox/Body")
 
+## Index of the tile whose wrapper owns `body`, or -1 when no tile does.
+## Indices shift whenever a pane is added or removed, so a body must be
+## re-found by identity rather than remembered by index.
+func _tile_index_of(body: Variant) -> int:
+	for i in tiles.size():
+		if _find_body(tiles[i].wrapper) == body:
+			return i
+	return -1
+
 func _toggle_minimize(w: Control, btn: Button):
 	var body = _find_body(w)
 	if body:
@@ -437,10 +442,24 @@ func _handle_swap(body: Control, new_type_name: String, _menu: PopupMenu):
 		on_swap.call(body, new_type_name)
 
 
+## Resolve a swap pair against the CURRENT tile list.
+##
+## A popup can stay open while the pane set changes under it (an IPC
+## `killPane`, a workspace switch, another pane's close), so indices captured
+## when it opened can point at a different pane or past the end. Both panes
+## are re-found by identity and the swap is abandoned if either is gone.
+## Takes Variants: the target may already be a freed instance by then.
+func resolve_swap_pair(a: Variant, b: Variant) -> Vector2i:
+	if not is_instance_valid(a) or not is_instance_valid(b):
+		return Vector2i(-1, -1)
+	var ia := _tile_index_of(a)
+	var ib := _tile_index_of(b)
+	if ia == -1 or ib == -1:
+		return Vector2i(-1, -1)
+	return Vector2i(ia, ib)
+
 func show_position_swap_popup(for_body: Control, menu_parent: Control, at_pos: Vector2):
-	var this_ti = -1
-	for i in tiles.size():
-		if _find_body(tiles[i].wrapper) == for_body: this_ti = i; break
+	var this_ti := _tile_index_of(for_body)
 	if this_ti == -1: return
 
 	var menu = PopupMenu.new()
@@ -454,12 +473,20 @@ func show_position_swap_popup(for_body: Control, menu_parent: Control, at_pos: V
 			var type_name = other._pane_type() if other.has_method("_pane_type") else "?"
 			label = PaneTypes.ALL.get(type_name, {}).get("name", type_name)
 		menu.add_item(String(label))
-		menu.set_item_metadata(menu.item_count - 1, i)
+		# The pane itself, not its index: the row is resolved when it is
+		# clicked, against whatever the tile list looks like by then.
+		menu.set_item_metadata(menu.item_count - 1, other)
 	menu.index_pressed.connect(func(idx: int):
-		var other_ti = menu.get_item_metadata(idx)
-		_swap_tile_positions(this_ti, other_ti)
-		tiles_resized.emit()
+		var target = menu.get_item_metadata(idx)
+		var pair := resolve_swap_pair(for_body, target)
 		menu.queue_free()
+		if pair.x == -1 or pair.y == -1:
+			# The pane set changed while the popup was open; swapping the
+			# current occupants of those indices would swap the wrong pair.
+			ToastManager.warn("Swap cancelled — that pane is no longer open")
+			return
+		_swap_tile_positions(pair.x, pair.y)
+		tiles_resized.emit()
 	)
 	menu_parent.add_child(menu)
 	menu.position = at_pos

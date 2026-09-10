@@ -155,6 +155,36 @@ func test_swap_preserves_settings():
 # test_swap_pane_not_found removed — push_error from TerminalManager
 # conflicts with GUT's error tracking. Covered by integration tests.
 
+# ── Position swap target resolution ────────────────────────────────────
+
+func test_swap_pair_resolves_against_the_current_tile_list():
+	var b1 = _tm.spawn_pane("terminal", {})
+	var b2 = _tm.spawn_pane("terminal", {})
+	var b3 = _tm.spawn_pane("terminal", {})
+	assert_not_null(b1)
+	assert_not_null(b2)
+	assert_not_null(b3)
+
+	# A popup opened with (b1, b3) chosen. b2 is killed meanwhile, so the
+	# index b3 had at open time now points at a different pane.
+	_tm.kill(b2)
+
+	assert_eq(
+		_tm.resolve_swap_pair(b1, b3), Vector2i(0, 1),
+		"surviving panes must resolve to their current indices")
+
+func test_swap_pair_abandons_a_closed_target():
+	var b1 = _tm.spawn_pane("terminal", {})
+	var b2 = _tm.spawn_pane("terminal", {})
+	assert_not_null(b1)
+	assert_not_null(b2)
+
+	_tm.kill(b2)
+
+	assert_eq(
+		_tm.resolve_swap_pair(b1, b2), Vector2i(-1, -1),
+		"a pane that is no longer open must abandon the swap")
+
 # ── Pane labels ─────────────────────────────────────────────────────────
 
 func test_pane_labels_per_type():
