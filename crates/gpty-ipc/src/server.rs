@@ -281,17 +281,22 @@ async fn handle_connection(
         }
     };
 
-    // Notifications get no response.
+    // Notifications (no `id` field) get no response. Checked before auth so
+    // an unauthenticated notification is dropped, not answered; a request
+    // that merely carries `"id": 0` still runs the auth path below.
     if req.is_notification() {
         return Ok(());
     }
+
+    // Response id for a real request; `id` is present whenever we get here.
+    let id = req.id.unwrap_or(0);
 
     // Auth: when the server has a secret configured, require a match.
     if let Some(expected) = secret {
         let provided = req.gpty_secret.as_deref().unwrap_or("");
         if provided != expected {
             let resp = protocol::build_error(
-                req.id,
+                id,
                 JsonRpcError::new(
                     JsonRpcError::UNAUTHORIZED,
                     "unauthorized: missing or invalid gpty_secret",
@@ -308,12 +313,12 @@ async fn handle_connection(
     let params = req.params.unwrap_or(serde_json::Value::Null);
     let resp = if let Some(handler) = handlers.get(&req.method) {
         match handler(params).await {
-            Ok(result) => protocol::build_response(req.id, result),
-            Err(e) => protocol::build_error(req.id, e),
+            Ok(result) => protocol::build_response(id, result),
+            Err(e) => protocol::build_error(id, e),
         }
     } else {
         protocol::build_error(
-            req.id,
+            id,
             JsonRpcError::new(
                 JsonRpcError::METHOD_NOT_FOUND,
                 format!("Unknown method: {}", req.method),
@@ -381,7 +386,7 @@ mod tests {
             // Successful call.
             let req = Request {
                 jsonrpc: "2.0".into(),
-                id: 1,
+                id: Some(1),
                 method: "echo".into(),
                 params: Some(serde_json::json!({"hello": "world"})),
                 gpty_secret: None,
@@ -394,7 +399,7 @@ mod tests {
             // Error call.
             let req = Request {
                 jsonrpc: "2.0".into(),
-                id: 2,
+                id: Some(2),
                 method: "fail".into(),
                 params: None,
                 gpty_secret: None,
@@ -407,7 +412,7 @@ mod tests {
             // Unknown method.
             let req = Request {
                 jsonrpc: "2.0".into(),
-                id: 3,
+                id: Some(3),
                 method: "nonexistent".into(),
                 params: None,
                 gpty_secret: None,
@@ -470,7 +475,7 @@ mod tests {
 
             let base = Request {
                 jsonrpc: "2.0".into(),
-                id: 1,
+                id: Some(1),
                 method: "echo".into(),
                 params: None,
                 gpty_secret: None,
@@ -478,6 +483,17 @@ mod tests {
 
             // Missing secret → unauthorized.
             let resp = send_request(&server_path, &base).await.unwrap();
+            assert_eq!(resp.error.unwrap().code, JsonRpcError::UNAUTHORIZED);
+
+            // An explicit `"id": 0` is a request, not a notification: it must
+            // be answered (UNAUTHORIZED) rather than silently dropped before
+            // the auth check.
+            let req = Request {
+                id: Some(0),
+                ..base.clone()
+            };
+            let resp = send_request(&server_path, &req).await.unwrap();
+            assert_eq!(resp.id, 0);
             assert_eq!(resp.error.unwrap().code, JsonRpcError::UNAUTHORIZED);
 
             // Wrong secret → unauthorized.

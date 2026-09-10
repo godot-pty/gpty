@@ -6,7 +6,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {
     pub jsonrpc: String,
-    pub id: u64,
+    /// Request id. JSON-RPC 2.0 notifications omit it entirely; requests
+    /// that do carry one keep their id on the wire (`skip_serializing_if`
+    /// only suppresses the field when it is absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<u64>,
     pub method: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
@@ -67,8 +71,11 @@ impl JsonRpcError {
 
 impl Request {
     /// Returns `true` when the request is a notification (no response expected).
+    ///
+    /// A notification omits `id` entirely; an explicit `"id": 0` is a normal
+    /// request that must still be answered.
     pub fn is_notification(&self) -> bool {
-        self.id == 0
+        self.id.is_none()
     }
 }
 
@@ -104,28 +111,37 @@ mod tests {
     fn round_trip_request() {
         let req = Request {
             jsonrpc: "2.0".into(),
-            id: 1,
+            id: Some(1),
             method: "newPane".into(),
             params: Some(serde_json::json!({"type": "terminal"})),
             gpty_secret: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let parsed: Request = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.id, 1);
+        assert_eq!(parsed.id, Some(1));
         assert_eq!(parsed.method, "newPane");
         assert!(!parsed.is_notification());
     }
 
     #[test]
     fn notification_detection() {
-        let req = Request {
-            jsonrpc: "2.0".into(),
-            id: 0,
-            method: "ping".into(),
-            params: None,
-            gpty_secret: None,
-        };
+        // A notification omits `id`; it still deserializes and is recognised.
+        let raw = r#"{"jsonrpc":"2.0","method":"ping"}"#;
+        let req: Request = serde_json::from_str(raw).unwrap();
+        assert_eq!(req.id, None);
         assert!(req.is_notification());
+        // Serializing a notification keeps the field absent.
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(!json.contains("\"id\""));
+    }
+
+    #[test]
+    fn explicit_zero_id_is_a_request() {
+        // `"id": 0` is a legitimate request id, not a notification marker.
+        let raw = r#"{"jsonrpc":"2.0","id":0,"method":"ping"}"#;
+        let req: Request = serde_json::from_str(raw).unwrap();
+        assert_eq!(req.id, Some(0));
+        assert!(!req.is_notification());
     }
 
     #[test]

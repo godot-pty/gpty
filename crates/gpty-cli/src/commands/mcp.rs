@@ -74,11 +74,15 @@ pub async fn run(client: &IpcClient) -> anyhow::Result<()> {
             continue;
         }
 
+        // Present for every request that reaches here (notifications are
+        // dropped above); fall back to 0 only to satisfy the response builder.
+        let id = req.id.unwrap_or(0);
+
         let resp = match req.method.as_str() {
             "tools/list" => {
                 let cmd = crate::Cli::command();
                 let tools = super::schema::build_mcp_tools_inline(&cmd);
-                build_response(req.id, tools)
+                build_response(id, tools)
             }
             "tools/call" => {
                 let params = req.params.unwrap_or(serde_json::Value::Null);
@@ -90,27 +94,27 @@ pub async fn run(client: &IpcClient) -> anyhow::Result<()> {
 
                 // Daemon tools are handled locally (no GUI needed)
                 if let Some(result) = run_daemon_tool(tool_name, client).await {
-                    build_response(req.id, result)
+                    build_response(id, result)
                 } else {
                     // Map kebab-case tool name to camelCase IPC method
                     let ipc_method = tool_to_ipc_method(tool_name);
                     match client.call(&ipc_method, Some(args)).await {
                         Ok(r) => {
                             if let Some(err) = r.error {
-                                build_error(req.id, err)
+                                build_error(id, err)
                             } else {
-                                build_response(req.id, r.result.unwrap_or(serde_json::Value::Null))
+                                build_response(id, r.result.unwrap_or(serde_json::Value::Null))
                             }
                         }
                         Err(e) => build_error(
-                            req.id,
+                            id,
                             JsonRpcError::new(JsonRpcError::INTERNAL_ERROR, e.to_string()),
                         ),
                     }
                 }
             }
             "initialize" => build_response(
-                req.id,
+                id,
                 serde_json::json!({
                     "protocolVersion": "2024-11-05",
                     "serverInfo": {"name": "gpty", "version": env!("CARGO_PKG_VERSION")},
@@ -118,7 +122,7 @@ pub async fn run(client: &IpcClient) -> anyhow::Result<()> {
                 }),
             ),
             _ => build_error(
-                req.id,
+                id,
                 JsonRpcError::new(
                     JsonRpcError::METHOD_NOT_FOUND,
                     format!("Unknown MCP method: {}", req.method),

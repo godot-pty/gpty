@@ -85,7 +85,7 @@ impl IpcClient {
 
         let req = Request {
             jsonrpc: "2.0".into(),
-            id: counter,
+            id: Some(counter),
             method: method.to_string(),
             params,
             gpty_secret: self.secret.clone(),
