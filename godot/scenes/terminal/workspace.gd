@@ -19,6 +19,7 @@ var _chrome: WindowChrome = null
 var _workspaces: Array[Dictionary] = []  # {name: String, grid: Control, tm: TerminalManager}
 var _active: int = 0
 var _active_profile: String = ""  # last successfully activated profile (sidebar accent)
+var _history_pruned: bool = false  # orphaned-scrollback sweep already attempted
 
 func _ready():
 	show()
@@ -53,6 +54,9 @@ func _ready():
 
 	# Push concepts to Rust engine — must wait for first frame (GDExtension ready)
 	_push_concepts_deferred()
+	# Reclaim scrollback rows of panes that no longer exist — same wait; needs
+	# the restored workspace set and a started terminal for the FFI handle.
+	_prune_history_deferred()
 
 	# Per-type keyboard shortcuts
 	for key in PaneTypes.ALL:
@@ -1179,6 +1183,42 @@ func get_terminal_for_ffi() -> GptyTerminal:
 		if body and body._terminal:
 			return body._terminal
 	return null
+
+func _prune_history_deferred():
+	# Wait for the scene tree to fully settle (GDExtension + terminal nodes ready)
+	await get_tree().create_timer(2.0).timeout
+	# The workspace may have been torn down (tests, quick quit) while waiting;
+	# resuming on a freed instance would raise a script error.
+	if not is_instance_valid(self) or not is_inside_tree():
+		return
+	# Skip in editor and headless GUT runs: a test workspace holds a handful of
+	# throwaway pane ids, and this sweep deletes every row for ids outside the
+	# live set — against the real history database that would reclaim the
+	# user's scrollback as collateral. Same gate the update checker uses.
+	if OS.has_feature("editor"):
+		return
+	# At most one sweep per session: the history connection sees the whole
+	# database, so a single call reclaims every orphaned pane's rows.
+	if _history_pruned:
+		return
+	_history_pruned = true
+	# Any live terminal works as the FFI handle — the prune is global.
+	var term = get_terminal_for_ffi()
+	if term == null:
+		return
+	var ids: Array[String] = []
+	for ws in _workspaces:
+		if ws.is_empty() or not ws.has("tm"):
+			continue
+		for t in ws.tm.tiles:
+			var body = ws.tm._find_body(t.wrapper)
+			if body == null:
+				continue
+			var id: String = str(body.get("attachment_id"))
+			if id.is_empty():
+				continue
+			ids.append(id)
+	term.prune_history(JSON.stringify(ids))
 
 func _save_current_as_profile():
 	# Gather current tiles

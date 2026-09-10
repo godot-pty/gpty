@@ -358,6 +358,55 @@ impl GptyTerminal {
         GString::from(json.to_string().as_str())
     }
 
+    /// Reclaim scrollback rows belonging to panes that no longer exist.
+    ///
+    /// `known_ids_json` is a JSON array of the `attachment_id`s that are live;
+    /// non-string entries are ignored and only the first 512 are considered.
+    /// This store's connection sees the WHOLE database, so the prune is
+    /// global — one call from any live pane reclaims orphaned rows for every
+    /// workspace. An empty (or empty-string) id list deletes nothing, because
+    /// it means the caller had no data rather than that every pane is gone.
+    /// Returns the number of deleted rows, or -1 when the pane is not running,
+    /// has no history store, the JSON is malformed, or the delete fails.
+    #[func]
+    fn prune_history(&self, known_ids_json: GString) -> i64 {
+        let Some(spawned) = &self.spawned else {
+            return -1;
+        };
+        let history = if let Ok(grid) = spawned.grid.lock() {
+            grid.history.clone()
+        } else {
+            None
+        };
+        let Some(history) = history else {
+            return -1;
+        };
+        let Ok(values) =
+            serde_json::from_str::<Vec<serde_json::Value>>(&known_ids_json.to_string())
+        else {
+            return -1;
+        };
+        // Same cap as other untrusted-input paths; only strings are ids.
+        let known: Vec<String> = values
+            .into_iter()
+            .take(512)
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect();
+        match history.lock() {
+            Ok(h) => match h.prune_missing_panes(&known) {
+                Ok(deleted) => deleted as i64,
+                Err(e) => {
+                    godot_warn!("[GDExt] Could not prune orphaned history rows: {e}");
+                    -1
+                }
+            },
+            Err(e) => {
+                godot_warn!("[GDExt] History store lock poisoned during prune: {e}");
+                -1
+            }
+        }
+    }
+
     /// Send raw text to the PTY — NO newline appended.
     ///
     /// Use this for interactive keyboard input. The shell's line discipline

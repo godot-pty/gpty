@@ -7,7 +7,7 @@
 //! Pane rows are keyed by the pane's stable `attachment_id` string (schema
 //! v2). An optional cap bounds how many lines are retained per pane.
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, params, params_from_iter};
 
 /// Maximum terms carried from user input into an FTS5 query.
 const MAX_QUERY_TERMS: usize = 32;
@@ -199,6 +199,33 @@ impl HistoryStore {
         )?;
         Ok(())
     }
+
+    /// Delete every stored line whose pane id is not in `known`.
+    ///
+    /// The connection sees the WHOLE database, not just this pane, so this
+    /// reclaims scrollback for panes that no longer exist: rows keyed by an
+    /// `attachment_id` nothing will ever open again are unreachable by
+    /// [`Self::clear`] (which knows only its own key) and their own store's
+    /// [`Self::enforce_cap`] never runs again, so they would leak forever.
+    ///
+    /// `known` is the set of live pane ids. An empty `known` returns `Ok(0)`
+    /// without touching anything: an empty list means the caller had no data,
+    /// and treating that as "prune everything" would destroy every pane's
+    /// scrollback.
+    ///
+    /// The FTS5 index is kept in sync by the `lines_ad` trigger declared in
+    /// [`Self::open`] (it issues FTS5's external-content `'delete'` command
+    /// for the removed rowid), so a plain DELETE is enough.
+    pub fn prune_missing_panes(&self, known: &[String]) -> Result<usize, rusqlite::Error> {
+        if known.is_empty() {
+            return Ok(0);
+        }
+        // Placeholders are built by repetition; values are bound, never
+        // concatenated into the SQL. `known` is non-empty (guarded above).
+        let placeholders = format!("?{}", ",?".repeat(known.len() - 1));
+        let sql = format!("DELETE FROM lines WHERE pane_id NOT IN ({placeholders})");
+        self.conn.execute(&sql, params_from_iter(known.iter()))
+    }
 }
 
 #[cfg(test)]
@@ -315,6 +342,60 @@ mod tests {
         store.clear().unwrap();
         assert_eq!(store.line_count().unwrap(), 0);
         assert_eq!(store.max_line_num().unwrap(), 0);
+    }
+
+    #[test]
+    fn prune_missing_panes_reclaims_orphans_and_keeps_known() {
+        let path = temp_db_path("prune");
+        let live = HistoryStore::open(&path, "pane-live", 100).unwrap();
+        let dead = HistoryStore::open(&path, "pane-dead", 100).unwrap();
+        live.append(0, "live line kept").unwrap();
+        dead.append(0, "orphan marker").unwrap();
+        dead.append(1, "orphan second").unwrap();
+
+        // Both panes' rows live in one database; the orphan is searchable.
+        assert_eq!(live.line_count().unwrap(), 1);
+        assert_eq!(dead.line_count().unwrap(), 2);
+        assert_eq!(dead.search("orphan", 10).unwrap().len(), 2);
+
+        // An empty known list means "the caller had no data", never "delete
+        // everything" — nothing may be touched.
+        assert_eq!(live.prune_missing_panes(&[]).unwrap(), 0);
+        assert_eq!(
+            dead.line_count().unwrap(),
+            2,
+            "empty known list pruned rows"
+        );
+
+        // Count the raw FTS index entries (no pane_id filter): this is what
+        // proves the lines_ad trigger fired for the orphan rows.
+        let fts_hits = |needle: &str| -> i64 {
+            live.conn
+                .query_row(
+                    "SELECT COUNT(*) FROM lines_fts WHERE lines_fts MATCH ?1",
+                    params![needle],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(fts_hits("orphan"), 2, "orphan rows were never indexed");
+
+        let known = vec!["pane-live".to_string()];
+        assert_eq!(live.prune_missing_panes(&known).unwrap(), 2);
+        assert_eq!(live.line_count().unwrap(), 1, "known pane's row was pruned");
+        assert_eq!(
+            live.get_lines(0, 0).unwrap(),
+            vec![(0, "live line kept".to_string())]
+        );
+        assert_eq!(dead.line_count().unwrap(), 0, "orphan rows survived");
+        assert!(dead.search("orphan", 10).unwrap().is_empty());
+        assert_eq!(
+            fts_hits("orphan"),
+            0,
+            "FTS index still returns deleted text"
+        );
+
+        fs::remove_file(&path).ok();
     }
 
     #[test]
