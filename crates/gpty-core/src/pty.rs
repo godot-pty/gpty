@@ -147,10 +147,13 @@ impl PtyHandle {
         // order nothing has been spawned when either call can still fail.
         let mut reader = pty_pair.master.try_clone_reader()?;
         let writer = pty_pair.master.take_writer()?;
-        let child = pty_pair.slave.spawn_command(cmd)?;
+        let mut child = pty_pair.slave.spawn_command(cmd)?;
         let master = pty_pair.master;
 
-        let read_thread = thread::Builder::new()
+        // The reader thread is the last fallible step after the shell exists,
+        // so its failure has to reap the child explicitly — there is no owner
+        // to drop it and portable-pty's child has no Drop impl.
+        let read_thread = match thread::Builder::new()
             .name(format!("pty-reader-{id}"))
             .spawn(move || {
                 let mut buf = [0u8; READ_BUF_SIZE];
@@ -168,7 +171,14 @@ impl PtyHandle {
                         }
                     }
                 }
-            })?;
+            }) {
+            Ok(handle) => handle,
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.try_wait();
+                return Err(e.into());
+            }
+        };
 
         Ok(Self {
             id,
