@@ -91,6 +91,10 @@ var _history_results: Array = []  # [[line_num, text], ...]
 var _history_panel: ScrollContainer
 var _history_list: VBoxContainer
 var _sync_interval: float = 1.0 / 60.0
+## Title and agent-state reads are FFI calls that allocate and take the grid
+## mutex; they change on OSC title / event arrival, not per frame.
+const SLOW_POLL_INTERVAL := 0.25
+var _slow_poll_timer: float = 0.0
 
 func _ready():
 	super._ready()
@@ -331,12 +335,17 @@ func _process(delta):
 			# frame — the fetch was damage-tracked, the draw was not.
 			queue_redraw()
 	_draw_ms = 0  # will be set on next _draw() call
-	var t = _terminal.get_title()
-	if t != _last_title and t != "":
-		_last_title = t
-		var display_title = pane_name if pane_name != "" else t
-		title_changed.emit(display_title)
-	_update_badge(delta)
+	_slow_poll_timer += delta
+	if _slow_poll_timer >= SLOW_POLL_INTERVAL:
+		_slow_poll_timer = 0.0
+		var t = _terminal.get_title()
+		if t != _last_title and t != "":
+			_last_title = t
+			var display_title = pane_name if pane_name != "" else t
+			title_changed.emit(display_title)
+		_poll_agent_state()
+	# The badge animates every frame; only its state source is throttled.
+	_animate_badge(delta)
 
 # ── Agent-state badge (display only) ───────────────────────────────────
 # Mirrors the tiered AgentState tracker from the engine. The badge never
@@ -351,11 +360,15 @@ const BADGE_ATTENTION_COLOR := Color(1.0, 0.78, 0.25)
 const BADGE_WORKING_COLOR := Color(0.5, 0.75, 1.0)
 const BADGE_SPINNER_FRAMES := [Icons.SPINNER, Icons.SPINNER_GAP, Icons.CIRCLE_NOTCH]
 
-func _update_badge(delta: float):
+## Read the terminal's declared agent state. Called from the slow poll — the
+## state changes on event arrival, not per frame, and each read crosses FFI.
+func _poll_agent_state():
 	var state := _terminal.get_agent_state()
 	if state != _badge_state:
 		_badge_state = state
 		_apply_badge(state)
+
+func _animate_badge(delta: float):
 	_badge_anim += delta
 	match _badge_state:
 		"working":

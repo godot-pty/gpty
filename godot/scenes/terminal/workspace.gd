@@ -336,17 +336,29 @@ func _wire_pane_activation(ws: Dictionary, _w: Control, body: Control):
 	# wiring the wrapper does not work. This covers the focusable case.
 	body.focus_entered.connect(func(): ws.tm.last_body = body)
 
+## Focus owner → owning pane. Called every frame from _refresh_status_bar,
+## but the answer only changes when the focus owner does: walking every tile
+## for every ancestor was O(depth x tiles) node lookups per frame.
+var _focus_owner_cache: Control = null
+var _focus_body_cache: Control = null
+
 func _body_of_focus_owner(owner: Control) -> Control:
+	if owner == _focus_owner_cache and is_instance_valid(_focus_body_cache):
+		return _focus_body_cache
 	# A focusable child (e.g. the Inspector's input field) owns keyboard
 	# focus without firing the pane's focus_entered — walk up to the pane.
+	var found: Control = null
 	var node = owner
-	while node != null:
+	while node != null and found == null:
 		for t in _tm.tiles:
 			var b = _tm._find_body(t.wrapper)
 			if b == node:
-				return b
+				found = b
+				break
 		node = node.get_parent()
-	return null
+	_focus_owner_cache = owner
+	_focus_body_cache = found
+	return found
 
 func _wire_tm(tm: TerminalManager):
 	tm.on_close = func(body: Control): _kill(body)
@@ -832,6 +844,11 @@ func _process(_delta: float):
 			_status_bar.set_fps(fps, fetch_ms, draw_ms)
 	_refresh_status_bar()
 
+## Last pane identity pushed to the status bar, so the per-frame refresh can
+## skip a string reformat and label re-layout when nothing changed.
+var _status_pane_label := ""
+var _status_pane_type := ""
+
 func _refresh_status_bar():
 	if _status_bar == null: return
 	var body = _tm.last_body
@@ -842,8 +859,14 @@ func _refresh_status_bar():
 	if owner_body:
 		_tm.last_body = owner_body
 		body = owner_body
+	var label: String = body.pane_label if body else ""
+	var type_name: String = body._pane_type() if body else ""
+	if label == _status_pane_label and type_name == _status_pane_type:
+		return
+	_status_pane_label = label
+	_status_pane_type = type_name
 	if body:
-		_status_bar.set_pane_info(body.pane_label, body._pane_type())
+		_status_bar.set_pane_info(label, type_name)
 	else:
 		_status_bar.set_pane_info("", "")
 	_status_bar.set_window_mode(SettingsManager.cfg_window_mode)
