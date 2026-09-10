@@ -655,19 +655,25 @@ func _tiles_from(raw: Array) -> Array[Dictionary]:
 			out.append(td)
 	return out
 
+## True when a saved tile would spawn something other than this user's current
+## defaults. The program, its arguments, and its environment all change what
+## runs, so all three are the trust decision — checking only `shell` (the
+## legacy key) let a tile ship `command`, `shell_args: ["-c", "…"]`, or a
+## `shell_env` the dialog never saw, and restore consumes all of them.
+func _tile_spawns_untrusted(td: Dictionary) -> bool:
+	return PaneTypes.tile_spawns_untrusted(
+		td, SettingsManager.cfg_shell_command, SettingsManager.cfg_shell_env)
+
 func _tiles_untrusted(tiles: Array[Dictionary]) -> bool:
 	for td in tiles:
-		var settings = td.get("settings", {})
-		if not (settings is Dictionary): continue
-		var sh = settings.get("shell", td.get("shell", ""))
-		if sh is String and sh != "" and sh != SettingsManager.cfg_shell_command:
+		if _tile_spawns_untrusted(td):
 			return true
 	return false
 
 func _show_multi_trust_dialog(entries: Array[Dictionary], active: int, untrusted: Array):
 	var dialog = ConfirmationDialog.new()
 	dialog.title = "Workspace Trust"
-	dialog.dialog_text = "This layout contains %d workspace(s) with a different shell than your current default (%s).\n\nRestore them anyway?" % [untrusted.size(), SettingsManager.cfg_shell_command]
+	dialog.dialog_text = "This layout contains %d workspace(s) whose panes start a different program, pass extra arguments, or set a different environment than your current default shell (%s).\n\nRestore them anyway?" % [untrusted.size(), SettingsManager.cfg_shell_command]
 	dialog.ok_button_text = "Restore"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():
@@ -1291,18 +1297,14 @@ func _activate_profile(p_name: String):
 	if profile.is_empty():
 		return
 
-	# Workspace trust: check for shell mismatch in profile tiles
-	var profile_tiles = profile.get("tiles", [])
-	var untrusted := false
-	for td in profile_tiles:
-		if not (td is Dictionary): continue
-		var settings = td.get("settings", {})
-		var sh = settings.get("shell", td.get("shell", ""))
-		if sh != "" and sh != SettingsManager.cfg_shell_command:
-			untrusted = true
-			break
+	# Workspace trust: a profile can change the program, its arguments, and its
+	# environment. All three go through the same gate as the workspace restore.
+	var profile_tiles: Array[Dictionary] = []
+	for td in profile.get("tiles", []):
+		if td is Dictionary:
+			profile_tiles.append(td)
 
-	if untrusted:
+	if _tiles_untrusted(profile_tiles):
 		_show_profile_trust_dialog(profile, profile_tiles)
 		return
 
@@ -1311,7 +1313,7 @@ func _activate_profile(p_name: String):
 func _show_profile_trust_dialog(profile: Dictionary, _tiles: Array):
 	var dialog = ConfirmationDialog.new()
 	dialog.title = "Workspace Trust"
-	dialog.dialog_text = "This profile contains panes with a different shell than your current default (%s).\n\nDo you want to activate it anyway?" % SettingsManager.cfg_shell_command
+	dialog.dialog_text = "This profile contains panes that start a different program, pass extra arguments, or set a different environment than your current default shell (%s).\n\nDo you want to activate it anyway?" % SettingsManager.cfg_shell_command
 	dialog.ok_button_text = "Activate"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():

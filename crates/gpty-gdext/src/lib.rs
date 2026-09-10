@@ -30,6 +30,13 @@ mod omp_events;
 
 const TOKIO_WORKERS: usize = 2;
 const MIN_DIM: i64 = 1;
+/// Upper bounds for a grid allocated through the FFI. Saved tiles carry their
+/// own `rows`/`cols` and are untrusted input: with no ceiling, a crafted
+/// `{"rows": 1000000, "cols": 1000000}` tile allocates 10^12 cells and takes
+/// the process down before a frame is drawn. 500×2000 is several times the
+/// largest grid a real window produces at a readable font size.
+const MAX_ROWS: i64 = 500;
+const MAX_COLS: i64 = 2000;
 /// Terminal ids identify a pane in engine state, capture lookups, and logs.
 /// They must stay unique across the process (a per-instance counter once gave
 /// every pane id 1 — one GptyTerminal is created per pane and each is
@@ -179,8 +186,8 @@ impl GptyTerminal {
 
         let config = TerminalConfig { id };
 
-        let rows = rows.max(MIN_DIM) as usize;
-        let cols = cols.max(MIN_DIM) as usize;
+        let rows = rows.clamp(MIN_DIM, MAX_ROWS) as usize;
+        let cols = cols.clamp(MIN_DIM, MAX_COLS) as usize;
 
         // Parse "KEY=value" lines into Vec<String> — capped so hostile
         // layout data cannot blow up the env list.
@@ -482,8 +489,8 @@ impl GptyTerminal {
     /// nothing, which surfaces as scrollback churn during resize cascades.
     #[func]
     fn resize_grid(&mut self, rows: i64, cols: i64) {
-        let rows = rows.max(MIN_DIM) as usize;
-        let cols = cols.max(MIN_DIM) as usize;
+        let rows = rows.clamp(MIN_DIM, MAX_ROWS) as usize;
+        let cols = cols.clamp(MIN_DIM, MAX_COLS) as usize;
         if self.with_grid(|g| g.num_rows() == rows && g.num_cols() == cols, false) {
             return;
         }
