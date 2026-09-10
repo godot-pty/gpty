@@ -21,8 +21,18 @@ func after_each():
 
 func _remove_files():
 	for p in [PATH, TMP]:
-		if FileAccess.file_exists(p):
-			DirAccess.remove_absolute(ProjectSettings.globalize_path(p))
+		_remove_path(p)
+
+func _remove_path(p: String):
+	# The failure-case test occupies TMP with a directory, and
+	# FileAccess.file_exists() is false for a directory — so checking only
+	# for files left it behind and poisoned later runs, since every write
+	# then failed to create its temp file.
+	var abs := ProjectSettings.globalize_path(p)
+	if DirAccess.dir_exists_absolute(abs):
+		DirAccess.remove_absolute(abs)
+	elif FileAccess.file_exists(p):
+		DirAccess.remove_absolute(abs)
 
 func test_round_trips_through_read_file():
 	_mgr._write_file(PATH, {"a": 1, "b": "two"})
