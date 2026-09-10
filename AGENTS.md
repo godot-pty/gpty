@@ -138,7 +138,7 @@ Inspector prompt → GptyAi.session_open/session_prompt → private omp --mode r
 
 ## MCP Integration
 
-gPTY ships an MCP server (`gpty mcp`) that exposes 14 tools for AI agent integration.
+gPTY ships an MCP server (`gpty mcp`) that exposes 19 tools for AI agent integration.
 AI agents and coding harnesses can discover these via the `mcp.json` that's at the root of the repository.
 
 ```json
