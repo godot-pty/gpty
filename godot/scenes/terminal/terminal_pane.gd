@@ -727,8 +727,28 @@ func _on_search_text_changed(new_text: String):
 func _on_search_submitted(_new_text: String):
 	if _scope_history:
 		return
-	if _search_results.get("count", 0) > 0:
-		_jump_to_match(1)  # next match
+	if _search_results.get("count", 0) == 0:
+		return
+	if int(_search_results.get("current", -1)) < 0:
+		# First Enter after a search: select the first match *past* the
+		# current view rather than index 0. Starting from 0 made the first
+		# press look like a no-op whenever the opening match was already on
+		# screen, which reads as "press Enter twice".
+		_search_results["current"] = _first_unseen_match_index() - 1
+	_jump_to_match(1)
+
+## Index of the earliest match not already scrolled into view, or 0 when every
+## match is visible. Mirrors `_jump_to_match`'s centering arithmetic so the two
+## agree on where a match sits relative to the viewport.
+func _first_unseen_match_index() -> int:
+	var rows_arr: Array = _search_results.get("rows", [])
+	var history: int = _terminal.get_history_size()
+	var cur_offset: int = _terminal.get_scroll_offset()
+	var half: int = int(rows / 2.0)
+	for i in rows_arr.size():
+		if history - int(rows_arr[i]) + half > cur_offset:
+			return i
+	return 0
 
 func _on_scope_toggled():
 	_scope_history = not _scope_history
