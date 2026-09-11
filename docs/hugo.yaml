@@ -37,3 +37,7 @@ params:
   theme:
     default: system
     displayToggle: true
+
+# SECURITY.md (mirrored into /docs/security/) uses :white_check_mark: / :x: in
+# its tables; GitHub renders them, so the site must too.
+enableEmoji: true

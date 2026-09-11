@@ -13,6 +13,7 @@ on:
       - "CONTRIBUTING.md"
       - "ROADMAP.md"
       - "AGENTS.md"
+      - "SECURITY.md"
       - "LICENSE"
       - "LICENSE-EXCEPTIONS.md"
       - "crates/**/README.md"

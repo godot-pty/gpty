@@ -14,6 +14,9 @@
     {{ $raw = $raw | replaceRE `\[CHANGELOG\.md\]\(CHANGELOG\.md\)` "[Changelog](/docs/changelog/)" }}
     {{ $raw = $raw | replaceRE `\[ROADMAP\.md\]\(ROADMAP\.md\)` "[Roadmap](/docs/roadmap/)" }}
     {{ $raw = $raw | replaceRE `\[CONTRIBUTING\.md\]\(CONTRIBUTING\.md\)` "[Contributing](/docs/contributing/)" }}
+    {{ $raw = $raw | replaceRE `\[SECURITY\.md\]\(SECURITY\.md\)` "[Security](/docs/security/)" }}
+    {{ $raw = $raw | replaceRE `\[AGENTS\.md\]\(AGENTS\.md#security\)` "[Agent Guide](/docs/agents/#security)" }}
+    {{ $raw = $raw | replaceRE `\[AGENTS\.md\]\(AGENTS\.md\)` "[Agent Guide](/docs/agents/)" }}
     {{ $raw = $raw | replaceRE `\[LICENSE\]\(LICENSE\)` "[License](/docs/license/)" }}
     {{ $raw = $raw | replaceRE `\[LICENSE-EXCEPTIONS\.md\]\(LICENSE-EXCEPTIONS\.md\)` "[License exceptions](/docs/license/#exceptions)" }}
     {{ $raw | markdownify }}
