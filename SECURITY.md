@@ -169,11 +169,12 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   transit — but nothing binds an artifact to the source it was built from. Verify the source or build
   locally if that matters to you.
 - **Resource bounds are per-path, not global.** A program that floods a pane can still make that
-  pane expensive: the PTY channel is unbounded, so output that outruns the engine's reader grows
-  memory, and the scrollback store takes one blocking write per line. The render loop is no longer
-  part of it — a pane whose own grid work exceeds its per-frame budget repaints less often instead
-  of spending every frame on it (v0.5.3) — but the other two are open DoS items in
-  [ROADMAP.md](ROADMAP.md).
+  pane expensive: the output queue is bounded per pane (256 × 4 KiB, enforced by blocking the
+  reader, so the child waits on the PTY buffer rather than the process growing — v0.5.4), and the
+  render loop repaints less often when a pane's own grid work exceeds its per-frame budget instead
+  of spending every frame on it (v0.5.3). The scrollback store still takes one blocking write per
+  output line, and concept matching still costs lines × enabled concepts per burst; both remain
+  open DoS items in [ROADMAP.md](ROADMAP.md).
 - **Parallel test runs are wall-clock sensitive.** The Inspector backend tests spawn real child
   processes and wait on them; the budgets are generous enough for a loaded parallel CI run, but a
   machine that is oversubscribed far beyond CI's shape can still time a turn out.

@@ -8,7 +8,23 @@ use std::io::{Read, Write};
 use std::thread;
 
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::Sender;
+
+/// Number of unread output chunks a pane's reader thread may queue before it
+/// blocks.
+///
+/// This is the memory bound for a flooding child. `cat /dev/urandom` (or any
+/// `yes`-class producer) emits far faster than the terminal task folds bytes
+/// into the grid, and an unbounded queue turned that into unbounded process
+/// growth — measured at ~110 MiB/s, 2.2 GiB after 20 s, with a `yes` pane.
+/// Once the queue is full the reader stops reading, the kernel's PTY buffer
+/// fills, and the child's `write` blocks: backpressure, which is what every
+/// terminal emulator applies and the only correct answer here. Dropping
+/// chunks instead would desynchronise the grid — these bytes carry ANSI state
+/// (`ESC[`, SGR, cursor moves), not self-contained records — and a reader
+/// that keeps draining into a lossy buffer only moves the growth. The queue
+/// costs at most `OUTPUT_QUEUE_CHUNKS * READ_BUF_SIZE` = 1 MiB per pane.
+pub const OUTPUT_QUEUE_CHUNKS: usize = 256;
 
 /// Environment variables that may not be set via pane/profile config.
 ///
@@ -223,14 +239,20 @@ impl Drop for PtyHandle {
 
 impl PtyHandle {
     /// Spawn a shell process in a new PTY and start a reader thread.
-    /// Output bytes are sent to `tx` as `Vec<u8>` chunks.
+    ///
+    /// Output bytes are sent to `tx` as `Vec<u8>` chunks. `tx` is expected to
+    /// be bounded ([`OUTPUT_QUEUE_CHUNKS`]): the reader blocks while it is
+    /// full, which is what makes a flooding child wait instead of growing the
+    /// process. A full queue is not an error and never drops bytes — the
+    /// thread only stops when the receiver is gone (pane teardown) or the read
+    /// side closes (child exit).
     pub fn spawn(
         id: u32,
         command: &str,
         args: &[&str],
         envs: &[String],
         trusted_envs: &[(String, String)],
-        tx: UnboundedSender<Vec<u8>>,
+        tx: Sender<Vec<u8>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let pty_system = native_pty_system();
         let mut cmd = CommandBuilder::new(command);
@@ -268,6 +290,12 @@ impl PtyHandle {
         // The reader thread is the last fallible step after the shell exists,
         // so its failure has to reap the child explicitly — there is no owner
         // to drop it and portable-pty's child has no Drop impl.
+        //
+        // `blocking_send` may only be called off the async runtime, which is
+        // what this dedicated OS thread is. Keeping the read here rather than
+        // folding it into the terminal task is what lets queue-full reach the
+        // child as ordinary PTY backpressure. A closed receiver means the pane
+        // is gone; stop reading so the child sees the master close.
         let read_thread = match thread::Builder::new()
             .name(format!("pty-reader-{id}"))
             .spawn(move || {
@@ -276,7 +304,7 @@ impl PtyHandle {
                     match reader.read(&mut buf) {
                         Ok(0) => break,
                         Ok(n) => {
-                            if tx.send(buf[..n].to_vec()).is_err() {
+                            if tx.blocking_send(buf[..n].to_vec()).is_err() {
                                 break;
                             }
                         }
@@ -553,5 +581,55 @@ mod tests {
         // But the trusted vec is well-formed for direct injection.
         assert_eq!(trusted[0], ("GPTY_ENV".to_string(), "1".to_string()));
         assert_eq!(trusted[1], ("GPTY_PANE_ID".to_string(), attachment_id));
+    }
+
+    /// A full output queue must throttle the child, never lose its bytes.
+    ///
+    /// The queue here holds two chunks while the child writes thousands of
+    /// lines, so the reader thread spends the whole run blocked in
+    /// `blocking_send`. A drop-on-full shortcut (`try_send` and carry on)
+    /// truncates the flood and leaves the grid desynchronised, and a reader
+    /// that gave up while the queue was full strands the child in `write`
+    /// forever — both show up as a short read here. This is the pane's
+    /// memory-safety property: a flooding child (`cat /dev/urandom`) must
+    /// wait, and every byte it printed must arrive in order.
+    #[tokio::test]
+    async fn a_full_output_queue_throttles_the_child_without_losing_bytes() {
+        const LINES: usize = 4000;
+        // %i (not %%i) is the command-line form of a cmd.exe for-loop.
+        #[cfg(windows)]
+        let (cmd, args) = (
+            "cmd.exe",
+            vec!["/C", "for /L %i in (1,1,4000) do @echo line-%i"],
+        );
+        #[cfg(not(windows))]
+        let (cmd, args) = ("sh", vec!["-c", "seq 1 4000"]);
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+        let handle = PtyHandle::spawn(9100, cmd, &args, &[], &[], tx).expect("spawn");
+
+        let collected = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            let mut collected = Vec::new();
+            while let Some(chunk) = rx.recv().await {
+                collected.extend_from_slice(&chunk);
+            }
+            collected
+        })
+        .await
+        .expect("the flood must drain completely, not stall on a full queue");
+
+        let text = String::from_utf8_lossy(&collected);
+        assert_eq!(
+            text.lines().count(),
+            LINES,
+            "a full queue must throttle the child, not drop its output"
+        );
+        #[cfg(windows)]
+        let last = "line-4000";
+        #[cfg(not(windows))]
+        let last = "4000";
+        assert_eq!(text.lines().last(), Some(last), "the tail of the flood");
+
+        drop(handle);
     }
 }

@@ -155,7 +155,10 @@ impl WorkspaceEngine {
         rows: usize,
         cols: usize,
     ) -> Result<SpawnedTerminal, Box<dyn std::error::Error + Send + Sync>> {
-        let (pty_tx, pty_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        // Bounded on purpose: a flooding child must wait rather than grow
+        // this process. See `OUTPUT_QUEUE_CHUNKS` for the sizing and why
+        // dropping chunks is not an option.
+        let (pty_tx, pty_rx) = mpsc::channel(crate::pty::OUTPUT_QUEUE_CHUNKS);
         let pty_handle =
             crate::pty::PtyHandle::spawn(config.id, command, args, envs, trusted_envs, pty_tx)?;
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<StdinInput>();
@@ -576,7 +579,7 @@ fn handle_command(
 async fn run_terminal_task(
     mut ctx: TaskContext,
     mut pty_handle: crate::pty::PtyHandle,
-    mut pty_rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    mut pty_rx: mpsc::Receiver<Vec<u8>>,
     mut stdin_rx: mpsc::UnboundedReceiver<StdinInput>,
     grid: Option<Arc<Mutex<TermGrid>>>,
 ) {
