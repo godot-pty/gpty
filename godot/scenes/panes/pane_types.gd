@@ -107,7 +107,17 @@ static func tile_spawns_untrusted(td: Dictionary, default_program: String, defau
 ## Validate a saved tile dictionary from layout.json / profiles.
 ## Returns {} when the tile is unusable; otherwise a dictionary with
 ## sanitized `settings`, `type_name`, and clamped grid geometry.
-static func sanitize_tile(td, grid_size: int = 12) -> Dictionary:
+## Layout grid, in abstract units: a pane's geometry is `col/row/cspan/rspan`
+## in these units, and this is the ONLY definition — `TerminalManager`'s drag
+## math, `workspace.gd`'s `_apply_layout`, and the sanitizer below all read it.
+## A second copy once drifted from its twin and silently clamped every restored
+## pane to a sliver (the layout divided by one unit while the tiles were in
+## another), so nothing else may define its own.
+const GRID := 60
+## Smallest pane, in grid units (a tenth of the grid ≈ 100 px at 1000 px).
+const MIN_TILE := 6
+
+static func sanitize_tile(td, grid_size: int = GRID) -> Dictionary:
 	if not (td is Dictionary):
 		return {}
 	var settings = td.get("settings", {})

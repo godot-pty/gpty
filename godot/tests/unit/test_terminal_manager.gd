@@ -93,16 +93,18 @@ func test_reset_clears_everything():
 # ── Tile split refusal ─────────────────────────────────────────────────
 
 func test_split_refused_when_grid_full():
-	# Fill the grid: keep spawning until the split algorithm refuses.
-	# With GRID=12, MIN_TILE=2, maximum tiles = (12/2)*(12/2) = 36.
-	# Safety cap at 50 in case of logic changes.
+	# Fill the grid: keep spawning until the split algorithm refuses. The cap
+	# is the most tiles the grid can hold — (GRID / MIN_TILE)², i.e. 100 at
+	# 60/6 — with margin, so it tracks the constants instead of drifting.
+	var cap: int = int(pow(float(PaneTypes.GRID) / float(PaneTypes.MIN_TILE), 2.0)) + 5
 	var count := 0
-	while count < 50:
+	while count < cap:
 		var body = _tm.spawn()
 		if body == null:
 			break
 		count += 1
 	assert_gt(count, 0, "should have spawned at least one tile")
+	assert_lt(count, cap, "the grid must refuse a split before the cap is reached")
 	# After filling, next spawn should return null
 	var extra = _tm.spawn()
 	assert_null(extra, "spawn should return null when grid is full")
@@ -253,3 +255,30 @@ func test_spawn_respects_show_titlebar_true():
 	var tb = _tm.tiles[0].wrapper.get_node_or_null("BodyVBox/TitleBar")
 	assert_not_null(tb, "titlebar node should exist")
 	assert_true(tb.visible, "titlebar should be visible when setting is true")
+# ── Saved-layout grid unit migration ───────────────────────────────────
+
+func test_scale_layout_converts_a_legacy_grid():
+	# A 12-unit layout (before the grid was refined) always spans 12, which is
+	# how the unit is inferred with no marker in the payload.
+	var legacy := [
+		{"col": 0, "row": 0, "cspan": 7, "rspan": 12},
+		{"col": 7, "row": 0, "cspan": 5, "rspan": 6},
+		{"col": 7, "row": 6, "cspan": 5, "rspan": 6},
+	]
+	var scaled: Array = TerminalManager.scale_layout(legacy)
+	var g: int = PaneTypes.GRID
+	assert_eq(scaled[0]["cspan"], int(round(7.0 / 12.0 * g)), "shares must survive")
+	assert_eq(scaled[0]["rspan"], g, "a full-height pane stays full height")
+	assert_eq(scaled[0]["col"] + scaled[0]["cspan"], scaled[1]["col"],
+		"neighbours must still meet exactly")
+
+func test_scale_layout_leaves_current_geometry_alone():
+	var current := [{"col": 0, "row": 0, "cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID}]
+	assert_eq(TerminalManager.scale_layout(current), current,
+		"geometry already in the current unit must not be rescaled")
+
+func test_scale_layout_prefers_a_declared_unit():
+	var legacy := [{"col": 0, "row": 0, "cspan": 12, "rspan": 12}]
+	var same: Array = TerminalManager.scale_layout(legacy, PaneTypes.GRID)
+	assert_eq(same[0]["cspan"], 12,
+		"a declared unit of 60 means the payload is already in grid units")

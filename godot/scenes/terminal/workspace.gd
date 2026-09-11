@@ -3,7 +3,6 @@ class_name Workspace
 # gpty Workspace — tiling grid of panes with title bars.
 # Tile lifecycle is delegated to TerminalManager.
 
-const GRID = 12
 const TITLEBAR_HEIGHT = WindowChrome.HEIGHT
 
 
@@ -170,8 +169,11 @@ func _apply_layout():
 		_status_bar.anchor_top = 1.0; _status_bar.anchor_bottom = 1.0
 		_status_bar.offset_top = -StatusBar.HEIGHT; _status_bar.offset_bottom = 0
 
-	var cw = maxf(_grid.size.x, 1.0) / GRID
-	var ch = maxf(_grid.size.y, 1.0) / GRID
+	# The grid unit comes from PaneTypes — the same constant the sanitizer and
+	# the drag math use. A local copy once drifted and sized every restored
+	# pane several times the grid.
+	var cw = maxf(_grid.size.x, 1.0) / PaneTypes.GRID
+	var ch = maxf(_grid.size.y, 1.0) / PaneTypes.GRID
 	for t in _tm.tiles:
 		var x = t.col * cw; var y = t.row * ch
 		var w = t.cspan * cw; var h = t.rspan * ch
@@ -557,7 +559,13 @@ func _save_workspaces_to_store():
 func _all_layouts() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for ws in _workspaces:
-		out.append({"name": ws.name, "layout": _gather_tiles_from(ws.tm)})
+		out.append({
+			"name": ws.name,
+			"layout": _gather_tiles_from(ws.tm),
+			# The unit the geometry was written in, so a layout saved by an
+			# older build (a coarser grid) still restores to the same shares.
+			"grid_unit": PaneTypes.GRID,
+		})
 	return out
 
 # ── Workspace (tab set) lifecycle ─────────────────────────────────────
@@ -610,7 +618,9 @@ func _build_workspaces(entries: Array[Dictionary], active: int):
 		else:
 			ws = _new_workspace_container(str(entries[i].get("name", "")))
 		_workspaces.append(ws)
-		_restore_into(ws, _tiles_from(entries[i].get("layout", [])))
+		var layout: Array = entries[i].get("layout", [])
+		layout = TerminalManager.scale_layout(layout, int(entries[i].get("grid_unit", 0)))
+		_restore_into(ws, _tiles_from(layout))
 	_active = clampi(active, 0, _workspaces.size() - 1)
 	_apply_active_workspace_view()
 
@@ -620,7 +630,7 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 	tm.reset()
 	for td in tiles:
 		if not (td is Dictionary): continue
-		var st = PaneTypes.sanitize_tile(td, GRID)
+		var st = PaneTypes.sanitize_tile(td, PaneTypes.GRID)
 		if st.is_empty(): continue
 		var settings: Dictionary = st["settings"]
 		var type_name: String = st["type_name"]
@@ -1442,8 +1452,10 @@ func _do_activate(profile: Dictionary):
 	if ws.is_empty():
 		return
 	_reset()
+	var raw: Array = TerminalManager.scale_layout(
+		profile.get("tiles", []), int(profile.get("grid_unit", 0)))
 	var tiles: Array[Dictionary] = []
-	for td in profile.get("tiles", []):
+	for td in raw:
 		if td is Dictionary:
 			tiles.append(td)
 	_restore_into(ws, tiles)

@@ -1,5 +1,11 @@
 //! Integration tests for the tile layout algorithms used by workspace.gd.
 //! These mirror the GDScript logic: split, kill, and expand operations.
+//!
+//! `GRID`/`MIN_TILE` here are the test's own, sized so the cases below stay
+//! readable — the algorithm is what is under test, and the invariants
+//! (tiles cover the grid without overlapping, killing restores the area) hold
+//! at any scale. The production grid is terminal_manager.gd's `GRID`, which is
+//! finer than this one so drags move in small steps.
 
 const GRID: i32 = 12;
 const MIN_TILE: i32 = 2;

@@ -365,3 +365,41 @@ func test_restore_renames_duplicate_attachment_ids():
 	assert_ne(ids[1], "", "the renamed pane must still have an id")
 
 	await get_tree().create_timer(2.1).timeout
+
+## A restored layout must end up the same *size on screen* as it was saved.
+##
+## The grid unit is a single constant (PaneTypes.GRID) read by the drag math,
+## the sanitizer, and `_apply_layout`; when a second copy of it drifted, the
+## sanitizer clamped a half-width tile to a single cell and the layout divided
+## by the wrong unit, so the restored panes were sized several times the grid
+## and drew outside the visible area. Asserting spans alone misses that: the
+## wrappers' rects are what the user sees.
+func test_restored_layout_keeps_its_share_of_the_screen():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	# A legacy (12-unit) two-pane profile: the migration must scale it.
+	ws._do_activate({"name": "P", "tiles": [
+		{"col": 0, "row": 0, "cspan": 6, "rspan": 12,
+			"settings": {"type": "code_viewer", "pane_name": "C1"}},
+		{"col": 6, "row": 0, "cspan": 6, "rspan": 12,
+			"settings": {"type": "terminal", "shell": "/bin/sh", "rows": 24, "cols": 80}},
+	]})
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var tm: TerminalManager = ws._tm
+	assert_eq(tm.tiles.size(), 2, "the profile must restore both panes")
+	var grid: Control = ws._grid
+	var left: Rect2 = (tm.tiles[0].wrapper as Control).get_global_rect()
+	var right: Rect2 = (tm.tiles[1].wrapper as Control).get_global_rect()
+	assert_almost_eq(left.size.x, grid.size.x * 0.5, grid.size.x * 0.02,
+		"a half-width pane must be half the grid wide, not a multiple of it")
+	assert_almost_eq(left.size.x + right.size.x, grid.size.x, grid.size.x * 0.02,
+		"the two panes must fill the grid between them")
+	assert_almost_eq(right.position.x, left.position.x + left.size.x, 1.0,
+		"the second pane must start where the first ends")

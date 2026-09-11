@@ -201,7 +201,7 @@ func test_drag_follows_the_pointer_step_by_step():
 	tm.begin_edge_drag(wrappers[0], "right", start)
 	for step in 8:
 		tm.drive_edge_drag(_motion_at(start + Vector2(12 * (step + 1), 0)))
-		assert_eq(_cell_total(tm), TerminalManager.GRID,
+		assert_eq(_cell_total(tm), PaneTypes.GRID,
 			"after step %d the panes must still add up to the grid" % (step + 1))
 	assert_gt(wrappers[0].get_global_rect().size.x, width_before,
 		"the pane must follow the pointer while dragging, not only on release")
@@ -222,9 +222,51 @@ func test_drag_stops_at_the_minimum_pane_size():
 	tm.begin_edge_drag(wrappers[0], "right", start)
 	tm.drive_edge_drag(_motion_at(start + Vector2(4000, 0)))
 	tm.drive_edge_drag(_release_at(start + Vector2(4000, 0)))
-	assert_eq(_cell_total(tm), TerminalManager.GRID, "the grid must stay full")
-	assert_eq(tm.tiles[1].cspan, TerminalManager.MIN_TILE,
+	assert_eq(_cell_total(tm), PaneTypes.GRID, "the grid must stay full")
+	assert_eq(tm.tiles[1].cspan, PaneTypes.MIN_TILE,
 		"the neighbour stops at MIN_TILE rather than vanishing")
+
+## The layout that ships as "Agent Workspace", and the one that never resized:
+## a full-height pane beside two stacked ones. A divider moves every tile on
+## the far side, and the neighbour test has to match by *overlap* — demanding
+## equal extents left the tall pane's edge with no neighbour at all.
+func test_full_height_pane_drags_against_two_stacked_neighbours():
+	var wrappers := await _workspace_with_two_panes()
+	var tm: TerminalManager = _ws._tm
+	tm.spawn_pane("terminal", {})
+	await get_tree().process_frame
+	assert_eq(tm.tiles.size(), 3, "three panes for the stacked layout")
+
+	var g: int = PaneTypes.GRID
+	# 0: full-height left; 1: top-right; 2: bottom-right.
+	tm.tiles[0].col = 0; tm.tiles[0].row = 0
+	tm.tiles[0].cspan = int(g * 0.6); tm.tiles[0].rspan = g
+	tm.tiles[1].col = int(g * 0.6); tm.tiles[1].row = 0
+	tm.tiles[1].cspan = g - int(g * 0.6); tm.tiles[1].rspan = int(g * 0.5)
+	tm.tiles[2].col = int(g * 0.6); tm.tiles[2].row = int(g * 0.5)
+	tm.tiles[2].cspan = g - int(g * 0.6); tm.tiles[2].rspan = g - int(g * 0.5)
+	_ws._apply_layout()
+	await get_tree().process_frame
+
+	var tall: int = tm.tiles[0].cspan
+	var right_w: int = tm.tiles[1].cspan
+	var rect: Rect2 = wrappers[0].get_global_rect()
+	var start := Vector2(rect.position.x + rect.size.x - 2.0, rect.position.y + rect.size.y * 0.5)
+	tm.begin_edge_drag(wrappers[0], "right", start)
+	tm.drive_edge_drag(_motion_at(start + Vector2(tm.tiles[0].cspan * 8.0, 0)))
+	tm.drive_edge_drag(_release_at(start + Vector2(tm.tiles[0].cspan * 8.0, 0)))
+
+	assert_gt(tm.tiles[0].cspan, tall,
+		"the full-height pane must grow when its divider is dragged")
+	assert_lt(tm.tiles[1].cspan, right_w, "the top-right pane must give up space")
+	assert_lt(tm.tiles[2].cspan, right_w, "the bottom-right pane must give up space too")
+	assert_eq(tm.tiles[1].cspan, tm.tiles[2].cspan,
+		"stacked neighbours on one divider shrink together")
+	# The stacked panes share the right-hand column, so summing every cspan
+	# would count that column twice: the divider holds when the two column
+	# widths are the grid.
+	assert_eq(tm.tiles[0].cspan + tm.tiles[1].cspan, g,
+		"the two columns must still fill the grid")
 
 ## The failure this file exists for: Godot's pick decides who gets the press,
 ## and the pane body consumed every event over the pane — the press has to

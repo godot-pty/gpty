@@ -9,8 +9,8 @@
         {
           "col": 0,
           "row": 0,
-          "cspan": 12,
-          "rspan": 12,
+          "cspan": 60,
+          "rspan": 60,
           "settings": {
             "type": "terminal",
             "pane_name": "OMP",
@@ -22,15 +22,15 @@
     },
     {
       "id": "omp-workspace",
-      "name": "OMP Workspace",
+      "name": "Agent Workspace",
       "builtin": true,
       "description": "A agent workspace for OMP with separate Inspector and Reasoning panes.",
       "tiles": [
         {
           "col": 0,
           "row": 0,
-          "cspan": 7,
-          "rspan": 12,
+          "cspan": 35,
+          "rspan": 60,
           "settings": {
             "type": "terminal",
             "pane_name": "Agent Terminal",
@@ -38,10 +38,10 @@
           }
         },
         {
-          "col": 7,
+          "col": 35,
           "row": 0,
-          "cspan": 5,
-          "rspan": 6,
+          "cspan": 25,
+          "rspan": 30,
           "settings": {
             "type": "inspector",
             "pane_name": "Inspector",
@@ -50,10 +50,10 @@
           }
         },
         {
-          "col": 7,
-          "row": 6,
-          "cspan": 5,
-          "rspan": 6,
+          "col": 35,
+          "row": 30,
+          "cspan": 25,
+          "rspan": 30,
           "settings": {
             "type": "reasoning",
             "pane_name": "Reasoning",
@@ -72,8 +72,8 @@
         {
           "col": 0,
           "row": 0,
-          "cspan": 12,
-          "rspan": 12,
+          "cspan": 60,
+          "rspan": 60,
           "settings": {
             "type": "terminal",
             "pane_name": "Herdr",
@@ -92,8 +92,8 @@
         {
           "col": 0,
           "row": 0,
-          "cspan": 12,
-          "rspan": 12,
+          "cspan": 60,
+          "rspan": 60,
           "settings": {
             "type": "terminal",
             "pane_name": "Lazygit",
@@ -112,8 +112,8 @@
         {
           "col": 0,
           "row": 0,
-          "cspan": 12,
-          "rspan": 12,
+          "cspan": 60,
+          "rspan": 60,
           "settings": {
             "type": "terminal",
             "pane_name": "Neovim",
@@ -132,8 +132,8 @@
         {
           "col": 0,
           "row": 0,
-          "cspan": 12,
-          "rspan": 12,
+          "cspan": 60,
+          "rspan": 60,
           "settings": {
             "type": "terminal",
             "pane_name": "Claude Code",

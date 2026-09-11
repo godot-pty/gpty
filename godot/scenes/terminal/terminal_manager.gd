@@ -3,8 +3,11 @@ class_name TerminalManager
 # gpty Terminal Manager — owns tile lifecycle and pane building.
 # Now supports any PaneBody type via spawn_pane().
 
-const GRID = 12
-const MIN_TILE = 2
+## The layout grid lives in PaneTypes: `PaneTypes.GRID`/`PaneTypes.MIN_TILE` are defined once
+## there, and the drag granularity *is* one unit — 60 units over a 1000 px pane
+## moves a divider in ~17 px steps (12 was an 83 px jump: "resize is jarring").
+## Saved layouts record the unit they were written in; `scale_layout` converts
+## an older one.
 const TITLE_BAR_HEIGHT = 26
 const BUTTON_MIN_WIDTH = 22
 const BUTTON_MIN_HEIGHT = 18
@@ -69,7 +72,7 @@ func spawn_pane(type_name: String, opts: Dictionary = {}) -> Control:
 	var w = _build_wrapper_body(body, title)
 
 	if tiles.is_empty():
-		tiles.append({wrapper = w, col = 0, row = 0, cspan = GRID, rspan = GRID})
+		tiles.append({wrapper = w, col = 0, row = 0, cspan = PaneTypes.GRID, rspan = PaneTypes.GRID})
 	else:
 		if not _split_for(w):
 			w.queue_free()
@@ -388,12 +391,12 @@ func _split_for(w: Control) -> bool:
 	var oc = s.col; var or1 = s.row; var os = s.cspan; var ot = s.rspan
 	if os >= ot:
 		var half = maxi(os / 2, 1)
-		if half < MIN_TILE or (os - half) < MIN_TILE: return false
+		if half < PaneTypes.MIN_TILE or (os - half) < PaneTypes.MIN_TILE: return false
 		s.cspan = half
 		tiles.append({wrapper = w, col = oc + half, row = or1, cspan = os - half, rspan = ot})
 	else:
 		var half = maxi(ot / 2, 1)
-		if half < MIN_TILE or (ot - half) < MIN_TILE: return false
+		if half < PaneTypes.MIN_TILE or (ot - half) < PaneTypes.MIN_TILE: return false
 		s.rspan = half
 		tiles.append({wrapper = w, col = oc, row = or1 + half, cspan = os, rspan = ot - half})
 	return true
@@ -427,7 +430,7 @@ func _expand_partial(rm: Dictionary):
 		return
 	if tiles.size() > 0:
 		tiles[0].col = 0; tiles[0].row = 0
-		tiles[0].cspan = GRID; tiles[0].rspan = GRID
+		tiles[0].cspan = PaneTypes.GRID; tiles[0].rspan = PaneTypes.GRID
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -637,7 +640,7 @@ func _resize_tile(wrapper: Control, edge: String, delta: Vector2):
 	# would round away to zero cells, and applying a step on top of a partial
 	# move would break the neighbour lookup below (the tiles no longer match
 	# the layout the press was made on) — which reverted the pane being
-	# dragged and left the grid not adding up to GRID cells.
+	# dragged and left the grid not adding up to PaneTypes.GRID cells.
 	var ti := _tile_index_for_wrapper(wrapper)
 	if ti == -1: return
 	if _drag_saved_sizes.get(wrapper, {}).is_empty(): return
@@ -650,80 +653,117 @@ func _resize_tile(wrapper: Control, edge: String, delta: Vector2):
 		o.rspan = o_saved.get("rspan", o.rspan)
 
 	var t = tiles[ti]
+	# A divider is a line, not a pair: every tile on the far side of it moves
+	# together when it moves, and the drag stops where the smallest of them
+	# would hit PaneTypes.MIN_TILE. The pixel scale is per cell of the dragged pane
+	# (wrapper.size spans exactly t's cells), which also holds when the
+	# neighbours have different extents.
 	match edge:
-		"left":
-			var adj = _adjacent_left(t)
-			if adj == null: return
-			var grid_px = maxf(wrapper.size.x, 1.0) / float(maxi(t.cspan + adj.cspan, 1))
+		"left", "right":
+			var neighbours := _neighbours_on(t, edge)
+			if neighbours.is_empty(): return
+			var grid_px = maxf(wrapper.size.x, 1.0) / float(maxi(t.cspan, 1))
 			var dg = int(round(delta.x / grid_px))
-			if dg >= 0: return  # dragging left edge left means shrinking self
-			dg = maxi(dg, -(t.cspan - MIN_TILE))  # don't push past MIN_TILE on self
-			dg = mini(dg, adj.cspan - MIN_TILE)   # don't push past MIN_TILE on adj
+			if edge == "left":
+				if dg >= 0: return  # dragging a left edge left shrinks self
+				dg = maxi(dg, -(t.cspan - PaneTypes.MIN_TILE))
+			else:
+				if dg <= 0: return  # dragging a right edge right grows self
+				dg = mini(dg, PaneTypes.GRID - t.col - t.cspan)
+			for o in neighbours:
+				dg = mini(dg, o.cspan - PaneTypes.MIN_TILE) if edge == "right" \
+					else maxi(dg, -(o.cspan - PaneTypes.MIN_TILE))
 			if dg == 0: return
-			t.col += dg
-			t.cspan -= dg
-			adj.cspan += dg
-		"right":
-			var adj = _adjacent_right(t)
-			if adj == null: return
-			var grid_px = maxf(wrapper.size.x, 1.0) / float(maxi(t.cspan + adj.cspan, 1))
-			var dg = int(round(delta.x / grid_px))
-			if dg <= 0: return  # dragging right edge right means growing self
-			dg = mini(dg, GRID - t.col - t.cspan)  # don't go past grid
-			dg = mini(dg, adj.cspan - MIN_TILE)    # don't push past MIN_TILE on adj
-			if dg == 0: return
-			t.cspan += dg
-			adj.col += dg
-			adj.cspan -= dg
-		"top":
-			var adj = _adjacent_above(t)
-			if adj == null: return
-			var grid_px = maxf(wrapper.size.y, 1.0) / float(maxi(t.rspan + adj.rspan, 1))
+			if edge == "right":
+				t.cspan += dg
+				for o in neighbours:
+					o.col += dg
+					o.cspan -= dg
+			else:
+				t.col += dg
+				t.cspan -= dg
+				for o in neighbours:
+					o.cspan += dg
+		"top", "bottom":
+			var neighbours := _neighbours_on(t, edge)
+			if neighbours.is_empty(): return
+			var grid_px = maxf(wrapper.size.y, 1.0) / float(maxi(t.rspan, 1))
 			var dg = int(round(delta.y / grid_px))
-			if dg >= 0: return
-			dg = maxi(dg, -(t.rspan - MIN_TILE))
-			dg = mini(dg, adj.rspan - MIN_TILE)
+			if edge == "top":
+				if dg >= 0: return
+				dg = maxi(dg, -(t.rspan - PaneTypes.MIN_TILE))
+			else:
+				if dg <= 0: return
+				dg = mini(dg, PaneTypes.GRID - t.row - t.rspan)
+			for o in neighbours:
+				dg = mini(dg, o.rspan - PaneTypes.MIN_TILE) if edge == "bottom" \
+					else maxi(dg, -(o.rspan - PaneTypes.MIN_TILE))
 			if dg == 0: return
-			t.row += dg
-			t.rspan -= dg
-			adj.rspan += dg
-		"bottom":
-			var adj = _adjacent_below(t)
-			if adj == null: return
-			var grid_px = maxf(wrapper.size.y, 1.0) / float(maxi(t.rspan + adj.rspan, 1))
-			var dg = int(round(delta.y / grid_px))
-			if dg <= 0: return
-			dg = mini(dg, GRID - t.row - t.rspan)
-			dg = mini(dg, adj.rspan - MIN_TILE)
-			if dg == 0: return
-			t.rspan += dg
-			adj.row += dg
-			adj.rspan -= dg
+			if edge == "bottom":
+				t.rspan += dg
+				for o in neighbours:
+					o.row += dg
+					o.rspan -= dg
+			else:
+				t.row += dg
+				t.rspan -= dg
+				for o in neighbours:
+					o.rspan += dg
 
-func _adjacent_left(t: Dictionary):
+## Convert a saved layout written against a different grid unit to today's
+## `PaneTypes.GRID`, so a restored pane keeps its share of the screen instead of a
+## fraction of it (a 12-unit layout restored into a 60-unit grid would give a
+## half-screen pane 6/60 of it). Colours, settings and ids are left alone;
+## only geometry is scaled. Exact when the units divide (12 → 60 is ×5).
+##
+## `declared` wins when a payload carries an explicit unit. Otherwise it is
+## inferred: a layout always tiles its whole grid, so the furthest edge among
+## its tiles *is* the unit it was written in — which is how layouts saved by
+## older builds (12) and by this one (60) are told apart with no format change.
+static func scale_layout(tiles: Array, declared: int = 0) -> Array:
+	var unit := declared
+	if unit <= 0:
+		for td in tiles:
+			if not (td is Dictionary):
+				continue
+			unit = maxi(unit, int(td.get("col", 0)) + int(td.get("cspan", 0)))
+			unit = maxi(unit, int(td.get("row", 0)) + int(td.get("rspan", 0)))
+	if unit <= 0 or unit == PaneTypes.GRID:
+		return tiles
+	var factor := float(PaneTypes.GRID) / float(unit)
+	var out := []
+	for td in tiles:
+		if not (td is Dictionary):
+			continue
+		var t: Dictionary = (td as Dictionary).duplicate(true)
+		t["col"] = int(round(float(t.get("col", 0)) * factor))
+		t["row"] = int(round(float(t.get("row", 0)) * factor))
+		t["cspan"] = maxi(int(round(float(t.get("cspan", unit)) * factor)), 1)
+		t["rspan"] = maxi(int(round(float(t.get("rspan", unit)) * factor)), 1)
+		out.append(t)
+	return out
+
+## Tiles sharing `t`'s edge on `side`, matched by *overlap*, not by equal
+## extents: the common layout is one full-height pane beside two stacked ones,
+## and the old equal-extent test found no neighbour at all there — so dragging
+## that divider silently did nothing.
+func _neighbours_on(t: Dictionary, side: String) -> Array:
+	var out := []
 	for o in tiles:
 		if o == t: continue
-		if o.col + o.cspan == t.col and o.row == t.row and o.rspan == t.rspan:
-			return o
-	return null
+		match side:
+			"left":
+				if o.col + o.cspan == t.col and _rows_overlap(o, t): out.append(o)
+			"right":
+				if o.col == t.col + t.cspan and _rows_overlap(o, t): out.append(o)
+			"top":
+				if o.row + o.rspan == t.row and _cols_overlap(o, t): out.append(o)
+			"bottom":
+				if o.row == t.row + t.rspan and _cols_overlap(o, t): out.append(o)
+	return out
 
-func _adjacent_right(t: Dictionary):
-	for o in tiles:
-		if o == t: continue
-		if o.col == t.col + t.cspan and o.row == t.row and o.rspan == t.rspan:
-			return o
-	return null
+func _rows_overlap(a: Dictionary, b: Dictionary) -> bool:
+	return a.row < b.row + b.rspan and b.row < a.row + a.rspan
 
-func _adjacent_above(t: Dictionary):
-	for o in tiles:
-		if o == t: continue
-		if o.row + o.rspan == t.row and o.col == t.col and o.cspan == t.cspan:
-			return o
-	return null
-
-func _adjacent_below(t: Dictionary):
-	for o in tiles:
-		if o == t: continue
-		if o.row == t.row + t.rspan and o.col == t.col and o.cspan == t.cspan:
-			return o
-	return null
+func _cols_overlap(a: Dictionary, b: Dictionary) -> bool:
+	return a.col < b.col + b.cspan and b.col < a.col + a.cspan
