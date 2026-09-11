@@ -15,7 +15,7 @@ func _on_init():
 func _load_defaults():
 	_builtin_profiles = []
 	var data := _read_file(DEFAULTS_FILE)
-	var raw = data.get("profiles", [])
+	var raw = _as_array(data, "profiles", [])
 	if not (raw is Array):
 		return
 	for item in raw:
@@ -27,7 +27,7 @@ func _load_defaults():
 func load_profiles():
 	var d = _read_file(PROFILES_FILE)
 	if d.is_empty(): return
-	var raw: Array = d.get("profiles", [])
+	var raw: Array = _as_array(d, "profiles", [])
 	profiles = []
 	for item in raw:
 		if item is Dictionary:

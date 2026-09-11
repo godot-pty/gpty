@@ -49,37 +49,39 @@ func _on_init():
 func load_settings():
 	var d = _read_file(SETTINGS_FILE)
 	if d.is_empty(): return
-	cfg_cursor_shape = d.get("cursor_shape", 0)
-	cfg_cursor_blink = d.get("cursor_blink", true)
-	cfg_cursor_blink_speed = d.get("cursor_blink_speed", 0.5)
-	cfg_scroll_lines = d.get("scroll_lines", 3)
-	cfg_history_lines = clampi(int(d.get("history_lines", 10000)), 100, 100000)
-	cfg_default_rows = d.get("default_rows", 24)
-	cfg_default_cols = d.get("default_cols", 80)
-	cfg_beam_width = d.get("beam_width", 2)
-	cfg_underline_height = d.get("underline_height", 3)
-	cfg_wrapper_bg = _color_from_hex(d.get("wrapper_bg", ""), WRAPPER_BG_COLOR)
-	cfg_title_bar_bg = _color_from_hex(d.get("title_bar_bg", ""), TITLE_BAR_BG_COLOR)
-	cfg_wrapper_border = _color_from_hex(d.get("wrapper_border", ""), WRAPPER_BORDER_COLOR)
-	cfg_sidebar_bg = _color_from_hex(d.get("sidebar_bg", ""), SIDEBAR_BG_COLOR)
-	cfg_focus_border = _color_from_hex(d.get("focus_border", ""), FOCUS_BORDER_COLOR)
-	cfg_selection = _color_from_hex(d.get("selection", ""), SELECTION_COLOR)
-	cfg_scrollback_indicator = _color_from_hex(d.get("scrollback_indicator", ""), SCROLLBACK_INDICATOR_COLOR)
-	cfg_color_scheme_path = d.get("color_scheme", "")
-	cfg_max_fps = d.get("max_fps", 0)
-	cfg_window_mode = d.get("window_mode", 0)
-	cfg_show_titlebar = d.get("show_titlebar", true)
-	var wp = d.get("window_position", {})
-	cfg_window_position = Vector2i(wp.get("x", 100), wp.get("y", 100))
-	var ws = d.get("window_size", {})
-	cfg_window_size = Vector2i(ws.get("x", 1920), ws.get("y", 1080))
-	cfg_font_path = d.get("font_path", "res://fonts/DejaVuSansMono.ttf")
-	cfg_font_size = d.get("font_size", 14)
-	cfg_shell_command = d.get("shell_command", "/bin/bash")
-	cfg_shell_env = d.get("shell_env", "")
-	cfg_reasoning_max_turns = clampi(int(d.get("reasoning_max_turns", 16)), 1, 64)
-	cfg_reasoning_max_turn_bytes = clampi(int(d.get("reasoning_max_turn_bytes", 65536)), 4096, 1048576)
-	cfg_check_updates = d.get("check_updates", true)
+	# Every key goes through a typed read: the `_cfg_*` variables are typed, and
+	# GDScript raises on assigning a wrongly typed JSON value to one, which
+	# aborted the loader and silently dropped every key after it (and the next
+	# save then wrote the defaults back over the file).
+	cfg_cursor_shape = _as_int(d, "cursor_shape", 0)
+	cfg_cursor_blink = _as_bool(d, "cursor_blink", true)
+	cfg_cursor_blink_speed = _as_float(d, "cursor_blink_speed", 0.5)
+	cfg_scroll_lines = _as_int(d, "scroll_lines", 3)
+	cfg_history_lines = clampi(_as_int(d, "history_lines", 10000), 100, 100000)
+	cfg_default_rows = _as_int(d, "default_rows", 24)
+	cfg_default_cols = _as_int(d, "default_cols", 80)
+	cfg_beam_width = _as_int(d, "beam_width", 2)
+	cfg_underline_height = _as_int(d, "underline_height", 3)
+	cfg_wrapper_bg = _color_from_hex(_as_string(d, "wrapper_bg", ""), WRAPPER_BG_COLOR)
+	cfg_title_bar_bg = _color_from_hex(_as_string(d, "title_bar_bg", ""), TITLE_BAR_BG_COLOR)
+	cfg_wrapper_border = _color_from_hex(_as_string(d, "wrapper_border", ""), WRAPPER_BORDER_COLOR)
+	cfg_sidebar_bg = _color_from_hex(_as_string(d, "sidebar_bg", ""), SIDEBAR_BG_COLOR)
+	cfg_focus_border = _color_from_hex(_as_string(d, "focus_border", ""), FOCUS_BORDER_COLOR)
+	cfg_selection = _color_from_hex(_as_string(d, "selection", ""), SELECTION_COLOR)
+	cfg_scrollback_indicator = _color_from_hex(_as_string(d, "scrollback_indicator", ""), SCROLLBACK_INDICATOR_COLOR)
+	cfg_color_scheme_path = _as_string(d, "color_scheme", "")
+	cfg_max_fps = _as_int(d, "max_fps", 0)
+	cfg_window_mode = _as_int(d, "window_mode", 0)
+	cfg_show_titlebar = _as_bool(d, "show_titlebar", true)
+	cfg_window_position = _window_vec(d, "window_position", Vector2i(100, 100))
+	cfg_window_size = _window_vec(d, "window_size", Vector2i(1920, 1080))
+	cfg_font_path = _as_string(d, "font_path", "res://fonts/DejaVuSansMono.ttf")
+	cfg_font_size = _as_int(d, "font_size", 14)
+	cfg_shell_command = _as_string(d, "shell_command", "/bin/bash")
+	cfg_shell_env = _as_string(d, "shell_env", "")
+	cfg_reasoning_max_turns = clampi(_as_int(d, "reasoning_max_turns", 16), 1, 64)
+	cfg_reasoning_max_turn_bytes = clampi(_as_int(d, "reasoning_max_turn_bytes", 65536), 4096, 1048576)
+	cfg_check_updates = _as_bool(d, "check_updates", true)
 
 func save_settings():
 	var d = {"cursor_shape": cfg_cursor_shape, "cursor_blink": cfg_cursor_blink, "cursor_blink_speed": cfg_cursor_blink_speed, "scroll_lines": cfg_scroll_lines, "default_rows": cfg_default_rows, "default_cols": cfg_default_cols, "beam_width": cfg_beam_width, "underline_height": cfg_underline_height, "wrapper_bg": cfg_wrapper_bg.to_html(), "title_bar_bg": cfg_title_bar_bg.to_html(), "wrapper_border": cfg_wrapper_border.to_html(), "sidebar_bg": cfg_sidebar_bg.to_html(), "focus_border": cfg_focus_border.to_html(), "selection": cfg_selection.to_html(), "scrollback_indicator": cfg_scrollback_indicator.to_html(), "color_scheme": cfg_color_scheme_path, "max_fps": cfg_max_fps, "font_path": cfg_font_path, "font_size": cfg_font_size, "shell_command": cfg_shell_command, "shell_env": cfg_shell_env, "show_titlebar": cfg_show_titlebar, "window_mode": cfg_window_mode, "window_position": {"x": cfg_window_position.x, "y": cfg_window_position.y}, "window_size": {"x": cfg_window_size.x, "y": cfg_window_size.y}}
@@ -111,6 +113,13 @@ func apply_to_terminal(body: Control):
 
 func apply_pane_settings(body: Control, settings: Dictionary):
 	body.apply_settings(settings)
+
+## A stored `{"x": .., "y": ..}` pair, or `fallback` when it is not one.
+func _window_vec(d: Dictionary, key: String, fallback: Vector2i) -> Vector2i:
+	var v = _as_dict(d, key, {})
+	if v.is_empty():
+		return fallback
+	return Vector2i(_as_int(v, "x", fallback.x), _as_int(v, "y", fallback.y))
 
 func _color_from_hex(hex: String, fallback: Color) -> Color:
 	if hex == "": return fallback
