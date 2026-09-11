@@ -14,6 +14,7 @@ cp ../CHANGELOG.md assets/repo/
 cp ../ROADMAP.md assets/repo/
 cp ../CONTRIBUTING.md assets/repo/
 cp ../LICENSE assets/repo/
+cp ../LICENSE-EXCEPTIONS.md assets/repo/
 cp ../AGENTS.md assets/repo/
 cp ../crates/gpty-core/README.md assets/repo/crates/gpty-core/
 cp ../crates/gpty-ipc/README.md assets/repo/crates/gpty-ipc/

@@ -1,15 +1,23 @@
 {{ $path := .Get 0 }}
 {{ $resource := resources.Get (printf "repo/%s" $path) }}
 {{ if $resource }}
-  {{ $raw := $resource.Content }}
-  {{/* Strip source-code links: [text](src/...) → text */}}
-  {{ $raw = $raw | replaceRE `\[([^\]]+)\]\(src/[^)]+\)` "$1" }}
-  {{/* Rewrite repo-relative links to doc pages */}}
-  {{ $raw = $raw | replaceRE `\[CHANGELOG\.md\]\(CHANGELOG\.md\)` "[Changelog](/docs/changelog/)" }}
-  {{ $raw = $raw | replaceRE `\[ROADMAP\.md\]\(ROADMAP\.md\)` "[Roadmap](/docs/roadmap/)" }}
-  {{ $raw = $raw | replaceRE `\[CONTRIBUTING\.md\]\(CONTRIBUTING\.md\)` "[Contributing](/docs/contributing/)" }}
-  {{ $raw = $raw | replaceRE `\[LICENSE\]\(LICENSE\)` "[License](/docs/license/)" }}
-  {{ $raw | markdownify }}
+  {{ if eq (.Get 1) "pre" }}
+    {{/* Verbatim: license texts must keep their own line breaks. Markdown would
+         rewrap the lines, swallow <https://…> as a tag, and read "  1. Source
+         Code." as an ordered list. */}}
+    <pre><code>{{ printf "%s" $resource.Content }}</code></pre>
+  {{ else }}
+    {{ $raw := $resource.Content }}
+    {{/* Strip source-code links: [text](src/...) → text */}}
+    {{ $raw = $raw | replaceRE `\[([^\]]+)\]\(src/[^)]+\)` "$1" }}
+    {{/* Rewrite repo-relative links to doc pages */}}
+    {{ $raw = $raw | replaceRE `\[CHANGELOG\.md\]\(CHANGELOG\.md\)` "[Changelog](/docs/changelog/)" }}
+    {{ $raw = $raw | replaceRE `\[ROADMAP\.md\]\(ROADMAP\.md\)` "[Roadmap](/docs/roadmap/)" }}
+    {{ $raw = $raw | replaceRE `\[CONTRIBUTING\.md\]\(CONTRIBUTING\.md\)` "[Contributing](/docs/contributing/)" }}
+    {{ $raw = $raw | replaceRE `\[LICENSE\]\(LICENSE\)` "[License](/docs/license/)" }}
+    {{ $raw = $raw | replaceRE `\[LICENSE-EXCEPTIONS\.md\]\(LICENSE-EXCEPTIONS\.md\)` "[License exceptions](/docs/license/#exceptions)" }}
+    {{ $raw | markdownify }}
+  {{ end }}
 {{ else }}
   > File `{{ $path }}` not found.
 {{ end }}
