@@ -445,6 +445,19 @@ impl TermGrid {
             .contains(alacritty_terminal::term::TermMode::ALT_SCREEN)
     }
 
+    /// True while the application has asked for bracketed paste
+    /// (DECSET 2004).
+    ///
+    /// The pane wraps a paste in `ESC[200~`/`ESC[201~` when this is set, so a
+    /// full-screen app (vim, an agent TUI) can tell pasted text from typed
+    /// keys instead of executing it line by line. When it is not set the pane
+    /// strips control bytes instead — see `TerminalPane.build_paste_payload`.
+    pub fn bracketed_paste(&self) -> bool {
+        self.term
+            .mode()
+            .contains(alacritty_terminal::term::TermMode::BRACKETED_PASTE)
+    }
+
     /// True while the application has enabled application keypad mode
     /// (DECPAM/DECKPAM). Numpad keys send SS3 sequences in that mode, and
     /// the characters printed on the keys otherwise.

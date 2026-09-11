@@ -820,6 +820,38 @@ func _report_mouse_event(event: InputEvent, mode: int) -> bool:
 		return true
 	return false
 
+## Payload for a paste, given whether the application asked for bracketed
+## paste (DECSET 2004).
+##
+## With bracketed paste the application receives the text wrapped in
+## `ESC[200~`/`ESC[201~` and can insert it verbatim instead of treating
+## newlines as Enter and control bytes as commands.
+##
+## Without it nothing can distinguish pasted text from typing, so the guard is
+## the other way round: control bytes are dropped (escape sequences included —
+## a clipboard can carry `ESC[201~`, a `\x03`, or an SGR that repaints the
+## pane), while newlines and tabs survive because a multi-line paste into a
+## plain shell is a normal thing to want. A bare CR goes too: the PTY turns it
+## into Enter, which is exactly the injection this guards against.
+static func build_paste_payload(text: String, bracketed: bool) -> String:
+	if bracketed:
+		return "\u001b[200~" + text + "\u001b[201~"
+	var out := ""
+	for ch in text:
+		var code := ch.unicode_at(0)
+		if code < 32 and ch != "\n" and ch != "\t":
+			continue
+		if code == 127:
+			continue
+		out += ch
+	return out
+
+## Whether the child asked for bracketed paste. Split out so a test can
+## drive the paste path without a live application on the other end (same
+## shape as `_mouse_mode`).
+func _is_bracketed_paste() -> bool:
+	return _terminal != null and _terminal.is_bracketed_paste()
+
 func _is_copy_paste(event: InputEventKey) -> bool:
 	return (event.keycode == KEY_C or event.keycode == KEY_V) and event.ctrl_pressed and event.shift_pressed
 
@@ -864,7 +896,8 @@ func _handle_keyboard(event: InputEventKey):
 		# and send a literal ^V for every repeat of the chord.
 		if not event.echo:
 			var cl = _get_clipboard_text()
-			if cl != "": _send_to_term(cl)
+			if cl != "":
+				_send_to_term(build_paste_payload(cl, _is_bracketed_paste()))
 		accept_event(); return
 
 	if event.keycode == KEY_PAGEUP:

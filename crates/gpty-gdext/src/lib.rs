@@ -678,6 +678,15 @@ impl GptyTerminal {
         self.with_grid(|g| g.mouse_mode() as i64, 0)
     }
 
+    /// Whether the application asked for bracketed paste (DECSET 2004).
+    ///
+    /// A paste is wrapped in `ESC[200~`/`ESC[201~` when this is true; see
+    /// `TerminalPane.build_paste_payload`.
+    #[func]
+    fn is_bracketed_paste(&self) -> bool {
+        self.with_grid(|g| g.bracketed_paste(), false)
+    }
+
     /// Total lines of scrollback history available.
     #[func]
     fn get_history_size(&self) -> i64 {
