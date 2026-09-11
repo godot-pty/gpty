@@ -8,7 +8,8 @@ set -euo pipefail
 # into dist/ for the platform this script runs on.
 #
 # Requirements: Rust toolchain, godot on PATH with export templates for
-# your Godot version installed.
+# exactly that Godot version installed (a 4.7.2 editor needs 4.7.2 templates;
+# the preflight below fails early and prints the download command).
 #
 # Env overrides:
 #   GODOT_BIN   Godot executable (default: godot)
@@ -94,6 +95,40 @@ ok "$LIB_DST"
 # ── Step 2: Godot export ───────────────────────────────────────────────
 command -v "$GODOT_BIN" >/dev/null 2>&1 \
     || die "godot not found on PATH — set GODOT_BIN or install Godot"
+
+# Godot looks for export templates under <data>/godot/export_templates/<version>/
+# where <version> is the editor's own string (e.g. 4.7.2.stable). A near-miss
+# fails deep inside the export with "No export template found"; a symlinked
+# directory that points at another version exports with the wrong engine build.
+step "Export templates"
+GODOT_VERSION="$("$GODOT_BIN" --version 2>/dev/null | cut -d. -f1-4)"
+[ -n "$GODOT_VERSION" ] || die "could not read a version from $GODOT_BIN"
+
+case "$PLATFORM" in
+    linux)   TEMPLATE_FILE="linux_release.x86_64" ;;
+    macos)   TEMPLATE_FILE="macos.zip" ;;
+    windows) TEMPLATE_FILE="windows_release_x86_64.exe" ;;
+esac
+TEMPLATES_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/godot/export_templates"
+if [ ! -f "$TEMPLATES_DIR/$GODOT_VERSION/$TEMPLATE_FILE" ]; then
+    # Release tags hyphenate the channel: 4.7.2.stable -> 4.7.2-stable.
+    GODOT_RELEASE="${GODOT_VERSION/.stable/-stable}"
+    die "no $GODOT_VERSION export templates — $TEMPLATE_FILE is missing from
+  $TEMPLATES_DIR/$GODOT_VERSION/
+  installed there: $(ls "$TEMPLATES_DIR" 2>/dev/null | tr '\n' ' ')
+  Install the templates for the editor you run (a symlink to another version
+  is not a fix — the export comes out of the other engine build):
+    curl -LO https://github.com/godotengine/godot-builds/releases/download/${GODOT_RELEASE}/Godot_v${GODOT_RELEASE}_export_templates.tpz
+    unzip -q Godot_v${GODOT_RELEASE}_export_templates.tpz -d /tmp/godot-templates
+    mkdir -p $TEMPLATES_DIR/$GODOT_VERSION
+    mv /tmp/godot-templates/templates/* $TEMPLATES_DIR/$GODOT_VERSION/"
+fi
+ok "$TEMPLATE_FILE for $GODOT_VERSION"
+if [ -f "$TEMPLATES_DIR/$GODOT_VERSION/version.txt" ]; then
+    FOUND_VERSION="$(head -n 1 "$TEMPLATES_DIR/$GODOT_VERSION/version.txt" 2>/dev/null)"
+    [ "$FOUND_VERSION" = "$GODOT_VERSION" ] \
+        || warn "$TEMPLATES_DIR/$GODOT_VERSION holds $FOUND_VERSION templates; exports will come from that engine build"
+fi
 
 step "Import Godot project"
 "$GODOT_BIN" --headless --path godot --import

@@ -47,7 +47,7 @@ One-shot standalone build (detects the host platform, builds gpty-gdext in relea
 ./scripts/build
 ```
 
-Requires Godot on PATH with export templates installed for its version.
+Requires Godot on PATH with export templates for **exactly** that version: a `4.7.2.stable` editor needs `4.7.2.stable` templates, and a symlinked older directory silently exports with the other engine build. The script fails early with the download command when they are missing.
 The manual steps below are what the script does internally.
 
 
