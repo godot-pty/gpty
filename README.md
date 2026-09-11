@@ -1,6 +1,6 @@
 <div align="center">
 
-  ![GitHub branch status](https://img.shields.io/github/checks-status/godot-pty/gpty/main)
+  [![Build](https://img.shields.io/github/actions/workflow/status/godot-pty/gpty/ci.yml?branch=main)](https://github.com/godot-pty/gpty/actions/workflows/ci.yml)
   ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/godot-pty/gpty/total)
   ![GitHub License](https://img.shields.io/github/license/godot-pty/gpty)
 
