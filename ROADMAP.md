@@ -17,7 +17,7 @@ The source of truth for all `gPTY` features; past, present, and planned.
 
 Launch is deferred: `gPTY` stays below 1.0.0 until either the project gains a growing, active userbase or the 0.x feature-set is exhausted — code signing and broad distribution are only worth pursuing once one of those is true.
 
-- [ ] Distribution — install.sh, Homebrew tap, AUR, winget (promoted from Future: launch blockers), and GitHub releases. `dist/aur/PKGBUILD` still installs the pre-rename layout (GUI as `gpty`, no CLI) and must switch to `gpty` (CLI) + `gpty-gui` with `Exec=gpty-gui`, plus install `godot/icon.png` as `/usr/share/icons/hicolor/256x256/apps/gpty.png` with `Icon=gpty`, once a release carries the new bundle.
+- [ ] Distribution — install.sh, Homebrew tap, AUR, winget (promoted from Future: launch blockers), and GitHub releases.
 - [ ] Code signing — macOS notarization + Windows Authenticode (promoted from Future: SmartScreen/Gatekeeper warnings are launch-killers).
 - [ ] Docs — agent guide, plugin authoring guide, socket API reference (from the existing schema generator), 60-second quick start.
 - [ ] Community infrastructure — plugin registry live, examples repo, community channel.
@@ -72,6 +72,10 @@ Launch is deferred: `gPTY` stays below 1.0.0 until either the project gains a gr
 - [ ] Pixel-smooth divider drag — a pane's geometry is stored in grid units, so a divider moves in steps of one unit (≈ the pane's width / 60, i.e. roughly a character cell). That is tmux-order granularity, but it is not the continuous follow a native split view gives. Two ways to close the gap, in increasing order of work:
   - **Finer grid** (one constant): raise `PaneTypes.GRID` and `MIN_TILE` proportionally (e.g. 240 / 24), which shrinks the step to a few pixels. `scale_layout` already converts saved layouts by ratio, so nothing else changes — but every step still performs a layout pass, and the terminal inside reflows in *character* cells regardless, so the pane's content snaps even when its border does not.
   - **Pixel geometry during the drag** (the real fix): while a divider is being dragged, move the two sides' wrappers by the raw pixel delta — no tile mutation, no reflow per step — and snap to grid units only on release, when the terminal reflows once (the existing `RESIZE_DEBOUNCE` already keeps the reflow to the settle). The tile model stays integer; only the live preview is continuous. Needs care with the drag's MIN_TILE clamps, which must be evaluated in pixels mid-drag and committed in units at the end.
+
+### Release tasks (with the v0.5.4 tag)
+
+- [ ] AUR package rework — the bundle now ships the CLI as `gpty` and the GUI as `gpty-gui`, so `dist/aur/PKGBUILD` must install both (`/usr/lib/gpty/{gpty,gpty-gui,gpty-gui.pck,libgpty_gdext.linux.x86_64.so}`, with `gpty` and `gpty-gui` on PATH), point the desktop entry at `Exec=gpty-gui`, install `godot/icon.png` as `/usr/share/icons/hicolor/256x256/apps/gpty.png` with `Icon=gpty`, bump `pkgver`/`pkgrel`, and take the tarball hash from the release's `SHA256SUMS` asset. Validate with `makepkg` before uploading; it cannot be done before the tag because no `gpty-gui` asset exists until then.
 
 ### Hardening follow-ups (deferred from v0.5.3)
 
