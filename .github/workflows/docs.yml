@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      # Editing this workflow must run it, or a fix to the build/verify steps
+      # cannot be validated by the job it repairs.
+      - ".github/workflows/docs.yml"
       - "README.md"
       - "CHANGELOG.md"
       - "CONTRIBUTING.md"
