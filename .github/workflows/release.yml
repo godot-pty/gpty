@@ -143,6 +143,7 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64"
           godot --headless --path godot --export-release "Linux/X11" "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64/gpty"
+          cp LICENSE LICENSE-EXCEPTIONS.md "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64/"
           tar -czf "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64.tar.gz" -C "$GITHUB_WORKSPACE/dist" "gpty-${VERSION}-linux-x86_64"
 
       - name: Export Windows
@@ -150,16 +151,33 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64"
           godot --headless --path godot --export-release "Windows Desktop" "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64/gpty.exe"
           cp godot/bin/gpty_gdext.windows.x86_64.dll "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64/" 2>/dev/null || true
+          cp LICENSE LICENSE-EXCEPTIONS.md "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64/"
           cd "$GITHUB_WORKSPACE/dist" && zip -r "gpty-${VERSION}-windows-x86_64.zip" "gpty-${VERSION}-windows-x86_64"
 
       - name: Export macOS
         run: |
           godot --headless --path godot --export-release "macOS" "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip"
+          # zip would happily create the archive itself, which would ship a
+          # licenses-only download if the export above produced nothing.
+          test -s "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" || { echo "macOS export produced no archive"; exit 1; }
+          zip -j "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" LICENSE LICENSE-EXCEPTIONS.md
 
       - name: Copy GDExtension artifacts for release
         run: |
           mkdir -p "$GITHUB_WORKSPACE/dist/gdextension"
           find gdext-artifacts -type f \( -name '*.so' -o -name '*.dylib' -o -name '*.dll' \) -exec cp {} "$GITHUB_WORKSPACE/dist/gdextension/" \;
+
+      # Entry names match the published asset names (flat basenames), so a
+      # downloaded file can be checked against its own line. Fails loudly when
+      # an expected artifact is missing rather than publishing a short list.
+      - name: Generate SHA256 checksums
+        run: |
+          cd "$GITHUB_WORKSPACE/dist"
+          sha256sum "gpty-${VERSION}-linux-x86_64.tar.gz" \
+                    "gpty-${VERSION}-windows-x86_64.zip" \
+                    "gpty-${VERSION}-macos.zip" > SHA256SUMS
+          (cd gdextension && sha256sum *) >> SHA256SUMS
+          cat SHA256SUMS
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -169,4 +187,24 @@ jobs:
             dist/gpty-${{ github.ref_name }}-windows-x86_64.zip
             dist/gpty-${{ github.ref_name }}-macos.zip
             dist/gdextension/*
+            dist/SHA256SUMS
+          # A release that is silently missing an asset is worse than a failed job.
+          fail_on_unmatched_files: true
+          # The releases API prepends this body to the generated notes.
+          body: |
+            ### Verifying your download
+
+            Every uploaded asset is listed in `SHA256SUMS`:
+
+            ```bash
+            sha256sum -c SHA256SUMS                  # Linux
+            shasum -a 256 -c SHA256SUMS              # macOS
+            certutil -hashfile <asset> SHA256        # Windows
+            ```
+
+            Run that from the folder holding your download. Lines for assets you did
+            not download report as missing — only your file's line has to say `OK`.
+
+            Checksums catch a corrupted or tampered download in transit; they are not
+            a signature. Release artifacts are unsigned (see SECURITY.md).
           generate_release_notes: true

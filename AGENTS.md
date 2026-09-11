@@ -285,7 +285,7 @@ Policy (threat model, supported versions, reporting, what gpty does not defend a
 - Core is **GPL-3.0-or-later** ([LICENSE](LICENSE)); [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md) holds the two section 7 additional permissions. Plugins, extensions, adapters, and pane types are **not** required to be GPLv3, which is why the bundled `extensions/gpty-omp-events` ships MIT and `godot/addons/gut` stays MIT. Do NOT "correct" a bundled permissive license into GPLv3, and never add license headers to JSON.
 - Data files (profiles, workspaces, layouts, concepts, settings) carry no copyleft: user-authored ones are the user's own, and the shipped `godot/*.json` defaults are Apache-2.0. The engine and pane code that reads them stays GPLv3.
 - First-party code is GPLv3 everywhere it is declared: `license = "GPL-3.0-or-later"` in every `crates/*/Cargo.toml`, `license=('GPL-3.0-or-later')` in `dist/aur/PKGBUILD`. Keep them in sync when adding a crate or package.
-- Release artifacts must carry `LICENSE` and `LICENSE-EXCEPTIONS.md` next to the binaries (GPLv3 §4/§6 requires giving recipients a copy of the license). `.github/workflows/release.yml` currently packs the export alone — add the copies when that job is next touched.
+- Release artifacts must carry `LICENSE` and `LICENSE-EXCEPTIONS.md` next to the binaries (GPLv3 §4/§6 requires giving recipients a copy of the license). `.github/workflows/release.yml` stages both copies into all three archives and publishes a `SHA256SUMS` covering every asset — keep both when editing that job.
 
 ### Commits
 

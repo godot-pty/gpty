@@ -45,6 +45,16 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 | macOS | `gpty-v0.5.3-macos.zip` - unzip, right-click the `.app` → Open |
 | Windows | `gpty-v0.5.3-windows-x86_64.zip` - unzip and run `gpty.exe` |
 
+Each release publishes a `SHA256SUMS` listing every asset. Check the file you downloaded before running it:
+
+```bash
+sha256sum -c SHA256SUMS            # Linux
+shasum -a 256 -c SHA256SUMS        # macOS
+certutil -hashfile <asset> SHA256  # Windows
+```
+
+Checksums catch a corrupted or tampered download in transit; they are not a signature - release artifacts are unsigned (see [SECURITY.md](SECURITY.md)).
+
 ### CLI
 
 The `gpty` binary controls a running GUI over JSON-RPC IPC. Build it with `cargo build -p gpty` (or `cargo build --workspace`).

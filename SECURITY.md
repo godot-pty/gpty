@@ -164,8 +164,10 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   a pane — tokens included — is stored on disk the same way a shell history file would be.
 - **The update check is notify-only.** It fetches release metadata over TLS and shows a toast; it
   never downloads or executes anything, and the response is treated as display data.
-- **Release artifacts are unsigned** (no code signing, no published checksums beyond the GitHub
-  release page). Verify the source or build locally if that matters to you.
+- **Release artifacts are unsigned.** No code signing and no build attestation. Each release publishes
+  a `SHA256SUMS` listing every asset, so a download can be checked for corruption or tampering in
+  transit — but nothing binds an artifact to the source it was built from. Verify the source or build
+  locally if that matters to you.
 - **Resource bounds are per-path, not global.** A program that floods a pane can still make that
   pane expensive: the PTY channel is unbounded, so output that outruns the engine's reader grows
   memory, and the scrollback store takes one blocking write per line. The render loop is no longer
