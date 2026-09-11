@@ -502,19 +502,29 @@ mod tests {
         let (turn, _run) = session.prompt(prompt("output here")).unwrap();
         let events = wait_terminal(&session).await;
         assert_eq!(turn, 1);
+        // Every assertion carries the envelopes it saw: this test polls a real
+        // child process, so a failure has to say whether a frame was relayed
+        // late, mis-relayed, or never emitted at all.
         assert!(
             events
                 .iter()
-                .any(|e| matches!(e.event, AiEvent::Thinking { .. }))
+                .any(|e| matches!(e.event, AiEvent::Thinking { .. })),
+            "no thinking frame among: {events:?}"
         );
-        assert!(events.iter().any(|e| matches!(
-            e.event,
-            AiEvent::Delta { ref text } if text == "found one error"
-        )));
-        assert!(events.iter().any(|e| matches!(
-            e.event,
-            AiEvent::Done { ref text } if text == "found one error"
-        )));
+        assert!(
+            events.iter().any(|e| matches!(
+                e.event,
+                AiEvent::Delta { ref text } if text == "found one error"
+            )),
+            "no delta frame among: {events:?}"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e.event,
+                AiEvent::Done { ref text } if text == "found one error"
+            )),
+            "no done frame among: {events:?}"
+        );
         session.close();
     }
 
