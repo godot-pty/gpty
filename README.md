@@ -41,9 +41,9 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 
 | Platform | Package |
 |---|---|
-| Linux | `gpty-v0.5.3-linux-x86_64.tar.gz` - extract and run `./gpty` |
-| macOS | `gpty-v0.5.3-macos.zip` - unzip, right-click the `.app` → Open |
-| Windows | `gpty-v0.5.3-windows-x86_64.zip` - unzip and run `gpty.exe` |
+| Linux | `gpty-v0.5.3-linux-x86_64.tar.gz` - extract; `./gpty-gui.sh` starts the GUI, `./gpty` is the CLI |
+| macOS | `gpty-v0.5.3-macos.zip` - unzip, right-click the `.app` → Open; `gpty` beside it is the CLI |
+| Windows | `gpty-v0.5.3-windows-x86_64.zip` - unzip; `gpty-gui.exe` starts the GUI, `gpty.exe` is the CLI |
 
 Each release publishes a `SHA256SUMS` listing every asset. Check the file you downloaded before running it:
 
@@ -57,7 +57,7 @@ Checksums catch a corrupted or tampered download in transit; they are not a sign
 
 ### CLI
 
-The `gpty` binary controls a running GUI over JSON-RPC IPC. Build it with `cargo build -p gpty` (or `cargo build --workspace`).
+The `gpty` binary controls a running GUI over JSON-RPC IPC, and every release bundle ships it next to the GUI, which it starts on demand (`--no-daemon` opts out). Building from source (`cargo build -p gpty`, or `cargo build --workspace`) is only needed when working on the CLI itself.
 
 Once the GUI is running (launched from Godot or a release binary), the CLI connects over a Unix socket (`$XDG_RUNTIME_DIR/gpty.sock` on Linux, or `GPTY_SOCKET` env var):
 

@@ -22,10 +22,14 @@ jobs:
       - name: Build GDExtension (release)
         run: cargo build -p gpty-gdext --release
 
+      - name: Build CLI (release)
+        run: cargo build -p gpty --release
+
       - name: Package
         run: |
           mkdir -p release
           cp target/release/libgpty_gdext.so release/libgpty_gdext.linux.x86_64.so
+          cp target/release/gpty release/gpty
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -52,10 +56,21 @@ jobs:
       - name: Build GDExtension (release)
         run: cargo build -p gpty-gdext --release
 
+      - name: Build CLI (release)
+        run: cargo build -p gpty --release
+
       - name: Package
         run: |
           mkdir -p release
           cp target/release/libgpty_gdext.dylib release/libgpty_gdext.macos.${{ matrix.target.arch }}.dylib
+          if [ "${{ matrix.target.arch }}" = "arm64" ]; then
+            # The app export is universal, so the CLI that ships inside it must be too.
+            rustup target add x86_64-apple-darwin
+            cargo build -p gpty --release --target x86_64-apple-darwin
+            lipo -create -output release/gpty target/release/gpty target/x86_64-apple-darwin/release/gpty
+          else
+            cp target/release/gpty release/gpty
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -75,10 +90,14 @@ jobs:
       - name: Build GDExtension (release)
         run: cargo build -p gpty-gdext --release
 
+      - name: Build CLI (release)
+        run: cargo build -p gpty --release
+
       - name: Package
         run: |
           mkdir release
           copy target\release\gpty_gdext.dll release\gpty_gdext.windows.x86_64.dll
+          copy target\release\gpty.exe release\gpty.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -141,17 +160,23 @@ jobs:
 
       - name: Export Linux
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64"
-          godot --headless --path godot --export-release "Linux/X11" "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64/gpty"
-          cp LICENSE LICENSE-EXCEPTIONS.md "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64/"
+          B="$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64"
+          mkdir -p "$B"
+          # The CLI owns the name `gpty`; the export ships beside it as `gpty-gui`
+          # so `gpty <command>` can auto-spawn it (see the CLI's GUI discovery).
+          godot --headless --path godot --export-release "Linux/X11" "$B/gpty-gui"
+          cp gdext-artifacts/gpty-linux-x86_64/gpty "$B/"
+          cp LICENSE LICENSE-EXCEPTIONS.md "$B/"
           tar -czf "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64.tar.gz" -C "$GITHUB_WORKSPACE/dist" "gpty-${VERSION}-linux-x86_64"
 
       - name: Export Windows
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64"
-          godot --headless --path godot --export-release "Windows Desktop" "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64/gpty.exe"
-          cp godot/bin/gpty_gdext.windows.x86_64.dll "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64/" 2>/dev/null || true
-          cp LICENSE LICENSE-EXCEPTIONS.md "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64/"
+          B="$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64"
+          mkdir -p "$B"
+          godot --headless --path godot --export-release "Windows Desktop" "$B/gpty-gui.exe"
+          cp godot/bin/gpty_gdext.windows.x86_64.dll "$B/" 2>/dev/null || true
+          cp gdext-artifacts/gpty-windows-x86_64/gpty.exe "$B/"
+          cp LICENSE LICENSE-EXCEPTIONS.md "$B/"
           cd "$GITHUB_WORKSPACE/dist" && zip -r "gpty-${VERSION}-windows-x86_64.zip" "gpty-${VERSION}-windows-x86_64"
 
       - name: Export macOS
@@ -160,7 +185,10 @@ jobs:
           # zip would happily create the archive itself, which would ship a
           # licenses-only download if the export above produced nothing.
           test -s "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" || { echo "macOS export produced no archive"; exit 1; }
-          zip -j "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" LICENSE LICENSE-EXCEPTIONS.md
+          # The bundle keeps its own name (the preset decides it); the CLI lands
+          # next to it, and the CLI discovers the app under /Applications too.
+          zip -j "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" LICENSE LICENSE-EXCEPTIONS.md \
+            gdext-artifacts/gpty-macos-arm64/gpty
 
       - name: Copy GDExtension artifacts for release
         run: |

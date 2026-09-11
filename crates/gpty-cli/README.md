@@ -2,6 +2,10 @@
 
 CLI for controlling the gpty terminal workspace over JSON-RPC IPC. Connects to a running gpty GUI instance (auto-spawns one unless `--no-daemon` is passed). Pane types are validated client-side with "did you mean?" suggestions before any IPC round-trip.
 
+## Getting it
+
+Release bundles ship this CLI beside the GUI — `gpty-gui` on Linux and Windows, `gPTY.app` on macOS — and the CLI starts that GUI on demand, so a downloaded bundle needs no toolchain. From a source checkout, `cargo build -p gpty` (or `cargo build --workspace`) puts the binary in `target/debug/gpty`.
+
 ## Role in the Workspace
 
 | Crate | Role | Depends On |

@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -49,9 +50,16 @@ pub async fn ensure_running(socket_path: &str, timeout: Duration) -> anyhow::Res
     Err(anyhow::anyhow!("could not connect to gpty GUI"))
 }
 
-fn find_gui_binary() -> Option<std::path::PathBuf> {
+/// GUI names to look for beside the CLI: release bundles and `/usr/lib/gpty`
+/// hold the export as `gpty-gui` while the CLI owns `gpty`.
+const GUI_SIBLING_NAMES: [&str; 2] = ["gpty-editor", "gpty-gui"];
+
+/// macOS bundle layout, relative to the directory holding the bundle.
+const MACOS_APP_INTERNALS: &str = "gPTY.app/Contents/MacOS/gPTY";
+
+fn find_gui_binary() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("GPTY_GUI") {
-        let p = std::path::PathBuf::from(path);
+        let p = PathBuf::from(path);
         if gpty_ipc::transport::validate_gui_binary(&p) {
             log::warn!("spawning GUI from GPTY_GUI override: {}", p.display());
             return Some(p);
@@ -61,17 +69,53 @@ fn find_gui_binary() -> Option<std::path::PathBuf> {
             p.display()
         );
     }
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let home = dirs::home_dir();
+    let gui = gui_candidates(dir, home.as_deref())
+        .into_iter()
+        .find(|candidate| launchable(candidate))?;
+    log::info!("spawning GUI: {}", gui.display());
+    Some(gui)
+}
+
+/// GUI locations to try, in priority order: an export shipped beside the CLI
+/// (release bundle, `/usr/lib/gpty`), then the macOS bundle — which the release
+/// zip puts next to the CLI and a normal install puts under `/Applications`.
+fn gui_candidates(exe_dir: &Path, home: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = GUI_SIBLING_NAMES
+        .iter()
+        .map(|name| exe_dir.join(name))
+        .collect();
+    candidates.push(exe_dir.join(MACOS_APP_INTERNALS));
+    candidates.push(Path::new("/Applications").join(MACOS_APP_INTERNALS));
+    if let Some(home) = home {
+        candidates.push(home.join("Applications").join(MACOS_APP_INTERNALS));
+    }
+    candidates
+}
+
+/// A discovered GUI must be an absolute regular file that no one else can
+/// write. Unlike the `GPTY_GUI` override it need not be owned by this user:
+/// an app under `/Applications` is normally root-owned.
+fn launchable(path: &Path) -> bool {
+    if !path.is_absolute() {
+        return false;
+    }
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !meta.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
     {
-        for name in &["gpty-editor", "gpty-gui"] {
-            let p = dir.join(name);
-            if p.exists() {
-                return Some(p);
-            }
+        use std::os::unix::fs::MetadataExt;
+        if meta.mode() & 0o022 != 0 {
+            return false;
         }
     }
-    None
+    true
 }
 
 pub async fn run_action(
@@ -113,5 +157,72 @@ pub async fn run_action(
                 std::process::exit(1);
             }
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A private temp file, mirroring the `validate_gui_binary` tests.
+    fn temp_file(name: &str, mode: u32) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("gpty-{name}-{}", std::process::id()));
+        std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+        }
+        #[cfg(not(unix))]
+        let _ = mode;
+        path
+    }
+
+    #[test]
+    fn bundle_sibling_outranks_system_locations() {
+        let candidates = gui_candidates(Path::new("/opt/gpty"), Some(Path::new("/home/u")));
+        assert_eq!(candidates[0], PathBuf::from("/opt/gpty/gpty-editor"));
+        assert_eq!(candidates[1], PathBuf::from("/opt/gpty/gpty-gui"));
+        assert!(
+            candidates.contains(&PathBuf::from("/opt/gpty/gPTY.app/Contents/MacOS/gPTY")),
+            "the macOS zip extracts the CLI next to the bundle"
+        );
+        assert!(candidates.contains(&PathBuf::from("/Applications/gPTY.app/Contents/MacOS/gPTY")));
+        assert!(candidates.contains(&PathBuf::from(
+            "/home/u/Applications/gPTY.app/Contents/MacOS/gPTY"
+        )));
+    }
+
+    #[test]
+    fn user_applications_dir_needs_a_home() {
+        let candidates = gui_candidates(Path::new("/opt/gpty"), None);
+        assert_eq!(
+            candidates
+                .iter()
+                .filter(|c| c.to_string_lossy().contains("Applications"))
+                .count(),
+            1,
+            "without a home directory only the system /Applications candidate is offered"
+        );
+    }
+
+    #[test]
+    fn launchable_requires_a_private_regular_file() {
+        let ok = temp_file("gui-ok", 0o755);
+        assert!(launchable(&ok));
+
+        let world_writable = temp_file("gui-world-writable", 0o777);
+        #[cfg(unix)]
+        assert!(
+            !launchable(&world_writable),
+            "a candidate anyone can replace must not be spawned"
+        );
+
+        assert!(!launchable(Path::new("/nonexistent/gpty-gui")));
+        assert!(!launchable(Path::new("gpty-gui")), "relative path");
+        assert!(!launchable(&std::env::temp_dir()), "a directory");
+
+        std::fs::remove_file(&ok).unwrap();
+        std::fs::remove_file(&world_writable).unwrap();
     }
 }

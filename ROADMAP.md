@@ -17,7 +17,7 @@ The source of truth for all `gPTY` features; past, present, and planned.
 
 Launch is deferred: `gPTY` stays below 1.0.0 until either the project gains a growing, active userbase or the 0.x feature-set is exhausted — code signing and broad distribution are only worth pursuing once one of those is true.
 
-- [ ] Distribution — install.sh, Homebrew tap, AUR, winget (promoted from Future: launch blockers), and GitHub releases.
+- [ ] Distribution — install.sh, Homebrew tap, AUR, winget (promoted from Future: launch blockers), and GitHub releases. `dist/aur/PKGBUILD` still installs the pre-rename layout (GUI as `gpty`, no CLI) and must switch to `gpty` (CLI) + `gpty-gui` with `Exec=gpty-gui` once a release carries the new bundle.
 - [ ] Code signing — macOS notarization + Windows Authenticode (promoted from Future: SmartScreen/Gatekeeper warnings are launch-killers).
 - [ ] Docs — agent guide, plugin authoring guide, socket API reference (from the existing schema generator), 60-second quick start.
 - [ ] Community infrastructure — plugin registry live, examples repo, community channel.
@@ -83,7 +83,7 @@ Launch is deferred: `gPTY` stays below 1.0.0 until either the project gains a gr
 - [ ] Persistence file-mode and symlink hardening — `.tmp` sibling writes use a predictable path and follow symlinks; scrollback is written with the process umask. Use `O_EXCL`+0600 temp files and set explicit modes. (Deferred from v0.5.3.)
 - [ ] Peer-credential gaps — Windows named pipes have no peer check to fail closed on (same-UID model is the whole gate), and `peer_uid_matches` returns `true` on Unix platforms other than Linux/Android/macOS. Document and, where a portable API exists, wire it up. (Deferred from v0.5.3.)
 - [ ] Shared-`/tmp` socket fallback — a world-writable fallback path can be squatted to deny the control surface (ownership/mode are validated, so it is DoS only). Prefer failing closed, or fall back to a per-user private directory. (Deferred from v0.5.3.)
-- [ ] MCP/daemon edges — `gpty mcp` reads stdin lines without a size bound; daemon auto-spawn's fallback binary discovery skips `validate_gui_binary`; the `/tmp` socket path has a narrow pre-creation TOCTOU; the GUI spawned by the CLI inherits the caller's environment (undocumented). (Deferred from v0.5.3.)
+- [ ] MCP/daemon edges — `gpty mcp` reads stdin lines without a size bound; `daemon stop` prints `invalid response: empty response` and exits 1 because `shutdown_handler` calls `process::exit(0)` before the response is written; the `/tmp` socket path has a narrow pre-creation TOCTOU; the GUI spawned by the CLI inherits the caller's environment (undocumented). Auto-spawn discovery now refuses candidates that are not private regular files, but it still skips `validate_gui_binary`'s owner check on purpose (a GUI under `/Applications` is legitimately root-owned). (Deferred from v0.5.3.)
 - [ ] Duplicate `attachment_id` — the pane-settings apply path never re-runs `_ensure_unique_attachment_id`, so two panes can share a public id and id-targeted IPC resolves to the wrong pane. (Deferred from v0.5.3.)
 - [ ] Store corruption handling — valid JSON with the wrong value types aborts a loader and can drop a whole workspace set; validate shape per key and skip bad entries instead. (Deferred from v0.5.3.)
 - [ ] Event-channel hygiene — subscriptions are never released (64 slots leak per client), `reasoning.delta` re-renders the whole accumulated Markdown unthrottled, and unknown envelope fields pass the OMP translation boundary unchecked. (Deferred from v0.5.3.)
