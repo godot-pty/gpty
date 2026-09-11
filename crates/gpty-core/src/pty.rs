@@ -203,6 +203,84 @@ pub fn validate_executable(program: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether `program` names a file rather than something to look up in `PATH`.
+fn has_separator(program: &str) -> bool {
+    program.contains('/') || (cfg!(windows) && program.contains('\\'))
+}
+
+/// Resolve a bare name against `path_value` the way the child's shell will.
+///
+/// Directories are tried in order; on Windows a name with no known executable
+/// extension is also tried with each `PATHEXT` entry. Only the first match is
+/// returned — it is the file the child would run, so it is the one to judge.
+fn resolve_in_path(program: &str, path_value: &str) -> Option<std::path::PathBuf> {
+    // An empty `PATH` (and an empty entry inside one) means the current
+    // directory to `execvp`, so it must mean the same here: skipping those
+    // entries would leave `PATH=` able to run a file the check never saw.
+    // The candidate is then relative, which `validate_executable` refuses.
+    let dirs: Vec<std::path::PathBuf> = if path_value.is_empty() {
+        vec![std::path::PathBuf::new()]
+    } else {
+        std::env::split_paths(path_value).collect()
+    };
+    for dir in dirs {
+        let candidate = dir.join(program);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        #[cfg(windows)]
+        {
+            let exts =
+                std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+            for ext in exts.split(';').filter(|e| !e.is_empty()) {
+                let with_ext = dir.join(format!("{program}{ext}"));
+                if with_ext.is_file() {
+                    return Some(with_ext);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Validate a program a pane is about to execute, resolving a bare name
+/// through the `PATH` the child will actually inherit.
+///
+/// [`validate_executable`] can only judge a path it is given, and a bare name
+/// was waved through: a saved tile that also sets `PATH` then decided which
+/// file the name resolved to, which is the whole point of resolving it here
+/// instead of blocking `PATH` (the shipped profiles launch tools — `omp`,
+/// `lazygit`, `nvim` — by name, so blocking it would break them).
+///
+/// `path_value` is the child's `PATH`: the tile's own `shell_env` value when
+/// it sets one, otherwise the user's — the same value `execvp` will search,
+/// since std replaces `environ` before the exec. A name that resolves to
+/// nothing is passed through: the spawn then fails exactly as it always has
+/// (the pane opens empty and the reason is logged), so a preset naming a tool
+/// the user has not installed is not refused for a second, different reason.
+pub fn validate_program(program: &str, path_value: Option<&str>) -> Result<(), String> {
+    if program.is_empty() || has_separator(program) {
+        return validate_executable(program);
+    }
+    let Some(path_value) = path_value else {
+        return Ok(());
+    };
+    match resolve_in_path(program, path_value) {
+        Some(resolved) if resolved.is_absolute() => {
+            validate_executable(&resolved.to_string_lossy())
+        }
+        // Only an empty PATH entry resolves to a relative path, and `execvp`
+        // would run it out of the working directory. `validate_executable`
+        // cannot judge it — a name with no separator is what it treats as
+        // PATH-resolved and waves through — so refuse it here.
+        Some(resolved) => Err(format!(
+            "program resolves into the working directory ({}): {program}",
+            resolved.display()
+        )),
+        None => Ok(()),
+    }
+}
+
 /// A handle to a spawned PTY: shell process + I/O thread.
 pub struct PtyHandle {
     pub id: u32,
@@ -254,6 +332,17 @@ impl PtyHandle {
         trusted_envs: &[(String, String)],
         tx: Sender<Vec<u8>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Resolve before anything is spawned: a bare name is executed through
+        // PATH, so the pane's own environment decides which file runs.
+        let child_path = envs
+            .iter()
+            .filter_map(|entry| entry.split_once('='))
+            .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+            .map(|(_, value)| value.to_string())
+            .or_else(|| std::env::var("PATH").ok());
+        validate_program(command, child_path.as_deref())
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
+
         let pty_system = native_pty_system();
         let mut cmd = CommandBuilder::new(command);
         cmd.args(args);
@@ -546,6 +635,105 @@ mod tests {
         // Not a regular file, and not absolute.
         assert!(validate_executable("/tmp").is_err());
         assert!(validate_executable("./relative").is_err());
+    }
+
+    /// A bare name is judged by the file it resolves to, and only against
+    /// the PATH the child would actually search.
+    #[test]
+    #[cfg(unix)]
+    fn a_bare_name_is_validated_after_path_resolution() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let base = std::env::temp_dir().join(format!("gpty_path_{}", std::process::id()));
+        let safe_dir = base.join("safe");
+        let open_dir = base.join("open");
+        std::fs::create_dir_all(&safe_dir).unwrap();
+        std::fs::create_dir_all(&open_dir).unwrap();
+        for dir in [&safe_dir, &open_dir] {
+            let tool = dir.join("probe-tool");
+            std::fs::write(&tool, b"#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        // The second directory is world-writable, so its entry can be swapped
+        // by another user even though the file itself is 0755.
+        std::fs::set_permissions(&open_dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+
+        let safe_path = safe_dir.to_string_lossy().to_string();
+        let open_path = open_dir.to_string_lossy().to_string();
+
+        // Resolution order decides which file the child runs; the first match
+        // is the one that has to pass.
+        assert!(
+            validate_program("probe-tool", Some(&safe_path)).is_ok(),
+            "a name resolving into a private directory is accepted"
+        );
+        assert!(
+            validate_program("probe-tool", Some(&format!("{open_path}:{safe_path}"))).is_err(),
+            "the file that PATH order actually selects must be the one judged"
+        );
+        assert!(
+            validate_program("probe-tool", Some(&format!("{safe_path}:{open_path}"))).is_ok(),
+            "an earlier safe match wins even when a later directory is unsafe"
+        );
+
+        // Nothing on PATH: passed through, so the spawn fails the way it
+        // always has rather than for a new reason.
+        assert!(validate_program("probe-tool", Some("/nonexistent")).is_ok());
+        assert!(validate_program("probe-tool", None).is_ok());
+        // An empty PATH entry means the current directory to execvp. A name
+        // that resolves there becomes a relative path and is refused rather
+        // than waved through — `Cargo.toml` always exists in the test's
+        // working directory, which cargo sets to the package root.
+        assert!(
+            validate_program("Cargo.toml", Some("")).is_err(),
+            "an empty PATH must not become an unchecked current-directory lookup"
+        );
+        // ... and a name that resolves nowhere there is still passed through.
+        assert!(validate_program("probe-tool", Some("")).is_ok());
+        // A path-like program skips PATH resolution and is checked as before.
+        assert!(validate_program("./probe-tool", Some(&safe_path)).is_err());
+
+        let _ = std::fs::set_permissions(&open_dir, std::fs::Permissions::from_mode(0o700));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The pane's spawn is the choke point: a bare program name plus a tile
+    /// that sets `PATH` must not reach a file another user could have put
+    /// there.
+    #[test]
+    #[cfg(unix)]
+    fn spawn_refuses_a_bare_name_that_resolves_into_a_writable_directory() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let open_dir = std::env::temp_dir().join(format!("gpty_spawn_path_{}", std::process::id()));
+        std::fs::create_dir_all(&open_dir).unwrap();
+        let tool = open_dir.join("probe-tool");
+        std::fs::write(&tool, b"#!/bin/sh\necho SHOULD_NOT_RUN\n").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&open_dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        let envs = vec![format!("PATH={}", open_dir.display())];
+        let refusal = PtyHandle::spawn(9201, "probe-tool", &[], &envs, &[], tx);
+        let Err(error) = refusal else {
+            std::fs::set_permissions(&open_dir, std::fs::Permissions::from_mode(0o700)).ok();
+            std::fs::remove_dir_all(&open_dir).ok();
+            panic!("a bare name resolving into a writable directory must be refused");
+        };
+        let message = error.to_string();
+        assert!(
+            message.contains("group/other-writable"),
+            "the refusal must say why, got: {message}"
+        );
+
+        // Restore and remove before asserting: an unconditional cleanup that
+        // runs first cannot leave a world-writable directory behind.
+        std::fs::set_permissions(&open_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::remove_dir_all(&open_dir).unwrap();
+        assert!(
+            message.contains(&open_dir.display().to_string()) || message.contains("probe-tool"),
+            "the refusal must name the program, got: {message}"
+        );
     }
 
     #[test]
