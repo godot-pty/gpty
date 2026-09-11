@@ -5,7 +5,17 @@
 //! the primary render source; SQLite is the persistence layer.
 //!
 //! Pane rows are keyed by the pane's stable `attachment_id` string (schema
-//! v2). An optional cap bounds how many lines are retained per pane.
+//! v2). Two caps bound what a pane retains: rows (the `history_lines`
+//! setting) and bytes (derived, see [`RETAINED_BYTES_PER_ROW`]).
+//!
+//! Writers never touch the store directly. [`PaneHistory::push`] queues a
+//! line and a per-pane writer thread commits batches on an interval, so a
+//! pane printing faster than SQLite can index (an insert costs ~30 µs, mostly
+//! the FTS5 trigger) neither stalls the terminal task nor holds the grid
+//! mutex the UI renders under.
+
+use std::collections::VecDeque;
+use std::sync::{Arc, Condvar, Mutex};
 
 use rusqlite::{Connection, params, params_from_iter};
 
@@ -42,7 +52,23 @@ pub struct HistoryStore {
     conn: Connection,
     pane_key: String,
     cap: u32,
+    byte_cap: u64,
 }
+
+/// Bytes of text a pane's store may retain per retained row.
+///
+/// The row cap bounds how *many* lines a pane keeps; this bounds how much
+/// text they may hold. A single line can be 16 KiB (`parser::MAX_LINE_LEN`),
+/// so 10 000 rows of pathological output — a program printing one giant line
+/// after another — would be 160 MB on disk and in the FTS index without it.
+/// Derived rather than separately configured: at 1 KiB per row the byte cap
+/// only binds when lines are far longer than terminal output usually is.
+const RETAINED_BYTES_PER_ROW: u64 = 1024;
+
+/// Row budget used to derive the byte cap for a store with no row cap
+/// (`cap == 0`, tests). Keeps the byte bound meaningful when the row bound is
+/// deliberately disabled.
+const UNCAPPED_ROW_BUDGET: u64 = 1024;
 
 impl HistoryStore {
     /// Open or create the history database at `path` for `pane_key`.
@@ -85,16 +111,64 @@ impl HistoryStore {
             conn,
             pane_key: pane_key.to_string(),
             cap,
+            byte_cap: u64::from(cap.max(UNCAPPED_ROW_BUDGET as u32)) * RETAINED_BYTES_PER_ROW,
         })
     }
 
-    /// Append an output line to the history.
+    /// Open a store with an explicit byte cap (tests: a bound small enough to
+    /// exercise trimming without writing megabytes).
+    pub fn with_byte_cap(mut self, bytes: u64) -> Self {
+        self.byte_cap = bytes;
+        self
+    }
+
+    /// What this store retains: `(rows, bytes)`. `rows` is `usize::MAX` when
+    /// the row cap is disabled.
+    ///
+    /// The writer thread bounds its pending queue with the same window, so a
+    /// line it drops under flood is one [`Self::enforce_cap`] would delete on
+    /// the next flush — never a line that would have been retained.
+    pub fn retention_window(&self) -> (usize, usize) {
+        let rows = if self.cap == 0 {
+            usize::MAX
+        } else {
+            self.cap as usize
+        };
+        (rows, self.byte_cap as usize)
+    }
+
+    /// Append a single output line. Pane writes go through
+    /// [`Self::append_batch`] (via `PaneHistory`); this is the one-row form
+    /// the tests build their fixtures with.
     pub fn append(&self, line_num: i64, text: &str) -> Result<i64, rusqlite::Error> {
         self.conn.execute(
             "INSERT INTO lines (pane_id, line_num, text) VALUES (?1, ?2, ?3)",
             params![self.pane_key, line_num, text],
         )?;
         Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Append a batch of output lines in one transaction.
+    ///
+    /// The per-statement cost is what the write path used to pay per line: a
+    /// commit per row measured 33 k rows/s, one transaction per batch 111 k
+    /// (release build; two calls with one variable prepared statement).
+    /// Batching past ~512 rows does not pay — the FTS5 index write, not the
+    /// commit, is what remains.
+    pub fn append_batch(&mut self, lines: &[(i64, String)]) -> Result<(), rusqlite::Error> {
+        if lines.is_empty() {
+            return Ok(());
+        }
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(
+                "INSERT INTO lines (pane_id, line_num, text) VALUES (?1, ?2, ?3)",
+            )?;
+            for (line_num, text) in lines {
+                stmt.execute(params![self.pane_key, line_num, text])?;
+            }
+        }
+        tx.commit()
     }
 
     /// Search all history lines for `pattern` using FTS5.
@@ -179,15 +253,40 @@ impl HistoryStore {
     }
 
     /// Delete the oldest lines beyond `cap`, keeping the newest `cap`.
+    ///
+    /// Two caps apply: rows (`cap`) and retained text bytes
+    /// ([`RETAINED_BYTES_PER_ROW`]-derived). The byte trim matters when lines
+    /// are long — the row cap alone would let a pane hold hundreds of
+    /// megabytes of 16 KiB lines.
     pub fn enforce_cap(&self) -> Result<(), rusqlite::Error> {
-        if self.cap == 0 {
-            return Ok(());
+        if self.cap != 0 {
+            self.conn.execute(
+                "DELETE FROM lines WHERE pane_id = ?1 AND line_num <=
+                    (SELECT MAX(line_num) FROM lines WHERE pane_id = ?1) - ?2",
+                params![self.pane_key, self.cap as i64],
+            )?;
         }
-        self.conn.execute(
-            "DELETE FROM lines WHERE pane_id = ?1 AND line_num <=
-                (SELECT MAX(line_num) FROM lines WHERE pane_id = ?1) - ?2",
-            params![self.pane_key, self.cap as i64],
-        )?;
+        if self.byte_cap != 0 {
+            let total: i64 = self.conn.query_row(
+                "SELECT COALESCE(SUM(LENGTH(text)), 0) FROM lines WHERE pane_id = ?1",
+                params![self.pane_key],
+                |row| row.get(0),
+            )?;
+            if total > self.byte_cap as i64 {
+                // Delete oldest-first until the newest rows fit the budget:
+                // the cutoff is the oldest line whose running total (summed
+                // from the newest backwards) is already over it.
+                self.conn.execute(
+                    "DELETE FROM lines WHERE pane_id = ?1 AND line_num <= (
+                        SELECT MIN(line_num) FROM (
+                            SELECT line_num, SUM(LENGTH(text)) OVER (ORDER BY line_num DESC) AS running
+                            FROM lines WHERE pane_id = ?1
+                        ) WHERE running > ?2
+                    )",
+                    params![self.pane_key, self.byte_cap as i64],
+                )?;
+            }
+        }
         Ok(())
     }
 
@@ -225,6 +324,270 @@ impl HistoryStore {
         let placeholders = format!("?{}", ",?".repeat(known.len() - 1));
         let sql = format!("DELETE FROM lines WHERE pane_id NOT IN ({placeholders})");
         self.conn.execute(&sql, params_from_iter(known.iter()))
+    }
+}
+
+// ── Write path ────────────────────────────────────────────────────────
+
+/// How long a commit waits for the batch to keep growing.
+///
+/// A batch is committed once it reaches [`FLUSH_ROWS`] or once this long
+/// passes with nothing new arriving, so a slow producer costs one transaction
+/// per interval instead of one per line. It is also the upper bound on how
+/// stale the store is for a reader: a search run right after output can miss
+/// the last 200 ms of it, which is the price of keeping SQLite off the
+/// terminal's path.
+const FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// Rows a batch grows to before it is committed (whatever the interval).
+///
+/// Measured (release): 512 rows per transaction reaches the store's ceiling
+/// (~111 k rows/s); larger transactions do not go faster.
+const FLUSH_ROWS: usize = 512;
+
+/// How long [`PaneHistory::flush`] waits for the writer to commit.
+const FLUSH_ACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Buffered output lines between the terminal task and the store's writer.
+///
+/// Bounded by the store's *retention window*: a line pushed out of the queue
+/// is older than the newest `rows`/`bytes` the store keeps anyway — exactly
+/// what [`HistoryStore::enforce_cap`] deletes on the next flush — so dropping
+/// it cannot open a gap inside the retained scrollback. Without that bound a
+/// pane flooding output at millions of lines per second would push the
+/// backlog somewhere else instead of fixing it (the store absorbs ~111 k
+/// rows/s).
+struct LineQueue {
+    inner: Mutex<QueueInner>,
+    window_rows: usize,
+    window_bytes: usize,
+    wake: Condvar,
+}
+
+struct QueueInner {
+    lines: VecDeque<(i64, String)>,
+    bytes: usize,
+    /// Pushed but not yet committed. Decremented for dropped lines too, so a
+    /// [`PaneHistory::flush`] wait cannot hang on a line nobody will write.
+    pending: usize,
+    closed: bool,
+}
+
+impl LineQueue {
+    fn new(window_rows: usize, window_bytes: usize) -> Self {
+        Self {
+            inner: Mutex::new(QueueInner {
+                lines: VecDeque::new(),
+                bytes: 0,
+                pending: 0,
+                closed: false,
+            }),
+            window_rows,
+            window_bytes,
+            wake: Condvar::new(),
+        }
+    }
+
+    /// Never blocks and never hands SQLite work to the caller; dropping only
+    /// happens past the retention window.
+    fn push(&self, line_num: i64, text: &str) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+        if inner.closed {
+            return;
+        }
+        inner.bytes += text.len();
+        inner.pending += 1;
+        // Only a queue that was empty can need waking the writer (it sleeps
+        // while there is nothing to take); a flood pushes millions of lines a
+        // second and every notify would be one system call too many.
+        let was_empty = inner.lines.is_empty();
+        inner.lines.push_back((line_num, text.to_string()));
+        while inner.lines.len() > self.window_rows || inner.bytes > self.window_bytes {
+            let Some((_, dropped)) = inner.lines.pop_front() else {
+                break;
+            };
+            inner.bytes -= dropped.len();
+            inner.pending -= 1;
+        }
+        drop(inner);
+        if was_empty {
+            self.wake.notify_one();
+        }
+    }
+
+    /// Take everything queued, oldest first.
+    fn take(&self) -> Vec<(i64, String)> {
+        let Ok(mut inner) = self.inner.lock() else {
+            return Vec::new();
+        };
+        inner.bytes = 0;
+        inner.lines.drain(..).collect()
+    }
+
+    fn flushed(&self, rows: usize) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.pending = inner.pending.saturating_sub(rows);
+        }
+        self.wake.notify_all();
+    }
+
+    fn close(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.closed = true;
+        }
+        self.wake.notify_all();
+    }
+
+    /// Sleep until there is something to take, the queue closes, or `timeout`.
+    /// `true` when lines are waiting.
+    fn wait(&self, timeout: std::time::Duration) -> bool {
+        let Ok(inner) = self.inner.lock() else {
+            return false;
+        };
+        let Ok((inner, _)) = self.wake.wait_timeout_while(inner, timeout, |state| {
+            state.lines.is_empty() && !state.closed
+        }) else {
+            return false;
+        };
+        !inner.lines.is_empty()
+    }
+
+    fn closed(&self) -> bool {
+        self.inner.lock().map(|inner| inner.closed).unwrap_or(true)
+    }
+
+    fn pending(&self) -> usize {
+        self.inner.lock().map(|inner| inner.pending).unwrap_or(0)
+    }
+
+    /// Block until every pushed line has been committed (or `timeout`).
+    fn wait_committed(&self) -> bool {
+        let Ok(inner) = self.inner.lock() else {
+            return false;
+        };
+        let Ok((inner, _)) = self
+            .wake
+            .wait_timeout_while(inner, FLUSH_ACK_TIMEOUT, |state| state.pending > 0)
+        else {
+            return false;
+        };
+        inner.pending == 0
+    }
+}
+
+/// A pane's persistent scrollback: the store, plus the thread that writes to
+/// it.
+///
+/// The terminal task used to call `HistoryStore::append` per output line while
+/// holding the grid mutex. One insert costs ~30 µs (a commit plus an FTS5
+/// index write per row), so a pane flooding output held the lock — and with it
+/// the UI thread — for the whole insert, and the pane's own ceiling was the
+/// store's per-row rate. Writes now go through [`Self::push`], which only
+/// touches the queue, and the writer thread commits batches off the terminal
+/// path; the same flood that used to cap a pane at ~33 k lines/s no longer
+/// reaches SQLite at the terminal's cadence at all.
+pub struct PaneHistory {
+    store: Arc<Mutex<HistoryStore>>,
+    queue: Arc<LineQueue>,
+}
+
+impl PaneHistory {
+    /// Open the pane's store and start its writer thread.
+    pub fn open(path: &str, pane_key: &str, cap: u32) -> Result<Self, rusqlite::Error> {
+        let store = HistoryStore::open(path, pane_key, cap)?;
+        let (rows, bytes) = store.retention_window();
+        let store = Arc::new(Mutex::new(store));
+        let queue = Arc::new(LineQueue::new(rows, bytes));
+        spawn_writer(Arc::clone(&store), Arc::clone(&queue));
+        Ok(Self { store, queue })
+    }
+
+    /// The store, for readers (search, restore, prune). Writes go through
+    /// [`Self::push`] so the lock is never held from the terminal path.
+    pub fn store(&self) -> &Arc<Mutex<HistoryStore>> {
+        &self.store
+    }
+
+    /// Queue a committed output line. Never blocks, never drops unless the
+    /// pane is already past what the store would retain.
+    pub fn push(&self, line_num: i64, text: &str) {
+        self.queue.push(line_num, text);
+    }
+
+    /// Lines pushed but not yet committed — how far the store trails the
+    /// pane. Zero when the writer has caught up.
+    pub fn pending(&self) -> usize {
+        self.queue.pending()
+    }
+
+    /// Commit everything pushed so far and return whether the queue drained.
+    ///
+    /// Called on shutdown (a process exit does not run the writer thread to
+    /// completion) and by tests, so a restart sees the output printed just
+    /// before the app closed.
+    pub fn flush(&self) -> bool {
+        self.queue.wait_committed()
+    }
+}
+
+impl Drop for PaneHistory {
+    fn drop(&mut self) {
+        // The writer flushes what it still holds and exits; the queue is
+        // dropped with the pane, so anything left in it is unreachable anyway.
+        self.queue.close();
+    }
+}
+
+/// Writer thread: drain the queue into batches, commit them, trim the store.
+fn spawn_writer(store: Arc<Mutex<HistoryStore>>, queue: Arc<LineQueue>) {
+    let spawned = std::thread::Builder::new()
+        .name("history-writer".to_string())
+        .spawn(move || {
+            let mut batch: Vec<(i64, String)> = Vec::new();
+            loop {
+                batch.extend(queue.take());
+                // A batch waits for more lines until it is worth a
+                // transaction, so a slow producer is not one commit per line.
+                if batch.len() < FLUSH_ROWS {
+                    if batch.is_empty() {
+                        // Closure is only terminal once the queue is empty: a
+                        // pane being torn down still has its last lines
+                        // committed (a push can land between take and close).
+                        if queue.closed() {
+                            break;
+                        }
+                    }
+                    if queue.wait(FLUSH_INTERVAL) {
+                        continue;
+                    }
+                }
+                if batch.is_empty() {
+                    continue;
+                }
+                let rows = batch.len();
+                match store.lock() {
+                    Ok(mut store) => {
+                        if let Err(e) = store.append_batch(&batch) {
+                            log::warn!("history append failed ({rows} rows): {e}");
+                        }
+                        // One trim per commit: the byte check scans the
+                        // pane's retained rows.
+                        if let Err(e) = store.enforce_cap() {
+                            log::warn!("history retention failed: {e}");
+                        }
+                    }
+                    Err(e) => log::warn!("history store lock poisoned: {e}"),
+                }
+                // The rows are accounted for whether they were written or not:
+                // a failed batch must not leave `flush` waiting.
+                queue.flushed(rows);
+                batch.clear();
+            }
+        });
+    if let Err(e) = spawned {
+        log::error!("could not start the history writer: {e}");
     }
 }
 
@@ -450,6 +813,167 @@ mod tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, 2);
+        fs::remove_file(&path).ok();
+    }
+
+    /// A batch lands complete, in one transaction, and is searchable.
+    #[test]
+    fn append_batch_commits_every_row_in_order() {
+        let mut store = HistoryStore::open(":memory:", "pane-a", 100).unwrap();
+        let batch: Vec<(i64, String)> = (0..600).map(|i| (i, format!("batch line {i}"))).collect();
+        store.append_batch(&batch).unwrap();
+
+        assert_eq!(store.line_count().unwrap(), 600);
+        assert_eq!(store.max_line_num().unwrap(), 599);
+        assert_eq!(store.get_lines(0, 599).unwrap(), batch);
+        // The FTS index is maintained by the insert trigger, so a batched
+        // insert is searchable exactly like a single one.
+        assert_eq!(
+            store.search_user_text("batch line 599", 5).unwrap().len(),
+            1
+        );
+        assert!(store.append_batch(&[]).is_ok());
+    }
+
+    /// The byte cap trims the oldest rows once retained text exceeds it,
+    /// even when the row cap would not have.
+    #[test]
+    fn byte_cap_trims_oldest_rows() {
+        // 100-byte lines, 250-byte budget: the newest two rows fit, the third
+        // does not.
+        let mut store = HistoryStore::open(":memory:", "pane-a", 0)
+            .unwrap()
+            .with_byte_cap(250);
+        let long = "x".repeat(100);
+        let batch: Vec<(i64, String)> = (0..3).map(|i| (i, format!("{i}{long}"))).collect();
+        store.append_batch(&batch).unwrap();
+        store.enforce_cap().unwrap();
+
+        let kept = store.get_lines(0, 9).unwrap();
+        assert_eq!(kept.len(), 2, "oldest rows beyond the byte budget are gone");
+        assert_eq!(kept.first().unwrap().0, 1);
+        assert_eq!(kept.last().unwrap().0, 2);
+        // The row cap is untouched by the byte trim when it is disabled.
+        assert_eq!(store.max_line_num().unwrap(), 2);
+    }
+
+    /// A line dropped by the queue is one the store would have deleted, so
+    /// the retained window stays contiguous — and a `flush` wait cannot hang
+    /// on a line that was dropped.
+    #[test]
+    fn a_full_queue_drops_only_past_the_retention_window() {
+        let queue = LineQueue::new(4, 10_000);
+        for i in 1..=10 {
+            queue.push(i, &format!("line {i}"));
+        }
+        let taken = queue.take();
+        let nums: Vec<i64> = taken.iter().map(|(n, _)| *n).collect();
+        assert_eq!(
+            nums,
+            vec![7, 8, 9, 10],
+            "the newest window survives; older lines are what enforce_cap deletes"
+        );
+        queue.flushed(taken.len());
+        assert!(
+            queue.wait_committed(),
+            "dropped lines must not hold a flush open"
+        );
+
+        // Same for the byte window, with one long line standing in for many.
+        let queue = LineQueue::new(usize::MAX, 30);
+        queue.push(1, &"a".repeat(20));
+        queue.push(2, &"b".repeat(20));
+        let taken = queue.take();
+        assert_eq!(taken.len(), 1);
+        assert_eq!(
+            taken[0].0, 2,
+            "the older over-budget line is the one dropped"
+        );
+    }
+
+    /// End to end: what the terminal pushes reaches the store through the
+    /// writer thread, in order, without the caller ever touching SQLite.
+    #[test]
+    fn pushed_lines_reach_the_store_and_a_flush_waits_for_them() {
+        let path = temp_db_path("push");
+        let history = PaneHistory::open(&path, "pane-a", 100).unwrap();
+        let store = Arc::clone(history.store());
+        for i in 1..=50 {
+            history.push(i, &format!("pushed {i}"));
+        }
+        assert!(history.flush(), "flush must wait for the writer");
+        assert_eq!(store.lock().unwrap().max_line_num().unwrap(), 50);
+        assert_eq!(store.lock().unwrap().line_count().unwrap(), 50);
+
+        // A pending write must survive the pane handle going away: the queue
+        // closes, the writer commits what it holds, then exits.
+        history.push(51, "last word");
+        drop(history);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut last = 0;
+        while std::time::Instant::now() < deadline {
+            last = store.lock().unwrap().max_line_num().unwrap();
+            if last == 51 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(last, 51, "a closing writer must commit what it still holds");
+        fs::remove_file(&path).ok();
+    }
+
+    /// The writer commits on its own, without a flush call.
+    #[test]
+    fn the_writer_commits_on_its_interval() {
+        let history = PaneHistory::open(":memory:", "pane-a", 100).unwrap();
+        let store = Arc::clone(history.store());
+        history.push(1, "unflushed line");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut last = 0;
+        while std::time::Instant::now() < deadline {
+            last = store.lock().unwrap().max_line_num().unwrap();
+            if last == 1 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(last, 1, "the writer thread must commit without being asked");
+    }
+
+    /// What a pane writes is what the next launch restores: the store-level
+    /// half of "scrollback survives a restart" (the grid feeds the returned
+    /// rows back through `feed_restore_lines`).
+    #[test]
+    fn a_reopened_pane_reads_back_what_the_writer_committed() {
+        let path = temp_db_path("restore");
+        {
+            let history = PaneHistory::open(&path, "pane-a", 100).unwrap();
+            for i in 1..=3 {
+                history.push(i, &format!("session one line {i}"));
+            }
+            assert!(history.flush());
+        }
+        // A restart: same database, same pane id, fresh store and writer.
+        let reopened = PaneHistory::open(&path, "pane-a", 100).unwrap();
+        let store = reopened.store().lock().unwrap();
+        assert_eq!(store.max_line_num().unwrap(), 3);
+        let lines: Vec<String> = store
+            .get_lines(1, 3)
+            .unwrap()
+            .into_iter()
+            .map(|(_, text)| text)
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                "session one line 1",
+                "session one line 2",
+                "session one line 3"
+            ]
+        );
+        assert_eq!(store.search_user_text("session one", 10).unwrap().len(), 3);
+        drop(store);
+        drop(reopened);
         fs::remove_file(&path).ok();
     }
 }

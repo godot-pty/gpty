@@ -149,8 +149,9 @@ pub struct TermGrid {
     pub palette: [[u8; 3]; 16],
     /// Line counter for history storage (monotonically increasing).
     line_count: u64,
-    /// Optional SQLite-backed history store for persistent scrollback.
-    pub history: Option<Arc<std::sync::Mutex<crate::history::HistoryStore>>>,
+    /// Optional persistent scrollback for this pane: the SQLite store (read
+    /// paths) plus the writer thread that commits queued lines.
+    pub history: Option<Arc<crate::history::PaneHistory>>,
     /// Process/liveness primitives written by the engine task.
     pub status: TermStatus,
     /// Tiered agent-state tracker (display only) written by the engine
@@ -562,8 +563,14 @@ impl TermGrid {
         self.generation += 1;
     }
 
-    /// Store a completed output line in the optional SQLite history and the
+    /// Store a completed output line in the optional scrollback and the
     /// recent-lines ring (backs `waitForOutput`).
+    ///
+    /// The ring is updated synchronously — `waitForOutput` polls it every
+    /// frame and must see the line that just matched — while persistence is
+    /// handed to the pane's writer thread. Nothing here touches SQLite: this
+    /// runs under the grid mutex, which the UI thread needs to render, and a
+    /// per-line insert used to hold it for ~30 µs.
     pub fn store_line(&mut self, line: &str) {
         self.line_count += 1;
         self.recent_lines.push_back(line.to_string());
@@ -571,25 +578,7 @@ impl TermGrid {
             self.recent_lines.pop_front();
         }
         if let Some(history) = &self.history {
-            match history.lock() {
-                Ok(h) => {
-                    if let Err(e) = h.append(self.line_count as i64, line) {
-                        // A dropped row leaves a hole in the persisted
-                        // scrollback; failing silently means a later restore
-                        // shows unexplained gaps (or nothing at all) with no
-                        // clue that the write ever failed.
-                        log::warn!("history append failed (line {}): {e}", self.line_count);
-                    }
-                    // Amortize retention: trim oldest rows beyond the store's
-                    // cap every 100 committed lines instead of on every append.
-                    if self.line_count.is_multiple_of(100)
-                        && let Err(e) = h.enforce_cap()
-                    {
-                        log::warn!("history retention failed: {e}");
-                    }
-                }
-                Err(e) => log::warn!("history store lock poisoned: {e}"),
-            }
+            history.push(self.line_count as i64, line);
         }
     }
 
@@ -750,12 +739,15 @@ mod tests {
     #[test]
     fn restore_feed_does_not_duplicate_history_rows() {
         let mut g = TermGrid::new_with_history(24, 80, 100);
-        let store = crate::history::HistoryStore::open(":memory:", "pane-t", 100).unwrap();
-        g.history = Some(Arc::new(std::sync::Mutex::new(store)));
+        let history = crate::history::PaneHistory::open(":memory:", "pane-t", 100).unwrap();
+        let store = Arc::clone(history.store());
+        g.history = Some(Arc::new(history));
         g.seed_line_count(5);
         g.feed_restore_lines(&["old line 1".to_string(), "old line 2".to_string()]);
         g.store_line("new line");
-        let hist = g.history.as_ref().unwrap().lock().unwrap();
+        // The writer thread commits asynchronously; a push is not a write.
+        g.history.as_ref().unwrap().flush();
+        let hist = store.lock().unwrap();
         // Restored rows are not re-appended; numbering continues at 6.
         assert_eq!(hist.max_line_num().unwrap(), 6);
         assert_eq!(hist.line_count().unwrap(), 1);

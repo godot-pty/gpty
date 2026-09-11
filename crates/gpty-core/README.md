@@ -15,7 +15,7 @@ Library crate for the gpty multi-PTY emulator. This is the engine — all termin
 | [`term`](src/term.rs) | Full terminal grid + damage tracking via `alacritty_terminal` | `TermGrid`, `CellInfo`, `GridUpdate` |
 | [`color`](src/color.rs) | ANSI color mapping — named, indexed, true-color → RGB | `color_to_rgb()` |
 | [`keymap`](src/keymap.rs) | Keyboard event → byte sequence translation | `key_event_to_bytes()` |
-| [`history`](src/history.rs) | SQLite-backed scrollback history store | `HistoryStore` |
+| [`history`](src/history.rs) | SQLite-backed scrollback history store and its write-behind thread | `HistoryStore`, `PaneHistory` |
 
 ## Concept System
 

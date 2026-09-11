@@ -209,6 +209,17 @@ func _take_focus():
 	if is_inside_tree():
 		grab_focus()
 
+## Commit buffered scrollback before the pane goes away. Output lines are
+## queued and written by a background thread, and the process may exit without
+## running Rust destructors, so the tail would otherwise be missing from the
+## pane's restored scrollback on the next launch.
+func _exit_tree():
+	# The GptyTerminal child has already left the tree by the time the pane's
+	# _exit_tree runs (children are notified first), so no inside-tree test.
+	if _terminal != null:
+		_terminal.flush_history()
+
+
 func _ready():
 	super._ready()
 	_terminal = GptyTerminal.new()

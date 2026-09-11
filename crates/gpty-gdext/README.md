@@ -71,7 +71,7 @@ Inspector omp is launched as `omp --mode rpc --no-session --no-tools --no-extens
 |--------|---------|-------------|
 | `get_plain_text(limit: int)` | `String` | Plain-text snapshot of screen + scrollback, newline-joined, capped 1–2000 lines (backs `paneRead`) |
 | `get_status()` | `String` | JSON: `{pid, running, exit_code, idle_ms}` (backs `paneStatus`) |
-| `search_history(pattern: String, limit: int)` | `String` | JSON `{"results": [[line_num, text], ...]}` — FTS5 search of the pane's persisted scrollback, newest-first (limit 1–500; raw FTS5 query syntax) |
+| `search_history(pattern: String, limit: int)` | `String` | JSON `{"results": [[line_num, text], ...]}` — FTS5 search of the pane's persisted scrollback, newest-first (limit 1–500; free text as a user typed it, sanitised into quoted terms, so punctuation such as `main.rs` is searchable) |
 | `check_lines(pattern: String)` | `String` | First recent line matching the Rust-regex pattern, or empty (backs `waitForOutput`) |
 | `emit_event(json: String)` | void | Static — fan a JSON event out to event-socket subscribers (no-op on Windows) |
 

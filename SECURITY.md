@@ -172,9 +172,10 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   pane expensive: the output queue is bounded per pane (256 × 4 KiB, enforced by blocking the
   reader, so the child waits on the PTY buffer rather than the process growing — v0.5.4), and the
   render loop repaints less often when a pane's own grid work exceeds its per-frame budget instead
-  of spending every frame on it (v0.5.3). The scrollback store still takes one blocking write per
-  output line, and concept matching still costs lines × enabled concepts per burst; both remain
-  open DoS items in [ROADMAP.md](ROADMAP.md).
+  of spending every frame on it (v0.5.3), and scrollback is committed by a per-pane writer thread
+  whose pending queue is bounded by the store's retention window (v0.5.4) instead of one blocking
+  insert per line under the grid lock. Concept matching still costs lines × enabled concepts per
+  burst, which remains an open DoS item in [ROADMAP.md](ROADMAP.md).
 - **Parallel test runs are wall-clock sensitive.** The Inspector backend tests spawn real child
   processes and wait on them; the budgets are generous enough for a loaded parallel CI run, but a
   machine that is oversubscribed far beyond CI's shape can still time a turn out.

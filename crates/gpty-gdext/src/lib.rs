@@ -233,24 +233,22 @@ impl GptyTerminal {
             cols,
         )) {
             Ok(spawned) => {
-                // Attach the SQLite history store and restore the scrollback
-                // tail. All inside one grid lock so the engine's store_line
-                // cannot interleave between the line-number read and the
-                // restored feed.
+                // Attach the scrollback and restore its tail. All inside one
+                // grid lock so the engine's store_line cannot interleave
+                // between the line-number read and the restored feed.
                 if let Ok(mut grid) = spawned.grid.lock() {
                     let history_lines = history_lines.clamp(100, 100_000) as u32;
                     if !history_key.is_empty() {
                         let db_path = godot::classes::ProjectSettings::singleton()
                             .globalize_path("user://history.db")
                             .to_string();
-                        match gpty_core::history::HistoryStore::open(
+                        match gpty_core::history::PaneHistory::open(
                             &db_path,
                             &history_key,
                             history_lines,
                         ) {
-                            Ok(store) => {
-                                let history = Arc::new(std::sync::Mutex::new(store));
-                                let max_ln = match history.lock() {
+                            Ok(history) => {
+                                let max_ln = match history.store().lock() {
                                     Ok(h) => match h.max_line_num() {
                                         Ok(n) => Some(n),
                                         Err(e) => {
@@ -265,6 +263,7 @@ impl GptyTerminal {
                                 if let Some(max_ln) = max_ln {
                                     let start = (max_ln - history_lines as i64).max(1);
                                     let restored: Vec<String> = history
+                                        .store()
                                         .lock()
                                         .ok()
                                         .and_then(|h| h.get_lines(start, max_ln).ok())
@@ -275,7 +274,7 @@ impl GptyTerminal {
                                     grid.seed_line_count(max_ln as u64);
                                     grid.feed_restore_lines(&restored);
                                 }
-                                grid.history = Some(history);
+                                grid.history = Some(Arc::new(history));
                             }
                             Err(e) => {
                                 godot_warn!(
@@ -297,6 +296,31 @@ impl GptyTerminal {
                 }
                 godot_error!("Failed to spawn PTY for '{command}': {e}");
             }
+        }
+    }
+
+    /// Commit this pane's buffered scrollback and wait for it (bounded).
+    ///
+    /// Output lines are queued and written by a background thread, so a
+    /// process that exits without teardown (SIGKILL, `daemon stop`'s
+    /// `process::exit`) loses whatever is still queued. The pane calls this
+    /// from its GDScript `_exit_tree()`, which Godot does run on a normal
+    /// quit, so the output printed just before closing is in the database
+    /// when the next launch restores the pane.
+    #[func]
+    fn flush_history(&self) {
+        let Some(spawned) = &self.spawned else {
+            return;
+        };
+        let history = if let Ok(grid) = spawned.grid.lock() {
+            grid.history.clone()
+        } else {
+            None
+        };
+        if let Some(history) = history
+            && !history.flush()
+        {
+            godot_warn!("[GDExt] Scrollback did not finish committing before exit");
         }
     }
 
@@ -330,7 +354,10 @@ impl GptyTerminal {
         };
         let limit = limit.clamp(1, 500) as usize;
         let text = pattern.to_string();
-        let (results, stored, error) = match history.lock() {
+        // A search can miss output printed in the last flush interval: the
+        // store is written off the terminal path on purpose (see
+        // `gpty_core::history::PaneHistory`).
+        let (results, stored, error) = match history.store().lock() {
             Ok(h) => {
                 let stored = h.line_count().unwrap_or(0);
                 match h.search_user_text(&text, limit) {
@@ -389,7 +416,7 @@ impl GptyTerminal {
             .take(512)
             .filter_map(|v| v.as_str().map(str::to_string))
             .collect();
-        match history.lock() {
+        match history.store().lock() {
             Ok(h) => match h.prune_missing_panes(&known) {
                 Ok(deleted) => deleted as i64,
                 Err(e) => {
