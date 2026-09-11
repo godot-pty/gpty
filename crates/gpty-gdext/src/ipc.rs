@@ -118,26 +118,28 @@ fn version_handler() -> HandlerFn {
     })
 }
 
-/// Shutdown handler — answers the client, then exits.
+/// Shutdown handler — answers the client, then asks the GUI to quit.
 ///
-/// `process::exit(0)` used to run *before* the reply, so the client saw an
-/// empty socket and reported `invalid response: empty response` for a stop
-/// that had already happened. The exit is now scheduled instead of executed
-/// here: the reply has to reach the client first.
+/// `process::exit(0)` used to run *before* the reply, which cost both ends:
+/// the client saw an empty socket and reported `invalid response: empty
+/// response` for a stop that had already happened, and the exit skipped every
+/// teardown — the workspace and settings saves, and whatever scrollback a
+/// pane's writer still held. The reply is now written and the quit runs
+/// through the scene tree, so `_exit_tree` does the saving.
 ///
-/// The exit is still abrupt, and that costs the teardown (the workspace and
-/// settings saves, and whatever scrollback a pane's writer still holds).
-/// Quitting through the scene tree would run them, and was tried: see
-/// ROADMAP.md, "`daemon stop` still skips teardown" — it ends in SIGSEGV when
-/// the quit happens while an IPC client is connected.
+/// This thread must not quit the tree itself: Godot's SceneTree is
+/// single-threaded, so the request is a flag that GDScript polls.
+static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Take a pending quit request (true once, then false again).
+pub fn take_shutdown_request() -> bool {
+    SHUTDOWN_REQUESTED.swap(false, Ordering::Relaxed)
+}
+
 fn shutdown_handler() -> HandlerFn {
     std::sync::Arc::new(|_params| {
         Box::pin(async move {
-            tokio::spawn(async {
-                // Let the response reach the client before the process goes.
-                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-                std::process::exit(0);
-            });
+            SHUTDOWN_REQUESTED.store(true, Ordering::Relaxed);
             Ok(serde_json::json!({"shutting_down": true}))
         })
     })

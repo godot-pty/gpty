@@ -1135,6 +1135,9 @@ func _poll_concept_events_for(ws: Dictionary):
 # ═══════════════════════════════════════════════════════════════════════
 
 func _poll_ipc_requests():
+	if GptyTerminal.take_shutdown_request():
+		get_tree().quit()
+		return
 	# GptyTerminal is a GodotClass — call static methods on the class
 	var reqs = GptyTerminal.drain_ipc_requests()
 	if reqs.is_empty():

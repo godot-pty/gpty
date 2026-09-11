@@ -556,6 +556,7 @@ dependencies = [
  "gpty-ai",
  "gpty-core",
  "gpty-ipc",
+ "libc",
  "log",
  "pulldown-cmark",
  "regex",

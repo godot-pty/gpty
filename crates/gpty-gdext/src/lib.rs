@@ -13,6 +13,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 
+use godot::init::InitStage;
 use godot::prelude::*;
 
 use godot::global::Key;
@@ -1067,6 +1068,12 @@ impl GptyTerminal {
     // Polled from GDScript each frame. Requests arrive via the
     // IpcServer → PENDING_REQUESTS → drain_ipc_requests.
 
+    /// Whether a client asked the GUI to quit.
+    #[func]
+    fn take_shutdown_request() -> bool {
+        crate::ipc::take_shutdown_request()
+    }
+
     /// Drain pending IPC requests into an Array of Dictionaries.
     /// Returns `[{id: int, method: String, params: String}]`.
     #[func]
@@ -1287,5 +1294,47 @@ fn godot_key_to_evdev(kc: i64) -> u32 {
 
 struct GptyExtension;
 
+/// Keep this library mapped for the life of the process.
+///
+/// Godot unloads a GDExtension at exit, and this extension owns threads that
+/// live inside it: the tokio runtime's workers, one PTY reader per pane, one
+/// history writer per pane. Once the mapping is gone, any of them that gets
+/// scheduled faults on its next instruction — which is exactly what quitting
+/// during IPC activity produced (SIGSEGV in a `tokio-rt-worker`, its stack
+/// pointing at an unmapped address; see the roadmap entry for `daemon stop`).
+/// `RTLD_NODELETE` adds a reference `dlclose` cannot drop, so the code stays
+/// mapped and a surviving thread is harmless while the process ends.
+///
+/// Windows has the same hazard with a different API (`GetModuleHandleExW`
+/// with `GET_MODULE_HANDLE_EX_FLAG_PIN`); it is not wired up because that
+/// platform is compile-checked only — tracked on the roadmap.
+#[cfg(unix)]
+fn pin_library() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        // SAFETY: `dladdr` only fills the struct it is given. `dlopen` on our
+        // own path finds the object already loaded and running this code; the
+        // returned handle is deliberately leaked so the reference stays.
+        unsafe {
+            let mut info: libc::Dl_info = std::mem::zeroed();
+            if libc::dladdr(pin_library as *const () as *const libc::c_void, &mut info) == 0
+                || info.dli_fname.is_null()
+            {
+                return;
+            }
+            libc::dlopen(info.dli_fname, libc::RTLD_NOW | libc::RTLD_NODELETE);
+        }
+    });
+}
+
 #[gdextension]
-unsafe impl ExtensionLibrary for GptyExtension {}
+unsafe impl ExtensionLibrary for GptyExtension {
+    fn on_stage_init(stage: InitStage) {
+        if stage == InitStage::Core {
+            // Before anything can spawn a thread.
+            #[cfg(unix)]
+            pin_library();
+        }
+    }
+}
