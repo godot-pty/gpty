@@ -1,32 +1,30 @@
+[gPTY](https://godot-pty.github.io/gpty/) - a PTY foundation built on Godot and Rust. Provides a tiling terminal grid, a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output without scraping a TUI.
+
+## Overview
+
 <div align="center">
 
   [![Build](https://img.shields.io/github/actions/workflow/status/godot-pty/gpty/ci.yml?branch=main)](https://github.com/godot-pty/gpty/actions/workflows/ci.yml)
   ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/godot-pty/gpty/total)
-  ![GitHub License](https://img.shields.io/github/license/godot-pty/gpty)
+  &nbsp;&nbsp;&nbsp; <img src="https://img.shields.io/badge/Built%20With:-gray" alt="Built With">
+  <img src="https://img.shields.io/badge/Gemini-8E75B2?logo=googlegemini&logoColor=white" alt="Gemini">
+  <img src="https://img.shields.io/badge/DeepSeek-4D6BFE?logo=deepseek&logoColor=white" alt="DeepSeek">
+  <img src="https://img.shields.io/badge/Claude-D97757?logo=claude&logoColor=white" alt="Claude">
+
 
 </div>
 
-[gPTY](https://godot-pty.github.io/gpty/) - a graphical Agent Development Environment (ADE); a PTY foundation built on Godot and Rust. Provides a tiling terminal grid, a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output without scraping a TUI.
-
-## Built With
-
 <p align="center">
-  <img src="https://img.shields.io/badge/Gemini-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Gemini">
-  <img src="https://img.shields.io/badge/DeepSeek-4D6BFE?style=for-the-badge&logo=deepseek&logoColor=white" alt="DeepSeek">
-  <img src="https://img.shields.io/badge/Claude-D97757?style=for-the-badge&logo=claude&logoColor=white" alt="Claude">
 </p>
 
-gPTY is an exploration in AI-directed development. The vast majority of this codebase, including the Godot UI layout and the Rust (`godopty-core`) GDExtension bridge, was generated using LLMs. While the application is fully functional and actively maintained, the underlying code may contain unidiomatic patterns and/or bugs.
-
-## Overview
-
-- **PTY foundation** - Spawn and manage independent shell sessions in a resizable tiling grid. Full DEC STD 070 via `alacritty_terminal`: 16/256/true color, scrollback with regex search, wrapped text selection.
+- **PTY** - Spawn and manage independent shell sessions in a resizable tiling grid. Full `DEC STD 070` via `alacritty_terminal`: `16`/`256`/`true color`, scrollback with regex search, wrapped text selection.
 - **Public API** - JSON-RPC IPC socket + CLI (`gpty new-pane`, `gpty inject`, …) + MCP server. AI agents, scripts, and orchestrators drive the workspace over a documented, versioned protocol.
 - **Concept engine** - RegEx triggers on PTY output capture the reply and route it into adjacent panes (code viewer, Inspector). Write your own or ship the defaults. Concepts capture and display only - they never inject input into a shell.
 - **Agent observability** - Reasoning pane passively projects documented agent lifecycle events (OMP, extensible); Inspector pane runs a private, tool-free Q&A session. Observability only - gpty never orchestrates agent state.
 - **Persistence** - Scrollback, settings, workspaces (named tab sets), and profiles auto-save to SQLite/JSON and restore on restart; full-text search across each pane's persisted history.
 - **Cross-platform** - Standalone binaries for Linux, macOS, and Windows. No Godot or Rust toolchain required to run.
 - **Documentation** - https://godot-pty.github.io/gpty/
+- The vast majority of this codebase, including most of the Godot UI layout and the Rust (`godopty-core`) GDExtension bridge, was generated using LLMs; and as such, the underlying code may contain unidiomatic patterns and/or bugs.
 
 | Component | Choice | Rationale |
 |----------|--------|-----------|
@@ -145,4 +143,4 @@ gPTY is free software, licensed under the **GNU General Public License, version 
 
 Copyright (C) 2026 Neil Pathare.
 
-gPTY is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+gPTY is distributed in the hope that it will be useful, but absolutely without any warranty and assumes no liability for any usage by end-users; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
