@@ -1,3 +1,10 @@
+<div align="center">
+
+  ![GitHub branch status](https://img.shields.io/github/checks-status/godot-pty/gpty/main)
+  ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/godot-pty/gpty/total)
+
+</div>
+
 [gPTY](https://godot-pty.github.io/gpty/) - a graphical Agent Development Environment (ADE); a PTY foundation built on Godot and Rust. Provides a tiling terminal grid, a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output without scraping a TUI.
 
 ## Built With
