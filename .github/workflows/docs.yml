@@ -43,15 +43,31 @@ jobs:
       - name: Verify mirrored README baked into overview
         run: |
           OVERVIEW=docs/public/docs/overview/index.html
-          if ! grep -q "Agent Development Environment" "$OVERVIEW"; then
-            echo "=== built overview head (first 1200 bytes) ==="
-            head -c 1200 "$OVERVIEW"
-            echo
-            echo "=== assets/repo/README.md head (first 300 bytes) ==="
+
+          # setup.sh mirrors README.md into the Hugo assets. The Hugo tarball
+          # ships a README.md of its own, so compare against the repo copy
+          # instead of a hard-coded phrase that drifts when the prose changes.
+          if ! cmp -s README.md docs/assets/repo/README.md; then
+            echo "=== docs/assets/repo/README.md is not the repo README ==="
             head -c 300 docs/assets/repo/README.md 2>/dev/null || echo "(missing)"
             exit 1
           fi
-          ! grep -q "static site generator" "$OVERVIEW"
+
+          # Canary drawn from the README itself: a run of seven or more bare
+          # words renders verbatim, so editing prose never breaks the check.
+          PHRASE=$(grep -oE '[A-Za-z0-9]+( [A-Za-z0-9]+){6,}' README.md | head -1 || true)
+          if [ -z "$PHRASE" ] || ! grep -Fq "$PHRASE" "$OVERVIEW"; then
+            echo "=== built overview head (first 1200 bytes) ==="
+            head -c 1200 "$OVERVIEW" 2>/dev/null || echo "(missing)"
+            echo
+            echo "expected phrase: ${PHRASE:-none found in README.md}"
+            exit 1
+          fi
+
+          if grep -q "static site generator" "$OVERVIEW"; then
+            echo "=== overview carries Hugo's stock README, not gPTY's ==="
+            exit 1
+          fi
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
