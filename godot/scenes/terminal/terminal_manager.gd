@@ -77,6 +77,7 @@ func spawn_pane(type_name: String, opts: Dictionary = {}) -> Control:
 		if not _split_for(w):
 			w.queue_free()
 			return null
+	_sync_edge_strips()
 
 	# For terminal panes, resolve the shell override and wire dynamic title.
 	if type_name == "terminal":
@@ -322,6 +323,22 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 
 # ── Lifecycle ──────────────────────────────────────────────────────────
 
+## Edge strips advertise a resize only when there is a divider to drag: with a
+## single pane every edge is the grid's own border, and showing the resize
+## cursor over an edge that cannot move is a lie the user will chase.
+func _sync_edge_strips():
+	var resizable := tiles.size() >= 2
+	for t in tiles:
+		var w: Control = t.wrapper
+		for edge in EDGE_EDGES:
+			var strip: Control = w.get_node_or_null("EdgeHost/Edge" + edge.capitalize())
+			if strip == null: continue
+			strip.mouse_filter = (
+				Control.MOUSE_FILTER_STOP if resizable else Control.MOUSE_FILTER_IGNORE)
+			strip.mouse_default_cursor_shape = (
+				(Control.CURSOR_HSIZE if edge == "left" or edge == "right" else Control.CURSOR_VSIZE)
+				if resizable else Control.CURSOR_ARROW)
+
 func kill(body: Control):
 	if last_body == body: last_body = null
 	var wi := _tile_index_of(body)
@@ -331,6 +348,7 @@ func kill(body: Control):
 	if not _expand_exact(rm):
 		_expand_partial(rm)
 	rm.wrapper.queue_free()
+	_sync_edge_strips()
 
 func kill_last():
 	if last_body: kill(last_body)
@@ -373,12 +391,13 @@ func swap_pane(body: Control, new_type_name: String) -> Control:
 
 	if last_body == body:
 		last_body = new_body
-
+	_sync_edge_strips()
 	return new_body
 func reset():
 	for t in tiles: t.wrapper.queue_free()
 	tiles.clear()
 	last_body = null
+	_sync_edge_strips()
 
 # ── Tiling ─────────────────────────────────────────────────────────────
 
@@ -578,6 +597,11 @@ func drag_active() -> bool:
 ## driven by `drive_edge_drag` from raw input, because the motion that follows
 ## a press on the border immediately leaves the strip for the pane body.
 func begin_edge_drag(wrapper: Control, edge: String, at: Vector2):
+	if tiles.size() < 2:
+		# A single pane fills the grid; there is no divider to move. The strips
+		# already show an arrow cursor in that state (see `_sync_edge_strips`),
+		# this is the belt under those braces.
+		return
 	_drag_edge = edge
 	_drag_wrapper = wrapper
 	_drag_start_pos = at
@@ -633,14 +657,21 @@ func _save_drag_initial_sizes():
 		var t = tiles[i]
 		_drag_saved_sizes[t.wrapper] = {"col": t.col, "row": t.row, "cspan": t.cspan, "rspan": t.rspan}
 
+## Move the divider at `edge` of `wrapper` to follow a drag that has travelled
+## `delta` pixels from the press.
+##
+## A divider is a *line*, not a pair: every tile on it moves when it moves, on
+## both sides and across its whole length. Adjusting only the grabbed pane and
+## whichever neighbour it matched left the other tiles on that line behind —
+## visible as grey gaps (or overlaps) between panes — and made the result
+## depend on which side of the divider the user happened to grab. Working from
+## the line removes both problems: the operation is the same for either side.
+##
+## `delta` is measured from the press and the whole move is recomputed from the
+## spans saved at the press, so the many small motion events of a real drag are
+## idempotent (a per-step delta would round to zero cells and apply a partial
+## move to a fresh baseline).
 func _resize_tile(wrapper: Control, edge: String, delta: Vector2):
-	# `delta` is the distance from the press, and the whole move is recomputed
-	# from the spans saved at the press. Both halves matter for a smooth drag:
-	# a real drag arrives as many 1-3 px motion events, so a per-step delta
-	# would round away to zero cells, and applying a step on top of a partial
-	# move would break the neighbour lookup below (the tiles no longer match
-	# the layout the press was made on) — which reverted the pane being
-	# dragged and left the grid not adding up to PaneTypes.GRID cells.
 	var ti := _tile_index_for_wrapper(wrapper)
 	if ti == -1: return
 	if _drag_saved_sizes.get(wrapper, {}).is_empty(): return
@@ -653,62 +684,50 @@ func _resize_tile(wrapper: Control, edge: String, delta: Vector2):
 		o.rspan = o_saved.get("rspan", o.rspan)
 
 	var t = tiles[ti]
-	# A divider is a line, not a pair: every tile on the far side of it moves
-	# together when it moves, and the drag stops where the smallest of them
-	# would hit PaneTypes.MIN_TILE. The pixel scale is per cell of the dragged pane
-	# (wrapper.size spans exactly t's cells), which also holds when the
-	# neighbours have different extents.
-	match edge:
-		"left", "right":
-			var neighbours := _neighbours_on(t, edge)
-			if neighbours.is_empty(): return
-			var grid_px = maxf(wrapper.size.x, 1.0) / float(maxi(t.cspan, 1))
-			var dg = int(round(delta.x / grid_px))
-			if edge == "left":
-				if dg >= 0: return  # dragging a left edge left shrinks self
-				dg = maxi(dg, -(t.cspan - PaneTypes.MIN_TILE))
-			else:
-				if dg <= 0: return  # dragging a right edge right grows self
-				dg = mini(dg, PaneTypes.GRID - t.col - t.cspan)
-			for o in neighbours:
-				dg = mini(dg, o.cspan - PaneTypes.MIN_TILE) if edge == "right" \
-					else maxi(dg, -(o.cspan - PaneTypes.MIN_TILE))
-			if dg == 0: return
-			if edge == "right":
-				t.cspan += dg
-				for o in neighbours:
-					o.col += dg
-					o.cspan -= dg
-			else:
-				t.col += dg
-				t.cspan -= dg
-				for o in neighbours:
-					o.cspan += dg
-		"top", "bottom":
-			var neighbours := _neighbours_on(t, edge)
-			if neighbours.is_empty(): return
-			var grid_px = maxf(wrapper.size.y, 1.0) / float(maxi(t.rspan, 1))
-			var dg = int(round(delta.y / grid_px))
-			if edge == "top":
-				if dg >= 0: return
-				dg = maxi(dg, -(t.rspan - PaneTypes.MIN_TILE))
-			else:
-				if dg <= 0: return
-				dg = mini(dg, PaneTypes.GRID - t.row - t.rspan)
-			for o in neighbours:
-				dg = mini(dg, o.rspan - PaneTypes.MIN_TILE) if edge == "bottom" \
-					else maxi(dg, -(o.rspan - PaneTypes.MIN_TILE))
-			if dg == 0: return
-			if edge == "bottom":
-				t.rspan += dg
-				for o in neighbours:
-					o.row += dg
-					o.rspan -= dg
-			else:
-				t.row += dg
-				t.rspan -= dg
-				for o in neighbours:
-					o.rspan += dg
+	# The two sides of the line, and how far it may travel: a tile that gives
+	# up space stops at MIN_TILE, and the line stays inside the grid.
+	var before := []
+	var after := []
+	var line := 0
+	var px := 0.0
+	if edge == "left" or edge == "right":
+		line = (t.col + t.cspan) if edge == "right" else t.col
+		px = maxf(wrapper.size.x, 1.0) / float(maxi(t.cspan, 1))
+		for o in tiles:
+			if o.col + o.cspan == line: before.append(o)
+			if o.col == line: after.append(o)
+	else:
+		line = (t.row + t.rspan) if edge == "bottom" else t.row
+		px = maxf(wrapper.size.y, 1.0) / float(maxi(t.rspan, 1))
+		for o in tiles:
+			if o.row + o.rspan == line: before.append(o)
+			if o.row == line: after.append(o)
+	if before.is_empty() or after.is_empty(): return
+
+	var lo := -line
+	var hi := PaneTypes.GRID - line
+	var step := 0
+	if edge == "left" or edge == "right":
+		step = int(round(delta.x / px))
+		for o in before: lo = maxi(lo, PaneTypes.MIN_TILE - o.cspan)
+		for o in after: hi = mini(hi, o.cspan - PaneTypes.MIN_TILE)
+	else:
+		step = int(round(delta.y / px))
+		for o in before: lo = maxi(lo, PaneTypes.MIN_TILE - o.rspan)
+		for o in after: hi = mini(hi, o.rspan - PaneTypes.MIN_TILE)
+	var dg := clampi(step, lo, hi)
+	if dg == 0: return
+
+	if edge == "left" or edge == "right":
+		for o in before: o.cspan += dg
+		for o in after:
+			o.col += dg
+			o.cspan -= dg
+	else:
+		for o in before: o.rspan += dg
+		for o in after:
+			o.row += dg
+			o.rspan -= dg
 
 ## Convert a saved layout written against a different grid unit to today's
 ## `PaneTypes.GRID`, so a restored pane keeps its share of the screen instead of a
@@ -742,28 +761,3 @@ static func scale_layout(tiles: Array, declared: int = 0) -> Array:
 		t["rspan"] = maxi(int(round(float(t.get("rspan", unit)) * factor)), 1)
 		out.append(t)
 	return out
-
-## Tiles sharing `t`'s edge on `side`, matched by *overlap*, not by equal
-## extents: the common layout is one full-height pane beside two stacked ones,
-## and the old equal-extent test found no neighbour at all there — so dragging
-## that divider silently did nothing.
-func _neighbours_on(t: Dictionary, side: String) -> Array:
-	var out := []
-	for o in tiles:
-		if o == t: continue
-		match side:
-			"left":
-				if o.col + o.cspan == t.col and _rows_overlap(o, t): out.append(o)
-			"right":
-				if o.col == t.col + t.cspan and _rows_overlap(o, t): out.append(o)
-			"top":
-				if o.row + o.rspan == t.row and _cols_overlap(o, t): out.append(o)
-			"bottom":
-				if o.row == t.row + t.rspan and _cols_overlap(o, t): out.append(o)
-	return out
-
-func _rows_overlap(a: Dictionary, b: Dictionary) -> bool:
-	return a.row < b.row + b.rspan and b.row < a.row + a.rspan
-
-func _cols_overlap(a: Dictionary, b: Dictionary) -> bool:
-	return a.col < b.col + b.cspan and b.col < a.col + a.cspan

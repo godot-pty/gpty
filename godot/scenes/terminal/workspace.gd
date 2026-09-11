@@ -657,6 +657,8 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 			cspan = st["cspan"], rspan = st["rspan"]})
 	if tm.tiles.is_empty():
 		_spawn_pane_into(ws, "terminal")
+	else:
+		tm._sync_edge_strips()
 
 func _tiles_from(raw: Array) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []

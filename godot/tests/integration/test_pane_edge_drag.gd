@@ -48,7 +48,9 @@ func _laid_out_wrappers(count: int) -> Array[Control]:
 # ── The grab area ──────────────────────────────────────────────────────
 
 func test_every_edge_has_a_strip_with_the_resize_cursor():
-	var wrappers := await _laid_out_wrappers(1)
+	# Two panes, i.e. with a divider to drag: a single pane's strips are inert
+	# on purpose (see test_single_pane_edges_do_not_offer_a_resize).
+	var wrappers := await _laid_out_wrappers(2)
 	var w: Control = wrappers[0]
 	for edge in TerminalManager.EDGE_EDGES:
 		var strip: Control = w.get_node_or_null("EdgeHost/Edge" + edge.capitalize())
@@ -181,6 +183,20 @@ func _workspace_with_two_panes() -> Array[Control]:
 		wrappers.append(t.wrapper)
 	return wrappers
 
+## True when the tiles cover the grid exactly once — no gap (what a resize
+## that forgets some tiles leaves behind) and no overlap.
+func _layout_covers_grid(tm: TerminalManager) -> bool:
+	var g: int = PaneTypes.GRID
+	var seen := {}
+	for t in tm.tiles:
+		for r in range(int(t.row), int(t.row + t.rspan)):
+			for c in range(int(t.col), int(t.col + t.cspan)):
+				var key := Vector2i(c, r)
+				if seen.has(key):
+					return false
+				seen[key] = true
+	return seen.size() == g * g
+
 func _cell_total(tm: TerminalManager) -> int:
 	var total := 0
 	for t in tm.tiles:
@@ -283,3 +299,57 @@ func test_press_on_the_band_starts_a_drag_through_gui_picking():
 		"a press 2 px inside the edge must reach the strip, not start a selection")
 	Input.parse_input_event(_release_at(at))
 	Input.flush_buffered_events()
+
+## A divider is a line across the whole window: dragging any part of it moves
+## every tile whose edge lies on it. Moving only the tiles in the grabbed
+## pane's column left the other column's divider behind — a step-shaped grey
+## gap between the panes, reported from a 2x2 layout.
+func test_dragging_one_pane_moves_the_shared_divider_across_columns():
+	var wrappers := await _workspace_with_two_panes()
+	var tm: TerminalManager = _ws._tm
+	while tm.tiles.size() < 4:
+		tm.spawn_pane("terminal", {})
+		await get_tree().process_frame
+	var g: int = PaneTypes.GRID
+	var half: int = int(g * 0.5)
+	# 2x2: 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right.
+	for i in 4:
+		tm.tiles[i].col = half * (i % 2)
+		tm.tiles[i].cspan = g - half
+		tm.tiles[i].row = half * int(i / 2)
+		tm.tiles[i].rspan = g - half
+	_ws._apply_layout()
+	await get_tree().process_frame
+	assert_true(_layout_covers_grid(tm), "the 2x2 layout must start gapless")
+
+	# Grab the *top-left* pane's bottom edge: the line it sits on is shared
+	# with the top-right pane, so both bottom panes must move with it.
+	var rect: Rect2 = wrappers[0].get_global_rect()
+	var start := Vector2(rect.position.x + rect.size.x * 0.5, rect.position.y + rect.size.y - 2.0)
+	tm.begin_edge_drag(wrappers[0], "bottom", start)
+	tm.drive_edge_drag(_motion_at(start + Vector2(0, 12)))
+	assert_true(_layout_covers_grid(tm),
+		"a drag must leave no gap or overlap between the panes")
+	assert_eq(tm.tiles[2].row, tm.tiles[3].row,
+		"both bottom panes must move to the same row (one straight divider)")
+	assert_eq(tm.tiles[0].row + tm.tiles[0].rspan, tm.tiles[2].row,
+		"the top-left pane must end exactly where the bottom-left one starts")
+	assert_eq(tm.tiles[1].row + tm.tiles[1].rspan, tm.tiles[3].row,
+		"the top-right pane must end exactly where the bottom-right one starts")
+	tm.drive_edge_drag(_release_at(start + Vector2(0, 12)))
+
+## One pane has no divider: its edges are the window border, so the strips must
+## not advertise a resize (and pressing them must not start one).
+func test_single_pane_edges_do_not_offer_a_resize():
+	var wrappers := await _laid_out_wrappers(1)
+	var w: Control = wrappers[0]
+	for edge in ["left", "right", "top", "bottom"]:
+		var strip: Control = w.get_node("EdgeHost/Edge" + edge.capitalize())
+		assert_eq(strip.mouse_filter, Control.MOUSE_FILTER_IGNORE,
+			"the %s edge must not grab the pointer for a single pane" % edge)
+		assert_eq(strip.mouse_default_cursor_shape, Control.CURSOR_ARROW,
+			"the %s edge must not show a resize cursor for a single pane" % edge)
+	var rect: Rect2 = w.get_global_rect()
+	var at := Vector2(rect.position.x + rect.size.x - 2.0, rect.position.y + rect.size.y * 0.5)
+	_tm.begin_edge_drag(w, "right", at)
+	assert_false(_tm.drag_active(), "a single pane must not start a resize drag")
