@@ -122,7 +122,7 @@ All CLI commands below use the default socket path (`$XDG_RUNTIME_DIR/gpty.sock`
 | 27 | `Ctrl+B` | Sidebar toggles visible/hidden |
 | 28 | `Ctrl+P` | Command palette opens, fuzzy search works |
 | 29 | `Alt+Arrow` | Focus moves between adjacent panes geographically |
-| 30 | Drag tile edge | Pane resizes, adjacent pane compensates |
+| 30 | Drag a pane edge (grab within ~6 px of the separator; the cursor becomes a resize arrow) | Pane resizes, adjacent pane compensates |
 | 31 | Sidebar window mode dropdown | Cycle OS → Borderless → Fullscreen, window responds correctly |
 | 32 | Settings panel (sidebar gear icon) | Opens, change font size → terminal re-renders, change persists after restart |
 | 33 | Profile save (sidebar save icon) | Save current layout, quit, relaunch, load from sidebar → layout restored |

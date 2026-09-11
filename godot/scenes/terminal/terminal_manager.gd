@@ -152,8 +152,51 @@ func _build_wrapper_body(body: Control, title: String) -> Control:
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(body)
 
-	root.gui_input.connect(func(event: InputEvent): _on_tile_edge_drag(event, root))
+	# Edge strips: they must be the wrapper's topmost children, because Godot
+	# picks the last sibling first and the pane body consumes every event over
+	# it. They live in a plain Control of their own: a PanelContainer fits
+	# *all* of its children into the content rect, so direct children would be
+	# stretched over the whole pane and swallow every click.
+	var edge_host := Control.new()
+	edge_host.name = "EdgeHost"
+	edge_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(edge_host)
+	for edge in EDGE_EDGES:
+		edge_host.add_child(_make_edge_strip(edge, root))
 	return root
+
+## Thickness of a pane's edge-drag strips.
+##
+## The pane body fills the wrapper, and a Control with `MOUSE_FILTER_STOP`
+## consumes the events over it, so the wrapper's own `gui_input` only ever
+## fired inside its 1 px stylebox border — a 4 px edge test was unreachable
+## (landing within one pixel of the border and pressing without moving is not
+## a gesture), and the imperative `cursor_set_shape` was overwritten by the
+## body's default arrow cursor the moment the pointer entered it, which is
+## why the resize cursor only flashed. The strips sit on top of the body, know
+## their own edge, and carry the cursor shape as `mouse_default_cursor_shape`,
+## which Godot applies on hover without any imperative call.
+const EDGE_STRIP := 6
+const EDGE_EDGES := ["left", "right", "top", "bottom"]
+
+func _make_edge_strip(edge: String, root: Control) -> Control:
+	var strip := Control.new()
+	strip.name = "Edge" + edge.capitalize()
+	strip.mouse_filter = Control.MOUSE_FILTER_STOP
+	strip.mouse_default_cursor_shape = (
+		Control.CURSOR_HSIZE if edge == "left" or edge == "right"
+		else Control.CURSOR_VSIZE)
+	strip.anchor_top = 0.0 if edge != "bottom" else 1.0
+	strip.anchor_bottom = 1.0 if edge != "top" else 0.0
+	strip.anchor_left = 0.0 if edge != "right" else 1.0
+	strip.anchor_right = 1.0 if edge != "left" else 0.0
+	match edge:
+		"left": strip.offset_right = EDGE_STRIP
+		"right": strip.offset_left = -EDGE_STRIP
+		"top": strip.offset_bottom = EDGE_STRIP
+		"bottom": strip.offset_top = -EDGE_STRIP
+	strip.gui_input.connect(func(event: InputEvent): _on_edge_strip_input(event, root, edge))
+	return strip
 
 func _make_vbox() -> VBoxContainer:
 	var v = VBoxContainer.new()
@@ -515,35 +558,53 @@ func show_type_swap_popup(for_body: Control, menu_parent: Control, at_pos: Vecto
 var _drag_edge: String = ""
 var _drag_wrapper: Control = null
 
-const EDGE_THRESHOLD = 4
+## True while an edge drag owns the mouse.
+func drag_active() -> bool:
+	return _drag_edge != ""
 
-func _on_tile_edge_drag(event: InputEvent, wrapper: Control):
-	if event is InputEventMouseMotion and _drag_edge == "":
-		var e = _edge_at(wrapper, event.position)
-		if e != "":
-			match e:
-				"left", "right": DisplayServer.cursor_set_shape(DisplayServer.CURSOR_HSIZE)
-				"top", "bottom": DisplayServer.cursor_set_shape(DisplayServer.CURSOR_VSIZE)
-		else:
-			DisplayServer.cursor_set_shape(DisplayServer.CURSOR_ARROW)
-	elif event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			var e = _edge_at(wrapper, event.position)
-			if e != "":
-				_drag_edge = e
-				_drag_wrapper = wrapper
-				_drag_start_pos = event.global_position
-				_save_drag_initial_sizes()
-		elif event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-			if _drag_edge != "":
-				_drag_edge = ""
-				_drag_wrapper = null
-				DisplayServer.cursor_set_shape(DisplayServer.CURSOR_ARROW)
-				tiles_resized.emit()
-	elif event is InputEventMouseMotion and _drag_edge != "":
-		var delta = event.global_position - _drag_start_pos
-		_resize_tile(_drag_wrapper, _drag_edge, delta)
+## Start a resize drag. Called by an edge strip's press; the drag itself is
+## driven by `drive_edge_drag` from raw input, because the motion that follows
+## a press on the border immediately leaves the strip for the pane body.
+func begin_edge_drag(wrapper: Control, edge: String, at: Vector2):
+	_drag_edge = edge
+	_drag_wrapper = wrapper
+	_drag_start_pos = at
+	_save_drag_initial_sizes()
+
+func end_edge_drag():
+	if _drag_edge == "":
+		return
+	_drag_edge = ""
+	_drag_wrapper = null
+	tiles_resized.emit()
+
+## Drive an in-flight drag from the workspace's raw `_input`: motion resizes,
+## the button release ends it. Returns true when the event belonged to the
+## drag, so the caller consumes it (the pane body must not also read the
+## motion as a text selection).
+func drive_edge_drag(event: InputEvent) -> bool:
+	if _drag_edge == "":
+		return false
+	if event is InputEventMouseMotion:
+		_resize_tile(_drag_wrapper, _drag_edge, event.global_position - _drag_start_pos)
 		_drag_start_pos = event.global_position
+		return true
+	if (
+		event is InputEventMouseButton
+		and event.button_index == MOUSE_BUTTON_LEFT
+		and not event.pressed
+	):
+		end_edge_drag()
+		return true
+	return false
+
+func _on_edge_strip_input(event: InputEvent, wrapper: Control, edge: String):
+	if not (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT):
+		return
+	if event.pressed:
+		begin_edge_drag(wrapper, edge, event.global_position)
+	else:
+		end_edge_drag()
 
 var _drag_start_pos: Vector2
 var _drag_saved_sizes: Dictionary = {}
@@ -553,14 +614,6 @@ func _save_drag_initial_sizes():
 	for i in tiles.size():
 		var t = tiles[i]
 		_drag_saved_sizes[t.wrapper] = {"col": t.col, "row": t.row, "cspan": t.cspan, "rspan": t.rspan}
-
-func _edge_at(wrapper: Control, pos: Vector2) -> String:
-	var s = wrapper.size
-	if pos.x <= EDGE_THRESHOLD: return "left"
-	if pos.x >= s.x - EDGE_THRESHOLD: return "right"
-	if pos.y <= EDGE_THRESHOLD: return "top"
-	if pos.y >= s.y - EDGE_THRESHOLD: return "bottom"
-	return ""
 
 func _resize_tile(wrapper: Control, edge: String, delta: Vector2):
 	var ti = -1

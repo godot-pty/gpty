@@ -2,17 +2,43 @@
 
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Security
-
-- **Workspace Trust shows what it will run.** The dialog named a category — "a different program, pass extra arguments, or set a different environment" — without naming the values, so approving it was a guess. It now lists the program, the argv, and each `environment:` entry, escaped and capped (the content comes from the file, not from us). `layoutLoad` over the control socket refuses an untrusted profile outright, since a CLI or MCP caller cannot answer a dialog.
+## [0.5.3] — 2026-09-10
 
 ### Added
 
 - `single_line` concepts mean **notify-only**: a trigger match is published on the event socket (`{type: concept, event: matched, mode: single_line, name, source}`) and nothing else happens — no capture, no routing, no output taken from the pane. The Settings → Concepts editor offers the mode again, and hides the target and stop-condition fields for it. A missing or unknown `capture_mode` still captures. Metadata only: the matched line is never published.
+- **Terminal mouse reporting.** A pane forwards clicks, drags and wheel events to a child that enabled mouse tracking (`DECSET 1000`/`1002`/`1003`, encoded as SGR when `1006` is on and in the legacy X10 form otherwise, from the same cell mapping selection uses), so `nvim`'s mouse mode, `lazygit` and herdr's pop-ups work inside a pane instead of only seeing the pane's own selection. Only the events the enabled mode covers are forwarded — with tracking off nothing changes — and holding `Shift` keeps text selection reachable while an app has grabbed the mouse.
+
+### Changed
+
+- **Rendering no longer costs the frame under load.** Text is drawn as one `draw_string` per run of cells that share font, color and underline state instead of one per cell (a full-screen repaint measured ~20 % cheaper), and a pane whose own grid fetch plus repaint exceeds a 4 ms per-frame budget looks at the grid less often — geometrically, down to ~10 Hz — instead of rebuilding its canvas every frame. That is what a flooding PTY (`cat /dev/urandom`, `yes`) used to do to the whole UI thread; a pane that keeps up is never throttled, and neither is a view you are scrolling yourself.
+- Idle panes no longer repaint at all (the repaint is gated on the grid generation) and the per-frame per-pane FFI polls and focus walk moved off the frame.
+- The pane search opens with `Ctrl+Shift+F`; plain `Ctrl+F` reaches the PTY again, as the docs always claimed (vim/less page-forward).
+
+### Fixed
+
+- **Pane edges could not be dragged.** The resize handler ran on the wrapper's `gui_input`, but the pane body fills the wrapper and consumes the mouse, so the wrapper only ever saw events inside its 1 px stylebox border — the 4 px edge test was unreachable, and the resize cursor only flashed because the body's default arrow overwrote it. Each pane edge now has a 6 px strip that owns the cursor shape and starts the drag, and the drag is driven from raw input so it survives the pointer leaving the strip.
+- Window titlebar controls used the wrong glyphs — maximize showed a keypad, restore a phone, and the window-mode picker a folder. They now render arrows-out / arrows-in / monitor (codepoints verified against the bundled font).
+- **Captures survive their pane.** Closing, swapping or resetting a pane mid-capture, or letting the child exit, used to drop the buffered output (the terminal task was aborted past its finalize path, and nothing polls a dead pane's queue); the capture is now finalized and routed like any other. A notify-only concept can also no longer sit in front of a capture concept and starve it, and the shell's post-SIGWINCH repaint is no longer buffered into an active capture (where it appeared as a duplicated prompt).
+- `pane-status`/`pane-run` report the exit code even when the child closes its pty a moment before it becomes reapable, instead of reporting nothing for a command that did exit.
+- The Inspector's OMP session serves a turn on a fresh child when the previous one's pipes are already closed (the liveness probe has the same window as the exit-code race above), instead of failing a turn nothing ever received.
+- The position-swap popup resolves its targets when a row is clicked, so a pane killed while the popup is open no longer swaps the wrong pair or indexes past the end.
+- Scrollback rows belonging to panes that no longer exist are reclaimed; the store stops growing with every pane id the workspace ever had.
+- Search: the first `Enter` advances past the matches already on screen, and scrollback search accepts what a user actually types (`main.rs`, `error: x`) instead of failing as a raw FTS5 query.
+- Keyboard focus moves to a surviving pane when the active one closes, instead of typing reaching nothing until the user clicks another pane.
+- Settings are written through a sibling temp file and renamed into place, so a failed write can no longer truncate the store; an unsupported max-FPS value is shown instead of deselecting the control.
+- Attachment ids stay unique when panes are attached, and disabling every concept takes effect immediately.
+- The PTY reader and writer are opened before the child is spawned (a failure no longer leaves an unreachable shell), the shell is reaped if the reader thread cannot start, and emulator replies are written with the grid lock released so a child that stops reading cannot stall the pane's renderer.
+- Scrollback persistence failures are reported instead of silently dropped.
+- Input: numpad keys send their characters unless the app enabled keypad mode; modified `~`-terminated keys emit the correct CSI form; key auto-repeat no longer reaches the paste and search chords twice; a stored grid size is applied only before a tile is laid out.
+- The cursor hides when the application hides it and follows the viewport when scrolling back.
+- Inspector reliability: a turn's output no longer leaks into the next turn; dropped events are reported instead of silently truncating the answer; an untouched adapter argv is not re-split; adapter frames are capped while reading; the adapter's stderr is drained so it cannot deadlock; the OMP child is re-spawned rather than written into.
+- IPC: the Windows event pipe sets the first-instance flag only for the first instance; a request without an id is treated as a notification instead of id 0.
+- MCP `pane-*`/`concept-*` tools resolve to their IPC methods again, and `pane-read` returns scrollback as documented rather than only the viewport.
 
 ### Security
+
+- **Workspace Trust shows what it will run.** The dialog named a category — "a different program, pass extra arguments, or set a different environment" — without naming the values, so approving it was a guess. It now lists the program, the argv, and each `environment:` entry, escaped and capped (the content comes from the file, not from us). `layoutLoad` over the control socket refuses an untrusted profile outright, since a CLI or MCP caller cannot answer a dialog.
 
 - **Concept definitions can no longer execute commands.** A concept is data: a regex trigger, a stop condition, and a routing target. Until now it could also carry a command template that was written into a target pane's PTY — reachable from terminal output (any program that printed a matching line) and from a Ctrl+click on a matching line, both with no authentication, no consent prompt, and no notice. A third-party `concepts.json` was therefore arbitrary code execution with an attacker-chosen trigger, aimed at whatever pane matched, repeatable and silent; the click path shipped in v0.5.2. Removed: `command_template`, `substitute_template`, `shell_quote`, `matching_commands`, the engine's event-injection branch and the pub-sub channel that existed only to carry it, `match_concepts_on_line`, the Ctrl+click handler, and the concept label plumbing (`TerminalConfig.labels`, `labels_json`, `_concept_labels`). Legacy `cmd` keys in a user file are ignored on parse and stripped on save; the Settings → Concepts dialog no longer collects one. See [SECURITY.md](SECURITY.md) for the threat model behind the change.
 - **Workspace Trust now covers everything that executes in a restored pane.** The gate compared only the legacy `shell` key, while restore consumed `command` > `shell` and passed `shell_args` and `shell_env` through untouched. A downloaded profile could therefore spawn `/bin/bash -c "curl … | sh"` (argv) or add a `command` override with no prompt at all — the argv half was the live one. The env half turned out to be unreachable: `_restore_into` applies tile settings before `apply_to_terminal`, which overwrites `shell_env` with the user's global, so a restored tile's env never reaches a child. That ordering also silently discards a user's own per-pane env on every restore; it is tracked with the v0.5.5 env model, where it must be fixed (fixing it alone would hand file-supplied env back to the attacker). `PaneTypes.tile_spawns_untrusted` checks program, argv, and environment against the user's defaults, and the workspace-restore path uses the same predicate.
@@ -23,10 +49,10 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - **MCP `tools/call` is restricted to advertised tools.** Any name was mapped to an IPC method, reaching methods that were never published as tools (including `shutdown`).
 - **CI runs least-privilege.** `ci.yml` declares `permissions: contents: read` instead of inheriting the repository default token scope, which was handed to a third-party audit action.
 - Added [SECURITY.md](SECURITY.md): threat model, reporting process, hardening that must not be weakened, and known limitations.
-
-### Fixed
-
-- Window titlebar controls used the wrong glyphs — maximize showed a keypad, restore a phone, and the window-mode picker a folder. They now render arrows-out / arrows-in / monitor (codepoints verified against the bundled font).
+- **The Inspector's prompt cannot be escaped by its own content.** Untrusted capture is wrapped in a fence one backtick longer than the longest run inside it (capped) and `concept`/`pane` metadata is flattened to a single line, so a capture that prints ``` can no longer land as instructions.
+- **Restored programs are validated beyond their own mode.** An absolute `command`/`shell` from a layout or profile must be a regular file owned by this user (or root), not group/other-writable, and its parent chain must not be shared-writable without the sticky bit — a downloaded profile can no longer run a binary another user could have replaced. The Inspector's adapter argv is held to the same rule.
+- **Control credentials are refused from untrusted pane environments** (`GPTY_SECRET`/`GPTY_SOCKET` alongside the pane-marker and event-channel keys), and the control socket compares its secret without short-circuiting.
+- **An unterminated OSC sequence is force-closed at 64 KiB.** vte's `std` build keeps OSC bytes in an unbounded buffer, so a program that emitted `ESC ]` without a terminator grew the parser's memory and left it stuck inside the string, swallowing every later line.
 
 ## [0.5.2] — 2026-09-09
 
@@ -171,6 +197,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - Cursor blink toggle redraws the terminal immediately
 - Concept editor no longer crashes when opened with an empty workspace (no terminal panes) — the Add Concept button is disabled until a terminal exists
 
+[0.5.3]: https://github.com/godot-pty/gpty/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/godot-pty/gpty/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/godot-pty/gpty/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/godot-pty/gpty/compare/v0.4.0...v0.5.0

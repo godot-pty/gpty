@@ -733,6 +733,14 @@ func _input(event):
 	# bodies contain RichTextLabels/ScrollContainers that consume clicks,
 	# and _unhandled_input would never see them. The workspace fills the
 	# window, so the event's viewport position maps 1:1 to canvas space.
+	#
+	# An in-flight pane-edge drag owns the mouse the same way: it starts on a
+	# strip at the pane's border, so the very next motion is already over the
+	# pane body (which would read it as a text selection). Driving the drag
+	# from here keeps it alive across the whole window.
+	if _tm != null and _tm.drag_active() and _tm.drive_edge_drag(event):
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		_activate_pane_under_mouse(event.position)
 
