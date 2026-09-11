@@ -352,6 +352,16 @@ async fn drive_child(
             .code()
             .map(|c| c.to_string())
             .unwrap_or_else(|| "signal".into());
+        // The adapter's stderr is drained by its own task, and the child
+        // exiting does not mean that task has read it yet: a summary taken
+        // here could drop precisely the line that explains the failure. Give
+        // the drain a bounded moment to reach EOF (the pipe closes with the
+        // child, so it ends immediately) before summarizing.
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            &mut bridge.stderr_task,
+        )
+        .await;
         let detail = bridge.stderr_summary();
         return Err(if detail.is_empty() {
             format!("cli backend exited with {code}")
