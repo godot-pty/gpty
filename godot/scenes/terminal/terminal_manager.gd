@@ -443,6 +443,15 @@ func _tile_index_of(body: Variant) -> int:
 			return i
 	return -1
 
+## Index of the tile whose *wrapper* is `wrapper`, or -1. The edge-drag paths
+## address tiles by wrapper (that is what the press carried), not by body —
+## `_tile_index_of` resolves bodies and would never match a wrapper.
+func _tile_index_for_wrapper(wrapper: Control) -> int:
+	for i in tiles.size():
+		if tiles[i].wrapper == wrapper:
+			return i
+	return -1
+
 func _toggle_minimize(w: Control, btn: Button):
 	var body = _find_body(w)
 	if body:
@@ -586,8 +595,14 @@ func drive_edge_drag(event: InputEvent) -> bool:
 	if _drag_edge == "":
 		return false
 	if event is InputEventMouseMotion:
+		# Distance from the *press*, not from the previous motion event.
+		# `_resize_tile` recomputes the whole move from the spans saved at the
+		# press, so a per-event delta would apply a partial step to a fresh
+		# baseline every time — and mouse motion arrives in 1-3 px steps that
+		# round to zero cells, which is why a slow drag moved nothing at all.
 		_resize_tile(_drag_wrapper, _drag_edge, event.global_position - _drag_start_pos)
-		_drag_start_pos = event.global_position
+		# Follow the pointer while dragging instead of jumping on release.
+		tiles_resized.emit()
 		return true
 	if (
 		event is InputEventMouseButton
@@ -616,33 +631,30 @@ func _save_drag_initial_sizes():
 		_drag_saved_sizes[t.wrapper] = {"col": t.col, "row": t.row, "cspan": t.cspan, "rspan": t.rspan}
 
 func _resize_tile(wrapper: Control, edge: String, delta: Vector2):
-	var ti = -1
-	for i in tiles.size():
-		if tiles[i].wrapper == wrapper: ti = i; break
+	# `delta` is the distance from the press, and the whole move is recomputed
+	# from the spans saved at the press. Both halves matter for a smooth drag:
+	# a real drag arrives as many 1-3 px motion events, so a per-step delta
+	# would round away to zero cells, and applying a step on top of a partial
+	# move would break the neighbour lookup below (the tiles no longer match
+	# the layout the press was made on) — which reverted the pane being
+	# dragged and left the grid not adding up to GRID cells.
+	var ti := _tile_index_for_wrapper(wrapper)
 	if ti == -1: return
+	if _drag_saved_sizes.get(wrapper, {}).is_empty(): return
+	for o in tiles:
+		var o_saved: Dictionary = _drag_saved_sizes.get(o.wrapper, {})
+		if o_saved.is_empty(): continue
+		o.col = o_saved.get("col", o.col)
+		o.row = o_saved.get("row", o.row)
+		o.cspan = o_saved.get("cspan", o.cspan)
+		o.rspan = o_saved.get("rspan", o.rspan)
 
 	var t = tiles[ti]
-	var saved = _drag_saved_sizes.get(wrapper, {})
-	if saved.is_empty(): return
-
-	# Reset both tiles to saved positions before applying delta
-	t.col = saved.get("col", t.col)
-	t.row = saved.get("row", t.row)
-	t.cspan = saved.get("cspan", t.cspan)
-	t.rspan = saved.get("rspan", t.rspan)
-
 	match edge:
 		"left":
 			var adj = _adjacent_left(t)
 			if adj == null: return
-			# Reset adjacent too
-			var adj_saved = _drag_saved_sizes.get(adj.wrapper, {})
-			if adj_saved.is_empty(): return
-			adj.col = adj_saved.get("col", adj.col)
-			adj.cspan = adj_saved.get("cspan", adj.cspan)
-			# Compute delta in grid units (approximate)
-			var total_w = maxf(wrapper.size.x, 1.0)
-			var grid_px = total_w / float(maxi(t.cspan + adj.cspan, 1))
+			var grid_px = maxf(wrapper.size.x, 1.0) / float(maxi(t.cspan + adj.cspan, 1))
 			var dg = int(round(delta.x / grid_px))
 			if dg >= 0: return  # dragging left edge left means shrinking self
 			dg = maxi(dg, -(t.cspan - MIN_TILE))  # don't push past MIN_TILE on self
@@ -654,12 +666,7 @@ func _resize_tile(wrapper: Control, edge: String, delta: Vector2):
 		"right":
 			var adj = _adjacent_right(t)
 			if adj == null: return
-			var adj_saved = _drag_saved_sizes.get(adj.wrapper, {})
-			if adj_saved.is_empty(): return
-			adj.col = adj_saved.get("col", adj.col)
-			adj.cspan = adj_saved.get("cspan", adj.cspan)
-			var total_w = maxf(wrapper.size.x, 1.0)
-			var grid_px = total_w / float(maxi(t.cspan + adj.cspan, 1))
+			var grid_px = maxf(wrapper.size.x, 1.0) / float(maxi(t.cspan + adj.cspan, 1))
 			var dg = int(round(delta.x / grid_px))
 			if dg <= 0: return  # dragging right edge right means growing self
 			dg = mini(dg, GRID - t.col - t.cspan)  # don't go past grid
@@ -671,12 +678,7 @@ func _resize_tile(wrapper: Control, edge: String, delta: Vector2):
 		"top":
 			var adj = _adjacent_above(t)
 			if adj == null: return
-			var adj_saved = _drag_saved_sizes.get(adj.wrapper, {})
-			if adj_saved.is_empty(): return
-			adj.row = adj_saved.get("row", adj.row)
-			adj.rspan = adj_saved.get("rspan", adj.rspan)
-			var total_h = maxf(wrapper.size.y, 1.0)
-			var grid_px = total_h / float(maxi(t.rspan + adj.rspan, 1))
+			var grid_px = maxf(wrapper.size.y, 1.0) / float(maxi(t.rspan + adj.rspan, 1))
 			var dg = int(round(delta.y / grid_px))
 			if dg >= 0: return
 			dg = maxi(dg, -(t.rspan - MIN_TILE))
@@ -688,12 +690,7 @@ func _resize_tile(wrapper: Control, edge: String, delta: Vector2):
 		"bottom":
 			var adj = _adjacent_below(t)
 			if adj == null: return
-			var adj_saved = _drag_saved_sizes.get(adj.wrapper, {})
-			if adj_saved.is_empty(): return
-			adj.row = adj_saved.get("row", adj.row)
-			adj.rspan = adj_saved.get("rspan", adj.rspan)
-			var total_h = maxf(wrapper.size.y, 1.0)
-			var grid_px = total_h / float(maxi(t.rspan + adj.rspan, 1))
+			var grid_px = maxf(wrapper.size.y, 1.0) / float(maxi(t.rspan + adj.rspan, 1))
 			var dg = int(round(delta.y / grid_px))
 			if dg <= 0: return
 			dg = mini(dg, GRID - t.row - t.rspan)

@@ -18,6 +18,11 @@ func before_each():
 	_tm = TerminalManager.new()
 
 func after_each():
+	if _ws and is_instance_valid(_ws):
+		if _ws.get_parent():
+			_ws.get_parent().remove_child(_ws)
+		_ws.free()
+	_ws = null
 	for t in _tm.tiles:
 		if t.wrapper:
 			t.wrapper.free()
@@ -143,6 +148,83 @@ func test_motion_without_a_drag_is_left_alone():
 	var wrappers := await _laid_out_wrappers(1)
 	assert_false(_tm.drive_edge_drag(_motion_at(wrappers[0].get_global_rect().get_center())),
 		"motion with no drag in flight must reach the panes")
+
+# ── Live resize (a real workspace, so the wrappers actually move) ──────
+
+const WorkspaceScript = preload("res://scenes/terminal/workspace.gd")
+
+var _ws: Control
+var _host: Control
+
+## A real workspace with two panes. The wrappers only move when
+## `tiles_resized` reaches `_apply_layout`, which is the wiring a drag
+## without live feedback would silently skip.
+func _workspace_with_two_panes() -> Array[Control]:
+	_host = Control.new()
+	_host.size = Vector2(1200, 800)
+	add_child_autofree(_host)
+	_ws = WorkspaceScript.new()
+	_host.add_child(_ws)
+	# The workspace takes its geometry from main.tscn's anchors; here it has to
+	# be given one, or every rect is degenerate and a drag cannot move anything.
+	_ws.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	_ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var tm: TerminalManager = _ws._tm
+	tm.spawn_pane("terminal", {})
+	_ws._apply_layout()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var wrappers: Array[Control] = []
+	for t in tm.tiles:
+		wrappers.append(t.wrapper)
+	return wrappers
+
+func _cell_total(tm: TerminalManager) -> int:
+	var total := 0
+	for t in tm.tiles:
+		total += t.cspan
+	return total
+
+## The drag has to behave like a tmux divider: follow the pointer in whole
+## cells while the button is held, and never lose a cell. Mouse motion arrives
+## in 1-3 px steps, so a per-step delta would round to zero and a partially
+## applied move used to leave the panes not adding up.
+func test_drag_follows_the_pointer_step_by_step():
+	var wrappers := await _workspace_with_two_panes()
+	var tm: TerminalManager = _ws._tm
+	var rect: Rect2 = wrappers[0].get_global_rect()
+	var start := Vector2(rect.position.x + rect.size.x - 2.0, rect.position.y + rect.size.y * 0.5)
+	var width_before: float = rect.size.x
+
+	tm.begin_edge_drag(wrappers[0], "right", start)
+	for step in 8:
+		tm.drive_edge_drag(_motion_at(start + Vector2(12 * (step + 1), 0)))
+		assert_eq(_cell_total(tm), TerminalManager.GRID,
+			"after step %d the panes must still add up to the grid" % (step + 1))
+	assert_gt(wrappers[0].get_global_rect().size.x, width_before,
+		"the pane must follow the pointer while dragging, not only on release")
+
+	var grown: float = wrappers[0].get_global_rect().size.x
+	tm.drive_edge_drag(_release_at(start + Vector2(96, 0)))
+	await get_tree().process_frame
+	assert_almost_eq(wrappers[0].get_global_rect().size.x, grown, 1.0,
+		"releasing must not move the divider back")
+	assert_false(tm.drag_active(), "the release ends the drag")
+
+## Dragging past the neighbour's minimum stops there instead of collapsing it.
+func test_drag_stops_at_the_minimum_pane_size():
+	var wrappers := await _workspace_with_two_panes()
+	var tm: TerminalManager = _ws._tm
+	var rect: Rect2 = wrappers[0].get_global_rect()
+	var start := Vector2(rect.position.x + rect.size.x - 2.0, rect.position.y + rect.size.y * 0.5)
+	tm.begin_edge_drag(wrappers[0], "right", start)
+	tm.drive_edge_drag(_motion_at(start + Vector2(4000, 0)))
+	tm.drive_edge_drag(_release_at(start + Vector2(4000, 0)))
+	assert_eq(_cell_total(tm), TerminalManager.GRID, "the grid must stay full")
+	assert_eq(tm.tiles[1].cspan, TerminalManager.MIN_TILE,
+		"the neighbour stops at MIN_TILE rather than vanishing")
 
 ## The failure this file exists for: Godot's pick decides who gets the press,
 ## and the pane body consumed every event over the pane — the press has to
