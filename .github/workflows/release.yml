@@ -117,6 +117,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # project.godot carries the last released version; bundles must report the
+      # tag (macOS reads CFBundleShortVersionString from it).
+      - name: Stamp the release version into the Godot project
+        run: |
+          sed -i "s|^config/version=.*|config/version=\"${VERSION#v}\"|" godot/project.godot
+          grep -n '^config/version=' godot/project.godot
+
       - name: Install Godot headless
         run: |
           sudo apt-get update -y && sudo apt-get install -y wget unzip
