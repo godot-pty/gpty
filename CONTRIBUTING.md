@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Rust >= 1.85 (tested with 1.96)
-- Godot 4.4+ (tested with 4.7) with GDExtension support
+- Godot 4.4+ (tested with 4.7.2) with GDExtension support
 - Linux (primary target), macOS (untested) or Windows 11 (untested).
 
 ## Setup

@@ -127,27 +127,27 @@ jobs:
       - name: Install Godot headless
         run: |
           sudo apt-get update -y && sudo apt-get install -y wget unzip
-          wget -q https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip
-          unzip Godot_v4.7-stable_linux.x86_64.zip
-          chmod +x Godot_v4.7-stable_linux.x86_64
-          sudo mv Godot_v4.7-stable_linux.x86_64 /usr/local/bin/godot
+          wget -q https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip Godot_v4.7.2-stable_linux.x86_64.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          sudo mv Godot_v4.7.2-stable_linux.x86_64 /usr/local/bin/godot
 
       - name: Install Godot export templates
         run: |
-          wget -q https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz
-          mkdir -p ~/.local/share/godot/export_templates/4.7.stable
+          wget -q https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz
+          mkdir -p ~/.local/share/godot/export_templates/4.7.2.stable
           mkdir -p /tmp/godot-templates
-          unzip -qo Godot_v4.7-stable_export_templates.tpz -d /tmp/godot-templates
+          unzip -qo Godot_v4.7.2-stable_export_templates.tpz -d /tmp/godot-templates
           if [ -d /tmp/godot-templates/templates ]; then
-            mv /tmp/godot-templates/templates/* ~/.local/share/godot/export_templates/4.7.stable/
+            mv /tmp/godot-templates/templates/* ~/.local/share/godot/export_templates/4.7.2.stable/
           else
-            mv /tmp/godot-templates/* ~/.local/share/godot/export_templates/4.7.stable/
+            mv /tmp/godot-templates/* ~/.local/share/godot/export_templates/4.7.2.stable/
           fi
-          cd ~/.local/share/godot/export_templates/4.7.stable
+          cd ~/.local/share/godot/export_templates/4.7.2.stable
           if [ -f macos.zip ]; then
             unzip -qo macos.zip "macos_template.app/Contents/MacOS/*" -d .
           fi
-          ls -la ~/.local/share/godot/export_templates/4.7.stable/
+          ls -la ~/.local/share/godot/export_templates/4.7.2.stable/
 
       - name: Download GDExtension artifacts
         uses: actions/download-artifact@v4

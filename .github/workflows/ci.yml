@@ -106,10 +106,10 @@ jobs:
       - name: Install Godot headless
         run: |
           sudo apt-get update -y && sudo apt-get install -y wget unzip
-          wget -q https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip
-          unzip Godot_v4.7-stable_linux.x86_64.zip
-          chmod +x Godot_v4.7-stable_linux.x86_64
-          sudo mv Godot_v4.7-stable_linux.x86_64 /usr/local/bin/godot
+          wget -q https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip Godot_v4.7.2-stable_linux.x86_64.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          sudo mv Godot_v4.7.2-stable_linux.x86_64 /usr/local/bin/godot
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
