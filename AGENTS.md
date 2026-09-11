@@ -155,6 +155,16 @@ The MCP tool schemas are auto-generated from clap command definitions in `crates
 
 See `skill://gpty-omp-integration` for usage patterns.
 
+## Roadmap workflow
+
+`ROADMAP.md` is a **prioritized queue**, not a diary. Work it like this:
+
+- **Picking the next task** — the next task is the first unchecked item in the *earliest unfinished release section* (sections run newest-release-first, so that is the last section containing `[ ]`; v0.5.4 while it is open). No grouping by origin, no separate "carry-over" headings: within a release, item order *is* the priority, and the top item is the answer to "what's next".
+- **Ordering** (used when adding or re-prioritizing items) — data-loss and correctness first, then security with a reachable path, then the release's own features, then robustness and tests, then low-reachability hardening, then polish, then work that can only happen at release time (tagging, packaging against a released artifact). Ties break toward the smaller item.
+- **New items found while working** — a defect or follow-up discovered mid-task does not get fixed silently, queued in a comment, or folded into an unrelated commit: add it to the roadmap as its own item, in priority position, with the evidence that makes it actionable (what breaks, how it was found, what the fix is). Fixing it immediately is fine when it is genuinely part of the current item's contract; otherwise it waits in the queue.
+- **Completed items** stay under their release with the evidence (what shipped, measured numbers, tests) — the release section doubles as the record. The CHANGELOG carries the user-facing summary at release time.
+- **Folded-up detail** — when a triage note, correction, or clarification exists for an item, it belongs *in* that item's text, not in a separate "corrections" item. An item that turns out to be partly done gets narrowed to what remains rather than left asserting a fixed problem.
+
 ## Testing
 
 - Tests live in `godot/tests/` — `unit/` for pure-logic classes, `integration/` for scene-tree tests.
