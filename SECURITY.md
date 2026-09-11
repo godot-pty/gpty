@@ -1,21 +1,24 @@
 # Security Policy
 
-gPTY is a local terminal workspace: it spawns PTY-backed shells, draws their grids, and exposes a
-local control socket so CLI tools, agents, and scripts can drive panes. This document states what
-the project defends against, what it deliberately does not, and how to report a problem.
+This document states what the project defends against, what it deliberately does not, 
+and how to report a problem.
 
 Implementation rules for contributors live in [AGENTS.md](AGENTS.md#security). This file is the
-policy: the threat model, the limits, and the reporting process.
+policy: the (currently limited) threat model, the limits, and the reporting process.
 
 ## Supported versions
 
-| Version | Supported |
+| Version | Support |
 | ------- | --------- |
-| 0.5.x   | :white_check_mark: security and correctness fixes |
+| > 0.5   | :white_check_mark: Security and correctness fixes |
 | < 0.5   | :x: |
 
-Pre-1.0: fixes land on `main` and ship in the next release. There are no maintenance branches and
-no backports to older minor versions — if a fix matters to you, upgrade.
+Generally, fixes will land on `main` and ship in the immediate next release. There is no plan to 
+have maintenance branches and/or backports to older minor versions — if a fix matters to you, 
+please upgrade.
+
+That said, if there is an issue with a significant severity and implications, the fix will be 
+backported to prior releases as feasible.
 
 ## Reporting a vulnerability
 
@@ -24,36 +27,37 @@ vulnerability**. It opens a private advisory thread visible only to the maintain
 open a public issue, pull request, or discussion for a suspected vulnerability — that exposes every
 user before a fix exists.
 
-If private reporting is unavailable to you, open an issue titled `security contact request` with
-**no technical details** and a maintainer will establish a private channel.
+If private reporting is unavailable to you, open an issue titled `Security Request` with
+**no technical details** and a maintainer will establish a private channel. In this channel,
+be prepared to privately share:
 
-Please include:
-
-- affected version, commit, and platform;
-- what an attacker controls (a file the user opens, a program running inside a pane, a remote
-  response, another local user, …);
-- a minimal reproduction, and the impact you believe it has.
+- The affected version(s), commit(s), and platform(s);
+- What an attacker could potentially control (a file the user opens, a program running inside a pane, 
+ a remote response, another local user, etc.);
+- A minimal set of reproduction steps, and the impact you believe it has.
 
 ### What to expect
 
-This is a single-maintainer project, so these are best-effort targets, not a contract:
+This is a single-maintainer project, so these are best-effort targets, definitely not a contract or 
+a guarantee:
 
 | Stage | Target |
 | ----- | ------ |
 | Acknowledgement of the report | ~7 days |
-| First assessment (in scope / not, severity, planned fix) | ~14 days |
-| Fix for confirmed issues | Next scheduled release |
-| Public disclosure | a GitHub security advisory published with the fix |
+| First assessment (in scope / not, severity, planned fix) | ~30 days |
+| Fix for confirmed issues | On the immediate next release |
+| Public disclosure | A GitHub security advisory published with the fix |
 
 We credit reporters in the advisory unless you prefer otherwise. If a reported behaviour turns out
 to be intentional and documented, we will explain the reasoning in the thread and record it here.
 
 ## Threat model
 
-**Trusted: your own user account.** gPTY trusts same-UID processes by design. A process running as
-you can already read your files, attach to your terminals, and drive the control socket, so "another
-program running as me can control the workspace" is not a vulnerability on its own. Setting
-`GPTY_SECRET` raises the bar for the control socket; it does not change the trust class.
+**Trusted: Your own user account.** `gPTY` trusts same-UID processes by design. A process running as
+**you** can already read your files, attach to your terminals, and drive the control socket, so "another
+program running as me can control the workspace" shouldn't be a vulnerability on its own (please open a 
+discussion post if you think otherwise). Setting `GPTY_SECRET` raises the bar for the control socket; 
+but it does not and cannot change the trust class.
 
 **Untrusted — must never gain authority:**
 
@@ -66,28 +70,28 @@ program running as me can control the workspace" is not a vulnerability on its o
 
 **In scope:**
 
-- untrusted data reaching a privileged action: executing a process, writing a file outside the
+- All untrusted data reaching a privileged action: Executing a process, writing a file outside the
   app's own `user://` store, gaining the control socket, or delivering input to a pane the user did
   not target;
-- cross-user attacks on shared hosts: socket squatting, world-writable paths, `PATH`/env manipulation;
+- Cross-user attacks on shared hosts: socket squatting, world-writable paths, `PATH`/env manipulation;
 - remote content driving a local action;
-- a lower-trust pane influencing a higher-trust one (an ordinary shell pane feeding a root shell or
+- A lower-trust pane influencing a higher-trust one (an ordinary shell pane feeding a root shell or
   an SSH session);
-- denial of service that locks the GUI thread or grows memory without a bound.
+- Denial of service that locks the GUI thread or grows memory without a bound.
 
 **Out of scope (by design, or accepted):**
 
-- same-UID processes controlling gPTY (see above);
-- spoofable display state: the `gpty_state=<value>` OSC declaration and the heuristic agent-state
+- Same-UID processes controlling gPTY (see above);
+- Spoofable display state: the `gpty_state=<value>` OSC declaration and the heuristic agent-state
   tiers may be set by anything that can print; they are labelled display-only and are never an input
   to a decision;
-- what happens after a user approves a **Workspace Trust** prompt, activates a downloaded profile,
+- What happens after a user approves a **Workspace Trust** prompt, activates a downloaded profile,
   or installs a third-party extension. Those prompts exist so the decision is explicit; after
   consent, gPTY runs what the file asks for;
-- unsigned release artifacts and the absence of code signing (see Known limitations);
-- third-party CLIs, editors, agents, and plugins the user runs inside a pane, and the files they
+- Unsigned release artifacts and the absence of code signing (see Known limitations);
+- Third-party CLIs, editors, agents, and plugins the user runs inside a pane, and the files they
   write;
-- a user pasting content into a shell, or running a command they typed.
+- A user pasting content into a shell, or running a command they typed.
 
 ## What gPTY deliberately does not do
 
@@ -174,11 +178,11 @@ Each is either accepted for the current scope or tracked as a roadmap item.
 
 ## Safe harbor
 
-We will not pursue or support legal action against researchers who, in good faith:
+We will not pursue or support legal action against researcher(s) who, in good faith:
 
-- test against their own installation and their own data;
-- avoid accessing, modifying, or exfiltrating data that is not theirs;
-- report a discovered issue privately and give us a reasonable window to fix it before disclosing;
-- do not degrade the service for anyone else.
+- Test against their own installation and their own data;
+- Avoid accessing, modifying, or exfiltrating data that is not theirs;
+- Report a discovered issue privately and give us a reasonable window to fix it before disclosing;
+- Do not degrade the service for anyone else.
 
-Security research that follows this policy is welcome.
+Security research that follows this policy is welcome. Please contribute via Issues and Discussions.
