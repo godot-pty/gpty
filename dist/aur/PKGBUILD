@@ -6,7 +6,7 @@ pkgrel=1
 pkgdesc="Multi-PTY terminal emulator with tiling grid GUI"
 arch=('x86_64')
 url="https://github.com/godot-pty/gpty"
-license=('Apache-2.0')
+license=('GPL-3.0-or-later')
 depends=()
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/gpty-v$pkgver-linux-x86_64.tar.gz"
         "gpty.desktop")

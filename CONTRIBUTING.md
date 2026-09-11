@@ -186,4 +186,6 @@ See [AGENTS.md](AGENTS.md) for full security rules, including Concept Engine ReD
 
 ## License
 
-Apache 2.0 (see [LICENSE](LICENSE)).
+gPTY is licensed under the **GNU General Public License, version 3 or later** - see [LICENSE](LICENSE). [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md) adds section 7 permissions so plugins, extensions, adapters, and data files can stay permissive (Apache-2.0, MIT, or their authors' own terms).
+
+There is no CLA. By opening a pull request you confirm that you wrote the contribution (or otherwise have the right to submit it) and you license it to the project under those same terms: GPL-3.0-or-later, plus the exceptions in `LICENSE-EXCEPTIONS.md`.

@@ -12,6 +12,7 @@ gpty/
 ├── Cargo.toml                  # Workspace root
 ├── AGENTS.md
 ├── LICENSE
+├── LICENSE-EXCEPTIONS.md       # GPLv3 §7 permissions: plugins + data stay non-copyleft
 ├── scripts/                    # CI runner and setup scripts
 │   ├── ci-check                # Run all CI checks locally (--fast for quick)
 │   ├── install-hooks           # Symlink githooks into .git/hooks/
@@ -278,6 +279,13 @@ Policy (threat model, supported versions, reporting, what gpty does not defend a
 - `broadcast-input`: a fan-out of `inject` over the `GPTY_SECRET`-gated control socket. Text is written to each PTY verbatim, exactly as `inject` does (the target shell interprets it — no additional interpolation by gpty). Pane tags used for targeting must be sanitized like `attachment_id` (`[a-z][a-z0-9_-]{0,31}`).
 - Plugin trust model: plugins are arbitrary code running as the user — the same trust as any editor extension. Review-then-run (reuse the Workspace Trust confirmation dialog), pin revisions, per-plugin config/state/log dirs, manifest validation with size/count/path caps (reuse concept parse caps and `sanitize_tile` rules). Never claim sandboxing.
 - Update checker: the startup GitHub-release check is notify-only — it never downloads or executes anything, and a remote `tag_name` is validated by `_is_valid_semver` before it reaches the toast. The response body is integrity-untrusted (TLS transport only; GitHub release artifacts are unsigned): treat remote version strings as display data. If a future "Download update" action is added, it MUST verify artifact integrity (pinned checksums or equivalent) before installation — a MITM'd response could otherwise point at a malicious payload.
+
+### Licensing
+
+- Core is **GPL-3.0-or-later** ([LICENSE](LICENSE)); [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md) holds the two section 7 additional permissions. Plugins, extensions, adapters, and pane types are **not** required to be GPLv3, which is why the bundled `extensions/gpty-omp-events` ships MIT and `godot/addons/gut` stays MIT. Do NOT "correct" a bundled permissive license into GPLv3, and never add license headers to JSON.
+- Data files (profiles, workspaces, layouts, concepts, settings) carry no copyleft: user-authored ones are the user's own, and the shipped `godot/*.json` defaults are Apache-2.0. The engine and pane code that reads them stays GPLv3.
+- First-party code is GPLv3 everywhere it is declared: `license = "GPL-3.0-or-later"` in every `crates/*/Cargo.toml`, `license=('GPL-3.0-or-later')` in `dist/aur/PKGBUILD`. Keep them in sync when adding a crate or package.
+- Release artifacts must carry `LICENSE` and `LICENSE-EXCEPTIONS.md` next to the binaries (GPLv3 §4/§6 requires giving recipients a copy of the license). `.github/workflows/release.yml` currently packs the export alone — add the copies when that job is next touched.
 
 ### Commits
 

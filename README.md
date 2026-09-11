@@ -2,6 +2,7 @@
 
   ![GitHub branch status](https://img.shields.io/github/checks-status/godot-pty/gpty/main)
   ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/godot-pty/gpty/total)
+  ![GitHub License](https://img.shields.io/github/license/godot-pty/gpty)
 
 </div>
 
@@ -135,4 +136,13 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete versioned changes and history.
 
 ## License
 
-This project is licensed under the Apache License, Version 2.0 - see [LICENSE](LICENSE) for details.
+gPTY is free software, licensed under the **GNU General Public License, version 3 or later** — see [LICENSE](LICENSE) for the full text.
+
+[LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md) adds two permissions under section 7 of that license, so the ecosystem side stays permissive:
+
+- **Plugins, extensions, and adapters are not required to be GPLv3.** Anything that works with gPTY over its CLI, JSON-RPC, MCP, or event interfaces — including native pane types — may be licensed under Apache-2.0, MIT, or any other terms you choose, and shipped alongside gPTY without obligation.
+- **Configuration and data files carry no copyleft.** Profiles, workspaces, layouts, concepts, and settings are yours to license however you like; the default `*.json` files shipped with gPTY are Apache-2.0.
+
+Copyright (C) 2026 Neil Pathare.
+
+gPTY is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.

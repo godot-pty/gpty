@@ -3,6 +3,7 @@ name = "gpty-ipc"
 version = "0.5.3"
 edition = "2024"
 description = "JSON-RPC IPC transport, client, and server for gpty workspace control"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 gpty-core = { path = "../gpty-core" }

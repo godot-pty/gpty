@@ -3,6 +3,7 @@ name = "gpty-gdext"
 version = "0.5.3"
 edition = "2024"
 description = "Godot 4 GDExtension for gpty — bridges the Rust terminal engine to Godot's renderer"
+license = "GPL-3.0-or-later"
 
 [lib]
 crate-type = ["cdylib"]
