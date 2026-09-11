@@ -162,10 +162,15 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   never downloads or executes anything, and the response is treated as display data.
 - **Release artifacts are unsigned** (no code signing, no published checksums beyond the GitHub
   release page). Verify the source or build locally if that matters to you.
-- **Resource bounds are per-path, not global.** A program that floods a pane can still push the
-  render loop and the scrollback store hard; see the DoS items in [ROADMAP.md](ROADMAP.md).
-- **Test flakiness under parallel load.** The Inspector adapter tests spawn real child processes with
-  timing assumptions and can fail in a heavily loaded parallel run; CI runs the suite serialised.
+- **Resource bounds are per-path, not global.** A program that floods a pane can still make that
+  pane expensive: the PTY channel is unbounded, so output that outruns the engine's reader grows
+  memory, and the scrollback store takes one blocking write per line. The render loop is no longer
+  part of it — a pane whose own grid work exceeds its per-frame budget repaints less often instead
+  of spending every frame on it (v0.5.3) — but the other two are open DoS items in
+  [ROADMAP.md](ROADMAP.md).
+- **Parallel test runs are wall-clock sensitive.** The Inspector backend tests spawn real child
+  processes and wait on them; the budgets are generous enough for a loaded parallel CI run, but a
+  machine that is oversubscribed far beyond CI's shape can still time a turn out.
 
 ## Safe harbor
 

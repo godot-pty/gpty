@@ -1,16 +1,73 @@
 ---
 title: gpty v0.5.3
 date: 2026-09-10
-draft: true
 ---
 
 v0.5.3 is the audit release: a security pass over the whole codebase, one capability removed on
-purpose, and a set of hardening fixes that came out of it.
+purpose, and the hardening that came out of it — plus the terminal work that was queued behind it.
+Panes track the mouse for the apps that ask, painting text got a fifth cheaper, and a flooding pane
+now slows itself down instead of spending every frame on the UI thread.
 
 <!--more-->
 
-<!-- Release step: drop `draft: true`, fill in the performance/mouse sections for this release,
-     add the home screenshot (/images/v0.5.3_1.png) and the standard download footer. -->
+![Screenshot](/images/v0.5.3_1.png)
+
+## The mouse belongs to the app when the app asks
+
+![The Agent Workspace profile: Agent Terminal, Inspector and Reasoning](/images/v0.5.3_2.png)
+
+Full-screen programs have asked terminals for mouse events since `xterm`; gPTY's panes ignored the
+question. Now the grid reports what the child enabled (`DECSET 1000`, `1002`, `1003`, and SGR
+encoding via `1006`), and the pane forwards exactly what that mode covers: clicks always, drags
+under `1002`, a button-less move under `1003`, wheels whenever the app tracks the mouse at all.
+`nvim`'s `:set mouse=a`, `lazygit`'s panes, and `herdr`'s pop-ups all work inside a pane now.
+
+Two details worth knowing:
+
+- **Shift is the escape hatch.** While an app has the mouse, hold `Shift` to select text locally and
+  copy it with `Ctrl+Shift+V` — the same convention `xterm` established, and the reason a
+  full-screen app cannot trap you.
+- **Nothing changes when tracking is off.** Selection, scrollback, and the wheel behave exactly as
+  before in a plain shell, which is still the common case.
+
+The reports are encoded SGR-style when the app asked for it and in the legacy X10 form otherwise,
+from the same cell math selection already used. Where the legacy form cannot address a cell at all
+(past 223), the event is dropped rather than pointing at a cell you did not click.
+
+## Repainting less, and repainting cheaper
+
+Two changes to how a busy pane spends the frame:
+
+**Text is drawn in glyph runs.** The renderer used to issue one `draw_string` per cell — up to
+~1 900 canvas commands for a full 80×24 pane, nearly all of them a single glyph in a color the
+neighbour already used. Consecutive cells that share font, color, and underline state now go out as
+one call. A full-screen repaint measured ~20 % cheaper, and both grid sizes render
+**pixel-identical** to the old path (that diff is how a dropped underline under an underlined space
+was caught before it shipped).
+
+**A pane that cannot keep up stops trying.** When a pane's own grid work — the fetch from Rust plus
+the repaint — exceeds a 4 ms budget, it looks at the grid less often, geometrically down to about
+10 Hz, and returns to the normal cadence as soon as a sync finds nothing new. This is the
+`cat /dev/urandom` case: the damage covers the screen every frame, and the old behaviour spent every
+frame packing cells and rebuilding the canvas, which is what made the whole window stutter. Nothing
+is dropped — the damage tracker coalesces everything into the newest grid state, and a pane that
+keeps up is never throttled. Scrolling with the wheel or jumping from the search bar is exempt
+entirely: that work is bounded by your hand, and it is the one case where the repaint rate is
+visible.
+
+Measured on a 12000-cell pane repainting its whole screen in a loop: 2.47 ms → 1.46 ms per frame,
+in the same window, with a pane that fits its budget left untouched.
+
+## Captures survive their pane
+
+![A cat capture routed into the Code Viewer pane](/images/v0.5.3_3.png)
+
+Concept captures had a quiet way to disappear: closing, swapping or resetting a pane mid-capture
+aborted the terminal task past its finalize path, and nothing polls a pane that no longer exists.
+The capture state is now shared, so a pane that goes away hands its buffered capture to the engine's
+orphan queue, which the workspace keeps draining and routing. A capture can also no longer be
+starved by a notify-only concept sitting in front of it, and the shell's post-resize repaint is no
+longer buffered into a capture as a duplicated prompt.
 
 ## Concepts can no longer run commands
 
@@ -83,8 +140,11 @@ match.
   you wouldn't. The environment half of the finding turned out to be unreachable — restore
   overwrites a tile's env with your own global before the shell starts — but the same ordering bug
   silently discards your per-pane env on every restore, and it has to be fixed together with the
-  v0.5.5 env model rather than before it. The predicate now covers program and arguments on the
-  sidebar paths; the `layoutLoad` IPC path bypassed it and is tracked.
+  v0.5.5 env model rather than before it. The predicate now covers program and arguments on every
+  restore path, the dialog names the program, the argv and each environment entry it is asking you
+  to approve, and `layoutLoad` over the control socket refuses an untrusted profile outright —
+  a CLI or MCP caller cannot answer a dialog, and naming a profile is not consent to what the file
+  asks for.
 - **Environment variables that make a shell run what they contain** — `PROMPT_COMMAND`, `BASH_ENV`,
   `ENV`, `SHELLOPTS`, `PS4`, `ZDOTDIR`, and the interpreter/tool equivalents (`PERL5OPT`,
   `PYTHONSTARTUP`, `NODE_OPTIONS`, `RUBYOPT`, `LESSOPEN`, `GIT_SSH_COMMAND`, …) — are now refused
@@ -101,6 +161,10 @@ match.
   materialising every hit across the whole scrollback on each keystroke.
 - **MCP `tools/call` accepted any method name**, including ones that were never published as tools.
   It now rejects anything outside the advertised schema.
+- **Pane edges could not be dragged.** The resize handler ran where the pane body consumed the
+  mouse, the drag was measured from the wrong origin so every small step rounded away, and a
+  half-applied move left the grid not adding up. Panes now resize the way a tmux divider does:
+  drag the edge, the panes follow the pointer, and neither can be squeezed below its minimum.
 - **CI inherited the repository's default token scope** for every job — including the one that
   hands it to a third-party audit action. `ci.yml` now declares `contents: read`.
 
@@ -121,8 +185,9 @@ against and what it doesn't: the trust model (same-UID processes are trusted; te
 files, remote responses, and other users are not), what is deliberately absent (sandboxing, OSC 52
 clipboard access, command execution from config), the hardening that must not be weakened, and the
 known limitations — Windows peer verification, the shared-`/tmp` socket fallback, plaintext
-scrollback, unsigned artifacts, and the fact that a flooded pane can still push the render loop
-hard.
+scrollback, unsigned artifacts, and the two DoS items the audit left open (the unbounded PTY-output
+channel and the per-line scrollback write; the render loop the audit also flagged is rate-limited
+now).
 
 That list is the point. A threat model that only lists strengths is marketing; the limitations
 section is where the honest engineering lives.

@@ -8,7 +8,8 @@
 # Usage: scripts/screenshot-gpty <output.png> <app-command...>
 #   e.g. scripts/screenshot-gpty docs/static/images/v0.5.1_1.png godot --path godot
 #
-# Requires: ImageMagick (`import`), python3 + python-xlib, a graphical
+# Requires: ffmpeg (preferred, `x11grab -window_id`) or an ImageMagick built
+# with X11 support (`import -window`), python3 + python-xlib, and a graphical
 # session with XWayland (DISPLAY set). Used by the release skill.
 set -euo pipefail
 
@@ -16,9 +17,18 @@ OUT="${1:?output path}"
 shift
 [[ $# -ge 1 ]] || { echo "usage: screenshot-gpty <out.png> <app-command...>" >&2; exit 2; }
 
-for t in import python3; do
-    command -v "$t" >/dev/null || { echo "missing tool: $t (need imagemagick + python3/python-xlib)" >&2; exit 3; }
-done
+command -v python3 >/dev/null || { echo "missing tool: python3 (need python3-xlib)" >&2; exit 3; }
+CAPTURE=""
+if command -v ffmpeg >/dev/null; then
+    CAPTURE=ffmpeg
+elif command -v import >/dev/null; then
+    # An ImageMagick built without X11 fails at capture time with a
+    # "missing an image filename" error that names the output path.
+    CAPTURE=import
+else
+    echo "missing tool: ffmpeg or imagemagick (import)" >&2
+    exit 3
+fi
 [[ -n "${DISPLAY:-}" ]] || { echo "no DISPLAY — the app window must exist on X11/XWayland" >&2; exit 3; }
 
 TMP="$(mktemp -d)"
@@ -79,5 +89,9 @@ done
 }
 
 sleep 2  # let the first frames settle
-import -window "$WID" "$OUT"
-echo "captured: $OUT"
+case "$CAPTURE" in
+    ffmpeg) ffmpeg -y -loglevel error -f x11grab -window_id "$WID" -i "${DISPLAY:-:0}" -frames:v 1 "$OUT" ;;
+    import) import -window "$WID" "$OUT" ;;
+esac
+[[ -s "$OUT" ]] || { echo "capture produced no image (${CAPTURE})" >&2; exit 5; }
+echo "captured: $OUT (${CAPTURE})"

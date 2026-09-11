@@ -8,6 +8,8 @@
   <img src="https://img.shields.io/badge/Claude-D97757?style=for-the-badge&logo=claude&logoColor=white" alt="Claude">
 </p>
 
+gPTY is an exploration in AI-directed development. The vast majority of this codebase, including the Godot UI layout and the Rust (`godopty-core`) GDExtension bridge, was generated using LLMs. While the application is fully functional and actively maintained, the underlying code may contain unidiomatic patterns and/or bugs.
+
 ## Overview
 
 - **PTY foundation** - Spawn and manage independent shell sessions in a resizable tiling grid. Full DEC STD 070 via `alacritty_terminal`: 16/256/true color, scrollback with regex search, wrapped text selection.
@@ -37,9 +39,9 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 
 | Platform | Package |
 |---|---|
-| Linux | `gpty-v0.5.2-linux-x86_64.tar.gz` - extract and run `./gpty` |
-| macOS | `gpty-v0.5.2-macos.zip` - unzip, right-click the `.app` → Open |
-| Windows | `gpty-v0.5.2-windows-x86_64.zip` - unzip and run `gpty.exe` |
+| Linux | `gpty-v0.5.3-linux-x86_64.tar.gz` - extract and run `./gpty` |
+| macOS | `gpty-v0.5.3-macos.zip` - unzip, right-click the `.app` → Open |
+| Windows | `gpty-v0.5.3-windows-x86_64.zip` - unzip and run `gpty.exe` |
 
 ### CLI
 
