@@ -1,20 +1,48 @@
 # Maintainer: gpty contributors
 # GitHub: https://github.com/godot-pty/gpty
+#
+# Prebuilt bundle from GitHub Releases, hence a -bin package: no Godot editor
+# and no Rust toolchain are involved. To update: bump pkgver/pkgrel, then
+# replace the tarball hash below (every release from v0.5.4 also publishes a
+# SHA256SUMS asset listing it).
 pkgname=gpty-bin
-pkgver=0.1.0
+pkgver=0.5.3
 pkgrel=1
-pkgdesc="Multi-PTY terminal emulator with tiling grid GUI"
+pkgdesc="Multi-PTY terminal emulator with a tiling grid GUI"
 arch=('x86_64')
 url="https://github.com/godot-pty/gpty"
 license=('GPL-3.0-or-later')
-depends=()
+# X11/GL libraries the Godot export template loads at runtime, plus the Vulkan
+# loader its default renderer needs.
+depends=('libglvnd' 'libx11' 'libxcursor' 'libxext' 'libxi' 'libxinerama' 'libxrandr' 'libxrender'
+         'vulkan-icd-loader')
+optdepends=('alsa-lib: ALSA audio backend'
+            'libpulse: PulseAudio audio backend'
+            'libdecor: Wayland client-side decorations'
+            'libxkbcommon: keyboard input under Wayland'
+            'fontconfig: system font fallback'
+            'systemd-libs: gamepad support via libudev'
+            'libspeechd: screen-reader support')
+provides=('gpty')
+conflicts=('gpty' 'gpty-git')
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/gpty-v$pkgver-linux-x86_64.tar.gz"
         "gpty.desktop")
-sha256sums=('SKIP'
-            'SKIP')
+sha256sums=('cb52bd8092218a0698aa9ea6abba63d3201e8a77af9273ad194317cbd014d663'
+            'e7480fd8958fba832ec7a35f2102db12e07b17d03a9d5e9e97513f9c602b070d')
 
 package() {
-    tar -xzf "$srcdir/$pkgname-$pkgver.tar.gz" -C "$srcdir"
-    install -Dm755 "$srcdir/gpty-v$pkgver-linux-x86_64/gpty" "$pkgdir/usr/bin/gpty"
+    # The Linux export is a bare executable plus its data pack and the
+    # GDExtension library (godot/export_presets.cfg keeps
+    # binary_format/embed_pck=false), so all three must share one directory.
+    install -Dm755 "$srcdir/gpty-v$pkgver-linux-x86_64/gpty" "$pkgdir/usr/lib/gpty/gpty"
+    install -Dm644 "$srcdir/gpty-v$pkgver-linux-x86_64/gpty.pck" "$pkgdir/usr/lib/gpty/gpty.pck"
+    install -Dm644 "$srcdir/gpty-v$pkgver-linux-x86_64/libgpty_gdext.linux.x86_64.so" \
+        "$pkgdir/usr/lib/gpty/libgpty_gdext.linux.x86_64.so"
+
+    # Godot resolves the pack and the GDExtension library against the real
+    # executable path (/proc/self/exe), so a symlink suffices on PATH.
+    install -d "$pkgdir/usr/bin"
+    ln -s /usr/lib/gpty/gpty "$pkgdir/usr/bin/gpty"
+
     install -Dm644 "$srcdir/gpty.desktop" "$pkgdir/usr/share/applications/gpty.desktop"
 }
