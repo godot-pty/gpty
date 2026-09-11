@@ -1,4 +1,4 @@
-[gPTY](https://godot-pty.github.io/gpty/) - a PTY foundation built on Godot and Rust. Provides a tiling terminal grid, a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output without scraping a TUI.
+[gPTY](https://godot-pty.github.io/gpty/) - a PTY foundation built on Godot and Rust. Provides a tiling grid for panes (terminal, code, file-tree, etc.), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI.
 
 ## Overview
 
@@ -11,11 +11,7 @@
   <img src="https://img.shields.io/badge/DeepSeek-4D6BFE?logo=deepseek&logoColor=white" alt="DeepSeek">
   <img src="https://img.shields.io/badge/Claude-D97757?logo=claude&logoColor=white" alt="Claude">
 
-
 </div>
-
-<p align="center">
-</p>
 
 - **PTY** - Spawn and manage independent shell sessions in a resizable tiling grid. Full `DEC STD 070` via `alacritty_terminal`: `16`/`256`/`true color`, scrollback with regex search, wrapped text selection.
 - **Public API** - JSON-RPC IPC socket + CLI (`gpty new-pane`, `gpty inject`, …) + MCP server. AI agents, scripts, and orchestrators drive the workspace over a documented, versioned protocol.
@@ -24,7 +20,7 @@
 - **Persistence** - Scrollback, settings, workspaces (named tab sets), and profiles auto-save to SQLite/JSON and restore on restart; full-text search across each pane's persisted history.
 - **Cross-platform** - Standalone binaries for Linux, macOS, and Windows. No Godot or Rust toolchain required to run.
 - **Documentation** - https://godot-pty.github.io/gpty/
-- The vast majority of this codebase, including most of the Godot UI layout and the Rust (`godopty-core`) GDExtension bridge, was generated using LLMs; and as such, the underlying code may contain unidiomatic patterns and/or bugs.
+- The vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using LLMs; and as such, the underlying code may contain unidiomatic patterns and/or bugs.
 
 | Component | Choice | Rationale |
 |----------|--------|-----------|
