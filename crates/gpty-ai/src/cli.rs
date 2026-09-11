@@ -428,12 +428,20 @@ mod tests {
     use crate::types::{AiEventEnvelope, SessionPromptRequest};
     use std::io::Write;
 
-    /// Write an executable fake adapter script that speaks the NDJSON
-    /// contract, returning its path and argv.
+    /// Write a fake adapter script that speaks the NDJSON contract, returning
+    /// its path and the argv to run it.
     ///
-    /// Unique per call *and* per run: tests run in parallel, and a stale file
-    /// from an earlier (killed) run must not be picked up — a path that is
-    /// still the image of a leftover process makes exec fail with ETXTBSY.
+    /// The argv is `sh <path>`, never the path alone: nothing execs the script
+    /// file itself, so the fixture cannot fail on the runner for reasons that
+    /// have nothing to do with the protocol — a script whose write fd is still
+    /// open in a leftover process (ETXTBSY), a `noexec` temp directory, or a
+    /// missing exec bit. A CI-only failure of this test turned out to be
+    /// exactly that: the session reported `Error { "failed to spawn ...:
+    /// Permission denied" }` before a single frame, which `wait_terminal`
+    /// treats as terminal, so no Thinking frame ever arrived.
+    ///
+    /// The name is still unique per call *and* per run: tests run in parallel
+    /// and must not read each other's script.
     fn fake_adapter(script: &str) -> (TempScript, Vec<String>) {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let dir = std::env::temp_dir();
@@ -449,11 +457,9 @@ mod tests {
         ));
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(script.as_bytes()).unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         (
             TempScript::new(path.clone()),
-            vec![path.to_string_lossy().to_string()],
+            vec!["/bin/sh".to_string(), path.to_string_lossy().to_string()],
         )
     }
 
