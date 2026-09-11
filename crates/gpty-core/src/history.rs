@@ -19,6 +19,8 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use rusqlite::{Connection, params, params_from_iter};
 
+use crate::lock::lock_or_warn;
+
 /// Maximum terms carried from user input into an FTS5 query.
 const MAX_QUERY_TERMS: usize = 32;
 
@@ -391,7 +393,7 @@ impl LineQueue {
     /// Never blocks and never hands SQLite work to the caller; dropping only
     /// happens past the retention window.
     fn push(&self, line_num: i64, text: &str) {
-        let Ok(mut inner) = self.inner.lock() else {
+        let Some(mut inner) = lock_or_warn(&self.inner, "history queue") else {
             return;
         };
         if inner.closed {
@@ -419,7 +421,7 @@ impl LineQueue {
 
     /// Take everything queued, oldest first.
     fn take(&self) -> Vec<(i64, String)> {
-        let Ok(mut inner) = self.inner.lock() else {
+        let Some(mut inner) = lock_or_warn(&self.inner, "history queue") else {
             return Vec::new();
         };
         inner.bytes = 0;
@@ -427,14 +429,14 @@ impl LineQueue {
     }
 
     fn flushed(&self, rows: usize) {
-        if let Ok(mut inner) = self.inner.lock() {
+        if let Some(mut inner) = lock_or_warn(&self.inner, "history queue") {
             inner.pending = inner.pending.saturating_sub(rows);
         }
         self.wake.notify_all();
     }
 
     fn close(&self) {
-        if let Ok(mut inner) = self.inner.lock() {
+        if let Some(mut inner) = lock_or_warn(&self.inner, "history queue") {
             inner.closed = true;
         }
         self.wake.notify_all();
@@ -443,7 +445,7 @@ impl LineQueue {
     /// Sleep until there is something to take, the queue closes, or `timeout`.
     /// `true` when lines are waiting.
     fn wait(&self, timeout: std::time::Duration) -> bool {
-        let Ok(inner) = self.inner.lock() else {
+        let Some(inner) = lock_or_warn(&self.inner, "history queue") else {
             return false;
         };
         let Ok((inner, _)) = self.wake.wait_timeout_while(inner, timeout, |state| {
@@ -455,16 +457,20 @@ impl LineQueue {
     }
 
     fn closed(&self) -> bool {
-        self.inner.lock().map(|inner| inner.closed).unwrap_or(true)
+        lock_or_warn(&self.inner, "history queue")
+            .map(|inner| inner.closed)
+            .unwrap_or(true)
     }
 
     fn pending(&self) -> usize {
-        self.inner.lock().map(|inner| inner.pending).unwrap_or(0)
+        lock_or_warn(&self.inner, "history queue")
+            .map(|inner| inner.pending)
+            .unwrap_or(0)
     }
 
     /// Block until every pushed line has been committed (or `timeout`).
     fn wait_committed(&self) -> bool {
-        let Ok(inner) = self.inner.lock() else {
+        let Some(inner) = lock_or_warn(&self.inner, "history queue") else {
             return false;
         };
         let Ok((inner, _)) = self

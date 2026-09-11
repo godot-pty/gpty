@@ -39,6 +39,7 @@ pub const MOUSE_MODE_MOTION: u8 = 4;
 pub const MOUSE_MODE_SGR: u8 = 8;
 
 use crate::color::color_to_rgb;
+use crate::lock::lock_or_warn;
 
 /// A character cell ready for rendering.
 #[derive(Debug, Clone)]
@@ -108,12 +109,12 @@ impl EventListener for TitleListener {
     fn send_event(&self, event: TermEvent) {
         match event {
             TermEvent::Title(t) => {
-                if let Ok(mut title) = self.title.lock() {
+                if let Some(mut title) = lock_or_warn(&self.title, "terminal title") {
                     *title = t;
                 }
             }
             TermEvent::PtyWrite(text) => {
-                if let Ok(mut replies) = self.replies.lock() {
+                if let Some(mut replies) = lock_or_warn(&self.replies, "terminal replies") {
                     replies.push_back(text.into_bytes());
                 }
             }
@@ -221,8 +222,7 @@ impl TermGrid {
     /// Take pending emulator-generated PTY replies (cursor reports, mode
     /// reports). The engine writes them to the child PTY.
     pub fn drain_replies(&mut self) -> Vec<Vec<u8>> {
-        self.replies
-            .lock()
+        lock_or_warn(&self.replies, "terminal replies")
             .map(|mut q| q.drain(..).collect())
             .unwrap_or_default()
     }
@@ -480,7 +480,9 @@ impl TermGrid {
 
     /// Current terminal title (set via OSC escape sequences, e.g. bash prompt).
     pub fn title(&self) -> String {
-        self.title.lock().map(|t| t.clone()).unwrap_or_default()
+        lock_or_warn(&self.title, "terminal title")
+            .map(|t| t.clone())
+            .unwrap_or_default()
     }
 
     /// Current row count.

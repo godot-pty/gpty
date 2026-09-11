@@ -23,6 +23,7 @@ use tokio::sync::mpsc;
 
 use crate::agent_state::{AgentState, StateTier};
 use crate::concept;
+use crate::lock::lock_or_warn;
 use crate::term::TermGrid;
 use crate::types::{CaptureMode, CapturedOutput, Concept, ConceptNotice, TerminalConfig};
 
@@ -114,7 +115,7 @@ impl Drop for SpawnedTerminal {
         // can fire between the abort and its next poll), the event sits on
         // the pane queue, which nothing polls for a pane that no longer
         // exists. Carry it over.
-        if let Ok(mut queue) = self.capture_queue.lock()
+        if let Some(mut queue) = lock_or_warn(&self.capture_queue, "capture queue")
             && !queue.is_empty()
         {
             for event in queue.drain(..) {
@@ -138,8 +139,7 @@ impl WorkspaceEngine {
     /// flight. The events are complete — there is nothing to acknowledge or
     /// flush, because the pane, its grid, and its raw-byte store died with it.
     pub fn drain_orphaned_captures(&self) -> Vec<CapturedOutput> {
-        self.orphaned_captures
-            .lock()
+        lock_or_warn(&self.orphaned_captures, "orphaned captures")
             .map(|mut queue| std::mem::take(&mut *queue))
             .unwrap_or_default()
     }
@@ -285,7 +285,7 @@ impl TaskContext {
     /// Queue a notify-only match, dropping the oldest when nobody has polled.
     fn push_notice(&self, concept_name: String) {
         const MAX_NOTICES: usize = 64;
-        if let Ok(mut notices) = self.notices.lock() {
+        if let Some(mut notices) = lock_or_warn(&self.notices, "concept notices") {
             if notices.len() >= MAX_NOTICES {
                 notices.remove(0);
             }
@@ -311,7 +311,7 @@ impl TaskContext {
 /// Feed raw bytes to the grid if present.
 fn feed_grid(grid: &Option<Arc<Mutex<TermGrid>>>, bytes: &[u8]) {
     if let Some(g) = grid
-        && let Ok(mut locked) = g.lock()
+        && let Some(mut locked) = lock_or_warn(g, "pane grid")
     {
         locked.feed(bytes);
     }
@@ -320,7 +320,7 @@ fn feed_grid(grid: &Option<Arc<Mutex<TermGrid>>>, bytes: &[u8]) {
 /// Store a line in the grid history.
 fn store_line(grid: &Option<Arc<Mutex<TermGrid>>>, line: &str) {
     if let Some(g) = grid
-        && let Ok(mut locked) = g.lock()
+        && let Some(mut locked) = lock_or_warn(g, "pane grid")
     {
         locked.store_line(line);
     }
@@ -367,7 +367,7 @@ struct CaptureSession {
 
 /// Push onto a bounded capture queue, dropping the oldest.
 fn push_bounded(queue: &Arc<Mutex<Vec<CapturedOutput>>>, event: CapturedOutput) {
-    if let Ok(mut queue) = queue.lock() {
+    if let Some(mut queue) = lock_or_warn(queue, "capture queue") {
         if queue.len() >= MAX_BUFFERED_CAPTURES {
             queue.remove(0);
         }
@@ -396,7 +396,7 @@ fn finalize_state(state: &mut CaptureState) -> Option<CapturedOutput> {
     let target = state.active_target.take().unwrap_or_default();
     let raw_bytes = std::mem::take(&mut state.buffer);
     state.bytes = 0;
-    if let Ok(mut bufs) = state.buffers.lock() {
+    if let Some(mut bufs) = lock_or_warn(&state.buffers, "capture buffers") {
         if bufs.len() >= MAX_BUFFERED_CAPTURES
             && let Some(oldest) = bufs.keys().min().copied()
         {
@@ -437,14 +437,13 @@ impl CaptureSession {
     }
 
     fn is_active(&self) -> bool {
-        self.state
-            .lock()
+        lock_or_warn(&self.state, "capture state")
             .map(|state| state.active_name.is_some())
             .unwrap_or(false)
     }
 
     fn begin(&self, name: String, target: String, deadline: tokio::time::Instant) {
-        if let Ok(mut state) = self.state.lock() {
+        if let Some(mut state) = lock_or_warn(&self.state, "capture state") {
             state.active_name = Some(name);
             state.active_target = Some(target);
             state.deadline = Some(deadline);
@@ -452,13 +451,13 @@ impl CaptureSession {
     }
 
     fn deadline(&self) -> Option<tokio::time::Instant> {
-        self.state.lock().ok().and_then(|state| state.deadline)
+        lock_or_warn(&self.state, "capture state").and_then(|state| state.deadline)
     }
 
     /// Feed PTY output while capturing. Returns true when the session
     /// finalized itself (byte cap exceeded or deadline passed).
     fn feed_output(&self, bytes: Vec<u8>, now: tokio::time::Instant) -> bool {
-        let Ok(mut state) = self.state.lock() else {
+        let Some(mut state) = lock_or_warn(&self.state, "capture state") else {
             return false;
         };
         if state.active_name.is_none() {
@@ -479,9 +478,7 @@ impl CaptureSession {
     /// Emit the completed capture to the sink and store raw bytes for
     /// later flush/acknowledge. Resets all capture state.
     fn finalize(&self) -> Option<CapturedOutput> {
-        let Ok(mut state) = self.state.lock() else {
-            return None;
-        };
+        let mut state = lock_or_warn(&self.state, "capture state")?;
         finalize_state(&mut state)
     }
 
@@ -492,16 +489,14 @@ impl CaptureSession {
     /// struct, so the capture goes to the engine's orphan queue, which the
     /// workspace keeps draining.
     fn finalize_to(&self, sink: Arc<Mutex<Vec<CapturedOutput>>>) -> Option<CapturedOutput> {
-        let Ok(mut state) = self.state.lock() else {
-            return None;
-        };
+        let mut state = lock_or_warn(&self.state, "capture state")?;
         state.sink = sink;
         finalize_state(&mut state)
     }
 
     /// True when the active concept's `UntilStop` mode stops on user input.
     fn stops_on_input(&self, concepts: &[Concept]) -> bool {
-        let Ok(state) = self.state.lock() else {
+        let Some(state) = lock_or_warn(&self.state, "capture state") else {
             return false;
         };
         let Some(name) = state.active_name.as_deref() else {
@@ -521,8 +516,8 @@ impl CaptureSession {
 
     /// Remove buffered chunks for a capture ID from the shared buffer map.
     fn take_chunks(&self, id: &u64) -> Option<Vec<Vec<u8>>> {
-        let state = self.state.lock().ok()?;
-        let mut bufs = state.buffers.lock().ok()?;
+        let state = lock_or_warn(&self.state, "capture state")?;
+        let mut bufs = lock_or_warn(&state.buffers, "capture buffers")?;
         bufs.remove(id)
     }
 }
@@ -585,7 +580,7 @@ async fn run_terminal_task(
 ) {
     // Initialize status primitives: pid and start time are known at spawn.
     if let Some(g) = &grid
-        && let Ok(mut locked) = g.lock()
+        && let Some(mut locked) = lock_or_warn(g, "pane grid")
     {
         locked.status.pid = pty_handle.process_id();
         locked.status.started_unix_ms = unix_ms();
@@ -612,7 +607,7 @@ async fn run_terminal_task(
                 let Some(bytes) = msg else { break; };
                 // Update liveness: any PTY output means the pane was active.
                 if let Some(g) = &grid
-                    && let Ok(mut locked) = g.lock()
+                    && let Some(mut locked) = lock_or_warn(g, "pane grid")
                 {
                     locked.status.last_output_unix_ms = Some(unix_ms());
                 }
@@ -654,7 +649,7 @@ async fn run_terminal_task(
                     // concept-match alternate-screen output.
                     let alt_screen = grid
                         .as_ref()
-                        .and_then(|g| g.lock().ok())
+                        .and_then(|g| lock_or_warn(g, "pane grid"))
                         .is_some_and(|g| g.is_alt_screen());
                     if !alt_screen && !ctx.pty_concept_match_suppressed(now) {
                         for line in &lines {
@@ -676,7 +671,7 @@ async fn run_terminal_task(
                         // display state.
                         if let Some(state) = declared
                             && let Some(g) = &grid
-                            && let Ok(mut locked) = g.lock()
+                            && let Some(mut locked) = lock_or_warn(g, "pane grid")
                         {
                             let ok = locked
                                 .agent_state
@@ -696,7 +691,7 @@ async fn run_terminal_task(
                         }
                         // Tier 3: conservative failure patterns + TTL decay.
                         if let Some(g) = &grid
-                            && let Ok(mut locked) = g.lock()
+                            && let Some(mut locked) = lock_or_warn(g, "pane grid")
                         {
                             for line in &lines {
                                 if line.len() > crate::parser::MAX_LINE_LEN {
@@ -775,7 +770,7 @@ async fn run_terminal_task(
                             log::error!("[Pane {}] PTY resize error: {e}", ctx.id);
                         }
                         if let Some(g) = &grid
-                            && let Ok(mut locked) = g.lock() {
+                            && let Some(mut locked) = lock_or_warn(g, "pane grid") {
                                 locked.resize(*rows as usize, *cols as usize);
                             }
                         ctx.suppress_pty_concept_match_until = Some(
@@ -797,8 +792,7 @@ async fn run_terminal_task(
         // blocking write stalls every consumer of that grid — including the
         // GDScript render poll — whenever the child stops draining its stdin.
         let replies = match &grid {
-            Some(g) => g
-                .lock()
+            Some(g) => lock_or_warn(g, "pane grid")
                 .map(|mut locked| locked.drain_replies())
                 .unwrap_or_default(),
             None => Vec::new(),
@@ -834,7 +828,7 @@ async fn run_terminal_task(
         exit_code = pty_handle.try_wait();
     }
     if let Some(g) = &grid
-        && let Ok(mut locked) = g.lock()
+        && let Some(mut locked) = lock_or_warn(g, "pane grid")
     {
         locked.status.exit_code = exit_code;
         // Tier 3 exit heuristic (display only): a shell that died with a

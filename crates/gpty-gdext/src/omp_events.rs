@@ -114,7 +114,7 @@ const MAX_QUEUED_EVENTS: usize = 256;
 
 /// Fan an event out to every active subscription queue (bounded).
 pub fn emit_event(event_json: &str) {
-    if let Ok(mut subs) = SUBSCRIPTIONS.lock() {
+    if let Some(mut subs) = gpty_core::lock::lock_or_warn(&SUBSCRIPTIONS, "event subscriptions") {
         for queue in subs.values_mut() {
             if queue.len() >= MAX_QUEUED_EVENTS {
                 queue.pop_front();
@@ -128,7 +128,8 @@ fn subscribe_handler() -> HandlerFn {
     std::sync::Arc::new(|_params| {
         Box::pin(async move {
             let sub_id = format!("sub-{}", NEXT_SUB_ID.fetch_add(1, Ordering::Relaxed));
-            if let Ok(mut subs) = SUBSCRIPTIONS.lock()
+            if let Some(mut subs) =
+                gpty_core::lock::lock_or_warn(&SUBSCRIPTIONS, "event subscriptions")
                 && subs.len() < MAX_SUBSCRIPTIONS
             {
                 subs.insert(sub_id.clone(), VecDeque::new());
@@ -154,7 +155,8 @@ fn events_poll_handler() -> HandlerFn {
                 .and_then(Value::as_u64)
                 .unwrap_or(64)
                 .min(256) as usize;
-            if let Ok(mut subs) = SUBSCRIPTIONS.lock()
+            if let Some(mut subs) =
+                gpty_core::lock::lock_or_warn(&SUBSCRIPTIONS, "event subscriptions")
                 && let Some(queue) = subs.get_mut(sub_id)
             {
                 let events: Vec<Value> = queue

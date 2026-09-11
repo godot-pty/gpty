@@ -236,7 +236,7 @@ impl GptyTerminal {
                 // Attach the scrollback and restore its tail. All inside one
                 // grid lock so the engine's store_line cannot interleave
                 // between the line-number read and the restored feed.
-                if let Ok(mut grid) = spawned.grid.lock() {
+                if let Some(mut grid) = gpty_core::lock::lock_or_warn(&spawned.grid, "pane grid") {
                     let history_lines = history_lines.clamp(100, 100_000) as u32;
                     if !history_key.is_empty() {
                         let db_path = godot::classes::ProjectSettings::singleton()
@@ -312,7 +312,8 @@ impl GptyTerminal {
         let Some(spawned) = &self.spawned else {
             return;
         };
-        let history = if let Ok(grid) = spawned.grid.lock() {
+        let history = if let Some(grid) = gpty_core::lock::lock_or_warn(&spawned.grid, "pane grid")
+        {
             grid.history.clone()
         } else {
             None
@@ -342,7 +343,8 @@ impl GptyTerminal {
                 "{\"results\":[],\"stored_lines\":0,\"error\":\"pane is not running\"}",
             );
         };
-        let history = if let Ok(grid) = spawned.grid.lock() {
+        let history = if let Some(grid) = gpty_core::lock::lock_or_warn(&spawned.grid, "pane grid")
+        {
             grid.history.clone()
         } else {
             None
@@ -397,7 +399,8 @@ impl GptyTerminal {
         let Some(spawned) = &self.spawned else {
             return -1;
         };
-        let history = if let Ok(grid) = spawned.grid.lock() {
+        let history = if let Some(grid) = gpty_core::lock::lock_or_warn(&spawned.grid, "pane grid")
+        {
             grid.history.clone()
         } else {
             None

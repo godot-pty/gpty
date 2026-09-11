@@ -571,7 +571,6 @@ dependencies = [
  "gpty-core",
  "libc",
  "log",
- "parking_lot",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
