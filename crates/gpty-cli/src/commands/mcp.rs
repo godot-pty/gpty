@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 
 use clap::CommandFactory;
 use gpty_ipc::client::IpcClient;
@@ -45,18 +45,66 @@ async fn run_daemon_tool(tool_name: &str, client: &IpcClient) -> Option<serde_js
     }
 }
 
+/// Largest request accepted from the MCP client, matching the control
+/// socket's own request cap (`gpty_ipc::server::MAX_REQUEST_LEN`).
+const MAX_MESSAGE_LEN: usize = 64 * 1024;
+
+/// Read and throw away the rest of an oversized line, so the next iteration
+/// starts at a message boundary instead of inside the previous one.
+fn discard_line(reader: &mut impl io::BufRead) -> io::Result<()> {
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Ok(());
+        }
+        match available.iter().position(|b| *b == b'\n') {
+            Some(at) => {
+                reader.consume(at + 1);
+                return Ok(());
+            }
+            None => {
+                let len = available.len();
+                reader.consume(len);
+            }
+        }
+    }
+}
+
 /// Run as an MCP server over stdio: read JSON-RPC from stdin, forward to IPC, write to stdout.
 pub async fn run(client: &IpcClient) -> anyhow::Result<()> {
     let stdin = io::stdin();
+    let mut reader = io::BufReader::new(stdin.lock());
     let mut stdout = io::stdout();
 
     // Computed once: `tools/call` must reject any name that is not an
     // advertised tool (see `mcp_tool_names`).
     let allowed_tools = super::schema::mcp_tool_names(&crate::Cli::command());
 
-    for line in stdin.lock().lines() {
-        let line = line?;
-        let line = line.trim().to_string();
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        // Same ceiling the control socket applies to a request. `lines()`
+        // buffered a whole line whatever its length, so a runaway client
+        // could grow `gpty mcp` without bound; anything past the cap is
+        // refused and the rest of that line is discarded.
+        let read = Read::take(&mut reader, MAX_MESSAGE_LEN as u64).read_until(b'\n', &mut line)?;
+        if read == 0 {
+            break;
+        }
+        if line.len() >= MAX_MESSAGE_LEN && !line.ends_with(b"\n") {
+            discard_line(&mut reader)?;
+            let resp = build_error(
+                0,
+                JsonRpcError::new(
+                    JsonRpcError::INVALID_REQUEST,
+                    format!("Request exceeds {MAX_MESSAGE_LEN} bytes"),
+                ),
+            );
+            writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
+            stdout.flush()?;
+            continue;
+        }
+        let line = String::from_utf8_lossy(&line).trim().to_string();
         if line.is_empty() {
             continue;
         }

@@ -118,11 +118,27 @@ fn version_handler() -> HandlerFn {
     })
 }
 
-/// Shutdown handler — responds instantly then exits the process.
+/// Shutdown handler — answers the client, then exits.
+///
+/// `process::exit(0)` used to run *before* the reply, so the client saw an
+/// empty socket and reported `invalid response: empty response` for a stop
+/// that had already happened. The exit is now scheduled instead of executed
+/// here: the reply has to reach the client first.
+///
+/// The exit is still abrupt, and that costs the teardown (the workspace and
+/// settings saves, and whatever scrollback a pane's writer still holds).
+/// Quitting through the scene tree would run them, and was tried: see
+/// ROADMAP.md, "`daemon stop` still skips teardown" — it ends in SIGSEGV when
+/// the quit happens while an IPC client is connected.
 fn shutdown_handler() -> HandlerFn {
     std::sync::Arc::new(|_params| {
         Box::pin(async move {
-            std::process::exit(0);
+            tokio::spawn(async {
+                // Let the response reach the client before the process goes.
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                std::process::exit(0);
+            });
+            Ok(serde_json::json!({"shutting_down": true}))
         })
     })
 }

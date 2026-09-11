@@ -68,8 +68,37 @@ impl IpcServer {
     pub async fn serve(&self) -> io::Result<()> {
         #[cfg(unix)]
         {
-            // Clean up stale socket file on Unix.
-            let _ = std::fs::remove_file(&self.socket_path);
+            // Clean up a stale socket from a previous run — but only one that
+            // is ours. The /tmp fallback path is predictable, so another user
+            // can plant something there first; unlinking blindly would delete
+            // their file (and hide the squat), and following a symlink would
+            // delete whatever it points at. Anything else is left alone and
+            // the bind below fails closed.
+            use std::os::unix::fs::FileTypeExt;
+            match std::fs::symlink_metadata(&self.socket_path) {
+                Ok(meta) if !meta.file_type().is_socket() => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::AlreadyExists,
+                        format!(
+                            "{} exists and is not a socket; refusing to replace it",
+                            self.socket_path
+                        ),
+                    ));
+                }
+                Ok(meta) if !owned_by_current_uid(&meta) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!(
+                            "{} is a socket owned by another user; refusing to replace it",
+                            self.socket_path
+                        ),
+                    ));
+                }
+                Ok(_) => {
+                    let _ = std::fs::remove_file(&self.socket_path);
+                }
+                Err(_) => {}
+            }
 
             let listener = tokio::net::UnixListener::bind(&self.socket_path)?;
 
@@ -205,6 +234,18 @@ impl IpcServer {
             .first_pipe_instance(first)
             .create(&self.socket_path)
     }
+}
+
+/// True when `meta` describes a file this process owns.
+///
+/// Used before replacing a stale socket on the shared-`/tmp` fallback path:
+/// only the owner may unlink entries in a sticky directory, and a socket
+/// someone else created is a squatted path, not a leftover from a crash.
+#[cfg(unix)]
+fn owned_by_current_uid(meta: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    // SAFETY: geteuid takes no arguments and cannot fail.
+    meta.uid() == unsafe { libc::geteuid() }
 }
 
 /// True when the peer process runs as the same effective UID as the server.
@@ -395,6 +436,33 @@ mod tests {
             reader.read_line(&mut line).await?;
             let resp: Response = serde_json::from_str(line.trim()).unwrap();
             Ok(resp)
+        }
+
+        /// A path planted by someone else must fail the bind, not be deleted:
+        /// the `/tmp` fallback is predictable, and unlinking blindly both destroys
+        /// their file and hides that the control surface was squatted.
+        #[cfg(unix)]
+        #[tokio::test]
+        async fn a_planted_socket_path_is_refused_not_unlinked() {
+            let path = format!("/tmp/gpty-ipc-planted-{}.sock", std::process::id());
+            let _ = std::fs::remove_file(&path);
+            std::fs::write(&path, b"not a socket").unwrap();
+
+            let server = IpcServer::new(&path);
+            let error = server
+                .serve()
+                .await
+                .expect_err("a foreign path must not be replaced");
+            assert!(
+                error.to_string().contains("not a socket"),
+                "the refusal must say what is in the way, got: {error}"
+            );
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                b"not a socket",
+                "the refused path must be left exactly as it was found"
+            );
+            let _ = std::fs::remove_file(&path);
         }
 
         #[tokio::test]

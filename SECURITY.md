@@ -158,8 +158,11 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   strips only the `GPTY_*` keys, so everything else reaches every pane: `SSH_AUTH_SOCK`, cloud
   credential pointers, proxy variables, `DISPLAY`. Launch gPTY from a shell that holds credentials
   you would not hand to a pane (or from inside a pane, or over SSH) and those panes inherit them.
-  This is the user's own context, not a file's — but it bounds what any per-pane environment model
-  can claim, and it is why the roadmap treats environment as authority rather than configuration.
+  The same applies to the GUI the CLI auto-spawns: it is a child of the CLI and inherits *its*
+  environment, so a `gpty` run from a credential-holding shell hands that context to every pane
+  opened afterwards. This is the user's own context, not a file's — but it bounds what any
+  per-pane environment model can claim, and it is why the roadmap treats environment as authority
+  rather than configuration.
 - **Scrollback is plaintext** in `user://` and the file mode follows your umask. Anything printed in
   a pane — tokens included — is stored on disk the same way a shell history file would be.
 - **The update check is notify-only.** It fetches release metadata over TLS and shows a toast; it
