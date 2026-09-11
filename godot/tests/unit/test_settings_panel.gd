@@ -83,7 +83,6 @@ func test_terminal_reset_restores_only_terminal_settings():
 func test_system_reset_restores_system_settings():
 	SettingsManager.cfg_window_mode = 2
 	SettingsManager.cfg_max_fps = 60
-	SettingsManager.cfg_show_titlebar = false
 
 	var btn := _tab_reset_button("System")
 	assert_not_null(btn, "System tab must have a reset button")
@@ -91,7 +90,6 @@ func test_system_reset_restores_system_settings():
 
 	assert_eq(SettingsManager.cfg_window_mode, 0, "window mode must reset to OS")
 	assert_eq(SettingsManager.cfg_max_fps, 0, "max fps must reset to unlimited")
-	assert_true(SettingsManager.cfg_show_titlebar, "titlebar must reset to shown")
 
 func test_reasoning_reset_restores_reasoning_settings():
 	SettingsManager.cfg_reasoning_max_turns = 3
@@ -223,3 +221,43 @@ func test_concept_dialog_is_90_percent_of_menu_width():
 	assert_not_null(dlg, "concept dialog must exist after opening")
 	assert_almost_eq(float(dlg.min_size.x), _panel._menu_width * 0.9, 0.01,
 		"concept dialog must be 90 percent of the settings menu width")
+
+# ── Titlebar toggle placement ──────────────────────────────────────────
+
+## The pane titlebar on/off is a global setting with no per-pane equivalent, so
+## the panel is the only place to find it — and it belongs with the chrome it
+## switches, next to the Title bar colour, not in the System tab where a user
+## looking for "titlebar" never looks.
+func test_show_titlebar_toggle_lives_with_the_chrome_colors():
+	var cb: CheckBox = _panel.find_child("ShowTitlebarCb", true, false)
+	assert_not_null(cb, "the settings panel must expose a titlebar toggle")
+	var tab := _tab_of(cb)
+	assert_eq(tab, "Appearance",
+		"the titlebar toggle belongs with the chrome colors, not in %s" % tab)
+
+func test_show_titlebar_toggle_is_bound_to_the_setting():
+	var cb: CheckBox = _panel.find_child("ShowTitlebarCb", true, false)
+	SettingsManager.cfg_show_titlebar = true
+	assert_true(cb.button_pressed, "the toggle must reflect the setting")
+	cb.button_pressed = false
+	_panel._debounce_timer.timeout.emit()  # the panel saves on a debounce
+	assert_false(SettingsManager.cfg_show_titlebar,
+		"toggling it off must reach the setting that hides every titlebar")
+
+func test_appearance_reset_restores_the_titlebar():
+	SettingsManager.cfg_show_titlebar = false
+	_panel.find_child("ShowTitlebarCb", true, false).button_pressed = false
+	var btn := _tab_reset_button("Appearance")
+	assert_not_null(btn, "the Appearance tab must have a reset")
+	btn.pressed.emit()
+	assert_true(SettingsManager.cfg_show_titlebar,
+		"resetting Appearance must bring the titlebars back")
+
+## The ScrollContainer that holds a control carries its tab's title as its name.
+func _tab_of(node: Node) -> String:
+	var cur := node
+	while cur != null:
+		if cur is ScrollContainer:
+			return cur.name
+		cur = cur.get_parent()
+	return ""

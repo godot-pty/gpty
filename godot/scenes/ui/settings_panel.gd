@@ -56,16 +56,13 @@ func _build_ui():
 	# Tab 1: System
 	var t_sys = _create_tab(tabs, "System")
 	var fps_opt = _add_fps_control(t_sys)
-	var show_tb_cb = _add_show_titlebar_control(t_sys)
 	var win_mode_opt = _add_window_mode_control(t_sys)
 	var check_updates_cb = _add_check_updates_control(t_sys)
 	_add_tab_reset(t_sys, func():
 		SettingsManager.cfg_max_fps = 0
-		SettingsManager.cfg_show_titlebar = true
 		SettingsManager.cfg_window_mode = 0
 		SettingsManager.cfg_check_updates = true
 		fps_opt.selected = 6  # "Unlimited" (0)
-		show_tb_cb.button_pressed = true
 		win_mode_opt.selected = 0
 		check_updates_cb.button_pressed = true
 		SettingsManager.save_settings()
@@ -117,11 +114,17 @@ func _build_ui():
 	t_app.add_child(HSeparator.new())
 	var scheme_btn = _add_scheme_picker(t_app)
 	t_app.add_child(HSeparator.new())
+	# The pane titlebar on/off sits with the chrome it controls — next to the
+	# "Title bar" colour and the border — instead of hiding in the System tab,
+	# where nobody looking for a titlebar setting would find it. It is a global
+	# setting, so it is not in the per-pane settings popup.
+	var show_tb_cb = _add_show_titlebar_control(t_app)
 	var color_btns = _add_color_section(t_app)
 	_add_tab_reset(t_app, func():
 		SettingsManager.cfg_font_path = "res://fonts/DejaVuSansMono.ttf"
 		SettingsManager.cfg_font_size = 14
 		SettingsManager.cfg_color_scheme_path = ""
+		SettingsManager.cfg_show_titlebar = true
 		SettingsManager.cfg_wrapper_bg = SettingsManager.WRAPPER_BG_COLOR
 		SettingsManager.cfg_title_bar_bg = SettingsManager.TITLE_BAR_BG_COLOR
 		SettingsManager.cfg_wrapper_border = SettingsManager.WRAPPER_BORDER_COLOR
@@ -132,6 +135,7 @@ func _build_ui():
 		font_btn.text = "DejaVuSansMono.ttf"
 		scheme_btn.text = "(none)"
 		fs_spin.value = 14
+		show_tb_cb.button_pressed = true
 		_reset_colors(color_btns)
 		SettingsManager.save_settings()
 	)
