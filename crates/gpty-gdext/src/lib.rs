@@ -21,6 +21,7 @@ use gpty_core::engine::{SpawnedTerminal, WorkspaceEngine};
 use gpty_core::types::TerminalConfig;
 
 mod ai;
+mod diagnostics;
 mod ipc;
 mod markdown;
 mod omp_events;
@@ -1344,6 +1345,9 @@ unsafe impl ExtensionLibrary for GptyExtension {
             // Before anything can spawn a thread.
             #[cfg(unix)]
             pin_library();
+            // And before the first background thread can warn: without this,
+            // every `log::warn!` from the gpty crates is dropped on the floor.
+            diagnostics::install();
         }
     }
 }
