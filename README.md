@@ -15,7 +15,7 @@
 
 - **PTY** - Spawn and manage independent shell sessions in a resizable tiling grid. Full `DEC STD 070` via `alacritty_terminal`: `16`/`256`/`true color`, scrollback with regex search, wrapped text selection.
 - **Public API** - JSON-RPC IPC socket + CLI (`gpty new-pane`, `gpty inject`, …) + MCP server. AI agents, scripts, and orchestrators drive the workspace over a documented, versioned protocol.
-- **Concept engine** - RegEx triggers on PTY output capture the reply and route it into adjacent panes (code viewer, Inspector). Write your own or ship the defaults. Concepts capture and display only - they never inject input into a shell.
+- **Concept engine** - RegEx triggers on PTY output capture the reply and route it into adjacent panes (code viewer, Inspector). Write your own - by hand or in the visual graph editor (Settings → Concepts) - or ship the defaults. Concepts capture and display only - they never inject input into a shell.
 - **Agent observability** - Reasoning pane passively projects documented agent lifecycle events (OMP, extensible); Inspector pane runs a private, tool-free Q&A session. Observability only - gpty never orchestrates agent state.
 - **Persistence** - Scrollback, settings, workspaces (named tab sets), and profiles auto-save to SQLite/JSON and restore on restart; full-text search across each pane's persisted history.
 - **Cross-platform** - Standalone binaries for Linux, macOS, and Windows. No Godot or Rust toolchain required to run.
