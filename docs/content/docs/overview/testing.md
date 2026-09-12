@@ -25,7 +25,7 @@ godot --headless --path godot --import
 **GDScript coverage:** concept merge/save/load, terminal manager tile lifecycle (spawn, kill, swap, labels, grid-full refusal), settings save/load roundtrip, profile CRUD, layout save/restore, sidebar signal emission, pane settings application, IPC dispatch against a real workspace (`test_ipc_dispatch_contract.gd`: listed pane ids and legacy labels both address the pane they name, terminal-only methods refuse other panes, unknown methods answer -32601, an untrusted profile is refused), palette command generation.
 
 **Known gaps (not automatable in headless CI):**
-- Real PTY output timing: a headless pane spawns a real shell, but tests that assert on its output are timing-dependent, so they live in the live smoke (`scripts/smoke-pane-api`) instead.
+- Real PTY output timing: a headless pane spawns a real shell, but tests that assert on its output are timing-dependent, so they live in the live smoke (`scripts/smoke_pane_api.py`) instead — one harness for every platform, run by `ci-check` and by the `windows-smoke` CI job.
 
 **Files without automated coverage** (manual checklist only):
 - `godot/scenes/terminal/workspace.gd` — restore/sanitize wiring and concept event routing; IPC dispatch itself is covered by `test_ipc_dispatch_contract.gd`, which drives `WorkspaceIpcHandlers.handle` with a real `Workspace`

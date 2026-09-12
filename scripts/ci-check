@@ -260,9 +260,13 @@ fi
 header "pane-API smoke"
 if [[ -z "$GODOT" ]]; then
     skip_gate "godot not found — skipping smoke test"
+elif ! command -v python3 >/dev/null 2>&1; then
+    skip_gate "python3 not found — skipping smoke test"
 else
     echo "  Running live pane-API smoke (headless GUI)..."
-    if ./scripts/smoke-pane-api 2>&1; then
+    # One harness for every platform: it drives the same flow through a Unix
+    # socket here and a named pipe on Windows (see the windows-smoke CI job).
+    if GODOT="$GODOT" python3 ./scripts/smoke_pane_api.py 2>&1; then
         pass "pane-API smoke"
     else
         fail "pane-API smoke"

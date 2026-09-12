@@ -142,10 +142,58 @@ jobs:
         run: ./scripts/gut-check
 
       - name: Live pane-API smoke
+        # One harness for every platform (Unix socket here, named pipe in the
+        # windows-smoke job); it builds the CLI and the extension itself.
+        run: python3 ./scripts/smoke_pane_api.py
+
+  # ── Windows runtime smoke (pane API over named pipes) ─────────────────
+  # rust-windows only compiles the Windows target — nothing ever ran Godot on
+  # Windows, so the named-pipe control and event listeners and the pane API
+  # were inferred from source. This job boots the GUI headless on
+  # windows-latest and drives the CLI against it: the same smoke harness as
+  # Linux, whose only platform difference is the transport.
+  windows-smoke:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: Cache cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install Godot (Windows, headless)
+        shell: pwsh
         run: |
-          sudo apt-get install -y jq
-          cargo build -p gpty
-          ./scripts/smoke-pane-api
+          Invoke-WebRequest -Uri "https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_win64.exe.zip" -OutFile godot.zip
+          # The release tag is mutable; the hash is the pin (from the release's
+          # SHA512-SUMS.txt, verified against the downloaded archive).
+          $expected = '83decd58fdf67b9d657958a1ae6bf1929c20785315a81effe245874cdc57acb709bf868e00778a96984338c1b29dafdb453c6847747694621c6ecf5da2259993'
+          $actual = (Get-FileHash godot.zip -Algorithm SHA512).Hash.ToLower()
+          if ($actual -ne $expected) { throw "Godot archive checksum mismatch: $actual" }
+          Expand-Archive godot.zip -DestinationPath godot-editor
+          $exe = Get-ChildItem godot-editor -Filter 'Godot_v4.7.2-stable_win64.exe' | Select-Object -First 1
+          Rename-Item -Path $exe.FullName -NewName godot.exe
+          Add-Content -Path $env:GITHUB_PATH -Value $exe.DirectoryName
+
+      - name: Live pane-API smoke (Windows)
+        shell: pwsh
+        # GODOT is explicit: the step above adds the editor to PATH for later
+        # steps, and which() is not worth relying on for a download.
+        run: |
+          python --version
+          python ./scripts/smoke_pane_api.py
+        env:
+          GODOT: ${{ github.workspace }}\godot-editor\godot.exe
 
   # ── Rust formatting ───────────────────────────────────────────────────
   rust-fmt:
