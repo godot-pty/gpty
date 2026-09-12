@@ -337,8 +337,16 @@ def main() -> int:
 
         # ── scrollback: content that scrolled off the screen ──────────
         smoke.enter("pane-read (scrollback)")
+        # Exactly 120 lines between the markers, on both platforms. The Windows
+        # side used to list System32 — thousands of lines on a runner — which
+        # pushed the oldest marker far outside the 200-line read, so the
+        # assertion failed on content the test never meant to generate: what is
+        # under test is that lines scrolled off the screen come back, not how
+        # much output a directory happens to have. cmd needs the loop
+        # parenthesised, or the trailing `& echo` joins the loop body.
         fill = (
-            r'echo SMOKE_OLDEST_A1B2 & dir "%SystemRoot%\System32" & echo SMOKE_NEWEST_C3D4'
+            r"echo SMOKE_OLDEST_A1B2 & (for /l %i in (1,1,120) do @echo scroll_%i)"
+            r" & echo SMOKE_NEWEST_C3D4"
             if WINDOWS
             else "echo SMOKE_OLDEST_A1B2; seq 1 120; echo SMOKE_NEWEST_C3D4"
         )
@@ -348,10 +356,20 @@ def main() -> int:
             "the scrollback fill must reach the pane",
         )
         scrollback = smoke.read_pane(pane_id, lines=200)
-        smoke.require(
-            "SMOKE_OLDEST_A1B2" in scrollback,
-            "pane-read must return scrollback, not just the visible screen",
-        )
+        if "SMOKE_OLDEST_A1B2" not in scrollback:
+            # Report the shape of what came back: a missing oldest marker means
+            # either the read window missed it (too many lines between the
+            # markers) or the grid kept no scrollback at all, and the first two
+            # and last two lines tell those apart from the log alone.
+            returned = scrollback.splitlines()
+            smoke.fail(
+                "pane-read must return scrollback, not just the visible screen",
+                {
+                    "lines_returned": len(returned),
+                    "first": returned[:2],
+                    "last": returned[-2:],
+                },
+            )
         smoke.require("SMOKE_NEWEST_C3D4" in scrollback, "pane-read must return the newest line")
 
         # ── the shipped extension's transport ─────────────────────────
