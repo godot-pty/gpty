@@ -14,10 +14,10 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
       - name: Build GDExtension (release)
         run: cargo build -p gpty-gdext --release
@@ -32,7 +32,7 @@ jobs:
           cp target/release/gpty release/gpty
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: gpty-linux-x86_64
           path: release/
@@ -48,10 +48,10 @@ jobs:
     runs-on: ${{ matrix.target.runner }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
       - name: Build GDExtension (release)
         run: cargo build -p gpty-gdext --release
@@ -73,7 +73,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: gpty-macos-${{ matrix.target.arch }}
           path: release/
@@ -82,10 +82,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
       - name: Build GDExtension (release)
         run: cargo build -p gpty-gdext --release
@@ -100,7 +100,7 @@ jobs:
           copy target\release\gpty.exe release\gpty.exe
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: gpty-windows-x86_64
           path: release/
@@ -111,11 +111,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Build-provenance attestation: `actions/attest-build-provenance` signs
+      # the staged artifacts with this workflow run's OIDC identity.
+      id-token: write
+      attestations: write
     env:
       VERSION: ${{ github.ref_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # project.godot carries the last released version; bundles must report the
       # tag (macOS reads CFBundleShortVersionString from it).
@@ -128,6 +132,9 @@ jobs:
         run: |
           sudo apt-get update -y && sudo apt-get install -y wget unzip
           wget -q https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          # The release tag is mutable; the hash is the pin (from the release's
+          # SHA512-SUMS.txt, verified against the downloaded archive).
+          echo "9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65  Godot_v4.7.2-stable_linux.x86_64.zip" | sha512sum -c -
           unzip Godot_v4.7.2-stable_linux.x86_64.zip
           chmod +x Godot_v4.7.2-stable_linux.x86_64
           sudo mv Godot_v4.7.2-stable_linux.x86_64 /usr/local/bin/godot
@@ -135,6 +142,8 @@ jobs:
       - name: Install Godot export templates
         run: |
           wget -q https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz
+          # Same pin as the editor build; from the release's SHA512-SUMS.txt.
+          echo "ca4d71c4d7b81dfc15d1a98baa07534aa95b03fdda78a0075b06672e1648d2e5f40980c9adc28d23e1b92e732ee7bf3461997aa804af74ec2fcd7a93ccb84079  Godot_v4.7.2-stable_export_templates.tpz" | sha512sum -c -
           mkdir -p ~/.local/share/godot/export_templates/4.7.2.stable
           mkdir -p /tmp/godot-templates
           unzip -qo Godot_v4.7.2-stable_export_templates.tpz -d /tmp/godot-templates
@@ -150,7 +159,7 @@ jobs:
           ls -la ~/.local/share/godot/export_templates/4.7.2.stable/
 
       - name: Download GDExtension artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: gdext-artifacts
 
@@ -214,8 +223,21 @@ jobs:
           (cd gdextension && sha256sum *) >> SHA256SUMS
           cat SHA256SUMS
 
+      # Bind each asset to the workflow, commit and runner that produced it:
+      # `gh attestation verify <asset> --repo godot-pty/gpty`. SHA256SUMS proves
+      # integrity in transit; this is what proves where the bytes came from.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: |
+            dist/gpty-${{ github.ref_name }}-linux-x86_64.tar.gz
+            dist/gpty-${{ github.ref_name }}-windows-x86_64.zip
+            dist/gpty-${{ github.ref_name }}-macos.zip
+            dist/gdextension/*
+            dist/SHA256SUMS
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             dist/gpty-${{ github.ref_name }}-linux-x86_64.tar.gz
@@ -240,6 +262,14 @@ jobs:
             Run that from the folder holding your download. Lines for assets you did
             not download report as missing — only your file's line has to say `OK`.
 
-            Checksums catch a corrupted or tampered download in transit; they are not
-            a signature. Release artifacts are unsigned (see SECURITY.md).
+            Checksums catch a corrupted or tampered download in transit. Every asset
+            also carries a **build-provenance attestation** that binds it to the
+            workflow run and commit that produced it:
+
+            ```bash
+            gh attestation verify <asset> --repo godot-pty/gpty
+            ```
+
+            The binaries are not code-signed (no Authenticode or notarization yet);
+            the attestation is the signature.
           generate_release_notes: true

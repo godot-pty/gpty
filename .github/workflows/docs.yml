@@ -28,11 +28,14 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Hugo
         run: |
           wget -q https://github.com/gohugoio/hugo/releases/download/v0.164.0/hugo_extended_0.164.0_linux-amd64.tar.gz
+          # The release tag is mutable; the hash is the pin (from the release's
+          # hugo_0.164.0_checksums.txt, verified against the downloaded archive).
+          echo "fea17b8c076f950bb2e9f9486667bdaa29422883888d509d63931c73e8a9b3a4  hugo_extended_0.164.0_linux-amd64.tar.gz" | sha256sum -c -
           # Extract ONLY the binary: the tarball also ships README.md/LICENSE
           # which would clobber the repo-root copies the mirror step reads.
           tar -xzf hugo_extended_0.164.0_linux-amd64.tar.gz hugo
@@ -74,9 +77,9 @@ jobs:
           fi
 
       - name: Upload pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: docs/public/
 
       - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

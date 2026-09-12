@@ -167,10 +167,12 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   a pane — tokens included — is stored on disk the same way a shell history file would be.
 - **The update check is notify-only.** It fetches release metadata over TLS and shows a toast; it
   never downloads or executes anything, and the response is treated as display data.
-- **Release artifacts are unsigned.** No code signing and no build attestation. Each release publishes
-  a `SHA256SUMS` listing every asset, so a download can be checked for corruption or tampering in
-  transit — but nothing binds an artifact to the source it was built from. Verify the source or build
-  locally if that matters to you.
+- **Release artifacts are not code-signed, but carry build provenance.** There is no Authenticode or
+  notarization. Each release publishes a `SHA256SUMS` listing every asset, and every asset is attested
+  with GitHub's build-provenance attestation (SLSA v1), signed by the release workflow's OIDC identity
+  — verify with `gh attestation verify <asset> --repo godot-pty/gpty`. That binds a download to the
+  workflow, commit and runner that produced it; checksums without the attestation only catch corruption
+  in transit. Verify the source or build locally if provenance is not enough for you.
 - **Resource bounds are per-path, not global.** A program that floods a pane can still make that
   pane expensive: the output queue is bounded per pane (256 × 4 KiB, enforced by blocking the
   reader, so the child waits on the PTY buffer rather than the process growing — v0.5.4), and the

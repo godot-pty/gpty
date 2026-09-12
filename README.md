@@ -53,7 +53,13 @@ shasum -a 256 -c SHA256SUMS        # macOS
 certutil -hashfile <asset> SHA256  # Windows
 ```
 
-Checksums catch a corrupted or tampered download in transit; they are not a signature - release artifacts are unsigned (see [SECURITY.md](SECURITY.md)).
+Checksums catch a corrupted or tampered download in transit. Each asset also carries a build-provenance attestation binding it to the workflow run that built it:
+
+```bash
+gh attestation verify <asset> --repo godot-pty/gpty
+```
+
+The binaries are not code-signed (see [SECURITY.md](SECURITY.md)).
 
 ### CLI
 
