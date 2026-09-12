@@ -8,6 +8,10 @@
 # Usage: scripts/screenshot-gpty <output.png> <app-command...>
 #   e.g. scripts/screenshot-gpty docs/static/images/v0.5.1_1.png godot --path godot
 #
+# SCREENSHOT_WAIT=<seconds> (default 2) is how long to let the window settle
+# before the capture. Raise it when the frame to capture takes longer to
+# arrive than a plain startup — a test-driven UI state, a slow machine.
+#
 # Requires: ffmpeg (preferred, `x11grab -window_id`) or an ImageMagick built
 # with X11 support (`import -window`), python3 + python-xlib, and a graphical
 # session with XWayland (DISPLAY set). Used by the release skill.
@@ -88,7 +92,7 @@ done
     exit 4
 }
 
-sleep 2  # let the first frames settle
+sleep "${SCREENSHOT_WAIT:-2}"  # let the first frames settle (SCREENSHOT_WAIT raises it)
 case "$CAPTURE" in
     ffmpeg) ffmpeg -y -loglevel error -f x11grab -window_id "$WID" -i "${DISPLAY:-:0}" -frames:v 1 "$OUT" ;;
     import) import -window "$WID" "$OUT" ;;
