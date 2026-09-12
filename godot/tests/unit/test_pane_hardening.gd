@@ -18,6 +18,24 @@ func after_each():
 		remove_child(_scene)
 		_scene.free()
 
+# ── PaneTypes.shell_run_args ───────────────────────────────────────────
+
+## The pane API runs a command through the user's configured shell, and the
+## "run this and exit" flag is not the same in every shell family: cmd.exe —
+## the Windows default — rejects the POSIX `-c`, which is how `pane-run` used
+## to fail there.
+func test_shell_run_args_follow_the_shell_family():
+	assert_eq(PaneTypes.shell_run_args("cmd.exe", "echo hi"), ["/c", "echo hi"])
+	assert_eq(PaneTypes.shell_run_args("cmd", "echo hi"), ["/c", "echo hi"])
+	assert_eq(
+		PaneTypes.shell_run_args("C:\\Windows\\System32\\CMD.EXE", "echo hi"),
+		["/c", "echo hi"],
+		"the path and the case of the program must not change the flag"
+	)
+	assert_eq(PaneTypes.shell_run_args("/bin/bash", "echo hi"), ["-c", "echo hi"])
+	assert_eq(PaneTypes.shell_run_args("pwsh", "echo hi"), ["-c", "echo hi"])
+	assert_eq(PaneTypes.shell_run_args("", "echo hi"), ["-c", "echo hi"])
+
 # ── PaneTypes.clamp_grid_int ───────────────────────────────────────────
 
 func test_clamp_grid_int_non_numeric_yields_lo():

@@ -233,6 +233,19 @@ static func sanitize_shell(v, fallback: String) -> String:
 	return fallback
 
 
+## Arguments that make `program` run `command` and exit.
+##
+## `cmd.exe` — the Windows default `cfg_shell_command` — spells the "run this
+## and exit" flag `/c` and rejects the POSIX `-c`; every other shell gpty
+## targets takes `-c`. The pane API runs commands through the user's configured
+## shell, so this is the one place that difference lives.
+static func shell_run_args(program: String, command: String) -> Array:
+	var base := program.get_file().to_lower()
+	if base == "cmd" or base == "cmd.exe":
+		return ["/c", command]
+	return ["-c", command]
+
+
 ## Sanitize program arguments from untrusted layout/profile data: array of
 ## non-empty strings ≤4096 chars without U+FFFD, capped at 32 entries.
 static func sanitize_shell_args(raw) -> Array:

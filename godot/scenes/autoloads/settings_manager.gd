@@ -31,7 +31,7 @@ var cfg_color_scheme_path := ""
 var cfg_max_fps := 0
 var cfg_font_path := "res://fonts/DejaVuSansMono.ttf"
 var cfg_font_size := 14
-var cfg_shell_command := "/bin/bash"
+var cfg_shell_command := default_shell_command()
 var cfg_window_mode := 0
 var cfg_show_titlebar := true
 var cfg_window_position := Vector2i(100, 100)
@@ -40,6 +40,20 @@ var cfg_shell_env := ""
 var cfg_reasoning_max_turns := 16
 var cfg_reasoning_max_turn_bytes := 65536
 var cfg_check_updates := true
+
+## The shell a fresh install opens panes with.
+##
+## Windows ships no POSIX shell at a predictable path, so a `/bin/bash` default
+## there made `GptyTerminal.start_shell` refuse every pane — the path contains a
+## separator and is not absolute on Windows, which `validate_executable` rejects
+## ("relative executable path") — and the user got a pane that never ran
+## anything. `%COMSPEC%` is the interpreter Windows itself would use; the bare
+## name is the fallback when it is unset.
+static func default_shell_command() -> String:
+	if OS.get_name() == "Windows":
+		var comspec := OS.get_environment("COMSPEC")
+		return comspec if comspec != "" else "cmd.exe"
+	return "/bin/bash"
 
 signal settings_changed
 
@@ -77,7 +91,7 @@ func load_settings():
 	cfg_window_size = _window_vec(d, "window_size", Vector2i(1920, 1080))
 	cfg_font_path = _as_string(d, "font_path", "res://fonts/DejaVuSansMono.ttf")
 	cfg_font_size = _as_int(d, "font_size", 14)
-	cfg_shell_command = _as_string(d, "shell_command", "/bin/bash")
+	cfg_shell_command = _as_string(d, "shell_command", default_shell_command())
 	cfg_shell_env = _as_string(d, "shell_env", "")
 	cfg_reasoning_max_turns = clampi(_as_int(d, "reasoning_max_turns", 16), 1, 64)
 	cfg_reasoning_max_turn_bytes = clampi(_as_int(d, "reasoning_max_turn_bytes", 65536), 4096, 1048576)

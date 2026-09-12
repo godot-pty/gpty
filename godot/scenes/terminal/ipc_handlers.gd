@@ -3,7 +3,7 @@ class_name WorkspaceIpcHandlers
 ##
 ## Every handler receives the Workspace instance and stays side-effect
 ## compatible with the inline version it replaced. New pane-API methods
-## land here; keep the smoke script (scripts/smoke-pane-api) as the
+## land here; keep the smoke script (scripts/smoke_pane_api.py) as the
 ## end-to-end contract check.
 
 
@@ -47,10 +47,11 @@ static func handle(ws, method: String, params: Dictionary):
 				return error("Invalid command")
 			# Execute through the configured shell so compound commands
 			# (&&, pipes, globs) work like a normal CLI invocation. The
-			# command is an argument, never the program itself.
+			# command is an argument, never the program itself, and the
+			# run flag follows the shell family (`cmd.exe` takes `/c`).
 			var run_body = ws._spawn_pane("terminal", {
 				"shell_command": SettingsManager.cfg_shell_command,
-				"shell_args": ["-c", run_cmd],
+				"shell_args": PaneTypes.shell_run_args(SettingsManager.cfg_shell_command, run_cmd),
 			})
 			if run_body == null:
 				return error("Grid is full")
