@@ -219,26 +219,83 @@ pub fn validate_gui_binary(path: &std::path::Path) -> bool {
 mod tests {
     use super::*;
 
+    /// Serialises every test that mutates the process environment. These
+    /// variables are process-global and cargo runs one binary's tests on
+    /// parallel threads, so an unlocked pair races for real: a run failed with
+    /// `env_var_empty_falls_back` clearing `GPTY_SOCKET` between the
+    /// `set_var` and the assertion of `env_var_overrides_default`.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Sets or clears one environment variable while holding [`ENV_LOCK`],
+    /// restoring the previous value (and releasing the lock) on drop —
+    /// including on panic, so a failing test cannot leak its value into the
+    /// rest of a parallel run.
+    struct EnvVar {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl EnvVar {
+        fn lock() -> std::sync::MutexGuard<'static, ()> {
+            // A panicking test poisons the lock; its guard restored the value
+            // on the way out, so the environment is still consistent.
+            ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+        }
+
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let lock = Self::lock();
+            let previous = std::env::var_os(key);
+            // SAFETY: the lock makes this the only test touching the variable,
+            // and the guard restores it on drop.
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key,
+                previous,
+                _lock: lock,
+            }
+        }
+
+        fn clear(key: &'static str) -> Self {
+            let lock = Self::lock();
+            let previous = std::env::var_os(key);
+            // SAFETY: as in `set`.
+            unsafe { std::env::remove_var(key) };
+            Self {
+                key,
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvVar {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(previous) => unsafe { std::env::set_var(self.key, previous) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
+    }
+
     #[test]
     fn default_socket_path_is_non_empty() {
         let path = default_socket_path();
         assert!(!path.is_empty());
     }
+
     #[test]
     fn env_var_overrides_default() {
-        // SAFETY: test runs in single-threaded context, no other tests read GPTY_SOCKET concurrently.
-        unsafe { std::env::set_var("GPTY_SOCKET", "/custom/path.sock") };
+        let _env = EnvVar::set("GPTY_SOCKET", "/custom/path.sock");
         assert_eq!(default_socket_path(), "/custom/path.sock");
-        unsafe { std::env::remove_var("GPTY_SOCKET") };
     }
 
     #[test]
     fn env_var_empty_falls_back() {
-        unsafe { std::env::set_var("GPTY_SOCKET", "") };
+        let _env = EnvVar::set("GPTY_SOCKET", "");
         let path = default_socket_path();
         assert!(!path.is_empty());
         assert_ne!(path, "");
-        unsafe { std::env::remove_var("GPTY_SOCKET") };
     }
 
     #[cfg(unix)]
@@ -314,57 +371,9 @@ mod tests {
         use super::*;
         use std::os::unix::fs::PermissionsExt;
 
-        /// Serialises the tests below: `XDG_RUNTIME_DIR` is process-global, and
-        /// cargo runs the tests in one binary on parallel threads.
-        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-        /// Sets or clears `XDG_RUNTIME_DIR` while holding [`ENV_LOCK`], and
-        /// restores the previous value (releasing the lock) on drop — including
-        /// on panic, which is how this module used to leave the variable set for
-        /// every later test in a parallel run.
-        struct XdgRuntimeDir {
-            previous: Option<std::ffi::OsString>,
-            _lock: std::sync::MutexGuard<'static, ()>,
-        }
-
-        impl XdgRuntimeDir {
-            fn lock() -> std::sync::MutexGuard<'static, ()> {
-                // A panicking test poisons the lock; the environment is restored
-                // by that test's guard, so the value is still consistent.
-                ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
-            }
-
-            fn set(path: &std::path::Path) -> Self {
-                let lock = Self::lock();
-                let previous = std::env::var_os("XDG_RUNTIME_DIR");
-                // SAFETY: the lock makes this the only test touching the
-                // variable, and the guard restores it on drop.
-                unsafe { std::env::set_var("XDG_RUNTIME_DIR", path) };
-                Self {
-                    previous,
-                    _lock: lock,
-                }
-            }
-
-            fn clear() -> Self {
-                let lock = Self::lock();
-                let previous = std::env::var_os("XDG_RUNTIME_DIR");
-                unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
-                Self {
-                    previous,
-                    _lock: lock,
-                }
-            }
-        }
-
-        impl Drop for XdgRuntimeDir {
-            fn drop(&mut self) {
-                match self.previous.take() {
-                    Some(previous) => unsafe { std::env::set_var("XDG_RUNTIME_DIR", previous) },
-                    None => unsafe { std::env::remove_var("XDG_RUNTIME_DIR") },
-                }
-            }
-        }
+        // `XDG_RUNTIME_DIR` is process-global like `GPTY_SOCKET`, so every test
+        // here guards it through the shared `EnvVar` above (the previous value
+        // is restored on drop, including on panic).
 
         fn make_dir(name: &str, mode: u32) -> std::path::PathBuf {
             let dir = std::env::temp_dir().join(format!("{name}-{}", std::process::id()));
@@ -377,7 +386,7 @@ mod tests {
         fn default_socket_path_follows_a_secure_xdg_runtime_dir() {
             let secure = make_dir("gpty-xdg-test", 0o700);
             {
-                let _env = XdgRuntimeDir::set(&secure);
+                let _env = EnvVar::set("XDG_RUNTIME_DIR", &secure);
                 assert_eq!(
                     default_socket_path(),
                     format!("{}/gpty.sock", secure.display())
@@ -390,7 +399,7 @@ mod tests {
         fn insecure_xdg_runtime_dir_is_rejected() {
             let insecure = make_dir("gpty-xdg-insecure", 0o777);
             {
-                let _env = XdgRuntimeDir::set(&insecure);
+                let _env = EnvVar::set("XDG_RUNTIME_DIR", &insecure);
                 let path = default_socket_path();
                 assert!(
                     !path.starts_with(&format!("{}/", insecure.display())),
@@ -402,7 +411,7 @@ mod tests {
 
         #[test]
         fn unset_xdg_runtime_dir_still_names_the_socket() {
-            let _env = XdgRuntimeDir::clear();
+            let _env = EnvVar::clear("XDG_RUNTIME_DIR");
             let path = default_socket_path();
             assert!(
                 path.ends_with("gpty.sock"),
