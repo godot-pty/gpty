@@ -1348,10 +1348,6 @@ struct GptyExtension;
 /// pointing at an unmapped address; see the roadmap entry for `daemon stop`).
 /// `RTLD_NODELETE` adds a reference `dlclose` cannot drop, so the code stays
 /// mapped and a surviving thread is harmless while the process ends.
-///
-/// Windows has the same hazard with a different API (`GetModuleHandleExW`
-/// with `GET_MODULE_HANDLE_EX_FLAG_PIN`); it is not wired up because that
-/// platform is compile-checked only — tracked on the roadmap.
 #[cfg(unix)]
 fn pin_library() {
     use std::sync::Once;
@@ -1372,12 +1368,61 @@ fn pin_library() {
     });
 }
 
+/// The Windows side of [`pin_library`]: Godot calls `FreeLibrary` on the
+/// extension, which has the same "threads still executing inside the DLL"
+/// hazard. `GetModuleHandleExW` with `GET_MODULE_HANDLE_EX_FLAG_PIN`
+/// increments the module's load count permanently (the pin cannot be undone),
+/// which is exactly what `RTLD_NODELETE` gives the Unix branch. The module is
+/// named by the address of this function, so nothing depends on the DLL's
+/// file name.
+#[cfg(windows)]
+fn pin_library() {
+    use std::ffi::c_void;
+    use std::sync::Once;
+
+    const GET_MODULE_HANDLE_EX_FLAG_PIN: u32 = 0x0000_0001;
+    const GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS: u32 = 0x0000_0004;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetModuleHandleExW(flags: u32, module_name: *const u16, module: *mut *mut c_void)
+        -> i32;
+    }
+
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let mut module: *mut c_void = std::ptr::null_mut();
+        // SAFETY: with FROM_ADDRESS the name argument is an address inside
+        // this DLL (`pin_library` itself); the call only writes the module
+        // handle it is given. A failure is reported, never fatal — the
+        // extension still runs, it just keeps the old unload hazard.
+        let ok = unsafe {
+            GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                pin_library as *const () as *const u16,
+                &mut module,
+            )
+        };
+        if ok == 0 {
+            log::warn!(
+                "could not pin the GDExtension module (GetModuleHandleExW: {}); a quit with \
+                 extension threads still running may crash",
+                std::io::Error::last_os_error()
+            );
+        }
+    });
+}
+
+/// No pin on other platforms: the hazard is Godot unloading the library with
+/// threads inside it, and only the Unix and Windows loaders do that here.
+#[cfg(not(any(unix, windows)))]
+fn pin_library() {}
+
 #[gdextension]
 unsafe impl ExtensionLibrary for GptyExtension {
     fn on_stage_init(stage: InitStage) {
         if stage == InitStage::Core {
             // Before anything can spawn a thread.
-            #[cfg(unix)]
             pin_library();
             // And before the first background thread can warn: without this,
             // every `log::warn!` from the gpty crates is dropped on the floor.
