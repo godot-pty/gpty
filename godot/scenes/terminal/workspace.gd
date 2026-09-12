@@ -38,6 +38,13 @@ func _ready():
 	add_child(pane_settings)
 	pane_settings.z_index = 100
 	_tm._pane_settings_panel = pane_settings
+	# The pane settings can rename a pane's public id (that is how IPC
+	# addresses it), and a typed duplicate would land *after* the pane was
+	# attached — the one path that used to skip the uniqueness check. The id
+	# is regenerated here, and the pane list redrawn because it shows it.
+	pane_settings.settings_applied.connect(func(body: Control):
+		_ensure_unique_attachment_id(body)
+		_apply_active_workspace_view())
 
 	_build_sidebar()
 

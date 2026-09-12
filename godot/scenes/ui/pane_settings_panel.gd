@@ -3,6 +3,12 @@ class_name PaneSettingsPanel
 # Type-aware pane settings overlay. Builds a shared shell (header, close, ESC)
 # and delegates content to the target pane's _build_pane_settings_ui().
 
+## Emitted after the target pane's settings were applied. The panel has no
+## view of the workspace, so anything the apply can invalidate across panes —
+## `attachment_id` above all, which is how IPC addresses a pane — is the
+## owner's to re-check.
+signal settings_applied(body: Control)
+
 var _target: Control
 var _debounce_timer: Timer
 var _gather_func: Callable
@@ -104,3 +110,4 @@ func _apply_to_target():
 	if _target == null or not is_instance_valid(_target): return
 	if not _gather_func.is_valid(): return
 	_target.apply_settings(_gather_func.call())
+	settings_applied.emit(_target)
