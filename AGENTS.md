@@ -173,6 +173,7 @@ See `skill://gpty-omp-integration` for usage patterns.
 - Signal testing: GDScript lambdas cannot capture outer primitives. Use GUT's `watch_signals(node)` + `assert_signal_emitted(node, "signal_name")` instead of `node.signal.connect(func(): captured_var = true)`.
 - Type checks: `body is SomeClass` requires a compile-time class name. For runtime type discrimination, use `body._pane_type()` string discriminators.
 - Headless resource leaks: GUT warnings about unfreed children and GDExtension `RID`/`ObjectDB` leaks are benign in headless mode — the dummy render server doesn't track GDExtension resources. Production renderer handles these correctly.
+- The GUT gate is `./scripts/gut-check`, never the bare `godot -s addons/gut/gut_cmdln.gd` command (`ci-check` and `ci.yml` both call the script; CONTRIBUTING and the testing docs point at it). GUT exits 0 after a parse error aborts the run — measured 4 of 40 scripts, 1.3 s instead of 57 s, no Run Summary — so the script owns the command and judges the output instead: Godot parse/script-error lines fail it, the Run Summary must be present and end in `All tests passed!`, the reported script count must equal the `test_*.gd` files the gdirs hold, and every script must contribute at least one test. Adding a test directory means adding it to that script, not just to a command line: GUT does not recurse (`include_subdirectories` is off), and a `test_*.gd` nested below a gdir is reported as never-run rather than quietly skipped.
 
 ## Conventions
 

@@ -137,7 +137,9 @@ jobs:
         run: godot --headless --path godot --import
 
       - name: Run GUT tests
-        run: godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration
+        # gut-check owns the command and validates the run: GUT exits 0 after
+        # a parse error aborts it with most of the suite unexecuted.
+        run: ./scripts/gut-check
 
       - name: Live pane-API smoke
         run: |

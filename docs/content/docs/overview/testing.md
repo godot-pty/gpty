@@ -17,8 +17,7 @@ cargo fmt --check
 
 # GDScript — unit + integration tests
 godot --headless --path godot --import
-godot --headless --path godot -s addons/gut/gut_cmdln.gd -d \
-  -gdir=res://tests/unit -gdir=res://tests/integration
+./scripts/gut-check  # runs GUT and fails if the run aborted (GUT exits 0 regardless)
 ```
 
 **Rust coverage:** core engine (parser, keymap, grid, concept routing, capture state machine, history), IPC types + protocol, CLI schema generation, GDExtension FFI functions. Tile layout algorithms are integration-tested in `crates/gpty-core/tests/tile_layout.rs`, which mirrors the GDScript split/kill/expand logic in `godot/scenes/terminal/terminal_manager.gd` — algorithm changes must be mirrored in both files.

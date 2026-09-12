@@ -125,7 +125,7 @@ cargo check
 
 # Godot (GUT) tests only
 godot --headless --path godot --import # Required before first run
-godot --headless --path godot -s addons/gut/gut_cmdln.gd -d -gdir=res://tests/unit -gdir=res://tests/integration
+./scripts/gut-check  # runs GUT and fails if the run aborted (GUT exits 0 regardless)
 
 # OMP extension unit tests (no omp install required)
 (cd extensions/gpty-omp-events && node --test)

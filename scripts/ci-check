@@ -246,10 +246,9 @@ else
     echo "  Importing Godot project..."
     godot --headless --path godot --import 2>&1 || { fail "godot import"; check_failed; }
     echo "  Running GUT tests..."
-    if godot --headless --path godot \
-        -s addons/gut/gut_cmdln.gd -d \
-        -gdir=res://tests/unit \
-        -gdir=res://tests/integration 2>&1; then
+    # gut-check owns the GUT command and validates the run (a parse error makes
+    # GUT abort after a handful of scripts and still exit 0).
+    if GODOT="$GODOT" ./scripts/gut-check 2>&1; then
         pass "GUT tests"
     else
         fail "GUT tests"

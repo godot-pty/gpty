@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# Run the GUT (GDScript) suite and judge the run, not just the exit code.
+#
+# GUT's exit code does not mean the suite ran. A parse error in any collected
+# .gd makes the collector break into Godot's debugger and the process still
+# exits 0 — measured: 1.3 s instead of ~60 s, four scripts executed instead of
+# forty, no Run Summary anywhere in the output. ci-check printed PASS off that
+# exit code, so the whole GDScript suite could stop running unnoticed.
+#
+# This script owns the GUT command — ci-check and ci.yml both call it, so the
+# command and its guard cannot drift apart — and then checks the output:
+#   1. no Godot parse/script error (how an aborted run announces itself);
+#   2. a complete Run Summary, ending in "All tests passed!";
+#   3. the script count GUT reports equals the test_*.gd files the -gdirs hold
+#      (GUT does not recurse, so a test script nested below a -gdir would never
+#      run — that is reported instead of silently shrinking the suite);
+#   4. at least one test per collected script.
+#
+# Requires godot on PATH; GODOT=<path> overrides.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+GODOT="${GODOT:-$(command -v godot || true)}"
+if [[ -z "$GODOT" ]]; then
+    echo "gut-check: godot not found on PATH (set GODOT=<path>)" >&2
+    exit 1
+fi
+
+# The one definition of what the run covers.
+TEST_DIRS=(godot/tests/unit godot/tests/integration)
+
+LOG="$(mktemp)"
+PLAIN="$(mktemp)"
+trap 'rm -f "$LOG" "$PLAIN"' EXIT
+
+GUT_ARGS=(-s addons/gut/gut_cmdln.gd -d)
+for dir in "${TEST_DIRS[@]}"; do
+    GUT_ARGS+=("-gdir=res://${dir#godot/}")
+done
+
+set +e
+"$GODOT" --headless --path godot "${GUT_ARGS[@]}" 2>&1 | tee "$LOG"
+STATUS="${PIPESTATUS[0]}"
+set -e
+
+# GUT colourises through a pipe too; match on a plain copy.
+ESC=$'\033'
+sed -E "s/${ESC}\[[0-9;?]*[A-Za-z]//g" "$LOG" > "$PLAIN"
+
+PROBLEMS=()
+
+if [[ "$STATUS" -ne 0 ]]; then
+    PROBLEMS+=("godot exited $STATUS")
+fi
+
+ERROR_LINES="$(grep -Em5 'SCRIPT ERROR|Parse Error|Failed to load script' "$PLAIN" || true)"
+if [[ -n "$ERROR_LINES" ]]; then
+    PROBLEMS+=("Godot reported a script/parse error — the suite did not run:")
+    while IFS= read -r line; do
+        PROBLEMS+=("    $line")
+    done <<<"$ERROR_LINES"
+fi
+
+# Totals block reads "Scripts              40" / "Tests               406".
+SCRIPTS_RAN="$(awk '$1 == "Scripts" && $2 ~ /^[0-9]+$/ { print $2; exit }' "$PLAIN")"
+TESTS_RAN="$(awk '$1 == "Tests" && $2 ~ /^[0-9]+$/ { print $2; exit }' "$PLAIN")"
+
+if [[ -z "$SCRIPTS_RAN" || -z "$TESTS_RAN" ]]; then
+    PROBLEMS+=("no Run Summary in the output — the run stopped before it finished")
+fi
+if ! grep -q -- '---- All tests passed! ----' "$PLAIN"; then
+    PROBLEMS+=("the run did not end with 'All tests passed!'")
+fi
+
+shopt -s nullglob
+declare -A DIRECT=()
+for dir in "${TEST_DIRS[@]}"; do
+    for file in "$dir"/test_*.gd; do
+        DIRECT["$file"]=1
+    done
+done
+EXPECTED="${#DIRECT[@]}"
+
+NESTED=()
+while IFS= read -r file; do
+    [[ -n "${DIRECT[$file]:-}" ]] || NESTED+=("$file")
+done < <(find "${TEST_DIRS[@]}" -name 'test_*.gd' | sort)
+
+if [[ -n "$SCRIPTS_RAN" && "$SCRIPTS_RAN" != "$EXPECTED" ]]; then
+    PROBLEMS+=("GUT ran $SCRIPTS_RAN scripts; ${TEST_DIRS[*]} hold $EXPECTED")
+fi
+if [[ -n "$SCRIPTS_RAN" && -n "$TESTS_RAN" && "$TESTS_RAN" -lt "$SCRIPTS_RAN" ]]; then
+    PROBLEMS+=("$SCRIPTS_RAN scripts ran only $TESTS_RAN tests — a script collected none")
+fi
+if (( ${#NESTED[@]} > 0 )); then
+    PROBLEMS+=("GUT does not recurse into subdirectories; these never run:")
+    for file in "${NESTED[@]}"; do
+        PROBLEMS+=("    $file")
+    done
+fi
+
+if (( ${#PROBLEMS[@]} > 0 )); then
+    echo
+    echo "gut-check: FAIL — this GUT run is not trustworthy" >&2
+    for problem in "${PROBLEMS[@]}"; do
+        echo "  $problem" >&2
+    done
+    exit 1
+fi
+
+echo
+echo "gut-check: OK — $SCRIPTS_RAN scripts, $TESTS_RAN tests, all passed"
