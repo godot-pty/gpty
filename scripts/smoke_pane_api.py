@@ -431,7 +431,17 @@ def main() -> int:
             if run_status.get("running") is False:
                 break
             time.sleep(0.5)
-        smoke.require(run_status.get("running") is False, "the pane-run pane must exit", run_status)
+        if run_status.get("running") is not False:
+            # Report the pane's own text as well as its status: "the command
+            # never ran" and "it ran but the exit was never reported" look
+            # identical in the status alone.
+            smoke.fail(
+                "the pane-run pane must exit",
+                {
+                    "status": run_status,
+                    "pane_tail": smoke.read_pane(run_id, lines=20)[-400:],
+                },
+            )
         smoke.require(
             run_status.get("exit_code") == 7,
             "the compound command must exit 7",

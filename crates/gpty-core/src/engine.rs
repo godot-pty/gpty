@@ -219,6 +219,20 @@ impl WorkspaceEngine {
 
 // ── Shared terminal task ──────────────────────────────────────────────
 
+/// How long the pty must stay silent after the child has exited before the
+/// task ends.
+///
+/// Waiting for the read side to close is not enough on its own: ConPTY keeps
+/// the pty pipe open after the child exits, so a Windows pane whose command had
+/// finished reported `running: true` with no exit code — and `paneStatus`'s exit
+/// code is exactly what `paneRun` promises. The quiet window keeps that from
+/// truncating output: anything the pty still holds arrives within it and
+/// re-arms the deadline.
+const EXIT_DRAIN_QUIET_MS: u64 = 500;
+
+/// How often the child is polled for its exit status.
+const CHILD_POLL_MS: u64 = 200;
+
 /// After SIGWINCH, TUIs redraw and re-emit visible screen content as fresh
 /// PTY bytes. Skip concept matching on those lines — they are not new shell
 /// events. User-initiated UntilStop triggers (typed Enter) are unaffected.
@@ -598,8 +612,31 @@ async fn run_terminal_task(
     let timeout_sleep = tokio::time::sleep(INACTIVE_DURATION);
     tokio::pin!(timeout_sleep);
 
+    // Child-exit watch. `pty_rx` closing is the usual signal (Unix closes the
+    // read side when the child exits); on Windows it may never close, so the
+    // child is polled too — see `EXIT_DRAIN_QUIET_MS`.
+    let mut child_exit: Option<i32> = None;
+    let mut exit_quiet_until: Option<tokio::time::Instant> = None;
+    let mut child_poll = tokio::time::interval(Duration::from_millis(CHILD_POLL_MS));
+    child_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
     loop {
         tokio::select! {
+            _ = child_poll.tick() => {
+                let now = tokio::time::Instant::now();
+                if child_exit.is_none() {
+                    // `try_wait` does not consume the status on either backend
+                    // (std caches it on Unix, Windows reads the exit code), so
+                    // the teardown below still reads the same answer.
+                    child_exit = pty_handle.try_wait();
+                    if child_exit.is_some() {
+                        exit_quiet_until =
+                            Some(now + Duration::from_millis(EXIT_DRAIN_QUIET_MS));
+                    }
+                } else if exit_quiet_until.is_some_and(|deadline| now >= deadline) {
+                    break;
+                }
+            }
             _ = &mut timeout_sleep => {
                 // Capture timeout fired
                 if ctx.session.is_active() {
@@ -609,6 +646,12 @@ async fn run_terminal_task(
             }
             msg = pty_rx.recv() => {
                 let Some(bytes) = msg else { break; };
+                // The child is gone but the pty may still hand over what it
+                // buffered; only silence ends the task.
+                if child_exit.is_some() {
+                    exit_quiet_until =
+                        Some(tokio::time::Instant::now() + Duration::from_millis(EXIT_DRAIN_QUIET_MS));
+                }
                 // Update liveness: any PTY output means the pane was active.
                 if let Some(g) = &grid
                     && let Some(mut locked) = lock_or_warn(g, "pane grid")
@@ -927,6 +970,57 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+    }
+
+    /// A pane whose shell exits must report that exit even when the pty stays
+    /// open — a background job of the shell holds it, and on Windows ConPTY
+    /// keeps it open whatever the child does. Waiting for the read side to close
+    /// alone left `paneStatus.running` true with no exit code for a command that
+    /// had finished, which is exactly what `paneRun` promises.
+    #[tokio::test]
+    async fn a_shell_that_exits_while_the_pty_is_held_open_is_still_reported() {
+        let engine = WorkspaceEngine::new(vec![]);
+        let spawned = engine
+            .spawn_terminal_with_grid(
+                TerminalConfig { id: 7 },
+                "sh",
+                // The grandchild ignores SIGHUP (which the kernel delivers to
+                // the foreground group when the session leader exits) and
+                // inherits the pty, so the read side never reaches EOF while
+                // the shell is already gone — the Windows/ConPTY shape.
+                &["-c", "echo BYE; (trap '' HUP; sleep 30) & exit 5"],
+                &[],
+                &[],
+                24,
+                80,
+            )
+            .await
+            .expect("spawn");
+
+        let reported = wait_until(Duration::from_secs(10), || {
+            spawned
+                .grid
+                .lock()
+                .map(|grid| grid.status.exit_code == Some(5))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            reported,
+            "the exit code must be reported even while a descendant holds the pty"
+        );
+
+        // Ending the task early is only correct if what the pty already held
+        // was still delivered.
+        let rendered = spawned
+            .grid
+            .lock()
+            .map(|grid| grid.plain_text(50).join("\n"))
+            .unwrap_or_default();
+        assert!(
+            rendered.contains("BYE"),
+            "output that preceded the exit must not be truncated; got {rendered:?}"
+        );
     }
 
     /// Poll the spawned terminal's agent state until it leaves Idle.
