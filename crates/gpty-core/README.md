@@ -21,12 +21,14 @@ Library crate for the gpty multi-PTY emulator. This is the engine — all termin
 ## Concept System
 
 Concepts capture terminal output and route it to a pane: a regular expression
-trigger, a stop condition, and a target pane kind.
+trigger, optional conditions (extra predicates over the same line), a stop
+condition, and a target pane kind.
 
 ```rust
 Concept {
     name: "cat_command",
     trigger_regex: Regex::new(r"(?:^|[$#>]\s)\bcat\s+\S").unwrap(),
+    conditions: vec![],
     enabled: true,
     capture_mode: CaptureMode::UntilStop { stop_timeout_ms: 300, stop_on_input: true },
     destinations: vec![Action { target_label: "code_viewer".into() }],
@@ -36,7 +38,8 @@ Concept {
 How it works:
 1. PTY output bytes stream through the `vte` parser
 2. The parser strips ANSI escape sequences and extracts visible text lines
-3. Each line is tested against every registered concept's `trigger_regex`
+3. Each line is tested against every registered concept's `trigger_regex`, then
+   against its `conditions` (all must match the same line)
 4. On an `UntilStop` match the terminal enters capture mode and buffers raw
    bytes; a `SingleLine` match is queued as a notice and stops here
 5. The capture ends on timeout (silence for N ms) or user input

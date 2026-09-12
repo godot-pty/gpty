@@ -122,6 +122,7 @@ pub struct Action {
 ///     trigger_regex: Regex::new(r"(?:^|[$#>]\s)\bcat\s+\S").unwrap(),
 ///     enabled: true,
 ///     capture_mode: CaptureMode::UntilStop { stop_timeout_ms: 300, stop_on_input: true },
+///     conditions: vec![],
 ///     destinations: vec![Action { target_label: "code_viewer".into() }],
 /// }
 /// ```
@@ -129,6 +130,14 @@ pub struct Action {
 pub struct Concept {
     pub name: String,
     pub trigger_regex: Regex,
+    /// Additional predicates over the same line `trigger_regex` matched.
+    ///
+    /// Every condition must match that line for the concept to fire, so a
+    /// condition can only ever narrow a match — it never starts a capture or
+    /// routes anything on its own. Conditions are regexes in the same dialect
+    /// as the trigger and are data like the rest of the vocabulary: nothing
+    /// here executes.
+    pub conditions: Vec<Regex>,
     /// Whether this concept is active. Disabled concepts are never evaluated.
     pub enabled: bool,
     /// How output is captured when this concept triggers.
@@ -142,6 +151,7 @@ impl Concept {
         Self {
             name: name.to_string(),
             trigger_regex,
+            conditions: Vec::new(),
             enabled: true,
             capture_mode: CaptureMode::default(),
             destinations,

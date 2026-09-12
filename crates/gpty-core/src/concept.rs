@@ -11,6 +11,7 @@
 //! called from the engine's terminal tasks.
 
 use crate::types::{CaptureMode, Concept};
+use regex::Regex;
 
 /// Test every concept's regex against `line`.
 ///
@@ -28,6 +29,11 @@ pub fn match_line(concepts: &[Concept], line: &str) -> Option<(String, CaptureMo
     let mut notify = None;
     for concept in concepts {
         if !concept.enabled || !concept.trigger_regex.is_match(line) {
+            continue;
+        }
+        // Conditions are extra predicates over the same line: all of them must
+        // match for the concept to fire, so they can only narrow the match.
+        if !concept.conditions.iter().all(|re| re.is_match(line)) {
             continue;
         }
         let target = concept
@@ -55,13 +61,73 @@ pub fn match_line(concepts: &[Concept], line: &str) -> Option<(String, CaptureMo
 pub const MAX_CONCEPTS: usize = 128;
 pub const MAX_TRIGGER_LEN: usize = 1024;
 pub const MAX_ACTIONS: usize = 32;
+pub const MAX_CONDITIONS: usize = 8;
 pub const MAX_STOP_TIMEOUT_MS: u64 = 600_000;
+
+/// Compile `pattern` in the dialect the engine actually matches with.
+fn compile_pattern(pattern: &str) -> Result<Regex, String> {
+    if pattern.is_empty() {
+        return Err("empty pattern".to_string());
+    }
+    if pattern.len() > MAX_TRIGGER_LEN {
+        return Err(format!("pattern exceeds the {MAX_TRIGGER_LEN}-byte limit"));
+    }
+    Regex::new(pattern).map_err(|e| e.to_string())
+}
+
+/// Validate a regex against the engine's matching dialect.
+///
+/// This is the authority the concept editor must ask: the engine matches with
+/// the Rust `regex` crate, which rejects look-around and backreferences that
+/// GDScript's PCRE2 accepts. `concepts_from_json` silently drops a concept
+/// carrying such a pattern, so validating engine-side is the only way to know
+/// whether a user-authored regex will actually load.
+pub fn validate_pattern(pattern: &str) -> Result<(), String> {
+    compile_pattern(pattern).map(|_| ())
+}
+
+/// Parse a concept's optional `conditions` array into compiled regexes.
+///
+/// Conditions narrow a match: every one must match the same line the trigger
+/// matched. Dropping a condition that cannot be parsed would *widen* matching,
+/// the unsafe direction, so anything not fully understood is an error the
+/// caller turns into a rejected concept.
+fn parse_conditions(value: Option<&serde_json::Value>) -> Result<Vec<Regex>, String> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    if value.is_null() {
+        return Ok(Vec::new());
+    }
+    let Some(entries) = value.as_array() else {
+        return Err("\"conditions\" must be an array of regex strings".to_string());
+    };
+    if entries.len() > MAX_CONDITIONS {
+        return Err(format!(
+            "{} conditions exceeds the limit of {MAX_CONDITIONS}",
+            entries.len()
+        ));
+    }
+    let mut conditions = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let Some(pattern) = entry.as_str() else {
+            return Err("every condition must be a regex string".to_string());
+        };
+        let re = compile_pattern(pattern)
+            .map_err(|e| format!("condition '{pattern}' is invalid: {e}"))?;
+        conditions.push(re);
+    }
+    Ok(conditions)
+}
 
 /// Parse concept definitions from the JSON payload pushed by GDScript
 /// (an Array of objects). Invalid entries are skipped; counts, lengths,
 /// and the capture timeout are capped per the `MAX_*` constants. The
 /// timeout clamp prevents `Instant::now() + Duration` overflow panics
 /// in the engine.
+///
+/// An entry whose `conditions` cannot be parsed in full is skipped rather
+/// than partially kept: dropping a condition would widen matching.
 pub fn concepts_from_json(json: &str) -> Vec<Concept> {
     use crate::types::Action;
 
@@ -86,8 +152,17 @@ pub fn concepts_from_json(json: &str) -> Vec<Concept> {
         if trigger.is_empty() || trigger.len() > MAX_TRIGGER_LEN {
             continue;
         }
-        let Ok(re) = regex::Regex::new(trigger) else {
+        let Ok(re) = Regex::new(trigger) else {
             continue;
+        };
+        // A malformed conditions list rejects the whole concept: a silently
+        // dropped condition would widen matching (see `parse_conditions`).
+        let conditions = match parse_conditions(item.get("conditions")) {
+            Ok(conditions) => conditions,
+            Err(reason) => {
+                log::warn!("concept '{name}' rejected: {reason}");
+                continue;
+            }
         };
         let enabled = item["enabled"].as_bool().unwrap_or(true);
         // `single_line` is notify-only: the match is published as an event and
@@ -123,6 +198,7 @@ pub fn concepts_from_json(json: &str) -> Vec<Concept> {
         concepts.push(Concept {
             name,
             trigger_regex: re,
+            conditions,
             enabled,
             capture_mode: cap_mode,
             destinations: actions,
@@ -148,6 +224,7 @@ mod tests {
         Concept {
             name: name.into(),
             trigger_regex: Regex::new(pattern).unwrap(),
+            conditions: vec![],
             enabled: true,
             capture_mode: CaptureMode::UntilStop {
                 stop_timeout_ms: 300,
@@ -157,6 +234,11 @@ mod tests {
                 target_label: target.into(),
             }],
         }
+    }
+
+    fn with_conditions(mut concept: Concept, patterns: &[&str]) -> Concept {
+        concept.conditions = patterns.iter().map(|p| Regex::new(p).unwrap()).collect();
+        concept
     }
 
     // ── match_line ─────────────────────────────────────────────────
@@ -235,6 +317,59 @@ mod tests {
         c.destinations.clear();
         let (_, _, target) = match_line(&[c], "crash").expect("should match");
         assert_eq!(target, "");
+    }
+
+    /// Conditions are ANDed with the trigger over the same line: every one
+    /// must match, and they never stand in for the trigger.
+    #[test]
+    fn match_line_requires_every_condition() {
+        let line = "deploy prod ok";
+
+        let all_hold = with_conditions(
+            make_concept("deploy", "deploy", "code_viewer"),
+            &["prod", r"\bok\b"],
+        );
+        let (name, _, target) = match_line(&[all_hold], line).expect("all conditions hold");
+        assert_eq!(name, "deploy");
+        assert_eq!(target, "code_viewer");
+
+        let one_missing = with_conditions(
+            make_concept("deploy", "deploy", "code_viewer"),
+            &["prod", r"\bstaging\b"],
+        );
+        assert!(
+            match_line(&[one_missing], line).is_none(),
+            "the trigger matched but one condition did not"
+        );
+
+        let trigger_absent =
+            with_conditions(make_concept("deploy", "deploy", "code_viewer"), &["prod"]);
+        assert!(
+            match_line(&[trigger_absent], "prod ok").is_none(),
+            "conditions never stand in for the trigger"
+        );
+    }
+
+    /// Conditions gate notify-only concepts too: they are predicates on the
+    /// line, independent of the capture mode.
+    #[test]
+    fn match_line_conditions_apply_to_notify_concepts() {
+        let mut notify = with_conditions(make_concept("n", "alpha", "none"), &["beta"]);
+        notify.capture_mode = CaptureMode::SingleLine;
+        assert!(match_line(&[notify.clone()], "alpha beta").is_some());
+        assert!(match_line(&[notify], "alpha gamma").is_none());
+    }
+
+    /// A concept whose conditions fail must not consume the line: a later
+    /// concept that matches still fires.
+    #[test]
+    fn match_line_falls_through_when_conditions_fail() {
+        let gated = with_conditions(make_concept("gated", "alpha", "x"), &["never"]);
+        let plain = make_concept("plain", "alpha", "y");
+        let (name, _, target) =
+            match_line(&[gated, plain], "alpha release").expect("the plain concept matches");
+        assert_eq!(name, "plain");
+        assert_eq!(target, "y");
     }
 
     // ── concepts_from_json ────────────────────────────────────────
@@ -387,5 +522,89 @@ mod tests {
         let concepts = concepts_from_json(json);
         assert_eq!(concepts[0].destinations.len(), 1);
         assert_eq!(concepts[0].destinations[0].target_label, "ok");
+    }
+
+    // ── conditions ────────────────────────────────────────────────
+
+    #[test]
+    fn validate_pattern_speaks_the_engine_dialect() {
+        assert!(validate_pattern(r"^\s*error\b").is_ok());
+        assert_eq!(validate_pattern("").unwrap_err(), "empty pattern");
+
+        let oversized = "a".repeat(MAX_TRIGGER_LEN + 1);
+        let err = validate_pattern(&oversized).unwrap_err();
+        assert!(
+            err.contains(&MAX_TRIGGER_LEN.to_string()),
+            "the cap must be named: {err}"
+        );
+
+        // PCRE2 (GDScript's RegEx) accepts look-around; the engine's `regex`
+        // crate does not, and `concepts_from_json` drops such a concept.
+        assert!(validate_pattern("(?=x)y").is_err());
+        assert!(validate_pattern("(?<=x)y").is_err());
+    }
+
+    #[test]
+    fn concepts_from_json_keeps_valid_conditions() {
+        let json = r#"[
+            {"name": "deploy", "trigger": "deploy", "conditions": ["prod", "\\bok\\b"]}
+        ]"#;
+        let concepts = concepts_from_json(json);
+        assert_eq!(concepts.len(), 1);
+        assert_eq!(concepts[0].conditions.len(), 2);
+        assert!(concepts[0].conditions[0].is_match("prod build"));
+        assert!(concepts[0].conditions[1].is_match("ok"));
+        // The parsed conditions are live predicates, not decoration.
+        assert_eq!(
+            match_line(&concepts, "deploy prod ok")
+                .map(|(n, _, _)| n)
+                .as_deref(),
+            Some("deploy")
+        );
+        assert!(match_line(&concepts, "deploy prod failed").is_none());
+    }
+
+    #[test]
+    fn concepts_from_json_accepts_an_empty_conditions_array() {
+        let json = r#"[{"name": "c", "trigger": "x", "conditions": []}]"#;
+        let concepts = concepts_from_json(json);
+        assert_eq!(concepts.len(), 1);
+        assert!(concepts[0].conditions.is_empty());
+    }
+
+    /// Dropping an unparseable condition would widen matching, so every
+    /// rejection path drops the whole concept.
+    #[test]
+    fn concepts_from_json_rejects_unparseable_conditions() {
+        for conditions in [
+            r#""prod""#,      // not an array
+            r#"["("]"#,       // does not compile
+            r#"[""]"#,        // empty pattern
+            r#"["ok", 7]"#,   // an entry is not a string
+            r#"["(?<=x)y"]"#, // look-behind: PCRE2-only, not engine dialect
+        ] {
+            let json = format!(r#"[{{"name": "c", "trigger": "x", "conditions": {conditions}}}]"#);
+            assert!(
+                concepts_from_json(&json).is_empty(),
+                "conditions {conditions} must reject the concept"
+            );
+        }
+    }
+
+    #[test]
+    fn concepts_from_json_rejects_over_cap_conditions() {
+        let entries: Vec<String> = (0..=MAX_CONDITIONS).map(|i| format!("\"ok{i}\"")).collect();
+        let json = format!(
+            r#"[{{"name": "c", "trigger": "x", "conditions": [{}]}}]"#,
+            entries.join(",")
+        );
+        assert!(concepts_from_json(&json).is_empty());
+    }
+
+    #[test]
+    fn concepts_from_json_rejects_oversized_condition() {
+        let long = "a".repeat(MAX_TRIGGER_LEN + 1);
+        let json = format!(r#"[{{"name": "c", "trigger": "x", "conditions": ["{long}"]}}]"#);
+        assert!(concepts_from_json(&json).is_empty());
     }
 }

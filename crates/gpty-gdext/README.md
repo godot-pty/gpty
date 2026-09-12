@@ -104,8 +104,9 @@ Inspector omp is launched as `omp --mode rpc --no-session --no-tools --no-extens
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `set_global_concepts(concepts_json: String)` | void | Replace all concepts in the engine (JSON array of concept objects; parse caps and timeout clamp in `gpty_core::concept::concepts_from_json`) |
-| `get_global_concepts()` | `Array` | Get all concepts as Dict array |
+| `set_global_concepts(concepts_json: String)` | void | Replace all concepts in the engine (JSON array of concept objects with `name`, `trigger`, optional `conditions` regex array, `enabled`, `capture_mode`, and `actions`; parse caps and timeout clamp in `gpty_core::concept::concepts_from_json`) |
+| `validate_regex(pattern: String)` | `String` | Validate a user-authored regex against the engine's dialect: `""` when accepted, else the error. GDScript's `RegEx` is PCRE2 and accepts look-around the Rust `regex` crate rejects, which `concepts_from_json` silently drops |
+| `get_global_concepts()` | `Array` | Get all concepts as Dict array (each carries `conditions`, possibly empty) |
 | `drain_concept_events()` | `Array` | Drain completed capture events from this terminal |
 | `drain_concept_notices()` | `Array` | Drain notify-only concept matches (`capture_mode: "single_line"`); returns `[{concept_name}]`. Metadata only — the matched line is never published |
 | `acknowledge_capture(event_id: int)` | void | Discard captured bytes (receiver consumed output) |

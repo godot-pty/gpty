@@ -950,7 +950,11 @@ impl GptyTerminal {
     ///   "name": String, "trigger": String (regex),
     ///   "enabled": bool, "capture_mode": String,
     ///   "stop_timeout_ms": int, "stop_on_input": bool,
-    ///   "actions": Array[{"cmd":String,"target":String}]
+    ///   "conditions": Array[String] (regexes ANDed with the trigger on the
+    ///   same line; a concept with an unparseable condition is dropped),
+    ///   "actions": Array[{"target":String}]
+    /// Call `validate_regex()` on user-authored patterns before writing them:
+    /// the engine's dialect is narrower than GDScript's PCRE2.
     /// Parsing and caps (count, lengths, timeout clamp) live in
     /// `gpty_core::concept::concepts_from_json`.
     #[func]
@@ -959,6 +963,10 @@ impl GptyTerminal {
         ENGINE.set_concepts(concepts);
     }
     /// Get all concepts as an Array of Dictionaries.
+    ///
+    /// Every dictionary carries `conditions` (PackedStringArray, possibly
+    /// empty) alongside `name`, `trigger`, `enabled`, `capture_mode`,
+    /// `stop_timeout_ms`/`stop_on_input` (until_stop only) and `actions`.
     #[func]
     fn get_global_concepts(&self) -> Array<Variant> {
         use gpty_core::types::CaptureMode;
@@ -969,6 +977,11 @@ impl GptyTerminal {
             obj.set("name", &Variant::from(c.name.clone()));
             obj.set("trigger", &Variant::from(c.trigger_regex.as_str()));
             obj.set("enabled", &Variant::from(c.enabled));
+            let mut conds = PackedStringArray::new();
+            for re in &c.conditions {
+                conds.push(&GString::from(re.as_str()));
+            }
+            obj.set("conditions", &Variant::from(conds));
             match c.capture_mode {
                 CaptureMode::SingleLine => {
                     obj.set("capture_mode", &Variant::from("single_line"));
@@ -1115,6 +1128,27 @@ impl GptyTerminal {
     #[func]
     fn get_app_version() -> GString {
         GString::from(env!("CARGO_PKG_VERSION"))
+    }
+
+    /// Validate a pattern against the engine's regex dialect.
+    ///
+    /// Returns an empty String when `gpty_core::concept::validate_pattern`
+    /// accepts the pattern, otherwise its error message for display.
+    ///
+    /// GDScript's `RegEx` is PCRE2 and accepts look-around and backreferences
+    /// that the Rust `regex` crate rejects; `concepts_from_json` silently drops
+    /// a concept carrying such a pattern. The concept editor must therefore
+    /// validate each user-authored trigger and condition through this call —
+    /// it is the only authority on what the engine will actually load.
+    ///
+    /// This is a static method — call it as `GptyTerminal.validate_regex("{p}")`
+    /// from GDScript.
+    #[func]
+    fn validate_regex(pattern: GString) -> GString {
+        match gpty_core::concept::validate_pattern(&pattern.to_string()) {
+            Ok(()) => GString::new(),
+            Err(err) => GString::from(&err),
+        }
     }
 
     /// Drain semantic events emitted by explicitly installed agent extensions.

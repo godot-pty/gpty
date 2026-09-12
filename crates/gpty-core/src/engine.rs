@@ -1096,6 +1096,7 @@ mod tests {
         let concept = Concept {
             name: "cat_test".into(),
             trigger_regex: Regex::new("cat").unwrap(),
+            conditions: vec![],
             enabled: true,
             capture_mode: CaptureMode::UntilStop {
                 stop_timeout_ms: 1000,
@@ -1144,6 +1145,7 @@ mod tests {
         let concept = Concept {
             name: "begin_marker".into(),
             trigger_regex: Regex::new("^BEGIN$").unwrap(),
+            conditions: vec![],
             enabled: true,
             capture_mode: CaptureMode::UntilStop {
                 stop_timeout_ms: 2000,
@@ -1204,6 +1206,7 @@ mod tests {
         let concept = Concept {
             name: "notify_me".into(),
             trigger_regex: Regex::new("^notify me").unwrap(),
+            conditions: vec![],
             enabled: true,
             capture_mode: CaptureMode::SingleLine,
             destinations: vec![],
@@ -1406,6 +1409,7 @@ mod tests {
         let concept = Concept {
             name: "cat_test".into(),
             trigger_regex: Regex::new("cat").unwrap(),
+            conditions: vec![],
             enabled: true,
             capture_mode: CaptureMode::UntilStop {
                 stop_timeout_ms: 60_000,
