@@ -284,10 +284,13 @@ pub fn validate_program(program: &str, path_value: Option<&str>) -> Result<(), S
 /// A handle to a spawned PTY: shell process + I/O thread.
 pub struct PtyHandle {
     pub id: u32,
-    writer: Box<dyn Write + Send>,
+    /// Input goes to a dedicated thread, never straight to the PTY: see
+    /// [`PtyHandle::send`].
+    writer_tx: std::sync::mpsc::Sender<Vec<u8>>,
     master: Box<dyn MasterPty + Send>,
     _child: Box<dyn portable_pty::Child + Send + Sync>,
     _read_thread: thread::JoinHandle<()>,
+    _write_thread: thread::JoinHandle<()>,
 }
 
 impl PtyHandle {
@@ -373,6 +376,7 @@ impl PtyHandle {
         // order nothing has been spawned when either call can still fail.
         let mut reader = pty_pair.master.try_clone_reader()?;
         let writer = pty_pair.master.take_writer()?;
+
         let mut child = pty_pair.slave.spawn_command(cmd)?;
         let master = pty_pair.master;
 
@@ -412,26 +416,78 @@ impl PtyHandle {
             }
         };
 
+        // Input is small and user-driven (a keystroke, a paste, an emulator
+        // reply), so its queue is unbounded — but it must not be the terminal
+        // task that drains it. A child that stops reading stdin (a flood, a
+        // `tail -f`) fills the kernel's input buffer, and a blocking write
+        // there used to stop the task draining PTY *output*: the pane froze,
+        // and so did any attempt to tear it down, because the task was inside
+        // a synchronous write and abort only lands at an await point. The
+        // thread can block as long as the child makes it; nothing else waits
+        // on it.
+        let (writer_tx, writer_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let write_thread = {
+            let mut writer = writer;
+            match thread::Builder::new()
+                .name(format!("pty-writer-{id}"))
+                .spawn(move || {
+                    while let Ok(first) = writer_rx.recv() {
+                        // Coalesce whatever else is queued: a paste arrives as
+                        // one call, but a flood of keystrokes should not be a
+                        // syscall each. Order is preserved — the queue is one
+                        // FIFO and the buffer is written in receive order.
+                        let mut buf = first;
+                        while let Ok(more) = writer_rx.try_recv() {
+                            buf.extend_from_slice(&more);
+                        }
+                        if let Err(e) = writer.write_all(&buf).and_then(|()| writer.flush()) {
+                            // The pane is gone or the child stopped reading
+                            // for good; nothing above can act on it now, but
+                            // it belongs in the log (the bridge carries it to
+                            // the GUI).
+                            log::warn!("[PTY {id}] Write error: {e}");
+                            break;
+                        }
+                    }
+                }) {
+                Ok(handle) => handle,
+                Err(e) => {
+                    let _ = child.kill();
+                    let _ = child.try_wait();
+                    return Err(e.into());
+                }
+            }
+        };
         Ok(Self {
             id,
-            writer,
+            writer_tx,
             master,
             _child: child,
             _read_thread: read_thread,
+            _write_thread: write_thread,
         })
     }
 
     /// Write a line to the PTY (appends `\r` = Enter).
     pub fn write_line(&mut self, line: &str) -> Result<(), std::io::Error> {
-        self.writer.write_all(line.as_bytes())?;
-        self.writer.write_all(b"\r")?;
-        self.writer.flush()
+        self.send(line.as_bytes())?;
+        self.send(b"\r")
     }
 
     /// Write raw bytes to the PTY (no newline appended).
     pub fn write_bytes(&mut self, data: &[u8]) -> Result<(), std::io::Error> {
-        self.writer.write_all(data)?;
-        self.writer.flush()
+        self.send(data)
+    }
+
+    /// Hand bytes to the PTY's writer thread.
+    ///
+    /// Returns as soon as they are queued; the only failure it can report is a
+    /// writer thread that is gone, which means the pane is gone with it. The
+    /// bytes reach the child in order, once the child reads.
+    fn send(&self, data: &[u8]) -> Result<(), std::io::Error> {
+        self.writer_tx.send(data.to_vec()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "PTY writer thread is gone")
+        })
     }
 
     /// Resize the PTY — sends SIGWINCH to the child process.
@@ -769,6 +825,46 @@ mod tests {
         // But the trusted vec is well-formed for direct injection.
         assert_eq!(trusted[0], ("GPTY_ENV".to_string(), "1".to_string()));
         assert_eq!(trusted[1], ("GPTY_PANE_ID".to_string(), attachment_id));
+    }
+
+    /// Input to a child that is not reading must not block the caller.
+    ///
+    /// The kernel's input buffer is ~4 KiB. Writing a paste larger than that
+    /// used to block the terminal task inside `write_all`, which stopped it
+    /// draining PTY *output* — the pane froze, and aborting the pane could not
+    /// land either, because the task was inside a synchronous write. Input now
+    /// goes to a writer thread, so the calls return and the child reads it
+    /// whenever it gets around to it.
+    #[test]
+    fn writing_to_a_child_that_does_not_read_does_not_block() {
+        #[cfg(windows)]
+        let (cmd, args) = ("cmd.exe", vec!["/C", "ping -n 30 127.0.0.1 > NUL"]);
+        #[cfg(not(windows))]
+        let (cmd, args) = ("sh", vec!["-c", "sleep 30"]);
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        let mut handle = PtyHandle::spawn(9300, cmd, &args, &[], &[], tx).expect("spawn");
+
+        // 1 MiB, in 64 KiB pieces: far past the input buffer, and far past
+        // what a blocking writer would accept before stopping. Written from
+        // another thread so a regression is a failed assertion rather than a
+        // test that hangs until CI gives up.
+        let payload = vec![b'x'; 64 * 1024];
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let writer = std::thread::spawn(move || {
+            for _ in 0..16 {
+                handle.write_bytes(&payload).expect("queued");
+            }
+            let _ = done_tx.send(());
+        });
+
+        assert!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .is_ok(),
+            "1 MiB of input to a child that never reads must queue, not block"
+        );
+        writer.join().ok();
     }
 
     /// A full output queue must throttle the child, never lose its bytes.
