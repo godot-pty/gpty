@@ -26,6 +26,10 @@ const MAX_CONDITIONS := 8
 const MAX_NAME_LEN := 256
 const MAX_PATTERN_LEN := 1024
 const MAX_POSITIONS := 512
+## Entries in the canvas order. A canvas holds at most [constant MAX_RULES]
+## rules; the headroom is for names a rule rename left behind, and it keeps a
+## hand-edited block bounded.
+const MAX_ORDER := 256
 const MAX_COORD := 100000.0
 const MAX_DRAFT_CHAINS := 32
 const MAX_DRAFT_NODES := 256
@@ -159,6 +163,15 @@ static func _fill_positions(nodes: Array, stored: Dictionary) -> Dictionary:
 			cond_counts[owner] = int(cond_counts.get(owner, 0)) + 1
 	var row_of := {}
 	var next_row := 0
+	# Auto rows start below every stored row: a rule the canvas has never
+	# arranged (a newly shipped default) must not land on top of one the user
+	# placed — it belongs after them, which is where the merge order puts it
+	# too, so the canvas and the engine agree about a rule nobody has touched.
+	var first_free_y := 40.0
+	for id in stored:
+		var v = stored[id]
+		if v is Array and v.size() == 2 and _is_number(v[1]):
+			first_free_y = maxf(first_free_y, float(v[1]) + 240.0)
 	for node in nodes:
 		var id: String = node["id"]
 		var v = stored.get(id)
@@ -172,7 +185,7 @@ static func _fill_positions(nodes: Array, stored: Dictionary) -> Dictionary:
 		if not row_of.has(row_key):
 			row_of[row_key] = next_row
 			next_row += 1
-		var y := 40.0 + float(row_of[row_key]) * 240.0
+		var y := first_free_y + float(row_of[row_key]) * 240.0
 		var x := 40.0
 		if suffix == "a":
 			x = 400.0 + float(int(cond_counts.get(owner, 0))) * 380.0
@@ -180,6 +193,86 @@ static func _fill_positions(nodes: Array, stored: Dictionary) -> Dictionary:
 			x = 400.0 + float(suffix.substr(1).to_int()) * 380.0
 		out[id] = [x, y]
 	return out
+
+## The canvas order: rule names top-to-bottom by their trigger's position (then
+## left-to-right, then by name for the same spot). This is the order the rules
+## are *tried* in — the editor saves it as the graph block's `order` and
+## `ConceptManager` applies it — so the canvas draws priority, not just layout.
+##
+## A rule with no stored position keeps the order it came in `paths` and sorts
+## after every arranged rule: a node the canvas has never shown must not
+## displace an arrangement the user made.
+static func rule_order(paths: Array, positions: Dictionary) -> Array:
+	var keyed: Array = []
+	for i in paths.size():
+		var path = paths[i]
+		if not (path is Dictionary):
+			continue
+		var name := str(path.get("name", ""))
+		if name == "":
+			continue
+		var ids = path.get("node_ids", {})
+		var trigger_id := str(ids.get("trigger", "")) if ids is Dictionary else ""
+		var v = positions.get(trigger_id)
+		var x := INF
+		var y := INF
+		# The editor holds canvas positions as Vector2; the file (and every
+		# caller coming from it) holds [x, y] arrays.
+		if v is Vector2:
+			x = v.x
+			y = v.y
+		elif v is Array and v.size() == 2 and _is_number(v[0]) and _is_number(v[1]):
+			x = float(v[0])
+			y = float(v[1])
+		keyed.append([y, x, i, name])
+	keyed.sort_custom(func(a, b):
+		if a[0] != b[0]:
+			return a[0] < b[0]
+		if a[1] != b[1]:
+			return a[1] < b[1]
+		if a[0] == INF:
+			# Both unarranged: keep the order they were compiled in.
+			return a[2] < b[2]
+		return a[3] < b[3]
+	)
+	var names: Array = []
+	for entry in keyed:
+		names.append(entry[3])
+	return names
+
+## Tidy positions: one row per rule in precedence order, draft nodes in their
+## own rows below. Replaces Godot's own arrangement — which lays a canvas out
+## by connection shape and would silently reshuffle the order rules run in.
+static func tidy_positions(paths: Array, drafts: Array, positions: Dictionary) -> Dictionary:
+	var by_name := {}
+	for path in paths:
+		if path is Dictionary:
+			by_name[str(path.get("name", ""))] = path
+	var ordered: Array = []
+	for name in rule_order(paths, positions):
+		var path: Dictionary = by_name.get(name, {})
+		var ids = path.get("node_ids", {})
+		if not (ids is Dictionary):
+			continue
+		var trigger := str(ids.get("trigger", ""))
+		if trigger != "":
+			ordered.append({"id": trigger})
+		var condition_ids = ids.get("conditions", [])
+		if condition_ids is Array:
+			for id in condition_ids:
+				ordered.append({"id": str(id)})
+		var action := str(ids.get("action", ""))
+		if action != "":
+			ordered.append({"id": action})
+	for chain in drafts:
+		if not (chain is Dictionary):
+			continue
+		var nodes = chain.get("nodes", [])
+		if nodes is Array:
+			for node in nodes:
+				if node is Dictionary and str(node.get("id", "")) != "":
+					ordered.append({"id": str(node["id"])})
+	return _fill_positions(ordered, {})
 
 # ═══════════════════════════════════════════════════════════════════════
 # Connection validation (used by the GraphEdit gesture handlers)
@@ -484,10 +577,13 @@ static func _normalize(entry: Dictionary) -> Dictionary:
 # Layout serialization
 # ═══════════════════════════════════════════════════════════════════════
 
-## Serialize positions + drafts for the graph block. Positions are re-keyed to
-## the canonical ids of the rules being saved, so a rule renamed in the editor
-## keeps its canvas position across reloads. Caps are applied here so a
-## runaway canvas can never write an unbounded block.
+## Serialize positions, drafts and the rule order for the graph block.
+## Positions are re-keyed to the canonical ids of the rules being saved, so a
+## rule renamed in the editor keeps its canvas position across reloads, and
+## the order is derived from those positions — it is the precedence order the
+## concepts are tried in, so the canvas and the engine cannot disagree about
+## it. Caps are applied here so a runaway canvas can never write an unbounded
+## block.
 static func layout(paths: Array, positions: Dictionary, drafts: Array) -> Dictionary:
 	var out_positions := {}
 	for path in paths:
@@ -543,7 +639,18 @@ static func layout(paths: Array, positions: Dictionary, drafts: Array) -> Dictio
 		if nodes_out.size() > 0:
 			out_drafts.append({"nodes": nodes_out, "edges": edges_out})
 
-	return {"version": GRAPH_VERSION, "positions": out_positions, "drafts": out_drafts}
+	var out_order: Array = []
+	for name in rule_order(paths, positions):
+		if out_order.size() >= MAX_ORDER:
+			break
+		out_order.append(name)
+
+	return {
+		"version": GRAPH_VERSION,
+		"positions": out_positions,
+		"drafts": out_drafts,
+		"order": out_order,
+	}
 
 ## Closed key set per kind — mirrors ConceptManager's sanitizer so a canvas
 ## round-trip through this function cannot carry junk into the file.

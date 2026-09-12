@@ -8,9 +8,10 @@ const DEFAULTS_FILE = "res://concepts.default.json"
 # lines it shows are the lines that actually run.
 const MAX_CONDITIONS := 8
 
-# Layout block written by the visual concept editor. It holds only positions
-# and unfinished drafts: the concepts array stays the single content store, so
-# nothing in the graph can drift from what the engine runs.
+# Layout block written by the visual concept editor. It holds the canvas's own
+# state — positions, unfinished drafts, and the order rules are tried in — and
+# never content: the concepts array stays the single content store, so nothing
+# in the graph can invent a trigger, an action or an enable flag.
 const GRAPH_VERSION := 1
 const MAX_GRAPH_POSITIONS := 512
 const MAX_GRAPH_COORD := 100000.0
@@ -18,6 +19,10 @@ const MAX_DRAFT_CHAINS := 32
 const MAX_DRAFT_NODES := 256
 const MAX_GRAPH_STRING := 1024
 const MAX_GRAPH_ID := 96
+## Entries in the canvas order, and the longest rule name one may carry
+## (mirrors `ConceptGraphModel.MAX_NAME_LEN`, which bounds names on write).
+const MAX_GRAPH_ORDER := 256
+const MAX_GRAPH_ORDER_NAME := 256
 const DRAFT_KINDS := ["trigger", "condition", "action"]
 
 signal concepts_changed
@@ -82,7 +87,44 @@ func _merge_concepts() -> Array:
 	for entry in merged:
 		if entry is Dictionary:
 			_migrate_actions_target(entry)
-	return merged
+	# The canvas order wins where it speaks: rules it names come first, in that
+	# order, and everything else keeps the merge order behind them. This is the
+	# precedence the engine runs (first match wins within a capture/notify
+	# class), so the visual editor's rows are the order rules are tried in.
+	return _apply_canvas_order(merged, get_graph_state())
+
+## Sort the merged concepts by the order the visual editor saved.
+##
+## A rule the canvas does not name keeps its merged position (shipped defaults
+## first, then user entries in file order) and is tried *after* the arranged
+## ones: a newly shipped default must never quietly take precedence over an
+## arrangement the user made — it appears on the canvas unranked the next time
+## the editor opens. A store with no `order` key is untouched, so a user who
+## never opened the editor gets exactly the order that shipped.
+func _apply_canvas_order(concepts: Array, graph: Dictionary) -> Array:
+	var raw = graph.get("order", [])
+	if not (raw is Array) or raw.is_empty():
+		return concepts
+	var rank := {}
+	for name in raw:
+		if name is String and name != "" and not rank.has(name):
+			rank[name] = rank.size()
+	if rank.is_empty():
+		return concepts
+	var keyed: Array = []
+	for i in concepts.size():
+		var entry = concepts[i]
+		var name := str(entry.get("name", "")) if entry is Dictionary else ""
+		# Unlisted entries sort after every listed one, in merged order.
+		var key := rank.size() + i
+		if name != "" and rank.has(name):
+			key = int(rank[name])
+		keyed.append([key, entry])
+	keyed.sort_custom(func(a, b): return a[0] < b[0])
+	var sorted: Array = []
+	for pair in keyed:
+		sorted.append(pair[1])
+	return sorted
 
 func _default_names(defaults: Array) -> Dictionary:
 	var names := {}
@@ -163,12 +205,13 @@ func save_state(concepts: Array, graph: Dictionary):
 	var sanitized := _sanitize_concepts(concepts)
 	var clean_graph := _sanitize_graph(graph)
 	var d := {"concepts": sanitized}
-	# A graph block with no positions and no drafts carries nothing. Omitting
-	# it keeps concepts.json clean for the users who never open the editor and
-	# never hand-edited a key that only the editor writes.
+	# A graph block with no positions, drafts or order carries nothing.
+	# Omitting it keeps concepts.json clean for the users who never open the
+	# editor and never hand-edited a key that only the editor writes.
 	var positions: Dictionary = clean_graph["positions"]
 	var drafts: Array = clean_graph["drafts"]
-	if not positions.is_empty() or not drafts.is_empty():
+	var order: Array = clean_graph["order"]
+	if not positions.is_empty() or not drafts.is_empty() or not order.is_empty():
 		d["graph"] = clean_graph
 	_write_file(CONCEPTS_FILE, d)
 	concepts_changed.emit()
@@ -194,13 +237,33 @@ func _sanitize_concepts(concepts: Array) -> Array:
 ## The graph block is untrusted file input: nothing read from it is trusted to
 ## have the right shape, and nothing written to it comes from anywhere else.
 func _sanitize_graph(raw) -> Dictionary:
-	var out := {"version": GRAPH_VERSION, "positions": {}, "drafts": []}
+	var out := {"version": GRAPH_VERSION, "positions": {}, "drafts": [], "order": []}
 	if not (raw is Dictionary):
 		return out
 	# `version` is ours to write: a file claiming another version is ignored
 	# rather than honoured, so an old file cannot change how we parse it.
 	out["positions"] = _sanitize_positions(raw.get("positions", {}))
 	out["drafts"] = _sanitize_drafts(raw.get("drafts", []))
+	out["order"] = _sanitize_order(raw.get("order", []))
+	return out
+
+## The rule order the canvas arranged. Names only, deduplicated (the first
+## occurrence is the rank), bounded in both count and length: this list is how
+## the file asks for a precedence other than the merge order, so a hand-edited
+## block must not be able to make it unbounded.
+func _sanitize_order(raw) -> Array:
+	var out: Array = []
+	if not (raw is Array):
+		return out
+	for entry in raw:
+		if out.size() >= MAX_GRAPH_ORDER:
+			break
+		if not (entry is String):
+			continue
+		var name: String = entry
+		if name == "" or name.length() > MAX_GRAPH_ORDER_NAME or out.has(name):
+			continue
+		out.append(name)
 	return out
 
 func _sanitize_positions(raw) -> Dictionary:

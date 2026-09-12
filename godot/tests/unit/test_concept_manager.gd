@@ -205,7 +205,12 @@ func test_push_clears_the_engine_when_every_concept_is_disabled():
 # must not throw the layout away.
 
 func test_save_concepts_preserves_the_existing_graph_block():
-	ConceptManager.save_state([], {"version": 1, "positions": {"c#t": [10, 20]}, "drafts": []})
+	ConceptManager.save_state([], {
+		"version": 1,
+		"positions": {"c#t": [10, 20]},
+		"drafts": [],
+		"order": ["graph_keep"],
+	})
 	ConceptManager.save_concepts([
 		{"name": "graph_keep", "trigger": "graph_regex", "enabled": true,
 		 "capture_mode": "until_stop", "stop_timeout_ms": 300, "stop_on_input": true,
@@ -219,6 +224,8 @@ func test_save_concepts_preserves_the_existing_graph_block():
 	assert_true(positions.has("c#t"), "node positions must survive a concept edit")
 	assert_eq(positions["c#t"][0], 10)
 	assert_eq(positions["c#t"][1], 20)
+	assert_eq(graph.get("order", []), ["graph_keep"],
+		"the rule order must survive a concept edit too — it is what the engine runs")
 
 func test_get_graph_state_drops_a_non_dict_graph():
 	ConceptManager._write_file(ConceptManager.CONCEPTS_FILE, {"concepts": [], "graph": "junk"})
@@ -260,6 +267,57 @@ func test_get_graph_state_caps_stored_positions():
 		{"concepts": [], "graph": {"positions": positions}})
 	var graph = ConceptManager.get_graph_state()
 	assert_eq(graph["positions"].size(), ConceptManager.MAX_GRAPH_POSITIONS)
+
+func test_get_graph_state_sanitizes_the_rule_order():
+	ConceptManager._write_file(ConceptManager.CONCEPTS_FILE, {
+		"concepts": [],
+		"graph": {"order": ["first", "first", "", 42, ["nested"], "x".repeat(400), "second"]},
+	})
+	var order: Array = ConceptManager.get_graph_state()["order"]
+	assert_eq(order, ["first", "second"],
+		"only non-empty, in-range, unique names survive — the first occurrence wins")
+
+func test_get_graph_state_caps_the_rule_order():
+	var order: Array = []
+	for i in ConceptManager.MAX_GRAPH_ORDER + 40:
+		order.append("rule%d" % i)
+	ConceptManager._write_file(ConceptManager.CONCEPTS_FILE,
+		{"concepts": [], "graph": {"order": order}})
+	assert_eq(ConceptManager.get_graph_state()["order"].size(), ConceptManager.MAX_GRAPH_ORDER)
+
+func test_merge_follows_the_saved_canvas_order():
+	ConceptManager.save_state([
+		_rule("rule_a", "trigger_a"), _rule("rule_b", "trigger_b"), _rule("rule_c", "trigger_c"),
+	], {"order": ["rule_c", "rule_a"]})
+	var merged = ConceptManager._merge_concepts()
+	var at := _index_by_name(merged)
+	assert_eq(at.size(), merged.size(), "every concept still merges exactly once")
+	assert_true(at["rule_c"] < at["rule_a"],
+		"the canvas order wins: rule_c was dragged above rule_a")
+	assert_true(at["rule_a"] < at["rule_b"],
+		"a rule the canvas never arranged is tried after the arranged ones")
+
+func test_merge_without_a_canvas_order_keeps_the_merge_order():
+	# No order key: shipped defaults first, then user entries in file order.
+	# A store that never saw the visual editor behaves exactly as it did.
+	ConceptManager.save_state([
+		_rule("z_user", "trigger_z"), _rule("a_user", "trigger_a"),
+	], {})
+	var merged = ConceptManager._merge_concepts()
+	var at := _index_by_name(merged)
+	assert_eq(at.size(), merged.size())
+	assert_true(at["z_user"] < at["a_user"],
+		"user entries keep the file order (z_user was written first)")
+	assert_ne(str(merged[0].get("name", "")), "a_user",
+		"the shipped defaults still come first when nothing was arranged")
+
+func test_save_state_keeps_an_order_only_graph_block():
+	ConceptManager.save_state([_rule("ordered", "trigger_o")], {"order": ["ordered"]})
+	var saved = ConceptManager._read_file(ConceptManager.CONCEPTS_FILE)
+	assert_true(saved.has("graph"), "an order-only block is still a graph block")
+	assert_eq(saved["graph"]["order"], ["ordered"])
+	assert_eq(ConceptManager.get_graph_state()["order"], ["ordered"],
+		"the order survives the read path")
 
 func test_get_graph_state_sanitizes_drafts():
 	var draft_nodes: Array = [
@@ -368,3 +426,18 @@ func _find_by_name(arr: Array, name: String):
 		if item is Dictionary and item.get("name", "") == name:
 			return item
 	return null
+
+## name → index over a merged concept list, for order assertions.
+func _index_by_name(merged: Array) -> Dictionary:
+	var at := {}
+	for i in merged.size():
+		at[str(merged[i].get("name", ""))] = i
+	return at
+
+## A stored concept entry in the shape `save_state` sanitizes.
+func _rule(concept_name: String, trigger: String) -> Dictionary:
+	return {
+		"name": concept_name, "trigger": trigger, "enabled": true,
+		"capture_mode": "until_stop", "stop_timeout_ms": 300, "stop_on_input": true,
+		"actions": [{"target": "terminal"}],
+	}

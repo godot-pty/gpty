@@ -40,6 +40,26 @@ func _find(nodes: Array, id: String) -> Dictionary:
 			return node
 	return {}
 
+## A user-authored rule, in the shape `_compile` writes.
+func _user_rule(rule_name: String, trigger: String) -> Dictionary:
+	return {
+		"name": rule_name, "trigger": trigger, "enabled": true,
+		"capture_mode": "until_stop", "stop_timeout_ms": 300, "stop_on_input": true,
+		"actions": [{"target": "code_viewer"}],
+	}
+
+## A compiled path with its canvas node ids — what [method ConceptGraphModel.rule_order]
+## reads to sort rules.
+func _ordered_path(rule_name: String) -> Dictionary:
+	return {
+		"name": rule_name, "trigger": "x",
+		"node_ids": {
+			"trigger": rule_name + "#t",
+			"conditions": [],
+			"action": rule_name + "#a",
+		},
+	}
+
 # ── Canvas construction ────────────────────────────────────────────────
 
 func test_build_canvas_materializes_a_chain_per_concept():
@@ -320,6 +340,62 @@ func test_layout_rekeys_positions_when_a_rule_is_renamed():
 	assert_true(positions.has("renamed#t"), "positions follow the new rule name")
 	assert_true(positions.has("renamed#a"))
 	assert_false(positions.has(NAME + "#t"), "the stale key is not written")
+	assert_eq(graph["order"], ["renamed"],
+		"the order names the rule it will be saved as, not the name it had")
+
+func test_layout_writes_the_rule_order_from_canvas_rows():
+	var concepts := [_user_rule("first", "a"), _user_rule("second", "b")]
+	var canvas := ConceptGraphModel.build_canvas(concepts, {})
+	# Drag "second" above "first": rows are the precedence order, not just
+	# layout, so the saved order follows the canvas.
+	canvas["positions"][ConceptGraphModel.trigger_id("second")] = [40.0, 40.0]
+	canvas["positions"][ConceptGraphModel.trigger_id("first")] = [40.0, 280.0]
+	var result := _analyze(canvas["nodes"], canvas["edges"])
+	var graph := ConceptGraphModel.layout(result["paths"], canvas["positions"], result["drafts"])
+	assert_eq(graph["order"], ["second", "first"],
+		"the saved order is the one the canvas shows")
+
+func test_rule_order_keeps_unarranged_rules_last():
+	var paths := [
+		_ordered_path("one"),
+		_ordered_path("two"),
+	]
+	# Only "two" has been placed; the canvas has never shown "one".
+	assert_eq(ConceptGraphModel.rule_order(paths, {"two#t": [10.0, 20.0]}), ["two", "one"],
+		"a rule the canvas has not arranged must not displace an arranged one")
+
+func test_rule_order_breaks_a_row_tie_left_to_right():
+	var paths := [_ordered_path("right"), _ordered_path("left")]
+	var positions := {"right#t": [400.0, 40.0], "left#t": [40.0, 40.0]}
+	assert_eq(ConceptGraphModel.rule_order(paths, positions), ["left", "right"],
+		"two rules on one row read left to right")
+
+func test_unarranged_rules_are_placed_below_arranged_ones():
+	# A rule the canvas has never shown (a newly shipped default) must not land
+	# on top of a row the user arranged: it goes below them, which is where the
+	# merge order tries it too.
+	var concepts := [_user_rule("arranged", "a"), _user_rule("brand_new", "b")]
+	var stored := {
+		"arranged#t": [40.0, 40.0],
+		"arranged#a": [400.0, 40.0],
+	}
+	var canvas := ConceptGraphModel.build_canvas(concepts, {"positions": stored})
+	assert_gt(canvas["positions"]["brand_new#t"][1], stored["arranged#t"][1],
+		"an unarranged rule is placed after the arranged rows")
+
+func test_tidy_positions_re_rows_the_canvas_in_its_order():
+	var concepts := [_user_rule("first", "a"), _user_rule("second", "b")]
+	var canvas := ConceptGraphModel.build_canvas(concepts, {})
+	canvas["positions"][ConceptGraphModel.trigger_id("second")] = [40.0, 40.0]
+	canvas["positions"][ConceptGraphModel.trigger_id("first")] = [40.0, 280.0]
+	var result := _analyze(canvas["nodes"], canvas["edges"])
+	var tidied := ConceptGraphModel.tidy_positions(
+		result["paths"], result["drafts"], canvas["positions"]
+	)
+	assert_lt(tidied["second#t"][1], tidied["first#t"][1],
+		"tidying keeps the order the canvas already had")
+	assert_gt(tidied["second#a"][0], tidied["second#t"][0],
+		"a chain still reads left to right")
 
 func test_layout_caps_draft_nodes():
 	var drafts := [{"nodes": [], "edges": []}]

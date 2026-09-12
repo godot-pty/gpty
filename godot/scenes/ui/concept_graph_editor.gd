@@ -14,7 +14,7 @@ extends Control
 ## invoke — the compiled entry's key set is closed by
 ## [method ConceptGraphModel.entry_for_path].
 
-const RULE_HINT := "Each rule: trigger → conditions → action. Connect output ports to input ports."
+const RULE_HINT := "Each rule: trigger → conditions → action. Connect output ports to input ports. Rules run top to bottom — drag a rule to change its priority (the number on its title)."
 
 var _graph: GraphEdit
 var _status_label: Label
@@ -30,6 +30,11 @@ var _drafts: Array = []
 var _errors: Array = []
 var _node_names: Dictionary = {}
 var _name_ids: Dictionary = {}
+## Canvas node id → the 1-based rank the rule is tried at, and the order that
+## produced it. Recomputed when the canvas is rebuilt and while a rule is
+## dragged, so the titles never disagree with the order that will be saved.
+var _ranks: Dictionary = {}
+var _order_names: Array = []
 var _frames: Array = []
 var _defaults: Array = []
 var _opened_default_names: Array = []
@@ -272,6 +277,8 @@ func _save() -> void:
 
 func _revalidate() -> void:
 	_analyze()
+	if _refresh_ranks():
+		_rewrite_titles()
 	_refresh_frames()
 	_update_error_display()
 
@@ -285,6 +292,7 @@ func _analyze_debounced() -> void:
 func _rebuild_canvas_ui() -> void:
 	_sync_positions_from_nodes()
 	_analyze()
+	_refresh_ranks()
 	_graph.clear_connections()
 	# Only our own elements: GraphEdit owns internal children (the connection
 	# layer, minimap container, popups) and removing those breaks the editor
@@ -330,6 +338,39 @@ func _attach_frames() -> void:
 			if _node_names.has(id):
 				_graph.attach_graph_element_to_frame(_node_names[id], _frames[i].name)
 
+## Rank each rule by the canvas order and remember it, so a trigger's title can
+## show where the rule sits in the order it will be tried in. Returns true when
+## the order changed (the caller then rewrites the titles).
+##
+## Ranks are keyed by the canvas node id the paths carry, not by rule name: a
+## rule renamed in the editor keeps its node ids until the next rebuild, and
+## its rank must not blink out in the meantime.
+func _refresh_ranks() -> bool:
+	var names := ConceptGraphModel.rule_order(_paths, _positions)
+	var changed := names != _order_names
+	_order_names = names
+	var trigger_id_by_name := {}
+	for path in _paths:
+		if path is Dictionary:
+			var ids = path.get("node_ids", {})
+			if ids is Dictionary:
+				trigger_id_by_name[str(path.get("name", ""))] = str(ids.get("trigger", ""))
+	_ranks = {}
+	for i in names.size():
+		var id := str(trigger_id_by_name.get(str(names[i]), ""))
+		if id != "":
+			_ranks[id] = i + 1
+	return changed
+
+func _rewrite_titles() -> void:
+	for node in _nodes:
+		var id := str(node["id"])
+		if not _node_names.has(id):
+			continue
+		var gn := _graph.get_node_or_null(NodePath(_node_names[id]))
+		if gn is GraphNode:
+			gn.title = _title_for(node)
+
 func _create_nodes() -> void:
 	_node_serial = 0
 	for node in _nodes:
@@ -367,6 +408,10 @@ func _make_graph_node(node: Dictionary) -> GraphNode:
 	gn.position_offset_changed.connect(func():
 		_positions[str(node["id"])] = gn.position_offset
 		_dirty = true
+		# Moving a rule is a priority change, so the ranks follow the drag —
+		# otherwise the titles would name the wrong rule as first.
+		if _refresh_ranks():
+			_rewrite_titles()
 		_update_status()
 	)
 	var box := VBoxContainer.new()
@@ -389,7 +434,9 @@ func _title_for(node: Dictionary) -> String:
 	match str(node["kind"]):
 		ConceptGraphModel.KIND_TRIGGER:
 			var name := str(params.get("name", ""))
-			return "Trigger - " + (name if name != "" else "(unnamed)")
+			var label := "Trigger - " + (name if name != "" else "(unnamed)")
+			var rank := int(_ranks.get(str(node["id"]), 0))
+			return ("%d. %s" % [rank, label]) if rank > 0 else label
 		ConceptGraphModel.KIND_CONDITION:
 			var pattern := str(params.get("pattern", ""))
 			return "Condition - " + (pattern.substr(0, 40) if pattern != "" else "(empty)")
@@ -726,9 +773,19 @@ func _on_popup_request(at_position: Vector2) -> void:
 	menu.popup_hide.connect(func(): menu.queue_free())
 	menu.popup_on_parent(Rect2i(Vector2i(at_position), Vector2i.ZERO))
 
+## Tidy the canvas. Deliberately not `GraphEdit.arrange_nodes()`: that lays
+## nodes out by connection shape, which would silently reshuffle the order the
+## rules are tried in. Re-rowed in the order they already have, so this button
+## is a tidy-up, never a reorder.
 func _arrange() -> void:
 	_sync_positions_from_nodes()
-	_graph.arrange_nodes()
+	# The model speaks file coordinates (arrays); the canvas speaks Vector2.
+	var tidied := ConceptGraphModel.tidy_positions(_paths, _drafts, _positions)
+	for id in _node_names:
+		var gn := _graph.get_node_or_null(NodePath(_node_names[id]))
+		if gn is GraphNode and tidied.has(id):
+			var p = tidied[id]
+			gn.position_offset = Vector2(float(p[0]), float(p[1]))
 	_sync_positions_from_nodes()
 	_dirty = true
 	_update_status()
