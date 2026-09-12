@@ -7,7 +7,7 @@ Library crate for the gpty multi-PTY emulator. This is the engine — all termin
 | Module | Purpose | Key Types |
 |--------|---------|-----------|
 | [`types`](src/types.rs) | Data vocabulary shared across all modules | `Concept`, `Action`, `TerminalConfig`, `CaptureMode`, `CapturedOutput`, `PaneType` |
-| [`concept`](src/concept.rs) | Pure functions for trigger matching and capture routing | `match_line()` |
+| [`concept`](src/concept.rs) | Trigger matching (gated by a combined `RegexSet`) and capture routing | `ConceptMatcher`, `match_line()` |
 | [`agent_state`](src/agent_state.rs) | Tiered, display-only agent-state detection (events / OSC / heuristics) | `AgentState`, `StateTier`, `AgentStateTracker` |
 | [`engine`](src/engine.rs) | Runtime orchestrator; spawns terminal tasks, capture state machine | `WorkspaceEngine`, `PtyTerminalHandle`, `SpawnedTerminal`, `TaskContext` |
 | [`pty`](src/pty.rs) | Cross-platform PTY lifecycle via `portable-pty` | `PtyHandle` |
@@ -15,7 +15,7 @@ Library crate for the gpty multi-PTY emulator. This is the engine — all termin
 | [`term`](src/term.rs) | Full terminal grid + damage tracking via `alacritty_terminal` | `TermGrid`, `CellInfo`, `GridUpdate` |
 | [`color`](src/color.rs) | ANSI color mapping — named, indexed, true-color → RGB | `color_to_rgb()` |
 | [`keymap`](src/keymap.rs) | Keyboard event → byte sequence translation | `key_event_to_bytes()` |
-| [`lock`](src/lock.rs) | Poison-tolerant locking: skip the work, report the first occurrence | `lock_or_warn()` |
+| [`lock`](src/lock.rs) | Poison-tolerant locking: skip the work, report the first occurrence | `lock_or_warn()`, `read_or_warn()`, `write_or_warn()` |
 | [`history`](src/history.rs) | SQLite-backed scrollback history store and its write-behind thread | `HistoryStore`, `PaneHistory` |
 
 ## Concept System
@@ -39,7 +39,9 @@ How it works:
 1. PTY output bytes stream through the `vte` parser
 2. The parser strips ANSI escape sequences and extracts visible text lines
 3. Each line is tested against every registered concept's `trigger_regex`, then
-   against its `conditions` (all must match the same line)
+   against its `conditions` (all must match the same line). One combined
+   `RegexSet` pass answers "could anything match" first, so a line that matches
+   no trigger — the common case — never enters the per-concept loop
 4. On an `UntilStop` match the terminal enters capture mode and buffers raw
    bytes; a `SingleLine` match is queued as a notice and stops here
 5. The capture ends on timeout (silence for N ms) or user input

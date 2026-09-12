@@ -22,8 +22,8 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::agent_state::{AgentState, StateTier};
-use crate::concept;
-use crate::lock::lock_or_warn;
+use crate::concept::ConceptMatcher;
+use crate::lock::{lock_or_warn, read_or_warn, write_or_warn};
 use crate::term::TermGrid;
 use crate::types::{CaptureMode, CapturedOutput, Concept, ConceptNotice, TerminalConfig};
 
@@ -47,7 +47,7 @@ enum StdinInput {
 // ── Public types ──────────────────────────────────────────────────────
 
 pub struct WorkspaceEngine {
-    concepts: Arc<std::sync::RwLock<Vec<Concept>>>,
+    concepts: Arc<std::sync::RwLock<ConceptMatcher>>,
     /// Captures finalized after their source pane was torn down. The pane's
     /// own queue dies with it, so this is the only way a capture that was
     /// still in flight when the pane closed reaches the workspace.
@@ -130,7 +130,7 @@ impl Drop for SpawnedTerminal {
 impl WorkspaceEngine {
     pub fn new(concepts: Vec<Concept>) -> Self {
         Self {
-            concepts: Arc::new(std::sync::RwLock::new(concepts)),
+            concepts: Arc::new(std::sync::RwLock::new(ConceptMatcher::new(concepts))),
             orphaned_captures: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -202,14 +202,18 @@ impl WorkspaceEngine {
         })
     }
 
+    /// Replace the concept set. The compiled matcher (and its prefilter) is
+    /// rebuilt here, which is the only place the set changes.
     pub fn set_concepts(&self, concepts: Vec<Concept>) {
-        if let Ok(mut w) = self.concepts.write() {
-            *w = concepts;
+        if let Some(mut w) = write_or_warn(&self.concepts, "concepts") {
+            *w = ConceptMatcher::new(concepts);
         }
     }
 
     pub fn get_concepts(&self) -> Vec<Concept> {
-        self.concepts.read().map(|c| c.clone()).unwrap_or_default()
+        read_or_warn(&self.concepts, "concepts")
+            .map(|c| c.concepts().to_vec())
+            .unwrap_or_default()
     }
 }
 
@@ -238,7 +242,7 @@ fn concept_match_suppressed(
 
 struct TaskContext {
     id: u32,
-    concepts: Arc<std::sync::RwLock<Vec<Concept>>>,
+    concepts: Arc<std::sync::RwLock<ConceptMatcher>>,
     session: CaptureSession,
     /// Notify-only matches, drained by GDScript and forwarded to the event
     /// socket. Dropped oldest-first, like the capture queue: a broad trigger
@@ -294,7 +298,7 @@ impl TaskContext {
     }
     fn new(
         id: u32,
-        concepts: Arc<std::sync::RwLock<Vec<Concept>>>,
+        concepts: Arc<std::sync::RwLock<ConceptMatcher>>,
         session: CaptureSession,
         notices: Arc<Mutex<Vec<ConceptNotice>>>,
     ) -> Self {
@@ -495,14 +499,14 @@ impl CaptureSession {
     }
 
     /// True when the active concept's `UntilStop` mode stops on user input.
-    fn stops_on_input(&self, concepts: &[Concept]) -> bool {
+    fn stops_on_input(&self, matcher: &ConceptMatcher) -> bool {
         let Some(state) = lock_or_warn(&self.state, "capture state") else {
             return false;
         };
         let Some(name) = state.active_name.as_deref() else {
             return false;
         };
-        concepts.iter().any(|c| {
+        matcher.concepts().iter().any(|c| {
             c.name == name
                 && matches!(
                     c.capture_mode,
@@ -652,15 +656,20 @@ async fn run_terminal_task(
                         .and_then(|g| lock_or_warn(g, "pane grid"))
                         .is_some_and(|g| g.is_alt_screen());
                     if !alt_screen && !ctx.pty_concept_match_suppressed(now) {
+                        // One read lock for the batch rather than one per line:
+                        // the matcher is pure, so the lock only has to keep a
+                        // concept reload from landing mid-batch. The guard comes
+                        // off a cloned handle, so it does not borrow `ctx` and
+                        // `apply_match` can still take it mutably.
+                        let concepts = Arc::clone(&ctx.concepts);
+                        let matcher = read_or_warn(&concepts, "concepts");
                         for line in &lines {
                             if line.len() > crate::parser::MAX_LINE_LEN {
                                 // Oversized line — skip concept matching to bound
                                 // regex cost. Grid and history still get it.
                                 continue;
                             }
-                            let concepts_guard = ctx.concepts.read().unwrap();
-                            let matched = concept::match_line(&concepts_guard, line);
-                            drop(concepts_guard);
+                            let matched = matcher.as_ref().and_then(|m| m.match_line(line));
                             if let Some(deadline) = ctx.apply_match(matched) {
                                 timeout_sleep.as_mut().reset(deadline);
                             }
@@ -732,14 +741,16 @@ async fn run_terminal_task(
                     StdinInput::Line(_) | StdinInput::Raw(_)
                 );
                 if is_user_input && ctx.session.is_active() {
-                    let concepts_guard = ctx.concepts.read().unwrap();
-                    if ctx.session.stops_on_input(&concepts_guard) {
+                    let matcher = read_or_warn(&ctx.concepts, "concepts");
+                    let stops = matcher
+                        .as_deref()
+                        .is_some_and(|m| ctx.session.stops_on_input(m));
+                    if stops {
                         ctx.session.finalize();
                         timeout_sleep
                             .as_mut()
                             .reset(tokio::time::Instant::now() + INACTIVE_DURATION);
                     }
-                    drop(concepts_guard);
                 }
                 match &input {
                     StdinInput::Line(line) => {
@@ -749,9 +760,9 @@ async fn run_terminal_task(
                         if !ctx.session.is_active()
                             && line.len() <= crate::parser::MAX_LINE_LEN
                         {
-                            let concepts_guard = ctx.concepts.read().unwrap();
-                            let matched = concept::match_line(&concepts_guard, line);
-                            drop(concepts_guard);
+                            let matched = read_or_warn(&ctx.concepts, "concepts")
+                                .as_deref()
+                                .and_then(|m| m.match_line(line));
                             if let Some(deadline) = ctx.apply_match(matched) {
                                 timeout_sleep.as_mut().reset(deadline);
                             }
@@ -1481,8 +1492,8 @@ mod tests {
         let (session, _, _) = test_session();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
         session.begin("cat".into(), "t".into(), deadline);
-        assert!(session.stops_on_input(&[c]));
-        assert!(!session.stops_on_input(&[c2]));
+        assert!(session.stops_on_input(&ConceptMatcher::new(vec![c])));
+        assert!(!session.stops_on_input(&ConceptMatcher::new(vec![c2])));
     }
 
     #[test]

@@ -14,7 +14,7 @@
 //! than invisible, and `std`'s poisoning is the only thing that distinguishes
 //! "never locked" from "locked by a thread that died".
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// Locks already reported, so a per-frame call site cannot flood the log.
 static REPORTED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
@@ -25,6 +25,40 @@ static REPORTED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 /// queue"); each distinct name is reported once per process.
 pub fn lock_or_warn<'a, T>(mutex: &'a Mutex<T>, what: &'static str) -> Option<MutexGuard<'a, T>> {
     match mutex.lock() {
+        Ok(guard) => Some(guard),
+        Err(_) => {
+            report_poison(what);
+            None
+        }
+    }
+}
+
+/// Read `rwlock`, or report `what` and return `None` when it is poisoned.
+///
+/// Same policy as [`lock_or_warn`]: the caller skips the work instead of
+/// panicking, which matters most in a pane's task, where a panic ends the
+/// pane. The concept lock holds an immutable snapshot behind a poisoned
+/// `RwLock` — the data is still intact, but recovering it silently would hide
+/// that a thread died, so the caller takes the skip path and the log says why.
+pub fn read_or_warn<'a, T>(
+    rwlock: &'a RwLock<T>,
+    what: &'static str,
+) -> Option<RwLockReadGuard<'a, T>> {
+    match rwlock.read() {
+        Ok(guard) => Some(guard),
+        Err(_) => {
+            report_poison(what);
+            None
+        }
+    }
+}
+
+/// Write `rwlock`, or report `what` and return `None` when it is poisoned.
+pub fn write_or_warn<'a, T>(
+    rwlock: &'a RwLock<T>,
+    what: &'static str,
+) -> Option<RwLockWriteGuard<'a, T>> {
+    match rwlock.write() {
         Ok(guard) => Some(guard),
         Err(_) => {
             report_poison(what);
