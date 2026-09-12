@@ -7,6 +7,10 @@ extends RichTextLabel
 
 const RENDER_DELAY := 0.075
 
+## Emitted after a pending render is applied. Streaming owners (the Reasoning
+## accordion) use it to re-sync layout once the coalesced text has landed.
+signal rendered
+
 var _renderer: RefCounted
 var _render_timer: Timer
 var _pending_markdown := ""
@@ -68,6 +72,7 @@ func _apply_pending():
 		append_text(str(_renderer.render(_pending_markdown)))
 	else:
 		append_text(_pending_markdown.replace("[", "[lb]"))
+	rendered.emit()
 
 func _confirm_link(meta):
 	var url := str(meta)

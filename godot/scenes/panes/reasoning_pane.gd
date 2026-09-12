@@ -93,10 +93,17 @@ func _refresh_turn_layout():
 		view.configure_for_accordion()
 		var body := str(rec.get("text", ""))
 		if body != "":
-			view.render_now(body)
+			# Coalesced: this runs on every delta, and `render_now` re-parsed
+			# the whole turn markdown for every turn on every token.
+			view.set_markdown(body)
 	_sync_fold_heights()
 	call_deferred("_sync_fold_heights_y")
 	_scroll_turn_list_to_bottom()
+
+## A coalesced render changes the content height after the delta has been
+## scheduled, so the fold height follows the render, not the event.
+func _on_view_rendered():
+	call_deferred("_sync_fold_heights_y")
 
 func _sync_fold_heights():
 	for rec in _turns:
@@ -377,6 +384,9 @@ func _add_fold(rec: Dictionary):
 	view.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	view.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	view.configure_for_accordion()
+	# The coalesced render lands after a delay, so the height sync has to be
+	# driven by the render, not by the delta that scheduled it.
+	view.rendered.connect(_on_view_rendered)
 	view.add_theme_font_size_override("normal_font_size", font_size)
 	view.add_theme_font_size_override("mono_font_size", font_size)
 	fold.add_child(view)
@@ -399,7 +409,10 @@ func _append_live_text(delta: String):
 	rec["text"] = _append_capped(str(rec.get("text", "")), delta, max_turn_bytes)
 	var view := _view_for(rec)
 	if view:
-		view.render_now(str(rec["text"]))
+		# The model keeps every delta; the view re-parses the accumulated turn
+		# markdown at most once per MarkdownView.RENDER_DELAY instead of once
+		# per token (the turn is finalized with render_now on settle).
+		view.set_markdown(str(rec["text"]))
 	call_deferred("_refresh_turn_layout")
 
 func _on_fold_expanded_changed():

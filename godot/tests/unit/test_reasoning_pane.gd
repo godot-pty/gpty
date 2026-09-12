@@ -138,6 +138,8 @@ func test_reasoning_delta_before_agent_started_keeps_text_on_one_turn():
 	_pane.receive_agent_event(_event("agent.started", {}, "s1", 2), "omp-terminal")
 	assert_eq(_pane._turns.size(), 1)
 	assert_eq(_pane._turns[0]["text"], "early thought")
+	# Streaming renders are coalesced; the view catches up after the delay.
+	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.05).timeout
 	assert_string_contains(_pane._view_at(0).get_parsed_text(), "early thought")
 
 func test_monotonic_seq_envelopes_still_render():
@@ -146,4 +148,21 @@ func test_monotonic_seq_envelopes_still_render():
 	_pane.receive_agent_event(_event("agent.started", {}, "s1", 3), "omp-terminal")
 	_pane.receive_agent_event(_event("thinking.delta", {"text": "seq path"}, "s1", 4), "omp-terminal")
 	assert_eq(_pane._turns[0]["text"], "seq path")
+	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.05).timeout
 	assert_string_contains(_pane._view_at(0).get_parsed_text(), "seq path")
+
+## A streaming turn re-parses its accumulated markdown at most once per
+## RENDER_DELAY: the old path called render_now per delta, so a fast stream
+## re-parsed the whole turn (and every other turn) for every token.
+func test_streaming_deltas_render_coalesced():
+	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
+	for i in 30:
+		_pane.receive_agent_event(_event("thinking.delta", {"text": "chunk-%d " % i}), "omp-terminal")
+	# The model is complete immediately ...
+	assert_string_contains(_pane._turns[0]["text"], "chunk-29")
+	# ... while the view has not been re-parsed for the burst yet.
+	assert_false(str(_pane._view_at(0).get_parsed_text()).contains("chunk-29"),
+		"a delta burst must not render synchronously")
+	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.05).timeout
+	assert_string_contains(_pane._view_at(0).get_parsed_text(), "chunk-0 ")
+	assert_string_contains(_pane._view_at(0).get_parsed_text(), "chunk-29")
