@@ -199,33 +199,194 @@ pub async fn run(client: &IpcClient) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
-    /// Methods the GUI registers on the control socket
-    /// (`crates/gpty-gdext/src/ipc.rs`). A tool that resolves to anything
-    /// else fails at runtime with -32601 and no test would notice.
-    const WORKSPACE_METHODS: &[&str] = &[
-        "newPane",
-        "listPanes",
-        "killPane",
-        "focusPane",
-        "inject",
-        "paneRead",
-        "paneStatus",
-        "paneRun",
-        "paneWait",
-        "broadcast",
-        "layoutSave",
-        "layoutLoad",
-        "layoutList",
-        "conceptList",
-        "conceptToggle",
-        "version",
-    ];
+    /// The IPC server's registrations, read from where they happen
+    /// (`start_ipc_server_inner`): `version` and `shutdown` are answered in
+    /// Rust, everything else is queued for GDScript.
+    const IPC_SERVER_SRC: &str = include_str!("../../../../crates/gpty-gdext/src/ipc.rs");
+    /// The other half of that vocabulary: the arms of
+    /// `WorkspaceIpcHandlers.handle`, plus the request the workspace's own
+    /// per-frame loop intercepts before dispatching (`paneWait`, whose
+    /// response lands frames later).
+    const IPC_HANDLERS_SRC: &str =
+        include_str!("../../../../godot/scenes/terminal/ipc_handlers.gd");
+    const WORKSPACE_SRC: &str = include_str!("../../../../godot/scenes/terminal/workspace.gd");
 
-    /// Every advertised MCP tool must resolve to a registered IPC method.
-    /// `daemon-*` tools are answered locally and never reach the socket.
+    /// The whole surface: routed methods plus the ones answered in Rust.
+    fn registered_methods() -> BTreeSet<String> {
+        let mut surface = rust_array_entries(IPC_SERVER_SRC, "let gdscript_methods = [");
+        surface.extend(rust_local_methods(IPC_SERVER_SRC));
+        surface
+    }
+
+    /// Entries of the Rust array literal whose `let <name> = [` is at `marker`.
+    fn rust_array_entries(src: &str, marker: &str) -> BTreeSet<String> {
+        let start = src
+            .find(marker)
+            .unwrap_or_else(|| panic!("`{marker}` not found in the IPC server"));
+        let block = &src[start + marker.len()..];
+        let end = block.find("];").expect("array literal is terminated");
+        block[..end]
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix('"')?.strip_suffix("\","))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Methods the server answers in Rust, without the GDScript hop.
+    fn rust_local_methods(src: &str) -> BTreeSet<String> {
+        src.lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let rest = line.strip_prefix("server.register(\"")?;
+                if line.contains("make_gdscript_handler") {
+                    return None;
+                }
+                rest.split('"').next().map(str::to_string)
+            })
+            .collect()
+    }
+
+    /// Top-level arms of the GDScript dispatch — the methods `handle` answers.
+    ///
+    /// Arms sit at two tabs inside the `match`; every string nested in a
+    /// handler body is deeper, so indentation is what separates the
+    /// vocabulary from the payload.
+    fn gdscript_dispatch_arms(src: &str) -> BTreeSet<String> {
+        src.lines()
+            .filter_map(|line| line.strip_prefix("\t\t\"")?.split('"').next())
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Methods the workspace intercepts in `_poll_ipc_requests` before it
+    /// reaches the dispatcher.
+    fn workspace_special_methods(src: &str) -> BTreeSet<String> {
+        src.lines()
+            .filter_map(|line| line.strip_prefix("\t\tif method == \"")?.split('"').next())
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Method literals passed to the IPC client by the CLI's command modules.
+    ///
+    /// Scanned from source because the call sites are spread over
+    /// `src/commands/*.rs`; the directory is read at test time, so a new
+    /// command file is covered without being listed here.
+    fn cli_call_site_methods() -> BTreeSet<String> {
+        const MARKERS: [&str; 2] = ["call_and_format(", ".call("];
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
+        let mut files: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+            .map(|entry| entry.expect("directory entry").path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
+            .collect();
+        files.sort();
+        assert!(
+            !files.is_empty(),
+            "no command sources under {}",
+            dir.display()
+        );
+
+        let mut methods = BTreeSet::new();
+        for path in files {
+            let src = std::fs::read_to_string(&path).expect("read a command source");
+            for marker in MARKERS {
+                for (at, _) in src.match_indices(marker) {
+                    if let Some(name) = first_argument_literal(&src[at + marker.len()..]) {
+                        methods.insert(name);
+                    }
+                }
+            }
+        }
+        methods
+    }
+
+    /// The identifier literal in a call's argument list, if it has one:
+    /// `client.call("paneWait", …)` and `call_and_format(&client, "paneWait",
+    /// …)` both hit it, while `client.call(&ipc_method, …)` — the derived
+    /// name in this module — has no literal to check.
+    fn first_argument_literal(args: &str) -> Option<String> {
+        let mut depth = 1usize; // the '(' the marker ended with
+        let mut end = args.len();
+        for (i, ch) in args.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let call = &args[..end];
+        let open = call.find('"')?;
+        let close = call[open + 1..].find('"')? + open + 1;
+        let literal = &call[open + 1..close];
+        let is_identifier = literal.starts_with(|c: char| c.is_ascii_alphabetic())
+            && literal.chars().all(|c| c.is_ascii_alphanumeric());
+        is_identifier.then(|| literal.to_string())
+    }
+
+    /// The method vocabulary is written down twice — registered in Rust,
+    /// dispatched in GDScript — and neither side can see the other. Drift
+    /// answers -32601 at runtime, in whichever client happens to call the
+    /// method, with no compile error anywhere.
     #[test]
-    fn every_mcp_tool_maps_to_a_registered_ipc_method() {
+    fn rust_registrations_and_gdscript_dispatch_agree() {
+        let routed = rust_array_entries(IPC_SERVER_SRC, "let gdscript_methods = [");
+        let local = rust_local_methods(IPC_SERVER_SRC);
+        let arms = gdscript_dispatch_arms(IPC_HANDLERS_SRC);
+        let specials = workspace_special_methods(WORKSPACE_SRC);
+
+        assert!(!routed.is_empty(), "parsed no routed methods out of ipc.rs");
+        assert!(
+            !local.is_empty(),
+            "parsed no locally answered methods out of ipc.rs"
+        );
+        assert!(
+            !arms.is_empty(),
+            "parsed no dispatch arms out of ipc_handlers.gd"
+        );
+        assert!(
+            !specials.is_empty(),
+            "parsed no intercepted methods out of workspace.gd"
+        );
+
+        let handled: BTreeSet<String> = arms.union(&specials).cloned().collect();
+        assert_eq!(
+            handled, routed,
+            "the GDScript handlers and the Rust registrations disagree: a method \
+             registered in Rust but handled on neither side fails at runtime with -32601 \
+             (after the 5 s GDScript timeout), and a handler with no registration is \
+             dead code"
+        );
+        assert!(
+            arms.is_disjoint(&specials),
+            "a method must be handled in exactly one place: {:?}",
+            arms.intersection(&specials).collect::<Vec<_>>()
+        );
+        assert!(
+            local.is_disjoint(&routed),
+            "a method answered in Rust must not also be routed to GDScript: {:?}",
+            local.intersection(&routed).collect::<Vec<_>>()
+        );
+    }
+
+    /// Every advertised MCP tool must resolve to a method the GUI registers,
+    /// no two tools may collapse onto one method, and every routed method
+    /// must be reachable from some tool. `daemon-*` tools are answered by the
+    /// MCP server itself and never reach the socket with a derived name.
+    #[test]
+    fn every_mcp_tool_maps_to_a_registered_method() {
+        let routed = rust_array_entries(IPC_SERVER_SRC, "let gdscript_methods = [");
+        let surface = registered_methods();
         let tools = crate::commands::schema::build_mcp_tools_inline(&crate::Cli::command());
         let names: Vec<&str> = tools["tools"]
             .as_array()
@@ -235,26 +396,50 @@ mod tests {
             .collect();
         assert!(!names.is_empty(), "schema must expose tools");
 
-        let mut mapped = Vec::new();
+        let mut mapped = BTreeSet::new();
         for name in &names {
             if name.starts_with("daemon-") {
                 continue;
             }
             let method = tool_to_ipc_method(name);
             assert!(
-                WORKSPACE_METHODS.contains(&method.as_str()),
+                surface.contains(&method),
                 "MCP tool '{name}' maps to IPC method '{method}', which the GUI does not register"
             );
-            mapped.push(method);
+            assert!(
+                mapped.insert(method.clone()),
+                "two MCP tools map to '{method}'"
+            );
         }
+        let covered: BTreeSet<String> = mapped.intersection(&routed).cloned().collect();
+        assert_eq!(
+            covered, routed,
+            "a routed method no tool reaches is dead surface; every tool that survives \
+             the daemon filter must name a routed method"
+        );
+    }
 
-        // No two tools may collapse onto the same method, and the mapping
-        // must cover every registered method — both would silently make one
-        // tool unreachable while the per-name assertions above still passed.
-        let mut unique = mapped.clone();
-        unique.sort();
-        unique.dedup();
-        assert_eq!(unique.len(), mapped.len(), "two tools map to one method");
-        assert_eq!(unique.len(), WORKSPACE_METHODS.len());
+    /// A command module naming a method the server does not register fails at
+    /// runtime and passes every other check here — the literal it passes to
+    /// `client.call` is a second, independent spelling of the vocabulary.
+    #[test]
+    fn cli_call_sites_name_registered_methods_only() {
+        let surface = registered_methods();
+        let used = cli_call_site_methods();
+        assert!(
+            !used.is_empty(),
+            "parsed no IPC method literals out of src/commands"
+        );
+
+        let unknown: Vec<_> = used.difference(&surface).collect();
+        assert!(
+            unknown.is_empty(),
+            "these method literals are not registered by the GUI: {unknown:?}"
+        );
+        let unreachable: Vec<_> = surface.difference(&used).collect();
+        assert!(
+            unreachable.is_empty(),
+            "these registered methods are reachable from no CLI command: {unreachable:?}"
+        );
     }
 }

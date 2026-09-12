@@ -20,16 +20,15 @@ godot --headless --path godot --import
 ./scripts/gut-check  # runs GUT and fails if the run aborted (GUT exits 0 regardless)
 ```
 
-**Rust coverage:** core engine (parser, keymap, grid, concept routing, capture state machine, history), IPC types + protocol, CLI schema generation, GDExtension FFI functions. Tile layout algorithms are integration-tested in `crates/gpty-core/tests/tile_layout.rs`, which mirrors the GDScript split/kill/expand logic in `godot/scenes/terminal/terminal_manager.gd` — algorithm changes must be mirrored in both files.
+**Rust coverage:** core engine (parser, keymap, grid, concept routing, capture state machine, history), IPC types + protocol, CLI schema generation, GDExtension FFI functions. Tile layout algorithms are integration-tested in `crates/gpty-core/tests/tile_layout.rs`, which mirrors the GDScript split/kill/expand logic in `godot/scenes/terminal/terminal_manager.gd` — algorithm changes must be mirrored in both files. The IPC vocabulary is pinned across languages: a test in `crates/gpty-cli/src/commands/mcp.rs` reads the real registrations (`crates/gpty-gdext/src/ipc.rs`), the real dispatch (`ipc_handlers.gd`, plus the requests `workspace.gd` intercepts), and every `client.call` literal in `src/commands/*.rs`, and asserts they name the same methods as the advertised MCP tools.
 
-**GDScript coverage:** concept merge/save/load, terminal manager tile lifecycle (spawn, kill, swap, labels, grid-full refusal), settings save/load roundtrip, profile CRUD, layout save/restore, sidebar signal emission, pane settings application, IPC routing logic (error format, listPanes, killPane, layoutList), palette command generation.
+**GDScript coverage:** concept merge/save/load, terminal manager tile lifecycle (spawn, kill, swap, labels, grid-full refusal), settings save/load roundtrip, profile CRUD, layout save/restore, sidebar signal emission, pane settings application, IPC dispatch against a real workspace (`test_ipc_dispatch_contract.gd`: listed pane ids and legacy labels both address the pane they name, terminal-only methods refuse other panes, unknown methods answer -32601, an untrusted profile is refused), palette command generation.
 
 **Known gaps (not automatable in headless CI):**
-- `Workspace` class cannot be instantiated in headless GUT (depends on `GptyTerminal` GDExtension class). Workspace-level logic (concept event routing, IPC polling dispatch) is tested manually.
-- Real PTY spawning is `#[ignore]` in Rust tests — slow and environment-dependent. Tested manually on Linux and Windows.
+- Real PTY output timing: a headless pane spawns a real shell, but tests that assert on its output are timing-dependent, so they live in the live smoke (`scripts/smoke-pane-api`) instead.
 
 **Files without automated coverage** (manual checklist only):
-- `godot/scenes/terminal/workspace.gd` — restore/sanitize wiring, concept event routing, IPC dispatch (routing patterns are unit-tested via the `test_ipc_routing.gd` mirror)
+- `godot/scenes/terminal/workspace.gd` — restore/sanitize wiring and concept event routing; IPC dispatch itself is covered by `test_ipc_dispatch_contract.gd`, which drives `WorkspaceIpcHandlers.handle` with a real `Workspace`
 - `godot/scenes/terminal/terminal_pane.gd` — renderer and input paths are partially covered by `test_keyboard.gd`/`test_copy_routing.gd` mocks; real rendering is manual-only
 - `godot/scenes/ui/settings_panel.gd`, `godot/scenes/ui/pane_settings_panel.gd`, `godot/scenes/ui/status_bar.gd`, `godot/scenes/ui/toast_overlay.gd`, `godot/scenes/ui/icons.gd`
 - `godot/scenes/panes/code_viewer.gd`, `godot/scenes/panes/file_tree.gd`, `godot/scenes/panes/inspector_pane.gd`, `godot/scenes/panes/reasoning_pane.gd` — unit-tested for routing/session contracts; real OMP/Markdown rendering is manual

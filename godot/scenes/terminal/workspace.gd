@@ -764,12 +764,29 @@ func _input(event):
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		_activate_pane_under_mouse(event.position)
 
+## Make `body` the active pane: the workspace that owns it records it (sidebar
+## accent, status bar, keyboard routing), and only a pane that can hold
+## keyboard focus receives focus — a read-only pane must not keep the keys the
+## user just left on a terminal, and a pane that cannot take focus (or is not
+## in the tree yet) must not raise an engine error. Shared by the three ways a
+## pane is activated: a click, a sidebar row, and an IPC focus request.
+func activate_pane(body: Control) -> void:
+	if body == null:
+		return
+	var bws := _workspace_for_body(body)
+	if not bws.is_empty():
+		bws.tm.last_body = body
+	if body is TerminalPane:
+		body._take_focus()
+	else:
+		var owner := get_viewport().gui_get_focus_owner()
+		if owner:
+			owner.release_focus()
+
 ## Uniform click-to-activate: any left click inside a pane (body, titlebar
 ## background, or an inner widget) makes that pane the active one. The
 ## sidebar/status bar are not tile wrappers, so their clicks are no-ops.
-## Non-terminal panes release the old keyboard owner so keystrokes stop
-## flowing to a terminal the user just left (read-only panes swallow keys
-## by design).
+## The focus rule itself lives in `activate_pane`.
 func _activate_pane_under_mouse(mouse: Vector2):
 	var ws := _active_workspace()
 	if ws.is_empty():
@@ -787,11 +804,7 @@ func _activate_pane_under_mouse(mouse: Vector2):
 		var body = ws.tm._find_body(w)
 		if body == null:
 			continue
-		ws.tm.last_body = body
-		if not (body is TerminalPane):
-			var owner := get_viewport().gui_get_focus_owner()
-			if owner:
-				owner.release_focus()
+		activate_pane(body)
 		return
 
 func _toggle_palette():
@@ -882,17 +895,9 @@ func _wire_sidebar_signals():
 	_sidebar.request_settings.connect(_toggle_settings)
 	_sidebar.request_reset.connect(func(): _do_reset())
 	_sidebar.request_focus.connect(func(body: Control):
-		# Same uniform semantics as clicking the pane itself: the row click
-		# activates the pane; only terminals take keyboard focus.
-		var bws := _workspace_for_body(body)
-		if not bws.is_empty():
-			bws.tm.last_body = body
-		if body is TerminalPane:
-			body.grab_focus()
-		else:
-			var owner := get_viewport().gui_get_focus_owner()
-			if owner:
-				owner.release_focus()
+		# Same uniform semantics as clicking the pane itself (see
+		# `activate_pane`).
+		activate_pane(body)
 	)
 	_sidebar.request_minimize.connect(func(body: Control): _on_pane_minimize(body))
 	_sidebar.request_position_swap.connect(func(body: Control, btn: Button): _on_pane_position_swap(body, btn))

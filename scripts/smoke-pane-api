@@ -119,6 +119,19 @@ READ_JSON="$("$GPTY" pane-read "$ID" --lines 50 --json)"
 jq -e '.result.text | contains("SMOKE_7X9Q2")' <<<"$READ_JSON" >/dev/null \
     || fail "pane-read must contain injected marker"
 
+step "pane-read (scrollback)"
+# The documented claim is "screen plus scrollback": output that scrolled out of
+# the visible grid must still come back. A fresh pane shows ~24 rows, so the
+# markers around 120 lines of output are well past the screen.
+"$GPTY" inject "$ID" --text 'echo SMOKE_OLDEST_A1B2; seq 1 120; echo SMOKE_NEWEST_C3D4' --json >/dev/null
+SB_WAIT="$("$GPTY" pane-wait "$ID" --pattern 'SMOKE_NEWEST_C3D4' --timeout-ms 10000 --json)"
+jq_assert "$SB_WAIT" '.result.matched == true' "the scrollback fill must reach the pane"
+SB_JSON="$("$GPTY" pane-read "$ID" --lines 200 --json)"
+jq -e '.result.text | contains("SMOKE_OLDEST_A1B2")' <<<"$SB_JSON" >/dev/null \
+    || fail "pane-read must return scrollback, not just the visible screen"
+jq -e '.result.text | contains("SMOKE_NEWEST_C3D4")' <<<"$SB_JSON" >/dev/null \
+    || fail "pane-read must return the newest line"
+
 # ── broadcast to tagged pane ───────────────────────────────────────────
 step "broadcast"
 BC_JSON="$("$GPTY" broadcast --tags smoke --text 'echo BROADCAST_OK' --json)"

@@ -89,7 +89,10 @@ static func handle(ws, method: String, params: Dictionary):
 			var body = ws._find_pane_by_label(pane_id)
 			if body == null:
 				return error("Pane '%s' not found" % pane_id)
-			body.grab_focus()
+			# The same activation a click or a sidebar row performs: the pane
+			# becomes the active one, and only a pane that can hold keyboard
+			# focus takes it (a read-only pane must not swallow keys).
+			ws.activate_pane(body)
 			return {"success": true}
 		"inject":
 			var pane_id = str(params.get("pane_id", ""))
@@ -156,11 +159,8 @@ static func handle(ws, method: String, params: Dictionary):
 			for p in ProfileManager.get_all_profiles():
 				names.append(p.get("name", ""))
 			return {"layouts": names}
-		"version":
-			return {"version": GptyTerminal.get_app_version(), "protocol": "2.0"}
-		"shutdown":
-			ws.get_tree().quit()
-			return {"success": true}
+		# `version` and `shutdown` are answered in Rust (`ipc.rs` registers
+		# both locally, and never queues them), so an arm here would be dead.
 		"conceptList":
 			var concepts = ConceptManager.get_concepts()
 			return {"concepts": concepts}
