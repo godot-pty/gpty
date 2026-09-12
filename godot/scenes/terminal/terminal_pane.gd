@@ -37,7 +37,11 @@ var color_scheme_path: String = "":
 
 
 
-@export var shell_command: String = "/bin/bash"
+## Defaults to this platform's shell: a pane built from nothing must still be
+## spawnable, and `/bin/bash` is a path `validate_executable` refuses on Windows
+## ("relative executable path") — the reset and the settings default both have to
+## agree with what a fresh install would use.
+@export var shell_command: String = SettingsManager.default_shell_command()
 @export var shell_args: Array = []  # program arguments; ["-c", cmd] = run through shell
 @export var shell_env := ""
 @export var rows: int = 24

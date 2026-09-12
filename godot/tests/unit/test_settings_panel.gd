@@ -67,6 +67,10 @@ func test_appearance_reset_restores_only_appearance_settings():
 		"other tabs' settings must not be touched")
 
 func test_terminal_reset_restores_only_terminal_settings():
+	# The autoload outlives this file: a reset that left a hard-coded shell behind
+	# is how the Windows run failed (later tests spawned panes with `/bin/bash`,
+	# which gpty refuses to spawn there), so the value is put back either way.
+	var original_shell := SettingsManager.cfg_shell_command
 	SettingsManager.cfg_scroll_lines = 9
 	SettingsManager.cfg_default_rows = 60
 	SettingsManager.cfg_reasoning_max_turns = 33
@@ -79,6 +83,9 @@ func test_terminal_reset_restores_only_terminal_settings():
 	assert_eq(SettingsManager.cfg_default_rows, 24, "default rows must reset to default")
 	assert_eq(SettingsManager.cfg_reasoning_max_turns, 33,
 		"other tabs' settings must not be touched")
+	assert_eq(SettingsManager.cfg_shell_command, SettingsManager.default_shell_command(),
+		"the reset must restore this platform's shell, not a POSIX path")
+	SettingsManager.cfg_shell_command = original_shell
 
 func test_system_reset_restores_system_settings():
 	SettingsManager.cfg_window_mode = 2

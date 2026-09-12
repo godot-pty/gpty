@@ -105,7 +105,7 @@ func _build_ui():
 		SettingsManager.cfg_history_lines = 10000
 		SettingsManager.cfg_default_rows = 24
 		SettingsManager.cfg_default_cols = 80
-		SettingsManager.cfg_shell_command = "/bin/bash"
+		SettingsManager.cfg_shell_command = SettingsManager.default_shell_command()
 		SettingsManager.cfg_shell_env = ""
 		shape_opt.selected = 0
 		blink_cb.button_pressed = true
@@ -116,7 +116,7 @@ func _build_ui():
 		history_spin.value = 10000
 		dims[0].value = 24
 		dims[1].value = 80
-		shell_le.text = "/bin/bash"
+		shell_le.text = SettingsManager.default_shell_command()
 		env_te.text = ""
 		SettingsManager.save_settings()
 	)
@@ -619,7 +619,7 @@ func _add_shell_control(v: VBoxContainer) -> LineEdit:
 	h.add_child(_lbl("Shell:"))
 	var le = LineEdit.new()
 	le.text = SettingsManager.cfg_shell_command
-	le.placeholder_text = "/bin/bash"
+	le.placeholder_text = SettingsManager.default_shell_command()
 	le.add_theme_font_size_override("font_size", 12)
 	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	le.text_changed.connect(func(t: String):

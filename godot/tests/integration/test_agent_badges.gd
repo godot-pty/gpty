@@ -59,6 +59,19 @@ func _declare_after_settle(body: Control, state: String):
 	var sequence := "\u001b]gpty_state=%s\u0007" % state
 	body._terminal.send_line(ShellFixtures.print_text(sequence))
 
+## Tier 2 (the `gpty_state` OSC a program prints) needs the sequence to travel
+## from the child to the pane's parser. On Windows it does not: ConPTY's
+## renderer drops it before gpty ever sees it — measured in CI, where the paste
+## tests (which use the same child-side byte emission and PowerShell fixture, for
+## DECSET 2004) pass while every declaration test fails. Tier 1 events are
+## unaffected and are the supported Windows path; see the ROADMAP item.
+func _needs_osc_delivery() -> bool:
+	if OS.get_name() != "Windows":
+		return false
+	pending("ConPTY does not deliver the gpty_state OSC to the pane (Tier 1 events are the Windows path)")
+	return true
+
+
 func test_badge_hidden_when_idle():
 	var ws = await _make_workspace()
 	var badge := _badge(ws)
@@ -66,6 +79,8 @@ func test_badge_hidden_when_idle():
 	assert_false(badge.visible, "idle terminals must hide the badge")
 
 func test_declaration_lights_badge_and_swaps_glyph():
+	if _needs_osc_delivery():
+		return
 	var ws = await _make_workspace()
 	var body = _first_body(ws)
 	await _declare_after_settle(body, "working")
@@ -82,6 +97,8 @@ func test_declaration_lights_badge_and_swaps_glyph():
 		"completed declaration must swap the badge to the check glyph")
 
 func test_failed_declaration_shows_warning():
+	if _needs_osc_delivery():
+		return
 	var ws = await _make_workspace()
 	var body = _first_body(ws)
 	await _declare_after_settle(body, "failed")
@@ -90,6 +107,8 @@ func test_failed_declaration_shows_warning():
 		"failed declaration must show the warning badge")
 
 func test_badge_is_display_only_projection():
+	if _needs_osc_delivery():
+		return
 	var ws = await _make_workspace()
 	var body = _first_body(ws)
 	# The badge mirrors the engine state — no pane behavior may depend on it.
