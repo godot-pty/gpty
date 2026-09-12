@@ -235,7 +235,7 @@ See `skill://gpty-omp-integration` for usage patterns.
 
 ### Inspector, Reasoning, and OMP
 
-gPTY is a terminal multiplexer with an observability layer. It does **not** recreate agent TUIs, scrape PTY output for agent semantics, or host the user's interactive OMP/Claude/Gemini session.
+gPTY is a graphical PTY foundation with an observability layer. It does **not** recreate agent TUIs, scrape PTY output for agent semantics, or host the user's interactive OMP/Claude/Gemini session.
 
 | Surface | Role |
 |---------|------|
