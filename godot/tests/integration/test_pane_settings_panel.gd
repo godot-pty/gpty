@@ -9,7 +9,7 @@ var _ws: Control
 
 func before_each():
 	MockAutoloads.setup()
-	SettingsManager.cfg_shell_command = "/bin/sh"
+	SettingsManager.cfg_shell_command = SettingsManager.default_shell_command()
 
 func after_each():
 	if _ws:

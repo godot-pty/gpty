@@ -7,7 +7,7 @@ var _tm: TerminalManager
 
 func before_each():
 	MockAutoloads.setup()
-	SettingsManager.cfg_shell_command = "/bin/sh"
+	SettingsManager.cfg_shell_command = SettingsManager.default_shell_command()
 	SettingsManager.cfg_default_rows = 24
 	SettingsManager.cfg_default_cols = 80
 	SettingsManager.cfg_font_size = 14
@@ -77,11 +77,11 @@ func test_code_viewer_get_layout_state_has_type():
 
 func test_spawn_pane_applies_global_settings():
 	SettingsManager.cfg_font_size = 18
-	SettingsManager.cfg_shell_command = "/bin/sh"
+	SettingsManager.cfg_shell_command = SettingsManager.default_shell_command()
 	var body = _tm.spawn_pane("terminal", {})
 	assert_not_null(body)
 	assert_eq(body.font_size, 18, "spawn_pane must apply global font size")
-	assert_eq(body.shell_command, "/bin/sh", "spawn_pane must apply global shell")
+	assert_eq(body.shell_command, SettingsManager.default_shell_command(), "spawn_pane must apply global shell")
 	for t in _tm.tiles:
 		t.wrapper.free()
 	_tm.tiles.clear()

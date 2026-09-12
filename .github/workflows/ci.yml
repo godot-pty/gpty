@@ -195,6 +195,23 @@ jobs:
         env:
           GODOT: ${{ github.workspace }}\godot-editor\godot.exe
 
+      - name: Import project
+        shell: bash
+        # `godot` is on PATH from the download step; the smoke imported the
+        # project already, and GUT resolves `class_name` globals from that cache.
+        run: godot --headless --path godot --import
+
+      - name: GUT tests (Windows)
+        # The same gate as Linux, under the runner's Git Bash: `gut-check` owns
+        # the command and validates the run (a parse error aborts GUT after a
+        # few scripts and still exits 0), so a Windows suite that stops early
+        # cannot pass as green. GUT here runs against the platform default shell
+        # — cmd.exe — since the suite reads `default_shell_command()`.
+        shell: bash
+        run: ./scripts/gut-check
+        env:
+          GODOT: ${{ github.workspace }}\godot-editor\godot.exe
+
   # ── Rust formatting ───────────────────────────────────────────────────
   rust-fmt:
     runs-on: ubuntu-latest

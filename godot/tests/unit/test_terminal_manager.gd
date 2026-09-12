@@ -2,13 +2,16 @@ extends GutTest
 # Unit tests for TerminalManager — spawn/kill/tile logic.
 # No UI rendering; tests pure RefCounted logic.
 
-const CannedShell := "/bin/sh"
+## The platform default, so the fixture is a program that exists here
+## (a POSIX path is refused on Windows and would spawn nothing).
+var _canned_shell := ""
 
 var _tm: TerminalManager
 
 func before_each():
 	MockAutoloads.setup()
-	SettingsManager.cfg_shell_command = CannedShell
+	_canned_shell = SettingsManager.default_shell_command()
+	SettingsManager.cfg_shell_command = _canned_shell
 	SettingsManager.cfg_default_rows = 24
 	SettingsManager.cfg_default_cols = 80
 	_tm = TerminalManager.new()
@@ -63,10 +66,10 @@ func test_create_body_all_types():
 
 func test_spawn_pane_uses_default_shell():
 	# spawn_pane applies global settings to fresh terminal bodies, so the
-	# shell defaults to cfg_shell_command (mocked to "/bin/sh" in before_each).
+	# shell defaults to cfg_shell_command (the platform default, set in before_each).
 	var body = _tm.spawn_pane("terminal", {})
 	assert_not_null(body)
-	assert_eq(body.shell_command, CannedShell)
+	assert_eq(body.shell_command, _canned_shell)
 
 # ── Kill ────────────────────────────────────────────────────────────────
 

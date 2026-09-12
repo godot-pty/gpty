@@ -9,7 +9,7 @@ var _ws: Control
 
 func before_each():
 	MockAutoloads.setup()
-	SettingsManager.cfg_shell_command = "/bin/sh"
+	SettingsManager.cfg_shell_command = SettingsManager.default_shell_command()
 
 func after_each():
 	if _ws:
@@ -37,8 +37,10 @@ func _first_body(ws: Control) -> Control:
 	var tm: TerminalManager = ws._tm
 	return tm._find_body(tm.tiles[0].wrapper)
 
-## Await until the badge predicate holds, with a real-time deadline.
-func _wait_until(ws: Control, predicate: Callable, timeout_s := 4.0) -> bool:
+## Await until the badge predicate holds, with a real-time deadline. Generous
+## on purpose: the declaration comes from a child process, and the Windows
+## fixture starts PowerShell to print it.
+func _wait_until(ws: Control, predicate: Callable, timeout_s := 8.0) -> bool:
 	var deadline := Time.get_ticks_msec() + int(timeout_s * 1000.0)
 	while Time.get_ticks_msec() < deadline:
 		await get_tree().process_frame
@@ -48,9 +50,14 @@ func _wait_until(ws: Control, predicate: Callable, timeout_s := 4.0) -> bool:
 
 ## Declarations are suppressed for 750 ms after a resize; startup layout
 ## churn resizes the pane several times. Wait out the window, then emit.
+##
+## The sequence is printed by a child process (`ShellFixtures`), not echoed by
+## the shell: the parser must see real output bytes, and `printf` does not exist
+## in every shell gpty has to run its tests under.
 func _declare_after_settle(body: Control, state: String):
 	await get_tree().create_timer(1.2).timeout
-	body._terminal.send_line("printf '\\033]gpty_state=%s\\007'" % state)
+	var sequence := "\u001b]gpty_state=%s\u0007" % state
+	body._terminal.send_line(ShellFixtures.print_text(sequence))
 
 func test_badge_hidden_when_idle():
 	var ws = await _make_workspace()

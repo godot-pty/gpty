@@ -20,6 +20,13 @@ godot --headless --path godot --import
 ./scripts/gut-check  # runs GUT and fails if the run aborted (GUT exits 0 regardless)
 ```
 
+The same two commands run on Windows in the `windows-smoke` job, under the
+runner's Git Bash: the suite takes its shells from
+`SettingsManager.default_shell_command()` and its byte-emitting fixtures from
+`godot/tests/helpers/shell_fixtures.gd`, so a GDScript test is not a
+Linux-only artifact. `gut-check` prints any test that pends with its reason and
+fails on a test that ran without asserting.
+
 **Rust coverage:** core engine (parser, keymap, grid, concept routing, capture state machine, history), IPC types + protocol, CLI schema generation, GDExtension FFI functions. Tile layout algorithms are integration-tested in `crates/gpty-core/tests/tile_layout.rs`, which mirrors the GDScript split/kill/expand logic in `godot/scenes/terminal/terminal_manager.gd` — algorithm changes must be mirrored in both files. The IPC vocabulary is pinned across languages: a test in `crates/gpty-cli/src/commands/mcp.rs` reads the real registrations (`crates/gpty-gdext/src/ipc.rs`), the real dispatch (`ipc_handlers.gd`, plus the requests `workspace.gd` intercepts), and every `client.call` literal in `src/commands/*.rs`, and asserts they name the same methods as the advertised MCP tools.
 
 **GDScript coverage:** concept merge/save/load, terminal manager tile lifecycle (spawn, kill, swap, labels, grid-full refusal), settings save/load roundtrip, profile CRUD, layout save/restore, sidebar signal emission, pane settings application, IPC dispatch against a real workspace (`test_ipc_dispatch_contract.gd`: listed pane ids and legacy labels both address the pane they name, terminal-only methods refuse other panes, unknown methods answer -32601, an untrusted profile is refused), palette command generation.

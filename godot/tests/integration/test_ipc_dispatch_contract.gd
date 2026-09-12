@@ -19,7 +19,7 @@ var _ws: Control
 
 func before_all():
 	MockAutoloads.setup()
-	SettingsManager.cfg_shell_command = "/bin/sh"
+	SettingsManager.cfg_shell_command = SettingsManager.default_shell_command()
 	SettingsManager.cfg_default_rows = 24
 	SettingsManager.cfg_default_cols = 80
 	_ws = WorkspaceScript.new()
@@ -132,7 +132,7 @@ func test_layout_load_refuses_an_untrusted_profile():
 	ProfileManager.add_profile("contract-untrusted", [
 		{
 			"col": 0, "row": 0, "cspan": 60, "rspan": 60,
-			"settings": {"type": "terminal", "shell": "/bin/sh", "shell_args": ["-c", "echo pwned"]},
+			"settings": {"type": "terminal", "shell": SettingsManager.default_shell_command(), "shell_args": ["-c", "echo pwned"]},
 		},
 	])
 	var tiles_before: int = _ws._tm.tiles.size()

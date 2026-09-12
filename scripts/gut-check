@@ -70,7 +70,28 @@ TESTS_RAN="$(awk '$1 == "Tests" && $2 ~ /^[0-9]+$/ { print $2; exit }' "$PLAIN")
 if [[ -z "$SCRIPTS_RAN" || -z "$TESTS_RAN" ]]; then
     PROBLEMS+=("no Run Summary in the output — the run stopped before it finished")
 fi
-if ! grep -q -- '---- All tests passed! ----' "$PLAIN"; then
+
+# Pending tests are allowed and printed: a fixture that needs a POSIX shell or a
+# file mode has no Windows meaning, and hiding those is worse than showing them.
+# A *risky* test — one that ran without asserting — is a real smell, so it fails.
+RISKY="$(grep -c '\[Risky\]' "$PLAIN" || true)"
+PENDING="$(grep -c '\[Pending\]' "$PLAIN" || true)"
+PENDING_TOTAL="0"
+if [[ "$RISKY" != "0" ]]; then
+    PROBLEMS+=("a test ran without asserting ([Risky])")
+fi
+if grep -q -- '---- All tests passed! ----' "$PLAIN"; then
+    :
+elif [[ "$PENDING" != "0" ]] && grep -qE -- '---- [0-9]+ pending/risky tests\. ----' "$PLAIN"; then
+    # The number in that sentence is the authoritative count (GUT prints each
+    # pending test twice in the log, so the line count is not).
+    PENDING_TOTAL="$(grep -oE -- '---- [0-9]+ pending/risky tests\. ----' "$PLAIN" | grep -oE '[0-9]+' | head -1)"
+    # The line's count cannot be compared to the pending lines: GUT prints each
+    # pending test once while it runs and again in the Run Summary. What matters
+    # is that the only non-passing category is `pending` — `risky` already
+    # failed above — and that every pending test is listed for review below.
+    :
+else
     PROBLEMS+=("the run did not end with 'All tests passed!'")
 fi
 
@@ -110,5 +131,20 @@ if (( ${#PROBLEMS[@]} > 0 )); then
     exit 1
 fi
 
+if [[ "$PENDING" != "0" ]]; then
+    echo
+    echo "gut-check: pending test(s) — allowed, listed for review:"
+    grep -E '^ *\[Pending\]' "$PLAIN" | sort -u | sed 's/^/  /'
+fi
+if [[ "$RISKY" != "0" ]]; then
+    echo
+    echo "gut-check: tests that ran without asserting:"
+    grep -E '^ *\[Risky\]' "$PLAIN" | sort -u | sed 's/^/  /'
+fi
+
 echo
-echo "gut-check: OK — $SCRIPTS_RAN scripts, $TESTS_RAN tests, all passed"
+if [[ "$PENDING" == "0" ]]; then
+    echo "gut-check: OK — $SCRIPTS_RAN scripts, $TESTS_RAN tests, all passed"
+else
+    echo "gut-check: OK — $SCRIPTS_RAN scripts, $TESTS_RAN tests, $PENDING_TOTAL pending"
+fi

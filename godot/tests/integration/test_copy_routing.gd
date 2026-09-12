@@ -24,7 +24,7 @@ func before_each():
 	_scene = TestScene.create()
 	add_child(_scene)
 	_pane = ProbedPane.new()
-	_pane.shell_command = "/bin/sh"
+	_pane.shell_command = SettingsManager.default_shell_command()
 	_scene.add_child(_pane)
 	_pane.size = Vector2(800, 600)
 	_pane.grab_focus()

@@ -10,7 +10,7 @@ var _ws: Control
 func before_each():
 	MockAutoloads.setup()
 	SettingsManager.cfg_show_titlebar = false
-	SettingsManager.cfg_shell_command = "/bin/sh"
+	SettingsManager.cfg_shell_command = SettingsManager.default_shell_command()
 	SettingsManager.cfg_default_rows = 24
 	SettingsManager.cfg_default_cols = 80
 	SettingsManager.cfg_font_size = 17
@@ -53,7 +53,7 @@ func test_profile_activation_respects_show_titlebar():
 
 	ws._do_activate({"name": "P", "tiles": [{
 		"col": 0, "row": 0, "cspan": 12, "rspan": 12,
-		"settings": {"type": "terminal", "shell": "/bin/sh", "rows": 24, "cols": 80},
+		"settings": {"type": "terminal", "shell": SettingsManager.default_shell_command(), "rows": 24, "cols": 80},
 	}]})
 	await get_tree().process_frame
 
@@ -77,7 +77,7 @@ func test_click_activates_non_terminal_pane():
 		{"col": 0, "row": 0, "cspan": 6, "rspan": 12,
 			"settings": {"type": "code_viewer", "pane_name": "C1"}},
 		{"col": 6, "row": 0, "cspan": 6, "rspan": 12,
-			"settings": {"type": "terminal", "shell": "/bin/sh", "rows": 24, "cols": 80}},
+			"settings": {"type": "terminal", "shell": SettingsManager.default_shell_command(), "rows": 24, "cols": 80}},
 	]})
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -151,7 +151,7 @@ func test_pane_run_executes_through_configured_shell():
 	assert_not_null(body, "paneRun must spawn a terminal pane")
 	assert_eq(body.shell_command, SettingsManager.cfg_shell_command,
 		"paneRun must use the configured shell as the program")
-	assert_eq(body.shell_args, ["-c", "echo hi && exit 7"],
+	assert_eq(body.shell_args, PaneTypes.shell_run_args(SettingsManager.cfg_shell_command, "echo hi && exit 7"),
 		"the command must run as shell arguments, not the program")
 
 	var err = WorkspaceIpcHandlers.handle(ws, "paneRun", {"command": "   "})
@@ -285,7 +285,7 @@ func test_profile_activation_refreshes_layout_and_pane_list():
 		{"col": 0, "row": 0, "cspan": 6, "rspan": 12,
 			"settings": {"type": "code_viewer", "pane_name": "C1"}},
 		{"col": 6, "row": 0, "cspan": 6, "rspan": 12,
-			"settings": {"type": "terminal", "shell": "/bin/sh", "rows": 24, "cols": 80}},
+			"settings": {"type": "terminal", "shell": SettingsManager.default_shell_command(), "rows": 24, "cols": 80}},
 	]})
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -387,7 +387,7 @@ func test_restored_layout_keeps_its_share_of_the_screen():
 		{"col": 0, "row": 0, "cspan": 6, "rspan": 12,
 			"settings": {"type": "code_viewer", "pane_name": "C1"}},
 		{"col": 6, "row": 0, "cspan": 6, "rspan": 12,
-			"settings": {"type": "terminal", "shell": "/bin/sh", "rows": 24, "cols": 80}},
+			"settings": {"type": "terminal", "shell": SettingsManager.default_shell_command(), "rows": 24, "cols": 80}},
 	]})
 	await get_tree().process_frame
 	await get_tree().process_frame

@@ -6,7 +6,7 @@ var _tm: TerminalManager
 
 func before_each():
 	MockAutoloads.setup()
-	SettingsManager.cfg_shell_command = "/bin/sh"
+	SettingsManager.cfg_shell_command = SettingsManager.default_shell_command()
 	SettingsManager.cfg_default_rows = 24
 	SettingsManager.cfg_default_cols = 80
 	_tm = TerminalManager.new()

@@ -123,22 +123,36 @@ func test_envelopes_from_other_runs_are_ignored():
 func test_cli_adapter_path_another_user_controls_is_refused():
 	# The adapter command comes from pane settings, which a profile or
 	# workspace file can supply, and it is executed as argv — so an absolute
-	# path must not point at a file another user could have written.
+	# path must not point at something another user could have written.
 	if _pane._ai == null:
 		pending("GptyAi GDExtension class not registered")
 		return
-	var path := "/tmp/gpty_inspector_probe_%d" % OS.get_process_id()
+	var dir := OS.get_temp_dir().path_join("gpty_inspector_probe_%d" % OS.get_process_id())
+	DirAccess.make_dir_recursive_absolute(dir)
+	var path := dir.path_join("adapter.sh")
 	var f := FileAccess.open(path, FileAccess.WRITE)
+	assert_true(f != null, "must write the probe adapter")
 	f.store_string("#!/bin/sh\n")
 	f.close()
-	OS.execute("chmod", ["777", path])
 
 	_pane.backend = "cli"
-	_pane.command = [path]
-	assert_false(_pane._ensure_session(), "a world-writable adapter must not open")
+	# A file mode is a Unix notion: the world-writable case is Unix-only, and
+	# a path that is not a regular file is refused on every platform.
+	if OS.get_name() != "Windows":
+		OS.execute("chmod", ["777", path])
+		_pane.command = [path]
+		assert_false(_pane._ensure_session(), "a world-writable adapter must not open")
+		assert_string_contains(_pane._status.text, "rejected")
+
+	_pane.command = [dir]
+	assert_false(
+		_pane._ensure_session(),
+		"an adapter path that is not a regular file must not open"
+	)
 	assert_string_contains(_pane._status.text, "rejected")
 
 	DirAccess.remove_absolute(path)
+	DirAccess.remove_absolute(dir)
 
 func test_command_field_only_reparses_when_edited():
 	# The Command field joins argv with spaces, so it cannot show an argument
