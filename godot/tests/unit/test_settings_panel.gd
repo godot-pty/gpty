@@ -261,3 +261,47 @@ func _tab_of(node: Node) -> String:
 			return cur.name
 		cur = cur.get_parent()
 	return ""
+
+# ── Scrollback on disk ─────────────────────────────────────────────────
+
+## The store is bounded by rows *and* bytes, so a user cannot work out what
+## scrollback costs from the "History lines" setting — the panel has to say it.
+func test_terminal_tab_reports_the_scrollback_store_size():
+	var label: Label = null
+	for candidate in _panel.find_children("*", "Label", true, false):
+		if candidate.name == "HistorySizeLabel":
+			label = candidate
+			break
+	assert_not_null(label, "the Terminal tab must carry a scrollback size row")
+	assert_ne(label.text, "", "the row must show something, even with no store yet")
+	assert_true(
+		label.text.ends_with("B") or label.text == "unavailable",
+		"the row must be a byte count; got '%s'" % label.text
+	)
+	# The path behind the number is worth a hover: it is where the user would
+	# look (or delete) if the number got large.
+	assert_string_contains(label.tooltip_text, "history.db")
+
+## The row must show what the store answers, in the units it answers in — the
+## provider is pinned here because the real store grows while the suite runs.
+func test_the_row_reports_what_the_store_answers():
+	_panel._history_stats_provider = func():
+		return '{"path": "/tmp/user/history.db", "bytes": 1536}'
+	_panel._refresh_history_size()
+	var label: Label = null
+	for candidate in _panel.find_children("*", "Label", true, false):
+		if candidate.name == "HistorySizeLabel":
+			label = candidate
+			break
+	assert_not_null(label)
+	assert_eq(label.text, "1.5 KiB")
+	assert_string_contains(label.tooltip_text, "/tmp/user/history.db")
+
+func test_format_bytes_scales_through_the_units():
+	assert_eq(SettingsPanel.format_bytes(0), "0 B")
+	assert_eq(SettingsPanel.format_bytes(999), "999 B")
+	assert_eq(SettingsPanel.format_bytes(1024), "1.0 KiB")
+	assert_eq(SettingsPanel.format_bytes(1536), "1.5 KiB")
+	assert_eq(SettingsPanel.format_bytes(5 * 1024 * 1024), "5.0 MiB")
+	assert_eq(SettingsPanel.format_bytes(3 * 1024 * 1024 * 1024), "3.0 GiB")
+	assert_eq(SettingsPanel.format_bytes(-1), "unavailable")

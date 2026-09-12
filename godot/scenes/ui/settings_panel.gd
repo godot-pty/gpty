@@ -7,6 +7,12 @@ signal request_graph_editor
 var _debounce_timer: Timer = null
 var _workspace: Control
 var _menu_width: float = 540.0  # settings panel width — dialogs size relative to it
+## The disk-usage row in the Terminal tab; refreshed whenever the panel opens,
+## because the panel outlives a single visit and scrollback keeps growing.
+var _history_size_label: Label = null
+## How the row reads the store size. Overridable so a test can pin a number:
+## the real store grows while the suite runs (every pane has a writer thread).
+var _history_stats_provider := Callable()
 
 func _init(workspace: Control):
 	_workspace = workspace
@@ -15,6 +21,10 @@ func _ready():
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_build_ui()
+
+func _notification(what: int):
+	if what == NOTIFICATION_VISIBILITY_CHANGED and visible:
+		_refresh_history_size()
 
 func _unhandled_input(event):
 	if visible and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
@@ -81,6 +91,7 @@ func _build_ui():
 	var dims = _add_dims_control(t_term)
 	var scroll_spin = _add_scroll_control(t_term)
 	var history_spin = _add_history_control(t_term)
+	_add_history_size_row(t_term)
 	t_term.add_child(HSeparator.new())
 	var shell_le = _add_shell_control(t_term)
 	var env_te = _add_env_control(t_term)
@@ -316,6 +327,53 @@ func _add_history_control(v: VBoxContainer) -> SpinBox:
 	hs.add_child(spin)
 	v.add_child(hs)
 	return spin
+
+## What scrollback costs on disk.
+##
+## The store is bounded by rows *and* bytes, so the number cannot be derived
+## from `History lines` — it depends on how long the lines actually were. Shown
+## as a hint (refresh on open), not as a live gauge.
+func _add_history_size_row(v: VBoxContainer) -> void:
+	var hs = HBoxContainer.new()
+	hs.add_child(_lbl("On disk:"))
+	var size = Label.new()
+	size.name = "HistorySizeLabel"
+	size.add_theme_font_size_override("font_size", 12)
+	hs.add_child(size)
+	v.add_child(hs)
+	_history_size_label = size
+	_refresh_history_size()
+
+func _refresh_history_size() -> void:
+	if _history_size_label == null or not is_instance_valid(_history_size_label):
+		return
+	var raw := (
+		str(_history_stats_provider.call())
+		if _history_stats_provider.is_valid()
+		else str(GptyTerminal.history_store_stats())
+	)
+	var stats = JSON.parse_string(raw)
+	if not (stats is Dictionary):
+		_history_size_label.text = "unavailable"
+		return
+	_history_size_label.text = format_bytes(int(stats.get("bytes", -1)))
+	_history_size_label.tooltip_text = str(stats.get("path", ""))
+
+
+## Human-readable byte count. Static and pure so the formatting is testable
+## without a panel or a store.
+static func format_bytes(bytes: int) -> String:
+	if bytes < 0:
+		return "unavailable"
+	var units := ["B", "KiB", "MiB", "GiB", "TiB"]
+	var value := float(bytes)
+	var unit := 0
+	while value >= 1024.0 and unit < units.size() - 1:
+		value /= 1024.0
+		unit += 1
+	if unit == 0:
+		return "%d B" % bytes
+	return "%.1f %s" % [value, units[unit]]
 
 func _add_dims_control(v: VBoxContainer) -> Array:
 	var hr = HBoxContainer.new()

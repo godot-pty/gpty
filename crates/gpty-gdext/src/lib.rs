@@ -243,9 +243,7 @@ impl GptyTerminal {
                 if let Some(mut grid) = gpty_core::lock::lock_or_warn(&spawned.grid, "pane grid") {
                     let history_lines = history_lines.clamp(100, 100_000) as u32;
                     if !history_key.is_empty() {
-                        let db_path = godot::classes::ProjectSettings::singleton()
-                            .globalize_path("user://history.db")
-                            .to_string();
+                        let db_path = history_db_path();
                         match gpty_core::history::PaneHistory::open(
                             &db_path,
                             &history_key,
@@ -1132,6 +1130,18 @@ impl GptyTerminal {
         GString::from(env!("CARGO_PKG_VERSION"))
     }
 
+    /// Bytes the scrollback store occupies on disk, and where it lives.
+    ///
+    /// Static, like `get_app_version`: the GUI asks before any pane exists, and
+    /// the answer is about the store file, not a terminal. JSON so the settings
+    /// panel can show the size (the path is there for a future "reveal").
+    #[func]
+    fn history_store_stats() -> GString {
+        let path = history_db_path();
+        let bytes = gpty_core::history::store_size_on_disk(&path);
+        GString::from(&serde_json::json!({ "path": path, "bytes": bytes }).to_string())
+    }
+
     /// Validate a pattern against the engine's regex dialect.
     ///
     /// Returns an empty String when `gpty_core::concept::validate_pattern`
@@ -1176,6 +1186,16 @@ impl GptyTerminal {
     fn respond_ipc(id: i64, success: bool, result_json: String) {
         crate::ipc::complete_response(id as u64, success, result_json);
     }
+}
+
+/// The SQLite file every pane's scrollback is persisted to.
+///
+/// `user://history.db`, globalized once so the spawn path and the settings
+/// panel's size query cannot disagree about which file is meant.
+fn history_db_path() -> String {
+    godot::classes::ProjectSettings::singleton()
+        .globalize_path("user://history.db")
+        .to_string()
 }
 
 /// Map Godot `Key` enum values to Linux evdev scancodes.

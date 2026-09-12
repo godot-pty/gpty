@@ -72,6 +72,21 @@ const RETAINED_BYTES_PER_ROW: u64 = 1024;
 /// deliberately disabled.
 const UNCAPPED_ROW_BUDGET: u64 = 1024;
 
+/// Bytes the store occupies on disk, including SQLite's `-wal`/`-shm`
+/// siblings.
+///
+/// This is what scrollback costs the user, which the settings panel surfaces:
+/// the store is bounded by rows *and* bytes, so the number is not derivable
+/// from the settings — it depends on how long the lines actually were. A file
+/// that does not exist counts as zero (nothing has been written yet).
+pub fn store_size_on_disk(path: &str) -> u64 {
+    ["", "-wal", "-shm"]
+        .iter()
+        .filter_map(|suffix| std::fs::metadata(format!("{path}{suffix}")).ok())
+        .map(|meta| meta.len())
+        .sum()
+}
+
 /// Restrict a store file to its owner.
 ///
 /// SQLite creates the database (and the `-wal`/`-shm` siblings it needs) with
@@ -673,6 +688,40 @@ mod tests {
                 assert_eq!(mode, 0o600, "{candidate} must be owner-only, got {mode:o}");
             }
         }
+        for candidate in [path.clone(), format!("{path}-wal"), format!("{path}-shm")] {
+            let _ = fs::remove_file(&candidate);
+        }
+    }
+
+    /// What the settings panel shows must be the real footprint, not a guess:
+    /// the store's own file plus the WAL siblings SQLite keeps beside it.
+    #[test]
+    fn store_size_on_disk_counts_the_store_and_its_siblings() {
+        let path = temp_db_path("size");
+        for candidate in [path.clone(), format!("{path}-wal"), format!("{path}-shm")] {
+            let _ = fs::remove_file(&candidate);
+        }
+
+        // Nothing written yet: no files, no bytes.
+        assert_eq!(store_size_on_disk(&path), 0);
+
+        {
+            let store = HistoryStore::open(&path, "pane-a", 100).unwrap();
+            for index in 0..50 {
+                store
+                    .append(index, "a line of scrollback long enough to weigh something")
+                    .unwrap();
+            }
+        }
+        let on_disk = store_size_on_disk(&path);
+        let expected: u64 = [path.clone(), format!("{path}-wal"), format!("{path}-shm")]
+            .iter()
+            .filter_map(|candidate| fs::metadata(candidate).ok())
+            .map(|meta| meta.len())
+            .sum();
+        assert!(on_disk > 0, "a store with rows must occupy bytes");
+        assert_eq!(on_disk, expected);
+
         for candidate in [path.clone(), format!("{path}-wal"), format!("{path}-shm")] {
             let _ = fs::remove_file(&candidate);
         }
