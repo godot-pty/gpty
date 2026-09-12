@@ -310,6 +310,22 @@ impl PtyHandle {
 }
 impl Drop for PtyHandle {
     fn drop(&mut self) {
+        // Take the whole process group, not just the shell. The child is a
+        // session leader (portable-pty calls `setsid` before the exec), so its
+        // pgid is its pid and a negative pid signals exactly its descendants —
+        // a `sleep`, a build, a `yes` — which otherwise outlive the shell
+        // until their own writes fail (measured: a `yes` lingered ~3 s after
+        // its pane closed with 64 KiB queued to it). Killed before the child
+        // so the shell cannot spawn more on its way out.
+        #[cfg(unix)]
+        if let Some(pid) = self._child.process_id() {
+            // SAFETY: `kill(2)` with a negative pid signals the group led by
+            // that pid. It is our own child's pid, and `setsid()` put it in a
+            // group this process is not part of, so the signal cannot reach us.
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
+        }
         let _ = self._child.kill();
         // Non-blocking reap: try_wait returns immediately.
         // If the child hasn't exited yet (brief race after kill),
@@ -825,6 +841,72 @@ mod tests {
         // But the trusted vec is well-formed for direct injection.
         assert_eq!(trusted[0], ("GPTY_ENV".to_string(), "1".to_string()));
         assert_eq!(trusted[1], ("GPTY_PANE_ID".to_string(), attachment_id));
+    }
+
+    /// A pane that goes away takes its grandchildren with it.
+    ///
+    /// `PtyHandle::drop` kills only the shell, and the shell's own children do
+    /// not always follow it: the kernel's SIGHUP on session-leader exit reaches
+    /// the *foreground* group, so a background job under job control (an
+    /// interactive pane's normal shape) or a process that ignores SIGHUP is
+    /// orphaned and lives until its own writes fail. The child here ignores
+    /// SIGHUP, which is the shape that used to survive.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn dropping_a_pane_kills_its_process_group() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        let handle = PtyHandle::spawn(
+            9400,
+            "sh",
+            // `trap "" HUP` is inherited by the exec'd `sleep`: even the
+            // session leader's exit does not take it down.
+            &["-c", "trap \"\" HUP; sleep 300 & echo GRANDCHILD=$!; wait"],
+            &[],
+            &[],
+            tx,
+        )
+        .expect("spawn");
+
+        // The shell prints the background child's pid: that is the process a
+        // plain kill of the shell would have left behind.
+        let mut seen = String::new();
+        let pid = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while let Some(chunk) = rx.recv().await {
+                seen.push_str(&String::from_utf8_lossy(&chunk));
+                if let Some(rest) = seen.split("GRANDCHILD=").nth(1)
+                    && let Some(digits) = rest.split_whitespace().next()
+                    && let Ok(pid) = digits.parse::<i32>()
+                {
+                    return pid;
+                }
+            }
+            0
+        })
+        .await
+        .expect("the shell must report its child's pid");
+        assert!(pid > 0, "no grandchild pid in: {seen}");
+
+        drop(handle);
+
+        // `kill(pid, 0)` is a liveness probe; ESRCH means the process is gone
+        // (and reaped — a zombie still answers until its parent collects it).
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut gone = false;
+        while std::time::Instant::now() < deadline {
+            // SAFETY: signal 0 performs the permission/existence checks only.
+            let alive = unsafe { libc::kill(pid, 0) } == 0;
+            let err = std::io::Error::last_os_error().raw_os_error();
+            if !alive && err == Some(libc::ESRCH) {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        if !gone {
+            // Leave no stray process behind for the rest of the suite.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+        assert!(gone, "closing the pane must kill the shell's children too");
     }
 
     /// Input to a child that is not reading must not block the caller.

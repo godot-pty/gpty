@@ -7,6 +7,8 @@ const REPO_NAME := "gpty"
 const RELEASES_URL := "https://api.github.com/repos/%s/%s/releases/latest"
 
 const REQUEST_TIMEOUT := 5.0
+## Largest release-listing response accepted (the update check is notify-only).
+const MAX_RESPONSE_BYTES := 64 * 1024
 
 var _http: HTTPRequest
 
@@ -30,6 +32,11 @@ func _check():
 	var current: String = GptyTerminal.get_app_version()
 	_http = HTTPRequest.new()
 	_http.timeout = REQUEST_TIMEOUT
+	# The body is display data from a host we do not control (TLS only, and a
+	# MITM'd or misbehaving response is not bounded by anything else): cap what
+	# the response may buffer, well above a release listing. -1, the default,
+	# means unlimited.
+	_http.body_size_limit = MAX_RESPONSE_BYTES
 	add_child(_http)
 	_http.request_completed.connect(_on_response.bind(current))
 	var url = RELEASES_URL % [REPO_OWNER, REPO_NAME]
