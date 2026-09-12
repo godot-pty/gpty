@@ -163,8 +163,10 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   opened afterwards. This is the user's own context, not a file's — but it bounds what any
   per-pane environment model can claim, and it is why the roadmap treats environment as authority
   rather than configuration.
-- **Scrollback is plaintext** in `user://` and the file mode follows your umask. Anything printed in
-  a pane — tokens included — is stored on disk the same way a shell history file would be.
+- **Scrollback is plaintext** in `user://`. The store, its WAL siblings and the JSON stores beside
+  it are created owner-only (0600) rather than with your umask, but the content is not encrypted:
+  anything printed in a pane — tokens included — is stored on disk the same way a shell history file
+  would be.
 - **The update check is notify-only.** It fetches release metadata over TLS and shows a toast; it
   never downloads or executes anything, and the response is treated as display data.
 - **Release artifacts are not code-signed, but carry build provenance.** There is no Authenticode or

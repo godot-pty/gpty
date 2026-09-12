@@ -72,6 +72,28 @@ const RETAINED_BYTES_PER_ROW: u64 = 1024;
 /// deliberately disabled.
 const UNCAPPED_ROW_BUDGET: u64 = 1024;
 
+/// Restrict a store file to its owner.
+///
+/// SQLite creates the database (and the `-wal`/`-shm` siblings it needs) with
+/// the process umask, so under a permissive umask — or a `user://` another
+/// account can read — every pane's scrollback is readable by others. Best
+/// effort by design: a sibling may not exist yet, and a mode that cannot be set
+/// is worth a log line, not a failed pane.
+#[cfg(unix)]
+fn restrict_to_owner(path: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    match std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+        Ok(()) => {}
+        // The `-wal`/`-shm` siblings appear with the first write; a missing
+        // file is the normal case, not a failure.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => log::warn!("could not restrict {path} to its owner: {e}"),
+    }
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_path: &str) {}
+
 impl HistoryStore {
     /// Open or create the history database at `path` for `pane_key`.
     ///
@@ -109,6 +131,13 @@ impl HistoryStore {
             END;
             PRAGMA user_version=2;"
         )?;
+        for candidate in [
+            path.to_string(),
+            format!("{path}-wal"),
+            format!("{path}-shm"),
+        ] {
+            restrict_to_owner(&candidate);
+        }
         Ok(Self {
             conn,
             pane_key: pane_key.to_string(),
@@ -610,6 +639,43 @@ mod tests {
             name,
             std::process::id()
         )
+    }
+
+    /// The store holds every pane's scrollback; the umask must not decide who
+    /// can read it.
+    #[test]
+    fn the_store_and_its_wal_siblings_are_owner_only() {
+        let path = temp_db_path("owner_only");
+        let _ = fs::remove_file(&path);
+        // A store written before this hardening is permissive; opening it must
+        // tighten it, not leave the old mode in place.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::write(&path, b"").unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        {
+            let store = HistoryStore::open(&path, "pane-a", 100).unwrap();
+            store
+                .append(0, "a line that must not be world-readable")
+                .unwrap();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for candidate in [path.clone(), format!("{path}-wal"), format!("{path}-shm")] {
+                let mode = match fs::metadata(&candidate) {
+                    Ok(meta) => meta.permissions().mode() & 0o777,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(e) => panic!("cannot stat {candidate}: {e}"),
+                };
+                assert_eq!(mode, 0o600, "{candidate} must be owner-only, got {mode:o}");
+            }
+        }
+        for candidate in [path.clone(), format!("{path}-wal"), format!("{path}-shm")] {
+            let _ = fs::remove_file(&candidate);
+        }
     }
 
     #[test]
