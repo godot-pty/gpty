@@ -984,7 +984,6 @@ func _refresh_status_bar():
 		_status_bar.set_pane_info(label, type_name)
 	else:
 		_status_bar.set_pane_info("", "")
-	_status_bar.set_window_mode(SettingsManager.cfg_window_mode)
 	# Sidebar pane accent follows focus (deduped inside the sidebar).
 	if _sidebar:
 		_sidebar.set_active_pane(body if (body and is_instance_valid(body)) else null)

@@ -1,6 +1,6 @@
 class_name StatusBar
 extends Control
-# gpty Status Bar — bottom bar showing pane info, FPS, and window mode.
+# gpty Status Bar — bottom bar showing pane info, FPS, clock, and version.
 
 const HEIGHT = 22.0
 const BG_COLOR = Color(0.12, 0.12, 0.14, 1.0)
@@ -29,7 +29,7 @@ func _ready():
 	_pane_label.text = ""
 	add_child(_pane_label)
 
-	# Right — combined FPS + window mode (single label, no layout drift)
+	# Right — combined FPS + clock + version (single label, no layout drift)
 	_right_label = Label.new()
 	_right_label.name = "RightInfo"
 	_right_label.add_theme_font_size_override("font_size", 11)
@@ -54,10 +54,16 @@ func _ready():
 func _right_update():
 	var t = Time.get_time_dict_from_system()
 	_clock_text = "%02d:%02d:%02d" % [t.hour, t.minute, t.second]
-	_right_label.text = _clock_text + "  |  " + _fps_text + "  |  " + _mode_text + "  |  " + _version_text
+	# Clock sits immediately left of the version; the FPS segment is the only
+	# one that can still be empty (first frame, before the first sample).
+	var parts := PackedStringArray()
+	if _fps_text != "":
+		parts.append(_fps_text)
+	parts.append(_clock_text)
+	parts.append(_version_text)
+	_right_label.text = "  |  ".join(parts)
 
 var _fps_text: String = ""
-var _mode_text: String = ""
 var _clock_text: String = ""
 var _version_text: String = ""
 
@@ -69,11 +75,4 @@ func set_fps(fps: int, fetch_ms: int, draw_ms: int):
 	_fps_text = "%d FPS" % fps
 	if fetch_ms >= 0:
 		_fps_text += "  %d/%dms" % [fetch_ms, draw_ms]
-	_right_update()
-
-func set_window_mode(mode: int):
-	match mode:
-		0: _mode_text = "OS"
-		1: _mode_text = "Win"
-		2: _mode_text = "Full"
 	_right_update()
