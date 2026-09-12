@@ -49,6 +49,9 @@ gpty pane-run --command "cargo test"
 # Wait for output matching a regex (Rust syntax, up to 60 s)
 gpty pane-wait T1 --pattern "tests passed" --timeout-ms 30000
 
+# Declare this pane's agent state (run inside the pane; display only)
+gpty state working
+
 # Inject into every pane carrying a tag
 gpty new-pane --tags ci
 gpty broadcast --tags ci --text "make test"
@@ -97,6 +100,7 @@ gpty version
 | `pane-status` | Status primitives for a pane (`pid`, `running`, `exit_code`, `idle_ms`); no argument lists every pane |
 | `pane-run` | Run a command in a new terminal pane (`--command`) |
 | `pane-wait` | Wait for a pane's output to match a regex (`--pattern`, `--timeout-ms` 100–60000) |
+| `state` | Declare the state of the pane the command runs in (`idle`, `working`, `needs-attention`, `completed`, `failed`). Needs the credentials a pane injects (`GPTY_EVENT_*`), submits over the event socket, and is not an MCP tool |
 | `broadcast` | Inject text into every pane carrying one of the given `--tags` |
 | `concept` | List or toggle concept triggers (`list`, `toggle <name>`) |
 | `schema` | Output JSON Schema describing all commands (`--format mcp` for MCP manifest) |

@@ -185,3 +185,105 @@ fn skill_flag_output_contains_guardrail() {
         "bundled SKILL.md must carry the GPTY_ENV guardrail"
     );
 }
+
+/// The declaration reaches the event socket as the listener expects it: the
+/// `ompEvent` method, the wire name, the state, and the pane's capability.
+#[tokio::test]
+async fn state_declaration_roundtrip() {
+    let seen: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+    let seen_h = Arc::clone(&seen);
+    let socket = start_server(
+        "state",
+        vec![("ompEvent", {
+            move |params: Value| {
+                *seen_h.lock().unwrap() = Some(params.clone());
+                serde_json::json!({"accepted": true, "next_seq": 1})
+            }
+        })],
+    )
+    .await;
+    let credentials = commands::state::Credentials {
+        socket_path: socket.clone(),
+        terminal_session_id: "session-1".into(),
+        capability: "cap-1".into(),
+        pane_id: "pane-abc".into(),
+    };
+    commands::state::declare(
+        &credentials,
+        "needs-attention",
+        true,
+        Duration::from_secs(5),
+    )
+    .await
+    .expect("a declaration should succeed");
+    let _ = std::fs::remove_file(&socket);
+
+    let params = seen
+        .lock()
+        .unwrap()
+        .take()
+        .expect("server handler should have been called");
+    assert_eq!(
+        params["v"], 1,
+        "the listener accepts protocol version 1 only"
+    );
+    assert_eq!(params["terminal_session_id"], "session-1");
+    assert_eq!(params["capability"], "cap-1");
+    assert_eq!(params["event"]["name"], commands::state::WIRE_EVENT);
+    assert_eq!(params["event"]["state"], "needs-attention");
+    assert!(
+        params.get("seq").is_none(),
+        "a fresh process per declaration has no counter to continue"
+    );
+}
+
+/// A pane injects exactly three credentials; anything else means the command
+/// was not run from one, and the message has to name what is missing.
+#[test]
+fn state_credentials_come_from_the_pane_environment() {
+    let full = |key: &str| match key {
+        "GPTY_EVENT_SOCKET" => Some("/run/user/1000/gpty-events.sock".to_string()),
+        "GPTY_TERMINAL_SESSION_ID" => Some("session-1".to_string()),
+        "GPTY_EVENT_CAPABILITY" => Some("cap-1".to_string()),
+        "GPTY_PANE_ID" => Some("pane-abc".to_string()),
+        _ => None,
+    };
+    let credentials = commands::state::credentials_from_env(full).expect("all present");
+    assert_eq!(credentials.socket_path, "/run/user/1000/gpty-events.sock");
+    assert_eq!(credentials.terminal_session_id, "session-1");
+    assert_eq!(credentials.capability, "cap-1");
+    assert_eq!(credentials.pane_id, "pane-abc");
+
+    // An empty value is unset: a layout can carry an empty variable, and a
+    // capability of "" would only fail later as a confusing rpc error.
+    for missing in [
+        "GPTY_EVENT_SOCKET",
+        "GPTY_TERMINAL_SESSION_ID",
+        "GPTY_EVENT_CAPABILITY",
+    ] {
+        let error = commands::state::credentials_from_env(|key| {
+            if key == missing {
+                Some(String::new())
+            } else {
+                full(key)
+            }
+        })
+        .expect_err("a missing credential must fail");
+        assert!(
+            error.to_string().contains(missing),
+            "the error must name {missing}: {error}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn invalid_state_never_reaches_socket() {
+    let error = commands::state::run("wroking", false, Duration::from_secs(5))
+        .await
+        .expect_err("an unknown state must fail client-side");
+    let message = error.to_string();
+    assert!(
+        message.contains("needs-attention"),
+        "the refusal must list the valid states: {message}"
+    );
+}

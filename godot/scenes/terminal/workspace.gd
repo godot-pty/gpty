@@ -1029,7 +1029,10 @@ func _poll_agent_events():
 			receiver.receive_agent_event(envelope, source_id)
 
 ## Map a generic-vocabulary event to the Tier 1 agent state it declares.
-## Empty string = the event carries no state declaration.
+## `state.declared` carries the state in its own field — an explicit
+## declaration from the pane's program (`gpty state`), which is how a program
+## declares state on Windows, where ConPTY consumes the `gpty_state` OSC
+## before the pane's parser can see it. Empty string = nothing declared.
 static func agent_state_for_event(event: Dictionary) -> String:
 	if not (event is Dictionary):
 		return ""
@@ -1043,6 +1046,10 @@ static func agent_state_for_event(event: Dictionary) -> String:
 		"tool.finished":
 			if bool(event.get("is_error", false)):
 				return "needs-attention"
+		"state.declared":
+			# The event socket already held the value to the declaration
+			# vocabulary; the terminal re-checks it on the way in.
+			return str(event.get("state", ""))
 	return ""
 
 # ═══════════════════════════════════════════════════════════════════════

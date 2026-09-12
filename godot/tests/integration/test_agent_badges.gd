@@ -60,15 +60,19 @@ func _declare_after_settle(body: Control, state: String):
 	body._terminal.send_line(ShellFixtures.print_text(sequence))
 
 ## Tier 2 (the `gpty_state` OSC a program prints) needs the sequence to travel
-## from the child to the pane's parser. On Windows it does not: ConPTY's
-## renderer drops it before gpty ever sees it — measured in CI, where the paste
-## tests (which use the same child-side byte emission and PowerShell fixture, for
-## DECSET 2004) pass while every declaration test fails. Tier 1 events are
-## unaffected and are the supported Windows path; see the ROADMAP item.
+## from the child to the pane's parser. On Windows it cannot: ConPTY re-renders
+## its own model and consumes sequences its VT engine does not implement —
+## measured in CI, where the paste tests (the same child-side byte emission and
+## PowerShell fixture, a DECSET instead of an OSC) pass while every declaration
+## test fails. That is a platform property rather than a gap to close here: the
+## declaration path on Windows is `gpty state <value>`, which submits over the
+## event socket with the pane's own capability and is asserted live on every
+## platform by `scripts/smoke_pane_api.py` (including the `windows-smoke` job).
+## AGENTS.md records the decision.
 func _needs_osc_delivery() -> bool:
 	if OS.get_name() != "Windows":
 		return false
-	pending("ConPTY does not deliver the gpty_state OSC to the pane (Tier 1 events are the Windows path)")
+	pending("ConPTY consumes the gpty_state OSC; `gpty state` is the Windows declaration path (AGENTS.md)")
 	return true
 
 
@@ -130,6 +134,12 @@ func test_generic_event_to_state_mapping():
 	assert_eq(W.agent_state_for_event({"name": "thinking.delta"}), "")
 	assert_eq(W.agent_state_for_event({"name": "turn.started"}), "")
 	assert_eq(W.agent_state_for_event({}), "")
+	# An explicit declaration carries its own value; a declaration without one
+	# declares nothing (the socket refuses an unknown value, so it cannot
+	# arrive with a value outside the vocabulary).
+	assert_eq(W.agent_state_for_event({"name": "state.declared", "state": "needs-attention"}),
+		"needs-attention")
+	assert_eq(W.agent_state_for_event({"name": "state.declared"}), "")
 
 func test_tier1_overrides_tier2_declaration():
 	var ws = await _make_workspace()

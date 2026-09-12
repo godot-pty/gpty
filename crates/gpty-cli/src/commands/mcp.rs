@@ -212,12 +212,36 @@ mod tests {
     const IPC_HANDLERS_SRC: &str =
         include_str!("../../../../godot/scenes/terminal/ipc_handlers.gd");
     const WORKSPACE_SRC: &str = include_str!("../../../../godot/scenes/terminal/workspace.gd");
+    /// The event listener's registrations. It is a second surface with its own
+    /// method set (`gpty state` submits on it), so the CLI's literals have to be
+    /// checked against both.
+    const OMP_EVENTS_SRC: &str = include_str!("../../../../crates/gpty-gdext/src/omp_events.rs");
 
     /// The whole surface: routed methods plus the ones answered in Rust.
     fn registered_methods() -> BTreeSet<String> {
         let mut surface = rust_array_entries(IPC_SERVER_SRC, "let gdscript_methods = [");
         surface.extend(rust_local_methods(IPC_SERVER_SRC));
         surface
+    }
+
+    /// Methods the event listener answers, read from where it registers them.
+    ///
+    /// AGENTS.md states the listener serves exactly these three "and nothing
+    /// else" — it is reachable by any same-UID process, and submission is gated
+    /// by a per-PTY capability rather than by `GPTY_SECRET` — so a fourth
+    /// method is new attack surface and has to change this list deliberately.
+    fn event_listener_methods() -> BTreeSet<String> {
+        let methods = rust_local_methods(OMP_EVENTS_SRC);
+        let expected: BTreeSet<String> = ["eventsPoll", "ompEvent", "subscribe"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(
+            methods, expected,
+            "the event listener's method set changed — a new method there is new \
+             surface on a socket any same-UID process can reach"
+        );
+        methods
     }
 
     /// Entries of the Rust array literal whose `let <name> = [` is at `marker`.
@@ -425,13 +449,20 @@ mod tests {
     #[test]
     fn cli_call_sites_name_registered_methods_only() {
         let surface = registered_methods();
+        let listener = event_listener_methods();
         let used = cli_call_site_methods();
         assert!(
             !used.is_empty(),
             "parsed no IPC method literals out of src/commands"
         );
 
-        let unknown: Vec<_> = used.difference(&surface).collect();
+        // A command may address either listener: the control socket carries the
+        // workspace API, the event socket carries submissions from inside a pane
+        // (`gpty state` -> `ompEvent`). Only the literals that exist are held to
+        // the event side — `subscribe`/`eventsPoll` are answered there but no CLI
+        // command calls them (the smoke and the shipped extension do).
+        let reachable: BTreeSet<String> = surface.union(&listener).cloned().collect();
+        let unknown: Vec<_> = used.difference(&reachable).collect();
         assert!(
             unknown.is_empty(),
             "these method literals are not registered by the GUI: {unknown:?}"

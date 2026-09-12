@@ -74,6 +74,9 @@ gpty version
 # Print the bundled agent skill (for coding agents running inside a pane)
 gpty --skill
 
+# Declare this pane's agent state, from inside the pane (display only)
+gpty state working
+
 # Spawn a new terminal pane
 gpty new-pane --pane-type terminal
 

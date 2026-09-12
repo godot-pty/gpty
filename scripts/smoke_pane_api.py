@@ -404,6 +404,39 @@ def main() -> int:
                 state,
             )
 
+        # ── gpty state: a program declaring its own pane state ────────
+        # The CLI reads the credentials its parent pane injected
+        # (GPTY_EVENT_SOCKET / GPTY_TERMINAL_SESSION_ID /
+        # GPTY_EVENT_CAPABILITY) and submits a declaration on the event
+        # socket. This is the Windows declaration path — ConPTY consumes the
+        # `gpty_state` OSC before gpty's parser can see it — and the value is
+        # deliberately not `working`, which the Tier 3 heuristic can report on
+        # its own while output flows.
+        smoke.enter("gpty state")
+        smoke.cli(
+            "inject",
+            pane_id,
+            "--text",
+            f'"{smoke.cli_bin}" state needs-attention',
+            "--json",
+        )
+        state = {}
+        for _ in range(20):
+            state = smoke.cli("pane-status", pane_id, "--json", check=False).get("result", {})
+            if state.get("agent_state") == "needs-attention" and state.get("agent_state_tier") == 1:
+                break
+            time.sleep(0.5)
+        if state.get("agent_state") != "needs-attention":
+            smoke.fail(
+                "`gpty state needs-attention` must declare the pane's state",
+                {"status": state, "pane_tail": smoke.read_pane(pane_id, lines=20)[-600:]},
+            )
+        smoke.require(
+            state.get("agent_state_tier") == 1,
+            "a declaration must arrive over the capability-authenticated channel",
+            state,
+        )
+
         # ── broadcast to a tagged pane ────────────────────────────────
         smoke.enter("broadcast")
         broadcast = smoke.result(

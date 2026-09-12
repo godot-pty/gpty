@@ -68,6 +68,15 @@ pub fn build_mcp_tools_inline(cmd: &clap::Command) -> serde_json::Value {
         if name == "mcp" || name == "schema" {
             continue;
         }
+        // `state` declares the state of the pane the command runs *in*, from
+        // the `GPTY_EVENT_*` its parent injected, and reaches the event
+        // socket — not the control socket. There is no IPC method behind it,
+        // so advertising it would publish a tool that cannot dispatch
+        // (`every_mcp_tool_maps_to_a_registered_method` fails if this
+        // exclusion is dropped).
+        if name == "state" {
+            continue;
+        }
         // Flatten nested subcommands (daemon, layout) into prefixed tools
         let nested: Vec<_> = sub.get_subcommands().collect();
         if !nested.is_empty() {

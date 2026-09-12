@@ -84,7 +84,9 @@ but it does not and cannot change the trust class.
 - Same-UID processes controlling gPTY (see above);
 - Spoofable display state: the `gpty_state=<value>` OSC declaration and the heuristic agent-state
   tiers may be set by anything that can print; they are labelled display-only and are never an input
-  to a decision;
+  to a decision. `gpty state` declares the same (display-only) state over the event socket, where the
+  per-PTY event capability a pane injects into its children is the gate rather than the output
+  stream; it is the declaration path on Windows, where ConPTY consumes the OSC before gpty sees it;
 - What happens after a user approves a **Workspace Trust** prompt, activates a downloaded profile,
   or installs a third-party extension. Those prompts exist so the decision is explicit; after
   consent, gPTY runs what the file asks for;

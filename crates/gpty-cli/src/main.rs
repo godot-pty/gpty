@@ -149,6 +149,12 @@ enum Commands {
         pane_id: Option<String>,
     },
 
+    /// Declare this pane's agent state (run inside a pane; display only)
+    State {
+        /// idle, working, needs-attention, completed, or failed
+        value: String,
+    },
+
     /// Run a command in a new terminal pane (executed through the configured shell)
     PaneRun {
         /// Command to run
@@ -263,6 +269,19 @@ async fn main() {
                 process::exit(1);
             }
             process::exit(0);
+        }
+        // `state` talks to the event socket with the credentials its parent
+        // pane injected — never the control socket — so it must not reach the
+        // daemon auto-spawn below (a pane strips GPTY_SOCKET/GPTY_SECRET, and
+        // the declaration belongs to the pane that is already running).
+        Some(Commands::State { value }) => {
+            match commands::state::run(value, cli.json, timeout).await {
+                Ok(()) => process::exit(0),
+                Err(e) => {
+                    eprintln!("{e}");
+                    process::exit(1);
+                }
+            }
         }
         None => {
             Cli::command().print_help().ok();

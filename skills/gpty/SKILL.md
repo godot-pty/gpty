@@ -68,10 +68,25 @@ Create panes with tags (`gpty new-pane --tags ci,backend`), then inject into eve
 matching pane at once: `gpty broadcast --tags ci --text "make test"`. Text is written
 verbatim — the target shell interprets it.
 
+### Declare your pane's agent state
+
+```
+gpty state working
+```
+
+Sets the state badge on the pane you are running in — one of `idle`, `working`,
+`needs-attention`, `completed`, `failed`. It takes no target: it reads the
+credentials gPTY injected into your pane and submits the declaration over the
+event socket, so it works wherever a pane does, Windows included (ConPTY
+consumes the `gpty_state` OSC that Unix agents print instead). It is display
+only — it never triggers actions, captures, or layout changes — and there is no
+MCP tool for it, since an MCP client is not inside a pane.
+
 ### Subscribe to events
 
 Over the event socket (`gpty-events.sock`): `subscribe` returns a `subscription_id`;
-`eventsPoll` drains bounded JSON events (concept matches, pane spawn/kill).
+`eventsPoll` drains bounded JSON events (concept matches, pane spawn/kill,
+`state.declared`).
 
 ## Installation
 

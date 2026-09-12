@@ -15,6 +15,7 @@ pub(crate) mod pane_run;
 pub(crate) mod pane_status;
 pub(crate) mod pane_wait;
 pub mod schema;
+pub mod state;
 
 use crate::Commands;
 use gpty_ipc::client::IpcClient;
@@ -61,7 +62,7 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
         Commands::Daemon { action } => daemon::run_action(action, client, json).await,
         Commands::Concept { action } => concept::run(client, action, json).await,
         Commands::Layout { action } => layout::run(client, action, json).await,
-        Commands::Schema { .. } | Commands::Version | Commands::Mcp => {
+        Commands::Schema { .. } | Commands::Version | Commands::Mcp | Commands::State { .. } => {
             unreachable!("handled before dispatch")
         }
     }
