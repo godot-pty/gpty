@@ -2,6 +2,7 @@
 Name=gPTY
 GenericName=PTY multiplexer
 Comment=PTY multiplexer with a tiling grid GUI and a JSON-RPC/MCP API
+Icon=gpty
 Exec=gpty-gui
 Type=Application
 Categories=System;TerminalEmulator;

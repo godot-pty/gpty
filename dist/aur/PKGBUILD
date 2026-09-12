@@ -6,7 +6,7 @@
 # replace the tarball hash below (every release from v0.5.4 also publishes a
 # SHA256SUMS asset listing it).
 pkgname=gpty-bin
-pkgver=0.5.3
+pkgver=0.5.4
 pkgrel=1
 pkgdesc="PTY multiplexer with a tiling grid GUI and a JSON-RPC/MCP API"
 arch=('x86_64')
@@ -26,23 +26,39 @@ optdepends=('alsa-lib: ALSA audio backend'
 provides=('gpty')
 conflicts=('gpty' 'gpty-git')
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/gpty-v$pkgver-linux-x86_64.tar.gz"
-        "gpty.desktop")
-sha256sums=('cb52bd8092218a0698aa9ea6abba63d3201e8a77af9273ad194317cbd014d663'
-            'e7480fd8958fba832ec7a35f2102db12e07b17d03a9d5e9e97513f9c602b070d')
+        "gpty.desktop"
+        "gpty.png")
+sha256sums=('097af707578bceb575af1a81664f86a1e09555f07305b0100a8ddf15d0007f02'
+            'eb3649aab87b646308e74437fa3a1f100cd6d6bb4843d3289b3470cbf41cc85c'
+            '22ab26a44956148e618726bd17c3d87cf00f63c5e0a3934918866282d3195bd9')
 
 package() {
     # The Linux export is a bare executable plus its data pack and the
     # GDExtension library (godot/export_presets.cfg keeps
-    # binary_format/embed_pck=false), so all three must share one directory.
+    # binary_format/embed_pck=false), so all four must share one directory:
+    # the GUI is `gpty-gui` (the CLI owns the name `gpty`) and the pack is
+    # named after the executable that loads it.
     install -Dm755 "$srcdir/gpty-v$pkgver-linux-x86_64/gpty" "$pkgdir/usr/lib/gpty/gpty"
-    install -Dm644 "$srcdir/gpty-v$pkgver-linux-x86_64/gpty.pck" "$pkgdir/usr/lib/gpty/gpty.pck"
+    install -Dm755 "$srcdir/gpty-v$pkgver-linux-x86_64/gpty-gui" "$pkgdir/usr/lib/gpty/gpty-gui"
+    install -Dm644 "$srcdir/gpty-v$pkgver-linux-x86_64/gpty-gui.pck" "$pkgdir/usr/lib/gpty/gpty-gui.pck"
     install -Dm644 "$srcdir/gpty-v$pkgver-linux-x86_64/libgpty_gdext.linux.x86_64.so" \
         "$pkgdir/usr/lib/gpty/libgpty_gdext.linux.x86_64.so"
 
     # Godot resolves the pack and the GDExtension library against the real
-    # executable path (/proc/self/exe), so a symlink suffices on PATH.
+    # executable path (/proc/self/exe), so a symlink suffices on PATH — for
+    # both halves: the CLI the agent API is driven from, and the GUI.
     install -d "$pkgdir/usr/bin"
     ln -s /usr/lib/gpty/gpty "$pkgdir/usr/bin/gpty"
+    ln -s /usr/lib/gpty/gpty-gui "$pkgdir/usr/bin/gpty-gui"
 
     install -Dm644 "$srcdir/gpty.desktop" "$pkgdir/usr/share/applications/gpty.desktop"
+    install -Dm644 "$srcdir/gpty.png" "$pkgdir/usr/share/icons/hicolor/256x256/apps/gpty.png"
+
+    # GPLv3 §4/§6: the license and the section-7 exceptions travel with the
+    # binaries. Both sit in the release tarball; nothing is fetched from the
+    # source tree.
+    install -Dm644 "$srcdir/gpty-v$pkgver-linux-x86_64/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 "$srcdir/gpty-v$pkgver-linux-x86_64/LICENSE-EXCEPTIONS.md" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE-EXCEPTIONS.md"
 }
