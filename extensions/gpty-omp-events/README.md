@@ -32,14 +32,19 @@ with the four activation variables; setting only some of them does nothing.
 
 ## Platform support
 
-gpty injects `GPTY_EVENT_*` only when its OMP event listener is running.
-That listener is **Unix-only today** (`gpty-events.sock` beside
-`gpty.sock`). On **Windows**, gpty does not start the listener or inject
-these variables, so this extension stays dormant even if linked in OMP.
+gpty injects `GPTY_EVENT_*` only when its OMP event listener is running, and the
+listener runs on every platform: `gpty-events.sock` beside `gpty.sock` on
+Linux/macOS, `\\.\pipe\gpty-events` (derived from the control pipe) on Windows.
 
-The extension transport can speak to a Unix domain socket on Linux/macOS.
-Windows named-pipe support in the extension is irrelevant until gpty adds
-a matching event listener on that platform.
+The transport is one code path for both, because `net.connect(path)` opens a
+Unix domain socket for a socket path and a named pipe for a pipe path. The only
+platform branch is validation: on Windows the path must be a `\\.\pipe\` name
+(answered from the path alone — a pipe cannot be `stat`ed), while on Unix the
+socket must exist, be a socket, and be owned and mode-restricted by this user.
+
+`scripts/smoke_pane_api.py` runs the shipped extension inside a gpty pane and
+asserts the pane reports Tier 1 `working`, so this chain is observed live on
+both platforms (the `windows-smoke` CI job is the Windows leg).
 
 ## Forwarded data
 

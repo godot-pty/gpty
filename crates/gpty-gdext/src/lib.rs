@@ -168,7 +168,9 @@ impl GptyTerminal {
 
         let mut trusted_envs: Vec<(String, String)> = Vec::new();
 
-        // OMP event-channel vars — Unix-only; conditional on successful registration.
+        // OMP event-channel vars — injected on every platform, conditional on
+        // successful registration (the listener serves a Unix socket or a
+        // Windows named pipe from `default_event_socket_path()`).
         if let Some((session_id, capability)) = &event_registration {
             trusted_envs.push((
                 "GPTY_EVENT_SOCKET".to_string(),

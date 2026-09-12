@@ -354,6 +354,38 @@ def main() -> int:
         )
         smoke.require("SMOKE_NEWEST_C3D4" in scrollback, "pane-read must return the newest line")
 
+        # ── the shipped extension's transport ─────────────────────────
+        # Runs the extension's own code inside the pane, where the per-PTY
+        # GPTY_EVENT_* variables live, and asserts the pane reports Tier 1
+        # `working` — the whole chain in one observable: pane environment ->
+        # extension transport (socket or named pipe) -> capability check ->
+        # translation -> GDScript drain -> agent state.
+        smoke.enter("extension transport")
+        sender = ROOT / "extensions" / "gpty-omp-events" / "tools" / "send-event.mjs"
+        if shutil.which("node") is None:
+            print("  node not on PATH — skipping; the extension cannot run here", flush=True)
+        else:
+            smoke.cli("inject", pane_id, "--text", f'node "{sender.as_posix()}"', "--json")
+            state = {}
+            # Both fields: Tier 3 (output is flowing, the node process is
+            # printing) can also report `working`, and only Tier 1 proves the
+            # capability-authenticated channel carried the event.
+            for _ in range(20):
+                state = smoke.cli("pane-status", pane_id, "--json", check=False).get("result", {})
+                if state.get("agent_state") == "working" and state.get("agent_state_tier") == 1:
+                    break
+                time.sleep(0.5)
+            if state.get("agent_state") != "working":
+                smoke.fail(
+                    "the extension's event must reach the pane as Tier 1 working",
+                    {"status": state, "pane_tail": smoke.read_pane(pane_id, lines=20)[-600:]},
+                )
+            smoke.require(
+                state.get("agent_state_tier") == 1,
+                "the state must come from the capability-authenticated channel",
+                state,
+            )
+
         # ── broadcast to a tagged pane ────────────────────────────────
         smoke.enter("broadcast")
         broadcast = smoke.result(

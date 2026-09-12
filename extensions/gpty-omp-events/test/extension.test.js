@@ -290,3 +290,64 @@ test("validates Unix socket type, owner, and private mode", () => {
   );
   assert.equal(validateSocket("relative.sock", { ...base, fsModule: {} }), false);
 });
+
+test("accepts a Windows named-pipe path, from the path alone", () => {
+  const pipe = String.raw`\\.\pipe\gpty-events`;
+  // A pipe path must not be stat'ed: on Windows that call throws for a pipe,
+  // and the branch exists precisely to answer before touching the filesystem.
+  const explodingFs = {
+    statSync() {
+      throw new Error("a named pipe must not be stat'ed");
+    },
+  };
+  const win32 = { platform: "win32", fsModule: explodingFs };
+
+  assert.equal(validateSocket(pipe, win32), true);
+  // A path that is not a pipe is refused on Windows, whatever it is: the
+  // listener is the only thing reachable there.
+  assert.equal(validateSocket("C:\\gpty\\gpty-events.sock", win32), false);
+  assert.equal(validateSocket("/tmp/gpty-events.sock", win32), false);
+  assert.equal(validateSocket("gpty-events", win32), false);
+  // `\\.\pipe\` must be the prefix, not merely a substring.
+  assert.equal(validateSocket("x\\\\.\\pipe\\gpty-events", win32), false);
+  assert.equal(validateSocket("\\\\.\\pipe", win32), false);
+});
+
+test("hands the platform path to the transport unchanged", async () => {
+  const pipe = String.raw`\\.\pipe\gpty-events`;
+  const seen = [];
+  let sent = "";
+
+  class FakeSocket extends EventEmitter {
+    setTimeout() {}
+    end(data) {
+      sent = data;
+      queueMicrotask(() => this.emit("close"));
+    }
+    destroy() {}
+  }
+
+  // The Windows leg of the transport is `net.connect(path)` — Node opens a
+  // named pipe for a pipe path — so the one thing gpty must get right is
+  // passing that path through untouched.
+  const forwarder = createEventForwarder(
+    { socketPath: pipe, terminalSessionId: "terminal-1", capability: "cap" },
+    {
+      platform: "win32",
+      fsModule: { statSync: () => assert.fail("unreachable") },
+      netModule: {
+        createConnection(path) {
+          seen.push(path);
+          const socket = new FakeSocket();
+          queueMicrotask(() => socket.emit("connect"));
+          return socket;
+        },
+      },
+    },
+  );
+
+  await forwarder.enqueue({ name: "omp.agent.started" }, "omp-1");
+
+  assert.deepEqual(seen, [pipe]);
+  assert.equal(JSON.parse(sent).params.capability, "cap");
+});
