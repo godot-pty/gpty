@@ -167,6 +167,26 @@ if rustup target list --installed 2>/dev/null | grep -q "^${WIN_TARGET}$" \
 else
     warn "windows cross-check — needs: rustup target add ${WIN_TARGET}; clang-cl + llvm-lib; xwin splat into ~/.xwin (enforced by CI job rust-windows)"
 fi
+# ── Step 3.7: peer-credential cross-check (BSD) ────────────────────────
+# The peer-credential functions are selected by `cfg(target_os)`, so the arms
+# for a platform this machine does not build never compile here: a typo in the
+# BSD arm would only surface for someone building on FreeBSD. FreeBSD is the
+# one that can be checked this way — illumos and NetBSD fail earlier, in the
+# bundled-SQLite build script, so those two arms are probe-verified (see the
+# ROADMAP entry).
+header "BSD cross-check"
+BSD_TARGET="x86_64-unknown-freebsd"
+if rustup target list --installed 2>/dev/null | grep -q "^${BSD_TARGET}$"; then
+    if cargo check -p gpty-ipc --target "$BSD_TARGET" 2>&1; then
+        pass "BSD cross-check"
+    else
+        fail "BSD cross-check"
+        check_failed
+    fi
+else
+    warn "BSD cross-check — needs: rustup target add ${BSD_TARGET} (enforced by the rust-tests CI job)"
+fi
+
 # ── Step 3.6: uniform crate versions ───────────────────────────────────
 # Release convention: every workspace crate ships the same version
 # (release skill step 5). One stale manifest = forgotten bump.

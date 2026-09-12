@@ -175,6 +175,11 @@ impl IpcServer {
                     log::error!("IPC pipe connect error: {e}");
                     continue;
                 }
+                if !peer_uid_matches(&server) {
+                    log::warn!("IPC connection rejected: peer user mismatch");
+                    drop(server);
+                    continue;
+                }
                 let permit = match semaphore.clone().try_acquire_owned() {
                     Ok(p) => p,
                     Err(_) => {
@@ -261,7 +266,14 @@ fn peer_uid_matches(stream: &tokio::net::UnixStream) -> bool {
     }
 }
 
-#[cfg(target_os = "macos")]
+/// macOS and the BSDs answer the same question through `getpeereid`.
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "openbsd",
+))]
 fn peer_uid_matches(stream: &tokio::net::UnixStream) -> bool {
     use std::os::fd::AsRawFd;
     let mut uid: libc::uid_t = u32::MAX;
@@ -274,12 +286,179 @@ fn peer_uid_matches(stream: &tokio::net::UnixStream) -> bool {
     uid == unsafe { libc::geteuid() }
 }
 
+/// illumos and Solaris hand the credentials over as an allocated `ucred`.
+#[cfg(any(target_os = "solaris", target_os = "illumos"))]
+fn peer_uid_matches(stream: &tokio::net::UnixStream) -> bool {
+    use std::os::fd::AsRawFd;
+    let mut cred: *mut libc::ucred_t = std::ptr::null_mut();
+    // SAFETY: `cred` is a valid out-pointer; on success the kernel allocates a
+    // ucred that `ucred_free` releases.
+    let rc = unsafe { libc::getpeerucred(stream.as_raw_fd(), &mut cred) };
+    if rc != 0 || cred.is_null() {
+        log::warn!("IPC peer credential lookup failed (getpeerucred rc={rc})");
+        return false;
+    }
+    // SAFETY: non-null and owned by this call until it is freed below.
+    let uid = unsafe { libc::ucred_geteuid(cred) };
+    unsafe { libc::ucred_free(cred) };
+    uid == unsafe { libc::geteuid() }
+}
+
+/// Peer check for the named-pipe server: the client process is identified by
+/// the id the pipe reports, and its token's user SID is compared with ours.
+///
+/// Windows has no `SO_PEERCRED`, and a named pipe's default ACL (owner,
+/// SYSTEM, Administrators) is inherited rather than verified — so the check
+/// has to be made here. Fails closed on every error, like the Unix paths.
+#[cfg(windows)]
+fn peer_uid_matches(server: &tokio::net::windows::named_pipe::NamedPipeServer) -> bool {
+    use std::os::windows::io::AsRawHandle;
+    win_peer::client_is_current_user(server.as_raw_handle().cast())
+}
+
+/// Remaining Unix platforms have no peer-credential API wired up here.
+///
+/// Accurate, not lazy: the socket's own mode (0600) and the owning-user check
+/// on the path remain the gate, and SECURITY.md says so. Platforms that do
+/// have an API — Linux, Android, macOS, the BSDs, illumos — are all covered
+/// above.
 #[cfg(all(
     unix,
-    not(any(target_os = "linux", target_os = "android", target_os = "macos"))
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "solaris",
+        target_os = "illumos",
+    ))
 ))]
 fn peer_uid_matches(_stream: &tokio::net::UnixStream) -> bool {
     true
+}
+
+/// Raw Win32 calls behind [`peer_uid_matches`] on Windows.
+///
+/// Kept to `extern "system"` declarations rather than a `windows-sys`
+/// dependency, the same way `gpty-gdext` pins its own module: three functions
+/// from kernel32 and three from advapi32 do not justify a dependency tree the
+/// release builds would carry on every platform.
+#[cfg(windows)]
+mod win_peer {
+    use core::ffi::{c_int, c_void};
+
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const TOKEN_QUERY: u32 = 0x0008;
+    const TOKEN_USER_CLASS: u32 = 1;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetNamedPipeClientProcessId(pipe: *mut c_void, client_pid: *mut u32) -> c_int;
+        fn OpenProcess(desired_access: u32, inherit_handle: c_int, process_id: u32) -> *mut c_void;
+        fn GetCurrentProcess() -> *mut c_void;
+        fn CloseHandle(handle: *mut c_void) -> c_int;
+    }
+
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn OpenProcessToken(process: *mut c_void, access: u32, token: *mut *mut c_void) -> c_int;
+        fn GetTokenInformation(
+            token: *mut c_void,
+            class: u32,
+            info: *mut c_void,
+            info_len: u32,
+            returned_len: *mut u32,
+        ) -> c_int;
+        fn EqualSid(a: *mut c_void, b: *mut c_void) -> c_int;
+    }
+
+    /// The user SID of `process`, returned with the buffer that holds it.
+    ///
+    /// `TOKEN_USER` is a `SID_AND_ATTRIBUTES`, so the SID pointer is the first
+    /// machine word of the returned buffer — the buffer must outlive the
+    /// pointer, which is why both are handed back together.
+    fn user_sid(process: *mut c_void) -> Option<(Vec<u8>, *mut c_void)> {
+        let mut token: *mut c_void = core::ptr::null_mut();
+        // SAFETY: `process` is a handle the caller obtained and has not closed;
+        // `token` is an out-pointer this function owns.
+        if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
+            return None;
+        }
+
+        // First call sizes the buffer, the second fills it. A zero-sized answer
+        // means the query itself failed, not that a zero-length token is valid.
+        let mut needed: u32 = 0;
+        unsafe {
+            GetTokenInformation(
+                token,
+                TOKEN_USER_CLASS,
+                core::ptr::null_mut(),
+                0,
+                &mut needed,
+            )
+        };
+        if needed == 0 {
+            unsafe { CloseHandle(token) };
+            return None;
+        }
+
+        let mut buffer = vec![0u8; needed as usize];
+        let ok = unsafe {
+            GetTokenInformation(
+                token,
+                TOKEN_USER_CLASS,
+                buffer.as_mut_ptr().cast(),
+                needed,
+                &mut needed,
+            )
+        };
+        unsafe { CloseHandle(token) };
+        if ok == 0 {
+            return None;
+        }
+
+        // SAFETY: the query filled `buffer` with a TOKEN_USER whose first field
+        // is the SID pointer.
+        let sid = unsafe { *(buffer.as_ptr() as *const *mut c_void) };
+        if sid.is_null() {
+            return None;
+        }
+        Some((buffer, sid))
+    }
+
+    /// True when the client on `pipe` runs under the same user as this process.
+    pub(super) fn client_is_current_user(pipe: *mut c_void) -> bool {
+        let mut pid: u32 = 0;
+        // SAFETY: `pipe` is a connected server-side pipe handle.
+        if unsafe { GetNamedPipeClientProcessId(pipe, &mut pid) } == 0 || pid == 0 {
+            log::warn!("IPC peer lookup failed: the pipe did not report its client");
+            return false;
+        }
+
+        // SAFETY: a plain process-id lookup; the handle is closed below.
+        let client = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if client.is_null() {
+            log::warn!("IPC peer lookup failed: cannot open client process {pid}");
+            return false;
+        }
+
+        // SAFETY: GetCurrentProcess returns a pseudo-handle that must not be
+        // closed, and `client` is a real handle that must be.
+        let ours = user_sid(unsafe { GetCurrentProcess() });
+        let theirs = user_sid(client);
+        unsafe { CloseHandle(client) };
+
+        let (Some((_ours_buffer, ours_sid)), Some((_theirs_buffer, theirs_sid))) = (ours, theirs)
+        else {
+            log::warn!("IPC peer lookup failed: no user token for client {pid}");
+            return false;
+        };
+        // SAFETY: both SIDs point into buffers that are still alive here.
+        unsafe { EqualSid(ours_sid, theirs_sid) != 0 }
+    }
 }
 
 /// Byte-wise equality that does not short-circuit on the first mismatch.
@@ -423,6 +602,22 @@ mod tests {
     mod unix {
         use super::*;
         use crate::protocol::{Request, Response};
+
+        /// The credential path itself, not just its effect on the accept loop:
+        /// both ends of a socket pair belong to this process, so the check must
+        /// answer "same user". (The rejection case needs a second UID and is
+        /// covered by the platform check's fail-closed error paths.)
+        #[tokio::test]
+        async fn peer_credentials_of_this_process_match() {
+            let (server_end, client_end) = tokio::net::UnixStream::pair().expect("socket pair");
+            assert!(
+                peer_uid_matches(&server_end),
+                "a peer in this very process must be accepted"
+            );
+            // The identity comes from the kernel, so it does not matter which
+            // end of the pair the server holds.
+            assert!(peer_uid_matches(&client_end));
+        }
 
         async fn send_request(socket_path: &str, req: &Request) -> io::Result<Response> {
             use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

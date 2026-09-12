@@ -58,6 +58,15 @@ jobs:
       - name: Run Rust tests (parallel)
         run: cargo test --workspace
 
+      # The peer-credential code is `cfg(target_os)`-selected, so the BSD arm is
+      # dead code on this runner: this is the only place it gets compiled.
+      # illumos and NetBSD cannot be checked the same way (their bundled SQLite
+      # does not build there); those two arms are probe-verified in the ROADMAP.
+      - name: Cross-check the BSD peer-credential arm
+        run: |
+          rustup target add x86_64-unknown-freebsd
+          cargo check -p gpty-ipc --target x86_64-unknown-freebsd
+
   # ── OMP extension tests (Node, no omp install) ────────────────────────
   omp-events-tests:
     runs-on: ubuntu-latest

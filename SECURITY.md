@@ -142,14 +142,18 @@ These are load-bearing guards. Reports that require removing one of them should 
 
 Each is either accepted for the current scope or tracked as a roadmap item.
 
-- **Windows peer verification.** The control socket rejects remote clients and lives in the user's
-  named-pipe namespace, but Windows pipes have no peer-UID check to fail closed on; on Windows the
-  same-UID trust model is the whole gate. Windows environment keys are case-insensitive (and the PTY
-  layer normalises them), so the `GPTY_*` credential and marker namespace is not case-sensitive
-  there. Windows runtime behaviour is compile-checked, not yet exercised in CI.
-- **Other Unix platforms.** `peer_uid_matches` fails *open* on Unix systems that are neither Linux,
-  Android, nor macOS (no portable peer-credential API is wired up), leaving file permissions as the
-  gate.
+- **Peer verification by platform.** The control socket checks that the connecting process runs as
+  the same user, and fails closed on a lookup error, on Linux and Android (`SO_PEERCRED`), macOS and
+  the BSDs (`getpeereid`), illumos and Solaris (`getpeerucred`), and Windows (the client process id
+  the pipe reports, then its token's user SID compared with gPTY's own). Windows named pipes also
+  reject remote clients and carry a default ACL for the creating user, SYSTEM and Administrators,
+  but that ACL is inherited rather than verified — the explicit check is what makes it a gate.
+  Remaining Unix targets (AIX, Haiku, QNX) have no peer-credential API wired up and still fail
+  *open*, so file permissions are the only gate there. Windows environment keys are
+  case-insensitive (and the PTY layer normalises them), so the `GPTY_*` credential and marker
+  namespace is not case-sensitive there. On Windows the check is compile-verified locally and
+  exercised by the `windows-smoke` CI job (a same-user client must be accepted); the rejection case
+  needs a second user account and is not covered.
 - **Shared-`/tmp` fallback.** When `$XDG_RUNTIME_DIR` and `/run/user/<uid>` are unavailable, the
   control socket falls back to a predictable path in a world-writable directory. Socket ownership
   and mode are validated before use, but another user can pre-create the path and deny service (not
