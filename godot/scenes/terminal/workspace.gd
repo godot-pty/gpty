@@ -11,6 +11,7 @@ var _sidebar_bg: ColorRect
 var _palette: Control
 var _grid: Control
 var _settings_panel: SettingsPanel
+var _concept_graph: Control = null
 var _tm: TerminalManager = TerminalManager.new()
 var _status_bar: StatusBar
 var _titlebar: Control = null
@@ -1239,6 +1240,7 @@ func _toggle_settings():
 		_settings_panel.z_index = 100
 		add_child(_settings_panel)
 		_settings_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_settings_panel.request_graph_editor.connect(_open_concept_graph)
 	if not _settings_panel.visible:
 		# Opening global settings closes the pane settings overlay so the
 		# two overlays never stack.
@@ -1249,6 +1251,22 @@ func _toggle_settings():
 		# stay topmost even when workspaces were added after first open.
 		move_child(_settings_panel, -1)
 	_settings_panel.visible = not _settings_panel.visible
+
+## Open the visual concept editor over the settings panel it was launched
+## from. Created lazily; `open()` reloads the canvas, so an edit made in the
+## manual dialog shows up when the editor is next opened.
+func _open_concept_graph():
+	if _concept_graph == null:
+		_concept_graph = ConceptGraphEditor.new()
+		_concept_graph.name = "ConceptGraphEditor"
+		_concept_graph.visible = false
+		_concept_graph.z_index = 100
+		add_child(_concept_graph)
+		_concept_graph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Input picking uses reverse tree order (z_index is rendering-only); stay
+	# topmost over workspaces added after the first open.
+	move_child(_concept_graph, -1)
+	_concept_graph.open()
 
 func _build_sidebar():
 	_sidebar_bg = ColorRect.new()

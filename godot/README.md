@@ -50,6 +50,8 @@ godot/
         ├── ui/                  # UI components
         │   ├── sidebar.gd       # Vertical stack: window mode, workspaces, panes, profiles
         │   ├── settings_panel.gd
+        │   ├── concept_graph_editor.gd # Visual rule editor overlay (GraphEdit)
+        │   ├── concept_graph_model.gd  # Pure canvas/build/validate/compile logic
         │   ├── toast_overlay.gd
         │   ├── window_chrome.gd # Titlebar + window-mode/fullscreen handling
         │   ├── markdown_view.gd # Safe shared Markdown renderer

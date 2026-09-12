@@ -1,6 +1,9 @@
 extends Control
 class_name SettingsPanel
 
+## Asks the workspace to open the visual concept editor over this panel.
+signal request_graph_editor
+
 var _debounce_timer: Timer = null
 var _workspace: Control
 var _menu_width: float = 540.0  # settings panel width — dialogs size relative to it
@@ -614,6 +617,17 @@ func _add_about_section(v: VBoxContainer):
 func _add_concept_section(v: VBoxContainer):
 	_concept_terminal = _workspace.get_terminal_for_ffi()
 
+	# The visual editor is the primary authoring surface; this list stays the
+	# quick index (toggle / delete / manual edit). Re-read on every save so a
+	# graph edit is reflected without reopening the panel.
+	ConceptManager.concepts_changed.connect(_refresh_concept_list)
+
+	var graph_btn = Button.new()
+	graph_btn.text = "Open Visual Editor"
+	graph_btn.tooltip_text = "Build rules as a node graph (trigger → conditions → action)"
+	graph_btn.pressed.connect(func(): request_graph_editor.emit())
+	v.add_child(graph_btn)
+
 	var add_btn = Button.new()
 	add_btn.text = "Add Concept"
 	# No terminal → no FFI vehicle for concepts; adding would silently
@@ -687,6 +701,11 @@ func _show_concept_dialog(idx: int):
 	timeout_spin.step = 50; timeout_spin.value = 300
 	var stop_on_input_cb = CheckButton.new(); stop_on_input_cb.text = "Stop on input"
 	stop_on_input_cb.button_pressed = true
+	# Conditions are extra regexes ANDed with the trigger on the same line.
+	# Both modes show the field: a notify-only concept can be narrowed too.
+	var conditions_te = TextEdit.new()
+	conditions_te.custom_minimum_size = Vector2(0, 60)
+	conditions_te.placeholder_text = "one regex per line"
 
 	# Notify-only concepts have no receiver, so the target and the capture stop
 	# conditions are meaningless for them — hide rather than collect.
@@ -712,8 +731,16 @@ func _show_concept_dialog(idx: int):
 			mode_opt.selected = 1 if c.get("capture_mode", "until_stop") == "single_line" else 0
 			timeout_spin.value = c.get("stop_timeout_ms", 300)
 			stop_on_input_cb.button_pressed = c.get("stop_on_input", true)
+			var conds = c.get("conditions", [])
+			if conds is Array:
+				var lines := PackedStringArray()
+				for cond in conds:
+					if cond is String:
+						lines.append(cond)
+				conditions_te.text = "\n".join(lines)
 	v.add_child(_lbl("Name:")); v.add_child(name_le)
 	v.add_child(_lbl("Regex:")); v.add_child(regex_le)
+	v.add_child(_lbl("Conditions (one regex per line, all must match):")); v.add_child(conditions_te)
 	v.add_child(_lbl("Mode:")); v.add_child(mode_opt)
 	v.add_child(target_row); v.add_child(target_le)
 	v.add_child(enabled_cb)
@@ -723,7 +750,8 @@ func _show_concept_dialog(idx: int):
 	dlg.confirmed.connect(func():
 		_save_concept(idx, name_le.text, regex_le.text, target_le.text,
 			enabled_cb.button_pressed, "single_line" if mode_opt.selected == 1 else "until_stop",
-			int(timeout_spin.value), stop_on_input_cb.button_pressed)
+			int(timeout_spin.value), stop_on_input_cb.button_pressed,
+			conditions_te.text.split("\n"))
 		dlg.queue_free()
 	)
 	add_child(dlg)
@@ -733,15 +761,31 @@ func _show_concept_dialog(idx: int):
 ## command, so no command field is collected.
 func _save_concept(idx: int, p_name: String, regex_pat: String, target: String,
 	p_enabled: bool = true, p_capture_mode: String = "until_stop",
-	stop_ms: int = 300, stop_input: bool = true):
+	stop_ms: int = 300, stop_input: bool = true, conditions: Array = []):
 	if p_name.strip_edges() == "":
 		return
+	var condition_lines: Array = []
+	for raw_line in conditions:
+		if not (raw_line is String):
+			continue
+		var line: String = raw_line
+		line = line.strip_edges()
+		if line == "":
+			continue
+		if condition_lines.size() >= ConceptManager.MAX_CONDITIONS:
+			ToastManager.warn("Only the first %d conditions per concept are kept" % ConceptManager.MAX_CONDITIONS)
+			break
+		condition_lines.append(line)
 	var entry: Dictionary = {
 		"name": p_name.strip_edges(),
 		"trigger": regex_pat,
 		"enabled": p_enabled,
 		"capture_mode": p_capture_mode,
 		"actions": [{"target": target.strip_edges()}],
+		# Always written, even when empty: the merge overlays user keys onto
+		# the shipped defaults, so omitting the key would let a default
+		# concept's conditions come back the moment the user cleared them.
+		"conditions": condition_lines,
 	}
 	if p_capture_mode == "until_stop":
 		entry["stop_timeout_ms"] = stop_ms

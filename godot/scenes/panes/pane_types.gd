@@ -4,11 +4,22 @@ class_name PaneTypes
 
 static var ALL: Dictionary = {
 	"terminal":    {"name": "Terminal",    "icon": ">_", "shortcut": "Ctrl+Shift+N", "label_prefix": "T"},
-	"code_viewer": {"name": "Code Viewer", "icon": "{}", "shortcut": "Ctrl+Shift+D", "label_prefix": "C"},
+	"code_viewer": {"name": "Code Viewer", "icon": "{}", "shortcut": "Ctrl+Shift+D", "label_prefix": "C", "receives_content": true},
 	"file_tree":   {"name": "File Tree",   "icon": "/>", "shortcut": "Ctrl+Shift+T", "label_prefix": "F"},
-	"inspector":   {"name": "Inspector",   "icon": "@",  "shortcut": "Ctrl+Shift+O", "label_prefix": "I"},
+	"inspector":   {"name": "Inspector",   "icon": "@",  "shortcut": "Ctrl+Shift+O", "label_prefix": "I", "receives_content": true},
 	"reasoning":   {"name": "Reasoning",   "icon": "?",  "shortcut": "", "label_prefix": "R"},
 }
+
+## Pane types whose body accepts a routed concept capture
+## (`can_receive_content`). Single source of truth for the concept graph's
+## action target picker — adding a receiver pane means flipping this flag
+## beside the implementation, not editing a second list.
+static func content_receivers() -> Array[String]:
+	var out: Array[String] = []
+	for key in ALL:
+		if ALL[key].get("receives_content", false) == true:
+			out.append(key)
+	return out
 
 ## Clamp a layout value to [lo, hi]. Non-numeric values yield `lo`.
 static func clamp_grid_int(v, lo: int, hi: int) -> int:

@@ -3,6 +3,23 @@ extends BasePersistenceManager
 const CONCEPTS_FILE = "user://concepts.json"
 const DEFAULTS_FILE = "res://concepts.default.json"
 
+# Extra regex predicates a concept may carry, ANDed with its trigger on the
+# same line. The engine enforces the same cap; the editor caps here so the
+# lines it shows are the lines that actually run.
+const MAX_CONDITIONS := 8
+
+# Layout block written by the visual concept editor. It holds only positions
+# and unfinished drafts: the concepts array stays the single content store, so
+# nothing in the graph can drift from what the engine runs.
+const GRAPH_VERSION := 1
+const MAX_GRAPH_POSITIONS := 512
+const MAX_GRAPH_COORD := 100000.0
+const MAX_DRAFT_CHAINS := 32
+const MAX_DRAFT_NODES := 256
+const MAX_GRAPH_STRING := 1024
+const MAX_GRAPH_ID := 96
+const DRAFT_KINDS := ["trigger", "condition", "action"]
+
 signal concepts_changed
 
 func _on_init():
@@ -135,6 +152,36 @@ func toggle_concept(name: String) -> bool:
 
 
 func save_concepts(concepts: Array):
+	# Delegates so a manual edit rewrites the concepts array without dropping
+	# the editor's layout: saving is a read-modify-write of the same file.
+	save_state(concepts, get_graph_state())
+
+## Replace the concept set and the editor's graph block in one write. Both
+## halves are sanitized here, so an edit dialog and the visual editor can
+## never disagree about what the file holds.
+func save_state(concepts: Array, graph: Dictionary):
+	var sanitized := _sanitize_concepts(concepts)
+	var clean_graph := _sanitize_graph(graph)
+	var d := {"concepts": sanitized}
+	# A graph block with no positions and no drafts carries nothing. Omitting
+	# it keeps concepts.json clean for the users who never open the editor and
+	# never hand-edited a key that only the editor writes.
+	var positions: Dictionary = clean_graph["positions"]
+	var drafts: Array = clean_graph["drafts"]
+	if not positions.is_empty() or not drafts.is_empty():
+		d["graph"] = clean_graph
+	_write_file(CONCEPTS_FILE, d)
+	concepts_changed.emit()
+	call_deferred("_push_to_rust")
+
+## The editor's layout block as stored on disk. Always well-formed: a missing,
+## malformed or hand-edited block reads back as version 1 with no content.
+func get_graph_state() -> Dictionary:
+	return _sanitize_graph(_read_file(CONCEPTS_FILE).get("graph", {}))
+
+## Deep-copy the entries that survive, dropping legacy command templates and
+## writing back disabled legacy routing targets.
+func _sanitize_concepts(concepts: Array) -> Array:
 	var sanitized: Array = []
 	for entry in concepts:
 		if entry is Dictionary:
@@ -142,10 +189,161 @@ func save_concepts(concepts: Array):
 			_strip_legacy_commands(copy)
 			_migrate_actions_target(copy)
 			sanitized.append(copy)
-	var d = {"concepts": sanitized}
-	_write_file(CONCEPTS_FILE, d)
-	concepts_changed.emit()
-	call_deferred("_push_to_rust")
+	return sanitized
+
+## The graph block is untrusted file input: nothing read from it is trusted to
+## have the right shape, and nothing written to it comes from anywhere else.
+func _sanitize_graph(raw) -> Dictionary:
+	var out := {"version": GRAPH_VERSION, "positions": {}, "drafts": []}
+	if not (raw is Dictionary):
+		return out
+	# `version` is ours to write: a file claiming another version is ignored
+	# rather than honoured, so an old file cannot change how we parse it.
+	out["positions"] = _sanitize_positions(raw.get("positions", {}))
+	out["drafts"] = _sanitize_drafts(raw.get("drafts", []))
+	return out
+
+func _sanitize_positions(raw) -> Dictionary:
+	var out := {}
+	if not (raw is Dictionary):
+		return out
+	for key in raw.keys():
+		if out.size() >= MAX_GRAPH_POSITIONS:
+			break
+		if not (key is String):
+			continue
+		var node_id: String = key
+		if node_id == "" or node_id.length() > MAX_GRAPH_ID:
+			continue
+		var v = raw[key]
+		if not (v is Array) or v.size() != 2:
+			continue
+		var x := _sanitize_coord(v[0])
+		var y := _sanitize_coord(v[1])
+		if is_nan(x) or is_nan(y):
+			continue
+		var pos: Array = [x, y]
+		out[node_id] = pos
+	return out
+
+## A coordinate is a finite number inside the sane pan range. Booleans are
+## rejected even though GDScript counts them as numbers: `true` from a
+## hand-edited file must not become 1.0.
+func _sanitize_coord(v) -> float:
+	if v is bool:
+		return NAN
+	if not (v is int or v is float):
+		return NAN
+	var f := float(v)
+	if not is_finite(f) or absf(f) > MAX_GRAPH_COORD:
+		return NAN
+	return f
+
+func _sanitize_drafts(raw) -> Array:
+	var out: Array = []
+	if not (raw is Array):
+		return out
+	var total_nodes := 0
+	for entry in raw:
+		if out.size() >= MAX_DRAFT_CHAINS or total_nodes >= MAX_DRAFT_NODES:
+			break
+		if not (entry is Dictionary):
+			continue
+		var nodes: Array = []
+		var raw_nodes = entry.get("nodes", [])
+		if raw_nodes is Array:
+			for n in raw_nodes:
+				if total_nodes >= MAX_DRAFT_NODES:
+					break
+				var node := _sanitize_draft_node(n)
+				if node.is_empty():
+					continue
+				nodes.append(node)
+				total_nodes += 1
+		var edges := _sanitize_draft_edges(entry.get("edges", []))
+		# A chain with no nodes and no edges carries nothing; keeping it would
+		# let an empty dictionary in a hand-edited file survive as a draft.
+		if nodes.is_empty() and edges.is_empty():
+			continue
+		out.append({"nodes": nodes, "edges": edges})
+	return out
+
+func _sanitize_draft_node(raw) -> Dictionary:
+	if not (raw is Dictionary):
+		return {}
+	var raw_id = raw.get("id", "")
+	if not (raw_id is String):
+		return {}
+	var id: String = raw_id
+	# An edge can only name a node by id, so a nameless node is unusable.
+	if id == "" or id.length() > MAX_GRAPH_ID:
+		return {}
+	var raw_kind = raw.get("kind", "")
+	if not (raw_kind is String) or not (raw_kind in DRAFT_KINDS):
+		return {}
+	var kind: String = raw_kind
+	return {"id": id, "kind": kind, "params": _sanitize_draft_params(kind, raw.get("params", {}))}
+
+func _sanitize_draft_edges(raw) -> Array:
+	var out: Array = []
+	if not (raw is Array):
+		return out
+	for edge in raw:
+		if not (edge is Array) or edge.size() != 2:
+			continue
+		var from = edge[0]
+		var to = edge[1]
+		if not (from is String) or not (to is String):
+			continue
+		var a: String = from
+		var b: String = to
+		if a == "" or b == "" or a.length() > MAX_GRAPH_ID or b.length() > MAX_GRAPH_ID:
+			continue
+		out.append([a, b])
+	return out
+
+## Draft nodes carry the same closed key set as the concepts they compile
+## into — per kind, with the same types and caps the engine applies. Unknown
+## keys are never copied: a draft node is unfinished work, not a place to
+## smuggle a field into the compiled concept.
+func _sanitize_draft_params(kind: String, params) -> Dictionary:
+	var out := {}
+	if not (params is Dictionary):
+		return out
+	match kind:
+		"trigger":
+			_copy_graph_string(params, out, "name", 256)
+			_copy_graph_string(params, out, "trigger", MAX_GRAPH_STRING)
+			_copy_graph_bool(params, out, "enabled")
+		"condition":
+			_copy_graph_string(params, out, "pattern", MAX_GRAPH_STRING)
+		"action":
+			_copy_action_mode(params, out)
+			_copy_graph_string(params, out, "target", 64)
+			_copy_graph_int(params, out, "stop_timeout_ms", 1, 600000)
+			_copy_graph_bool(params, out, "stop_on_input")
+	return out
+
+func _copy_graph_string(src: Dictionary, dst: Dictionary, key: String, max_len: int) -> void:
+	var v = src.get(key)
+	if v is String and (v as String).length() <= max_len:
+		dst[key] = v
+
+func _copy_graph_bool(src: Dictionary, dst: Dictionary, key: String) -> void:
+	var v = src.get(key)
+	if v is bool:
+		dst[key] = v
+
+func _copy_graph_int(src: Dictionary, dst: Dictionary, key: String, lo: int, hi: int) -> void:
+	var v = src.get(key)
+	if v is bool or not (v is int):
+		return
+	dst[key] = clampi(v, lo, hi)
+
+func _copy_action_mode(src: Dictionary, dst: Dictionary) -> void:
+	var v = src.get("mode")
+	if v is String and (v == "until_stop" or v == "single_line"):
+		dst["mode"] = v
 
 ## Concepts never carry a command. A `cmd` key can only come from the release
 ## where a concept action could inject one into a PTY, so it is dropped
