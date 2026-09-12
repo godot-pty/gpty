@@ -8,7 +8,7 @@
 pkgname=gpty-bin
 pkgver=0.5.3
 pkgrel=1
-pkgdesc="Multi-PTY terminal emulator with a tiling grid GUI"
+pkgdesc="PTY Multiplexer"
 arch=('x86_64')
 url="https://github.com/godot-pty/gpty"
 license=('GPL-3.0-or-later')

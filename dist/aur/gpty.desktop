@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=gpty
-Comment=Multi-PTY terminal emulator with tiling grid
+Comment=PTY Multiplexer
 Exec=gpty
 Type=Application
 Categories=System;TerminalEmulator;
