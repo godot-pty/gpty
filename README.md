@@ -41,9 +41,9 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 
 | Platform | Package |
 |---|---|
-| Linux | `gpty-v0.5.3-linux-x86_64.tar.gz` - extract; `./gpty-gui.sh` starts the GUI, `./gpty` is the CLI |
-| macOS | `gpty-v0.5.3-macos.zip` - unzip, right-click the `.app` → Open; `gpty` beside it is the CLI |
-| Windows | `gpty-v0.5.3-windows-x86_64.zip` - unzip; `gpty-gui.exe` starts the GUI, `gpty.exe` is the CLI |
+| Linux | `gpty-v0.5.4-linux-x86_64.tar.gz` - extract; `./gpty-gui.sh` starts the GUI, `./gpty` is the CLI |
+| macOS | `gpty-v0.5.4-macos.zip` - unzip, right-click the `.app` → Open; `gpty` beside it is the CLI |
+| Windows | `gpty-v0.5.4-windows-x86_64.zip` - unzip; `gpty-gui.exe` starts the GUI, `gpty.exe` is the CLI |
 
 Each release publishes a `SHA256SUMS` listing every asset. Check the file you downloaded before running it:
 
