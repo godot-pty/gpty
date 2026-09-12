@@ -154,10 +154,13 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   namespace is not case-sensitive there. On Windows the check is compile-verified locally and
   exercised by the `windows-smoke` CI job (a same-user client must be accepted); the rejection case
   needs a second user account and is not covered.
-- **Shared-`/tmp` fallback.** When `$XDG_RUNTIME_DIR` and `/run/user/<uid>` are unavailable, the
-  control socket falls back to a predictable path in a world-writable directory. Socket ownership
-  and mode are validated before use, but another user can pre-create the path and deny service (not
-  read or spoof traffic).
+- **Shared-`/tmp` fallback.** The control socket's directory is chosen in order: `$XDG_RUNTIME_DIR`,
+  `/run/user/<uid>` (Linux) or `$TMPDIR` (macOS), then a private state directory of your own
+  (`$XDG_STATE_HOME/gpty` or `$HOME/.local/state/gpty`, created 0700), and only then
+  `/tmp/gpty-<uid>.sock`. That last path is predictable in a world-writable directory: socket
+  ownership and mode are validated before use, so nobody can read or spoof traffic, but another user
+  can pre-create the path and deny service. It is reached only when no private directory exists or
+  can be created.
 - **A pane inherits your environment.** The PTY layer snapshots the GUI process's environment and
   strips only the `GPTY_*` keys, so everything else reaches every pane: `SSH_AUTH_SOCK`, cloud
   credential pointers, proxy variables, `DISPLAY`. Launch gPTY from a shell that holds credentials

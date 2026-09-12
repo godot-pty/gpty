@@ -70,10 +70,14 @@ fn is_secure_runtime_dir(path: &str, uid: u32) -> bool {
 /// Respects the `GPTY_SOCKET` environment variable if set (explicit
 /// override; bypasses directory validation).
 ///
-/// Resolution order (Linux): `$XDG_RUNTIME_DIR/gpty.sock` when the directory
-/// is user-owned and has no group/other access, then `/run/user/<uid>/gpty.sock`,
-/// then `/tmp/gpty-<uid>.sock` as a last resort. macOS: `$TMPDIR/gpty.sock`
-/// when secure, else `/tmp/gpty-<uid>.sock`. Windows: `\\.\pipe\gpty`.
+/// Resolution order: a per-user *runtime* directory first — `$XDG_RUNTIME_DIR`
+/// then `/run/user/<uid>` on Linux, `$TMPDIR` on macOS — each accepted only when
+/// it is user-owned and inaccessible to group/other. Then a private state
+/// directory of our own ([`private_state_dir`]). Only then the session temp
+/// directory: `/tmp/gpty-<uid>.sock` is predictable in a world-writable place,
+/// so another user can hold the path and deny the control surface (owner and
+/// mode are validated, so it is denial of service and not a spoof). Windows:
+/// `\\.\pipe\gpty`, whose namespace the creating user's ACL covers.
 pub fn default_socket_path() -> String {
     if let Ok(val) = std::env::var("GPTY_SOCKET")
         && !val.is_empty()
@@ -102,9 +106,7 @@ pub fn default_socket_path() -> String {
         if is_secure_runtime_dir(&run_user, uid) {
             return format!("{run_user}/gpty.sock");
         }
-        // Last resort: uid-suffixed path in /tmp. The server chmods the socket
-        // to 0600 and enforces a peer-UID check, so this stays private.
-        format!("/tmp/gpty-{uid}.sock")
+        fallback_socket_path(uid)
     }
 
     #[cfg(target_os = "macos")]
@@ -114,7 +116,7 @@ pub fn default_socket_path() -> String {
         if is_secure_runtime_dir(&tmp, uid) {
             return format!("{tmp}/gpty.sock");
         }
-        format!("/tmp/gpty-{uid}.sock")
+        fallback_socket_path(uid)
     }
 
     #[cfg(windows)]
@@ -122,9 +124,84 @@ pub fn default_socket_path() -> String {
         r"\\.\pipe\gpty".into()
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    // Other Unix platforms: no runtime directory convention is wired up, so a
+    // private state directory is the first stop and the shared temp the last.
+    #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+    {
+        fallback_socket_path(unsafe { libc::geteuid() })
+    }
+
+    // Targets with neither a Unix socket nor a named pipe (wasm and friends):
+    // a path is still the honest answer, even though nothing can bind it.
+    #[cfg(not(any(unix, windows)))]
     {
         "/tmp/gpty.sock".into()
+    }
+}
+
+/// A private state directory this user owns, for the fallback socket.
+///
+/// `$XDG_STATE_HOME/gpty` when set to an absolute path, else
+/// `$HOME/.local/state/gpty`. The directory is created when missing, tightened
+/// to 0700 when it exists but is lax (only if it is *ours* — another user's
+/// directory is not ours to chmod), and validated with the same rule as a
+/// runtime directory before it is used. `None` when neither variable names a
+/// usable absolute path, which leaves the shared temp path as the documented
+/// last resort.
+///
+/// This exists because the shared-`/tmp` fallback is squattable: a predictable
+/// path in a world-writable directory lets another user hold the control
+/// socket's name and deny service. Removing that needs a directory nobody else
+/// can write to, not a less guessable filename — the client has to derive the
+/// same path, so it cannot be random.
+#[cfg(unix)]
+fn private_state_dir(uid: u32) -> Option<std::path::PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::fs::PermissionsExt;
+
+    let candidates = [
+        std::env::var("XDG_STATE_HOME")
+            .ok()
+            .filter(|value| value.starts_with('/'))
+            .map(|value| std::path::PathBuf::from(value).join("gpty")),
+        std::env::var("HOME")
+            .ok()
+            .filter(|value| value.starts_with('/'))
+            .map(|value| std::path::PathBuf::from(value).join(".local/state/gpty")),
+    ];
+
+    for dir in candidates.into_iter().flatten() {
+        if !dir.exists() && std::fs::create_dir_all(&dir).is_err() {
+            continue;
+        }
+        let Ok(meta) = std::fs::metadata(&dir) else {
+            continue;
+        };
+        // Tighten only what is ours; a directory we do not own is skipped and
+        // the next candidate (or the shared temp path) is used instead.
+        if meta.uid() == uid && meta.mode() & 0o077 != 0 {
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
+        if is_secure_runtime_dir(&dir.to_string_lossy(), uid) {
+            return Some(dir);
+        }
+    }
+    None
+}
+
+/// The socket path used when no per-user runtime directory is available.
+///
+/// A private state directory when one can be had ([`private_state_dir`]),
+/// otherwise the uid-suffixed path in the session temp directory. That last
+/// resort is squattable — predictable in a world-writable place — so anything
+/// above it is tried first; the socket itself is still validated (owner, mode)
+/// before either side uses it, which makes squatting a denial of service rather
+/// than a way in.
+#[cfg(unix)]
+fn fallback_socket_path(uid: u32) -> String {
+    match private_state_dir(uid) {
+        Some(dir) => format!("{}/gpty.sock", dir.display()),
+        None => format!("/tmp/gpty-{uid}.sock"),
     }
 }
 
@@ -298,6 +375,50 @@ mod tests {
         assert_ne!(path, "");
     }
 
+    /// The same guard for a test that needs several variables at once.
+    ///
+    /// [`ENV_LOCK`] is a plain `Mutex`: taking two [`EnvVar`]s in one test
+    /// deadlocks on the second (it did — the whole `xdg` module hung for
+    /// minutes), so the variables a single resolution reads are set together.
+    struct EnvVars {
+        previous: Vec<(&'static str, Option<std::ffi::OsString>)>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl EnvVars {
+        /// Set or clear each variable under one guard; `None` clears a key.
+        fn apply(changes: &[(&'static str, Option<&str>)]) -> Self {
+            let lock = EnvVar::lock();
+            let mut previous = Vec::with_capacity(changes.len());
+            for (key, value) in changes {
+                previous.push((*key, std::env::var_os(key)));
+                // SAFETY: the guard makes this the only test touching these
+                // variables, and it restores them on drop.
+                unsafe {
+                    match value {
+                        Some(value) => std::env::set_var(key, value),
+                        None => std::env::remove_var(key),
+                    }
+                }
+            }
+            Self {
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvVars {
+        fn drop(&mut self) {
+            for (key, previous) in self.previous.drain(..) {
+                match previous {
+                    Some(previous) => unsafe { std::env::set_var(key, previous) },
+                    None => unsafe { std::env::remove_var(key) },
+                }
+            }
+        }
+    }
+
     #[cfg(unix)]
     mod socket_validation {
         use super::*;
@@ -411,11 +532,103 @@ mod tests {
 
         #[test]
         fn unset_xdg_runtime_dir_still_names_the_socket() {
-            let _env = EnvVar::clear("XDG_RUNTIME_DIR");
+            let state = std::env::temp_dir().join(format!("gpty-state-{}", std::process::id()));
+            let _env = EnvVars::apply(&[
+                ("XDG_RUNTIME_DIR", None),
+                ("XDG_STATE_HOME", Some(state.to_str().unwrap())),
+            ]);
             let path = default_socket_path();
             assert!(
                 path.ends_with("gpty.sock"),
                 "fallback must still name the control socket: {path}"
+            );
+        }
+
+        /// The shared-`/tmp` path is predictable in a world-writable directory:
+        /// another user can hold the name and deny the control surface. A
+        /// private state directory removes that, so the fallback prefers one.
+        ///
+        /// Tested through the fallback itself rather than through
+        /// `default_socket_path()`: on a machine where `/run/user/<uid>` exists
+        /// and is private (every modern Linux), the chain legitimately stops
+        /// before reaching here.
+        #[test]
+        fn the_fallback_prefers_a_private_state_dir_over_the_shared_tmp_path() {
+            let state_root = make_dir("gpty-state-home", 0o700);
+            let path;
+            {
+                let _env = EnvVars::apply(&[
+                    ("XDG_STATE_HOME", Some(state_root.to_str().unwrap())),
+                    ("HOME", None),
+                ]);
+                path = fallback_socket_path(unsafe { libc::geteuid() });
+            }
+            let expected = state_root.join("gpty/gpty.sock");
+            assert_eq!(path, expected.to_string_lossy());
+            // Created and private: that is what makes the path un-squattable.
+            let meta = std::fs::metadata(state_root.join("gpty")).unwrap();
+            assert_eq!(meta.permissions().mode() & 0o777, 0o700);
+            std::fs::remove_dir_all(&state_root).unwrap();
+        }
+
+        /// A state directory that exists but is lax is tightened, not rejected
+        /// and not written into as-is — the umask of whichever run created it
+        /// must not leave the socket's directory open to others.
+        #[test]
+        fn the_fallback_tightens_a_lax_state_dir() {
+            let state_root = make_dir("gpty-state-lax", 0o700);
+            let lax = state_root.join("gpty");
+            std::fs::create_dir_all(&lax).unwrap();
+            std::fs::set_permissions(&lax, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+            let path;
+            {
+                let _env = EnvVars::apply(&[
+                    ("XDG_STATE_HOME", Some(state_root.to_str().unwrap())),
+                    ("HOME", None),
+                ]);
+                path = fallback_socket_path(unsafe { libc::geteuid() });
+            }
+
+            assert_eq!(path, lax.join("gpty.sock").to_string_lossy());
+            assert_eq!(
+                std::fs::metadata(&lax).unwrap().permissions().mode() & 0o777,
+                0o700,
+                "an existing state dir this user owns must be tightened to 0700"
+            );
+            std::fs::remove_dir_all(&state_root).unwrap();
+        }
+
+        /// With nowhere private to go, the documented last resort is the
+        /// uid-suffixed path in the session temp directory.
+        #[test]
+        fn the_fallback_ends_in_the_shared_temp_directory() {
+            let path;
+            {
+                let _env = EnvVars::apply(&[("XDG_STATE_HOME", None), ("HOME", None)]);
+                path = fallback_socket_path(unsafe { libc::geteuid() });
+            }
+            assert_eq!(
+                path,
+                format!("/tmp/gpty-{}.sock", unsafe { libc::geteuid() }),
+                "with no private directory the last resort is the shared temp path"
+            );
+        }
+
+        /// Relative values are not directories in any useful sense, so they are
+        /// ignored rather than joined onto the working directory.
+        #[test]
+        fn a_relative_state_dir_is_ignored() {
+            let relative = format!("gpty-state-relative-{}", std::process::id());
+            let path;
+            {
+                let _env = EnvVars::apply(&[("XDG_STATE_HOME", Some(&relative)), ("HOME", None)]);
+                path = fallback_socket_path(unsafe { libc::geteuid() });
+            }
+            assert_eq!(
+                path,
+                format!("/tmp/gpty-{}.sock", unsafe { libc::geteuid() }),
+                "a relative XDG_STATE_HOME must be ignored, not joined onto the working directory"
             );
         }
     }
