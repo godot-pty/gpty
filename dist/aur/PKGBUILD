@@ -8,7 +8,7 @@
 pkgname=gpty-bin
 pkgver=0.5.3
 pkgrel=1
-pkgdesc="PTY Multiplexer"
+pkgdesc="PTY multiplexer with a tiling grid GUI and a JSON-RPC/MCP API"
 arch=('x86_64')
 url="https://github.com/godot-pty/gpty"
 license=('GPL-3.0-or-later')

@@ -1,7 +1,8 @@
 [Desktop Entry]
-Name=gpty
-Comment=PTY Multiplexer
-Exec=gpty
+Name=gPTY
+GenericName=PTY multiplexer
+Comment=PTY multiplexer with a tiling grid GUI and a JSON-RPC/MCP API
+Exec=gpty-gui
 Type=Application
 Categories=System;TerminalEmulator;
 Terminal=false
