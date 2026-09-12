@@ -26,6 +26,9 @@ const MAX_SESSION_EVENTS: usize = 64;
 const MAX_ID_LEN: usize = 128;
 
 const MAX_THINKING_BYTES: usize = 8 * 1024;
+/// Longest accepted state declaration value. `needs-attention` is the longest
+/// name the vocabulary has; the cap only bounds what this socket accepts.
+const MAX_STATE_LEN: usize = 32;
 /// Extension `seq` counters reset in each new omp process; accept the rollover.
 const SEQ_RESET_CEILING: u64 = 128;
 
@@ -39,6 +42,12 @@ const ALLOWED_EVENTS: &[&str] = &[
     "omp.tool.started",
     "omp.tool.finished",
     "omp.reasoning.delta",
+    // gpty-native rather than an adapter's: a program inside a pane
+    // declaring its own display state through `gpty state`. It rides this
+    // socket because the per-PTY event capability is the only credential a
+    // pane's child holds — and it is the Windows answer for the
+    // `gpty_state` OSC, which ConPTY consumes before it can reach the pane.
+    "gpty.state.declared",
 ];
 
 /// Adapter-neutral event vocabulary. The extension speaks OMP-specific
@@ -55,6 +64,7 @@ const GENERIC_EVENT_NAMES: &[(&str, &str)] = &[
     ("omp.tool.started", "tool.call"),
     ("omp.tool.finished", "tool.finished"),
     ("omp.reasoning.delta", "thinking.delta"),
+    ("gpty.state.declared", "state.declared"),
 ];
 
 /// Translate a wire event name to the generic vocabulary. Unknown names
@@ -135,6 +145,14 @@ const ALLOWED_FIELDS: &[(&str, &[(&str, FieldKind)])] = &[
             ("emitted_at_ms", FieldKind::Int),
         ],
     ),
+    // A declaration's value. The handler rejects a submission whose value is
+    // not in `AgentState::from_declaration` — the allowlist would drop it and
+    // leave an empty declaration that silently does nothing — so this row
+    // bounds the shape and the vocabulary stays the one in gpty-core.
+    (
+        "state.declared",
+        &[("state", FieldKind::Str(MAX_STATE_LEN))],
+    ),
 ];
 
 /// Translate a wire event into the generic vocabulary, copying **only** the
@@ -179,6 +197,9 @@ struct SessionCapability {
 pub struct OmpSemanticEvent {
     pub terminal_session_id: String,
     pub omp_session_id: String,
+    /// The producer's sequence number, or 0 when it supplied none — a
+    /// declaration submitted by a fresh process per call (`gpty state`)
+    /// carries no stream position to advance.
     pub seq: u64,
     pub event: Value,
 }
@@ -374,11 +395,16 @@ fn event_handler() -> HandlerFn {
             let capability = bounded_string(&params, "capability", 128);
             let omp_session_id =
                 bounded_string(&params, "omp_session_id", MAX_ID_LEN).unwrap_or("");
+            // Optional: the OMP extension always sends one, but `gpty state`
+            // runs as a fresh process per declaration and has no counter to
+            // continue. The capability authorizes a submission; a sequence
+            // only orders one long-lived producer's own stream, so it is
+            // checked when it is present (the gate further down).
             let seq = params.get("seq").and_then(Value::as_u64);
             let event = params.get("event").and_then(Value::as_object);
 
-            let (Some(terminal_id), Some(capability), Some(seq), Some(event)) =
-                (terminal_id, capability, seq, event)
+            let (Some(terminal_id), Some(capability), Some(event)) =
+                (terminal_id, capability, event)
             else {
                 return Err(gpty_ipc::protocol::JsonRpcError::new(
                     -32602,
@@ -417,6 +443,21 @@ fn event_handler() -> HandlerFn {
                     "invalid reasoning delta",
                 ));
             }
+            // A declaration must name a real state, for the same reason: the
+            // allowlist would drop an unknown value and leave a declaration
+            // that silently does nothing, where the caller can be told.
+            if name == "gpty.state.declared"
+                && event
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .and_then(gpty_core::agent_state::AgentState::from_declaration)
+                    .is_none()
+            {
+                return Err(gpty_ipc::protocol::JsonRpcError::new(
+                    -32602,
+                    "invalid state declaration",
+                ));
+            }
             let Some(translated) = translate_event(event) else {
                 return Err(gpty_ipc::protocol::JsonRpcError::new(
                     -32602,
@@ -424,7 +465,7 @@ fn event_handler() -> HandlerFn {
                 ));
             };
 
-            {
+            let next_seq = {
                 let mut sessions = SESSIONS.lock().unwrap();
                 let Some(session) = sessions.get_mut(terminal_id) else {
                     return Err(gpty_ipc::protocol::JsonRpcError::new(
@@ -438,7 +479,9 @@ fn event_handler() -> HandlerFn {
                         "invalid event capability",
                     ));
                 }
-                if !accept_event_seq(session, seq) {
+                if let Some(seq) = seq
+                    && !accept_event_seq(session, seq)
+                {
                     return Err(gpty_ipc::protocol::JsonRpcError::new(
                         -32003,
                         "stale event sequence",
@@ -459,12 +502,17 @@ fn event_handler() -> HandlerFn {
                 queue.push_back(OmpSemanticEvent {
                     terminal_session_id: terminal_id.to_string(),
                     omp_session_id: omp_session_id.to_string(),
-                    seq,
+                    seq: seq.unwrap_or(0),
                     event: translated,
                 });
-            }
 
-            Ok(json!({"accepted": true, "next_seq": seq + 1}))
+                // The next sequence this session expects — its own counter,
+                // which an unsequenced submission leaves untouched (so it
+                // still answers a producer that supplies one next time).
+                session.last_seq.saturating_add(1)
+            };
+
+            Ok(json!({"accepted": true, "next_seq": next_seq}))
         })
     })
 }
@@ -498,6 +546,11 @@ pub fn ensure_server_started() {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    /// Serializes the tests that reach the process-global session and event
+    /// queues: cargo runs one binary's tests on parallel threads, and an event
+    /// queued by one test is visible to another test's `drain_events()`.
+    static QUEUES: Mutex<()> = Mutex::new(());
 
     fn reset() {
         SESSIONS.lock().unwrap().clear();
@@ -545,6 +598,7 @@ mod tests {
             ("omp.tool.started", "tool.call"),
             ("omp.tool.finished", "tool.finished"),
             ("omp.reasoning.delta", "thinking.delta"),
+            ("gpty.state.declared", "state.declared"),
         ] {
             assert_eq!(to_generic_name(wire), generic, "wire name {wire}");
         }
@@ -688,6 +742,7 @@ mod tests {
 
     #[test]
     fn unregister_expires_session_and_queued_events() {
+        let _guard = QUEUES.lock().unwrap();
         reset();
         SESSIONS.lock().unwrap().insert(
             "terminal".into(),
@@ -705,5 +760,60 @@ mod tests {
         unregister_terminal("terminal");
         assert!(SESSIONS.lock().unwrap().is_empty());
         assert!(EVENTS.lock().unwrap().is_empty());
+    }
+
+    /// The declaration path end to end: a registered session, the real
+    /// handler, and the queue's own view of what arrived.
+    #[test]
+    fn a_state_declaration_is_accepted_without_a_sequence() {
+        let _guard = QUEUES.lock().unwrap();
+        reset();
+        let (session_id, capability) = register_terminal().expect("registration");
+        let handler = event_handler();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let result = runtime.block_on(handler(json!({
+            "v": PROTOCOL_VERSION,
+            "terminal_session_id": session_id,
+            "capability": capability,
+            "event": {"name": "gpty.state.declared", "state": "needs-attention"},
+        })));
+        assert!(
+            result.is_ok(),
+            "an unsequenced declaration must be accepted: {result:?}"
+        );
+        let mine: Vec<_> = drain_events()
+            .into_iter()
+            .filter(|event| event.terminal_session_id == session_id)
+            .collect();
+        assert_eq!(mine.len(), 1, "exactly one event for this session");
+        assert_eq!(mine[0].event["name"], "state.declared");
+        assert_eq!(mine[0].event["state"], "needs-attention");
+        assert_eq!(
+            mine[0].seq, 0,
+            "a submission without a sequence carries no position"
+        );
+        unregister_terminal(&session_id);
+    }
+
+    /// Refused before the session lookup, so the caller hears about a typo
+    /// instead of watching a declaration silently do nothing.
+    #[test]
+    fn a_declaration_with_an_unknown_state_is_rejected() {
+        let handler = event_handler();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let error = runtime
+            .block_on(handler(json!({
+                "v": PROTOCOL_VERSION,
+                "terminal_session_id": "any",
+                "capability": "any",
+                "event": {"name": "gpty.state.declared", "state": "wroking"},
+            })))
+            .expect_err("a value outside the vocabulary must be refused");
+        assert_eq!(error.code, -32602, "got: {error:?}");
+        assert!(
+            error.message.contains("state declaration"),
+            "the refusal must name what it refused: {}",
+            error.message
+        );
     }
 }
