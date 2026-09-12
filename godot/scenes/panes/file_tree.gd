@@ -32,8 +32,40 @@ func _ready():
 				_populate(item, path)
 			item.collapsed = not item.collapsed
 		elif FileAccess.file_exists(path):
-			OS.shell_open("file://" + path)
+			_confirm_open(path)
+		else:
+			# `file_exists` is a regular-file check in Godot (false for
+			# directories, devices and FIFOs), so this covers everything the
+			# tree can list but not hand to a system handler.
+			ToastManager.warn("Not a regular file — refusing to open: %s" % path, 4.0, "File Tree")
 	)
+
+## Opening a file hands its path to the desktop's default handler, which is a
+## sharper sink than it looks: a downloaded `.desktop` file is *run*, not
+## displayed, by the mime handler. Two guards, mirroring `markdown_view`'s
+## link policy:
+##   1. Scheme allowlist: only an absolute local path is ever turned into a
+##      `file://` URI, and that URI is constructed here — a file name cannot
+##      contain `/`, so no other scheme can be injected through the tree.
+##   2. Confirmation: the user sees the exact path before anything is opened.
+const OPEN_SCHEME := "file://"
+
+func _confirm_open(path: String) -> void:
+	if not path.is_absolute_path():
+		ToastManager.warn("Refusing to open a non-absolute path: %s" % path, 4.0, "File Tree")
+		return
+	var uri := OPEN_SCHEME + path
+	var dialog := ConfirmationDialog.new()
+	dialog.title = "Open file"
+	dialog.dialog_text = "Open this file with the system's default application?\n\n%s" % path
+	dialog.ok_button_text = "Open"
+	add_child(dialog)
+	dialog.confirmed.connect(func():
+		dialog.queue_free()
+		OS.shell_open(uri)
+	)
+	dialog.canceled.connect(func(): dialog.queue_free())
+	dialog.popup_centered()
 
 func _populate(parent: TreeItem, path: String):
 	if path == "" or not path.is_absolute_path() or not DirAccess.dir_exists_absolute(path):
