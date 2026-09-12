@@ -115,27 +115,88 @@ func _press_at(pos: Vector2) -> InputEventMouseButton:
 	e.pressed = true
 	return e
 
-func test_dragging_a_right_edge_resizes_both_tiles():
+## Snapshot of the tile model's geometry, for "did the drag touch the model?"
+## assertions: one [col, row, cspan, rspan] entry per tile, in tile order.
+func _tile_state(tm: TerminalManager) -> Array:
+	var state := []
+	for t in tm.tiles:
+		state.append([int(t.col), int(t.row), int(t.cspan), int(t.rspan)])
+	return state
+
+func test_a_drag_previews_in_pixels_and_commits_units_on_release():
 	var wrappers := await _laid_out_wrappers(2)
 	var left_span: int = _tm.tiles[0].cspan
 	var right_span: int = _tm.tiles[1].cspan
-	var start: Vector2 = wrappers[0].get_global_rect().position + Vector2(wrappers[0].size.x, 150)
+	var model_before := _tile_state(_tm)
+	var left_rect: Rect2 = wrappers[0].get_global_rect()
+	var right_rect: Rect2 = wrappers[1].get_global_rect()
+	var start: Vector2 = left_rect.position + Vector2(left_rect.size.x, 150)
 
 	# A press on the strip starts the drag...
 	_tm._on_edge_strip_input(_press_at(start), wrappers[0], "right")
 	assert_true(_tm.drag_active(), "a press on the edge strip must start a drag")
 
-	# ...and raw motion (which the pane body would otherwise consume) drives it.
+	# ...and raw motion (which the pane body would otherwise consume) drives a
+	# pixel preview: the wrappers move, the tile model does not.
 	assert_true(_tm.drive_edge_drag(_motion_at(start + Vector2(40, 0))),
 		"motion during a drag belongs to the drag")
-	assert_gt(_tm.tiles[0].cspan, left_span,
-		"dragging a right edge right must grow that pane")
-	assert_lt(_tm.tiles[1].cspan, right_span, "the neighbour must give up the space")
+	assert_almost_eq(wrappers[0].get_global_rect().size.x, left_rect.size.x + 40.0, 0.5,
+		"the grabbed pane must follow the pointer while the button is held")
+	assert_almost_eq(wrappers[1].get_global_rect().position.x, right_rect.position.x + 40.0, 0.5,
+		"the neighbour's near edge must move with the divider")
+	assert_eq(_tile_state(_tm), model_before,
+		"the preview must leave the tile model untouched — only the release commits")
 
 	watch_signals(_tm)
 	_tm.drive_edge_drag(_release_at(start + Vector2(40, 0)))
 	assert_false(_tm.drag_active(), "the release must end the drag")
 	assert_signal_emitted(_tm, "tiles_resized", "ending a drag must relayout the grid")
+	assert_gt(_tm.tiles[0].cspan, left_span,
+		"dragging a right edge right must grow that pane")
+	assert_lt(_tm.tiles[1].cspan, right_span, "the neighbour must give up the space")
+
+## The preview is a UI affordance: the model changes once, on release, and the
+## drag emits exactly one `tiles_resized`. That single relayout is what keeps
+## every pane — and every terminal inside it — from reflowing per motion event.
+func test_motion_previews_without_touching_the_tile_model():
+	var wrappers := await _laid_out_wrappers(2)
+	var model_before := _tile_state(_tm)
+	var rect: Rect2 = wrappers[0].get_global_rect()
+	var start := Vector2(rect.position.x + rect.size.x - 2.0, rect.position.y + rect.size.y * 0.5)
+	watch_signals(_tm)
+	_tm.begin_edge_drag(wrappers[0], "right", start)
+	_tm.drive_edge_drag(_motion_at(start + Vector2(25, 0)))
+	assert_eq(_tile_state(_tm), model_before, "motion must not mutate the tile model")
+	assert_signal_not_emitted(_tm, "tiles_resized",
+		"a motion must not relayout the grid — the release does that")
+	assert_almost_eq(wrappers[0].get_global_rect().size.x, rect.size.x + 25.0, 0.5,
+		"the preview must move the wrapper by raw pixels")
+	_tm.drive_edge_drag(_release_at(start + Vector2(25, 0)))
+	assert_signal_emit_count(_tm, "tiles_resized", 1, "one release, one relayout")
+
+## The preview clamps to the same limits the commit does: the neighbour stops
+## at MIN_TILE in pixels, not only when the button comes up.
+func test_preview_stops_at_the_minimum_pane_size():
+	var wrappers := await _laid_out_wrappers(2)
+	var unit: float = wrappers[1].size.x / float(_tm.tiles[1].cspan)
+	var rect: Rect2 = wrappers[0].get_global_rect()
+	var start := Vector2(rect.position.x + rect.size.x - 2.0, rect.position.y + rect.size.y * 0.5)
+	_tm.begin_edge_drag(wrappers[0], "right", start)
+	_tm.drive_edge_drag(_motion_at(start + Vector2(4000, 0)))
+	assert_almost_eq(wrappers[1].size.x, unit * PaneTypes.MIN_TILE, 0.5,
+		"the neighbour must not preview smaller than MIN_TILE")
+	_tm.drive_edge_drag(_release_at(start + Vector2(4000, 0)))
+	assert_eq(_tm.tiles[1].cspan, PaneTypes.MIN_TILE,
+		"the commit lands on MIN_TILE, not past it")
+
+## An edge on the window border has no tile on its far side: the press must not
+## become a drag (there is nothing to move, and a phantom drag would consume
+## the click and emit a spurious relayout on release).
+func test_border_edges_do_not_start_a_drag():
+	var wrappers := await _laid_out_wrappers(2)
+	var rect: Rect2 = wrappers[0].get_global_rect()
+	_tm.begin_edge_drag(wrappers[0], "left", rect.position + Vector2(2, rect.size.y * 0.5))
+	assert_false(_tm.drag_active(), "the window border must not start a resize drag")
 
 func test_drag_survives_leaving_the_strip():
 	var wrappers := await _laid_out_wrappers(2)
@@ -203,33 +264,44 @@ func _cell_total(tm: TerminalManager) -> int:
 		total += t.cspan
 	return total
 
-## The drag has to behave like a tmux divider: follow the pointer in whole
-## cells while the button is held, and never lose a cell. Mouse motion arrives
-## in 1-3 px steps, so a per-step delta would round to zero and a partially
-## applied move used to leave the panes not adding up.
+## The divider has to follow the pointer at pixel granularity while the button
+## is held (one grid unit is ~17 px on a 1000 px pane, which used to make every
+## motion snap to the next unit), keep the model integer, and never lose a cell.
+## Mouse motion arrives in 1-3 px steps, so a per-step delta would round to zero
+## and a partially applied move used to leave the panes not adding up.
 func test_drag_follows_the_pointer_step_by_step():
 	var wrappers := await _workspace_with_two_panes()
 	var tm: TerminalManager = _ws._tm
 	var rect: Rect2 = wrappers[0].get_global_rect()
 	var start := Vector2(rect.position.x + rect.size.x - 2.0, rect.position.y + rect.size.y * 0.5)
 	var width_before: float = rect.size.x
+	var unit: float = width_before / float(tm.tiles[0].cspan)
 
 	tm.begin_edge_drag(wrappers[0], "right", start)
 	for step in 8:
 		tm.drive_edge_drag(_motion_at(start + Vector2(12 * (step + 1), 0)))
 		assert_eq(_cell_total(tm), PaneTypes.GRID,
 			"after step %d the panes must still add up to the grid" % (step + 1))
-	assert_gt(wrappers[0].get_global_rect().size.x, width_before,
-		"the pane must follow the pointer while dragging, not only on release")
+		assert_almost_eq(wrappers[0].get_global_rect().size.x, width_before + 12.0 * (step + 1), 0.5,
+			"step %d: the divider must track the pointer in raw pixels, not snap to units"
+				% (step + 1))
 
-	var grown: float = wrappers[0].get_global_rect().size.x
+	var previewed: float = wrappers[0].get_global_rect().size.x
 	tm.drive_edge_drag(_release_at(start + Vector2(96, 0)))
 	await get_tree().process_frame
-	assert_almost_eq(wrappers[0].get_global_rect().size.x, grown, 1.0,
-		"releasing must not move the divider back")
+	# The release snaps the previewed travel to the nearest whole unit — that
+	# is the only thing the tile model can represent — and it must not fall
+	# back towards the press position.
+	assert_almost_eq(wrappers[0].get_global_rect().size.x, roundf(previewed / unit) * unit, 1.0,
+		"the release must commit the preview onto a grid unit")
+	assert_almost_eq(tm.tiles[0].cspan * unit, roundf((width_before + 96.0) / unit) * unit, 1.0,
+		"the committed span must reflect the pointer travel")
+	assert_gt(wrappers[0].get_global_rect().size.x, width_before,
+		"the pane must stay grown after the release")
 	assert_false(tm.drag_active(), "the release ends the drag")
 
-## Dragging past the neighbour's minimum stops there instead of collapsing it.
+## Dragging past the neighbour's minimum stops there instead of collapsing it,
+## in the preview as well as in the commit.
 func test_drag_stops_at_the_minimum_pane_size():
 	var wrappers := await _workspace_with_two_panes()
 	var tm: TerminalManager = _ws._tm
@@ -301,9 +373,10 @@ func test_press_on_the_band_starts_a_drag_through_gui_picking():
 	Input.flush_buffered_events()
 
 ## A divider is a line across the whole window: dragging any part of it moves
-## every tile whose edge lies on it. Moving only the tiles in the grabbed
-## pane's column left the other column's divider behind — a step-shaped grey
-## gap between the panes, reported from a 2x2 layout.
+## every tile whose edge lies on it — in the preview as well as on commit.
+## Moving only the tiles in the grabbed pane's column left the other column's
+## divider behind — a step-shaped grey gap between the panes, reported from a
+## 2x2 layout.
 func test_dragging_one_pane_moves_the_shared_divider_across_columns():
 	var wrappers := await _workspace_with_two_panes()
 	var tm: TerminalManager = _ws._tm
@@ -321,6 +394,11 @@ func test_dragging_one_pane_moves_the_shared_divider_across_columns():
 	_ws._apply_layout()
 	await get_tree().process_frame
 	assert_true(_layout_covers_grid(tm), "the 2x2 layout must start gapless")
+	var model_before := _tile_state(tm)
+	var bl: Control = tm.tiles[2].wrapper
+	var br: Control = tm.tiles[3].wrapper
+	var bl_top: float = bl.get_global_rect().position.y
+	var br_top: float = br.get_global_rect().position.y
 
 	# Grab the *top-left* pane's bottom edge: the line it sits on is shared
 	# with the top-right pane, so both bottom panes must move with it.
@@ -328,15 +406,39 @@ func test_dragging_one_pane_moves_the_shared_divider_across_columns():
 	var start := Vector2(rect.position.x + rect.size.x * 0.5, rect.position.y + rect.size.y - 2.0)
 	tm.begin_edge_drag(wrappers[0], "bottom", start)
 	tm.drive_edge_drag(_motion_at(start + Vector2(0, 12)))
+	assert_almost_eq(bl.get_global_rect().position.y, bl_top + 12.0, 0.5,
+		"the pane below must preview with the divider")
+	assert_almost_eq(br.get_global_rect().position.y, br_top + 12.0, 0.5,
+		"the pane in the other column must preview on the same line")
+	assert_eq(_tile_state(tm), model_before,
+		"the preview must not touch the tile model mid-drag")
+	tm.drive_edge_drag(_release_at(start + Vector2(0, 12)))
 	assert_true(_layout_covers_grid(tm),
 		"a drag must leave no gap or overlap between the panes")
 	assert_eq(tm.tiles[2].row, tm.tiles[3].row,
-		"both bottom panes must move to the same row (one straight divider)")
+		"both bottom panes must commit to the same row (one straight divider)")
 	assert_eq(tm.tiles[0].row + tm.tiles[0].rspan, tm.tiles[2].row,
 		"the top-left pane must end exactly where the bottom-left one starts")
 	assert_eq(tm.tiles[1].row + tm.tiles[1].rspan, tm.tiles[3].row,
 		"the top-right pane must end exactly where the bottom-right one starts")
-	tm.drive_edge_drag(_release_at(start + Vector2(0, 12)))
+
+## The preview is absolute from the press position, so backtracking over it is
+## safe: a drag that returns to where it started must commit no change and
+## leave the divider exactly where it was.
+func test_drag_returning_to_the_press_point_restores_the_layout():
+	var wrappers := await _workspace_with_two_panes()
+	var tm: TerminalManager = _ws._tm
+	var rect: Rect2 = wrappers[0].get_global_rect()
+	var start := Vector2(rect.position.x + rect.size.x - 2.0, rect.position.y + rect.size.y * 0.5)
+	var model_before := _tile_state(tm)
+	tm.begin_edge_drag(wrappers[0], "right", start)
+	tm.drive_edge_drag(_motion_at(start + Vector2(45, 0)))
+	tm.drive_edge_drag(_motion_at(start))
+	tm.drive_edge_drag(_release_at(start))
+	await get_tree().process_frame
+	assert_eq(_tile_state(tm), model_before, "returning to the press point must commit no change")
+	assert_almost_eq(wrappers[0].get_global_rect().size.x, rect.size.x, 0.5,
+		"the divider must be back where the drag started")
 
 ## One pane has no divider: its edges are the window border, so the strips must
 ## not advertise a resize (and pressing them must not start one).
