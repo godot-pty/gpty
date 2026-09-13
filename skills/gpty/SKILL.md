@@ -53,7 +53,7 @@ gpty pane-read <pane> --lines 200
 
 ```
 gpty pane-run --command "cargo test"
-gpty pane-status <pane>        # pid, running, exit_code, idle_ms
+gpty pane-status <pane>        # pid, running, exit_code, exit_reason, idle_ms
 gpty pane-status               # every pane (agent-status-list)
 ```
 

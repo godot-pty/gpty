@@ -70,7 +70,7 @@ Inspector omp is launched as `omp --mode rpc --no-session --no-tools --no-extens
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `get_plain_text(limit: int)` | `String` | Plain-text snapshot of screen + scrollback, newline-joined, capped 1–2000 lines (backs `paneRead`) |
-| `get_status()` | `String` | JSON: `{pid, running, exit_code, idle_ms}` (backs `paneStatus`) |
+| `get_status()` | `String` | JSON: `{pid, running, exit_code, exit_reason, idle_ms, agent_state, agent_state_tier}` (backs `paneStatus`). `running` requires a live terminal task *and* no exit code; `exit_reason` is `exited`, `task_ended` (the task died without recording one — a panic, or a child that closed its pty and outlived the pane) or `null` while it runs |
 | `search_history(pattern: String, limit: int)` | `String` | JSON `{"results": [[line_num, text], ...]}` — FTS5 search of the pane's persisted scrollback, newest-first (limit 1–500; free text as a user typed it, sanitised into quoted terms, so punctuation such as `main.rs` is searchable) |
 | `check_lines(pattern: String)` | `String` | First recent line matching the Rust-regex pattern, or empty (backs `waitForOutput`) |
 | `emit_event(json: String)` | void | Static — fan a JSON event out to event-socket subscribers (no-op on Windows) |

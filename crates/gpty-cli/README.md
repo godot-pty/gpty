@@ -97,7 +97,7 @@ gpty version
 | `focus-pane` | Focus a pane by id |
 | `inject` | Send text to a terminal pane by id |
 | `pane-read` | Read a pane's plain-text output (screen + scrollback, `--lines` 1–2000) |
-| `pane-status` | Status primitives for a pane (`pid`, `running`, `exit_code`, `idle_ms`); no argument lists every pane |
+| `pane-status` | Status primitives for a pane (`pid`, `running`, `exit_code`, `exit_reason`, `idle_ms`); no argument lists every pane |
 | `pane-run` | Run a command in a new terminal pane (`--command`) |
 | `pane-wait` | Wait for a pane's output to match a regex (`--pattern`, `--timeout-ms` 100–60000) |
 | `state` | Declare the state of the pane the command runs in (`idle`, `working`, `needs-attention`, `completed`, `failed`). Needs the credentials a pane injects (`GPTY_EVENT_*`), submits over the event socket, and is not an MCP tool |

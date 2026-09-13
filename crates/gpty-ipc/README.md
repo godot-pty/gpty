@@ -135,7 +135,7 @@ See `crates/gpty-gdext/src/omp_events.rs` and
 | `focusPane` | `pane_id` | `{success: true}` |
 | `inject` | `pane_id`, `text` | `{success: true}` |
 | `paneRead` | `pane_id`, `lines?` (1–2000) | `{text}` |
-| `paneStatus` | `pane_id` | `{pid, running, exit_code, idle_ms}` |
+| `paneStatus` | `pane_id` | `{pid, running, exit_code, exit_reason, idle_ms, agent_state, agent_state_tier}` — `exit_reason` is `exited`, `task_ended`, or `null` while running |
 | `paneRun` | `command` | `{pane_id, label, type}` (exit code via `paneStatus`) |
 | `paneWait` | `pane_id`, `pattern`, `timeout_ms?` (100–60000) | `{matched, line?}` / `{matched: false, timed_out}` — response held server-side until match or deadline |
 | `broadcast` | `tags`, `text` | `{success, count}` |

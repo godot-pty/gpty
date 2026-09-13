@@ -462,18 +462,20 @@ impl GptyTerminal {
     // ── Grid access helpers ─────────────────────────────────────────
 
     /// Lock the grid immutably, call `f`, return its result.
-    /// Returns `default` if no shell started or the mutex is poisoned.
+    ///
+    /// Returns `default` if no shell started, or if the mutex is poisoned by a
+    /// panic that died holding it. The poison is reported through
+    /// `lock_or_warn` — once per process, sharing the engine's own name for
+    /// this lock — because these helpers are polled every frame by the
+    /// renderer, and one line per frame buries the reason it is there.
     fn with_grid<T>(&self, f: impl FnOnce(&gpty_core::term::TermGrid) -> T, default: T) -> T {
-        if let Some(ref spawned) = self.spawned {
-            match spawned.grid.lock() {
-                Ok(g) => f(&g),
-                Err(e) => {
-                    godot_error!("gpty: TermGrid lock poisoned: {e}");
-                    default
-                }
-            }
-        } else {
-            default
+        match self
+            .spawned
+            .as_ref()
+            .and_then(|s| gpty_core::lock::lock_or_warn(&s.grid, "pane grid"))
+        {
+            Some(g) => f(&g),
+            None => default,
         }
     }
     fn with_grid_mut_ret<T>(
@@ -481,26 +483,25 @@ impl GptyTerminal {
         f: impl FnOnce(&mut gpty_core::term::TermGrid) -> T,
         default: T,
     ) -> T {
-        if let Some(ref spawned) = self.spawned {
-            match spawned.grid.lock() {
-                Ok(mut g) => f(&mut g),
-                Err(e) => {
-                    godot_error!("gpty: TermGrid lock poisoned: {e}");
-                    default
-                }
-            }
-        } else {
-            default
+        match self
+            .spawned
+            .as_ref()
+            .and_then(|s| gpty_core::lock::lock_or_warn(&s.grid, "pane grid"))
+        {
+            Some(mut g) => f(&mut g),
+            None => default,
         }
     }
 
-    /// Lock the grid mutably and call `f`. No-op if no shell or lock poisoned.
+    /// Lock the grid mutably and call `f`. No-op if no shell or lock poisoned
+    /// (reported once per process — see [`Self::with_grid`]).
     fn with_grid_mut(&self, f: impl FnOnce(&mut gpty_core::term::TermGrid)) {
-        if let Some(ref spawned) = self.spawned {
-            match spawned.grid.lock() {
-                Ok(mut g) => f(&mut g),
-                Err(e) => godot_error!("gpty: TermGrid lock poisoned: {e}"),
-            }
+        if let Some(mut g) = self
+            .spawned
+            .as_ref()
+            .and_then(|s| gpty_core::lock::lock_or_warn(&s.grid, "pane grid"))
+        {
+            f(&mut g);
         }
     }
 
@@ -571,28 +572,16 @@ impl GptyTerminal {
     }
 
     /// Process status primitives as JSON: pid, running, exit_code, idle_ms,
-    /// agent_state, agent_state_tier.
+    /// exit_reason, agent_state, agent_state_tier. Built in core
+    /// (`SpawnedTerminal::status_json`) so the document the pane API promises
+    /// is the one under test.
     #[func]
     fn get_status(&self) -> GString {
+        let Some(spawned) = self.spawned.as_ref() else {
+            return GString::from("{}");
+        };
         self.with_grid(
-            |g| {
-                let s = &g.status;
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0);
-                let idle_ms = s.last_output_unix_ms.map(|t| now.saturating_sub(t));
-                let json = serde_json::json!({
-                    "pid": s.pid,
-                    "running": s.exit_code.is_none(),
-                    "exit_code": s.exit_code,
-                    "idle_ms": idle_ms,
-                    "agent_state": g.agent_state.state.as_str(),
-                    "agent_state_tier": g.agent_state.tier.map(|t| t as u8),
-                })
-                .to_string();
-                GString::from(json.as_str())
-            },
+            |g| GString::from(spawned.status_json(g).as_str()),
             GString::from("{}"),
         )
     }

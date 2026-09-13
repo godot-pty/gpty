@@ -126,6 +126,50 @@ impl Drop for SpawnedTerminal {
 }
 
 impl SpawnedTerminal {
+    /// Whether the terminal task has ended — for any reason: the child exited,
+    /// the pane is being torn down, or **the task panicked**, which tokio
+    /// catches by aborting it. Nothing else notices that last one, so this is
+    /// the only signal that separates a dead pane from a busy one.
+    ///
+    /// `status.exit_code` is written by the task's own exit path alone, so
+    /// "finished with no exit code" is the state that would otherwise report a
+    /// dead pane as running; a clean exit records the code before the future
+    /// ends, so the two never overlap.
+    pub fn task_finished(&self) -> bool {
+        self._task.is_finished()
+    }
+
+    /// The pane's status document, exactly as the `paneStatus` IPC method
+    /// returns it.
+    ///
+    /// `running` needs both inputs, not just the exit code: a child that has
+    /// not been reaped **and** a task that is still there to reap it. A task
+    /// that ended without recording an exit code — it panicked, or the child
+    /// closed its pty and outlived the pane — leaves `exit_code: null` forever,
+    /// which on its own reads as "still running" and hangs every consumer that
+    /// waits for exit. `exit_reason` is what makes the difference visible.
+    pub fn status_json(&self, grid: &TermGrid) -> String {
+        let s = &grid.status;
+        let task_alive = !self.task_finished();
+        let idle_ms = s.last_output_unix_ms.map(|t| unix_ms().saturating_sub(t));
+        let running = s.exit_code.is_none() && task_alive;
+        let exit_reason = match (s.exit_code, task_alive) {
+            (Some(_), _) => Some("exited"),
+            (None, false) => Some("task_ended"),
+            (None, true) => None,
+        };
+        serde_json::json!({
+            "pid": s.pid,
+            "running": running,
+            "exit_code": s.exit_code,
+            "exit_reason": exit_reason,
+            "idle_ms": idle_ms,
+            "agent_state": grid.agent_state.state.as_str(),
+            "agent_state_tier": grid.agent_state.tier.map(|t| t as u8),
+        })
+        .to_string()
+    }
+
     /// Apply `rows × cols` to the grid and to the PTY — all-or-nothing.
     ///
     /// Returns whether the grid holds the new size, which is what the caller
@@ -1071,6 +1115,81 @@ mod tests {
         );
     }
 
+    /// A pane whose child closes its pty and keeps running ends its terminal
+    /// task with no exit code — the same state a panicked task leaves, and the
+    /// one `exit_code` alone reads as "still running". Nothing drains such a
+    /// pane any more, so `paneStatus` has to say it stopped and why; a consumer
+    /// waiting for exit would otherwise wait forever.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_task_that_ends_without_an_exit_code_is_reported_as_stopped() {
+        let engine = WorkspaceEngine::new(vec![]);
+        let spawned = engine
+            .spawn_terminal_with_grid(
+                TerminalConfig { id: 13 },
+                "sh",
+                // Closing all three fds detaches the child from the pty: the
+                // read side ends while `sleep` outlives it, so the reap finds
+                // nothing to report and the task ends without an exit code.
+                &["-c", "exec 0<&- 1>&- 2>&-; sleep 30"],
+                &[],
+                &[],
+                24,
+                80,
+            )
+            .await
+            .expect("spawn");
+
+        let ended = wait_until(Duration::from_secs(20), || spawned.task_finished()).await;
+        assert!(
+            ended,
+            "the task must end once the child stops using its pty"
+        );
+
+        let status = pane_status(&spawned);
+        assert_eq!(
+            status["running"],
+            serde_json::json!(false),
+            "a pane nothing drains must not report itself as running: {status}"
+        );
+        assert_eq!(status["exit_code"], serde_json::Value::Null);
+        assert_eq!(
+            status["exit_reason"],
+            serde_json::json!("task_ended"),
+            "the status must say why the pane stopped: {status}"
+        );
+    }
+
+    /// The other branch of the same document: a pane that is up is running, and
+    /// no reason is invented for it. `pane-status` in the smoke suite reads
+    /// exactly this field.
+    #[tokio::test]
+    async fn a_live_pane_reports_running() {
+        let engine = WorkspaceEngine::new(vec![]);
+        #[cfg(windows)]
+        let cmd = "cmd.exe";
+        #[cfg(not(windows))]
+        let cmd = "sh";
+        let spawned = engine
+            .spawn_terminal_with_grid(TerminalConfig { id: 14 }, cmd, &[], &[], &[], 24, 80)
+            .await
+            .expect("spawn");
+
+        let status = pane_status(&spawned);
+        assert_eq!(
+            status["running"],
+            serde_json::json!(true),
+            "a live pane must report running: {status}"
+        );
+        assert_eq!(status["exit_reason"], serde_json::Value::Null);
+    }
+
+    /// Parse the pane's status document the way a consumer sees it.
+    fn pane_status(spawned: &SpawnedTerminal) -> serde_json::Value {
+        let grid = spawned.grid.lock().expect("grid");
+        serde_json::from_str(&spawned.status_json(&grid)).expect("status JSON")
+    }
+
     /// Wait for a state that a real PTY and a real child process produce.
     ///
     /// These budgets are wall-clock, so they must survive a loaded machine: a
@@ -1127,6 +1246,17 @@ mod tests {
         assert!(
             reported,
             "the exit code must be reported even while a descendant holds the pty"
+        );
+
+        // The third branch of the status document: a reap that *did* produce a
+        // code is not a dead task, and the reason says so.
+        let status = pane_status(&spawned);
+        assert_eq!(status["running"], serde_json::json!(false), "{status}");
+        assert_eq!(status["exit_code"], serde_json::json!(5), "{status}");
+        assert_eq!(
+            status["exit_reason"],
+            serde_json::json!("exited"),
+            "{status}"
         );
 
         // Ending the task early is only correct if what the pty already held
