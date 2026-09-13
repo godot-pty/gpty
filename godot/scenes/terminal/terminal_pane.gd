@@ -414,9 +414,19 @@ func _process(delta):
 				var new_cols = maxi(int((size.x - PADDING) / _cell_w), MIN_COLS)
 				var new_rows = maxi(int((size.y - PADDING) / _cell_h), MIN_ROWS)
 				if new_cols != cols or new_rows != rows:
-					cols = new_cols
-					rows = new_rows
-					_terminal.resize_grid(rows, cols)
+					# Keep the debounce armed until the backend reports it took
+					# the size. A refused resize answers false (poisoned grid
+					# lock) and a panic in the call never returns at all — the
+					# GDScript VM aborts this function at the FFI boundary — so
+					# in both cases cols/rows must keep the size the grid really
+					# holds, or the pane renders at dimensions the backend never
+					# applied and the comparison above never asks again.
+					_resize_pending = true
+					_resize_timer = 0.0
+					if _terminal.resize_grid(new_rows, new_cols):
+						cols = new_cols
+						rows = new_rows
+						_resize_pending = false
 
 	_time_since_sync += delta
 	if _time_since_sync >= _sync_interval + _sync_backoff:

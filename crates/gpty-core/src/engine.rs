@@ -125,6 +125,37 @@ impl Drop for SpawnedTerminal {
     }
 }
 
+impl SpawnedTerminal {
+    /// Apply `rows × cols` to the grid and to the PTY — all-or-nothing.
+    ///
+    /// Returns whether the grid holds the new size, which is what the caller
+    /// records: a resize that did not happen must not be remembered as one.
+    /// A poisoned grid lock (a panic that died holding the guard) skips
+    /// **both** halves instead of resizing the PTY alone — the child would
+    /// reflow and take a SIGWINCH at a width the emulator never applied, and
+    /// nothing re-sends a size the shell is already at, so the pane would
+    /// render garbage until the user happened to resize it again.
+    ///
+    /// Unchanged dimensions are a success that touches nothing: re-sending
+    /// SIGWINCH makes the shell redraw (and re-echo its input line) for
+    /// nothing, which is exactly what a split's resize cascade produces.
+    pub fn resize(&self, rows: usize, cols: usize) -> bool {
+        let Some(mut grid) = lock_or_warn(&self.grid, "pane grid") else {
+            return false;
+        };
+        if grid.num_rows() == rows && grid.num_cols() == cols {
+            return true;
+        }
+        grid.resize(rows, cols);
+        // Release before touching the PTY: the guard is what the UI renders
+        // under, and the task's own `StdinInput::Resize` arm re-applies the
+        // same size to its grid copy as a no-op.
+        drop(grid);
+        self.handle.resize_pty(rows as u16, cols as u16);
+        true
+    }
+}
+
 // ── WorkspaceEngine ───────────────────────────────────────────────────
 
 impl WorkspaceEngine {
@@ -949,6 +980,94 @@ mod tests {
         assert!(
             rendered,
             "Grid should have received and rendered the input text"
+        );
+    }
+
+    /// The resize a pane asks for moves both halves: the grid *and* the child's
+    /// own window size. The child is the only witness for the second half —
+    /// ask it, through the pty, for the size the kernel gave it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_resize_reaches_the_grid_and_the_child() {
+        let engine = WorkspaceEngine::new(vec![]);
+        let spawned = engine
+            .spawn_terminal_with_grid(TerminalConfig { id: 11 }, "sh", &[], &[], &[], 24, 80)
+            .await
+            .expect("spawn");
+
+        assert!(
+            spawned.resize(30, 90),
+            "a fresh grid must take the new dimensions"
+        );
+        assert_eq!(
+            spawned
+                .grid
+                .lock()
+                .ok()
+                .map(|g| (g.num_rows(), g.num_cols())),
+            Some((30, 90)),
+            "the grid must hold the new dimensions"
+        );
+
+        spawned.handle.send_line("stty size");
+        let moved = wait_until(Duration::from_secs(10), || {
+            spawned
+                .grid
+                .lock()
+                .map(|grid| grid.plain_text(2000).iter().any(|l| l.trim() == "30 90"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            moved,
+            "the child must see the new window size, not just the grid"
+        );
+    }
+
+    /// A refused resize (poisoned grid lock) must not move the child either:
+    /// resizing the PTY alone makes the shell reflow at a width the emulator
+    /// never applied, and nothing re-sends the size it is already at. The grid
+    /// cannot be read through a poisoned lock, so the child reports its own
+    /// window size to a file — the pty is the only channel back, and it is the
+    /// one being checked.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_refused_resize_leaves_the_child_where_it_was() {
+        let engine = WorkspaceEngine::new(vec![]);
+        let spawned = engine
+            .spawn_terminal_with_grid(TerminalConfig { id: 12 }, "sh", &[], &[], &[], 24, 80)
+            .await
+            .expect("spawn");
+
+        // Poison the grid exactly as a panic that died holding the guard does.
+        let grid = Arc::clone(&spawned.grid);
+        let poisoned = std::panic::catch_unwind(move || {
+            let _guard = grid.lock().expect("a fresh grid is not poisoned");
+            panic!("poison the pane grid");
+        });
+        assert!(poisoned.is_err(), "the closure must have panicked");
+        assert!(spawned.grid.lock().is_err(), "the grid must be poisoned");
+
+        assert!(
+            !spawned.resize(30, 90),
+            "a poisoned grid must report the refusal to the caller"
+        );
+
+        let report = std::env::temp_dir().join(format!("gpty_resize_{}", std::process::id()));
+        let _ = std::fs::remove_file(&report);
+        spawned
+            .handle
+            .send_line(&format!("stty size > '{}'", report.display()));
+        let observed = wait_until(Duration::from_secs(10), || {
+            std::fs::read_to_string(&report)
+                .map(|s| s.trim() == "24 80")
+                .unwrap_or(false)
+        })
+        .await;
+        let _ = std::fs::remove_file(&report);
+        assert!(
+            observed,
+            "the child must still report the size it was spawned at"
         );
     }
 
