@@ -6,6 +6,7 @@
 
 mod commands;
 mod plugin_manifest;
+mod plugin_store;
 #[cfg(test)]
 mod tests;
 
@@ -134,6 +135,12 @@ enum Commands {
         action: ConceptAction,
     },
 
+    /// Install, manage, and run plugins
+    Plugin {
+        #[command(subcommand)]
+        action: PluginAction,
+    },
+
     /// Read pane output (screen plus scrollback)
     PaneRead {
         /// Target pane ID or label
@@ -226,6 +233,49 @@ enum LayoutAction {
     List,
 }
 
+#[derive(clap::Subcommand)]
+enum PluginAction {
+    /// Install a plugin from a git repo, reviewed in the GUI
+    Install {
+        /// Plugin target: owner/repo or owner/repo@ref
+        target: String,
+    },
+    /// List installed plugins
+    List,
+    /// Enable a plugin
+    Enable {
+        /// Plugin id (owner/name)
+        id: String,
+    },
+    /// Disable a plugin
+    Disable {
+        /// Plugin id (owner/name)
+        id: String,
+    },
+    /// Remove a plugin and its per-plugin directories
+    Uninstall {
+        /// Plugin id (owner/name)
+        id: String,
+    },
+    /// Show a plugin's log files
+    Logs {
+        /// Plugin id (owner/name)
+        id: String,
+
+        /// Lines of the newest log to show
+        #[arg(long, default_value = "50")]
+        lines: usize,
+    },
+    /// Run one of the plugin's declared actions through the gpty CLI
+    Run {
+        /// Plugin id (owner/name)
+        id: String,
+
+        /// The action's name in the manifest
+        action: String,
+    },
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -277,6 +327,22 @@ async fn main() {
         // the declaration belongs to the pane that is already running).
         Some(Commands::State { value }) => {
             match commands::state::run(value, cli.json, timeout).await {
+                Ok(()) => process::exit(0),
+                Err(e) => {
+                    eprintln!("{e}");
+                    process::exit(1);
+                }
+            }
+        }
+        // `plugin` admin actions (list, enable, uninstall, logs, run) touch
+        // only the store and the installed content — spawning the GUI for
+        // them would be noise. `install` is the one action that needs the
+        // GUI (its review dialog), and it ensures the daemon itself, so the
+        // arm must sit above the auto-spawn below.
+        Some(Commands::Plugin { action }) => {
+            match commands::plugin::run(action, &socket_path, timeout, cli.json, cli.no_daemon)
+                .await
+            {
                 Ok(()) => process::exit(0),
                 Err(e) => {
                     eprintln!("{e}");

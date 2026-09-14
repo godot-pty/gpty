@@ -522,6 +522,7 @@ dependencies = [
  "gpty-core",
  "gpty-ipc",
  "log",
+ "serde",
  "serde_json",
  "tokio",
  "toml",

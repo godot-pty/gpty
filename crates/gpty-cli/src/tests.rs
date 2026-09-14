@@ -287,3 +287,87 @@ async fn invalid_state_never_reaches_socket() {
         "the refusal must list the valid states: {message}"
     );
 }
+
+/// The install review handshake: the CLI sends the manifest summary over
+/// `pluginInstall` and the GUI's verdict decides whether anything installs.
+#[tokio::test]
+async fn plugin_install_review_accepts() {
+    let seen: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+    let seen_h = Arc::clone(&seen);
+    let socket = start_server(
+        "plugin_review_accept",
+        vec![("pluginInstall", {
+            move |params: Value| {
+                *seen_h.lock().unwrap() = Some(params.clone());
+                serde_json::json!({"accepted": true})
+            }
+        })],
+    )
+    .await;
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+    let summary = serde_json::json!({
+        "id": "owner/demo",
+        "name": "Demo",
+        "version": "1.0.0",
+        "revision": "a1b2c3d4e5f6",
+        "source": "github.com/owner/demo",
+        "actions": [],
+    });
+    let accepted = commands::plugin::review_install(&client, &summary)
+        .await
+        .expect("an accepted review is a successful handshake");
+    assert!(accepted);
+    let _ = std::fs::remove_file(&socket);
+
+    let params = seen
+        .lock()
+        .unwrap()
+        .take()
+        .expect("server handler should have been called");
+    assert_eq!(params["id"], "owner/demo");
+    assert_eq!(params["revision"], "a1b2c3d4e5f6");
+    assert_eq!(params["name"], "Demo");
+}
+
+/// A decline is a verdict, not an error: the CLI reports it as a refusal and
+/// the caller refuses to install.
+#[tokio::test]
+async fn plugin_install_review_declines() {
+    let socket = start_server(
+        "plugin_review_decline",
+        vec![(
+            "pluginInstall",
+            |_params: Value| serde_json::json!({"accepted": false}),
+        )],
+    )
+    .await;
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+    let accepted = commands::plugin::review_install(
+        &client,
+        &serde_json::json!({"id": "owner/demo", "revision": "a1b2c3d4e5f6"}),
+    )
+    .await
+    .expect("a decline still arrives as a handshake answer");
+    assert!(!accepted, "declined means the CLI must not install");
+    let _ = std::fs::remove_file(&socket);
+}
+
+/// No GUI answering (disconnected, `--no-daemon` with nothing running) is
+/// the fail-closed side of the handshake: the install must not proceed on
+/// silence, so the client error propagates.
+#[tokio::test]
+async fn plugin_install_review_fails_closed_without_a_gui() {
+    let missing = format!(
+        "{}/gpty-cli-roundtrip-no-such-socket.sock",
+        std::env::temp_dir().display()
+    );
+    let _ = std::fs::remove_file(&missing);
+    let client = IpcClient::new(&missing, Duration::from_secs(2));
+    let error = commands::plugin::review_install(
+        &client,
+        &serde_json::json!({"id": "owner/demo", "revision": "a1b2c3d4e5f6"}),
+    )
+    .await
+    .expect_err("no listener must fail the review");
+    assert!(!error.to_string().is_empty());
+}

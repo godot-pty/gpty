@@ -15,6 +15,7 @@ gpty-core = { path = "../gpty-core" }
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 dirs = "6.0.0"
 anyhow = "1"

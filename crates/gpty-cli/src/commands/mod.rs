@@ -14,6 +14,7 @@ pub(crate) mod pane_read;
 pub(crate) mod pane_run;
 pub(crate) mod pane_status;
 pub(crate) mod pane_wait;
+pub mod plugin;
 pub mod schema;
 pub mod state;
 
@@ -62,7 +63,11 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
         Commands::Daemon { action } => daemon::run_action(action, client, json).await,
         Commands::Concept { action } => concept::run(client, action, json).await,
         Commands::Layout { action } => layout::run(client, action, json).await,
-        Commands::Schema { .. } | Commands::Version | Commands::Mcp | Commands::State { .. } => {
+        Commands::Schema { .. }
+        | Commands::Version
+        | Commands::Mcp
+        | Commands::State { .. }
+        | Commands::Plugin { .. } => {
             unreachable!("handled before dispatch")
         }
     }

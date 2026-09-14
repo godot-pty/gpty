@@ -7,7 +7,8 @@
 //! - All other requests are pushed into `PENDING_REQUESTS` with a oneshot
 //!   stored in `PENDING_RESPONSES`. GDScript polls `drain_ipc_requests()`
 //!   each frame, processes the request, and calls `respond_ipc()`.
-//! - The fallback handler imposes a 5-second timeout: if GDScript hasn't
+//! - The fallback handler imposes a per-method timeout (5 s, or 300 s for
+//!   `pluginInstall`'s human-answered review dialog): if GDScript hasn't
 //!   responded by then, the client receives an error.
 
 use std::collections::{HashMap, VecDeque};
@@ -51,8 +52,15 @@ pub fn complete_response(id: u64, success: bool, result_json: String) {
     }
 }
 
+/// The fallback deadline for a GDScript-answered request. The poll loop
+/// answers in milliseconds; 5 s covers a stalled frame comfortably.
+const GDS_RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// The fallback deadline for `pluginInstall`, whose answer waits on a human
+/// reading the review dialog.
+const PLUGIN_REVIEW_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// Make a handler that routes a named method through the pending queue.
-fn make_gdscript_handler(method: String) -> HandlerFn {
+fn make_gdscript_handler(method: String, timeout: std::time::Duration) -> HandlerFn {
     std::sync::Arc::new(move |params| {
         let params_json = serde_json::to_string(&params).unwrap_or_default();
 
@@ -79,7 +87,7 @@ fn make_gdscript_handler(method: String) -> HandlerFn {
         }
 
         Box::pin(async move {
-            match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+            match tokio::time::timeout(timeout, rx).await {
                 Ok(Ok((true, result))) => {
                     Ok(serde_json::from_str(&result).unwrap_or(serde_json::Value::Null))
                 }
@@ -187,9 +195,20 @@ pub async fn start_ipc_server_inner(socket_path: &str) {
         "layoutList",
         "conceptList",
         "conceptToggle",
+        // The plugin-install review handshake: the CLI asks, a human answers
+        // a dialog, so the fallback deadline is minutes, not seconds.
+        "pluginInstall",
     ];
     for method_name in gdscript_methods {
-        server.register(method_name, make_gdscript_handler(method_name.to_string()));
+        let timeout = if method_name == "pluginInstall" {
+            PLUGIN_REVIEW_TIMEOUT
+        } else {
+            GDS_RESPONSE_TIMEOUT
+        };
+        server.register(
+            method_name,
+            make_gdscript_handler(method_name.to_string(), timeout),
+        );
     }
 
     log::info!("IPC server starting on {}", socket_path);

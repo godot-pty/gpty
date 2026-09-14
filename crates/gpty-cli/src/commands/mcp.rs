@@ -212,6 +212,13 @@ mod tests {
     const IPC_HANDLERS_SRC: &str =
         include_str!("../../../../godot/scenes/terminal/ipc_handlers.gd");
     const WORKSPACE_SRC: &str = include_str!("../../../../godot/scenes/terminal/workspace.gd");
+
+    /// Routed methods that are deliberately never MCP tools. `pluginInstall`
+    /// waits on a human answering the review dialog — an MCP client cannot
+    /// answer it (the rule that also refuses `layoutLoad` on untrusted
+    /// profiles), so the method exists for the CLI only. Adding a name here
+    /// is a product decision; make it deliberately.
+    const NON_TOOL_ROUTED: &[&str] = &["pluginInstall"];
     /// The event listener's registrations. It is a second surface with its own
     /// method set (`gpty state` submits on it), so the CLI's literals have to be
     /// checked against both.
@@ -405,8 +412,13 @@ mod tests {
 
     /// Every advertised MCP tool must resolve to a method the GUI registers,
     /// no two tools may collapse onto one method, and every routed method
-    /// must be reachable from some tool. `daemon-*` tools are answered by the
-    /// MCP server itself and never reach the socket with a derived name.
+    /// must be reachable from some tool — except the deliberately CLI-only
+    /// handshakes named in [`NON_TOOL_ROUTED`]: a human answers
+    /// `pluginInstall`'s review dialog, which an MCP client cannot do (the
+    /// same rule that refuses `layoutLoad` on untrusted profiles), so the
+    /// method is routed but never advertised as a tool. `daemon-*` tools are
+    /// answered by the MCP server itself and never reach the socket with a
+    /// derived name.
     #[test]
     fn every_mcp_tool_maps_to_a_registered_method() {
         let routed = rust_array_entries(IPC_SERVER_SRC, "let gdscript_methods = [");
@@ -436,10 +448,16 @@ mod tests {
             );
         }
         let covered: BTreeSet<String> = mapped.intersection(&routed).cloned().collect();
+        let deliberate: BTreeSet<String> = NON_TOOL_ROUTED
+            .iter()
+            .map(|method| method.to_string())
+            .collect();
+        let expected: BTreeSet<String> = covered.union(&deliberate).cloned().collect();
         assert_eq!(
-            covered, routed,
+            expected, routed,
             "a routed method no tool reaches is dead surface; every tool that survives \
-             the daemon filter must name a routed method"
+             the daemon filter must name a routed method, and NON_TOOL_ROUTED names the \
+             deliberate CLI-only exceptions"
         );
     }
 

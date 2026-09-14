@@ -29,10 +29,6 @@
 //! Installation, the review dialog, and executing actions are the plugin
 //! install & lifecycle item — this module only parses and validates.
 
-// Consumed by the plugin install & lifecycle item (the next queue entry).
-// The allow drops when the install CLI lands and wires this surface up.
-#![allow(dead_code)]
-
 use std::fmt;
 
 use clap::CommandFactory;
@@ -966,8 +962,10 @@ fn reject_unknown_keys(entry: &toml::Table, known: &[&str], path: &str) -> Manif
 // ── Identifier shapes ─────────────────────────────────────────────────
 
 /// `owner/name` — the registry's plugin identity. Both parts lowercase
-/// alphanumeric with hyphens, 1-63 characters each.
-fn valid_plugin_id(id: &str) -> bool {
+/// alphanumeric with hyphens, 1-63 characters each. Public because the
+/// install CLI validates ids before joining them into paths
+/// (`plugin_store`), and the store keys on them.
+pub fn valid_plugin_id(id: &str) -> bool {
     let Some((owner, name)) = id.split_once('/') else {
         return false;
     };

@@ -77,6 +77,17 @@ pub fn build_mcp_tools_inline(cmd: &clap::Command) -> serde_json::Value {
         if name == "state" {
             continue;
         }
+        // `plugin` is the install/manage CLI: installing waits on a human
+        // reading the review dialog (the `pluginInstall` handshake, which is
+        // deliberately not an MCP tool — an MCP client cannot answer a
+        // dialog, the same rule that refuses `layoutLoad` on untrusted
+        // profiles), and `list`/`enable`/`uninstall`/`logs` touch local
+        // state, not the workspace API. `plugin run` *is* the way an action
+        // reaches the MCP tool surface — each action names an advertised
+        // tool from this very list.
+        if name == "plugin" {
+            continue;
+        }
         // Flatten nested subcommands (daemon, layout) into prefixed tools
         let nested: Vec<_> = sub.get_subcommands().collect();
         if !nested.is_empty() {
@@ -205,5 +216,10 @@ mod tests {
         // Self-referential tools excluded
         assert!(!names.contains(&"mcp"));
         assert!(!names.contains(&"schema"));
+        // Plugin admin stays out: install waits on a human, the rest are
+        // local state, and `pluginInstall` is deliberately not a tool.
+        assert!(!names.contains(&"plugin-install"));
+        assert!(!names.contains(&"plugin-list"));
+        assert!(!names.contains(&"plugin-run"));
     }
 }

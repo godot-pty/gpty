@@ -47,6 +47,7 @@ godot/
         │   ├── ipc_handlers.gd  # WorkspaceIpcHandlers — IPC/pane-API method dispatch
         │   ├── terminal_pane.gd # Control-based renderer, keyboard, selection
         │   ├── concept_router.gd # Pure concept-event routing (extracted, testable)
+        │   ├── plugin_review_text.gd # Pure plugin-review dialog text (extracted, testable)
         │   └── terminal_manager.gd
         ├── ui/                  # UI components
         │   ├── sidebar.gd       # Vertical stack: window mode, workspaces, panes, profiles

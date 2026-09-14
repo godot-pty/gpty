@@ -976,6 +976,8 @@ func _on_sidebar_toggled():
 	_apply_layout()
 
 var _pending_waits: Dictionary = {}
+# pluginInstall reviews waiting on the dialog: id -> summary params
+var _pending_plugin_reviews: Dictionary = {}
 
 func _process(_delta: float):
 	# Concept event polling — must run even before sidebar is ready
@@ -1223,6 +1225,9 @@ func _poll_ipc_requests():
 				"deadline_ms": Time.get_ticks_msec() + w_timeout,
 			}
 			continue
+		if method == "pluginInstall":
+			_show_plugin_review(int(id), params)
+			continue
 		var result = _handle_ipc_method(method, params)
 		var success = not (result is Dictionary and result.has("error"))
 		var result_json = JSON.stringify(result) if typeof(result) != TYPE_STRING else result
@@ -1254,6 +1259,42 @@ func _poll_pending_waits():
 
 func _handle_ipc_method(method: String, params):
 	return WorkspaceIpcHandlers.handle(self, method, params)
+
+# ── Plugin install review (pluginInstall) ─────────────────────────────
+#
+# The CLI sends the validated manifest summary; a human approves here before
+# anything installs (the same trust model as the Workspace Trust dialog, and
+# the same deferred-response pattern as paneWait). The dialog text is built
+# by PluginReviewText — a pure, unit-tested builder whose caps keep the
+# untrusted manifest strings from shaping the dialog.
+
+const PLUGIN_REVIEW_MAX_PENDING := 4
+
+## Ask the user to review a plugin install. The IPC response is deferred:
+## the answer lands when the dialog closes, and the Rust-side fallback
+## deadline for this method is minutes, not seconds.
+func _show_plugin_review(id: int, params: Dictionary):
+	if _pending_plugin_reviews.size() >= PLUGIN_REVIEW_MAX_PENDING:
+		GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error("Too many pending plugin reviews")))
+		return
+	_pending_plugin_reviews[id] = params
+	var dialog = ConfirmationDialog.new()
+	dialog.title = "Plugin Install Review"
+	dialog.dialog_text = PluginReviewText.build(params)
+	dialog.ok_button_text = "Install"
+	dialog.cancel_button_text = "Decline"
+	dialog.confirmed.connect(func():
+		_pending_plugin_reviews.erase(id)
+		GptyTerminal.respond_ipc(id, true, JSON.stringify({"accepted": true}))
+		dialog.queue_free()
+	)
+	dialog.canceled.connect(func():
+		_pending_plugin_reviews.erase(id)
+		GptyTerminal.respond_ipc(id, true, JSON.stringify({"accepted": false}))
+		dialog.queue_free()
+	)
+	add_child(dialog)
+	dialog.popup_centered()
 
 func _ipc_error(msg: String, code := -32000):
 	return WorkspaceIpcHandlers.error(msg, code)
