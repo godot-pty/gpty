@@ -660,16 +660,19 @@ mod tests {
         let mut perms = std::fs::metadata(&path).unwrap().permissions();
         perms.set_mode(0o777);
         std::fs::set_permissions(&path, perms.clone()).unwrap();
-        assert!(
-            validate_executable(&path.to_string_lossy()).is_err(),
-            "group/other-writable executable must be refused"
-        );
+        let refused = validate_executable(&path.to_string_lossy()).is_err();
 
         // The same file, private to its owner, is accepted.
         perms.set_mode(0o755);
         std::fs::set_permissions(&path, perms).unwrap();
-        assert!(validate_executable(&path.to_string_lossy()).is_ok());
+        let accepted = validate_executable(&path.to_string_lossy()).is_ok();
+
+        // Remove the file before asserting: an unconditional cleanup that runs
+        // first cannot leave a world-writable executable behind on a
+        // panicking run.
         let _ = std::fs::remove_file(&path);
+        assert!(refused, "group/other-writable executable must be refused");
+        assert!(accepted, "a private executable must be accepted");
 
         // A safe 0755 binary is still replaceable when its *directory* is
         // writable by group or others. This is the /tmp-without-`t` case.
@@ -736,39 +739,51 @@ mod tests {
         let open_path = open_dir.to_string_lossy().to_string();
 
         // Resolution order decides which file the child runs; the first match
-        // is the one that has to pass.
+        // is the one that has to pass. The verdicts are captured before the
+        // cleanup below, which must run first so a panicking assert cannot
+        // leave a world-writable directory behind.
+        let safe_ok = validate_program("probe-tool", Some(&safe_path)).is_ok();
+        let open_first_err =
+            validate_program("probe-tool", Some(&format!("{open_path}:{safe_path}"))).is_err();
+        let safe_first_ok =
+            validate_program("probe-tool", Some(&format!("{safe_path}:{open_path}"))).is_ok();
+        let nowhere_ok = validate_program("probe-tool", Some("/nonexistent")).is_ok();
+        let no_path_ok = validate_program("probe-tool", None).is_ok();
+        let cargo_toml_err = validate_program("Cargo.toml", Some("")).is_err();
+        let empty_ok = validate_program("probe-tool", Some("")).is_ok();
+        let relative_err = validate_program("./probe-tool", Some(&safe_path)).is_err();
+
+        let _ = std::fs::set_permissions(&open_dir, std::fs::Permissions::from_mode(0o700));
+        let _ = std::fs::remove_dir_all(&base);
+
         assert!(
-            validate_program("probe-tool", Some(&safe_path)).is_ok(),
+            safe_ok,
             "a name resolving into a private directory is accepted"
         );
         assert!(
-            validate_program("probe-tool", Some(&format!("{open_path}:{safe_path}"))).is_err(),
+            open_first_err,
             "the file that PATH order actually selects must be the one judged"
         );
         assert!(
-            validate_program("probe-tool", Some(&format!("{safe_path}:{open_path}"))).is_ok(),
+            safe_first_ok,
             "an earlier safe match wins even when a later directory is unsafe"
         );
-
         // Nothing on PATH: passed through, so the spawn fails the way it
         // always has rather than for a new reason.
-        assert!(validate_program("probe-tool", Some("/nonexistent")).is_ok());
-        assert!(validate_program("probe-tool", None).is_ok());
+        assert!(nowhere_ok);
+        assert!(no_path_ok);
         // An empty PATH entry means the current directory to execvp. A name
         // that resolves there becomes a relative path and is refused rather
         // than waved through — `Cargo.toml` always exists in the test's
         // working directory, which cargo sets to the package root.
         assert!(
-            validate_program("Cargo.toml", Some("")).is_err(),
+            cargo_toml_err,
             "an empty PATH must not become an unchecked current-directory lookup"
         );
         // ... and a name that resolves nowhere there is still passed through.
-        assert!(validate_program("probe-tool", Some("")).is_ok());
+        assert!(empty_ok);
         // A path-like program skips PATH resolution and is checked as before.
-        assert!(validate_program("./probe-tool", Some(&safe_path)).is_err());
-
-        let _ = std::fs::set_permissions(&open_dir, std::fs::Permissions::from_mode(0o700));
-        let _ = std::fs::remove_dir_all(&base);
+        assert!(relative_err);
     }
 
     /// The pane's spawn is the choke point: a bare program name plus a tile

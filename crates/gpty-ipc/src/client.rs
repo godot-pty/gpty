@@ -228,14 +228,17 @@ mod tests {
 
             tokio::time::sleep(Duration::from_millis(200)).await;
 
-            // With GPTY_SECRET set, the client presents the secret and succeeds.
-            unsafe { std::env::set_var("GPTY_SECRET", "s3cret") };
+            // GPTY_SECRET is process-global: the shared env guard serializes
+            // this against every other test that mutates the environment, and
+            // dropping it restores the previous value (none here), so a panic
+            // cannot leak the secret into the rest of a parallel run.
+            let secret = crate::test_env::EnvVar::set("GPTY_SECRET", "s3cret");
             let client = IpcClient::new(&server_path, Duration::from_secs(5));
             let resp = client.call("greet", None).await.unwrap();
             assert!(resp.error.is_none());
 
             // Without the env var, a fresh client fails with UNAUTHORIZED.
-            unsafe { std::env::remove_var("GPTY_SECRET") };
+            drop(secret);
             let client = IpcClient::new(&server_path, Duration::from_secs(5));
             let resp = client.call("greet", None).await.unwrap();
             let err = resp.error.unwrap();

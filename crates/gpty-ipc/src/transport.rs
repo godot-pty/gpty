@@ -296,64 +296,10 @@ pub fn validate_gui_binary(path: &std::path::Path) -> bool {
 mod tests {
     use super::*;
 
-    /// Serialises every test that mutates the process environment. These
-    /// variables are process-global and cargo runs one binary's tests on
-    /// parallel threads, so an unlocked pair races for real: a run failed with
-    /// `env_var_empty_falls_back` clearing `GPTY_SOCKET` between the
-    /// `set_var` and the assertion of `env_var_overrides_default`.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    /// Sets or clears one environment variable while holding [`ENV_LOCK`],
-    /// restoring the previous value (and releasing the lock) on drop —
-    /// including on panic, so a failing test cannot leak its value into the
-    /// rest of a parallel run.
-    struct EnvVar {
-        key: &'static str,
-        previous: Option<std::ffi::OsString>,
-        _lock: std::sync::MutexGuard<'static, ()>,
-    }
-
-    impl EnvVar {
-        fn lock() -> std::sync::MutexGuard<'static, ()> {
-            // A panicking test poisons the lock; its guard restored the value
-            // on the way out, so the environment is still consistent.
-            ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
-        }
-
-        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
-            let lock = Self::lock();
-            let previous = std::env::var_os(key);
-            // SAFETY: the lock makes this the only test touching the variable,
-            // and the guard restores it on drop.
-            unsafe { std::env::set_var(key, value) };
-            Self {
-                key,
-                previous,
-                _lock: lock,
-            }
-        }
-
-        fn clear(key: &'static str) -> Self {
-            let lock = Self::lock();
-            let previous = std::env::var_os(key);
-            // SAFETY: as in `set`.
-            unsafe { std::env::remove_var(key) };
-            Self {
-                key,
-                previous,
-                _lock: lock,
-            }
-        }
-    }
-
-    impl Drop for EnvVar {
-        fn drop(&mut self) {
-            match self.previous.take() {
-                Some(previous) => unsafe { std::env::set_var(self.key, previous) },
-                None => unsafe { std::env::remove_var(self.key) },
-            }
-        }
-    }
+    /// Sets or clears environment variables through the shared test-env
+    /// guard (`crate::test_env`) — see that module for why every test module
+    /// that touches `std::env` uses the same lock.
+    use crate::test_env::{EnvVar, EnvVars};
 
     #[test]
     fn default_socket_path_is_non_empty() {
@@ -373,50 +319,6 @@ mod tests {
         let path = default_socket_path();
         assert!(!path.is_empty());
         assert_ne!(path, "");
-    }
-
-    /// The same guard for a test that needs several variables at once.
-    ///
-    /// [`ENV_LOCK`] is a plain `Mutex`: taking two [`EnvVar`]s in one test
-    /// deadlocks on the second (it did — the whole `xdg` module hung for
-    /// minutes), so the variables a single resolution reads are set together.
-    struct EnvVars {
-        previous: Vec<(&'static str, Option<std::ffi::OsString>)>,
-        _lock: std::sync::MutexGuard<'static, ()>,
-    }
-
-    impl EnvVars {
-        /// Set or clear each variable under one guard; `None` clears a key.
-        fn apply(changes: &[(&'static str, Option<&str>)]) -> Self {
-            let lock = EnvVar::lock();
-            let mut previous = Vec::with_capacity(changes.len());
-            for (key, value) in changes {
-                previous.push((*key, std::env::var_os(key)));
-                // SAFETY: the guard makes this the only test touching these
-                // variables, and it restores them on drop.
-                unsafe {
-                    match value {
-                        Some(value) => std::env::set_var(key, value),
-                        None => std::env::remove_var(key),
-                    }
-                }
-            }
-            Self {
-                previous,
-                _lock: lock,
-            }
-        }
-    }
-
-    impl Drop for EnvVars {
-        fn drop(&mut self) {
-            for (key, previous) in self.previous.drain(..) {
-                match previous {
-                    Some(previous) => unsafe { std::env::set_var(key, previous) },
-                    None => unsafe { std::env::remove_var(key) },
-                }
-            }
-        }
     }
 
     #[cfg(unix)]
