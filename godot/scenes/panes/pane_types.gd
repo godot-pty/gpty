@@ -101,6 +101,29 @@ static func tile_spawns_untrusted(td: Dictionary, default_program: String) -> bo
 		return true
 	return false
 
+## The canonical identity of what a tile would run: program + argv joined
+## with U+001F. The consent store (TrustedStore) keys approvals on this, so
+## a trust approval covers the exact spawn plan — the same derivation the
+## gate above uses (`command` > `shell` > tile's legacy `shell`, plus
+## `shell_args`), kept adjacent so the two can never drift. Empty when the
+## tile names nothing to run.
+static func tile_plan_key(td: Dictionary) -> String:
+	var settings = td.get("settings", {})
+	if not (settings is Dictionary):
+		return ""
+	var program := str(settings.get("command", settings.get("shell", td.get("shell", ""))))
+	var parts: Array[String] = []
+	if program != "":
+		parts.append(program)
+	var args = settings.get("shell_args", [])
+	if args is Array:
+		for a in args:
+			if a is String:
+				parts.append(a)
+	if parts.is_empty():
+		return ""
+	return "\u001f".join(parts)
+
 ## Validate a saved tile dictionary from layout.json / profiles.
 ## Returns {} when the tile is unusable; otherwise a dictionary with
 ## sanitized `settings`, `type_name`, and clamped grid geometry.

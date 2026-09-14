@@ -31,13 +31,14 @@ godot/
     │   └── Phosphor-Regular.ttf
     └── scenes/
         ├── main.tscn            # Root scene (Workspace)
-        ├── autoloads/           # 10 singleton managers
+        ├── autoloads/           # 11 singleton managers
         │   ├── base_persistence_manager.gd  # Shared JSON I/O base
         │   ├── settings_manager.gd
         │   ├── profile_manager.gd
         │   ├── concept_manager.gd
         │   ├── workspace_store.gd  # Named workspace (tab set) persistence
         │   ├── pane_env_store.gd   # User-owned per-pane env, keyed by attachment_id
+        │   ├── trusted_store.gd    # Workspace Trust consent memory (builtins + plugins)
         │   ├── focus_manager.gd
         │   ├── toast_manager.gd
         │   ├── shortcut_manager.gd

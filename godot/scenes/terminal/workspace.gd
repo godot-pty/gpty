@@ -614,10 +614,13 @@ func _init_workspaces():
 
 	# Workspace trust: warn if any saved shell differs from the configured
 	# default. Cancel keeps the layout but swaps untrusted shells out —
-	# every workspace is rebuilt with the default shell instead.
+	# every workspace is rebuilt with the default shell instead. The consent
+	# memory applies first: a tile whose exact spawn plan an approval covers
+	# does not count, so a workspace saved from an approved profile restores
+	# without re-asking.
 	var untrusted: Array = []
 	for i in entries.size():
-		if _tiles_untrusted(_tiles_from(entries[i].get("layout", []))):
+		if _tiles_untrusted_without_consent(_tiles_from(entries[i].get("layout", []))):
 			untrusted.append(i)
 	if not untrusted.is_empty():
 		_show_multi_trust_dialog(entries, active, untrusted)
@@ -726,6 +729,57 @@ func _tiles_untrusted(tiles: Array[Dictionary]) -> bool:
 		if _tile_spawns_untrusted(td):
 			return true
 	return false
+
+## The restore gate with the consent memory applied: an untrusted tile whose
+## exact spawn plan an approval covers no longer counts. Anything not covered
+## keeps today's behavior.
+func _tiles_untrusted_without_consent(tiles: Array[Dictionary]) -> bool:
+	var approved := TrustedStore.approved_plan_keys(GptyTerminal.get_app_version())
+	for td in tiles:
+		if not _tile_spawns_untrusted(td):
+			continue
+		var key := PaneTypes.tile_plan_key(td)
+		if key == "" or not approved.has(key):
+			return true
+	return false
+
+## Consent check for profile activation (and the IPC layoutLoad gate):
+## a shipped builtin is covered once approved at this app version — its
+## content ships with the version, so a new release re-asks; any other
+## profile is covered when every untrusted tile's exact spawn plan was
+## approved through a builtin (a workspace saved from one restores the same
+## way). Content that arrived any other way has no record and keeps asking.
+func _profile_consented(profile: Dictionary) -> bool:
+	if profile.get("builtin", false):
+		return TrustedStore.is_builtin_approved(
+			str(profile.get("name", "")), GptyTerminal.get_app_version())
+	var approved := TrustedStore.approved_plan_keys(GptyTerminal.get_app_version())
+	for td in profile.get("tiles", []):
+		if not (td is Dictionary):
+			continue
+		if not _tile_spawns_untrusted(td):
+			continue
+		var key := PaneTypes.tile_plan_key(td)
+		if key == "" or not approved.has(key):
+			return false
+	return true
+
+## The trust dialog's consent is remembered only for content gpty ships: a
+## builtin records its name + app version and every tile's spawn plan.
+## User-authored profiles never record consent — approving one does not
+## write, so it asks again (the record covers installed and shipped
+## content; anything else is a new decision each time).
+func _remember_profile_consent(profile: Dictionary, tiles: Array):
+	if not profile.get("builtin", false):
+		return
+	var plans: Array = []
+	for td in tiles:
+		if td is Dictionary:
+			var key := PaneTypes.tile_plan_key(td)
+			if key != "":
+				plans.append(key)
+	TrustedStore.approve_builtin(
+		str(profile.get("name", "")), GptyTerminal.get_app_version(), plans)
 
 ## What the untrusted tiles in `tiles` would run, for the trust dialog. Capped
 ## in PaneTypes — the content is file data, not something we render raw.
@@ -1284,6 +1338,11 @@ func _show_plugin_review(id: int, params: Dictionary):
 	dialog.ok_button_text = "Install"
 	dialog.cancel_button_text = "Decline"
 	dialog.confirmed.connect(func():
+		# Consent made once counts: the accepted plugin is recorded at its
+		# pinned revision, so installed content does not re-prompt forever
+		# (and a *new* revision re-prompts — the record keys on the pin).
+		TrustedStore.approve_plugin(
+			str(params.get("id", "")), str(params.get("revision", "")))
 		_pending_plugin_reviews.erase(id)
 		GptyTerminal.respond_ipc(id, true, JSON.stringify({"accepted": true}))
 		dialog.queue_free()
@@ -1516,13 +1575,19 @@ func _activate_profile(p_name: String):
 		return
 
 	# Workspace trust: a profile can change the program, its arguments, and its
-	# environment. All three go through the same gate as the workspace restore.
+	# environment. All three go through the same gate as the workspace restore
+	# — with the consent memory applied: content the user already approved
+	# (a builtin at this app version, or a profile whose every untrusted
+	# spawn plan an approval covers) activates without re-asking.
 	var profile_tiles: Array[Dictionary] = []
 	for td in profile.get("tiles", []):
 		if td is Dictionary:
 			profile_tiles.append(td)
 
 	if _tiles_untrusted(profile_tiles):
+		if _profile_consented(profile):
+			_do_profile_activate(profile)
+			return
 		_show_profile_trust_dialog(profile, profile_tiles)
 		return
 
@@ -1540,6 +1605,7 @@ func _show_profile_trust_dialog(profile: Dictionary, tiles: Array):
 	dialog.ok_button_text = "Activate"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():
+		_remember_profile_consent(profile, details_tiles)
 		_do_activate(profile)
 		dialog.queue_free()
 	)

@@ -155,6 +155,24 @@ func test_trust_gate_has_no_env_authority():
 		{"settings": {"type": "terminal", "shell_env": "EDITOR=vim"}},
 		"/bin/bash"))
 
+func test_plan_key_identifies_the_exact_spawn_plan():
+	# The plan key feeds the consent store; it must be the same derivation
+	# the gate uses (command > shell > legacy shell, plus shell_args) so an
+	# approval can never cover something the gate did not see.
+	var trusted := {"settings": {"type": "terminal", "command": "/bin/bash"}}
+	assert_eq(PaneTypes.tile_plan_key(trusted), "/bin/bash")
+	# An argv payload changes the plan identity even when the program matches.
+	var argv := {"settings": {"type": "terminal", "command": "/bin/bash", "shell_args": ["-c", "echo hi"]}}
+	assert_eq(PaneTypes.tile_plan_key(argv), "/bin/bash\u001f-c\u001fecho hi")
+	assert_true(PaneTypes.tile_plan_key(argv) != PaneTypes.tile_plan_key(trusted))
+	# A different program is a different plan.
+	assert_eq(PaneTypes.tile_plan_key({"settings": {"type": "terminal", "command": "omp"}}), "omp")
+	# The legacy shell key participates in the same derivation.
+	assert_eq(PaneTypes.tile_plan_key({"shell": "lazygit", "settings": {"type": "terminal"}}), "lazygit")
+	# Nothing to run = no plan.
+	assert_eq(PaneTypes.tile_plan_key({"settings": {"type": "terminal"}}), "")
+	assert_eq(PaneTypes.tile_plan_key({}), "")
+
 # ── PaneTypes.untrusted_plan (what the trust dialog shows) ─────────────
 
 func test_untrusted_plan_lists_what_will_run():

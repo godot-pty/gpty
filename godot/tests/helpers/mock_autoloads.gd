@@ -30,6 +30,7 @@ static func setup():
 	_override_script("WorkspaceStore", _MockWorkspaceStore)
 	_override_script("ConceptManager", _MockConceptManager)
 	_override_script("PaneEnvStore", _MockPaneEnvStore)
+	_override_script("TrustedStore", _MockTrustedStore)
 
 	# For node-only autoloads, just ensure they're valid nodes
 	# (they exist from project.godot autoload registration)
@@ -40,6 +41,7 @@ static func teardown():
 	_restore_script("ProfileManager")
 	_restore_script("WorkspaceStore")
 	_restore_script("PaneEnvStore")
+	_restore_script("TrustedStore")
 	_store.clear()
 	_original_scripts.clear()
 
@@ -96,6 +98,18 @@ class _MockConceptManager extends "res://scenes/autoloads/concept_manager.gd":
 ## `MockAutoloads.set_store(PaneEnvStore.ENV_FILE, ...)` and then call
 ## `PaneEnvStore.reload()` to see the seeded file.
 class _MockPaneEnvStore extends "res://scenes/autoloads/pane_env_store.gd":
+	func _read_file(path: String) -> Dictionary:
+		return MockAutoloads.get_store(path)
+	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.set_store(path, data)
+	func _on_init():
+		reload()
+
+
+## The consent store loads through the mocked backend, so a test can seed
+## `MockAutoloads.set_store(TrustedStore.TRUSTED_FILE, ...)` and then call
+## `TrustedStore.reload()` to see the seeded file.
+class _MockTrustedStore extends "res://scenes/autoloads/trusted_store.gd":
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):

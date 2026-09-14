@@ -148,3 +148,45 @@ func test_layout_load_refuses_an_untrusted_profile():
 	var loaded = WorkspaceIpcHandlers.handle(_ws, "layoutLoad", {"name": "contract-trusted"})
 	assert_true(loaded.get("success", false), "a trusted profile must still load over IPC")
 	assert_eq(_ws._tm.tiles.size(), 1, "the trusted profile replaces the layout")
+
+# ── Consent memory ────────────────────────────────────────────────────
+
+func test_consented_content_skips_the_trust_gates():
+	var version: String = GptyTerminal.get_app_version()
+	# A builtin is covered once approved at this app version — never before,
+	# and never from another version's approval.
+	var builtin := {"name": "contract-builtin", "builtin": true, "tiles": [
+		{"settings": {"type": "terminal", "command": "contract-tool"}},
+	]}
+	assert_false(_ws._profile_consented(builtin), "an unapproved builtin is not consented")
+	TrustedStore.approve_builtin("contract-builtin", version, ["contract-tool"])
+	assert_true(_ws._profile_consented(builtin), "an approved builtin at this version is consented")
+	TrustedStore.approve_builtin("contract-stale", "0.0.0", ["contract-tool"])
+	var stale := {"name": "contract-stale", "builtin": true, "tiles": [
+		{"settings": {"type": "terminal", "command": "contract-tool"}},
+	]}
+	assert_false(_ws._profile_consented(stale), "an approval from another app version is stale")
+
+	# A user profile is covered when every untrusted tile's exact plan was
+	# approved; any uncovered plan keeps the gate.
+	var covered := {"name": "contract-covered", "tiles": [
+		{"settings": {"type": "terminal", "command": "contract-tool"}},
+	]}
+	assert_true(_ws._profile_consented(covered), "an approved plan covers a user profile")
+	var uncovered := {"name": "contract-uncovered", "tiles": [
+		{"settings": {"type": "terminal", "command": "contract-other"}},
+	]}
+	assert_false(_ws._profile_consented(uncovered), "an unapproved plan still asks")
+
+	# The restore gate: covered plans stop counting, anything else does not,
+	# and a trusted tile never counts with or without a record.
+	var tiles_covered: Array[Dictionary] = [
+		{"settings": {"type": "terminal", "command": "contract-tool"}},
+	]
+	assert_false(_ws._tiles_untrusted_without_consent(tiles_covered))
+	var tiles_uncovered: Array[Dictionary] = [
+		{"settings": {"type": "terminal", "command": "contract-other"}},
+	]
+	assert_true(_ws._tiles_untrusted_without_consent(tiles_uncovered))
+	var tiles_trusted: Array[Dictionary] = [{"settings": {"type": "terminal"}}]
+	assert_false(_ws._tiles_untrusted_without_consent(tiles_trusted))

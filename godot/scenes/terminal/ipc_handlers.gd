@@ -143,13 +143,16 @@ static func handle(ws, method: String, params: Dictionary):
 			# an environment — the same decision the sidebar gates behind the
 			# Workspace Trust dialog. A caller cannot answer that dialog, and
 			# naming the profile is not consent to what a file asks for, so
-			# untrusted profiles are refused here and the user activates them in
-			# the GUI.
+			# untrusted profiles are refused here — unless the consent memory
+			# already covers them (a builtin approved at this app version, or
+			# a profile whose every untrusted spawn plan an approval covers):
+			# the user approved that exact content in the GUI, and the record
+			# is the proof a caller cannot forge.
 			var profile_tiles: Array[Dictionary] = []
 			for td in profile.get("tiles", []):
 				if td is Dictionary:
 					profile_tiles.append(td)
-			if ws._tiles_untrusted(profile_tiles):
+			if ws._tiles_untrusted(profile_tiles) and not ws._profile_consented(profile):
 				return error(
 					"Profile '%s' needs confirmation in the GUI (it starts a different program or passes arguments)"
 					% profile_name)
