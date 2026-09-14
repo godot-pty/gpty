@@ -323,7 +323,10 @@ pub(crate) async fn review_install(
 
 /// What the review dialog renders. All fields come from a validated manifest
 /// (caps applied at parse time); the GUI re-caps the display, because the
-/// dialog text is untrusted file content.
+/// dialog text is untrusted file content. `requested_ref` is the ref the
+/// user named on the command line (a tag, branch, or commit SHA — or
+/// "default branch" for a bare install), shown beside the resolved revision
+/// so the review answers "what I asked for, resolved to what I get".
 pub(crate) fn review_summary(
     manifest: &Manifest,
     target: &InstallTarget,
@@ -334,6 +337,7 @@ pub(crate) fn review_summary(
         "name": manifest.name,
         "version": manifest.version.to_string(),
         "revision": revision,
+        "requested_ref": target.ref_name.clone().unwrap_or_else(|| "default branch".into()),
         "source": format!("github.com/{}/{}", target.owner, target.repo),
         "build": manifest.build,
         "startup": manifest.startup,
@@ -783,6 +787,14 @@ tiles = [{settings = {type = "terminal"}, col = 0, row = 0}]
         let summary = review_summary(&manifest, &target, "abc123def456");
         assert_eq!(summary["id"], "owner/repo");
         assert_eq!(summary["revision"], "abc123def456");
+        // A bare install resolves the default branch tip; the dialog says so
+        // instead of showing a ref the user never named.
+        assert_eq!(summary["requested_ref"], "default branch");
+        // A named ref is shown as typed: the review answers "what I asked
+        // for, resolved to what I get".
+        let pinned = parse_target("owner/repo@v1.2.0").unwrap();
+        let pinned_summary = review_summary(&manifest, &pinned, "abc123def456");
+        assert_eq!(pinned_summary["requested_ref"], "v1.2.0");
         assert_eq!(summary["actions"][0]["command"], "pane-run");
         assert_eq!(summary["actions"][0]["args"]["command"], "cargo test");
         assert_eq!(summary["events"][0]["type"], "pane.killed");

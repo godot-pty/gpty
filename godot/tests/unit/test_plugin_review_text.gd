@@ -8,12 +8,22 @@ extends GutTest
 func test_shows_identity_and_source():
 	var text := PluginReviewText.build({
 		"id": "owner/demo", "name": "Demo", "version": "1.2.3",
-		"revision": "a1b2c3d4e5f6", "source": "github.com/owner/demo",
+		"revision": "a1b2c3d4e5f6", "requested_ref": "v1.2.0",
+		"source": "github.com/owner/demo",
 	})
 	assert_true(text.contains("Demo (owner/demo)"), "the display name and id are shown")
 	assert_true(text.contains("1.2.3"), "the version is shown")
 	assert_true(text.contains("a1b2c3d4e5f6"), "the revision is shown")
+	assert_true(text.contains("Requested: v1.2.0"), "the ref the user named is shown")
 	assert_true(text.contains("github.com/owner/demo"), "the source is shown")
+
+func test_bare_install_shows_the_default_branch():
+	var text := PluginReviewText.build({
+		"id": "owner/demo",
+		"requested_ref": "default branch",
+	})
+	assert_true(text.contains("Requested: default branch"),
+		"a bare install says what it resolved, not a ref nobody named")
 
 func test_actions_list_command_and_args():
 	var text := PluginReviewText.build({

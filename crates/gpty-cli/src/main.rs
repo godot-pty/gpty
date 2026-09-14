@@ -237,7 +237,9 @@ enum LayoutAction {
 enum PluginAction {
     /// Install a plugin from a git repo, reviewed in the GUI
     Install {
-        /// Plugin target: owner/repo or owner/repo@ref
+        /// Plugin target: owner/repo, or owner/repo@ref where ref is any
+        /// tag, branch, or commit SHA. A bare owner/repo installs the
+        /// default branch's latest.
         target: String,
     },
     /// List installed plugins

@@ -16,6 +16,10 @@ static func build(params: Dictionary) -> String:
 	var lines: Array[String] = []
 	lines.append("Plugin: %s (%s)" % [field(params, "name", 64), field(params, "id", 64)])
 	lines.append("Version %s  ·  revision %s" % [field(params, "version", 16), field(params, "revision", 64)])
+	# The ref the user named on the command line (a tag, branch, or commit
+	# SHA — "default branch" for a bare install), resolved to the pinned
+	# revision above.
+	lines.append("Requested: %s" % field(params, "requested_ref", 96))
 	lines.append("Source: %s" % field(params, "source", 96))
 
 	var actions: Array = params.get("actions", [])
