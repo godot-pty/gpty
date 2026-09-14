@@ -689,6 +689,27 @@ mod tests {
     /// lock one test's session spawns the other test's script.
     static OMP_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+    /// A path that cannot collide, even between two creations in the same
+    /// process in the same clock tick: the nanosecond fraction is a hint, not
+    /// a uniqueness source (a coarse clock repeats it), so a process-global
+    /// counter is the guarantee. The parallel test gate (`ci-check` step 4.2)
+    /// exists to catch exactly this class — two tests racing on a shared temp
+    /// path once reported a spawn failure as "Text file busy".
+    fn fake_script_path(kind: &str) -> std::path::PathBuf {
+        static SCRIPT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!(
+            "gpty_fake_omp_{}_{}_{}_{}.sh",
+            kind,
+            std::process::id(),
+            nanos,
+            SCRIPT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+        ))
+    }
+
     /// A child that answers and then exits must not brick the session. The
     /// next prompt has to re-spawn; without that, every later turn writes
     /// into a dead pipe and the pane only recovers by being reopened.
@@ -703,14 +724,7 @@ mod tests {
 
         // A fake omp: greets, ignores the handshake, answers one prompt, exits.
         // The guard removes it on drop, including if an assertion panics.
-        let script = TempScript::new(std::env::temp_dir().join(format!(
-                "gpty_fake_omp_{}_{}.sh",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.subsec_nanos())
-                    .unwrap_or(0)
-            )));
+        let script = TempScript::new(fake_script_path("respawn"));
         let mut file = std::fs::File::create(script.path()).unwrap();
         file.write_all(
             b"#!/bin/sh\n\
@@ -783,14 +797,7 @@ mod tests {
         use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
 
-        let script = TempScript::new(std::env::temp_dir().join(format!(
-                "gpty_fake_omp_pipes_{}_{}.sh",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.subsec_nanos())
-                    .unwrap_or(0)
-            )));
+        let script = TempScript::new(fake_script_path("pipes"));
         let mut file = std::fs::File::create(script.path()).unwrap();
         file.write_all(
             b"#!/bin/sh\n\
