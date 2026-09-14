@@ -5,6 +5,7 @@
 //! (unless `--no-daemon` is passed).
 
 mod commands;
+mod plugin_manifest;
 #[cfg(test)]
 mod tests;
 

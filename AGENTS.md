@@ -274,6 +274,17 @@ gPTY is evolving from a multi-terminal emulator into an ADE — a graphical PTY 
   - Webview/WebSocket panes — a new trust boundary; not v1.
 - **Positioning & naming:** the wedge is GUI + public-API PTY foundation + concept engine + Windows + hardening. Keep the `gpty` name (2026-09 decision): rebranding is positioning, not renaming. Two-tier naming convention: the display name is `gPTY` (UI, docs, prose); machine-facing identifiers stay lowercase/actual — `gpty` binary, crates, repo, and socket paths; `GPTY_*` env vars; `GptyTerminal`; `@gpty/omp-events`.
 
+### Plugin Manifest (v0.5.5)
+
+`gpty-plugin.toml` — the schema lives in `crates/gpty-cli/src/plugin_manifest.rs` (`parse_manifest`, currently dead-code-allowed until the install item wires it). Top-level keys: `id` (`owner/name`, `[a-z0-9-]` parts 1–63 chars), `name` (1–64 chars), `version` + `min_gpty_version` (semver `X.Y.Z`, no pre-release), `platforms` (subset of `linux|macos|windows`, default all), `build`/`startup` (argv arrays), and five array-of-table sections: `[[actions]]` (≤64: `name`, `command`, optional `args`), `[[events]]` (≤64: `name`, `type`), `[[link_handlers]]` (≤16: `scheme`, `command` argv), `[[concepts]]` (≤128), `[[profiles]]` (≤64, ≤64 tiles each).
+
+Rules that must not weaken:
+- **Nothing executes at parse/validation time**, and argv is never a shell string — the same "no shell evaluation" rule as tiles (`build`/`startup`/link-handler commands are argv arrays, ≤32 entries, ≤4096 chars total, no U+FFFD).
+- **Every concept is engine-accepted**: the validator round-trips each `[[concepts]]` entry through the real `gpty_core::concept::concepts_from_json`; an entry the engine would silently drop (a trigger/condition outside the Rust `regex` dialect — e.g. a PCRE2 lookbehind) rejects the manifest. Entries hold to the closed key set the visual editor compiles (`name`, `trigger`, `enabled`, `conditions`, `capture_mode`, `stop_timeout_ms`, `stop_on_input`, `actions`; `capture_mode` ∈ {absent, `single_line`}), so a plugin concept cannot smuggle a key into the engine.
+- **Tiles mirror `PaneTypes.sanitize_tile`** — pane type ∈ the five `PaneTypes.ALL` entries (legacy `observer` refused with guidance), grid geometry within `GRID` (60), `rows`/`cols` ≤ 500/2000, `attachment_id` pattern — with one deliberate difference: the sanitizer clamps legacy files, the validator rejects (a manifest is authored content; an out-of-range value is an authoring error). Never relax these to "clamp" and never duplicate the grid constants in the GUI.
+- **`[[actions]].command` is the published API surface** — the same derivation `schema::mcp_tool_names()` produces (the 19 MCP tools); a manifest cannot name anything else. **`[[events]].type`** is the closed event-socket vocabulary (`pane.spawned`, `pane.killed`, `concept.matched`, `state.declared`, plus the generic OMP set `session.bound`, `agent.started`, `turn.started`, `tool.call`, `thinking.delta`). Adding a vocabulary entry means adding it to those constants deliberately, in lockstep with the emitting side.
+- Unknown keys are rejected in manifest sections (closed schema); unknown *tile settings* keys are tolerated, mirroring `_set_typed`'s inertness.
+
 ### Security
 
 Policy (threat model, supported versions, reporting, what gpty does not defend against) lives in [SECURITY.md](SECURITY.md). The rules below are implementation constraints for this repo.
