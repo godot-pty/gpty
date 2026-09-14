@@ -34,25 +34,22 @@ static func clamp_grid_int(v, lo: int, hi: int) -> int:
 const PANE_MAX_ROWS := 500
 const PANE_MAX_COLS := 2000
 
-## Caps for the Workspace Trust dialog: env lines and value length per tile,
-## and total detail lines across the dialog. The content is file-supplied.
-const TRUST_MAX_ENV_LINES := 8
+## Caps for the Workspace Trust dialog: value length and total detail lines
+## across the dialog. The content is file-supplied.
 const TRUST_MAX_VALUE_LEN := 160
 const TRUST_MAX_DETAIL_LINES := 24
 
 ## What an untrusted tile would run, one labelled fact per line, for the
 ## Workspace Trust dialog. Empty when the tile matches the caller's defaults.
 ##
-## Consent is only informed if the user sees the program, arguments, and
-## environment entries being approved — the summary sentence alone said "a
-## different environment" without saying which. This is attacker-controlled
-## file content rendered into a dialog, so it is escaped and capped: every env
-## entry keeps its "environment:" label (a value cannot forge a "program:"
-## line), and a thousand-entry environment cannot build a dialog taller than
-## the screen.
-static func untrusted_plan(
-	td: Dictionary, default_program: String, default_env: String
-) -> PackedStringArray:
+## Consent is only informed if the user sees the program and arguments being
+## approved — the summary sentence alone said "a different program" without
+## saying which. Environment is deliberately absent: a file cannot supply env
+## (restore strips `shell_env` with a notice; per-pane env is the user's own
+## `PaneEnvStore`, written by the pane settings UI), so there is nothing to
+## show. This is attacker-controlled file content rendered into a dialog, so
+## it is escaped and capped.
+static func untrusted_plan(td: Dictionary, default_program: String) -> PackedStringArray:
 	var out := PackedStringArray()
 	var settings = td.get("settings", {})
 	if not (settings is Dictionary):
@@ -68,16 +65,6 @@ static func untrusted_plan(
 				rendered.append(_trust_text(a))
 		if not rendered.is_empty():
 			out.append("arguments: " + ", ".join(rendered))
-	var env := str(settings.get("shell_env", "")).strip_edges()
-	if env != "" and env != default_env.strip_edges():
-		var lines := env.split("\n", false)
-		var shown := 0
-		for line in lines:
-			if shown >= TRUST_MAX_ENV_LINES:
-				out.append("environment: … %d more line(s)" % (lines.size() - shown))
-				break
-			out.append("environment: " + _trust_text(str(line)))
-			shown += 1
 	return out
 
 ## Escape a value for display in the trust dialog. Newlines are the dangerous
@@ -96,11 +83,13 @@ static func _trust_text(text: String) -> String:
 	return escaped
 
 ## True when a saved tile would spawn something other than the caller's
-## defaults: a different program, extra arguments, or a different environment.
-## All three change what runs, so a restore gate must look at all three — a
-## `shell`-only check missed a tile that shipped `command`, an argv payload
-## (`shell_args: ["-c", "…"]`), or an env-only payload.
-static func tile_spawns_untrusted(td: Dictionary, default_program: String, default_env: String) -> bool:
+## defaults: a different program, or extra arguments. Both change what runs,
+## so a restore gate must look at both — a `shell`-only check missed a tile
+## that shipped `command` or an argv payload (`shell_args: ["-c", "…"]`).
+## Environment is not a file decision: restore strips a tile's `shell_env`
+## with a notice and never lets it reach a child, so there is no env clause
+## here to trigger.
+static func tile_spawns_untrusted(td: Dictionary, default_program: String) -> bool:
 	var settings = td.get("settings", {})
 	if not (settings is Dictionary):
 		return false
@@ -109,9 +98,6 @@ static func tile_spawns_untrusted(td: Dictionary, default_program: String, defau
 		return true
 	var args = settings.get("shell_args", [])
 	if args is Array and not args.is_empty():
-		return true
-	var env := str(settings.get("shell_env", "")).strip_edges()
-	if env != "" and env != default_env.strip_edges():
 		return true
 	return false
 

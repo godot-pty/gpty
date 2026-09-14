@@ -6,8 +6,10 @@ class_name PaneSettingsPanel
 ## Emitted after the target pane's settings were applied. The panel has no
 ## view of the workspace, so anything the apply can invalidate across panes —
 ## `attachment_id` above all, which is how IPC addresses a pane — is the
-## owner's to re-check.
-signal settings_applied(body: Control)
+## owner's to re-check. `settings` is the gathered dict that was applied, and
+## `previous_id` the pane's id before the apply, so the owner can re-key
+## per-pane state (the env store) when the id changed.
+signal settings_applied(body: Control, settings: Dictionary, previous_id: String)
 
 var _target: Control
 var _debounce_timer: Timer
@@ -109,5 +111,7 @@ func _build_ui():
 func _apply_to_target():
 	if _target == null or not is_instance_valid(_target): return
 	if not _gather_func.is_valid(): return
-	_target.apply_settings(_gather_func.call())
-	settings_applied.emit(_target)
+	var settings: Dictionary = _gather_func.call()
+	var previous_id: String = str(_target.attachment_id)
+	_target.apply_settings(settings)
+	settings_applied.emit(_target, settings, previous_id)

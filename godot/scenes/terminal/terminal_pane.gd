@@ -229,6 +229,13 @@ func _ready():
 	_terminal = GptyTerminal.new()
 	_terminal.name = "GptyTerminal"
 	add_child(_terminal)
+	# Per-pane env is the user's own store, keyed by this pane's id — final
+	# here, because attachment-id renames run before the wrapper enters the
+	# tree. The base below was applied by the settings pipeline (the user's
+	# global env); the store entry, when present, overlays it.
+	var own_env := PaneEnvStore.env_for(attachment_id)
+	if own_env != "":
+		shell_env = own_env
 	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines, JSON.stringify(shell_args))
 
 	if color_scheme_path != "":
@@ -306,10 +313,12 @@ func _notification(what):
 
 func _get_layout_state() -> Dictionary:
 	var state = super._get_layout_state()
+	# `shell_env` is deliberately absent: a saved file must not carry env.
+	# The pane's own env lives in PaneEnvStore, keyed by attachment_id.
 	state.merge({
 		"shell": shell_command, "shell_args": shell_args.duplicate(),
 		"rows": rows, "cols": cols,
-		"shell_env": shell_env, "font_path": font_path,
+		"font_path": font_path,
 		"color_scheme_path": color_scheme_path,
 		"cursor_shape": cursor_shape, "cursor_blink": cursor_blink,
 		"cursor_blink_speed": cursor_blink_speed, "cursor_color": cursor_color,
@@ -1175,8 +1184,8 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 
 	# ── Shell ──
 	var env_te = TextEdit.new()
-	env_te.text = shell_env
-	env_te.placeholder_text = "KEY=value (one per line)"
+	env_te.text = PaneEnvStore.env_for(attachment_id)
+	env_te.placeholder_text = "KEY=value (one per line) — empty inherits the global environment"
 	env_te.custom_minimum_size = Vector2(0, 60)
 	env_te.add_theme_font_size_override("font_size", 11)
 	env_te.text_changed.connect(func(): panel._debounce_timer.start())

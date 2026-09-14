@@ -108,8 +108,10 @@ but it does not and cannot change the trust class.
 - **No scraping of agent TUIs.** Pane output is presentation, not a structured event source.
   Observability comes only from documented hooks (the OMP event extension) and the control API.
 - **No shell evaluation of configured "commands".** A saved tile or profile names a program and an
-  argv array; there is no shell string anywhere in the spawn path. Restored environments pass
-  through one blocklist before they reach a child.
+  argv array; there is no shell string anywhere in the spawn path. A saved file cannot supply
+  environment at all: a tile's `shell_env` is dropped on restore with a notice, and the environment
+  a pane gets — the inherited one plus your own global and per-pane settings — passes through one
+  blocklist before it reaches a child.
 
 ## Hardening in place
 
@@ -130,10 +132,10 @@ These are load-bearing guards. Reports that require removing one of them should 
 - **Restored layouts and profiles**: tile types, settings, and grid geometry are validated; a tile
   that starts a different program or passes extra arguments raises the Workspace Trust prompt before
   it runs, and `layoutLoad` over the control socket refuses such a profile outright (a caller cannot
-  answer a dialog, so naming the profile is not consent to what the file asks for). A tile's
-  `shell_env` is currently overwritten by your own global environment setting before the shell
-  starts, so it neither runs nor needs consent; the ordering that discards it is tracked in
-  [ROADMAP.md](ROADMAP.md) with the v0.5.5 environment model.
+  answer a dialog, so naming the profile is not consent to what the file asks for). Environment is
+  not a file decision: a tile's `shell_env` is dropped on restore with a notice naming what was
+  dropped, and per-pane environment is the user's own — `user://pane_env.json`, written only by the
+  pane settings UI and keyed by the pane's id, applied at spawn over the user's global environment.
 - **Concepts**: the standard Rust `regex` crate only (no backtracking engine), bounded counts and
   lengths, a 16 KiB line cap before matching, 4 MiB capture buffers, and a 64 KiB OSC cap in the
   parser.
@@ -169,9 +171,11 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   you would not hand to a pane (or from inside a pane, or over SSH) and those panes inherit them.
   The same applies to the GUI the CLI auto-spawns: it is a child of the CLI and inherits *its*
   environment, so a `gpty` run from a credential-holding shell hands that context to every pane
-  opened afterwards. This is the user's own context, not a file's — but it bounds what any
-  per-pane environment model can claim, and it is why the roadmap treats environment as authority
-  rather than configuration.
+  opened afterwards. On top of that inherited environment a pane gets your global `shell_env`
+  overlaid by the pane's own entry from the user-owned `pane_env.json` store; saved files cannot
+  supply environment. This is the user's own context, not a file's — but it bounds what any
+  per-pane environment model can claim, and it is why environment is treated as authority rather
+  than configuration.
 - **Scrollback is plaintext** in `user://`. The store, its WAL siblings and the JSON stores beside
   it are created owner-only (0600) rather than with your umask, but the content is not encrypted:
   anything printed in a pane — tokens included — is stored on disk the same way a shell history file

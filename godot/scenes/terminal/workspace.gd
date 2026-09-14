@@ -43,8 +43,22 @@ func _ready():
 	# addresses it), and a typed duplicate would land *after* the pane was
 	# attached — the one path that used to skip the uniqueness check. The id
 	# is regenerated here, and the pane list redrawn because it shows it.
-	pane_settings.settings_applied.connect(func(body: Control):
+	# This handler is also the ONLY writer of the per-pane env store: env is
+	# keyed by the pane's id, so the entry follows a rename, and only what the
+	# user typed in the pane settings UI ever lands in the trusted map.
+	pane_settings.settings_applied.connect(func(body: Control, settings: Dictionary, previous_id: String):
 		_ensure_unique_attachment_id(body)
+		if previous_id != "" and body.attachment_id != previous_id:
+			var own_env := PaneEnvStore.env_for(previous_id)
+			PaneEnvStore.remove_env(previous_id)
+			if own_env != "":
+				PaneEnvStore.set_env(body.attachment_id, own_env)
+		if settings.has("shell_env"):
+			var env_text: String = str(settings.get("shell_env", "")).strip_edges()
+			if env_text == "":
+				PaneEnvStore.remove_env(body.attachment_id)
+			else:
+				PaneEnvStore.set_env(body.attachment_id, env_text)
 		_apply_active_workspace_view())
 
 	_build_sidebar()
@@ -634,14 +648,24 @@ func _build_workspaces(entries: Array[Dictionary], active: int):
 
 func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 	var tm: TerminalManager = ws.tm
-	var grid: Control = ws.grid
 	tm.reset()
+	var dropped_env: Array[String] = []
 	for td in tiles:
 		if not (td is Dictionary): continue
 		var st = PaneTypes.sanitize_tile(td, PaneTypes.GRID)
 		if st.is_empty(): continue
 		var settings: Dictionary = st["settings"]
 		var type_name: String = st["type_name"]
+
+		# A file must not carry env. Legacy tiles may have one; it is dropped
+		# here — named in the notice, never adopted into the pane-env store,
+		# because adopting would launder a hostile file's payload into the
+		# trusted map. The pane's own env comes from PaneEnvStore at spawn.
+		var file_env := str(settings.get("shell_env", "")).strip_edges()
+		if file_env != "":
+			settings.erase("shell_env")
+			var label: String = str(settings.get("pane_name", type_name))
+			dropped_env.append("%s: %s" % [label, PaneTypes._trust_text(file_env)])
 
 		var body = tm.create_body(type_name)
 		if body == null: continue
@@ -668,6 +692,19 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 	else:
 		tm._sync_edge_strips()
 
+	if not dropped_env.is_empty():
+		var shown := dropped_env.slice(0, 3)
+		var shown_ps := PackedStringArray()
+		for s in shown:
+			shown_ps.append(s)
+		var more := dropped_env.size() - shown.size()
+		var tail := ""
+		if more > 0:
+			tail = " (+%d more pane%s)" % [more, "s" if more > 1 else ""]
+		ToastManager.warn(
+			"Saved pane environment was dropped%s: %s. Files cannot supply environment — set it again in Pane Settings → Environment."
+			% [tail, ", ".join(shown_ps)], 8.0)
+
 func _tiles_from(raw: Array) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for td in raw:
@@ -676,13 +713,13 @@ func _tiles_from(raw: Array) -> Array[Dictionary]:
 	return out
 
 ## True when a saved tile would spawn something other than this user's current
-## defaults. The program, its arguments, and its environment all change what
-## runs, so all three are the trust decision — checking only `shell` (the
-## legacy key) let a tile ship `command`, `shell_args: ["-c", "…"]`, or a
-## `shell_env` the dialog never saw, and restore consumes all of them.
+## defaults. The program and its arguments both change what runs, so both are
+## the trust decision — checking only `shell` (the legacy key) let a tile ship
+## `command` or `shell_args: ["-c", "…"]` that the dialog never saw. Env is not
+## a file decision: restore strips `shell_env` before it can reach a spawn.
 func _tile_spawns_untrusted(td: Dictionary) -> bool:
 	return PaneTypes.tile_spawns_untrusted(
-		td, SettingsManager.cfg_shell_command, SettingsManager.cfg_shell_env)
+		td, SettingsManager.cfg_shell_command)
 
 func _tiles_untrusted(tiles: Array[Dictionary]) -> bool:
 	for td in tiles:
@@ -696,7 +733,7 @@ func _untrusted_details(tiles: Array[Dictionary]) -> String:
 	var lines: Array[String] = []
 	for td in tiles:
 		var plan := PaneTypes.untrusted_plan(
-			td, SettingsManager.cfg_shell_command, SettingsManager.cfg_shell_env)
+			td, SettingsManager.cfg_shell_command)
 		if plan.is_empty():
 			continue
 		var settings = td.get("settings", {})
@@ -718,7 +755,7 @@ func _show_multi_trust_dialog(entries: Array[Dictionary], active: int, untrusted
 		for td in _tiles_from(entries[i].get("layout", [])):
 			details_tiles.append(td)
 	var details := _untrusted_details(details_tiles)
-	dialog.dialog_text = "This layout contains %d workspace(s) whose panes start a different program, pass extra arguments, or set a different environment than your current default shell (%s).\n\n%s\n\nRestore them anyway?" % [untrusted.size(), SettingsManager.cfg_shell_command, details]
+	dialog.dialog_text = "This layout contains %d workspace(s) whose panes start a different program or pass extra arguments than your current default shell (%s).\n\n%s\n\nRestore them anyway?" % [untrusted.size(), SettingsManager.cfg_shell_command, details]
 	dialog.ok_button_text = "Restore"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():
@@ -1458,7 +1495,7 @@ func _show_profile_trust_dialog(profile: Dictionary, tiles: Array):
 		if td is Dictionary:
 			details_tiles.append(td)
 	var details := _untrusted_details(details_tiles)
-	dialog.dialog_text = "This profile contains panes that start a different program, pass extra arguments, or set a different environment than your current default shell (%s).\n\n%s\n\nDo you want to activate it anyway?" % [SettingsManager.cfg_shell_command, details]
+	dialog.dialog_text = "This profile contains panes that start a different program or pass extra arguments than your current default shell (%s).\n\n%s\n\nDo you want to activate it anyway?" % [SettingsManager.cfg_shell_command, details]
 	dialog.ok_button_text = "Activate"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():

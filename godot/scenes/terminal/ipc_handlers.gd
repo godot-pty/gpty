@@ -151,7 +151,7 @@ static func handle(ws, method: String, params: Dictionary):
 					profile_tiles.append(td)
 			if ws._tiles_untrusted(profile_tiles):
 				return error(
-					"Profile '%s' needs confirmation in the GUI (it starts a different program, passes arguments, or sets an environment)"
+					"Profile '%s' needs confirmation in the GUI (it starts a different program or passes arguments)"
 					% profile_name)
 			ws._do_activate(profile)
 			return {"success": true}
