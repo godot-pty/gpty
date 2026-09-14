@@ -156,18 +156,27 @@ pub fn default_socket_path() -> String {
 /// same path, so it cannot be random.
 #[cfg(unix)]
 fn private_state_dir(uid: u32) -> Option<std::path::PathBuf> {
+    xdg_dir("XDG_STATE_HOME", ".local/state", uid)
+}
+
+#[cfg(unix)]
+fn xdg_dir(env_var: &str, home_suffix: &str, uid: u32) -> Option<std::path::PathBuf> {
     use std::os::unix::fs::MetadataExt;
     use std::os::unix::fs::PermissionsExt;
 
     let candidates = [
-        std::env::var("XDG_STATE_HOME")
+        std::env::var(env_var)
             .ok()
             .filter(|value| value.starts_with('/'))
             .map(|value| std::path::PathBuf::from(value).join("gpty")),
         std::env::var("HOME")
             .ok()
             .filter(|value| value.starts_with('/'))
-            .map(|value| std::path::PathBuf::from(value).join(".local/state/gpty")),
+            .map(|value| {
+                std::path::PathBuf::from(value)
+                    .join(home_suffix)
+                    .join("gpty")
+            }),
     ];
 
     for dir in candidates.into_iter().flatten() {
@@ -187,6 +196,57 @@ fn private_state_dir(uid: u32) -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+/// The per-user directory gpty keeps mutable state in —
+/// `$XDG_STATE_HOME/gpty` or `~/.local/state/gpty` on Unix, created 0700 and
+/// validated exactly like the socket's private state directory;
+/// `%LOCALAPPDATA%\gpty` on Windows. `None` when no usable path can be
+/// derived, and callers decide what that means for their feature.
+pub fn state_dir() -> Option<std::path::PathBuf> {
+    #[cfg(unix)]
+    {
+        private_state_dir(unsafe { libc::geteuid() })
+    }
+    #[cfg(windows)]
+    {
+        local_app_data()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        None
+    }
+}
+
+/// The per-user directory gpty keeps installed data in —
+/// `$XDG_DATA_HOME/gpty` or `~/.local/share/gpty` on Unix, created and
+/// tightened with the same rules as [`state_dir`]; `%LOCALAPPDATA%\gpty` on
+/// Windows (which has no data/state split). The CLI's plugin content lives
+/// under here.
+pub fn data_dir() -> Option<std::path::PathBuf> {
+    #[cfg(unix)]
+    {
+        xdg_dir("XDG_DATA_HOME", ".local/share", unsafe { libc::geteuid() })
+    }
+    #[cfg(windows)]
+    {
+        local_app_data()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        None
+    }
+}
+
+/// `%LOCALAPPDATA%\gpty` — the Windows per-user app-data directory, the one
+/// place both the store and the installed content go (Windows has no
+/// data/state split). Created on demand by callers.
+#[cfg(windows)]
+fn local_app_data() -> Option<std::path::PathBuf> {
+    std::env::var("LOCALAPPDATA")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(|value| std::path::PathBuf::from(value).join("gpty"))
 }
 
 /// The socket path used when no per-user runtime directory is available.
