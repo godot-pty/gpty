@@ -2,6 +2,13 @@ extends PaneBody
 class_name TerminalPane
 # gpty Terminal Pane — Control-based node for focus + rendering.
 
+## The tiered agent state changed (emitted from the slow poll). The workspace
+## is the only listener: it dispatches the pane contract
+## (`PaneBody.on_agent_state_changed`) to this terminal and every pane that
+## observes it. The badge is applied through that same hook, so there is one
+## path from tracker to display.
+signal agent_state_changed(state: String)
+
 const CURSOR_BLINK_INTERVAL = 0.5
 const SCROLL_LINES = 3
 @export var scroll_lines: int = SCROLL_LINES
@@ -526,7 +533,16 @@ func _poll_agent_state():
 	var state := _terminal.get_agent_state()
 	if state != _badge_state:
 		_badge_state = state
-		_apply_badge(state)
+		agent_state_changed.emit(state)
+
+## The terminal observes itself: the tiered tracker is this pane's own state.
+func agent_state_source_id() -> String:
+	return attachment_id
+
+## Contract hook — the badge is applied here, not in the poll, so the badge
+## and any custom pane's observation travel the same workspace dispatch.
+func on_agent_state_changed(state: String) -> void:
+	_apply_badge(state)
 
 func _animate_badge(delta: float):
 	_badge_anim += delta

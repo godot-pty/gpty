@@ -105,6 +105,30 @@ func can_receive_content(_event: Dictionary = {}) -> bool:
 func receive_content(_text: String, _event: Dictionary = {}) -> bool:
 	return false
 
+## Agent-state observation contract.
+##
+## A pane observes ONE terminal, named by its stable `attachment_id`; a
+## terminal observes itself (it returns its own id, because the tiered tracker
+## it reads is that terminal's state). Empty means the pane observes nothing —
+## the base default.
+##
+## `on_agent_state_changed` is called with that terminal's state on every
+## change, and once when the pane enters a workspace (or when the observed
+## terminal attaches after it — restore order is not fixed), so a companion
+## created mid-session starts informed instead of waiting for the next
+## transition. States are `idle` / `working` / `needs-attention` /
+## `completed` / `failed`.
+##
+## DISPLAY ONLY. A Tier 2 declaration is spoofable by anything that prints to
+## the terminal, and Tier 3 is a heuristic; a hook must never feed a decision,
+## an action, a capture, or IPC. The titlebar badge has always followed that
+## rule, and it is this contract's first implementation.
+func agent_state_source_id() -> String:
+	return ""
+
+func on_agent_state_changed(_state: String) -> void:
+	pass
+
 # Override to add type-specific settings controls.
 # `panel` provides `_debounce_timer` and `_gather_func` (set by each type).
 func _build_pane_settings_ui(_panel: Control) -> Control:

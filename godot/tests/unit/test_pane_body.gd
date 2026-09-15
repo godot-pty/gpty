@@ -36,6 +36,14 @@ func test_pane_type_is_base():
 	_scene.add_child(body)
 	assert_eq(body._pane_type(), "base")
 
+func test_agent_state_contract_defaults_to_observing_nothing():
+	# The workspace dispatches to every pane whose source id matches a
+	# terminal; an empty id (the base default) can never match, so a pane that
+	# implements nothing is never called.
+	var body = PaneBody.new()
+	_scene.add_child(body)
+	assert_eq(body.agent_state_source_id(), "", "the base pane observes no terminal")
+
 # ── apply_settings ─────────────────────────────────────────────────────
 
 func test_apply_settings_pane_name():

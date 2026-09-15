@@ -404,6 +404,11 @@ func _attach_pane_into(ws: Dictionary, w: Control, body: Control):
 			var lbl = w.get_node_or_null("BodyVBox/TitleBar/TitleLabel")
 			if lbl: lbl.text = " " + t
 		)
+		# Agent-state contract: this terminal is the source of its own state.
+		# The state itself is dispatched by `_prime_new_pane_observers` /
+		# `_dispatch_agent_state` — panes are primed by the scan, not here, so
+		# every pane-entry route ends up informed.
+		body.agent_state_changed.connect(func(state: String): _dispatch_agent_state(body.attachment_id, state))
 
 func _wire_pane_activation(ws: Dictionary, _w: Control, body: Control):
 	# Pane activation on plain clicks is handled in _input via wrapper
@@ -1036,6 +1041,7 @@ var _pending_plugin_reviews: Dictionary = {}
 func _process(_delta: float):
 	# Concept event polling — must run even before sidebar is ready
 	_poll_agent_events()
+	_prime_new_pane_observers()
 	_poll_concept_events()
 	_poll_ipc_requests()
 	_poll_pending_waits()
@@ -1119,6 +1125,58 @@ func _poll_agent_events():
 		var source_id: String = source.attachment_id if source.attachment_id != "" else source.pane_label
 		for receiver in receivers:
 			receiver.receive_agent_event(envelope, source_id)
+
+# ═══════════════════════════════════════════════════════════════════════
+# Agent-state observation contract
+# ═══════════════════════════════════════════════════════════════════════
+
+## The workspace is the only dispatcher for the pane contract
+## (`PaneBody.agent_state_source_id` / `on_agent_state_changed`): a terminal
+## emits its tiered state change and every pane observing that terminal hears
+## it. Panes are found through the `panes` group, not the tile lists, so
+## hidden workspaces keep observing. Display only — a Tier 2 state is
+## spoofable and Tier 3 is a heuristic, so nothing here may feed a decision.
+
+## Panes whose source state has been delivered, by instance id — the value is
+## the source they were primed for, so a pane that points at a different
+## terminal later (a settings edit) is primed again. A pane entering the tree
+## by ANY route — spawn, restore, swap, a future pane SDK — is primed on the
+## next frame instead of only on the tile-attach path, and a follower whose
+## terminal has not appeared yet is retried until it does. The scan is O(panes)
+## with no allocation per pane; only new or re-pointed panes do any work.
+var _agent_state_primed := {}
+
+func _prime_new_pane_observers():
+	for body in get_tree().get_nodes_in_group("panes"):
+		if not (body is PaneBody):
+			continue
+		var key := body.get_instance_id()
+		var source_id: String = body.agent_state_source_id()
+		if _agent_state_primed.has(key) and str(_agent_state_primed[key]) == source_id:
+			continue  # already primed for this source
+		if source_id == "":
+			_agent_state_primed[key] = ""  # observes nothing, ever
+			continue
+		var terminal := _terminal_for_agent_state(source_id)
+		if terminal == null or terminal._terminal == null:
+			continue  # the source is not attached yet: try again next frame
+		_agent_state_primed[key] = source_id
+		_dispatch_agent_state(source_id, terminal._terminal.get_agent_state())
+
+func _terminal_for_agent_state(source_id: String) -> Control:
+	if source_id == "":
+		return null
+	for body in get_tree().get_nodes_in_group("panes"):
+		if body is TerminalPane and body.attachment_id == source_id:
+			return body
+	return null
+
+func _dispatch_agent_state(source_id: String, state: String):
+	if source_id == "":
+		return
+	for body in get_tree().get_nodes_in_group("panes"):
+		if body is PaneBody and body.agent_state_source_id() == source_id:
+			body.on_agent_state_changed(state)
 
 ## Map a generic-vocabulary event to the Tier 1 agent state it declares.
 ## `state.declared` carries the state in its own field — an explicit
