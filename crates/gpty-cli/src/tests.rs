@@ -22,6 +22,22 @@ async fn start_server<F>(name: &str, handlers: Vec<(&str, F)>) -> String
 where
     F: Fn(Value) -> Value + Send + Sync + 'static,
 {
+    let handlers: Vec<(&str, HandlerFn)> = handlers
+        .into_iter()
+        .map(|(method, f)| {
+            let handler: HandlerFn = Arc::new(move |params| {
+                let result: Result<Value, gpty_ipc::protocol::JsonRpcError> = Ok(f(params));
+                Box::pin(async move { result })
+            });
+            (method, handler)
+        })
+        .collect();
+    start_server_with(name, handlers).await
+}
+
+/// The same, for handlers that must take time (a held response) — the sync
+/// wrapper above cannot sleep on the server's task.
+async fn start_server_with(name: &str, handlers: Vec<(&str, HandlerFn)>) -> String {
     let socket_path = format!(
         "{}/gpty-cli-roundtrip-{}-{name}.sock",
         std::env::temp_dir().display(),
@@ -29,11 +45,7 @@ where
     );
     let _ = std::fs::remove_file(&socket_path);
     let mut server = IpcServer::new(socket_path.clone());
-    for (method, f) in handlers {
-        let handler: HandlerFn = Arc::new(move |params| {
-            let result: Result<Value, gpty_ipc::protocol::JsonRpcError> = Ok(f(params));
-            Box::pin(async move { result })
-        });
+    for (method, handler) in handlers {
         server.register(method, handler);
     }
     tokio::spawn(async move {
@@ -429,4 +441,49 @@ async fn plugin_install_review_fails_closed_without_a_gui() {
     .await
     .expect_err("no listener must fail the review");
     assert!(!error.to_string().is_empty());
+}
+
+/// `pane-wait --socket <path>` used to be silently ignored: the command built
+/// its own client from the platform default socket, so neither the flag nor
+/// `GPTY_SOCKET` had any effect on it while every other command honored them.
+/// It now derives its client from the dispatched one, so the resolved endpoint
+/// is the one that carries the request.
+#[tokio::test]
+async fn pane_wait_reaches_the_resolved_socket() {
+    let socket = start_server(
+        "pane_wait_socket",
+        vec![(
+            "paneWait",
+            |_params: Value| serde_json::json!({"matched": true, "line": "from-test-server"}),
+        )],
+    )
+    .await;
+    // Exactly how `main.rs` builds the dispatched client from `--socket` /
+    // `GPTY_SOCKET` / the platform default.
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+    commands::pane_wait::run(&client, "pane-x", "needle", 500, true)
+        .await
+        .expect("pane-wait must reach the server its socket names");
+    let _ = std::fs::remove_file(&socket);
+}
+
+/// The wait's own deadline, not the connection budget: the server holds the
+/// response until the pattern matches or `timeout_ms` passes, so the command
+/// must not give up while the answer is still coming.
+#[tokio::test]
+async fn pane_wait_outlives_the_connection_budget() {
+    let held: HandlerFn = Arc::new(|_params| {
+        Box::pin(async {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            Ok(serde_json::json!({"matched": true, "line": "late"}))
+        })
+    });
+    let socket = start_server_with("pane_wait_budget", vec![("paneWait", held)]).await;
+    // A budget that expires long before the server answers: using the
+    // dispatched client as-is would time the wait out.
+    let client = IpcClient::new(&socket, Duration::from_millis(50));
+    commands::pane_wait::run(&client, "pane-x", "needle", 500, true)
+        .await
+        .expect("a held response must outlive the connection budget");
+    let _ = std::fs::remove_file(&socket);
 }

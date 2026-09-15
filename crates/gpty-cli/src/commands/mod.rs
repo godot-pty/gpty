@@ -60,7 +60,7 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
             pane_id,
             pattern,
             timeout_ms,
-        } => pane_wait::run(pane_id, pattern, *timeout_ms, json).await,
+        } => pane_wait::run(client, pane_id, pattern, *timeout_ms, json).await,
         Commands::Broadcast { tags, text } => broadcast::run(client, tags, text, json).await,
         Commands::Daemon { action } => daemon::run_action(action, client, json).await,
         Commands::Concept { action } => concept::run(client, action, json).await,

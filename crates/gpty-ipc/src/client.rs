@@ -69,6 +69,23 @@ impl IpcClient {
         Self::new(transport::default_socket_path(), timeout)
     }
 
+    /// A client for the same endpoint and secret with a different timeout.
+    ///
+    /// `pane-wait` is the one command whose response is held by the server
+    /// (until the pattern matches or the wait's own deadline passes, up to
+    /// 60 s), while the global `--timeout` is a connection budget. Deriving
+    /// the wait client from the dispatched one keeps whatever endpoint the
+    /// CLI resolved (`--socket`, `GPTY_SOCKET`, or the platform default) —
+    /// building it from scratch is what made `pane-wait --socket <path>`
+    /// silently ignore the flag.
+    pub fn with_timeout(&self, timeout: Duration) -> Self {
+        Self {
+            socket_path: self.socket_path.clone(),
+            timeout,
+            secret: self.secret.clone(),
+        }
+    }
+
     /// Send a JSON-RPC request and return the parsed response.
     ///
     /// The `params` value is serialized as the request's `params` field.
