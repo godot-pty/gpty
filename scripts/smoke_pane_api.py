@@ -368,7 +368,15 @@ def main() -> int:
                 answered = True
                 break
             time.sleep(1.0)
-        smoke.require(answered, "the shell must answer the readiness probe")
+        if not answered:
+            tail = smoke.read_pane(pane_id, lines=50).splitlines()[-15:]
+            smoke.fail(
+                "the shell must answer the readiness probe",
+                {
+                    "echo_reached": any(("%i" in line or "%s" in line) for line in tail),
+                    "pane_tail": tail,
+                },
+            )
 
         # ── inject -> pane-wait -> pane-read ──────────────────────────
         smoke.enter("inject + pane-wait")
@@ -382,8 +390,22 @@ def main() -> int:
             else "printf 'SMOKE_7X9Q%s\\n' 2"
         )
         smoke.cli("inject", pane_id, "--text", first_cmd, "--json")
+        first_wait = smoke.wait_for_output(pane_id, "SMOKE_7X9Q2")
+        if first_wait.get("matched") is not True:
+            # Diagnostics for the Windows-only failure class: did the line
+            # reach the shell at all (its echo appears), did it execute (the
+            # output line appears), and what did the pane actually hold?
+            tail = smoke.read_pane(pane_id, lines=50).splitlines()[-15:]
+            smoke.fail(
+                "pane-wait must match the injected marker",
+                {
+                    "wait": first_wait,
+                    "echo_reached": any(("%i" in line or "%s" in line) for line in tail),
+                    "pane_tail": tail,
+                },
+            )
         smoke.require(
-            smoke.wait_for_output(pane_id, "SMOKE_7X9Q2").get("matched") is True,
+            first_wait.get("matched") is True,
             "pane-wait must match the injected marker",
         )
 
