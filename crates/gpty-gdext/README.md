@@ -133,7 +133,7 @@ on drop.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `drain_ipc_requests()` | `Array` | Drain queued **control** IPC requests for GDScript dispatch |
+| `drain_ipc_requests()` | `Array` | Drain queued **control** IPC requests as `[{id, method, params, timeout_ms}]`. `timeout_ms` is the request's remaining fallback deadline (0 once it has passed); the deferred-answer dialogs arm their expiry timer from it, so a dialog cannot outlive the request that asked for it |
 | `respond_ipc(id, success, result_json)` | void | Respond to a drained IPC request |
 | `drain_agent_events()` | `String` | Drain bounded OMP extension events from `gpty-events.sock` (JSON array). **Unix only** — see [OMP event socket](#omp-event-socket-reasoning-pane) |
 

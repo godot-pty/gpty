@@ -27,6 +27,11 @@ pub struct IpcRequest {
     pub id: u64,
     pub method: String,
     pub params: String,
+    /// When this request's fallback deadline fires (`fallback_timeout` for the
+    /// method). GDScript is told the time remaining so a dialog whose answer
+    /// nobody gives can close when the request dies, instead of outliving it
+    /// and turning a late click into a response no channel is listening for.
+    pub deadline: std::time::Instant,
 }
 
 /// Queue of requests waiting for GDScript polling.
@@ -79,6 +84,32 @@ fn fallback_timeout(method_name: &str) -> std::time::Duration {
     }
 }
 
+/// One request as GDScript receives it, built here rather than in the FFI
+/// layer so the shape and the deadline derivation are unit-tested.
+#[derive(Debug, PartialEq, Eq)]
+pub struct RequestDocument {
+    pub id: u64,
+    pub method: String,
+    pub params: String,
+    /// Milliseconds until this request's fallback deadline; 0 once it has
+    /// passed. A deferred-answer method reads 0 as "the request is already
+    /// gone — do not open a dialog nobody can answer".
+    pub timeout_ms: u64,
+}
+
+pub fn request_document(req: &IpcRequest) -> RequestDocument {
+    request_document_at(req, std::time::Instant::now())
+}
+
+fn request_document_at(req: &IpcRequest, now: std::time::Instant) -> RequestDocument {
+    RequestDocument {
+        id: req.id,
+        method: req.method.clone(),
+        params: req.params.clone(),
+        timeout_ms: req.deadline.saturating_duration_since(now).as_millis() as u64,
+    }
+}
+
 /// Make a handler that routes a named method through the pending queue.
 fn make_gdscript_handler(method: String, timeout: std::time::Duration) -> HandlerFn {
     std::sync::Arc::new(move |params| {
@@ -99,6 +130,7 @@ fn make_gdscript_handler(method: String, timeout: std::time::Duration) -> Handle
                 id,
                 method: method.clone(),
                 params: params_json,
+                deadline: std::time::Instant::now() + timeout,
             });
         }
         {
@@ -267,15 +299,18 @@ mod tests {
         clear_state();
         {
             let mut queue = PENDING_REQUESTS.lock().unwrap();
+            let now = std::time::Instant::now();
             queue.push_back(IpcRequest {
                 id: 1,
                 method: "newPane".into(),
                 params: r#"{"type":"terminal"}"#.into(),
+                deadline: now + GDS_RESPONSE_TIMEOUT,
             });
             queue.push_back(IpcRequest {
                 id: 2,
                 method: "listPanes".into(),
                 params: "{}".into(),
+                deadline: now + GDS_RESPONSE_TIMEOUT,
             });
         }
         let drained = drain_requests();
@@ -325,6 +360,69 @@ mod tests {
             PANE_WAIT_TIMEOUT >= std::time::Duration::from_secs(60),
             "the paneWait fallback must outlive the method's own deadline"
         );
+    }
+
+    // A6. the drained document carries the request's *remaining* deadline —
+    // 0 once it has passed, never a wrapped value
+    #[test]
+    fn request_document_carries_the_remaining_deadline() {
+        let now = std::time::Instant::now();
+        let req = IpcRequest {
+            id: 7,
+            method: "pluginInstall".into(),
+            params: r#"{"id":"owner/demo"}"#.into(),
+            deadline: now + PLUGIN_REVIEW_TIMEOUT,
+        };
+        let fresh = request_document_at(&req, now);
+        assert_eq!(fresh.id, 7);
+        assert_eq!(fresh.method, "pluginInstall");
+        assert_eq!(fresh.params, r#"{"id":"owner/demo"}"#);
+        assert!(
+            fresh.timeout_ms > 299_000 && fresh.timeout_ms <= 300_000,
+            "a fresh request reports (nearly) its whole deadline: {}",
+            fresh.timeout_ms
+        );
+
+        let halfway = request_document_at(&req, now + std::time::Duration::from_secs(100));
+        assert!(
+            halfway.timeout_ms > 199_000 && halfway.timeout_ms <= 200_000,
+            "the deadline is the time remaining, not the configured duration: {}",
+            halfway.timeout_ms
+        );
+
+        let late = request_document_at(
+            &req,
+            now + PLUGIN_REVIEW_TIMEOUT + std::time::Duration::from_secs(5),
+        );
+        assert_eq!(
+            late.timeout_ms, 0,
+            "an expired request reports 0, not a wrapped value"
+        );
+    }
+
+    // A7. the queued request's deadline is its method's fallback, so the value
+    // the GUI is handed is the one that will actually kill the request — one
+    // source of truth, not a second constant in GDScript.
+    #[test]
+    #[serial]
+    fn a_queued_request_carries_its_methods_fallback_deadline() {
+        clear_state();
+        let handler =
+            make_gdscript_handler("pluginInstall".into(), fallback_timeout("pluginInstall"));
+        // Invoking the handler queues the request synchronously and returns the
+        // future (dropped here; `clear_state` cleans both maps).
+        let future = handler(serde_json::json!({"id": "owner/demo"}));
+        let drained = drain_requests();
+        assert_eq!(drained.len(), 1);
+        let doc = request_document(&drained[0]);
+        assert_eq!(doc.method, "pluginInstall");
+        assert!(
+            doc.timeout_ms > 299_000 && doc.timeout_ms <= 300_000,
+            "the GUI must be told the review's own deadline: {}",
+            doc.timeout_ms
+        );
+        drop(future);
+        clear_state();
     }
 }
 

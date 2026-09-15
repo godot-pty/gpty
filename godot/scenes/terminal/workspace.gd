@@ -1338,7 +1338,7 @@ func _poll_ipc_requests():
 			}
 			continue
 		if method == "pluginInstall":
-			_show_plugin_review(int(id), params)
+			_show_plugin_review(int(id), params, int(req.get("timeout_ms", 0)))
 			continue
 		var result = _handle_ipc_method(method, params)
 		var success = not (result is Dictionary and result.has("error"))
@@ -1385,33 +1385,76 @@ const PLUGIN_REVIEW_MAX_PENDING := 4
 ## Ask the user to review a plugin install. The IPC response is deferred:
 ## the answer lands when the dialog closes, and the Rust-side fallback
 ## deadline for this method is minutes, not seconds.
-func _show_plugin_review(id: int, params: Dictionary):
+##
+## A review must not outlive the request that asked for it: `timeout_ms` is
+## that request's *remaining* fallback deadline (Rust hands it over with the
+## request), and when it passes the dialog closes itself and says so. Without
+## that, a click on a dialog whose request had already died would answer a
+## channel nobody is listening on (`respond_ipc` no-ops) while the user
+## believed the install happened.
+func _show_plugin_review(id: int, params: Dictionary, timeout_ms: int):
+	if timeout_ms <= 0:
+		# The request expired before this frame drained it, so there is no
+		# channel left to answer: do not open a dialog for it.
+		return
 	if _pending_plugin_reviews.size() >= PLUGIN_REVIEW_MAX_PENDING:
 		GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error("Too many pending plugin reviews")))
 		return
-	_pending_plugin_reviews[id] = params
 	var dialog = ConfirmationDialog.new()
+	dialog.name = "PluginReviewDialog"
 	dialog.title = "Plugin Install Review"
 	dialog.dialog_text = PluginReviewText.build(params)
 	dialog.ok_button_text = "Install"
 	dialog.cancel_button_text = "Decline"
+	var expiry := Timer.new()
+	expiry.name = "ReviewExpiry"
+	expiry.one_shot = true
+	# At least a frame, so a request drained with a sliver left still shows.
+	expiry.wait_time = maxf(0.001, timeout_ms / 1000.0)
+	expiry.timeout.connect(func(): _expire_plugin_review(id))
+	add_child(expiry)
+	expiry.start()
+	_pending_plugin_reviews[id] = {"dialog": dialog, "timer": expiry}
+
 	dialog.confirmed.connect(func():
 		# Consent made once counts: the accepted plugin is recorded at its
 		# pinned revision, so installed content does not re-prompt forever
 		# (and a *new* revision re-prompts — the record keys on the pin).
 		TrustedStore.approve_plugin(
 			str(params.get("id", "")), str(params.get("revision", "")))
-		_pending_plugin_reviews.erase(id)
+		_finish_plugin_review(id)
 		GptyTerminal.respond_ipc(id, true, JSON.stringify({"accepted": true}))
-		dialog.queue_free()
 	)
 	dialog.canceled.connect(func():
-		_pending_plugin_reviews.erase(id)
+		_finish_plugin_review(id)
 		GptyTerminal.respond_ipc(id, true, JSON.stringify({"accepted": false}))
-		dialog.queue_free()
 	)
 	add_child(dialog)
 	dialog.popup_centered()
+
+## Drop a pending review's dialog and expiry timer (idempotent — the answer
+## path and the expiry path both land here).
+func _finish_plugin_review(id: int):
+	var entry = _pending_plugin_reviews.get(id)
+	_pending_plugin_reviews.erase(id)
+	if not (entry is Dictionary):
+		return
+	var dialog = entry.get("dialog")
+	if dialog != null and is_instance_valid(dialog):
+		dialog.queue_free()
+	var timer = entry.get("timer")
+	if timer != null and is_instance_valid(timer):
+		timer.queue_free()
+
+## The request's fallback deadline passed. Nothing is answered — by the time
+## this fires the request is gone, which is what the timer's deadline means.
+func _expire_plugin_review(id: int):
+	if not _pending_plugin_reviews.has(id):
+		return
+	_finish_plugin_review(id)
+	ToastManager.warn(
+		"Plugin install review expired — the requesting command already timed out. Nothing was installed.",
+		8.0)
 
 func _ipc_error(msg: String, code := -32000):
 	return WorkspaceIpcHandlers.error(msg, code)

@@ -1092,17 +1092,22 @@ impl GptyTerminal {
     }
 
     /// Drain pending IPC requests into an Array of Dictionaries.
-    /// Returns `[{id: int, method: String, params: String}]`.
+    /// Returns `[{id: int, method: String, params: String, timeout_ms: int}]`.
+    /// `timeout_ms` is the request's remaining fallback deadline (0 once it
+    /// has passed) — the deferred-answer dialogs close themselves when it
+    /// fires, so a late answer cannot look like consent.
     #[func]
     fn drain_ipc_requests() -> Array<Dictionary<Variant, Variant>> {
         crate::ipc::ensure_server_started();
         let requests = crate::ipc::drain_requests();
         let mut arr = Array::new();
         for req in requests {
+            let doc = crate::ipc::request_document(&req);
             let mut dict = Dictionary::new();
-            dict.set("id", &Variant::from(req.id as i64));
-            dict.set("method", &Variant::from(req.method));
-            dict.set("params", &Variant::from(req.params));
+            dict.set("id", &Variant::from(doc.id as i64));
+            dict.set("method", &Variant::from(doc.method));
+            dict.set("params", &Variant::from(doc.params));
+            dict.set("timeout_ms", &Variant::from(doc.timeout_ms as i64));
             arr.push(&dict);
         }
         arr
