@@ -407,9 +407,7 @@ def main() -> int:
         # real output lines, and the wrap of the long echoed command cannot
         # split a marker that is not in it.
         fill = (
-            r"for /l %i in (2,1,2) do @echo SMOKE_OLDEST_A1B%i"
-            r" & (for /l %i in (1,1,120) do @echo scroll_%i)"
-            r" & for /l %i in (4,1,4) do @echo SMOKE_NEWEST_C3D%i"
+            r"for /l %i in (2,1,2) do @echo SMOKE_OLDEST_A1B%i&(for /l %i in (1,1,120) do @echo scroll_%i)&for /l %i in (4,1,4) do @echo SMOKE_NEWEST_C3D%i"
             if WINDOWS
             else "printf 'SMOKE_OLDEST_A1B%s\\n' 2; seq 1 120; printf 'SMOKE_NEWEST_C3D%s\\n' 4"
         )
