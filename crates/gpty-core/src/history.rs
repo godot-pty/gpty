@@ -118,6 +118,14 @@ impl HistoryStore {
     /// mode for concurrent access. `cap` bounds retained lines per pane.
     pub fn open(path: &str, pane_key: &str, cap: u32) -> Result<Self, rusqlite::Error> {
         let conn = Connection::open(path)?;
+        // Every pane's writer holds its own connection to the SAME file, and
+        // a colliding commit fails instantly with SQLITE_BUSY unless the
+        // connection waits for the lock — on Windows that surfaced as
+        // "history append failed: database is locked" (rows dropped) under
+        // concurrent panes. The writer holds the lock for milliseconds per
+        // batch, so a bounded wait turns the collision into a serialized
+        // commit instead of a lost one.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         if version < 2 {
@@ -688,6 +696,27 @@ mod tests {
                 assert_eq!(mode, 0o600, "{candidate} must be owner-only, got {mode:o}");
             }
         }
+        for candidate in [path.clone(), format!("{path}-wal"), format!("{path}-shm")] {
+            let _ = fs::remove_file(&candidate);
+        }
+    }
+
+    /// Every pane's writer holds its own connection to the SAME file, so a
+    /// colliding commit must wait for the lock instead of failing with
+    /// SQLITE_BUSY — on Windows that dropped rows as "database is locked".
+    #[test]
+    fn writers_wait_for_the_lock_instead_of_failing() {
+        let path = temp_db_path("busy_timeout");
+        let _ = fs::remove_file(&path);
+        let store = HistoryStore::open(&path, "pane-a", 100).unwrap();
+        let timeout: i64 = store
+            .conn
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            timeout, 5000,
+            "concurrent writers must wait for the lock, not drop batches"
+        );
         for candidate in [path.clone(), format!("{path}-wal"), format!("{path}-shm")] {
             let _ = fs::remove_file(&candidate);
         }
