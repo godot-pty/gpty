@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Live pane-API smoke: boots the GUI headless and drives the JSON-RPC CLI
 end-to-end (new-pane -> status -> inject -> wait -> read -> scrollback ->
-broadcast -> pane-run exit code -> cli_view stdout -> kill), plus
-subscribe/eventsPoll on the event listener.
+broadcast -> pane-run exit code -> concept from output -> cli_view stdout ->
+kill), plus subscribe/eventsPoll on the event listener.
 
 One harness for every platform: the transport is the only difference between
 Unix and Windows (named pipe vs Unix socket), so the flow is written once and
@@ -20,7 +20,9 @@ tree. On Unix user data is sandboxed with XDG_DATA_HOME; on Windows Godot
 resolves its user data through the Known Folder API, which the APPDATA
 environment variable does not redirect, so a Windows run uses the real
 per-user data directory — fine on a disposable CI runner, worth knowing on a
-dev box.
+dev box. One file in it is written by the harness itself: the smoke seeds a
+concept before launch (the only way to register one; `concept toggle` cannot
+add) and puts the store back in teardown, so a dev-box run leaves no trace.
 
 Exit 0 and "PASS" on success; non-zero with "FAIL [step]: ..." and the tail of
 the Godot log otherwise. Reads and writes only inside the repo (plus the
@@ -31,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -79,6 +82,10 @@ class Smoke:
         self.env["GPTY_SECRET"] = SECRET
         if not WINDOWS:
             self.env["XDG_DATA_HOME"] = str(self.tmp / "data")
+        # The seeded concept store (see `seed_concepts`): its path and the
+        # bytes to put back in teardown.
+        self.concepts_path: Path | None = None
+        self.concepts_backup: bytes | None = None
 
     # ── Reporting ─────────────────────────────────────────────────────
 
@@ -250,6 +257,9 @@ class Smoke:
 
     def teardown(self) -> None:
         if self.gui is None:
+            # A failure between seeding and launch still has to put the store
+            # back.
+            self.restore_concepts()
             return
         # A failed build may leave no CLI to ask; the process kill below still
         # has to happen, and a missing binary must not mask the real failure.
@@ -260,6 +270,81 @@ class Smoke:
         except subprocess.TimeoutExpired:
             self.gui.kill()
             self.gui.wait(timeout=10)
+        # After the GUI is gone, so nothing overwrites the store behind us.
+        self.restore_concepts()
+
+    # ── Concept seed ──────────────────────────────────────────────────
+    # The smoke needs a concept it can trigger from real *output*. The only
+    # registration route that exists is the store the GUI reads at startup
+    # (`concept toggle` flips a shipped rule, it cannot add one), so it is
+    # seeded before launch and put back in teardown: on Windows `user://` is
+    # the real per-user directory — Godot resolves it through the Known
+    # Folder API, which APPDATA does not redirect — and a dev-box run must
+    # leave no trace.
+
+    CONCEPT_NAME = "smoke_concept"
+    ## The trigger demands the digit the shell appends at runtime: the typed
+    ## line builds `SMOKE_CONCEPT_8K3%s` / `...%i`, which this cannot match, so
+    ## only a real output line — the one a ConPTY parser regression stops
+    ## committing — can fire the concept.
+    CONCEPT_TRIGGER = r"SMOKE_CONCEPT_8K3[0-9]"
+
+    def user_dir(self) -> Path:
+        """Godot's `user://` for this project, as the platform resolves it."""
+        project = re.search(
+            r'config/name="([^"]+)"',
+            (ROOT / "godot" / "project.godot").read_text(encoding="utf-8"),
+        )
+        if project is None:
+            self.fail("godot/project.godot has no config/name to derive user:// from")
+            raise  # unreachable — fail() raises
+        data_home = os.environ["APPDATA"] if WINDOWS else self.env["XDG_DATA_HOME"]
+        return Path(data_home) / "godot" / "app_userdata" / project.group(1)
+
+    def seed_concepts(self) -> None:
+        path = self.user_dir() / "concepts.json"
+        self.concepts_path = path
+        self.concepts_backup = path.read_bytes() if path.exists() else None
+        store: dict = {}
+        if path.exists():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    store = loaded
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                # A hand-broken store reads as empty in the GUI too.
+                store = {}
+        concepts = store.get("concepts")
+        if not isinstance(concepts, list):
+            concepts = []
+        concepts.append(
+            {
+                "name": self.CONCEPT_NAME,
+                "trigger": self.CONCEPT_TRIGGER,
+                "enabled": True,
+                "capture_mode": "until_stop",
+                "stop_timeout_ms": 400,
+                "stop_on_input": True,
+                "actions": [{"target": "code_viewer"}],
+            }
+        )
+        store["concepts"] = concepts
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(store), encoding="utf-8")
+
+    def restore_concepts(self) -> None:
+        if self.concepts_path is None:
+            return
+        try:
+            if self.concepts_backup is None:
+                self.concepts_path.unlink(missing_ok=True)
+            else:
+                self.concepts_path.write_bytes(self.concepts_backup)
+        except OSError as error:
+            print(
+                f"warning: could not restore {self.concepts_path}: {error}",
+                file=sys.stderr,
+            )
 
     def log_tail(self, lines: int = 40) -> str:
         try:
@@ -302,6 +387,9 @@ def main() -> int:
     try:
         smoke.build()
         smoke.import_project()
+        # The concept store is read at GUI startup, so the seed must land
+        # before the launch (and it is restored in teardown).
+        smoke.seed_concepts()
         smoke.launch()
 
         # ── Event listener ────────────────────────────────────────────
@@ -579,6 +667,64 @@ def main() -> int:
             "pane-run output must contain the compound marker",
         )
         smoke.cli("kill-pane", run_id, "--json")
+
+        # ── a concept fires from real output ──────────────────────────
+        # ConPTY renders line breaks as cursor moves (no LF), so the parser
+        # only commits real command output after the row-advancing CSI fix;
+        # before it, only CRLF-terminated input echoes matched. The seeded
+        # concept's trigger demands the digit the shell appends at runtime, so
+        # nothing typed can match it — the event below can only come from an
+        # output line, and a parser regression fails this step instead of
+        # shipping.
+        smoke.enter("concept from output")
+        concepts = smoke.result(
+            smoke.cli("concept", "list", "--json"), "concept list"
+        ).get("concepts", [])
+        smoke.require(
+            any(
+                c.get("name") == smoke.CONCEPT_NAME and c.get("enabled") is True
+                for c in concepts
+            ),
+            "the seeded concept must be loaded and enabled",
+            [c.get("name") for c in concepts],
+        )
+        # Route it for real: with no receiver the capture is flushed back to
+        # the terminal and toasted instead of consumed.
+        viewer = smoke.result(
+            smoke.cli("new-pane", "-t", "code_viewer", "--json"),
+            "new-pane (code_viewer)",
+        )
+        viewer_id = viewer.get("pane_id")
+        smoke.require(bool(viewer_id), "the code_viewer receiver must spawn", viewer)
+        concept_cmd = (
+            r"for /l %i in (1,1,1) do @echo SMOKE_CONCEPT_8K3%i"
+            if WINDOWS
+            else "printf 'SMOKE_CONCEPT_8K3%s\\n' 8"
+        )
+        smoke.cli("inject", pane_id, "--text", concept_cmd, "--json")
+        matched = False
+        for _ in range(40):
+            events = smoke.result(
+                smoke.event_rpc(
+                    "eventsPoll", {"subscription_id": subscription, "limit": 64}
+                ),
+                "eventsPoll",
+            ).get("events", [])
+            if any(
+                e.get("type") == "concept"
+                and e.get("name") == smoke.CONCEPT_NAME
+                and e.get("target") == "code_viewer"
+                for e in events
+            ):
+                matched = True
+                break
+            time.sleep(0.5)
+        if not matched:
+            smoke.fail(
+                "a concept must fire from the child's output on this platform",
+                {"pane_tail": smoke.read_pane(pane_id, lines=20)[-400:]},
+            )
+        smoke.cli("kill-pane", viewer_id, "--json")
 
         # ── cli_view: a command's stdout streamed into a pane body ────
         # The pane runs argv directly (no shell, no PTY), so this step also
