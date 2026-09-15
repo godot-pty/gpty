@@ -76,6 +76,20 @@ jobs:
             exit 1
           fi
 
+      - name: Verify the plugin catalog rendered
+        run: |
+          # The catalog fetches the registry at build time and falls back to the
+          # committed snapshot, so a page with neither an installable entry nor
+          # the shortcode's "no plugins" notice means the shortcode itself broke:
+          # fail the deploy instead of publishing an empty catalog silently.
+          PLUGINS=docs/public/plugins/index.html
+          if ! grep -q "plugin install godot-pty/" "$PLUGINS" \
+              && ! grep -q "No plugins are listed" "$PLUGINS"; then
+            echo "=== plugins page rendered neither an entry nor the notice ==="
+            head -c 800 "$PLUGINS" 2>/dev/null || echo "(missing)"
+            exit 1
+          fi
+
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:

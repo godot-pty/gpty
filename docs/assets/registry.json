@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "godot-pty/gpty-omp",
+      "repo": "https://github.com/godot-pty/gpty-omp",
+      "name": "OMP",
+      "description": "A terminal running OMP (oh-my-pi) — the agent workspace profile.",
+      "category": "agent",
+      "min_gpty_version": "0.5.4",
+      "platforms": ["linux", "macos", "windows"]
+    },
+    {
+      "id": "godot-pty/gpty-claude",
+      "repo": "https://github.com/godot-pty/gpty-claude",
+      "name": "Claude",
+      "description": "A terminal running Claude Code.",
+      "category": "agent",
+      "min_gpty_version": "0.5.4",
+      "platforms": ["linux", "macos", "windows"]
+    },
+    {
+      "id": "godot-pty/gpty-herdr",
+      "repo": "https://github.com/godot-pty/gpty-herdr",
+      "name": "Herdr",
+      "description": "A terminal running Herdr, the session multiplexer.",
+      "category": "multiplexer",
+      "min_gpty_version": "0.5.4",
+      "platforms": ["linux", "macos", "windows"]
+    },
+    {
+      "id": "godot-pty/gpty-lazygit",
+      "repo": "https://github.com/godot-pty/gpty-lazygit",
+      "name": "Lazygit",
+      "description": "A terminal running Lazygit, the Git TUI.",
+      "category": "git",
+      "min_gpty_version": "0.5.4",
+      "platforms": ["linux", "macos", "windows"]
+    },
+    {
+      "id": "godot-pty/gpty-neovim",
+      "repo": "https://github.com/godot-pty/gpty-neovim",
+      "name": "Neovim",
+      "description": "A terminal running Neovim.",
+      "category": "editor",
+      "min_gpty_version": "0.5.4",
+      "platforms": ["linux", "macos", "windows"]
+    }
+  ]
+}
