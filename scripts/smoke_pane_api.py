@@ -323,9 +323,12 @@ def main() -> int:
 
         # ── shell readiness: a line typed before the child attaches is read ──
         # by nothing (the repo's documented cold-shell hazard — measured past
-        # 10 s on a cold runner). `idle_ms` is 0 until the first output and
-        # stays ~0 while the shell keeps printing, so a quarter second of
-        # silence means the startup banner is done and the prompt is up.
+        # 10 s on a cold runner). Quiescing is necessary but not sufficient:
+        # the banner can finish while a quiet rc phase (no output) is still
+        # running, so the shell must *answer* a probe before real input is
+        # trusted. `idle_ms` is 0 until the first output and stays ~0 while
+        # the shell keeps printing, so a quarter second of silence is the
+        # fast path; the probe loop below is the proof.
         smoke.enter("shell readiness")
         idle_ms = 0
         for _ in range(120):
@@ -339,17 +342,45 @@ def main() -> int:
             "the shell must quiesce before input is injected",
             idle_ms,
         )
+        # The probe retries until the shell answers: a probe typed before the
+        # shell attaches is discarded (the same hazard as any injected line),
+        # so a cold runner may need several rounds before one is read.
+        # The marker is BUILT at shell runtime (`printf %s` / `for /l %i`), so
+        # the typed command text never contains it — only the output line can
+        # match, on every platform and line discipline, with no anchors.
+        probe_cmd = (
+            r"for /l %i in (7,1,7) do @echo SMOKE_READY_9X7%i"
+            if WINDOWS
+            else "printf 'SMOKE_READY_9X7%s\\n' Z"
+        )
+        answered = False
+        for _ in range(10):
+            smoke.cli("inject", pane_id, "--text", probe_cmd, "--json")
+            if (
+                smoke.wait_for_output(pane_id, "SMOKE_READY_9X7Z", timeout_ms=3000).get(
+                    "matched"
+                )
+                is True
+            ):
+                answered = True
+                break
+            time.sleep(1.0)
+        smoke.require(answered, "the shell must answer the readiness probe")
 
         # ── inject -> pane-wait -> pane-read ──────────────────────────
         smoke.enter("inject + pane-wait")
-        smoke.cli("inject", pane_id, "--text", "echo SMOKE_7X9Q2", "--json")
-        # Anchored: an unanchored pattern matches the shell's *echo of the
-        # typed command* (which contains the marker as text) the instant it
-        # echoes — before the command runs — so the wait proves nothing about
-        # the output. ^...\s*$ matches only the bare output line (trailing
-        # whitespace tolerated: some line disciplines pad the line).
+        # The marker is built at shell runtime (see the probe): the typed
+        # command's echo cannot contain it, so the wait matches only the
+        # output line — the echo-spoof and wrap-splitting hazards are
+        # designed out, not regexed around.
+        first_cmd = (
+            r"for /l %i in (2,1,2) do @echo SMOKE_7X9Q%i"
+            if WINDOWS
+            else "printf 'SMOKE_7X9Q%s\\n' 2"
+        )
+        smoke.cli("inject", pane_id, "--text", first_cmd, "--json")
         smoke.require(
-            smoke.wait_for_output(pane_id, "^SMOKE_7X9Q2\\s*$").get("matched") is True,
+            smoke.wait_for_output(pane_id, "SMOKE_7X9Q2").get("matched") is True,
             "pane-wait must match the injected marker",
         )
 
@@ -368,25 +399,20 @@ def main() -> int:
         # under test is that lines scrolled off the screen come back, not how
         # much output a directory happens to have. cmd needs the loop
         # parenthesised, or the trailing `& echo` joins the loop body.
+        # Both markers are BUILT at shell runtime (see the probe), so the
+        # typed line's echo never contains them: the wait can only match the
+        # real output lines, and the wrap of the long echoed command cannot
+        # split a marker that is not in it.
         fill = (
-            r"echo SMOKE_OLDEST_A1B2 & (for /l %i in (1,1,120) do @echo scroll_%i)"
-            r" & echo SMOKE_NEWEST_C3D4"
+            r"for /l %i in (2,1,2) do @echo SMOKE_OLDEST_A1B%i"
+            r" & (for /l %i in (1,1,120) do @echo scroll_%i)"
+            r" & for /l %i in (4,1,4) do @echo SMOKE_NEWEST_C3D%i"
             if WINDOWS
-            else "echo SMOKE_OLDEST_A1B2; seq 1 120; echo SMOKE_NEWEST_C3D4"
+            else "printf 'SMOKE_OLDEST_A1B%s\\n' 2; seq 1 120; printf 'SMOKE_NEWEST_C3D%s\\n' 4"
         )
         smoke.cli("inject", pane_id, "--text", fill, "--json")
-        # Anchored for two reasons. (1) The shell echoes the typed command —
-        # which contains both markers as *text* — so an unanchored wait
-        # matches the echo before the command has run; the read below would
-        # race the output tail (reproduced: wait matched in 0.02 s, the
-        # newest output line was still missing). (2) The echo wraps at the
-        # pane's width and can split a marker across the wrap (measured at
-        # 80 cols), so the substring check sees `SMOKE_\nNEWEST_C3D4` — the
-        # bare output line is short, never wraps, and is what the wait must
-        # pin. Anchoring makes the wait mean "the output arrived"; trailing
-        # \s* tolerates line disciplines that pad the line.
         smoke.require(
-            smoke.wait_for_output(pane_id, "^SMOKE_NEWEST_C3D4\\s*$").get("matched") is True,
+            smoke.wait_for_output(pane_id, "SMOKE_NEWEST_C3D4").get("matched") is True,
             "the scrollback fill must reach the pane",
         )
         scrollback = smoke.read_pane(pane_id, lines=200)
