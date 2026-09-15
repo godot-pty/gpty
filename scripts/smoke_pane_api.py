@@ -324,8 +324,12 @@ def main() -> int:
         # ── inject -> pane-wait -> pane-read ──────────────────────────
         smoke.enter("inject + pane-wait")
         smoke.cli("inject", pane_id, "--text", "echo SMOKE_7X9Q2", "--json")
+        # Anchored: an unanchored pattern matches the shell's *echo of the
+        # typed command* (which contains the marker as text) the instant it
+        # echoes — before the command runs — so the wait proves nothing about
+        # the output. ^...$ matches only the bare output line.
         smoke.require(
-            smoke.wait_for_output(pane_id, "SMOKE_7X9Q2").get("matched") is True,
+            smoke.wait_for_output(pane_id, "^SMOKE_7X9Q2$").get("matched") is True,
             "pane-wait must match the injected marker",
         )
 
@@ -351,8 +355,17 @@ def main() -> int:
             else "echo SMOKE_OLDEST_A1B2; seq 1 120; echo SMOKE_NEWEST_C3D4"
         )
         smoke.cli("inject", pane_id, "--text", fill, "--json")
+        # Anchored for two reasons. (1) The shell echoes the typed command —
+        # which contains both markers as *text* — so an unanchored wait
+        # matches the echo before the command has run; the read below would
+        # race the output tail (reproduced: wait matched in 0.02 s, the
+        # newest output line was still missing). (2) The echo wraps at the
+        # pane's width and can split a marker across the wrap (measured at
+        # 80 cols), so the substring check sees `SMOKE_\nNEWEST_C3D4` — the
+        # bare output line is short, never wraps, and is what the wait must
+        # pin. Anchoring makes the wait mean "the output arrived".
         smoke.require(
-            smoke.wait_for_output(pane_id, "SMOKE_NEWEST_C3D4").get("matched") is True,
+            smoke.wait_for_output(pane_id, "^SMOKE_NEWEST_C3D4$").get("matched") is True,
             "the scrollback fill must reach the pane",
         )
         scrollback = smoke.read_pane(pane_id, lines=200)
