@@ -72,13 +72,16 @@ pub const PANE_MAX_ROWS: i64 = 500;
 pub const PANE_MAX_COLS: i64 = 2000;
 
 /// Pane types `PaneTypes.ALL` registers — the closed set a tile's `type` may
-/// name (`test_pane_types_all_has_five_entries` pins the count).
+/// name. The GUI side is pinned by `test_pane_types_all_has_six_entries`
+/// (`godot/tests/integration/test_palette.gd`); this mirror by
+/// `pane_type_and_platform_lists_match_the_gui_surface`.
 pub const PANE_TYPES: &[&str] = &[
     "terminal",
     "code_viewer",
     "file_tree",
     "inspector",
     "reasoning",
+    "cli_view",
 ];
 
 /// Platforms a manifest may declare.
@@ -1415,6 +1418,36 @@ tiles = [
         );
     }
 
+    /// The tile contract covers type/geometry/`attachment_id` only, so a
+    /// cli_view tile's own settings — `command` (program) and `shell_args`
+    /// (argv) — are tolerated and carried through untouched: the pane, not
+    /// the manifest, owns what a view runs.
+    #[test]
+    fn cli_view_tile_settings_pass_through() {
+        let m = parse(
+            r#"id = "a/b"
+name = "x"
+version = "1.0.0"
+min_gpty_version = "0.5.5"
+[[profiles]]
+name = "Tools"
+tiles = [
+  { col = 0, row = 0, cspan = 30, rspan = 60, settings = { type = "cli_view", attachment_id = "git-log", command = "git", shell_args = ["log", "--oneline", "-n", "20"] } },
+]
+"#,
+        );
+        let tile = &m.profiles[0].tiles[0];
+        assert_eq!(tile["settings"]["type"].as_str(), Some("cli_view"));
+        assert_eq!(tile["settings"]["command"].as_str(), Some("git"));
+        assert_eq!(
+            tile["settings"]["shell_args"]
+                .as_array()
+                .expect("shell_args array")
+                .len(),
+            4
+        );
+    }
+
     #[test]
     fn profile_and_tile_counts_are_capped() {
         let many: Vec<String> = (0..MAX_PROFILES + 1)
@@ -1442,9 +1475,10 @@ tiles = [
     #[test]
     fn pane_type_and_platform_lists_match_the_gui_surface() {
         // The mirror lists must not drift from what the GUI registers: the
-        // pane type set is pinned by `test_pane_types_all_has_five_entries`,
+        // pane type set is pinned by `test_pane_types_all_has_six_entries`,
         // and the platform set is the export preset's own vocabulary.
-        assert_eq!(PANE_TYPES.len(), 5);
+        assert_eq!(PANE_TYPES.len(), 6);
+        assert!(PANE_TYPES.contains(&"cli_view"));
         assert_eq!(PLATFORMS.len(), 3);
     }
 }

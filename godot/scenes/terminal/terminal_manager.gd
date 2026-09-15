@@ -20,6 +20,7 @@ const _PaneScripts := {
 	"file_tree":   preload("res://scenes/panes/file_tree.gd"),
 	"inspector":   preload("res://scenes/panes/inspector_pane.gd"),
 	"reasoning":   preload("res://scenes/panes/reasoning_pane.gd"),
+	"cli_view":    preload("res://scenes/panes/cli_view_pane.gd"),
 }
 
 var on_close: Callable  # set by workspace to refresh layout after kill

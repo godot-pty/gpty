@@ -60,13 +60,17 @@ struct Cli {
 enum Commands {
     /// Open a new pane
     NewPane {
-        /// Pane type: terminal, code_viewer, file_tree, inspector, reasoning
+        /// Pane type: terminal, code_viewer, file_tree, inspector, reasoning, cli_view
         #[arg(short = 't', long, default_value = "terminal")]
         pane_type: String,
 
         /// Shell command to run (terminal only)
         #[arg(short, long)]
         command: Option<String>,
+
+        /// Program arguments (cli_view only; repeatable)
+        #[arg(long = "arg", value_name = "ARG", allow_hyphen_values = true)]
+        args: Vec<String>,
 
         /// Split direction: left, right, top, bottom
         #[arg(short, long, default_value = "bottom")]

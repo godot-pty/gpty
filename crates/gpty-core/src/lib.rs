@@ -11,6 +11,7 @@
 //! | [`agent_state`] | Tiered, display-only agent-state detection (events / OSC / heuristics) |
 //! | [`engine`] | Central pub-sub orchestrator; spawns terminal tasks on the tokio runtime |
 //! | [`pty`]    | Cross-platform PTY lifecycle via `portable-pty`; one OS thread per PTY |
+//! | [`cli`]    | `cli_view` backend: one argv child, stdout+stderr merged into a bounded line queue |
 //! | [`parser`] | Strips ANSI escape sequences from PTY output; extracts plain-text lines |
 //! | [`term`]   | Full terminal grid via `alacritty_terminal`; cursor, colors, scrolling |
 //!
@@ -31,6 +32,7 @@
 //! ```
 
 pub mod agent_state;
+pub mod cli;
 pub mod color;
 pub mod concept;
 pub mod engine;

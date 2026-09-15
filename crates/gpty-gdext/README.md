@@ -46,6 +46,23 @@ One private Inspector session. There is no process-global subscriber bus.
 
 Inspector omp is launched as `omp --mode rpc --no-session --no-tools --no-extensions --no-skills --no-rules`.
 
+### GptyCliView (extends Node)
+
+One `cli_view` pane's CLI process: a program plus argv, never a shell. The
+child's stdout and stderr are merged into one bounded queue of complete lines,
+which the pane drains once a frame and renders as plain text. The node strips
+the workspace credentials (`GPTY_SECRET`, `GPTY_SOCKET`, …) from the child's
+environment, resolves a bare command through `PATH` and holds an absolute one to
+`validate_executable`, and kills the child *and its process group* on stop and
+on drop.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `start(config_json: String)` | `String` | Start the CLI. JSON: `{command, args}` — `command` non-empty and ≤1024 chars, `args` ≤32 entries of ≤4096 chars, no U+FFFD in either. `{"ok":true,"pid":N}` or `{"ok":false,"error":"..."}`. An existing process is stopped first |
+| `poll_lines()` | `PackedStringArray` | Every complete line since the last call, stdout+stderr merged. Non-blocking |
+| `status_json()` | `String` | JSON: `{program, args, pid, running, exit_code, exit_reason}`. `pid` is null once the child is gone; `exit_reason` is `exited`, `killed` (stopped by us) or null while it runs. A pane that never started reports the same fields idle |
+| `stop()` | void | Kill the child and its process group. Safe with nothing running |
+
 ### GptyTerminal (extends Node2D)
 
 #### Terminal lifecycle

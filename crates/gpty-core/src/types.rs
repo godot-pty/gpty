@@ -53,6 +53,7 @@ pub enum PaneType {
     #[serde(alias = "observer")]
     Inspector,
     Reasoning,
+    CliView,
 }
 
 impl PaneType {
@@ -64,6 +65,7 @@ impl PaneType {
             Self::FileTree => "file_tree",
             Self::Inspector => "inspector",
             Self::Reasoning => "reasoning",
+            Self::CliView => "cli_view",
         }
     }
 
@@ -83,6 +85,7 @@ impl std::str::FromStr for PaneType {
             "file_tree" => Ok(Self::FileTree),
             "inspector" | "observer" => Ok(Self::Inspector),
             "reasoning" => Ok(Self::Reasoning),
+            "cli_view" => Ok(Self::CliView),
             _ => Err(()),
         }
     }

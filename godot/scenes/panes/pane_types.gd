@@ -8,6 +8,7 @@ static var ALL: Dictionary = {
 	"file_tree":   {"name": "File Tree",   "icon": "/>", "shortcut": "Ctrl+Shift+T", "label_prefix": "F"},
 	"inspector":   {"name": "Inspector",   "icon": "@",  "shortcut": "Ctrl+Shift+O", "label_prefix": "I", "receives_content": true},
 	"reasoning":   {"name": "Reasoning",   "icon": "?",  "shortcut": "", "label_prefix": "R"},
+	"cli_view":    {"name": "CLI View",    "icon": "$_", "shortcut": "", "label_prefix": "V"},
 }
 
 ## Pane types whose body accepts a routed concept capture

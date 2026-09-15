@@ -57,6 +57,19 @@ gpty pane-status <pane>        # pid, running, exit_code, exit_reason, idle_ms
 gpty pane-status               # every pane (agent-status-list)
 ```
 
+### Stream a command's output into a pane
+
+`cli_view` runs argv directly (no shell, no PTY) and shows its stdout in the
+pane body — the no-terminal way to watch a tool that just needs to print:
+
+```
+gpty new-pane --pane-type cli_view --command git --arg status --arg --short
+gpty pane-read V1 --lines 100
+```
+
+Arguments after `--arg` are passed verbatim (no shell evaluation), and
+`pane-read` returns the body text, so you can check on it later.
+
 ### Waiting for output patterns
 
 `gpty pane-wait <pane> --pattern "tests passed" --timeout-ms 30000` blocks until the

@@ -96,7 +96,7 @@ gpty version
 
 | Command | Description |
 |---------|-------------|
-| `new-pane` | Open a new pane (`-t, --pane-type` terminal/code_viewer/file_tree/inspector/reasoning, `-c, --command` command, `-s, --split` split, `-f, --focus` focus, `--tags` broadcast tags). `observer` is a deprecated alias for `inspector`. |
+| `new-pane` | Open a new pane (`-t, --pane-type` terminal/code_viewer/file_tree/inspector/reasoning/cli_view, `-c, --command` command, `--arg` program argument for `cli_view` (repeatable), `-s, --split` split, `-f, --focus` focus, `--tags` broadcast tags). `observer` is a deprecated alias for `inspector`. |
 | `list-panes` | List all active panes with stable ids, labels, types, and positions |
 | `kill-pane` | Close a pane by id or `"active"` |
 | `focus-pane` | Focus a pane by id |

@@ -65,6 +65,7 @@ godot/
             ├── code_viewer.gd
             ├── file_tree.gd
             ├── inspector_pane.gd
+            ├── cli_view_pane.gd
             └── reasoning_pane.gd
 ```
 

@@ -38,7 +38,7 @@ fails on a test that ran without asserting.
 - `godot/scenes/terminal/workspace.gd` — restore/sanitize wiring and concept event routing; IPC dispatch itself is covered by `test_ipc_dispatch_contract.gd`, which drives `WorkspaceIpcHandlers.handle` with a real `Workspace`
 - `godot/scenes/terminal/terminal_pane.gd` — renderer and input paths are partially covered by `test_keyboard.gd`/`test_copy_routing.gd` mocks; real rendering is manual-only
 - `godot/scenes/ui/settings_panel.gd`, `godot/scenes/ui/pane_settings_panel.gd`, `godot/scenes/ui/status_bar.gd`, `godot/scenes/ui/toast_overlay.gd`, `godot/scenes/ui/icons.gd`
-- `godot/scenes/panes/code_viewer.gd`, `godot/scenes/panes/file_tree.gd`, `godot/scenes/panes/inspector_pane.gd`, `godot/scenes/panes/reasoning_pane.gd` — unit-tested for routing/session contracts; real OMP/Markdown rendering is manual
+- `godot/scenes/panes/code_viewer.gd`, `godot/scenes/panes/file_tree.gd`, `godot/scenes/panes/inspector_pane.gd`, `godot/scenes/panes/reasoning_pane.gd` — unit-tested for routing/session contracts; real OMP/Markdown rendering is manual (`cli_view_pane.gd` is the exception: `test_cli_view.gd` runs a real child and asserts its streamed lines)
 - `godot/scenes/autoloads/focus_manager.gd`, `godot/scenes/autoloads/shortcut_manager.gd`, `godot/scenes/autoloads/toast_manager.gd`, `godot/scenes/autoloads/update_checker.gd`
 
 ## Manual pre-release checklist
@@ -165,6 +165,19 @@ All CLI commands below use the default socket path (`$XDG_RUNTIME_DIR/gpty.sock`
 | 40 | Drag across text while such an app is focused | The app receives the drag, not the pane. Hold `Shift` to select locally and copy with `Ctrl+Shift+V` |
 | 41 | Wheel-scroll a mouse-aware app | The app scrolls it (the pane does not scroll its scrollback) |
 | 42 | Quit the TUI, then drag and wheel in the pane again | Selection and scrollback work as before — reporting turned off with the app |
+
+---
+
+### cli_view pane
+
+**Given** the GUI is running and the GDExtension is built from this tree
+
+| # | Command | Expected |
+|---|---------|----------|
+| 43 | `gpty new-pane --pane-type cli_view --command /bin/sh --arg -c --arg "printf 'view-ok\n'"` | Pane `V1` appears; its body shows `view-ok`; the status row reports the exit |
+| 44 | `gpty pane-read V1` | Returns the streamed text — the pane keeps it after the child exits |
+| 45 | Pane Settings → change Program/Arguments → Restart | The new argv runs; a running child is untouched until Restart |
+| 46 | `gpty kill-pane V1` while a long-running child runs (`--command /bin/sh --arg -c --arg "sleep 300"`) | Pane closes and the child process is gone (`ps aux | grep sleep`) |
 
 ---
 

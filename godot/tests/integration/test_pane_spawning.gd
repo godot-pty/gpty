@@ -49,7 +49,7 @@ func test_spawn_terminal_body_is_terminal_pane():
 
 func test_spawn_all_pane_types():
 	# Verify each pane type via _pane_type() discriminator.
-	var expected := ["terminal", "code_viewer", "file_tree", "inspector", "reasoning"]
+	var expected := ["terminal", "code_viewer", "file_tree", "inspector", "reasoning", "cli_view"]
 	for type_name in expected:
 		_tm.reset()
 		var body = _tm.spawn_pane(type_name, {})
@@ -112,7 +112,7 @@ func test_pane_labels_have_correct_prefixes():
 	# Verify each pane type gets the right prefix on pane_label
 	var cases := {
 		"terminal": "T", "code_viewer": "C", "file_tree": "F",
-		"inspector": "I", "reasoning": "R",
+		"inspector": "I", "reasoning": "R", "cli_view": "V",
 	}
 	for type_name in cases:
 		_tm.reset()

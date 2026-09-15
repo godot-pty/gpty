@@ -69,6 +69,7 @@ async fn new_pane_roundtrip_params_and_output() {
         &client,
         "terminal",
         Some("htop"),
+        &[],
         "bottom",
         None,
         true,
@@ -87,6 +88,54 @@ async fn new_pane_roundtrip_params_and_output() {
     assert_eq!(params["type"], "terminal");
     assert_eq!(params["command"], "htop");
     assert_eq!(params["focus"], true);
+    assert!(
+        params.get("args").is_none(),
+        "no argv means no `args` key on the wire: {params}"
+    );
+}
+
+#[tokio::test]
+async fn cli_view_roundtrip_carries_argv() {
+    let seen: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+    let seen_h = Arc::clone(&seen);
+    let socket = start_server(
+        "cli_view",
+        vec![("newPane", {
+            move |params: Value| {
+                *seen_h.lock().unwrap() = Some(params.clone());
+                serde_json::json!({"pane_id": "V1", "type": "cli_view"})
+            }
+        })],
+    )
+    .await;
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+    commands::new_pane::run(
+        &client,
+        "cli_view",
+        Some("/bin/sh"),
+        &["-c".to_string(), "printf marker".to_string()],
+        "bottom",
+        None,
+        true,
+        &[],
+        true,
+    )
+    .await
+    .expect("cli_view new-pane should succeed");
+    let _ = std::fs::remove_file(&socket);
+
+    let params = seen
+        .lock()
+        .unwrap()
+        .take()
+        .expect("server handler should have been called");
+    assert_eq!(params["type"], "cli_view");
+    assert_eq!(params["command"], "/bin/sh");
+    assert_eq!(
+        params["args"],
+        serde_json::json!(["-c", "printf marker"]),
+        "argv must reach the GUI as an ordered string array"
+    );
 }
 
 #[tokio::test]
@@ -133,9 +182,19 @@ async fn invalid_pane_type_never_reaches_server() {
     )
     .await;
     let client = IpcClient::new(&socket, Duration::from_secs(5));
-    let err = commands::new_pane::run(&client, "obsever", None, "bottom", None, true, &[], true)
-        .await
-        .expect_err("invalid pane type must fail client-side");
+    let err = commands::new_pane::run(
+        &client,
+        "obsever",
+        None,
+        &[],
+        "bottom",
+        None,
+        true,
+        &[],
+        true,
+    )
+    .await
+    .expect_err("invalid pane type must fail client-side");
     let _ = std::fs::remove_file(&socket);
 
     let msg = err.to_string();

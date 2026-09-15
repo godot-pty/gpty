@@ -11,6 +11,7 @@ Library crate for the gpty multi-PTY emulator. This is the engine — all termin
 | [`agent_state`](src/agent_state.rs) | Tiered, display-only agent-state detection (events / OSC / heuristics) | `AgentState`, `StateTier`, `AgentStateTracker` |
 | [`engine`](src/engine.rs) | Runtime orchestrator; spawns terminal tasks, capture state machine | `WorkspaceEngine`, `PtyTerminalHandle`, `SpawnedTerminal`, `TaskContext` |
 | [`pty`](src/pty.rs) | Cross-platform PTY lifecycle via `portable-pty` | `PtyHandle` |
+| [`cli`](src/cli.rs) | `cli_view` backend: one argv child (never a shell); stdout+stderr merged into a bounded line queue | `CliProcess` |
 | [`parser`](src/parser.rs) | Strips ANSI escape sequences; extracts plain-text lines | `LineParser` |
 | [`term`](src/term.rs) | Full terminal grid + damage tracking via `alacritty_terminal` | `TermGrid`, `CellInfo`, `GridUpdate` |
 | [`color`](src/color.rs) | ANSI color mapping — named, indexed, true-color → RGB | `color_to_rgb()` |

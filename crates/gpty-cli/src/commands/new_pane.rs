@@ -7,6 +7,7 @@ const VALID_TYPES: &[&str] = &[
     "file_tree",
     "inspector",
     "reasoning",
+    "cli_view",
     "observer",
 ];
 // Mirrors the IPC request shape one-to-one; grouping would obscure dispatch.
@@ -15,6 +16,7 @@ pub async fn run(
     client: &IpcClient,
     pane_type: &str,
     command: Option<&str>,
+    args: &[String],
     split: &str,
     title: Option<&str>,
     focus: bool,
@@ -47,6 +49,15 @@ pub async fn run(
     });
     if let Some(cmd) = command {
         params["command"] = serde_json::Value::String(cmd.to_string());
+    }
+    // argv for `command`; the GUI read path ignores it for every type but
+    // cli_view, which runs the program directly instead of through a shell.
+    if !args.is_empty() {
+        params["args"] = serde_json::Value::Array(
+            args.iter()
+                .map(|a| serde_json::Value::String(a.clone()))
+                .collect(),
+        );
     }
     if let Some(t) = title {
         params["title"] = serde_json::Value::String(t.to_string());

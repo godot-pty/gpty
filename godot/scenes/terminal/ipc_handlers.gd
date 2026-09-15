@@ -17,20 +17,35 @@ static func handle(ws, method: String, params: Dictionary):
 			var type_name = str(params.get("type", "terminal"))
 			if not PaneTypes.ALL.has(type_name):
 				return error("Unknown pane type: %s" % type_name)
-			var shell: String = PaneTypes.sanitize_shell(
-				params.get("command"), SettingsManager.cfg_shell_command)
 			var np_tags: Array = PaneTypes.sanitize_tags(params.get("tags", []))
-			var body = ws._spawn_pane(type_name, {"shell_command": shell, "tags": np_tags})
+			var opts: Dictionary
+			if type_name == "cli_view":
+				# argv, not a shell string: the pane runs the program directly,
+				# so `command` is the program and `args` its argument vector.
+				opts = {
+					"command": PaneTypes.sanitize_shell(params.get("command"), ""),
+					"shell_args": PaneTypes.sanitize_shell_args(params.get("args", [])),
+					"tags": np_tags,
+				}
+			else:
+				var shell: String = PaneTypes.sanitize_shell(
+					params.get("command"), SettingsManager.cfg_shell_command)
+				opts = {"shell_command": shell, "tags": np_tags}
+			var body = ws._spawn_pane(type_name, opts)
 			if body == null:
 				return error("Grid is full")
 			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "spawned", "pane_id": body.attachment_id, "label": body.pane_label}))
 			return {"pane_id": body.attachment_id, "label": body.pane_label, "type": type_name}
 		"paneRead":
 			var pr_body = ws._find_pane_by_label(str(params.get("pane_id", "")))
-			if pr_body == null or not (pr_body is TerminalPane):
-				return error("Pane '%s' not found" % params.get("pane_id", ""))
-			var pr_lines = int(params.get("lines", 200))
-			return {"text": str(pr_body._terminal.get_plain_text(clampi(pr_lines, 1, 2000)))}
+			var pr_lines = clampi(int(params.get("lines", 200)), 1, 2000)
+			if pr_body is TerminalPane:
+				return {"text": str(pr_body._terminal.get_plain_text(pr_lines))}
+			if pr_body is CliViewPane:
+				# A cli_view has no terminal buffer; its body text is the
+				# drained child output the pane already displays.
+				return {"text": pr_body.get_text(pr_lines)}
+			return error("Pane '%s' not found" % params.get("pane_id", ""))
 		"paneStatus":
 			var ps_body = ws._find_pane_by_label(str(params.get("pane_id", "")))
 			if ps_body == null or not (ps_body is TerminalPane):

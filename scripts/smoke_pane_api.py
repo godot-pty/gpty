@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Live pane-API smoke: boots the GUI headless and drives the JSON-RPC CLI
 end-to-end (new-pane -> status -> inject -> wait -> read -> scrollback ->
-broadcast -> pane-run exit code -> kill), plus subscribe/eventsPoll on the
-event listener.
+broadcast -> pane-run exit code -> cli_view stdout -> kill), plus
+subscribe/eventsPoll on the event listener.
 
 One harness for every platform: the transport is the only difference between
 Unix and Windows (named pipe vs Unix socket), so the flow is written once and
@@ -579,6 +579,41 @@ def main() -> int:
             "pane-run output must contain the compound marker",
         )
         smoke.cli("kill-pane", run_id, "--json")
+
+        # ── cli_view: a command's stdout streamed into a pane body ────
+        # The pane runs argv directly (no shell, no PTY), so this step also
+        # pins the two API halves that make it usable: `new-pane` carrying
+        # `--arg` argv for the cli_view type, and `pane-read` serving the body
+        # text of a pane that is not a terminal. The marker is read *after*
+        # the child has printed and exited, which is what pins the view as a
+        # retained ring rather than a live-only stream.
+        smoke.enter("cli_view")
+        if WINDOWS:
+            view_program = os.environ.get("COMSPEC", "cmd.exe")
+            view_argv = ["/c", "echo SMOKE_CLI_VIEW_5F2"]
+        else:
+            view_program = "/bin/sh"
+            view_argv = ["-c", "printf 'SMOKE_CLI_VIEW_5F2\\n'"]
+        view_cmd = ["new-pane", "-t", "cli_view", "--command", view_program]
+        for arg in view_argv:
+            view_cmd += ["--arg", arg]
+        view_cmd += ["--json"]
+        view = smoke.result(smoke.cli(*view_cmd), "new-pane (cli_view)")
+        view_id = view.get("pane_id")
+        smoke.require(bool(view_id), "new-pane must return a cli_view pane_id", view)
+        smoke.require(view.get("type") == "cli_view", "the pane must report the cli_view type", view)
+        view_text = ""
+        for _ in range(40):
+            view_text = smoke.read_pane(view_id, lines=50)
+            if "SMOKE_CLI_VIEW_5F2" in view_text:
+                break
+            time.sleep(0.5)
+        smoke.require(
+            "SMOKE_CLI_VIEW_5F2" in view_text,
+            "cli_view must stream the child's stdout into the pane body",
+            view_text[-500:],
+        )
+        smoke.cli("kill-pane", view_id, "--json")
 
         # ── kill-pane ─────────────────────────────────────────────────
         smoke.enter("kill-pane")

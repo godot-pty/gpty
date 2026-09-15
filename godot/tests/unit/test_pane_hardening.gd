@@ -173,6 +173,23 @@ func test_plan_key_identifies_the_exact_spawn_plan():
 	assert_eq(PaneTypes.tile_plan_key({"settings": {"type": "terminal"}}), "")
 	assert_eq(PaneTypes.tile_plan_key({}), "")
 
+func test_trust_gate_covers_a_cli_view_tile():
+	# CLI View spawns a program plus its argv through exactly the terminal
+	# keys (`command` + `shell_args`), so a tile that names them is untrusted
+	# by the same derivation — no new clause, and no hole in the restore gate
+	# for a layout file that would otherwise get a program launched for free.
+	var tile := {"settings": {
+		"type": "cli_view", "command": "/tmp/probe", "shell_args": ["--flag", "value"],
+	}}
+	assert_true(PaneTypes.tile_spawns_untrusted(tile, "/bin/bash"))
+	assert_eq(PaneTypes.tile_plan_key(tile), "/tmp/probe\u001f--flag\u001fvalue")
+
+	# A CLI View tile that names nothing to run starts no process, so there is
+	# nothing to consent to.
+	var idle := {"settings": {"type": "cli_view"}}
+	assert_false(PaneTypes.tile_spawns_untrusted(idle, "/bin/bash"))
+	assert_eq(PaneTypes.tile_plan_key(idle), "")
+
 # ── PaneTypes.untrusted_plan (what the trust dialog shows) ─────────────
 
 func test_untrusted_plan_lists_what_will_run():

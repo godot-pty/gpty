@@ -26,6 +26,7 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
         Commands::NewPane {
             pane_type,
             command,
+            args,
             split,
             title,
             focus,
@@ -35,6 +36,7 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
                 client,
                 pane_type,
                 command.as_deref(),
+                args,
                 split,
                 title.as_deref(),
                 *focus,

@@ -11,6 +11,10 @@ pub struct NewPaneParams {
     pub pane_type: gpty_core::types::PaneType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    /// Argument vector for `command` (cli_view only: the program is run
+    /// directly, never through a shell).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
     #[serde(default = "default_split")]
     pub split: SplitDirection,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -155,6 +159,7 @@ mod tests {
         let params = NewPaneParams {
             pane_type: gpty_core::types::PaneType::Terminal,
             command: Some("htop".into()),
+            args: Vec::new(),
             split: SplitDirection::Bottom,
             title: Some("My Pane".into()),
             focus: true,
@@ -354,6 +359,7 @@ mod tests {
         let params = NewPaneParams {
             pane_type: gpty_core::types::PaneType::Terminal,
             command: Some("htop".into()),
+            args: vec!["-c".into(), "printf hi".into()],
             split: SplitDirection::Right,
             title: None,
             focus: false,
@@ -362,6 +368,7 @@ mod tests {
         let v = serde_json::to_value(&params).unwrap();
         assert_eq!(v["type"], "terminal");
         assert_eq!(v["command"], "htop");
+        assert_eq!(v["args"], serde_json::json!(["-c", "printf hi"]));
         assert_eq!(v["split"], "Right");
         assert_eq!(v["focus"], false);
         assert!(
@@ -375,6 +382,7 @@ mod tests {
         let params = NewPaneParams {
             pane_type: gpty_core::types::PaneType::CodeViewer,
             command: None,
+            args: Vec::new(),
             split: SplitDirection::Bottom,
             title: None,
             focus: true,
@@ -383,6 +391,10 @@ mod tests {
         let v = serde_json::to_value(&params).unwrap();
         assert_eq!(v["type"], "code-viewer");
         assert_eq!(v["split"], "Bottom");
+        assert!(
+            v.get("args").is_none(),
+            "empty args should skip serialization"
+        );
         assert!(v.get("command").is_none());
         assert!(v.get("title").is_none());
     }
