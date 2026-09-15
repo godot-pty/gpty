@@ -123,6 +123,26 @@ class Smoke:
             self.fail(f"{what} must answer a result object", payload)
         return result
 
+    # ── Diagnostics ───────────────────────────────────────────────────
+    # Failure-time evidence, kept permanently: the Windows-only failures so
+    # far have been races between what pane-read shows (raw grid bytes) and
+    # what pane-wait scans (committed lines), and the shape below
+    # distinguishes late arrival (idle_ms ~0: the bytes just landed) from a
+    # line the parser never committed (idle_ms ~= the wait's own duration,
+    # and a fresh short wait still misses). Every wait failure path calls it.
+
+    def diag(self, pane_id: str, pattern: str | None = None) -> dict:
+        status = self.cli("pane-status", pane_id, "--json", check=False).get("result", {})
+        tail = self.read_pane(pane_id, lines=50).splitlines()[-15:]
+        diag: dict = {
+            "idle_ms": int(status.get("idle_ms") or 0),
+            "echo_reached": any(("%i" in line or "%s" in line) for line in tail),
+            "pane_tail": tail,
+        }
+        if pattern is not None:
+            diag["fresh_wait"] = self.wait_for_output(pane_id, pattern, timeout_ms=2000)
+        return diag
+
     # ── Event listener ────────────────────────────────────────────────
 
     def event_rpc(self, method: str, params: dict | None = None) -> dict:
@@ -369,13 +389,9 @@ def main() -> int:
                 break
             time.sleep(1.0)
         if not answered:
-            tail = smoke.read_pane(pane_id, lines=50).splitlines()[-15:]
             smoke.fail(
                 "the shell must answer the readiness probe",
-                {
-                    "echo_reached": any(("%i" in line or "%s" in line) for line in tail),
-                    "pane_tail": tail,
-                },
+                smoke.diag(pane_id, "SMOKE_READY_4Q7"),
             )
 
         # ── inject -> pane-wait -> pane-read ──────────────────────────
@@ -392,17 +408,9 @@ def main() -> int:
         smoke.cli("inject", pane_id, "--text", first_cmd, "--json")
         first_wait = smoke.wait_for_output(pane_id, "SMOKE_7X9Q2")
         if first_wait.get("matched") is not True:
-            # Diagnostics for the Windows-only failure class: did the line
-            # reach the shell at all (its echo appears), did it execute (the
-            # output line appears), and what did the pane actually hold?
-            tail = smoke.read_pane(pane_id, lines=50).splitlines()[-15:]
             smoke.fail(
                 "pane-wait must match the injected marker",
-                {
-                    "wait": first_wait,
-                    "echo_reached": any(("%i" in line or "%s" in line) for line in tail),
-                    "pane_tail": tail,
-                },
+                {"wait": first_wait, **smoke.diag(pane_id, "SMOKE_7X9Q2")},
             )
         smoke.require(
             first_wait.get("matched") is True,
@@ -434,10 +442,12 @@ def main() -> int:
             else "printf 'SMOKE_OLDEST_A1B%s\\n' 2; seq 1 120; printf 'SMOKE_NEWEST_C3D%s\\n' 4"
         )
         smoke.cli("inject", pane_id, "--text", fill, "--json")
-        smoke.require(
-            smoke.wait_for_output(pane_id, "SMOKE_NEWEST_C3D4").get("matched") is True,
-            "the scrollback fill must reach the pane",
-        )
+        fill_wait = smoke.wait_for_output(pane_id, "SMOKE_NEWEST_C3D4")
+        if fill_wait.get("matched") is not True:
+            smoke.fail(
+                "the scrollback fill must reach the pane",
+                {"wait": fill_wait, **smoke.diag(pane_id, "SMOKE_NEWEST_C3D4")},
+            )
         scrollback = smoke.read_pane(pane_id, lines=200)
         if "SMOKE_OLDEST_A1B2" not in scrollback:
             # Report the shape of what came back: a missing oldest marker means
@@ -451,6 +461,7 @@ def main() -> int:
                     "lines_returned": len(returned),
                     "first": returned[:2],
                     "last": returned[-2:],
+                    **smoke.diag(pane_id, "SMOKE_NEWEST_C3D4"),
                 },
             )
         smoke.require("SMOKE_NEWEST_C3D4" in scrollback, "pane-read must return the newest line")
