@@ -7,8 +7,10 @@
 //! - All other requests are pushed into `PENDING_REQUESTS` with a oneshot
 //!   stored in `PENDING_RESPONSES`. GDScript polls `drain_ipc_requests()`
 //!   each frame, processes the request, and calls `respond_ipc()`.
-//! - The fallback handler imposes a per-method timeout (5 s, or 300 s for
-//!   `pluginInstall`'s human-answered review dialog): if GDScript hasn't
+//! - The fallback handler imposes a per-method timeout: 5 s for the
+//!   poll-loop methods, 70 s for `paneWait` (whose answer is held until the
+//!   pattern matches or the request's own ≤60 s deadline), and 300 s for
+//!   `pluginInstall`'s human-answered review dialog. If GDScript hasn't
 //!   responded by then, the client receives an error.
 
 use std::collections::{HashMap, VecDeque};
@@ -58,6 +60,24 @@ const GDS_RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 /// The fallback deadline for `pluginInstall`, whose answer waits on a human
 /// reading the review dialog.
 const PLUGIN_REVIEW_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+/// The fallback deadline for `paneWait`, whose answer is held until the
+/// pattern matches or the *request's own* deadline (up to 60 s) passes —
+/// GDScript's `_poll_pending_waits` answers at the later of the two, so the
+/// fallback must outlive the method's published ceiling or a slow match is
+/// reported as `-32000 timeout waiting for GUI response` (the 5 s default
+/// made `pane-wait --timeout-ms 60000` a lie: it could never wait past 5 s).
+const PANE_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(70);
+
+/// The fallback deadline for a routed method. Deferred-answer methods
+/// (`paneWait`, `pluginInstall`) need deadlines that cover their contracts;
+/// everything else answers from the poll loop in milliseconds.
+fn fallback_timeout(method_name: &str) -> std::time::Duration {
+    match method_name {
+        "paneWait" => PANE_WAIT_TIMEOUT,
+        "pluginInstall" => PLUGIN_REVIEW_TIMEOUT,
+        _ => GDS_RESPONSE_TIMEOUT,
+    }
+}
 
 /// Make a handler that routes a named method through the pending queue.
 fn make_gdscript_handler(method: String, timeout: std::time::Duration) -> HandlerFn {
@@ -195,19 +215,15 @@ pub async fn start_ipc_server_inner(socket_path: &str) {
         "layoutList",
         "conceptList",
         "conceptToggle",
-        // The plugin-install review handshake: the CLI asks, a human answers
-        // a dialog, so the fallback deadline is minutes, not seconds.
+        // Deferred-answer methods (see `fallback_timeout`): the plugin
+        // install review waits on a human, pane-wait holds until the
+        // pattern matches or its own deadline.
         "pluginInstall",
     ];
     for method_name in gdscript_methods {
-        let timeout = if method_name == "pluginInstall" {
-            PLUGIN_REVIEW_TIMEOUT
-        } else {
-            GDS_RESPONSE_TIMEOUT
-        };
         server.register(
             method_name,
-            make_gdscript_handler(method_name.to_string(), timeout),
+            make_gdscript_handler(method_name.to_string(), fallback_timeout(method_name)),
         );
     }
 
@@ -295,6 +311,20 @@ mod tests {
         clear_state();
         complete_response(999, false, String::new());
         // No assertion needed — the test passes if it doesn't panic.
+    }
+
+    // A5. the deferred-answer methods get deadlines that cover their
+    // contracts, everything else keeps the poll-loop default
+    #[test]
+    fn deferred_methods_get_contract_covering_fallbacks() {
+        assert_eq!(fallback_timeout("paneWait"), PANE_WAIT_TIMEOUT);
+        assert_eq!(fallback_timeout("pluginInstall"), PLUGIN_REVIEW_TIMEOUT);
+        assert_eq!(fallback_timeout("newPane"), GDS_RESPONSE_TIMEOUT);
+        assert_eq!(fallback_timeout("layoutLoad"), GDS_RESPONSE_TIMEOUT);
+        assert!(
+            PANE_WAIT_TIMEOUT >= std::time::Duration::from_secs(60),
+            "the paneWait fallback must outlive the method's own deadline"
+        );
     }
 }
 

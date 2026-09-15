@@ -321,15 +321,35 @@ def main() -> int:
             time.sleep(0.5)
         smoke.require(status.get("running") is True, "the pane must be running", status)
 
+        # ── shell readiness: a line typed before the child attaches is read ──
+        # by nothing (the repo's documented cold-shell hazard — measured past
+        # 10 s on a cold runner). `idle_ms` is 0 until the first output and
+        # stays ~0 while the shell keeps printing, so a quarter second of
+        # silence means the startup banner is done and the prompt is up.
+        smoke.enter("shell readiness")
+        idle_ms = 0
+        for _ in range(120):
+            payload = smoke.cli("pane-status", pane_id, "--json", check=False)
+            idle_ms = int(payload.get("result", {}).get("idle_ms") or 0)
+            if idle_ms >= 250:
+                break
+            time.sleep(0.25)
+        smoke.require(
+            idle_ms >= 250,
+            "the shell must quiesce before input is injected",
+            idle_ms,
+        )
+
         # ── inject -> pane-wait -> pane-read ──────────────────────────
         smoke.enter("inject + pane-wait")
         smoke.cli("inject", pane_id, "--text", "echo SMOKE_7X9Q2", "--json")
         # Anchored: an unanchored pattern matches the shell's *echo of the
         # typed command* (which contains the marker as text) the instant it
         # echoes — before the command runs — so the wait proves nothing about
-        # the output. ^...$ matches only the bare output line.
+        # the output. ^...\s*$ matches only the bare output line (trailing
+        # whitespace tolerated: some line disciplines pad the line).
         smoke.require(
-            smoke.wait_for_output(pane_id, "^SMOKE_7X9Q2$").get("matched") is True,
+            smoke.wait_for_output(pane_id, "^SMOKE_7X9Q2\\s*$").get("matched") is True,
             "pane-wait must match the injected marker",
         )
 
@@ -363,9 +383,10 @@ def main() -> int:
         # pane's width and can split a marker across the wrap (measured at
         # 80 cols), so the substring check sees `SMOKE_\nNEWEST_C3D4` — the
         # bare output line is short, never wraps, and is what the wait must
-        # pin. Anchoring makes the wait mean "the output arrived".
+        # pin. Anchoring makes the wait mean "the output arrived"; trailing
+        # \s* tolerates line disciplines that pad the line.
         smoke.require(
-            smoke.wait_for_output(pane_id, "^SMOKE_NEWEST_C3D4$").get("matched") is True,
+            smoke.wait_for_output(pane_id, "^SMOKE_NEWEST_C3D4\\s*$").get("matched") is True,
             "the scrollback fill must reach the pane",
         )
         scrollback = smoke.read_pane(pane_id, lines=200)
