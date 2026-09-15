@@ -14,8 +14,12 @@
 //! We implement `Perform` on a private [`Handler`] struct that:
 //!
 //! - Collects printable characters into a `current_line` buffer
-//! - Commits the buffer on `\n` (LF) or `\r` (CR)
-//! - Discards all CSI, OSC, ESC, and DCS sequences
+//! - Commits the buffer on `\n` (LF); a bare `\r` stashes it (CRLF pairs
+//!   and prompt reprints are resolved by the bytes that follow)
+//! - Discards all CSI, OSC, ESC, and DCS sequences — with one exception:
+//!   cursor moves that advance the row (CUP to another row, CUD, CNL)
+//!   commit the pending line, because ConPTY renders line breaks as cursor
+//!   positioning without LF (see [`Handler`]).
 //!
 //! This is ~80 lines total — far simpler than a full terminal emulator,
 //! and sufficient for regex-based concept triggering.
@@ -126,7 +130,16 @@ pub const MAX_LINE_LEN: usize = 16 * 1024;
 const MAX_OSC_BYTES: usize = 64 * 1024;
 
 /// Private vte handler that collects printable text and ignores everything else.
-#[derive(Default)]
+///
+/// One class of CSI is interpreted: cursor moves that advance the row
+/// (`CUP`/`HVP` to a different row, `CUD`, `CNL`). ConPTY renders command
+/// output lines as text followed by the cursor moving to the next row —
+/// with no LF — so a discard-only parser that ignored positioning merged
+/// every output line with the following prompt into one buffer that never
+/// committed (windows-smoke: `pane-read` showed the output line, pane-wait
+/// never matched it). Same-row moves do not commit — they are prompt
+/// redraws and progress-bar updates, which must keep the LF/CR semantics
+/// above.
 struct Handler {
     current_line: String,
     completed_lines: Vec<String>,
@@ -140,6 +153,36 @@ struct Handler {
     /// sequence. Single-shot: only the first declaration in a parse
     /// applies; the engine consumes it via [`LineParser::take_declared_state`].
     declared_state: Option<crate::agent_state::AgentState>,
+    /// 1-based cursor row, tracked across CSI cursor moves (see above).
+    cursor_row: usize,
+}
+
+impl Default for Handler {
+    fn default() -> Self {
+        Self {
+            current_line: String::new(),
+            completed_lines: Vec::new(),
+            cr_stash: None,
+            declared_state: None,
+            cursor_row: 1,
+        }
+    }
+}
+
+impl Handler {
+    /// Commit the pending line when a downward cursor move ends it. Unlike
+    /// LF, this does not commit empty buffers — positioning noise would
+    /// otherwise stamp blank history rows.
+    fn commit_if_nonempty(&mut self) {
+        if let Some(stashed) = self.cr_stash.take() {
+            if !stashed.is_empty() {
+                self.completed_lines.push(stashed);
+            }
+        } else if !self.current_line.is_empty() {
+            self.completed_lines
+                .push(std::mem::take(&mut self.current_line));
+        }
+    }
 }
 
 impl Perform for Handler {
@@ -169,8 +212,11 @@ impl Perform for Handler {
                         .push(std::mem::take(&mut self.current_line));
                 }
             }
-            // Carriage-return: stash, never commit (see cr_stash doc).
-            b'\r' => {
+            // Carriage-return: stash, never commit (see cr_stash doc). A
+            // repeated CR keeps the first stash: ConPTY emits `\r\r\n` for
+            // some line ends, and re-stashing would clobber the text with
+            // the now-empty buffer, turning the completed line into "".
+            b'\r' if self.cr_stash.is_none() => {
                 self.cr_stash = Some(std::mem::take(&mut self.current_line));
             }
             // BEL, BS, HT, VT, FF — ignore.
@@ -178,16 +224,49 @@ impl Perform for Handler {
         }
     }
 
-    // ── All escape sequence handlers: discard ──────────────────────────
+    // ── Escape sequence handlers ──────────────────────────────────────
+    // Discard-only, with one interpreted class in `csi_dispatch` (see the
+    // Handler doc); OSC carries the single whitelisted agent-state
+    // declaration; everything else is stripped.
 
-    /// CSI: `ESC [` — cursor positioning, SGR, etc.
-    fn csi_dispatch(
-        &mut self,
-        _params: &Params,
-        _intermediates: &[u8],
-        _ignore: bool,
-        _action: char,
-    ) {
+    /// CSI: `ESC [` — the one class interpreted beyond discard: cursor
+    /// moves that advance the row commit the pending line (see the Handler
+    /// doc — ConPTY line breaks carry no LF). Same-row moves never commit.
+    fn csi_dispatch(&mut self, params: &Params, _intermediates: &[u8], ignore: bool, action: char) {
+        if ignore {
+            return;
+        }
+        match action {
+            // CUP / HVP — `ESC[row;colH`. A row CHANGE is a line break;
+            // same-row repositioning (prompt redraw, progress bar) is not.
+            'H' | 'f' => {
+                let row = params
+                    .iter()
+                    .next()
+                    .and_then(|sub| sub.first().copied())
+                    .filter(|r| *r != 0)
+                    .unwrap_or(1) as usize;
+                if row != self.cursor_row {
+                    self.commit_if_nonempty();
+                    self.cursor_row = row;
+                }
+            }
+            // CUD / CNL — `ESC[nB` / `ESC[nE`: move down n rows. n > 0 is
+            // always a line advance.
+            'B' | 'E' => {
+                let n = params
+                    .iter()
+                    .next()
+                    .and_then(|sub| sub.first().copied())
+                    .filter(|r| *r != 0)
+                    .unwrap_or(1) as usize;
+                if n > 0 {
+                    self.commit_if_nonempty();
+                    self.cursor_row = self.cursor_row.saturating_add(n);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// OSC: `ESC ]` — window title, clipboard, etc.
@@ -281,6 +360,63 @@ mod tests {
         // text overwrites — "hello" is gone, only "world" completes.
         let lines = p.feed(b"hello\rworld\n");
         assert_eq!(lines, vec!["world"]);
+    }
+
+    #[test]
+    fn cr_cr_lf_keeps_the_line() {
+        // ConPTY emits `\r\r\n` for some line ends; the second CR must not
+        // clobber the stashed text with the emptied buffer — the line used
+        // to complete as "" (windows-smoke failure class).
+        let mut p = LineParser::new();
+        assert_eq!(p.feed(b"SMOKE_7X9Q2\r\r\n"), vec!["SMOKE_7X9Q2"]);
+    }
+
+    #[test]
+    fn bare_cr_reprint_does_not_commit() {
+        // The SIGWINCH prompt reprint: `\r ESC[K \r prompt`. The first CR
+        // stashes, EL is discarded, the second CR keeps the stash, and the
+        // prompt printables discard it — nothing commits until the LF.
+        let mut p = LineParser::new();
+        assert!(p.feed(b"old line\r\x1b[K\rprompt$ ").is_empty());
+        assert_eq!(p.feed(b"\n"), vec!["prompt$ "]);
+    }
+
+    #[test]
+    fn cursor_down_commits_the_line_without_lf() {
+        // ConPTY renders output lines with a cursor move to the next row
+        // and no LF; the parser must commit on the row change.
+        let mut p = LineParser::new();
+        assert_eq!(p.feed(b"SMOKE_7X9Q2\r\x1b[5;1H"), vec!["SMOKE_7X9Q2"]);
+        // The prompt that follows accumulates into the next (uncommitted) line.
+        assert!(p.feed(b"C:\\dir>").is_empty());
+    }
+
+    #[test]
+    fn cud_and_cnl_commit() {
+        let mut p = LineParser::new();
+        assert_eq!(p.feed(b"a\x1b[1B"), vec!["a"]);
+        assert_eq!(p.feed(b"b\x1b[2E"), vec!["b"]);
+    }
+
+    #[test]
+    fn same_row_cup_does_not_commit() {
+        // Same-row repositioning (prompt redraw, progress bar) must not
+        // stamp a history row — the reprint contract depends on it.
+        let mut p = LineParser::new();
+        assert_eq!(
+            p.feed(b"progress \x1b[1;1Hupdate\n"),
+            vec!["progress update"]
+        );
+    }
+
+    #[test]
+    fn conpty_transaction_commits_output_and_prompt_separately() {
+        // The windows-smoke shape: the command echo (CRLF), then the output
+        // line ending in `\r` + CUP to the next row, then the prompt — which
+        // must NOT merge into the committed output line.
+        let mut p = LineParser::new();
+        let lines = p.feed(b"C:\\>echo SMOKE\r\nSMOKE\r\x1b[2;1HC:\\>");
+        assert_eq!(lines, vec!["C:\\>echo SMOKE", "SMOKE"]);
     }
 
     #[test]
