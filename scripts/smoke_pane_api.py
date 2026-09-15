@@ -347,17 +347,20 @@ def main() -> int:
         # so a cold runner may need several rounds before one is read.
         # The marker is BUILT at shell runtime (`printf %s` / `for /l %i`), so
         # the typed command text never contains it — only the output line can
-        # match, on every platform and line discipline, with no anchors.
+        # match, on every platform and line discipline, with no anchors. The
+        # marker ends in a DIGIT: the cmd loop can only append its loop
+        # variable, so the POSIX and cmd forms must build the same final
+        # character (a letter ending made `...9X7%i` print `...9X77`).
         probe_cmd = (
-            r"for /l %i in (7,1,7) do @echo SMOKE_READY_9X7%i"
+            r"for /l %i in (7,1,7) do @echo SMOKE_READY_4Q%i"
             if WINDOWS
-            else "printf 'SMOKE_READY_9X7%s\\n' Z"
+            else "printf 'SMOKE_READY_4Q%s\\n' 7"
         )
         answered = False
         for _ in range(10):
             smoke.cli("inject", pane_id, "--text", probe_cmd, "--json")
             if (
-                smoke.wait_for_output(pane_id, "SMOKE_READY_9X7Z", timeout_ms=3000).get(
+                smoke.wait_for_output(pane_id, "SMOKE_READY_4Q7", timeout_ms=3000).get(
                     "matched"
                 )
                 is True
