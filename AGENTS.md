@@ -88,6 +88,8 @@ gpty/
         │   ├── profile_manager.gd
         │   ├── concept_manager.gd
         │   ├── workspace_store.gd  # Named workspace (tab set) persistence
+        │   ├── pane_env_store.gd   # User-owned per-pane env, keyed by attachment_id
+        │   ├── trusted_store.gd    # Workspace Trust consent memory (builtins + plugins)
         │   ├── focus_manager.gd
         │   ├── toast_manager.gd
         │   ├── shortcut_manager.gd
@@ -96,6 +98,7 @@ gpty/
         │   ├── workspace.gd        # Root controller, workspace switching, concept routing, profile restore
         │   ├── ipc_handlers.gd     # WorkspaceIpcHandlers — pane-API/IPC method dispatch (extracted)
         │   ├── concept_router.gd   # Pure concept-event routing (extracted, testable)
+        │   ├── plugin_review_text.gd # Pure plugin-review dialog text (extracted, testable)
         │   ├── terminal_pane.gd    # Control-based renderer, keyboard, mouse, selection, history search
         │   └── terminal_manager.gd # Tile lifecycle, split/kill/swap/spawn
         ├── ui/
@@ -276,7 +279,7 @@ gPTY is evolving from a multi-terminal emulator into an ADE — a graphical PTY 
 
 ### Plugin Manifest (v0.5.5)
 
-`gpty-plugin.toml` — the schema lives in `crates/gpty-cli/src/plugin_manifest.rs` (`parse_manifest`). Top-level keys: `id` (`owner/name`, `[a-z0-9-]` parts 1–63 chars), `name` (1–64 chars), `version` + `min_gpty_version` (semver `X.Y.Z`, no pre-release), `platforms` (subset of `linux|macos|windows`, default all), `build`/`startup` (argv arrays), and five array-of-table sections: `[[actions]]` (≤64: `name`, `command`, optional `args`), `[[events]]` (≤64: `name`, `type`), `[[link_handlers]]` (≤16: `scheme`, `command` argv), `[[concepts]]` (≤128), `[[profiles]]` (≤64, ≤64 tiles each).
+`gpty-plugin.toml` — the schema lives in `crates/gpty-cli/src/plugin_manifest.rs` (`parse_manifest`). Top-level keys: `id` (`owner/name`, `[a-z0-9-]` parts 1–63 chars), `name` (1–64 chars), `version` + `min_gpty_version` (semver `X.Y.Z`, no pre-release), `platforms` (subset of `linux|macos|windows`, default all), `build`/`startup` (argv arrays), and five array-of-table sections: `[[actions]]` (≤64: `name`, `command`, optional `args`), `[[events]]` (≤64: `name`, `type`), `[[link_handlers]]` (≤16: `scheme`, `command` argv), `[[concepts]]` (≤128), `[[profiles]]` (≤64, ≤64 tiles each). The first-party tool-layout plugins are one repo per tool under the `godot-pty` org — `gpty-omp`, `gpty-herdr`, `gpty-lazygit`, `gpty-neovim`, `gpty-claude` — each a single manifest with that tool's `[[profiles]]`; a repo is the install/review/consent unit (see the profiles-migration item).
 
 Install & lifecycle (same release): `gpty plugin install <owner>/<repo>[@ref]` — `@ref` accepts any advertised git ref (tag, branch, or commit SHA); a bare install means the default branch's latest, and the review dialog shows the requested ref beside the resolved revision while the store pins the SHA (a moved tag = new revision = re-review) — clones `https://github.com/<owner>/<repo>` into a staging dir under the data dir (`data_dir()/staging`, git driven by argv, never a shell), parses the manifest (64 KiB cap), gates it (the manifest's `id` must equal the install target; the current platform must be declared; `min_gpty_version` must not exceed the CLI), and — because a plugin's actions run as the user with the workspace API — sends a summary over the `pluginInstall` IPC method for a human to review in the GUI (`workspace.gd:_show_plugin_review`, the Workspace Trust pattern with the paneWait deferred response; the Rust fallback deadline for this method is 300 s, not 5 s). No GUI answers (declined, disconnected, `--no-daemon`) => nothing installs. On acceptance the content moves to `data_dir()/plugins/<id>` (rename on one filesystem, old revision swapped with rollback), the per-plugin runtime dirs `state_dir()/plugins/<id>/{config,state,logs}` are created, and the record lands in the store: `state_dir()/plugins.json` (`crates/gpty-cli/src/plugin_store.rs` — `{id, revision, enabled, installed_at}`, ≤256 records, atomic random-suffix temp + rename 0600, strict on corrupt files). `list` / `enable` / `disable` / `uninstall` / `logs` manage the store and dirs; `run <id> <action>` spawns `GPTY_BIN_PATH` (or the current exe) with the action's `command` + `--key value` args — argv only, output captured to the log dir and printed on exit. A manifest's `build`/`startup` commands are **declared, not executed** — displayed in the review, run by no current item (executing them is its own trust decision). The plugin subcommand is excluded from the MCP tool list (like `state`): installing waits on a human, the admin actions touch local state, and `pluginInstall` is deliberately not a tool; the contract test names it in `NON_TOOL_ROUTED`.
 

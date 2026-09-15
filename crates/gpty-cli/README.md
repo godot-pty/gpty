@@ -80,6 +80,11 @@ gpty layout save mysetup
 gpty layout load mysetup
 gpty layout list
 
+# Install, manage, and run plugins
+gpty plugin install godot-pty/gpty-omp
+gpty plugin list
+gpty plugin run godot-pty/gpty-omp run-tests
+
 # Machine-readable JSON output
 gpty list-panes --json
 
@@ -107,6 +112,7 @@ gpty version
 | `mcp` | Run as MCP server over stdio (for AI tool integration) |
 | `daemon` | Manage the GUI: `start`, `stop`, `status` |
 | `layout` | Layout management: `save <name>`, `load <name>`, `list` |
+| `plugin` | Install, manage, and run plugins: `install <owner>/<repo>[@ref]` (git clone, manifest validation, GUI review dialog — a plugin's actions run as you, so a human must accept), `list`, `enable`/`disable <id>`, `uninstall <id>`, `logs <id>`, `run <id> <action>` (spawns the action's CLI command through `GPTY_BIN_PATH`). Not an MCP tool: install waits on the review dialog, the admin actions touch local state |
 | `version` | Print version info |
 
 ## Global Flags
@@ -125,8 +131,10 @@ gpty version
 | Crate | Version | Role |
 |-------|---------|------|
 | `gpty-ipc` | path | IPC transport + client |
+| `gpty-core` | path | Concept engine (manifest validation round-trips) |
 | `clap` | 4 | CLI argument parsing |
 | `anyhow` | 1 | Error handling |
-| `serde_json` | 1 | JSON output |
+| `serde` / `serde_json` | 1 | JSON store + output |
+| `toml` | 0.8 | `gpty-plugin.toml` parsing |
 | `dirs` | 6 | Platform directories (GUI binary discovery) |
 | `tokio` | 1 | Async runtime |

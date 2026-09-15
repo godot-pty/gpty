@@ -131,8 +131,11 @@ These are load-bearing guards. Reports that require removing one of them should 
   owned by you or root.
 - **Restored layouts and profiles**: tile types, settings, and grid geometry are validated; a tile
   that starts a different program or passes extra arguments raises the Workspace Trust prompt before
-  it runs, and `layoutLoad` over the control socket refuses such a profile outright (a caller cannot
-  answer a dialog, so naming the profile is not consent to what the file asks for). Environment is
+  it runs, and `layoutLoad` over the control socket refuses such a profile (a caller cannot answer a
+  dialog, so naming the profile is not consent to what the file asks for) — unless the consent memory
+  covers it: a built-in profile approved at this app version, or a profile whose every untrusted
+  tile's exact program+argv was approved, loads, because the record is proof the user approved that
+  content in the GUI. A new app version or plugin revision re-prompts by construction. Environment is
   not a file decision: a tile's `shell_env` is dropped on restore with a notice naming what was
   dropped, and per-pane environment is the user's own — `user://pane_env.json`, written only by the
   pane settings UI and keyed by the pane's id, applied at spawn over the user's global environment.

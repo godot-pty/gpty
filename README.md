@@ -94,6 +94,10 @@ gpty layout save my-setup
 gpty layout load my-setup
 gpty layout list
 
+# Install a plugin (reviewed in the GUI — its actions run as you)
+gpty plugin install godot-pty/gpty-omp
+gpty plugin list
+
 # Manage the GUI daemon
 gpty daemon status
 gpty daemon stop
