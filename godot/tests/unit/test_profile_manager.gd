@@ -180,6 +180,32 @@ func test_plugin_profiles_dedupe_among_themselves():
 	assert_eq(all[0].get("plugin_id"), "godot-pty/gpty-omp")
 	assert_eq(all[2].get("plugin_id"), "godot-pty/gpty-omp-third")
 
+func test_a_plugin_profile_yields_a_name_the_user_takes_later():
+	_set_plugin_json(JSON.stringify([_installed("OMP")]))
+	assert_eq(ProfileManager.get_all_profiles()[0].get("name"), "OMP")
+
+	# The user saves their own "OMP" while the plugin is installed. The name is
+	# theirs, so the plugin yields it now — not at the next launch, where
+	# `get_all_profiles` would have listed the plugin first and resolved a click
+	# on the user's row (and `layoutLoad "OMP"`) to the plugin's profile.
+	ProfileManager.add_profile("OMP", [])
+
+	var all := ProfileManager.get_all_profiles()
+	assert_eq(all[0].get("name"), "OMP (2)", "the plugin yields the name it was holding")
+	assert_true(all[0].get("plugin", false))
+	assert_eq(all[1].get("name"), "OMP", "the user profile keeps the bare name")
+	assert_eq(ProfileManager.find_profile("OMP").get("_user_index"), 0,
+		"the bare name resolves to the user's profile, not the plugin's")
+
+func test_deleting_a_user_profile_gives_the_name_back_to_the_plugin():
+	_set_plugin_json(JSON.stringify([_installed("OMP")]))
+	ProfileManager.add_profile("OMP", [])
+	assert_eq(ProfileManager.get_all_profiles()[0].get("name"), "OMP (2)")
+
+	ProfileManager.delete_profile(0)
+	assert_eq(ProfileManager.get_all_profiles()[0].get("name"), "OMP",
+		"with the user profile gone the plugin holds the bare name again")
+
 func test_garbage_plugin_json_yields_no_profiles():
 	for garbage in ["", "not json", "{}", "[1, \"x\", null]"]:
 		_set_plugin_json(garbage)

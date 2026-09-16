@@ -9,6 +9,12 @@ var _builtin_profiles: Array[Dictionary] = []
 ## written back to PROFILES_FILE: the plugin owns them, and they disappear
 ## with the plugin.
 var _plugin_profiles: Array[Dictionary] = []
+## The parsed store answer behind `_plugin_profiles`, kept so the display
+## names can be re-derived without re-reading the store (see
+## `_derive_plugin_profiles`). Untyped on purpose: the answer is store data,
+## so it can be a non-array (a JSON object, or `null` for a parse failure)
+## and a typed `Array` here would raise where the contract says skip.
+var _plugin_profile_entries = []
 
 ## Test seam. When valid it answers with the same JSON the FFI returns, so
 ## the merge can be exercised without an install; otherwise the extension
@@ -59,18 +65,21 @@ func add_profile(p_name: String, p_tiles: Array[Dictionary]):
 		n += 1
 		result_name = "%s (%d)" % [base, n]
 	profiles.append({"name": result_name, "tiles": p_tiles})
+	_derive_plugin_profiles()
 	save_profiles()
 
 func update_profile(index: int, p_name: String, p_tiles: Array[Dictionary]):
 	if index < 0 or index >= profiles.size():
 		return
 	profiles[index] = {"name": p_name, "tiles": p_tiles}
+	_derive_plugin_profiles()
 	save_profiles()
 
 func delete_profile(index: int):
 	if index < 0 or index >= profiles.size():
 		return
 	profiles.remove_at(index)
+	_derive_plugin_profiles()
 	save_profiles()
 
 
@@ -92,6 +101,7 @@ func rename_profile(index: int, p_name: String) -> String:
 		n += 1
 		result_name = "%s (%d)" % [base, n]
 	profiles[index]["name"] = result_name
+	_derive_plugin_profiles()
 	save_profiles()
 	return result_name
 
@@ -108,24 +118,39 @@ func get_profiles() -> Array[Dictionary]:
 ## is skipped instead of raising. Every refresh emits `profiles_changed`, so
 ## the sidebar and the layout list pick the installed set up.
 func refresh_plugin_profiles():
-	_plugin_profiles = []
-	var raw = _parse_plugin_profiles()
-	if raw is Array:
-		for item in raw:
-			if not (item is Dictionary):
-				continue
-			var base := str(item.get("name", ""))
-			var tiles = item.get("tiles")
-			if base == "" or not (tiles is Array):
-				continue
-			_plugin_profiles.append({
-				"name": _plugin_profile_name(base),
-				"tiles": tiles,
-				"plugin": true,
-				"plugin_id": str(item.get("plugin_id", "")),
-				"revision": str(item.get("revision", "")),
-			})
+	_plugin_profile_entries = _parse_plugin_profiles()
+	_derive_plugin_profiles()
 	profiles_changed.emit()
+
+## Derive the sidebar rows from the parsed entries, naming each against the
+## names already spoken for: a builtin or user profile keeps the bare name
+## and the plugin yields with ` (n)`, and among plugin profiles the first one
+## wins. Split out from the refresh so it can run again *without* re-reading
+## the store — a user profile added, renamed or deleted changes whose name
+## wins, not the plugin's content, and without that re-run the sidebar shows
+## two rows with one name for the rest of the session while `find_profile`
+## resolves the colliding name to the plugin's row (it lists plugins before
+## users), so a click on the user's row — or `layoutLoad` by that name —
+## would activate the plugin's profile.
+func _derive_plugin_profiles():
+	_plugin_profiles = []
+	if not (_plugin_profile_entries is Array):
+		return
+	var raw: Array = _plugin_profile_entries
+	for item in raw:
+		if not (item is Dictionary):
+			continue
+		var base := str(item.get("name", ""))
+		var tiles = item.get("tiles")
+		if base == "" or not (tiles is Array):
+			continue
+		_plugin_profiles.append({
+			"name": _plugin_profile_name(base),
+			"tiles": tiles,
+			"plugin": true,
+			"plugin_id": str(item.get("plugin_id", "")),
+			"revision": str(item.get("revision", "")),
+		})
 
 func _plugin_profiles_json() -> String:
 	if plugin_profiles_source.is_valid():
