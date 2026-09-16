@@ -2,15 +2,18 @@ extends GutTest
 # CLI View pane: a real child process whose stdout reaches the pane body,
 # plus the settings sanitization the pane owes its inputs.
 #
-# The child is the configured shell running a `ShellFixtures` command line
-# (`PaneTypes.shell_run_args`), not the command itself: the pane runs argv and
-# never a shell, so a test that wants a command line has to supply the shell.
-# The fixture builds it per platform.
+# The child is a real program with real argv — never a shell command line the
+# pane might evaluate, because it does not: `ShellFixtures.print_text_argv`
+# names the program (the shell running `printf` on POSIX, PowerShell itself on
+# Windows) and the pane spawns exactly that.
 
-## A launch plus a poll cycle. Sized for a real process, not a frame count:
-## a cold `powershell.exe` on the Windows runners starts in seconds, and the
-## pane only observes an exit after the extension has reaped the child.
-const PROCESS_BUDGET_MS := 10000
+## A launch plus a poll cycle, sized for a real process rather than a frame
+## count. Generous because the child is an interpreter starting cold on a CI
+## runner — a cold `powershell.exe` measured past 10 s in this repo already
+## (`test_bracketed_paste.gd`) — and because the pane only observes an exit
+## after the extension has reaped the child. Waits return as soon as the
+## condition holds, so the budget only costs time when something is wrong.
+const PROCESS_BUDGET_MS := 20000
 
 var _scene: Control
 
@@ -44,10 +47,10 @@ func _make_pane(command: String, args: Array) -> CliViewPane:
 	_scene.add_child(pane)
 	return pane
 
-## The shell command line that prints `text` and exits, as argv.
+## The plan that prints `text` and exits, as the argv the pane spawns.
 func _print_plan(text: String, hold_seconds := 0) -> Array:
-	var shell := SettingsManager.default_shell_command()
-	return [shell, PaneTypes.shell_run_args(shell, ShellFixtures.print_text(text, hold_seconds))]
+	return ShellFixtures.print_text_argv(
+		SettingsManager.default_shell_command(), text, hold_seconds)
 
 func _wait_until(predicate: Callable, timeout_ms: int) -> bool:
 	var deadline := Time.get_ticks_msec() + timeout_ms
