@@ -4,7 +4,7 @@
       "id": "omp-workspace",
       "name": "Agent Workspace",
       "builtin": true,
-      "description": "A agent workspace for OMP with separate Inspector and Reasoning panes.",
+      "description": "An agent workspace for OMP with separate Inspector and Reasoning panes.",
       "tiles": [
         {
           "col": 0,
