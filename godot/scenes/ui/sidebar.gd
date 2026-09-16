@@ -241,6 +241,12 @@ const SECTION_MAX_VISIBLE_ROWS = 5
 const ACCENT_COLOR = Color(0.45, 0.7, 1.0)
 const ACCENT_HOVER_COLOR = Color(0.6, 0.8, 1.0)
 
+## The profiles section's catalog hint: with no installed plugin profile the
+## only shipped layout is the built-in, and the tool layouts live in plugin
+## repos listed on this page.
+const PLUGINS_CATALOG_URL := "https://godot-pty.github.io/gpty/plugins/"
+const CATALOG_HINT_TEXT := "Get more layouts \u2192 catalog"
+
 func _add_workspace_section(parent: VBoxContainer):
 	var section = VBoxContainer.new(); section.name = "WorkspaceSection"
 
@@ -457,9 +463,16 @@ func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 	if not _profile_list: return
 	for c in _profile_list.get_children(): c.queue_free()
 	var rows: Array[Control] = []
+	var has_plugin_profile := false
 	for i in profiles.size():
 		var p = profiles[i]
 		var p_name = p.get("name", "Unnamed")
+		# `== true` rather than a typed cast: a user profile comes from a
+		# hand-editable file, and a stray value must read as "not a plugin"
+		# instead of raising on the assignment.
+		var is_plugin: bool = p.get("plugin", false) == true
+		if is_plugin:
+			has_plugin_profile = true
 		var row = HBoxContainer.new()
 		var btn = Button.new(); btn.text = p_name
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -472,7 +485,12 @@ func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 			_apply_row_accent(btn, p_name == active_name)
 		)
 		row.add_child(btn)
-		if not p.get("builtin", false):
+		if is_plugin:
+			# An installed plugin owns its profiles: they arrive and are
+			# replaced with the plugin, so there is nothing to rename or
+			# delete here — the row only says where it came from.
+			btn.tooltip_text = _plugin_provenance(p)
+		elif not p.get("builtin", false):
 			var user_index := int(p.get("_user_index", i))
 			btn.tooltip_text += "\nDouble-click to rename"
 			btn.gui_input.connect(func(ev: InputEvent):
@@ -489,7 +507,38 @@ func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 		_profile_list.add_child(row)
 		rows.append(row)
 
+	# No installed plugin profile means this section holds only the built-in
+	# and the user's own layouts — point at the catalog so the plugins that
+	# carry the tool profiles are discoverable. It counts as a row for the
+	# height cap like any other.
+	if not has_plugin_profile:
+		var hint_row := _make_catalog_hint_row()
+		_profile_list.add_child(hint_row)
+		rows.append(hint_row)
+
 	# Show up to SECTION_MAX_VISIBLE_ROWS rows at full measured height; a
 	# scrollbar appears only beyond that.
 	var sc = _profile_list.get_parent() as ScrollContainer
 	if sc: sc.custom_minimum_size.y = _measured_section_height(_profile_list, rows)
+
+## Where a plugin-sourced profile came from. The second sentence is the
+## reason such a row has no rename or delete: the plugin replaces it whole.
+func _plugin_provenance(profile: Dictionary) -> String:
+	return "Installed from %s@%s" % [
+		str(profile.get("plugin_id", "")),
+		str(profile.get("revision", "")),
+	] + " — plugin profiles follow the plugin"
+
+## The profiles section's catalog hint row. Same row shape as a profile row
+## (a Button inside a row container) so the section's measured height sees
+## it; pressing it opens the registry page.
+func _make_catalog_hint_row() -> HBoxContainer:
+	var row = HBoxContainer.new()
+	var btn = Button.new()
+	btn.name = "CatalogHintBtn"
+	btn.text = CATALOG_HINT_TEXT
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn.tooltip_text = "Browse installable plugins"
+	btn.pressed.connect(func(): OS.shell_open(PLUGINS_CATALOG_URL))
+	row.add_child(btn)
+	return row

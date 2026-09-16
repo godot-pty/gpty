@@ -190,3 +190,94 @@ func test_consented_content_skips_the_trust_gates():
 	assert_true(_ws._tiles_untrusted_without_consent(tiles_uncovered))
 	var tiles_trusted: Array[Dictionary] = [{"settings": {"type": "terminal"}}]
 	assert_false(_ws._tiles_untrusted_without_consent(tiles_trusted))
+
+func test_plugin_profiles_are_consented_by_their_installed_revision():
+	var version: String = GptyTerminal.get_app_version()
+	var plugin_tiles: Array[Dictionary] = [
+		{"settings": {"type": "terminal", "command": "contract-tool"}},
+	]
+	var plugin_profile := {
+		"name": "contract-plugin", "plugin": true,
+		"plugin_id": "godot-pty/gpty-omp", "revision": "a1b2c3d4e5f6",
+		"tiles": plugin_tiles,
+	}
+	assert_true(_ws._tiles_untrusted(plugin_tiles),
+		"the plugin's tiles name a program, so the gate applies")
+
+	# A plan-key approval covers a user profile but not a plugin profile: the
+	# plugin branch decides first, and the install review's record is the
+	# answer the user actually gave.
+	TrustedStore.approve_builtin("contract-plan", version, ["contract-tool"])
+	assert_false(_ws._profile_consented(plugin_profile),
+		"a plan approval is not the plugin's install record")
+
+	TrustedStore.approve_plugin("godot-pty/gpty-omp", "a1b2c3d4e5f6")
+	assert_true(_ws._profile_consented(plugin_profile),
+		"the approved revision activates without the trust dialog")
+
+	# The record keys on the pin, so a newer revision re-prompts.
+	var newer := plugin_profile.duplicate(true)
+	newer["revision"] = "f6e5d4c3b2a1"
+	assert_false(_ws._profile_consented(newer), "another revision re-prompts")
+
+func test_layout_load_sees_installed_plugin_profiles():
+	# The merge this item adds is what makes a plugin profile reachable by
+	# name over IPC — layoutList offers it and layoutLoad gates on the
+	# plugin's record. A plugin id of its own, so no other case in this
+	# script's shared consent store can stand in for the answer.
+	ProfileManager.plugin_profiles_source = func(): return JSON.stringify([{
+		"plugin_id": "godot-pty/gpty-herdr", "revision": "c0ffee123456",
+		"name": "contract-plugin-load",
+		"tiles": [{"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+			"settings": {"type": "terminal", "shell_args": ["-i"]}}],
+	}])
+	ProfileManager.refresh_plugin_profiles()
+
+	var listed = WorkspaceIpcHandlers.handle(_ws, "layoutList", {})
+	assert_true(listed is Dictionary and listed.has("layouts"), "layoutList must answer layouts")
+	assert_true((listed["layouts"] as Array).has("contract-plugin-load"),
+		"an installed plugin profile must be listed")
+
+	var refused = WorkspaceIpcHandlers.handle(_ws, "layoutLoad", {"name": "contract-plugin-load"})
+	assert_true(refused.has("error"), "an unapproved plugin profile must be refused over IPC")
+	assert_string_contains(str(refused["error"]["message"]), "GUI",
+		"the refusal must point at the GUI")
+
+	TrustedStore.approve_plugin("godot-pty/gpty-herdr", "c0ffee123456")
+	var loaded = WorkspaceIpcHandlers.handle(_ws, "layoutLoad", {"name": "contract-plugin-load"})
+	assert_true(loaded.get("success", false),
+		"an approved plugin profile must load over IPC")
+	assert_eq(_ws._tm.tiles.size(), 1, "the plugin profile replaces the layout")
+
+	# Leave the merged set empty again — the mocked autoload outlives this
+	# test for the whole script — without asking the real store.
+	ProfileManager.plugin_profiles_source = func(): return "[]"
+	ProfileManager.refresh_plugin_profiles()
+
+func test_accepted_plugin_profiles_are_read_after_the_clone_lands():
+	# The install review's accept path refreshes on a timer: the CLI only
+	# moves the accepted clone into place after it reads the answer, so an
+	# immediate re-read would miss the profiles it wrote.
+	ProfileManager.plugin_profiles_source = func(): return "[]"
+	ProfileManager.refresh_plugin_profiles()
+
+	# What the store answers once the install has landed.
+	ProfileManager.plugin_profiles_source = func(): return JSON.stringify([{
+		"plugin_id": "godot-pty/gpty-nvim", "revision": "deadbeef1234",
+		"name": "contract-installed",
+		"tiles": [{"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+			"settings": {"type": "code_viewer"}}],
+	}])
+	_ws._refresh_plugin_profiles_deferred()
+	assert_true(ProfileManager.find_profile("contract-installed").is_empty(),
+		"the refresh must wait for the install to land, not read immediately")
+
+	await get_tree().create_timer(2.1).timeout
+	var found := ProfileManager.find_profile("contract-installed")
+	assert_false(found.is_empty(),
+		"the deferred refresh must pick up the installed plugin's profiles")
+	assert_true(found.get("plugin", false), "it must arrive as a plugin profile")
+	assert_eq(found.get("plugin_id"), "godot-pty/gpty-nvim")
+
+	ProfileManager.plugin_profiles_source = func(): return "[]"
+	ProfileManager.refresh_plugin_profiles()

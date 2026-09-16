@@ -22,9 +22,10 @@ use gpty_ipc::client::IpcClient;
 
 use crate::PluginAction;
 use crate::plugin_manifest::{
-    self, ActionSpec, Manifest, Platform, current_version, parse_manifest, valid_plugin_id,
+    self, ActionSpec, Manifest, Platform, ProfileSpec, current_version, parse_manifest,
+    valid_plugin_id,
 };
-use crate::plugin_store::{self, PluginStore};
+use crate::plugin_store::{self, PluginProfileRecord, PluginStore};
 
 /// The review dialog waits on a human; the request deadline (and this
 /// client's timeout) are minutes, not the default 5 s.
@@ -50,6 +51,7 @@ pub async fn run(
         PluginAction::Uninstall { id } => uninstall(id, json),
         PluginAction::Logs { id, lines } => logs(id, *lines),
         PluginAction::Run { id, action: name } => run_action(id, name, json),
+        PluginAction::Validate { path } => validate(path, json),
     }
 }
 
@@ -248,7 +250,7 @@ async fn install(
     }
     move_into_place(&staging, &manifest.id)?;
     guard.disarm();
-    let record = store.upsert(&manifest.id, &revision)?;
+    let record = store.upsert(&manifest.id, &revision, &profile_records(&manifest))?;
 
     print_result(
         json,
@@ -321,6 +323,28 @@ pub(crate) async fn review_install(
     }
 }
 
+/// The manifest's profiles as store records: the name plus its tiles as JSON.
+///
+/// The store is the GUI's read model, so the tiles travel as
+/// `serde_json::Value` — `parse_manifest` already held every one of them to
+/// the tile contract, and the GUI never parses TOML.
+pub(crate) fn profile_records(manifest: &Manifest) -> Vec<PluginProfileRecord> {
+    manifest
+        .profiles
+        .iter()
+        .map(|profile| PluginProfileRecord {
+            name: profile.name.clone(),
+            tiles: profile
+                .tiles
+                .iter()
+                .map(|tile| {
+                    serde_json::to_value(tile).expect("a validated tile serializes to JSON")
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 /// What the review dialog renders. All fields come from a validated manifest
 /// (caps applied at parse time); the GUI re-caps the display, because the
 /// dialog text is untrusted file content. `requested_ref` is the ref the
@@ -365,12 +389,61 @@ pub(crate) fn review_summary(
             .map(|handler| serde_json::json!({"scheme": handler.scheme, "command": handler.command}))
             .collect::<Vec<_>>(),
         "concepts": manifest.concepts.len(),
+        // A profile is geometry plus the programs its tiles name; the review
+        // says what activating it would start, not just how many tiles.
         "profiles": manifest
             .profiles
             .iter()
-            .map(|profile| serde_json::json!({"name": profile.name, "tiles": profile.tiles.len()}))
+            .map(|profile| serde_json::json!({
+                "name": profile.name,
+                "tiles": profile.tiles.len(),
+                "programs": profile_programs(profile),
+            }))
             .collect::<Vec<_>>(),
     })
+}
+
+/// The most programs one review entry lists.
+const MAX_PROFILE_PROGRAMS: usize = 8;
+/// The most characters of one program name the review lists — the cap the
+/// summary applies to the other displayed tile/argv values.
+const MAX_PROGRAM_LEN: usize = 64;
+
+/// The distinct `settings.command` values a profile's tiles name, in tile
+/// order: "what this profile would run". A tile that names no program
+/// (a code viewer, a file tree) contributes nothing. `settings.command` is
+/// authored content with no manifest-level length cap, so each entry is
+/// shortened for the dialog like every other displayed string.
+fn profile_programs(profile: &ProfileSpec) -> Vec<String> {
+    let mut programs: Vec<String> = Vec::new();
+    for tile in &profile.tiles {
+        let Some(command) = tile
+            .get("settings")
+            .and_then(|settings| settings.get("command"))
+            .and_then(|command| command.as_str())
+        else {
+            continue;
+        };
+        let command = short(command, MAX_PROGRAM_LEN);
+        if command.is_empty() || programs.contains(&command) {
+            continue;
+        }
+        programs.push(command);
+        if programs.len() >= MAX_PROFILE_PROGRAMS {
+            break;
+        }
+    }
+    programs
+}
+
+/// One capped, control-character-free string for the review summary — the
+/// Rust mirror of `PluginReviewText.short` in the GUI, which re-caps the same
+/// untrusted manifest strings before printing them.
+fn short(text: &str, cap: usize) -> String {
+    text.chars()
+        .filter(|ch| !ch.is_control())
+        .take(cap)
+        .collect()
 }
 
 // ── List / enable / disable / uninstall ───────────────────────────────
@@ -557,13 +630,93 @@ pub(crate) fn action_argv(spec: &ActionSpec) -> Vec<String> {
     argv
 }
 
+// ── Validate ──────────────────────────────────────────────────────────
+
+/// `gpty plugin validate <path>` — the plugin-authoring loop, and what a
+/// plugin repo's own CI runs: parse a manifest through exactly the validator
+/// install uses, and report the verdict. No store, no GUI, no network.
+///
+/// A directory resolves to the manifest inside it, so an author points this
+/// at the plugin checkout; a file is the manifest itself.
+fn validate(path: &Path, json: bool) -> anyhow::Result<()> {
+    match validate_manifest(path) {
+        Ok(manifest) => {
+            print_result(
+                json,
+                serde_json::json!({
+                    "ok": true,
+                    "id": manifest.id,
+                    "name": manifest.name,
+                    "version": manifest.version.to_string(),
+                }),
+                format!(
+                    "plugin ok: {} {} ({} profiles, {} actions, {} events, {} concepts, {} link handlers)",
+                    manifest.id,
+                    manifest.version,
+                    manifest.profiles.len(),
+                    manifest.actions.len(),
+                    manifest.events.len(),
+                    manifest.concepts.len(),
+                    manifest.link_handlers.len(),
+                ),
+            );
+            Ok(())
+        }
+        Err(diagnostic) => {
+            // Every failure — an unreadable path, an oversized file, a
+            // rejected field — is the same verdict, so `--json` always
+            // answers with the same envelope an authoring loop branches on.
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"ok": false, "errors": [diagnostic]})
+                    )?
+                );
+            }
+            // A rejected manifest is an exit status, not a crash: the caller
+            // prints the diagnostic to stderr and exits 1. In `--json` mode
+            // the diagnostic reaches stderr too, so a human watching the run
+            // still reads what failed.
+            bail!("{diagnostic}");
+        }
+    }
+}
+
+/// The verdict as one diagnostic line: `<manifest path>: <what is wrong>`,
+/// or the path/IO error when the file could not even be read.
+fn validate_manifest(path: &Path) -> Result<Manifest, String> {
+    let manifest_path = resolve_manifest_path(path).map_err(|e| format!("{e:#}"))?;
+    let text = read_manifest_text(&manifest_path).map_err(|e| format!("{e:#}"))?;
+    parse_manifest(&text).map_err(|e| format!("{}: {e}", manifest_path.display()))
+}
+
+/// The manifest a `validate` argument names: a directory is a plugin
+/// directory, so the manifest is the one inside it; a file is the manifest.
+fn resolve_manifest_path(path: &Path) -> anyhow::Result<PathBuf> {
+    let metadata = std::fs::metadata(path)
+        .with_context(|| format!("{}: not a readable file or directory", path.display()))?;
+    if metadata.is_dir() {
+        Ok(path.join(plugin_manifest::MANIFEST_FILENAME))
+    } else {
+        Ok(path.to_path_buf())
+    }
+}
+
 // ── Shared helpers ────────────────────────────────────────────────────
 
 /// Read and parse the manifest in a plugin directory. Size-capped: a
 /// manifest is a declaration, and the file comes from an untrusted repo.
 pub(crate) fn read_manifest(dir: &Path) -> anyhow::Result<Manifest> {
     let path = dir.join(plugin_manifest::MANIFEST_FILENAME);
-    let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+    let text = read_manifest_text(&path)?;
+    parse_manifest(&text).map_err(|e| anyhow!("{}: {e}", path.display()))
+}
+
+/// Read a manifest's bytes with the size cap, as UTF-8 text. Shared by
+/// install and `validate` so both accept exactly the same files.
+fn read_manifest_text(path: &Path) -> anyhow::Result<String> {
+    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     if bytes.len() > MAX_MANIFEST_BYTES {
         bail!(
             "{} is {} bytes; manifests are at most {MAX_MANIFEST_BYTES}",
@@ -571,8 +724,7 @@ pub(crate) fn read_manifest(dir: &Path) -> anyhow::Result<Manifest> {
             bytes.len()
         );
     }
-    let text = String::from_utf8(bytes).context("manifest is not UTF-8")?;
-    parse_manifest(&text).map_err(|e| anyhow!("{}: {e}", path.display()))
+    String::from_utf8(bytes).with_context(|| format!("{} is not UTF-8", path.display()))
 }
 
 fn short_rev(revision: &str) -> String {
@@ -802,6 +954,88 @@ tiles = [{settings = {type = "terminal"}, col = 0, row = 0}]
         assert_eq!(summary["concepts"], 0);
         assert_eq!(summary["profiles"][0]["tiles"], 1);
         assert_eq!(summary["build"], serde_json::json!(["make", "build"]));
+    }
+
+    /// The review answers "what would this profile start": the distinct
+    /// programs its tiles name, in tile order, capped so a hostile manifest
+    /// cannot bloat the dialog.
+    #[test]
+    fn review_summary_lists_the_programs_each_profile_runs() {
+        let tiles: Vec<String> = (0..MAX_PROFILE_PROGRAMS + 3)
+            .map(|i| {
+                format!(
+                    "{{ col = 0, row = 0, settings = {{ type = \"cli_view\", command = \"prog{i}\" }} }}"
+                )
+            })
+            .collect();
+        let manifest = parse_manifest(&format!(
+            r#"
+id = "owner/repo"
+name = "Demo"
+version = "1.0.0"
+min_gpty_version = "0.5.0"
+
+[[profiles]]
+name = "Tools"
+tiles = [
+  {{ col = 0, row = 0, cspan = 30, rspan = 60, settings = {{ type = "terminal", command = "omp" }} }},
+  {{ col = 30, row = 0, cspan = 30, rspan = 60, settings = {{ type = "terminal", command = "omp" }} }},
+  {{ col = 0, row = 0, cspan = 60, rspan = 60, settings = {{ type = "code_viewer" }} }},
+  {{ col = 0, row = 0, cspan = 60, rspan = 60, settings = {{ type = "terminal", command = "nvim" }} }},
+]
+"#
+        ))
+        .unwrap();
+        let summary = review_summary(&manifest, &parse_target("owner/repo").unwrap(), "abc123");
+        // Distinct, tile order, and a tile with no `command` contributes
+        // nothing — the dialog never claims a code viewer runs a program.
+        assert_eq!(
+            summary["profiles"][0]["programs"],
+            serde_json::json!(["omp", "nvim"])
+        );
+
+        let many = parse_manifest(&format!(
+            "id = \"owner/repo\"\nname = \"Demo\"\nversion = \"1.0.0\"\nmin_gpty_version = \"0.5.0\"\n[[profiles]]\nname = \"Many\"\ntiles = [{}]\n",
+            tiles.join(", ")
+        ))
+        .unwrap();
+        let summary = review_summary(&many, &parse_target("owner/repo").unwrap(), "abc123");
+        let programs = summary["profiles"][0]["programs"].as_array().unwrap();
+        assert_eq!(programs.len(), MAX_PROFILE_PROGRAMS);
+        assert_eq!(programs[0], "prog0", "tile order is what the review shows");
+    }
+
+    /// The store record is the GUI's only view of a plugin's tiles, so the
+    /// toml → JSON conversion has to keep the tile shape (nested tables and
+    /// arrays included) intact.
+    #[test]
+    fn profile_records_carry_the_validated_tiles_as_json() {
+        let manifest = parse_manifest(
+            r#"
+id = "owner/repo"
+name = "Demo"
+version = "1.0.0"
+min_gpty_version = "0.5.0"
+
+[[profiles]]
+name = "Tools"
+tiles = [
+  { col = 0, row = 0, cspan = 30, rspan = 60, settings = { type = "cli_view", attachment_id = "git-log", command = "git", shell_args = ["log", "--oneline"] } },
+]
+"#,
+        )
+        .unwrap();
+        let records = profile_records(&manifest);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "Tools");
+        assert_eq!(records[0].tiles.len(), 1);
+        let tile = &records[0].tiles[0];
+        assert_eq!(tile["settings"]["command"], "git");
+        assert_eq!(
+            tile["settings"]["shell_args"],
+            serde_json::json!(["log", "--oneline"])
+        );
+        assert_eq!(tile["cspan"], 30);
     }
 
     #[test]

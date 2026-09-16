@@ -2,7 +2,8 @@
 """Live pane-API smoke: boots the GUI headless and drives the JSON-RPC CLI
 end-to-end (new-pane -> status -> inject -> wait -> read -> scrollback ->
 broadcast -> pane-run exit code -> concept from output -> cli_view stdout ->
-kill), plus subscribe/eventsPoll on the event listener.
+plugin-provided profile -> kill), plus subscribe/eventsPoll on the event
+listener.
 
 One harness for every platform: the transport is the only difference between
 Unix and Windows (named pipe vs Unix socket), so the flow is written once and
@@ -16,13 +17,14 @@ The event listener has no auth and is read-only, so the client here is a plain
 line-delimited JSON-RPC call over the platform transport.
 
 Requires: godot on PATH (or GODOT=<path>), cargo, and the CLI built from this
-tree. On Unix user data is sandboxed with XDG_DATA_HOME; on Windows Godot
-resolves its user data through the Known Folder API, which the APPDATA
-environment variable does not redirect, so a Windows run uses the real
-per-user data directory — fine on a disposable CI runner, worth knowing on a
-dev box. One file in it is written by the harness itself: the smoke seeds a
-concept before launch (the only way to register one; `concept toggle` cannot
-add) and puts the store back in teardown, so a dev-box run leaves no trace.
+tree. On Unix user data and state are sandboxed with XDG_DATA_HOME and
+XDG_STATE_HOME; on Windows Godot resolves its user data through the Known
+Folder API, which the APPDATA environment variable does not redirect, and the
+plugin store lives under `%LOCALAPPDATA%`, so a Windows run uses the real
+per-user directories — fine on a disposable CI runner, worth knowing on a
+dev box. The stores the harness writes itself (a concept, and an installed
+plugin's record) are backed up and put back in teardown, so a dev-box run
+leaves no trace.
 
 Exit 0 and "PASS" on success; non-zero with "FAIL [step]: ..." and the tail of
 the Godot log otherwise. Reads and writes only inside the repo (plus the
@@ -82,10 +84,16 @@ class Smoke:
         self.env["GPTY_SECRET"] = SECRET
         if not WINDOWS:
             self.env["XDG_DATA_HOME"] = str(self.tmp / "data")
-        # The seeded concept store (see `seed_concepts`): its path and the
-        # bytes to put back in teardown.
+            # The plugin store lives in the state directory; sandbox it too, so
+            # the seeded record (and anything the GUI writes) never touches the
+            # developer's real store.
+            self.env["XDG_STATE_HOME"] = str(self.tmp / "state")
+        # The seeded stores (see `seed_concepts` / `seed_plugin`): each path
+        # and the bytes to put back in teardown.
         self.concepts_path: Path | None = None
         self.concepts_backup: bytes | None = None
+        self.plugins_path: Path | None = None
+        self.plugins_backup: bytes | None = None
 
     # ── Reporting ─────────────────────────────────────────────────────
 
@@ -257,9 +265,10 @@ class Smoke:
 
     def teardown(self) -> None:
         if self.gui is None:
-            # A failure between seeding and launch still has to put the store
+            # A failure between seeding and launch still has to put the stores
             # back.
             self.restore_concepts()
+            self.restore_plugin()
             return
         # A failed build may leave no CLI to ask; the process kill below still
         # has to happen, and a missing binary must not mask the real failure.
@@ -270,8 +279,9 @@ class Smoke:
         except subprocess.TimeoutExpired:
             self.gui.kill()
             self.gui.wait(timeout=10)
-        # After the GUI is gone, so nothing overwrites the store behind us.
+        # After the GUI is gone, so nothing overwrites the stores behind us.
         self.restore_concepts()
+        self.restore_plugin()
 
     # ── Concept seed ──────────────────────────────────────────────────
     # The smoke needs a concept it can trigger from real *output*. The only
@@ -346,6 +356,85 @@ class Smoke:
                 file=sys.stderr,
             )
 
+    # ── Plugin store seed ─────────────────────────────────────────────
+    # The profiles migration moved the five tool layouts onto plugin repos, and
+    # the GUI reads what `gpty plugin install` recorded in the store (it never
+    # parses a manifest). Seeding a record is therefore the whole install as far
+    # as the GUI is concerned — the step below proves store -> FFI ->
+    # ProfileManager -> layoutList/layoutLoad live. On Windows the state dir is
+    # the real per-user one (`%LOCALAPPDATA%\gpty`), so the file is backed up
+    # and restored like the concept store.
+
+    PLUGIN_ID = "godot-pty/smoke-plugin"
+    PLUGIN_REVISION = "0123456789abcdef0123456789abcdef01234567"
+    PLUGIN_PROFILE = "Smoke Layout"
+    PLUGIN_TILE_ID = "smoke-tile"
+
+    def state_dir(self) -> Path:
+        """gpty's state directory, as `transport::state_dir()` resolves it."""
+        if WINDOWS:
+            return Path(os.environ["LOCALAPPDATA"]) / "gpty"
+        return Path(self.env["XDG_STATE_HOME"]) / "gpty"
+
+    def seed_plugin(self) -> None:
+        path = self.state_dir() / "plugins.json"
+        self.plugins_path = path
+        self.plugins_backup = path.read_bytes() if path.exists() else None
+        store: dict = {}
+        if path.exists():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    store = loaded
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                store = {}
+        plugins = store.get("plugins")
+        if not isinstance(plugins, list):
+            plugins = []
+        plugins.append(
+            {
+                "id": self.PLUGIN_ID,
+                "revision": self.PLUGIN_REVISION,
+                "enabled": True,
+                "installed_at": 0,
+                "profiles": [
+                    {
+                        "name": self.PLUGIN_PROFILE,
+                        "tiles": [
+                            {
+                                "col": 0,
+                                "row": 0,
+                                "cspan": 60,
+                                "rspan": 60,
+                                "settings": {
+                                    "type": "terminal",
+                                    "attachment_id": self.PLUGIN_TILE_ID,
+                                    "pane_name": "From a plugin",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        store["plugins"] = plugins
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(store), encoding="utf-8")
+
+    def restore_plugin(self) -> None:
+        if self.plugins_path is None:
+            return
+        try:
+            if self.plugins_backup is None:
+                self.plugins_path.unlink(missing_ok=True)
+            else:
+                self.plugins_path.write_bytes(self.plugins_backup)
+        except OSError as error:
+            print(
+                f"warning: could not restore {self.plugins_path}: {error}",
+                file=sys.stderr,
+            )
+
     def log_tail(self, lines: int = 40) -> str:
         try:
             text = self.godot_log.read_text(errors="replace").splitlines()
@@ -390,6 +479,9 @@ def main() -> int:
         # The concept store is read at GUI startup, so the seed must land
         # before the launch (and it is restored in teardown).
         smoke.seed_concepts()
+        # Same for the plugin store: its records are what the GUI lists as
+        # installed-plugin profiles.
+        smoke.seed_plugin()
         smoke.launch()
 
         # ── Event listener ────────────────────────────────────────────
@@ -775,6 +867,34 @@ def main() -> int:
             any(e.get("type") == "pane" and e.get("event") == "killed" for e in killed),
             "eventsPoll must deliver the pane killed event",
             killed[:3],
+        )
+
+        # ── profiles provided by an installed plugin ──────────────────
+        # The profiles migration moved the five tool layouts out of the app and
+        # onto plugin repos, and the GUI lists what `gpty plugin install`
+        # recorded in the store (it never parses a manifest). Running this last
+        # also proves `layoutLoad` works on a plugin-sourced profile: the tile
+        # below is a plain terminal, so activation starts a pane rather than
+        # asking for trust in a dialog nobody can answer here.
+        smoke.enter("plugin-provided profile")
+        names = smoke.result(smoke.cli("layout", "list", "--json"), "layout list").get(
+            "layouts", []
+        )
+        smoke.require(
+            smoke.PLUGIN_PROFILE in names,
+            "the installed plugin's profile must be listed",
+            names,
+        )
+        smoke.result(
+            smoke.cli("layout", "load", smoke.PLUGIN_PROFILE, "--json"), "layout load"
+        )
+        panes = smoke.result(smoke.cli("list-panes", "--json"), "list-panes").get(
+            "panes", []
+        )
+        smoke.require(
+            any(p.get("id") == smoke.PLUGIN_TILE_ID for p in panes),
+            "the plugin profile's tile must be the pane that exists",
+            panes,
         )
 
         smoke.enter("teardown")

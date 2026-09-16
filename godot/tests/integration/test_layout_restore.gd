@@ -155,44 +155,50 @@ func test_command_with_fffd_falls_back_to_shell_default():
 	assert_eq(sh, SettingsManager.cfg_shell_command,
 		"command containing U+FFFD must fall back to the default shell")
 
-func test_each_preset_tile_passes_sanitize_tile():
-	# Every ecosystem preset tile must survive PaneTypes.sanitize_tile so that
-	# the restore path can process it.  Also verifies that command survives.
-	var preset_tiles := [
-		{"col": 0, "row": 0, "cspan": 12, "rspan": 12,
-		 "settings": {"type": "terminal", "pane_name": "Herdr",      "attachment_id": "herdr",   "command": "herdr"}},
-		{"col": 0, "row": 0, "cspan": 12, "rspan": 12,
-		 "settings": {"type": "terminal", "pane_name": "Lazygit",    "attachment_id": "lazygit", "command": "lazygit"}},
-		{"col": 0, "row": 0, "cspan": 12, "rspan": 12,
-		 "settings": {"type": "terminal", "pane_name": "Neovim",     "attachment_id": "nvim",    "command": "nvim"}},
-		{"col": 0, "row": 0, "cspan": 12, "rspan": 12,
-		 "settings": {"type": "terminal", "pane_name": "Claude Code","attachment_id": "claude",  "command": "claude"}},
-		{"col": 0, "row": 0, "cspan": 12, "rspan": 12,
-		 "settings": {"type": "terminal", "pane_name": "OMP",        "attachment_id": "omp",     "command": "omp"}},
-	]
-	for td in preset_tiles:
-		var cmd: String = td["settings"]["command"]
-		var st = PaneTypes.sanitize_tile(td, 12)
-		assert_false(st.is_empty(), "%s preset tile must pass sanitize_tile" % cmd)
-		assert_eq(st["settings"].get("command"), cmd,
-			"command must survive sanitize_tile for %s" % cmd)
-
-func test_six_builtins_in_default_profiles_file():
-	# Read profiles.default.json directly (bypasses the mock) to confirm
-	# exactly six built-in profiles are shipped, with the expected names.
+## The shipped defaults, read directly: the mock store answers for
+## `res://profiles.default.json`, so a test that wants the file the app ships
+## with has to open it.
+func _default_profiles() -> Array:
 	var f := FileAccess.open("res://profiles.default.json", FileAccess.READ)
 	assert_not_null(f, "res://profiles.default.json must be present")
 	if f == null:
-		return
+		return []
 	var j := JSON.new()
 	assert_eq(j.parse(f.get_as_text()), OK, "profiles.default.json must be valid JSON")
 	var data = j.get_data()
 	assert_true(data is Dictionary)
-	var raw = data.get("profiles", [])
-	assert_eq(raw.size(), 6, "profiles.default.json must contain exactly 6 built-in profiles")
+	return data.get("profiles", [])
+
+func test_each_preset_tile_passes_sanitize_tile():
+	# Every shipped preset tile must survive PaneTypes.sanitize_tile so the
+	# restore path can process it — including the pane type and the companion
+	# link the tile carries. Only "Agent Workspace" ships now: the five
+	# tool profiles moved to plugin repos, whose own CI sanitizes their tiles.
+	var raw := _default_profiles()
+	assert_gt(raw.size(), 0, "profiles.default.json must ship at least one profile")
+	for profile in raw:
+		var profile_name: String = profile.get("name", "")
+		var tiles: Array = profile.get("tiles", [])
+		assert_gt(tiles.size(), 0, "\"%s\" must carry tiles" % profile_name)
+		for td in tiles:
+			var st = PaneTypes.sanitize_tile(td, 12)
+			assert_false(st.is_empty(), "%s tile must pass sanitize_tile" % profile_name)
+			assert_eq(st["type_name"], td["settings"].get("type"),
+				"the %s tile must keep its pane type" % profile_name)
+			assert_eq(st["settings"].get("attachment_id"),
+				td["settings"].get("attachment_id"),
+				"the %s tile's companion link must survive sanitize_tile" % profile_name)
+
+func test_only_the_agent_workspace_ships_as_a_builtin():
+	# The five tool-specific built-ins (OMP, Herdr, Lazygit, Neovim, Claude)
+	# now come from one plugin repo per tool, so the file carries the single
+	# program-free layout: the recommended first-run profile asks for no
+	# consent because it names no program.
 	var names: Array = []
-	for p in raw:
+	for p in _default_profiles():
 		if p is Dictionary:
 			names.append(p.get("name", ""))
-	for expected in ["OMP", "Agent Workspace", "Herdr", "Lazygit", "Neovim", "Claude"]:
-		assert_true(expected in names, "\"%s\" must be a built-in profile" % expected)
+	assert_eq(names, ["Agent Workspace"],
+		"profiles.default.json must ship exactly the Agent Workspace built-in")
+	for moved in ["OMP", "Herdr", "Lazygit", "Neovim", "Claude"]:
+		assert_false(moved in names, "\"%s\" must come from its plugin now" % moved)

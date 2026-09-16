@@ -87,3 +87,125 @@ func test_rename_profile_rejects_invalid():
 	assert_eq(ProfileManager.rename_profile(idx, "   "), "", "blank name must fail")
 	# Renaming to its own name is a no-op returning the same name.
 	assert_eq(ProfileManager.rename_profile(idx, "Real"), "Real")
+
+# ── Installed-plugin profiles ──────────────────────────────────────────
+#
+# The seam stands in for `GptyTerminal.installed_plugin_profiles()`: the JSON
+# the CLI writes when it installs a plugin, one entry per profile.
+
+func _set_plugin_json(text: String):
+	ProfileManager.plugin_profiles_source = func(): return text
+	ProfileManager.refresh_plugin_profiles()
+
+func _installed(name: String, plugin_id := "godot-pty/gpty-omp", revision := "a1b2c3d4e5f6") -> Dictionary:
+	return {
+		"plugin_id": plugin_id,
+		"revision": revision,
+		"name": name,
+		"tiles": [{"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+			"settings": {"type": "terminal", "command": "omp"}}],
+	}
+
+func test_plugin_profiles_merge_between_builtins_and_user_profiles():
+	# A builtin read from the shipped defaults, a user profile, and one
+	# installed plugin profile.
+	MockAutoloads.set_store(ProfileManager.DEFAULTS_FILE, {"profiles": [
+		{"id": "builtin", "name": "Built-in", "tiles": []},
+	]})
+	ProfileManager._load_defaults()
+	ProfileManager.add_profile("Mine", [])
+	_set_plugin_json(JSON.stringify([_installed("OMP")]))
+
+	var all := ProfileManager.get_all_profiles()
+	assert_eq(all.size(), 3, "builtin + plugin + user")
+	assert_eq(all[0].get("name"), "Built-in")
+	assert_eq(all[1].get("name"), "OMP")
+	assert_eq(all[2].get("name"), "Mine")
+	assert_true(all[1].get("plugin", false), "a plugin profile is marked as one")
+	assert_eq(all[1].get("plugin_id"), "godot-pty/gpty-omp")
+	assert_eq(all[1].get("revision"), "a1b2c3d4e5f6")
+	assert_eq((all[1].get("tiles") as Array).size(), 1, "the plugin's tiles come through as they are")
+	assert_false(all[1].has("_user_index"), "a plugin profile is not a user profile")
+	assert_eq(all[2].get("_user_index"), 0, "user rows keep the delete/rename index space")
+
+	# The plugin's own profiles never land in the user store.
+	assert_eq(ProfileManager.get_profiles().size(), 1, "only the user profile is persisted")
+	assert_eq(MockAutoloads.get_store(ProfileManager.PROFILES_FILE).get("profiles", []).size(), 1)
+
+func test_find_profile_resolves_an_installed_plugin_profile():
+	_set_plugin_json(JSON.stringify([_installed("OMP")]))
+	var found := ProfileManager.find_profile("OMP")
+	assert_false(found.is_empty(), "find_profile must see installed plugin profiles")
+	assert_eq(found.get("plugin_id"), "godot-pty/gpty-omp")
+	assert_eq(found.get("revision"), "a1b2c3d4e5f6")
+	var tiles: Array = found.get("tiles", [])
+	assert_eq(tiles.size(), 1)
+	assert_eq(tiles[0]["settings"]["command"], "omp", "the plugin's tiles arrive unmodified")
+
+func test_user_profile_keeps_the_bare_name_when_a_plugin_collides():
+	ProfileManager.add_profile("OMP", [])
+	_set_plugin_json(JSON.stringify([_installed("OMP")]))
+
+	var all := ProfileManager.get_all_profiles()
+	assert_eq(all[0].get("name"), "OMP (2)", "the plugin profile yields the name")
+	assert_true(all[0].get("plugin", false))
+	assert_eq(all[1].get("name"), "OMP", "the user profile keeps the bare name")
+	assert_false(all[1].get("plugin", false))
+
+func test_builtin_keeps_the_bare_name_when_a_plugin_collides():
+	MockAutoloads.set_store(ProfileManager.DEFAULTS_FILE, {"profiles": [
+		{"id": "omp", "name": "OMP", "tiles": []},
+	]})
+	ProfileManager._load_defaults()
+	_set_plugin_json(JSON.stringify([_installed("OMP")]))
+
+	var all := ProfileManager.get_all_profiles()
+	assert_eq(all[0].get("name"), "OMP", "the builtin keeps the bare name")
+	assert_true(all[0].get("builtin", false))
+	assert_eq(all[1].get("name"), "OMP (2)", "the plugin profile takes the suffix")
+	assert_true(all[1].get("plugin", false))
+
+func test_plugin_profiles_dedupe_among_themselves():
+	_set_plugin_json(JSON.stringify([
+		_installed("OMP", "godot-pty/gpty-omp"),
+		_installed("OMP", "godot-pty/gpty-omp-alt", "f6e5d4c3b2a1"),
+		_installed("OMP", "godot-pty/gpty-omp-third", "0123456789ab"),
+	]))
+
+	var all := ProfileManager.get_all_profiles()
+	assert_eq(all.size(), 3)
+	assert_eq(all[0].get("name"), "OMP", "the first plugin profile keeps the name")
+	assert_eq(all[1].get("name"), "OMP (2)")
+	assert_eq(all[2].get("name"), "OMP (3)")
+	assert_eq(all[0].get("plugin_id"), "godot-pty/gpty-omp")
+	assert_eq(all[2].get("plugin_id"), "godot-pty/gpty-omp-third")
+
+func test_garbage_plugin_json_yields_no_profiles():
+	for garbage in ["", "not json", "{}", "[1, \"x\", null]"]:
+		_set_plugin_json(garbage)
+		assert_eq(ProfileManager.get_all_profiles().size(), 0,
+			"\"%s\" must yield no plugin profiles" % garbage)
+
+func test_malformed_plugin_entries_are_skipped_not_fatal():
+	_set_plugin_json(JSON.stringify([
+		{"plugin_id": "godot-pty/gpty-omp", "revision": "a1b2c3d4e5f6", "tiles": []},
+		{"plugin_id": "godot-pty/gpty-omp", "revision": "a1b2c3d4e5f6", "name": "OMP", "tiles": "not a list"},
+		_installed("Herdr", "godot-pty/gpty-herdr", "c0ffee123456"),
+	]))
+
+	var all := ProfileManager.get_all_profiles()
+	assert_eq(all.size(), 1, "only the complete entry survives")
+	assert_eq(all[0].get("name"), "Herdr")
+
+func test_refresh_plugin_profiles_replaces_the_installed_set():
+	_set_plugin_json(JSON.stringify([_installed("OMP")]))
+	assert_eq(ProfileManager.get_all_profiles().size(), 1)
+
+	# A second refresh answers with the plugin uninstalled.
+	_set_plugin_json("[]")
+	assert_eq(ProfileManager.get_all_profiles().size(), 0, "an uninstalled plugin leaves nothing behind")
+
+func test_refresh_plugin_profiles_emits_profiles_changed():
+	watch_signals(ProfileManager)
+	_set_plugin_json(JSON.stringify([_installed("OMP")]))
+	assert_signal_emitted(ProfileManager, "profiles_changed")

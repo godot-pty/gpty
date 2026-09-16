@@ -85,6 +85,10 @@ gpty plugin install godot-pty/gpty-omp
 gpty plugin list
 gpty plugin run godot-pty/gpty-omp run-tests
 
+# Check a manifest locally (the plugin-authoring loop and a plugin repo's CI)
+gpty plugin validate ./gpty-plugin.toml
+gpty plugin validate ./gpty-plugin.toml --json
+
 # Machine-readable JSON output
 gpty list-panes --json
 
@@ -112,7 +116,7 @@ gpty version
 | `mcp` | Run as MCP server over stdio (for AI tool integration) |
 | `daemon` | Manage the GUI: `start`, `stop`, `status` |
 | `layout` | Layout management: `save <name>`, `load <name>`, `list` |
-| `plugin` | Install, manage, and run plugins: `install <owner>/<repo>[@ref]` (git clone, manifest validation, GUI review dialog — a plugin's actions run as you, so a human must accept), `list`, `enable`/`disable <id>`, `uninstall <id>`, `logs <id>`, `run <id> <action>` (spawns the action's CLI command through `GPTY_BIN_PATH`). Not an MCP tool: install waits on the review dialog, the admin actions touch local state |
+| `plugin` | Install, manage, and run plugins: `install <owner>/<repo>[@ref]` (git clone, manifest validation, GUI review dialog — a plugin's actions run as you, so a human must accept), `list`, `enable`/`disable <id>`, `uninstall <id>`, `logs <id>`, `run <id> <action>` (spawns the action's CLI command through `GPTY_BIN_PATH`), `validate <path>` (check a `gpty-plugin.toml` file or plugin directory with the install validator — the local authoring loop, no GUI and no network; `--json` prints `{"ok":…}` and exits 1 on rejection). Not an MCP tool: install waits on the review dialog, the admin actions touch local state |
 | `version` | Print version info |
 
 ## Global Flags

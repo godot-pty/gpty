@@ -6,6 +6,11 @@
 //! `data_dir()/plugins/<id>` and the per-plugin runtime dirs under
 //! `state_dir()/plugins/<id>`.
 //!
+//! A record also carries the profiles the installed revision declared — name
+//! plus tiles, as JSON. The store is the GUI's read model: the CLI parsed and
+//! validated the manifest at install time, so the GUI reads the profiles out
+//! of the record instead of parsing TOML itself.
+//!
 //! Writes are atomic — a random sibling temp name, mode 0600, renamed over
 //! the target — mirroring `BasePersistenceManager._write_file`: an in-place
 //! write truncates the target as soon as it opens, so a failure would cost
@@ -18,7 +23,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::plugin_manifest::valid_plugin_id;
+use crate::plugin_manifest::{MAX_NAME_LEN, valid_plugin_id};
 use gpty_ipc::transport;
 
 /// The most plugin records the store keeps. Mirrors the manifest's own
@@ -30,13 +35,37 @@ pub const MIN_REVISION_LEN: usize = 7;
 pub const MAX_REVISION_LEN: usize = 64;
 /// `owner/name` with both parts at the manifest's 63-char cap.
 pub const MAX_ID_LEN: usize = 127;
+/// The most profiles one record carries — mirrors `plugin_manifest`'s
+/// `MAX_PROFILES` (the store accepts exactly what a manifest may declare).
+pub const MAX_PROFILE_RECORDS: usize = 64;
+/// The most tiles one stored profile carries — mirrors `plugin_manifest`'s
+/// `MAX_PROFILE_TILES`.
+pub const MAX_PROFILE_TILES: usize = 64;
+/// A stored profile name, at the manifest's own `name` cap.
+pub const MAX_PROFILE_NAME_LEN: usize = MAX_NAME_LEN;
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+/// One profile a plugin ships: its name and its tiles.
+///
+/// The tiles travel as JSON because the store is the GUI's read model — the
+/// GUI never parses TOML. The tile contract was enforced by
+/// `plugin_manifest::parse_manifest` before the record was written, so this
+/// is the validated shape, not a second schema.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct PluginProfileRecord {
+    pub name: String,
+    pub tiles: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct PluginRecord {
     pub id: String,
     pub revision: String,
     pub enabled: bool,
     pub installed_at: u64,
+    /// The profiles the installed revision declared. Empty for a plugin that
+    /// ships none, and for records written before profiles were stored (the
+    /// reader tolerates the missing key).
+    pub profiles: Vec<PluginProfileRecord>,
 }
 
 /// A store-level failure. Never a validation of manifest *content* — that is
@@ -117,18 +146,28 @@ impl PluginStore {
         Ok(self.records()?.into_iter().find(|record| record.id == id))
     }
 
-    /// Install or re-install `id` at `revision`. A re-install keeps the
-    /// existing `enabled` flag — a plugin the user disabled stays disabled
-    /// across an upgrade — and refreshes `installed_at`.
-    pub fn upsert(&self, id: &str, revision: &str) -> StoreResult<PluginRecord> {
+    /// Install or re-install `id` at `revision`, replacing the stored
+    /// `profiles`. A re-install keeps the existing `enabled` flag — a plugin
+    /// the user disabled stays disabled across an upgrade — and refreshes
+    /// `installed_at`. The profiles follow the revision: they are what the
+    /// installed content declares, so an upgrade must not leave the previous
+    /// revision's profiles readable.
+    pub fn upsert(
+        &self,
+        id: &str,
+        revision: &str,
+        profiles: &[PluginProfileRecord],
+    ) -> StoreResult<PluginRecord> {
         validate_id(id)?;
         validate_revision(revision)?;
+        validate_profiles(profiles)?;
         let mut records = self.records()?;
         if let Some(slot) = records.iter_mut().find(|record| record.id == id) {
             // A re-install keeps the existing enabled flag — a plugin the
             // user disabled stays disabled across an upgrade.
             slot.revision = revision.to_string();
             slot.installed_at = now_secs();
+            slot.profiles = profiles.to_vec();
         } else {
             if records.len() >= MAX_PLUGINS {
                 return Err(StoreError(format!(
@@ -140,6 +179,7 @@ impl PluginStore {
                 revision: revision.to_string(),
                 enabled: true,
                 installed_at: now_secs(),
+                profiles: profiles.to_vec(),
             });
         }
         self.write_records(&records)?;
@@ -204,7 +244,7 @@ fn parse_record(entry: &serde_json::Value) -> Result<PluginRecord, String> {
     let Some(table) = entry.as_object() else {
         return Err("not an object".into());
     };
-    let known = ["id", "revision", "enabled", "installed_at"];
+    let known = ["id", "revision", "enabled", "installed_at", "profiles"];
     for key in table.keys() {
         if !known.contains(&key.as_str()) {
             return Err(format!("unknown key `{key}`"));
@@ -228,12 +268,89 @@ fn parse_record(entry: &serde_json::Value) -> Result<PluginRecord, String> {
         .get("installed_at")
         .and_then(|v| v.as_u64())
         .ok_or("missing integer `installed_at`")?;
+    // Absent means a record written before profiles were stored — read it as
+    // "this plugin ships none" rather than refusing the whole store.
+    let profiles = match table.get("profiles") {
+        Some(value) => parse_profiles(value)?,
+        None => Vec::new(),
+    };
     Ok(PluginRecord {
         id: id.to_string(),
         revision: revision.to_string(),
         enabled,
         installed_at,
+        profiles,
     })
+}
+
+/// The `profiles` array of a record: the shape `upsert` writes, checked
+/// strictly because the file is user-owned state a hostile local writer can
+/// plant.
+fn parse_profiles(value: &serde_json::Value) -> Result<Vec<PluginProfileRecord>, String> {
+    let Some(entries) = value.as_array() else {
+        return Err("`profiles` is not an array".into());
+    };
+    if entries.len() > MAX_PROFILE_RECORDS {
+        return Err(format!("more than {MAX_PROFILE_RECORDS} profiles"));
+    }
+    let mut out = Vec::with_capacity(entries.len());
+    for (i, entry) in entries.iter().enumerate() {
+        let Some(table) = entry.as_object() else {
+            return Err(format!("profile {i} is not an object"));
+        };
+        for key in table.keys() {
+            if !["name", "tiles"].contains(&key.as_str()) {
+                return Err(format!("profile {i}: unknown key `{key}`"));
+            }
+        }
+        let name = table
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| format!("profile {i}: missing string `name`"))?;
+        let tiles = table
+            .get("tiles")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| format!("profile {i}: missing array `tiles`"))?;
+        check_profile_shape(name, tiles).map_err(|what| format!("profile {i}: {what}"))?;
+        out.push(PluginProfileRecord {
+            name: name.to_string(),
+            tiles: tiles.clone(),
+        });
+    }
+    Ok(out)
+}
+
+/// The caps a profile has to satisfy, shared by the reader and the write
+/// path: a record the reader would refuse must never be written.
+fn check_profile_shape(name: &str, tiles: &[serde_json::Value]) -> Result<(), String> {
+    let chars = name.chars().count();
+    if chars == 0 || chars > MAX_PROFILE_NAME_LEN {
+        return Err(format!(
+            "`name` must be 1-{MAX_PROFILE_NAME_LEN} characters"
+        ));
+    }
+    if tiles.len() > MAX_PROFILE_TILES {
+        return Err(format!("more than {MAX_PROFILE_TILES} tiles"));
+    }
+    for (i, tile) in tiles.iter().enumerate() {
+        if !tile.is_object() {
+            return Err(format!("tile {i} is not an object"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_profiles(profiles: &[PluginProfileRecord]) -> StoreResult<()> {
+    if profiles.len() > MAX_PROFILE_RECORDS {
+        return Err(StoreError(format!(
+            "at most {MAX_PROFILE_RECORDS} profiles per plugin"
+        )));
+    }
+    for profile in profiles {
+        check_profile_shape(&profile.name, &profile.tiles)
+            .map_err(|what| StoreError(format!("invalid profile `{}`: {what}", profile.name)))?;
+    }
+    Ok(())
 }
 
 fn validate_id(id: &str) -> StoreResult<()> {
@@ -388,14 +505,14 @@ mod tests {
     #[test]
     fn upsert_roundtrips_and_refreshes_installed_at() {
         let store = make_store("roundtrip");
-        let first = store.upsert("owner/name", "abc123def456").unwrap();
+        let first = store.upsert("owner/name", "abc123def456", &[]).unwrap();
         assert_eq!(first.id, "owner/name");
         assert_eq!(first.revision, "abc123def456");
         assert!(first.enabled);
 
         // An upgrade keeps the enabled flag and changes the revision.
         store.set_enabled("owner/name", false).unwrap();
-        let upgraded = store.upsert("owner/name", "fedcba987654").unwrap();
+        let upgraded = store.upsert("owner/name", "fedcba987654", &[]).unwrap();
         assert_eq!(upgraded.revision, "fedcba987654");
         assert!(!upgraded.enabled, "an upgrade must not re-enable");
 
@@ -407,8 +524,8 @@ mod tests {
     #[test]
     fn remove_deletes_only_the_named_record() {
         let store = make_store("remove");
-        store.upsert("owner/a", "aaaaaaa").unwrap();
-        store.upsert("owner/b", "bbbbbbb").unwrap();
+        store.upsert("owner/a", "aaaaaaa", &[]).unwrap();
+        store.upsert("owner/b", "bbbbbbb", &[]).unwrap();
         assert!(store.remove("owner/a").unwrap());
         assert!(!store.remove("owner/a").unwrap());
         let ids: Vec<_> = store
@@ -424,7 +541,7 @@ mod tests {
     fn set_enabled_reports_unknown_ids() {
         let store = make_store("enable");
         assert_eq!(store.set_enabled("owner/x", true).unwrap(), None);
-        store.upsert("owner/x", "aaaaaaa").unwrap();
+        store.upsert("owner/x", "aaaaaaa", &[]).unwrap();
         let record = store.set_enabled("owner/x", false).unwrap().unwrap();
         assert!(!record.enabled);
     }
@@ -433,9 +550,9 @@ mod tests {
     fn ids_are_validated_before_any_write() {
         let store = make_store("bad-id");
         // A path separator in an id must never reach a path join.
-        assert!(store.upsert("owner/../etc", "aaaaaaa").is_err());
-        assert!(store.upsert("Owner/UPPER", "aaaaaaa").is_err());
-        assert!(store.upsert("nohyphen", "aaaaaaa").is_err());
+        assert!(store.upsert("owner/../etc", "aaaaaaa", &[]).is_err());
+        assert!(store.upsert("Owner/UPPER", "aaaaaaa", &[]).is_err());
+        assert!(store.upsert("nohyphen", "aaaaaaa", &[]).is_err());
         assert!(store.remove("owner/../etc").is_err());
         assert!(store.set_enabled("../../x", true).is_err());
         assert_eq!(store.records().unwrap(), Vec::new());
@@ -444,10 +561,10 @@ mod tests {
     #[test]
     fn revisions_are_validated() {
         let store = make_store("bad-rev");
-        assert!(store.upsert("owner/x", "short").is_err());
-        assert!(store.upsert("owner/x", "has a space in it").is_err());
+        assert!(store.upsert("owner/x", "short", &[]).is_err());
+        assert!(store.upsert("owner/x", "has a space in it", &[]).is_err());
         let long = "a".repeat(MAX_REVISION_LEN + 1);
-        assert!(store.upsert("owner/x", &long).is_err());
+        assert!(store.upsert("owner/x", &long, &[]).is_err());
         assert_eq!(store.records().unwrap(), Vec::new());
     }
 
@@ -458,7 +575,7 @@ mod tests {
         let err = store.records().unwrap_err();
         assert!(err.0.contains("corrupt"), "error names the file: {err}");
         // A corrupt store must not be silently overwritten by a later op.
-        assert!(store.upsert("owner/x", "aaaaaaa").is_err());
+        assert!(store.upsert("owner/x", "aaaaaaa", &[]).is_err());
     }
 
     #[test]
@@ -494,16 +611,20 @@ mod tests {
         let write_store = make_store("cap-write");
         for i in 0..MAX_PLUGINS {
             write_store
-                .upsert(&format!("owner/p{i}"), "aaaaaaa")
+                .upsert(&format!("owner/p{i}"), "aaaaaaa", &[])
                 .unwrap();
         }
-        assert!(write_store.upsert("owner/overflow", "aaaaaaa").is_err());
+        assert!(
+            write_store
+                .upsert("owner/overflow", "aaaaaaa", &[])
+                .is_err()
+        );
     }
 
     #[test]
     fn writes_are_atomic_and_leave_no_temp_files() {
         let store = make_store("atomic");
-        store.upsert("owner/x", "aaaaaaa").unwrap();
+        store.upsert("owner/x", "aaaaaaa", &[]).unwrap();
         let dir = store.path.parent().unwrap().to_path_buf();
         let leftovers: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
@@ -515,7 +636,7 @@ mod tests {
             "temp files left behind: {leftovers:?}"
         );
         // A second write replaces the target, not the temp name.
-        store.upsert("owner/y", "bbbbbbb").unwrap();
+        store.upsert("owner/y", "bbbbbbb", &[]).unwrap();
         assert_eq!(store.records().unwrap().len(), 2);
     }
 
@@ -524,7 +645,7 @@ mod tests {
     fn store_file_is_private() {
         use std::os::unix::fs::PermissionsExt;
         let store = make_store("mode");
-        store.upsert("owner/x", "aaaaaaa").unwrap();
+        store.upsert("owner/x", "aaaaaaa", &[]).unwrap();
         let mode = std::fs::metadata(store.path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "the store holds install records");
     }
@@ -534,5 +655,197 @@ mod tests {
         assert!(content_dir("owner/../x").is_err());
         assert!(logs_dir("a/b/c").is_err());
         assert!(runtime_dir("noslash").is_err());
+    }
+
+    /// The profile a plugin ships has to survive a save/load cycle as JSON —
+    /// it is the GUI's only view of the plugin's tiles.
+    #[test]
+    fn profiles_roundtrip_and_follow_the_revision() {
+        let store = make_store("profiles-roundtrip");
+        let profiles = vec![
+            PluginProfileRecord {
+                name: "OMP".into(),
+                tiles: vec![serde_json::json!({
+                    "col": 0,
+                    "row": 0,
+                    "cspan": 60,
+                    "rspan": 60,
+                    "settings": {"type": "terminal", "command": "omp"},
+                })],
+            },
+            PluginProfileRecord {
+                name: "Empty".into(),
+                tiles: Vec::new(),
+            },
+        ];
+        let record = store
+            .upsert("owner/omp", "abc123def456", &profiles)
+            .unwrap();
+        assert_eq!(record.profiles, profiles);
+        // The reloaded record is what the strict reader built out of the file.
+        assert_eq!(
+            store.record("owner/omp").unwrap().unwrap().profiles,
+            profiles
+        );
+        assert_eq!(
+            store.records().unwrap()[0].profiles[0].tiles[0]["settings"]["command"],
+            "omp"
+        );
+
+        // A re-install replaces the profiles with the new revision's, keeping
+        // the enabled flag: a record must not keep serving the old tiles.
+        store.set_enabled("owner/omp", false).unwrap();
+        let upgraded = store.upsert("owner/omp", "fedcba987654", &[]).unwrap();
+        assert!(upgraded.profiles.is_empty());
+        assert!(!upgraded.enabled, "an upgrade must not re-enable");
+
+        // The write path refuses what the reader would refuse.
+        let too_many: Vec<PluginProfileRecord> = (0..=MAX_PROFILE_RECORDS)
+            .map(|i| PluginProfileRecord {
+                name: format!("p{i}"),
+                tiles: Vec::new(),
+            })
+            .collect();
+        assert!(
+            store
+                .upsert("owner/omp", "fedcba987654", &too_many)
+                .is_err()
+        );
+        let unnamed = vec![PluginProfileRecord {
+            name: String::new(),
+            tiles: Vec::new(),
+        }];
+        assert!(store.upsert("owner/omp", "fedcba987654", &unnamed).is_err());
+    }
+
+    /// A record written before profiles were stored has no `profiles` key;
+    /// it must read as "this plugin ships none", not as a corrupt store.
+    #[test]
+    fn missing_profiles_key_reads_as_empty() {
+        let store = make_store("profiles-absent");
+        std::fs::write(
+            &store.path,
+            r#"{"plugins": [{"id": "owner/x", "revision": "aaaaaaa", "enabled": true, "installed_at": 1}]}"#,
+        )
+        .unwrap();
+        let records = store.records().unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(records[0].profiles.is_empty());
+        // Re-installing one adds them without disturbing the rest.
+        let profiles = vec![PluginProfileRecord {
+            name: "P".into(),
+            tiles: vec![serde_json::json!({"settings": {"type": "terminal"}})],
+        }];
+        let updated = store.upsert("owner/x", "bbbbbbb", &profiles).unwrap();
+        assert_eq!(updated.profiles, profiles);
+    }
+
+    /// Every malformed `profiles` shape the reader can meet is a named error —
+    /// the store never silently drops a record's profiles.
+    #[test]
+    fn malformed_profile_shapes_are_rejected() {
+        let cases: [(&str, serde_json::Value, &str); 7] = [
+            ("not-array", serde_json::json!("OMP"), "not an array"),
+            (
+                "entry-not-object",
+                serde_json::json!(["OMP"]),
+                "is not an object",
+            ),
+            (
+                "unknown-key",
+                serde_json::json!([{"name": "P", "tiles": [], "color": "red"}]),
+                "unknown key `color`",
+            ),
+            (
+                "name-empty",
+                serde_json::json!([{"name": "", "tiles": []}]),
+                "`name` must be 1-",
+            ),
+            (
+                "name-too-long",
+                serde_json::json!([{"name": "n".repeat(MAX_PROFILE_NAME_LEN + 1), "tiles": []}]),
+                "`name` must be 1-",
+            ),
+            (
+                "tiles-not-array",
+                serde_json::json!([{"name": "P", "tiles": 3}]),
+                "missing array `tiles`",
+            ),
+            (
+                "tile-not-object",
+                serde_json::json!([{"name": "P", "tiles": ["settings"]}]),
+                "tile 0 is not an object",
+            ),
+        ];
+        for (label, profiles, expected) in cases {
+            let store = make_store(&format!("profiles-shape-{label}"));
+            std::fs::write(
+                &store.path,
+                serde_json::to_vec(&serde_json::json!({"plugins": [{
+                    "id": "owner/x",
+                    "revision": "aaaaaaa",
+                    "enabled": true,
+                    "installed_at": 1,
+                    "profiles": profiles,
+                }]}))
+                .unwrap(),
+            )
+            .unwrap();
+            let error = store.records().unwrap_err();
+            assert!(
+                error.0.contains(expected),
+                "case `{label}` must be named by `{expected}`: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn cap_on_stored_profile_and_tile_counts() {
+        let store = make_store("profiles-cap");
+        let profiles: Vec<serde_json::Value> = (0..=MAX_PROFILE_RECORDS)
+            .map(|i| serde_json::json!({"name": format!("p{i}"), "tiles": []}))
+            .collect();
+        std::fs::write(
+            &store.path,
+            serde_json::to_vec(&serde_json::json!({"plugins": [{
+                "id": "owner/x",
+                "revision": "aaaaaaa",
+                "enabled": true,
+                "installed_at": 1,
+                "profiles": profiles,
+            }]}))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            store
+                .records()
+                .unwrap_err()
+                .0
+                .contains(&format!("more than {MAX_PROFILE_RECORDS} profiles"))
+        );
+
+        let tiles: Vec<serde_json::Value> = (0..=MAX_PROFILE_TILES)
+            .map(|_| serde_json::json!({"settings": {"type": "terminal"}}))
+            .collect();
+        std::fs::write(
+            &store.path,
+            serde_json::to_vec(&serde_json::json!({"plugins": [{
+                "id": "owner/x",
+                "revision": "aaaaaaa",
+                "enabled": true,
+                "installed_at": 1,
+                "profiles": [{"name": "P", "tiles": tiles}],
+            }]}))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            store
+                .records()
+                .unwrap_err()
+                .0
+                .contains(&format!("more than {MAX_PROFILE_TILES} tiles"))
+        );
     }
 }

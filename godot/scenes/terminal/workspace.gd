@@ -749,12 +749,21 @@ func _tiles_untrusted_without_consent(tiles: Array[Dictionary]) -> bool:
 	return false
 
 ## Consent check for profile activation (and the IPC layoutLoad gate):
-## a shipped builtin is covered once approved at this app version — its
-## content ships with the version, so a new release re-asks; any other
-## profile is covered when every untrusted tile's exact spawn plan was
-## approved through a builtin (a workspace saved from one restores the same
-## way). Content that arrived any other way has no record and keeps asking.
+## an installed-plugin profile is covered when its plugin was approved at
+## exactly the revision this profile came from (the install review wrote that
+## record, and a newer revision re-prompts); a shipped builtin is covered
+## once approved at this app version — its content ships with the version, so
+## a new release re-asks; any other profile is covered when every untrusted
+## tile's exact spawn plan was approved through a builtin (a workspace saved
+## from one restores the same way). Content that arrived any other way has no
+## record and keeps asking.
 func _profile_consented(profile: Dictionary) -> bool:
+	# First, so a plugin profile is decided by its plugin's approval and never
+	# falls through to the plan-key walk an unrelated approval could satisfy.
+	var plugin_id := str(profile.get("plugin_id", ""))
+	if plugin_id != "":
+		return TrustedStore.is_plugin_approved(
+			plugin_id, str(profile.get("revision", "")))
 	if profile.get("builtin", false):
 		return TrustedStore.is_builtin_approved(
 			str(profile.get("name", "")), GptyTerminal.get_app_version())
@@ -1424,6 +1433,10 @@ func _show_plugin_review(id: int, params: Dictionary, timeout_ms: int):
 			str(params.get("id", "")), str(params.get("revision", "")))
 		_finish_plugin_review(id)
 		GptyTerminal.respond_ipc(id, true, JSON.stringify({"accepted": true}))
+		# The CLI only moves the clone into place after it reads this answer,
+		# so the installed profiles are not on disk yet — pick them up once
+		# they are (same wait the deferred concept push uses).
+		_refresh_plugin_profiles_deferred()
 	)
 	dialog.canceled.connect(func():
 		_finish_plugin_review(id)
@@ -1561,6 +1574,19 @@ func _push_concepts_deferred():
 	if not is_instance_valid(self) or not is_inside_tree():
 		return
 	_push_concepts_to_engine()
+
+## Re-read the installed-plugin profiles once the CLI has had time to move the
+## accepted clone into place and write its store record. Called from the
+## install review's accept path — refreshing immediately would read the store
+## before the install exists.
+func _refresh_plugin_profiles_deferred():
+	await get_tree().create_timer(2.0).timeout
+	# The workspace may have been torn down (tests, quick quit) while waiting;
+	# resuming on a freed instance would raise a script error.
+	if not is_instance_valid(self) or not is_inside_tree():
+		return
+	ProfileManager.refresh_plugin_profiles()
+
 func get_terminal_for_ffi() -> GptyTerminal:
 	for t in _tm.tiles:
 		var body = _tm._find_body(t.wrapper)
@@ -1754,7 +1780,10 @@ func _do_activate(profile: Dictionary):
 	ToastManager.info("Profile '%s' activated" % profile.get("name", ""))
 
 func _delete_profile(idx: int):
-	var profiles := ProfileManager.get_all_profiles()
+	# The sidebar's index is a user-profile index (the `_user_index` it
+	# received), so it addresses `get_profiles()` — `get_all_profiles()` puts
+	# the built-in and installed-plugin profiles in front of it.
+	var profiles := ProfileManager.get_profiles()
 	var deleted_name := ""
 	if idx >= 0 and idx < profiles.size():
 		deleted_name = str(profiles[idx].get("name", ""))
@@ -1765,7 +1794,8 @@ func _delete_profile(idx: int):
 	ToastManager.info("Profile deleted")
 
 func _rename_profile(idx: int, new_name: String):
-	var profiles := ProfileManager.get_all_profiles()
+	# Same index space as the sidebar's rows: user profiles only.
+	var profiles := ProfileManager.get_profiles()
 	var old_name := ""
 	if idx >= 0 and idx < profiles.size():
 		old_name = str(profiles[idx].get("name", ""))

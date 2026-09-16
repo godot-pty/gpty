@@ -10,6 +10,7 @@ mod plugin_store;
 #[cfg(test)]
 mod tests;
 
+use std::path::PathBuf;
 use std::process;
 use std::time::Duration;
 
@@ -279,6 +280,11 @@ enum PluginAction {
 
         /// The action's name in the manifest
         action: String,
+    },
+    /// Check a manifest file or plugin directory with the install validator
+    Validate {
+        /// Path to a `gpty-plugin.toml`, or to the plugin directory holding it
+        path: PathBuf,
     },
 }
 

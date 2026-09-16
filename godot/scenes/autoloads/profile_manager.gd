@@ -5,12 +5,23 @@ const DEFAULTS_FILE = "res://profiles.default.json"
 
 var profiles: Array[Dictionary] = []
 var _builtin_profiles: Array[Dictionary] = []
+## Profiles installed with a plugin, refreshed from the extension. Never
+## written back to PROFILES_FILE: the plugin owns them, and they disappear
+## with the plugin.
+var _plugin_profiles: Array[Dictionary] = []
+
+## Test seam. When valid it answers with the same JSON the FFI returns, so
+## the merge can be exercised without an install; otherwise the extension
+## is asked (`installed_plugin_profiles()` — the CLI writes every installed
+## plugin's validated profiles into the store and this reads them).
+var plugin_profiles_source: Callable
 
 signal profiles_changed
 
 func _on_init():
 	_load_defaults()
 	load_profiles()
+	refresh_plugin_profiles()
 
 func _load_defaults():
 	_builtin_profiles = []
@@ -87,10 +98,77 @@ func rename_profile(index: int, p_name: String) -> String:
 func get_profiles() -> Array[Dictionary]:
 	return profiles
 
+## Rebuild the installed-plugin profiles from the extension's JSON:
+## `[{"plugin_id": "owner/repo", "revision": "...", "name": "OMP",
+## "tiles": [ ... ]}, ...]` — enabled plugins only, one entry per profile,
+## `[]` when nothing is installed.
+##
+## The answer is store data like any other, so one bad entry costs itself: a
+## non-array answer, a non-dict entry, or an entry with no usable name/tiles
+## is skipped instead of raising. Every refresh emits `profiles_changed`, so
+## the sidebar and the layout list pick the installed set up.
+func refresh_plugin_profiles():
+	_plugin_profiles = []
+	var raw = _parse_plugin_profiles()
+	if raw is Array:
+		for item in raw:
+			if not (item is Dictionary):
+				continue
+			var base := str(item.get("name", ""))
+			var tiles = item.get("tiles")
+			if base == "" or not (tiles is Array):
+				continue
+			_plugin_profiles.append({
+				"name": _plugin_profile_name(base),
+				"tiles": tiles,
+				"plugin": true,
+				"plugin_id": str(item.get("plugin_id", "")),
+				"revision": str(item.get("revision", "")),
+			})
+	profiles_changed.emit()
+
+func _plugin_profiles_json() -> String:
+	if plugin_profiles_source.is_valid():
+		return str(plugin_profiles_source.call())
+	return str(GptyTerminal.installed_plugin_profiles())
+
+## Parse that answer. `null` for anything that is not JSON — the extension
+## answers `[]` when nothing is installed, so a parse failure means the store
+## or the binding is broken, not that there are no profiles to show. Parsed
+## through `JSON.new()` rather than `JSON.parse_string` so a bad answer is a
+## value, not an engine error line.
+func _parse_plugin_profiles():
+	var j := JSON.new()
+	if j.parse(_plugin_profiles_json()) != OK:
+		return null
+	return j.get_data()
+
+## Resolve a plugin profile's name, mirroring add_profile's convention: a
+## built-in or a user profile keeps the bare name and the plugin yields with
+## the " (n)" suffix, and among plugin profiles the first one wins.
+func _plugin_profile_name(base: String) -> String:
+	var result_name := base
+	var n := 1
+	while _name_exists(result_name) or _plugin_profile_exists(result_name):
+		n += 1
+		result_name = "%s (%d)" % [base, n]
+	return result_name
+
+func _plugin_profile_exists(p_name: String) -> bool:
+	for plugin_profile in _plugin_profiles:
+		if str(plugin_profile.get("name", "")) == p_name:
+			return true
+	return false
+
+## Built-ins, then installed-plugin profiles, then the user's own — the order
+## the sidebar renders and the order `find_profile` resolves a `layoutLoad`
+## name in.
 func get_all_profiles() -> Array[Dictionary]:
 	var all: Array[Dictionary] = []
 	for builtin in _builtin_profiles:
 		all.append(builtin.duplicate(true))
+	for plugin_profile in _plugin_profiles:
+		all.append(plugin_profile.duplicate(true))
 	for i in profiles.size():
 		var profile: Dictionary = profiles[i].duplicate(true)
 		profile["_user_index"] = i

@@ -1141,6 +1141,43 @@ impl GptyTerminal {
         GString::from(&serde_json::json!({ "path": path, "bytes": bytes }).to_string())
     }
 
+    /// Profiles declared by the installed plugins, for the GUI's profile list.
+    ///
+    /// Static, like `get_app_version`: the list is offered before any pane
+    /// exists, and it describes the plugin store, not a terminal. The store
+    /// (`state_dir()/plugins.json`) is written by `gpty plugin install` and is
+    /// user-owned state: a store that is *missing* is the normal state of a
+    /// machine with no plugins, so it answers `[]` without a word; anything
+    /// else that goes wrong (no state directory, an unreadable or malformed
+    /// store) is worth a warn, and still never an error the GUI has to handle
+    /// at startup. GDScript sees the warn with its own call stack attached,
+    /// which is why the routine case must stay silent.
+    ///
+    /// JSON array of `{plugin_id, revision, name, tiles}`, one entry per
+    /// profile of every **enabled** plugin, in store order; `tiles` are the
+    /// manifest's raw tile values, which the GUI sanitizes again for its own
+    /// pane type.
+    #[func]
+    fn installed_plugin_profiles() -> GString {
+        let Some(dir) = gpty_ipc::transport::state_dir() else {
+            log::warn!("installed_plugin_profiles: no state directory");
+            return GString::from("[]");
+        };
+        let path = dir.join("plugins.json");
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return GString::from("[]"),
+            Err(e) => {
+                log::warn!("installed_plugin_profiles: {}: {e}", path.display());
+                return GString::from("[]");
+            }
+        };
+        GString::from(&profiles_json(&text).unwrap_or_else(|reason| {
+            log::warn!("installed_plugin_profiles: {}: {reason}", path.display());
+            "[]".to_string()
+        }))
+    }
+
     /// Validate a pattern against the engine's regex dialect.
     ///
     /// Returns an empty String when `gpty_core::concept::validate_pattern`
@@ -1195,6 +1232,63 @@ fn history_db_path() -> String {
     godot::classes::ProjectSettings::singleton()
         .globalize_path("user://history.db")
         .to_string()
+}
+
+/// Shape the plugin store into `installed_plugin_profiles`' JSON.
+///
+/// Split from the file read so the shaping rules are testable without a state
+/// dir. `Err` names why the store was unusable; the caller logs it and still
+/// answers `[]`, because a GUI that cannot offer profiles must not also fail
+/// to start. Records and profile entries the store cannot be trusted to
+/// describe are dropped one at a time — a single unreadable entry must not
+/// hide every plugin, and the store is edited outside this process.
+fn profiles_json(store_text: &str) -> Result<String, String> {
+    let root: serde_json::Value =
+        serde_json::from_str(store_text).map_err(|e| format!("not JSON: {e}"))?;
+    let records = root
+        .get("plugins")
+        .and_then(|v| v.as_array())
+        .ok_or("no `plugins` array")?;
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for record in records {
+        // Only enabled plugins are offered; a record whose `enabled` is
+        // missing or not a boolean is not an enabled plugin.
+        if record.get("enabled").and_then(|v| v.as_bool()) != Some(true) {
+            continue;
+        }
+        // A profile is only meaningful under the plugin it came from — the
+        // GUI installs through `plugin_id` — so a record without a string
+        // `id` contributes nothing. `revision` is display-only.
+        let Some(plugin_id) = record.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let revision = record
+            .get("revision")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let Some(profiles) = record.get("profiles").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for profile in profiles {
+            let Some(name) = profile.get("name").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(tiles) = profile.get("tiles").and_then(|v| v.as_array()) else {
+                continue;
+            };
+            let mut entry = serde_json::Map::new();
+            entry.insert("plugin_id".into(), plugin_id.into());
+            entry.insert("revision".into(), revision.into());
+            entry.insert("name".into(), name.into());
+            // Tiles pass through as they were stored: the manifest validator
+            // already capped them, and the GUI re-sanitizes every field it
+            // turns into a pane, so re-validating here would only mean two
+            // rules to keep in sync.
+            entry.insert("tiles".into(), serde_json::Value::Array(tiles.clone()));
+            out.push(serde_json::Value::Object(entry));
+        }
+    }
+    Ok(serde_json::Value::Array(out).to_string())
 }
 
 /// Map Godot `Key` enum values to Linux evdev scancodes.
@@ -1449,5 +1543,138 @@ unsafe impl ExtensionLibrary for GptyExtension {
             // every `log::warn!` from the gpty crates is dropped on the floor.
             diagnostics::install();
         }
+    }
+}
+
+// ── Tests ────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::profiles_json;
+
+    /// What `installed_plugin_profiles` hands GDScript: an unusable store is
+    /// an empty list (the FFI logs the reason), so only a store the reader
+    /// accepts produces entries.
+    fn emitted(store_text: &str) -> String {
+        profiles_json(store_text).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    fn parsed(store_text: &str) -> serde_json::Value {
+        serde_json::from_str(&emitted(store_text)).expect("emitted JSON parses")
+    }
+
+    /// Only the enabled record's profiles, in store order, one entry per
+    /// profile, tiles passed through untouched.
+    #[test]
+    fn profiles_json_lists_enabled_records_only() {
+        let store = r#"{
+            "plugins": [
+                {
+                    "id": "acme/off", "revision": "aaa1111", "enabled": false,
+                    "installed_at": 1,
+                    "profiles": [{"name": "Hidden", "tiles": [{"col": 9}]}]
+                },
+                {
+                    "id": "acme/on", "revision": "bbb2222", "enabled": true,
+                    "installed_at": 2,
+                    "profiles": [
+                        {"name": "OMP", "tiles": [{"col": 0, "row": 0, "cspan": 1,
+                         "rspan": 2, "settings": {"pane_type": "omp"}}]},
+                        {"name": "Logs", "tiles": [{"col": 1, "row": 0}]}
+                    ]
+                }
+            ]
+        }"#;
+        assert_eq!(
+            parsed(store),
+            serde_json::json!([
+                {
+                    "plugin_id": "acme/on",
+                    "revision": "bbb2222",
+                    "name": "OMP",
+                    "tiles": [{"col": 0, "row": 0, "cspan": 1, "rspan": 2,
+                               "settings": {"pane_type": "omp"}}]
+                },
+                {
+                    "plugin_id": "acme/on",
+                    "revision": "bbb2222",
+                    "name": "Logs",
+                    "tiles": [{"col": 1, "row": 0}]
+                }
+            ])
+        );
+    }
+
+    /// A plugin installed before the profile migration declares no key at
+    /// all; that is not an error.
+    #[test]
+    fn profiles_json_ignores_records_without_profiles() {
+        let store = r#"{"plugins": [{"id": "acme/old", "revision": "ccc3333",
+                        "enabled": true, "installed_at": 3}]}"#;
+        assert_eq!(parsed(store), serde_json::json!([]));
+    }
+
+    /// One broken entry is skipped while its neighbours still reach the GUI —
+    /// truncating the list at the first bad entry would hide every later
+    /// plugin behind one stray edit.
+    #[test]
+    fn profiles_json_skips_malformed_entries_and_keeps_the_rest() {
+        let store = r#"{"plugins": [{
+            "id": "acme/part", "revision": "ddd4444", "enabled": true,
+            "installed_at": 4,
+            "profiles": [
+                {"name": "Good", "tiles": [{"col": 0}]},
+                {"tiles": [{"col": 1}]},
+                {"name": 7, "tiles": [{"col": 2}]},
+                {"name": "NoTiles"},
+                {"name": "BadTiles", "tiles": "nope"},
+                {"name": "Also Good", "tiles": [{"col": 3}]}
+            ]
+        }]}"#;
+        assert_eq!(
+            parsed(store),
+            serde_json::json!([
+                {"plugin_id": "acme/part", "revision": "ddd4444",
+                 "name": "Good", "tiles": [{"col": 0}]},
+                {"plugin_id": "acme/part", "revision": "ddd4444",
+                 "name": "Also Good", "tiles": [{"col": 3}]}
+            ])
+        );
+    }
+
+    /// A profile the GUI cannot attribute to a plugin is not offered: every
+    /// install action it triggers needs `plugin_id`.
+    #[test]
+    fn profiles_json_ignores_records_without_string_id() {
+        let store = r#"{"plugins": [
+            {"revision": "eee5555", "enabled": true,
+             "profiles": [{"name": "Orphan", "tiles": []}]},
+            {"id": "acme/on", "revision": "fff6666", "enabled": true,
+             "installed_at": 5,
+             "profiles": [{"name": "Kept", "tiles": []}]}
+        ]}"#;
+        assert_eq!(
+            parsed(store),
+            serde_json::json!([
+                {"plugin_id": "acme/on", "revision": "fff6666",
+                 "name": "Kept", "tiles": []}
+            ])
+        );
+    }
+
+    /// A store with no `plugins` array, and text that is not JSON at all,
+    /// each name why the list is empty instead of failing the call.
+    #[test]
+    fn profiles_json_rejects_a_store_without_the_plugins_array() {
+        let err = profiles_json(r#"{"version": 1}"#).unwrap_err();
+        assert!(err.contains("`plugins`"), "{err}");
+        assert_eq!(emitted(r#"{"version": 1}"#), "[]");
+    }
+
+    #[test]
+    fn profiles_json_rejects_empty_text() {
+        let err = profiles_json("").unwrap_err();
+        assert!(err.contains("not JSON"), "{err}");
+        assert_eq!(emitted(""), "[]");
     }
 }

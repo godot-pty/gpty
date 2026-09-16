@@ -81,6 +81,7 @@ on drop.
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `get_app_version()` | `String` | App version from `CARGO_PKG_VERSION` (static — call as `GptyTerminal.get_app_version()`) |
+| `installed_plugin_profiles()` | `String` | Static — JSON array of `{plugin_id, revision, name, tiles}`, one entry per profile of every **enabled** installed plugin, in store order (`tiles` are the manifest's raw tile dictionaries; the caller sanitizes each field). Reads `<state_dir>/plugins.json`; a missing or broken store is `[]` plus one warn, never an error. Plugins installed before the profiles migration, and profile entries without a string `name` or a `tiles` list, contribute nothing |
 
 #### Pane API & status
 

@@ -186,3 +186,63 @@ func test_update_profile_list_accents_active_profile():
 		"active profile row must carry the accent")
 	assert_true((rows[1].get_child(0) as Button).has_theme_color_override("font_pressed_color"),
 		"pressed active profile row must keep the accent")
+
+# ── Installed-plugin profiles in the section ───────────────────────────
+
+func _plugin_profile(name := "OMP") -> Dictionary:
+	return {
+		"name": name, "plugin": true,
+		"plugin_id": "godot-pty/gpty-omp", "revision": "a1b2c3d4e5f6",
+		"tiles": [{"col": 0, "row": 0, "cspan": 60, "rspan": 60}],
+	}
+
+func test_plugin_profile_row_shows_provenance_without_delete():
+	var profiles: Array[Dictionary] = [_plugin_profile()]
+	_sidebar.update_profile_list(profiles, "")
+
+	assert_eq(_sidebar._profile_list.get_child_count(), 1,
+		"the plugin row is the whole section: no catalog hint")
+	var row = _sidebar._profile_list.get_child(0)
+	var btn := row.get_child(0) as Button
+	assert_eq(btn.text, "OMP")
+	assert_eq(row.get_child_count(), 1, "a plugin profile has no delete button")
+	assert_string_contains(btn.tooltip_text, "Installed from godot-pty/gpty-omp@a1b2c3d4e5f6",
+		"the tooltip must name where the profile came from")
+	assert_string_contains(btn.tooltip_text, "plugin profiles follow the plugin",
+		"the tooltip must say why the row cannot be edited")
+
+func test_plugin_profile_row_does_not_offer_rename():
+	var profiles: Array[Dictionary] = [_plugin_profile()]
+	_sidebar.update_profile_list(profiles, "")
+	var row = _sidebar._profile_list.get_child(0)
+	var btn := row.get_child(0) as Button
+
+	var ev = InputEventMouseButton.new()
+	ev.button_index = MOUSE_BUTTON_LEFT
+	ev.pressed = true
+	ev.double_click = true
+	btn.gui_input.emit(ev)
+
+	for c in row.get_children():
+		assert_false(c is LineEdit, "a plugin profile must not open a rename editor")
+
+func test_catalog_hint_row_shows_only_without_plugin_profiles():
+	var profiles: Array[Dictionary] = [
+		{"name": "Agent Workspace", "builtin": true},
+		{"name": "Mine", "description": "", "_user_index": 0},
+	]
+	_sidebar.update_profile_list(profiles, "")
+
+	assert_eq(_sidebar._profile_list.get_child_count(), 3, "two profiles plus the catalog hint")
+	var hint := _sidebar._profile_list.get_child(2).get_child(0) as Button
+	assert_eq(hint.text, "Get more layouts \u2192 catalog")
+	assert_eq(_sidebar._profile_list.get_child(2).get_child_count(), 1,
+		"the hint is a row of its own, with no delete button")
+	# The height cap must still see the hint as a row: the measured section
+	# height covers all three rows, so nothing is clipped at the row limit.
+	var expected := float(_sidebar._profile_list.get_theme_constant("separation")) * 2.0
+	for i in _sidebar._profile_list.get_child_count():
+		expected += _sidebar._profile_list.get_child(i).get_combined_minimum_size().y
+	var sc = _sidebar._profile_list.get_parent() as ScrollContainer
+	assert_almost_eq(float(sc.custom_minimum_size.y), expected, 1.0,
+		"the section height must cover every rendered row, the hint included")
