@@ -662,7 +662,16 @@ def main() -> int:
             # Both fields: Tier 3 (output is flowing, the node process is
             # printing) can also report `working`, and only Tier 1 proves the
             # capability-authenticated channel carried the event.
-            for _ in range(20):
+            #
+            # The budget is sized for a process launch, not for the round trip
+            # this step is about: it starts a cold `node` on the runner, and on
+            # `windows-smoke` that outran the 10 s this used to allow — the pane
+            # tail showed the echoed `node "…/send-event.mjs"` line and nothing
+            # else, `idle_ms` 9837, so the step reported "the event never
+            # arrived" for a Node.js that was still starting. The same mistake
+            # was fixed in `test_bracketed_paste.gd` when a cold
+            # `powershell.exe` outran its 10 s.
+            for _ in range(120):
                 state = smoke.cli("pane-status", pane_id, "--json", check=False).get("result", {})
                 if state.get("agent_state") == "working" and state.get("agent_state_tier") == 1:
                     break
