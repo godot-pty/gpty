@@ -32,6 +32,7 @@
 use std::fmt;
 
 use clap::CommandFactory;
+use gpty_core::types::PaneType;
 
 /// The manifest's file name in a plugin directory.
 pub const MANIFEST_FILENAME: &str = "gpty-plugin.toml";
@@ -72,17 +73,18 @@ pub const PANE_MAX_ROWS: i64 = 500;
 pub const PANE_MAX_COLS: i64 = 2000;
 
 /// Pane types `PaneTypes.ALL` registers — the closed set a tile's `type` may
-/// name. The GUI side is pinned by `test_pane_types_all_has_six_entries`
-/// (`godot/tests/integration/test_palette.gd`); this mirror by
-/// `pane_type_and_platform_lists_match_the_gui_surface`.
-pub const PANE_TYPES: &[&str] = &[
-    "terminal",
-    "code_viewer",
-    "file_tree",
-    "inspector",
-    "reasoning",
-    "cli_view",
-];
+/// name.
+///
+/// Derived from [`PaneType::ALL`] rather than listed again: the enum is where
+/// the wire spelling lives (`as_str`), and a second literal here could only
+/// drift from it (the manifest's own seam test would then be checking the
+/// copy). The GUI side is pinned by `test_pane_types_all_has_six_entries`
+/// (`godot/tests/integration/test_palette.gd`), and
+/// `pane_type_and_platform_lists_match_the_gui_surface` pins this derivation
+/// against the expected six.
+pub fn pane_types() -> Vec<&'static str> {
+    PaneType::ALL.iter().map(|t| t.as_str()).collect()
+}
 
 /// Platforms a manifest may declare.
 pub const PLATFORMS: &[&str] = &["linux", "macos", "windows"];
@@ -861,12 +863,13 @@ fn validate_tile(tile: &toml::Value, path: &str) -> ManifestResult<()> {
             "`observer` is legacy; author `inspector` or `reasoning`",
         ));
     }
-    if !PANE_TYPES.contains(&type_name) {
+    let pane_types = pane_types();
+    if !pane_types.contains(&type_name) {
         return Err(ManifestError::at(
             &format!("{path}.settings.type"),
             &format!(
                 "unknown pane type `{type_name}` (use one of: {})",
-                PANE_TYPES.join(", ")
+                pane_types.join(", ")
             ),
         ));
     }
@@ -1472,13 +1475,60 @@ tiles = [
         );
     }
 
+    /// Keys of a GDScript `static var ALL: Dictionary = { … }` registry, in
+    /// file order — the GUI side read rather than restated.
+    fn gdscript_registry_keys(source: &str) -> Vec<&str> {
+        let start = source
+            .find("static var ALL: Dictionary = {")
+            .expect("PaneTypes.ALL must exist");
+        let rest = &source[start..];
+        let end = rest
+            .find("\n}")
+            .expect("the registry dictionary must close");
+        rest[..end]
+            .lines()
+            .filter_map(|line| {
+                let tail = line.trim_start().strip_prefix('"')?;
+                let (key, after) = tail.split_once('"')?;
+                after.trim_start().starts_with(':').then_some(key)
+            })
+            .collect()
+    }
+
+    /// The pane vocabulary is one thing seen from two sides: the enum's wire
+    /// spellings — what serde emits, what the manifest validator accepts, what
+    /// the CLI's `new-pane` validates — and the GUI's registry keys. This test
+    /// reads the registry instead of restating it, so a rename on either side
+    /// fails here; the count-only checks on both sides would have let a
+    /// `code_viewer` → `codeviewer` through in silence.
+    #[test]
+    fn pane_types_match_the_gui_registry_key_for_key() {
+        const PANE_TYPES_SRC: &str = include_str!("../../../godot/scenes/panes/pane_types.gd");
+        assert_eq!(
+            pane_types(),
+            gdscript_registry_keys(PANE_TYPES_SRC),
+            "the enum's wire spellings must be the registry's keys, in its order"
+        );
+    }
+
     #[test]
     fn pane_type_and_platform_lists_match_the_gui_surface() {
-        // The mirror lists must not drift from what the GUI registers: the
-        // pane type set is pinned by `test_pane_types_all_has_six_entries`,
-        // and the platform set is the export preset's own vocabulary.
-        assert_eq!(PANE_TYPES.len(), 6);
-        assert!(PANE_TYPES.contains(&"cli_view"));
+        // The platform set is the export preset's own vocabulary, so it stays
+        // a literal; the pane types are derived from the enum, and this is the
+        // contract that both the GUI registry and the derivation must satisfy
+        // (`test_pane_types_all_has_six_entries` pins the GUI side).
+        assert_eq!(
+            pane_types(),
+            vec![
+                "terminal",
+                "code_viewer",
+                "file_tree",
+                "inspector",
+                "reasoning",
+                "cli_view"
+            ],
+            "the enum's wire spellings are the GUI's registry keys, in its order"
+        );
         assert_eq!(PLATFORMS.len(), 3);
     }
 }

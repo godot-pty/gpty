@@ -1,15 +1,17 @@
+use gpty_core::types::PaneType;
 use gpty_ipc::client::IpcClient;
 
-/// Valid pane type names.
-const VALID_TYPES: &[&str] = &[
-    "terminal",
-    "code_viewer",
-    "file_tree",
-    "inspector",
-    "reasoning",
-    "cli_view",
-    "observer",
-];
+/// The pane type names this command accepts: [`PaneType`]'s wire spellings
+/// plus the legacy `observer`, which is still translated to `inspector` below
+/// with a warning.
+///
+/// Derived, not listed: a literal here could only drift from `PaneType::as_str`,
+/// which is the spelling the GUI registers (and the one serde emits).
+fn valid_types() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = PaneType::ALL.iter().map(|t| t.as_str()).collect();
+    names.push("observer");
+    names
+}
 // Mirrors the IPC request shape one-to-one; grouping would obscure dispatch.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
@@ -24,15 +26,16 @@ pub async fn run(
     json: bool,
 ) -> anyhow::Result<()> {
     // Validate pane type with "did you mean?" suggestions.
-    if !VALID_TYPES.contains(&pane_type) {
-        let suggestion = closest_match(pane_type, VALID_TYPES);
+    let valid_types = valid_types();
+    if !valid_types.contains(&pane_type) {
+        let suggestion = closest_match(pane_type, &valid_types);
         let hint = match suggestion {
             Some(s) => format!(" — did you mean \"{s}\"?"),
             None => String::new(),
         };
         anyhow::bail!(
             "invalid pane type: \"{pane_type}\"{hint}\nValid types: {}",
-            VALID_TYPES.join(", ")
+            valid_types.join(", ")
         );
     }
 

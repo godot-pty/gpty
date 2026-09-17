@@ -43,20 +43,58 @@ use regex::Regex;
 /// Pane type discriminator — mirrors GDScript PaneTypes.ALL keys.
 ///
 /// Used across the IPC boundary to identify which type of pane to spawn
-/// or query. The `as_str()` method returns the GDScript-compatible key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+/// or query. The `as_str()` method returns the GDScript-compatible key, and
+/// that key **is** the wire spelling: serde delegates to it below, so a struct
+/// carrying this type cannot spell a pane differently from the registry the
+/// GUI reads. (It used to be `#[serde(rename_all = "kebab-case")]`, which made
+/// `NewPaneParams` serialize `code-viewer` and — worse — *reject* the
+/// `code_viewer` every other surface uses.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaneType {
     Terminal,
     CodeViewer,
     FileTree,
-    #[serde(alias = "observer")]
     Inspector,
     Reasoning,
     CliView,
 }
 
+/// Serialized as the GUI's own key, not as a Rust variant name.
+impl Serialize for PaneType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+/// Parsed by the same function the rest of the code uses ([`PaneType::parse`]),
+/// so the accepted set and the emitted set are one definition.
+impl<'de> Deserialize<'de> for PaneType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(&raw).ok_or_else(|| {
+            let valid = Self::ALL.map(|t| t.as_str()).join(", ");
+            serde::de::Error::custom(format!(
+                "unknown pane type `{raw}` (expected one of: {valid})"
+            ))
+        })
+    }
+}
+
 impl PaneType {
+    /// Every pane type, in the order `PaneTypes.ALL` registers them.
+    ///
+    /// The one enumeration: [`Self::as_str`] names each, serde emits exactly
+    /// those names, and callers that need "all of them" (the manifest
+    /// validator, tests) iterate this instead of writing a second list.
+    pub const ALL: [PaneType; 6] = [
+        PaneType::Terminal,
+        PaneType::CodeViewer,
+        PaneType::FileTree,
+        PaneType::Inspector,
+        PaneType::Reasoning,
+        PaneType::CliView,
+    ];
+
     /// Returns the GDScript `PaneTypes.ALL` dictionary key for this type.
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -191,4 +229,56 @@ pub struct CapturedOutput {
 pub struct ConceptNotice {
     /// The concept whose trigger matched.
     pub concept_name: String,
+}
+
+#[cfg(test)]
+mod pane_type_tests {
+    use super::PaneType;
+
+    /// The wire spelling is the GUI's key, for every variant. This is the
+    /// contract the old `rename_all = "kebab-case"` broke: a Rust struct
+    /// serialized a pane type the GUI's registry has no entry for.
+    #[test]
+    fn serde_speaks_the_gui_key_for_every_variant() {
+        for pane_type in PaneType::ALL {
+            let value = serde_json::to_value(pane_type).unwrap();
+            assert_eq!(
+                value,
+                serde_json::Value::String(pane_type.as_str().to_string()),
+                "{pane_type:?} must serialize as its GUI key"
+            );
+        }
+    }
+
+    /// And it *reads* that key: the direction that used to fail, since serde
+    /// expected `code-viewer` while every other surface sends `code_viewer`.
+    #[test]
+    fn the_gui_key_deserializes_back_to_the_same_variant() {
+        for pane_type in PaneType::ALL {
+            let json = format!("\"{}\"", pane_type.as_str());
+            let back: PaneType = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, pane_type);
+        }
+        // The legacy spelling of the inspector pane is still understood — it
+        // arrives from saved layouts (`PaneTypes.migrate_pane_settings`), so
+        // dropping it would refuse files the GUI still accepts.
+        let legacy: PaneType = serde_json::from_str("\"observer\"").unwrap();
+        assert_eq!(legacy, PaneType::Inspector);
+    }
+
+    /// A Rust-shaped name is not a wire value: the kebab form is what this
+    /// type used to emit, and nothing may speak it again.
+    #[test]
+    fn rust_shaped_names_are_not_wire_values() {
+        let error = serde_json::from_str::<PaneType>("\"code-viewer\"").unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("code-viewer"),
+            "the error names the input: {message}"
+        );
+        assert!(
+            message.contains("code_viewer"),
+            "and the valid set: {message}"
+        );
+    }
 }

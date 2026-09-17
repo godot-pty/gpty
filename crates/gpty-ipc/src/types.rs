@@ -389,7 +389,8 @@ mod tests {
             tags: vec![],
         };
         let v = serde_json::to_value(&params).unwrap();
-        assert_eq!(v["type"], "code-viewer");
+        // The wire spelling is `PaneType::as_str()` — the GUI's registry key.
+        assert_eq!(v["type"], "code_viewer");
         assert_eq!(v["split"], "Bottom");
         assert!(
             v.get("args").is_none(),
