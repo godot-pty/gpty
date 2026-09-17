@@ -118,9 +118,12 @@ at spawn. A leaked capability is scoped to that terminal.
 **Platform:** the listener runs on Linux, macOS **and** Windows — it
 serves `gpty-events.sock` on Unix and `\\.\pipe\gpty-events` on Windows,
 and `GPTY_EVENT_*` is injected at spawn on every platform. The shipped
-`@gpty/omp-events` extension still speaks only to a Unix socket, so on
-Windows Reasoning stays dormant until an adapter with a named-pipe
-transport exists. Control IPC is unaffected on either platform.
+`@gpty/omp-events` extension reaches either transport through one
+`net.connect(path)` call (Node opens a Unix socket for a socket path and a
+named pipe for a pipe path), so Reasoning is live on both; the only
+platform branch is validation, where a Windows path must be a
+`\\.\pipe\` name, checked from the path alone because a pipe cannot be
+`stat`ed. Control IPC is unaffected on either platform.
 
 See `crates/gpty-gdext/src/omp_events.rs` and
 `extensions/gpty-omp-events/`.

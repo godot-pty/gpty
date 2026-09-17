@@ -91,7 +91,7 @@ on drop.
 | `get_status()` | `String` | JSON: `{pid, running, exit_code, exit_reason, idle_ms, agent_state, agent_state_tier}` (backs `paneStatus`). `running` requires a live terminal task *and* no exit code; `exit_reason` is `exited`, `task_ended` (the task died without recording one — a panic, or a child that closed its pty and outlived the pane) or `null` while it runs |
 | `search_history(pattern: String, limit: int)` | `String` | JSON `{"results": [[line_num, text], ...]}` — FTS5 search of the pane's persisted scrollback, newest-first (limit 1–500; free text as a user typed it, sanitised into quoted terms, so punctuation such as `main.rs` is searchable) |
 | `check_lines(pattern: String)` | `String` | First recent line matching the Rust-regex pattern, or empty (backs `waitForOutput`) |
-| `emit_event(json: String)` | void | Static — fan a JSON event out to event-socket subscribers (no-op on Windows) |
+| `emit_event(json: String)` | void | Static — fan a JSON event out to event-socket subscribers |
 
 #### Grid & rendering
 
@@ -136,7 +136,7 @@ on drop.
 |--------|---------|-------------|
 | `drain_ipc_requests()` | `Array` | Drain queued **control** IPC requests as `[{id, method, params, timeout_ms}]`. `timeout_ms` is the request's remaining fallback deadline (0 once it has passed); the deferred-answer dialogs arm their expiry timer from it, so a dialog cannot outlive the request that asked for it |
 | `respond_ipc(id, success, result_json)` | void | Respond to a drained IPC request |
-| `drain_agent_events()` | `String` | Drain bounded OMP extension events from `gpty-events.sock` (JSON array). **Unix only** — see [OMP event socket](#omp-event-socket-reasoning-pane) |
+| `drain_agent_events()` | `String` | Drain bounded OMP extension events (JSON array) from `gpty-events.sock` on Unix or `\\.\pipe\gpty-events` on Windows — see [OMP event socket](#omp-event-socket-reasoning-pane) |
 
 The control server registers `version`/`shutdown` locally; every other method (`newPane`, `paneRead`, `paneStatus`, `paneRun`, `paneWait`, `broadcast`, layout, concepts) is listed in `ipc.rs` `gdscript_methods` and routed to GDScript — `workspace.gd` delegates dispatch to `WorkspaceIpcHandlers` (`ipc_handlers.gd`). New pane-API methods must be added to **both** the registration list and the handler module.
 
@@ -174,28 +174,35 @@ Partial update (`is_full = false`, damaged cells only):
 ## OMP event socket (Reasoning pane)
 
 Passive OMP observability uses a **second** local IPC listener beside the
-workspace-control socket (`gpty.sock` → `gpty-events.sock`). Implementation:
+workspace-control socket: `gpty.sock` → `gpty-events.sock` on Unix,
+`\\.\pipe\gpty` → `\\.\pipe\gpty-events` on Windows. Implementation:
 `src/omp_events.rs`. Protocol details: `crates/gpty-ipc/README.md`.
 
-| Platform | Control IPC (`gpty.sock`) | OMP event socket (`gpty-events.sock`) |
-|----------|---------------------------|----------------------------------------|
-| Linux / macOS (Unix) | Unix domain socket | **Supported** — `ompEvent` JSON-RPC |
-| Windows | Named pipe | **Not supported yet** — fail-closed |
+| Platform | Control IPC | OMP event socket |
+|----------|-------------|------------------|
+| Linux / macOS (Unix) | Unix domain socket, `gpty.sock` | Unix domain socket, `gpty-events.sock` — `ompEvent` JSON-RPC |
+| Windows | Named pipe, `\\.\pipe\gpty` | Named pipe, `\\.\pipe\gpty-events` — `ompEvent` JSON-RPC |
 
-On Unix, each PTY spawn registers an ephemeral capability and injects
-`GPTY_EVENT_*` into the shell. `@gpty/omp-events` forwards semantic events;
-`workspace.gd` polls `drain_agent_events()` into the Reasoning pane.
+The listener runs on every platform, and it is started unconditionally: every
+PTY spawn calls `ensure_server_started()` and `register_terminal()` — no
+`cfg` branch stands between the two — and the shell is given `GPTY_EVENT_*`
+when registration succeeds. `@gpty/omp-events` then forwards semantic events
+and `workspace.gd` polls `drain_agent_events()` into the Reasoning pane, so
+Terminal, Inspector and Reasoning behave the same way on Windows. The
+`windows-smoke` job runs the extension inside a real pane there and asserts the
+pane reports Tier 1 `working`, which observes the whole chain — env injection,
+transport, capability check, translation, drain — on the platform.
 
-On Windows, `register_terminal()` and `ensure_server_started()` are no-ops:
-no event listener starts, **`GPTY_EVENT_*` is not injected**, and
-`drain_agent_events()` always returns `[]`. Terminals and Inspector still
-work; only the Reasoning / `@gpty/omp-events` path is unavailable until a
-Windows transport lands (likely named pipes, mirroring control IPC).
+The shipped extension needs no platform branch to reach either transport:
+`net.connect(path)` opens a Unix socket for a socket path and a named pipe for
+a pipe path. The only branch is validation — a Windows path must be a
+`\\.\pipe\` name, answered from the path alone because a pipe cannot be
+`stat`ed, while on Unix the socket must be owned by this user and inaccessible
+to group/other.
 
-The Windows CI `rust-windows` job compiles this crate with `RUSTFLAGS:
--Dwarnings`. All Unix-only event code (listener, capability store, and
-helpers) is `#[cfg(unix)]`-gated so the Windows build stays warning-free;
-`register_terminal()` and `drain_events()` keep fail-closed stubs.
+The event code carries no `#[cfg(unix)]` gates at all: `omp_events.rs` is
+platform-neutral, which is what lets the `rust-windows` job compile this crate
+under `RUSTFLAGS: -Dwarnings`.
 
 ### Tips
 
