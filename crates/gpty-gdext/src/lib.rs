@@ -940,6 +940,12 @@ impl GptyTerminal {
     }
 
     /// Replace all concepts in the global engine.
+    ///
+    /// Static because the store it writes is process-wide: an instance would
+    /// only be a vehicle for the call, and the GDScript side used to allocate
+    /// one per push and leak it (`ConceptManager._push_to_rust` — one ObjectDB
+    /// entry per save, toggle and editor save).
+    ///
     /// `concepts_json` is a JSON Array of objects, each with:
     ///   "name": String, "trigger": String (regex),
     ///   "enabled": bool, "capture_mode": String,
@@ -952,17 +958,20 @@ impl GptyTerminal {
     /// Parsing and caps (count, lengths, timeout clamp) live in
     /// `gpty_core::concept::concepts_from_json`.
     #[func]
-    fn set_global_concepts(&self, concepts_json: GString) {
+    fn set_global_concepts(concepts_json: GString) {
         let concepts = gpty_core::concept::concepts_from_json(&concepts_json.to_string());
         ENGINE.set_concepts(concepts);
     }
     /// Get all concepts as an Array of Dictionaries.
     ///
+    /// Static for the same reason as `set_global_concepts`: it reads the
+    /// process-wide store, so there is nothing for an instance to own.
+    ///
     /// Every dictionary carries `conditions` (PackedStringArray, possibly
     /// empty) alongside `name`, `trigger`, `enabled`, `capture_mode`,
     /// `stop_timeout_ms`/`stop_on_input` (until_stop only) and `actions`.
     #[func]
-    fn get_global_concepts(&self) -> Array<Variant> {
+    fn get_global_concepts() -> Array<Variant> {
         use gpty_core::types::CaptureMode;
         let concepts = ENGINE.get_concepts();
         let mut arr = Array::<Variant>::new();

@@ -172,9 +172,8 @@ func test_merge_preserves_inspector_targets():
 func test_push_clears_the_engine_when_every_concept_is_disabled():
 	# Seed the engine with a concept so the clearing push is observable.
 	var seed = '[{"name":"seed","trigger":"zzz","enabled":true,"capture_mode":"until_stop","actions":[{"target":"terminal"}]}]'
-	var seeded = ClassDB.instantiate("GptyTerminal")
-	seeded.set_global_concepts(seed)
-	assert_eq(seeded.get_global_concepts().size(), 1,
+	GptyTerminal.set_global_concepts(seed)
+	assert_eq(GptyTerminal.get_global_concepts().size(), 1,
 		"precondition: engine holds the seeded concept")
 
 	# User data disables cat_command, the only concept shipped enabled, so the
@@ -187,16 +186,24 @@ func test_push_clears_the_engine_when_every_concept_is_disabled():
 	])
 	ConceptManager._push_to_rust()
 
-	var readback = ClassDB.instantiate("GptyTerminal")
-	assert_eq(readback.get_global_concepts().size(), 0,
+	assert_eq(GptyTerminal.get_global_concepts().size(), 0,
 		"disabling every concept must clear the engine set")
 
 	# The concept set is engine-global and outlives this test: restore defaults.
 	ConceptManager.save_concepts([])
 	ConceptManager._push_to_rust()
 
-	seeded.free()
-	readback.free()
+func test_a_push_owns_no_ffi_instance():
+	# The push used to build a `GptyTerminal` with `ClassDB.instantiate` as the
+	# vehicle for `set_global_concepts` (the store it writes is process-wide,
+	# but the accessor took an instance) and never release it: every save,
+	# toggle and editor save leaked one ObjectDB entry, which GUT lists as an
+	# orphan. The accessor is static now — the count per push is the observable
+	# this pins, so the vehicle cannot come back.
+	for i in 3:
+		ConceptManager._push_to_rust()
+	assert_no_new_orphans("a concept push must not leave an FFI instance behind")
+
 
 # ── Graph block storage ────────────────────────────────────────────────
 # The visual concept editor stores layout in a `graph` block alongside the

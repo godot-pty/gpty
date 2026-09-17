@@ -43,6 +43,7 @@ INHERITED_MEMBERS = {
     "get_meta",
     "has_method",
     "has_meta",
+    "new",
     "is_inside_tree",
     "is_queued_for_deletion",
     "queue_free",
@@ -114,6 +115,11 @@ def gdscript_handles(text: str, classes: set[str]) -> dict[str, str]:
         ):
             for m in re.finditer(pattern, text):
                 handles[m.group(1)] = cls
+    # The class name itself: GDExtension classes expose `#[func]` methods
+    # statically (the engine-global accessors are the established pattern), and
+    # `GptyTerminal.history_store_stats()` is as renameable as any handle call.
+    for cls in classes:
+        handles.setdefault(cls, cls)
     # Handles handed out at runtime rather than constructed in place: a pane
     # body owns its terminal and exposes it as `_terminal`, and
     # `get_terminal_for_ffi()` returns one. Without these two rules every

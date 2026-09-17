@@ -15,12 +15,12 @@ func after_each():
 		_t = null
 
 func test_concepts_roundtrip_through_ffi():
-	_t.set_global_concepts(JSON.stringify([
+	GptyTerminal.set_global_concepts(JSON.stringify([
 		{"name": "c1", "trigger": "^testcmd", "enabled": true,
 		 "capture_mode": "until_stop", "stop_timeout_ms": 450, "stop_on_input": false,
 		 "actions": [{"target": "inspector"}]},
 	]))
-	var back = _t.get_global_concepts()
+	var back = GptyTerminal.get_global_concepts()
 	assert_eq(back.size(), 1, "one concept should roundtrip")
 	assert_eq(back[0]["name"], "c1")
 	assert_eq(back[0]["trigger"], "^testcmd")

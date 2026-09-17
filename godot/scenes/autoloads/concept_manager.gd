@@ -28,6 +28,13 @@ const DRAFT_KINDS := ["trigger", "condition", "action"]
 signal concepts_changed
 
 func _on_init():
+	# The concept store owns the push: the engine's set is process-wide, so one
+	# listener is right however many workspaces exist (a per-workspace connect
+	# also collided — the same bound callable was re-connected by every new
+	# workspace, which Godot rejects). The guard covers a mocked autoload
+	# re-running init.
+	if not concepts_changed.is_connected(_push_to_rust):
+		concepts_changed.connect(_push_to_rust)
 	# Defer push — GDExtension may not be registered yet during autoload init
 	call_deferred("_push_to_rust")
 
@@ -41,11 +48,15 @@ func _push_to_rust():
 	for c in concepts:
 		if c is Dictionary and c.get("enabled", true) == true:
 			enabled_only.append(c)
-	var t = ClassDB.instantiate("GptyTerminal")
-	if t == null:
-		push_warning("[ConceptManager] Failed to instantiate GptyTerminal, concepts not pushed")
+	# `set_global_concepts` is static — the store it writes is process-wide, so
+	# there is no instance to allocate. This used to be `ClassDB.instantiate("GptyTerminal")`
+	# with no release: one leaked ObjectDB entry per save, toggle and editor save.
+	# The guard keeps a broken extension from turning every push into a hard
+	# error; it is false only if the class never registered at all.
+	if not ClassDB.class_exists("GptyTerminal"):
+		push_warning("[ConceptManager] GptyTerminal unavailable, concepts not pushed")
 		return
-	t.set_global_concepts(JSON.stringify(enabled_only))
+	GptyTerminal.set_global_concepts(JSON.stringify(enabled_only))
 
 func _merge_concepts() -> Array:
 	var defaults = _load_defaults()

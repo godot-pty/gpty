@@ -104,7 +104,9 @@ func _ready():
 	)
 
 	SettingsManager.settings_changed.connect(_on_settings_changed)
-	ConceptManager.concepts_changed.connect(_push_concepts_to_engine)
+	# Concept changes are pushed by their owner (`ConceptManager`), one listener
+	# per process: the engine's set is process-wide, so a per-workspace connect
+	# both duplicated the push and collided across workspace instances.
 	_on_settings_changed()
 	_apply_window_mode.call_deferred()
 	if SettingsManager.cfg_window_mode == 0: _chrome.restore_position()
@@ -1549,31 +1551,18 @@ func _build_sidebar():
 # ═══════════════════════════════════════════════════════════════════════
 
 
-func _push_concepts_to_engine():
-	for t in _tm.tiles:
-		var body = _tm._find_body(t.wrapper)
-		if body == null:
-			continue
-		if body is TerminalPane:
-			var term = body.get("_terminal")
-			if term == null:
-				continue
-			var concepts = ConceptManager._merge_concepts()
-			var enabled: Array = []
-			for c in concepts:
-				if c is Dictionary and c.get("enabled", true) == true:
-					enabled.append(c)
-			# Push the empty set too — see ConceptManager._push_to_rust.
-			term.set_global_concepts(JSON.stringify(enabled))
-			return
+## Push the merged concept set once the scene tree has settled (GDExtension
+## and terminal nodes ready). The push itself lives in `ConceptManager`: the
+## store is process-wide, so the scan this used to do only existed to borrow a
+## terminal's instance as the FFI vehicle — and it silently skipped the push
+## when no terminal was open.
 func _push_concepts_deferred():
-	# Wait for the scene tree to fully settle (GDExtension + terminal nodes ready)
 	await get_tree().create_timer(2.0).timeout
 	# The workspace may have been torn down (tests, quick quit) while waiting;
 	# resuming on a freed instance would raise a script error.
 	if not is_instance_valid(self) or not is_inside_tree():
 		return
-	_push_concepts_to_engine()
+	ConceptManager._push_to_rust()
 
 ## Re-read the installed-plugin profiles once the CLI has had time to move the
 ## accepted clone into place and write its store record. Called from the
