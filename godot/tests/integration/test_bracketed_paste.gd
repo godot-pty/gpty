@@ -9,6 +9,14 @@ extends GutTest
 # interactive shell's readline enables bracketed paste by itself, so it cannot
 # be the thing that decides.
 #
+# The pane's shell is spawned with line editing off (`ShellFixtures.no_line_editing_args()`),
+# because the default one sets the mode itself and then the assertions cannot
+# say whose bytes arrived — measured: with the fixture's command line replaced
+# by a bare `sleep 30` the file still passed 3/3, since `bash -i` had turned
+# bracketed paste on and turned it off again when the typed line ran. With that
+# source removed, the mode either comes from the child or does not arrive, on
+# every platform.
+#
 # Two waits, because the pane's shell and the fixture are different processes.
 # The pane's shell has to be printing before a command line is typed into it —
 # a line handed to a console app that has not attached yet is read by nothing —
@@ -16,9 +24,7 @@ extends GutTest
 # the fixture's process, not the paste path: on Windows it is
 # `powershell -Command`, whose first launch on a loaded runner measured past
 # the 10 s this file used to allow, which reported a cold start as "the mode
-# never arrived" (windows-smoke). On Unix the same 10 s hid the problem behind
-# readline, which had already set the mode; the assertions below still exercise
-# the parser there, but only Windows exercises the child.
+# never arrived" (windows-smoke).
 
 const WorkspaceScript = preload("res://scenes/terminal/workspace.gd")
 
@@ -42,20 +48,33 @@ func after_each():
 		_ws = null
 	MockAutoloads.teardown()
 
-## A workspace with one running terminal, handed over to a child that prints
-## `sequence` and stays alive while the test reads the grid's mode.
-func _pane_owned_by_child(sequence: String) -> Control:
+## A workspace with one terminal, handed over to the child that `line` starts.
+##
+## The pane is spawned here rather than taken from the workspace's startup pane
+## because its shell has to start without line editing: `SettingsManager`
+## carries no global arguments, and `bash -i` sets DECSET 2004 around every line
+## readline edits — the very mode this file is about.
+func _pane_owned_by_child(line: String) -> Control:
 	var ws = WorkspaceScript.new()
 	_ws = ws
 	add_child(ws)
 	await get_tree().process_frame
 	await get_tree().process_frame
-	var body = ws._tm._find_body(ws._tm.tiles[0].wrapper)
+	var body = ws._spawn_pane("terminal", {"shell_args": ShellFixtures.no_line_editing_args()})
+	assert_not_null(body, "the file needs a terminal pane it can configure")
 	assert_true(
 		await _wait_for_shell_output(body, SHELL_READY_MS),
 		"the pane's shell must print before a command line is typed into it: %s" % _pane_state(body)
 	)
-	body._terminal.send_line(ShellFixtures.print_text(sequence, 30))
+	# Nothing has been typed and the shell sets no modes, so the mode must be
+	# off. This is the assertion that pins the setup: with the default shell it
+	# fails, because readline had already turned bracketed paste on — which is
+	# how a command line that prints nothing could pass the tests below.
+	assert_false(
+		body._terminal.is_bracketed_paste(),
+		"the pane's shell must not set bracketed paste by itself: %s" % _pane_state(body)
+	)
+	body._terminal.send_line(line)
 	return body
 
 ## The shell has produced output — `idle_ms` is stamped by the first PTY bytes
@@ -89,23 +108,30 @@ func _pane_state(body: Control) -> String:
 	return "mode=%s grid=%s" % [body._terminal.is_bracketed_paste(), grid.replace("\n", "\\n")]
 
 func test_resetting_the_mode_reaches_the_pane():
-	var body = await _pane_owned_by_child("\u001b[?2004l")
-	# readline usually set it already, so this is a real transition rather
-	# than an unset default.
+	# On, hold, off: one line, because a holding fixture cannot be typed into
+	# again. Both halves are the child's doing, so this is a real transition on
+	# every platform — with the default shell it was the *shell* that had set
+	# the mode, which let a fixture that printed nothing pass.
+	var body = await _pane_owned_by_child(
+		ShellFixtures.print_text_pair("\u001b[?2004h", 3, "\u001b[?2004l"))
+	assert_true(
+		await _wait_for_mode(body, true, FIXTURE_STARTUP_MS),
+		"DECSET 2004 from the child must reach the grid's mode: %s" % _pane_state(body)
+	)
 	assert_true(
 		await _wait_for_mode(body, false, FIXTURE_STARTUP_MS),
-		"2004l from the child must clear the grid's mode: %s" % _pane_state(body)
+		"2004l from the child must clear it again: %s" % _pane_state(body)
 	)
 
 func test_setting_the_mode_reaches_the_pane():
-	var body = await _pane_owned_by_child("\u001b[?2004h")
+	var body = await _pane_owned_by_child(ShellFixtures.print_text("\u001b[?2004h", 30))
 	assert_true(
 		await _wait_for_mode(body, true, FIXTURE_STARTUP_MS),
 		"DECSET 2004 from the child must reach the grid's mode: %s" % _pane_state(body)
 	)
 
 func test_the_paste_path_uses_the_child_mode():
-	var body = await _pane_owned_by_child("\u001b[?2004h")
+	var body = await _pane_owned_by_child(ShellFixtures.print_text("\u001b[?2004h", 30))
 	assert_true(
 		await _wait_for_mode(body, true, FIXTURE_STARTUP_MS),
 		"the paste path needs the child's mode: %s" % _pane_state(body)

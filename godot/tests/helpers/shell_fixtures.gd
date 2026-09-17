@@ -49,6 +49,24 @@ static func print_text_argv(shell: String, text: String, hold_seconds := 0) -> A
 	return [shell, PaneTypes.shell_run_args(shell, print_text(text, hold_seconds))]
 
 
+## Arguments that keep the pane's shell from setting terminal modes by itself.
+##
+## A bracketed-paste test wants the mode to come from the *child* it spawns; an
+## interactive shell sets it too, and then the assertion cannot tell whose bytes
+## arrived. `bash -i` emits DECSET 2004 around every line readline edits —
+## measured: with the fixture's command line replaced by a bare `sleep 30`,
+## `test_bracketed_paste.gd` still passed 3/3, because readline had already set
+## the mode and cleared it when the line was executed. `bash --noediting -i`
+## emits neither, and still prompts and runs what it is given, so the fixture's
+## bytes are the only source left. The pane's shell here is bash
+## (`SettingsManager.default_shell_command()` on Unix), so these are its flags;
+## `cmd.exe` has no line editor and gets none.
+static func no_line_editing_args() -> Array:
+	if is_windows():
+		return []
+	return ["--noediting"]
+
+
 static func _printf_write(text: String, hold_seconds: int) -> String:
 	var encoded := ""
 	for i in text.length():
@@ -71,20 +89,49 @@ static func _printf_write(text: String, hold_seconds: int) -> String:
 ## quote-shaped. Operators stay unspaced so the script needs no quoting of its
 ## own on the way to `-Command`.
 static func _powershell_script(text: String, hold_seconds: int) -> String:
+	var script := _powershell_expr(text)
+	if hold_seconds > 0:
+		script += ";Start-Sleep %d" % hold_seconds
+	return script
+
+
+## One element per character: printable ASCII as itself, everything else as
+## `[char]N`. Single quotes are escaped out as well as double quotes — the
+## script travels inside a double-quoted `cmd` argument, so a literal one would
+## end it early.
+static func _powershell_parts(text: String) -> PackedStringArray:
 	var parts: PackedStringArray = []
 	for i in text.length():
 		var code := text.unicode_at(i)
-		# Double quotes are excluded as well as the single quote: the script is
-		# passed inside a double-quoted cmd argument, so a literal one would
-		# end it early.
 		if code >= 32 and code < 127 and code != 39 and code != 34:
 			parts.append("'%s'" % text[i])
 		else:
 			parts.append("[char]%d" % code)
-	var script := "[Console]::Write(%s)" % "+".join(parts)
-	if hold_seconds > 0:
-		script += ";Start-Sleep %d" % hold_seconds
-	return script
+	# `[Console]::Write()` with no arguments is a syntax error, not a no-op.
+	if parts.is_empty():
+		parts.append("''")
+	return parts
+
+
+## Just the write expression for `text`, without the optional trailing hold —
+## the piece `print_text_pair` composes two of.
+static func _powershell_expr(text: String) -> String:
+	return "[Console]::Write(%s)" % "+".join(_powershell_parts(text))
+
+
+## Print `first`, hold the shell for `hold_seconds`, then print `second` — one
+## typed line that a test can watch a mode go one way and back on.
+##
+## A fixture that holds the shell cannot be given a second command while it
+## holds: a later line sits in the PTY's input buffer until the first one
+## finishes. A transition (on, then off) therefore has to be one line, and this
+## is that line.
+static func print_text_pair(first: String, hold_seconds: int, second: String) -> String:
+	if is_windows():
+		return 'powershell -NoProfile -Command "%s;Start-Sleep %d;%s"' % [
+			_powershell_expr(first), hold_seconds, _powershell_expr(second),
+		]
+	return "%s; sleep %d; %s" % [_printf_write(first, 0), hold_seconds, _printf_write(second, 0)]
 
 ## The PowerShell every supported Windows ships. Absolute: an argv plan is
 ## spawned without a shell, so there is nothing to resolve a bare name.
