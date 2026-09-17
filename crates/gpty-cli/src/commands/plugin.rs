@@ -46,13 +46,47 @@ pub async fn run(
             install(target, socket_path, timeout, json, no_daemon).await
         }
         PluginAction::List => list(json),
-        PluginAction::Enable { id } => set_enabled(id, true, json),
-        PluginAction::Disable { id } => set_enabled(id, false, json),
-        PluginAction::Uninstall { id } => uninstall(id, json),
+        PluginAction::Enable { id } => {
+            notify_store_changed(socket_path, "enable", id, set_enabled(id, true, json)).await
+        }
+        PluginAction::Disable { id } => {
+            notify_store_changed(socket_path, "disable", id, set_enabled(id, false, json)).await
+        }
+        PluginAction::Uninstall { id } => {
+            notify_store_changed(socket_path, "uninstall", id, uninstall(id, json)).await
+        }
         PluginAction::Logs { id, lines } => logs(id, *lines),
         PluginAction::Run { id, action: name } => run_action(id, name, json),
         PluginAction::Validate { path } => validate(path, json),
     }
+}
+
+/// How long to wait for a running GUI to acknowledge a store change. The
+/// refresh it triggers is synchronous and immediate, so this only bounds a
+/// hung GUI — and a hung GUI must not hold an admin action hostage.
+const NOTIFY_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Run an admin action and, when it actually changed the store, tell a
+/// running GUI so its profile list re-reads it.
+///
+/// Best-effort on purpose: the CLI works with no GUI, and an admin action must
+/// not *start* one (the item that added this refused the alternative for the
+/// same reason). A missing socket, a refused connection or a timeout is
+/// dropped — the next launch reads the store anyway. The action's own error is
+/// what the user sees, and it is returned untouched.
+pub(crate) async fn notify_store_changed(
+    socket_path: &str,
+    action: &str,
+    id: &str,
+    result: anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    result?;
+    let client = IpcClient::new(socket_path, NOTIFY_TIMEOUT);
+    let params = serde_json::json!({"action": action, "id": id});
+    if let Err(e) = client.call("pluginsChanged", Some(params)).await {
+        log::debug!("pluginsChanged not delivered (no GUI?): {e}");
+    }
+    Ok(())
 }
 
 // ── Install ───────────────────────────────────────────────────────────

@@ -11,8 +11,26 @@ static func error(msg: String, code := -32000) -> Dictionary:
 	return {"error": {"code": code, "message": msg}}
 
 
+## The admin actions `gpty plugin` can take that change the store a running GUI
+## reads. Closed vocabulary: the CLI names one, anything else is refused.
+const PLUGIN_ADMIN_ACTIONS := ["uninstall", "enable", "disable"]
+
+
 static func handle(ws, method: String, params: Dictionary):
 	match method:
+		"pluginsChanged":
+			# A CLI admin action has already written the plugin store when
+			# this arrives (unlike the install review, whose clone lands only
+			# after the human answers), so the profile list re-reads it now
+			# and the answer means "the GUI has caught up". Without this a
+			# running GUI kept listing an uninstalled plugin's profiles — and
+			# kept activating them from its in-memory copy — until the next
+			# restart, which made `disable` look like it did nothing.
+			var pc_action := str(params.get("action", ""))
+			if not PLUGIN_ADMIN_ACTIONS.has(pc_action):
+				return error("Unknown plugin action: %s" % pc_action)
+			ProfileManager.refresh_plugin_profiles()
+			return {"refreshed": true, "action": pc_action}
 		"newPane":
 			var type_name = str(params.get("type", "terminal"))
 			if not PaneTypes.ALL.has(type_name):

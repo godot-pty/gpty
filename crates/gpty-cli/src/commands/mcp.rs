@@ -216,9 +216,13 @@ mod tests {
     /// Routed methods that are deliberately never MCP tools. `pluginInstall`
     /// waits on a human answering the review dialog — an MCP client cannot
     /// answer it (the rule that also refuses `layoutLoad` on untrusted
-    /// profiles), so the method exists for the CLI only. Adding a name here
-    /// is a product decision; make it deliberately.
-    const NON_TOOL_ROUTED: &[&str] = &["pluginInstall"];
+    /// profiles), so the method exists for the CLI only. `pluginsChanged` is
+    /// the CLI's notification that an admin action rewrote the plugin store
+    /// (`gpty plugin uninstall|enable|disable`); an MCP client has no reason
+    /// to poke a GUI's profile list, and the actions themselves are not
+    /// tools either. Adding a name here is a product decision; make it
+    /// deliberately.
+    const NON_TOOL_ROUTED: &[&str] = &["pluginInstall", "pluginsChanged"];
     /// The event listener's registrations. It is a second surface with its own
     /// method set (`gpty state` submits on it), so the CLI's literals have to be
     /// checked against both.

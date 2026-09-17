@@ -251,6 +251,11 @@ pub async fn start_ipc_server_inner(socket_path: &str) {
         // install review waits on a human, pane-wait holds until the
         // pattern matches or its own deadline.
         "pluginInstall",
+        // A notification, not a request the user drives: `gpty plugin
+        // uninstall|enable|disable` fires it after writing the store so a
+        // running GUI drops the plugin's profiles live (the refresh is
+        // synchronous, so the CLI's answer means the list is up to date).
+        "pluginsChanged",
     ];
     for method_name in gdscript_methods {
         server.register(

@@ -487,3 +487,71 @@ async fn pane_wait_outlives_the_connection_budget() {
         .expect("a held response must outlive the connection budget");
     let _ = std::fs::remove_file(&socket);
 }
+
+/// The admin actions' notification. A running GUI has to re-read the plugin
+/// store after `uninstall`/`enable`/`disable` — before this it kept listing an
+/// uninstalled plugin's profiles until a restart — but the CLI must stay
+/// usable with no GUI, and an admin action must not start one. So the notice
+/// is best-effort in exactly one direction: delivered when a GUI is
+/// listening, dropped silently when none is, and never in place of the
+/// action's own answer.
+#[tokio::test]
+async fn plugin_admin_notice_reaches_a_gui_and_is_silent_without_one() {
+    let seen: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+    let seen_h = Arc::clone(&seen);
+    let socket = start_server(
+        "plugins_changed",
+        vec![("pluginsChanged", {
+            move |params: Value| {
+                *seen_h.lock().unwrap() = Some(params.clone());
+                serde_json::json!({"refreshed": true})
+            }
+        })],
+    )
+    .await;
+
+    commands::plugin::notify_store_changed(&socket, "uninstall", "godot-pty/gpty-omp", Ok(()))
+        .await
+        .expect("notifying a listening GUI must succeed");
+    let sent = seen
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the GUI must receive the notice");
+    assert_eq!(sent["action"], "uninstall", "the action travels");
+    assert_eq!(
+        sent["id"], "godot-pty/gpty-omp",
+        "and the plugin it changed"
+    );
+
+    // No GUI: the socket is absent, so nothing is delivered — and that is
+    // not the admin action's problem.
+    let absent = format!(
+        "{}/gpty-cli-roundtrip-{}-no-gui.sock",
+        std::env::temp_dir().display(),
+        std::process::id()
+    );
+    let _ = std::fs::remove_file(&absent);
+    commands::plugin::notify_store_changed(&absent, "disable", "godot-pty/gpty-omp", Ok(()))
+        .await
+        .expect("a missing GUI must not fail the admin action");
+
+    // A failed action surfaces its own error and sends nothing: the store was
+    // never written, so there is nothing for the GUI to re-read.
+    *seen.lock().unwrap() = None;
+    let error = commands::plugin::notify_store_changed(
+        &socket,
+        "disable",
+        "godot-pty/gpty-omp",
+        Err(anyhow::anyhow!("plugin `x` is not installed")),
+    )
+    .await
+    .expect_err("the action's error must surface");
+    assert!(error.to_string().contains("not installed"));
+    assert!(
+        seen.lock().unwrap().is_none(),
+        "a failed action must not notify: {sent:?}"
+    );
+
+    let _ = std::fs::remove_file(&socket);
+}

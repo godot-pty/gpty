@@ -897,6 +897,32 @@ def main() -> int:
             panes,
         )
 
+        # ── plugin admin notice ───────────────────────────────────────
+        # The other half of the store's read path: `gpty plugin uninstall`
+        # rewrites it while the GUI is running, and the notification the CLI
+        # fires afterwards is what makes the row leave the list without a
+        # restart (before that, a running GUI read the store only at launch
+        # and after an install review, so `disable` looked like it did
+        # nothing). The answer to the notification is sent after the refresh,
+        # so the next `layout list` must already be missing the profile.
+        smoke.enter("plugin admin notice")
+        # `plugin` prints its payload directly (no RPC envelope) — unlike the
+        # pane-API commands, which answer with one.
+        removed = smoke.cli("plugin", "uninstall", smoke.PLUGIN_ID, "--json")
+        smoke.require(
+            removed.get("removed") is True,
+            "uninstall must report the record removed",
+            removed,
+        )
+        names = smoke.result(smoke.cli("layout", "list", "--json"), "layout list").get(
+            "layouts", []
+        )
+        smoke.require(
+            smoke.PLUGIN_PROFILE not in names,
+            "a running GUI must drop an uninstalled plugin's profile",
+            names,
+        )
+
         smoke.enter("teardown")
         print("PASS")
         return 0

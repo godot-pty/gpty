@@ -254,6 +254,35 @@ func test_layout_load_sees_installed_plugin_profiles():
 	ProfileManager.plugin_profiles_source = func(): return "[]"
 	ProfileManager.refresh_plugin_profiles()
 
+func test_an_admin_notification_refreshes_the_profile_list():
+	# The install review refreshes on a timer because the CLI moves the clone
+	# into place only after it reads the answer. An admin action is the
+	# opposite: the store is already written when the notification arrives, so
+	# the refresh is synchronous and `refreshed: true` means the GUI has
+	# caught up. Without it, `gpty plugin uninstall` left the row in a running
+	# GUI (and kept activating it from memory) until the next restart.
+	ProfileManager.plugin_profiles_source = func(): return JSON.stringify([{
+		"plugin_id": "godot-pty/gpty-omp", "revision": "a1b2c3d4e5f6",
+		"name": "contract-admin-refresh",
+		"tiles": [{"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+			"settings": {"type": "terminal"}}],
+	}])
+	ProfileManager.refresh_plugin_profiles()
+	assert_false(ProfileManager.find_profile("contract-admin-refresh").is_empty(),
+		"precondition: the installed plugin's profile is listed")
+
+	# What the store answers once `gpty plugin uninstall` has removed it.
+	ProfileManager.plugin_profiles_source = func(): return "[]"
+	var answer = WorkspaceIpcHandlers.handle(
+		_ws, "pluginsChanged", {"action": "uninstall", "id": "godot-pty/gpty-omp"})
+	assert_eq(answer.get("refreshed"), true, "the notification must re-read the store")
+	assert_true(ProfileManager.find_profile("contract-admin-refresh").is_empty(),
+		"an uninstalled plugin's profile must leave the list without a restart")
+
+	var refused = WorkspaceIpcHandlers.handle(_ws, "pluginsChanged", {"action": "rm -rf /"})
+	assert_true(refused.has("error"),
+		"an action outside the vocabulary must be refused, not ignored")
+
 func test_accepted_plugin_profiles_are_read_after_the_clone_lands():
 	# The install review's accept path refreshes on a timer: the CLI only
 	# moves the accepted clone into place after it reads the answer, so an
