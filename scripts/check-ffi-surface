@@ -9,6 +9,13 @@ This walks the exported surface out of `crates/gpty-gdext/src/*.rs`, finds the
 identifiers that GDScript holds a GDExtension class in, and checks every
 `handle.method(...)` call against that surface.
 
+A `#[func]` is attributed to the class named by its enclosing `#[godot_api]
+impl` block — the primary one or any `#[godot_api(secondary)]` block, which is
+how gdext lets one class be implemented across several files. The rule used to
+be "the first `struct` in the file", which silently dropped every method the
+moment a class grew a second file; the count is asserted per class instead, and
+a `#[func]` outside such a block is reported rather than ignored.
+
 It also checks the crate's own prose — `crates/gpty-gdext/README.md` and the
 `///`/`//!` comments in `src/*.rs`: a backticked `name(...)` there must be a
 real export or a plain `fn` in the crate. The README is what a caller reads
@@ -31,7 +38,10 @@ GODOT_SCENES = ROOT / "godot" / "scenes"
 
 FUNC_RE = re.compile(r"#\[func\]")
 FN_RE = re.compile(r"\bfn\s+([a-z_][a-z0-9_]*)\s*\(")
-CLASS_RE = re.compile(r"struct\s+([A-Z][A-Za-z0-9_]*)")
+# `#[godot_api]` / `#[godot_api(secondary)]` markers, and the impl header that
+# follows one: `impl Foo {` or `impl Trait for Foo {`.
+GODOT_API_RE = re.compile(r"#\[godot_api(?:\([^)]*\))?\]")
+IMPL_RE = re.compile(r"\bimpl\s+(?:[A-Za-z_][A-Za-z0-9_:]*\s+for\s+)?([A-Z][A-Za-z0-9_]*)\s*(?:where[^{]*)?\{")
 
 # Members GDScript may legitimately call on a GDExtension object without a
 # `#[func]`: they come from Godot's Object/Node rather than the class itself.
@@ -112,25 +122,49 @@ def split_args(arglist: str) -> list[str]:
     return [a.strip() for a in out if a.strip()]
 
 
-def exported_surface() -> dict[str, dict[str, int]]:
-    """class name -> {method: arity}, arity counting only non-self parameters."""
+def impl_blocks(text: str) -> list[tuple[str, int, int]]:
+    """(class, start, end) for every `#[godot_api]` impl block in a file.
+
+    A block runs from its marker to the next marker (or the end of the file):
+    a `#[func]` cannot live outside an impl block, so the region is exactly the
+    block for this purpose, and brace-counting would have to survive braces
+    inside string literals.
+    """
+    markers = [m.start() for m in GODOT_API_RE.finditer(text)]
+    blocks = []
+    for n, start in enumerate(markers):
+        header = IMPL_RE.search(text, start, markers[n + 1] if n + 1 < len(markers) else len(text))
+        if header is None:
+            continue
+        blocks.append((header.group(1), start, markers[n + 1] if n + 1 < len(markers) else len(text)))
+    return blocks
+
+
+def exported_surface() -> tuple[dict[str, dict[str, int]], list[str]]:
+    """class name -> {method: arity}; plus any `#[func]` the walk could not place."""
     surface: dict[str, dict[str, int]] = {}
+    unplaced: list[str] = []
     for path in sorted(GEXT_SRC.glob("*.rs")):
         text = path.read_text()
-        class_match = CLASS_RE.search(text)
-        if not class_match:
-            continue
-        methods: dict[str, int] = {}
-        for marker in FUNC_RE.finditer(text):
-            fn = FN_RE.search(text, marker.end())
-            if not fn:
-                continue
-            params = split_args(balanced_args(text, text.index("(", fn.end() - 1)))
-            params = [p for p in params if p not in ("&self", "&mut self", "self", "mut self")]
-            methods[fn.group(1)] = len(params)
-        if methods:
-            surface[class_match.group(1)] = methods
-    return surface
+        blocks = impl_blocks(text)
+        placed = 0
+        for class_name, start, end in blocks:
+            region = text[start:end]
+            methods = surface.setdefault(class_name, {})
+            for marker in FUNC_RE.finditer(region):
+                placed += 1
+                fn = FN_RE.search(region, marker.end())
+                if not fn:
+                    continue
+                params = split_args(balanced_args(region, region.index("(", fn.end() - 1)))
+                params = [p for p in params if p not in ("&self", "&mut self", "self", "mut self")]
+                methods[fn.group(1)] = len(params)
+        total = len(FUNC_RE.findall(text))
+        if placed != total:
+            unplaced.append(
+                f"{path.relative_to(ROOT)}: {total - placed} #[func] outside a #[godot_api] impl block"
+            )
+    return {c: m for c, m in surface.items() if m}, unplaced
 
 
 def gdscript_handles(text: str, classes: set[str]) -> dict[str, str]:
@@ -199,13 +233,13 @@ def doc_problems(surface: dict[str, dict[str, int]]) -> tuple[int, list[str]]:
 
 
 def main() -> int:
-    surface = exported_surface()
+    surface, unplaced = exported_surface()
     if not surface:
         print("check-ffi-surface: no #[func] exports found — wrong directory?")
         return 1
 
     total_calls = 0
-    problems: list[str] = []
+    problems: list[str] = list(unplaced)
 
     for path in sorted(GODOT_SCENES.rglob("*.gd")):
         text = path.read_text()

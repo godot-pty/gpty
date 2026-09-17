@@ -21,6 +21,11 @@ so `cargo build -p gpty-gdext` is enough. Restart Godot after each rebuild.
 
 ## GDScript API
 
+The implementation is filed by facet under `src/`, one `#[godot_api(secondary)]` impl block
+per file — `lib.rs` holds the class itself (session lifecycle, input, the grid access
+helpers), `grid_api.rs`, `history_api.rs`, `capture_api.rs` and `bridge_api.rs` hold the
+rest. The sections below are those facets.
+
 ### GptyMarkdown (extends RefCounted)
 
 | Method | Returns | Description |
