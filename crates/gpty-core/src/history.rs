@@ -15,7 +15,7 @@
 //! mutex the UI renders under.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use rusqlite::{Connection, params, params_from_iter};
 
@@ -109,6 +109,36 @@ fn restrict_to_owner(path: &str) {
 #[cfg(not(unix))]
 fn restrict_to_owner(_path: &str) {}
 
+/// One writer per history file at a time, for this whole process.
+///
+/// Every pane's writer owns its *own* connection to the same file
+/// ([`HistoryStore::open`]), and SQLite serializes writers per file: N panes
+/// meant N writers racing for the write lock, with only `busy_timeout` between
+/// them and `SQLITE_BUSY`. That wait is not a queue and can starve a writer —
+/// measured on `windows-smoke`, a commit passed a 5 s expiry and the batch was
+/// dropped with `history append failed (2 rows): database is locked`.
+///
+/// Taking this guard around each write makes that impossible by construction
+/// for anything inside this process (which is every pane; a GUI is one
+/// process). It is always the *innermost* lock — acquired inside a store
+/// method, so a caller may hold the per-pane store mutex while taking it, and
+/// nothing may take a store mutex while holding it — so the order cannot
+/// invert, and it is held only across one transaction.
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+/// Serialize this process's writes to any one history file.
+///
+/// `None` — the lock was poisoned by a panic on another thread — means the
+/// write proceeds **unserialized** rather than not at all: losing the
+/// serialization risks a `SQLITE_BUSY` that the busy timeout still waits out,
+/// while skipping the write would lose the rows outright. (Elsewhere the
+/// policy is the opposite, and [`lock_or_warn`]'s doc says why: skipping is how
+/// a pane keeps rendering through someone else's panic. A dropped batch's only
+/// second chance was the retention window.)
+fn write_guard() -> Option<MutexGuard<'static, ()>> {
+    lock_or_warn(&WRITE_LOCK, "history write lock")
+}
+
 impl HistoryStore {
     /// Open or create the history database at `path` for `pane_key`.
     ///
@@ -118,12 +148,11 @@ impl HistoryStore {
     /// mode for concurrent access. `cap` bounds retained lines per pane.
     pub fn open(path: &str, pane_key: &str, cap: u32) -> Result<Self, rusqlite::Error> {
         let conn = Connection::open(path)?;
-        // Every pane's writer holds its own connection to the SAME file, and
-        // a colliding commit fails instantly with SQLITE_BUSY unless the
-        // connection waits for the lock — on Windows that surfaced as
-        // "history append failed: database is locked" (rows dropped) under
-        // concurrent panes. The writer holds the lock for milliseconds per
-        // batch, so a bounded wait turns the collision into a serialized
+        // The backstop for another *process* holding the write lock: this
+        // process serializes its own writers in [`write_guard`] before SQLite
+        // ever sees them, so a collision here means a second gpty (or another
+        // tool) on the same file. The writer holds the lock for milliseconds
+        // per batch, so a bounded wait turns that collision into a serialized
         // commit instead of a lost one.
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -195,6 +224,7 @@ impl HistoryStore {
     /// [`Self::append_batch`] (via `PaneHistory`); this is the one-row form
     /// the tests build their fixtures with.
     pub fn append(&self, line_num: i64, text: &str) -> Result<i64, rusqlite::Error> {
+        let _serialized = write_guard();
         self.conn.execute(
             "INSERT INTO lines (pane_id, line_num, text) VALUES (?1, ?2, ?3)",
             params![self.pane_key, line_num, text],
@@ -213,6 +243,7 @@ impl HistoryStore {
         if lines.is_empty() {
             return Ok(());
         }
+        let _serialized = write_guard();
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare_cached(
@@ -313,6 +344,7 @@ impl HistoryStore {
     /// are long — the row cap alone would let a pane hold hundreds of
     /// megabytes of 16 KiB lines.
     pub fn enforce_cap(&self) -> Result<(), rusqlite::Error> {
+        let _serialized = write_guard();
         if self.cap != 0 {
             self.conn.execute(
                 "DELETE FROM lines WHERE pane_id = ?1 AND line_num <=
@@ -346,6 +378,7 @@ impl HistoryStore {
 
     /// Delete all history for this pane.
     pub fn clear(&self) -> Result<(), rusqlite::Error> {
+        let _serialized = write_guard();
         self.conn.execute(
             "DELETE FROM lines WHERE pane_id = ?1",
             params![self.pane_key],
@@ -373,6 +406,7 @@ impl HistoryStore {
         if known.is_empty() {
             return Ok(0);
         }
+        let _serialized = write_guard();
         // Placeholders are built by repetition; values are bound, never
         // concatenated into the SQL. `known` is non-empty (guarded above).
         let placeholders = format!("?{}", ",?".repeat(known.len() - 1));
@@ -717,6 +751,68 @@ mod tests {
             timeout, 5000,
             "concurrent writers must wait for the lock, not drop batches"
         );
+        for candidate in [path.clone(), format!("{path}-wal"), format!("{path}-shm")] {
+            let _ = fs::remove_file(&candidate);
+        }
+    }
+
+    /// The busy timeout above is a *backstop*: this process's own writers
+    /// never race for the file, because every write takes [`write_guard`]
+    /// first. Without it, N panes' writers could starve one another past the
+    /// timeout and drop batches (measured on `windows-smoke`).
+    ///
+    /// The stores are opened before the guard is taken: `open` runs DDL, and a
+    /// `CREATE TABLE IF NOT EXISTS` blocking on the file's write lock would
+    /// make this pass for the wrong reason.
+    #[test]
+    fn in_process_commits_serialize_on_one_file() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let path = temp_db_path("serialize");
+        let _ = fs::remove_file(&path);
+        let reader = HistoryStore::open(&path, "pane-x", 100).unwrap();
+
+        // Control: with nobody holding the guard, the commit just happens —
+        // so the wait observed below is the guard, not the thread's startup.
+        let mut free_store = HistoryStore::open(&path, "pane-x", 100).unwrap();
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&done);
+        std::thread::spawn(move || {
+            free_store
+                .append_batch(&[(1, "control".to_string())])
+                .unwrap();
+            flag.store(true, Ordering::SeqCst);
+        })
+        .join()
+        .unwrap();
+        assert!(
+            done.load(Ordering::SeqCst),
+            "a free guard must not block a commit"
+        );
+
+        // Held: the same commit waits for it, which is what keeps two panes'
+        // writers from colliding at all.
+        let mut held_store = HistoryStore::open(&path, "pane-x", 100).unwrap();
+        let guard = write_guard();
+        assert!(guard.is_some(), "the write lock must be healthy");
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&done);
+        let writer = std::thread::spawn(move || {
+            held_store.append_batch(&[(2, "held".to_string())]).unwrap();
+            flag.store(true, Ordering::SeqCst);
+        });
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            !done.load(Ordering::SeqCst),
+            "a commit must wait for the write guard while another holds it"
+        );
+        drop(guard);
+        writer.join().unwrap();
+        assert!(
+            done.load(Ordering::SeqCst),
+            "and proceed once it is released"
+        );
+        assert_eq!(reader.max_line_num().unwrap(), 2, "both commits landed");
         for candidate in [path.clone(), format!("{path}-wal"), format!("{path}-shm")] {
             let _ = fs::remove_file(&candidate);
         }
