@@ -201,4 +201,6 @@ helpers) is `#[cfg(unix)]`-gated so the Windows build stays warning-free;
 
 - Use `get_grid_generation()` to skip redundant grid polls when idle
 - The renderer uses `get_grid_updates_packed()` to fetch only damaged cells, merging into `_cell_cache`
-- If the grid mutex is held by the background task, `get_grid_rows()` returns `[]`
+- If the grid mutex is held by the background task, or no shell has started yet,
+  `get_grid_updates_packed()` returns an empty `Dictionary` and `get_rows()` /
+  `get_cols()` answer `0`

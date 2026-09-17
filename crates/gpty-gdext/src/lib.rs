@@ -131,7 +131,8 @@ impl GptyTerminal {
     ///
     /// # Edge cases
     /// - Calling twice replaces the previous session.
-    /// - If spawning fails, the grid stays empty and `get_grid_rows()` returns `[]`.
+    /// - If spawning fails, the grid stays empty: `get_rows()` and `get_cols()`
+    ///   answer `0`, and `get_grid_updates_packed()` returns an empty dictionary.
     /// - `rows` and `cols` are clamped to ≥1.
     // FFI boundary: GDScript callers pass positionally; no object to group into.
     #[allow(clippy::too_many_arguments)]
@@ -702,7 +703,7 @@ impl GptyTerminal {
 
     /// Monotonically increasing counter; changes every time the grid is
     /// updated. GDScript can compare to a cached value to skip redundant
-    /// `get_grid_rows()` calls when nothing changed.
+    /// `get_grid_updates_packed()` calls when nothing changed.
     #[func]
     fn get_grid_generation(&self) -> i64 {
         self.with_grid(|g| g.generation as i64, -1)

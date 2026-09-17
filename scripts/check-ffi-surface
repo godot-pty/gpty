@@ -9,6 +9,13 @@ This walks the exported surface out of `crates/gpty-gdext/src/*.rs`, finds the
 identifiers that GDScript holds a GDExtension class in, and checks every
 `handle.method(...)` call against that surface.
 
+It also checks the crate's own prose — `crates/gpty-gdext/README.md` and the
+`///`/`//!` comments in `src/*.rs`: a backticked `name(...)` there must be a
+real export or a plain `fn` in the crate. The README is what a caller reads
+before writing the first call, and a name that never existed costs the same
+round trip as a renamed export — `get_grid_rows()` was named in three places
+and existed in none.
+
 Exit codes: 0 clean, 1 problems found. Reads only; never writes.
 """
 
@@ -50,6 +57,27 @@ INHERITED_MEMBERS = {
     "set",
     "set_meta",
 }
+
+# Names the crate's own prose may use that are neither `#[func]` exports nor
+# plain `fn`s in this crate. Fail-closed like INHERITED_MEMBERS: a new name is
+# reported once and added here deliberately, with its reason.
+DOC_ALLOWED_NAMES = {
+    # Godot's own callbacks, named where the docs explain what the renderer or
+    # a pane does with the bridge.
+    "_draw",
+    "_exit_tree",
+    "_process",
+    "_ready",
+    # gpty-ipc's state-directory helper: the profiles doc says where the store
+    # lives, not that the class has such a method.
+    "state_dir",
+    # `IpcServer::serve` from gpty-ipc: the retry-loop doc names the imported
+    # server's own method, not one of this class's.
+    "serve",
+}
+
+DOC_TOKEN_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*)\(")
+GEXT_README = ROOT / "crates" / "gpty-gdext" / "README.md"
 
 
 def balanced_args(text: str, open_paren: int) -> str:
@@ -135,6 +163,41 @@ def gdscript_handles(text: str, classes: set[str]) -> dict[str, str]:
     return handles
 
 
+def crate_docs() -> list[tuple[str, str]]:
+    """(label, text) for the crate's own prose: README and doc comments."""
+    docs = [(str(GEXT_README.relative_to(ROOT)), GEXT_README.read_text())]
+    for path in sorted(GEXT_SRC.glob("*.rs")):
+        lines = [
+            line.strip()
+            for line in path.read_text().splitlines()
+            if line.strip().startswith(("///", "//!"))
+        ]
+        if lines:
+            docs.append((f"{path.relative_to(ROOT)} doc comments", "\n".join(lines)))
+    return docs
+
+
+def doc_problems(surface: dict[str, dict[str, int]]) -> tuple[int, list[str]]:
+    """Backticked `name(...)` in the crate's prose must name something real."""
+    exported = {name for methods in surface.values() for name in methods}
+    crate_fns = {
+        m.group(1)
+        for path in GEXT_SRC.glob("*.rs")
+        for m in FN_RE.finditer(path.read_text())
+    }
+    checked, problems = 0, []
+    for label, text in crate_docs():
+        for m in DOC_TOKEN_RE.finditer(text):
+            name = m.group(1)
+            checked += 1
+            if name in exported or name in crate_fns or name in DOC_ALLOWED_NAMES:
+                continue
+            problems.append(
+                f"{label}: `{name}()` — not an export of this crate and not a plain fn"
+            )
+    return checked, problems
+
+
 def main() -> int:
     surface = exported_surface()
     if not surface:
@@ -168,6 +231,9 @@ def main() -> int:
                         f"but the #[func] takes {methods[name]}"
                     )
 
+    doc_checked, doc_issues = doc_problems(surface)
+    problems.extend(doc_issues)
+
     if problems:
         print(f"check-ffi-surface: {len(problems)} problem(s) across {total_calls} calls")
         for problem in problems:
@@ -176,6 +242,7 @@ def main() -> int:
 
     classes = ", ".join(f"{c} ({len(m)})" for c, m in sorted(surface.items()))
     print(f"check-ffi-surface: {total_calls} calls match the export surface — {classes}")
+    print(f"check-ffi-surface: {doc_checked} names in the crate's prose are real methods")
     return 0
 
 
