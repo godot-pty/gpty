@@ -70,7 +70,7 @@ func reload():
 		_builtins[key] = {"version": version, "plans": plans}
 	var plugins := _as_dict(d, "plugins", {})
 	for key in plugins:
-		if not (key is String) or not _valid_plugin_id(key):
+		if not (key is String) or not valid_plugin_id(key):
 			continue
 		if _plugins.size() >= MAX_ENTRIES:
 			break
@@ -115,7 +115,7 @@ func is_plugin_approved(p_id: String, revision: String) -> bool:
 
 ## Record a plugin install-review acceptance. Overwrites any older revision.
 func approve_plugin(p_id: String, revision: String):
-	if not _valid_plugin_id(p_id) or not _valid_revision(revision):
+	if not valid_plugin_id(p_id) or not _valid_revision(revision):
 		return
 	if _plugins.size() >= MAX_ENTRIES and not _plugins.has(p_id):
 		return
@@ -159,8 +159,16 @@ static func _valid_version(version: String) -> bool:
 			return false
 	return true
 
-## The manifest's own `owner/name` shape, mirrored from plugin_manifest.rs.
-static func _valid_plugin_id(id: String) -> bool:
+## The manifest's own `owner/name` shape, mirrored from
+## `plugin_manifest.rs::valid_plugin_id` (which remains authoritative: it is
+## what gates a write to the store).
+##
+## Public because it has two consumers on this side of the boundary — the
+## consent records keyed by plugin id here, and the `pluginsChanged` notice
+## the CLI fires after an admin action (`ipc_handlers.gd`). One mirror, not
+## two: a second copy of the shape is how the GUI's idea of a valid id drifts
+## from the CLI's.
+static func valid_plugin_id(id: String) -> bool:
 	var re := RegEx.create_from_string("^[a-z0-9-]{1,63}/[a-z0-9-]{1,63}$")
 	return re.search(id) != null
 

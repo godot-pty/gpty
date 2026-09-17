@@ -26,11 +26,27 @@ static func handle(ws, method: String, params: Dictionary):
 			# running GUI kept listing an uninstalled plugin's profiles — and
 			# kept activating them from its in-memory copy — until the next
 			# restart, which made `disable` look like it did nothing.
+			#
+			# Both fields are validated although only `action` is read today.
+			# `id` is inert right now (this handler neither stores nor looks
+			# anything up with it), and the CLI cannot deliver a malformed one:
+			# it fires the notice only after `PluginStore` accepted the id, and
+			# that store validates ids before any write. It is checked anyway
+			# because validation is a boundary property, not a property of the
+			# fields that happen to have consumers — the day something *uses*
+			# the id (a toast naming the plugin, a row linking to its repo)
+			# nobody will re-derive this decision, and an id that has been
+			# travelling unvalidated for a release or two gets mistaken for
+			# trusted input. The shape is not re-declared here: the GUI's one
+			# mirror lives beside the consent records that key on the same id.
 			var pc_action := str(params.get("action", ""))
 			if not PLUGIN_ADMIN_ACTIONS.has(pc_action):
 				return error("Unknown plugin action: %s" % pc_action)
+			var pc_id := str(params.get("id", ""))
+			if not TrustedStore.valid_plugin_id(pc_id):
+				return error("Malformed plugin id: %s" % pc_id)
 			ProfileManager.refresh_plugin_profiles()
-			return {"refreshed": true, "action": pc_action}
+			return {"refreshed": true, "action": pc_action, "id": pc_id}
 		"newPane":
 			var type_name = str(params.get("type", "terminal"))
 			if not PaneTypes.ALL.has(type_name):

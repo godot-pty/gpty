@@ -283,6 +283,27 @@ func test_an_admin_notification_refreshes_the_profile_list():
 	assert_true(refused.has("error"),
 		"an action outside the vocabulary must be refused, not ignored")
 
+	# The id is inert today but validated anyway (boundary property, not a
+	# consumer's concern) — and a refusal must precede the refresh, so a
+	# malformed notice cannot move the profile list as a side effect. The
+	# source below would add a row if the handler got as far as refreshing.
+	ProfileManager.plugin_profiles_source = func(): return JSON.stringify([{
+		"plugin_id": "godot-pty/gpty-nvim", "revision": "deadbeef1234",
+		"name": "contract-refused-notice",
+		"tiles": [{"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+			"settings": {"type": "terminal"}}],
+	}])
+	var bad_id = WorkspaceIpcHandlers.handle(
+		_ws, "pluginsChanged", {"action": "disable", "id": "Not An Id"})
+	assert_true(bad_id.has("error"), "a malformed plugin id must be refused")
+	assert_string_contains(str(bad_id["error"]["message"]), "plugin id",
+		"the refusal must name the field it refused")
+	assert_true(ProfileManager.find_profile("contract-refused-notice").is_empty(),
+		"a refused notice must not refresh the store")
+
+	ProfileManager.plugin_profiles_source = func(): return "[]"
+	ProfileManager.refresh_plugin_profiles()
+
 func test_accepted_plugin_profiles_are_read_after_the_clone_lands():
 	# The install review's accept path refreshes on a timer: the CLI only
 	# moves the accepted clone into place after it reads the answer, so an

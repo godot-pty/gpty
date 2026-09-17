@@ -95,3 +95,24 @@ func test_approvals_persist_to_the_store():
 	var on_disk = MockAutoloads.get_store(TrustedStore.TRUSTED_FILE)
 	assert_eq(on_disk["builtins"]["Demo"], {"version": "0.5.4", "plans": ["plan-a"]})
 	assert_eq(on_disk["plugins"]["godot-pty/gpty-omp"], "a1b2c3d4e5f6")
+
+## The plugin-id shape, now a shared public API (`ipc_handlers.gd` uses it for
+## the `pluginsChanged` notice, this store keys consent records on it). Its
+## boundaries are the whole point: an id that passes here but not in
+## `plugin_manifest.rs::valid_plugin_id` would let the GUI accept something the
+## CLI would refuse to store.
+func test_valid_plugin_id_holds_the_manifest_shape():
+	assert_true(TrustedStore.valid_plugin_id("godot-pty/gpty-omp"))
+	assert_true(TrustedStore.valid_plugin_id("a/b"), "single characters are valid")
+	assert_true(TrustedStore.valid_plugin_id("a1-2/b3-4"))
+	assert_true(TrustedStore.valid_plugin_id("%s/%s" % ["a".repeat(63), "b".repeat(63)]),
+		"63 characters per part is the ceiling")
+
+	assert_false(TrustedStore.valid_plugin_id(""), "an empty id is not an id")
+	assert_false(TrustedStore.valid_plugin_id("noslash"), "the separator is required")
+	assert_false(TrustedStore.valid_plugin_id("Owner/repo"), "uppercase is refused")
+	assert_false(TrustedStore.valid_plugin_id("owner/repo/extra"), "a second separator is refused")
+	assert_false(TrustedStore.valid_plugin_id("owner/re po"), "whitespace is refused")
+	assert_false(TrustedStore.valid_plugin_id("owner/"), "an empty part is refused")
+	assert_false(TrustedStore.valid_plugin_id("%s/b" % "a".repeat(64)),
+		"64 characters per part is over the ceiling")
