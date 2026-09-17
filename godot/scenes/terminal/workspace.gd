@@ -1317,6 +1317,16 @@ func _poll_concept_events_for(ws: Dictionary):
 
 func _poll_ipc_requests():
 	if GptyTerminal.take_shutdown_request():
+		# A refusal to start (another window holds the control socket) quits
+		# too, but closing without a word reads as a crash — say why first.
+		# The toast is in-window and needs no external process: `OS.alert`
+		# blocks on zenity/kdialog and hangs a headless run (measured), so
+		# headless quits at once and a desktop gets a moment to read the line.
+		var failure := GptyTerminal.take_startup_failure()
+		if failure != "":
+			ToastManager.warn(failure)
+			if DisplayServer.get_name() != "headless":
+				await get_tree().create_timer(4.0).timeout
 		get_tree().quit()
 		return
 	# GptyTerminal is a GodotClass — call static methods on the class

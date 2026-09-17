@@ -141,6 +141,8 @@ on drop.
 |--------|---------|-------------|
 | `drain_ipc_requests()` | `Array` | Drain queued **control** IPC requests as `[{id, method, params, timeout_ms}]`. `timeout_ms` is the request's remaining fallback deadline (0 once it has passed); the deferred-answer dialogs arm their expiry timer from it, so a dialog cannot outlive the request that asked for it |
 | `respond_ipc(id, success, result_json)` | void | Respond to a drained IPC request |
+| `take_shutdown_request()` | `bool` | Whether a client asked the GUI to quit (true once, then false). Polled each frame; the quit runs through the scene tree so `_exit_tree` still saves |
+| `take_startup_failure()` | `String` | Why this instance is quitting itself, when it could not serve the pane API (a refusal to replace a live socket or pipe) — empty when the quit came from a client. Taken once, for the toast the GUI shows as it goes |
 | `drain_agent_events()` | `String` | Drain bounded OMP extension events (JSON array) from `gpty-events.sock` on Unix or `\\.\pipe\gpty-events` on Windows — see [OMP event socket](#omp-event-socket-reasoning-pane) |
 
 The control server registers `version`/`shutdown` locally; every other method (`newPane`, `paneRead`, `paneStatus`, `paneRun`, `paneWait`, `broadcast`, layout, concepts) is listed in `ipc.rs` `gdscript_methods` and routed to GDScript — `workspace.gd` delegates dispatch to `WorkspaceIpcHandlers` (`ipc_handlers.gd`). New pane-API methods must be added to **both** the registration list and the handler module.

@@ -540,6 +540,21 @@ impl GptyTerminal {
         crate::ipc::take_shutdown_request()
     }
 
+    /// Why this instance is shutting itself down, if it could not serve the
+    /// pane API (empty string when the quit came from a client).
+    ///
+    /// Taken once, then gone. The GUI shows it as it quits: a refused control
+    /// socket means another instance holds the path, and a window that
+    /// vanishes without a word reads as a crash.
+    #[func]
+    fn take_startup_failure() -> GString {
+        GString::from(
+            crate::ipc::take_startup_failure()
+                .unwrap_or_default()
+                .as_str(),
+        )
+    }
+
     /// Stable opaque identifier for the current PTY lifetime.
     #[func]
     fn get_terminal_session_id(&self) -> GString {

@@ -21,6 +21,13 @@ const MAX_REQUEST_LEN: usize = 64 * 1024; // 64 KiB
 const MAX_CONNECTIONS: usize = 16;
 /// Per-connection lifetime cap so slow clients cannot hold a slot forever.
 const CONNECTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// How long the bind-time probe waits for a connect to an existing socket.
+///
+/// A listening Unix socket accepts immediately; this only matters when its
+/// backlog is saturated, and the outcome then is `Unknown` — which fails
+/// closed rather than replacing a path that may belong to a running server.
+#[cfg(unix)]
+const SOCKET_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// A boxed, cloneable async handler function.
 ///
@@ -69,11 +76,12 @@ impl IpcServer {
         #[cfg(unix)]
         {
             // Clean up a stale socket from a previous run — but only one that
-            // is ours. The /tmp fallback path is predictable, so another user
-            // can plant something there first; unlinking blindly would delete
-            // their file (and hide the squat), and following a symlink would
-            // delete whatever it points at. Anything else is left alone and
-            // the bind below fails closed.
+            // is ours, and only when nothing is listening on it. The /tmp
+            // fallback path is predictable, so another user can plant
+            // something there first; unlinking blindly would delete their file
+            // (and hide the squat), and following a symlink would delete
+            // whatever it points at. Anything else is left alone and the bind
+            // below fails closed.
             use std::os::unix::fs::FileTypeExt;
             match std::fs::symlink_metadata(&self.socket_path) {
                 Ok(meta) if !meta.file_type().is_socket() => {
@@ -94,9 +102,33 @@ impl IpcServer {
                         ),
                     ));
                 }
-                Ok(_) => {
-                    let _ = std::fs::remove_file(&self.socket_path);
-                }
+                Ok(_) => match probe_socket(std::path::Path::new(&self.socket_path)).await {
+                    // A leftover from a crash: replacing it is what makes a
+                    // restart work.
+                    SocketState::Stale | SocketState::Absent => {
+                        let _ = std::fs::remove_file(&self.socket_path);
+                    }
+                    SocketState::Live => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::AlreadyExists,
+                            format!(
+                                "another gpty instance is already listening on {}; refusing to \
+                                 replace its socket",
+                                self.socket_path
+                            ),
+                        ));
+                    }
+                    SocketState::Unknown => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::AlreadyExists,
+                            format!(
+                                "{} did not answer a probe; refusing to replace a socket that may \
+                                 belong to a running instance (remove it only if you are sure)",
+                                self.socket_path
+                            ),
+                        ));
+                    }
+                },
                 Err(_) => {}
             }
 
@@ -165,6 +197,20 @@ impl IpcServer {
                 // do not block new ones.
                 let server = match self.create_pipe_instance().await {
                     Ok(s) => s,
+                    Err(e) if pipe_name_is_taken(&e) => {
+                        // The Unix branch refuses the same way. Without this,
+                        // `first_pipe_instance` only *logged* the conflict, so
+                        // a second GUI kept running with no control surface
+                        // while the loop spun on the taken name.
+                        return Err(io::Error::new(
+                            io::ErrorKind::AlreadyExists,
+                            format!(
+                                "another gpty instance is already listening on {}; refusing to \
+                                 replace its pipe",
+                                self.socket_path
+                            ),
+                        ));
+                    }
                     Err(e) => {
                         log::error!("IPC pipe create error: {e}");
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -238,6 +284,53 @@ impl IpcServer {
             .reject_remote_clients(true)
             .first_pipe_instance(first)
             .create(&self.socket_path)
+    }
+}
+
+/// True when a named-pipe create failed because another process owns the name.
+///
+/// `FILE_FLAG_FIRST_PIPE_INSTANCE` answers `ERROR_ACCESS_DENIED` (5) when the
+/// name already has an owner; every other failure is transient and the accept
+/// loop retries. Matching on the raw code as well as the kind keeps this
+/// correct if the mapping into `ErrorKind` ever changes.
+#[cfg(windows)]
+fn pipe_name_is_taken(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::PermissionDenied || error.raw_os_error() == Some(5)
+}
+
+/// What an existing socket path says about a server behind it.
+///
+/// The distinction is the whole point: replacing a *stale* socket file (a crash
+/// left it behind) is right, replacing a *live* one orphans the running server
+/// — it keeps its listener on an unlinked inode while every client is
+/// redirected to the newcomer. Measured before this existed: two `gpty-gui`
+/// processes, two listeners on `/run/user/1000/gpty.sock`, the older one
+/// unreachable, and a CLI command that had gone to the wrong workspace.
+#[cfg(unix)]
+#[derive(Debug, PartialEq, Eq)]
+enum SocketState {
+    /// Nothing at the path.
+    Absent,
+    /// A socket file with nothing listening behind it.
+    Stale,
+    /// A server accepted the connection: it must not be replaced.
+    Live,
+    /// The probe could not tell (a timeout, an unexpected error): fail closed.
+    Unknown,
+}
+
+/// Probe an existing socket path by connecting to it.
+///
+/// Only a refused connection proves nothing is listening. A successful connect
+/// means a server is there; a timeout or any other error means the path *may*
+/// belong to one, which is enough to refuse the bind.
+#[cfg(unix)]
+async fn probe_socket(path: &std::path::Path) -> SocketState {
+    match tokio::time::timeout(SOCKET_PROBE_TIMEOUT, tokio::net::UnixStream::connect(path)).await {
+        Ok(Ok(_stream)) => SocketState::Live,
+        Ok(Err(e)) if e.kind() == io::ErrorKind::ConnectionRefused => SocketState::Stale,
+        Ok(Err(e)) if e.kind() == io::ErrorKind::NotFound => SocketState::Absent,
+        Ok(Err(_)) | Err(_) => SocketState::Unknown,
     }
 }
 
@@ -657,6 +750,127 @@ mod tests {
                 b"not a socket",
                 "the refused path must be left exactly as it was found"
             );
+            let _ = std::fs::remove_file(&path);
+        }
+
+        /// The bind-time decision table, probed directly: a live listener, a
+        /// leftover file, and nothing at all must be told apart, because only
+        /// the first of them may not be replaced.
+        #[tokio::test]
+        async fn the_probe_distinguishes_live_stale_and_absent() {
+            use std::path::Path;
+
+            let path = format!("/tmp/gpty-ipc-probe-{}.sock", std::process::id());
+            let _ = std::fs::remove_file(&path);
+            assert_eq!(
+                probe_socket(Path::new(&path)).await,
+                SocketState::Absent,
+                "a missing path is not a stale socket"
+            );
+
+            // A listener that is dropped leaves its file behind: that is what a
+            // crashed instance leaves, and it must be replaceable.
+            let stale = tokio::net::UnixListener::bind(&path).expect("bind");
+            drop(stale);
+            assert!(
+                std::fs::symlink_metadata(&path).is_ok(),
+                "the fixture needs the leftover file to still exist"
+            );
+            assert_eq!(
+                probe_socket(Path::new(&path)).await,
+                SocketState::Stale,
+                "a refused connection means nothing is listening"
+            );
+
+            // bind() refuses to overwrite the leftover path, so clear it first.
+            std::fs::remove_file(&path).unwrap();
+            let live = tokio::net::UnixListener::bind(&path).expect("rebind");
+            assert_eq!(
+                probe_socket(Path::new(&path)).await,
+                SocketState::Live,
+                "an accepted connection means a server is there"
+            );
+            drop(live);
+            let _ = std::fs::remove_file(&path);
+        }
+
+        /// The defect this rule exists for: a second instance used to unlink a
+        /// live socket and take the path, orphaning the running server (both
+        /// processes kept running, every client going to the newcomer).
+        #[tokio::test]
+        async fn a_live_socket_is_refused_and_left_reachable() {
+            let path = format!("/tmp/gpty-ipc-live-{}.sock", std::process::id());
+            let _ = std::fs::remove_file(&path);
+
+            let mut first = IpcServer::new(&path);
+            first.register(
+                "echo",
+                Arc::new(|params| Box::pin(async move { Ok(params) })),
+            );
+            tokio::spawn(async move {
+                let _ = first.serve().await;
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+            let second = IpcServer::new(&path);
+            let error = second
+                .serve()
+                .await
+                .expect_err("a live socket must not be replaced");
+            assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+            assert!(
+                error.to_string().contains("already listening"),
+                "the refusal must name the reason, got: {error}"
+            );
+
+            // The point of refusing: the first server is still there.
+            let req = Request {
+                jsonrpc: "2.0".into(),
+                id: Some(7),
+                method: "echo".into(),
+                params: Some(serde_json::json!({"still": "here"})),
+                gpty_secret: None,
+            };
+            let resp = send_request(&path, &req)
+                .await
+                .expect("the live server must still answer after a refused bind");
+            assert_eq!(resp.result.unwrap(), serde_json::json!({"still": "here"}));
+
+            let _ = std::fs::remove_file(&path);
+        }
+
+        /// A leftover from a crash must still be replaced, or a restart after
+        /// `SIGKILL` could never bind.
+        #[tokio::test]
+        async fn a_stale_socket_is_replaced() {
+            let path = format!("/tmp/gpty-ipc-stale-{}.sock", std::process::id());
+            let _ = std::fs::remove_file(&path);
+            drop(tokio::net::UnixListener::bind(&path).expect("bind"));
+            assert!(std::fs::symlink_metadata(&path).is_ok(), "leftover file");
+
+            let mut server = IpcServer::new(&path);
+            server.register(
+                "echo",
+                Arc::new(|params| Box::pin(async move { Ok(params) })),
+            );
+            let server_path = path.clone();
+            tokio::spawn(async move {
+                let _ = server.serve().await;
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+            let req = Request {
+                jsonrpc: "2.0".into(),
+                id: Some(1),
+                method: "echo".into(),
+                params: Some(serde_json::json!({"fresh": true})),
+                gpty_secret: None,
+            };
+            let resp = send_request(&server_path, &req)
+                .await
+                .expect("a stale socket must be replaced by a working server");
+            assert_eq!(resp.result.unwrap(), serde_json::json!({"fresh": true}));
+
             let _ = std::fs::remove_file(&path);
         }
 

@@ -263,6 +263,53 @@ class Smoke:
             time.sleep(0.5)
         self.fail(f"the GUI did not become reachable within {READY_TIMEOUT_S:.0f}s")
 
+    def second_instance_is_refused(self) -> None:
+        """A second GUI must refuse the control endpoint and exit, leaving the first reachable.
+
+        The defect this pins: `IpcServer::serve()` unlinked a live socket (and
+        the Windows pipe branch spun on the taken name), so a second instance
+        orphaned the running one — both windows up, every CLI command going to
+        the newcomer, the older workspace unreachable with no message. The
+        trigger was the CLI's one-second readiness probe treating any failure
+        as "no GUI", so this is the state a single slow probe produced.
+        """
+        self.enter("second instance")
+        second_log = self.tmp / "godot-second.log"
+        with second_log.open("w") as log:
+            second = subprocess.Popen(
+                [self.godot, "--headless", "--path", "godot"],
+                cwd=ROOT,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=self.env,
+            )
+        try:
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline and second.poll() is None:
+                time.sleep(0.25)
+            self.require(
+                second.poll() is not None,
+                "a second GUI must exit instead of running without a control endpoint",
+            )
+            # The first instance is untouched: it still owns the endpoint and
+            # still answers.
+            payload = self.cli("--no-daemon", "list-panes", "--json", check=False)
+            self.require(
+                payload.get("result", {}).get("panes") is not None,
+                "the first instance must still answer after the refusal",
+                payload,
+            )
+            text = second_log.read_text(errors="replace")
+            self.require(
+                "refusing" in text,
+                "the second instance must say why it refused in its log",
+                text[-400:],
+            )
+        finally:
+            if second.poll() is None:
+                second.kill()
+                second.wait(timeout=10)
+
     def teardown(self) -> None:
         if self.gui is None:
             # A failure between seeding and launch still has to put the stores
@@ -483,6 +530,9 @@ def main() -> int:
         # installed-plugin profiles.
         smoke.seed_plugin()
         smoke.launch()
+
+        # ── a second instance must not take the endpoint ──────────────
+        smoke.second_instance_is_refused()
 
         # ── Event listener ────────────────────────────────────────────
         smoke.enter("event listener")

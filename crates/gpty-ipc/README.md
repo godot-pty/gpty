@@ -81,6 +81,15 @@ channel against other local users:
 
 - **Socket placement**: Linux defaults to `$XDG_RUNTIME_DIR/gpty.sock` (a
   per-user, 0700 directory); the socket file itself is chmod 0600.
+- **One instance owns the endpoint**: `serve()` probes a socket that is
+  already there and refuses to bind when a server answers — only a leftover
+  from a crash (a refused connection) is replaced. Before this, a second
+  instance unlinked the live socket and took the path, orphaning the running
+  server: both processes stayed up and every client silently went to the
+  newcomer. The same rule covers the event socket and, on Windows, the pipe
+  name (`ERROR_ACCESS_DENIED` from `FILE_FLAG_FIRST_PIPE_INSTANCE` is refused
+  instead of retried). An instance that cannot bind is not a usable window:
+  it asks itself to quit and says why.
 - **Peer UID check**: on Linux/macOS the server verifies the connecting
   process runs as the same effective UID as the server and drops mismatches.
 - **Shared secret (optional)**: set `GPTY_SECRET` when launching the GUI and

@@ -14,8 +14,8 @@
 //!   responded by then, the client receives an error.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{LazyLock, Mutex};
 
 use gpty_ipc::server::{HandlerFn, IpcServer};
 use gpty_ipc::transport;
@@ -196,6 +196,21 @@ pub fn take_shutdown_request() -> bool {
     SHUTDOWN_REQUESTED.swap(false, Ordering::Relaxed)
 }
 
+/// Why this instance could not serve the pane API, for the GUI to show before
+/// it quits (taken once, then gone).
+///
+/// A control socket that cannot bind means this process is a window with no
+/// API: the user would have two workspaces and only one of them reachable,
+/// which is exactly the state the bind refusal exists to prevent. The reason
+/// travels to GDScript so the window can say what happened instead of
+/// vanishing.
+static STARTUP_FAILURE: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
+
+pub fn take_startup_failure() -> Option<String> {
+    let mut slot = gpty_core::lock::lock_or_warn(&STARTUP_FAILURE, "startup failure")?;
+    slot.take()
+}
+
 fn shutdown_handler() -> HandlerFn {
     std::sync::Arc::new(|_params| {
         Box::pin(async move {
@@ -266,7 +281,26 @@ pub async fn start_ipc_server_inner(socket_path: &str) {
 
     log::info!("IPC server starting on {}", socket_path);
     if let Err(e) = server.serve().await {
+        // The server never started, so this instance cannot serve the pane
+        // API. Quitting is the correct outcome — a second window whose socket
+        // was refused is a workspace nothing can reach — and the reason is
+        // recorded for the GUI to show as it goes. `serve()` returns only
+        // before the accept loop, so any error here is fatal to the API.
         log::error!("IPC server error: {e}");
+        // One short line for the toast (the log above carries the path and the
+        // reason): a toast is read at a glance, and `OS.alert` is not an option
+        // here — it shells out to zenity/kdialog and *waits for a human*, which
+        // hangs a headless run (measured: the smoke's second instance never
+        // quit).
+        let reason = if e.kind() == std::io::ErrorKind::AlreadyExists {
+            "Another gPTY window is already running — this one will close.".to_string()
+        } else {
+            "gPTY could not start its control socket — this window will close.".to_string()
+        };
+        if let Some(mut slot) = gpty_core::lock::lock_or_warn(&STARTUP_FAILURE, "startup failure") {
+            *slot = Some(reason);
+        }
+        SHUTDOWN_REQUESTED.store(true, Ordering::Relaxed);
     }
 }
 
@@ -480,6 +514,47 @@ mod integration_tests {
         assert_eq!(result["protocol"], "2.0");
         let _ = std::fs::remove_file(&socket_path);
     }
+    // B4: a bind refused because another instance holds the socket must leave
+    // this process asking to quit, with a reason the GUI can show — the
+    // alternative is a second window whose workspace nothing can reach.
+    #[tokio::test]
+    #[serial]
+    async fn a_refused_bind_records_the_failure_and_asks_to_quit() {
+        let socket_path = format!("/tmp/gpty-ipc-test-{}-refused.sock", std::process::id());
+        let _ = std::fs::remove_file(&socket_path);
+        // A live listener stands in for the other instance.
+        let live = tokio::net::UnixListener::bind(&socket_path).expect("bind");
+
+        // Returns as soon as `serve()` refuses, so no polling is needed.
+        start_ipc_server_inner(&socket_path).await;
+
+        assert!(
+            take_shutdown_request(),
+            "a refused bind must ask the GUI to quit"
+        );
+        let reason = take_startup_failure().unwrap_or_default();
+        assert!(
+            reason.contains("Another gPTY window is already running"),
+            "the reason must name the cause, got: {reason}"
+        );
+        assert!(
+            reason.contains("this one will close"),
+            "the reason is the line the user reads before the window goes, got: {reason}"
+        );
+        assert!(
+            take_startup_failure().is_none(),
+            "the reason is taken once, like the quit request"
+        );
+        let flag = take_shutdown_request();
+        assert!(
+            !flag,
+            "the quit request is single-shot too, so a shown dialog cannot re-trigger"
+        );
+
+        drop(live);
+        let _ = std::fs::remove_file(&socket_path);
+    }
+
     // B2: GDScript-routed method times out without polling
     #[tokio::test]
     #[serial]

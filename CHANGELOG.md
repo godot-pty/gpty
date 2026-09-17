@@ -2,6 +2,12 @@
 
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6] — Unreleased
+
+### Fixed
+
+- **A second gPTY window can no longer hijack the control socket.** `IpcServer::serve()` unlinked an existing socket after checking only that it was a socket owned by this UID, so a second instance took the path and orphaned the running one: both windows stayed up, every CLI command went to the newcomer, and the older workspace became unreachable with no message anywhere (measured: two processes, two listeners on `/run/user/1000/gpty.sock`, the older one's inode unlinked). The bind now probes the path first and refuses when a server answers — replacing only a socket nothing is listening on, so a restart after a crash still works — and the same rule covers the event socket and, on Windows, the named pipe (which previously spun on a taken name instead of refusing). A checkout that cannot serve asks itself to quit through the existing shutdown flag and says why in a toast instead of vanishing: a window without a pane API is worse than no window.
+
 ## [0.5.5] — 2026-09-17
 
 ### Added
