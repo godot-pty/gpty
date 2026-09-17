@@ -62,6 +62,15 @@ func _pane_owned_by_child(line: String) -> Control:
 	await get_tree().process_frame
 	var body = ws._spawn_pane("terminal", {"shell_args": ShellFixtures.no_line_editing_args()})
 	assert_not_null(body, "the file needs a terminal pane it can configure")
+	# Then close the workspace's startup pane, so the file leaves one pane per
+	# test exactly as it did before it configured its own. Every pane keeps a
+	# history writer on the run's single SQLite store, and running two per test
+	# here is what pushed a later file's append past the store's 5 s lock wait
+	# (`history append failed (2 rows): database is locked`, windows-smoke) —
+	# the collision was the file's footprint, not its assertions.
+	var startup = ws._tm._find_body(ws._tm.tiles[0].wrapper)
+	if startup != null and startup != body:
+		ws._tm.kill(startup)
 	assert_true(
 		await _wait_for_shell_output(body, SHELL_READY_MS),
 		"the pane's shell must print before a command line is typed into it: %s" % _pane_state(body)
