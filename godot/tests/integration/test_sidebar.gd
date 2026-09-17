@@ -31,6 +31,39 @@ func after_each():
 		remove_child(_scene)
 		_scene.free()
 
+func test_a_row_label_never_claims_more_width_than_the_panel():
+	# The sidebar is a fixed 180 px panel (16 px of margins) whose right edge is
+	# covered by the workspace grid, so a row that sizes itself to its text is
+	# not wrapped or scrolled — it is cut, and it also drags the centring of the
+	# rows above it out of view. Measured before the fix: the catalog hint
+	# claimed 220 px and a 52-character profile name 415 px, and the profile row
+	# then read "Agent Workspac" (it had fit in the previous release).
+	# `clip_text` is the mechanism — it drops the text from the button's minimum
+	# width (220 -> 8 px) so the row stays inside the panel and the overrun
+	# ellipsizes instead of being sliced.
+	# The hint row exists only while no plugin profile is installed, so the
+	# list has to be built (empty) before it can be measured.
+	_sidebar.update_profile_list([], "")
+	var hint = _sidebar.find_child("CatalogHintBtn", true, false)
+	assert_not_null(hint, "the catalog hint row must exist")
+	assert_lte((hint as Button).get_combined_minimum_size().x, 164.0,
+		"the hint row must not claim more width than the panel offers")
+	# By identity, not by index: `update_profile_list` frees the previous rows
+	# with `queue_free()`, so within one frame the list still holds the row the
+	# first call built and index 0 is not the profile row at all.
+	var long_name := "a user profile name long enough to stretch the panel"
+	var profiles: Array[Dictionary] = [{"name": long_name}]
+	_sidebar.update_profile_list(profiles, "")
+	var btn: Button = null
+	for row in _sidebar._profile_list.get_children():
+		var candidate := row.get_child(0) as Button
+		if candidate != null and candidate.text == long_name:
+			btn = candidate
+			break
+	assert_not_null(btn, "the profile row must have a label button")
+	assert_lte(btn.get_combined_minimum_size().x, 164.0,
+		"a user-authored name must ellipsize, not stretch the row")
+
 func test_sidebar_build_succeeds():
 	# After build, update_pane_list with empty array should not crash
 	_sidebar.update_pane_list([])
@@ -235,7 +268,10 @@ func test_catalog_hint_row_shows_only_without_plugin_profiles():
 
 	assert_eq(_sidebar._profile_list.get_child_count(), 3, "two profiles plus the catalog hint")
 	var hint := _sidebar._profile_list.get_child(2).get_child(0) as Button
-	assert_eq(hint.text, "Get more layouts \u2192 catalog")
+	# Against the constant, not a literal: this test is about the hint being a
+	# row of its own, and pinning the wording made a one-word copy change fail
+	# a placement test.
+	assert_eq(hint.text, Sidebar.CATALOG_HINT_TEXT)
 	assert_eq(_sidebar._profile_list.get_child(2).get_child_count(), 1,
 		"the hint is a row of its own, with no delete button")
 	# The height cap must still see the hint as a row: the measured section

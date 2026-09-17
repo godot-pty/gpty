@@ -73,9 +73,8 @@ func update_pane_list(panes: Array, active_body: Control = null):
 		row.add_theme_constant_override("separation", 1)
 		row.set_meta("body", body)
 
-		var btn = Button.new()
-		btn.text = body.get("pane_label") if body.get("pane_label") != "" else "%s?" % PaneTypes.ALL.get(body._pane_type(), {}).get("label_prefix", "?")
-		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var btn = _make_row_label_button(
+			body.get("pane_label") if body.get("pane_label") != "" else "%s?" % PaneTypes.ALL.get(body._pane_type(), {}).get("label_prefix", "?"))
 		_apply_row_accent(btn, body == active_body)
 		btn.pressed.connect(func(): request_focus.emit(body))
 		row.add_child(btn)
@@ -112,6 +111,24 @@ func set_active_pane(body: Control):
 		if btn == null:
 			continue
 		_apply_row_accent(btn, row.get_meta("body") == body)
+
+## A section row's label Button.
+##
+## The sidebar is a fixed 180 px panel (16 px of margins), so a row must never
+## size itself to its text: a long name — a user-authored workspace, profile or
+## pane name, or the catalog hint — would stretch the section's VBox past the
+## panel and clip *every* row's right edge. Measured: the 27-character catalog
+## hint wanted 220 px and cut the profile row above it to "Agent Workspac",
+## which had fit before. `clip_text` removes the text from the button's minimum
+## width and the overrun behavior ellipsizes it, so a name that cannot fit
+## reads as truncated instead of silently slicing neighbouring rows.
+func _make_row_label_button(text: String) -> Button:
+	var btn = Button.new()
+	btn.text = text
+	btn.clip_text = true
+	btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return btn
 
 func _make_pane_action_button(icon: String, tooltip: String) -> Button:
 	var btn = Button.new()
@@ -245,7 +262,7 @@ const ACCENT_HOVER_COLOR = Color(0.6, 0.8, 1.0)
 ## only shipped layout is the built-in, and the tool layouts live in plugin
 ## repos listed on this page.
 const PLUGINS_CATALOG_URL := "https://godot-pty.github.io/gpty/plugins/"
-const CATALOG_HINT_TEXT := "Get more layouts \u2192 catalog"
+const CATALOG_HINT_TEXT := "More layouts \u2192"
 
 func _add_workspace_section(parent: VBoxContainer):
 	var section = VBoxContainer.new(); section.name = "WorkspaceSection"
@@ -326,9 +343,7 @@ func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close:
 	var row = HBoxContainer.new()
 	row.add_theme_constant_override("separation", 2)
 
-	var btn = Button.new()
-	btn.text = ws_name
-	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var btn = _make_row_label_button(ws_name)
 	btn.tooltip_text = "Switch workspace (double-click to rename)"
 	_apply_row_accent(btn, is_active)
 	btn.pressed.connect(func(): request_workspace_switch.emit(idx))
@@ -474,8 +489,7 @@ func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 		if is_plugin:
 			has_plugin_profile = true
 		var row = HBoxContainer.new()
-		var btn = Button.new(); btn.text = p_name
-		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var btn = _make_row_label_button(p_name)
 		btn.tooltip_text = str(p.get("description", ""))
 		_apply_row_accent(btn, p_name == active_name)
 		# Toggle-mode buttons flip on click; re-assert so a canceled
@@ -534,11 +548,9 @@ func _plugin_provenance(profile: Dictionary) -> String:
 ## it; pressing it opens the registry page.
 func _make_catalog_hint_row() -> HBoxContainer:
 	var row = HBoxContainer.new()
-	var btn = Button.new()
+	var btn = _make_row_label_button(CATALOG_HINT_TEXT)
 	btn.name = "CatalogHintBtn"
-	btn.text = CATALOG_HINT_TEXT
-	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn.tooltip_text = "Browse installable plugins"
+	btn.tooltip_text = "Browse the plugin registry"
 	btn.pressed.connect(func(): OS.shell_open(PLUGINS_CATALOG_URL))
 	row.add_child(btn)
 	return row

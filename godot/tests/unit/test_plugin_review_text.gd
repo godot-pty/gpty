@@ -33,6 +33,33 @@ func test_actions_list_command_and_args():
 	})
 	assert_true(text.contains("run-tests: gpty pane-run command=cargo test"), text)
 
+func test_profiles_show_what_they_would_start():
+	# The line that makes the review informed consent: a profile approved here
+	# is one the trust gate later activates at the pinned revision, and the
+	# programs are what its plan key derives from. The CLI computes them; the
+	# dialog used to print only the profile's name.
+	var text := PluginReviewText.build({
+		"id": "owner/demo",
+		"profiles": [
+			{"name": "Lazygit", "tiles": 1, "programs": ["lazygit"]},
+			{"name": "Plain", "tiles": 1, "programs": []},
+		],
+	})
+	assert_true(text.contains("Lazygit: starts lazygit"), text)
+	assert_true(text.contains("Plain: no program (layout only)"),
+		"a profile whose tiles name no program says so: " + text)
+
+func test_a_wrong_typed_field_cannot_empty_the_dialog():
+	# Measured while staging a capture: an Array in `concepts` raised
+	# "Nonexistent 'int' constructor" and the builder returned "" — the user
+	# was asked to approve a plugin with an empty dialog.
+	var text := PluginReviewText.build({
+		"id": "owner/demo", "name": "Demo", "concepts": ["not", "a", "count"],
+	})
+	assert_true(text.contains("Demo (owner/demo)"),
+		"the identity block survives a wrong-typed field: " + text)
+	assert_gt(text.length(), 0, "the dialog is never empty")
+
 func test_fields_are_capped_and_control_characters_stripped():
 	# A hostile name field: newlines would add lines the builder never wrote,
 	# and unbounded length would bloat the dialog.

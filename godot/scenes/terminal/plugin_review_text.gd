@@ -10,6 +10,8 @@ class_name PluginReviewText
 const MAX_LINES := 40
 const MAX_FIELD := 96
 const MAX_LISTED := 8
+## Programs listed per profile before an ellipsis (the CLI caps its own list too).
+const MAX_PROGRAMS_SHOWN := 8
 
 
 static func build(params: Dictionary) -> String:
@@ -82,18 +84,27 @@ static func build(params: Dictionary) -> String:
 	if startup_cmd is Array and not startup_cmd.is_empty():
 		lines.append("Startup command (declared, not run at install): %s" % argv_text(startup_cmd))
 
-	var concept_count := int(params.get("concepts", 0))
+	# A summary field of the wrong type must not abort the whole dialog: an
+	# empty consent dialog is worse than a missing count. Measured while
+	# staging a capture — an Array here raised "Nonexistent 'int' constructor"
+	# and every line built before it was discarded, so the user was asked to
+	# approve a plugin with no information at all.
+	var concept_count := _as_int(params.get("concepts", 0))
 	var profiles: Array = params.get("profiles", [])
 	if concept_count > 0 or (profiles is Array and not profiles.is_empty()):
 		lines.append("")
 		if concept_count > 0:
 			lines.append("Concepts: %d" % concept_count)
 		if profiles is Array and not profiles.is_empty():
-			var names: Array = []
+			lines.append("Profiles -- what each one would start:")
 			for entry in profiles:
+				if lines.size() >= MAX_LINES:
+					break
 				if entry is Dictionary:
-					names.append(field(entry, "name", 32))
-			lines.append("Profiles: %s" % ", ".join(names))
+					lines.append("  %s: %s" % [
+						field(entry, "name", 32),
+						programs_text(entry.get("programs", [])),
+					])
 
 	if lines.size() > MAX_LINES:
 		lines.resize(MAX_LINES)
@@ -101,6 +112,31 @@ static func build(params: Dictionary) -> String:
 	lines.append("")
 	lines.append("Installing grants this plugin the workspace API — its actions run as you through the gpty CLI. Nothing has executed yet.")
 	return "\n".join(lines)
+
+
+## What a profile's tiles would start, as one capped line.
+##
+## This is the line that makes the review informed consent rather than a name:
+## a profile the user approves here is one `_profile_consented` later activates
+## at the pinned revision, and the programs are what the Workspace Trust plan
+## key is derived from. A summary without it (an older CLI, a plugin whose
+## tiles are pure geometry) says so instead of showing nothing.
+static func programs_text(raw: Variant) -> String:
+	if not raw is Array or raw.is_empty():
+		return "no program (layout only)"
+	var parts: Array = []
+	for i in mini(raw.size(), MAX_PROGRAMS_SHOWN):
+		parts.append(short(str(raw[i]), 64))
+	if raw.size() > MAX_PROGRAMS_SHOWN:
+		parts.append("…")
+	return "starts " + ", ".join(parts)
+
+
+## A summary field read as an int, or 0 when it is not a number at all.
+static func _as_int(value: Variant) -> int:
+	if value is int or value is float:
+		return int(value)
+	return 0
 
 
 ## One capped, control-character-free string from a summary field.

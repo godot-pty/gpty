@@ -513,7 +513,7 @@ dependencies = [
 
 [[package]]
 name = "gpty"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "gpty-ai"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "libc",
  "log",
@@ -542,7 +542,7 @@ dependencies = [
 
 [[package]]
 name = "gpty-core"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "alacritty_terminal",
  "libc",
@@ -558,7 +558,7 @@ dependencies = [
 
 [[package]]
 name = "gpty-gdext"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "getrandom",
  "godot",
@@ -576,7 +576,7 @@ dependencies = [
 
 [[package]]
 name = "gpty-ipc"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "gpty-core",
  "libc",
