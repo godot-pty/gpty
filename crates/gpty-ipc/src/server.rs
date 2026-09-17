@@ -188,6 +188,10 @@ impl IpcServer {
         {
             log::info!("IPC server listening on {}", self.socket_path);
 
+            // A pipe name owned by another process makes every create fail;
+            // these bound that case so the caller refuses instead of looping.
+            let mut startup_failures: u32 = 0;
+            let mut created_any = false;
             let semaphore = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
             loop {
                 // A Windows named pipe instance serves exactly one client.
@@ -212,11 +216,33 @@ impl IpcServer {
                         ));
                     }
                     Err(e) => {
-                        log::error!("IPC pipe create error: {e}");
+                        // The shape of "another instance owns the name" is not
+                        // fully trustworthy across Windows versions (the
+                        // documented answer is ERROR_ACCESS_DENIED, matched
+                        // above), so a startup that can never create an
+                        // instance gives up rather than spinning: a first
+                        // instance creating a free name does not fail fifty
+                        // times in a row, and a window with no control surface
+                        // must not look alive.
+                        if !created_any {
+                            startup_failures += 1;
+                            if startup_failures > PIPE_STARTUP_ATTEMPTS {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::AlreadyExists,
+                                    format!(
+                                        "could not create the pipe {} after {startup_failures} \
+                                         attempts ({e}); another gpty instance may own it",
+                                        self.socket_path
+                                    ),
+                                ));
+                            }
+                        }
+                        log::error!("IPC pipe create error: {e} (raw {:?})", e.raw_os_error());
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                         continue;
                     }
                 };
+                created_any = true;
                 if let Err(e) = server.connect().await {
                     log::error!("IPC pipe connect error: {e}");
                     continue;
@@ -286,6 +312,14 @@ impl IpcServer {
             .create(&self.socket_path)
     }
 }
+
+/// Startup creates to allow before calling a pipe name unusable.
+///
+/// ~5 s at the 100 ms retry interval: long enough for a genuinely transient
+/// failure to clear, short enough that a name owned by another instance makes
+/// this one quit instead of running without a control surface.
+#[cfg(windows)]
+const PIPE_STARTUP_ATTEMPTS: u32 = 50;
 
 /// True when a named-pipe create failed because another process owns the name.
 ///

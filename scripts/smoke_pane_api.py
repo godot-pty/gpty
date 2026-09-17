@@ -289,7 +289,8 @@ class Smoke:
                 time.sleep(0.25)
             self.require(
                 second.poll() is not None,
-                "a second GUI must exit instead of running without a control endpoint",
+                "a second GUI must exit instead of running without a control endpoint "
+                f"(its log tail: {second_log.read_text(errors='replace')[-400:]!r})",
             )
             # The first instance is untouched: it still owns the endpoint and
             # still answers.
