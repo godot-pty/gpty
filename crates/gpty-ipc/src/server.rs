@@ -46,6 +46,20 @@ pub struct IpcServer {
     socket_path: String,
     /// Optional shared secret; when set, requests must carry a matching gpty_secret.
     secret: Option<String>,
+    /// Windows: whether the next pipe instance this *endpoint* creates may
+    /// claim the name.
+    ///
+    /// `FILE_FLAG_FIRST_PIPE_INSTANCE` fails when any instance of the name
+    /// exists, which is the only thing that stops another process from owning
+    /// it — but it must be set exactly once per name: on every create it would
+    /// fail against our own previous instance and the accept loop would never
+    /// run. The scope therefore has to be the endpoint, not the process: one
+    /// process runs two servers (control and event) under different names, and
+    /// a process-global flag let whichever created first consume the claim, so
+    /// the second one created a pipe on a name another instance already owned
+    /// — silently, because Windows allows several instances of a name.
+    #[cfg(windows)]
+    first_pipe_instance: std::sync::atomic::AtomicBool,
 }
 
 impl IpcServer {
@@ -55,6 +69,8 @@ impl IpcServer {
             handlers: HashMap::new(),
             socket_path: socket_path.into(),
             secret: None,
+            #[cfg(windows)]
+            first_pipe_instance: std::sync::atomic::AtomicBool::new(true),
         }
     }
 
@@ -291,18 +307,13 @@ impl IpcServer {
     async fn create_pipe_instance(
         &self,
     ) -> io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
-        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::atomic::Ordering;
         use tokio::net::windows::named_pipe;
 
-        // FILE_FLAG_FIRST_PIPE_INSTANCE makes create() fail when *any*
-        // instance of the name already exists, so it only guards the very
-        // first instance this process creates — that is what blocks another
-        // local process from squatting on the pipe name. Applying it to every
-        // instance would instead make the accept loop fail with
-        // "pipe create error" until the previous client disconnects,
-        // serializing the daemon to one live connection.
-        static FIRST_PIPE_INSTANCE: AtomicBool = AtomicBool::new(true);
-        let first = FIRST_PIPE_INSTANCE.swap(false, Ordering::SeqCst);
+        // True for the first instance this endpoint creates and false after,
+        // which is what blocks another local process from owning the name
+        // (see the field's comment for why this cannot be process-global).
+        let first = self.first_pipe_instance.swap(false, Ordering::SeqCst);
 
         // Named pipes are network-reachable by default; this daemon is
         // local-only, so reject remote clients.
