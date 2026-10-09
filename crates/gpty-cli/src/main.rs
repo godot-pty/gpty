@@ -1,8 +1,12 @@
 //! # gpty — terminal workspace CLI
 //!
 //! Controls the gpty GUI over JSON-RPC IPC.
-//! When the GUI is not running, `gpty` can auto-spawn it
-//! (unless `--no-daemon` is passed).
+//!
+//! A GUI is started on demand only for commands a fresh instance can satisfy
+//! — `new-pane` and `layout load` — and `--no-daemon` refuses even those.
+//! Every other command answers with the shared "no gpty GUI is running"
+//! hint when nothing is listening, instead of opening a window it cannot
+//! use; `gpty daemon start` starts one explicitly (the hint names it).
 
 mod commands;
 mod plugin_manifest;
@@ -48,7 +52,7 @@ struct Cli {
     #[arg(long, global = true, default_value = "5000")]
     timeout: u64,
 
-    /// Don't auto-spawn the GUI if not running
+    /// Never start a GUI (commands that need one fail)
     #[arg(long, global = true)]
     no_daemon: bool,
 
@@ -288,6 +292,43 @@ enum PluginAction {
     },
 }
 
+/// Whether the generic gate may start a GUI for this command.
+///
+/// Only commands a *fresh* GUI can satisfy: creating a pane, or restoring a
+/// saved layout. Every other command needs a workspace that already exists —
+/// starting one would add a window and then fail at the command's actual
+/// work, so those answer with `daemon::NO_GUI_HINT` instead (the same
+/// message `--no-daemon` produces for the two that may spawn). `plugin
+/// install` and `daemon start` never reach this gate: each is handled in its
+/// own arm (the install review, and the explicit start).
+///
+/// Exhaustive on purpose: a new subcommand must choose a side.
+fn may_autospawn(cmd: &Commands) -> bool {
+    match cmd {
+        Commands::NewPane { .. } => true,
+        Commands::Layout {
+            action: LayoutAction::Load { .. },
+        } => true,
+        Commands::ListPanes
+        | Commands::KillPane { .. }
+        | Commands::FocusPane { .. }
+        | Commands::Inject { .. }
+        | Commands::Schema { .. }
+        | Commands::Daemon { .. }
+        | Commands::Layout { .. }
+        | Commands::Concept { .. }
+        | Commands::Plugin { .. }
+        | Commands::PaneRead { .. }
+        | Commands::PaneStatus { .. }
+        | Commands::State { .. }
+        | Commands::PaneRun { .. }
+        | Commands::PaneWait { .. }
+        | Commands::Broadcast { .. }
+        | Commands::Mcp
+        | Commands::Version => false,
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -327,7 +368,7 @@ async fn main() {
         }
         Some(Commands::Mcp) => {
             let client = IpcClient::new(&socket_path, timeout);
-            if let Err(e) = commands::mcp::run(&client).await {
+            if let Err(e) = commands::mcp::run(&client, &socket_path, timeout).await {
                 eprintln!("mcp error: {e}");
                 process::exit(1);
             }
@@ -357,7 +398,22 @@ async fn main() {
             {
                 Ok(()) => process::exit(0),
                 Err(e) => {
-                    eprintln!("{e}");
+                    report_error(&e);
+                    process::exit(1);
+                }
+            }
+        }
+        // `daemon` owns its whole surface here: `start` is the explicit
+        // spawner, and `stop`/`status` report a missing GUI instead of being
+        // refused by the generic gate below (which must never spawn for a
+        // command that only asks or shuts down).
+        Some(Commands::Daemon { action }) => {
+            match commands::daemon::run(action, &socket_path, timeout, cli.json, cli.no_daemon)
+                .await
+            {
+                Ok(code) => process::exit(code),
+                Err(e) => {
+                    eprintln!("error: {e}");
                     process::exit(1);
                 }
             }
@@ -369,26 +425,39 @@ async fn main() {
         _ => {}
     }
 
-    // Ensure daemon is running (unless --no-daemon).
+    let Some(command) = &cli.command else {
+        unreachable!("handled above");
+    };
+
+    // Start a GUI only for commands a fresh workspace can satisfy, and only
+    // when `--no-daemon` allows it. The never-spawn set (and `--no-daemon`)
+    // reach the GUI through the dispatch below and fail there with the shared
+    // hint when nothing answers — never with a window they cannot use.
     if !cli.no_daemon
+        && may_autospawn(command)
         && let Err(e) = commands::daemon::ensure_running(&socket_path, timeout).await
     {
         eprintln!("error: {e}");
-        eprintln!("  Is gpty running? Start it or pass --no-daemon to skip.");
         process::exit(1);
     }
 
     let client = IpcClient::new(&socket_path, timeout);
-    let Some(command) = &cli.command else {
-        unreachable!("handled above");
-    };
-    let result = commands::dispatch(command, &client, cli.json).await;
-
-    match result {
+    match commands::dispatch(command, &client, cli.json).await {
         Ok(()) => process::exit(0),
         Err(e) => {
-            eprintln!("{e}");
+            report_error(&e);
             process::exit(1);
         }
+    }
+}
+
+/// Print a failed command: the shared no-GUI hint when nothing is listening
+/// on the control socket, the error itself otherwise. The never-spawn set
+/// and `--no-daemon` both land here, so all of them answer the same way.
+fn report_error(e: &anyhow::Error) {
+    if commands::daemon::is_not_running(e) {
+        eprintln!("error: {}", commands::daemon::NO_GUI_HINT);
+    } else {
+        eprintln!("error: {e}");
     }
 }

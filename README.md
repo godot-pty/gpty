@@ -63,13 +63,13 @@ The binaries are not code-signed (see [SECURITY.md](SECURITY.md)).
 
 ### CLI
 
-The `gpty` binary controls a running GUI over JSON-RPC IPC, and every release bundle ships it next to the GUI, which it starts on demand (`--no-daemon` opts out). Building from source (`cargo build -p gpty`, or `cargo build --workspace`) is only needed when working on the CLI itself.
+The `gpty` binary controls a running GUI over JSON-RPC IPC, and every release bundle ships it next to the GUI. The CLI starts one on demand only for commands a fresh workspace can satisfy — `new-pane` and `layout load` — while `gpty daemon start` starts one explicitly and `--no-daemon` never starts one. Every other command needs a workspace that already exists, so it fails with `no gpty GUI is running (start one with \`gpty daemon start\`)` instead of opening a window it cannot use. Building from source (`cargo build -p gpty`, or `cargo build --workspace`) is only needed when working on the CLI itself.
 
 Once the GUI is running (launched from Godot or a release binary), the CLI connects over a Unix socket (`$XDG_RUNTIME_DIR/gpty.sock` on Linux, or `GPTY_SOCKET` env var):
 
 ```bash
-# Check if the GUI is running
-gpty version
+# Check if the GUI is running (exit 1 when it is not)
+gpty daemon status
 
 # Print the bundled agent skill (for coding agents running inside a pane)
 gpty --skill
@@ -99,6 +99,7 @@ gpty plugin install godot-pty/gpty-omp
 gpty plugin list
 
 # Manage the GUI daemon
+gpty daemon start
 gpty daemon status
 gpty daemon stop
 

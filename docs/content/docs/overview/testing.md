@@ -90,8 +90,8 @@ All CLI commands below use the default socket path (`$XDG_RUNTIME_DIR/gpty.sock`
 | 13 | `gpty daemon status` | "gpty GUI is running (v0.3.0)" |
 | 14 | `gpty daemon stop` | GUI exits cleanly, no zombie processes (`ps aux | grep gpty`) |
 | 15 | `gpty daemon status` | "gpty GUI is not running." with exit code 1 |
-| 16 | `gpty --no-daemon version` | "could not connect to gpty GUI" error |
-| 17 | `gpty version` (GUI not running) | Auto-spawns GUI, then responds with version |
+| 16 | `gpty --no-daemon new-pane` (GUI not running) | `error: no gpty GUI is running (start one with \`gpty daemon start\`)`, exit 1, no window |
+| 17 | `gpty daemon start` (GUI not running) | `gpty GUI started (v<version>)`, and the window opens; a GUI that cannot start reports its own stderr immediately |
 
 ---
 

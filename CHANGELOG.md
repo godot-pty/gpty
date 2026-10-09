@@ -4,6 +4,10 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 
 ## [0.5.6] — Unreleased
 
+### Changed
+
+- **The CLI starts a GUI only for commands a fresh one can satisfy.** `new-pane` and `layout load` still auto-start the workspace (unless `--no-daemon`); every other command — queries, pane-targeted mutations, `concept toggle`, and `daemon stop`/`status` — now fails with `no gpty GUI is running (start one with \`gpty daemon start\`)` and exit 1, instead of opening a window and then failing at the command's actual work (`gpty list-panes` used to launch the GUI it was trying to query). `gpty daemon start` is the explicit spawner, `gpty daemon stop` with nothing running is a no-op, and the MCP server never auto-starts a GUI: its `daemon-start` tool is the bootstrap, and other tool calls that find none say so. A GUI that cannot start — no display, missing libraries — now reports its own stderr immediately instead of waiting out the timeout in silence.
+
 ### Fixed
 
 - **A second gPTY window can no longer hijack the control socket.** `IpcServer::serve()` unlinked an existing socket after checking only that it was a socket owned by this UID, so a second instance took the path and orphaned the running one: both windows stayed up, every CLI command went to the newcomer, and the older workspace became unreachable with no message anywhere (measured: two processes, two listeners on `/run/user/1000/gpty.sock`, the older one's inode unlinked). The bind now probes the path first and refuses when a server answers — replacing only a socket nothing is listening on, so a restart after a crash still works — and the same rule covers the event socket and, on Windows, the named pipe (which previously spun on a taken name instead of refusing). A checkout that cannot serve asks itself to quit through the existing shutdown flag and says why in a toast instead of vanishing: a window without a pane API is worse than no window.

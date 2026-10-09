@@ -12,8 +12,8 @@ use gpty_ipc::client::IpcClient;
 use gpty_ipc::server::{HandlerFn, IpcServer};
 use serde_json::Value;
 
-use crate::LayoutAction;
 use crate::commands;
+use crate::{DaemonAction, LayoutAction};
 
 /// Start an `IpcServer` on a unique temp socket registered with the
 /// given handlers. Each handler receives the request params and returns
@@ -554,4 +554,358 @@ async fn plugin_admin_notice_reaches_a_gui_and_is_silent_without_one() {
     );
 
     let _ = std::fs::remove_file(&socket);
+}
+
+// ── GUI spawn policy ──────────────────────────────────────────────────
+//
+// Which commands may start a GUI, what a command with no GUI says, and what
+// a GUI that cannot start reports. The live path (against a real GUI) is the
+// smoke's job; these are the decisions and the diagnostics.
+
+/// Every command's side of the gate, so a new subcommand cannot pick one by
+/// accident: `may_autospawn` is exhaustive, and this table is the record of
+/// what each side means.
+#[test]
+fn spawn_policy_is_deliberate_per_command() {
+    let cases: &[(&[&str], bool)] = &[
+        // A fresh GUI can satisfy these two.
+        (&["gpty", "new-pane"], true),
+        (&["gpty", "layout", "load", "Agent Workspace"], true),
+        // Everything else needs a workspace that already exists.
+        (&["gpty", "list-panes"], false),
+        (&["gpty", "kill-pane", "T1"], false),
+        (&["gpty", "focus-pane", "T1"], false),
+        (&["gpty", "inject", "T1", "--text", "hi"], false),
+        (&["gpty", "pane-read", "T1"], false),
+        (&["gpty", "pane-status"], false),
+        (&["gpty", "pane-run", "--command", "ls"], false),
+        (&["gpty", "pane-wait", "T1", "--pattern", "x"], false),
+        (
+            &["gpty", "broadcast", "--tags", "ci", "--text", "hi"],
+            false,
+        ),
+        (&["gpty", "concept", "list"], false),
+        (&["gpty", "concept", "toggle", "cat"], false),
+        (&["gpty", "layout", "save", "Saved"], false),
+        (&["gpty", "layout", "list"], false),
+        (&["gpty", "daemon", "status"], false),
+        (&["gpty", "daemon", "stop"], false),
+        (&["gpty", "mcp"], false),
+        (&["gpty", "state", "idle"], false),
+        (&["gpty", "schema"], false),
+        (&["gpty", "version"], false),
+        // Handled in their own arms before the gate: `plugin install` starts
+        // a GUI for the review dialog itself and `daemon start` is the one
+        // explicit spawner, so neither may fall through to the generic gate.
+        (&["gpty", "plugin", "install", "owner/repo"], false),
+        (&["gpty", "plugin", "list"], false),
+    ];
+    for (argv, expected) in cases {
+        let cli = <crate::Cli as clap::Parser>::try_parse_from(*argv)
+            .unwrap_or_else(|e| panic!("{argv:?} did not parse: {e}"));
+        let command = cli.command.as_ref().expect("a subcommand was parsed");
+        assert_eq!(crate::may_autospawn(command), *expected, "argv: {argv:?}");
+    }
+}
+
+/// A missing listener is recognized through whatever context a command has
+/// wrapped around the client error — that is what routes the never-spawn set
+/// and `--no-daemon` to the shared hint instead of a raw connect error.
+#[tokio::test]
+async fn a_missing_listener_is_recognized_as_not_running() {
+    let missing = format!(
+        "{}/gpty-cli-roundtrip-{}-spawn-policy.sock",
+        std::env::temp_dir().display(),
+        std::process::id()
+    );
+    let _ = std::fs::remove_file(&missing);
+    let client = IpcClient::new(&missing, Duration::from_secs(1));
+    let error = client
+        .call("listPanes", None)
+        .await
+        .expect_err("no listener must fail");
+    let error = anyhow::Error::new(error);
+    assert!(commands::daemon::is_not_running(&error), "{error}");
+    let wrapped = error.context("while listing panes");
+    assert!(
+        commands::daemon::is_not_running(&wrapped),
+        "context must not hide the cause: {wrapped}"
+    );
+    assert_eq!(
+        commands::daemon::NO_GUI_HINT,
+        "no gpty GUI is running (start one with `gpty daemon start`)"
+    );
+}
+
+/// A refusal is not absence: a regular file where the socket should be keeps
+/// its own message (the client validates before sending anything), so the
+/// no-GUI hint cannot mask a hijack guard.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_refused_endpoint_is_not_reported_as_not_running() {
+    let path = format!(
+        "{}/gpty-cli-roundtrip-{}-not-a-socket",
+        std::env::temp_dir().display(),
+        std::process::id()
+    );
+    std::fs::write(&path, b"not a socket").unwrap();
+    let client = IpcClient::new(&path, Duration::from_secs(1));
+    let error = anyhow::Error::new(
+        client
+            .call("listPanes", None)
+            .await
+            .expect_err("a regular file is refused"),
+    );
+    assert!(!commands::daemon::is_not_running(&error), "{error}");
+    let _ = std::fs::remove_file(&path);
+}
+
+/// `--no-daemon` and `daemon start` contradict each other; the flag wins so
+/// "never spawn" stays true everywhere.
+#[tokio::test]
+async fn daemon_start_refuses_under_no_daemon() {
+    let error = commands::daemon::run(
+        &DaemonAction::Start,
+        "/nonexistent/gpty.sock",
+        Duration::from_secs(1),
+        false,
+        true,
+    )
+    .await
+    .expect_err("--no-daemon and start contradict each other");
+    assert!(error.to_string().contains("--no-daemon"), "{error}");
+}
+
+/// The endpoint `start_server` will bind, so a test can point the CLI at it
+/// before a server exists there (the auto-spawn case).
+#[cfg(unix)]
+fn spawn_socket(name: &str) -> String {
+    let path = format!(
+        "{}/gpty-cli-roundtrip-{}-{name}.sock",
+        std::env::temp_dir().display(),
+        std::process::id()
+    );
+    let _ = std::fs::remove_file(&path);
+    path
+}
+
+/// An executable script standing in for the GUI binary; whatever proves the
+/// spawner ran is a file the script writes. `validate_gui_binary` holds it to
+/// an absolute, user-owned, private regular file — hence the 0700 mode.
+#[cfg(unix)]
+fn fake_gui(name: &str, body: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let path =
+        std::env::temp_dir().join(format!("gpty-cli-fake-gui-{}-{name}", std::process::id()));
+    std::fs::write(&path, format!("#!/bin/sh\n{body}")).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    path
+}
+
+/// `GPTY_GUI` is process-global, and cargo runs a binary's tests on parallel
+/// threads: every test that points the spawner at a fake GUI holds this lock
+/// and restores the previous value on drop (including on panic).
+#[cfg(unix)]
+fn spawn_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(unix)]
+struct GuiOverride {
+    previous: Option<std::ffi::OsString>,
+}
+
+#[cfg(unix)]
+impl GuiOverride {
+    fn set(path: &std::path::Path) -> Self {
+        let previous = std::env::var_os("GPTY_GUI");
+        unsafe { std::env::set_var("GPTY_GUI", path) };
+        Self { previous }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for GuiOverride {
+    fn drop(&mut self) {
+        unsafe {
+            match self.previous.take() {
+                Some(value) => std::env::set_var("GPTY_GUI", value),
+                None => std::env::remove_var("GPTY_GUI"),
+            }
+        }
+    }
+}
+
+/// The spawner runs only when the endpoint is genuinely empty: a live server
+/// is never shadowed by a freshly started GUI.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_running_gui_is_never_spawned_over() {
+    let _guard = spawn_env_lock();
+    let socket = spawn_socket("spawn_live");
+    let marker = std::env::temp_dir().join(format!("gpty-cli-spawn-live-{}", std::process::id()));
+    let _ = std::fs::remove_file(&marker);
+    let gui = fake_gui(
+        "live",
+        &format!("echo started >> {}\nsleep 2\n", marker.display()),
+    );
+    let _override = GuiOverride::set(&gui);
+    let _server = start_server(
+        "spawn_live",
+        vec![(
+            "version",
+            |_p: Value| serde_json::json!({"version": "9.9.9"}),
+        )],
+    )
+    .await;
+
+    commands::daemon::ensure_running(&socket, Duration::from_secs(2))
+        .await
+        .expect("a running GUI needs no spawn");
+    assert!(
+        !marker.exists(),
+        "a live endpoint must not be spawned over ({marker:?})"
+    );
+    let _ = std::fs::remove_file(&marker);
+    let _ = std::fs::remove_file(&gui);
+    let _ = std::fs::remove_file(&socket);
+}
+
+/// A dead endpoint starts the discovered GUI exactly once — not once per
+/// poll — and a GUI that never binds is reported against the endpoint.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_dead_endpoint_spawns_once_and_reports_the_timeout() {
+    let _guard = spawn_env_lock();
+    let socket = spawn_socket("spawn_dead");
+    let marker = std::env::temp_dir().join(format!("gpty-cli-spawn-dead-{}", std::process::id()));
+    let _ = std::fs::remove_file(&marker);
+    let gui = fake_gui(
+        "dead",
+        &format!("echo started >> {}\nsleep 3\n", marker.display()),
+    );
+    let _override = GuiOverride::set(&gui);
+
+    let error = commands::daemon::ensure_running(&socket, Duration::from_millis(900))
+        .await
+        .expect_err("a GUI that never binds must fail");
+    assert!(
+        error.to_string().contains("did not answer"),
+        "the failure names the endpoint and the timeout: {error}"
+    );
+    let attempts = std::fs::read_to_string(&marker).unwrap_or_default();
+    assert_eq!(
+        attempts.lines().count(),
+        1,
+        "the GUI is spawned exactly once, not once per poll: {attempts:?}"
+    );
+    let _ = std::fs::remove_file(&marker);
+    let _ = std::fs::remove_file(&gui);
+}
+
+/// A GUI that cannot start is reported with its own words, and at once:
+/// waiting out the whole budget with the child's stderr discarded is what the
+/// old spawner did.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_gui_that_dies_reports_its_own_output() {
+    let _guard = spawn_env_lock();
+    let socket = spawn_socket("dead_gui");
+    let gui = fake_gui("dies", "echo 'boom: no display' >&2\nexit 3\n");
+    let _override = GuiOverride::set(&gui);
+
+    let started = std::time::Instant::now();
+    let error = commands::daemon::ensure_running(&socket, Duration::from_secs(30))
+        .await
+        .expect_err("a GUI that exits cannot serve");
+    let message = error.to_string();
+    assert!(message.contains("boom: no display"), "{message}");
+    assert!(message.contains("exited immediately"), "{message}");
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the child's exit must end the wait, not the 30 s budget: {message}"
+    );
+    let _ = std::fs::remove_file(&gui);
+}
+
+/// Whoever brings the endpoint up wins: one that appears during the wait is
+/// adopted. This is the concurrent-`new-pane` property — the loser's GUI
+/// refuses the bind (one instance owns the endpoint) and this call reaches
+/// the winner.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_gui_that_appears_during_the_wait_is_adopted() {
+    let _guard = spawn_env_lock();
+    let socket = spawn_socket("late_gui");
+    let gui = fake_gui("late", "sleep 3\n");
+    let _override = GuiOverride::set(&gui);
+
+    let waiting = {
+        let socket = socket.clone();
+        tokio::spawn(async move {
+            commands::daemon::ensure_running(&socket, Duration::from_secs(5)).await
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    let late = start_server(
+        "late_gui",
+        vec![(
+            "version",
+            |_p: Value| serde_json::json!({"version": "1.2.3"}),
+        )],
+    )
+    .await;
+    assert_eq!(late, socket, "the test server must bind the awaited path");
+
+    let result = waiting.await.expect("the wait task must not panic");
+    assert!(result.is_ok(), "{result:?}");
+    let _ = std::fs::remove_file(&late);
+    let _ = std::fs::remove_file(&gui);
+}
+
+/// `daemon status` reports and never starts what it checks; `daemon stop`
+/// with nothing running is an idempotent no-op. The marker script proves
+/// neither touched the spawner.
+#[cfg(unix)]
+#[tokio::test]
+async fn daemon_status_never_spawns_and_stop_is_a_no_op() {
+    let _guard = spawn_env_lock();
+    let marker = std::env::temp_dir().join(format!("gpty-cli-spawn-name-{}", std::process::id()));
+    let _ = std::fs::remove_file(&marker);
+    let gui = fake_gui(
+        "status",
+        &format!("echo started >> {}\nsleep 2\n", marker.display()),
+    );
+    let _override = GuiOverride::set(&gui);
+    let socket = spawn_socket("status_stop");
+
+    let code = commands::daemon::run(
+        &DaemonAction::Status,
+        &socket,
+        Duration::from_secs(1),
+        false,
+        false,
+    )
+    .await
+    .expect("status reports a missing GUI, it does not fail");
+    assert_eq!(code, 1, "not running is a nonzero status");
+
+    let code = commands::daemon::run(
+        &DaemonAction::Stop,
+        &socket,
+        Duration::from_secs(1),
+        false,
+        false,
+    )
+    .await
+    .expect("stopping nothing is a no-op");
+    assert_eq!(code, 0, "stopping nothing reaches the desired state");
+
+    assert!(
+        !marker.exists(),
+        "status/stop must never start a GUI ({marker:?})"
+    );
+    let _ = std::fs::remove_file(&marker);
+    let _ = std::fs::remove_file(&gui);
 }

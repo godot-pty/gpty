@@ -1,8 +1,11 @@
 use std::io::{self, BufRead, Read, Write};
+use std::time::Duration;
 
 use clap::CommandFactory;
 use gpty_ipc::client::IpcClient;
 use gpty_ipc::protocol::{JsonRpcError, Request, build_error, build_response};
+
+use crate::commands::daemon::{self, Started};
 
 /// Map a kebab-case MCP tool name to the camelCase IPC method the GUI
 /// registers: `pane-read` → `paneRead`, `broadcast` → `broadcast`.
@@ -27,20 +30,59 @@ fn tool_to_ipc_method(tool_name: &str) -> String {
     out
 }
 
-/// Handle daemon tools locally (no IPC needed). Returns Some(result) if handled, None if not a daemon tool.
-async fn run_daemon_tool(tool_name: &str, client: &IpcClient) -> Option<serde_json::Value> {
+/// Handle the daemon tools locally. They manage the GUI itself, so they are
+/// the one place MCP may start it — explicitly, through `daemon-start`; every
+/// other tool never spawns, and a tool call that finds no GUI says so and
+/// names that tool.
+async fn run_daemon_tool(
+    tool_name: &str,
+    client: &IpcClient,
+    socket_path: &str,
+    timeout: Duration,
+) -> Option<serde_json::Value> {
     match tool_name {
-        "daemon-start" => {
-            Some(serde_json::json!({"status": "GUI daemon auto-spawns on first tool call"}))
-        }
-        "daemon-stop" => match client.call("shutdown", Some(serde_json::Value::Null)).await {
-            Ok(r) => r.result,
-            Err(_) => Some(serde_json::json!({"status": "GUI not running"})),
-        },
-        "daemon-status" => match client.call("version", None).await {
-            Ok(r) => r.result,
-            Err(_) => Some(serde_json::json!({"version": null, "status": "not running"})),
-        },
+        "daemon-start" => Some(match daemon::start(socket_path, timeout).await {
+            Ok(Started::Already(v)) => {
+                serde_json::json!({"status": "already-running", "version": v})
+            }
+            Ok(Started::Launched(v)) => serde_json::json!({"status": "started", "version": v}),
+            Err(e) => serde_json::json!({"status": "error", "error": e.to_string()}),
+        }),
+        "daemon-stop" => Some(
+            match client.call("shutdown", Some(serde_json::Value::Null)).await {
+                Ok(r) if r.error.is_none() => serde_json::json!({"status": "stopped"}),
+                Ok(r) => serde_json::json!({
+                    "status": "error",
+                    "error": r.error.map(|e| e.message).unwrap_or_else(|| "unknown".into()),
+                }),
+                Err(e) => {
+                    let err = anyhow::Error::new(e);
+                    if daemon::is_not_running(&err) {
+                        serde_json::json!({"status": "not running"})
+                    } else {
+                        serde_json::json!({"status": "error", "error": err.to_string()})
+                    }
+                }
+            },
+        ),
+        "daemon-status" => Some(match client.call("version", None).await {
+            Ok(r) if r.error.is_none() => serde_json::json!({
+                "status": "running",
+                "version": r.result.as_ref().and_then(|v| v.get("version")).and_then(|v| v.as_str()),
+            }),
+            Ok(r) => serde_json::json!({
+                "status": "error",
+                "error": r.error.map(|e| e.message).unwrap_or_else(|| "unknown".into()),
+            }),
+            Err(e) => {
+                let err = anyhow::Error::new(e);
+                if daemon::is_not_running(&err) {
+                    serde_json::json!({"status": "not running"})
+                } else {
+                    serde_json::json!({"status": "error", "error": err.to_string()})
+                }
+            }
+        }),
         _ => None,
     }
 }
@@ -71,7 +113,10 @@ fn discard_line(reader: &mut impl io::BufRead) -> io::Result<()> {
 }
 
 /// Run as an MCP server over stdio: read JSON-RPC from stdin, forward to IPC, write to stdout.
-pub async fn run(client: &IpcClient) -> anyhow::Result<()> {
+///
+/// `socket_path`/`timeout` are here for the one tool that manages the GUI
+/// itself (`daemon-start`): the server never starts a GUI implicitly.
+pub async fn run(client: &IpcClient, socket_path: &str, timeout: Duration) -> anyhow::Result<()> {
     let stdin = io::stdin();
     let mut reader = io::BufReader::new(stdin.lock());
     let mut stdout = io::stdout();
@@ -153,7 +198,9 @@ pub async fn run(client: &IpcClient) -> anyhow::Result<()> {
                         ),
                     )
                 // Daemon tools are handled locally (no GUI needed)
-                } else if let Some(result) = run_daemon_tool(tool_name, client).await {
+                } else if let Some(result) =
+                    run_daemon_tool(tool_name, client, socket_path, timeout).await
+                {
                     build_response(id, result)
                 } else {
                     // Map kebab-case tool name to camelCase IPC method
@@ -166,10 +213,22 @@ pub async fn run(client: &IpcClient) -> anyhow::Result<()> {
                                 build_response(id, r.result.unwrap_or(serde_json::Value::Null))
                             }
                         }
-                        Err(e) => build_error(
-                            id,
-                            JsonRpcError::new(JsonRpcError::INTERNAL_ERROR, e.to_string()),
-                        ),
+                        Err(e) => {
+                            // Unlike the CLI, the MCP server never starts a
+                            // GUI for a tool call: the client bootstraps with
+                            // `daemon-start`, so a dead endpoint must say so
+                            // rather than surface a raw connect error.
+                            let err = anyhow::Error::new(e);
+                            let message = if daemon::is_not_running(&err) {
+                                format!("{}; call the daemon-start tool first", daemon::NO_GUI_HINT)
+                            } else {
+                                err.to_string()
+                            };
+                            build_error(
+                                id,
+                                JsonRpcError::new(JsonRpcError::INTERNAL_ERROR, message),
+                            )
+                        }
                     }
                 }
             }

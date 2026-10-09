@@ -32,6 +32,10 @@ You are running inside one pane of a gPTY terminal workspace. Use the `gpty` CLI
 | `concept-toggle` | `gpty concept toggle <name>` |
 | `version` | `gpty version` |
 
+The CLI starts a GUI on demand for `new-pane` and `layout load`; the MCP
+server never starts one implicitly — if a tool call finds no GUI, the answer
+says so and names `daemon-start`, which is the explicit bootstrap over MCP.
+
 ## Coordination recipes
 
 ### Split a pane and run a test suite
