@@ -125,6 +125,11 @@ pub async fn run(client: &IpcClient, socket_path: &str, timeout: Duration) -> an
     // advertised tool (see `mcp_tool_names`).
     let allowed_tools = super::schema::mcp_tool_names(&crate::Cli::command());
 
+    // The CLI's stale-binary warning, once per server session: an agent that
+    // finds a tool missing because an old `gpty` on PATH is serving MCP
+    // should see why in its log.
+    daemon::warn_on_version_mismatch(socket_path, daemon::VERSION_CHECK_BUDGET).await;
+
     let mut line = Vec::new();
     loop {
         line.clear();

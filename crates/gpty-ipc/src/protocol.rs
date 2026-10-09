@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 
 // ── JSON-RPC 2.0 protocol types ──────────────────────────
 
+/// The control-IPC dialect version, pinned per release and reported by the
+/// `version` method. Both binaries compare it: a GUI (or CLI) answering a
+/// different value is from a different release, whatever the version numbers
+/// say — the CLI's stale-binary warning says so instead of leaving commands
+/// to fail opaquely. One definition, used by the server's `version` handler,
+/// the CLI's `version` output, and the About tab (`get_ipc_protocol_version`).
+pub const PROTOCOL_VERSION: &str = "2.0";
+
 /// An incoming JSON-RPC 2.0 request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {

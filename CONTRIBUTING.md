@@ -101,6 +101,13 @@ cargo run --bin gpty -- inject T1 -t "echo hello"
 cargo run --bin gpty -- daemon stop
 ```
 
+`cargo run` always builds the CLI from this checkout, but a `cargo install`ed
+`gpty` on `PATH` can shadow a release bundle's CLI: after a version bump,
+reinstall it (`cargo install --path crates/gpty-cli --force`). The stale binary
+otherwise fails opaquely — a subcommand it lacks dies in clap before any IPC,
+which is why the CLI warns once when it reads a running GUI whose version or
+IPC protocol differs.
+
 Standalone commands (no GUI needed):
 
 ```bash

@@ -172,7 +172,7 @@ fn version_handler() -> HandlerFn {
         Box::pin(async move {
             Ok(serde_json::json!({
                 "version": env!("CARGO_PKG_VERSION"),
-                "protocol": "2.0"
+                "protocol": gpty_ipc::protocol::PROTOCOL_VERSION
             }))
         })
     })
@@ -511,7 +511,11 @@ mod integration_tests {
             .expect("version should succeed");
         let result = resp.result.expect("should have result");
         assert_eq!(result["version"], env!("CARGO_PKG_VERSION"));
-        assert_eq!(result["protocol"], "2.0");
+        assert_eq!(
+            result["protocol"],
+            gpty_ipc::protocol::PROTOCOL_VERSION,
+            "the wire value comes from the one definition"
+        );
         let _ = std::fs::remove_file(&socket_path);
     }
     // B4: a bind refused because another instance holds the socket must leave

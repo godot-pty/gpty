@@ -363,7 +363,7 @@ async fn main() {
         }
         Some(Commands::Version) => {
             println!("gpty {}", env!("CARGO_PKG_VERSION"));
-            println!("protocol: 2.0");
+            println!("protocol: {}", gpty_ipc::protocol::PROTOCOL_VERSION);
             process::exit(0);
         }
         Some(Commands::Mcp) => {
@@ -440,6 +440,17 @@ async fn main() {
         eprintln!("error: {e}");
         process::exit(1);
     }
+
+    // A stale CLI on `PATH` never says so on its own: `gpty version` is
+    // local-only, and a subcommand this build lacks dies in clap before any
+    // IPC. Where the spawn gate has not already read the GUI's version (its
+    // probe does), read it once — best-effort, never gating — and warn when
+    // the pair differs.
+    commands::daemon::warn_on_version_mismatch(
+        &socket_path,
+        commands::daemon::VERSION_CHECK_BUDGET,
+    )
+    .await;
 
     let client = IpcClient::new(&socket_path, timeout);
     match commands::dispatch(command, &client, cli.json).await {

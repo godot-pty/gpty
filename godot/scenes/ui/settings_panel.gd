@@ -646,6 +646,7 @@ func _add_env_control(v: VBoxContainer) -> TextEdit:
 	return te
 
 var _version_label: Label
+var _protocol_label: Label
 var _concept_list: VBoxContainer
 var _concept_terminal: GptyTerminal  # any terminal for global concept FFI
 
@@ -660,10 +661,13 @@ func _add_about_section(v: VBoxContainer):
 
 	var ipc_row = HBoxContainer.new()
 	ipc_row.add_child(_lbl("IPC protocol:"))
-	var ipc_val = Label.new()
-	ipc_val.text = "2.0"
-	ipc_val.add_theme_font_size_override("font_size", 12)
-	ipc_row.add_child(ipc_val)
+	# From the one definition (`gpty_ipc::protocol::PROTOCOL_VERSION`), not a
+	# literal: the same value the wire carries and the CLI prints.
+	_protocol_label = Label.new()
+	_protocol_label.name = "ProtocolLabel"
+	_protocol_label.text = GptyTerminal.get_ipc_protocol_version()
+	_protocol_label.add_theme_font_size_override("font_size", 12)
+	ipc_row.add_child(_protocol_label)
 	v.add_child(ipc_row)
 
 	var url_lbl = Label.new()

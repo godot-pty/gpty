@@ -2,6 +2,7 @@ use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::Duration;
 
 use crate::DaemonAction;
@@ -70,9 +71,19 @@ enum Probe {
 /// `daemon status` snappy; how long a *caller* waits for a slow GUI is the
 /// caller's deadline, applied in [`connect_with`].
 async fn probe(socket_path: &str) -> Probe {
-    let client = IpcClient::new(socket_path, Duration::from_secs(1));
+    probe_with(socket_path, Duration::from_secs(1)).await
+}
+
+/// A `version` probe with an explicit budget: long where the answer decides
+/// whether a GUI exists, short for the best-effort stale-binary check, which
+/// must never delay the command it precedes.
+async fn probe_with(socket_path: &str, timeout: Duration) -> Probe {
+    let client = IpcClient::new(socket_path, timeout);
     match client.call("version", None).await {
-        Ok(resp) if resp.error.is_none() => Probe::Running(resp),
+        Ok(resp) if resp.error.is_none() => {
+            note_gui_version(&resp);
+            Probe::Running(resp)
+        }
         Ok(resp) if auth_denied(&resp) => Probe::Auth,
         Ok(resp) => Probe::Failed(format!(
             "the gpty GUI answered the version probe with an error: {}",
@@ -89,6 +100,112 @@ async fn probe(socket_path: &str) -> Probe {
         }
         Err(e) => Probe::Failed(e.to_string()),
     }
+}
+
+/// Set once a `version` response has been read in this process, so the
+/// best-effort check some call sites run first skips its probe afterwards.
+static VERSION_OBSERVED: AtomicBool = AtomicBool::new(false);
+/// Set once a stale-binary warning has been printed. `daemon start` can see
+/// two version responses (its pre-check and the connect loop), and the
+/// mismatch is a property of the binaries, not of the command.
+static VERSION_WARNED: AtomicBool = AtomicBool::new(false);
+
+/// Probe budget for the best-effort stale-binary check. A GUI too busy to
+/// answer within it skips the warning rather than delaying the command that
+/// is about to run.
+pub const VERSION_CHECK_BUDGET: Duration = Duration::from_millis(500);
+
+/// Best-effort stale-binary check for a call site that has not read the
+/// version yet (the command `main` is about to dispatch, the MCP server at
+/// startup). A no-op once a version has been read. Never fails and never
+/// gates: the caller's real work runs whatever the probe finds.
+pub async fn warn_on_version_mismatch(socket_path: &str, budget: Duration) {
+    if VERSION_OBSERVED.load(AtomicOrdering::Relaxed) {
+        return;
+    }
+    let _ = probe_with(socket_path, budget).await;
+}
+
+/// Record a `version` response and warn, once per process, when the GUI it
+/// came from disagrees with this CLI about the IPC protocol or the version.
+///
+/// `gpty version` is local-only by design (it cannot probe a GUI), and a
+/// subcommand this build lacks dies in clap before any IPC — so without this
+/// a stale `gpty` on `PATH` never says so; its commands just fail opaquely.
+fn note_gui_version(resp: &Response) {
+    VERSION_OBSERVED.store(true, AtomicOrdering::Relaxed);
+    let Some(result) = resp.result.as_ref() else {
+        return;
+    };
+    let gui_version = result
+        .get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let gui_protocol = result
+        .get("protocol")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let Some(line) = stale_binary_line(
+        gpty_ipc::protocol::PROTOCOL_VERSION,
+        gui_protocol,
+        env!("CARGO_PKG_VERSION"),
+        gui_version,
+    ) else {
+        return;
+    };
+    if VERSION_WARNED.swap(true, AtomicOrdering::Relaxed) {
+        return;
+    }
+    eprintln!("warning: {line}");
+}
+
+/// The one line a mismatched binary pair earns, or `None` when they agree.
+///
+/// The protocol comes first: two builds that disagree about the wire are from
+/// different releases whatever the numbers say. A GUI from before the field
+/// existed (`protocol` absent) falls through to the version comparison, and a
+/// response that names neither side is not evidence of anything.
+fn stale_binary_line(
+    cli_protocol: &str,
+    gui_protocol: &str,
+    cli_version: &str,
+    gui_version: &str,
+) -> Option<String> {
+    if !gui_protocol.is_empty() && gui_protocol != cli_protocol {
+        return Some(format!(
+            "the gpty CLI speaks IPC protocol {cli_protocol} but the running GUI speaks {gui_protocol}; they are from different releases — reinstall the CLI (`cargo install --path crates/gpty-cli`) or use the one shipped beside the GUI"
+        ));
+    }
+    if cli_version.is_empty() || gui_version.is_empty() || gui_version == cli_version {
+        return None;
+    }
+    let order = parse_version_triple(cli_version)
+        .zip(parse_version_triple(gui_version))
+        .map(|(cli, gui)| cli.cmp(&gui));
+    Some(match order {
+        Some(std::cmp::Ordering::Less) => format!(
+            "the gpty CLI (v{cli_version}) is older than the running GUI (v{gui_version}); reinstall the CLI (`cargo install --path crates/gpty-cli`) or use the one shipped beside the GUI"
+        ),
+        Some(std::cmp::Ordering::Greater) => format!(
+            "the running GUI (v{gui_version}) is older than the gpty CLI (v{cli_version}); update the GUI, or use the CLI the newer release shipped"
+        ),
+        _ => format!(
+            "the gpty CLI (v{cli_version}) and the running GUI (v{gui_version}) report different versions; make sure both come from the same release"
+        ),
+    })
+}
+
+/// `X.Y.Z` as numbers; `None` for anything else (a pre-release suffix, a
+/// date, `unknown`), which [`stale_binary_line`] words generically.
+fn parse_version_triple(version: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
 }
 
 /// Wait for a GUI to answer on `socket_path`, starting one when the endpoint
@@ -419,6 +536,40 @@ mod tests {
         #[cfg(not(unix))]
         let _ = mode;
         path
+    }
+
+    /// The stale-binary check: the protocol is the primary signal, the
+    /// version comparison is direction-aware, and a pair that agrees — or
+    /// says nothing — earns no line.
+    #[test]
+    fn a_mismatched_binary_pair_earns_one_named_line() {
+        assert!(stale_binary_line("2.0", "2.0", "0.5.5", "0.5.5").is_none());
+        // Same numbers, different wire: only the protocol can catch it.
+        let protocol = stale_binary_line("2.0", "3.0", "0.5.5", "0.5.5").expect("warns");
+        assert!(
+            protocol.contains("protocol 2.0") && protocol.contains("speaks 3.0"),
+            "{protocol}"
+        );
+        assert!(
+            protocol.contains("cargo install --path crates/gpty-cli"),
+            "the remedy is named: {protocol}"
+        );
+        // The reported case: an older CLI shadowing a newer GUI on PATH.
+        let older = stale_binary_line("2.0", "", "0.5.0", "0.5.5").expect("warns");
+        assert!(
+            older.contains("v0.5.0") && older.contains("v0.5.5") && older.contains("older than"),
+            "{older}"
+        );
+        // The reverse repair is updating the GUI, not reinstalling the CLI.
+        let newer = stale_binary_line("2.0", "2.0", "0.6.0", "0.5.5").expect("warns");
+        assert!(newer.contains("GUI (v0.5.5) is older"), "{newer}");
+        // Unparseable numbers still name both sides.
+        let odd = stale_binary_line("2.0", "2.0", "0.5.5-rc1", "0.5.5").expect("warns");
+        assert!(odd.contains("same release"), "{odd}");
+        // Nothing to compare: a matching protocol and no version, or no
+        // version at all, is not evidence of staleness.
+        assert!(stale_binary_line("2.0", "2.0", "0.5.5", "").is_none());
+        assert!(stale_binary_line("2.0", "", "", "0.5.5").is_none());
     }
 
     #[test]

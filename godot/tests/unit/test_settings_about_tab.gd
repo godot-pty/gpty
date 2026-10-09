@@ -50,6 +50,17 @@ func test_version_label_prefixed_with_gpty():
 		"Version label should begin with 'gpty v'"
 	)
 
+func test_protocol_label_comes_from_the_ffi_source():
+	# The About tab showed a hardcoded "2.0"; the wire value now has one
+	# definition, so the tab must read the same source the server reports.
+	assert_not_null(_panel._protocol_label, "About tab must expose _protocol_label")
+	assert_eq(
+		_panel._protocol_label.text,
+		GptyTerminal.get_ipc_protocol_version(),
+		"the About tab must show the protocol the wire actually carries"
+	)
+	assert_false(_panel._protocol_label.text.is_empty())
+
 # ── helpers ────────────────────────────────────────────────────────────
 
 ## Walk the immediate children of the panel to find the TabContainer.

@@ -46,6 +46,17 @@ impl GptyTerminal {
         GString::from(env!("CARGO_PKG_VERSION"))
     }
 
+    /// The control-IPC protocol version this build speaks, for the About tab.
+    ///
+    /// Static like `get_app_version`, and the one definition behind it is
+    /// `gpty_ipc::protocol::PROTOCOL_VERSION` — the same value the server's
+    /// `version` handler reports and the CLI prints, so the tab cannot drift
+    /// from what the wire actually carries.
+    #[func]
+    fn get_ipc_protocol_version() -> GString {
+        GString::from(gpty_ipc::protocol::PROTOCOL_VERSION)
+    }
+
     /// Profiles declared by the installed plugins, for the GUI's profile list.
     ///
     /// Static, like `get_app_version`: the list is offered before any pane
