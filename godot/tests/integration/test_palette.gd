@@ -18,6 +18,7 @@ func test_palette_commands_include_all_types():
 	assert_true(cmds.has("new inspector"), "should have new inspector")
 	assert_true(cmds.has("new reasoning"), "should have new reasoning")
 	assert_true(cmds.has("new cli view"), "should have new cli view")
+	assert_true(cmds.has("new wiki"), "should have new wiki")
 
 func test_palette_commands_include_actions():
 	var cmds = PaneTypes.build_palette_commands()
@@ -25,12 +26,13 @@ func test_palette_commands_include_actions():
 	assert_true(cmds.has("settings"))
 	assert_true(cmds.has("reset layout"))
 
-func test_pane_types_all_has_six_entries():
-	assert_eq(PaneTypes.ALL.size(), 6)
+func test_pane_types_all_has_seven_entries():
+	assert_eq(PaneTypes.ALL.size(), 7)
 	assert_true(PaneTypes.ALL.has("terminal"))
 	assert_true(PaneTypes.ALL.has("code_viewer"))
 	assert_true(PaneTypes.ALL.has("file_tree"))
 	assert_true(PaneTypes.ALL.has("inspector"))
 	assert_true(PaneTypes.ALL.has("reasoning"))
 	assert_true(PaneTypes.ALL.has("cli_view"))
+	assert_true(PaneTypes.ALL.has("wiki"))
 	assert_false(PaneTypes.ALL.has("observer"))

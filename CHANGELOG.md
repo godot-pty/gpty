@@ -2,6 +2,12 @@
 
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — Unreleased
+
+### Added
+
+- **Wiki pane type (v0.6.0 groundwork).** A seventh pane type, `wiki`, registered across the vocabulary (`PaneTypes.ALL`, the Rust `PaneType` enum, the type→body map) and therefore spawnable from the sidebar, the palette (`new wiki`), `gpty new-pane -t wiki`, and layout/profile restore. It opens a vault at an absolute directory path — validated at use exactly like `file_tree`'s root, so a file-supplied path is never trusted — and lists the vault's Markdown notes (recursive, hidden entries skipped, bounded in entries and depth). Activating a note renders it read-only through the sanitized Markdown pipeline; editing, wikilinks, the link graph, and the full-text index stay with their own v0.6.0 items. The note read and the code viewer now share one guard, `TextRead.read_prefix` (absolute paths only, regular-file gate, 1 MiB cap, torn-UTF8-safe decode) — the security rule has a single definition.
+
 ## [0.5.6] — Unreleased
 
 ### Added

@@ -2,8 +2,8 @@
 """Live pane-API smoke: boots the GUI headless and drives the JSON-RPC CLI
 end-to-end (new-pane -> status -> inject -> wait -> read -> scrollback ->
 broadcast -> pane-run exit code -> concept from output -> cli_view stdout ->
-plugin-provided profile -> kill), plus subscribe/eventsPoll on the event
-listener.
+wiki pane -> plugin-provided profile -> kill), plus subscribe/eventsPoll on
+the event listener.
 
 One harness for every platform: the transport is the only difference between
 Unix and Windows (named pipe vs Unix socket), so the flow is written once and
@@ -969,6 +969,17 @@ def main() -> int:
             view_text[-500:],
         )
         smoke.cli("kill-pane", view_id, "--json")
+
+        # ── wiki: a directory-backed pane type ────────────────────────
+        # The vault view is GUI-side, so the API half this pins is the
+        # registration: `new-pane -t wiki` carries the new wire spelling
+        # through the Rust enum, the GUI registry and the body map.
+        smoke.enter("wiki")
+        wiki = smoke.result(smoke.cli("new-pane", "-t", "wiki", "--json"), "new-pane (wiki)")
+        wiki_id = wiki.get("pane_id")
+        smoke.require(bool(wiki_id), "new-pane must return a wiki pane_id", wiki)
+        smoke.require(wiki.get("type") == "wiki", "the pane must report the wiki type", wiki)
+        smoke.cli("kill-pane", wiki_id, "--json")
 
         # ── kill-pane ─────────────────────────────────────────────────
         smoke.enter("kill-pane")

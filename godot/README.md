@@ -64,9 +64,11 @@ godot/
             ├── pane_types.gd    # Pane registry, sanitizers, palette command list
             ├── code_viewer.gd
             ├── file_tree.gd
+            ├── text_read.gd     # Shared read guard: regular-file gate + 1 MiB cap
             ├── inspector_pane.gd
             ├── cli_view_pane.gd
-            └── reasoning_pane.gd
+            ├── reasoning_pane.gd
+            └── wiki_pane.gd     # Read-only vault browser (Markdown notes)
 ```
 
 ## Key Bindings

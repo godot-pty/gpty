@@ -78,7 +78,7 @@ func test_small_file_loads_in_full():
 func test_file_over_the_cap_is_truncated_with_a_notice():
 	var pane := _make_viewer()
 	await get_tree().process_frame
-	var cap: int = CodeViewerPane.MAX_FILE_BYTES
+	var cap: int = TextRead.DEFAULT_MAX_BYTES
 	var path := _write(_tmp.path_join("huge.txt"), "a".repeat(cap + 4096))
 	pane.load_file(path)
 	assert_eq(pane.file_path, path, "a truncated file is still shown (with a notice)")
@@ -91,7 +91,7 @@ func test_file_over_the_cap_is_truncated_with_a_notice():
 func test_torn_utf8_at_the_cap_is_not_shown_as_a_replacement_glyph():
 	var pane := _make_viewer()
 	await get_tree().process_frame
-	var cap: int = CodeViewerPane.MAX_FILE_BYTES
+	var cap: int = TextRead.DEFAULT_MAX_BYTES
 	# cap bytes of "a" plus a 2-byte character: the read stops after its lead.
 	var path := _write(_tmp.path_join("torn.txt"), "a".repeat(cap - 1) + "é")
 	pane.load_file(path)

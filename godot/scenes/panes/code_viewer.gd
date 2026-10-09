@@ -59,39 +59,17 @@ func _ready():
 	else:
 		_refresh_view()
 
-## Largest file the viewer will read.
-##
-## The reader runs on the GUI thread and the path can come from an untrusted
-## layout/profile (or a typo), so the read is capped: a multi-GB file used to
-## be slurped whole. Anything past the cap is replaced by a truncation notice.
-##
-## `FileAccess.file_exists` is the path-type gate: measured on Godot 4.7.2 it
-## is false for directories, character devices (`/dev/zero`) and FIFOs — even
-## when they are reached through a symlink — and true only for regular files
-## (symlinks to regular files included), so a non-regular path never reaches
-## `open` (which on a FIFO would block the GUI thread until a writer appears).
-const MAX_FILE_BYTES := 1 << 20
-
 func load_file(path: String):
-	if path == "" or not path.is_absolute_path():
-		_clear_content()
-		return
-	if not FileAccess.file_exists(path):
-		_clear_content()
-		return
-	var size := FileAccess.get_size(path)
-	if size < 0:
-		_clear_content()
-		return
-	var f = FileAccess.open(path, FileAccess.READ)
-	if not f:
+	# The read guard (regular-file gate, 1 MiB cap, torn-UTF8-safe decode)
+	# lives in TextRead so the wiki pane reads a note under the same rules.
+	var r := TextRead.read_prefix(path)
+	if not r.ok:
 		_clear_content()
 		return
 	file_path = path
-	if size > MAX_FILE_BYTES:
-		_content = _decode_prefix(f.get_buffer(MAX_FILE_BYTES)) + _truncation_notice(size)
-	else:
-		_content = f.get_as_text()
+	_content = r.text + (
+		TextRead.truncation_notice(TextRead.DEFAULT_MAX_BYTES, r.size) if r.truncated else ""
+	)
 	_editor.text = _content
 
 	# Basic syntax detection from extension. `add_comment_string` never
@@ -106,33 +84,6 @@ func load_file(path: String):
 		"rs", "c", "cpp", "h", "hpp":
 			_editor.add_comment_delimiter("//", "", true)
 	_refresh_view()
-
-## Decode at most the cap, cutting a UTF-8 sequence the cap landed inside so
-## the text does not end on a replacement glyph.
-func _decode_prefix(bytes: PackedByteArray) -> String:
-	var size := bytes.size()
-	var cut := size
-	# Walk back over up to 3 continuation bytes to the lead of the last
-	# sequence; if that sequence is incomplete, drop it as well.
-	while cut > 0 and size - cut < 4 and (bytes[cut - 1] & 0xC0) == 0x80:
-		cut -= 1
-	if cut > 0:
-		var lead_index := cut - 1
-		var lead: int = bytes[lead_index]
-		var need := 1
-		if lead & 0xE0 == 0xC0:
-			need = 2
-		elif lead & 0xF0 == 0xE0:
-			need = 3
-		elif lead & 0xF8 == 0xF0:
-			need = 4
-		cut = size if size - lead_index >= need else lead_index
-	return bytes.slice(0, cut).get_string_from_utf8()
-
-func _truncation_notice(total: int) -> String:
-	return "\n\n… truncated: showing the first %s of %s …\n" % [
-		String.humanize_size(MAX_FILE_BYTES), String.humanize_size(total),
-	]
 
 func _clear_content():
 	file_path = ""

@@ -38,7 +38,7 @@ fails on a test that ran without asserting.
 - `godot/scenes/terminal/workspace.gd` — restore/sanitize wiring and concept event routing; IPC dispatch itself is covered by `test_ipc_dispatch_contract.gd`, which drives `WorkspaceIpcHandlers.handle` with a real `Workspace`
 - `godot/scenes/terminal/terminal_pane.gd` — renderer and input paths are partially covered by `test_keyboard.gd`/`test_copy_routing.gd` mocks; real rendering is manual-only
 - `godot/scenes/ui/settings_panel.gd`, `godot/scenes/ui/pane_settings_panel.gd`, `godot/scenes/ui/status_bar.gd`, `godot/scenes/ui/toast_overlay.gd`, `godot/scenes/ui/icons.gd`
-- `godot/scenes/panes/code_viewer.gd`, `godot/scenes/panes/file_tree.gd`, `godot/scenes/panes/inspector_pane.gd`, `godot/scenes/panes/reasoning_pane.gd` — unit-tested for routing/session contracts; real OMP/Markdown rendering is manual (`cli_view_pane.gd` is the exception: `test_cli_view.gd` runs a real child and asserts its streamed lines)
+- `godot/scenes/panes/code_viewer.gd`, `godot/scenes/panes/file_tree.gd`, `godot/scenes/panes/wiki_pane.gd`, `godot/scenes/panes/inspector_pane.gd`, `godot/scenes/panes/reasoning_pane.gd` — unit-tested for routing/session contracts; real OMP/Markdown rendering is manual (`cli_view_pane.gd` is the exception: `test_cli_view.gd` runs a real child and asserts its streamed lines)
 - `godot/scenes/autoloads/focus_manager.gd`, `godot/scenes/autoloads/shortcut_manager.gd`, `godot/scenes/autoloads/toast_manager.gd`, `godot/scenes/autoloads/update_checker.gd`
 
 ## Manual pre-release checklist
