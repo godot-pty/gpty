@@ -665,7 +665,7 @@ mod tests {
         let path = temp_db("scope");
         let vault = temp_vault("scope_a");
         let mut store = VaultStore::open(&path).unwrap();
-        let mut row = |vault_id: &str, rel: &str| NoteRow {
+        let row = |vault_id: &str, rel: &str| NoteRow {
             vault_id: vault_id.into(),
             rel_path: rel.into(),
             mtime: 1,
