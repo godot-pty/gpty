@@ -84,6 +84,22 @@ func test_a_bare_concept_count_still_renders():
 	var text := PluginReviewText.build({"id": "owner/demo", "concepts": 3})
 	assert_true(text.contains("Concepts: 3"), text)
 
+func test_declared_only_sections_say_so():
+	# The 2026-10 decision: gpty dispatches no events to plugins and runs no
+	# link handler, build, or startup command. The review is the consent
+	# surface, so it must not imply otherwise.
+	var text := PluginReviewText.build({
+		"id": "owner/demo",
+		"events": [{"name": "on-done", "type": "pane.killed"}],
+		"link_handlers": [{"scheme": "demo", "command": ["gpty", "new-pane"]}],
+		"build": ["make"],
+		"startup": ["make", "serve"],
+	})
+	assert_true(text.contains("Listens for (declared"), text)
+	assert_true(text.contains("Link handlers (declared"), text)
+	assert_true(text.contains("Build command (declared, not run by gpty)"), text)
+	assert_true(text.contains("Startup command (declared, not run by gpty)"), text)
+
 func test_fields_are_capped_and_control_characters_stripped():
 	# A hostile name field: newlines would add lines the builder never wrote,
 	# and unbounded length would bloat the dialog.

@@ -52,7 +52,10 @@ static func build(params: Dictionary) -> String:
 	var events: Array = params.get("events", [])
 	if events is Array and not events.is_empty():
 		lines.append("")
-		lines.append("Listens for:")
+		# Decision (2026-10): gpty dispatches nothing to plugins. A plugin that
+		# wants events subscribes to the event socket itself, so the review
+		# says "declared" rather than implying gpty will feed them.
+		lines.append("Listens for (declared; the plugin reads gpty's event socket itself):")
 		var shown_events := 0
 		for entry in events:
 			if shown_events >= MAX_LISTED or lines.size() >= MAX_LINES:
@@ -66,7 +69,9 @@ static func build(params: Dictionary) -> String:
 	var link_handlers: Array = params.get("link_handlers", [])
 	if link_handlers is Array and not link_handlers.is_empty():
 		lines.append("")
-		lines.append("Link handlers:")
+		# Same decision: the Markdown view opens http(s)/mailto through the OS
+		# and ignores every other scheme, so no handler here is ever run.
+		lines.append("Link handlers (declared; gpty runs none of these):")
 		for entry in link_handlers:
 			if lines.size() >= MAX_LINES:
 				break
@@ -79,10 +84,10 @@ static func build(params: Dictionary) -> String:
 	var build_cmd: Array = params.get("build", [])
 	if build_cmd is Array and not build_cmd.is_empty():
 		lines.append("")
-		lines.append("Build command (declared, not run at install): %s" % argv_text(build_cmd))
+		lines.append("Build command (declared, not run by gpty): %s" % argv_text(build_cmd))
 	var startup_cmd: Array = params.get("startup", [])
 	if startup_cmd is Array and not startup_cmd.is_empty():
-		lines.append("Startup command (declared, not run at install): %s" % argv_text(startup_cmd))
+		lines.append("Startup command (declared, not run by gpty): %s" % argv_text(startup_cmd))
 
 	# A summary field of the wrong type must not abort the whole dialog: an
 	# empty consent dialog is worse than a missing count. Measured while
