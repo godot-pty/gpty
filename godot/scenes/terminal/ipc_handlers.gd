@@ -21,11 +21,13 @@ static func handle(ws, method: String, params: Dictionary):
 		"pluginsChanged":
 			# A CLI admin action has already written the plugin store when
 			# this arrives (unlike the install review, whose clone lands only
-			# after the human answers), so the profile list re-reads it now
-			# and the answer means "the GUI has caught up". Without this a
-			# running GUI kept listing an uninstalled plugin's profiles — and
-			# kept activating them from its in-memory copy — until the next
-			# restart, which made `disable` look like it did nothing.
+			# after the human answers), so the profile list and the concept
+			# set re-read it now and the answer means "the GUI has caught
+			# up". Without this a running GUI kept listing an uninstalled
+			# plugin's profiles — and kept activating them from its
+			# in-memory copy — until the next restart, which made `disable`
+			# look like it did nothing; an uninstalled plugin's concepts
+			# would have stayed live in the engine the same way.
 			#
 			# Both fields are validated although only `action` is read today.
 			# `id` is inert right now (this handler neither stores nor looks
@@ -46,6 +48,7 @@ static func handle(ws, method: String, params: Dictionary):
 			if not TrustedStore.valid_plugin_id(pc_id):
 				return error("Malformed plugin id: %s" % pc_id)
 			ProfileManager.refresh_plugin_profiles()
+			ConceptManager.refresh_plugin_concepts()
 			return {"refreshed": true, "action": pc_action, "id": pc_id}
 		"newPane":
 			var type_name = str(params.get("type", "terminal"))

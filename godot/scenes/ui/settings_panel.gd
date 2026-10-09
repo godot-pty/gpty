@@ -705,10 +705,20 @@ func _refresh_concept_list():
 	for c in _concept_list.get_children():
 		c.queue_free()
 	var concepts = ConceptManager.get_concepts() if _concept_terminal else []
+	# Provenance for the rows a plugin shipped, by the name the merged set
+	# carries: a rule the user did not write should say where it came from,
+	# and a deduped name like "cat (2)" needs it most.
+	var plugin_sources: Dictionary = ConceptManager.plugin_sources() if _concept_terminal else {}
 	for i in concepts.size():
 		var c = concepts[i]
 		var enabled: bool = c.get("enabled", true)
 		var h = HBoxContainer.new()
+		var source: Dictionary = plugin_sources.get(str(c.get("name", "")), {})
+		var provenance := ""
+		if not source.is_empty():
+			provenance = "From plugin %s (revision %s)" % [
+				source.get("plugin_id", "?"), source.get("revision", "?")]
+			h.tooltip_text = provenance
 		# Enabled toggle
 		var toggle = CheckButton.new()
 		toggle.button_pressed = enabled
@@ -722,6 +732,8 @@ func _refresh_concept_list():
 		var lbl = Label.new()
 		lbl.text = "%s  →  %s" % [c.get("name", "?"), c.get("trigger", "?")]
 		lbl.add_theme_font_size_override("font_size", 11)
+		if provenance != "":
+			lbl.tooltip_text = provenance
 		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if not enabled:
 			lbl.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
@@ -874,7 +886,12 @@ func _delete_concept(idx: int):
 		if c is Dictionary and c.get("name", "") == concept_name:
 			continue
 		kept.append(c)
-	if ConceptManager._default_names(ConceptManager._load_defaults()).has(concept_name):
+	# A shipped default lives in a read-only file and a plugin's rule lives in
+	# the plugin: neither can be removed by editing the user store, so
+	# deleting one writes the disabled overlay that keeps it off (and that the
+	# toggle flips back). The user's own rule is simply gone.
+	var shipped := ConceptManager._default_names(ConceptManager._load_defaults()).has(concept_name)
+	if shipped or ConceptManager.plugin_sources().has(concept_name):
 		kept.append({"name": concept_name, "enabled": false})
 	ConceptManager.save_concepts(kept)
 	_refresh_concept_list()

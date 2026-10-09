@@ -22,8 +22,8 @@ use gpty_ipc::client::IpcClient;
 
 use crate::PluginAction;
 use crate::plugin_manifest::{
-    self, ActionSpec, Manifest, Platform, ProfileSpec, current_version, parse_manifest,
-    valid_plugin_id,
+    self, ActionSpec, MAX_CONCEPT_NAME_LEN, Manifest, Platform, ProfileSpec, current_version,
+    parse_manifest, valid_plugin_id,
 };
 use crate::plugin_store::{self, PluginProfileRecord, PluginStore};
 
@@ -284,7 +284,12 @@ async fn install(
     }
     move_into_place(&staging, &manifest.id)?;
     guard.disarm();
-    let record = store.upsert(&manifest.id, &revision, &profile_records(&manifest))?;
+    let record = store.upsert(
+        &manifest.id,
+        &revision,
+        &profile_records(&manifest),
+        &concept_records(&manifest),
+    )?;
 
     print_result(
         json,
@@ -379,6 +384,22 @@ pub(crate) fn profile_records(manifest: &Manifest) -> Vec<PluginProfileRecord> {
         .collect()
 }
 
+/// The manifest's concepts as stored JSON entries.
+///
+/// The store is the GUI's read model, so the entries travel as
+/// `serde_json::Value` — `parse_manifest` already held every one of them to
+/// the engine's closed key set and round-tripped them through the real engine
+/// parser (`concepts_from_json`), and the GUI never parses TOML.
+pub(crate) fn concept_records(manifest: &Manifest) -> Vec<serde_json::Value> {
+    manifest
+        .concepts
+        .iter()
+        .map(|concept| {
+            serde_json::to_value(concept).expect("a validated concept serializes to JSON")
+        })
+        .collect()
+}
+
 /// What the review dialog renders. All fields come from a validated manifest
 /// (caps applied at parse time); the GUI re-caps the display, because the
 /// dialog text is untrusted file content. `requested_ref` is the ref the
@@ -422,7 +443,14 @@ pub(crate) fn review_summary(
             .iter()
             .map(|handler| serde_json::json!({"scheme": handler.scheme, "command": handler.command}))
             .collect::<Vec<_>>(),
-        "concepts": manifest.concepts.len(),
+        // A concept is a trigger plus what it does. The review names each one
+        // (the GUI caps the display) so accepting an install is consent to
+        // rules the user can read, not to a count.
+        "concepts": manifest
+            .concepts
+            .iter()
+            .map(concept_review_entry)
+            .collect::<Vec<_>>(),
         // A profile is geometry plus the programs its tiles name; the review
         // says what activating it would start, not just how many tiles.
         "profiles": manifest
@@ -478,6 +506,51 @@ fn short(text: &str, cap: usize) -> String {
         .filter(|ch| !ch.is_control())
         .take(cap)
         .collect()
+}
+
+/// The most pane targets one review concept entry lists — the same cap the
+/// profile program list uses, for the same reason: a valid entry can name 32
+/// actions and the dialog is not a dump.
+const MAX_CONCEPT_TARGETS: usize = 8;
+
+/// One review entry per concept: its name, whether it ships enabled, and
+/// where its actions route. A `single_line` concept only notifies, and the
+/// entry says so explicitly — "notify only" and "routes output to
+/// code_viewer" are different things to consent to.
+fn concept_review_entry(concept: &toml::Value) -> serde_json::Value {
+    let name = concept
+        .get("name")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    let enabled = concept
+        .get("enabled")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+    let mut targets: Vec<String> = Vec::new();
+    if let Some(actions) = concept.get("actions").and_then(|value| value.as_array()) {
+        for action in actions {
+            let Some(target) = action.get("target").and_then(|value| value.as_str()) else {
+                continue;
+            };
+            let target = short(target, MAX_PROGRAM_LEN);
+            if target.is_empty() || targets.contains(&target) {
+                continue;
+            }
+            targets.push(target);
+            if targets.len() >= MAX_CONCEPT_TARGETS {
+                break;
+            }
+        }
+    }
+    serde_json::json!({
+        "name": short(name, MAX_CONCEPT_NAME_LEN),
+        "enabled": enabled,
+        "notify_only": concept
+            .get("capture_mode")
+            .and_then(|value| value.as_str())
+            == Some("single_line"),
+        "targets": targets,
+    })
 }
 
 // ── List / enable / disable / uninstall ───────────────────────────────
@@ -966,6 +1039,16 @@ command = ["gpty", "new-pane"]
 [[profiles]]
 name = "CI"
 tiles = [{settings = {type = "terminal"}, col = 0, row = 0}]
+
+[[concepts]]
+name = "build-failed"
+trigger = "error:"
+actions = [{target = "code_viewer"}]
+
+[[concepts]]
+name = "notify-done"
+trigger = "done"
+capture_mode = "single_line"
 "#,
         )
         .unwrap();
@@ -985,9 +1068,58 @@ tiles = [{settings = {type = "terminal"}, col = 0, row = 0}]
         assert_eq!(summary["actions"][0]["args"]["command"], "cargo test");
         assert_eq!(summary["events"][0]["type"], "pane.killed");
         assert_eq!(summary["link_handlers"][0]["scheme"], "demo");
-        assert_eq!(summary["concepts"], 0);
+        // Each concept is named with what it would do, not counted: a
+        // capture names where it routes, a notify-only rule says so.
+        assert_eq!(summary["concepts"][0]["name"], "build-failed");
+        assert_eq!(summary["concepts"][0]["enabled"], true);
+        assert_eq!(summary["concepts"][0]["notify_only"], false);
+        assert_eq!(
+            summary["concepts"][0]["targets"],
+            serde_json::json!(["code_viewer"])
+        );
+        assert_eq!(summary["concepts"][1]["name"], "notify-done");
+        assert_eq!(summary["concepts"][1]["notify_only"], true);
+        assert_eq!(summary["concepts"][1]["targets"], serde_json::json!([]));
         assert_eq!(summary["profiles"][0]["tiles"], 1);
         assert_eq!(summary["build"], serde_json::json!(["make", "build"]));
+    }
+
+    /// The stored concept is the validated TOML entry as JSON — the GUI and
+    /// the engine read exactly what the manifest validator approved, whose
+    /// closed key set means nothing reached the record that the engine would
+    /// not accept.
+    #[test]
+    fn concept_records_serialize_the_validated_entries() {
+        let manifest = parse_manifest(
+            r#"
+id = "owner/repo"
+name = "Demo"
+version = "1.0.0"
+min_gpty_version = "0.5.0"
+
+[[concepts]]
+name = "cat"
+trigger = "^cat\\s"
+conditions = ["\\.rs$"]
+actions = [{target = "code_viewer"}]
+"#,
+        )
+        .unwrap();
+        let records = concept_records(&manifest);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["name"], "cat");
+        assert_eq!(records[0]["trigger"], "^cat\\s");
+        assert_eq!(records[0]["conditions"], serde_json::json!(["\\.rs$"]));
+        assert_eq!(records[0]["actions"][0]["target"], "code_viewer");
+        assert_eq!(
+            records[0]["actions"][0]
+                .as_object()
+                .expect("an action is an object")
+                .len(),
+            1,
+            "the action carries exactly the closed key set: {:?}",
+            records[0]
+        );
     }
 
     /// The review answers "what would this profile start": the distinct

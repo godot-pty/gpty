@@ -48,6 +48,11 @@ pub const MAX_PROFILE_TILES: usize = 64;
 /// The engine's own concept cap (`gpty_core::concept::MAX_CONCEPTS`) — a
 /// manifest cannot exceed what the engine will load.
 pub const MAX_CONCEPTS: usize = 128;
+/// The engine parser's own caps for one concept entry
+/// (`concepts_from_json`): the manifest validator, the store reader, and the
+/// engine all judge a name and a trigger by the same numbers.
+pub const MAX_CONCEPT_NAME_LEN: usize = 256;
+pub const MAX_CONCEPT_TRIGGER_LEN: usize = 1024;
 
 /// Identifier shapes.
 pub const MAX_NAME_LEN: usize = 64;
@@ -664,17 +669,17 @@ fn parse_concepts(table: &toml::Table) -> ManifestResult<Vec<toml::Value>> {
 fn validate_concept_entry(entry: &toml::Table, path: &str) -> ManifestResult<()> {
     reject_unknown_keys(entry, CONCEPT_KEYS, path)?;
     let name = required_string(entry, "name", path)?;
-    if name.is_empty() || name.chars().count() > 256 {
+    if name.is_empty() || name.chars().count() > MAX_CONCEPT_NAME_LEN {
         return Err(ManifestError::at(
             &format!("{path}.name"),
-            "must be 1-256 characters",
+            &format!("must be 1-{MAX_CONCEPT_NAME_LEN} characters"),
         ));
     }
     let trigger = required_string(entry, "trigger", path)?;
-    if trigger.is_empty() || trigger.chars().count() > 1024 {
+    if trigger.is_empty() || trigger.chars().count() > MAX_CONCEPT_TRIGGER_LEN {
         return Err(ManifestError::at(
             &format!("{path}.trigger"),
-            "must be 1-1024 characters",
+            &format!("must be 1-{MAX_CONCEPT_TRIGGER_LEN} characters"),
         ));
     }
     if let Some(v) = entry.get("enabled")

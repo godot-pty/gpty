@@ -1446,9 +1446,9 @@ func _show_plugin_review(id: int, params: Dictionary, timeout_ms: int):
 		_finish_plugin_review(id)
 		GptyTerminal.respond_ipc(id, true, JSON.stringify({"accepted": true}))
 		# The CLI only moves the clone into place after it reads this answer,
-		# so the installed profiles are not on disk yet — pick them up once
-		# they are (same wait the deferred concept push uses).
-		_refresh_plugin_profiles_deferred()
+		# so the installed profiles and concepts are not on disk yet — pick
+		# them up once they are (same wait the deferred concept push uses).
+		_refresh_plugin_content_deferred()
 	)
 	dialog.canceled.connect(func():
 		_finish_plugin_review(id)
@@ -1574,17 +1574,18 @@ func _push_concepts_deferred():
 		return
 	ConceptManager._push_to_rust()
 
-## Re-read the installed-plugin profiles once the CLI has had time to move the
-## accepted clone into place and write its store record. Called from the
-## install review's accept path — refreshing immediately would read the store
-## before the install exists.
-func _refresh_plugin_profiles_deferred():
+## Re-read the installed plugins' content — profiles and concepts — once the
+## CLI has had time to move the accepted clone into place and write its store
+## record. Called from the install review's accept path; refreshing
+## immediately would read the store before the install exists.
+func _refresh_plugin_content_deferred():
 	await get_tree().create_timer(2.0).timeout
 	# The workspace may have been torn down (tests, quick quit) while waiting;
 	# resuming on a freed instance would raise a script error.
 	if not is_instance_valid(self) or not is_inside_tree():
 		return
 	ProfileManager.refresh_plugin_profiles()
+	ConceptManager.refresh_plugin_concepts()
 
 func get_terminal_for_ffi() -> GptyTerminal:
 	for t in _tm.tiles:

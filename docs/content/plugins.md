@@ -4,9 +4,13 @@ weight: 2
 ---
 
 A gpty plugin is a repository containing a `gpty-plugin.toml` manifest. It can
-ship pure data — profiles, concepts, event subscriptions — or name programs to
-run, and the manifest schema is the plugin-manifest section of the
-[agent guide](/docs/agents/). Installing one is explicit:
+ship pure data — profiles (named layouts) and concepts (terminal-output
+triggers), both delivered to the running GUI — or name programs to run. Its
+event subscriptions and link handlers are declared and shown in the install
+review, but no runtime consumes them yet: both would be execution paths, and
+wiring them is a separate trust decision. The manifest schema is the
+plugin-manifest section of the [agent guide](/docs/agents/). Installing one is
+explicit:
 
 ```sh
 gpty plugin install <id>

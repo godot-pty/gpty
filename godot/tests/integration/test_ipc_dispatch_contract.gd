@@ -22,6 +22,11 @@ func before_all():
 	SettingsManager.cfg_shell_command = SettingsManager.default_shell_command()
 	SettingsManager.cfg_default_rows = 24
 	SettingsManager.cfg_default_cols = 80
+	# The plugin seams stay off the real store for the whole script: the
+	# `pluginsChanged` arm and the deferred install refresh both re-read the
+	# concept set now, and a dev machine's plugins are not this test's input.
+	ConceptManager.plugin_concepts_source = func(): return "[]"
+	ConceptManager.refresh_plugin_concepts()
 	_ws = WorkspaceScript.new()
 	add_child(_ws)
 	_ws.size = Vector2(1200, 800)
@@ -34,6 +39,8 @@ func after_all():
 	remove_child(_ws)
 	_ws.free()
 	_ws = null
+	ConceptManager.plugin_concepts_source = Callable()
+	ConceptManager._plugin_concept_entries = []
 	MockAutoloads.teardown()
 
 func _spawn(type_name: String) -> Control:
@@ -318,7 +325,7 @@ func test_accepted_plugin_profiles_are_read_after_the_clone_lands():
 		"tiles": [{"col": 0, "row": 0, "cspan": 60, "rspan": 60,
 			"settings": {"type": "code_viewer"}}],
 	}])
-	_ws._refresh_plugin_profiles_deferred()
+	_ws._refresh_plugin_content_deferred()
 	assert_true(ProfileManager.find_profile("contract-installed").is_empty(),
 		"the refresh must wait for the install to land, not read immediately")
 
@@ -331,3 +338,38 @@ func test_accepted_plugin_profiles_are_read_after_the_clone_lands():
 
 	ProfileManager.plugin_profiles_source = func(): return "[]"
 	ProfileManager.refresh_plugin_profiles()
+
+func test_accepted_plugin_concepts_are_read_after_the_clone_lands():
+	# The concept half of the same deferred read: the CLI writes the record
+	# only after the human answers, so the concept set has to be picked up on
+	# the same timer, from the same record.
+	ConceptManager.plugin_concepts_source = func(): return "[]"
+	ConceptManager.refresh_plugin_concepts()
+
+	ConceptManager.plugin_concepts_source = func(): return JSON.stringify([{
+		"plugin_id": "godot-pty/gpty-nvim", "revision": "deadbeef1234",
+		"name": "contract-concept",
+		"concept": {"name": "contract-concept", "trigger": "^contract",
+			"actions": [{"target": "code_viewer"}]},
+	}])
+	_ws._refresh_plugin_content_deferred()
+	assert_eq(ConceptManager.plugin_sources().size(), 0,
+		"the refresh must wait for the install to land, not read immediately")
+
+	await get_tree().create_timer(2.1).timeout
+	assert_true(ConceptManager.plugin_sources().has("contract-concept"),
+		"the deferred refresh must pick up the installed plugin's concepts")
+	assert_eq(ConceptManager.plugin_sources()["contract-concept"].get("plugin_id"),
+		"godot-pty/gpty-nvim", "the rule keeps its provenance")
+	assert_not_null(
+		_find_concept(ConceptManager.get_concepts(), "contract-concept"),
+		"the rule must reach the merged set the engine is pushed")
+
+	ConceptManager.plugin_concepts_source = func(): return "[]"
+	ConceptManager.refresh_plugin_concepts()
+
+func _find_concept(concepts: Array, name: String) -> Dictionary:
+	for c in concepts:
+		if c is Dictionary and c.get("name", "") == name:
+			return c
+	return {}

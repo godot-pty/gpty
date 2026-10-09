@@ -6,10 +6,11 @@
 //! `data_dir()/plugins/<id>` and the per-plugin runtime dirs under
 //! `state_dir()/plugins/<id>`.
 //!
-//! A record also carries the profiles the installed revision declared — name
-//! plus tiles, as JSON. The store is the GUI's read model: the CLI parsed and
-//! validated the manifest at install time, so the GUI reads the profiles out
-//! of the record instead of parsing TOML itself.
+//! A record also carries the content the installed revision declared, as
+//! JSON: the profiles (name plus tiles) and the concepts (the validated
+//! engine entries). The store is the GUI's read model: the CLI parsed and
+//! validated the manifest at install time, so the GUI reads these out of the
+//! record instead of parsing TOML itself.
 //!
 //! Writes are atomic — a random sibling temp name, mode 0600, renamed over
 //! the target — mirroring `BasePersistenceManager._write_file`: an in-place
@@ -23,7 +24,10 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::plugin_manifest::{MAX_NAME_LEN, valid_plugin_id};
+use crate::plugin_manifest::{
+    CONCEPT_KEYS, MAX_CONCEPT_NAME_LEN, MAX_CONCEPT_TRIGGER_LEN, MAX_CONCEPTS, MAX_NAME_LEN,
+    valid_plugin_id,
+};
 use gpty_ipc::transport;
 
 /// The most plugin records the store keeps. Mirrors the manifest's own
@@ -43,6 +47,10 @@ pub const MAX_PROFILE_RECORDS: usize = 64;
 pub const MAX_PROFILE_TILES: usize = 64;
 /// A stored profile name, at the manifest's own `name` cap.
 pub const MAX_PROFILE_NAME_LEN: usize = MAX_NAME_LEN;
+/// The most concepts one record carries — the engine's own cap, which
+/// `plugin_manifest::MAX_CONCEPTS` mirrors: what a manifest may declare is
+/// what a record may hold.
+pub const MAX_CONCEPT_RECORDS: usize = MAX_CONCEPTS;
 
 /// One profile a plugin ships: its name and its tiles.
 ///
@@ -66,6 +74,11 @@ pub struct PluginRecord {
     /// ships none, and for records written before profiles were stored (the
     /// reader tolerates the missing key).
     pub profiles: Vec<PluginProfileRecord>,
+    /// The concepts the installed revision declared, as the validated JSON
+    /// entries the engine's own parser accepted. Empty for a plugin that
+    /// ships none, and for records written before concepts were stored (the
+    /// reader tolerates the missing key).
+    pub concepts: Vec<serde_json::Value>,
 }
 
 /// A store-level failure. Never a validation of manifest *content* — that is
@@ -147,20 +160,22 @@ impl PluginStore {
     }
 
     /// Install or re-install `id` at `revision`, replacing the stored
-    /// `profiles`. A re-install keeps the existing `enabled` flag — a plugin
-    /// the user disabled stays disabled across an upgrade — and refreshes
-    /// `installed_at`. The profiles follow the revision: they are what the
-    /// installed content declares, so an upgrade must not leave the previous
-    /// revision's profiles readable.
+    /// `profiles` and `concepts`. A re-install keeps the existing `enabled`
+    /// flag — a plugin the user disabled stays disabled across an upgrade —
+    /// and refreshes `installed_at`. The content follows the revision: it is
+    /// what the installed content declares, so an upgrade must not leave the
+    /// previous revision's profiles or concepts readable.
     pub fn upsert(
         &self,
         id: &str,
         revision: &str,
         profiles: &[PluginProfileRecord],
+        concepts: &[serde_json::Value],
     ) -> StoreResult<PluginRecord> {
         validate_id(id)?;
         validate_revision(revision)?;
         validate_profiles(profiles)?;
+        validate_concepts(concepts)?;
         let mut records = self.records()?;
         if let Some(slot) = records.iter_mut().find(|record| record.id == id) {
             // A re-install keeps the existing enabled flag — a plugin the
@@ -168,6 +183,7 @@ impl PluginStore {
             slot.revision = revision.to_string();
             slot.installed_at = now_secs();
             slot.profiles = profiles.to_vec();
+            slot.concepts = concepts.to_vec();
         } else {
             if records.len() >= MAX_PLUGINS {
                 return Err(StoreError(format!(
@@ -180,6 +196,7 @@ impl PluginStore {
                 enabled: true,
                 installed_at: now_secs(),
                 profiles: profiles.to_vec(),
+                concepts: concepts.to_vec(),
             });
         }
         self.write_records(&records)?;
@@ -244,7 +261,14 @@ fn parse_record(entry: &serde_json::Value) -> Result<PluginRecord, String> {
     let Some(table) = entry.as_object() else {
         return Err("not an object".into());
     };
-    let known = ["id", "revision", "enabled", "installed_at", "profiles"];
+    let known = [
+        "id",
+        "revision",
+        "enabled",
+        "installed_at",
+        "profiles",
+        "concepts",
+    ];
     for key in table.keys() {
         if !known.contains(&key.as_str()) {
             return Err(format!("unknown key `{key}`"));
@@ -274,12 +298,18 @@ fn parse_record(entry: &serde_json::Value) -> Result<PluginRecord, String> {
         Some(value) => parse_profiles(value)?,
         None => Vec::new(),
     };
+    // The same tolerance for records written before concepts were stored.
+    let concepts = match table.get("concepts") {
+        Some(value) => parse_concepts(value)?,
+        None => Vec::new(),
+    };
     Ok(PluginRecord {
         id: id.to_string(),
         revision: revision.to_string(),
         enabled,
         installed_at,
         profiles,
+        concepts,
     })
 }
 
@@ -349,6 +379,76 @@ fn validate_profiles(profiles: &[PluginProfileRecord]) -> StoreResult<()> {
     for profile in profiles {
         check_profile_shape(&profile.name, &profile.tiles)
             .map_err(|what| StoreError(format!("invalid profile `{}`: {what}", profile.name)))?;
+    }
+    Ok(())
+}
+
+/// The `concepts` array of a record: the entries `parse_manifest` validated
+/// and the engine parser accepted, checked so the file cannot describe
+/// anything the GUI would not be able to key, match, or display.
+fn parse_concepts(value: &serde_json::Value) -> Result<Vec<serde_json::Value>, String> {
+    let Some(entries) = value.as_array() else {
+        return Err("`concepts` is not an array".into());
+    };
+    if entries.len() > MAX_CONCEPT_RECORDS {
+        return Err(format!("more than {MAX_CONCEPT_RECORDS} concepts"));
+    }
+    for (i, entry) in entries.iter().enumerate() {
+        check_concept_shape(entry).map_err(|what| format!("concept {i}: {what}"))?;
+    }
+    Ok(entries.clone())
+}
+
+/// The shape a concept entry has to satisfy, shared by the reader and the
+/// write path: a record the reader would refuse must never be written.
+///
+/// The entry travels as JSON — `parse_manifest` held it to the engine's
+/// vocabulary and the engine parser runs again on push — so this checks what
+/// the *store* and the GUI must be able to trust: the object shape, the
+/// closed key set (`CONCEPT_KEYS`, the same set the manifest enforces), and
+/// the identity fields the GUI keys by and the engine matches on.
+fn check_concept_shape(entry: &serde_json::Value) -> Result<(), String> {
+    let Some(table) = entry.as_object() else {
+        return Err("is not an object".into());
+    };
+    for key in table.keys() {
+        if !CONCEPT_KEYS.contains(&key.as_str()) {
+            return Err(format!("unknown key `{key}`"));
+        }
+    }
+    let name = table
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or("missing string `name`")?;
+    let chars = name.chars().count();
+    if chars == 0 || chars > MAX_CONCEPT_NAME_LEN {
+        return Err(format!(
+            "`name` must be 1-{MAX_CONCEPT_NAME_LEN} characters"
+        ));
+    }
+    let trigger = table
+        .get("trigger")
+        .and_then(|v| v.as_str())
+        .ok_or("missing string `trigger`")?;
+    let chars = trigger.chars().count();
+    if chars == 0 || chars > MAX_CONCEPT_TRIGGER_LEN {
+        return Err(format!(
+            "`trigger` must be 1-{MAX_CONCEPT_TRIGGER_LEN} characters"
+        ));
+    }
+    Ok(())
+}
+
+/// The write-path mirror of [`parse_concepts`]: what the reader would refuse
+/// is never written.
+fn validate_concepts(concepts: &[serde_json::Value]) -> StoreResult<()> {
+    if concepts.len() > MAX_CONCEPT_RECORDS {
+        return Err(StoreError(format!(
+            "at most {MAX_CONCEPT_RECORDS} concepts per plugin"
+        )));
+    }
+    for (i, entry) in concepts.iter().enumerate() {
+        check_concept_shape(entry).map_err(|what| StoreError(format!("concept {i}: {what}")))?;
     }
     Ok(())
 }
@@ -505,14 +605,18 @@ mod tests {
     #[test]
     fn upsert_roundtrips_and_refreshes_installed_at() {
         let store = make_store("roundtrip");
-        let first = store.upsert("owner/name", "abc123def456", &[]).unwrap();
+        let first = store
+            .upsert("owner/name", "abc123def456", &[], &[])
+            .unwrap();
         assert_eq!(first.id, "owner/name");
         assert_eq!(first.revision, "abc123def456");
         assert!(first.enabled);
 
         // An upgrade keeps the enabled flag and changes the revision.
         store.set_enabled("owner/name", false).unwrap();
-        let upgraded = store.upsert("owner/name", "fedcba987654", &[]).unwrap();
+        let upgraded = store
+            .upsert("owner/name", "fedcba987654", &[], &[])
+            .unwrap();
         assert_eq!(upgraded.revision, "fedcba987654");
         assert!(!upgraded.enabled, "an upgrade must not re-enable");
 
@@ -524,8 +628,8 @@ mod tests {
     #[test]
     fn remove_deletes_only_the_named_record() {
         let store = make_store("remove");
-        store.upsert("owner/a", "aaaaaaa", &[]).unwrap();
-        store.upsert("owner/b", "bbbbbbb", &[]).unwrap();
+        store.upsert("owner/a", "aaaaaaa", &[], &[]).unwrap();
+        store.upsert("owner/b", "bbbbbbb", &[], &[]).unwrap();
         assert!(store.remove("owner/a").unwrap());
         assert!(!store.remove("owner/a").unwrap());
         let ids: Vec<_> = store
@@ -541,7 +645,7 @@ mod tests {
     fn set_enabled_reports_unknown_ids() {
         let store = make_store("enable");
         assert_eq!(store.set_enabled("owner/x", true).unwrap(), None);
-        store.upsert("owner/x", "aaaaaaa", &[]).unwrap();
+        store.upsert("owner/x", "aaaaaaa", &[], &[]).unwrap();
         let record = store.set_enabled("owner/x", false).unwrap().unwrap();
         assert!(!record.enabled);
     }
@@ -550,9 +654,9 @@ mod tests {
     fn ids_are_validated_before_any_write() {
         let store = make_store("bad-id");
         // A path separator in an id must never reach a path join.
-        assert!(store.upsert("owner/../etc", "aaaaaaa", &[]).is_err());
-        assert!(store.upsert("Owner/UPPER", "aaaaaaa", &[]).is_err());
-        assert!(store.upsert("nohyphen", "aaaaaaa", &[]).is_err());
+        assert!(store.upsert("owner/../etc", "aaaaaaa", &[], &[]).is_err());
+        assert!(store.upsert("Owner/UPPER", "aaaaaaa", &[], &[]).is_err());
+        assert!(store.upsert("nohyphen", "aaaaaaa", &[], &[]).is_err());
         assert!(store.remove("owner/../etc").is_err());
         assert!(store.set_enabled("../../x", true).is_err());
         assert_eq!(store.records().unwrap(), Vec::new());
@@ -561,10 +665,14 @@ mod tests {
     #[test]
     fn revisions_are_validated() {
         let store = make_store("bad-rev");
-        assert!(store.upsert("owner/x", "short", &[]).is_err());
-        assert!(store.upsert("owner/x", "has a space in it", &[]).is_err());
+        assert!(store.upsert("owner/x", "short", &[], &[]).is_err());
+        assert!(
+            store
+                .upsert("owner/x", "has a space in it", &[], &[])
+                .is_err()
+        );
         let long = "a".repeat(MAX_REVISION_LEN + 1);
-        assert!(store.upsert("owner/x", &long, &[]).is_err());
+        assert!(store.upsert("owner/x", &long, &[], &[]).is_err());
         assert_eq!(store.records().unwrap(), Vec::new());
     }
 
@@ -575,7 +683,7 @@ mod tests {
         let err = store.records().unwrap_err();
         assert!(err.0.contains("corrupt"), "error names the file: {err}");
         // A corrupt store must not be silently overwritten by a later op.
-        assert!(store.upsert("owner/x", "aaaaaaa", &[]).is_err());
+        assert!(store.upsert("owner/x", "aaaaaaa", &[], &[]).is_err());
     }
 
     #[test]
@@ -611,12 +719,12 @@ mod tests {
         let write_store = make_store("cap-write");
         for i in 0..MAX_PLUGINS {
             write_store
-                .upsert(&format!("owner/p{i}"), "aaaaaaa", &[])
+                .upsert(&format!("owner/p{i}"), "aaaaaaa", &[], &[])
                 .unwrap();
         }
         assert!(
             write_store
-                .upsert("owner/overflow", "aaaaaaa", &[])
+                .upsert("owner/overflow", "aaaaaaa", &[], &[])
                 .is_err()
         );
     }
@@ -624,7 +732,7 @@ mod tests {
     #[test]
     fn writes_are_atomic_and_leave_no_temp_files() {
         let store = make_store("atomic");
-        store.upsert("owner/x", "aaaaaaa", &[]).unwrap();
+        store.upsert("owner/x", "aaaaaaa", &[], &[]).unwrap();
         let dir = store.path.parent().unwrap().to_path_buf();
         let leftovers: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
@@ -636,7 +744,7 @@ mod tests {
             "temp files left behind: {leftovers:?}"
         );
         // A second write replaces the target, not the temp name.
-        store.upsert("owner/y", "bbbbbbb", &[]).unwrap();
+        store.upsert("owner/y", "bbbbbbb", &[], &[]).unwrap();
         assert_eq!(store.records().unwrap().len(), 2);
     }
 
@@ -645,7 +753,7 @@ mod tests {
     fn store_file_is_private() {
         use std::os::unix::fs::PermissionsExt;
         let store = make_store("mode");
-        store.upsert("owner/x", "aaaaaaa", &[]).unwrap();
+        store.upsert("owner/x", "aaaaaaa", &[], &[]).unwrap();
         let mode = std::fs::metadata(store.path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "the store holds install records");
     }
@@ -679,7 +787,7 @@ mod tests {
             },
         ];
         let record = store
-            .upsert("owner/omp", "abc123def456", &profiles)
+            .upsert("owner/omp", "abc123def456", &profiles, &[])
             .unwrap();
         assert_eq!(record.profiles, profiles);
         // The reloaded record is what the strict reader built out of the file.
@@ -695,7 +803,7 @@ mod tests {
         // A re-install replaces the profiles with the new revision's, keeping
         // the enabled flag: a record must not keep serving the old tiles.
         store.set_enabled("owner/omp", false).unwrap();
-        let upgraded = store.upsert("owner/omp", "fedcba987654", &[]).unwrap();
+        let upgraded = store.upsert("owner/omp", "fedcba987654", &[], &[]).unwrap();
         assert!(upgraded.profiles.is_empty());
         assert!(!upgraded.enabled, "an upgrade must not re-enable");
 
@@ -708,14 +816,18 @@ mod tests {
             .collect();
         assert!(
             store
-                .upsert("owner/omp", "fedcba987654", &too_many)
+                .upsert("owner/omp", "fedcba987654", &too_many, &[])
                 .is_err()
         );
         let unnamed = vec![PluginProfileRecord {
             name: String::new(),
             tiles: Vec::new(),
         }];
-        assert!(store.upsert("owner/omp", "fedcba987654", &unnamed).is_err());
+        assert!(
+            store
+                .upsert("owner/omp", "fedcba987654", &unnamed, &[])
+                .is_err()
+        );
     }
 
     /// A record written before profiles were stored has no `profiles` key;
@@ -736,7 +848,7 @@ mod tests {
             name: "P".into(),
             tiles: vec![serde_json::json!({"settings": {"type": "terminal"}})],
         }];
-        let updated = store.upsert("owner/x", "bbbbbbb", &profiles).unwrap();
+        let updated = store.upsert("owner/x", "bbbbbbb", &profiles, &[]).unwrap();
         assert_eq!(updated.profiles, profiles);
     }
 
@@ -846,6 +958,158 @@ mod tests {
                 .unwrap_err()
                 .0
                 .contains(&format!("more than {MAX_PROFILE_TILES} tiles"))
+        );
+    }
+
+    /// The concepts a plugin ships survive a save/load cycle as JSON — they
+    /// are the GUI's and the engine's only view of the rules — and a
+    /// re-install replaces them, like the profiles.
+    #[test]
+    fn concepts_roundtrip_and_follow_the_revision() {
+        let store = make_store("concepts-roundtrip");
+        let concepts = vec![
+            serde_json::json!({
+                "name": "cat",
+                "trigger": "^cat\\s+",
+                "actions": [{"target": "code_viewer"}],
+            }),
+            serde_json::json!({
+                "name": "notify",
+                "trigger": "done",
+                "capture_mode": "single_line",
+                "enabled": false,
+            }),
+        ];
+        let record = store
+            .upsert("owner/data", "abc123def456", &[], &concepts)
+            .unwrap();
+        assert_eq!(record.concepts, concepts);
+        let reloaded = store.record("owner/data").unwrap().unwrap();
+        assert_eq!(reloaded.concepts, concepts);
+        assert_eq!(reloaded.concepts[0]["actions"][0]["target"], "code_viewer");
+
+        // A re-install replaces the concepts with the new revision's: a
+        // record must not keep serving the old revision's rules.
+        store.set_enabled("owner/data", false).unwrap();
+        let upgraded = store
+            .upsert("owner/data", "fedcba987654", &[], &[])
+            .unwrap();
+        assert!(upgraded.concepts.is_empty());
+        assert!(!upgraded.enabled, "an upgrade must not re-enable");
+    }
+
+    /// A record written before concepts were stored has no `concepts` key; it
+    /// must read as "this plugin ships none", not as a corrupt store.
+    #[test]
+    fn missing_concepts_key_reads_as_empty() {
+        let store = make_store("concepts-absent");
+        std::fs::write(
+            &store.path,
+            r#"{"plugins": [{"id": "owner/x", "revision": "aaaaaaa", "enabled": true, "installed_at": 1}]}"#,
+        )
+        .unwrap();
+        assert!(store.records().unwrap()[0].concepts.is_empty());
+    }
+
+    /// Every malformed `concepts` shape the reader can meet is a named error —
+    /// the store never silently drops a record's concepts — and the write
+    /// path refuses what the reader would refuse.
+    #[test]
+    fn malformed_concept_shapes_are_rejected() {
+        let cases: [(&str, serde_json::Value, &str); 6] = [
+            ("not-array", serde_json::json!("cat"), "not an array"),
+            (
+                "entry-not-object",
+                serde_json::json!(["cat"]),
+                "is not an object",
+            ),
+            (
+                "unknown-key",
+                serde_json::json!([{"name": "cat", "trigger": "x", "cmd": "rm -rf /"}]),
+                "unknown key `cmd`",
+            ),
+            (
+                "name-empty",
+                serde_json::json!([{"name": "", "trigger": "x"}]),
+                "`name` must be 1-",
+            ),
+            (
+                "trigger-missing",
+                serde_json::json!([{"name": "cat"}]),
+                "missing string `trigger`",
+            ),
+            (
+                "trigger-too-long",
+                serde_json::json!([{
+                    "name": "cat",
+                    "trigger": "t".repeat(MAX_CONCEPT_TRIGGER_LEN + 1),
+                }]),
+                "`trigger` must be 1-",
+            ),
+        ];
+        for (label, concepts, expected) in cases {
+            let store = make_store(&format!("concepts-shape-{label}"));
+            std::fs::write(
+                &store.path,
+                serde_json::to_vec(&serde_json::json!({"plugins": [{
+                    "id": "owner/x",
+                    "revision": "aaaaaaa",
+                    "enabled": true,
+                    "installed_at": 1,
+                    "concepts": concepts,
+                }]}))
+                .unwrap(),
+            )
+            .unwrap();
+            let error = store.records().unwrap_err();
+            assert!(
+                error.0.contains(expected),
+                "case `{label}` must be named by `{expected}`: {error}"
+            );
+
+            if let Some(entries) = concepts.as_array() {
+                let write_store = make_store(&format!("concepts-write-{label}"));
+                assert!(
+                    write_store
+                        .upsert("owner/x", "aaaaaaa", &[], entries)
+                        .is_err(),
+                    "the write path must refuse `{label}`"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cap_on_stored_concept_count() {
+        let store = make_store("concepts-cap");
+        let concepts: Vec<serde_json::Value> = (0..=MAX_CONCEPT_RECORDS)
+            .map(|i| serde_json::json!({"name": format!("c{i}"), "trigger": "x"}))
+            .collect();
+        std::fs::write(
+            &store.path,
+            serde_json::to_vec(&serde_json::json!({"plugins": [{
+                "id": "owner/x",
+                "revision": "aaaaaaa",
+                "enabled": true,
+                "installed_at": 1,
+                "concepts": concepts,
+            }]}))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            store
+                .records()
+                .unwrap_err()
+                .0
+                .contains(&format!("more than {MAX_CONCEPT_RECORDS} concepts"))
+        );
+        let too_many: Vec<serde_json::Value> = (0..=MAX_CONCEPT_RECORDS)
+            .map(|i| serde_json::json!({"name": format!("c{i}"), "trigger": "x"}))
+            .collect();
+        assert!(
+            store.upsert("owner/x", "aaaaaaa", &[], &too_many).is_err(),
+            "the write path enforces the same cap"
         );
     }
 }

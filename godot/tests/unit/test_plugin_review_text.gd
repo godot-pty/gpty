@@ -60,6 +60,30 @@ func test_a_wrong_typed_field_cannot_empty_the_dialog():
 		"the identity block survives a wrong-typed field: " + text)
 	assert_gt(text.length(), 0, "the dialog is never empty")
 
+func test_concepts_are_named_with_what_they_would_do():
+	# A concept is a trigger, so the dialog says what each rule would do
+	# rather than counting them: a capture names the pane types it routes
+	# terminal output to, a notify-only rule publishes and captures nothing.
+	var text := PluginReviewText.build({
+		"id": "owner/demo",
+		"concepts": [
+			{"name": "build-failed", "enabled": true, "notify_only": false,
+				"targets": ["code_viewer"]},
+			{"name": "done", "enabled": false, "notify_only": true, "targets": []},
+		],
+	})
+	assert_true(text.contains("build-failed: captures to code_viewer"), text)
+	assert_true(text.contains("done: notify only (ships disabled)"),
+		"a notify-only rule that ships disabled says both: " + text)
+	assert_false(text.contains("Concepts:"),
+		"the rules are named, not counted: " + text)
+
+func test_a_bare_concept_count_still_renders():
+	# An older CLI sends only the count (the field was a number before the
+	# rules were named); the section must not vanish on a mixed install.
+	var text := PluginReviewText.build({"id": "owner/demo", "concepts": 3})
+	assert_true(text.contains("Concepts: 3"), text)
+
 func test_fields_are_capped_and_control_characters_stripped():
 	# A hostile name field: newlines would add lines the builder never wrote,
 	# and unbounded length would bloat the dialog.

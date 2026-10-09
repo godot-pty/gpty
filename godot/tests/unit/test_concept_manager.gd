@@ -6,10 +6,16 @@ func before_each():
 	MockAutoloads.setup()
 	_scene = TestScene.create()
 	add_child(_scene)
+	# The autoload reads the real plugin store once at init; every test owns
+	# its plugin layer explicitly (an empty seam unless the test sets one).
+	ConceptManager.plugin_concepts_source = func(): return "[]"
+	ConceptManager._plugin_concept_entries = []
 
 func after_each():
 	for c in _scene.get_children():
 		c.queue_free()
+	ConceptManager.plugin_concepts_source = Callable()
+	ConceptManager._plugin_concept_entries = []
 	MockAutoloads.teardown()
 	if _scene:
 		_scene.queue_free()
@@ -427,6 +433,91 @@ func test_save_state_omits_an_empty_graph_block():
 		"a graph with nothing to store must not add a key to the file")
 	assert_eq(saved["concepts"].size(), 1)
 
+# ── Installed-plugin concepts ──────────────────────────────────────────
+
+func test_plugin_concepts_merge_between_defaults_and_user_rules():
+	# A user rule of the user's own, so the three layers have a row each.
+	ConceptManager.save_concepts([_rule("user_rule", "^user")])
+	_seed_plugin_concepts([_plugin_entry("acme/rules", "plugin_rule", "^plugin")])
+	var merged = ConceptManager._merge_concepts()
+	var at := _index_by_name(merged)
+	assert_true(at.has("plugin_rule"), "the plugin's rule must reach the merged set")
+	# Precedence is the merge order the engine runs: shipped defaults, then
+	# installed content, then the user's own rules.
+	var default_at := -1
+	var defaults_at := ConceptManager._default_names(ConceptManager._load_defaults())
+	for i in merged.size():
+		if defaults_at.has(str(merged[i].get("name", ""))):
+			default_at = i
+			break
+	assert_true(default_at >= 0, "the shipped defaults must be in the merged set")
+	assert_true(default_at < int(at["plugin_rule"]), "defaults rank before plugin rules")
+	assert_true(int(at["plugin_rule"]) < int(at["user_rule"]), "plugin rules rank before user rules")
+	assert_eq(ConceptManager.plugin_sources().get("plugin_rule", {}).get("plugin_id"), "acme/rules")
+
+func test_a_toggle_overlays_a_plugin_concept_instead_of_duplicating_it():
+	_seed_plugin_concepts([_plugin_entry("acme/rules", "watch", "^watch")])
+	assert_true(ConceptManager.toggle_concept("watch"), "the toggle answers success")
+	var merged = ConceptManager._merge_concepts()
+	var rows: Array = merged.filter(func(c): return c is Dictionary and c.get("name", "") == "watch")
+	assert_eq(rows.size(), 1, "a toggle must change the plugin's rule, not add a second one")
+	assert_eq(rows[0].get("enabled", true), false, "the toggle must disable it")
+	assert_eq(rows[0].get("trigger", ""), "^watch", "the plugin's trigger must survive the overlay")
+	assert_true(ConceptManager.plugin_sources().has("watch"),
+		"it is still the plugin's rule, so the list still says where it came from")
+	# And back on again through the same overlay.
+	ConceptManager.toggle_concept("watch")
+	assert_eq(_find_by_name(ConceptManager._merge_concepts(), "watch").get("enabled", false), true)
+
+func test_a_plugin_name_yields_to_defaults_and_to_earlier_plugins():
+	var defaults = ConceptManager._load_defaults()
+	assert_gt(defaults.size(), 0, "the shipped defaults are the other name holder here")
+	var base: String = str(defaults[0].get("name", ""))
+	_seed_plugin_concepts([
+		_plugin_entry("acme/first", base, "^first"),
+		_plugin_entry("acme/second", base, "^second"),
+	])
+	var sources := ConceptManager.plugin_sources()
+	assert_true(sources.has("%s (2)" % base),
+		"the first plugin yields to the shipped default: %s" % str(sources.keys()))
+	assert_true(sources.has("%s (3)" % base),
+		"the second yields to the first: %s" % str(sources.keys()))
+	assert_eq(sources["%s (2)" % base].get("plugin_id"), "acme/first")
+	assert_eq(sources["%s (3)" % base].get("plugin_id"), "acme/second")
+	assert_false(sources.has(base), "the shipped default keeps its bare name")
+
+func test_unusable_plugin_answers_are_skipped_not_fatal():
+	_seed_plugin_concepts([
+		"not an entry",
+		{"plugin_id": "acme/x", "revision": "abc1234"},
+		{"plugin_id": "acme/x", "revision": "abc1234", "concept": "nope"},
+		{"plugin_id": "acme/x", "revision": "abc1234", "concept": {"trigger": "no-name"}},
+		{"plugin_id": "acme/x", "revision": "abc1234", "concept": {"name": "no-trigger"}},
+		_plugin_entry("acme/x", "good", "^good"),
+	])
+	var sources := ConceptManager.plugin_sources()
+	assert_eq(sources.size(), 1, "only the usable entry survives: %s" % str(sources))
+	assert_true(sources.has("good"))
+
+	# An answer that is not JSON at all is the same contract: no plugin
+	# concepts, not an error thrown into the merge.
+	ConceptManager.plugin_concepts_source = func(): return "{not json"
+	ConceptManager.refresh_plugin_concepts()
+	assert_eq(ConceptManager.plugin_sources().size(), 0)
+	assert_gt(ConceptManager._merge_concepts().size(), 0,
+		"the shipped concepts still merge after a broken answer")
+
+func test_refresh_replaces_the_installed_set_and_emits():
+	watch_signals(ConceptManager)
+	_seed_plugin_concepts([_plugin_entry("acme/old", "old_rule", "^old")])
+	assert_signal_emitted(ConceptManager, "concepts_changed",
+		"every refresh must republish, so the engine push follows the store")
+	assert_true(ConceptManager.plugin_sources().has("old_rule"))
+	_seed_plugin_concepts([_plugin_entry("acme/new", "new_rule", "^new")])
+	var sources := ConceptManager.plugin_sources()
+	assert_true(sources.has("new_rule"))
+	assert_false(sources.has("old_rule"), "the installed set replaces, never accumulates")
+
 # ── Helpers ────────────────────────────────────────────────────────────
 func _find_by_name(arr: Array, name: String):
 	for item in arr:
@@ -447,4 +538,21 @@ func _rule(concept_name: String, trigger: String) -> Dictionary:
 		"name": concept_name, "trigger": trigger, "enabled": true,
 		"capture_mode": "until_stop", "stop_timeout_ms": 300, "stop_on_input": true,
 		"actions": [{"target": "terminal"}],
+	}
+
+## Seed the plugin layer the way the FFI answers, then refresh — the seam
+## returns the same JSON `GptyTerminal.installed_plugin_concepts()` does.
+func _seed_plugin_concepts(entries: Array) -> void:
+	ConceptManager.plugin_concepts_source = func(): return JSON.stringify(entries)
+	ConceptManager.refresh_plugin_concepts()
+
+## One `installed_plugin_concepts()` entry: provenance beside the concept the
+## manifest declared.
+func _plugin_entry(plugin_id: String, concept_name: String, trigger: String) -> Dictionary:
+	return {
+		"plugin_id": plugin_id,
+		"revision": "abc123def456",
+		"name": concept_name,
+		"concept": {"name": concept_name, "trigger": trigger,
+			"actions": [{"target": "code_viewer"}]},
 	}

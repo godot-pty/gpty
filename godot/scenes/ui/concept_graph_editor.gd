@@ -236,7 +236,20 @@ func _load_from_manager() -> void:
 	for d in _defaults:
 		if d is Dictionary:
 			_opened_default_names.append(str(d.get("name", "")))
-	var canvas := ConceptGraphModel.build_canvas(ConceptManager.get_concepts(), ConceptManager.get_graph_state())
+	# Plugin-shipped rules stay off the canvas: the canvas authors the user's
+	# rules and the shipped defaults, and its save path (untouched → no entry,
+	# deleted → tombstone) is defined for exactly those two layers. A plugin
+	# rule is content that arrives and leaves with the plugin, so it belongs
+	# to the concepts list in Settings, where it can be toggled, edited (which
+	# takes it over as a user rule) or deleted without the canvas inventing a
+	# node whose save semantics the model deliberately lacks.
+	var plugin_names := ConceptManager.plugin_sources().keys()
+	var canvas_concepts: Array = []
+	for c in ConceptManager.get_concepts():
+		if c is Dictionary and plugin_names.has(str(c.get("name", ""))):
+			continue
+		canvas_concepts.append(c)
+	var canvas := ConceptGraphModel.build_canvas(canvas_concepts, ConceptManager.get_graph_state())
 	_nodes = canvas["nodes"]
 	_edges = canvas["edges"]
 	var positions: Dictionary = canvas["positions"]

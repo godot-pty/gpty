@@ -417,6 +417,13 @@ class Smoke:
     PLUGIN_REVISION = "0123456789abcdef0123456789abcdef01234567"
     PLUGIN_PROFILE = "Smoke Layout"
     PLUGIN_TILE_ID = "smoke-tile"
+    # The plugin's concept: the record carries it, the static FFI shapes it,
+    # and ConceptManager merges it into the set the engine matches with — all
+    # proven live below on whichever platform runs the smoke. Its trigger
+    # demands a digit the shell appends at runtime, so no echoed input line
+    # can match it and the event can only come from real output.
+    PLUGIN_CONCEPT = "smoke_plugin_concept"
+    PLUGIN_CONCEPT_TRIGGER = "SMOKE_PLUGIN_7Q2[0-9]"
 
     def state_dir(self) -> Path:
         """gpty's state directory, as `transport::state_dir()` resolves it."""
@@ -461,6 +468,13 @@ class Smoke:
                                 },
                             }
                         ],
+                    }
+                ],
+                "concepts": [
+                    {
+                        "name": self.PLUGIN_CONCEPT,
+                        "trigger": self.PLUGIN_CONCEPT_TRIGGER,
+                        "capture_mode": "single_line",
                     }
                 ],
             }
@@ -878,6 +892,49 @@ def main() -> int:
             )
         smoke.cli("kill-pane", viewer_id, "--json")
 
+        # ── a plugin's concept fires from real output ─────────────────
+        # The seeded plugin record also ships a concept, and the store is the
+        # GUI's read model: this proves the whole delivery path live — record →
+        # `installed_plugin_concepts()` → ConceptManager's merge → the engine
+        # push — because the event below can only come from a match, and the
+        # trigger demands a digit the shell appends at runtime, so no echoed
+        # input line can produce it.
+        smoke.enter("plugin concept from output")
+        concepts = smoke.result(
+            smoke.cli("concept", "list", "--json"), "concept list"
+        ).get("concepts", [])
+        smoke.require(
+            any(c.get("name") == smoke.PLUGIN_CONCEPT for c in concepts),
+            "the installed plugin's concept must be in the merged set",
+            [c.get("name") for c in concepts],
+        )
+        plugin_cmd = (
+            r"for /l %i in (1,1,1) do @echo SMOKE_PLUGIN_7Q2%i"
+            if WINDOWS
+            else "printf 'SMOKE_PLUGIN_7Q2%s\\n' 7"
+        )
+        smoke.cli("inject", pane_id, "--text", plugin_cmd, "--json")
+        plugin_matched = False
+        for _ in range(40):
+            events = smoke.result(
+                smoke.event_rpc(
+                    "eventsPoll", {"subscription_id": subscription, "limit": 64}
+                ),
+                "eventsPoll",
+            ).get("events", [])
+            if any(
+                e.get("type") == "concept" and e.get("name") == smoke.PLUGIN_CONCEPT
+                for e in events
+            ):
+                plugin_matched = True
+                break
+            time.sleep(0.5)
+        if not plugin_matched:
+            smoke.fail(
+                "a plugin's concept must fire from the child's output",
+                {"pane_tail": smoke.read_pane(pane_id, lines=20)[-400:]},
+            )
+
         # ── cli_view: a command's stdout streamed into a pane body ────
         # The pane runs argv directly (no shell, no PTY), so this step also
         # pins the two API halves that make it usable: `new-pane` carrying
@@ -981,6 +1038,14 @@ def main() -> int:
             smoke.PLUGIN_PROFILE not in names,
             "a running GUI must drop an uninstalled plugin's profile",
             names,
+        )
+        concepts = smoke.result(
+            smoke.cli("concept", "list", "--json"), "concept list"
+        ).get("concepts", [])
+        smoke.require(
+            not any(c.get("name") == smoke.PLUGIN_CONCEPT for c in concepts),
+            "a running GUI must drop an uninstalled plugin's concept",
+            [c.get("name") for c in concepts],
         )
 
         smoke.enter("teardown")

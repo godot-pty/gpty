@@ -27,6 +27,17 @@ const DRAFT_KINDS := ["trigger", "condition", "action"]
 
 signal concepts_changed
 
+## Concepts installed with a plugin, as the FFI shapes the store:
+## `[{plugin_id, revision, name, concept}]` for enabled plugins only, `[]`
+## when none. Never written back to CONCEPTS_FILE: the plugin owns them, and
+## they disappear with the plugin.
+var _plugin_concept_entries = []
+
+## Test seam, mirroring `ProfileManager.plugin_profiles_source`: when valid it
+## answers with the same JSON the FFI returns, so the plugin layer can be
+## exercised without an install.
+var plugin_concepts_source: Callable
+
 func _on_init():
 	# The concept store owns the push: the engine's set is process-wide, so one
 	# listener is right however many workspaces exist (a per-workspace connect
@@ -35,6 +46,10 @@ func _on_init():
 	# re-running init.
 	if not concepts_changed.is_connected(_push_to_rust):
 		concepts_changed.connect(_push_to_rust)
+	# Installed plugins' concepts are read before the first push; this is the
+	# one read that does not go through `refresh_plugin_concepts()`, whose
+	# emit would push synchronously during autoload init.
+	_plugin_concept_entries = _parse_plugin_concepts()
 	# Defer push — GDExtension may not be registered yet during autoload init
 	call_deferred("_push_to_rust")
 
@@ -61,6 +76,12 @@ func _push_to_rust():
 func _merge_concepts() -> Array:
 	var defaults = _load_defaults()
 	var user = _load_from_file()
+	# Installed plugins' concepts sit between the two, the order
+	# `ProfileManager.get_all_profiles` uses for builtins/plugin/user: shipped
+	# rules first, then installed content, then the user's own. Names are
+	# derived here rather than cached because they depend on the other plugin
+	# rows (two plugins can ship one name) and on the shipped defaults.
+	var plugins := _plugin_concept_rows()
 	# Build a name→index map for user concepts
 	var user_map := {}
 	for i in user.size():
@@ -85,13 +106,32 @@ func _merge_concepts() -> Array:
 			merged.append(entry)
 		else:
 			merged.append(d)
-	# Append user-only concepts (not in defaults)
+	# Plugin concepts carry the same user overlay a default does: a toggle
+	# writes a thin `{name, enabled}` and an edit writes a full entry, and
+	# both must change the plugin's rule rather than sit beside it as a
+	# duplicate (the row's name is what the overlay names).
+	for row in plugins:
+		var plugin_entry: Dictionary = row["concept"]
+		var name = plugin_entry.get("name", "")
+		if name in user_map:
+			var entry: Dictionary = plugin_entry.duplicate(true)
+			var u = user[user_map[name]]
+			if u is Dictionary:
+				for key in u.keys():
+					entry[key] = u[key]
+			merged.append(entry)
+		else:
+			merged.append(plugin_entry)
+	# Append user-only concepts (not in defaults, not a plugin's)
+	var spoken := _default_names(defaults)
+	for row in plugins:
+		spoken[str(row.get("name", ""))] = true
 	for i in user.size():
 		var c = user[i]
 		if not (c is Dictionary):
 			continue
 		# Already merged above — skip
-		if c.get("name", "") in _default_names(defaults):
+		if c.get("name", "") in spoken:
 			continue
 		merged.append(c)
 	# Rewrite legacy observer targets — its active role is now Inspector.
@@ -107,11 +147,12 @@ func _merge_concepts() -> Array:
 ## Sort the merged concepts by the order the visual editor saved.
 ##
 ## A rule the canvas does not name keeps its merged position (shipped defaults
-## first, then user entries in file order) and is tried *after* the arranged
-## ones: a newly shipped default must never quietly take precedence over an
-## arrangement the user made — it appears on the canvas unranked the next time
-## the editor opens. A store with no `order` key is untouched, so a user who
-## never opened the editor gets exactly the order that shipped.
+## first, then installed-plugin rules, then user entries in file order) and is
+## tried *after* the arranged ones: a newly shipped default must never quietly
+## take precedence over an arrangement the user made — it appears on the
+## canvas unranked the next time the editor opens. A store with no `order` key
+## is untouched, so a user who never opened the editor gets exactly the order
+## that shipped.
 func _apply_canvas_order(concepts: Array, graph: Dictionary) -> Array:
 	var raw = graph.get("order", [])
 	if not (raw is Array) or raw.is_empty():
@@ -179,6 +220,86 @@ func _load_from_file() -> Array:
 ## Return merged concepts with enabled status for IPC/MCP.
 func get_concepts() -> Array:
 	return _merge_concepts()
+
+## Re-read the concepts installed plugins declare. The CLI is the only
+## manifest reader — it validated each entry against the engine's parser at
+## install time and the store record carries it — so nothing here parses
+## TOML. Emits `concepts_changed` exactly like a save does, so the engine
+## push and the Settings list both pick an install, disable or uninstall up
+## without a restart.
+func refresh_plugin_concepts():
+	_plugin_concept_entries = _parse_plugin_concepts()
+	concepts_changed.emit()
+
+## `{name: {plugin_id, revision}}` for every plugin-shipped concept, keyed by
+## the name the merged set carries. The Settings list uses it to say where a
+## rule came from; a shipped default or the user's own rule is absent.
+func plugin_sources() -> Dictionary:
+	var out := {}
+	for row in _plugin_concept_rows():
+		out[str(row.get("name", ""))] = {
+			"plugin_id": row.get("plugin_id", ""),
+			"revision": row.get("revision", ""),
+		}
+	return out
+
+## The installed plugins' concepts with their derived names and provenance, in
+## store order: `[{name, concept, plugin_id, revision}]`.
+##
+## Derived on demand, never cached: the names depend on the shipped defaults
+## and on the other plugin rows, and a name a plugin frees (an uninstall, or
+## a re-install under a new revision) must come back to whoever ships it next.
+## Only those two layers hold a name here — a *user* entry that names a
+## plugin rule is that rule's overlay, which the merge applies by name; if it
+## counted as a competing name instead, a toggle would rename the plugin's
+## rule out from under its own overlay and appear not to stick.
+func _plugin_concept_rows() -> Array:
+	# A parse failure leaves `null` here; the contract says "no plugin
+	# concepts", not "raise".
+	if not (_plugin_concept_entries is Array):
+		return []
+	var taken := _default_names(_load_defaults())
+	var rows: Array = []
+	for raw in _plugin_concept_entries:
+		if not (raw is Dictionary):
+			continue
+		var concept = raw.get("concept")
+		if not (concept is Dictionary):
+			continue
+		var base := str(concept.get("name", ""))
+		if base == "" or str(concept.get("trigger", "")) == "":
+			continue
+		var name := base
+		var n := 1
+		while taken.has(name):
+			n += 1
+			name = "%s (%d)" % [base, n]
+		taken[name] = true
+		var entry: Dictionary = concept.duplicate(true)
+		entry["name"] = name
+		rows.append({
+			"name": name,
+			"concept": entry,
+			"plugin_id": str(raw.get("plugin_id", "")),
+			"revision": str(raw.get("revision", "")),
+		})
+	return rows
+
+func _plugin_concepts_json() -> String:
+	if plugin_concepts_source.is_valid():
+		return str(plugin_concepts_source.call())
+	return str(GptyTerminal.installed_plugin_concepts())
+
+## Parse that answer. `null` for anything that is not JSON — the extension
+## answers `[]` when nothing is installed, so a parse failure means the store
+## or the binding is broken, not that no plugin ships concepts. Parsed
+## through `JSON.new()` rather than `JSON.parse_string` so a bad answer is a
+## value, not an engine error line.
+func _parse_plugin_concepts():
+	var j := JSON.new()
+	if j.parse(_plugin_concepts_json()) != OK:
+		return null
+	return j.get_data()
 
 ## Toggle a concept's enabled flag in the user overrides file.
 func toggle_concept(name: String) -> bool:

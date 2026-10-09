@@ -83,6 +83,41 @@ impl GptyTerminal {
         }))
     }
 
+    /// Concepts declared by the installed plugins, for the GUI's concept set.
+    ///
+    /// The concepts counterpart of `installed_plugin_profiles`: static for
+    /// the same reason (it describes the plugin store, not a terminal), it
+    /// answers `[]` without a word for a missing store, and anything else
+    /// that goes wrong is a warn and still `[]` — a GUI that cannot offer
+    /// concepts must not also fail to start.
+    ///
+    /// JSON array of `{plugin_id, revision, name, concept}`, one entry per
+    /// concept of every **enabled** plugin, in store order; `concept` is the
+    /// validated manifest entry (the engine's own key set), which the GUI
+    /// merges by name and pushes to the engine.
+    #[func]
+    fn installed_plugin_concepts() -> GString {
+        let Some(dir) = gpty_ipc::transport::state_dir() else {
+            log::warn!("installed_plugin_concepts: no state directory");
+            return GString::from("[]");
+        };
+        let path = dir.join("plugins.json");
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return GString::from("[]"),
+            Err(e) => {
+                log::warn!("installed_plugin_concepts: {}: {e}", path.display());
+                return GString::from("[]");
+            }
+        };
+        GString::from(
+            &crate::plugin_concepts_json(&text).unwrap_or_else(|reason| {
+                log::warn!("installed_plugin_concepts: {}: {reason}", path.display());
+                "[]".to_string()
+            }),
+        )
+    }
+
     /// Drain semantic events emitted by explicitly installed agent extensions.
     #[func]
     fn drain_agent_events() -> GString {

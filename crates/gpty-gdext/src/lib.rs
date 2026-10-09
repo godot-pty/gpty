@@ -629,6 +629,56 @@ fn profiles_json(store_text: &str) -> Result<String, String> {
     Ok(serde_json::Value::Array(out).to_string())
 }
 
+/// Shape the plugin store into `installed_plugin_concepts`' JSON.
+///
+/// The concepts counterpart of `profiles_json`: same rules (enabled records
+/// only, one unreadable entry skipped rather than truncating the list, the
+/// store's text the only input) and the same reason for splitting it from the
+/// file read. Each entry carries its provenance beside the validated concept
+/// object, because the GUI merges concepts from several plugins by name and
+/// must be able to say where one came from.
+fn plugin_concepts_json(store_text: &str) -> Result<String, String> {
+    let root: serde_json::Value =
+        serde_json::from_str(store_text).map_err(|e| format!("not JSON: {e}"))?;
+    let records = root
+        .get("plugins")
+        .and_then(|v| v.as_array())
+        .ok_or("no `plugins` array")?;
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for record in records {
+        if record.get("enabled").and_then(|v| v.as_bool()) != Some(true) {
+            continue;
+        }
+        let Some(plugin_id) = record.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let revision = record
+            .get("revision")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let Some(concepts) = record.get("concepts").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for concept in concepts {
+            let Some(name) = concept.get("name").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            // The trigger is what the engine matches on; an entry without a
+            // string one can never do anything, so it is not offered.
+            if concept.get("trigger").and_then(|v| v.as_str()).is_none() {
+                continue;
+            }
+            let mut entry = serde_json::Map::new();
+            entry.insert("plugin_id".into(), plugin_id.into());
+            entry.insert("revision".into(), revision.into());
+            entry.insert("name".into(), name.into());
+            entry.insert("concept".into(), concept.clone());
+            out.push(serde_json::Value::Object(entry));
+        }
+    }
+    Ok(serde_json::Value::Array(out).to_string())
+}
+
 /// Map Godot `Key` enum values to Linux evdev scancodes.
 ///
 /// Convert a Godot 4 Key ordinal to a Linux evdev scancode.
@@ -888,7 +938,7 @@ unsafe impl ExtensionLibrary for GptyExtension {
 
 #[cfg(test)]
 mod tests {
-    use super::profiles_json;
+    use super::{plugin_concepts_json, profiles_json};
 
     /// What `installed_plugin_profiles` hands GDScript: an unusable store is
     /// an empty list (the FFI logs the reason), so only a store the reader
@@ -1014,5 +1064,134 @@ mod tests {
         let err = profiles_json("").unwrap_err();
         assert!(err.contains("not JSON"), "{err}");
         assert_eq!(emitted(""), "[]");
+    }
+
+    /// What `installed_plugin_concepts` hands GDScript: the same contract as
+    /// `emitted` — an unusable store is an empty list.
+    fn concepts_emitted(store_text: &str) -> String {
+        plugin_concepts_json(store_text).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    fn concepts_parsed(store_text: &str) -> serde_json::Value {
+        serde_json::from_str(&concepts_emitted(store_text)).expect("emitted JSON parses")
+    }
+
+    /// Only enabled records' concepts, in store order, each with the
+    /// provenance the GUI needs to attribute and remove it, and the concept
+    /// object passed through exactly as the engine will read it.
+    #[test]
+    fn plugin_concepts_json_lists_enabled_records_only() {
+        let store = r#"{
+            "plugins": [
+                {
+                    "id": "acme/off", "revision": "aaa1111", "enabled": false,
+                    "installed_at": 1,
+                    "concepts": [{"name": "Hidden", "trigger": "hidden"}]
+                },
+                {
+                    "id": "acme/on", "revision": "bbb2222", "enabled": true,
+                    "installed_at": 2,
+                    "concepts": [
+                        {"name": "cat", "trigger": "^cat\\s",
+                         "actions": [{"target": "code_viewer"}]},
+                        {"name": "notify", "trigger": "done",
+                         "capture_mode": "single_line", "enabled": false}
+                    ]
+                }
+            ]
+        }"#;
+        assert_eq!(
+            concepts_parsed(store),
+            serde_json::json!([
+                {
+                    "plugin_id": "acme/on",
+                    "revision": "bbb2222",
+                    "name": "cat",
+                    "concept": {"name": "cat", "trigger": "^cat\\s",
+                                "actions": [{"target": "code_viewer"}]}
+                },
+                {
+                    "plugin_id": "acme/on",
+                    "revision": "bbb2222",
+                    "name": "notify",
+                    "concept": {"name": "notify", "trigger": "done",
+                                "capture_mode": "single_line", "enabled": false}
+                }
+            ])
+        );
+    }
+
+    /// A record written before concepts were stored declares no key at all;
+    /// that is not an error.
+    #[test]
+    fn plugin_concepts_json_ignores_records_without_concepts() {
+        let store = r#"{"plugins": [{"id": "acme/old", "revision": "ccc3333",
+                        "enabled": true, "installed_at": 3}]}"#;
+        assert_eq!(concepts_parsed(store), serde_json::json!([]));
+    }
+
+    /// One broken entry is skipped while its neighbours still reach the GUI;
+    /// an entry without a string trigger could never match anything and is
+    /// not offered.
+    #[test]
+    fn plugin_concepts_json_skips_malformed_entries_and_keeps_the_rest() {
+        let store = r#"{"plugins": [{
+            "id": "acme/part", "revision": "ddd4444", "enabled": true,
+            "installed_at": 4,
+            "concepts": [
+                {"name": "Good", "trigger": "good"},
+                {"trigger": "nameless"},
+                {"name": 7, "trigger": "numbered"},
+                {"name": "NoTrigger"},
+                {"name": "BadTrigger", "trigger": 9},
+                {"name": "Also Good", "trigger": "also"}
+            ]
+        }]}"#;
+        assert_eq!(
+            concepts_parsed(store),
+            serde_json::json!([
+                {"plugin_id": "acme/part", "revision": "ddd4444", "name": "Good",
+                 "concept": {"name": "Good", "trigger": "good"}},
+                {"plugin_id": "acme/part", "revision": "ddd4444", "name": "Also Good",
+                 "concept": {"name": "Also Good", "trigger": "also"}}
+            ])
+        );
+    }
+
+    /// A concept the GUI cannot attribute to a plugin is not offered: the
+    /// concepts list names its source, and uninstall has to know whose rule
+    /// went away.
+    #[test]
+    fn plugin_concepts_json_ignores_records_without_string_id() {
+        let store = r#"{"plugins": [
+            {"revision": "eee5555", "enabled": true,
+             "concepts": [{"name": "Orphan", "trigger": "orphan"}]},
+            {"id": "acme/on", "revision": "fff6666", "enabled": true,
+             "installed_at": 5,
+             "concepts": [{"name": "Kept", "trigger": "kept"}]}
+        ]}"#;
+        assert_eq!(
+            concepts_parsed(store),
+            serde_json::json!([
+                {"plugin_id": "acme/on", "revision": "fff6666", "name": "Kept",
+                 "concept": {"name": "Kept", "trigger": "kept"}}
+            ])
+        );
+    }
+
+    /// A store with no `plugins` array, and text that is not JSON at all,
+    /// each name why the list is empty instead of failing the call.
+    #[test]
+    fn plugin_concepts_json_rejects_a_store_without_the_plugins_array() {
+        let err = plugin_concepts_json(r#"{"version": 1}"#).unwrap_err();
+        assert!(err.contains("`plugins`"), "{err}");
+        assert_eq!(concepts_emitted(r#"{"version": 1}"#), "[]");
+    }
+
+    #[test]
+    fn plugin_concepts_json_rejects_empty_text() {
+        let err = plugin_concepts_json("").unwrap_err();
+        assert!(err.contains("not JSON"), "{err}");
+        assert_eq!(concepts_emitted(""), "[]");
     }
 }

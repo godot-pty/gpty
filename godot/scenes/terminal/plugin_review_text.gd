@@ -88,13 +88,32 @@ static func build(params: Dictionary) -> String:
 	# empty consent dialog is worse than a missing count. Measured while
 	# staging a capture — an Array here raised "Nonexistent 'int' constructor"
 	# and every line built before it was discarded, so the user was asked to
-	# approve a plugin with no information at all.
-	var concept_count := _as_int(params.get("concepts", 0))
+	# approve a plugin with no information at all. A current CLI sends one
+	# entry per concept (`{name, enabled, notify_only, targets}`), so the
+	# rules can be named; a bare count (an older CLI) is still rendered as the
+	# count it is rather than dropped.
+	var concepts: Variant = params.get("concepts", 0)
+	var concept_rows: Array = concepts if concepts is Array else []
+	var concept_count := concept_rows.size() if not concept_rows.is_empty() else _as_int(concepts)
 	var profiles: Array = params.get("profiles", [])
 	if concept_count > 0 or (profiles is Array and not profiles.is_empty()):
 		lines.append("")
-		if concept_count > 0:
+		if concept_rows.is_empty():
 			lines.append("Concepts: %d" % concept_count)
+		else:
+			lines.append("Concepts (triggers that read terminal output — they never run anything):")
+			var shown_concepts := 0
+			for entry in concept_rows:
+				if shown_concepts >= MAX_LISTED or lines.size() >= MAX_LINES:
+					break
+				if entry is Dictionary:
+					lines.append("  %s: %s" % [
+						field(entry, "name", 32),
+						concept_effect_text(entry),
+					])
+					shown_concepts += 1
+			if shown_concepts < concept_rows.size():
+				lines.append("  … %d more" % (concept_rows.size() - shown_concepts))
 		if profiles is Array and not profiles.is_empty():
 			lines.append("Profiles -- what each one would start:")
 			for entry in profiles:
@@ -112,6 +131,24 @@ static func build(params: Dictionary) -> String:
 	lines.append("")
 	lines.append("Installing grants this plugin the workspace API — its actions run as you through the gpty CLI. Nothing has executed yet.")
 	return "\n".join(lines)
+
+
+## What one concept would do, as one capped line: a notify-only rule publishes
+## the match and captures nothing, a capture names the pane types it routes
+## terminal output to, and a rule that ships disabled says so.
+static func concept_effect_text(entry: Dictionary) -> String:
+	var suffix := "" if entry.get("enabled", true) else " (ships disabled)"
+	if entry.get("notify_only", false) == true:
+		return "notify only" + suffix
+	var targets: Variant = entry.get("targets", [])
+	if not targets is Array or targets.is_empty():
+		return "captures (no target yet)" + suffix
+	var parts: Array = []
+	for i in mini(targets.size(), MAX_PROGRAMS_SHOWN):
+		parts.append(short(str(targets[i]), 64))
+	if targets.size() > MAX_PROGRAMS_SHOWN:
+		parts.append("…")
+	return "captures to " + ", ".join(parts) + suffix
 
 
 ## What a profile's tiles would start, as one capped line.
