@@ -489,35 +489,68 @@ pub async fn run(
                 Err(e) => Err(e.into()),
             }
         }
-        DaemonAction::Status => match probe(socket_path).await {
-            Probe::Running(resp) => {
-                if json {
-                    println!("{}", serde_json::to_string_pretty(&resp)?);
-                } else {
-                    println!("gpty GUI is running (v{})", version_of(&resp));
-                }
-                Ok(0)
-            }
-            Probe::Auth => {
-                println!(
-                    "gpty GUI is running but requires GPTY_SECRET authentication (mismatched GPTY_SECRET)."
-                );
-                Ok(1)
-            }
-            Probe::Absent => {
-                println!("gpty GUI is not running.");
-                Ok(1)
-            }
-            Probe::Busy => {
-                println!("gpty GUI did not answer within one second (it may be busy).");
-                Ok(1)
-            }
-            Probe::Failed(why) => {
-                println!("{why}");
-                Ok(1)
-            }
-        },
+        DaemonAction::Status => run_status(socket_path, json).await,
     }
+}
+
+/// `gpty daemon status`: exit 0 only when a GUI answered. Under `--json` the
+/// running case keeps the raw `version` response — the smoke and scripts
+/// parse `result.version` out of it, so that shape is load-bearing — and
+/// every failing case answers a shaped object instead of the prose a script
+/// cannot parse.
+async fn run_status(socket_path: &str, json: bool) -> anyhow::Result<i32> {
+    match probe(socket_path).await {
+        Probe::Running(resp) => {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+            } else {
+                println!("gpty GUI is running (v{})", version_of(&resp));
+            }
+            Ok(0)
+        }
+        other => {
+            let (code, shaped, text) =
+                status_answer(&other).expect("a non-running probe has a shaped answer");
+            if json {
+                println!("{}", serde_json::to_string_pretty(&shaped)?);
+            } else {
+                println!("{text}");
+            }
+            Ok(code)
+        }
+    }
+}
+
+/// The failing outcomes of `daemon status` as `(exit code, the object
+/// `--json` answers with, the sentence it prints otherwise)`. `None` is the
+/// running case, whose JSON is the raw response. The statuses are the
+/// vocabulary the MCP `daemon-status` tool already answers with, so a script
+/// can switch transports without re-learning the shapes.
+fn status_answer(probe: &Probe) -> Option<(i32, serde_json::Value, String)> {
+    Some(match probe {
+        Probe::Running(_) => return None,
+        Probe::Auth => (
+            1,
+            serde_json::json!({"status": "error", "error": AUTH_HINT}),
+            "gpty GUI is running but requires GPTY_SECRET authentication (mismatched GPTY_SECRET)."
+                .to_string(),
+        ),
+        Probe::Absent => (
+            1,
+            serde_json::json!({"status": "not running"}),
+            "gpty GUI is not running.".to_string(),
+        ),
+        Probe::Busy => (
+            1,
+            serde_json::json!({"status": "busy"}),
+            "gpty GUI did not answer within one second (it may be busy).".to_string(),
+        ),
+        Probe::Failed(why) => (
+            1,
+            serde_json::json!({"status": "error", "error": why}),
+            why.clone(),
+        ),
+    })
 }
 
 #[cfg(test)]
@@ -536,6 +569,56 @@ mod tests {
         #[cfg(not(unix))]
         let _ = mode;
         path
+    }
+
+    /// `daemon status --json` answers a shaped object on every failing path —
+    /// prose is exactly what a script cannot parse — while the running path
+    /// keeps the raw `version` response the smoke and scripts parse.
+    #[test]
+    fn daemon_status_shapes_every_failing_answer() {
+        let running = Probe::Running(Response {
+            jsonrpc: "2.0".into(),
+            id: 1,
+            result: Some(serde_json::json!({"version": "0.5.5", "protocol": "2.0"})),
+            error: None,
+        });
+        assert!(
+            status_answer(&running).is_none(),
+            "the running answer is the raw version response, not a shaped one"
+        );
+
+        let (code, shaped, text) = status_answer(&Probe::Absent).expect("shaped");
+        assert_eq!(
+            (code, shaped),
+            (1, serde_json::json!({"status": "not running"}))
+        );
+        assert_eq!(
+            text, "gpty GUI is not running.",
+            "the plain path keeps its sentence"
+        );
+
+        let (code, shaped, _) = status_answer(&Probe::Busy).expect("shaped");
+        assert_eq!((code, shaped), (1, serde_json::json!({"status": "busy"})));
+
+        let (code, shaped, text) =
+            status_answer(&Probe::Failed("cannot use /x: nope".into())).expect("shaped");
+        assert_eq!(
+            (code, shaped),
+            (
+                1,
+                serde_json::json!({"status": "error", "error": "cannot use /x: nope"})
+            )
+        );
+        assert_eq!(
+            text, "cannot use /x: nope",
+            "the plain path keeps the reason"
+        );
+
+        let (code, shaped, text) = status_answer(&Probe::Auth).expect("shaped");
+        assert_eq!(code, 1);
+        assert_eq!(shaped["status"], "error");
+        assert_eq!(shaped["error"], AUTH_HINT);
+        assert!(text.contains("GPTY_SECRET"), "{text}");
     }
 
     /// The stale-binary check: the protocol is the primary signal, the
