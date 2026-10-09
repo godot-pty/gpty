@@ -109,6 +109,54 @@ func test_a_follower_is_primed_on_attach_and_told_every_change():
 	for state in probe.seen:
 		assert_true(state in STATES, "unexpected state '%s'" % state)
 
+## A change that beats the entry prime — the same-frame race the dispatcher
+## used to lose — must not reach an unsettled follower, or the scan's entry
+## would deliver the same value a second time.
+func test_a_change_dispatched_before_the_entry_prime_is_dropped():
+	var ws := await _make_workspace()
+	var body := _first_body(ws)
+	var probe := _add_probe(ws, body.attachment_id)
+	# The follower has just joined and the terminal's slow poll emitted before
+	# the scan primed it: the change arrives first (dispatched directly here).
+	ws._dispatch_agent_state(body.attachment_id, "working")
+	assert_eq(probe.seen.size(), 0, "an unsettled observer must not hear a change")
+	assert_true(
+		await _wait_until(func(): return probe.seen.size() >= 1),
+		"the scan must still deliver the entry state")
+	assert_eq(probe.seen, ["idle"],
+		"the entry is the tracker's current state, delivered once")
+
+## The entry delivery goes to the new pane alone: attaching another follower
+## must not re-tell a settled one the state it already holds.
+func test_attaching_another_follower_does_not_re_tell_settled_ones():
+	var ws := await _make_workspace()
+	var body := _first_body(ws)
+	var first := _add_probe(ws, body.attachment_id)
+	assert_true(
+		await _wait_until(func(): return first.seen.size() >= 1),
+		"the first follower must be primed")
+	var second := _add_probe(ws, body.attachment_id)
+	assert_true(
+		await _wait_until(func(): return second.seen.size() >= 1),
+		"the second follower must be primed")
+	assert_eq(first.seen, ["idle"],
+		"a settled observer must not be re-told by another pane's entry")
+	assert_eq(second.seen, ["idle"])
+
+## Both delivery paths run through the same recorder: a repeat of the value an
+## observer holds is dropped, while a real transition still lands.
+func test_a_repeat_of_the_value_an_observer_holds_is_dropped():
+	var ws := await _make_workspace()
+	var body := _first_body(ws)
+	var probe := _add_probe(ws, body.attachment_id)
+	assert_true(await _wait_until(func(): return probe.seen.size() >= 1))
+	ws._dispatch_agent_state(body.attachment_id, "idle")
+	assert_eq(probe.seen, ["idle"], "a repeat of the held value must be dropped")
+	ws._dispatch_agent_state(body.attachment_id, "working")
+	assert_eq(probe.seen, ["idle", "working"], "a real transition still lands")
+	ws._dispatch_agent_state(body.attachment_id, "working")
+	assert_eq(probe.seen, ["idle", "working"], "and its repeat is dropped too")
+
 func test_a_pane_that_observes_nothing_is_never_told():
 	var ws := await _make_workspace()
 	var body := _first_body(ws)

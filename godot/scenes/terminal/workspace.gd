@@ -1144,17 +1144,21 @@ func _poll_agent_events():
 ## The workspace is the only dispatcher for the pane contract
 ## (`PaneBody.agent_state_source_id` / `on_agent_state_changed`): a terminal
 ## emits its tiered state change and every pane observing that terminal hears
-## it. Panes are found through the `panes` group, not the tile lists, so
-## hidden workspaces keep observing. Display only — a Tier 2 state is
-## spoofable and Tier 3 is a heuristic, so nothing here may feed a decision.
+## it, at most once per delivery. Panes are found through the `panes` group,
+## not the tile lists, so hidden workspaces keep observing. Display only — a
+## Tier 2 state is spoofable and Tier 3 is a heuristic, so nothing here may
+## feed a decision.
 
-## Panes whose source state has been delivered, by instance id — the value is
-## the source they were primed for, so a pane that points at a different
-## terminal later (a settings edit) is primed again. A pane entering the tree
-## by ANY route — spawn, restore, swap, a future pane SDK — is primed on the
-## next frame instead of only on the tile-attach path, and a follower whose
-## terminal has not appeared yet is retried until it does. The scan is O(panes)
-## with no allocation per pane; only new or re-pointed panes do any work.
+## What every observer was last told, by instance id: `[source_id, state]`.
+## The source half keeps a pane re-pointed at another terminal (a settings
+## edit) from counting as settled — it is primed again — and the state half is
+## the delivery shadow that makes the entry prime and a same-frame change emit
+## impossible to deliver twice (the dispatcher-side mirror of the terminal's
+## own `_badge_state` rule). A pane entering the tree by ANY route — spawn,
+## restore, swap, a future pane SDK — is primed on the next frame instead of
+## only on the tile-attach path, and a follower whose terminal has not appeared
+## yet is retried until it does. The scan is O(panes); only new or re-pointed
+## panes do any work.
 var _agent_state_primed := {}
 
 func _prime_new_pane_observers():
@@ -1163,16 +1167,20 @@ func _prime_new_pane_observers():
 			continue
 		var key := body.get_instance_id()
 		var source_id: String = body.agent_state_source_id()
-		if _agent_state_primed.has(key) and str(_agent_state_primed[key]) == source_id:
-			continue  # already primed for this source
+		var record = _agent_state_primed.get(key)
+		if record != null and str(record[0]) == source_id:
+			continue  # already settled for this source
 		if source_id == "":
-			_agent_state_primed[key] = ""  # observes nothing, ever
+			_agent_state_primed[key] = ["", ""]  # observes nothing, ever
 			continue
 		var terminal := _terminal_for_agent_state(source_id)
 		if terminal == null or terminal._terminal == null:
 			continue  # the source is not attached yet: try again next frame
-		_agent_state_primed[key] = source_id
-		_dispatch_agent_state(source_id, terminal._terminal.get_agent_state())
+		# The entry delivery is this scan's job and goes to *this* pane alone:
+		# it used to broadcast to every observer of the source, re-telling
+		# settled panes the state they already held whenever one pane attached.
+		_agent_state_primed[key] = [source_id, ""]
+		_tell_observer(body, source_id, terminal._terminal.get_agent_state())
 
 func _terminal_for_agent_state(source_id: String) -> Control:
 	if source_id == "":
@@ -1186,8 +1194,26 @@ func _dispatch_agent_state(source_id: String, state: String):
 	if source_id == "":
 		return
 	for body in get_tree().get_nodes_in_group("panes"):
-		if body is PaneBody and body.agent_state_source_id() == source_id:
-			body.on_agent_state_changed(state)
+		if not (body is PaneBody) or body.agent_state_source_id() != source_id:
+			continue
+		# Only a pane the scan has already settled hears a change: delivering
+		# to one it has not would make the scan's entry the duplicate instead
+		# (the scan runs every frame, so an entry lags at most a frame).
+		var record = _agent_state_primed.get(body.get_instance_id())
+		if record == null or str(record[0]) != source_id:
+			continue
+		_tell_observer(body, source_id, state)
+
+## One delivery to one observer, dropped when it already holds this value.
+## Both paths — the scan's entry prime and a change emit — come through here,
+## so the same state can never be delivered twice in a row; that is the same
+## rule the terminal's own hook applies for itself through `_badge_state`.
+func _tell_observer(body: PaneBody, source_id: String, state: String):
+	var record = _agent_state_primed.get(body.get_instance_id())
+	if record == null or str(record[0]) != source_id or str(record[1]) == state:
+		return
+	record[1] = state
+	body.on_agent_state_changed(state)
 
 ## Map a generic-vocabulary event to the Tier 1 agent state it declares.
 ## `state.declared` carries the state in its own field — an explicit
