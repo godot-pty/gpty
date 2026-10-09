@@ -1,7 +1,10 @@
 extends GutTest
-# Wiki pane: the read-only vault browser — vault validation, the recursive
-# .md scan (hidden skip, depth cap, entry cap), the note render, and the
-# layout-state round trip.
+# Wiki pane: the read-only vault browser — vault validation, the indexed note
+# list (`GptyTerminal.vault_index`), the index-backed search
+# (`GptyTerminal.vault_search`), the note render, and the layout-state round
+# trip. The walk's own rules (hidden skip, depth/entry caps, staleness) are
+# pinned by `gpty_core::vault`'s unit tests; this file asserts the pane's view
+# of that index.
 
 var _tmp: String
 
@@ -36,7 +39,7 @@ func _write(path: String, text: String) -> String:
 func _make_pane(vault: String) -> WikiPane:
 	var pane := WikiPane.new()
 	pane.vault_path = vault
-	# vault_path is set before add_child so _ready performs the scan.
+	# vault_path is set before add_child so _ready performs the index pass.
 	add_child_autofree(pane)
 	return pane
 
@@ -45,6 +48,13 @@ func _list_texts(pane: WikiPane) -> Array:
 	var out := []
 	for i in pane._list.item_count:
 		out.append(pane._list.get_item_text(i))
+	return out
+
+
+func _list_meta(pane: WikiPane) -> Array:
+	var out := []
+	for i in pane._list.item_count:
+		out.append(pane._list.get_item_metadata(i))
 	return out
 
 
@@ -58,6 +68,8 @@ func test_unset_vault_shows_placeholder():
 	assert_true(pane._placeholder.visible)
 	assert_false(pane._list.visible)
 	assert_eq(pane._list.item_count, 0)
+	# A search box is meaningless without a vault.
+	assert_false(pane._search.visible)
 
 
 func test_a_non_directory_vault_is_refused():
@@ -90,29 +102,7 @@ func test_lists_markdown_notes_recursively_and_skips_hidden():
 		["note.md", "sub".path_join("nested.md")],
 		"only .md notes, hidden dirs skipped, sorted",
 	)
-
-
-func test_depth_cap_stops_the_walk():
-	var deep := _tmp
-	for i in 17:
-		deep = deep.path_join("d%d" % i)
-	DirAccess.make_dir_recursive_absolute(deep)
-	_write(deep.path_join("deep.md"), "# Deep")
-	_write(_tmp.path_join("top.md"), "# Top")
-
-	var pane := _make_pane(_tmp)
-	assert_eq(_list_texts(pane), ["top.md"], "a note past the depth cap is not walked")
-
-
-func test_entry_cap_reports_truncation():
-	for i in 3:
-		_write(_tmp.path_join("n%d.md" % i), "# N")
-	var pane := _make_pane(_tmp)
-
-	var scan: Dictionary = pane._scan_vault(2)
-	assert_eq(scan["notes"].size(), 2)
-	assert_true(scan["truncated"], "the cap must report that a note was left out")
-	assert_false(pane._scan_vault()["truncated"], "the full scan is not truncated")
+	assert_eq(_list_meta(pane)[0], _tmp.path_join("note.md"))
 
 
 func test_activating_a_note_renders_it_and_back_returns():
@@ -129,6 +119,35 @@ func test_activating_a_note_renders_it_and_back_returns():
 	assert_true(pane._list.visible)
 	assert_false(pane._reader.visible)
 	assert_false(pane._back.visible)
+
+
+func test_search_filters_the_list_to_matching_notes():
+	_write(_tmp.path_join("alpha.md"), "# Alpha\napples are red")
+	_write(_tmp.path_join("beta.md"), "# Beta\nbananas are yellow")
+	var pane := _make_pane(_tmp)
+	assert_eq(pane._list.item_count, 2)
+
+	pane._search.text = "bananas"
+	pane._run_search()
+	assert_eq(pane._list.item_count, 1, "only the matching note is listed")
+	assert_eq(_list_meta(pane)[0], _tmp.path_join("beta.md"))
+	assert_string_contains(_list_texts(pane)[0], "Beta", "the hit shows its title")
+	assert_string_contains(_list_texts(pane)[0], "banana", "the hit shows its snippet")
+
+	# Clearing the query restores the full list.
+	pane._search.text = ""
+	pane._run_search()
+	assert_eq(pane._list.item_count, 2)
+
+
+func test_a_search_with_no_match_says_so():
+	_write(_tmp.path_join("alpha.md"), "# Alpha\napples")
+	var pane := _make_pane(_tmp)
+
+	pane._search.text = "zebra"
+	pane._run_search()
+	assert_eq(pane._list.item_count, 0)
+	assert_true(pane._placeholder.visible)
 
 
 func test_layout_state_carries_the_vault_path():

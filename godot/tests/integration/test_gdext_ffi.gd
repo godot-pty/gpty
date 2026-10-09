@@ -60,3 +60,33 @@ func test_markdown_renderer_formats_and_sanitizes():
 	assert_string_contains(rendered, "[b]bold[/b]")
 	assert_string_contains(rendered, "[lb]raw]")
 	assert_false("[url=javascript:" in rendered)
+
+func test_vault_index_and_search_answer_shaped_json():
+	# The vault facet's wire contract (consumed by wiki_pane.gd): an index
+	# answer carries the note list and the pass' counts, a search answer
+	# carries hits with snippets, and a bad root is an `error` envelope rather
+	# than an empty result — the distinction the pane's placeholder relies on.
+	var vault := ProjectSettings.globalize_path("user://gdext_ffi_vault")
+	DirAccess.make_dir_recursive_absolute(vault)
+	var note := FileAccess.open(vault.path_join("note.md"), FileAccess.WRITE)
+	note.store_string("# Heading\nzebra")
+	note.close()
+
+	var indexed = JSON.parse_string(str(GptyTerminal.vault_index(vault)))
+	assert_true(indexed is Dictionary, "vault_index must answer JSON")
+	assert_true(indexed.has("notes"), "the note list is part of the contract")
+	assert_true("note.md" in indexed["notes"], "the indexed note must be listed")
+	assert_true(indexed.has("added") and indexed.has("truncated"))
+
+	var found = JSON.parse_string(str(GptyTerminal.vault_search(vault, "zebra", 10)))
+	assert_true(found is Dictionary, "vault_search must answer JSON")
+	assert_eq(found.get("total", -1), 1, "the indexed body must be searchable")
+	var hit: Dictionary = found["results"][0]
+	assert_eq(hit.get("path"), "note.md")
+	assert_string_contains(str(hit.get("snippet")), "zebra")
+
+	var bad = JSON.parse_string(str(GptyTerminal.vault_index("/nonexistent/vault/root")))
+	assert_true(bad is Dictionary and bad.has("error"), "a bad root must answer an error")
+
+	DirAccess.remove_absolute(vault.path_join("note.md"))
+	DirAccess.remove_absolute(vault)

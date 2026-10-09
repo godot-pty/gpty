@@ -18,6 +18,7 @@ Library crate for the gpty multi-PTY emulator. This is the engine — all termin
 | [`keymap`](src/keymap.rs) | Keyboard event → byte sequence translation | `key_event_to_bytes()` |
 | [`lock`](src/lock.rs) | Poison-tolerant locking: skip the work, report the first occurrence | `lock_or_warn()`, `read_or_warn()`, `write_or_warn()` |
 | [`history`](src/history.rs) | SQLite-backed scrollback history store and its write-behind thread | `HistoryStore`, `PaneHistory` |
+| [`vault`](src/vault.rs) | SQLite + FTS5 index over a directory of Markdown notes — the wiki pane's list and search | `VaultStore`, `scan_vault()`, `index_vault()` |
 
 ## Concept System
 
@@ -81,6 +82,6 @@ All modules are single files in `src/`. When a module grows beyond ~200 lines or
 | `alacritty_terminal` | 0.26 | Full terminal grid emulator |
 | `tokio` | 1.52 | Async runtime + broadcast channel |
 | `regex` | 1.12 | Concept trigger patterns |
-| `rusqlite` | 0.31 | SQLite history storage |
+| `rusqlite` | 0.31 | SQLite storage: scrollback history and the vault index |
 | `serde` | 1 | Serialization framework (derive support) |
 | `serde_json` | 1 | JSON encoding for IPC + schema output |

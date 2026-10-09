@@ -91,11 +91,12 @@ pub fn store_size_on_disk(path: &str) -> u64 {
 ///
 /// SQLite creates the database (and the `-wal`/`-shm` siblings it needs) with
 /// the process umask, so under a permissive umask — or a `user://` another
-/// account can read — every pane's scrollback is readable by others. Best
-/// effort by design: a sibling may not exist yet, and a mode that cannot be set
-/// is worth a log line, not a failed pane.
+/// account can read — every pane's scrollback is readable by others. The same
+/// rule guards the vault index ([`crate::vault::VaultStore`]), which is why
+/// this is crate-visible. Best effort by design: a sibling may not exist yet,
+/// and a mode that cannot be set is worth a log line, not a failed pane.
 #[cfg(unix)]
-fn restrict_to_owner(path: &str) {
+pub(crate) fn restrict_to_owner(path: &str) {
     use std::os::unix::fs::PermissionsExt;
     match std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
         Ok(()) => {}
@@ -107,7 +108,7 @@ fn restrict_to_owner(path: &str) {
 }
 
 #[cfg(not(unix))]
-fn restrict_to_owner(_path: &str) {}
+pub(crate) fn restrict_to_owner(_path: &str) {}
 
 /// One writer per history file at a time, for this whole process.
 ///
@@ -126,7 +127,7 @@ fn restrict_to_owner(_path: &str) {}
 /// invert, and it is held only across one transaction.
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
-/// Serialize this process's writes to any one history file.
+/// Serialize this process's writes to any one SQLite store file.
 ///
 /// `None` — the lock was poisoned by a panic on another thread — means the
 /// write proceeds **unserialized** rather than not at all: losing the
@@ -135,7 +136,12 @@ static WRITE_LOCK: Mutex<()> = Mutex::new(());
 /// policy is the opposite, and [`lock_or_warn`]'s doc says why: skipping is how
 /// a pane keeps rendering through someone else's panic. A dropped batch's only
 /// second chance was the retention window.)
-fn write_guard() -> Option<MutexGuard<'static, ()>> {
+///
+/// Crate-visible because the vault index ([`crate::vault::VaultStore`]) opens
+/// its own connection to its own file the same way and needs the same
+/// "innermost lock, held across one transaction" discipline; one process-wide
+/// lock for both stores keeps that a single rule.
+pub(crate) fn write_guard() -> Option<MutexGuard<'static, ()>> {
     lock_or_warn(&WRITE_LOCK, "history write lock")
 }
 

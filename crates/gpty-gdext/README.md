@@ -23,7 +23,7 @@ so `cargo build -p gpty-gdext` is enough. Restart Godot after each rebuild.
 
 The implementation is filed by facet under `src/`, one `#[godot_api(secondary)]` impl block
 per file — `lib.rs` holds the class itself (session lifecycle, input, the grid access
-helpers), `grid_api.rs`, `history_api.rs`, `capture_api.rs` and `bridge_api.rs` hold the
+helpers), `grid_api.rs`, `history_api.rs`, `vault_api.rs`, `capture_api.rs` and `bridge_api.rs` hold the
 rest. The sections below are those facets.
 
 ### GptyMarkdown (extends RefCounted)
@@ -88,6 +88,13 @@ on drop.
 | `get_app_version()` | `String` | App version from `CARGO_PKG_VERSION` (static — call as `GptyTerminal.get_app_version()`) |
 | `get_ipc_protocol_version()` | `String` | Static — the control-IPC protocol version (`gpty_ipc::protocol::PROTOCOL_VERSION`), the single definition the server's `version` method reports and the CLI prints; the About tab reads it so the label cannot drift from the wire |
 | `installed_plugin_profiles()` | `String` | Static — JSON array of `{plugin_id, revision, name, tiles}`, one entry per profile of every **enabled** installed plugin, in store order (`tiles` are the manifest's raw tile dictionaries; the caller sanitizes each field). Reads `<state_dir>/plugins.json`; a missing or broken store is `[]` plus one warn, never an error. Plugins installed before the profiles migration, and profile entries without a string `name` or a `tiles` list, contribute nothing |
+
+#### Vault index
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `vault_index(vault_path: String)` | `String` | Static — walk a vault directory, refresh its index and answer the note list. JSON: `{notes: ["note.md", "sub/other.md", …], truncated, added, updated, removed, unreadable}` (notes sorted by path, hidden entries skipped, bounded at 2000 notes / depth 16). `error` is present only when the path cannot be used or the store cannot be opened |
+| `vault_search(vault_path: String, pattern: String, limit: int)` | `String` | Static — FTS5 search within one vault, best rank first. JSON: `{results: [{path, title, snippet}], total}`; free text sanitised into quoted, ANDed terms, notes porter-stemmed, `limit` clamped 1–500. `error` only when the query could not run, so a caller can tell "no match" from "not indexed" |
 
 #### Pane API & status
 

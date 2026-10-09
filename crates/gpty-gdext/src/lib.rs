@@ -30,6 +30,7 @@ mod history_api;
 mod ipc;
 mod markdown;
 mod omp_events;
+mod vault_api;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Constants
