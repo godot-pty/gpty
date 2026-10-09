@@ -93,10 +93,17 @@ func test_a_follower_is_primed_on_attach_and_told_every_change():
 	assert_eq(probe.seen[0], "idle", "the primed state is the tracker's current one")
 
 	body._terminal.set_agent_state("needs-attention")
+	# Wait for the *value*, not for the list to grow: the entry prime and the
+	# change are separate deliveries, and a same-value duplicate would satisfy
+	# a size check and then fail the assertion below (measured on
+	# windows-smoke before the poll stopped re-announcing the primed state).
+	# The budget is many slow polls (`SLOW_POLL_INTERVAL`, 0.25 s) with room
+	# for a loaded runner's frame pacing.
 	assert_true(
-		await _wait_until(func(): return probe.seen.size() >= 2),
+		await _wait_until(func(): return not probe.seen.is_empty() and probe.seen[-1] == "needs-attention", 5.0),
 		"a state change must reach the follower: %s" % str(probe.seen))
-	assert_eq(probe.seen[-1], "needs-attention")
+	assert_eq(probe.seen, ["idle", "needs-attention"],
+		"one entry delivery and one change, with no duplicate")
 	# Every value the hook can receive is in the published vocabulary — the
 	# hook is third-party code and must be able to match exhaustively.
 	for state in probe.seen:

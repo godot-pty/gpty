@@ -529,10 +529,19 @@ const BADGE_SPINNER_FRAMES := [Icons.SPINNER, Icons.SPINNER_GAP, Icons.CIRCLE_NO
 
 ## Read the terminal's declared agent state. Called from the slow poll — the
 ## state changes on event arrival, not per frame, and each read crosses FFI.
+##
+## `_badge_state` is what this terminal's hook was last *delivered* (see
+## `on_agent_state_changed`), so a read only reports a delta against it. The
+## one read before any delivery is adopted silently: the workspace's prime
+## scan owns the entry delivery, and announcing the spawn state here as well
+## told every follower the same value twice.
 func _poll_agent_state():
 	var state := _terminal.get_agent_state()
-	if state != _badge_state:
-		_badge_state = state
+	if state == _badge_state:
+		return
+	var delivered := _badge_state != ""
+	_badge_state = state
+	if delivered:
 		agent_state_changed.emit(state)
 
 ## The terminal observes itself: the tiered tracker is this pane's own state.
@@ -540,8 +549,11 @@ func agent_state_source_id() -> String:
 	return attachment_id
 
 ## Contract hook — the badge is applied here, not in the poll, so the badge
-## and any custom pane's observation travel the same workspace dispatch.
+## and any custom pane's observation travel the same workspace dispatch. The
+## delivery is recorded too: this hook is where the terminal learns what it
+## has been told, and `_poll_agent_state` reports only deltas against it.
 func on_agent_state_changed(state: String) -> void:
+	_badge_state = state
 	_apply_badge(state)
 
 func _animate_badge(delta: float):
