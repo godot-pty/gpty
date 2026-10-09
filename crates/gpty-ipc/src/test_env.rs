@@ -38,18 +38,6 @@ impl EnvVar {
             _lock: lock,
         }
     }
-
-    pub(crate) fn clear(key: &'static str) -> Self {
-        let lock = lock();
-        let previous = std::env::var_os(key);
-        // SAFETY: as in `set`.
-        unsafe { std::env::remove_var(key) };
-        Self {
-            key,
-            previous,
-            _lock: lock,
-        }
-    }
 }
 
 impl Drop for EnvVar {
