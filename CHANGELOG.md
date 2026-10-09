@@ -8,7 +8,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 
 - **Wiki pane type (v0.6.0 groundwork).** A seventh pane type, `wiki`, registered across the vocabulary (`PaneTypes.ALL`, the Rust `PaneType` enum, the type→body map) and therefore spawnable from the sidebar, the palette (`new wiki`), `gpty new-pane -t wiki`, and layout/profile restore. It opens a vault at an absolute directory path — validated at use exactly like `file_tree`'s root, so a file-supplied path is never trusted — and lists the vault's Markdown notes (recursive, hidden entries skipped, bounded in entries and depth). Activating a note renders it read-only through the sanitized Markdown pipeline; editing, wikilinks, the link graph, and the full-text index stay with their own v0.6.0 items. The note read and the code viewer now share one guard, `TextRead.read_prefix` (absolute paths only, regular-file gate, 1 MiB cap, torn-UTF8-safe decode) — the security rule has a single definition.
 
-## [0.5.6] — Unreleased
+## [0.5.6] — 2026-10-09
 
 ### Added
 
@@ -27,6 +27,8 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 - **A stale CLI on `PATH` now says so.** The CLI and the GUI must come from the same release: an older `gpty` shadowing the bundle's CLI failed opaquely (`error: unrecognized subcommand 'plugin'` while the running GUI was 0.5.5, and its own `gpty version` is local-only by design). Every command that talks to a GUI now compares what it reports — IPC protocol first, then version, direction-aware — and prints one stderr warning naming both sides and the remedy; the check rides on probes the CLI already makes, a command that has not probed does one best-effort check (500 ms, never able to fail or gate it), and the MCP server warns the same way at startup. The protocol version also has one definition now (`gpty_ipc::protocol::PROTOCOL_VERSION`), shared by the server's `version` response, the CLI, and the About tab, which had a hardcoded `2.0`.
 - **An agent-state observer is told a value once, whichever path carried it.** The entry scan broadcast the current state to every observer of a terminal, so attaching a second follower re-told the first a value it already held; and a follower that joined while a change was in flight heard the change before its entry, then the same value again from the scan. Each observer now carries `[source, last state]`: the scan's entry goes to the new pane alone, a change reaches only panes already settled for that source, and a repeat of the held value is dropped — the dispatcher-side mirror of the terminal's `_badge_state` rule. Three contract tests pin it (a change dispatched before the entry, a second follower attaching, a repeated dispatch).
 - **`gpty daemon status --json` answers JSON on every path.** The running case printed the raw `version` response (parseable), but the not-running, busy, refused and auth paths printed prose — a script that probed with `--json` got unparseable output exactly when the probe mattered. Those paths now answer the shaped vocabulary the MCP `daemon-status` tool already used (`{"status": "not running"}`, `{"status": "busy"}`, `{"status": "error", "error": …}`), still with exit 1; the running shape is unchanged, because the live smoke parses `result.version` out of it.
+
+[0.5.6]: https://github.com/godot-pty/gpty/compare/v0.5.5...v0.5.6
 
 ## [0.5.5] — 2026-09-17
 
