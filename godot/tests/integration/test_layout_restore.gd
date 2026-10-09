@@ -189,6 +189,38 @@ func test_each_preset_tile_passes_sanitize_tile():
 				td["settings"].get("attachment_id"),
 				"the %s tile's companion link must survive sanitize_tile" % profile_name)
 
+## A wiki tile is a path carrier: the vault path must survive sanitize_tile
+## (untrusted file input) and the restore path must rebuild a pane that
+## lists the vault — not merely accept the type.
+func test_a_wiki_tile_restores_its_vault():
+	var vault := ProjectSettings.globalize_path("user://wiki_restore_vault")
+	DirAccess.make_dir_recursive_absolute(vault)
+	var note := FileAccess.open(vault.path_join("note.md"), FileAccess.WRITE)
+	note.store_string("# Heading")
+
+	var body = _tm.spawn_pane("wiki", {"vault_path": vault})
+	assert_not_null(body, "a wiki pane must spawn")
+	var saved = _gather_tiles()
+	assert_eq(saved.size(), 1)
+
+	var st = PaneTypes.sanitize_tile({
+		"col": 0, "row": 0, "cspan": 12, "rspan": 12,
+		"settings": saved[0].get("settings", {}),
+	})
+	assert_false(st.is_empty(), "a wiki tile must pass sanitize_tile")
+	assert_eq(st["type_name"], "wiki")
+	assert_eq(st["settings"].get("vault_path"), vault,
+		"the vault path must survive sanitize_tile")
+
+	var restored = _tm.create_body("wiki")
+	add_child_autofree(restored)
+	restored.apply_settings(st["settings"])
+	assert_eq(restored._list.get_item_text(0), "note.md",
+		"the restored pane must list the vault's notes")
+
+	DirAccess.remove_absolute(vault.path_join("note.md"))
+	DirAccess.remove_absolute(vault)
+
 func test_only_the_agent_workspace_ships_as_a_builtin():
 	# The five tool-specific built-ins (OMP, Herdr, Lazygit, Neovim, Claude)
 	# now come from one plugin repo per tool, so the file carries the single
