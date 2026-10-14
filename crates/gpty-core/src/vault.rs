@@ -1,18 +1,21 @@
 //! Vault index: a SQLite + FTS5 store over a directory of Markdown notes.
 //!
-//! The wiki pane browses a *vault* — a plain directory of `.md` files — and
-//! this module is the one definition of what a note is (the walk's hidden,
-//! extension, depth and count rules) and of what searching one costs (the
-//! `notes_fts` index). It reuses the scrollback store's skeleton deliberately
-//! ([`crate::history`]): external-content FTS5 with the three triggers, the
-//! same pragmas, the same owner-only mode, and the same process-wide write
-//! lock — so the v0.5.1 engine's operational lessons carry over instead of
-//! being re-learned.
+//! The wiki pane browses *and edits* a vault — a plain directory of `.md`
+//! files — and this module is the one definition of what a note is (the
+//! walk's hidden, extension, depth and count rules), of what searching one
+//! costs (the `notes_fts` index), and of what writing one is allowed to touch
+//! ([`write_vault_note`]: the same path vocabulary, containment through
+//! symlinks, a stamp that refuses to overwrite an outside edit, and an atomic
+//! replacement that keeps the note's own mode). It reuses the scrollback
+//! store's skeleton deliberately ([`crate::history`]): external-content FTS5
+//! with the three triggers, the same pragmas, the same owner-only mode, and
+//! the same process-wide write lock — so the v0.5.1 engine's operational
+//! lessons carry over instead of being re-learned.
 //!
 //! The store file lives in the app's state directory (`state_dir()/vaults.db`),
-//! never inside a vault: a vault is user data this module only reads, and the
-//! roadmap's agent-access item needs the index reachable from the CLI too,
-//! which cannot resolve Godot's `user://`.
+//! never inside a vault: a vault is the user's own data, and the roadmap's
+//! agent-access item needs the index reachable from the CLI too, which cannot
+//! resolve Godot's `user://`.
 
 use std::path::Path;
 use std::time::UNIX_EPOCH;
@@ -206,8 +209,13 @@ fn mtime_nanos(meta: &std::fs::Metadata) -> i64 {
 ///
 /// `None` for anything unreadable. Returns `(text, truncated)`.
 pub fn read_note(abs_path: &str) -> Option<(String, bool)> {
+    read_file_capped(Path::new(abs_path))
+}
+
+/// [`read_note`]'s shared body, so the index and the editor load the same cut.
+fn read_file_capped(path: &Path) -> Option<(String, bool)> {
     use std::io::Read;
-    let mut file = std::fs::File::open(abs_path).ok()?;
+    let mut file = std::fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len();
     let mut bytes = Vec::new();
     file.by_ref()
@@ -215,6 +223,231 @@ pub fn read_note(abs_path: &str) -> Option<(String, bool)> {
         .read_to_end(&mut bytes)
         .ok()?;
     Some((trim_torn_tail(bytes), size > MAX_NOTE_BYTES))
+}
+
+/// A note's on-disk identity: the (mtime, size) pair the index uses to decide
+/// whether a note changed, and the pair a save checks before overwriting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoteStamp {
+    /// Modification time in microseconds since the epoch. Microseconds, not
+    /// the index's nanoseconds: the stamp travels to the pane through JSON,
+    /// whose numbers are IEEE-754 doubles — 1.7e18 ns loses its low bits in
+    /// that round trip, while 1.8e15 µs is exact.
+    pub mtime: i64,
+    pub size: i64,
+}
+
+impl NoteStamp {
+    fn of(meta: &std::fs::Metadata) -> Self {
+        NoteStamp {
+            mtime: mtime_nanos(meta) / 1000,
+            size: meta.len() as i64,
+        }
+    }
+}
+
+/// A note as the editor loads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteContent {
+    /// The text, at most [`MAX_NOTE_BYTES`], torn UTF-8 tail dropped.
+    pub text: String,
+    /// The text is a prefix of a larger file. The editor must not offer
+    /// editing: saving a truncated read would drop everything past the cut.
+    pub truncated: bool,
+    /// The file uses CRLF line endings. The editor works in LF and the save
+    /// puts the CRLFs back, or editing one word rewrites every line.
+    pub crlf: bool,
+    pub stamp: NoteStamp,
+}
+
+/// Why a note could not be read or written. [`NoteError::code`] is the stable
+/// spelling the FFI answers, and the pane switches on it — `changed_on_disk`
+/// is what offers an explicit overwrite, so the codes are a contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoteError {
+    /// The vault root is not an absolute directory.
+    BadVault(String),
+    /// The vault-relative path is not a note path: empty, absolute, escaping
+    /// the vault, hidden at any level, or not `.md`.
+    BadPath(String),
+    /// No regular file at the resolved path.
+    NotFound,
+    /// The file changed on disk since the caller loaded it.
+    ChangedOnDisk,
+    /// The content exceeds [`MAX_NOTE_BYTES`].
+    TooLarge(usize),
+    /// The path resolves — through a symlink — outside the vault.
+    Outside,
+    Io(String),
+}
+
+impl NoteError {
+    /// The stable code the FFI answers for this error.
+    pub fn code(&self) -> &'static str {
+        match self {
+            NoteError::BadVault(_) => "bad_vault",
+            NoteError::BadPath(_) => "bad_path",
+            NoteError::NotFound => "not_found",
+            NoteError::ChangedOnDisk => "changed_on_disk",
+            NoteError::TooLarge(_) => "too_large",
+            NoteError::Outside => "outside_vault",
+            NoteError::Io(_) => "io",
+        }
+    }
+}
+
+impl std::fmt::Display for NoteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NoteError::BadVault(m) => write!(f, "not a vault directory: {m}"),
+            NoteError::BadPath(m) => write!(f, "not a note path: {m}"),
+            NoteError::NotFound => write!(f, "no such note"),
+            NoteError::ChangedOnDisk => {
+                write!(f, "the note changed on disk since it was opened")
+            }
+            NoteError::TooLarge(size) => {
+                write!(f, "note is {size} bytes; the limit is {MAX_NOTE_BYTES}")
+            }
+            NoteError::Outside => write!(f, "the note resolves outside the vault"),
+            NoteError::Io(m) => write!(f, "{m}"),
+        }
+    }
+}
+
+/// Longest vault-relative path accepted (a note path, not a filesystem path).
+const MAX_REL_PATH_BYTES: usize = 1024;
+
+/// Resolve `rel_path` under `root`, enforcing the walk's own vocabulary: a
+/// relative path of ordinary components, none of them hidden, whose last one
+/// is `.md`. The shape rule is what makes `..` unrepresentable — a note path
+/// can only name something the walk would have listed.
+fn note_path(root: &str, rel_path: &str) -> Result<std::path::PathBuf, NoteError> {
+    let root_path = Path::new(root);
+    if !root_path.is_absolute() || !root_path.is_dir() {
+        return Err(NoteError::BadVault(root.to_string()));
+    }
+    if rel_path.is_empty() || rel_path.len() > MAX_REL_PATH_BYTES {
+        return Err(NoteError::BadPath(rel_path.to_string()));
+    }
+    let rel = Path::new(rel_path);
+    let mut last: Option<String> = None;
+    for component in rel.components() {
+        let std::path::Component::Normal(name) = component else {
+            return Err(NoteError::BadPath(rel_path.to_string()));
+        };
+        let name = name.to_string_lossy().into_owned();
+        if name.starts_with('.') {
+            return Err(NoteError::BadPath(rel_path.to_string()));
+        }
+        last = Some(name);
+    }
+    let Some(last) = last else {
+        return Err(NoteError::BadPath(rel_path.to_string()));
+    };
+    if !has_md_extension(&last) {
+        return Err(NoteError::BadPath(rel_path.to_string()));
+    }
+    Ok(root_path.join(rel))
+}
+
+/// Load one note of a vault for the editor: the text at the display path's
+/// cap, the CRLF flag, and the stamp a later save checks.
+///
+/// Resolution does not canonicalise: the walk lists symlinked notes, and this
+/// read follows them exactly as the pane's display read does. The target must
+/// be a regular file, though — a FIFO planted in a vault must not reach
+/// `File::open`, which would block the GUI thread the FFI runs on.
+pub fn read_vault_note(root: &str, rel_path: &str) -> Result<NoteContent, NoteError> {
+    let path = note_path(root, rel_path)?;
+    let meta = std::fs::metadata(&path).map_err(|_| NoteError::NotFound)?;
+    if !meta.is_file() {
+        return Err(NoteError::NotFound);
+    }
+    let (text, truncated) = read_file_capped(&path).ok_or(NoteError::NotFound)?;
+    Ok(NoteContent {
+        crlf: text.contains("\r\n"),
+        text,
+        truncated,
+        stamp: NoteStamp::of(&meta),
+    })
+}
+
+/// Replace one note's content, atomically.
+///
+/// The write is contained: the vault-relative path must satisfy the walk's
+/// vocabulary, the resolved path (symlinks followed) must stay inside the
+/// vault — a note symlinked to a file outside it is refused, one symlinked to
+/// a sibling note is written through — and the target must be an existing
+/// regular file, because this edits notes and never creates one.
+///
+/// `expected` is the stamp the caller loaded: a note whose (mtime, size)
+/// differs is refused with [`NoteError::ChangedOnDisk`] rather than
+/// overwritten, and `None` skips the check (a forced save).
+///
+/// The replacement is a hidden sibling temp file — random name, so a
+/// concurrent walk never lists it — renamed over the target, which keeps the
+/// note's own mode and cannot truncate a file it fails to rewrite.
+pub fn write_vault_note(
+    root: &str,
+    rel_path: &str,
+    content: &str,
+    expected: Option<NoteStamp>,
+) -> Result<NoteStamp, NoteError> {
+    if content.len() as u64 > MAX_NOTE_BYTES {
+        return Err(NoteError::TooLarge(content.len()));
+    }
+    let path = note_path(root, rel_path)?;
+    let real = std::fs::canonicalize(&path).map_err(|_| NoteError::NotFound)?;
+    let root_real =
+        std::fs::canonicalize(root).map_err(|_| NoteError::BadVault(root.to_string()))?;
+    if !real.starts_with(&root_real) {
+        return Err(NoteError::Outside);
+    }
+    let meta = std::fs::metadata(&real).map_err(|_| NoteError::NotFound)?;
+    if !meta.is_file() {
+        return Err(NoteError::NotFound);
+    }
+    if let Some(expected) = expected
+        && NoteStamp::of(&meta) != expected
+    {
+        return Err(NoteError::ChangedOnDisk);
+    }
+    let Some(dir) = real.parent() else {
+        return Err(NoteError::Io(
+            "the note has no parent directory".to_string(),
+        ));
+    };
+    let tmp = dir.join(format!(".gpty-note-{:016x}.tmp", temp_suffix()));
+    if let Err(e) = std::fs::write(&tmp, content) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(NoteError::Io(format!("writing {}: {e}", tmp.display())));
+    }
+    // Keep the note's own mode: the temp file was created with the process
+    // umask, and a vault may be shared or deliberately readable by others.
+    if let Err(e) = std::fs::set_permissions(&tmp, meta.permissions()) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(NoteError::Io(format!("setting the note's mode: {e}")));
+    }
+    if let Err(e) = std::fs::rename(&tmp, &real) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(NoteError::Io(format!("replacing {}: {e}", real.display())));
+    }
+    let meta =
+        std::fs::metadata(&real).map_err(|e| NoteError::Io(format!("stamping the note: {e}")))?;
+    Ok(NoteStamp::of(&meta))
+}
+
+/// 64 bits of process-local randomness for the temp name: time nanos mixed
+/// with the pid and a per-process counter — the same rule the plugin store's
+/// temp files follow. The name is not a secret; it only has to be
+/// unpredictable to another local writer.
+fn temp_suffix() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos() as u64 | d.as_secs() << 32);
+    nanos ^ (std::process::id() as u64) << 16 ^ COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Drop the trailing bytes of an incomplete UTF-8 sequence so a body cut at
@@ -880,5 +1113,205 @@ mod tests {
         store.clear_vault(&root_str(&vault)).unwrap();
         assert_eq!(store.note_count(&root_str(&vault)).unwrap(), 0);
         assert_eq!(store.note_count("/nonexistent/other").unwrap(), 1);
+    }
+
+    // ── Note editing: the single-note read/write path ────────────────────
+
+    #[test]
+    fn a_vault_note_round_trips_through_read_and_write() {
+        let vault = temp_vault("note_round_trip");
+        write_note(&vault, "note.md", "# One\n\nbody\n");
+        let root = root_str(&vault);
+
+        let loaded = read_vault_note(&root, "note.md").unwrap();
+        assert_eq!(loaded.text, "# One\n\nbody\n");
+        assert!(!loaded.truncated);
+        assert!(!loaded.crlf);
+
+        let stamp = write_vault_note(&root, "note.md", "# Two\n", Some(loaded.stamp)).unwrap();
+        let reread = read_vault_note(&root, "note.md").unwrap();
+        assert_eq!(reread.text, "# Two\n");
+        assert_eq!(
+            reread.stamp, stamp,
+            "the write's stamp must be the file's current one"
+        );
+        assert_eq!(
+            scan_vault(&root).notes.len(),
+            1,
+            "the hidden temp file must not survive the write"
+        );
+    }
+
+    #[test]
+    fn a_stale_stamp_refuses_a_save_and_a_forced_one_goes_through() {
+        let vault = temp_vault("note_stale");
+        write_note(&vault, "note.md", "first");
+        let root = root_str(&vault);
+        let loaded = read_vault_note(&root, "note.md").unwrap();
+
+        // Someone else edited the file (a different size guarantees the
+        // stamp differs even on a coarse-grained filesystem).
+        write_note(&vault, "note.md", "second, longer");
+        let error = write_vault_note(&root, "note.md", "mine", Some(loaded.stamp)).unwrap_err();
+        assert_eq!(error, NoteError::ChangedOnDisk);
+        assert_eq!(error.code(), "changed_on_disk");
+        assert_eq!(
+            fs::read_to_string(vault.join("note.md")).unwrap(),
+            "second, longer",
+            "a refused save must leave the other writer's content alone"
+        );
+
+        let stamp = write_vault_note(&root, "note.md", "mine", None).unwrap();
+        assert_eq!(read_vault_note(&root, "note.md").unwrap().stamp, stamp);
+    }
+
+    #[test]
+    fn note_paths_must_stay_in_the_vault_vocabulary() {
+        let vault = temp_vault("note_paths");
+        write_note(&vault, "note.md", "x");
+        let root = root_str(&vault);
+        // Every path the walk could never have produced: escaping, absolute,
+        // hidden at either level, or not Markdown.
+        for rel in [
+            "",
+            "../escape.md",
+            "sub/../../escape.md",
+            "/etc/notes.md",
+            ".hidden.md",
+            "sub/.hidden.md",
+            "note.txt",
+            "..",
+        ] {
+            assert_eq!(
+                read_vault_note(&root, rel).unwrap_err(),
+                NoteError::BadPath(rel.to_string()),
+                "the read must refuse {rel:?}"
+            );
+            assert_eq!(
+                write_vault_note(&root, rel, "x", None).unwrap_err(),
+                NoteError::BadPath(rel.to_string()),
+                "the write must refuse {rel:?}"
+            );
+        }
+        assert!(
+            !std::path::Path::new(&std::env::temp_dir())
+                .join("escape.md")
+                .exists(),
+            "no refused path may have created a file"
+        );
+    }
+
+    #[test]
+    fn a_write_refuses_a_directory_and_a_missing_note_and_oversized_content() {
+        let vault = temp_vault("note_refuse");
+        fs::create_dir_all(vault.join("dir.md")).unwrap();
+        write_note(&vault, "note.md", "x");
+        let root = root_str(&vault);
+
+        assert_eq!(
+            read_vault_note(&root, "dir.md").unwrap_err(),
+            NoteError::NotFound,
+            "a directory is not a note to read"
+        );
+        assert_eq!(
+            write_vault_note(&root, "dir.md", "x", None).unwrap_err(),
+            NoteError::NotFound
+        );
+        assert_eq!(
+            write_vault_note(&root, "new.md", "x", None).unwrap_err(),
+            NoteError::NotFound,
+            "editing never creates a note"
+        );
+
+        let huge = "x".repeat(MAX_NOTE_BYTES as usize + 1);
+        assert_eq!(
+            write_vault_note(&root, "note.md", &huge, None).unwrap_err(),
+            NoteError::TooLarge(MAX_NOTE_BYTES as usize + 1)
+        );
+        assert_eq!(fs::read_to_string(vault.join("note.md")).unwrap(), "x");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_out_of_the_vault_is_written_by_neither() {
+        let vault = temp_vault("note_symlink_out");
+        let outside = temp_vault("note_symlink_target");
+        fs::write(outside.join("secret.md"), "outside").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.md"), vault.join("link.md")).unwrap();
+        let root = root_str(&vault);
+
+        assert!(
+            read_vault_note(&root, "link.md").is_ok(),
+            "reads follow the walk's symlink rule"
+        );
+        assert_eq!(
+            write_vault_note(&root, "link.md", "changed", None).unwrap_err(),
+            NoteError::Outside
+        );
+        assert_eq!(
+            fs::read_to_string(outside.join("secret.md")).unwrap(),
+            "outside",
+            "the file the link points at must be untouched"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_inside_the_vault_is_written_through() {
+        let vault = temp_vault("note_symlink_in");
+        write_note(&vault, "real.md", "one");
+        std::os::unix::fs::symlink("real.md", vault.join("alias.md")).unwrap();
+        let root = root_str(&vault);
+
+        let loaded = read_vault_note(&root, "alias.md").unwrap();
+        assert_eq!(loaded.text, "one");
+        write_vault_note(&root, "alias.md", "two", Some(loaded.stamp)).unwrap();
+        assert_eq!(fs::read_to_string(vault.join("real.md")).unwrap(), "two");
+        assert!(
+            fs::symlink_metadata(vault.join("alias.md"))
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the write replaces the target, not the link"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_write_keeps_the_notes_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let vault = temp_vault("note_mode");
+        write_note(&vault, "note.md", "x");
+        let path = vault.join("note.md");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        let root = root_str(&vault);
+
+        let loaded = read_vault_note(&root, "note.md").unwrap();
+        write_vault_note(&root, "note.md", "y", Some(loaded.stamp)).unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o640,
+            "the replacement must keep the note's mode, not the umask's"
+        );
+    }
+
+    #[test]
+    fn reading_flags_crlf_and_a_body_past_the_cap() {
+        let vault = temp_vault("note_read_flags");
+        write_note(&vault, "crlf.md", "# A\r\nline\r\n");
+        let root = root_str(&vault);
+        let loaded = read_vault_note(&root, "crlf.md").unwrap();
+        assert!(
+            loaded.crlf,
+            "a CRLF note must be flagged so the save can put the CRLFs back"
+        );
+        assert_eq!(loaded.stamp.size, 11, "# A\r\nline\r\n is 11 bytes");
+
+        let body = "y".repeat(MAX_NOTE_BYTES as usize + 64);
+        write_note(&vault, "big.md", &body);
+        let loaded = read_vault_note(&root, "big.md").unwrap();
+        assert!(loaded.truncated, "past the cap the body is a prefix");
+        assert_eq!(loaded.text.len(), MAX_NOTE_BYTES as usize);
+        assert_eq!(loaded.stamp.size, body.len() as i64);
     }
 }
