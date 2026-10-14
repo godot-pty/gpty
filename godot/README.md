@@ -68,7 +68,7 @@ godot/
             ├── inspector_pane.gd
             ├── cli_view_pane.gd
             ├── reasoning_pane.gd
-            └── wiki_pane.gd     # Read-only vault browser (Markdown notes)
+            └── wiki_pane.gd     # Vault browser and Markdown note editor
 ```
 
 ## Key Bindings
@@ -81,6 +81,12 @@ godot/
 | `Ctrl+Shift+V` | Paste from clipboard |
 | `Ctrl+Shift+F` | Toggle scrollback search |
 | `PageUp` / `PageDown` | Scroll through history |
+
+### Wiki editor
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+S` | Save the open note (same as the Save button) |
 
 ### Workspace
 
