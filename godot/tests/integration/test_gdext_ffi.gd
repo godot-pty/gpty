@@ -90,3 +90,49 @@ func test_vault_index_and_search_answer_shaped_json():
 
 	DirAccess.remove_absolute(vault.path_join("note.md"))
 	DirAccess.remove_absolute(vault)
+
+
+func test_vault_note_read_and_write_answer_shaped_json():
+	# The editor's wire contract (consumed by wiki_pane.gd): a read answers the
+	# text with the stamp and the file's shape, a write answers the fresh stamp
+	# plus whether the index caught up, and a refusal answers an `error` with
+	# the stable `code` the pane switches on.
+	var vault := ProjectSettings.globalize_path("user://gdext_ffi_notes")
+	DirAccess.make_dir_recursive_absolute(vault)
+	var note := FileAccess.open(vault.path_join("note.md"), FileAccess.WRITE)
+	note.store_string("# One\n")
+	note.close()
+
+	var read = JSON.parse_string(str(GptyTerminal.vault_note_read(vault, "note.md")))
+	assert_true(read is Dictionary, "vault_note_read must answer JSON")
+	assert_eq(read.get("text"), "# One\n")
+	assert_false(read.get("truncated", true))
+	assert_false(read.get("crlf", true), "a LF note is not a CRLF note")
+	var mtime := int(read.get("mtime", 0))
+	var size := int(read.get("size", 0))
+	assert_gt(mtime, 0, "the stamp is how a save knows what it loaded")
+	assert_eq(size, 6)
+
+	var written = JSON.parse_string(str(GptyTerminal.vault_note_write(
+		vault, "note.md", "# Two\nzebra\n", mtime, size, false)))
+	assert_false(written.has("error"), "a fresh stamp must be accepted")
+	assert_true(written.has("mtime") and written.has("size"), "the write answers the new stamp")
+	assert_eq(written.get("indexed"), true, "the write must re-index the vault")
+
+	var reread = JSON.parse_string(str(GptyTerminal.vault_note_read(vault, "note.md")))
+	assert_eq(reread.get("text"), "# Two\nzebra\n")
+	var found = JSON.parse_string(str(GptyTerminal.vault_search(vault, "zebra", 10)))
+	assert_eq(found.get("total", -1), 1, "the saved body must be searchable at once")
+
+	var stale = JSON.parse_string(str(GptyTerminal.vault_note_write(
+		vault, "note.md", "# Three\n", mtime, size, false)))
+	assert_eq(stale.get("code"), "changed_on_disk", "a stale stamp must be refused by code")
+	var after = JSON.parse_string(str(GptyTerminal.vault_note_read(vault, "note.md")))
+	assert_eq(after.get("text"), "# Two\nzebra\n", "a refused write must not touch the file")
+
+	var escape = JSON.parse_string(str(GptyTerminal.vault_note_write(
+		vault, "../escape.md", "x", -1, 0, false)))
+	assert_eq(escape.get("code"), "bad_path", "a path outside the vault is refused by shape")
+
+	DirAccess.remove_absolute(vault.path_join("note.md"))
+	DirAccess.remove_absolute(vault)

@@ -23,6 +23,47 @@ fn vault_error(message: &str) -> GString {
     GString::from(document.as_str())
 }
 
+/// A note-path error's document: the message plus the stable `code` the pane
+/// switches on (`changed_on_disk` is what offers an explicit overwrite).
+fn note_error(error: gpty_core::vault::NoteError) -> GString {
+    let document =
+        serde_json::json!({ "error": error.to_string(), "code": error.code() }).to_string();
+    GString::from(document.as_str())
+}
+
+/// Whether a note failure deserves a log line. Refusals the caller asked
+/// about — a path outside the walk's vocabulary, a note that moved, a stale
+/// stamp, content over the cap — are reported through the pane's toast or
+/// overwrite dialog; only a containment refusal (a symlink trying to leave
+/// the vault) and an I/O failure are diagnostics, because nobody asked for
+/// them and nothing else surfaces them.
+fn note_failure_is_diagnostic(error: &gpty_core::vault::NoteError) -> bool {
+    matches!(
+        error,
+        gpty_core::vault::NoteError::Outside | gpty_core::vault::NoteError::Io(_)
+    )
+}
+/// Bring one vault's index up to date, answering whether it worked. A save
+/// whose re-index fails is still a saved note, so this never fails its caller.
+fn reindex_vault(root: &str) -> bool {
+    let Some(db) = vault_db_path() else {
+        return false;
+    };
+    match gpty_core::vault::VaultStore::open(&db) {
+        Ok(mut store) => match gpty_core::vault::index_vault(&mut store, root) {
+            Ok(_) => true,
+            Err(e) => {
+                log::warn!("vault re-index after a save failed ({root}): {e}");
+                false
+            }
+        },
+        Err(e) => {
+            log::warn!("vault index open failed ({db}): {e}");
+            false
+        }
+    }
+}
+
 /// Why `path` cannot be a vault root, or `None` when it can.
 fn vault_path_problem(path: &str) -> Option<String> {
     let candidate = std::path::Path::new(path);
@@ -139,6 +180,108 @@ impl GptyTerminal {
             Err(e) => {
                 log::warn!("vault search failed ({path}): {e}");
                 vault_error(&format!("vault search failed: {e}"))
+            }
+        }
+    }
+
+    /// Load one note for the editor (JSON).
+    ///
+    /// `rel_path` is a vault-relative note path (the spelling the index
+    /// answers and the list shows). Returns
+    /// `{"text", "truncated", "crlf", "mtime", "size"}`: the text at the
+    /// display path's 1 MiB cut, whether that cut hit a larger file (the pane
+    /// must not offer editing — a save would drop the tail), whether the file
+    /// uses CRLF endings, and the stamp a later save checks (`mtime` is in
+    /// microseconds since the epoch — exact in JSON's double, unlike the
+    /// index's nanoseconds). On failure the answer is `{"error", "code"}` —
+    /// `code` is the stable discriminator the pane switches on.
+    #[func]
+    fn vault_note_read(vault_path: GString, rel_path: GString) -> GString {
+        let path = vault_path.to_string();
+        if let Some(problem) = vault_path_problem(&path) {
+            return vault_error(&problem);
+        }
+        match gpty_core::vault::read_vault_note(&path, &rel_path.to_string()) {
+            Ok(note) => {
+                let document = serde_json::json!({
+                    "text": note.text,
+                    "truncated": note.truncated,
+                    "crlf": note.crlf,
+                    "mtime": note.stamp.mtime,
+                    "size": note.stamp.size,
+                })
+                .to_string();
+                GString::from(document.as_str())
+            }
+            Err(e) => {
+                if note_failure_is_diagnostic(&e) {
+                    log::warn!("vault note read failed ({path}): {e}");
+                }
+                note_error(e)
+            }
+        }
+    }
+
+    /// Replace one note's content (JSON), and re-index the vault.
+    ///
+    /// Only an existing note is written — this edits, it never creates — and
+    /// the write stays inside the vault: the path must satisfy the walk's
+    /// vocabulary and the resolved file (symlinks followed) must live under
+    /// the root. `expected_mtime`/`expected_size` are the stamp the caller
+    /// loaded; a note that differs on disk is refused with
+    /// `code: "changed_on_disk"` rather than overwritten, unless `force` is
+    /// true (that is what the pane's overwrite confirmation passes). The
+    /// replacement is atomic and keeps the note's own mode.
+    ///
+    /// Returns `{"mtime", "size", "indexed"}` with the file's fresh stamp —
+    /// `indexed` is false when the note is saved but the search index could
+    /// not be brought up to date. On failure: `{"error", "code"}`.
+    #[func]
+    fn vault_note_write(
+        vault_path: GString,
+        rel_path: GString,
+        content: GString,
+        expected_mtime: i64,
+        expected_size: i64,
+        force: bool,
+    ) -> GString {
+        let path = vault_path.to_string();
+        if let Some(problem) = vault_path_problem(&path) {
+            return vault_error(&problem);
+        }
+        let expected = if force || expected_mtime < 0 {
+            None
+        } else {
+            Some(gpty_core::vault::NoteStamp {
+                mtime: expected_mtime,
+                size: expected_size,
+            })
+        };
+        match gpty_core::vault::write_vault_note(
+            &path,
+            &rel_path.to_string(),
+            &content.to_string(),
+            expected,
+        ) {
+            Ok(stamp) => {
+                // Write-through: the file is the index's source of truth, so
+                // a caller never has to remember a second call to make the
+                // edit searchable — and a failed re-index is not a failed
+                // save, which is why it is a field and not an error.
+                let indexed = reindex_vault(&path);
+                let document = serde_json::json!({
+                    "mtime": stamp.mtime,
+                    "size": stamp.size,
+                    "indexed": indexed,
+                })
+                .to_string();
+                GString::from(document.as_str())
+            }
+            Err(e) => {
+                if note_failure_is_diagnostic(&e) {
+                    log::warn!("vault note write failed ({path}): {e}");
+                }
+                note_error(e)
             }
         }
     }
