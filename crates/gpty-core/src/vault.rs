@@ -502,6 +502,198 @@ pub fn note_title(rel_path: &str, body: &str) -> String {
     stem.chars().take(MAX_TITLE_CHARS).collect()
 }
 
+// ── Recovery copies (the editor's unsaved buffers) ─────────────────────
+//
+// The editor holds its buffer in memory only — [`write_vault_note`] runs on an
+// explicit save and nothing writes on teardown — so a crash, or an outside
+// kill, takes whatever was typed since. These three functions are the other
+// half of that design: a throttled snapshot of the buffer *outside the vault*,
+// under gpty's own state directory, offered back when the same note is
+// reopened, and never applied on its own.
+//
+// The copy is keyed by the canonical vault root and the note path, so the same
+// note reached through a different spelling of the root finds its copy, and
+// the record repeats that identity so a stale file (or a hash collision) can
+// only answer "no copy" — never somebody else's text. Nothing here touches a
+// vault: an absent copy is the normal state, and every failure is a diagnostic
+// rather than a refusal the caller asked about, because no write to a note is
+// at stake.
+
+/// Longest recovery copy stored: the editor's buffer space, held to the same
+/// 1 MiB the note read cuts at. A copy can only come from a note this module
+/// let the editor edit, so it can never be larger than the note it copies —
+/// and a buffer past that cap could not be saved either ([`write_vault_note`]
+/// refuses it the same way), so refusing its copy keeps the two limits saying
+/// the same thing rather than promising a recovery nothing could write back.
+pub const MAX_SCRATCH_BYTES: u64 = MAX_NOTE_BYTES;
+
+/// One note's recovery copy: the unsaved buffer, and the stamp of the file
+/// revision it was typed against — so a save restored from it still checks the
+/// file the user actually saw.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Scratch {
+    pub text: String,
+    pub stamp: NoteStamp,
+}
+
+/// Where one note's copy lives: its canonical vault root (the identity the
+/// record repeats) and the file both hash to, under `dir`.
+fn scratch_location(
+    dir: &str,
+    root: &str,
+    rel_path: &str,
+) -> Result<(String, std::path::PathBuf), NoteError> {
+    // The walk's own vocabulary, so a copy can only belong to a note the walk
+    // could have listed; the resolved path itself is unused, because nothing
+    // here reads or writes the vault.
+    note_path(root, rel_path)?;
+    let root_real =
+        std::fs::canonicalize(root).map_err(|_| NoteError::BadVault(root.to_string()))?;
+    let root_key = root_real.to_string_lossy().into_owned();
+    let file = Path::new(dir).join(format!("{:016x}.json", scratch_key(&root_key, rel_path)));
+    Ok((root_key, file))
+}
+
+/// 64 bits of FNV-1a over the canonical root, a NUL, and the note path.
+///
+/// Fixed here rather than taken from `DefaultHasher`: Rust promises nothing
+/// about that algorithm across releases, and a toolchain bump would silently
+/// orphan every copy in the state directory.
+fn scratch_key(root_key: &str, rel_path: &str) -> u64 {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET;
+    let bytes = root_key
+        .bytes()
+        .chain(std::iter::once(0))
+        .chain(rel_path.bytes());
+    for byte in bytes {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(PRIME);
+    }
+    hash
+}
+
+/// Snapshot one note's unsaved buffer under `dir`.
+///
+/// `stamp` is the stamp the buffer was loaded from. The write is atomic — a
+/// hidden temp file under a random name, renamed over the previous copy — so an
+/// interrupted write cannot truncate the copy the user may still need, and the
+/// file is restricted to its owner like every store gpty writes.
+pub fn write_scratch(
+    dir: &str,
+    root: &str,
+    rel_path: &str,
+    text: &str,
+    stamp: NoteStamp,
+) -> Result<(), NoteError> {
+    if text.len() as u64 > MAX_SCRATCH_BYTES {
+        return Err(NoteError::TooLarge(text.len()));
+    }
+    let (root_key, path) = scratch_location(dir, root, rel_path)?;
+    let Some(parent) = path.parent() else {
+        return Err(NoteError::Io(format!(
+            "the recovery copy has no directory: {}",
+            path.display()
+        )));
+    };
+    ensure_private_dir(parent)?;
+    let document = serde_json::json!({
+        "vault": root_key,
+        "path": rel_path,
+        "mtime": stamp.mtime,
+        "size": stamp.size,
+        "text": text,
+    })
+    .to_string();
+    let tmp = parent.join(format!(".gpty-scratch-{:016x}.tmp", temp_suffix()));
+    if let Err(e) = std::fs::write(&tmp, document) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(NoteError::Io(format!("writing {}: {e}", tmp.display())));
+    }
+    restrict_to_owner(&tmp.to_string_lossy());
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(NoteError::Io(format!("replacing {}: {e}", path.display())));
+    }
+    Ok(())
+}
+
+/// Load one note's recovery copy, `None` when there is none.
+///
+/// A copy that cannot be parsed, or whose record names a different vault or
+/// note, answers as absent — never as the wrong text — and is reported as a
+/// diagnostic. A stamp that is missing or malformed reads as `(0, 0)`: no real
+/// file's stamp equals that, so a restore into such a copy still has to pass
+/// the save's own conflict check.
+pub fn read_scratch(dir: &str, root: &str, rel_path: &str) -> Result<Option<Scratch>, NoteError> {
+    let (root_key, path) = scratch_location(dir, root, rel_path)?;
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            log::warn!("could not read the recovery copy {}: {e}", path.display());
+            return Ok(None);
+        }
+    };
+    let Ok(document) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        log::warn!("ignoring an unreadable recovery copy at {}", path.display());
+        return Ok(None);
+    };
+    if document.get("vault").and_then(|v| v.as_str()) != Some(root_key.as_str())
+        || document.get("path").and_then(|v| v.as_str()) != Some(rel_path)
+    {
+        log::warn!(
+            "ignoring a recovery copy that names another note: {}",
+            path.display()
+        );
+        return Ok(None);
+    }
+    let Some(text) = document.get("text").and_then(|v| v.as_str()) else {
+        log::warn!("ignoring a recovery copy without text: {}", path.display());
+        return Ok(None);
+    };
+    let field = |name: &str| document.get(name).and_then(|v| v.as_i64()).unwrap_or(0);
+    Ok(Some(Scratch {
+        text: text.to_string(),
+        stamp: NoteStamp {
+            mtime: field("mtime"),
+            size: field("size"),
+        },
+    }))
+}
+
+/// Drop one note's recovery copy. Absent is not an error: the pane clears on
+/// every deliberate end (a save, a discard) and most of them have no copy to
+/// clear, because nothing was typed since the last one.
+pub fn clear_scratch(dir: &str, root: &str, rel_path: &str) -> Result<(), NoteError> {
+    let (_, path) = scratch_location(dir, root, rel_path)?;
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(NoteError::Io(format!("removing {}: {e}", path.display()))),
+    }
+}
+
+/// Create the recovery copy's directory, owner-only.
+///
+/// The files inside carry the 0600 every store gets; a directory others can
+/// list would still name them, and the process umask decides the mode
+/// `create_dir_all` leaves behind. Best effort on the mode like
+/// [`restrict_to_owner`]: a directory whose mode cannot be set is worth a log
+/// line, not a lost edit.
+fn ensure_private_dir(dir: &Path) -> Result<(), NoteError> {
+    std::fs::create_dir_all(dir).map_err(|e| NoteError::Io(format!("{}: {e}", dir.display())))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)) {
+            log::warn!("could not restrict {} to its owner: {e}", dir.display());
+        }
+    }
+    Ok(())
+}
+
 /// The vault index.
 pub struct VaultStore {
     conn: Connection,
@@ -1293,6 +1485,188 @@ mod tests {
             mode, 0o640,
             "the replacement must keep the note's mode, not the umask's"
         );
+    }
+
+    fn temp_scratch(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("gpty_scratch_{tag}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn a_recovery_copy_round_trips_and_clears() {
+        let vault = temp_vault("scratch_round_trip");
+        write_note(&vault, "note.md", "one\n");
+        let dir = temp_scratch("round_trip");
+        let root = root_str(&vault);
+        let dir = root_str(&dir);
+        let stamp = NoteStamp {
+            mtime: 1_700_000_000_000_000,
+            size: 4,
+        };
+
+        assert_eq!(
+            read_scratch(&dir, &root, "note.md").unwrap(),
+            None,
+            "no copy has been written yet"
+        );
+        write_scratch(&dir, &root, "note.md", "typed\ntext\n", stamp).unwrap();
+        assert_eq!(
+            read_scratch(&dir, &root, "note.md").unwrap(),
+            Some(Scratch {
+                text: "typed\ntext\n".to_string(),
+                stamp,
+            })
+        );
+
+        // A later snapshot replaces the copy rather than accumulating files.
+        let later = NoteStamp {
+            mtime: 1_700_000_000_000_001,
+            size: 4,
+        };
+        write_scratch(&dir, &root, "note.md", "more\n", later).unwrap();
+        assert_eq!(
+            read_scratch(&dir, &root, "note.md").unwrap().unwrap().text,
+            "more\n"
+        );
+
+        clear_scratch(&dir, &root, "note.md").unwrap();
+        assert_eq!(read_scratch(&dir, &root, "note.md").unwrap(), None);
+        // Clearing again is the common case, not an error: the pane clears on
+        // every deliberate end, whether or not a copy exists.
+        clear_scratch(&dir, &root, "note.md").unwrap();
+    }
+
+    #[test]
+    fn a_recovery_copy_is_keyed_by_vault_and_note() {
+        let vault = temp_vault("scratch_keys");
+        let other_vault = temp_vault("scratch_keys_other");
+        write_note(&vault, "a.md", "a");
+        write_note(&vault, "b.md", "b");
+        write_note(&other_vault, "a.md", "a");
+        let dir = root_str(&temp_scratch("keys"));
+        let root = root_str(&vault);
+        let other_root = root_str(&other_vault);
+        let stamp = NoteStamp { mtime: 7, size: 1 };
+
+        write_scratch(&dir, &root, "a.md", "A", stamp).unwrap();
+        write_scratch(&dir, &root, "b.md", "B", stamp).unwrap();
+        write_scratch(&dir, &other_root, "a.md", "OTHER", stamp).unwrap();
+
+        clear_scratch(&dir, &root, "a.md").unwrap();
+        assert_eq!(read_scratch(&dir, &root, "a.md").unwrap(), None);
+        assert_eq!(
+            read_scratch(&dir, &root, "b.md").unwrap().unwrap().text,
+            "B",
+            "a sibling note keeps its copy"
+        );
+        assert_eq!(
+            read_scratch(&dir, &other_root, "a.md")
+                .unwrap()
+                .unwrap()
+                .text,
+            "OTHER",
+            "the same note path in another vault is another copy"
+        );
+    }
+
+    #[test]
+    fn a_copy_that_names_another_note_is_never_restored() {
+        let vault = temp_vault("scratch_identity");
+        write_note(&vault, "note.md", "x");
+        let dir = root_str(&temp_scratch("identity"));
+        let root = root_str(&vault);
+
+        // The file is named by a hash, so what it *says* is the safety net:
+        // a record naming another vault or note must read as absent.
+        let (_, path) = scratch_location(&dir, &root, "note.md").unwrap();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let record = |vault: &str, rel: &str, text: &str| {
+            serde_json::json!({ "vault": vault, "path": rel, "mtime": 1, "size": 1, "text": text })
+                .to_string()
+        };
+        fs::write(&path, record("/somewhere/else", "note.md", "theirs")).unwrap();
+        assert_eq!(read_scratch(&dir, &root, "note.md").unwrap(), None);
+        fs::write(&path, record(&root, "other.md", "theirs")).unwrap();
+        assert_eq!(read_scratch(&dir, &root, "note.md").unwrap(), None);
+        fs::write(&path, "not json at all").unwrap();
+        assert_eq!(read_scratch(&dir, &root, "note.md").unwrap(), None);
+        // A record that names the note but has no stamp must not answer with
+        // a stamp that could match a file and skip the save's conflict check.
+        fs::write(
+            &path,
+            serde_json::json!({ "vault": root, "path": "note.md", "text": "mine" }).to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            read_scratch(&dir, &root, "note.md").unwrap().unwrap().stamp,
+            NoteStamp { mtime: 0, size: 0 }
+        );
+    }
+
+    #[test]
+    fn a_copy_can_only_belong_to_a_note_path() {
+        let vault = temp_vault("scratch_paths");
+        write_note(&vault, "note.md", "x");
+        let dir = root_str(&temp_scratch("paths"));
+        let root = root_str(&vault);
+        let stamp = NoteStamp { mtime: 1, size: 1 };
+
+        for bad in [
+            "../escape.md",
+            "/etc/passwd.md",
+            ".hidden.md",
+            "sub/.hidden/note.md",
+            "note.txt",
+            "",
+        ] {
+            assert!(
+                matches!(
+                    write_scratch(&dir, &root, bad, "x", stamp),
+                    Err(NoteError::BadPath(_))
+                ),
+                "{bad:?} is not a note path and must have no copy"
+            );
+            assert!(matches!(
+                read_scratch(&dir, &root, bad),
+                Err(NoteError::BadPath(_))
+            ));
+            assert!(matches!(
+                clear_scratch(&dir, &root, bad),
+                Err(NoteError::BadPath(_))
+            ));
+        }
+        assert!(matches!(
+            write_scratch(&dir, "/no/such/vault", "note.md", "x", stamp),
+            Err(NoteError::BadVault(_))
+        ));
+        assert!(matches!(
+            write_scratch(
+                &dir,
+                &root,
+                "note.md",
+                &"x".repeat(MAX_SCRATCH_BYTES as usize + 1),
+                stamp
+            ),
+            Err(NoteError::TooLarge(_))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_recovery_copy_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let vault = temp_vault("scratch_mode");
+        write_note(&vault, "note.md", "x");
+        let dir = root_str(&temp_scratch("mode"));
+        let root = root_str(&vault);
+        write_scratch(&dir, &root, "note.md", "x", NoteStamp { mtime: 1, size: 1 }).unwrap();
+
+        let (_, path) = scratch_location(&dir, &root, "note.md").unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "an unsaved buffer is nobody else's to read");
+        let dir_mode = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(dir_mode, 0o700, "and neither are the names of the copies");
     }
 
     #[test]
