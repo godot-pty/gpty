@@ -151,6 +151,14 @@ func test_a_search_with_no_match_says_so():
 	pane._run_search()
 	assert_eq(pane._list.item_count, 0)
 	assert_true(pane._placeholder.visible)
+	# A zero-hit search must not be a dead end: the box stays so the query can
+	# be amended, and clearing it brings the vault back.
+	assert_true(pane._search.visible, "the query must stay editable")
+	assert_true(pane._search.clear_button_enabled, "and clearable")
+	pane._search.text = ""
+	pane._run_search()
+	assert_false(pane._placeholder.visible)
+	assert_eq(_list_texts(pane), ["alpha.md"], "clearing the query restores the list")
 
 
 func test_layout_state_carries_the_vault_path():

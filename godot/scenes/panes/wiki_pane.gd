@@ -223,7 +223,7 @@ func _refresh():
 	_list.clear()
 	var problem := _vault_problem()
 	if problem != "":
-		_show_placeholder(problem)
+		_show_placeholder(problem, false)
 		return
 	_search.visible = true
 	if _search.text.strip_edges() != "":
@@ -289,14 +289,17 @@ func _run_search() -> void:
 	_placeholder.visible = false
 	_list.visible = true
 
-func _show_placeholder(text: String) -> void:
+## Replace the content area with a message. `searchable` says whether the
+## search box stays in the top row: a query can be amended and cleared (a
+## zero-hit search must not strand the pane with no way back to the notes),
+## while a vault that cannot be opened has nothing to search at all.
+func _show_placeholder(text: String, searchable := true) -> void:
 	_placeholder.text = text
 	_placeholder.visible = true
 	_list.visible = false
 	_note_box.visible = false
 	_back.visible = false
-	if _search != null:
-		_search.visible = false
+	_search.visible = searchable
 
 ## Leave the note and show the list. The Back button routes through
 ## `_request_leave`, so an unsaved note asks first; `_refresh` is the
