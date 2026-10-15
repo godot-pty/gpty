@@ -13,6 +13,13 @@ class_name WikiPane
 ## `gpty_core::vault` (reached through `GptyTerminal.vault_index`,
 ## `vault_search`, `vault_note_read`, `vault_note_write`), so the pane and the
 ## index cannot disagree about which files are notes.
+##
+## The close guards cover every deliberate way a buffer can end; a crash (or an
+## outside kill) has no guard to run, so the pane also keeps a *recovery copy*
+## of a dirty buffer outside the vault (`GptyTerminal.vault_scratch_write`,
+## under gpty's state directory — never a second write path into the vault) and
+## offers it back when the same note is reopened: never applied on its own, and
+## dropped the moment the buffer reaches the file or the user discards it.
 
 @export var vault_path := ""
 ## Note view: `edit` (source only) | `split` (source + live preview) |
@@ -27,6 +34,11 @@ const MAX_SHOWN_QUERY := 60
 const SEARCH_LIMIT := 200
 ## Wait after a keystroke before querying the index.
 const SEARCH_DEBOUNCE := 0.15
+## Wait after a buffer turns dirty before its recovery copy is written. The
+## copy is throttled, not restarted per keystroke — a debounce that resets on
+## every keystroke never fires during a long typing run, which is exactly when
+## the most work is at risk — so at most this much typing can be lost.
+const SCRATCH_DEBOUNCE := 1.5
 ## The note view's modes, in toolbar order.
 const VIEW_MODES := ["edit", "split", "preview"]
 
@@ -43,6 +55,7 @@ var _mode_buttons: Dictionary = {}
 var _placeholder: Label
 var _footer: Label
 var _search_timer: Timer
+var _scratch_timer: Timer
 
 ## The open note: its vault-relative path (the index's spelling), the text as
 ## loaded — what "dirty" is measured against — and the stamp the save checks.
@@ -56,6 +69,10 @@ var _crlf := false
 ## False when the load hit the 1 MiB cap: a save would replace the whole file
 ## with its first MiB, so that note is shown read-only.
 var _editable_note := false
+## The recovery copy a restore question is about, and the note it belongs to,
+## for as long as that question is on screen.
+var _restore_copy: Dictionary = {}
+var _restore_rel := ""
 
 func _ready():
 	super._ready()
@@ -199,6 +216,12 @@ func _ready():
 	_search_timer.timeout.connect(_run_search)
 	add_child(_search_timer)
 
+	_scratch_timer = Timer.new()
+	_scratch_timer.one_shot = true
+	_scratch_timer.wait_time = SCRATCH_DEBOUNCE
+	_scratch_timer.timeout.connect(_write_scratch)
+	add_child(_scratch_timer)
+
 	_apply_font_size()
 
 	# The spawn/restore apply_settings call runs before the node enters the
@@ -328,6 +351,9 @@ func _clear_note() -> void:
 	_loaded_size = 0
 	_crlf = false
 	_editable_note = false
+	# No note is open, so no recovery copy is pending. The copy on disk is
+	# another matter: a deliberate end drops it, and nothing here does.
+	_scratch_timer.stop()
 
 ## Why `vault_path` cannot be opened, or "" when it can.
 func _vault_problem() -> String:
@@ -356,18 +382,25 @@ func _open_note(rel: String) -> void:
 		ToastManager.warn("Could not open note: " + why, 4.0, "Wiki")
 		return
 	_current_rel = rel
+	# The editor works in LF; `_payload` puts the CRLFs back on save. The text
+	# "dirty" is measured against has to be in that same space, or every CRLF
+	# note would open already dirty — with Save lit for an edit nobody made, and
+	# a recovery copy offered back for the file the pane just read.
 	_saved_text = str(answer.get("text", ""))
+	if bool(answer.get("crlf", false)):
+		_saved_text = _saved_text.replace("\r\n", "\n")
 	_loaded_mtime = int(answer.get("mtime", 0))
 	_loaded_size = int(answer.get("size", 0))
 	_crlf = bool(answer.get("crlf", false))
 	# A truncated read is a prefix; editing it and saving would drop the rest
 	# of the file, so that note stays read-only.
 	_editable_note = not bool(answer.get("truncated", false))
-	# The editor works in LF; `_payload` puts the CRLFs back on save. (Setting
-	# `text` reaches `_on_editor_changed` a frame later, like every TextEdit
-	# change — harmless, because that handler recomputes the state instead of
-	# trusting the signal.)
-	_editor.text = _saved_text.replace("\r\n", "\n") if _crlf else _saved_text
+	# A pending copy from the previous note must not fire into this one.
+	_scratch_timer.stop()
+	# (Setting `text` reaches `_on_editor_changed` a frame later, like every
+	# TextEdit change — harmless, because that handler recomputes the state
+	# instead of trusting the signal.)
+	_editor.text = _saved_text
 	_editor.editable = _editable_note
 	_editor.scroll_vertical = 0
 	_note_title.text = rel
@@ -381,6 +414,8 @@ func _open_note(rel: String) -> void:
 	_apply_view_mode()
 	_update_dirty()
 	_reader.scroll_to_line(0)
+	# Last, so the note is on screen when the question appears.
+	_offer_scratch(rel)
 
 ## Show the mode's views and keep the toolbar's buttons on the active one.
 func _apply_view_mode() -> void:
@@ -422,6 +457,7 @@ func _preview_text() -> String:
 ## current buffer rather than trusting the signal's timing.
 func _on_editor_changed() -> void:
 	_update_dirty()
+	_touch_scratch()
 	if _preview_visible():
 		_reader.set_markdown(_preview_text())
 
@@ -484,11 +520,128 @@ func _save(force := false, answer := Callable()) -> void:
 	_saved_text = _editor.text
 	_loaded_mtime = int(reply.get("mtime", 0))
 	_loaded_size = int(reply.get("size", 0))
+	# The buffer reached the file, so the crash copy has nothing left to say.
+	_drop_scratch(vault_path, _current_rel)
 	_update_dirty()
 	if not bool(reply.get("indexed", true)):
 		ToastManager.warn("Saved %s, but the search index could not be updated" % _current_rel, 5.0, "Wiki")
 	if answer.is_valid():
 		answer.call(true)
+
+# ── The recovery copy: the buffer a crash would take ───────────────────
+
+## Arm the recovery copy after an edit. The timer is not restarted by later
+## edits (see `SCRATCH_DEBOUNCE`), and a clean buffer has nothing to keep: the
+## copy it might have is the one a deliberate end already dropped.
+func _touch_scratch() -> void:
+	if _current_rel == "" or not _is_dirty():
+		_scratch_timer.stop()
+		return
+	if _scratch_timer.is_stopped():
+		_scratch_timer.start()
+
+## Refresh the open note's recovery copy. Nothing here can reach the vault —
+## the copy lives under gpty's own state directory, and `_save` is still the
+## only caller of `vault_note_write`. A copy that cannot be written is not a
+## user-facing failure (the buffer is on screen, and a disk that refuses this
+## write fails the save loudly enough), so the Rust side logs it and the pane
+## stays quiet.
+func _write_scratch() -> void:
+	if _current_rel == "" or not _is_dirty():
+		return
+	GptyTerminal.vault_scratch_write(
+		vault_path, _current_rel, _editor.text, _loaded_mtime, _loaded_size
+	)
+
+## The recovery copy for `rel`, or {} when there is none.
+func _read_scratch(rel: String) -> Dictionary:
+	var answer = JSON.parse_string(str(GptyTerminal.vault_scratch_read(vault_path, rel)))
+	if answer is Dictionary and bool(answer.get("found", false)):
+		return answer
+	return {}
+
+## Forget the recovery copy of one note: its buffer either reached the file or
+## was deliberately discarded, and a copy outliving that would offer the work
+## back as if the user had never answered.
+func _drop_scratch(root: String, rel: String) -> void:
+	if rel == _current_rel:
+		_scratch_timer.stop()
+	if root == "" or rel == "":
+		return
+	GptyTerminal.vault_scratch_clear(root, rel)
+
+## Offer the recovery copy a crash left behind, right after the note is on
+## screen. Never automatic: the file is what the note says, and only an answer
+## here changes what the editor holds.
+##
+##   Restore  the buffer comes back — dirty, and still carrying the stamp of
+##            the revision it was typed against, so a file that moved on while
+##            gpty was away gets the save's own conflict question first;
+##   Discard  the copy goes;
+##   Escape   "not now": the file stays, the copy stays, the next open asks
+##            again.
+func _offer_scratch(rel: String) -> void:
+	if not _editable_note:
+		# A note past the cap is read-only, so a restored buffer could never be
+		# saved and the pane's close guard would not see it as unsaved work:
+		# restoring would be a promise the pane cannot keep. The copy stays, for
+		# whenever the note is editable again.
+		return
+	var copy := _read_scratch(rel)
+	if copy.is_empty():
+		return
+	if str(copy.get("text", "")) == _saved_text:
+		# A typed change that was undone: leftover, not a question.
+		_drop_scratch(vault_path, rel)
+		return
+	var dialog := ConfirmationDialog.new()
+	dialog.name = "RestoreConfirm"
+	dialog.title = "Unsaved changes recovered"
+	dialog.dialog_text = "%s had unsaved changes when gpty last closed.\n\nRestore them?" % rel
+	dialog.ok_button_text = "Restore"
+	dialog.add_button("Discard", true, "discard")
+	add_child(dialog)
+	_restore_copy = copy
+	_restore_rel = rel
+	dialog.confirmed.connect(_apply_restore.bind(dialog))
+	dialog.custom_action.connect(_discard_restore.bind(dialog))
+	dialog.canceled.connect(dialog.queue_free)
+	dialog.popup_centered()
+
+## The Restore answer: put the recovered buffer back in the editor.
+func _apply_restore(dialog: Window) -> void:
+	dialog.queue_free()
+	var rel := _restore_rel
+	var copy := _restore_copy
+	_restore_copy = {}
+	_restore_rel = ""
+	if rel == "" or rel != _current_rel:
+		# The note was replaced under the question (a vault change from the
+		# settings panel): this copy is not the open editor's to take.
+		return
+	# Setting `text` marks the buffer dirty through `_on_editor_changed` a frame
+	# later; the stamp the copy carries is what a save then checks, so a file
+	# that changed while gpty was away still gets the conflict question.
+	_editor.text = str(copy.get("text", ""))
+	_loaded_mtime = int(copy.get("mtime", 0))
+	_loaded_size = int(copy.get("size", 0))
+	_editor.scroll_vertical = 0
+	_update_dirty()
+	if _preview_visible():
+		_reader.render_now(_preview_text())
+	ToastManager.info("Restored unsaved changes to %s" % rel, 4.0, "Wiki")
+
+## The Discard answer (the dialog's custom action): the user decided, so the
+## question must not come back.
+func _discard_restore(action: String, dialog: Window) -> void:
+	if action != "discard":
+		return
+	dialog.queue_free()
+	var rel := _restore_rel
+	_restore_copy = {}
+	_restore_rel = ""
+	if rel != "":
+		_drop_scratch(vault_path, rel)
 
 ## The note changed on disk since it was opened (another editor, a git
 ## checkout): overwriting it is the user's call, never the pane's. `answer`
@@ -547,6 +700,9 @@ func _request_leave(answer: Callable) -> void:
 	dialog.custom_action.connect(func(action):
 		if action == "discard":
 			dialog.queue_free()
+			# The user just decided this buffer's fate: the recovery copy must
+			# not offer it back at the next open.
+			_drop_scratch(vault_path, _current_rel)
 			answer.call(true)
 	)
 	dialog.canceled.connect(func():
@@ -557,7 +713,8 @@ func _request_leave(answer: Callable) -> void:
 
 func _has_open_ask() -> bool:
 	return find_child("DiscardConfirm", false, false) != null \
-		or find_child("OverwriteConfirm", false, false) != null
+		or find_child("OverwriteConfirm", false, false) != null \
+		or find_child("RestoreConfirm", false, false) != null
 
 ## The close contract (`PaneBody.request_close`): the pane is about to be
 ## destroyed, so the buffer is about to be lost for good — the same ask the
@@ -589,6 +746,9 @@ func apply_settings(settings: Dictionary):
 			# settings panel's debounce makes a dialog here unusable — say
 			# what was lost instead of discarding it silently.
 			ToastManager.warn("Discarded unsaved changes to %s (vault changed)" % _current_rel, 5.0, "Wiki")
+		# That discard is the user's answer by another route: the copy goes too,
+		# and it is keyed by the vault the buffer belonged to.
+		_drop_scratch(previous_vault, _current_rel)
 		# A different vault makes the old query meaningless.
 		_search.text = ""
 		_apply_font_size()

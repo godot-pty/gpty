@@ -7,15 +7,29 @@ extends GutTest
 # of that index.
 
 var _tmp: String
+## The recovery-copy tests' own vault. A copy is keyed by the vault path, so
+## the run's ticks make that key unreachable from any later run: a copy leaked
+## by an interrupted suite can never be offered to somebody else's pane.
+var _scratch_tmp: String
 
 
 func before_each():
 	MockAutoloads.setup()
 	_tmp = ProjectSettings.globalize_path("user://wiki_probe_vault")
 	DirAccess.make_dir_recursive_absolute(_tmp)
+	_scratch_tmp = ProjectSettings.globalize_path(
+		"user://wiki_probe_scratch_%d" % Time.get_ticks_usec()
+	)
+	DirAccess.make_dir_recursive_absolute(_scratch_tmp)
 
 
 func after_each():
+	# Recovery copies live in gpty's state directory, not under the probe vault,
+	# so removing the tree does not remove them — clear them first, while the
+	# vault they are keyed to still exists.
+	for rel in ["note.md", "big.md"]:
+		GptyTerminal.vault_scratch_clear(_scratch_tmp, rel)
+	_remove_tree(_scratch_tmp)
 	_remove_tree(_tmp)
 	MockAutoloads.teardown()
 
@@ -480,3 +494,215 @@ func test_layout_state_carries_the_note_view_mode():
 	assert_eq(restored.view_mode, "split")
 	restored.apply_settings({"view_mode": "edit"})
 	assert_eq(restored.view_mode, "edit")
+
+# ── The recovery copy: what a crash cannot take ────────────────────────
+#
+# The close guards cover every deliberate end; a crash (or an outside kill) has
+# no guard to run, so a dirty buffer is also snapshotted outside the vault and
+# offered back when the note is reopened. These tests drive the pane's own
+# timer and its own dialogs against the real store: the copy is written under
+# gpty's state directory, and the vault is where it is read from.
+
+## The recovery copy a later session would find for one note, asked through the
+## same call the pane uses to offer it.
+func _stored_copy(vault: String, rel: String) -> Dictionary:
+	var answer = JSON.parse_string(str(GptyTerminal.vault_scratch_read(vault, rel)))
+	return answer if answer is Dictionary else {}
+
+
+func _has_copy(vault: String, rel: String) -> bool:
+	return bool(_stored_copy(vault, rel).get("found", false))
+
+
+func test_a_dirty_buffer_gets_a_recovery_copy_and_a_clean_one_does_not():
+	_write(_scratch_tmp.path_join("note.md"), "# One\n")
+	var pane := _make_pane(_scratch_tmp)
+	# The debounce is 1.5 s in the real pane; this is the pane's own timer, so
+	# only the wait is shortened.
+	pane._scratch_timer.wait_time = 0.05
+	pane._list.item_activated.emit(0)
+	await wait_seconds(0.1)
+	assert_false(_has_copy(_scratch_tmp, "note.md"), "a clean note writes no copy")
+
+	await _type_into(pane, "# Two\n\nedited\n")
+	await wait_seconds(0.1)
+	var copy := _stored_copy(_scratch_tmp, "note.md")
+	assert_true(bool(copy.get("found", false)), "a typed buffer must reach the copy")
+	assert_eq(str(copy.get("text", "")), "# Two\n\nedited\n")
+	assert_eq(int(copy.get("mtime", 0)), pane._loaded_mtime,
+		"the copy carries the stamp the buffer was typed against")
+	assert_eq(int(copy.get("size", 0)), pane._loaded_size)
+
+
+func test_the_recovery_copy_is_throttled_rather_than_restarted_per_keystroke():
+	_write(_scratch_tmp.path_join("note.md"), "# One\n")
+	var pane := _make_pane(_scratch_tmp)
+	pane._scratch_timer.wait_time = 1.0
+	pane._list.item_activated.emit(0)
+
+	await _type_into(pane, "a\n")
+	var armed := pane._scratch_timer.time_left
+	await wait_seconds(0.1)
+	await _type_into(pane, "b\n")
+	assert_true(pane._scratch_timer.time_left < armed,
+		"a later keystroke must not push the copy out again, or a long typing run would never be covered")
+
+
+func test_a_save_drops_the_recovery_copy():
+	_write(_scratch_tmp.path_join("note.md"), "# One\n")
+	var pane := _make_pane(_scratch_tmp)
+	pane._scratch_timer.wait_time = 0.05
+	pane._list.item_activated.emit(0)
+	await _type_into(pane, "# Two\n")
+	await wait_seconds(0.1)
+	assert_true(_has_copy(_scratch_tmp, "note.md"))
+
+	pane._save()
+	assert_false(_has_copy(_scratch_tmp, "note.md"),
+		"a save ends the copy's reason to exist")
+
+
+func test_a_discard_drops_the_recovery_copy():
+	_write(_scratch_tmp.path_join("note.md"), "# One\n")
+	var pane := _make_pane(_scratch_tmp)
+	pane._scratch_timer.wait_time = 0.05
+	pane._list.item_activated.emit(0)
+	await _type_into(pane, "# Two\n")
+	await wait_seconds(0.1)
+
+	pane._back.pressed.emit()
+	_dialogs_of(pane)[0].custom_action.emit("discard")
+	assert_false(_has_copy(_scratch_tmp, "note.md"),
+		"a deliberately discarded buffer must not come back as a question")
+
+
+func test_a_vault_change_drops_the_recovery_copy():
+	_write(_scratch_tmp.path_join("note.md"), "# One\n")
+	var pane := _make_pane(_scratch_tmp)
+	pane._scratch_timer.wait_time = 0.05
+	pane._list.item_activated.emit(0)
+	await _type_into(pane, "# Two\n")
+	await wait_seconds(0.1)
+	assert_true(_has_copy(_scratch_tmp, "note.md"))
+
+	# The settings panel's debounce makes a dialog unusable here, so the change
+	# itself is the discard (the pane says so) — and the copy must follow it.
+	var other := ProjectSettings.globalize_path("user://wiki_probe_vault_other")
+	DirAccess.make_dir_recursive_absolute(other)
+	pane.apply_settings({"vault_path": other})
+	assert_false(_has_copy(_scratch_tmp, "note.md"),
+		"the copy is keyed to the vault the buffer belonged to, and the discard drops it")
+	_remove_tree(other)
+
+
+func test_reopening_a_note_offers_the_buffer_a_crash_left_behind():
+	_write(_scratch_tmp.path_join("note.md"), "# One\n")
+	var crashed := _make_pane(_scratch_tmp)
+	crashed._scratch_timer.wait_time = 0.05
+	crashed._list.item_activated.emit(0)
+	await _type_into(crashed, "# Two\n\nrecovered\n")
+	await wait_seconds(0.1)
+	# Nothing decided that buffer's fate — no save, no discard — and the pane
+	# goes away the way a crash leaves it.
+	crashed.queue_free()
+	await wait_process_frames(1)
+
+	var pane := _make_pane(_scratch_tmp)
+	pane._list.item_activated.emit(0)
+	assert_eq(pane._editor.text, "# One\n",
+		"the file is what the note says until the user answers")
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the copy must be offered, never applied on its own")
+	assert_eq(dialogs[0].name, "RestoreConfirm")
+	assert_string_contains(dialogs[0].dialog_text, "note.md")
+
+	dialogs[0].confirmed.emit()
+	assert_eq(pane._editor.text, "# Two\n\nrecovered\n", "Restore brings the buffer back")
+	assert_true(pane._is_dirty(), "and it is unsaved work")
+	assert_false(pane._save_button.disabled)
+
+	pane._save()
+	var f = FileAccess.open(_scratch_tmp.path_join("note.md"), FileAccess.READ)
+	assert_eq(f.get_as_text(), "# Two\n\nrecovered\n", "the save writes what was recovered")
+	assert_false(_has_copy(_scratch_tmp, "note.md"))
+	# A reopened note asks nothing more after the save. (`queue_free` frees at
+	# the end of the frame, so the dialog above is still a child until one
+	# passes.)
+	await wait_process_frames(1)
+	pane._back.pressed.emit()
+	pane._list.item_activated.emit(0)
+	assert_eq(_dialogs_of(pane).size(), 0)
+
+
+func test_a_recovered_buffer_can_be_discarded():
+	_write(_scratch_tmp.path_join("note.md"), "# One\n")
+	GptyTerminal.vault_scratch_write(_scratch_tmp, "note.md", "# Two\n", 1, 1)
+	var pane := _make_pane(_scratch_tmp)
+	pane._list.item_activated.emit(0)
+
+	_dialogs_of(pane)[0].custom_action.emit("discard")
+	assert_eq(pane._editor.text, "# One\n", "the file stays what the note says")
+	assert_false(pane._is_dirty())
+	assert_false(_has_copy(_scratch_tmp, "note.md"), "and the copy is gone")
+
+	# The dialog is a child until the frame that frees it ends.
+	await wait_process_frames(1)
+	pane._back.pressed.emit()
+	pane._list.item_activated.emit(0)
+	assert_eq(_dialogs_of(pane).size(), 0, "a decided copy must not come back")
+
+
+func test_a_restore_after_the_file_moved_on_still_asks_before_overwriting():
+	_write(_scratch_tmp.path_join("note.md"), "# Mine\n")
+	# A copy from a session that saw an older revision (another editor wrote
+	# the file since): the stamp it carries is that revision's, not this one's.
+	GptyTerminal.vault_scratch_write(_scratch_tmp, "note.md", "# Recovered\n", 1, 1)
+	var pane := _make_pane(_scratch_tmp)
+	pane._list.item_activated.emit(0)
+	_dialogs_of(pane)[0].confirmed.emit()
+	assert_true(pane._is_dirty())
+	# The restore question is a child until the frame that frees it ends, and
+	# Godot refuses a second exclusive dialog while one is registered.
+	await wait_process_frames(1)
+
+	pane._save()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the save must ask before overwriting what it did not see")
+	assert_eq(dialogs[0].name, "OverwriteConfirm")
+	var f = FileAccess.open(_scratch_tmp.path_join("note.md"), FileAccess.READ)
+	assert_string_contains(f.get_as_text(), "Mine", "nothing is written before the answer")
+
+	dialogs[0].confirmed.emit()
+	await wait_process_frames(2)
+	f = FileAccess.open(_scratch_tmp.path_join("note.md"), FileAccess.READ)
+	assert_eq(f.get_as_text(), "# Recovered\n", "confirming writes the recovered buffer")
+
+
+func test_a_read_only_note_is_never_offered_a_restore():
+	var big = FileAccess.open(_scratch_tmp.path_join("big.md"), FileAccess.WRITE)
+	big.store_string("x".repeat(TextRead.DEFAULT_MAX_BYTES + 1))
+	big.close()
+	GptyTerminal.vault_scratch_write(_scratch_tmp, "big.md", "typed", 1, 1)
+	var pane := _make_pane(_scratch_tmp)
+
+	pane._list.item_activated.emit(0)
+	assert_false(pane._editable_note)
+	assert_eq(_dialogs_of(pane).size(), 0,
+		"a restored buffer could not be saved, so it must not be offered")
+	assert_true(_has_copy(_scratch_tmp, "big.md"),
+		"and the copy is kept rather than dropped")
+
+
+func test_a_crlf_note_opens_clean():
+	_write(_scratch_tmp.path_join("note.md"), "# One\r\nline\r\n")
+	var pane := _make_pane(_scratch_tmp)
+	pane._scratch_timer.wait_time = 0.05
+	pane._list.item_activated.emit(0)
+	assert_true(pane._crlf, "the file's endings must be remembered")
+	assert_false(pane._is_dirty(), "CRLF endings are the file's shape, not an edit")
+	assert_true(pane._save_button.disabled, "so there is nothing to save yet")
+
+	await _type_into(pane, "# Two\nline\n")
+	await wait_seconds(0.1)
+	assert_eq(str(_stored_copy(_scratch_tmp, "note.md").get("text", "")), "# Two\nline\n",
+		"the copy is written in the editor's LF space, which is what dirty is measured in")

@@ -136,3 +136,47 @@ func test_vault_note_read_and_write_answer_shaped_json():
 
 	DirAccess.remove_absolute(vault.path_join("note.md"))
 	DirAccess.remove_absolute(vault)
+
+
+func test_vault_scratch_functions_answer_shaped_json():
+	# The recovery copy's wire contract (consumed by wiki_pane.gd): a read
+	# distinguishes "no copy" from a failure, a write answers `ok`, and the
+	# stamp the caller supplied comes back with the text. The copy lives in
+	# gpty's state directory, not under the vault, so this test uses a vault
+	# path of its own (an unreachable key for any later run) and drops the copy
+	# before it finishes.
+	var vault := ProjectSettings.globalize_path("user://gdext_ffi_scratch_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(vault)
+
+	var absent = JSON.parse_string(str(GptyTerminal.vault_scratch_read(vault, "note.md")))
+	assert_true(absent is Dictionary, "vault_scratch_read must answer JSON")
+	assert_false(absent.get("found", true), "no copy is `found: false`, not an error")
+	assert_false(absent.has("error"), "an absent copy is the normal state")
+
+	var wrote = JSON.parse_string(str(GptyTerminal.vault_scratch_write(
+		vault, "note.md", "typed\n", 1700000000000000, 6)))
+	assert_true(wrote is Dictionary, "vault_scratch_write must answer JSON")
+	assert_true(wrote.get("ok", false), "a writable state directory answers ok")
+
+	var copy = JSON.parse_string(str(GptyTerminal.vault_scratch_read(vault, "note.md")))
+	assert_true(copy.get("found", false))
+	assert_eq(copy.get("text"), "typed\n")
+	assert_eq(int(copy.get("mtime", 0)), 1700000000000000,
+		"the copy carries the stamp the caller was holding, not the file's")
+	assert_eq(int(copy.get("size", 0)), 6)
+
+	var cleared = JSON.parse_string(str(GptyTerminal.vault_scratch_clear(vault, "note.md")))
+	assert_true(cleared.get("ok", false))
+	var gone = JSON.parse_string(str(GptyTerminal.vault_scratch_read(vault, "note.md")))
+	assert_false(gone.get("found", true))
+	var again = JSON.parse_string(str(GptyTerminal.vault_scratch_clear(vault, "note.md")))
+	assert_true(again.get("ok", false), "clearing an absent copy is not an error")
+
+	var bad_root = JSON.parse_string(str(GptyTerminal.vault_scratch_read("/nonexistent/vault", "note.md")))
+	assert_true(bad_root is Dictionary and bad_root.has("error"), "a bad root answers an error")
+	var bad_path = JSON.parse_string(str(GptyTerminal.vault_scratch_write(
+		vault, "../escape.md", "x", 1, 1)))
+	assert_eq(bad_path.get("code"), "bad_path", "a path outside the walk is refused by shape")
+
+	GptyTerminal.vault_scratch_clear(vault, "note.md")
+	DirAccess.remove_absolute(vault)
