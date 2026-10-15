@@ -129,6 +129,27 @@ func agent_state_source_id() -> String:
 func on_agent_state_changed(_state: String) -> void:
 	pass
 
+## Close contract: ask before this pane is destroyed.
+##
+## `answer` receives whether the pane may go — `true` proceeds with the
+## teardown, `false` cancels it and the pane stays exactly as it is. The
+## answer may be deferred (a pane with unsaved work opens a Save/Discard
+## dialog), so a caller must never assume it lands before `request_close`
+## returns, and it must never destroy the pane itself: whoever asks passes a
+## continuation as `answer`. The base answers `true` immediately — a pane with
+## nothing to lose never asks — and every destruction path goes through here:
+## the workspace's kill, swap, reset, workspace-close and layout-reload paths,
+## and quitting the app.
+func request_close(answer: Callable) -> void:
+	answer.call(true)
+
+## The state half of the close contract: whether this pane holds work that a
+## close would destroy. A caller that cannot show a dialog — an IPC client,
+## which has no way to answer one — checks this and refuses instead of asking
+## (the same rule `layoutLoad` applies to an untrusted profile).
+func has_unsaved_state() -> bool:
+	return false
+
 # Override to add type-specific settings controls.
 # `panel` provides `_debounce_timer` and `_gather_func` (set by each type).
 func _build_pane_settings_ui(_panel: Control) -> Control:

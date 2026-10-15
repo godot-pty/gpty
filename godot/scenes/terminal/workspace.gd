@@ -20,6 +20,10 @@ var _workspaces: Array[Dictionary] = []  # {name: String, grid: Control, tm: Ter
 var _active: int = 0
 var _active_profile: String = ""  # last successfully activated profile (sidebar accent)
 var _history_pruned: bool = false  # orphaned-scrollback sweep already attempted
+## The quit itself, behind a seam: tests replace it to observe a close request
+## without ending the run (`_history_stats_provider`'s pattern).
+var quit_action: Callable = func(): get_tree().quit()
+var _quit_asking: bool = false  # a pane-ask walk for quitting is in flight
 
 func _ready():
 	show()
@@ -72,6 +76,10 @@ func _ready():
 	_refresh_profile_buttons()
 	_wire_tm(_tm)
 	_init_workspaces()
+
+	# A quit request comes to us, not straight to the engine: panes holding
+	# unsaved work get to ask before the window goes away (see `request_quit`).
+	get_tree().auto_accept_quit = false
 
 	# Push concepts to Rust engine — must wait for first frame (GDExtension ready)
 	_push_concepts_deferred()
@@ -159,7 +167,11 @@ func _apply_fps_setting():
 
 func _notification(what):
 	if what == NOTIFICATION_RESIZED: _apply_layout()
-	if what == NOTIFICATION_WM_CLOSE_REQUEST: _chrome.save_position()
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_chrome.save_position()
+		# auto_accept_quit is off (see _ready): the close request is ours to
+		# answer, and the answer is the pane ask.
+		request_quit()
 
 # NOTE: We save in _exit_tree(), not NOTIFICATION_WM_CLOSE_REQUEST.
 # WM_CLOSE_REQUEST does not fire when the Godot editor stops the game,
@@ -258,12 +270,84 @@ func _spawn_bulk(count: int, shell := ""):
 	ToastManager.info("Spawned %d terminals" % bodies.size())
 	if bodies.size() > 0: bodies[-1].grab_focus()
 
+# ── Close guards ───────────────────────────────────────────────────────
+# Destroying a pane, or quitting the app, is the one action that cannot be
+# undone, so every path that does it asks the panes first
+# (`PaneBody.request_close`) and a "no" cancels the whole action.
+
+## The bodies of one workspace, in tile order.
+func _pane_bodies(ws: Dictionary) -> Array:
+	var bodies := []
+	if ws.is_empty():
+		return bodies
+	for t in ws.tm.tiles:
+		var body = ws.tm._find_body(t.wrapper)
+		if body != null:
+			bodies.append(body)
+	return bodies
+
+## Every pane of every workspace — hidden workspaces keep live panes.
+func _all_pane_bodies() -> Array:
+	var bodies := []
+	for ws in _workspaces:
+		bodies.append_array(_pane_bodies(ws))
+	return bodies
+
+## Ask `bodies` in order whether they may be destroyed, then run `next`. A
+## pane that answers no stops the walk: `declined` runs (when given) and
+## `next` never does, so the action behind the walk is cancelled as a whole.
+func _ask_close_then(bodies: Array, next: Callable, declined := Callable()) -> void:
+	_ask_close_step(bodies, 0, next, declined)
+
+func _ask_close_step(bodies: Array, index: int, next: Callable, declined: Callable) -> void:
+	while index < bodies.size() and not is_instance_valid(bodies[index]):
+		index += 1  # freed while an earlier pane was asking
+	if index >= bodies.size():
+		next.call()
+		return
+	var body = bodies[index]
+	body.request_close(func(proceed: bool):
+		if not proceed:
+			if declined.is_valid():
+				declined.call()
+			return
+		_ask_close_step(bodies, index + 1, next, declined)
+	)
+
+## Quit the app — the one quit path, reached by the window manager's close
+## request, the titlebar's close button and the shutdown flag. Panes holding
+## unsaved work are asked first, and a Cancel cancels the quit. A second
+## request during the walk is ignored rather than stacking dialogs; the flag
+## clears when the walk ends, so a request after a cancelled one still works.
+func request_quit() -> void:
+	if _quit_asking:
+		return
+	_quit_asking = true
+	_ask_close_then(
+		_all_pane_bodies(),
+		func():
+			_quit_asking = false
+			quit_action.call(),
+		func(): _quit_asking = false,
+	)
+
+## Close one pane the user asked to close. The pane answers first when it
+## holds unsaved work, and a Cancel leaves everything as it is.
 func _kill(body: Control):
 	var ws := _workspace_for_body(body)
 	if ws.is_empty():
 		return
+	body.request_close(func(proceed: bool):
+		if proceed:
+			_kill_now(body)
+	)
+
+func _kill_now(body: Control):
 	# _refresh_status_bar keeps last_body synced to the focus owner, so this
 	# tells us whether the pane being closed was the one holding the keyboard.
+	var ws := _workspace_for_body(body)
+	if ws.is_empty():
+		return
 	var held_focus: bool = ws.tm.last_body == body
 	ws.tm.kill(body)
 	_close_pane_settings_for(body)
@@ -290,7 +374,18 @@ func _close_pane_settings_for(body: Control):
 	if panel and panel.visible and panel._target == body:
 		panel.close()
 
+## Change a pane's type. The old body is destroyed by the swap, so it answers
+## first when it holds unsaved work.
 func _swap_pane(body: Control, new_type_name: String):
+	var ws := _workspace_for_body(body)
+	if ws.is_empty():
+		return
+	body.request_close(func(proceed: bool):
+		if proceed:
+			_swap_pane_now(body, new_type_name)
+	)
+
+func _swap_pane_now(body: Control, new_type_name: String):
 	var ws := _workspace_for_body(body)
 	if ws.is_empty():
 		return
@@ -326,9 +421,9 @@ func _swap_pane(body: Control, new_type_name: String):
 	ToastManager.info("Swapped to %s" % PaneTypes.ALL[new_type_name]["name"])
 
 func _kill_last():
-	_tm.kill_last()
-	_apply_layout()
-	_list()
+	if not is_instance_valid(_tm.last_body):
+		return
+	_kill(_tm.last_body)
 
 func _on_pane_minimize(body: Control):
 	body.visible = not body.visible
@@ -341,15 +436,25 @@ func _on_pane_position_swap(body: Control, source_btn: Button):
 func _on_pane_type_swap(body: Control, source_btn: Button):
 	_tm.show_type_swap_popup(body, self, source_btn.get_screen_position() + Vector2(0, source_btn.size.y))
 
-func _reset():
+## The reset primitive: every pane of the active workspace goes, no asking.
+## Only the guarded entries below and the layout-rebuild internals call it.
+func _reset_now():
 	_tm.reset()
 	_apply_layout()
 	_list()
 
+## Reset the active workspace's panes — the user-facing paths (sidebar,
+## shortcut, palette) and profile activation ask first.
+func _reset():
+	_ask_close_then(_pane_bodies(_active_workspace()), _reset_now)
+
 ## User-facing reset: clears the active workspace's panes AND the
 ## profile-accent state (a reset layout is no longer "that profile").
 func _do_reset():
-	_reset()
+	_ask_close_then(_pane_bodies(_active_workspace()), _do_reset_now)
+
+func _do_reset_now():
+	_reset_now()
 	_active_profile = ""
 	_refresh_profile_buttons()
 
@@ -530,6 +635,18 @@ func _add_workspace():
 	_switch_workspace(_workspaces.size() - 1)
 
 func _close_workspace(idx: int):
+	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size():
+		return
+	if _workspaces.size() <= 1:
+		ToastManager.info("Cannot close the last workspace")
+		return
+	_ask_close_then(_pane_bodies(_workspaces[idx]), func():
+		_close_workspace_now(idx)
+	)
+
+func _close_workspace_now(idx: int):
+	# Re-checked: the ask is deferred, so the list it was made against may
+	# have moved on (another close, a restore) by the time it is answered.
 	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size():
 		return
 	if _workspaces.size() <= 1:
@@ -843,8 +960,9 @@ func _show_multi_trust_dialog(entries: Array[Dictionary], active: int, untrusted
 	dialog.popup_centered()
 
 func _restore():
-	# Palette "load": reload the saved workspace set from disk.
-	_init_workspaces()
+	# Palette "load": reload the saved workspace set from disk. Every pane in
+	# every workspace is about to be destroyed, so all of them are asked.
+	_ask_close_then(_all_pane_bodies(), _init_workspaces)
 
 # ═══════════════════════════════════════════════════════════════════════
 # Palette
@@ -1353,7 +1471,9 @@ func _poll_ipc_requests():
 			ToastManager.warn(failure)
 			if DisplayServer.get_name() != "headless":
 				await get_tree().create_timer(4.0).timeout
-		get_tree().quit()
+		# Still a quit, so it still asks: a refused socket bind must not drop
+		# what a pane holds (the same walk the window close uses).
+		request_quit()
 		return
 	# GptyTerminal is a GodotClass — call static methods on the class
 	var reqs = GptyTerminal.drain_ipc_requests()
@@ -1789,7 +1909,10 @@ func _do_activate(profile: Dictionary):
 	var ws := _active_workspace()
 	if ws.is_empty():
 		return
-	_reset()
+	_ask_close_then(_pane_bodies(ws), func(): _activate_now(ws, profile))
+
+func _activate_now(ws: Dictionary, profile: Dictionary):
+	_reset_now()
 	var raw: Array = TerminalManager.scale_layout(
 		profile.get("tiles", []), int(profile.get("grid_unit", 0)))
 	var tiles: Array[Dictionary] = []

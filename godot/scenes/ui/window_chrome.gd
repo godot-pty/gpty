@@ -64,7 +64,7 @@ func build(ws: Control) -> Control:
 	btn_cont.add_child(max_btn)
 	titlebar.set_meta("_max_btn", max_btn)
 
-	var close_btn = _make_titlebar_button(Icons.CLOSE, func(): _ws.get_tree().quit())
+	var close_btn = _make_titlebar_button(Icons.CLOSE, func(): _ws.request_quit())
 	btn_cont.add_child(close_btn)
 
 	titlebar.add_child(btn_cont)

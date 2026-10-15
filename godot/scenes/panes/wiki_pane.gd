@@ -74,7 +74,10 @@ func _ready():
 	_back.name = "BackToNotes"
 	_back.text = "Back to notes"
 	_back.focus_mode = Control.FOCUS_NONE
-	_back.pressed.connect(func(): _request_leave(_show_list))
+	_back.pressed.connect(func(): _request_leave(func(proceed: bool):
+		if proceed:
+			_show_list()
+	))
 	top.add_child(_back)
 
 	_search = LineEdit.new()
@@ -452,66 +455,121 @@ func _update_dirty() -> void:
 func _payload() -> String:
 	return _editor.text.replace("\n", "\r\n") if _crlf else _editor.text
 
-## Write the open note back. Only a user action reaches this — the Save button
-## or Ctrl+S — and `force` is only ever set by the overwrite confirmation
-## below, so the pane never overwrites an outside edit on its own.
-func _save(force := false) -> void:
+## Write the open note back. `answer` (optional) hears the outcome when a save
+## is what lets something else proceed — leaving the note, closing the pane,
+## quitting: `true` once the write landed, `false` when it did not (a conflict
+## the user cancels, an I/O failure), so the caller can cancel its own action
+## instead of proceeding over a failed write.
+func _save(force := false, answer := Callable()) -> void:
 	if _current_rel == "" or not _editable_note:
+		if answer.is_valid():
+			answer.call(false)
 		return
-	var answer = JSON.parse_string(str(GptyTerminal.vault_note_write(
+	var reply = JSON.parse_string(str(GptyTerminal.vault_note_write(
 		vault_path, _current_rel, _payload(), _loaded_mtime, _loaded_size, force
 	)))
-	if not (answer is Dictionary):
+	if not (reply is Dictionary):
 		ToastManager.warn("Could not save %s: no answer from the vault" % _current_rel, 5.0, "Wiki")
+		if answer.is_valid():
+			answer.call(false)
 		return
-	if answer.has("error"):
-		if str(answer.get("code", "")) == "changed_on_disk" and not force:
-			_ask_overwrite()
+	if reply.has("error"):
+		if str(reply.get("code", "")) == "changed_on_disk" and not force:
+			_ask_overwrite(answer)
 			return
-		ToastManager.warn("Could not save %s: %s" % [_current_rel, str(answer["error"])], 5.0, "Wiki")
+		ToastManager.warn("Could not save %s: %s" % [_current_rel, str(reply["error"])], 5.0, "Wiki")
+		if answer.is_valid():
+			answer.call(false)
 		return
 	_saved_text = _editor.text
-	_loaded_mtime = int(answer.get("mtime", 0))
-	_loaded_size = int(answer.get("size", 0))
+	_loaded_mtime = int(reply.get("mtime", 0))
+	_loaded_size = int(reply.get("size", 0))
 	_update_dirty()
-	if not bool(answer.get("indexed", true)):
+	if not bool(reply.get("indexed", true)):
 		ToastManager.warn("Saved %s, but the search index could not be updated" % _current_rel, 5.0, "Wiki")
+	if answer.is_valid():
+		answer.call(true)
 
 ## The note changed on disk since it was opened (another editor, a git
-## checkout): overwriting it is the user's call, never the pane's.
-func _ask_overwrite() -> void:
+## checkout): overwriting it is the user's call, never the pane's. `answer`
+## hears `false` when the overwrite is declined, so a close behind this save
+## is cancelled rather than left waiting.
+func _ask_overwrite(answer := Callable()) -> void:
 	var dialog := ConfirmationDialog.new()
 	dialog.name = "OverwriteConfirm"
 	dialog.title = "Note changed on disk"
 	dialog.dialog_text = "%s changed on disk since it was opened.\n\nOverwrite it with your version?" % _current_rel
 	dialog.ok_button_text = "Overwrite"
 	add_child(dialog)
-	dialog.confirmed.connect(func():
+	dialog.confirmed.connect(func(): _save_after_dialog(dialog, answer, true))
+	dialog.canceled.connect(func():
 		dialog.queue_free()
-		_save(true)
+		if answer.is_valid():
+			answer.call(false)
 	)
-	dialog.canceled.connect(func(): dialog.queue_free())
 	dialog.popup_centered()
 
-## Run `next` — leaving the note — unless the buffer is dirty, in which case
-## the user answers first: the pane does not discard typed text silently, and
-## it does not save without being asked.
-func _request_leave(next: Callable) -> void:
+## Run the save once `dialog` is really gone. An exclusive child window
+## outlives `queue_free` by a frame, and Godot refuses a second exclusive
+## dialog while one is still registered — the overwrite question would never
+## appear, and the answer behind it would never come. Shared by both dialogs
+## that end in a save: the discard ask (whose save may then raise the
+## overwrite question) and that overwrite question itself (`force`, so the
+## confirmed overwrite does not ask again).
+func _save_after_dialog(dialog: Window, answer: Callable, force := false) -> void:
+	dialog.queue_free()
+	await get_tree().process_frame
+	_save(force, answer)
+
+## Ask before the buffer is lost. Every path that would end its life comes
+## here — leaving the note, a pane close, a layout reset, quitting the app —
+## and the answers are the editor convention: Save (write it, then continue),
+## Discard (continue without it), Cancel (nothing happens, the pane stays as
+## it is). A clean buffer just continues, and the pane never writes on its own.
+func _request_leave(answer: Callable) -> void:
 	if not _is_dirty():
-		next.call()
+		answer.call(true)
+		return
+	# One question at a time: a second ask while this pane is already asking
+	# (a close request during a pending discard, a quit during the overwrite
+	# dialog) is declined, so the dialogs cannot stack.
+	if _has_open_ask():
+		answer.call(false)
 		return
 	var dialog := ConfirmationDialog.new()
 	dialog.name = "DiscardConfirm"
 	dialog.title = "Unsaved changes"
-	dialog.dialog_text = "%s has unsaved changes.\n\nDiscard them?" % _current_rel
-	dialog.ok_button_text = "Discard"
+	dialog.dialog_text = "%s has unsaved changes." % _current_rel
+	dialog.ok_button_text = "Save"
+	dialog.add_button("Discard", true, "discard")
 	add_child(dialog)
-	dialog.confirmed.connect(func():
-		dialog.queue_free()
-		next.call()
+	dialog.confirmed.connect(func(): _save_after_dialog(dialog, answer))
+	dialog.custom_action.connect(func(action):
+		if action == "discard":
+			dialog.queue_free()
+			answer.call(true)
 	)
-	dialog.canceled.connect(func(): dialog.queue_free())
+	dialog.canceled.connect(func():
+		dialog.queue_free()
+		answer.call(false)
+	)
 	dialog.popup_centered()
+
+func _has_open_ask() -> bool:
+	return find_child("DiscardConfirm", false, false) != null \
+		or find_child("OverwriteConfirm", false, false) != null
+
+## The close contract (`PaneBody.request_close`): the pane is about to be
+## destroyed, so the buffer is about to be lost for good — the same ask the
+## Back button makes runs first, and a Cancel cancels the close.
+func request_close(answer: Callable) -> void:
+	_request_leave(answer)
+
+## The close contract's state half: an IPC caller cannot answer a dialog, so
+## it refuses a pane that holds unsaved work instead (its own guard, and
+## `PaneBody.has_unsaved_state` for the default).
+func has_unsaved_state() -> bool:
+	return _is_dirty()
 
 func apply_settings(settings: Dictionary):
 	var previous_vault := vault_path

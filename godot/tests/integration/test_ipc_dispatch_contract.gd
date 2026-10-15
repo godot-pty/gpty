@@ -102,6 +102,57 @@ func test_pane_targeting_accepts_an_id_and_a_legacy_label():
 	var missing = WorkspaceIpcHandlers.handle(_ws, "killPane", {"pane_id": "no-such-pane"})
 	assert_true(missing.has("error"), "killing an unknown pane must be an error, not a success")
 
+## Give a pane unsaved work, the way the wiki editor does when a note is typed
+## into: the IPC seam only cares that the pane reports `has_unsaved_state()`.
+func _dirty(pane: Control) -> void:
+	pane._current_rel = "note.md"
+	pane._saved_text = "before"
+	pane._editable_note = true
+	pane._editor.text = "after"
+
+func test_kill_pane_refuses_a_pane_holding_unsaved_work():
+	# A caller cannot answer the pane's Save/Discard dialog, so a pane with
+	# unsaved work is refused rather than silently thrown away — the rule
+	# `layoutLoad` already applies to an untrusted profile.
+	var wiki = _spawn("wiki")
+	_dirty(wiki)
+	var wiki_id := str(wiki.attachment_id)
+
+	var refused = WorkspaceIpcHandlers.handle(_ws, "killPane", {"pane_id": wiki_id})
+	assert_true(refused.has("error"), "an unsaved pane must be refused, not killed")
+	assert_true(is_instance_valid(wiki), "and it must survive the call")
+
+	# The same call goes through once nothing would be lost.
+	wiki._saved_text = wiki._editor.text
+	var killed = WorkspaceIpcHandlers.handle(_ws, "killPane", {"pane_id": wiki_id})
+	assert_true(killed.get("success", false), "a clean pane kills as before")
+
+func test_layout_load_refuses_while_a_pane_holds_unsaved_work():
+	# Activating a profile resets the active workspace, so the same refusal
+	# applies. The probe profile is empty, so nothing about it is untrusted and
+	# nothing spawns — the unsaved pane is the only thing that can refuse.
+	ProfileManager.add_profile("Close guard probe", [])
+	var wiki = _spawn("wiki")
+	_dirty(wiki)
+
+	var refused = WorkspaceIpcHandlers.handle(_ws, "layoutLoad", {"name": "Close guard probe"})
+	assert_true(refused.has("error"), "a load over unsaved work must refuse")
+	assert_true(is_instance_valid(wiki), "and nothing may be reset")
+
+	wiki._saved_text = wiki._editor.text
+	var loaded = WorkspaceIpcHandlers.handle(_ws, "layoutLoad", {"name": "Close guard probe"})
+	assert_true(loaded.get("success", false), "a clean workspace loads as before")
+	await get_tree().process_frame
+	assert_false(is_instance_valid(wiki), "and the load really did replace the pane set")
+
+	# Drop the probe again, so the profile list stays what the other tests
+	# expect from the store.
+	var profiles = ProfileManager.get_all_profiles()
+	for i in profiles.size():
+		if str(profiles[i].get("name", "")) == "Close guard probe":
+			ProfileManager.delete_profile(i)
+			break
+
 # ── Method contracts ───────────────────────────────────────────────────
 
 func test_terminal_only_methods_refuse_other_panes():

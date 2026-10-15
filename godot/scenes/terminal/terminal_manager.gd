@@ -355,10 +355,6 @@ func kill(body: Control):
 	rm.wrapper.queue_free()
 	_sync_edge_strips()
 
-func kill_last():
-	if last_body: kill(last_body)
-
-
 func swap_pane(body: Control, new_type_name: String) -> Control:
 	# Find the tile owning this body.
 	var ti := _tile_index_of(body)

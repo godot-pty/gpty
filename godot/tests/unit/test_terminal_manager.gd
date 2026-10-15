@@ -79,8 +79,9 @@ func test_kill_removes_tile():
 	_tm.kill(body)
 	assert_eq(_tm.tiles.size(), 0, "tiles should be empty after kill")
 
-# kill_last and last_body tracking is done by Workspace, not TerminalManager.
-# TerminalManager.kill_last() only calls kill() — it doesn't manage last_body.
+# "Close the last pane" is a Workspace path, not a TerminalManager one: the
+# shortcut and the palette call `Workspace._kill_last`, which resolves
+# `last_body` and goes through the pane's close ask like every other kill.
 
 # ── Reset ──────────────────────────────────────────────────────────────
 

@@ -279,9 +279,107 @@ func test_back_with_unsaved_changes_asks_before_discarding():
 	pane._back.pressed.emit()
 	dialogs = _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1)
-	dialogs[0].confirmed.emit()
-	assert_false(pane._note_box.visible, "confirming discards and returns to the list")
+	dialogs[0].custom_action.emit("discard")
+	assert_false(pane._note_box.visible, "discarding returns to the list")
 	assert_true(pane._list.visible)
+	var f = FileAccess.open(_tmp.path_join("note.md"), FileAccess.READ)
+	assert_eq(f.get_as_text(), "# Note\n", "discarding must not write the note")
+
+
+func test_back_can_save_the_note_and_leave():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	var pane := _make_pane(_tmp)
+	pane._list.item_activated.emit(0)
+	await _type_into(pane, "# Edited\n")
+
+	pane._back.pressed.emit()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs[0].ok_button_text, "Save", "the first answer is Save")
+	dialogs[0].confirmed.emit()
+	await wait_process_frames(2)  # the save runs after the dialog is freed
+	assert_false(pane._note_box.visible, "saving lets the pane move on")
+	var f = FileAccess.open(_tmp.path_join("note.md"), FileAccess.READ)
+	assert_eq(f.get_as_text(), "# Edited\n", "and the note reached the file")
+
+
+# ── The close contract ─────────────────────────────────────────────────
+
+func test_request_close_asks_a_dirty_pane_and_a_cancel_keeps_it():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	var pane := _make_pane(_tmp)
+	pane._list.item_activated.emit(0)
+	await _type_into(pane, "# Edited\n")
+
+	var answers := []
+	pane.request_close(func(proceed: bool): answers.append(proceed))
+	assert_eq(answers, [], "the answer must not land before the user gives it")
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "a close over unsaved work must ask")
+
+	dialogs[0].canceled.emit()
+	assert_eq(answers, [false], "canceling reports that the pane may not go")
+
+
+func test_request_close_lets_a_clean_pane_go_immediately():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	var pane := _make_pane(_tmp)
+	pane._list.item_activated.emit(0)
+
+	var answers := []
+	pane.request_close(func(proceed: bool): answers.append(proceed))
+	assert_eq(answers, [true], "a clean pane never asks")
+	assert_eq(_dialogs_of(pane).size(), 0)
+
+
+func test_request_close_saves_before_it_lets_the_pane_go():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	var pane := _make_pane(_tmp)
+	pane._list.item_activated.emit(0)
+	await _type_into(pane, "# Edited\n")
+
+	var answers := []
+	pane.request_close(func(proceed: bool): answers.append(proceed))
+	var dialogs := _dialogs_of(pane)
+	dialogs[0].confirmed.emit()
+	await wait_process_frames(2)  # the save runs after the dialog is freed
+	assert_eq(answers, [true], "a successful save lets the pane go")
+	var f = FileAccess.open(_tmp.path_join("note.md"), FileAccess.READ)
+	assert_eq(f.get_as_text(), "# Edited\n", "and the buffer was written first")
+
+
+func test_request_close_asks_again_when_the_save_hits_a_conflict():
+	_write(_tmp.path_join("note.md"), "# Mine\n")
+	var pane := _make_pane(_tmp)
+	pane._list.item_activated.emit(0)
+	await _type_into(pane, "# Mine, overwritten\n")
+	# Another writer touches the note between the load and the close.
+	_write(_tmp.path_join("note.md"), "# Theirs, and longer\n")
+
+	var answers := []
+	pane.request_close(func(proceed: bool): answers.append(proceed))
+	_dialogs_of(pane)[0].confirmed.emit()  # Save
+	await wait_process_frames(2)  # the save runs after the dialog is freed
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the conflict must be asked about before closing")
+	assert_eq(dialogs[0].name, "OverwriteConfirm")
+	assert_eq(answers, [], "the pane may not go until the conflict is answered")
+
+	dialogs[0].canceled.emit()
+	assert_eq(answers, [false], "canceling the overwrite cancels the close")
+
+
+func test_has_unsaved_state_follows_the_buffer():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	var pane := _make_pane(_tmp)
+	assert_false(pane.has_unsaved_state(), "an unopened note holds nothing")
+
+	pane._list.item_activated.emit(0)
+	assert_false(pane.has_unsaved_state(), "a freshly opened note is clean")
+	await _type_into(pane, "# Edited\n")
+	assert_true(pane.has_unsaved_state(), "a typed buffer is unsaved work")
+
+	pane._save()
+	assert_false(pane.has_unsaved_state(), "saving clears it")
 
 
 func test_a_save_that_would_overwrite_an_outside_edit_asks_first():
@@ -302,6 +400,7 @@ func test_a_save_that_would_overwrite_an_outside_edit_asks_first():
 	assert_string_contains(f.get_as_text(), "Theirs", "nothing is written before the answer")
 
 	dialogs[0].confirmed.emit()
+	await wait_process_frames(2)  # the save runs after the dialog is freed
 	f = FileAccess.open(_tmp.path_join("note.md"), FileAccess.READ)
 	assert_string_contains(f.get_as_text(), "Mine, overwritten",
 		"confirming writes the pane's version")

@@ -134,6 +134,12 @@ static func handle(ws, method: String, params: Dictionary):
 				kp_target = ws._find_pane_by_label(kp_pane_id)
 			if kp_target == null:
 				return error("Pane '%s' not found" % kp_pane_id)
+			# A caller cannot answer a dialog, so a pane holding unsaved work
+			# is refused rather than asked (the rule `layoutLoad` already
+			# applies to an untrusted profile): naming a pane is not consent
+			# to throw away what the user typed into it.
+			if kp_target.has_unsaved_state():
+				return error("Pane '%s' has unsaved changes; save or discard them in the pane, then retry" % kp_pane_id)
 			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "killed", "pane_id": kp_target.attachment_id, "label": kp_target.pane_label}))
 			ws._kill(kp_target)
 			return {"success": true}
@@ -208,6 +214,12 @@ static func handle(ws, method: String, params: Dictionary):
 				return error(
 					"Profile '%s' needs confirmation in the GUI (it starts a different program or passes arguments)"
 					% profile_name)
+			# Activating a profile resets the active workspace, so a pane
+			# holding unsaved work is refused for the same reason: a caller
+			# cannot answer the pane's Save/Discard dialog.
+			for pane in ws._pane_bodies(ws._active_workspace()):
+				if pane.has_unsaved_state():
+					return error("A pane in the active workspace has unsaved changes; save or discard them in the pane, then retry")
 			ws._do_activate(profile)
 			return {"success": true}
 		"layoutList":
