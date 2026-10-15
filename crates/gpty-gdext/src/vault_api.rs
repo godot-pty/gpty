@@ -18,9 +18,34 @@ fn vault_db_path() -> Option<String> {
     gpty_ipc::transport::state_dir().map(|dir| dir.join("vaults.db").to_string_lossy().into_owned())
 }
 
+/// Where the editor's recovery copies live: gpty's own scratch directory in
+/// the state directory, beside the vault index and never inside a vault. An
+/// unsaved buffer is gpty's state, not the user's files; the directory is
+/// created on the first write, owner-only.
+fn scratch_dir_path() -> Option<String> {
+    gpty_ipc::transport::state_dir().map(|dir| dir.join("scratch").to_string_lossy().into_owned())
+}
+
 fn vault_error(message: &str) -> GString {
     let document = serde_json::json!({ "error": message }).to_string();
     GString::from(document.as_str())
+}
+
+/// A recovery-copy failure's document.
+///
+/// The split is the one [`note_failure_is_diagnostic`] already makes: an I/O
+/// failure is a diagnostic nobody asked for (the copy is background work, the
+/// pane shows no error for it, and nothing else surfaces the reason), while a
+/// bad vault, a path outside the walk's vocabulary, or an oversize buffer is
+/// the caller's own request being refused by code — logged, that would be
+/// noise, and in the wire test below it would fail a GUT run that is
+/// legitimately asking for the refusal (GUT counts an engine error as a
+/// failure).
+fn scratch_error(error: gpty_core::vault::NoteError) -> GString {
+    if note_failure_is_diagnostic(&error) {
+        log::warn!("vault recovery copy failed: {error}");
+    }
+    note_error(error)
 }
 
 /// A note-path error's document: the message plus the stable `code` the pane
@@ -283,6 +308,113 @@ impl GptyTerminal {
                 }
                 note_error(e)
             }
+        }
+    }
+
+    /// The recovery copy of one note's unsaved buffer (JSON).
+    ///
+    /// The editor holds its buffer in memory only, so a crash takes it unless
+    /// a copy was written; that copy is keyed by this vault and note path, and
+    /// this is how the pane asks for it when the note is reopened. Answers
+    /// `{"found": false}` when there is none — the normal state, and the answer
+    /// for a copy that cannot be trusted (an unreadable file, a record naming
+    /// another note) — and `{"found": true, "text", "mtime", "size"}` when
+    /// there is: the buffer, and the stamp of the file revision it was typed
+    /// against, so a save restored from it still checks the file the user saw.
+    /// `error` is present only when the vault or the note path cannot be used
+    /// at all.
+    #[func]
+    fn vault_scratch_read(vault_path: GString, rel_path: GString) -> GString {
+        let path = vault_path.to_string();
+        if let Some(problem) = vault_path_problem(&path) {
+            return vault_error(&problem);
+        }
+        let Some(dir) = scratch_dir_path() else {
+            return vault_error("no writable state directory for recovery copies");
+        };
+        match gpty_core::vault::read_scratch(&dir, &path, &rel_path.to_string()) {
+            Ok(Some(copy)) => {
+                let document = serde_json::json!({
+                    "found": true,
+                    "text": copy.text,
+                    "mtime": copy.stamp.mtime,
+                    "size": copy.stamp.size,
+                })
+                .to_string();
+                GString::from(document.as_str())
+            }
+            Ok(None) => {
+                let document = serde_json::json!({ "found": false }).to_string();
+                GString::from(document.as_str())
+            }
+            Err(e) => scratch_error(e),
+        }
+    }
+
+    /// Snapshot one note's unsaved buffer as its recovery copy (JSON).
+    ///
+    /// The debounced half of the editor's crash protection: the pane calls
+    /// this while a dirty buffer is quiet, and the copy is cleared on the save
+    /// or the discard that ends it. It goes to gpty's state directory and
+    /// *never* to the vault — this is not a note write — it is atomic, and it
+    /// is restricted to its owner. `expected_mtime`/`expected_size` are the
+    /// stamp the buffer was loaded from; the copy records it so a restore
+    /// after the file moved on still asks before overwriting.
+    ///
+    /// Answers `{"ok": true}` or `{"error", "code"}`.
+    #[func]
+    fn vault_scratch_write(
+        vault_path: GString,
+        rel_path: GString,
+        text: GString,
+        expected_mtime: i64,
+        expected_size: i64,
+    ) -> GString {
+        let path = vault_path.to_string();
+        if let Some(problem) = vault_path_problem(&path) {
+            return vault_error(&problem);
+        }
+        let Some(dir) = scratch_dir_path() else {
+            return vault_error("no writable state directory for recovery copies");
+        };
+        let stamp = gpty_core::vault::NoteStamp {
+            mtime: expected_mtime,
+            size: expected_size,
+        };
+        match gpty_core::vault::write_scratch(
+            &dir,
+            &path,
+            &rel_path.to_string(),
+            &text.to_string(),
+            stamp,
+        ) {
+            Ok(()) => {
+                let document = serde_json::json!({ "ok": true }).to_string();
+                GString::from(document.as_str())
+            }
+            Err(e) => scratch_error(e),
+        }
+    }
+
+    /// Drop one note's recovery copy (JSON): the buffer either reached the
+    /// file or was deliberately discarded, and a copy outliving that would
+    /// offer a restore of work the user already decided about. An absent copy
+    /// is not an error. Answers `{"ok": true}` or `{"error", "code"}`.
+    #[func]
+    fn vault_scratch_clear(vault_path: GString, rel_path: GString) -> GString {
+        let path = vault_path.to_string();
+        if let Some(problem) = vault_path_problem(&path) {
+            return vault_error(&problem);
+        }
+        let Some(dir) = scratch_dir_path() else {
+            return vault_error("no writable state directory for recovery copies");
+        };
+        match gpty_core::vault::clear_scratch(&dir, &path, &rel_path.to_string()) {
+            Ok(()) => {
+                let document = serde_json::json!({ "ok": true }).to_string();
+                GString::from(document.as_str())
+            }
+            Err(e) => scratch_error(e),
         }
     }
 }
