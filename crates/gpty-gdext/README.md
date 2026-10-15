@@ -30,11 +30,17 @@ rest. The sections below are those facets.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `render(markdown: String)` | `String` | Convert untrusted CommonMark/GFM to sanitized `RichTextLabel` BBCode |
+| `render(markdown: String)` | `String` | Convert untrusted CommonMark/GFM to sanitized `RichTextLabel` BBCode. JSON: `{text, truncated, shown, size}` — the cut travels with the text (`shown`/`size` are bytes of the source, the shape a pane read answers) because the input is capped and a prefix must not be rendered in silence |
 
 Raw BBCode and HTML are escaped, images render as alt text, and only
 `http`, `https`, and `mailto` links become metadata. Godot asks for
 confirmation before `MarkdownView` opens a link.
+
+The input cap (`MAX_MARKDOWN_BYTES`) is the same 1 MiB the panes read under, so
+a document at a pane's read cap renders whole, and a source past it — a pasted
+buffer, a routed capture, a long model turn — is what the answer's `truncated`
+reports. `MarkdownView` shows that, and a cut its caller made
+(`set_source_notice`), as one banner above the body.
 
 ### GptyAi (extends Node)
 

@@ -143,3 +143,26 @@ func test_file_tree_refuses_a_non_absolute_path():
 	await get_tree().process_frame
 	pane._confirm_open("relative/note.md")
 	assert_eq(_dialogs_of(pane).size(), 0, "a non-absolute path must not reach the handler")
+
+## Past the read cap the text view carries the notice after the text; the
+## rendered view has to show it above the body instead, because a notice
+## appended to a source at the renderer's cap is the first thing the cut drops
+## — which is exactly the size this notice exists for.
+func test_a_markdown_file_past_the_cap_announces_the_cut_in_the_rendered_view():
+	var pane := _make_viewer()
+	await get_tree().process_frame
+	var cap: int = TextRead.DEFAULT_MAX_BYTES
+	var path := _write(_tmp.path_join("huge.md"), "# Head\n\n" + "a".repeat(cap))
+	pane.load_file(path)
+
+	assert_true(pane._markdown.visible, "a .md file renders by default")
+	var shown: String = pane._markdown.get_parsed_text()
+	assert_true(shown.begins_with("… truncated"), "the notice belongs above the body")
+	assert_string_contains(shown, "Head", "and the head of the file is still rendered")
+	# The source the renderer parsed carries no notice of its own — the pane
+	# shows one line, not the notice twice (once as a paragraph at the end).
+	assert_true(pane._source.begins_with("# Head"))
+	assert_false(pane._source.contains("truncated"))
+	assert_eq(pane._notice, TextRead.truncation_notice(cap, cap + 8))
+	assert_string_contains(pane._content, "truncated",
+		"the text view still says so at the end of the text it holds")

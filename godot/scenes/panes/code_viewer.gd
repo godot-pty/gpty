@@ -10,7 +10,13 @@ class_name CodeViewerPane
 var _editor: CodeEdit
 var _markdown: MarkdownView
 var _view_toggle: Button
+## The editor's text: the read plus its notice when the read hit the cap.
 var _content := ""
+## What the rendered view gets: the read itself, with no notice in it — a
+## source at the renderer's cap is exactly where an appended notice would be
+## cut — and the notice it shows above the body instead.
+var _source := ""
+var _notice := ""
 var _show_rendered := false
 
 static var _langs := ["", "md", "gd", "py", "rs", "c", "cpp", "h", "js", "ts"]
@@ -67,9 +73,14 @@ func load_file(path: String):
 		_clear_content()
 		return
 	file_path = path
-	_content = r.text + (
+	_source = r.text
+	_notice = (
 		TextRead.truncation_notice(TextRead.DEFAULT_MAX_BYTES, r.size) if r.truncated else ""
 	)
+	# The text view carries the notice as text (it is a pane of the file's
+	# bytes, and the end of the text is where a reader gets to); the rendered
+	# view shows it above the body, so the source it parses is the bare read.
+	_content = _source if _notice == "" else _source + "\n\n" + _notice + "\n"
 	_editor.text = _content
 
 	# Basic syntax detection from extension. `add_comment_string` never
@@ -88,6 +99,8 @@ func load_file(path: String):
 func _clear_content():
 	file_path = ""
 	_content = ""
+	_source = ""
+	_notice = ""
 	if _editor != null:
 		_editor.text = ""
 	_refresh_view()
@@ -108,7 +121,8 @@ func _refresh_view():
 	_view_toggle.visible = can_render
 	_view_toggle.text = "View source" if _show_rendered else "Render Markdown"
 	if _show_rendered:
-		_markdown.render_now(_content)
+		_markdown.set_source_notice(_notice)
+		_markdown.render_now(_source)
 	_markdown.scroll_to_line(0)
 
 func _toggle_view():
@@ -126,6 +140,11 @@ func receive_content(text: String, _event: Dictionary = {}) -> bool:
 	if not can_receive_content(_event):
 		return false
 	_content = text
+	# A routed capture is the whole text — nothing was cut before the pane got
+	# it — so the only cut a reader can be missing is the renderer's own, which
+	# the view reports from its answer.
+	_source = text
+	_notice = ""
 	_editor.text = text
 	_editor.set_caret_line(0)
 	_refresh_view()

@@ -351,6 +351,8 @@ func _clear_note() -> void:
 	_loaded_size = 0
 	_crlf = false
 	_editable_note = false
+	# No note is open, so the preview has nothing to declare about a cut.
+	_sync_source_notice()
 	# No note is open, so no recovery copy is pending. The copy on disk is
 	# another matter: a deliberate end drops it, and nothing here does.
 	_scratch_timer.stop()
@@ -395,6 +397,9 @@ func _open_note(rel: String) -> void:
 	# A truncated read is a prefix; editing it and saving would drop the rest
 	# of the file, so that note stays read-only.
 	_editable_note = not bool(answer.get("truncated", false))
+	# Before the first render below: a read-only note is at the read cap, so
+	# the preview has to be told what it is not showing.
+	_sync_source_notice()
 	# A pending copy from the previous note must not fire into this one.
 	_scratch_timer.stop()
 	# (Setting `text` reaches `_on_editor_changed` a frame later, like every
@@ -445,12 +450,21 @@ func _preview_visible() -> bool:
 	return _note_box.visible and _reader.visible
 
 ## What the preview renders: the buffer, not the file (that is what makes it a
-## live preview), plus the one truncation notice when the file was cut.
+## live preview). The read cap's notice is deliberately *not* in it — a notice
+## appended to a source at the renderer's cap is the first thing the cut
+## drops — and `_reader` shows it above the body instead (`_sync_source_notice`).
 func _preview_text() -> String:
-	var text := _editor.text
-	if _current_rel != "" and not _editable_note:
-		text += TextRead.truncation_notice(TextRead.DEFAULT_MAX_BYTES, _loaded_size)
-	return text
+	return _editor.text
+
+## Tell the preview which cut the *pane* made: a note read at the cap is a
+## prefix of a larger file, so the reader has to say so above the body — the
+## source cannot carry it, because that note is at the renderer's cap too.
+func _sync_source_notice() -> void:
+	_reader.set_source_notice(
+		TextRead.truncation_notice(TextRead.DEFAULT_MAX_BYTES, _loaded_size)
+		if not _editable_note and _current_rel != ""
+		else ""
+	)
 
 ## A TextEdit change — user typing or a programmatic `text` assignment; the
 ## signal arrives one frame after the edit, so this recomputes from the

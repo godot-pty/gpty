@@ -62,8 +62,13 @@ static func _decode_utf8_prefix(bytes: PackedByteArray) -> String:
 		cut = size if size - lead_index >= need else lead_index
 	return bytes.slice(0, cut).get_string_from_utf8()
 
-## The one truncation notice both panes show.
+## The one truncation notice: what a reader is told when a cap — this read's,
+## or the renderer's own input cap — means the screen holds less than the
+## document. A bare sentence, because the caller decides where it goes (the
+## text panes append it to the text, `MarkdownView` shows it above the body as
+## its banner), and bracket-free, because that banner renders it through
+## `append_text` on a BBCode label.
 static func truncation_notice(cap: int, total: int) -> String:
-	return "\n\n… truncated: showing the first %s of %s …\n" % [
+	return "… truncated: showing the first %s of %s …" % [
 		String.humanize_size(cap), String.humanize_size(total),
 	]

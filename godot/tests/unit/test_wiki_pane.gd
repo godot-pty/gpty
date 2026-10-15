@@ -450,6 +450,14 @@ func test_a_note_past_the_cap_is_read_only():
 	assert_string_contains(pane._dirty_label.text, "larger than",
 		"the read-only reason belongs next to the editor")
 	assert_eq(pane.view_mode, "split")
+	# The preview is told which cut the pane made, and says it above the body:
+	# a note at the read cap is at the renderer's cap too, so a notice appended
+	# to the source is the first thing that cut would drop.
+	assert_true(pane._reader.get_parsed_text().begins_with("… truncated"),
+		"the preview must announce the cut before the body")
+	assert_string_contains(pane._reader.get_parsed_text(),
+		String.humanize_size(TextRead.DEFAULT_MAX_BYTES),
+		"and name how much of the file it is showing")
 
 
 func test_crlf_endings_survive_an_edit():

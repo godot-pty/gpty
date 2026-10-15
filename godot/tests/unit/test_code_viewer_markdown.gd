@@ -49,3 +49,24 @@ func test_invalid_path_clears_previous_content():
 	assert_eq(pane.file_path, "")
 	assert_eq(pane._content, "")
 	assert_eq(pane._editor.text, "")
+
+## Concept-routed output is the one source a pane receives that nothing else
+## capped (a capture can be megabytes), so it is where the renderer's own cut
+## has to be visible rather than silent.
+func test_a_capture_over_the_render_cap_says_what_it_is_not_showing():
+	var pane = CodeViewerPane.new()
+	pane.language = "md"
+	add_child_autofree(pane)
+	await get_tree().process_frame
+
+	pane.receive_content("# Head\n\n" + "a".repeat(TextRead.DEFAULT_MAX_BYTES + 1))
+
+	var shown: String = pane._markdown.get_parsed_text()
+	assert_true(shown.begins_with("… truncated"), "the banner is the first thing a reader sees")
+	assert_string_contains(shown, String.humanize_size(TextRead.DEFAULT_MAX_BYTES),
+		"and it names how much was rendered")
+	assert_string_contains(shown, "Head", "the head of the capture is still rendered")
+	# The text view holds the whole capture: the cut is the preview's, and the
+	# pane must not invent a notice for text it has in full.
+	assert_true(pane._editor.text.begins_with("# Head"))
+	assert_false(pane._editor.text.contains("truncated"))

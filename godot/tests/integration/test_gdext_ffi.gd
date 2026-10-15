@@ -55,11 +55,24 @@ func test_unstarted_grid_functions_are_safe():
 func test_markdown_renderer_formats_and_sanitizes():
 	var renderer = ClassDB.instantiate("GptyMarkdown")
 	assert_not_null(renderer, "GptyMarkdown must be registered")
-	var rendered: String = renderer.render("# Title\n\n**bold** [raw]\n\n[x](javascript:bad)")
+	var answer = JSON.parse_string(str(renderer.render("# Title\n\n**bold** [raw]\n\n[x](javascript:bad)")))
+	assert_true(answer is Dictionary, "render must answer JSON")
+	var rendered := str(answer.get("text", ""))
 	assert_string_contains(rendered, "[font_size=26][b]Title")
 	assert_string_contains(rendered, "[b]bold[/b]")
 	assert_string_contains(rendered, "[lb]raw]")
 	assert_false("[url=javascript:" in rendered)
+	# The cut travels with the text (a view that cannot say what it did not
+	# render is the bug this answers), and the cap is the read cap every pane
+	# already applies — `TextRead.DEFAULT_MAX_BYTES`.
+	assert_false(answer.get("truncated", true), "a short document is not cut")
+	assert_eq(int(answer.get("shown", 0)), int(answer.get("size", -1)))
+	var cap: int = TextRead.DEFAULT_MAX_BYTES
+	var over = "a".repeat(cap + 1)
+	var cut = JSON.parse_string(str(renderer.render(over)))
+	assert_true(cut.get("truncated", false), "past the cap the render must say so")
+	assert_eq(int(cut.get("shown", 0)), cap, "the answer names how much it rendered")
+	assert_eq(int(cut.get("size", 0)), cap + 1, "and how much it was given")
 
 func test_vault_index_and_search_answer_shaped_json():
 	# The vault facet's wire contract (consumed by wiki_pane.gd): an index
