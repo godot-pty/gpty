@@ -17,6 +17,7 @@
 //! agent-access item needs the index reachable from the CLI too, which cannot
 //! resolve Godot's `user://`.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
@@ -30,6 +31,15 @@ use crate::links;
 /// disagree about which files are notes.
 pub const MAX_NOTES: usize = 2000;
 pub const MAX_DEPTH: usize = 16;
+
+/// Rows one graph query keeps per edge class, and ghost nodes it keeps.
+///
+/// The graph is drawn, not read: past this many edges a canvas is a hairball,
+/// and the caps bound both the query's memory and the JSON crossing to the
+/// pane. Ghosts are capped separately because unresolved targets are user
+/// typos, which outnumber real notes by design.
+pub const MAX_GRAPH_EDGES: usize = 10_000;
+pub const MAX_GRAPH_GHOSTS: usize = 2_000;
 
 /// Longest note body stored or read, in bytes. Mirrors the display path's
 /// `TextRead.DEFAULT_MAX_BYTES` (godot/scenes/panes/text_read.gd): the index
@@ -142,6 +152,41 @@ pub struct LinksForNote {
     pub outgoing: Vec<LinkRow>,
     pub backlinks: Vec<Backlink>,
     pub unresolved: Vec<BrokenLink>,
+}
+
+/// One node of the link graph: an indexed note, or a target nothing resolved
+/// to (a ghost).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphNode {
+    /// The note's vault-relative path — or, for a ghost, `ghost:<target>`.
+    pub id: String,
+    /// The note's indexed title; a ghost's label is the target as written.
+    pub label: String,
+    pub ghost: bool,
+}
+
+/// One aggregated edge: the mentions of `dst` written by `src`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphEdge {
+    pub src: String,
+    /// The resolved note's path, or the ghost node's id.
+    pub dst: String,
+    /// How many `[[…]]` occurrences this pair accounts for.
+    pub count: i64,
+    /// `dst` is a ghost id rather than an indexed note path.
+    pub ghost: bool,
+}
+
+/// A vault's link graph: the notes, the ghosts they point at, and the
+/// aggregated mentions between them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VaultGraph {
+    /// Notes by path, then ghosts by target.
+    pub nodes: Vec<GraphNode>,
+    /// Resolved edges, then unresolved ones.
+    pub edges: Vec<GraphEdge>,
+    /// A cap cut an edge class or the ghost set short.
+    pub truncated: bool,
 }
 
 /// Walk `root` for Markdown notes under the production caps.
@@ -1582,6 +1627,145 @@ impl VaultStore {
         })
     }
 
+    /// The vault's link graph: every indexed note as a node, one ghost node
+    /// per unresolved target, and the mentions between them aggregated.
+    ///
+    /// Aggregation happens here rather than in the pane because the `links`
+    /// table keeps one row per occurrence: a graph wants a weight, and two
+    /// readers of the same vault must agree on the order — heaviest edge
+    /// first, then by name — or they would draw different pictures of one
+    /// store. Self-references are ordinary rows; dropping them is a drawing
+    /// decision, not a fact about the index.
+    pub fn graph(&self, vault_id: &str) -> Result<VaultGraph, rusqlite::Error> {
+        self.graph_limited(vault_id, MAX_GRAPH_EDGES, MAX_GRAPH_GHOSTS)
+    }
+
+    /// [`Self::graph`] with explicit caps (tests exercise the truncation rule
+    /// without inserting ten thousand rows, like [`index_vault_limited`]).
+    ///
+    /// Each edge class is read with one row past its cap, so `truncated` is
+    /// answered without counting the whole table. Ghost nodes come from the
+    /// *retained* unresolved rows and are capped again: an edge whose ghost
+    /// did not survive cannot be drawn, because an edge needs both ends.
+    pub fn graph_limited(
+        &self,
+        vault_id: &str,
+        max_edges: usize,
+        max_ghosts: usize,
+    ) -> Result<VaultGraph, rusqlite::Error> {
+        let mut truncated = false;
+
+        let mut nodes: Vec<GraphNode> = {
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT rel_path, title FROM notes WHERE vault_id = ?1 ORDER BY rel_path",
+            )?;
+            stmt.query_map(params![vault_id], |row| {
+                Ok(GraphNode {
+                    id: row.get(0)?,
+                    label: row.get(1)?,
+                    ghost: false,
+                })
+            })?
+            .collect::<Result<_, _>>()?
+        };
+
+        let resolved: Vec<(String, String, i64)> = self.graph_edges(
+            "SELECT src, resolved, COUNT(*) FROM links
+             WHERE vault_id = ?1 AND resolved IS NOT NULL
+             GROUP BY src, resolved
+             ORDER BY COUNT(*) DESC, src ASC, resolved ASC
+             LIMIT ?2",
+            vault_id,
+            max_edges,
+        )?;
+        if resolved.len() > max_edges {
+            truncated = true;
+        }
+        let mut edges: Vec<GraphEdge> = resolved
+            .into_iter()
+            .take(max_edges)
+            .map(|(src, dst, count)| GraphEdge {
+                src,
+                dst,
+                count,
+                ghost: false,
+            })
+            .collect();
+
+        let unresolved: Vec<(String, String, i64)> = self.graph_edges(
+            "SELECT src, target, COUNT(*) FROM links
+             WHERE vault_id = ?1 AND resolved IS NULL
+             GROUP BY src, target
+             ORDER BY COUNT(*) DESC, src ASC, target ASC
+             LIMIT ?2",
+            vault_id,
+            max_edges,
+        )?;
+        if unresolved.len() > max_edges {
+            truncated = true;
+        }
+        let unresolved = unresolved.into_iter().take(max_edges);
+
+        // A set for the membership test and a vector for the deterministic
+        // sort: the retained rows are bounded by MAX_GRAPH_EDGES (ten
+        // thousand), so a `Vec::contains` per row would be a needless
+        // quadratic scan over the same few ghost names.
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut ghosts: Vec<String> = Vec::new();
+        let mut pending: Vec<(String, String, i64)> = Vec::new();
+        for (src, target, count) in unresolved {
+            if seen.insert(target.clone()) {
+                ghosts.push(target.clone());
+            }
+            pending.push((src, target, count));
+        }
+        if ghosts.len() > max_ghosts {
+            truncated = true;
+            ghosts.truncate(max_ghosts);
+            seen = ghosts.iter().cloned().collect();
+        }
+        for (src, target, count) in pending {
+            if !seen.contains(&target) {
+                continue;
+            }
+            edges.push(GraphEdge {
+                src,
+                dst: format!("ghost:{target}"),
+                count,
+                ghost: true,
+            });
+        }
+        // Notes are already path-ordered; ghosts are ordered by target, which
+        // keeps the node list deterministic for an unchanged vault.
+        ghosts.sort();
+        nodes.extend(ghosts.into_iter().map(|target| GraphNode {
+            id: format!("ghost:{target}"),
+            label: target,
+            ghost: true,
+        }));
+
+        Ok(VaultGraph {
+            nodes,
+            edges,
+            truncated,
+        })
+    }
+
+    /// Run one aggregated-edge query, reading one row past `cap` so the
+    /// caller can tell "exactly at the cap" from "cut short".
+    fn graph_edges(
+        &self,
+        sql: &str,
+        vault_id: &str,
+        cap: usize,
+    ) -> Result<Vec<(String, String, i64)>, rusqlite::Error> {
+        let mut stmt = self.conn.prepare_cached(sql)?;
+        stmt.query_map(params![vault_id, (cap + 1) as i64], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?
+        .collect()
+    }
+
     /// FTS5 `MATCH` within one vault, best rank first, with a body snippet.
     ///
     /// `pattern` is FTS5 query syntax (callers with user text want
@@ -2238,6 +2422,171 @@ mod tests {
                 .is_empty(),
             "neither candidate claims the edge"
         );
+    }
+
+    #[test]
+    fn a_graph_node_is_every_indexed_note_even_without_edges() {
+        let path = temp_db("graph_nodes");
+        let vault = temp_vault("graph_nodes");
+        let root = root_str(&vault);
+        let mut store = VaultStore::open(&path).unwrap();
+        store
+            .upsert_batch(&rows(
+                &root,
+                &[
+                    ("z.md", "# Zeta\n"),
+                    ("a/b.md", "# Bee\n"),
+                    ("solo.md", "# Alone\n"),
+                ],
+            ))
+            .unwrap();
+
+        let graph = store.graph(&root).unwrap();
+        let nodes: Vec<(&str, &str, bool)> = graph
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node.label.as_str(), node.ghost))
+            .collect();
+        assert_eq!(
+            nodes,
+            vec![
+                ("a/b.md", "Bee", false),
+                ("solo.md", "Alone", false),
+                ("z.md", "Zeta", false),
+            ],
+            "nodes are the indexed notes by path, titled by the index"
+        );
+        assert!(graph.edges.is_empty(), "no links, no edges");
+        assert!(!graph.truncated);
+    }
+
+    #[test]
+    fn mentions_aggregate_per_pair_and_ghosts_stand_for_unresolved_targets() {
+        let path = temp_db("graph_edges");
+        let vault = temp_vault("graph_edges");
+        let root = root_str(&vault);
+        let mut store = VaultStore::open(&path).unwrap();
+        store
+            .upsert_batch(&rows(
+                &root,
+                &[
+                    ("a.md", "# A\n[[b]] [[b|alias]] [[Missing]]\n"),
+                    ("b.md", "# B\n[[a]]\n"),
+                    ("c.md", "# C\n[[a#frag]]\n"),
+                ],
+            ))
+            .unwrap();
+
+        let graph = store.graph(&root).unwrap();
+        let edges: Vec<(&str, &str, i64, bool)> = graph
+            .edges
+            .iter()
+            .map(|edge| (edge.src.as_str(), edge.dst.as_str(), edge.count, edge.ghost))
+            .collect();
+        assert_eq!(
+            edges,
+            vec![
+                ("a.md", "b.md", 2, false),
+                ("b.md", "a.md", 1, false),
+                ("c.md", "a.md", 1, false),
+                ("a.md", "ghost:Missing", 1, true),
+            ],
+            "counts aggregate occurrences; heaviest first, then by name, resolved before ghost"
+        );
+
+        let ghosts: Vec<(&str, &str, bool)> = graph
+            .nodes
+            .iter()
+            .filter(|node| node.ghost)
+            .map(|node| (node.id.as_str(), node.label.as_str(), node.ghost))
+            .collect();
+        assert_eq!(ghosts, vec![("ghost:Missing", "Missing", true)]);
+        assert!(!graph.truncated);
+    }
+
+    #[test]
+    fn a_self_reference_is_an_ordinary_edge() {
+        let path = temp_db("graph_self");
+        let vault = temp_vault("graph_self");
+        let root = root_str(&vault);
+        let mut store = VaultStore::open(&path).unwrap();
+        store
+            .upsert_batch(&rows(&root, &[("Self.md", "# Self\n[[Self]]\n")]))
+            .unwrap();
+
+        let graph = store.graph(&root).unwrap();
+        assert_eq!(
+            graph.edges,
+            vec![GraphEdge {
+                src: "Self.md".into(),
+                dst: "Self.md".into(),
+                count: 1,
+                ghost: false,
+            }],
+            "the query reports the fact; dropping the loop is the drawing's job"
+        );
+    }
+
+    #[test]
+    fn a_graph_cap_truncates_and_drops_edges_without_a_ghost() {
+        let path = temp_db("graph_capped");
+        let vault = temp_vault("graph_capped");
+        let root = root_str(&vault);
+        let mut store = VaultStore::open(&path).unwrap();
+        store
+            .upsert_batch(&rows(
+                &root,
+                &[
+                    ("a.md", "# A\n[[b]] [[b|alias]] [[Missing]]\n"),
+                    ("b.md", "# B\n[[a]]\n"),
+                ],
+            ))
+            .unwrap();
+
+        let graph = store.graph_limited(&root, 1, 0).unwrap();
+        assert!(graph.truncated, "both classes and the ghost set overflowed");
+        assert_eq!(graph.edges.len(), 1, "one edge per class at most");
+        assert_eq!(graph.edges[0].count, 2, "the heaviest row survives");
+        assert!(
+            !graph.edges.iter().any(|edge| edge.ghost),
+            "an edge needs its ghost node, and the ghost cap was zero"
+        );
+        assert!(!graph.nodes.iter().any(|node| node.ghost));
+    }
+
+    #[test]
+    fn an_empty_vault_has_an_empty_graph() {
+        let path = temp_db("graph_empty");
+        let vault = temp_vault("graph_empty");
+        let root = root_str(&vault);
+        let store = VaultStore::open(&path).unwrap();
+
+        let graph = store.graph(&root).unwrap();
+        assert_eq!(
+            graph,
+            VaultGraph {
+                nodes: Vec::new(),
+                edges: Vec::new(),
+                truncated: false,
+            }
+        );
+    }
+
+    #[test]
+    fn a_cleared_vault_returns_no_edges() {
+        let path = temp_db("graph_cleared");
+        let vault = temp_vault("graph_cleared");
+        let root = root_str(&vault);
+        let mut store = VaultStore::open(&path).unwrap();
+        store
+            .upsert_batch(&rows(&root, &[("a.md", "# A\n[[b]]\n"), ("b.md", "# B\n")]))
+            .unwrap();
+        assert_eq!(store.graph(&root).unwrap().edges.len(), 1);
+
+        store.clear_vault(&root).unwrap();
+        let graph = store.graph(&root).unwrap();
+        assert!(graph.nodes.is_empty());
+        assert!(graph.edges.is_empty(), "a note that vanished is gone");
     }
 
     #[test]

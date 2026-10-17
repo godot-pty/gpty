@@ -255,8 +255,6 @@ func _sync_window_mode():
 ## five-row visibility cap before an inner scrollbar, one accent color for
 ## the active row, and measured (not hard-coded) section heights.
 const SECTION_MAX_VISIBLE_ROWS = 5
-const ACCENT_COLOR = Color(0.45, 0.7, 1.0)
-const ACCENT_HOVER_COLOR = Color(0.6, 0.8, 1.0)
 
 ## The profiles section's catalog hint: with no installed plugin profile the
 ## only shipped layout is the built-in, and the tool layouts live in plugin
@@ -331,9 +329,9 @@ func _apply_row_accent(btn: Button, active: bool):
 		# A pressed button resolves text from font_pressed_color, which
 		# otherwise falls back to the theme default — override all three
 		# states or the accent vanishes exactly when the row is active.
-		btn.add_theme_color_override("font_color", ACCENT_COLOR)
-		btn.add_theme_color_override("font_hover_color", ACCENT_HOVER_COLOR)
-		btn.add_theme_color_override("font_pressed_color", ACCENT_COLOR)
+		btn.add_theme_color_override("font_color", Palette.ACCENT_COLOR)
+		btn.add_theme_color_override("font_hover_color", Palette.ACCENT_HOVER_COLOR)
+		btn.add_theme_color_override("font_pressed_color", Palette.ACCENT_COLOR)
 	else:
 		btn.remove_theme_color_override("font_color")
 		btn.remove_theme_color_override("font_hover_color")

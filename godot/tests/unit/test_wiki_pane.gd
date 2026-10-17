@@ -1130,3 +1130,105 @@ func test_a_crlf_note_opens_clean():
 	await wait_seconds(0.1)
 	assert_eq(str(_stored_copy(_scratch_tmp, "note.md").get("text", "")), "# Two\nline\n",
 		"the copy is written in the editor's LF space, which is what dirty is measured in")
+
+# ── The link graph ─────────────────────────────────────────────────────
+
+func _graph_ids(pane: WikiPane) -> Array:
+	var out := []
+	for node in pane._graph_view.nodes:
+		out.append(str(node["id"]))
+	return out
+
+func _seed_linked_vault() -> void:
+	_write(_tmp.path_join("a.md"), "# A\n\n[[b]] and [[b|again]] and [[Missing]]\n")
+	_write(_tmp.path_join("b.md"), "# B\n\n[[a]]\n")
+
+
+func test_graph_shows_notes_links_and_unresolved_targets():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+
+	pane._show_graph()
+	assert_true(pane._graph_view.visible)
+	assert_false(pane._list.visible)
+	assert_false(pane._note_box.visible)
+	var ids := _graph_ids(pane)
+	assert_has(ids, "a.md")
+	assert_has(ids, "b.md")
+	assert_has(ids, "ghost:Missing")
+	assert_eq(pane._graph_view.edges.size(), 2,
+		"a↔b is one aggregated pair and a→Missing is the other")
+	for edge in pane._graph_view.edges:
+		if str(edge["a"]) == "a.md" and str(edge["b"]) == "b.md":
+			assert_eq(int(edge["count"]), 3, "mentions aggregate per pair")
+			assert_true(bool(edge["mutual"]), "both directions exist")
+		elif str(edge["b"]) == "ghost:Missing":
+			assert_eq(int(edge["count"]), 1)
+			assert_true(bool(edge["ghost"]))
+
+
+func test_graph_click_opens_the_note():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+
+	pane._show_graph()
+	pane._graph_view.node_activated.emit("b.md")
+	assert_eq(pane._current_rel, "b.md")
+	assert_true(pane._note_box.visible)
+	assert_false(pane._graph_view.visible)
+
+
+func test_graph_click_asks_before_replacing_a_dirty_note():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	pane._list.item_activated.emit(0)
+	await _type_into(pane, "# Unsaved\n")
+
+	pane._show_graph()
+	pane._graph_view.node_activated.emit("b.md")
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "a click must not discard the buffer")
+	assert_eq(pane._current_rel, "a.md", "the note stays open while asked")
+
+	dialogs[0].canceled.emit()
+	assert_eq(pane._current_rel, "a.md", "canceling keeps the note")
+	assert_true(pane._is_dirty(), "and the buffer is still unsaved work")
+
+
+func test_the_graph_is_requeried_after_a_save():
+	_write(_tmp.path_join("a.md"), "# A\n")
+	var pane := _make_pane(_tmp)
+	pane._list.item_activated.emit(0)
+	await _type_into(pane, "# A\n\n[[later]]\n")
+	pane._save()
+
+	pane._show_graph()
+	assert_has(_graph_ids(pane), "ghost:later",
+		"the save re-indexed, so the graph reads the new edge")
+
+
+func test_graph_back_returns_to_the_list():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+
+	pane._show_graph()
+	pane._back.pressed.emit()
+	assert_true(pane._list.visible)
+	assert_false(pane._graph_view.visible)
+
+
+func test_graph_ghost_click_offers_to_create_the_missing_note():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+
+	pane._show_graph()
+	pane._graph_view.ghost_activated.emit("Missing")
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "a missing target offers the create-from-link verb")
+	assert_eq(dialogs[0].name, "NoteNameConfirm")
+
+
+func test_a_vault_that_cannot_be_opened_hides_the_graph_entry():
+	var pane := _make_pane(_tmp.path_join("not-a-vault"))
+	assert_false(pane._graph_button.visible)
+	assert_false(pane._graph_view.visible)

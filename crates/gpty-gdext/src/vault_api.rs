@@ -288,6 +288,73 @@ impl GptyTerminal {
         }
     }
 
+    /// The vault's link graph: nodes and aggregated edges for a canvas (JSON).
+    ///
+    /// Read-only over the index the pass already built, so drawing a graph
+    /// never walks the vault or re-parses a note; the aggregation (one edge
+    /// per `(src, dst)` pair, weighted by `[[…]]` occurrences) happens in the
+    /// store, which is also where the deterministic order is settled. Returns
+    /// `{"nodes": [{"id", "label", "ghost"}, ...], "edges": [{"src", "dst",
+    /// "count", "ghost"}, ...], "truncated": bool}`. A node id is a note's
+    /// vault-relative path, or `ghost:<target>` for a target nothing resolved
+    /// to; a ghost edge's `dst` is that node id. `error` is present only when
+    /// the vault or the store cannot be used.
+    #[func]
+    fn vault_graph(vault_path: GString) -> GString {
+        let path = vault_path.to_string();
+        if let Some(problem) = vault_path_problem(&path) {
+            return vault_error(&problem);
+        }
+        let Some(db) = vault_db_path() else {
+            return vault_error("no writable state directory for the vault index");
+        };
+        let store = match gpty_core::vault::VaultStore::open(&db) {
+            Ok(store) => store,
+            Err(e) => {
+                log::warn!("vault index open failed ({db}): {e}");
+                return vault_error(&format!("vault index unavailable: {e}"));
+            }
+        };
+        match store.graph(&path) {
+            Ok(graph) => {
+                let nodes: Vec<serde_json::Value> = graph
+                    .nodes
+                    .iter()
+                    .map(|node| {
+                        serde_json::json!({
+                            "id": &node.id,
+                            "label": &node.label,
+                            "ghost": node.ghost,
+                        })
+                    })
+                    .collect();
+                let edges: Vec<serde_json::Value> = graph
+                    .edges
+                    .iter()
+                    .map(|edge| {
+                        serde_json::json!({
+                            "src": &edge.src,
+                            "dst": &edge.dst,
+                            "count": edge.count,
+                            "ghost": edge.ghost,
+                        })
+                    })
+                    .collect();
+                let document = serde_json::json!({
+                    "nodes": nodes,
+                    "edges": edges,
+                    "truncated": graph.truncated,
+                })
+                .to_string();
+                GString::from(document.as_str())
+            }
+            Err(e) => {
+                log::warn!("vault graph failed ({path}): {e}");
+                vault_error(&format!("vault graph failed: {e}"))
+            }
+        }
+    }
+
     /// Resolve one `[[target]]` against a vault's note set (JSON).
     ///
     /// The answer comes from the same rule the index pass applies

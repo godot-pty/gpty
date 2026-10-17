@@ -14,6 +14,15 @@ class_name WikiPane
 ## `vault_search`, `vault_note_read`, `vault_note_write`), so the pane and the
 ## index cannot disagree about which files are notes.
 ##
+## The pane also has a **link graph view** — the vault's own link structure
+## drawn as a canvas, not a second file format. `GptyTerminal.vault_graph`
+## answers every indexed note plus one ghost per unresolved target, with links
+## aggregated per pair; `VaultGraphModel` lays it out deterministically and
+## `VaultGraphView` draws it. Geometry is session state in the view (a drag
+## lasts as long as the pane), and nothing there writes to the vault: clicking
+## a note opens it through the same leave guard the list uses, and clicking a
+## ghost runs the same resolution a preview mention does.
+##
 ## The close guards cover every deliberate way a buffer can end; a crash (or an
 ## outside kill) has no guard to run, so the pane also keeps a *recovery copy*
 ## of a dirty buffer outside the vault (`GptyTerminal.vault_scratch_write`,
@@ -72,6 +81,11 @@ var _scratch_timer: Timer
 var _new_button: Button
 var _rename_button: Button
 var _delete_button: Button
+## The link graph: its entry in the top row and the canvas itself. The canvas
+## keeps the session's node geometry, so hiding and reopening it never
+## reshuffles a graph the user arranged.
+var _graph_button: Button
+var _graph_view: VaultGraphView
 
 ## The link panel's parts: this note's outgoing mentions and its backlinks,
 ## both from the index (`GptyTerminal.vault_links`). Rows are rebuilt whenever
@@ -140,6 +154,14 @@ func _ready():
 	_search.text_changed.connect(func(_text): _search_timer.start())
 	_search.text_submitted.connect(func(_text): _run_search())
 	top.add_child(_search)
+
+	_graph_button = Button.new()
+	_graph_button.name = "GraphView"
+	_graph_button.text = "Graph"
+	_graph_button.focus_mode = Control.FOCUS_NONE
+	_graph_button.tooltip_text = "Map this vault's links (re-reads the index)"
+	_graph_button.pressed.connect(_show_graph)
+	top.add_child(_graph_button)
 
 	var content = VBoxContainer.new()
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -291,6 +313,16 @@ func _ready():
 	_links_footer.add_theme_font_size_override("font_size", 11)
 	links_rows.add_child(_links_footer)
 
+	# ── The link graph: the vault's structure, generated on demand ──
+	_graph_view = VaultGraphView.new()
+	_graph_view.name = "LinkGraph"
+	_graph_view.visible = false
+	_graph_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_graph_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_graph_view.node_activated.connect(_on_graph_node_activated)
+	_graph_view.ghost_activated.connect(_on_graph_ghost_activated)
+	content.add_child(_graph_view)
+
 	_placeholder = Label.new()
 	_placeholder.name = "Placeholder"
 	_placeholder.visible = false
@@ -336,6 +368,7 @@ func _refresh():
 	_clear_note()
 	_back.visible = false
 	_note_box.visible = false
+	_graph_view.visible = false
 	_footer.visible = false
 	_list.clear()
 	var problem := _vault_problem()
@@ -344,6 +377,7 @@ func _refresh():
 		return
 	_search.visible = true
 	_new_button.visible = true
+	_graph_button.visible = true
 	if _search.text.strip_edges() != "":
 		_run_search()
 		return
@@ -372,7 +406,7 @@ func _refresh():
 ## Query the index for the search box's text and show matching notes.
 ## Empty text falls back to the plain note list.
 func _run_search() -> void:
-	if _list == null or _note_box.visible or _vault_problem() != "":
+	if _list == null or _note_box.visible or _graph_view.visible or _vault_problem() != "":
 		return
 	var query := _search.text.strip_edges()
 	if query == "":
@@ -383,6 +417,7 @@ func _run_search() -> void:
 	_list.clear()
 	_footer.visible = false
 	_note_box.visible = false
+	_graph_view.visible = false
 	_back.visible = false
 	if not (answer is Dictionary):
 		_show_placeholder("Vault search unavailable.")
@@ -416,11 +451,15 @@ func _show_placeholder(text: String, searchable := true) -> void:
 	_placeholder.visible = true
 	_list.visible = false
 	_note_box.visible = false
+	_graph_view.visible = false
 	_back.visible = false
 	_search.visible = searchable
 	# A working vault with no note open can always gain one, even when the
 	# placeholder is a zero-hit search or an empty vault.
 	_new_button.visible = searchable
+	# The graph is readable whatever the search text says (it is vault-wide),
+	# but a vault that cannot be opened has nothing to draw.
+	_graph_button.visible = searchable
 
 ## Leave the note and show the list. The Back button routes through
 ## `_request_leave`, so an unsaved note asks first; `_refresh` is the
@@ -511,8 +550,10 @@ func _open_note(rel: String) -> void:
 	_list.visible = false
 	_footer.visible = false
 	_placeholder.visible = false
+	_graph_view.visible = false
 	_search.visible = false
 	_new_button.visible = false
+	_graph_button.visible = true
 	_note_box.visible = true
 	_back.visible = true
 	_apply_view_mode()
@@ -523,6 +564,54 @@ func _open_note(rel: String) -> void:
 	_refresh_links()
 	# Last, so the note is on screen when the question appears.
 	_offer_scratch(rel)
+
+# ── The link graph: the vault's structure, generated on demand ──────────
+
+## Show the vault's link structure. The answer is read from the index on every
+## visit — the pane's own mutations (a save, a create, a rename, a delete, a
+## reference rewrite) all re-index before returning, so there is no cached
+## graph to go stale; the view keeps only its session geometry.
+##
+## Opening the graph does not disturb the open note: the buffer stays alive
+## (and dirty) behind the canvas, so Back and a node click route through the
+## same leave guard every other navigation uses, and a dirty buffer can never
+## be replaced without its answer.
+func _show_graph() -> void:
+	var problem := _vault_problem()
+	if problem != "":
+		_show_placeholder(problem, false)
+		return
+	# A search still waiting on its debounce must not pull the pane back to
+	# the list after the graph has been opened.
+	_search_timer.stop()
+	var answer = JSON.parse_string(str(GptyTerminal.vault_graph(vault_path)))
+	var graph := VaultGraphModel.parse(answer)
+	if not bool(graph["ok"]):
+		_show_placeholder("Vault graph failed: " + _shown_path(str(graph["error"])))
+		return
+	_list.visible = false
+	_footer.visible = false
+	_note_box.visible = false
+	_placeholder.visible = false
+	_search.visible = false
+	_new_button.visible = false
+	_graph_button.visible = true
+	_back.visible = true
+	_graph_view.visible = true
+	_graph_view.show_graph(graph, _current_rel)
+
+## A node opens its note, behind the same ask a Back makes: the click can
+## replace a buffer that is still unsaved, so the graph cannot open over it.
+func _on_graph_node_activated(id: String) -> void:
+	_request_leave(func(proceed: bool):
+		if proceed:
+			_open_note(id)
+	)
+
+## An unresolved target is exactly what the preview's mention is: run the same
+## resolution (missing → offer to create, ambiguous → report), never a guess.
+func _on_graph_ghost_activated(target: String) -> void:
+	_follow_target(target)
 
 # ── The link panel: the open note's mentions and backlinks ──────────────
 
@@ -660,6 +749,13 @@ func _follow_note(rel: String) -> void:
 func _on_mention_clicked(target: String) -> void:
 	if _current_rel == "":
 		return
+	_follow_target(target)
+
+## Follow one `[[target]]` by the index's own rule. The preview's mention click
+## and the graph's ghost click share this: a resolved target opens in place, a
+## missing one offers to create it, and an ambiguous stem is reported with its
+## candidates and never silently picked.
+func _follow_target(target: String) -> void:
 	var answer = JSON.parse_string(str(GptyTerminal.vault_link_resolve(vault_path, target)))
 	if not (answer is Dictionary) or answer.has("error"):
 		var why := str(answer["error"]) if answer is Dictionary and answer.has("error") else "unreadable"

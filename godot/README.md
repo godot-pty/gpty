@@ -55,6 +55,9 @@ godot/
         │   ├── settings_panel.gd
         │   ├── concept_graph_editor.gd # Visual rule editor overlay (GraphEdit)
         │   ├── concept_graph_model.gd  # Pure canvas/build/validate/compile logic
+        │   ├── vault_graph_model.gd    # Pure vault link-graph normalize/layout/hit-test
+        │   ├── vault_graph_view.gd     # Custom-drawn vault link-graph canvas
+        │   ├── palette.gd       # Shared UI accent colors
         │   ├── toast_overlay.gd
         │   ├── window_chrome.gd # Titlebar + window-mode/fullscreen handling
         │   ├── markdown_view.gd # Safe shared Markdown renderer
@@ -68,7 +71,7 @@ godot/
             ├── inspector_pane.gd
             ├── cli_view_pane.gd
             ├── reasoning_pane.gd
-            └── wiki_pane.gd     # Vault browser and Markdown note editor
+            └── wiki_pane.gd     # Vault browser, Markdown note editor, link graph
 ```
 
 ## Key Bindings
