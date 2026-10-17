@@ -19,6 +19,7 @@ Library crate for the gpty multi-PTY emulator. This is the engine — all termin
 | [`lock`](src/lock.rs) | Poison-tolerant locking: skip the work, report the first occurrence | `lock_or_warn()`, `read_or_warn()`, `write_or_warn()` |
 | [`history`](src/history.rs) | SQLite-backed scrollback history store and its write-behind thread | `HistoryStore`, `PaneHistory` |
 | [`vault`](src/vault.rs) | SQLite + FTS5 index over a directory of Markdown notes — the wiki pane's list and search | `VaultStore`, `scan_vault()`, `index_vault()` |
+| [`links`](src/links.rs) | `[[wikilink]]` parsing (occurrences with their line; code and escapes are literal) and resolution against a note set (stem or path, exact case then a unique case-insensitive match, ambiguity never silently picked) | `parse_links()`, `Link`, `NoteIndex`, `Resolution` |
 
 ## Concept System
 

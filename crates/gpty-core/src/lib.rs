@@ -38,6 +38,7 @@ pub mod concept;
 pub mod engine;
 pub mod history;
 pub mod keymap;
+pub mod links;
 pub mod lock;
 pub mod parser;
 pub mod pty;

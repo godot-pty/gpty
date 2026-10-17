@@ -23,6 +23,7 @@ use std::time::UNIX_EPOCH;
 use rusqlite::{Connection, params};
 
 use crate::history::{restrict_to_owner, sanitize_fts_query, write_guard};
+use crate::links;
 
 /// Notes one walk keeps, and how deep it descends. Moved here from the wiki
 /// pane's GDScript scan so the pane's list and the search index cannot
@@ -96,6 +97,51 @@ pub struct IndexOutcome {
     pub removed: usize,
     /// Notes the walk saw but could not read (permissions, a race).
     pub unreadable: usize,
+}
+
+/// One stored `[[…]]` occurrence of one note.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkRow {
+    /// 0-based occurrence index within the note — the stored identity,
+    /// `(vault, src, seq)`.
+    pub seq: i64,
+    /// 1-based line the mention is on.
+    pub line: i64,
+    /// What the edge points at (alias and fragment stripped).
+    pub target: String,
+    /// The note it resolved to, or `None` while it does not resolve.
+    pub resolved: Option<String>,
+}
+
+/// One note's mention of another — the same edge as [`LinkRow`] read in
+/// reverse (`WHERE resolved = …`), which is why a backlink is never authored
+/// twice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Backlink {
+    /// The note that wrote the mention.
+    pub src: String,
+    pub line: i64,
+    /// The target as that note wrote it.
+    pub target: String,
+}
+
+/// One outgoing link that does not resolve.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrokenLink {
+    pub target: String,
+    pub line: i64,
+    /// The notes the target matched when several did; empty when nothing
+    /// matched at all. Derived at query time from the same rules the index
+    /// used, so it can never disagree with `resolved`.
+    pub candidates: Vec<String>,
+}
+
+/// Everything one note's links answer: out, back, and unresolved.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LinksForNote {
+    pub outgoing: Vec<LinkRow>,
+    pub backlinks: Vec<Backlink>,
+    pub unresolved: Vec<BrokenLink>,
 }
 
 /// Walk `root` for Markdown notes under the production caps.
@@ -904,6 +950,16 @@ impl VaultStore {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         if version < 1 {
             conn.execute_batch(VAULT_SCHEMA)?;
+        } else if version < 2 {
+            // The 2 schema adds the links table, and the bump *rebuilds* the
+            // derived tables rather than migrating them: they are a cache of
+            // the vault, and a v1 store holds note rows whose links this
+            // version never parsed — keeping them would leave every unchanged
+            // note with no edges until it was next edited. Dropping the rows
+            // makes the next index pass re-read every note and write both, in
+            // one pass, from the vault itself.
+            conn.execute_batch(VAULT_REBUILD)?;
+            conn.execute_batch(VAULT_SCHEMA)?;
         }
         for candidate in [
             path.to_string(),
@@ -917,6 +973,12 @@ impl VaultStore {
 
     /// Insert or refresh rows in one transaction (one FTS index write per row;
     /// the batching shape mirrors `HistoryStore::append_batch`).
+    ///
+    /// A row's links are rewritten here too, in the same transaction: the body
+    /// this pass already read is what the parse sees, so the note row and its
+    /// edges cannot drift, and a caller never has to remember a second call.
+    /// Resolution runs against the vault's notes *after* the upserts, so a
+    /// batch that adds a target and its linker resolves both ways in one pass.
     pub fn upsert_batch(&mut self, rows: &[NoteRow]) -> Result<(), rusqlite::Error> {
         let _serialized = write_guard();
         let tx = self.conn.transaction()?;
@@ -937,6 +999,38 @@ impl VaultStore {
                     row.title,
                     row.body
                 ])?;
+            }
+        }
+        let mut vaults: Vec<&str> = rows.iter().map(|row| row.vault_id.as_str()).collect();
+        vaults.sort_unstable();
+        vaults.dedup();
+        for vault_id in vaults {
+            let notes: Vec<String> = {
+                let mut stmt =
+                    tx.prepare_cached("SELECT rel_path FROM notes WHERE vault_id = ?1")?;
+                stmt.query_map(params![vault_id], |row| row.get(0))?
+                    .collect::<Result<_, _>>()?
+            };
+            let refs: Vec<&str> = notes.iter().map(String::as_str).collect();
+            let index = links::NoteIndex::new(&refs);
+            let mut clear =
+                tx.prepare_cached("DELETE FROM links WHERE vault_id = ?1 AND src = ?2")?;
+            let mut insert = tx.prepare_cached(
+                "INSERT INTO links (vault_id, src, seq, line, target, resolved)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )?;
+            for row in rows.iter().filter(|row| row.vault_id == vault_id) {
+                clear.execute(params![vault_id, row.rel_path])?;
+                for link in links::parse_links(&row.body) {
+                    insert.execute(params![
+                        vault_id,
+                        row.rel_path,
+                        link.seq as i64,
+                        link.line as i64,
+                        link.target,
+                        index.resolve(&link.target).note()
+                    ])?;
+                }
             }
         }
         tx.commit()
@@ -982,6 +1076,12 @@ impl VaultStore {
                 "DELETE FROM notes WHERE vault_id = ?1 AND rel_path = ?2",
                 params![vault_id, rel_path],
             )?;
+            // Its own edges go with it; the edges *to* it are cleared by the
+            // pass' re-resolution, which runs because the note set moved.
+            self.conn.execute(
+                "DELETE FROM links WHERE vault_id = ?1 AND src = ?2",
+                params![vault_id, rel_path],
+            )?;
             deleted += 1;
         }
         Ok(deleted)
@@ -1006,6 +1106,8 @@ impl VaultStore {
             deleted += self
                 .conn
                 .execute("DELETE FROM notes WHERE vault_id = ?1", params![vault_id])?;
+            self.conn
+                .execute("DELETE FROM links WHERE vault_id = ?1", params![vault_id])?;
         }
         Ok(deleted)
     }
@@ -1024,7 +1126,120 @@ impl VaultStore {
         let _serialized = write_guard();
         self.conn
             .execute("DELETE FROM notes WHERE vault_id = ?1", params![vault_id])?;
+        self.conn
+            .execute("DELETE FROM links WHERE vault_id = ?1", params![vault_id])?;
         Ok(())
+    }
+
+    /// Re-derive every link's `resolved` for one vault.
+    ///
+    /// `resolved` is *derived*, and the note set moves under it: a target that
+    /// was missing can appear (nothing re-read its linkers — their files did
+    /// not change), a target can vanish, and a stem two notes now share must
+    /// stop resolving. The index pass calls this only when the set actually
+    /// moved (`added`/`removed`), so an ordinary pass writes nothing here.
+    pub fn reresolve_links(&self, vault_id: &str) -> Result<usize, rusqlite::Error> {
+        let _serialized = write_guard();
+        let notes: Vec<String> = {
+            let mut stmt = self
+                .conn
+                .prepare_cached("SELECT rel_path FROM notes WHERE vault_id = ?1")?;
+            stmt.query_map(params![vault_id], |row| row.get(0))?
+                .collect::<Result<_, _>>()?
+        };
+        let refs: Vec<&str> = notes.iter().map(String::as_str).collect();
+        let index = links::NoteIndex::new(&refs);
+        let rows: Vec<(String, i64, String, Option<String>)> = {
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT src, seq, target, resolved FROM links WHERE vault_id = ?1",
+            )?;
+            stmt.query_map(params![vault_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?
+            .collect::<Result<_, _>>()?
+        };
+        let mut update = self.conn.prepare_cached(
+            "UPDATE links SET resolved = ?1 WHERE vault_id = ?2 AND src = ?3 AND seq = ?4",
+        )?;
+        let mut changed = 0usize;
+        for (src, seq, target, was) in rows {
+            let now = index.resolve(&target).note().map(str::to_string);
+            if now != was {
+                update.execute(params![now, vault_id, src, seq])?;
+                changed += 1;
+            }
+        }
+        Ok(changed)
+    }
+
+    /// Every link of one note: what it points at, what points back at it, and
+    /// what stays unresolved (with the candidates when it is ambiguous).
+    pub fn links_for(
+        &self,
+        vault_id: &str,
+        rel_path: &str,
+    ) -> Result<LinksForNote, rusqlite::Error> {
+        let outgoing: Vec<LinkRow> = {
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT seq, line, target, resolved FROM links
+                 WHERE vault_id = ?1 AND src = ?2 ORDER BY seq",
+            )?;
+            stmt.query_map(params![vault_id, rel_path], |row| {
+                Ok(LinkRow {
+                    seq: row.get(0)?,
+                    line: row.get(1)?,
+                    target: row.get(2)?,
+                    resolved: row.get(3)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?
+        };
+        let backlinks: Vec<Backlink> = {
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT src, line, target FROM links
+                 WHERE vault_id = ?1 AND resolved = ?2 ORDER BY src, line",
+            )?;
+            stmt.query_map(params![vault_id, rel_path], |row| {
+                Ok(Backlink {
+                    src: row.get(0)?,
+                    line: row.get(1)?,
+                    target: row.get(2)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?
+        };
+        let mut unresolved = Vec::new();
+        if outgoing.iter().any(|link| link.resolved.is_none()) {
+            // The *why* is derived here rather than stored: `resolved` says
+            // that a link did not resolve, and re-running the same rules over
+            // the same note set says which notes it could not choose between
+            // — ambiguity needs a list, and the schema has no column for one.
+            let notes: Vec<String> = {
+                let mut stmt = self
+                    .conn
+                    .prepare_cached("SELECT rel_path FROM notes WHERE vault_id = ?1")?;
+                stmt.query_map(params![vault_id], |row| row.get(0))?
+                    .collect::<Result<_, _>>()?
+            };
+            let refs: Vec<&str> = notes.iter().map(String::as_str).collect();
+            let index = links::NoteIndex::new(&refs);
+            for link in outgoing.iter().filter(|link| link.resolved.is_none()) {
+                let candidates = match index.resolve(&link.target) {
+                    links::Resolution::Ambiguous(candidates) => candidates,
+                    links::Resolution::Resolved(_) | links::Resolution::Missing => Vec::new(),
+                };
+                unresolved.push(BrokenLink {
+                    target: link.target.clone(),
+                    line: link.line,
+                    candidates,
+                });
+            }
+        }
+        Ok(LinksForNote {
+            outgoing,
+            backlinks,
+            unresolved,
+        })
     }
 
     /// FTS5 `MATCH` within one vault, best rank first, with a body snippet.
@@ -1133,6 +1348,15 @@ pub fn index_vault_limited(
         store.remove_missing(root, &known)?
     };
     store.prune_dead_vaults()?;
+    if added > 0 || removed > 0 {
+        // The note set moved, so every link of this vault is re-derived: a
+        // stub that just appeared resolves the links that pointed at it (their
+        // files did not change, so nothing else would have re-read them), a
+        // target that vanished loses its resolution, and a stem that is now
+        // shared stops resolving. An ordinary pass — nothing added, nothing
+        // removed — writes nothing.
+        store.reresolve_links(root)?;
+    }
     Ok(IndexOutcome {
         notes: scan.notes,
         truncated: scan.truncated,
@@ -1175,7 +1399,31 @@ CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE ON notes BEGIN
     INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES ('delete', old.rowid, old.title, old.body);
     INSERT INTO notes_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
 END;
-PRAGMA user_version=1;
+CREATE TABLE IF NOT EXISTS links (
+    vault_id TEXT NOT NULL,
+    src      TEXT NOT NULL,
+    seq      INTEGER NOT NULL,
+    line     INTEGER NOT NULL,
+    target   TEXT NOT NULL,
+    resolved TEXT,
+    PRIMARY KEY (vault_id, src, seq)
+);
+CREATE INDEX IF NOT EXISTS links_resolved ON links (vault_id, resolved);
+PRAGMA user_version=2;
+";
+
+/// What a version-1 store is brought through instead of being migrated: the
+/// derived tables are dropped and rebuilt, because a v1 store holds note rows
+/// whose *links* this version never parsed — keeping them would leave every
+/// unchanged note edgeless until it was next edited. The vault is the source
+/// of truth; the next index pass re-reads it whole.
+const VAULT_REBUILD: &str = "
+DROP TRIGGER IF EXISTS notes_ai;
+DROP TRIGGER IF EXISTS notes_ad;
+DROP TRIGGER IF EXISTS notes_au;
+DROP TABLE IF EXISTS notes_fts;
+DROP TABLE IF EXISTS notes;
+DROP TABLE IF EXISTS links;
 ";
 
 #[cfg(test)]
@@ -1532,6 +1780,256 @@ mod tests {
             store.search_user_text(&root, "property", 10).unwrap().len(),
             1
         );
+    }
+
+    fn rows(vault: &str, pairs: &[(&str, &str)]) -> Vec<NoteRow> {
+        pairs
+            .iter()
+            .enumerate()
+            .map(|(i, (rel, body))| NoteRow {
+                vault_id: vault.to_string(),
+                rel_path: (*rel).to_string(),
+                mtime: 1 + i as i64,
+                size: body.len() as i64,
+                title: note_title(rel, body),
+                body: (*body).to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_note_row_writes_its_edges_and_their_backlink() {
+        let path = temp_db("links_write");
+        let vault = temp_vault("links_write");
+        let root = root_str(&vault);
+        let mut store = VaultStore::open(&path).unwrap();
+        store
+            .upsert_batch(&rows(
+                &root,
+                &[
+                    ("target.md", "# Target\n"),
+                    (
+                        "src.md",
+                        "# Src\n\nsee [[target]] twice: [[target]] and [[Target|Label]].\n",
+                    ),
+                ],
+            ))
+            .unwrap();
+
+        let src = store.links_for(&root, "src.md").unwrap();
+        assert_eq!(src.outgoing.len(), 3, "one row per occurrence");
+        assert_eq!(src.outgoing[0].line, 3);
+        assert_eq!(src.outgoing[0].seq, 0);
+        assert!(
+            src.outgoing
+                .iter()
+                .all(|link| link.resolved.as_deref() == Some("target.md")),
+            "a case-insensitive unique match resolves: {src:?}"
+        );
+        assert!(src.backlinks.is_empty());
+        assert!(src.unresolved.is_empty());
+
+        let target = store.links_for(&root, "target.md").unwrap();
+        assert_eq!(target.outgoing.len(), 0);
+        assert_eq!(
+            target.backlinks.len(),
+            3,
+            "a backlink is the same edge read in reverse — per occurrence"
+        );
+        assert_eq!(target.backlinks[0].src, "src.md");
+        assert_eq!(target.backlinks[0].line, 3);
+
+        // Re-upserting the source rewrites its edges rather than appending.
+        store
+            .upsert_batch(&rows(&root, &[("src.md", "# Src\nno links any more\n")]))
+            .unwrap();
+        assert!(
+            store
+                .links_for(&root, "src.md")
+                .unwrap()
+                .outgoing
+                .is_empty()
+        );
+        assert!(
+            store
+                .links_for(&root, "target.md")
+                .unwrap()
+                .backlinks
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn an_ambiguous_target_is_unresolved_and_names_its_candidates() {
+        let path = temp_db("links_ambiguous");
+        let vault = temp_vault("links_ambiguous");
+        let root = root_str(&vault);
+        let mut store = VaultStore::open(&path).unwrap();
+        store
+            .upsert_batch(&rows(
+                &root,
+                &[
+                    ("a/note.md", "# A\n"),
+                    ("b/note.md", "# B\n"),
+                    ("x.md", "[[note]]\n"),
+                ],
+            ))
+            .unwrap();
+
+        let x = store.links_for(&root, "x.md").unwrap();
+        assert_eq!(x.outgoing.len(), 1);
+        assert_eq!(
+            x.outgoing[0].resolved, None,
+            "a shared stem is never picked"
+        );
+        assert_eq!(
+            x.unresolved,
+            vec![BrokenLink {
+                target: "note".into(),
+                line: 1,
+                candidates: vec!["a/note.md".into(), "b/note.md".into()],
+            }]
+        );
+        assert!(
+            store
+                .links_for(&root, "a/note.md")
+                .unwrap()
+                .backlinks
+                .is_empty(),
+            "neither candidate claims the edge"
+        );
+    }
+
+    #[test]
+    fn the_pass_resolves_a_stub_that_appears_and_releases_one_that_vanishes() {
+        let vault = temp_vault("links_move");
+        let root = root_str(&vault);
+        let mut store = VaultStore::open(&temp_db("links_move")).unwrap();
+        write_note(&vault, "x.md", "# X\nsee [[later]] and [[gone]]\n");
+        write_note(&vault, "gone.md", "# Gone\n");
+        index_vault(&mut store, &root).unwrap();
+        let before = store.links_for(&root, "x.md").unwrap();
+        assert_eq!(before.outgoing[1].resolved.as_deref(), Some("gone.md"));
+
+        // A stub appears. Nothing re-read x.md — its file did not change — so
+        // the pass itself has to re-derive the edge.
+        write_note(&vault, "later.md", "# Later\n");
+        index_vault(&mut store, &root).unwrap();
+        let after = store.links_for(&root, "x.md").unwrap();
+        assert_eq!(after.outgoing[0].resolved.as_deref(), Some("later.md"));
+        assert_eq!(
+            store.links_for(&root, "later.md").unwrap().backlinks.len(),
+            1
+        );
+
+        // A target that vanishes loses its resolution; the occurrence stays.
+        fs::remove_file(vault.join("gone.md")).unwrap();
+        index_vault(&mut store, &root).unwrap();
+        let final_links = store.links_for(&root, "x.md").unwrap();
+        assert_eq!(final_links.outgoing[1].resolved, None);
+        assert_eq!(final_links.outgoing[1].target, "gone");
+        assert_eq!(final_links.unresolved.len(), 1);
+    }
+
+    #[test]
+    fn a_second_note_with_the_same_stem_stops_a_resolved_link() {
+        let vault = temp_vault("links_stem");
+        let root = root_str(&vault);
+        let mut store = VaultStore::open(&temp_db("links_stem")).unwrap();
+        write_note(&vault, "a/note.md", "# A\n");
+        write_note(&vault, "x.md", "# X\n[[note]]\n");
+        index_vault(&mut store, &root).unwrap();
+        assert_eq!(
+            store.links_for(&root, "x.md").unwrap().outgoing[0]
+                .resolved
+                .as_deref(),
+            Some("a/note.md")
+        );
+
+        // The stem is shared now, so the edge must stop resolving rather than
+        // keep pointing at whichever note happened to be there first.
+        write_note(&vault, "b/note.md", "# B\n");
+        index_vault(&mut store, &root).unwrap();
+        let links = store.links_for(&root, "x.md").unwrap();
+        assert_eq!(links.outgoing[0].resolved, None);
+        assert_eq!(
+            links.unresolved[0].candidates,
+            vec!["a/note.md".to_string(), "b/note.md".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_removed_note_takes_its_own_edges_and_clear_vault_takes_the_rest() {
+        let vault = temp_vault("links_remove");
+        let root = root_str(&vault);
+        let mut store = VaultStore::open(&temp_db("links_remove")).unwrap();
+        write_note(&vault, "x.md", "# X\n[[y]]\n");
+        write_note(&vault, "y.md", "# Y\n");
+        index_vault(&mut store, &root).unwrap();
+        assert_eq!(store.links_for(&root, "y.md").unwrap().backlinks.len(), 1);
+
+        fs::remove_file(vault.join("x.md")).unwrap();
+        index_vault(&mut store, &root).unwrap();
+        assert!(
+            store.links_for(&root, "y.md").unwrap().backlinks.is_empty(),
+            "the edge went with its source"
+        );
+        assert!(store.links_for(&root, "x.md").unwrap().outgoing.is_empty());
+
+        store.clear_vault(&root).unwrap();
+        assert!(store.links_for(&root, "y.md").unwrap().outgoing.is_empty());
+
+        // A dead vault root takes its links too.
+        let dead = "/nonexistent/vault-root-for-links";
+        store
+            .upsert_batch(&rows(dead, &[("a.md", "# A\n[[b]]\n"), ("b.md", "# B\n")]))
+            .unwrap();
+        assert_eq!(store.links_for(dead, "b.md").unwrap().backlinks.len(), 1);
+        store.prune_dead_vaults().unwrap();
+        assert!(store.links_for(dead, "b.md").unwrap().backlinks.is_empty());
+    }
+
+    #[test]
+    fn the_schema_bump_rebuilds_the_derived_tables() {
+        // A version-1 store: notes, no links.
+        let path = temp_db("links_bump");
+        let vault = temp_vault("links_bump");
+        let root = root_str(&vault);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE notes (
+                 vault_id TEXT NOT NULL, rel_path TEXT NOT NULL, mtime INTEGER NOT NULL,
+                 size INTEGER NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL,
+                 PRIMARY KEY (vault_id, rel_path));
+             CREATE VIRTUAL TABLE notes_fts USING fts5(
+                 title, body, content=notes, content_rowid=rowid, tokenize='porter unicode61');
+             PRAGMA user_version=1;",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO notes (vault_id, rel_path, mtime, size, title, body)
+             VALUES (?1, 'a.md', 1, 1, 'A', '[[b]]')",
+            params![root],
+        )
+        .unwrap();
+        drop(conn);
+
+        let mut store = VaultStore::open(&path).unwrap();
+        let version: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 2, "the bump is recorded");
+        assert_eq!(
+            store.note_count(&root).unwrap(),
+            0,
+            "the derived tables are rebuilt, not migrated: the next pass re-reads the vault"
+        );
+        // The links table is queryable (and the pass repopulates both sides).
+        write_note(&vault, "a.md", "# A\n[[b]]\n");
+        write_note(&vault, "b.md", "# B\n");
+        index_vault(&mut store, &root).unwrap();
+        assert_eq!(store.links_for(&root, "b.md").unwrap().backlinks.len(), 1);
     }
 
     #[test]
