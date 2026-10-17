@@ -148,12 +148,24 @@ omp plugin link "$(pwd)/extensions/gpty-omp-events"
 
 # Terminal renderer cost (needs a display; see the script header)
 godot --path godot --disable-vsync -s res://tests/bench/draw_bench.gd
+
+# Markdown preview cost: Rust render + parse + the label's shape pass
+godot --headless --path godot -s res://tests/bench/markdown_bench.gd
 ```
 
 The render benchmark fills a pane with a deterministic ANSI-rich screen, prints
 the cost of a forced full repaint against an idle frame, and saves the rendered
 frame to `/tmp/gpty_draw_<BENCH_TAG>.png`. Two revisions must render
 byte-identical pixels, so diff the two PNGs before trusting a timing delta.
+
+The Markdown benchmark prints `render_ms` / `parse_ms` / `shape_ms` /
+`total_ms` per size for a repeated block; `shape_ms` is the frame after the
+text lands, which is the pass a document's markup can make superlinear (see
+`GptyMarkdown`'s docs) and the number a change to the renderer's output has to
+be argued against. Run it against a release GDExtension
+(`cargo build --release -p gpty-gdext`, then point the platform's
+`godot/bin/libgpty_gdext.*` symlink at `target/release/`) for the numbers a
+user would see, and restore the debug symlink afterwards.
 
 ### CLI (control a running GUI)
 

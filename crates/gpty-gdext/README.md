@@ -36,6 +36,14 @@ Raw BBCode and HTML are escaped, images render as alt text, and only
 `http`, `https`, and `mailto` links become metadata. Godot asks for
 confirmation before `MarkdownView` opens a link.
 
+The output never uses Godot's list tags: `[ul]`/`[ol]` lay a document out
+superlinearly in the item count (measured: 38915 ms to shape 1.7 MiB of
+two-item lists against 819 ms for that same rendered text with the tags
+stripped, and 146705 ms for a real 1 MiB note), so each item is a `• `/`N. `
+line inside one `[indent]` per list — identical on screen and linear to lay
+out. The numbering is the renderer's own, which is also why an ordered list
+that starts at 3 renders as `3.` rather than `1.`.
+
 The input cap (`MAX_MARKDOWN_BYTES`) is the same 1 MiB the panes read under, so
 a document at a pane's read cap renders whole, and a source past it — a pasted
 buffer, a routed capture, a long model turn — is what the answer's `truncated`
@@ -104,7 +112,7 @@ on drop.
 | `vault_note_read(vault_path: String, rel_path: String)` | `String` | Static — load one note for the editor. JSON: `{text, truncated, crlf, mtime, size}` (the text at the 1 MiB cut, `truncated` when that cut hit a larger file, `crlf` when the file uses CRLF endings, and the stamp a save checks), or `{error, code}`. Only a regular file at a vault-relative `.md` path the walk could have produced is read |
 | `vault_note_write(vault_path: String, rel_path: String, content: String, expected_mtime: int, expected_size: int, force: bool)` | `String` | Static — replace an existing note atomically (hidden sibling temp, renamed over the target, keeping the note's own mode) and re-index the vault. The resolved path must stay inside the root (a symlink escaping it is refused, one pointing at a sibling note is written through); the file must exist — this edits, never creates. A stamp different from `expected_mtime`/`expected_size` answers `code: "changed_on_disk"` unless `force` is true. JSON: `{mtime, size, indexed}` — `indexed: false` means saved but not searchable yet — or `{error, code}` |
 | `vault_scratch_read(vault_path: String, rel_path: String)` | `String` | Static — the recovery copy of one note's unsaved buffer, written by the editor so a crash cannot take it. JSON: `{found: false}` when there is none (the normal state, and the answer for a copy that cannot be trusted) or `{found: true, text, mtime, size}` — the buffer, and the stamp of the file revision it was typed against, so a save restored from it still checks the file the user saw. `error` only when the vault or the note path cannot be used |
-| `vault_scratch_write(vault_path: String, rel_path: String, text: String, expected_mtime: int, expected_size: int)` | `String` | Static — snapshot one note's unsaved buffer as its recovery copy. Goes to gpty's own state directory (`state_dir()/scratch`, owner-only) and never to the vault — this is not a note write — and is atomic (hidden random temp, renamed over the previous copy). `expected_mtime`/`expected_size` are the stamp the buffer was loaded from, recorded so a restore after the file moved on still asks. JSON: `{ok: true}` or `{error, code}` |
+| `vault_scratch_write(vault_path: String, rel_path: String, text: String, expected_mtime: int, expected_size: int)` | `String` | Static — snapshot one note's unsaved buffer as its recovery copy. Goes to gpty's own state directory (`state_dir()/scratch`, owner-only) and never to the vault — this is not a note write — and is atomic (hidden random temp, renamed over the previous copy). Each write also prunes the directory: a copy whose own record names a vault that is gone is reclaimed, as is a temp file older than an hour; a vault that cannot be read and a record that cannot be interpreted are left alone. `expected_mtime`/`expected_size` are the stamp the buffer was loaded from, recorded so a restore after the file moved on still asks. JSON: `{ok: true}` or `{error, code}` |
 | `vault_scratch_clear(vault_path: String, rel_path: String)` | `String` | Static — drop one note's recovery copy: its buffer either reached the file or was deliberately discarded. An absent copy is not an error. JSON: `{ok: true}` or `{error, code}` |
 
 #### Pane API & status
