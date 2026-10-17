@@ -431,26 +431,60 @@ func _expand_exact(rm: Dictionary) -> bool:
 			if rm.row + rm.rspan == t.row: t.row = rm.row; t.rspan += rm.rspan; return true
 	return false
 
+## No single neighbour matches the freed rect, so a *group* of tiles along one
+## side absorbs it. Exactly one side may: the old code stretched the tiles on
+## both sides of a freed strip across it, so each claimed the whole strip and
+## the two groups overlapped. A side qualifies only if its tiles lie within the
+## freed edge and together span all of it — a tile that merely shares a
+## coordinate with the edge, or one that sticks out past it, would stretch into
+## a neighbour's area or leave part of the gap open.
 func _expand_partial(rm: Dictionary):
-	var left = []; var right = []; var up = []; var down = []
-	for t in tiles:
-		if t.col + t.cspan == rm.col: left.append(t)
-		if rm.col + rm.cspan == t.col: right.append(t)
-		if t.row + t.rspan == rm.row: up.append(t)
-		if rm.row + rm.rspan == t.row: down.append(t)
-	if left.size() > 0 or right.size() > 0:
-		var new_right = rm.col + rm.cspan
-		for t in left: t.cspan = new_right - t.col
-		for t in right: t.cspan = (t.col + t.cspan) - rm.col; t.col = rm.col
+	var left := _edge_group(rm, true, false)
+	if not left.is_empty():
+		for t in left: t.cspan += rm.cspan
 		return
-	if up.size() > 0 or down.size() > 0:
-		var new_bottom = rm.row + rm.rspan
-		for t in up: t.rspan = new_bottom - t.row
-		for t in down: t.rspan = (t.row + t.rspan) - rm.row; t.row = rm.row
+	var right := _edge_group(rm, true, true)
+	if not right.is_empty():
+		for t in right: t.col = rm.col; t.cspan += rm.cspan
 		return
-	if tiles.size() > 0:
+	var up := _edge_group(rm, false, false)
+	if not up.is_empty():
+		for t in up: t.rspan += rm.rspan
+		return
+	var down := _edge_group(rm, false, true)
+	if not down.is_empty():
+		for t in down: t.row = rm.row; t.rspan += rm.rspan
+		return
+	# Nothing tiles that edge (a hand-edited or pinwheel layout). A lone
+	# survivor is simply the whole grid. With several tiles there is no
+	# rectangle-preserving way to fill the hole, and stretching one tile over
+	# the rest would stack panes on top of each other, so the gap stays.
+	if tiles.size() == 1:
 		tiles[0].col = 0; tiles[0].row = 0
 		tiles[0].cspan = PaneTypes.GRID; tiles[0].rspan = PaneTypes.GRID
+
+## The tiles abutting one side of `rm` that can absorb it — `vertical_edge`
+## picks the left/right sides (the shared edge runs along rows), otherwise
+## the top/bottom (along columns); `far_side` picks right/bottom. Returns the
+## group only when it is contained in the edge and spans all of it, else [].
+func _edge_group(rm: Dictionary, vertical_edge: bool, far_side: bool) -> Array:
+	var group := []
+	var covered := 0
+	for t in tiles:
+		if vertical_edge:
+			var abuts: bool = (rm.col + rm.cspan == t.col) if far_side \
+					else (t.col + t.cspan == rm.col)
+			if abuts and t.row >= rm.row and t.row + t.rspan <= rm.row + rm.rspan:
+				group.append(t)
+				covered += t.rspan
+		else:
+			var abuts: bool = (rm.row + rm.rspan == t.row) if far_side \
+					else (t.row + t.rspan == rm.row)
+			if abuts and t.col >= rm.col and t.col + t.cspan <= rm.col + rm.cspan:
+				group.append(t)
+				covered += t.cspan
+	var needed: int = rm.rspan if vertical_edge else rm.cspan
+	return group if covered == needed else []
 
 # ── Helpers ────────────────────────────────────────────────────────────
 

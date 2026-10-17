@@ -259,6 +259,293 @@ func test_spawn_respects_show_titlebar_true():
 	var tb = _tm.tiles[0].wrapper.get_node_or_null("BodyVBox/TitleBar")
 	assert_not_null(tb, "titlebar node should exist")
 	assert_true(tb.visible, "titlebar should be visible when setting is true")
+# ── Tile geometry: split / kill / expand ───────────────────────────────
+#
+# These run the real `spawn_pane` / `kill` against the real tile list. They
+# replaced `crates/gpty-core/tests/tile_layout.rs`, which tested a Rust copy of
+# this algorithm and so passed whatever this file did. Panes are code viewers —
+# no PTY — because only the geometry is under test.
+
+func _spawn_panes(count: int) -> Array:
+	var bodies: Array = []
+	for i in count:
+		var body = _tm.spawn_pane("code_viewer", {})
+		assert_not_null(body, "pane %d of %d must fit in the grid" % [i + 1, count])
+		bodies.append(body)
+	return bodies
+
+func _tile_of(body) -> Dictionary:
+	var idx: int = _tm._tile_index_of(body)
+	assert_ne(idx, -1, "the pane must still own a tile")
+	return _tm.tiles[idx] if idx != -1 else {}
+
+func _rect(tile: Dictionary) -> Array:
+	return [tile.col, tile.row, tile.cspan, tile.rspan]
+
+## The tiles must partition the grid: inside it, no tile under MIN_TILE, no two
+## overlapping, and — with no overlap — total area equal to the grid's means no
+## gap either. Returns a description of the first violation, "" when sound.
+func _partition_fault() -> String:
+	var fault := _overlap_fault()
+	if fault != "":
+		return fault
+	var g: int = PaneTypes.GRID
+	var area := 0
+	for t in _tm.tiles:
+		area += t.cspan * t.rspan
+	if area != g * g:
+		return "tiles cover %d of %d units" % [area, g * g]
+	return ""
+
+## Bounds, minimum size and overlap only — the part of `_partition_fault` that
+## must hold even when a layout cannot be closed up without a hole.
+func _overlap_fault() -> String:
+	var g: int = PaneTypes.GRID
+	for i in _tm.tiles.size():
+		var a: Dictionary = _tm.tiles[i]
+		if a.col < 0 or a.row < 0 or a.col + a.cspan > g or a.row + a.rspan > g:
+			return "tile %s leaves the %d-unit grid" % [_rect(a), g]
+		if a.cspan < PaneTypes.MIN_TILE or a.rspan < PaneTypes.MIN_TILE:
+			return "tile %s is under MIN_TILE %d" % [_rect(a), PaneTypes.MIN_TILE]
+		for j in range(i + 1, _tm.tiles.size()):
+			var b: Dictionary = _tm.tiles[j]
+			if a.col < b.col + b.cspan and b.col < a.col + a.cspan \
+					and a.row < b.row + b.rspan and b.row < a.row + a.rspan:
+				return "tiles %s and %s overlap" % [_rect(a), _rect(b)]
+	return ""
+
+func _assert_partition(context: String) -> void:
+	assert_eq(_partition_fault(), "", "the tiles must partition the grid %s" % context)
+
+## Place the tiles of freshly spawned panes at exact rects, for layouts the
+## splitter cannot produce by itself (it only ever halves the largest tile).
+## The algorithm reads nothing but geometry, so this is the whole setup.
+func _arrange(bodies: Array, rects: Array) -> void:
+	for i in bodies.size():
+		var tile := _tile_of(bodies[i])
+		tile.col = rects[i][0]
+		tile.row = rects[i][1]
+		tile.cspan = rects[i][2]
+		tile.rspan = rects[i][3]
+	_assert_partition("the hand-placed starting layout")
+
+func test_the_first_pane_fills_the_grid():
+	var bodies := _spawn_panes(1)
+	var g: int = PaneTypes.GRID
+	assert_eq(_rect(_tile_of(bodies[0])), [0, 0, g, g])
+
+func test_splits_halve_the_largest_tile_along_its_longer_side():
+	var g: int = PaneTypes.GRID
+	var h: int = g / 2
+	var bodies := _spawn_panes(3)
+	# A square splits left|right (the first tile keeps the left half) ...
+	assert_eq(_rect(_tile_of(bodies[1])), [h, 0, h, g], "the second pane takes the right half")
+	# ... and the next split takes the largest tile — now the tall left half,
+	# which splits top|bottom.
+	assert_eq(_rect(_tile_of(bodies[0])), [0, 0, h, h], "the first pane keeps the top-left")
+	assert_eq(_rect(_tile_of(bodies[2])), [0, h, h, h], "the third pane takes the bottom-left")
+	_assert_partition("after three splits")
+
+func test_every_split_up_to_the_grid_limit_keeps_a_partition():
+	var spawned := 0
+	while spawned < 200 and _tm.spawn_pane("code_viewer", {}) != null:
+		spawned += 1
+		assert_eq(_partition_fault(), "", "after %d panes" % spawned)
+	assert_between(spawned, 4, 199, "the grid must hold several panes and then refuse")
+	assert_eq(_tm.tiles.size(), spawned)
+
+func test_a_refused_split_leaves_the_layout_untouched():
+	while _tm.tiles.size() < 200 and _tm.spawn_pane("code_viewer", {}) != null:
+		pass
+	assert_lt(_tm.tiles.size(), 200, "the grid must fill and refuse before 200 panes")
+	var before: Array = []
+	for t in _tm.tiles:
+		before.append(_rect(t))
+	assert_null(_tm.spawn_pane("code_viewer", {}), "a full grid must refuse another pane")
+	var after: Array = []
+	for t in _tm.tiles:
+		after.append(_rect(t))
+	assert_eq(after, before, "a refused split must not move or resize any tile")
+	_assert_partition("after the refused split")
+
+func test_killing_either_half_of_a_pair_gives_the_survivor_the_grid():
+	var g: int = PaneTypes.GRID
+	for victim_index in [0, 1]:
+		_tm.reset()
+		var bodies := _spawn_panes(2)
+		_tm.kill(bodies[victim_index])
+		assert_eq(_tm.tiles.size(), 1)
+		assert_eq(_rect(_tile_of(bodies[1 - victim_index])), [0, 0, g, g],
+			"the survivor must grow to the whole grid (killed pane %d)" % victim_index)
+
+func test_killing_a_stacked_tile_grows_its_partner_vertically():
+	# Three panes: top-left, bottom-left, and a full-height right half.
+	var g: int = PaneTypes.GRID
+	var h: int = g / 2
+	var bodies := _spawn_panes(3)
+	_tm.kill(bodies[2])
+	assert_eq(_rect(_tile_of(bodies[0])), [0, 0, h, g], "the tile above grows down over the gap")
+	assert_eq(_rect(_tile_of(bodies[1])), [h, 0, h, g], "the other half is not disturbed")
+	_assert_partition("after closing the bottom-left pane")
+
+func test_killing_a_full_height_tile_stretches_every_neighbour_across():
+	# No single neighbour matches the victim's edge, so the partial path must
+	# widen *both* tiles that touch it.
+	var g: int = PaneTypes.GRID
+	var h: int = g / 2
+	var bodies := _spawn_panes(3)
+	_tm.kill(bodies[1])  # the full-height right half
+	assert_eq(_rect(_tile_of(bodies[0])), [0, 0, g, h], "top-left stretches to full width")
+	assert_eq(_rect(_tile_of(bodies[2])), [0, h, g, h], "bottom-left stretches to full width")
+	_assert_partition("after closing the full-height pane")
+
+func test_killing_a_left_tile_pulls_the_right_neighbours_across_it():
+	# A full-height left strip, with two stacked tiles on the right: the right
+	# tiles must move *left* to take the strip's place.
+	var g: int = PaneTypes.GRID
+	var strip := g / 5
+	var top_h := g / 2
+	var bodies := _spawn_panes(3)
+	_arrange(bodies, [
+		[0, 0, strip, g],
+		[strip, 0, g - strip, top_h],
+		[strip, top_h, g - strip, g - top_h],
+	])
+	_tm.kill(bodies[0])
+	assert_eq(_rect(_tile_of(bodies[1])), [0, 0, g, top_h])
+	assert_eq(_rect(_tile_of(bodies[2])), [0, top_h, g, g - top_h])
+	_assert_partition("after closing the left strip")
+
+func test_killing_a_top_tile_pulls_the_lower_neighbours_up_across_it():
+	var g: int = PaneTypes.GRID
+	var band := g / 5
+	var half := g / 2
+	var bodies := _spawn_panes(3)
+	_arrange(bodies, [
+		[0, 0, g, band],
+		[0, band, half, g - band],
+		[half, band, g - half, g - band],
+	])
+	_tm.kill(bodies[0])
+	assert_eq(_rect(_tile_of(bodies[1])), [0, 0, half, g])
+	assert_eq(_rect(_tile_of(bodies[2])), [half, 0, g - half, g])
+	_assert_partition("after closing the top band")
+
+## Closing the middle of three columns, each side split in two: the tiles on
+## *both* sides touch the freed strip. The old code stretched both groups
+## across it, so they overlapped each other — found by the oldest-first close
+## order below, which reached this shape after four closes.
+func test_closing_a_strip_with_tiles_on_both_sides_is_absorbed_by_one_side_only():
+	var g: int = PaneTypes.GRID
+	var third := g / 3
+	var half := g / 2
+	var bodies := _spawn_panes(5)
+	_arrange(bodies, [
+		[0, 0, third, half],              # left, top
+		[0, half, third, g - half],       # left, bottom
+		[third, 0, third, g],             # the strip that closes
+		[2 * third, 0, g - 2 * third, half],
+		[2 * third, half, g - 2 * third, g - half],
+	])
+	_tm.kill(bodies[2])
+	_assert_partition("after closing the middle strip")
+	assert_eq(_rect(_tile_of(bodies[0])), [0, 0, 2 * third, half],
+		"the left group takes the strip")
+	assert_eq(_rect(_tile_of(bodies[1])), [0, half, 2 * third, g - half])
+	assert_eq(_rect(_tile_of(bodies[3])), [2 * third, 0, g - 2 * third, half],
+		"the right group must not also stretch across it")
+	assert_eq(_rect(_tile_of(bodies[4])), [2 * third, half, g - 2 * third, g - half])
+
+## A tile whose right edge merely lines up with the freed tile's left edge, in
+## a different row band, is not a neighbour and must not be stretched.
+func test_a_tile_that_only_shares_a_coordinate_is_not_stretched():
+	var g: int = PaneTypes.GRID
+	var h := g / 2
+	var q := g / 4
+	var bodies := _spawn_panes(6)
+	_arrange(bodies, [
+		[0, 0, h, q],                # L1 — beside the freed tile
+		[0, q, h, h - q],            # L2 — beside the freed tile
+		[h, 0, h, h],                # R  — the one that closes (split below it)
+		[0, h, h, h],                # E  — right edge lines up with R's left edge, rows do not
+		[h, h, q, h],                # D1 — under R
+		[h + q, h, g - h - q, h],    # D2 — under R
+	])
+	_tm.kill(bodies[2])
+	_assert_partition("after closing the top-right tile")
+	assert_eq(_rect(_tile_of(bodies[0])), [0, 0, g, q], "L1 takes the freed width")
+	assert_eq(_rect(_tile_of(bodies[1])), [0, q, g, h - q], "L2 takes the freed width")
+	assert_eq(_rect(_tile_of(bodies[3])), [0, h, h, h],
+		"E shares only a column coordinate with the freed tile and must not move")
+
+## Layouts the splitter cannot make (a hand-edited profile) may have a freed
+## rect no group of tiles can absorb. Stacking one tile over the rest would
+## hide panes behind each other, so the hole stays and nothing overlaps.
+func test_a_hole_no_tiles_can_absorb_is_left_open_rather_than_overlapped():
+	var g: int = PaneTypes.GRID
+	var u := g / 3  # a pinwheel of four arms around a centre tile
+	var bodies := _spawn_panes(5)
+	_arrange(bodies, [
+		[0, 0, 2 * u, u],
+		[2 * u, 0, u, 2 * u],
+		[u, 2 * u, 2 * u, u],
+		[0, u, u, 2 * u],
+		[u, u, u, u],                # the centre — no arm lies within its edges
+	])
+	_tm.kill(bodies[4])
+	assert_eq(_tm.tiles.size(), 4)
+	assert_eq(_overlap_fault(), "", "an unabsorbable hole must not become an overlap")
+	assert_eq(_rect(_tile_of(bodies[0])), [0, 0, 2 * u, u], "the arms keep their places")
+	assert_eq(_rect(_tile_of(bodies[2])), [u, 2 * u, 2 * u, u])
+
+func test_every_close_order_of_five_panes_keeps_a_partition():
+	var checked := 0
+	for order in _permutations([0, 1, 2, 3, 4]):
+		_tm.reset()
+		var bodies := _spawn_panes(5)
+		for i in 4:
+			_tm.kill(bodies[order[i]])
+			var fault := _partition_fault()
+			if fault != "":
+				assert_eq(fault, "", "closing panes in order %s, after close %d" % [order, i + 1])
+				return
+		checked += 1
+	assert_eq(checked, 120, "all 5! close orders were exercised")
+
+func _permutations(items: Array) -> Array:
+	if items.size() <= 1:
+		return [items.duplicate()]
+	var out: Array = []
+	for i in items.size():
+		var rest := items.duplicate()
+		var head = rest.pop_at(i)
+		for tail in _permutations(rest):
+			out.append([head] + tail)
+	return out
+
+func test_closing_panes_in_any_order_never_leaves_a_gap_or_overlap():
+	# Build eight panes, then close them in three different orders; the
+	# partition must hold after every single close.
+	for order in ["newest_first", "oldest_first", "middle_out"]:
+		_tm.reset()
+		var bodies := _spawn_panes(8)
+		var queue: Array = bodies.duplicate()
+		var step := 0
+		while queue.size() > 1:
+			var pick: int = 0
+			match order:
+				"newest_first": pick = queue.size() - 1
+				"oldest_first": pick = 0
+				"middle_out": pick = queue.size() / 2
+			_tm.kill(queue.pop_at(pick))
+			step += 1
+			assert_eq(_partition_fault(), "",
+				"%s: after closing %d of 8 panes" % [order, step])
+		assert_eq(_tm.tiles.size(), 1)
+		var g: int = PaneTypes.GRID
+		assert_eq(_rect(_tile_of(queue[0])), [0, 0, g, g],
+			"%s: the last pane must own the whole grid" % order)
+
 # ── Saved-layout grid unit migration ───────────────────────────────────
 
 func test_scale_layout_converts_a_legacy_grid():
