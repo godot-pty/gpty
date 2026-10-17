@@ -8,6 +8,12 @@ pub fn truncate_utf8(input: &str, max_bytes: usize) -> String {
         return input.to_string();
     }
     let marker = "\n\n[truncated]";
+    if max_bytes < marker.len() {
+        // No room for content plus the marker; the caller's cap wins. Both
+        // real caps are KiBs, so this only keeps the documented contract for
+        // any future caller (the marker is ASCII, so a prefix is valid).
+        return marker[..max_bytes].to_string();
+    }
     let budget = max_bytes.saturating_sub(marker.len());
     let mut end = budget.min(input.len());
     while end > 0 && !input.is_char_boundary(end) {
@@ -116,6 +122,18 @@ mod tests {
             "one byte over is cut and marked"
         );
         assert_eq!(truncate_utf8("", 20), "");
+    }
+
+    /// The documented contract is "at most `max_bytes`", including caps that
+    /// cannot hold the marker itself — no real caller passes one (both are
+    /// KiBs), but a caller's limit must never be exceeded.
+    #[test]
+    fn a_cap_smaller_than_the_marker_still_never_exceeds_it() {
+        for cap in 0..=MARKER.len() {
+            let out = truncate_utf8("a capture longer than any tiny cap", cap);
+            assert!(out.len() <= cap, "cap {cap} produced {out:?}");
+        }
+        assert_eq!(truncate_utf8("something", 5), &MARKER[..5]);
     }
 
     #[test]
