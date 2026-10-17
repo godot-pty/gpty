@@ -36,7 +36,8 @@ pub const MAX_DEPTH: usize = 16;
 /// text the view never shows.
 pub const MAX_NOTE_BYTES: u64 = 1 << 20;
 
-/// Longest title kept (the first heading, or the file stem).
+/// Longest title kept (the first heading past any frontmatter block, or the
+/// file stem).
 const MAX_TITLE_CHARS: usize = 200;
 
 /// Most hits one search returns.
@@ -480,9 +481,46 @@ fn trim_torn_tail(mut bytes: Vec<u8>) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
+/// The body with a leading, closed YAML frontmatter block removed.
+///
+/// Obsidian writes a note's properties as a `---` … `---` block at the very
+/// top of the file (the closing delimiter may also be `...`). Nothing else
+/// treats the block specially — it renders as ordinary Markdown, and no
+/// `title:` key is read (that belongs with a properties UI, if one ever
+/// exists) — so this exists only so the *label* scan below can look past it:
+/// without the skip the opening `---` is the body's first non-empty line, and
+/// every such note is named by its file stem.
+///
+/// Only a block that actually closes counts: an unterminated `---` is not
+/// frontmatter, and the body is returned whole so the scan behaves exactly as
+/// it did before. A delimiter line may carry trailing whitespace (and, in a
+/// CRLF file, the `\r`).
+fn without_frontmatter(body: &str) -> &str {
+    let mut offset = 0;
+    let mut opening = true;
+    for line in body.split_inclusive('\n') {
+        let text = line.strip_suffix('\n').unwrap_or(line).trim_end();
+        if opening {
+            if text != "---" {
+                return body;
+            }
+            opening = false;
+        } else if text == "---" || text == "..." {
+            return &body[offset + line.len()..];
+        }
+        offset += line.len();
+    }
+    // No closing delimiter: not frontmatter.
+    body
+}
+
 /// What a list row shows: the first heading's text, else the file stem.
+///
+/// A leading YAML frontmatter block is skipped first ([`without_frontmatter`]),
+/// so an Obsidian-shaped note (`---` / `title: …` / `---` / `# Real heading`)
+/// is labelled and ranked by its heading rather than by its stem.
 pub fn note_title(rel_path: &str, body: &str) -> String {
-    for line in body.lines() {
+    for line in without_frontmatter(body).lines() {
         let trimmed = line.trim_start();
         if let Some(rest) = trimmed.strip_prefix('#') {
             let title = rest.trim_start_matches('#').trim();
@@ -1424,6 +1462,76 @@ mod tests {
         assert_eq!(note_title("dir/my-note.md", "\n\n## Later\nbody"), "Later");
         assert_eq!(note_title("dir/my-note.md", "plain body"), "my-note");
         assert_eq!(note_title("dir/my-note.md", ""), "my-note");
+    }
+
+    #[test]
+    fn a_frontmatter_block_is_not_the_title() {
+        // The shape the item was found with: Obsidian's properties block, then
+        // the real heading. Without the skip the opening `---` is the first
+        // non-empty line and the note is named by its stem.
+        assert_eq!(
+            note_title(
+                "obsidian.md",
+                "---\ntitle: A Property\ntags: [x]\n---\n# Real Heading\n\nbody\n"
+            ),
+            "Real Heading"
+        );
+        // `...` closes a YAML document too, and a CRLF file carries its `\r`
+        // into both delimiter lines.
+        assert_eq!(
+            note_title(
+                "b.md",
+                "---\r\ntitle: x\r\n...\r\n# Crlf Heading\r\nbody\r\n"
+            ),
+            "Crlf Heading"
+        );
+        // A heading inside the block is the block's, not the note's.
+        assert_eq!(
+            note_title("c.md", "---\n# Not The Title\n---\nplain body\n"),
+            "c"
+        );
+        // No heading after a closed block still falls back to the stem.
+        assert_eq!(note_title("d.md", "---\ntitle: x\n---\nplain body\n"), "d");
+        // Unterminated: not frontmatter, so the opening `---` is the body's
+        // first non-empty line and the stem names the note, exactly as before.
+        assert_eq!(note_title("e.md", "---\ntitle: x\n# Heading\n"), "e");
+        // A first line that is not the delimiter changes nothing.
+        assert_eq!(note_title("f.md", "text\n---\n# Heading\n"), "f");
+        // Only the *first* line can open the block.
+        assert_eq!(
+            note_title("g.md", "\n---\ntitle: x\n---\n# Heading\n"),
+            "g",
+            "a leading blank line means the file does not start with the block"
+        );
+    }
+
+    #[test]
+    fn a_frontmatter_note_is_found_and_labelled_by_its_heading() {
+        // The item was reported from search results, so this pins what a hit
+        // *says* after a real index pass, not just what `note_title` returns.
+        let path = temp_db("frontmatter_search");
+        let vault = temp_vault("frontmatter_search");
+        let root = root_str(&vault);
+        let mut store = VaultStore::open(&path).unwrap();
+        write_note(
+            &vault,
+            "obsidian.md",
+            "---\ntitle: A Property\ntags: [x]\n---\n# Real Heading\n\nwidget body\n",
+        );
+        index_vault(&mut store, &root).unwrap();
+
+        let hits = store.search_user_text(&root, "widget", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(
+            hits[0].title, "Real Heading",
+            "the hit must be labelled by the heading, not by the stem"
+        );
+        // The properties block is still ordinary indexed body text — the skip
+        // is a label rule, not a second content store.
+        assert_eq!(
+            store.search_user_text(&root, "property", 10).unwrap().len(),
+            1
+        );
     }
 
     #[test]
