@@ -33,7 +33,39 @@ TEST_DIRS=(godot/tests/unit godot/tests/integration)
 
 LOG="$(mktemp)"
 PLAIN="$(mktemp)"
-trap 'rm -f "$LOG" "$PLAIN"' EXIT
+
+# ── A private endpoint and user profile for the suite ────────────────────
+#
+# The tests spawn real panes, and every gpty instance binds the control *and*
+# event endpoints — one instance owns each. Running this gate while a workspace
+# is open therefore made the test instance refuse the bind, set its own
+# shutdown flag and quit mid-suite: measured 2026-10-14 as 12 scripts and no
+# Run Summary at all, which reads as a crash rather than as "close the app".
+#
+# `GPTY_SOCKET` moves both endpoints (the event path is derived from the
+# control one), so the suite never meets a developer's GUI; on Windows that is
+# the same variable carrying a pipe name. The XDG dirs are the second half of
+# the same rule: the suite's probe vaults, the vault index and the recovery
+# copies stay inside the sandbox instead of the developer's real data and state
+# directories, and a bare `Workspace` can no longer restore a real layout whose
+# presence depends on the machine (the smoke sandboxes itself the same way).
+# Windows ignores the XDG variables — Godot resolves `user://` through the
+# Known Folder API and the state dir comes from `%LOCALAPPDATA%` — so there
+# this buys the endpoints, and the profile half waits on its queued item.
+SANDBOX="$(mktemp -d)"
+chmod 700 "$SANDBOX"
+export XDG_RUNTIME_DIR="$SANDBOX/run"
+export XDG_DATA_HOME="$SANDBOX/data"
+export XDG_STATE_HOME="$SANDBOX/state"
+mkdir -p "$XDG_RUNTIME_DIR" "$XDG_DATA_HOME" "$XDG_STATE_HOME"
+case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*) export GPTY_SOCKET='\\.\pipe\gpty-gut-'"$$" ;;
+    *) export GPTY_SOCKET="$XDG_RUNTIME_DIR/gpty.sock" ;;
+esac
+# A developer's shell may carry a secret this instance has no client for.
+unset GPTY_SECRET
+
+trap 'rm -f "$LOG" "$PLAIN"; rm -rf "$SANDBOX"' EXIT
 
 GUT_ARGS=(-s addons/gut/gut_cmdln.gd -d)
 for dir in "${TEST_DIRS[@]}"; do
