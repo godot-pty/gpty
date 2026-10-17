@@ -209,6 +209,85 @@ impl GptyTerminal {
         }
     }
 
+    /// Every link of one note: what it points at, what points back at it, and
+    /// what stays unresolved (JSON).
+    ///
+    /// Links are parsed and resolved by the index pass — one row per `[[…]]`
+    /// occurrence, with the line it was written on — so this reads the derived
+    /// store rather than scanning the vault. `outgoing` is what the note links
+    /// to (`{target, resolved, line, seq}`, `resolved` null while it does not
+    /// resolve); `backlinks` is the same edges read in reverse
+    /// (`{src, line, target}`, one entry per mention); `unresolved` names each
+    /// target nothing matched, with `candidates` listing the notes an
+    /// ambiguous stem could not be chosen between. `error` is present only
+    /// when the vault or the store cannot be used.
+    #[func]
+    fn vault_links(vault_path: GString, rel_path: GString) -> GString {
+        let path = vault_path.to_string();
+        if let Some(problem) = vault_path_problem(&path) {
+            return vault_error(&problem);
+        }
+        let Some(db) = vault_db_path() else {
+            return vault_error("no writable state directory for the vault index");
+        };
+        let store = match gpty_core::vault::VaultStore::open(&db) {
+            Ok(store) => store,
+            Err(e) => {
+                log::warn!("vault index open failed ({db}): {e}");
+                return vault_error(&format!("vault index unavailable: {e}"));
+            }
+        };
+        match store.links_for(&path, &rel_path.to_string()) {
+            Ok(links) => {
+                let outgoing: Vec<serde_json::Value> = links
+                    .outgoing
+                    .iter()
+                    .map(|link| {
+                        serde_json::json!({
+                            "target": &link.target,
+                            "resolved": &link.resolved,
+                            "line": link.line,
+                            "seq": link.seq,
+                        })
+                    })
+                    .collect();
+                let backlinks: Vec<serde_json::Value> = links
+                    .backlinks
+                    .iter()
+                    .map(|link| {
+                        serde_json::json!({
+                            "src": &link.src,
+                            "line": link.line,
+                            "target": &link.target,
+                        })
+                    })
+                    .collect();
+                let unresolved: Vec<serde_json::Value> = links
+                    .unresolved
+                    .iter()
+                    .map(|link| {
+                        serde_json::json!({
+                            "target": &link.target,
+                            "line": link.line,
+                            "candidates": &link.candidates,
+                        })
+                    })
+                    .collect();
+                let document = serde_json::json!({
+                    "outgoing": outgoing,
+                    "backlinks": backlinks,
+                    "unresolved": unresolved,
+                })
+                .to_string();
+                GString::from(document.as_str())
+            }
+            Err(e) => {
+                log::warn!("vault links failed ({path}): {e}");
+                vault_error(&format!("vault links failed: {e}"))
+            }
+        }
+    }
+
     /// Load one note for the editor (JSON).
     ///
     /// `rel_path` is a vault-relative note path (the spelling the index

@@ -105,6 +105,47 @@ func test_vault_index_and_search_answer_shaped_json():
 	DirAccess.remove_absolute(vault)
 
 
+func test_vault_links_answer_shaped_json():
+	# The wire contract the wiki pane's link views read: outgoing occurrences
+	# with their line and resolution, backlinks as the same edges in reverse,
+	# unresolved targets with the candidates an ambiguous stem could not choose
+	# between, and an `error` envelope for a root that cannot be used.
+	var vault := ProjectSettings.globalize_path("user://gdext_ffi_links")
+	DirAccess.make_dir_recursive_absolute(vault)
+	var target := FileAccess.open(vault.path_join("target.md"), FileAccess.WRITE)
+	target.store_string("# Target\n")
+	target.close()
+	var src := FileAccess.open(vault.path_join("src.md"), FileAccess.WRITE)
+	src.store_string("# Src\n\nsee [[target]] and [[missing]]\n")
+	src.close()
+	GptyTerminal.vault_index(vault)
+
+	var links = JSON.parse_string(str(GptyTerminal.vault_links(vault, "src.md")))
+	assert_true(links is Dictionary, "vault_links must answer JSON")
+	var outgoing: Array = links.get("outgoing", [])
+	assert_eq(outgoing.size(), 2, "one row per occurrence")
+	assert_eq(outgoing[0].get("target"), "target")
+	assert_eq(outgoing[0].get("resolved"), "target.md")
+	assert_eq(outgoing[0].get("line"), 3)
+	assert_eq(outgoing[0].get("seq"), 0)
+	assert_eq(outgoing[1].get("resolved"), null, "a missing target resolves to null")
+	assert_eq(links.get("unresolved", []).size(), 1)
+	assert_eq(links["unresolved"][0].get("target"), "missing")
+	assert_eq(links["unresolved"][0].get("candidates", []).size(), 0)
+
+	var back = JSON.parse_string(str(GptyTerminal.vault_links(vault, "target.md")))
+	assert_eq(back.get("backlinks", []).size(), 1, "the edge, read in reverse")
+	assert_eq(back["backlinks"][0].get("src"), "src.md")
+	assert_eq(back["backlinks"][0].get("line"), 3)
+
+	var bad = JSON.parse_string(str(GptyTerminal.vault_links("/nonexistent/vault/root", "a.md")))
+	assert_true(bad is Dictionary and bad.has("error"), "a bad root must answer an error")
+
+	DirAccess.remove_absolute(vault.path_join("src.md"))
+	DirAccess.remove_absolute(vault.path_join("target.md"))
+	DirAccess.remove_absolute(vault)
+
+
 func test_vault_note_read_and_write_answer_shaped_json():
 	# The editor's wire contract (consumed by wiki_pane.gd): a read answers the
 	# text with the stamp and the file's shape, a write answers the fresh stamp
