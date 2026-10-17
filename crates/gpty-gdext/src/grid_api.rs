@@ -143,6 +143,12 @@ impl GptyTerminal {
     /// Grid updates as PackedColorArray and PackedInt32Array
     /// instead of generic Array, avoiding per-element Variant boxing overhead.
     /// This is the preferred path for GDScript rendering.
+    ///
+    /// The color arrays are **paint-ready**: `CellInfo::paint_colors` applies
+    /// SGR 7 (inverse) before packing, so `fg` is always the glyph color and
+    /// `bg` always its background. The renderer draws them as they are — it
+    /// must not swap an inverse cell itself, and doing so is what painted a
+    /// pasted line (readline wraps its echo in `ESC[7m`) in its own color.
     #[func]
     fn get_grid_updates_packed(&self, force_full: bool) -> Dictionary<Variant, Variant> {
         self.with_grid_mut_ret(
@@ -161,15 +167,16 @@ impl GptyTerminal {
                             let mut line = String::with_capacity(n_cols);
                             for cell in row.iter() {
                                 line.push(cell.ch);
+                                let (fg, bg) = cell.paint_colors();
                                 fg_arr.push(Color::from_rgb(
-                                    cell.fg[0] as f32 * RGB_SCALE,
-                                    cell.fg[1] as f32 * RGB_SCALE,
-                                    cell.fg[2] as f32 * RGB_SCALE,
+                                    fg[0] as f32 * RGB_SCALE,
+                                    fg[1] as f32 * RGB_SCALE,
+                                    fg[2] as f32 * RGB_SCALE,
                                 ));
                                 bg_arr.push(Color::from_rgb(
-                                    cell.bg[0] as f32 * RGB_SCALE,
-                                    cell.bg[1] as f32 * RGB_SCALE,
-                                    cell.bg[2] as f32 * RGB_SCALE,
+                                    bg[0] as f32 * RGB_SCALE,
+                                    bg[1] as f32 * RGB_SCALE,
+                                    bg[2] as f32 * RGB_SCALE,
                                 ));
                                 let mut a: i32 = 0;
                                 if cell.bold {
@@ -209,15 +216,16 @@ impl GptyTerminal {
                         for u in cells {
                             indices_arr.push((u.row * cols + u.col) as i32);
                             chars.push(&Variant::from(u.cell.ch.to_string()));
+                            let (fg, bg) = u.cell.paint_colors();
                             fg_arr.push(Color::from_rgb(
-                                u.cell.fg[0] as f32 * RGB_SCALE,
-                                u.cell.fg[1] as f32 * RGB_SCALE,
-                                u.cell.fg[2] as f32 * RGB_SCALE,
+                                fg[0] as f32 * RGB_SCALE,
+                                fg[1] as f32 * RGB_SCALE,
+                                fg[2] as f32 * RGB_SCALE,
                             ));
                             bg_arr.push(Color::from_rgb(
-                                u.cell.bg[0] as f32 * RGB_SCALE,
-                                u.cell.bg[1] as f32 * RGB_SCALE,
-                                u.cell.bg[2] as f32 * RGB_SCALE,
+                                bg[0] as f32 * RGB_SCALE,
+                                bg[1] as f32 * RGB_SCALE,
+                                bg[2] as f32 * RGB_SCALE,
                             ));
                             let mut a: i32 = 0;
                             if u.cell.bold {

@@ -191,6 +191,13 @@ per-cell arrays: `fg`/`bg` are `PackedColorArray`, `attrs` is
 `PackedInt32Array` (bit flags: 1 bold, 2 italic, 4 underline, 8 inverse,
 16 wide), and `chars` is an `Array` of strings.
 
+`fg`/`bg` are **paint-ready**: `CellInfo::paint_colors` has already applied
+SGR 7 (inverse), so `fg` is always the glyph color and `bg` always the
+background. Draw them as they are — do not swap an inverse cell in GDScript.
+The `8 inverse` bit stays in `attrs` as cell information, not as a drawing
+instruction; swapping only the text color is what painted a bracketed paste
+(readline echoes it inside `ESC[7m`) in its own background.
+
 Full update (`is_full = true`, first fetch or `force_full`):
 ```gdscript
 {

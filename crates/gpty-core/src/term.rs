@@ -699,6 +699,22 @@ impl CellInfo {
             wide: flags.contains(Flags::WIDE_CHAR),
         }
     }
+
+    /// The colors this cell must be painted with: SGR 7 (inverse) swaps the
+    /// foreground and the background. A renderer that swaps only the text
+    /// color paints the glyph in its own background — and `ESC[7m` is not an
+    /// exotic attribute: a shell's readline wraps the echo of every bracketed
+    /// paste in `ESC[7m`/`ESC[27m`, so an unswapped background made whole
+    /// pasted lines invisible. `fg`/`bg` stay the raw SGR colors; the
+    /// renderer-facing packer calls this so the swap has one definition and
+    /// the GUI pays no per-cell branch for it.
+    pub fn paint_colors(&self) -> ([u8; 3], [u8; 3]) {
+        if self.inverse {
+            (self.bg, self.fg)
+        } else {
+            (self.fg, self.bg)
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -966,6 +982,29 @@ mod tests {
         let rows = g.renderable_rows();
         assert_eq!(rows[0][0].ch, 'R');
         assert_eq!(rows[0][0].fg, [205, 0, 0]); // \x1b[31m = Red
+    }
+
+    /// SGR 7 swaps both halves at the presentation boundary. The packed
+    /// cache the pane draws from carries these values, so a renderer that
+    /// only swaps the text color has no way left to paint a glyph in its own
+    /// background — the shape of a shell's bracketed-paste echo (`ESC[7m`),
+    /// which used to render as blank cells until the next key.
+    #[test]
+    fn inverse_cells_expose_swapped_paint_colors() {
+        let mut g = TermGrid::new(3, 20);
+        g.feed(b"\x1b[31;7mI\x1b[0mN");
+        let rows = g.renderable_rows();
+
+        let inverse = &rows[0][0];
+        assert!(inverse.inverse);
+        let (text, bg) = inverse.paint_colors();
+        assert_eq!(text, inverse.bg, "inverse text takes the background color");
+        assert_eq!(bg, inverse.fg, "and its background takes the text color");
+        assert_ne!(text, bg, "a glyph must never be painted in its own color");
+
+        let plain = &rows[0][1];
+        assert!(!plain.inverse);
+        assert_eq!(plain.paint_colors(), (plain.fg, plain.bg));
     }
 
     #[test]

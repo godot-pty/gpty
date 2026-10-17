@@ -24,10 +24,12 @@ const SEARCH_HIGHLIGHT_COLOR = Color(1.0, 0.8, 0.0, 0.35)
 const SEARCH_ACTIVE_COLOR = Color(1.0, 0.5, 0.0, 0.5)
 const PRINTABLE_ASCII_MAX = 126
 ## Cell attribute bits, packed by the Rust grid reader (`get_grid_updates_packed`).
+## SGR 7 is deliberately absent: `CellInfo::paint_colors` has already swapped
+## `fg`/`bg` before packing, so the color arrays are paint-ready and the draw
+## pass must not swap them again.
 const ATTR_BOLD := 1
 const ATTR_ITALIC := 2
 const ATTR_UNDERLINE := 4
-const ATTR_INVERSE := 8
 ## Set on the first cell of a wide character; the next cell is its spacer.
 const ATTR_WIDE := 16
 
@@ -708,7 +710,6 @@ func _draw_cells(off: Vector2, baseline: float):
 				# its own and never was.
 				if a & ATTR_UNDERLINE != 0 and not wide_prev:
 					var seg_fg: Color = fg_arr[idx] as Color
-					if a & ATTR_INVERSE != 0: seg_fg = bg_arr[idx] as Color
 					var seg_y: float = off.y + r * _cell_h + baseline + 2
 					draw_line(Vector2(off.x + c * _cell_w, seg_y),
 						Vector2(off.x + (c + 1) * _cell_w, seg_y), seg_fg, 1.0)
@@ -719,7 +720,6 @@ func _draw_cells(off: Vector2, baseline: float):
 			if a & ATTR_BOLD != 0: run_font = _font_bold
 			if a & ATTR_ITALIC != 0: run_font = _font_italic
 			var run_fg: Color = fg_arr[idx] as Color
-			if a & ATTR_INVERSE != 0: run_fg = bg_arr[idx] as Color
 			var run_underline: bool = a & ATTR_UNDERLINE != 0
 			var text := ch
 			var wide: bool = a & ATTR_WIDE != 0
@@ -732,7 +732,6 @@ func _draw_cells(off: Vector2, baseline: float):
 				if nch == " " or nch == "": break
 				var na: int = attrs[nidx]
 				var nfg: Color = fg_arr[nidx] as Color
-				if na & ATTR_INVERSE != 0: nfg = bg_arr[nidx] as Color
 				if nfg != run_fg or (na & ATTR_UNDERLINE != 0) != run_underline: break
 				var nfont = _font
 				if na & ATTR_BOLD != 0: nfont = _font_bold
