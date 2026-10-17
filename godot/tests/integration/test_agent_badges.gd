@@ -142,6 +142,11 @@ func test_generic_event_to_state_mapping():
 	assert_eq(W.agent_state_for_event({"name": "state.declared"}), "")
 
 func test_tier1_overrides_tier2_declaration():
+	# Gated like the declaration tests above: where ConPTY eats the OSC no Tier 2
+	# declaration ever arrives, so "it did not override Tier 1" would hold with
+	# the precedence rule deleted — a pass that tests nothing.
+	if _needs_osc_delivery():
+		return
 	var ws = await _make_workspace()
 	var body = _first_body(ws)
 	# Authoritative Tier 1 observation from a capability event.

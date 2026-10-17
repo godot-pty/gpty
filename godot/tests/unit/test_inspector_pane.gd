@@ -10,9 +10,19 @@ func before_each():
 	add_child_autofree(_pane)
 	await get_tree().process_frame
 
+## The pane is a thin view over the `GptyAi` extension class; with it missing
+## `_ai` is null and the pane does nothing, so every assertion below would be
+## about a pane that never ran. The extension is a build requirement — CI
+## builds it on every platform before this suite — so its absence is a failure
+## to report, never a skip: a test that stands down here turns a broken build
+## into a green run.
+func _ai_ready() -> bool:
+	assert_not_null(_pane._ai,
+		"GptyAi must be registered: build and install the gpty-gdext extension")
+	return _pane._ai != null
+
 func test_receive_content_starts_mock_turn():
-	if _pane._ai == null:
-		pending("GptyAi GDExtension class not registered")
+	if not _ai_ready():
 		return
 	_pane.accept_concept_captures = true
 	assert_true(_pane.receive_content("error: something broke"))
@@ -49,8 +59,7 @@ func test_declines_routed_content_without_ai_bridge():
 	_pane._ai = ai
 
 func test_declines_concept_captures_until_opt_in():
-	if _pane._ai == null:
-		pending("GptyAi GDExtension class not registered")
+	if not _ai_ready():
 		return
 	_pane.accept_concept_captures = false
 	assert_false(_pane.can_receive_content())
@@ -58,8 +67,7 @@ func test_declines_concept_captures_until_opt_in():
 	assert_eq(_pane._session_id, "")
 
 func test_done_keeps_prompt_quote():
-	if _pane._ai == null:
-		pending("GptyAi GDExtension class not registered")
+	if not _ai_ready():
 		return
 	_pane.accept_concept_captures = true
 	_pane.receive_content("error: something broke")
@@ -74,8 +82,7 @@ func test_pane_type_is_inspector():
 	assert_eq(_pane._default_title(), "Inspector")
 
 func test_cli_backend_requires_command():
-	if _pane._ai == null:
-		pending("GptyAi GDExtension class not registered")
+	if not _ai_ready():
 		return
 	_pane.backend = "cli"
 	_pane.command = []
@@ -124,8 +131,7 @@ func test_cli_adapter_path_another_user_controls_is_refused():
 	# The adapter command comes from pane settings, which a profile or
 	# workspace file can supply, and it is executed as argv — so an absolute
 	# path must not point at something another user could have written.
-	if _pane._ai == null:
-		pending("GptyAi GDExtension class not registered")
+	if not _ai_ready():
 		return
 	var dir := OS.get_temp_dir().path_join("gpty_inspector_probe_%d" % OS.get_process_id())
 	DirAccess.make_dir_recursive_absolute(dir)
@@ -170,8 +176,7 @@ func test_command_field_only_reparses_when_edited():
 		"an edited Command field is parsed as whitespace-separated argv")
 
 func test_cli_backend_streams_from_fake_adapter():
-	if _pane._ai == null:
-		pending("GptyAi GDExtension class not registered")
+	if not _ai_ready():
 		return
 	if OS.get_name() == "Windows":
 		pending("fake adapter needs a POSIX shell")

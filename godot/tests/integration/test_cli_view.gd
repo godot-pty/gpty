@@ -31,13 +31,15 @@ func after_each():
 
 ## The pane is a thin view over the `GptyCliView` extension class. With the
 ## class missing the pane logs an error and does nothing, so every assertion
-## below would be about a pane that never ran — stand down instead (the
-## Inspector suite's rule for the same situation).
+## below would be about a pane that never ran. The extension is a build
+## requirement — CI builds it on every platform before this suite — so its
+## absence is a failure to report, never a skip (the Inspector suite's rule for
+## the same situation).
 func _ffi_ready() -> bool:
-	if ClassDB.class_exists("GptyCliView"):
-		return true
-	pending("GptyCliView GDExtension class not registered")
-	return false
+	var present := ClassDB.class_exists("GptyCliView")
+	assert_true(present,
+		"GptyCliView must be registered: build and install the gpty-gdext extension")
+	return present
 
 ## A real pane with its spawn plan already set, entering the tree starting it.
 func _make_pane(command: String, args: Array) -> CliViewPane:

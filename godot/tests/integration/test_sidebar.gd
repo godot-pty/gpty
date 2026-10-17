@@ -64,25 +64,81 @@ func test_a_row_label_never_claims_more_width_than_the_panel():
 	assert_lte(btn.get_combined_minimum_size().x, 164.0,
 		"a user-authored name must ellipsize, not stretch the row")
 
-func test_sidebar_build_succeeds():
-	# After build, update_pane_list with empty array should not crash
+## The footer buttons are a `Button` holding an icon Label and a text Label;
+## find one by its text.
+func _icon_text_button(label: String) -> Button:
+	for b in _sidebar.find_children("*", "Button", true, false):
+		var row = b.get_node_or_null("IconTextRow")
+		if row == null:
+			continue
+		for l in row.get_children():
+			if l is Label and l.text == label:
+				return b
+	return null
+
+func test_build_offers_one_add_button_per_pane_type():
+	var row = _sidebar.find_child("PaneTypeRow", true, false)
+	assert_not_null(row, "the Add Pane row must exist after build")
+	assert_eq(row.get_child_count(), PaneTypes.ALL.size(),
+		"one button per registered pane type")
+	for i in PaneTypes.ALL.size():
+		var info: Dictionary = PaneTypes.ALL[PaneTypes.ALL.keys()[i]]
+		assert_string_contains((row.get_child(i) as Button).tooltip_text, info["name"],
+			"button %d must be labelled for its pane type" % i)
 	_sidebar.update_pane_list([])
-	assert_not_null(_sidebar._pane_list, "_pane_list should exist after build")
+	assert_eq(_sidebar._pane_list.get_child_count(), 0, "no panes, no rows")
 
-func test_sidebar_emits_request_new_pane():
+## These press the real buttons. They used to call `signal.emit()` themselves
+## and assert it was emitted, which proves Godot emits signals and nothing
+## about whether a button is wired to one.
+func test_each_add_pane_button_requests_its_own_pane_type():
+	var row = _sidebar.find_child("PaneTypeRow", true, false)
+	var keys := PaneTypes.ALL.keys()
 	watch_signals(_sidebar)
-	_sidebar.request_new_pane.emit("terminal")
-	assert_signal_emitted(_sidebar, "request_new_pane")
+	for i in keys.size():
+		(row.get_child(i) as Button).pressed.emit()
+		assert_eq(get_signal_emit_count(_sidebar, "request_new_pane"), i + 1,
+			"pressing button %d emits exactly one request" % i)
+		assert_eq(get_signal_parameters(_sidebar, "request_new_pane"), [keys[i]],
+			"button %d asks for %s, not a neighbour's type" % [i, keys[i]])
 
-func test_sidebar_emits_request_settings():
+func test_the_settings_button_requests_settings_and_nothing_else():
+	var btn := _icon_text_button("Settings")
+	assert_not_null(btn, "the Settings button must exist")
 	watch_signals(_sidebar)
-	_sidebar.request_settings.emit()
-	assert_signal_emitted(_sidebar, "request_settings")
+	btn.pressed.emit()
+	assert_signal_emit_count(_sidebar, "request_settings", 1)
+	assert_signal_not_emitted(_sidebar, "request_reset")
 
-func test_sidebar_emits_request_reset():
+func test_the_reset_button_requests_reset_and_nothing_else():
+	var btn := _icon_text_button("Reset")
+	assert_not_null(btn, "the Reset button must exist")
 	watch_signals(_sidebar)
-	_sidebar.request_reset.emit()
-	assert_signal_emitted(_sidebar, "request_reset")
+	btn.pressed.emit()
+	assert_signal_emit_count(_sidebar, "request_reset", 1)
+	assert_signal_not_emitted(_sidebar, "request_settings")
+
+func test_a_pane_rows_buttons_each_act_on_that_pane():
+	var body = autofree(PaneBody.new())
+	body.pane_label = "T1"
+	_sidebar.update_pane_list([body])
+	var row = _sidebar._pane_list.get_child(0)
+	var actions := [
+		"request_focus", "request_minimize", "request_position_swap",
+		"request_type_swap", "request_pane_settings", "request_close",
+	]
+	assert_eq(row.get_child_count(), actions.size(), "a row is label + six actions")
+	watch_signals(_sidebar)
+	for i in actions.size():
+		(row.get_child(i) as Button).pressed.emit()
+		assert_eq(get_signal_emit_count(_sidebar, actions[i]), 1,
+			"button %d must emit %s" % [i, actions[i]])
+		assert_eq(get_signal_parameters(_sidebar, actions[i])[0], body,
+			"%s must carry this row's pane" % actions[i])
+		var total := 0
+		for a in actions:
+			total += get_signal_emit_count(_sidebar, a)
+		assert_eq(total, i + 1, "button %d must not also fire another action" % i)
 
 
 func test_update_pane_list_shows_label():
@@ -166,17 +222,23 @@ func test_profile_row_double_click_renames():
 	assert_signal_emitted_with_parameters(_sidebar, "request_profile_rename", [0, "NewName"])
 
 func test_update_pane_list_replaces_previous():
-	var body1 = PaneBody.new(); body1.pane_label = "T1"
-	var body2 = PaneBody.new(); body2.pane_label = "C1"
+	var body1 = autofree(PaneBody.new()); body1.pane_label = "T1"
+	var body2 = autofree(PaneBody.new()); body2.pane_label = "C1"
 
 	_sidebar.update_pane_list([body1, body2])
 	var pane_list = _sidebar._pane_list
-	assert_gt(pane_list.get_child_count(), 1, "should have multiple rows")
+	assert_eq(pane_list.get_child_count(), 2, "one row per pane")
 
-	# Replace with single pane — new label should appear
+	# The old rows are `queue_free()`d, so they are still children until the
+	# frame ends: the replacement has to be judged after it, or "the old rows
+	# were never cleared" and "they were" read the same.
 	_sidebar.update_pane_list([body1])
-	var focus_btn = pane_list.get_child(pane_list.get_child_count() - 1).get_child(0)
-	assert_eq(focus_btn.text, "T1", "replacement should show updated label")
+	await get_tree().process_frame
+	assert_eq(pane_list.get_child_count(), 1, "the previous rows are gone")
+	var labels := []
+	for row in pane_list.get_children():
+		labels.append((row.get_child(0) as Button).text)
+	assert_eq(labels, ["T1"], "only the replacement's pane is listed — no stale 'C1'")
 
 func test_update_pane_list_accents_active_body():
 	var b1 = PaneBody.new(); b1.pane_label = "T1"

@@ -23,25 +23,44 @@ func after_each():
 
 # ── Settings application ───────────────────────────────────────────────
 
+## Each of these checks the *effect* of the setting on the live pane, not that
+## a property reads back what was assigned — a setter that stored the value
+## and applied it nowhere would have passed the read-back.
+
 func test_apply_settings_font_size():
 	var body = _tm.create_body("terminal")
 	_scene.add_child(body)
 	assert_not_null(body)
-	body.apply_settings({"font_size": 20})
-	assert_eq(body.font_size, 20)
+	var cell_w: float = body._cell_w
+	var cell_h: float = body._cell_h
+	assert_gt(cell_w, 0.0, "the pane must have measured its glyphs before the change")
+
+	body.apply_settings({"font_size": 28})
+
+	assert_eq(body.font_size, 28)
+	assert_gt(body._cell_w, cell_w, "a larger font must widen the cell")
+	assert_gt(body._cell_h, cell_h, "a larger font must heighten the cell")
+	assert_eq(body._font.fixed_size, 28, "the font itself is resized, not just the property")
 
 func test_apply_settings_rows_cols():
 	var body = _tm.create_body("terminal")
 	_scene.add_child(body)
+	assert_not_null(body._terminal, "the pane must own a grid for this test")
 	body.apply_settings({"rows": 30, "cols": 100})
 	assert_eq(body.rows, 30)
 	assert_eq(body.cols, 100)
+	assert_eq(body._terminal.get_rows(), 30, "the terminal grid is resized to the setting")
+	assert_eq(body._terminal.get_cols(), 100)
 
 func test_apply_settings_pane_name():
 	var body = _tm.create_body("code_viewer")
 	_scene.add_child(body)
+	watch_signals(body)
 	body.apply_settings({"pane_name": "CustomName"})
 	assert_eq(body.pane_name, "CustomName")
+	assert_signal_emitted_with_parameters(body, "title_changed", ["CustomName"])
+	assert_eq(body._get_layout_state()["pane_name"], "CustomName",
+		"the name is what gets saved")
 
 func test_apply_to_terminal_from_settings():
 	var body = _tm.create_body("terminal")
@@ -55,23 +74,40 @@ func test_apply_to_terminal_from_settings():
 func test_apply_pane_settings_delegates():
 	var body = _tm.create_body("code_viewer")
 	_scene.add_child(body)
-	SettingsManager.apply_pane_settings(body, {"font_size": 22})
+	watch_signals(body)
+	SettingsManager.apply_pane_settings(body, {"font_size": 22, "pane_name": "Delegated"})
 	assert_eq(body.font_size, 22)
+	# `title_changed` only comes out of the body's own `apply_settings`, so this
+	# fails if the call stops going through it (a bare property write would
+	# still have set font_size).
+	assert_signal_emitted_with_parameters(body, "title_changed", ["Delegated"])
 
 # ── Layout state ───────────────────────────────────────────────────────
 
-func test_terminal_get_layout_state_has_type():
+func test_terminal_get_layout_state_carries_what_the_pane_holds():
 	var body = _tm.create_body("terminal")
 	_scene.add_child(body)
+	body.shell_command = "/opt/custom-shell"
+	body.shell_args = ["--login"]
+	body.rows = 33
+	body.cols = 91
 	var state = body._get_layout_state()
 	assert_eq(state.get("type"), "terminal")
-	assert_true(state.has("shell"))
+	assert_eq(state.get("shell"), "/opt/custom-shell")
+	assert_eq(state.get("shell_args"), ["--login"])
+	assert_eq([state.get("rows"), state.get("cols")], [33, 91])
+	assert_false(state.has("shell_env"), "a saved file must never carry the pane's env")
 
-func test_code_viewer_get_layout_state_has_type():
+func test_code_viewer_get_layout_state_round_trips_through_apply_settings():
 	var body = _tm.create_body("code_viewer")
 	_scene.add_child(body)
+	body.apply_settings({"pane_name": "Viewer", "font_size": 19})
 	var state = body._get_layout_state()
 	assert_eq(state.get("type"), "code_viewer")
+	var twin = _tm.create_body("code_viewer")
+	_scene.add_child(twin)
+	twin.apply_settings(state)
+	assert_eq(twin._get_layout_state(), state, "state -> apply -> state is stable")
 
 # ── spawn_pane applies global settings ─────────────────────────────────
 
