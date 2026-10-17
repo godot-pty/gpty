@@ -579,7 +579,10 @@ fn scratch_key(root_key: &str, rel_path: &str) -> u64 {
 /// `stamp` is the stamp the buffer was loaded from. The write is atomic — a
 /// hidden temp file under a random name, renamed over the previous copy — so an
 /// interrupted write cannot truncate the copy the user may still need, and the
-/// file is restricted to its owner like every store gpty writes.
+/// file is restricted to its owner like every store gpty writes. A write is
+/// also the cleanup point ([`prune_scratch`]): the copies of vaults that went
+/// away are reclaimed here, before the new copy is located, so a write refused
+/// for a vault that is no longer a directory still tidies the directory.
 pub fn write_scratch(
     dir: &str,
     root: &str,
@@ -590,6 +593,7 @@ pub fn write_scratch(
     if text.len() as u64 > MAX_SCRATCH_BYTES {
         return Err(NoteError::TooLarge(text.len()));
     }
+    prune_scratch(Path::new(dir));
     let (root_key, path) = scratch_location(dir, root, rel_path)?;
     let Some(parent) = path.parent() else {
         return Err(NoteError::Io(format!(
@@ -672,6 +676,151 @@ pub fn clear_scratch(dir: &str, root: &str, rel_path: &str) -> Result<(), NoteEr
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(NoteError::Io(format!("removing {}: {e}", path.display()))),
+    }
+}
+
+/// How long the remains of an interrupted copy write may sit before a prune
+/// reclaims them. A live temp file exists for the microseconds between its
+/// `write` and the `rename` over the previous copy, so an hour is far beyond
+/// any writer's business with it — and without the check, a crash inside that
+/// window would leave the file behind forever.
+const STALE_SCRATCH_TEMP: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// 16 lowercase hex digits: the stem [`scratch_location`]'s `{:016x}` builds.
+fn is_hex16(stem: &str) -> bool {
+    stem.len() == 16
+        && stem
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Whether a name is one of this module's copy files (`<16 hex>.json`).
+fn is_copy_name(name: &str) -> bool {
+    name.strip_suffix(".json").is_some_and(is_hex16)
+}
+
+/// Whether a name is the temp file a copy write renames into place.
+fn is_temp_name(name: &str) -> bool {
+    name.strip_prefix(".gpty-scratch-")
+        .and_then(|rest| rest.strip_suffix(".tmp"))
+        .is_some_and(is_hex16)
+}
+
+/// Whether a temp file is old enough to be the remains of a write that died
+/// rather than the property of one in flight. A file whose age cannot be
+/// read is kept.
+fn temp_is_stale(path: &Path) -> bool {
+    path.metadata()
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age > STALE_SCRATCH_TEMP)
+}
+
+/// Whether one copy's record names a vault that is definitively gone.
+///
+/// The record is the only authority consulted, and it is consulted whole:
+/// nothing here walks a vault, so a note that merely was not listed (the walk
+/// was capped, or the note is momentarily unreadable) keeps its copy — that is
+/// exactly the work this feature exists to keep. A record that cannot be read,
+/// parsed, or that never names a vault decides nothing.
+fn copy_is_orphaned(path: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    let Ok(record) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return false;
+    };
+    let Some(vault) = record.get("vault").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    // A record this module wrote names an absolute canonical root
+    // (`scratch_location` canonicalizes). A relative one would be resolved
+    // against whatever the process's working directory happens to be, which is
+    // no verdict about a vault at all, so it decides nothing.
+    if !Path::new(vault).is_absolute() {
+        return false;
+    }
+    match std::fs::metadata(vault) {
+        // Still there, and a directory: its copies stay. A vault root that
+        // became a file is not a vault any more, so its copies go.
+        Ok(meta) => !meta.is_dir(),
+        // Absent: moved, renamed, or deleted. Every path through the API —
+        // reads and offers included — resolves a canonical root first, so
+        // this copy cannot be reached again.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+        // Anything else — a permission error, a network path that is not
+        // mounted, an I/O error — cannot say the vault is gone, and the copy
+        // of a vault that is merely hard to reach must survive.
+        Err(_) => false,
+    }
+}
+
+/// Remove a file a prune decided is unreachable. A file that is already gone
+/// is not a failure: two writers may race the same prune.
+fn remove_stale(path: &Path) {
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => log::warn!(
+            "could not remove the stale recovery copy {}: {e}",
+            path.display()
+        ),
+    }
+}
+
+/// Drop the recovery copies and temp remains that nothing can reach again.
+///
+/// [`write_scratch`] runs this on its way in — the pane's throttle is the only
+/// writer, so this is one short directory listing a few times a minute at the
+/// very most over a directory that holds one file per dirty note, each record
+/// read to be judged — so the copies a crashed session left for a vault that
+/// later moved or vanished do not accumulate forever. A pile a crash left
+/// behind is read once and then gone, which is the case this exists for; a
+/// steady state is one small record per open, dirty note.
+///
+/// What a prune may delete is deliberately narrow: a copy whose own record
+/// names a vault that is gone ([`copy_is_orphaned`]), and the temp file of a
+/// write that never finished ([`STALE_SCRATCH_TEMP`]). A name this module did
+/// not build is never touched, and neither is a record that cannot be read or
+/// made sense of — a deletion needs a record that says the copy is
+/// unreachable, never one this code could not interpret. Nothing here touches
+/// a vault, so no vault walk, truncated or otherwise, can ever cost a copy.
+///
+/// Housekeeping never fails the write it rides on: a listing or a removal that
+/// fails is a diagnostic, and the copy waits for the next attempt.
+fn prune_scratch(dir: &Path) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        // The directory is created by the first write; before that there is
+        // nothing to prune.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+        Err(e) => {
+            log::warn!(
+                "could not list the recovery copies at {}: {e}",
+                dir.display()
+            );
+            return;
+        }
+    };
+    // An entry the listing could not yield is left where it is: every deletion
+    // below is justified by the file's own content, never by an absence from
+    // this walk, so a short walk only means the copy waits for the next prune.
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let unreachable = if is_copy_name(name) {
+            copy_is_orphaned(&path)
+        } else if is_temp_name(name) {
+            temp_is_stale(&path)
+        } else {
+            false
+        };
+        if unreachable {
+            remove_stale(&path);
+        }
     }
 }
 
@@ -1667,6 +1816,196 @@ mod tests {
         assert_eq!(mode, 0o600, "an unsaved buffer is nobody else's to read");
         let dir_mode = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
         assert_eq!(dir_mode, 0o700, "and neither are the names of the copies");
+    }
+
+    #[test]
+    fn a_write_prunes_copies_of_vaults_that_are_gone() {
+        let live = temp_vault("scratch_prune_live");
+        let moved = temp_vault("scratch_prune_moved");
+        let replaced = temp_vault("scratch_prune_replaced");
+        for vault in [&live, &moved, &replaced] {
+            write_note(vault, "note.md", "x");
+        }
+        let dir = root_str(&temp_scratch("prune"));
+        let live_root = root_str(&live);
+        let moved_root = root_str(&moved);
+        let replaced_root = root_str(&replaced);
+        let stamp = NoteStamp { mtime: 1, size: 1 };
+
+        for root in [&live_root, &moved_root, &replaced_root] {
+            write_scratch(&dir, root, "note.md", "typed", stamp).unwrap();
+        }
+        let (_, live_copy) = scratch_location(&dir, &live_root, "note.md").unwrap();
+        let (_, moved_copy) = scratch_location(&dir, &moved_root, "note.md").unwrap();
+        let (_, replaced_copy) = scratch_location(&dir, &replaced_root, "note.md").unwrap();
+
+        // One vault is moved away, one is replaced by a file. Both orphans are
+        // unreachable: every read of a copy resolves its canonical vault root
+        // first, and neither root resolves any more.
+        fs::remove_dir_all(&moved).unwrap();
+        fs::remove_dir_all(&replaced).unwrap();
+        fs::write(&replaced, "not a vault").unwrap();
+
+        // The prune rides a write — of a note in the *live* vault, so the
+        // assertion is about the walk and not about the orphan's own key.
+        write_scratch(&dir, &live_root, "note.md", "still mine", stamp).unwrap();
+
+        assert!(
+            !moved_copy.exists(),
+            "a copy of a vault that was moved away must be reclaimed"
+        );
+        assert!(
+            !replaced_copy.exists(),
+            "a copy of a path that is not a directory any more must be reclaimed"
+        );
+        assert!(live_copy.exists(), "a live vault keeps its copy");
+        assert_eq!(
+            read_scratch(&dir, &live_root, "note.md")
+                .unwrap()
+                .unwrap()
+                .text,
+            "still mine"
+        );
+    }
+
+    #[test]
+    fn a_copy_survives_its_note_leaving_the_vault() {
+        let vault = temp_vault("scratch_prune_note");
+        write_note(&vault, "note.md", "x");
+        write_note(&vault, "other.md", "y");
+        let dir = root_str(&temp_scratch("prune_note"));
+        let root = root_str(&vault);
+        let stamp = NoteStamp { mtime: 1, size: 1 };
+
+        write_scratch(&dir, &root, "note.md", "typed", stamp).unwrap();
+        let (_, copy) = scratch_location(&dir, &root, "note.md").unwrap();
+
+        // The note is deleted — or the walk was capped and never listed it —
+        // while its vault is still the vault it was. The copy stays: it is the
+        // unsaved work this feature exists to keep, and a truncated walk must
+        // never be what drops it.
+        fs::remove_file(vault.join("note.md")).unwrap();
+        write_scratch(&dir, &root, "other.md", "other buffer", stamp).unwrap();
+
+        assert!(
+            copy.exists(),
+            "the vault exists; the note's absence is not a verdict"
+        );
+        assert_eq!(
+            read_scratch(&dir, &root, "note.md").unwrap().unwrap().text,
+            "typed"
+        );
+    }
+
+    #[test]
+    fn a_prune_keeps_what_it_cannot_judge() {
+        let vault = temp_vault("scratch_prune_unreadable");
+        write_note(&vault, "note.md", "x");
+        let dir = root_str(&temp_scratch("prune_unreadable"));
+        let root = root_str(&vault);
+        let stamp = NoteStamp { mtime: 1, size: 1 };
+        write_scratch(&dir, &root, "note.md", "typed", stamp).unwrap();
+
+        let dir_path = Path::new(&dir);
+        // A name this module did not build, an unparseable record, a record
+        // that never names a vault, and one whose vault is not absolute: none
+        // may be deleted, because only a record that says "unreachable"
+        // authorizes a deletion.
+        let foreign = dir_path.join("notes.json");
+        fs::write(&foreign, r#"{"vault": "/no/such/vault"}"#).unwrap();
+        let torn = dir_path.join(format!("{:016x}.json", 0xdead_beef_u64));
+        fs::write(&torn, "{ not json").unwrap();
+        let anonymous = dir_path.join(format!("{:016x}.json", 0xfeed_face_u64));
+        fs::write(&anonymous, r#"{"path": "note.md", "text": "mine"}"#).unwrap();
+        let relative = dir_path.join(format!("{:016x}.json", 0x0bad_f00d_u64));
+        fs::write(&relative, r#"{"vault": "notes", "path": "note.md"}"#).unwrap();
+
+        write_scratch(&dir, &root, "note.md", "again", stamp).unwrap();
+
+        assert!(
+            foreign.exists(),
+            "a name this module did not build is not ours to delete"
+        );
+        assert!(torn.exists(), "an unparseable record decides nothing");
+        assert!(
+            anonymous.exists(),
+            "a record without a vault decides nothing"
+        );
+        assert!(
+            relative.exists(),
+            "a vault named relatively resolves against nothing we can judge"
+        );
+    }
+
+    #[test]
+    fn a_prune_reclaims_the_remains_of_an_interrupted_write() {
+        let vault = temp_vault("scratch_prune_temp");
+        write_note(&vault, "note.md", "x");
+        let dir = root_str(&temp_scratch("prune_temp"));
+        let root = root_str(&vault);
+        let stamp = NoteStamp { mtime: 1, size: 1 };
+
+        let dir_path = Path::new(&dir);
+        fs::create_dir_all(dir_path).unwrap();
+        let stale = dir_path.join(format!(".gpty-scratch-{:016x}.tmp", 0xdead_beef_u64));
+        let fresh = dir_path.join(format!(".gpty-scratch-{:016x}.tmp", 0xfeed_face_u64));
+        fs::write(&stale, "half a copy").unwrap();
+        fs::write(&fresh, "half a copy").unwrap();
+        // Age the stale one past the window: a writer's temp file lives from
+        // its `write` to its `rename`, and an hour is far beyond either.
+        let aged =
+            std::time::SystemTime::now() - STALE_SCRATCH_TEMP - std::time::Duration::from_secs(60);
+        fs::File::options()
+            .write(true)
+            .open(&stale)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(aged))
+            .unwrap();
+
+        write_scratch(&dir, &root, "note.md", "typed", stamp).unwrap();
+
+        assert!(
+            !stale.exists(),
+            "a temp file nothing is going to rename is reclaimed"
+        );
+        assert!(
+            fresh.exists(),
+            "a temp file a writer may still hold is left alone"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_vault_that_cannot_be_read_keeps_its_copies() {
+        use std::os::unix::fs::PermissionsExt;
+        let outer = temp_vault("scratch_prune_eacces");
+        let vault = outer.join("vault");
+        fs::create_dir_all(&vault).unwrap();
+        write_note(&vault, "note.md", "x");
+        let live = temp_vault("scratch_prune_eacces_live");
+        write_note(&live, "note.md", "y");
+        let dir = root_str(&temp_scratch("prune_eacces"));
+        let root = root_str(&vault);
+        let live_root = root_str(&live);
+        let stamp = NoteStamp { mtime: 1, size: 1 };
+
+        write_scratch(&dir, &root, "note.md", "typed", stamp).unwrap();
+        let (_, copy) = scratch_location(&dir, &root, "note.md").unwrap();
+
+        // The vault still exists, but nothing can reach it: the check must
+        // answer "not gone", because a vault that is temporarily unreachable —
+        // an unmounted network path, a permissions problem — keeps the work a
+        // crash left behind. (Running as root ignores the mode; the metadata
+        // call then succeeds and the copy is kept all the same.)
+        fs::set_permissions(&outer, fs::Permissions::from_mode(0o000)).unwrap();
+        write_scratch(&dir, &live_root, "note.md", "live", stamp).unwrap();
+        let kept = copy.exists();
+        fs::set_permissions(&outer, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(
+            kept,
+            "a vault that may exist but cannot be read keeps its copies"
+        );
     }
 
     #[test]
