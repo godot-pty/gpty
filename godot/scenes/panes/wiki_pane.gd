@@ -950,10 +950,75 @@ func _rename_note(new_rel: String) -> bool:
 		_drop_scratch(vault_path, previous)
 	if not bool(reply.get("indexed", true)):
 		ToastManager.warn("Renamed %s, but the search index could not be updated" % _current_rel, 5.0, "Wiki")
-	# This note's own edges moved with it; links other notes wrote to the old
-	# name are the re-indexed store's answer now.
+	# This note's own edges moved with it. Mentions other notes wrote to the
+	# old name do not follow a file: the rename just made them unresolved, and
+	# updating them writes *their* notes — so it is a separate, explicit
+	# question, never a side effect of the rename.
 	_refresh_links()
+	_offer_link_update(previous, _current_rel)
 	return true
+
+## Offer to respell the mentions that still name the old path. The preview
+## answers how many notes and occurrences resolved to the old name before the
+## move; nothing is written until the answer is Update, and a vault with no
+## mentions is not asked about at all.
+func _offer_link_update(previous: String, new_rel: String) -> void:
+	if _has_open_ask():
+		return
+	var preview = JSON.parse_string(str(
+		GptyTerminal.vault_link_rewrite_preview(vault_path, previous, new_rel)))
+	if not (preview is Dictionary) or preview.has("error"):
+		# The rename itself landed; a pass that cannot be planned is reported
+		# rather than silently skipped — the mentions stay as they are.
+		ToastManager.warn(_note_failure("Could not check mentions of", previous, preview), 5.0, "Wiki")
+		return
+	var files := int(preview.get("files", 0))
+	if files <= 0:
+		return
+	var mentions := int(preview.get("mentions", 0))
+	var dialog := ConfirmationDialog.new()
+	dialog.name = "UpdateReferencesConfirm"
+	dialog.title = "Update references?"
+	dialog.dialog_text = "%d mention(s) in %d note(s) still name %s.\n\nUpdate them to %s?" % [
+		mentions, files, previous, new_rel,
+	]
+	if bool(preview.get("truncated", false)):
+		dialog.dialog_text += "\n\nThis vault has more notes than the walk lists, so some were not checked."
+	dialog.ok_button_text = "Update"
+	add_child(dialog)
+	dialog.confirmed.connect(func():
+		dialog.queue_free()
+		_apply_link_update(previous, new_rel)
+	)
+	dialog.canceled.connect(dialog.queue_free)
+	dialog.popup_centered()
+
+## Apply the update the question offered. The core re-plans in this call, so
+## the count is what actually landed (an edit made while the question was open
+## is read fresh) and a note that changes between its plan and its write is
+## skipped rather than replaced; the re-index makes the new backlinks visible
+## in this pane's panel at once.
+func _apply_link_update(previous: String, new_rel: String) -> void:
+	var reply = JSON.parse_string(str(
+		GptyTerminal.vault_link_rewrite(vault_path, previous, new_rel)))
+	if not (reply is Dictionary) or reply.has("error"):
+		ToastManager.warn(_note_failure("Could not update mentions of", previous, reply), 5.0, "Wiki")
+		return
+	var files := int(reply.get("files", 0))
+	var mentions := int(reply.get("mentions", 0))
+	var skipped := int(reply.get("skipped", 0))
+	if mentions == 0:
+		ToastManager.info("No mentions needed updating", 3.0, "Wiki")
+	else:
+		var text := "Updated %d mention(s) in %d note(s)" % [mentions, files]
+		if skipped > 0:
+			text += "; %d note(s) could not be updated" % skipped
+		if bool(reply.get("truncated", false)):
+			text += " (some notes were not checked)"
+		ToastManager.info(text, 4.0, "Wiki")
+	if not bool(reply.get("indexed", true)):
+		ToastManager.warn("Mentions updated, but the search index could not be updated", 5.0, "Wiki")
+	_refresh_links()
 
 ## Ask before the one destructive verb: an open note is about to stop
 ## existing, and a dirty buffer dies with it — no save question, because the
@@ -1191,7 +1256,7 @@ func _has_open_ask() -> bool:
 	# buffer — while the answered dialog is still awaiting deletion.
 	for dialog_name in [
 		"DiscardConfirm", "OverwriteConfirm", "RestoreConfirm",
-		"NoteNameConfirm", "DeleteConfirm",
+		"NoteNameConfirm", "DeleteConfirm", "UpdateReferencesConfirm",
 	]:
 		var dialog := find_child(dialog_name, false, false) as Window
 		if dialog != null and dialog.visible:

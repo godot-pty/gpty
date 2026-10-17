@@ -343,6 +343,41 @@ pub fn resolve_target(target: &str, notes: &[&str]) -> Resolution {
     NoteIndex::new(notes).resolve(target)
 }
 
+/// The spelling `target` needs after the note it points at moved to
+/// `new_rel_path`, or `None` when the new name cannot be written as a link.
+///
+/// The style is the target's own: a path target (`dir/note` or
+/// `dir/note.md`) keeps its extension spelling, a bare target becomes the new
+/// file stem. Callers rewrite only occurrences that *resolved to* the moved
+/// note; this answers the new spelling, not whether it resolves.
+///
+/// The result must be re-readable as one target. `[` ends the scan, `]`
+/// closes it early, `|` starts an alias and `#` a fragment, and a control
+/// character (a newline above all) breaks the line-oriented parse — so a new
+/// name containing one cannot be spelled, and a caller must leave the mention
+/// alone rather than write a link that parses as something else or not at
+/// all.
+pub fn retarget(target: &str, new_rel_path: &str) -> Option<String> {
+    let spelled = if target.contains('/') {
+        if target.ends_with(".md") {
+            new_rel_path.to_string()
+        } else {
+            new_rel_path
+                .strip_suffix(".md")
+                .unwrap_or(new_rel_path)
+                .to_string()
+        }
+    } else {
+        note_stem(new_rel_path).to_string()
+    };
+    let spellable = !spelled.is_empty()
+        && spelled.len() <= MAX_LINK_TARGET_BYTES
+        && !spelled
+            .chars()
+            .any(|c| matches!(c, '[' | ']' | '|' | '#') || c.is_control());
+    spellable.then_some(spelled)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -550,5 +585,48 @@ a `[[span]]` then a real [[after]]\n\
             Resolution::Resolved("sub/note.md".into()),
             "a bare target looks at stems anywhere in the vault"
         );
+    }
+
+    #[test]
+    fn retarget_keeps_the_targets_own_style() {
+        assert_eq!(retarget("note", "moved/new.md").as_deref(), Some("new"));
+        assert_eq!(
+            retarget("Note", "moved/new.md").as_deref(),
+            Some("new"),
+            "a case-insensitive match is respelled exactly"
+        );
+        assert_eq!(
+            retarget("sub/note", "moved/new.md").as_deref(),
+            Some("moved/new"),
+            "a path target keeps its missing extension"
+        );
+        assert_eq!(
+            retarget("sub/note.md", "moved/new.md").as_deref(),
+            Some("moved/new.md"),
+            "a path target that spelled the extension keeps it"
+        );
+        assert_eq!(
+            retarget("sub/note", "plain.md").as_deref(),
+            Some("plain"),
+            "moving to the root collapses a path target to a bare one"
+        );
+    }
+
+    #[test]
+    fn retarget_refuses_a_name_a_link_cannot_spell() {
+        for (target, new_rel) in [
+            ("note", "new|name.md"),
+            ("note", "new#name.md"),
+            ("note", "new[name.md"),
+            ("note", "new]name.md"),
+            ("note", "new\nname.md"),
+            ("sub/note", "dir#x/new.md"),
+        ] {
+            assert_eq!(
+                retarget(target, new_rel),
+                None,
+                "{new_rel:?} cannot be written as one link target"
+            );
+        }
     }
 }

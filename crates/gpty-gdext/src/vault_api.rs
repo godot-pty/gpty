@@ -549,6 +549,94 @@ impl GptyTerminal {
         }
     }
 
+    /// What a rename's reference update would touch (JSON), writing nothing.
+    ///
+    /// `rel_path` is the name the note had before the move and `new_rel_path`
+    /// the name it has now: the pass reads the vault *after* the rename and
+    /// reconstructs the old note set from the walk, so the only occurrences
+    /// considered are those that resolved to the old name. Answers
+    /// `{"files", "mentions", "skipped", "truncated"}` — how many notes and
+    /// occurrences still name the old target, how many notes could not be
+    /// examined (unreadable or over the read cap), and whether the walk's note
+    /// cap cut the vault. The pane shows these numbers in its update question;
+    /// nothing is written until `vault_link_rewrite` runs.
+    #[func]
+    fn vault_link_rewrite_preview(
+        vault_path: GString,
+        rel_path: GString,
+        new_rel_path: GString,
+    ) -> GString {
+        let path = vault_path.to_string();
+        if let Some(problem) = vault_path_problem(&path) {
+            return vault_error(&problem);
+        }
+        match gpty_core::vault::preview_link_rewrite(
+            &path,
+            &rel_path.to_string(),
+            &new_rel_path.to_string(),
+        ) {
+            Ok(report) => {
+                let document = serde_json::json!({
+                    "files": report.files,
+                    "mentions": report.mentions,
+                    "skipped": report.skipped,
+                    "truncated": report.truncated,
+                })
+                .to_string();
+                GString::from(document.as_str())
+            }
+            Err(e) => {
+                if note_failure_is_diagnostic(&e) {
+                    log::warn!("vault reference preview failed ({path}): {e}");
+                }
+                note_error(e)
+            }
+        }
+    }
+
+    /// Rewrite the mentions that still name a renamed note (JSON), then
+    /// re-index the vault.
+    ///
+    /// Applies the pass the preview planned: only occurrences that resolved to
+    /// the old name before the move are respelled, an alias and a `#` fragment
+    /// are preserved, fenced code and code spans are not links to begin with,
+    /// and the renamed note itself is left to its editor's buffer. Answers
+    /// `{"files", "mentions", "skipped", "truncated", "indexed"}` — what
+    /// landed, what could not be updated, whether the walk's note cap left
+    /// notes unexamined, and whether the search index followed.
+    #[func]
+    fn vault_link_rewrite(
+        vault_path: GString,
+        rel_path: GString,
+        new_rel_path: GString,
+    ) -> GString {
+        let path = vault_path.to_string();
+        if let Some(problem) = vault_path_problem(&path) {
+            return vault_error(&problem);
+        }
+        let new_rel = new_rel_path.to_string();
+        match gpty_core::vault::rewrite_links_after_rename(&path, &rel_path.to_string(), &new_rel) {
+            Ok(done) => {
+                let indexed = reindex_vault(&path);
+                let document = serde_json::json!({
+                    "files": done.files,
+                    "mentions": done.mentions,
+                    "skipped": done.skipped,
+                    "truncated": done.truncated,
+                    "indexed": indexed,
+                })
+                .to_string();
+                GString::from(document.as_str())
+            }
+            Err(e) => {
+                if note_failure_is_diagnostic(&e) {
+                    log::warn!("vault reference rewrite failed ({path}): {e}");
+                }
+                note_error(e)
+            }
+        }
+    }
+
     /// The recovery copy of one note's unsaved buffer (JSON).
     ///
     /// The editor holds its buffer in memory only, so a crash takes it unless

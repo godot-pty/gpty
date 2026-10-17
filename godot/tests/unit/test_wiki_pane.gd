@@ -801,13 +801,68 @@ func test_rename_moves_the_open_note():
 	assert_eq(_name_field(dialog).text, "note.md", "the current path is the default")
 	_name_field(dialog).text = "moved.md"
 	dialog.confirmed.emit()
-	await wait_process_frames(1)
+	await wait_process_frames(2)
 
 	assert_eq(pane._current_rel, "moved.md")
 	assert_eq(pane._note_title.text, "moved.md")
 	assert_false(FileAccess.file_exists(_tmp.path_join("note.md")))
 	assert_eq(_read(_tmp.path_join("moved.md")), "# Note\n")
 	assert_eq(pane._editor.text, "# Note\n", "the open buffer is untouched by the move")
+	assert_eq(_dialogs_of(pane).size(), 0,
+		"nothing mentions the old name, so there is no question to ask")
+
+
+func test_renaming_a_linked_note_offers_to_update_the_mentions():
+	DirAccess.make_dir_recursive_absolute(_tmp.path_join("sub"))
+	DirAccess.make_dir_recursive_absolute(_tmp.path_join("moved"))
+	_write(_tmp.path_join("sub").path_join("old.md"), "# Old\n")
+	var src := "# Src\n\nSee [[old]], [[OLD]], [[sub/old]], [[sub/old.md|label]], [[sub/old#Part]].\n"
+	_write(_tmp.path_join("src.md"), src)
+	var code := "`[[old]]`\n\n```\n[[old]]\n```\n"
+	_write(_tmp.path_join("code.md"), code)
+	var pane := _make_pane(_tmp)
+	pane._open_note("sub/old.md")
+
+	pane._rename_button.pressed.emit()
+	_name_field(_dialogs_of(pane)[0]).text = "moved/new.md"
+	_dialogs_of(pane)[0].confirmed.emit()
+	await wait_process_frames(2)
+
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the update is offered, not done silently")
+	var dialog: ConfirmationDialog = dialogs[0]
+	assert_string_contains(dialog.dialog_text, "5 mention(s) in 1 note(s)")
+	assert_string_contains(dialog.dialog_text, "moved/new.md")
+	assert_eq(_read(_tmp.path_join("src.md")), src,
+		"nothing is written before the answer")
+
+	dialog.confirmed.emit()
+	await wait_process_frames(2)
+	assert_eq(_read(_tmp.path_join("src.md")),
+		"# Src\n\nSee [[new]], [[new]], [[moved/new]], [[moved/new.md|label]], [[moved/new#Part]].\n")
+	assert_eq(_read(_tmp.path_join("code.md")), code, "code stays literal")
+	assert_eq(pane._current_rel, "moved/new.md", "the open note is where the rename put it")
+
+
+func test_declining_the_mention_update_leaves_the_other_notes_alone():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	_write(_tmp.path_join("src.md"), "[[note]]\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("note.md")
+
+	pane._rename_button.pressed.emit()
+	_name_field(_dialogs_of(pane)[0]).text = "moved.md"
+	_dialogs_of(pane)[0].confirmed.emit()
+	await wait_process_frames(2)
+
+	var dialog: ConfirmationDialog = _dialogs_of(pane)[0]
+	assert_string_contains(dialog.dialog_text, "1 mention(s) in 1 note(s)")
+	dialog.canceled.emit()
+	await wait_process_frames(2)
+
+	assert_eq(_read(_tmp.path_join("src.md")), "[[note]]\n",
+		"the question is a choice, not a side effect")
+	assert_eq(_dialogs_of(pane).size(), 0)
 
 
 func test_rename_while_dirty_moves_the_recovery_copy():
