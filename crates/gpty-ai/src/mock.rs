@@ -75,12 +75,7 @@ pub(crate) async fn run_mock_session(
             },
             capture,
         );
-        let midpoint = summary.len() / 2;
-        let midpoint = (0..=midpoint)
-            .rev()
-            .find(|index| summary.is_char_boundary(*index))
-            .unwrap_or(0);
-        let (first, second) = summary.split_at(midpoint);
+        let (first, second) = split_at_midpoint(&summary);
         sink.emit(
             turn_id,
             &run_id,
@@ -104,16 +99,61 @@ pub(crate) async fn run_mock_session(
     }
 }
 
+/// Split `text` near its byte midpoint, never inside a character.
+///
+/// The mock streams its answer as two deltas; the cut is moved back to the
+/// nearest character boundary so a capture full of multi-byte characters
+/// cannot panic `split_at` or produce an invalid delta.
+fn split_at_midpoint(text: &str) -> (&str, &str) {
+    let midpoint = (0..=text.len() / 2)
+        .rev()
+        .find(|index| text.is_char_boundary(*index))
+        .unwrap_or(0);
+    text.split_at(midpoint)
+}
+
 #[cfg(test)]
 mod tests {
+    use super::split_at_midpoint;
+
     #[test]
-    fn midpoint_is_safe_for_unicode() {
-        let text = "🙂🙂🙂";
-        let midpoint = text.len() / 2;
-        let midpoint = (0..=midpoint)
-            .rev()
-            .find(|index| text.is_char_boundary(*index))
-            .unwrap();
-        let _ = text.split_at(midpoint);
+    fn midpoint_moves_back_to_a_character_boundary() {
+        // 12 bytes, midpoint 6 is inside the second emoji (bytes 4..8).
+        let (first, second) = split_at_midpoint("🙂🙂🙂");
+        assert_eq!(
+            first, "🙂",
+            "the cut moves back to byte 4, not forward to 8"
+        );
+        assert_eq!(second, "🙂🙂");
+    }
+
+    #[test]
+    fn midpoint_keeps_every_byte_for_any_mix_of_widths() {
+        // 1-, 2-, 3- and 4-byte characters at every offset: the two halves
+        // must always reassemble the input, and the first half is never
+        // longer than the midpoint nor shorter than the midpoint minus the
+        // widest character's continuation bytes.
+        let unit = "aé€🙂";
+        for repeat in 1..6 {
+            let text = unit.repeat(repeat);
+            let (first, second) = split_at_midpoint(&text);
+            assert_eq!(format!("{first}{second}"), text, "no byte lost or invented");
+            assert!(first.len() <= text.len() / 2, "never past the midpoint");
+            assert!(
+                first.len() + 3 >= text.len() / 2,
+                "moves back by at most one character's continuation bytes: {} vs {}",
+                first.len(),
+                text.len() / 2
+            );
+        }
+    }
+
+    #[test]
+    fn midpoint_of_ascii_is_exact_and_of_nothing_is_nothing() {
+        assert_eq!(split_at_midpoint("abcdef"), ("abc", "def"));
+        assert_eq!(split_at_midpoint(""), ("", ""));
+        // One character, wider than half itself: everything lands in the
+        // second half rather than splitting it.
+        assert_eq!(split_at_midpoint("🙂"), ("", "🙂"));
     }
 }

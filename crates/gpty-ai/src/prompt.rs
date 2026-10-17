@@ -82,12 +82,40 @@ mod tests {
     use super::*;
     use crate::types::BackendKind;
 
+    const MARKER: &str = "\n\n[truncated]";
+
     #[test]
-    fn truncate_respects_char_boundary() {
-        let s = "é".repeat(10);
-        let out = truncate_utf8(&s, 5);
-        assert!(out.contains("[truncated]"));
-        assert!(out.is_char_boundary(out.len()));
+    fn truncate_cuts_on_a_character_boundary_and_stays_within_the_cap() {
+        // The marker is 13 bytes, so a 20-byte cap leaves 7 for content. In
+        // "é" (2 bytes) that is 3 whole characters (6 bytes): byte 7 is the
+        // middle of the fourth, so the cut must move back to 6.
+        let out = truncate_utf8(&"é".repeat(20), 20);
+        assert_eq!(out, format!("ééé{MARKER}"));
+        assert!(
+            out.len() <= 20,
+            "the result must fit the cap: {}",
+            out.len()
+        );
+
+        // Same with a 4-byte character: 7 bytes of room holds one whole 🙂.
+        let out = truncate_utf8(&"🙂".repeat(10), 20);
+        assert_eq!(out, format!("🙂{MARKER}"));
+        assert!(out.len() <= 20);
+    }
+
+    #[test]
+    fn truncate_leaves_input_within_the_cap_untouched() {
+        let exactly = "é".repeat(10); // 20 bytes
+        assert_eq!(
+            truncate_utf8(&exactly, 20),
+            exactly,
+            "at the cap is not over it"
+        );
+        assert!(
+            truncate_utf8(&exactly, 19).ends_with(MARKER),
+            "one byte over is cut and marked"
+        );
+        assert_eq!(truncate_utf8("", 20), "");
     }
 
     #[test]
