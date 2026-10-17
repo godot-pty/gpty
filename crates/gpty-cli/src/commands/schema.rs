@@ -172,21 +172,117 @@ mod tests {
     use super::*;
     use clap::CommandFactory;
 
-    #[test]
-    fn json_schema_is_valid_json() {
-        let schema = clap_command_to_json_schema(&crate::Cli::command());
-        let json_str = serde_json::to_string(&schema).unwrap();
-        // Must parse as valid JSON.
-        let _parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    fn tools() -> Vec<serde_json::Value> {
+        build_mcp_tools_inline(&crate::Cli::command())["tools"]
+            .as_array()
+            .expect("the document carries a tools array")
+            .clone()
+    }
+
+    fn tool<'a>(tools: &'a [serde_json::Value], name: &str) -> &'a serde_json::Value {
+        tools
+            .iter()
+            .find(|t| t["name"] == name)
+            .unwrap_or_else(|| panic!("no tool named {name}"))
+    }
+
+    fn required_of(tool: &serde_json::Value) -> Vec<String> {
+        let mut required: Vec<String> = tool["inputSchema"]["required"]
+            .as_array()
+            .expect("required is an array")
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        required.sort();
+        required
     }
 
     #[test]
-    fn mcp_tools_is_valid_json() {
-        let tools = build_mcp_tools_inline(&crate::Cli::command());
-        let json_str = serde_json::to_string(&tools).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
-        // Must have a "tools" array.
-        assert!(parsed.get("tools").and_then(|v| v.as_array()).is_some());
+    fn json_schema_has_one_variant_per_subcommand_with_its_arguments() {
+        let cmd = crate::Cli::command();
+        let schema = clap_command_to_json_schema(&cmd);
+        assert_eq!(
+            schema["$schema"],
+            "https://json-schema.org/draft/2020-12/schema"
+        );
+        assert_eq!(schema["title"], "gpty CLI");
+        assert_eq!(schema["type"], "object");
+
+        let variants = schema["oneOf"].as_array().expect("oneOf is an array");
+        let names: Vec<&str> = variants
+            .iter()
+            .map(|v| v["properties"]["command"]["const"].as_str().unwrap())
+            .collect();
+        let expected: Vec<&str> = cmd.get_subcommands().map(|s| s.get_name()).collect();
+        assert_eq!(names, expected, "one variant per subcommand, in order");
+
+        // A subcommand's variant describes its own arguments and nothing else.
+        let inject = variants
+            .iter()
+            .find(|v| v["properties"]["command"]["const"] == "inject")
+            .unwrap();
+        let args = &inject["properties"]["args"];
+        assert_eq!(args["additionalProperties"], false);
+        let props = args["properties"].as_object().unwrap();
+        assert!(props.contains_key("pane_id") && props.contains_key("text"));
+        assert_eq!(
+            props["text"]["description"],
+            "Text to send (trailing newline added)"
+        );
+        assert_eq!(props["text"]["type"], "string");
+    }
+
+    #[test]
+    fn mcp_tool_inputs_name_what_each_command_needs() {
+        let tools = tools();
+        assert_eq!(required_of(tool(&tools, "kill-pane")), ["pane_id"]);
+        assert_eq!(required_of(tool(&tools, "focus-pane")), ["pane_id"]);
+        assert_eq!(required_of(tool(&tools, "inject")), ["pane_id", "text"]);
+        // Everything `new-pane` takes has a default, so none of it is required
+        // — an MCP client may open a pane with no arguments at all.
+        assert_eq!(required_of(tool(&tools, "new-pane")), Vec::<String>::new());
+        let new_pane = &tool(&tools, "new-pane")["inputSchema"]["properties"];
+        for arg in [
+            "pane_type",
+            "command",
+            "args",
+            "split",
+            "title",
+            "focus",
+            "tags",
+        ] {
+            assert!(new_pane.get(arg).is_some(), "new-pane must expose {arg}");
+        }
+
+        for t in &tools {
+            let name = t["name"].as_str().unwrap();
+            assert_eq!(t["inputSchema"]["type"], "object", "{name}");
+            let props = t["inputSchema"]["properties"].as_object().unwrap();
+            for r in required_of(t) {
+                assert!(
+                    props.contains_key(&r),
+                    "{name} requires {r} but does not declare it"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mcp_tool_names_are_unique_and_match_the_advertised_list() {
+        let tools = tools();
+        let names: Vec<String> = tools
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), names.len(), "a tool name is advertised twice");
+        assert_eq!(
+            mcp_tool_names(&crate::Cli::command()),
+            names,
+            "the tools/call allow-list is exactly the advertised tools, in order"
+        );
     }
 
     #[test]
@@ -216,6 +312,10 @@ mod tests {
         // Self-referential tools excluded
         assert!(!names.contains(&"mcp"));
         assert!(!names.contains(&"schema"));
+        // `state` declares the pane's own state over the event socket; no IPC
+        // method sits behind it, so advertising it would publish a tool that
+        // cannot dispatch.
+        assert!(!names.contains(&"state"));
         // Plugin admin stays out: install waits on a human, the rest are
         // local state, and `pluginInstall` is deliberately not a tool.
         assert!(!names.contains(&"plugin-install"));
