@@ -210,6 +210,59 @@ func test_vault_note_read_and_write_answer_shaped_json():
 	DirAccess.remove_absolute(vault)
 
 
+func test_vault_note_file_verbs_answer_shaped_json():
+	# Create / rename / delete, the editor's other write surface: each answers
+	# whether the index caught up, a collision answers `code: "exists"` instead
+	# of replacing anything, and the index follows the new name.
+	var vault := ProjectSettings.globalize_path("user://gdext_ffi_note_verbs")
+	DirAccess.make_dir_recursive_absolute(vault)
+
+	var created = JSON.parse_string(str(GptyTerminal.vault_note_create(
+		vault, "fresh.md", "# Fresh\n")))
+	assert_false(created.has("error"), "a new name is created")
+	assert_true(created.has("mtime") and created.has("size"), "the create answers a stamp")
+	assert_eq(created.get("indexed"), true, "the create re-indexes")
+	var listed = JSON.parse_string(str(GptyTerminal.vault_index(vault)))
+	assert_true("fresh.md" in listed["notes"], "the new note is searchable at once")
+
+	var collision = JSON.parse_string(str(GptyTerminal.vault_note_create(
+		vault, "fresh.md", "clobber")))
+	assert_eq(collision.get("code"), "exists", "an existing note is never replaced")
+	var untouched = JSON.parse_string(str(GptyTerminal.vault_note_read(vault, "fresh.md")))
+	assert_eq(untouched.get("text"), "# Fresh\n")
+
+	var renamed = JSON.parse_string(str(GptyTerminal.vault_note_rename(
+		vault, "fresh.md", "moved.md")))
+	assert_false(renamed.has("error"), "a rename lands")
+	assert_eq(renamed.get("path"), "moved.md", "the answer names the new path")
+	assert_eq(renamed.get("indexed"), true)
+	var after_rename = JSON.parse_string(str(GptyTerminal.vault_index(vault)))
+	assert_true("moved.md" in after_rename["notes"], "the index follows the move")
+	assert_false("fresh.md" in after_rename["notes"])
+
+	var replaced = JSON.parse_string(str(GptyTerminal.vault_note_create(
+		vault, "other.md", "other")))
+	assert_false(replaced.has("error"))
+	var name_taken = JSON.parse_string(str(GptyTerminal.vault_note_rename(
+		vault, "moved.md", "other.md")))
+	assert_eq(name_taken.get("code"), "exists", "a rename never overwrites either")
+
+	var deleted = JSON.parse_string(str(GptyTerminal.vault_note_delete(vault, "moved.md")))
+	assert_false(deleted.has("error"), "a delete lands")
+	assert_eq(deleted.get("indexed"), true)
+	var after_delete = JSON.parse_string(str(GptyTerminal.vault_index(vault)))
+	assert_false("moved.md" in after_delete["notes"], "the index drops the deleted note")
+	var missing = JSON.parse_string(str(GptyTerminal.vault_note_delete(vault, "moved.md")))
+	assert_eq(missing.get("code"), "not_found")
+
+	var bad = JSON.parse_string(str(GptyTerminal.vault_note_create(
+		vault, "../escape.md", "x")))
+	assert_eq(bad.get("code"), "bad_path", "the verbs hold the walk's vocabulary")
+
+	DirAccess.remove_absolute(vault.path_join("other.md"))
+	DirAccess.remove_absolute(vault)
+
+
 func test_vault_scratch_functions_answer_shaped_json():
 	# The recovery copy's wire contract (consumed by wiki_pane.gd): a read
 	# distinguishes "no copy" from a failure, a write answers `ok`, and the

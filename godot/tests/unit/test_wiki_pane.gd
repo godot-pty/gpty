@@ -27,7 +27,7 @@ func after_each():
 	# Recovery copies live in gpty's state directory, not under the probe vault,
 	# so removing the tree does not remove them — clear them first, while the
 	# vault they are keyed to still exists.
-	for rel in ["note.md", "big.md"]:
+	for rel in ["note.md", "big.md", "moved.md"]:
 		GptyTerminal.vault_scratch_clear(_scratch_tmp, rel)
 	_remove_tree(_scratch_tmp)
 	_remove_tree(_tmp)
@@ -588,9 +588,9 @@ func test_the_panel_lists_outgoing_mentions_with_their_lines():
 	assert_string_contains(rows[0], "b")
 	assert_string_contains(rows[0], "line 3", "the row names the line it was written on")
 	assert_string_contains(rows[1], "ghost")
-	assert_string_contains(rows[1], "unresolved")
-	assert_true((pane._outgoing_rows.get_child(1) as Button).disabled,
-		"nothing can be opened for an unresolved target")
+	assert_string_contains(rows[1], "not found")
+	assert_false((pane._outgoing_rows.get_child(1) as Button).disabled,
+		"a missing target offers the create-from-link action")
 	assert_true(pane._links_backlinks_heading.visible == false,
 		"no note links here, so the backlink section stays out of the way")
 
@@ -678,15 +678,52 @@ func test_following_a_link_asks_before_discarding_an_unsaved_buffer():
 		"and the discarded edit was not written")
 
 
-func test_a_missing_mention_is_reported_and_not_followed():
+func test_a_missing_mention_offers_to_create_it():
 	_write(_tmp.path_join("a.md"), "# A\n\nSee [[ghost]].\n")
 	var pane := _make_pane(_tmp)
 	pane._open_note("a.md")
-	watch_signals(ToastManager)
 
 	pane._reader.note_link_clicked.emit("ghost")
-	assert_eq(pane._current_rel, "a.md", "there is nowhere to follow")
-	assert_signal_emitted(ToastManager, "toast_requested", "the pane says why nothing happened")
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "a missing target offers the create action")
+	var field: LineEdit = dialogs[0].find_child("NoteName", true, false)
+	assert_not_null(field, "the question carries a name field")
+	assert_eq(field.text, "ghost.md", "the mention's own spelling is the default")
+
+	dialogs[0].canceled.emit()
+	await get_tree().process_frame
+	assert_eq(pane._current_rel, "a.md", "canceling creates nothing and follows nothing")
+	assert_false(FileAccess.file_exists(_tmp.path_join("ghost.md")))
+
+
+func test_creating_from_a_missing_mention_opens_the_new_note():
+	_write(_tmp.path_join("a.md"), "# A\n\nSee [[ghost]].\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("a.md")
+
+	pane._reader.note_link_clicked.emit("ghost")
+	_dialogs_of(pane)[0].confirmed.emit()
+	await wait_process_frames(2)
+	assert_true(FileAccess.file_exists(_tmp.path_join("ghost.md")),
+		"confirming creates the note the mention named")
+	assert_eq(pane._current_rel, "ghost.md", "and opens it in place")
+	assert_eq(pane._editor.text, "")
+
+
+func test_an_ambiguous_mention_is_reported_and_never_created():
+	DirAccess.make_dir_recursive_absolute(_tmp.path_join("one"))
+	DirAccess.make_dir_recursive_absolute(_tmp.path_join("two"))
+	_write(_tmp.path_join("one").path_join("dup.md"), "# One\n")
+	_write(_tmp.path_join("two").path_join("dup.md"), "# Two\n")
+	_write(_tmp.path_join("x.md"), "# X\n\nsee [[dup]]\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("x.md")
+	watch_signals(ToastManager)
+
+	pane._reader.note_link_clicked.emit("dup")
+	assert_eq(pane._current_rel, "x.md", "an ambiguous stem is never picked")
+	assert_eq(_dialogs_of(pane).size(), 0, "and never guessed by creating one")
+	assert_signal_emitted(ToastManager, "toast_requested")
 
 
 func test_following_a_link_saves_when_the_user_chooses_save():
@@ -701,6 +738,130 @@ func test_following_a_link_saves_when_the_user_chooses_save():
 	await wait_process_frames(2)  # the save runs after the dialog is freed
 	assert_eq(pane._current_rel, "b.md", "the save lets the follow proceed")
 	assert_eq(_read(_tmp.path_join("a.md")), "# A edited\n\nSee [[b]].\n")
+
+
+# ── Creating, renaming, and deleting notes ─────────────────────────────
+#
+# The verbs themselves are the core's (`gpty_core::vault`), pinned there; these
+# drive the pane's entry points and its dialogs against a real vault: the name
+# question, the collision retry, the delete confirmation, and the recovery
+# copy's key moving with a rename.
+
+func _name_field(dialog: ConfirmationDialog) -> LineEdit:
+	return dialog.find_child("NoteName", true, false) as LineEdit
+
+
+func test_new_note_creates_and_opens_it():
+	var pane := _make_pane(_tmp)
+	assert_true(pane._new_button.visible, "the list offers a new note")
+
+	pane._new_button.pressed.emit()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the name is asked before anything is written")
+	var field := _name_field(dialogs[0])
+	assert_eq(field.text, WikiPane.NEW_NOTE_NAME)
+	field.text = "fresh"
+	dialogs[0].confirmed.emit()
+	await wait_process_frames(1)
+
+	assert_true(FileAccess.file_exists(_tmp.path_join("fresh.md")),
+		"a bare name gains the walk's .md extension")
+	assert_eq(pane._current_rel, "fresh.md", "the new note opens")
+	assert_eq(pane._editor.text, "")
+	assert_false(pane._new_button.visible, "the note view owns the pane now")
+
+
+func test_a_new_note_never_replaces_one_and_the_question_reopens():
+	_write(_tmp.path_join("taken.md"), "# Taken\n")
+	var pane := _make_pane(_tmp)
+	pane._new_button.pressed.emit()
+	var dialog: ConfirmationDialog = _dialogs_of(pane)[0]
+	_name_field(dialog).text = "taken.md"
+	watch_signals(ToastManager)
+
+	dialog.confirmed.emit()
+	await wait_process_frames(2)
+	assert_eq(_read(_tmp.path_join("taken.md")), "# Taken\n",
+		"an existing note is never overwritten")
+	assert_signal_emitted(ToastManager, "toast_requested", "the refusal is reported")
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the name question is asked again")
+	assert_eq(_name_field(dialogs[0]).text, "taken.md",
+		"with the typed name, so the correction is one edit")
+	assert_eq(pane._current_rel, "", "nothing opened")
+
+
+func test_rename_moves_the_open_note():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("note.md")
+
+	pane._rename_button.pressed.emit()
+	var dialog: ConfirmationDialog = _dialogs_of(pane)[0]
+	assert_eq(_name_field(dialog).text, "note.md", "the current path is the default")
+	_name_field(dialog).text = "moved.md"
+	dialog.confirmed.emit()
+	await wait_process_frames(1)
+
+	assert_eq(pane._current_rel, "moved.md")
+	assert_eq(pane._note_title.text, "moved.md")
+	assert_false(FileAccess.file_exists(_tmp.path_join("note.md")))
+	assert_eq(_read(_tmp.path_join("moved.md")), "# Note\n")
+	assert_eq(pane._editor.text, "# Note\n", "the open buffer is untouched by the move")
+
+
+func test_rename_while_dirty_moves_the_recovery_copy():
+	_write(_scratch_tmp.path_join("note.md"), "# One\n")
+	var pane := _make_pane(_scratch_tmp)
+	pane._scratch_timer.wait_time = 0.05
+	pane._open_note("note.md")
+	await _type_into(pane, "# Two\n")
+	await wait_seconds(0.1)
+	assert_true(_has_copy(_scratch_tmp, "note.md"))
+
+	pane._rename_button.pressed.emit()
+	_name_field(_dialogs_of(pane)[0]).text = "moved.md"
+	_dialogs_of(pane)[0].confirmed.emit()
+	await wait_process_frames(1)
+
+	assert_true(_has_copy(_scratch_tmp, "moved.md"),
+		"the copy is re-keyed, or a crash would orphan the buffer")
+	assert_false(_has_copy(_scratch_tmp, "note.md"))
+	assert_true(pane._is_dirty(), "the buffer is still unsaved work")
+
+
+func test_delete_asks_and_removes_the_note():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	_write(_tmp.path_join("other.md"), "# Other\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("note.md")
+
+	pane._delete_button.pressed.emit()
+	var dialog: ConfirmationDialog = _dialogs_of(pane)[0]
+	assert_string_contains(dialog.dialog_text, "note.md")
+	dialog.canceled.emit()
+	await get_tree().process_frame
+	assert_true(FileAccess.file_exists(_tmp.path_join("note.md")),
+		"canceling keeps the note")
+	assert_eq(pane._current_rel, "note.md")
+
+	pane._delete_button.pressed.emit()
+	_dialogs_of(pane)[0].confirmed.emit()
+	await wait_process_frames(1)
+	assert_false(FileAccess.file_exists(_tmp.path_join("note.md")))
+	assert_eq(pane._current_rel, "", "the pane returns to the list")
+	assert_true(pane._note_box.visible == false)
+	assert_eq(_list_texts(pane), ["other.md"], "the index caught up")
+
+
+func test_delete_warns_about_an_unsaved_buffer():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("note.md")
+	await _type_into(pane, "# Edited\n")
+
+	pane._delete_button.pressed.emit()
+	assert_string_contains(_dialogs_of(pane)[0].dialog_text, "Unsaved changes")
 
 
 # ── The recovery copy: what a crash cannot take ────────────────────────

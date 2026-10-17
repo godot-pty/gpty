@@ -51,6 +51,8 @@ const MAX_SHOWN_LINK := 72
 ## Height of the link panel's scroll area: a bounded strip, so the editor and
 ## the preview keep their space whether a note has one link or fifty.
 const LINK_PANEL_HEIGHT := 132
+## What the New-note prompt starts with: one word to edit beats an empty field.
+const NEW_NOTE_NAME := "Untitled.md"
 
 var _back: Button
 var _search: LineEdit
@@ -66,6 +68,10 @@ var _placeholder: Label
 var _footer: Label
 var _search_timer: Timer
 var _scratch_timer: Timer
+## File verbs on the list and note views: new (list), rename/delete (note).
+var _new_button: Button
+var _rename_button: Button
+var _delete_button: Button
 
 ## The link panel's parts: this note's outgoing mentions and its backlinks,
 ## both from the index (`GptyTerminal.vault_links`). Rows are rebuilt whenever
@@ -116,6 +122,15 @@ func _ready():
 			_show_list()
 	))
 	top.add_child(_back)
+
+	_new_button = Button.new()
+	_new_button.name = "NewNote"
+	_new_button.text = "New note"
+	_new_button.focus_mode = Control.FOCUS_NONE
+	_new_button.tooltip_text = "Create a Markdown note in this vault"
+	_new_button.visible = false
+	_new_button.pressed.connect(_ask_new_note)
+	top.add_child(_new_button)
 
 	_search = LineEdit.new()
 	_search.name = "Search"
@@ -188,6 +203,22 @@ func _ready():
 	_dirty_label.visible = false
 	_dirty_label.add_theme_font_size_override("font_size", 12)
 	toolbar.add_child(_dirty_label)
+
+	_rename_button = Button.new()
+	_rename_button.name = "RenameNote"
+	_rename_button.text = "Rename"
+	_rename_button.focus_mode = Control.FOCUS_NONE
+	_rename_button.tooltip_text = "Move this note to another vault-relative path"
+	_rename_button.pressed.connect(_ask_rename)
+	toolbar.add_child(_rename_button)
+
+	_delete_button = Button.new()
+	_delete_button.name = "DeleteNote"
+	_delete_button.text = "Delete"
+	_delete_button.focus_mode = Control.FOCUS_NONE
+	_delete_button.tooltip_text = "Delete this note from the vault"
+	_delete_button.pressed.connect(_ask_delete)
+	toolbar.add_child(_delete_button)
 
 	_save_button = Button.new()
 	_save_button.name = "Save"
@@ -312,6 +343,7 @@ func _refresh():
 		_show_placeholder(problem, false)
 		return
 	_search.visible = true
+	_new_button.visible = true
 	if _search.text.strip_edges() != "":
 		_run_search()
 		return
@@ -386,6 +418,9 @@ func _show_placeholder(text: String, searchable := true) -> void:
 	_note_box.visible = false
 	_back.visible = false
 	_search.visible = searchable
+	# A working vault with no note open can always gain one, even when the
+	# placeholder is a zero-hit search or an empty vault.
+	_new_button.visible = searchable
 
 ## Leave the note and show the list. The Back button routes through
 ## `_request_leave`, so an unsaved note asks first; `_refresh` is the
@@ -477,6 +512,7 @@ func _open_note(rel: String) -> void:
 	_footer.visible = false
 	_placeholder.visible = false
 	_search.visible = false
+	_new_button.visible = false
 	_note_box.visible = true
 	_back.visible = true
 	_apply_view_mode()
@@ -532,15 +568,19 @@ func _refresh_links() -> void:
 				_follow_note.bind(str(resolved)), "Open %s" % str(resolved))
 			continue
 		var list: Array = candidates.get(_link_key(target, line), [])
-		var hint := "unresolved"
-		if not list.is_empty():
+		if list.is_empty():
+			# Missing (not ambiguous): the row offers the create-from-link
+			# action, because that is the one way this note can gain its
+			# target. Ambiguity stays information only — creating either
+			# candidate would be a guess.
+			_add_link_row(_outgoing_rows, "%s · line %d · not found" % [_shown_link(target), line],
+				_create_from_link.bind(target), "Create note \"%s\"" % target)
+		else:
 			# The ambiguity hint is the store's own candidate list, so the row
 			# names exactly the notes the resolver refused to choose between.
-			hint = "ambiguous: " + _joined_links(list)
-		# No action: nothing can be opened, so the row explains itself instead
-		# of promising one (create-from-link is the next item's verb).
-		_add_link_row(_outgoing_rows, "%s · line %d · %s" % [_shown_link(target), line, hint],
-			Callable(), "")
+			_add_link_row(_outgoing_rows,
+				"%s · line %d · ambiguous: %s" % [_shown_link(target), line, _joined_links(list)],
+				Callable(), "")
 	var shown_back := 0
 	for entry in backlinks:
 		if not (entry is Dictionary):
@@ -631,7 +671,9 @@ func _on_mention_clicked(target: String) -> void:
 		return
 	var candidates: Array = answer.get("candidates", []) if answer.get("candidates") is Array else []
 	if candidates.is_empty():
-		ToastManager.warn("No note named [[%s]] in this vault" % _shown_link(target), 4.0, "Wiki")
+		# Missing, not ambiguous: the mention names a note that could exist,
+		# so the click offers to create it (the create-from-link action).
+		_create_from_link(target)
 	else:
 		ToastManager.warn("[[%s]] is ambiguous: %s" % [_shown_link(target), _joined_links(candidates)], 6.0, "Wiki")
 
@@ -777,6 +819,186 @@ func _save(force := false, answer := Callable()) -> void:
 		ToastManager.warn("Saved %s, but the search index could not be updated" % _current_rel, 5.0, "Wiki")
 	if answer.is_valid():
 		answer.call(true)
+
+# ── Creating, renaming, and deleting notes ─────────────────────────────
+#
+# The editor used to only touch notes that already existed. These are the
+# missing file verbs, held to the same rules as a save: the path follows the
+# walk's vocabulary, the operation stays inside the vault, and the core
+# refuses an existing destination rather than replacing it (`create_new`).
+# Each verb re-indexes, so a new name is searchable and a moved one stops
+# resolving links that named the old stem.
+
+func _ask_new_note() -> void:
+	_ask_note_name("New note", NEW_NOTE_NAME, "Create",
+		"Create a new note in this vault.", _create_note)
+
+## The create-from-link action: a mention whose target does not exist yet
+## offers to make it. The name keeps the mention's own spelling (plus `.md`
+## when it has no extension) so the link resolves as soon as the note exists.
+func _create_from_link(target: String) -> void:
+	_ask_note_name("New note from link", _note_name_with_md(target), "Create",
+		"Create [[%s]] as a new note?" % target, _create_note)
+
+func _ask_rename() -> void:
+	if _current_rel == "":
+		return
+	_ask_note_name("Rename note", _current_rel, "Rename",
+		"New vault-relative path for %s." % _current_rel, _rename_note)
+
+## Ask for a note path, then run `answer` with it. `answer` returns whether
+## the action landed: a refusal (a collision, a path outside the vocabulary)
+## re-opens the same question with the typed text, so the correction happens
+## where the name was entered instead of costing the whole dialog.
+func _ask_note_name(title: String, initial: String, ok_text: String, hint: String, answer: Callable) -> void:
+	if _has_open_ask():
+		return
+	var dialog := ConfirmationDialog.new()
+	dialog.name = "NoteNameConfirm"
+	dialog.title = title
+	dialog.ok_button_text = ok_text
+	var box := VBoxContainer.new()
+	# A fixed content width: AcceptDialog fits a child to the dialog's content
+	# rect, and an auto-wrapping Label there reports a tiny minimum (measured:
+	# a 420 px request became a 791 px-tall dialog).
+	box.custom_minimum_size = Vector2(380, 0)
+	var label := Label.new()
+	label.text = hint
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.custom_minimum_size.x = 380
+	box.add_child(label)
+	var field := LineEdit.new()
+	field.name = "NoteName"
+	field.text = initial
+	field.select_all()
+	box.add_child(field)
+	dialog.add_child(box)
+	dialog.register_text_enter(field)
+	add_child(dialog)
+	dialog.confirmed.connect(func():
+		var value := _normalized_note_name(field.text)
+		# Hide before running the action: a real OK press hides the dialog
+		# before emitting `confirmed` (measured), but a directly emitted signal
+		# does not — and the action may ask its own question (a dirty buffer's
+		# leave ask) or re-open this one after a refusal.
+		dialog.hide()
+		dialog.queue_free()
+		if not answer.call(value):
+			_ask_note_name(title, field.text, ok_text, hint, answer)
+	)
+	dialog.canceled.connect(dialog.queue_free)
+	dialog.popup_centered()
+
+## What a typed name means: trimmed, with `.md` appended when the last
+## component has no extension at all. Any other extension is left alone — the
+## store refuses it with a message rather than silently renaming what the
+## user typed.
+func _normalized_note_name(text: String) -> String:
+	var name := text.strip_edges()
+	if name == "" or name.get_file().get_extension() != "":
+		return name
+	return name + ".md"
+
+func _note_name_with_md(target: String) -> String:
+	var name := target.strip_edges()
+	return name if name.get_file().get_extension() != "" else name + ".md"
+
+## Create an empty note and open it. Opening goes through the leave guard:
+## creating from a link happens while another note — possibly with an unsaved
+## buffer — is the one on screen.
+func _create_note(rel: String) -> bool:
+	if rel == "":
+		ToastManager.warn("Enter a note name", 3.0, "Wiki")
+		return false
+	var reply = JSON.parse_string(str(GptyTerminal.vault_note_create(vault_path, rel, "")))
+	if not (reply is Dictionary) or reply.has("error"):
+		ToastManager.warn(_note_failure("Could not create", rel, reply), 5.0, "Wiki")
+		return false
+	if not bool(reply.get("indexed", true)):
+		ToastManager.warn("Created %s, but the search index could not be updated" % rel, 5.0, "Wiki")
+	_request_leave(func(proceed: bool):
+		if proceed:
+			_open_note(rel)
+	)
+	return true
+
+## Move the open note to a new path. The buffer and its stamp stay valid (a
+## rename preserves the file's mtime and size); a dirty buffer's recovery copy
+## is re-keyed, because a copy left under the old path would never be offered
+## again.
+func _rename_note(new_rel: String) -> bool:
+	if _current_rel == "":
+		return false
+	if new_rel == "":
+		ToastManager.warn("Enter a note name", 3.0, "Wiki")
+		return false
+	if new_rel == _current_rel:
+		return true
+	var previous := _current_rel
+	var reply = JSON.parse_string(str(GptyTerminal.vault_note_rename(vault_path, previous, new_rel)))
+	if not (reply is Dictionary) or reply.has("error"):
+		ToastManager.warn(_note_failure("Could not rename", new_rel, reply), 5.0, "Wiki")
+		return false
+	_current_rel = str(reply.get("path", new_rel))
+	_note_title.text = _current_rel
+	_note_title.tooltip_text = _current_rel
+	if _is_dirty():
+		_drop_scratch(vault_path, previous)
+		_scratch_timer.stop()
+		_write_scratch()
+	else:
+		_drop_scratch(vault_path, previous)
+	if not bool(reply.get("indexed", true)):
+		ToastManager.warn("Renamed %s, but the search index could not be updated" % _current_rel, 5.0, "Wiki")
+	# This note's own edges moved with it; links other notes wrote to the old
+	# name are the re-indexed store's answer now.
+	_refresh_links()
+	return true
+
+## Ask before the one destructive verb: an open note is about to stop
+## existing, and a dirty buffer dies with it — no save question, because the
+## file is what is being deleted.
+func _ask_delete() -> void:
+	if _current_rel == "" or _has_open_ask():
+		return
+	var dialog := ConfirmationDialog.new()
+	dialog.name = "DeleteConfirm"
+	dialog.title = "Delete note"
+	dialog.dialog_text = "Delete %s? This cannot be undone." % _current_rel
+	if _is_dirty():
+		dialog.dialog_text += "\n\nUnsaved changes to it will be lost."
+	dialog.ok_button_text = "Delete"
+	add_child(dialog)
+	dialog.confirmed.connect(func():
+		dialog.queue_free()
+		_delete_open_note()
+	)
+	dialog.canceled.connect(dialog.queue_free)
+	dialog.popup_centered()
+
+func _delete_open_note() -> void:
+	if _current_rel == "":
+		return
+	var rel := _current_rel
+	var reply = JSON.parse_string(str(GptyTerminal.vault_note_delete(vault_path, rel)))
+	if not (reply is Dictionary) or reply.has("error"):
+		ToastManager.warn(_note_failure("Could not delete", rel, reply), 5.0, "Wiki")
+		return
+	# A deliberate end: the buffer died with the note, so the crash copy must
+	# not be offered back for a name the user just removed.
+	_drop_scratch(vault_path, rel)
+	_show_list()
+	if not bool(reply.get("indexed", true)):
+		ToastManager.warn("Deleted %s, but the search index could not be updated" % rel, 5.0, "Wiki")
+
+## One toast line for a refused file verb: the pane names what it tried, and
+## the store's message says why (`code` is the discriminator a caller would
+## switch on, but here the message is already human text).
+func _note_failure(prefix: String, rel: String, reply) -> String:
+	var text := "%s %s" % [prefix, _shown_link(rel)]
+	if reply is Dictionary and reply.has("error"):
+		return text + ": " + _shown_link(str(reply["error"]))
+	return text + ": no answer from the vault"
 
 # ── The recovery copy: the buffer a crash would take ───────────────────
 
@@ -962,9 +1184,19 @@ func _request_leave(answer: Callable) -> void:
 	dialog.popup_centered()
 
 func _has_open_ask() -> bool:
-	return find_child("DiscardConfirm", false, false) != null \
-		or find_child("OverwriteConfirm", false, false) != null \
-		or find_child("RestoreConfirm", false, false) != null
+	# Only a *visible* dialog is still being asked. `AcceptDialog` hides itself
+	# before emitting `confirmed`/`canceled` (measured on 4.7.2), so the action
+	# an answer starts may show its own question — the create-from-link flow
+	# is a name prompt whose success asks the leave question for a dirty
+	# buffer — while the answered dialog is still awaiting deletion.
+	for dialog_name in [
+		"DiscardConfirm", "OverwriteConfirm", "RestoreConfirm",
+		"NoteNameConfirm", "DeleteConfirm",
+	]:
+		var dialog := find_child(dialog_name, false, false) as Window
+		if dialog != null and dialog.visible:
+			return true
+	return false
 
 ## The close contract (`PaneBody.request_close`): the pane is about to be
 ## destroyed, so the buffer is about to be lost for good — the same ask the

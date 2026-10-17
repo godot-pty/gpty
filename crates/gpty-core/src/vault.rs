@@ -319,6 +319,8 @@ pub enum NoteError {
     BadPath(String),
     /// No regular file at the resolved path.
     NotFound,
+    /// A note, symlink or directory already occupies the destination path.
+    Exists,
     /// The file changed on disk since the caller loaded it.
     ChangedOnDisk,
     /// The content exceeds [`MAX_NOTE_BYTES`].
@@ -335,6 +337,7 @@ impl NoteError {
             NoteError::BadVault(_) => "bad_vault",
             NoteError::BadPath(_) => "bad_path",
             NoteError::NotFound => "not_found",
+            NoteError::Exists => "exists",
             NoteError::ChangedOnDisk => "changed_on_disk",
             NoteError::TooLarge(_) => "too_large",
             NoteError::Outside => "outside_vault",
@@ -349,6 +352,7 @@ impl std::fmt::Display for NoteError {
             NoteError::BadVault(m) => write!(f, "not a vault directory: {m}"),
             NoteError::BadPath(m) => write!(f, "not a note path: {m}"),
             NoteError::NotFound => write!(f, "no such note"),
+            NoteError::Exists => write!(f, "a note already exists at that path"),
             NoteError::ChangedOnDisk => {
                 write!(f, "the note changed on disk since it was opened")
             }
@@ -482,6 +486,138 @@ pub fn write_vault_note(
     let meta =
         std::fs::metadata(&real).map_err(|e| NoteError::Io(format!("stamping the note: {e}")))?;
     Ok(NoteStamp::of(&meta))
+}
+
+/// Create one note with `content`, refusing to replace anything.
+///
+/// The vault-relative path obeys the walk's vocabulary, and its directory
+/// must already exist **inside** the vault — creating through a directory
+/// symlinked out of the vault would write outside it, so that is refused
+/// rather than followed. The file is claimed with `create_new`, so an
+/// existing note, symlink or directory at the path is [`NoteError::Exists`]
+/// and no race can turn a create into an overwrite.
+pub fn create_vault_note(
+    root: &str,
+    rel_path: &str,
+    content: &str,
+) -> Result<NoteStamp, NoteError> {
+    if content.len() as u64 > MAX_NOTE_BYTES {
+        return Err(NoteError::TooLarge(content.len()));
+    }
+    let path = note_path(root, rel_path)?;
+    let Some(dir) = path.parent() else {
+        return Err(NoteError::BadPath(format!(
+            "{rel_path}: its directory does not exist"
+        )));
+    };
+    ensure_directory_inside(root, dir, rel_path)?;
+    let mut file = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Err(NoteError::Exists),
+        Err(e) => {
+            return Err(NoteError::Io(format!("creating {}: {e}", path.display())));
+        }
+    };
+    use std::io::Write as _;
+    if let Err(e) = file.write_all(content.as_bytes()) {
+        drop(file);
+        let _ = std::fs::remove_file(&path);
+        return Err(NoteError::Io(format!("writing {}: {e}", path.display())));
+    }
+    drop(file);
+    let meta =
+        std::fs::metadata(&path).map_err(|e| NoteError::Io(format!("stamping the note: {e}")))?;
+    Ok(NoteStamp::of(&meta))
+}
+
+/// Delete one note entry from the vault.
+///
+/// The path obeys the walk's vocabulary, and the operation acts on the
+/// **entry**, never through it: a symlinked note is unlinked and its target
+/// stays where it is, because deleting must not reach a file the vault does
+/// not contain. The entry must be a note (a symlink is followed only to tell
+/// one from a directory or device).
+pub fn delete_vault_note(root: &str, rel_path: &str) -> Result<(), NoteError> {
+    let path = note_path(root, rel_path)?;
+    let meta = std::fs::metadata(&path).map_err(|_| NoteError::NotFound)?;
+    if !meta.is_file() {
+        return Err(NoteError::NotFound);
+    }
+    std::fs::remove_file(&path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            NoteError::NotFound
+        } else {
+            NoteError::Io(format!("deleting {}: {e}", path.display()))
+        }
+    })
+}
+
+/// Rename one note within the vault, refusing to replace anything.
+///
+/// Both paths obey the walk's vocabulary and the destination's directory
+/// must resolve inside the vault (same rule as a create). The source
+/// **entry** moves — a symlinked note moves as a link, its target untouched —
+/// and the destination is claimed with `create_new` before the rename, so an
+/// existing note is [`NoteError::Exists`], never overwritten; the claim is
+/// the only file a failed rename can leave behind, and it is removed then.
+pub fn rename_vault_note(root: &str, rel_path: &str, new_rel_path: &str) -> Result<(), NoteError> {
+    let path = note_path(root, rel_path)?;
+    let dest = note_path(root, new_rel_path)?;
+    let meta = std::fs::metadata(&path).map_err(|_| NoteError::NotFound)?;
+    if !meta.is_file() {
+        return Err(NoteError::NotFound);
+    }
+    let Some(dir) = dest.parent() else {
+        return Err(NoteError::BadPath(format!(
+            "{new_rel_path}: its directory does not exist"
+        )));
+    };
+    ensure_directory_inside(root, dir, new_rel_path)?;
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&dest)
+    {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Err(NoteError::Exists),
+        Err(e) => {
+            return Err(NoteError::Io(format!("claiming {}: {e}", dest.display())));
+        }
+    }
+    if let Err(e) = std::fs::rename(&path, &dest) {
+        let _ = std::fs::remove_file(&dest);
+        return Err(if e.kind() == std::io::ErrorKind::NotFound {
+            NoteError::NotFound
+        } else {
+            NoteError::Io(format!("renaming {}: {e}", path.display()))
+        });
+    }
+    Ok(())
+}
+
+/// Require `dir` (a path under `root`) to exist and resolve inside the vault.
+///
+/// `rel_path` only shapes the refusal's message: the caller names the note it
+/// was trying to reach, and a missing directory is a path problem, not a
+/// store failure.
+fn ensure_directory_inside(root: &str, dir: &Path, rel_path: &str) -> Result<(), NoteError> {
+    let root_real =
+        std::fs::canonicalize(root).map_err(|_| NoteError::BadVault(root.to_string()))?;
+    let dir_real = std::fs::canonicalize(dir)
+        .map_err(|_| NoteError::BadPath(format!("{rel_path}: its directory does not exist")))?;
+    if !dir_real.is_dir() {
+        return Err(NoteError::BadPath(format!(
+            "{rel_path}: its directory is not a directory"
+        )));
+    }
+    if !dir_real.starts_with(&root_real) {
+        return Err(NoteError::Outside);
+    }
+    Ok(())
 }
 
 /// 64 bits of process-local randomness for the temp name: time nanos mixed
@@ -2295,6 +2431,187 @@ mod tests {
         assert_eq!(
             mode, 0o640,
             "the replacement must keep the note's mode, not the umask's"
+        );
+    }
+
+    #[test]
+    fn a_note_can_be_created_but_never_over_an_existing_entry() {
+        let vault = temp_vault("note_create");
+        let root = root_str(&vault);
+
+        let stamp = create_vault_note(&root, "fresh.md", "# Fresh\n").unwrap();
+        let loaded = read_vault_note(&root, "fresh.md").unwrap();
+        assert_eq!(loaded.text, "# Fresh\n");
+        assert_eq!(
+            loaded.stamp, stamp,
+            "the create answers the new file's stamp"
+        );
+        assert_eq!(
+            create_vault_note(&root, "fresh.md", "clobber").unwrap_err(),
+            NoteError::Exists,
+            "a create must never replace an existing note"
+        );
+        assert_eq!(
+            fs::read_to_string(vault.join("fresh.md")).unwrap(),
+            "# Fresh\n"
+        );
+
+        fs::create_dir_all(vault.join("sub")).unwrap();
+        create_vault_note(&root, "sub/nested.md", "nested").unwrap();
+        assert_eq!(
+            fs::read_to_string(vault.join("sub/nested.md")).unwrap(),
+            "nested"
+        );
+
+        // The walk's vocabulary and an existing directory apply unchanged.
+        assert_eq!(
+            create_vault_note(&root, "sub/deeper/x.md", "x").unwrap_err(),
+            NoteError::BadPath("sub/deeper/x.md: its directory does not exist".into())
+        );
+        assert_eq!(
+            create_vault_note(&root, ".hidden.md", "x").unwrap_err(),
+            NoteError::BadPath(".hidden.md".into())
+        );
+        assert_eq!(
+            create_vault_note(&root, "notes.txt", "x").unwrap_err(),
+            NoteError::BadPath("notes.txt".into())
+        );
+        fs::create_dir_all(vault.join("dir.md")).unwrap();
+        assert_eq!(
+            create_vault_note(&root, "dir.md", "x").unwrap_err(),
+            NoteError::Exists,
+            "a directory is not a note to create over"
+        );
+        assert!(!vault.join("sub").join("deeper").exists());
+    }
+
+    #[test]
+    fn deleting_a_note_removes_the_entry_and_nothing_else() {
+        let vault = temp_vault("note_delete");
+        write_note(&vault, "note.md", "x");
+        write_note(&vault, "other.md", "y");
+        fs::create_dir_all(vault.join("dir.md")).unwrap();
+        let root = root_str(&vault);
+
+        delete_vault_note(&root, "note.md").unwrap();
+        assert!(!vault.join("note.md").exists());
+        assert_eq!(
+            fs::read_to_string(vault.join("other.md")).unwrap(),
+            "y",
+            "only the named note goes"
+        );
+        assert_eq!(
+            delete_vault_note(&root, "note.md").unwrap_err(),
+            NoteError::NotFound
+        );
+        assert_eq!(
+            delete_vault_note(&root, "dir.md").unwrap_err(),
+            NoteError::NotFound,
+            "a directory is not a note to delete"
+        );
+        for rel in [".hidden.md", "../escape.md", "/x.md", "x.txt"] {
+            assert_eq!(
+                delete_vault_note(&root, rel).unwrap_err(),
+                NoteError::BadPath(rel.to_string()),
+                "the delete must refuse {rel:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn renaming_moves_the_note_and_refuses_an_existing_destination() {
+        let vault = temp_vault("note_rename");
+        write_note(&vault, "a.md", "content");
+        write_note(&vault, "b.md", "other");
+        let root = root_str(&vault);
+
+        assert_eq!(
+            rename_vault_note(&root, "a.md", "sub/moved.md").unwrap_err(),
+            NoteError::BadPath("sub/moved.md: its directory does not exist".into()),
+            "a rename never creates directories"
+        );
+        fs::create_dir_all(vault.join("sub")).unwrap();
+        rename_vault_note(&root, "a.md", "sub/moved.md").unwrap();
+        assert!(!vault.join("a.md").exists());
+        assert_eq!(
+            fs::read_to_string(vault.join("sub").join("moved.md")).unwrap(),
+            "content"
+        );
+
+        assert_eq!(
+            rename_vault_note(&root, "sub/moved.md", "b.md").unwrap_err(),
+            NoteError::Exists,
+            "a rename must never replace an existing note"
+        );
+        assert_eq!(fs::read_to_string(vault.join("b.md")).unwrap(), "other");
+        assert_eq!(
+            rename_vault_note(&root, "missing.md", "x.md").unwrap_err(),
+            NoteError::NotFound
+        );
+        assert!(
+            !vault.join("x.md").exists(),
+            "a refused rename leaves no claim behind"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_and_rename_refuse_a_directory_symlinked_out_of_the_vault() {
+        let vault = temp_vault("note_dir_escape");
+        let outside = temp_vault("note_dir_escape_target");
+        std::os::unix::fs::symlink(&outside, vault.join("out")).unwrap();
+        write_note(&vault, "note.md", "x");
+        let root = root_str(&vault);
+
+        assert_eq!(
+            create_vault_note(&root, "out/x.md", "x").unwrap_err(),
+            NoteError::Outside
+        );
+        assert!(
+            !outside.join("x.md").exists(),
+            "nothing may be created outside the vault"
+        );
+        assert_eq!(
+            rename_vault_note(&root, "note.md", "out/x.md").unwrap_err(),
+            NoteError::Outside
+        );
+        assert!(vault.join("note.md").exists());
+        assert!(!outside.join("x.md").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delete_and_rename_move_the_entry_not_a_symlinked_target() {
+        let vault = temp_vault("note_entry");
+        let outside = temp_vault("note_entry_target");
+        fs::write(outside.join("secret.md"), "outside").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.md"), vault.join("outside.md")).unwrap();
+        write_note(&vault, "real.md", "real");
+        std::os::unix::fs::symlink("real.md", vault.join("alias.md")).unwrap();
+        let root = root_str(&vault);
+
+        rename_vault_note(&root, "alias.md", "moved.md").unwrap();
+        assert!(
+            fs::symlink_metadata(vault.join("moved.md"))
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the link moves as a link"
+        );
+        assert_eq!(fs::read_to_string(vault.join("real.md")).unwrap(), "real");
+        delete_vault_note(&root, "moved.md").unwrap();
+        assert_eq!(
+            fs::read_to_string(vault.join("real.md")).unwrap(),
+            "real",
+            "deleting the link must not delete its target"
+        );
+
+        // A link out of the vault can be unlinked without touching its
+        // target: the entry is inside, and nothing outside is reached.
+        delete_vault_note(&root, "outside.md").unwrap();
+        assert_eq!(
+            fs::read_to_string(outside.join("secret.md")).unwrap(),
+            "outside"
         );
     }
 

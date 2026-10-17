@@ -447,6 +447,108 @@ impl GptyTerminal {
         }
     }
 
+    /// Create one note (JSON), and re-index the vault.
+    ///
+    /// `rel_path` follows the same vocabulary a save does (vault-relative,
+    /// `.md`, no hidden component), and its directory must already exist
+    /// inside the vault — creation never makes directories, and never writes
+    /// through a directory symlinked out of the vault. The file is claimed
+    /// with `create_new`, so an existing note, symlink or directory at the
+    /// path answers `code: "exists"`; there is no overwrite path. Returns
+    /// `{"mtime", "size", "indexed"}` (the fresh stamp and whether the index
+    /// caught up), or `{"error", "code"}`.
+    #[func]
+    fn vault_note_create(vault_path: GString, rel_path: GString, content: GString) -> GString {
+        let path = vault_path.to_string();
+        if let Some(problem) = vault_path_problem(&path) {
+            return vault_error(&problem);
+        }
+        match gpty_core::vault::create_vault_note(
+            &path,
+            &rel_path.to_string(),
+            &content.to_string(),
+        ) {
+            Ok(stamp) => {
+                let indexed = reindex_vault(&path);
+                let document = serde_json::json!({
+                    "mtime": stamp.mtime,
+                    "size": stamp.size,
+                    "indexed": indexed,
+                })
+                .to_string();
+                GString::from(document.as_str())
+            }
+            Err(e) => {
+                if note_failure_is_diagnostic(&e) {
+                    log::warn!("vault note create failed ({path}): {e}");
+                }
+                note_error(e)
+            }
+        }
+    }
+
+    /// Delete one note (JSON), and re-index the vault.
+    ///
+    /// Only an existing note is deleted; the operation acts on the vault
+    /// **entry**, so a symlinked note is unlinked and the file it points at
+    /// stays where it is. Returns `{"indexed"}` (`false` only when the index
+    /// could not be brought up to date), or `{"error", "code"}`.
+    #[func]
+    fn vault_note_delete(vault_path: GString, rel_path: GString) -> GString {
+        let path = vault_path.to_string();
+        if let Some(problem) = vault_path_problem(&path) {
+            return vault_error(&problem);
+        }
+        match gpty_core::vault::delete_vault_note(&path, &rel_path.to_string()) {
+            Ok(()) => {
+                let indexed = reindex_vault(&path);
+                let document = serde_json::json!({ "indexed": indexed }).to_string();
+                GString::from(document.as_str())
+            }
+            Err(e) => {
+                if note_failure_is_diagnostic(&e) {
+                    log::warn!("vault note delete failed ({path}): {e}");
+                }
+                note_error(e)
+            }
+        }
+    }
+
+    /// Rename one note (JSON), and re-index the vault.
+    ///
+    /// Both paths follow the save vocabulary, and the destination's directory
+    /// must exist inside the vault. The destination is claimed before the
+    /// rename, so an existing note answers `code: "exists"` instead of being
+    /// replaced. The vault **entry** moves (a symlinked note moves as a link).
+    /// Returns `{"path", "indexed"}` — the new relative path, which is also
+    /// the stamp the caller keeps using, since a rename preserves the file's
+    /// mtime and size — or `{"error", "code"}`.
+    #[func]
+    fn vault_note_rename(vault_path: GString, rel_path: GString, new_rel_path: GString) -> GString {
+        let path = vault_path.to_string();
+        if let Some(problem) = vault_path_problem(&path) {
+            return vault_error(&problem);
+        }
+        let new_rel = new_rel_path.to_string();
+        match gpty_core::vault::rename_vault_note(&path, &rel_path.to_string(), &new_rel) {
+            Ok(()) => {
+                let indexed = reindex_vault(&path);
+                let document = serde_json::json!({
+                    "path": new_rel,
+                    "indexed": indexed,
+                })
+                .to_string();
+                GString::from(document.as_str())
+            }
+            Err(e) => {
+                if note_failure_is_diagnostic(&e) {
+                    log::warn!("vault note rename failed ({path}): {e}");
+                }
+                note_error(e)
+            }
+        }
+    }
+
     /// The recovery copy of one note's unsaved buffer (JSON).
     ///
     /// The editor holds its buffer in memory only, so a crash takes it unless
