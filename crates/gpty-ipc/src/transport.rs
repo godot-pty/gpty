@@ -469,7 +469,13 @@ mod tests {
         fn default_socket_path_follows_a_secure_xdg_runtime_dir() {
             let secure = make_dir("gpty-xdg-test", 0o700);
             {
-                let _env = EnvVar::set("XDG_RUNTIME_DIR", &secure);
+                // `GPTY_SOCKET` outranks the runtime dir, and a gpty pane
+                // exports it to its children — so a developer running the
+                // tests from inside gpty would otherwise see its value here.
+                let _env = EnvVars::apply(&[
+                    ("GPTY_SOCKET", None),
+                    ("XDG_RUNTIME_DIR", Some(secure.to_str().unwrap())),
+                ]);
                 assert_eq!(
                     default_socket_path(),
                     format!("{}/gpty.sock", secure.display())
@@ -482,7 +488,12 @@ mod tests {
         fn insecure_xdg_runtime_dir_is_rejected() {
             let insecure = make_dir("gpty-xdg-insecure", 0o777);
             {
-                let _env = EnvVar::set("XDG_RUNTIME_DIR", &insecure);
+                // With `GPTY_SOCKET` set the runtime dir is never consulted and
+                // this assertion would hold whatever the check did.
+                let _env = EnvVars::apply(&[
+                    ("GPTY_SOCKET", None),
+                    ("XDG_RUNTIME_DIR", Some(insecure.to_str().unwrap())),
+                ]);
                 let path = default_socket_path();
                 assert!(
                     !path.starts_with(&format!("{}/", insecure.display())),
@@ -496,6 +507,7 @@ mod tests {
         fn unset_xdg_runtime_dir_still_names_the_socket() {
             let state = std::env::temp_dir().join(format!("gpty-state-{}", std::process::id()));
             let _env = EnvVars::apply(&[
+                ("GPTY_SOCKET", None),
                 ("XDG_RUNTIME_DIR", None),
                 ("XDG_STATE_HOME", Some(state.to_str().unwrap())),
             ]);

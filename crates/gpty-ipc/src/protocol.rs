@@ -115,8 +115,13 @@ pub fn build_error(id: u64, error: JsonRpcError) -> Response {
 mod tests {
     use super::*;
 
+    // The envelope is the one contract every client (the CLI, scripts, the
+    // GUI's own client) shares, so each shape is pinned against literal JSON.
+    // A serde round-trip alone would pass a renamed key, because both
+    // directions would be renamed together.
+
     #[test]
-    fn round_trip_request() {
+    fn wire_request_envelope() {
         let req = Request {
             jsonrpc: "2.0".into(),
             id: Some(1),
@@ -124,11 +129,48 @@ mod tests {
             params: Some(serde_json::json!({"type": "terminal"})),
             gpty_secret: None,
         };
-        let json = serde_json::to_string(&req).unwrap();
-        let parsed: Request = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.id, Some(1));
+        assert_eq!(
+            serde_json::to_value(&req).unwrap(),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "newPane",
+                "params": {"type": "terminal"},
+            }),
+            "an absent secret must not appear on the wire at all"
+        );
+        let parsed: Request = serde_json::from_str(
+            r#"{"jsonrpc":"2.0","id":9,"method":"newPane","params":{"type":"terminal"}}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.id, Some(9));
         assert_eq!(parsed.method, "newPane");
+        assert_eq!(parsed.params, Some(serde_json::json!({"type": "terminal"})));
+        assert!(parsed.gpty_secret.is_none());
         assert!(!parsed.is_notification());
+    }
+
+    /// The secret travels under the key `gpty_secret`: the server reads it
+    /// from there, so a client spelling it any other way is treated as
+    /// unauthenticated.
+    #[test]
+    fn wire_request_carries_the_secret_as_gpty_secret() {
+        let req = Request {
+            jsonrpc: "2.0".into(),
+            id: Some(2),
+            method: "version".into(),
+            params: None,
+            gpty_secret: Some("s3cret".into()),
+        };
+        assert_eq!(
+            serde_json::to_value(&req).unwrap(),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": 2, "method": "version", "gpty_secret": "s3cret",
+            })
+        );
+        let parsed: Request = serde_json::from_str(
+            r#"{"jsonrpc":"2.0","id":2,"method":"version","gpty_secret":"s3cret"}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.gpty_secret.as_deref(), Some("s3cret"));
     }
 
     #[test]
@@ -153,26 +195,47 @@ mod tests {
     }
 
     #[test]
-    fn round_trip_response_success() {
+    fn wire_response_success_has_result_and_no_error_key() {
         let resp = build_response(42, serde_json::json!({"pane_id": "T1"}));
-        let json = serde_json::to_string(&resp).unwrap();
-        let parsed: Response = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            serde_json::to_value(&resp).unwrap(),
+            serde_json::json!({"jsonrpc": "2.0", "id": 42, "result": {"pane_id": "T1"}}),
+            "JSON-RPC forbids `error` alongside `result`, even as null"
+        );
+        let parsed: Response =
+            serde_json::from_str(r#"{"jsonrpc":"2.0","id":42,"result":{"pane_id":"T1"}}"#).unwrap();
         assert_eq!(parsed.id, 42);
-        assert!(parsed.result.is_some());
+        assert_eq!(parsed.result, Some(serde_json::json!({"pane_id": "T1"})));
         assert!(parsed.error.is_none());
     }
 
     #[test]
-    fn round_trip_response_error() {
+    fn wire_response_error_has_error_and_no_result_key() {
         let err = JsonRpcError::new(JsonRpcError::METHOD_NOT_FOUND, "no such method");
         let resp = build_error(7, err);
-        let json = serde_json::to_string(&resp).unwrap();
-        let parsed: Response = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.id, 7);
-        assert!(parsed.result.is_none());
-        let e = parsed.error.unwrap();
-        assert_eq!(e.code, JsonRpcError::METHOD_NOT_FOUND);
-        assert_eq!(e.message, "no such method");
+        assert_eq!(
+            serde_json::to_value(&resp).unwrap(),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": 7,
+                "error": {"code": -32601, "message": "no such method"},
+            }),
+            "the error is spelled code/message, with no `data` when there is none"
+        );
+        let with_data = JsonRpcError::with_data(-32001, "nope", serde_json::json!({"hint": 1}));
+        assert_eq!(
+            serde_json::to_value(&with_data).unwrap(),
+            serde_json::json!({"code": -32001, "message": "nope", "data": {"hint": 1}})
+        );
+    }
+
+    /// The numeric codes are the JSON-RPC spec's, and clients match on them;
+    /// pin the ones the server hands out beyond those `jsonrpc_constants` covers.
+    #[test]
+    fn error_codes_match_the_jsonrpc_spec() {
+        assert_eq!(JsonRpcError::INVALID_REQUEST, -32600);
+        assert_eq!(JsonRpcError::METHOD_NOT_FOUND, -32601);
+        assert_eq!(JsonRpcError::INVALID_PARAMS, -32602);
+        assert_eq!(JsonRpcError::UNAUTHORIZED, -32001);
     }
 
     #[test]
