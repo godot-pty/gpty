@@ -162,24 +162,33 @@ const NO_BUTTON := 3
 const MOD_SHIFT := 1
 const MOD_ALT := 2
 const MOD_CTRL := 4
+## Added to the button code of a motion report (xterm's "32 = motion" bit). It
+## is what tells the app a report is the pointer *moving* rather than a button
+## going down: without it a drag under 1002 is byte-for-byte a press, and the
+## app re-presses at every cell instead of extending a drag.
+const MOTION_FLAG := 32
 ## Highest cell the legacy X10 encoding can address.
 const LEGACY_CELL_MAX := 223
 
 ## Encode one mouse report for the child process.
 ##
 ## `button` is the protocol button code, `cell` is 1-based, `mods` is the
-## `MOD_*` bitmask, and `released` selects the release form. SGR (DECSET 1006)
+## `MOD_*` bitmask, and `released` selects the release form. `motion` marks a
+## pointer-moved report (a drag under 1002, any move under 1003) and adds
+## `MOTION_FLAG`; a motion report is never a release. SGR (DECSET 1006)
 ## is used when the app asked for it; otherwise the legacy X10 form. Returns
 ## "" when the event cannot be expressed: X10 offsets coordinates by 32 and
 ## caps them at 223, and reporting a different cell than the one clicked would
 ## be worse than dropping the event.
 static func encode_mouse_report(
-	mode: int, released: bool, button: int, cell: Vector2i, mods: int
+	mode: int, released: bool, button: int, cell: Vector2i, mods: int,
+	motion := false
 ) -> String:
 	var addends := 0
 	if mods & MOD_SHIFT != 0: addends += 4
 	if mods & MOD_ALT != 0: addends += 8
 	if mods & MOD_CTRL != 0: addends += 16
+	if motion: addends += MOTION_FLAG
 	if mode & MOUSE_MODE_SGR != 0:
 		return "\u001b[<%d;%d;%d%s" % [
 			button + addends, cell.x, cell.y, "m" if released else "M"]
@@ -867,7 +876,7 @@ func _report_mouse_event(event: InputEvent, mode: int) -> bool:
 			return false
 		if not held and mode & MOUSE_MODE_MOTION == 0:
 			return false
-		_send_to_term(encode_mouse_report(mode, false, button, point, mods))
+		_send_to_term(encode_mouse_report(mode, false, button, point, mods, true))
 		return true
 	return false
 
