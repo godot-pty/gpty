@@ -50,6 +50,21 @@ func _write(path: String, text: String) -> String:
 	return path
 
 
+## Read a file's text and release the handle before returning. A test must not
+## hold a `FileAccess` across a save: GDScript keeps the object alive until its
+## variable is reassigned, and on Windows an open handle (opened without delete
+## sharing) makes the save's rename over that file fail with "Access is denied"
+## — which is what `windows-smoke` measured on the overwrite-confirm tests.
+func _read(path: String) -> String:
+	var f := FileAccess.open(path, FileAccess.READ)
+	assert_not_null(f, "%s must be readable" % path)
+	if f == null:
+		return ""
+	var text := f.get_as_text()
+	f.close()
+	return text
+
+
 func _make_pane(vault: String) -> WikiPane:
 	var pane := WikiPane.new()
 	pane.vault_path = vault
@@ -236,8 +251,8 @@ func test_opening_a_note_fills_the_editor_and_saving_writes_it_back():
 	assert_false(pane._is_dirty(), "a save clears the dirty state")
 	assert_false(pane._dirty_label.visible)
 	assert_true(pane._save_button.disabled, "there is nothing to save when clean")
-	var f = FileAccess.open(_tmp.path_join("note.md"), FileAccess.READ)
-	assert_eq(f.get_as_text(), "# Two\n\nedited\n", "the save must reach the file")
+	assert_eq(_read(_tmp.path_join("note.md")), "# Two\n\nedited\n",
+		"the save must reach the file")
 
 
 func test_the_preview_follows_the_buffer_live():
@@ -262,22 +277,32 @@ func test_a_settled_preview_waits_for_the_typing_to_stop():
 	# fingers — a throttle would have rendered 75 ms after the first edit.
 	_write(_tmp.path_join("note.md"), "# First\n")
 	var pane := _make_pane(_tmp)
-	pane._reader.settle_delay = 0.3
+	# The window is wall-clock, so the margins are sized for a loaded CI runner
+	# rather than for the assertion: each check below sits 0.4 s inside the
+	# window it is about (`windows-smoke` measured a 0.1 s margin losing to
+	# frame hitches — the preview rendered "Second" inside what the test
+	# believed was still the quiet window).
+	pane._reader.settle_delay = 1.0
 	pane._list.item_activated.emit(0)
 	assert_string_contains(pane._reader.get_parsed_text(), "First",
 		"opening the note shows the buffer at once")
 
 	await _type_into(pane, "# Second\n")
-	await wait_seconds(0.2)
+	await wait_seconds(0.6)
 	assert_string_contains(pane._reader.get_parsed_text(), "First",
 		"a render inside the quiet window is what the settle exists to prevent")
 
+	# 1.2 s after the first edit — past its window — but only 0.6 s after this
+	# one: a preview that rendered here did not restart the window on the edit.
 	await _type_into(pane, "# Third\n")
-	await wait_seconds(0.15)
+	await wait_seconds(0.6)
 	assert_string_contains(pane._reader.get_parsed_text(), "First",
 		"each edit restarts the window")
 
-	await wait_seconds(0.4)
+	# Wait on the render itself rather than on a second guess at the clock.
+	watch_signals(pane._reader)
+	await wait_for_signal(pane._reader.rendered, 3.0)
+	assert_signal_emitted(pane._reader, "rendered")
 	assert_string_contains(pane._reader.get_parsed_text(), "Third",
 		"once the buffer is quiet the preview catches up")
 
@@ -324,8 +349,8 @@ func test_back_with_unsaved_changes_asks_before_discarding():
 	dialogs[0].custom_action.emit("discard")
 	assert_false(pane._note_box.visible, "discarding returns to the list")
 	assert_true(pane._list.visible)
-	var f = FileAccess.open(_tmp.path_join("note.md"), FileAccess.READ)
-	assert_eq(f.get_as_text(), "# Note\n", "discarding must not write the note")
+	assert_eq(_read(_tmp.path_join("note.md")), "# Note\n",
+		"discarding must not write the note")
 
 
 func test_back_can_save_the_note_and_leave():
@@ -340,8 +365,8 @@ func test_back_can_save_the_note_and_leave():
 	dialogs[0].confirmed.emit()
 	await wait_process_frames(2)  # the save runs after the dialog is freed
 	assert_false(pane._note_box.visible, "saving lets the pane move on")
-	var f = FileAccess.open(_tmp.path_join("note.md"), FileAccess.READ)
-	assert_eq(f.get_as_text(), "# Edited\n", "and the note reached the file")
+	assert_eq(_read(_tmp.path_join("note.md")), "# Edited\n",
+		"and the note reached the file")
 
 
 # ── The close contract ─────────────────────────────────────────────────
@@ -385,8 +410,8 @@ func test_request_close_saves_before_it_lets_the_pane_go():
 	dialogs[0].confirmed.emit()
 	await wait_process_frames(2)  # the save runs after the dialog is freed
 	assert_eq(answers, [true], "a successful save lets the pane go")
-	var f = FileAccess.open(_tmp.path_join("note.md"), FileAccess.READ)
-	assert_eq(f.get_as_text(), "# Edited\n", "and the buffer was written first")
+	assert_eq(_read(_tmp.path_join("note.md")), "# Edited\n",
+		"and the buffer was written first")
 
 
 func test_request_close_asks_again_when_the_save_hits_a_conflict():
@@ -438,13 +463,12 @@ func test_a_save_that_would_overwrite_an_outside_edit_asks_first():
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "an outside edit must be confirmed before overwriting")
 	assert_string_contains(dialogs[0].dialog_text, "changed on disk")
-	var f = FileAccess.open(_tmp.path_join("note.md"), FileAccess.READ)
-	assert_string_contains(f.get_as_text(), "Theirs", "nothing is written before the answer")
+	assert_string_contains(_read(_tmp.path_join("note.md")), "Theirs",
+		"nothing is written before the answer")
 
 	dialogs[0].confirmed.emit()
 	await wait_process_frames(2)  # the save runs after the dialog is freed
-	f = FileAccess.open(_tmp.path_join("note.md"), FileAccess.READ)
-	assert_string_contains(f.get_as_text(), "Mine, overwritten",
+	assert_string_contains(_read(_tmp.path_join("note.md")), "Mine, overwritten",
 		"confirming writes the pane's version")
 	assert_false(pane._is_dirty())
 
@@ -497,8 +521,8 @@ func test_crlf_endings_survive_an_edit():
 
 	await _type_into(pane, "# Two\nline\n")
 	pane._save()
-	var f = FileAccess.open(_tmp.path_join("note.md"), FileAccess.READ)
-	assert_eq(f.get_as_text(), "# Two\r\nline\r\n", "the save must put the CRLFs back")
+	assert_eq(_read(_tmp.path_join("note.md")), "# Two\r\nline\r\n",
+		"the save must put the CRLFs back")
 
 
 func test_a_vault_change_drops_the_open_note():
@@ -658,8 +682,8 @@ func test_reopening_a_note_offers_the_buffer_a_crash_left_behind():
 	assert_false(pane._save_button.disabled)
 
 	pane._save()
-	var f = FileAccess.open(_scratch_tmp.path_join("note.md"), FileAccess.READ)
-	assert_eq(f.get_as_text(), "# Two\n\nrecovered\n", "the save writes what was recovered")
+	assert_eq(_read(_scratch_tmp.path_join("note.md")), "# Two\n\nrecovered\n",
+		"the save writes what was recovered")
 	assert_false(_has_copy(_scratch_tmp, "note.md"))
 	# A reopened note asks nothing more after the save. (`queue_free` frees at
 	# the end of the frame, so the dialog above is still a child until one
@@ -705,13 +729,13 @@ func test_a_restore_after_the_file_moved_on_still_asks_before_overwriting():
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "the save must ask before overwriting what it did not see")
 	assert_eq(dialogs[0].name, "OverwriteConfirm")
-	var f = FileAccess.open(_scratch_tmp.path_join("note.md"), FileAccess.READ)
-	assert_string_contains(f.get_as_text(), "Mine", "nothing is written before the answer")
+	assert_string_contains(_read(_scratch_tmp.path_join("note.md")), "Mine",
+		"nothing is written before the answer")
 
 	dialogs[0].confirmed.emit()
 	await wait_process_frames(2)
-	f = FileAccess.open(_scratch_tmp.path_join("note.md"), FileAccess.READ)
-	assert_eq(f.get_as_text(), "# Recovered\n", "confirming writes the recovered buffer")
+	assert_eq(_read(_scratch_tmp.path_join("note.md")), "# Recovered\n",
+		"confirming writes the recovered buffer")
 
 
 func test_a_read_only_note_is_never_offered_a_restore():
