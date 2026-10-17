@@ -271,7 +271,7 @@ func _spawn_bulk(count: int, shell := ""):
 	_apply_layout()
 	_list()
 	ToastManager.info("Spawned %d terminals" % bodies.size())
-	if bodies.size() > 0: bodies[-1].grab_focus()
+	if bodies.size() > 0: activate_pane(bodies[-1])
 
 # ── Close guards ───────────────────────────────────────────────────────
 # Destroying a pane, or quitting the app, is the one action that cannot be
@@ -363,8 +363,7 @@ func _kill_now(body: Control):
 		for t in ws.tm.tiles:
 			var survivor = ws.tm._find_body(t.wrapper)
 			if survivor is TerminalPane:
-				ws.tm.last_body = survivor
-				survivor.grab_focus()
+				activate_pane(survivor)
 				break
 	ToastManager.info("Pane closed")
 
@@ -419,8 +418,10 @@ func _swap_pane_now(body: Control, new_type_name: String):
 
 	_apply_layout()
 	_list()
-	if new_body.focus_mode != Control.FOCUS_NONE:
-		new_body.grab_focus()
+	# The swapped-in body is the pane the user just acted on: record it and
+	# apply the one focus rule (a terminal takes the keyboard, a read-only
+	# pane releases it).
+	activate_pane(new_body)
 	ToastManager.info("Swapped to %s" % PaneTypes.ALL[new_type_name]["name"])
 
 func _kill_last():
