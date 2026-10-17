@@ -32,12 +32,19 @@ var _render_timer: Timer
 var _pending_markdown := ""
 ## The caller's own truncation notice (see `set_source_notice`).
 var _source_notice := ""
+## Wall-clock cost of the last applied render (Rust render + BBCode parse +
+## append), read by the Reasoning pane's `GPTY_REASONING_DEBUG` line. The
+## label's shape pass lands on the next frame and is not part of this number.
+var last_render_usec := 0
 
 func _ready():
 	bbcode_enabled = true
 	fit_content = false
 	autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	selection_enabled = true
+	# The right-click Copy / Select All menu: a selection is only useful if it
+	# can be taken out of the pane.
+	context_menu_enabled = true
 	# Static documents start at the top; streaming owners opt in.
 	scroll_following = false
 
@@ -94,7 +101,7 @@ func render_now(markdown: String):
 	if not is_node_ready():
 		call_deferred("_apply_pending")
 		return
-	_apply_pending()
+	_apply_pending(false)
 
 func clear_markdown():
 	_pending_markdown = ""
@@ -114,7 +121,17 @@ func clear_markdown():
 func set_source_notice(notice: String) -> void:
 	_source_notice = notice
 
-func _apply_pending():
+func _apply_pending(from_timer := true):
+	# A streaming re-render replaces the whole body, which drops whatever the
+	# user has selected. While a selection is held, leave the pending text and
+	# try again after the delay — the live view pauses under the user's cursor
+	# instead of erasing it every RENDER_DELAY. Explicit `render_now` (opening
+	# a note, a settled turn) is not deferred.
+	if from_timer and get_selected_text() != "":
+		if _render_timer != null:
+			_render_timer.start()
+		return
+	var started := Time.get_ticks_usec()
 	clear()
 	# Fail soft: without the renderer the source is shown escaped, and a
 	# caller-supplied notice still describes what is missing.
@@ -134,6 +151,7 @@ func _apply_pending():
 		# it did not parse.
 		append_text("[i]%s[/i]\n\n" % notice)
 	append_text(body)
+	last_render_usec = Time.get_ticks_usec() - started
 	rendered.emit()
 
 func _confirm_link(meta):

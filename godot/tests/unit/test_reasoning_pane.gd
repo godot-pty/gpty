@@ -166,3 +166,125 @@ func test_streaming_deltas_render_coalesced():
 	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.05).timeout
 	assert_string_contains(_pane._view_at(0).get_parsed_text(), "chunk-0 ")
 	assert_string_contains(_pane._view_at(0).get_parsed_text(), "chunk-29")
+
+## A completed turn is static: streaming a new turn must not reparse it. The
+## old `_refresh_turn_layout` re-issued `set_markdown` for every turn on every
+## delta, which re-rendered the whole accordion (and cleared any selection).
+func test_a_streaming_turn_does_not_re_render_completed_turns():
+	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
+	_pane.receive_agent_event(_event("thinking.delta", {"text": "first"}), "omp-terminal")
+	_pane.receive_agent_event(_event("agent.settled"), "omp-terminal")
+	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.1).timeout
+
+	var first_view: MarkdownView = _pane._view_at(0)
+	watch_signals(first_view)
+
+	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
+	for i in 5:
+		_pane.receive_agent_event(
+			_event("thinking.delta", {"text": "second %d " % i}), "omp-terminal")
+	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.2).timeout
+
+	assert_eq(get_signal_emit_count(first_view, "rendered"), 0,
+		"a completed turn must not be re-rendered while another streams")
+	assert_string_contains(_pane._view_at(1).get_parsed_text(), "second 4")
+
+
+## Selection is the copy path. A streaming render replaces the body and would
+## drop it, so the view holds the pending render while text is selected.
+func test_a_selection_survives_a_streaming_render():
+	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
+	_pane.receive_agent_event(
+		_event("thinking.delta", {"text": "first selection"}), "omp-terminal")
+	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.1).timeout
+
+	var view: MarkdownView = _pane._view_at(0)
+	view.select_all()
+	var selected: String = view.get_selected_text()
+	assert_string_contains(selected, "first selection", "the body must be selectable")
+
+	view.set_markdown("replacement text")
+	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.15).timeout
+	assert_eq(view.get_selected_text(), selected,
+		"a streaming render must not clear the selection")
+	assert_string_contains(view.get_parsed_text(), "first selection",
+		"the pending render waits for the selection")
+
+	view.deselect()
+	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.15).timeout
+	assert_string_contains(view.get_parsed_text(), "replacement text",
+		"and it lands once the selection is released")
+
+
+## The retention cap is a setting, not a silent data loss: the cut and its
+## reason are visible in the turn.
+func test_the_turn_cap_is_visible():
+	_pane.max_turn_bytes = 32
+	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
+	_pane.receive_agent_event(
+		_event("thinking.delta", {"text": "x".repeat(80)}), "omp-terminal")
+	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.1).timeout
+
+	assert_true(_pane._turns[0].get("truncated", false), "the record says it was cut")
+	assert_lte(_pane._turns[0]["text"].to_utf8_buffer().size(), 32)
+	assert_string_contains(_pane._view_at(0).get_parsed_text(), "limit",
+		"the view must say why the turn stops")
+
+
+## The idle instructions contain the protocol probe command; a Label could not
+## be selected, so a user had to retype it.
+func test_the_status_instructions_can_be_selected_and_copied():
+	var status = _pane._status
+	assert_true(status is RichTextLabel, "the status must be selectable text")
+	assert_true(status.selection_enabled)
+	assert_true(status.context_menu_enabled, "right-click Copy must be available")
+	status.select_all()
+	assert_string_contains(status.get_selected_text(), "echo $GPTY_EVENT_PROTOCOL")
+
+
+## Live output follows the newest line like a log viewer. The old check
+## re-measured "is the bar near the bottom" when the scroll ran — after a
+## render had grown the content — so a multi-line growth stopped the follow.
+## The pane tracks intent instead: a user scroll-up pauses it, returning to
+## the bottom (or a new turn) resumes it.
+func test_a_live_turn_follows_the_bottom_until_the_user_scrolls_up():
+	var host := Control.new()
+	host.size = Vector2(420, 320)
+	add_child_autofree(host)
+	var pane := ReasoningPane.new()
+	pane.source_attachment_id = "omp-terminal"
+	host.add_child(pane)
+	pane.size = Vector2(420, 320)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	pane.receive_agent_event(_event("agent.started"), "omp-terminal")
+	for i in 40:
+		pane.receive_agent_event(
+			_event("thinking.delta", {"text": "reasoning line %d\n" % i}), "omp-terminal")
+	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.35).timeout
+
+	var bar := pane._turn_scroll.get_v_scroll_bar()
+	assert_gt(bar.max_value, bar.page, "the content must overflow the viewport")
+	assert_gte(bar.value + bar.page, bar.max_value - 2.0,
+		"a live turn is followed to the bottom")
+
+	# The user scrolls up: the next growth must not yank them back.
+	pane._turn_scroll.scroll_vertical = 0
+	await get_tree().process_frame
+	assert_false(pane._follow_live, "scrolling up clears follow")
+	for i in 10:
+		pane.receive_agent_event(
+			_event("thinking.delta", {"text": "more %d\n" % i}), "omp-terminal")
+	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.35).timeout
+	assert_eq(bar.value, 0, "a deliberate scroll-up is not overridden")
+
+	# Returning to the bottom re-arms it.
+	pane._turn_scroll.scroll_vertical = int(bar.max_value)
+	await get_tree().process_frame
+	assert_true(pane._follow_live, "scrolling back to the bottom re-arms follow")
+	for i in 10:
+		pane.receive_agent_event(
+			_event("thinking.delta", {"text": "tail %d\n" % i}), "omp-terminal")
+	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.35).timeout
+	assert_gte(bar.value + bar.page, bar.max_value - 2.0, "it follows again")

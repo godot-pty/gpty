@@ -15,7 +15,7 @@ const TURN_SCHEMA := 1
 
 @export var source_attachment_id := "omp-terminal"
 
-var _status: Label
+var _status: RichTextLabel
 var _turn_scroll: ScrollContainer
 var _turn_list: VBoxContainer
 ## JSON-shaped turn records. Do not store node refs here.
@@ -31,6 +31,7 @@ func _ready():
 	super._ready()
 	max_turns = clampi(int(SettingsManager.cfg_reasoning_max_turns), 1, 64)
 	max_turn_bytes = clampi(int(SettingsManager.cfg_reasoning_max_turn_bytes), 4096, 1048576)
+	_debug = OS.get_environment("GPTY_REASONING_DEBUG") != ""
 
 	var root := VBoxContainer.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -38,10 +39,19 @@ func _ready():
 	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(root)
 
-	_status = Label.new()
+	# A RichTextLabel rather than a Label so the instructions (the
+	# `echo $GPTY_EVENT_PROTOCOL` command in particular) can be selected and
+	# copied; a Label cannot. `context_menu_enabled` gives the right-click
+	# Copy/Select All menu, the discoverable half of the same feature.
+	_status = RichTextLabel.new()
 	_status.name = "Status"
+	_status.bbcode_enabled = false
+	_status.fit_content = true
+	_status.scroll_active = false
+	_status.selection_enabled = true
+	_status.context_menu_enabled = true
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status.add_theme_font_size_override("font_size", 12)
+	_status.add_theme_font_size_override("normal_font_size", 12)
 	_status.text = _idle_status()
 	root.add_child(_status)
 
@@ -58,16 +68,40 @@ func _ready():
 	_turn_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_turn_list)
 
+	var vbar := scroll.get_v_scroll_bar()
+	if vbar != null:
+		vbar.value_changed.connect(_on_scroll_changed)
+		# The range changes when a render's fold height reaches the container
+		# (one layout after the render). Re-following on that signal is what
+		# makes the view catch up in the same frame as the new content, even
+		# though the first scroll was clamped at the previous bottom.
+		vbar.changed.connect(_on_scroll_range_changed)
+
 var _last_vbar_visible := false
 
-func _process(_delta):
+## Opt-in pipeline diagnostics (`GPTY_REASONING_DEBUG=1`): one line per second
+## with the input rate, the render rate and the event server's drop counters.
+## The pane cannot tell "the model is slow" from "we are slow" without both
+## halves, and a dropped delta is invisible in the text.
+var _debug := false
+var _dbg_elapsed := 0.0
+var _dbg_deltas := 0
+var _dbg_bytes := 0
+var _dbg_max_delta := 0
+var _dbg_renders := 0
+var _dbg_render_usec := 0
+var _dbg_caps := 0
+
+func _process(delta):
 	if _turn_scroll == null:
 		return
+	if _debug:
+		_tick_debug(delta)
 	var vbar := _turn_scroll.get_v_scroll_bar()
 	var visible := vbar != null and vbar.visible
 	if visible != _last_vbar_visible:
 		_last_vbar_visible = visible
-		call_deferred("_refresh_turn_layout")
+		_queue_layout_refresh()
 
 ## Visible viewport width: the scroll container size minus the vertical
 ## scrollbar when it is shown. Using the outer size would make content
@@ -86,69 +120,106 @@ func _sync_turn_list_width():
 	if width > 0:
 		_turn_list.custom_minimum_size.x = width
 
+## One deferred refresh per frame, not per delta: a burst of 200 deltas used
+## to enqueue 200 deferred calls, each walking every turn.
+var _layout_queued := false
+var _scroll_queued := false
+## Auto-follow intent, not a proximity test at scroll time: content grows by
+## whole lines between renders, so "was the bar at the bottom before this
+## growth" is the question a live log answers. A user scroll-up clears the
+## flag; returning to the bottom (or starting a new turn) sets it again.
+var _follow_live := true
+var _auto_scrolling := false
+const FOLLOW_TOLERANCE := 24.0
+
+func _queue_layout_refresh():
+	if _layout_queued:
+		return
+	_layout_queued = true
+	call_deferred("_refresh_turn_layout")
+
+## Width, fold state and (cached) heights. Rendering is not this function's
+## job: a turn's view is rendered by the delta that changed it, by its initial
+## render, or by `_freeze_live`. Re-rendering every turn here is what used to
+## clear a selection and re-parse every completed turn on every token.
 func _refresh_turn_layout():
+	_layout_queued = false
 	_sync_turn_list_width()
 	for rec in _turns:
-		var view := _view_for(rec)
-		view.configure_for_accordion()
-		var body := str(rec.get("text", ""))
-		if body != "":
-			# Coalesced: this runs on every delta, and `render_now` re-parsed
-			# the whole turn markdown for every turn on every token.
-			view.set_markdown(body)
-	_sync_fold_heights()
-	call_deferred("_sync_fold_heights_y")
-	_scroll_turn_list_to_bottom()
+		_sync_fold_height(rec)
+	_queue_scroll_bottom()
 
-## A coalesced render changes the content height after the delta has been
-## scheduled, so the fold height follows the render, not the event.
-func _on_view_rendered():
-	call_deferred("_sync_fold_heights_y")
-
-func _sync_fold_heights():
-	for rec in _turns:
-		var fold := _fold_for(rec)
+## A coalesced render changes the content height after the delta that caused
+## it has returned, so the fold height follows the render.
+func _on_view_rendered(rec: Dictionary):
+	if _debug:
+		_dbg_renders += 1
 		var view := _view_for(rec)
-		if fold == null or view == null:
-			continue
-		if fold.folded:
-			view.custom_minimum_size = Vector2(0, 0)
-		else:
-			var width := maxi(_viewport_width() - 8, 0)
-			if width > 0:
-				view.custom_minimum_size = Vector2(width, 0)
-			view.queue_redraw()
+		if view:
+			_dbg_render_usec += view.last_render_usec
+	call_deferred("_sync_fold_height", rec, true)
+	_queue_scroll_bottom()
 
-func _sync_fold_heights_y():
-	for rec in _turns:
-		var fold := _fold_for(rec)
-		var view := _view_for(rec)
-		if fold == null or view == null:
-			continue
-		if fold.folded:
-			view.custom_minimum_size = Vector2(0, 0)
-			continue
-		var width := maxi(_viewport_width() - 8, 0)
-		if width <= 0:
-			continue
-		var height := view.get_content_height()
-		view.custom_minimum_size = Vector2(width, height + 4 if height > 0 else 0)
+## `synced_width` caches the width a view's height was measured at, so a
+## static turn is not re-measured every frame; `force` follows a render.
+func _sync_fold_height(rec: Dictionary, force := false):
+	var fold := _fold_for(rec)
+	var view := _view_for(rec)
+	if fold == null or view == null:
+		return
+	if fold.folded:
+		view.custom_minimum_size = Vector2(0, 0)
+		rec["synced_width"] = -1
+		return
+	var width := maxi(_viewport_width() - 8, 0)
+	if width <= 0:
+		return
+	if not force and int(rec.get("synced_width", -1)) == width:
+		return
+	rec["synced_width"] = width
+	var height := view.get_content_height()
+	view.custom_minimum_size = Vector2(width, height + 4 if height > 0 else 0)
 
 func _scroll_turn_list_to_bottom():
-	if _turn_scroll == null:
+	_queue_scroll_bottom()
+
+func _queue_scroll_bottom():
+	if _scroll_queued:
 		return
+	_scroll_queued = true
 	call_deferred("_apply_turn_scroll_bottom")
 
 func _apply_turn_scroll_bottom():
-	if _turn_scroll == null:
+	_scroll_queued = false
+	if _turn_scroll == null or not _follow_live:
 		return
 	var bar := _turn_scroll.get_v_scroll_bar()
 	if bar == null:
 		return
-	# Follow only while already at the bottom; a deliberate scroll-up
-	# during a live turn must not be yanked back down.
-	if bar.value + bar.page >= bar.max_value - 8.0:
-		_turn_scroll.scroll_vertical = int(bar.max_value)
+	# This write is ours: the value_changed it emits must not be mistaken for
+	# the user scrolling away from the bottom.
+	_auto_scrolling = true
+	_turn_scroll.scroll_vertical = int(bar.max_value)
+	_auto_scrolling = false
+
+## The range grows one layout after a render; if the user is following, take
+## the new bottom now. Without this, the scroll issued with the render clamps
+## at the previous bottom and a multi-line growth stops the follow.
+func _on_scroll_range_changed():
+	if _follow_live:
+		_queue_scroll_bottom()
+
+## A user drag, wheel or keyboard scroll clears auto-follow once the viewport
+## leaves the bottom; scrolling back to the bottom re-arms it. Content growth
+## does not call this (the value does not move), which is why the flag — not
+## a fresh distance check — is what `_apply_turn_scroll_bottom` reads.
+func _on_scroll_changed(_value: float):
+	if _auto_scrolling or _turn_scroll == null:
+		return
+	var bar := _turn_scroll.get_v_scroll_bar()
+	if bar == null:
+		return
+	_follow_live = bar.value + bar.page >= bar.max_value - FOLLOW_TOLERANCE
 
 func _idle_status() -> String:
 	var source := source_attachment_id if source_attachment_id != "" else "(unset)"
@@ -203,6 +274,8 @@ func receive_agent_event(envelope: Dictionary, source_id: String):
 				_bind_session(incoming, _event_ms(event))
 			var text := str(event.get("text", ""))
 			if text != "":
+				if _debug:
+					_note_debug_delta(text)
 				_append_live_text(text)
 				_status.text = "Reasoning…"
 		"agent.settled":
@@ -262,6 +335,51 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"source_attachment_id": source.text.strip_edges(),
 		}
 	return v
+
+## The input half of the diagnostic: what actually reached the pane (the
+## server-side counters say what reached the listener and what it rejected).
+func _note_debug_delta(text: String):
+	var bytes := text.to_utf8_buffer().size()
+	_dbg_deltas += 1
+	_dbg_bytes += bytes
+	_dbg_max_delta = maxi(_dbg_max_delta, bytes)
+
+## One line a second. `in` is the pane's view of the source rate, `render` is
+## what the GUI paid to show it, and `server` is the listener's cumulative
+## view — `full`/`big` rising is the signature of lost text, not slow drawing.
+func _tick_debug(delta: float):
+	_dbg_elapsed += delta
+	if _dbg_elapsed < 1.0:
+		return
+	var window := _dbg_elapsed
+	var server_text := ""
+	var server = JSON.parse_string(str(GptyTerminal.omp_event_stats()))
+	if server is Dictionary:
+		server_text = " | server accepted=%d (%.1f KiB/s) full=%d big=%d drained=%d queued=%d/%d" % [
+			int(server.get("accepted", 0)),
+			float(server.get("accepted_bytes", 0)) / 1024.0 / window,
+			int(server.get("rejected_queue_full", 0)),
+			int(server.get("rejected_oversized", 0)),
+			int(server.get("drained_events", 0)),
+			int(server.get("queued_events", 0)),
+			int(server.get("queued_bytes", 0))]
+	var live := _live_turn()
+	var turn_bytes := int(live.get("text_bytes", 0)) if not live.is_empty() else 0
+	print("[reasoning] in=%.0f ev/s %.1f KiB/s max=%d B | render=%d/s %.1f ms | turn=%s caps=%d%s" % [
+		float(_dbg_deltas) / window,
+		float(_dbg_bytes) / 1024.0 / window,
+		_dbg_max_delta,
+		float(_dbg_renders) / window,
+		(float(_dbg_render_usec) / 1000.0) / maxi(_dbg_renders, 1),
+		String.humanize_size(turn_bytes),
+		int(live.get("truncated", 0)) if not live.is_empty() else _dbg_caps,
+		server_text])
+	_dbg_elapsed = 0.0
+	_dbg_deltas = 0
+	_dbg_bytes = 0
+	_dbg_max_delta = 0
+	_dbg_renders = 0
+	_dbg_render_usec = 0
 
 func _event_ms(event: Dictionary) -> int:
 	var value = event.get("emitted_at_ms", 0)
@@ -352,10 +470,18 @@ func _make_turn(started_at_ms: int) -> Dictionary:
 		"settled_at_ms": 0,
 		"status": "streaming",
 		"text": "",
+		# Incremental byte count: an append must not re-encode the whole turn
+		# to learn its size.
+		"text_bytes": 0,
+		"truncated": false,
+		"synced_width": -1,
 	}
 
 func _start_turn(started_at_ms: int):
 	_freeze_live(started_at_ms)
+	# A new live turn is what the user is watching: resume following even if
+	# they had scrolled up in the previous one.
+	_follow_live = true
 	for rec in _turns:
 		var fold := _fold_for(rec)
 		if fold:
@@ -386,7 +512,7 @@ func _add_fold(rec: Dictionary):
 	view.configure_for_accordion()
 	# The coalesced render lands after a delay, so the height sync has to be
 	# driven by the render, not by the delta that scheduled it.
-	view.rendered.connect(_on_view_rendered)
+	view.rendered.connect(func(): _on_view_rendered(rec))
 	view.add_theme_font_size_override("normal_font_size", font_size)
 	view.add_theme_font_size_override("mono_font_size", font_size)
 	fold.add_child(view)
@@ -397,8 +523,10 @@ func _add_fold(rec: Dictionary):
 
 	var text := str(rec.get("text", ""))
 	if text != "":
+		if bool(rec.get("truncated", false)):
+			_show_truncation_notice(view)
 		view.render_now(text)
-	call_deferred("_refresh_turn_layout")
+	_queue_layout_refresh()
 
 func _append_live_text(delta: String):
 	if _live_index < 0:
@@ -406,17 +534,57 @@ func _append_live_text(delta: String):
 	var rec := _live_turn()
 	if rec.is_empty() or str(rec.get("status", "")) != "streaming":
 		return
-	rec["text"] = _append_capped(str(rec.get("text", "")), delta, max_turn_bytes)
+	var text := str(rec.get("text", ""))
+	# The fallback must not be computed when the key exists: `Dictionary.get`'s
+	# default is a normal argument, so passing `text.to_utf8_buffer().size()`
+	# here encoded the whole turn on every delta (measured: ~200 ms of the
+	# capped-append path for one 64 KiB turn).
+	var size := int(rec.get("text_bytes", -1))
+	if size < 0:
+		size = text.to_utf8_buffer().size()
+	if size >= max_turn_bytes:
+		# The cap is already spent: do not concatenate or re-encode the whole
+		# turn for a delta that cannot be shown. (The old path paid a full
+		# `existing + delta` and two `to_utf8_buffer()` copies per dropped
+		# delta — measured at ~500 ms for one 64 KiB capped turn.)
+		_mark_truncated(rec)
+		return
+	var added := delta.to_utf8_buffer().size()
+	if size + added <= max_turn_bytes:
+		rec["text"] = text + delta
+		rec["text_bytes"] = size + added
+	else:
+		rec["text"] = _close_open_fences(_truncate_utf8(text + delta, max_turn_bytes))
+		rec["text_bytes"] = max_turn_bytes
+		_mark_truncated(rec)
 	var view := _view_for(rec)
 	if view:
 		# The model keeps every delta; the view re-parses the accumulated turn
 		# markdown at most once per MarkdownView.RENDER_DELAY instead of once
 		# per token (the turn is finalized with render_now on settle).
 		view.set_markdown(str(rec["text"]))
-	call_deferred("_refresh_turn_layout")
+	_queue_layout_refresh()
+
+## The cap is a user setting, so hitting it is not an error — but silently
+## losing the rest of a thought is, so the view says what happened. One notice
+## per turn; the flag rides in the record, not in the view.
+func _mark_truncated(rec: Dictionary):
+	if bool(rec.get("truncated", false)):
+		return
+	rec["truncated"] = true
+	_dbg_caps += 1
+	var view := _view_for(rec)
+	if view:
+		_show_truncation_notice(view)
+		view.set_markdown(str(rec.get("text", "")))
+
+func _show_truncation_notice(view: MarkdownView):
+	view.set_source_notice(
+		"… this turn reached its %s limit; later reasoning is not shown. Raise it in Settings → Reasoning."
+		% String.humanize_size(max_turn_bytes))
 
 func _on_fold_expanded_changed():
-	call_deferred("_refresh_turn_layout")
+	_queue_layout_refresh()
 
 func _freeze_live(settled_at_ms: int):
 	var rec := _live_turn()
@@ -432,7 +600,7 @@ func _freeze_live(settled_at_ms: int):
 		if text != "":
 			view.render_now(text)
 	_sync_fold_title(rec)
-	call_deferred("_refresh_turn_layout")
+	_queue_layout_refresh()
 
 func _drop_oldest_turn():
 	if _turns.is_empty():
@@ -463,14 +631,6 @@ func _free_fold(fold):
 	if parent:
 		parent.remove_child(fold)
 	fold.free()
-
-func _append_capped(existing: String, delta: String, max_bytes: int) -> String:
-	var combined := existing + delta
-	if combined.to_utf8_buffer().size() <= max_bytes:
-		return combined
-	if existing.to_utf8_buffer().size() >= max_bytes:
-		return existing
-	return _close_open_fences(_truncate_utf8(combined, max_bytes))
 
 ## Truncating raw Markdown mid-fence leaves an unclosed ``` block: the
 ## renderer would treat the rest as code, un-wrapping prose that had
