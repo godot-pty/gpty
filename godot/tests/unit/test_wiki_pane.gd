@@ -555,6 +555,154 @@ func test_layout_state_carries_the_note_view_mode():
 	restored.apply_settings({"view_mode": "edit"})
 	assert_eq(restored.view_mode, "edit")
 
+# ── The link panel: mentions and backlinks of the open note ────────────
+#
+# The data half (the index pass, the resolver, `vault_links`) is pinned by
+# `gpty_core::vault` / `gpty_core::links`; these tests drive the pane's view of
+# it against the real store — the panel's rows, following in place, and the
+# guard an unsaved buffer gets.
+
+func _row_texts(container: VBoxContainer) -> Array:
+	var out := []
+	for row in container.get_children():
+		out.append((row as Button).text)
+	return out
+
+
+func test_a_note_without_links_shows_no_panel():
+	_write(_tmp.path_join("note.md"), "# N\n\nno mentions here\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("note.md")
+	assert_false(pane._links_box.visible, "an empty panel would only take space")
+
+
+func test_the_panel_lists_outgoing_mentions_with_their_lines():
+	_write(_tmp.path_join("a.md"), "# A\n\nSee [[b]] and [[ghost]].\n")
+	_write(_tmp.path_join("b.md"), "# B\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("a.md")
+
+	assert_true(pane._links_box.visible)
+	var rows := _row_texts(pane._outgoing_rows)
+	assert_eq(rows.size(), 2, "one row per occurrence")
+	assert_string_contains(rows[0], "b")
+	assert_string_contains(rows[0], "line 3", "the row names the line it was written on")
+	assert_string_contains(rows[1], "ghost")
+	assert_string_contains(rows[1], "unresolved")
+	assert_true((pane._outgoing_rows.get_child(1) as Button).disabled,
+		"nothing can be opened for an unresolved target")
+	assert_true(pane._links_backlinks_heading.visible == false,
+		"no note links here, so the backlink section stays out of the way")
+
+
+func test_backlinks_name_the_note_and_the_line():
+	_write(_tmp.path_join("a.md"), "# A\n\nSee [[b]].\n")
+	_write(_tmp.path_join("b.md"), "# B\n\ntarget\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("b.md")
+
+	var rows := _row_texts(pane._backlinks_rows)
+	assert_eq(rows.size(), 1, "one row per mention, in the linking note")
+	assert_string_contains(rows[0], "a.md")
+	assert_string_contains(rows[0], "line 3")
+
+
+func test_an_ambiguous_target_is_shown_with_its_candidates():
+	DirAccess.make_dir_recursive_absolute(_tmp.path_join("one"))
+	DirAccess.make_dir_recursive_absolute(_tmp.path_join("two"))
+	_write(_tmp.path_join("one").path_join("dup.md"), "# One\n")
+	_write(_tmp.path_join("two").path_join("dup.md"), "# Two\n")
+	_write(_tmp.path_join("x.md"), "# X\n\nsee [[dup]]\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("x.md")
+
+	var rows := _row_texts(pane._outgoing_rows)
+	assert_eq(rows.size(), 1)
+	assert_string_contains(rows[0], "ambiguous")
+	assert_string_contains(rows[0], "one/dup.md", "the hint names every candidate")
+	assert_string_contains(rows[0], "two/dup.md")
+	assert_true((pane._outgoing_rows.get_child(0) as Button).disabled,
+		"an ambiguous stem is never silently picked")
+
+
+func test_clicking_a_link_follows_it_in_place():
+	_write(_tmp.path_join("a.md"), "# A\n\nSee [[b]].\n")
+	_write(_tmp.path_join("b.md"), "# B\n\nbody\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("a.md")
+
+	(pane._outgoing_rows.get_child(0) as Button).pressed.emit()
+	assert_eq(pane._current_rel, "b.md", "the target replaces the open note")
+	assert_eq(pane._editor.text, "# B\n\nbody\n")
+	assert_string_contains(_row_texts(pane._backlinks_rows)[0], "a.md",
+		"the newly opened note's panel follows the move")
+
+
+func test_clicking_a_backlink_opens_the_linking_note():
+	_write(_tmp.path_join("a.md"), "# A\n\nSee [[b]].\n")
+	_write(_tmp.path_join("b.md"), "# B\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("b.md")
+
+	(pane._backlinks_rows.get_child(0) as Button).pressed.emit()
+	assert_eq(pane._current_rel, "a.md")
+
+
+func test_a_rendered_mention_click_resolves_through_the_vault():
+	_write(_tmp.path_join("a.md"), "# A\n\nSee [[B]].\n")
+	_write(_tmp.path_join("b.md"), "# B\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("a.md")
+	assert_true(pane._reader.wikilinks_enabled, "the wiki preview opts into mentions")
+
+	# The renderer emits `note_link_clicked` with the target decoded; the pane
+	# asks the same resolver the index used.
+	pane._reader.note_link_clicked.emit("B")
+	assert_eq(pane._current_rel, "b.md", "a case-insensitive unique match follows")
+
+
+func test_following_a_link_asks_before_discarding_an_unsaved_buffer():
+	_write(_tmp.path_join("a.md"), "# A\n\nSee [[b]].\n")
+	_write(_tmp.path_join("b.md"), "# B\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("a.md")
+	await _type_into(pane, "# A edited\n")
+
+	(pane._outgoing_rows.get_child(0) as Button).pressed.emit()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "following can lose a buffer, so it asks first")
+	assert_eq(pane._current_rel, "a.md", "the note stays until the answer")
+	dialogs[0].custom_action.emit("discard")
+	assert_eq(pane._current_rel, "b.md", "discarding lets the follow proceed")
+	assert_eq(_read(_tmp.path_join("a.md")), "# A\n\nSee [[b]].\n",
+		"and the discarded edit was not written")
+
+
+func test_a_missing_mention_is_reported_and_not_followed():
+	_write(_tmp.path_join("a.md"), "# A\n\nSee [[ghost]].\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("a.md")
+	watch_signals(ToastManager)
+
+	pane._reader.note_link_clicked.emit("ghost")
+	assert_eq(pane._current_rel, "a.md", "there is nowhere to follow")
+	assert_signal_emitted(ToastManager, "toast_requested", "the pane says why nothing happened")
+
+
+func test_following_a_link_saves_when_the_user_chooses_save():
+	_write(_tmp.path_join("a.md"), "# A\n\nSee [[b]].\n")
+	_write(_tmp.path_join("b.md"), "# B\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("a.md")
+	await _type_into(pane, "# A edited\n\nSee [[b]].\n")
+
+	(pane._outgoing_rows.get_child(0) as Button).pressed.emit()
+	_dialogs_of(pane)[0].confirmed.emit()
+	await wait_process_frames(2)  # the save runs after the dialog is freed
+	assert_eq(pane._current_rel, "b.md", "the save lets the follow proceed")
+	assert_eq(_read(_tmp.path_join("a.md")), "# A edited\n\nSee [[b]].\n")
+
+
 # ── The recovery copy: what a crash cannot take ────────────────────────
 #
 # The close guards cover every deliberate end; a crash (or an outside kill) has

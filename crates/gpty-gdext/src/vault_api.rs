@@ -288,6 +288,63 @@ impl GptyTerminal {
         }
     }
 
+    /// Resolve one `[[target]]` against a vault's note set (JSON).
+    ///
+    /// The answer comes from the same rule the index pass applies
+    /// (`links::NoteIndex`), so a mention followed from the preview lands on
+    /// the note the store recorded — or on the note it *would* record for a
+    /// mention that is not saved yet. `{"resolved": "note.md", "candidates":
+    /// []}` when exactly one note matched; `resolved` null with the sorted
+    /// `candidates` when a stem is ambiguous (never silently picked); and
+    /// `resolved` null with no candidates when nothing matched or the target
+    /// is empty/oversized. `error` is present only when the vault or the
+    /// store cannot be used — "not found" is an answer, not a failure.
+    #[func]
+    fn vault_link_resolve(vault_path: GString, target: GString) -> GString {
+        let path = vault_path.to_string();
+        if let Some(problem) = vault_path_problem(&path) {
+            return vault_error(&problem);
+        }
+        let target = target.to_string();
+        // An empty or oversized target cannot have been stored as a link
+        // (`links::parse_links` refuses both), so it is a missing answer
+        // rather than a store query.
+        if target.is_empty() || target.len() > gpty_core::links::MAX_LINK_TARGET_BYTES {
+            return GString::from(r#"{"resolved":null,"candidates":[]}"#);
+        }
+        let Some(db) = vault_db_path() else {
+            return vault_error("no writable state directory for the vault index");
+        };
+        let store = match gpty_core::vault::VaultStore::open(&db) {
+            Ok(store) => store,
+            Err(e) => {
+                log::warn!("vault index open failed ({db}): {e}");
+                return vault_error(&format!("vault index unavailable: {e}"));
+            }
+        };
+        match store.resolve_target(&path, &target) {
+            Ok(resolution) => {
+                let document = match resolution {
+                    gpty_core::links::Resolution::Resolved(note) => {
+                        serde_json::json!({ "resolved": note, "candidates": [] })
+                    }
+                    gpty_core::links::Resolution::Ambiguous(candidates) => {
+                        serde_json::json!({ "resolved": null, "candidates": candidates })
+                    }
+                    gpty_core::links::Resolution::Missing => {
+                        serde_json::json!({ "resolved": null, "candidates": [] })
+                    }
+                }
+                .to_string();
+                GString::from(document.as_str())
+            }
+            Err(e) => {
+                log::warn!("vault link resolve failed ({path}): {e}");
+                vault_error(&format!("vault link resolve failed: {e}"))
+            }
+        }
+    }
+
     /// Load one note for the editor (JSON).
     ///
     /// `rel_path` is a vault-relative note path (the spelling the index

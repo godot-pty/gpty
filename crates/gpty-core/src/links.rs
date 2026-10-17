@@ -45,6 +45,16 @@ pub struct Link {
     pub alias: Option<String>,
     /// The heading when written (`[[target#heading]]`), navigation only.
     pub fragment: Option<String>,
+    /// Byte offset of the opening `[[` in the parsed body.
+    ///
+    /// The preview replaces exactly the occurrence this parser accepted, so
+    /// the rendered mention and the stored edge cannot disagree about what is
+    /// a link — the same scanner that skips fences, spans and escapes answers
+    /// both. [`parse_links`] fills these for its caller; the store never
+    /// persists them.
+    pub start: usize,
+    /// Byte offset just past the closing `]]`.
+    pub end: usize,
 }
 
 /// Parse every link occurrence of one note body.
@@ -58,23 +68,30 @@ pub struct Link {
 pub fn parse_links(body: &str) -> Vec<Link> {
     let mut links = Vec::new();
     let mut fence: Option<(u8, usize)> = None;
-    for (index, raw) in body.lines().enumerate() {
-        let line = raw.trim_end_matches('\r');
+    let mut offset = 0usize;
+    for (index, chunk) in body.split_inclusive('\n').enumerate() {
+        // `split_inclusive` keeps the line ending, so `offset` stays the
+        // occurrence's true byte position in `body` even for CRLF notes.
+        let raw = chunk.strip_suffix('\n').unwrap_or(chunk);
+        let line = raw.strip_suffix('\r').unwrap_or(raw);
         if let Some((marker, length)) = fence {
             if closes_fence(line, marker, length) {
                 fence = None;
             }
+            offset += chunk.len();
             continue;
         }
         if let Some(open) = opens_fence(line) {
             fence = Some(open);
+            offset += chunk.len();
             continue;
         }
-        scan_line(line, index + 1, &mut links);
+        scan_line(line, index + 1, offset, &mut links);
         if links.len() >= MAX_LINK_OCCURRENCES {
             links.truncate(MAX_LINK_OCCURRENCES);
             break;
         }
+        offset += chunk.len();
     }
     links
 }
@@ -112,7 +129,7 @@ fn run_length(bytes: &[u8], start: usize, marker: u8) -> usize {
 ///
 /// Byte scanning is safe here: every delimiter this looks for is ASCII, so an
 /// index at one is always a char boundary.
-fn scan_line(line: &str, number: usize, out: &mut Vec<Link>) {
+fn scan_line(line: &str, number: usize, line_offset: usize, out: &mut Vec<Link>) {
     let bytes = line.as_bytes();
     let mut i = 0;
     let mut code_run: Option<usize> = None;
@@ -133,7 +150,9 @@ fn scan_line(line: &str, number: usize, out: &mut Vec<Link>) {
             && !is_escaped(bytes, i)
             && let Some(close) = find_close(bytes, i + 2)
         {
-            if let Some(link) = link_from(&line[i + 2..close], number, out.len()) {
+            if let Some(mut link) = link_from(&line[i + 2..close], number, out.len()) {
+                link.start = line_offset + i;
+                link.end = line_offset + close + 2;
                 out.push(link);
             }
             i = close + 2;
@@ -192,6 +211,9 @@ fn link_from(content: &str, line: usize, seq: usize) -> Option<Link> {
         target: target.to_string(),
         alias: alias.filter(not_empty).map(str::to_string),
         fragment: fragment.filter(not_empty).map(str::to_string),
+        // Filled by the scanner, which knows where the opener sits.
+        start: 0,
+        end: 0,
     })
 }
 
@@ -344,6 +366,15 @@ mod tests {
         assert_eq!(links[1].alias.as_deref(), Some("The label"));
         assert_eq!(links[2].target, "Target", "the fragment is not the edge");
         assert_eq!(links[2].fragment.as_deref(), Some("Heading"));
+    }
+
+    #[test]
+    fn an_occurrence_carries_the_byte_span_it_was_parsed_from() {
+        let body = "first [[A|one]]\r\nsecond line\n  [[dir/B#part]] trailing";
+        let links = parse_links(body);
+        assert_eq!(links.len(), 2);
+        assert_eq!(&body[links[0].start..links[0].end], "[[A|one]]");
+        assert_eq!(&body[links[1].start..links[1].end], "[[dir/B#part]]");
     }
 
     #[test]

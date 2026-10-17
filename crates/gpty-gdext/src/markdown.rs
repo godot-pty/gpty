@@ -92,13 +92,24 @@ impl GptyMarkdown {
     /// links become metadata, so `RichTextLabel` never receives
     /// source-controlled tags.
     ///
+    /// `wikilinks` turns `[[target]]` / `[[target|alias]]` occurrences into
+    /// internal `gpty-note:` links (the wiki pane's mention syntax). It is off
+    /// for every other caller: the vault vocabulary must not change how an
+    /// inspector answer or a reasoning turn displays, and the scheme is only
+    /// ever emitted by this renderer — a Markdown link cannot name it.
+    ///
     /// Answers `{"text", "truncated", "shown", "size"}`: the BBCode, whether
     /// the source was cut at [`MAX_MARKDOWN_BYTES`], and how many bytes were
     /// rendered of how many were given. `truncated` is what lets a view say
     /// what it did not render instead of showing a prefix in silence.
     #[func]
-    fn render(&self, markdown: GString) -> GString {
-        let rendered = render_markdown(&markdown.to_string());
+    fn render(&self, markdown: GString, wikilinks: bool) -> GString {
+        let source = markdown.to_string();
+        let rendered = if wikilinks {
+            render_markdown_with(&source, true)
+        } else {
+            render_markdown(&source)
+        };
         let document = serde_json::json!({
             "text": rendered.text,
             "truncated": rendered.truncated,
@@ -110,8 +121,31 @@ impl GptyMarkdown {
     }
 }
 
+/// Render without wikilink syntax — the callers that have no vault.
 fn render_markdown(markdown: &str) -> Rendered {
+    render_markdown_with(markdown, false)
+}
+
+/// Render `markdown`, optionally turning `[[…]]` mentions into internal links.
+///
+/// Wikilinks are replaced *before* Markdown parsing, with the occurrence set
+/// [`gpty_core::links::parse_links`] produces — the same scanner the index
+/// pass uses. That is deliberate: code fences, inline code spans and an
+/// escaped opener are literal text for the store, so they must be literal in
+/// the preview too, and a second recognition rule here could only drift. Each
+/// occurrence becomes an opaque sentinel that Markdown cannot interpret (so
+/// surrounding emphasis, headings and tables are unaffected and the link
+/// label is never re-parsed), then the sentinel is substituted for the
+/// `gpty-note:` BBCode in the finished output.
+fn render_markdown_with(markdown: &str, wikilinks: bool) -> Rendered {
     let source = truncate_utf8(markdown, MAX_MARKDOWN_BYTES);
+    let shown = source.len();
+    let (prepared, mentions) = if wikilinks && source.contains("[[") {
+        extract_mentions(source)
+    } else {
+        (source.to_string(), Vec::new())
+    };
+    let source = prepared.as_str();
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
@@ -168,10 +202,133 @@ fn render_markdown(markdown: &str) -> Rendered {
         }
     }
     Rendered {
-        text: out,
-        truncated: source.len() < markdown.len(),
-        shown: source.len(),
+        text: substitute_mentions(out, &mentions),
+        truncated: shown < markdown.len(),
+        shown,
         size: markdown.len(),
+    }
+}
+
+/// Marker characters around a mention's index, used only while rendering.
+///
+/// Two non-printable control characters are improbable enough in a note that
+/// the substitution below can treat the pair as its own; a source that spells
+/// the whole token would only reach a link the note itself names.
+const MENTION_OPEN: &str = "\u{1e}\u{1f}";
+const MENTION_CLOSE: &str = "\u{1f}\u{1e}";
+
+/// One `[[…]]` occurrence as the preview shows and follows it.
+struct Mention {
+    /// What the link points at (alias and fragment stripped) — the vault
+    /// target the pane resolves.
+    target: String,
+    /// What the reader sees: the alias when written, else the target with its
+    /// heading fragment as authored.
+    label: String,
+}
+
+/// Replace every occurrence `gpty_core::links` accepted with its sentinel.
+///
+/// The spans come from that parser, so a fenced block, a code span or an
+/// escaped opener stays literal here exactly as it does in the index; the
+/// occurrence cap is the store's own (a note past it has no stored edges
+/// either, so its preview does not invent links the index does not hold).
+fn extract_mentions(source: &str) -> (String, Vec<Mention>) {
+    let links = gpty_core::links::parse_links(source);
+    if links.is_empty() {
+        return (source.to_string(), Vec::new());
+    }
+    let mut prepared = String::with_capacity(source.len());
+    let mut mentions = Vec::with_capacity(links.len());
+    let mut last = 0usize;
+    for link in &links {
+        prepared.push_str(&source[last..link.start]);
+        prepared.push_str(MENTION_OPEN);
+        prepared.push_str(&mentions.len().to_string());
+        prepared.push_str(MENTION_CLOSE);
+        last = link.end;
+        mentions.push(Mention {
+            target: link.target.clone(),
+            label: mention_label(link),
+        });
+    }
+    prepared.push_str(&source[last..]);
+    (prepared, mentions)
+}
+
+/// The mention's display text: an alias when written, otherwise the target as
+/// authored — a heading fragment is navigation the store drops, not text the
+/// reader should lose.
+fn mention_label(link: &gpty_core::links::Link) -> String {
+    if let Some(alias) = &link.alias {
+        return alias.clone();
+    }
+    match &link.fragment {
+        Some(fragment) => format!("{}#{}", link.target, fragment),
+        None => link.target.clone(),
+    }
+}
+
+/// Substitute sentinels for `gpty-note:` BBCode in finished output.
+///
+/// One linear pass: replacing each token by index (rather than `String::replace`
+/// once per mention) keeps a note with the parser's full 512 occurrences
+/// linear in the rendered size instead of quadratic.
+fn substitute_mentions(rendered: String, mentions: &[Mention]) -> String {
+    if mentions.is_empty() {
+        return rendered;
+    }
+    let mut out = String::with_capacity(rendered.len() + mentions.len() * 32);
+    let mut rest = rendered.as_str();
+    while let Some(position) = rest.find(MENTION_OPEN) {
+        out.push_str(&rest[..position]);
+        let after = &rest[position + MENTION_OPEN.len()..];
+        let token = after
+            .find(MENTION_CLOSE)
+            .and_then(|end| after[..end].parse::<usize>().ok().map(|i| (i, end)));
+        match token {
+            Some((index, end)) if index < mentions.len() => {
+                out.push_str(&mention_bbcode(&mentions[index]));
+                rest = &after[end + MENTION_CLOSE.len()..];
+            }
+            // A token the source itself contained: keep it as text and keep
+            // scanning after the opener, so no occurrence is lost.
+            _ => {
+                out.push_str(MENTION_OPEN);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The BBCode for one mention.
+///
+/// The target is percent-encoded so a path with a space, a `]` or a quote
+/// cannot end the tag early or smuggle another attribute; the label is escaped
+/// as ordinary text, so a note can never supply BBCode through a link. Only
+/// `MarkdownView` interprets the scheme, and only to announce a click for the
+/// owning pane to resolve.
+fn mention_bbcode(mention: &Mention) -> String {
+    let mut out = String::from("[url=gpty-note:");
+    percent_encode_into(&mut out, &mention.target);
+    out.push(']');
+    escape_bbcode_into(&mut out, &mention.label);
+    out.push_str("[/url]");
+    out
+}
+
+fn percent_encode_into(out: &mut String, text: &str) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    for &byte in text.as_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/') {
+            out.push(byte as char);
+        } else {
+            out.push('%');
+            out.push(HEX[(byte >> 4) as usize] as char);
+            out.push(HEX[(byte & 0x0f) as usize] as char);
+        }
     }
 }
 
@@ -332,6 +489,60 @@ fn truncate_utf8(input: &str, max_bytes: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wikilinks_become_internal_links_only_when_asked() {
+        let rendered = render_markdown_with("see [[Note|the note]] and [[B#Part]]", true).text;
+        assert!(
+            rendered.contains("[url=gpty-note:Note]the note[/url]"),
+            "the alias is the label: {rendered}"
+        );
+        assert!(
+            rendered.contains("[url=gpty-note:B]B#Part[/url]"),
+            "a heading stays readable while the edge is to the note: {rendered}"
+        );
+
+        let plain = render_markdown_with("see [[Note]]", false).text;
+        assert!(!plain.contains("gpty-note:"), "{plain}");
+        assert!(plain.contains("[lb][lb]Note]"), "literal text: {plain}");
+    }
+
+    #[test]
+    fn a_mention_is_literal_in_code_and_when_escaped() {
+        let rendered = render_markdown_with(
+            "`[[span]]`\n\n```\n[[fenced]]\n```\n\nescaped \\[[no]] and real [[yes]]",
+            true,
+        )
+        .text;
+        assert!(!rendered.contains("gpty-note:span"), "{rendered}");
+        assert!(!rendered.contains("gpty-note:fenced"), "{rendered}");
+        assert!(!rendered.contains("gpty-note:no"), "{rendered}");
+        assert!(
+            rendered.contains("[url=gpty-note:yes]yes[/url]"),
+            "the real occurrence still renders: {rendered}"
+        );
+    }
+
+    #[test]
+    fn a_mention_target_cannot_break_out_of_its_bbcode() {
+        // A target may contain a single `]` and a space; both would end or
+        // corrupt the tag if emitted verbatim, so the target is encoded and
+        // the label escaped as ordinary text.
+        let rendered = render_markdown_with("[[a b]x]]", true).text;
+        assert!(
+            rendered.contains("[url=gpty-note:a%20b%5Dx]a b]x[/url]"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn a_markdown_link_cannot_impersonate_a_mention() {
+        // Only this renderer's own emission may name the internal scheme;
+        // `safe_url` keeps a document's link to http/https/mailto.
+        let rendered = render_markdown_with("[x](gpty-note:secret)", true).text;
+        assert!(!rendered.contains("gpty-note:"), "{rendered}");
+        assert!(rendered.contains("[u]x[/u]"), "{rendered}");
+    }
 
     #[test]
     fn renders_common_markdown() {

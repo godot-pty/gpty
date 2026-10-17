@@ -14,6 +14,21 @@ extends RichTextLabel
 
 const RENDER_DELAY := 0.075
 
+## The scheme this renderer gives a `[[wikilink]]` mention when
+## `wikilinks_enabled` is on. Only the view interprets it: it is announced as a
+## click, never handed to `OS.shell_open`.
+const INTERNAL_SCHEME := "gpty-note:"
+
+## Render `[[target]]` / `[[target|alias]]` as internal links. Off by default —
+## the vault vocabulary must not change how Inspector output, a reasoning turn
+## or a code preview displays — and the wiki pane turns it on.
+var wikilinks_enabled := false
+
+## A `[[wikilink]]` mention was clicked, with its target decoded. The owning
+## pane decides what the name means (the wiki pane resolves it against its
+## vault); the view never resolves or opens anything itself.
+signal note_link_clicked(target: String)
+
 ## How long an editor's buffer must be quiet before its preview renders — see
 ## `set_markdown_settled`. A var rather than a const so a test can shorten the
 ## window it is not testing (the pane's `_scratch_timer.wait_time` is poked
@@ -138,7 +153,7 @@ func _apply_pending(from_timer := true):
 	var body := _pending_markdown.replace("[", "[lb]")
 	var notice := _source_notice
 	if _renderer != null and _renderer.has_method("render"):
-		var answer = JSON.parse_string(str(_renderer.render(_pending_markdown)))
+		var answer = JSON.parse_string(str(_renderer.render(_pending_markdown, wikilinks_enabled)))
 		if answer is Dictionary and answer.has("text"):
 			body = str(answer["text"])
 			if bool(answer.get("truncated", false)):
@@ -156,6 +171,12 @@ func _apply_pending(from_timer := true):
 
 func _confirm_link(meta):
 	var url := str(meta)
+	if url.begins_with(INTERNAL_SCHEME):
+		# A mention: the pane that owns the document resolves it. The scheme
+		# holds a percent-encoded vault target (the renderer's encoding), so
+		# decode before handing it over.
+		note_link_clicked.emit(url.trim_prefix(INTERNAL_SCHEME).uri_decode())
+		return
 	if not (url.begins_with("https://") or url.begins_with("http://") or url.begins_with("mailto:")):
 		return
 	var dialog = ConfirmationDialog.new()

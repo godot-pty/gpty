@@ -1140,13 +1140,7 @@ impl VaultStore {
     /// moved (`added`/`removed`), so an ordinary pass writes nothing here.
     pub fn reresolve_links(&self, vault_id: &str) -> Result<usize, rusqlite::Error> {
         let _serialized = write_guard();
-        let notes: Vec<String> = {
-            let mut stmt = self
-                .conn
-                .prepare_cached("SELECT rel_path FROM notes WHERE vault_id = ?1")?;
-            stmt.query_map(params![vault_id], |row| row.get(0))?
-                .collect::<Result<_, _>>()?
-        };
+        let notes = self.note_paths(vault_id)?;
         let refs: Vec<&str> = notes.iter().map(String::as_str).collect();
         let index = links::NoteIndex::new(&refs);
         let rows: Vec<(String, i64, String, Option<String>)> = {
@@ -1170,6 +1164,32 @@ impl VaultStore {
             }
         }
         Ok(changed)
+    }
+
+    /// Resolve one target against this vault's note set.
+    ///
+    /// The same rules the index pass applies (`links::NoteIndex`), exposed
+    /// for a caller that holds a target but no stored row — the wiki pane
+    /// following a mention, including one the user has not saved yet. The
+    /// note set comes from the index rather than a vault walk, so the answer
+    /// cannot disagree with `resolved` in the `links` table.
+    pub fn resolve_target(
+        &self,
+        vault_id: &str,
+        target: &str,
+    ) -> Result<links::Resolution, rusqlite::Error> {
+        let notes = self.note_paths(vault_id)?;
+        let refs: Vec<&str> = notes.iter().map(String::as_str).collect();
+        Ok(links::NoteIndex::new(&refs).resolve(target))
+    }
+
+    /// Every note path this vault's index holds, in index order.
+    fn note_paths(&self, vault_id: &str) -> Result<Vec<String>, rusqlite::Error> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT rel_path FROM notes WHERE vault_id = ?1")?;
+        stmt.query_map(params![vault_id], |row| row.get(0))?
+            .collect::<Result<_, _>>()
     }
 
     /// Every link of one note: what it points at, what points back at it, and
@@ -1214,13 +1234,7 @@ impl VaultStore {
             // that a link did not resolve, and re-running the same rules over
             // the same note set says which notes it could not choose between
             // — ambiguity needs a list, and the schema has no column for one.
-            let notes: Vec<String> = {
-                let mut stmt = self
-                    .conn
-                    .prepare_cached("SELECT rel_path FROM notes WHERE vault_id = ?1")?;
-                stmt.query_map(params![vault_id], |row| row.get(0))?
-                    .collect::<Result<_, _>>()?
-            };
+            let notes = self.note_paths(vault_id)?;
             let refs: Vec<&str> = notes.iter().map(String::as_str).collect();
             let index = links::NoteIndex::new(&refs);
             for link in outgoing.iter().filter(|link| link.resolved.is_none()) {
@@ -1897,6 +1911,48 @@ mod tests {
                 .backlinks
                 .is_empty(),
             "neither candidate claims the edge"
+        );
+    }
+
+    #[test]
+    fn resolve_target_answers_a_clicked_mention_from_the_same_rules() {
+        let path = temp_db("links_resolve");
+        let vault = temp_vault("links_resolve");
+        let root = root_str(&vault);
+        let mut store = VaultStore::open(&path).unwrap();
+        store
+            .upsert_batch(&rows(
+                &root,
+                &[
+                    ("a/dup.md", "# A\n"),
+                    ("b/dup.md", "# B\n"),
+                    ("Note.md", "# Note\n"),
+                ],
+            ))
+            .unwrap();
+
+        assert_eq!(
+            store.resolve_target(&root, "Note").unwrap(),
+            crate::links::Resolution::Resolved("Note.md".into()),
+            "exact case wins"
+        );
+        assert_eq!(
+            store.resolve_target(&root, "note").unwrap(),
+            crate::links::Resolution::Resolved("Note.md".into()),
+            "a unique case-insensitive match still resolves"
+        );
+        assert_eq!(
+            store.resolve_target(&root, "a/dup").unwrap(),
+            crate::links::Resolution::Resolved("a/dup.md".into()),
+            "a target with / names a path"
+        );
+        assert_eq!(
+            store.resolve_target(&root, "dup").unwrap(),
+            crate::links::Resolution::Ambiguous(vec!["a/dup.md".into(), "b/dup.md".into()])
+        );
+        assert_eq!(
+            store.resolve_target(&root, "ghost").unwrap(),
+            crate::links::Resolution::Missing
         );
     }
 

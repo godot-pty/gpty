@@ -41,6 +41,16 @@ const SEARCH_DEBOUNCE := 0.15
 const SCRATCH_DEBOUNCE := 1.5
 ## The note view's modes, in toolbar order.
 const VIEW_MODES := ["edit", "split", "preview"]
+## Rows the link panel shows per section. One note can hold the parser's 512
+## mentions and a popular one gathers many backlinks, so the panel is a
+## summary — the rest is counted in its footer instead of pushing the editor
+## out of the pane.
+const MAX_LINK_ROWS := 50
+## Longest target or path a link row prints (the text is note-supplied).
+const MAX_SHOWN_LINK := 72
+## Height of the link panel's scroll area: a bounded strip, so the editor and
+## the preview keep their space whether a note has one link or fifty.
+const LINK_PANEL_HEIGHT := 132
 
 var _back: Button
 var _search: LineEdit
@@ -56,6 +66,16 @@ var _placeholder: Label
 var _footer: Label
 var _search_timer: Timer
 var _scratch_timer: Timer
+
+## The link panel's parts: this note's outgoing mentions and its backlinks,
+## both from the index (`GptyTerminal.vault_links`). Rows are rebuilt whenever
+## a note opens or a save lands (the save re-indexes), never polled.
+var _links_box: VBoxContainer
+var _links_outgoing_heading: Label
+var _outgoing_rows: VBoxContainer
+var _links_backlinks_heading: Label
+var _backlinks_rows: VBoxContainer
+var _links_footer: Label
 
 ## The open note: its vault-relative path (the index's spelling), the text as
 ## loaded — what "dirty" is measured against — and the stamp the save checks.
@@ -198,7 +218,47 @@ func _ready():
 	_reader.visible = false
 	_reader.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_reader.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	# `[[mentions]]` render as internal links and are followed in place; the
+	# view announces a click and the pane resolves it against the vault.
+	_reader.wikilinks_enabled = true
+	_reader.note_link_clicked.connect(_on_mention_clicked)
 	split.add_child(_reader)
+
+	# ── The link panel: this note's mentions and its backlinks ──
+	_links_box = VBoxContainer.new()
+	_links_box.name = "LinksPanel"
+	_links_box.visible = false
+	_note_box.add_child(_links_box)
+
+	var links_scroll := ScrollContainer.new()
+	links_scroll.name = "LinksScroll"
+	links_scroll.custom_minimum_size.y = LINK_PANEL_HEIGHT
+	links_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	links_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_links_box.add_child(links_scroll)
+
+	var links_rows := VBoxContainer.new()
+	links_rows.name = "LinksRows"
+	links_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	links_scroll.add_child(links_rows)
+
+	_links_outgoing_heading = _add_link_heading(links_rows, "Links to")
+	_outgoing_rows = VBoxContainer.new()
+	_outgoing_rows.name = "OutgoingLinks"
+	_outgoing_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	links_rows.add_child(_outgoing_rows)
+
+	_links_backlinks_heading = _add_link_heading(links_rows, "Linked from")
+	_backlinks_rows = VBoxContainer.new()
+	_backlinks_rows.name = "Backlinks"
+	_backlinks_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	links_rows.add_child(_backlinks_rows)
+
+	_links_footer = Label.new()
+	_links_footer.name = "LinksFooter"
+	_links_footer.visible = false
+	_links_footer.add_theme_font_size_override("font_size", 11)
+	links_rows.add_child(_links_footer)
 
 	_placeholder = Label.new()
 	_placeholder.name = "Placeholder"
@@ -353,6 +413,9 @@ func _clear_note() -> void:
 	_editable_note = false
 	# No note is open, so the preview has nothing to declare about a cut.
 	_sync_source_notice()
+	# A different note (or the list) has different links; a stale row must
+	# never offer to open a note the panel no longer describes.
+	_clear_links()
 	# No note is open, so no recovery copy is pending. The copy on disk is
 	# another matter: a deliberate end drops it, and nothing here does.
 	_scratch_timer.stop()
@@ -419,8 +482,170 @@ func _open_note(rel: String) -> void:
 	_apply_view_mode()
 	_update_dirty()
 	_reader.scroll_to_line(0)
+	# The index's view of this note (outgoing mentions and backlinks); it is
+	# rebuilt, not polled, and a save re-indexes so it refreshes again there.
+	_refresh_links()
 	# Last, so the note is on screen when the question appears.
 	_offer_scratch(rel)
+
+# ── The link panel: the open note's mentions and backlinks ──────────────
+
+## Rebuild the panel from the index's view of the open note.
+##
+## `GptyTerminal.vault_links` answers outgoing occurrences, backlinks and the
+## unresolved targets with their candidates — a read of the index the parser
+## already wrote, never a scan of the vault. The panel is display plus
+## navigation: a resolved row opens its note in place, behind the same ask a
+## Back makes; an unresolved row says why and is not clickable, because there
+## is no create-from-link verb yet.
+func _refresh_links() -> void:
+	_clear_links()
+	if _current_rel == "" or _links_box == null:
+		return
+	var answer = JSON.parse_string(str(GptyTerminal.vault_links(vault_path, _current_rel)))
+	if not (answer is Dictionary) or answer.has("error"):
+		return
+	var outgoing: Array = answer.get("outgoing", []) if answer.get("outgoing") is Array else []
+	var backlinks: Array = answer.get("backlinks", []) if answer.get("backlinks") is Array else []
+	var unresolved: Array = answer.get("unresolved", []) if answer.get("unresolved") is Array else []
+	# The candidate list is per unresolved *occurrence* (target + line), the
+	# identity the outgoing rows use.
+	var candidates := {}
+	for entry in unresolved:
+		if entry is Dictionary:
+			candidates[_link_key(str(entry.get("target", "")), int(entry.get("line", 0)))] = \
+				entry.get("candidates", [])
+	var shown_out := 0
+	for entry in outgoing:
+		if not (entry is Dictionary):
+			continue
+		if shown_out >= MAX_LINK_ROWS:
+			break
+		var target := str(entry.get("target", ""))
+		if target == "":
+			continue
+		shown_out += 1
+		var line := int(entry.get("line", 0))
+		var resolved = entry.get("resolved")
+		if resolved is String and str(resolved) != "":
+			_add_link_row(_outgoing_rows, "%s · line %d" % [_shown_link(target), line],
+				_follow_note.bind(str(resolved)), "Open %s" % str(resolved))
+			continue
+		var list: Array = candidates.get(_link_key(target, line), [])
+		var hint := "unresolved"
+		if not list.is_empty():
+			# The ambiguity hint is the store's own candidate list, so the row
+			# names exactly the notes the resolver refused to choose between.
+			hint = "ambiguous: " + _joined_links(list)
+		# No action: nothing can be opened, so the row explains itself instead
+		# of promising one (create-from-link is the next item's verb).
+		_add_link_row(_outgoing_rows, "%s · line %d · %s" % [_shown_link(target), line, hint],
+			Callable(), "")
+	var shown_back := 0
+	for entry in backlinks:
+		if not (entry is Dictionary):
+			continue
+		if shown_back >= MAX_LINK_ROWS:
+			break
+		var src := str(entry.get("src", ""))
+		if src == "":
+			continue
+		shown_back += 1
+		var line := int(entry.get("line", 0))
+		_add_link_row(_backlinks_rows, "%s · line %d" % [_shown_link(src), line],
+			_follow_note.bind(src), "Open %s" % src)
+	var omitted := maxi(0, outgoing.size() - shown_out) + maxi(0, backlinks.size() - shown_back)
+	_links_footer.text = "… %d more mention(s) not shown" % omitted
+	_links_footer.visible = omitted > 0
+	_links_outgoing_heading.visible = shown_out > 0
+	_outgoing_rows.visible = shown_out > 0
+	_links_backlinks_heading.visible = shown_back > 0
+	_backlinks_rows.visible = shown_back > 0
+	_links_box.visible = shown_out > 0 or shown_back > 0
+
+## Drop the panel's rows (a rebuild, or leaving the note). The containers stay
+## so the next rebuild has somewhere to put its rows.
+func _clear_links() -> void:
+	for container in [_outgoing_rows, _backlinks_rows]:
+		if container == null:
+			continue
+		for row in container.get_children():
+			container.remove_child(row)
+			row.queue_free()
+	if _links_footer != null:
+		_links_footer.visible = false
+	if _links_box != null:
+		_links_box.visible = false
+
+func _add_link_heading(parent: VBoxContainer, text: String) -> Label:
+	var label := Label.new()
+	label.name = text.validate_node_name()
+	label.text = text
+	label.add_theme_font_size_override("font_size", 12)
+	parent.add_child(label)
+	return label
+
+## One panel row: a flat, left-aligned button when it has somewhere to go
+## (disabled otherwise), so an unresolved mention reads as information rather
+## than as a broken action.
+func _add_link_row(parent: VBoxContainer, text: String, action: Callable, tooltip: String) -> Button:
+	var row := Button.new()
+	row.flat = true
+	row.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	row.focus_mode = Control.FOCUS_NONE
+	row.text = text
+	row.tooltip_text = tooltip
+	row.add_theme_font_size_override("font_size", 12)
+	row.disabled = not action.is_valid()
+	parent.add_child(row)
+	if action.is_valid():
+		row.pressed.connect(action)
+	return row
+
+## Follow a link in place: the destination replaces the open note. The same
+## Save/Discard/Cancel ask a Back makes runs first — following can be the way
+## an unsaved buffer is lost. There is no history stack in v1: the notes list
+## is the way back.
+func _follow_note(rel: String) -> void:
+	if rel == "" or rel == _current_rel:
+		return
+	_request_leave(func(proceed: bool):
+		if proceed:
+			_open_note(rel)
+	)
+
+## A rendered `[[mention]]` was clicked. The destination comes from the same
+## resolver the index used (`vault_link_resolve`), so an ambiguous stem is
+## reported with its candidates rather than silently picked.
+func _on_mention_clicked(target: String) -> void:
+	if _current_rel == "":
+		return
+	var answer = JSON.parse_string(str(GptyTerminal.vault_link_resolve(vault_path, target)))
+	if not (answer is Dictionary) or answer.has("error"):
+		var why := str(answer["error"]) if answer is Dictionary and answer.has("error") else "unreadable"
+		ToastManager.warn("Could not resolve [[%s]]: %s" % [_shown_link(target), _shown_link(why)], 5.0, "Wiki")
+		return
+	var resolved = answer.get("resolved")
+	if resolved is String and str(resolved) != "":
+		_follow_note(str(resolved))
+		return
+	var candidates: Array = answer.get("candidates", []) if answer.get("candidates") is Array else []
+	if candidates.is_empty():
+		ToastManager.warn("No note named [[%s]] in this vault" % _shown_link(target), 4.0, "Wiki")
+	else:
+		ToastManager.warn("[[%s]] is ambiguous: %s" % [_shown_link(target), _joined_links(candidates)], 6.0, "Wiki")
+
+func _link_key(target: String, line: int) -> String:
+	return "%s|%d" % [target, line]
+
+func _shown_link(text: String) -> String:
+	return text if text.length() <= MAX_SHOWN_LINK else text.left(MAX_SHOWN_LINK) + "…"
+
+func _joined_links(paths: Array) -> String:
+	var parts: Array = []
+	for path in paths:
+		parts.append(_shown_link(str(path)))
+	return ", ".join(parts)
 
 ## Show the mode's views and keep the toolbar's buttons on the active one.
 func _apply_view_mode() -> void:
@@ -545,6 +770,9 @@ func _save(force := false, answer := Callable()) -> void:
 	# The buffer reached the file, so the crash copy has nothing left to say.
 	_drop_scratch(vault_path, _current_rel)
 	_update_dirty()
+	# The save re-indexed the vault: this note's edges (and its backlinks, in
+	# other notes) may have changed with the text just written.
+	_refresh_links()
 	if not bool(reply.get("indexed", true)):
 		ToastManager.warn("Saved %s, but the search index could not be updated" % _current_rel, 5.0, "Wiki")
 	if answer.is_valid():
