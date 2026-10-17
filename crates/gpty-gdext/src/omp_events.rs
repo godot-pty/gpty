@@ -19,9 +19,25 @@ use std::time::{Duration, Instant};
 
 const PROTOCOL_VERSION: u64 = 1;
 
-const MAX_GLOBAL_EVENTS: usize = 256;
+/// Bounds on the queue between the event socket and the frame's drain.
+///
+/// The old 64-per-session cap was smaller than a single frame's burst of
+/// reasoning deltas once the GUI was busy: the socket answered `event queue
+/// full`, the extension's fire-and-forget producer swallowed it, and the
+/// pane's text lost chunks mid-sentence. The producer now coalesces (one
+/// event per 16 ms), so these caps only absorb a stalled GUI; the byte bound
+/// is the one that actually limits memory, since a single delta may carry
+/// 8 KiB.
+const MAX_GLOBAL_EVENTS: usize = 4096;
 
-const MAX_SESSION_EVENTS: usize = 64;
+const MAX_SESSION_EVENTS: usize = 1024;
+
+/// Global byte budget for queued events (~4 MiB, drained every frame).
+const MAX_QUEUED_BYTES: usize = 4 * 1024 * 1024;
+
+/// At most one "events are being rejected" warning per this interval: a
+/// stalled GUI could otherwise flood the log with one line per delta.
+const DROP_WARN_INTERVAL: Duration = Duration::from_secs(5);
 
 const MAX_ID_LEN: usize = 128;
 
@@ -202,13 +218,108 @@ pub struct OmpSemanticEvent {
     /// carries no stream position to advance.
     pub seq: u64,
     pub event: Value,
+    /// Serialized size, accounted against [`MAX_QUEUED_BYTES`].
+    bytes: usize,
+}
+
+/// The pending-event queue plus its byte total, so the memory bound is O(1)
+/// rather than a walk of the queue on every submission.
+#[derive(Default)]
+struct EventQueue {
+    events: VecDeque<OmpSemanticEvent>,
+    bytes: usize,
+}
+
+impl EventQueue {
+    fn has_room(&self, terminal_id: &str, bytes: usize) -> bool {
+        if self.events.len() >= MAX_GLOBAL_EVENTS
+            || self.bytes.saturating_add(bytes) > MAX_QUEUED_BYTES
+        {
+            return false;
+        }
+        let per_session = self
+            .events
+            .iter()
+            .filter(|queued| queued.terminal_session_id == terminal_id)
+            .count();
+        per_session < MAX_SESSION_EVENTS
+    }
 }
 
 static SESSIONS: LazyLock<Mutex<HashMap<String, SessionCapability>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-static EVENTS: LazyLock<Mutex<VecDeque<OmpSemanticEvent>>> =
-    LazyLock::new(|| Mutex::new(VecDeque::new()));
+static EVENTS: LazyLock<Mutex<EventQueue>> = LazyLock::new(|| Mutex::new(EventQueue::default()));
+
+/// Cumulative counters for the Reasoning pane's diagnostics (`omp_event_stats`
+/// and `GPTY_REASONING_DEBUG`). Counters, not gauges: the pane derives rates.
+#[derive(Default, Clone, Copy)]
+struct EventCounters {
+    accepted: u64,
+    accepted_bytes: u64,
+    rejected_queue_full: u64,
+    rejected_oversized: u64,
+    drained_events: u64,
+    drained_bytes: u64,
+}
+
+static COUNTERS: LazyLock<Mutex<EventCounters>> =
+    LazyLock::new(|| Mutex::new(EventCounters::default()));
+
+/// Last drop warning, so a stalled drain cannot log one line per delta.
+static LAST_DROP_WARN: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
+
+/// JSON snapshot of the event pipeline's counters and queue depth.
+///
+/// Static data about the process, not a terminal: the Reasoning pane prints it
+/// when `GPTY_REASONING_DEBUG` is set, and a test can assert the drop counters.
+pub fn stats_json() -> String {
+    let counters = COUNTERS.lock().map(|c| *c).unwrap_or_default();
+    let (queued_events, queued_bytes) = EVENTS
+        .lock()
+        .map(|queue| (queue.events.len(), queue.bytes))
+        .unwrap_or((0, 0));
+    json!({
+        "accepted": counters.accepted,
+        "accepted_bytes": counters.accepted_bytes,
+        "rejected_queue_full": counters.rejected_queue_full,
+        "rejected_oversized": counters.rejected_oversized,
+        "drained_events": counters.drained_events,
+        "drained_bytes": counters.drained_bytes,
+        "queued_events": queued_events,
+        "queued_bytes": queued_bytes,
+        "max_queued_bytes": MAX_QUEUED_BYTES,
+        "max_session_events": MAX_SESSION_EVENTS,
+    })
+    .to_string()
+}
+
+fn note_counter(update: impl FnOnce(&mut EventCounters)) {
+    if let Ok(mut counters) = COUNTERS.lock() {
+        update(&mut counters);
+    }
+}
+
+/// A bounded, rate-limited diagnostic: dropping observability events is a
+/// real loss, but a burst would otherwise bury the console.
+fn warn_dropped(reason: &str) {
+    let now = Instant::now();
+    let Ok(mut last) = LAST_DROP_WARN.lock() else {
+        return;
+    };
+    if last.is_some_and(|at| now.saturating_duration_since(at) < DROP_WARN_INTERVAL) {
+        return;
+    }
+    *last = Some(now);
+    let (queued_events, queued_bytes) = EVENTS
+        .lock()
+        .map(|queue| (queue.events.len(), queue.bytes))
+        .unwrap_or((0, 0));
+    log::warn!(
+        "OMP event rejected ({reason}; {queued_events} queued / {queued_bytes} bytes): \
+         agent observability is losing events"
+    );
+}
 
 // ── Event subscriptions (gpty → clients over the event socket) ─────────
 // Subscribers receive bounded JSON event lines via `eventsPoll`. Push
@@ -341,14 +452,39 @@ pub fn register_terminal() -> std::io::Result<(String, String)> {
 
 pub fn unregister_terminal(session_id: &str) {
     SESSIONS.lock().unwrap().remove(session_id);
-    EVENTS
-        .lock()
-        .unwrap()
-        .retain(|event| event.terminal_session_id != session_id);
+    if let Ok(mut queue) = EVENTS.lock() {
+        let mut removed = 0;
+        queue.events.retain(|event| {
+            let keep = event.terminal_session_id != session_id;
+            if !keep {
+                removed += event.bytes;
+            }
+            keep
+        });
+        queue.bytes = queue.bytes.saturating_sub(removed);
+    }
 }
 
+/// Take every queued event for the frame's drain.
+///
+/// The byte total goes with them: a drained event no longer occupies the
+/// queue, so the next burst starts from the real depth.
 pub fn drain_events() -> Vec<OmpSemanticEvent> {
-    EVENTS.lock().unwrap().drain(..).collect()
+    let (events, bytes) = match EVENTS.lock() {
+        Ok(mut queue) => {
+            let bytes = queue.bytes;
+            queue.bytes = 0;
+            (queue.events.drain(..).collect::<Vec<_>>(), bytes)
+        }
+        Err(_) => return Vec::new(),
+    };
+    if !events.is_empty() {
+        note_counter(|counters| {
+            counters.drained_events = counters.drained_events.saturating_add(events.len() as u64);
+            counters.drained_bytes = counters.drained_bytes.saturating_add(bytes as u64);
+        });
+    }
+    events
 }
 
 fn random_hex(bytes: usize) -> std::io::Result<String> {
@@ -438,6 +574,10 @@ fn event_handler() -> HandlerFn {
                     .and_then(Value::as_str)
                     .is_none_or(|text| text.len() > MAX_THINKING_BYTES)
             {
+                note_counter(|counters| {
+                    counters.rejected_oversized = counters.rejected_oversized.saturating_add(1);
+                });
+                warn_dropped("reasoning delta over the 8 KiB cap");
                 return Err(gpty_ipc::protocol::JsonRpcError::new(
                     -32602,
                     "invalid reasoning delta",
@@ -464,6 +604,11 @@ fn event_handler() -> HandlerFn {
                     "unsupported OMP event",
                 ));
             };
+            // Accounted against the queue's memory budget. The allowlist has
+            // already bounded the fields, so this is bounded too.
+            let event_bytes = serde_json::to_string(&translated)
+                .map(|encoded| encoded.len())
+                .unwrap_or(0);
 
             let next_seq = {
                 let mut sessions = SESSIONS.lock().unwrap();
@@ -489,28 +634,37 @@ fn event_handler() -> HandlerFn {
                 }
 
                 let mut queue = EVENTS.lock().unwrap();
-                let per_session = queue
-                    .iter()
-                    .filter(|queued| queued.terminal_session_id == terminal_id)
-                    .count();
-                if queue.len() >= MAX_GLOBAL_EVENTS || per_session >= MAX_SESSION_EVENTS {
+                if !queue.has_room(terminal_id, event_bytes) {
+                    drop(queue);
+                    note_counter(|counters| {
+                        counters.rejected_queue_full =
+                            counters.rejected_queue_full.saturating_add(1);
+                    });
+                    warn_dropped("event queue full");
                     return Err(gpty_ipc::protocol::JsonRpcError::new(
                         -32004,
                         "event queue full",
                     ));
                 }
-                queue.push_back(OmpSemanticEvent {
+                queue.events.push_back(OmpSemanticEvent {
                     terminal_session_id: terminal_id.to_string(),
                     omp_session_id: omp_session_id.to_string(),
                     seq: seq.unwrap_or(0),
                     event: translated,
+                    bytes: event_bytes,
                 });
+                queue.bytes = queue.bytes.saturating_add(event_bytes);
 
                 // The next sequence this session expects — its own counter,
                 // which an unsequenced submission leaves untouched (so it
                 // still answers a producer that supplies one next time).
                 session.last_seq.saturating_add(1)
             };
+            note_counter(|counters| {
+                counters.accepted = counters.accepted.saturating_add(1);
+                counters.accepted_bytes =
+                    counters.accepted_bytes.saturating_add(event_bytes as u64);
+            });
 
             Ok(json!({"accepted": true, "next_seq": next_seq}))
         })
@@ -554,7 +708,98 @@ mod tests {
 
     fn reset() {
         SESSIONS.lock().unwrap().clear();
-        EVENTS.lock().unwrap().clear();
+        {
+            let mut queue = EVENTS.lock().unwrap();
+            queue.events.clear();
+            queue.bytes = 0;
+        }
+        *COUNTERS.lock().unwrap() = EventCounters::default();
+        *LAST_DROP_WARN.lock().unwrap() = None;
+    }
+
+    fn queued_event(terminal_id: &str, bytes: usize) -> OmpSemanticEvent {
+        OmpSemanticEvent {
+            terminal_session_id: terminal_id.to_string(),
+            omp_session_id: "omp-test".into(),
+            seq: 0,
+            event: json!({"name": "thinking.delta", "text": "x"}),
+            bytes,
+        }
+    }
+
+    #[test]
+    fn the_queue_absorbs_a_frame_burst_and_bounds_both_axes() {
+        let _guard = QUEUES.lock().unwrap_or_else(|p| p.into_inner());
+        let mut queue = EventQueue::default();
+
+        // The old cap (64) was below one frame's burst of reasoning deltas.
+        for _ in 0..MAX_SESSION_EVENTS {
+            assert!(queue.has_room("terminal-a", 1));
+            let event = queued_event("terminal-a", 1);
+            queue.bytes += event.bytes;
+            queue.events.push_back(event);
+        }
+        assert!(
+            !queue.has_room("terminal-a", 1),
+            "one session cannot exceed its share"
+        );
+        assert!(
+            queue.has_room("terminal-b", 1),
+            "a chatty terminal must not starve another"
+        );
+
+        let byte_bound = EventQueue::default();
+        assert!(byte_bound.has_room("a", MAX_QUEUED_BYTES));
+        assert!(
+            !byte_bound.has_room("a", MAX_QUEUED_BYTES + 1),
+            "the queue's memory is bounded by bytes, not only by count"
+        );
+    }
+
+    #[test]
+    fn drain_returns_the_queue_and_records_what_it_moved() {
+        let _guard = QUEUES.lock().unwrap_or_else(|p| p.into_inner());
+        reset();
+        {
+            let mut queue = EVENTS.lock().unwrap();
+            for bytes in [10, 20] {
+                let event = queued_event("terminal-a", bytes);
+                queue.bytes += event.bytes;
+                queue.events.push_back(event);
+            }
+        }
+        let drained = drain_events();
+        assert_eq!(drained.len(), 2);
+        assert_eq!(drained[0].bytes + drained[1].bytes, 30);
+        assert!(EVENTS.lock().unwrap().events.is_empty());
+        assert_eq!(EVENTS.lock().unwrap().bytes, 0, "the byte total resets");
+
+        let stats: serde_json::Value = serde_json::from_str(&stats_json()).unwrap();
+        assert_eq!(stats["drained_events"], 2);
+        assert_eq!(stats["drained_bytes"], 30);
+        assert_eq!(stats["queued_events"], 0);
+        assert_eq!(stats["queued_bytes"], 0);
+        reset();
+    }
+
+    #[test]
+    fn unregistering_a_terminal_frees_its_queued_bytes() {
+        let _guard = QUEUES.lock().unwrap_or_else(|p| p.into_inner());
+        reset();
+        {
+            let mut queue = EVENTS.lock().unwrap();
+            for (terminal, bytes) in [("a", 10), ("b", 20)] {
+                let event = queued_event(terminal, bytes);
+                queue.bytes += event.bytes;
+                queue.events.push_back(event);
+            }
+        }
+        unregister_terminal("a");
+        let queue = EVENTS.lock().unwrap();
+        assert_eq!(queue.events.len(), 1);
+        assert_eq!(queue.bytes, 20, "only the removed terminal's bytes go");
+        drop(queue);
+        reset();
     }
 
     #[test]
@@ -751,15 +996,18 @@ mod tests {
                 last_seq: 0,
             },
         );
-        EVENTS.lock().unwrap().push_back(OmpSemanticEvent {
+        EVENTS.lock().unwrap().events.push_back(OmpSemanticEvent {
             terminal_session_id: "terminal".into(),
             omp_session_id: "omp".into(),
             seq: 1,
             event: json!({"name": "omp.agent.started"}),
+            bytes: 0,
         });
         unregister_terminal("terminal");
         assert!(SESSIONS.lock().unwrap().is_empty());
-        assert!(EVENTS.lock().unwrap().is_empty());
+        let queue = EVENTS.lock().unwrap();
+        assert!(queue.events.is_empty());
+        assert_eq!(queue.bytes, 0);
     }
 
     /// The declaration path end to end: a registered session, the real

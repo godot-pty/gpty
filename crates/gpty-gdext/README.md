@@ -102,6 +102,7 @@ on drop.
 | `get_app_version()` | `String` | App version from `CARGO_PKG_VERSION` (static — call as `GptyTerminal.get_app_version()`) |
 | `get_ipc_protocol_version()` | `String` | Static — the control-IPC protocol version (`gpty_ipc::protocol::PROTOCOL_VERSION`), the single definition the server's `version` method reports and the CLI prints; the About tab reads it so the label cannot drift from the wire |
 | `installed_plugin_profiles()` | `String` | Static — JSON array of `{plugin_id, revision, name, tiles}`, one entry per profile of every **enabled** installed plugin, in store order (`tiles` are the manifest's raw tile dictionaries; the caller sanitizes each field). Reads `<state_dir>/plugins.json`; a missing or broken store is `[]` plus one warn, never an error. Plugins installed before the profiles migration, and profile entries without a string `name` or a `tiles` list, contribute nothing |
+| `omp_event_stats()` | `String` | Static — the OMP event pipeline's counters: cumulative `accepted`/`accepted_bytes`/`drained_events`/`drained_bytes`, `rejected_queue_full`/`rejected_oversized`, and the live `queued_events`/`queued_bytes` against `max_queued_bytes`/`max_session_events`. The Reasoning pane's `GPTY_REASONING_DEBUG` line reads it to separate a slow renderer from a lossy input stream |
 
 #### Vault index
 

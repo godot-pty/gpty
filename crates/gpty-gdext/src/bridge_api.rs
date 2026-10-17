@@ -129,6 +129,20 @@ impl GptyTerminal {
         )
     }
 
+    /// Counters for the OMP event pipeline (the event socket → drain path).
+    ///
+    /// Static, like the other process-level statics: it describes the
+    /// listener, not one terminal. The Reasoning pane prints it when
+    /// `GPTY_REASONING_DEBUG` is set, which is how a slow or lossy stream is
+    /// told apart from a slow renderer. JSON object with cumulative
+    /// `accepted`/`accepted_bytes`/`drained_events`/`drained_bytes`,
+    /// `rejected_queue_full`/`rejected_oversized` counters, and the current
+    /// `queued_events`/`queued_bytes` against their caps.
+    #[func]
+    fn omp_event_stats() -> GString {
+        GString::from(&crate::omp_events::stats_json())
+    }
+
     /// Drain semantic events emitted by explicitly installed agent extensions.
     #[func]
     fn drain_agent_events() -> GString {

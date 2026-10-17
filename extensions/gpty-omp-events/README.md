@@ -59,7 +59,9 @@ The event allowlist is:
 - agent start/end and turn start/end
 - tool execution start/update/end with tool name, call ID, and error state only
 - `message_update` events whose subtype is `thinking_delta`, including only the
-  bounded reasoning delta and content index
+  reasoning delta text. Deltas are coalesced for up to 16 ms and sent as
+  events of at most 8 KiB of **UTF-8 bytes**, split on code-point boundaries
+  (never truncated); the content index is not forwarded
 
 Prompts, answer text, tool arguments/results, provider/model/context objects,
 session file paths, environment variables, and credentials are never copied
@@ -69,7 +71,9 @@ transport envelope.
 Strings, complete requests, and the 128-entry outbox are bounded. Transport uses
 only Node/Bun built-ins, validates private same-owner Unix sockets where the
 platform exposes ownership and mode, applies a short timeout, drops oldest
-queued events under pressure, and swallows all transport errors.
+queued events under pressure, and swallows all transport errors. The
+coalescing is what keeps a token-rate reasoning stream under that bound: one
+flush every 16 ms instead of one socket connection per token.
 
 ## Test
 
