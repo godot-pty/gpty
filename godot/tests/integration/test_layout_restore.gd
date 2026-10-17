@@ -1,8 +1,16 @@
 extends GutTest
 # Integration tests: layout save/restore cycle.
-# Verifies that tiles can be persisted and restored with correct types and settings.
+#
+# A layout is gathered from live panes, written through WorkspaceStore, read
+# back, and rebuilt by the *real* `Workspace._restore_into` — the function the
+# app restores through. The assertions are about the panes that come out of
+# it. (This file used to replay the restore logic inside the test bodies and
+# assert on the replay, which keeps passing when the real path changes.)
+
+const WorkspaceScript = preload("res://scenes/terminal/workspace.gd")
 
 var _tm: TerminalManager
+var _ws: Control
 
 func before_each():
 	MockAutoloads.setup()
@@ -13,9 +21,17 @@ func before_each():
 
 func after_each():
 	_tm.reset()
+	_free_workspace()
 	MockAutoloads.teardown()
 
-# ── Helper: gather tiles in WorkspaceStore format ──────────────────────
+func _free_workspace():
+	if _ws:
+		if _ws.get_parent():
+			_ws.get_parent().remove_child(_ws)
+		_ws.free()
+		_ws = null
+
+# ── Helpers ────────────────────────────────────────────────────────────
 
 func _save_tiles(tiles: Array[Dictionary]):
 	WorkspaceStore.save(0, [{"name": "Workspace 1", "layout": tiles}])
@@ -32,6 +48,7 @@ func _load_tiles() -> Array[Dictionary]:
 			out.append(td)
 	return out
 
+## Tiles in WorkspaceStore format, gathered from the source manager's panes.
 func _gather_tiles() -> Array[Dictionary]:
 	var ts: Array[Dictionary] = []
 	for t in _tm.tiles:
@@ -44,7 +61,48 @@ func _gather_tiles() -> Array[Dictionary]:
 		})
 	return ts
 
-# ── Round-trip tests ───────────────────────────────────────────────────
+## A real Workspace, ready (the same two-frame settle the pane-env tests use).
+## A test that restores twice reads the first result before the second call:
+## the previous workspace (and its bodies) is freed here.
+func _make_workspace() -> Control:
+	_free_workspace()
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	return ws
+
+## Restore `tiles` through the real restore path; return the rebuilt bodies in
+## tile order.
+##
+## The store is cleared first: `Workspace._ready` restores its own entry, and a
+## tile naming a non-default program would stop there on the trust dialog
+## (leaving `_workspaces` empty) — this test is about `_restore_into`, so it
+## starts from a plain workspace.
+func _restore(tiles: Array[Dictionary]) -> Array:
+	WorkspaceStore.save(0, [])
+	var ws = await _make_workspace()
+	ws._restore_into(ws._workspaces[0], tiles)
+	var bodies := []
+	for t in ws._tm.tiles:
+		bodies.append(ws._tm._find_body(t.wrapper))
+	return bodies
+
+func _one_tile(settings: Dictionary) -> Array[Dictionary]:
+	return [{
+		"col": 0, "row": 0, "cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID,
+		"settings": settings,
+	}]
+
+## A shell that exists on this platform and is not the configured default —
+## a test proving "the tile's program became the pane's program" needs both
+## halves: a name that does not exist fails the spawn (an engine error GUT
+## counts), and the default would pass even if the tile were ignored.
+func _other_shell() -> String:
+	return "cmd.exe" if OS.get_name() == "Windows" else "/bin/sh"
+
+# ── Round trip: gather → store → load → real restore ───────────────────
 
 func test_save_restore_terminal():
 	var body = _tm.spawn()
@@ -54,61 +112,79 @@ func test_save_restore_terminal():
 	assert_eq(saved[0].get("settings", {}).get("type"), "terminal")
 
 	_save_tiles(saved)
-	var loaded = _load_tiles()
-	assert_eq(loaded.size(), 1)
-	assert_eq(loaded[0].get("settings", {}).get("type"), "terminal")
+	var restored = await _restore(_load_tiles())
+	assert_eq(restored.size(), 1)
+	assert_true(restored[0] is TerminalPane, "the saved terminal comes back as a terminal")
+	assert_eq(restored[0]._pane_type(), "terminal")
 
 func test_save_restore_mixed_types():
-	var t1 = _tm.spawn_pane("terminal", {"pane_name": "Term1"})
-	assert_not_null(t1)
-	var t2 = _tm.spawn_pane("code_viewer", {"pane_name": "Code1"})
-	assert_not_null(t2)
-
+	assert_not_null(_tm.spawn_pane("terminal", {"pane_name": "Term1"}))
+	assert_not_null(_tm.spawn_pane("code_viewer", {"pane_name": "Code1"}))
 	var saved = _gather_tiles()
 	assert_eq(saved.size(), 2)
 
 	_save_tiles(saved)
-	var loaded = _load_tiles()
-	assert_eq(loaded.size(), 2)
+	var restored = await _restore(_load_tiles())
+	assert_eq(restored.size(), 2)
+	# Each saved tile maps to a rebuilt pane of the same type and name, in the
+	# same order — not merely "a terminal and a code viewer exist somewhere".
+	for i in 2:
+		var want: Dictionary = saved[i]["settings"]
+		assert_eq(restored[i]._pane_type(), want["type"], "tile %d keeps its type" % i)
+		assert_eq(restored[i].pane_name, want["pane_name"], "tile %d keeps its name" % i)
 
-	var types := []
-	for td in loaded:
-		types.append(td.get("settings", {}).get("type"))
-	assert_true(types.has("terminal"), "loaded tiles should include terminal")
-	assert_true(types.has("code_viewer"), "loaded tiles should include code_viewer")
-
-func test_restore_preserves_settings():
+func test_restore_preserves_settings_and_geometry():
 	var body = _tm.spawn_pane("terminal", {"pane_name": "Custom", "rows": 30, "cols": 100})
 	assert_not_null(body)
-
 	var saved = _gather_tiles()
 	_save_tiles(saved)
-	var loaded = _load_tiles()
 
-	var settings = loaded[0].get("settings", {})
-	assert_eq(settings.get("pane_name"), "Custom")
-	assert_eq(settings.get("rows"), 30)
-	assert_eq(settings.get("cols"), 100)
+	var loaded := _load_tiles()
+	WorkspaceStore.save(0, [])  # see `_restore`
+	var ws = await _make_workspace()
+	ws._restore_into(ws._workspaces[0], loaded)
+	var tile = ws._tm.tiles[0]
+	var restored = ws._tm._find_body(tile.wrapper)
+
+	assert_eq(restored.pane_name, "Custom")
+	assert_eq(restored.rows, 30, "the saved row count reaches the rebuilt pane")
+	assert_eq(restored.cols, 100, "the saved column count reaches the rebuilt pane")
+	assert_eq([tile.col, tile.row, tile.cspan, tile.rspan],
+		[saved[0]["col"], saved[0]["row"], saved[0]["cspan"], saved[0]["rspan"]],
+		"the tile keeps its place in the grid")
 
 func test_restore_legacy_no_type_key():
-	# Simulate legacy layout data without "type" key
+	# A layout written before tiles carried a pane type: the restore path must
+	# rebuild it as a terminal and honour the legacy `shell` key.
+	var shell := _other_shell()
 	var legacy: Array[Dictionary] = [{
-		"col": 0, "row": 0, "cspan": 12, "rspan": 12,
-		"settings": {"shell": "/bin/bash", "pane_name": "OldPane"},
+		"col": 0, "row": 0, "cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID,
+		"settings": {"shell": shell, "pane_name": "OldPane"},
 	}]
 	_save_tiles(legacy)
-	var loaded = _load_tiles()
-	assert_eq(loaded.size(), 1)
-	# No "type" key: workspace defaults to "terminal"
-	assert_eq(loaded[0].get("settings", {}).get("type", "terminal"), "terminal")
+	var restored = await _restore(_load_tiles())
+	assert_eq(restored.size(), 1)
+	assert_true(restored[0] is TerminalPane, "no type key restores as a terminal")
+	assert_eq(restored[0].pane_name, "OldPane")
+	assert_eq(restored[0].shell_command, shell,
+		"the legacy shell key is still honoured (and differs from the default)")
 
-func test_load_tiles_empty_when_no_file():
-	var loaded = _load_tiles()
-	assert_eq(loaded, [], "should return empty when no file exists")
+func test_restoring_nothing_usable_still_leaves_a_terminal():
+	# Every tile in the file is junk (not a dict, unknown pane type): the
+	# restore must not leave the user with an empty workspace.
+	var junk: Array[Dictionary] = [{
+		"col": 0, "row": 0, "cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID,
+		"settings": {"type": "no_such_pane_type"},
+	}]
+	var restored = await _restore(junk)
+	assert_eq(restored.size(), 1, "the fallback is exactly one pane")
+	assert_true(restored[0] is TerminalPane, "and it is a terminal")
 
 # ── Per-tile command field (ecosystem presets) ─────────────────────────
-# Tests mirror the _do_restore / _do_activate restore logic and verify
-# that profile data is untrusted — commands are sanitised before use.
+# Profile data is untrusted: the restore path runs `command`/`shell` through
+# sanitize_shell. These drive the real `_restore_into` and read the spawned
+# pane's `shell_command`, so a change to the real command > shell > default
+# order — or to where sanitising happens — fails here.
 
 func test_command_field_survives_sanitize_tile():
 	# A tile with settings.command should pass sanitize_tile and
@@ -122,38 +198,47 @@ func test_command_field_survives_sanitize_tile():
 	assert_eq(st["settings"].get("command"), "lazygit",
 		"command field must survive sanitize_tile")
 
-func test_valid_command_used_as_shell_command():
-	# Mirror the restore-path logic: command > shell > default.
-	var settings := {"type": "terminal", "command": "herdr", "attachment_id": "herdr"}
-	var raw = settings.get("command", settings.get("shell", ""))
-	var sh = PaneTypes.sanitize_shell(raw, SettingsManager.cfg_shell_command)
-	assert_eq(sh, "herdr", "valid command should be returned by sanitize_shell as-is")
+func test_valid_command_becomes_the_panes_shell_command():
+	var command := _other_shell()
+	var bodies = await _restore(_one_tile(
+		{"type": "terminal", "command": command, "attachment_id": "restored-command"}))
+	assert_eq(bodies[0].shell_command, command, "a valid command is what the pane runs")
+
+func test_command_outranks_the_legacy_shell_key():
+	var command := _other_shell()
+	var bodies = await _restore(_one_tile(
+		{"type": "terminal", "command": command, "shell": "/bin/zsh"}))
+	assert_eq(bodies[0].shell_command, command, "command > shell")
 
 func test_empty_command_falls_back_to_shell_default():
-	# If command is absent, the restore path should produce the default shell.
-	var settings := {"type": "terminal", "attachment_id": "myterm"}
-	var raw = settings.get("command", settings.get("shell", ""))
-	var sh = PaneTypes.sanitize_shell(raw, SettingsManager.cfg_shell_command)
-	assert_eq(sh, SettingsManager.cfg_shell_command,
-		"missing command should fall back to the default shell")
+	var bodies = await _restore(_one_tile({"type": "terminal", "attachment_id": "myterm"}))
+	assert_eq(bodies[0].shell_command, SettingsManager.cfg_shell_command,
+		"a tile naming no program runs the user's default shell")
 
 func test_oversized_command_falls_back_to_shell_default():
 	# A command exceeding sanitize_shell's 1024-char cap must not reach the shell.
-	var big_cmd := "x".repeat(1025)
-	var settings := {"type": "terminal", "command": big_cmd}
-	var raw = settings.get("command", settings.get("shell", ""))
-	var sh = PaneTypes.sanitize_shell(raw, SettingsManager.cfg_shell_command)
-	assert_eq(sh, SettingsManager.cfg_shell_command,
-		"oversized command must fall back to the default shell")
+	var bodies = await _restore(_one_tile(
+		{"type": "terminal", "command": "x".repeat(1025)}))
+	assert_eq(bodies[0].shell_command, SettingsManager.cfg_shell_command,
+		"an oversized command must not reach the spawned pane")
+
+func test_the_command_length_cap_is_1024_exactly():
+	# The boundary lives in sanitize_shell, which `_restore_into` calls. It is
+	# asserted on the function rather than through a pane because a pane given
+	# a 1024-character program name tries to spawn it, and that is an engine
+	# error the test would then have to expect.
+	var fallback := SettingsManager.cfg_shell_command
+	assert_eq(PaneTypes.sanitize_shell("x".repeat(1024), fallback), "x".repeat(1024),
+		"1024 characters is still allowed")
+	assert_eq(PaneTypes.sanitize_shell("x".repeat(1025), fallback), fallback,
+		"one more is refused")
 
 func test_command_with_fffd_falls_back_to_shell_default():
 	# U+FFFD (Godot's decoded-NUL replacement) must be rejected.
-	var bad_cmd := "evil\uFFFDcmd"
-	var settings := {"type": "terminal", "command": bad_cmd}
-	var raw = settings.get("command", settings.get("shell", ""))
-	var sh = PaneTypes.sanitize_shell(raw, SettingsManager.cfg_shell_command)
-	assert_eq(sh, SettingsManager.cfg_shell_command,
-		"command containing U+FFFD must fall back to the default shell")
+	var bodies = await _restore(_one_tile(
+		{"type": "terminal", "command": "evil\uFFFDcmd"}))
+	assert_eq(bodies[0].shell_command, SettingsManager.cfg_shell_command,
+		"a command containing U+FFFD must not reach the spawned pane")
 
 ## The shipped defaults, read directly: the mock store answers for
 ## `res://profiles.default.json`, so a test that wants the file the app ships
@@ -190,32 +275,26 @@ func test_each_preset_tile_passes_sanitize_tile():
 				"the %s tile's companion link must survive sanitize_tile" % profile_name)
 
 ## A wiki tile is a path carrier: the vault path must survive sanitize_tile
-## (untrusted file input) and the restore path must rebuild a pane that
+## (untrusted file input) and the real restore path must rebuild a pane that
 ## lists the vault — not merely accept the type.
 func test_a_wiki_tile_restores_its_vault():
 	var vault := ProjectSettings.globalize_path("user://wiki_restore_vault")
 	DirAccess.make_dir_recursive_absolute(vault)
 	var note := FileAccess.open(vault.path_join("note.md"), FileAccess.WRITE)
 	note.store_string("# Heading")
+	note.close()
 
 	var body = _tm.spawn_pane("wiki", {"vault_path": vault})
 	assert_not_null(body, "a wiki pane must spawn")
 	var saved = _gather_tiles()
 	assert_eq(saved.size(), 1)
+	_save_tiles(saved)
 
-	var st = PaneTypes.sanitize_tile({
-		"col": 0, "row": 0, "cspan": 12, "rspan": 12,
-		"settings": saved[0].get("settings", {}),
-	})
-	assert_false(st.is_empty(), "a wiki tile must pass sanitize_tile")
-	assert_eq(st["type_name"], "wiki")
-	assert_eq(st["settings"].get("vault_path"), vault,
-		"the vault path must survive sanitize_tile")
-
-	var restored = _tm.create_body("wiki")
-	add_child_autofree(restored)
-	restored.apply_settings(st["settings"])
-	assert_eq(restored._list.get_item_text(0), "note.md",
+	var restored = await _restore(_load_tiles())
+	assert_eq(restored.size(), 1)
+	assert_eq(restored[0]._pane_type(), "wiki")
+	assert_eq(restored[0].vault_path, vault, "the vault path survives the restore")
+	assert_eq(restored[0]._list.get_item_text(0), "note.md",
 		"the restored pane must list the vault's notes")
 
 	DirAccess.remove_absolute(vault.path_join("note.md"))
