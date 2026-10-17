@@ -14,7 +14,10 @@
 #   3. the script count GUT reports equals the test_*.gd files the -gdirs hold
 #      (GUT does not recurse, so a test script nested below a -gdir would never
 #      run — that is reported instead of silently shrinking the suite);
-#   4. at least one test per collected script.
+#   4. at least one test per collected script;
+#   5. no `[Risky]` test (ran without asserting), and no `[Pending]` test
+#      outside Windows — pending is how a test records a platform gap, so on
+#      Linux/macOS it can only mean something was skipped by accident.
 #
 # Requires godot on PATH; GODOT=<path> overrides.
 set -euo pipefail
@@ -59,8 +62,14 @@ export XDG_DATA_HOME="$SANDBOX/data"
 export XDG_STATE_HOME="$SANDBOX/state"
 mkdir -p "$XDG_RUNTIME_DIR" "$XDG_DATA_HOME" "$XDG_STATE_HOME"
 case "$(uname -s)" in
-    MINGW* | MSYS* | CYGWIN*) export GPTY_SOCKET='\\.\pipe\gpty-gut-'"$$" ;;
-    *) export GPTY_SOCKET="$XDG_RUNTIME_DIR/gpty.sock" ;;
+    MINGW* | MSYS* | CYGWIN*)
+        IS_WINDOWS=1
+        export GPTY_SOCKET='\\.\pipe\gpty-gut-'"$$"
+        ;;
+    *)
+        IS_WINDOWS=0
+        export GPTY_SOCKET="$XDG_RUNTIME_DIR/gpty.sock"
+        ;;
 esac
 # A developer's shell may carry a secret this instance has no client for.
 unset GPTY_SECRET
@@ -103,14 +112,23 @@ if [[ -z "$SCRIPTS_RAN" || -z "$TESTS_RAN" ]]; then
     PROBLEMS+=("no Run Summary in the output — the run stopped before it finished")
 fi
 
-# Pending tests are allowed and printed: a fixture that needs a POSIX shell or a
-# file mode has no Windows meaning, and hiding those is worse than showing them.
+# Pending tests are allowed on Windows only, and printed: a fixture that needs a
+# POSIX shell or a file mode has no Windows meaning, and hiding those is worse
+# than showing them. Everywhere else a pending test is a skip nobody decided
+# on — a missing extension, an absent fixture — and a suite that skips quietly
+# reports green for code it never ran, so it fails the run instead.
 # A *risky* test — one that ran without asserting — is a real smell, so it fails.
 RISKY="$(grep -c '\[Risky\]' "$PLAIN" || true)"
 PENDING="$(grep -c '\[Pending\]' "$PLAIN" || true)"
 PENDING_TOTAL="0"
 if [[ "$RISKY" != "0" ]]; then
     PROBLEMS+=("a test ran without asserting ([Risky])")
+fi
+if [[ "$PENDING" != "0" && "$IS_WINDOWS" != "1" ]]; then
+    PROBLEMS+=("pending tests are a Windows-only allowance, but these skipped on $(uname -s):")
+    while IFS= read -r line; do
+        PROBLEMS+=("    $line")
+    done < <(grep -E '^ *\[Pending\]' "$PLAIN" | sort -u)
 fi
 if grep -q -- '---- All tests passed! ----' "$PLAIN"; then
     :
