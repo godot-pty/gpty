@@ -114,6 +114,29 @@ func test_click_activates_non_terminal_pane():
 	# Wait out the deferred concept push timer so it doesn't resume after free.
 	await get_tree().create_timer(2.1).timeout
 
+## The view refresh runs on every workspace switch and profile activation,
+## and the active pane may be a read-only one. It used to call
+## `last_body.grab_focus()`, which is an engine error on a pane that cannot
+## take focus (GUT fails this test for it) — the one focus rule lives in
+## `activate_pane`.
+func test_applying_the_active_workspace_view_keeps_a_read_only_pane_active():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	ws._execute_command("new code viewer")
+	var body = ws._tm.last_body
+	assert_not_null(body, "the palette command must leave an active pane")
+	assert_eq(body._pane_type(), "code_viewer", "it must be the pane that was spawned")
+
+	ws._apply_active_workspace_view()
+	assert_eq(ws._tm.last_body, body,
+		"refreshing the view must not drop the active read-only pane")
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
 func test_add_workspace_starts_blank():
 	var ws = WorkspaceScript.new()
 	_ws = ws

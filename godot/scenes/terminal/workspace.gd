@@ -93,7 +93,10 @@ func _ready():
 		var shortcut := str(info.get("shortcut", ""))
 		if shortcut.strip_edges() == "":
 			continue
-		ShortcutManager.register("app:new_" + key, shortcut, func(): var b = _spawn_pane(key); if b: b.grab_focus())
+		# `activate_pane`, not `grab_focus()`: only terminals can take keyboard
+		# focus, so grabbing it on a new read-only pane is an engine error and
+		# leaves the pane unrecorded as active (so "close active" skips it).
+		ShortcutManager.register("app:new_" + key, shortcut, func(): var b = _spawn_pane(key); if b: activate_pane(b))
 	ShortcutManager.register("app:close_pane", "Ctrl+Shift+W", func(): _kill_last())
 	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _toggle_sidebar)
 	ShortcutManager.register("app:toggle_palette", "Ctrl+Shift+P", _toggle_palette)
@@ -610,8 +613,11 @@ func _apply_active_workspace_view():
 	_list()
 	_sync_pane_titlebars()
 	_refresh_status_bar()
+	# The same rule as every other activation path: a terminal takes the
+	# keyboard, a read-only pane releases it. A bare `grab_focus()` here raised
+	# an engine error for the latter on every workspace switch.
 	if _tm.last_body and is_instance_valid(_tm.last_body):
-		_tm.last_body.grab_focus()
+		activate_pane(_tm.last_body)
 
 func _switch_workspace(idx: int):
 	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size() or idx == _active:
@@ -1096,7 +1102,8 @@ func _execute_command(cmd: String):
 		for key in PaneTypes.ALL:
 			if PaneTypes.ALL[key]["name"].to_lower() == type_label:
 				var body = _spawn_pane(key)
-				if body: body.grab_focus()
+				# Same rule as the "new pane" shortcuts: see `activate_pane`.
+				if body: activate_pane(body)
 				return
 		return
 	match cmd:
