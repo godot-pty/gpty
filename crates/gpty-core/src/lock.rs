@@ -86,29 +86,110 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    #[test]
-    fn a_poisoned_lock_is_skipped_instead_of_panicking() {
+    /// How many times `what` is on the reported list. Every test below uses a
+    /// name of its own, because `REPORTED` is process-wide and cargo runs the
+    /// tests of one binary in parallel.
+    fn reported(what: &str) -> usize {
+        REPORTED
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|seen| **seen == what)
+            .count()
+    }
+
+    /// Poison a lock the only way one can be poisoned: a holder that panics.
+    fn poisoned_mutex() -> Arc<Mutex<i32>> {
         let mutex = Arc::new(Mutex::new(7));
         let poisoner = Arc::clone(&mutex);
-        // Poison it the only way a lock can be poisoned.
         let _ = std::thread::spawn(move || {
             let _guard = poisoner.lock().unwrap();
             panic!("holder dies");
         })
         .join();
+        mutex
+    }
 
-        assert!(
-            lock_or_warn(&mutex, "test lock is absent").is_none(),
-            "the caller must be able to skip instead of panicking"
-        );
-        // Reporting is idempotent: the second occurrence is not re-logged.
-        assert!(lock_or_warn(&mutex, "test lock is absent").is_none());
+    fn poisoned_rwlock() -> Arc<RwLock<i32>> {
+        let lock = Arc::new(RwLock::new(7));
+        let poisoner = Arc::clone(&lock);
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoner.write().unwrap();
+            panic!("writer dies");
+        })
+        .join();
+        lock
     }
 
     #[test]
-    fn a_healthy_lock_is_handed_out() {
+    fn a_poisoned_lock_is_skipped_instead_of_panicking() {
+        let mutex = poisoned_mutex();
+        assert!(
+            lock_or_warn(&mutex, "lock test: skipped mutex").is_none(),
+            "the caller must be able to skip instead of panicking"
+        );
+    }
+
+    #[test]
+    fn a_poisoned_lock_is_reported_once_however_often_it_is_hit() {
+        let what = "lock test: reported once";
+        let mutex = poisoned_mutex();
+        assert_eq!(
+            reported(what),
+            0,
+            "nothing is reported before the first hit"
+        );
+        for _ in 0..5 {
+            assert!(lock_or_warn(&mutex, what).is_none());
+        }
+        assert_eq!(
+            reported(what),
+            1,
+            "a per-frame call site must not flood the log: one report, five hits"
+        );
+    }
+
+    #[test]
+    fn each_distinct_lock_is_reported_separately() {
+        let (a, b) = ("lock test: distinct a", "lock test: distinct b");
+        let mutex = poisoned_mutex();
+        assert!(lock_or_warn(&mutex, a).is_none());
+        assert_eq!((reported(a), reported(b)), (1, 0));
+        assert!(lock_or_warn(&mutex, b).is_none());
+        assert_eq!(
+            (reported(a), reported(b)),
+            (1, 1),
+            "the second name is not swallowed by the first's report"
+        );
+    }
+
+    #[test]
+    fn a_healthy_lock_is_handed_out_and_never_reported() {
+        let what = "lock test: healthy";
         let mutex = Mutex::new(7);
-        let guard = lock_or_warn(&mutex, "healthy test lock").expect("lock");
-        assert_eq!(*guard, 7);
+        {
+            let mut guard = lock_or_warn(&mutex, what).expect("a healthy lock is handed out");
+            *guard += 1;
+        }
+        assert_eq!(*mutex.lock().unwrap(), 8, "the guard writes through");
+        assert_eq!(reported(what), 0, "a healthy lock is not a diagnostic");
+    }
+
+    #[test]
+    fn a_poisoned_rwlock_is_skipped_for_read_and_write_alike() {
+        let (r, w) = ("lock test: rw read", "lock test: rw write");
+        let lock = poisoned_rwlock();
+        assert!(read_or_warn(&lock, r).is_none(), "read skips");
+        assert!(write_or_warn(&lock, w).is_none(), "write skips");
+        assert_eq!((reported(r), reported(w)), (1, 1), "and each is reported");
+    }
+
+    #[test]
+    fn a_healthy_rwlock_is_handed_out_for_read_and_write() {
+        let (r, w) = ("lock test: healthy read", "lock test: healthy write");
+        let lock = RwLock::new(7);
+        *write_or_warn(&lock, w).expect("write guard") += 1;
+        assert_eq!(*read_or_warn(&lock, r).expect("read guard"), 8);
+        assert_eq!((reported(r), reported(w)), (0, 0));
     }
 }

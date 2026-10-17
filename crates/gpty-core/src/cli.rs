@@ -660,7 +660,7 @@ mod process_tests {
     }
 
     #[test]
-    fn spawn_refuses_a_program_another_user_could_have_written() {
+    fn spawn_refuses_a_missing_absolute_path_and_names_it() {
         let error = match CliProcess::spawn("/nonexistent/gpty-cli-view-test", &[]) {
             Ok(_) => panic!("a missing absolute path must be refused"),
             Err(error) => error,
@@ -669,5 +669,39 @@ mod process_tests {
             error.contains("/nonexistent/gpty-cli-view-test"),
             "the refusal must name the program: {error}"
         );
+    }
+
+    #[test]
+    fn spawn_refuses_a_program_another_user_could_have_written() {
+        use std::os::unix::fs::PermissionsExt;
+        // A real, runnable script — so the only thing that can stop it is the
+        // rule under test, not a missing file or a bad interpreter.
+        let path =
+            std::env::temp_dir().join(format!("gpty_cli_view_writable_{}", std::process::id()));
+        std::fs::write(&path, b"#!/bin/sh\nexit 0\n").unwrap();
+        let program = path.to_string_lossy().to_string();
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let refused = CliProcess::spawn(&program, &[]);
+
+        // The control: the same file, private to its owner, runs. Without it
+        // the refusal above could be any failure at all.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let accepted = CliProcess::spawn(&program, &[]);
+
+        // Remove the file before asserting, so a failing run cannot leave a
+        // world-writable executable behind.
+        let _ = std::fs::remove_file(&path);
+
+        let error = match refused {
+            Ok(_) => panic!("a group/other-writable program must be refused"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("group/other-writable executable") && error.contains(&program),
+            "the refusal must name the rule and the program: {error}"
+        );
+        let mut process = accepted.expect("the same program at 0755 must spawn");
+        process.stop();
     }
 }

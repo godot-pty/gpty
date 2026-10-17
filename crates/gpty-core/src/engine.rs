@@ -1009,21 +1009,21 @@ mod tests {
 
         spawned.handle.send_line("echo hello");
 
+        // The shell's *output* is a line that is exactly "hello". The typed
+        // command line ("… echo hello") contains the word too, and a prompt
+        // alone contains 'e' and 'h', so only a whole-line match shows the
+        // command ran and its output reached the grid.
         let rendered = wait_until(Duration::from_secs(10), || {
             spawned
                 .grid
                 .lock()
-                .map(|grid| {
-                    grid.renderable_rows()
-                        .iter()
-                        .any(|r| r.iter().any(|c| c.ch == 'e' || c.ch == 'h'))
-                })
+                .map(|grid| visible_lines(&grid).iter().any(|line| line == "hello"))
                 .unwrap_or(false)
         })
         .await;
         assert!(
             rendered,
-            "Grid should have received and rendered the input text"
+            "the output of `echo hello` must reach the grid as its own line"
         );
     }
 
@@ -1318,6 +1318,17 @@ mod tests {
         );
     }
 
+    /// A declaration with a value outside the whitelist is ignored — and, as
+    /// the test's own control, the parser keeps working around it.
+    ///
+    /// The old form of this test ran a lone bad declaration and expected
+    /// `Idle`, which is also what a parser that handled *no* declaration
+    /// would leave — it could not fail for the reason it was written. This
+    /// one declares a valid state, then an unknown value, then another valid
+    /// state, spaced past the 500 ms rate limit so the bad value is judged on
+    /// its content and not discarded for arriving too soon. Sampling the state
+    /// throughout shows the bad value neither reset it nor wedged the parser,
+    /// and the grid shows the sequence was consumed rather than printed.
     #[cfg(unix)]
     #[tokio::test]
     async fn osc_declaration_ignores_unknown_values() {
@@ -1328,7 +1339,12 @@ mod tests {
             .spawn_terminal_with_grid(
                 config,
                 "sh",
-                &["-c", "printf '\\033]gpty_state=evi1\\007'; sleep 1"],
+                &[
+                    "-c",
+                    "printf '\\033]gpty_state=working\\007'; sleep 0.7; \
+                     printf '\\033]gpty_state=evi1\\007'; sleep 0.7; \
+                     printf '\\033]gpty_state=completed\\007'; sleep 1",
+                ],
                 &[],
                 &[],
                 24,
@@ -1336,10 +1352,34 @@ mod tests {
             )
             .await
             .expect("Failed to spawn terminal");
+        assert_eq!(wait_for_state(&spawned).await, AgentState::Working);
+
+        let mut seen = vec![AgentState::Working];
+        let reached_completed = wait_until(Duration::from_secs(20), || {
+            let state = spawned
+                .grid
+                .lock()
+                .map(|grid| grid.agent_state.state)
+                .unwrap_or(AgentState::Idle);
+            if seen.last() != Some(&state) {
+                seen.push(state);
+            }
+            state == AgentState::Completed
+        })
+        .await;
+        assert!(
+            reached_completed,
+            "a valid declaration after the bad one must still be accepted (saw {seen:?})"
+        );
         assert_eq!(
-            wait_for_state(&spawned).await,
-            AgentState::Idle,
-            "non-whitelisted declaration values must be ignored"
+            seen,
+            [AgentState::Working, AgentState::Completed],
+            "the unknown value must not move the state through anything else"
+        );
+        let screen = visible_lines(&spawned.grid.lock().unwrap()).join("\n");
+        assert!(
+            !screen.contains("evi1") && !screen.contains("gpty_state"),
+            "the declaration is consumed as an escape sequence, never printed: {screen:?}"
         );
     }
 
@@ -1411,12 +1451,40 @@ mod tests {
         {
             let mut locked = bufs.lock().unwrap();
             locked.insert(7, vec![b"hello".to_vec(), b"world".to_vec()]);
+            locked.insert(8, vec![b"other".to_vec()]);
         }
-        let result = session.take_chunks(&7);
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().len(), 2);
-        // Entry should be removed
-        assert!(bufs.lock().unwrap().get(&7).is_none());
+        assert_eq!(
+            session.take_chunks(&7),
+            Some(vec![b"hello".to_vec(), b"world".to_vec()]),
+            "the chunks come back whole and in order"
+        );
+        assert!(
+            bufs.lock().unwrap().get(&7).is_none(),
+            "the entry is removed"
+        );
+        assert_eq!(
+            bufs.lock().unwrap().get(&8),
+            Some(&vec![b"other".to_vec()]),
+            "taking one capture must not touch another"
+        );
+    }
+
+    /// What the pane shows: each row as text, trailing blanks dropped, empty
+    /// rows omitted. Asserting on whole lines — not on "some cell holds this
+    /// letter" — is what tells "only the prompt is replayed" from "everything
+    /// is".
+    fn visible_lines(grid: &TermGrid) -> Vec<String> {
+        grid.renderable_rows()
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.ch)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .filter(|line| !line.is_empty())
+            .collect()
     }
 
     #[test]
@@ -1432,11 +1500,8 @@ mod tests {
         handle_command(&input, &grid_opt, &session);
         // After flush, chunks are consumed
         assert!(bufs.lock().unwrap().get(&1).is_none());
-        // Grid should have the flushed content
-        let locked = grid.lock().unwrap();
-        let rows = locked.renderable_rows();
-        let has_hello = rows.iter().any(|r| r.iter().any(|c| c.ch == 'h'));
-        assert!(has_hello, "Grid should contain flushed text");
+        // The flushed text, and only it, is on screen.
+        assert_eq!(visible_lines(&grid.lock().unwrap()), ["hello"]);
     }
 
     /// A resize (SIGWINCH) must NOT finalize an active UntilStop capture.
@@ -1633,10 +1698,13 @@ mod tests {
         let input = StdinInput::AcknowledgeCapture(2);
         handle_command(&input, &grid_opt, &session);
         assert!(bufs.lock().unwrap().get(&2).is_none());
-        let locked = grid.lock().unwrap();
-        let rows = locked.renderable_rows();
-        let prompt_found = rows.iter().any(|r| r.iter().any(|c| c.ch == 'p'));
-        assert!(prompt_found, "Grid should contain the restored prompt");
+        // Acknowledged output was consumed by its receiver, so the pane gets
+        // back the prompt line and nothing before it.
+        assert_eq!(
+            visible_lines(&grid.lock().unwrap()),
+            ["$ prompt here"],
+            "only the trailing prompt is replayed, on a fresh line"
+        );
     }
 
     #[test]
@@ -1652,6 +1720,33 @@ mod tests {
         let input = StdinInput::AcknowledgeCapture(3);
         handle_command(&input, &grid_opt, &session);
         assert!(bufs.lock().unwrap().get(&3).is_none());
+        assert_eq!(
+            visible_lines(&grid.lock().unwrap()),
+            ["$"],
+            "a buffer that is all prompt is replayed whole"
+        );
+    }
+
+    #[test]
+    fn test_handle_command_acknowledge_with_no_prompt_replays_nothing() {
+        let grid = Arc::new(Mutex::new(TermGrid::new(24, 80)));
+        let grid_opt = Some(grid.clone());
+        let (session, bufs, _) = test_session();
+        {
+            // Ends on a newline: there is no prompt after the last line, so
+            // there is nothing to restore — and no stray blank line either.
+            let mut locked = bufs.lock().unwrap();
+            locked.insert(4, vec![b"captured\nlines\n".to_vec()]);
+        }
+        handle_command(&StdinInput::AcknowledgeCapture(4), &grid_opt, &session);
+        assert!(bufs.lock().unwrap().get(&4).is_none());
+        let locked = grid.lock().unwrap();
+        assert_eq!(visible_lines(&locked), Vec::<String>::new());
+        assert_eq!(
+            locked.cursor_position(),
+            Some((0, 0)),
+            "nothing was fed, so the cursor did not move"
+        );
     }
 
     #[test]
@@ -1666,19 +1761,23 @@ mod tests {
         }
         // Feed content into the grid so we can verify it's untouched
         feed_grid(&grid_opt, b"original content\r\n");
+        let before = visible_lines(&grid.lock().unwrap());
+        assert_eq!(before, ["original content"]);
         // Line variant is not FlushCapture or AcknowledgeCapture
         let input = StdinInput::Line("some command".into());
         handle_command(&input, &grid_opt, &session);
         // Buffers must be unchanged (unknown variant doesn't consume)
-        assert!(
-            bufs.lock().unwrap().get(&1).is_some(),
+        assert_eq!(
+            bufs.lock().unwrap().get(&1),
+            Some(&vec![b"captured data".to_vec()]),
             "Unknown variant must not touch capture buffers"
         );
         // Grid content must be unchanged
-        let locked = grid.lock().unwrap();
-        let rows = locked.renderable_rows();
-        let has_original = rows.iter().any(|r| r.iter().any(|c| c.ch == 'o'));
-        assert!(has_original, "Unknown variant must not alter the grid");
+        assert_eq!(
+            visible_lines(&grid.lock().unwrap()),
+            before,
+            "Unknown variant must not alter the grid"
+        );
     }
 
     // ── CaptureSession lifecycle ─────────────────────────────────
