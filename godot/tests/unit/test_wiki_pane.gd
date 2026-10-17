@@ -243,15 +243,43 @@ func test_opening_a_note_fills_the_editor_and_saving_writes_it_back():
 func test_the_preview_follows_the_buffer_live():
 	_write(_tmp.path_join("note.md"), "# First\n")
 	var pane := _make_pane(_tmp)
+	pane._reader.settle_delay = 0.05
 	pane._list.item_activated.emit(0)
 	assert_eq(pane.view_mode, "split", "split is the default view")
 	assert_true(pane._editor.visible and pane._reader.visible)
 
 	await _type_into(pane, "# Renamed\n\nlive body\n")
-	await wait_seconds(0.2)  # MarkdownView coalesces renders at 75 ms
+	await wait_seconds(0.2)  # the preview settles once the edit stops
 	assert_string_contains(pane._reader.get_parsed_text(), "Renamed",
 		"the preview must render the buffer, not the file")
 	assert_string_contains(pane._reader.get_parsed_text(), "live body")
+
+
+func test_a_settled_preview_waits_for_the_typing_to_stop():
+	# The preview renders on settle, not on the streaming throttle: every edit
+	# restarts its window, so a typing run over a large note never queues the
+	# render (and the label's shape pass that follows it) under the user's
+	# fingers — a throttle would have rendered 75 ms after the first edit.
+	_write(_tmp.path_join("note.md"), "# First\n")
+	var pane := _make_pane(_tmp)
+	pane._reader.settle_delay = 0.3
+	pane._list.item_activated.emit(0)
+	assert_string_contains(pane._reader.get_parsed_text(), "First",
+		"opening the note shows the buffer at once")
+
+	await _type_into(pane, "# Second\n")
+	await wait_seconds(0.2)
+	assert_string_contains(pane._reader.get_parsed_text(), "First",
+		"a render inside the quiet window is what the settle exists to prevent")
+
+	await _type_into(pane, "# Third\n")
+	await wait_seconds(0.15)
+	assert_string_contains(pane._reader.get_parsed_text(), "First",
+		"each edit restarts the window")
+
+	await wait_seconds(0.4)
+	assert_string_contains(pane._reader.get_parsed_text(), "Third",
+		"once the buffer is quiet the preview catches up")
 
 
 func test_view_modes_show_the_editor_and_preview_independently():

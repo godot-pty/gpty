@@ -39,6 +39,20 @@ use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, T
 /// screen — `edit` mode renders nothing, and a document is only re-rendered
 /// when the buffer changes — which is why the panes keep the preview
 /// optional rather than making it the editor.
+///
+/// The *shape* pass that follows a render (in the frame after the text lands)
+/// is the third cost, and it is the one that can stop being linear: Godot lays
+/// a `[ul]`/`[ol]` list out superlinearly in the number of items, so a
+/// list-dense document is the worst case. Measured (headless, the Godot 4.7.2
+/// binary the app ships against, ~1.7 MiB of rendered BBCode, one tag form per
+/// document): two-item lists 38915 ms — and a real 1 MiB note 146705 ms —
+/// against 819 ms for that same rendered text with the list tags stripped and
+/// 0.5–1.3 s for every other construct (headings, quotes, inline code, links,
+/// tables). So this renderer emits **no list tags at all**: each item is a
+/// `• `/`N. ` line inside one `[indent]` per list, which renders identically
+/// (checked against the tag form side by side) and keeps the layout linear —
+/// a `[ul]` in this output is a freeze measured in minutes, not a style
+/// preference.
 const MAX_MARKDOWN_BYTES: usize = 1 << 20;
 
 /// One render's result: the BBCode, and the source it came from.
@@ -106,6 +120,7 @@ fn render_markdown(markdown: &str) -> Rendered {
 
     let mut out = String::with_capacity(source.len() + source.len() / 4);
     let mut safe_links = Vec::new();
+    let mut lists: Vec<OpenList> = Vec::new();
     for event in Parser::new_ext(source, options) {
         match event {
             Event::Start(Tag::Link { dest_url, .. }) => {
@@ -126,8 +141,8 @@ fn render_markdown(markdown: &str) -> Rendered {
                     "[/u]"
                 });
             }
-            Event::Start(tag) => start_tag(&mut out, tag),
-            Event::End(tag) => end_tag(&mut out, tag),
+            Event::Start(tag) => start_tag(&mut out, tag, &mut lists),
+            Event::End(tag) => end_tag(&mut out, tag, &mut lists),
             Event::Text(text) => escape_bbcode_into(&mut out, &text),
             Event::Code(text) => {
                 out.push_str("[code]");
@@ -160,7 +175,17 @@ fn render_markdown(markdown: &str) -> Rendered {
     }
 }
 
-fn start_tag(out: &mut String, tag: Tag<'_>) {
+/// One open list, so an item can carry its own bullet or number.
+///
+/// This state exists because the list *tags* are not used (see the module
+/// docs): with `[indent]` + a literal prefix the numbering is ours, which also
+/// means a list starting at 3 renders as `3.` rather than as `[ol]`'s 1.
+struct OpenList {
+    ordered: bool,
+    next: u64,
+}
+
+fn start_tag(out: &mut String, tag: Tag<'_>, lists: &mut Vec<OpenList>) {
     match tag {
         Tag::Paragraph => {}
         Tag::Heading { level, .. } => {
@@ -180,15 +205,35 @@ fn start_tag(out: &mut String, tag: Tag<'_>) {
         }
         Tag::HtmlBlock => {}
         Tag::List(start) => {
-            // Godot 4.7 BBCode has no [ol start=N] param; the unknown param
-            // would render as literal text. Plain [ol] keeps lists valid.
-            if start.is_some() {
-                out.push_str("[ol]");
-            } else {
-                out.push_str("[ul]");
+            // No `[ul]`/`[ol]`: Godot's list layout is superlinear in the
+            // item count and this output feeds a live preview (the module
+            // docs carry the measured 38915 ms → 819 ms difference), so a
+            // list is one `[indent]` plus a literal prefix per item. A nested
+            // list opens its own indent, which is what the nested tag did.
+            if !lists.is_empty() && !out.ends_with('\n') {
+                // A nested list is a block of its own; the outer item's text
+                // does not run into it. A loose item's paragraph already
+                // ended a line, so this only fills the gap a tight item
+                // leaves (and never doubles a blank line).
+                out.push('\n');
+            }
+            lists.push(OpenList {
+                ordered: start.is_some(),
+                next: start.unwrap_or(1),
+            });
+            out.push_str("[indent]");
+        }
+        Tag::Item => {
+            if let Some(list) = lists.last_mut() {
+                if list.ordered {
+                    out.push_str(&list.next.to_string());
+                    out.push_str(". ");
+                    list.next += 1;
+                } else {
+                    out.push_str("• ");
+                }
             }
         }
-        Tag::Item => {}
         Tag::FootnoteDefinition(name) => {
             out.push_str("[b]");
             escape_bbcode_into(out, &name);
@@ -215,15 +260,16 @@ fn start_tag(out: &mut String, tag: Tag<'_>) {
     }
 }
 
-fn end_tag(out: &mut String, tag: TagEnd) {
+fn end_tag(out: &mut String, tag: TagEnd, lists: &mut Vec<OpenList>) {
     match tag {
         TagEnd::Paragraph => out.push_str("\n\n"),
         TagEnd::Heading(_) => out.push_str("[/b][/font_size]\n"),
         TagEnd::BlockQuote(_) => out.push_str("[/indent]\n"),
         TagEnd::CodeBlock => out.push_str("[/code]\n\n"),
         TagEnd::HtmlBlock => {}
-        TagEnd::List(ordered) => {
-            out.push_str(if ordered { "[/ol]\n" } else { "[/ul]\n" });
+        TagEnd::List(_) => {
+            lists.pop();
+            out.push_str("[/indent]\n");
         }
         TagEnd::Item => out.push('\n'),
         TagEnd::FootnoteDefinition => out.push('\n'),
@@ -315,10 +361,42 @@ mod tests {
     }
 
     #[test]
-    fn ordered_lists_emit_plain_ol_tag() {
-        let rendered = render_markdown("3. third\n4. fourth").text;
-        assert!(rendered.contains("[ol]"));
-        assert!(!rendered.contains("start="));
+    fn lists_are_indented_bullets_and_our_own_numbers() {
+        // The list *tags* are never emitted (see the module docs: Godot's
+        // list layout is superlinear, and the live preview pays it on every
+        // update), so the bullet and the number are this renderer's own text.
+        // Numbering from the source's own start is a side effect: `[ol]`
+        // could not carry a start and rendered `3.` as `1.`.
+        let rendered = render_markdown("- one\n- two\n\n3. third\n4. fourth").text;
+        assert!(
+            !rendered.contains("[ul]") && !rendered.contains("[ol]"),
+            "no list tag may be emitted: {rendered}"
+        );
+        assert!(
+            rendered.contains("[indent]• one\n• two\n[/indent]"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("[indent]3. third\n4. fourth\n[/indent]"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn a_nested_list_nests_its_indent() {
+        let rendered = render_markdown("- outer\n  - inner\n").text;
+        assert!(
+            rendered.contains("• outer\n[indent]• inner\n[/indent]"),
+            "a nested list must open its own indent under its item: {rendered}"
+        );
+        // A loose item ends its paragraph on a blank line already; the nested
+        // list must not add a second one.
+        let loose = render_markdown("- outer\n\n  - inner\n").text;
+        assert!(
+            loose.contains("• outer\n\n[indent]• inner"),
+            "a loose item's paragraph already ended the line: {loose}"
+        );
+        assert!(!loose.contains("\n\n\n"), "no blank line doubled: {loose}");
     }
 
     #[test]

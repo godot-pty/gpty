@@ -469,11 +469,19 @@ func _sync_source_notice() -> void:
 ## A TextEdit change — user typing or a programmatic `text` assignment; the
 ## signal arrives one frame after the edit, so this recomputes from the
 ## current buffer rather than trusting the signal's timing.
+##
+## The preview is told to render on *settle*, not on the streaming throttle: a
+## keystroke must never queue a render, because a preview update on a large
+## note costs a full render plus the label's shape pass (measured: `GptyMarkdown`
+## render ~14 ms for 1 MiB in release, and a shape pass that this renderer's own
+## output now keeps linear at ~0.8 s for 1 MiB). The pane switches modes and
+## opens notes with `render_now` — those are explicit acts and must show the
+## current buffer at once.
 func _on_editor_changed() -> void:
 	_update_dirty()
 	_touch_scratch()
 	if _preview_visible():
-		_reader.set_markdown(_preview_text())
+		_reader.set_markdown_settled(_preview_text())
 
 ## Ctrl+S saves, the same as the button — an editor that only saves by mouse
 ## is a trap for anyone who lives on the keyboard.

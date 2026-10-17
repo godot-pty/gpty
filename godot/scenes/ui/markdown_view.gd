@@ -14,6 +14,15 @@ extends RichTextLabel
 
 const RENDER_DELAY := 0.075
 
+## How long an editor's buffer must be quiet before its preview renders — see
+## `set_markdown_settled`. A var rather than a const so a test can shorten the
+## window it is not testing (the pane's `_scratch_timer.wait_time` is poked
+## the same way). Chosen to outlast the pauses *inside* a typing run: a
+## preview update on a large document costs a full render plus the label's
+## shape pass, so firing between words would put that cost back under the
+## user's fingers.
+var settle_delay := 0.4
+
 ## Emitted after a pending render is applied. Streaming owners (the Reasoning
 ## accordion) use it to re-sync layout once the coalesced text has landed.
 signal rendered
@@ -57,8 +66,26 @@ func set_markdown(markdown: String):
 	if _render_timer == null:
 		return
 	# Throttle rapid streaming updates; restarting an active timer would never render.
+	_render_timer.wait_time = RENDER_DELAY
 	if _render_timer.is_stopped():
 		_render_timer.start()
+
+## An editor's buffer: render once the source *settles*.
+##
+## `set_markdown`'s timer is a throttle — an active timer is not restarted, so
+## a long stream (a model's tokens) still renders regularly — while this
+## restarts it on every call: nothing renders while typing continues, and one
+## render lands when it stops. That is what a live preview of a large document
+## wants, because the expensive thing is the render plus the label's shape
+## pass, not the keystroke — see the module docs of `GptyMarkdown` for the
+## measured shape cost of the markup that used to make it superlinear. The
+## quiet window is [`settle_delay`].
+func set_markdown_settled(markdown: String):
+	_pending_markdown = markdown
+	if _render_timer == null:
+		return
+	_render_timer.wait_time = settle_delay
+	_render_timer.start()
 
 func render_now(markdown: String):
 	_pending_markdown = markdown
