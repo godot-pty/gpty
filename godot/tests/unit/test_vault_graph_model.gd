@@ -207,3 +207,111 @@ func test_hit_test_returns_nothing_outside_the_radius():
 	var nodes := [_node("a.md")]
 	var positions := {"a.md": Vector2(10.0, 10.0)}
 	assert_eq(VaultGraphModel.hit_test(nodes, positions, Vector2(40.0, 40.0), 5.0), "")
+
+
+# ── Declared weights ───────────────────────────────────────────────────
+
+func test_a_declared_weight_overrides_the_measured_count_for_display():
+	var parsed := VaultGraphModel.parse(
+		_answer([_node("a.md"), _node("b.md")], [_edge("a.md", "b.md", 50)]),
+		{"a.md": {"b.md": 3}}
+	)
+	var edge: Dictionary = parsed["edges"][0]
+	assert_eq(edge["declared"], 3)
+	assert_eq(edge["weight"], 3, "the authored number is what the canvas draws")
+	assert_eq(edge["count"], 50, "the measured count is never overwritten")
+
+
+func test_an_absent_declaration_falls_back_to_the_measured_count():
+	var parsed := VaultGraphModel.parse(
+		_answer([_node("a.md"), _node("b.md")], [_edge("a.md", "b.md", 7)]),
+		{"a.md": {"elsewhere.md": 90}}
+	)
+	var edge: Dictionary = parsed["edges"][0]
+	assert_eq(edge["declared"], 0)
+	assert_eq(edge["weight"], 7)
+
+
+func test_a_pair_takes_the_larger_of_its_two_direction_declarations():
+	var parsed := VaultGraphModel.parse(
+		_answer(
+			[_node("a.md"), _node("b.md")],
+			[_edge("a.md", "b.md", 2), _edge("b.md", "a.md", 2)]
+		),
+		{"a.md": {"b.md": 4}, "b.md": {"a.md": 9}}
+	)
+	var edge: Dictionary = parsed["edges"][0]
+	assert_eq(edge["declared"], 9)
+	assert_eq(edge["weight"], 9)
+	assert_eq(edge["count"], 4, "measured mentions stay their own number")
+
+
+func test_declarations_never_touch_a_ghost_edge():
+	var parsed := VaultGraphModel.parse(
+		_answer(
+			[_node("a.md"), _node("ghost:Missing", "Missing", true)],
+			[_edge("a.md", "ghost:Missing", 1, true)]
+		),
+		{"a.md": {"ghost:Missing": 50}}
+	)
+	var edge: Dictionary = parsed["edges"][0]
+	assert_eq(edge["declared"], 0, "a declaration names two notes, not a missing target")
+	assert_eq(edge["weight"], 1)
+	assert_true(edge["ghost"])
+
+
+func test_apply_weights_clears_back_to_the_measured_count():
+	var parsed := VaultGraphModel.parse(
+		_answer([_node("a.md"), _node("b.md")], [_edge("a.md", "b.md", 6)])
+	)
+	VaultGraphModel.apply_weights(parsed["edges"], {"a.md": {"b.md": 10}})
+	assert_eq(parsed["edges"][0]["weight"], 10)
+	VaultGraphModel.apply_weights(parsed["edges"], {})
+	assert_eq(parsed["edges"][0]["declared"], 0)
+	assert_eq(parsed["edges"][0]["weight"], 6)
+
+
+func test_a_declared_weight_sets_the_stroke_scale():
+	# An override of 1 on a pair mentioned 100 times draws at the bottom of the
+	# range, and a declared 60 draws wider than a measured 5.
+	assert_lt(
+		VaultGraphModel.edge_width(1, 100),
+		VaultGraphModel.edge_width(5, 100)
+	)
+	assert_gt(
+		VaultGraphModel.edge_width(60, 100),
+		VaultGraphModel.edge_width(5, 100)
+	)
+
+
+# ── Edge hit-testing ───────────────────────────────────────────────────
+
+func _drawn_edge(a: String, b: String, declared := 0) -> Dictionary:
+	return {"a": a, "b": b, "ab": 1, "ba": 0, "count": 1, "ghost": false,
+		"declared": declared, "weight": declared if declared > 0 else 1}
+
+
+func test_hit_test_edge_measures_distance_to_the_line_not_its_midpoint():
+	var edges := [_drawn_edge("a.md", "b.md")]
+	var positions := {"a.md": Vector2(0.0, 0.0), "b.md": Vector2(100.0, 0.0)}
+	# Near the line but far from the midpoint: still the edge.
+	var hit := VaultGraphModel.hit_test_edge(edges, positions, Vector2(10.0, 2.0), 5.0)
+	assert_eq(str(hit.get("a", "")), "a.md")
+	assert_eq(str(hit.get("b", "")), "b.md")
+	# Beyond the radius.
+	assert_true(VaultGraphModel.hit_test_edge(edges, positions, Vector2(10.0, 9.0), 5.0).is_empty())
+
+
+func test_hit_test_edge_reads_a_zero_length_segment_as_a_point():
+	var edges := [_drawn_edge("a.md", "b.md")]
+	var positions := {"a.md": Vector2(4.0, 4.0), "b.md": Vector2(4.0, 4.0)}
+	assert_false(VaultGraphModel.hit_test_edge(edges, positions, Vector2(5.0, 4.0), 2.0).is_empty())
+
+
+func test_hit_test_edge_breaks_overlapping_ties_by_pair_id():
+	var edges := [_drawn_edge("b.md", "c.md"), _drawn_edge("a.md", "b.md")]
+	var positions := {
+		"a.md": Vector2(0.0, 0.0), "b.md": Vector2(100.0, 0.0), "c.md": Vector2(200.0, 0.0),
+	}
+	var hit := VaultGraphModel.hit_test_edge(edges, positions, Vector2(50.0, 0.0), 5.0)
+	assert_eq(str(hit.get("a", "")), "a.md", "the a-then-b order is deterministic")

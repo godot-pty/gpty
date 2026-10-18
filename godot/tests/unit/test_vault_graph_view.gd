@@ -169,3 +169,93 @@ func test_relayout_returns_to_the_deterministic_arrangement():
 	for id in fresh:
 		assert_true((view.positions[id] as Vector2).is_equal_approx(fresh[id]),
 			"%s must match the model's layout" % id)
+
+
+# ── The declared-weight control ────────────────────────────────────────
+
+## Put the two drawn pairs on known screen coordinates, so a test point is a
+## point and not a fit-dependent guess.
+func _pin_geometry(view: VaultGraphView) -> void:
+	view._zoom = 1.0
+	view._pan = Vector2.ZERO
+	view.positions["a.md"] = Vector2(100.0, 100.0)
+	view.positions["b.md"] = Vector2(300.0, 100.0)
+	view.positions["ghost:Missing"] = Vector2(100.0, 300.0)
+
+
+func _edge_between(view: VaultGraphView, a: String, b: String) -> Dictionary:
+	for edge in view.edges:
+		if edge is Dictionary and str(edge["a"]) == a and str(edge["b"]) == b:
+			return edge
+	return {}
+
+
+func test_edge_at_finds_the_segment_under_the_pointer():
+	var view := _make_view()
+	_pin_geometry(view)
+	var hit := view._edge_at(Vector2(200.0, 102.0))
+	assert_eq(str(hit.get("a", "")), "a.md")
+	assert_eq(str(hit.get("b", "")), "b.md")
+	assert_true(view._edge_at(Vector2(200.0, 160.0)).is_empty(),
+		"well off the line is not the edge")
+
+
+func test_the_edge_menu_requests_a_weight_for_the_pair():
+	var view := _make_view()
+	_pin_geometry(view)
+	watch_signals(view)
+	var edge := view._edge_at(Vector2(200.0, 100.0))
+	view._pending_edge = edge
+	view._on_edge_menu_pressed(0)
+	assert_signal_emitted_with_parameters(
+		view, "weight_set_requested", [edge["a"], edge["b"], 0]
+	)
+
+
+func test_the_edge_menu_reports_the_current_declaration_and_can_clear_it():
+	var view := _make_view()
+	_pin_geometry(view)
+	view.set_weights({"a.md": {"b.md": 12}})
+	var edge := _edge_between(view, "a.md", "b.md")
+	assert_eq(int(edge["declared"]), 12)
+	watch_signals(view)
+	view._pending_edge = edge
+	view._on_edge_menu_pressed(0)
+	assert_signal_emitted_with_parameters(
+		view, "weight_set_requested", ["a.md", "b.md", 12]
+	)
+	view._pending_edge = edge
+	view._on_edge_menu_pressed(1)
+	assert_signal_emitted_with_parameters(view, "weight_cleared", ["a.md", "b.md"])
+
+
+func test_a_ghost_edge_offers_no_weight_control():
+	var view := _make_view()
+	_pin_geometry(view)
+	view._pending_edge = {}
+	view._open_edge_menu(Vector2(100.0, 300.0))
+	assert_true(view._pending_edge.is_empty(),
+		"a declaration names two notes, and a missing target is not one")
+
+
+func test_set_weights_updates_thickness_scale_and_status():
+	var view := _make_view()
+	var edge := _edge_between(view, "a.md", "b.md")
+	assert_eq(int(edge.get("declared", 0)), 0, "a fresh edge has no declaration")
+	view.set_weights({"a.md": {"b.md": 50}})
+	assert_eq(int(edge["declared"]), 50)
+	assert_eq(int(edge["weight"]), 50, "the displayed weight replaced the measured count")
+	assert_eq(view._max_count, 50, "the stroke scale follows the display weights")
+	assert_string_contains(view._status.text, "1 declared")
+	assert_string_contains(view._status.text, "2 links", "the edge set is unchanged")
+
+
+func test_the_edge_menu_opens_for_a_drawn_edge():
+	var view := _make_view()
+	_pin_geometry(view)
+	view._pending_edge = {}
+	view._open_edge_menu(Vector2(200.0, 100.0))
+	assert_false(view._pending_edge.is_empty(),
+		"the edge under the pointer is the menu's target")
+	assert_true(view._edge_menu.visible, "the menu actually opened")
+	view._edge_menu.hide()

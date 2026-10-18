@@ -32,6 +32,7 @@ You are running inside one pane of a gPTY terminal workspace. Use the `gpty` CLI
 | `concept-toggle` | `gpty concept toggle <name>` |
 | `vault-search` | `gpty vault search <vault> <pattern>` |
 | `vault-read` | `gpty vault read <vault> <path>` |
+| `vault-weight` | `gpty vault weight <vault> <src> <target> --weight N` |
 | `version` | `gpty version` |
 
 The CLI starts a GUI on demand for `new-pane` and `layout load`; the MCP
@@ -88,8 +89,9 @@ pane's recent output matches (Rust regex syntax), then prints the matching line.
 
 ### Query the knowledge base (Markdown vault)
 
-Both commands take the vault's absolute directory and are read-only: nothing
-in the vault is written.
+All three commands take the vault's absolute directory. Search and read are
+read-only: nothing in the vault is written. `weight` writes only your own
+declared-weight store (never the vault, never the index) and is display-only.
 
 ```
 gpty vault search ~/notes "ownership lifetimes"   # {results, total, truncated}
@@ -105,6 +107,19 @@ results are partial; on a read it means the note is larger than the 1 MiB
 display cap and the text stops there. A refusal (missing note, path outside
 the vault) is a JSON-RPC error whose `data.code` is stable (`not_found`,
 `bad_path`, …).
+
+### Curate link weights (display only)
+
+```
+gpty vault weight ~/notes notes/a.md notes/b.md --weight 40   # {vault, src, target, weight}
+gpty vault weight ~/notes notes/a.md notes/b.md --clear       # weight: 0
+```
+
+An optional authored override of the link graph's measured mention count, 1–100.
+It changes edge thickness, the canvas layout springs and link-panel ordering —
+nothing else: it can never hide an edge, gate navigation, write to the vault or
+count as consent. The store (`user://link_weights.json`) belongs to the running
+GUI, so this command needs one and never starts it.
 
 ### Fan-out with tags
 

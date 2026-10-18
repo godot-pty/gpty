@@ -256,6 +256,21 @@ mod tests {
             vault_search.get("limit").is_some(),
             "limit must be optional"
         );
+        // The authored layer's write is one directed number plus its clear
+        // switch; all of the pair's paths are required, the number is not.
+        assert_eq!(
+            required_of(tool(&tools, "vault-weight")),
+            ["src", "target", "vault_path"]
+        );
+        let vault_weight = &tool(&tools, "vault-weight")["inputSchema"]["properties"];
+        assert!(
+            vault_weight.get("weight").is_some(),
+            "weight must be optional"
+        );
+        assert!(
+            vault_weight.get("clear").is_some(),
+            "clear must be optional"
+        );
         let new_pane = &tool(&tools, "new-pane")["inputSchema"]["properties"];
         for arg in [
             "pane_type",

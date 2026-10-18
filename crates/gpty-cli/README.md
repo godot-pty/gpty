@@ -60,6 +60,10 @@ gpty broadcast --tags ci --text "make test"
 gpty vault search ~/notes "ownership"
 gpty vault read ~/notes notes/idea.md
 
+# Curate a link's display weight (the wiki pane's graph; needs a running GUI)
+gpty vault weight ~/notes notes/idea.md notes/spec.md --weight 40
+gpty vault weight ~/notes notes/idea.md notes/spec.md --clear
+
 # Manage concept triggers
 gpty concept list
 gpty concept toggle cat_command

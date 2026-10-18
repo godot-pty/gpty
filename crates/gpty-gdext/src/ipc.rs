@@ -293,6 +293,11 @@ pub async fn start_ipc_server_inner(socket_path: &str) {
         "layoutList",
         "conceptList",
         "conceptToggle",
+        // The link graph's authored layer (`gpty vault weight`): the store is
+        // the user's `user://link_weights.json`, which only the GUI can
+        // resolve, so this one vault method is answered by GDScript rather
+        // than beside `vaultSearch`/`vaultRead` in Rust. Display-only.
+        "vaultWeight",
         // Deferred-answer methods (see `fallback_timeout`): the plugin
         // install review waits on a human, pane-wait holds until the
         // pattern matches or its own deadline.

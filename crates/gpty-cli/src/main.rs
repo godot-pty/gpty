@@ -204,7 +204,7 @@ enum Commands {
         text: String,
     },
 
-    /// Search a Markdown vault and read its notes (agent access)
+    /// Search a Markdown vault, read its notes, and curate link weights
     Vault {
         #[command(subcommand)]
         action: VaultAction,
@@ -249,6 +249,26 @@ enum VaultAction {
 
         /// Vault-relative note path (e.g. notes/idea.md)
         path: String,
+    },
+    /// Declare (or clear) a display weight for one vault link
+    Weight {
+        /// Vault directory (absolute path)
+        vault_path: String,
+
+        /// Vault-relative source note (e.g. notes/a.md)
+        src: String,
+
+        /// Vault-relative target note (e.g. notes/b.md)
+        target: String,
+
+        /// Declared weight, 1-100 (overrides the measured mention count for
+        /// edge thickness, layout stiffness and link-panel order only)
+        #[arg(long, conflicts_with = "clear")]
+        weight: Option<i64>,
+
+        /// Remove the declaration instead of setting one
+        #[arg(long, conflicts_with = "weight")]
+        clear: bool,
     },
 }
 

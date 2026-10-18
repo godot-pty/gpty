@@ -1232,3 +1232,117 @@ func test_a_vault_that_cannot_be_opened_hides_the_graph_entry():
 	var pane := _make_pane(_tmp.path_join("not-a-vault"))
 	assert_false(pane._graph_button.visible)
 	assert_false(pane._graph_view.visible)
+
+
+# ── Declared edge weights (the authored layer) ─────────────────────────
+
+func _edge_in_graph(pane: WikiPane, a: String, b: String) -> Dictionary:
+	for edge in pane._graph_view.edges:
+		if edge is Dictionary and str(edge["a"]) == a and str(edge["b"]) == b:
+			return edge
+	return {}
+
+
+func test_a_declared_weight_reaches_the_graph_and_survives_a_requery():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	LinkWeightsStore.set_pair(_tmp, "a.md", "b.md", 33)
+
+	pane._show_graph()
+	var edge := _edge_in_graph(pane, "a.md", "b.md")
+	assert_eq(int(edge["declared"]), 33)
+	assert_eq(int(edge["weight"]), 33)
+	assert_eq(int(edge["count"]), 3, "the measured mentions are still there")
+
+	pane._show_graph()
+	assert_eq(int(_edge_in_graph(pane, "a.md", "b.md")["declared"]), 33,
+		"a re-query re-applies the authored layer")
+
+
+func test_the_graph_set_control_writes_both_directions_and_clears_them():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	pane._show_graph()
+
+	pane._set_declared_weight("a.md", "b.md", 21)
+	assert_eq(LinkWeightsStore.weight_of(_tmp, "a.md", "b.md"), 21)
+	assert_eq(LinkWeightsStore.weight_of(_tmp, "b.md", "a.md"), 21)
+	assert_eq(int(_edge_in_graph(pane, "a.md", "b.md")["declared"]), 21)
+
+	pane._clear_declared_weight("a.md", "b.md")
+	assert_eq(LinkWeightsStore.weight_of(_tmp, "a.md", "b.md"), 0)
+	assert_eq(LinkWeightsStore.weight_of(_tmp, "b.md", "a.md"), 0)
+	assert_eq(int(_edge_in_graph(pane, "a.md", "b.md")["declared"]), 0)
+	assert_eq(int(_edge_in_graph(pane, "a.md", "b.md")["weight"]), 3,
+		"clearing falls back to the measured count")
+
+
+func test_an_invalid_pair_is_refused_without_writing():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	pane._set_declared_weight("a.md", "../escape.md", 10)
+	assert_eq(LinkWeightsStore.vault_weights(_tmp), {},
+		"the store's vocabulary is the last word")
+
+
+func test_showing_a_complete_graph_prunes_vanished_endpoints():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	LinkWeightsStore.set_weight(_tmp, "a.md", "b.md", 5)
+	LinkWeightsStore.set_weight(_tmp, "a.md", "gone.md", 5)
+
+	pane._show_graph()
+	assert_eq(LinkWeightsStore.weight_of(_tmp, "a.md", "b.md"), 5,
+		"a live endpoint keeps its declaration")
+	assert_eq(LinkWeightsStore.weight_of(_tmp, "a.md", "gone.md"), 0,
+		"a note the graph no longer lists is pruned lazily")
+
+
+func test_the_link_panel_puts_a_declared_mention_first():
+	_write(_tmp.path_join("a.md"), "# A\n\n[[b]]\n\n[[c]]\n")
+	_write(_tmp.path_join("b.md"), "# B\n")
+	_write(_tmp.path_join("c.md"), "# C\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("a.md")
+
+	assert_eq(pane._outgoing_rows.get_child_count(), 2)
+	var first := pane._outgoing_rows.get_child(0) as Button
+	var second := pane._outgoing_rows.get_child(1) as Button
+	assert_string_contains(first.text, "b", "the index's order with no declarations")
+
+	LinkWeightsStore.set_weight(_tmp, "a.md", "c.md", 50)
+	pane._refresh_links()
+	first = pane._outgoing_rows.get_child(0) as Button
+	second = pane._outgoing_rows.get_child(1) as Button
+	assert_string_contains(first.text, "c",
+		"a declared mention sorts above the uncurated one")
+	assert_string_contains(second.text, "b")
+
+
+func test_a_declared_backlink_sorts_first_too():
+	_write(_tmp.path_join("target.md"), "# Target\n")
+	_write(_tmp.path_join("a.md"), "# A\n\n[[target]]\n")
+	_write(_tmp.path_join("b.md"), "# B\n\n[[target]]\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("target.md")
+
+	assert_eq(pane._backlinks_rows.get_child_count(), 2)
+	LinkWeightsStore.set_weight(_tmp, "b.md", "target.md", 50)
+	pane._refresh_links()
+	var first := pane._backlinks_rows.get_child(0) as Button
+	var second := pane._backlinks_rows.get_child(1) as Button
+	assert_string_contains(first.text, "b",
+		"the declaration is read in the backlink's own direction")
+	assert_string_contains(second.text, "a")
+
+
+func test_the_weight_question_is_one_ask_at_a_time():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	pane._show_graph()
+
+	pane._ask_declared_weight("a.md", "b.md", 0)
+	assert_eq(_dialogs_of(pane).size(), 1)
+	assert_eq(_dialogs_of(pane)[0].name, "WeightConfirm")
+	pane._ask_declared_weight("a.md", "b.md", 0)
+	assert_eq(_dialogs_of(pane).size(), 1, "the second question does not stack")

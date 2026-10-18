@@ -2,7 +2,7 @@
 """Live pane-API smoke: boots the GUI headless and drives the JSON-RPC CLI
 end-to-end (new-pane -> status (one pane, then every pane) -> inject ->
 wait -> read -> scrollback -> broadcast -> pane-run exit code -> concept
-from output -> cli_view stdout -> wiki pane -> vault search/read ->
+from output -> cli_view stdout -> wiki pane -> vault search/read/weight ->
 plugin-provided profile -> kill), plus subscribe/eventsPoll on the event
 listener.
 
@@ -1081,6 +1081,33 @@ def main() -> int:
             "vault read must answer the note document",
             note,
         )
+
+        # The authored layer's one agent verb is a routed (GDScript) method
+        # because its store is Godot's user:// — this is the live proof that
+        # the registration, the GUI dispatch and the store write all agree.
+        # Set then clear, so the run leaves no declaration behind.
+        declared = smoke.result(
+            smoke.cli(
+                "vault", "weight", str(vault), "notes/Beta.md", "Alpha.md",
+                "--weight", "40", "--json",
+            ),
+            "vault weight",
+        )
+        smoke.require(
+            declared.get("weight") == 40
+            and declared.get("src") == "notes/Beta.md"
+            and declared.get("target") == "Alpha.md",
+            "vault weight must answer the declared pair",
+            declared,
+        )
+        cleared = smoke.result(
+            smoke.cli(
+                "vault", "weight", str(vault), "notes/Beta.md", "Alpha.md",
+                "--clear", "--json",
+            ),
+            "vault weight (clear)",
+        )
+        smoke.require(cleared.get("weight") == 0, "clearing must answer weight 0", cleared)
 
         # `--json` prints the response envelope *and* exits nonzero for an RPC
         # error: the envelope carries the stable `code` the wiki pane also

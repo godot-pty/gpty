@@ -1,10 +1,14 @@
-//! `gpty vault search|read`: the knowledge base's read-only access surface
-//! for agents and scripts.
+//! `gpty vault search|read|weight`: the knowledge base's agent access surface.
 //!
-//! Both commands are thin clients of the control socket's native
+//! Search and read are thin clients of the control socket's native
 //! `vaultSearch`/`vaultRead` handlers (`crates/gpty-gdext/src/vault_ipc.rs`),
 //! which own the walk, the index and the note editor's containment rules.
 //! Nothing here decides what a note is.
+//!
+//! `weight` is the one *write* in the group, and it writes only the user's
+//! declared-link store (`user://link_weights.json`, answered by the GUI's
+//! `vaultWeight` handler): a display-only number for one directed link, or
+//! its removal. It never touches a note or the index.
 
 use std::time::Duration;
 
@@ -43,6 +47,29 @@ pub async fn run(client: &IpcClient, action: &VaultAction, json: bool) -> anyhow
         VaultAction::Read { vault_path, path } => {
             let params = serde_json::json!({"vault_path": vault_path, "path": path});
             super::call_and_format(client, "vaultRead", params, json).await
+        }
+        VaultAction::Weight {
+            vault_path,
+            src,
+            target,
+            weight,
+            clear,
+        } => {
+            // The write surface is exactly one number: set it, or clear it.
+            // Naming neither is a usage error rather than a silent clear, so
+            // a typo cannot delete a declaration.
+            if !clear && weight.is_none() {
+                anyhow::bail!(
+                    "give --weight <1-100> to declare a weight, or --clear to remove one"
+                );
+            }
+            let params = serde_json::json!({
+                "vault_path": vault_path,
+                "src": src,
+                "target": target,
+                "weight": if *clear { serde_json::Value::Null } else { serde_json::json!(weight.unwrap_or(0)) },
+            });
+            super::call_and_format(client, "vaultWeight", params, json).await
         }
     }
 }

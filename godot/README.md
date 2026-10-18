@@ -31,7 +31,7 @@ godot/
     │   └── Phosphor-Regular.ttf
     └── scenes/
         ├── main.tscn            # Root scene (Workspace)
-        ├── autoloads/           # 11 singleton managers
+        ├── autoloads/           # 12 singleton managers
         │   ├── base_persistence_manager.gd  # Shared JSON I/O base
         │   ├── settings_manager.gd
         │   ├── profile_manager.gd
@@ -39,6 +39,7 @@ godot/
         │   ├── workspace_store.gd  # Named workspace (tab set) persistence
         │   ├── pane_env_store.gd   # User-owned per-pane env, keyed by attachment_id
         │   ├── trusted_store.gd    # Workspace Trust consent memory (builtins + plugins)
+        │   ├── link_weights_store.gd # User-owned declared link weights (display-only)
         │   ├── focus_manager.gd
         │   ├── toast_manager.gd
         │   ├── shortcut_manager.gd
@@ -57,6 +58,7 @@ godot/
         │   ├── concept_graph_model.gd  # Pure canvas/build/validate/compile logic
         │   ├── vault_graph_model.gd    # Pure vault link-graph normalize/layout/hit-test
         │   ├── vault_graph_view.gd     # Custom-drawn vault link-graph canvas
+        │   ├── link_weights.gd         # Pure declared-weight vocabulary (paths, range, lookup)
         │   ├── palette.gd       # Shared UI accent colors
         │   ├── toast_overlay.gd
         │   ├── window_chrome.gd # Titlebar + window-mode/fullscreen handling

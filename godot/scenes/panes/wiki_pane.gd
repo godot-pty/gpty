@@ -21,7 +21,12 @@ class_name WikiPane
 ## `VaultGraphView` draws it. Geometry is session state in the view (a drag
 ## lasts as long as the pane), and nothing there writes to the vault: clicking
 ## a note opens it through the same leave guard the list uses, and clicking a
-## ghost runs the same resolution a preview mention does.
+## ghost runs the same resolution a preview mention does. A right-click on an
+## edge sets or clears a **declared weight** — the authored layer over measured
+## mentions, kept in the user's `user://link_weights.json` (never `vaults.db`,
+## which a rebuild may replace) and display-only: it changes thickness, layout
+## stiffness and link-panel order, never which edges exist or what a click can
+## reach.
 ##
 ## The close guards cover every deliberate way a buffer can end; a crash (or an
 ## outside kill) has no guard to run, so the pane also keeps a *recovery copy*
@@ -321,6 +326,8 @@ func _ready():
 	_graph_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_graph_view.node_activated.connect(_on_graph_node_activated)
 	_graph_view.ghost_activated.connect(_on_graph_ghost_activated)
+	_graph_view.weight_set_requested.connect(_ask_declared_weight)
+	_graph_view.weight_cleared.connect(_clear_declared_weight)
 	content.add_child(_graph_view)
 
 	_placeholder = Label.new()
@@ -585,10 +592,19 @@ func _show_graph() -> void:
 	# the list after the graph has been opened.
 	_search_timer.stop()
 	var answer = JSON.parse_string(str(GptyTerminal.vault_graph(vault_path)))
-	var graph := VaultGraphModel.parse(answer)
+	var graph := VaultGraphModel.parse(answer, LinkWeightsStore.vault_weights(vault_path))
 	if not bool(graph["ok"]):
 		_show_placeholder("Vault graph failed: " + _shown_path(str(graph["error"])))
 		return
+	# Lazy cleanup of declarations whose endpoints left the vault. A truncated
+	# answer must not prune: the edges it does not name are still real, and
+	# deleting their authored weights would be unrecoverable.
+	if not bool(graph["truncated"]):
+		var known := {}
+		for node in graph["nodes"]:
+			if node is Dictionary and not bool(node.get("ghost", false)):
+				known[str(node.get("id", ""))] = true
+		LinkWeightsStore.prune(vault_path, known)
 	_list.visible = false
 	_footer.visible = false
 	_note_box.visible = false
@@ -612,6 +628,77 @@ func _on_graph_node_activated(id: String) -> void:
 ## resolution (missing → offer to create, ambiguous → report), never a guess.
 func _on_graph_ghost_activated(target: String) -> void:
 	_follow_target(target)
+
+## The canvas's set control asked for a number. The pane owns the prompt (and
+## the pane-wide "one ask at a time" rule), then writes the user-owned store —
+## the canvas itself never writes anything.
+func _ask_declared_weight(a: String, b: String, current: int) -> void:
+	if _has_open_ask():
+		return
+	var dialog := ConfirmationDialog.new()
+	dialog.name = "WeightConfirm"
+	dialog.title = "Declared weight"
+	dialog.ok_button_text = "Set"
+	var box := VBoxContainer.new()
+	# A fixed content width: AcceptDialog fits a child to the dialog's content
+	# rect, and an auto-wrapping Label there reports a tiny minimum.
+	box.custom_minimum_size = Vector2(380, 0)
+	var label := Label.new()
+	label.text = "How strongly are %s and %s related?\n\nThis is display only: it overrides the measured mention count for edge thickness and link-panel order. Relayout applies it to the arrangement." % [
+		_shown_link(a), _shown_link(b),
+	]
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.custom_minimum_size.x = 380
+	box.add_child(label)
+	var spin := SpinBox.new()
+	spin.name = "WeightValue"
+	spin.min_value = LinkWeights.MIN_WEIGHT
+	spin.max_value = LinkWeights.MAX_WEIGHT
+	spin.step = 1
+	spin.value = current if current > 0 else LinkWeights.DEFAULT_WEIGHT
+	spin.custom_minimum_size.x = 120
+	box.add_child(spin)
+	dialog.add_child(box)
+	add_child(dialog)
+	dialog.confirmed.connect(func():
+		# Hide before writing: the write re-applies the canvas, and a visible
+		# dialog would keep `_has_open_ask` true behind it.
+		dialog.hide()
+		dialog.queue_free()
+		_set_declared_weight(a, b, int(spin.value))
+	)
+	dialog.canceled.connect(dialog.queue_free)
+	dialog.popup_centered()
+
+## Write one declared weight for the drawn pair and re-apply it to the canvas.
+func _set_declared_weight(a: String, b: String, weight: int) -> void:
+	var problem := LinkWeightsStore.set_pair(vault_path, a, b, weight)
+	if problem != "":
+		ToastManager.warn("Could not declare a weight: %s" % problem, 5.0, "Wiki")
+		return
+	_refresh_declared_weights()
+	ToastManager.info(
+		"Declared weight %d for %s ↔ %s" % [weight, _shown_link(a), _shown_link(b)],
+		3.0,
+		"Wiki"
+	)
+
+## Clear both directions of a pair's declaration (a no-op is still a success).
+func _clear_declared_weight(a: String, b: String) -> void:
+	var problem := LinkWeightsStore.clear_pair(vault_path, a, b)
+	if problem != "":
+		ToastManager.warn("Could not clear the weight: %s" % problem, 5.0, "Wiki")
+		return
+	_refresh_declared_weights()
+	ToastManager.info("Cleared the declared weight for %s ↔ %s" % [
+		_shown_link(a), _shown_link(b),
+	], 3.0, "Wiki")
+
+## Re-apply the authored layer without re-querying the index: setting a weight
+## changes what is drawn, never which pairs exist.
+func _refresh_declared_weights() -> void:
+	if _graph_view != null and _graph_view.visible:
+		_graph_view.set_weights(LinkWeightsStore.vault_weights(vault_path))
 
 # ── The link panel: the open note's mentions and backlinks ──────────────
 
@@ -640,6 +727,13 @@ func _refresh_links() -> void:
 		if entry is Dictionary:
 			candidates[_link_key(str(entry.get("target", "")), int(entry.get("line", 0)))] = \
 				entry.get("candidates", [])
+	# The authored layer orders the panel: a declared weight is the user's own
+	# judgement that a mention matters, so it sorts above measured ones. The
+	# section cap applies after the ordering, so a curated mention can surface
+	# from past it; the footer still counts every row the cap excludes.
+	var weights := LinkWeightsStore.vault_weights(vault_path)
+	outgoing = _ordered_by_declared_weight(outgoing, weights, _current_rel, true)
+	backlinks = _ordered_by_declared_weight(backlinks, weights, _current_rel, false)
 	var shown_out := 0
 	for entry in outgoing:
 		if not (entry is Dictionary):
@@ -772,6 +866,44 @@ func _follow_target(target: String) -> void:
 		_create_from_link(target)
 	else:
 		ToastManager.warn("[[%s]] is ambiguous: %s" % [_shown_link(target), _joined_links(candidates)], 6.0, "Wiki")
+
+## Order panel entries by the declared weight of the mention they name,
+## highest first, keeping the index's order on ties.
+##
+## `outgoing` rows name a target the open note mentions (`_current_rel` is
+## the source); backlink rows name the note that mentions the open one (the
+## entry's `src`). Only resolved entries can carry a declaration — an
+## unresolved target is not a note, so it weighs 0 and keeps its place. The
+## caller's cap is applied afterwards, and its footer counts what it excludes.
+func _ordered_by_declared_weight(
+	entries: Array, weights: Dictionary, note: String, outgoing: bool
+) -> Array:
+	var decorated: Array = []
+	for index in entries.size():
+		var entry = entries[index]
+		if not (entry is Dictionary):
+			continue
+		var other := ""
+		if outgoing:
+			var resolved = entry.get("resolved")
+			other = str(resolved) if resolved is String else ""
+		else:
+			other = str(entry.get("src", ""))
+		decorated.append({
+			"entry": entry,
+			"index": index,
+			"weight": LinkWeights.lookup(
+				weights, note, other) if outgoing else LinkWeights.lookup(weights, other, note),
+		})
+	decorated.sort_custom(func(left, right):
+		if int(left["weight"]) != int(right["weight"]):
+			return int(left["weight"]) > int(right["weight"])
+		return int(left["index"]) < int(right["index"])
+	)
+	var ordered: Array = []
+	for item in decorated:
+		ordered.append(item["entry"])
+	return ordered
 
 func _link_key(target: String, line: int) -> String:
 	return "%s|%d" % [target, line]
@@ -1353,6 +1485,7 @@ func _has_open_ask() -> bool:
 	for dialog_name in [
 		"DiscardConfirm", "OverwriteConfirm", "RestoreConfirm",
 		"NoteNameConfirm", "DeleteConfirm", "UpdateReferencesConfirm",
+		"WeightConfirm",
 	]:
 		var dialog := find_child(dialog_name, false, false) as Window
 		if dialog != null and dialog.visible:

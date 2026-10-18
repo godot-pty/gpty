@@ -24,6 +24,13 @@ signal node_activated(id: String)
 ## its synthetic node prefix removed; the pane decides what an unresolved
 ## mention means (it is the same rule the preview's mention click applies).
 signal ghost_activated(target: String)
+## The user asked to declare a weight for an edge. `current` is the pair's
+## existing declaration, 0 when it has none; the pane opens the number prompt
+## and writes the store (the canvas never writes anything).
+signal weight_set_requested(a: String, b: String, current: int)
+## The user asked to clear an edge's declared weight. The pane writes the
+## store and re-applies it.
+signal weight_cleared(a: String, b: String)
 
 const ZOOM_MIN := 0.06
 const ZOOM_MAX := 4.0
@@ -36,6 +43,9 @@ const FIT_PADDING := 0.08
 const DRAG_THRESHOLD := 4.0
 ## The click radius around a node, in screen pixels.
 const HIT_RADIUS := 11.0
+## How close a press must be to an edge's line, in screen pixels, to offer
+## its declared-weight menu.
+const EDGE_HIT_RADIUS := 6.0
 ## Labels are drawn for every node only while the graph is both zoomed in
 ## enough to read them and small enough that they do not become a wall of
 ## text; the hovered and selected nodes always get one.
@@ -72,6 +82,10 @@ var _hint: Label
 var _relayout_button: Button
 var _fit_button: Button
 var _arrows_button: Button
+var _edge_menu: PopupMenu
+## The edge the open menu acts on. Geometry can move while a popup is up (a
+## re-query, a relayout), so the menu keeps the pair's identity, not a point.
+var _pending_edge: Dictionary = {}
 
 
 func _ready() -> void:
@@ -99,9 +113,7 @@ func show_graph(data: Dictionary, current_id := "") -> void:
 	_max_degree = 1
 	for id in _degrees:
 		_max_degree = maxi(_max_degree, int(_degrees[id]["in"]) + int(_degrees[id]["out"]))
-	_max_count = 1
-	for edge in edges:
-		_max_count = maxi(_max_count, int(edge.get("count", 1)))
+	_recompute_weight_scale()
 	if current_id != "" and _has_node(current_id):
 		selected_id = current_id
 	elif selected_id != "" and not _has_node(selected_id):
@@ -111,6 +123,25 @@ func show_graph(data: Dictionary, current_id := "") -> void:
 	queue_redraw()
 	if first_show:
 		call_deferred("_fit_if_needed")
+
+
+## Re-apply the authored layer without re-querying the index: the graph's
+## shape is unchanged, so the set/clear control only needs the new display
+## weights. Session geometry is kept (a declaration never reshuffles the
+## arrangement; Relayout is what runs the springs again).
+func set_weights(declared: Dictionary) -> void:
+	VaultGraphModel.apply_weights(edges, declared)
+	_recompute_weight_scale()
+	_update_status()
+	queue_redraw()
+
+## Thickness is normalized over the display weights, so a declared override
+## sets the scale the same way a mention count does.
+func _recompute_weight_scale() -> void:
+	_max_count = 1
+	for edge in edges:
+		if edge is Dictionary:
+			_max_count = maxi(_max_count, int(edge.get("weight", edge.get("count", 1))))
 
 
 ## Highlight one node without opening it (the pane passes its open note).
@@ -205,9 +236,19 @@ func _build_chrome() -> void:
 	_fit_button.pressed.connect(fit_to_view)
 	controls.add_child(_fit_button)
 
+	# The edge menu is the authored layer's only human control: right-click an
+	# edge to set or clear its declared weight. Ghost edges are not offered —
+	# a declaration names two notes.
+	_edge_menu = PopupMenu.new()
+	_edge_menu.name = "EdgeMenu"
+	_edge_menu.add_item("Set declared weight…", 0)
+	_edge_menu.add_item("Clear declared weight", 1)
+	_edge_menu.id_pressed.connect(_on_edge_menu_pressed)
+	add_child(_edge_menu)
+
 	_hint = Label.new()
 	_hint.name = "GraphHint"
-	_hint.text = "Drag to pan · Wheel to zoom · Drag a node to move it · Click a note to open it"
+	_hint.text = "Drag to pan · Wheel to zoom · Drag a node to move it · Click a note to open it · Right-click an edge to declare its weight"
 	_hint.add_theme_font_size_override("font_size", 10)
 	_hint.modulate = Color(1, 1, 1, 0.55)
 	_hint.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
@@ -246,9 +287,15 @@ func _update_status() -> void:
 			ghosts += 1
 		else:
 			notes += 1
+	var declared := 0
+	for edge in edges:
+		if edge is Dictionary and int(edge.get("declared", 0)) > 0:
+			declared += 1
 	var text := "%d notes · %d links" % [notes, edges.size()]
 	if ghosts > 0:
 		text += " · %d missing" % ghosts
+	if declared > 0:
+		text += " · %d declared" % declared
 	if _truncated:
 		text += " · truncated"
 	if selected_id != "":
@@ -295,6 +342,10 @@ func _gui_input(event: InputEvent) -> void:
 				_moved = false
 			else:
 				_panning = false
+			accept_event()
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			if event.pressed:
+				_open_edge_menu(event.position)
 			accept_event()
 	elif event is InputEventMouseMotion:
 		if _panning:
@@ -359,6 +410,44 @@ func _hover(screen_point: Vector2) -> void:
 	)
 	queue_redraw()
 
+## The edge nearest a screen point, or `{}`.
+func _edge_at(screen_point: Vector2) -> Dictionary:
+	return VaultGraphModel.hit_test_edge(
+		edges, positions, to_world(screen_point), EDGE_HIT_RADIUS / _zoom
+	)
+
+## Offer the declared-weight actions for the edge under `screen_point`.
+##
+## A ghost edge is skipped: a declared weight names two notes, and an
+## unresolved target is not a note. The menu's texts carry the current
+## declaration so the edge's state is readable without opening a dialog first.
+func _open_edge_menu(screen_point: Vector2) -> void:
+	var edge := _edge_at(screen_point)
+	if edge.is_empty() or bool(edge.get("ghost", false)):
+		return
+	_pending_edge = edge
+	var declared := int(edge.get("declared", 0))
+	_edge_menu.set_item_text(
+		0,
+		"Set declared weight…" if declared <= 0 else "Change declared weight (%d)…" % declared
+	)
+	_edge_menu.set_item_disabled(1, declared <= 0)
+	_edge_menu.popup_on_parent(Rect2i(Vector2i(screen_point), Vector2i.ZERO))
+
+func _on_edge_menu_pressed(id: int) -> void:
+	var edge := _pending_edge
+	_pending_edge = {}
+	if edge.is_empty():
+		return
+	var a := str(edge.get("a", ""))
+	var b := str(edge.get("b", ""))
+	if a == "" or b == "":
+		return
+	if id == 0:
+		weight_set_requested.emit(a, b, int(edge.get("declared", 0)))
+	elif id == 1:
+		weight_cleared.emit(a, b)
+
 
 # ── Drawing ────────────────────────────────────────────────────────────
 
@@ -390,8 +479,15 @@ func _draw() -> void:
 		if not _segment_visible(pa, pb, view):
 			continue
 		var related := selected_id != "" and (a == selected_id or b == selected_id)
+		var declared := int(edge.get("declared", 0))
 		var color := selected_edge if related else edge_color
-		var width := VaultGraphModel.edge_width(int(edge.get("count", 1)), _max_count)
+		# An authored edge reads as authored even when nothing is selected: the
+		# accent tints it while the measured edges stay neutral.
+		if not related and declared > 0:
+			color = Color(accent, 0.5)
+		var width := VaultGraphModel.edge_width(
+			int(edge.get("weight", edge.get("count", 1))), _max_count
+		)
 		width *= clampf(sqrt(_zoom), 0.6, 1.6)
 		draw_line(pa, pb, color, width, true)
 		if show_arrows:

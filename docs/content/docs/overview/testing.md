@@ -189,6 +189,7 @@ All CLI commands below use the default socket path (`$XDG_RUNTIME_DIR/gpty.sock`
 |---|---------|----------|
 | 47 | `gpty vault search /path/to/vault ownership` | `{"results": [{"path", "title", "snippet"}], "total": N, "truncated": false}`, best match first; a note edited outside gPTY is found on the next query without reopening the vault |
 | 48 | `gpty vault read /path/to/vault notes/idea.md` | `{"path", "text", "truncated", "crlf", "mtime", "size"}`; a missing note exits 1 with a JSON-RPC error whose `data.code` is `not_found`, and an escaping path (`../x.md`) answers `bad_path` with the same nonzero status |
+| 49 | `gpty vault weight /path/to/vault notes/a.md notes/b.md --weight 40`, then reopen the graph in the wiki pane | `{"vault", "src", "target", "weight": 40}`; the a↔b edge is thicker/accented and the panel orders b first; `--clear` answers `weight: 0` and the edge returns to its measured count. `user://link_weights.json` carries the pair; `vaults.db` is untouched |
 
 ---
 

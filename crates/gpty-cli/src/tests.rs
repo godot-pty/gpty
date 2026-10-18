@@ -317,6 +317,78 @@ async fn vault_roundtrip_carries_the_query_params() {
     assert_eq!(read_params["path"], "a.md");
 }
 
+/// The declared-weight verb is one number: `--weight N` sends it, `--clear`
+/// sends JSON null (which the GUI reads as "remove"), and naming neither is a
+/// usage error rather than a silent clear. The parameter names are the
+/// handler's — `vault_path`, `src`, `target`, `weight` — the same seam the
+/// search/read test pins.
+#[tokio::test]
+async fn vault_weight_roundtrip_is_one_number_or_a_clear() {
+    let calls: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let calls_h = Arc::clone(&calls);
+    let handler: HandlerFn = Arc::new(move |params| {
+        calls_h.lock().unwrap().push(params);
+        Box::pin(async move { Ok(serde_json::json!({"weight": 40})) })
+    });
+    let socket = start_server_with("vault_weight", vec![("vaultWeight", handler)]).await;
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+
+    commands::vault::run(
+        &client,
+        &VaultAction::Weight {
+            vault_path: "/vault".to_string(),
+            src: "a.md".to_string(),
+            target: "b.md".to_string(),
+            weight: Some(40),
+            clear: false,
+        },
+        true,
+    )
+    .await
+    .expect("setting a weight should succeed");
+    commands::vault::run(
+        &client,
+        &VaultAction::Weight {
+            vault_path: "/vault".to_string(),
+            src: "a.md".to_string(),
+            target: "b.md".to_string(),
+            weight: None,
+            clear: true,
+        },
+        true,
+    )
+    .await
+    .expect("clearing a weight should succeed");
+
+    // Naming neither is refused before the socket is touched.
+    let err = commands::vault::run(
+        &client,
+        &VaultAction::Weight {
+            vault_path: "/vault".to_string(),
+            src: "a.md".to_string(),
+            target: "b.md".to_string(),
+            weight: None,
+            clear: false,
+        },
+        true,
+    )
+    .await
+    .expect_err("a weight command with neither flag must fail");
+    let _ = std::fs::remove_file(&socket);
+    assert!(
+        err.to_string().contains("--weight"),
+        "error should name the flag: {err}"
+    );
+
+    let sent = calls.lock().unwrap();
+    assert_eq!(sent.len(), 2, "the refused form must not reach the server");
+    assert_eq!(sent[0]["vault_path"], "/vault");
+    assert_eq!(sent[0]["src"], "a.md");
+    assert_eq!(sent[0]["target"], "b.md");
+    assert_eq!(sent[0]["weight"], 40);
+    assert!(sent[1]["weight"].is_null(), "clear sends JSON null");
+}
+
 /// A response that carries an error must fail the command even under
 /// `--json`: the envelope is printed for a script to parse, and the exit
 /// status is the signal it branches on.

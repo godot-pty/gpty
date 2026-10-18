@@ -19,7 +19,9 @@ class_name VaultGraphModel
 ## - **Weights are damped, never linear.** Width is logarithmic between
 ##   [constant EDGE_MIN_WIDTH] and [constant EDGE_MAX_WIDTH], and the layout
 ##   spring uses the same logarithm, so one chatty note cannot dominate the
-##   drawing or pull the whole graph into a point.
+##   drawing or pull the whole graph into a point. The number those read is the
+##   edge's display `weight`: a user-declared value when one exists, otherwise
+##   the measured mention count — see [method apply_weights].
 ## - **Layout is deterministic.** The same graph always lays out the same way
 ##   (a sunflower seed plus a fixed iteration count and a hash-derived jitter,
 ##   never a random source), which is what makes it testable and what lets a
@@ -62,16 +64,24 @@ const MAX_SPRING := 4.0
 ## "truncated": bool}`:
 ## - `nodes`: `{id, label, ghost}` in the store's order (every note, then one
 ##   ghost per distinct unresolved target).
-## - `edges`: `{a, b, count, ab, ba, mutual, ghost}` in a deterministic order
-##   (`a`, then `b`). `a`/`b` are the pair's sorted ids, `count` is the total
-##   mentions both ways, `ab`/`ba` the per-direction counts, `mutual` says both
-##   directions exist, and `ghost` says one endpoint is an unresolved target.
+## - `edges`: `{a, b, count, ab, ba, mutual, ghost, declared, weight}` in a
+##   deterministic order (`a`, then `b`). `a`/`b` are the pair's sorted ids,
+##   `count` is the total mentions both ways, `ab`/`ba` the per-direction
+##   counts, `mutual` says both directions exist, and `ghost` says one endpoint
+##   is an unresolved target. `declared` is the authored override (0 = none)
+##   and `weight` the value the canvas draws with — declared when there is one,
+##   otherwise `count`; the measured number is never overwritten.
 ## - `truncated`: the store capped its edges or ghost nodes (the canvas says
 ##   so instead of silently showing part of the vault as if it were all).
 ##
 ## A malformed answer is an error answer, never a half-built graph: the pane's
 ## only alternative is to draw something the user would read as the vault.
-static func parse(answer: Variant) -> Dictionary:
+##
+## `declared` is [LinkWeightsStore]'s nested map (`src -> target -> weight`).
+## It only changes what is drawn — never which pairs are drawn: an edge the
+## index has is always shown, and a declaration for a pair it does not have
+## creates nothing.
+static func parse(answer: Variant, declared := {}) -> Dictionary:
 	if not (answer is Dictionary):
 		return _failed("Vault graph unavailable.")
 	if answer.has("error"):
@@ -152,6 +162,7 @@ static func parse(answer: Variant) -> Dictionary:
 			return str(left["a"]) < str(right["a"])
 		return str(left["b"]) < str(right["b"])
 	)
+	apply_weights(edges, declared)
 	return {
 		"ok": true,
 		"error": "",
@@ -162,6 +173,37 @@ static func parse(answer: Variant) -> Dictionary:
 
 static func _failed(message: String) -> Dictionary:
 	return {"ok": false, "error": message, "nodes": [], "edges": [], "truncated": false}
+
+## Apply the authored layer to parsed edges, in place.
+##
+## `declared` is [LinkWeightsStore]'s map (`src -> target -> weight`) keyed on
+## vault-relative note paths. The canvas draws one edge per pair, so a pair
+## takes the larger of its two directions' declarations — an agent may declare
+## one direction, and the drawn edge should still reflect it. A pair with a
+## ghost endpoint ignores declarations entirely: a declared weight names two
+## notes, and an unresolved target is not one.
+##
+## `count` is never changed. `declared` and `weight` are the display fields:
+## `weight` is what thickness and springs read, so clearing a declaration
+## falls straight back to the measured mentions and a re-index cannot lose a
+## measured number to an override.
+static func apply_weights(edges: Array, declared: Dictionary) -> void:
+	for edge in edges:
+		if not (edge is Dictionary):
+			continue
+		var a := str(edge.get("a", ""))
+		var b := str(edge.get("b", ""))
+		var measured := maxi(0, int(edge.get("count", 0)))
+		if a == "" or b == "" or bool(edge.get("ghost", false)):
+			edge["declared"] = 0
+			edge["weight"] = measured
+			continue
+		var chosen := maxi(
+			LinkWeights.lookup(declared, a, b),
+			LinkWeights.lookup(declared, b, a)
+		)
+		edge["declared"] = chosen
+		edge["weight"] = chosen if chosen > 0 else measured
 
 ## A label the canvas can draw: one line, bounded. A title can contain a
 ## newline (the index stores the body's first heading), and `draw_string`
@@ -211,7 +253,9 @@ static func edge_width(count: int, max_count: int) -> float:
 	)
 
 ## The spring strength layout gives one pair: the same logarithm, clamped —
-## a linear count would let one hub collapse the graph onto itself.
+## a linear count would let one hub collapse the graph onto itself. The value
+## is the edge's display `weight`, so a declared override moves the layout the
+## same way it moves the stroke.
 static func spring_strength(count: int) -> float:
 	return clampf(1.0 + log(1.0 + float(maxi(0, count))), 1.0, MAX_SPRING)
 
@@ -398,7 +442,8 @@ static func _relax(nodes: Array, edges: Array, positions: Dictionary) -> void:
 			var distance := delta.length()
 			if distance < 0.0001:
 				continue
-			var magnitude := (distance * distance / ideal) * spring_strength(int(edge.get("count", 1))) * 0.25
+			var magnitude := (distance * distance / ideal) \
+				* spring_strength(int(edge.get("weight", edge.get("count", 1)))) * 0.25
 			var pull := delta / distance * magnitude
 			displacement[a] += pull
 			displacement[b] -= pull
@@ -466,6 +511,47 @@ static func hit_test(nodes: Array, positions: Dictionary, point: Vector2, radius
 			best = id
 			best_distance = distance
 	return best
+
+## The edge whose segment passes nearest `point` within `radius` world units,
+## or `{}`.
+##
+## A canvas has no stroke objects to click, so an edge's target is its line:
+## distance is point-to-segment, not to the midpoint. Ties break by the pair's
+## `a`, then `b` id, like [method hit_test], so the answer is deterministic
+## when two edges overlap (a drawn stack of dragged nodes).
+static func hit_test_edge(edges: Array, positions: Dictionary, point: Vector2, radius: float) -> Dictionary:
+	var best := {}
+	var best_distance := INF
+	var best_key := ""
+	for edge in edges:
+		if not (edge is Dictionary):
+			continue
+		var a := str(edge.get("a", ""))
+		var b := str(edge.get("b", ""))
+		if a == "" or b == "" or not positions.has(a) or not positions.has(b):
+			continue
+		var distance := _segment_distance(
+			point, positions[a] as Vector2, positions[b] as Vector2
+		)
+		if distance > radius:
+			continue
+		var key := a + "\u0000" + b
+		if distance < best_distance or (
+			is_equal_approx(distance, best_distance) and (best_key == "" or key < best_key)
+		):
+			best = edge
+			best_distance = distance
+			best_key = key
+	return best
+
+## Distance from `point` to the segment `a`–`b`.
+static func _segment_distance(point: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab := b - a
+	var length_sq := ab.length_squared()
+	if length_sq < 0.000001:
+		return point.distance_to(a)
+	var t := clampf((point - a).dot(ab) / length_sq, 0.0, 1.0)
+	return point.distance_to(a + ab * t)
 
 # ═══════════════════════════════════════════════════════════════════════
 # Determinism

@@ -18,6 +18,69 @@ const PLUGIN_ADMIN_ACTIONS := ["uninstall", "enable", "disable"]
 
 static func handle(ws, method: String, params: Dictionary):
 	match method:
+		"vaultWeight":
+			# The authored layer's one agent verb: declare (or clear) one
+			# directed link's display weight. It writes the user's own store
+			# (`user://link_weights.json`) and nothing else — never a vault,
+			# never the index, never a decision. A declared weight can only
+			# change how the graph and link panel are drawn (the same rule the
+			# canvas's set/clear control follows), so an agent curating a
+			# vault's structure still cannot hide an edge, gate navigation or
+			# count as consent.
+			#
+			# One number is the whole surface: `weight` present means set, and
+			# its absence (or null) means clear. The GUI owns the store because
+			# `user://` is Godot's; a caller needs a running GUI, which is why
+			# the CLI command never auto-spawns one.
+			var vw_vault := LinkWeights.normalize_vault(str(params.get("vault_path", "")))
+			if not LinkWeights.valid_vault_path(vw_vault) \
+				or not DirAccess.dir_exists_absolute(vw_vault):
+				return error("Vault is not an absolute directory: %s" % vw_vault, -32602)
+			var vw_src := str(params.get("src", ""))
+			var vw_target := str(params.get("target", ""))
+			if not LinkWeights.valid_note_path(vw_src) \
+				or not LinkWeights.valid_note_path(vw_target):
+				return error(
+					"`src` and `target` must be vault-relative note paths (.md, no hidden component)",
+					-32602
+				)
+			var vw_raw = params.get("weight")
+			if vw_raw == null or (vw_raw is String and str(vw_raw).strip_edges() == ""):
+				var vw_cleared := LinkWeightsStore.clear_weight(vw_vault, vw_src, vw_target)
+				if vw_cleared != "":
+					return error(vw_cleared)
+				return {"vault": vw_vault, "src": vw_src, "target": vw_target, "weight": 0}
+			var vw_weight := 0
+			if vw_raw is int:
+				vw_weight = int(vw_raw)
+			elif vw_raw is float:
+				vw_weight = int(vw_raw)
+			elif vw_raw is String and str(vw_raw).strip_edges().is_valid_int():
+				vw_weight = str(vw_raw).strip_edges().to_int()
+			else:
+				return error(
+					"`weight` must be an integer between %d and %d, or omitted to clear"
+						% [LinkWeights.MIN_WEIGHT, LinkWeights.MAX_WEIGHT],
+					-32602
+				)
+			if vw_weight < LinkWeights.MIN_WEIGHT or vw_weight > LinkWeights.MAX_WEIGHT:
+				return error(
+					"`weight` must be between %d and %d" % [
+						LinkWeights.MIN_WEIGHT, LinkWeights.MAX_WEIGHT,
+					],
+					-32602
+				)
+			var vw_problem := LinkWeightsStore.set_weight(
+				vw_vault, vw_src, vw_target, vw_weight
+			)
+			if vw_problem != "":
+				return error(vw_problem)
+			return {
+				"vault": vw_vault,
+				"src": vw_src,
+				"target": vw_target,
+				"weight": vw_weight,
+			}
 		"pluginsChanged":
 			# A CLI admin action has already written the plugin store when
 			# this arrives (unlike the install review, whose clone lands only
