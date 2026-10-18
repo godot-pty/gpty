@@ -15,8 +15,10 @@ extends BasePersistenceManager
 # Two writers, one store: the wiki pane's canvas (a set/clear control on an
 # edge; `set_pair`/`clear_pair`, which touch both directions of the drawn
 # pair) and the `vaultWeight` IPC method (one directed number, for an agent).
-# The pane lazily prunes declarations whose endpoints left the vault when it
-# shows a complete graph, so the file does not accumulate names forever.
+# A note rename re-keys both endpoints (`rekey_note`), so authored work
+# follows the file. The pane lazily prunes declarations whose endpoints left
+# the vault when it shows a complete graph, so the file does not accumulate
+# names forever (an outside move looks like a delete here and is pruned).
 #
 # The file is hand-editable, so the loader is the same boundary as every other
 # store: typed reads, path-shape checks, weight-range checks, and caps — a bad
@@ -171,6 +173,65 @@ func clear_pair(root: String, a: String, b: String) -> String:
 	if changed:
 		_store_after_clear(key, map)
 	return ""
+
+## Move every declaration naming `old_rel` — as source, target, or both — to
+## `new_rel`, in one vault, in one write. The wiki pane calls this after a
+## rename lands, before a complete graph could prune the old name as a note
+## that vanished; the authored layer follows the file instead of being erased.
+##
+## Two rules make the rebuilt map deterministic: a declaration already stored
+## at the destination loses to the moved one (a rename requires the destination
+## note to be absent, so anything stored under that path is stale — e.g. a
+## note that had the name earlier), and a row that starts and ends at the
+## renamed note is moved as a whole rather than half-substituted. A store with
+## nothing to move is not rewritten, and an invalid path changes nothing.
+## Returns whether the map changed.
+func rekey_note(root: String, old_rel: String, new_rel: String) -> bool:
+	if old_rel == new_rel \
+		or not LinkWeights.valid_note_path(old_rel) \
+		or not LinkWeights.valid_note_path(new_rel):
+		return false
+	var key := LinkWeights.normalize_vault(root)
+	var map: Variant = _vaults.get(key)
+	if not (map is Dictionary):
+		return false
+	var rebuilt := {}
+	var moved := {}
+	var changed := false
+	for raw_src in map:
+		var src := str(raw_src)
+		var targets: Dictionary = map[raw_src]
+		var out := {}
+		# Targets other than the old path keep their value; the old target is
+		# written last so it wins a stale entry already spelled `new_rel`.
+		for raw_target in targets:
+			var target := str(raw_target)
+			if target == old_rel:
+				continue
+			out[target] = int(targets[raw_target])
+		if targets.has(old_rel):
+			out[new_rel] = int(targets[old_rel])
+			changed = true
+		if src == old_rel:
+			moved = out
+			changed = true
+			continue
+		rebuilt[src] = out
+	if not moved.is_empty() or map.has(old_rel):
+		# The moved row merges into any stale row at the new path; per target,
+		# the moved declaration is the live one.
+		var merged: Dictionary = rebuilt.get(new_rel, {})
+		for target in moved:
+			merged[target] = int(moved[target])
+		rebuilt[new_rel] = merged
+	if not changed:
+		return false
+	if rebuilt.is_empty():
+		_vaults.erase(key)
+	else:
+		_vaults[key] = rebuilt
+	_save()
+	return true
 
 ## Drop declarations whose endpoint is not in `known` (the note ids of a
 ## complete graph answer), and save only when something went. Called lazily by

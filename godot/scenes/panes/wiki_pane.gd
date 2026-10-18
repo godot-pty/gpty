@@ -1178,6 +1178,13 @@ func _rename_note(new_rel: String) -> bool:
 		_drop_scratch(vault_path, previous)
 	if not bool(reply.get("indexed", true)):
 		ToastManager.warn("Renamed %s, but the search index could not be updated" % _current_rel, 5.0, "Wiki")
+	# The authored layer follows the file: declared weights key on note paths,
+	# so both endpoints are re-keyed here — before any graph view could prune
+	# the old name as vanished. It is independent of the mention update below:
+	# a declaration is not a mention, and declining to respell other notes must
+	# not discard the curation. A refused or failed rename never reaches this
+	# point, so the store is untouched in that case.
+	LinkWeightsStore.rekey_note(vault_path, previous, _current_rel)
 	# This note's own edges moved with it. Mentions other notes wrote to the
 	# old name do not follow a file: the rename just made them unresolved, and
 	# updating them writes *their* notes — so it is a separate, explicit

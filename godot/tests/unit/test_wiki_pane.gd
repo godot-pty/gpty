@@ -812,6 +812,63 @@ func test_rename_moves_the_open_note():
 		"nothing mentions the old name, so there is no question to ask")
 
 
+## Declared weights are authored data keyed on note paths: a rename re-keys
+## both endpoints immediately, before any complete graph could prune the old
+## name as a note that vanished.
+func test_rename_rekeys_declared_link_weights():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	_write(_tmp.path_join("other.md"), "# Other\n")
+	LinkWeightsStore.set_weight(_tmp, "note.md", "other.md", 25)
+	LinkWeightsStore.set_weight(_tmp, "other.md", "note.md", 40)
+	var pane := _make_pane(_tmp)
+	pane._open_note("note.md")
+
+	pane._rename_button.pressed.emit()
+	_name_field(_dialogs_of(pane)[0]).text = "moved.md"
+	_dialogs_of(pane)[0].confirmed.emit()
+	await wait_process_frames(2)
+
+	assert_eq(LinkWeightsStore.weight_of(_tmp, "moved.md", "other.md"), 25,
+		"an outgoing declaration follows the note")
+	assert_eq(LinkWeightsStore.weight_of(_tmp, "other.md", "moved.md"), 40,
+		"an incoming declaration follows the note")
+	assert_eq(LinkWeightsStore.weight_of(_tmp, "note.md", "other.md"), 0)
+	assert_eq(LinkWeightsStore.weight_of(_tmp, "other.md", "note.md"), 0)
+
+
+func test_a_cancelled_rename_leaves_declared_weights_alone():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	LinkWeightsStore.set_weight(_tmp, "note.md", "other.md", 25)
+	var pane := _make_pane(_tmp)
+	pane._open_note("note.md")
+
+	pane._rename_button.pressed.emit()
+	_dialogs_of(pane)[0].canceled.emit()
+	await wait_process_frames(1)
+
+	assert_eq(pane._current_rel, "note.md")
+	assert_eq(LinkWeightsStore.weight_of(_tmp, "note.md", "other.md"), 25)
+	assert_eq(LinkWeightsStore.weight_of(_tmp, "moved.md", "other.md"), 0)
+
+
+func test_a_refused_rename_leaves_declared_weights_alone():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	_write(_tmp.path_join("taken.md"), "# Taken\n")
+	LinkWeightsStore.set_weight(_tmp, "note.md", "other.md", 25)
+	var pane := _make_pane(_tmp)
+	pane._open_note("note.md")
+
+	pane._rename_button.pressed.emit()
+	_name_field(_dialogs_of(pane)[0]).text = "taken.md"
+	_dialogs_of(pane)[0].confirmed.emit()
+	await wait_process_frames(2)
+
+	assert_eq(pane._current_rel, "note.md", "the open note did not move")
+	assert_eq(LinkWeightsStore.weight_of(_tmp, "note.md", "other.md"), 25,
+		"a refused rename changes nothing")
+	assert_eq(LinkWeightsStore.weight_of(_tmp, "taken.md", "other.md"), 0)
+
+
 func test_renaming_a_linked_note_offers_to_update_the_mentions():
 	DirAccess.make_dir_recursive_absolute(_tmp.path_join("sub"))
 	DirAccess.make_dir_recursive_absolute(_tmp.path_join("moved"))

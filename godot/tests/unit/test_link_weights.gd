@@ -168,6 +168,68 @@ func test_a_full_vault_refuses_a_new_pair():
 	assert_eq(LinkWeightsStore.set_weight(VAULT, "note-0000.md", "other-0000.md", 9), "")
 
 
+# ── Renaming ───────────────────────────────────────────────────────────
+
+func test_rekey_moves_both_endpoints_of_a_renamed_note():
+	LinkWeightsStore.set_weight(VAULT, "old.md", "other.md", 5)
+	LinkWeightsStore.set_weight(VAULT, "other.md", "old.md", 7)
+	LinkWeightsStore.set_weight(VAULT, "old.md", "old.md", 9)
+	LinkWeightsStore.set_weight(VAULT, "keep.md", "other.md", 3)
+
+	assert_true(LinkWeightsStore.rekey_note(VAULT, "old.md", "new/dir.md"))
+
+	assert_eq(LinkWeightsStore.weight_of(VAULT, "new/dir.md", "other.md"), 5,
+		"a declaration authored on the renamed note follows it")
+	assert_eq(LinkWeightsStore.weight_of(VAULT, "other.md", "new/dir.md"), 7,
+		"a declaration pointing at the renamed note follows it")
+	assert_eq(LinkWeightsStore.weight_of(VAULT, "new/dir.md", "new/dir.md"), 9,
+		"a self-declaration moves with the note")
+	assert_eq(LinkWeightsStore.weight_of(VAULT, "keep.md", "other.md"), 3,
+		"unrelated declarations are untouched")
+	assert_eq(LinkWeightsStore.weight_of(VAULT, "old.md", "other.md"), 0)
+	assert_eq(LinkWeightsStore.weight_of(VAULT, "other.md", "old.md"), 0)
+
+
+## A rename requires the destination note to be absent, so anything already
+## stored under that path is stale (a note that used the name earlier). The
+## moved declaration is the live one and wins the shared targets.
+func test_rekey_merges_a_stale_destination_row_with_the_moved_value_winning():
+	LinkWeightsStore.set_weight(VAULT, "new.md", "x.md", 4)
+	LinkWeightsStore.set_weight(VAULT, "old.md", "x.md", 60)
+	LinkWeightsStore.set_weight(VAULT, "old.md", "new.md", 70)
+
+	assert_true(LinkWeightsStore.rekey_note(VAULT, "old.md", "new.md"))
+
+	assert_eq(LinkWeightsStore.weight_of(VAULT, "new.md", "x.md"), 60)
+	assert_eq(LinkWeightsStore.weight_of(VAULT, "new.md", "new.md"), 70,
+		"the old target spelling is moved as well")
+
+
+func test_rekey_with_nothing_to_move_is_a_no_op():
+	LinkWeightsStore.set_weight(VAULT, "a.md", "b.md", 5)
+	var before = MockAutoloads.get_store(LinkWeightsStore.WEIGHTS_FILE)
+
+	assert_false(LinkWeightsStore.rekey_note(VAULT, "old.md", "new.md"))
+	assert_false(LinkWeightsStore.rekey_note(VAULT, "a.md", "a.md"),
+		"an unchanged name is not a move")
+	assert_false(LinkWeightsStore.rekey_note(VAULT, "../old.md", "new.md"),
+		"a path the walk could not produce is refused")
+	assert_false(LinkWeightsStore.rekey_note("relative/vault", "a.md", "b.md"))
+	assert_eq(MockAutoloads.get_store(LinkWeightsStore.WEIGHTS_FILE), before)
+	assert_eq(LinkWeightsStore.weight_of(VAULT, "a.md", "b.md"), 5)
+
+
+func test_rekey_touches_one_vault_only():
+	LinkWeightsStore.set_weight(VAULT, "old.md", "a.md", 5)
+	LinkWeightsStore.set_weight("/other", "old.md", "a.md", 8)
+
+	assert_true(LinkWeightsStore.rekey_note(VAULT, "old.md", "new.md"))
+
+	assert_eq(LinkWeightsStore.weight_of(VAULT, "new.md", "a.md"), 5)
+	assert_eq(LinkWeightsStore.weight_of("/other", "old.md", "a.md"), 8,
+		"another vault's declarations are not this rename's business")
+
+
 # ── Pruning ────────────────────────────────────────────────────────────
 
 func test_prune_removes_only_entries_whose_endpoint_vanished():
