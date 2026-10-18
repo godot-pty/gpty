@@ -1,6 +1,6 @@
 # gpty-cli
 
-CLI for controlling the gpty terminal workspace over JSON-RPC IPC. Connects to a running gpty GUI instance (auto-spawns one unless `--no-daemon` is passed). Pane types are validated client-side with "did you mean?" suggestions before any IPC round-trip.
+CLI for controlling the gpty terminal workspace over JSON-RPC IPC. Connects to a running gpty GUI instance; only `new-pane` and `layout load` may start one on demand, and `--no-daemon` refuses even those (a query must not open a workspace). Pane types are validated client-side with "did you mean?" suggestions before any IPC round-trip.
 
 ## Getting it
 
@@ -56,6 +56,10 @@ gpty state working
 gpty new-pane --tags ci
 gpty broadcast --tags ci --text "make test"
 
+# Search a Markdown vault and read one of its notes (agent access)
+gpty vault search ~/notes "ownership"
+gpty vault read ~/notes notes/idea.md
+
 # Manage concept triggers
 gpty concept list
 gpty concept toggle cat_command
@@ -106,11 +110,12 @@ gpty version
 | `focus-pane` | Focus a pane by id |
 | `inject` | Send text to a terminal pane by id |
 | `pane-read` | Read a pane's plain-text output (screen + scrollback, `--lines` 1–2000) |
-| `pane-status` | Status primitives for a pane (`pid`, `running`, `exit_code`, `exit_reason`, `idle_ms`); no argument lists every pane |
+| `pane-status` | Status primitives for a pane (`pid`, `running`, `exit_code`, `exit_reason`, `idle_ms`); no argument answers `{panes: [{pane_id, label, type, status}]}` for every pane, with `status: null` for panes that have no status primitives (non-terminals) |
 | `pane-run` | Run a command in a new terminal pane (`--command`) |
 | `pane-wait` | Wait for a pane's output to match a regex (`--pattern`, `--timeout-ms` 100–60000) |
 | `state` | Declare the state of the pane the command runs in (`idle`, `working`, `needs-attention`, `completed`, `failed`). Needs the credentials a pane injects (`GPTY_EVENT_*`), submits over the event socket, and is not an MCP tool |
 | `broadcast` | Inject text into every pane carrying one of the given `--tags` |
+| `vault` | Read-only knowledge-base access: `search <vault_path> <pattern>` (absolute vault directory; re-indexes changed notes first, `--limit` 1–500) answers `{results, total, truncated}`, `read <vault_path> <path>` answers the note document. Neither writes to the vault |
 | `concept` | List or toggle concept triggers (`list`, `toggle <name>`) |
 | `schema` | Output JSON Schema describing all commands (`--format mcp` for MCP manifest) |
 | `mcp` | Run as MCP server over stdio (for AI tool integration) |
@@ -124,7 +129,7 @@ gpty version
 | Flag | Description |
 |------|-------------|
 | `--skill` | Print the bundled agent skill (SKILL.md) and exit |
-| `--json` | Machine-readable JSON output |
+| `--json` | Machine-readable JSON output. A failed command still exits 1, with the JSON-RPC error envelope on stdout (`error.data.code` is the stable discriminator) |
 | `--socket <path>` | Override IPC socket path |
 | `--timeout <ms>` | Connection timeout in milliseconds (default 5000) |
 | `--no-daemon` | Don't auto-spawn the GUI if not running |

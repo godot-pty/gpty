@@ -12,6 +12,12 @@
 //!   pattern matches or the request's own ≤60 s deadline), and 300 s for
 //!   `pluginInstall`'s human-answered review dialog. If GDScript hasn't
 //!   responded by then, the client receives an error.
+//! - Each routed method is registered with a *dispatch* budget that outlives
+//!   that fallback by 5 s (`dispatch_timeout`), so the fallback answers the
+//!   client and the server budget only frees a wedged connection. A single
+//!   connection-wide timeout cannot serve both: a held answer must be allowed
+//!   to outlive the I/O bound, which is why the server's cap lives on the
+//!   handler rather than on the connection.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -72,6 +78,22 @@ const PLUGIN_REVIEW_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 /// reported as `-32000 timeout waiting for GUI response` (the 5 s default
 /// made `pane-wait --timeout-ms 60000` a lie: it could never wait past 5 s).
 const PANE_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(70);
+
+/// How much longer the server's dispatch backstop waits than the handler's
+/// own fallback.
+///
+/// The fallback must fire first so the client receives a JSON-RPC error; the
+/// server budget exists only to free the connection from a wedged handler.
+/// The single 30 s connection timeout this replaces did neither: it cut
+/// `paneWait` at half its published 60 s and `pluginInstall` at a tenth of
+/// its review window, and the client saw a dropped socket.
+const DISPATCH_SLACK: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The server-side dispatch budget for a routed method: its own fallback plus
+/// [`DISPATCH_SLACK`], registered with `register_with_timeout`.
+fn dispatch_timeout(method_name: &str) -> std::time::Duration {
+    fallback_timeout(method_name) + DISPATCH_SLACK
+}
 
 /// The fallback deadline for a routed method. Deferred-answer methods
 /// (`paneWait`, `pluginInstall`) need deadlines that cover their contracts;
@@ -245,6 +267,15 @@ pub async fn start_ipc_server_inner(socket_path: &str) {
     server.register("version", version_handler());
     server.register("shutdown", shutdown_handler());
 
+    // Vault access (`gpty vault search|read`, and the vault MCP tools) is
+    // answered here rather than through GDScript: a vault is a directory, not
+    // workspace state, and the walk plus the SQLite index are run on the
+    // blocking pool so an agent's query cannot stall the frame that polls
+    // `drain_ipc_requests`. `vaultSearch` re-indexes changed notes first;
+    // neither method writes to the vault.
+    server.register("vaultSearch", crate::vault_ipc::search_handler());
+    server.register("vaultRead", crate::vault_ipc::read_handler());
+
     // All other methods route through GDScript.
     let gdscript_methods = [
         "newPane",
@@ -273,9 +304,12 @@ pub async fn start_ipc_server_inner(socket_path: &str) {
         "pluginsChanged",
     ];
     for method_name in gdscript_methods {
-        server.register(
+        // Each routed method carries its own server-side backstop, derived
+        // from the same fallback the handler uses (see `dispatch_timeout`).
+        server.register_with_timeout(
             method_name,
             make_gdscript_handler(method_name.to_string(), fallback_timeout(method_name)),
+            dispatch_timeout(method_name),
         );
     }
 
@@ -398,6 +432,24 @@ mod tests {
         assert!(
             PANE_WAIT_TIMEOUT >= std::time::Duration::from_secs(60),
             "the paneWait fallback must outlive the method's own deadline"
+        );
+        // The server's dispatch backstop must outlive each handler's own
+        // fallback, or the fallback never gets to answer: the client would
+        // see a dropped connection instead of the JSON-RPC error (the bug a
+        // single 30 s connection timeout caused for both held methods).
+        for method in ["paneWait", "pluginInstall", "newPane"] {
+            assert!(
+                dispatch_timeout(method) > fallback_timeout(method),
+                "`{method}` must answer at its fallback before the server's budget expires"
+            );
+        }
+        assert!(
+            dispatch_timeout("paneWait") > std::time::Duration::from_secs(60),
+            "the paneWait backstop must outlive the method's published wait"
+        );
+        assert!(
+            dispatch_timeout("pluginInstall") > std::time::Duration::from_secs(300),
+            "the install review backstop must outlive the human-answer window"
         );
     }
 

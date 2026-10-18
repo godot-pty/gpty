@@ -15,9 +15,8 @@ pub async fn run(client: &IpcClient, action: &LayoutAction, json: bool) -> anyho
             let resp = client.call("layoutList", None).await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&resp)?);
-            } else if let Some(ref err) = resp.error {
-                anyhow::bail!("rpc error {}: {}", err.code, err.message);
-            } else if let Some(ref result) = resp.result
+            } else if resp.error.is_none()
+                && let Some(result) = &resp.result
                 && let Some(layouts) = result.get("layouts").and_then(|v| v.as_array())
             {
                 for l in layouts {
@@ -26,7 +25,7 @@ pub async fn run(client: &IpcClient, action: &LayoutAction, json: bool) -> anyho
                     }
                 }
             }
-            Ok(())
+            super::check_error(&resp)
         }
     }
 }

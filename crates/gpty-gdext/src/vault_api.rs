@@ -12,9 +12,11 @@ use godot::prelude::*;
 
 /// Where the vault index lives: the app's private state directory, beside the
 /// CLI's other process-shared files and never inside a vault. A vault is user
-/// data this feature only reads, and the roadmap's agent-access item needs the
-/// same index reachable from the CLI, which cannot resolve `user://`.
-fn vault_db_path() -> Option<String> {
+/// data this feature only reads. The path is `gpty_ipc::transport::state_dir()`
+/// (Rust) rather than a Godot `user://` path because the index is also
+/// reachable from the control socket's native vault handlers
+/// (`vault_ipc.rs`), which run outside Godot's path resolution.
+pub(crate) fn vault_db_path() -> Option<String> {
     gpty_ipc::transport::state_dir().map(|dir| dir.join("vaults.db").to_string_lossy().into_owned())
 }
 
@@ -62,7 +64,7 @@ fn note_error(error: gpty_core::vault::NoteError) -> GString {
 /// overwrite dialog; only a containment refusal (a symlink trying to leave
 /// the vault) and an I/O failure are diagnostics, because nobody asked for
 /// them and nothing else surfaces them.
-fn note_failure_is_diagnostic(error: &gpty_core::vault::NoteError) -> bool {
+pub(crate) fn note_failure_is_diagnostic(error: &gpty_core::vault::NoteError) -> bool {
     matches!(
         error,
         gpty_core::vault::NoteError::Outside | gpty_core::vault::NoteError::Io(_)
@@ -90,7 +92,7 @@ fn reindex_vault(root: &str) -> bool {
 }
 
 /// Why `path` cannot be a vault root, or `None` when it can.
-fn vault_path_problem(path: &str) -> Option<String> {
+pub(crate) fn vault_path_problem(path: &str) -> Option<String> {
     let candidate = std::path::Path::new(path);
     if path.is_empty() {
         return Some("no vault path".to_string());

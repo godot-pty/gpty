@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Live pane-API smoke: boots the GUI headless and drives the JSON-RPC CLI
-end-to-end (new-pane -> status -> inject -> wait -> read -> scrollback ->
-broadcast -> pane-run exit code -> concept from output -> cli_view stdout ->
-wiki pane -> plugin-provided profile -> kill), plus subscribe/eventsPoll on
-the event listener.
+end-to-end (new-pane -> status (one pane, then every pane) -> inject ->
+wait -> read -> scrollback -> broadcast -> pane-run exit code -> concept
+from output -> cli_view stdout -> wiki pane -> vault search/read ->
+plugin-provided profile -> kill), plus subscribe/eventsPoll on the event
+listener.
 
 One harness for every platform: the transport is the only difference between
 Unix and Windows (named pipe vs Unix socket), so the flow is written once and
@@ -24,7 +25,9 @@ plugin store lives under `%LOCALAPPDATA%`, so a Windows run uses the real
 per-user directories — fine on a disposable CI runner, worth knowing on a
 dev box. The stores the harness writes itself (a concept, and an installed
 plugin's record) are backed up and put back in teardown, so a dev-box run
-leaves no trace.
+leaves no trace. The vault step indexes a temporary vault into `vaults.db`:
+on Unix the state directory is sandboxed, and on Windows the rows are derived
+data for a root that no longer exists, so the next index pass prunes them.
 
 Exit 0 and "PASS" on success; non-zero with "FAIL [step]: ..." and the tail of
 the Godot log otherwise. Reads and writes only inside the repo (plus the
@@ -111,26 +114,47 @@ class Smoke:
 
     # ── CLI ───────────────────────────────────────────────────────────
 
-    def cli(self, *args: str, check: bool = True) -> dict:
-        """Run the CLI and return its JSON response."""
+    def cli_run(self, *args: str) -> tuple[int, dict, str]:
+        """Run the CLI; return `(exit status, parsed stdout, failure detail)`.
+
+        Stdout is parsed even on a failed exit: `--json` prints the JSON-RPC
+        error envelope before it fails, and that envelope — not a lost status
+        — is what a probe asserts on.
+        """
         proc = subprocess.run(
             [str(self.cli_bin), *args],
             capture_output=True,
             text=True,
             env=self.env,
         )
-        if proc.returncode != 0:
+        payload: dict = {}
+        if proc.stdout.strip():
+            try:
+                loaded = json.loads(proc.stdout)
+            except json.JSONDecodeError:
+                loaded = None
+            if isinstance(loaded, dict):
+                payload = loaded
+        return proc.returncode, payload, (proc.stderr or proc.stdout).strip()
+
+    def cli(self, *args: str, check: bool = True) -> dict:
+        """Run the CLI and return its JSON response.
+
+        `check=False` returns whatever JSON stdout held even on a failed exit
+        (usually the `--json` error envelope); use `cli_run` when the status
+        itself is under test.
+        """
+        code, payload, detail = self.cli_run(*args)
+        if code != 0:
             if not check:
-                return {}
+                return payload
             self.fail(
-                f"`gpty {' '.join(args)}` exited {proc.returncode}",
-                (proc.stderr or proc.stdout).strip()[:300],
+                f"`gpty {' '.join(args)}` exited {code}",
+                detail[:300],
             )
-        try:
-            return json.loads(proc.stdout)
-        except json.JSONDecodeError:
-            self.fail(f"`gpty {' '.join(args)}` did not print JSON", proc.stdout[:300])
-            raise  # unreachable — fail() raises
+        if not payload:
+            self.fail(f"`gpty {' '.join(args)}` did not print JSON", detail[:300])
+        return payload
 
     def result(self, payload: dict, what: str) -> dict:
         result = payload.get("result")
@@ -586,6 +610,23 @@ def main() -> int:
             time.sleep(0.5)
         smoke.require(status.get("running") is True, "the pane must be running", status)
 
+        # ── pane-status: every pane in one answer ─────────────────────
+        # The no-pane form is the API's aggregate: the CLI sends one empty
+        # `paneStatus` request and the GUI answers every tile, non-terminals
+        # with `status: null`. Assert the pane just created carries its status
+        # document in that document (the old `--json` branch answered the raw
+        # pane list, with no `status` at all).
+        smoke.enter("pane-status (every pane)")
+        all_status = smoke.result(smoke.cli("pane-status", "--json"), "pane-status (all)")
+        entries = all_status.get("panes") or []
+        mine = next((e for e in entries if e.get("pane_id") == pane_id), None)
+        smoke.require(mine is not None, "the aggregate must list the pane", entries[:3])
+        smoke.require(
+            isinstance(mine.get("status"), dict) and "running" in mine["status"],
+            "a terminal's aggregate row must carry its status document",
+            mine,
+        )
+
         # ── shell readiness: a line typed before the child attaches is read ──
         # by nothing (the repo's documented cold-shell hazard — measured past
         # 10 s on a cold runner). Quiescing is necessary but not sufficient:
@@ -980,6 +1021,85 @@ def main() -> int:
         smoke.require(bool(wiki_id), "new-pane must return a wiki pane_id", wiki)
         smoke.require(wiki.get("type") == "wiki", "the pane must report the wiki type", wiki)
         smoke.cli("kill-pane", wiki_id, "--json")
+
+        # ── vault access: search and read over the pane API ──────────
+        # The knowledge base is queried from outside a pane. Both methods are
+        # answered natively by the control socket (no workspace state, no
+        # GDScript hop), and search re-indexes changed notes first so a note
+        # edited outside gPTY is visible to the next query.
+        smoke.enter("vault")
+        vault = smoke.tmp / "vault"
+        (vault / "notes").mkdir(parents=True)
+        (vault / "Alpha.md").write_text(
+            "# Alpha\n\nownership and lifetimes\n", encoding="utf-8"
+        )
+        (vault / "notes" / "Beta.md").write_text(
+            "# Beta\n\nborrow checker rules\n", encoding="utf-8"
+        )
+
+        found = smoke.result(
+            smoke.cli("vault", "search", str(vault), "ownership", "--json"),
+            "vault search",
+        )
+        smoke.require(found.get("total") == 1, "vault search must find the term", found)
+        hits = found.get("results") or []
+        smoke.require(
+            bool(hits) and hits[0].get("path") == "Alpha.md",
+            "vault search must name the note path",
+            found,
+        )
+        smoke.require(
+            found.get("truncated") is False,
+            "a small vault must not report a truncated walk",
+            found,
+        )
+
+        (vault / "Alpha.md").write_text(
+            "# Alpha\n\nownership, lifetimes, and pinning\n", encoding="utf-8"
+        )
+        fresh = smoke.result(
+            smoke.cli("vault", "search", str(vault), "pinning", "--json"),
+            "vault search (fresh)",
+        )
+        smoke.require(
+            fresh.get("total") == 1,
+            "vault search must re-index notes changed outside gPTY",
+            fresh,
+        )
+
+        note = smoke.result(
+            smoke.cli("vault", "read", str(vault), "notes/Beta.md", "--json"),
+            "vault read",
+        )
+        smoke.require(
+            "borrow checker rules" in (note.get("text") or ""),
+            "vault read must return the note text",
+            note,
+        )
+        smoke.require(
+            note.get("truncated") is False and note.get("path") == "notes/Beta.md",
+            "vault read must answer the note document",
+            note,
+        )
+
+        # `--json` prints the response envelope *and* exits nonzero for an RPC
+        # error: the envelope carries the stable `code` the wiki pane also
+        # switches on, and the status is the success signal a script branches
+        # on.
+        code, missing, _ = smoke.cli_run(
+            "vault", "read", str(vault), "missing.md", "--json"
+        )
+        smoke.require(
+            code != 0,
+            "--json must exit nonzero when the command fails",
+            code,
+        )
+        error = missing.get("error") or {}
+        smoke.require(
+            (error.get("data") or {}).get("code") == "not_found",
+            "reading a missing note must answer not_found",
+            missing,
+        )
 
         # ── kill-pane ─────────────────────────────────────────────────
         smoke.enter("kill-pane")

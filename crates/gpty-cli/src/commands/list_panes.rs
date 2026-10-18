@@ -4,9 +4,9 @@ pub async fn run(client: &IpcClient, json: bool) -> anyhow::Result<()> {
     let resp = client.call("listPanes", None).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
-    } else if let Some(ref err) = resp.error {
-        anyhow::bail!("rpc error {}: {}", err.code, err.message);
-    } else if let Some(ref result) = resp.result {
+    } else if resp.error.is_none()
+        && let Some(result) = &resp.result
+    {
         // Pretty-print as a table.
         if let Some(panes) = result.get("panes").and_then(|v| v.as_array()) {
             if panes.is_empty() {
@@ -36,5 +36,5 @@ pub async fn run(client: &IpcClient, json: bool) -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(result)?);
         }
     }
-    Ok(())
+    super::check_error(&resp)
 }

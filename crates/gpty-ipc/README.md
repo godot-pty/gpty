@@ -96,8 +96,13 @@ channel against other local users:
   for every client (CLI, MCP). The server rejects requests with a missing or
   mismatched `gpty_secret` field (`-32001`).
 - **Request size cap**: request lines over 64 KiB get an `-32600` error.
-- **Connection cap**: at most 16 concurrent connections; slow connections
-  are dropped after 30 s.
+- **Connection cap**: at most 16 concurrent connections. Reading the request
+  and writing the response each have a 30 s I/O bound, while the handler
+  dispatches under a per-method budget: 30 s by default (`register`), and
+  whatever a held answer declares with `register_with_timeout` (the GUI uses
+  fallback + 5 s — 75 s for `paneWait`, 305 s for `pluginInstall`). A handler
+  that overruns gets a `-32000 handler timed out` answer instead of a dropped
+  connection.
 
 ## Event socket (OMP observability)
 
@@ -147,7 +152,7 @@ See `crates/gpty-gdext/src/omp_events.rs` and
 | `focusPane` | `pane_id` | `{success: true}` |
 | `inject` | `pane_id`, `text` | `{success: true}` |
 | `paneRead` | `pane_id`, `lines?` (1–2000) | `{text}` |
-| `paneStatus` | `pane_id` | `{pid, running, exit_code, exit_reason, idle_ms, agent_state, agent_state_tier}` — `exit_reason` is `exited`, `task_ended`, or `null` while running |
+| `paneStatus` | `pane_id?` | The status document (`{pid, running, exit_code, exit_reason, idle_ms, agent_state, agent_state_tier}` — `exit_reason` is `exited`, `task_ended`, or `null` while running). With no `pane_id`, the aggregate `{panes: [{pane_id, label, type, status}]}` for every tile, non-terminals carrying `status: null` |
 | `paneRun` | `command` | `{pane_id, label, type}` (exit code via `paneStatus`) |
 | `paneWait` | `pane_id`, `pattern`, `timeout_ms?` (100–60000) | `{matched, line?}` / `{matched: false, timed_out}` — response held server-side until match or deadline |
 | `broadcast` | `tags`, `text` | `{success, count}` |
@@ -156,6 +161,8 @@ See `crates/gpty-gdext/src/omp_events.rs` and
 | `layoutList` | — | `{layouts: [string]}` |
 | `conceptList` | — | `{concepts: [{name, enabled, trigger, actions, …}]}` |
 | `conceptToggle` | `name` | `{success, name}` |
+| `vaultSearch` | `vault_path`, `pattern`, `limit?` (1–500) | `{results: [{path, title, snippet}], total, truncated}` — re-indexes changed notes first, then queries the FTS index (answered natively, off the GUI thread) |
+| `vaultRead` | `vault_path`, `path` | `{path, text, truncated, crlf, mtime, size}` — a refusal is `-32000` with `data.code` (`bad_path`, `not_found`, `outside_vault`, …) |
 | `version` | — | `{version, protocol}` |
 | `shutdown` | — | `{success: true}` |
 

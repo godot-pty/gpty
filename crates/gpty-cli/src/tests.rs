@@ -13,7 +13,7 @@ use gpty_ipc::server::{HandlerFn, IpcServer};
 use serde_json::Value;
 
 use crate::commands;
-use crate::{DaemonAction, LayoutAction};
+use crate::{DaemonAction, LayoutAction, VaultAction};
 
 /// Start an `IpcServer` on a unique temp socket registered with the
 /// given handlers. Each handler receives the request params and returns
@@ -245,6 +245,160 @@ async fn layout_list_roundtrip() {
         *calls.lock().unwrap(),
         1,
         "layout list must reach the server exactly once"
+    );
+}
+
+/// The vault commands carry the pane API's parameter names unchanged: the
+/// native handlers read `vault_path`, `pattern`, `limit` and `path`, so a
+/// rename on either side would answer "required param missing" at runtime
+/// with nothing failing to compile.
+#[tokio::test]
+async fn vault_roundtrip_carries_the_query_params() {
+    let searched: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+    let read: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+    let searched_h = Arc::clone(&searched);
+    let read_h = Arc::clone(&read);
+
+    let search_handler: HandlerFn = Arc::new(move |params| {
+        *searched_h.lock().unwrap() = Some(params);
+        Box::pin(
+            async move { Ok(serde_json::json!({"results": [], "total": 0, "truncated": false})) },
+        )
+    });
+    let read_handler: HandlerFn = Arc::new(move |params| {
+        *read_h.lock().unwrap() = Some(params);
+        Box::pin(async move { Ok(serde_json::json!({"path": "a.md", "text": "x"})) })
+    });
+    let socket = start_server_with(
+        "vault",
+        vec![("vaultSearch", search_handler), ("vaultRead", read_handler)],
+    )
+    .await;
+
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+    commands::vault::run(
+        &client,
+        &VaultAction::Search {
+            vault_path: "/vault".to_string(),
+            pattern: "rust".to_string(),
+            limit: 7,
+        },
+        true,
+    )
+    .await
+    .expect("vault search should succeed");
+    commands::vault::run(
+        &client,
+        &VaultAction::Read {
+            vault_path: "/vault".to_string(),
+            path: "a.md".to_string(),
+        },
+        true,
+    )
+    .await
+    .expect("vault read should succeed");
+    let _ = std::fs::remove_file(&socket);
+
+    let search_params = searched
+        .lock()
+        .unwrap()
+        .take()
+        .expect("the search handler should have been called");
+    assert_eq!(search_params["vault_path"], "/vault");
+    assert_eq!(search_params["pattern"], "rust");
+    assert_eq!(search_params["limit"], 7);
+
+    let read_params = read
+        .lock()
+        .unwrap()
+        .take()
+        .expect("the read handler should have been called");
+    assert_eq!(read_params["vault_path"], "/vault");
+    assert_eq!(read_params["path"], "a.md");
+}
+
+/// A response that carries an error must fail the command even under
+/// `--json`: the envelope is printed for a script to parse, and the exit
+/// status is the signal it branches on.
+#[tokio::test]
+async fn json_mode_fails_on_an_rpc_error() {
+    let handler: HandlerFn = Arc::new(|_params| {
+        Box::pin(async {
+            Err(gpty_ipc::protocol::JsonRpcError::new(
+                -32000,
+                "no such note",
+            ))
+        })
+    });
+    let socket = start_server_with("json_error", vec![("vaultRead", handler)]).await;
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+
+    let result = commands::vault::run(
+        &client,
+        &VaultAction::Read {
+            vault_path: "/vault".to_string(),
+            path: "missing.md".to_string(),
+        },
+        true,
+    )
+    .await;
+    let _ = std::fs::remove_file(&socket);
+    let message = result
+        .expect_err("a --json command must fail when the response carries an error")
+        .to_string();
+    assert!(message.contains("no such note"), "got: {message}");
+}
+
+/// The custom-output commands (`layout list` prints names, not the envelope)
+/// share the same rule through `check_error`.
+#[tokio::test]
+async fn json_mode_fails_a_custom_output_command_on_an_rpc_error() {
+    let handler: HandlerFn = Arc::new(|_params| {
+        Box::pin(async { Err(gpty_ipc::protocol::JsonRpcError::new(-32000, "refused")) })
+    });
+    let socket = start_server_with("layout_json_error", vec![("layoutList", handler)]).await;
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+
+    let result = commands::layout::run(&client, &LayoutAction::List, true).await;
+    let _ = std::fs::remove_file(&socket);
+    let message = result
+        .expect_err("a custom-output --json command must fail on an error response")
+        .to_string();
+    assert!(message.contains("refused"), "got: {message}");
+}
+
+/// The no-argument form reaches the API as one empty request — the GUI
+/// answers the aggregate — rather than fanning out to `listPanes` and losing
+/// the statuses under `--json` (the bug this replaces). A fan-out would send
+/// `listPanes`, which this server does not register.
+#[tokio::test]
+async fn pane_status_without_a_pane_uses_the_api_aggregate() {
+    let seen: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+    let seen_h = Arc::clone(&seen);
+    let handler: HandlerFn = Arc::new(move |params| {
+        *seen_h.lock().unwrap() = Some(params);
+        Box::pin(async move {
+            Ok(serde_json::json!({
+                "panes": [
+                    {"pane_id": "T1", "label": "T1", "type": "terminal",
+                     "status": {"running": true}},
+                    {"pane_id": "V1", "label": "V1", "type": "code_viewer",
+                     "status": null},
+                ]
+            }))
+        })
+    });
+    let socket = start_server_with("pane_status_all", vec![("paneStatus", handler)]).await;
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+
+    commands::pane_status::run(&client, None, true)
+        .await
+        .expect("the all-panes status must succeed");
+    let _ = std::fs::remove_file(&socket);
+    assert_eq!(
+        seen.lock().unwrap().take(),
+        Some(serde_json::json!({})),
+        "the no-pane mode must ask paneStatus for the aggregate, not call listPanes"
     );
 }
 

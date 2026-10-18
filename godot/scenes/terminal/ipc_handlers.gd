@@ -84,9 +84,38 @@ static func handle(ws, method: String, params: Dictionary):
 				return {"text": pr_body.get_text(pr_lines)}
 			return error("Pane '%s' not found" % params.get("pane_id", ""))
 		"paneStatus":
-			var ps_body = ws._find_pane_by_label(str(params.get("pane_id", "")))
-			if ps_body == null or not (ps_body is TerminalPane):
-				return error("Pane '%s' not found" % params.get("pane_id", ""))
+			# No target = every pane's status (the CLI's no-argument mode and
+			# the MCP tool's): one document, built here where the pane list and
+			# the status primitives already live. Non-terminal panes have no
+			# status primitives — they are listed with `status: null` rather
+			# than dropped, so the answer covers every pane the list named.
+			var ps_target := str(params.get("pane_id", ""))
+			if ps_target == "":
+				var ps_panes := []
+				for t in ws._tm.tiles:
+					var ps_any = ws._tm._find_body(t.wrapper)
+					if ps_any == null:
+						continue
+					var ps_entry := {
+						"pane_id": ps_any.attachment_id,
+						"label": ps_any.pane_label,
+						"type": ps_any._pane_type(),
+						"status": null,
+					}
+					if ps_any is TerminalPane:
+						var ps_all = JSON.parse_string(str(ps_any._terminal.get_status()))
+						if ps_all is Dictionary:
+							ps_entry["status"] = ps_all
+					ps_panes.append(ps_entry)
+				return {"panes": ps_panes}
+			var ps_body = ws._find_pane_by_label(ps_target)
+			if ps_body == null:
+				return error("Pane '%s' not found" % ps_target)
+			# Existing but not a terminal: the pane is real, it just has no
+			# status primitives. Say that instead of "not found", which sent
+			# an agent looking for a pane it can already see in listPanes.
+			if not (ps_body is TerminalPane):
+				return error("Pane '%s' has no status (not a terminal)" % ps_target)
 			var ps_status = JSON.parse_string(str(ps_body._terminal.get_status()))
 			if not (ps_status is Dictionary):
 				return error("Pane status unavailable")

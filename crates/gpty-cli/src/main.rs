@@ -204,6 +204,12 @@ enum Commands {
         text: String,
     },
 
+    /// Search a Markdown vault and read its notes (agent access)
+    Vault {
+        #[command(subcommand)]
+        action: VaultAction,
+    },
+
     /// Run as MCP server over stdio
     Mcp,
 
@@ -219,6 +225,30 @@ enum ConceptAction {
     Toggle {
         /// Concept name
         name: String,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum VaultAction {
+    /// Search a vault's notes by text (indexes changed notes first)
+    Search {
+        /// Vault directory (absolute path)
+        vault_path: String,
+
+        /// Search text; terms are ANDed and notes are stemmed
+        pattern: String,
+
+        /// Maximum results (1-500)
+        #[arg(long, default_value = "20")]
+        limit: i64,
+    },
+    /// Read one note from a vault
+    Read {
+        /// Vault directory (absolute path)
+        vault_path: String,
+
+        /// Vault-relative note path (e.g. notes/idea.md)
+        path: String,
     },
 }
 
@@ -324,6 +354,7 @@ fn may_autospawn(cmd: &Commands) -> bool {
         | Commands::PaneRun { .. }
         | Commands::PaneWait { .. }
         | Commands::Broadcast { .. }
+        | Commands::Vault { .. }
         | Commands::Mcp
         | Commands::Version => false,
     }

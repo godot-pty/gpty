@@ -31,6 +31,7 @@ mod ipc;
 mod markdown;
 mod omp_events;
 mod vault_api;
+mod vault_ipc;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Constants

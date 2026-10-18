@@ -241,6 +241,21 @@ mod tests {
         // Everything `new-pane` takes has a default, so none of it is required
         // — an MCP client may open a pane with no arguments at all.
         assert_eq!(required_of(tool(&tools, "new-pane")), Vec::<String>::new());
+        // Vault access names its directory and its own argument in the same
+        // spellings the native handlers read; `limit` stays optional.
+        assert_eq!(
+            required_of(tool(&tools, "vault-search")),
+            ["pattern", "vault_path"]
+        );
+        assert_eq!(
+            required_of(tool(&tools, "vault-read")),
+            ["path", "vault_path"]
+        );
+        let vault_search = &tool(&tools, "vault-search")["inputSchema"]["properties"];
+        assert!(
+            vault_search.get("limit").is_some(),
+            "limit must be optional"
+        );
         let new_pane = &tool(&tools, "new-pane")["inputSchema"]["properties"];
         for arg in [
             "pane_type",

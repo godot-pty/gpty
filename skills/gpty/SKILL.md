@@ -30,6 +30,8 @@ You are running inside one pane of a gPTY terminal workspace. Use the `gpty` CLI
 | `daemon-status` | `gpty daemon status` |
 | `concept-list` | `gpty concept list` |
 | `concept-toggle` | `gpty concept toggle <name>` |
+| `vault-search` | `gpty vault search <vault> <pattern>` |
+| `vault-read` | `gpty vault read <vault> <path>` |
 | `version` | `gpty version` |
 
 The CLI starts a GUI on demand for `new-pane` and `layout load`; the MCP
@@ -61,6 +63,11 @@ gpty pane-status <pane>        # pid, running, exit_code, exit_reason, idle_ms
 gpty pane-status               # every pane (agent-status-list)
 ```
 
+The no-pane form is one API call and answers
+`{panes: [{pane_id, label, type, status}]}`; a pane without status primitives
+(a non-terminal) carries `status: null`, so the list is complete rather than
+silently shorter.
+
 ### Stream a command's output into a pane
 
 `cli_view` runs argv directly (no shell, no PTY) and shows its stdout in the
@@ -78,6 +85,26 @@ Arguments after `--arg` are passed verbatim (no shell evaluation), and
 
 `gpty pane-wait <pane> --pattern "tests passed" --timeout-ms 30000` blocks until the
 pane's recent output matches (Rust regex syntax), then prints the matching line.
+
+### Query the knowledge base (Markdown vault)
+
+Both commands take the vault's absolute directory and are read-only: nothing
+in the vault is written.
+
+```
+gpty vault search ~/notes "ownership lifetimes"   # {results, total, truncated}
+gpty vault read ~/notes notes/idea.md             # {path, text, truncated, crlf, mtime, size}
+```
+
+Search re-indexes notes whose mtime/size changed before querying, so a note
+edited outside gPTY is visible to the next search — no pane needs to reopen
+the vault. Terms are ANDed and notes are stemmed; `--limit` accepts 1–500
+(default 20). A hit names the vault-relative `path`, which is what `read`
+takes. `truncated: true` on a search means the walk hit its 2000-note cap, so
+results are partial; on a read it means the note is larger than the 1 MiB
+display cap and the text stops there. A refusal (missing note, path outside
+the vault) is a JSON-RPC error whose `data.code` is stable (`not_found`,
+`bad_path`, …).
 
 ### Fan-out with tags
 

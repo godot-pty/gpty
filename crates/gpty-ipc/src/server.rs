@@ -19,8 +19,21 @@ use crate::protocol::{JsonRpcError, Request};
 const MAX_REQUEST_LEN: usize = 64 * 1024; // 64 KiB
 /// Maximum in-flight connections; excess connections are dropped.
 const MAX_CONNECTIONS: usize = 16;
-/// Per-connection lifetime cap so slow clients cannot hold a slot forever.
-const CONNECTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Deadline for the I/O phases of one connection: reading the request line
+/// and writing the response. A slow or stalled client cannot hold a slot
+/// forever. It deliberately does **not** bound the handler — see
+/// [`DEFAULT_DISPATCH_TIMEOUT`].
+const IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// The dispatch budget for a handler that does not declare its own.
+///
+/// This is a backstop, not the normal deadline. A handler whose answer is
+/// deliberately held (`paneWait`, `pluginInstall`) declares a budget that
+/// outlives its own fallback via [`IpcServer::register_with_timeout`], so the
+/// fallback answers a clean JSON-RPC error first and this only frees the
+/// connection when the handler is wedged. It also covers the slowest ordinary
+/// handler: the GUI's native `vaultSearch` may re-index a vault before it
+/// queries, and its client waits 25 s.
+pub const DEFAULT_DISPATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 /// How long the bind-time probe waits for a connect to an existing socket.
 ///
 /// A listening Unix socket accepts immediately; this only matters when its
@@ -40,9 +53,20 @@ pub type HandlerFn = Arc<
         + Send
         + Sync,
 >;
+
+/// A registered handler and how long the server waits for it.
+#[derive(Clone)]
+struct RegisteredHandler {
+    handler: HandlerFn,
+    /// The server-side backstop. A handler that holds its answer sets its own
+    /// (shorter) internal deadline and answers a JSON-RPC error there; this
+    /// value only stops a wedged handler from holding a connection slot.
+    timeout: std::time::Duration,
+}
+
 /// The IPC server — binds a socket and dispatches JSON-RPC requests.
 pub struct IpcServer {
-    handlers: HashMap<String, HandlerFn>,
+    handlers: HashMap<String, RegisteredHandler>,
     socket_path: String,
     /// Optional shared secret; when set, requests must carry a matching gpty_secret.
     secret: Option<String>,
@@ -80,8 +104,29 @@ impl IpcServer {
     }
 
     /// Register a handler for a named JSON-RPC method.
+    ///
+    /// It dispatches under [`DEFAULT_DISPATCH_TIMEOUT`].
     pub fn register(&mut self, method: &str, handler: HandlerFn) {
-        self.handlers.insert(method.to_string(), handler);
+        self.register_with_timeout(method, handler, DEFAULT_DISPATCH_TIMEOUT);
+    }
+
+    /// Register a handler with its own dispatch budget.
+    ///
+    /// The budget must **outlive** the handler's internal deadline: a method
+    /// that holds its answer (a pane wait, a human-answered review dialog)
+    /// should answer a JSON-RPC error at its own deadline, and this value is
+    /// only the backstop that frees the connection when the handler is
+    /// wedged. A budget shorter than the handler's own wait converts every
+    /// held answer into a dropped connection, which is what a single
+    /// connection-wide timeout used to do.
+    pub fn register_with_timeout(
+        &mut self,
+        method: &str,
+        handler: HandlerFn,
+        timeout: std::time::Duration,
+    ) {
+        self.handlers
+            .insert(method.to_string(), RegisteredHandler { handler, timeout });
     }
 
     /// Bind the socket and accept connections forever.
@@ -181,15 +226,13 @@ impl IpcServer {
                         let secret = self.secret.clone();
                         tokio::spawn(async move {
                             let _permit = permit;
-                            match tokio::time::timeout(
-                                CONNECTION_TIMEOUT,
-                                handle_connection(stream, &handlers, secret.as_deref()),
-                            )
-                            .await
+                            // No deadline around the whole connection: the
+                            // handler's own budget is chosen per method, and
+                            // a held answer must outlive the old 30 s cap.
+                            if let Err(e) =
+                                handle_connection(stream, &handlers, secret.as_deref()).await
                             {
-                                Ok(Ok(())) => {}
-                                Ok(Err(e)) => log::warn!("IPC connection error: {e}"),
-                                Err(_) => log::warn!("IPC connection timed out"),
+                                log::warn!("IPC connection error: {e}");
                             }
                         });
                     }
@@ -280,15 +323,9 @@ impl IpcServer {
                 let secret = self.secret.clone();
                 tokio::spawn(async move {
                     let _permit = permit;
-                    match tokio::time::timeout(
-                        CONNECTION_TIMEOUT,
-                        handle_connection(server, &handlers, secret.as_deref()),
-                    )
-                    .await
-                    {
-                        Ok(Ok(())) => {}
-                        Ok(Err(e)) => log::warn!("IPC connection error: {e}"),
-                        Err(_) => log::warn!("IPC connection timed out"),
+                    // The handler's budget is per method (see the Unix arm).
+                    if let Err(e) = handle_connection(server, &handlers, secret.as_deref()).await {
+                        log::warn!("IPC connection error: {e}");
                     }
                 });
             }
@@ -616,10 +653,33 @@ fn constant_time_eq(provided: &[u8], expected: &[u8]) -> bool {
         == 0
 }
 
+/// Write one response line under the I/O bound.
+///
+/// Shared by every path that answers a connection, so a client that stops
+/// reading cannot hold a slot forever and the bound is written once.
+async fn write_response<W>(writer: &mut W, resp: &protocol::Response) -> io::Result<()>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    let json = serde_json::to_string(resp).unwrap_or_default();
+    tokio::time::timeout(IO_TIMEOUT, async {
+        writer.write_all(json.as_bytes()).await?;
+        writer.write_all(b"\n").await
+    })
+    .await
+    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "response write timed out"))?
+}
+
 /// Handle a single connection: read one JSON-RPC request, dispatch, respond.
+///
+/// I/O (the request read and the response write) is bounded by
+/// [`IO_TIMEOUT`]; the handler dispatches under its own registered budget.
+/// The two are separate on purpose — one connection-wide deadline made every
+/// method whose answer is deliberately held (`paneWait`, `pluginInstall`)
+/// die at that deadline, no matter what the method or the client promised.
 async fn handle_connection(
     stream: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
-    handlers: &HashMap<String, HandlerFn>,
+    handlers: &HashMap<String, RegisteredHandler>,
     secret: Option<&str>,
 ) -> io::Result<()> {
     let (reader, mut writer) = tokio::io::split(stream);
@@ -627,9 +687,13 @@ async fn handle_connection(
     let mut line = String::new();
 
     // Read one newline-delimited JSON request, bounded to MAX_REQUEST_LEN
-    // bytes so a malicious client cannot force unbounded allocation.
+    // bytes so a malicious client cannot force unbounded allocation. The
+    // bound also keeps a connection that connects and sends nothing from
+    // holding a slot.
     let mut limited = BufReader::new((&mut buf_reader).take(MAX_REQUEST_LEN as u64 + 1));
-    let n = limited.read_line(&mut line).await?;
+    let n = tokio::time::timeout(IO_TIMEOUT, limited.read_line(&mut line))
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "request read timed out"))??;
     if n == 0 {
         return Ok(()); // EOF
     }
@@ -641,9 +705,7 @@ async fn handle_connection(
                 format!("request exceeds {MAX_REQUEST_LEN} bytes"),
             ),
         );
-        let json = serde_json::to_string(&resp).unwrap_or_default();
-        writer.write_all(json.as_bytes()).await?;
-        writer.write_all(b"\n").await?;
+        write_response(&mut writer, &resp).await?;
         return Ok(());
     }
     let line = line.trim().to_string();
@@ -659,9 +721,7 @@ async fn handle_connection(
                 0,
                 JsonRpcError::new(JsonRpcError::PARSE_ERROR, format!("Parse error: {e}")),
             );
-            let json = serde_json::to_string(&resp).unwrap_or_default();
-            writer.write_all(json.as_bytes()).await?;
-            writer.write_all(b"\n").await?;
+            write_response(&mut writer, &resp).await?;
             return Ok(());
         }
     };
@@ -687,33 +747,43 @@ async fn handle_connection(
                     "unauthorized: missing or invalid gpty_secret",
                 ),
             );
-            let json = serde_json::to_string(&resp).unwrap_or_default();
-            writer.write_all(json.as_bytes()).await?;
-            writer.write_all(b"\n").await?;
+            write_response(&mut writer, &resp).await?;
             return Ok(());
         }
     }
 
-    // Dispatch.
+    // Dispatch under the method's own budget. A handler that misses it gets
+    // an answer rather than a dropped connection, so a client sees why.
     let params = req.params.unwrap_or(serde_json::Value::Null);
-    let resp = if let Some(handler) = handlers.get(&req.method) {
-        match handler(params).await {
-            Ok(result) => protocol::build_response(id, result),
-            Err(e) => protocol::build_error(id, e),
-        }
-    } else {
-        protocol::build_error(
+    let resp = match handlers.get(&req.method) {
+        Some(entry) => match tokio::time::timeout(entry.timeout, (entry.handler)(params)).await {
+            Ok(Ok(result)) => protocol::build_response(id, result),
+            Ok(Err(e)) => protocol::build_error(id, e),
+            Err(_) => {
+                log::warn!(
+                    "IPC handler `{}` exceeded its {} ms dispatch budget",
+                    req.method,
+                    entry.timeout.as_millis()
+                );
+                protocol::build_error(
+                    id,
+                    JsonRpcError::new(
+                        JsonRpcError::SERVER_ERROR,
+                        format!("handler timed out after {} ms", entry.timeout.as_millis()),
+                    ),
+                )
+            }
+        },
+        None => protocol::build_error(
             id,
             JsonRpcError::new(
                 JsonRpcError::METHOD_NOT_FOUND,
                 format!("Unknown method: {}", req.method),
             ),
-        )
+        ),
     };
 
-    let json = serde_json::to_string(&resp).unwrap_or_default();
-    writer.write_all(json.as_bytes()).await?;
-    writer.write_all(b"\n").await?;
+    write_response(&mut writer, &resp).await?;
 
     Ok(())
 }
@@ -981,6 +1051,77 @@ mod tests {
             let resp = send_request(&server_path, &req).await.unwrap();
             assert_eq!(resp.id, 3);
             assert_eq!(resp.error.unwrap().code, JsonRpcError::METHOD_NOT_FOUND);
+        }
+
+        /// A handler that outlives its budget is answered with a JSON-RPC
+        /// timeout rather than a dropped socket, and a *held* answer whose
+        /// budget covers it still succeeds — the two halves of the rule that
+        /// a connection-wide deadline cannot express.
+        #[tokio::test]
+        async fn a_wedged_handler_answers_a_timeout_instead_of_dropping_the_connection() {
+            let socket_path = format!("/tmp/gpty-ipc-budget-{}.sock", std::process::id());
+            let _ = std::fs::remove_file(&socket_path);
+
+            let mut server = IpcServer::new(&socket_path);
+            server.register_with_timeout(
+                "wedged",
+                Arc::new(|_params| {
+                    Box::pin(async {
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        Ok(serde_json::json!({"too_late": true}))
+                    })
+                }),
+                std::time::Duration::from_millis(50),
+            );
+            server.register_with_timeout(
+                "held",
+                Arc::new(|_params| {
+                    Box::pin(async {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        Ok(serde_json::json!({"held": true}))
+                    })
+                }),
+                std::time::Duration::from_millis(500),
+            );
+
+            let server_path = socket_path.clone();
+            tokio::spawn(async move {
+                let _ = server.serve().await;
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+            let request = |id: u64, method: &str| Request {
+                jsonrpc: "2.0".into(),
+                id: Some(id),
+                method: method.into(),
+                params: None,
+                gpty_secret: None,
+            };
+
+            let wedged = send_request(&server_path, &request(1, "wedged"))
+                .await
+                .expect("the connection must stay answerable");
+            assert_eq!(wedged.id, 1);
+            assert!(
+                wedged.result.is_none(),
+                "a late result must not be answered: {:?}",
+                wedged.result
+            );
+            let error = wedged.error.expect("the client must receive an error");
+            assert_eq!(error.code, JsonRpcError::SERVER_ERROR);
+            assert!(
+                error.message.contains("timed out"),
+                "the error must say what happened, got: {}",
+                error.message
+            );
+
+            let held = send_request(&server_path, &request(2, "held"))
+                .await
+                .expect("a handler inside its budget must answer");
+            assert_eq!(held.id, 2);
+            assert_eq!(held.result.unwrap(), serde_json::json!({"held": true}));
+
+            let _ = std::fs::remove_file(&socket_path);
         }
 
         #[tokio::test]

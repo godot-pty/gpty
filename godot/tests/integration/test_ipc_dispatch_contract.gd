@@ -84,6 +84,44 @@ func test_every_listed_id_addresses_the_pane_it_names():
 
 	_ws._kill(extra)
 
+# ── paneStatus: one target, or every pane ──────────────────────────────
+
+func test_pane_status_without_a_pane_covers_every_pane():
+	var terminal = _spawn("terminal")
+	var viewer = _spawn("code_viewer")
+	var terminal_id := str(terminal.attachment_id)
+	var viewer_id := str(viewer.attachment_id)
+
+	var result = WorkspaceIpcHandlers.handle(_ws, "paneStatus", {})
+	assert_true(result is Dictionary and result.has("panes"), "no target must answer a panes array")
+	var entries: Array = result["panes"]
+	assert_eq(entries.size(), _ws._tm.tiles.size(), "the aggregate must cover every tile")
+
+	var by_id := {}
+	for entry in entries:
+		by_id[str(entry["pane_id"])] = entry
+	assert_true(by_id.has(terminal_id), "the terminal must be listed")
+	assert_true(by_id.has(viewer_id), "the non-terminal must be listed, not dropped")
+	var terminal_status = by_id[terminal_id]["status"]
+	assert_true(terminal_status is Dictionary, "a terminal must carry its status primitives")
+	assert_true(terminal_status.has("running"), "the status document must be paneStatus's own")
+	assert_eq(str(by_id[terminal_id]["type"]), "terminal")
+	assert_null(by_id[viewer_id]["status"], "a pane without status primitives must say so with null")
+	assert_eq(str(by_id[viewer_id]["type"]), "code_viewer")
+
+	# The single-pane contract is unchanged: a terminal answers its status
+	# object, and a non-terminal is refused as having no status rather than
+	# pretending it does not exist.
+	var one = WorkspaceIpcHandlers.handle(_ws, "paneStatus", {"pane_id": terminal_id})
+	assert_false(one.has("error"), "a terminal target must answer its status")
+	assert_true(one.has("running"), "the single-pane answer must stay the status document itself")
+	var not_terminal = WorkspaceIpcHandlers.handle(_ws, "paneStatus", {"pane_id": viewer_id})
+	assert_true(not_terminal.has("error"), "a non-terminal target must be refused")
+	assert_string_contains(str(not_terminal["error"]["message"]), "not a terminal")
+
+	_ws._kill(terminal)
+	_ws._kill(viewer)
+
 func test_pane_targeting_accepts_an_id_and_a_legacy_label():
 	var by_id = _spawn("code_viewer")
 	var by_label = _spawn("code_viewer")
