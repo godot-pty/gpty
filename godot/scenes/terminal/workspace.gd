@@ -256,6 +256,27 @@ func _add_body_to_grid_into(ws: Dictionary, w: Control, body: Control, label: St
 	_list()
 	ToastManager.info("%s spawned" % label)
 
+## Answer a pane's `request_pane` (the file tree opening a file in a viewer,
+## and any future origin). The type is held to the pane registry — the request
+## is internal, but the spawn surface stays closed — and a `code_viewer`
+## request for a file this workspace already shows is focused instead of
+## duplicated: a viewer's scroll, selection and rendered/source mode belong to
+## its document, so repointing one at another file is rejected, while a
+## second view is a deliberate layout choice (spawn another viewer directly).
+func _request_pane_into(ws: Dictionary, type_name: String, settings: Dictionary):
+	if ws.is_empty() or not PaneTypes.ALL.has(type_name):
+		return
+	var path: String = str(settings.get("file_path", ""))
+	if type_name == "code_viewer" and path != "":
+		for t in ws.tm.tiles:
+			var shown = ws.tm._find_body(t.wrapper)
+			if shown is CodeViewerPane and shown.file_path == path:
+				activate_pane(shown)
+				return
+	var body := _spawn_pane_into(ws, type_name, settings)
+	if body != null:
+		activate_pane(body)
+
 func _spawn_bulk(count: int, shell := ""):
 	var start_size = _tm.tiles.size()
 	var bodies = _tm.spawn_bulk(count, shell)
@@ -510,6 +531,11 @@ func _attach_pane_into(ws: Dictionary, w: Control, body: Control):
 	_ensure_unique_attachment_id(body)
 	ws.grid.add_child(w)
 	_wire_pane_activation(ws, w, body)
+	# Panes never spawn panes: a body that needs another pane emits
+	# `request_pane` and this workspace — the only spawner — answers it.
+	body.request_pane.connect(func(type_name: String, settings: Dictionary):
+		_request_pane_into(ws, type_name, settings)
+	)
 	if body is TerminalPane:
 		body.title_changed.connect(func(t: String):
 			var lbl = w.get_node_or_null("BodyVBox/TitleBar/TitleLabel")

@@ -5,6 +5,16 @@ extends Control
 
 signal title_changed(new_title: String)
 
+## Panes never spawn panes. A body that needs another pane asks its workspace
+## by emitting this; the workspace is the only spawner, attaches the new pane
+## through its usual path and activates it. `settings` is the same dictionary
+## `TerminalManager.spawn_pane`/`apply_settings` consume (`type` plus the
+## pane's own keys, e.g. `{"file_path": ...}` for a code viewer). The
+## workspace may answer with an existing pane instead of a new one (a viewer
+## already showing that file is focused), so a body must not assume its
+## request created anything.
+signal request_pane(type: String, settings: Dictionary)
+
 @export var pane_name := ""
 ## Stable logical link used by profiles and companion panes. Unlike
 ## `pane_label`, this value survives save/restore.

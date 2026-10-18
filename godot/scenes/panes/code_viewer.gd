@@ -10,6 +10,7 @@ class_name CodeViewerPane
 var _editor: CodeEdit
 var _markdown: MarkdownView
 var _view_toggle: Button
+var _reload_button: Button
 ## The editor's text: the read plus its notice when the read hit the cap.
 var _content := ""
 ## What the rendered view gets: the read itself, with no notice in it — a
@@ -31,11 +32,26 @@ func _ready():
 	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(root)
 
+	var toolbar = HBoxContainer.new()
+	toolbar.name = "Toolbar"
+	root.add_child(toolbar)
+
+	# Opening the same file again focuses this pane instead of re-reading it
+	# (a viewer's scroll, selection and mode belong to its document), so a
+	# file changed on disk is refreshed by this explicit action.
+	_reload_button = Button.new()
+	_reload_button.name = "ReloadButton"
+	_reload_button.text = "Reload"
+	_reload_button.focus_mode = Control.FOCUS_NONE
+	_reload_button.tooltip_text = "Re-read this file from disk"
+	_reload_button.pressed.connect(reload)
+	toolbar.add_child(_reload_button)
+
 	_view_toggle = Button.new()
 	_view_toggle.name = "ViewToggle"
 	_view_toggle.focus_mode = Control.FOCUS_NONE
 	_view_toggle.pressed.connect(_toggle_view)
-	root.add_child(_view_toggle)
+	toolbar.add_child(_view_toggle)
 
 	var content_root = Control.new()
 	content_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -96,6 +112,20 @@ func load_file(path: String):
 			_editor.add_comment_delimiter("//", "", true)
 	_refresh_view()
 
+## Re-read the file being shown. `load_file` is the same gate a first open
+## uses (regular file, 1 MiB cap, torn-tail drop), so a file that is gone or
+## became non-regular clears the pane rather than showing stale text as if it
+## were current.
+func reload():
+	if file_path == "":
+		return
+	var scroll := _editor.scroll_vertical
+	var caret := _editor.get_caret_line()
+	load_file(file_path)
+	if _editor.text != "":
+		_editor.set_caret_line(mini(caret, _editor.get_line_count() - 1))
+		_editor.scroll_vertical = scroll
+
 func _clear_content():
 	file_path = ""
 	_content = ""
@@ -118,6 +148,7 @@ func _refresh_view():
 	_show_rendered = can_render and view_mode != "source"
 	_editor.visible = not _show_rendered
 	_markdown.visible = _show_rendered
+	_reload_button.disabled = file_path == ""
 	_view_toggle.visible = can_render
 	_view_toggle.text = "View source" if _show_rendered else "Render Markdown"
 	if _show_rendered:
@@ -145,6 +176,10 @@ func receive_content(text: String, _event: Dictionary = {}) -> bool:
 	# the view reports from its answer.
 	_source = text
 	_notice = ""
+	# The pane now shows the capture, not a file. Keeping `file_path` would
+	# make a later "open this file" focus a viewer that no longer shows it,
+	# and would save the path into the layout as if the pane still held it.
+	file_path = ""
 	_editor.text = text
 	_editor.set_caret_line(0)
 	_refresh_view()

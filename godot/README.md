@@ -67,6 +67,7 @@ godot/
         └── panes/               # Specialty pane types
             ├── pane_body.gd
             ├── pane_types.gd    # Pane registry, sanitizers, palette command list
+            ├── viewable_files.gd # Closed table: which paths open in the viewer
             ├── code_viewer.gd
             ├── file_tree.gd
             ├── text_read.gd     # Shared read guard: regular-file gate + 1 MiB cap

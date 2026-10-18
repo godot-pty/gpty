@@ -59,6 +59,26 @@ func _dialogs_of(node: Node) -> Array:
 			found.append(child)
 	return found
 
+
+## Collect `request_pane` emissions as `[type, settings]` pairs. The captured
+## Array is shared by reference, so the lambda appends where the test reads.
+func _requests(pane: FileTreePane) -> Array:
+	var requests := []
+	pane.request_pane.connect(func(type_name: String, settings: Dictionary):
+		requests.append([type_name, settings])
+	)
+	return requests
+
+
+func _activate(pane: FileTreePane, name: String) -> TreeItem:
+	var item := _item_named(pane._tree, name)
+	if item == null:
+		assert_not_null(item, "the tree must list " + name)
+		return null
+	item.select(0)
+	pane._tree.emit_signal("item_activated")
+	return item
+
 # ── Code viewer: read cap ──────────────────────────────────────────────
 
 func test_small_file_loads_in_full():
@@ -109,21 +129,109 @@ func test_non_regular_path_is_refused():
 	assert_eq(pane.file_path, "", "a non-regular path must not become the pane's file")
 	assert_eq(pane._content, "")
 
-# ── File tree: confirmation before the system handler ─────────────────
+# ── Code viewer: Reload ────────────────────────────────────────────────
 
-func test_file_tree_activation_confirms_before_opening():
-	_write(_tmp.path_join("note.md"), "# hi\n")
+## Opening the same file again focuses a viewer instead of re-reading it, so
+## a file changed on disk is picked up only through the explicit action.
+func test_reload_re_reads_the_file_from_disk():
+	var pane := _make_viewer()
+	await get_tree().process_frame
+	var path := _write(_tmp.path_join("reload.txt"), "before\n")
+	pane.load_file(path)
+	assert_eq(pane._content, "before\n")
+	_write(path, "after\n")
+	assert_eq(pane._content, "before\n", "a load is a read, not a watch")
+
+	pane._reload_button.pressed.emit()
+
+	assert_eq(pane._content, "after\n", "Reload re-reads through the same gate")
+	assert_eq(pane.file_path, path, "the pane still shows the same file")
+
+func test_reload_is_disabled_when_the_pane_shows_no_file():
+	var pane := _make_viewer()
+	await get_tree().process_frame
+	assert_true(pane._reload_button.disabled, "a fresh viewer has nothing to reload")
+	pane.receive_content("some capture")
+	assert_true(pane._reload_button.disabled, "a routed capture is not a file")
+	assert_eq(pane.file_path, "")
+
+## A capture replaces the document; keeping the old path would make a later
+## "open this file" focus a pane that no longer shows it.
+func test_a_routed_capture_drops_the_file_identity():
+	var pane := _make_viewer()
+	await get_tree().process_frame
+	var path := _write(_tmp.path_join("before.txt"), "file\n")
+	pane.load_file(path)
+	pane.receive_content("capture")
+	assert_eq(pane.file_path, "", "the pane no longer shows the file")
+
+# ── File tree: in-app viewer route ─────────────────────────────────────
+
+## A supported text file opens in-app: the tree asks its workspace for a
+## `code_viewer` pane and never reaches the system handler or a confirmation.
+func test_file_tree_activation_of_a_supported_file_requests_a_viewer():
+	var path := _write(_tmp.path_join("note.md"), "# hi\n")
 	var pane := _make_tree(_tmp)
 	await get_tree().process_frame
-	var item := _item_named(pane._tree, "note.md")
-	assert_not_null(item, "the tree must list the file")
-	item.select(0)
-	pane._tree.emit_signal("item_activated")
+	var opened := []
+	pane.open_external = func(uri: String): opened.append(uri)
+	var requests := _requests(pane)
 
+	_activate(pane, "note.md")
+
+	assert_eq(requests.size(), 1, "one activation asks the workspace once")
+	assert_eq(requests[0][0], "code_viewer", "Markdown is a viewer type")
+	assert_eq(requests[0][1].get("file_path"), path, "the request carries the exact path")
+	assert_eq(_dialogs_of(pane).size(), 0, "the in-app route never asks for confirmation")
+	assert_eq(opened, [], "the in-app route never reaches the system handler")
+
+## Anything the table does not name keeps the old behavior exactly: confirm,
+## then hand the constructed `file://` URI to the system's default handler.
+func test_file_tree_activation_of_an_unsupported_file_still_confirms():
+	_write(_tmp.path_join("picture.png"), "not really a png")
+	var pane := _make_tree(_tmp)
+	await get_tree().process_frame
+	var opened := []
+	pane.open_external = func(uri: String): opened.append(uri)
+	var requests := _requests(pane)
+
+	_activate(pane, "picture.png")
+
+	assert_eq(requests, [], "an unsupported type must not reach a pane")
 	var dialogs := _dialogs_of(pane)
-	assert_eq(dialogs.size(), 1, "opening a file must ask first")
-	assert_string_contains(dialogs[0].dialog_text, "note.md",
+	assert_eq(dialogs.size(), 1, "the system route asks first")
+	assert_string_contains(dialogs[0].dialog_text, "picture.png",
 		"the confirmation must show what will be opened")
+	assert_eq(opened, [], "nothing opens before the answer")
+	dialogs[0].confirmed.emit()
+	assert_eq(opened.size(), 1, "a confirmed open reaches the handler")
+	assert_true(opened[0].begins_with(pane.OPEN_SCHEME),
+		"the sink constructs the URI itself")
+
+## The per-tree setting can keep every file on the system path, including the
+## types the viewer supports.
+func test_open_in_system_keeps_the_confirmation_for_a_supported_file():
+	_write(_tmp.path_join("note.md"), "# hi\n")
+	var pane := _make_tree(_tmp)
+	pane.open_in = "system"
+	await get_tree().process_frame
+	var requests := _requests(pane)
+
+	_activate(pane, "note.md")
+
+	assert_eq(requests, [], "system mode must not request a pane")
+	assert_eq(_dialogs_of(pane).size(), 1,
+		"even a supported file gets the system confirmation in this mode")
+
+## A non-absolute path never becomes a pane request either — the same guard
+## the system path applies (`_confirm_open`, covered below).
+func test_file_tree_refuses_a_non_absolute_viewer_open():
+	var pane := _make_tree(_tmp)
+	await get_tree().process_frame
+	var requests := _requests(pane)
+	pane._open_activated("relative/note.md")
+	assert_eq(requests, [], "a relative path must not reach the workspace")
+	assert_eq(_dialogs_of(pane).size(), 0)
 
 func test_file_tree_directory_activation_expands_without_a_dialog():
 	DirAccess.make_dir_recursive_absolute(_tmp.path_join("sub"))

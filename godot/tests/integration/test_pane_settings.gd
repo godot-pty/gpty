@@ -5,6 +5,24 @@ extends GutTest
 var _scene: Control
 var _tm: TerminalManager
 
+## The pane settings panel is a real Control; a fixture provides only the two
+## fields `_build_pane_settings_ui` writes and reads.
+class FakePanePanel extends Control:
+	var _debounce_timer: Timer
+	var _gather_func: Callable
+
+	func _init():
+		_debounce_timer = Timer.new()
+
+
+func _option_with_item(root: Node, text: String) -> OptionButton:
+	for node in root.find_children("*", "OptionButton", true, false):
+		var opt := node as OptionButton
+		for i in opt.item_count:
+			if opt.get_item_text(i) == text:
+				return opt
+	return null
+
 func before_each():
 	MockAutoloads.setup()
 	SettingsManager.cfg_shell_command = SettingsManager.default_shell_command()
@@ -108,6 +126,38 @@ func test_code_viewer_get_layout_state_round_trips_through_apply_settings():
 	_scene.add_child(twin)
 	twin.apply_settings(state)
 	assert_eq(twin._get_layout_state(), state, "state -> apply -> state is stable")
+
+## `open_in` is a closed vocabulary and travels the same path as every other
+## pane setting: the settings UI gathers it, `apply_settings` accepts it, and
+## the tile state carries it back.
+func test_file_tree_open_in_round_trips_through_the_pane_settings_ui():
+	var body = _tm.create_body("file_tree")
+	_scene.add_child(body)
+	var panel := FakePanePanel.new()
+	_scene.add_child(panel)
+	var ui: Control = body._build_pane_settings_ui(panel)
+	_scene.add_child(ui)
+
+	var opt := _option_with_item(ui, "System application")
+	assert_not_null(opt, "the pane settings must offer the system route")
+	opt.select(1)
+
+	var gathered: Dictionary = panel._gather_func.call()
+	assert_eq(gathered.get("open_in"), "system")
+	body.apply_settings(gathered)
+
+	var state = body._get_layout_state()
+	assert_eq(state.get("open_in"), "system", "the choice is part of the tile state")
+	var twin = _tm.create_body("file_tree")
+	_scene.add_child(twin)
+	twin.apply_settings(state)
+	assert_eq(twin.open_in, "system", "state -> apply restores the choice")
+	assert_eq(twin._get_layout_state(), state, "state -> apply -> state is stable")
+
+	# A saved file is untrusted input: an unknown mode falls back to the
+	# default instead of leaving the route undefined.
+	twin.apply_settings({"open_in": "something-else"})
+	assert_eq(twin.open_in, "viewer", "the mode vocabulary is closed")
 
 # ── spawn_pane applies global settings ─────────────────────────────────
 
