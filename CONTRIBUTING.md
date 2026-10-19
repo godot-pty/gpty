@@ -63,7 +63,7 @@ One-shot standalone build (detects the host platform, builds gpty-gdext in relea
 ./scripts/build
 ```
 
-Requires Godot on PATH with export templates for **exactly** that version: a `4.7.2.stable` editor needs `4.7.2.stable` templates, and a symlinked older directory silently exports with the other engine build. The script fails early with the download command when they are missing.
+Requires Godot on PATH with export templates for **exactly** that version: a `4.7.2.stable` editor needs `4.7.2.stable` templates, and a symlinked older directory silently exports with the other engine build. The script fails early with the download command when they are missing. It also calls `scripts/bundle-media` after the export, so the host bundle carries the pinned FFmpeg runtime beside the GDExtension (run `./scripts/media-deps` first).
 The manual steps below are what the script does internally.
 
 
