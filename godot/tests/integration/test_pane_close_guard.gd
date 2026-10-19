@@ -13,16 +13,22 @@ var _quit_called := false
 
 
 class ScriptedPane extends RefCounted:
-	## A pane whose close answer is scripted: the walk only calls
-	## `request_close`/the answer, so a RefCounted stands in for a pane and the
-	## walk's semantics are pinned here (the real dialog behavior by the wiki
-	## pane's own tests). RefCounted, not a Node: no orphan per test.
+	## A pane whose close answer is scripted: the walk asks `has_running_work`
+	## once per action and `request_close` per pane, so a RefCounted stands in
+	## for a pane and the walk's semantics are pinned here (the real dialog
+	## behavior by the wiki pane's own tests and the live terminal below).
+	## RefCounted, not a Node: no orphan per test.
 	var proceeds := true
 	var asks := 0
+	var running := false
+	var pane_label := "S"
 
 	func request_close(answer: Callable) -> void:
 		asks += 1
 		answer.call(proceeds)
+
+	func has_running_work() -> bool:
+		return running
 
 
 func before_all():
@@ -73,6 +79,13 @@ func _dirty(pane: Control) -> void:
 func _ask_dialog(pane: Control) -> ConfirmationDialog:
 	return pane.find_child("DiscardConfirm", false, false) as ConfirmationDialog
 
+## The one question a running-work action must be asking. One dialog names
+## every busy pane, so the actions that destroy many panes raise it once.
+func _expect_running_ask() -> ConfirmationDialog:
+	var dialog := _ws.find_child("RunningWorkConfirm", false, false) as ConfirmationDialog
+	assert_not_null(dialog, "the action must ask before stopping running work")
+	return dialog
+
 
 ## The question a pane must be asking. Asserting here keeps a missing dialog a
 ## clean test failure rather than a null dereference (a script error aborts the
@@ -88,6 +101,10 @@ func after_each():
 	# them all (the primitive, no asking). A leftover dirty pane would be asked
 	# again by the next test's walk, and a second exclusive dialog cannot be
 	# raised while a leftover question is still open.
+	var leftover := _ws.find_child("RunningWorkConfirm", false, false) as ConfirmationDialog
+	if leftover:
+		leftover.hide()
+		leftover.queue_free()
 	for ws in _ws._workspaces:
 		ws.tm.reset()
 	await get_tree().process_frame
@@ -133,6 +150,127 @@ func test_the_walk_skips_a_pane_that_was_freed_while_asking():
 
 	assert_eq([a.asks, b.asks], [1, 1], "a freed pane is skipped, not fatal")
 	assert_eq(done, [true])
+
+## Stopping processes is the action's hazard, so it is asked once for the
+## whole set — and before any per-pane question, so a Cancel stops the action
+## before anything has been asked to throw work away.
+func test_running_work_is_asked_once_for_the_whole_action():
+	var idle := ScriptedPane.new()
+	idle.pane_label = "T1"
+	var busy_a := ScriptedPane.new()
+	busy_a.pane_label = "T2"
+	busy_a.running = true
+	var busy_b := ScriptedPane.new()
+	busy_b.pane_label = "T3"
+	busy_b.running = true
+	var done := []
+	var refused := []
+	_ws._ask_close_then(
+		[idle, busy_a, busy_b], func(): done.append(true), func(): refused.append(true))
+
+	var dialog := _expect_running_ask()
+	assert_string_contains(dialog.dialog_text, "T2", "every busy pane is named")
+	assert_string_contains(dialog.dialog_text, "T3")
+	assert_false(dialog.dialog_text.contains("T1"), "an idle pane is not named")
+	assert_eq([idle.asks, busy_a.asks, busy_b.asks], [0, 0, 0],
+		"no pane answers before the action's own consent")
+
+	dialog.canceled.emit()
+	await get_tree().process_frame
+	assert_eq(refused, [true], "canceling the running ask cancels the action")
+	assert_eq(done, [])
+	assert_eq([idle.asks, busy_a.asks, busy_b.asks], [0, 0, 0],
+		"nothing was asked to discard work either")
+
+	_ws._ask_close_then(
+		[idle, busy_a, busy_b], func(): done.append(true), func(): refused.append(true))
+	_expect_running_ask().confirmed.emit()
+	await get_tree().process_frame
+	assert_eq([idle.asks, busy_a.asks, busy_b.asks], [1, 1, 1],
+		"consent to stopping processes moves the walk to the per-pane questions")
+	assert_eq(done, [true])
+
+## The live half: a command typed at the shell prompt is a foreground job, and
+## closing the pane asks before killing it. A platform that cannot report one
+## (Windows/ConPTY) treats a live shell as possibly busy — the documented
+## fallback — so the same close still asks.
+func test_closing_a_terminal_with_a_running_command_asks_first():
+	if not ClassDB.class_exists("GptyTerminal"):
+		pending("the GDExtension is not loaded")
+		return
+	var body = _ws._spawn_pane("terminal")
+	assert_not_null(body, "the test needs a real terminal")
+	assert_true(body is TerminalPane)
+	assert_true(await _wait_for_shell_output(body, 30000),
+		"the shell must print before it is typed into: %s" % _status_text(body))
+	if ShellFixtures.is_windows():
+		assert_true(body.has_running_work(),
+			"ConPTY cannot report a foreground group; a live shell must be treated conservatively")
+	else:
+		assert_true(await _wait_for_work_state(body, false, 10000),
+			"a shell at its prompt runs nothing: %s" % _status_text(body))
+		body._terminal.send_line("sleep 600")
+		assert_true(await _wait_for_work_state(body, true, 10000),
+			"a typed foreground command must be reported: %s" % _status_text(body))
+
+	var tiles_before: int = _ws._tm.tiles.size()
+	_ws._kill(body)
+	assert_true(is_instance_valid(body), "the pane stays until the running ask answers")
+	assert_eq(_ws._tm.tiles.size(), tiles_before)
+	var dialog := _expect_running_ask()
+	assert_string_contains(dialog.dialog_text, body.pane_label)
+	dialog.canceled.emit()
+	await get_tree().process_frame
+	assert_true(is_instance_valid(body), "canceling keeps the pane, and its command")
+
+	_ws._kill(body)
+	_expect_running_ask().confirmed.emit()
+	await get_tree().process_frame
+	assert_false(is_instance_valid(body), "confirming closes the pane")
+
+func _wait_for_shell_output(body: Control, timeout_ms: int) -> bool:
+	var deadline := Time.get_ticks_msec() + timeout_ms
+	while Time.get_ticks_msec() < deadline:
+		var status = JSON.parse_string(str(body._terminal.get_status()))
+		if status is Dictionary and status.get("idle_ms") != null:
+			return true
+		await get_tree().create_timer(0.05).timeout
+	return false
+
+func _wait_for_work_state(body: Control, running: bool, timeout_ms: int) -> bool:
+	var deadline := Time.get_ticks_msec() + timeout_ms
+	while Time.get_ticks_msec() < deadline:
+		if body.has_running_work() == running:
+			return true
+		await get_tree().create_timer(0.05).timeout
+	return false
+
+## A close that loses nothing must show nothing: a shell at its prompt is
+## closed at once. Windows is the documented exception — ConPTY cannot report
+## a foreground group, so a live shell is conservatively busy and the close
+## asks (covered by the test above).
+func test_closing_an_idle_shell_does_not_ask():
+	if ShellFixtures.is_windows():
+		pending("ConPTY has no foreground process group; a live shell is conservatively busy")
+		return
+	if not ClassDB.class_exists("GptyTerminal"):
+		pending("the GDExtension is not loaded")
+		return
+	var body = _ws._spawn_pane("terminal")
+	assert_not_null(body)
+	assert_true(await _wait_for_shell_output(body, 30000),
+		"the shell must print before it is closed: %s" % _status_text(body))
+	assert_true(await _wait_for_work_state(body, false, 10000),
+		"a shell at its prompt runs nothing: %s" % _status_text(body))
+
+	_ws._kill(body)
+	await get_tree().process_frame
+	assert_false(is_instance_valid(body), "an idle shell closes without a question")
+	assert_null(_ws.find_child("RunningWorkConfirm", false, false),
+		"nothing was running, so nothing was asked")
+
+func _status_text(body: Control) -> String:
+	return "status=%s" % str(body._terminal.get_status())
 
 # ── Quit (the workspace's seam) ────────────────────────────────────────
 

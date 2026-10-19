@@ -160,6 +160,15 @@ func request_close(answer: Callable) -> void:
 func has_unsaved_state() -> bool:
 	return false
 
+## Whether destroying this pane would stop work that is still running — the
+## other thing a close can lose, and a different question from unsaved state:
+## a process can be restarted, a lost edit cannot. A caller that can show a
+## dialog aggregates this across the panes an action destroys and asks once
+## (the workspace's `_ask_running_then`); a caller that cannot (IPC) treats
+## the action itself as consent and proceeds.
+func has_running_work() -> bool:
+	return false
+
 # Override to add type-specific settings controls.
 # `panel` provides `_debounce_timer` and `_gather_func` (set by each type).
 func _build_pane_settings_ui(_panel: Control) -> Control:

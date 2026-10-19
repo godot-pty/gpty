@@ -313,6 +313,33 @@ impl PtyHandle {
             .flatten()
             .map(|s| s.exit_code() as i32)
     }
+
+    /// Whether a process other than the spawned child owns the PTY's
+    /// foreground — a command typed at the shell prompt that is still running.
+    ///
+    /// The child is a session leader (`portable-pty` calls `setsid` before the
+    /// exec), and interactive shells enable job control on their controlling
+    /// terminal, so the foreground process group is the child's own pid only
+    /// while the shell is at its prompt. A background job (`cmd &`) does not
+    /// count — it never took the terminal — which is the xterm notion, not
+    /// "a descendant exists". A pane whose configured program *is* the child
+    /// (`command = "nvim"`) therefore reports no foreground job: closing that
+    /// pane is closing the program, which is what the user asked for.
+    ///
+    /// `None` means the platform cannot tell (Windows/ConPTY has no
+    /// foreground-process-group equivalent); a caller deciding whether to ask
+    /// must treat that conservatively.
+    #[cfg(unix)]
+    pub fn foreground_job(&self) -> Option<bool> {
+        let foreground = self.master.process_group_leader()?;
+        let shell = self._child.process_id()? as libc::pid_t;
+        Some(foreground != shell)
+    }
+
+    #[cfg(not(unix))]
+    pub fn foreground_job(&self) -> Option<bool> {
+        None
+    }
 }
 impl Drop for PtyHandle {
     fn drop(&mut self) {

@@ -108,7 +108,7 @@ godot/
 | `Ctrl+Shift+W` | Close focused pane |
 | `Ctrl+Shift+B` | Toggle sidebar |
 | `Ctrl+Shift+P` | Command palette |
-| `Ctrl+Shift+R` | Reset workspace |
+| `Ctrl+Shift+R` | Close all panes |
 | `F11` / `Ctrl+Shift+M` | Toggle fullscreen |
 | `Alt+←↑↓→` | Jump to adjacent pane |
 
@@ -120,7 +120,7 @@ godot/
 
 - [+ Terminal] — spawn a new terminal
 - [Settings] — open global settings panel
-- [Reset] — clear all terminals and layout
+- [Close all panes] — close every pane in this workspace; if a command is still running, it asks first
 
 Layout is auto-saved on close and auto-restored on startup via `user://layout.json`.
 
@@ -135,4 +135,4 @@ requires the `@gpty/omp-events` extension and gpty's Unix event socket
 
 ## Command Palette (Ctrl+Shift+P)
 
-Type partial commands: `new`, `close`, `settings`, `reset`, `save`, `load`.
+Type partial commands: `new`, `close`, `settings`, `close all`, `save`, `load`.

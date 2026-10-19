@@ -222,7 +222,7 @@ static func sanitize_tags(raw: Array) -> Array:
 
 ## Action commands appended after the pane-type entries in the palette.
 const PALETTE_ACTIONS: Array[String] = [
-	"close active", "spawn 16 terminals", "settings", "reset layout", "save", "load",
+	"close active", "spawn 16 terminals", "settings", "close all panes", "save", "load",
 ]
 
 ## Build the full palette command list: one "new <type>" entry per pane type

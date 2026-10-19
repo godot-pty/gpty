@@ -233,7 +233,11 @@ static func handle(ws, method: String, params: Dictionary):
 			if kp_target.has_unsaved_state():
 				return error("Pane '%s' has unsaved changes; save or discard them in the pane, then retry" % kp_pane_id)
 			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "killed", "pane_id": kp_target.attachment_id, "label": kp_target.pane_label}))
-			ws._kill(kp_target)
+			# The kill primitive, not `_kill`: the GUI's close path asks about a
+			# foreground process, and this caller cannot answer a dialog. Naming
+			# the pane is consent to stop what it runs; unsaved work above is
+			# the irreversible half that stays refused.
+			ws._kill_now(kp_target)
 			return {"success": true}
 		"focusPane":
 			var pane_id = str(params.get("pane_id", ""))
@@ -308,11 +312,14 @@ static func handle(ws, method: String, params: Dictionary):
 					% profile_name)
 			# Activating a profile resets the active workspace, so a pane
 			# holding unsaved work is refused for the same reason: a caller
-			# cannot answer the pane's Save/Discard dialog.
+			# cannot answer the pane's Save/Discard dialog. A running process
+			# is not refused — the request to load a layout is consent to stop
+			# what the layout replaces — and `ask_running: false` keeps the
+			# GUI from raising a dialog this caller cannot answer.
 			for pane in ws._pane_bodies(ws._active_workspace()):
 				if pane.has_unsaved_state():
 					return error("A pane in the active workspace has unsaved changes; save or discard them in the pane, then retry")
-			ws._do_activate(profile)
+			ws._do_activate(profile, false)
 			return {"success": true}
 		"layoutList":
 			var names = []

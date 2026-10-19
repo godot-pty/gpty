@@ -5,6 +5,10 @@ class_name Workspace
 
 const TITLEBAR_HEIGHT = WindowChrome.HEIGHT
 
+## Panes named in the running-work confirmation before the rest are counted;
+## a bulk close of sixteen panes must still be readable in one dialog.
+const RUNNING_ASK_MAX_NAMES = 8
+
 
 var _sidebar: Sidebar
 var _sidebar_bg: ColorRect
@@ -325,8 +329,64 @@ func _all_pane_bodies() -> Array:
 ## Ask `bodies` in order whether they may be destroyed, then run `next`. A
 ## pane that answers no stops the walk: `declined` runs (when given) and
 ## `next` never does, so the action behind the walk is cancelled as a whole.
-func _ask_close_then(bodies: Array, next: Callable, declined := Callable()) -> void:
-	_ask_close_step(bodies, 0, next, declined)
+##
+## Two questions, in a deliberate order. Stopping processes still running in
+## the panes is the *action's* hazard, so it is asked once for the whole set
+## (`_ask_running_then`) — a workspace close must not raise one dialog per
+## terminal. What a pane must ask about itself (the wiki's Save/Discard) goes
+## through the per-pane contract. `ask_running` is false only for an IPC
+## action, whose caller cannot answer a dialog and has already been refused
+## for unsaved work: naming the action is its consent to stop processes.
+func _ask_close_then(
+		bodies: Array, next: Callable, declined := Callable(),
+		ask_running := true) -> void:
+	if ask_running:
+		_ask_running_then(
+			bodies, func(): _ask_close_step(bodies, 0, next, declined), declined)
+	else:
+		_ask_close_step(bodies, 0, next, declined)
+
+## One consent for the processes a whole action would stop.
+##
+## `has_running_work` is exact where the platform can tell (Unix foreground
+## process group) and conservative where it cannot (Windows: a live shell).
+## A clean action calls `next` synchronously, so nothing is shown for a close
+## that loses nothing.
+func _ask_running_then(bodies: Array, next: Callable, declined := Callable()) -> void:
+	var busy: Array = []
+	for body in bodies:
+		if is_instance_valid(body) and body.has_running_work():
+			busy.append(body)
+	if busy.is_empty():
+		next.call()
+		return
+	var names := PackedStringArray()
+	var shown := mini(busy.size(), RUNNING_ASK_MAX_NAMES)
+	for i in shown:
+		names.append(str(busy[i].get("pane_label")))
+	if busy.size() > shown:
+		names.append("…and %d more" % (busy.size() - shown))
+	var dialog := ConfirmationDialog.new()
+	dialog.name = "RunningWorkConfirm"
+	dialog.title = "Stop running processes?"
+	dialog.dialog_text = (
+		"Closing will stop processes still running in:\n\n%s\n\nClose anyway?"
+		% "\n".join(names))
+	dialog.ok_button_text = "Close anyway"
+	dialog.cancel_button_text = "Cancel"
+	dialog.confirmed.connect(func():
+		dialog.hide()
+		dialog.queue_free()
+		next.call()
+	)
+	dialog.canceled.connect(func():
+		dialog.hide()
+		dialog.queue_free()
+		if declined.is_valid():
+			declined.call()
+	)
+	add_child(dialog)
+	dialog.popup_centered()
 
 func _ask_close_step(bodies: Array, index: int, next: Callable, declined: Callable) -> void:
 	while index < bodies.size() and not is_instance_valid(bodies[index]):
@@ -360,16 +420,13 @@ func request_quit() -> void:
 		func(): _quit_asking = false,
 	)
 
-## Close one pane the user asked to close. The pane answers first when it
-## holds unsaved work, and a Cancel leaves everything as it is.
+## Close one pane the user asked to close. Stopping a running command and
+## discarding unsaved work are both questions; a Cancel leaves the pane.
 func _kill(body: Control):
 	var ws := _workspace_for_body(body)
 	if ws.is_empty():
 		return
-	body.request_close(func(proceed: bool):
-		if proceed:
-			_kill_now(body)
-	)
+	_ask_close_then([body], func(): _kill_now(body))
 
 func _kill_now(body: Control):
 	# _refresh_status_bar keeps last_body synced to the focus owner, so this
@@ -403,15 +460,12 @@ func _close_pane_settings_for(body: Control):
 		panel.close()
 
 ## Change a pane's type. The old body is destroyed by the swap, so it answers
-## first when it holds unsaved work.
+## first — for a running command as well as unsaved work.
 func _swap_pane(body: Control, new_type_name: String):
 	var ws := _workspace_for_body(body)
 	if ws.is_empty():
 		return
-	body.request_close(func(proceed: bool):
-		if proceed:
-			_swap_pane_now(body, new_type_name)
-	)
+	_ask_close_then([body], func(): _swap_pane_now(body, new_type_name))
 
 func _swap_pane_now(body: Control, new_type_name: String):
 	var ws := _workspace_for_body(body)
@@ -1168,7 +1222,7 @@ func _execute_command(cmd: String):
 		"close active": _kill_last()
 		"spawn 16 terminals": _spawn_bulk(16)
 		"settings": _toggle_settings()
-		"reset layout": _reset()
+		"close all panes": _reset()
 		"save": _save()
 		"load": _restore()
 
@@ -1970,11 +2024,12 @@ func _do_profile_activate(profile: Dictionary):
 	else:
 		_do_activate(profile)
 
-func _do_activate(profile: Dictionary):
+func _do_activate(profile: Dictionary, ask_running := true):
 	var ws := _active_workspace()
 	if ws.is_empty():
 		return
-	_ask_close_then(_pane_bodies(ws), func(): _activate_now(ws, profile))
+	_ask_close_then(
+		_pane_bodies(ws), func(): _activate_now(ws, profile), Callable(), ask_running)
 
 func _activate_now(ws: Dictionary, profile: Dictionary):
 	_reset_now()

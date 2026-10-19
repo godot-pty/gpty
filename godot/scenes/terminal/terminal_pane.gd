@@ -231,6 +231,24 @@ func _take_focus():
 	if is_inside_tree():
 		grab_focus()
 
+## Whether a command typed at this pane's shell prompt is still running.
+##
+## Unix answers from the PTY's foreground process group, so a background job
+## does not count; a platform that cannot report one (Windows/ConPTY) answers
+## `true` for a live shell, because the alternative is ending work silently.
+## A shell that has already exited has nothing left to stop. The status sample
+## is refreshed by the engine's 200 ms child poll, so a command started and
+## closed within that window reads as idle — the close is a human action
+## measured in seconds, not a race the dialog has to win.
+func has_running_work() -> bool:
+	if _terminal == null:
+		return false
+	var status = JSON.parse_string(str(_terminal.get_status()))
+	if not (status is Dictionary) or not bool(status.get("running", false)):
+		return false
+	var foreground = status.get("foreground_job")
+	return foreground == null or bool(foreground)
+
 ## Commit buffered scrollback before the pane goes away. Output lines are
 ## queued and written by a background thread, and the process may exit without
 ## running Rust destructors, so the tail would otherwise be missing from the

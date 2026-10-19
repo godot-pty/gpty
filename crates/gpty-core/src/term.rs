@@ -123,13 +123,20 @@ impl EventListener for TitleListener {
     }
 }
 /// Process status primitives for the terminal, updated by the engine task
-/// and read by the gdext bridge. Display-oriented; never a decision input.
+/// and read by the gdext bridge. Observability data: the one decision it
+/// informs is the GUI's close confirmation (`foreground_job`), never a
+/// capture, capability or security decision.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TermStatus {
     pub pid: Option<u32>,
     pub exit_code: Option<i32>,
     pub last_output_unix_ms: Option<u64>,
     pub started_unix_ms: u64,
+    /// Whether the PTY's foreground process group is something other than the
+    /// spawned child — i.e. a command is running in the foreground. `None`
+    /// where the platform cannot tell (Windows/ConPTY), which callers must
+    /// treat as "could be busy".
+    pub foreground_job: Option<bool>,
 }
 
 pub struct TermGrid {

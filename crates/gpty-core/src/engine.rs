@@ -164,6 +164,7 @@ impl SpawnedTerminal {
             "exit_code": s.exit_code,
             "exit_reason": exit_reason,
             "idle_ms": idle_ms,
+            "foreground_job": s.foreground_job,
             "agent_state": grid.agent_state.state.as_str(),
             "agent_state_tier": grid.agent_state.tier.map(|t| t as u8),
         })
@@ -700,6 +701,14 @@ async fn run_terminal_task(
             _ = child_poll.tick() => {
                 let now = tokio::time::Instant::now();
                 if child_exit.is_none() {
+                    // Sample the terminal's foreground process group for the
+                    // status document the close confirmation reads. Cheap on
+                    // Unix; `None` (unknown) where the platform cannot tell.
+                    if let Some(g) = &grid
+                        && let Some(mut locked) = lock_or_warn(g, "pane grid")
+                    {
+                        locked.status.foreground_job = pty_handle.foreground_job();
+                    }
                     // `try_wait` does not consume the status on either backend
                     // (std caches it on Unix, Windows reads the exit code), so
                     // the teardown below still reads the same answer.
@@ -1182,6 +1191,106 @@ mod tests {
             "a live pane must report running: {status}"
         );
         assert_eq!(status["exit_reason"], serde_json::Value::Null);
+    }
+
+    /// The close confirmation's observable: a shell at its prompt reports no
+    /// foreground job, and a command typed at that prompt reports one.
+    ///
+    /// Unix only — Windows/ConPTY has no foreground-process-group notion, so
+    /// the status answers `null` there and the GUI treats a running shell as
+    /// possibly busy. `-m` forces job control, so the shell puts the command
+    /// in its own process group the way the default interactive shell does.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn foreground_job_follows_a_command_typed_at_the_prompt() {
+        let engine = WorkspaceEngine::new(vec![]);
+        let spawned = engine
+            .spawn_terminal_with_grid(
+                TerminalConfig { id: 15 },
+                "sh",
+                &["-i", "-m"],
+                &[],
+                &[],
+                24,
+                80,
+            )
+            .await
+            .expect("spawn");
+
+        let at_prompt = wait_until(Duration::from_secs(20), || {
+            spawned
+                .grid
+                .lock()
+                .map(|g| {
+                    g.status.last_output_unix_ms.is_some() && g.status.foreground_job == Some(false)
+                })
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            at_prompt,
+            "a shell at its prompt must report no foreground job: {}",
+            pane_status(&spawned)
+        );
+
+        spawned.handle.send_line("sleep 30");
+        let running = wait_until(Duration::from_secs(20), || {
+            spawned
+                .grid
+                .lock()
+                .map(|g| g.status.foreground_job == Some(true))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            running,
+            "a foreground command must be reported: {}",
+            pane_status(&spawned)
+        );
+        assert_eq!(
+            pane_status(&spawned)["foreground_job"],
+            serde_json::json!(true),
+            "the status document carries the field the GUI reads"
+        );
+    }
+
+    /// A background job never took the terminal, so it must not turn the
+    /// close confirmation on — the test is "foreground", not "a descendant
+    /// exists". `READY` proves the background command was started before the
+    /// assertion, so a permanently-false sample cannot pass it.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn a_background_descendant_is_not_a_foreground_job() {
+        let engine = WorkspaceEngine::new(vec![]);
+        let spawned = engine
+            .spawn_terminal_with_grid(
+                TerminalConfig { id: 16 },
+                "sh",
+                &["-c", "sleep 30 & echo READY; wait"],
+                &[],
+                &[],
+                24,
+                80,
+            )
+            .await
+            .expect("spawn");
+
+        let started = wait_until(Duration::from_secs(20), || {
+            spawned
+                .grid
+                .lock()
+                .map(|g| g.plain_text(50).join("\n").contains("READY"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(started, "the background command must have started");
+
+        assert_eq!(
+            spawned.grid.lock().expect("grid").status.foreground_job,
+            Some(false),
+            "a background descendant is not a foreground job: {}",
+            pane_status(&spawned)
+        );
     }
 
     /// Parse the pane's status document the way a consumer sees it.

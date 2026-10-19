@@ -112,9 +112,16 @@ func test_the_settings_button_requests_settings_and_nothing_else():
 	assert_signal_emit_count(_sidebar, "request_settings", 1)
 	assert_signal_not_emitted(_sidebar, "request_reset")
 
-func test_the_reset_button_requests_reset_and_nothing_else():
-	var btn := _icon_text_button("Reset")
-	assert_not_null(btn, "the Reset button must exist")
+func test_the_close_all_panes_button_requests_reset_and_nothing_else():
+	var btn := _icon_text_button("Close all panes")
+	assert_not_null(btn, "the Close all panes button must exist")
+	# UX-02: the bulk close used the same counter-clockwise-arrow glyph as
+	# "change pane type" and pane defaults, so the destructive action looked
+	# like a refresh. It must keep its own icon.
+	var row := btn.get_node_or_null("IconTextRow")
+	assert_not_null(row)
+	assert_eq((row.get_child(0) as Label).text, Icons.DELETE,
+		"the bulk close must not reuse the pane-type swap glyph")
 	watch_signals(_sidebar)
 	btn.pressed.emit()
 	assert_signal_emit_count(_sidebar, "request_reset", 1)
