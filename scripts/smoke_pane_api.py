@@ -75,6 +75,11 @@ class Smoke:
         else:
             self.events = self.control + "-events"
         self.godot_log = self.tmp / "godot.log"
+        # `--log-file` moves Godot's own engine log out of the user profile.
+        # Diagnostics must read it: with the flag, stdout carries only the
+        # engine header and GDExtension warnings, so a crash tail taken from
+        # the stdout capture alone names nothing.
+        self.engine_log = self.tmp / "godot-engine.log"
         self.gui: subprocess.Popen | None = None
         self.cli_bin = ROOT / "target" / "debug" / ("gpty.exe" if WINDOWS else "gpty")
         self.godot = os.environ.get("GODOT") or shutil.which("godot")
@@ -156,7 +161,7 @@ class Smoke:
             if not check:
                 return payload
             self.fail(
-                f"`gpty {' '.join(args)}` exited {code}",
+                f"`gpty {' '.join(args)}` exited {code} (0x{code & 0xFFFFFFFF:08X})",
                 detail[:300],
             )
         if not payload:
@@ -292,7 +297,7 @@ class Smoke:
                 self.godot,
                 "--headless",
                 "--log-file",
-                str(self.tmp / "godot-engine.log"),
+                str(self.engine_log),
                 "--path",
                 "godot",
             ],
@@ -504,11 +509,24 @@ class Smoke:
         path.write_text(json.dumps(store), encoding="utf-8")
 
     def log_tail(self, lines: int = 40) -> str:
-        try:
-            text = self.godot_log.read_text(errors="replace").splitlines()
-        except OSError:
-            return "(no Godot log)"
-        return "\n".join(text[-lines:])
+        """The GUI's own log, plus the stdout capture.
+
+        `--log-file` sends the engine log to `engine_log`; the stdout capture
+        then holds only the startup banner and GDExtension `godot_warn!`
+        lines. Both are printed so a failure keeps the full picture.
+        """
+        parts: list[str] = []
+        for path, label in (
+            (self.engine_log, "engine log"),
+            (self.godot_log, "stdout"),
+        ):
+            try:
+                text = path.read_text(errors="replace").splitlines()
+            except OSError:
+                continue
+            if text:
+                parts.append(f"--- {label} ---\n" + "\n".join(text[-lines:]))
+        return "\n".join(parts) if parts else "(no Godot log)"
 
     def run(
         self, argv: list[str], cwd: Path | None = None, check: bool = True
@@ -784,13 +802,27 @@ def main() -> int:
         # deliberately not `working`, which the Tier 3 heuristic can report on
         # its own while output flows.
         smoke.enter("gpty state")
-        smoke.cli(
+        # `inject` is the CLI's own process; a non-zero exit here is the
+        # caller's crash, not the declaration command's. Keep the pane tail
+        # anyway: the injected line may already have reached the shell, and a
+        # child that crashed is evidence the caller's exit code is not the
+        # whole story.
+        code, _, inject_detail = smoke.cli_run(
             "inject",
             pane_id,
             "--text",
             f'"{smoke.cli_bin}" state needs-attention',
             "--json",
         )
+        if code != 0:
+            smoke.fail(
+                "injecting the gpty state declaration failed",
+                {
+                    "exit": code,
+                    "detail": inject_detail[:300],
+                    "pane_tail": smoke.read_pane(pane_id, lines=20)[-600:],
+                },
+            )
         state = {}
         for _ in range(20):
             state = smoke.cli("pane-status", pane_id, "--json", check=False).get("result", {})

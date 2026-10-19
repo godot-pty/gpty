@@ -84,11 +84,15 @@ case "$(uname -s)" in
         export GPTY_TEST_USER_DIR="$SANDBOX_WIN\\user"
         export LOCALAPPDATA="$SANDBOX_WIN\\localappdata"
         export APPDATA="$SANDBOX_WIN\\roaming"
+        # A native path too: the editor is a Windows process, and an MSYS
+        # `/tmp/...` spelling of the log is not a path it can open.
+        GODOT_LOG="$SANDBOX_WIN\\godot.log"
         ;;
     *)
         IS_WINDOWS=0
         export GPTY_SOCKET="$XDG_RUNTIME_DIR/gpty.sock"
         export GPTY_TEST_USER_DIR="$SANDBOX/user"
+        GODOT_LOG="$SANDBOX/godot.log"
         ;;
 esac
 # A developer's shell may carry a secret this instance has no client for.
@@ -102,7 +106,7 @@ for dir in "${TEST_DIRS[@]}"; do
 done
 
 set +e
-"$GODOT" --headless --log-file "$SANDBOX/godot.log" --path godot "${GUT_ARGS[@]}" 2>&1 | tee "$LOG"
+"$GODOT" --headless --log-file "$GODOT_LOG" --path godot "${GUT_ARGS[@]}" 2>&1 | tee "$LOG"
 STATUS="${PIPESTATUS[0]}"
 set -e
 
