@@ -19,6 +19,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
+      - name: Build media dependencies
+        run: ./scripts/media-deps
+
       - name: Build GDExtension (release)
         run: cargo build -p gpty-gdext --release
 
@@ -53,6 +56,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
+      - name: Build media dependencies
+        run: ./scripts/media-deps
+
       - name: Build GDExtension (release)
         run: cargo build -p gpty-gdext --release
 
@@ -86,6 +92,23 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: Cache vcpkg FFmpeg
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\packages
+            C:\vcpkg\downloads
+          key: vcpkg-ffmpeg-${{ runner.os }}-9.0.2
+          restore-keys: |
+            vcpkg-ffmpeg-${{ runner.os }}-
+
+      - name: Build media dependencies
+        shell: bash
+        env:
+          VCPKG_ROOT: ${{ env.VCPKG_INSTALLATION_ROOT || 'C:/vcpkg' }}
+        run: ./scripts/media-deps
 
       - name: Build GDExtension (release)
         run: cargo build -p gpty-gdext --release

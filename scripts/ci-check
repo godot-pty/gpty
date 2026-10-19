@@ -65,6 +65,39 @@ else
     printf "  %bMode: local%b — a missing toolchain skips with a warning\n" "$BOLD" "$NC"
 fi
 
+# ── Media dependencies (before anything compiles the extension) ────────
+# The GDExtension links FFmpeg, and the pinned build is what CI tests. Build
+# it once per prefix (scripts/media-deps caches by version + component hash);
+# a developer with system FFmpeg can still run, but the pinned prefix keeps
+# the local gate equal to CI.
+case "$(uname -s)" in
+    Linux*) MEDIA_PLATFORM="linux" ;;
+    Darwin*) MEDIA_PLATFORM="macos" ;;
+    MINGW*|MSYS*|CYGWIN*) MEDIA_PLATFORM="windows" ;;
+    *) MEDIA_PLATFORM="unknown" ;;
+esac
+case "$(uname -m)" in
+    amd64|x86_64) MEDIA_ARCH="x86_64" ;;
+    arm64|aarch64) MEDIA_ARCH="arm64" ;;
+    *) MEDIA_ARCH="unknown" ;;
+esac
+MEDIA_ENV="$REPO_ROOT/dist/ffmpeg/$MEDIA_PLATFORM-$MEDIA_ARCH/env.sh"
+header "media dependencies"
+# The script is a no-op when the stamp matches (version + components + asm);
+# running it unconditionally is what notices a changed component list.
+if "$REPO_ROOT/scripts/media-deps"; then
+    pass "media dependencies"
+else
+    fail "media dependencies — run './scripts/media-deps'"
+    check_failed
+    # Let the checks below fail with the real compiler error if the system
+    # FFmpeg can satisfy them; the gate already recorded failure.
+fi
+if [ -f "$MEDIA_ENV" ]; then
+    # shellcheck disable=SC1090
+    source "$MEDIA_ENV"
+fi
+
 # ── Step 1: cargo fmt ──────────────────────────────────────────────────
 header "cargo fmt --check"
 if cargo fmt --all -- --check 2>&1; then

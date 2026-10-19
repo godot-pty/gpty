@@ -46,6 +46,12 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
+
+      - name: Build media dependencies
+        # Pinned minimal FFmpeg (scripts/media-deps); gpty-gdext links it, so
+        # every job that compiles or loads the extension needs the prefix.
+        run: ./scripts/media-deps
+
       - name: Run clippy
         run: cargo clippy --workspace -- -D warnings
 
@@ -100,6 +106,23 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Cache vcpkg FFmpeg
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\packages
+            C:\vcpkg\downloads
+          key: vcpkg-ffmpeg-${{ runner.os }}-9.0.2
+          restore-keys: |
+            vcpkg-ffmpeg-${{ runner.os }}-
+
+      - name: Build media dependencies
+        shell: bash
+        env:
+          VCPKG_ROOT: ${{ env.VCPKG_INSTALLATION_ROOT || 'C:/vcpkg' }}
+        run: ./scripts/media-deps
+
       - name: Check Windows build
         env:
           RUSTFLAGS: -Dwarnings
@@ -135,6 +158,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
+
+      - name: Build media dependencies
+        run: ./scripts/media-deps
 
       - name: Build GDExtension
         run: cargo build -p gpty-gdext
@@ -179,6 +205,23 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
+
+      - name: Cache vcpkg FFmpeg
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\packages
+            C:\vcpkg\downloads
+          key: vcpkg-ffmpeg-${{ runner.os }}-9.0.2
+          restore-keys: |
+            vcpkg-ffmpeg-${{ runner.os }}-
+
+      - name: Build media dependencies
+        shell: bash
+        env:
+          VCPKG_ROOT: ${{ env.VCPKG_INSTALLATION_ROOT || 'C:/vcpkg' }}
+        run: ./scripts/media-deps
 
       - name: Install Godot (Windows, headless)
         shell: pwsh

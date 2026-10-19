@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── media-deps: build the pinned FFmpeg that gpty links ─────────────────
+# Usage: ./scripts/media-deps
+#
+# Downloads FFmpeg 9.0.2 (SHA256-pinned), builds a minimal LGPLv3 **shared**
+# library set from `crates/gpty-media/components.txt`, and installs it under
+# `dist/ffmpeg/<platform>-<arch>` (or $GPTY_MEDIA_PREFIX).
+#
+# Why shared: release bundles carry these libraries beside the GDExtension
+# (`$ORIGIN` / `@loader_path` / the application directory), so the binary is
+# not tied to a distro's FFmpeg soname. Why LGPLv3 and no GPL: every decoder
+# we need is LGPL; dynamic linking keeps the license obligations simple.
+#
+# Windows uses vcpkg's FFmpeg (the version follows the vcpkg baseline;
+# ffmpeg-the-third supports 5.1–9.0) rather than the source tarball. The
+# runtime allowlist in src/lib.rs still gates which demuxers/codecs may run,
+# but the Windows build carries a wider set of internal codecs than the
+# minimal Unix build — the release-packaging item tracks narrowing it.
+#
+# Environment:
+#   GPTY_MEDIA_PREFIX  install prefix (default: dist/ffmpeg/<platform>-<arch>)
+#   VCPKG_ROOT         Windows only: vcpkg checkout used to build FFmpeg
+#
+# After a build the script writes `<prefix>/env.sh` and, in GitHub Actions,
+# appends FFMPEG_DIR/PKG_CONFIG_PATH/LD_LIBRARY_PATH/PATH to the job env.
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+VERSION="9.0.2"
+SHA256="8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
+COMPONENTS="$REPO_ROOT/crates/gpty-media/components.txt"
+JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; NC='\033[0m'
+step() { printf "\n${GREEN}── %s ──${NC}\n" "$1"; }
+warn() { printf "${YELLOW}NOTE${NC} %s\n" "$1"; }
+die()  { printf "${RED}ERROR${NC} %s\n" "$1" >&2; exit 1; }
+
+[ -f "$COMPONENTS" ] || die "missing $COMPONENTS"
+component() {
+    sed -n "s/^$1 *= *//p" "$COMPONENTS" | head -1
+}
+DECODERS="$(component decoders)"
+DEMUXERS="$(component demuxers)"
+PARSERS="$(component parsers)"
+[ -n "$DECODERS" ] && [ -n "$DEMUXERS" ] && [ -n "$PARSERS" ] \
+    || die "components.txt is missing a component line"
+
+case "$(uname -s)" in
+    Linux*) PLATFORM="linux" ;;
+    Darwin*) PLATFORM="macos" ;;
+    MINGW*|MSYS*|CYGWIN*) PLATFORM="windows" ;;
+    *) die "unsupported OS: $(uname -s)" ;;
+esac
+case "$(uname -m)" in
+    amd64|x86_64) ARCH="x86_64" ;;
+    arm64|aarch64) ARCH="arm64" ;;
+    *) die "unsupported architecture: $(uname -m)" ;;
+esac
+
+PREFIX="${GPTY_MEDIA_PREFIX:-$REPO_ROOT/dist/ffmpeg/$PLATFORM-$ARCH}"
+mkdir -p "$PREFIX"
+
+stamp() {
+    local asm="noasm"
+    if command -v nasm >/dev/null 2>&1; then asm="asm"; fi
+    printf '%s %s %s %s\n' "$VERSION" "$(cat "$COMPONENTS" | cksum)" "$PLATFORM-$ARCH" "$asm"
+}
+
+sha256_of() {
+    if command -v sha256sum >/dev/null; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+
+write_env() {
+    local libdir="$PREFIX/lib"
+    local bindir="$PREFIX/bin"
+    {
+        echo "export FFMPEG_DIR='$PREFIX'"
+        echo "export PKG_CONFIG_PATH='$PREFIX/lib/pkgconfig:\${PKG_CONFIG_PATH:-}'"
+        if [ "$PLATFORM" = "macos" ]; then
+            echo "export DYLD_LIBRARY_PATH='$libdir:\${DYLD_LIBRARY_PATH:-}'"
+        fi
+        if [ "$PLATFORM" = "windows" ]; then
+            echo "export PATH='$bindir:\${PATH:-}'"
+        else
+            echo "export LD_LIBRARY_PATH='$libdir:\${LD_LIBRARY_PATH:-}'"
+        fi
+    } > "$PREFIX/env.sh"
+
+    if [ -n "${GITHUB_ENV:-}" ]; then
+        {
+            echo "FFMPEG_DIR=$PREFIX"
+            echo "PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+            if [ "$PLATFORM" = "macos" ]; then
+                echo "DYLD_LIBRARY_PATH=$libdir${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+            else
+                echo "LD_LIBRARY_PATH=$libdir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            fi
+        } >> "$GITHUB_ENV"
+    fi
+    if [ -n "${GITHUB_PATH:-}" ] && [ "$PLATFORM" = "windows" ]; then
+        echo "$bindir" >> "$GITHUB_PATH"
+    fi
+    printf '  source "%s/env.sh"\n' "$PREFIX"
+}
+
+if [ -f "$PREFIX/.stamp" ] && [ "$(cat "$PREFIX/.stamp")" = "$(stamp)" ]; then
+    step "FFmpeg $VERSION already built"
+    write_env
+    exit 0
+fi
+
+if [ "$PLATFORM" = "windows" ]; then
+    step "FFmpeg $VERSION via vcpkg"
+    [ -n "${VCPKG_ROOT:-}" ] || die "set VCPKG_ROOT (or use the Windows CI job) to build media deps"
+    "$VCPKG_ROOT/vcpkg" install ffmpeg:x64-windows
+    PREFIX="$VCPKG_ROOT/installed/x64-windows"
+    stamp > "$PREFIX/.stamp"
+    write_env
+    exit 0
+fi
+
+step "Fetching FFmpeg $VERSION"
+SRC_DIR="$REPO_ROOT/dist/ffmpeg/src"
+TARBALL="$SRC_DIR/ffmpeg-$VERSION.tar.xz"
+mkdir -p "$SRC_DIR"
+if [ ! -f "$TARBALL" ]; then
+    curl -fL --retry 3 --connect-timeout 20 \
+        -o "$TARBALL.part" "https://ffmpeg.org/releases/ffmpeg-$VERSION.tar.xz" \
+        || die "cannot download FFmpeg $VERSION"
+    mv "$TARBALL.part" "$TARBALL"
+fi
+ACTUAL="$(sha256_of "$TARBALL")"
+[ "$ACTUAL" = "$SHA256" ] || die "FFmpeg tarball checksum mismatch (expected $SHA256, got $ACTUAL)"
+
+BUILD_DIR="$REPO_ROOT/dist/ffmpeg/build-$PLATFORM-$ARCH"
+if [ ! -d "$BUILD_DIR/ffmpeg-$VERSION" ]; then
+    step "Extracting"
+    mkdir -p "$BUILD_DIR"
+    tar -xJf "$TARBALL" -C "$BUILD_DIR"
+fi
+cd "$BUILD_DIR/ffmpeg-$VERSION"
+
+EXTRA=()
+if [ "$ARCH" = "x86_64" ]; then
+    if ! command -v nasm >/dev/null; then
+        warn "nasm not found; x86 SIMD assembly will be disabled (install nasm for release builds)"
+        EXTRA+=(--disable-x86asm)
+    fi
+fi
+
+step "Configuring (LGPLv3, shared, minimal components)"
+./configure \
+    --prefix="$PREFIX" \
+    --enable-version3 \
+    --enable-shared --disable-static \
+    --enable-pic \
+    --disable-everything \
+    --disable-programs \
+    --disable-doc \
+    --disable-network \
+    --disable-autodetect \
+    --disable-encoders \
+    --disable-filters \
+    --disable-devices \
+    --disable-avdevice \
+    --disable-avfilter \
+    --disable-debug \
+    --enable-swscale \
+    --enable-swresample \
+    --enable-protocol=file \
+    --enable-decoder="$DECODERS" \
+    --enable-demuxer="$DEMUXERS" \
+    --enable-parser="$PARSERS" \
+    "${EXTRA[@]}" \
+    > "$BUILD_DIR/configure.log" 2>&1 \
+    || { tail -20 "$BUILD_DIR/configure.log"; die "FFmpeg configure failed"; }
+
+step "Building"
+make -j"$JOBS" > "$BUILD_DIR/make.log" 2>&1 \
+    || { tail -20 "$BUILD_DIR/make.log"; die "FFmpeg build failed"; }
+make install > "$BUILD_DIR/install.log" 2>&1 \
+    || { tail -20 "$BUILD_DIR/install.log"; die "FFmpeg install failed"; }
+
+mkdir -p "$PREFIX/licenses"
+for license in COPYING.LGPLv2.1 COPYING.LGPLv3; do
+    [ -f "$license" ] && cp "$license" "$PREFIX/licenses/"
+done
+cp "$COMPONENTS" "$PREFIX/components.txt"
+stamp > "$PREFIX/.stamp"
+
+step "FFmpeg $VERSION ready"
+du -sh "$PREFIX" 2>/dev/null || true
+write_env

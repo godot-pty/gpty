@@ -57,3 +57,6 @@ dist/gpty.exe
 dist/gpty.zip
 dist/gpty_gdext.windows.x86_64.dll
 dist/gpty.sh
+
+# Pinned FFmpeg build (scripts/media-deps)
+dist/ffmpeg/
