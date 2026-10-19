@@ -625,17 +625,20 @@ impl GptyTerminal {
     /// `rel_path` is the name the note had before the move and `new_rel_path`
     /// the name it has now: the pass reads the vault *after* the rename and
     /// reconstructs the old note set from the walk, so the only occurrences
-    /// considered are those that resolved to the old name. Answers
-    /// `{"files", "mentions", "skipped", "truncated"}` — how many notes and
-    /// occurrences still name the old target, how many notes could not be
-    /// examined (unreadable or over the read cap), and whether the walk's note
-    /// cap cut the vault. The pane shows these numbers in its update question;
-    /// nothing is written until `vault_link_rewrite` runs.
+    /// considered are those that resolved to the old name. `include_renamed`
+    /// adds the renamed note itself to the candidate set, for a caller whose
+    /// buffer is clean; a dirty buffer passes false and its note is left
+    /// alone. Answers `{"files", "mentions", "skipped", "truncated"}` — how
+    /// many notes and occurrences still name the old target, how many notes
+    /// could not be examined (unreadable or over the read cap), and whether
+    /// the walk's note cap cut the vault. The pane shows these numbers in its
+    /// update question; nothing is written until `vault_link_rewrite` runs.
     #[func]
     fn vault_link_rewrite_preview(
         vault_path: GString,
         rel_path: GString,
         new_rel_path: GString,
+        include_renamed: bool,
     ) -> GString {
         let path = vault_path.to_string();
         if let Some(problem) = vault_path_problem(&path) {
@@ -645,6 +648,7 @@ impl GptyTerminal {
             &path,
             &rel_path.to_string(),
             &new_rel_path.to_string(),
+            include_renamed,
         ) {
             Ok(report) => {
                 let document = serde_json::json!({
@@ -671,32 +675,52 @@ impl GptyTerminal {
     /// Applies the pass the preview planned: only occurrences that resolved to
     /// the old name before the move are respelled, an alias and a `#` fragment
     /// are preserved, fenced code and code spans are not links to begin with,
-    /// and the renamed note itself is left to its editor's buffer. Answers
-    /// `{"files", "mentions", "skipped", "truncated", "indexed"}` — what
-    /// landed, what could not be updated, whether the walk's note cap left
-    /// notes unexamined, and whether the search index followed.
+    /// and `include_renamed` decides whether the renamed note itself is a
+    /// candidate — pass true for a clean buffer and false for a dirty one,
+    /// because the pass writes the file under an editor's buffer and must
+    /// never do that to unsaved work. Answers
+    /// `{"files", "mentions", "skipped", "truncated", "indexed"}`, plus
+    /// `"renamed_note": {"text", "crlf", "mtime", "size"}` when the renamed
+    /// note itself was rewritten — the text that landed and its fresh stamp,
+    /// so the editor showing it can adopt both instead of reading again (a
+    /// save right after therefore does not see a stale stamp). `"renamed_note"`
+    /// is absent when nothing was written to that note.
     #[func]
     fn vault_link_rewrite(
         vault_path: GString,
         rel_path: GString,
         new_rel_path: GString,
+        include_renamed: bool,
     ) -> GString {
         let path = vault_path.to_string();
         if let Some(problem) = vault_path_problem(&path) {
             return vault_error(&problem);
         }
         let new_rel = new_rel_path.to_string();
-        match gpty_core::vault::rewrite_links_after_rename(&path, &rel_path.to_string(), &new_rel) {
+        match gpty_core::vault::rewrite_links_after_rename(
+            &path,
+            &rel_path.to_string(),
+            &new_rel,
+            include_renamed,
+        ) {
             Ok(done) => {
                 let indexed = reindex_vault(&path);
-                let document = serde_json::json!({
+                let mut document = serde_json::json!({
                     "files": done.files,
                     "mentions": done.mentions,
                     "skipped": done.skipped,
                     "truncated": done.truncated,
                     "indexed": indexed,
-                })
-                .to_string();
+                });
+                if let Some(note) = &done.renamed_note {
+                    document["renamed_note"] = serde_json::json!({
+                        "text": note.text,
+                        "crlf": note.crlf,
+                        "mtime": note.stamp.mtime,
+                        "size": note.stamp.size,
+                    });
+                }
+                let document = document.to_string();
                 GString::from(document.as_str())
             }
             Err(e) => {

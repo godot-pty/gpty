@@ -653,7 +653,7 @@ pub fn rename_vault_note(root: &str, rel_path: &str, new_rel_path: &str) -> Resu
 }
 
 /// What a rename's reference update found, or wrote.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LinkRewriteResult {
     /// Notes whose text changes: a note mentioning the target twice counts
     /// once.
@@ -666,6 +666,22 @@ pub struct LinkRewriteResult {
     pub skipped: usize,
     /// The walk hit [`MAX_NOTES`], so notes past the cap were not examined.
     pub truncated: bool,
+    /// The renamed note's rewritten body, when it was among `files`: the text
+    /// that landed and its fresh stamp, so an editor showing that note can
+    /// adopt it instead of reading the file again. `None` in a preview
+    /// (nothing is written to adopt) and whenever the renamed note needed no
+    /// rewrite, was not a candidate, or could not be written.
+    pub renamed_note: Option<RenamedNoteRewrite>,
+}
+
+/// The renamed note as the reference pass left it: raw file text (CRLF kept)
+/// and the stamp a later save checks. The editor normalizes the line endings
+/// into its own buffer space, exactly as a note read does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenamedNoteRewrite {
+    pub text: String,
+    pub crlf: bool,
+    pub stamp: NoteStamp,
 }
 
 /// Plan a rename's reference update without writing anything: the counts a
@@ -673,13 +689,15 @@ pub struct LinkRewriteResult {
 ///
 /// The rules are [`rewrite_links_after_rename`]'s — this is the same pass with
 /// its writes elided, so the preview and the apply cannot disagree about what
-/// is a candidate.
+/// is a candidate, including whether the renamed note itself is one
+/// (`include_renamed`).
 pub fn preview_link_rewrite(
     root: &str,
     old_rel_path: &str,
     new_rel_path: &str,
+    include_renamed: bool,
 ) -> Result<LinkRewriteResult, NoteError> {
-    rewrite_links(root, old_rel_path, new_rel_path, false)
+    rewrite_links(root, old_rel_path, new_rel_path, false, include_renamed)
 }
 
 /// Rewrite the `[[mentions]]` that still name a renamed note.
@@ -697,10 +715,13 @@ pub fn preview_link_rewrite(
 /// `new_rel_path` swapped back for `old_rel_path`. A stem two notes shared was
 /// ambiguous, never a backlink, and stays untouched.
 ///
-/// The note at its new path is not a candidate: its buffer belongs to the
-/// editor, and rewriting the file under it would turn unsaved work into an
-/// outside edit. A mention the renamed note makes to itself is left for its
-/// editor to fix.
+/// The note at its new path is a candidate only when `include_renamed` is
+/// true: its buffer belongs to the editor, and a caller must pass `false`
+/// while that buffer holds unsaved work, because rewriting the file under it
+/// would turn an edit into an outside change. A clean caller passes `true`,
+/// making a note that mentions itself — by its old stem or path — follow the
+/// rename like any other note; the rewritten body and its fresh stamp come
+/// back in [`LinkRewriteResult::renamed_note`] for that editor to adopt.
 ///
 /// Each written note goes through [`write_vault_note`], so the same
 /// containment and cap rules apply, and a note that changes between its read
@@ -717,19 +738,22 @@ pub fn rewrite_links_after_rename(
     root: &str,
     old_rel_path: &str,
     new_rel_path: &str,
+    include_renamed: bool,
 ) -> Result<LinkRewriteResult, NoteError> {
-    rewrite_links(root, old_rel_path, new_rel_path, true)
+    rewrite_links(root, old_rel_path, new_rel_path, true, include_renamed)
 }
 
 /// The pass behind the preview and the apply: `write` decides whether a
-/// changed body is counted or written. Bodies are built one note at a time and
-/// dropped (or written) immediately, so a vault where every note mentions the
-/// target cannot pin every rewritten copy in memory at once.
+/// changed body is counted or written, and `include_renamed` whether the note
+/// at `new_rel_path` is examined at all. Bodies are built one note at a time
+/// and dropped (or written) immediately, so a vault where every note mentions
+/// the target cannot pin every rewritten copy in memory at once.
 fn rewrite_links(
     root: &str,
     old_rel_path: &str,
     new_rel_path: &str,
     write: bool,
+    include_renamed: bool,
 ) -> Result<LinkRewriteResult, NoteError> {
     let root_path = Path::new(root);
     if !root_path.is_absolute() || !root_path.is_dir() {
@@ -772,7 +796,8 @@ fn rewrite_links(
     };
 
     for note in &scan.notes {
-        if note.rel_path == new_rel_path {
+        let is_renamed_note = note.rel_path == new_rel_path;
+        if is_renamed_note && !include_renamed {
             continue;
         }
         // Unreadable notes are the index's `unreadable` case, not an error:
@@ -827,9 +852,16 @@ fn rewrite_links(
             continue;
         };
         match write_vault_note(root, &note.rel_path, &new_body, Some(NoteStamp::of(&meta))) {
-            Ok(_) => {
+            Ok(stamp) => {
                 result.files += 1;
                 result.mentions += mentions;
+                if is_renamed_note {
+                    result.renamed_note = Some(RenamedNoteRewrite {
+                        crlf: new_body.contains("\r\n"),
+                        text: new_body,
+                        stamp,
+                    });
+                }
             }
             Err(e) => {
                 if matches!(e, NoteError::Outside | NoteError::Io(_)) {
@@ -3150,13 +3182,13 @@ mod tests {
         let root = root_str(&vault);
         rename_vault_note(&root, "sub/old.md", "moved/new.md").unwrap();
 
-        let plan = preview_link_rewrite(&root, "sub/old.md", "moved/new.md").unwrap();
+        let plan = preview_link_rewrite(&root, "sub/old.md", "moved/new.md", false).unwrap();
         assert_eq!(plan.files, 1, "only src.md mentions the note");
         assert_eq!(plan.mentions, 5);
         assert_eq!(plan.skipped, 0);
         assert!(!plan.truncated);
 
-        let done = rewrite_links_after_rename(&root, "sub/old.md", "moved/new.md").unwrap();
+        let done = rewrite_links_after_rename(&root, "sub/old.md", "moved/new.md", false).unwrap();
         assert_eq!(done, plan);
         assert_eq!(
             fs::read_to_string(vault.join("src.md")).unwrap(),
@@ -3178,13 +3210,13 @@ mod tests {
         let root = root_str(&vault);
         rename_vault_note(&root, "a/note.md", "renamed.md").unwrap();
 
-        let plan = preview_link_rewrite(&root, "a/note.md", "renamed.md").unwrap();
+        let plan = preview_link_rewrite(&root, "a/note.md", "renamed.md", false).unwrap();
         assert_eq!(plan.files, 1);
         assert_eq!(
             plan.mentions, 1,
             "the bare stem was ambiguous, never a backlink"
         );
-        rewrite_links_after_rename(&root, "a/note.md", "renamed.md").unwrap();
+        rewrite_links_after_rename(&root, "a/note.md", "renamed.md", false).unwrap();
         assert_eq!(
             fs::read_to_string(vault.join("src.md")).unwrap(),
             "[[note]] and [[renamed]]\n"
@@ -3197,6 +3229,83 @@ mod tests {
     }
 
     #[test]
+    fn a_rename_rewrites_the_notes_own_mentions_when_the_caller_includes_it() {
+        let vault = temp_vault("link_rewrite_self");
+        write_note(
+            &vault,
+            "old.md",
+            "# Old\r\n\r\nSelf [[old]] and [[old|me]] and [[other]].\r\n",
+        );
+        write_note(&vault, "other.md", "# Other\n");
+        let root = root_str(&vault);
+        rename_vault_note(&root, "old.md", "new.md").unwrap();
+
+        let excluded = preview_link_rewrite(&root, "old.md", "new.md", false).unwrap();
+        assert_eq!(
+            excluded.files, 0,
+            "a caller with unsaved work excludes its own note"
+        );
+        assert!(excluded.renamed_note.is_none());
+
+        let plan = preview_link_rewrite(&root, "old.md", "new.md", true).unwrap();
+        assert_eq!(plan.files, 1);
+        assert_eq!(plan.mentions, 2);
+        assert!(
+            plan.renamed_note.is_none(),
+            "a preview writes nothing to adopt"
+        );
+
+        let done = rewrite_links_after_rename(&root, "old.md", "new.md", true).unwrap();
+        assert_eq!(done.files, 1);
+        assert_eq!(done.mentions, 2);
+        let rewritten = done
+            .renamed_note
+            .expect("the rewritten note comes back for its editor");
+        let expected = "# Old\r\n\r\nSelf [[new]] and [[new|me]] and [[other]].\r\n";
+        assert_eq!(rewritten.text, expected);
+        assert!(rewritten.crlf, "the body keeps the file's line endings");
+        assert_eq!(fs::read_to_string(vault.join("new.md")).unwrap(), expected);
+        let meta = fs::metadata(vault.join("new.md")).unwrap();
+        assert_eq!(
+            rewritten.stamp,
+            NoteStamp::of(&meta),
+            "the editor adopts the stamp a later save checks"
+        );
+    }
+
+    #[test]
+    fn a_renamed_note_without_self_mentions_answers_no_body() {
+        let vault = temp_vault("link_rewrite_self_clean");
+        write_note(&vault, "old.md", "# Old\n");
+        let root = root_str(&vault);
+        rename_vault_note(&root, "old.md", "new.md").unwrap();
+
+        let done = rewrite_links_after_rename(&root, "old.md", "new.md", true).unwrap();
+        assert_eq!(done.files, 0);
+        assert!(
+            done.renamed_note.is_none(),
+            "nothing changed, so there is nothing to adopt"
+        );
+        assert_eq!(fs::read_to_string(vault.join("new.md")).unwrap(), "# Old\n");
+    }
+
+    #[test]
+    fn a_renamed_note_past_the_read_cap_is_skipped_even_when_included() {
+        let vault = temp_vault("link_rewrite_self_cap");
+        let mut body = String::from("[[old]]\n");
+        body.push_str(&"x".repeat(MAX_NOTE_BYTES as usize));
+        write_note(&vault, "old.md", &body);
+        let root = root_str(&vault);
+        rename_vault_note(&root, "old.md", "new.md").unwrap();
+
+        let done = rewrite_links_after_rename(&root, "old.md", "new.md", true).unwrap();
+        assert_eq!(done.files, 0, "a read prefix is not the file");
+        assert_eq!(done.skipped, 1);
+        assert!(done.renamed_note.is_none());
+        assert_eq!(fs::read_to_string(vault.join("new.md")).unwrap(), body);
+    }
+
+    #[test]
     fn a_reference_update_keeps_a_notes_line_endings() {
         let vault = temp_vault("link_rewrite_crlf");
         write_note(&vault, "old.md", "# Old\n");
@@ -3204,9 +3313,9 @@ mod tests {
         let root = root_str(&vault);
         rename_vault_note(&root, "old.md", "new.md").unwrap();
 
-        let plan = preview_link_rewrite(&root, "old.md", "new.md").unwrap();
+        let plan = preview_link_rewrite(&root, "old.md", "new.md", false).unwrap();
         assert_eq!(
-            rewrite_links_after_rename(&root, "old.md", "new.md").unwrap(),
+            rewrite_links_after_rename(&root, "old.md", "new.md", false).unwrap(),
             plan
         );
         assert_eq!(
@@ -3225,7 +3334,7 @@ mod tests {
 
         assert!(
             matches!(
-                preview_link_rewrite(&root, "old.md", "new#name.md").unwrap_err(),
+                preview_link_rewrite(&root, "old.md", "new#name.md", false).unwrap_err(),
                 NoteError::BadPath(_)
             ),
             "a name the parser would re-read as syntax is refused"
@@ -3246,12 +3355,12 @@ mod tests {
         let root = root_str(&vault);
         rename_vault_note(&root, "old.md", "new.md").unwrap();
 
-        let plan = preview_link_rewrite(&root, "old.md", "new.md").unwrap();
+        let plan = preview_link_rewrite(&root, "old.md", "new.md", false).unwrap();
         assert_eq!(plan.files, 0, "a read prefix is not the file");
         assert_eq!(plan.mentions, 0);
         assert_eq!(plan.skipped, 1);
         assert_eq!(
-            rewrite_links_after_rename(&root, "old.md", "new.md")
+            rewrite_links_after_rename(&root, "old.md", "new.md", false)
                 .unwrap()
                 .skipped,
             1

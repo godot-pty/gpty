@@ -1237,20 +1237,24 @@ func _rename_note(new_rel: String) -> bool:
 	# This note's own edges moved with it. Mentions other notes wrote to the
 	# old name do not follow a file: the rename just made them unresolved, and
 	# updating them writes *their* notes — so it is a separate, explicit
-	# question, never a side effect of the rename.
+	# question, never a side effect of the rename. A clean buffer also makes
+	# this note's own self-mentions candidates; a dirty one is the editor's and
+	# is never written under.
 	_refresh_links()
-	_offer_link_update(previous, _current_rel)
+	_offer_link_update(previous, _current_rel, not _is_dirty())
 	return true
 
 ## Offer to respell the mentions that still name the old path. The preview
 ## answers how many notes and occurrences resolved to the old name before the
 ## move; nothing is written until the answer is Update, and a vault with no
-## mentions is not asked about at all.
-func _offer_link_update(previous: String, new_rel: String) -> void:
+## mentions is not asked about at all. `include_renamed` is the open note's
+## buffer state: a clean buffer can adopt a rewrite of itself, a dirty one
+## must never be written under.
+func _offer_link_update(previous: String, new_rel: String, include_renamed: bool) -> void:
 	if _has_open_ask():
 		return
 	var preview = JSON.parse_string(str(
-		GptyTerminal.vault_link_rewrite_preview(vault_path, previous, new_rel)))
+		GptyTerminal.vault_link_rewrite_preview(vault_path, previous, new_rel, include_renamed)))
 	if not (preview is Dictionary) or preview.has("error"):
 		# The rename itself landed; a pass that cannot be planned is reported
 		# rather than silently skipped — the mentions stay as they are.
@@ -1281,13 +1285,18 @@ func _offer_link_update(previous: String, new_rel: String) -> void:
 ## the count is what actually landed (an edit made while the question was open
 ## is read fresh) and a note that changes between its plan and its write is
 ## skipped rather than replaced; the re-index makes the new backlinks visible
-## in this pane's panel at once.
+## in this pane's panel at once. The open note is included only when its buffer
+## is still clean: the pass rewrote the file under it, so the answer carries
+## the text and fresh stamp the editor adopts.
 func _apply_link_update(previous: String, new_rel: String) -> void:
 	var reply = JSON.parse_string(str(
-		GptyTerminal.vault_link_rewrite(vault_path, previous, new_rel)))
+		GptyTerminal.vault_link_rewrite(vault_path, previous, new_rel, not _is_dirty())))
 	if not (reply is Dictionary) or reply.has("error"):
 		ToastManager.warn(_note_failure("Could not update mentions of", previous, reply), 5.0, "Wiki")
 		return
+	var source = reply.get("renamed_note", null)
+	if source is Dictionary and _current_rel == new_rel:
+		_adopt_rewritten_note(source)
 	var files := int(reply.get("files", 0))
 	var mentions := int(reply.get("mentions", 0))
 	var skipped := int(reply.get("skipped", 0))
@@ -1303,6 +1312,36 @@ func _apply_link_update(previous: String, new_rel: String) -> void:
 	if not bool(reply.get("indexed", true)):
 		ToastManager.warn("Mentions updated, but the search index could not be updated", 5.0, "Wiki")
 	_refresh_links()
+
+## Adopt text the reference pass wrote into the open note. The file under the
+## clean buffer changed by exactly those respellings, so the buffer is brought
+## in line and the fresh stamp comes from the answer — not from a second read,
+## which could race an edit that landed after the pass. This is not an edit:
+## `_saved_text` moves with the buffer, so dirty state and Save stay as they
+## were, and a save right after does not hit `changed_on_disk`.
+func _adopt_rewritten_note(source: Dictionary) -> void:
+	var text := str(source.get("text", ""))
+	_crlf = bool(source.get("crlf", _crlf))
+	var buffer := text.replace("\r\n", "\n") if _crlf else text
+	_saved_text = buffer
+	_loaded_mtime = int(source.get("mtime", 0))
+	_loaded_size = int(source.get("size", 0))
+	var caret_line := _editor.get_caret_line()
+	var caret_column := _editor.get_caret_column()
+	var scroll := _editor.scroll_vertical
+	_editor.text = buffer
+	# A rewrite respells targets in place, so the line count is unchanged and
+	# the caret's line survives; its column clamps to the line's new length.
+	var line_index := mini(caret_line, maxi(_editor.get_line_count() - 1, 0))
+	_editor.set_caret_line(line_index)
+	_editor.set_caret_column(mini(caret_column, _editor.get_line(line_index).length()))
+	_editor.scroll_vertical = scroll
+	_update_dirty()
+	if _preview_visible():
+		# A programmatic `text` assignment emits only `text_set` (never
+		# `text_changed`), so the preview is re-rendered here or it would keep
+		# showing the old spellings.
+		_reader.render_now(_preview_text())
 
 ## Ask before the one destructive verb: an open note is about to stop
 ## existing, and a dirty buffer dies with it — no save question, because the

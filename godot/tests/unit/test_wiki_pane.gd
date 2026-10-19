@@ -1000,6 +1000,69 @@ func test_renaming_a_linked_note_offers_to_update_the_mentions():
 	assert_eq(pane._current_rel, "moved/new.md", "the open note is where the rename put it")
 
 
+## A note may mention itself (a hub or an index). When its buffer is clean the
+## reference pass can rewrite that mention too, and the pane adopts the text
+## and stamp the pass answers — the file changed under a buffer that did not.
+func test_renaming_a_clean_self_linked_note_updates_its_own_text():
+	_write(_tmp.path_join("note.md"), "# Note\n\nSee [[note]] and [[note|me]].\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("note.md")
+
+	pane._rename_button.pressed.emit()
+	_name_field(_dialogs_of(pane)[0]).text = "moved.md"
+	_dialogs_of(pane)[0].confirmed.emit()
+	await wait_process_frames(2)
+
+	var dialog: ConfirmationDialog = _dialogs_of(pane)[0]
+	assert_string_contains(dialog.dialog_text, "2 mention(s) in 1 note(s)",
+		"the open note's own mentions are offered too")
+	dialog.confirmed.emit()
+	await wait_process_frames(2)
+
+	var expected := "# Note\n\nSee [[moved]] and [[moved|me]].\n"
+	assert_eq(_read(_tmp.path_join("moved.md")), expected)
+	assert_eq(pane._editor.text, expected, "the open buffer adopts the pass's text")
+	assert_eq(pane._saved_text, expected, "adoption is not an edit")
+	assert_false(pane._is_dirty())
+	# The adopted stamp is the file's, so a save right after is not a conflict.
+	var reply = JSON.parse_string(str(GptyTerminal.vault_note_write(
+		_tmp, "moved.md", pane._editor.text,
+		pane._loaded_mtime, pane._loaded_size, false)))
+	if reply is Dictionary:
+		assert_false(reply.has("error"), "the stamp came from the write that landed")
+
+
+## A dirty buffer is the editor's: the pass may update other notes, but never
+## the file under an unsaved edit — the self-mention stays as typed.
+func test_a_dirty_self_linked_note_is_never_rewritten_under_the_buffer():
+	_write(_scratch_tmp.path_join("note.md"), "# Note\n\nSelf [[note]].\n")
+	_write(_scratch_tmp.path_join("src.md"), "See [[note]].\n")
+	var pane := _make_pane(_scratch_tmp)
+	pane._scratch_timer.wait_time = 0.05
+	pane._open_note("note.md")
+	await _type_into(pane, "# Edited\n\nSelf [[note]].\n")
+	assert_true(pane._is_dirty())
+
+	pane._rename_button.pressed.emit()
+	_name_field(_dialogs_of(pane)[0]).text = "moved.md"
+	_dialogs_of(pane)[0].confirmed.emit()
+	await wait_process_frames(2)
+
+	var dialog: ConfirmationDialog = _dialogs_of(pane)[0]
+	assert_string_contains(dialog.dialog_text, "1 mention(s) in 1 note(s)",
+		"only the note whose buffer is not open is offered")
+	dialog.confirmed.emit()
+	await wait_process_frames(2)
+
+	assert_eq(_read(_scratch_tmp.path_join("moved.md")),
+		"# Note\n\nSelf [[note]].\n",
+		"the file under the dirty buffer was not rewritten")
+	assert_eq(_read(_scratch_tmp.path_join("src.md")), "See [[moved]].\n")
+	assert_eq(pane._editor.text, "# Edited\n\nSelf [[note]].\n",
+		"the unsaved buffer is untouched")
+	assert_true(pane._is_dirty())
+
+
 func test_declining_the_mention_update_leaves_the_other_notes_alone():
 	_write(_tmp.path_join("note.md"), "# Note\n")
 	_write(_tmp.path_join("src.md"), "[[note]]\n")
