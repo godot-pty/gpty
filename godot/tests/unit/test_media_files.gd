@@ -32,24 +32,31 @@ func _write(path: String, text := "x") -> String:
 
 
 func test_video_and_audio_extensions_are_known():
-	assert_eq(MediaFiles.kind_for("/p/movie.ogv"), MediaFiles.VIDEO)
+	for path in [
+		"/p/movie.ogv", "/p/movie.mp4", "/p/movie.m4v", "/p/movie.mov",
+		"/p/movie.mkv", "/p/movie.webm", "/p/movie.avi", "/p/movie.ts",
+		"/p/movie.m2ts",
+	]:
+		assert_eq(MediaFiles.kind_for(path), MediaFiles.VIDEO, path)
 	for path in ["/p/song.ogg", "/p/song.oga", "/p/song.mp3", "/p/song.wav"]:
 		assert_eq(MediaFiles.kind_for(path), MediaFiles.AUDIO, path)
 
 
 func test_extensions_are_case_insensitive():
 	assert_eq(MediaFiles.kind_for("/p/MOVIE.OGV"), MediaFiles.VIDEO)
+	assert_eq(MediaFiles.kind_for("/p/MOVIE.MP4"), MediaFiles.VIDEO)
 	assert_eq(MediaFiles.kind_for("/p/SONG.WAV"), MediaFiles.AUDIO)
 
 
 func test_unknown_formats_are_not_media():
-	for path in ["/p/movie.mp4", "/p/photo.png", "/p/program.exe", "/p/notes.md", "/p/noext"]:
+	for path in ["/p/song.flac", "/p/photo.png", "/p/program.exe", "/p/notes.md", "/p/noext"]:
 		assert_eq(MediaFiles.kind_for(path), "", path)
 		assert_eq(MediaFiles.pane_for(path), "", path)
 
 
 func test_a_known_format_routes_to_the_media_pane():
 	assert_eq(MediaFiles.pane_for("/p/movie.ogv"), "media")
+	assert_eq(MediaFiles.pane_for("/p/movie.mp4"), "media")
 	assert_eq(MediaFiles.pane_for("/p/song.ogg"), "media")
 
 

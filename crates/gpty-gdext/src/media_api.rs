@@ -203,6 +203,16 @@ fn open_config(value: &Value) -> Result<OpenConfig, String> {
     if let Some(height) = object.get("max_height") {
         config.max_height = number(height, "max_height")?;
     }
+    if let Some(video) = object.get("video") {
+        config.video = video
+            .as_bool()
+            .ok_or_else(|| "\"video\" must be a boolean".to_string())?;
+    }
+    if let Some(audio) = object.get("audio") {
+        config.audio = audio
+            .as_bool()
+            .ok_or_else(|| "\"audio\" must be a boolean".to_string())?;
+    }
     Ok(config)
 }
 

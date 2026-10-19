@@ -92,7 +92,7 @@ only hand over JSON or drain a bounded queue.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `open(config_json: String)` | `String` | Open a file, replacing the current session. JSON: `{path, sample_rate, channels, max_width, max_height}`; `sample_rate` defaults to 48000, `channels` to 2, the box to native size. The path is validated synchronously and returns `{"ok":true,"state":"opening"}`; probing/decoding runs on the session thread, and `status()` then reports `Playing` with `info` (`{container,duration_us,video,audio,streams}`) or `Failed` with an error. A refused path is `{"ok":false,"error":{"code","message"}}` immediately |
+| `open(config_json: String)` | `String` | Open a file, replacing the current session. JSON: `{path, sample_rate, channels, max_width, max_height, video, audio}`; `sample_rate` defaults to 48000, `channels` to 2, the box to native size, and both stream flags to true (disable one when the caller will not drain its queue). The path is validated synchronously and returns `{"ok":true,"state":"opening"}`; probing/decoding runs on the session thread, and `status()` then reports `Playing` with `info` (`{container,duration_us,video,audio,streams}`) or `Failed` with an error. A refused path is `{"ok":false,"error":{"code","message"}}` immediately |
 | `poll_video()` | `Dictionary` | `{}` when empty, else `{width,height,pts_us,keyframe,data}` with `data` a packed RGBA8 array of `width * height * 4` bytes |
 | `poll_audio()` | `Dictionary` | `{}` when empty, else `{sample_rate,channels,pts_us,data}` with `data` interleaved f32 at the requested rate/channels |
 | `seek(position_us: int)` | `String` | Acknowledged seek; pre-target frames are dropped. `{"ok":true}` or an error envelope |

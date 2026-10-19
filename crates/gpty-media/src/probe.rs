@@ -94,13 +94,18 @@ pub(crate) struct AudioStream {
 /// Open and inspect `path`, without starting a decode worker.
 pub fn probe(path: &str) -> Result<MediaInfo, MediaError> {
     let stop = Arc::new(AtomicBool::new(false));
-    let opened = open_input(path, stop)?;
+    let opened = open_input(path, stop, true, true)?;
     Ok(opened.info)
 }
 
 /// Open `path` with a wall-clock budget and validate everything this backend
 /// is allowed to read. `stop` lets a session close interrupt a blocked open.
-pub(crate) fn open_input(path: &str, stop: Arc<AtomicBool>) -> Result<OpenedInput, MediaError> {
+pub(crate) fn open_input(
+    path: &str,
+    stop: Arc<AtomicBool>,
+    want_video: bool,
+    want_audio: bool,
+) -> Result<OpenedInput, MediaError> {
     ensure_ffmpeg_init()?;
     let path = validate_path(path)?;
 
@@ -193,8 +198,8 @@ pub(crate) fn open_input(path: &str, stop: Arc<AtomicBool>) -> Result<OpenedInpu
             .disposition()
             .contains(ffmpeg::format::stream::Disposition::ATTACHED_PIC);
         let candidate = match kind {
-            StreamKind::Video => video.is_none() && !attached_pic,
-            StreamKind::Audio => audio.is_none(),
+            StreamKind::Video => want_video && video.is_none() && !attached_pic,
+            StreamKind::Audio => want_audio && audio.is_none(),
         };
 
         info.streams.push(StreamInfo {
@@ -292,7 +297,7 @@ pub(crate) fn open_input(path: &str, stop: Arc<AtomicBool>) -> Result<OpenedInpu
 
     if video.is_none() && audio.is_none() {
         return Err(MediaError::unsupported_codec(
-            "no decodable audio or video stream",
+            "no decodable stream of the requested kind",
         ));
     }
 

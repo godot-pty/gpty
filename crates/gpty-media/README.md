@@ -7,7 +7,11 @@ pane consumes packed RGBA frames and interleaved f32 samples.
 ## API
 
 - `probe(path) -> MediaInfo` — container, duration, streams, selected codecs.
-- `MediaSession::open(OpenConfig)` — starts one decode thread and returns.
+- `MediaSession::open(OpenConfig)` / `start(OpenConfig)` — starts one decode
+  thread; `open` waits for stream info, `start` returns immediately. `video`
+  and `audio` select which decoders run (default both): a caller that polls
+  only one queue must turn the other off, because an unconsumed queue is
+  backpressure and would stall the stream it is not reading.
 - `poll_video(max)` / `poll_audio(max)` — non-blocking drains of bounded
   queues. A full queue blocks the decoder, not the caller.
 - `seek(position_us)` — acknowledged by the worker before it returns, so

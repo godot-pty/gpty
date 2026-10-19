@@ -213,6 +213,40 @@ fn an_av_file_produces_both_streams() {
 }
 
 #[test]
+fn video_only_does_not_decode_audio() {
+    let mut config = OpenConfig::new(fixture("av_h264_aac.mp4"));
+    config.audio = false;
+    let session = MediaSession::open(config).unwrap();
+    assert!(!wait_video(&session, 1).is_empty());
+    assert!(
+        session.poll_audio(1).is_empty(),
+        "a video-only session queued audio"
+    );
+    assert!(session.status().info.unwrap().audio.is_none());
+}
+
+#[test]
+fn audio_only_does_not_decode_video() {
+    let mut config = OpenConfig::new(fixture("av_h264_aac.mp4"));
+    config.video = false;
+    let session = MediaSession::open(config).unwrap();
+    assert!(!wait_audio(&session, 1).is_empty());
+    assert!(
+        session.poll_video(1).is_empty(),
+        "an audio-only session queued video"
+    );
+    assert!(session.status().info.unwrap().video.is_none());
+}
+
+#[test]
+fn a_session_must_request_one_stream() {
+    let mut config = OpenConfig::new(fixture("h264.mp4"));
+    config.video = false;
+    config.audio = false;
+    assert_eq!(open_err(config).code(), MediaErrorCode::UnsupportedCodec);
+}
+
+#[test]
 fn seek_lands_at_or_after_the_target() {
     let session = MediaSession::open(OpenConfig::new(fixture("long_h264.mp4"))).unwrap();
     let first = wait_video(&session, 1);

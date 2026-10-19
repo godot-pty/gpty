@@ -4,21 +4,31 @@ class_name MediaPane
 #
 # The file is a path carrier like every file pane: an absolute local path,
 # validated at use by `MediaFiles` (allowlist + regular-file gate), never a
-# URL and never handed to `ResourceLoader` — the pane builds the decoder for
-# the kind the table named. Playback is Godot's native streams for the
-# formats the engine ships (Theora `.ogv`, Ogg Vorbis/MP3/WAV audio); the
-# wider Rust demux/decode matrix is a later roadmap item, and this pane's
-# path gate, layout state and UI survive that swap. Transport controls
-# (play/pause/seek/loop, paneStatus) are their own item as well: opening a
-# file plays it once, and the status line says what happened.
+# URL and never handed to `ResourceLoader`. Video is decoded by the pinned
+# FFmpeg backend (`GptyMedia` → `gpty-media`) and uploaded as an ImageTexture;
+# audio still uses Godot's native stream loaders until the Audio playback item
+# wires `poll_audio` into an AudioStreamGenerator. A video session is opened
+# with `audio: false` for that reason: an unconsumed audio queue is
+# backpressure and would stall video decode.
+#
+# Presentation is PTS-gated against `Time.get_ticks_usec()` so a decoder that
+# runs faster than real time does not play the clip at 4×. Transport controls
+# (pause/seek/loop, paneStatus) remain their own item.
 
 @export var file_path := ""
 
-var _video: VideoStreamPlayer
-## `VideoStreamPlayer.expand` is a *cover* fit — a tall pane crops the sides
-## of a wide clip — so the player lives inside an AspectRatioContainer that
-## is given the clip's own ratio and centers it instead (letterbox/pillarbox).
-var _video_frame: AspectRatioContainer
+## Video surface. `TextureRect` with aspect-preserving stretch gives the same
+## letterbox/pillarbox fit the old AspectRatioContainer did, without needing
+## the clip's dimensions before the first frame arrives.
+var _video_surface: TextureRect
+var _backend: GptyMedia
+var _texture: ImageTexture
+var _pending_frames: Array = []
+var _clock_start_us := -1
+var _first_pts_us := 0
+var _video_finished := false
+var _finished_shown := false
+
 var _audio: AudioStreamPlayer
 var _placeholder: CenterContainer
 var _placeholder_title: Label
@@ -33,6 +43,12 @@ func _ready():
 		load_media(file_path)
 	else:
 		_show_idle()
+
+func _process(_delta):
+	_poll_video()
+
+func _exit_tree():
+	_stop_backend()
 
 func _build_ui():
 	var root := VBoxContainer.new()
@@ -51,19 +67,14 @@ func _build_ui():
 	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(content)
 
-	_video_frame = AspectRatioContainer.new()
-	_video_frame.name = "VideoFrame"
-	_video_frame.visible = false
-	content.add_child(_video_frame)
-	_video_frame.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-
-	_video = VideoStreamPlayer.new()
-	_video.name = "Video"
-	_video.expand = true
-	_video.autoplay = false
-	_video.finished.connect(_on_finished)
-	_video_frame.add_child(_video)
-	_video.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_video_surface = TextureRect.new()
+	_video_surface.name = "Video"
+	_video_surface.visible = false
+	_video_surface.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_video_surface.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_video_surface.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(_video_surface)
+	_video_surface.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	_placeholder = CenterContainer.new()
 	_placeholder.name = "Placeholder"
@@ -113,7 +124,7 @@ func _build_ui():
 	# must not sit in the layout where it would claim height from the video.
 	_audio = AudioStreamPlayer.new()
 	_audio.name = "Audio"
-	_audio.finished.connect(_on_finished)
+	_audio.finished.connect(_on_audio_finished)
 	add_child(_audio)
 
 ## Play `path`, replacing whatever this pane was playing. A refused path
@@ -121,7 +132,7 @@ func _build_ui():
 ## could not open) and explains itself in the placeholder.
 func load_media(path: String) -> void:
 	path = path.strip_edges()
-	if _video == null:
+	if _video_surface == null:
 		# Before `_ready` the UI does not exist; `_ready` loads `file_path`.
 		file_path = path
 		return
@@ -137,55 +148,127 @@ func load_media(path: String) -> void:
 		file_path = ""
 		_show_idle()
 		return
-	var kind: String = verdict.kind
-	var stream := _load_stream(path, kind)
+	file_path = path
+	_kind = verdict.kind
+	_placeholder.visible = false
+	_status.visible = true
+	if _kind == MediaFiles.VIDEO:
+		_open_video(path)
+		return
+
+	var stream := _load_audio_stream(path)
 	if stream == null:
 		file_path = ""
 		_show_error("Could not decode this media file: %s" % MediaFiles.display_name(path))
 		return
-	file_path = path
-	_kind = kind
-	_placeholder.visible = false
-	_status.visible = true
-	if kind == MediaFiles.VIDEO:
-		_video.stream = stream as VideoStream
-		_video_frame.visible = true
-		_video.visible = true
-		_fit_video()
-		_fit_video.call_deferred()
-	else:
-		_audio.stream = stream as AudioStream
-		_show_audio_placeholder(path)
+	_audio.stream = stream
+	_show_audio_placeholder(path)
 	_start_playback()
 
-## The one place a path becomes a decoder. Typed streams only: the extension
-## table already chose the kind, and no branch consults `ResourceLoader`.
-func _load_stream(path: String, kind: String) -> Resource:
-	if kind == MediaFiles.VIDEO:
-		var stream := VideoStreamTheora.new()
-		stream.file = path
-		return stream
-	if kind == MediaFiles.AUDIO:
-		match path.get_extension().to_lower():
-			"mp3":
-				return AudioStreamMP3.load_from_file(path)
-			"wav":
-				return AudioStreamWAV.load_from_file(path)
-			_:
-				return AudioStreamOggVorbis.load_from_file(path)
-	return null
+## The one place an audio path becomes a decoder. Typed streams only: the
+## extension table already chose the kind, and no branch consults
+## `ResourceLoader`. Video never reaches this function.
+func _load_audio_stream(path: String) -> Resource:
+	match path.get_extension().to_lower():
+		"mp3":
+			return AudioStreamMP3.load_from_file(path)
+		"wav":
+			return AudioStreamWAV.load_from_file(path)
+		_:
+			return AudioStreamOggVorbis.load_from_file(path)
 
-## Give the frame the clip's own ratio. `get_video_texture()` reports the
-## stream's dimensions once the stream is assigned, but a decoder may expose
-## it a frame later, so the caller also defers one call; a zero height means
-## nothing is available yet and the default 16:9 frame stands in.
-func _fit_video():
-	if _video == null or _video_frame == null:
+## Start a video session. `open` validates the path synchronously and probes
+## on the backend's own thread; `_poll_video` follows its status.
+func _open_video(path: String) -> void:
+	if _backend == null:
+		_backend = GptyMedia.new()
+		_backend.name = "MediaBackend"
+		add_child(_backend)
+	var answer = JSON.parse_string(_backend.open(JSON.stringify({
+		"path": path,
+		"audio": false,
+		"sample_rate": 48000,
+		"channels": 2,
+	})))
+	if not (answer is Dictionary) or not answer.get("ok", false):
+		var error = answer.get("error", {}) if answer is Dictionary else {}
+		_show_error("Could not open the media file: %s" % str(error.get("message", "")))
 		return
-	var texture := _video.get_video_texture()
-	if texture == null or texture.get_height() <= 0:
+	_video_finished = false
+	_finished_shown = false
+	_clock_start_us = -1
+	_pending_frames.clear()
+	_status.text = "Opening %s" % MediaFiles.display_name(path)
+
+## Drain decoded frames, gate presentation on the PTS clock, and update the
+## surface. A frame is presented when its due time arrives; a small backlog is
+## kept so a slow frame does not reorder the clip.
+func _poll_video() -> void:
+	if _backend == null or _kind != MediaFiles.VIDEO:
 		return
-	_video_frame.ratio = float(texture.get_width()) / float(texture.get_height())
+	var status = JSON.parse_string(_backend.status())
+	if status is Dictionary:
+		if status.get("state") == "failed":
+			var error = status.get("error", {})
+			_show_error("Could not decode this media file: %s" % str(error.get("message", "")))
+			return
+		if status.get("state") == "finished":
+			_video_finished = true
+
+	var now := Time.get_ticks_usec()
+	# Poll a bounded batch: the backend queue is small, and a slow frame must
+	# not spend the whole frame budget draining it.
+	for _i in 8:
+		var frame = _backend.poll_video()
+		if frame.is_empty():
+			break
+		if _clock_start_us < 0:
+			_clock_start_us = now
+			_first_pts_us = int(frame["pts_us"])
+		_pending_frames.append(frame)
+		while _pending_frames.size() > 4:
+			_pending_frames.pop_front()
+
+	if _pending_frames.is_empty():
+		if _video_finished and not _finished_shown:
+			_finish_video()
+		return
+
+	while not _pending_frames.is_empty():
+		var frame: Dictionary = _pending_frames[0]
+		var due := _clock_start_us + int(frame["pts_us"]) - _first_pts_us
+		if due > now:
+			break
+		_pending_frames.pop_front()
+		# Catch up by dropping a frame that is already well past due when a
+		# newer one is waiting; never drop the last frame in the queue.
+		if now - due > 100_000 and not _pending_frames.is_empty():
+			continue
+		_present_video(frame)
+		if _status.text.begins_with("Opening"):
+			_status.text = "Playing %s" % MediaFiles.display_name(file_path)
+	if _video_finished and _pending_frames.is_empty() and not _finished_shown:
+		_finish_video()
+
+func _present_video(frame: Dictionary) -> void:
+	var width := int(frame.get("width", 0))
+	var height := int(frame.get("height", 0))
+	var data: PackedByteArray = frame.get("data", PackedByteArray())
+	if width <= 0 or height <= 0 or data.is_empty():
+		return
+	var image := Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, data)
+	if _texture == null or _texture.get_width() != width or _texture.get_height() != height:
+		_texture = ImageTexture.create_from_image(image)
+		_video_surface.texture = _texture
+	else:
+		_texture.update(image)
+	_video_surface.visible = true
+	_placeholder.visible = false
+
+func _finish_video() -> void:
+	_finished_shown = true
+	_status.visible = true
+	_status.text = "Finished %s" % MediaFiles.display_name(file_path)
 
 func _start_playback():
 	# `play()` is an engine error outside the tree; every production caller is
@@ -193,20 +276,12 @@ func _start_playback():
 	# whole contract rather than a retry loop.
 	if not is_inside_tree():
 		return
-	if _kind == MediaFiles.VIDEO and _video.stream != null:
-		_video.play()
-	elif _kind == MediaFiles.AUDIO and _audio.stream != null:
+	if _kind == MediaFiles.AUDIO and _audio.stream != null:
 		_audio.play()
-	_status.text = "Playing %s" % MediaFiles.display_name(file_path)
+		_status.text = "Playing %s" % MediaFiles.display_name(file_path)
 
 func _teardown_stream():
-	if _video != null:
-		if _video.is_inside_tree():
-			_video.stop()
-		_video.stream = null
-		_video.visible = false
-	if _video_frame != null:
-		_video_frame.visible = false
+	_stop_backend()
 	if _audio != null:
 		if _audio.is_inside_tree():
 			_audio.stop()
@@ -215,9 +290,20 @@ func _teardown_stream():
 	_status.visible = false
 	_status.text = ""
 
+func _stop_backend():
+	if _backend != null:
+		_backend.close()
+	_texture = null
+	_pending_frames.clear()
+	_clock_start_us = -1
+	_video_finished = false
+	_finished_shown = false
+	if _video_surface != null:
+		_video_surface.texture = null
+		_video_surface.visible = false
+
 func _show_idle():
-	_video.visible = false
-	_video_frame.visible = false
+	_stop_backend()
 	_placeholder.visible = true
 	_placeholder_title.text = "Media"
 	_placeholder_hint.text = "No file selected — set an absolute path in pane settings."
@@ -229,14 +315,16 @@ func _show_audio_placeholder(path: String):
 	_placeholder_hint.text = "Audio"
 
 func _show_error(message: String):
-	_video.visible = false
-	_video_frame.visible = false
+	# A pane showing an error is not showing a file; the viewer's rule.
+	file_path = ""
+	_kind = ""
+	_stop_backend()
 	_placeholder.visible = true
 	_placeholder_title.text = "Media"
 	_placeholder_hint.text = message
 	_status.visible = false
 
-func _on_finished():
+func _on_audio_finished():
 	_status.visible = true
 	_status.text = "Finished %s" % MediaFiles.display_name(file_path)
 	if _kind == MediaFiles.AUDIO:
@@ -257,7 +345,7 @@ func apply_settings(settings: Dictionary):
 	# only a path that actually changed reaches the decoder.
 	var previous_path := file_path
 	super.apply_settings(settings)
-	if _video == null:
+	if _video_surface == null:
 		return
 	if settings.get("file_path") is String:
 		if file_path != previous_path:
@@ -287,7 +375,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 
 	var file_le = LineEdit.new()
 	file_le.text = file_path
-	file_le.placeholder_text = "/path/to/movie.ogv or song.ogg"
+	file_le.placeholder_text = "/path/to/movie.mp4 or song.ogg"
 	file_le.text_changed.connect(func(_s): panel._debounce_timer.start())
 	_add_setting_row(v, "File:", file_le)
 

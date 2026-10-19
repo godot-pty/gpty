@@ -2,12 +2,13 @@ extends GutTest
 # The media pane plays the local formats MediaFiles names, refuses everything
 # else before a decoder sees it, and carries its path through layout state.
 #
-# Playback is asserted on the player itself (`playing` / `is_playing()`), not
-# on a status string: Godot's audio driver is Dummy in this suite and a video
-# decodes in headless mode, so both halves are observable without a display.
-# The `.ogv` fixture is a five-second synthetic test pattern + sine tone
-# (ffmpeg: testsrc + sine, libtheora/libvorbis); the WAV is generated here so
-# no second binary asset is needed.
+# Audio playback is asserted on the player itself (`playing`), not on a status
+# string: Godot's audio driver is Dummy in this suite. Video is decoded by the
+# pinned FFmpeg backend and asserted on the texture it produces (the dummy
+# renderer still creates ImageTextures), so both halves are observable without
+# a display. The `.ogv` fixture is a five-second synthetic test pattern + sine
+# tone; the `.mp4` comes from the media crate's generated fixtures. The WAV is
+# generated here so no second binary asset is needed.
 
 var _tmp: String
 
@@ -53,10 +54,27 @@ func _wav(name := "tone.wav") -> String:
 	return path
 
 
-func _video() -> String:
+func _ogv() -> String:
 	var path := ProjectSettings.globalize_path("res://tests/fixtures/media/pattern.ogv")
 	assert_true(FileAccess.file_exists(path), "the video fixture must be readable")
 	return path
+
+
+func _mp4() -> String:
+	var path := ProjectSettings.globalize_path("res://") \
+		.path_join("../crates/gpty-media/tests/fixtures/h264.mp4").simplify_path()
+	assert_true(FileAccess.file_exists(path), "the MP4 fixture must be readable")
+	return path
+
+
+## Wait for the first decoded frame. The backend opens/probes on its own
+## thread, so the pane needs a few frames even for a tiny file.
+func _await_video(pane: MediaPane, budget := 300) -> bool:
+	for _i in budget:
+		if pane._video_surface.texture != null:
+			return true
+		await get_tree().process_frame
+	return false
 
 
 func test_pane_type_is_media():
@@ -66,7 +84,7 @@ func test_pane_type_is_media():
 
 func test_a_fresh_pane_is_idle():
 	var pane := _make_pane()
-	assert_false(pane._video.visible)
+	assert_false(pane._video_surface.visible)
 	assert_true(pane._placeholder.visible)
 	assert_string_contains(pane._placeholder_hint.text, "pane settings")
 	assert_eq(pane.file_path, "")
@@ -80,25 +98,36 @@ func test_an_audio_file_loads_and_plays():
 	assert_eq(pane.file_path, path, "a played file is the pane's file")
 	assert_eq(pane._kind, MediaFiles.AUDIO)
 	assert_true(pane._audio.playing, "the pane must actually start the stream")
-	assert_false(pane._video.visible)
+	assert_false(pane._video_surface.visible)
 	assert_eq(pane._audio.stream.get_length(), 1.0, "the loaded stream is the file's audio")
 	assert_string_contains(pane._placeholder_title.text, "tone.wav")
 	assert_string_contains(pane._status.text, "Playing")
 
 
-func test_a_video_file_loads_and_plays():
+func test_an_mp4_video_loads_and_renders_a_frame():
 	var pane := _make_pane()
-	var path := _video()
+	var path := _mp4()
 	pane.load_media(path)
-	await get_tree().process_frame
+	assert_true(await _await_video(pane), "no decoded frame reached the texture")
 
 	assert_eq(pane.file_path, path)
 	assert_eq(pane._kind, MediaFiles.VIDEO)
-	assert_true(pane._video.visible, "a video uses the video surface")
+	assert_true(pane._video_surface.visible, "a video uses the texture surface")
 	assert_false(pane._placeholder.visible)
-	assert_true(pane._video.is_playing(), "the video decoder must be running")
-	assert_gt(pane._video.get_stream_length(), 4.0, "the fixture is the five-second clip")
-	assert_string_contains(pane._status.text, "Playing")
+	assert_not_null(pane._backend, "video decode goes through GptyMedia")
+	assert_not_null(pane._video_surface.texture)
+	assert_eq(pane._video_surface.texture.get_width(), 64)
+	assert_eq(pane._video_surface.texture.get_height(), 48)
+	assert_true(pane._status.visible)
+
+
+func test_theora_video_uses_the_same_backend():
+	var pane := _make_pane()
+	pane.load_media(_ogv())
+	assert_true(await _await_video(pane), "no Theora frame reached the texture")
+	assert_not_null(pane._backend)
+	assert_eq(pane._kind, MediaFiles.VIDEO)
+	assert_not_null(pane._video_surface.texture)
 
 
 func test_an_unsupported_extension_is_refused_before_a_decoder():

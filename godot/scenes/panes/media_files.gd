@@ -16,9 +16,12 @@ extends RefCounted
 # Adding a format is one entry here plus a case in the pane's loader; the
 # extension list is also what the file tree consults to choose the pane.
 
-## Containers Godot's native video decoder reads. Theora-in-Ogg only: the
-## Rust backend's wider matrix (MP4/WebM/MKV, H.264/VP9/AV1) is a later item.
-const VIDEO_EXTENSIONS: Array[String] = ["ogv"]
+## Video containers the Rust backend demuxes. The backend decodes H.264,
+## H.265, VP8/9, AV1 and Theora; `.ogv` moved here with the video-rendering
+## item, so there is no second (native VideoStreamPlayer) video path.
+const VIDEO_EXTENSIONS: Array[String] = [
+	"ogv", "mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m2ts",
+]
 
 ## Audio formats the native stream loaders read.
 const AUDIO_EXTENSIONS: Array[String] = ["ogg", "oga", "mp3", "wav"]

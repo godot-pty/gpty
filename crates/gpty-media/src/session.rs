@@ -41,6 +41,12 @@ pub struct OpenConfig {
     /// Downscale to fit this box while preserving aspect. Zero means native.
     pub max_width: u32,
     pub max_height: u32,
+    /// Decode video. A caller that is not consuming both streams must turn
+    /// the other off: an unconsumed queue is backpressure, so a video-only
+    /// caller would otherwise be stalled by audio it never polls.
+    pub video: bool,
+    /// Decode audio.
+    pub audio: bool,
 }
 
 impl OpenConfig {
@@ -51,6 +57,8 @@ impl OpenConfig {
             channels: 2,
             max_width: 0,
             max_height: 0,
+            video: true,
+            audio: true,
         }
     }
 
@@ -72,6 +80,11 @@ impl OpenConfig {
                 "requested frame box {}x{} exceeds {MAX_VIDEO_DIMENSION}",
                 self.max_width, self.max_height
             )));
+        }
+        if !self.video && !self.audio {
+            return Err(MediaError::unsupported_codec(
+                "the session must request video or audio",
+            ));
         }
         Ok(())
     }
@@ -442,7 +455,12 @@ fn worker_main(
     ready_tx: SyncSender<Startup>,
     shared: Arc<Shared>,
 ) {
-    let opened = match open_input(&config.path, shared.stop.clone()) {
+    let opened = match open_input(
+        &config.path,
+        shared.stop.clone(),
+        config.video,
+        config.audio,
+    ) {
         Ok(opened) => opened,
         Err(error) => {
             shared.fail(error.clone());
