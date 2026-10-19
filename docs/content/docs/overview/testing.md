@@ -32,7 +32,10 @@ endpoint: `GPTY_TEST_USER_DIR` names a temp directory that
 `BasePersistenceManager` uses for every `user://` store and that the GDExtension
 uses for `history.db`. On Windows, where Godot's `user://` resolves through the
 Known Folder API and cannot be redirected by an environment variable, it
-additionally sandboxes `LOCALAPPDATA`/`APPDATA` and passes `--log-file`. The
+additionally sandboxes `LOCALAPPDATA`/`APPDATA`. The GUT run leaves Godot's
+file logging off (so there is no engine log to redirect) and caps the suite at
+`GUT_TIMEOUT` (600 s) so a hung test fails the gate; the live smoke uses
+`--log-file` because it needs a failure-time engine log. The
 effect is that a suite run cannot read a developer's saved layout, write probe
 vaults or recovery copies into their state directory, or append to their real
 scrollback. A test that needs a filesystem path must use

@@ -65,8 +65,14 @@ PLAIN="$(mktemp)"
 #   * `LOCALAPPDATA`/`APPDATA` are the env-based half of Windows: the Rust
 #     state and data directories read `%LOCALAPPDATA%` directly, so the plugin
 #     store, vault index and recovery copies land in the sandbox too.
-# Godot's own engine log is moved with `--log-file`; otherwise it would still
-# land in the real user directory.
+# No `--log-file`: Godot's file logging is off by default (`debug/file_logging`
+# is unset in project.godot), so the run writes no engine log into the real user
+# directory, and the pipeline below already captures stdout for the gate's
+# judgment. The smoke uses the flag because it needs a failure-time engine log;
+# adding it here was the only difference from the known-good Windows GUT run
+# and the step hung with it (both the MSYS and the cygpath spelling), so it
+# stays out until a Windows run can pin the cause. A bounded timeout below keeps
+# a future hang from occupying the runner.
 SANDBOX="$(mktemp -d)"
 chmod 700 "$SANDBOX"
 export XDG_RUNTIME_DIR="$SANDBOX/run"
@@ -84,15 +90,11 @@ case "$(uname -s)" in
         export GPTY_TEST_USER_DIR="$SANDBOX_WIN\\user"
         export LOCALAPPDATA="$SANDBOX_WIN\\localappdata"
         export APPDATA="$SANDBOX_WIN\\roaming"
-        # A native path too: the editor is a Windows process, and an MSYS
-        # `/tmp/...` spelling of the log is not a path it can open.
-        GODOT_LOG="$SANDBOX_WIN\\godot.log"
         ;;
     *)
         IS_WINDOWS=0
         export GPTY_SOCKET="$XDG_RUNTIME_DIR/gpty.sock"
         export GPTY_TEST_USER_DIR="$SANDBOX/user"
-        GODOT_LOG="$SANDBOX/godot.log"
         ;;
 esac
 # A developer's shell may carry a secret this instance has no client for.
@@ -105,9 +107,19 @@ for dir in "${TEST_DIRS[@]}"; do
     GUT_ARGS+=("-gdir=res://${dir#godot/}")
 done
 
+# A hung suite must fail the gate, not hold the runner until GitHub's six-hour
+# job cap. The suite is ~1.5 min here and ~3-5 min on Windows; 15 min is slack
+# for a loaded runner. `timeout` is absent on stock macOS, where the gate simply
+# runs unbounded as before.
+GUT_TIMEOUT="${GUT_TIMEOUT:-600}"
 set +e
-"$GODOT" --headless --log-file "$GODOT_LOG" --path godot "${GUT_ARGS[@]}" 2>&1 | tee "$LOG"
-STATUS="${PIPESTATUS[0]}"
+if command -v timeout >/dev/null 2>&1; then
+    timeout "$GUT_TIMEOUT" "$GODOT" --headless --path godot "${GUT_ARGS[@]}" 2>&1 | tee "$LOG"
+    STATUS="${PIPESTATUS[0]}"
+else
+    "$GODOT" --headless --path godot "${GUT_ARGS[@]}" 2>&1 | tee "$LOG"
+    STATUS="${PIPESTATUS[0]}"
+fi
 set -e
 
 # GUT colourises through a pipe too; match on a plain copy.
@@ -116,7 +128,9 @@ sed -E "s/${ESC}\[[0-9;?]*[A-Za-z]//g" "$LOG" > "$PLAIN"
 
 PROBLEMS=()
 
-if [[ "$STATUS" -ne 0 ]]; then
+if [[ "$STATUS" -eq 124 ]]; then
+    PROBLEMS+=("the suite exceeded ${GUT_TIMEOUT}s and was killed (a hung test or process)")
+elif [[ "$STATUS" -ne 0 ]]; then
     PROBLEMS+=("godot exited $STATUS")
 fi
 
