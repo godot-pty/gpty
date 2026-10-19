@@ -137,6 +137,15 @@ fn render_markdown(markdown: &str) -> Rendered {
 /// surrounding emphasis, headings and tables are unaffected and the link
 /// label is never re-parsed), then the sentinel is substituted for the
 /// `gpty-note:` BBCode in the finished output.
+///
+/// One nesting case is decided here: a mention written inside a Markdown
+/// link's label (or an image's alt text) **yields to its container** and
+/// renders as plain label text. Emitting a second `[url]` inside the first
+/// leaves the click target undefined — the outer link is what the author
+/// explicitly wrote — so the event loop resolves a sentinel to its label while
+/// it is inside a link or image, and to a `gpty-note:` link everywhere else.
+/// The alternative (an inner link that wins) would make a link's own label
+/// silently navigate somewhere other than the link's `href`.
 fn render_markdown_with(markdown: &str, wikilinks: bool) -> Rendered {
     let source = truncate_utf8(markdown, MAX_MARKDOWN_BYTES);
     let shown = source.len();
@@ -155,11 +164,15 @@ fn render_markdown_with(markdown: &str, wikilinks: bool) -> Rendered {
     let mut out = String::with_capacity(source.len() + source.len() / 4);
     let mut safe_links = Vec::new();
     let mut lists: Vec<OpenList> = Vec::new();
+    // How many link-ish containers (a Markdown link or an image's alt text)
+    // the current event is inside; a mention found there yields to it.
+    let mut nested = 0usize;
     for event in Parser::new_ext(source, options) {
         match event {
             Event::Start(Tag::Link { dest_url, .. }) => {
                 let safe = safe_url(&dest_url);
                 safe_links.push(safe);
+                nested += 1;
                 if safe {
                     out.push_str("[url=");
                     out.push_str(&dest_url);
@@ -169,15 +182,32 @@ fn render_markdown_with(markdown: &str, wikilinks: bool) -> Rendered {
                 }
             }
             Event::End(TagEnd::Link) => {
+                nested = nested.saturating_sub(1);
                 out.push_str(if safe_links.pop().unwrap_or(false) {
                     "[/url]"
                 } else {
                     "[/u]"
                 });
             }
-            Event::Start(tag) => start_tag(&mut out, tag, &mut lists),
-            Event::End(tag) => end_tag(&mut out, tag, &mut lists),
-            Event::Text(text) => escape_bbcode_into(&mut out, &text),
+            Event::Start(tag) => {
+                if matches!(tag, Tag::Image { .. }) {
+                    nested += 1;
+                }
+                start_tag(&mut out, tag, &mut lists);
+            }
+            Event::End(tag) => {
+                if matches!(tag, TagEnd::Image) {
+                    nested = nested.saturating_sub(1);
+                }
+                end_tag(&mut out, tag, &mut lists);
+            }
+            Event::Text(text) => {
+                if nested > 0 {
+                    push_yielding_mentions(&mut out, &text, &mentions);
+                } else {
+                    escape_bbcode_into(&mut out, &text);
+                }
+            }
             Event::Code(text) => {
                 out.push_str("[code]");
                 escape_bbcode_into(&mut out, &text);
@@ -222,6 +252,9 @@ struct Mention {
     /// What the link points at (alias and fragment stripped) — the vault
     /// target the pane resolves.
     target: String,
+    /// The heading the mention names (`[[target#heading]]`), carried so the
+    /// click can land on it. The edge itself is still the note.
+    fragment: Option<String>,
     /// What the reader sees: the alias when written, else the target with its
     /// heading fragment as authored.
     label: String,
@@ -249,6 +282,7 @@ fn extract_mentions(source: &str) -> (String, Vec<Mention>) {
         last = link.end;
         mentions.push(Mention {
             target: link.target.clone(),
+            fragment: link.fragment.clone(),
             label: mention_label(link),
         });
     }
@@ -269,6 +303,42 @@ fn mention_label(link: &gpty_core::links::Link) -> String {
     }
 }
 
+/// The index and byte end of the mention token at the start of `text` (which
+/// begins just past [`MENTION_OPEN`]), or `None` when the text after it is not
+/// a token this renderer emitted.
+fn mention_token(text: &str, count: usize) -> Option<(usize, usize)> {
+    let end = text.find(MENTION_CLOSE)?;
+    let index = text[..end].parse::<usize>().ok()?;
+    (index < count).then_some((index, end))
+}
+
+/// Emit a text event that sits inside a link or image, resolving sentinels to
+/// their labels.
+///
+/// A mention written in a Markdown link's label (or an image's alt text)
+/// yields to that container — see [`render_markdown_with`] — so no second
+/// `[url]` is emitted inside the first and the click target stays defined.
+fn push_yielding_mentions(out: &mut String, text: &str, mentions: &[Mention]) {
+    let mut rest = text;
+    while let Some(position) = rest.find(MENTION_OPEN) {
+        escape_bbcode_into(out, &rest[..position]);
+        let after = &rest[position + MENTION_OPEN.len()..];
+        match mention_token(after, mentions.len()) {
+            Some((index, end)) => {
+                escape_bbcode_into(out, &mentions[index].label);
+                rest = &after[end + MENTION_CLOSE.len()..];
+            }
+            // A token the source itself contained: keep it as text and keep
+            // scanning after the opener, so no occurrence is lost.
+            None => {
+                escape_bbcode_into(out, MENTION_OPEN);
+                rest = after;
+            }
+        }
+    }
+    escape_bbcode_into(out, rest);
+}
+
 /// Substitute sentinels for `gpty-note:` BBCode in finished output.
 ///
 /// One linear pass: replacing each token by index (rather than `String::replace`
@@ -283,17 +353,14 @@ fn substitute_mentions(rendered: String, mentions: &[Mention]) -> String {
     while let Some(position) = rest.find(MENTION_OPEN) {
         out.push_str(&rest[..position]);
         let after = &rest[position + MENTION_OPEN.len()..];
-        let token = after
-            .find(MENTION_CLOSE)
-            .and_then(|end| after[..end].parse::<usize>().ok().map(|i| (i, end)));
-        match token {
-            Some((index, end)) if index < mentions.len() => {
+        match mention_token(after, mentions.len()) {
+            Some((index, end)) => {
                 out.push_str(&mention_bbcode(&mentions[index]));
                 rest = &after[end + MENTION_CLOSE.len()..];
             }
             // A token the source itself contained: keep it as text and keep
             // scanning after the opener, so no occurrence is lost.
-            _ => {
+            None => {
                 out.push_str(MENTION_OPEN);
                 rest = after;
             }
@@ -306,13 +373,19 @@ fn substitute_mentions(rendered: String, mentions: &[Mention]) -> String {
 /// The BBCode for one mention.
 ///
 /// The target is percent-encoded so a path with a space, a `]` or a quote
-/// cannot end the tag early or smuggle another attribute; the label is escaped
+/// cannot end the tag early or smuggle another attribute, and a heading
+/// fragment follows a literal `#` — the encoder escapes any `#` inside either
+/// part, so the separator cannot be confused with data. The label is escaped
 /// as ordinary text, so a note can never supply BBCode through a link. Only
 /// `MarkdownView` interprets the scheme, and only to announce a click for the
 /// owning pane to resolve.
 fn mention_bbcode(mention: &Mention) -> String {
     let mut out = String::from("[url=gpty-note:");
     percent_encode_into(&mut out, &mention.target);
+    if let Some(fragment) = &mention.fragment {
+        out.push('#');
+        percent_encode_into(&mut out, fragment);
+    }
     out.push(']');
     escape_bbcode_into(&mut out, &mention.label);
     out.push_str("[/url]");
@@ -498,13 +571,58 @@ mod tests {
             "the alias is the label: {rendered}"
         );
         assert!(
-            rendered.contains("[url=gpty-note:B]B#Part[/url]"),
-            "a heading stays readable while the edge is to the note: {rendered}"
+            rendered.contains("[url=gpty-note:B#Part]B#Part[/url]"),
+            "the heading rides the URL so a click can land on it: {rendered}"
         );
 
         let plain = render_markdown_with("see [[Note]]", false).text;
         assert!(!plain.contains("gpty-note:"), "{plain}");
         assert!(plain.contains("[lb][lb]Note]"), "literal text: {plain}");
+    }
+
+    #[test]
+    fn a_mention_fragment_is_encoded_after_one_unescaped_separator() {
+        // The target and the heading are each percent-encoded, so the single
+        // literal `#` is the only separator the view has to split on.
+        let rendered = render_markdown_with("[[a b#Part One]]", true).text;
+        assert!(
+            rendered.contains("[url=gpty-note:a%20b#Part%20One]a b#Part One[/url]"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn a_mention_inside_a_markdown_link_yields_to_it() {
+        // Nested `[url]` tags leave the click target undefined, so the mention
+        // renders as plain text inside the link the author wrote.
+        let rendered = render_markdown_with("[see [[B]]](https://example.com/x)", true).text;
+        assert!(
+            rendered.contains("[url=https://example.com/x]see B[/url]"),
+            "the outer link is the click target: {rendered}"
+        );
+        assert!(
+            !rendered.contains("gpty-note:"),
+            "no nested internal link: {rendered}"
+        );
+    }
+
+    #[test]
+    fn a_mention_inside_an_image_alt_is_only_alt_text() {
+        // An image is reduced to its alt text; a mention there has no click
+        // target of its own either.
+        let rendered = render_markdown_with("![alt [[B]]](x.png)", true).text;
+        assert!(rendered.contains("Image: alt B"), "{rendered}");
+        assert!(!rendered.contains("gpty-note:"), "{rendered}");
+    }
+
+    #[test]
+    fn a_mention_beside_a_markdown_link_still_links() {
+        let rendered = render_markdown_with("[x](https://example.com) and [[B]]", true).text;
+        assert!(rendered.contains("[url=gpty-note:B]B[/url]"), "{rendered}");
+        assert!(
+            rendered.contains("[url=https://example.com]x[/url]"),
+            "{rendered}"
+        );
     }
 
     #[test]

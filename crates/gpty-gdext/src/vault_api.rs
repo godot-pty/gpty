@@ -217,8 +217,9 @@ impl GptyTerminal {
     /// Links are parsed and resolved by the index pass — one row per `[[…]]`
     /// occurrence, with the line it was written on — so this reads the derived
     /// store rather than scanning the vault. `outgoing` is what the note links
-    /// to (`{target, resolved, line, seq}`, `resolved` null while it does not
-    /// resolve); `backlinks` is the same edges read in reverse
+    /// to (`{target, resolved, line, seq, fragment}`, `resolved` null while it
+    /// does not resolve and `fragment` null without a `#heading`); `backlinks`
+    /// is the same edges read in reverse
     /// (`{src, line, target}`, one entry per mention); `unresolved` names each
     /// target nothing matched, with `candidates` listing the notes an
     /// ambiguous stem could not be chosen between. `error` is present only
@@ -250,6 +251,7 @@ impl GptyTerminal {
                             "resolved": &link.resolved,
                             "line": link.line,
                             "seq": link.seq,
+                            "fragment": &link.fragment,
                         })
                     })
                     .collect();

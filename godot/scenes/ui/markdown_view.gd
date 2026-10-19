@@ -24,10 +24,12 @@ const INTERNAL_SCHEME := "gpty-note:"
 ## or a code preview displays — and the wiki pane turns it on.
 var wikilinks_enabled := false
 
-## A `[[wikilink]]` mention was clicked, with its target decoded. The owning
+## A `[[wikilink]]` mention was clicked: its target decoded, and the heading
+## fragment it named (`[[target#heading]]`) or "" when it had none. The owning
 ## pane decides what the name means (the wiki pane resolves it against its
-## vault); the view never resolves or opens anything itself.
-signal note_link_clicked(target: String)
+## vault and scrolls to the fragment); the view never resolves or opens
+## anything itself.
+signal note_link_clicked(target: String, fragment: String)
 
 ## How long an editor's buffer must be quiet before its preview renders — see
 ## `set_markdown_settled`. A var rather than a const so a test can shorten the
@@ -45,8 +47,19 @@ signal rendered
 var _renderer: RefCounted
 var _render_timer: Timer
 var _pending_markdown := ""
+## What the label currently shows, so an identical render is skipped instead
+## of replacing the body — opening a note schedules the editor's settled
+## render a frame later, and that redundant pass used to land 0.4 s after a
+## scroll and reset it to the top.
+var _last_rendered := ""
+var _last_wikilinks := false
+var _last_notice := ""
 ## The caller's own truncation notice (see `set_source_notice`).
 var _source_notice := ""
+## A pending character offset to scroll to once the label has shaped its text
+## (visual lines do not exist before the layout pass).
+var _scroll_offset := -1
+var _scroll_queued := false
 ## Wall-clock cost of the last applied render (Rust render + BBCode parse +
 ## append), read by the Reasoning pane's `GPTY_REASONING_DEBUG` line. The
 ## label's shape pass lands on the next frame and is not part of this number.
@@ -123,6 +136,82 @@ func clear_markdown():
 	if _render_timer != null:
 		_render_timer.stop()
 	clear()
+	_last_rendered = ""
+	_last_wikilinks = wikilinks_enabled
+	_last_notice = ""
+	_scroll_offset = -1
+
+## Scroll the preview to the line whose text is `heading`, returning whether
+## the rendered body contains such a line.
+##
+## The source scan (`MarkdownAnchors`) finds what a fragment means; this looks
+## for that heading in the *rendered* text, so Markdown syntax and blank lines
+## cannot make the source line and the visual line disagree. Matching is
+## trimmed, exact first and case-insensitive second (Obsidian's fragments are
+## case-insensitive). The actual scroll is queued: a `RichTextLabel` computes
+## visual lines on its layout pass, one frame after the text lands, and
+## `get_character_line` is -1 until then (measured on Godot 4.7.2 headless).
+func scroll_to_heading(heading: String) -> bool:
+	var needle := heading.strip_edges()
+	if needle == "":
+		return false
+	var offset := _line_offset(get_parsed_text(), needle)
+	if offset < 0:
+		return false
+	_queue_scroll(offset)
+	return true
+
+## Scroll to the position a 1-based *source* line derives: the last heading at
+## or before it, or the top when it has none. Always answers true — a line
+## without a heading is not a missing destination, it is a position with no
+## better anchor than the start of the document.
+func scroll_to_source_line(source: String, line: int) -> bool:
+	var heading := MarkdownAnchors.nearest(source, line)
+	if heading != "" and scroll_to_heading(heading):
+		return true
+	_queue_scroll(0)
+	return true
+
+## The character offset where the first line equal to `needle` starts, or -1.
+func _line_offset(text: String, needle: String) -> int:
+	var offset := 0
+	var lower := needle.to_lower()
+	var inexact := -1
+	for line in text.split("\n"):
+		var trimmed := line.strip_edges()
+		if trimmed == needle:
+			return offset
+		if inexact < 0 and trimmed.to_lower() == lower:
+			inexact = offset
+		offset += line.length() + 1
+	return inexact
+
+func _queue_scroll(offset: int) -> void:
+	_scroll_offset = offset
+	if _scroll_queued or not is_inside_tree():
+		return
+	_scroll_queued = true
+	_apply_scroll()
+
+func _apply_scroll() -> void:
+	# One frame is what the layout pass needs; a second covers a label that
+	# was still hidden when the request arrived. `_scroll_queued` stays set
+	# across both, so a request arriving meanwhile only replaces the offset
+	# and the latest one wins.
+	for _attempt in 2:
+		if get_character_line(0) >= 0:
+			break
+		if not is_inside_tree():
+			return
+		await get_tree().process_frame
+	var offset := _scroll_offset
+	_scroll_offset = -1
+	_scroll_queued = false
+	if offset < 0 or not is_inside_tree():
+		return
+	var line := get_character_line(offset)
+	if line >= 0:
+		scroll_to_line(line)
 
 ## Tell the view that the markdown it will be given is itself a prefix, and what
 ## to say about it — `TextRead.truncation_notice(cap, total)` from the caller's
@@ -146,8 +235,16 @@ func _apply_pending(from_timer := true):
 		if _render_timer != null:
 			_render_timer.start()
 		return
+	# An identical render would replace the body for no visible change — and
+	# a replacement resets the scroll, so the editor's settled render 0.4 s
+	# after a note opens used to undo a fragment scroll.
+	if _pending_markdown == _last_rendered \
+			and wikilinks_enabled == _last_wikilinks \
+			and _source_notice == _last_notice:
+		return
+	# A render replaces the text a pending scroll was computed for.
+	_scroll_offset = -1
 	var started := Time.get_ticks_usec()
-	clear()
 	# Fail soft: without the renderer the source is shown escaped, and a
 	# caller-supplied notice still describes what is missing.
 	var body := _pending_markdown.replace("[", "[lb]")
@@ -163,9 +260,15 @@ func _apply_pending(from_timer := true):
 	if notice != "":
 		# Our own line, never the document's: `truncation_notice` is
 		# bracket-free, and this is the only BBCode the view wraps around text
-		# it did not parse.
-		append_text("[i]%s[/i]\n\n" % notice)
-	append_text(body)
+		# it did not parse. One assignment rather than `clear()` +
+		# `append_text()`: same parse, and the label's own `text` stays the
+		# document (an `append_text` body is reachable only as parsed text).
+		text = "[i]%s[/i]\n\n%s" % [notice, body]
+	else:
+		text = body
+	_last_rendered = _pending_markdown
+	_last_wikilinks = wikilinks_enabled
+	_last_notice = _source_notice
 	last_render_usec = Time.get_ticks_usec() - started
 	rendered.emit()
 
@@ -173,9 +276,15 @@ func _confirm_link(meta):
 	var url := str(meta)
 	if url.begins_with(INTERNAL_SCHEME):
 		# A mention: the pane that owns the document resolves it. The scheme
-		# holds a percent-encoded vault target (the renderer's encoding), so
-		# decode before handing it over.
-		note_link_clicked.emit(url.trim_prefix(INTERNAL_SCHEME).uri_decode())
+		# holds a percent-encoded vault target and, after one literal `#`, an
+		# optional percent-encoded heading (the renderer's encoding) — decode
+		# both before handing them over. The literal separator is unambiguous
+		# because the encoder escapes a `#` inside either part.
+		var payload := url.trim_prefix(INTERNAL_SCHEME)
+		var hash := payload.find("#")
+		var target := payload if hash < 0 else payload.left(hash)
+		var fragment := "" if hash < 0 else payload.substr(hash + 1)
+		note_link_clicked.emit(target.uri_decode(), fragment.uri_decode())
 		return
 	if not (url.begins_with("https://") or url.begins_with("http://") or url.begins_with("mailto:")):
 		return

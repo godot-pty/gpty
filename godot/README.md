@@ -63,6 +63,7 @@ godot/
         │   ├── toast_overlay.gd
         │   ├── window_chrome.gd # Titlebar + window-mode/fullscreen handling
         │   ├── markdown_view.gd # Safe shared Markdown renderer
+        │   ├── markdown_anchors.gd # Pure ATX heading scan for fragment/line navigation
         │   └── icons.gd         # Phosphor icon constants
         └── panes/               # Specialty pane types
             ├── pane_body.gd

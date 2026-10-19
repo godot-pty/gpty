@@ -519,7 +519,12 @@ func _on_note_activated(index: int) -> void:
 ## preview. The read comes from the vault module, so the editor holds exactly
 ## what the index holds, and the file's own shape (CRLF endings, the 1 MiB
 ## cut) is applied to what the user can do with it.
-func _open_note(rel: String) -> void:
+##
+## `fragment` is a heading the link named (`[[note#heading]]`) and `line` a
+## 1-based source line a backlink row names; one of them is where the view
+## lands instead of the top. Both are navigation only — the note that opened
+## is the resolved path, never anything the fragment says.
+func _open_note(rel: String, fragment := "", line := 0) -> void:
 	var answer = JSON.parse_string(str(GptyTerminal.vault_note_read(vault_path, rel)))
 	if not (answer is Dictionary) or answer.has("error"):
 		# The path came from a just-completed walk or search; a failure here
@@ -566,6 +571,8 @@ func _open_note(rel: String) -> void:
 	_apply_view_mode()
 	_update_dirty()
 	_reader.scroll_to_line(0)
+	# After the top reset, so a fragment or line lands where the link pointed.
+	_scroll_open_note(fragment, line)
 	# The index's view of this note (outgoing mentions and backlinks); it is
 	# rebuilt, not polled, and a save re-indexes so it refreshes again there.
 	_refresh_links()
@@ -707,9 +714,11 @@ func _refresh_declared_weights() -> void:
 ## `GptyTerminal.vault_links` answers outgoing occurrences, backlinks and the
 ## unresolved targets with their candidates — a read of the index the parser
 ## already wrote, never a scan of the vault. The panel is display plus
-## navigation: a resolved row opens its note in place, behind the same ask a
-## Back makes; an unresolved row says why and is not clickable, because there
-## is no create-from-link verb yet.
+## navigation: a resolved outgoing row opens its note in place (and its heading
+## fragment when it names one), a backlink row opens the linking note at the
+## line it names, all behind the same ask a Back makes; a missing target offers
+## create-from-link, and an ambiguous one names its candidates and is not
+## clickable because either choice would be a guess.
 func _refresh_links() -> void:
 	_clear_links()
 	if _current_rel == "" or _links_box == null:
@@ -745,10 +754,15 @@ func _refresh_links() -> void:
 			continue
 		shown_out += 1
 		var line := int(entry.get("line", 0))
+		var fragment := str(entry.get("fragment", "")) if entry.get("fragment") is String else ""
+		var shown := target if fragment == "" else "%s#%s" % [target, fragment]
 		var resolved = entry.get("resolved")
 		if resolved is String and str(resolved) != "":
-			_add_link_row(_outgoing_rows, "%s · line %d" % [_shown_link(target), line],
-				_follow_note.bind(str(resolved)), "Open %s" % str(resolved))
+			var tooltip := "Open %s" % str(resolved)
+			if fragment != "":
+				tooltip += " at #%s" % fragment
+			_add_link_row(_outgoing_rows, "%s · line %d" % [_shown_link(shown), line],
+				_follow_note.bind(str(resolved), fragment), tooltip)
 			continue
 		var list: Array = candidates.get(_link_key(target, line), [])
 		if list.is_empty():
@@ -775,8 +789,11 @@ func _refresh_links() -> void:
 			continue
 		shown_back += 1
 		var line := int(entry.get("line", 0))
+		# The backlink row names a line in the note it opens, so the click
+		# lands there (derived from the nearest heading above it) instead of
+		# stopping at the top of a long note.
 		_add_link_row(_backlinks_rows, "%s · line %d" % [_shown_link(src), line],
-			_follow_note.bind(src), "Open %s" % src)
+			_follow_note.bind(src, "", line), "Open %s at line %d" % [src, line])
 	var omitted := maxi(0, outgoing.size() - shown_out) + maxi(0, backlinks.size() - shown_back)
 	_links_footer.text = "… %d more mention(s) not shown" % omitted
 	_links_footer.visible = omitted > 0
@@ -829,27 +846,59 @@ func _add_link_row(parent: VBoxContainer, text: String, action: Callable, toolti
 ## Save/Discard/Cancel ask a Back makes runs first — following can be the way
 ## an unsaved buffer is lost. There is no history stack in v1: the notes list
 ## is the way back.
-func _follow_note(rel: String) -> void:
-	if rel == "" or rel == _current_rel:
+##
+## A link to the note already open replaces nothing, so it needs no ask: it
+## only moves the view to the fragment or line it names (a self-mention is
+## how a note's own table of contents works).
+func _follow_note(rel: String, fragment := "", line := 0) -> void:
+	if rel == "":
+		return
+	if rel == _current_rel:
+		_scroll_open_note(fragment, line)
 		return
 	_request_leave(func(proceed: bool):
 		if proceed:
-			_open_note(rel)
+			_open_note(rel, fragment, line)
 	)
+
+## Move the open note's view to where a link pointed, in whichever half of the
+## note view is showing: the source editor scrolls by line, the preview by
+## rendered line (the two spaces do not agree on line numbers), and split mode
+## does both. A heading the note does not contain is reported once — the
+## destination note still opened, so a missing `#fragment` is a wrong scroll,
+## never a failed navigation.
+func _scroll_open_note(fragment: String, line: int) -> void:
+	var found := false
+	if _editor.visible:
+		var heading_line := MarkdownAnchors.find(_editor.text, fragment) if fragment != "" else 0
+		if heading_line > 0:
+			_editor.scroll_vertical = heading_line - 1
+			found = true
+		elif line > 0:
+			_editor.scroll_vertical = line - 1
+			found = true
+	if _reader.visible and fragment != "":
+		found = _reader.scroll_to_heading(fragment) or found
+	elif _reader.visible and line > 0:
+		_reader.scroll_to_source_line(_preview_text(), line)
+	if fragment != "" and not found:
+		ToastManager.warn("Heading not found: #" + _shown_link(fragment), 4.0, "Wiki")
 
 ## A rendered `[[mention]]` was clicked. The destination comes from the same
 ## resolver the index used (`vault_link_resolve`), so an ambiguous stem is
-## reported with its candidates rather than silently picked.
-func _on_mention_clicked(target: String) -> void:
+## reported with its candidates rather than silently picked; the fragment it
+## carried is the place inside that destination to land.
+func _on_mention_clicked(target: String, fragment: String) -> void:
 	if _current_rel == "":
 		return
-	_follow_target(target)
+	_follow_target(target, fragment)
 
 ## Follow one `[[target]]` by the index's own rule. The preview's mention click
 ## and the graph's ghost click share this: a resolved target opens in place, a
 ## missing one offers to create it, and an ambiguous stem is reported with its
-## candidates and never silently picked.
-func _follow_target(target: String) -> void:
+## candidates and never silently picked. `fragment` is navigation inside a
+## resolved note; it takes no part in resolving the note.
+func _follow_target(target: String, fragment := "") -> void:
 	var answer = JSON.parse_string(str(GptyTerminal.vault_link_resolve(vault_path, target)))
 	if not (answer is Dictionary) or answer.has("error"):
 		var why := str(answer["error"]) if answer is Dictionary and answer.has("error") else "unreadable"
@@ -857,7 +906,7 @@ func _follow_target(target: String) -> void:
 		return
 	var resolved = answer.get("resolved")
 	if resolved is String and str(resolved) != "":
-		_follow_note(str(resolved))
+		_follow_note(str(resolved), fragment)
 		return
 	var candidates: Array = answer.get("candidates", []) if answer.get("candidates") is Array else []
 	if candidates.is_empty():

@@ -21,7 +21,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::history::{restrict_to_owner, sanitize_fts_query, write_guard};
 use crate::links;
@@ -119,6 +119,14 @@ pub struct LinkRow {
     pub line: i64,
     /// What the edge points at (alias and fragment stripped).
     pub target: String,
+    /// The heading fragment as written (`[[target#heading]]`), if any.
+    ///
+    /// Presentation, and derived rather than stored: the `links` table keeps
+    /// the edge only, so `links_for` re-parses the note body it already holds
+    /// and attaches the occurrence's fragment by `seq`. Never a navigation
+    /// decision on its own — a fragment says where in the resolved note to
+    /// scroll, never *which* note.
+    pub fragment: Option<String>,
     /// The note it resolved to, or `None` while it does not resolve.
     pub resolved: Option<String>,
 }
@@ -1570,16 +1578,38 @@ impl VaultStore {
         vault_id: &str,
         rel_path: &str,
     ) -> Result<LinksForNote, rusqlite::Error> {
+        // Fragments are presentation the `links` table does not persist, so
+        // they come from the body the same index pass stored beside the rows —
+        // re-parsed, then matched by `seq` (each occurrence's stored identity).
+        let fragments: std::collections::HashMap<i64, String> = {
+            let body: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT body FROM notes WHERE vault_id = ?1 AND rel_path = ?2",
+                    params![vault_id, rel_path],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            body.map(|body| {
+                links::parse_links(&body)
+                    .into_iter()
+                    .filter_map(|link| link.fragment.map(|fragment| (link.seq as i64, fragment)))
+                    .collect()
+            })
+            .unwrap_or_default()
+        };
         let outgoing: Vec<LinkRow> = {
             let mut stmt = self.conn.prepare_cached(
                 "SELECT seq, line, target, resolved FROM links
                  WHERE vault_id = ?1 AND src = ?2 ORDER BY seq",
             )?;
             stmt.query_map(params![vault_id, rel_path], |row| {
+                let seq: i64 = row.get(0)?;
                 Ok(LinkRow {
-                    seq: row.get(0)?,
+                    seq,
                     line: row.get(1)?,
                     target: row.get(2)?,
+                    fragment: fragments.get(&seq).cloned(),
                     resolved: row.get(3)?,
                 })
             })?
@@ -2334,14 +2364,15 @@ mod tests {
                     ("target.md", "# Target\n"),
                     (
                         "src.md",
-                        "# Src\n\nsee [[target]] twice: [[target]] and [[Target|Label]].\n",
+                        "# Src\n\nsee [[target]] twice: [[target]] and [[Target|Label]].\n\
+                         Also [[target#Part|with a part]].\n",
                     ),
                 ],
             ))
             .unwrap();
 
         let src = store.links_for(&root, "src.md").unwrap();
-        assert_eq!(src.outgoing.len(), 3, "one row per occurrence");
+        assert_eq!(src.outgoing.len(), 4, "one row per occurrence");
         assert_eq!(src.outgoing[0].line, 3);
         assert_eq!(src.outgoing[0].seq, 0);
         assert!(
@@ -2350,6 +2381,13 @@ mod tests {
                 .all(|link| link.resolved.as_deref() == Some("target.md")),
             "a case-insensitive unique match resolves: {src:?}"
         );
+        // A fragment is presentation the table does not store: the query
+        // re-derives it from the body, per occurrence.
+        assert_eq!(src.outgoing[3].fragment.as_deref(), Some("Part"));
+        assert!(
+            src.outgoing[..3].iter().all(|link| link.fragment.is_none()),
+            "a mention without a heading carries no fragment: {src:?}"
+        );
         assert!(src.backlinks.is_empty());
         assert!(src.unresolved.is_empty());
 
@@ -2357,7 +2395,7 @@ mod tests {
         assert_eq!(target.outgoing.len(), 0);
         assert_eq!(
             target.backlinks.len(),
-            3,
+            4,
             "a backlink is the same edge read in reverse — per occurrence"
         );
         assert_eq!(target.backlinks[0].src, "src.md");

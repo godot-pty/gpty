@@ -655,10 +655,109 @@ func test_a_rendered_mention_click_resolves_through_the_vault():
 	pane._open_note("a.md")
 	assert_true(pane._reader.wikilinks_enabled, "the wiki preview opts into mentions")
 
-	# The renderer emits `note_link_clicked` with the target decoded; the pane
-	# asks the same resolver the index used.
-	pane._reader.note_link_clicked.emit("B")
+	# The renderer emits `note_link_clicked` with the target and fragment decoded;
+	# the pane asks the same resolver the index used.
+	pane._reader.note_link_clicked.emit("B", "")
 	assert_eq(pane._current_rel, "b.md", "a case-insensitive unique match follows")
+
+
+## A note whose only content is filler, with `heading` on a known line.
+func _write_long_note(rel: String, heading: String, heading_line: int) -> void:
+	var lines: Array = []
+	while lines.size() < heading_line - 1:
+		lines.append("filler line %d" % lines.size())
+	lines.append(heading)
+	lines.append("")
+	lines.append("after the heading")
+	_write(_tmp.path_join(rel), "\n".join(lines) + "\n")
+
+
+func test_a_fragment_mention_lands_on_the_heading_in_the_editor():
+	_write(_tmp.path_join("a.md"), "# A\n\nSee [[b#Part]].\n")
+	_write_long_note("b.md", "## Part", 34)
+	var pane := _make_pane(_tmp)
+	pane.view_mode = "edit"
+	pane._open_note("a.md")
+
+	pane._reader.note_link_clicked.emit("b", "Part")
+	assert_eq(pane._current_rel, "b.md")
+	assert_eq(int(pane._editor.scroll_vertical), 33,
+		"the source editor scrolls to the heading's line")
+
+
+func test_a_fragment_mention_scrolls_the_preview_to_the_heading():
+	# The preview's lines are rendered lines (wrapping included), so the
+	# scroll is queued for the label's layout pass and lands a frame later.
+	_write(_tmp.path_join("a.md"), "# A\n\nSee [[b#Part]].\n")
+	_write_long_note("b.md", "## Part", 80)
+	var pane := _make_pane(_tmp)
+	pane._open_note("a.md")
+
+	pane._reader.note_link_clicked.emit("b", "Part")
+	assert_eq(pane._current_rel, "b.md")
+	await wait_process_frames(3)
+	assert_true(pane._reader.get_v_scroll_bar().value > 0,
+		"the preview followed the heading instead of staying at the top")
+
+
+func test_the_panel_row_names_the_fragment_and_follows_it():
+	_write(_tmp.path_join("a.md"), "# A\n\nSee [[b#Part]].\n")
+	_write_long_note("b.md", "## Part", 34)
+	var pane := _make_pane(_tmp)
+	pane.view_mode = "edit"
+	pane._open_note("a.md")
+
+	var rows := _row_texts(pane._outgoing_rows)
+	assert_string_contains(rows[0], "b#Part", "the row says where the link lands")
+	(pane._outgoing_rows.get_child(0) as Button).pressed.emit()
+	assert_eq(pane._current_rel, "b.md")
+	assert_eq(int(pane._editor.scroll_vertical), 33)
+
+
+func test_a_backlink_row_jumps_to_the_mention_line():
+	# The backlink names a line in the note it opens; the click lands there
+	# instead of stopping at the top.
+	_write_long_note("a.md", "## Mentions", 34)
+	var source := _read(_tmp.path_join("a.md")) + "See [[b]].\n"
+	_write(_tmp.path_join("a.md"), source)
+	_write(_tmp.path_join("b.md"), "# B\n")
+	var pane := _make_pane(_tmp)
+	pane.view_mode = "edit"
+	pane._open_note("b.md")
+
+	var rows := _row_texts(pane._backlinks_rows)
+	assert_string_contains(rows[0], "line 37", "the mention follows the heading block")
+	(pane._backlinks_rows.get_child(0) as Button).pressed.emit()
+	assert_eq(pane._current_rel, "a.md")
+	assert_eq(int(pane._editor.scroll_vertical), 36,
+		"the linking note opens at the mention, not at its top")
+
+
+func test_a_missing_fragment_still_opens_the_note_and_says_so():
+	_write(_tmp.path_join("a.md"), "# A\n\nSee [[b#Nope]].\n")
+	_write(_tmp.path_join("b.md"), "# B\n\nbody\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("a.md")
+	watch_signals(ToastManager)
+
+	pane._reader.note_link_clicked.emit("b", "Nope")
+	assert_eq(pane._current_rel, "b.md", "the destination is the note, not the heading")
+	assert_signal_emitted(ToastManager, "toast_requested",
+		"a fragment the note does not contain is reported")
+	assert_eq(_dialogs_of(pane).size(), 0, "a wrong scroll is not a question")
+
+
+func test_a_mention_inside_a_markdown_link_yields_to_it():
+	# Nested `[url]` tags in one label leave the click target undefined, so the
+	# preview renders the outer link the author wrote and the mention as text.
+	_write(_tmp.path_join("a.md"), "# A\n\n[see [[b]]](https://example.com/x)\n")
+	_write(_tmp.path_join("b.md"), "# B\n")
+	var pane := _make_pane(_tmp)
+	pane._open_note("a.md")
+
+	var bbcode: String = pane._reader.text
+	assert_string_contains(bbcode, "[url=https://example.com/x]see b[/url]")
+	assert_false(bbcode.contains("gpty-note:"), "no nested internal link: %s" % bbcode)
 
 
 func test_following_a_link_asks_before_discarding_an_unsaved_buffer():
@@ -683,7 +782,7 @@ func test_a_missing_mention_offers_to_create_it():
 	var pane := _make_pane(_tmp)
 	pane._open_note("a.md")
 
-	pane._reader.note_link_clicked.emit("ghost")
+	pane._reader.note_link_clicked.emit("ghost", "")
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "a missing target offers the create action")
 	var field: LineEdit = dialogs[0].find_child("NoteName", true, false)
@@ -701,7 +800,7 @@ func test_creating_from_a_missing_mention_opens_the_new_note():
 	var pane := _make_pane(_tmp)
 	pane._open_note("a.md")
 
-	pane._reader.note_link_clicked.emit("ghost")
+	pane._reader.note_link_clicked.emit("ghost", "")
 	_dialogs_of(pane)[0].confirmed.emit()
 	await wait_process_frames(2)
 	assert_true(FileAccess.file_exists(_tmp.path_join("ghost.md")),
@@ -720,7 +819,7 @@ func test_an_ambiguous_mention_is_reported_and_never_created():
 	pane._open_note("x.md")
 	watch_signals(ToastManager)
 
-	pane._reader.note_link_clicked.emit("dup")
+	pane._reader.note_link_clicked.emit("dup", "")
 	assert_eq(pane._current_rel, "x.md", "an ambiguous stem is never picked")
 	assert_eq(_dialogs_of(pane).size(), 0, "and never guessed by creating one")
 	assert_signal_emitted(ToastManager, "toast_requested")
