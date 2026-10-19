@@ -319,7 +319,15 @@ func test_a_media_tile_restores_its_file():
 	assert_eq(restored.size(), 1)
 	assert_true(restored[0] is MediaPane, "a media tile comes back as a media pane")
 	assert_eq(restored[0].file_path, path, "the file path survives the restore")
-	assert_true(restored[0]._audio.playing, "the restored pane starts its stream")
+	# Decoding starts on the backend's thread and the generator starts on the
+	# first PCM chunk; a restore must not have to finish that synchronously.
+	var playing := false
+	for _i in 300:
+		if restored[0]._audio.playing:
+			playing = true
+			break
+		await get_tree().process_frame
+	assert_true(playing, "the restored pane starts its stream")
 
 	DirAccess.remove_absolute(path)
 

@@ -23,8 +23,12 @@ const VIDEO_EXTENSIONS: Array[String] = [
 	"ogv", "mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m2ts",
 ]
 
-## Audio formats the native stream loaders read.
-const AUDIO_EXTENSIONS: Array[String] = ["ogg", "oga", "mp3", "wav"]
+## Audio containers the Rust backend demuxes. The pane feeds decoded PCM into
+## an AudioStreamGenerator, so this is the backend's audio matrix rather than
+## Godot's three native loaders.
+const AUDIO_EXTENSIONS: Array[String] = [
+	"ogg", "oga", "opus", "mp3", "wav", "flac", "m4a", "aac",
+]
 
 const VIDEO := "video"
 const AUDIO := "audio"

@@ -186,6 +186,24 @@ fn audio_resamples_to_the_requested_rate_and_channels() {
 }
 
 #[test]
+fn an_unspecified_source_layout_is_normalized() {
+    // 8-bit mono WAV: the demuxer reports a channel count without a layout
+    // mask, which used to panic inside the resampler binding's unwrap.
+    let mut config = OpenConfig::new(fixture("wav_u8.wav"));
+    config.sample_rate = 48_000;
+    config.channels = 2;
+    let session = MediaSession::open(config).unwrap();
+    let chunks = collect_audio_to_end(&session);
+    assert!(!chunks.is_empty(), "no audio decoded");
+    assert!(
+        chunks
+            .iter()
+            .all(|c| c.sample_rate == 48_000 && c.channels == 2)
+    );
+    assert!(chunks.iter().map(|c| c.frames()).sum::<usize>() > 1_000);
+}
+
+#[test]
 fn audio_resamples_to_mono_when_requested() {
     let mut config = OpenConfig::new(fixture("flac.flac"));
     config.sample_rate = 22_050;

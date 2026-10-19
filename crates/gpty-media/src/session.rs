@@ -791,7 +791,7 @@ fn drain_audio(
                     }
                     cursor.skip_until = None;
                 }
-                let chunks = pipeline.push_frame(&frame, stream.time_base)?;
+                let chunks = pipeline.push_frame(&mut frame, stream.time_base)?;
                 for chunk in chunks {
                     let queued = QueuedAudio {
                         epoch: shared.epoch.load(Ordering::Relaxed),
@@ -972,7 +972,7 @@ impl AudioPipeline {
 
     fn push_frame(
         &mut self,
-        frame: &ffmpeg::frame::Audio,
+        frame: &mut ffmpeg::frame::Audio,
         time_base: ffmpeg::Rational,
     ) -> Result<Vec<AudioChunk>, MediaError> {
         let source_rate = frame.rate();
@@ -983,12 +983,21 @@ impl AudioPipeline {
             self.next_pts_us = frame_time_us(pts, time_base);
         }
 
-        let source = (frame.format(), source_rate, frame.ch_layout().channels());
+        let source_channels = frame.ch_layout().channels().max(1);
+        // PCM files may carry an unspecified channel layout (no mask);
+        // `swresample` needs a mask, and it also compares the *frame's* layout
+        // with the configured input. Normalize the frame itself, not just the
+        // resampler, or conversion answers `InputChanged`.
+        if frame.ch_layout().mask().is_none() {
+            frame.set_ch_layout(ffmpeg::ChannelLayout::default_for_channels(source_channels));
+        }
+        let source_layout = frame.ch_layout().clone();
+        let source = (frame.format(), source_rate, source_channels);
         if self.source != Some(source) {
             self.resampler = Some(
                 ffmpeg::software::resampling::Context::get2(
                     frame.format(),
-                    frame.ch_layout().clone(),
+                    source_layout,
                     source_rate,
                     ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Packed),
                     self.target_layout.clone(),

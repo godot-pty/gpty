@@ -38,7 +38,10 @@ func test_video_and_audio_extensions_are_known():
 		"/p/movie.m2ts",
 	]:
 		assert_eq(MediaFiles.kind_for(path), MediaFiles.VIDEO, path)
-	for path in ["/p/song.ogg", "/p/song.oga", "/p/song.mp3", "/p/song.wav"]:
+	for path in [
+		"/p/song.ogg", "/p/song.oga", "/p/song.opus", "/p/song.mp3",
+		"/p/song.wav", "/p/song.flac", "/p/song.m4a", "/p/song.aac",
+	]:
 		assert_eq(MediaFiles.kind_for(path), MediaFiles.AUDIO, path)
 
 
@@ -49,7 +52,7 @@ func test_extensions_are_case_insensitive():
 
 
 func test_unknown_formats_are_not_media():
-	for path in ["/p/song.flac", "/p/photo.png", "/p/program.exe", "/p/notes.md", "/p/noext"]:
+	for path in ["/p/song.aiff", "/p/photo.png", "/p/program.exe", "/p/notes.md", "/p/noext"]:
 		assert_eq(MediaFiles.kind_for(path), "", path)
 		assert_eq(MediaFiles.pane_for(path), "", path)
 

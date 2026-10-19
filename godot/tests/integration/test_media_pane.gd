@@ -77,6 +77,22 @@ func _await_video(pane: MediaPane, budget := 300) -> bool:
 	return false
 
 
+## Wait until the first PCM chunk has started the generator.
+func _await_audio(pane: MediaPane, budget := 300) -> bool:
+	for _i in budget:
+		if pane._audio_playing and pane._audio_playback != null:
+			return true
+		await get_tree().process_frame
+	return false
+
+
+func _av_mp4() -> String:
+	var path := ProjectSettings.globalize_path("res://") \
+		.path_join("../crates/gpty-media/tests/fixtures/av_h264_aac.mp4").simplify_path()
+	assert_true(FileAccess.file_exists(path), "the A/V fixture must be readable")
+	return path
+
+
 func test_pane_type_is_media():
 	assert_eq(MediaPane.new()._pane_type(), "media", "the registry key is the discriminator")
 	MediaPane.new().free()
@@ -94,12 +110,13 @@ func test_an_audio_file_loads_and_plays():
 	var pane := _make_pane()
 	var path := _wav()
 	pane.load_media(path)
+	assert_true(await _await_audio(pane), "no PCM chunk reached the generator")
 
 	assert_eq(pane.file_path, path, "a played file is the pane's file")
 	assert_eq(pane._kind, MediaFiles.AUDIO)
-	assert_true(pane._audio.playing, "the pane must actually start the stream")
+	assert_true(pane._audio.playing, "the pane must actually start the generator")
+	assert_not_null(pane._audio_playback)
 	assert_false(pane._video_surface.visible)
-	assert_eq(pane._audio.stream.get_length(), 1.0, "the loaded stream is the file's audio")
 	assert_string_contains(pane._placeholder_title.text, "tone.wav")
 	assert_string_contains(pane._status.text, "Playing")
 
@@ -119,6 +136,27 @@ func test_an_mp4_video_loads_and_renders_a_frame():
 	assert_eq(pane._video_surface.texture.get_width(), 64)
 	assert_eq(pane._video_surface.texture.get_height(), 48)
 	assert_true(pane._status.visible)
+
+
+func test_an_av_file_feeds_both_surfaces():
+	var pane := _make_pane()
+	pane.load_media(_av_mp4())
+	assert_true(await _await_video(pane), "no video frame arrived")
+	assert_true(await _await_audio(pane), "no audio chunk arrived")
+	assert_not_null(pane._video_surface.texture)
+	assert_true(pane._audio.playing)
+	assert_not_null(pane._audio_playback)
+
+
+func test_volume_and_mute_apply_to_the_player():
+	var pane := _make_pane()
+	pane.load_media(_wav())
+	assert_true(await _await_audio(pane))
+	pane.apply_settings({"volume_db": -6.0, "muted": true})
+	assert_eq(pane.volume_db, -6.0)
+	assert_almost_eq(pane._audio.volume_db, -80.0, 0.01)
+	pane.apply_settings({"volume_db": -6.0, "muted": false})
+	assert_almost_eq(pane._audio.volume_db, -6.0, 0.01)
 
 
 func test_theora_video_uses_the_same_backend():
@@ -167,6 +205,7 @@ func test_a_missing_file_is_refused_without_clearing_the_pane_silently():
 func test_clearing_the_path_returns_to_idle():
 	var pane := _make_pane()
 	pane.load_media(_wav())
+	assert_true(await _await_audio(pane))
 	assert_true(pane._audio.playing)
 	pane.load_media("")
 	assert_eq(pane.file_path, "")
@@ -179,6 +218,7 @@ func test_clearing_the_path_returns_to_idle():
 func test_a_bad_path_stops_the_previous_playback():
 	var pane := _make_pane()
 	pane.load_media(_wav())
+	assert_true(await _await_audio(pane))
 	assert_true(pane._audio.playing)
 
 	pane.load_media(_tmp.path_join("missing.wav"))
@@ -194,6 +234,7 @@ func test_apply_settings_loads_the_path():
 	var path := _wav()
 	pane.apply_settings({"file_path": path})
 	assert_eq(pane.file_path, path)
+	assert_true(await _await_audio(pane))
 	assert_true(pane._audio.playing)
 
 
@@ -201,6 +242,7 @@ func test_an_unrelated_setting_does_not_restart_playback():
 	var pane := _make_pane()
 	var path := _wav()
 	pane.load_media(path)
+	assert_true(await _await_audio(pane))
 	var stream: AudioStream = pane._audio.stream
 	pane.apply_settings({"pane_name": "Renamed", "font_size": 18, "file_path": path})
 	assert_true(pane._audio.stream == stream,

@@ -4,15 +4,17 @@ class_name MediaPane
 #
 # The file is a path carrier like every file pane: an absolute local path,
 # validated at use by `MediaFiles` (allowlist + regular-file gate), never a
-# URL and never handed to `ResourceLoader`. Video is decoded by the pinned
-# FFmpeg backend (`GptyMedia` → `gpty-media`) and uploaded as an ImageTexture;
-# audio still uses Godot's native stream loaders until the Audio playback item
-# wires `poll_audio` into an AudioStreamGenerator. A video session is opened
-# with `audio: false` for that reason: an unconsumed audio queue is
-# backpressure and would stall video decode.
+# URL and never handed to `ResourceLoader`. Both streams come from the pinned
+# FFmpeg backend (`GptyMedia` → `gpty-media`): video is uploaded as an
+# ImageTexture, audio is decoded to interleaved f32 and pushed into an
+# AudioStreamGenerator. One session is opened for the file, with `video` and
+# `audio` set to the streams this pane will actually drain — an unconsumed
+# queue is backpressure and would stall the other stream.
 #
-# Presentation is PTS-gated against `Time.get_ticks_usec()` so a decoder that
-# runs faster than real time does not play the clip at 4×. Transport controls
+# Presentation is clocked: video is gated on the audio playback position when
+# audio is running (PTS mapped through `get_playback_position()`), otherwise
+# on a monotonic start clock, so a decoder that runs faster than real time
+# does not play the clip several times too fast. Transport controls
 # (pause/seek/loop, paneStatus) remain their own item.
 
 @export var file_path := ""
@@ -26,15 +28,38 @@ var _texture: ImageTexture
 var _pending_frames: Array = []
 var _clock_start_us := -1
 var _first_pts_us := 0
-var _video_finished := false
-var _finished_shown := false
+var _finished := false
+var _finished_announced := false
 
 var _audio: AudioStreamPlayer
+var _audio_playback: AudioStreamGeneratorPlayback
+var _pending_audio: Array = []
+var _audio_playing := false
+var _audio_started := false
+var _audio_start_pts_us := 0
+var _generator_capacity := 0
+
+## User-owned pane settings, persisted with the tile like the file path.
+var volume_db := 0.0
+var muted := false
+
 var _placeholder: CenterContainer
 var _placeholder_title: Label
 var _placeholder_hint: Label
 var _status: Label
 var _kind := ""
+
+const MIX_RATE := 48000
+const AUDIO_BUFFER_SECONDS := 0.2
+## Chunks held locally beyond the generator buffer (~1.4 s). Draining the
+## backend queue into this lead keeps a full audio queue from blocking the
+## worker, which also decodes video.
+const AUDIO_PENDING_MAX := 32
+## How far ahead of the media clock a video frame may be held (µs); audio
+## playback positions are coarse, so a small tolerance avoids stutter.
+const VIDEO_PRESENT_TOLERANCE_US := 20_000
+## Drop a frame this far behind the media clock when a newer one is waiting.
+const VIDEO_CATCHUP_US := 150_000
 
 func _ready():
 	super._ready()
@@ -45,7 +70,7 @@ func _ready():
 		_show_idle()
 
 func _process(_delta):
-	_poll_video()
+	_poll_backend()
 
 func _exit_tree():
 	_stop_backend()
@@ -124,7 +149,6 @@ func _build_ui():
 	# must not sit in the layout where it would claim height from the video.
 	_audio = AudioStreamPlayer.new()
 	_audio.name = "Audio"
-	_audio.finished.connect(_on_audio_finished)
 	add_child(_audio)
 
 ## Play `path`, replacing whatever this pane was playing. A refused path
@@ -152,59 +176,59 @@ func load_media(path: String) -> void:
 	_kind = verdict.kind
 	_placeholder.visible = false
 	_status.visible = true
-	if _kind == MediaFiles.VIDEO:
-		_open_video(path)
-		return
+	_open_media(path, _kind == MediaFiles.VIDEO, true)
+	if _kind == MediaFiles.AUDIO:
+		_show_audio_placeholder(path)
 
-	var stream := _load_audio_stream(path)
-	if stream == null:
-		file_path = ""
-		_show_error("Could not decode this media file: %s" % MediaFiles.display_name(path))
-		return
-	_audio.stream = stream
-	_show_audio_placeholder(path)
-	_start_playback()
-
-## The one place an audio path becomes a decoder. Typed streams only: the
-## extension table already chose the kind, and no branch consults
-## `ResourceLoader`. Video never reaches this function.
-func _load_audio_stream(path: String) -> Resource:
-	match path.get_extension().to_lower():
-		"mp3":
-			return AudioStreamMP3.load_from_file(path)
-		"wav":
-			return AudioStreamWAV.load_from_file(path)
-		_:
-			return AudioStreamOggVorbis.load_from_file(path)
-
-## Start a video session. `open` validates the path synchronously and probes
-## on the backend's own thread; `_poll_video` follows its status.
-func _open_video(path: String) -> void:
+## Open one backend session for the streams this pane will drain.
+func _open_media(path: String, want_video: bool, want_audio: bool) -> void:
 	if _backend == null:
 		_backend = GptyMedia.new()
 		_backend.name = "MediaBackend"
 		add_child(_backend)
+	if want_audio:
+		_prepare_audio()
 	var answer = JSON.parse_string(_backend.open(JSON.stringify({
 		"path": path,
-		"audio": false,
-		"sample_rate": 48000,
+		"video": want_video,
+		"audio": want_audio,
+		"sample_rate": MIX_RATE,
 		"channels": 2,
 	})))
 	if not (answer is Dictionary) or not answer.get("ok", false):
 		var error = answer.get("error", {}) if answer is Dictionary else {}
 		_show_error("Could not open the media file: %s" % str(error.get("message", "")))
 		return
-	_video_finished = false
-	_finished_shown = false
+	_finished = false
+	_finished_announced = false
 	_clock_start_us = -1
 	_pending_frames.clear()
 	_status.text = "Opening %s" % MediaFiles.display_name(path)
 
-## Drain decoded frames, gate presentation on the PTS clock, and update the
-## surface. A frame is presented when its due time arrives; a small backlog is
-## kept so a slow frame does not reorder the clip.
-func _poll_video() -> void:
-	if _backend == null or _kind != MediaFiles.VIDEO:
+## The generator buffer is set up now, but playback starts with the first
+## decoded chunk so the media clock starts on real samples, not on silence.
+func _prepare_audio() -> void:
+	_audio.stop()
+	_audio_playback = null
+	_audio_playing = false
+	_audio_started = false
+	_audio_start_pts_us = 0
+	_pending_audio.clear()
+	var generator := AudioStreamGenerator.new()
+	generator.mix_rate = MIX_RATE
+	generator.buffer_length = AUDIO_BUFFER_SECONDS
+	_generator_capacity = int(MIX_RATE * AUDIO_BUFFER_SECONDS)
+	_audio.stream = generator
+	_apply_audio_volume()
+
+func _apply_audio_volume() -> void:
+	if _audio != null:
+		_audio.volume_db = -80.0 if muted else volume_db
+
+## Drain decoded frames and audio, gate video on the media clock, and announce
+## the end once both the backend and the generator have caught up.
+func _poll_backend() -> void:
+	if _backend == null:
 		return
 	var status = JSON.parse_string(_backend.status())
 	if status is Dictionary:
@@ -213,42 +237,60 @@ func _poll_video() -> void:
 			_show_error("Could not decode this media file: %s" % str(error.get("message", "")))
 			return
 		if status.get("state") == "finished":
-			_video_finished = true
+			_finished = true
+	if _kind == MediaFiles.VIDEO:
+		_poll_video()
+	_feed_audio()
+	if _finished and not _finished_announced:
+		if not _pending_frames.is_empty() or not _pending_audio.is_empty():
+			return
+		if _audio_started and _audio_playback != null \
+				and _audio_playback.get_frames_available() < _generator_capacity - 64:
+			return
+		_finished_announced = true
+		_status.visible = true
+		_status.text = "Finished %s" % MediaFiles.display_name(file_path)
 
+## Current media position in microseconds. Audio, when running, is the clock;
+## otherwise the monotonic start clock is used. `-1` means no clock yet.
+func _media_clock_us() -> int:
+	if _audio_started and _audio_playback != null:
+		return _audio_start_pts_us + int(_audio.get_playback_position() * 1_000_000.0)
+	if _clock_start_us < 0:
+		return -1
+	return _first_pts_us + (Time.get_ticks_usec() - _clock_start_us)
+
+func _poll_video() -> void:
 	var now := Time.get_ticks_usec()
-	# Poll a bounded batch: the backend queue is small, and a slow frame must
-	# not spend the whole frame budget draining it.
+	if _clock_start_us < 0 and not _audio_started:
+		_clock_start_us = now
 	for _i in 8:
 		var frame = _backend.poll_video()
 		if frame.is_empty():
 			break
-		if _clock_start_us < 0:
+		if _clock_start_us < 0 and not _audio_started:
 			_clock_start_us = now
 			_first_pts_us = int(frame["pts_us"])
 		_pending_frames.append(frame)
 		while _pending_frames.size() > 4:
 			_pending_frames.pop_front()
 
-	if _pending_frames.is_empty():
-		if _video_finished and not _finished_shown:
-			_finish_video()
-		return
-
+	var media_now := _media_clock_us()
+	if media_now < 0:
+		media_now = _first_pts_us
 	while not _pending_frames.is_empty():
 		var frame: Dictionary = _pending_frames[0]
-		var due := _clock_start_us + int(frame["pts_us"]) - _first_pts_us
-		if due > now:
+		var pts := int(frame["pts_us"])
+		if pts > media_now + VIDEO_PRESENT_TOLERANCE_US:
 			break
 		_pending_frames.pop_front()
-		# Catch up by dropping a frame that is already well past due when a
-		# newer one is waiting; never drop the last frame in the queue.
-		if now - due > 100_000 and not _pending_frames.is_empty():
+		# Catch up by dropping a frame already well past due when a newer one
+		# is waiting; never drop the last frame in the queue.
+		if media_now - pts > VIDEO_CATCHUP_US and not _pending_frames.is_empty():
 			continue
 		_present_video(frame)
 		if _status.text.begins_with("Opening"):
 			_status.text = "Playing %s" % MediaFiles.display_name(file_path)
-	if _video_finished and _pending_frames.is_empty() and not _finished_shown:
-		_finish_video()
 
 func _present_video(frame: Dictionary) -> void:
 	var width := int(frame.get("width", 0))
@@ -265,27 +307,79 @@ func _present_video(frame: Dictionary) -> void:
 	_video_surface.visible = true
 	_placeholder.visible = false
 
-func _finish_video() -> void:
-	_finished_shown = true
-	_status.visible = true
-	_status.text = "Finished %s" % MediaFiles.display_name(file_path)
-
-func _start_playback():
-	# `play()` is an engine error outside the tree; every production caller is
-	# in it (`_ready` or a settings apply from the panel), so a guard is the
-	# whole contract rather than a retry loop.
-	if not is_inside_tree():
+## Push decoded chunks into the generator while it has room. A chunk that
+## does not fit stays pending; the generator consumes in real time.
+func _feed_audio() -> void:
+	if _audio.stream == null:
 		return
-	if _kind == MediaFiles.AUDIO and _audio.stream != null:
-		_audio.play()
-		_status.text = "Playing %s" % MediaFiles.display_name(file_path)
+	# Drain the backend queue even when the generator is full. Leaving the
+	# queue full blocks the worker on an audio send, and that same worker
+	# decodes video; the local lead is bounded.
+	if _pending_audio.size() < AUDIO_PENDING_MAX:
+		for _i in 8:
+			var polled = _backend.poll_audio()
+			if polled.is_empty():
+				break
+			_pending_audio.append(polled)
+	if _pending_audio.is_empty():
+		return
+	var available := 0
+	if _audio_playing:
+		if _audio_playback == null:
+			return
+		available = _audio_playback.get_frames_available()
+		if available <= 0:
+			return
+	var added := 0
+	while not _pending_audio.is_empty() and added < 8:
+		var chunk: Dictionary = _pending_audio[0]
+		var channels := int(chunk.get("channels", 2))
+		var data: PackedFloat32Array = chunk.get("data", PackedFloat32Array())
+		if channels <= 0:
+			_pending_audio.pop_front()
+			continue
+		var frames := int(data.size() / channels)
+		if frames <= 0:
+			_pending_audio.pop_front()
+			continue
+		if not _audio_playing:
+			if not _start_audio(chunk):
+				return
+			available = _audio_playback.get_frames_available()
+		if frames > available:
+			break
+		var buffer := PackedVector2Array()
+		buffer.resize(frames)
+		if channels >= 2:
+			for f in frames:
+				buffer[f] = Vector2(data[f * channels], data[f * channels + 1])
+		else:
+			for f in frames:
+				var sample := data[f]
+				buffer[f] = Vector2(sample, sample)
+		if not _audio_playback.push_buffer(buffer):
+			break
+		_pending_audio.pop_front()
+		available -= frames
+		added += 1
+		if _status.text.begins_with("Opening"):
+			_status.text = "Playing %s" % MediaFiles.display_name(file_path)
+
+## Start the generator on the first real chunk, so `get_playback_position()`
+## and the media PTS share an origin.
+func _start_audio(chunk: Dictionary) -> bool:
+	_audio.play()
+	_audio_playback = _audio.get_stream_playback() as AudioStreamGeneratorPlayback
+	if _audio_playback == null:
+		_show_error("Could not start audio playback")
+		return false
+	_audio_playing = true
+	_audio_started = true
+	_audio_start_pts_us = int(chunk.get("pts_us", 0))
+	return true
 
 func _teardown_stream():
 	_stop_backend()
-	if _audio != null:
-		if _audio.is_inside_tree():
-			_audio.stop()
-		_audio.stream = null
 	_kind = ""
 	_status.visible = false
 	_status.text = ""
@@ -296,11 +390,19 @@ func _stop_backend():
 	_texture = null
 	_pending_frames.clear()
 	_clock_start_us = -1
-	_video_finished = false
-	_finished_shown = false
+	_finished = false
+	_finished_announced = false
 	if _video_surface != null:
 		_video_surface.texture = null
 		_video_surface.visible = false
+	if _audio != null:
+		_audio.stop()
+		_audio.stream = null
+	_audio_playback = null
+	_audio_playing = false
+	_audio_started = false
+	_audio_start_pts_us = 0
+	_pending_audio.clear()
 
 func _show_idle():
 	_stop_backend()
@@ -324,18 +426,16 @@ func _show_error(message: String):
 	_placeholder_hint.text = message
 	_status.visible = false
 
-func _on_audio_finished():
-	_status.visible = true
-	_status.text = "Finished %s" % MediaFiles.display_name(file_path)
-	if _kind == MediaFiles.AUDIO:
-		_placeholder_hint.text = "Audio · finished"
-
 func _pane_type() -> String:
 	return "media"
 
 func _get_layout_state() -> Dictionary:
 	var state = super._get_layout_state()
-	state.merge({"file_path": file_path})
+	state.merge({
+		"file_path": file_path,
+		"volume_db": volume_db,
+		"muted": muted,
+	})
 	return state
 
 func apply_settings(settings: Dictionary):
@@ -347,6 +447,12 @@ func apply_settings(settings: Dictionary):
 	super.apply_settings(settings)
 	if _video_surface == null:
 		return
+	if settings.get("volume_db") != null and (settings["volume_db"] is float or settings["volume_db"] is int):
+		volume_db = clampf(float(settings["volume_db"]), -40.0, 6.0)
+		_apply_audio_volume()
+	if settings.get("muted") is bool:
+		muted = settings["muted"]
+		_apply_audio_volume()
 	if settings.get("file_path") is String:
 		if file_path != previous_path:
 			load_media(file_path)
@@ -379,6 +485,21 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	file_le.text_changed.connect(func(_s): panel._debounce_timer.start())
 	_add_setting_row(v, "File:", file_le)
 
+	var volume := HSlider.new()
+	volume.min_value = -40.0
+	volume.max_value = 6.0
+	volume.step = 0.5
+	volume.value = volume_db
+	volume.custom_minimum_size.x = 140
+	volume.value_changed.connect(func(_v): panel._debounce_timer.start())
+	_add_setting_row(v, "Volume (dB):", volume)
+
+	var mute := CheckBox.new()
+	mute.text = "Mute"
+	mute.button_pressed = muted
+	mute.toggled.connect(func(_v): panel._debounce_timer.start())
+	v.add_child(mute)
+
 	var hint := Label.new()
 	hint.text = "Local files only. Supported: %s." % MediaFiles.supported_text()
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -390,6 +511,8 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"pane_name": name_le.text.strip_edges(),
 			"font_size": int(font_spin.value),
 			"file_path": file_le.text.strip_edges(),
+			"volume_db": float(volume.value),
+			"muted": mute.button_pressed,
 		}
 
 	return v
