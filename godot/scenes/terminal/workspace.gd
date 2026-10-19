@@ -632,6 +632,25 @@ func _next_workspace_number() -> int:
 			max_n = maxi(max_n, ws_name.substr("Workspace ".length()).to_int())
 	return max_n + 1
 
+## The pane a workspace should activate when it has no remembered one — at
+## launch, on switching to a workspace that was restored but never visited,
+## and after a profile rebuild. A terminal wins because only terminals take
+## keyboard focus: activating the first tile of a read-only-first layout would
+## leave the first keystroke nowhere. The first tile is the fallback so a
+## read-only workspace still has an active pane (sidebar accent, status bar,
+## "close active").
+func _fallback_active_body() -> Control:
+	var first: Control = null
+	for t in _tm.tiles:
+		var body = _tm._find_body(t.wrapper)
+		if body == null:
+			continue
+		if first == null:
+			first = body
+		if body is TerminalPane:
+			return body
+	return first
+
 func _apply_active_workspace_view():
 	if _workspaces.is_empty():
 		return
@@ -647,9 +666,16 @@ func _apply_active_workspace_view():
 	_refresh_status_bar()
 	# The same rule as every other activation path: a terminal takes the
 	# keyboard, a read-only pane releases it. A bare `grab_focus()` here raised
-	# an engine error for the latter on every workspace switch.
-	if _tm.last_body and is_instance_valid(_tm.last_body):
-		activate_pane(_tm.last_body)
+	# an engine error for the latter on every workspace switch. When the
+	# workspace has no remembered pane, pick its first terminal: `last_body`
+	# is only ever set by a click, a spawn, or a focus event, and startup sets
+	# none of them — leaving the first keystroke after launch with nowhere to
+	# go (UX-01).
+	var body: Control = _tm.last_body
+	if body == null or not is_instance_valid(body):
+		body = _fallback_active_body()
+	if body:
+		activate_pane(body)
 
 func _switch_workspace(idx: int):
 	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size() or idx == _active:

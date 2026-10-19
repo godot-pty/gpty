@@ -8,6 +8,10 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 
 - **A media pane plays local audio and video.** An eighth pane type, `media`, opens an absolute local file and plays it through Godot's native streams — Theora `.ogv` video and Ogg Vorbis/MP3/WAV audio — with the file name and playback state shown in the pane. The path is validated at use by the closed `MediaFiles` table (absolute, regular file, known extension) and never reaches `ResourceLoader`, so a file-supplied layout or profile cannot smuggle a `.gd` or `.tscn` in behind a media extension; remote URLs and project schemes are refused with an in-pane explanation. The file tree's in-app route now covers media too (supported files ask the workspace for a media pane, and reopening the same file focuses the pane already playing it), and a media tile restores its path. Transport controls, `paneStatus` transport state, and the Rust demux/decode matrix for the wider container/codec set are the release's remaining media items.
 
+### Fixed
+
+- **The first keystroke after launch reaches the shell.** A fresh workspace left `last_body` unset and no pane held keyboard focus — `_apply_active_workspace_view` only activated a *remembered* pane, and nothing on the startup path ever set one — so typing did nothing until the user clicked a terminal (UX-01, verified on v0.5.6 and still present in 0.7.0). The view refresh now resolves a fallback: the workspace's first terminal, else its first pane (so a read-only layout still has an active row), activated through the same `activate_pane` rule as a click. The same hole affected every other entry that builds panes without activating them — switching to a restored workspace that was never visited, and profile activation — and the one fallback fixes those too.
+
 ## [0.6.0] — 2026-10-19
 
 ### Added
