@@ -185,12 +185,11 @@ func test_cli_backend_streams_from_fake_adapter():
 		+ "printf '%s\\n' '{\"type\":\"thinking\",\"text\":\"t\"}'\n" \
 		+ "printf '%s\\n' '{\"type\":\"delta\",\"text\":\"cli said hi\"}'\n" \
 		+ "printf '%s\\n' '{\"type\":\"done\",\"text\":\"cli said hi\"}'\n"
-	var path := "user://fake_cli_adapter.sh"
-	var f := FileAccess.open(path, FileAccess.WRITE)
+	var abs := TestPaths.user_path("fake_cli_adapter.sh")
+	var f := FileAccess.open(abs, FileAccess.WRITE)
 	assert_true(f != null, "must write the adapter script")
 	f.store_string(script)
 	f.close()
-	var abs := ProjectSettings.globalize_path(path)
 	OS.execute("chmod", ["+x", abs])
 	_pane.backend = "cli"
 	_pane.command = [abs]

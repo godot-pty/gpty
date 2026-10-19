@@ -278,7 +278,7 @@ func test_each_preset_tile_passes_sanitize_tile():
 ## (untrusted file input) and the real restore path must rebuild a pane that
 ## lists the vault — not merely accept the type.
 func test_a_wiki_tile_restores_its_vault():
-	var vault := ProjectSettings.globalize_path("user://wiki_restore_vault")
+	var vault := TestPaths.user_path("wiki_restore_vault")
 	DirAccess.make_dir_recursive_absolute(vault)
 	var note := FileAccess.open(vault.path_join("note.md"), FileAccess.WRITE)
 	note.store_string("# Heading")

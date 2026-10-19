@@ -87,7 +87,7 @@ func test_vault_index_and_search_answer_shaped_json():
 	# answer carries the note list and the pass' counts, a search answer
 	# carries hits with snippets, and a bad root is an `error` envelope rather
 	# than an empty result — the distinction the pane's placeholder relies on.
-	var vault := ProjectSettings.globalize_path("user://gdext_ffi_vault")
+	var vault := TestPaths.user_path("gdext_ffi_vault")
 	DirAccess.make_dir_recursive_absolute(vault)
 	var note := FileAccess.open(vault.path_join("note.md"), FileAccess.WRITE)
 	note.store_string("# Heading\nzebra")
@@ -118,7 +118,7 @@ func test_vault_links_answer_shaped_json():
 	# with their line and resolution, backlinks as the same edges in reverse,
 	# unresolved targets with the candidates an ambiguous stem could not choose
 	# between, and an `error` envelope for a root that cannot be used.
-	var vault := ProjectSettings.globalize_path("user://gdext_ffi_links")
+	var vault := TestPaths.user_path("gdext_ffi_links")
 	DirAccess.make_dir_recursive_absolute(vault)
 	var target := FileAccess.open(vault.path_join("target.md"), FileAccess.WRITE)
 	target.store_string("# Target\n")
@@ -169,7 +169,7 @@ func test_vault_note_read_and_write_answer_shaped_json():
 	# text with the stamp and the file's shape, a write answers the fresh stamp
 	# plus whether the index caught up, and a refusal answers an `error` with
 	# the stable `code` the pane switches on.
-	var vault := ProjectSettings.globalize_path("user://gdext_ffi_notes")
+	var vault := TestPaths.user_path("gdext_ffi_notes")
 	DirAccess.make_dir_recursive_absolute(vault)
 	var note := FileAccess.open(vault.path_join("note.md"), FileAccess.WRITE)
 	note.store_string("# One\n")
@@ -214,7 +214,7 @@ func test_vault_note_file_verbs_answer_shaped_json():
 	# Create / rename / delete, the editor's other write surface: each answers
 	# whether the index caught up, a collision answers `code: "exists"` instead
 	# of replacing anything, and the index follows the new name.
-	var vault := ProjectSettings.globalize_path("user://gdext_ffi_note_verbs")
+	var vault := TestPaths.user_path("gdext_ffi_note_verbs")
 	DirAccess.make_dir_recursive_absolute(vault)
 
 	var created = JSON.parse_string(str(GptyTerminal.vault_note_create(
@@ -270,7 +270,7 @@ func test_vault_scratch_functions_answer_shaped_json():
 	# gpty's state directory, not under the vault, so this test uses a vault
 	# path of its own (an unreachable key for any later run) and drops the copy
 	# before it finishes.
-	var vault := ProjectSettings.globalize_path("user://gdext_ffi_scratch_%d" % Time.get_ticks_usec())
+	var vault := TestPaths.user_path("gdext_ffi_scratch_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(vault)
 
 	var absent = JSON.parse_string(str(GptyTerminal.vault_scratch_read(vault, "note.md")))
@@ -305,3 +305,20 @@ func test_vault_scratch_functions_answer_shaped_json():
 
 	GptyTerminal.vault_scratch_clear(vault, "note.md")
 	DirAccess.remove_absolute(vault)
+
+
+func test_the_test_user_root_redirects_the_history_store():
+	# The gdext half of the suite's sandbox: `user://` cannot be redirected on
+	# Windows (Godot uses the Known Folder API), so `history_db_path` honors
+	# `GPTY_TEST_USER_DIR` exactly like `BasePersistenceManager`. Without this
+	# every spawned pane writes scrollback into the developer's real profile.
+	var previous := OS.get_environment("GPTY_TEST_USER_DIR")
+	var root := TestPaths.user_path("gdext_ffi_user_root")
+	DirAccess.make_dir_recursive_absolute(root)
+	OS.set_environment("GPTY_TEST_USER_DIR", root)
+	var stats = JSON.parse_string(str(GptyTerminal.history_store_stats()))
+	OS.set_environment("GPTY_TEST_USER_DIR", previous)
+
+	assert_true(stats is Dictionary, "history_store_stats must answer JSON")
+	assert_eq(str(stats.get("path", "")), root.path_join("history.db"))
+	DirAccess.remove_absolute(root)

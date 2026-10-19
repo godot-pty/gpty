@@ -27,6 +27,18 @@ runner's Git Bash: the suite takes its shells from
 Linux-only artifact. `gut-check` prints any test that pends with its reason and
 fails on a test that ran without asserting.
 
+`gut-check` also gives the run a private **user root**, not just a private
+endpoint: `GPTY_TEST_USER_DIR` names a temp directory that
+`BasePersistenceManager` uses for every `user://` store and that the GDExtension
+uses for `history.db`. On Windows, where Godot's `user://` resolves through the
+Known Folder API and cannot be redirected by an environment variable, it
+additionally sandboxes `LOCALAPPDATA`/`APPDATA` and passes `--log-file`. The
+effect is that a suite run cannot read a developer's saved layout, write probe
+vaults or recovery copies into their state directory, or append to their real
+scrollback. A test that needs a filesystem path must use
+`TestPaths.user_path("name")` rather than `ProjectSettings.globalize_path("user://name")`;
+the live smoke uses the same seam and needs no store backup/restore.
+
 **Rust coverage:** core engine (parser, keymap, grid, concept routing, capture state machine, history, the vault index and its walk), the vault's native IPC handlers (search re-indexing, read containment, parameter validation), IPC types + protocol, CLI schema generation and response formatting (both output modes fail on an RPC error, and the JSON envelope is printed first), GDExtension FFI functions. The tile layout algorithm (split, kill, expand) lives only in `godot/scenes/terminal/terminal_manager.gd` and is tested there, in `godot/tests/unit/test_terminal_manager.gd`, against the real `spawn_pane`/`kill` — including every close order of five panes. A Rust copy of it once stood in for those tests and could not fail when the real code broke; do not reintroduce one. The IPC vocabulary is pinned across languages: a test in `crates/gpty-cli/src/commands/mcp.rs` reads the real registrations (`crates/gpty-gdext/src/ipc.rs`), the real dispatch (`ipc_handlers.gd`, plus the requests `workspace.gd` intercepts), and every `client.call` literal in `src/commands/*.rs`, and asserts they name the same methods as the advertised MCP tools.
 
 **GDScript coverage:** concept merge/save/load, terminal manager tile lifecycle (spawn, kill, swap, labels, grid-full refusal), divider edge drag (`test_pane_edge_drag.gd`: pixel preview vs unit commit, one `tiles_resized` per release, MIN_TILE clamp, window-border refusal, drag survives leaving the strip), settings save/load roundtrip, profile CRUD and the three profile sources (the shipped built-in, installed-plugin profiles, user profiles — merge order, ` (n)` dedupe, and the plugin-revision consent gate), layout save/restore, sidebar signal emission, pane settings application, IPC dispatch against a real workspace (`test_ipc_dispatch_contract.gd`: listed pane ids and legacy labels both address the pane they name, terminal-only methods refuse other panes, unknown methods answer -32601, an untrusted profile is refused, and a targetless `paneStatus` covers every tile with `status: null` for non-terminals), palette command generation.

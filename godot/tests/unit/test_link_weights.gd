@@ -15,7 +15,7 @@ var _ipc_vault := ""
 
 func before_each():
 	MockAutoloads.setup()
-	_ipc_vault = ProjectSettings.globalize_path("user://link_weights_probe")
+	_ipc_vault = TestPaths.user_path("link_weights_probe")
 	DirAccess.make_dir_recursive_absolute(_ipc_vault)
 
 func after_each():

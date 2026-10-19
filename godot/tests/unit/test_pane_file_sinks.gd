@@ -7,7 +7,7 @@ var _tmp: String
 
 func before_each():
 	MockAutoloads.setup()
-	_tmp = ProjectSettings.globalize_path("user://file_sink_probe")
+	_tmp = TestPaths.user_path("file_sink_probe")
 	DirAccess.make_dir_recursive_absolute(_tmp)
 
 

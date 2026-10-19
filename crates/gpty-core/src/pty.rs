@@ -84,6 +84,9 @@ const BLOCKED_ENV_KEYS: &[&str] = &[
     "GPTY_SECRET",
     "GPTY_SOCKET",
     "GPTY_GUI",
+    // Test-harness seam: where the suite's stores and scrollback live. A pane
+    // has no use for it, and file-supplied env must not set it.
+    "GPTY_TEST_USER_DIR",
 ];
 
 /// Environment keys removed from every child process gpty spawns — terminal
@@ -104,6 +107,7 @@ pub const STRIPPED_INHERITED_ENV_KEYS: &[&str] = &[
     "GPTY_EVENT_CAPABILITY",
     "GPTY_ENV",
     "GPTY_PANE_ID",
+    "GPTY_TEST_USER_DIR",
 ];
 
 /// Filter `KEY=VALUE` environment entries from settings/layouts/profiles.

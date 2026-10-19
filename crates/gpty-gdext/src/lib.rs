@@ -568,10 +568,35 @@ impl GptyTerminal {
 ///
 /// `user://history.db`, globalized once so the spawn path and the settings
 /// panel's size query cannot disagree about which file is meant.
+///
+/// A test harness may redirect it with `GPTY_TEST_USER_DIR` — the same
+/// variable `BasePersistenceManager.resolve_store_path` uses for the GDScript
+/// stores. Godot's `user://` resolves through the OS (the Known Folder API on
+/// Windows), which no environment variable redirects, so without this seam a
+/// GUT run writes every pane's scrollback into the developer's real profile.
 fn history_db_path() -> String {
-    godot::classes::ProjectSettings::singleton()
+    let default = godot::classes::ProjectSettings::singleton()
         .globalize_path("user://history.db")
-        .to_string()
+        .to_string();
+    history_db_path_for(
+        std::env::var("GPTY_TEST_USER_DIR").ok().as_deref(),
+        &default,
+    )
+}
+
+/// Resolve the history database from an optional test root.
+///
+/// Split from the Godot call so the rule is unit-testable: only an absolute,
+/// non-empty root redirects the file; anything else keeps the default path.
+fn history_db_path_for(test_root: Option<&str>, default_path: &str) -> String {
+    let Some(root) = test_root else {
+        return default_path.to_string();
+    };
+    let root = std::path::Path::new(root);
+    if root.as_os_str().is_empty() || !root.is_absolute() {
+        return default_path.to_string();
+    }
+    root.join("history.db").to_string_lossy().into_owned()
 }
 
 /// Shape the plugin store into `installed_plugin_profiles`' JSON.
@@ -940,7 +965,35 @@ unsafe impl ExtensionLibrary for GptyExtension {
 
 #[cfg(test)]
 mod tests {
-    use super::{plugin_concepts_json, profiles_json};
+    use super::{history_db_path_for, plugin_concepts_json, profiles_json};
+
+    /// The test seam is deliberately narrow: an absolute directory redirects
+    /// the history database, while an unset, empty or relative value keeps
+    /// Godot's `user://history.db` — a malformed harness variable must not
+    /// silently send scrollback somewhere the app cannot find it again.
+    #[test]
+    fn history_db_path_honors_only_an_absolute_test_root() {
+        let root = std::env::temp_dir().join("gpty-test-history");
+        let root_text = root.to_str().expect("temp dir is UTF-8");
+        let expected = root.join("history.db").to_string_lossy().into_owned();
+
+        assert_eq!(
+            history_db_path_for(Some(root_text), "user://history.db"),
+            expected
+        );
+        assert_eq!(
+            history_db_path_for(Some("relative/root"), "user://history.db"),
+            "user://history.db"
+        );
+        assert_eq!(
+            history_db_path_for(Some(""), "user://history.db"),
+            "user://history.db"
+        );
+        assert_eq!(
+            history_db_path_for(None, "user://history.db"),
+            "user://history.db"
+        );
+    }
 
     /// What `installed_plugin_profiles` hands GDScript: an unusable store is
     /// an empty list (the FFI logs the reason), so only a store the reader

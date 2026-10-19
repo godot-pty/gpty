@@ -15,10 +15,10 @@ var _scratch_tmp: String
 
 func before_each():
 	MockAutoloads.setup()
-	_tmp = ProjectSettings.globalize_path("user://wiki_probe_vault")
+	_tmp = TestPaths.user_path("wiki_probe_vault")
 	DirAccess.make_dir_recursive_absolute(_tmp)
-	_scratch_tmp = ProjectSettings.globalize_path(
-		"user://wiki_probe_scratch_%d" % Time.get_ticks_usec()
+	_scratch_tmp = TestPaths.user_path(
+		"wiki_probe_scratch_%d" % Time.get_ticks_usec()
 	)
 	DirAccess.make_dir_recursive_absolute(_scratch_tmp)
 
@@ -531,7 +531,7 @@ func test_a_vault_change_drops_the_open_note():
 	pane._list.item_activated.emit(0)
 	await _type_into(pane, "# Edited\n")
 
-	var other := ProjectSettings.globalize_path("user://wiki_probe_vault_other")
+	var other := TestPaths.user_path("wiki_probe_vault_other")
 	DirAccess.make_dir_recursive_absolute(other)
 	pane.apply_settings({"vault_path": other})
 	assert_eq(pane._current_rel, "", "a different vault must not keep the old note")
@@ -1230,7 +1230,7 @@ func test_a_vault_change_drops_the_recovery_copy():
 
 	# The settings panel's debounce makes a dialog unusable here, so the change
 	# itself is the discard (the pane says so) — and the copy must follow it.
-	var other := ProjectSettings.globalize_path("user://wiki_probe_vault_other")
+	var other := TestPaths.user_path("wiki_probe_vault_other")
 	DirAccess.make_dir_recursive_absolute(other)
 	pane.apply_settings({"vault_path": other})
 	assert_false(_has_copy(_scratch_tmp, "note.md"),

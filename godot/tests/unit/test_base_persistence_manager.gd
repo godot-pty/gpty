@@ -33,24 +33,32 @@ func _remove_files():
 		_remove_path(p)
 	_remove_path(PATH)
 
-## Every file in `user://` that belongs to this store: the store itself and any
-## temp file a write may have left behind.
+## The absolute path a store path resolves to. `_write_file` and `_read_file`
+## apply `resolve_store_path`, so a test that inspects the file directly must
+## ask the same function — otherwise it looks at `user://` while the manager
+## wrote under `GPTY_TEST_USER_DIR`.
+func _abs(p: String) -> String:
+	var resolved := BasePersistenceManager.resolve_store_path(p)
+	return resolved if resolved.is_absolute_path() else ProjectSettings.globalize_path(resolved)
+
+## Every file belonging to this store: the store itself and any temp file a
+## write may have left behind.
 func _siblings() -> PackedStringArray:
 	var out := PackedStringArray()
-	var dir := DirAccess.open("user://")
+	var dir := DirAccess.open(_abs(PATH).get_base_dir())
 	if dir == null:
 		return out
 	for entry in dir.get_files():
 		if entry.begins_with(PREFIX):
-			out.append("user://" + entry)
+			out.append(_abs(PATH).get_base_dir().path_join(entry))
 	return out
 
 func _remove_path(p: String):
 	# A test may occupy a path with a directory, and FileAccess.file_exists()
 	# is false for a directory — so checking only for files left it behind and
 	# poisoned later runs, since every write then failed to create its temp.
-	var abs := ProjectSettings.globalize_path(p)
-	if DirAccess.dir_exists_absolute(abs) or FileAccess.file_exists(p):
+	var abs := _abs(p)
+	if DirAccess.dir_exists_absolute(abs) or FileAccess.file_exists(abs):
 		DirAccess.remove_absolute(abs)
 
 func test_round_trips_through_read_file():
@@ -58,6 +66,25 @@ func test_round_trips_through_read_file():
 	var back = _mgr._read_file(PATH)
 	assert_eq(back.get("a"), 1)
 	assert_eq(back.get("b"), "two")
+
+## The suite's user root is one rule, and only an absolute directory takes
+## effect: the harness redirects every store, while a malformed value keeps
+## `user://` so a typo cannot send stores somewhere the app cannot find again.
+func test_store_paths_follow_only_an_absolute_test_root():
+	var previous := OS.get_environment("GPTY_TEST_USER_DIR")
+	var root := ProjectSettings.globalize_path("user://store_root_probe")
+	OS.set_environment("GPTY_TEST_USER_DIR", root)
+	var redirected := BasePersistenceManager.resolve_store_path("user://settings.json")
+	var res_untouched := BasePersistenceManager.resolve_store_path("res://profiles.default.json")
+	var abs_untouched := BasePersistenceManager.resolve_store_path("/absolute/settings.json")
+	OS.set_environment("GPTY_TEST_USER_DIR", "relative/root")
+	var relative_ignored := BasePersistenceManager.resolve_store_path("user://settings.json")
+	OS.set_environment("GPTY_TEST_USER_DIR", previous)
+
+	assert_eq(redirected, root.path_join("settings.json"))
+	assert_eq(res_untouched, "res://profiles.default.json")
+	assert_eq(abs_untouched, "/absolute/settings.json")
+	assert_eq(relative_ignored, "user://settings.json", "a relative root is ignored")
 
 func test_replaces_existing_content():
 	_mgr._write_file(PATH, {"old": true})
@@ -70,7 +97,7 @@ func test_leaves_no_temp_file_behind():
 	_mgr._write_file(PATH, {"a": 1})
 	var leftovers := PackedStringArray()
 	for p in _siblings():
-		if p != PATH:
+		if p != _abs(PATH):
 			leftovers.append(p)
 	assert_eq(
 		leftovers.size(), 0,
@@ -82,11 +109,11 @@ func test_leaves_no_temp_file_behind():
 ## `<store>.tmp` let anything able to write in `user://` point the next save at
 ## a file of its choosing.
 func test_a_planted_symlink_at_the_temp_path_is_not_followed():
-	var dir := DirAccess.open("user://")
-	assert_not_null(dir, "user:// must be a directory")
+	var dir := DirAccess.open(_abs(PATH).get_base_dir())
+	assert_not_null(dir, "the store directory must exist")
 	var victim := "user://test_persistence_victim.txt"
 	_remove_path(victim)
-	var victim_file := FileAccess.open(victim, FileAccess.WRITE)
+	var victim_file := FileAccess.open(_abs(victim), FileAccess.WRITE)
 	victim_file.store_string("ORIGINAL")
 	victim_file.close()
 
@@ -94,16 +121,14 @@ func test_a_planted_symlink_at_the_temp_path_is_not_followed():
 	# with write access to user:// would.
 	_remove_path(PATH + ".tmp")
 	assert_eq(
-		dir.create_link(
-			ProjectSettings.globalize_path(victim), ProjectSettings.globalize_path(PATH + ".tmp")
-		),
+		dir.create_link(_abs(victim), _abs(PATH + ".tmp")),
 		OK,
 		"the probe must be able to plant a symlink"
 	)
 
 	_mgr._write_file(PATH, {"payload": true})
 
-	var victim_text := FileAccess.open(victim, FileAccess.READ).get_as_text()
+	var victim_text := FileAccess.open(_abs(victim), FileAccess.READ).get_as_text()
 	assert_eq(victim_text, "ORIGINAL", "a planted symlink must never be written through")
 	assert_true(_mgr._read_file(PATH).get("payload"), "the store must still be written")
 
@@ -116,7 +141,7 @@ func test_a_written_store_is_owner_only():
 		return
 	_mgr._write_file(PATH, {"a": 1})
 	assert_eq(
-		FileAccess.get_unix_permissions(ProjectSettings.globalize_path(PATH)),
+		FileAccess.get_unix_permissions(_abs(PATH)),
 		0x180,
 		"a store must be readable by its owner only (0600)"
 	)
@@ -131,7 +156,7 @@ func test_a_failed_write_leaves_the_previous_file_intact():
 	var fixed := FixedTempManager.new()
 	add_child_autofree(fixed)
 	var tmp := "%s.%s.tmp" % [PATH, "test"]
-	DirAccess.make_dir_absolute(ProjectSettings.globalize_path(tmp))
+	DirAccess.make_dir_absolute(_abs(tmp))
 
 	fixed._write_file(PATH, {"new": true})
 

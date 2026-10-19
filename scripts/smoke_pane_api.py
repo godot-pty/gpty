@@ -18,16 +18,15 @@ The event listener has no auth and is read-only, so the client here is a plain
 line-delimited JSON-RPC call over the platform transport.
 
 Requires: godot on PATH (or GODOT=<path>), cargo, and the CLI built from this
-tree. On Unix user data and state are sandboxed with XDG_DATA_HOME and
-XDG_STATE_HOME; on Windows Godot resolves its user data through the Known
-Folder API, which the APPDATA environment variable does not redirect, and the
-plugin store lives under `%LOCALAPPDATA%`, so a Windows run uses the real
-per-user directories — fine on a disposable CI runner, worth knowing on a
-dev box. The stores the harness writes itself (a concept, and an installed
-plugin's record) are backed up and put back in teardown, so a dev-box run
-leaves no trace. The vault step indexes a temporary vault into `vaults.db`:
-on Unix the state directory is sandboxed, and on Windows the rows are derived
-data for a root that no longer exists, so the next index pass prunes them.
+tree. Every per-user directory is sandboxed in `self.tmp`: on Unix the XDG
+data/state roots, and on every platform `GPTY_TEST_USER_DIR` — the seam
+`BasePersistenceManager` and the gdext history database honor — because Godot
+resolves `user://` through the Known Folder API on Windows, which no
+environment variable redirects. Windows also gets `LOCALAPPDATA`/`APPDATA`
+for gpty's Rust state and data directories, and Godot's own engine log is
+moved with `--log-file`. Nothing is backed up or restored, because nothing
+outside the sandbox is written: the concept seed, the plugin record and the
+vault index live in the run's own directories and vanish with them.
 
 Exit 0 and "PASS" on success; non-zero with "FAIL [step]: ..." and the tail of
 the Godot log otherwise. Reads and writes only inside the repo (plus the
@@ -38,7 +37,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import socket
 import subprocess
@@ -85,18 +83,27 @@ class Smoke:
         self.env = dict(os.environ)
         self.env["GPTY_SOCKET"] = self.control
         self.env["GPTY_SECRET"] = SECRET
-        if not WINDOWS:
+        # The stores and the history database on every platform: `user://` is
+        # not env-redirectable on Windows, so the seam is a path the app reads
+        # rather than a directory Godot resolves. Created before launch because
+        # the history database is opened by the first pane.
+        user_dir = self.tmp / "user"
+        user_dir.mkdir()
+        self.env["GPTY_TEST_USER_DIR"] = str(user_dir)
+        if WINDOWS:
+            # Godot still writes its engine log to the real user directory
+            # unless `--log-file` is given (see launch), and the Rust state and
+            # data directories read these directly.
+            for name in ("localappdata", "roaming"):
+                (self.tmp / name).mkdir()
+            self.env["LOCALAPPDATA"] = str(self.tmp / "localappdata")
+            self.env["APPDATA"] = str(self.tmp / "roaming")
+        else:
             self.env["XDG_DATA_HOME"] = str(self.tmp / "data")
             # The plugin store lives in the state directory; sandbox it too, so
             # the seeded record (and anything the GUI writes) never touches the
             # developer's real store.
             self.env["XDG_STATE_HOME"] = str(self.tmp / "state")
-        # The seeded stores (see `seed_concepts` / `seed_plugin`): each path
-        # and the bytes to put back in teardown.
-        self.concepts_path: Path | None = None
-        self.concepts_backup: bytes | None = None
-        self.plugins_path: Path | None = None
-        self.plugins_backup: bytes | None = None
 
     # ── Reporting ─────────────────────────────────────────────────────
 
@@ -264,13 +271,31 @@ class Smoke:
 
     def import_project(self) -> None:
         self.enter("import")
-        self.run([self.godot, "--headless", "--path", "godot", "--import"], cwd=ROOT)
+        self.run(
+            [
+                self.godot,
+                "--headless",
+                "--log-file",
+                str(self.tmp / "godot-import.log"),
+                "--path",
+                "godot",
+                "--import",
+            ],
+            cwd=ROOT,
+        )
 
     def launch(self) -> None:
         self.enter("launch")
         log = self.godot_log.open("w")
         self.gui = subprocess.Popen(
-            [self.godot, "--headless", "--path", "godot"],
+            [
+                self.godot,
+                "--headless",
+                "--log-file",
+                str(self.tmp / "godot-engine.log"),
+                "--path",
+                "godot",
+            ],
             cwd=ROOT,
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -301,7 +326,14 @@ class Smoke:
         second_log = self.tmp / "godot-second.log"
         with second_log.open("w") as log:
             second = subprocess.Popen(
-                [self.godot, "--headless", "--path", "godot"],
+                [
+                    self.godot,
+                    "--headless",
+                    "--log-file",
+                    str(self.tmp / "godot-second-engine.log"),
+                    "--path",
+                    "godot",
+                ],
                 cwd=ROOT,
                 stdout=log,
                 stderr=subprocess.STDOUT,
@@ -337,10 +369,6 @@ class Smoke:
 
     def teardown(self) -> None:
         if self.gui is None:
-            # A failure between seeding and launch still has to put the stores
-            # back.
-            self.restore_concepts()
-            self.restore_plugin()
             return
         # A failed build may leave no CLI to ask; the process kill below still
         # has to happen, and a missing binary must not mask the real failure.
@@ -351,18 +379,12 @@ class Smoke:
         except subprocess.TimeoutExpired:
             self.gui.kill()
             self.gui.wait(timeout=10)
-        # After the GUI is gone, so nothing overwrites the stores behind us.
-        self.restore_concepts()
-        self.restore_plugin()
 
     # ── Concept seed ──────────────────────────────────────────────────
     # The smoke needs a concept it can trigger from real *output*. The only
     # registration route that exists is the store the GUI reads at startup
     # (`concept toggle` flips a shipped rule, it cannot add one), so it is
-    # seeded before launch and put back in teardown: on Windows `user://` is
-    # the real per-user directory — Godot resolves it through the Known
-    # Folder API, which APPDATA does not redirect — and a dev-box run must
-    # leave no trace.
+    # seeded into the run's user root before launch.
 
     CONCEPT_NAME = "smoke_concept"
     ## The trigger demands the digit the shell appends at runtime: the typed
@@ -372,21 +394,11 @@ class Smoke:
     CONCEPT_TRIGGER = r"SMOKE_CONCEPT_8K3[0-9]"
 
     def user_dir(self) -> Path:
-        """Godot's `user://` for this project, as the platform resolves it."""
-        project = re.search(
-            r'config/name="([^"]+)"',
-            (ROOT / "godot" / "project.godot").read_text(encoding="utf-8"),
-        )
-        if project is None:
-            self.fail("godot/project.godot has no config/name to derive user:// from")
-            raise  # unreachable — fail() raises
-        data_home = os.environ["APPDATA"] if WINDOWS else self.env["XDG_DATA_HOME"]
-        return Path(data_home) / "godot" / "app_userdata" / project.group(1)
+        """The run's user root, which the app resolves `user://` through."""
+        return Path(self.env["GPTY_TEST_USER_DIR"])
 
     def seed_concepts(self) -> None:
         path = self.user_dir() / "concepts.json"
-        self.concepts_path = path
-        self.concepts_backup = path.read_bytes() if path.exists() else None
         store: dict = {}
         if path.exists():
             try:
@@ -414,28 +426,14 @@ class Smoke:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(store), encoding="utf-8")
 
-    def restore_concepts(self) -> None:
-        if self.concepts_path is None:
-            return
-        try:
-            if self.concepts_backup is None:
-                self.concepts_path.unlink(missing_ok=True)
-            else:
-                self.concepts_path.write_bytes(self.concepts_backup)
-        except OSError as error:
-            print(
-                f"warning: could not restore {self.concepts_path}: {error}",
-                file=sys.stderr,
-            )
-
     # ── Plugin store seed ─────────────────────────────────────────────
     # The profiles migration moved the five tool layouts onto plugin repos, and
     # the GUI reads what `gpty plugin install` recorded in the store (it never
     # parses a manifest). Seeding a record is therefore the whole install as far
     # as the GUI is concerned — the step below proves store -> FFI ->
-    # ProfileManager -> layoutList/layoutLoad live. On Windows the state dir is
-    # the real per-user one (`%LOCALAPPDATA%\gpty`), so the file is backed up
-    # and restored like the concept store.
+    # ProfileManager -> layoutList/layoutLoad live. The state directory is
+    # sandboxed (`XDG_STATE_HOME` on Unix, `LOCALAPPDATA` on Windows), so the
+    # record lands in the run's temp tree.
 
     PLUGIN_ID = "godot-pty/smoke-plugin"
     PLUGIN_REVISION = "0123456789abcdef0123456789abcdef01234567"
@@ -452,13 +450,11 @@ class Smoke:
     def state_dir(self) -> Path:
         """gpty's state directory, as `transport::state_dir()` resolves it."""
         if WINDOWS:
-            return Path(os.environ["LOCALAPPDATA"]) / "gpty"
+            return Path(self.env["LOCALAPPDATA"]) / "gpty"
         return Path(self.env["XDG_STATE_HOME"]) / "gpty"
 
     def seed_plugin(self) -> None:
         path = self.state_dir() / "plugins.json"
-        self.plugins_path = path
-        self.plugins_backup = path.read_bytes() if path.exists() else None
         store: dict = {}
         if path.exists():
             try:
@@ -506,20 +502,6 @@ class Smoke:
         store["plugins"] = plugins
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(store), encoding="utf-8")
-
-    def restore_plugin(self) -> None:
-        if self.plugins_path is None:
-            return
-        try:
-            if self.plugins_backup is None:
-                self.plugins_path.unlink(missing_ok=True)
-            else:
-                self.plugins_path.write_bytes(self.plugins_backup)
-        except OSError as error:
-            print(
-                f"warning: could not restore {self.plugins_path}: {error}",
-                file=sys.stderr,
-            )
 
     def log_tail(self, lines: int = 40) -> str:
         try:
