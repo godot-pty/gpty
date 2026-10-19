@@ -44,6 +44,17 @@ package() {
     install -Dm644 "$srcdir/gpty-v$pkgver-linux-x86_64/libgpty_gdext.linux.x86_64.so" \
         "$pkgdir/usr/lib/gpty/libgpty_gdext.linux.x86_64.so"
 
+    # The GDExtension carries an $ORIGIN runpath, so the pinned FFmpeg that it
+    # was built against must sit in the same directory. Shipping it privately
+    # keeps the package independent of the distro's FFmpeg soname.
+    install -d "$pkgdir/usr/lib/gpty"
+    cp -a "$srcdir/gpty-v$pkgver-linux-x86_64"/libav*.so* "$pkgdir/usr/lib/gpty/"
+    cp -a "$srcdir/gpty-v$pkgver-linux-x86_64"/libsw*.so* "$pkgdir/usr/lib/gpty/"
+    install -Dm644 "$srcdir/gpty-v$pkgver-linux-x86_64/licenses/COPYING.LGPLv3" \
+        "$pkgdir/usr/share/licenses/gpty/COPYING.LGPLv3"
+    install -Dm644 "$srcdir/gpty-v$pkgver-linux-x86_64/licenses/COPYING.LGPLv2.1" \
+        "$pkgdir/usr/share/licenses/gpty/COPYING.LGPLv2.1"
+
     # Godot resolves the pack and the GDExtension library against the real
     # executable path (/proc/self/exe), so a symlink suffices on PATH — for
     # both halves: the CLI the agent API is driven from, and the GUI.

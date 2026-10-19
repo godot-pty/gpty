@@ -118,10 +118,39 @@ fi
 if [ "$PLATFORM" = "windows" ]; then
     step "FFmpeg $VERSION via vcpkg"
     [ -n "${VCPKG_ROOT:-}" ] || die "set VCPKG_ROOT (or use the Windows CI job) to build media deps"
+    VCPKG_PREFIX="$VCPKG_ROOT/installed/x64-windows"
     "$VCPKG_ROOT/vcpkg" install ffmpeg:x64-windows
-    PREFIX="$VCPKG_ROOT/installed/x64-windows"
+    # Compilation uses the vcpkg prefix (headers, import libs); the stable
+    # repo prefix carries the runtime DLLs and licenses that bundle-media
+    # copies beside the exported app.
+    mkdir -p "$PREFIX/bin" "$PREFIX/licenses"
+    cp "$VCPKG_PREFIX"/bin/*.dll "$PREFIX/bin"/
+    for license in "$VCPKG_PREFIX"/share/ffmpeg/copyright \
+                   "$VCPKG_PREFIX"/share/ffmpeg/LICENSE* \
+                   "$VCPKG_PREFIX"/share/ffmpeg/COPYING*; do
+        if [ -f "$license" ]; then
+            cp "$license" "$PREFIX/licenses/"
+        fi
+    done
+    cp "$COMPONENTS" "$PREFIX/components.txt"
+    {
+        echo "export FFMPEG_DIR='$VCPKG_PREFIX'"
+        echo "export PKG_CONFIG_PATH='$VCPKG_PREFIX/lib/pkgconfig:\${PKG_CONFIG_PATH:-}'"
+        echo "export PATH='$PREFIX/bin:$VCPKG_PREFIX/bin:\${PATH:-}'"
+    } > "$PREFIX/env.sh"
+    if [ -n "${GITHUB_ENV:-}" ]; then
+        {
+            echo "FFMPEG_DIR=$VCPKG_PREFIX"
+            echo "PKG_CONFIG_PATH=$VCPKG_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+        } >> "$GITHUB_ENV"
+    fi
+    if [ -n "${GITHUB_PATH:-}" ]; then
+        echo "$PREFIX/bin" >> "$GITHUB_PATH"
+        echo "$VCPKG_PREFIX/bin" >> "$GITHUB_PATH"
+    fi
     stamp > "$PREFIX/.stamp"
-    write_env
+    step "FFmpeg $VERSION ready"
+    printf '  source "%s/env.sh"\n' "$PREFIX"
     exit 0
 fi
 
@@ -147,6 +176,11 @@ fi
 cd "$BUILD_DIR/ffmpeg-$VERSION"
 
 EXTRA=()
+if [ "$PLATFORM" = "macos" ]; then
+    # Dylibs must be relocatable into the app bundle: ids and dependencies use
+    # @rpath, and each library carries @loader_path so its siblings resolve.
+    EXTRA+=(--install-name-dir=@rpath --extra-ldflags=-Wl,-rpath,@loader_path)
+fi
 if [ "$ARCH" = "x86_64" ]; then
     if ! command -v nasm >/dev/null; then
         warn "nasm not found; x86 SIMD assembly will be disabled (install nasm for release builds)"

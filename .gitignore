@@ -60,3 +60,7 @@ dist/gpty.sh
 
 # Pinned FFmpeg build (scripts/media-deps)
 dist/ffmpeg/
+
+# Local media bundle output (scripts/build -> scripts/bundle-media)
+dist/lib*.so*
+dist/licenses/

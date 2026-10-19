@@ -30,9 +30,13 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p release
+          mkdir -p release/ffmpeg/lib release/ffmpeg/licenses
           cp target/release/libgpty_gdext.so release/libgpty_gdext.linux.x86_64.so
           cp target/release/gpty release/gpty
+          cp -a dist/ffmpeg/linux-x86_64/lib/libav*.so* release/ffmpeg/lib/
+          cp -a dist/ffmpeg/linux-x86_64/lib/libsw*.so* release/ffmpeg/lib/
+          cp -a dist/ffmpeg/linux-x86_64/licenses/. release/ffmpeg/licenses/
+          cp dist/ffmpeg/linux-x86_64/components.txt release/ffmpeg/
 
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -67,8 +71,12 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p release
+          mkdir -p release/ffmpeg/lib release/ffmpeg/licenses
           cp target/release/libgpty_gdext.dylib release/libgpty_gdext.macos.${{ matrix.target.arch }}.dylib
+          cp dist/ffmpeg/macos-${{ matrix.target.arch }}/lib/libav*.dylib release/ffmpeg/lib/
+          cp dist/ffmpeg/macos-${{ matrix.target.arch }}/lib/libsw*.dylib release/ffmpeg/lib/
+          cp -a dist/ffmpeg/macos-${{ matrix.target.arch }}/licenses/. release/ffmpeg/licenses/
+          cp dist/ffmpeg/macos-${{ matrix.target.arch }}/components.txt release/ffmpeg/
           if [ "${{ matrix.target.arch }}" = "arm64" ]; then
             # The app export is universal, so the CLI that ships inside it must be too.
             rustup target add x86_64-apple-darwin
@@ -83,6 +91,33 @@ jobs:
         with:
           name: gpty-macos-${{ matrix.target.arch }}
           path: release/
+
+  # The macOS app is universal while each build runner has one arch's FFmpeg.
+  # Combine them here (lipo needs macOS) and ad-hoc sign the results so the
+  # export job can inject pre-signed libraries without touching a signature.
+  bundle-macos:
+    needs: [build-macos]
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+
+      - name: Build universal FFmpeg libraries
+        run: |
+          ./scripts/bundle-media macos-libs release/ffmpeg \
+            artifacts/gpty-macos-arm64/ffmpeg \
+            artifacts/gpty-macos-x86_64/ffmpeg
+
+      - name: Upload universal FFmpeg
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gpty-macos-ffmpeg
+          path: release/ffmpeg
 
   build-windows:
     runs-on: windows-latest
@@ -119,8 +154,13 @@ jobs:
       - name: Package
         run: |
           mkdir release
+          mkdir release\ffmpeg
+          mkdir release\ffmpeg\licenses
           copy target\release\gpty_gdext.dll release\gpty_gdext.windows.x86_64.dll
           copy target\release\gpty.exe release\gpty.exe
+          copy "%FFMPEG_DIR%\bin\*.dll" release\ffmpeg\
+          xcopy /y /q "dist\ffmpeg\windows-x86_64\licenses\*" release\ffmpeg\licenses\
+          copy "dist\ffmpeg\windows-x86_64\components.txt" release\ffmpeg\
 
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -130,7 +170,7 @@ jobs:
 
   # ── Export standalone app + create GitHub Release ─────────────────────
   export-release:
-    needs: [build-linux, build-macos, build-windows]
+    needs: [build-linux, build-macos, build-windows, bundle-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -206,6 +246,7 @@ jobs:
           godot --headless --path godot --export-release "Linux/X11" "$B/gpty-gui"
           cp gdext-artifacts/gpty-linux-x86_64/gpty "$B/"
           cp LICENSE LICENSE-EXCEPTIONS.md "$B/"
+          ./scripts/bundle-media linux "$B" gdext-artifacts/gpty-linux-x86_64/ffmpeg
           tar -czf "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64.tar.gz" -C "$GITHUB_WORKSPACE/dist" "gpty-${VERSION}-linux-x86_64"
 
       - name: Export Windows
@@ -216,6 +257,7 @@ jobs:
           cp godot/bin/gpty_gdext.windows.x86_64.dll "$B/" 2>/dev/null || true
           cp gdext-artifacts/gpty-windows-x86_64/gpty.exe "$B/"
           cp LICENSE LICENSE-EXCEPTIONS.md "$B/"
+          ./scripts/bundle-media windows "$B" gdext-artifacts/gpty-windows-x86_64/ffmpeg
           cd "$GITHUB_WORKSPACE/dist" && zip -r "gpty-${VERSION}-windows-x86_64.zip" "gpty-${VERSION}-windows-x86_64"
 
       - name: Export macOS
@@ -228,6 +270,9 @@ jobs:
           # next to it, and the CLI discovers the app under /Applications too.
           zip -j "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" LICENSE LICENSE-EXCEPTIONS.md \
             gdext-artifacts/gpty-macos-arm64/gpty
+          ./scripts/bundle-media macos-zip \
+            "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" \
+            "gdext-artifacts/gpty-macos-ffmpeg/ffmpeg"
 
       - name: Copy GDExtension artifacts for release
         run: |

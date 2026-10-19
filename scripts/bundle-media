@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── bundle-media: place the pinned FFmpeg runtime beside a gpty bundle ──
+# Usage:
+#   scripts/bundle-media linux   <target-dir> [ffmpeg-prefix]
+#   scripts/bundle-media windows <target-dir> [ffmpeg-prefix]
+#   scripts/bundle-media macos-libs <output-dir> <arm-prefix> <x86-prefix>
+#   scripts/bundle-media macos-zip  <export.zip> <universal-ffmpeg-prefix>
+#
+# The GDExtension records `$ORIGIN` (Linux) / `@loader_path` (macOS) and the
+# Windows loader searches the application directory, so the runtime only has
+# to sit beside the extension. `macos-libs` combines the two per-arch builds
+# (the release app is universal) and ad-hoc signs the result; `macos-zip`
+# injects those pre-signed libraries into the exported `.app`, which is why it
+# can run on the Linux export job.
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+step() { printf "\n${GREEN}── %s ──${NC}\n" "$1"; }
+die()  { printf "${RED}ERROR${NC} %s\n" "$1" >&2; exit 1; }
+
+default_prefix() {
+    local platform="$1" arch
+    if [ -n "${FFMPEG_DIR:-}" ] && [ -d "$FFMPEG_DIR" ]; then
+        printf '%s' "$FFMPEG_DIR"
+        return
+    fi
+    case "$(uname -m)" in
+        amd64|x86_64) arch="x86_64" ;;
+        arm64|aarch64) arch="arm64" ;;
+        *) arch="$(uname -m)" ;;
+    esac
+    printf '%s/dist/ffmpeg/%s-%s' "$REPO_ROOT" "$platform" "$arch"
+}
+
+copy_licenses() {
+    local source="$1" target="$2"
+    mkdir -p "$target"
+    if [ -d "$source/licenses" ]; then
+        cp -a "$source/licenses/." "$target/"
+    fi
+    if [ -f "$source/components.txt" ]; then
+        cp "$source/components.txt" "$target/"
+    fi
+}
+
+bundle_linux() {
+    local dest="$1" prefix="${2:-$(default_prefix linux)}"
+    [ -d "$prefix/lib" ] || die "no FFmpeg build at $prefix (run ./scripts/media-deps)"
+    mkdir -p "$dest"
+    # Symlinks matter: the loader resolves the SONAME `libavcodec.so.63`.
+    cp -a "$prefix"/lib/libav*.so* "$dest"/
+    cp -a "$prefix"/lib/libsw*.so* "$dest"/
+    copy_licenses "$prefix" "$dest/licenses"
+    if command -v ldd >/dev/null 2>&1; then
+        local ext
+        for ext in "$dest"/libgpty_gdext.*.so; do
+            [ -f "$ext" ] || continue
+            if LD_LIBRARY_PATH= ldd "$ext" 2>/dev/null | grep -q 'not found'; then
+                LD_LIBRARY_PATH= ldd "$ext" | grep 'not found' >&2
+                die "the bundled extension has unresolved libraries"
+            fi
+        done
+    fi
+    step "FFmpeg runtime placed in $dest"
+}
+
+bundle_windows() {
+    local dest="$1" prefix="${2:-$(default_prefix windows)}"
+    [ -d "$prefix/bin" ] || die "no FFmpeg build at $prefix (run ./scripts/media-deps)"
+    mkdir -p "$dest"
+    cp "$prefix"/bin/*.dll "$dest"/
+    copy_licenses "$prefix" "$dest/licenses"
+    step "FFmpeg DLLs placed in $dest"
+}
+
+macos_libs() {
+    local out="$1" arm="$2" x86="$3"
+    [ -d "$arm/lib" ] || die "no arm64 FFmpeg build at $arm"
+    [ -d "$x86/lib" ] || die "no x86_64 FFmpeg build at $x86"
+    command -v lipo >/dev/null || die "lipo is required (run this on macOS)"
+    command -v install_name_tool >/dev/null || die "install_name_tool is required"
+    mkdir -p "$out/lib"
+    local arm_lib base
+    for arm_lib in "$arm"/lib/libav*.dylib "$arm"/lib/libsw*.dylib; do
+        [ -f "$arm_lib" ] || continue
+        base="$(basename "$arm_lib")"
+        [ -f "$x86/lib/$base" ] || die "x86_64 build lacks $base"
+        lipo -create "$arm_lib" "$x86/lib/$base" -output "$out/lib/$base"
+        install_name_tool -id "@rpath/$base" "$out/lib/$base"
+        install_name_tool -add_rpath "@loader_path" "$out/lib/$base" 2>/dev/null || true
+        # Rewrite any absolute build-prefix dependency to the @rpath form.
+        otool -L "$out/lib/$base" | tail -n +2 | awk '{print $1}' | while read -r dep; do
+            local dep_base
+            dep_base="$(basename "$dep")"
+            case "$dep_base" in
+                libav*|libsw*) install_name_tool -change "$dep" "@rpath/$dep_base" "$out/lib/$base" ;;
+            esac
+        done
+        # install_name_tool invalidates the ad-hoc signature; re-sign so an
+        # arm64 loader accepts it.
+        codesign --force --sign - "$out/lib/$base" >/dev/null 2>&1 || true
+    done
+    # The extension itself must reference @rpath, not the build prefix, or the
+    # pre-signed libraries above cannot satisfy it after the move.
+    local ext
+    for ext in "$arm"/libgpty_gdext*.dylib "$(dirname "$arm")"/libgpty_gdext*.dylib; do
+        [ -f "$ext" ] || continue
+        if otool -L "$ext" | grep -E '/lib(av|sw)[a-z]+[^ ]*\.dylib' >/dev/null; then
+            die "$(basename "$ext") links FFmpeg by absolute path; rebuild with --install-name-dir=@rpath"
+        fi
+    done
+    copy_licenses "$arm" "$out/licenses"
+    step "Universal FFmpeg libraries in $out"
+}
+
+macos_zip() {
+    local zip="$1" universal="$2"
+    [ -f "$zip" ] || die "no export archive at $zip"
+    [ -d "$universal/lib" ] || die "no universal FFmpeg libraries at $universal"
+    command -v unzip >/dev/null && command -v zip >/dev/null || die "zip/unzip are required"
+    local work app macos_dir
+    work="$(mktemp -d)"
+    trap 'rm -rf "${work:-}"' EXIT
+    unzip -q "$zip" -d "$work/bundle"
+    app="$(find "$work/bundle" -maxdepth 1 -name '*.app' | head -1)"
+    [ -n "$app" ] || die "the export archive has no .app bundle"
+    macos_dir="$app/Contents/MacOS"
+    [ -d "$macos_dir" ] || die "the app has no Contents/MacOS"
+    cp "$universal"/lib/*.dylib "$macos_dir"/
+    mkdir -p "$app/Contents/Resources/licenses"
+    if [ -d "$universal/licenses" ]; then
+        cp -a "$universal/licenses/." "$app/Contents/Resources/licenses/"
+    fi
+    # The export is unsigned today; when signing lands this injection must run
+    # before the final codesign pass.
+    rm -f "$zip"
+    (cd "$work/bundle" && zip -qry "$zip" .)
+    step "FFmpeg runtime injected into $(basename "$zip")"
+}
+
+command="${1:-}"
+case "$command" in
+    linux)       [ $# -ge 2 ] || die "usage: $0 linux <target-dir> [ffmpeg-prefix]"; bundle_linux "$2" "${3:-$(default_prefix linux)}" ;;
+    windows)     [ $# -ge 2 ] || die "usage: $0 windows <target-dir> [ffmpeg-prefix]"; bundle_windows "$2" "${3:-$(default_prefix windows)}" ;;
+    macos-libs)  [ $# -ge 4 ] || die "usage: $0 macos-libs <output-dir> <arm-prefix> <x86-prefix>"; macos_libs "$2" "$3" "$4" ;;
+    macos-zip)   [ $# -ge 3 ] || die "usage: $0 macos-zip <export.zip> <universal-prefix>"; macos_zip "$2" "$3" ;;
+    *) die "usage: $0 <linux|windows|macos-libs|macos-zip> ..." ;;
+esac

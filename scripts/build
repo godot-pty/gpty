@@ -146,6 +146,23 @@ if [[ "$PLATFORM" == "windows" ]]; then
     ok "dist/gpty_gdext.windows.x86_64.dll"
 fi
 
+step "Bundle the pinned FFmpeg runtime"
+case "$PLATFORM" in
+    linux)
+        "$REPO_ROOT/scripts/bundle-media" linux "$REPO_ROOT/dist" \
+            "$REPO_ROOT/dist/ffmpeg/linux-$ARCH"
+        ;;
+    windows)
+        "$REPO_ROOT/scripts/bundle-media" windows "$REPO_ROOT/dist" \
+            "$REPO_ROOT/dist/ffmpeg/windows-$ARCH"
+        ;;
+    macos)
+        "$REPO_ROOT/scripts/bundle-media" macos-zip "$REPO_ROOT/dist/gpty.zip" \
+            "$REPO_ROOT/dist/ffmpeg/macos-$ARCH"
+        ;;
+esac
+ok "media runtime beside the export"
+
 # ── Summary ────────────────────────────────────────────────────────────
 printf "\n${GREEN}${BOLD}Build complete.${NC}\n"
 case "$PLATFORM" in
