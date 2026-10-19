@@ -320,5 +320,10 @@ func test_the_test_user_root_redirects_the_history_store():
 	OS.set_environment("GPTY_TEST_USER_DIR", previous)
 
 	assert_true(stats is Dictionary, "history_store_stats must answer JSON")
-	assert_eq(str(stats.get("path", "")), root.path_join("history.db"))
+	# Rust's `Path::join` emits the platform separator; GDScript's `path_join`
+	# uses `/`. Compare normalized strings, not the spelling.
+	assert_eq(
+		str(stats.get("path", "")).replace("\\", "/"),
+		root.path_join("history.db").replace("\\", "/")
+	)
 	DirAccess.remove_absolute(root)
