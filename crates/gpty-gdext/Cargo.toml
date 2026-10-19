@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 godot = { version = "0.5", features = ["api-4-4"] }
 gpty-core = { path = "../gpty-core" }
 gpty-ai = { path = "../gpty-ai" }
+gpty-media = { path = "../gpty-media" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 log = "0.4"
 regex = "1"

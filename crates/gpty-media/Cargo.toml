@@ -1,0 +1,11 @@
+[package]
+name = "gpty-media"
+version = "0.6.0"
+edition = "2024"
+description = "Media probe and decode backend for gpty: demux/decode through a pinned FFmpeg build"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+ffmpeg-the-third = { version = "6.0.0", default-features = false, features = ["codec", "format", "software-scaling", "software-resampling"] }
+log = "0.4"
+libc = "0.2"

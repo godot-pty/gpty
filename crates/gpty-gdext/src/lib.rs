@@ -29,6 +29,7 @@ mod grid_api;
 mod history_api;
 mod ipc;
 mod markdown;
+mod media_api;
 mod omp_events;
 mod vault_api;
 mod vault_ipc;

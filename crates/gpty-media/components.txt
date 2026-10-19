@@ -1,0 +1,11 @@
+# The closed FFmpeg component set gpty ships.
+#
+# `scripts/media-deps` turns these into `--enable-*-` configure flags and the
+# Rust allowlists in `src/lib.rs` are checked against this file by
+# `tests/build_recipe.rs`. One edit here is the only place a format is added:
+# a demuxer without its decoder (or vice versa) is a partial file that opens
+# and then fails, which is worse than a clean refusal.
+
+decoders=h264,hevc,vp8,vp9,av1,theora,mpeg2video,mpeg4,aac,mp3,opus,vorbis,flac,alac,ac3,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le
+demuxers=mov,matroska,ogg,wav,flac,mp3,aac,avi,mpegts
+parsers=h264,hevc,vp9,av1,mpeg4video,mpegvideo,aac,aac_latm,opus,vorbis,flac,mpegaudio
