@@ -116,8 +116,8 @@ func test_pane_status_without_a_pane_covers_every_pane():
 	assert_false(one.has("error"), "a terminal target must answer its status")
 	assert_true(one.has("running"), "the single-pane answer must stay the status document itself")
 	var not_terminal = WorkspaceIpcHandlers.handle(_ws, "paneStatus", {"pane_id": viewer_id})
-	assert_true(not_terminal.has("error"), "a non-terminal target must be refused")
-	assert_string_contains(str(not_terminal["error"]["message"]), "not a terminal")
+	assert_true(not_terminal.has("error"), "a pane without status primitives must be refused")
+	assert_string_contains(str(not_terminal["error"]["message"]), "no status primitives")
 
 	_ws._kill(terminal)
 	_ws._kill(viewer)

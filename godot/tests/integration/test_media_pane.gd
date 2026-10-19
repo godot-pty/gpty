@@ -86,6 +86,13 @@ func _await_audio(pane: MediaPane, budget := 300) -> bool:
 	return false
 
 
+func _long_mp4() -> String:
+	var path := ProjectSettings.globalize_path("res://") \
+		.path_join("../crates/gpty-media/tests/fixtures/long_h264.mp4").simplify_path()
+	assert_true(FileAccess.file_exists(path), "the long MP4 fixture must be readable")
+	return path
+
+
 func _av_mp4() -> String:
 	var path := ProjectSettings.globalize_path("res://") \
 		.path_join("../crates/gpty-media/tests/fixtures/av_h264_aac.mp4").simplify_path()
@@ -251,13 +258,59 @@ func test_an_unrelated_setting_does_not_restart_playback():
 	assert_eq(pane.pane_name, "Renamed")
 
 
+func test_transport_pause_and_seek_are_reported():
+	var pane := _make_pane()
+	pane.load_media(_long_mp4())
+	assert_true(await _await_video(pane))
+
+	var doc = pane.status_document()
+	assert_true(doc is Dictionary, "a playing media pane has a status document")
+	assert_eq(doc["kind"], MediaFiles.VIDEO)
+	assert_gt(doc["duration_us"], 1_000_000)
+	assert_false(doc["paused"])
+
+	pane._toggle_pause()
+	assert_true(pane._paused)
+	var paused_doc = pane.status_document()
+	assert_true(paused_doc["paused"])
+	var frozen = int(paused_doc["position_us"])
+	await get_tree().process_frame
+	assert_eq(int(pane.status_document()["position_us"]), frozen,
+		"a paused media clock must not advance")
+
+	pane._toggle_pause()
+	assert_false(pane._paused)
+	pane._seek_to(1_500_000)
+	var after = pane.status_document()
+	assert_true(after is Dictionary)
+	assert_gte(int(after["position_us"]), 1_400_000, "seek must move the transport position")
+	assert_false(after["paused"])
+
+
+func test_loop_restarts_a_finished_file():
+	var pane := _make_pane()
+	pane.loop_enabled = true
+	pane.load_media(_mp4())
+	assert_true(await _await_video(pane))
+	var restarted := false
+	for _i in 600:
+		if pane._loop_count > 0:
+			restarted = true
+			break
+		await get_tree().process_frame
+	assert_true(restarted, "the loop must seek back and restart the clip")
+	assert_false(pane._finished)
+
+
 func test_layout_state_carries_the_file_path():
 	var pane := _make_pane()
 	var path := _wav()
 	pane.load_media(path)
+	pane.loop_enabled = true
 	var state := pane._get_layout_state()
 	assert_eq(state.get("type"), "media")
 	assert_eq(state.get("file_path"), path)
+	assert_true(state.get("loop"), "loop is pane state carried by the tile")
 
 
 func test_it_does_not_accept_routed_content():

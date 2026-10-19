@@ -31,6 +31,19 @@ var _first_pts_us := 0
 var _finished := false
 var _finished_announced := false
 
+var _transport: HBoxContainer
+var _play_button: Button
+var _seek_slider: HSlider
+var _time_label: Label
+var _loop_check: CheckBox
+var _duration_us := 0
+var _seeking := false
+var _paused := false
+var _paused_position_us := 0
+var _paused_at_us := 0
+var loop_enabled := false
+var _loop_count := 0
+
 var _audio: AudioStreamPlayer
 var _audio_playback: AudioStreamGeneratorPlayback
 var _pending_audio: Array = []
@@ -136,6 +149,38 @@ func _build_ui():
 	_placeholder_hint.custom_minimum_size.x = 200
 	box.add_child(_placeholder_hint)
 
+	_transport = HBoxContainer.new()
+	_transport.name = "Transport"
+	_transport.visible = false
+	_transport.add_theme_constant_override("separation", 6)
+	root.add_child(_transport)
+
+	_play_button = Button.new()
+	_play_button.text = "Pause"
+	_play_button.custom_minimum_size.x = 64
+	_play_button.pressed.connect(_toggle_pause)
+	_transport.add_child(_play_button)
+
+	_seek_slider = HSlider.new()
+	_seek_slider.min_value = 0
+	_seek_slider.max_value = 1
+	_seek_slider.step = 1
+	_seek_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_seek_slider.drag_started.connect(func(): _seeking = true)
+	_seek_slider.drag_ended.connect(_on_seek_drag_ended)
+	_transport.add_child(_seek_slider)
+
+	_time_label = Label.new()
+	_time_label.custom_minimum_size.x = 112
+	_time_label.text = "0:00 / 0:00"
+	_transport.add_child(_time_label)
+
+	_loop_check = CheckBox.new()
+	_loop_check.text = "Loop"
+	_loop_check.button_pressed = loop_enabled
+	_loop_check.toggled.connect(_on_loop_toggled)
+	_transport.add_child(_loop_check)
+
 	_status = Label.new()
 	_status.name = "Status"
 	_status.visible = false
@@ -203,6 +248,14 @@ func _open_media(path: String, want_video: bool, want_audio: bool) -> void:
 	_finished_announced = false
 	_clock_start_us = -1
 	_pending_frames.clear()
+	_duration_us = 0
+	_paused = false
+	_paused_position_us = 0
+	_seek_slider.max_value = 1
+	_seek_slider.value = 0
+	_play_button.text = "Pause"
+	_loop_check.button_pressed = loop_enabled
+	_transport.visible = true
 	_status.text = "Opening %s" % MediaFiles.display_name(path)
 
 ## The generator buffer is set up now, but playback starts with the first
@@ -236,8 +289,14 @@ func _poll_backend() -> void:
 			var error = status.get("error", {})
 			_show_error("Could not decode this media file: %s" % str(error.get("message", "")))
 			return
+		var duration_value = status.get("duration_us")
+		if (duration_value is int or duration_value is float) and int(duration_value) > 0:
+			_duration_us = int(duration_value)
 		if status.get("state") == "finished":
 			_finished = true
+	if _paused:
+		_update_transport()
+		return
 	if _kind == MediaFiles.VIDEO:
 		_poll_video()
 	_feed_audio()
@@ -247,9 +306,121 @@ func _poll_backend() -> void:
 		if _audio_started and _audio_playback != null \
 				and _audio_playback.get_frames_available() < _generator_capacity - 64:
 			return
+		if loop_enabled:
+			_restart_loop()
+		else:
+			_finished_announced = true
+			_play_button.text = "Play"
+			_status.visible = true
+			_status.text = "Finished %s" % MediaFiles.display_name(file_path)
+	_update_transport()
+
+func _current_position_us() -> int:
+	if _paused:
+		return _paused_position_us
+	var clock := _media_clock_us()
+	return maxi(0, clock)
+
+func _fmt_time(us: int) -> String:
+	var seconds := int(us / 1_000_000)
+	return "%d:%02d" % [int(seconds / 60), seconds % 60]
+
+func _update_transport() -> void:
+	if _transport == null or _seeking:
+		return
+	var position := _current_position_us()
+	if _duration_us > 0:
+		position = clampi(position, 0, _duration_us)
+		_seek_slider.max_value = maxf(1.0, float(_duration_us) / 1000.0)
+	_seek_slider.value = float(position) / 1000.0
+	_time_label.text = "%s / %s" % [_fmt_time(position), _fmt_time(_duration_us)]
+
+## Play/pause. A finished, non-looping file restarts from zero; otherwise the
+## audio generator pauses in place and a video-only clock is offset so the
+## pause does not consume media time.
+func _toggle_pause() -> void:
+	if _backend == null or _kind == "":
+		return
+	if _finished_announced and not loop_enabled:
+		_finished = false
+		_finished_announced = false
+		_paused = false
+		_play_button.text = "Pause"
+		_status.text = "Playing %s" % MediaFiles.display_name(file_path)
+		_seek_to(0)
+		return
+	_paused = not _paused
+	if _paused:
+		_paused_position_us = maxi(0, _media_clock_us())
+		_paused_at_us = Time.get_ticks_usec()
+		if _audio_playing:
+			_audio.stream_paused = true
+		_play_button.text = "Play"
+		_status.visible = true
+		_status.text = "Paused"
+	else:
+		if _audio_playing:
+			_audio.stream_paused = false
+		elif _clock_start_us >= 0:
+			_clock_start_us += Time.get_ticks_usec() - _paused_at_us
+		_play_button.text = "Pause"
+		_status.text = "Playing %s" % MediaFiles.display_name(file_path)
+
+func _on_seek_drag_ended(value_changed: bool) -> void:
+	_seeking = false
+	if value_changed:
+		_seek_to(int(_seek_slider.value * 1000.0))
+
+func _seek_to(position_us: int) -> void:
+	if _backend == null:
+		return
+	var answer = JSON.parse_string(_backend.seek(position_us))
+	if not (answer is Dictionary) or not answer.get("ok", false):
+		_status.visible = true
+		_status.text = "Seek failed"
+		return
+	_pending_frames.clear()
+	_pending_audio.clear()
+	_finished = false
+	_finished_announced = false
+	_clock_start_us = -1
+	_first_pts_us = 0
+	if _audio_playback != null:
+		_audio_playback.clear_buffer()
+	_audio_playing = false
+	_audio_started = false
+	_audio_start_pts_us = 0
+	if _paused:
+		_paused_position_us = position_us
+	_update_transport()
+
+func _on_loop_toggled(toggled_on: bool) -> void:
+	loop_enabled = toggled_on
+
+## Restart a finished file. The backend worker stays alive after EOF, so the
+## same seek path applies; local queues and the generator buffer are cleared
+## and the first real chunk starts a fresh media clock.
+func _restart_loop() -> void:
+	var answer = JSON.parse_string(_backend.seek(0))
+	if not (answer is Dictionary) or not answer.get("ok", false):
 		_finished_announced = true
 		_status.visible = true
 		_status.text = "Finished %s" % MediaFiles.display_name(file_path)
+		return
+	_pending_frames.clear()
+	_pending_audio.clear()
+	if _audio_playback != null:
+		_audio_playback.clear_buffer()
+	_audio_playing = false
+	_audio_started = false
+	_audio_start_pts_us = 0
+	_clock_start_us = -1
+	_first_pts_us = 0
+	_finished = false
+	_finished_announced = false
+	_paused_position_us = 0
+	_loop_count += 1
+	_play_button.text = "Pause"
 
 ## Current media position in microseconds. Audio, when running, is the clock;
 ## otherwise the monotonic start clock is used. `-1` means no clock yet.
@@ -261,6 +432,8 @@ func _media_clock_us() -> int:
 	return _first_pts_us + (Time.get_ticks_usec() - _clock_start_us)
 
 func _poll_video() -> void:
+	if _paused:
+		return
 	var now := Time.get_ticks_usec()
 	if _clock_start_us < 0 and not _audio_started:
 		_clock_start_us = now
@@ -310,7 +483,7 @@ func _present_video(frame: Dictionary) -> void:
 ## Push decoded chunks into the generator while it has room. A chunk that
 ## does not fit stays pending; the generator consumes in real time.
 func _feed_audio() -> void:
-	if _audio.stream == null:
+	if _audio.stream == null or _paused:
 		return
 	# Drain the backend queue even when the generator is full. Leaving the
 	# queue full blocks the worker on an audio send, and that same worker
@@ -376,6 +549,8 @@ func _start_audio(chunk: Dictionary) -> bool:
 	_audio_playing = true
 	_audio_started = true
 	_audio_start_pts_us = int(chunk.get("pts_us", 0))
+	if _paused:
+		_audio.stream_paused = true
 	return true
 
 func _teardown_stream():
@@ -403,6 +578,11 @@ func _stop_backend():
 	_audio_started = false
 	_audio_start_pts_us = 0
 	_pending_audio.clear()
+	_paused = false
+	_paused_position_us = 0
+	_seeking = false
+	if _transport != null:
+		_transport.visible = false
 
 func _show_idle():
 	_stop_backend()
@@ -429,12 +609,41 @@ func _show_error(message: String):
 func _pane_type() -> String:
 	return "media"
 
+## Transport primitives for `paneStatus`. The document is the pane's own
+## display state; it is never an input to a decision.
+func status_document() -> Variant:
+	if _backend == null or file_path == "":
+		return null
+	var status = JSON.parse_string(_backend.status())
+	if not (status is Dictionary):
+		return null
+	var position = _paused_position_us if _paused else _media_clock_us()
+	if position < 0:
+		var reported = status.get("position_us")
+		position = int(reported) if reported is int or reported is float else 0
+	var duration_value = status.get("duration_us")
+	var duration_us := _duration_us
+	if duration_value is int or duration_value is float:
+		duration_us = int(duration_value)
+	return {
+		"kind": _kind,
+		"file": file_path,
+		"state": status.get("state"),
+		"position_us": int(position),
+		"duration_us": duration_us,
+		"paused": _paused,
+		"loop": loop_enabled,
+		"volume_db": volume_db,
+		"muted": muted,
+	}
+
 func _get_layout_state() -> Dictionary:
 	var state = super._get_layout_state()
 	state.merge({
 		"file_path": file_path,
 		"volume_db": volume_db,
 		"muted": muted,
+		"loop": loop_enabled,
 	})
 	return state
 
@@ -453,6 +662,10 @@ func apply_settings(settings: Dictionary):
 	if settings.get("muted") is bool:
 		muted = settings["muted"]
 		_apply_audio_volume()
+	if settings.get("loop") is bool:
+		loop_enabled = settings["loop"]
+		if _loop_check != null:
+			_loop_check.button_pressed = loop_enabled
 	if settings.get("file_path") is String:
 		if file_path != previous_path:
 			load_media(file_path)

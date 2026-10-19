@@ -1208,6 +1208,13 @@ func _draw_search_highlights(off: Vector2):
 		var color = SEARCH_ACTIVE_COLOR if i == current else SEARCH_HIGHLIGHT_COLOR
 		draw_rect(Rect2(off.x + match_col * _cell_w, off.y + display_row * _cell_h, _cell_w, _cell_h), color)
 
+## The process/grid document the pane API promises, unchanged for terminals.
+func status_document() -> Variant:
+	if _terminal == null:
+		return null
+	var parsed = JSON.parse_string(str(_terminal.get_status()))
+	return parsed if parsed is Dictionary else null
+
 func _pane_type() -> String:
 	return "terminal"
 

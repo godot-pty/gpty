@@ -104,6 +104,14 @@ func _get_layout_state() -> Dictionary:
 func _pane_type() -> String:
 	return "base"  # overridden by concrete types
 
+## Status primitives for `paneStatus`, or null when the pane has none.
+##
+## A terminal returns its process/grid document; the media pane returns its
+## transport state. The IPC aggregate lists a pane with `status: null` rather
+## than dropping it, so a client can still see that the pane exists.
+func status_document() -> Variant:
+	return null
+
 ## Routed-content capability contract.
 ##
 ## Routers must ask before delivery, and acknowledge source data only when

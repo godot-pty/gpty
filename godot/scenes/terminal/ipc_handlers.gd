@@ -149,9 +149,10 @@ static func handle(ws, method: String, params: Dictionary):
 		"paneStatus":
 			# No target = every pane's status (the CLI's no-argument mode and
 			# the MCP tool's): one document, built here where the pane list and
-			# the status primitives already live. Non-terminal panes have no
-			# status primitives — they are listed with `status: null` rather
-			# than dropped, so the answer covers every pane the list named.
+			# the status primitives already live. Every pane answers through
+			# `status_document()`; one without primitives is listed with
+			# `status: null` rather than dropped, so the answer covers every
+			# pane the list named.
 			var ps_target := str(params.get("pane_id", ""))
 			if ps_target == "":
 				var ps_panes := []
@@ -159,29 +160,23 @@ static func handle(ws, method: String, params: Dictionary):
 					var ps_any = ws._tm._find_body(t.wrapper)
 					if ps_any == null:
 						continue
-					var ps_entry := {
+					var ps_any_status = ps_any.status_document()
+					ps_panes.append({
 						"pane_id": ps_any.attachment_id,
 						"label": ps_any.pane_label,
 						"type": ps_any._pane_type(),
-						"status": null,
-					}
-					if ps_any is TerminalPane:
-						var ps_all = JSON.parse_string(str(ps_any._terminal.get_status()))
-						if ps_all is Dictionary:
-							ps_entry["status"] = ps_all
-					ps_panes.append(ps_entry)
+						"status": ps_any_status if ps_any_status is Dictionary else null,
+					})
 				return {"panes": ps_panes}
 			var ps_body = ws._find_pane_by_label(ps_target)
 			if ps_body == null:
 				return error("Pane '%s' not found" % ps_target)
-			# Existing but not a terminal: the pane is real, it just has no
-			# status primitives. Say that instead of "not found", which sent
+			# Existing but with no status primitives: the pane is real, it just
+			# has nothing to report. Say that instead of "not found", which sent
 			# an agent looking for a pane it can already see in listPanes.
-			if not (ps_body is TerminalPane):
-				return error("Pane '%s' has no status (not a terminal)" % ps_target)
-			var ps_status = JSON.parse_string(str(ps_body._terminal.get_status()))
+			var ps_status = ps_body.status_document()
 			if not (ps_status is Dictionary):
-				return error("Pane status unavailable")
+				return error("Pane '%s' has no status primitives" % ps_target)
 			return ps_status
 		"paneRun":
 			var run_cmd := str(params.get("command", "")).strip_edges()
