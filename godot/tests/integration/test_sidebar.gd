@@ -81,6 +81,8 @@ func test_build_offers_one_add_button_per_pane_type():
 	assert_not_null(row, "the Add Pane row must exist after build")
 	assert_eq(row.get_child_count(), PaneTypes.ALL.size(),
 		"one button per registered pane type")
+	assert_lte(row.get_combined_minimum_size().x, 164.0,
+		"the pane buttons must fit the sidebar's content width (eight in one row clipped the last icon)")
 	for i in PaneTypes.ALL.size():
 		var info: Dictionary = PaneTypes.ALL[PaneTypes.ALL.keys()[i]]
 		assert_string_contains((row.get_child(i) as Button).tooltip_text, info["name"],

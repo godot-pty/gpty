@@ -2,6 +2,12 @@
 
 Log all notable changes to the project. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — Unreleased
+
+### Added
+
+- **A media pane plays local audio and video.** An eighth pane type, `media`, opens an absolute local file and plays it through Godot's native streams — Theora `.ogv` video and Ogg Vorbis/MP3/WAV audio — with the file name and playback state shown in the pane. The path is validated at use by the closed `MediaFiles` table (absolute, regular file, known extension) and never reaches `ResourceLoader`, so a file-supplied layout or profile cannot smuggle a `.gd` or `.tscn` in behind a media extension; remote URLs and project schemes are refused with an in-pane explanation. The file tree's in-app route now covers media too (supported files ask the workspace for a media pane, and reopening the same file focuses the pane already playing it), and a media tile restores its path. Transport controls, `paneStatus` transport state, and the Rust demux/decode matrix for the wider container/codec set are the release's remaining media items.
+
 ## [0.6.0] — 2026-10-19
 
 ### Added

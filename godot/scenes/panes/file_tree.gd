@@ -1,7 +1,8 @@
 extends PaneBody
 class_name FileTreePane
-# Simple file tree pane — lists files in a directory and opens them either in
-# an in-app code viewer or through the system's default handler.
+# Simple file tree pane — lists files in a directory and opens them in an
+# in-app viewer (text via `code_viewer`, local media via `media`) or through
+# the system's default handler.
 
 @export var root_path := "/"
 ## How an activation opens a file: `viewer` (default) asks the workspace for
@@ -56,11 +57,12 @@ func _ready():
 			ToastManager.warn("Not a regular file — refusing to open: %s" % path, 4.0, "File Tree")
 	)
 
-## Where an activated file goes. A supported text file opens in the viewer by
-## default — the pane set already renders it, and the in-app route never hands
-## the path to a desktop handler. Every other file (and every file when
-## `open_in` is `system`) keeps the existing confirm-then-system path, so a
-## binary, an image or a downloaded `.desktop` behaves exactly as before.
+## Where an activated file goes. A supported text file opens in the code
+## viewer and a supported local media file in the media pane — the pane set
+## already renders or plays them, and the in-app route never hands the path to
+## a desktop handler. Every other file (and every file when `open_in` is
+## `system`) keeps the existing confirm-then-system path, so a binary, an image
+## or a downloaded `.desktop` behaves exactly as before.
 func _open_activated(path: String) -> void:
 	if not path.is_absolute_path():
 		ToastManager.warn("Refusing to open a non-absolute path: %s" % path, 4.0, "File Tree")
@@ -71,6 +73,10 @@ func _open_activated(path: String) -> void:
 			# Panes never spawn panes: the workspace owns the spawn, the
 			# same-path focus rule and activation.
 			request_pane.emit(viewer, {"file_path": path})
+			return
+		var media := MediaFiles.pane_for(path)
+		if media != "":
+			request_pane.emit(media, {"file_path": path})
 			return
 	_confirm_open(path)
 

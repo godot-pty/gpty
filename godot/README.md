@@ -69,12 +69,14 @@ godot/
             ├── pane_body.gd
             ├── pane_types.gd    # Pane registry, sanitizers, palette command list
             ├── viewable_files.gd # Closed table: which paths open in the viewer
+            ├── media_files.gd   # Closed table + path gate for the media pane
             ├── code_viewer.gd
             ├── file_tree.gd
             ├── text_read.gd     # Shared read guard: regular-file gate + 1 MiB cap
             ├── inspector_pane.gd
             ├── cli_view_pane.gd
             ├── reasoning_pane.gd
+            ├── media_pane.gd    # Local audio/video playback
             └── wiki_pane.gd     # Vault browser, Markdown note editor, link graph
 ```
 

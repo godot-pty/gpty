@@ -300,6 +300,29 @@ func test_a_wiki_tile_restores_its_vault():
 	DirAccess.remove_absolute(vault.path_join("note.md"))
 	DirAccess.remove_absolute(vault)
 
+## A media tile is the same kind of path carrier as a wiki tile: the absolute
+## file path must survive sanitize_tile and the real restore path must rebuild
+## a pane that actually opens (and plays) it, not merely accept the type.
+func test_a_media_tile_restores_its_file():
+	var path := TestPaths.user_path("media_restore_tone.wav")
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_8_BITS
+	stream.mix_rate = 8000
+	stream.stereo = false
+	var data := PackedByteArray()
+	data.resize(8000)
+	data.fill(128)
+	stream.data = data
+	assert_eq(stream.save_to_wav(path), OK)
+
+	var restored = await _restore(_one_tile({"type": "media", "file_path": path}))
+	assert_eq(restored.size(), 1)
+	assert_true(restored[0] is MediaPane, "a media tile comes back as a media pane")
+	assert_eq(restored[0].file_path, path, "the file path survives the restore")
+	assert_true(restored[0]._audio.playing, "the restored pane starts its stream")
+
+	DirAccess.remove_absolute(path)
+
 func test_only_the_agent_workspace_ships_as_a_builtin():
 	# The five tool-specific built-ins (OMP, Herdr, Lazygit, Neovim, Claude)
 	# now come from one plugin repo per tool, so the file carries the single

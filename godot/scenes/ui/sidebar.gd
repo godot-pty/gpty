@@ -227,9 +227,16 @@ func _add_pane_buttons(v: VBoxContainer):
 	lbl.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
 	v.add_child(lbl)
 
-	var row = HBoxContainer.new()
+	# A two-row grid, not a strip: eight pane types in one row overflow the
+	# 164 px content width (the eighth icon was clipped to `|` when the media
+	# pane landed). Four columns keep every button reachable and leave the
+	# icons their ambient size.
+	var row = GridContainer.new()
 	row.name = "PaneTypeRow"
-	row.add_theme_constant_override("separation", 2)
+	row.columns = 4
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("h_separation", 2)
+	row.add_theme_constant_override("v_separation", 2)
 
 	for key in PaneTypes.ALL:
 		var info = PaneTypes.ALL[key]

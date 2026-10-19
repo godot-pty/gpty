@@ -58,6 +58,7 @@ pub enum PaneType {
     Reasoning,
     CliView,
     Wiki,
+    Media,
 }
 
 /// Serialized as the GUI's own key, not as a Rust variant name.
@@ -87,7 +88,7 @@ impl PaneType {
     /// The one enumeration: [`Self::as_str`] names each, serde emits exactly
     /// those names, and callers that need "all of them" (the manifest
     /// validator, tests) iterate this instead of writing a second list.
-    pub const ALL: [PaneType; 7] = [
+    pub const ALL: [PaneType; 8] = [
         PaneType::Terminal,
         PaneType::CodeViewer,
         PaneType::FileTree,
@@ -95,6 +96,7 @@ impl PaneType {
         PaneType::Reasoning,
         PaneType::CliView,
         PaneType::Wiki,
+        PaneType::Media,
     ];
 
     /// Returns the GDScript `PaneTypes.ALL` dictionary key for this type.
@@ -107,6 +109,7 @@ impl PaneType {
             Self::Reasoning => "reasoning",
             Self::CliView => "cli_view",
             Self::Wiki => "wiki",
+            Self::Media => "media",
         }
     }
 
@@ -128,6 +131,7 @@ impl std::str::FromStr for PaneType {
             "reasoning" => Ok(Self::Reasoning),
             "cli_view" => Ok(Self::CliView),
             "wiki" => Ok(Self::Wiki),
+            "media" => Ok(Self::Media),
             _ => Err(()),
         }
     }

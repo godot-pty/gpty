@@ -185,6 +185,24 @@ func test_file_tree_activation_of_a_supported_file_requests_a_viewer():
 	assert_eq(_dialogs_of(pane).size(), 0, "the in-app route never asks for confirmation")
 	assert_eq(opened, [], "the in-app route never reaches the system handler")
 
+## A supported media file takes the media-pane route, like a text file takes
+## the viewer route: no confirmation and no system handler.
+func test_file_tree_activation_of_a_media_file_requests_the_media_pane():
+	var path := _write(_tmp.path_join("clip.ogv"), "OggS — not decoded: the tree only requests a pane")
+	var pane := _make_tree(_tmp)
+	await get_tree().process_frame
+	var opened := []
+	pane.open_external = func(uri: String): opened.append(uri)
+	var requests := _requests(pane)
+
+	_activate(pane, "clip.ogv")
+
+	assert_eq(requests.size(), 1, "one activation asks the workspace once")
+	assert_eq(requests[0][0], "media", "an Ogg video is a media type")
+	assert_eq(requests[0][1].get("file_path"), path, "the request carries the exact path")
+	assert_eq(_dialogs_of(pane).size(), 0, "the in-app route never asks for confirmation")
+	assert_eq(opened, [], "the in-app route never reaches the system handler")
+
 ## Anything the table does not name keeps the old behavior exactly: confirm,
 ## then hand the constructed `file://` URI to the system's default handler.
 func test_file_tree_activation_of_an_unsupported_file_still_confirms():

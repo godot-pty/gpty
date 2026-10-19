@@ -111,6 +111,35 @@ func test_a_second_request_for_the_same_file_focuses_the_existing_viewer():
 	assert_eq(_ws._tm.last_body, viewer, "the existing viewer is focused")
 
 
+func _media_panes() -> Array:
+	var found := []
+	for t in _ws._tm.tiles:
+		var body = _ws._tm._find_body(t.wrapper)
+		if body is MediaPane:
+			found.append(body)
+	return found
+
+
+## A second media pane for the same file would double the sound and the
+## decode work, so the request focuses the pane that already holds it — the
+## same rule the code viewer applies to its document.
+func test_a_second_request_for_the_same_media_file_focuses_the_existing_pane():
+	var tree := _file_tree()
+	var clip := ProjectSettings.globalize_path("res://tests/fixtures/media/pattern.ogv")
+	tree.request_pane.emit("media", {"file_path": clip})
+	var panes := _media_panes()
+	assert_eq(panes.size(), 1, "the request spawns exactly one media pane")
+	assert_eq(panes[0].file_path, clip)
+	var tile_count: int = _ws._tm.tiles.size()
+	_ws.activate_pane(tree)
+	assert_ne(_ws._tm.last_body, panes[0], "the test must start with another pane active")
+
+	tree.request_pane.emit("media", {"file_path": clip})
+
+	assert_eq(_ws._tm.tiles.size(), tile_count, "the same file must not get a second pane")
+	assert_eq(_ws._tm.last_body, panes[0], "the existing media pane is focused")
+
+
 func test_a_different_file_gets_its_own_viewer():
 	var tree := _file_tree()
 	tree.request_pane.emit("code_viewer", {"file_path": _file_a})

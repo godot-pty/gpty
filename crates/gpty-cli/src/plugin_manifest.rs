@@ -83,10 +83,10 @@ pub const PANE_MAX_COLS: i64 = 2000;
 /// Derived from [`PaneType::ALL`] rather than listed again: the enum is where
 /// the wire spelling lives (`as_str`), and a second literal here could only
 /// drift from it (the manifest's own seam test would then be checking the
-/// copy). The GUI side is pinned by `test_pane_types_all_has_seven_entries`
-/// (`godot/tests/integration/test_palette.gd`), and
-/// `pane_type_and_platform_lists_match_the_gui_surface` pins this derivation
-/// against the expected seven.
+/// copy). The GUI side is pinned by `pane_types_match_the_gui_registry_key_for_key`,
+/// which reads `PaneTypes.ALL` from the GDScript source, and
+/// `pane_type_and_platform_lists_match_the_gui_surface` pins the full order
+/// against the expected list.
 pub fn pane_types() -> Vec<&'static str> {
     PaneType::ALL.iter().map(|t| t.as_str()).collect()
 }
@@ -1521,7 +1521,7 @@ tiles = [
         // The platform set is the export preset's own vocabulary, so it stays
         // a literal; the pane types are derived from the enum, and this is the
         // contract that both the GUI registry and the derivation must satisfy
-        // (`test_pane_types_all_has_seven_entries` pins the GUI side).
+        // (`pane_types_match_the_gui_registry_key_for_key` pins the GUI side).
         assert_eq!(
             pane_types(),
             vec![
@@ -1531,7 +1531,8 @@ tiles = [
                 "inspector",
                 "reasoning",
                 "cli_view",
-                "wiki"
+                "wiki",
+                "media"
             ],
             "the enum's wire spellings are the GUI's registry keys, in its order"
         );

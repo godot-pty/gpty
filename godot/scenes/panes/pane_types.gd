@@ -10,6 +10,7 @@ static var ALL: Dictionary = {
 	"reasoning":   {"name": "Reasoning",   "icon": "?",  "shortcut": "", "label_prefix": "R"},
 	"cli_view":    {"name": "CLI View",    "icon": "$_", "shortcut": "", "label_prefix": "V"},
 	"wiki":        {"name": "Wiki",        "icon": "[]", "shortcut": "", "label_prefix": "W"},
+	"media":       {"name": "Media",       "icon": "|>", "shortcut": "", "label_prefix": "M"},
 }
 
 ## Pane types whose body accepts a routed concept capture

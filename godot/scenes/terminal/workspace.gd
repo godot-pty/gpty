@@ -267,10 +267,15 @@ func _request_pane_into(ws: Dictionary, type_name: String, settings: Dictionary)
 	if ws.is_empty() or not PaneTypes.ALL.has(type_name):
 		return
 	var path: String = str(settings.get("file_path", ""))
-	if type_name == "code_viewer" and path != "":
+	if path != "" and (type_name == "code_viewer" or type_name == "media"):
 		for t in ws.tm.tiles:
 			var shown = ws.tm._find_body(t.wrapper)
-			if shown is CodeViewerPane and shown.file_path == path:
+			if type_name == "code_viewer" and shown is CodeViewerPane and shown.file_path == path:
+				activate_pane(shown)
+				return
+			# A second media pane playing the same file would double the sound
+			# and the decode work; focus the one that already holds it.
+			if type_name == "media" and shown is MediaPane and shown.file_path == path:
 				activate_pane(shown)
 				return
 	var body := _spawn_pane_into(ws, type_name, settings)

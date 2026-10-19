@@ -2,7 +2,7 @@
 """Live pane-API smoke: boots the GUI headless and drives the JSON-RPC CLI
 end-to-end (new-pane -> status (one pane, then every pane) -> inject ->
 wait -> read -> scrollback -> broadcast -> pane-run exit code -> concept
-from output -> cli_view stdout -> wiki pane -> vault search/read/weight ->
+from output -> cli_view stdout -> wiki pane -> media pane -> vault search/read/weight ->
 plugin-provided profile -> kill), plus subscribe/eventsPoll on the event
 listener.
 
@@ -1035,6 +1035,18 @@ def main() -> int:
         smoke.require(bool(wiki_id), "new-pane must return a wiki pane_id", wiki)
         smoke.require(wiki.get("type") == "wiki", "the pane must report the wiki type", wiki)
         smoke.cli("kill-pane", wiki_id, "--json")
+
+        # ── media: a file-backed pane type ───────────────────────────
+        # Playback is GUI-side and its formats are a closed local table, so
+        # the API half this pins is the registration: `new-pane -t media`
+        # carries the new wire spelling through the Rust enum, the GUI
+        # registry and the body map.
+        smoke.enter("media")
+        media = smoke.result(smoke.cli("new-pane", "-t", "media", "--json"), "new-pane (media)")
+        media_id = media.get("pane_id")
+        smoke.require(bool(media_id), "new-pane must return a media pane_id", media)
+        smoke.require(media.get("type") == "media", "the pane must report the media type", media)
+        smoke.cli("kill-pane", media_id, "--json")
 
         # ── vault access: search and read over the pane API ──────────
         # The knowledge base is queried from outside a pane. Both methods are
