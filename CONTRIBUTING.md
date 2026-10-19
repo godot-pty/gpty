@@ -5,6 +5,9 @@
 - Rust >= 1.85 (tested with 1.96)
 - Godot 4.4+ (tested with 4.7.2) with GDExtension support
 - Linux (primary target), macOS (untested) or Windows 11 (untested).
+- FFmpeg build dependencies for `./scripts/media-deps`: `curl`, a C toolchain, `make`, and
+  `nasm` on x86 Linux (without nasm the script warns and disables hand-written SIMD). Windows
+  uses vcpkg (`VCPKG_ROOT`). The script builds the pinned FFmpeg the GDExtension links.
 
 ## Setup
 
@@ -29,6 +32,19 @@ This installs:
 - `pre-push` (full CI suite).
 
 Run `./scripts/ci-check` directly to validate changes before committing.
+
+### Build media dependencies (once per checkout)
+
+The GDExtension links a pinned FFmpeg; build it before the first `cargo build`:
+
+```bash
+./scripts/media-deps
+source dist/ffmpeg/<platform>-<arch>/env.sh   # in every new shell
+```
+
+`ci-check` builds or sources this prefix automatically. The library must be beside the extension
+for a bundled run; `$ORIGIN`/`@loader_path` is baked into the GDExtension, so a dev build falls
+back to the system FFmpeg when the pinned one is not on `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH`.
 
 ### Build
 

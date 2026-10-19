@@ -145,10 +145,23 @@ These are load-bearing guards. Reports that require removing one of them should 
 - **Markdown**: rendered from Markdown to escaped BBCode — never raw HTML or unescaped tags; links
   are scheme-checked and opened only after an explicit confirmation.
 
+- **Media decoding**: the media backend links a pinned FFmpeg (LGPLv3, dynamically linked) built
+  with `--disable-everything --disable-network`, so only the containers and codecs in
+  `crates/gpty-media/components.txt` exist in the shipped libraries. A media path must be an absolute
+  local **regular file** (a FIFO or device is refused before FFmpeg sees it), the demuxer's alias
+  list is checked after opening, and the selected stream's codec id is checked against the same
+  list before a decoder runs. Caps: 16 streams, 4096 px per side, 34 MiB per decoded frame, 8 audio
+  channels, bounded queues and a 10 s open/probe budget. Decode runs on its own thread; no hardware
+  decoder and no network protocol is compiled in.
+
 ## Known limitations
 
 Each is either accepted for the current scope or tracked as a roadmap item.
 
+- **Media decoding is in-process C code.** FFmpeg is a large memory-unsafe decoder stack and is a
+  deliberate exception to the memory-safety preference the rest of the untrusted-input path follows.
+  The minimal build and the allowlists reduce the surface; they are not a sandbox. A decoder bug
+  would be a same-process memory-safety bug, and media files should be treated as untrusted input.
 - **Peer verification by platform.** The control socket checks that the connecting process runs as
   the same user, and fails closed on a lookup error, on Linux and Android (`SO_PEERCRED`), macOS and
   the BSDs (`getpeereid`), illumos and Solaris (`getpeerucred`), and Windows (the client process id
