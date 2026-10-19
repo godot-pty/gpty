@@ -102,7 +102,13 @@ unset GPTY_SECRET
 
 trap 'rm -f "$LOG" "$PLAIN"; rm -rf "$SANDBOX"' EXIT
 
-GUT_ARGS=(-s addons/gut/gut_cmdln.gd -d)
+# No `-d`: Godot parses it as `--debug`, so a runtime error in a test breaks
+# into the interactive debugger (`Debugger Break`, `debug>`) — measured on
+# Windows: one out-of-bounds index in a failing test flooded the step log
+# with 1.7 GB of the same break and stalled the suite. Without it GUT records
+# the failure and continues; the gate's own checks (Run Summary/all passed)
+# are what judge the run, not Godot's debugger.
+GUT_ARGS=(-s addons/gut/gut_cmdln.gd)
 for dir in "${TEST_DIRS[@]}"; do
     GUT_ARGS+=("-gdir=res://${dir#godot/}")
 done

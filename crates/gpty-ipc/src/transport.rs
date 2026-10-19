@@ -240,13 +240,28 @@ pub fn data_dir() -> Option<std::path::PathBuf> {
 
 /// `%LOCALAPPDATA%\gpty` — the Windows per-user app-data directory, the one
 /// place both the store and the installed content go (Windows has no
-/// data/state split). Created on demand by callers.
+/// data/state split).
+///
+/// Created on first use, the same contract as the Unix `private_state_dir`:
+/// `state_dir()` is called by stores that only want to open a file inside it
+/// (`vaults.db`, the recovery copies, the plugin store), and one of them
+/// forgetting to create the parent made the vault index fail on a fresh
+/// Windows profile with `unable to open database file`. The smoke hid it by
+/// seeding a plugin record first.
 #[cfg(windows)]
 fn local_app_data() -> Option<std::path::PathBuf> {
-    std::env::var("LOCALAPPDATA")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .map(|value| std::path::PathBuf::from(value).join("gpty"))
+    local_app_dir(&std::env::var("LOCALAPPDATA").ok()?)
+}
+
+/// The shared part of [`local_app_data`], testable off Windows.
+#[cfg(any(windows, test))]
+fn local_app_dir(base: &str) -> Option<std::path::PathBuf> {
+    if base.is_empty() {
+        return None;
+    }
+    let dir = std::path::PathBuf::from(base).join("gpty");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
 }
 
 /// The socket path used when no per-user runtime directory is available.
@@ -360,6 +375,22 @@ mod tests {
     /// guard (`crate::test_env`) — see that module for why every test module
     /// that touches `std::env` uses the same lock.
     use crate::test_env::{EnvVar, EnvVars};
+
+    /// The Windows state directory must exist by the time `state_dir()`
+    /// returns it: a store opens its database inside without creating the
+    /// parent, and the vault index failed on a fresh profile when nothing
+    /// else had made it.
+    #[test]
+    fn local_app_dir_is_created_on_first_use() {
+        let base = std::env::temp_dir().join(format!("gpty-localappdata-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let dir = local_app_dir(base.to_str().expect("temp dir is UTF-8"))
+            .expect("a writable temp base must be usable");
+        assert!(dir.is_dir(), "the gpty state directory must be created");
+        assert_eq!(dir, base.join("gpty"));
+        assert_eq!(local_app_dir(""), None, "an empty LOCALAPPDATA is unusable");
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn default_socket_path_is_non_empty() {
