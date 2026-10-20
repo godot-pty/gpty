@@ -1038,8 +1038,10 @@ impl AudioPipeline {
         }
         self.acc.extend(
             data[..complete]
-                .chunks_exact(4)
-                .map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]])),
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_ne_bytes(*b)),
         );
         self.next_pts_us += samples as u64 * 1_000_000 / source_rate as u64;
         Ok(self.take_full_chunks())
@@ -1123,8 +1125,10 @@ impl AudioPipeline {
         let complete = usable - (usable % (channels * 4));
         self.acc.extend(
             data[..complete]
-                .chunks_exact(4)
-                .map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]])),
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_ne_bytes(*b)),
         );
     }
 }
