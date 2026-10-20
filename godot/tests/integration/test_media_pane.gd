@@ -12,6 +12,16 @@ extends GutTest
 
 var _tmp: String
 
+## Presentations are counted through a subclass: `ImageTexture.get_image()`
+## returns the image the texture was *created* with, so a later `update()` is
+## invisible to a readback in the dummy renderer.
+class CountingPane extends MediaPane:
+	var presented_pts: Array[int] = []
+
+	func _present_video(frame: Dictionary) -> void:
+		presented_pts.append(int(frame.get("pts_us", -1)))
+		super._present_video(frame)
+
 
 func before_each():
 	MockAutoloads.setup()
@@ -317,3 +327,38 @@ func test_it_does_not_accept_routed_content():
 	var pane := _make_pane()
 	assert_false(pane.can_receive_content({}), "a media pane is not a concept receiver")
 	assert_false(pane.receive_content("text", {}))
+
+
+## `long_h264.mp4` is 6 frames at 2 fps (PTS 0, 0.5 … 2.5 s). The decoder
+## produces them faster than real time; by the 1.6 s mark the first four are
+## due. A fixed drain count followed by "keep the newest four" discarded the
+## 0.5 s frame and every frame before the clip's last four, so the surface
+## stayed on the first picture while audio advanced.
+func test_video_presents_frames_in_order_instead_of_only_the_clip_tail():
+	var pane := CountingPane.new()
+	add_child_autofree(pane)
+	await get_tree().process_frame
+	pane.load_media(_long_mp4())
+	var deadline := Time.get_ticks_msec() + 8000
+	while pane._media_clock_us() < 1_600_000 and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	assert_gte(pane._media_clock_us(), 1_600_000, "the media clock must start")
+	assert_gte(pane.presented_pts.size(), 4, "the picture must advance past the first frame")
+	assert_eq(pane.presented_pts.slice(0, 4), [0, 500_000, 1_000_000, 1_500_000],
+		"frames are presented in order, not only from the backlog's tail")
+
+
+## A seek during playback must stop the generator before discarding samples:
+## its `clear_buffer` refuses while the playback is active (paused included).
+func test_seek_while_audio_plays_restarts_playback():
+	var pane := _make_pane()
+	pane.load_media(_av_mp4())
+	assert_true(await _await_audio(pane), "audio playback must start")
+
+	pane._seek_to(0)
+	var deadline := Time.get_ticks_msec() + 8000
+	while (not pane._audio_playing or pane._media_clock_us() < 100_000) \
+			and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	assert_true(pane._audio_playing, "audio playback must restart after the seek")
+	assert_gte(pane._media_clock_us(), 100_000, "the media clock must resume")

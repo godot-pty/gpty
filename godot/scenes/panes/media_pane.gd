@@ -73,6 +73,10 @@ const AUDIO_PENDING_MAX := 32
 const VIDEO_PRESENT_TOLERANCE_US := 20_000
 ## Drop a frame this far behind the media clock when a newer one is waiting.
 const VIDEO_CATCHUP_US := 150_000
+## Frames held decoded ahead of the media clock. The decoder runs far faster
+## than real time, so polling is bounded by this backlog: draining past it
+## would discard frames that are due but not yet presented.
+const VIDEO_BACKLOG_FRAMES := 4
 
 func _ready():
 	super._ready()
@@ -379,6 +383,17 @@ func _seek_to(position_us: int) -> void:
 		_status.visible = true
 		_status.text = "Seek failed"
 		return
+	_reset_after_seek()
+	if _paused:
+		_paused_position_us = position_us
+	_update_transport()
+
+## Drop everything that belongs to the pre-seek timeline. The audio player is
+## stopped rather than having its generator buffer cleared: `clear_buffer`
+## refuses while the playback is active (paused still counts as active), and
+## the next `play()` instantiates a fresh, empty generator playback anyway —
+## so dropping our reference is what discards the queued samples.
+func _reset_after_seek() -> void:
 	_pending_frames.clear()
 	_pending_audio.clear()
 	_finished = false
@@ -386,20 +401,18 @@ func _seek_to(position_us: int) -> void:
 	_clock_start_us = -1
 	_first_pts_us = 0
 	if _audio_playback != null:
-		_audio_playback.clear_buffer()
+		_audio.stop()
+		_audio_playback = null
 	_audio_playing = false
 	_audio_started = false
 	_audio_start_pts_us = 0
-	if _paused:
-		_paused_position_us = position_us
-	_update_transport()
 
 func _on_loop_toggled(toggled_on: bool) -> void:
 	loop_enabled = toggled_on
 
 ## Restart a finished file. The backend worker stays alive after EOF, so the
-## same seek path applies; local queues and the generator buffer are cleared
-## and the first real chunk starts a fresh media clock.
+## same seek path applies; local queues are dropped and the first real chunk
+## starts a fresh media clock.
 func _restart_loop() -> void:
 	var answer = JSON.parse_string(_backend.seek(0))
 	if not (answer is Dictionary) or not answer.get("ok", false):
@@ -407,17 +420,7 @@ func _restart_loop() -> void:
 		_status.visible = true
 		_status.text = "Finished %s" % MediaFiles.display_name(file_path)
 		return
-	_pending_frames.clear()
-	_pending_audio.clear()
-	if _audio_playback != null:
-		_audio_playback.clear_buffer()
-	_audio_playing = false
-	_audio_started = false
-	_audio_start_pts_us = 0
-	_clock_start_us = -1
-	_first_pts_us = 0
-	_finished = false
-	_finished_announced = false
+	_reset_after_seek()
 	_paused_position_us = 0
 	_loop_count += 1
 	_play_button.text = "Pause"
@@ -434,23 +437,17 @@ func _media_clock_us() -> int:
 func _poll_video() -> void:
 	if _paused:
 		return
-	var now := Time.get_ticks_usec()
-	if _clock_start_us < 0 and not _audio_started:
-		_clock_start_us = now
-	for _i in 8:
-		var frame = _backend.poll_video()
-		if frame.is_empty():
-			break
-		if _clock_start_us < 0 and not _audio_started:
-			_clock_start_us = now
-			_first_pts_us = int(frame["pts_us"])
-		_pending_frames.append(frame)
-		while _pending_frames.size() > 4:
-			_pending_frames.pop_front()
-
+	_refill_video()
 	var media_now := _media_clock_us()
 	if media_now < 0:
-		media_now = _first_pts_us
+		if _pending_frames.is_empty():
+			return
+		# Start the clock on the first frame's own PTS: a stream whose
+		# timeline does not begin at zero would otherwise be held as "in the
+		# future" for the length of that offset.
+		_first_pts_us = int(_pending_frames[0]["pts_us"])
+		_clock_start_us = Time.get_ticks_usec()
+		media_now = _media_clock_us()
 	while not _pending_frames.is_empty():
 		var frame: Dictionary = _pending_frames[0]
 		var pts := int(frame["pts_us"])
@@ -464,6 +461,18 @@ func _poll_video() -> void:
 		_present_video(frame)
 		if _status.text.begins_with("Opening"):
 			_status.text = "Playing %s" % MediaFiles.display_name(file_path)
+
+## Drain the decoder only while the backlog has room. The backend's own
+## bounded queue is the backpressure; polling past the backlog is what
+## discarded frames that were due — the decoder decodes a whole clip in
+## milliseconds, so a fixed drain count kept only the newest frames and the
+## picture stayed on the first one while audio advanced.
+func _refill_video() -> void:
+	while _pending_frames.size() < VIDEO_BACKLOG_FRAMES:
+		var frame = _backend.poll_video()
+		if frame.is_empty():
+			break
+		_pending_frames.append(frame)
 
 func _present_video(frame: Dictionary) -> void:
 	var width := int(frame.get("width", 0))
