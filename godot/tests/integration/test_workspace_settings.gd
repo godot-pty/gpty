@@ -54,7 +54,7 @@ func test_profile_activation_respects_show_titlebar():
 	ws._do_activate({"name": "P", "tiles": [{
 		"col": 0, "row": 0, "cspan": 12, "rspan": 12,
 		"settings": {"type": "terminal", "shell": SettingsManager.default_shell_command(), "rows": 24, "cols": 80},
-	}]})
+	}]}, false)
 	await get_tree().process_frame
 
 	var tm: TerminalManager = ws._tm
@@ -78,7 +78,7 @@ func test_click_activates_non_terminal_pane():
 			"settings": {"type": "code_viewer", "pane_name": "C1"}},
 		{"col": 6, "row": 0, "cspan": 6, "rspan": 12,
 			"settings": {"type": "terminal", "shell": SettingsManager.default_shell_command(), "rows": 24, "cols": 80}},
-	]})
+	]}, false)
 	await get_tree().process_frame
 	await get_tree().process_frame
 
@@ -309,7 +309,7 @@ func test_profile_activation_refreshes_layout_and_pane_list():
 			"settings": {"type": "code_viewer", "pane_name": "C1"}},
 		{"col": 6, "row": 0, "cspan": 6, "rspan": 12,
 			"settings": {"type": "terminal", "shell": SettingsManager.default_shell_command(), "rows": 24, "cols": 80}},
-	]})
+	]}, false)
 	await get_tree().process_frame
 	await get_tree().process_frame
 
@@ -411,7 +411,7 @@ func test_restored_layout_keeps_its_share_of_the_screen():
 			"settings": {"type": "code_viewer", "pane_name": "C1"}},
 		{"col": 6, "row": 0, "cspan": 6, "rspan": 12,
 			"settings": {"type": "terminal", "shell": SettingsManager.default_shell_command(), "rows": 24, "cols": 80}},
-	]})
+	]}, false)
 	await get_tree().process_frame
 	await get_tree().process_frame
 
