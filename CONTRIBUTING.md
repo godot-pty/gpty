@@ -81,7 +81,7 @@ godot --headless --path godot --export-release "Linux/X11" ../dist/gpty
 
 ### Clean
 
-Remove build/test artifacts for a clean slate — stale IPC sockets, Godot import caches, and standalone `dist/` outputs:
+Remove build/test artifacts for a clean slate - stale IPC sockets, Godot import caches, and standalone `dist/` outputs:
 
 ```bash
 ./scripts/clean             # default: transient artifacts
@@ -120,7 +120,7 @@ cargo run --bin gpty -- daemon stop
 `cargo run` always builds the CLI from this checkout, but a `cargo install`ed
 `gpty` on `PATH` can shadow a release bundle's CLI: after a version bump,
 reinstall it (`cargo install --path crates/gpty-cli --force`). The stale binary
-otherwise fails opaquely — a subcommand it lacks dies in clap before any IPC,
+otherwise fails opaquely - a subcommand it lacks dies in clap before any IPC,
 which is why the CLI warns once when it reads a running GUI whose version or
 IPC protocol differs.
 
@@ -135,7 +135,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | cargo run --bin gpty -- 
 ### Test
 
 - **Automated**: `./scripts/ci-check` runs the full suite (Rust + GUT + audit). CI runs on every push to `main` and every PR.
-- **Manual pre-release**: [docs/content/docs/testing.md](docs/content/docs/testing.md) — smoke tests for CLI bridge, daemon lifecycle, UI shortcuts, and error paths that require a running GUI.
+- **Manual pre-release**: [docs/content/docs/overview/testing.md](docs/content/docs/overview/testing.md) - smoke tests for CLI bridge, daemon lifecycle, UI shortcuts, and error paths that require a running GUI.
 - Test format: `Given / When / Then` with expected output. See the manual checklist for examples.
 
 ```bash
@@ -202,7 +202,7 @@ See [AGENTS.md](AGENTS.md) for the full directory tree.
 
 ## Code Style
 
-See [AGENTS.md](AGENTS.md) for the complete GDScript and Rust conventions, pitfalls, and patterns.
+See the agent guide for the complete conventions and patterns: [Rust](docs/content/docs/agents/rust.md), [GDScript](docs/content/docs/agents/gdscript.md), and [pitfalls](docs/content/docs/agents/pitfalls.md).
 
 ## Pull Request Process
 
@@ -210,14 +210,14 @@ See [AGENTS.md](AGENTS.md) for the complete GDScript and Rust conventions, pitfa
 2. Create your feature branch.
 3. Make your changes.
 4. Test your changes (functionally).
-5. Run `./scripts/ci-check` — ensure all checks pass
+5. Run `./scripts/ci-check` - ensure all checks pass
 6. Add or update test cases as applicable.
 7. See [AGENTS.md](AGENTS.md) for commit information.
 8. Submit a pull request.
 
 ## Security
 
-See [AGENTS.md](AGENTS.md) for full security rules, including Concept Engine ReDoS prevention and OSC 52 clipboard restrictions.
+See the [security rules](docs/content/docs/agents/security.md) for the full list, including Concept Engine ReDoS prevention and OSC 52 clipboard restrictions.
 
 ## License
 

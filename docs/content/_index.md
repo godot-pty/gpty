@@ -3,7 +3,7 @@ title: gPTY
 toc: false
 ---
 
-[gPTY](https://godot-pty.github.io/gpty/) - a PTY foundation built on Godot and Rust. Provides a tiling grid for panes (terminal, code, file-tree, etc.), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI.
+[gPTY](https://godot-pty.github.io/gpty/) - a PTY foundation built on Godot and Rust. Provides a tiling grid for panes (terminal, code viewer, file tree, wiki, media, and more), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI.
 
 ![gpty terminal grid](/images/v0.6.0_1.png)
 
@@ -21,12 +21,12 @@ toc: false
 {{< hextra/feature-grid >}}
   {{< hextra/feature-card
     title="PTY Foundation & Public API"
-    subtitle="Spawn and manage shell sessions over a documented JSON-RPC socket, CLI, and MCP server — the same protocol AI agents use."
+    subtitle="Spawn and manage shell sessions over a documented JSON-RPC socket, CLI, and MCP server - the same protocol AI agents use."
     icon="terminal"
   >}}
   {{< hextra/feature-card
     title="Concept Engine"
-    subtitle="RegEx triggers on PTY output capture the reply and route it into adjacent panes — code viewer, Inspector — with no polling."
+    subtitle="RegEx triggers on PTY output capture the reply and route it into adjacent panes - code viewer, Inspector - with no polling."
     icon="sparkles"
   >}}
   {{< hextra/feature-card

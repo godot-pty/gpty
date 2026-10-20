@@ -9,7 +9,7 @@ Second release. Minor improvements, still a very alpha feel to it. Experimenting
 
 ![Screenshot](/images/v0.2.0_1.png)
 
-**Window modes.** Three-mode window system — OS decorated, borderless windowed, and fullscreen. Per-pane titlebar with minimize, swap, settings, and close buttons. Custom titlebar in non-OS modes. Drag to move.
+**Window modes.** Three-mode window system - OS decorated, borderless windowed, and fullscreen. Per-pane titlebar with minimize, swap, settings, and close buttons. Custom titlebar in non-OS modes. Drag to move.
 
 **Status bar.** Bottom bar showing active pane info, FPS/ms, and the current window mode indicator. Sidebar pane rows now match the full action button set from the titlebar.
 
@@ -20,5 +20,5 @@ Second release. Minor improvements, still a very alpha feel to it. Experimenting
 **Release**
 
 - Download the standalone binary from [GitHub Releases](https://github.com/godot-pty/gpty/releases/tag/v0.2.0).
-- Full changelog: [CHANGELOG.md](https://github.com/godot-pty/gpty/blob/main/CHANGELOG.md#020--2026-08-08).
+- Full changelog: [Changelog](https://github.com/godot-pty/gpty/blob/main/docs/content/docs/changelog/v0.2.0.md).
 - Source: [github.com/godot-pty/gpty](https://github.com/godot-pty/gpty).

@@ -1,4 +1,4 @@
-[gPTY](https://godot-pty.github.io/gpty/) - a PTY foundation built on Godot and Rust. Provides a tiling grid for panes (terminal, code, file-tree, etc.), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI.
+[gPTY](https://godot-pty.github.io/gpty/) - a PTY foundation built on Godot and Rust. Provides a tiling grid for panes (terminal, code viewer, file tree, wiki, media, and more), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI.
 
 ## Overview
 
@@ -17,6 +17,8 @@
 - **Public API** - JSON-RPC IPC socket + CLI (`gpty new-pane`, `gpty inject`, …) + MCP server. AI agents, scripts, and orchestrators drive the workspace over a documented, versioned protocol.
 - **Concept engine** - RegEx triggers on PTY output capture the reply and route it into adjacent panes (code viewer, Inspector). Write your own - by hand or in the visual graph editor (Settings → Concepts) - or ship the defaults. Concepts capture and display only - they never inject input into a shell.
 - **Agent observability** - Reasoning pane passively projects documented agent lifecycle events (OMP, extensible); Inspector pane runs a private, tool-free Q&A session. Observability only - gpty never orchestrates agent state.
+- **Knowledge base** - The wiki pane browses a vault of plain Markdown notes with full-text search, live-preview editing, `[[wikilinks]]` and a link graph; agents search and read the same vault through `gpty vault` / MCP.
+- **Media** - The media pane (landing in v0.7) plays local audio and video through a pinned, minimal FFmpeg backend. Files are untrusted input and are never fetched over the network.
 - **Persistence** - Scrollback, settings, workspaces (named tab sets), and profiles auto-save to SQLite/JSON and restore on restart; full-text search across each pane's persisted history.
 - **Cross-platform** - Standalone binaries for Linux, macOS, and Windows. No Godot or Rust toolchain required to run.
 - **Documentation** - https://godot-pty.github.io/gpty/
@@ -41,9 +43,11 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 
 | Platform | Package |
 |---|---|
-| Linux | `gpty-v0.6.0-linux-x86_64.tar.gz` - extract; `./gpty-gui.sh` starts the GUI, `./gpty` is the CLI |
-| macOS | `gpty-v0.6.0-macos.zip` - unzip, right-click the `.app` → Open; `gpty` beside it is the CLI |
-| Windows | `gpty-v0.6.0-windows-x86_64.zip` - unzip; `gpty-gui.exe` starts the GUI, `gpty.exe` is the CLI |
+| Linux | `gpty-v<version>-linux-x86_64.tar.gz` - extract; `./gpty-gui.sh` starts the GUI, `./gpty` is the CLI |
+| macOS | `gpty-v<version>-macos.zip` - unzip, right-click the `.app` → Open; `gpty` beside it is the CLI |
+| Windows | `gpty-v<version>-windows-x86_64.zip` - unzip; `gpty-gui.exe` starts the GUI, `gpty.exe` is the CLI |
+
+In the file names, `<version>` is the release tag you downloaded (for example `v0.6.0`).
 
 Each release publishes a `SHA256SUMS` listing every asset. Check the file you downloaded before running it:
 
@@ -63,7 +67,7 @@ The binaries are not code-signed (see [SECURITY.md](SECURITY.md)).
 
 ### CLI
 
-The `gpty` binary controls a running GUI over JSON-RPC IPC, and every release bundle ships it next to the GUI. The CLI starts one on demand only for commands a fresh workspace can satisfy — `new-pane` and `layout load` — while `gpty daemon start` starts one explicitly and `--no-daemon` never starts one. Every other command needs a workspace that already exists, so it fails with `no gpty GUI is running (start one with \`gpty daemon start\`)` instead of opening a window it cannot use. Building from source (`cargo build -p gpty`, or `cargo build --workspace`) is only needed when working on the CLI itself; if you install it that way, **reinstall it after a version bump** (`cargo install --path crates/gpty-cli --force`). A stale `gpty` earlier on `PATH` shadows the release's CLI and fails opaquely (a subcommand it lacks dies in clap before any IPC), which is why the CLI warns once, on stderr, when it sees that the running GUI's version or IPC protocol differs from its own — the warning names both sides, but the reinstall is the fix.
+The `gpty` binary controls a running GUI over JSON-RPC IPC, and every release bundle ships it next to the GUI. The CLI starts one on demand only for commands a fresh workspace can satisfy - `new-pane` and `layout load` - while `gpty daemon start` starts one explicitly and `--no-daemon` never starts one. Every other command needs a workspace that already exists, so it fails with `no gpty GUI is running (start one with \`gpty daemon start\`)` instead of opening a window it cannot use. Building from source (`cargo build -p gpty`, or `cargo build --workspace`) is only needed when working on the CLI itself; if you install it that way, **reinstall it after a version bump** (`cargo install --path crates/gpty-cli --force`). A stale `gpty` earlier on `PATH` shadows the release's CLI and fails opaquely (a subcommand it lacks dies in clap before any IPC), which is why the CLI warns once, on stderr, when it sees that the running GUI's version or IPC protocol differs from its own - the warning names both sides, but the reinstall is the fix.
 
 Once the GUI is running (launched from Godot or a release binary), the CLI connects over a Unix socket (`$XDG_RUNTIME_DIR/gpty.sock` on Linux, or `GPTY_SOCKET` env var):
 
@@ -86,6 +90,15 @@ gpty list-panes
 # Send text to a pane (by label, e.g. T1)
 gpty inject T1 --text "echo hello"
 
+# Read a pane's screen and scrollback; run a command in a new pane and wait for its output
+gpty pane-read T1 --lines 200
+gpty pane-run --command "cargo test"
+gpty pane-wait T1 --pattern "tests passed" --timeout-ms 30000
+
+# Search and read a wiki vault
+gpty vault search <vault> <pattern>
+gpty vault read <vault> <path>
+
 # Close a pane
 gpty kill-pane T1
 
@@ -94,7 +107,7 @@ gpty layout save my-setup
 gpty layout load my-setup
 gpty layout list
 
-# Install a plugin (reviewed in the GUI — its actions run as you)
+# Install a plugin (reviewed in the GUI - its actions run as you)
 gpty plugin install godot-pty/gpty-omp
 gpty plugin list
 
@@ -130,13 +143,13 @@ Tool schemas are generated from the same clap definitions as the CLI (`crates/gp
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for the full feature inventory.
+See [ROADMAP.md](ROADMAP.md) for what is released, in progress, and planned, one page per release chain.
 
 ---
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for the threat model, reporting process, and what gpty does *not* defend against. Implementation rules - the Concept Engine's ReDoS stance, PTY environment sanitization, IPC hardening, OSC 52 restrictions - live in [AGENTS.md](AGENTS.md#security).
+See [SECURITY.md](SECURITY.md) for the threat model, reporting process, and what gpty does *not* defend against. Implementation rules - the Concept Engine's ReDoS stance, PTY environment sanitization, IPC hardening, OSC 52 restrictions - live in the [security rules](docs/content/docs/agents/security.md).
 
 ---
 
@@ -154,11 +167,11 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete versioned changes and history.
 
 ## License
 
-gPTY is free software, licensed under the **GNU General Public License, version 3 or later** — see [LICENSE](LICENSE) for the full text.
+gPTY is free software, licensed under the **GNU General Public License, version 3 or later** - see [LICENSE](LICENSE) for the full text.
 
 [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md) adds two permissions under section 7 of that license, so the ecosystem side stays permissive:
 
-- **Plugins, extensions, and adapters are not required to be GPLv3.** Anything that works with gPTY over its CLI, JSON-RPC, MCP, or event interfaces — including native pane types — may be licensed under Apache-2.0, MIT, or any other terms you choose, and shipped alongside gPTY without obligation.
+- **Plugins, extensions, and adapters are not required to be GPLv3.** Anything that works with gPTY over its CLI, JSON-RPC, MCP, or event interfaces - including native pane types - may be licensed under Apache-2.0, MIT, or any other terms you choose, and shipped alongside gPTY without obligation.
 - **Configuration and data files carry no copyleft.** Profiles, workspaces, layouts, concepts, and settings are yours to license however you like; the default `*.json` files shipped with gPTY are Apache-2.0.
 
 Copyright (C) 2026 Neil Pathare.

@@ -10,12 +10,12 @@ gpty's test strategy combines automated CI checks with a manual pre-release smok
 Run on every push and pull request:
 
 ```bash
-# Rust — unit tests, integration tests, doctests
+# Rust - unit tests, integration tests, doctests
 cargo test --workspace
 cargo clippy -- -D warnings
 cargo fmt --check
 
-# GDScript — unit + integration tests
+# GDScript - unit + integration tests
 godot --headless --path godot --import
 ./scripts/gut-check  # runs GUT and fails if the run aborted (GUT exits 0 regardless)
 ```
@@ -44,18 +44,18 @@ scrollback. A test that needs a filesystem path must use
 `TestPaths.user_path("name")` rather than `ProjectSettings.globalize_path("user://name")`;
 the live smoke uses the same seam and needs no store backup/restore.
 
-**Rust coverage:** core engine (parser, keymap, grid, concept routing, capture state machine, history, the vault index and its walk), the vault's native IPC handlers (search re-indexing, read containment, parameter validation), IPC types + protocol, CLI schema generation and response formatting (both output modes fail on an RPC error, and the JSON envelope is printed first), GDExtension FFI functions. The tile layout algorithm (split, kill, expand) lives only in `godot/scenes/terminal/terminal_manager.gd` and is tested there, in `godot/tests/unit/test_terminal_manager.gd`, against the real `spawn_pane`/`kill` — including every close order of five panes. A Rust copy of it once stood in for those tests and could not fail when the real code broke; do not reintroduce one. The IPC vocabulary is pinned across languages: a test in `crates/gpty-cli/src/commands/mcp.rs` reads the real registrations (`crates/gpty-gdext/src/ipc.rs`), the real dispatch (`ipc_handlers.gd`, plus the requests `workspace.gd` intercepts), and every `client.call` literal in `src/commands/*.rs`, and asserts they name the same methods as the advertised MCP tools.
+**Rust coverage:** core engine (parser, keymap, grid, concept routing, capture state machine, history, the vault index and its walk), the vault's native IPC handlers (search re-indexing, read containment, parameter validation), IPC types + protocol, CLI schema generation and response formatting (both output modes fail on an RPC error, and the JSON envelope is printed first), GDExtension FFI functions. The tile layout algorithm (split, kill, expand) lives only in `godot/scenes/terminal/terminal_manager.gd` and is tested there, in `godot/tests/unit/test_terminal_manager.gd`, against the real `spawn_pane`/`kill` - including every close order of five panes. A Rust copy of it once stood in for those tests and could not fail when the real code broke; do not reintroduce one. The IPC vocabulary is pinned across languages: a test in `crates/gpty-cli/src/commands/mcp.rs` reads the real registrations (`crates/gpty-gdext/src/ipc.rs`), the real dispatch (`ipc_handlers.gd`, plus the requests `workspace.gd` intercepts), and every `client.call` literal in `src/commands/*.rs`, and asserts they name the same methods as the advertised MCP tools.
 
-**GDScript coverage:** concept merge/save/load, terminal manager tile lifecycle (spawn, kill, swap, labels, grid-full refusal), divider edge drag (`test_pane_edge_drag.gd`: pixel preview vs unit commit, one `tiles_resized` per release, MIN_TILE clamp, window-border refusal, drag survives leaving the strip), settings save/load roundtrip, profile CRUD and the three profile sources (the shipped built-in, installed-plugin profiles, user profiles — merge order, ` (n)` dedupe, and the plugin-revision consent gate), layout save/restore, sidebar signal emission, pane settings application, IPC dispatch against a real workspace (`test_ipc_dispatch_contract.gd`: listed pane ids and legacy labels both address the pane they name, terminal-only methods refuse other panes, unknown methods answer -32601, an untrusted profile is refused, and a targetless `paneStatus` covers every tile with `status: null` for non-terminals), palette command generation.
+**GDScript coverage:** concept merge/save/load, terminal manager tile lifecycle (spawn, kill, swap, labels, grid-full refusal), divider edge drag (`test_pane_edge_drag.gd`: pixel preview vs unit commit, one `tiles_resized` per release, MIN_TILE clamp, window-border refusal, drag survives leaving the strip), settings save/load roundtrip, profile CRUD and the three profile sources (the shipped built-in, installed-plugin profiles, user profiles - merge order, ` (n)` dedupe, and the plugin-revision consent gate), layout save/restore, sidebar signal emission, pane settings application, IPC dispatch against a real workspace (`test_ipc_dispatch_contract.gd`: listed pane ids and legacy labels both address the pane they name, terminal-only methods refuse other panes, unknown methods answer -32601, an untrusted profile is refused, and a targetless `paneStatus` covers every tile with `status: null` for non-terminals), palette command generation.
 
 **Known gaps (not automatable in headless CI):**
-- Real PTY output timing: a headless pane spawns a real shell, but tests that assert on its output are timing-dependent, so they live in the live smoke (`scripts/smoke_pane_api.py`) instead — one harness for every platform, run by `ci-check` and by the `windows-smoke` CI job. Its concept step asserts a routed capture event fired by a runtime-built output marker, which is the live proof that committed *output* lines (ConPTY renders their breaks as cursor moves) reach the concept matcher on the platform running the smoke. Its final step seeds an installed plugin's record into the sandboxed store and asserts the plugin's profile is listed by `layout list` and restored by `layout load`, which is the live proof of the profiles-migration read path. Its vault step seeds a temp vault and drives `vault search` (twice — the second after editing a note outside gPTY, which proves the index-on-search freshness), `vault read`, and the `not_found` refusal, so the native vault handlers are exercised over the same socket an agent uses.
+- Real PTY output timing: a headless pane spawns a real shell, but tests that assert on its output are timing-dependent, so they live in the live smoke (`scripts/smoke_pane_api.py`) instead - one harness for every platform, run by `ci-check` and by the `windows-smoke` CI job. Its concept step asserts a routed capture event fired by a runtime-built output marker, which is the live proof that committed *output* lines (ConPTY renders their breaks as cursor moves) reach the concept matcher on the platform running the smoke. Its final step seeds an installed plugin's record into the sandboxed store and asserts the plugin's profile is listed by `layout list` and restored by `layout load`, which is the live proof of the profiles-migration read path. Its vault step seeds a temp vault and drives `vault search` (twice - the second after editing a note outside gPTY, which proves the index-on-search freshness), `vault read`, and the `not_found` refusal, so the native vault handlers are exercised over the same socket an agent uses.
 
 **Files without automated coverage** (manual checklist only):
-- `godot/scenes/terminal/workspace.gd` — restore/sanitize wiring and concept event routing; IPC dispatch itself is covered by `test_ipc_dispatch_contract.gd`, which drives `WorkspaceIpcHandlers.handle` with a real `Workspace`
-- `godot/scenes/terminal/terminal_pane.gd` — renderer and input paths are partially covered by `test_keyboard.gd`/`test_copy_routing.gd` mocks; real rendering is manual-only
+- `godot/scenes/terminal/workspace.gd` - restore/sanitize wiring and concept event routing; IPC dispatch itself is covered by `test_ipc_dispatch_contract.gd`, which drives `WorkspaceIpcHandlers.handle` with a real `Workspace`
+- `godot/scenes/terminal/terminal_pane.gd` - renderer and input paths are partially covered by `test_keyboard.gd`/`test_copy_routing.gd` mocks; real rendering is manual-only
 - `godot/scenes/ui/settings_panel.gd`, `godot/scenes/ui/pane_settings_panel.gd`, `godot/scenes/ui/status_bar.gd`, `godot/scenes/ui/toast_overlay.gd`, `godot/scenes/ui/icons.gd`
-- `godot/scenes/panes/code_viewer.gd`, `godot/scenes/panes/file_tree.gd`, `godot/scenes/panes/wiki_pane.gd`, `godot/scenes/panes/inspector_pane.gd`, `godot/scenes/panes/reasoning_pane.gd` — unit-tested for routing/session contracts; real OMP/Markdown rendering is manual (`cli_view_pane.gd` is the exception: `test_cli_view.gd` runs a real child and asserts its streamed lines)
+- `godot/scenes/panes/code_viewer.gd`, `godot/scenes/panes/file_tree.gd`, `godot/scenes/panes/wiki_pane.gd`, `godot/scenes/panes/inspector_pane.gd`, `godot/scenes/panes/reasoning_pane.gd` - unit-tested for routing/session contracts; real OMP/Markdown rendering is manual (`cli_view_pane.gd` is the exception: `test_cli_view.gd` runs a real child and asserts its streamed lines)
 - `godot/scenes/autoloads/focus_manager.gd`, `godot/scenes/autoloads/shortcut_manager.gd`, `godot/scenes/autoloads/toast_manager.gd`, `godot/scenes/autoloads/update_checker.gd`
 
 ## Manual pre-release checklist
@@ -74,7 +74,7 @@ All CLI commands below use the default socket path (`$XDG_RUNTIME_DIR/gpty.sock`
 
 ---
 
-### IPC bridge — CLI-to-GUI roundtrip
+### IPC bridge - CLI-to-GUI roundtrip
 
 **Given** the GUI is running with at least one auto-spawned terminal
 **When** CLI commands are issued
@@ -178,10 +178,10 @@ All CLI commands below use the default socket path (`$XDG_RUNTIME_DIR/gpty.sock`
 
 | # | Action | Expected |
 |---|--------|----------|
-| 39 | In `nvim`, `:set mouse=a`, then click a line | The cursor jumps to that line — the click reached the app |
+| 39 | In `nvim`, `:set mouse=a`, then click a line | The cursor jumps to that line - the click reached the app |
 | 40 | Drag across text while such an app is focused | The app receives the drag, not the pane. Hold `Shift` to select locally and copy with `Ctrl+Shift+V` |
 | 41 | Wheel-scroll a mouse-aware app | The app scrolls it (the pane does not scroll its scrollback) |
-| 42 | Quit the TUI, then drag and wheel in the pane again | Selection and scrollback work as before — reporting turned off with the app |
+| 42 | Quit the TUI, then drag and wheel in the pane again | Selection and scrollback work as before - reporting turned off with the app |
 
 ---
 
@@ -192,7 +192,7 @@ All CLI commands below use the default socket path (`$XDG_RUNTIME_DIR/gpty.sock`
 | # | Command | Expected |
 |---|---------|----------|
 | 43 | `gpty new-pane --pane-type cli_view --command /bin/sh --arg -c --arg "printf 'view-ok\n'"` | Pane `V1` appears; its body shows `view-ok`; the status row reports the exit |
-| 44 | `gpty pane-read V1` | Returns the streamed text — the pane keeps it after the child exits |
+| 44 | `gpty pane-read V1` | Returns the streamed text - the pane keeps it after the child exits |
 | 45 | Pane Settings → change Program/Arguments → Restart | The new argv runs; a running child is untouched until Restart |
 | 46 | `gpty kill-pane V1` while a long-running child runs (`--command /bin/sh --arg -c --arg "sleep 300"`) | Pane closes and the child process is gone (`ps aux | grep sleep`) |
 

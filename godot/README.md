@@ -1,4 +1,4 @@
-# gpty — Godot Project
+# gpty - Godot Project
 
 ## Running
 
@@ -46,7 +46,7 @@ godot/
         │   └── update_checker.gd
         ├── terminal/            # Core terminal logic
         │   ├── workspace.gd     # Grid layout, workspace tabs, sidebar, profiles, concept routing
-        │   ├── ipc_handlers.gd  # WorkspaceIpcHandlers — IPC/pane-API method dispatch
+        │   ├── ipc_handlers.gd  # WorkspaceIpcHandlers - IPC/pane-API method dispatch
         │   ├── terminal_pane.gd # Control-based renderer, keyboard, selection
         │   ├── concept_router.gd # Pure concept-event routing (extracted, testable)
         │   ├── plugin_review_text.gd # Pure plugin-review dialog text (extracted, testable)
@@ -114,20 +114,20 @@ godot/
 
 > **Note:** `Ctrl+Shift+C` copies the terminal selection; with no selection it does nothing.
 >
-> **Note:** `Ctrl+V` is deliberately passed through to the shell as a literal `^V` — shells and TUIs use it (readline quoted-insert, vim visual-block mode). Paste uses `Ctrl+Shift+V`.
+> **Note:** `Ctrl+V` is deliberately passed through to the shell as a literal `^V` - shells and TUIs use it (readline quoted-insert, vim visual-block mode). Paste uses `Ctrl+Shift+V`.
 
 ## Sidebar
 
-- [+ Terminal] — spawn a new terminal
-- [Settings] — open global settings panel
-- [Close all panes] — close every pane in this workspace; if a command is still running, it asks first
+- [+ Terminal] - spawn a new terminal
+- [Settings] - open global settings panel
+- [Close all panes] - close every pane in this workspace; if a command is still running, it asks first
 
 Layout is auto-saved on close and auto-restored on startup via `user://layout.json`.
 
 The shipped **Agent Workspace** profile opens a normal terminal plus separate
 Inspector (private Q&A) and Reasoning (passive agent thinking) panes. Five
 single-pane ecosystem presets ship alongside it: herdr, lazygit, nvim,
-claude, and OMP — each restores one full-screen terminal running that tool.
+claude, and OMP - each restores one full-screen terminal running that tool.
 None of them install the OMP extension or launch `omp`; the user does that in
 the terminal. Inspector does not follow the terminal conversation. Reasoning
 requires the `@gpty/omp-events` extension and gpty's Unix event socket

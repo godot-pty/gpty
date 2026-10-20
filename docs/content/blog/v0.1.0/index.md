@@ -36,5 +36,5 @@ First release! 6 days, 193 commits. Feels like we're in a state that could be pu
 **Release**
 
 - Download the standalone binary for your platform from [GitHub Releases](https://github.com/godot-pty/gpty/releases/tag/v0.1.0).
-- Changelog: [github.com/godot-pty/gpty/CHANGELOG](https://github.com/godot-pty/gpty/blob/main/CHANGELOG.md).
+- Changelog: [Changelog](https://github.com/godot-pty/gpty/blob/main/docs/content/docs/changelog/v0.1.0.md).
 - Source: [github.com/godot-pty/gpty](https://github.com/godot-pty/gpty).

@@ -13,9 +13,13 @@
     {{/* Rewrite repo-relative links to doc pages */}}
     {{ $raw = $raw | replaceRE `\[CHANGELOG\.md\]\(CHANGELOG\.md\)` "[Changelog](/docs/changelog/)" }}
     {{ $raw = $raw | replaceRE `\[ROADMAP\.md\]\(ROADMAP\.md\)` "[Roadmap](/docs/roadmap/)" }}
+    {{/* Root docs link split pages (roadmap chains, changelog releases, agent
+         guide topics) by their repo path; map them onto the site under the
+         configured baseURL, so the rewrite works from any rendering page. */}}
+    {{ $docs := "docs/" | relURL }}
+    {{ $raw = $raw | replaceRE `\]\(docs/content/docs/([^)]+)\.md(#[^)]*)?\)` (printf "](%s${1}/${2})" $docs) }}
     {{ $raw = $raw | replaceRE `\[CONTRIBUTING\.md\]\(CONTRIBUTING\.md\)` "[Contributing](/docs/contributing/)" }}
     {{ $raw = $raw | replaceRE `\[SECURITY\.md\]\(SECURITY\.md\)` "[Security](/docs/security/)" }}
-    {{ $raw = $raw | replaceRE `\[AGENTS\.md\]\(AGENTS\.md#security\)` "[Agent Guide](/docs/agents/#security)" }}
     {{ $raw = $raw | replaceRE `\[AGENTS\.md\]\(AGENTS\.md\)` "[Agent Guide](/docs/agents/)" }}
     {{ $raw = $raw | replaceRE `\[LICENSE\]\(LICENSE\)` "[License](/docs/license/)" }}
     {{ $raw = $raw | replaceRE `\[LICENSE-EXCEPTIONS\.md\]\(LICENSE-EXCEPTIONS\.md\)` "[License exceptions](/docs/license/#exceptions)" }}

@@ -4,13 +4,13 @@ CLI for controlling the gpty terminal workspace over JSON-RPC IPC. Connects to a
 
 ## Getting it
 
-Release bundles ship this CLI beside the GUI — `gpty-gui` on Linux and Windows, `gPTY.app` on macOS — and the CLI starts that GUI on demand, so a downloaded bundle needs no toolchain. From a source checkout, `cargo build -p gpty` (or `cargo build --workspace`) puts the binary in `target/debug/gpty`.
+Release bundles ship this CLI beside the GUI - `gpty-gui` on Linux and Windows, `gPTY.app` on macOS - and the CLI starts that GUI on demand, so a downloaded bundle needs no toolchain. From a source checkout, `cargo build -p gpty` (or `cargo build --workspace`) puts the binary in `target/debug/gpty`.
 
 ## Role in the Workspace
 
 | Crate | Role | Depends On |
 |-------|------|------------|
-| `gpty-core` | Engine library (PTY, ANSI, grid, concepts) | — |
+| `gpty-core` | Engine library (PTY, ANSI, grid, concepts) | - |
 | `gpty-ipc` | IPC transport + protocol | `gpty-core` |
 | `gpty-gdext` | Godot 4 GDExtension bridge + IPC server | `gpty-core`, `gpty-ipc` |
 | **`gpty-cli`** | **CLI for workspace control** | `gpty-ipc` |
@@ -125,7 +125,7 @@ gpty version
 | `mcp` | Run as MCP server over stdio (for AI tool integration) |
 | `daemon` | Manage the GUI: `start`, `stop`, `status` |
 | `layout` | Layout management: `save <name>`, `load <name>`, `list` |
-| `plugin` | Install, manage, and run plugins: `install <owner>/<repo>[@ref]` (git clone, manifest validation, GUI review dialog — a plugin's actions run as you, so a human must accept), `list`, `enable`/`disable <id>` and `uninstall <id>` (each notifies a running GUI so its profile list drops or picks up the plugin's layouts without a restart; with no GUI the notice is dropped and the next launch reads the store), `logs <id>`, `run <id> <action>` (spawns the action's CLI command through `GPTY_BIN_PATH`), `validate <path>` (check a `gpty-plugin.toml` file or plugin directory with the install validator — the local authoring loop, no GUI and no network; `--json` prints `{"ok":…}` and exits 1 on rejection). Not an MCP tool: install waits on the review dialog, the admin actions touch local state |
+| `plugin` | Install, manage, and run plugins: `install <owner>/<repo>[@ref]` (git clone, manifest validation, GUI review dialog - a plugin's actions run as you, so a human must accept), `list`, `enable`/`disable <id>` and `uninstall <id>` (each notifies a running GUI so its profile list drops or picks up the plugin's layouts without a restart; with no GUI the notice is dropped and the next launch reads the store), `logs <id>`, `run <id> <action>` (spawns the action's CLI command through `GPTY_BIN_PATH`), `validate <path>` (check a `gpty-plugin.toml` file or plugin directory with the install validator - the local authoring loop, no GUI and no network; `--json` prints `{"ok":…}` and exits 1 on rejection). Not an MCP tool: install waits on the review dialog, the admin actions touch local state |
 | `version` | Print version info |
 
 ## Global Flags

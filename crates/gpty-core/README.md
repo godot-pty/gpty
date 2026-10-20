@@ -1,6 +1,6 @@
 # gpty-core
 
-Library crate for the gpty multi-PTY emulator. This is the engine — all terminal lifecycle, ANSI parsing, concept matching, capture buffering, and grid management live here.
+Library crate for the gpty multi-PTY emulator. This is the engine - all terminal lifecycle, ANSI parsing, concept matching, capture buffering, and grid management live here.
 
 ## Module Layout
 
@@ -14,11 +14,11 @@ Library crate for the gpty multi-PTY emulator. This is the engine — all termin
 | [`cli`](src/cli.rs) | `cli_view` backend: one argv child (never a shell); stdout+stderr merged into a bounded line queue | `CliProcess` |
 | [`parser`](src/parser.rs) | Strips ANSI escape sequences; extracts plain-text lines | `LineParser` |
 | [`term`](src/term.rs) | Full terminal grid + damage tracking via `alacritty_terminal` | `TermGrid`, `CellInfo`, `GridUpdate` |
-| [`color`](src/color.rs) | ANSI color mapping — named, indexed, true-color → RGB | `color_to_rgb()` |
+| [`color`](src/color.rs) | ANSI color mapping - named, indexed, true-color → RGB | `color_to_rgb()` |
 | [`keymap`](src/keymap.rs) | Keyboard event → byte sequence translation | `key_event_to_bytes()` |
 | [`lock`](src/lock.rs) | Poison-tolerant locking: skip the work, report the first occurrence | `lock_or_warn()`, `read_or_warn()`, `write_or_warn()` |
 | [`history`](src/history.rs) | SQLite-backed scrollback history store and its write-behind thread | `HistoryStore`, `PaneHistory` |
-| [`vault`](src/vault.rs) | SQLite + FTS5 index over a directory of Markdown notes — the wiki pane's list and search | `VaultStore`, `scan_vault()`, `index_vault()` |
+| [`vault`](src/vault.rs) | SQLite + FTS5 index over a directory of Markdown notes - the wiki pane's list and search | `VaultStore`, `scan_vault()`, `index_vault()` |
 | [`links`](src/links.rs) | `[[wikilink]]` parsing (occurrences with their line; code and escapes are literal) and resolution against a note set (stem or path, exact case then a unique case-insensitive match, ambiguity never silently picked) | `parse_links()`, `Link`, `NoteIndex`, `Resolution` |
 
 ## Concept System
@@ -44,17 +44,17 @@ How it works:
 3. Each line is tested against every registered concept's `trigger_regex`, then
    against its `conditions` (all must match the same line). One combined
    `RegexSet` pass answers "could anything match" first, so a line that matches
-   no trigger — the common case — never enters the per-concept loop
+   no trigger - the common case - never enters the per-concept loop
 4. On an `UntilStop` match the terminal enters capture mode and buffers raw
    bytes; a `SingleLine` match is queued as a notice and stops here
 5. The capture ends on timeout (silence for N ms) or user input
 6. GDScript drains the completed capture and routes its text to the first pane
-   whose type matches the action's `target_label` — with no receiver, the raw
+   whose type matches the action's `target_label` - with no receiver, the raw
    bytes are replayed into the grid
 
 **Concepts never execute anything.** A concept definition is data: it starts a
 capture and chooses which pane kind displays the result. It cannot write to a
-PTY. That is deliberate — the trigger is a regex over terminal output, which is
+PTY. That is deliberate - the trigger is a regex over terminal output, which is
 untrusted, so a concept that could act would be an execution primitive driven by
 whatever a program happens to print. `capture_mode` is `UntilStop` (capture and route) or `SingleLine`
 (notify-only: the match is published on the event socket and nothing is
@@ -66,7 +66,7 @@ Key functions: `match_line()`, `finalize_capture()`, `handle_command()`, `feed_g
 ### Use Cases
 
 - Read the code you just catted: `cat README.md` in a shell pane opens the file in a code viewer pane.
-- Error triage: route a compiler error block, a traceback, or a failing test log to the Inspector — gated behind its own opt-in (`accept_concept_captures`), because captured output leaves the terminal.
+- Error triage: route a compiler error block, a traceback, or a failing test log to the Inspector - gated behind its own opt-in (`accept_concept_captures`), because captured output leaves the terminal.
 - Diff and log review: `git diff` / `git log` output lands in a viewer pane instead of eating scrollback.
 - Documentation lookup: match a compiler error code and open the relevant snippet or link in an adjacent pane.
 

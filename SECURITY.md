@@ -3,7 +3,7 @@
 This document states what the project defends against, what it deliberately does not, 
 and how to report a problem.
 
-Implementation rules for contributors live in [AGENTS.md](AGENTS.md#security). This file is the
+Implementation rules for contributors live in [the security rules](docs/content/docs/agents/security.md). This file is the
 policy: the (currently limited) threat model, the limits, and the reporting process.
 
 ## Supported versions
@@ -14,7 +14,7 @@ policy: the (currently limited) threat model, the limits, and the reporting proc
 | < 0.5   | :x: |
 
 Generally, fixes will land on `main` and ship in the immediate next release. There is no plan to 
-have maintenance branches and/or backports to older minor versions — if a fix matters to you, 
+have maintenance branches and/or backports to older minor versions - if a fix matters to you, 
 please upgrade.
 
 That said, if there is an issue with a significant severity and implications, the fix will be 
@@ -24,7 +24,7 @@ backported to prior releases as feasible.
 
 **Use GitHub's private vulnerability reporting**: repository **Security** tab → **Report a
 vulnerability**. It opens a private advisory thread visible only to the maintainers. Please do not
-open a public issue, pull request, or discussion for a suspected vulnerability — that exposes every
+open a public issue, pull request, or discussion for a suspected vulnerability - that exposes every
 user before a fix exists.
 
 If private reporting is unavailable to you, open an issue titled `Security Request` with
@@ -56,10 +56,13 @@ to be intentional and documented, we will explain the reasoning in the thread an
 **Trusted: Your own user account.** `gPTY` trusts same-UID processes by design. A process running as
 **you** can already read your files, attach to your terminals, and drive the control socket, so "another
 program running as me can control the workspace" shouldn't be a vulnerability on its own (please open a 
-discussion post if you think otherwise). Setting `GPTY_SECRET` raises the bar for the control socket; 
-but it does not and cannot change the trust class.
+discussion post if you think otherwise). Setting `GPTY_SECRET` raises the bar for *other users* of the
+machine; it does not and cannot change the trust class, and it does not separate a pane from the control
+socket. That second point matters: the trust above is for processes *outside* gPTY. Code running
+*inside* a pane is not separated from the control surface today, which is a known, tracked gap (see
+"A program in a pane can read and drive every other pane" under Known limitations).
 
-**Untrusted — must never gain authority:**
+**Untrusted - must never gain authority:**
 
 - **Terminal output.** Every byte a program prints, including escape sequences, is attacker-controlled
   if any program you run can be induced to print attacker-chosen text.
@@ -76,12 +79,15 @@ but it does not and cannot change the trust class.
 - Cross-user attacks on shared hosts: socket squatting, world-writable paths, `PATH`/env manipulation;
 - remote content driving a local action;
 - A lower-trust pane influencing a higher-trust one (an ordinary shell pane feeding a root shell or
-  an SSH session);
+  an SSH session). This is in scope as a goal and is **not enforced yet**: a program in any pane can
+  currently drive every other pane. It is a documented known limitation rather than an unreported
+  bug, and enforcement is on the roadmap (see Known limitations);
 - Denial of service that locks the GUI thread or grows memory without a bound.
 
 **Out of scope (by design, or accepted):**
 
-- Same-UID processes controlling gPTY (see above);
+- Processes *outside* gPTY that run as the same user controlling it (see above). A process *inside* a
+  pane is the in-scope case listed earlier, not this one;
 - Spoofable display state: the `gpty_state=<value>` OSC declaration and the heuristic agent-state
   tiers may be set by anything that can print; they are labelled display-only and are never an input
   to a decision. `gpty state` declares the same (display-only) state over the event socket, where the
@@ -110,7 +116,7 @@ but it does not and cannot change the trust class.
 - **No shell evaluation of configured "commands".** A saved tile or profile names a program and an
   argv array; there is no shell string anywhere in the spawn path. A saved file cannot supply
   environment at all: a tile's `shell_env` is dropped on restore with a notice, and the environment
-  a pane gets — the inherited one plus your own global and per-pane settings — passes through one
+  a pane gets - the inherited one plus your own global and per-pane settings - passes through one
   blocklist before it reaches a child.
 
 ## Hardening in place
@@ -121,7 +127,7 @@ These are load-bearing guards. Reports that require removing one of them should 
   macOS), 64 KiB request cap, 16 concurrent connections, optional shared secret compared in constant
   time; clients validate the socket path and the GUI binary before trusting either.
 - **Event socket**: separate listener; *submitting* an event requires a per-PTY capability that is
-  never reused and is compared in constant time. Reading the fan-out is open to same-UID processes —
+  never reused and is compared in constant time. Reading the fan-out is open to same-UID processes -
   treat the event channel as non-confidential from your own user.
 - **Child processes**: `LD_*`/`DYLD_*`, event-channel, pane-marker, and control-credential variables
   are stripped from every child, and startup-evaluation variables (`PROMPT_COMMAND`, `BASH_ENV`,
@@ -132,17 +138,17 @@ These are load-bearing guards. Reports that require removing one of them should 
 - **Restored layouts and profiles**: tile types, settings, and grid geometry are validated; a tile
   that starts a different program or passes extra arguments raises the Workspace Trust prompt before
   it runs, and `layoutLoad` over the control socket refuses such a profile (a caller cannot answer a
-  dialog, so naming the profile is not consent to what the file asks for) — unless the consent memory
+  dialog, so naming the profile is not consent to what the file asks for) - unless the consent memory
   covers it: a built-in profile approved at this app version, or a profile whose every untrusted
   tile's exact program+argv was approved, loads, because the record is proof the user approved that
   content in the GUI. A new app version or plugin revision re-prompts by construction. Environment is
   not a file decision: a tile's `shell_env` is dropped on restore with a notice naming what was
-  dropped, and per-pane environment is the user's own — `user://pane_env.json`, written only by the
+  dropped, and per-pane environment is the user's own - `user://pane_env.json`, written only by the
   pane settings UI and keyed by the pane's id, applied at spawn over the user's global environment.
 - **Concepts**: the standard Rust `regex` crate only (no backtracking engine), bounded counts and
   lengths, a 16 KiB line cap before matching, 4 MiB capture buffers, and a 64 KiB OSC cap in the
   parser.
-- **Markdown**: rendered from Markdown to escaped BBCode — never raw HTML or unescaped tags; links
+- **Markdown**: rendered from Markdown to escaped BBCode - never raw HTML or unescaped tags; links
   are scheme-checked and opened only after an explicit confirmation.
 
 - **Media decoding**: the media backend links a pinned FFmpeg (LGPLv3, dynamically linked) built
@@ -167,7 +173,7 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   the BSDs (`getpeereid`), illumos and Solaris (`getpeerucred`), and Windows (the client process id
   the pipe reports, then its token's user SID compared with gPTY's own). Windows named pipes also
   reject remote clients and carry a default ACL for the creating user, SYSTEM and Administrators,
-  but that ACL is inherited rather than verified — the explicit check is what makes it a gate.
+  but that ACL is inherited rather than verified - the explicit check is what makes it a gate.
   Remaining Unix targets (AIX, Haiku, QNX) have no peer-credential API wired up and still fail
   *open*, so file permissions are the only gate there. Windows environment keys are
   case-insensitive (and the PTY layer normalises them), so the `GPTY_*` credential and marker
@@ -181,6 +187,34 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   ownership and mode are validated before use, so nobody can read or spoof traffic, but another user
   can pre-create the path and deny service. It is reached only when no private directory exists or
   can be created.
+- **A program in a pane can read and drive every other pane.** Every pane's shell is a child of the
+  GUI and runs as you, so it passes the control socket's one gate (same user). The PTY layer strips
+  `GPTY_SOCKET` and `GPTY_SECRET` from a pane's environment, but the default socket path is derived
+  from `XDG_RUNTIME_DIR`, which is inherited, so the `gpty` CLI inside a pane finds the socket anyway.
+  The secret does not close the gap either: the pane's shell is a child of the GUI process and, on
+  Linux, can read the secret from `/proc/<gui pid>/environ` (shown by running it; other platforms have
+  equivalents that were not tested). The reach is the whole control surface - `inject`, `pane-run`,
+  `broadcast`, `new-pane`, `kill-pane` and `pane-read` - so another pane's input *and* its output. Any
+  process that can run in a pane (an install script, a `curl | sh`, a compromised dependency, an agent
+  following an injected prompt) can type into your other panes, including a root shell or an SSH
+  session, and read what they print. gPTY does not separate panes from each other and makes no such
+  claim today. Workspaces do not help: all of a window's workspaces share one control socket, and a
+  command that names a pane by its id or label (`T1`) is looked up in the active workspace first and
+  then in every other one. Until enforcement lands, keep untrusted code and root shells or
+  authenticated sessions apart by running one of them outside gPTY, and treat `GPTY_SECRET` as protection against other users only. The same
+  control surface is the intended agent workflow (an agent in a pane calling `gpty inject` or
+  `gpty mcp`), so the planned fix is a per-pane permission the user grants, not removing the surface.
+  Even then it will be a speed bump against opportunistic scripts and injected agents, not a boundary
+  against a determined local attacker. Real isolation from code you do not trust has to come from the
+  operating system - run it as another user, in a container or VM, or under a sandbox such as
+  bubblewrap, away from the terminal that holds your root and SSH sessions. gPTY may one day offer an
+  opt-in isolated pane (a shell started where the control socket is not visible); that is an idea, not
+  a plan or a promise, and it would not change the "No sandboxing" statement above until it exists.
+  A *sensitive workspace* flag is planned (see the roadmap) with one fixed rule: the panes of a workspace
+  the user marks sensitive are not reachable over the control socket by any client - pane or outside, with
+  no exception - and are not written to the history store. It is not implemented yet, so today no
+  workspace has this property.
+  Tracked in [ROADMAP.md](ROADMAP.md).
 - **A pane inherits your environment.** The PTY layer snapshots the GUI process's environment and
   strips only the `GPTY_*` keys, so everything else reaches every pane: `SSH_AUTH_SOCK`, cloud
   credential pointers, proxy variables, `DISPLAY`. Launch gPTY from a shell that holds credentials
@@ -189,24 +223,24 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   environment, so a `gpty` run from a credential-holding shell hands that context to every pane
   opened afterwards. On top of that inherited environment a pane gets your global `shell_env`
   overlaid by the pane's own entry from the user-owned `pane_env.json` store; saved files cannot
-  supply environment. This is the user's own context, not a file's — but it bounds what any
+  supply environment. This is the user's own context, not a file's - but it bounds what any
   per-pane environment model can claim, and it is why environment is treated as authority rather
   than configuration.
 - **Scrollback is plaintext** in `user://`. The store, its WAL siblings and the JSON stores beside
   it are created owner-only (0600) rather than with your umask, but the content is not encrypted:
-  anything printed in a pane — tokens included — is stored on disk the same way a shell history file
+  anything printed in a pane - tokens included - is stored on disk the same way a shell history file
   would be.
 - **The update check is notify-only.** It fetches release metadata over TLS and shows a toast; it
   never downloads or executes anything, and the response is treated as display data.
 - **Release artifacts are not code-signed, but carry build provenance.** There is no Authenticode or
   notarization. Each release publishes a `SHA256SUMS` listing every asset, and every asset is attested
-  with GitHub's build-provenance attestation (SLSA v1), signed by the release workflow's OIDC identity
-  — verify with `gh attestation verify <asset> --repo godot-pty/gpty`. That binds a download to the
+  with GitHub's build-provenance attestation (SLSA v1), signed by the release workflow's OIDC identity -
+  verify with `gh attestation verify <asset> --repo godot-pty/gpty`. That binds a download to the
   workflow, commit and runner that produced it; checksums without the attestation only catch corruption
   in transit. Verify the source or build locally if provenance is not enough for you.
 - **Resource bounds are per-path, not global.** A program that floods a pane can still make that
   pane expensive: the output queue is bounded per pane (256 × 4 KiB, enforced by blocking the
-  reader, so the child waits on the PTY buffer rather than the process growing — v0.5.4), and the
+  reader, so the child waits on the PTY buffer rather than the process growing - v0.5.4), and the
   render loop repaints less often when a pane's own grid work exceeds its per-frame budget instead
   of spending every frame on it (v0.5.3), and scrollback is committed by a per-pane writer thread
   whose pending queue is bounded by the store's retention window (v0.5.4) instead of one blocking

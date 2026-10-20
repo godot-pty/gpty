@@ -39,7 +39,7 @@ Linux/macOS, `\\.\pipe\gpty-events` (derived from the control pipe) on Windows.
 The transport is one code path for both, because `net.connect(path)` opens a
 Unix domain socket for a socket path and a named pipe for a pipe path. The only
 platform branch is validation: on Windows the path must be a `\\.\pipe\` name
-(answered from the path alone — a pipe cannot be `stat`ed), while on Unix the
+(answered from the path alone - a pipe cannot be `stat`ed), while on Unix the
 socket must exist, be a socket, and be owned and mode-restricted by this user.
 
 `scripts/smoke_pane_api.py` runs the shipped extension inside a gpty pane and
