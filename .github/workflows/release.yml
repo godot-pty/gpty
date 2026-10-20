@@ -273,7 +273,7 @@ jobs:
             gdext-artifacts/gpty-macos-arm64/gpty
           ./scripts/bundle-media macos-zip \
             "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" \
-            "gdext-artifacts/gpty-macos-ffmpeg/ffmpeg"
+            "gdext-artifacts/gpty-macos-ffmpeg"
 
       - name: Copy GDExtension artifacts for release
         run: |
