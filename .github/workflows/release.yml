@@ -158,7 +158,7 @@ jobs:
           mkdir release\ffmpeg\licenses
           copy target\release\gpty_gdext.dll release\gpty_gdext.windows.x86_64.dll
           copy target\release\gpty.exe release\gpty.exe
-          copy "%FFMPEG_DIR%\bin\*.dll" release\ffmpeg\
+          copy "$env:FFMPEG_DIR\bin\*.dll" release\ffmpeg\
           xcopy /y /q "dist\ffmpeg\windows-x86_64\licenses\*" release\ffmpeg\licenses\
           copy "dist\ffmpeg\windows-x86_64\components.txt" release\ffmpeg\
 

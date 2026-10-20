@@ -107,7 +107,8 @@ macos_libs() {
     local ext
     for ext in "$arm"/libgpty_gdext*.dylib "$(dirname "$arm")"/libgpty_gdext*.dylib; do
         [ -f "$ext" ] || continue
-        if otool -L "$ext" | grep -E '/lib(av|sw)[a-z]+[^ ]*\.dylib' >/dev/null; then
+        if otool -L "$ext" | tail -n +2 | awk '{print $1}' \
+            | grep -E '^/.*lib(av|sw)[a-z]+[^/]*\.dylib$' >/dev/null; then
             die "$(basename "$ext") links FFmpeg by absolute path; rebuild with --install-name-dir=@rpath"
         fi
     done
