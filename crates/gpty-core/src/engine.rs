@@ -1285,8 +1285,26 @@ mod tests {
         .await;
         assert!(started, "the background command must have started");
 
+        // The status poll samples `foreground_job` every 200 ms; READY can be
+        // in the grid before the first sample, so wait for one instead of
+        // asserting against the initial `None`.
+        let sampled = wait_until(Duration::from_secs(20), || {
+            spawned
+                .grid
+                .lock()
+                .map(|g| g.status.foreground_job.is_some())
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(sampled, "the status poll must sample the foreground job");
+
+        // Bind the value before the assert: the guard from `grid.lock()`
+        // lives to the end of its statement, and the assertion's failure
+        // message calls `pane_status`, which locks the same non-reentrant
+        // mutex - a failing assert deadlocked its own message.
+        let foreground = spawned.grid.lock().expect("grid").status.foreground_job;
         assert_eq!(
-            spawned.grid.lock().expect("grid").status.foreground_job,
+            foreground,
             Some(false),
             "a background descendant is not a foreground job: {}",
             pane_status(&spawned)
