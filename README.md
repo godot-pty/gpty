@@ -47,7 +47,7 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 | macOS | `gpty-v<version>-macos.zip` - unzip, right-click the `.app` → Open; `gpty` beside it is the CLI |
 | Windows | `gpty-v<version>-windows-x86_64.zip` - unzip; `gpty-gui.exe` starts the GUI, `gpty.exe` is the CLI |
 
-In the file names, `<version>` is the release tag you downloaded (for example `v0.6.0`).
+In the file names, `<version>` is the release tag you downloaded (for example `v0.7.0`).
 
 Each release publishes a `SHA256SUMS` listing every asset. Check the file you downloaded before running it:
 
