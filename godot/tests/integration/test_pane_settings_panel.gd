@@ -50,6 +50,14 @@ func test_popup_closes_when_target_pane_killed():
 func test_popup_closes_when_killed_via_sidebar_signal_path():
 	var ws = await _make_workspace()
 	var body = _first_body(ws)
+	# The status poll samples the foreground job every 200 ms; a close before
+	# the first sample is conservatively "busy" and raises the running-work
+	# dialog this test does not answer. Wait for the idle sample first.
+	for _i in 60:
+		if not body.has_running_work():
+			break
+		await get_tree().create_timer(0.1).timeout
+	assert_false(body.has_running_work(), "the shell must be sampled idle before the close")
 	ws._tm._open_pane_settings(body)
 	var panel = _panel(ws)
 	assert_true(panel.visible)
