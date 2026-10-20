@@ -82,7 +82,7 @@ func test_every_listed_id_addresses_the_pane_it_names():
 		"activating a read-only pane must not leave a terminal holding keyboard focus"
 	)
 
-	_ws._kill(extra)
+	_ws._kill_now(extra)
 
 # ── paneStatus: one target, or every pane ──────────────────────────────
 
@@ -119,8 +119,8 @@ func test_pane_status_without_a_pane_covers_every_pane():
 	assert_true(not_terminal.has("error"), "a pane without status primitives must be refused")
 	assert_string_contains(str(not_terminal["error"]["message"]), "no status primitives")
 
-	_ws._kill(terminal)
-	_ws._kill(viewer)
+	_ws._kill_now(terminal)
+	_ws._kill_now(viewer)
 
 func test_pane_targeting_accepts_an_id_and_a_legacy_label():
 	var by_id = _spawn("code_viewer")
@@ -206,7 +206,7 @@ func test_terminal_only_methods_refuse_other_panes():
 	var absent = WorkspaceIpcHandlers.handle(_ws, "paneRead", {"pane_id": "no-such-pane"})
 	assert_true(absent.has("error"), "paneRead must refuse an unknown pane")
 
-	_ws._kill(viewer)
+	_ws._kill_now(viewer)
 
 func test_unknown_method_answers_method_not_found():
 	var result = WorkspaceIpcHandlers.handle(_ws, "notAMethod", {})

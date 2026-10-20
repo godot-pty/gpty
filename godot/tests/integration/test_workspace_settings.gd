@@ -344,7 +344,7 @@ func test_killing_the_focused_pane_hands_focus_to_a_survivor():
 	ws._tm.last_body = victim
 	assert_true(victim.has_focus(), "precondition: the pane to close holds focus")
 
-	ws._kill(victim)
+	ws._kill_now(victim)
 	await get_tree().process_frame
 	await get_tree().process_frame
 

@@ -35,6 +35,15 @@ func _first_body(ws: Control) -> Control:
 	var tm: TerminalManager = ws._tm
 	return tm._find_body(tm.tiles[0].wrapper)
 
+## Answer the running-work question when the close path raised one. Windows
+## cannot tell an idle shell from a busy one (`foreground_job` is null), and
+## an unsampled Unix pane is conservatively busy too; a user answers the same
+## dialog, so the test does.
+func _confirm_running_ask(ws: Control) -> void:
+	var dialog := ws.find_child("RunningWorkConfirm", false, false) as ConfirmationDialog
+	if dialog:
+		dialog.confirmed.emit()
+
 func test_popup_closes_when_target_pane_killed():
 	var ws = await _make_workspace()
 	var body = _first_body(ws)
@@ -45,25 +54,19 @@ func test_popup_closes_when_target_pane_killed():
 	assert_true(panel.visible, "popup opens for the pane")
 
 	ws._kill(body)
+	_confirm_running_ask(ws)
 	assert_false(panel.visible, "killing the target pane must close the popup")
 
 func test_popup_closes_when_killed_via_sidebar_signal_path():
 	var ws = await _make_workspace()
 	var body = _first_body(ws)
-	# The status poll samples the foreground job every 200 ms; a close before
-	# the first sample is conservatively "busy" and raises the running-work
-	# dialog this test does not answer. Wait for the idle sample first.
-	for _i in 60:
-		if not body.has_running_work():
-			break
-		await get_tree().create_timer(0.1).timeout
-	assert_false(body.has_running_work(), "the shell must be sampled idle before the close")
 	ws._tm._open_pane_settings(body)
 	var panel = _panel(ws)
 	assert_true(panel.visible)
 
 	# The sidebar close button emits request_close → workspace _kill.
 	ws._sidebar.request_close.emit(body)
+	_confirm_running_ask(ws)
 	assert_false(panel.visible, "sidebar close must close the popup too")
 
 func test_popup_closes_on_type_swap():
@@ -74,6 +77,7 @@ func test_popup_closes_on_type_swap():
 	assert_true(panel.visible)
 
 	ws._swap_pane(body, "code_viewer")
+	_confirm_running_ask(ws)
 	assert_false(panel.visible, "swapping the target pane must close the popup")
 	var tm: TerminalManager = ws._tm
 	var swapped = tm._find_body(tm.tiles[0].wrapper)
