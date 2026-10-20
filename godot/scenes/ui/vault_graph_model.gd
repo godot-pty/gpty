@@ -133,16 +133,22 @@ static func parse(answer: Variant, declared := {}) -> Dictionary:
 				a = dst
 				b = src
 				forward = false
-			var key := a + "\u0000" + b
-			if not pairs.has(key):
-				pairs[key] = {
+			# A nested map keys the pair as (a, b) without a separator
+			# character: every separator is a character a note path may
+			# contain, except NUL — and Godot strings no longer hold NUL
+			# (`"\u0000"` is decoded as U+FFFD with an engine error).
+			if not pairs.has(a):
+				pairs[a] = {}
+			var rows: Dictionary = pairs[a]
+			if not rows.has(b):
+				rows[b] = {
 					"a": a,
 					"b": b,
 					"ab": 0,
 					"ba": 0,
 					"ghost": false,
 				}
-			var pair: Dictionary = pairs[key]
+			var pair: Dictionary = rows[b]
 			if forward:
 				pair["ab"] = int(pair["ab"]) + count
 			else:
@@ -150,13 +156,15 @@ static func parse(answer: Variant, declared := {}) -> Dictionary:
 			if bool(raw.get("ghost", false)) or bool(by_id[a]["ghost"]) or bool(by_id[b]["ghost"]):
 				pair["ghost"] = true
 	var edges: Array = []
-	for key in pairs:
-		var pair: Dictionary = pairs[key]
-		var ab := int(pair["ab"])
-		var ba := int(pair["ba"])
-		pair["count"] = ab + ba
-		pair["mutual"] = ab > 0 and ba > 0
-		edges.append(pair)
+	for a in pairs:
+		var rows: Dictionary = pairs[a]
+		for b in rows:
+			var pair: Dictionary = rows[b]
+			var ab := int(pair["ab"])
+			var ba := int(pair["ba"])
+			pair["count"] = ab + ba
+			pair["mutual"] = ab > 0 and ba > 0
+			edges.append(pair)
 	edges.sort_custom(func(left, right):
 		if str(left["a"]) != str(right["a"]):
 			return str(left["a"]) < str(right["a"])
@@ -522,7 +530,8 @@ static func hit_test(nodes: Array, positions: Dictionary, point: Vector2, radius
 static func hit_test_edge(edges: Array, positions: Dictionary, point: Vector2, radius: float) -> Dictionary:
 	var best := {}
 	var best_distance := INF
-	var best_key := ""
+	var best_a := ""
+	var best_b := ""
 	for edge in edges:
 		if not (edge is Dictionary):
 			continue
@@ -535,13 +544,14 @@ static func hit_test_edge(edges: Array, positions: Dictionary, point: Vector2, r
 		)
 		if distance > radius:
 			continue
-		var key := a + "\u0000" + b
+		var closer := a < best_a or (a == best_a and b < best_b)
 		if distance < best_distance or (
-			is_equal_approx(distance, best_distance) and (best_key == "" or key < best_key)
+			is_equal_approx(distance, best_distance) and (best_a == "" or closer)
 		):
 			best = edge
 			best_distance = distance
-			best_key = key
+			best_a = a
+			best_b = b
 	return best
 
 ## Distance from `point` to the segment `a`–`b`.
