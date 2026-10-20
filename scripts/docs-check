@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+"""Check the markdown the project ships: links, anchors and the split-page structure.
+
+Standard library only; run from anywhere. Exits 1 and lists every problem found.
+
+  * every relative link in a markdown file resolves to a file, and its #anchor
+    resolves to a heading (links into Hugo shortcodes and absolute URLs are skipped)
+  * `/images/...` links resolve under docs/static/images/
+  * roadmap chain pages: front matter, one three-column table row shape
+    (`| done | AREA | **Title** - text |`), a known AREA, no unescaped `|`, titles
+    unique across all chains, and no image inside a table row
+  * ROADMAP.md, CHANGELOG.md and AGENTS.md link exactly the pages under
+    docs/content/docs/{roadmap,changelog,agents}/, and nothing links a page that
+    does not exist
+  * README.md carries no hard-coded release version in the download file names
+"""
+import os
+import re
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SKIP_PREFIXES = (
+    '.git/', 'target/', 'node_modules/', 'godot/addons/', 'docs/public/',
+    'docs/assets/', 'docs/resources/', 'docs/.cache/', 'docs/data/',
+)
+problems = []
+
+
+def bad(where, msg):
+    problems.append(f'{where}: {msg}')
+
+
+def rel(path):
+    return os.path.relpath(path, ROOT).replace(os.sep, '/')
+
+
+def read(path):
+    with open(os.path.join(ROOT, path), encoding='utf-8') as f:
+        return f.read()
+
+
+def markdown_files():
+    out = []
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        dirnames[:] = [d for d in dirnames
+                       if not (rel(os.path.join(dirpath, d)) + '/').startswith(SKIP_PREFIXES)]
+        for name in filenames:
+            if name.endswith('.md'):
+                path = rel(os.path.join(dirpath, name))
+                if not path.startswith(SKIP_PREFIXES):
+                    out.append(path)
+    return sorted(out)
+
+
+def slug(heading):
+    h = re.sub(r'`', '', heading.strip().lower())
+    h = re.sub(r'[^\w\- ]', '', h)
+    return h.replace(' ', '-')
+
+
+def strip_code(text):
+    text = re.sub(r'```.*?```', '', text, flags=re.S)
+    return re.sub(r'`[^`\n]*`', '', text)
+
+
+def front_matter(text):
+    m = re.match(r'---\n(.*?)\n---\n', text, re.S)
+    if not m:
+        return None
+    return dict(
+        (k.strip(), v.strip().strip('"'))
+        for k, _, v in (line.partition(':') for line in m.group(1).split('\n')) if k.strip())
+
+
+FILES = markdown_files()
+ANCHORS = {}
+for f in FILES:
+    ANCHORS[f] = {slug(m.group(1)) for m in re.finditer(r'^#{1,6} (.+)$', strip_code(read(f)), re.M)}
+
+# ── links and anchors ────────────────────────────────────────────────────
+link_re = re.compile(r'(?<!\!)\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)')
+img_re = re.compile(r'!\[[^\]]*\]\(([^)\s]+)\)')
+for f in FILES:
+    text = strip_code(read(f))
+    for m in link_re.finditer(text):
+        url = m.group(1)
+        if re.match(r'(https?:|mailto:)', url) or url.startswith('/') or '{{' in url:
+            continue
+        path, _, frag = url.partition('#')
+        target = os.path.normpath(os.path.join(os.path.dirname(f), path)).replace(os.sep, '/') if path else f
+        if path and not os.path.exists(os.path.join(ROOT, target)):
+            bad(f, f'link to missing file: {url}')
+        elif frag and target in ANCHORS and slug(frag) not in ANCHORS[target] and frag not in ANCHORS[target]:
+            bad(f, f'link to missing anchor: {url}')
+    for m in img_re.finditer(text):
+        url = m.group(1)
+        if url.startswith('/images/') and not os.path.exists(os.path.join(ROOT, 'docs/static', url.lstrip('/'))):
+            bad(f, f'image not found under docs/static/: {url}')
+
+# ── split-page indexes: root file <-> pages ──────────────────────────────
+for root_md, folder in (('ROADMAP.md', 'roadmap'), ('CHANGELOG.md', 'changelog'), ('AGENTS.md', 'agents')):
+    d = f'docs/content/docs/{folder}'
+    pages = sorted(p for p in os.listdir(os.path.join(ROOT, d)) if p.endswith('.md') and p != '_index.md')
+    linked = set(re.findall(r'\]\(' + re.escape(d) + r'/([^)#]+\.md)', read(root_md)))
+    for p in pages:
+        if p not in linked:
+            bad(root_md, f'does not link {d}/{p}')
+        fm = front_matter(read(f'{d}/{p}'))
+        if not fm or 'title' not in fm or 'weight' not in fm:
+            bad(f'{d}/{p}', 'front matter needs title and weight')
+    for p in sorted(linked - set(pages)):
+        bad(root_md, f'links missing page {d}/{p}')
+    if not os.path.exists(os.path.join(ROOT, d, '_index.md')):
+        bad(d, '_index.md is missing (the section would not render the root file)')
+
+# ── roadmap tables ───────────────────────────────────────────────────────
+m = re.search(r'Area column names[^(]*\(([A-Z, ]+)\)', read('ROADMAP.md'))
+AREAS = {a.strip() for a in m.group(1).split(',')} if m else set()
+if not AREAS:
+    bad('ROADMAP.md', 'could not read the Area list from the opening text')
+row_re = re.compile(r'^\| (✅|⬜) \| ([A-Z]+) \| (.+) \|$')
+seen = {}
+rd = 'docs/content/docs/roadmap'
+for p in sorted(os.listdir(os.path.join(ROOT, rd))):
+    if not p.endswith('.md') or p == '_index.md':
+        continue
+    for n, line in enumerate(read(f'{rd}/{p}').split('\n'), 1):
+        if not line.startswith('| ') or re.match(r'^\| (Done|:?-)', line):
+            continue
+        where = f'{rd}/{p}:{n}'
+        if '![' in strip_code(line):
+            bad(where, 'image inside a table row (list it under "## Screenshots" instead)')
+        r = row_re.match(line)
+        if not r:
+            bad(where, 'row is not `| ✅/⬜ | AREA | **Title** - text |`')
+            continue
+        done, area, item = r.groups()
+        if area not in AREAS:
+            bad(where, f'unknown area {area}')
+        if re.search(r'(?<!\\)\|', item):
+            bad(where, 'unescaped | inside the item cell')
+        t = re.match(r'\*\*(.+?)\*\*( - |$)', item)
+        if not t:
+            bad(where, 'item must start with **Title** followed by " - text"')
+            continue
+        title = t.group(1)
+        if title in seen:
+            bad(where, f'title duplicates {seen[title]}: {title[:60]}')
+        seen[title] = where
+
+# ── README ───────────────────────────────────────────────────────────────
+if re.search(r'gpty-v\d+\.\d+\.\d+-', read('README.md')):
+    bad('README.md', 'download file names hard-code a release version (use gpty-v<version>-...)')
+
+if problems:
+    print('\n'.join(problems))
+    print(f'\ndocs-check: {len(problems)} problem(s) in {len(FILES)} markdown files')
+    sys.exit(1)
+print(f'docs-check: OK ({len(FILES)} markdown files, {len(seen)} roadmap rows)')

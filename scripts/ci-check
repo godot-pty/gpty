@@ -132,6 +132,16 @@ else
     check_failed
 fi
 
+# ── Docs: markdown links, roadmap tables, split pages ──────────────────
+header "docs-check"
+if DOCS_OUT="$(python3 scripts/docs-check 2>&1)"; then
+    pass "docs-check"
+else
+    fail "docs-check"
+    detail "$DOCS_OUT"
+    check_failed
+fi
+
 # ── Step 3: cargo clippy ───────────────────────────────────────────────
 header "cargo clippy"
 if cargo clippy --workspace -- -D warnings 2>&1; then

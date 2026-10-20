@@ -8,6 +8,7 @@ on:
       # Editing this workflow must run it, or a fix to the build/verify steps
       # cannot be validated by the job it repairs.
       - ".github/workflows/docs.yml"
+      - "scripts/docs-check"
       - "README.md"
       - "CHANGELOG.md"
       - "CONTRIBUTING.md"
@@ -40,6 +41,9 @@ jobs:
           # which would clobber the repo-root copies the mirror step reads.
           tar -xzf hugo_extended_0.164.0_linux-amd64.tar.gz hugo
           sudo mv hugo /usr/local/bin/
+
+      - name: Check markdown (links, roadmap tables, split pages)
+        run: ./scripts/docs-check
 
       - name: Copy repo docs into site
         run: cd docs && ./setup.sh
@@ -75,6 +79,25 @@ jobs:
             echo "=== overview carries Hugo's stock README, not gPTY's ==="
             exit 1
           fi
+
+      - name: Verify the split pages rendered and are linked
+        run: |
+          # ROADMAP.md, CHANGELOG.md and AGENTS.md are indexes over one page per
+          # chain / release / topic. Each page must have been built, and the
+          # section index must link it: the shortcode rewrites the repo paths
+          # into site URLs, so a broken rewrite shows up here, not in production.
+          for section in roadmap changelog agents; do
+            INDEX="docs/public/docs/$section/index.html"
+            [ -f "$INDEX" ] || { echo "=== $INDEX was not built ==="; exit 1; }
+            for page in docs/content/docs/$section/*.md; do
+              name=$(basename "$page" .md)
+              [ "$name" = "_index" ] && continue
+              [ -f "docs/public/docs/$section/$name/index.html" ] \
+                || { echo "=== $section/$name was not built ==="; exit 1; }
+              grep -q "docs/$section/$name/" "$INDEX" \
+                || { echo "=== $section index does not link $name ==="; exit 1; }
+            done
+          done
 
       - name: Verify the plugin catalog rendered
         run: |
