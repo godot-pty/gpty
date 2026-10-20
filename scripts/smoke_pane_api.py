@@ -269,6 +269,24 @@ class Smoke:
                 ROOT / "target" / "debug" / "gpty_gdext.dll",
                 bin_dir / "gpty_gdext.windows.x86_64.dll",
             )
+            # The GDExtension imports the FFmpeg DLLs, and Windows searches the
+            # DLL's own directory before PATH. Copy them beside it - the layout
+            # the release bundle ships - instead of depending on a vcpkg PATH
+            # entry that a cold CI cache or a local shell may not have.
+            ffmpeg_dir = os.environ.get("FFMPEG_DIR", "")
+            dll_dir = (
+                Path(ffmpeg_dir) / "bin"
+                if ffmpeg_dir
+                else ROOT / "dist" / "ffmpeg" / "windows-x86_64" / "bin"
+            )
+            dlls = sorted(dll_dir.glob("*.dll")) if dll_dir.is_dir() else []
+            self.require(
+                bool(dlls),
+                f"no FFmpeg DLLs in {dll_dir} — run ./scripts/media-deps"
+                " (or set FFMPEG_DIR to a prefix with bin/)",
+            )
+            for dll in dlls:
+                shutil.copy2(dll, bin_dir / dll.name)
         else:
             link = bin_dir / "libgpty_gdext.linux.x86_64.so"
             link.unlink(missing_ok=True)
@@ -525,6 +543,13 @@ class Smoke:
             except OSError:
                 continue
             if text:
+                # A GDExtension that fails to load prints its reason at the
+                # start, then every script that uses its classes fails to
+                # parse; the tail alone shows the parse errors and hides the
+                # cause. Print the head too when the file is long enough that
+                # they are different.
+                if label == "engine log" and len(text) > lines:
+                    parts.append(f"--- {label} (head) ---\n" + "\n".join(text[:20]))
                 parts.append(f"--- {label} ---\n" + "\n".join(text[-lines:]))
         return "\n".join(parts) if parts else "(no Godot log)"
 
