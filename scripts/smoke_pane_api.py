@@ -627,6 +627,20 @@ def main() -> int:
             mine,
         )
 
+        # ── CLI process teardown, at volume ───────────────────────────
+        # The Windows smoke once saw a CLI process exit with
+        # STATUS_HEAP_CORRUPTION (0xC0000374) on an `inject`: no stdout, no
+        # stderr, and it passed on rerun. Each CLI command is a throwaway
+        # process that makes two connections (the best-effort `version`
+        # probe, then the command itself), so a loop is how that class is
+        # reproduced: N processes ≈ 2N connection teardowns. The crash is
+        # the signal — never wrap this in a retry. `pane-status` is used
+        # rather than `inject` because it makes the same two connections
+        # without writing into the pane the later steps depend on.
+        smoke.enter("CLI teardown stress")
+        for _ in range(100):
+            smoke.cli("pane-status", pane_id, "--json")
+
         # ── shell readiness: a line typed before the child attaches is read ──
         # by nothing (the repo's documented cold-shell hazard — measured past
         # 10 s on a cold runner). Quiescing is necessary but not sufficient:

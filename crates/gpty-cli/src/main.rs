@@ -380,7 +380,16 @@ fn may_autospawn(cmd: &Commands) -> bool {
     }
 }
 
-#[tokio::main]
+// A current-thread runtime: every command is a single request in a process
+// that exits as soon as it has an answer, and nothing here uses
+// `spawn_blocking` or `tokio::process`, so there is no work to parallelize.
+// The multi-thread flavor's workers were the only concurrency around
+// `process::exit`, and the Windows smoke once reported
+// `STATUS_HEAP_CORRUPTION` (0xC0000374) from `inject` with no output at all —
+// the shape of a worker being torn down mid-allocation. Do not switch this
+// back without evidence: a worker pool only adds startup cost and an exit
+// race to a one-request CLI.
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let cli = Cli::parse();
 
