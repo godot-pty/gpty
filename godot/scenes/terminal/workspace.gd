@@ -1590,8 +1590,15 @@ func _poll_ipc_requests():
 			ToastManager.warn(failure)
 			if DisplayServer.get_name() != "headless":
 				await get_tree().create_timer(4.0).timeout
-		# Still a quit, so it still asks: a refused socket bind must not drop
-		# what a pane holds (the same walk the window close uses).
+			# A refused instance never served a workspace, so there is no work
+			# to ask about. The normal quit walk would raise a dialog nothing
+			# can answer in a headless launch - and on Windows every live shell
+			# is conservatively busy, so the refused second instance used to
+			# hang instead of exiting.
+			quit_action.call()
+			return
+		# A normal shutdown request still asks: it must not drop what a pane
+		# holds (the same walk the window close uses).
 		request_quit()
 		return
 	# GptyTerminal is a GodotClass — call static methods on the class
