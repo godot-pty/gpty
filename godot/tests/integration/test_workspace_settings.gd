@@ -153,6 +153,46 @@ func test_add_workspace_starts_blank():
 	# Wait out the deferred concept push timer so it doesn't resume after free.
 	await get_tree().create_timer(2.1).timeout
 
+func test_profile_accent_follows_the_active_workspace():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	# W1 activates P1.
+	ws._do_activate({"name": "P1", "tiles": []}, false)
+	await get_tree().process_frame
+	assert_eq(ws._active_profile, "P1")
+	assert_eq(ws._workspaces[0].get("profile"), "P1")
+
+	# A new workspace starts blank: no profile accent leaks in from W1.
+	ws._add_workspace()
+	await get_tree().process_frame
+	assert_eq(ws._workspaces.size(), 2)
+	assert_eq(ws._active_profile, "", "a new workspace must not inherit W1's profile accent")
+	assert_eq(ws._workspaces[1].get("profile"), "")
+
+	# Each workspace remembers its own profile across switches.
+	ws._do_activate({"name": "P2", "tiles": []}, false)
+	await get_tree().process_frame
+	assert_eq(ws._active_profile, "P2")
+	ws._switch_workspace(0)
+	assert_eq(ws._active_profile, "P1", "W1 must remember P1")
+	ws._switch_workspace(1)
+	assert_eq(ws._active_profile, "P2", "W2 must remember P2")
+
+	# Reset drops the accent for its own workspace only.
+	ws._do_reset_now()
+	assert_eq(ws._active_profile, "")
+	assert_eq(ws._workspaces[1].get("profile"), "")
+	ws._switch_workspace(0)
+	assert_eq(ws._active_profile, "P1", "W1's accent survives W2's reset")
+
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
 func test_pane_run_executes_through_configured_shell():
 	var ws = WorkspaceScript.new()
 	_ws = ws

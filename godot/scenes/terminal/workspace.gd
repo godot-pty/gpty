@@ -20,9 +20,9 @@ var _tm: TerminalManager = TerminalManager.new()
 var _status_bar: StatusBar
 var _titlebar: Control = null
 var _chrome: WindowChrome = null
-var _workspaces: Array[Dictionary] = []  # {name: String, grid: Control, tm: TerminalManager}
+var _workspaces: Array[Dictionary] = []  # {name: String, grid: Control, tm: TerminalManager, profile: String}
 var _active: int = 0
-var _active_profile: String = ""  # last successfully activated profile (sidebar accent)
+var _active_profile: String = ""  # active workspace's profile name (sidebar accent; re-derived on every switch)
 var _history_pruned: bool = false  # orphaned-scrollback sweep already attempted
 ## The quit itself, behind a seam: tests replace it to observe a close request
 ## without ending the run (`_history_stats_provider`'s pattern).
@@ -539,6 +539,9 @@ func _do_reset():
 
 func _do_reset_now():
 	_reset_now()
+	var ws := _active_workspace()
+	if not ws.is_empty():
+		ws["profile"] = ""
 	_active_profile = ""
 	_refresh_profile_buttons()
 
@@ -670,7 +673,7 @@ func _new_workspace_container(ws_name: String) -> Dictionary:
 	_wire_tm(tm)
 	grid.visible = false
 	grid.process_mode = Node.PROCESS_MODE_DISABLED
-	return {"name": ws_name, "grid": grid, "tm": tm}
+	return {"name": ws_name, "grid": grid, "tm": tm, "profile": ""}
 
 func _workspace_names() -> Array[String]:
 	var out: Array[String] = []
@@ -714,6 +717,13 @@ func _apply_active_workspace_view():
 		_workspaces[i].grid.visible = (i == _active)
 		_workspaces[i].grid.process_mode = Node.PROCESS_MODE_INHERIT if i == _active else Node.PROCESS_MODE_DISABLED
 	_update_workspace_ui()
+	# The profile accent belongs to the workspace, not the app: a profile
+	# activated in W1 must not stay lit while W2 (which never activated one)
+	# is active. Each workspace records its own profile name, and every
+	# switch, creation and restore re-derives the accent from it.
+	var active_ws := _active_workspace()
+	_active_profile = str(active_ws.get("profile", "")) if not active_ws.is_empty() else ""
+	_refresh_profile_buttons()
 	_apply_layout()
 	_list()
 	_sync_pane_titlebars()
@@ -881,7 +891,7 @@ func _build_workspaces(entries: Array[Dictionary], active: int):
 	for i in entries.size():
 		var ws: Dictionary
 		if i == 0:
-			ws = {"name": entries[i].get("name", "Workspace 1"), "grid": _grid, "tm": _tm}
+			ws = {"name": entries[i].get("name", "Workspace 1"), "grid": _grid, "tm": _tm, "profile": ""}
 		else:
 			ws = _new_workspace_container(str(entries[i].get("name", "")))
 		_workspaces.append(ws)
@@ -2047,11 +2057,10 @@ func _activate_now(ws: Dictionary, profile: Dictionary):
 		if td is Dictionary:
 			tiles.append(td)
 	_restore_into(ws, tiles)
-	_active_profile = str(profile.get("name", ""))
-	_refresh_profile_buttons()
+	ws["profile"] = str(profile.get("name", ""))
 	# Same refresh path as workspace switching: layout, pane list, titlebars,
-	# and focus. Skipping it leaves restored wrappers unlaid-out and the
-	# sidebar pane list stale until the user switches workspaces.
+	# focus, and the profile accent, which is re-derived from `ws` (never
+	# carried across a switch).
 	_apply_active_workspace_view()
 	ToastManager.info("Profile '%s' activated" % profile.get("name", ""))
 
@@ -2064,6 +2073,9 @@ func _delete_profile(idx: int):
 	if idx >= 0 and idx < profiles.size():
 		deleted_name = str(profiles[idx].get("name", ""))
 	ProfileManager.delete_profile(idx)
+	for ws in _workspaces:
+		if str(ws.get("profile", "")) == deleted_name:
+			ws["profile"] = ""
 	if deleted_name != "" and deleted_name == _active_profile:
 		_active_profile = ""
 	_refresh_profile_buttons()
@@ -2079,6 +2091,9 @@ func _rename_profile(idx: int, new_name: String):
 	if renamed == "":
 		ToastManager.warn("Cannot rename profile")
 	else:
+		for ws in _workspaces:
+			if str(ws.get("profile", "")) == old_name:
+				ws["profile"] = renamed
 		if old_name != "" and old_name == _active_profile:
 			_active_profile = renamed
 		ToastManager.info("Profile renamed to '%s'" % renamed)
