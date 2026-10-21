@@ -484,7 +484,6 @@ func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 	if not _profile_list: return
 	for c in _profile_list.get_children(): c.queue_free()
 	var rows: Array[Control] = []
-	var has_plugin_profile := false
 	for i in profiles.size():
 		var p = profiles[i]
 		var p_name = p.get("name", "Unnamed")
@@ -492,8 +491,6 @@ func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 		# hand-editable file, and a stray value must read as "not a plugin"
 		# instead of raising on the assignment.
 		var is_plugin: bool = p.get("plugin", false) == true
-		if is_plugin:
-			has_plugin_profile = true
 		var row = HBoxContainer.new()
 		var btn = _make_row_label_button(p_name)
 		btn.tooltip_text = str(p.get("description", ""))
@@ -527,14 +524,13 @@ func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 		_profile_list.add_child(row)
 		rows.append(row)
 
-	# No installed plugin profile means this section holds only the built-in
-	# and the user's own layouts — point at the catalog so the plugins that
-	# carry the tool profiles are discoverable. It counts as a row for the
-	# height cap like any other.
-	if not has_plugin_profile:
-		var hint_row := _make_catalog_hint_row()
-		_profile_list.add_child(hint_row)
-		rows.append(hint_row)
+	# The catalog hint is the section's last row, always: with installed
+	# plugin profiles the section is where the user finds new ones, so the
+	# entry point must not disappear the moment the first plugin lands. It
+	# counts as a row for the height cap like any other.
+	var hint_row := _make_catalog_hint_row()
+	_profile_list.add_child(hint_row)
+	rows.append(hint_row)
 
 	# Show up to SECTION_MAX_VISIBLE_ROWS rows at full measured height; a
 	# scrollbar appears only beyond that.

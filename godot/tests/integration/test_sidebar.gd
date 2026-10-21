@@ -41,8 +41,7 @@ func test_a_row_label_never_claims_more_width_than_the_panel():
 	# `clip_text` is the mechanism — it drops the text from the button's minimum
 	# width (220 -> 8 px) so the row stays inside the panel and the overrun
 	# ellipsizes instead of being sliced.
-	# The hint row exists only while no plugin profile is installed, so the
-	# list has to be built (empty) before it can be measured.
+	# The hint row is always built, so an empty list is enough to measure it.
 	_sidebar.update_profile_list([], "")
 	var hint = _sidebar.find_child("CatalogHintBtn", true, false)
 	assert_not_null(hint, "the catalog hint row must exist")
@@ -304,12 +303,14 @@ func test_plugin_profile_row_shows_provenance_without_delete():
 	var profiles: Array[Dictionary] = [_plugin_profile()]
 	_sidebar.update_profile_list(profiles, "")
 
-	assert_eq(_sidebar._profile_list.get_child_count(), 1,
-		"the plugin row is the whole section: no catalog hint")
+	assert_eq(_sidebar._profile_list.get_child_count(), 2,
+		"the plugin row plus the catalog hint")
 	var row = _sidebar._profile_list.get_child(0)
 	var btn := row.get_child(0) as Button
 	assert_eq(btn.text, "OMP")
 	assert_eq(row.get_child_count(), 1, "a plugin profile has no delete button")
+	assert_eq((_sidebar._profile_list.get_child(1).get_child(0) as Button).name,
+		"CatalogHintBtn", "the catalog hint must stay the last row")
 	assert_string_contains(btn.tooltip_text, "Installed from godot-pty/gpty-omp@a1b2c3d4e5f6",
 		"the tooltip must name where the profile came from")
 	assert_string_contains(btn.tooltip_text, "plugin profiles follow the plugin",
@@ -330,7 +331,7 @@ func test_plugin_profile_row_does_not_offer_rename():
 	for c in row.get_children():
 		assert_false(c is LineEdit, "a plugin profile must not open a rename editor")
 
-func test_catalog_hint_row_shows_only_without_plugin_profiles():
+func test_catalog_hint_row_is_last_with_and_without_plugin_profiles():
 	var profiles: Array[Dictionary] = [
 		{"name": "Agent Workspace", "builtin": true},
 		{"name": "Mine", "description": "", "_user_index": 0},
@@ -353,3 +354,13 @@ func test_catalog_hint_row_shows_only_without_plugin_profiles():
 	var sc = _sidebar._profile_list.get_parent() as ScrollContainer
 	assert_almost_eq(float(sc.custom_minimum_size.y), expected, 1.0,
 		"the section height must cover every rendered row, the hint included")
+
+	# With an installed plugin profile the hint must NOT disappear (the
+	# reported bug): the plugin row comes first and the catalog row stays last.
+	_sidebar.update_profile_list([_plugin_profile()], "")
+	await get_tree().process_frame  # the previous rows are queue_free()d
+	assert_eq(_sidebar._profile_list.get_child_count(), 2,
+		"the plugin profile plus the catalog hint")
+	assert_eq(_sidebar._profile_list.get_child(0).get_child(0).text, "OMP")
+	assert_eq(_sidebar._profile_list.get_child(1).get_child(0).name,
+		"CatalogHintBtn", "the catalog hint must be the last row")
