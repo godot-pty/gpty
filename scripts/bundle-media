@@ -129,7 +129,15 @@ macos_zip() {
     [ -n "$app" ] || die "the export archive has no .app bundle"
     macos_dir="$app/Contents/MacOS"
     [ -d "$macos_dir" ] || die "the app has no Contents/MacOS"
-    cp "$universal"/lib/*.dylib "$macos_dir"/
+    # Godot's export puts GDExtension libraries in Contents/Frameworks, and
+    # the extension resolves FFmpeg through @loader_path - so the runtime
+    # belongs beside it there, not in Contents/MacOS (where the app binary
+    # lives). Fall back to MacOS for an export that keeps the extension there.
+    local target="$macos_dir"
+    if compgen -G "$app/Contents/Frameworks/libgpty_gdext*.dylib" >/dev/null; then
+        target="$app/Contents/Frameworks"
+    fi
+    cp "$universal"/lib/*.dylib "$target"/
     mkdir -p "$app/Contents/Resources/licenses"
     if [ -d "$universal/licenses" ]; then
         cp -a "$universal/licenses/." "$app/Contents/Resources/licenses/"
