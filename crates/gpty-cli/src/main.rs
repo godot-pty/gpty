@@ -529,6 +529,8 @@ fn report_error(e: &anyhow::Error) {
     if commands::daemon::is_not_running(e) {
         eprintln!("error: {}", commands::daemon::NO_GUI_HINT);
     } else {
-        eprintln!("error: {e}");
+        // `{:#}` keeps the cause chain: the outer context ("moving … into …")
+        // alone hid the ENOENT that explained a failed plugin install.
+        eprintln!("error: {e:#}");
     }
 }
