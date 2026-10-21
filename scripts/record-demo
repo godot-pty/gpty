@@ -1,0 +1,244 @@
+#!/usr/bin/env bash
+# Record a scripted gPTY demo and encode it for the README and docs site.
+#
+# Launches the app in a sandbox (fresh user-data dir, throwaway HOME, its own
+# IPC socket, so a running gPTY is never touched), seeds a workspace, drives it
+# with the gpty CLI exactly the way an agent would, records the app window with
+# ffmpeg, then burns captions in and writes a GIF, an MP4 and a WebM.
+#
+# Usage: scripts/record-demo <hero|tour> [out-dir]
+#   out-dir defaults to docs/static/images; files are demo-<scenario>.{gif,mp4,webm}
+#
+# Build first: `cargo build --workspace` (the GUI loads the debug GDExtension and the
+# panes use target/debug/gpty). Override the GUI command with DEMO_APP.
+#
+# Env: DEMO_FONT=22       font size (large enough to read at GIF width)
+#      DEMO_SIZE=1280x760  window size        DEMO_FPS=15   capture frame rate
+#      GIF_WIDTH=1000      GIF width          GIF_FPS=12    GIF frame rate
+#      DEMO_KEEP=1         keep the raw capture and cue files next to the output
+#
+# Requires: ffmpeg (x11grab, drawtext), python3 + python-xlib, git, a graphical
+# session with XWayland (DISPLAY set). No input is simulated: each step injects a
+# whole command line through the gpty CLI, and the layout is seeded already open (a
+# wiki pane restores its note and graph), so the run never touches your keyboard,
+# pointer, or input permissions.
+set -euo pipefail
+export LC_ALL=C
+
+SCENARIO="${1:?usage: record-demo <hero|tour> [out-dir]}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+OUT_DIR="${2:-$ROOT/docs/static/images}"
+SIZE="${DEMO_SIZE:-1280x760}"
+FPS="${DEMO_FPS:-15}"
+GIF_WIDTH="${GIF_WIDTH:-1000}"
+GIF_FPS="${GIF_FPS:-12}"
+case "$SCENARIO" in hero | tour) ;; *) echo "scenario must be hero or tour" >&2; exit 2 ;; esac
+
+for tool in ffmpeg python3 git; do
+    command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 3; }
+done
+python3 -c 'import Xlib' 2>/dev/null || { echo "missing python-xlib" >&2; exit 3; }
+[[ -n "${DISPLAY:-}" ]] || { echo "no DISPLAY - the app window must exist on X11/XWayland" >&2; exit 3; }
+[[ -x "$ROOT/target/debug/gpty" ]] || { echo "build first: cargo build --workspace" >&2; exit 3; }
+
+TMP="$(mktemp -d)"
+APP_PID="" REC_PID=""
+cleanup() {
+    [[ -n "$REC_PID" ]] && kill "$REC_PID" 2>/dev/null || true
+    [[ -n "$APP_PID" ]] && kill "$APP_PID" 2>/dev/null || true
+    [[ -n "$APP_PID" ]] && wait "$APP_PID" 2>/dev/null || true
+    if [[ "${DEMO_KEEP:-}" != 1 ]]; then rm -rf "$TMP"; else echo "kept: $TMP"; fi
+}
+trap cleanup EXIT
+
+# ── sandbox ──────────────────────────────────────────────────────────────
+export HOME="$TMP/home"
+export XDG_DATA_HOME="$TMP/data"
+export XDG_CONFIG_HOME="$TMP/config"
+export GPTY_SOCKET="$TMP/gpty.sock"
+export SHELL=/bin/bash
+export PATH="$ROOT/target/debug:$PATH"
+mkdir -p "$HOME" "$XDG_DATA_HOME" "$XDG_CONFIG_HOME"
+cp -r "$ROOT/scripts/demo/project/." "$HOME/"
+cp -r "$ROOT/scripts/demo/vault" "$HOME/vault"
+# A short prompt the default `cat` concept recognises ("<anything>$ cat ...").
+cat >"$HOME/.bashrc" <<'RC'
+PS1='\[\e[1;32m\]demo\[\e[0m\]:\[\e[1;34m\]~\[\e[0m\]$ '
+export PATH="__ROOT__/target/debug:$PATH"
+# A pane strips GPTY_SOCKET from its environment, so without this the CLI typed
+# into a pane would reach whatever gPTY owns the default socket (a real session).
+export GPTY_SOCKET="__SOCK__"
+RC
+sed -i "s#__ROOT__#$ROOT#; s#__SOCK__#$GPTY_SOCKET#" "$HOME/.bashrc"
+(
+    cd "$HOME"
+    export GIT_AUTHOR_NAME=demo GIT_AUTHOR_EMAIL=demo@example.com GIT_COMMITTER_NAME=demo GIT_COMMITTER_EMAIL=demo@example.com
+    git init -q -b main .
+    git add src && git commit -q -m "word counts for log lines"
+    echo "// sorted output" >>src/main.rs && git commit -q -am "sort the output"
+    git commit -q --allow-empty -m "add CI workflow"
+    git commit -q --allow-empty -m "release 0.1"
+)
+if [[ "$SCENARIO" == tour ]]; then
+    ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=640x360:rate=24" \
+        -f lavfi -i "sine=frequency=330:sample_rate=48000" -t 30 \
+        -c:v libx264 -pix_fmt yuv420p -c:a aac "$HOME/clip.mp4"
+fi
+
+# ── seed the workspace ───────────────────────────────────────────────────
+DATA_DIR="$XDG_DATA_HOME/godot/app_userdata/gPTY"
+mkdir -p "$DATA_DIR"
+SCENARIO="$SCENARIO" HOME_DIR="$HOME" python3 - >"$DATA_DIR/workspaces.json" <<'PY'
+import json, os
+home, scenario = os.environ["HOME_DIR"], os.environ["SCENARIO"]
+FONT = int(os.environ.get("DEMO_FONT", "22"))  # large enough to read at GIF width
+def tile(col, row, cspan, rspan, **settings):
+    return {"col": col, "row": row, "cspan": cspan, "rspan": rspan, "settings": settings}
+if scenario == "hero":
+    layout = [
+        tile(0, 0, 33, 60, type="terminal", pane_name="agent", font_size=FONT),
+        tile(33, 0, 27, 60, type="code_viewer", pane_name="viewer", font_size=FONT),
+    ]
+else:
+    layout = [
+        tile(0, 0, 32, 60, type="wiki", pane_name="notes", vault_path=home + "/vault", open_note="index.md", graph=True, font_size=FONT),
+        tile(32, 0, 28, 34, type="media", pane_name="clip", file_path=home + "/clip.mp4", loop=True),
+        tile(32, 34, 28, 26, type="terminal", pane_name="agent", font_size=FONT),
+    ]
+print(json.dumps({"version": 1, "active": 0,
+                  "workspaces": [{"name": "demo", "layout": layout, "grid_unit": 60}]}))
+PY
+
+# The terminal font comes from the global setting at spawn, not from the tile.
+printf '{"font_size": %s}\n' "${DEMO_FONT:-22}" >"$DATA_DIR/settings.json"
+
+# ── launch ───────────────────────────────────────────────────────────────
+APP_CMD="${DEMO_APP:-godot --path $ROOT/godot --display-driver x11 --windowed --resolution $SIZE}"
+(cd "$HOME" && exec $APP_CMD) >"$TMP/app.log" 2>&1 &
+APP_PID=$!
+
+WID=""
+for _ in $(seq 1 60); do
+    WID="$(APP_PID="$APP_PID" python3 - <<'PY' 2>/dev/null
+import os
+from Xlib import display
+pid_want = int(os.environ["APP_PID"])
+d = display.Display()
+found = []
+def walk(w):
+    if found:
+        return
+    try:
+        name = (w.get_wm_name() or "").lower()
+        if "gpty" in name:
+            pid = w.get_full_property(d.intern_atom("_NET_WM_PID"), 0)
+            if pid and pid.value[0] in (pid_want,):
+                found.append(w.id)
+                return
+    except Exception:
+        pass
+    try:
+        for c in w.query_tree().children:
+            walk(c)
+    except Exception:
+        pass
+walk(d.screen().root)
+print(hex(found[0]) if found else "")
+PY
+)"
+    [[ -n "$WID" ]] && break
+    sleep 0.5
+done
+[[ -n "$WID" ]] || { echo "gpty window not found. App log tail:" >&2; tail -20 "$TMP/app.log" >&2; exit 4; }
+for _ in $(seq 1 40); do gpty daemon status >/dev/null 2>&1 && break; sleep 0.5; done
+sleep 2
+
+# ── record + captions ────────────────────────────────────────────────────
+RAW="$TMP/raw.mkv"
+ffmpeg -loglevel error -y -f x11grab -framerate "$FPS" -window_id "$WID" -i "$DISPLAY" \
+    -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v libx264 -preset ultrafast -crf 16 -pix_fmt yuv420p "$RAW" &
+REC_PID=$!
+T0="$EPOCHREALTIME"
+now() { python3 -c "print(round($EPOCHREALTIME - ${T0/,/.}, 2))"; }
+CUES="$TMP/cues.tsv"; : >"$CUES"
+CUE_N=0; CUE_START=""
+cue_end() {
+    [[ -n "$CUE_START" ]] || return 0
+    printf '%s\t%s\t%s\n' "$CUE_START" "$(now)" "$CUE_N" >>"$CUES"
+    CUE_START=""
+}
+caption() { cue_end; CUE_N=$((CUE_N + 1)); printf '%s' "$1" >"$TMP/cue$CUE_N.txt"; CUE_START="$(now)"; }
+
+label_of() { # label_of <type> -> first pane label of that type (from the live pane list)
+    gpty list-panes --json | python3 -c '
+import json, sys
+want = sys.argv[1]
+d = json.load(sys.stdin)
+panes = d.get("result", d)
+panes = panes.get("panes", panes) if isinstance(panes, dict) else panes
+for p in panes:
+    if p.get("type") == want or p.get("pane_type") == want:
+        print(p.get("label") or p.get("id")); break
+' "$1"
+}
+type_line() { gpty inject "$AGENT" --text "$1" >/dev/null; }
+
+sleep 1.5
+AGENT="$(label_of terminal)"
+[[ -n "$AGENT" ]] || { echo "no terminal pane found; pane list:" >&2; gpty list-panes >&2; exit 5; }
+
+if [[ "$SCENARIO" == hero ]]; then
+    caption "A tiling grid of real terminals"
+    sleep 2.5
+    caption "Concepts route a command's output into a viewer pane"
+    type_line "cat src/main.rs"
+    sleep 5
+    type_line "clear"
+    sleep 0.8
+    caption "Any script or agent can drive panes: same API for the CLI, JSON-RPC and MCP"
+    type_line "gpty pane-run --command 'for i in 1 2 3 4 5; do echo \"compiling step \$i\"; sleep 1; done; echo BUILD OK'"
+    sleep 2.5
+    BUILD="$(gpty list-panes --json | python3 -c '
+import json, sys
+d = json.load(sys.stdin); r = d.get("result", d)
+ps = r.get("panes", r) if isinstance(r, dict) else r
+print(next((p.get("label") or p.get("id") for p in ps if (p.get("type") or p.get("pane_type")) == "terminal" and (p.get("label") or p.get("id")) != sys.argv[1]), ""))' "$AGENT")"
+    caption "Wait for output instead of guessing, then check the exit status"
+    type_line "gpty pane-wait $BUILD --pattern 'BUILD OK' --timeout-ms 20000 && gpty pane-status $BUILD"
+    sleep 6
+    caption "Stream any command into its own pane"
+    type_line "gpty new-pane -t cli_view -c git --arg log --arg=--oneline --title history"
+    sleep 4
+    caption "gPTY - github.com/godot-pty/gpty"
+    sleep 2.5
+else
+    caption "A local knowledge base: Markdown notes and the link graph between them"
+    sleep 5.5
+    caption "Audio and video play in a pane, next to your terminal"
+    sleep 5
+    caption "Agents search the same vault through the CLI and MCP"
+    type_line "gpty vault search $HOME/vault agent"
+    sleep 5
+    caption "gPTY - github.com/godot-pty/gpty"
+    sleep 2.5
+fi
+cue_end
+kill -INT "$REC_PID" 2>/dev/null || true
+wait "$REC_PID" 2>/dev/null || true
+REC_PID=""
+[[ -s "$RAW" ]] || { echo "capture produced no video" >&2; exit 6; }
+
+# ── encode ───────────────────────────────────────────────────────────────
+FONT="$(fc-match -f '%{file}' 'sans:bold' 2>/dev/null || true)"
+DRAW=""
+while IFS=$'\t' read -r a b n; do
+    DRAW+="drawtext=${FONT:+fontfile=$FONT:}textfile=$TMP/cue$n.txt:fontsize=26:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=14:x=(w-text_w)/2:y=h-text_h-28:enable='between(t,$a,$b)',"
+done <"$CUES"
+DRAW="${DRAW%,}"; [[ -n "$DRAW" ]] || DRAW="null"
+mkdir -p "$OUT_DIR"
+BASE="$OUT_DIR/demo-$SCENARIO"
+ffmpeg -loglevel error -y -i "$RAW" -vf "$DRAW" -c:v libx264 -crf 23 -preset slow -pix_fmt yuv420p -movflags +faststart "$BASE.mp4"
+ffmpeg -loglevel error -y -i "$RAW" -vf "$DRAW" -c:v libvpx-vp9 -crf 34 -b:v 0 -an "$BASE.webm"
+ffmpeg -loglevel error -y -i "$RAW" -vf "$DRAW,fps=$GIF_FPS,scale=$GIF_WIDTH:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" "$BASE.gif"
+if [[ "${DEMO_KEEP:-}" == 1 ]]; then cp "$RAW" "$BASE.raw.mkv"; cp "$CUES" "$BASE.cues.tsv"; fi
+ls -lh "$BASE".{gif,mp4,webm}
