@@ -40,6 +40,16 @@ class_name WikiPane
 ## `preview` (rendered only). Split is what makes the preview live.
 @export var view_mode := "split"
 
+## What a saved layout asks the pane to reopen where the user left off: the
+## open note (a vault-relative path, read through the same gate as every
+## other open) and whether the link graph was showing. Consumed once, by
+## `_ready`'s first index pass; later `apply_settings` calls (the settings
+## panel re-applies its whole dict) must never replay it.
+var _restore_note := ""
+var _restore_graph := false
+## Longest note path a layout may name; the Rust gate validates the rest.
+const MAX_RESTORE_NOTE := 512
+
 ## Longest path the invalid-vault placeholder shows (it is file-supplied).
 const MAX_SHOWN_PATH := 200
 ## Longest search query the placeholder echoes back.
@@ -357,6 +367,21 @@ func _ready():
 	# The spawn/restore apply_settings call runs before the node enters the
 	# tree, so the initial index pass belongs here (code_viewer's pattern).
 	_refresh()
+	_restore_view()
+
+## Reopen the note and graph a saved layout names. A path that no longer opens
+## says so (`_open_note` toasts); an invalid vault leaves the placeholder alone.
+func _restore_view() -> void:
+	var rel := _restore_note
+	var graph := _restore_graph
+	_restore_note = ""
+	_restore_graph = false
+	if _vault_problem() != "":
+		return
+	if rel != "":
+		_open_note(rel)
+	if graph:
+		_show_graph()
 
 ## The editor and the preview share the pane's font size, which the settings
 ## panel can change after `_ready`.
@@ -1603,12 +1628,20 @@ func apply_settings(settings: Dictionary):
 	var previous_vault := vault_path
 	var previous_mode := view_mode
 	super.apply_settings(settings)
+	# Remember what a restore asked for; only the spawn-time call (before the
+	# node is in the tree) is ever replayed, by `_restore_view`.
+	if settings.get("open_note") is String and settings["open_note"].length() <= MAX_RESTORE_NOTE:
+		_restore_note = settings["open_note"]
+	if settings.get("graph") is bool:
+		_restore_graph = settings["graph"]
 	# `view_mode` is a pane property only for its declared values; anything
 	# else (a typo in an untrusted layout) keeps the pane's own value.
 	if settings.get("view_mode") is String:
 		view_mode = settings["view_mode"] if settings["view_mode"] in VIEW_MODES else previous_mode
 	if not is_inside_tree():
 		return
+	_restore_note = ""
+	_restore_graph = false
 	# The base assigned `vault_path` (its name is the settings key); re-scan
 	# rather than reassign, so a half-typed path stays in the settings field.
 	if vault_path != previous_vault:
@@ -1632,7 +1665,13 @@ func apply_settings(settings: Dictionary):
 
 func _get_layout_state() -> Dictionary:
 	var state = super._get_layout_state()
-	state.merge({"vault_path": vault_path, "view_mode": view_mode})
+	state.merge({
+		"vault_path": vault_path, "view_mode": view_mode,
+		# Where the user left off: the open note and the graph. Unsaved text is
+		# not part of this (the recovery copy covers a crash).
+		"open_note": _current_rel,
+		"graph": _graph_view != null and _graph_view.visible,
+	})
 	return state
 
 func _pane_type() -> String:

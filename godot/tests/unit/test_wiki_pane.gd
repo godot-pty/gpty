@@ -555,6 +555,61 @@ func test_layout_state_carries_the_note_view_mode():
 	restored.apply_settings({"view_mode": "edit"})
 	assert_eq(restored.view_mode, "edit")
 
+func test_layout_state_carries_the_open_note_and_graph():
+	_write(_tmp.path_join("note.md"), "# N\n")
+	var pane := _make_pane(_tmp)
+	var state: Dictionary = pane._get_layout_state()
+	assert_eq(state.get("open_note"), "", "the list view names no note")
+	assert_false(bool(state.get("graph")))
+
+	pane._open_note("note.md")
+	state = pane._get_layout_state()
+	assert_eq(state.get("open_note"), "note.md")
+	assert_false(bool(state.get("graph")))
+
+	pane._show_graph()
+	state = pane._get_layout_state()
+	assert_true(bool(state.get("graph")))
+
+
+func test_a_layout_reopens_the_note_and_the_graph():
+	_write(_tmp.path_join("note.md"), "# N\nbody\n")
+	_write(_tmp.path_join("other.md"), "# O\n[[note]]\n")
+	var pane := WikiPane.new()
+	pane.apply_settings({"vault_path": _tmp, "open_note": "note.md"})
+	add_child_autofree(pane)
+	assert_true(pane._note_box.visible, "the saved note is open")
+	assert_eq(pane._current_rel, "note.md")
+	assert_false(pane._graph_view.visible)
+
+	var graphed := WikiPane.new()
+	graphed.apply_settings({"vault_path": _tmp, "graph": true})
+	add_child_autofree(graphed)
+	assert_true(graphed._graph_view.visible, "the saved graph view is showing")
+
+
+func test_restore_is_spawn_time_only_and_tolerates_a_missing_note():
+	_write(_tmp.path_join("note.md"), "# N\n")
+	var pane := _make_pane(_tmp)
+	# The settings panel re-applies its whole dict: that must not open anything.
+	pane.apply_settings({"vault_path": _tmp, "open_note": "note.md", "graph": true})
+	assert_false(pane._note_box.visible)
+	assert_false(pane._graph_view.visible)
+
+	# A note that has since been deleted leaves the list, not a broken view.
+	var gone := WikiPane.new()
+	gone.apply_settings({"vault_path": _tmp, "open_note": "deleted.md"})
+	add_child_autofree(gone)
+	assert_false(gone._note_box.visible)
+	assert_true(gone._list.visible)
+
+	# An oversized or mistyped value is ignored, not trusted.
+	var junk := WikiPane.new()
+	junk.apply_settings({"vault_path": _tmp, "open_note": "x".repeat(600), "graph": "yes"})
+	add_child_autofree(junk)
+	assert_false(junk._note_box.visible)
+	assert_false(junk._graph_view.visible)
+
 # ── The link panel: mentions and backlinks of the open note ────────────
 #
 # The data half (the index pass, the resolver, `vault_links`) is pinned by
