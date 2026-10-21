@@ -94,6 +94,8 @@ for f in FILES:
             bad(f, f'link to missing anchor: {url}')
     for m in img_re.finditer(text):
         url = m.group(1)
+        if not re.match(r'(https?:|/)', url) and not os.path.exists(os.path.join(ROOT, os.path.dirname(f), url)):
+            bad(f, f'image not found: {url}')
         if url.startswith('/images/') and not os.path.exists(os.path.join(ROOT, 'docs/static', url.lstrip('/'))):
             bad(f, f'image not found under docs/static/: {url}')
 
