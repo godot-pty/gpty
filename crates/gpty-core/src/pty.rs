@@ -433,6 +433,15 @@ impl PtyHandle {
         for (k, v) in trusted_envs {
             cmd.env(k, v);
         }
+        // `chdir` does not update the environment. A shell repairs `PWD`
+        // itself, but a profile tile that runs a program directly would
+        // otherwise see the GUI's directory in `$PWD` and could resolve
+        // relative paths against the wrong place. Applied after the env
+        // layers so a pane's own `PWD` cannot disagree with the real cwd.
+        #[cfg(unix)]
+        if let Some(dir) = cwd {
+            cmd.env("PWD", dir);
+        }
 
         let pty_pair = pty_system.openpty(PtySize {
             rows: DEFAULT_ROWS,
@@ -909,6 +918,38 @@ mod tests {
             output.contains(&expected.display().to_string()),
             "child cwd must be {}, output was: {output}",
             expected.display()
+        );
+    }
+
+    /// A direct (non-shell) program must see the workspace directory in
+    /// `$PWD`, not the GUI's inherited value.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn spawn_with_cwd_sets_pwd_for_direct_programs() {
+        let dir = std::env::temp_dir().join(format!("gpty_pwd_probe_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let handle = PtyHandle::spawn_with_cwd(9501, "env", &[], &[], &[], Some(&dir), tx)
+            .expect("spawn env in an existing directory");
+
+        let output = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let mut bytes = Vec::new();
+            while let Some(chunk) = rx.recv().await {
+                bytes.extend_from_slice(&chunk);
+            }
+            String::from_utf8_lossy(&bytes).into_owned()
+        })
+        .await
+        .expect("env must exit and close its output");
+
+        drop(handle);
+        std::fs::remove_dir_all(&dir).ok();
+
+        let expected = format!("PWD={}", dir.display());
+        assert!(
+            output.lines().any(|line| line.trim_end() == expected),
+            "child PWD must be {expected}, output was: {output}"
         );
     }
 
