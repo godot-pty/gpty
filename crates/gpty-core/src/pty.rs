@@ -5,6 +5,7 @@
 //! Each PTY uses one OS thread.
 
 use std::io::{Read, Write};
+use std::path::Path;
 use std::thread;
 
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
@@ -384,6 +385,25 @@ impl PtyHandle {
         trusted_envs: &[(String, String)],
         tx: Sender<Vec<u8>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::spawn_with_cwd(id, command, args, envs, trusted_envs, None, tx)
+    }
+
+    /// Like [`Self::spawn`], but starts the child in `cwd` when given.
+    ///
+    /// The caller owns path validation: an invalid or missing directory is a
+    /// spawn error, not a silent fallback, because the workspace that supplied
+    /// it can report that to the user. `None` inherits gpty's own working
+    /// directory, which is what every pane did before workspace directories.
+    #[allow(clippy::too_many_arguments)]
+    pub fn spawn_with_cwd(
+        id: u32,
+        command: &str,
+        args: &[&str],
+        envs: &[String],
+        trusted_envs: &[(String, String)],
+        cwd: Option<&Path>,
+        tx: Sender<Vec<u8>>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Resolve before anything is spawned: a bare name is executed through
         // PATH, so the pane's own environment decides which file runs.
         let child_path = envs
@@ -398,6 +418,9 @@ impl PtyHandle {
         let pty_system = native_pty_system();
         let mut cmd = CommandBuilder::new(command);
         cmd.args(args);
+        if let Some(dir) = cwd {
+            cmd.cwd(dir);
+        }
         for key in STRIPPED_INHERITED_ENV_KEYS {
             cmd.env_remove(key);
         }
@@ -853,6 +876,39 @@ mod tests {
         assert!(
             message.contains(&open_dir.display().to_string()) || message.contains("probe-tool"),
             "the refusal must name the program, got: {message}"
+        );
+    }
+
+    /// A workspace's directory reaches the child, not just gpty's own cwd.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn spawn_with_cwd_starts_the_child_there() {
+        let dir = std::env::temp_dir().join(format!("gpty_cwd_probe_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let expected = dir.canonicalize().unwrap();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        let handle =
+            PtyHandle::spawn_with_cwd(9500, "sh", &["-c", "pwd -P"], &[], &[], Some(&dir), tx)
+                .expect("spawn in an existing directory");
+
+        let output = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let mut bytes = Vec::new();
+            while let Some(chunk) = rx.recv().await {
+                bytes.extend_from_slice(&chunk);
+            }
+            String::from_utf8_lossy(&bytes).into_owned()
+        })
+        .await
+        .expect("the child must exit and close its output");
+
+        drop(handle);
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert!(
+            output.contains(&expected.display().to_string()),
+            "child cwd must be {}, output was: {output}",
+            expected.display()
         );
     }
 

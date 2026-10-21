@@ -136,6 +136,12 @@ impl GptyTerminal {
     /// arguments (e.g. `["-c", "echo hi && exit 7"]` for shell wrapping).
     /// Capped at 32 args of ≤4096 chars each.
     ///
+    /// `cwd` is the workspace's working directory. Empty inherits gpty's
+    /// own directory; a non-absolute path, one that is not an existing
+    /// directory, or one carrying a NUL is ignored with a warning rather
+    /// than failing the pane, so a workspace restored after its directory
+    /// moved still opens a shell.
+    ///
     /// # Edge cases
     /// - Calling twice replaces the previous session.
     /// - If spawning fails, the grid stays empty: `get_rows()` and `get_cols()`
@@ -153,6 +159,7 @@ impl GptyTerminal {
         pane_id: GString,
         history_lines: i64,
         args_json: GString,
+        cwd: GString,
     ) {
         let command = command.to_string();
         if command.is_empty() || command.len() > 1024 || command.contains('\0') {
@@ -236,7 +243,32 @@ impl GptyTerminal {
             .collect();
         let args_refs: Vec<&str> = args.iter().map(|a| a.as_str()).collect();
 
-        match RUNTIME.block_on(ENGINE.spawn_terminal_with_grid(
+        // Workspace working directory. It is user-originated, but the store
+        // it comes from can be stale or hand-edited, so an unusable path is
+        // dropped here instead of turning every pane in that workspace into
+        // a spawn failure.
+        let cwd = {
+            let raw = cwd.to_string();
+            if raw.is_empty() {
+                None
+            } else if raw.len() > 4096 || raw.contains('\0') {
+                godot_warn!("Ignoring workspace working directory: invalid path");
+                None
+            } else {
+                let path = std::path::PathBuf::from(&raw);
+                if !path.is_absolute() {
+                    godot_warn!("Ignoring workspace working directory (not absolute): {raw}");
+                    None
+                } else if !path.is_dir() {
+                    godot_warn!("Workspace working directory is not a directory: {raw}");
+                    None
+                } else {
+                    Some(path)
+                }
+            }
+        };
+
+        match RUNTIME.block_on(ENGINE.spawn_terminal_with_grid_in(
             config,
             &command,
             &args_refs,
@@ -244,6 +276,7 @@ impl GptyTerminal {
             &trusted_envs,
             rows,
             cols,
+            cwd.as_deref(),
         )) {
             Ok(spawned) => {
                 // Attach the scrollback and restore its tail. All inside one

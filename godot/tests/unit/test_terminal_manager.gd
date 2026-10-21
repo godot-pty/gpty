@@ -71,6 +71,14 @@ func test_spawn_pane_uses_default_shell():
 	assert_not_null(body)
 	assert_eq(body.shell_command, _canned_shell)
 
+func test_spawn_pane_sets_workspace_cwd():
+	# The workspace owns the directory, so it wins over any tile key.
+	var dir := OS.get_user_data_dir()
+	var body = _tm.spawn_pane("terminal", {"workspace_cwd": "/tmp/from-the-file"}, dir)
+	assert_not_null(body)
+	assert_eq(body.workspace_cwd, dir,
+		"spawn_pane must pass the workspace's directory to the terminal")
+
 # ── Kill ────────────────────────────────────────────────────────────────
 
 func test_kill_removes_tile():

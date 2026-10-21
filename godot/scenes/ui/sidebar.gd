@@ -21,6 +21,7 @@ signal request_workspace_switch(index: int)
 signal request_workspace_add
 signal request_workspace_close(index: int)
 signal request_workspace_rename(index: int, name: String)
+signal request_workspace_cwd(index: int)
 
 
 var bg: ColorRect
@@ -298,13 +299,14 @@ func _add_workspace_section(parent: VBoxContainer):
 
 	parent.add_child(section)
 
-func update_workspace_list(names: Array[String], active: int):
+func update_workspace_list(names: Array[String], active: int, cwds: Array[String] = []):
 	if not _workspace_list: return
 	for c in _workspace_list.get_children(): c.queue_free()
 	var show_close := names.size() > 1
 	var rows: Array[Control] = []
 	for i in names.size():
-		var row := _make_workspace_row(i, names[i], i == active, show_close)
+		var cwd := str(cwds[i]) if i < cwds.size() else ""
+		var row := _make_workspace_row(i, names[i], i == active, show_close, cwd)
 		_workspace_list.add_child(row)
 		rows.append(row)
 	var sc = _workspace_list.get_parent() as ScrollContainer
@@ -345,16 +347,29 @@ func _apply_row_accent(btn: Button, active: bool):
 		btn.remove_theme_color_override("font_hover_color")
 		btn.remove_theme_color_override("font_pressed_color")
 
-func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close: bool) -> HBoxContainer:
+func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close: bool, cwd := "") -> HBoxContainer:
 	var row = HBoxContainer.new()
 	row.add_theme_constant_override("separation", 2)
 
+	var dir_hint := cwd if cwd != "" else "default (gpty's own directory)"
 	var btn = _make_row_label_button(ws_name)
-	btn.tooltip_text = "Switch workspace (double-click to rename)"
+	btn.tooltip_text = "Switch workspace (double-click to rename)\nWorking directory: %s" % dir_hint
 	_apply_row_accent(btn, is_active)
 	btn.pressed.connect(func(): request_workspace_switch.emit(idx))
 	btn.gui_input.connect(func(ev: InputEvent): _on_workspace_row_input(idx, btn, ev))
 	row.add_child(btn)
+
+	# Per-workspace working directory. The profile stays a layout template,
+	# so the directory is edited on the workspace instance instead.
+	var cog = Button.new(); cog.name = "WorkspaceCwdBtn"
+	cog.text = Icons.SETTINGS; cog.flat = true
+	Icons.style_button(cog)
+	cog.tooltip_text = "Working directory: %s" % dir_hint
+	cog.custom_minimum_size = Vector2(22, 0)
+	if cwd != "":
+		cog.add_theme_color_override("font_color", Palette.ACCENT_COLOR)
+	cog.pressed.connect(func(): request_workspace_cwd.emit(idx))
+	row.add_child(cog)
 
 	# Close button only when more than one workspace exists (min-1 invariant).
 	if show_close:

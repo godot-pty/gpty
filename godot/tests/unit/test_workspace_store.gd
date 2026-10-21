@@ -52,6 +52,23 @@ func test_name_sanitized():
 	assert_false(String(wss[0].get("name", "")).contains("\n"), "control chars must be dropped")
 	assert_eq(wss[1].get("name"), "Workspace", "empty name must fall back")
 
+func test_cwd_roundtrip_and_sanitized():
+	var dir := OS.get_user_data_dir()
+	var workspaces: Array[Dictionary] = [
+		{"name": "Repo", "cwd": dir, "layout": []},
+		{"name": "Relative", "cwd": "relative/path", "layout": []},
+		{"name": "Control", "cwd": dir + "\nbad", "layout": []},
+		{"name": "Too long", "cwd": "/" + "x".repeat(5000), "layout": []},
+		{"name": "Default", "layout": []},
+	]
+	WorkspaceStore.save(0, workspaces)
+	var wss: Array = WorkspaceStore.load().get("workspaces", [])
+	assert_eq(wss[0].get("cwd"), dir, "an absolute directory must survive")
+	assert_eq(wss[1].get("cwd"), "", "a relative path must be dropped")
+	assert_eq(wss[2].get("cwd"), "", "control bytes must be dropped")
+	assert_eq(wss[3].get("cwd"), "", "an oversized path must be dropped")
+	assert_eq(wss[4].get("cwd"), "", "an absent directory means the default")
+
 func test_non_dict_entries_skipped():
 	var workspaces: Array[Dictionary] = [
 		{"name": "Good", "layout": [_tile("terminal"), "junk", 42, null]},

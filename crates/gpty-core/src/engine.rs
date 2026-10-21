@@ -231,12 +231,47 @@ impl WorkspaceEngine {
         rows: usize,
         cols: usize,
     ) -> Result<SpawnedTerminal, Box<dyn std::error::Error + Send + Sync>> {
+        self.spawn_terminal_with_grid_in(
+            config,
+            command,
+            args,
+            envs,
+            trusted_envs,
+            rows,
+            cols,
+            None,
+        )
+        .await
+    }
+
+    /// Like [`Self::spawn_terminal_with_grid`], but starts the child in `cwd`
+    /// when given. The pane layer validates that directory before it gets
+    /// here; `None` inherits gpty's own working directory.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn spawn_terminal_with_grid_in(
+        &self,
+        config: TerminalConfig,
+        command: &str,
+        args: &[&str],
+        envs: &[String],
+        trusted_envs: &[(String, String)],
+        rows: usize,
+        cols: usize,
+        cwd: Option<&std::path::Path>,
+    ) -> Result<SpawnedTerminal, Box<dyn std::error::Error + Send + Sync>> {
         // Bounded on purpose: a flooding child must wait rather than grow
         // this process. See `OUTPUT_QUEUE_CHUNKS` for the sizing and why
         // dropping chunks is not an option.
         let (pty_tx, pty_rx) = mpsc::channel(crate::pty::OUTPUT_QUEUE_CHUNKS);
-        let pty_handle =
-            crate::pty::PtyHandle::spawn(config.id, command, args, envs, trusted_envs, pty_tx)?;
+        let pty_handle = crate::pty::PtyHandle::spawn_with_cwd(
+            config.id,
+            command,
+            args,
+            envs,
+            trusted_envs,
+            cwd,
+            pty_tx,
+        )?;
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<StdinInput>();
 
         let grid = Arc::new(Mutex::new(TermGrid::new(rows, cols)));

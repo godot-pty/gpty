@@ -39,15 +39,15 @@ var _pane_settings_panel  # set by workspace
 
 # ── Public spawn API ───────────────────────────────────────────────────
 
-func spawn(shell := "") -> Control:
+func spawn(shell := "", cwd := "") -> Control:
 	var s = shell if shell != "" else SettingsManager.cfg_shell_command
 	return spawn_pane("terminal", {
 		"shell_command": s,
 		"rows": SettingsManager.cfg_default_rows,
 		"cols": SettingsManager.cfg_default_cols,
-	})
+	}, cwd)
 
-func spawn_bulk(count: int, shell := "") -> Array[Control]:
+func spawn_bulk(count: int, shell := "", cwd := "") -> Array[Control]:
 	var spawned: Array[Control] = []
 	var s = shell if shell != "" else SettingsManager.cfg_shell_command
 	for i in count:
@@ -55,12 +55,12 @@ func spawn_bulk(count: int, shell := "") -> Array[Control]:
 			"shell_command": s,
 			"rows": SettingsManager.cfg_default_rows,
 			"cols": SettingsManager.cfg_default_cols,
-		})
+		}, cwd)
 		if body == null: break
 		spawned.append(body)
 	return spawned
 
-func spawn_pane(type_name: String, opts: Dictionary = {}) -> Control:
+func spawn_pane(type_name: String, opts: Dictionary = {}, workspace_cwd := "") -> Control:
 	var script = _PaneScripts.get(type_name)
 	if script == null:
 		push_error("Unknown pane type: " + type_name)
@@ -73,6 +73,9 @@ func spawn_pane(type_name: String, opts: Dictionary = {}) -> Control:
 	if type_name == "terminal" and body is TerminalPane:
 		SettingsManager.apply_to_terminal(body)
 	body.apply_settings(opts)
+	# The workspace owns the directory, so it wins over any stored tile key.
+	if body is TerminalPane:
+		body.workspace_cwd = str(workspace_cwd)
 
 	var title = opts.get("title_label", PaneTypes.ALL.get(type_name, {}).get("name", type_name))
 	var w = _build_wrapper_body(body, title)

@@ -240,7 +240,7 @@ func _spawn_pane(type_name: String, opts := {}) -> Control:
 
 func _spawn_pane_into(ws: Dictionary, type_name: String, opts := {}) -> Control:
 	var tm: TerminalManager = ws.tm
-	var body = tm.spawn_pane(type_name, opts)
+	var body = tm.spawn_pane(type_name, opts, str(ws.get("cwd", "")))
 	if body == null:
 		ToastManager.warn("Cannot add pane — grid is full")
 		return null
@@ -288,7 +288,7 @@ func _request_pane_into(ws: Dictionary, type_name: String, settings: Dictionary)
 
 func _spawn_bulk(count: int, shell := ""):
 	var start_size = _tm.tiles.size()
-	var bodies = _tm.spawn_bulk(count, shell)
+	var bodies = _tm.spawn_bulk(count, shell, str(_active_workspace().get("cwd", "")))
 	if bodies.is_empty():
 		ToastManager.warn("Cannot add terminals — grid is full")
 		return
@@ -551,7 +551,7 @@ func _do_reset_now():
 
 func _update_workspace_ui():
 	if _sidebar:
-		_sidebar.update_workspace_list(_workspace_names(), _active)
+		_sidebar.update_workspace_list(_workspace_names(), _active, _workspace_dirs())
 
 ## Every pane is addressed over IPC by its `attachment_id`, and resolution
 ## returns the first match — so two panes sharing an id make inject, read,
@@ -662,7 +662,7 @@ func _workspace_for_body(body: Control) -> Dictionary:
 				return ws
 	return {}
 
-func _new_workspace_container(ws_name: String) -> Dictionary:
+func _new_workspace_container(ws_name: String, ws_cwd := "") -> Dictionary:
 	var grid = Control.new()
 	grid.name = "Grid%d" % _workspaces.size()
 	grid.anchor_left = 0.0; grid.anchor_right = 1.0
@@ -673,12 +673,18 @@ func _new_workspace_container(ws_name: String) -> Dictionary:
 	_wire_tm(tm)
 	grid.visible = false
 	grid.process_mode = Node.PROCESS_MODE_DISABLED
-	return {"name": ws_name, "grid": grid, "tm": tm, "profile": ""}
+	return {"name": ws_name, "grid": grid, "tm": tm, "profile": "", "cwd": ws_cwd}
 
 func _workspace_names() -> Array[String]:
 	var out: Array[String] = []
 	for ws in _workspaces:
 		out.append(str(ws.name))
+	return out
+
+func _workspace_dirs() -> Array[String]:
+	var out: Array[String] = []
+	for ws in _workspaces:
+		out.append(str(ws.get("cwd", "")))
 	return out
 
 func _next_workspace_number() -> int:
@@ -757,7 +763,9 @@ func _add_workspace():
 		ToastManager.warn("Maximum 8 workspaces")
 		return
 	var ws_name = "Workspace %d" % _next_workspace_number()
-	var ws = _new_workspace_container(ws_name)
+	# A new workspace starts where the current one points, the way a new
+	# terminal tab does; the cog changes it independently afterwards.
+	var ws = _new_workspace_container(ws_name, str(_active_workspace().get("cwd", "")))
 	_workspaces.append(ws)
 	# Blank slate: no auto-spawned terminal — the user decides what fills it.
 	_switch_workspace(_workspaces.size() - 1)
@@ -803,6 +811,59 @@ func _rename_workspace(idx: int, new_name: String):
 	_update_workspace_ui()
 	_save_workspaces_to_store()
 
+## Pick a workspace's default directory. It applies to terminals spawned
+## after the change — a freshly activated profile included — and never moves
+## a live shell, so the user's running work is untouched.
+func _open_workspace_cwd_dialog(idx: int):
+	if idx < 0 or idx >= _workspaces.size():
+		return
+	var ws: Dictionary = _workspaces[idx]
+	var dialog := FileDialog.new()
+	dialog.title = "Working directory for %s" % str(ws.get("name", ""))
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	var start := str(ws.get("cwd", ""))
+	if start == "":
+		start = OS.get_environment("HOME")
+	if start == "":
+		start = OS.get_environment("USERPROFILE")
+	if start != "" and DirAccess.dir_exists_absolute(start):
+		dialog.current_dir = start
+	dialog.add_button("Use default", true, "default")
+	dialog.custom_action.connect(func(action: StringName):
+		if action == &"default":
+			_set_workspace_cwd(idx, "")
+			dialog.queue_free()
+	)
+	dialog.dir_selected.connect(func(dir: String):
+		_set_workspace_cwd(idx, dir)
+		dialog.queue_free()
+	)
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered_ratio(0.6)
+
+func _set_workspace_cwd(idx: int, dir: String):
+	if idx < 0 or idx >= _workspaces.size():
+		return
+	var clean := WorkspaceStore.sanitize_cwd(dir)
+	if dir != "" and clean == "":
+		ToastManager.warn("That working directory is not a usable absolute path")
+		return
+	if clean != "" and not DirAccess.dir_exists_absolute(clean):
+		ToastManager.warn("Working directory does not exist: %s" % clean)
+		return
+	var ws: Dictionary = _workspaces[idx]
+	if str(ws.get("cwd", "")) == clean:
+		return
+	ws["cwd"] = clean
+	_update_workspace_ui()
+	_save_workspaces_to_store()
+	if clean == "":
+		ToastManager.info("Workspace '%s' uses the default directory" % ws.name)
+	else:
+		ToastManager.info("Workspace '%s' starts new terminals in %s" % [ws.name, clean])
+
 # ═══════════════════════════════════════════════════════════════════════
 # Persistence
 # ═══════════════════════════════════════════════════════════════════════
@@ -835,6 +896,7 @@ func _all_layouts() -> Array[Dictionary]:
 	for ws in _workspaces:
 		out.append({
 			"name": ws.name,
+			"cwd": str(ws.get("cwd", "")),
 			"layout": _gather_tiles_from(ws.tm),
 			# The unit the geometry was written in, so a layout saved by an
 			# older build (a coarser grid) still restores to the same shares.
@@ -858,6 +920,7 @@ func _init_workspaces():
 			continue
 		entries.append({
 			"name": WorkspaceStore.sanitize_name(str(entry.get("name", ""))),
+			"cwd": WorkspaceStore.sanitize_cwd(str(entry.get("cwd", ""))),
 			"layout": _tiles_from(entry.get("layout", [])),
 		})
 	if entries.is_empty():
@@ -890,10 +953,11 @@ func _teardown_workspaces():
 func _build_workspaces(entries: Array[Dictionary], active: int):
 	for i in entries.size():
 		var ws: Dictionary
+		var ws_cwd := str(entries[i].get("cwd", ""))
 		if i == 0:
-			ws = {"name": entries[i].get("name", "Workspace 1"), "grid": _grid, "tm": _tm, "profile": ""}
+			ws = {"name": entries[i].get("name", "Workspace 1"), "grid": _grid, "tm": _tm, "profile": "", "cwd": ws_cwd}
 		else:
-			ws = _new_workspace_container(str(entries[i].get("name", "")))
+			ws = _new_workspace_container(str(entries[i].get("name", "")), ws_cwd)
 		_workspaces.append(ws)
 		var layout: Array = entries[i].get("layout", [])
 		layout = TerminalManager.scale_layout(layout, int(entries[i].get("grid_unit", 0)))
@@ -935,6 +999,9 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 			var sh: String = PaneTypes.sanitize_shell(raw, SettingsManager.cfg_shell_command)
 			SettingsManager.apply_to_terminal(body)
 			body.shell_command = sh
+			if body is TerminalPane:
+				# The workspace owns the directory; a tile cannot carry one.
+				body.workspace_cwd = str(ws.get("cwd", ""))
 
 		var title = PaneTypes.ALL.get(type_name, {}).get("name", type_name)
 		var w = tm._build_wrapper_body(body, title)
@@ -1266,6 +1333,7 @@ func _wire_sidebar_signals():
 	_sidebar.request_workspace_add.connect(_add_workspace)
 	_sidebar.request_workspace_close.connect(_close_workspace)
 	_sidebar.request_workspace_rename.connect(_rename_workspace)
+	_sidebar.request_workspace_cwd.connect(_open_workspace_cwd_dialog)
 	_sidebar.request_save_profile.connect(_save_current_as_profile)
 	_sidebar.request_delete_profile.connect(_delete_profile)
 	_tm.tiles_resized.connect(_apply_layout)

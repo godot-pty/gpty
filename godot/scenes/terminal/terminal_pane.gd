@@ -53,6 +53,11 @@ var color_scheme_path: String = "":
 @export var shell_command: String = SettingsManager.default_shell_command()
 @export var shell_args: Array = []  # program arguments; ["-c", cmd] = run through shell
 @export var shell_env := ""
+## The owning workspace's directory. Set by the workspace before this pane
+## enters the tree, and deliberately never part of a profile or saved tile:
+## a profile is a layout template, while the directory belongs to the
+## workspace instance. Empty inherits gpty's own directory.
+var workspace_cwd := ""
 @export var rows: int = 24
 @export var cols: int = 80
 
@@ -272,7 +277,7 @@ func _ready():
 	var own_env := PaneEnvStore.env_for(attachment_id)
 	if own_env != "":
 		shell_env = own_env
-	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines, JSON.stringify(shell_args))
+	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines, JSON.stringify(shell_args), workspace_cwd)
 
 	if color_scheme_path != "":
 		_apply_stored_scheme()

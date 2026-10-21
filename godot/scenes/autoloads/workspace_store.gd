@@ -8,6 +8,7 @@ extends BasePersistenceManager
 const FILE = "user://workspaces.json"
 const LEGACY_FILE = "user://layout.json"
 const MAX_NAME_LENGTH = 32
+const MAX_CWD_LENGTH = 4096
 
 
 func load() -> Dictionary:
@@ -21,6 +22,10 @@ func load() -> Dictionary:
 			continue
 		workspaces.append({
 			"name": sanitize_name(str(_as_string(item, "name", ""))),
+			# The directory is a workspace instance's own setting. Empty
+			# means "inherit gpty's directory", which is also what every
+			# workspace did before this field existed.
+			"cwd": sanitize_cwd(str(_as_string(item, "cwd", ""))),
 			# A workspace whose `layout` is not a list used to abort the whole
 			# load (a typed parameter rejects it), taking every other
 			# workspace with it.
@@ -37,6 +42,7 @@ func save(active: int, workspaces: Array[Dictionary]):
 	for ws in workspaces:
 		out.append({
 			"name": sanitize_name(str(_as_string(ws, "name", ""))),
+			"cwd": sanitize_cwd(str(_as_string(ws, "cwd", ""))),
 			"layout": _typed_tiles(_as_array(ws, "layout", [])),
 		})
 	var d = {
@@ -65,6 +71,23 @@ func sanitize_name(raw: String) -> String:
 	out = cleaned.strip_edges().left(MAX_NAME_LENGTH)
 	if out == "":
 		out = "Workspace"
+	return out
+
+
+## A workspace directory is accepted only as an absolute, bounded string with
+## no control bytes. It is not a spawn surface — the pane layer re-checks that
+## it exists before handing it to the PTY — but a hand-editable store must not
+## smuggle arbitrary bytes across the FFI.
+func sanitize_cwd(raw: String) -> String:
+	var out := raw.strip_edges()
+	if out == "" or out.length() > MAX_CWD_LENGTH:
+		return ""
+	for ch in out:
+		var code := ch.unicode_at(0)
+		if code < 32 or code == 127:
+			return ""
+	if not out.is_absolute_path():
+		return ""
 	return out
 
 

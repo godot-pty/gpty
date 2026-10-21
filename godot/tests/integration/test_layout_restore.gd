@@ -80,9 +80,10 @@ func _make_workspace() -> Control:
 ## tile naming a non-default program would stop there on the trust dialog
 ## (leaving `_workspaces` empty) — this test is about `_restore_into`, so it
 ## starts from a plain workspace.
-func _restore(tiles: Array[Dictionary]) -> Array:
+func _restore(tiles: Array[Dictionary], cwd := "") -> Array:
 	WorkspaceStore.save(0, [])
 	var ws = await _make_workspace()
+	ws._workspaces[0]["cwd"] = cwd
 	ws._restore_into(ws._workspaces[0], tiles)
 	var bodies := []
 	for t in ws._tm.tiles:
@@ -152,6 +153,33 @@ func test_restore_preserves_settings_and_geometry():
 	assert_eq([tile.col, tile.row, tile.cspan, tile.rspan],
 		[saved[0]["col"], saved[0]["row"], saved[0]["cspan"], saved[0]["rspan"]],
 		"the tile keeps its place in the grid")
+
+func test_set_workspace_cwd_persists_and_rejects_missing():
+	WorkspaceStore.save(0, [])
+	var ws = await _make_workspace()
+	var dir := OS.get_user_data_dir()
+	ws._set_workspace_cwd(0, dir)
+	assert_eq(ws._workspaces[0].get("cwd"), dir)
+	var saved: Array = WorkspaceStore.load().get("workspaces", [])
+	assert_eq(saved[0].get("cwd"), dir, "the directory must reach the store")
+
+	ws._set_workspace_cwd(0, dir + "/gpty-missing-directory")
+	assert_eq(ws._workspaces[0].get("cwd"), dir,
+		"a missing directory must not replace the current one")
+
+	ws._set_workspace_cwd(0, "")
+	assert_eq(ws._workspaces[0].get("cwd"), "", "Use default clears the directory")
+
+func test_restore_applies_workspace_cwd():
+	# The workspace owns the directory; a profile/tile cannot carry one.
+	var dir := OS.get_user_data_dir()
+	var restored = await _restore(_one_tile({
+		"type": "terminal",
+		"workspace_cwd": "/tmp/from-the-file",
+	}), dir)
+	assert_eq(restored.size(), 1)
+	assert_eq(restored[0].workspace_cwd, dir,
+		"the restored terminal must take the workspace's directory")
 
 func test_restore_legacy_no_type_key():
 	# A layout written before tiles carried a pane type: the restore path must
