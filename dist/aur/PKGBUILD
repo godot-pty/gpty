@@ -6,7 +6,7 @@
 # replace the tarball hash below (every release from v0.5.4 also publishes a
 # SHA256SUMS asset listing it).
 pkgname=gpty-bin
-pkgver=0.6.0
+pkgver=0.7.0
 pkgrel=1
 pkgdesc="PTY multiplexer with a tiling grid GUI and a JSON-RPC/MCP API"
 arch=('x86_64')
@@ -28,7 +28,7 @@ conflicts=('gpty' 'gpty-git')
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/gpty-v$pkgver-linux-x86_64.tar.gz"
         "gpty.desktop"
         "gpty.png")
-sha256sums=('22cbb787d72f17ed9d768cc0fcb5a402de89b0a9456971ee6b1a359863ee6335'
+sha256sums=('1369ca900cc8b5c7714b437acca5bc59215b6011d15229e772f6f87a4f88a428'
             'eb3649aab87b646308e74437fa3a1f100cd6d6bb4843d3289b3470cbf41cc85c'
             '22ab26a44956148e618726bd17c3d87cf00f63c5e0a3934918866282d3195bd9')
 
