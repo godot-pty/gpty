@@ -1,0 +1,7 @@
+{{/* A short looping demo clip: {{< video "demo-hero" >}} plays docs/static/images/demo-hero.{webm,mp4}.
+     Raw HTML is disabled in Markdown, so clips go through this shortcode. */}}
+{{ $name := .Get 0 }}
+<video autoplay loop muted playsinline controls preload="metadata" style="width:100%;border-radius:8px">
+  <source src="{{ printf "images/%s.webm" $name | relURL }}" type="video/webm">
+  <source src="{{ printf "images/%s.mp4" $name | relURL }}" type="video/mp4">
+</video>

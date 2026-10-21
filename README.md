@@ -13,16 +13,43 @@
 
 </div>
 
-- **PTY** - Spawn and manage independent shell sessions in a resizable tiling grid. Full `DEC STD 070` via `alacritty_terminal`: `16`/`256`/`true color`, scrollback with regex search, wrapped text selection.
-- **Public API** - JSON-RPC IPC socket + CLI (`gpty new-pane`, `gpty inject`, …) + MCP server. AI agents, scripts, and orchestrators drive the workspace over a documented, versioned protocol.
-- **Concept engine** - RegEx triggers on PTY output capture the reply and route it into adjacent panes (code viewer, Inspector). Write your own - by hand or in the visual graph editor (Settings → Concepts) - or ship the defaults. Concepts capture and display only - they never inject input into a shell.
-- **Agent observability** - Reasoning pane passively projects documented agent lifecycle events (OMP, extensible); Inspector pane runs a private, tool-free Q&A session. Observability only - gpty never orchestrates agent state.
-- **Knowledge base** - The wiki pane browses a vault of plain Markdown notes with full-text search, live-preview editing, `[[wikilinks]]` and a link graph; agents search and read the same vault through `gpty vault` / MCP.
-- **Media** - The media pane (landing in v0.7) plays local audio and video through a pinned, minimal FFmpeg backend. Files are untrusted input and are never fetched over the network.
-- **Persistence** - Scrollback, settings, workspaces (named tab sets), and profiles auto-save to SQLite/JSON and restore on restart; full-text search across each pane's persisted history.
-- **Cross-platform** - Standalone binaries for Linux, macOS, and Windows. No Godot or Rust toolchain required to run.
-- **Documentation** - https://godot-pty.github.io/gpty/
-- The vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using LLMs; and as such, the underlying code may contain unidiomatic patterns and/or bugs.
+![A script drives gPTY: cat routes into a viewer pane, pane-run opens a build pane, pane-wait blocks on its output, new-pane streams git log](docs/static/images/demo-hero.gif)
+
+### Why gPTY
+
+gPTY is a desktop workspace (a GUI, not a server you attach to over SSH). Panes are not only terminals: a pane can be a code viewer, a file tree, a wiki, and/or a media player sitting in the same tiling grid (a built-in browser however, is out of scope), and every pane can be driven from a shell, a script, or an agent over one public API.
+
+### Features
+
+**Terminals**
+
+- **Tiling grid** - split, resize, and rearrange independent shell sessions; save and reload named layouts, workspaces (tab sets), and profiles.
+- **Real terminal emulation** - `alacritty_terminal` grid with `16`/`256`/`true color`, scrollback with regex search, and wrapped text selection.
+- **Everything is remembered** - scrollback, settings, and workspaces restore on restart, with full-text search across each pane's history.
+- **Careful by default** - closing a pane or the app asks before it kills a command that is still running.
+
+**More than terminals**
+
+- **File tree and code viewer** - double-click a file to read it in a pane, with Markdown rendered safely.
+- **Wiki** - a vault of plain Markdown notes with full-text search, a live-preview editor, `[[wikilinks]]`, backlinks, and a link graph, reopened where you left off. [Watch the panes tour](docs/static/images/demo-tour.mp4).
+- **Media** - play local audio and video in a pane through a pinned, minimal FFmpeg backend (v0.7).
+- **`cli_view`** - stream any command's output into a pane, so a plugin can add UI without a Godot SDK.
+
+**Built for agents and automation**
+
+- **One API, three doors** - the same operations are available as a JSON-RPC socket, the `gpty` CLI, and an MCP server: spawn panes, inject input, read output, run a command and wait for a pattern, broadcast to tagged panes.
+- **Agent state badges** - an agent declares `working` or `needs attention` from its own pane and the tab shows it. Display only.
+- **Observability panes** - Reasoning passively shows documented agent lifecycle events (OMP today, adapter-neutral vocabulary); Inspector is a private, tool-free Q&A session. gPTY never orchestrates agent state.
+- **Concepts** - regex triggers on terminal output capture the reply and route it into an adjacent pane. Write your own in Settings, by hand or in the visual graph editor. Concepts display only; they never type into a shell.
+
+**Extensible, with limits**
+
+- **Plugins** - manifest-based, reviewed in the GUI before install, with a public [registry](https://godot-pty.github.io/gpty/plugins/).
+- **A written threat model** - see [SECURITY.md](SECURITY.md). Releases ship `SHA256SUMS` and build-provenance attestations; the control socket is owner-only.
+
+### Status
+
+gPTY is a side project in active development. A vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using LLMs under human review; and as such, the underlying code may contain unidiomatic patterns and/or bugs. Roadmap & documentation: https://godot-pty.github.io/gpty/ Binaries are not code-signed (yet).
 
 | Component | Choice | Rationale |
 |----------|--------|-----------|

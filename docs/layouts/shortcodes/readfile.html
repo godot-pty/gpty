@@ -16,6 +16,7 @@
     {{/* Root docs link split pages (roadmap chains, changelog releases, agent
          guide topics) by their repo path; map them onto the site under the
          configured baseURL, so the rewrite works from any rendering page. */}}
+    {{ $raw = $raw | replaceRE `\]\(docs/static/images/` "](/images/" }}
     {{ $docs := "docs/" | relURL }}
     {{ $raw = $raw | replaceRE `\]\(docs/content/docs/([^)]+)\.md(#[^)]*)?\)` (printf "](%s${1}/${2})" $docs) }}
     {{ $raw = $raw | replaceRE `\[CONTRIBUTING\.md\]\(CONTRIBUTING\.md\)` "[Contributing](/docs/contributing/)" }}

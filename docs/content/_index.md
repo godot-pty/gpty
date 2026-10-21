@@ -5,7 +5,11 @@ toc: false
 
 [gPTY](https://godot-pty.github.io/gpty/) - a PTY foundation built on Godot and Rust. Provides a tiling grid for panes (terminal, code viewer, file tree, wiki, media, and more), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI.
 
-![gpty terminal grid](/images/v0.7.0_1.png)
+{{< video "demo-hero" >}}
+
+The panes tour: wiki link graph, media playback, and agent search of the vault.
+
+{{< video "demo-tour" >}}
 
 {{< cards >}}
   {{< card link="/gpty/docs" title="Documentation" icon="book-open" subtitle="Learn how gPTY works, from the PTY engine to the public agent API." >}}
