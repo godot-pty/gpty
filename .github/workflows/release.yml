@@ -246,6 +246,10 @@ jobs:
           # so `gpty <command>` can auto-spawn it (see the CLI's GUI discovery).
           godot --headless --path godot --export-release "Linux/X11" "$B/gpty-gui"
           cp gdext-artifacts/gpty-linux-x86_64/gpty "$B/"
+          # actions/download-artifact does not preserve file modes, so the CLI
+          # arrives 0644 (`Permission denied` when run). The GUI is exported in
+          # this job and keeps +x; restore the CLI's mode before tarring.
+          chmod 0755 "$B/gpty"
           cp LICENSE LICENSE-EXCEPTIONS.md "$B/"
           ./scripts/bundle-media linux "$B" gdext-artifacts/gpty-linux-x86_64/ffmpeg
           tar -czf "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64.tar.gz" -C "$GITHUB_WORKSPACE/dist" "gpty-${VERSION}-linux-x86_64"
