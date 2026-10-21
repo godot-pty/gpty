@@ -585,6 +585,91 @@ async fn invalid_state_never_reaches_socket() {
     );
 }
 
+/// Regression: every plugin id is `owner/name`, so on a fresh install the
+/// destination's parent (`plugins/owner`) does not exist. Renaming into that
+/// missing parent failed with ENOENT *after* the review had been accepted,
+/// leaving no content and no store record — the install looked finished.
+#[test]
+fn plugin_move_creates_the_id_parent_directory() {
+    let base = std::env::temp_dir().join(format!("gpty-plugin-move-fresh-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let root = base.join("plugins");
+    let staging = base.join("staging-abc");
+    std::fs::create_dir_all(&staging).unwrap();
+    std::fs::write(staging.join("gpty-plugin.toml"), b"id = \"owner/demo\"\n").unwrap();
+
+    commands::plugin::move_staged_into(&root, &staging, "owner/demo")
+        .expect("a fresh install must create the id's parent");
+
+    assert!(root.join("owner/demo/gpty-plugin.toml").is_file());
+    assert!(
+        !staging.exists(),
+        "the staging dir must be consumed by the move"
+    );
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// A revision upgrade swaps the old content out and leaves no `.old-*`
+/// sibling behind.
+#[test]
+fn plugin_move_replaces_an_existing_install() {
+    let base =
+        std::env::temp_dir().join(format!("gpty-plugin-move-upgrade-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let root = base.join("plugins");
+    let dest = root.join("owner/demo");
+    std::fs::create_dir_all(&dest).unwrap();
+    std::fs::write(dest.join("old.txt"), b"old").unwrap();
+    let staging = base.join("staging-def");
+    std::fs::create_dir_all(&staging).unwrap();
+    std::fs::write(staging.join("new.txt"), b"new").unwrap();
+
+    commands::plugin::move_staged_into(&root, &staging, "owner/demo")
+        .expect("an upgrade must replace the installed content");
+
+    assert!(dest.join("new.txt").is_file());
+    assert!(!dest.join("old.txt").exists());
+    let leftovers: Vec<_> = std::fs::read_dir(&root)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name())
+        .filter(|name| name.to_string_lossy().starts_with(".old-"))
+        .collect();
+    assert!(leftovers.is_empty(), "leftover swap dirs: {leftovers:?}");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// The swap's failure half: if the staged clone cannot be moved into place,
+/// the installed content is restored and the swap dir is gone — a failed
+/// upgrade must not destroy the working install.
+#[test]
+fn plugin_move_restores_the_old_content_when_the_new_clone_cannot_move() {
+    let base =
+        std::env::temp_dir().join(format!("gpty-plugin-move-rollback-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let root = base.join("plugins");
+    let dest = root.join("owner/demo");
+    std::fs::create_dir_all(&dest).unwrap();
+    std::fs::write(dest.join("old.txt"), b"old").unwrap();
+    let missing_staging = base.join("staging-gone");
+
+    commands::plugin::move_staged_into(&root, &missing_staging, "owner/demo")
+        .expect_err("a missing staging dir must fail the move");
+
+    assert!(
+        dest.join("old.txt").is_file(),
+        "the previous install must be restored"
+    );
+    let leftovers: Vec<_> = std::fs::read_dir(&root)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name())
+        .filter(|name| name.to_string_lossy().starts_with(".old-"))
+        .collect();
+    assert!(leftovers.is_empty(), "leftover swap dirs: {leftovers:?}");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 /// The install review handshake: the CLI sends the manifest summary over
 /// `pluginInstall` and the GUI's verdict decides whether anything installs.
 #[tokio::test]

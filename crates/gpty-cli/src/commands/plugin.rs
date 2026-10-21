@@ -254,7 +254,9 @@ async fn install(
     if let Some(existing) = store.record(&manifest.id)?
         && existing.revision == revision
     {
-        guard.disarm();
+        // Nothing to install, but the staged clone is still ours: leave the
+        // guard armed so Drop removes it. (Disarming here leaked a full
+        // clone into the staging dir on every re-install.)
         println!(
             "`{}` is already installed at revision {}",
             manifest.id,
@@ -315,8 +317,23 @@ async fn install(
 /// a rollback if the new content cannot take its place.
 fn move_into_place(staging: &Path, id: &str) -> anyhow::Result<()> {
     let root = plugin_store::content_root()?;
-    std::fs::create_dir_all(&root).with_context(|| format!("creating {}", root.display()))?;
+    move_staged_into(&root, staging, id)
+}
+
+/// The root-parameterized half of [`move_into_place`], so the move can be
+/// tested without resolving (and writing to) the real data dir.
+///
+/// An id is always `owner/name` (both parts validated), so the destination's
+/// *parent* is a directory that does not exist on a fresh install: creating
+/// only the content root and renaming into `plugins/owner/name` would fail
+/// with ENOENT. Create the parent, then rename.
+pub(crate) fn move_staged_into(root: &Path, staging: &Path, id: &str) -> anyhow::Result<()> {
+    std::fs::create_dir_all(root).with_context(|| format!("creating {}", root.display()))?;
     let dest = root.join(id);
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
     if !dest.exists() {
         return std::fs::rename(staging, &dest)
             .with_context(|| format!("moving {} into {}", staging.display(), dest.display()));
