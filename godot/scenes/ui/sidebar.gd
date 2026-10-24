@@ -165,7 +165,7 @@ func _add_buttons(v: VBoxContainer):
 	settings_btn.pressed.connect(func(): request_settings.emit())
 	v.add_child(settings_btn)
 
-	var reset_btn = _make_icon_text_button(Icons.DELETE, "Close all panes", Color(0.85, 0.2, 0.2, 1.0))
+	var reset_btn = _make_icon_text_button(Icons.DELETE, "Close All", Color(0.85, 0.2, 0.2, 1.0))
 	reset_btn.tooltip_text = "Close every pane in this workspace (Ctrl+Shift+R)"
 	reset_btn.pressed.connect(func(): request_reset.emit())
 	v.add_child(reset_btn)

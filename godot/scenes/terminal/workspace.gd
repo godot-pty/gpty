@@ -1299,7 +1299,7 @@ func _execute_command(cmd: String):
 		"close active": _kill_last()
 		"spawn 16 terminals": _spawn_bulk(16)
 		"settings": _toggle_settings()
-		"close all panes": _reset()
+		"close all": _reset()
 		"save": _save()
 		"load": _restore()
 

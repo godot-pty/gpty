@@ -112,7 +112,7 @@ func test_the_settings_button_requests_settings_and_nothing_else():
 	assert_signal_not_emitted(_sidebar, "request_reset")
 
 func test_the_close_all_panes_button_requests_reset_and_nothing_else():
-	var btn := _icon_text_button("Close all panes")
+	var btn := _icon_text_button("Close All")
 	assert_not_null(btn, "the Close all panes button must exist")
 	# UX-02: the bulk close used the same counter-clockwise-arrow glyph as
 	# "change pane type" and pane defaults, so the destructive action looked
