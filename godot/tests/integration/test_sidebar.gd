@@ -203,15 +203,15 @@ func test_workspace_row_double_click_renames():
 	assert_eq(_sidebar._workspace_list.get_child_count(), 2,
 		"workspace rows must survive the post-commit blur")
 
-func test_workspace_cog_emits_cwd_request():
+func test_workspace_directory_button_emits_cwd_request():
 	_sidebar.update_workspace_list(["Repo"], 0, ["/tmp/repo"])
 	var row = _sidebar._workspace_list.get_child(0)
-	var cog: Button = row.get_node_or_null("WorkspaceCwdBtn")
-	assert_not_null(cog, "each workspace row carries a settings cog")
-	assert_string_contains(cog.tooltip_text, "/tmp/repo",
-		"the cog names the workspace's current directory")
+	var dir_btn: Button = row.get_node_or_null("WorkspaceCwdBtn")
+	assert_not_null(dir_btn, "each workspace row carries a directory button")
+	assert_string_contains(dir_btn.tooltip_text, "/tmp/repo",
+		"the button names the workspace's current directory")
 	watch_signals(_sidebar)
-	cog.pressed.emit()
+	dir_btn.pressed.emit()
 	assert_signal_emitted_with_parameters(_sidebar, "request_workspace_cwd", [0])
 
 func test_profile_row_double_click_renames():

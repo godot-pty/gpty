@@ -360,16 +360,20 @@ func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close:
 	row.add_child(btn)
 
 	# Per-workspace working directory. The profile stays a layout template,
-	# so the directory is edited on the workspace instance instead.
-	var cog = Button.new(); cog.name = "WorkspaceCwdBtn"
-	cog.text = Icons.SETTINGS; cog.flat = true
-	Icons.style_button(cog)
-	cog.tooltip_text = "Working directory: %s" % dir_hint
-	cog.custom_minimum_size = Vector2(22, 0)
+	# so the directory is edited on the workspace instance instead. The glyph
+	# is a folder, not a gear: this button opens a directory picker and does
+	# nothing else, and a gear would promise a settings surface that does not
+	# exist yet. A workspace settings menu (sensitive flag, and the rest) is
+	# queued for when there is more than one setting to put in it.
+	var dir_btn = Button.new(); dir_btn.name = "WorkspaceCwdBtn"
+	dir_btn.text = Icons.FOLDER; dir_btn.flat = true
+	Icons.style_button(dir_btn)
+	dir_btn.tooltip_text = "Working directory: %s" % dir_hint
+	dir_btn.custom_minimum_size = Vector2(22, 0)
 	if cwd != "":
-		cog.add_theme_color_override("font_color", Palette.ACCENT_COLOR)
-	cog.pressed.connect(func(): request_workspace_cwd.emit(idx))
-	row.add_child(cog)
+		dir_btn.add_theme_color_override("font_color", Palette.ACCENT_COLOR)
+	dir_btn.pressed.connect(func(): request_workspace_cwd.emit(idx))
+	row.add_child(dir_btn)
 
 	# Close button only when more than one workspace exists (min-1 invariant).
 	if show_close:
