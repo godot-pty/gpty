@@ -525,10 +525,14 @@ mod tests {
                     ("GPTY_SOCKET", None),
                     ("XDG_RUNTIME_DIR", Some(insecure.to_str().unwrap())),
                 ]);
+                // The directory and the returned path are deliberately not
+                // echoed: a panic message is a log sink and would carry
+                // filesystem paths into one. The assertion already proves
+                // which directory was consulted.
                 let path = default_socket_path();
                 assert!(
                     !path.starts_with(&format!("{}/", insecure.display())),
-                    "insecure XDG_RUNTIME_DIR {insecure:?} must not be used; got {path}"
+                    "insecure XDG_RUNTIME_DIR must not be used"
                 );
             }
             std::fs::remove_dir_all(&insecure).unwrap();
@@ -542,10 +546,11 @@ mod tests {
                 ("XDG_RUNTIME_DIR", None),
                 ("XDG_STATE_HOME", Some(state.to_str().unwrap())),
             ]);
+            // Not echoed for the same reason: a panic message is a log sink.
             let path = default_socket_path();
             assert!(
                 path.ends_with("gpty.sock"),
-                "fallback must still name the control socket: {path}"
+                "fallback must still name the control socket"
             );
         }
 

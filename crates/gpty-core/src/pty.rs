@@ -760,12 +760,14 @@ mod tests {
             "0755 file in a 0777 non-sticky directory must be refused"
         );
         // The refusal must come from the directory rule and name that
-        // directory — the 0755 file itself is fine in both runs.
+        // directory — the 0755 file itself is fine in both runs. It is
+        // asserted but not echoed: a panic message is a log sink and would
+        // carry a filesystem path into one.
         let refusal = in_open_dir.unwrap_err();
         assert!(
             refusal.contains("group/other-writable directory")
                 && refusal.contains(&shared.display().to_string()),
-            "refusal must name the directory at fault, got: {refusal}"
+            "refusal must name the directory at fault"
         );
         assert!(
             in_sticky_dir.is_ok(),
