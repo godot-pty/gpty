@@ -1,4 +1,4 @@
-[gPTY](https://godot-pty.github.io/gpty/) - a PTY foundation built on Godot and Rust. Provides a tiling grid for panes (terminal, code viewer, file tree, wiki, media, and more), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI.
+[gPTY](https://godot-pty.github.io/gpty/) - a desktop workspace built on Rust and Godot. It provides a tiling grid for panes (terminals, code viewers, file trees, wikis, media, and more), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI. Every pane can be driven from a shell, a script, or an agent over one public API.
 
 ## Overview
 
@@ -15,27 +15,20 @@
 
 ![A script drives gPTY: cat routes into a viewer pane, pane-run opens a build pane, pane-wait blocks on its output, new-pane streams git log](docs/static/images/demo-hero.gif)
 
-### Why gPTY
-
-gPTY is a desktop workspace (a GUI, not a server you attach to over SSH). Panes are not only terminals: a pane can be a code viewer, a file tree, a wiki, and/or a media player sitting in the same tiling grid (a built-in browser however, is out of scope), and every pane can be driven from a shell, a script, or an agent over one public API.
-
 ### Features
 
-**Terminals**
+**Panes**
 
 - **Tiling grid** - split, resize, and rearrange independent shell sessions; save and reload named layouts, workspaces (tab sets), and profiles.
-- **Real terminal emulation** - `alacritty_terminal` grid with `16`/`256`/`true color`, scrollback with regex search, and wrapped text selection.
-- **Everything is remembered** - scrollback, settings, and workspaces restore on restart, with full-text search across each pane's history.
-- **Careful by default** - closing a pane or the app asks before it kills a command that is still running.
-
-**More than terminals**
-
-- **File tree and code viewer** - double-click a file to read it in a pane, with Markdown rendered safely.
+- **Emulation** - `alacritty_terminal` grid with `16`/`256`/`true color`, scrollback with regex search, and wrapped text selection.
+- **Memory** - scrollback, settings, and workspaces restore on restart, with full-text search across each pane's history.
+- **File Tree** - Native Godot OS file tree browser.
+- **Code Viewer** - Text and Markdown rendered
 - **Wiki** - a vault of plain Markdown notes with full-text search, a live-preview editor, `[[wikilinks]]`, backlinks, and a link graph, reopened where you left off. [Watch the panes tour](docs/static/images/demo-tour.mp4).
 - **Media** - play local audio and video in a pane through a pinned, minimal FFmpeg backend (v0.7).
 - **`cli_view`** - stream any command's output into a pane, so a plugin can add UI without a Godot SDK.
 
-**Built for agents and automation**
+**Agents & Automation**
 
 - **One API, three doors** - the same operations are available as a JSON-RPC socket, the `gpty` CLI, and an MCP server: spawn panes, inject input, read output, run a command and wait for a pattern, broadcast to tagged panes.
 - **Agent state badges** - an agent declares `working` or `needs attention` from its own pane and the tab shows it. Display only.
@@ -49,7 +42,7 @@ gPTY is a desktop workspace (a GUI, not a server you attach to over SSH). Panes 
 
 ### Status
 
-gPTY is a side project in active development. A vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using LLMs under human review; and as such, the underlying code may contain unidiomatic patterns and/or bugs. Roadmap & documentation: https://godot-pty.github.io/gpty/ Binaries are not code-signed (yet).
+gPTY is a side project in active development. A vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using LLMs under human review; and as such, the underlying code may contain unidiomatic patterns and/or bugs. Roadmap & documentation: https://godot-pty.github.io/gpty/
 
 | Component | Choice | Rationale |
 |----------|--------|-----------|
