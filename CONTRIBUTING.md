@@ -156,10 +156,13 @@ godot --headless --path godot --import # Required before first run
 # Explicitly link the OMP observability plugin (user action; gpty never auto-installs)
 omp plugin link "$(pwd)/extensions/gpty-omp-events"
 
-# Run all CI checks locally (fmt, clippy, tests, GUT, audit)
+# Workflow lint (valid YAML + a top-level permissions block in every workflow)
+./scripts/lint-workflows
+
+# Run all CI checks locally (fmt, workflow lint, clippy, tests, GUT, audit)
 ./scripts/ci-check
 
-# Fast checks only (fmt, clippy)
+# Fast checks only (fmt, workflow lint, clippy)
 ./scripts/ci-check --fast
 
 # Terminal renderer cost (needs a display; see the script header)

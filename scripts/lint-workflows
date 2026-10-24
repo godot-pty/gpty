@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Lint the GitHub workflows: valid YAML, and an explicit least-privilege
+# `permissions:` block at the top of every workflow.
+#
+# Why the permission rule: a workflow without one hands every job whatever the
+# repository default grants, which is read-write on repositories created before
+# February 2023 and follows a transferred or forked repository. GitHub's code
+# scanning reports exactly that ("Workflow does not contain permissions"), and a
+# green CI run says nothing about it - release.yml shipped that way until
+# 2026-10-24. A job that needs more declares its own block, which replaces the
+# workflow's scope for that job; the top-level read is the floor, not the
+# ceiling (see export-release in release.yml).
+#
+# ci-check and ci.yml both call this script, so the rule and the command that
+# enforces it cannot drift apart - the same reason scripts/gut-check owns the
+# GUT command.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+python3 - <<'PY'
+import sys
+from pathlib import Path
+
+import yaml
+
+WORKFLOWS = ("ci.yml", "release.yml", "docs.yml")
+errors = []
+for name in WORKFLOWS:
+    try:
+        doc = yaml.safe_load(Path(".github/workflows", name).read_text())
+    except Exception as exc:
+        errors.append(f"{name}: {exc}")
+        continue
+    if not isinstance(doc, dict):
+        errors.append(f"{name}: not a YAML mapping")
+        continue
+    perms = doc.get("permissions")
+    if perms is None:
+        errors.append(f"{name}: no top-level permissions block")
+        continue
+    # A mapping of scopes, or the shorthand levels `read-all` / `write-all`.
+    if not isinstance(perms, (dict, str)):
+        errors.append(f"{name}: permissions must be a mapping or a level name")
+        continue
+    print(f"  OK: {name} (permissions: {perms})")
+
+for err in errors:
+    print(f"  ERROR: {err}", file=sys.stderr)
+sys.exit(1 if errors else 0)
+PY

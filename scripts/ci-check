@@ -109,25 +109,10 @@ fi
 
 # ── Step 2: Workflow YAML lint ─────────────────────────────────────────
 header "workflow YAML lint"
-YAML_OUT="$(python3 -c "
-import yaml, sys
-errs = []
-for w in ['ci.yml','release.yml','docs.yml']:
-    try:
-        yaml.safe_load(open(f'.github/workflows/{w}'))
-        print(f'  OK: {w}')
-    except Exception as e:
-        errs.append(f'  ERROR: {w}: {e}')
-if errs:
-    for e in errs:
-        print(e, file=sys.stderr)
-    sys.exit(1)
-" 2>&1)" && YAML_OK=true || YAML_OK=false
-
-if $YAML_OK; then
-    pass "workflow YAML"
+if YAML_OUT="$(./scripts/lint-workflows 2>&1)"; then
+    pass "workflow lint"
 else
-    fail "workflow YAML"
+    fail "workflow lint"
     detail "$YAML_OUT"
     check_failed
 fi

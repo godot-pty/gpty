@@ -20,6 +20,12 @@ on:
       - "crates/**/README.md"
   workflow_dispatch:
 
+# Least privilege: jobs inherit this unless they declare their own block (the
+# build job does, for Pages and the OIDC token). A new job added here must not
+# silently inherit the repository default.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest

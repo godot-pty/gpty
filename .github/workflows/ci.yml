@@ -26,8 +26,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Validate YAML syntax
-        run: python3 -c "import yaml; [yaml.safe_load(open(f'.github/workflows/{w}')) for w in ['ci.yml','release.yml','docs.yml']]"
+      - name: Lint workflows
+        run: ./scripts/lint-workflows
 
   # ── Rust tests (core + gdext + cli) ──────────────────────────────────
   rust-tests:

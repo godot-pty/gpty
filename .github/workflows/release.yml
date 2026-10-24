@@ -4,6 +4,14 @@ on:
   push:
     tags: ["v*"]
 
+# Least privilege: the build jobs only read the repository. Without this block
+# they inherit the repository default, which is read-write on repositories
+# created before February 2023 and follows a transferred or forked repository.
+# `export-release` overrides it with exactly the writes it needs: release
+# contents, plus the OIDC identity the build-provenance attestation signs with.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   GDE_BIN: godot/bin
