@@ -346,7 +346,11 @@ if command -v cargo-audit &>/dev/null; then
     # re-resolves to latest compatible versions and silently rewrites the
     # repo's pinned Cargo.lock on every run.
     [ -f Cargo.lock ] || cargo generate-lockfile 2>&1 || true
-    if cargo audit 2>&1; then
+    # Same flags as CI (.github/workflows/ci.yml). `--deny warnings` matters:
+    # plain `cargo audit` reports an `unsound` advisory as an allowed warning
+    # and exits 0, so this gate passed on the change that turned CI red
+    # (RUSTSEC-2026-0386, tokio). A warning CI would reject must fail here too.
+    if cargo audit --deny warnings 2>&1; then
         pass "cargo audit"
     else
         fail "cargo audit"

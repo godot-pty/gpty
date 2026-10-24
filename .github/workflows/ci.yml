@@ -8,8 +8,10 @@ on:
 
 # Least privilege: every job here only reads the repository. Without this
 # block each job inherits the repository default token scope, which is handed
-# to third-party actions (the dependency-audit job passes it explicitly), so a
-# compromised action would hold whatever write scopes the default grants.
+# to third-party actions, so a compromised action would hold whatever write
+# scopes the default grants. No job is exempt: the dependency audit runs
+# `cargo audit` directly rather than an action that publishes a Check Run,
+# which would need `checks: write` and could never work for a fork PR anyway.
 permissions:
   contents: read
 
@@ -296,7 +298,17 @@ jobs:
       - name: Verify Cargo.lock exists
         run: test -f Cargo.lock
 
+      # Plain `cargo audit`, deliberately not rustsec/audit-check: that action
+      # publishes a Check Run when it finds something, which needs `checks:
+      # write` handed to a third-party action, and a fork PR's token can never
+      # create checks at all. `--deny warnings` makes an `unsound` advisory
+      # fail here with the advisory text instead of an API error, and the same
+      # flag in scripts/ci-check keeps the local gate and CI in agreement.
+      # The version is pinned so the tool's policy cannot change under a green
+      # build; there is no install-action entry for cargo-audit, so this is the
+      # one place a build step costs a couple of minutes.
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+
       - name: Run cargo-audit
-        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo audit --deny warnings
