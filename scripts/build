@@ -130,6 +130,10 @@ if [ -f "$TEMPLATES_DIR/$GODOT_VERSION/version.txt" ]; then
         || warn "$TEMPLATES_DIR/$GODOT_VERSION holds $FOUND_VERSION templates; exports will come from that engine build"
 fi
 
+step "Knowledge bundle"
+"$REPO_ROOT/scripts/build-wiki"
+ok "godot/knowledge.json"
+
 step "Import Godot project"
 "$GODOT_BIN" --headless --path godot --import
 ok "project imported"

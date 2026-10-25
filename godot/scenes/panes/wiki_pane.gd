@@ -112,6 +112,12 @@ var _links_backlinks_heading: Label
 var _backlinks_rows: VBoxContainer
 var _links_footer: Label
 
+## The vault path actually handed to the vault APIs. `vault_path` is the
+## configured value and may be the shipped `@knowledge` token; the token is
+## resolved once (seeding the bundle on first use) and every call below uses
+## this absolute path, so a saved layout never bakes in a release's directory.
+var _vault_root := ""
+
 ## The open note: its vault-relative path (the index's spelling), the text as
 ## loaded — what "dirty" is measured against — and the stamp the save checks.
 var _current_rel := ""
@@ -366,6 +372,8 @@ func _ready():
 
 	# The spawn/restore apply_settings call runs before the node enters the
 	# tree, so the initial index pass belongs here (code_viewer's pattern).
+	# Resolve first: the bundled profile stores `@knowledge`, not a path.
+	_resolve_vault()
 	_refresh()
 	_restore_view()
 
@@ -413,7 +421,7 @@ func _refresh():
 	if _search.text.strip_edges() != "":
 		_run_search()
 		return
-	var answer = JSON.parse_string(str(GptyTerminal.vault_index(vault_path)))
+	var answer = JSON.parse_string(str(GptyTerminal.vault_index(_vault_root)))
 	if not (answer is Dictionary):
 		_show_placeholder("Vault index unavailable.")
 		return
@@ -444,7 +452,7 @@ func _run_search() -> void:
 	if query == "":
 		_refresh()
 		return
-	var answer = JSON.parse_string(str(GptyTerminal.vault_search(vault_path, query, SEARCH_LIMIT)))
+	var answer = JSON.parse_string(str(GptyTerminal.vault_search(_vault_root, query, SEARCH_LIMIT)))
 	_clear_note()
 	_list.clear()
 	_footer.visible = false
@@ -526,15 +534,28 @@ func _clear_note() -> void:
 	# another matter: a deliberate end drops it, and nothing here does.
 	_scratch_timer.stop()
 
-## Why `vault_path` cannot be opened, or "" when it can.
+## Resolve the configured value into the absolute directory the vault APIs
+## take. A normal path comes back unchanged; `@knowledge` seeds the bundled
+## notes into the user data directory and returns that copy.
+func _resolve_vault() -> void:
+	_vault_root = KnowledgeStore.resolve(vault_path)
+
+## Why the vault cannot be opened, or "" when it can.
 func _vault_problem() -> String:
 	if vault_path == "":
 		return "No vault selected — set a vault path in the pane settings."
-	if not vault_path.is_absolute_path() or not DirAccess.dir_exists_absolute(vault_path):
+	if _vault_root == "":
+		if vault_path == KnowledgeStore.TOKEN:
+			var why := KnowledgeStore.last_error()
+			return why if why != "" else "The bundled knowledge base could not be opened."
 		return "Not a vault directory: " + _shown_path(vault_path)
+	if not _vault_root.is_absolute_path() or not DirAccess.dir_exists_absolute(_vault_root):
+		return "Not a vault directory: " + _shown_path(_vault_root)
 	return ""
 
 func _shown_path(path: String) -> String:
+	if path == KnowledgeStore.TOKEN:
+		return "the bundled knowledge base"
 	return path if path.length() <= MAX_SHOWN_PATH else path.left(MAX_SHOWN_PATH) + "…"
 
 func _on_note_activated(index: int) -> void:
@@ -550,7 +571,7 @@ func _on_note_activated(index: int) -> void:
 ## lands instead of the top. Both are navigation only — the note that opened
 ## is the resolved path, never anything the fragment says.
 func _open_note(rel: String, fragment := "", line := 0) -> void:
-	var answer = JSON.parse_string(str(GptyTerminal.vault_note_read(vault_path, rel)))
+	var answer = JSON.parse_string(str(GptyTerminal.vault_note_read(_vault_root, rel)))
 	if not (answer is Dictionary) or answer.has("error"):
 		# The path came from a just-completed walk or search; a failure here
 		# means the note moved or was replaced between the two.
@@ -623,8 +644,8 @@ func _show_graph() -> void:
 	# A search still waiting on its debounce must not pull the pane back to
 	# the list after the graph has been opened.
 	_search_timer.stop()
-	var answer = JSON.parse_string(str(GptyTerminal.vault_graph(vault_path)))
-	var graph := VaultGraphModel.parse(answer, LinkWeightsStore.vault_weights(vault_path))
+	var answer = JSON.parse_string(str(GptyTerminal.vault_graph(_vault_root)))
+	var graph := VaultGraphModel.parse(answer, LinkWeightsStore.vault_weights(_vault_root))
 	if not bool(graph["ok"]):
 		_show_placeholder("Vault graph failed: " + _shown_path(str(graph["error"])))
 		return
@@ -636,7 +657,7 @@ func _show_graph() -> void:
 		for node in graph["nodes"]:
 			if node is Dictionary and not bool(node.get("ghost", false)):
 				known[str(node.get("id", ""))] = true
-		LinkWeightsStore.prune(vault_path, known)
+		LinkWeightsStore.prune(_vault_root, known)
 	_list.visible = false
 	_footer.visible = false
 	_note_box.visible = false
@@ -704,7 +725,7 @@ func _ask_declared_weight(a: String, b: String, current: int) -> void:
 
 ## Write one declared weight for the drawn pair and re-apply it to the canvas.
 func _set_declared_weight(a: String, b: String, weight: int) -> void:
-	var problem := LinkWeightsStore.set_pair(vault_path, a, b, weight)
+	var problem := LinkWeightsStore.set_pair(_vault_root, a, b, weight)
 	if problem != "":
 		ToastManager.warn("Could not declare a weight: %s" % problem, 5.0, "Wiki")
 		return
@@ -717,7 +738,7 @@ func _set_declared_weight(a: String, b: String, weight: int) -> void:
 
 ## Clear both directions of a pair's declaration (a no-op is still a success).
 func _clear_declared_weight(a: String, b: String) -> void:
-	var problem := LinkWeightsStore.clear_pair(vault_path, a, b)
+	var problem := LinkWeightsStore.clear_pair(_vault_root, a, b)
 	if problem != "":
 		ToastManager.warn("Could not clear the weight: %s" % problem, 5.0, "Wiki")
 		return
@@ -730,7 +751,7 @@ func _clear_declared_weight(a: String, b: String) -> void:
 ## changes what is drawn, never which pairs exist.
 func _refresh_declared_weights() -> void:
 	if _graph_view != null and _graph_view.visible:
-		_graph_view.set_weights(LinkWeightsStore.vault_weights(vault_path))
+		_graph_view.set_weights(LinkWeightsStore.vault_weights(_vault_root))
 
 # ── The link panel: the open note's mentions and backlinks ──────────────
 
@@ -748,7 +769,7 @@ func _refresh_links() -> void:
 	_clear_links()
 	if _current_rel == "" or _links_box == null:
 		return
-	var answer = JSON.parse_string(str(GptyTerminal.vault_links(vault_path, _current_rel)))
+	var answer = JSON.parse_string(str(GptyTerminal.vault_links(_vault_root, _current_rel)))
 	if not (answer is Dictionary) or answer.has("error"):
 		return
 	var outgoing: Array = answer.get("outgoing", []) if answer.get("outgoing") is Array else []
@@ -765,7 +786,7 @@ func _refresh_links() -> void:
 	# judgement that a mention matters, so it sorts above measured ones. The
 	# section cap applies after the ordering, so a curated mention can surface
 	# from past it; the footer still counts every row the cap excludes.
-	var weights := LinkWeightsStore.vault_weights(vault_path)
+	var weights := LinkWeightsStore.vault_weights(_vault_root)
 	outgoing = _ordered_by_declared_weight(outgoing, weights, _current_rel, true)
 	backlinks = _ordered_by_declared_weight(backlinks, weights, _current_rel, false)
 	var shown_out := 0
@@ -924,7 +945,7 @@ func _on_mention_clicked(target: String, fragment: String) -> void:
 ## candidates and never silently picked. `fragment` is navigation inside a
 ## resolved note; it takes no part in resolving the note.
 func _follow_target(target: String, fragment := "") -> void:
-	var answer = JSON.parse_string(str(GptyTerminal.vault_link_resolve(vault_path, target)))
+	var answer = JSON.parse_string(str(GptyTerminal.vault_link_resolve(_vault_root, target)))
 	if not (answer is Dictionary) or answer.has("error"):
 		var why := str(answer["error"]) if answer is Dictionary and answer.has("error") else "unreadable"
 		ToastManager.warn("Could not resolve [[%s]]: %s" % [_shown_link(target), _shown_link(why)], 5.0, "Wiki")
@@ -1093,7 +1114,7 @@ func _save(force := false, answer := Callable()) -> void:
 			answer.call(false)
 		return
 	var reply = JSON.parse_string(str(GptyTerminal.vault_note_write(
-		vault_path, _current_rel, _payload(), _loaded_mtime, _loaded_size, force
+		_vault_root, _current_rel, _payload(), _loaded_mtime, _loaded_size, force
 	)))
 	if not (reply is Dictionary):
 		ToastManager.warn("Could not save %s: no answer from the vault" % _current_rel, 5.0, "Wiki")
@@ -1112,7 +1133,7 @@ func _save(force := false, answer := Callable()) -> void:
 	_loaded_mtime = int(reply.get("mtime", 0))
 	_loaded_size = int(reply.get("size", 0))
 	# The buffer reached the file, so the crash copy has nothing left to say.
-	_drop_scratch(vault_path, _current_rel)
+	_drop_scratch(_vault_root, _current_rel)
 	_update_dirty()
 	# The save re-indexed the vault: this note's edges (and its backlinks, in
 	# other notes) may have changed with the text just written.
@@ -1212,7 +1233,7 @@ func _create_note(rel: String) -> bool:
 	if rel == "":
 		ToastManager.warn("Enter a note name", 3.0, "Wiki")
 		return false
-	var reply = JSON.parse_string(str(GptyTerminal.vault_note_create(vault_path, rel, "")))
+	var reply = JSON.parse_string(str(GptyTerminal.vault_note_create(_vault_root, rel, "")))
 	if not (reply is Dictionary) or reply.has("error"):
 		ToastManager.warn(_note_failure("Could not create", rel, reply), 5.0, "Wiki")
 		return false
@@ -1237,7 +1258,7 @@ func _rename_note(new_rel: String) -> bool:
 	if new_rel == _current_rel:
 		return true
 	var previous := _current_rel
-	var reply = JSON.parse_string(str(GptyTerminal.vault_note_rename(vault_path, previous, new_rel)))
+	var reply = JSON.parse_string(str(GptyTerminal.vault_note_rename(_vault_root, previous, new_rel)))
 	if not (reply is Dictionary) or reply.has("error"):
 		ToastManager.warn(_note_failure("Could not rename", new_rel, reply), 5.0, "Wiki")
 		return false
@@ -1245,11 +1266,11 @@ func _rename_note(new_rel: String) -> bool:
 	_note_title.text = _current_rel
 	_note_title.tooltip_text = _current_rel
 	if _is_dirty():
-		_drop_scratch(vault_path, previous)
+		_drop_scratch(_vault_root, previous)
 		_scratch_timer.stop()
 		_write_scratch()
 	else:
-		_drop_scratch(vault_path, previous)
+		_drop_scratch(_vault_root, previous)
 	if not bool(reply.get("indexed", true)):
 		ToastManager.warn("Renamed %s, but the search index could not be updated" % _current_rel, 5.0, "Wiki")
 	# The authored layer follows the file: declared weights key on note paths,
@@ -1258,7 +1279,7 @@ func _rename_note(new_rel: String) -> bool:
 	# a declaration is not a mention, and declining to respell other notes must
 	# not discard the curation. A refused or failed rename never reaches this
 	# point, so the store is untouched in that case.
-	LinkWeightsStore.rekey_note(vault_path, previous, _current_rel)
+	LinkWeightsStore.rekey_note(_vault_root, previous, _current_rel)
 	# This note's own edges moved with it. Mentions other notes wrote to the
 	# old name do not follow a file: the rename just made them unresolved, and
 	# updating them writes *their* notes — so it is a separate, explicit
@@ -1279,7 +1300,7 @@ func _offer_link_update(previous: String, new_rel: String, include_renamed: bool
 	if _has_open_ask():
 		return
 	var preview = JSON.parse_string(str(
-		GptyTerminal.vault_link_rewrite_preview(vault_path, previous, new_rel, include_renamed)))
+		GptyTerminal.vault_link_rewrite_preview(_vault_root, previous, new_rel, include_renamed)))
 	if not (preview is Dictionary) or preview.has("error"):
 		# The rename itself landed; a pass that cannot be planned is reported
 		# rather than silently skipped — the mentions stay as they are.
@@ -1315,7 +1336,7 @@ func _offer_link_update(previous: String, new_rel: String, include_renamed: bool
 ## the text and fresh stamp the editor adopts.
 func _apply_link_update(previous: String, new_rel: String) -> void:
 	var reply = JSON.parse_string(str(
-		GptyTerminal.vault_link_rewrite(vault_path, previous, new_rel, not _is_dirty())))
+		GptyTerminal.vault_link_rewrite(_vault_root, previous, new_rel, not _is_dirty())))
 	if not (reply is Dictionary) or reply.has("error"):
 		ToastManager.warn(_note_failure("Could not update mentions of", previous, reply), 5.0, "Wiki")
 		return
@@ -1393,13 +1414,13 @@ func _delete_open_note() -> void:
 	if _current_rel == "":
 		return
 	var rel := _current_rel
-	var reply = JSON.parse_string(str(GptyTerminal.vault_note_delete(vault_path, rel)))
+	var reply = JSON.parse_string(str(GptyTerminal.vault_note_delete(_vault_root, rel)))
 	if not (reply is Dictionary) or reply.has("error"):
 		ToastManager.warn(_note_failure("Could not delete", rel, reply), 5.0, "Wiki")
 		return
 	# A deliberate end: the buffer died with the note, so the crash copy must
 	# not be offered back for a name the user just removed.
-	_drop_scratch(vault_path, rel)
+	_drop_scratch(_vault_root, rel)
 	_show_list()
 	if not bool(reply.get("indexed", true)):
 		ToastManager.warn("Deleted %s, but the search index could not be updated" % rel, 5.0, "Wiki")
@@ -1435,12 +1456,12 @@ func _write_scratch() -> void:
 	if _current_rel == "" or not _is_dirty():
 		return
 	GptyTerminal.vault_scratch_write(
-		vault_path, _current_rel, _editor.text, _loaded_mtime, _loaded_size
+		_vault_root, _current_rel, _editor.text, _loaded_mtime, _loaded_size
 	)
 
 ## The recovery copy for `rel`, or {} when there is none.
 func _read_scratch(rel: String) -> Dictionary:
-	var answer = JSON.parse_string(str(GptyTerminal.vault_scratch_read(vault_path, rel)))
+	var answer = JSON.parse_string(str(GptyTerminal.vault_scratch_read(_vault_root, rel)))
 	if answer is Dictionary and bool(answer.get("found", false)):
 		return answer
 	return {}
@@ -1477,7 +1498,7 @@ func _offer_scratch(rel: String) -> void:
 		return
 	if str(copy.get("text", "")) == _saved_text:
 		# A typed change that was undone: leftover, not a question.
-		_drop_scratch(vault_path, rel)
+		_drop_scratch(_vault_root, rel)
 		return
 	var dialog := ConfirmationDialog.new()
 	dialog.name = "RestoreConfirm"
@@ -1526,7 +1547,7 @@ func _discard_restore(action: String, dialog: Window) -> void:
 	_restore_copy = {}
 	_restore_rel = ""
 	if rel != "":
-		_drop_scratch(vault_path, rel)
+		_drop_scratch(_vault_root, rel)
 
 ## The note changed on disk since it was opened (another editor, a git
 ## checkout): overwriting it is the user's call, never the pane's. `answer`
@@ -1587,7 +1608,7 @@ func _request_leave(answer: Callable) -> void:
 			dialog.queue_free()
 			# The user just decided this buffer's fate: the recovery copy must
 			# not offer it back at the next open.
-			_drop_scratch(vault_path, _current_rel)
+			_drop_scratch(_vault_root, _current_rel)
 			answer.call(true)
 	)
 	dialog.canceled.connect(func():
@@ -1626,6 +1647,7 @@ func has_unsaved_state() -> bool:
 
 func apply_settings(settings: Dictionary):
 	var previous_vault := vault_path
+	var previous_root := _vault_root
 	var previous_mode := view_mode
 	super.apply_settings(settings)
 	# Remember what a restore asked for; only the spawn-time call (before the
@@ -1645,6 +1667,10 @@ func apply_settings(settings: Dictionary):
 	# The base assigned `vault_path` (its name is the settings key); re-scan
 	# rather than reassign, so a half-typed path stays in the settings field.
 	if vault_path != previous_vault:
+		# A token or a typed path becomes the absolute directory the vault
+		# APIs take. Seeding can fail, and `_vault_problem` then explains it
+		# instead of leaving an empty list.
+		_resolve_vault()
 		if _note_box.visible and _is_dirty():
 			# A different vault makes the open note meaningless, and the
 			# settings panel's debounce makes a dialog here unusable — say
@@ -1652,7 +1678,7 @@ func apply_settings(settings: Dictionary):
 			ToastManager.warn("Discarded unsaved changes to %s (vault changed)" % _current_rel, 5.0, "Wiki")
 		# That discard is the user's answer by another route: the copy goes too,
 		# and it is keyed by the vault the buffer belonged to.
-		_drop_scratch(previous_vault, _current_rel)
+		_drop_scratch(previous_root, _current_rel)
 		# A different vault makes the old query meaningless.
 		_search.text = ""
 		_apply_font_size()
@@ -1700,8 +1726,19 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	var vault_le = LineEdit.new()
 	vault_le.text = vault_path
 	vault_le.placeholder_text = "/path/to/vault"
-	vault_le.text_changed.connect(func(_s): panel._debounce_timer.start())
 	_add_setting_row(v, "Vault path:", vault_le)
+	# `@knowledge` is the shipped profile's token, not a path. Say what it
+	# means; typing a real path hides the hint again.
+	var vault_hint := Label.new()
+	vault_hint.text = "Bundled knowledge base — opened from a copy in your user data."
+	vault_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vault_hint.add_theme_font_size_override("font_size", 11)
+	vault_hint.visible = vault_path == KnowledgeStore.TOKEN
+	v.add_child(vault_hint)
+	vault_le.text_changed.connect(func(text):
+		panel._debounce_timer.start()
+		vault_hint.visible = text.strip_edges() == KnowledgeStore.TOKEN
+	)
 
 	var mode_opt = OptionButton.new()
 	for mode in VIEW_MODES:

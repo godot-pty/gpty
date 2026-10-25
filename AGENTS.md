@@ -32,11 +32,13 @@ gpty/
 │   ├── content/docs/agents/    # Agent guide topic pages (Rust, GDScript, security, ...)
 │   ├── content/docs/roadmap/   # One page per release chain (v0.N.md, future.md)
 │   ├── content/docs/changelog/ # One page per release (vX.Y.Z.md)
+│   ├── content/wiki/           # Knowledge-base vault; scripts/build-wiki packs it into godot/knowledge.json
 │   └── static/images/          # Release screenshots + roadmap evidence images
 ├── LICENSE
 ├── LICENSE-EXCEPTIONS.md       # GPLv3 §7 permissions: plugins + data stay non-copyleft
 ├── scripts/                    # CI runner and setup scripts
 │   ├── ci-check                # Run all CI checks locally (--fast for quick)
+│   ├── build-wiki              # Pack docs/content/wiki into godot/knowledge.json
 │   ├── install-hooks           # Symlink githooks into .git/hooks/
 │   └── build                   # Build standalone app for the host platform
 ├── githooks/                   # Git hook scripts
@@ -117,7 +119,8 @@ gpty/
     ├── project.godot
     ├── gpty.gdextension
     ├── concepts.default.json   # Shipped default concepts
-    ├── profiles.default.json   # Shipped recommended layouts (Agent Workspace)
+    ├── profiles.default.json   # Shipped recommended layouts (Agent Workspace, Knowledge Base)
+    ├── knowledge.json          # Generated wiki bundle (scripts/build-wiki)
     ├── fonts/                  # DejaVu Sans Mono + Phosphor icons
     └── scenes/
         ├── main.tscn

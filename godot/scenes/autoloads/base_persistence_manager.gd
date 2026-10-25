@@ -116,6 +116,39 @@ const STORE_UNIX_MODE := 0x180  # 0600
 func _temp_suffix() -> String:
 	return Crypto.new().generate_random_bytes(8).hex_encode()
 
+## Read a text asset (not a JSON store). Empty when it is missing or
+## unreadable; callers that need to distinguish the two own the check.
+func _read_text(path: String) -> String:
+	return FileAccess.get_file_as_string(resolve_store_path(path))
+
+## Write a text asset atomically, owner-only on Unix. This is the text sibling
+## of `_write_file`: stores hold JSON dictionaries, while a seeded vault is a
+## tree of Markdown files. Returns false when the write could not land.
+func _write_text(path: String, text: String) -> bool:
+	var target := resolve_store_path(path)
+	var tmp := "%s.%s.tmp" % [target, _temp_suffix()]
+	var abs_tmp := ProjectSettings.globalize_path(tmp)
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	if f == null:
+		push_warning("[%s] cannot open %s for writing" % [name, tmp])
+		return false
+	f.store_string(text)
+	f.close()
+	FileAccess.set_unix_permissions(abs_tmp, STORE_UNIX_MODE)
+	var err := DirAccess.rename_absolute(abs_tmp, ProjectSettings.globalize_path(target))
+	if err == OK:
+		return true
+	# Same fallback as `_write_file`: a non-atomic write beats losing the file,
+	# and the warning names it so the platform's rename limitation is visible.
+	push_warning("[%s] atomic replace of %s failed (%d); writing directly" % [name, target, err])
+	var direct := FileAccess.open(target, FileAccess.WRITE)
+	if direct:
+		direct.store_string(text)
+		direct.close()
+		FileAccess.set_unix_permissions(ProjectSettings.globalize_path(target), STORE_UNIX_MODE)
+	DirAccess.remove_absolute(abs_tmp)
+	return direct != null
+
 func _write_file(path: String, data: Dictionary):
 	# Write a sibling temp file and rename it into place. FileAccess.WRITE
 	# truncates the target the moment it opens, so a crash or power loss

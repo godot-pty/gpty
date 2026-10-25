@@ -285,8 +285,9 @@ func _default_profiles() -> Array:
 func test_each_preset_tile_passes_sanitize_tile():
 	# Every shipped preset tile must survive PaneTypes.sanitize_tile so the
 	# restore path can process it — including the pane type and the companion
-	# link the tile carries. Only "Agent Workspace" ships now: the five
-	# tool profiles moved to plugin repos, whose own CI sanitizes their tiles.
+	# link the tile carries. The five tool profiles moved to plugin repos,
+	# whose own CI sanitizes their tiles; the two shipped profiles are the
+	# Agent Workspace and the bundled Knowledge Base.
 	var raw := _default_profiles()
 	assert_gt(raw.size(), 0, "profiles.default.json must ship at least one profile")
 	for profile in raw:
@@ -359,16 +360,50 @@ func test_a_media_tile_restores_its_file():
 
 	DirAccess.remove_absolute(path)
 
-func test_only_the_agent_workspace_ships_as_a_builtin():
+## The shipped profile's token is only useful if a real pane resolves it: this
+## is the whole release path (token → seed → index → list) without the GUI.
+func test_a_wiki_pane_opens_the_bundled_vault_from_its_token():
+	var restored = await _restore(_one_tile({"type": "wiki", "vault_path": "@knowledge"}))
+	assert_eq(restored.size(), 1, "the bundled wiki tile must restore")
+	assert_not_null(restored[0]._list, "the wiki body must be ready")
+	assert_gt(restored[0]._list.item_count, 40,
+		"the wiki pane must resolve @knowledge to the seeded vault")
+
+func test_the_shipped_builtins_are_program_free():
 	# The five tool-specific built-ins (OMP, Herdr, Lazygit, Neovim, Claude)
-	# now come from one plugin repo per tool, so the file carries the single
-	# program-free layout: the recommended first-run profile asks for no
-	# consent because it names no program.
+	# now come from one plugin repo per tool. Both shipped profiles are
+	# program-free: Agent Workspace names no command, and Knowledge Base is a
+	# wiki tile whose only setting is the bundled-vault token.
 	var names: Array = []
+	var knowledge_tile: Dictionary = {}
 	for p in _default_profiles():
 		if p is Dictionary:
 			names.append(p.get("name", ""))
-	assert_eq(names, ["Agent Workspace"],
-		"profiles.default.json must ship exactly the Agent Workspace built-in")
+			if p.get("name", "") == "Knowledge Base":
+				for tile in p.get("tiles", []):
+					if tile is Dictionary:
+						var settings: Dictionary = tile.get("settings", {})
+						if settings.get("type", "") == "wiki":
+							knowledge_tile = tile
+	assert_eq(names, ["Agent Workspace", "Knowledge Base"],
+		"profiles.default.json must ship the agent workspace and the bundled wiki")
 	for moved in ["OMP", "Herdr", "Lazygit", "Neovim", "Claude"]:
 		assert_false(moved in names, "\"%s\" must come from its plugin now" % moved)
+	assert_false(knowledge_tile.is_empty(), "Knowledge Base must carry a wiki tile")
+	var knowledge_settings: Dictionary = knowledge_tile.get("settings", {})
+	assert_eq(knowledge_settings.get("vault_path"), "@knowledge",
+		"the knowledge base tile must name the shipped bundle, not a machine path")
+	assert_eq(knowledge_settings.get("open_note"), "index.md",
+		"the bundled profile must open Start Here for a first-time reader")
+	# "Program-free" is the whole point of the shipped set: no built-in may
+	# turn first-run onboarding into a trust dialog.
+	for profile in _default_profiles():
+		if not (profile is Dictionary):
+			continue
+		for tile in profile.get("tiles", []):
+			if not (tile is Dictionary):
+				continue
+			var settings: Dictionary = tile.get("settings", {})
+			for key in ["command", "shell", "shell_args"]:
+				assert_false(settings.has(key),
+					"\"%s\" must not carry a spawn plan (%s)" % [profile.get("name", ""), key])

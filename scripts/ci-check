@@ -127,6 +127,18 @@ else
     check_failed
 fi
 
+# ── Knowledge bundle: generated from the wiki vault ────────────────────
+# The vault is the source; godot/knowledge.json is what release builds read.
+# A stale bundle ships old notes, so it fails here rather than at export.
+header "knowledge bundle"
+if WIKI_OUT="$(python3 scripts/build-wiki --check 2>&1)"; then
+    pass "knowledge bundle"
+else
+    fail "knowledge bundle"
+    detail "$WIKI_OUT"
+    check_failed
+fi
+
 # ── Step 3: cargo clippy ───────────────────────────────────────────────
 header "cargo clippy"
 if cargo clippy --workspace -- -D warnings 2>&1; then

@@ -42,6 +42,28 @@
           }
         }
       ]
+    },
+    {
+      "id": "knowledge-base",
+      "name": "Knowledge Base",
+      "builtin": true,
+      "description": "The bundled gPTY wiki: project and terminal concepts, linked. Opens a copy in your user data.",
+      "tiles": [
+        {
+          "col": 0,
+          "row": 0,
+          "cspan": 60,
+          "rspan": 60,
+          "settings": {
+            "type": "wiki",
+            "pane_name": "Knowledge Base",
+            "attachment_id": "knowledge",
+            "vault_path": "@knowledge",
+            "view_mode": "preview",
+            "open_note": "index.md"
+          }
+        }
+      ]
     }
   ]
 }

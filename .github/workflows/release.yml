@@ -243,6 +243,9 @@ jobs:
           done
           ls -la godot/bin/
 
+      - name: Check the knowledge bundle
+        run: ./scripts/build-wiki --check
+
       - name: Import project
         run: godot --headless --path godot --import
 

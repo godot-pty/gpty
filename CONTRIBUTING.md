@@ -8,6 +8,7 @@
 - FFmpeg build dependencies for `./scripts/media-deps`: `curl`, a C toolchain, `make`, and
   `nasm` on x86 Linux (without nasm the script warns and disables hand-written SIMD). Windows
   uses vcpkg (`VCPKG_ROOT`). The script builds the pinned FFmpeg the GDExtension links.
+- Python 3 (for `scripts/docs-check` and `scripts/build-wiki`).
 
 ## Setup
 

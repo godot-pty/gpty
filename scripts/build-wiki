@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""Build the knowledge bundle that ships inside the app.
+
+`docs/content/wiki` is the source of truth: a vault of plain Markdown notes read
+and edited in the Wiki pane. A release has no `docs/` directory, so the notes
+are packed into `godot/knowledge.json`, which the exporter includes and
+`KnowledgeStore` (godot/scenes/autoloads/knowledge_store.gd) unpacks into
+`user://knowledge/<content hash>/` on first use.
+
+The hash is over the notes' paths and text, so changing a note produces a new
+seed directory instead of overwriting whatever the user edited in the previous
+one. `--check` regenerates in memory and compares; it is a CI gate, not a build
+step, so a stale bundle fails loudly instead of shipping old notes.
+
+Usage:
+  ./scripts/build-wiki           write godot/knowledge.json
+  ./scripts/build-wiki --check   fail if it is missing or stale
+"""
+import hashlib
+import json
+import os
+import sys
+import tempfile
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VAULT = os.path.join(ROOT, "docs", "content", "wiki")
+OUT = os.path.join(ROOT, "godot", "knowledge.json")
+
+MAX_NOTES = 2000
+MAX_DEPTH = 16
+MAX_NOTE_BYTES = 1 << 20
+MAX_BUNDLE_BYTES = 32 << 20
+MAX_PATH_BYTES = 1024
+
+
+def fail(message):
+    print(f"build-wiki: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def note_path_problem(rel):
+    if not rel:
+        return "empty path"
+    if len(rel.encode("utf-8")) > MAX_PATH_BYTES:
+        return f"path longer than {MAX_PATH_BYTES} bytes"
+    if rel.startswith("/") or "\\" in rel or ":" in rel or "\0" in rel:
+        return "path is not vault-relative"
+    parts = rel.split("/")
+    if parts[-1][-3:] != ".md":
+        return "not a Markdown note"
+    for part in parts:
+        if part in ("", ".", ".."):
+            return "path has an empty, current or parent component"
+        if part.startswith("."):
+            return "path names a hidden entry"
+    return ""
+
+
+def collect():
+    found = []
+
+    def walk(directory, prefix, depth):
+        if depth > MAX_DEPTH:
+            return
+        try:
+            entries = sorted(os.scandir(directory), key=lambda e: e.name)
+        except OSError as error:
+            fail(f"cannot read {directory}: {error}")
+        for entry in entries:
+            if entry.name.startswith("."):
+                continue
+            rel = f"{prefix}/{entry.name}" if prefix else entry.name
+            try:
+                is_dir = entry.is_dir(follow_symlinks=True)
+                is_file = entry.is_file(follow_symlinks=True)
+            except OSError as error:
+                fail(f"cannot inspect {entry.path}: {error}")
+            if is_dir:
+                walk(entry.path, rel, depth + 1)
+            elif is_file and entry.name.endswith(".md"):
+                problem = note_path_problem(rel)
+                if problem:
+                    fail(f"{rel}: {problem}")
+                with open(entry.path, "rb") as handle:
+                    data = handle.read()
+                if len(data) > MAX_NOTE_BYTES:
+                    fail(f"{rel}: larger than the {MAX_NOTE_BYTES // 1024} KiB note cap")
+                try:
+                    text = data.decode("utf-8")
+                except UnicodeDecodeError as error:
+                    fail(f"{rel}: not UTF-8: {error}")
+                found.append({"path": rel, "text": text})
+                if len(found) > MAX_NOTES:
+                    fail(f"vault has more than {MAX_NOTES} notes")
+
+    walk(VAULT, "", 0)
+    if not found:
+        fail(f"no Markdown notes under {os.path.relpath(VAULT, ROOT)}")
+    found.sort(key=lambda note: note["path"])
+    if len({note["path"] for note in found}) != len(found):
+        fail("two notes share a vault-relative path")
+    if len({note["path"].lower() for note in found}) != len(found):
+        fail("two notes' paths differ only by case")
+    total = sum(len(note["text"].encode("utf-8")) for note in found)
+    if total > MAX_BUNDLE_BYTES:
+        fail(f"notes total {total} bytes, over the {MAX_BUNDLE_BYTES} byte bundle cap")
+    return found
+
+
+def digest(notes):
+    hasher = hashlib.sha256()
+    for note in notes:
+        hasher.update(note["path"].encode("utf-8"))
+        hasher.update(b"\0")
+        hasher.update(note["text"].encode("utf-8"))
+        hasher.update(b"\0")
+    return hasher.hexdigest()[:16]
+
+
+def payload():
+    notes = collect()
+    data = {"version": digest(notes), "notes": notes}
+    encoded = json.dumps(
+        data, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8") + b"\n"
+    return notes, data["version"], encoded
+
+
+def main():
+    check = "--check" in sys.argv[1:]
+    notes, version, encoded = payload()
+    if check:
+        if not os.path.exists(OUT):
+            fail(f"{os.path.relpath(OUT, ROOT)} is missing; run ./scripts/build-wiki")
+        with open(OUT, "rb") as handle:
+            current = handle.read()
+        if current != encoded:
+            fail(
+                f"{os.path.relpath(OUT, ROOT)} is stale ({len(notes)} notes, "
+                f"version {version}); run ./scripts/build-wiki"
+            )
+        print(f"build-wiki: OK ({len(notes)} notes, version {version})")
+        return
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    handle, temporary = tempfile.mkstemp(
+        prefix=".knowledge-", suffix=".json", dir=os.path.dirname(OUT)
+    )
+    try:
+        with os.fdopen(handle, "wb") as out:
+            out.write(encoded)
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, OUT)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+    print(
+        f"build-wiki: wrote {os.path.relpath(OUT, ROOT)} "
+        f"({len(notes)} notes, {len(encoded)} bytes, version {version})"
+    )
+
+
+if __name__ == "__main__":
+    main()
