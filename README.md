@@ -4,12 +4,7 @@
 
 <div align="center">
 
-  [![Build](https://img.shields.io/github/actions/workflow/status/godot-pty/gpty/ci.yml?branch=main)](https://github.com/godot-pty/gpty/actions/workflows/ci.yml)
-  ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/godot-pty/gpty/total)
-  &nbsp;&nbsp;&nbsp; <img src="https://img.shields.io/badge/Built%20With:-gray" alt="Built With">
-  <img src="https://img.shields.io/badge/Gemini-8E75B2?logo=googlegemini&logoColor=white" alt="Gemini">
-  <img src="https://img.shields.io/badge/DeepSeek-4D6BFE?logo=deepseek&logoColor=white" alt="DeepSeek">
-  <img src="https://img.shields.io/badge/Claude-D97757?logo=claude&logoColor=white" alt="Claude">
+  [![Build](https://img.shields.io/github/actions/workflow/status/godot-pty/gpty/ci.yml?branch=main)](https://github.com/godot-pty/gpty/actions/workflows/ci.yml) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/godot-pty/gpty/total) ![LLM-powered](https://img.shields.io/badge/LLM-powered-6A5ACD) [![r/gPTY](https://img.shields.io/reddit/subreddit-subscribers/gPTY?label=r%2FgPTY&style=social)](https://www.reddit.com/r/gPTY/)
 
 </div>
 
@@ -24,7 +19,7 @@
 - **Memory** - scrollback, settings, and workspaces restore on restart, with full-text search across each pane's history.
 - **File Tree** - Native Godot OS file tree browser.
 - **Code Viewer** - Text and Markdown rendered
-- **Wiki** - a vault of plain Markdown notes with full-text search, a live-preview editor, `[[wikilinks]]`, backlinks, and a link graph, reopened where you left off. [Watch the panes tour](docs/static/images/demo-tour.mp4).
+- **Wiki** - a vault of plain Markdown notes with full-text search, a live-preview editor, `[[wikilinks]]`, backlinks, and a link graph, reopened where you left off. The shipped **Knowledge Base** profile opens the bundled wiki inside a release. [Watch the panes tour](docs/static/images/demo-tour.mp4).
 - **Media** - play local audio and video in a pane through a pinned, minimal FFmpeg backend (v0.7).
 - **`cli_view`** - stream any command's output into a pane, so a plugin can add UI without a Godot SDK.
 
@@ -66,6 +61,8 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 | Linux | `gpty-v<version>-linux-x86_64.tar.gz` - extract; `./gpty-gui.sh` starts the GUI, `./gpty` is the CLI |
 | macOS | `gpty-v<version>-macos.zip` - unzip, right-click the `.app` → Open; `gpty` beside it is the CLI |
 | Windows | `gpty-v<version>-windows-x86_64.zip` - unzip; `gpty-gui.exe` starts the GUI, `gpty.exe` is the CLI |
+
+Every release also bundles the gPTY knowledge base; the **Knowledge Base** profile in the sidebar opens the bundled wiki from your user data.
 
 In the file names, `<version>` is the release tag you downloaded (for example `v0.7.0`).
 
