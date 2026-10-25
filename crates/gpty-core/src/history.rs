@@ -589,6 +589,10 @@ impl LineQueue {
 pub struct PaneHistory {
     store: Arc<Mutex<HistoryStore>>,
     queue: Arc<LineQueue>,
+    /// The writer thread, joined on drop after the queue closes. Without the
+    /// join a close only *asked* the writer to commit its partial batch and
+    /// returned; whether the last lines reached SQLite was a scheduling race.
+    writer: Option<std::thread::JoinHandle<()>>,
 }
 
 impl PaneHistory {
@@ -598,8 +602,12 @@ impl PaneHistory {
         let (rows, bytes) = store.retention_window();
         let store = Arc::new(Mutex::new(store));
         let queue = Arc::new(LineQueue::new(rows, bytes));
-        spawn_writer(Arc::clone(&store), Arc::clone(&queue));
-        Ok(Self { store, queue })
+        let writer = spawn_writer(Arc::clone(&store), Arc::clone(&queue));
+        Ok(Self {
+            store,
+            queue,
+            writer,
+        })
     }
 
     /// The store, for readers (search, restore, prune). Writes go through
@@ -632,14 +640,24 @@ impl PaneHistory {
 
 impl Drop for PaneHistory {
     fn drop(&mut self) {
-        // The writer flushes what it still holds and exits; the queue is
-        // dropped with the pane, so anything left in it is unreachable anyway.
+        // Close, then wait. A drop that returned before the writer committed
+        // its partial batch made the last lines a scheduling race: the CI
+        // parallel run caught it when the writer had one pending line and did
+        // not get scheduled inside the test's poll window.
         self.queue.close();
+        if let Some(writer) = self.writer.take()
+            && writer.join().is_err()
+        {
+            log::warn!("history writer panicked while closing");
+        }
     }
 }
 
 /// Writer thread: drain the queue into batches, commit them, trim the store.
-fn spawn_writer(store: Arc<Mutex<HistoryStore>>, queue: Arc<LineQueue>) {
+fn spawn_writer(
+    store: Arc<Mutex<HistoryStore>>,
+    queue: Arc<LineQueue>,
+) -> Option<std::thread::JoinHandle<()>> {
     let spawned = std::thread::Builder::new()
         .name("history-writer".to_string())
         .spawn(move || {
@@ -650,11 +668,17 @@ fn spawn_writer(store: Arc<Mutex<HistoryStore>>, queue: Arc<LineQueue>) {
                 // transaction, so a slow producer is not one commit per line.
                 if batch.len() < FLUSH_ROWS {
                     if batch.is_empty() {
-                        // Closure is only terminal once the queue is empty: a
-                        // pane being torn down still has its last lines
-                        // committed (a push can land between take and close).
+                        // Closure is terminal only once a *fresh* take is
+                        // empty. `push` can land between the take above and
+                        // this check, then `close` makes both visible: the
+                        // line is in the queue, not in `batch`. Once `closed`
+                        // is observed no later push can be accepted, so one
+                        // more take is enough to see every line that made it.
                         if queue.closed() {
-                            break;
+                            batch.extend(queue.take());
+                            if batch.is_empty() {
+                                break;
+                            }
                         }
                     }
                     if queue.wait(FLUSH_INTERVAL) {
@@ -684,8 +708,12 @@ fn spawn_writer(store: Arc<Mutex<HistoryStore>>, queue: Arc<LineQueue>) {
                 batch.clear();
             }
         });
-    if let Err(e) = spawned {
-        log::error!("could not start the history writer: {e}");
+    match spawned {
+        Ok(handle) => Some(handle),
+        Err(e) => {
+            log::error!("could not start the history writer: {e}");
+            None
+        }
     }
 }
 
@@ -1158,19 +1186,18 @@ mod tests {
         assert_eq!(store.lock().unwrap().line_count().unwrap(), 50);
 
         // A pending write must survive the pane handle going away: the queue
-        // closes, the writer commits what it holds, then exits.
+        // closes, the writer commits what it holds, then exits. `drop` joins
+        // that writer, so the store is final when it returns. The writer also
+        // re-drains a closed queue before breaking, because a push can land
+        // between an empty take and the closed check; the old five-second poll
+        // hid either race whenever local scheduling happened to win.
         history.push(51, "last word");
         drop(history);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let mut last = 0;
-        while std::time::Instant::now() < deadline {
-            last = store.lock().unwrap().max_line_num().unwrap();
-            if last == 51 {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        assert_eq!(last, 51, "a closing writer must commit what it still holds");
+        assert_eq!(
+            store.lock().unwrap().max_line_num().unwrap(),
+            51,
+            "a closing writer must commit what it still holds"
+        );
         fs::remove_file(&path).ok();
     }
 
