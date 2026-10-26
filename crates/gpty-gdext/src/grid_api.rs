@@ -96,6 +96,59 @@ impl GptyTerminal {
         self.with_grid(|g| g.display_offset() as i64, 0)
     }
 
+    /// Begin a text selection at a viewport cell (0-based row on the visible
+    /// screen).
+    ///
+    /// The selection is held by the grid, not the pane: scrolling the view
+    /// moves the highlight with the text, and output rotates it with the
+    /// grid (alacritty keeps it on its rows). `get_selection_text` therefore
+    /// still returns the original text after either.
+    #[func]
+    fn selection_start(&mut self, row: i64, col: i64) {
+        self.with_grid_mut(|g| g.selection_start(row.max(0) as usize, col.max(0) as usize));
+    }
+
+    /// Extend the live selection to a viewport cell.
+    #[func]
+    fn selection_extend(&mut self, row: i64, col: i64) {
+        self.with_grid_mut(|g| g.selection_extend(row.max(0) as usize, col.max(0) as usize));
+    }
+
+    /// Drop the selection.
+    #[func]
+    fn selection_clear(&mut self) {
+        self.with_grid_mut(|g| g.selection_clear());
+    }
+
+    /// Selected text, read from the grid rows: a selection scrolled out of
+    /// the viewport still copies in full. Empty when nothing is selected.
+    #[func]
+    fn get_selection_text(&self) -> GString {
+        self.with_grid(
+            |g| GString::from(g.selection_text().as_str()),
+            GString::new(),
+        )
+    }
+
+    /// Selected cells for drawing: packed triples of
+    /// `(viewport row, first column, last column)`, inclusive and clipped to
+    /// the visible screen. Empty when nothing visible is selected.
+    #[func]
+    fn get_selection_cells(&self) -> PackedInt32Array {
+        self.with_grid(
+            |g| {
+                let mut out = PackedInt32Array::new();
+                for (row, first, last) in g.selection_cells() {
+                    out.push(row as i32);
+                    out.push(first as i32);
+                    out.push(last as i32);
+                }
+                out
+            },
+            PackedInt32Array::new(),
+        )
+    }
+
     /// Mouse reporting the child process has enabled, as a bitmask: bit 0
     /// click (DECSET 1000), bit 1 drag (1002), bit 2 any-motion (1003), bit 3
     /// SGR encoding (1006). Zero — the common case — means the pane owns

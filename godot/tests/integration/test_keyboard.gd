@@ -15,6 +15,22 @@ class RecordingPane:
 	var sent_lines: Array[String] = []
 	var clip := "clip-payload"
 	var search_toggles := 0
+	var snaps := 0
+	var sel_text := ""
+	var clears := 0
+
+	func _snap_to_bottom():
+		snaps += 1
+
+	# The grid owns the selection; these tests route key events, so the
+	# selected text and the clear are seams (the text itself is covered by
+	# `term::tests::selection_*`).
+	func _get_selected_text() -> String:
+		return sel_text
+
+	func _clear_selection():
+		clears += 1
+		sel_text = ""
 
 	func _send_to_term(text: String):
 		sent.append(text)
@@ -142,11 +158,10 @@ func test_ctrl_shift_c_copy_does_not_leak_control_char():
 
 
 func test_ctrl_shift_c_with_selection_copies_without_leaking():
-	_pane._cell_cache = {"rows": 1, "cols": 3, "chars": ["abc"]}
-	_pane._sel_start = Vector2i(0, 0)
-	_pane._sel_end = Vector2i(0, 2)
+	_pane.sel_text = "abc"
 	_pane._handle_keyboard(_key_event(KEY_C, 0, true, true))
 	assert_eq(_pane.sent, [], "copy with selection must not send bytes to the shell")
+	assert_eq(_pane.clears, 1, "copy consumed the chord and dismissed the selection")
 
 
 func test_held_paste_sends_clipboard_once():
@@ -186,3 +201,31 @@ func test_alt_shift_letter_prepends_escape():
 func test_ctrl_alt_letter_no_escape_prefix():
 	_pane._handle_keyboard(_key_event(KEY_A, 0, true, false, true))
 	assert_eq(_pane.sent, ["\u0001"], "Ctrl+Alt+A sends the control char without ESC prefix")
+
+
+# --- Viewport follow: only input that reaches the child moves the view ---
+# The reported bug: with a scrollback view and a selection, pressing Ctrl or
+# Shift (the first half of Shift+Ctrl+C) jumped the screen back to the cursor
+# row, leaving the screen-anchored highlight on different text.
+
+func test_bare_modifier_press_keeps_the_scrolled_back_view():
+	_pane._handle_keyboard(_key_event(KEY_CTRL, 0, true))
+	_pane._handle_keyboard(_key_event(KEY_SHIFT, 0, false, true))
+	_pane._handle_keyboard(_key_event(KEY_ALT, 0, false, false, true))
+	assert_eq(_pane.snaps, 0, "bare modifiers must not snap the view to the bottom")
+	assert_eq(_pane.sent, [], "bare modifiers send nothing")
+
+
+func test_page_keys_move_the_view_without_snapping():
+	_pane._handle_keyboard(_key_event(KEY_PAGEUP, 0))
+	_pane._handle_keyboard(_key_event(KEY_PAGEDOWN, 0))
+	assert_eq(_pane.snaps, 0, "PageUp/PageDown must not reset the view they just moved")
+
+
+func test_keys_that_send_input_still_snap_to_bottom():
+	_pane._handle_keyboard(_key_event(KEY_Z, 122))
+	assert_eq(_pane.snaps, 1, "a printable key returns the view to live output")
+	_pane._handle_keyboard(_key_event(KEY_LEFT, 0))
+	assert_eq(_pane.snaps, 2, "a keymap key returns the view to live output")
+	_pane._handle_keyboard(_key_event(KEY_ENTER, 13))
+	assert_eq(_pane.snaps, 3, "Enter returns the view to live output")

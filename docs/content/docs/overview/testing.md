@@ -179,7 +179,7 @@ All CLI commands below use the default socket path (`$XDG_RUNTIME_DIR/gpty.sock`
 | # | Action | Expected |
 |---|--------|----------|
 | 39 | In `nvim`, `:set mouse=a`, then click a line | The cursor jumps to that line - the click reached the app |
-| 40 | Drag across text while such an app is focused | The app receives the drag, not the pane. Hold `Shift` to select locally and copy with `Ctrl+Shift+V` |
+| 40 | Drag across text while such an app is focused | The app receives the drag, not the pane. Hold `Shift` to select locally and copy with `Ctrl+Shift+C` |
 | 41 | Wheel-scroll a mouse-aware app | The app scrolls it (the pane does not scroll its scrollback) |
 | 42 | Quit the TUI, then drag and wheel in the pane again | Selection and scrollback work as before - reporting turned off with the app |
 

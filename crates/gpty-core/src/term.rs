@@ -16,10 +16,12 @@ use std::sync::{Arc, Mutex};
 use alacritty_terminal::Term;
 use alacritty_terminal::event::{Event as TermEvent, EventListener};
 use alacritty_terminal::grid::{Dimensions, Grid, Scroll};
-use alacritty_terminal::index::{Column, Line};
+use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::Config;
 use alacritty_terminal::term::cell::Cell;
 use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::term::viewport_to_point;
 
 /// Cursor shape returned by the terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,6 +159,12 @@ pub struct TermGrid {
     pub palette: [[u8; 3]; 16],
     /// Line counter for history storage (monotonically increasing).
     line_count: u64,
+    /// Which end of the live selection the mouse-down cell is. The pane
+    /// re-creates the range on every drag motion with both end cells
+    /// inclusive (alacritty's `Side` encodes sub-cell pointer positions a
+    /// cell-granularity drag does not have), and the anchor is read back
+    /// from the live range so it keeps rotating with the grid mid-drag.
+    selection_anchor_at_start: bool,
     /// Optional persistent scrollback for this pane: the SQLite store (read
     /// paths) plus the writer thread that commits queued lines.
     pub history: Option<Arc<crate::history::PaneHistory>>,
@@ -219,6 +227,7 @@ impl TermGrid {
             last_full_offset: 0,
             palette: crate::color::SYSTEM_COLORS,
             line_count: 0,
+            selection_anchor_at_start: true,
             history: None,
             status: TermStatus::default(),
             agent_state: crate::agent_state::AgentStateTracker::default(),
@@ -585,6 +594,112 @@ impl TermGrid {
         self.generation += 1;
     }
 
+    // ── Selection ─────────────────────────────────────────────────────
+    //
+    // The selection lives in grid coordinates (`Term::selection`), not in
+    // viewport rows: alacritty rotates it with the grid whenever output
+    // scrolls the screen and on resize, and the viewport mapping is derived
+    // on demand. A screen-space selection (what the pane used to keep) left
+    // the highlight on whatever text the view scrolled under it, and copied
+    // the wrong rows.
+
+    /// Begin a selection at a viewport cell (0-based row on the visible
+    /// screen). A press with no motion selects the cell under it.
+    pub fn selection_start(&mut self, row: usize, col: usize) {
+        let point = self.viewport_point(row, col);
+        self.selection_anchor_at_start = true;
+        let mut selection = Selection::new(SelectionType::Simple, point, Side::Left);
+        selection.update(point, Side::Right);
+        self.term.selection = Some(selection);
+    }
+
+    /// Extend the selection to a viewport cell, keeping both end cells
+    /// selected (the pane's drag is cell-granular).
+    ///
+    /// The anchor is read back from the live range rather than stored beside
+    /// it, so a drag in progress survives the grid rotating under it.
+    pub fn selection_extend(&mut self, row: usize, col: usize) {
+        let point = self.viewport_point(row, col);
+        let Some(range) = self
+            .term
+            .selection
+            .as_ref()
+            .and_then(|selection| selection.to_range(&self.term))
+        else {
+            return;
+        };
+        let anchor = if self.selection_anchor_at_start {
+            range.start
+        } else {
+            range.end
+        };
+        let (start, end) = if point >= anchor {
+            (anchor, point)
+        } else {
+            (point, anchor)
+        };
+        self.selection_anchor_at_start = point >= anchor;
+        let mut selection = Selection::new(SelectionType::Simple, start, Side::Left);
+        selection.update(end, Side::Right);
+        self.term.selection = Some(selection);
+    }
+
+    /// Drop the selection.
+    pub fn selection_clear(&mut self) {
+        self.term.selection = None;
+    }
+
+    /// Selected text, read from the grid rows: a selection scrolled out of
+    /// view still copies in full. Empty when nothing is selected.
+    pub fn selection_text(&self) -> String {
+        self.term.selection_to_string().unwrap_or_default()
+    }
+
+    /// Selected cells as `(viewport row, first column, last column)`,
+    /// inclusive and clipped to the visible screen. Empty when nothing
+    /// visible is selected — the selection itself may still exist.
+    pub fn selection_cells(&self) -> Vec<(usize, usize, usize)> {
+        let Some(range) = self
+            .term
+            .selection
+            .as_ref()
+            .and_then(|selection| selection.to_range(&self.term))
+        else {
+            return Vec::new();
+        };
+        let offset = self.term.grid().display_offset() as i32;
+        let last_col = self.cols.saturating_sub(1);
+        let mut cells = Vec::new();
+        for line in range.start.line.0..=range.end.line.0 {
+            let row = line + offset;
+            if row < 0 || row as usize >= self.rows {
+                continue;
+            }
+            let first = if line == range.start.line.0 {
+                range.start.column.0
+            } else {
+                0
+            };
+            let last = if line == range.end.line.0 {
+                range.end.column.0
+            } else {
+                last_col
+            };
+            if first <= last {
+                cells.push((row as usize, first, last));
+            }
+        }
+        cells
+    }
+
+    /// A viewport cell as a grid point, under the current scroll offset.
+    fn viewport_point(&self, row: usize, col: usize) -> Point {
+        viewport_to_point(
+            self.term.grid().display_offset(),
+            Point::new(row, Column(col)),
+        )
+    }
+
     /// Store a completed output line in the optional scrollback and the
     /// recent-lines ring (backs `waitForOutput`).
     ///
@@ -731,6 +846,20 @@ impl CellInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Visible rows as trimmed strings, top to bottom.
+    fn screen_rows(g: &TermGrid) -> Vec<String> {
+        g.renderable_rows()
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.ch)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect()
+    }
 
     #[test]
     fn create_grid() {
@@ -1106,6 +1235,105 @@ mod tests {
         g.resize(30, 100);
         assert_eq!(g.num_rows(), 30);
         assert_eq!(g.num_cols(), 100);
+    }
+
+    #[test]
+    fn selection_follows_text_across_view_scroll_and_output() {
+        let mut g = TermGrid::new(5, 20);
+        for i in 0..12 {
+            g.feed(format!("line{i}\r\n").as_bytes());
+        }
+        let rows = screen_rows(&g);
+        let row = rows
+            .iter()
+            .position(|r| r == "line9")
+            .expect("line9 must be on screen");
+        g.selection_start(row, 0);
+        g.selection_extend(row, 4);
+        assert_eq!(g.selection_text(), "line9");
+        assert_eq!(g.selection_cells(), vec![(row, 0, 4)]);
+
+        // User scroll: the highlight moves with the text.
+        g.scroll_up(2);
+        assert_eq!(g.selection_text(), "line9");
+        assert_eq!(g.selection_cells(), vec![(row + 2, 0, 4)]);
+
+        // Output while scrolled back: the viewport stays pinned, so neither
+        // the text nor its rows may move (this is the drift a screen-space
+        // selection showed).
+        g.feed(b"line12\r\nline13\r\n");
+        assert_eq!(g.selection_text(), "line9");
+        assert_eq!(
+            g.selection_cells(),
+            vec![(row + 2, 0, 4)],
+            "output must not slide the highlight off its text"
+        );
+    }
+
+    #[test]
+    fn selection_follows_text_up_when_output_scrolls_the_screen() {
+        let mut g = TermGrid::new(5, 20);
+        for i in 0..8 {
+            g.feed(format!("row{i}\r\n").as_bytes());
+        }
+        let rows = screen_rows(&g);
+        let row = rows
+            .iter()
+            .position(|r| r == "row6")
+            .expect("row6 must be on screen");
+        g.selection_start(row, 0);
+        g.selection_extend(row, 3);
+        assert_eq!(g.selection_text(), "row6");
+
+        g.feed(b"row8\r\n");
+        assert_eq!(g.selection_text(), "row6");
+        assert_eq!(
+            g.selection_cells(),
+            vec![(row - 1, 0, 3)],
+            "output at the bottom scrolls the selection up with the text"
+        );
+    }
+
+    #[test]
+    fn selection_copies_rows_scrolled_out_of_the_viewport() {
+        let mut g = TermGrid::new(5, 20);
+        for i in 0..12 {
+            g.feed(format!("keep{i}\r\n").as_bytes());
+        }
+        let rows = screen_rows(&g);
+        let row = rows
+            .iter()
+            .position(|r| r == "keep9")
+            .expect("keep9 must be on screen");
+        g.selection_start(row, 0);
+        g.selection_extend(row, 4);
+        g.scroll_up(rows.len());
+        assert!(
+            g.selection_cells().is_empty(),
+            "the selected row is out of view: {:?}",
+            g.selection_cells()
+        );
+        assert_eq!(
+            g.selection_text(),
+            "keep9",
+            "copy reads grid rows, not just the viewport"
+        );
+    }
+
+    #[test]
+    fn drag_anchor_survives_output_rotating_under_it() {
+        let mut g = TermGrid::new(3, 20);
+        g.feed(b"alpha\r\nbeta\r\n");
+        g.selection_start(0, 0);
+        // The linefeed scrolls "alpha" into history while the button is held.
+        g.feed(b"gamma\r\n");
+        assert_eq!(screen_rows(&g)[0], "beta");
+        g.selection_extend(1, 2);
+        assert!(
+            g.selection_text().starts_with("alpha"),
+            "the drag anchor must stay on its text: {:?}",
+            g.selection_text()
+        );
     }
 
     #[test]

@@ -50,6 +50,12 @@ func test_unstarted_grid_functions_are_safe():
 	assert_eq(_t.get_cols(), 0, "unstarted grid has 0 cols")
 	_t.scroll_reset()
 	_t.resize_grid(30, 100)
+	# Selection on a pane with no grid: no-ops, and nothing to report.
+	_t.selection_start(0, 0)
+	_t.selection_extend(1, 1)
+	assert_eq(str(_t.get_selection_text()), "", "no grid means nothing is selected")
+	assert_eq(_t.get_selection_cells().size(), 0, "no grid means nothing to highlight")
+	_t.selection_clear()
 	pass # no crash is the assertion
 
 func test_markdown_renderer_formats_and_sanitizes():

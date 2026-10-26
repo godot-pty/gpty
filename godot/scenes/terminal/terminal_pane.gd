@@ -94,8 +94,11 @@ var _cursor_blink_timer: float = 0.0
 var _cursor_visible: bool = true
 var _last_title: String = ""
 var _selecting: bool = false
-var _sel_start: Vector2i = Vector2i(-1, -1)
-var _sel_end: Vector2i = Vector2i(-1, -1)
+## Selected cells for drawing, as packed (row, first column, last column)
+## triples in viewport coordinates. The selection itself lives in the grid —
+## alacritty rotates it with the text — so this is a projection of it for the
+## current scroll offset, refreshed by `_refresh_selection`.
+var _sel_cells: PackedInt32Array = PackedInt32Array()
 var _last_grid_gen: int = -1
 var _fetch_ms: int = 0
 var _draw_ms: int = 0
@@ -524,6 +527,9 @@ func _process(delta):
 					maxf(MAX_SYNC_INTERVAL - _sync_interval, 0.0))
 			_cursor_visible = true
 			_cursor_blink_timer = 0.0
+			# The selection is grid-space: a scroll or new output moves its
+			# viewport rows without changing the selection itself.
+			_refresh_selection()
 			# Repaint only when the grid actually changed. Every other
 			# visual trigger queues its own redraw (cursor blink, selection,
 			# search, settings, metric changes), and scroll/resize/palette
@@ -680,7 +686,7 @@ func _draw():
 			HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, scrollback_indicator_color)
 
 	# Selection
-	if _sel_start.x >= 0 and _sel_end.x >= 0:
+	if not _sel_cells.is_empty():
 		_draw_selection(off)
 
 	# Search highlights
@@ -795,38 +801,21 @@ func _draw_cursor(off: Vector2, baseline: float):
 				draw_string(_font, Vector2(cx, cy + baseline), cursor_ch, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.BLACK)
 
 func _draw_selection(off: Vector2):
-	var p0 = _sel_start; var p1 = _sel_end
-	if p1.y < p0.y or (p1.y == p0.y and p1.x < p0.x):
-		p0 = _sel_end; p1 = _sel_start
-	var sr0 = p0.y; var sr1 = p1.y
-	for r in range(sr0, sr1 + 1):
-		var gcols: int = _cell_cache["cols"]; var grows: int = _cell_cache["rows"]
-		if r < 0 or r >= grows: continue
-		var cb = p0.x if r == sr0 else 0
-		var ce = (p1.x if r == sr1 else gcols - 1) + 1
-		for c in range(cb, ce):
-			if c >= 0 and c < gcols:
-				draw_rect(Rect2(off.x + c * _cell_w, off.y + r * _cell_h, _cell_w, _cell_h), selection_color)
+	for i in range(0, _sel_cells.size(), 3):
+		var row: int = _sel_cells[i]
+		var c0: int = _sel_cells[i + 1]
+		var c1: int = _sel_cells[i + 2]
+		draw_rect(Rect2(
+			off.x + c0 * _cell_w, off.y + row * _cell_h,
+			(c1 - c0 + 1) * _cell_w, _cell_h), selection_color)
 
 
+## Selected text, read from the grid rows: text scrolled out of the viewport
+## is still part of the copy.
 func _get_selected_text() -> String:
-	if _sel_start.x < 0 or _sel_end.x < 0 or _cell_cache.is_empty(): return ""
-	var p0 = _sel_start; var p1 = _sel_end
-	if p1.y < p0.y or (p1.y == p0.y and p1.x < p0.x):
-		p0 = _sel_end; p1 = _sel_start
-	var sr0 = p0.y; var sr1 = p1.y
-	var lines: Array[String] = []
-	for r in range(sr0, sr1 + 1):
-		var gcols: int = _cell_cache["cols"]; var grows: int = _cell_cache["rows"]
-		if r < 0 or r >= grows: continue
-		var chars: Array = _cell_cache["chars"]
-		var cb = maxi(0, p0.x if r == sr0 else 0)
-		var ce = mini(gcols - 1, p1.x if r == sr1 else gcols - 1)
-		var line = ""
-		for c in range(cb, ce + 1):
-			line += chars[r][c]
-		lines.append(line.rstrip(" "))
-	return "\n".join(lines)
+	if _terminal == null:
+		return ""
+	return _terminal.get_selection_text()
 
 func _gui_input(event):
 	if event is InputEventKey and ShortcutManager.is_shortcut(event) and not _is_copy_paste(event):
@@ -849,7 +838,7 @@ func _handle_mouse(event: InputEvent):
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
 				_take_focus(); _selecting = true
-				_sel_start = _mouse_to_cell(event.position); _sel_end = _sel_start; queue_redraw()
+				_select_at(_mouse_to_cell(event.position))
 			else: _selecting = false; queue_redraw()
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			_note_view_input()
@@ -858,7 +847,7 @@ func _handle_mouse(event: InputEvent):
 			_note_view_input()
 			_terminal.scroll_down(scroll_lines)
 	if event is InputEventMouseMotion and _selecting:
-		_sel_end = _mouse_to_cell(event.position); queue_redraw()
+		_extend_selection_to(_mouse_to_cell(event.position))
 
 ## Forward a mouse event to the child process. Returns true when the event
 ## went to the app — the pane then leaves selection and scrollback alone.
@@ -941,9 +930,51 @@ func _get_clipboard_text() -> String:
 	return DisplayServer.clipboard_get()
 
 func _clear_selection():
-	_sel_start = Vector2i(-1, -1)
-	_sel_end = Vector2i(-1, -1)
+	if _terminal != null:
+		_terminal.selection_clear()
+	_sel_cells = PackedInt32Array()
 	queue_redraw()
+
+## Start a selection at a viewport cell. A drag past the grid edge clamps to
+## the nearest cell, and a pane with no grid yet ignores the press.
+func _select_at(cell: Vector2i):
+	var c := _clamp_to_grid(cell)
+	if c.x < 0:
+		return
+	_terminal.selection_start(c.y, c.x)
+	_refresh_selection()
+	queue_redraw()
+
+## Extend the live selection to a viewport cell.
+func _extend_selection_to(cell: Vector2i):
+	var c := _clamp_to_grid(cell)
+	if c.x < 0:
+		return
+	_terminal.selection_extend(c.y, c.x)
+	_refresh_selection()
+	queue_redraw()
+
+## Mouse coordinates outside the grid clamp to the nearest cell; a pane with
+## no grid reports (-1, -1).
+func _clamp_to_grid(cell: Vector2i) -> Vector2i:
+	if cell.x < 0 or _terminal == null or _cell_cache.is_empty():
+		return Vector2i(-1, -1)
+	return Vector2i(
+		clampi(cell.x, 0, int(_cell_cache["cols"]) - 1),
+		clampi(cell.y, 0, int(_cell_cache["rows"]) - 1))
+
+## Refresh the highlight's viewport cells from the grid selection. Scrolling
+## and new output change these rows without touching the selection itself.
+func _refresh_selection():
+	if _terminal == null:
+		_sel_cells = PackedInt32Array()
+		return
+	_sel_cells = _terminal.get_selection_cells()
+
+## Return the viewport to live output. Split out so tests can observe when
+## input asks for it: an unstarted grid makes the FFI call itself a no-op.
+func _snap_to_bottom():
+	_terminal.scroll_reset()
 
 func _send_to_term(text: String):
 	_terminal.send_text(text)
@@ -990,18 +1021,23 @@ func _handle_keyboard(event: InputEventKey):
 		_terminal.scroll_down(rows); accept_event(); return
 	if event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
 		_clear_selection()
-		_send_line_to_term(""); _terminal.scroll_reset(); accept_event(); return
-	_terminal.scroll_reset()
+		_send_line_to_term(""); _snap_to_bottom(); accept_event(); return
+	# Only input that reaches the child returns the view to live output: that
+	# input is about to echo at the bottom. A bare modifier press (Ctrl or
+	# Shift on the way to Shift+Ctrl+C) sends nothing, so a scrolled-back
+	# view — and the selection anchored to what it shows — must stay put.
 	# Try Rust keymap first (arrows, F-keys, Home, End, etc.)
 	var bytes = _terminal.key_to_bytes(event.keycode, event.shift_pressed, event.alt_pressed, event.ctrl_pressed, event.meta_pressed)
 	if bytes.size() > 0:
 		_clear_selection()
+		_snap_to_bottom()
 		_send_to_term(bytes.get_string_from_ascii())
 		accept_event(); return
 	# Fall back to unicode + Ctrl+letter path
 	var tx = _key_to_text(event)
 	if tx != "":
 		_clear_selection()
+		_snap_to_bottom()
 		if event.alt_pressed and not event.ctrl_pressed:
 			tx = char(0x1b) + tx
 		_send_to_term(tx)

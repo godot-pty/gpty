@@ -183,6 +183,18 @@ and compiles no network protocol.
 | `search_grid(pattern: String)` | `Dictionary` | Search scrollback for regex pattern |
 | `key_to_bytes(keycode, shift, alt, ctrl, meta)` | `PackedByteArray` | Convert key event to terminal byte sequence |
 
+#### Selection
+
+The selection is held by the grid (`alacritty_terminal::Term::selection`), not by the viewport: scrolling moves the highlight with its text, output rotates it with the grid, and the text read back for a copy includes rows scrolled out of view.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `selection_start(row: int, col: int)` | void | Begin a selection at a viewport cell (0-based row) |
+| `selection_extend(row: int, col: int)` | void | Extend the live selection to a viewport cell |
+| `selection_clear()` | void | Drop the selection |
+| `get_selection_text()` | `String` | Selected text from grid rows (scrollback included), `""` when none |
+| `get_selection_cells()` | `PackedInt32Array` | `(row, first column, last column)` triples in viewport coordinates for drawing |
+
 #### Concept engine
 
 | Method | Returns | Description |
