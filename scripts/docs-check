@@ -150,6 +150,38 @@ for p in sorted(os.listdir(os.path.join(ROOT, rd))):
             bad(where, f'title duplicates {seen[title]}: {title[:60]}')
         seen[title] = where
 
+# ── site paths ───────────────────────────────────────────────────────────
+# The docs site is served from the domain root (docs/hugo.yaml baseURL), so a
+# leftover `/gpty/` prefix is invisible in the repo and fatal in production:
+# every stylesheet and script 404s and the page renders as unstyled text on
+# white. The github.io host is stale for the same reason once a custom domain
+# is set. Both are source-level mistakes (the moving to gpty.dev kept two
+# hardcoded card links and the old baseURL), so this reads the sources rather
+# than the built site - the build is not committed and would hide them anyway.
+SITE_TEXT_SUFFIXES = ('.md', '.gd', '.yaml', '.yml', '.json', '.sh', '.toml', '.cfg', '.html')
+STALE_PREFIX = re.compile(r'(?<![\w-])/gpty/')
+STALE_HOST = re.compile(r'godot-pty\.github\.io')
+for dirpath, dirnames, filenames in os.walk(ROOT):
+    rel_dir = rel(dirpath) + '/'
+    dirnames[:] = [d for d in dirnames
+                   if not (rel_dir + d + '/').startswith(SKIP_PREFIXES)
+                   and not (rel_dir + d + '/').startswith(('dist/', 'godot/bin/', 'godot/.godot/'))]
+    for name in filenames:
+        if not name.endswith(SITE_TEXT_SUFFIXES):
+            continue
+        path = rel(os.path.join(dirpath, name))
+        if path.startswith(SKIP_PREFIXES):
+            continue
+        try:
+            text = read(path)
+        except (OSError, UnicodeDecodeError):
+            continue
+        for n, line in enumerate(text.split('\n'), 1):
+            if STALE_HOST.search(line):
+                bad(f'{path}:{n}', 'names the old godot-pty.github.io host (the site is gpty.dev)')
+            if STALE_PREFIX.search(line):
+                bad(f'{path}:{n}', 'absolute site path starts with /gpty/ (the site is served from the root)')
+
 # ── README ───────────────────────────────────────────────────────────────
 if re.search(r'gpty-v\d+\.\d+\.\d+-', read('README.md')):
     bad('README.md', 'download file names hard-code a release version (use gpty-v<version>-...)')

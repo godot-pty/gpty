@@ -1,4 +1,4 @@
-[gPTY](https://godot-pty.github.io/gpty/) - a desktop workspace built on Rust and Godot. It provides a tiling grid for panes (terminals, code viewers, file trees, wikis, media, and more), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI. Every pane can be driven from a shell, a script, or an agent over one public API.
+[gPTY](https://gpty.dev/) - a desktop workspace built on Rust and Godot. It provides a tiling grid for panes (terminals, code viewers, file trees, wikis, media, and more), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI. Every pane can be driven from a shell, a script, or an agent over one public API.
 
 ## Overview
 
@@ -32,12 +32,12 @@
 
 **Extensible, with limits**
 
-- **Plugins** - manifest-based, reviewed in the GUI before install, with a public [registry](https://godot-pty.github.io/gpty/plugins/).
+- **Plugins** - manifest-based, reviewed in the GUI before install, with a public [registry](https://gpty.dev/plugins/).
 - **A written threat model** - see [SECURITY.md](SECURITY.md). Releases ship `SHA256SUMS` and build-provenance attestations; the control socket is owner-only.
 
 ### Status
 
-gPTY is a side project in active development. A vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using LLMs under human review; and as such, the underlying code may contain unidiomatic patterns and/or bugs. Roadmap & documentation: https://godot-pty.github.io/gpty/
+gPTY is a side project in active development. A vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using LLMs under human review; and as such, the underlying code may contain unidiomatic patterns and/or bugs. Roadmap & documentation: https://gpty.dev/
 
 | Component | Choice | Rationale |
 |----------|--------|-----------|

@@ -151,5 +151,5 @@ checked call sites). And the status bar gained a **clock** beside the version.
 
 - Download the standalone binary from [GitHub Releases](https://github.com/godot-pty/gpty/releases/tag/v0.5.5).
 - Full changelog: [Changelog](https://github.com/godot-pty/gpty/blob/main/docs/content/docs/changelog/v0.5.5.md).
-- Plugin registry: [godot-pty.github.io/gpty/plugins](https://godot-pty.github.io/gpty/plugins/).
+- Plugin registry: [gpty.dev/plugins](https://gpty.dev/plugins/).
 - Source: [github.com/godot-pty/gpty](https://github.com/godot-pty/gpty).
