@@ -268,7 +268,7 @@ const SECTION_MAX_VISIBLE_ROWS = 5
 ## The profiles section's catalog hint: with no installed plugin profile the
 ## only shipped layout is the built-in, and the tool layouts live in plugin
 ## repos listed on this page.
-const PLUGINS_CATALOG_URL := "https://godot-pty.github.io/gpty/plugins/"
+const PLUGINS_CATALOG_URL := "https://gpty.dev/plugins/"
 const CATALOG_HINT_TEXT := "More layouts \u2192"
 
 func _add_workspace_section(parent: VBoxContainer):
