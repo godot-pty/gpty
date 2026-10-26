@@ -22,8 +22,13 @@ use clap::{CommandFactory, Parser};
 use gpty_ipc::client::IpcClient;
 use gpty_ipc::transport;
 
-/// Bundled agent skill, shipped at `skills/gpty/SKILL.md` and printed by `gpty --skill`.
-const SKILL: &str = include_str!("../../../skills/gpty/SKILL.md");
+/// Bundled agent skill, shipped in the crate at `skills/gpty/SKILL.md` and
+/// printed by `gpty --skill`. It lives inside the crate because `cargo
+/// package` copies only the package directory: an `include_str!` that reached
+/// above `crates/gpty-cli` compiled in the workspace and then failed the
+/// packaged tarball's verify build, which is the last step before `cargo
+/// publish` uploads anything.
+const SKILL: &str = include_str!("../skills/gpty/SKILL.md");
 
 #[derive(Parser)]
 #[command(

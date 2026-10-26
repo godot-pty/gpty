@@ -71,6 +71,7 @@ gpty/
 │   │   └── tests/             # Fixtures (generated), decode/seek/path tests, binding rules
 │   ├── gpty-cli/               # CLI workspace control over JSON-RPC IPC
 │   │   ├── Cargo.toml
+│   │   ├── skills/gpty/SKILL.md # Bundled agent skill, printed by `gpty --skill`
 │   │   └── src/
 │   │       ├── main.rs         # clap CLI entry point
 │   │       └── commands/       # Subcommand handlers
@@ -113,8 +114,6 @@ gpty/
 │           └── media_api.rs    # GptyMedia: JSON + packed arrays over gpty-media
 ├── extensions/
 │   └── gpty-omp-events/        # Explicit OMP plugin; dormant unless GPTY_EVENT_* is set
-├── skills/
-│   └── gpty/SKILL.md           # Bundled agent skill, printed by `gpty --skill`
 └── godot/                      # Godot 4.7 project
     ├── project.godot
     ├── gpty.gdextension
