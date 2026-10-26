@@ -4,6 +4,10 @@ version = "0.7.0"
 edition = "2024"
 description = "Core library for gpty: PTY management, terminal parsing, and concept-based orchestration"
 license = "GPL-3.0-or-later"
+repository = "https://github.com/godot-pty/gpty"
+homepage = "https://gpty.dev"
+keywords = ["terminal", "pty", "terminal-emulator", "grid", "capture"]
+categories = ["command-line-utilities", "parsing"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
