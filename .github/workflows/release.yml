@@ -290,21 +290,20 @@ jobs:
             "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" \
             "gdext-artifacts/gpty-macos-ffmpeg"
 
-      - name: Copy GDExtension artifacts for release
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/dist/gdextension"
-          find gdext-artifacts -type f \( -name '*.so' -o -name '*.dylib' -o -name '*.dll' \) -exec cp {} "$GITHUB_WORKSPACE/dist/gdextension/" \;
-
-      # Entry names match the published asset names (flat basenames), so a
-      # downloaded file can be checked against its own line. Fails loudly when
-      # an expected artifact is missing rather than publishing a short list.
+      # Three archives and one checksum file, nothing else. The per-library
+      # assets (the GDExtension and its pinned FFmpeg) are already inside each
+      # archive; publishing them a second time made a 36-file release page that
+      # nobody could choose from, and inflated the download counts that are the
+      # project's only install signal. Entry names match the published asset
+      # names (flat basenames), so a downloaded file can be checked against its
+      # own line, and a missing artifact fails the job instead of shipping a
+      # short list.
       - name: Generate SHA256 checksums
         run: |
           cd "$GITHUB_WORKSPACE/dist"
           sha256sum "gpty-${VERSION}-linux-x86_64.tar.gz" \
                     "gpty-${VERSION}-windows-x86_64.zip" \
                     "gpty-${VERSION}-macos.zip" > SHA256SUMS
-          (cd gdextension && sha256sum *) >> SHA256SUMS
           cat SHA256SUMS
 
       # Bind each asset to the workflow, commit and runner that produced it:
@@ -317,7 +316,6 @@ jobs:
             dist/gpty-${{ github.ref_name }}-linux-x86_64.tar.gz
             dist/gpty-${{ github.ref_name }}-windows-x86_64.zip
             dist/gpty-${{ github.ref_name }}-macos.zip
-            dist/gdextension/*
             dist/SHA256SUMS
 
       - name: Create GitHub Release
@@ -327,7 +325,6 @@ jobs:
             dist/gpty-${{ github.ref_name }}-linux-x86_64.tar.gz
             dist/gpty-${{ github.ref_name }}-windows-x86_64.zip
             dist/gpty-${{ github.ref_name }}-macos.zip
-            dist/gdextension/*
             dist/SHA256SUMS
           # A release that is silently missing an asset is worse than a failed job.
           fail_on_unmatched_files: true
