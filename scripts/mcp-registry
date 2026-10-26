@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""Check the MCP registry descriptor that `mcp-publisher publish` sends.
+
+`server.json` is what the official registry stores, so it is a claim about the
+package it names: the package must exist, publish under a namespace the project
+controls, and start the server the way the descriptor says. The registry checks
+those claims itself at publish time; this catches the ones that can be checked
+offline, so a typo fails CI instead of the release.
+
+Usage:
+  ./scripts/mcp-registry check     validate server.json (CI gate)
+
+Publishing is deliberately not here: it needs `mcp-publisher login` and a
+published crate (see the v0.8.0 roadmap row).
+"""
+import json
+import os
+import re
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DESCRIPTOR = os.path.join(ROOT, "server.json")
+CLI_MANIFEST = os.path.join(ROOT, "crates", "gpty-cli", "Cargo.toml")
+CLI_README = os.path.join(ROOT, "crates", "gpty-cli", "README.md")
+REPO_URL = "https://github.com/godot-pty/gpty"
+# The types the official registry accepts today. A new one is a spec change, so
+# a closed set here is the point: it fails loudly rather than publishing junk.
+REGISTRY_TYPES = {"npm", "pypi", "nuget", "oci", "mcpb", "cargo"}
+NAME = re.compile(r"^io\.github\.[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9._-]*$")
+SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+MAX_DESCRIPTION = 100
+
+problems = []
+
+
+def bad(message):
+    problems.append(message)
+
+
+def read_json(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError:
+        bad(f"{os.path.relpath(path, ROOT)} is missing")
+    except json.JSONDecodeError as error:
+        bad(f"{os.path.relpath(path, ROOT)} is not JSON: {error}")
+    return None
+
+
+def crate_version():
+    with open(CLI_MANIFEST, encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("version ="):
+                return line.split("=", 1)[1].strip().strip('"')
+    return ""
+
+
+def check_header(server):
+    schema = server.get("$schema", "")
+    if not schema.startswith("https://static.modelcontextprotocol.io/schemas/"):
+        bad("$schema is not a modelcontextprotocol.io schema URL")
+    name = server.get("name", "")
+    if not NAME.match(name):
+        bad(f"name {name!r} is not an io.github.<owner>/<server> identifier")
+    description = server.get("description", "")
+    if not description:
+        bad("description is required")
+    elif len(description) > MAX_DESCRIPTION:
+        bad(f"description is {len(description)} characters (limit {MAX_DESCRIPTION})")
+    elif "\n" in description:
+        bad("description must be one line")
+    version = server.get("version", "")
+    if not SEMVER.match(version):
+        bad(f"version {version!r} is not semver")
+    elif version != crate_version():
+        bad(f"version {version} does not match crates/gpty-cli ({crate_version()})")
+    repository = server.get("repository") or {}
+    if repository.get("url") != REPO_URL or repository.get("source") != "github":
+        bad(f"repository must be {REPO_URL} with source github")
+    return name, version
+
+
+def check_packages(server, name, version):
+    packages = server.get("packages")
+    if not isinstance(packages, list) or not packages:
+        bad("packages must be a non-empty list")
+        return
+    for index, package in enumerate(packages):
+        where = f"packages[{index}]"
+        kind = package.get("registryType")
+        if kind not in REGISTRY_TYPES:
+            bad(f"{where}.registryType {kind!r} is not one of {sorted(REGISTRY_TYPES)}")
+        if not package.get("identifier"):
+            bad(f"{where}.identifier is required")
+        if package.get("version") != version:
+            bad(f"{where}.version must equal the server version {version}")
+        if (package.get("transport") or {}).get("type") != "stdio":
+            bad(f"{where}.transport.type must be stdio")
+        if kind == "cargo":
+            check_cargo(package, where, name)
+
+
+def check_cargo(package, where, name):
+    if package.get("identifier") != "gpty":
+        bad(f"{where}.identifier must be the crate `gpty`")
+    # `cargo install gpty` puts one binary on PATH, and the server is the `mcp`
+    # subcommand of it. Without this the client would start `gpty` and get a
+    # usage error instead of an MCP handshake.
+    arguments = package.get("packageArguments") or []
+    if {"type": "positional", "value": "mcp"} not in arguments:
+        bad(f"{where}.packageArguments must start the `mcp` subcommand")
+    # crates.io strips HTML comments, so the ownership token has to be visible
+    # text in the crate README for the registry's verification to find it.
+    with open(CLI_README, encoding="utf-8") as handle:
+        if f"mcp-name: {name}" not in handle.read():
+            bad(f"crates/gpty-cli/README.md lacks the visible `mcp-name: {name}` token")
+
+
+def check_placeholders(server):
+    text = json.dumps(server)
+    if "__" in text:
+        bad("server.json still contains a __PLACEHOLDER__ token")
+
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] != "check":
+        print("usage: mcp-registry check", file=sys.stderr)
+        return 2
+    server = read_json(DESCRIPTOR)
+    if server is not None:
+        if not isinstance(server, dict):
+            bad("server.json must be a JSON object")
+        else:
+            check_placeholders(server)
+            name, version = check_header(server)
+            check_packages(server, name, version)
+    if problems:
+        for problem in problems:
+            print(f"mcp-registry: {problem}", file=sys.stderr)
+        return 1
+    print(f"mcp-registry: {server['name']} {server['version']} -> {server['packages'][0]['identifier']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

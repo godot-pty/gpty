@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.godot-pty/gpty",
+  "title": "gPTY",
+  "description": "Spawn panes, inject input and read output in a tiling terminal workspace",
+  "version": "0.7.0",
+  "websiteUrl": "https://gpty.dev/",
+  "repository": {
+    "url": "https://github.com/godot-pty/gpty",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "cargo",
+      "identifier": "gpty",
+      "version": "0.7.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}

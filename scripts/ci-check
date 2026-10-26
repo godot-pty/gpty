@@ -127,6 +127,19 @@ else
     check_failed
 fi
 
+# ── MCP registry descriptor ────────────────────────────────────────────
+# server.json is the claim the registry publishes: the package it names, the
+# version it pins and the arguments that start the server. A typo that the
+# registry only rejects at release time fails here instead.
+header "mcp-registry"
+if MCP_OUT="$(python3 scripts/mcp-registry check 2>&1)"; then
+    pass "mcp-registry"
+else
+    fail "mcp-registry"
+    detail "$MCP_OUT"
+    check_failed
+fi
+
 # ── Knowledge bundle: generated from the wiki vault ────────────────────
 # The vault is the source; godot/knowledge.json is what release builds read.
 # A stale bundle ships old notes, so it fails here rather than at export.

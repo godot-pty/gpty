@@ -151,3 +151,14 @@ gpty version
 | `toml` | 0.8 | `gpty-plugin.toml` parsing |
 | `dirs` | 6 | Platform directories (GUI binary discovery) |
 | `tokio` | 1 | Async runtime |
+
+## MCP registry
+
+The repository's `server.json` declares this crate as the
+`io.github.godot-pty/gpty` server in the
+[official MCP registry](https://registry.modelcontextprotocol.io). Before it
+publishes, the registry verifies that the crate belongs to that entry by
+looking for this exact line in the crate README - crates.io strips HTML
+comments, so the token is plain text rather than a comment:
+
+MCP Registry name: `mcp-name: io.github.godot-pty/gpty`
