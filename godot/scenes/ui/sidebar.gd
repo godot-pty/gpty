@@ -12,6 +12,7 @@ signal request_type_swap(body: Control, source_btn: Button)
 signal request_pane_settings(body: Control)
 signal toggled
 signal request_profile(name: String)
+signal request_profile_in_new_workspace(name: String)
 signal request_profile_rename(index: int, name: String)
 signal request_save_profile
 signal request_delete_profile(index: int)
@@ -80,23 +81,23 @@ func update_pane_list(panes: Array, active_body: Control = null):
 		btn.pressed.connect(func(): request_focus.emit(body))
 		row.add_child(btn)
 
-		var min_btn = _make_pane_action_button(Icons.RESTORE if not body.visible else Icons.MINIMIZE, "Minimize / Restore")
+		var min_btn = _make_row_action_button(Icons.RESTORE if not body.visible else Icons.MINIMIZE, "Minimize / Restore")
 		min_btn.pressed.connect(func(): request_minimize.emit(body))
 		row.add_child(min_btn)
 
-		var pos_btn = _make_pane_action_button(Icons.SWAP, "Swap position")
+		var pos_btn = _make_row_action_button(Icons.SWAP, "Swap position")
 		pos_btn.pressed.connect(func(): request_position_swap.emit(body, pos_btn))
 		row.add_child(pos_btn)
 
-		var type_btn = _make_pane_action_button(Icons.RESET, "Change pane type")
+		var type_btn = _make_row_action_button(Icons.RESET, "Change pane type")
 		type_btn.pressed.connect(func(): request_type_swap.emit(body, type_btn))
 		row.add_child(type_btn)
 
-		var set_btn = _make_pane_action_button(Icons.SETTINGS, "Pane settings")
+		var set_btn = _make_row_action_button(Icons.SETTINGS, "Pane settings")
 		set_btn.pressed.connect(func(): request_pane_settings.emit(body))
 		row.add_child(set_btn)
 
-		var cls_btn = _make_pane_action_button(Icons.CLOSE, "Close pane")
+		var cls_btn = _make_row_action_button(Icons.CLOSE, "Close pane")
 		cls_btn.pressed.connect(func(): request_close.emit(body))
 		row.add_child(cls_btn)
 		_pane_list.add_child(row)
@@ -131,7 +132,9 @@ func _make_row_label_button(text: String) -> Button:
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return btn
 
-func _make_pane_action_button(icon: String, tooltip: String) -> Button:
+## A trailing glyph on a section row (pane and profile rows). Glyph-only
+## affordances are the sidebar's idiom, so the tooltip carries the meaning.
+func _make_row_action_button(icon: String, tooltip: String) -> Button:
 	var btn = Button.new()
 	btn.text = icon; btn.flat = true
 	btn.tooltip_text = tooltip
@@ -521,6 +524,18 @@ func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 			_apply_row_accent(btn, p_name == active_name)
 		)
 		row.add_child(btn)
+
+		# The row's other gesture: open this profile in a workspace of its own
+		# and leave the active one alone. A modifier click would cost no space,
+		# but nothing on screen would advertise it, and the two actions differ
+		# in whether they replace live panes - so the destructive-safe one is
+		# the plain click on the name, and this glyph is the visible second
+		# action (the workspace tab metaphor: a new tab from a template).
+		var new_ws_btn := _make_row_action_button(
+			Icons.NEW_WORKSPACE, "Open '%s' in a new workspace" % p_name)
+		new_ws_btn.name = "ProfileNewWorkspaceBtn"
+		new_ws_btn.pressed.connect(func(): request_profile_in_new_workspace.emit(p_name))
+		row.add_child(new_ws_btn)
 		if is_plugin:
 			# An installed plugin owns its profiles: they arrive and are
 			# replaced with the plugin, so there is nothing to rename or

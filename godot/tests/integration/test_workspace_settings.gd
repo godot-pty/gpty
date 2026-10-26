@@ -193,6 +193,87 @@ func test_profile_accent_follows_the_active_workspace():
 	# Wait out the deferred concept push timer so it doesn't resume after free.
 	await get_tree().create_timer(2.1).timeout
 
+## The sidebar's arrow opens a profile in its own workspace. Nothing in the
+## active workspace may move: its tiles, its directory and its own profile
+## association all stay, and the new tab carries the profile's tiles and name.
+func test_profile_opened_in_a_new_workspace_leaves_the_current_one_alone():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var first: Dictionary = ws._workspaces[0]
+	var tiles_before: int = (first.tm as TerminalManager).tiles.size()
+	assert_gt(tiles_before, 0, "the first workspace starts with a terminal")
+	assert_eq(str(first.get("profile", "")), "")
+
+	var profile := {"name": "Fresh", "tiles": [{
+		"col": 0, "row": 0, "cspan": 12, "rspan": 12,
+		"settings": {"type": "terminal", "shell": SettingsManager.default_shell_command(),
+			"rows": 24, "cols": 80},
+	}]}
+	ws._do_activate(profile, false, true)
+	await get_tree().process_frame
+
+	assert_eq(ws._workspaces.size(), 2, "a profile opened in a new workspace adds a tab")
+	assert_eq(ws._active, 1, "the new workspace becomes the active one")
+	assert_eq(str(ws._workspaces[1].name), "Fresh", "the tab is named after the profile")
+	assert_eq((ws._workspaces[1].tm as TerminalManager).tiles.size(), 1,
+		"the profile's tiles land in the new workspace")
+	assert_eq((first.tm as TerminalManager).tiles.size(), tiles_before,
+		"the current workspace's layout is untouched")
+	assert_eq(str(first.get("profile", "")), "",
+		"the current workspace keeps its own profile association")
+	assert_eq(ws._active_profile, "Fresh", "the new workspace carries the profile accent")
+	assert_false((first.grid as Control).visible)
+	assert_true((ws._workspaces[1].grid as Control).visible)
+
+	# A second workspace from the same profile gets a distinct name, so the
+	# two tabs never read the same in the sidebar.
+	ws._do_activate(profile, false, true)
+	await get_tree().process_frame
+	assert_eq(str(ws._workspaces[2].name), "Fresh 2")
+
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
+## At the cap the action is refused before anything is created or replaced: a
+## ninth tab cannot exist, and the profile's tiles must not fall through into
+## the active workspace as a consolation layout.
+func test_profile_opened_at_the_workspace_cap_is_refused():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	while ws._workspaces.size() < WorkspaceScript.MAX_WORKSPACES:
+		ws._add_workspace()
+	await get_tree().process_frame
+	var cap: int = WorkspaceScript.MAX_WORKSPACES
+	assert_eq(ws._workspaces.size(), cap)
+	assert_eq(ws._active, cap - 1)
+
+	var tiles: Array[Dictionary] = [{
+		"col": 0, "row": 0, "cspan": 12, "rspan": 12,
+		"settings": {"type": "terminal", "shell": SettingsManager.default_shell_command(),
+			"rows": 24, "cols": 80},
+	}]
+	ProfileManager.add_profile("CapTest", tiles)
+	ws._open_profile_in_new_workspace("CapTest")
+	await get_tree().process_frame
+
+	assert_eq(ws._workspaces.size(), cap, "a ninth workspace must not be created")
+	assert_eq((ws._tm.tiles as Array).size(), 0,
+		"the refused profile must not be applied to the active workspace")
+	assert_eq(ws._active, cap - 1, "the active workspace must not change")
+
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
 func test_pane_run_executes_through_configured_shell():
 	var ws = WorkspaceScript.new()
 	_ws = ws

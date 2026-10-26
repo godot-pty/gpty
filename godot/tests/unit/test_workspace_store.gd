@@ -92,3 +92,22 @@ func test_legacy_layout_import():
 func test_legacy_import_empty_when_no_file():
 	var legacy = WorkspaceStore.import_legacy_layout()
 	assert_eq(legacy, [])
+
+func test_unique_name_suffixes_keep_the_length_cap():
+	assert_eq(WorkspaceStore.unique_name("Main", {}), "Main",
+		"a free name is used as-is")
+	assert_eq(WorkspaceStore.unique_name("Main", {"Main": true}), "Main 2")
+	assert_eq(WorkspaceStore.unique_name("Main", {"Main": true, "Main 2": true}), "Main 3")
+
+	# The suffix is applied after the 32-character cap. Composing first and
+	# sanitizing second would cut the suffix off, hand back the same taken name
+	# and loop forever - measured as a hang candidate while writing this.
+	var base := "x".repeat(WorkspaceStore.MAX_NAME_LENGTH)
+	var second := WorkspaceStore.unique_name(base, {base: true})
+	assert_eq(second.length(), WorkspaceStore.MAX_NAME_LENGTH,
+		"the suffixed name must still fit the store's cap")
+	assert_true(second.ends_with(" 2"), "the suffix must survive the cap, not be sliced off")
+	assert_ne(second, base)
+
+	# The suffix is computed from the sanitized name, not the raw one.
+	assert_eq(WorkspaceStore.unique_name("  Bad\tName ", {"BadName": true}), "BadName 2")

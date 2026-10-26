@@ -122,6 +122,7 @@ godot/
 - [Settings] - open global settings panel
 - [Close All] - close every pane in this workspace; if a command is still running, it asks first
 - [Folder button on a workspace row] - choose that workspace's default directory; every terminal spawned there, including one activated from a profile, starts in it (`Use default` clears it)
+- [Profile row] - the name activates that layout in the current workspace (it asks before replacing panes); the arrow button opens it in a new workspace named after the profile and leaves the current one untouched
 
 Layout is auto-saved on close and auto-restored on startup via `user://layout.json`.
 

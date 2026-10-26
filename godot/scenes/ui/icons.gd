@@ -17,6 +17,7 @@ const EXPAND   = "\uE13A"  # caret-right
 const ADD      = "\uE3D4"  # plus
 const SETTINGS = "\uE272"  # gear-six
 const FOLDER   = "\uE24A"  # folder (a directory picker, not a settings surface)
+const NEW_WORKSPACE = "\uE5DE"  # arrow-square-out (open a profile in its own workspace)
 const RESET    = "\uE038"  # arrow-counter-clockwise (pane type swap)
 const SWAP     = "\uE0A0"  # arrows-left-right (position swap)
 const MAXIMIZE_WIN = "\uE0A2"  # arrows-out (expand/fullscreen)

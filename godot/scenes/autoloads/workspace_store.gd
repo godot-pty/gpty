@@ -74,6 +74,21 @@ func sanitize_name(raw: String) -> String:
 	return out
 
 
+## A workspace name no name in `taken` uses yet: `base` when free, else
+## " 2", " 3" … The suffix is applied *after* the length cap, because
+## sanitizing the composed string would slice a 32-character base's suffix off
+## and hand back a name that is taken again - the loop would never end.
+func unique_name(base: String, taken: Dictionary) -> String:
+	var clean := sanitize_name(base)
+	var candidate := clean
+	var n := 2
+	while taken.has(candidate):
+		var suffix := " %d" % n
+		candidate = sanitize_name(clean.left(MAX_NAME_LENGTH - suffix.length()).strip_edges() + suffix)
+		n += 1
+	return candidate
+
+
 ## A workspace directory is accepted only as an absolute, bounded string with
 ## no control bytes. It is not a spawn surface — the pane layer re-checks that
 ## it exists before handing it to the PTY — but a hand-editable store must not

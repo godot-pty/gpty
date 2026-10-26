@@ -9,6 +9,12 @@ const TITLEBAR_HEIGHT = WindowChrome.HEIGHT
 ## a bulk close of sixteen panes must still be readable in one dialog.
 const RUNNING_ASK_MAX_NAMES = 8
 
+## The workspace cap: the sidebar's new-workspace button, the profile's
+## "open in a new workspace" action and the store's clamped `active` index all
+## use it, so a ninth tab can never be created by one path and refused by
+## another.
+const MAX_WORKSPACES := 8
+
 
 var _sidebar: Sidebar
 var _sidebar_bg: ColorRect
@@ -759,8 +765,8 @@ func _switch_workspace(idx: int):
 func _add_workspace():
 	if _workspaces.is_empty():
 		return
-	if _workspaces.size() >= 8:
-		ToastManager.warn("Maximum 8 workspaces")
+	if _workspaces.size() >= MAX_WORKSPACES:
+		ToastManager.warn("Maximum %d workspaces" % MAX_WORKSPACES)
 		return
 	var ws_name = "Workspace %d" % _next_workspace_number()
 	# A new workspace starts where the current one points, the way a new
@@ -769,6 +775,24 @@ func _add_workspace():
 	_workspaces.append(ws)
 	# Blank slate: no auto-spawned terminal — the user decides what fills it.
 	_switch_workspace(_workspaces.size() - 1)
+
+## A blank workspace for `profile`, switched to so `_tm`, the grid and the
+## sidebar follow it. Named after the profile (a second one from the same
+## profile gets " 2", " 3" …) and pointing where the current workspace points,
+## the same way a new tab inherits its directory. Returns {} at the cap or when
+## there is no active workspace to inherit from.
+func _create_workspace_for_profile(profile: Dictionary) -> Dictionary:
+	if _workspaces.is_empty() or _workspaces.size() >= MAX_WORKSPACES:
+		return {}
+	var taken := {}
+	for ws in _workspaces:
+		taken[str(ws.name)] = true
+	var ws := _new_workspace_container(
+		WorkspaceStore.unique_name(str(profile.get("name", "Profile")), taken),
+		str(_active_workspace().get("cwd", "")))
+	_workspaces.append(ws)
+	_switch_workspace(_workspaces.size() - 1)
+	return ws
 
 func _close_workspace(idx: int):
 	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size():
@@ -1326,6 +1350,7 @@ func _wire_sidebar_signals():
 	_sidebar.request_pane_settings.connect(func(body: Control): _tm._open_pane_settings(body))
 	_sidebar.toggled.connect(func(): _on_sidebar_toggled())
 	_sidebar.request_profile.connect(_activate_profile)
+	_sidebar.request_profile_in_new_workspace.connect(_open_profile_in_new_workspace)
 	_sidebar.request_profile_rename.connect(_rename_profile)
 	_sidebar.request_window_mode.connect(_chrome.on_window_mode_selected)
 	_sidebar.request_search.connect(_open_active_search)
@@ -2056,10 +2081,7 @@ func _activate_profile(p_name: String):
 	# — with the consent memory applied: content the user already approved
 	# (a builtin at this app version, or a profile whose every untrusted
 	# spawn plan an approval covers) activates without re-asking.
-	var profile_tiles: Array[Dictionary] = []
-	for td in profile.get("tiles", []):
-		if td is Dictionary:
-			profile_tiles.append(td)
+	var profile_tiles := _profile_tiles(profile)
 
 	if _tiles_untrusted(profile_tiles):
 		if _profile_consented(profile):
@@ -2070,7 +2092,42 @@ func _activate_profile(p_name: String):
 
 	_do_profile_activate(profile)
 
-func _show_profile_trust_dialog(profile: Dictionary, tiles: Array):
+## The profile section's second gesture: open `p_name` in a workspace of its
+## own and leave the active workspace untouched. Because nothing live is
+## replaced, the "replace your layout?" confirmation is skipped — but the
+## Workspace Trust gate is not: the profile still chooses programs to spawn.
+## Refused at the workspace cap before consent, so the user is not asked to
+## approve a profile that then cannot open.
+func _open_profile_in_new_workspace(p_name: String):
+	var profile := ProfileManager.find_profile(p_name)
+	if profile.is_empty():
+		return
+	if _workspaces.size() >= MAX_WORKSPACES:
+		ToastManager.warn("Maximum %d workspaces" % MAX_WORKSPACES)
+		return
+	var profile_tiles := _profile_tiles(profile)
+	if _tiles_untrusted(profile_tiles):
+		if _profile_consented(profile):
+			_do_activate(profile, true, true)
+			return
+		_show_profile_trust_dialog(profile, profile_tiles, true)
+		return
+	_do_activate(profile, true, true)
+
+## A profile's tiles as a typed array. `tiles` is untyped JSON at every entry
+## point (the user file, a plugin record, the sidebar dictionary), so the
+## conversion lives in one place instead of in each activation path.
+func _profile_tiles(profile: Dictionary) -> Array[Dictionary]:
+	var tiles: Array[Dictionary] = []
+	for td in profile.get("tiles", []):
+		if td is Dictionary:
+			tiles.append(td)
+	return tiles
+
+## `open_in_new` is carried through the consent step: the user approves the
+## profile's programs once, and the approval must not silently redirect the
+## click into the current workspace (or the other way round).
+func _show_profile_trust_dialog(profile: Dictionary, tiles: Array, open_in_new := false):
 	var dialog = ConfirmationDialog.new()
 	dialog.title = "Workspace Trust"
 	var details_tiles: Array[Dictionary] = []
@@ -2083,7 +2140,7 @@ func _show_profile_trust_dialog(profile: Dictionary, tiles: Array):
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():
 		_remember_profile_consent(profile, details_tiles)
-		_do_activate(profile)
+		_do_activate(profile, true, open_in_new)
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)
@@ -2091,7 +2148,6 @@ func _show_profile_trust_dialog(profile: Dictionary, tiles: Array):
 	dialog.popup_centered()
 
 func _do_profile_activate(profile: Dictionary):
-	var tiles = profile.get("tiles", [])
 	# Confirm if workspace has existing panes
 	if _tm.tiles.size() > 0:
 		var dialog = ConfirmationDialog.new()
@@ -2109,7 +2165,19 @@ func _do_profile_activate(profile: Dictionary):
 	else:
 		_do_activate(profile)
 
-func _do_activate(profile: Dictionary, ask_running := true):
+## Activate `profile` where the caller chose: `open_in_new` creates a
+## workspace for it and switches there (so the reset and the restore run
+## against that tab), otherwise it replaces the active workspace's layout.
+## `ask_running` is false only for an IPC action, whose caller cannot answer a
+## dialog and was already refused for unsaved work; a new workspace has no live
+## panes, so that walk is skipped for the new-workspace branch.
+func _do_activate(profile: Dictionary, ask_running := true, open_in_new := false):
+	if open_in_new:
+		var fresh := _create_workspace_for_profile(profile)
+		if fresh.is_empty():
+			return
+		_activate_now(fresh, profile)
+		return
 	var ws := _active_workspace()
 	if ws.is_empty():
 		return
