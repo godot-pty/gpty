@@ -1,0 +1,101 @@
+name: MCP Registry
+
+# Publishes server.json to the official MCP registry when a release is published.
+#
+# Separate from release.yml on purpose. The release artifacts are the primary
+# artifact and must not be blocked by a registry outage, but a failed publish
+# has to stay visible: a green release with no registry entry is exactly the
+# silent failure this job exists to prevent.
+#
+# No secret is involved. Authentication is this workflow's OIDC identity, which
+# the registry maps to the `io.github.godot-pty` namespace - a crates.io token
+# or PAT here would turn "can push a v* tag" into "can publish in the project's
+# name" (see the v0.7.1 tag-ruleset row).
+on:
+  release:
+    types: [published]
+  # First publication, or a descriptor fix for a version whose release already
+  # ran. Publishes whatever server.json says on the selected ref.
+  workflow_dispatch:
+
+# Least privilege: reading the repository is all this job needs beyond the OIDC
+# token it declares for itself. Without a top-level block every job inherits the
+# repository default (read-write on repositories created before February 2023).
+permissions:
+  contents: read
+
+# Two runs publishing at once would race on the same server name; a queued run
+# is fine, a cancelled one is not (the registry may already have taken it).
+concurrency:
+  group: mcp-registry
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # A prerelease is not the version anyone should be pointed at.
+    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # `mcp-publisher login github-oidc`
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # The descriptor is the claim the registry stores, and the registry only
+      # checks the package at publish time. Fail here, with a message that says
+      # what to fix, instead of inside the publisher's error.
+      - name: Check the descriptor
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python3 scripts/mcp-registry check
+          VERSION=$(python3 -c 'import json; print(json.load(open("server.json"))["version"])')
+          if [ -n "${TAG}" ] && [ "v${VERSION}" != "${TAG}" ]; then
+            echo "server.json publishes ${VERSION}, but this release is ${TAG}" >&2
+            echo "bump server.json with the crates in the release commit (step 5 of the release skill)" >&2
+            exit 1
+          fi
+          # The registry verifies package existence at publish; ask crates.io
+          # first so a missing publish reads as one, not as a registry error.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "User-Agent: gpty-release-check (github.com/godot-pty/gpty)" \
+            "https://crates.io/api/v1/crates/gpty/${VERSION}")
+          if [ "${code}" != "200" ]; then
+            echo "gpty ${VERSION} is not on crates.io (HTTP ${code}); publish the crates first" >&2
+            exit 1
+          fi
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      # Pinned release, verified against the publisher's own Sigstore bundle
+      # before it runs: `releases/latest` is mutable and this binary holds the
+      # credential that publishes under the project's name.
+      - name: Download and verify mcp-publisher
+        run: |
+          set -euo pipefail
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          archive="mcp-publisher_${os}_${arch}.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          rm -f "$archive" "$archive.sigstore.json"
+          ./mcp-publisher --version
+
+      - name: Validate and publish
+        run: |
+          ./mcp-publisher validate
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish

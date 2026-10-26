@@ -23,7 +23,7 @@ from pathlib import Path
 
 import yaml
 
-WORKFLOWS = ("ci.yml", "release.yml", "docs.yml")
+WORKFLOWS = ("ci.yml", "docs.yml", "mcp-registry.yml", "release.yml")
 errors = []
 for name in WORKFLOWS:
     try:
