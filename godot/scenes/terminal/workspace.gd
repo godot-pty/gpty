@@ -67,6 +67,10 @@ func _ready():
 			PaneEnvStore.remove_env(previous_id)
 			if own_env != "":
 				PaneEnvStore.set_env(body.attachment_id, own_env)
+			# A companion follows its terminal by attachment id, so a rename
+			# that left it on the old id would silence it: events carry the
+			# new one and `receive_agent_event` drops them.
+			_retarget_companions(body, previous_id)
 		if settings.has("shell_env"):
 			var env_text: String = str(settings.get("shell_env", "")).strip_edges()
 			if env_text == "":
@@ -655,6 +659,31 @@ func _carry_pane_env(old_id: String, new_id: String):
 	if not PaneEnvStore.has_env(old_id) or PaneEnvStore.has_env(new_id):
 		return
 	PaneEnvStore.set_env(new_id, PaneEnvStore.env_for(old_id))
+
+## Re-point the companions that follow a pane renamed in Pane Settings.
+##
+## The follow link (`source_attachment_id`) is a display link, not an IPC id,
+## so it is rewritten inside the renamed pane's own workspace only: the same
+## profile can be live in another workspace under its own ids, and a rename
+## here must not steal that workspace's companion. Companions opt in by
+## implementing `retarget_source` - the pane decides whether a rename keeps its
+## session state, which `apply_settings` (a *different* source) resets.
+func _retarget_companions(body: Control, previous_id: String):
+	var new_id := str(body.attachment_id)
+	if previous_id == "" or new_id == "" or new_id == previous_id:
+		return
+	var ws := _workspace_for_body(body)
+	if ws.is_empty():
+		return
+	for t in ws.tm.tiles:
+		var other = ws.tm._find_body(t.wrapper)
+		if other == null or other == body:
+			continue
+		if not other.has_method("retarget_source"):
+			continue
+		if str(other.get("source_attachment_id")) != previous_id:
+			continue
+		other.retarget_source(new_id)
 
 ## Single choke point where a pane enters a workspace: adds the wrapper to
 ## the grid, wires activation tracking, and (for terminals) the dynamic

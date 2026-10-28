@@ -5,6 +5,11 @@ extends GutTest
 # re-pointed before either body exists — without that, the companion followed
 # the first workspace's terminal (it showed that stream, and once delivery is
 # scoped it would hear nothing at all).
+#
+# The same link is maintained when the user renames a terminal in Pane Settings
+# (`Workspace._retarget_companions`): the companion follows the new id inside
+# that terminal's own workspace and keeps the session it had bound, while
+# another workspace's companion — which points at its own logical id — keeps it.
 
 const WorkspaceScript = preload("res://scenes/terminal/workspace.gd")
 
@@ -160,5 +165,82 @@ func test_a_profile_activated_twice_keeps_its_companion_on_its_own_terminal():
 	assert_eq(reason_b._omp_session_id, "session-b",
 		"the local terminal's events reach the local companion")
 	assert_eq(reason_a._omp_session_id, "", "a foreign workspace's stream never does")
+
+	await get_tree().create_timer(2.1).timeout
+
+## The Pane Settings apply contract, without the widget hunt: gather a dict,
+## apply it to the target, then announce it with the id the pane had before the
+## apply. The workspace's `settings_applied` handler is what re-keys a rename.
+func _rename_via_pane_settings(ws: Control, workspace: int, body: Control, new_id: String):
+	var panel: PaneSettingsPanel = ws._workspaces[workspace].tm._pane_settings_panel
+	panel._target = body
+	panel._gather_func = func(): return {"attachment_id": new_id}
+	panel._apply_to_target()
+	panel.close()
+
+## Renaming a terminal in Pane Settings keeps its companion subscribed to it:
+## the link follows the new id, and the session the pane had already bound
+## stays (the terminal never restarted, so it is still the same OMP session).
+## The reported 2026-10-28 case: the companion held the old id and silently
+## dropped every event that carried the new one.
+func test_a_pane_settings_rename_moves_the_companion_but_not_its_session():
+	var ws := await _make_workspace()
+	ws._do_activate(_agent_profile(), false)
+	await get_tree().process_frame
+	var term = _body_with_id(ws, 0, "agent-terminal")
+	var reason = _body_with_id(ws, 0, "agent-reasoning")
+	assert_not_null(term, "the profile's terminal is restored")
+	assert_not_null(reason, "the profile's companion is restored")
+
+	var sid := str(term._terminal.get_terminal_session_id())
+	assert_ne(sid, "", "the PTY has a session id")
+	ws._route_agent_events([{
+		"terminal_session_id": sid,
+		"omp_session_id": "session-1",
+		"event": {"name": "session.bound"},
+	}])
+	assert_eq(reason._omp_session_id, "session-1", "bound before the rename")
+
+	_rename_via_pane_settings(ws, 0, term, "agent")
+
+	assert_eq(str(term.attachment_id), "agent", "the pane took the new id")
+	assert_eq(str(reason.source_attachment_id), "agent",
+		"the companion follows the renamed terminal")
+	assert_eq(reason._omp_session_id, "session-1",
+		"same terminal: the bound session survives the rename")
+	assert_eq(str(reason._get_layout_state().get("source_attachment_id", "")), "agent",
+		"the saved layout carries the new id, not the dead one")
+
+	ws._route_agent_events([{
+		"terminal_session_id": sid,
+		"event": {"name": "agent.started"},
+	}])
+	assert_false(reason._live_turn().is_empty(),
+		"events under the new id are accepted again")
+
+## The follow link is display-only and workspace-scoped: a companion in another
+## workspace keeps the id it names, even when it names the id this rename just
+## left behind. (An unscoped rewrite would steal it.)
+func test_a_rename_never_reaches_another_workspace_s_companion():
+	var ws := await _make_workspace()
+	ws._do_activate(_agent_profile(), false)
+	await get_tree().process_frame
+	var term_a = _body_with_id(ws, 0, "agent-terminal")
+	var reason_a = _body_with_id(ws, 0, "agent-reasoning")
+	assert_not_null(term_a)
+	assert_not_null(reason_a)
+
+	ws._add_workspace()
+	await get_tree().process_frame
+	var reason_b = ws._spawn_pane_into(ws._workspaces[1], "reasoning",
+		{"source_attachment_id": "agent-terminal"})
+	assert_not_null(reason_b, "W2 gets a hand-linked companion")
+	assert_eq(str(reason_b.source_attachment_id), "agent-terminal")
+
+	_rename_via_pane_settings(ws, 0, term_a, "agent")
+
+	assert_eq(str(reason_a.source_attachment_id), "agent", "W1's companion follows")
+	assert_eq(str(reason_b.source_attachment_id), "agent-terminal",
+		"W2's companion keeps its own logical id")
 
 	await get_tree().create_timer(2.1).timeout

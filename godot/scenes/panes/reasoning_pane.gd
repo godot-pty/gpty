@@ -311,6 +311,22 @@ func apply_settings(settings: Dictionary):
 	if is_inside_tree() and _omp_session_id == "" and _status:
 		_status.text = _idle_status()
 
+## Follow the terminal this pane watches when that terminal was renamed.
+##
+## The *same* terminal under a new id, so the OMP session and the turns shown
+## still belong to it and stay - unlike `apply_settings`, which treats a source
+## change as a different terminal and resets them. `Workspace._retarget_companions`
+## calls this for a rename in this pane's own workspace only.
+func retarget_source(new_id: String):
+	var id := PaneTypes.sanitize_attachment_id(new_id)
+	if id == "" or id == source_attachment_id:
+		return
+	source_attachment_id = id
+	# The status text names the source only while nothing is bound; a bound
+	# session's status is its own (Reasoning…/Done/session ended).
+	if _omp_session_id == "" and is_inside_tree() and _status:
+		_status.text = _idle_status()
+
 func _get_layout_state() -> Dictionary:
 	var state := super._get_layout_state()
 	state["source_attachment_id"] = source_attachment_id
