@@ -1099,10 +1099,18 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 		plans.append({"tile": st, "legacy_shell": td.get("shell", "")})
 	_resolve_tile_ids(plans)
 	var dropped_env: Array[String] = []
+	var dropped_settings: Array[String] = []
 	for plan in plans:
 		var st: Dictionary = plan["tile"]
 		var settings: Dictionary = st["settings"]
 		var type_name: String = st["type_name"]
+
+		# A file's settings went through the pane type's closed table; whatever
+		# it refused is named here once, so a typo or a crafted layout is
+		# visible instead of silently changing the pane.
+		for key in st.get("dropped", PackedStringArray()):
+			var label: String = str(settings.get("pane_name", type_name))
+			dropped_settings.append("%s: %s" % [label, PaneTypes._trust_text(str(key))])
 
 		# A file must not carry env. Legacy tiles may have one; it is dropped
 		# here — named in the notice, never adopted into the pane-env store,
@@ -1154,6 +1162,19 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 		ToastManager.warn(
 			"Saved pane environment was dropped%s: %s. Files cannot supply environment — set it again in Pane Settings → Environment."
 			% [tail, ", ".join(shown_ps)], 8.0)
+
+	if not dropped_settings.is_empty():
+		var shown_settings := dropped_settings.slice(0, 3)
+		var shown_ps := PackedStringArray()
+		for s in shown_settings:
+			shown_ps.append(s)
+		var more_settings := dropped_settings.size() - shown_settings.size()
+		var tail_settings := ""
+		if more_settings > 0:
+			tail_settings = " (+%d more)" % more_settings
+		ToastManager.warn(
+			"Unsupported pane setting%s ignored in the saved layout%s: %s. A layout may only set the settings a pane saves; change the rest in Pane Settings."
+			% ["" if dropped_settings.size() == 1 else "s", tail_settings, ", ".join(shown_ps)], 8.0)
 
 func _tiles_from(raw: Array) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []

@@ -150,15 +150,23 @@ static func sanitize_tile(td, grid_size: int = GRID) -> Dictionary:
 	var type_name = settings.get("type", "terminal")
 	if not (type_name is String) or not ALL.has(type_name):
 		return {}
-	# Stored grid sizes are untrusted: without a ceiling a crafted tile
-	# (`rows: 1000000`) allocates a grid of 10^12 cells at spawn. The Rust FFI
-	# clamps again on the way in — this keeps absurd values out of the pane
-	# object itself, where the settings dialog and save round-trip would
-	# otherwise show them.
-	if settings.has("rows"):
-		settings["rows"] = clamp_grid_int(settings["rows"], 1, PANE_MAX_ROWS)
-	if settings.has("cols"):
-		settings["cols"] = clamp_grid_int(settings["cols"], 1, PANE_MAX_COLS)
+	# A file's settings go through the closed per-type table: unknown keys,
+	# wrong-typed values and app-only keys (env, scheme paths) are dropped and
+	# reported, instead of reaching `PaneBody.apply_settings`'s property path.
+	# The spawn keys are preserved verbatim for `_restore_into`, which validates
+	# them itself (the trust gate + sanitize_shell); rows/cols are clamped by
+	# the table's int rules now that only a terminal accepts them.
+	var filtered := sanitize_settings(type_name, settings, SOURCE_FILE)
+	var kept: Dictionary = filtered["settings"]
+	# A spawn key is not a property: the restore path consumes it (and reports
+	# its own drop for `shell_env`), so it must not count as an ignored setting.
+	var dropped := PackedStringArray()
+	for key in filtered["dropped"]:
+		if not SPAWN_KEYS.has(key):
+			dropped.append(key)
+	for key in SPAWN_KEYS:
+		if settings.has(key) and not kept.has(key):
+			kept[key] = settings[key]
 	var col: int = clamp_grid_int(td.get("col", 0), 0, grid_size - 1)
 	var row: int = clamp_grid_int(td.get("row", 0), 0, grid_size - 1)
 	var cspan: int = clamp_grid_int(td.get("cspan", grid_size), 1, grid_size)
@@ -166,8 +174,9 @@ static func sanitize_tile(td, grid_size: int = GRID) -> Dictionary:
 	cspan = mini(cspan, grid_size - col)
 	rspan = mini(rspan, grid_size - row)
 	return {
-		"settings": settings, "type_name": type_name,
+		"settings": kept, "type_name": type_name,
 		"col": col, "row": row, "cspan": cspan, "rspan": rspan,
+		"dropped": dropped,
 	}
 
 ## Convert legacy Observer layouts before type validation. This keeps existing
@@ -270,3 +279,264 @@ static func sanitize_shell_args(raw) -> Array:
 		if out.size() >= 32:
 			break
 	return out
+
+# ── Pane settings a file may set ───────────────────────────────────────
+#
+# A tile's `settings` dictionary is attacker-controlled: it comes from
+# workspaces.json, profiles.json and the JSON a plugin ships. It used to reach
+# every exported property through `PaneBody._set_typed` (any String/int/float/
+# bool), so a file could set `font_bold_path` and the next font reload ran
+# `load()` on it - a `.tres` with an embedded script executes during load(),
+# which Workspace Trust never saw because a font is not a spawn plan.
+#
+# The vocabulary is now closed per pane type. A key that is not in its table
+# is dropped (and counted for the restore notice), a known key is coerced and
+# clamped by its rule, and a rule marked `file: false` is refused to files: the
+# user's own settings, the pane panel and the app's spawn options still set it
+# through SOURCE_RUNTIME. The values are the pane's *saved* vocabulary
+# (`_get_layout_state`) plus what the app itself applies; a new pane property
+# meant to survive a layout must be added here, and
+# `test_pane_settings.gd` fails when a saved key is not accepted.
+
+const SOURCE_FILE := 0     ## workspaces.json / profiles.json / plugin JSON
+const SOURCE_RUNTIME := 1  ## global settings, pane panel, spawn options
+
+## The font-size range, shared by the settings rule and the pane panel's
+## spinbox so the two cannot disagree.
+const FONT_SIZE_MIN := 8
+const FONT_SIZE_MAX := 32
+
+## Shared by every pane type.
+const COMMON_SETTINGS := {
+	"type": {"kind": "text", "max": 32},          # discriminator; read, never set
+	"pane_name": {"kind": "text", "max": 128},
+	"attachment_id": {"kind": "id"},
+	"tags": {"kind": "tags"},
+	"font_size": {"kind": "int", "min": FONT_SIZE_MIN, "max": FONT_SIZE_MAX},
+}
+
+## Extensions the terminal font loader will read. Anything else - notably
+## `.tres`/`.res`, which can carry a script - falls back to the bundled font.
+const FONT_EXTENSIONS := ["ttf", "otf", "ttc", "woff", "woff2"]
+
+## Keys `Workspace._restore_into` consumes itself instead of applying them as
+## properties: the spawn program, its argv source and the env block it strips
+## with its own notice. Kept verbatim by `sanitize_tile`; each is validated
+## where it is used (the trust gate + `sanitize_shell`).
+const SPAWN_KEYS := ["shell", "command", "shell_env"]
+
+const TERMINAL_SETTINGS := {
+	"rows": {"kind": "int", "min": 1, "max": PANE_MAX_ROWS},
+	"cols": {"kind": "int", "min": 1, "max": PANE_MAX_COLS},
+	"shell_args": {"kind": "argv"},
+	"shell_command": {"kind": "shell", "file": false},
+	"shell_env": {"kind": "text", "max": 65536, "file": false},
+	"font_path": {"kind": "font_path"},
+	# A file must not name a scheme: the read itself is capped and harmless,
+	# but appearance paths are the user's, not a shared layout's. The pane
+	# panel and the global setting (runtime) still set it.
+	"color_scheme_path": {"kind": "scheme_path", "file": false},
+	"cursor_shape": {"kind": "int", "min": 0, "max": 2},
+	"cursor_blink": {"kind": "bool"},
+	"cursor_blink_speed": {"kind": "float", "min": 0.1, "max": 2.0},
+	"cursor_color": {"kind": "color"},
+	"scroll_lines": {"kind": "int", "min": 1, "max": 10},
+	"max_fps": {"kind": "int", "min": 0, "max": 240},
+	"default_fg": {"kind": "color"},
+	"default_bg": {"kind": "color"},
+	"beam_cursor_width": {"kind": "int", "min": 1, "max": 8},
+	"underline_cursor_height": {"kind": "int", "min": 1, "max": 8},
+	"focus_border_color": {"kind": "color", "file": false},
+	"selection_color": {"kind": "color", "file": false},
+	"scrollback_indicator_color": {"kind": "color", "file": false},
+}
+
+const CODE_VIEWER_SETTINGS := {
+	"file_path": {"kind": "text", "max": 4096},
+	"language": {"kind": "text", "max": 64},
+	"view_mode": {"kind": "text", "max": 32},
+}
+
+const FILE_TREE_SETTINGS := {
+	"root_path": {"kind": "text", "max": 4096},
+	"open_in": {"kind": "text", "max": 32},
+}
+
+const INSPECTOR_SETTINGS := {
+	"backend": {"kind": "text", "max": 32},
+	"command": {"kind": "argv"},
+	"auto_run": {"kind": "bool"},
+	"accept_concept_captures": {"kind": "bool"},
+	"system_prompt": {"kind": "text", "max": 65536},
+	"model": {"kind": "text", "max": 128},
+}
+
+const REASONING_SETTINGS := {
+	"source_attachment_id": {"kind": "id"},
+}
+
+const CLI_VIEW_SETTINGS := {
+	"command": {"kind": "shell"},
+	"shell_args": {"kind": "argv"},
+}
+
+const WIKI_SETTINGS := {
+	"vault_path": {"kind": "text", "max": 4096},
+	"view_mode": {"kind": "text", "max": 32},
+	"open_note": {"kind": "text", "max": 512},
+	"graph": {"kind": "bool"},
+}
+
+const MEDIA_SETTINGS := {
+	"file_path": {"kind": "text", "max": 4096},
+	"volume_db": {"kind": "float", "min": -40.0, "max": 6.0},
+	"muted": {"kind": "bool"},
+	"loop": {"kind": "bool"},
+}
+
+const PANE_SETTINGS := {
+	"terminal": TERMINAL_SETTINGS,
+	"code_viewer": CODE_VIEWER_SETTINGS,
+	"file_tree": FILE_TREE_SETTINGS,
+	"inspector": INSPECTOR_SETTINGS,
+	"reasoning": REASONING_SETTINGS,
+	"cli_view": CLI_VIEW_SETTINGS,
+	"wiki": WIKI_SETTINGS,
+	"media": MEDIA_SETTINGS,
+}
+
+## The closed key table for one pane type (common + its own).
+static func settings_schema(type_name: String) -> Dictionary:
+	var schema: Dictionary = COMMON_SETTINGS.duplicate()
+	var own = PANE_SETTINGS.get(type_name)
+	if own is Dictionary:
+		schema.merge(own)
+	return schema
+
+## Filter a settings dictionary through `type_name`'s table.
+##
+## Returns `{"settings": Dictionary, "dropped": PackedStringArray}`. `dropped`
+## names every key that was refused - unknown to the type, wrong-typed, out of
+## range, or reserved to the app when `source` is SOURCE_FILE - so the caller
+## can tell the user once per load instead of silently changing their pane.
+static func sanitize_settings(type_name: String, raw: Dictionary, source: int = SOURCE_RUNTIME) -> Dictionary:
+	var schema := settings_schema(type_name)
+	var out := {}
+	var dropped := PackedStringArray()
+	for key in raw:
+		if not (key is String):
+			continue
+		var rule = schema.get(key)
+		if not (rule is Dictionary):
+			dropped.append(str(key))
+			continue
+		if source == SOURCE_FILE and rule.get("file", true) == false:
+			dropped.append(key)
+			continue
+		var value = _value_for_rule(rule, raw[key])
+		if value == null:
+			dropped.append(key)
+			continue
+		out[key] = value
+	return {"settings": out, "dropped": dropped}
+
+## Coerce one value through its rule, or null when it must be dropped.
+static func _value_for_rule(rule: Dictionary, v) -> Variant:
+	match str(rule.get("kind", "")):
+		"text":
+			if not (v is String):
+				return null
+			var text: String = v
+			if text.length() > int(rule.get("max", 128)) or text.contains("\uFFFD"):
+				return null
+			return text
+		"int":
+			if not (v is int or v is float):
+				return null
+			var f := float(v)
+			if not is_finite(f):
+				return null
+			var lo := int(rule.get("min", 0))
+			var hi := int(rule.get("max", lo))
+			return clampi(int(clampf(f, float(lo), float(hi))), lo, hi)
+		"float":
+			if not (v is int or v is float):
+				return null
+			var f := float(v)
+			if not is_finite(f):
+				return null
+			return clampf(f, float(rule.get("min", 0.0)), float(rule.get("max", 0.0)))
+		"bool":
+			return v if v is bool else null
+		"color":
+			# Colors saved to JSON are "(r, g, b, a)" strings; the pane parses
+			# them (`TerminalPane._restore_color_strings`). Both forms pass.
+			if v is Color:
+				return v
+			if v is String and _is_color_string(v):
+				return v
+			return null
+		"id":
+			if not (v is String):
+				return null
+			if v == "":
+				return ""  # `ensure_attachment_id` fills it
+			var clean := sanitize_attachment_id(v)
+			return clean if clean != "" else null
+		"tags":
+			return sanitize_tags(v) if v is Array else null
+		"argv":
+			return sanitize_shell_args(v) if v is Array else null
+		"shell":
+			if not (v is String):
+				return null
+			var program := sanitize_shell(v, "")
+			return program if program != "" else null
+		"font_path":
+			if not (v is String):
+				return null
+			var path: String = v
+			if path == "":
+				return ""
+			if path.length() > 4096 or path.contains("\uFFFD"):
+				return null
+			# `res://` and `user://` are "absolute" to Godot, but they are
+			# virtual: a data value may only name a real filesystem file. The
+			# bundled fonts are `res://` constants no file ever supplies.
+			if path.begins_with("res://") or path.begins_with("user://"):
+				return null
+			if not path.is_absolute_path() or not font_extension_ok(path):
+				return null
+			return path
+		"scheme_path":
+			if not (v is String):
+				return null
+			var scheme: String = v
+			if scheme.length() > 4096 or scheme.contains("\uFFFD"):
+				return null
+			return scheme
+	return null
+
+static func _is_color_string(v: String) -> bool:
+	var s := v.strip_edges()
+	if not (s.begins_with("(") and s.ends_with(")")):
+		return false
+	var parts := s.substr(1, s.length() - 2).split(",", false)
+	if parts.size() < 3:
+		return false
+	for part in parts:
+		if not part.strip_edges().is_valid_float():
+			return false
+	return true
+
+## True when `path` names a font file the loader may read (by extension).
+static func font_extension_ok(path: String) -> bool:
+	return FONT_EXTENSIONS.has(path.get_extension().to_lower())
+
+## A `FileDialog` filter string for every extension the font loader reads, so
+## the pickers and the loader cannot drift apart.
+static func font_filter() -> String:
+	var parts := PackedStringArray()
+	for ext in FONT_EXTENSIONS:
+		parts.append("*." + ext)
+	return ", ".join(parts)

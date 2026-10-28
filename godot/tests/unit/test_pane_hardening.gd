@@ -248,3 +248,104 @@ func test_sanitize_attachment_id_rejects_invalid():
 	assert_eq(PaneTypes.sanitize_attachment_id("OMP"), "")
 	assert_eq(PaneTypes.sanitize_attachment_id("omp-terminal"), "omp-terminal")
 	assert_eq(PaneTypes.sanitize_attachment_id("1bad"), "")
+
+# ── Pane settings allowlist ────────────────────────────────────────────
+#
+# A tile's settings dict is attacker-controlled. The table is the only way a
+# value reaches a pane property; a file may set only the keys its type saves,
+# and every value is coerced and clamped by its rule.
+
+func test_file_settings_drop_unknown_and_app_only_keys():
+	var result := PaneTypes.sanitize_settings("terminal", {
+		"rows": 30,
+		"font_size": 999,
+		"font_path": "/tmp/x.ttf",
+		"font_bold_path": "/tmp/evil.tres",
+		"shell_env": "PROMPT_COMMAND=curl evil",
+		"color_scheme_path": "/tmp/scheme.csv",
+		"bogus": 1,
+	}, PaneTypes.SOURCE_FILE)
+	var kept: Dictionary = result["settings"]
+	assert_eq(kept.get("rows"), 30)
+	assert_eq(kept.get("font_size"), PaneTypes.FONT_SIZE_MAX, "an absurd size is clamped")
+	assert_eq(kept.get("font_path"), "/tmp/x.ttf")
+	for key in ["font_bold_path", "shell_env", "color_scheme_path", "bogus"]:
+		assert_false(kept.has(key), "%s must not be settable from a file" % key)
+		assert_true(result["dropped"].has(key), "%s must be reported" % key)
+
+func test_runtime_settings_keep_the_app_only_keys():
+	var kept: Dictionary = PaneTypes.sanitize_settings("terminal", {
+		"shell_env": "A=B",
+		"color_scheme_path": "/tmp/scheme.csv",
+	}, PaneTypes.SOURCE_RUNTIME)["settings"]
+	assert_eq(kept.get("shell_env"), "A=B", "the panel and global settings set env")
+	assert_eq(kept.get("color_scheme_path"), "/tmp/scheme.csv",
+		"the user's own appearance choice survives")
+
+func test_settings_values_are_coerced_and_clamped():
+	var kept: Dictionary = PaneTypes.sanitize_settings("terminal", {
+		"font_size": 1, "scroll_lines": 99.9, "cursor_blink_speed": 99,
+		"rows": 100000, "cols": "wide", "cursor_shape": 7,
+		"default_fg": "(1, 0, 0, 0.5)", "cursor_color": "red",
+		"pane_name": "x".repeat(500),
+	}, PaneTypes.SOURCE_RUNTIME)["settings"]
+	assert_eq(kept.get("font_size"), PaneTypes.FONT_SIZE_MIN)
+	assert_eq(kept.get("scroll_lines"), 10)
+	assert_eq(kept.get("cursor_blink_speed"), 2.0)
+	assert_eq(kept.get("rows"), PaneTypes.PANE_MAX_ROWS)
+	assert_false(kept.has("cols"), "a non-numeric grid size is dropped")
+	assert_eq(kept.get("cursor_shape"), 2, "the three cursor shapes are the range")
+	assert_eq(kept.get("default_fg"), "(1, 0, 0, 0.5)", "a saved color string survives")
+	assert_false(kept.has("cursor_color"), "a non-color string is dropped")
+	assert_false(kept.has("pane_name"), "an oversized name is dropped")
+
+func test_font_paths_are_gated_by_extension_and_absolute():
+	var kept: Dictionary = PaneTypes.sanitize_settings(
+		"terminal", {"font_path": "fonts/relative.ttf"}, PaneTypes.SOURCE_RUNTIME)["settings"]
+	assert_false(kept.has("font_path"), "a data path must be absolute")
+	kept = PaneTypes.sanitize_settings(
+		"terminal", {"font_path": "/fonts/x.res"}, PaneTypes.SOURCE_RUNTIME)["settings"]
+	assert_false(kept.has("font_path"), "a resource is not a font")
+	kept = PaneTypes.sanitize_settings(
+		"terminal", {"font_path": "res://fonts/DejaVuSansMono.ttf"}, PaneTypes.SOURCE_RUNTIME)["settings"]
+	assert_false(kept.has("font_path"), "only compile-time constants are res://")
+	kept = PaneTypes.sanitize_settings(
+		"terminal", {"font_path": "/fonts/x.TTF"}, PaneTypes.SOURCE_RUNTIME)["settings"]
+	assert_eq(kept.get("font_path"), "/fonts/x.TTF")
+
+func test_other_types_are_validated_by_their_own_rules():
+	var kept: Dictionary = PaneTypes.sanitize_settings(
+		"inspector", {"command": ["a", 5, "", "b"]}, PaneTypes.SOURCE_RUNTIME)["settings"]
+	assert_eq(kept.get("command"), ["a", "b"], "argv is sanitized, not passed through")
+	kept = PaneTypes.sanitize_settings(
+		"reasoning", {"source_attachment_id": "OMP"}, PaneTypes.SOURCE_RUNTIME)["settings"]
+	assert_false(kept.has("source_attachment_id"), "a malformed id is dropped")
+	kept = PaneTypes.sanitize_settings(
+		"cli_view", {"command": 123, "shell_args": ["ok", 5, ""]}, PaneTypes.SOURCE_RUNTIME)["settings"]
+	assert_false(kept.has("command"), "a non-string program is dropped")
+	assert_eq(kept.get("shell_args"), ["ok"])
+	kept = PaneTypes.sanitize_settings(
+		"cli_view", {"command": "x".repeat(2048)}, PaneTypes.SOURCE_RUNTIME)["settings"]
+	assert_false(kept.has("command"), "an oversized program is dropped")
+	kept = PaneTypes.sanitize_settings(
+		"media", {"volume_db": 99, "loop": true}, PaneTypes.SOURCE_FILE)["settings"]
+	assert_eq(kept.get("volume_db"), 6.0, "volume is clamped to its range")
+	assert_eq(kept.get("loop"), true)
+
+func test_a_tile_keeps_its_spawn_keys_and_reports_dropped_ones():
+	var st := PaneTypes.sanitize_tile({
+		"settings": {
+			"type": "terminal",
+			"shell": "/bin/zsh", "command": "lazygit", "shell_env": "A=B",
+			"font_bold_path": "/tmp/evil.tres",
+			"rows": 99999,
+		},
+		"col": 0, "row": 0, "cspan": 12, "rspan": 12,
+	}, 12)
+	var settings: Dictionary = st["settings"]
+	for key in ["shell", "command", "shell_env"]:
+		assert_true(settings.has(key),
+			"%s is consumed by the restore path, not applied as a property" % key)
+	assert_eq(settings.get("rows"), PaneTypes.PANE_MAX_ROWS)
+	assert_false(settings.has("font_bold_path"), "an unlisted property never reaches the pane")
+	assert_true(st["dropped"].has("font_bold_path"), "the ignored key must be reported")

@@ -181,3 +181,44 @@ func test_spawn_pane_opts_override_globals():
 	for t in _tm.tiles:
 		t.wrapper.free()
 	_tm.tiles.clear()
+
+# ── Settings allowlist ─────────────────────────────────────────────────
+
+func test_apply_settings_refuses_an_unlisted_property():
+	# The hole this closes: `_set_typed` assigned any exported String/int/
+	# float/bool property, so a layout could pick the next font to load().
+	var body = _tm.create_body("terminal")
+	_scene.add_child(body)
+	body.apply_settings({
+		"font_bold_path": "/tmp/evil.tres",
+		"font_italic_path": "/tmp/evil.tres",
+		"workspace_cwd": "/tmp",
+	})
+	assert_eq(body.font_bold_path, "res://fonts/DejaVuSansMono-Bold.ttf",
+		"an unlisted property must never be assigned from settings")
+	assert_eq(body.font_italic_path, "res://fonts/DejaVuSansMono-Oblique.ttf")
+	assert_eq(body.workspace_cwd, "", "the manager owns the working directory")
+
+func test_every_pane_type_accepts_the_settings_it_saves():
+	# Drift guard for the closed table: a key added to `_get_layout_state`
+	# without a rule would silently stop surviving a save/restore cycle.
+	var applied_by_the_pane := ["graph", "open_note", "loop"]
+	for type_name in PaneTypes.ALL:
+		var script = TerminalManager._PaneScripts.get(type_name)
+		assert_not_null(script, "%s must have a pane script" % type_name)
+		var body: Control = script.new()
+		var saved: Dictionary = body._get_layout_state()
+		var tile := PaneTypes.sanitize_tile({
+			"settings": saved, "col": 0, "row": 0,
+			"cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID,
+		})
+		assert_eq(tile.get("dropped", PackedStringArray()).size(), 0,
+			"%s must accept every key it saves (dropped %s)"
+			% [type_name, str(tile.get("dropped", []))])
+		assert_eq(tile.get("type_name"), type_name, "a saved tile keeps its type")
+		for key in PaneTypes.settings_schema(type_name):
+			if key == "type":
+				continue
+			assert_true(key in body or applied_by_the_pane.has(key),
+				"%s: allowlisted key '%s' addresses no property" % [type_name, key])
+		body.free()

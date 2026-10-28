@@ -37,27 +37,37 @@ func _ready():
 func _recompute_cell_metrics():
 	pass  # overridden by types that render text
 
+## Apply a settings dictionary to this pane.
+##
+## Every key goes through `PaneTypes.settings_schema(_pane_type())`: the closed
+## per-type table is the only way a value reaches a property. Files are already
+## filtered at their boundary (`PaneTypes.sanitize_tile`); this second gate is
+## what stops a programmatic caller - or a future path that forgets to sanitize
+## - from setting an arbitrary exported property (the hole that let a layout
+## choose `font_bold_path` and have it `load()`ed). A key outside the table is
+## ignored, never assigned.
 func apply_settings(settings: Dictionary):
-	for key in settings:
-		if not (key is String):
-			continue
-		var v = settings[key]
+	var accepted: Dictionary = PaneTypes.sanitize_settings(
+		_pane_type(), settings, PaneTypes.SOURCE_RUNTIME)["settings"]
+	for key in accepted:
+		var v = accepted[key]
 		match key:
-			"pane_name":
-				if v is String:
-					pane_name = v
-			"font_size":
-				if v is int or v is float:
-					font_size = int(v)
-			"tags":
-				if v is Array:
-					tags = PaneTypes.sanitize_tags(v)
 			"type":
-				pass
+				pass  # the discriminator; `_pane_type()` is a method, not a property
+			"pane_name":
+				pane_name = v
+			"font_size":
+				font_size = v
+			"tags":
+				tags = v
 			_:
-				_set_typed(key, v)
+				# Keys a pane applies itself (`graph`, `loop`, `open_note`) have
+				# no property of this name: its own `apply_settings` reads them
+				# from the same dictionary.
+				if key in self:
+					set(key, v)
 	ensure_attachment_id()
-	if settings.has("pane_name") and settings.get("pane_name") is String:
+	if accepted.has("pane_name"):
 		title_changed.emit(pane_name if pane_name != "" else _default_title())
 
 ## Every pane has a stable public id. Generate one when no saved
@@ -65,29 +75,6 @@ func apply_settings(settings: Dictionary):
 func ensure_attachment_id():
 	if attachment_id == "":
 		attachment_id = PaneTypes.generate_attachment_id()
-
-## Set a property only when the incoming value's type matches the
-## property's declared type — layout JSON is untrusted and may carry
-## strings where numbers belong (or vice versa).
-func _set_typed(key: String, v):
-	if not (key in self):
-		return
-	var t = typeof(self.get(key))
-	match t:
-		TYPE_INT:
-			if v is int or v is float:
-				set(key, int(v))
-		TYPE_FLOAT:
-			if v is int or v is float:
-				set(key, float(v))
-		TYPE_STRING:
-			if v is String:
-				set(key, v)
-		TYPE_BOOL:
-			if v is bool:
-				set(key, v)
-		_:
-			pass
 
 func _default_title() -> String:
 	return get_class()

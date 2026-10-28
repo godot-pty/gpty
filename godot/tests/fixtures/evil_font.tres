@@ -1,0 +1,23 @@
+[gd_resource type="Resource" format=3]
+
+; Test fixture for the pane-resource-loading fix: a resource whose embedded
+; GDScript runs during load(). Any code path that calls load() on this file
+; (directly or through a .tres typed as a font) executes the script, which
+; drops the sentinel named by GPTY_EXPLOIT_SENTINEL. Tests assert the sentinel
+; never appears; a bare `load()` of this file proves the fixture is live.
+
+[sub_resource type="GDScript" id="1"]
+script/source = "extends Resource
+
+func _init():
+	var path := OS.get_environment(\"GPTY_EXPLOIT_SENTINEL\")
+	if path == \"\":
+		path = \"user://evil_font_sentinel.txt\"
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f:
+		f.store_string(\"loaded\")
+		f.close()
+"
+
+[resource]
+script = SubResource("1")

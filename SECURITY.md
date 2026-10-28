@@ -67,7 +67,11 @@ socket. That second point matters: the trust above is for processes *outside* gP
 - **Terminal output.** Every byte a program prints, including escape sequences, is attacker-controlled
   if any program you run can be induced to print attacker-chosen text.
 - **Files.** Saved layouts, profiles, workspaces, concept definitions, markdown, scrollback: files
-  can arrive from a repository, a chat message, or a shared dotfiles setup.
+  can arrive from a repository, a chat message, or a shared dotfiles setup. A file cannot turn that
+  into code by naming a resource: pane settings go through a closed per-type allowlist
+  (`PaneTypes.settings_schema`), and a data-supplied font path is read as bytes by `TerminalFonts`,
+  never through `load()` - a `.tres` with an embedded script runs during `load()`, and Workspace
+  Trust does not examine a font.
 - **Remote responses.** Release metadata, documentation, anything fetched over the network.
 - **Other users** on a shared machine, and any file or socket they could have written.
 

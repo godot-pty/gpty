@@ -48,6 +48,7 @@ godot/
         │   ├── workspace.gd     # Grid layout, workspace tabs, sidebar, profiles, concept routing
         │   ├── ipc_handlers.gd  # WorkspaceIpcHandlers - IPC/pane-API method dispatch
         │   ├── terminal_pane.gd # Control-based renderer, keyboard, selection
+        │   ├── terminal_fonts.gd # Byte-only font loader (a data path never reaches load())
         │   ├── concept_router.gd # Pure concept-event routing (extracted, testable)
         │   ├── plugin_review_text.gd # Pure plugin-review dialog text (extracted, testable)
         │   └── terminal_manager.gd

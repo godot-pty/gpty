@@ -142,6 +142,7 @@ gpty/
         │   ├── concept_router.gd   # Pure concept-event routing (extracted, testable)
         │   ├── plugin_review_text.gd # Pure plugin-review dialog text (extracted, testable)
         │   ├── terminal_pane.gd    # Control-based renderer, keyboard, mouse, selection, history search
+        │   ├── terminal_fonts.gd   # Byte-only font loader (a data path never reaches load())
         │   ├── terminal_manager.gd # Tile lifecycle, split/kill/swap/spawn
         │   └── tile_drag.gd        # Divider-drag state machine (extracted)
         ├── ui/

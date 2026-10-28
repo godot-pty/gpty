@@ -568,7 +568,7 @@ func _add_scheme_picker(v: VBoxContainer) -> Button:
 	)
 
 func _add_font_picker(v: VBoxContainer) -> Button:
-	return _add_file_picker(v, "Font:", SettingsManager.cfg_font_path, [["*.ttf", "TrueType Fonts"]], func(path: String):
+	return _add_file_picker(v, "Font:", SettingsManager.cfg_font_path, [[PaneTypes.font_filter(), "Fonts"]], func(path: String):
 		SettingsManager.cfg_font_path = path
 		SettingsManager.save_settings()
 	)

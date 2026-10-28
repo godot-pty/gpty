@@ -362,8 +362,10 @@ func _get_layout_state() -> Dictionary:
 	state.merge({
 		"shell": shell_command, "shell_args": shell_args.duplicate(),
 		"rows": rows, "cols": cols,
-		"font_path": font_path,
-		"color_scheme_path": color_scheme_path,
+		# `color_scheme_path` is deliberately absent: a file may not name a
+		# scheme (PaneTypes keeps it runtime-only), and on restore the global
+		# appearance is applied after the tile anyway, so a saved value never
+		# took effect. The pane panel and Settings → Appearance still set it.
 		"cursor_shape": cursor_shape, "cursor_blink": cursor_blink,
 		"cursor_blink_speed": cursor_blink_speed, "cursor_color": cursor_color,
 		"scroll_lines": scroll_lines, "max_fps": max_fps,
@@ -371,6 +373,10 @@ func _get_layout_state() -> Dictionary:
 		"beam_cursor_width": beam_cursor_width,
 		"underline_cursor_height": underline_cursor_height,
 	})
+	# Only a font the user chose is saved: the bundled default is a `res://`
+	# constant the pane already starts with, and a data value may not name one.
+	if not font_path.begins_with("res://"):
+		state["font_path"] = font_path
 	return state
 
 func apply_settings(settings: Dictionary):
@@ -409,21 +415,31 @@ func _reload_fonts():
 	_font_bold = _load_font(font_bold_path, "res://fonts/DejaVuSansMono-Bold.ttf")
 	_font_italic = _load_font(font_italic_path, "res://fonts/DejaVuSansMono-Oblique.ttf")
 
+## Largest scheme file read. A palette is 16 short hex colours; anything past
+## this is not a scheme, and the read happens on the GUI thread.
+const SCHEME_MAX_BYTES := 1 << 14
+
+## Apply the pane's colour scheme file. The path is data: `TextRead` gates it
+## to an absolute regular file and caps the read, so a scheme entry cannot make
+## the pane read a device, a FIFO, or a huge file.
 func _apply_stored_scheme():
 	if _terminal == null: return
 	var path = color_scheme_path
-	if path == "" or not FileAccess.file_exists(path):
+	if path == "":
 		_terminal.set_palette("")
 		return
-	var f = FileAccess.open(path, FileAccess.READ)
-	if not f: return
-	var hex_csv = f.get_as_text().strip_edges().replace("\n", ",").replace(" ", "")
+	var r := TextRead.read_prefix(path, SCHEME_MAX_BYTES)
+	if not r.ok:
+		_terminal.set_palette("")
+		return
+	var hex_csv: String = str(r.text).strip_edges().replace("\n", ",").replace("\r", ",").replace(" ", "")
 	_terminal.set_palette(hex_csv)
 
+## Load one of the three font faces. `path` is data (a saved or global
+## setting) and never reaches a resource loader: `TerminalFonts` reads bytes.
+## `fallback` is a bundled `res://` constant and is the only `load()` path.
 func _load_font(path: String, fallback: String) -> Font:
-	var f: Font
-	if path != "" and ResourceLoader.exists(path): f = load(path)
-	else: f = load(fallback)
+	var f := TerminalFonts.load_for(path, fallback)
 	f.fixed_size = font_size
 	return f
 
@@ -1278,7 +1294,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	_make_row(v, "Attachment ID:", attach_le, panel)
 
 	var font_spin = SpinBox.new()
-	font_spin.min_value = 8; font_spin.max_value = 32
+	font_spin.min_value = PaneTypes.FONT_SIZE_MIN; font_spin.max_value = PaneTypes.FONT_SIZE_MAX
 	font_spin.value = font_size
 	_make_row(v, "Font size:", font_spin, panel)
 
@@ -1372,7 +1388,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 		dlg.access = FileDialog.ACCESS_FILESYSTEM
 		dlg.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 		dlg.current_path = font_btn.get_meta("path", "")
-		dlg.add_filter("*.ttf", "TrueType Fonts")
+		dlg.add_filter(PaneTypes.font_filter(), "Fonts")
 		dlg.file_selected.connect(func(path: String):
 			font_btn.set_meta("path", path)
 			font_btn.text = path.get_file()
