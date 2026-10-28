@@ -41,6 +41,22 @@ pub async fn run(
     json: bool,
     no_daemon: bool,
 ) -> anyhow::Result<()> {
+    // The stale-binary check, for every action on this surface. `main` runs it
+    // before the generic dispatch, but `plugin` never reaches that dispatch:
+    // its arm sits above it (install owns the review handshake, and the admin
+    // actions must not auto-spawn a GUI). The check rides here instead —
+    // bounded, best-effort, silent without a GUI — because the store these
+    // commands read and write is the GUI's too, and a pair from different
+    // releases makes the older side call the newer side's records corrupt
+    // (`plugins.json is corrupt: record 0: unknown key 'concepts'`, v0.7.1
+    // report). The offline validator probes too: the rule is the surface, not
+    // each action, and no GUI means one failed connect and no output.
+    crate::commands::daemon::warn_on_version_mismatch(
+        socket_path,
+        crate::commands::daemon::VERSION_CHECK_BUDGET,
+    )
+    .await;
+
     match action {
         PluginAction::Install { target } => {
             install(target, socket_path, timeout, json, no_daemon).await

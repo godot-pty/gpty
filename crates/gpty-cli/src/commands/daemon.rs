@@ -115,15 +115,25 @@ static VERSION_WARNED: AtomicBool = AtomicBool::new(false);
 /// is about to run.
 pub const VERSION_CHECK_BUDGET: Duration = Duration::from_millis(500);
 
-/// Best-effort stale-binary check for a call site that has not read the
-/// version yet (the command `main` is about to dispatch, the MCP server at
-/// startup). A no-op once a version has been read. Never fails and never
-/// gates: the caller's real work runs whatever the probe finds.
+/// Some call sites run the check themselves because they never reach the
+/// generic one: the MCP server at startup, and the `plugin` surface (whose
+/// arm sits above `main`'s generic dispatch). A no-op once a version has been
+/// read. Never fails and never gates: the caller's real work runs whatever
+/// the probe finds.
 pub async fn warn_on_version_mismatch(socket_path: &str, budget: Duration) {
     if VERSION_OBSERVED.load(AtomicOrdering::Relaxed) {
         return;
     }
     let _ = probe_with(socket_path, budget).await;
+}
+
+/// Clear the once-per-process latches. Tests call this: the statics outlive a
+/// test, and a `version` response read by one test would silence the next
+/// test's probe (the parallel-thread shared-state class in the pitfalls page).
+#[cfg(test)]
+pub(crate) fn reset_version_latch() {
+    VERSION_OBSERVED.store(false, AtomicOrdering::Relaxed);
+    VERSION_WARNED.store(false, AtomicOrdering::Relaxed);
 }
 
 /// Record a `version` response and warn, once per process, when the GUI it

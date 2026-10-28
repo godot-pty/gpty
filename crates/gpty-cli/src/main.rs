@@ -456,7 +456,9 @@ async fn main() {
         // only the store and the installed content — spawning the GUI for
         // them would be noise. `install` is the one action that needs the
         // GUI (its review dialog), and it ensures the daemon itself, so the
-        // arm must sit above the auto-spawn below.
+        // arm must sit above the auto-spawn below. Sitting above that gate
+        // also skips the stale-binary check further down, so `plugin::run`
+        // runs it itself before any action.
         Some(Commands::Plugin { action }) => {
             match commands::plugin::run(action, &socket_path, timeout, cli.json, cli.no_daemon)
                 .await

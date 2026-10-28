@@ -5,6 +5,7 @@
 //! The server chmods its socket 0600, satisfying the client-side socket
 //! validation (`transport::validate_socket_path`).
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -13,7 +14,7 @@ use gpty_ipc::server::{HandlerFn, IpcServer};
 use serde_json::Value;
 
 use crate::commands;
-use crate::{DaemonAction, LayoutAction, VaultAction};
+use crate::{DaemonAction, LayoutAction, PluginAction, VaultAction};
 
 /// Start an `IpcServer` on a unique temp socket registered with the
 /// given handlers. Each handler receives the request params and returns
@@ -1219,4 +1220,58 @@ async fn daemon_status_never_spawns_and_stop_is_a_no_op() {
     );
     let _ = std::fs::remove_file(&marker);
     let _ = std::fs::remove_file(&gui);
+}
+
+/// The `plugin` arm sits above `main`'s generic stale-binary check, so the
+/// check rides on the surface itself: a CLI from a different release than the
+/// GUI must say so before the command reads or writes the store the GUI shares
+/// (the v0.7.1 report - an older reader called the newer CLI's records
+/// `unknown key 'concepts'` with no explanation). The offline validator is the
+/// coldest action on that surface - no GUI, one failed connect, no output -
+/// which is also the one a test can run without the real store or data dir.
+#[tokio::test]
+async fn plugin_commands_probe_the_gui_version_first() {
+    commands::daemon::reset_version_latch();
+    let probes = Arc::new(AtomicUsize::new(0));
+    let probes_h = Arc::clone(&probes);
+    let socket = start_server(
+        "plugin_version_probe",
+        vec![("version", move |_p: Value| {
+            probes_h.fetch_add(1, Ordering::Relaxed);
+            // A matching pair: the probe runs, and no warning is printed.
+            serde_json::json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                "protocol": gpty_ipc::protocol::PROTOCOL_VERSION,
+            })
+        })],
+    )
+    .await;
+
+    let dir = std::env::temp_dir().join(format!("gpty-cli-plugin-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("gpty-plugin.toml"),
+        "id = \"owner/repo\"\nname = \"Demo\"\nversion = \"1.0.0\"\nmin_gpty_version = \"0.5.0\"\n",
+    )
+    .unwrap();
+
+    commands::plugin::run(
+        &PluginAction::Validate { path: dir.clone() },
+        &socket,
+        Duration::from_secs(5),
+        true,
+        true,
+    )
+    .await
+    .expect("a valid manifest validates");
+
+    assert_eq!(
+        probes.load(Ordering::Relaxed),
+        1,
+        "the plugin surface reads the GUI's version before doing its work"
+    );
+
+    let _ = std::fs::remove_file(&socket);
+    let _ = std::fs::remove_dir_all(&dir);
 }
