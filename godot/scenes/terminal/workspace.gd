@@ -576,7 +576,15 @@ func _ensure_unique_attachment_id(body: Control):
 			break
 		replacement = PaneTypes.generate_attachment_id()
 	body.attachment_id = replacement
-	ToastManager.warn("Duplicate pane id '%s' renamed to '%s'" % [id, replacement])
+	_on_duplicate_rename(id, replacement)
+
+## A collision rename is not a user gesture: the user-owned state keyed by the
+## old id is carried to the new one, and the change is reported (the id shows
+## in the pane settings and addresses the pane over IPC). Shared by the
+## attach-time check and the restore pre-pass so both paths behave the same.
+func _on_duplicate_rename(old_id: String, new_id: String):
+	_carry_pane_env(old_id, new_id)
+	ToastManager.warn("Duplicate pane id '%s' renamed to '%s'" % [old_id, new_id])
 
 ## True when any *other* pane in any workspace already carries `id`.
 func _attachment_id_in_use(id: String, except: Control) -> bool:
@@ -590,6 +598,63 @@ func _attachment_id_in_use(id: String, except: Control) -> bool:
 			if str(other.get("attachment_id")) == id:
 				return true
 	return false
+
+## Resolve every restored tile's `attachment_id` before any body exists, then
+## rewrite the set's companion references through the same map.
+##
+## A profile can be activated in more than one workspace, so its saved ids
+## (e.g. `omp-terminal`) collide with the instance already live elsewhere. The
+## attach path renames the duplicate, but by then a later tile may already have
+## stored the original id as its `source_attachment_id`: the Reasoning pane
+## would follow the *other* workspace's terminal. Inside a workspace the first
+## tile keeps a repeated id, matching IPC's first-match resolution.
+func _resolve_tile_ids(plans: Array[Dictionary]):
+	var reserved := {}
+	for ws in _workspaces:
+		if ws.is_empty() or not ws.has("tm"):
+			continue
+		for t in ws.tm.tiles:
+			var other = ws.tm._find_body(t.wrapper)
+			if other != null:
+				reserved[str(other.get("attachment_id"))] = true
+	var remap := {}
+	for plan in plans:
+		var settings: Dictionary = plan["tile"]["settings"]
+		var id := str(settings.get("attachment_id", ""))
+		if id == "":
+			continue  # `apply_settings` generates one; nothing can reference it
+		if not reserved.has(id):
+			reserved[id] = true
+			continue
+		var replacement := PaneTypes.generate_attachment_id()
+		for _i in 32:
+			if not reserved.has(replacement):
+				break
+			replacement = PaneTypes.generate_attachment_id()
+		reserved[replacement] = true
+		settings["attachment_id"] = replacement
+		_on_duplicate_rename(id, replacement)
+		if not remap.has(id):
+			remap[id] = replacement
+	if remap.is_empty():
+		return
+	for plan in plans:
+		var settings: Dictionary = plan["tile"]["settings"]
+		var source := str(settings.get("source_attachment_id", ""))
+		if source != "" and remap.has(source):
+			settings["source_attachment_id"] = remap[source]
+
+## A collision rename is not a user gesture, so the old id's env is *copied*:
+## the entry still belongs to the pane holding that id in the other workspace,
+## and both instances of a profile's logical pane should spawn with the
+## environment the user set for it. Runs before the body enters the tree, where
+## `_ready` reads the store (a terminal's spawn env).
+func _carry_pane_env(old_id: String, new_id: String):
+	if old_id == "" or new_id == "" or old_id == new_id:
+		return
+	if not PaneEnvStore.has_env(old_id) or PaneEnvStore.has_env(new_id):
+		return
+	PaneEnvStore.set_env(new_id, PaneEnvStore.env_for(old_id))
 
 ## Single choke point where a pane enters a workspace: adds the wrapper to
 ## the grid, wires activation tracking, and (for terminals) the dynamic
@@ -613,7 +678,7 @@ func _attach_pane_into(ws: Dictionary, w: Control, body: Control):
 		# The state itself is dispatched by `_prime_new_pane_observers` /
 		# `_dispatch_agent_state` — panes are primed by the scan, not here, so
 		# every pane-entry route ends up informed.
-		body.agent_state_changed.connect(func(state: String): _dispatch_agent_state(body.attachment_id, state))
+		body.agent_state_changed.connect(func(state: String): _dispatch_agent_state(ws, body.attachment_id, state))
 
 func _wire_pane_activation(ws: Dictionary, _w: Control, body: Control):
 	# Pane activation on plain clicks is handled in _input via wrapper
@@ -992,11 +1057,21 @@ func _build_workspaces(entries: Array[Dictionary], active: int):
 func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 	var tm: TerminalManager = ws.tm
 	tm.reset()
-	var dropped_env: Array[String] = []
+	# Sanitize the whole set first: an id collision is a property of the set
+	# (and of the panes already live in other workspaces), and a companion may
+	# reference a terminal that appears later in the list. Resolving both
+	# before a body exists is what keeps the companion on its own terminal —
+	# renaming at attach time would leave it pointed at the other instance.
+	var plans: Array[Dictionary] = []
 	for td in tiles:
 		if not (td is Dictionary): continue
 		var st = PaneTypes.sanitize_tile(td, PaneTypes.GRID)
 		if st.is_empty(): continue
+		plans.append({"tile": st, "legacy_shell": td.get("shell", "")})
+	_resolve_tile_ids(plans)
+	var dropped_env: Array[String] = []
+	for plan in plans:
+		var st: Dictionary = plan["tile"]
 		var settings: Dictionary = st["settings"]
 		var type_name: String = st["type_name"]
 
@@ -1019,7 +1094,7 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 		# "shell" is the legacy shell-binary key.  Priority: command > shell > default.
 		# Both run through sanitize_shell — profile data is untrusted.
 		if type_name == "terminal":
-			var raw = settings.get("command", settings.get("shell", td.get("shell", "")))
+			var raw = settings.get("command", settings.get("shell", plan["legacy_shell"]))
 			var sh: String = PaneTypes.sanitize_shell(raw, SettingsManager.cfg_shell_command)
 			SettingsManager.apply_to_terminal(body)
 			body.shell_command = sh
@@ -1445,14 +1520,29 @@ func _poll_agent_events():
 	var events = JSON.parse_string(raw)
 	if not (events is Array):
 		return
-	# One pass per drain: session-id → source map plus receiver list, so each
-	# event no longer re-scans every tile twice (O(E×T²) → O(T + E×R)).
-	# Hidden workspaces keep receiving events (their PTYs stay alive).
+	_route_agent_events(events)
+
+## Route one drained batch to the panes that observe the emitting terminal.
+##
+## The source is resolved by FFI session id — a pane's `attachment_id` is
+## reassigned when it collides, the session id never is — and the envelope goes
+## only to receivers in that terminal's own workspace. A profile activated in
+## two workspaces names the same logical companion in both, and only one
+## instance can keep the id, so the unscoped fan-out showed one workspace's
+## stream inside the other. Hidden workspaces still hear their own terminals
+## (their PTYs stay alive). Split from the drain so GUT can feed synthetic
+## envelopes without an agent extension behind them.
+func _route_agent_events(events: Array):
+	# One pass per drain: session → source (with its workspace index), and the
+	# receivers grouped by workspace, so each event no longer re-scans every
+	# tile twice (O(E×T²) → O(T + E×R)).
 	var source_by_session := {}
-	var receivers: Array[Control] = []
-	for ws in _workspaces:
-		for tile in ws.tm.tiles:
-			var body = ws.tm._find_body(tile.wrapper)
+	var receivers_by_ws: Array = []
+	for i in _workspaces.size():
+		var ws: Dictionary = _workspaces[i]
+		var receivers: Array[Control] = []
+		for t in ws.tm.tiles:
+			var body = ws.tm._find_body(t.wrapper)
 			if body == null:
 				continue
 			if body.has_method("receive_agent_event"):
@@ -1460,13 +1550,15 @@ func _poll_agent_events():
 			if body is TerminalPane and body.get("_terminal") != null:
 				var session_id := str(body._terminal.get_terminal_session_id())
 				if session_id != "":
-					source_by_session[session_id] = body
+					source_by_session[session_id] = {"body": body, "workspace": i}
+		receivers_by_ws.append(receivers)
 	for envelope in events:
 		if not (envelope is Dictionary):
 			continue
-		var source: Control = source_by_session.get(str(envelope.get("terminal_session_id", "")), null)
-		if source == null:
+		var src = source_by_session.get(str(envelope.get("terminal_session_id", "")), null)
+		if src == null:
 			continue
+		var source: Control = src["body"]
 		var event = envelope.get("event", {})
 		# Tier 1 (authoritative): capability-authenticated events set the
 		# terminal's agent state before routing. Display state only.
@@ -1474,6 +1566,7 @@ func _poll_agent_events():
 		if state != "" and source.get("_terminal") != null:
 			source._terminal.set_agent_state(state)
 		var source_id: String = source.attachment_id if source.attachment_id != "" else source.pane_label
+		var receivers: Array = receivers_by_ws[int(src["workspace"])]
 		for receiver in receivers:
 			receiver.receive_agent_event(envelope, source_id)
 
@@ -1485,9 +1578,11 @@ func _poll_agent_events():
 ## (`PaneBody.agent_state_source_id` / `on_agent_state_changed`): a terminal
 ## emits its tiered state change and every pane observing that terminal hears
 ## it, at most once per delivery. Panes are found through the `panes` group,
-## not the tile lists, so hidden workspaces keep observing. Display only — a
-## Tier 2 state is spoofable and Tier 3 is a heuristic, so nothing here may
-## feed a decision.
+## not the tile lists, so hidden workspaces keep observing their own; the
+## source is resolved inside the observer's own workspace, so a companion left
+## pointing at another workspace's id observes nothing rather than that
+## terminal. Display only — a Tier 2 state is spoofable and Tier 3 is a
+## heuristic, so nothing here may feed a decision.
 
 ## What every observer was last told, by instance id: `[source_id, state]`.
 ## The source half keeps a pane re-pointed at another terminal (a settings
@@ -1495,10 +1590,10 @@ func _poll_agent_events():
 ## the delivery shadow that makes the entry prime and a same-frame change emit
 ## impossible to deliver twice (the dispatcher-side mirror of the terminal's
 ## own `_badge_state` rule). A pane entering the tree by ANY route — spawn,
-## restore, swap, a future pane SDK — is primed on the next frame instead of
-## only on the tile-attach path, and a follower whose terminal has not appeared
-## yet is retried until it does. The scan is O(panes); only new or re-pointed
-## panes do any work.
+## restore, swap, a future pane SDK — is primed on the next frame once it owns
+## a tile in a workspace, instead of only on the tile-attach path, and a
+## follower whose terminal has not appeared yet is retried until it does. The
+## scan is O(panes); only new or re-pointed panes pay the workspace lookup.
 var _agent_state_primed := {}
 
 func _prime_new_pane_observers():
@@ -1513,7 +1608,13 @@ func _prime_new_pane_observers():
 		if source_id == "":
 			_agent_state_primed[key] = ["", ""]  # observes nothing, ever
 			continue
-		var terminal := _terminal_for_agent_state(source_id)
+		# Observation is workspace-scoped: the terminal must live in the
+		# observer's own workspace. A pane not attached to a tile yet (mid-swap,
+		# mid-restore) is retried next frame.
+		var ws := _workspace_for_body(body)
+		if ws.is_empty():
+			continue
+		var terminal := _terminal_for_agent_state(ws, source_id)
 		if terminal == null or terminal._terminal == null:
 			continue  # the source is not attached yet: try again next frame
 		# The entry delivery is this scan's job and goes to *this* pane alone:
@@ -1522,18 +1623,20 @@ func _prime_new_pane_observers():
 		_agent_state_primed[key] = [source_id, ""]
 		_tell_observer(body, source_id, terminal._terminal.get_agent_state())
 
-func _terminal_for_agent_state(source_id: String) -> Control:
-	if source_id == "":
+func _terminal_for_agent_state(ws: Dictionary, source_id: String) -> Control:
+	if source_id == "" or ws.is_empty():
 		return null
-	for body in get_tree().get_nodes_in_group("panes"):
+	for t in ws.tm.tiles:
+		var body = ws.tm._find_body(t.wrapper)
 		if body is TerminalPane and body.attachment_id == source_id:
 			return body
 	return null
 
-func _dispatch_agent_state(source_id: String, state: String):
-	if source_id == "":
+func _dispatch_agent_state(ws: Dictionary, source_id: String, state: String):
+	if source_id == "" or ws.is_empty():
 		return
-	for body in get_tree().get_nodes_in_group("panes"):
+	for t in ws.tm.tiles:
+		var body = ws.tm._find_body(t.wrapper)
 		if not (body is PaneBody) or body.agent_state_source_id() != source_id:
 			continue
 		# Only a pane the scan has already settled hears a change: delivering

@@ -4,7 +4,7 @@ A reasoning pane is a passive window onto an agent's lifecycle: it shows the rea
 
 ## What it is
 
-The body is `ReasoningPane` (`godot/scenes/panes/reasoning_pane.gd`); the registered type key is `reasoning` and its label prefix is `R`. It listens to semantic events from one terminal, identified by that terminal's stable `attachment_id` (the default source is `omp-terminal`), and projects them into a scroll of foldable turns.
+The body is `ReasoningPane` (`godot/scenes/panes/reasoning_pane.gd`); the registered type key is `reasoning` and its label prefix is `R`. It listens to semantic events from one terminal in its own workspace, identified by that terminal's stable `attachment_id` (the default source is `omp-terminal`), and projects them into a scroll of foldable turns. Delivery is workspace-scoped: the dispatcher resolves the emitting PTY by its session id and hands the event only to receivers in that terminal's workspace, so activating the same profile in two workspaces keeps each Reasoning pane on its own terminal.
 
 The important word is *reported*. The pane never starts an agent, never sends it a prompt, and never scrapes the TUI. It only displays events the agent publishes through gPTY's event socket. When nothing publishes, the pane is a status line explaining what to link.
 

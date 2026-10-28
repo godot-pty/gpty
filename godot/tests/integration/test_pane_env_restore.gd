@@ -96,3 +96,37 @@ func test_the_settings_ui_writes_the_store_and_a_rename_moves_it():
 	panel._gather_func = func(): return {"shell_env": "   "}
 	panel._apply_to_target()
 	assert_eq(PaneEnvStore.env_for("new-id"), "", "clearing the field removes the override")
+
+## A profile activated in a second workspace renames its duplicate terminal.
+## The store entry belongs to the logical pane id — the first instance still
+## uses it — so the renamed instance gets a *copy* and spawns with the env the
+## user set; removing it from the old id would take it from the first pane.
+func test_a_collision_rename_copies_the_env_to_the_new_id():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	PaneEnvStore.set_env("shared-term", "OWNED=1")
+
+	var tiles: Array[Dictionary] = [{
+		"col": 0, "row": 0, "cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID,
+		"settings": {"type": "terminal", "pane_name": "Owned",
+			"attachment_id": "shared-term"},
+	}]
+	ws._restore_into(ws._workspaces[0], tiles)
+	var first = ws._tm._find_body(ws._tm.tiles[0].wrapper)
+	assert_eq(first.attachment_id, "shared-term", "the first instance keeps the id")
+
+	ws._add_workspace()
+	var w2: Dictionary = ws._workspaces[1]
+	ws._restore_into(w2, tiles)
+	assert_eq(w2.tm.tiles.size(), 1, "the tile restores into the second workspace")
+	var renamed = w2.tm._find_body(w2.tm.tiles[0].wrapper)
+	assert_ne(renamed.attachment_id, "shared-term", "the duplicate is renamed")
+	assert_eq(renamed.shell_env, "OWNED=1",
+		"the renamed pane spawns with the logical pane's env")
+	assert_eq(PaneEnvStore.env_for("shared-term"), "OWNED=1",
+		"the first instance's entry is not taken away")
+
+	await get_tree().create_timer(2.1).timeout

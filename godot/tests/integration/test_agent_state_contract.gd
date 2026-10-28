@@ -14,12 +14,16 @@ const STATES := ["idle", "working", "needs-attention", "completed", "failed"]
 class ProbePane extends PaneBody:
 	var source := ""
 	var seen: Array[String] = []
+	var events: Array = []
 
 	func agent_state_source_id() -> String:
 		return source
 
 	func on_agent_state_changed(state: String) -> void:
 		seen.append(state)
+
+	func receive_agent_event(envelope: Dictionary, source_id: String) -> void:
+		events.append([envelope, source_id])
 
 var _ws: Control
 
@@ -52,10 +56,19 @@ func _badge(ws: Control) -> Label:
 	var tm: TerminalManager = ws._tm
 	return tm.tiles[0].wrapper.get_node_or_null("BodyVBox/TitleBar/StateBadge")
 
-func _add_probe(ws: Control, source_id: String) -> ProbePane:
+## A probe enters its workspace through the real attach path and owns a tile,
+## like a themed pane: observation is workspace-scoped, so a pane outside every
+## workspace has no source to observe.
+func _add_probe(ws: Control, source_id: String, workspace := 0) -> ProbePane:
 	var probe := ProbePane.new()
+	probe.name = "Body"  # `_find_body` resolves tiles by this fixed child name
 	probe.source = source_id
-	ws.add_child(probe)
+	probe.pane_label = "P%d" % (workspace + 1)
+	var wsd: Dictionary = ws._workspaces[workspace]
+	var w: Control = wsd.tm._build_wrapper_body(probe, "Probe")
+	ws._attach_pane_into(wsd, w, probe)
+	wsd.tm.tiles.append({wrapper = w, col = 0, row = 0,
+		cspan = PaneTypes.MIN_TILE, rspan = PaneTypes.MIN_TILE})
 	return probe
 
 ## Real-time wait: a state change is observed on the terminal's slow poll
@@ -118,7 +131,7 @@ func test_a_change_dispatched_before_the_entry_prime_is_dropped():
 	var probe := _add_probe(ws, body.attachment_id)
 	# The follower has just joined and the terminal's slow poll emitted before
 	# the scan primed it: the change arrives first (dispatched directly here).
-	ws._dispatch_agent_state(body.attachment_id, "working")
+	ws._dispatch_agent_state(ws._workspaces[0], body.attachment_id, "working")
 	assert_eq(probe.seen.size(), 0, "an unsettled observer must not hear a change")
 	assert_true(
 		await _wait_until(func(): return probe.seen.size() >= 1),
@@ -150,11 +163,11 @@ func test_a_repeat_of_the_value_an_observer_holds_is_dropped():
 	var body := _first_body(ws)
 	var probe := _add_probe(ws, body.attachment_id)
 	assert_true(await _wait_until(func(): return probe.seen.size() >= 1))
-	ws._dispatch_agent_state(body.attachment_id, "idle")
+	ws._dispatch_agent_state(ws._workspaces[0], body.attachment_id, "idle")
 	assert_eq(probe.seen, ["idle"], "a repeat of the held value must be dropped")
-	ws._dispatch_agent_state(body.attachment_id, "working")
+	ws._dispatch_agent_state(ws._workspaces[0], body.attachment_id, "working")
 	assert_eq(probe.seen, ["idle", "working"], "a real transition still lands")
-	ws._dispatch_agent_state(body.attachment_id, "working")
+	ws._dispatch_agent_state(ws._workspaces[0], body.attachment_id, "working")
 	assert_eq(probe.seen, ["idle", "working"], "and its repeat is dropped too")
 
 func test_a_pane_that_observes_nothing_is_never_told():
@@ -190,3 +203,41 @@ func test_a_follower_that_repoints_is_primed_for_the_new_source():
 		await _wait_until(func(): return probe.seen.size() >= 1),
 		"a re-pointed pane must be primed for its new source")
 	assert_eq(probe.seen[0], "idle")
+
+# ── Workspace scoping ──────────────────────────────────────────────────
+
+## Reported 2026-10-28: the same profile activated in two workspaces left the
+## second companion pointed at the first workspace's terminal. Observation is
+## scoped to the observer's own workspace, so a stale pointer observes
+## nothing, a source change never crosses over, and a hidden workspace still
+## hears its own terminal.
+func test_agent_state_never_crosses_workspaces_and_a_hidden_one_observes_its_own():
+	var ws := await _make_workspace()
+	var body_a := _first_body(ws)
+	var probe_a := _add_probe(ws, body_a.attachment_id, 0)
+	assert_true(await _wait_until(func(): return probe_a.seen.size() >= 1))
+
+	ws._add_workspace()
+	await get_tree().process_frame
+	var body_b = ws._spawn_pane_into(ws._workspaces[1], "terminal", {})
+	assert_not_null(body_b, "the second workspace gets its own terminal")
+	var probe_b := _add_probe(ws, body_b.attachment_id, 1)
+	assert_true(await _wait_until(func(): return probe_b.seen.size() >= 1))
+
+	# The reported state: a companion in W2 pointing at W1's terminal id. It
+	# has no terminal in its own workspace, so it is never primed.
+	var stray := _add_probe(ws, body_a.attachment_id, 1)
+	await _wait_until(func(): return false, 0.3)
+	assert_eq(stray.seen, [], "another workspace's terminal is not a source")
+
+	# W1's change reaches its follower only.
+	ws._switch_workspace(0)
+	ws._dispatch_agent_state(ws._workspaces[0], body_a.attachment_id, "working")
+	assert_eq(probe_a.seen[-1], "working")
+	assert_eq(probe_b.seen, ["idle"], "W1's state must not leak into W2")
+
+	# W2 is hidden now; its own change still lands on its own follower.
+	ws._dispatch_agent_state(ws._workspaces[1], body_b.attachment_id, "needs-attention")
+	assert_eq(probe_b.seen, ["idle", "needs-attention"],
+		"a hidden workspace still observes its own terminal")
+	assert_eq(probe_a.seen[-1], "working", "and W2's state must not leak into W1")
