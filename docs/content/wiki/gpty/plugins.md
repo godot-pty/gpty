@@ -51,6 +51,8 @@ Before anything lands it gates the manifest: the `id` must equal the install tar
 
 Content moves to `data_dir()/plugins/<id>`, runtime directories are created under `state_dir()/plugins/<id>/{config,state,logs}`, and a record lands in `state_dir()/plugins.json` with the resolved SHA and the manifest's profiles and concepts. **The store pins the SHA**, not the tag: a moved tag is a new revision and triggers a re-review. The GUI never parses TOML: the validator stays the single gate, and a broken record degrades one entry at a time.
 
+Every `plugin` command reads the running GUI's version before it does anything else — bounded, best-effort, silent when no GUI answers. The store is shared state, so a CLI older than the GUI beside it rejects record keys it does not know and reports `plugins.json` as corrupt; that is what a stale `gpty` on `PATH` looks like. The warning names both versions and the fix: reinstall the CLI, or use the one shipped beside the GUI.
+
 ## The trust model
 
 The review dialog is not a formality. A plugin's actions run as the user, through the same API a person at the CLI uses, so installing one is granting a third party the ability to create panes, inject keystrokes, and read your vault through your own account. That is why install always asks, why `pluginInstall` is deliberately not an MCP tool — a client cannot answer a dialog — and why the review names the programs the profiles would run.

@@ -64,7 +64,7 @@ A turn record is the pane's own source of truth: it holds the turn index, the st
 | Settings → Reasoning → max turns | how many turns are kept; default 16, clamped 1–64 per pane |
 | Settings → Reasoning → bytes per turn | how much reasoning one turn retains; default 65,536 bytes, clamped 4,096–1,048,576 |
 
-The two global caps are read when a pane is created, so a change applies to panes opened afterward. Changing the source attachment id clears the pane's turns and rebinds: the events of a different terminal are a different conversation.
+The two global caps are read when a pane is created, so a change applies to panes opened afterward. Changing the source attachment id clears the pane's turns and rebinds: the events of a different terminal are a different conversation. Renaming the *terminal* in Pane Settings is not that — the link follows the new id and the pane keeps its turns, and only companions in the renamed terminal's own workspace move: a pane in another workspace keeps the id you typed.
 
 ## What it does not do
 
