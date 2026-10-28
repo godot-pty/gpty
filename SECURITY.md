@@ -198,9 +198,12 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   process that can run in a pane (an install script, a `curl | sh`, a compromised dependency, an agent
   following an injected prompt) can type into your other panes, including a root shell or an SSH
   session, and read what they print. gPTY does not separate panes from each other and makes no such
-  claim today. Workspaces do not help: all of a window's workspaces share one control socket, and a
-  command that names a pane by its id or label (`T1`) is looked up in the active workspace first and
-  then in every other one. Until enforcement lands, keep untrusted code and root shells or
+  claim today. Workspaces do not help: all of a window's workspaces share one control socket, and
+  every pane in every workspace is addressable by its id, which is matched across all of them. A
+  label that two workspaces share (`T1`) is refused with an error naming every candidate rather than
+  guessed from the active workspace, so an accidentally misdirected command fails loudly - that is a
+  correctness rule, not a boundary, since any process can read `list-panes`' ids or guess them.
+  Until enforcement lands, keep untrusted code and root shells or
   authenticated sessions apart by running one of them outside gPTY, and treat `GPTY_SECRET` as protection against other users only. The same
   control surface is the intended agent workflow (an agent in a pane calling `gpty inject` or
   `gpty mcp`), so the planned fix is a per-pane permission the user grants, not removing the surface.

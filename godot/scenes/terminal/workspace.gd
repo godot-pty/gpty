@@ -1850,9 +1850,13 @@ func _poll_ipc_requests():
 			if params == null:
 				params = {}
 		if method == "paneWait":
-			var w_body = _find_pane_by_label(str(params.get("pane_id", "")))
-			if w_body == null or not (w_body is TerminalPane):
-				GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error("Pane '%s' not found" % params.get("pane_id", ""))))
+			var w_found: Dictionary = _resolve_pane_target(str(params.get("pane_id", "")))
+			if w_found.has("error"):
+				GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error(str(w_found["error"]))))
+				continue
+			var w_body = w_found["body"]
+			if not (w_body is TerminalPane):
+				GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error("Pane '%s' is not a terminal" % params.get("pane_id", ""))))
 				continue
 			var w_pattern = str(params.get("pattern", ""))
 			if w_pattern == "" or w_pattern.length() > 1024:
@@ -1882,7 +1886,7 @@ func _poll_pending_waits():
 	var done: Array = []
 	for wid in _pending_waits:
 		var w = _pending_waits[wid]
-		var wbody = _find_pane_by_label(str(w.get("attachment_id", "")))
+		var wbody = _resolve_pane_target(str(w.get("attachment_id", ""))).get("body")
 		if wbody == null or not (wbody is TerminalPane):
 			GptyTerminal.respond_ipc(int(wid), false, JSON.stringify(_ipc_error("Pane gone")))
 			done.append(wid)
@@ -1991,28 +1995,53 @@ func _expire_plugin_review(id: int):
 func _ipc_error(msg: String, code := -32000):
 	return WorkspaceIpcHandlers.error(msg, code)
 
-func _find_pane_by_label(label: String) -> Control:
-	# Labels (T1) can collide across workspaces; attachment_ids are
-	# globally unique. Resolve active-workspace-first for label targeting.
-	var ws := _active_workspace()
-	if not ws.is_empty():
-		var body = _find_in_tm(ws.tm, label)
-		if body:
-			return body
-	for i in _workspaces.size():
-		if i == _active:
+## Resolve an IPC pane target to the pane it names.
+##
+## A target is either an `attachment_id` (the public id, unique across every
+## workspace) or a display label ("T1"). Labels are numbered per workspace and
+## restart at 1, so two workspaces routinely hold a "T1": resolving that label
+## to the active workspace's pane would hand an agent's command to a pane it
+## never named - the user switching tabs while an agent works in the
+## background is ordinary use, not an edge case. So an id always wins (it
+## cannot be ambiguous), a label that matches exactly one pane in one
+## workspace still resolves, and a label that matches several is refused.
+##
+## Returns `{body: Control}` on success, `{error: String}` when the target
+## names nothing or names several panes; the refusal lists every candidate's
+## workspace and attachment id, which is what the caller needs to address the
+## pane it meant.
+func _resolve_pane_target(target: String) -> Dictionary:
+	if target == "":
+		return {"error": "Pane target required"}
+	for ws in _workspaces:
+		if ws.is_empty() or not ws.has("tm"):
 			continue
-		var other = _find_in_tm(_workspaces[i].tm, label)
-		if other:
-			return other
-	return null
+		for t in ws.tm.tiles:
+			var body = ws.tm._find_body(t.wrapper)
+			if body != null and str(body.get("attachment_id")) == target:
+				return {"body": body}
+	var matches: Array = []
+	for ws in _workspaces:
+		if ws.is_empty() or not ws.has("tm"):
+			continue
+		for t in ws.tm.tiles:
+			var body = ws.tm._find_body(t.wrapper)
+			if body == null or str(body.get("pane_label")) != target:
+				continue
+			matches.append({"body": body, "workspace": str(ws.name)})
+	if matches.size() == 1:
+		return {"body": matches[0]["body"]}
+	if matches.is_empty():
+		return {"error": "Pane '%s' not found" % target}
+	var candidates: Array[String] = []
+	for hit in matches:
+		candidates.append("%s (%s)" % [hit["workspace"], str(hit["body"].attachment_id)])
+	return {
+		"error": "Pane '%s' is ambiguous: it names %s - address the pane by its id" % [
+			target, ", ".join(candidates),
+		],
+	}
 
-func _find_in_tm(tm: TerminalManager, label: String) -> Control:
-	for t in tm.tiles:
-		var body = tm._find_body(t.wrapper)
-		if body and (body.attachment_id == label or body.get("pane_label") == label):
-			return body
-	return null
 func _toggle_settings():
 	if _settings_panel == null:
 		_settings_panel = SettingsPanel.new(self)

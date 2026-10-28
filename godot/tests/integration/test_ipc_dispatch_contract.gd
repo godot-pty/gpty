@@ -3,7 +3,7 @@ extends GutTest
 # workspace it drives — the real dispatch table, the real id/label resolution,
 # the real panes.
 #
-# The coverage this replaces reimplemented `_find_pane_by_label`, the listPanes
+# The coverage this replaces reimplemented `_resolve_pane_target`, the listPanes
 # response and the error envelope inside the test file and asserted on those
 # copies (its own header said so), so a change to the shipped handlers — the id
 # and label resolution IPC targeting rests on, above all — could not fail it.
@@ -48,6 +48,10 @@ func _spawn(type_name: String) -> Control:
 	assert_not_null(body, "spawning a %s pane must work" % type_name)
 	return body
 
+## The pane the IPC target names, or null when resolution refused it.
+func _target(target: String) -> Control:
+	return _ws._resolve_pane_target(target).get("body")
+
 # ── listPanes ↔ pane targeting ─────────────────────────────────────────
 
 func test_every_listed_id_addresses_the_pane_it_names():
@@ -65,7 +69,7 @@ func test_every_listed_id_addresses_the_pane_it_names():
 			"the id listPanes reports (%s) must address the pane IPC targeting resolves" % pane_id
 		)
 		assert_eq(
-			_ws._tm.last_body, _ws._find_pane_by_label(pane_id),
+			_ws._tm.last_body, _target(pane_id),
 			"focusPane must make the pane it resolved the active one"
 		)
 
@@ -130,15 +134,94 @@ func test_pane_targeting_accepts_an_id_and_a_legacy_label():
 
 	var killed = WorkspaceIpcHandlers.handle(_ws, "killPane", {"pane_id": by_id_key})
 	assert_true(killed.get("success", false), "killPane must accept an attachment id")
-	assert_null(_ws._find_pane_by_label(by_id_key), "the pane addressed by id must be gone")
-	assert_eq(_ws._find_pane_by_label(by_label_key), by_label, "the other pane must survive")
+	assert_null(_target(by_id_key), "the pane addressed by id must be gone")
+	assert_eq(_target(by_label_key), by_label, "the other pane must survive")
 
 	killed = WorkspaceIpcHandlers.handle(_ws, "killPane", {"pane_id": by_label_key})
 	assert_true(killed.get("success", false), "killPane must still accept a label")
-	assert_null(_ws._find_pane_by_label(by_label_key), "the pane addressed by label must be gone")
+	assert_null(_target(by_label_key), "the pane addressed by label must be gone")
 
 	var missing = WorkspaceIpcHandlers.handle(_ws, "killPane", {"pane_id": "no-such-pane"})
 	assert_true(missing.has("error"), "killing an unknown pane must be an error, not a success")
+
+# ── Cross-workspace label resolution ──────────────────────────────────
+#
+# `attachment_id` is unique across every workspace; a label is numbered per
+# workspace and restarts at 1, so two workspaces both hold a "T1" in ordinary
+# use. Resolving that label to the active workspace's pane handed an agent's
+# command to a pane it never named - the user switching tabs while an agent
+# works in the background is enough to trigger it.
+
+## Both workspaces hold a "T1": every targeting method refuses the label,
+## names both candidates, and acts on neither pane.
+func test_a_label_two_workspaces_share_is_refused_by_every_targeting_method():
+	var first = _ws._tm._find_body(_ws._tm.tiles[0].wrapper)
+	assert_eq(str(first.pane_label), "T1", "the first workspace's terminal is T1")
+	_ws._add_workspace()
+	var second = _spawn("terminal")
+	assert_eq(str(second.pane_label), "T1", "labels restart in the new workspace")
+	assert_ne(str(first.attachment_id), str(second.attachment_id), "ids stay globally unique")
+
+	var first_ws := str(_ws._workspaces[0].name)
+	var second_ws := str(_ws._workspaces[1].name)
+	var marker := "ambiguous-label-marker"
+	var calls := {
+		"inject": {"pane_id": "T1", "text": marker},
+		"paneRead": {"pane_id": "T1"},
+		"paneStatus": {"pane_id": "T1"},
+		"killPane": {"pane_id": "T1"},
+		"focusPane": {"pane_id": "T1"},
+	}
+	for method in calls:
+		var refused = WorkspaceIpcHandlers.handle(_ws, method, calls[method])
+		assert_true(refused.has("error"), "%s must refuse an ambiguous label" % method)
+		var message := str(refused["error"]["message"])
+		assert_string_contains(message, "ambiguous", "%s must say why it refused" % method)
+		assert_string_contains(message, str(first.attachment_id),
+			"%s must name the %s candidate's id" % [method, first_ws])
+		assert_string_contains(message, str(second.attachment_id),
+			"%s must name the %s candidate's id" % [method, second_ws])
+		assert_string_contains(message, first_ws, "%s must name the first workspace" % method)
+		assert_string_contains(message, second_ws, "%s must name the second workspace" % method)
+
+	assert_eq(_target("T1"), null, "an ambiguous label addresses nothing")
+	assert_true(is_instance_valid(first) and is_instance_valid(second),
+		"a refused target must not kill or free a pane")
+	# The refusal is returned before any write, so no pane can have received
+	# the marker; wait out an echo window so a silent delivery could not hide.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	for pane in [first, second]:
+		assert_false(str(pane._terminal.get_plain_text(200)).contains(marker),
+			"a refused label must deliver nothing to %s" % pane.attachment_id)
+
+	_ws._close_workspace_now(1)
+
+## An id resolves from either workspace (ids are globally unique), and a label
+## that only one pane carries still resolves while another workspace is active.
+func test_a_unique_label_and_every_id_resolve_from_another_workspace():
+	var first = _ws._tm._find_body(_ws._tm.tiles[0].wrapper)
+	_ws._add_workspace()
+	var second = _spawn("terminal")
+	assert_eq(str(second.pane_label), first.pane_label, "both workspaces hold a T1")
+
+	for body in [first, second]:
+		var by_id = WorkspaceIpcHandlers.handle(
+			_ws, "paneRead", {"pane_id": str(body.attachment_id), "lines": 20})
+		assert_false(by_id.has("error"), "an id must resolve from either workspace")
+		assert_eq(str(by_id["text"]), str(body._terminal.get_plain_text(20)),
+			"the id must read the pane it names, not the active workspace's")
+
+	# With one carrier left, the label is unambiguous again - even though the
+	# caller is looking at another workspace.
+	_ws._kill_now(second)
+	assert_eq(_target(str(first.pane_label)), first, "a unique label must still resolve")
+	var by_label = WorkspaceIpcHandlers.handle(
+		_ws, "paneRead", {"pane_id": str(first.pane_label), "lines": 20})
+	assert_false(by_label.has("error"), "a unique label must still address its pane")
+	assert_eq(str(by_label["text"]), str(first._terminal.get_plain_text(20)))
+
+	_ws._close_workspace_now(1)
 
 ## Give a pane unsaved work, the way the wiki editor does when a note is typed
 ## into: the IPC seam only cares that the pane reports `has_unsaved_state()`.

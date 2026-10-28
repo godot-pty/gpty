@@ -137,7 +137,10 @@ static func handle(ws, method: String, params: Dictionary):
 			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "spawned", "pane_id": body.attachment_id, "label": body.pane_label}))
 			return {"pane_id": body.attachment_id, "label": body.pane_label, "type": type_name}
 		"paneRead":
-			var pr_body = ws._find_pane_by_label(str(params.get("pane_id", "")))
+			var pr_found: Dictionary = ws._resolve_pane_target(str(params.get("pane_id", "")))
+			if pr_found.has("error"):
+				return error(str(pr_found["error"]))
+			var pr_body: Control = pr_found["body"]
 			var pr_lines = clampi(int(params.get("lines", 200)), 1, 2000)
 			if pr_body is TerminalPane:
 				return {"text": str(pr_body._terminal.get_plain_text(pr_lines))}
@@ -145,7 +148,7 @@ static func handle(ws, method: String, params: Dictionary):
 				# A cli_view has no terminal buffer; its body text is the
 				# drained child output the pane already displays.
 				return {"text": pr_body.get_text(pr_lines)}
-			return error("Pane '%s' not found" % params.get("pane_id", ""))
+			return error("Pane '%s' has no readable output" % params.get("pane_id", ""))
 		"paneStatus":
 			# No target = every pane's status (the CLI's no-argument mode and
 			# the MCP tool's): one document, built here where the pane list and
@@ -168,9 +171,10 @@ static func handle(ws, method: String, params: Dictionary):
 						"status": ps_any_status if ps_any_status is Dictionary else null,
 					})
 				return {"panes": ps_panes}
-			var ps_body = ws._find_pane_by_label(ps_target)
-			if ps_body == null:
-				return error("Pane '%s' not found" % ps_target)
+			var ps_found: Dictionary = ws._resolve_pane_target(ps_target)
+			if ps_found.has("error"):
+				return error(str(ps_found["error"]))
+			var ps_body: Control = ps_found["body"]
 			# Existing but with no status primitives: the pane is real, it just
 			# has nothing to report. Say that instead of "not found", which sent
 			# an agent looking for a pane it can already see in listPanes.
@@ -218,7 +222,10 @@ static func handle(ws, method: String, params: Dictionary):
 			if kp_pane_id == "active" and ws._tm.last_body:
 				kp_target = ws._tm.last_body
 			else:
-				kp_target = ws._find_pane_by_label(kp_pane_id)
+				var kp_found: Dictionary = ws._resolve_pane_target(kp_pane_id)
+				if kp_found.has("error"):
+					return error(str(kp_found["error"]))
+				kp_target = kp_found["body"]
 			if kp_target == null:
 				return error("Pane '%s' not found" % kp_pane_id)
 			# A caller cannot answer a dialog, so a pane holding unsaved work
@@ -236,9 +243,10 @@ static func handle(ws, method: String, params: Dictionary):
 			return {"success": true}
 		"focusPane":
 			var pane_id = str(params.get("pane_id", ""))
-			var body = ws._find_pane_by_label(pane_id)
-			if body == null:
-				return error("Pane '%s' not found" % pane_id)
+			var fp_found: Dictionary = ws._resolve_pane_target(pane_id)
+			if fp_found.has("error"):
+				return error(str(fp_found["error"]))
+			var body: Control = fp_found["body"]
 			# The same activation a click or a sidebar row performs: the pane
 			# becomes the active one, and only a pane that can hold keyboard
 			# focus takes it (a read-only pane must not swallow keys).
@@ -249,9 +257,10 @@ static func handle(ws, method: String, params: Dictionary):
 			var text = str(params.get("text", ""))
 			if text.length() > 65536:
 				return error("Injected text exceeds 64 KiB limit")
-			var body = ws._find_pane_by_label(pane_id)
-			if body == null:
-				return error("Pane '%s' not found" % pane_id)
+			var in_found: Dictionary = ws._resolve_pane_target(pane_id)
+			if in_found.has("error"):
+				return error(str(in_found["error"]))
+			var body: Control = in_found["body"]
 			if not body is TerminalPane:
 				return error("Pane '%s' is not a terminal" % pane_id)
 			body._terminal.send_line(text)

@@ -104,7 +104,8 @@ gpty new-pane --pane-type terminal
 # List all active panes
 gpty list-panes
 
-# Send text to a pane (by label, e.g. T1)
+# Target a pane by id (what list-panes reports) or by a label that is unique
+# across workspaces; a label two workspaces share is refused, not guessed
 gpty inject T1 --text "echo hello"
 
 # Read a pane's screen and scrollback; run a command in a new pane and wait for its output

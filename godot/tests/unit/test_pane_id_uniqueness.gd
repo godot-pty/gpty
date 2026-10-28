@@ -59,10 +59,10 @@ func test_the_renamed_pane_is_still_addressable_by_its_new_id():
 	panel._apply_to_target()
 
 	assert_eq(
-		_ws._find_pane_by_label(second.attachment_id), second,
+		_ws._resolve_pane_target(second.attachment_id).get("body"), second,
 		"IPC resolution finds the pane under the id it now carries"
 	)
 	assert_eq(
-		_ws._find_pane_by_label(first.attachment_id), first,
+		_ws._resolve_pane_target(first.attachment_id).get("body"), first,
 		"and the pane that kept the id is untouched"
 	)

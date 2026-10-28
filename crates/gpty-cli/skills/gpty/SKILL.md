@@ -62,6 +62,12 @@ Read a pane's screen plus scrollback:
 gpty pane-read <pane> --lines 200
 ```
 
+`<pane>` is the stable `id`, or a label that is unique across **all** workspaces.
+Labels restart at 1 in every workspace, so a label two workspaces share (`T1` in
+each) is refused with an error naming every candidate's workspace and id instead
+of being resolved to whichever workspace is active - prefer the `id` when the
+target matters, and prefer `gpty list-panes` over a guessed label.
+
 ### Run a command and watch its status
 
 ```

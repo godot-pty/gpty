@@ -104,19 +104,19 @@ enum Commands {
 
     /// Close a pane
     KillPane {
-        /// Pane ID or "active"
+        /// Pane ID, a label unique across workspaces, or "active"
         pane_id: String,
     },
 
     /// Focus a pane
     FocusPane {
-        /// Pane ID
+        /// Pane ID, or a label unique across workspaces
         pane_id: String,
     },
 
     /// Send text to a terminal pane
     Inject {
-        /// Target pane ID
+        /// Target pane ID, or a label unique across workspaces
         pane_id: String,
 
         /// Text to send (trailing newline added)
@@ -157,7 +157,7 @@ enum Commands {
 
     /// Read pane output (screen plus scrollback)
     PaneRead {
-        /// Target pane ID or label
+        /// Target pane ID, or a label unique across workspaces
         pane_id: String,
 
         /// Max lines (1-2000)
@@ -167,7 +167,7 @@ enum Commands {
 
     /// Pane status; omit the pane for every pane's status
     PaneStatus {
-        /// Target pane ID or label (omit for all panes)
+        /// Target pane ID, or a label unique across workspaces (omit for all panes)
         pane_id: Option<String>,
     },
 
@@ -186,7 +186,7 @@ enum Commands {
 
     /// Wait for a pane's output to match a regex pattern
     PaneWait {
-        /// Target pane ID or label
+        /// Target pane ID, or a label unique across workspaces
         pane_id: String,
 
         /// Regex pattern (Rust regex syntax, max 1024 chars)
