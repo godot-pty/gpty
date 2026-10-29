@@ -402,6 +402,15 @@ async fn main() {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     }
 
+    // A client process carries `GPTY_SECRET` in its environment for as long
+    // as it runs, and a program in a pane runs as the same user: mark this
+    // process non-dumpable before it connects, so that program cannot recover
+    // the secret from `/proc/<pid>/environ`. Logged, never fatal - the
+    // command still works without the marking.
+    if let Err(error) = gpty_core::hardening::harden_process() {
+        eprintln!("gpty: process hardening failed: {error}");
+    }
+
     // `--skill` prints the bundled agent skill and exits; no IPC, no daemon.
     if cli.skill {
         print!("{SKILL}");

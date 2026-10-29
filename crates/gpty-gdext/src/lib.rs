@@ -991,6 +991,13 @@ unsafe impl ExtensionLibrary for GptyExtension {
             // And before the first background thread can warn: without this,
             // every `log::warn!` from the gpty crates is dropped on the floor.
             diagnostics::install();
+            // This process holds `GPTY_SECRET`, and every pane shell is its
+            // child, so hide the environment from same-user programs before
+            // the first pane exists. A failure is a diagnostic: the process
+            // still works, it is only as exposed as it was before.
+            if let Err(error) = gpty_core::hardening::harden_process() {
+                log::warn!("process hardening failed: {error}");
+            }
         }
     }
 }

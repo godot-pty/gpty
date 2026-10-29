@@ -3,8 +3,9 @@
 end-to-end (new-pane -> status (one pane, then every pane) -> inject ->
 wait -> read -> scrollback -> broadcast -> pane-run exit code -> concept
 from output -> cli_view stdout -> wiki pane -> media pane -> vault search/read/weight ->
-plugin-provided profile -> kill), plus subscribe/eventsPoll on the event
-listener.
+plugin-provided profile -> kill), plus a Linux-only process-hardening check
+(a pane must not read the GUI's or a CLI client's environment) and
+subscribe/eventsPoll on the event listener.
 
 One harness for every platform: the transport is the only difference between
 Unix and Windows (named pipe vs Unix socket), so the flow is written once and
@@ -390,6 +391,212 @@ class Smoke:
                 second.kill()
                 second.wait(timeout=10)
 
+    def process_hardening(self, pane_id: str) -> None:
+        """A pane's programs must not read the GUI's or a client's environment.
+
+        Linux: the GUI clears `PR_SET_DUMPABLE`, making `/proc/<gui>/environ`
+        and `/proc/<gui>/maps` root-owned, so a same-user process in a pane
+        gets EACCES (measured 2026-10-29). The pane's own shell is an `exec`ed
+        child and must stay dumpable, or its programs cannot be debugged.
+
+        Windows: the GUI installs a process DACL that withholds
+        `PROCESS_VM_READ`/`PROCESS_VM_WRITE`/`PROCESS_CREATE_THREAD` from the
+        user, so the `OpenProcess` a memory read needs is refused, while
+        identity (`PROCESS_QUERY_LIMITED_INFORMATION`, the mask the socket's
+        peer check opens a client with) and termination still work.
+
+        A client process holds the same secret while it runs, so a long-lived
+        `gpty mcp` is checked the same way on both platforms. macOS is not
+        asserted: it exposes the environment to same-user readers through
+        `KERN_PROCARGS2` (`ps -E`, `pgrep`) regardless of tracing, and
+        SECURITY.md records that gap.
+        """
+        self.enter("process hardening")
+        if WINDOWS:
+            self._windows_process_hardening(pane_id)
+        elif sys.platform == "linux":
+            self._linux_process_hardening(pane_id)
+        else:
+            print(
+                f"  {sys.platform}: no dumpable rule or process DACL - the check is"
+                " Linux/Windows-only (the macOS gap is documented in SECURITY.md)",
+                flush=True,
+            )
+            return
+        log_text = self.engine_log.read_text(errors="replace")
+        self.require(
+            "process hardening failed" not in log_text,
+            "the GUI must report no process-hardening failure",
+            log_text[-500:],
+        )
+
+    def _linux_process_hardening(self, pane_id: str) -> None:
+        gui = self.gui.pid
+        # One injected line, several probes: each marker is printed as an
+        # output value, and the done marker is BUILT at shell runtime (the
+        # typed line's echo holds `SMOKE_DONE_H5%s`, never `SMOKE_DONE_H57`),
+        # so the wait cannot match the command's own echo.
+        probe = (
+            f"printf 'SMOKE_ENV_READ='; cat /proc/{gui}/environ >/dev/null 2>&1 && echo YES || echo DENIED; "
+            f"printf 'SMOKE_SECRET='; cat /proc/{gui}/environ 2>/dev/null | tr '\\000' '\\n' | grep -c '^GPTY_SECRET=' || true; "
+            f"printf 'SMOKE_MAPS_READ='; head -c 1 /proc/{gui}/maps >/dev/null 2>&1 && echo YES || echo DENIED; "
+            "printf 'SMOKE_PANE_READ='; sh -c 'cat /proc/$PPID/environ >/dev/null 2>&1 && echo YES || echo DENIED'; "
+            "printf 'SMOKE_DONE_H5%s\\n' 7"
+        )
+        self.cli("inject", pane_id, "--text", probe, "--json")
+        wait = self.wait_for_output(pane_id, "SMOKE_DONE_H57", timeout_ms=5000)
+        if wait.get("matched") is not True:
+            self.fail(
+                "the hardening probe must reach the pane",
+                {"wait": wait, **self.diag(pane_id, "SMOKE_DONE_H57")},
+            )
+        text = self.read_pane(pane_id, lines=80)
+        observed = [
+            line
+            for line in text.splitlines()
+            if line.startswith(
+                ("SMOKE_ENV_READ=", "SMOKE_SECRET=", "SMOKE_MAPS_READ=", "SMOKE_PANE_READ=")
+            )
+        ]
+        self.require(
+            "SMOKE_ENV_READ=DENIED" in text,
+            "a program in a pane must not be able to read the GUI's environment",
+            observed,
+        )
+        self.require(
+            "SMOKE_SECRET=0" in text,
+            "a program in a pane must not be able to recover GPTY_SECRET",
+            observed,
+        )
+        self.require(
+            "SMOKE_MAPS_READ=DENIED" in text,
+            "a program in a pane must not be able to read the GUI's memory map",
+            observed,
+        )
+        self.require(
+            "SMOKE_PANE_READ=YES" in text,
+            "the pane's own shell must stay dumpable, or its programs cannot be debugged",
+            observed,
+        )
+
+        # A client process holds the secret for as long as it runs. `gpty mcp`
+        # is the long-lived one, so a pane program gets a stable target.
+        self._with_mcp_client(
+            lambda pid: self._inject_linux_client_probe(pane_id, pid),
+        )
+
+    def _inject_linux_client_probe(self, pane_id: str, pid: int) -> None:
+        self.cli(
+            "inject",
+            pane_id,
+            "--text",
+            f"printf 'SMOKE_CLI_ENV_READ='; cat /proc/{pid}/environ >/dev/null 2>&1 && echo YES || echo DENIED; "
+            "printf 'SMOKE_DONE_H5%s\\n' 8",
+            "--json",
+        )
+        wait = self.wait_for_output(pane_id, "SMOKE_DONE_H58", timeout_ms=5000)
+        if wait.get("matched") is not True:
+            self.fail(
+                "the CLI-client probe must reach the pane",
+                {"wait": wait, **self.diag(pane_id, "SMOKE_DONE_H58")},
+            )
+        text = self.read_pane(pane_id, lines=80)
+        self.require(
+            "SMOKE_CLI_ENV_READ=DENIED" in text,
+            "a client process must not expose GPTY_SECRET to a program in a pane",
+            text.splitlines()[-8:],
+        )
+
+    def _windows_process_hardening(self, pane_id: str) -> None:
+        self._windows_access_probe(pane_id, "the GUI", "SMOKE_WIN", self.gui.pid)
+        self._with_mcp_client(
+            lambda pid: self._windows_access_probe(pane_id, "a client process", "SMOKE_WIN_CLI", pid),
+        )
+
+    def _windows_access_probe(self, pane_id: str, what: str, label: str, pid: int) -> None:
+        """Open `pid` from a pane with three access masks and assert the split.
+
+        `PROCESS_VM_READ` is the right a memory read (the PEB's environment
+        block) needs, so a hardened process must refuse it.
+        `PROCESS_QUERY_LIMITED_INFORMATION` is what the control socket's peer
+        check opens a client with, so a hardened client must keep it or every
+        command would be rejected. `PROCESS_TERMINATE` keeps a hung GUI endable
+        from Task Manager. The probe is one line because it is typed into
+        `cmd.exe`, which ends a command at a newline; it uses the interpreter
+        that runs this harness, so it does not depend on the pane's PATH.
+        """
+        code = (
+            "import ctypes,sys;"
+            "k=ctypes.WinDLL('kernel32',use_last_error=True);"
+            "k.OpenProcess.restype=ctypes.c_void_p;"
+            "k.OpenProcess.argtypes=(ctypes.c_uint32,ctypes.c_bool,ctypes.c_uint32);"
+            "k.CloseHandle.argtypes=(ctypes.c_void_p,);"
+            "pid=int(sys.argv[1]);label=sys.argv[2];"
+            "o=k.OpenProcess(0x0010,False,pid);"
+            "print(label+'_VM_READ='+('ALLOWED' if o else 'DENIED'),flush=True);"
+            "o and k.CloseHandle(o);"
+            "o=k.OpenProcess(0x1000,False,pid);"
+            "print(label+'_QUERY='+('YES' if o else 'NO'),flush=True);"
+            "o and k.CloseHandle(o);"
+            "o=k.OpenProcess(0x0001,False,pid);"
+            "print(label+'_TERMINATE='+('YES' if o else 'NO'),flush=True);"
+            "o and k.CloseHandle(o)"
+        )
+        self.cli(
+            "inject",
+            pane_id,
+            "--text",
+            f'"{sys.executable}" -c "{code}" {pid} {label}',
+            "--json",
+        )
+        wait = self.wait_for_output(
+            pane_id, f"{label}_VM_READ=(DENIED|ALLOWED)", timeout_ms=15000
+        )
+        if wait.get("matched") is not True:
+            self.fail(
+                f"the access probe for {what} must reach the pane",
+                {"wait": wait, **self.diag(pane_id, f"{label}_VM_READ=")},
+            )
+        text = self.read_pane(pane_id, lines=120)
+        observed = [
+            line for line in text.splitlines() if line.startswith(label) and "=" in line
+        ]
+        self.require(
+            f"{label}_VM_READ=DENIED" in text,
+            f"{what} must refuse PROCESS_VM_READ from a program in a pane",
+            observed,
+        )
+        self.require(
+            f"{label}_QUERY=YES" in text,
+            f"{what} must still allow PROCESS_QUERY_LIMITED_INFORMATION",
+            observed,
+        )
+        self.require(
+            f"{label}_TERMINATE=YES" in text,
+            f"{what} must still be terminable, or a hung GUI cannot be ended",
+            observed,
+        )
+        # Keep the values in the CI log: a green run is the evidence a closed
+        # roadmap row cites, and the values are what a pane program would see.
+        print(f"  {what}: " + ", ".join(observed), flush=True)
+
+    def _with_mcp_client(self, check) -> None:
+        """Run `check(pid)` against a long-lived `gpty mcp` client, then stop it."""
+        mcp = subprocess.Popen(
+            [str(self.cli_bin), "mcp"],
+            env=self.env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            time.sleep(0.5)
+            self.require(mcp.poll() is None, "gpty mcp must stay running while stdin is open")
+            check(mcp.pid)
+        finally:
+            mcp.kill()
+            mcp.wait(timeout=10)
+
     def teardown(self) -> None:
         if self.gui is None:
             return
@@ -718,6 +925,9 @@ def main() -> int:
                 "the shell must answer the readiness probe",
                 smoke.diag(pane_id, "SMOKE_READY_4Q7"),
             )
+
+        # ── a pane cannot read the GUI's (or CLI client's) environment ──
+        smoke.process_hardening(pane_id)
 
         # ── inject -> pane-wait -> pane-read ──────────────────────────
         smoke.enter("inject + pane-wait")

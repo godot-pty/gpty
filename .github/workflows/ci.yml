@@ -130,6 +130,14 @@ jobs:
           RUSTFLAGS: -Dwarnings
         run: cargo check --workspace
 
+      # One binary, no Godot: asserts the process DACL directly (memory denied,
+      # peer-check and terminate masks kept) so a DACL regression fails in
+      # seconds instead of inside the full GUI smoke.
+      - name: Process hardening (Windows DACL)
+        env:
+          RUSTFLAGS: -Dwarnings
+        run: cargo test -p gpty-core --test windows_hardening
+
   # ── GDScript tests (GUT headless) ────────────────────────────────────
   gut-tests:
     runs-on: ubuntu-latest
