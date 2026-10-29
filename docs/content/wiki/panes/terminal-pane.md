@@ -37,10 +37,12 @@ Keys the pane recognises itself:
 | Key | Effect |
 |---|---|
 | `Ctrl+Shift+C` | copy the selection |
-| `Ctrl+Shift+V` | paste (bracketed paste when the child asked for it) |
+| `Ctrl+Shift+V` | paste (bracketed paste when the child asked for it; control bytes are stripped either way) |
 | `Ctrl+Shift+F` | toggle the scrollback search bar (regular expressions) |
 | `PageUp` / `PageDown` | scroll the viewport |
 | `Ctrl+V` | deliberately passed through to the child as `^V` |
+
+Pasting treats the clipboard as untrusted input. Both modes drop control characters other than tab and newline - escape sequences included - before anything reaches the child: a clipboard holding `ESC[201~` would otherwise close a bracketed paste early and have the rest arrive as typing, and a pasted `^C` would interrupt. The bracketed mode then wraps the surviving text in `ESC[200~`/`ESC[201~`.
 
 Wheel scrolling moves three lines by default. Output that scrolls past the viewport goes to the pane's scrollback, which is written to SQLite and restored when the pane comes back after a restart; the default depth is 10,000 lines and the global setting clamps it to 100–100,000.
 

@@ -907,31 +907,40 @@ func _report_mouse_event(event: InputEvent, mode: int) -> bool:
 		return true
 	return false
 
+## What a paste may carry: everything except C0 controls other than newline and
+## tab, and DEL. Both branches of `build_paste_payload` go through this one
+## filter, so they cannot drift apart.
+##
+## The bracketed branch needs it as much as the plain one. A bracketed paste is
+## terminated by `ESC[201~`, and that terminator would come from the clipboard,
+## so text containing it ends the paste early and everything after it - a
+## newline included - arrives as typed input (the "pastejacking" shape, which
+## any web page can plant with a copy-to-clipboard button). Dropping ESC removes
+## that hole and every other sequence a bracketed application would interpret
+## as input. A bare CR goes too: the PTY turns it into Enter. Newlines and tabs
+## stay, because a multi-line paste into a shell is a normal thing to want.
+static var _paste_control_re: RegEx = null
+
+static func _paste_text(text: String) -> String:
+	# Compiled once and cached: this runs on every paste, and the bracketed
+	# branch is the common one (readline asks for DECSET 2004 by itself).
+	if _paste_control_re == null:
+		# C0 minus tab (0x09) and newline (0x0a), plus DEL.
+		_paste_control_re = RegEx.create_from_string("[\\x00-\\x08\\x0b-\\x1f\\x7f]")
+	return _paste_control_re.sub(text, "", true)
+
 ## Payload for a paste, given whether the application asked for bracketed
 ## paste (DECSET 2004).
 ##
-## With bracketed paste the application receives the text wrapped in
-## `ESC[200~`/`ESC[201~` and can insert it verbatim instead of treating
-## newlines as Enter and control bytes as commands.
-##
-## Without it nothing can distinguish pasted text from typing, so the guard is
-## the other way round: control bytes are dropped (escape sequences included —
-## a clipboard can carry `ESC[201~`, a `\x03`, or an SGR that repaints the
-## pane), while newlines and tabs survive because a multi-line paste into a
-## plain shell is a normal thing to want. A bare CR goes too: the PTY turns it
-## into Enter, which is exactly the injection this guards against.
+## With bracketed paste the application receives the filtered text wrapped in
+## `ESC[200~`/`ESC[201~` and can insert it as a block instead of treating
+## newlines as Enter and control bytes as commands. Without it nothing can
+## distinguish pasted text from typing, so the same filter is the whole guard.
 static func build_paste_payload(text: String, bracketed: bool) -> String:
+	var safe := _paste_text(text)
 	if bracketed:
-		return "\u001b[200~" + text + "\u001b[201~"
-	var out := ""
-	for ch in text:
-		var code := ch.unicode_at(0)
-		if code < 32 and ch != "\n" and ch != "\t":
-			continue
-		if code == 127:
-			continue
-		out += ch
-	return out
+		return "\u001b[200~" + safe + "\u001b[201~"
+	return safe
 
 ## Whether the child asked for bracketed paste. Split out so a test can
 ## drive the paste path without a live application on the other end (same

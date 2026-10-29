@@ -17,7 +17,7 @@ These are handled by the focused terminal before the workspace sees them. `Ctrl+
 
 `Ctrl+Shift+C` copies only. With nothing selected it still consumes the chord and does nothing — it never falls through to a workspace shortcut, and it never clears the search bar or triggers an action. After a copy the selection is cleared.
 
-`Ctrl+Shift+V` pastes. When the program running in the terminal has enabled bracketed paste, gPTY wraps the text the way the terminal protocol expects, so a shell or editor can tell a paste from typing.
+`Ctrl+Shift+V` pastes. When the program running in the terminal has enabled bracketed paste, gPTY wraps the text the way the terminal protocol expects, so a shell or editor can tell a paste from typing. Either way the text is filtered first: control characters other than tab and newline are removed, escape included, so a clipboard that carries a paste terminator or an interrupt cannot end the bracket early or act as a keypress. Newlines and tabs survive, so a multi-line paste stays a multi-line paste.
 
 `Ctrl+V` is the deliberate exception. It is passed through to the shell as a literal `^V` instead of pasting, because programs use it: readline's quoted-insert and vim's visual-block mode both rely on receiving it. Paste is `Ctrl+Shift+V` for this reason, not by convention.
 
