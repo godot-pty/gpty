@@ -4,7 +4,11 @@ class_name InspectorPane
 ## Does not attach to a terminal-hosted OMP conversation.
 
 @export var backend := "omp"
-@export var auto_run := true
+## Auto-send is off by default, and a file cannot turn it on (the settings
+## table marks `auto_run`, `accept_concept_captures` and `system_prompt`
+## `file: false`). A capture then waits for the user until they enable it in
+## the pane panel, so the first auto-send of a capture is always their choice.
+@export var auto_run := false
 @export var accept_concept_captures := false
 @export var system_prompt := ""
 @export var model := ""
@@ -277,12 +281,13 @@ func _default_title() -> String:
 	return "Inspector"
 
 func _get_layout_state() -> Dictionary:
+	# `system_prompt`, `auto_run` and `accept_concept_captures` are runtime
+	# state, not layout state: the settings table refuses them from files
+	# (`file: false`), so saving them here would only write keys the restore
+	# path drops with a notice. The pane panel sets them for the live pane.
 	var state = super._get_layout_state()
 	state.merge({
 		"backend": backend,
-		"auto_run": auto_run,
-		"accept_concept_captures": accept_concept_captures,
-		"system_prompt": system_prompt,
 		"model": model,
 		"command": command.duplicate(),
 	})

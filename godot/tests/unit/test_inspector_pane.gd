@@ -21,6 +21,27 @@ func _ai_ready() -> bool:
 		"GptyAi must be registered: build and install the gpty-gdext extension")
 	return _pane._ai != null
 
+# ── What a file may not aim ────────────────────────────────────────────
+
+func test_a_fresh_pane_starts_with_auto_send_off():
+	# `before_each` switches auto-run on for the capture tests; the shipping
+	# default is what a restored pane gets, and it must be off.
+	var fresh = InspectorPane.new()
+	assert_false(fresh.auto_run, "auto-send is opt-in")
+	assert_false(fresh.accept_concept_captures, "captures are opt-in")
+	assert_eq(fresh.system_prompt, "", "no prompt until the user writes one")
+	fresh.free()
+
+func test_layout_state_carries_no_prompt_or_auto_send():
+	# Those three are runtime state: saving them would write keys the restore
+	# path now refuses, and every restore would toast about dropped keys.
+	_pane.system_prompt = "session only"
+	_pane.accept_concept_captures = true
+	var state: Dictionary = _pane._get_layout_state()
+	for key in ["system_prompt", "auto_run", "accept_concept_captures"]:
+		assert_false(state.has(key), "%s must not be saved into a layout" % key)
+	assert_eq(state.get("backend"), "mock", "the backend choice is layout state")
+
 func test_receive_content_starts_mock_turn():
 	if not _ai_ready():
 		return

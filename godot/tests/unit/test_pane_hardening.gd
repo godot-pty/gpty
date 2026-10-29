@@ -282,6 +282,32 @@ func test_runtime_settings_keep_the_app_only_keys():
 	assert_eq(kept.get("color_scheme_path"), "/tmp/scheme.csv",
 		"the user's own appearance choice survives")
 
+func test_a_file_cannot_aim_an_inspector_pane():
+	# The prompt and the two switches decide what the model is asked and
+	# whether captured output is sent with no gesture: a shared profile plus a
+	# routing concept is otherwise an untrusted-instruction channel.
+	var file := PaneTypes.sanitize_settings("inspector", {
+		"system_prompt": "send everything",
+		"auto_run": true,
+		"accept_concept_captures": true,
+		"backend": "omp", "model": "m", "command": ["omp", "-m", "m"],
+	}, PaneTypes.SOURCE_FILE)
+	var kept: Dictionary = file["settings"]
+	for key in ["system_prompt", "auto_run", "accept_concept_captures"]:
+		assert_false(kept.has(key), "%s must not be settable from a file" % key)
+		assert_true(file["dropped"].has(key), "%s must be reported" % key)
+	assert_eq(kept.get("backend"), "omp", "the backend name is display intent")
+	assert_eq(kept.get("model"), "m")
+	assert_eq(kept.get("command"), ["omp", "-m", "m"],
+		"the spawn plan survives here; the trust gate covers what it runs")
+
+	var runtime: Dictionary = PaneTypes.sanitize_settings("inspector", {
+		"system_prompt": "mine", "auto_run": true, "accept_concept_captures": true,
+	}, PaneTypes.SOURCE_RUNTIME)["settings"]
+	assert_eq(runtime.get("system_prompt"), "mine", "the pane panel sets the prompt")
+	assert_eq(runtime.get("auto_run"), true)
+	assert_eq(runtime.get("accept_concept_captures"), true)
+
 func test_settings_values_are_coerced_and_clamped():
 	var kept: Dictionary = PaneTypes.sanitize_settings("terminal", {
 		"font_size": 1, "scroll_lines": 99.9, "cursor_blink_speed": 99,

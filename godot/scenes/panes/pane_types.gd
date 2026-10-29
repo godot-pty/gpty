@@ -365,9 +365,15 @@ const FILE_TREE_SETTINGS := {
 const INSPECTOR_SETTINGS := {
 	"backend": {"kind": "text", "max": 32},
 	"command": {"kind": "argv"},
-	"auto_run": {"kind": "bool"},
-	"accept_concept_captures": {"kind": "bool"},
-	"system_prompt": {"kind": "text", "max": 65536},
+	# A file may not aim the pane. The prompt decides what the model is asked,
+	# and the two switches decide whether a concept capture is sent with no
+	# gesture at all - a shared profile plus a routing concept is otherwise an
+	# untrusted-instruction channel. The pane panel (SOURCE_RUNTIME) sets all
+	# three for the live pane; a restored pane starts from its own defaults
+	# (auto-send off, no prompt), and none of them is layout state.
+	"auto_run": {"kind": "bool", "file": false},
+	"accept_concept_captures": {"kind": "bool", "file": false},
+	"system_prompt": {"kind": "text", "max": 65536, "file": false},
 	"model": {"kind": "text", "max": 128},
 }
 
