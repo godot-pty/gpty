@@ -51,6 +51,149 @@ WINDOWS = os.name == "nt"
 SECRET = "smoke-secret"
 READY_TIMEOUT_S = 60.0
 
+# Written into the sandbox and run inside a pane for the Windows process-hardening
+# check. It drops SeDebugPrivilege first: a normal pane process does not have it
+# enabled, and an enabled privilege opens any process regardless of its DACL
+# (that is an elevated debugger, not a pane). It prints the token SID and the
+# privilege state so a CI failure says which opener was used.
+WINDOWS_HARDENING_PROBE = r'''
+import ctypes
+import sys
+from ctypes import wintypes
+
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+
+kernel32.OpenProcess.restype = wintypes.HANDLE
+kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+kernel32.LocalFree.argtypes = (wintypes.HLOCAL,)
+kernel32.LocalFree.restype = wintypes.HLOCAL
+advapi32.OpenProcessToken.argtypes = (
+    wintypes.HANDLE,
+    wintypes.DWORD,
+    ctypes.POINTER(wintypes.HANDLE),
+)
+advapi32.GetTokenInformation.argtypes = (
+    wintypes.HANDLE,
+    ctypes.c_int,
+    ctypes.c_void_p,
+    wintypes.DWORD,
+    ctypes.POINTER(wintypes.DWORD),
+)
+advapi32.LookupPrivilegeValueW.argtypes = (
+    wintypes.LPCWSTR,
+    wintypes.LPCWSTR,
+    ctypes.POINTER(ctypes.c_uint64),
+)
+advapi32.AdjustTokenPrivileges.argtypes = (
+    wintypes.HANDLE,
+    wintypes.BOOL,
+    ctypes.c_void_p,
+    wintypes.DWORD,
+    ctypes.c_void_p,
+    ctypes.POINTER(wintypes.DWORD),
+)
+advapi32.ConvertSidToStringSidW.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(wintypes.LPWSTR),
+)
+
+TOKEN_QUERY = 0x0008
+TOKEN_ADJUST_PRIVILEGES = 0x0020
+TOKEN_USER = 1
+TOKEN_PRIVILEGES = 3
+SE_PRIVILEGE_ENABLED = 0x00000002
+ERROR_NOT_ALL_ASSIGNED = 1300
+
+
+def token_sid(token):
+    needed = wintypes.DWORD()
+    advapi32.GetTokenInformation(token, TOKEN_USER, None, 0, ctypes.byref(needed))
+    if not needed.value:
+        return "?"
+    buf = (ctypes.c_ubyte * needed.value)()
+    if not advapi32.GetTokenInformation(
+        token, TOKEN_USER, buf, needed.value, ctypes.byref(needed)
+    ):
+        return "?"
+    sid = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))[0]
+    text = wintypes.LPWSTR()
+    if not advapi32.ConvertSidToStringSidW(sid, ctypes.byref(text)):
+        return "?"
+    try:
+        return text.value or "?"
+    finally:
+        kernel32.LocalFree(ctypes.cast(text, ctypes.c_void_p))
+
+
+def privilege_state(token, luid):
+    needed = wintypes.DWORD()
+    advapi32.GetTokenInformation(token, TOKEN_PRIVILEGES, None, 0, ctypes.byref(needed))
+    if not needed.value:
+        return "UNKNOWN"
+    buf = (ctypes.c_ubyte * needed.value)()
+    if not advapi32.GetTokenInformation(
+        token, TOKEN_PRIVILEGES, buf, needed.value, ctypes.byref(needed)
+    ):
+        return "UNKNOWN"
+    count = int.from_bytes(bytes(buf[0:4]), "little")
+    for index in range(count):
+        offset = 4 + index * 12
+        if offset + 12 > len(buf):
+            break
+        if int.from_bytes(bytes(buf[offset:offset + 8]), "little") == luid:
+            attributes = int.from_bytes(bytes(buf[offset + 8:offset + 12]), "little")
+            return "ENABLED" if attributes & SE_PRIVILEGE_ENABLED else "DISABLED"
+    return "ABSENT"
+
+
+def drop_debug_privilege(token):
+    luid = ctypes.c_uint64()
+    if not advapi32.LookupPrivilegeValueW(None, "SeDebugPrivilege", ctypes.byref(luid)):
+        return "UNKNOWN"
+    before = privilege_state(token, luid.value)
+    state = (ctypes.c_ubyte * 16)()
+    state[0:4] = (1).to_bytes(4, "little")
+    state[4:12] = luid.value.to_bytes(8, "little")
+    state[12:16] = (0).to_bytes(4, "little")
+    if not advapi32.AdjustTokenPrivileges(token, False, state, 0, None, None):
+        return before + "->FAILED"
+    after = "ABSENT" if ctypes.get_last_error() == ERROR_NOT_ALL_ASSIGNED else "DISABLED"
+    return before + "->" + after
+
+
+def try_open(pid, access):
+    handle = kernel32.OpenProcess(access, False, pid)
+    if not handle:
+        return False
+    kernel32.CloseHandle(handle)
+    return True
+
+
+pid = int(sys.argv[1])
+label = sys.argv[2]
+
+token = wintypes.HANDLE()
+if advapi32.OpenProcessToken(
+    kernel32.GetCurrentProcess(),
+    TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES,
+    ctypes.byref(token),
+):
+    print(label + "_TOKEN=" + token_sid(token), flush=True)
+    print(label + "_DEBUG_PRIV=" + drop_debug_privilege(token), flush=True)
+    kernel32.CloseHandle(token)
+else:
+    print(label + "_TOKEN=?", flush=True)
+    print(label + "_DEBUG_PRIV=UNKNOWN", flush=True)
+
+print(label + "_VM_READ=" + ("ALLOWED" if try_open(pid, 0x0010) else "DENIED"), flush=True)
+print(label + "_QUERY=" + ("YES" if try_open(pid, 0x1000) else "NO"), flush=True)
+print(label + "_TERMINATE=" + ("YES" if try_open(pid, 0x0001) else "NO"), flush=True)
+'''
+
+
 
 class SmokeFailure(Exception):
     """A step failed; the message is the report."""
@@ -508,12 +651,18 @@ class Smoke:
         )
 
     def _windows_process_hardening(self, pane_id: str) -> None:
-        self._windows_access_probe(pane_id, "the GUI", "SMOKE_WIN", self.gui.pid)
+        probe = self.tmp / "hardening_probe.py"
+        probe.write_text(WINDOWS_HARDENING_PROBE.strip() + "\n", encoding="utf-8")
+        self._windows_access_probe(pane_id, "the GUI", "SMOKE_WIN", self.gui.pid, probe)
         self._with_mcp_client(
-            lambda pid: self._windows_access_probe(pane_id, "a client process", "SMOKE_WIN_CLI", pid),
+            lambda pid: self._windows_access_probe(
+                pane_id, "a client process", "SMOKE_WIN_CLI", pid, probe
+            ),
         )
 
-    def _windows_access_probe(self, pane_id: str, what: str, label: str, pid: int) -> None:
+    def _windows_access_probe(
+        self, pane_id: str, what: str, label: str, pid: int, probe: Path
+    ) -> None:
         """Open `pid` from a pane with three access masks and assert the split.
 
         `PROCESS_VM_READ` is the right a memory read (the PEB's environment
@@ -521,32 +670,20 @@ class Smoke:
         `PROCESS_QUERY_LIMITED_INFORMATION` is what the control socket's peer
         check opens a client with, so a hardened client must keep it or every
         command would be rejected. `PROCESS_TERMINATE` keeps a hung GUI endable
-        from Task Manager. The probe is one line because it is typed into
-        `cmd.exe`, which ends a command at a newline; it uses the interpreter
-        that runs this harness, so it does not depend on the pane's PATH.
+        from Task Manager.
+
+        The probe is a script file rather than a `-c` one-liner: it drops
+        `SeDebugPrivilege` before opening (that privilege overrides any process
+        DACL, so leaving it on would model an elevated debugger, not a pane) and
+        prints the token SID, the privilege state, and the three results, so a
+        CI failure says which opener was used. It runs the interpreter that runs
+        this harness, so it does not depend on the pane's PATH.
         """
-        code = (
-            "import ctypes,sys;"
-            "k=ctypes.WinDLL('kernel32',use_last_error=True);"
-            "k.OpenProcess.restype=ctypes.c_void_p;"
-            "k.OpenProcess.argtypes=(ctypes.c_uint32,ctypes.c_bool,ctypes.c_uint32);"
-            "k.CloseHandle.argtypes=(ctypes.c_void_p,);"
-            "pid=int(sys.argv[1]);label=sys.argv[2];"
-            "o=k.OpenProcess(0x0010,False,pid);"
-            "print(label+'_VM_READ='+('ALLOWED' if o else 'DENIED'),flush=True);"
-            "o and k.CloseHandle(o);"
-            "o=k.OpenProcess(0x1000,False,pid);"
-            "print(label+'_QUERY='+('YES' if o else 'NO'),flush=True);"
-            "o and k.CloseHandle(o);"
-            "o=k.OpenProcess(0x0001,False,pid);"
-            "print(label+'_TERMINATE='+('YES' if o else 'NO'),flush=True);"
-            "o and k.CloseHandle(o)"
-        )
         self.cli(
             "inject",
             pane_id,
             "--text",
-            f'"{sys.executable}" -c "{code}" {pid} {label}',
+            f'"{sys.executable}" "{probe}" {pid} {label}',
             "--json",
         )
         wait = self.wait_for_output(

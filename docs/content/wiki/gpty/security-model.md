@@ -63,7 +63,7 @@ On Linux a non-dumpable process also loses `/proc/<pid>/maps`, `/proc/<pid>/mem`
 
 ### The Windows equivalent
 
-Windows exposes the environment only by reading process memory. gPTY therefore gives the process a DACL that withholds `PROCESS_VM_READ`, `PROCESS_VM_WRITE`, `PROCESS_VM_OPERATION` and `PROCESS_CREATE_THREAD` from the user — so `ReadProcessMemory` into the PEB is refused, and so is code injection — while keeping `PROCESS_QUERY_LIMITED_INFORMATION` (the mask the control socket's peer check opens a client with), `PROCESS_TERMINATE` (Task Manager can still end a hung GUI), `SYNCHRONIZE` and `READ_CONTROL`. `SYSTEM` keeps full access.
+Windows exposes the environment only by reading process memory. gPTY therefore gives the process a DACL that withholds `PROCESS_VM_READ`, `PROCESS_VM_WRITE`, `PROCESS_VM_OPERATION` and `PROCESS_CREATE_THREAD` from the owner — so `ReadProcessMemory` into the PEB is refused, and so is code injection — while keeping `PROCESS_QUERY_LIMITED_INFORMATION` (the mask the control socket's peer check opens a client with), `PROCESS_TERMINATE` (Task Manager can still end a hung GUI), `SYNCHRONIZE` and `READ_CONTROL`. It is one ACE, for the process owner: `SYSTEM` gets no blanket entry, because it holds `SeDebugPrivilege` and a full grant would re-grant everything when the app itself runs as SYSTEM. A process that enables that privilege overrides any process DACL; that is an elevated debugger, not a pane.
 
 ### Cost and limits
 

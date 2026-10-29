@@ -32,7 +32,15 @@
 //! `PROCESS_CREATE_THREAD` from the user, while keeping identity
 //! (`PROCESS_QUERY_LIMITED_INFORMATION`, which the socket's peer check needs),
 //! termination (a hung GUI can still be ended), synchronization and
-//! `READ_CONTROL`. `SYSTEM` keeps full access.
+//! `READ_CONTROL`. Exactly one ACE is installed, for the process owner: a
+//! SYSTEM process holds `SeDebugPrivilege`, and a blanket SYSTEM ACE would
+//! re-grant full access whenever gPTY itself runs as SYSTEM (the owner would
+//! then match it, and the hardening would be a no-op).
+//!
+//! A process that *enables* `SeDebugPrivilege` overrides any process DACL;
+//! that is an elevated debugger, not a normal pane, and is outside what a DACL
+//! can promise - the Windows test and the smoke probe drop the privilege so
+//! they model the same-user case the guard is for.
 //!
 //! ## Cost, and the opt-out
 //!
@@ -158,8 +166,6 @@ mod windows {
     const ACL_REVISION: u32 = 2;
     /// `SECURITY_MAX_SID_SIZE` from `winnt.h`: the largest legal SID, in bytes.
     const SECURITY_MAX_SID_SIZE: usize = 68;
-    const WIN_LOCAL_SYSTEM_SID: u32 = 22;
-    const PROCESS_ALL_ACCESS: u32 = 0x001F_0FFF;
     /// `sizeof(ACL)` from `winnt.h`.
     const ACL_HEADER_BYTES: usize = 8;
     /// `sizeof(ACCESS_ALLOWED_ACE)` from `winnt.h`, including its inline
@@ -181,12 +187,6 @@ mod windows {
             info: *mut c_void,
             info_len: u32,
             returned_len: *mut u32,
-        ) -> i32;
-        fn CreateWellKnownSid(
-            sid_type: u32,
-            domain_sid: *mut c_void,
-            sid: *mut c_void,
-            sid_len: *mut u32,
         ) -> i32;
         fn InitializeAcl(acl: *mut c_void, acl_len: u32, acl_revision: u32) -> i32;
         fn AddAccessAllowedAce(
@@ -214,50 +214,25 @@ mod windows {
         // the buffer pointer-aligned for that first field.
         let (token_user, user_sid) = user_sid()?;
 
-        // One `ACL` header and two ACEs (the user and SYSTEM). SIDs are
+        // One `ACL` header and one ACE, for the process owner. SIDs are
         // DWORD-aligned, so `Vec<u32>` gives the ACL APIs the alignment they
-        // document; `AddAccessAllowedAce` fills in each ACE's size.
+        // document; `AddAccessAllowedAce` fills in the ACE's size.
         let acl_bytes = ACL_HEADER_BYTES
-            + 2 * (ACCESS_ALLOWED_ACE_BYTES - size_of::<u32>() + SECURITY_MAX_SID_SIZE);
+            + (ACCESS_ALLOWED_ACE_BYTES - size_of::<u32>() + SECURITY_MAX_SID_SIZE);
         let mut acl_buffer = vec![0u32; acl_bytes.div_ceil(size_of::<u32>())];
         let acl = acl_buffer.as_mut_ptr().cast::<c_void>();
         let acl_len = (acl_buffer.len() * size_of::<u32>()) as u32;
-
-        let mut system_sid = [0u32; SECURITY_MAX_SID_SIZE / size_of::<u32>()];
-        let mut system_sid_len = SECURITY_MAX_SID_SIZE as u32;
-        // SAFETY: the destination is a 68-byte, DWORD-aligned buffer and the
-        // length is that buffer's size, as CreateWellKnownSid requires.
-        let created = unsafe {
-            CreateWellKnownSid(
-                WIN_LOCAL_SYSTEM_SID,
-                core::ptr::null_mut(),
-                system_sid.as_mut_ptr().cast::<c_void>(),
-                &mut system_sid_len,
-            )
-        };
-        if created == 0 {
-            return Err(io::Error::last_os_error());
-        }
 
         // SAFETY: `acl` points at `acl_len` writable bytes, DWORD-aligned.
         if unsafe { InitializeAcl(acl, acl_len, ACL_REVISION) } == 0 {
             return Err(io::Error::last_os_error());
         }
-        // SAFETY: the ACL has room for both ACEs, and both SIDs are valid and
-        // outlive this call (`user_sid` is inside `token_user`; `system_sid`
-        // is a local).
+        // SAFETY: the ACL has room for the ACE, and `user_sid` is valid and
+        // outlives this call (it points inside `token_user`).
         let user_ace = unsafe { AddAccessAllowedAce(acl, ACL_REVISION, USER_ACCESS, user_sid) };
-        let system_ace = unsafe {
-            AddAccessAllowedAce(
-                acl,
-                ACL_REVISION,
-                PROCESS_ALL_ACCESS,
-                system_sid.as_mut_ptr().cast::<c_void>(),
-            )
-        };
-        // The ACEs copy their SIDs, so the token buffer is no longer needed.
+        // The ACE copies its SID, so the token buffer is no longer needed.
         drop(token_user);
-        if user_ace == 0 || system_ace == 0 {
+        if user_ace == 0 {
             return Err(io::Error::last_os_error());
         }
 

@@ -156,14 +156,19 @@ These are load-bearing guards. Reports that require removing one of them should 
   `PROCESS_VM_READ`, `PROCESS_VM_WRITE`, `PROCESS_VM_OPERATION` and `PROCESS_CREATE_THREAD` from the
   user (the rights a memory read or code injection needs) while keeping
   `PROCESS_QUERY_LIMITED_INFORMATION` (the socket's peer check opens a client with it),
-  `PROCESS_TERMINATE` (a hung GUI stays endable), `SYNCHRONIZE` and `READ_CONTROL`; `SYSTEM` keeps
-  full access. The cost is deliberate: a non-dumpable process on Linux produces no core dump and
+  `PROCESS_TERMINATE` (a hung GUI stays endable), `SYNCHRONIZE` and `READ_CONTROL`, in one ACE for
+  the process owner. There is no blanket `SYSTEM` ACE: `SYSTEM` holds `SeDebugPrivilege`, and a full
+  grant would re-grant everything whenever gPTY itself runs as `SYSTEM` (the owner then matches it).
+  A process that *enables* `SeDebugPrivilege` can open any process regardless of its DACL - that is
+  an elevated debugger, not a normal pane, and the Windows test and smoke drop the privilege before
+  probing. The cost is deliberate: a non-dumpable process on Linux produces no core dump and
   cannot be attached to by a same-user debugger or profiler, and a hardened Windows process cannot
   be opened for memory reads by the same user, so `GPTY_ALLOW_DEBUG=1` opts out for a developer who
   needs one. The Windows DACL is compile-verified; a dedicated Windows integration test asserts the
-  split on its own process (the default DACL grants memory access, the hardened one refuses it, and
-  the peer-check and terminate masks still open), and the smoke's `process hardening` step asserts it
-  for the GUI and a client on a real Windows run. macOS has no mechanism wired up; see Known
+  split on its own process (the default DACL grants memory access, the hardened one refuses it, the
+  installed DACL read back has one owner ACE without memory rights, and the peer-check and terminate
+  masks still open), and the smoke's `process hardening` step asserts it for the GUI and a client on
+  a real Windows run. macOS has no mechanism wired up; see Known
   limitations.
 - **Restored layouts and profiles**: tile types, settings, and grid geometry are validated; a tile
   that starts a different program or passes extra arguments raises the Workspace Trust prompt before
