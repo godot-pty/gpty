@@ -164,11 +164,10 @@ These are load-bearing guards. Reports that require removing one of them should 
   probing. The cost is deliberate: a non-dumpable process on Linux produces no core dump and
   cannot be attached to by a same-user debugger or profiler, and a hardened Windows process cannot
   be opened for memory reads by the same user, so `GPTY_ALLOW_DEBUG=1` opts out for a developer who
-  needs one. The Windows DACL is compile-verified; a dedicated Windows integration test asserts the
-  split on its own process (the default DACL grants memory access, the hardened one refuses it, the
-  installed DACL read back has one owner ACE without memory rights, and the peer-check and terminate
-  masks still open), and the smoke's `process hardening` step asserts it for the GUI and a client on
-  a real Windows run. macOS has no mechanism wired up; see Known
+  needs one. The Windows DACL is verified by the Windows CI jobs: a dedicated integration test (which
+  also reads the installed DACL back and asserts one owner ACE without memory rights) and the
+  smoke's `process hardening` step against the GUI and a client. macOS has no mechanism wired up;
+  see Known
   limitations.
 - **Restored layouts and profiles**: tile types, settings, and grid geometry are validated; a tile
   that starts a different program or passes extra arguments raises the Workspace Trust prompt before
