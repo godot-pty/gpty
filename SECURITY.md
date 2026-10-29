@@ -57,10 +57,14 @@ to be intentional and documented, we will explain the reasoning in the thread an
 **you** can already read your files, attach to your terminals, and drive the control socket, so "another
 program running as me can control the workspace" shouldn't be a vulnerability on its own (please open a 
 discussion post if you think otherwise). Setting `GPTY_SECRET` raises the bar for *other users* of the
-machine; it does not and cannot change the trust class, and it does not separate a pane from the control
-socket. That second point matters: the trust above is for processes *outside* gPTY. Code running
-*inside* a pane is not separated from the control surface today, which is a known, tracked gap (see
-"A program in a pane can read and drive every other pane" under Known limitations).
+machine, and on Linux and Windows it also keeps the secret out of reach of code running in your
+panes: the GUI and the CLI harden themselves at startup (a non-dumpable process on Linux, a process
+DACL without memory access on Windows), so a pane program cannot read `GPTY_SECRET` from their
+environment and therefore cannot authenticate to the control socket. That is a credential barrier, not
+pane isolation, and it only exists when a secret is set (the default install sets none). The trust
+above is for processes *outside* gPTY; code running *inside* a pane is not separated from the control
+surface by a permission model yet, which is a known, tracked gap (see "A program in a pane can read and
+drive every other pane" under Known limitations).
 
 **Untrusted - must never gain authority:**
 
@@ -83,9 +87,12 @@ socket. That second point matters: the trust above is for processes *outside* gP
 - Cross-user attacks on shared hosts: socket squatting, world-writable paths, `PATH`/env manipulation;
 - remote content driving a local action;
 - A lower-trust pane influencing a higher-trust one (an ordinary shell pane feeding a root shell or
-  an SSH session). This is in scope as a goal and is **not enforced yet**: a program in any pane can
-  currently drive every other pane. It is a documented known limitation rather than an unreported
-  bug, and enforcement is on the roadmap (see Known limitations);
+  an SSH session). This is in scope as a goal and has **no per-pane permission model yet**: with the
+  default install (no `GPTY_SECRET`) a program in any pane can drive every other pane. Setting a
+  secret closes the environment path that used to leak it on Linux and Windows (see Hardening in
+  place), so the socket gate becomes real for pane programs - but that is a credential, not a
+  boundary, and it is a documented known limitation rather than an unreported bug. Enforcement is on
+  the roadmap (see Known limitations);
 - Denial of service that locks the GUI thread or grows memory without a bound.
 
 **Out of scope (by design, or accepted):**
@@ -139,6 +146,25 @@ These are load-bearing guards. Reports that require removing one of them should 
   `LESSOPEN`, `GIT_SSH_COMMAND`, `GIT_EXTERNAL_DIFF`, `GIT_PAGER`, `PAGER`) are refused from
   configuration. Absolute programs restored from files must not be group/other-writable and must be
   owned by you or root.
+- **The GUI's and the CLI's own environment**: both harden themselves at startup
+  (`gpty_core::hardening::harden_process`, called from the GDExtension's init and the CLI's `main`).
+  A pane's shell is a child of the GUI and runs as you, so without this it can recover `GPTY_SECRET`
+  from the parent's environment. On Linux the call clears the dumpable bit (`PR_SET_DUMPABLE 0`), so
+  `/proc/<gui pid>/environ` and `/proc/<gui pid>/maps` are root-owned and a pane program gets
+  `EACCES` (measured 2026-10-29), while the pane's own `exec`ed shell - and the programs it starts -
+  returns to dumpable and stays debuggable. On Windows it installs a process DACL that withholds
+  `PROCESS_VM_READ`, `PROCESS_VM_WRITE`, `PROCESS_VM_OPERATION` and `PROCESS_CREATE_THREAD` from the
+  user (the rights a memory read or code injection needs) while keeping
+  `PROCESS_QUERY_LIMITED_INFORMATION` (the socket's peer check opens a client with it),
+  `PROCESS_TERMINATE` (a hung GUI stays endable), `SYNCHRONIZE` and `READ_CONTROL`; `SYSTEM` keeps
+  full access. The cost is deliberate: a non-dumpable process on Linux produces no core dump and
+  cannot be attached to by a same-user debugger or profiler, and a hardened Windows process cannot
+  be opened for memory reads by the same user, so `GPTY_ALLOW_DEBUG=1` opts out for a developer who
+  needs one. The Windows DACL is compile-verified; a dedicated Windows integration test asserts the
+  split on its own process (the default DACL grants memory access, the hardened one refuses it, and
+  the peer-check and terminate masks still open), and the smoke's `process hardening` step asserts it
+  for the GUI and a client on a real Windows run. macOS has no mechanism wired up; see Known
+  limitations.
 - **Restored layouts and profiles**: tile types, settings, and grid geometry are validated; a tile
   that starts a different program or passes extra arguments raises the Workspace Trust prompt before
   it runs, and `layoutLoad` over the control socket refuses such a profile (a caller cannot answer a
@@ -195,9 +221,17 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   GUI and runs as you, so it passes the control socket's one gate (same user). The PTY layer strips
   `GPTY_SOCKET` and `GPTY_SECRET` from a pane's environment, but the default socket path is derived
   from `XDG_RUNTIME_DIR`, which is inherited, so the `gpty` CLI inside a pane finds the socket anyway.
-  The secret does not close the gap either: the pane's shell is a child of the GUI process and, on
-  Linux, can read the secret from `/proc/<gui pid>/environ` (shown by running it; other platforms have
-  equivalents that were not tested). The reach is the whole control surface - `inject`, `pane-run`,
+  The secret closes that path on Linux and Windows: the GUI and the CLI harden themselves at
+  startup, so on Linux a pane program's read of `/proc/<pid>/environ` fails with `EACCES` (measured
+  2026-10-29; see Hardening in place), and on Windows the process DACL refuses the `PROCESS_VM_READ`
+  a memory read needs, so with a secret set on the GUI the program cannot authenticate and is
+  refused. That barrier is narrow: the default install sets no secret; on macOS the environment is
+  readable by same-user processes through `KERN_PROCARGS2` (`ps -E`, `pgrep`); on both Linux and
+  Windows the marking lands a moment after `exec`, so a process polling the platform's access check
+  while a client starts can still catch that client's secret (the GUI outlives that window, and its
+  panes do not exist while it opens); and an rc file that exports `GPTY_SECRET` puts it back into
+  every pane's own shell, because
+  the PTY strip happens before that shell starts. The reach is the whole control surface - `inject`, `pane-run`,
   `broadcast`, `new-pane`, `kill-pane` and `pane-read` - so another pane's input *and* its output. Any
   process that can run in a pane (an install script, a `curl | sh`, a compromised dependency, an agent
   following an injected prompt) can type into your other panes, including a root shell or an SSH
@@ -207,10 +241,11 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   label that two workspaces share (`T1`) is refused with an error naming every candidate rather than
   guessed from the active workspace, so an accidentally misdirected command fails loudly - that is a
   correctness rule, not a boundary, since any process can read `list-panes`' ids or guess them.
-  Until enforcement lands, keep untrusted code and root shells or
-  authenticated sessions apart by running one of them outside gPTY, and treat `GPTY_SECRET` as protection against other users only. The same
-  control surface is the intended agent workflow (an agent in a pane calling `gpty inject` or
-  `gpty mcp`), so the planned fix is a per-pane permission the user grants, not removing the surface.
+  Until enforcement lands, keep untrusted code and root shells or authenticated sessions apart by
+  running one of them outside gPTY: without a secret set, the control surface is open to every program
+  you run. A secret is not the fix either - it locks out the agents running in panes. The control
+  surface is the intended agent workflow (an agent in a pane calling `gpty inject` or `gpty mcp`), so
+  the planned fix is a per-pane permission the user grants, not removing the surface.
   Even then it will be a speed bump against opportunistic scripts and injected agents, not a boundary
   against a determined local attacker. Real isolation from code you do not trust has to come from the
   operating system - run it as another user, in a container or VM, or under a sandbox such as
