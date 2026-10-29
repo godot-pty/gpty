@@ -136,7 +136,7 @@ jobs:
       - name: Process hardening (Windows DACL)
         env:
           RUSTFLAGS: -Dwarnings
-        run: cargo test -p gpty-core --test windows_hardening
+        run: cargo test -p gpty-core --test windows_hardening -- --nocapture
 
   # ── GDScript tests (GUT headless) ────────────────────────────────────
   gut-tests:
