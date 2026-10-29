@@ -88,6 +88,48 @@ func test_rename_profile_rejects_invalid():
 	# Renaming to its own name is a no-op returning the same name.
 	assert_eq(ProfileManager.rename_profile(idx, "Real"), "Real")
 
+# ── Provenance ─────────────────────────────────────────────────────────
+
+func test_a_user_file_cannot_claim_where_it_came_from():
+	# Consent used to be looked up by fields *inside* the profile, so a user
+	# entry carrying `builtin: true` (or an installed plugin's id and approved
+	# revision) was treated as that content and skipped the dialog listing its
+	# own tiles. The loader strips those claims; `get_all_profiles` stamps the
+	# real origin.
+	MockAutoloads.set_store(ProfileManager.PROFILES_FILE, {"profiles": [{
+		"name": "Claimed",
+		"description": "keep me",
+		"builtin": true,
+		"plugin": true,
+		"plugin_id": "godot-pty/gpty-omp",
+		"revision": "a1b2c3d4e5f6",
+		"_origin": "builtin",
+		"_user_index": 7,
+		"tiles": [],
+	}]})
+	ProfileManager.load_profiles()
+	var loaded: Dictionary = ProfileManager.profiles[0]
+	for key in ["builtin", "plugin", "plugin_id", "revision", "_origin", "_user_index"]:
+		assert_false(loaded.has(key), "a user file cannot claim `%s`" % key)
+	assert_eq(loaded.get("description"), "keep me", "fields gpty does not own survive")
+	var all := ProfileManager.get_all_profiles()
+	assert_eq(all[all.size() - 1].get("_origin"), ProfileManager.ORIGIN_USER,
+		"the loader's stamp is what the gate reads")
+
+func test_get_all_profiles_stamps_each_where_each_one_came_from():
+	MockAutoloads.set_store(ProfileManager.DEFAULTS_FILE, {"profiles": [
+		{"id": "shipped", "name": "Shipped", "tiles": []},
+	]})
+	ProfileManager._load_defaults()
+	_set_plugin_json(JSON.stringify([_installed("OMP")]))
+	ProfileManager.add_profile("Mine", [])
+
+	var all := ProfileManager.get_all_profiles()
+	assert_eq(all.size(), 3)
+	assert_eq(all[0].get("_origin"), ProfileManager.ORIGIN_BUILTIN)
+	assert_eq(all[1].get("_origin"), ProfileManager.ORIGIN_PLUGIN)
+	assert_eq(all[2].get("_origin"), ProfileManager.ORIGIN_USER)
+
 # ── Installed-plugin profiles ──────────────────────────────────────────
 #
 # The seam stands in for `GptyTerminal.installed_plugin_profiles()`: the JSON

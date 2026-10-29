@@ -332,19 +332,27 @@ func test_layout_load_refuses_an_untrusted_profile():
 
 func test_consented_content_skips_the_trust_gates():
 	var version: String = GptyTerminal.get_app_version()
-	# A builtin is covered once approved at this app version — never before,
-	# and never from another version's approval.
-	var builtin := {"name": "contract-builtin", "builtin": true, "tiles": [
+	# A builtin is covered once its own approval covers the tiles it ships at
+	# this app version — never before, never from another version's approval,
+	# and never for different tiles under the same name.
+	var builtin := {"_origin": "builtin", "name": "contract-builtin", "tiles": [
 		{"settings": {"type": "terminal", "command": "contract-tool"}},
 	]}
 	assert_false(_ws._profile_consented(builtin), "an unapproved builtin is not consented")
 	TrustedStore.approve_builtin("contract-builtin", version, ["contract-tool"])
 	assert_true(_ws._profile_consented(builtin), "an approved builtin at this version is consented")
 	TrustedStore.approve_builtin("contract-stale", "0.0.0", ["contract-tool"])
-	var stale := {"name": "contract-stale", "builtin": true, "tiles": [
+	var stale := {"_origin": "builtin", "name": "contract-stale", "tiles": [
 		{"settings": {"type": "terminal", "command": "contract-tool"}},
 	]}
 	assert_false(_ws._profile_consented(stale), "an approval from another app version is stale")
+
+	# The name is not the approval: the recorded plans are. Content that
+	# changed under an approved builtin's name is a new decision.
+	var changed := {"_origin": "builtin", "name": "contract-builtin", "tiles": [
+		{"settings": {"type": "terminal", "command": "contract-other"}},
+	]}
+	assert_false(_ws._profile_consented(changed), "a builtin's changed tiles re-prompt")
 
 	# A user profile is covered when every untrusted tile's exact plan was
 	# approved; any uncovered plan keeps the gate.
@@ -376,7 +384,7 @@ func test_plugin_profiles_are_consented_by_their_installed_revision():
 		{"settings": {"type": "terminal", "command": "contract-tool"}},
 	]
 	var plugin_profile := {
-		"name": "contract-plugin", "plugin": true,
+		"_origin": "plugin", "name": "contract-plugin",
 		"plugin_id": "godot-pty/gpty-omp", "revision": "a1b2c3d4e5f6",
 		"tiles": plugin_tiles,
 	}
@@ -390,7 +398,7 @@ func test_plugin_profiles_are_consented_by_their_installed_revision():
 	assert_false(_ws._profile_consented(plugin_profile),
 		"a plan approval is not the plugin's install record")
 
-	TrustedStore.approve_plugin("godot-pty/gpty-omp", "a1b2c3d4e5f6")
+	TrustedStore.approve_plugin("godot-pty/gpty-omp", "a1b2c3d4e5f6", ["contract-tool"])
 	assert_true(_ws._profile_consented(plugin_profile),
 		"the approved revision activates without the trust dialog")
 
@@ -398,6 +406,49 @@ func test_plugin_profiles_are_consented_by_their_installed_revision():
 	var newer := plugin_profile.duplicate(true)
 	newer["revision"] = "f6e5d4c3b2a1"
 	assert_false(_ws._profile_consented(newer), "another revision re-prompts")
+
+	# ...and the approved revision covers only the plans the review listed:
+	# tiles that changed under the same pin are a new decision.
+	var changed := plugin_profile.duplicate(true)
+	changed["tiles"] = [{"settings": {"type": "terminal", "command": "contract-other"}}]
+	assert_false(_ws._profile_consented(changed),
+		"a plugin profile whose tiles changed under the same revision re-prompts")
+
+	# A record written before plans were stored still approves the revision,
+	# and covers no plans — so that profile asks once more.
+	TrustedStore.approve_plugin("godot-pty/gpty-omp-alt", "0123456789ab")
+	var legacy := plugin_profile.duplicate(true)
+	legacy["plugin_id"] = "godot-pty/gpty-omp-alt"
+	legacy["revision"] = "0123456789ab"
+	assert_true(TrustedStore.is_plugin_approved("godot-pty/gpty-omp-alt", "0123456789ab"))
+	assert_false(_ws._profile_consented(legacy),
+		"an approval without plans cannot cover untrusted tiles")
+
+func test_a_user_profile_cannot_claim_where_it_came_from():
+	var version: String = GptyTerminal.get_app_version()
+	# Both records the file could point at exist and cover this plan.
+	TrustedStore.approve_builtin("contract-claimed", version, ["contract-tool"])
+	TrustedStore.approve_plugin("godot-pty/gpty-omp", "a1b2c3d4e5f6", ["contract-tool"])
+
+	# A user profile claiming every identity field, with its own different
+	# tile. The loader strips the claims, so the entry reads as user content
+	# and the plan walk runs — the approval above never gets consulted.
+	MockAutoloads.set_store(ProfileManager.PROFILES_FILE, {"profiles": [{
+		"name": "contract-claimed",
+		"builtin": true,
+		"plugin": true,
+		"plugin_id": "godot-pty/gpty-omp",
+		"revision": "a1b2c3d4e5f6",
+		"_origin": "builtin",
+		"tiles": [{"settings": {"type": "terminal", "command": "contract-other"}}],
+	}]})
+	ProfileManager.load_profiles()
+	var claimed := ProfileManager.find_profile("contract-claimed")
+	assert_false(claimed.is_empty(), "the user profile must load")
+	assert_eq(claimed.get("_origin"), ProfileManager.ORIGIN_USER,
+		"provenance comes from the loader, not from the file")
+	assert_false(_ws._profile_consented(claimed),
+		"fields inside a user profile never choose which record is consulted")
 
 func test_layout_load_sees_installed_plugin_profiles():
 	# The merge this item adds is what makes a plugin profile reachable by
@@ -422,7 +473,7 @@ func test_layout_load_sees_installed_plugin_profiles():
 	assert_string_contains(str(refused["error"]["message"]), "GUI",
 		"the refusal must point at the GUI")
 
-	TrustedStore.approve_plugin("godot-pty/gpty-herdr", "c0ffee123456")
+	TrustedStore.approve_plugin("godot-pty/gpty-herdr", "c0ffee123456", ["-i"])
 	var loaded = WorkspaceIpcHandlers.handle(_ws, "layoutLoad", {"name": "contract-plugin-load"})
 	assert_true(loaded.get("success", false),
 		"an approved plugin profile must load over IPC")

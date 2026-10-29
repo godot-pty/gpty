@@ -1202,61 +1202,88 @@ func _tiles_untrusted(tiles: Array[Dictionary]) -> bool:
 ## exact spawn plan an approval covers no longer counts. Anything not covered
 ## keeps today's behavior.
 func _tiles_untrusted_without_consent(tiles: Array[Dictionary]) -> bool:
-	var approved := TrustedStore.approved_plan_keys(GptyTerminal.get_app_version())
-	for td in tiles:
-		if not _tile_spawns_untrusted(td):
-			continue
-		var key := PaneTypes.tile_plan_key(td)
-		if key == "" or not approved.has(key):
-			return true
-	return false
+	return not _plans_covered(
+		tiles, TrustedStore.approved_plan_keys(GptyTerminal.get_app_version()))
 
-## Consent check for profile activation (and the IPC layoutLoad gate):
-## an installed-plugin profile is covered when its plugin was approved at
-## exactly the revision this profile came from (the install review wrote that
-## record, and a newer revision re-prompts); a shipped builtin is covered
-## once approved at this app version — its content ships with the version, so
-## a new release re-asks; any other profile is covered when every untrusted
-## tile's exact spawn plan was approved through a builtin (a workspace saved
-## from one restores the same way). Content that arrived any other way has no
-## record and keeps asking.
-func _profile_consented(profile: Dictionary) -> bool:
-	# First, so a plugin profile is decided by its plugin's approval and never
-	# falls through to the plan-key walk an unrelated approval could satisfy.
-	var plugin_id := str(profile.get("plugin_id", ""))
-	if plugin_id != "":
-		return TrustedStore.is_plugin_approved(
-			plugin_id, str(profile.get("revision", "")))
-	if profile.get("builtin", false):
-		return TrustedStore.is_builtin_approved(
-			str(profile.get("name", "")), GptyTerminal.get_app_version())
-	var approved := TrustedStore.approved_plan_keys(GptyTerminal.get_app_version())
-	for td in profile.get("tiles", []):
-		if not (td is Dictionary):
-			continue
-		if not _tile_spawns_untrusted(td):
+## True when every untrusted tile's spawn plan is in `approved` — an Array of
+## plan keys or a key->true dictionary (the two shapes the store answers in).
+## A trusted tile needs no record; a tile whose untrusted spawn yields no key
+## can never be covered, so it keeps asking.
+func _plans_covered(tiles, approved) -> bool:
+	for td in tiles:
+		if not (td is Dictionary) or not _tile_spawns_untrusted(td):
 			continue
 		var key := PaneTypes.tile_plan_key(td)
-		if key == "" or not approved.has(key):
+		if key == "" or not _plan_approved(approved, key):
 			return false
 	return true
 
-## The trust dialog's consent is remembered only for content gpty ships: a
-## builtin records its name + app version and every tile's spawn plan.
-## User-authored profiles never record consent — approving one does not
-## write, so it asks again (the record covers installed and shipped
-## content; anything else is a new decision each time).
+static func _plan_approved(approved, key: String) -> bool:
+	if approved is Dictionary or approved is Array:
+		return approved.has(key)
+	return false
+
+## Consent check for profile activation (and the IPC layoutLoad gate).
+##
+## Trust comes from `_origin` — the stamp `ProfileManager.get_all_profiles`
+## puts on an entry — and never from fields inside the profile: a user file
+## cannot claim `builtin` or `plugin_id` (the loader strips them), and an
+## unstamped dict is user content. Each origin binds the approval to the
+## content it covers:
+##
+## - plugin: the plugin id + revision the install review approved, AND every
+##   untrusted tile's plan that review listed. A different revision re-prompts,
+##   and so does different content under the same revision.
+## - builtin: its name + app version, AND the plans recorded with that
+##   approval. A release ships new content, which the version re-prompts.
+## - user: every untrusted tile's plan covered by an approved builtin — a
+##   workspace saved from one restores the same way. Nothing is ever recorded
+##   for a user profile, so it asks again.
+func _profile_consented(profile: Dictionary) -> bool:
+	var tiles = profile.get("tiles", [])
+	match str(profile.get("_origin", ProfileManager.ORIGIN_USER)):
+		ProfileManager.ORIGIN_PLUGIN:
+			var plugin_id := str(profile.get("plugin_id", ""))
+			var revision := str(profile.get("revision", ""))
+			return (
+				TrustedStore.is_plugin_approved(plugin_id, revision)
+				and _plans_covered(tiles, TrustedStore.plugin_plans(plugin_id, revision))
+			)
+		ProfileManager.ORIGIN_BUILTIN:
+			var name := str(profile.get("name", ""))
+			var version := GptyTerminal.get_app_version()
+			return (
+				TrustedStore.is_builtin_approved(name, version)
+				and _plans_covered(tiles, TrustedStore.builtin_plans(name, version))
+			)
+	return _plans_covered(
+		tiles, TrustedStore.approved_plan_keys(GptyTerminal.get_app_version()))
+
+## The trust dialog's consent is remembered only for content gpty ships or a
+## plugin pinned. A builtin records its name + app version and every tile's
+## spawn plan. A plugin profile whose tiles changed under an approved revision
+## adds the plans the dialog just showed to that record — the revision itself
+## is only ever approved by the install review, which shows the whole manifest.
+## User-authored profiles never record consent, so approving one does not make
+## the next activation silent.
 func _remember_profile_consent(profile: Dictionary, tiles: Array):
-	if not profile.get("builtin", false):
-		return
 	var plans: Array = []
 	for td in tiles:
 		if td is Dictionary:
 			var key := PaneTypes.tile_plan_key(td)
-			if key != "":
+			if key != "" and not plans.has(key):
 				plans.append(key)
-	TrustedStore.approve_builtin(
-		str(profile.get("name", "")), GptyTerminal.get_app_version(), plans)
+	match str(profile.get("_origin", ProfileManager.ORIGIN_USER)):
+		ProfileManager.ORIGIN_BUILTIN:
+			TrustedStore.approve_builtin(
+				str(profile.get("name", "")), GptyTerminal.get_app_version(), plans)
+		ProfileManager.ORIGIN_PLUGIN:
+			var plugin_id := str(profile.get("plugin_id", ""))
+			var revision := str(profile.get("revision", ""))
+			if not TrustedStore.is_plugin_approved(plugin_id, revision):
+				return
+			TrustedStore.approve_plugin(
+				plugin_id, revision, TrustedStore.plugin_plans(plugin_id, revision) + plans)
 
 ## What the untrusted tiles in `tiles` would run, for the trust dialog. Capped
 ## in PaneTypes — the content is file data, not something we render raw.
@@ -1971,10 +1998,13 @@ func _show_plugin_review(id: int, params: Dictionary, timeout_ms: int):
 
 	dialog.confirmed.connect(func():
 		# Consent made once counts: the accepted plugin is recorded at its
-		# pinned revision, so installed content does not re-prompt forever
-		# (and a *new* revision re-prompts — the record keys on the pin).
+		# pinned revision with the spawn plans the review listed, so installed
+		# content does not re-prompt forever (and a *new* revision re-prompts —
+		# the record keys on the pin, while profiles whose tiles change under
+		# it re-prompt because their plans are no longer covered).
 		TrustedStore.approve_plugin(
-			str(params.get("id", "")), str(params.get("revision", "")))
+			str(params.get("id", "")), str(params.get("revision", "")),
+			PluginReviewText.plans(params))
 		_finish_plugin_review(id)
 		GptyTerminal.respond_ipc(id, true, JSON.stringify({"accepted": true}))
 		# The CLI only moves the clone into place after it reads this answer,

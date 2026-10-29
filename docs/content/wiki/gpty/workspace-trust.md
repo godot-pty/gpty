@@ -38,13 +38,15 @@ The dialog shows the plan rather than a summary sentence: which pane type, which
 
 | Content | Approval recorded as | Invalidated by |
 |---|---|---|
-| Builtin profile | Profile name + app version + every tile's spawn plan | A new gPTY version |
-| Installed plugin | Plugin id + pinned revision | A new revision |
+| Builtin profile | Profile name + app version + every tile's spawn plan | A new gPTY version, or tiles that changed under it |
+| Installed plugin | Plugin id + pinned revision + the spawn plans the review listed | A new revision, or tiles that changed under it |
 | User-authored profile | Nothing | — (asks each time) |
 
-Only the trust dialogs' confirm paths write records. A user-authored profile never records consent, so approving one does not make the next activation silent. A builtin ships with the app, so its approval is tied to the version that shipped it: a new release re-prompts by construction. A plugin is approved at the revision the install pinned, so a moved tag or new commit re-prompts.
+Only the trust dialogs' confirm paths write records. A user-authored profile never records consent, so approving one does not make the next activation silent. A builtin ships with the app, so its approval is tied to the version that shipped it: a new release re-prompts by construction. A plugin is approved at the revision the install pinned, so a moved tag or new commit re-prompts, and the plans the review listed are recorded with it so a different profile set at the same pin re-prompts too. The profile dialog can extend an already-approved revision's plans after showing the tiles, but only the install review approves a revision.
 
-The store is `user://trusted.json`, with two namespaces: `builtins` mapping a name to a version and a list of plan keys, and `plugins` mapping an id to a revision. It is hand-editable, so it is read like any other untrusted file: typed reads, shape checks, and caps on entries, name and version lengths, plan counts, and key length. A bad entry costs itself, not the file.
+Provenance is gPTY's, not the file's. Every profile is stamped with where it was loaded from — the shipped defaults, the installed-plugin store, or your own `profiles.json` — and identity fields are stripped out of user entries on load. A hand-written entry that says `"builtin": true`, or carries an installed plugin's id and approved revision, is still your profile: its tiles go through the plan gate like any other, so it cannot borrow someone else's approval.
+
+The store is `user://trusted.json`, with two namespaces: `builtins` mapping a name to a version and a list of plan keys, and `plugins` mapping an id to a revision and the plan keys the review listed. It is hand-editable, so it is read like any other untrusted file: typed reads, shape checks, and caps on entries, name and version lengths, plan counts, and key length. A record written before plugin plans existed (an id mapped straight to a revision) still approves that revision and covers no plans, so such a plugin's profiles ask once more. A bad entry costs itself, not the file.
 
 That also describes revocation: remove the entry — or delete the file — and the next launch reads a store with no record, so the next restore asks again. The store is a memory of approvals, not a lock.
 

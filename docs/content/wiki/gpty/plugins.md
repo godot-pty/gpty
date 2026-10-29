@@ -62,7 +62,7 @@ The blast radius is bounded by published surfaces, not by sandboxing:
 - **Actions may only name published tools.** `[[actions]].command` is validated against the same list `schema::mcp_tool_names()` derives — the 22 MCP tools. A manifest cannot name anything else on the socket.
 - **Event types are a closed vocabulary.** `pane.spawned`, `pane.killed`, `concept.matched`, `state.declared`, plus the generic OMP set (`session.bound`, `agent.started`, `turn.started`, `tool.call`, `thinking.delta`). Adding one is a deliberate change in lockstep with the emitting side.
 - **Concepts capture and route display content only**; they never execute. Plugin concepts are the same engine objects a hand-written concept is.
-- **Profiles are consented at the pinned revision.** Opening a tile that would spawn a different program or argv is already a [[workspace-trust|Workspace Trust]] decision; plugin profiles go through the same gate.
+- **Profiles are consented at the pinned revision, down to their spawn plans.** Opening a tile that would spawn a different program or argv is already a [[workspace-trust|Workspace Trust]] decision; plugin profiles go through the same gate, and the install approval records the exact plans the review listed — a profile whose tiles change under the same revision asks again.
 
 What none of this prevents is a plugin running arbitrary code in the panes it spawns, with a concept of its own choosing. The [[security-model|Security Model]] treats plugins as untrusted guests for that reason: they are gated at install and at the API surface, not contained at runtime.
 

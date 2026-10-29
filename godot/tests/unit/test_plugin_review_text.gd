@@ -49,6 +49,31 @@ func test_profiles_show_what_they_would_start():
 	assert_true(text.contains("Plain: no program (layout only)"),
 		"a profile whose tiles name no program says so: " + text)
 
+func test_the_recorded_plans_are_the_ones_the_dialog_lists():
+	# `plans` is what `TrustedStore.approve_plugin` records on accept, read
+	# from the same summary entries `programs_text` prints — otherwise the
+	# approval could cover something the user never saw.
+	var params := {
+		"id": "owner/demo",
+		"profiles": [
+			{"name": "A", "tiles": 2, "programs": ["omp"], "plans": ["omp\u001f-m", "omp\u001f-m"]},
+			{"name": "B", "tiles": 1, "programs": [], "plans": ["-i"]},
+			{"name": "C", "tiles": 1, "plans": "not a list"},
+			{"name": "D", "tiles": 1, "plans": [42, "", "git"]},
+			"not an entry",
+		],
+	}
+	assert_eq(PluginReviewText.plans(params), ["omp\u001f-m", "-i", "git"],
+		"flattened, deduplicated, strings only, one bad entry at a time")
+
+func test_an_older_summary_records_no_plans():
+	# A CLI that predates plans sends none: the review still works and the
+	# revision is still approved, but its profiles ask once more.
+	assert_eq(PluginReviewText.plans({"id": "owner/demo", "profiles": [
+		{"name": "A", "tiles": 1, "programs": ["omp"]},
+	]}), [])
+	assert_eq(PluginReviewText.plans({}), [])
+
 func test_a_wrong_typed_field_cannot_empty_the_dialog():
 	# Measured while staging a capture: an Array in `concepts` raised
 	# "Nonexistent 'int' constructor" and the builder returned "" — the user

@@ -28,9 +28,11 @@ Before anything is torn down, the trust check runs. A profile whose tiles would 
 
 | Profile source | What an approval covers |
 |---|---|
-| Built-in | That profile name at the current app version; a new release asks again |
-| Plugin | That plugin id at the exact installed revision; a new revision asks again |
+| Built-in | That profile name at the current app version, and the spawn plans recorded with it; a new release asks again, and so does different content under the same name |
+| Plugin | That plugin id at the exact installed revision, and the spawn plans the install review listed; a new revision asks again, and so does different content under the same revision |
 | Saved by you | Ask every time, unless every untrusted spawn plan was already approved through a shipped profile |
+
+Where a profile came from is recorded by gPTY when it loads it, not read from the file. A hand-written `profiles.json` entry cannot claim to be a built-in or to belong to an installed plugin: those fields are stripped on load, so the entry is your profile and goes through the same plan check as any other. An approval also covers only the plans it recorded, which is why a profile whose tiles changed under an approved name or revision asks again.
 
 A saved-by-you profile never writes a consent record, so it is a fresh decision each activation. The dialog's Cancel activates nothing and leaves the workspace as it was.
 

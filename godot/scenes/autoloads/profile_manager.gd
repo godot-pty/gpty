@@ -41,6 +41,21 @@ func _load_defaults():
 			profile["builtin"] = true
 			_builtin_profiles.append(profile)
 
+## Where a profile was loaded from. Every dict `get_all_profiles()` answers
+## carries one as `_origin`, and the consent gate (`Workspace._profile_consented`)
+## branches on that stamp and nothing else — never on fields inside the
+## profile, which a file can write.
+const ORIGIN_BUILTIN := "builtin"
+const ORIGIN_PLUGIN := "plugin"
+const ORIGIN_USER := "user"
+
+## Identity fields a profile file may not claim. The loaders that own them
+## stamp them after loading (`_load_defaults` sets `builtin`,
+## `_derive_plugin_profiles` sets `plugin`/`plugin_id`/`revision`), so a user
+## file that carries one is stripped here: consent is never looked up by a
+## field the file chose.
+const PROVENANCE_KEYS := ["builtin", "plugin", "plugin_id", "revision"]
+
 func load_profiles():
 	var d = _read_file(PROFILES_FILE)
 	if d.is_empty(): return
@@ -48,7 +63,22 @@ func load_profiles():
 	profiles = []
 	for item in raw:
 		if item is Dictionary:
-			profiles.append(item)
+			var profile: Dictionary = item.duplicate(true)
+			_strip_provenance(profile)
+			profiles.append(profile)
+
+## Remove whatever a file says about where it came from.
+##
+## Keys starting with `_` are this manager's own stamps (`_origin`,
+## `_user_index`), so that rule covers a stamp added later instead of only the
+## list above — a hand-written `"_origin": "builtin"` is stripped like
+## `"builtin": true` is.
+static func _strip_provenance(profile: Dictionary):
+	for key in PROVENANCE_KEYS:
+		profile.erase(key)
+	for key in profile.keys():
+		if key is String and key.begins_with("_"):
+			profile.erase(key)
 
 func save_profiles():
 	var d = {"profiles": profiles}
@@ -188,14 +218,24 @@ func _plugin_profile_exists(p_name: String) -> bool:
 ## Built-ins, then installed-plugin profiles, then the user's own — the order
 ## the sidebar renders and the order `find_profile` resolves a `layoutLoad`
 ## name in.
+##
+## This is also the one place that knows provenance, so it stamps `_origin` on
+## every entry: it is what `Workspace._profile_consented` branches on, and a
+## dict that did not come through here (a hand-written profile, a test fixture)
+## has no stamp and is treated as user content.
 func get_all_profiles() -> Array[Dictionary]:
 	var all: Array[Dictionary] = []
 	for builtin in _builtin_profiles:
-		all.append(builtin.duplicate(true))
+		var profile: Dictionary = builtin.duplicate(true)
+		profile["_origin"] = ORIGIN_BUILTIN
+		all.append(profile)
 	for plugin_profile in _plugin_profiles:
-		all.append(plugin_profile.duplicate(true))
+		var profile: Dictionary = plugin_profile.duplicate(true)
+		profile["_origin"] = ORIGIN_PLUGIN
+		all.append(profile)
 	for i in profiles.size():
 		var profile: Dictionary = profiles[i].duplicate(true)
+		profile["_origin"] = ORIGIN_USER
 		profile["_user_index"] = i
 		all.append(profile)
 	return all

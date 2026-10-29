@@ -173,6 +173,32 @@ static func programs_text(raw: Variant) -> String:
 		parts.append("…")
 	return "starts " + ", ".join(parts)
 
+## The spawn-plan keys the summary lists, flattened over its profiles and
+## deduplicated: what `TrustedStore.approve_plugin` records when the user
+## accepts. The dialog prints `programs` and the record stores `plans`, both
+## read from the same summary entries, so the approval covers the content the
+## dialog named — a profile whose tiles change under the same revision no
+## longer matches and re-prompts.
+##
+## The summary is untrusted JSON like any other payload, so a missing or
+## wrong-shaped field costs that entry, never the dialog: a non-string key is
+## skipped, and the store applies its own caps on write.
+static func plans(params: Dictionary) -> Array:
+	var out: Array = []
+	var profiles = params.get("profiles", [])
+	if not (profiles is Array):
+		return out
+	for entry in profiles:
+		if not (entry is Dictionary):
+			continue
+		var raw = entry.get("plans", [])
+		if not (raw is Array):
+			continue
+		for key in raw:
+			if key is String and not key.is_empty() and not out.has(key):
+				out.append(key)
+	return out
+
 
 ## A summary field read as an int, or 0 when it is not a number at all.
 static func _as_int(value: Variant) -> int:

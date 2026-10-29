@@ -485,7 +485,10 @@ pub(crate) fn review_summary(
             .map(concept_review_entry)
             .collect::<Vec<_>>(),
         // A profile is geometry plus the programs its tiles name; the review
-        // says what activating it would start, not just how many tiles.
+        // says what activating it would start, not just how many tiles. The
+        // plan keys are what the approval records — the dialog shows the
+        // programs, and `_profile_consented` compares these against the tiles
+        // it is about to run.
         "profiles": manifest
             .profiles
             .iter()
@@ -493,6 +496,7 @@ pub(crate) fn review_summary(
                 "name": profile.name,
                 "tiles": profile.tiles.len(),
                 "programs": profile_programs(profile),
+                "plans": profile_plan_keys(&profile.tiles),
             }))
             .collect::<Vec<_>>(),
     })
@@ -529,6 +533,65 @@ fn profile_programs(profile: &ProfileSpec) -> Vec<String> {
         }
     }
     programs
+}
+
+/// The most characters a stored plan key may have — mirrors
+/// `TrustedStore.MAX_PLAN_KEY_LEN` in the GUI, which is the cap an approval
+/// can hold. A longer key is dropped rather than shortened: a shortened key
+/// could never equal the tile it came from, so it would only make the
+/// approval silently cover nothing.
+const MAX_PLAN_KEY_LEN: usize = 8192;
+
+/// The exact spawn-plan keys a profile's tiles would produce, deduplicated in
+/// tile order — the Rust mirror of `PaneTypes.tile_plan_key` in the GUI,
+/// which is what the activation gate compares them against.
+///
+/// A tile contributes like `PaneTypes.tile_spawns_untrusted` says it would:
+/// a program (`settings.command`, then `settings.shell`, then the tile's
+/// legacy `shell`) and the string entries of `settings.shell_args`, joined
+/// with U+001F. A tile that names nothing to run (a code viewer, pure
+/// geometry) has no key — there is nothing to approve.
+///
+/// Only strings are read. The GUI's `str()` would coerce a number into a
+/// program name, but a file-supplied non-string is dropped by the settings
+/// sanitizer before a spawn, so such a tile could never match anyway; leaving
+/// it out makes that profile re-prompt, which is the safe answer.
+fn profile_plan_keys(tiles: &[toml::Value]) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+    for tile in tiles {
+        let settings = tile.get("settings");
+        // First *present* key wins (the GUI's `get`-with-default chain), and
+        // then it has to be a string.
+        let program = settings
+            .and_then(|s| s.get("command"))
+            .or_else(|| settings.and_then(|s| s.get("shell")))
+            .or_else(|| tile.get("shell"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let mut parts: Vec<&str> = Vec::new();
+        if !program.is_empty() {
+            parts.push(program);
+        }
+        if let Some(args) = settings
+            .and_then(|s| s.get("shell_args"))
+            .and_then(|value| value.as_array())
+        {
+            for arg in args {
+                if let Some(arg) = arg.as_str() {
+                    parts.push(arg);
+                }
+            }
+        }
+        if parts.is_empty() {
+            continue;
+        }
+        let key = parts.join("\u{1f}");
+        if key.chars().count() > MAX_PLAN_KEY_LEN || keys.contains(&key) {
+            continue;
+        }
+        keys.push(key);
+    }
+    keys
 }
 
 /// One capped, control-character-free string for the review summary — the
@@ -1202,6 +1265,53 @@ tiles = [
         let programs = summary["profiles"][0]["programs"].as_array().unwrap();
         assert_eq!(programs.len(), MAX_PROFILE_PROGRAMS);
         assert_eq!(programs[0], "prog0", "tile order is what the review shows");
+    }
+
+    /// The exact spawn plans a profile would run — what the install approval
+    /// records, so a profile whose tiles change under the same revision
+    /// re-prompts. The derivation mirrors `PaneTypes.tile_plan_key` in the
+    /// GUI: program precedence (`command` > `settings.shell` > the tile's
+    /// legacy `shell`), then the string entries of `shell_args`, joined with
+    /// U+001F; deduplicated in tile order.
+    #[test]
+    fn review_summary_lists_the_plan_keys_each_profile_would_run() {
+        let manifest = parse_manifest(
+            r#"
+id = "owner/repo"
+name = "Demo"
+version = "1.0.0"
+min_gpty_version = "0.5.0"
+
+[[profiles]]
+name = "Tools"
+tiles = [
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "terminal", command = "omp", shell_args = ["-m", "fast"] } },
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "terminal", command = "omp", shell_args = ["-m", "fast"] } },
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "terminal", shell = "zsh", shell_args = ["-l"] } },
+  { col = 0, row = 0, cspan = 60, rspan = 60, shell = "fish", settings = { type = "terminal" } },
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "terminal", command = "omp", shell = "ignored" } },
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "code_viewer" } },
+]
+
+[[profiles]]
+name = "Plain"
+tiles = [
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "code_viewer" } },
+]
+"#,
+        )
+        .unwrap();
+        let summary = review_summary(&manifest, &parse_target("owner/repo").unwrap(), "abc123");
+        assert_eq!(
+            summary["profiles"][0]["plans"],
+            serde_json::json!(["omp\u{1f}-m\u{1f}fast", "zsh\u{1f}-l", "fish", "omp"]),
+            "tile order, deduplicated, command > settings.shell > tile shell"
+        );
+        assert_eq!(
+            summary["profiles"][1]["plans"],
+            serde_json::json!([]),
+            "a profile that runs nothing has nothing to approve"
+        );
     }
 
     /// The store record is the GUI's only view of a plugin's tiles, so the

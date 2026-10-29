@@ -12,10 +12,13 @@ extends BasePersistenceManager
 #     gpty release re-prompts. The plans are what the approval actually
 #     covers — a workspace saved from an approved builtin restores without a
 #     dialog because every tile's exact program+argv was approved.
-#   plugins: plugin id -> pinned revision
+#   plugins: plugin id -> {revision: pinned revision, plans: [spawn-plan keys]}
 #     Written when the install review dialog is accepted. A new revision
-#     re-prompts. (The profile-activation side of this record activates when
-#     installed-plugin profiles surface — the profiles-migration item.)
+#     re-prompts. The plans are what that approval covers, exactly as for a
+#     builtin: the review summary lists them, so an installed profile whose
+#     tiles changed under the same revision (a hand-edited store, or a CLI
+#     writing a different profile set at one pin) re-prompts instead of
+#     inheriting the approval.
 #
 # Only the trust dialogs' confirm paths write here: a builtin approval from
 # the profile dialog, a plugin approval from the install review. User-authored
@@ -74,10 +77,24 @@ func reload():
 			continue
 		if _plugins.size() >= MAX_ENTRIES:
 			break
-		var revision := _as_string(plugins, key, "")
+		var entry = plugins[key]
+		# A bare string is the pre-plans record (id -> revision). It still
+		# approves the revision, and covers no plans, so a plugin profile with
+		# untrusted tiles asks once more; writing plans back is what makes the
+		# next activation silent.
+		if entry is String:
+			if _valid_revision(entry):
+				_plugins[key] = {"revision": entry, "plans": []}
+			continue
+		if not (entry is Dictionary):
+			continue
+		var revision := _as_string(entry, "revision", "")
 		if not _valid_revision(revision):
 			continue
-		_plugins[key] = revision
+		_plugins[key] = {
+			"revision": revision,
+			"plans": _clean_plans(entry.get("plans", [])),
+		}
 
 ## A builtin profile approved at exactly this app version.
 func is_builtin_approved(p_name: String, version: String) -> bool:
@@ -91,14 +108,24 @@ func approve_builtin(p_name: String, version: String, plans: Array):
 		return
 	if _builtins.size() >= MAX_ENTRIES and not _builtins.has(p_name):
 		return
+	_builtins[p_name] = {"version": version, "plans": _clean_plans(plans)}
+	_save()
+
+## A plan list as this store keeps it: strings only, non-empty, within the key
+## cap, deduplicated, capped at MAX_PLANS. One implementation for the builtin
+## and plugin records and for the loader, so a hand-edited file cannot store
+## something an approval could not.
+static func _clean_plans(raw) -> Array:
 	var capped: Array = []
-	for p in plans:
+	if not (raw is Array):
+		return capped
+	for p in raw:
 		if p is String and not p.is_empty() and p.length() <= MAX_PLAN_KEY_LEN:
-			capped.append(p)
+			if not capped.has(p):
+				capped.append(p)
 		if capped.size() >= MAX_PLANS:
 			break
-	_builtins[p_name] = {"version": version, "plans": capped}
-	_save()
+	return capped
 
 ## The plans an approval of `p_name` at `version` covers; empty when the
 ## approval is absent or from another version (stale content re-prompts).
@@ -111,16 +138,27 @@ func builtin_plans(p_name: String, version: String) -> Array:
 
 ## A plugin approved at exactly this pinned revision.
 func is_plugin_approved(p_id: String, revision: String) -> bool:
-	return str(_plugins.get(p_id, "")) == revision
+	var entry = _plugins.get(p_id)
+	return entry is Dictionary and str(entry.get("revision", "")) == revision
 
-## Record a plugin install-review acceptance. Overwrites any older revision.
-func approve_plugin(p_id: String, revision: String):
+## Record a plugin install-review acceptance: the pinned revision, and the
+## spawn plans the review listed. Overwrites any older revision.
+func approve_plugin(p_id: String, revision: String, plans: Array = []):
 	if not valid_plugin_id(p_id) or not _valid_revision(revision):
 		return
 	if _plugins.size() >= MAX_ENTRIES and not _plugins.has(p_id):
 		return
-	_plugins[p_id] = revision
+	_plugins[p_id] = {"revision": revision, "plans": _clean_plans(plans)}
 	_save()
+
+## The plans a plugin approval at `revision` covers; empty when the approval is
+## absent, from another revision, or predates plans — all of which re-prompt.
+func plugin_plans(p_id: String, revision: String) -> Array:
+	var entry = _plugins.get(p_id)
+	if entry is Dictionary and str(entry.get("revision", "")) == revision:
+		var plans = entry.get("plans", [])
+		return plans if plans is Array else []
+	return []
 
 ## Every spawn-plan key a builtin approval at this app version covers.
 ## The restore gate asks "was this exact program+argv approved?" — a tile

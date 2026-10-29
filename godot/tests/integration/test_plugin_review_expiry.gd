@@ -94,3 +94,30 @@ func test_answering_before_the_deadline_cleans_up():
 	await get_tree().process_frame
 	assert_false(is_instance_valid(dialog), "the answered dialog must be freed")
 	assert_null(ws.get_node_or_null("ReviewExpiry"), "the expiry timer must go with the answer")
+
+func test_accepting_a_review_records_its_revision_and_plans():
+	# The wiring between the summary the dialog showed and the consent record
+	# the activation gate reads: the revision alone used to be the record, so
+	# a plugin whose profiles changed under the same pin kept the approval.
+	var ws := await _make_workspace()
+	var params := _review_params()
+	params["profiles"] = [
+		{"name": "Tools", "tiles": 2, "programs": ["omp"],
+			"plans": ["omp\u001f--model", "-i"]},
+	]
+	ws._show_plugin_review(14, params, 60_000)
+	var dialog := _dialog(ws)
+	assert_not_null(dialog, "the review dialog must open")
+	# No client holds this request in the test (see the answered-path test).
+	gut.error_tracker.disabled = true
+	dialog.confirmed.emit()
+	gut.error_tracker.disabled = false
+	assert_true(TrustedStore.is_plugin_approved("owner/demo", "abc1234"),
+		"accepting approves the pinned revision")
+	assert_eq(TrustedStore.plugin_plans("owner/demo", "abc1234"), ["omp\u001f--model", "-i"],
+		"and records the plans the review listed")
+	assert_eq(ws._pending_plugin_reviews.size(), 0, "the accepted review is settled")
+	# The accepted install schedules a deferred store re-read; let it land
+	# while the mock is still installed (the workspace tear-down would leave
+	# the callback on a freed object otherwise).
+	await get_tree().create_timer(2.1).timeout
