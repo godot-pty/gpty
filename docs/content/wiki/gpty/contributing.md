@@ -103,7 +103,7 @@ Install the repository's git hooks once per clone:
 | `commit-msg` | Conventional Commits check |
 | `pre-push` | The full CI suite |
 
-The hooks are symlinks into `githooks/`, so they update with the repo. Running `./scripts/ci-check` by hand before committing is equivalent and faster to iterate on.
+The hooks are symlinks into `githooks/`, so they update with the repo - but only if they *are* symlinks: a `.git/hooks/<name>` that exists as a regular file is a stale copy from an older install and silently pins that behaviour. After editing anything under `githooks/`, run `./scripts/install-hooks`; it replaces a copied hook with the symlink (backing the old file up to `<name>.bak`) and skips the ones already pointing at the right target. This is not cosmetic: the pre-push hook now hands `scripts/ci-check` the pushed range, and only the symlinked version does it. Running `./scripts/ci-check` by hand before committing is equivalent and faster to iterate on.
 
 ## Commits
 

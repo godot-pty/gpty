@@ -112,6 +112,7 @@ Do not guess, and do not re-run until it passes by luck.
 - If a file has both staged and unstaged changes, warn the user before staging
 - Default to committing everything that looks intentional; ask only when genuinely ambiguous
 - Before skipping a file, check if similar files are already tracked in the repo (`git ls-files`)
+- **Check the index, not just your intent.** `git diff --cached --name-only` before committing: the index is shared with every other process touching this checkout (another agent, a script, a vendoring refresh), and work staged by someone else lands in your commit under your message. Stage explicit paths and confirm the staged list matches the commit's story; if it does not, unstage the extras or split them into their own commit.
 - **README freshness**: Before committing, check if the change affects documentation. The README update MUST be in the same commit or an immediately following `docs(scope):` commit:
   - **API surface changes**: new/removed/renamed `#[func]` methods → update `crates/gpty-gdext/README.md` API table
   - **New/removed modules**: files added/removed from `src/` → update `crates/gpty-core/README.md` module table
