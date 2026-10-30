@@ -9,6 +9,11 @@ on:
       # cannot be validated by the job it repairs.
       - ".github/workflows/docs.yml"
       - "scripts/docs-check"
+      # The knowledge bundle ships inside the app and is generated from
+      # `docs/content/wiki`, so a wiki-only commit changes this file and must
+      # still be validated here - CI ignores documentation-only pushes.
+      - "godot/knowledge.json"
+      - "scripts/build-wiki"
       - "README.md"
       - "CHANGELOG.md"
       - "CONTRIBUTING.md"
@@ -50,6 +55,12 @@ jobs:
 
       - name: Check markdown (links, roadmap tables, split pages)
         run: ./scripts/docs-check
+
+      # The bundle is tracked and generated; a stale one would ship an app
+      # whose wiki disagrees with the notes. This is the only place CI can
+      # see it, because a docs-only push skips the code workflow.
+      - name: Verify the knowledge bundle is current
+        run: ./scripts/build-wiki --check
 
       - name: Copy repo docs into site
         run: cd docs && ./setup.sh

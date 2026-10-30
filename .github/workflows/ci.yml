@@ -1,10 +1,32 @@
 name: CI
 
 on:
+  # A documentation-only push runs none of these jobs; the Docs workflow is
+  # its gate (it builds the site, runs docs-check and verifies the knowledge
+  # bundle). A roadmap or note edit cannot change what any job here tests -
+  # no Rust or GDScript test reads `docs/`, and the bundle is generated data
+  # the Docs job re-checks. A full run is ~4 minutes warm and can reach ~30
+  # when the Windows vcpkg tree has to rebuild, which is a lot to spend on a
+  # Markdown edit. Anything outside this list (workflows, scripts, crates,
+  # godot/, the smoke) still runs the full suite.
   push:
     branches: [main, master]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "godot/knowledge.json"
+      - "LICENSE"
   pull_request:
     branches: [main, master]
+    # Kept as a literal copy rather than a YAML anchor: the anchor would be
+    # valid YAML, but this file is the thing that decides whether CI runs at
+    # all, and an alias the server's parser rejected would fail closed with no
+    # job to say so.
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "godot/knowledge.json"
+      - "LICENSE"
 
 # Least privilege: every job here only reads the repository. Without this
 # block each job inherits the repository default token scope, which is handed
@@ -104,9 +126,10 @@ jobs:
   # job, Windows-only compile errors only surface at tag time.
   rust-windows:
     runs-on: windows-latest
-    # Same cap as windows-smoke: the Windows target build plus the hardening
-    # test is ~10 minutes green, and a stuck rustc must not hold the runner.
-    timeout-minutes: 40
+    # Same cap as windows-smoke: it runs the same `Build media dependencies`,
+    # so a cold vcpkg rebuild has to fit here too, and a stuck rustc must not
+    # hold the runner.
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -250,8 +273,10 @@ jobs:
     runs-on: windows-latest
     # A hung Godot or cargo would otherwise hold the runner to GitHub's
     # six-hour cap (gut-check's notes record one such hang on Windows). Green
-    # is ~10 minutes here; 30 is slack for a loaded runner.
-    timeout-minutes: 40
+    # is ~4.5 minutes here, but a cold vcpkg FFmpeg rebuild inside `Build
+    # media dependencies` took 26.5 minutes once, so the cap has to clear that
+    # plus the rest of the job under runner load.
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
