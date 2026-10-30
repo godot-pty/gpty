@@ -23,11 +23,21 @@ from pathlib import Path
 
 import yaml
 
-WORKFLOWS = ("ci.yml", "docs.yml", "mcp-registry.yml", "release.yml")
+# Every workflow in the directory, not a list: a hard-coded four let a new
+# file ship without the permissions floor this script exists to enforce
+# (`codeql.yml` arrived that way on 2026-10-30 and this gate said nothing).
+WORKFLOWS = sorted(
+    set(Path(".github/workflows").glob("*.yml"))
+    | set(Path(".github/workflows").glob("*.yaml"))
+)
+if not WORKFLOWS:
+    print("  ERROR: no workflows found under .github/workflows", file=sys.stderr)
+    sys.exit(1)
 errors = []
-for name in WORKFLOWS:
+for path in WORKFLOWS:
+    name = path.name
     try:
-        doc = yaml.safe_load(Path(".github/workflows", name).read_text())
+        doc = yaml.safe_load(path.read_text())
     except Exception as exc:
         errors.append(f"{name}: {exc}")
         continue
