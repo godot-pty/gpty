@@ -141,7 +141,13 @@ run_bundle_check() {
     fi
 }
 
-if ! $CI_MODE && [ -z "${CI_CHECK_FULL:-}" ] && docs_only_change; then
+# A range handed over by the pre-push hook is trustworthy even when `CI` is set
+# in the environment (the variable is exported by many harnesses and by CI
+# itself, and it would otherwise disable the narrowing everywhere); the
+# auto-detected paths are not, because a CI checkout is shallow and detached.
+if [ -z "${CI_CHECK_FULL:-}" ] \
+    && { [ -n "${CI_CHECK_RANGE_FROM:-}" ] || ! $CI_MODE; } \
+    && docs_only_change; then
     printf "  %bDocs-only change%b — docs gates only; CI_CHECK_FULL=1 runs everything\n" "$BOLD" "$NC"
     run_docs_check
     run_bundle_check
