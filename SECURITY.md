@@ -136,7 +136,10 @@ These are load-bearing guards. Reports that require removing one of them should 
 
 - **Control socket**: per-user path, `0600`, cross-UID peers rejected (fail-closed on Linux and
   macOS), 64 KiB request cap, 16 concurrent connections, optional shared secret compared in constant
-  time; clients validate the socket path and the GUI binary before trusting either.
+  time, and `params` must be a JSON object (or absent): a positional/non-object value is answered
+  with JSON-RPC `-32602` before it is dispatched or queued, because one reaching the GUI's drain
+  raised a call error that aborted the rest of the batch; clients validate the socket path and the
+  GUI binary before trusting either.
 - **Event socket**: separate listener; *submitting* an event requires a per-PTY capability that is
   never reused and is compared in constant time. Reading the fan-out is open to same-UID processes -
   treat the event channel as non-confidential from your own user.
@@ -184,8 +187,15 @@ These are load-bearing guards. Reports that require removing one of them should 
   by the pane settings UI and keyed by the pane's id, applied at spawn over the user's global
   environment.
 - **Concepts**: the standard Rust `regex` crate only (no backtracking engine), bounded counts and
-  lengths, a 16 KiB line cap before matching, 4 MiB capture buffers, and a 64 KiB OSC cap in the
-  parser.
+  lengths, a 16 KiB line cap before matching, and 4 MiB capture buffers.
+- **Terminal parsing**: a program's output is untrusted, and `vte` keeps an OSC string's payload in
+  a `Vec` that grows until the string terminates (its 1 KiB cap exists only in the `no_std` build),
+  so one `EscapeStringGuard` (`crates/gpty-core/src/escstring.rs`) sits in front of *both* parsers -
+  the terminal grid and the plain-text line parser - and closes a string that passes 64 KiB with a
+  BEL. Measured 2026-10-30: `ESC ] 0 ;` followed by 256 MiB of payload held the grid flat at 6.2 MB,
+  where it reached 267 MB before the guard. DCS, APC, PM and SOS payloads are read and discarded by
+  `alacritty_terminal` and are not counted; the bound test feeds all five kinds, so a dependency
+  that starts buffering one of them fails the test instead of growing.
 - **Markdown**: rendered from Markdown to escaped BBCode - never raw HTML or unescaped tags; links
   are scheme-checked and opened only after an explicit confirmation.
 
