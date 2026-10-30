@@ -62,7 +62,7 @@ A pane is addressed by its attachment ID (`T1`, `C1`, `W1`, …) or by `"active"
 
 - **The GUI owns state.** There is no daemon that mirrors the workspace and can disagree with it. If no GUI is running, only the commands that can satisfy a fresh workspace may start one.
 - **One definition.** The CLI, MCP schemas, and IPC method list are generated from the same clap definitions; a tool cannot drift from `gpty --help` without failing a test.
-- **Validation at the edge.** Request size is capped at 64 KiB, the server accepts at most 16 connections, and each handler has a budget. The CLI validates pane types before connecting, with suggestions.
+- **Validation at the edge.** Request size is capped at 64 KiB, the server accepts at most 16 connections, and each handler has a budget. A window holds at most 96 live panes across every workspace (`Workspace.MAX_LIVE_PANES`), so `new-pane` and `pane-run` answer with the limit instead of starting a process per call without end, and a layout or profile file with more tiles restores what fits and reports the rest. The CLI validates pane types before connecting, with suggestions.
 - **No ambient authority.** The socket is owner-only and peer-checked on Unix. An optional shared secret keeps other users out, but it is not a boundary against a program inside a pane, which is a child of the GUI.
 
 The separate event socket is not part of this API: it carries events and cannot create panes, inject input, or shut down the app. See [[omp-events]].

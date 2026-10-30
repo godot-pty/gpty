@@ -160,7 +160,8 @@ static func handle(ws, method: String, params: Dictionary):
 				opts = {"shell_command": shell, "tags": np_tags}
 			var body = ws._spawn_pane(type_name, opts)
 			if body == null:
-				return error("Grid is full")
+				var np_refused: String = ws._pane_ceiling_refusal()
+				return error(np_refused if np_refused != "" else "Grid is full")
 			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "spawned", "pane_id": body.attachment_id, "label": body.pane_label}))
 			return {"pane_id": body.attachment_id, "label": body.pane_label, "type": type_name}
 		"paneRead":
@@ -224,7 +225,8 @@ static func handle(ws, method: String, params: Dictionary):
 				"shell_args": PaneTypes.shell_run_args(SettingsManager.cfg_shell_command, run_cmd),
 			})
 			if run_body == null:
-				return error("Grid is full")
+				var run_refused: String = ws._pane_ceiling_refusal()
+				return error(run_refused if run_refused != "" else "Grid is full")
 			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "spawned", "pane_id": run_body.attachment_id, "label": run_body.pane_label}))
 			return {"pane_id": run_body.attachment_id, "label": run_body.pane_label, "type": "terminal"}
 		"listPanes":

@@ -140,6 +140,14 @@ These are load-bearing guards. Reports that require removing one of them should 
   with JSON-RPC `-32602` before it is dispatched or queued, because one reaching the GUI's drain
   raised a call error that aborted the rest of the batch; clients validate the socket path and the
   GUI binary before trusting either.
+- **Pane count**: a window holds at most 96 live panes, counted across every workspace because a
+  hidden workspace's pane keeps its PTY, child process and grid. The one ceiling
+  (`Workspace.MAX_LIVE_PANES`) is enforced where panes are created, so `new-pane`, `pane-run`, the
+  palette, a profile activation and a layout or workspace file all stop at it and say so: a caller
+  gets an error naming the limit, the user gets a toast, and a restore creates what fits and reports
+  the rest. Measured at 96 panes: about 0.9 GB (GUI 295 MB plus shells 596 MB) and 3.9 s for a full
+  restore, still inside a caller's 5 s timeout; before the ceiling a file with 300 tiles restored 300
+  shells and left the GUI answering `list-panes` in seconds.
 - **Event socket**: separate listener; *submitting* an event requires a per-PTY capability that is
   never reused and is compared in constant time. Reading the fan-out is open to same-UID processes -
   treat the event channel as non-confidential from your own user.

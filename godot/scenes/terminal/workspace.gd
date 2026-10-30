@@ -15,6 +15,23 @@ const RUNNING_ASK_MAX_NAMES = 8
 ## another.
 const MAX_WORKSPACES := 8
 
+## The live-pane ceiling for the whole window — every workspace, because a
+## hidden workspace's panes keep their PTY, child process and grid alive. Every
+## path that can create a pane shares `_pane_ceiling_refusal`: the control
+## socket (`newPane`, `paneRun`), the palette and sidebar spawns, a profile
+## activation, and a workspace/profile restore from a file.
+## Measured on the headless GUI (2026-10-30): a pane costs about 6 MB in its
+## shell, and the GUI grows by under 1 MB per pane (279 MB with 64 panes, 323 MB
+## with 128); creating panes spends about 40 ms each, so the most one operation
+## can legitimately create here is 96 panes — about 0.9 GB (GUI 295 MB, shells
+## 596 MB) and 3.9 s, which still fits inside a control-socket caller's 5 s
+## timeout; a 128-tile restore overran that timeout and a 300-tile one left
+## `list-panes` answering in seconds. One workspace holds 64 panes at the
+## divider's `MIN_TILE` floor, so this is one and a half full grids — no
+## hand-built layout comes near it — while a caller or a file can no longer
+## spend a machine's processes and memory without end.
+const MAX_LIVE_PANES := 96
+
 
 var _sidebar: Sidebar
 var _sidebar_bg: ColorRect
@@ -239,6 +256,29 @@ func _apply_layout():
 # Spawn / Kill — delegate to TerminalManager
 # ═══════════════════════════════════════════════════════════════════════
 
+## Live panes across every workspace: the number `MAX_LIVE_PANES` bounds.
+## Tiles, not bodies, so a restore that is already placing wrappers counts
+## against the ceiling exactly like a live pane does.
+func _live_pane_count() -> int:
+	var n := 0
+	for ws in _workspaces:
+		n += ws.tm.tiles.size()
+	return n
+
+## How many more panes may be created right now (never negative).
+func _live_pane_room() -> int:
+	return maxi(MAX_LIVE_PANES - _live_pane_count(), 0)
+
+## "" while a pane may still be created, otherwise the refusal, naming the
+## limit. The one decision behind every creation path: a toast, a caller's
+## error and a restore notice all print this text, and the number in it comes
+## from `MAX_LIVE_PANES` so none of them can state a different limit.
+func _pane_ceiling_refusal() -> String:
+	var live := _live_pane_count()
+	if live < MAX_LIVE_PANES:
+		return ""
+	return "Pane limit reached: this window holds %d panes (the limit is %d). Close a pane to make room." % [live, MAX_LIVE_PANES]
+
 func _spawn(shell := "") -> Control:
 	return _spawn_pane("terminal", {"shell_command": shell})
 
@@ -249,6 +289,10 @@ func _spawn_pane(type_name: String, opts := {}) -> Control:
 	return _spawn_pane_into(ws, type_name, opts)
 
 func _spawn_pane_into(ws: Dictionary, type_name: String, opts := {}) -> Control:
+	var refused := _pane_ceiling_refusal()
+	if refused != "":
+		ToastManager.warn(refused)
+		return null
 	var tm: TerminalManager = ws.tm
 	var body = tm.spawn_pane(type_name, opts, str(ws.get("cwd", "")))
 	if body == null:
@@ -297,8 +341,12 @@ func _request_pane_into(ws: Dictionary, type_name: String, settings: Dictionary)
 		activate_pane(body)
 
 func _spawn_bulk(count: int, shell := ""):
+	var room := _live_pane_room()
+	if room == 0:
+		ToastManager.warn(_pane_ceiling_refusal())
+		return
 	var start_size = _tm.tiles.size()
-	var bodies = _tm.spawn_bulk(count, shell, str(_active_workspace().get("cwd", "")))
+	var bodies = _tm.spawn_bulk(mini(count, room), shell, str(_active_workspace().get("cwd", "")))
 	if bodies.is_empty():
 		ToastManager.warn("Cannot add terminals — grid is full")
 		return
@@ -311,6 +359,13 @@ func _spawn_bulk(count: int, shell := ""):
 	_apply_layout()
 	_list()
 	ToastManager.info("Spawned %d terminals" % bodies.size())
+	# The clamp is silent only when nothing was asked past the ceiling; a bulk
+	# spawn that stopped short says why, from the same refusal text as a single
+	# one.
+	if bodies.size() < count:
+		var refused := _pane_ceiling_refusal()
+		if refused != "":
+			ToastManager.warn(refused)
 	if bodies.size() > 0: activate_pane(bodies[-1])
 
 # ── Close guards ───────────────────────────────────────────────────────
@@ -1098,9 +1153,21 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 		if st.is_empty(): continue
 		plans.append({"tile": st, "legacy_shell": td.get("shell", "")})
 	_resolve_tile_ids(plans)
+	# The window's ceiling, applied where a file's tile count is spent: this
+	# workspace's own panes were just reset, so the room is what the other
+	# workspaces leave. A layout or profile with more tiles than that restores
+	# the ones that fit and names the rest rather than starting a process per
+	# tile until the machine gives out.
+	var room := _live_pane_room()
+	var restored := 0
+	var skipped_by_limit := 0
 	var dropped_env: Array[String] = []
 	var dropped_settings: Array[String] = []
-	for plan in plans:
+	for plan_idx in plans.size():
+		if restored >= room:
+			skipped_by_limit = plans.size() - plan_idx
+			break
+		var plan: Dictionary = plans[plan_idx]
 		var st: Dictionary = plan["tile"]
 		var settings: Dictionary = st["settings"]
 		var type_name: String = st["type_name"]
@@ -1145,10 +1212,19 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 		_attach_pane_into(ws, w, body)
 		tm.tiles.append({wrapper = w, col = st["col"], row = st["row"],
 			cspan = st["cspan"], rspan = st["rspan"]})
-	if tm.tiles.is_empty():
+		restored += 1
+	if tm.tiles.is_empty() and skipped_by_limit == 0:
+		# A workspace restored from an empty layout, not one the ceiling emptied:
+		# when tiles were skipped, the notice below already says why there are
+		# none, and a second toast would repeat it.
 		_spawn_pane_into(ws, "terminal")
 	else:
 		tm._sync_edge_strips()
+
+	if skipped_by_limit > 0:
+		ToastManager.warn(
+			"Restored %d of %d panes. %s"
+			% [restored, plans.size(), _pane_ceiling_refusal()], 8.0)
 
 	if not dropped_env.is_empty():
 		var shown := dropped_env.slice(0, 3)
