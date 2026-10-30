@@ -1,10 +1,32 @@
 #!/usr/bin/env bash
-# pre-push: full CI suite before pushing
-# Delegates to scripts/ci-check (full mode)
-# Receives remote name/URL from git on stdin but ignores them.
+# pre-push: CI suite before pushing
+# Delegates to scripts/ci-check (full mode). The pushed range is handed over as
+# CI_CHECK_RANGE_FROM so a documentation-only push can narrow to the docs gates
+# (scripts/ci-check decides; CI_CHECK_FULL=1 forces the full suite). Git writes
+# one line per ref to stdin: <local ref> <local sha> <remote ref> <remote sha>.
+# A new branch (zero remote sha), two refs with different remote shas, or a
+# missing value all mean "range unknown", and the full suite runs.
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 CI_CHECK="$REPO_ROOT/scripts/ci-check"
+
+RANGE_FROM=""
+RANGE_USABLE=true
+while read -r _local_ref _local_sha _remote_ref remote_sha; do
+    if [[ -z "$remote_sha" || "$remote_sha" =~ ^0+$ ]]; then
+        RANGE_USABLE=false
+        break
+    fi
+    if [[ -z "$RANGE_FROM" ]]; then
+        RANGE_FROM="$remote_sha"
+    elif [[ "$RANGE_FROM" != "$remote_sha" ]]; then
+        RANGE_USABLE=false
+        break
+    fi
+done
+if $RANGE_USABLE && [[ -n "$RANGE_FROM" ]]; then
+    export CI_CHECK_RANGE_FROM="$RANGE_FROM"
+fi
 
 if [[ -x "$CI_CHECK" ]]; then
     "$CI_CHECK"

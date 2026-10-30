@@ -6,6 +6,14 @@ set -euo pipefail
 #   --fast   Only fmt + workflow lint + clippy (pre-commit)
 #   (no flag)  Full suite: fmt + lint + clippy + tests + GUT + audit
 #
+# A documentation-only change runs the docs gates only (docs-check +
+# knowledge bundle) in either mode, because a Markdown edit cannot change what
+# the Rust, GDScript or smoke gates test - and CI skips its code workflow for
+# one too (`paths-ignore` in .github/workflows/ci.yml). The changed set is the
+# push range when the pre-push hook provides it (CI_CHECK_RANGE_FROM), the
+# index under --fast, and the unpushed commits otherwise, always plus
+# uncommitted and untracked files. CI_CHECK_FULL=1 forces the full suite.
+#
 # A missing optional toolchain (node, godot, python3 >= 3.11, cargo-audit)
 # SKIPs with a warning on a dev machine, but FAILS the run when the CI or
 # GITHUB_ACTIONS environment variable is set: a CI build must not go green
@@ -65,6 +73,82 @@ else
     printf "  %bMode: local%b — a missing toolchain skips with a warning\n" "$BOLD" "$NC"
 fi
 
+# ── Documentation-only changes ─────────────────────────────────────────
+# Same globs as ci.yml's `paths-ignore`; keep them in sync. `case` patterns
+# match `/`, so `docs/*` covers every depth and `*.md` covers a README next to
+# a crate.
+changed_paths() {
+    {
+        if [ -n "${CI_CHECK_RANGE_FROM:-}" ]; then
+            git diff --name-only "${CI_CHECK_RANGE_FROM}..HEAD" 2>/dev/null || true
+        elif $FAST; then
+            git diff --cached --name-only 2>/dev/null || true
+        else
+            upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+            if [ -n "$upstream" ]; then
+                git diff --name-only "${upstream}..HEAD" 2>/dev/null || true
+            fi
+        fi
+        # Whatever is not committed yet is in no committed range, and a new
+        # Rust file must not hide behind a docs commit.
+        git diff --name-only 2>/dev/null || true
+        git diff --cached --name-only 2>/dev/null || true
+        git ls-files --others --exclude-standard 2>/dev/null || true
+    } | sed '/^$/d' | sort -u
+}
+
+docs_only_change() {
+    local paths p seen=0
+    paths="$(changed_paths)"
+    [ -n "$paths" ] || return 1          # nothing to judge: run everything
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        seen=1
+        case "$p" in
+            docs/*|*.md|godot/knowledge.json|LICENSE) ;;
+            *) return 1 ;;
+        esac
+    done <<EOF
+$paths
+EOF
+    [ "$seen" -eq 1 ]
+}
+
+run_docs_check() {
+    header "docs-check"
+    if DOCS_OUT="$(python3 scripts/docs-check 2>&1)"; then
+        pass "docs-check"
+    else
+        fail "docs-check"
+        detail "$DOCS_OUT"
+        check_failed
+    fi
+}
+
+run_bundle_check() {
+    header "knowledge bundle"
+    if WIKI_OUT="$(python3 scripts/build-wiki --check 2>&1)"; then
+        pass "knowledge bundle"
+    else
+        fail "knowledge bundle"
+        detail "$WIKI_OUT"
+        check_failed
+    fi
+}
+
+if ! $CI_MODE && [ -z "${CI_CHECK_FULL:-}" ] && docs_only_change; then
+    printf "  %bDocs-only change%b — docs gates only; CI_CHECK_FULL=1 runs everything\n" "$BOLD" "$NC"
+    run_docs_check
+    run_bundle_check
+    printf "\n"
+    if [[ $FAILED -eq 0 ]]; then
+        printf "${GREEN}${BOLD}Docs checks passed. Ready to push.${NC}\n"
+    else
+        printf "${RED}${BOLD}Docs checks failed. Fix before pushing.${NC}\n"
+    fi
+    exit $FAILED
+fi
+
 # ── Media dependencies (before anything compiles the extension) ────────
 # The GDExtension links FFmpeg, and the pinned build is what CI tests. Build
 # it once per prefix (scripts/media-deps caches by version + component hash);
@@ -118,14 +202,7 @@ else
 fi
 
 # ── Docs: markdown links, roadmap tables, split pages ──────────────────
-header "docs-check"
-if DOCS_OUT="$(python3 scripts/docs-check 2>&1)"; then
-    pass "docs-check"
-else
-    fail "docs-check"
-    detail "$DOCS_OUT"
-    check_failed
-fi
+run_docs_check
 
 # ── MCP registry descriptor ────────────────────────────────────────────
 # server.json is the claim the registry publishes: the package it names, the
@@ -143,14 +220,7 @@ fi
 # ── Knowledge bundle: generated from the wiki vault ────────────────────
 # The vault is the source; godot/knowledge.json is what release builds read.
 # A stale bundle ships old notes, so it fails here rather than at export.
-header "knowledge bundle"
-if WIKI_OUT="$(python3 scripts/build-wiki --check 2>&1)"; then
-    pass "knowledge bundle"
-else
-    fail "knowledge bundle"
-    detail "$WIKI_OUT"
-    check_failed
-fi
+run_bundle_check
 
 # ── Step 3: cargo clippy ───────────────────────────────────────────────
 header "cargo clippy"
