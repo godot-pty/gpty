@@ -379,6 +379,91 @@ class Smoke:
             self.fail(f"event {method} did not answer JSON", data[:300])
             raise  # unreachable
 
+    def control_rpc(self, method: str, params, request_id: int = 1) -> dict:
+        """One line-delimited JSON-RPC call on the control socket.
+
+        `params` is sent exactly as given, so a test can send a shape the typed
+        CLI cannot build - the malformed-params step below does.
+        """
+        request = (
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": method,
+                    "params": params,
+                    "gpty_secret": SECRET,
+                }
+            )
+            + "\n"
+        ).encode()
+        if WINDOWS:
+            raw = open(self.control, "r+b", buffering=0)  # noqa: SIM115 - closed below
+            try:
+                raw.write(request)
+                data = b""
+                while not data.endswith(b"\n"):
+                    chunk = raw.readline()
+                    if not chunk:
+                        break
+                    data += chunk
+            finally:
+                raw.close()
+        else:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+                conn.settimeout(10.0)
+                conn.connect(self.control)
+                conn.sendall(request)
+                data = b""
+                while not data.endswith(b"\n"):
+                    chunk = conn.recv(65536)
+                    if not chunk:
+                        break
+                    data += chunk
+        try:
+            return json.loads(data.decode())
+        except json.JSONDecodeError:
+            self.fail(f"control {method} did not answer JSON", data[:300])
+            raise  # unreachable
+
+    def malformed_params(self) -> None:
+        """A non-object `params` is refused, and the requests around it still answer.
+
+        The audit's batch-loss defect: the GUI drain parsed each request's
+        `params` and handed a non-object straight to a typed handler, whose call
+        error aborted the poll function - every request already taken off the
+        Rust queue behind it went unanswered, and each caller waited out its own
+        timeout. The server refuses the value before it is queued now, so the
+        client gets a JSON-RPC error and the batch keeps its shape.
+
+        A valid request goes before and after the bad one on purpose: a refusal
+        that swallowed the queue would fail here, at the step that caused it,
+        instead of at some later pane call that looks unrelated.
+        """
+        self.enter("malformed params")
+        before = self.control_rpc("listPanes", {}, request_id=1)
+        self.require("result" in before, "a well-formed request must answer", before)
+
+        bad = self.control_rpc("listPanes", [1, 2], request_id=2)
+        error = bad.get("error") or {}
+        self.require(
+            int(error.get("code") or 0) == -32602,
+            "a non-object params must be refused as invalid params",
+            bad,
+        )
+        self.require(
+            "params" in str(error.get("message", "")),
+            "the refusal must name params",
+            bad,
+        )
+
+        after = self.control_rpc("listPanes", {}, request_id=3)
+        self.require(
+            "result" in after,
+            "the request after the bad one must still be served",
+            after,
+        )
+
     def subscribe(self) -> str:
         """Wait for the event listener, then subscribe to it.
 
@@ -942,6 +1027,9 @@ def main() -> int:
         # ── a second instance must not take the endpoint ──────────────
         smoke.second_instance_is_refused()
 
+        # ── a malformed request must not cost the batch ───────────────
+        smoke.malformed_params()
+
         # ── Event listener ────────────────────────────────────────────
         smoke.enter("event listener")
         subscription = smoke.subscribe()
@@ -1137,6 +1225,62 @@ def main() -> int:
                 },
             )
         smoke.require("SMOKE_NEWEST_C3D4" in scrollback, "pane-read must return the newest line")
+
+        # ── an unterminated OSC must not wedge the grid ───────────────
+        # `ESC ]` opens a string and vte keeps its payload in an unbounded Vec:
+        # before the guard, a program that opened one and kept writing grew the
+        # GUI without a ceiling *and* stopped the pane rendering, because no
+        # later byte was parsed as output. The guard closes the string at
+        # 64 KiB, so the flood renders and the marker after it arrives - the
+        # read here is `pane-read`, which serves grid rows, not committed lines
+        # (the line parser was already capped, which is how the two paths
+        # diverged in the first place).
+        #
+        # ONE program emits the introducer, the flood and the marker. Split
+        # across injected commands the step proves nothing: the prompt between
+        # them prints its own ESC sequences, which end the string before the
+        # flood starts - measured by running this step with the guard's budget
+        # removed, which passed until the three writes shared one process.
+        smoke.enter("unterminated OSC")
+        if WINDOWS:
+            # cmd.exe cannot emit ESC, PowerShell can. ConPTY may consume the
+            # sequence before gpty's parser sees it, in which case this step
+            # still proves the pane renders an 80 KiB flood. The marker is
+            # concatenated at runtime for the same reason as below.
+            osc_flood = (
+                'powershell -NoProfile -Command "'
+                "[Console]::Write([char]27 + ']0;'); "
+                "1..4000 | ForEach-Object { [Console]::WriteLine('oscflood_0123456789') }; "
+                "[Console]::WriteLine('SMOKE_OSC_' + 'GUARD_8D1')\""
+            )
+        else:
+            # 128 KiB, twice the budget, as whole lines so the flood is
+            # realistic output rather than one unbroken run. The newline before
+            # the marker keeps it off a wrap boundary: rows are joined with
+            # `\n` by pane-read, which would split a marker that wrapped. The
+            # marker is built by `printf` at runtime so the echoed command line
+            # cannot contain it - the shell echoes what was typed, and a literal
+            # marker there would satisfy the assertion with the grid empty.
+            osc_flood = (
+                r"printf '\033]0;'; yes oscflood_0123456789 | head -c 131072; "
+                r"printf '\nSMOKE_OSC_%s\n' GUARD_8D1"
+            )
+        smoke.cli("inject", pane_id, "--text", osc_flood, "--json")
+        osc_tail = ""
+        for _ in range(60):
+            osc_tail = smoke.read_pane(pane_id, lines=40)
+            if "SMOKE_OSC_GUARD_8D1" in osc_tail:
+                break
+            time.sleep(0.25)
+        if "SMOKE_OSC_GUARD_8D1" not in osc_tail:
+            smoke.fail(
+                "the grid must render output after an unterminated OSC",
+                {"pane_tail": osc_tail[-600:], **smoke.diag(pane_id)},
+            )
+        smoke.require(
+            "SMOKE_OSC_GUARD_8D1" in osc_tail,
+            "the grid must render output after an unterminated OSC",
+        )
 
         # ── the shipped extension's transport ─────────────────────────
         # Runs the extension's own code inside the pane, where the per-PTY
