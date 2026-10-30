@@ -124,26 +124,6 @@ func _next_label(type_name: String) -> String:
 		if label != null and label.begins_with(prefix):
 			highest = maxi(highest, label.substr(prefix.length()).to_int())
 	return "%s%d" % [prefix, highest + 1]
-# ── Legacy wrapper builder (for backward compat during transition) ─────
-
-func build_wrapper(shell: String, rows: int, cols: int) -> Control:
-	var body: Control = _PaneScripts["terminal"].new()
-	body.name = "Body"
-	body.rows = rows
-	body.cols = cols
-
-	var title = shell.get_file() if shell else "terminal"
-	var w = _build_wrapper_body(body, title)
-
-	SettingsManager.apply_to_terminal(body)
-	body.ensure_attachment_id()
-	body.shell_command = shell if shell != "" else SettingsManager.cfg_shell_command
-
-	body.title_changed.connect(func(t: String):
-		var lbl = w.get_node_or_null("BodyVBox/TitleBar/TitleLabel")
-		if lbl: lbl.text = " " + t
-	)
-	return w
 
 # ── Wrapper shell builder (shared across all pane types) ───────────────
 
