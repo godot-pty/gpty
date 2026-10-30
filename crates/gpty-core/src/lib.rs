@@ -14,6 +14,7 @@
 //! | [`hardening`] | Keeps gPTY's own environment (the control secret) out of reach of pane programs |
 //! | [`cli`]    | `cli_view` backend: one argv child, stdout+stderr merged into a bounded line queue |
 //! | [`parser`] | Strips ANSI escape sequences from PTY output; extracts plain-text lines |
+//! | [`escstring`] | Bounds an unterminated escape string so a pane program cannot grow parser memory |
 //! | [`term`]   | Full terminal grid via `alacritty_terminal`; cursor, colors, scrolling |
 //!
 //! ## Data Flow
@@ -37,6 +38,7 @@ pub mod cli;
 pub mod color;
 pub mod concept;
 pub mod engine;
+pub mod escstring;
 pub mod hardening;
 pub mod history;
 pub mod keymap;

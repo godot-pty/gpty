@@ -26,16 +26,15 @@
 
 use vte::{Params, Parser, Perform};
 
+use crate::escstring::{EscapeStringGuard, MAX_ESCAPE_STRING_BYTES};
+
 /// Strips ANSI escape sequences from a PTY byte stream and extracts
 /// completed lines of visible text for regex matching.
 pub struct LineParser {
     parser: Parser,
     handler: Handler,
-    /// Bytes consumed by the OSC sequence currently open, if any.
-    osc_len: Option<usize>,
-    /// The previous byte was an ESC: outside a sequence it may introduce an
-    /// OSC (`ESC ]`), inside one it may start the string terminator (`ESC \`).
-    osc_pending_esc: bool,
+    /// Bounds the OSC payload vte buffers (see [`crate::escstring`]).
+    strings: EscapeStringGuard,
 }
 
 impl Default for LineParser {
@@ -49,65 +48,30 @@ impl LineParser {
         Self {
             parser: Parser::new(),
             handler: Handler::default(),
-            osc_len: None,
-            osc_pending_esc: false,
+            strings: EscapeStringGuard::new(),
         }
     }
 
     /// Feed raw PTY bytes into the parser.
     ///
-    /// The stream is watched for an OSC sequence that never terminates. vte's
-    /// `std` build (which alacritty forces on) keeps OSC bytes in an unbounded
-    /// `Vec` — its 1 KiB `MAX_OSC_RAW` cap exists only in the no_std ArrayVec
-    /// build — so a truncated title, a malformed hyperlink, or
+    /// The stream goes through [`EscapeStringGuard`] first: vte's `std` build
+    /// (which alacritty forces on) keeps an OSC string's payload in an
+    /// unbounded `Vec`, so a truncated title, a malformed hyperlink, or
     /// `printf '\033]0;'` followed by endless output would accumulate memory
-    /// for as long as the stream continues, and no later text would ever be
-    /// parsed because the parser would still be inside the string. Past the
-    /// budget the sequence is closed with a BEL, which vte handles as a string
-    /// terminator, and parsing continues normally.
+    /// for as long as the stream continues — and no later text would ever be
+    /// parsed, because the parser would still be inside the string. Past the
+    /// budget the guard closes the sequence with a BEL, which vte handles as a
+    /// string terminator, and parsing continues normally.
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<String> {
-        let mut flushed = 0usize;
-        for (i, &byte) in bytes.iter().enumerate() {
-            match self.osc_len {
-                Some(len) => {
-                    self.osc_len = Some(len + 1);
-                    if byte == 0x07 || byte == 0x18 || byte == 0x1a {
-                        // String terminators: BEL, CAN, SUB.
-                        self.osc_len = None;
-                    } else if byte == 0x1b {
-                        self.osc_pending_esc = true;
-                    } else if self.osc_pending_esc {
-                        self.osc_pending_esc = false;
-                        if byte == b'\\' {
-                            self.osc_len = None; // ST
-                        }
-                    }
-                    if self.osc_len.is_some_and(|n| n > MAX_OSC_BYTES) {
-                        self.parser.advance(&mut self.handler, &bytes[flushed..=i]);
-                        self.parser.advance(&mut self.handler, &[0x07]);
-                        flushed = i + 1;
-                        self.osc_len = None;
-                        self.osc_pending_esc = false;
-                    }
-                }
-                None => {
-                    if self.osc_pending_esc {
-                        self.osc_pending_esc = false;
-                        if byte == b']' {
-                            self.osc_len = Some(0);
-                            continue;
-                        }
-                    }
-                    if byte == 0x1b {
-                        self.osc_pending_esc = true;
-                    }
-                }
-            }
-        }
-        if flushed < bytes.len() {
-            self.parser.advance(&mut self.handler, &bytes[flushed..]);
-        }
-        std::mem::take(&mut self.handler.completed_lines)
+        let Self {
+            parser,
+            handler,
+            strings,
+        } = self;
+        strings.feed(bytes, MAX_ESCAPE_STRING_BYTES, |slice| {
+            parser.advance(handler, slice)
+        });
+        std::mem::take(&mut handler.completed_lines)
     }
 
     /// Consume the Tier 2 agent-state declaration seen in the bytes fed
@@ -118,16 +82,12 @@ impl LineParser {
     }
 }
 
-/// Maximum bytes buffered for a single output line before the parser
-/// stops collecting. Bounds memory when a program floods output without
-/// newlines; concept matching is additionally gated on this length in
-/// the engine. The grid still receives raw bytes (separate path).
+/// Maximum bytes buffered for a single output line before the parser stops
+/// collecting. Bounds memory when a program floods output without newlines;
+/// concept matching is additionally gated on this length in the engine. The
+/// grid still receives raw bytes (separate path, with the same
+/// [`MAX_ESCAPE_STRING_BYTES`] string cap in [`crate::escstring`]).
 pub const MAX_LINE_LEN: usize = 16 * 1024;
-
-/// Bytes an OSC sequence may accumulate before the parser forces it closed.
-/// Sized well above any legitimate title or hyperlink, and small enough that
-/// a malformed sequence cannot hold meaningful memory.
-const MAX_OSC_BYTES: usize = 64 * 1024;
 
 /// Private vte handler that collects printable text and ignores everything else.
 ///
@@ -321,7 +281,7 @@ mod tests {
         // OSC content instead of being parsed as output.
         let mut p = LineParser::new();
         let mut input = b"\x1b]0;".to_vec();
-        input.extend(std::iter::repeat_n(b'x', MAX_OSC_BYTES + 16));
+        input.extend(std::iter::repeat_n(b'x', MAX_ESCAPE_STRING_BYTES + 16));
         input.extend_from_slice(b"visible line\n");
 
         let lines = p.feed(&input);

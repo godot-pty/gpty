@@ -14,6 +14,7 @@ Library crate for the gpty multi-PTY emulator. This is the engine - all terminal
 | [`hardening`](src/hardening.rs) | Startup process hardening (Linux dumpable bit, Windows process DACL); keeps the GUI's and CLI's environment out of a pane program's reach | `harden_process` |
 | [`cli`](src/cli.rs) | `cli_view` backend: one argv child (never a shell); stdout+stderr merged into a bounded line queue | `CliProcess` |
 | [`parser`](src/parser.rs) | Strips ANSI escape sequences; extracts plain-text lines | `LineParser` |
+| [`escstring`](src/escstring.rs) | Bounds an unterminated escape string so a pane program cannot grow parser memory; one guard in front of both `vte` consumers | `EscapeStringGuard`, `MAX_ESCAPE_STRING_BYTES` |
 | [`term`](src/term.rs) | Full terminal grid + damage tracking via `alacritty_terminal` | `TermGrid`, `CellInfo`, `GridUpdate` |
 | [`color`](src/color.rs) | ANSI color mapping - named, indexed, true-color → RGB | `color_to_rgb()` |
 | [`keymap`](src/keymap.rs) | Keyboard event → byte sequence translation | `key_event_to_bytes()` |

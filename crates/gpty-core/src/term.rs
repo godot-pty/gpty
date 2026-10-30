@@ -23,6 +23,8 @@ use alacritty_terminal::term::cell::Cell;
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::viewport_to_point;
 
+use crate::escstring::{EscapeStringGuard, MAX_ESCAPE_STRING_BYTES};
+
 /// Cursor shape returned by the terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -144,6 +146,10 @@ pub struct TermStatus {
 pub struct TermGrid {
     term: Term<TitleListener>,
     processor: vte::ansi::Processor,
+    /// Bounds the OSC payload vte buffers, so a program that opens a string
+    /// and never closes it cannot grow this grid without limit. See
+    /// [`crate::escstring`].
+    strings: EscapeStringGuard,
     title: Arc<Mutex<String>>,
     /// Bytes the terminal emulator generated as replies to application
     /// queries (DSR cursor position, mode reports). The engine drains
@@ -218,6 +224,7 @@ impl TermGrid {
         Self {
             term,
             processor,
+            strings: EscapeStringGuard::new(),
             title,
             replies,
             rows,
@@ -248,9 +255,31 @@ impl TermGrid {
     /// This updates the internal grid (cursor position, scrolling, SGR
     /// state, etc.). Call this whenever new bytes arrive from the PTY
     /// read thread.
+    ///
+    /// Bytes go through [`EscapeStringGuard`] first: it counts an open OSC
+    /// string's payload and closes it past [`MAX_ESCAPE_STRING_BYTES`], so a
+    /// program that writes `ESC ]` and never terminates it cannot grow this
+    /// grid's parser state without bound. Only the escape-string framing is
+    /// touched; every other byte reaches alacritty unchanged.
     pub fn feed(&mut self, bytes: &[u8]) {
         self.generation += 1;
-        self.processor.advance(&mut self.term, bytes);
+        self.feed_parser(bytes);
+    }
+
+    /// Bytes to the parser only — the guard plus alacritty's processor,
+    /// without the generation bump. Every byte that reaches the processor goes
+    /// through here, including the emulator-owned sequences below, so the
+    /// guard cannot miss a path that grows parser state.
+    fn feed_parser(&mut self, bytes: &[u8]) {
+        let Self {
+            strings,
+            processor,
+            term,
+            ..
+        } = self;
+        strings.feed(bytes, MAX_ESCAPE_STRING_BYTES, |slice| {
+            processor.advance(term, slice)
+        });
     }
 
     /// Seed the internal line counter to continue numbering after restored
@@ -442,7 +471,7 @@ impl TermGrid {
                 seq.push_str(&format!("\x1b[{cursor_row}B")); // back to old row
                 seq.push_str(&format!("\x1b[{}G", cursor_col + 1)); // restore column
             }
-            self.processor.advance(&mut self.term, seq.as_bytes());
+            self.feed_parser(seq.as_bytes());
         }
         self.generation += 1;
     }
@@ -1071,6 +1100,32 @@ mod tests {
         let rows = g.renderable_rows();
         assert_eq!(rows[0][0].ch, 'h');
         assert_eq!(rows[0][4].ch, 'o');
+    }
+
+    /// A program that opens an OSC and never closes it is cut at the budget:
+    /// the grid keeps a bounded title, and the bytes after the cut parse
+    /// normally instead of being swallowed as payload.
+    #[test]
+    fn unterminated_osc_is_cut_and_the_next_sequence_parses() {
+        let mut g = TermGrid::new(5, 40);
+        let mut flood = b"\x1b]0;".to_vec();
+        flood.extend(std::iter::repeat_n(b'T', 2 * MAX_ESCAPE_STRING_BYTES));
+        flood.extend_from_slice(b"\x07");
+        g.feed(&flood);
+
+        assert!(
+            g.title().len() <= MAX_ESCAPE_STRING_BYTES + 1,
+            "title must be cut at the budget, got {} bytes",
+            g.title().len()
+        );
+
+        g.feed(b"\r\n\x1b[31mRED\r\n");
+        let rows = g.renderable_rows();
+        let row = rows
+            .iter()
+            .find(|row| row.first().is_some_and(|cell| cell.ch == 'R'))
+            .expect("text after the capped OSC must render");
+        assert_eq!(row[0].fg, [205, 0, 0], "and keep its SGR colour");
     }
 
     #[test]
