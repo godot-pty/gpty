@@ -1247,30 +1247,42 @@ def main() -> int:
             # sequence before gpty's parser sees it, in which case this step
             # still proves the pane renders an 80 KiB flood.
             #
-            # The script lives in the sandbox and the pane types a short `-File`
-            # call. A 233-character one-liner typed into cmd.exe at the prompt
-            # was echoed and then never executed (run 41050887648,
-            # windows-smoke: the line sat at the prompt and the pane produced no
-            # bytes for the whole budget), so the shape every other Windows step
-            # uses - a short command line whose work is in a file - is the one
-            # that is verified here. The step's first assertion is the flood's
-            # own shape (see below), so this arm still says whether the program
-            # ran at all.
+            # The launch does not go through the pane's prompt. Typing a program
+            # name at the cmd.exe prompt produced no execution at all on
+            # `windows-smoke`: a 233-character `powershell -Command "..."` line
+            # (run 41050887648) and then a 125-character `powershell -File "..."`
+            # line were both echoed in full and then produced no bytes for the
+            # whole 60 s budget, while a 155-character line of cmd built-ins just
+            # before them ran normally. `pane-run` takes the shell's argv path
+            # and passes on that platform every run, so the guard - the thing
+            # this step is about - is tested through it. The typed-program
+            # question is its own roadmap row (v0.9.0).
             osc_script = smoke.tmp / "osc-flood.ps1"
             osc_script.write_text(
                 "\n".join(
                     [
                         "[Console]::Write([char]27 + ']0;')",
                         "1..4000 | ForEach-Object { [Console]::WriteLine('oscflood_0123456789') }",
-                        # Runtime concatenation, as below: the typed command
-                        # line must not contain the marker it is waiting for.
+                        # Runtime concatenation, as below: the command line must
+                        # not contain the marker it is waiting for.
                         "[Console]::WriteLine('SMOKE_OSC_' + 'GUARD_8D1')",
                     ]
                 )
                 + "\n",
                 encoding="utf-8",
             )
-            osc_flood = 'powershell -NoProfile -ExecutionPolicy Bypass -File "%s"' % osc_script
+            # No quotes around the path: this string becomes one argv element,
+            # which `pane-run` hands to `cmd /c`, and cmd does not understand
+            # the backslash-escaped quotes the spawn would add - the sandbox
+            # path has no spaces, so it needs none.
+            osc_command = (
+                "powershell -NoProfile -ExecutionPolicy Bypass -File %s" % osc_script
+            )
+            flood_run = smoke.result(
+                smoke.cli("pane-run", "--command", osc_command, "--json"), "pane-run"
+            )
+            osc_pane = str(flood_run.get("pane_id", ""))
+            smoke.require(osc_pane != "", "the OSC flood pane must be created", flood_run)
         else:
             # 128 KiB, twice the budget, as whole lines so the flood is
             # realistic output rather than one unbroken run. The newline before
@@ -1279,13 +1291,14 @@ def main() -> int:
             # marker is built by `printf` at runtime so the echoed command line
             # cannot contain it - the shell echoes what was typed, and a literal
             # marker there would satisfy the assertion with the grid empty.
-            osc_flood = (
+            osc_command = (
                 r"printf '\033]0;'; yes oscflood_0123456789 | head -c 131072; "
                 r"printf '\nSMOKE_OSC_%s\n' GUARD_8D1"
             )
-        smoke.cli("inject", pane_id, "--text", osc_flood, "--json")
+            smoke.cli("inject", pane_id, "--text", osc_command, "--json")
+            osc_pane = pane_id
 
-        # Stage 1: prove the injected program ran. A step that cannot start its
+        # Stage 1: prove the flooding program ran. A step that cannot start its
         # own program must not report the guard as broken - that is the mistake
         # this split exists to prevent (run 41050887648: the typed command was
         # echoed and never executed, and the failure blamed the grid).
@@ -1294,37 +1307,39 @@ def main() -> int:
         # emits thousands of lines, so a marker printed before them has scrolled
         # out of any read window by the time the first poll lands (measured here
         # - a 131 KiB flood finished before the first `pane-read`). Rows that
-        # *begin* with the token are the flood: the echoed command line carries
-        # it mid-line, and there is only one of those.
+        # *begin* with the token are the flood; a command line carries it
+        # mid-line.
         def flood_rows(text: str) -> int:
             return sum(1 for row in text.splitlines() if row.startswith("oscflood_0123456789"))
 
         began = ""
         for _ in range(120):
-            began = smoke.read_pane(pane_id, lines=40)
+            began = smoke.read_pane(osc_pane, lines=40)
             if flood_rows(began) >= 10:
                 break
             time.sleep(0.5)
         if flood_rows(began) < 10:
             smoke.fail(
                 "the injected OSC program must start (the pane shows no flood output)",
-                {"typed": osc_flood, "pane_tail": began[-600:], **smoke.diag(pane_id)},
+                {"command": osc_command, "pane_tail": began[-600:], **smoke.diag(osc_pane)},
             )
+
+        # Stage 2: the marker the guard must let through. Sized for the Windows
+        # arm: a cold `powershell.exe` starting and then emitting 4000 lines is
+        # the same shape that once outran a 10 s budget in
+        # `test_bracketed_paste.gd` and the 10 s the extension step below used to
+        # allow. The loop exits on the first hit, so the budget only costs time
+        # when the step is already failing.
         osc_tail = ""
-        # Sized for the Windows arm: a cold `powershell.exe` starting and then
-        # emitting 4000 lines is the same shape that once outran a 10 s budget
-        # in `test_bracketed_paste.gd` and the 10 s the extension step below
-        # used to allow. The loop exits on the first hit, so the budget only
-        # costs time when the step is already failing.
         for _ in range(120):
-            osc_tail = smoke.read_pane(pane_id, lines=40)
+            osc_tail = smoke.read_pane(osc_pane, lines=40)
             if "SMOKE_OSC_GUARD_8D1" in osc_tail:
                 break
             time.sleep(0.5)
         if "SMOKE_OSC_GUARD_8D1" not in osc_tail:
             smoke.fail(
                 "the grid must render output after an unterminated OSC",
-                {"pane_tail": osc_tail[-600:], **smoke.diag(pane_id)},
+                {"pane_tail": osc_tail[-600:], **smoke.diag(osc_pane)},
             )
         smoke.require(
             "SMOKE_OSC_GUARD_8D1" in osc_tail,
