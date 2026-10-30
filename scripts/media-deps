@@ -117,9 +117,42 @@ write_env() {
     printf '  source "%s/env.sh"\n' "$PREFIX"
 }
 
+# Windows compiles against vcpkg's headers and import libraries and runs
+# against the DLLs copied into the repo prefix, so its environment is not
+# `write_env`'s: FFMPEG_DIR has to be the vcpkg prefix. The skip path below
+# needs the same block as the build branch, or a cached prefix would tell the
+# build to look for headers in a directory that only holds DLLs.
+write_env_vcpkg() {
+    local vcpkg_prefix="$1"
+    {
+        echo "export FFMPEG_DIR='$vcpkg_prefix'"
+        echo "export PKG_CONFIG_PATH='$vcpkg_prefix/lib/pkgconfig:\${PKG_CONFIG_PATH:-}'"
+        echo "export PATH='$PREFIX/bin:$vcpkg_prefix/bin:\${PATH:-}'"
+    } > "$PREFIX/env.sh"
+    if [ -n "${GITHUB_ENV:-}" ]; then
+        {
+            echo "FFMPEG_DIR=$vcpkg_prefix"
+            echo "PKG_CONFIG_PATH=$vcpkg_prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+        } >> "$GITHUB_ENV"
+    fi
+    if [ -n "${GITHUB_PATH:-}" ]; then
+        echo "$PREFIX/bin" >> "$GITHUB_PATH"
+        echo "$vcpkg_prefix/bin" >> "$GITHUB_PATH"
+    fi
+    printf '  source "%s/env.sh"\n' "$PREFIX"
+}
+
 if [ -f "$PREFIX/.stamp" ] && [ "$(cat "$PREFIX/.stamp")" = "$(stamp)" ]; then
     step "FFmpeg $VERSION already built"
-    write_env
+    if [ "$PLATFORM" = "windows" ] && [ -n "${VCPKG_ROOT:-}" ] \
+        && [ -d "$VCPKG_ROOT/installed/x64-windows" ]; then
+        # The cached repo prefix supplies the DLLs; vcpkg's tree must still be
+        # there for headers and import libraries. When it is not (a cache
+        # eviction), fall through and reinstall rather than failing at compile.
+        write_env_vcpkg "$VCPKG_ROOT/installed/x64-windows"
+    else
+        write_env
+    fi
     exit 0
 fi
 
@@ -141,24 +174,9 @@ if [ "$PLATFORM" = "windows" ]; then
         fi
     done
     cp "$COMPONENTS" "$PREFIX/components.txt"
-    {
-        echo "export FFMPEG_DIR='$VCPKG_PREFIX'"
-        echo "export PKG_CONFIG_PATH='$VCPKG_PREFIX/lib/pkgconfig:\${PKG_CONFIG_PATH:-}'"
-        echo "export PATH='$PREFIX/bin:$VCPKG_PREFIX/bin:\${PATH:-}'"
-    } > "$PREFIX/env.sh"
-    if [ -n "${GITHUB_ENV:-}" ]; then
-        {
-            echo "FFMPEG_DIR=$VCPKG_PREFIX"
-            echo "PKG_CONFIG_PATH=$VCPKG_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-        } >> "$GITHUB_ENV"
-    fi
-    if [ -n "${GITHUB_PATH:-}" ]; then
-        echo "$PREFIX/bin" >> "$GITHUB_PATH"
-        echo "$VCPKG_PREFIX/bin" >> "$GITHUB_PATH"
-    fi
+    write_env_vcpkg "$VCPKG_PREFIX"
     stamp > "$PREFIX/.stamp"
     step "FFmpeg $VERSION ready"
-    printf '  source "%s/env.sh"\n' "$PREFIX"
     exit 0
 fi
 
