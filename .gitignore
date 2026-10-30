@@ -41,7 +41,10 @@ reasonix.toml
 # Local audit (delete when resolved)
 TEMP*
 AUDIT.md
-.omp/
+.omp/*
+# Committed agent skills: OMP's native project provider scans .omp/skills/<name>/SKILL.md
+!.omp/skills/
+!.omp/skills/**
 
 docs/public/
 docs/.hugo_build.lock

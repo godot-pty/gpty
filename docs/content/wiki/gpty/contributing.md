@@ -87,6 +87,8 @@ Two more that cost real CI runs. A test that writes an executable and then spawn
 
 Tests are written `Given / When / Then` with expected output stated. Behaviour changes come with a test that would fail without them; a fix that only moves a symptom is not done.
 
+A documentation-only change is the one exception to "full suite": `scripts/ci-check` detects it and runs only `docs-check` and `build-wiki --check`, because no Rust or GDScript test reads `docs/` and the same split decides what CI runs (a docs-only push starts only the Docs workflow). The changed set is the pushed range when the pre-push hook supplies it, the index under `--fast`, and the unpushed commits otherwise - plus uncommitted and untracked files, so a new source file cannot hide behind a docs commit. `CI_CHECK_FULL=1` forces the whole gate.
+
 ## Hooks
 
 Install the repository's git hooks once per clone:

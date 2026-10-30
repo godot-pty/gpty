@@ -15,7 +15,8 @@ This file holds the rules every change needs. The detailed rules live in one pag
 | [Inspector, Reasoning, and OMP](docs/content/docs/agents/inspector-reasoning-omp.md) | The agent-observability panes |
 | [Plugin manifest](docs/content/docs/agents/plugins.md) | Plugin manifests, catalog, install and trust |
 | [Security rules](docs/content/docs/agents/security.md) | Any change near IPC, PTY, the filesystem, plugins, networking, or secrets (read before editing) |
-| [Pitfalls and tool notes](docs/content/docs/agents/pitfalls.md) | Before debugging, and before touching an FFI or CLI boundary: the known traps |
+|[Pitfalls and tool notes](docs/content/docs/agents/pitfalls.md)|Before debugging, and before touching an FFI or CLI boundary: the known traps|
+|Agent skills (`skill://<name>`)|Any task: load the matching skill before the first edit - the bodies live in `.omp/skills/<name>/SKILL.md`|
 
 ## Project Structure
 
@@ -227,6 +228,7 @@ See `skill://gpty-omp-integration` for usage patterns.
 
 `ROADMAP.md` is an index, and the roadmap itself is a **prioritized queue** split into one page per release chain under `docs/content/docs/roadmap/` (`v0.1.md` … `v1.0.md`, then `future.md`; the Hugo site renders them as children of the Roadmap section, and `docs/content/docs/roadmap/_index.md` renders `ROADMAP.md` as the section's front page). Work it like this:
 
+- **Before working a row** - read `skill://gpty-roadmap-task` first: it carries the order of operations, the per-area gate table and the close-out contract. Every skill is committed at `.omp/skills/<name>/SKILL.md`, which OMP's native project provider loads at startup, so they travel with the clone.
 - **Picking the next task** - the next task is the first unchecked row (⬜) in the *earliest unfinished release*: open the chain pages in version order, take the first chain that still has a ⬜, and take the first ⬜ on that page (a chain page lists its releases oldest-first, so an earlier release with a leftover ⬜ comes before a later one). The index marks each chain `released`, `in progress`, `planned` or `unscheduled`. Future is never picked from. No grouping by origin, no separate "carry-over" headings: within a release, row order *is* the priority, and the top row is the answer to "what's next".
 - **Row format** - one row per line in the page's table: `| ✅ or ⬜ | AREA | **Title** - evidence, fix, tests |`. The Area is one of TERM, GUI, IPC, CLI, SEC, PLUGIN, WIKI, CONCEPT, MEDIA, AGENT, CORE, BUILD, DOCS, PROJECT. Escape a literal `|` in the text as `\|`, and keep `<` inside backticks (the site omits raw HTML). There is no size or discovered-date column: sizing was only a tie-break, and provenance is in git history and, where it matters, in the row text ("found by the October audit", "measured on commit …"). Titles stay unique; other rows and docs refer to a row by its bold title.
 - **Ordering** (used when adding or re-prioritizing rows) - data-loss and correctness first, then security with a reachable path, then the release's own features, then robustness and tests, then low-reachability hardening, then polish, then work that can only happen at release time (tagging, packaging against a released artifact). Ties break toward the smaller item. The owner may promote the release's headline feature ahead of the hardening tail once the correctness and security block is closed; when it is done, say so in the row rather than leaving the queue ambiguous.
