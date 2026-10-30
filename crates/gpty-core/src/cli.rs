@@ -676,8 +676,17 @@ mod process_tests {
         use std::os::unix::fs::PermissionsExt;
         // A real, runnable script — so the only thing that can stop it is the
         // rule under test, not a missing file or a bad interpreter.
-        let path =
-            std::env::temp_dir().join(format!("gpty_cli_view_writable_{}", std::process::id()));
+        // A name no other test process can be using: the parallel run has
+        // several test binaries in flight, and a collision would let another
+        // test's swap of the same path decide this one.
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "gpty_cli_view_writable_{}_{unique}",
+            std::process::id()
+        ));
         std::fs::write(&path, b"#!/bin/sh\nexit 0\n").unwrap();
         let program = path.to_string_lossy().to_string();
 
@@ -686,8 +695,26 @@ mod process_tests {
 
         // The control: the same file, private to its owner, runs. Without it
         // the refusal above could be any failure at all.
+        //
+        // The kernel answers ETXTBSY while *any* process holds the file open
+        // for writing, and libtest's thread pool forks for other tests: a fork
+        // on another thread can hold a dup of this file's write descriptor for
+        // a moment after `fs::write` closed ours. Measured on CI, where the
+        // control spawn failed with `Text file busy` on two of three parallel
+        // runs (serial runs never did). Retry that one error only, bounded, so
+        // a descriptor that really leaked still fails the test - the rule under
+        // test is the permission check, never the exec itself.
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let accepted = CliProcess::spawn(&program, &[]);
+        let mut accepted = CliProcess::spawn(&program, &[]);
+        for _ in 0..20 {
+            match &accepted {
+                Err(error) if error.contains("Text file busy") => {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                    accepted = CliProcess::spawn(&program, &[]);
+                }
+                _ => break,
+            }
+        }
 
         // Remove the file before asserting, so a failing run cannot leave a
         // world-writable executable behind.
