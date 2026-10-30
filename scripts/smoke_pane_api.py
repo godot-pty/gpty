@@ -1267,11 +1267,16 @@ def main() -> int:
             )
         smoke.cli("inject", pane_id, "--text", osc_flood, "--json")
         osc_tail = ""
-        for _ in range(60):
+        # Sized for the Windows arm: a cold `powershell.exe` starting and then
+        # emitting 4000 lines is the same shape that once outran a 10 s budget
+        # in `test_bracketed_paste.gd` and the 10 s the extension step below
+        # used to allow. The loop exits on the first hit, so the budget only
+        # costs time when the step is already failing.
+        for _ in range(120):
             osc_tail = smoke.read_pane(pane_id, lines=40)
             if "SMOKE_OSC_GUARD_8D1" in osc_tail:
                 break
-            time.sleep(0.25)
+            time.sleep(0.5)
         if "SMOKE_OSC_GUARD_8D1" not in osc_tail:
             smoke.fail(
                 "the grid must render output after an unterminated OSC",
