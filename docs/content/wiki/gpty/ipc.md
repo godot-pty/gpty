@@ -107,10 +107,13 @@ The channel can create panes, inject keystrokes, and shut the workspace down, so
 | One instance | A live endpoint is never replaced; only a crash leftover is rebound |
 | Optional secret | `GPTY_SECRET` set on the GUI and clients; missing or mismatched yields `-32001` |
 | Request size | Lines over 64 KiB are refused with `-32600` |
+| `params` shape | Named-only: a JSON object, or absent (`null` reads as absent). Anything else answers `-32602` before dispatch |
 | Connections | At most 16 concurrent; 30 s I/O bounds on read and write |
 | Handler budget | 30 s default, 75 s for `paneWait`, 305 s for `pluginInstall`; overrun answers `-32000` |
 
 `GPTY_SECRET` keeps *other users* out. It is not a boundary against a program inside a pane: that program is a child of the GUI, inherits its environment, and can read the secret back.
+
+Named-only `params` is a batch rule as much as a protocol one. Every method takes its arguments by name, and a positional value used to reach a typed handler in the GUI's drain, where the resulting call error aborted the rest of that frame's batch — the requests already dequeued behind it were never answered. The server now refuses the shape before queueing it, and the drain's own guard answers the same code if one arrives another way.
 
 ## The second socket
 

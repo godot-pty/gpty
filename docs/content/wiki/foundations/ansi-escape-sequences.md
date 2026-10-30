@@ -45,7 +45,9 @@ It also means terminal output is untrusted display data. A program can paint any
 
 ## Limits and edge cases
 
-Unknown or malformed sequences are ignored rather than treated as text. A sequence that is never terminated is different: it swallows everything after it until the terminator arrives. The line parser bounds that exposure by force-closing an unterminated OSC after 64 KiB and resuming normal parsing, so a program cannot hold text extraction hostage indefinitely with a truncated title or hyperlink.
+Unknown or malformed sequences are ignored rather than treated as text. A sequence that is never terminated is different: the parser stays inside it, so every byte after it is swallowed and the string's payload accumulates until a terminator arrives. Both halves matter — output stops being interpreted *and* memory grows — so a terminal has to bound it, and what needs bounding depends on which sequences its parser actually buffers.
+
+gPTY closes an unterminated OSC after 64 KiB with a `BEL` and resumes normal parsing, from one shared guard (`crates/gpty-core/src/escstring.rs`) placed in front of both parsers: the display grid and the plain-text line parser. A truncated title or hyperlink can therefore neither hold text extraction hostage nor grow the process. DCS, APC, PM and SOS payloads are read and discarded by `alacritty_terminal` instead of buffered, so they are not counted — measuring that is what decides the guard's scope rather than assuming every string behaves alike.
 
 Finally, escape sequences do not compose into a reliable "screenshot" format. If you need the screen as text, ask the terminal for its resolved cells, not for the bytes that produced them—which is exactly what `paneRead` does.
 
