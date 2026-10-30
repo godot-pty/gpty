@@ -49,6 +49,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Cache FFmpeg
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          # The built prefix, not the source or build trees: `media-deps` skips
+          # when its `.stamp` (version + components checksum + platform +
+          # assembler) matches and still writes the job env, so a restored
+          # prefix turns a ~105 s build into a 2 s check. A stale cache costs
+          # time - the stamp forces the rebuild - never correctness.
+          path: dist/ffmpeg/linux-x86_64
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-ffmpeg-
+
       - name: Build media dependencies
         # Pinned minimal FFmpeg (scripts/media-deps); gpty-gdext links it, so
         # every job that compiles or loads the extension needs the prefix.
@@ -107,9 +120,9 @@ jobs:
           path: |
             ~/.cargo/registry
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-check-
 
       - name: Cache vcpkg FFmpeg
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -175,6 +188,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Cache FFmpeg
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          # The built prefix, not the source or build trees: `media-deps` skips
+          # when its `.stamp` (version + components checksum + platform +
+          # assembler) matches and still writes the job env, so a restored
+          # prefix turns a ~105 s build into a 2 s check. A stale cache costs
+          # time - the stamp forces the rebuild - never correctness.
+          path: dist/ffmpeg/linux-x86_64
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-ffmpeg-
+
       - name: Build media dependencies
         run: ./scripts/media-deps
 
@@ -222,9 +248,9 @@ jobs:
           path: |
             ~/.cargo/registry
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-build-
 
       - name: Cache vcpkg FFmpeg
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -338,8 +364,19 @@ jobs:
       # The version is pinned so the tool's policy cannot change under a green
       # build; there is no install-action entry for cargo-audit, so this is the
       # one place a build step costs a couple of minutes.
+      - name: Cache cargo-audit
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          # The installed binary, keyed on the pinned version. A miss builds it
+          # from crates.io with `--locked`, so a hit is the same artifact this
+          # job would make (measured: 173 s of every run went to compiling a
+          # tool that then ran in 3 s). The version in the key is what keeps
+          # the tool's policy from drifting under a green build.
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-0.22.2-${{ runner.os }}
+
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked --version 0.22.2
+        run: command -v cargo-audit >/dev/null || cargo install cargo-audit --locked --version 0.22.2
 
       - name: Run cargo-audit
         run: cargo audit --deny warnings
