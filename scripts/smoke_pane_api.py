@@ -1245,14 +1245,32 @@ def main() -> int:
         if WINDOWS:
             # cmd.exe cannot emit ESC, PowerShell can. ConPTY may consume the
             # sequence before gpty's parser sees it, in which case this step
-            # still proves the pane renders an 80 KiB flood. The marker is
-            # concatenated at runtime for the same reason as below.
-            osc_flood = (
-                'powershell -NoProfile -Command "'
-                "[Console]::Write([char]27 + ']0;'); "
-                "1..4000 | ForEach-Object { [Console]::WriteLine('oscflood_0123456789') }; "
-                "[Console]::WriteLine('SMOKE_OSC_' + 'GUARD_8D1')\""
+            # still proves the pane renders an 80 KiB flood.
+            #
+            # The script lives in the sandbox and the pane types a short `-File`
+            # call. A 233-character one-liner typed into cmd.exe at the prompt
+            # was echoed and then never executed (run 41050887648,
+            # windows-smoke: the line sat at the prompt and the pane produced no
+            # bytes for the whole budget), so the shape every other Windows step
+            # uses - a short command line whose work is in a file - is the one
+            # that is verified here. The step's first assertion is the flood's
+            # own shape (see below), so this arm still says whether the program
+            # ran at all.
+            osc_script = smoke.tmp / "osc-flood.ps1"
+            osc_script.write_text(
+                "\n".join(
+                    [
+                        "[Console]::Write([char]27 + ']0;')",
+                        "1..4000 | ForEach-Object { [Console]::WriteLine('oscflood_0123456789') }",
+                        # Runtime concatenation, as below: the typed command
+                        # line must not contain the marker it is waiting for.
+                        "[Console]::WriteLine('SMOKE_OSC_' + 'GUARD_8D1')",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
             )
+            osc_flood = 'powershell -NoProfile -ExecutionPolicy Bypass -File "%s"' % osc_script
         else:
             # 128 KiB, twice the budget, as whole lines so the flood is
             # realistic output rather than one unbroken run. The newline before
@@ -1266,6 +1284,32 @@ def main() -> int:
                 r"printf '\nSMOKE_OSC_%s\n' GUARD_8D1"
             )
         smoke.cli("inject", pane_id, "--text", osc_flood, "--json")
+
+        # Stage 1: prove the injected program ran. A step that cannot start its
+        # own program must not report the guard as broken - that is the mistake
+        # this split exists to prevent (run 41050887648: the typed command was
+        # echoed and never executed, and the failure blamed the grid).
+        #
+        # The evidence is the flood's own shape, not a marker line: the program
+        # emits thousands of lines, so a marker printed before them has scrolled
+        # out of any read window by the time the first poll lands (measured here
+        # - a 131 KiB flood finished before the first `pane-read`). Rows that
+        # *begin* with the token are the flood: the echoed command line carries
+        # it mid-line, and there is only one of those.
+        def flood_rows(text: str) -> int:
+            return sum(1 for row in text.splitlines() if row.startswith("oscflood_0123456789"))
+
+        began = ""
+        for _ in range(120):
+            began = smoke.read_pane(pane_id, lines=40)
+            if flood_rows(began) >= 10:
+                break
+            time.sleep(0.5)
+        if flood_rows(began) < 10:
+            smoke.fail(
+                "the injected OSC program must start (the pane shows no flood output)",
+                {"typed": osc_flood, "pane_tail": began[-600:], **smoke.diag(pane_id)},
+            )
         osc_tail = ""
         # Sized for the Windows arm: a cold `powershell.exe` starting and then
         # emitting 4000 lines is the same shape that once outran a 10 s budget
