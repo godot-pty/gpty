@@ -62,10 +62,18 @@ esac
 PREFIX="${GPTY_MEDIA_PREFIX:-$REPO_ROOT/dist/ffmpeg/$PLATFORM-$ARCH}"
 mkdir -p "$PREFIX"
 
+# What a built prefix was built *by*: the pinned version, the component list, the
+# platform, whether an assembler was available - and this script's own checksum,
+# so editing a build flag invalidates the prefix even locally. CI already keys
+# its cache on the script (`hashFiles('scripts/media-deps')`), but without the
+# checksum here a local `media-deps` after a flag change said "already built"
+# and left the old library linked: a silent stale-success, which is the one
+# failure mode a stamp exists to prevent.
 stamp() {
     local asm="noasm"
     if command -v nasm >/dev/null 2>&1; then asm="asm"; fi
-    printf '%s %s %s %s\n' "$VERSION" "$(cat "$COMPONENTS" | cksum)" "$PLATFORM-$ARCH" "$asm"
+    printf '%s %s %s %s %s\n' "$VERSION" "$(cat "$COMPONENTS" | cksum)" \
+        "$PLATFORM-$ARCH" "$asm" "$(cksum < "$REPO_ROOT/scripts/media-deps")"
 }
 
 sha256_of() {
