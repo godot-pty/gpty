@@ -91,6 +91,9 @@ jobs:
   # job, Windows-only compile errors only surface at tag time.
   rust-windows:
     runs-on: windows-latest
+    # Same cap as windows-smoke: the Windows target build plus the hardening
+    # test is ~10 minutes green, and a stuck rustc must not hold the runner.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -141,6 +144,9 @@ jobs:
   # ── GDScript tests (GUT headless) ────────────────────────────────────
   gut-tests:
     runs-on: ubuntu-latest
+    # The same guard as the Windows jobs: this one boots Godot and the GUI, so
+    # a hang must fail in minutes rather than at GitHub's six-hour cap.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -199,6 +205,10 @@ jobs:
   # Linux, whose only platform difference is the transport.
   windows-smoke:
     runs-on: windows-latest
+    # A hung Godot or cargo would otherwise hold the runner to GitHub's
+    # six-hour cap (gut-check's notes record one such hang on Windows). Green
+    # is ~10 minutes here; 30 is slack for a loaded runner.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -233,6 +243,15 @@ jobs:
           VCPKG_ROOT: ${{ env.VCPKG_INSTALLATION_ROOT || 'C:/vcpkg' }}
         run: ./scripts/media-deps
 
+      - name: Build CLI and extension
+        shell: bash
+        # The smoke builds both itself, but it reports a failure as a summary
+        # line. Two windows-smoke runs failed with `cargo build ... exited 101`
+        # and the only visible detail was build-script metadata, which named
+        # nothing: a cargo error belongs in a step of its own. The smoke's own
+        # build then finds the artifacts current and costs seconds.
+        run: cargo build -p gpty-gdext -p gpty
+
       - name: Install Godot (Windows, headless)
         shell: pwsh
         run: |
@@ -258,12 +277,16 @@ jobs:
           GODOT: ${{ github.workspace }}\godot-editor\godot.exe
 
       - name: Import project
+        if: ${{ !cancelled() }}
         shell: bash
         # `godot` is on PATH from the download step; the smoke imported the
         # project already, and GUT resolves `class_name` globals from that cache.
+        # Runs whether or not the smoke passed: a failing smoke must not cost
+        # the run its second, independent signal.
         run: godot --headless --path godot --import
 
       - name: GUT tests (Windows)
+        if: ${{ !cancelled() }}
         # The same gate as Linux, under the runner's Git Bash: `gut-check` owns
         # the command and validates the run (a parse error aborts GUT after a
         # few scripts and still exits 0), so a Windows suite that stops early

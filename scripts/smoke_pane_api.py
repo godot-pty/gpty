@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -48,6 +49,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WINDOWS = os.name == "nt"
+# A cargo or Godot invocation that never returns must fail the run, not hold
+# the CI runner to its six-hour cap. Green builds here take 1-3 minutes.
+RUN_TIMEOUT_S = 1800.0
+# Cargo and Godot colourise through a pipe; a captured error should be
+# readable in a job log (the same strip gut-check applies).
+_ANSI = re.compile("\x1b\\[[0-9;?]*[A-Za-z]")
+
+
+def strip_ansi(text: str) -> str:
+    return _ANSI.sub("", text)
 SECRET = "smoke-secret"
 READY_TIMEOUT_S = 60.0
 
@@ -985,16 +996,29 @@ class Smoke:
     def run(
         self, argv: list[str], cwd: Path | None = None, check: bool = True
     ) -> subprocess.CompletedProcess:
-        proc = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, env=self.env)
+        rendered = " ".join(str(a) for a in argv)
+        try:
+            proc = subprocess.run(
+                argv,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                env=self.env,
+                timeout=RUN_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail(f"`{rendered}` did not finish in {RUN_TIMEOUT_S:.0f}s")
+            raise  # unreachable
         if check and proc.returncode != 0:
             # Whole lines, not the last 300 characters: a failed build's tail is
             # cargo's build-script chatter (`cargo::metadata=` lines) and the
             # error sits above it - measured on windows-smoke, where the
-            # character tail named nothing.
-            detail = (proc.stderr or proc.stdout).strip().splitlines()
+            # character tail named nothing. Colour is stripped for the same
+            # reason (the job sets CARGO_TERM_COLOR).
+            detail = strip_ansi(proc.stderr or proc.stdout).strip().splitlines()
             self.fail(
-                f"`{' '.join(str(a) for a in argv)}` exited {proc.returncode}",
-                [f"stderr/stdout tail (last {min(len(detail), 30)} lines):"] + detail[-30:]
+                f"`{rendered}` exited {proc.returncode}",
+                [f"stderr/stdout tail (last {min(len(detail), 50)} lines):"] + detail[-50:]
                 if detail
                 else "(no output)",
             )
