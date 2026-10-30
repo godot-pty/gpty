@@ -53,7 +53,7 @@ A pane is addressed by its attachment ID (`T1`, `C1`, `W1`, …) or by `"active"
 | `running` | A live terminal task with no exit code |
 | `exit_code` | The child's exit code, when one was recorded |
 | `exit_reason` | `exited`, `task_ended`, or null while running |
-| `idle_ms` | Time since the last output |
+| `idle_ms` | Time since the last output; measured on bytes arriving from the platform terminal, so it also grows while a child is simply quiet - and on Windows while the console host sits on an unterminated escape string, which emits nothing ([[conpty]]) |
 | `agent_state`, `agent_state_tier` | The display-only badge and which tier supplied it |
 
 `paneRun` opens a new terminal pane through the configured shell; it does not reuse an existing pane. `paneWait` is a regex match against recent output, not a promise about future output: it is held server-side until the pattern appears or the deadline passes. `paneRead` is a snapshot, so a caller that needs a stream should poll or subscribe to events instead.

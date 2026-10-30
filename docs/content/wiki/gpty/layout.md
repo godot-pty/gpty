@@ -39,7 +39,7 @@ Restoring a layout therefore starts fresh programs in the same shapes, not the s
 
 Automatic persistence and named saving are two different mechanisms.
 
-The **workspace set** is auto-saved to `user://workspaces.json` whenever you switch or close a workspace, and on exit. Each entry holds a name, an optional default directory, and its layout array plus the `grid_unit` it was written in, so a file from an older build converts to the same shares. On startup the set is restored and the previously active workspace is re-selected. A legacy `user://layout.json` is imported once when the store is empty, which is why the older file name still appears in the code.
+The **workspace set** is auto-saved to `user://workspaces.json` whenever you switch or close a workspace, and on exit. Each entry holds a name, an optional default directory, and its layout array plus the `grid_unit` it was written in, so a file from an older build converts to the same shares. On startup the set is restored and the previously active workspace is re-selected. A legacy `user://layout.json` is imported once when the store is empty, which is why the older file name still appears in the code. A layout with more tiles than the window has room for restores what fits and says how many did not: live panes are capped across the whole window, not per workspace, so the ceiling a restore meets is what the other workspaces leave ([[control-api]]).
 
 A **named layout** is saved on demand:
 

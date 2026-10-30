@@ -71,6 +71,15 @@ not identical.
   sequences, some details of *how* a program drew something may not survive byte-for-byte.
   In practice this is invisible for normal interactive use, and it is the reason
   terminal-compatibility edge cases are often platform-specific.
+- The console host is itself a parser, and escape strings are where that shows. An
+  unterminated OSC (`ESC ]`) is buffered by the console host until `BEL`/`ST` arrives: the
+  introducer and every byte after it are absorbed instead of re-emitted, so the attached
+  terminal receives **nothing at all** for as long as the string stays open. A program that
+  opens a title string and then writes output makes a Windows pane look frozen, where on a
+  Unix PTY the bytes reach the pane's parser and its own guard closes the string at 64 KiB.
+  Measured: a 92 KiB unterminated flood from a pane produced zero bytes at the grid. This is
+  also why gPTY's guard is unit-tested coverage on Windows rather than a live bound - the
+  child's escape strings never arrive.
 - Resize is a request, not a signal. A program that ignores the new size will keep
   drawing at the old dimensions, exactly as on Unix.
 - Text selection and copy in the pane are gPTY's own (the grid is gPTY's state); they do
@@ -81,6 +90,7 @@ not identical.
 ## Related
 
 - [[terminal-foundations]]
+- [[ansi-escape-sequences]]
 - [[pty|PTY (the Unix mechanism)]]
 - [[shell]]
 - [[terminal-emulator]]

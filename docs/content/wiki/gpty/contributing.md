@@ -81,6 +81,8 @@ cargo check
 
 Two details worth knowing. GUT exits 0 even when a run aborts, which is why `scripts/gut-check` exists and why it is the command to trust. And `godot --headless --path godot --import` must run once before the first headless test, or the project has no imported resources and every scene load fails.
 
+Two more that cost real CI runs. A test that writes an executable and then spawns it can see `ETXTBSY` while another test thread forks holding a dup of the write descriptor: retry that one error inside the test, bounded, and leave the product reporting it. And an escape-string assertion cannot be made end to end on Windows - the console host buffers an unterminated string before gPTY sees it ([[conpty]]) - so the guard's coverage lives in `escstring` unit tests and the live smoke skips that arm on that platform.
+
 Tests are written `Given / When / Then` with expected output stated. Behaviour changes come with a test that would fail without them; a fix that only moves a symptom is not done.
 
 ## Hooks
