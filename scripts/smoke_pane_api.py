@@ -987,9 +987,16 @@ class Smoke:
     ) -> subprocess.CompletedProcess:
         proc = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, env=self.env)
         if check and proc.returncode != 0:
+            # Whole lines, not the last 300 characters: a failed build's tail is
+            # cargo's build-script chatter (`cargo::metadata=` lines) and the
+            # error sits above it - measured on windows-smoke, where the
+            # character tail named nothing.
+            detail = (proc.stderr or proc.stdout).strip().splitlines()
             self.fail(
                 f"`{' '.join(str(a) for a in argv)}` exited {proc.returncode}",
-                (proc.stderr or proc.stdout).strip()[-300:],
+                [f"stderr/stdout tail (last {min(len(detail), 30)} lines):"] + detail[-30:]
+                if detail
+                else "(no output)",
             )
         return proc
 
