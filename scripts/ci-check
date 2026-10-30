@@ -89,11 +89,16 @@ changed_paths() {
                 git diff --name-only "${upstream}..HEAD" 2>/dev/null || true
             fi
         fi
-        # Whatever is not committed yet is in no committed range, and a new
-        # Rust file must not hide behind a docs commit.
-        git diff --name-only 2>/dev/null || true
-        git diff --cached --name-only 2>/dev/null || true
-        git ls-files --others --exclude-standard 2>/dev/null || true
+        # A push or a commit validates its own content, not the working tree:
+        # uncommitted files never leave the machine, so counting them would
+        # force the full suite for a docs push whenever a scratch file is
+        # lying around. A manual run has no such range, so there the working
+        # tree is the thing being judged - including untracked files, so a new
+        # Rust file cannot hide behind a docs commit.
+        if [ -z "${CI_CHECK_RANGE_FROM:-}" ] && ! $FAST; then
+            git diff --name-only 2>/dev/null || true
+            git ls-files --others --exclude-standard 2>/dev/null || true
+        fi
     } | sed '/^$/d' | sort -u
 }
 
