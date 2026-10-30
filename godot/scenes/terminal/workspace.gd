@@ -1891,12 +1891,16 @@ func _poll_ipc_requests():
 	for req in reqs:
 		var id = req["id"]
 		var method = req["method"]
-		var params_str = req["params"]
-		var params = {}
-		if params_str != "":
-			params = JSON.parse_string(params_str)
-			if params == null:
-				params = {}
+		# Defence in depth for the batch: the Rust edge refuses a non-object
+		# `params`, and this guard keeps one that slipped past from aborting
+		# the loop (see `WorkspaceIpcHandlers.request_params`).
+		var parsed: Dictionary = WorkspaceIpcHandlers.request_params(req["params"])
+		if parsed.has("error"):
+			# -32602 matches what the Rust edge answers for the same input, so
+			# a client sees one contract whichever layer refused it.
+			GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error(str(parsed["error"]), -32602)))
+			continue
+		var params: Dictionary = parsed["params"]
 		if method == "paneWait":
 			var w_found: Dictionary = _resolve_pane_target(str(params.get("pane_id", "")))
 			if w_found.has("error"):

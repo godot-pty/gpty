@@ -11,6 +11,33 @@ static func error(msg: String, code := -32000) -> Dictionary:
 	return {"error": {"code": code, "message": msg}}
 
 
+## Parse one queued request's `params` field for the drain loop.
+##
+## The Rust server refuses a `params` that is not a JSON object before it is
+## queued (JSON-RPC `-32602`), and this is the second layer. GDScript has no
+## try/catch, so a value that is not a `Dictionary` raises a call error in the
+## typed handlers (`paneWait`'s `params.get(...)`, `handle(ws, method, params:
+## Dictionary)`), which aborts the whole poll loop - every request already
+## drained from the Rust queue is then neither handled nor answered, and each
+## caller waits out its own timeout. One bad value must cost one error
+## response, never the batch.
+##
+## Returns `{"params": Dictionary}` for a request that may be handled, or
+## `{"error": String}` for one that must be answered and skipped. Absent, empty
+## and `null` params all mean "no arguments"; unparseable JSON is treated the
+## same way, because the server answers malformed JSON before queueing and this
+## path only exists for whatever got past it.
+static func request_params(raw) -> Dictionary:
+	if not (raw is String) or raw.is_empty() or raw == "null":
+		return {"params": {}}
+	var parsed = JSON.parse_string(raw)
+	if parsed == null:
+		return {"params": {}}
+	if not (parsed is Dictionary):
+		return {"error": "params must be a JSON object, got %s" % type_string(typeof(parsed))}
+	return {"params": parsed}
+
+
 ## The admin actions `gpty plugin` can take that change the store a running GUI
 ## reads. Closed vocabulary: the CLI names one, anything else is refused.
 const PLUGIN_ADMIN_ACTIONS := ["uninstall", "enable", "disable"]

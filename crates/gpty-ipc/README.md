@@ -74,6 +74,14 @@ Error:
 {"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"Unknown method: badMethod"}}
 ```
 
+`params` is **named-only**: it must be a JSON object, or absent (an explicit
+`null` reads as absent). A positional/array value, string or number is answered
+with `-32602` before it reaches a handler, and the GUI's drain answers the same
+code if one ever slips past. JSON-RPC 2.0 permits by-position params; every
+gpty method takes by-name, and a non-object value used to abort the GUI's whole
+request batch — the requests already dequeued behind it were never answered, and
+each caller waited out its own timeout.
+
 ## Security
 
 The IPC channel controls the whole workspace, so the server hardens the

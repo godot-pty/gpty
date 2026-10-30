@@ -670,6 +670,20 @@ where
     .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "response write timed out"))?
 }
 
+/// Name the JSON type of a value, for the `params` error message. Naming the
+/// type rather than echoing the value keeps a megabyte of client input out of
+/// the response.
+fn json_kind(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "a boolean",
+        serde_json::Value::Number(_) => "a number",
+        serde_json::Value::String(_) => "a string",
+        serde_json::Value::Array(_) => "an array",
+        serde_json::Value::Object(_) => "an object",
+    }
+}
+
 /// Handle a single connection: read one JSON-RPC request, dispatch, respond.
 ///
 /// I/O (the request read and the response write) is bounded by
@@ -754,7 +768,29 @@ async fn handle_connection(
 
     // Dispatch under the method's own budget. A handler that misses it gets
     // an answer rather than a dropped connection, so a client sees why.
+    //
+    // `params` must be an object (or absent, or explicitly null) before it is
+    // dispatched. JSON-RPC allows positional params, but every gpty method is
+    // named, and the queue in front of GDScript hands the value to a typed
+    // `Dictionary` handler: an array, string or number raises a call error
+    // there, which aborts the whole poll loop and leaves every request already
+    // drained from the queue neither handled nor answered. Refusing it here
+    // means the client gets a JSON-RPC error and the batch keeps its shape.
     let params = req.params.unwrap_or(serde_json::Value::Null);
+    if !params.is_null() && !params.is_object() {
+        let resp = protocol::build_error(
+            id,
+            JsonRpcError::new(
+                JsonRpcError::INVALID_PARAMS,
+                format!(
+                    "params must be a JSON object or absent, got {}",
+                    json_kind(&params)
+                ),
+            ),
+        );
+        write_response(&mut writer, &resp).await?;
+        return Ok(());
+    }
     let resp = match handlers.get(&req.method) {
         Some(entry) => match tokio::time::timeout(entry.timeout, (entry.handler)(params)).await {
             Ok(Ok(result)) => protocol::build_response(id, result),
@@ -1051,6 +1087,85 @@ mod tests {
             let resp = send_request(&server_path, &req).await.unwrap();
             assert_eq!(resp.id, 3);
             assert_eq!(resp.error.unwrap().code, JsonRpcError::METHOD_NOT_FOUND);
+        }
+
+        /// A `params` value that is not an object is refused at the edge, and
+        /// the server keeps serving: what the drain loop must never see is a
+        /// value that is not a `Dictionary`, because GDScript has no try/catch
+        /// and one call error aborts the whole batch — every request already
+        /// drained from the queue went unanswered, and each caller sat out its
+        /// own timeout. Every non-object kind is covered, not just the array
+        /// the audit reproduced with.
+        #[tokio::test]
+        async fn non_object_params_are_refused_and_the_server_keeps_serving() {
+            let socket_path = format!("/tmp/gpty-ipc-params-{}.sock", std::process::id());
+            let _ = std::fs::remove_file(&socket_path);
+
+            let mut server = IpcServer::new(&socket_path);
+            server.register(
+                "echo",
+                Arc::new(|params| Box::pin(async move { Ok(params) })),
+            );
+            // Reports what it received: a null result is not distinguishable
+            // from an absent one on the wire, so the handler has to say so.
+            server.register(
+                "received",
+                Arc::new(|params| {
+                    Box::pin(async move { Ok(serde_json::json!({"null": params.is_null()})) })
+                }),
+            );
+            let server_path = socket_path.clone();
+            tokio::spawn(async move {
+                let _ = server.serve().await;
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+            for (id, params, kind) in [
+                (1, serde_json::json!([1, 2]), "an array"),
+                (2, serde_json::json!("x"), "a string"),
+                (3, serde_json::json!(5), "a number"),
+                (4, serde_json::json!(true), "a boolean"),
+            ] {
+                let req = Request {
+                    jsonrpc: "2.0".into(),
+                    id: Some(id),
+                    method: "echo".into(),
+                    params: Some(params),
+                    gpty_secret: None,
+                };
+                let resp = send_request(&server_path, &req).await.unwrap();
+                assert_eq!(resp.id, id);
+                assert!(resp.result.is_none(), "a refused request must not answer");
+                let error = resp.error.expect("non-object params must be an error");
+                assert_eq!(error.code, JsonRpcError::INVALID_PARAMS);
+                assert!(
+                    error.message.contains(kind),
+                    "the refusal must name the type it saw, got: {}",
+                    error.message
+                );
+            }
+
+            // Absent and explicit-null params are both "no arguments" and still
+            // reach the handler; a refusal must not swallow the working shape.
+            for (id, params) in [(5, None), (6, Some(serde_json::Value::Null))] {
+                let req = Request {
+                    jsonrpc: "2.0".into(),
+                    id: Some(id),
+                    method: "received".into(),
+                    params,
+                    gpty_secret: None,
+                };
+                let resp = send_request(&server_path, &req).await.unwrap();
+                assert_eq!(resp.id, id);
+                assert!(resp.error.is_none(), "absent params must still dispatch");
+                assert_eq!(
+                    resp.result.unwrap(),
+                    serde_json::json!({"null": true}),
+                    "the handler must be called with null params"
+                );
+            }
+
+            let _ = std::fs::remove_file(&socket_path);
         }
 
         /// A handler that outlives its budget is answered with a JSON-RPC
