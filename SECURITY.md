@@ -203,7 +203,11 @@ These are load-bearing guards. Reports that require removing one of them should 
   BEL. Measured 2026-10-30: `ESC ] 0 ;` followed by 256 MiB of payload held the grid flat at 6.2 MB,
   where it reached 267 MB before the guard. DCS, APC, PM and SOS payloads are read and discarded by
   `alacritty_terminal` and are not counted; the bound test feeds all five kinds, so a dependency
-  that starts buffering one of them fails the test instead of growing.
+  that starts buffering one of them fails the test instead of growing. On Windows the guard cannot
+  see a pane's OSC: ConPTY's host parses the child's output before gPTY does and buffers an
+  unterminated string itself (measured 2026-10-30 - a 92 KiB unterminated flood from a pane produced
+  zero bytes at the grid, and the smoke now says so instead of asserting a bound it cannot reach),
+  so there the guard is unit-tested coverage while the claim above is conhost's to keep.
 - **Markdown**: rendered from Markdown to escaped BBCode - never raw HTML or unescaped tags; links
   are scheme-checked and opened only after an explicit confirmation.
 
