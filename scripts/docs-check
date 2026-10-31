@@ -20,7 +20,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP_PREFIXES = (
-    '.git/', 'target/', 'node_modules/', 'godot/addons/', 'docs/public/',
+    '.git/', '.entire/', 'target/', 'node_modules/', 'godot/addons/', 'docs/public/',
     'docs/assets/', 'docs/resources/', 'docs/.cache/', 'docs/data/',
 )
 problems = []
