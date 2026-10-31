@@ -543,8 +543,11 @@ fn profile_programs(profile: &ProfileSpec) -> Vec<String> {
 const MAX_PLAN_KEY_LEN: usize = 8192;
 
 /// The exact spawn-plan keys a profile's tiles would produce, deduplicated in
-/// tile order — the Rust mirror of `PaneTypes.tile_plan_key` in the GUI,
-/// which is what the activation gate compares them against.
+/// tile order — the Rust mirror of `PaneTypes.tile_plan_key` in the GUI's
+/// no-directory form, which is what the plugin activation gate compares them
+/// against: the install review runs before a workspace (and its directory) is
+/// chosen, and a plugin already runs arbitrary code as the user, so its
+/// approval covers the programs, not a spawn directory.
 ///
 /// A tile contributes like `PaneTypes.tile_spawns_untrusted` says it would:
 /// a program (`settings.command`, then `settings.shell`, then the tile's
@@ -1270,9 +1273,11 @@ tiles = [
     /// The exact spawn plans a profile would run — what the install approval
     /// records, so a profile whose tiles change under the same revision
     /// re-prompts. The derivation mirrors `PaneTypes.tile_plan_key` in the
-    /// GUI: program precedence (`command` > `settings.shell` > the tile's
-    /// legacy `shell`), then the string entries of `shell_args`, joined with
-    /// U+001F; deduplicated in tile order.
+    /// GUI's no-directory form (the directory is appended only by the
+    /// workspace-restore and builtin gates, which know their target): program
+    /// precedence (`command` > `settings.shell` > the tile's legacy `shell`),
+    /// then the string entries of `shell_args`, joined with U+001F;
+    /// deduplicated in tile order.
     #[test]
     fn review_summary_lists_the_plan_keys_each_profile_would_run() {
         let manifest = parse_manifest(

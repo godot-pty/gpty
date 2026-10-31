@@ -370,13 +370,13 @@ func test_consented_content_skips_the_trust_gates():
 	var tiles_covered: Array[Dictionary] = [
 		{"settings": {"type": "terminal", "command": "contract-tool"}},
 	]
-	assert_false(_ws._tiles_untrusted_without_consent(tiles_covered))
+	assert_false(_ws._tiles_untrusted_without_consent(tiles_covered, ""))
 	var tiles_uncovered: Array[Dictionary] = [
 		{"settings": {"type": "terminal", "command": "contract-other"}},
 	]
-	assert_true(_ws._tiles_untrusted_without_consent(tiles_uncovered))
+	assert_true(_ws._tiles_untrusted_without_consent(tiles_uncovered, ""))
 	var tiles_trusted: Array[Dictionary] = [{"settings": {"type": "terminal"}}]
-	assert_false(_ws._tiles_untrusted_without_consent(tiles_trusted))
+	assert_false(_ws._tiles_untrusted_without_consent(tiles_trusted, ""))
 
 func test_plugin_profiles_are_consented_by_their_installed_revision():
 	var version: String = GptyTerminal.get_app_version()

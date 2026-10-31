@@ -17,12 +17,15 @@ A tile is **untrusted** when its program differs from your current default shell
 
 The same keys gate `cli_view`, whose pane runs its argv directly. Installed plugin profiles go through the same gate, because their tiles are saved content too.
 
+Every terminal also starts in its workspace's directory, which comes from `workspaces.json`. For an untrusted tile the directory is part of the decision: an approval covers the exact program, argv **and** directory, so keeping an approved program but moving it to another directory is a new prompt. A plain shell in a file-supplied directory restores without asking — a directory is not executable, and prompting at every launch would train you to dismiss the dialog. What that accepts is a shell started in content you did not choose; reaching it needs your own `workspaces.json` to be written or synced from elsewhere, which is same-user file access, and it is stated in [[security-model|Security Model]]. A tile, profile or plugin cannot choose a directory of its own: the workspace owns it.
+
 ## When the dialog appears
 
 The prompt appears when a restore would spawn a different program or extra arguments, on the paths where a user is present to answer:
 
 - restoring the saved workspace set at startup, or reloading it with the palette's load action;
-- activating a profile from the sidebar.
+- activating a profile from the sidebar;
+- changing a workspace's directory with the sidebar's folder button, when that workspace holds an untrusted tile. A workspace whose panes all run your default shell changes directory without asking.
 
 On the workspace path the dialog describes every affected workspace. Cancelling does not run the file's programs: the affected workspaces are rebuilt with their panes dropped, so the app opens without the untrusted spawns.
 
@@ -30,7 +33,7 @@ Over IPC, `layoutLoad` **refuses** an untrusted profile instead of prompting. A 
 
 ## The consent key
 
-Consent is per spawn plan, not per file. The key is the exact program and argv joined in order, with a unit separator between parts — the same derivation the trust predicate uses, so the thing shown in the dialog, the thing stored, and the thing checked can never drift. A file that changes one argument is a new decision.
+Consent is per spawn plan, not per file. The key is the exact program and argv joined in order, with a unit separator between parts — the same derivation the trust predicate uses, so the thing shown in the dialog, the thing stored, and the thing checked can never drift. For an untrusted spawn the key also carries the workspace directory the spawn will use, after a record separator; the directory is sanitized to an absolute path and the separator cannot appear in it, so an argument that ends in a path cannot be read as the directory. A relative or missing directory contributes nothing, because that is where the spawn falls back to gPTY's own directory. A file that changes one argument — or the directory — is a new decision.
 
 The dialog shows the plan rather than a summary sentence: which pane type, which program, which arguments. Values are escaped and length-capped because they are attacker-controlled file content, and newlines in particular would forge an extra dialog line.
 
@@ -38,11 +41,11 @@ The dialog shows the plan rather than a summary sentence: which pane type, which
 
 | Content | Approval recorded as | Invalidated by |
 |---|---|---|
-| Builtin profile | Profile name + app version + every tile's spawn plan | A new gPTY version, or tiles that changed under it |
+| Builtin profile | Profile name + app version + every untrusted tile's spawn plan at the approved directory | A new gPTY version, or tiles or the directory that changed under it |
 | Installed plugin | Plugin id + pinned revision + the spawn plans the review listed | A new revision, or tiles that changed under it |
 | User-authored profile | Nothing | — (asks each time) |
 
-Only the trust dialogs' confirm paths write records. A user-authored profile never records consent, so approving one does not make the next activation silent. A builtin ships with the app, so its approval is tied to the version that shipped it: a new release re-prompts by construction. A plugin is approved at the revision the install pinned, so a moved tag or new commit re-prompts, and the plans the review listed are recorded with it so a different profile set at the same pin re-prompts too. The profile dialog can extend an already-approved revision's plans after showing the tiles, but only the install review approves a revision.
+Only the trust dialogs' confirm paths write records. A user-authored profile never records consent, so approving one does not make the next activation silent. A builtin ships with the app, so its approval is tied to the version that shipped it: a new release re-prompts by construction, and the record names the directory the activation was approved in, so activating the same profile in another directory asks there. A plugin is approved at the revision the install pinned, so a moved tag or new commit re-prompts, and the plans the review listed are recorded with it so a different profile set at the same pin re-prompts too. The profile dialog can extend an already-approved revision's plans after showing the tiles, but only the install review approves a revision; those plans are program and argv only, because the review runs before a workspace directory exists, and a plugin already runs arbitrary code as you.
 
 Provenance is gPTY's, not the file's. Every profile is stamped with where it was loaded from — the shipped defaults, the installed-plugin store, or your own `profiles.json` — and identity fields are stripped out of user entries on load. A hand-written entry that says `"builtin": true`, or carries an installed plugin's id and approved revision, is still your profile: its tiles go through the plan gate like any other, so it cannot borrow someone else's approval.
 

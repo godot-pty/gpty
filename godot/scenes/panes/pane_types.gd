@@ -105,12 +105,23 @@ static func tile_spawns_untrusted(td: Dictionary, default_program: String) -> bo
 	return false
 
 ## The canonical identity of what a tile would run: program + argv joined
-## with U+001F. The consent store (TrustedStore) keys approvals on this, so
-## a trust approval covers the exact spawn plan — the same derivation the
-## gate above uses (`command` > `shell` > tile's legacy `shell`, plus
-## `shell_args`), kept adjacent so the two can never drift. Empty when the
-## tile names nothing to run.
-static func tile_plan_key(td: Dictionary) -> String:
+## with U+001F, plus the workspace directory the spawn will start in when
+## `cwd` is non-empty. The consent store (TrustedStore) keys approvals on
+## this, so a trust approval covers the exact spawn plan — the same
+## derivation the gate above uses (`command` > `shell` > tile's legacy
+## `shell`, plus `shell_args`), kept adjacent so the two can never drift.
+## Empty when the tile names nothing to run.
+##
+## The directory joins the identity only where the plan is already untrusted:
+## an approval for "run `omp update && exec omp` in /srv/repo" must not be
+## repointed at another directory by editing a workspace file, while a plain
+## shell in a file-supplied directory needs no approval (a directory is not
+## executable, and asking at every launch would train the user to dismiss the
+## one dialog). It is joined with U+001E rather than the content separator
+## because `WorkspaceStore.sanitize_cwd` refuses control bytes: the last
+## U+001E in a key always opens the directory, so an argv that ends in an
+## absolute path cannot be mistaken for the directory.
+static func tile_plan_key(td: Dictionary, cwd: String = "") -> String:
 	var settings = td.get("settings", {})
 	if not (settings is Dictionary):
 		return ""
@@ -125,7 +136,10 @@ static func tile_plan_key(td: Dictionary) -> String:
 				parts.append(a)
 	if parts.is_empty():
 		return ""
-	return "\u001f".join(parts)
+	var key := "\u001f".join(parts)
+	if cwd != "":
+		key += "\u001e" + cwd
+	return key
 
 ## Validate a saved tile dictionary from layout.json / profiles.
 ## Returns {} when the tile is unusable; otherwise a dictionary with

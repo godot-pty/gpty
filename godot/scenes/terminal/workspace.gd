@@ -1029,6 +1029,40 @@ func _set_workspace_cwd(idx: int, dir: String):
 	var ws: Dictionary = _workspaces[idx]
 	if str(ws.get("cwd", "")) == clean:
 		return
+	# A directory is a trust input only where the spawn is already untrusted:
+	# the plan keys this workspace will restore carry its directory (see
+	# `PaneTypes.tile_plan_key`), so a new directory is a plan the consent
+	# memory does not cover. A workspace whose tiles all run the default shell
+	# changes directory without a prompt — the accepted case.
+	var tiles := _gather_tiles_from(ws.tm)
+	if _tiles_untrusted_without_consent(tiles, clean):
+		_ask_workspace_cwd_change(idx, clean, tiles)
+		return
+	_apply_workspace_cwd(idx, clean)
+
+## The picker's trust half: the workspace's own tiles keep running, but the
+## layout saved from them will start in `clean` on the next restore. The
+## dialog names both so the new directory is the decision, not a side note.
+func _ask_workspace_cwd_change(idx: int, clean: String, tiles: Array[Dictionary]):
+	var dialog := ConfirmationDialog.new()
+	dialog.title = "Workspace Trust"
+	dialog.dialog_text = "Workspace '%s' would start these panes in a new directory the next time it is restored.\n\n%s\n\nChange the directory anyway?" % [str(_workspaces[idx].get("name", "")), _untrusted_details(tiles, clean)]
+	dialog.ok_button_text = "Change Directory"
+	dialog.cancel_button_text = "Cancel"
+	dialog.confirmed.connect(func():
+		_apply_workspace_cwd(idx, clean)
+		dialog.queue_free()
+	)
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered()
+
+func _apply_workspace_cwd(idx: int, clean: String):
+	if idx < 0 or idx >= _workspaces.size():
+		return
+	var ws: Dictionary = _workspaces[idx]
+	if str(ws.get("cwd", "")) == clean:
+		return
 	ws["cwd"] = clean
 	_update_workspace_ui()
 	_save_workspaces_to_store()
@@ -1108,7 +1142,8 @@ func _init_workspaces():
 	# without re-asking.
 	var untrusted: Array = []
 	for i in entries.size():
-		if _tiles_untrusted_without_consent(_tiles_from(entries[i].get("layout", []))):
+		if _tiles_untrusted_without_consent(
+			_tiles_from(entries[i].get("layout", [])), _spawn_cwd(entries[i])):
 			untrusted.append(i)
 	if not untrusted.is_empty():
 		_show_multi_trust_dialog(entries, active, untrusted)
@@ -1274,22 +1309,33 @@ func _tiles_untrusted(tiles: Array[Dictionary]) -> bool:
 			return true
 	return false
 
-## The restore gate with the consent memory applied: an untrusted tile whose
-## exact spawn plan an approval covers no longer counts. Anything not covered
-## keeps today's behavior.
-func _tiles_untrusted_without_consent(tiles: Array[Dictionary]) -> bool:
-	return not _plans_covered(
-		tiles, TrustedStore.approved_plan_keys(GptyTerminal.get_app_version()))
+## The directory a spawn in `ws` actually starts in, as the trust key names
+## it: the workspace's sanitized directory when it is usable, otherwise ""
+## (the PTY's inherited directory — what the backend itself falls back to for
+## an unusable path, so a relative or stale store value cannot alias an
+## approval for a directory the spawn never used).
+func _spawn_cwd(ws: Dictionary) -> String:
+	var cwd := WorkspaceStore.sanitize_cwd(str(ws.get("cwd", "")))
+	if cwd == "" or not DirAccess.dir_exists_absolute(cwd):
+		return ""
+	return cwd
 
-## True when every untrusted tile's spawn plan is in `approved` — an Array of
-## plan keys or a key->true dictionary (the two shapes the store answers in).
-## A trusted tile needs no record; a tile whose untrusted spawn yields no key
-## can never be covered, so it keeps asking.
-func _plans_covered(tiles, approved) -> bool:
+## The restore gate with the consent memory applied: an untrusted tile whose
+## exact spawn plan (program, argv, and the workspace directory) an approval
+## covers no longer counts. Anything not covered keeps today's behavior.
+func _tiles_untrusted_without_consent(tiles: Array[Dictionary], cwd: String) -> bool:
+	return not _plans_covered(
+		tiles, TrustedStore.approved_plan_keys(GptyTerminal.get_app_version()), cwd)
+
+## True when every untrusted tile's spawn plan in `cwd` is in `approved` — an
+## Array of plan keys or a key->true dictionary (the two shapes the store
+## answers in). A trusted tile needs no record; a tile whose untrusted spawn
+## yields no key can never be covered, so it keeps asking.
+func _plans_covered(tiles, approved, cwd: String) -> bool:
 	for td in tiles:
 		if not (td is Dictionary) or not _tile_spawns_untrusted(td):
 			continue
-		var key := PaneTypes.tile_plan_key(td)
+		var key := PaneTypes.tile_plan_key(td, cwd)
 		if key == "" or not _plan_approved(approved, key):
 			return false
 	return true
@@ -1309,62 +1355,87 @@ static func _plan_approved(approved, key: String) -> bool:
 ##
 ## - plugin: the plugin id + revision the install review approved, AND every
 ##   untrusted tile's plan that review listed. A different revision re-prompts,
-##   and so does different content under the same revision.
+##   and so does different content under the same revision. The record stays
+##   keyed on program + argv, without a directory: the review runs before any
+##   workspace is chosen, and a plugin is arbitrary code either way.
 ## - builtin: its name + app version, AND the plans recorded with that
-##   approval. A release ships new content, which the version re-prompts.
-## - user: every untrusted tile's plan covered by an approved builtin — a
-##   workspace saved from one restores the same way. Nothing is ever recorded
-##   for a user profile, so it asks again.
+##   approval - each carrying the directory it was approved for, because the
+##   activation target is the active workspace (a profile opened in a new
+##   workspace inherits that workspace's directory). A release ships new
+##   content, which the version re-prompts.
+## - user: every untrusted tile's plan covered by an approved builtin at this
+##   directory — a workspace saved from one restores the same way. Nothing is
+##   ever recorded for a user profile, so it asks again.
 func _profile_consented(profile: Dictionary) -> bool:
 	var tiles = profile.get("tiles", [])
+	var cwd := _spawn_cwd(_active_workspace())
 	match str(profile.get("_origin", ProfileManager.ORIGIN_USER)):
 		ProfileManager.ORIGIN_PLUGIN:
 			var plugin_id := str(profile.get("plugin_id", ""))
 			var revision := str(profile.get("revision", ""))
 			return (
 				TrustedStore.is_plugin_approved(plugin_id, revision)
-				and _plans_covered(tiles, TrustedStore.plugin_plans(plugin_id, revision))
+				and _plans_covered(tiles, TrustedStore.plugin_plans(plugin_id, revision), "")
 			)
 		ProfileManager.ORIGIN_BUILTIN:
 			var name := str(profile.get("name", ""))
 			var version := GptyTerminal.get_app_version()
 			return (
 				TrustedStore.is_builtin_approved(name, version)
-				and _plans_covered(tiles, TrustedStore.builtin_plans(name, version))
+				and _plans_covered(tiles, TrustedStore.builtin_plans(name, version), cwd)
 			)
 	return _plans_covered(
-		tiles, TrustedStore.approved_plan_keys(GptyTerminal.get_app_version()))
+		tiles, TrustedStore.approved_plan_keys(GptyTerminal.get_app_version()), cwd)
 
 ## The trust dialog's consent is remembered only for content gpty ships or a
-## plugin pinned. A builtin records its name + app version and every tile's
-## spawn plan. A plugin profile whose tiles changed under an approved revision
-## adds the plans the dialog just showed to that record — the revision itself
-## is only ever approved by the install review, which shows the whole manifest.
-## User-authored profiles never record consent, so approving one does not make
-## the next activation silent.
+## plugin pinned. A builtin records its name + app version and the spawn plans
+## the dialog showed - each keyed with the directory the activation will start
+## them in, so editing a workspace file to point the same approved program at
+## another directory is a new decision. A plugin profile whose tiles changed
+## under an approved revision adds the plans the dialog just showed to that
+## record (program + argv only: the install review approved those before any
+## workspace directory existed) — the revision itself is only ever approved by
+## the install review, which shows the whole manifest. User-authored profiles
+## never record consent, so approving one does not make the next activation
+## silent.
 func _remember_profile_consent(profile: Dictionary, tiles: Array):
-	var plans: Array = []
-	for td in tiles:
-		if td is Dictionary:
-			var key := PaneTypes.tile_plan_key(td)
-			if key != "" and not plans.has(key):
-				plans.append(key)
+	var cwd := _spawn_cwd(_active_workspace())
 	match str(profile.get("_origin", ProfileManager.ORIGIN_USER)):
 		ProfileManager.ORIGIN_BUILTIN:
 			TrustedStore.approve_builtin(
-				str(profile.get("name", "")), GptyTerminal.get_app_version(), plans)
+				str(profile.get("name", "")), GptyTerminal.get_app_version(),
+				_untrusted_plan_keys(tiles, cwd))
 		ProfileManager.ORIGIN_PLUGIN:
 			var plugin_id := str(profile.get("plugin_id", ""))
 			var revision := str(profile.get("revision", ""))
 			if not TrustedStore.is_plugin_approved(plugin_id, revision):
 				return
 			TrustedStore.approve_plugin(
-				plugin_id, revision, TrustedStore.plugin_plans(plugin_id, revision) + plans)
+				plugin_id, revision,
+				TrustedStore.plugin_plans(plugin_id, revision)
+					+ _untrusted_plan_keys(tiles, ""))
 
-## What the untrusted tiles in `tiles` would run, for the trust dialog. Capped
-## in PaneTypes — the content is file data, not something we render raw.
-func _untrusted_details(tiles: Array[Dictionary]) -> String:
+## The plan keys the trust dialog just showed for `tiles` in `cwd`: only the
+## tiles that needed the prompt, so a mostly-default layout cannot fill the
+## store's plan cap with keys no gate consults.
+func _untrusted_plan_keys(tiles, cwd: String) -> Array:
+	var keys: Array = []
+	for td in tiles:
+		if not (td is Dictionary) or not _tile_spawns_untrusted(td):
+			continue
+		var key := PaneTypes.tile_plan_key(td, cwd)
+		if key != "" and not keys.has(key):
+			keys.append(key)
+	return keys
+
+## What the untrusted tiles in `tiles` would run, for the trust dialog. `cwd`
+## is the directory the spawn will start in; it is named first because it is
+## part of the plan the user is approving. Capped in PaneTypes — the content
+## is file data, not something we render raw.
+func _untrusted_details(tiles: Array[Dictionary], cwd := "") -> String:
 	var lines: Array[String] = []
+	if cwd != "":
+		lines.append("directory: " + PaneTypes._trust_text(cwd))
 	for td in tiles:
 		var plan := PaneTypes.untrusted_plan(
 			td, SettingsManager.cfg_shell_command)
@@ -1384,11 +1455,25 @@ func _untrusted_details(tiles: Array[Dictionary]) -> String:
 func _show_multi_trust_dialog(entries: Array[Dictionary], active: int, untrusted: Array):
 	var dialog = ConfirmationDialog.new()
 	dialog.title = "Workspace Trust"
-	var details_tiles: Array[Dictionary] = []
+	# Grouped per workspace: the directory is workspace-scoped, so flattening
+	# the tiles would show one workspace's panes under another's directory (or
+	# no directory at all, which is exactly what this dialog has to name).
+	var lines: Array[String] = []
 	for i in untrusted:
-		for td in _tiles_from(entries[i].get("layout", [])):
-			details_tiles.append(td)
-	var details := _untrusted_details(details_tiles)
+		var header := "Workspace '%s'" % str(entries[i].get("name", "Workspace"))
+		lines.append(header + ":")
+		var details := _untrusted_details(
+			_tiles_from(entries[i].get("layout", [])), _spawn_cwd(entries[i]))
+		for line in details.split("\n"):
+			if line == "":
+				continue
+			if lines.size() >= PaneTypes.TRUST_MAX_DETAIL_LINES:
+				lines.append("  … more panes not shown")
+				break
+			lines.append("  " + line)
+		if lines.size() >= PaneTypes.TRUST_MAX_DETAIL_LINES:
+			break
+	var details := "\n".join(lines)
 	dialog.dialog_text = "This layout contains %d workspace(s) whose panes start a different program or pass extra arguments than your current default shell (%s).\n\n%s\n\nRestore them anyway?" % [untrusted.size(), SettingsManager.cfg_shell_command, details]
 	dialog.ok_button_text = "Restore"
 	dialog.cancel_button_text = "Cancel"
@@ -2426,7 +2511,7 @@ func _show_profile_trust_dialog(profile: Dictionary, tiles: Array, open_in_new :
 	for td in tiles:
 		if td is Dictionary:
 			details_tiles.append(td)
-	var details := _untrusted_details(details_tiles)
+	var details := _untrusted_details(details_tiles, _spawn_cwd(_active_workspace()))
 	dialog.dialog_text = "This profile contains panes that start a different program or pass extra arguments than your current default shell (%s).\n\n%s\n\nDo you want to activate it anyway?" % [SettingsManager.cfg_shell_command, details]
 	dialog.ok_button_text = "Activate"
 	dialog.cancel_button_text = "Cancel"

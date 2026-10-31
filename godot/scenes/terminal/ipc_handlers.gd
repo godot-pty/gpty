@@ -332,9 +332,10 @@ static func handle(ws, method: String, params: Dictionary):
 			# naming the profile is not consent to what a file asks for, so
 			# untrusted profiles are refused here — unless the consent memory
 			# already covers them (a builtin approved at this app version, or
-			# a profile whose every untrusted spawn plan an approval covers):
-			# the user approved that exact content in the GUI, and the record
-			# is the proof a caller cannot forge.
+			# a profile whose every untrusted spawn plan — program, argv and
+			# the active workspace's directory — an approval covers): the user
+			# approved that exact content in the GUI, and the record is the
+			# proof a caller cannot forge.
 			var profile_tiles: Array[Dictionary] = []
 			for td in profile.get("tiles", []):
 				if td is Dictionary:

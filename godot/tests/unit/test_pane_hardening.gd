@@ -173,6 +173,21 @@ func test_plan_key_identifies_the_exact_spawn_plan():
 	assert_eq(PaneTypes.tile_plan_key({"settings": {"type": "terminal"}}), "")
 	assert_eq(PaneTypes.tile_plan_key({}), "")
 
+func test_plan_key_carries_the_approved_directory():
+	# The trust key names the directory the spawn will start in, so editing a
+	# workspace file cannot repoint an approved program at other content.
+	var tile := {"settings": {"type": "terminal", "command": "omp"}}
+	assert_eq(PaneTypes.tile_plan_key(tile, "/srv/repo"), "omp\u001e/srv/repo")
+	assert_true(PaneTypes.tile_plan_key(tile, "/srv/repo") != PaneTypes.tile_plan_key(tile, "/tmp/other"),
+		"another directory is another plan")
+	assert_eq(PaneTypes.tile_plan_key(tile, ""), PaneTypes.tile_plan_key(tile),
+		"an empty directory leaves the content identity")
+	# The directory separator is not the argv separator: an argv whose last
+	# entry is an absolute path must not serialize to the same key as a
+	# directory (which is why the two use different control characters).
+	var argv_path := {"settings": {"type": "terminal", "command": "omp", "shell_args": ["/srv/repo"]}}
+	assert_ne(PaneTypes.tile_plan_key(argv_path), PaneTypes.tile_plan_key(tile, "/srv/repo"))
+
 func test_trust_gate_covers_a_cli_view_tile():
 	# CLI View spawns a program plus its argv through exactly the terminal
 	# keys (`command` + `shell_args`), so a tile that names them is untrusted

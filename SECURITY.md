@@ -185,15 +185,31 @@ These are load-bearing guards. Reports that require removing one of them should 
   it runs, and `layoutLoad` over the control socket refuses such a profile (a caller cannot answer a
   dialog, so naming the profile is not consent to what the file asks for) - unless the consent memory
   covers it: the approval must match the content - a built-in's name and app version plus the spawn
-  plans recorded with it, a plugin's id and pinned revision plus the plans its install review listed,
-  or a user profile whose every untrusted tile's exact program+argv was approved - because the record
-  is proof the user approved that content in the GUI. A new app version, a new plugin revision, or
-  different tiles under the same name or revision re-prompts. Provenance is gPTY's: fields inside a
-  user profile file cannot make it a built-in or plugin profile, because they are stripped on load.
-  Environment is not a file decision: a tile's `shell_env` is dropped on restore with a notice naming
-  what was dropped, and per-pane environment is the user's own - `user://pane_env.json`, written only
-  by the pane settings UI and keyed by the pane's id, applied at spawn over the user's global
-  environment.
+  plans (program, argv and the workspace directory) recorded with it, a plugin's id and pinned
+  revision plus the plans its install review listed, or a user profile whose every untrusted tile's
+  exact program+argv at that directory was approved - because the record is proof the user approved
+  that content in the GUI. A new app version, a new plugin revision, or different tiles under the
+  same name or revision re-prompts. Provenance is gPTY's: fields inside a user profile file cannot
+  make it a built-in or plugin profile, because they are stripped on load. Environment is not a file
+  decision: a tile's `shell_env` is dropped on restore with a notice naming what was dropped, and
+  per-pane environment is the user's own - `user://pane_env.json`, written only by the pane settings
+  UI and keyed by the pane's id, applied at spawn over the user's global environment.
+- **Workspace directories (v0.7.1)**: a workspace's working directory comes from
+  `workspaces.json` and is handed to every terminal that workspace starts. A directory is not
+  executable on its own, so a plain shell in a file-supplied directory restores without a prompt
+  (asking at every launch would train the user to dismiss the one dialog that matters), and a
+  tile, profile or plugin cannot carry a directory of its own - the workspace owns it. Where the
+  spawn is already untrusted, the directory joins the trust decision: an untrusted tile's approval
+  is keyed on program + argv + the directory the spawn will actually use, the Workspace Trust dialog
+  names that directory, and changing a workspace's directory through the folder picker re-asks when
+  the workspace holds an untrusted tile, cancelling the change otherwise. Editing a workspace file to
+  point an approved program at another directory therefore re-prompts instead of restoring silently.
+  The accepted exposure is the plain-shell case: a crafted or synced `workspaces.json` can start an
+  ordinary shell in a directory the user did not choose, which matters only through a program that
+  later trusts its working directory (a tool reading repository instructions, `git` running hooks).
+  Reaching it needs the ability to write the user's `workspaces.json` or to have a copy synced to
+  this machine - that is same-UID file access, which gPTY trusts by design (see the threat model),
+  and a program already running in a pane could write the file itself.
 - **Concepts**: the standard Rust `regex` crate only (no backtracking engine), bounded counts and
   lengths, a 16 KiB line cap before matching, and 4 MiB capture buffers.
 - **Terminal parsing**: a program's output is untrusted, and `vte` keeps an OSC string's payload in
