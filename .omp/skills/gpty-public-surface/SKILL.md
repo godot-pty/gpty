@@ -53,7 +53,7 @@ Two surfaces, one shape: a list in one language that must agree with a list in a
 
 | Test | What it reads |
 |---|---|
-| `cargo test -p gpty` | the contract tests parse the real `ipc.rs` registrations, the `ipc_handlers.gd` arms, the `method ==` intercepts in `workspace.gd`, and every `client.call` literal, assert agreement with the advertised MCP tool names, and (`wire.rs`) check every translated argument key against the keys its handler reads |
+| `cargo test -p gpty` | the contract tests parse the real `ipc.rs` registrations, the `ipc_handlers.gd` `handle` arms, the `method ==` intercepts in its `dispatch_request`, and every `client.call` literal, assert agreement with the advertised MCP tool names, and (`wire.rs`) check every translated argument key against the keys its handler reads |
 | `test_ipc_dispatch_contract.gd` | drives `WorkspaceIpcHandlers.handle` against a real `Workspace` — one instance per script, because each schedules a deferred concept push that must land while it is alive |
 | `python3 scripts/smoke_pane_api.py` | the only test crossing CLI validation → Rust params → GUI registry on a real socket |
 | `./scripts/check-ffi-surface` | `#[func]` exports against every GDScript call site, plus the crate's own prose |
