@@ -129,6 +129,26 @@ func test_a_rename_moves_the_record():
 		"system_prompt": "Mine", "auto_run": true, "accept_concept_captures": false,
 	}, "the rename carries the panel's values to the new id")
 
+# ── Closing the pane discards its aim ──────────────────────────────────
+
+func test_closing_the_pane_removes_the_record():
+	var body = await _restore("closing")
+	_apply_panel(body, {"system_prompt": "Throwaway", "auto_run": true, "accept_concept_captures": false})
+	assert_true(PaneInspectorStore.has_state("closing"))
+
+	_ws._kill(body)
+	await get_tree().process_frame
+	assert_false(is_instance_valid(body), "an idle Inspector closes without a dialog")
+	assert_false(PaneInspectorStore.has_state("closing"),
+		"closing the pane discards the aim it carried")
+
+	# A later pane that reuses the id starts from the defaults, not from the
+	# instruction the user closed.
+	_ws._restore_into(_ws._workspaces[0], _inspector_tile("closing"))
+	var restored = _ws._tm._find_body(_ws._tm.tiles[0].wrapper)
+	assert_eq(restored.system_prompt, "")
+	assert_false(restored.auto_run)
+
 func test_a_collision_rename_copies_the_record():
 	# The same logical pane live in a second workspace gets a renamed id; the
 	# first instance keeps its record, and the new instance inherits the aim the

@@ -505,6 +505,13 @@ func _kill_now(body: Control):
 	if ws.is_empty():
 		return
 	var held_focus: bool = ws.tm.last_body == body
+	# The user discarded this Inspector pane, so its stored aim goes with it: a
+	# later pane that reuses the id starts from the defaults, not from an
+	# instruction the user removed. Only this explicit-close path removes it —
+	# restart, profile activation, workspace close and layout restore reset the
+	# manager directly (`tm.reset()`), so the aim still survives those.
+	if body is InspectorPane:
+		PaneInspectorStore.remove_state(str(body.attachment_id))
 	ws.tm.kill(body)
 	_close_pane_settings_for(body)
 	_apply_layout()
