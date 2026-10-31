@@ -5,10 +5,13 @@ on:
   # its gate (it builds the site, runs docs-check and verifies the knowledge
   # bundle). A roadmap or note edit cannot change what any job here tests -
   # no Rust or GDScript test reads `docs/`, and the bundle is generated data
-  # the Docs job re-checks. A full run is ~4 minutes warm and can reach ~30
+  # the Docs job re-checks. The two script entries below are the docs gates
+  # themselves, and the Docs workflow runs both, so changing one is validated
+  # by the job it repairs. A full run is ~4 minutes warm and can reach ~30
   # when the Windows vcpkg tree has to rebuild, which is a lot to spend on a
-  # Markdown edit. Anything outside this list (workflows, scripts, crates,
-  # godot/, the smoke) still runs the full suite.
+  # Markdown edit. Anything else here (workflows, any other script, crates,
+  # godot/, the smoke) still runs the full suite: a script that builds the
+  # app, drives Godot or runs a gate needs the code gates to validate it.
   push:
     branches: [main, master]
     paths-ignore:
@@ -16,6 +19,8 @@ on:
       - "**/*.md"
       - "godot/knowledge.json"
       - "LICENSE"
+      - "scripts/docs-check"
+      - "scripts/build-wiki"
   pull_request:
     branches: [main, master]
     # Kept as a literal copy rather than a YAML anchor: the anchor would be
@@ -27,6 +32,8 @@ on:
       - "**/*.md"
       - "godot/knowledge.json"
       - "LICENSE"
+      - "scripts/docs-check"
+      - "scripts/build-wiki"
 
 # Least privilege: every job here only reads the repository. Without this
 # block each job inherits the repository default token scope, which is handed

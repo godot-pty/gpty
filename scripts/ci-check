@@ -2,17 +2,26 @@
 set -euo pipefail
 
 # ── ci-check: Run all CI checks locally in fast-fail order ──────────────
-# Usage: ./scripts/ci-check [--fast]
-#   --fast   Only fmt + workflow lint + clippy (pre-commit)
-#   (no flag)  Full suite: fmt + lint + clippy + tests + GUT + audit
+# Usage: ./scripts/ci-check [--fast | --classify]
+#   --fast       Only fmt + workflow lint + clippy (pre-commit)
+#   --classify   Print the changed set, each path's class, and the suite it
+#                selects; run nothing (answers "why did the gate skip that?")
+#   (no flag)    Full suite: fmt + lint + clippy + tests + GUT + audit
 #
-# A documentation-only change runs the docs gates only (docs-check +
-# knowledge bundle) in either mode, because a Markdown edit cannot change what
-# the Rust, GDScript or smoke gates test - and CI skips its code workflow for
-# one too (`paths-ignore` in .github/workflows/ci.yml). The changed set is the
-# push range when the pre-push hook provides it (CI_CHECK_RANGE_FROM), the
-# index under --fast, and the unpushed commits otherwise, always plus
-# uncommitted and untracked files. CI_CHECK_FULL=1 forces the full suite.
+# A docs-class change runs the docs gates only (docs-check + knowledge bundle)
+# in either mode, because nothing it touches can change what the Rust,
+# GDScript or smoke gates test - and CI skips its code workflow for one too
+# (`paths-ignore` in .github/workflows/ci.yml). A path is docs-class when the
+# only gate it can influence is one the Docs workflow already runs: `docs/`,
+# Markdown, the generated bundle, the licenses, and the two scripts that are
+# nothing but that workflow's gates (`scripts/docs-check`,
+# `scripts/build-wiki`). Every other script under `scripts/` builds the app,
+# drives Godot, or is itself a gate runner, so it takes the code gates. Rust
+# and Godot are never split: the extension is one boundary, so a change on
+# either side runs both suites. The changed set is the push range when the
+# pre-push hook provides it (CI_CHECK_RANGE_FROM), the index under --fast, and
+# the unpushed commits otherwise, always plus uncommitted and untracked files.
+# CI_CHECK_FULL=1 forces the full suite.
 #
 # A missing optional toolchain (node, godot, python3 >= 3.11, cargo-audit)
 # SKIPs with a warning on a dev machine, but FAILS the run when the CI or
@@ -23,9 +32,13 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 FAST=false
-if [[ "${1:-}" == "--fast" ]]; then
-    FAST=true
-fi
+CLASSIFY=false
+for arg in "$@"; do
+    case "$arg" in
+        --fast) FAST=true ;;
+        --classify) CLASSIFY=true ;;
+    esac
+done
 
 # ── Color helpers ───────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -73,7 +86,7 @@ else
     printf "  %bMode: local%b — a missing toolchain skips with a warning\n" "$BOLD" "$NC"
 fi
 
-# ── Documentation-only changes ─────────────────────────────────────────
+# ── Changed set and its class ──────────────────────────────────────────
 # Same globs as ci.yml's `paths-ignore`; keep them in sync. `case` patterns
 # match `/`, so `docs/*` covers every depth and `*.md` covers a README next to
 # a crate.
@@ -102,21 +115,53 @@ changed_paths() {
     } | sed '/^$/d' | sort -u
 }
 
-docs_only_change() {
+# docs_class_path: can this path influence only a gate the Docs workflow runs?
+# The list is deliberate, not "anything small": a script moves into this class
+# only when its own gate is in the Docs workflow, so a change to it is still
+# executed by a gate.
+docs_class_path() {
+    case "$1" in
+        docs/*|*.md|godot/knowledge.json|LICENSE) return 0 ;;
+        scripts/docs-check|scripts/build-wiki) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+docs_class_change() {
     local paths p seen=0
     paths="$(changed_paths)"
     [ -n "$paths" ] || return 1          # nothing to judge: run everything
     while IFS= read -r p; do
         [ -n "$p" ] || continue
         seen=1
-        case "$p" in
-            docs/*|*.md|godot/knowledge.json|LICENSE) ;;
-            *) return 1 ;;
-        esac
+        docs_class_path "$p" || return 1
     done <<EOF
 $paths
 EOF
     [ "$seen" -eq 1 ]
+}
+
+report_class() {
+    local paths p p_class
+    header "change class"
+    paths="$(changed_paths)"
+    if [ -z "$paths" ]; then
+        printf "  no changed paths found — the gate would run everything\n"
+        printf "\n  %b→ full suite%b\n" "$BOLD" "$NC"
+        return 0
+    fi
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        if docs_class_path "$p"; then p_class="docs"; else p_class="code"; fi
+        printf "  %-4s %s\n" "$p_class" "$p"
+    done <<EOF
+$paths
+EOF
+    if docs_class_change; then
+        printf "\n  %b→ docs gates only (docs-check + knowledge bundle)%b\n" "$BOLD" "$NC"
+    else
+        printf "\n  %b→ full suite (docs gates, static checks, Rust, Godot, smoke, audit)%b\n" "$BOLD" "$NC"
+    fi
 }
 
 run_docs_check() {
@@ -141,14 +186,21 @@ run_bundle_check() {
     fi
 }
 
+# --classify answers "why did the gate run (or skip) that?" without running it.
+if $CLASSIFY; then
+    report_class
+    printf "\n"
+    exit 0
+fi
+
 # A range handed over by the pre-push hook is trustworthy even when `CI` is set
 # in the environment (the variable is exported by many harnesses and by CI
 # itself, and it would otherwise disable the narrowing everywhere); the
 # auto-detected paths are not, because a CI checkout is shallow and detached.
 if [ -z "${CI_CHECK_FULL:-}" ] \
     && { [ -n "${CI_CHECK_RANGE_FROM:-}" ] || ! $CI_MODE; } \
-    && docs_only_change; then
-    printf "  %bDocs-only change%b — docs gates only; CI_CHECK_FULL=1 runs everything\n" "$BOLD" "$NC"
+    && docs_class_change; then
+    printf "  %bDocs-class change%b — docs gates only; CI_CHECK_FULL=1 runs everything\n" "$BOLD" "$NC"
     run_docs_check
     run_bundle_check
     printf "\n"
