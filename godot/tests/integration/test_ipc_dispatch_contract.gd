@@ -145,6 +145,99 @@ func test_new_pane_honours_focus():
 	_ws._kill_now(passive)
 	_ws._kill_now(eager)
 
+func test_new_pane_split_reaches_the_tile_rect():
+	# One full-grid terminal, so the assertion is about the direction rather
+	# than whatever layout the tests above left behind.
+	_ws._tm.reset()
+	var first = _spawn("terminal")
+	var answer = WorkspaceIpcHandlers.handle(_ws, "newPane", {
+		"type": "code_viewer", "split": "top", "focus": false,
+	})
+	assert_false(answer.has("error"), "%s" % answer)
+	var fresh := _target(str(answer.get("pane_id", "")))
+	assert_not_null(fresh, "the caller must get the pane it created")
+	assert_eq(_ws._tm.tiles.size(), 2, "one new tile beside the one terminal")
+	var half := PaneTypes.GRID / 2
+	var target_tile: Dictionary = _ws._tm.tiles[0]
+	var fresh_tile: Dictionary = _ws._tm.tiles[1]
+	assert_eq(
+		Rect2i(target_tile.col, target_tile.row, target_tile.cspan, target_tile.rspan),
+		Rect2i(0, half, PaneTypes.GRID, half),
+		"the requested side must move the target below the new pane")
+	assert_eq(
+		Rect2i(fresh_tile.col, fresh_tile.row, fresh_tile.cspan, fresh_tile.rspan),
+		Rect2i(0, 0, PaneTypes.GRID, half),
+		"the new pane must occupy the requested top half")
+
+	# The CLI's clap enum cannot emit this, but raw IPC and an MCP client can:
+	# it is a bad parameter, refused before anything spawns.
+	var refused = WorkspaceIpcHandlers.handle(_ws, "newPane", {
+		"type": "code_viewer", "split": "sideways",
+	})
+	assert_true(refused.has("error"), "a side the CLI cannot emit must be refused")
+	assert_eq(int(refused["error"]["code"]), -32602, "a bad side is bad params, not a failed spawn")
+	assert_eq(_ws._tm.tiles.size(), 2, "a refused side must not create a pane")
+
+	_ws._kill_now(fresh)
+
+# ── The drain loop's own body ──────────────────────────────────────────
+#
+# `Workspace._poll_ipc_requests` cannot be driven from a test: it reads the
+# static Rust queue. `WorkspaceIpcHandlers.dispatch_request` is that loop's
+# per-request body, so this drives the real dispatch and envelope instead of a
+# copy of the params decision.
+
+func test_a_batch_produces_one_response_per_request():
+	var batch := [
+		{"id": 41, "method": "paneStatus", "params": "{}", "timeout_ms": 5000},
+		{"id": 42, "method": "paneRead", "params": "[1,2]", "timeout_ms": 5000},
+		{"id": 43, "method": "noSuchMethod", "params": "{}", "timeout_ms": 5000},
+	]
+	var answers := []
+	for req in batch:
+		answers.append_array(WorkspaceIpcHandlers.dispatch_request(_ws, req))
+	assert_eq(answers.size(), 3, "one bad request must not cost another its answer")
+	assert_eq(
+		[int(answers[0]["id"]), int(answers[1]["id"]), int(answers[2]["id"])],
+		[41, 42, 43], "every request must be answered, in order")
+
+	assert_true(bool(answers[0]["success"]), "paneStatus must succeed")
+	assert_true(
+		answers[0]["payload"] is Dictionary and answers[0]["payload"].has("panes"),
+		"a success payload is the handler's own document")
+
+	assert_false(bool(answers[1]["success"]), "a non-object params must be refused")
+	assert_eq(int(answers[1]["payload"]["code"]), -32602)
+	assert_string_contains(str(answers[1]["payload"]["message"]), "params")
+
+	assert_false(bool(answers[2]["success"]), "an unknown method must be refused")
+	assert_eq(int(answers[2]["payload"]["code"]), -32601)
+	# The flat shape: the error object itself, not `{"error": {...}}` one level
+	# down, which the Rust edge would then stringify into the message.
+	assert_true(answers[2]["payload"].has("code") and answers[2]["payload"].has("message"))
+	assert_false(answers[2]["payload"].has("error"), "the answer must not nest a second envelope")
+
+func test_a_pane_wait_is_booked_rather_than_answered_in_the_batch():
+	var terminal = _spawn("terminal")
+	var answers = WorkspaceIpcHandlers.dispatch_request(_ws, {
+		"id": 44,
+		"method": "paneWait",
+		"params": JSON.stringify({
+			"pane_id": str(terminal.attachment_id), "pattern": "never", "timeout_ms": 500,
+		}),
+		"timeout_ms": 5000,
+	})
+	assert_eq(answers, [], "a wait answers from the wait poll, frames later")
+	assert_true(_ws._pending_waits.has("44"), "the request must be booked for that poll")
+	_ws._pending_waits.erase("44")
+	_ws._kill_now(terminal)
+
+func test_an_expired_plugin_review_opens_no_dialog():
+	var answers = WorkspaceIpcHandlers.dispatch_request(_ws, {
+		"id": 45, "method": "pluginInstall", "params": "{}", "timeout_ms": 0,
+	})
+	assert_eq(answers, [], "an expired review has no channel left to answer")
+
 # ── paneStatus: one target, or every pane ──────────────────────────────
 
 func test_pane_status_without_a_pane_covers_every_pane():

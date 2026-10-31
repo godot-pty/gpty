@@ -16,7 +16,6 @@ JSON-RPC 2.0 IPC transport, client, and server for gpty workspace control.
 | Module | Purpose |
 |--------|---------|
 | [`protocol`](src/protocol.rs) | JSON-RPC 2.0 types: `Request`, `Response`, `JsonRpcError` with builders |
-| [`types`](src/types.rs) | IPC domain types: `NewPaneParams`, `PaneInfo`, `InjectParams`, etc. |
 | [`transport`](src/transport.rs) | Platform-specific socket connection (Unix domain, named pipe) |
 | [`server`](src/server.rs) | Async IPC server: bind socket, accept connections, dispatch to handlers |
 | [`client`](src/client.rs) | Async IPC client: connect, send request, read response with timeout |

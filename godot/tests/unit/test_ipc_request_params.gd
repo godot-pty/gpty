@@ -11,13 +11,15 @@ extends GutTest
 # queue (`drain_ipc_requests`), so everything after the bad one was neither
 # handled nor answered, and each dropped caller waited out its own timeout.
 #
-# The loop itself cannot be driven from here - `drain_ipc_requests` has no push
-# seam a GDScript test can reach - so this covers the decision it makes per
+# The loop itself cannot be driven from *here* - `drain_ipc_requests` has no
+# push seam a GDScript test can reach - so this covers the decision it makes per
 # request (`WorkspaceIpcHandlers.request_params`), including that the guarded
-# value is what a typed handler accepts. The live path (a raw non-object
-# `params` over the control socket, then a normal call) is a step in
-# `scripts/smoke_pane_api.py`, and the server-edge refusal has its own test in
-# `crates/gpty-ipc/src/server.rs`.
+# value is what a typed handler accepts. The loop's per-request body is
+# `WorkspaceIpcHandlers.dispatch_request`, and
+# `tests/integration/test_ipc_dispatch_contract.gd` drives a whole batch
+# through it. The live path (a raw non-object `params` over the control
+# socket, then a normal call) is a step in `scripts/smoke_pane_api.py`, and the
+# server-edge refusal has its own test in `crates/gpty-ipc/src/server.rs`.
 
 const BATCH := [
 	{"id": 1, "params": "{\"pane_id\":\"a\"}"},

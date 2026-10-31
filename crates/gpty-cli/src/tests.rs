@@ -1040,8 +1040,10 @@ async fn an_mcp_tool_call_with_a_bad_argument_never_reaches_the_gui() {
     .expect_err("an unknown argument is refused");
     let _ = std::fs::remove_file(&socket);
 
-    assert_eq!(err.code, -32602, "invalid params, as the wrong type is");
-    assert!(err.message.contains("pane_type"), "{}", err.message);
+    let commands::mcp::ToolCallError::Malformed(message) = err else {
+        panic!("a bad argument is a malformed call, not a tool refusal: {err:?}");
+    };
+    assert!(message.contains("pane_type"), "{message}");
     assert_eq!(
         *calls.lock().unwrap(),
         0,

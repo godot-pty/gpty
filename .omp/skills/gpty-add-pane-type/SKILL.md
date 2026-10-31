@@ -39,7 +39,7 @@ New `#[derive(GodotClass)]` in a NEW file under `crates/gpty-gdext/src/`; regist
 - `godot/tests/integration/test_pane_spawning.gd` pins the type list and label prefixes.
 - `godot/tests/unit/test_pane_hardening.gd` if the pane spawns something (trust coverage).
 - Unit/integration test for real behavior (`godot/tests/unit/test_<key>.gd` or `integration/`), asserting the observable read API and the visible widget content, not UI wording.
-- Live smoke: add a step to `scripts/smoke_pane_api.py` (`new-pane -t <key>` -> require `type == "<key>"`, then `kill-pane`) — the only check that crosses CLI validation -> `NewPaneParams` deserialization (the Rust enum) -> the GUI registry -> `_PaneScripts` on the real socket.
+- Live smoke: add a step to `scripts/smoke_pane_api.py` (`new-pane -t <key>` -> require `type == "<key>"`, then `kill-pane`) — the only check that crosses CLI validation (`PaneType::ALL`) -> the `type` wire key -> the GUI registry -> `_PaneScripts` on the real socket.
 - Docs: `AGENTS.md` (structure tree + Security bullet if it spawns), `godot/README.md` (tree), `crates/gpty-cli/README.md` + `main.rs`'s `pane_type` doc comment if the type is spawnable over IPC, `docs/content/docs/overview/testing.md`, `CHANGELOG.md` (the upcoming release section).
 
 ## 6. Gate

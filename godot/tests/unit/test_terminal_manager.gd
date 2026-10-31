@@ -122,6 +122,53 @@ func test_split_refused_when_grid_full():
 	assert_null(extra, "spawn should return null when grid is full")
 
 
+# ── Split direction ────────────────────────────────────────────────────
+
+## The grid rect a tile occupies, for comparing directions as rectangles.
+func _tile_rect(t: Dictionary) -> Rect2i:
+	return Rect2i(t.col, t.row, t.cspan, t.rspan)
+
+## Each named side puts the new tile on that edge of the largest tile, and
+## leaves the target the span the aspect split would have given it.
+func test_split_honours_each_side():
+	var half := PaneTypes.GRID / 2
+	var cases := {
+		"right": [Rect2i(0, 0, half, PaneTypes.GRID), Rect2i(half, 0, half, PaneTypes.GRID)],
+		"left": [Rect2i(half, 0, half, PaneTypes.GRID), Rect2i(0, 0, half, PaneTypes.GRID)],
+		"bottom": [Rect2i(0, 0, PaneTypes.GRID, half), Rect2i(0, half, PaneTypes.GRID, half)],
+		"top": [Rect2i(0, half, PaneTypes.GRID, half), Rect2i(0, 0, PaneTypes.GRID, half)],
+	}
+	for side in cases:
+		_tm.reset()
+		assert_not_null(_tm.spawn(), "the first pane fills the grid")
+		var body = _tm.spawn_pane("terminal", {"split": side})
+		assert_not_null(body, "split=%s must spawn" % side)
+		assert_eq(_tile_rect(_tm.tiles[0]), cases[side][0], "split=%s: target rect" % side)
+		assert_eq(_tile_rect(_tm.tiles[1]), cases[side][1], "split=%s: new pane rect" % side)
+
+## No side is the aspect split, unchanged: right for a wide tile. This is the
+## geometry every direction must preserve for the target.
+func test_no_side_keeps_the_aspect_split():
+	_tm.spawn()
+	assert_not_null(_tm.spawn_pane("terminal", {}))
+	var half := PaneTypes.GRID / 2
+	assert_eq(_tile_rect(_tm.tiles[0]), Rect2i(0, 0, half, PaneTypes.GRID))
+	assert_eq(_tile_rect(_tm.tiles[1]), Rect2i(half, 0, half, PaneTypes.GRID))
+
+## A side the grid cannot honour is a preference, not a refusal: `top` on a
+## tile one minimum tile tall falls back to the aspect choice.
+func test_an_impossible_side_falls_back_to_the_aspect_choice():
+	_tm.spawn()
+	_tm.tiles[0].cspan = PaneTypes.GRID
+	_tm.tiles[0].rspan = PaneTypes.MIN_TILE
+	var body = _tm.spawn_pane("terminal", {"split": "top"})
+	assert_not_null(body, "a side the grid cannot honour must not refuse the spawn")
+	var half := PaneTypes.GRID / 2
+	assert_eq(_tile_rect(_tm.tiles[0]), Rect2i(0, 0, half, PaneTypes.MIN_TILE),
+		"the target must keep the aspect split's rect")
+	assert_eq(_tile_rect(_tm.tiles[1]), Rect2i(half, 0, half, PaneTypes.MIN_TILE),
+		"the new pane must take the axis the aspect choice picked")
+
 # ── Swap ─────────────────────────────────────────────────────────────────
 
 func test_swap_pane_same_spot():

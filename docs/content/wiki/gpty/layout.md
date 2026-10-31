@@ -10,7 +10,7 @@ Units are shares, not pixels: the grid stretches to fill the pane area, so a uni
 
 ## How panes get geometry
 
-The first pane in an empty workspace fills the entire grid. Spawning another pane splits the largest tile in half along its longer axis; if either half would fall below `MIN_TILE`, the spawn is refused and gPTY warns that the grid is full. Panes never overlap, and no tile is ever automatically stacked on another.
+The first pane in an empty workspace fills the entire grid. Spawning another pane splits the largest tile in half along its longer axis; a caller may name a side (`left`, `right`, `top`, `bottom`) to split along that axis and put the new pane on that edge. A side the grid cannot honour falls back to the longer-axis split rather than refusing the spawn; if either half would still fall below `MIN_TILE`, the spawn is refused and gPTY warns that the grid is full. Panes never overlap, and no tile is ever automatically stacked on another.
 
 Closing a pane frees its rectangle. An exact neighbour that matches the shape absorbs it; otherwise a group of tiles along exactly one side grows into the gap. A hand-edited or pinwheel arrangement with no such neighbour keeps the gap rather than stacking panes — except a lone survivor, which becomes the whole grid again.
 

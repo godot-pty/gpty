@@ -87,6 +87,78 @@ async fn run_daemon_tool(
     }
 }
 
+/// Why a tool call did not produce a domain result.
+///
+/// The three cases are answered differently on the wire, which is why they are
+/// not one error type. The MCP tools contract separates a *tool* failure (a
+/// successful `tools/call` response carrying `isError: true`) from a malformed
+/// call or a dead endpoint (a JSON-RPC error). Collapsing them made "the pane
+/// is gone" look like a transport fault, with nothing an agent could quote or
+/// retry.
+#[derive(Debug)]
+pub(crate) enum ToolCallError {
+    /// The argument translation refused the call itself.
+    Malformed(String),
+    /// No GUI answered (or the connection failed): a transport fault.
+    Transport(String),
+    /// The handler refused the call; its code and sentence travel in the tool
+    /// result.
+    Refused(JsonRpcError),
+}
+
+/// The MCP `CallToolResult` shape for a handler's value: the JSON as text in
+/// `content`, and the object itself in `structuredContent` when it is one.
+///
+/// `structuredContent` must be a JSON object per the tools specification, so a
+/// string result (some handlers return pre-serialized JSON) appears in `text`
+/// only.
+fn tool_result(value: serde_json::Value, is_error: bool) -> serde_json::Value {
+    let text = match &value {
+        serde_json::Value::String(text) => text.clone(),
+        other => other.to_string(),
+    };
+    let mut result = serde_json::json!({
+        "content": [{"type": "text", "text": text}],
+        "isError": is_error,
+    });
+    if value.is_object() {
+        result["structuredContent"] = value;
+    }
+    result
+}
+
+/// A handler's refusal as a tool result: the sentence is what the agent reads,
+/// and `structuredContent` carries the code for a programmatic consumer.
+fn tool_refusal(error: JsonRpcError) -> serde_json::Value {
+    let message = error.message;
+    serde_json::json!({
+        "content": [{"type": "text", "text": message.clone()}],
+        "structuredContent": {"error": {"code": error.code, "message": message}},
+        "isError": true,
+    })
+}
+
+/// Build the JSON-RPC response for one `tools/call` outcome.
+///
+/// Split from the stdio loop so the three answer shapes are testable without a
+/// socket: a refusal is a result, a malformed call and a dead endpoint stay
+/// protocol errors.
+fn tool_call_response(
+    id: u64,
+    outcome: Result<serde_json::Value, ToolCallError>,
+) -> gpty_ipc::protocol::Response {
+    match outcome {
+        Ok(result) => build_response(id, tool_result(result, false)),
+        Err(ToolCallError::Malformed(message)) => {
+            build_error(id, JsonRpcError::new(JsonRpcError::INVALID_PARAMS, message))
+        }
+        Err(ToolCallError::Transport(message)) => {
+            build_error(id, JsonRpcError::new(JsonRpcError::INTERNAL_ERROR, message))
+        }
+        Err(ToolCallError::Refused(error)) => build_response(id, tool_refusal(error)),
+    }
+}
+
 /// Run one non-daemon tool: translate its arguments, then call the GUI.
 ///
 /// Split from the stdio loop so the wiring is testable without a client on
@@ -98,13 +170,13 @@ pub(crate) async fn dispatch_tool(
     client: &IpcClient,
     tool_name: &str,
     arguments: &serde_json::Value,
-) -> Result<serde_json::Value, JsonRpcError> {
-    let params = super::wire::wire_params(tool_name, arguments)
-        .map_err(|message| JsonRpcError::new(JsonRpcError::INVALID_PARAMS, message))?;
+) -> Result<serde_json::Value, ToolCallError> {
+    let params =
+        super::wire::wire_params(tool_name, arguments).map_err(ToolCallError::Malformed)?;
     let ipc_method = tool_to_ipc_method(tool_name);
     match client.call(&ipc_method, Some(params)).await {
         Ok(response) => match response.error {
-            Some(err) => Err(err),
+            Some(err) => Err(ToolCallError::Refused(err)),
             None => Ok(response.result.unwrap_or(serde_json::Value::Null)),
         },
         Err(e) => {
@@ -117,7 +189,7 @@ pub(crate) async fn dispatch_tool(
             } else {
                 err.to_string()
             };
-            Err(JsonRpcError::new(JsonRpcError::INTERNAL_ERROR, message))
+            Err(ToolCallError::Transport(message))
         }
     }
 }
@@ -241,12 +313,13 @@ pub async fn run(client: &IpcClient, socket_path: &str, timeout: Duration) -> an
                 } else if let Some(result) =
                     run_daemon_tool(tool_name, client, socket_path, timeout).await
                 {
-                    build_response(id, result)
+                    // A daemon command that reports `status: "error"` is a
+                    // tool failure like any other; the status document stays
+                    // the structured content.
+                    let failed = result.get("status").and_then(|s| s.as_str()) == Some("error");
+                    build_response(id, tool_result(result, failed))
                 } else {
-                    match dispatch_tool(client, tool_name, &args).await {
-                        Ok(result) => build_response(id, result),
-                        Err(err) => build_error(id, err),
-                    }
+                    tool_call_response(id, dispatch_tool(client, tool_name, &args).await)
                 }
             }
             "initialize" => build_response(
@@ -282,12 +355,11 @@ mod tests {
     /// Rust, everything else is queued for GDScript.
     const IPC_SERVER_SRC: &str = include_str!("../../../../crates/gpty-gdext/src/ipc.rs");
     /// The other half of that vocabulary: the arms of
-    /// `WorkspaceIpcHandlers.handle`, plus the request the workspace's own
-    /// per-frame loop intercepts before dispatching (`paneWait`, whose
-    /// response lands frames later).
+    /// `WorkspaceIpcHandlers.handle`, plus the methods
+    /// `WorkspaceIpcHandlers.dispatch_request` intercepts before dispatch
+    /// (`paneWait` and `pluginInstall`, whose answers land later).
     const IPC_HANDLERS_SRC: &str =
         include_str!("../../../../godot/scenes/terminal/ipc_handlers.gd");
-    const WORKSPACE_SRC: &str = include_str!("../../../../godot/scenes/terminal/workspace.gd");
 
     /// Routed methods that are deliberately never MCP tools. `pluginInstall`
     /// waits on a human answering the review dialog — an MCP client cannot
@@ -372,11 +444,10 @@ mod tests {
             .collect()
     }
 
-    /// Methods the workspace intercepts in `_poll_ipc_requests` before it
-    /// reaches the dispatcher.
-    fn workspace_special_methods(src: &str) -> BTreeSet<String> {
+    /// Methods `dispatch_request` intercepts before it reaches the dispatcher.
+    fn dispatch_request_special_methods(src: &str) -> BTreeSet<String> {
         src.lines()
-            .filter_map(|line| line.strip_prefix("\t\tif method == \"")?.split('"').next())
+            .filter_map(|line| line.strip_prefix("\tif method == \"")?.split('"').next())
             .filter(|name| !name.is_empty())
             .map(str::to_string)
             .collect()
@@ -454,7 +525,7 @@ mod tests {
         let routed = rust_array_entries(IPC_SERVER_SRC, "let gdscript_methods = [");
         let local = rust_local_methods(IPC_SERVER_SRC);
         let arms = gdscript_dispatch_arms(IPC_HANDLERS_SRC);
-        let specials = workspace_special_methods(WORKSPACE_SRC);
+        let specials = dispatch_request_special_methods(IPC_HANDLERS_SRC);
 
         assert!(!routed.is_empty(), "parsed no routed methods out of ipc.rs");
         assert!(
@@ -569,6 +640,72 @@ mod tests {
         assert!(
             unreachable.is_empty(),
             "these registered methods are reachable from no CLI command: {unreachable:?}"
+        );
+    }
+
+    /// A handler's refusal is a *tool result*: the agent reads the handler's
+    /// own sentence, and `isError` says to act on it rather than treat the
+    /// transport as broken.
+    #[test]
+    fn a_handler_refusal_is_a_tool_result_with_a_readable_sentence() {
+        let resp = tool_call_response(
+            7,
+            Err(ToolCallError::Refused(JsonRpcError::new(
+                JsonRpcError::SERVER_ERROR,
+                "Pane 'nosuchpane' not found",
+            ))),
+        );
+        assert!(
+            resp.error.is_none(),
+            "a refusal must not be a protocol error"
+        );
+        let result = resp.result.expect("a tool result");
+        assert_eq!(result["isError"], true);
+        assert_eq!(result["content"][0]["type"], "text");
+        assert_eq!(
+            result["content"][0]["text"], "Pane 'nosuchpane' not found",
+            "the text must be the sentence, not a JSON blob"
+        );
+        assert_eq!(
+            result["structuredContent"]["error"]["code"],
+            JsonRpcError::SERVER_ERROR
+        );
+    }
+
+    /// A successful call answers the content block and structured content the
+    /// strict clients read, and the two agree about the domain value.
+    #[test]
+    fn a_successful_tool_result_agrees_with_its_structured_content() {
+        let value = serde_json::json!({"matched": true, "line": "ok"});
+        let resp = tool_call_response(1, Ok(value.clone()));
+        assert!(resp.error.is_none());
+        let result = resp.result.expect("a tool result");
+        assert_eq!(result["isError"], false);
+        assert_eq!(result["structuredContent"], value);
+        assert_eq!(result["content"][0]["text"], value.to_string());
+    }
+
+    /// A malformed call and a dead endpoint stay JSON-RPC errors: there is no
+    /// tool result to retry, and the code says which layer refused it.
+    #[test]
+    fn a_malformed_call_and_a_dead_endpoint_are_protocol_errors() {
+        let malformed = tool_call_response(
+            2,
+            Err(ToolCallError::Malformed(
+                "unknown argument `pane`. did you mean `pane_id`?".into(),
+            )),
+        );
+        assert!(malformed.result.is_none(), "a malformed call has no result");
+        assert_eq!(
+            malformed.error.expect("an error").code,
+            JsonRpcError::INVALID_PARAMS
+        );
+
+        let dead = tool_call_response(3, Err(ToolCallError::Transport("no GUI".into())));
+        assert!(dead.result.is_none(), "a dead endpoint has no result");
+        assert_eq!(
+            dead.error.expect("an error").code,
+            JsonRpcError::INTERNAL_ERROR
         );
     }
 }

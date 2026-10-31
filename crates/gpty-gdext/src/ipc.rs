@@ -23,6 +23,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 
+use gpty_ipc::protocol::JsonRpcError;
 use gpty_ipc::server::{HandlerFn, IpcServer};
 use gpty_ipc::transport;
 use tokio::sync::oneshot;
@@ -132,6 +133,23 @@ fn request_document_at(req: &IpcRequest, now: std::time::Instant) -> RequestDocu
     }
 }
 
+/// The value a GDScript handler's `(success, payload)` pair becomes.
+///
+/// A success payload is the handler's JSON. A refusal payload is the flat
+/// `{code, message}` error object `WorkspaceIpcHandlers.error` builds — not the
+/// old `{"error": {...}}` envelope, which used to arrive stringified and leave
+/// the caller with one level of nesting too many to read. The fallback keeps a
+/// non-JSON payload from vanishing; it is reported as an application error.
+fn handler_outcome(success: bool, result: String) -> Result<serde_json::Value, JsonRpcError> {
+    if success {
+        return Ok(serde_json::from_str(&result).unwrap_or(serde_json::Value::Null));
+    }
+    match serde_json::from_str::<JsonRpcError>(&result) {
+        Ok(error) => Err(error),
+        Err(_) => Err(JsonRpcError::new(-32000, result)),
+    }
+}
+
 /// Make a handler that routes a named method through the pending queue.
 fn make_gdscript_handler(method: String, timeout: std::time::Duration) -> HandlerFn {
     std::sync::Arc::new(move |params| {
@@ -162,12 +180,7 @@ fn make_gdscript_handler(method: String, timeout: std::time::Duration) -> Handle
 
         Box::pin(async move {
             match tokio::time::timeout(timeout, rx).await {
-                Ok(Ok((true, result))) => {
-                    Ok(serde_json::from_str(&result).unwrap_or(serde_json::Value::Null))
-                }
-                Ok(Ok((false, result))) => {
-                    Err(gpty_ipc::protocol::JsonRpcError::new(-32000, result))
-                }
+                Ok(Ok((success, result))) => handler_outcome(success, result),
                 Ok(Err(_)) => Err(gpty_ipc::protocol::JsonRpcError::new(
                     -32000,
                     "internal error: response channel closed",
@@ -519,6 +532,37 @@ mod tests {
         );
         drop(future);
         clear_state();
+    }
+
+    // A8. GDScript refuses a request by sending the flat error object; the
+    // edge answers that object as the JSON-RPC error. The old path treated
+    // the whole payload as one message string, so a caller read
+    // `{"error":{"code":-32000,"message":"Pane 'x' not found"}}` as the text.
+    #[test]
+    fn a_handler_refusal_keeps_its_code_and_sentence() {
+        let error = handler_outcome(
+            false,
+            r#"{"code":-32602,"message":"`split` must be one of: left, right, top, bottom"}"#
+                .into(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, -32602);
+        assert_eq!(
+            error.message,
+            "`split` must be one of: left, right, top, bottom"
+        );
+    }
+
+    // A9. A success payload is the handler's JSON. A refusal payload that is
+    // not an error object cannot silently pass as one: it becomes a -32000
+    // error carrying the text, rather than a success or a dropped answer.
+    #[test]
+    fn handler_payloads_are_parsed_by_their_outcome() {
+        let value = handler_outcome(true, r#"{"matched":true}"#.into()).unwrap();
+        assert_eq!(value, serde_json::json!({"matched": true}));
+        let error = handler_outcome(false, "not json".into()).unwrap_err();
+        assert_eq!(error.code, -32000);
+        assert_eq!(error.message, "not json");
     }
 }
 

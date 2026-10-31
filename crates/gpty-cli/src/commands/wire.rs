@@ -136,9 +136,9 @@ fn default_of(arg: &clap::Arg) -> Option<Value> {
 /// an entry names an argument that does not exist, and when a tool's
 /// advertised id reaches a key no handler reads.
 ///
-/// `title` is deliberately *not* here: the wire key is `title` too (the
-/// `gpty-ipc` domain model's `NewPaneParams` spells it that way), and the
-/// handler renames it to `title_label` when it builds the pane's spawn
+/// `title` is deliberately *not* here: the wire key is `title` too, the name
+/// the `newPane` handler reads (and the row that gave `--title` effect chose),
+/// and the handler renames it to `title_label` when it builds the pane's spawn
 /// options — the boundary where an API request becomes internal state.
 const RENAMES: &[(&str, &str, &str)] = &[
     // `--pane-type` is the CLI flag; the handler's `newPane` reads `type`.
@@ -324,11 +324,12 @@ mod tests {
     use super::*;
 
     /// The GDScript half of the vocabulary: the dispatch arms in
-    /// `WorkspaceIpcHandlers.handle`, and the one method the workspace's own
-    /// per-frame loop intercepts (`paneWait`, whose answer lands frames later).
+    /// `WorkspaceIpcHandlers.handle`, plus the two methods
+    /// `WorkspaceIpcHandlers.dispatch_request` intercepts before it reaches
+    /// `handle` (`paneWait` and `pluginInstall`, whose answers land frames or a
+    /// dialog later).
     const IPC_HANDLERS_SRC: &str =
         include_str!("../../../../godot/scenes/terminal/ipc_handlers.gd");
-    const WORKSPACE_SRC: &str = include_str!("../../../../godot/scenes/terminal/workspace.gd");
     /// The vault pair's handlers are native Rust (the walk and SQLite run on
     /// the blocking pool), and they read keys through `string_param` /
     /// `int_param`. The pair shares one vocabulary (`vault_path`), so the
@@ -368,10 +369,10 @@ mod tests {
 
     /// The `params.get("…")` keys a method's body reads.
     ///
-    /// The arms sit at two tabs; a block ends at the next arm. `paneWait` has
-    /// no arm (the drain loop answers it), so its body is read from the
-    /// workspace instead, and the vault pair's native handlers from their own
-    /// module.
+    /// The arms sit at two tabs; a block ends at the next arm. `paneWait` and
+    /// `pluginInstall` are intercepted before the match (a `\tif method ==`
+    /// branch at one tab inside `dispatch_request`), so their bodies are read
+    /// from there, and the vault pair's native handlers from their own module.
     fn handler_param_keys(method: &str) -> BTreeSet<String> {
         let arm = format!("\t\t\"{method}\":");
         if let Some(at) = IPC_HANDLERS_SRC.find(&arm) {
@@ -384,11 +385,11 @@ mod tests {
                 .map(str::to_string)
                 .collect();
         }
-        let branch = format!("\t\tif method == \"{method}\":");
-        if let Some(at) = WORKSPACE_SRC.find(&branch) {
-            return WORKSPACE_SRC[at + branch.len()..]
+        let branch = format!("\tif method == \"{method}\":");
+        if let Some(at) = IPC_HANDLERS_SRC.find(&branch) {
+            return IPC_HANDLERS_SRC[at + branch.len()..]
                 .lines()
-                .take_while(|line| !line.starts_with("\t\tif method =="))
+                .take_while(|line| !line.starts_with("\tif method =="))
                 .filter_map(|line| line.split("params.get(\"").skip(1).next())
                 .filter_map(|rest| rest.split('"').next())
                 .filter(|key| !key.is_empty())
@@ -409,14 +410,12 @@ mod tests {
     /// Advertised arguments whose handler does not read them yet.
     ///
     /// An entry here is a lie the surface still tells: the argument is
-    /// accepted and has no effect. `v0.7.md`'s **`--split`, `--focus` and
-    /// `--title` are accepted by `new-pane` and do nothing** is the row that
-    /// removes the last one — its title and focus halves landed with this
-    /// one, because `spawn_pane` already read `title_label` and focusing a
-    /// pane is one `activate_pane` call. Adding an entry is a product
-    /// decision, and the test below fails for every emitted key that is
-    /// neither read nor listed here.
-    const INERT_ARGUMENTS: &[(&str, &str)] = &[("new-pane", "split")];
+    /// accepted and has no effect. Empty since `new-pane`'s `--split` grew a
+    /// handler: `_split_for` now takes the side (`left`/`right`/`top`/
+    /// `bottom`) and falls back to the aspect choice when it cannot be
+    /// honoured. Adding an entry is a product decision, and the test below
+    /// fails for every emitted key that is neither read nor listed here.
+    const INERT_ARGUMENTS: &[(&str, &str)] = &[];
 
     /// Arguments one sample cannot carry because the tool refuses them
     /// together; `vault_weight_asks_for_exactly_one_of_weight_and_clear`

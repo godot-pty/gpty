@@ -18,7 +18,7 @@ All three reach the same handlers in the running GUI. The CLI is a stateless cli
 
 | Method | Params | Answers |
 |---|---|---|
-| `newPane` | `type`, `command?`, `split?`, `title?`, `focus?`, `tags?` | `{pane_id, label, type}` |
+| `newPane` | `type`, `command?`, `split?` (`left`/`right`/`top`/`bottom`), `title?`, `focus?`, `tags?` | `{pane_id, label, type}` |
 | `listPanes` | — | `{panes: [{id, label, type, title, col, row, tags, …}], count}` |
 | `killPane` | `pane_id` | `{success}` |
 | `focusPane` | `pane_id` | `{success}` |

@@ -475,6 +475,68 @@ class Smoke:
             after,
         )
 
+    def handler_errors_are_flat_sentences(self) -> None:
+        """A handler's refusal is its own sentence, not a stringified envelope.
+
+        Every error a GDScript handler raised used to travel as the whole
+        `{"error": {...}}` document stringified into the JSON-RPC message, so
+        `pane-read` on a missing pane printed a nested blob instead of naming
+        the pane. The drain loop now sends the flat error object and the Rust
+        edge builds the JSON-RPC error from it.
+        """
+        self.enter("handler error shape")
+        bad = self.control_rpc("paneRead", {"pane_id": "nosuchpane", "lines": 50})
+        error = bad.get("error") or {}
+        self.require(
+            int(error.get("code") or 0) == -32000,
+            "a handler refusal keeps its application code",
+            bad,
+        )
+        self.require(
+            str(error.get("message", "")) == "Pane 'nosuchpane' not found",
+            "the message must be the handler's sentence, not a nested JSON blob",
+            bad,
+        )
+        code, _payload, detail = self.cli_run("pane-read", "nosuchpane")
+        self.require(code != 0, "a refused pane-read must exit non-zero", detail)
+        self.require(
+            "rpc error -32000: Pane 'nosuchpane' not found" in detail,
+            "the CLI must print the handler's sentence, not a JSON blob",
+            detail,
+        )
+
+    def split_direction(self) -> None:
+        """`new-pane --split top` places the pane above the largest tile.
+
+        The flag was advertised and had no effect: the new tile landed on the
+        largest pane's right edge whatever the side. `list-panes` exposes the
+        grid rect, so the placement is checked against the layout itself
+        rather than a screenshot.
+        """
+        self.enter("new-pane --split top")
+        before = self.result(self.cli("list-panes", "--json"), "list-panes")
+        panes = before.get("panes") or []
+        self.require(bool(panes), "the workspace must hold a pane to split", before)
+        target = max(panes, key=lambda p: int(p["cspan"]) * int(p["rspan"]))
+        payload = self.result(
+            self.cli("new-pane", "-t", "code_viewer", "--split", "top", "--json"),
+            "new-pane --split top",
+        )
+        new_id = str(payload.get("pane_id", ""))
+        after = self.result(self.cli("list-panes", "--json"), "list-panes")
+        placed = next((p for p in after.get("panes") or [] if p.get("id") == new_id), None)
+        self.require(placed is not None, "the new pane must be listed", after)
+        half = int(target["rspan"]) // 2
+        self.require(
+            int(placed["row"]) == int(target["row"])
+            and int(placed["rspan"]) == int(target["rspan"]) - half
+            and int(placed["col"]) == int(target["col"])
+            and int(placed["cspan"]) == int(target["cspan"]),
+            "the new pane must occupy the top half of the target, not its right edge",
+            {"target": target, "placed": placed},
+        )
+        self.cli("kill-pane", new_id)
+
     def subscribe(self) -> str:
         """Wait for the event listener, then subscribe to it.
 
@@ -1061,9 +1123,15 @@ def main() -> int:
         # ── a malformed request must not cost the batch ───────────────
         smoke.malformed_params()
 
+        # ── a handler refusal is a flat sentence ──────────────────────
+        smoke.handler_errors_are_flat_sentences()
+
         # ── Event listener ────────────────────────────────────────────
         smoke.enter("event listener")
         subscription = smoke.subscribe()
+
+        # ── new-pane --split places the pane on the named side ────────
+        smoke.split_direction()
 
         # ── new-pane (the default shell for this platform) ─────────────
         smoke.enter("new-pane")

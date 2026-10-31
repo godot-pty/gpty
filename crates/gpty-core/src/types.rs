@@ -44,11 +44,11 @@ use regex::Regex;
 ///
 /// Used across the IPC boundary to identify which type of pane to spawn
 /// or query. The `as_str()` method returns the GDScript-compatible key, and
-/// that key **is** the wire spelling: serde delegates to it below, so a struct
-/// carrying this type cannot spell a pane differently from the registry the
-/// GUI reads. (It used to be `#[serde(rename_all = "kebab-case")]`, which made
-/// `NewPaneParams` serialize `code-viewer` and — worse — *reject* the
-/// `code_viewer` every other surface uses.)
+/// that key **is** the wire spelling: serde delegates to it below, so a
+/// struct carrying this type cannot spell a pane differently from the
+/// registry the GUI reads. (It used to be `#[serde(rename_all =
+/// "kebab-case")]`, which serialized `code-viewer` and — worse — *rejected*
+/// the `code_viewer` every other surface uses.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaneType {
     Terminal,

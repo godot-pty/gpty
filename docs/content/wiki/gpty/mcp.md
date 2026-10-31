@@ -4,7 +4,7 @@
 
 ## What the server is
 
-The process reads newline-delimited JSON-RPC from stdin and writes answers to stdout. It implements the MCP handshake (`initialize`, answering protocol version `2024-11-05` with `serverInfo` naming `gpty`), discovery (`tools/list`), and dispatch (`tools/call`). Each `tools/call` is translated into one request on the [[ipc|control socket]]; the server holds a single client connection and forwards the result as tool output.
+The process reads newline-delimited JSON-RPC from stdin and writes answers to stdout. It implements the MCP handshake (`initialize`, answering protocol version `2024-11-05` with `serverInfo` naming `gpty`), discovery (`tools/list`), and dispatch (`tools/call`). Each `tools/call` is translated into one request on the [[ipc|control socket]]; the server holds a single client connection and forwards the result as a tool result the strict clients can read (`content` text plus `structuredContent`).
 
 A stdio server is the right shape here because an MCP harness already owns the process: it spawns `gpty mcp`, keeps the pipes, and never needs a port, a URL, or a discovery file. There is nothing to secure on the network because there is no network.
 
@@ -47,6 +47,12 @@ Two transformations happen on the way. Nested subcommand groups are flattened: `
 ### From tool arguments to the wire
 
 A tool's arguments are clap's (`pane_type`, `title`, `lines`); the handler behind the method reads the CLI's wire names (`type`) and an array where the schema once said string. `crates/gpty-cli/src/commands/wire.rs` is the one translation: it derives each argument's shape from the clap definition, renames the ids whose wire key differs through one table, and refuses what it cannot honour with `-32602` — an unknown key (naming the nearest valid one), a value of the wrong JSON type, or a contradictory pair. That refusal is the point. A forwarded argument the handler does not read is dropped, and the call then *succeeds with the default*: `tools/call new-pane {"pane_type": "wiki"}` used to create a terminal. Integers and booleans still accept the numeric and `"true"`/`"false"` strings an older client may send, so a schema change does not break one.
+
+### What a call returns
+
+A successful call answers a `tools/call` result: the handler's JSON as compact text in `content` (`[{"type": "text", "text": …}]`) and, when the value is an object, the same object in `structuredContent`.
+
+A refusal is still a successful response, with `isError: true`, the handler's own sentence in `content.text`, and `{error: {code, message}}` in `structuredContent`. "The pane is gone" is then something an agent can read, quote and re-address rather than a transport fault. JSON-RPC errors are reserved for a malformed call (the argument translation's `-32602`, an unknown tool or method) and a dead endpoint — the distinction a client loop needs, because an `isError` result is retryable after a change while a protocol error says the request or the connection was the problem.
 
 ## No auto-spawn
 

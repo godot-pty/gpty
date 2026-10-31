@@ -19,7 +19,7 @@ The second point matters for automation: a typo in a pane type fails immediately
 
 | Command | What it does |
 |---|---|
-| `new-pane` | Open a pane. `-t/--pane-type` (terminal, code_viewer, file_tree, inspector, reasoning, cli_view, wiki, media), `-c/--command`, `--arg` (repeatable, `cli_view` argv), `-s/--split left\|right\|top\|bottom`, `--title`, `-f/--focus true\|false` (default true), `--tags` |
+| `new-pane` | Open a pane. `-t/--pane-type` (terminal, code_viewer, file_tree, inspector, reasoning, cli_view, wiki, media), `-c/--command`, `--arg` (repeatable, `cli_view` argv), `-s/--split left\|right\|top\|bottom` (a side of the largest tile; when it cannot fit, the tile's aspect decides), `--title`, `-f/--focus true\|false` (default true), `--tags` |
 | `list-panes` | Every pane with id, label, type, and grid position |
 | `kill-pane` | Close a pane by id, or `"active"` for the focused one |
 | `focus-pane` | Focus a pane by id |

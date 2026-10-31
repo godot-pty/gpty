@@ -43,6 +43,59 @@ static func request_params(raw) -> Dictionary:
 const PLUGIN_ADMIN_ACTIONS := ["uninstall", "enable", "disable"]
 
 
+## Dispatch one drained request into the response documents it produces.
+##
+## Extracted from `Workspace._poll_ipc_requests` so the loop's own body can run
+## in a GUT test: the Rust queue (`drain_ipc_requests`) has no push seam, and
+## testing only the per-request params decision left the `paneWait`
+## bookkeeping and the success/error envelope unexercised. Each entry is
+## `{id, success, payload}`; an empty array means the answer is deferred
+## (`paneWait` answers from the wait poll, `pluginInstall` from the review
+## dialog).
+##
+## A refusal's payload is the flat error object `error()` builds, not the
+## `{"error": ...}` envelope: `respond_ipc` hands it to the Rust edge, which
+## makes it the JSON-RPC error itself, so the caller reads the handler's own
+## sentence instead of a stringified document.
+static func dispatch_request(ws, req: Dictionary) -> Array:
+	var id = req.get("id", 0)
+	var parsed: Dictionary = request_params(req.get("params"))
+	if parsed.has("error"):
+		# -32602 matches what the Rust edge answers for the same input, so a
+		# client sees one contract whichever layer refused it.
+		return [_answer(id, false, error(str(parsed["error"]), -32602)["error"])]
+	var params: Dictionary = parsed["params"]
+	var method = str(req.get("method", ""))
+	if method == "paneWait":
+		var w_found: Dictionary = ws._resolve_pane_target(str(params.get("pane_id", "")))
+		if w_found.has("error"):
+			return [_answer(id, false, error(str(w_found["error"]))["error"])]
+		var w_body = w_found["body"]
+		if not (w_body is TerminalPane):
+			return [_answer(id, false, error("Pane '%s' is not a terminal" % params.get("pane_id", ""))["error"])]
+		var w_pattern = str(params.get("pattern", ""))
+		if w_pattern == "" or w_pattern.length() > 1024:
+			return [_answer(id, false, error("Invalid wait pattern")["error"])]
+		var w_timeout = clampi(int(params.get("timeout_ms", 10000)), 100, 60000)
+		ws._pending_waits[str(id)] = {
+			"attachment_id": w_body.attachment_id,
+			"pattern": w_pattern,
+			"deadline_ms": Time.get_ticks_msec() + w_timeout,
+		}
+		return []
+	if method == "pluginInstall":
+		ws._show_plugin_review(int(id), params, int(req.get("timeout_ms", 0)))
+		return []
+	var result = ws._handle_ipc_method(method, params)
+	if result is Dictionary and result.has("error"):
+		return [_answer(id, false, result["error"])]
+	return [_answer(id, true, result)]
+
+
+static func _answer(id, success: bool, payload) -> Dictionary:
+	return {"id": id, "success": success, "payload": payload}
+
+
 static func handle(ws, method: String, params: Dictionary):
 	match method:
 		"vaultWeight":
@@ -178,6 +231,18 @@ static func handle(ws, method: String, params: Dictionary):
 			var np_title: String = PaneTypes.sanitize_title(params.get("title", ""))
 			if np_title != "":
 				np_opts["title_label"] = np_title
+			# A split side is a placement preference for the largest tile
+			# (`PaneTypes.SPLIT_SIDES`, what the CLI's `--split` accepts).
+			# Anything else is a caller bug and is refused before a pane
+			# exists, like a non-boolean `focus`; the tiling itself never
+			# refuses the spawn over a preference.
+			var np_split = params.get("split", "")
+			if np_split != "":
+				if not (np_split is String) or not PaneTypes.SPLIT_SIDES.has(np_split):
+					return error(
+						"`split` must be one of: %s" % ", ".join(PackedStringArray(PaneTypes.SPLIT_SIDES)),
+						-32602)
+				np_opts["split"] = np_split
 			var body = ws._spawn_pane(type_name, np_opts)
 			if body == null:
 				var np_refused: String = ws._pane_ceiling_refusal()

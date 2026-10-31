@@ -83,7 +83,7 @@ func spawn_pane(type_name: String, opts: Dictionary = {}, workspace_cwd := "") -
 	if tiles.is_empty():
 		tiles.append({wrapper = w, col = 0, row = 0, cspan = PaneTypes.GRID, rspan = PaneTypes.GRID})
 	else:
-		if not _split_for(w):
+		if not _split_for(w, str(opts.get("split", ""))):
 			w.queue_free()
 			return null
 	_sync_edge_strips()
@@ -386,23 +386,64 @@ func reset():
 
 # ── Tiling ─────────────────────────────────────────────────────────────
 
-func _split_for(w: Control) -> bool:
+## Split the largest tile for the new wrapper `w`, preferring the caller's
+## `side` (one of `PaneTypes.SPLIT_SIDES`; absent or unknown means no
+## preference) and letting the tile's aspect decide when no side was named.
+##
+## A side is a preference, never a refusal: an axis that cannot hold two
+## `MIN_TILE` tiles falls back to the aspect choice, and false is returned only
+## when neither axis can. The target keeps the span the aspect split gives it
+## (`floor(span / 2)`) in every direction - `left`/`top` move the target and
+## put the new tile at the old edge, so `right`/`bottom` are exactly the
+## pre-direction geometry.
+func _split_for(w: Control, side: String = "") -> bool:
+	if not PaneTypes.SPLIT_SIDES.has(side):
+		side = ""
 	var bi = 0; var ba = 0
 	for i in tiles.size():
 		var a = tiles[i].cspan * tiles[i].rspan
 		if a > ba: ba = a; bi = i
 	var s = tiles[bi]
-	var oc = s.col; var or1 = s.row; var os = s.cspan; var ot = s.rspan
-	if os >= ot:
-		var half = maxi(os / 2, 1)
-		if half < PaneTypes.MIN_TILE or (os - half) < PaneTypes.MIN_TILE: return false
-		s.cspan = half
-		tiles.append({wrapper = w, col = oc + half, row = or1, cspan = os - half, rspan = ot})
+	var horizontal: bool = side == "left" or side == "right" \
+			or (side == "" and s.cspan >= s.rspan)
+	if horizontal and _split_horizontal(s, w, side == "left"): return true
+	if not horizontal and _split_vertical(s, w, side == "top"): return true
+	if side != "":
+		# The named axis cannot satisfy MIN_TILE; take the aspect choice.
+		if not horizontal and _split_horizontal(s, w, false): return true
+		if horizontal and _split_vertical(s, w, false): return true
+	return false
+
+## Halve the tile along its columns, the new wrapper on the left or the right.
+## The target keeps `floor(cspan / 2)`; the new tile takes the rest.
+func _split_horizontal(s: Dictionary, w: Control, new_on_left: bool) -> bool:
+	var span: int = s.cspan
+	var half := maxi(span / 2, 1)
+	var rest := span - half
+	if half < PaneTypes.MIN_TILE or rest < PaneTypes.MIN_TILE: return false
+	var col: int = s.col
+	s.cspan = half
+	if new_on_left:
+		s.col = col + rest
+		tiles.append({wrapper = w, col = col, row = s.row, cspan = rest, rspan = s.rspan})
 	else:
-		var half = maxi(ot / 2, 1)
-		if half < PaneTypes.MIN_TILE or (ot - half) < PaneTypes.MIN_TILE: return false
-		s.rspan = half
-		tiles.append({wrapper = w, col = oc, row = or1 + half, cspan = os, rspan = ot - half})
+		tiles.append({wrapper = w, col = col + half, row = s.row, cspan = rest, rspan = s.rspan})
+	return true
+
+## Halve the tile along its rows, the new wrapper on the top or the bottom.
+## The target keeps `floor(rspan / 2)`; the new tile takes the rest.
+func _split_vertical(s: Dictionary, w: Control, new_on_top: bool) -> bool:
+	var span: int = s.rspan
+	var half := maxi(span / 2, 1)
+	var rest := span - half
+	if half < PaneTypes.MIN_TILE or rest < PaneTypes.MIN_TILE: return false
+	var row: int = s.row
+	s.rspan = half
+	if new_on_top:
+		s.row = row + rest
+		tiles.append({wrapper = w, col = s.col, row = row, cspan = s.cspan, rspan = rest})
+	else:
+		tiles.append({wrapper = w, col = s.col, row = row + half, cspan = s.cspan, rspan = rest})
 	return true
 
 func _expand_exact(rm: Dictionary) -> bool:

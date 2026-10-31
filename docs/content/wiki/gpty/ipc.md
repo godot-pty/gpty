@@ -67,7 +67,7 @@ The fallbacks cover sessions with no runtime directory (a cron job, a stripped l
 
 | Method | Purpose |
 |---|---|
-| `newPane` | Create a pane; `type`, optional `command`, `split`, `title`, `focus`, `tags` |
+| `newPane` | Create a pane; `type`, optional `command`, `split` (`left`/`right`/`top`/`bottom`), `title`, `focus`, `tags` |
 | `listPanes` | Every pane with id, label, type, title, cell position, tags |
 | `killPane` | Close a pane by id, or `"active"` for the focused one |
 | `focusPane` | Focus a pane by id or `"active"` |

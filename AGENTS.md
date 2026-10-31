@@ -95,7 +95,6 @@ gpty/
 │   ├── gpty-ipc/               # Shared JSON-RPC 2.0 IPC transport, client, and server
 │   │   └── src/
 │   │       ├── protocol.rs     # JSON-RPC 2.0 Request, Response, JsonRpcError
-│   │       ├── types.rs        # IPC domain types (NewPaneParams, PaneInfo, …)
 │   │       ├── transport.rs    # Platform socket connection (Unix, named pipe)
 │   │       ├── server.rs       # Async IPC server with handler registry
 │   │       └── client.rs       # Async IPC client with connect/call/timeout
@@ -224,6 +223,8 @@ Tools: `new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `layout-sa
 A tool's arguments travel under the ids clap gives them (`pane_type`), while the handler reads the CLI's wire key (`type`). `commands/wire.rs` is the one translation: it derives each argument's JSON type from the clap definition (an `Append` list, a boolean flag, an integer field), renames the handful of ids that differ (`RENAMES`), and refuses an unknown key (naming the nearest valid one), a value of the wrong JSON type, or a contradictory pair with `-32602`. A new argument needs no second list; a *renamed* wire key needs an entry in that table, and `wire_keys_are_the_keys_the_handlers_read` fails if a translated key is one no handler reads.
 
 The MCP tool schemas are auto-generated from clap command definitions in `crates/gpty-cli/src/commands/schema.rs`. Nested subcommands (`daemon`, `layout`) are flattened into prefixed tools. Self-referential tools (`mcp`, `schema`) are excluded.
+
+A tool call the handler refuses is a *successful* `tools/call` response with `isError: true`, the handler's own sentence in the text content, and its code in `structuredContent`; JSON-RPC errors are reserved for a malformed call (the argument translation's `-32602`, an unknown tool or method) and a dead endpoint. Refusals travel flat end to end: the GUI's drain loop answers the handler's `{code, message}` error object itself, and the Rust edge builds the JSON-RPC error from it, so a CLI or MCP caller reads the sentence instead of a stringified envelope.
 
 See `skill://gpty-omp-integration` for usage patterns.
 

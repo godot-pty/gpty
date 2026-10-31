@@ -8,7 +8,6 @@ pub mod client;
 pub mod protocol;
 pub mod server;
 pub mod transport;
-pub mod types;
 
 #[cfg(test)]
 pub(crate) mod test_env;

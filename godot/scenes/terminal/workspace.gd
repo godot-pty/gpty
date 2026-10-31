@@ -2078,45 +2078,12 @@ func _poll_ipc_requests():
 	if reqs.is_empty():
 		return
 	for req in reqs:
-		var id = req["id"]
-		var method = req["method"]
-		# Defence in depth for the batch: the Rust edge refuses a non-object
-		# `params`, and this guard keeps one that slipped past from aborting
-		# the loop (see `WorkspaceIpcHandlers.request_params`).
-		var parsed: Dictionary = WorkspaceIpcHandlers.request_params(req["params"])
-		if parsed.has("error"):
-			# -32602 matches what the Rust edge answers for the same input, so
-			# a client sees one contract whichever layer refused it.
-			GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error(str(parsed["error"]), -32602)))
-			continue
-		var params: Dictionary = parsed["params"]
-		if method == "paneWait":
-			var w_found: Dictionary = _resolve_pane_target(str(params.get("pane_id", "")))
-			if w_found.has("error"):
-				GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error(str(w_found["error"]))))
-				continue
-			var w_body = w_found["body"]
-			if not (w_body is TerminalPane):
-				GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error("Pane '%s' is not a terminal" % params.get("pane_id", ""))))
-				continue
-			var w_pattern = str(params.get("pattern", ""))
-			if w_pattern == "" or w_pattern.length() > 1024:
-				GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error("Invalid wait pattern")))
-				continue
-			var w_timeout = clampi(int(params.get("timeout_ms", 10000)), 100, 60000)
-			_pending_waits[str(id)] = {
-				"attachment_id": w_body.attachment_id,
-				"pattern": w_pattern,
-				"deadline_ms": Time.get_ticks_msec() + w_timeout,
-			}
-			continue
-		if method == "pluginInstall":
-			_show_plugin_review(int(id), params, int(req.get("timeout_ms", 0)))
-			continue
-		var result = _handle_ipc_method(method, params)
-		var success = not (result is Dictionary and result.has("error"))
-		var result_json = JSON.stringify(result) if typeof(result) != TYPE_STRING else result
-		GptyTerminal.respond_ipc(id, success, result_json)
+		for answer in WorkspaceIpcHandlers.dispatch_request(self, req):
+			var payload = answer["payload"]
+			# A handler may already return its JSON as a string (`vaultRead`
+			# does); everything else is serialized once, here.
+			var text = payload if typeof(payload) == TYPE_STRING else JSON.stringify(payload)
+			GptyTerminal.respond_ipc(int(answer["id"]), bool(answer["success"]), text)
 
 # Poll registered paneWait requests each frame: respond on first regex match
 # or deadline. Matching happens in Rust (standard regex crate) per pane.
@@ -2129,7 +2096,7 @@ func _poll_pending_waits():
 		var w = _pending_waits[wid]
 		var wbody = _resolve_pane_target(str(w.get("attachment_id", ""))).get("body")
 		if wbody == null or not (wbody is TerminalPane):
-			GptyTerminal.respond_ipc(int(wid), false, JSON.stringify(_ipc_error("Pane gone")))
+			GptyTerminal.respond_ipc(int(wid), false, JSON.stringify(_ipc_error("Pane gone")["error"]))
 			done.append(wid)
 			continue
 		var line = str(wbody._terminal.check_lines(w["pattern"]))
@@ -2171,7 +2138,7 @@ func _show_plugin_review(id: int, params: Dictionary, timeout_ms: int):
 		# channel left to answer: do not open a dialog for it.
 		return
 	if _pending_plugin_reviews.size() >= PLUGIN_REVIEW_MAX_PENDING:
-		GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error("Too many pending plugin reviews")))
+		GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error("Too many pending plugin reviews")["error"]))
 		return
 	var dialog = ConfirmationDialog.new()
 	dialog.name = "PluginReviewDialog"
