@@ -51,7 +51,7 @@ A missing toolchain SKIPs locally but FAILS under `CI`/`GITHUB_ACTIONS`, so a lo
 
 ## 7. Commit, then stop
 
-`skill://commit`; conventional scope; a behavior change and its test land in the same commit; an intentional behavior change gets the reason in the body. Before the reply: every call site migrated, docs updated or a row queued for them, the changed path exercised for real (tests alone are not proof), scratch files gone, `git status` clean of strays.
+`skill://commit`; conventional scope; a behavior change and its test land in the same commit; an intentional behavior change gets the reason in the body. Before the reply: every call site migrated, docs updated or a row queued for them, the changed path exercised for real (tests alone are not proof), scratch files gone, `git status` clean of strays. When the *session* is ending rather than just this row, run `skill://gpty-session-wrap-up` first: it owns the audit a single row does not (doc mirrors beyond the row, the wiki bundle, skills and memory, loose threads).
 
 ## Maintenance
 
