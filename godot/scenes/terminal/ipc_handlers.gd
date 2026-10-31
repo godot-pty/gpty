@@ -141,15 +141,28 @@ static func handle(ws, method: String, params: Dictionary):
 			ConceptManager.refresh_plugin_concepts()
 			return {"refreshed": true, "action": pc_action, "id": pc_id}
 		"newPane":
+			# Every value here is caller-supplied and ends at a spawn or a
+			# label, so each is validated or sanitized before it is used. The
+			# keys are the CLI's wire names; the MCP tool surface advertises
+			# clap's ids and `wire.rs` translates them (`pane_type` -> `type`,
+			# `title` -> `title_label`).
 			var type_name = str(params.get("type", "terminal"))
 			if not PaneTypes.ALL.has(type_name):
 				return error("Unknown pane type: %s" % type_name)
+			# Validated before anything spawns: a refused call must not leave a
+			# pane behind. Absent means focus (the documented default), and a
+			# value that is not a boolean is refused rather than coerced —
+			# `"false"` is truthy in GDScript, which would focus the opposite
+			# of what the caller asked for.
+			var np_focus = params.get("focus", true)
+			if typeof(np_focus) != TYPE_BOOL:
+				return error("`focus` must be a boolean", -32602)
 			var np_tags: Array = PaneTypes.sanitize_tags(params.get("tags", []))
-			var opts: Dictionary
+			var np_opts: Dictionary
 			if type_name == "cli_view":
 				# argv, not a shell string: the pane runs the program directly,
 				# so `command` is the program and `args` its argument vector.
-				opts = {
+				np_opts = {
 					"command": PaneTypes.sanitize_shell(params.get("command"), ""),
 					"shell_args": PaneTypes.sanitize_shell_args(params.get("args", [])),
 					"tags": np_tags,
@@ -157,11 +170,22 @@ static func handle(ws, method: String, params: Dictionary):
 			else:
 				var shell: String = PaneTypes.sanitize_shell(
 					params.get("command"), SettingsManager.cfg_shell_command)
-				opts = {"shell_command": shell, "tags": np_tags}
-			var body = ws._spawn_pane(type_name, opts)
+				np_opts = {"shell_command": shell, "tags": np_tags}
+			# A display title, never the pane's addressable label
+			# (`pane_label`): the request names it `title`, the spawn options
+			# name it `title_label` (what `spawn_pane` reads), and an empty
+			# result leaves the type's default in place.
+			var np_title: String = PaneTypes.sanitize_title(params.get("title", ""))
+			if np_title != "":
+				np_opts["title_label"] = np_title
+			var body = ws._spawn_pane(type_name, np_opts)
 			if body == null:
 				var np_refused: String = ws._pane_ceiling_refusal()
 				return error(np_refused if np_refused != "" else "Grid is full")
+			# Focus last: `activate_pane` resolves the pane's workspace, which
+			# only exists once the body is in the grid.
+			if np_focus:
+				ws.activate_pane(body)
 			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "spawned", "pane_id": body.attachment_id, "label": body.pane_label}))
 			return {"pane_id": body.attachment_id, "label": body.pane_label, "type": type_name}
 		"paneRead":

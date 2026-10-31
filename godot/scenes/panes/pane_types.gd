@@ -234,14 +234,48 @@ static func generate_attachment_id() -> String:
 
 ## Sanitize a pane-tag list from untrusted layout/profile/IPC data.
 ## Each tag follows the attachment_id pattern; oversize/foreign values drop.
-static func sanitize_tags(raw: Array) -> Array:
+##
+## A value that is not an array has no tags in it, so it is `[]` — the way
+## `sanitize_shell_args` treats the same input. A typed parameter would raise
+## instead, and this is called from the IPC drain loop, where one raise aborts
+## every request in the batch (GDScript has no try/catch).
+static func sanitize_tags(raw) -> Array:
 	var out: Array = []
+	if not (raw is Array):
+		return out
 	for t in raw:
 		if t is String and out.size() < 16:
 			var clean := sanitize_attachment_id(t)
 			if clean != "" and not out.has(clean):
 				out.append(clean)
 	return out
+
+## The sides an explicit split can name, in the order `--split` accepts them.
+## `""` (no preference) is not one of them: the target tile's aspect decides.
+const SPLIT_SIDES := ["left", "right", "top", "bottom"]
+
+## Longest display title accepted; a title is a label, not a document.
+const TITLE_MAX_LENGTH := 64
+
+## Sanitize a pane's display title from untrusted IPC or file data.
+##
+## Control characters (a newline would break the title bar's single line) are
+## dropped and the result is cut at `TITLE_MAX_LENGTH`; the U+FFFD that a
+## decoded NUL becomes means the value was never a title, so the whole string
+## falls back to the pane type's default name (`""`).
+static func sanitize_title(v) -> String:
+	if not (v is String):
+		return ""
+	var out := ""
+	for ch in v:
+		if ch == "\uFFFD":
+			return ""
+		if out.length() >= TITLE_MAX_LENGTH:
+			break
+		var code: int = ch.unicode_at(0)
+		if code >= 0x20 and code != 0x7f:
+			out += ch
+	return out.strip_edges()
 
 ## Action commands appended after the pane-type entries in the palette.
 const PALETTE_ACTIONS: Array[String] = [

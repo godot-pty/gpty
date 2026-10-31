@@ -82,16 +82,16 @@ enum Commands {
         #[arg(long = "arg", value_name = "ARG", allow_hyphen_values = true)]
         args: Vec<String>,
 
-        /// Split direction: left, right, top, bottom
-        #[arg(short, long, default_value = "bottom")]
-        split: String,
+        /// Split direction: left, right, top, bottom (default: the tile's aspect)
+        #[arg(short, long, value_parser = ["left", "right", "top", "bottom"])]
+        split: Option<String>,
 
         /// Pane title
         #[arg(long)]
         title: Option<String>,
 
-        /// Focus the new pane
-        #[arg(short, long, default_value = "true")]
+        /// Focus the new pane (default: true); `--focus false` leaves focus where it is
+        #[arg(short, long, default_value_t = true, action = clap::ArgAction::Set)]
         focus: bool,
 
         /// Comma-separated pane tags for broadcast targeting

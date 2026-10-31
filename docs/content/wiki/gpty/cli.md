@@ -19,7 +19,7 @@ The second point matters for automation: a typo in a pane type fails immediately
 
 | Command | What it does |
 |---|---|
-| `new-pane` | Open a pane. `-t/--pane-type` (terminal, code_viewer, file_tree, inspector, reasoning, cli_view, wiki, media), `-c/--command`, `--arg` (repeatable, `cli_view` argv), `-s/--split`, `-f/--focus`, `--tags` |
+| `new-pane` | Open a pane. `-t/--pane-type` (terminal, code_viewer, file_tree, inspector, reasoning, cli_view, wiki, media), `-c/--command`, `--arg` (repeatable, `cli_view` argv), `-s/--split left\|right\|top\|bottom`, `--title`, `-f/--focus true\|false` (default true), `--tags` |
 | `list-panes` | Every pane with id, label, type, and grid position |
 | `kill-pane` | Close a pane by id, or `"active"` for the focused one |
 | `focus-pane` | Focus a pane by id |
@@ -61,7 +61,7 @@ The second point matters for automation: a typo in a pane type fails immediately
 Open a pane and give it work:
 
 ```bash
-gpty new-pane --pane-type terminal --command "cargo test" --focus
+gpty new-pane --pane-type terminal --command "cargo test" --focus true
 ```
 
 Run a command in a fresh pane, then check on it:

@@ -19,7 +19,7 @@ pub async fn run(
     pane_type: &str,
     command: Option<&str>,
     args: &[String],
-    split: &str,
+    split: Option<&str>,
     title: Option<&str>,
     focus: bool,
     tags: &[String],
@@ -28,7 +28,7 @@ pub async fn run(
     // Validate pane type with "did you mean?" suggestions.
     let valid_types = valid_types();
     if !valid_types.contains(&pane_type) {
-        let suggestion = closest_match(pane_type, &valid_types);
+        let suggestion = super::closest_match(pane_type, &valid_types);
         let hint = match suggestion {
             Some(s) => format!(" — did you mean \"{s}\"?"),
             None => String::new(),
@@ -47,9 +47,14 @@ pub async fn run(
     };
     let mut params = serde_json::json!({
         "type": wire_type,
-        "split": split,
         "focus": focus,
     });
+    // A named side is a preference the GUI honours on the largest tile; with
+    // none, it splits by that tile's aspect, as its own spawns do. Sending the
+    // flag's old default here made every call ask for `bottom`.
+    if let Some(side) = split {
+        params["split"] = serde_json::Value::String(side.to_string());
+    }
     if let Some(cmd) = command {
         params["command"] = serde_json::Value::String(cmd.to_string());
     }
@@ -63,6 +68,8 @@ pub async fn run(
         );
     }
     if let Some(t) = title {
+        // The API key; the handler turns it into the pane's `title_label`
+        // (its display title, not its addressable `pane_label`).
         params["title"] = serde_json::Value::String(t.to_string());
     }
     params["tags"] = serde_json::Value::Array(
@@ -71,50 +78,4 @@ pub async fn run(
             .collect(),
     );
     super::call_and_format(client, "newPane", params, json).await
-}
-
-/// Find the closest valid match using Levenshtein distance.
-fn closest_match<'a>(input: &str, valid: &[&'a str]) -> Option<&'a str> {
-    let input = input.to_lowercase();
-    valid
-        .iter()
-        .filter_map(|&v| {
-            let dist = levenshtein_distance(&input, v);
-            let threshold = (v.len().max(input.len()) / 2).min(3);
-            if dist <= threshold {
-                Some((dist, v))
-            } else {
-                None
-            }
-        })
-        .min_by_key(|(d, _)| *d)
-        .map(|(_, v)| v)
-}
-
-fn levenshtein_distance(a: &str, b: &str) -> usize {
-    let a_chars: Vec<char> = a.chars().collect();
-    let b_chars: Vec<char> = b.chars().collect();
-    let n = a_chars.len();
-    let m = b_chars.len();
-    if n == 0 {
-        return m;
-    }
-    if m == 0 {
-        return n;
-    }
-    let mut prev: Vec<usize> = (0..=m).collect();
-    let mut curr = vec![0usize; m + 1];
-    for i in 1..=n {
-        curr[0] = i;
-        for j in 1..=m {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] {
-                0
-            } else {
-                1
-            };
-            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
-        }
-        std::mem::swap(&mut prev, &mut curr);
-    }
-    prev[m]
 }

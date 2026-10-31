@@ -88,6 +88,63 @@ func test_every_listed_id_addresses_the_pane_it_names():
 
 	_ws._kill_now(extra)
 
+# ── newPane: the pane the caller asked for ─────────────────────────────
+#
+# The MCP tool surface advertises clap's ids (`pane_type`, `title`) and
+# `wire.rs` translates them into the keys this handler reads (`type`,
+# `title_label`). For a while nothing translated them: the handler looked up
+# `type`, got its default, and every MCP call created a terminal.
+
+func test_new_pane_creates_the_type_the_caller_names():
+	var answer = WorkspaceIpcHandlers.handle(_ws, "newPane", {"type": "code_viewer"})
+	assert_true(answer is Dictionary, "newPane must answer a document")
+	assert_false(answer.has("error"), "a registered type must spawn: %s" % answer)
+	assert_eq(str(answer.get("type", "")), "code_viewer", "the answer names the type it created")
+	var body := _target(str(answer.get("pane_id", "")))
+	assert_true(
+		body is CodeViewerPane,
+		"the spawned body must be the requested pane type, not the default one"
+	)
+	_ws._kill_now(body)
+
+func test_new_pane_applies_the_display_title_it_is_given():
+	var answer = WorkspaceIpcHandlers.handle(_ws, "newPane", {
+		"type": "file_tree", "title": "MARKER",
+	})
+	assert_false(answer.has("error"), "%s" % answer)
+	var body := _target(str(answer.get("pane_id", "")))
+	var wrapper: Control = null
+	for t in _ws._tm.tiles:
+		if _ws._tm._find_body(t.wrapper) == body:
+			wrapper = t.wrapper
+	assert_not_null(wrapper, "the new pane must own a tile")
+	var label = wrapper.get_node_or_null("BodyVBox/TitleBar/TitleLabel")
+	assert_not_null(label, "every tile carries a title label")
+	assert_eq(
+		str(label.text).strip_edges(), "MARKER",
+		"the title must reach the title bar, where a caller can see it"
+	)
+	_ws._kill_now(body)
+
+func test_new_pane_honours_focus():
+	var focused = WorkspaceIpcHandlers.handle(_ws, "newPane", {"type": "code_viewer", "focus": true})
+	assert_false(focused.has("error"), "%s" % focused)
+	var eager := _target(str(focused.get("pane_id", "")))
+	assert_eq(_ws._tm.last_body, eager, "focus:true must make the new pane the active one")
+
+	var quiet = WorkspaceIpcHandlers.handle(_ws, "newPane", {"type": "code_viewer", "focus": false})
+	assert_false(quiet.has("error"), "%s" % quiet)
+	var passive := _target(str(quiet.get("pane_id", "")))
+	assert_eq(_ws._tm.last_body, eager, "focus:false must leave the active pane where it was")
+
+	# A string would be truthy in GDScript: coerced, it focuses the opposite of
+	# what `"false"` says, so it is refused instead.
+	var refused = WorkspaceIpcHandlers.handle(_ws, "newPane", {"type": "code_viewer", "focus": "true"})
+	assert_true(refused.has("error"), "a non-boolean focus must be refused, not coerced")
+
+	_ws._kill_now(passive)
+	_ws._kill_now(eager)
+
 # ── paneStatus: one target, or every pane ──────────────────────────────
 
 func test_pane_status_without_a_pane_covers_every_pane():

@@ -18,6 +18,7 @@ pub mod plugin;
 pub mod schema;
 pub mod state;
 pub(crate) mod vault;
+pub(crate) mod wire;
 
 use crate::Commands;
 use gpty_ipc::client::IpcClient;
@@ -38,7 +39,7 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
                 pane_type,
                 command.as_deref(),
                 args,
-                split,
+                split.as_deref(),
                 title.as_deref(),
                 *focus,
                 tags,
@@ -145,4 +146,54 @@ pub async fn call_and_format(
 ) -> anyhow::Result<()> {
     let resp = client.call(method, Some(params)).await?;
     format_response(&resp, json)
+}
+
+/// The valid name closest to `input`, when one is close enough to suggest.
+///
+/// Shared by the two places a caller is told what they probably meant: an
+/// invalid `--pane-type` (a typo is the common cause) and an unknown argument
+/// in a `tools/call` (an agent guessing the parameter name).
+pub(crate) fn closest_match<'a>(input: &str, valid: &[&'a str]) -> Option<&'a str> {
+    let input = input.to_lowercase();
+    valid
+        .iter()
+        .filter_map(|&v| {
+            let dist = levenshtein_distance(&input, v);
+            let threshold = (v.len().max(input.len()) / 2).min(3);
+            if dist <= threshold {
+                Some((dist, v))
+            } else {
+                None
+            }
+        })
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, v)| v)
+}
+
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let n = a_chars.len();
+    let m = b_chars.len();
+    if n == 0 {
+        return m;
+    }
+    if m == 0 {
+        return n;
+    }
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr = vec![0usize; m + 1];
+    for i in 1..=n {
+        curr[0] = i;
+        for j in 1..=m {
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[m]
 }

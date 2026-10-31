@@ -119,6 +119,35 @@ func test_sanitize_shell_args_rejects_junk_and_caps():
 	# Non-array input degrades to an empty list.
 	assert_eq(PaneTypes.sanitize_shell_args("not-an-array"), [])
 
+# ── PaneTypes.sanitize_tags ────────────────────────────────────────────
+
+## A value that is not an array must not raise. `sanitize_tags` is called
+## from the IPC drain loop, where one raise abandons every queued request —
+## a typed parameter here made `{"tags": "x"}` a batch-wide failure.
+func test_sanitize_tags_degrades_a_non_array_to_no_tags():
+	assert_eq(PaneTypes.sanitize_tags("agent"), [], "a string is no tag list")
+	assert_eq(PaneTypes.sanitize_tags(null), [])
+	assert_eq(
+		PaneTypes.sanitize_tags("agent,ci"), [],
+		"a joined string is the CLI's spelling, not the wire's: the caller splits it")
+	assert_eq(PaneTypes.sanitize_tags(["agent", "ci"]), ["agent", "ci"])
+
+# ── PaneTypes.sanitize_title ───────────────────────────────────────────
+
+## A title is one line on the title bar, not arbitrary text: control
+## characters are dropped, the result is capped, and invalid Unicode (what a
+## decoded NUL becomes) is not a title at all.
+func test_sanitize_title_keeps_one_line():
+	assert_eq(PaneTypes.sanitize_title("tests"), "tests")
+	assert_eq(PaneTypes.sanitize_title("  tests  "), "tests", "a title is trimmed")
+	assert_eq(PaneTypes.sanitize_title("a\nb"), "ab", "a newline never reaches the title bar")
+	assert_eq(PaneTypes.sanitize_title("a\u007Fb"), "ab", "DEL is a control character too")
+	assert_eq(PaneTypes.sanitize_title("a\uFFFDb"), "", "invalid Unicode is refused whole")
+	assert_eq(PaneTypes.sanitize_title(42), "", "a non-string is no title")
+	assert_eq(PaneTypes.sanitize_title(""), "")
+	var long: String = "x".repeat(PaneTypes.TITLE_MAX_LENGTH + 20)
+	assert_eq(PaneTypes.sanitize_title(long).length(), PaneTypes.TITLE_MAX_LENGTH)
+
 # ── PaneTypes.tile_spawns_untrusted (restore trust gate) ───────────────
 
 func test_trust_gate_flags_a_different_program():

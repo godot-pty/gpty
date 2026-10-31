@@ -83,8 +83,8 @@ async fn new_pane_roundtrip_params_and_output() {
         "terminal",
         Some("htop"),
         &[],
-        "bottom",
         None,
+        Some("MARKER"),
         true,
         &["ci".to_string()],
         true,
@@ -101,6 +101,18 @@ async fn new_pane_roundtrip_params_and_output() {
     assert_eq!(params["type"], "terminal");
     assert_eq!(params["command"], "htop");
     assert_eq!(params["focus"], true);
+    assert_eq!(
+        params["title"], "MARKER",
+        "`--title` travels under the API's own key"
+    );
+    assert!(
+        params.get("title_label").is_none(),
+        "`title_label` is the pane's internal option, not a wire key: {params}"
+    );
+    assert!(
+        params.get("split").is_none(),
+        "no `--split` means no preference, not a hardcoded side: {params}"
+    );
     assert!(
         params.get("args").is_none(),
         "no argv means no `args` key on the wire: {params}"
@@ -127,7 +139,7 @@ async fn cli_view_roundtrip_carries_argv() {
         "cli_view",
         Some("/bin/sh"),
         &["-c".to_string(), "printf marker".to_string()],
-        "bottom",
+        Some("right"),
         None,
         true,
         &[],
@@ -148,6 +160,10 @@ async fn cli_view_roundtrip_carries_argv() {
         params["args"],
         serde_json::json!(["-c", "printf marker"]),
         "argv must reach the GUI as an ordered string array"
+    );
+    assert_eq!(
+        params["split"], "right",
+        "a named side reaches the GUI as the preference it is"
     );
 }
 
@@ -195,19 +211,9 @@ async fn invalid_pane_type_never_reaches_server() {
     )
     .await;
     let client = IpcClient::new(&socket, Duration::from_secs(5));
-    let err = commands::new_pane::run(
-        &client,
-        "obsever",
-        None,
-        &[],
-        "bottom",
-        None,
-        true,
-        &[],
-        true,
-    )
-    .await
-    .expect_err("invalid pane type must fail client-side");
+    let err = commands::new_pane::run(&client, "obsever", None, &[], None, None, true, &[], true)
+        .await
+        .expect_err("invalid pane type must fail client-side");
     let _ = std::fs::remove_file(&socket);
 
     let msg = err.to_string();
@@ -918,6 +924,129 @@ fn spawn_policy_is_deliberate_per_command() {
         let command = cli.command.as_ref().expect("a subcommand was parsed");
         assert_eq!(crate::may_autospawn(command), *expected, "argv: {argv:?}");
     }
+}
+
+/// The `new-pane` options the GUI actually honours.
+///
+/// `--focus false` used to be rejected outright (a `SetTrue` flag whose
+/// documented value could never be false, so "do not focus" could not be asked
+/// for), and `--split` was free text with a `bottom` default that no code
+/// read. Both are now the values the handler consumes, and an unknown side is
+/// refused by clap rather than silently ignored.
+#[test]
+fn new_pane_flags_parse_into_what_the_gui_honours() {
+    let cli = <crate::Cli as clap::Parser>::try_parse_from([
+        "gpty", "new-pane", "--focus", "false", "--split", "left", "--title", "t",
+    ])
+    .expect("`--focus false` must parse");
+    let crate::Commands::NewPane {
+        focus,
+        split,
+        title,
+        ..
+    } = cli.command.expect("a subcommand was parsed")
+    else {
+        panic!("new-pane did not parse as NewPane");
+    };
+    assert!(!focus, "`--focus false` must mean what it says");
+    assert_eq!(split.as_deref(), Some("left"));
+    assert_eq!(title.as_deref(), Some("t"));
+
+    let default = <crate::Cli as clap::Parser>::try_parse_from(["gpty", "new-pane"])
+        .expect("new-pane parses with no arguments")
+        .command
+        .expect("a subcommand was parsed");
+    let crate::Commands::NewPane { focus, split, .. } = default else {
+        panic!("new-pane did not parse as NewPane");
+    };
+    assert!(focus, "focusing the new pane is the documented default");
+    assert_eq!(split, None, "no side means the tile's aspect decides");
+
+    assert!(
+        <crate::Cli as clap::Parser>::try_parse_from(["gpty", "new-pane", "--split", "sideways"])
+            .is_err(),
+        "an unknown side is refused, never ignored"
+    );
+}
+
+/// The MCP wiring, end to end inside the CLI: the arguments arrive under the
+/// ids the tool advertises (`pane_type`, `title`), the server translates them,
+/// and the GUI method sees its own wire keys. `tools/call` used to forward the
+/// object verbatim, so every `new-pane` call created a terminal.
+#[tokio::test]
+async fn an_mcp_tool_call_translates_its_arguments_first() {
+    let seen: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+    let seen_h = Arc::clone(&seen);
+    let socket = start_server(
+        "mcp_new_pane",
+        vec![("newPane", {
+            move |params: Value| {
+                *seen_h.lock().unwrap() = Some(params.clone());
+                serde_json::json!({"pane_id": "W1", "type": "wiki"})
+            }
+        })],
+    )
+    .await;
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+    let answer = commands::mcp::dispatch_tool(
+        &client,
+        "new-pane",
+        &serde_json::json!({"pane_type": "wiki", "title": "MARKER"}),
+    )
+    .await
+    .expect("a valid tool call must reach the GUI");
+    let _ = std::fs::remove_file(&socket);
+
+    assert_eq!(
+        answer["type"], "wiki",
+        "the handler's answer comes back as is"
+    );
+    let sent = seen.lock().unwrap().take().expect("the handler ran");
+    assert_eq!(sent["type"], "wiki", "`pane_type` must arrive as `type`");
+    assert_eq!(
+        sent["title"], "MARKER",
+        "`title` reaches the handler under its own name"
+    );
+    assert!(
+        sent.get("pane_type").is_none(),
+        "the advertised id must not reach the GUI: {sent}"
+    );
+}
+
+/// A call the translation refuses must not touch the socket: the CLI's own
+/// validation is the boundary, and a half-translated request would reach a
+/// handler that silently defaults the dropped value.
+#[tokio::test]
+async fn an_mcp_tool_call_with_a_bad_argument_never_reaches_the_gui() {
+    let calls: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
+    let calls_h = Arc::clone(&calls);
+    let socket = start_server(
+        "mcp_refused",
+        vec![("newPane", {
+            move |_params: Value| {
+                *calls_h.lock().unwrap() += 1;
+                serde_json::json!({})
+            }
+        })],
+    )
+    .await;
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+    let err = commands::mcp::dispatch_tool(
+        &client,
+        "new-pane",
+        &serde_json::json!({"paneTipe": "wiki"}),
+    )
+    .await
+    .expect_err("an unknown argument is refused");
+    let _ = std::fs::remove_file(&socket);
+
+    assert_eq!(err.code, -32602, "invalid params, as the wrong type is");
+    assert!(err.message.contains("pane_type"), "{}", err.message);
+    assert_eq!(
+        *calls.lock().unwrap(),
+        0,
+        "a refused call must not reach the GUI"
+    );
 }
 
 /// A missing listener is recognized through whatever context a command has

@@ -14,7 +14,7 @@ use crate::commands::daemon::{self, Started};
 /// the same identifier in two conventions, and a table silently drifts as
 /// soon as a command is added. The previous table omitted `pane-*` and
 /// `concept-*`, so six tools answered -32601.
-fn tool_to_ipc_method(tool_name: &str) -> String {
+pub(crate) fn tool_to_ipc_method(tool_name: &str) -> String {
     let mut out = String::with_capacity(tool_name.len());
     let mut upper_next = false;
     for ch in tool_name.chars() {
@@ -84,6 +84,41 @@ async fn run_daemon_tool(
             }
         }),
         _ => None,
+    }
+}
+
+/// Run one non-daemon tool: translate its arguments, then call the GUI.
+///
+/// Split from the stdio loop so the wiring is testable without a client on
+/// stdin — the two halves are the bug this exists for: the tool advertises
+/// clap's ids (`pane_type`), the handler reads its wire key (`type`), and a
+/// call that skips `wire::wire_params` succeeds with the default. A wrong key
+/// or value is refused with `-32602` and never reaches the socket.
+pub(crate) async fn dispatch_tool(
+    client: &IpcClient,
+    tool_name: &str,
+    arguments: &serde_json::Value,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let params = super::wire::wire_params(tool_name, arguments)
+        .map_err(|message| JsonRpcError::new(JsonRpcError::INVALID_PARAMS, message))?;
+    let ipc_method = tool_to_ipc_method(tool_name);
+    match client.call(&ipc_method, Some(params)).await {
+        Ok(response) => match response.error {
+            Some(err) => Err(err),
+            None => Ok(response.result.unwrap_or(serde_json::Value::Null)),
+        },
+        Err(e) => {
+            // Unlike the CLI, the MCP server never starts a GUI for a tool
+            // call: the client bootstraps with `daemon-start`, so a dead
+            // endpoint must say so rather than surface a raw connect error.
+            let err = anyhow::Error::new(e);
+            let message = if daemon::is_not_running(&err) {
+                format!("{}; call the daemon-start tool first", daemon::NO_GUI_HINT)
+            } else {
+                err.to_string()
+            };
+            Err(JsonRpcError::new(JsonRpcError::INTERNAL_ERROR, message))
+        }
     }
 }
 
@@ -208,32 +243,9 @@ pub async fn run(client: &IpcClient, socket_path: &str, timeout: Duration) -> an
                 {
                     build_response(id, result)
                 } else {
-                    // Map kebab-case tool name to camelCase IPC method
-                    let ipc_method = tool_to_ipc_method(tool_name);
-                    match client.call(&ipc_method, Some(args)).await {
-                        Ok(r) => {
-                            if let Some(err) = r.error {
-                                build_error(id, err)
-                            } else {
-                                build_response(id, r.result.unwrap_or(serde_json::Value::Null))
-                            }
-                        }
-                        Err(e) => {
-                            // Unlike the CLI, the MCP server never starts a
-                            // GUI for a tool call: the client bootstraps with
-                            // `daemon-start`, so a dead endpoint must say so
-                            // rather than surface a raw connect error.
-                            let err = anyhow::Error::new(e);
-                            let message = if daemon::is_not_running(&err) {
-                                format!("{}; call the daemon-start tool first", daemon::NO_GUI_HINT)
-                            } else {
-                                err.to_string()
-                            };
-                            build_error(
-                                id,
-                                JsonRpcError::new(JsonRpcError::INTERNAL_ERROR, message),
-                            )
-                        }
+                    match dispatch_tool(client, tool_name, &args).await {
+                        Ok(result) => build_response(id, result),
+                        Err(err) => build_error(id, err),
                     }
                 }
             }

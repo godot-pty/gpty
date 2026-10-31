@@ -1,5 +1,8 @@
 use crate::Cli;
 use clap::CommandFactory;
+use serde_json::{Map, Value, json};
+
+use super::wire;
 
 pub fn run(format: &str) -> anyhow::Result<()> {
     match format {
@@ -17,27 +20,13 @@ pub fn run(format: &str) -> anyhow::Result<()> {
 }
 
 fn clap_command_to_json_schema(cmd: &clap::Command) -> serde_json::Value {
-    let _props = serde_json::Map::new();
     let mut one_of = Vec::new();
     for sub in cmd.get_subcommands() {
-        let mut sub_props = serde_json::Map::new();
-        for arg in sub.get_arguments() {
-            let id = arg.get_id().to_string();
-            let mut arg_schema = serde_json::json!({"type": "string", "description": arg.get_help().unwrap_or_default().to_string()});
-            let vals = arg.get_possible_values();
-            if !vals.is_empty() {
-                let enums: Vec<_> = vals
-                    .iter()
-                    .map(|v| serde_json::Value::String(v.get_name().to_string()))
-                    .collect();
-                arg_schema["enum"] = serde_json::Value::Array(enums);
-            }
-            if arg.is_required_set() {
-                sub_props.insert(id.clone(), arg_schema);
-            } else {
-                sub_props.insert(id, arg_schema);
-            }
-        }
+        // The same argument schemas the MCP manifest advertises: one
+        // derivation, so the two discovery surfaces cannot describe an
+        // argument differently (both used to call every one of them a
+        // string, an integer argument included).
+        let (sub_props, _required) = build_args_schema(sub);
         let sub_schema = serde_json::json!({
             "type": "object",
             "properties": sub_props,
@@ -60,9 +49,23 @@ fn clap_command_to_json_schema(cmd: &clap::Command) -> serde_json::Value {
     })
 }
 
-pub fn build_mcp_tools_inline(cmd: &clap::Command) -> serde_json::Value {
-    let mut tools = Vec::new();
-    for sub in cmd.get_subcommands() {
+/// One advertised MCP tool: its name, description, and the clap command its
+/// arguments come from.
+pub struct ToolDef {
+    pub name: String,
+    pub about: String,
+    pub command: clap::Command,
+}
+
+/// Every advertised tool, with nested subcommands flattened (`daemon-start`)
+/// and the deliberate exclusions applied.
+///
+/// The one place that decides what the surface contains: the manifest, the
+/// `tools/call` allow-list and the argument translation all read this list, so
+/// a command appears in all three or in none.
+pub fn tool_defs(root: &clap::Command) -> Vec<ToolDef> {
+    let mut defs = Vec::new();
+    for sub in root.get_subcommands() {
         let name = sub.get_name().to_string();
         // Skip self-referential / admin commands that aren't useful as MCP tools
         if name == "mcp" || name == "schema" {
@@ -89,21 +92,45 @@ pub fn build_mcp_tools_inline(cmd: &clap::Command) -> serde_json::Value {
             continue;
         }
         // Flatten nested subcommands (daemon, layout) into prefixed tools
-        let nested: Vec<_> = sub.get_subcommands().collect();
-        if !nested.is_empty() {
-            for nested_sub in nested {
-                let nested_name = format!("{}-{}", name, nested_sub.get_name());
-                let desc = nested_sub.get_about().unwrap_or_default().to_string();
-                let (properties, required) = build_args_schema(nested_sub);
-                tools.push(build_tool(&nested_name, &desc, properties, required));
-            }
-        } else {
-            let desc = sub.get_about().unwrap_or_default().to_string();
-            let (properties, required) = build_args_schema(sub);
-            tools.push(build_tool(&name, &desc, properties, required));
+        let nested: Vec<clap::Command> = sub.get_subcommands().cloned().collect();
+        if nested.is_empty() {
+            defs.push(ToolDef {
+                about: sub.get_about().unwrap_or_default().to_string(),
+                name,
+                command: sub.clone(),
+            });
+            continue;
+        }
+        for nested_sub in nested {
+            defs.push(ToolDef {
+                name: format!("{name}-{}", nested_sub.get_name()),
+                about: nested_sub.get_about().unwrap_or_default().to_string(),
+                command: nested_sub,
+            });
         }
     }
-    serde_json::json!({ "tools": tools })
+    defs
+}
+
+/// The clap command behind one advertised tool name — `tools/call`'s argument
+/// translation looks the tool up here, so it validates against exactly what
+/// the manifest advertised.
+pub fn find_tool_command(tool: &str) -> Option<clap::Command> {
+    tool_defs(&Cli::command())
+        .into_iter()
+        .find(|def| def.name == tool)
+        .map(|def| def.command)
+}
+
+pub fn build_mcp_tools_inline(cmd: &clap::Command) -> serde_json::Value {
+    let tools: Vec<Value> = tool_defs(cmd)
+        .iter()
+        .map(|def| {
+            let (properties, required) = build_args_schema(&def.command);
+            build_tool(&def.name, &def.about, properties, required)
+        })
+        .collect();
+    json!({ "tools": tools })
 }
 
 /// Names of every advertised MCP tool, in schema order.
@@ -126,44 +153,82 @@ pub fn mcp_tool_names(cmd: &clap::Command) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn build_args_schema(
-    sub: &clap::Command,
-) -> (serde_json::Map<String, serde_json::Value>, Vec<String>) {
-    let mut properties = serde_json::Map::new();
+fn build_args_schema(sub: &clap::Command) -> (Map<String, Value>, Vec<String>) {
+    let mut properties = Map::new();
     let mut required = Vec::new();
-    for arg in sub.get_arguments() {
-        let id = arg.get_id().to_string();
-        let mut arg_schema = serde_json::json!({"type": "string", "description": arg.get_help().unwrap_or_default().to_string()});
-        let vals = arg.get_possible_values();
-        if !vals.is_empty() {
-            let enums: Vec<_> = vals
-                .iter()
-                .map(|v| serde_json::Value::String(v.get_name().to_string()))
-                .collect();
-            arg_schema["enum"] = serde_json::Value::Array(enums);
+    for spec in wire::tool_args(sub) {
+        let mut schema = spec.kind.schema();
+        schema["description"] = json!(spec.help);
+        // A boolean's `["true", "false"]` is its type, not a closed set of
+        // values; only a string argument's possible values are an enum.
+        if spec.kind != wire::Kind::Bool && !spec.possible.is_empty() {
+            schema["enum"] = json!(spec.possible);
         }
-        properties.insert(id.clone(), arg_schema);
-        if arg.is_required_set() {
-            required.push(id);
+        if let Some(default) = spec.default {
+            schema["default"] = default;
         }
+        if spec.required {
+            required.push(spec.id.clone());
+        }
+        properties.insert(spec.id, schema);
     }
     (properties, required)
+}
+
+/// Tools that only read: they change nothing a caller can observe beyond the
+/// answer. Everything not named here and not in [`DESTRUCTIVE_TOOLS`] is an
+/// additive write (it creates something or changes a display setting).
+const READ_ONLY_TOOLS: &[&str] = &[
+    "concept-list",
+    "daemon-status",
+    "layout-list",
+    "list-panes",
+    "pane-read",
+    "pane-status",
+    "vault-read",
+    "vault-search",
+    "version",
+];
+
+/// Tools whose write can destroy work: they stop a process, replace the
+/// workspace, or send input to whatever a pane is running.
+const DESTRUCTIVE_TOOLS: &[&str] = &[
+    "broadcast",
+    "daemon-stop",
+    "inject",
+    "kill-pane",
+    "layout-load",
+    "pane-run",
+];
+
+/// The MCP `annotations` a tool declares, from the two closed sets above.
+///
+/// `readOnlyHint` lets a client offer a tool without a confirmation step, and
+/// `destructiveHint` is what tells it to ask first — a tool that kills panes
+/// and one that lists them must not look alike. A tool in neither set is
+/// additive: it may create or adjust, never remove what is there.
+fn annotations(name: &str) -> Value {
+    json!({
+        "readOnlyHint": READ_ONLY_TOOLS.contains(&name),
+        "destructiveHint": DESTRUCTIVE_TOOLS.contains(&name),
+    })
 }
 
 fn build_tool(
     name: &str,
     desc: &str,
-    properties: serde_json::Map<String, serde_json::Value>,
+    properties: Map<String, Value>,
     required: Vec<String>,
-) -> serde_json::Value {
-    serde_json::json!({
+) -> Value {
+    json!({
         "name": name,
         "description": desc,
         "inputSchema": {
             "type": "object",
             "properties": properties,
             "required": required,
-        }
+        },
+        "annotations": annotations(name),
     })
 }
 
@@ -230,6 +295,81 @@ mod tests {
             "Text to send (trailing newline added)"
         );
         assert_eq!(props["text"]["type"], "string");
+    }
+
+    /// A property's type is what clap parses, not a blanket "string".
+    ///
+    /// The manifest called every argument a string — an integer's, a
+    /// boolean's and an array's alike — so an MCP client following it sent
+    /// `"lines": "200"` and `"args": "a b"`, and the second one reached a
+    /// handler expecting an array.
+    #[test]
+    fn argument_types_are_the_ones_clap_parses() {
+        let tools = tools();
+        let pane_read = &tool(&tools, "pane-read")["inputSchema"]["properties"];
+        assert_eq!(pane_read["lines"]["type"], "integer");
+        assert_eq!(pane_read["lines"]["default"], 200);
+        let wait = &tool(&tools, "pane-wait")["inputSchema"]["properties"];
+        assert_eq!(wait["timeout_ms"]["type"], "integer");
+        assert_eq!(wait["timeout_ms"]["default"], 10_000);
+
+        let new_pane = &tool(&tools, "new-pane")["inputSchema"]["properties"];
+        assert_eq!(new_pane["focus"]["type"], "boolean");
+        assert_eq!(new_pane["focus"]["default"], true);
+        assert!(
+            new_pane["focus"].get("enum").is_none(),
+            "a boolean's true/false is its type, not a closed set of strings"
+        );
+        assert_eq!(new_pane["tags"]["type"], "array");
+        assert_eq!(new_pane["tags"]["items"]["type"], "string");
+        assert_eq!(new_pane["args"]["type"], "array");
+        assert_eq!(
+            new_pane["split"]["enum"],
+            json!(["left", "right", "top", "bottom"]),
+            "the sides the GUI can build are the ones the schema offers"
+        );
+        assert_eq!(new_pane["pane_type"]["type"], "string");
+        assert_eq!(new_pane["pane_type"]["default"], "terminal");
+
+        let weight = &tool(&tools, "vault-weight")["inputSchema"]["properties"];
+        assert_eq!(weight["weight"]["type"], "integer");
+        assert_eq!(weight["clear"]["type"], "boolean");
+    }
+
+    /// The MCP `annotations` are classified exhaustively: a tool that kills
+    /// panes and one that lists them must not look alike to a client deciding
+    /// whether to ask first.
+    #[test]
+    fn every_tool_declares_its_hints() {
+        let tools = tools();
+        for t in &tools {
+            let name = t["name"].as_str().unwrap();
+            let read_only = t["annotations"]["readOnlyHint"]
+                .as_bool()
+                .unwrap_or_else(|| panic!("{name} declares no readOnlyHint"));
+            let destructive = t["annotations"]["destructiveHint"]
+                .as_bool()
+                .unwrap_or_else(|| panic!("{name} declares no destructiveHint"));
+            assert!(!read_only || !destructive, "{name} cannot be both");
+            assert_eq!(
+                read_only,
+                READ_ONLY_TOOLS.contains(&name),
+                "{name} disagrees with the read-only set"
+            );
+            assert_eq!(
+                destructive,
+                DESTRUCTIVE_TOOLS.contains(&name),
+                "{name} disagrees with the destructive set"
+            );
+        }
+        // A classified name must still be advertised: a rename would otherwise
+        // leave the hint attached to nothing and the tool silently additive.
+        for name in READ_ONLY_TOOLS.iter().chain(DESTRUCTIVE_TOOLS) {
+            assert!(
+                tools.iter().any(|t| t["name"] == *name),
+                "classified but not advertised: {name}"
+            );
+        }
     }
 
     #[test]
