@@ -31,7 +31,7 @@ godot/
     │   └── Phosphor-Regular.ttf
     └── scenes/
         ├── main.tscn            # Root scene (Workspace)
-        ├── autoloads/           # 12 singleton managers
+        ├── autoloads/           # 13 singleton managers
         │   ├── base_persistence_manager.gd  # Shared JSON I/O base
         │   ├── settings_manager.gd
         │   ├── profile_manager.gd
