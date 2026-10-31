@@ -111,12 +111,15 @@ impl GptyTerminal {
     /// Index a vault and return its note list (JSON).
     ///
     /// Walks `vault_path` for Markdown notes (hidden entries skipped at every
-    /// level, bounded in count and depth), re-reads only the notes whose
-    /// mtime or size changed, drops rows for notes that vanished, and returns
+    /// level, bounded in count and depth, symlinks followed only when they
+    /// resolve inside the vault), re-reads only the notes whose mtime or size
+    /// changed, drops rows for notes that vanished, and returns
     /// `{"notes": ["note.md", "sub/other.md", ...], "truncated": bool,
-    /// "added": n, "updated": n, "removed": n, "unreadable": n}` with the
-    /// notes sorted by path (the vault-relative paths a list row shows; a
-    /// title is a search-result field, read from the indexed body).
+    /// "added": n, "updated": n, "removed": n, "unreadable": n, "outside": n}`
+    /// with the notes sorted by path (the vault-relative paths a list row
+    /// shows; a title is a search-result field, read from the indexed body).
+    /// `outside` counts the links skipped for pointing out of the vault, so
+    /// the pane can say why a note it does not list is not there.
     /// `error` is present only when the path cannot be used or the store
     /// cannot be opened, so "empty vault" and "failed" stay distinguishable.
     #[func]
@@ -149,6 +152,7 @@ impl GptyTerminal {
                     "updated": outcome.updated,
                     "removed": outcome.removed,
                     "unreadable": outcome.unreadable,
+                    "outside": outcome.outside,
                 })
                 .to_string();
                 GString::from(document.as_str())

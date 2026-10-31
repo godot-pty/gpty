@@ -30,6 +30,7 @@ func after_each():
 	for rel in ["note.md", "big.md", "moved.md"]:
 		GptyTerminal.vault_scratch_clear(_scratch_tmp, rel)
 	_remove_tree(_scratch_tmp)
+	_remove_tree(TestPaths.user_path("wiki_probe_outside"))
 	_remove_tree(_tmp)
 	MockAutoloads.teardown()
 
@@ -132,6 +133,31 @@ func test_lists_markdown_notes_recursively_and_skips_hidden():
 		"only .md notes, hidden dirs skipped, sorted",
 	)
 	assert_eq(_list_meta(pane)[0], "note.md", "a row carries the vault-relative path")
+
+
+## A symlink that resolves outside the vault is not a note of the vault: the
+## walk refuses it (the same rule the reader and a save enforce), and the
+## footer says a link was skipped so the note is not silently missing.
+func test_the_list_skips_a_link_out_of_the_vault_and_says_so():
+	if OS.get_name() == "Windows":
+		pending("creating a symlink needs a privilege the test runner does not hold")
+		return
+	var outside := TestPaths.user_path("wiki_probe_outside")
+	DirAccess.make_dir_recursive_absolute(outside)
+	_write(outside.path_join("secret.md"), "# Secret")
+	_write(_tmp.path_join("note.md"), "# Note")
+	var dir := DirAccess.open(_tmp)
+	assert_not_null(dir, "the probe vault must be openable")
+	assert_eq(
+		dir.create_link(outside.path_join("secret.md"), _tmp.path_join("link.md")),
+		OK,
+		"the probe must be able to plant a symlink",
+	)
+
+	var pane := _make_pane(_tmp)
+	assert_eq(_list_texts(pane), ["note.md"], "a link out of the vault is not listed")
+	assert_true(pane._footer.visible, "the skip must be reported, not silent")
+	assert_string_contains(pane._footer.text, "pointing outside this vault")
 
 
 func test_activating_a_note_renders_it_and_back_returns():

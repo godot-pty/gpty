@@ -23,15 +23,16 @@ Every listing and every search starts with a walk of the directory. Its rules ar
 | Rule | Value |
 |---|---|
 | Hidden entries | skipped at every level (`.obsidian`, `.git`, `.trash`) |
+| Links out of the vault | skipped and counted (`outside`); a link that stays inside is followed |
 | Extension | `.md` as the last path component |
-| Order | sorted per directory, then by relative path |
+| Order | sorted per directory (plain entries before symlinks), then by relative path |
 | Notes per walk | 2,000, then `truncated` is set |
 | Depth | 16 directory levels |
 | Unreadable entry | skipped; the rest of the vault still lists |
 | Path length | 1,024 bytes |
 | Body read | 1 MiB, a torn UTF-8 tail dropped |
 
-The walk is best-effort on purpose: a vault is user data, and one unreadable subdirectory does not hide the rest of it. A symlinked directory is walked like a directory, with the depth cap stopping a loop.
+The walk is best-effort on purpose: a vault is user data, and one unreadable subdirectory does not hide the rest of it. A symlink is followed only when it resolves inside the vault — the same rule a read and a save enforce — so a link to `~/.ssh` or a project tree is skipped, never indexed, and the pane's footer says how many were skipped. A link that stays inside the vault works, and a directory already reached is not walked twice: loops stop at the canonical path rather than at the depth cap.
 
 The count cap has a subtler rule attached. Notes are dropped from the index only when a walk was complete; a truncated walk can add and refresh notes but never concludes that anything vanished, because the files it did not reach are still real.
 

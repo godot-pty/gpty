@@ -2,15 +2,15 @@
 //!
 //! The wiki pane browses *and edits* a vault — a plain directory of `.md`
 //! files — and this module is the one definition of what a note is (the
-//! walk's hidden, extension, depth and count rules), of what searching one
-//! costs (the `notes_fts` index), and of what writing one is allowed to touch
-//! ([`write_vault_note`]: the same path vocabulary, containment through
-//! symlinks, a stamp that refuses to overwrite an outside edit, and an atomic
-//! replacement that keeps the note's own mode). It reuses the scrollback
-//! store's skeleton deliberately ([`crate::history`]): external-content FTS5
-//! with the three triggers, the same pragmas, the same owner-only mode, and
-//! the same process-wide write lock — so the v0.5.1 engine's operational
-//! lessons carry over instead of being re-learned.
+//! walk's hidden, extension, depth, containment and count rules), of what
+//! searching one costs (the `notes_fts` index), and of what writing one is
+//! allowed to touch ([`write_vault_note`]: the same path vocabulary,
+//! containment through symlinks, a stamp that refuses to overwrite an outside
+//! edit, and an atomic replacement that keeps the note's own mode). It reuses
+//! the scrollback store's skeleton deliberately ([`crate::history`]):
+//! external-content FTS5 with the three triggers, the same pragmas, the same
+//! owner-only mode, and the same process-wide write lock — so the v0.5.1
+//! engine's operational lessons carry over instead of being re-learned.
 //!
 //! The store file lives in the app's state directory (`state_dir()/vaults.db`),
 //! never inside a vault: a vault is the user's own data, and the roadmap's
@@ -18,7 +18,7 @@
 //! resolve Godot's `user://`.
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -75,6 +75,11 @@ pub struct ScanResult {
     pub notes: Vec<ScannedNote>,
     /// The count cap cut the walk short with a note still to list.
     pub truncated: bool,
+    /// Entries skipped because they resolve outside the vault — a symlinked
+    /// note or directory. Counted rather than silent: the pane says so, and
+    /// the number is how a user learns a link they made is not being read
+    /// (the walk, the reader and a save refuse the same files).
+    pub outside: usize,
 }
 
 /// One row to write into the index.
@@ -107,6 +112,9 @@ pub struct IndexOutcome {
     pub removed: usize,
     /// Notes the walk saw but could not read (permissions, a race).
     pub unreadable: usize,
+    /// Entries the walk skipped because they resolve outside the vault (see
+    /// [`ScanResult::outside`]).
+    pub outside: usize,
 }
 
 /// One stored `[[…]]` occurrence of one note.
@@ -208,72 +216,128 @@ pub fn scan_vault(root: &str) -> ScanResult {
 /// Best-effort by design: an unreadable entry is skipped, not an error — a
 /// vault is user data and one bad subdirectory should not hide the rest.
 pub fn scan_vault_limited(root: &str, max_notes: usize, max_depth: usize) -> ScanResult {
-    let mut notes = Vec::new();
-    let mut truncated = false;
-    walk(
-        Path::new(root),
-        Path::new(""),
-        0,
+    // A vault reached through a symlinked spelling of its own path (`/tmp` is
+    // `/private/tmp` on macOS) resolves once, and every entry is judged
+    // against that: the rule is about where a file really is, not how the
+    // root happened to be spelled. A root that does not resolve has no
+    // entries, which is the answer `read_dir` used to give.
+    let Ok(root_real) = std::fs::canonicalize(root) else {
+        return ScanResult {
+            notes: Vec::new(),
+            truncated: false,
+            outside: 0,
+        };
+    };
+    let mut ctx = WalkCtx {
+        // Seeded with the root so a link pointing back at it is dropped by
+        // the visited check rather than walked a second time.
+        visited: HashSet::from([root_real.clone()]),
+        root_real: root_real.clone(),
         max_notes,
         max_depth,
-        &mut notes,
-        &mut truncated,
-    );
+        notes: Vec::new(),
+        truncated: false,
+        outside: 0,
+    };
+    walk(Path::new(root), &root_real, Path::new(""), 0, &mut ctx);
+    let mut notes = ctx.notes;
     notes.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
-    ScanResult { notes, truncated }
+    ScanResult {
+        notes,
+        truncated: ctx.truncated,
+        outside: ctx.outside,
+    }
 }
 
-fn walk(
-    dir: &Path,
-    rel: &Path,
-    depth: usize,
+/// One walk's state, bundled so the recursion stays a plain function and the
+/// rules live in one place rather than as seven parameters.
+struct WalkCtx {
+    /// Canonical root: the containment every entry is judged against.
+    root_real: PathBuf,
+    /// Canonical directories already entered. A symlink cannot walk one twice
+    /// or loop forever; the depth cap stays only as a second bound.
+    visited: HashSet<PathBuf>,
     max_notes: usize,
     max_depth: usize,
-    out: &mut Vec<ScannedNote>,
-    truncated: &mut bool,
-) {
-    if *truncated || depth > max_depth {
+    notes: Vec<ScannedNote>,
+    truncated: bool,
+    outside: usize,
+}
+
+fn walk(dir: &Path, dir_real: &Path, rel: &Path, depth: usize, ctx: &mut WalkCtx) {
+    if ctx.truncated || depth > ctx.max_depth {
         return;
     }
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     // Sorted per directory so the walk is deterministic whatever order the
-    // filesystem hands entries back in.
-    let mut names: Vec<String> = entries
+    // filesystem hands entries back in — and plain entries before symlinks,
+    // so a directory a name already reaches keeps that name: an alias
+    // (`archive` -> `./old`) must not capture the notes `old/` lists, and the
+    // visited set then drops the alias.
+    let mut entries: Vec<(String, Option<std::fs::Metadata>)> = entries
         .filter_map(|entry| entry.ok())
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .map(|entry| {
+            (
+                entry.file_name().to_string_lossy().into_owned(),
+                std::fs::symlink_metadata(entry.path()).ok(),
+            )
+        })
         .collect();
-    names.sort();
-    for name in names {
+    entries.sort_by(|a, b| {
+        let a_link = a.1.as_ref().is_some_and(|m| m.file_type().is_symlink());
+        let b_link = b.1.as_ref().is_some_and(|m| m.file_type().is_symlink());
+        (a_link, &a.0).cmp(&(b_link, &b.0))
+    });
+
+    for (name, entry_meta) in entries {
         // Hidden entries are skipped at every level (`.obsidian`, `.git`,
         // `.trash`) — the same rule the pane applied before the index existed.
         if name.starts_with('.') {
             continue;
         }
-        let child = dir.join(&name);
-        let child_rel = rel.join(&name);
-        // `metadata` follows symlinks, so a symlinked directory is walked like
-        // a directory; the depth cap is what stops a loop.
-        let Ok(meta) = std::fs::metadata(&child) else {
+        let Some(entry_meta) = entry_meta else {
             continue;
         };
+        let child = dir.join(&name);
+        let child_rel = rel.join(&name);
+        // A link is followed only when it resolves inside the vault — the
+        // rule a read and a save already enforce — because the index feeds
+        // the list, search and the link graph, and none of them may show text
+        // from a file the vault does not contain. Directories are resolved
+        // rather than trusted by their entry type: that is the path the
+        // visited check below compares, and it is also what stops a directory
+        // reparse point (a Windows junction, which need not be reported as a
+        // symlink) from smuggling an outside tree into the index.
+        let (real, meta) = if entry_meta.is_dir() || entry_meta.file_type().is_symlink() {
+            let Ok(real) = std::fs::canonicalize(&child) else {
+                continue; // dangling: nothing to index, nothing to report
+            };
+            match std::fs::metadata(&real) {
+                Ok(meta) => (real, meta),
+                Err(_) => continue,
+            }
+        } else {
+            (dir_real.join(&name), entry_meta)
+        };
+        if !real.starts_with(&ctx.root_real) {
+            ctx.outside += 1;
+            continue;
+        }
         if meta.is_dir() {
-            walk(
-                &child,
-                &child_rel,
-                depth + 1,
-                max_notes,
-                max_depth,
-                out,
-                truncated,
-            );
+            // The canonical path, not the depth cap, is what stops a loop and
+            // a directory reached twice.
+            if !ctx.visited.insert(real.clone()) {
+                continue;
+            }
+            walk(&child, &real, &child_rel, depth + 1, ctx);
         } else if meta.is_file() && has_md_extension(&name) {
-            if out.len() >= max_notes {
-                *truncated = true;
+            if ctx.notes.len() >= ctx.max_notes {
+                ctx.truncated = true;
                 return;
             }
-            out.push(ScannedNote {
+            ctx.notes.push(ScannedNote {
                 rel_path: slash_join(&child_rel),
                 abs_path: child.to_string_lossy().into_owned(),
                 mtime: mtime_nanos(&meta),
@@ -454,20 +518,40 @@ fn note_path(root: &str, rel_path: &str) -> Result<std::path::PathBuf, NoteError
     Ok(root_path.join(rel))
 }
 
+/// Resolve one note path, symlinks followed, and require the result to stay
+/// inside the vault root.
+///
+/// This is the containment rule a read, a save and the walk share: a file the
+/// vault does not contain is not a note of the vault, whichever verb reaches
+/// for it. A path that no longer resolves answers [`NoteError::NotFound`]; a
+/// vault whose own root does not resolve answers [`NoteError::BadVault`].
+fn resolve_inside(root: &str, path: &Path) -> Result<PathBuf, NoteError> {
+    let real = std::fs::canonicalize(path).map_err(|_| NoteError::NotFound)?;
+    let root_real =
+        std::fs::canonicalize(root).map_err(|_| NoteError::BadVault(root.to_string()))?;
+    if !real.starts_with(&root_real) {
+        return Err(NoteError::Outside);
+    }
+    Ok(real)
+}
+
 /// Load one note of a vault for the editor: the text at the display path's
 /// cap, the CRLF flag, and the stamp a later save checks.
 ///
-/// Resolution does not canonicalise: the walk lists symlinked notes, and this
-/// read follows them exactly as the pane's display read does. The target must
-/// be a regular file, though — a FIFO planted in a vault must not reach
+/// The resolved path (symlinks followed) must stay inside the vault — the same
+/// rule a save enforces and the walk lists by — so a note symlinked out of the
+/// vault answers [`NoteError::Outside`] instead of another file's text, while
+/// one symlinked to a sibling note is read through. The target must be a
+/// regular file, though — a FIFO planted in a vault must not reach
 /// `File::open`, which would block the GUI thread the FFI runs on.
 pub fn read_vault_note(root: &str, rel_path: &str) -> Result<NoteContent, NoteError> {
     let path = note_path(root, rel_path)?;
-    let meta = std::fs::metadata(&path).map_err(|_| NoteError::NotFound)?;
+    let real = resolve_inside(root, &path)?;
+    let meta = std::fs::metadata(&real).map_err(|_| NoteError::NotFound)?;
     if !meta.is_file() {
         return Err(NoteError::NotFound);
     }
-    let (text, truncated) = read_file_capped(&path).ok_or(NoteError::NotFound)?;
+    let (text, truncated) = read_file_capped(&real).ok_or(NoteError::NotFound)?;
     Ok(NoteContent {
         crlf: text.contains("\r\n"),
         text,
@@ -501,12 +585,7 @@ pub fn write_vault_note(
         return Err(NoteError::TooLarge(content.len()));
     }
     let path = note_path(root, rel_path)?;
-    let real = std::fs::canonicalize(&path).map_err(|_| NoteError::NotFound)?;
-    let root_real =
-        std::fs::canonicalize(root).map_err(|_| NoteError::BadVault(root.to_string()))?;
-    if !real.starts_with(&root_real) {
-        return Err(NoteError::Outside);
-    }
+    let real = resolve_inside(root, &path)?;
     let meta = std::fs::metadata(&real).map_err(|_| NoteError::NotFound)?;
     if !meta.is_file() {
         return Err(NoteError::NotFound);
@@ -1950,6 +2029,7 @@ pub fn index_vault_limited(
         updated,
         removed,
         unreadable,
+        outside: scan.outside,
     })
 }
 
@@ -2213,6 +2293,76 @@ mod tests {
             "the cap must report that a note was left out"
         );
         assert!(!scan_vault_limited(&root_str(&vault), MAX_NOTES, MAX_DEPTH).truncated);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_out_of_the_vault_are_not_listed_or_indexed() {
+        use std::os::unix::fs::symlink;
+        let path = temp_db("outside_links");
+        let vault = temp_vault("outside_links");
+        let outside = temp_vault("outside_links_target");
+        write_note(&vault, "real.md", "# Real\ninside");
+        fs::write(outside.join("secret.md"), "# Secret\nOUTSIDETOKEN").unwrap();
+        symlink(outside.join("secret.md"), vault.join("file.md")).unwrap();
+        symlink(&outside, vault.join("escape")).unwrap();
+
+        let root = root_str(&vault);
+        let scan = scan_vault(&root);
+        let paths: Vec<&str> = scan.notes.iter().map(|n| n.rel_path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["real.md"],
+            "a link out of the vault is not a note of the vault"
+        );
+        assert_eq!(scan.outside, 2, "the skipped links are counted, not silent");
+
+        let mut store = VaultStore::open(&path).unwrap();
+        let outcome = index_vault(&mut store, &root).unwrap();
+        assert_eq!(outcome.outside, 2);
+        assert_eq!((outcome.added, outcome.unreadable), (1, 0));
+        assert!(
+            store
+                .search_user_text(&root, "OUTSIDETOKEN", 10)
+                .unwrap()
+                .is_empty(),
+            "text from outside the vault must never reach a search result"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_inside_the_vault_lists_its_notes_once() {
+        use std::os::unix::fs::symlink;
+        let vault = temp_vault("inside_dir_link");
+        write_note(&vault, "old/one.md", "# One");
+        write_note(&vault, "old/two.md", "# Two");
+        write_note(&vault, "top.md", "# Top");
+        // `archive` sorts before `old`; the plain directory must keep its own
+        // name, so the alias is the entry the visited set drops.
+        symlink("old", vault.join("archive")).unwrap();
+        let scan = scan_vault(&root_str(&vault));
+        let paths: Vec<&str> = scan.notes.iter().map(|n| n.rel_path.as_str()).collect();
+        assert_eq!(paths, vec!["old/one.md", "old/two.md", "top.md"]);
+        assert_eq!(scan.outside, 0, "a link that stays inside is not refused");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_loop_terminates_and_lists_each_note_once() {
+        use std::os::unix::fs::symlink;
+        let vault = temp_vault("link_loop");
+        write_note(&vault, "sub/note.md", "# Note");
+        symlink("..", vault.join("sub/up")).unwrap();
+        symlink(".", vault.join("self")).unwrap();
+        let scan = scan_vault(&root_str(&vault));
+        let paths: Vec<&str> = scan.notes.iter().map(|n| n.rel_path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["sub/note.md"],
+            "a loop must stop at the canonical path, not at the depth cap"
+        );
+        assert_eq!(scan.outside, 0);
     }
 
     #[test]
@@ -2981,16 +3131,17 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_symlink_out_of_the_vault_is_written_by_neither() {
+    fn a_symlink_out_of_the_vault_is_neither_read_nor_written() {
         let vault = temp_vault("note_symlink_out");
         let outside = temp_vault("note_symlink_target");
         fs::write(outside.join("secret.md"), "outside").unwrap();
         std::os::unix::fs::symlink(outside.join("secret.md"), vault.join("link.md")).unwrap();
         let root = root_str(&vault);
 
-        assert!(
-            read_vault_note(&root, "link.md").is_ok(),
-            "reads follow the walk's symlink rule"
+        assert_eq!(
+            read_vault_note(&root, "link.md").unwrap_err(),
+            NoteError::Outside,
+            "a read must not answer a file the vault does not contain"
         );
         assert_eq!(
             write_vault_note(&root, "link.md", "changed", None).unwrap_err(),

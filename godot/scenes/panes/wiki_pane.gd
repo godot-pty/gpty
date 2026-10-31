@@ -439,8 +439,19 @@ func _refresh():
 		return
 	_placeholder.visible = false
 	_list.visible = true
+	# Both parts of the index status, in one footer: a cap that stopped the
+	# listing, and links the walk refused because they resolve outside the
+	# vault (the same rule a read and a save enforce). The second one is why a
+	# note a user made a link to is not in the list.
+	var status := ""
 	if answer.get("truncated", false):
-		_footer.text = "… listing stopped; this vault has more notes than the pane lists."
+		status = "… listing stopped; this vault has more notes than the pane lists."
+	var outside := int(answer.get("outside", 0))
+	if outside > 0:
+		var skipped := "Skipped %d link(s) pointing outside this vault." % outside
+		status = skipped if status == "" else status + " " + skipped
+	if status != "":
+		_footer.text = status
 		_footer.visible = true
 
 ## Query the index for the search box's text and show matching notes.
