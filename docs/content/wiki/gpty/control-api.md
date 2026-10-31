@@ -34,7 +34,7 @@ All three reach the same handlers in the running GUI. The CLI is a stateless cli
 | `conceptList` | — | `{concepts: [{name, enabled, trigger, actions, …}]}` |
 | `conceptToggle` | `name` | `{success, name}` |
 | `vaultSearch` | `vault_path`, `pattern`, `limit?` (1–500) | `{results: [{path, title, snippet}], total, truncated}` |
-| `vaultRead` | `vault_path`, `path` | `{path, text, truncated, crlf, mtime, size}` |
+| `vaultRead` | `vault_path`, `path` | `{path, text, truncated, crlf, mtime, size}`, or an error whose `code` is `outside_vault` when the note resolves outside the vault |
 | `vaultWeight` | `vault_path`, `src`, `target`, `weight?` | The declared weight, or a clear |
 | `version` | — | `{version, protocol}` |
 | `shutdown` | — | `{success}` |
