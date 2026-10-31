@@ -80,13 +80,21 @@ Plugins are arbitrary code running as you; that is the trust model, stated plain
 
 Saved tiles are validated before they are trusted: the pane type must be known, grid geometry is clamped, arguments are capped, and viewer paths must be absolute. Media paths must be absolute local regular files — no URLs, no device nodes — and the decoder is built without network protocols. Markdown renders to escaped text: raw HTML is not interpreted, images become alt text, only `http`, `https`, and `mailto` links become metadata, and a link opens only after an explicit confirmation. Captured output handed to the Inspector is fenced so that content cannot close the fence and become instructions.
 
+## What gPTY keeps, and who can read it
+
+gPTY's own state is private to your account by construction, and the rule is applied in one place rather than per store. Every `user://` store is written owner-only, and the directory holding them is kept at 0700; a store written by an older build — before that rule — is repaired to 0600 the next time it is read, and the directory is repaired at start-up. The same primitive covers the scrollback database and its SQLite siblings, the vault index, the wiki pane's recovery copies, and the engine's log directory. A repair opens the path without following a symlink and only rewrites a *looser* mode of a file you own, so a link planted at a store path is skipped instead of changing someone else's file.
+
+Nothing about that makes the contents secret. Scrollback is plaintext, the vault index holds copies of note text, and `pane_env.json` holds whatever environment values you typed into a pane panel — readable by anything running as you, which is the same trust class as the files themselves.
+
+**Logs carry ids, paths, counts and error discriminants, never program text.** Pane output, a captured buffer, injected or pasted text, environment values and an agent backend's stderr are logged at `debug` at most, stripped of terminal control sequences and bounded per line, and no log file is written at all unless you enable file logging yourself (`--log-file`). The one place a backend's own words do appear is the failure message in the Inspector — see [[inspector|Inspector]].
+
 ## Known limitations
 
 These are the ones that matter, and they are documented rather than implied.
 
 - **A program in a pane can drive every other pane, unless a secret is set on Linux or Windows.** Panes are children of the GUI, so they pass the control socket's same-user gate, and the default socket path is derivable from the inherited runtime directory. With `GPTY_SECRET` set, the hardened GUI and CLI keep the secret out of a pane program's reach — a credential, not pane isolation. The default install sets no secret; macOS still exposes the environment to same-user processes; and the startup window and rc-file re-export described above still apply. When it is reachable, the reach is the whole surface: inject, pane-run, broadcast, new-pane, kill-pane, and pane-read. Workspaces do not isolate panes from each other. Per-pane permission and a "sensitive workspace" that no client can reach are tracked, not implemented.
 - **A pane inherits your environment** other than the stripped keys — `SSH_AUTH_SOCK`, cloud credential pointers, proxy settings, and `DISPLAY` all reach every pane, including a GUI auto-spawned by the CLI.
-- **Scrollback is plaintext.** The store and its SQLite siblings are owner-only, but anything printed in a pane — tokens included — is on disk like a shell history file.
+- **Scrollback is plaintext.** The store and its SQLite siblings are owner-only inside a 0700 directory, but anything printed in a pane — tokens included — is on disk like a shell history file.
 - **Media decoding is in-process C.** The pinned FFmpeg build is minimal and allowlisted, but it is not a sandbox.
 - **Peer verification has gaps.** A few Unix targets have no peer-credential API wired up and fail open, leaving file permissions as the only gate. The shared-`/tmp` fallback allows pre-creation denial of service.
 - **Release artifacts are unsigned**, though they carry build provenance and checksums.

@@ -41,7 +41,7 @@ Two surfaces, one shape: a list in one language that must agree with a list in a
 
 ## E. GDExtension method
 
-- Put the `#[func]` in the facet that owns the data: `grid_api.rs`, `history_api.rs`, `vault_api.rs`, `capture_api.rs`, `bridge_api.rs`, `media_api.rs`, or `lib.rs` — inside `#[godot_api]`, primary or `#[godot_api(secondary)]`. `check-ffi-surface` attributes each `#[func]` to the class named by its enclosing impl header and reports any `#[func]` outside a block.
+- Put the `#[func]` in the facet that owns the data: `grid_api.rs`, `history_api.rs`, `vault_api.rs`, `store_api.rs`, `capture_api.rs`, `bridge_api.rs`, `media_api.rs`, or `lib.rs` — inside `#[godot_api]`, primary or `#[godot_api(secondary)]`. `check-ffi-surface` attributes each `#[func]` to the class named by its enclosing impl header and reports any `#[func]` outside a block.
 - **Input marshalling**: only `GString`, `bool` and `i64` are reliable `#[func]` inputs. `Array<Variant>`, `Dictionary` and bare `Variant` silently fail — the GDScript call succeeds and the Rust body never runs. Complex input goes in as one JSON `GString`; collections go out as packed arrays, never per-cell dictionaries (`get_grid_updates_packed` is the model).
 - GDScript must pass **untyped** `Array`: a typed `Array[Dictionary]` is rejected at runtime ("expected array of type Untyped").
 - After adding a method or changing a signature: `cargo build -p gpty-gdext` and fully restart Godot — the editor keeps the old library mapped.

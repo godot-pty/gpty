@@ -68,7 +68,7 @@ It does not attach to the OMP conversation hosted in a terminal, and it does not
 
 ## Limits and edge cases
 
-One session per pane, so a second Inspector is a second conversation with its own history. The `omp` backend needs `omp` on `PATH`; a stale extension build reports that the bridge is missing and asks for a rebuild rather than failing silently. The thinking area is not a log — it is the current turn's reasoning. Captures are gated per pane, so enabling the opt-in on one Inspector does not enable it on another, and a restore turns it back off. Because captures leave the pane, treat that toggle as a data-sharing decision, not a display preference.
+One session per pane, so a second Inspector is a second conversation with its own history. The `omp` backend needs `omp` on `PATH`; a stale extension build reports that the bridge is missing and asks for a rebuild rather than failing silently. The thinking area is not a log — it is the current turn's reasoning. When a backend fails, the pane's error shows what that program said on stderr, with terminal control sequences stripped and each line bounded; the rest of its stderr is not written to a log file, so this message is where the child's own account of a failure survives. Captures are gated per pane, so enabling the opt-in on one Inspector does not enable it on another, and a restore turns it back off. Because captures leave the pane, treat that toggle as a data-sharing decision, not a display preference.
 
 ## Related
 
