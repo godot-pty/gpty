@@ -193,7 +193,11 @@ These are load-bearing guards. Reports that require removing one of them should 
   make it a built-in or plugin profile, because they are stripped on load. Environment is not a file
   decision: a tile's `shell_env` is dropped on restore with a notice naming what was dropped, and
   per-pane environment is the user's own - `user://pane_env.json`, written only by the pane settings
-  UI and keyed by the pane's id, applied at spawn over the user's global environment.
+  UI and keyed by the pane's id, applied at spawn over the user's global environment. The Inspector's
+  prompt and its two switches are the same kind of user-owned state, in `user://pane_inspector.json`:
+  the settings table refuses them from files, the pane settings UI is the only writer, and the pane
+  reads its own record at attach - so a profile cannot aim an Inspector, while a prompt and switches
+  the user set survive a restart for the pane that carries that id.
 - **Workspace directories (v0.7.1)**: a workspace's working directory comes from
   `workspaces.json` and is handed to every terminal that workspace starts. A directory is not
   executable on its own, so a plain shell in a file-supplied directory restores without a prompt

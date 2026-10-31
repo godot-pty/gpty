@@ -74,16 +74,15 @@ func _ready():
 	# addresses it), and a typed duplicate would land *after* the pane was
 	# attached — the one path that used to skip the uniqueness check. The id
 	# is regenerated here, and the pane list redrawn because it shows it.
-	# This handler is also the ONLY writer of the per-pane env store: env is
-	# keyed by the pane's id, so the entry follows a rename, and only what the
-	# user typed in the pane settings UI ever lands in the trusted map.
+	# This handler is also the ONLY writer of the user-owned per-pane stores:
+	# env (`PaneEnvStore`) and the Inspector's aim (`PaneInspectorStore`). Both
+	# are keyed by the pane's id, so an entry follows a rename, and only what
+	# the user set in the pane settings UI ever lands in a trusted store.
 	pane_settings.settings_applied.connect(func(body: Control, settings: Dictionary, previous_id: String):
 		_ensure_unique_attachment_id(body)
 		if previous_id != "" and body.attachment_id != previous_id:
-			var own_env := PaneEnvStore.env_for(previous_id)
-			PaneEnvStore.remove_env(previous_id)
-			if own_env != "":
-				PaneEnvStore.set_env(body.attachment_id, own_env)
+			_move_pane_env(previous_id, body.attachment_id)
+			PaneInspectorStore.move_state(previous_id, body.attachment_id)
 			# A companion follows its terminal by attachment id, so a rename
 			# that left it on the old id would silence it: events carry the
 			# new one and `receive_agent_event` drops them.
@@ -94,6 +93,12 @@ func _ready():
 				PaneEnvStore.remove_env(body.attachment_id)
 			else:
 				PaneEnvStore.set_env(body.attachment_id, env_text)
+		if body is InspectorPane and settings.has("system_prompt"):
+			PaneInspectorStore.set_state(
+				body.attachment_id,
+				str(settings.get("system_prompt", "")),
+				settings.get("auto_run", false) == true,
+				settings.get("accept_concept_captures", false) == true)
 		_apply_active_workspace_view())
 
 	_build_sidebar()
@@ -643,6 +648,7 @@ func _ensure_unique_attachment_id(body: Control):
 ## attach-time check and the restore pre-pass so both paths behave the same.
 func _on_duplicate_rename(old_id: String, new_id: String):
 	_carry_pane_env(old_id, new_id)
+	PaneInspectorStore.copy_state(old_id, new_id)
 	ToastManager.warn("Duplicate pane id '%s' renamed to '%s'" % [old_id, new_id])
 
 ## True when any *other* pane in any workspace already carries `id`.
@@ -715,6 +721,17 @@ func _carry_pane_env(old_id: String, new_id: String):
 		return
 	PaneEnvStore.set_env(new_id, PaneEnvStore.env_for(old_id))
 
+## A rename the user made in Pane Settings moves the entry: the old id is no
+## longer the pane's, so it must not carry the env any more. The companion
+## inspector store moves separately (`PaneInspectorStore.move_state`).
+func _move_pane_env(old_id: String, new_id: String):
+	if old_id == "" or new_id == "" or old_id == new_id:
+		return
+	var own_env := PaneEnvStore.env_for(old_id)
+	PaneEnvStore.remove_env(old_id)
+	if own_env != "":
+		PaneEnvStore.set_env(new_id, own_env)
+
 ## Re-point the companions that follow a pane renamed in Pane Settings.
 ##
 ## The follow link (`source_attachment_id`) is a display link, not an IPC id,
@@ -746,6 +763,10 @@ func _retarget_companions(body: Control, previous_id: String):
 ## type is wired correctly everywhere.
 func _attach_pane_into(ws: Dictionary, w: Control, body: Control):
 	_ensure_unique_attachment_id(body)
+	# The id is final now, so the user's own per-pane state (the Inspector's
+	# prompt and switches) can be overlaid on the saved settings. Every entry
+	# route — spawn, restore, type swap — comes through here.
+	body.apply_user_state()
 	ws.grid.add_child(w)
 	_wire_pane_activation(ws, w, body)
 	# Panes never spawn panes: a body that needs another pane emits

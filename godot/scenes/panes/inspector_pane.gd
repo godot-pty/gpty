@@ -284,7 +284,9 @@ func _get_layout_state() -> Dictionary:
 	# `system_prompt`, `auto_run` and `accept_concept_captures` are runtime
 	# state, not layout state: the settings table refuses them from files
 	# (`file: false`), so saving them here would only write keys the restore
-	# path drops with a notice. The pane panel sets them for the live pane.
+	# path drops with a notice. The pane panel sets them for the live pane,
+	# and `PaneInspectorStore` carries the user's own values across restarts
+	# (`apply_user_state`), never a file.
 	var state = super._get_layout_state()
 	state.merge({
 		"backend": backend,
@@ -292,6 +294,19 @@ func _get_layout_state() -> Dictionary:
 		"command": command.duplicate(),
 	})
 	return state
+
+## The user's own aim, applied at attach (see `PaneBody.apply_user_state`).
+## The record is keyed by the pane's public id, written only by the pane
+## settings panel, so restored values always come from the user's own gesture;
+## a layout or profile that names the trio is still refused by the settings
+## table before this runs.
+func apply_user_state():
+	var state := PaneInspectorStore.state_for(attachment_id)
+	if state.is_empty():
+		return
+	system_prompt = str(state.get("system_prompt", ""))
+	auto_run = state.get("auto_run", false) == true
+	accept_concept_captures = state.get("accept_concept_captures", false) == true
 
 func apply_settings(settings: Dictionary):
 	var prev_backend = backend

@@ -70,6 +70,18 @@ func apply_settings(settings: Dictionary):
 	if accepted.has("pane_name"):
 		title_changed.emit(pane_name if pane_name != "" else _default_title())
 
+## Apply the user's own per-pane state, after the saved settings at attach.
+##
+## Some pane settings are the user's gestures rather than file content — the
+## Inspector's prompt and auto-send switches (`PaneInspectorStore`, keyed by
+## `attachment_id`) — so they live in a user-owned store that a layout or
+## profile cannot write, and the pane reads them here, once the id is final.
+## The base has no such state; a pane whose aim is user-owned overrides this.
+## `Workspace._attach_pane_into` is the only caller, so every entry route
+## (spawn, restore, type swap) applies it.
+func apply_user_state():
+	pass
+
 ## Every pane has a stable public id. Generate one when no saved
 ## attachment_id was applied (fresh panes, legacy wrappers).
 func ensure_attachment_id():

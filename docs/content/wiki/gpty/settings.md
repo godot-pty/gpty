@@ -74,14 +74,14 @@ Version, the IPC protocol version gPTY speaks, and the repository address. The p
 | Scope | Where | What it covers |
 |---|---|---|
 | Global | Settings panel, `user://settings.json` | Fonts, colors, terminal defaults, shell program, global environment, FPS, window mode |
-| Per pane | Pane Settings popup, saved with the tile | Name, attachment id, font size, environment override, and type-specific view options |
+| Per pane | Pane Settings popup; the Inspector's aim in `user://pane_inspector.json` | Name, attachment id, font size, environment override, type-specific view options, and the Inspector's prompt and switches |
 | Workspace | Sidebar folder button, `user://workspaces.json` | Default directory inherited by new terminals; changing it asks when the workspace holds a pane that names its own program |
 | File-supplied | Layout or profile tile | Pane type, geometry, and a spawn plan (program and arguments) |
 | Trust | Workspace Trust dialog, `user://trusted.json` | Approval memory for file-supplied spawn plans |
 
 The Pane Settings popup is type-aware. For a terminal it edits the pane's name, public attachment id, font size, environment lines, cursor shape, blink and blink speed, cursor color, beam width, underline height, grid rows and columns, scroll lines, default foreground and background colors, font file, and color scheme. It does **not** edit the shell program, its arguments, tags, or a working directory — the program and arguments come from the creation call, a layout tile or a profile (and are exactly what Workspace Trust gates), while the directory belongs to the workspace (the sidebar's folder button). Clearing the environment box removes that pane's override, so it inherits the global environment again.
 
-Per-pane environment is the one setting only you can supply. It is stored in `user://pane_env.json`, keyed by the pane's attachment id, and only the pane settings UI writes it. A saved layout or profile that carries environment has it stripped on restore with a notice; the file is never allowed to become spawn-time authority. Renaming a pane's attachment id moves its environment entry to the new key.
+Per-pane environment and the Inspector's aim are the settings only you can supply. Environment is stored in `user://pane_env.json` and the aim (system prompt, auto-send, capture acceptance) in `user://pane_inspector.json`, both keyed by the pane's attachment id, and only the pane settings UI writes them. A saved layout or profile that carries environment has it stripped on restore with a notice — the file is never allowed to become spawn-time authority — and the Inspector's three keys are refused from files outright, so a restored pane takes its aim from your record, never from the layout. Renaming a pane's attachment id moves both entries to the new key.
 
 Two related files are not part of settings: `user://trusted.json` holds Workspace Trust approvals, and `user://workspaces.json` and `user://profiles.json` hold the arrangements. See [[workspace-trust]], [[workspace]], and [[profile]].
 

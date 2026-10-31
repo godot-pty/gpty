@@ -43,7 +43,7 @@ Backends:
 
 The CLI bridge contract is one JSON request line in for a prompt and JSON event lines out (`thinking`, `delta`, `done`, `error`, `status`). Adapters translate a tool's documented hooks; nothing scrapes a TUI and nothing counts tokens.
 
-A capture routed from a terminal concept can reach the pane only when you enable **Accept terminal concept captures**. That gate is off by default and is the whole security story of the feature: a capture is terminal output, and delivering it means that text leaves the pane and goes to a model. With the gate on, captures queue in the pane; **Auto-run** decides whether a capture starts a turn immediately, and **Run on last capture** replays the most recent one by hand. Auto-run is off by default and never survives a restore: a capture that arrives on a freshly restored pane waits for you.
+A capture routed from a terminal concept can reach the pane only when you enable **Accept terminal concept captures**. That gate is off by default and is the whole security story of the feature: a capture is terminal output, and delivering it means that text leaves the pane and goes to a model. With the gate on, captures queue in the pane; **Auto-run** decides whether a capture starts a turn immediately, and **Run on last capture** replays the most recent one by hand. Auto-run is off by default and no file can turn it on; when you set it in the pane panel it is stored as your own preference for that pane and comes back with it after a restart, so a capture arriving on a restored pane follows the choice you made rather than a file's.
 
 ## Settings that matter
 
@@ -54,11 +54,11 @@ A capture routed from a terminal concept can reach the pane only when you enable
 | Backend | `omp`, `cli`, `mock` |
 | Model | optional model passed to the backend |
 | Command | the `cli` backend's adapter argv (whitespace-split, no shell) |
-| Auto-run | whether a capture starts a turn immediately (per session, off by default) |
-| Accept terminal concept captures | the opt-in gate for routed output (per session) |
-| System prompt | replaces the default inspector prompt (per session) |
+| Auto-run | whether a capture starts a turn immediately (user-owned, off by default) |
+| Accept terminal concept captures | the opt-in gate for routed output (user-owned, off by default) |
+| System prompt | replaces the default inspector prompt (user-owned) |
 
-The three rows that decide what a capture becomes — Auto-run, Accept terminal concept captures and System prompt — are per-session state, not part of the layout. A restored pane starts with captures and auto-run off and no prompt, and a profile, layout or workspace file cannot set any of them: only the pane panel can, and a file that names them has those keys ignored with a notice. A prompt you type is therefore a session note, so keep anything you want to reuse somewhere outside gPTY for now.
+The three rows that decide what a capture becomes — Auto-run, Accept terminal concept captures and System prompt — are your own state, not part of the layout. They live in `user://pane_inspector.json`, keyed by the pane's attachment id, and only the pane settings panel writes them. A profile, layout or workspace file cannot set any of them: the settings table refuses the keys from files (with a notice), so the first auto-send of a capture always follows a gesture you made in the panel. The record follows the pane's public id — a rename moves it, and the same profile restored in a second workspace copies it — so a prompt you wrote and the switches you set come back after a restart for that pane. Clearing the prompt and turning both switches off removes the record.
 
 Changing the backend, model, system prompt or CLI command closes the session, so the next prompt opens one under the new configuration.
 
@@ -68,7 +68,7 @@ It does not attach to the OMP conversation hosted in a terminal, and it does not
 
 ## Limits and edge cases
 
-One session per pane, so a second Inspector is a second conversation with its own history. The `omp` backend needs `omp` on `PATH`; a stale extension build reports that the bridge is missing and asks for a rebuild rather than failing silently. The thinking area is not a log — it is the current turn's reasoning. When a backend fails, the pane's error shows what that program said on stderr, with terminal control sequences stripped and each line bounded; the rest of its stderr is not written to a log file, so this message is where the child's own account of a failure survives. Captures are gated per pane, so enabling the opt-in on one Inspector does not enable it on another, and a restore turns it back off. Because captures leave the pane, treat that toggle as a data-sharing decision, not a display preference.
+One session per pane, so a second Inspector is a second conversation with its own history. The `omp` backend needs `omp` on `PATH`; a stale extension build reports that the bridge is missing and asks for a rebuild rather than failing silently. The thinking area is not a log — it is the current turn's reasoning. When a backend fails, the pane's error shows what that program said on stderr, with terminal control sequences stripped and each line bounded; the rest of its stderr is not written to a log file, so this message is where the child's own account of a failure survives. Captures are gated per pane, so enabling the opt-in on one Inspector does not enable it on another, and a restore keeps the choice you stored for that pane rather than one a file names. Because captures leave the pane, treat that toggle as a data-sharing decision, not a display preference.
 
 ## Related
 
