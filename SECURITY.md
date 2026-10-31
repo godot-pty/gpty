@@ -139,7 +139,11 @@ These are load-bearing guards. Reports that require removing one of them should 
   time, and `params` must be a JSON object (or absent): a positional/non-object value is answered
   with JSON-RPC `-32602` before it is dispatched or queued, because one reaching the GUI's drain
   raised a call error that aborted the rest of the batch; clients validate the socket path and the
-  GUI binary before trusting either.
+  GUI binary before trusting either. The MCP server in front of it translates a tool call's
+  arguments from the ids the tool advertises to the wire names the handler reads, and answers
+  `-32602` for an unknown key (naming the nearest valid one) or a value of the wrong JSON type:
+  forwarding the object verbatim dropped every name that differed, so a call silently performed a
+  different action than the one requested.
 - **Pane count**: a window holds at most 96 live panes, counted across every workspace because a
   hidden workspace's pane keeps its PTY, child process and grid. The one ceiling
   (`Workspace.MAX_LIVE_PANES`) is enforced where panes are created, so `new-pane`, `pane-run`, the

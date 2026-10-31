@@ -22,6 +22,7 @@ Two surfaces, one shape: a list in one language that must agree with a list in a
 - **Deadline.** `fallback_timeout()` in `ipc.rs` maps `paneWait` → `PANE_WAIT_TIMEOUT`, `pluginInstall` → `PLUGIN_REVIEW_TIMEOUT`, everything else → `GDS_RESPONSE_TIMEOUT` (an answer from the poll loop, in ms). A deferred-answer method needs an arm there **and** in `dispatch_timeout()` — the server-side backstop is derived from the same pair.
 - **Deferred answers live in the drain loop**, not the handler: `paneWait` registers a pending wait and `pluginInstall` opens the review dialog *before* dispatch, then a per-frame poll answers. A method that cannot answer in the same frame belongs there.
 - **Params.** The Rust edge refuses a `params` that is not a JSON object with `-32602`; `WorkspaceIpcHandlers.request_params()` is the second layer because a GDScript call error on a mistyped value aborts the entire drain loop — every queued request then goes unanswered and each caller waits out its timeout. One bad value must cost one error response, never the batch.
+- **Tool arguments.** For an MCP tool, `commands/wire.rs::wire_params` sits in front of the socket: it derives each argument's JSON shape from its clap definition (an `Append` list, a boolean flag, an integer value-parser), renames the ids whose wire key differs through `RENAMES`, and refuses an unknown key (naming the nearest valid one), a wrong JSON type, or a contradictory pair with `-32602`. Forgetting it is not a compile error: the handler looks up its own key, finds nothing, and the call succeeds with the default.
 - **Errors** return `{"error": {"code", "message"}}`; the drain loop turns that into JSON-RPC `success=false`. `-32602` for invalid params (same code as the Rust edge), `-32000` otherwise.
 - **Results** are JSON-serialized by the loop; return a plain Dictionary/Array, not a pre-serialized string, unless the caller expects one.
 
@@ -52,7 +53,7 @@ Two surfaces, one shape: a list in one language that must agree with a list in a
 
 | Test | What it reads |
 |---|---|
-| `cargo test -p gpty-cli` | the contract test parses the real `ipc.rs` registrations, the `ipc_handlers.gd` arms, the `method ==` intercepts in `workspace.gd`, and every `client.call` literal, then asserts agreement with the advertised MCP tool names |
+| `cargo test -p gpty` | the contract tests parse the real `ipc.rs` registrations, the `ipc_handlers.gd` arms, the `method ==` intercepts in `workspace.gd`, and every `client.call` literal, assert agreement with the advertised MCP tool names, and (`wire.rs`) check every translated argument key against the keys its handler reads |
 | `test_ipc_dispatch_contract.gd` | drives `WorkspaceIpcHandlers.handle` against a real `Workspace` — one instance per script, because each schedules a deferred concept push that must land while it is alive |
 | `python3 scripts/smoke_pane_api.py` | the only test crossing CLI validation → Rust params → GUI registry on a real socket |
 | `./scripts/check-ffi-surface` | `#[func]` exports against every GDScript call site, plus the crate's own prose |

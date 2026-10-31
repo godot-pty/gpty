@@ -34,7 +34,7 @@ A fix without a failing-before observation is a guess. Reproduce on a fresh buil
 | `crates/**` | `cargo fmt --all`, `cargo clippy --workspace -- -D warnings`, `cargo test -p <crate>`, then `cargo test --workspace` (ci-check runs it serial **and** parallel — the suite must pass both ways) |
 | `godot/**` | new `class_name` → `godot --headless --path godot --import` first (GUT resolves global classes only from the importer's cache), then `./scripts/gut-check` |
 | `#[func]` exports | `./scripts/check-ffi-surface` — a renamed export fails only at runtime, in whichever pane calls it, often only in a log line |
-| IPC method / MCP tool | `cargo test -p gpty-cli` — `mcp.rs` reads the real registrations, the GDScript dispatch arms and every CLI call literal |
+| IPC method / MCP tool | `cargo test -p gpty` — the package is `gpty`; there is no `gpty-cli` package. `mcp.rs` reads the real registrations, the GDScript dispatch arms and every CLI call literal, and `wire.rs` checks translated argument keys against the handler's own |
 | any doc/roadmap edit | `python3 scripts/docs-check` |
 | app-visible behavior | `python3 scripts/smoke_pane_api.py`, or `skill://gpty-live-gui-smoke`; UI claims → `skill://gpty-ui-review` |
 | anything | `./scripts/ci-check` before committing (full: fmt, workflow lint, docs, clippy, ffi surface, log hygiene, cross-target checks, tests twice, gdext build, import, GUT, live smoke, `cargo audit --deny warnings`) |

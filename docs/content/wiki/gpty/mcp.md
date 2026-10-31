@@ -40,9 +40,13 @@ The consequence for an MCP author is simple: if a tool is not in `tools/list`, c
 
 ## Where the schemas come from
 
-Tool descriptions and argument schemas are generated from the clap command definitions in `crates/gpty-cli/src/commands/schema.rs`. Each subcommand becomes a tool, its arguments become JSON Schema properties with enums pulled from clap's possible values, and required-argument marking follows the clap definition.
+Tool descriptions and argument schemas are generated from the clap command definitions in `crates/gpty-cli/src/commands/schema.rs`. Each subcommand becomes a tool, its arguments become JSON Schema properties typed the way clap parses them (an `--arg` list is an array of strings, a flag a boolean, an integer argument an integer), enums are pulled from clap's possible values, and required-argument marking follows the clap definition.
 
 Two transformations happen on the way. Nested subcommand groups are flattened: `daemon start` becomes `daemon-start`, `layout save` becomes `layout-save`. The concept and vault verbs are already flat. And the self-referential commands are skipped — `mcp` (the server describing itself as a tool makes no sense) and `schema` (an admin/discovery command, not a workspace action). Because both the schema and `--help` read the same definitions, `gpty schema --format mcp` is the authority whenever documentation and binary disagree.
+
+### From tool arguments to the wire
+
+A tool's arguments are clap's (`pane_type`, `title`, `lines`); the handler behind the method reads the CLI's wire names (`type`) and an array where the schema once said string. `crates/gpty-cli/src/commands/wire.rs` is the one translation: it derives each argument's shape from the clap definition, renames the ids whose wire key differs through one table, and refuses what it cannot honour with `-32602` — an unknown key (naming the nearest valid one), a value of the wrong JSON type, or a contradictory pair. That refusal is the point. A forwarded argument the handler does not read is dropped, and the call then *succeeds with the default*: `tools/call new-pane {"pane_type": "wiki"}` used to create a terminal. Integers and booleans still accept the numeric and `"true"`/`"false"` strings an older client may send, so a schema change does not break one.
 
 ## No auto-spawn
 
