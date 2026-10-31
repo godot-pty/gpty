@@ -1,17 +1,19 @@
 //! Long-lived Oh-My-Pi (`omp --mode rpc`) session backend.
 
 use std::process::Stdio;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, Lines};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::backend::BackendError;
 use crate::binary::resolve_omp_binary;
+use crate::logtext::{StderrTail, spawn_drain};
 use crate::prompt::{build_user_message, resolve_system_prompt, truncate_utf8};
 use crate::registry::{CancelSignal, EventSink, SessionCommand};
 use crate::stream::events_from_rpc_frame;
@@ -20,6 +22,8 @@ use crate::types::{AiEvent, BackendKind, SessionOpenRequest, SessionPromptReques
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(120);
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 const CANCEL_WAIT: Duration = Duration::from_secs(2);
+/// How long a failed start waits for its stderr drain to finish reading.
+const STDERR_SETTLE: Duration = Duration::from_millis(500);
 const MAX_REASSEMBLED_FRAME_BYTES: usize = 64 * 1024 * 1024;
 const MAX_CHUNKS: usize = 4096;
 static NEXT_COMMAND_ID: AtomicU64 = AtomicU64::new(1);
@@ -135,6 +139,10 @@ struct OmpProcess {
     lines: Lines<BufReader<ChildStdout>>,
     decoder: RpcFrameDecoder,
     stderr_task: JoinHandle<()>,
+    /// Bounded, sanitized stderr of the child (`crate::logtext`). The lines are
+    /// logged at `debug` - they are program output - so a start-up failure is
+    /// the one place the child's own account of it is still visible.
+    stderr_tail: Arc<StderrTail>,
     /// Set once the child can no longer serve a prompt: killed by an abort,
     /// or its stdout closed. The session re-spawns before the next turn.
     dead: bool,
@@ -208,47 +216,62 @@ impl OmpProcess {
             .stderr
             .take()
             .ok_or_else(|| "omp stderr missing".to_string())?;
-        let stderr_task = tokio::spawn(async move {
-            let mut reader = BufReader::new(stderr);
-            let mut buffer = [0_u8; 4096];
-            loop {
-                match reader.read(&mut buffer).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(count) => {
-                        let text = String::from_utf8_lossy(&buffer[..count]);
-                        log::warn!("omp stderr: {}", text.trim_end());
-                    }
-                }
-            }
-        });
+        let stderr_tail = Arc::new(StderrTail::new());
+        let stderr_task = spawn_drain(stderr, "omp", Arc::clone(&stderr_tail));
         let mut process = Self {
             child,
             stdin,
             lines: BufReader::new(stdout).lines(),
             decoder: RpcFrameDecoder::default(),
             stderr_task,
+            stderr_tail,
             dead: false,
         };
-        let ready = tokio::time::timeout(START_TIMEOUT, process.next_frame())
+        match process.handshake().await {
+            Ok(()) => Ok(process),
+            Err(error) => Err(process.describe_failure(error).await),
+        }
+    }
+
+    /// The `ready` frame and the protocol negotiation, in one place so a
+    /// failure carries the child's own stderr.
+    async fn handshake(&mut self) -> Result<(), String> {
+        let ready = tokio::time::timeout(START_TIMEOUT, self.next_frame())
             .await
             .map_err(|_| "timeout waiting for omp ready".to_string())?
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "omp stdout closed before ready".to_string())?;
         if ready.get("type").and_then(Value::as_str) != Some("ready") {
-            process
-                .wait_for_type("ready", START_TIMEOUT)
+            self.wait_for_type("ready", START_TIMEOUT)
                 .await
                 .map_err(|error| error.to_string())?;
         }
-        process
-            .write(json!({
-                "id": next_id(),
-                "type": "negotiate_protocol",
-                "protocolVersion": 2
-            }))
-            .await
-            .map_err(|error| error.to_string())?;
-        Ok(process)
+        self.write(json!({
+            "id": next_id(),
+            "type": "negotiate_protocol",
+            "protocolVersion": 2
+        }))
+        .await
+        .map_err(|error| error.to_string())
+    }
+
+    /// A failure message that carries what the child said, when it said
+    /// anything: the lines themselves are `debug`-level log text, and a bare
+    /// "timeout waiting for omp ready" cannot tell a missing model from a
+    /// broken install.
+    ///
+    /// The child is stopped first - otherwise its stderr pipe never reaches
+    /// EOF - and the drain gets a bounded moment to finish, so the message is
+    /// the child's account rather than a race against the reader.
+    async fn describe_failure(mut self, error: String) -> String {
+        let _ = self.child.kill().await;
+        let _ = tokio::time::timeout(STDERR_SETTLE, &mut self.stderr_task).await;
+        let detail = self.stderr_tail.summary();
+        if detail.is_empty() {
+            error
+        } else {
+            format!("{error} (omp stderr: {detail})")
+        }
     }
 
     async fn prompt(
@@ -781,6 +804,70 @@ mod tests {
 
         session.close();
         unsafe { std::env::remove_var("GPTY_OMP") };
+    }
+
+    /// A start-up failure must say what the child said. The line itself is a
+    /// `debug` log (it is program output), so the message the Inspector pane
+    /// shows is the one place a user can tell a missing model from a broken
+    /// install - and it is sanitized, because the child renders its errors
+    /// with escape codes.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn omp_start_failure_carries_the_child_stderr() {
+        let _guard = OMP_ENV_LOCK.lock().await;
+        use crate::registry::AiSession;
+        use crate::types::{SessionOpenRequest, SessionPromptRequest};
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let script = TempScript::new(fake_script_path("start_failure"));
+        let mut file = std::fs::File::create(script.path()).unwrap();
+        file.write_all(
+            b"#!/bin/sh\n\
+              printf '%b\\n' '\\0033[31moom: no model configured\\0033[0m' >&2\n\
+              exit 2\n",
+        )
+        .unwrap();
+        drop(file);
+        std::fs::set_permissions(script.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        unsafe { std::env::set_var("GPTY_OMP", script.path()) };
+
+        // The session spawns its child on the first prompt, so the failure
+        // arrives as that turn's error event rather than from `open`.
+        let session = AiSession::open(
+            &tokio::runtime::Handle::current(),
+            SessionOpenRequest {
+                backend: BackendKind::Omp,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        session
+            .prompt(SessionPromptRequest {
+                capture: "x".into(),
+                concept_name: "test".into(),
+                source_pane: "T1".into(),
+            })
+            .unwrap();
+        let events = drain_turn(&session).await;
+        unsafe { std::env::remove_var("GPTY_OMP") };
+
+        let message = events
+            .iter()
+            .find_map(|e| match &e.event {
+                AiEvent::Error { message } => Some(message.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("a child that never says ready must error: {events:?}"));
+        assert!(
+            message.contains("oom: no model configured"),
+            "the child's own account must ride the error: {message}"
+        );
+        assert!(
+            !message.contains('\u{1b}') && !message.contains("0033"),
+            "the escape sequence must be stripped: {message}"
+        );
+        session.close();
     }
 
     /// The window between "the child answered" and "the child is gone" is real:

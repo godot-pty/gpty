@@ -23,8 +23,8 @@ so `cargo build -p gpty-gdext` is enough. Restart Godot after each rebuild.
 
 The implementation is filed by facet under `src/`, one `#[godot_api(secondary)]` impl block
 per file - `lib.rs` holds the class itself (session lifecycle, input, the grid access
-helpers), `grid_api.rs`, `history_api.rs`, `vault_api.rs`, `capture_api.rs` and `bridge_api.rs` hold the
-rest. The sections below are those facets.
+helpers), `grid_api.rs`, `history_api.rs`, `vault_api.rs`, `store_api.rs`, `capture_api.rs` and
+`bridge_api.rs` hold the rest. The sections below are those facets.
 
 ### GptyMarkdown (extends RefCounted)
 
@@ -147,6 +147,12 @@ and compiles no network protocol.
 | `vault_scratch_read(vault_path: String, rel_path: String)` | `String` | Static - the recovery copy of one note's unsaved buffer, written by the editor so a crash cannot take it. JSON: `{found: false}` when there is none (the normal state, and the answer for a copy that cannot be trusted) or `{found: true, text, mtime, size}` - the buffer, and the stamp of the file revision it was typed against, so a save restored from it still checks the file the user saw. `error` only when the vault or the note path cannot be used |
 | `vault_scratch_write(vault_path: String, rel_path: String, text: String, expected_mtime: int, expected_size: int)` | `String` | Static - snapshot one note's unsaved buffer as its recovery copy. Goes to gpty's own state directory (`state_dir()/scratch`, owner-only) and never to the vault - this is not a note write - and is atomic (hidden random temp, renamed over the previous copy). Each write also prunes the directory: a copy whose own record names a vault that is gone is reclaimed, as is a temp file older than an hour; a vault that cannot be read and a record that cannot be interpreted are left alone. `expected_mtime`/`expected_size` are the stamp the buffer was loaded from, recorded so a restore after the file moved on still asks. JSON: `{ok: true}` or `{error, code}` |
 | `vault_scratch_clear(vault_path: String, rel_path: String)` | `String` | Static - drop one note's recovery copy: its buffer either reached the file or was deliberately discarded. An absent copy is not an error. JSON: `{ok: true}` or `{error, code}` |
+
+#### User store files
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `secure_store_path(path: String, directory: bool)` | `String` | Static - repair the mode of one of gPTY's own files: a store file (`directory: false`, tightened to 0600) or the directory holding them (`true`, 0700). Only a looser mode of a file this user owns is rewritten, and a symlink at `path` is skipped rather than chmod'd through (`O_NOFOLLOW`, then `fchmod` on that descriptor). Empty when there was nothing to do or the mode is now owner-only; otherwise the diagnostic to log, which `BasePersistenceManager` prints once per path. Windows inherits the profile directory's ACLs and always answers empty |
 
 #### Pane API & status
 

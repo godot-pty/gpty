@@ -16,6 +16,7 @@
 //! | [`parser`] | Strips ANSI escape sequences from PTY output; extracts plain-text lines |
 //! | [`escstring`] | Bounds an unterminated escape string so a pane program cannot grow parser memory |
 //! | [`term`]   | Full terminal grid via `alacritty_terminal`; cursor, colors, scrolling |
+//! | [`owner_only`] | Repairs a store's or a store directory's mode to owner-only, never through a symlink |
 //!
 //! ## Data Flow
 //!
@@ -44,6 +45,7 @@ pub mod history;
 pub mod keymap;
 pub mod links;
 pub mod lock;
+pub mod owner_only;
 pub mod parser;
 pub mod pty;
 pub mod term;

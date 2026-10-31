@@ -93,22 +93,18 @@ pub fn store_size_on_disk(path: &str) -> u64 {
 /// the process umask, so under a permissive umask — or a `user://` another
 /// account can read — every pane's scrollback is readable by others. The same
 /// rule guards the vault index ([`crate::vault::VaultStore`]), which is why
-/// this is crate-visible. Best effort by design: a sibling may not exist yet,
-/// and a mode that cannot be set is worth a log line, not a failed pane.
-#[cfg(unix)]
+/// this is crate-visible. The mechanism is
+/// [`crate::owner_only::restrict_file`], shared with the GDScript stores'
+/// repair path, so a symlink at the database path is skipped rather than
+/// chmod'd through. Best effort by design: a sibling may not exist yet, and a
+/// mode that cannot be set is worth a log line, not a failed pane.
 pub(crate) fn restrict_to_owner(path: &str) {
-    use std::os::unix::fs::PermissionsExt;
-    match std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
-        Ok(()) => {}
-        // The `-wal`/`-shm` siblings appear with the first write; a missing
-        // file is the normal case, not a failure.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => log::warn!("could not restrict {path} to its owner: {e}"),
+    if let Some(problem) =
+        crate::owner_only::restrict_file(std::path::Path::new(path)).problem(path)
+    {
+        log::warn!("could not restrict a store to its owner ({problem})");
     }
 }
-
-#[cfg(not(unix))]
-pub(crate) fn restrict_to_owner(_path: &str) {}
 
 /// One writer per history file at a time, for this whole process.
 ///

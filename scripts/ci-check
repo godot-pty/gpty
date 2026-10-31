@@ -255,6 +255,19 @@ else
     check_failed
 fi
 
+# ── Step 3.2: Log hygiene ──────────────────────────────────────────────
+# What a program writes is not log material (AGENTS.md, SECURITY.md): a pane's
+# output, a capture, injected text or a backend's stderr can quote a prompt or a
+# credential, and `warn` is the level the GDExtension forwards into Godot's
+# console and its log file. Static, no build.
+header "log hygiene"
+if ./scripts/check-log-hygiene 2>&1; then
+    pass "log hygiene"
+else
+    fail "log hygiene — a log call formats program input/output"
+    check_failed
+fi
+
 # ── Fast mode stops here ───────────────────────────────────────────────
 if $FAST; then
     printf "\n"

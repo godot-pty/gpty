@@ -3,6 +3,10 @@ extends Node
 
 func _ready():
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# Before any store is read, so a loose directory is closed first: every
+	# autoload extends this class, and the guard makes the engine's start-up
+	# pass one repair rather than one per autoload.
+	_secure_user_root_once()
 	_on_init()
 
 func _on_init():
@@ -32,10 +36,137 @@ static func resolve_store_path(path: String) -> String:
 		return path
 	return root.path_join(path.substr("user://".length()))
 
+## The directory every store lives in, as an absolute path: the test root when
+## the harness redirected `user://`, otherwise the engine's own answer.
+static func user_root() -> String:
+	var root := user_root_override()
+	if root != "":
+		return root
+	return ProjectSettings.globalize_path("user://")
+
+## Mode the `user://` root is kept at: owner only.
+##
+## The files inside carry `STORE_UNIX_MODE`, but a 0755 directory (measured:
+## the engine creates `user://` with the process umask) already names every
+## store in it, and a store written by an older build still carries the old
+## file's mode until something saves it again. A 0700 root closes that gap for
+## every store at once. No-op on Windows.
+const USER_ROOT_UNIX_MODE := 0x1C0  # 0700
+
+## Stores whose mode could not be repaired this run, so the warning is printed
+## once instead of on every read of the same store.
+static var _mode_failure_reported := {}
+
+static var _user_root_secured := false
+
+## Run [`method secure_user_root`] once per process.
+static func _secure_user_root_once() -> void:
+	if _user_root_secured:
+		return
+	_user_root_secured = true
+	secure_user_root()
+
+## Tighten the directory that holds every store to `USER_ROOT_UNIX_MODE`.
+##
+## Idempotent, cheap, and never fatal: a directory that refuses the change is
+## worth one warning, not a failed launch. Ownership and the symlink refusal
+## are the Rust side's (`_restrict_to_owner`) - GDScript cannot read a file's
+## owner, and a chmod through a link would change someone else's directory.
+static func secure_user_root() -> void:
+	if OS.get_name() == "Windows":
+		return
+	var root := user_root()
+	if not DirAccess.dir_exists_absolute(root):
+		# The engine would create it on the first write, with the umask's mode.
+		# Creating it here means the mode is right before the first store lands.
+		var made := DirAccess.make_dir_recursive_absolute(root)
+		if made != OK and made != ERR_ALREADY_EXISTS:
+			push_warning("[BasePersistenceManager] cannot create %s (%d)" % [root, made])
+			return
+	var reason := _restrict_to_owner(root, true)
+	if reason != "":
+		push_warning(
+			"[BasePersistenceManager] could not restrict the user directory to its owner (%s)" % reason
+		)
+	_tighten_log_dir(root.path_join("logs"))
+
+## How many log files one start-up pass repairs.
+##
+## The engine writes one file per run (plus rotated ones), so the list grows;
+## the cap keeps a directory someone filled by hand from turning launch into a
+## syscall loop. Nothing is lost by stopping: the 0700 root already hides them.
+const MAX_LOG_FILES := 32
+
+## Keep the engine's log directory as private as the stores beside it.
+##
+## Godot writes `user://logs/godot.log` and its rotated siblings with the
+## process umask once file logging is on - measured 0644 in a 0755 directory -
+## and gPTY's policy is that program text never reaches a log file by default.
+## The 0700 root closes the directory to other accounts on its own; this makes
+## the modes inside it say the same thing, once per launch, because the engine
+## re-creates the files it writes.
+static func _tighten_log_dir(dir: String) -> void:
+	if not DirAccess.dir_exists_absolute(dir):
+		return
+	var report := _restrict_to_owner(dir, true)
+	var handle := DirAccess.open(dir)
+	if report == "" and handle != null:
+		var seen := 0
+		for entry in handle.get_files():
+			if seen >= MAX_LOG_FILES:
+				break
+			if not entry.ends_with(".log"):
+				continue
+			seen += 1
+			var file_report := _restrict_to_owner(dir.path_join(entry), false)
+			if file_report != "":
+				report = file_report
+				break
+	if report != "":
+		push_warning(
+			"[BasePersistenceManager] could not restrict the log directory to its owner (%s)" % report
+		)
+
+## Ask the Rust side for the owner-only mode on `target`; `""` means there was
+## nothing to do or the mode is now owner-only, else the diagnostic to log.
+##
+## The extension is optional here: without it the store loads with whatever
+## mode it already has, exactly as before the repair existed, instead of every
+## read turning into a hard error. Windows needs no repair at all.
+static func _restrict_to_owner(target: String, directory: bool) -> String:
+	if OS.get_name() == "Windows":
+		return ""
+	if not ClassDB.class_exists("GptyTerminal"):
+		return ""
+	return str(GptyTerminal.secure_store_path(target, directory))
+
+## Repair one store's mode as it is about to be read.
+##
+## The write path sets `STORE_UNIX_MODE` on every file it lands, but a store
+## written by an older build keeps the umask's mode until it is saved again -
+## measured: `layout.json` at 0644 beside `concepts.json` at 0600 - so the read
+## is where an untouched store is repaired. Best effort: a repair that fails is
+## one warning per store per run, and the load continues.
+func _tighten_store_mode(target: String) -> void:
+	var reason := _restrict_to_owner(target, false)
+	if reason == "":
+		return
+	if not _claim_mode_failure(target):
+		return
+	push_warning("[%s] could not restrict %s to its owner (%s)" % [name, target, reason])
+
+## True the first time a store's mode cannot be repaired, false afterwards.
+static func _claim_mode_failure(target: String) -> bool:
+	if _mode_failure_reported.has(target):
+		return false
+	_mode_failure_reported[target] = true
+	return true
+
 func _read_file(path: String) -> Dictionary:
 	var target := resolve_store_path(path)
 	if not FileAccess.file_exists(target):
 		return {}
+	_tighten_store_mode(target)
 	var f = FileAccess.open(target, FileAccess.READ)
 	if not f:
 		return {}

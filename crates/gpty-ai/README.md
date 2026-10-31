@@ -21,6 +21,19 @@ Network / harness I/O lives here on tokio - Godot only polls envelopes.
 | OpenAI-compatible HTTP | Planned | Same session API |
 | Other harnesses (ACP, `omp -p`) | Planned | Thin adapters |
 
+### Stderr and logs
+
+A backend child is a third-party program, so its stderr is program output:
+a prompt, a path, or a credential in an error message. Both backends route it
+through `logtext` - one sanitized (no escape sequences or control characters),
+bounded (2048 bytes per line, `[truncated]` marked) line at a time, logged at
+`debug` and never written to a file by default. The same module keeps the
+bounded `StderrTail` (20 lines) that rides the failure message a user actually
+sees: a non-zero `cli` exit, and an `omp` start-up failure (the child is killed
+and the drain given a bounded moment so its account is not lost to a race).
+`scripts/check-log-hygiene` in `ci-check` fails a `log::*!` that formats
+program content without a `// log-ok:` marker.
+
 ### CLI bridge contract
 
 The `cli` backend runs a user-configured command (argv from the Inspector

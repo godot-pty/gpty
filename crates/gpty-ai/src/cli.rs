@@ -23,17 +23,17 @@
 //! one prompt; cancelling kills it (`kill_on_drop` guarantees no orphans
 //! when the session closes), and the next prompt spawns a fresh child.
 
-use std::collections::VecDeque;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
+use crate::logtext::{StderrTail, spawn_drain};
 use crate::prompt::truncate_utf8;
 use crate::registry::{CancelSignal, EventSink, SessionCommand};
 use crate::types::{AiEvent, BackendKind, SessionOpenRequest};
@@ -42,10 +42,6 @@ const PROMPT_TIMEOUT: Duration = Duration::from_secs(120);
 /// Read timeout for a single frame line from the child.
 const FRAME_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_FRAME_BYTES: usize = 64 * 1024;
-/// Adapter stderr lines retained for the exit-status error message.
-const MAX_STDERR_LINES: usize = 20;
-/// Per-line cap on that retained stderr, so a chatty adapter cannot grow it.
-const MAX_STDERR_LINE_BYTES: usize = 2048;
 
 pub struct CliBackend {
     pub timeout: Duration,
@@ -214,58 +210,16 @@ struct CliChild {
     stdout: BufReader<ChildStdout>,
     /// Keeps the adapter's stderr pipe drained for the child's whole life.
     stderr_task: tokio::task::JoinHandle<()>,
-    /// Bounded tail of that stderr, surfaced when the adapter exits non-zero.
-    stderr_tail: Arc<Mutex<VecDeque<String>>>,
+    /// Bounded, sanitized tail of that stderr, surfaced when the adapter exits
+    /// non-zero (`crate::logtext::StderrTail`).
+    stderr_tail: Arc<StderrTail>,
 }
 
 impl CliChild {
     /// The adapter's own account of a failure, for the exit-status error.
     fn stderr_summary(&self) -> String {
-        match self.stderr_tail.lock() {
-            Ok(tail) => tail.iter().cloned().collect::<Vec<_>>().join(" | "),
-            Err(_) => String::new(),
-        }
+        self.stderr_tail.summary()
     }
-}
-
-/// Continuously drain the adapter's stderr into a bounded tail.
-///
-/// The pipe has to be read for the child's whole life. Once the kernel
-/// buffer (~64 KiB) fills, the adapter blocks on its next stderr write and
-/// can never finish the turn — it stalls until the 10 s frame timeout
-/// fires, and the failure surfaces as "stopped emitting frames" rather
-/// than as the adapter's own error. `wait()` does not drain it; only a
-/// reader that keeps up does.
-fn spawn_stderr_drain(
-    stderr: ChildStderr,
-) -> (Arc<Mutex<VecDeque<String>>>, tokio::task::JoinHandle<()>) {
-    let tail: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
-    let sink = Arc::clone(&tail);
-    let task = tokio::spawn(async move {
-        let mut reader = BufReader::new(stderr);
-        let mut buffer = [0_u8; 4096];
-        loop {
-            match reader.read(&mut buffer).await {
-                Ok(0) | Err(_) => break,
-                Ok(count) => {
-                    // Lossy: a non-UTF-8 adapter must not stop the drain,
-                    // and chunk boundaries may split a line in two.
-                    let text = String::from_utf8_lossy(&buffer[..count]);
-                    for line in text.lines() {
-                        let line = truncate_utf8(line, MAX_STDERR_LINE_BYTES);
-                        log::warn!("cli backend stderr: {line}");
-                        if let Ok(mut retained) = sink.lock() {
-                            if retained.len() == MAX_STDERR_LINES {
-                                retained.pop_front();
-                            }
-                            retained.push_back(line);
-                        }
-                    }
-                }
-            }
-        }
-    });
-    (tail, task)
 }
 
 async fn drive_child(
@@ -289,7 +243,8 @@ async fn drive_child(
         .stderr
         .take()
         .ok_or_else(|| "cli backend: no stderr".to_string())?;
-    let (stderr_tail, stderr_task) = spawn_stderr_drain(stderr);
+    let stderr_tail = Arc::new(StderrTail::new());
+    let stderr_task = spawn_drain(stderr, "cli backend", Arc::clone(&stderr_tail));
     let mut bridge = CliChild {
         child,
         stdin,
@@ -681,6 +636,58 @@ mod tests {
                 if message.contains("exited with 3")
                     && message.contains("model backend unreachable"))),
             "exit error must carry the adapter's stderr: {events:?}"
+        );
+        session.close();
+    }
+
+    /// What the adapter said reaches the failure message as text: its terminal
+    /// control sequences are stripped and a line that runs for pages is cut at
+    /// the cap. The line itself is logged at `debug` only, so this message is
+    /// the one place a user still sees the adapter's own account of a failure.
+    #[tokio::test]
+    async fn cli_stderr_reaches_the_failure_message_stripped_and_bounded() {
+        let flood = "x".repeat(4_000);
+        let script = format!(
+            "#!/bin/sh\nread line\n\
+             printf '%b\\n' '\\0033[31mfailed: no model\\0033[0m' >&2\n\
+             printf '%s\\n' '{flood}' >&2\n\
+             exit 7\n"
+        );
+        let (_script, command) = fake_adapter(&script);
+        let session = AiSession::open(
+            &tokio::runtime::Handle::current(),
+            SessionOpenRequest {
+                backend: BackendKind::Cli,
+                command,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        session.prompt(prompt("x")).unwrap();
+        let events = wait_terminal(&session).await;
+        let message = events
+            .iter()
+            .find_map(|e| match &e.event {
+                AiEvent::Error { message } => Some(message.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("a non-zero exit must answer with an error: {events:?}"));
+        assert!(
+            message.contains("failed: no model"),
+            "the adapter's text must survive stripping: {message}"
+        );
+        assert!(
+            !message.contains('\u{1b}') && !message.contains("0033"),
+            "an escape sequence must not reach the message: {message}"
+        );
+        assert!(
+            message.contains("[truncated]"),
+            "the cut line must be marked as cut: {message}"
+        );
+        assert!(
+            message.len() < 3_000,
+            "a 4000-byte stderr line must be bounded, got {} bytes",
+            message.len()
         );
         session.close();
     }

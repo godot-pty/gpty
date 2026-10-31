@@ -31,6 +31,7 @@ mod ipc;
 mod markdown;
 mod media_api;
 mod omp_events;
+mod store_api;
 mod vault_api;
 mod vault_ipc;
 

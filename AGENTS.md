@@ -262,6 +262,13 @@ gPTY is evolving from a multi-terminal emulator into an ADE - a graphical PTY fo
   - Webview/WebSocket panes - a new trust boundary; not v1.
 - **Positioning & naming:** the wedge is GUI + public-API PTY foundation + concept engine + Windows + hardening. Keep the `gpty` name (2026-09 decision): rebranding is positioning, not renaming. Two-tier naming convention: the display name is `gPTY` (UI, docs, prose); machine-facing identifiers stay lowercase/actual - `gpty` binary, crates, repo, and socket paths; `GPTY_*` env vars; `GptyTerminal`; `@gpty/omp-events`.
 
+## Logging
+
+- **A program's output is not log material.** Pane output, a captured buffer, injected or pasted text, environment values and an agent backend's stderr are never logged above `debug`, and never written to a file by default. Ids, paths, counts, PIDs, error discriminants and mode bits are fine.
+- **The rule is enforced, not remembered.** `scripts/check-log-hygiene` (run by `ci-check`) fails a `log::*!` whose format string or arguments name program content (`text`, `data`, `output`, `payload`, `stdout`, `stderr`, `line`, `input`, `capture`, `content`, `body`, `prompt`, `command`, `argv`, `env`) unless the call carries a `// log-ok: <why it is safe>` marker, and the marker is a claim a reviewer checks.
+- **Backend stderr has one path.** `gpty_ai::logtext::spawn_drain` strips escape sequences and control characters, bounds each line to `MAX_LINE_BYTES`, logs at `debug` and fills the bounded `StderrTail` that rides the failure message a user sees. Do not add a second drain and do not raise the level.
+- **No log file by default.** `project.godot` leaves Godot's file logging off; a launch that turns it on (`--log-file`) inside the user directory has that directory repaired to 0700 and its `*.log` files to 0600 at start-up, with the same owner-only primitive the stores use.
+
 ## Licensing
 
 - Core is **GPL-3.0-or-later** ([LICENSE](LICENSE)); [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md) holds the two section 7 additional permissions. Plugins, extensions, adapters, and pane types are **not** required to be GPLv3, which is why the bundled `extensions/gpty-omp-events` ships MIT and `godot/addons/gut` stays MIT. Do NOT "correct" a bundled permissive license into GPLv3, and never add license headers to JSON.

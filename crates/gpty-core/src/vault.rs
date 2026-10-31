@@ -1402,17 +1402,16 @@ fn prune_scratch(dir: &Path) {
 ///
 /// The files inside carry the 0600 every store gets; a directory others can
 /// list would still name them, and the process umask decides the mode
-/// `create_dir_all` leaves behind. Best effort on the mode like
-/// [`restrict_to_owner`]: a directory whose mode cannot be set is worth a log
-/// line, not a lost edit.
+/// `create_dir_all` leaves behind. The mode is set through
+/// [`crate::owner_only::restrict_dir`], the same repair the GDScript stores
+/// use, so a directory that is not this user's (or a link) is left alone.
+/// Best effort: a directory whose mode cannot be set is worth a log line, not
+/// a lost edit.
 fn ensure_private_dir(dir: &Path) -> Result<(), NoteError> {
     std::fs::create_dir_all(dir).map_err(|e| NoteError::Io(format!("{}: {e}", dir.display())))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Err(e) = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)) {
-            log::warn!("could not restrict {} to its owner: {e}", dir.display());
-        }
+    let restriction = crate::owner_only::restrict_dir(dir);
+    if let Some(problem) = restriction.problem(&dir.display().to_string()) {
+        log::warn!("could not restrict a directory to its owner ({problem})");
     }
     Ok(())
 }

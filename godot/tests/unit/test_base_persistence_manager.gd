@@ -163,3 +163,127 @@ func test_a_failed_write_leaves_the_previous_file_intact():
 	var back = fixed._read_file(PATH)
 	assert_true(back.get("old"), "the existing file must survive a failed write")
 	assert_false(back.has("new"), "nothing may be written when the temp file cannot be created")
+
+# ── The owner-only repair on the read path ─────────────────────────────
+#
+# The write path sets `STORE_UNIX_MODE` on every store it lands, but a store
+# written by an older build keeps the process umask's mode until it is saved
+# again (measured on a normal install: `layout.json` 0644 beside
+# `concepts.json` 0600), and the engine creates `user://` itself at 0755. These
+# tests pin the repair: reading fixes the mode, contents are never rewritten,
+# a symlink is not chmod'd through, and the directory that holds everything is
+# closed to other accounts.
+
+func test_a_loose_store_is_tightened_when_it_is_read():
+	if OS.get_name() == "Windows":
+		pending("file modes are not a Windows notion")
+		return
+	_mgr._write_file(PATH, {"kept": "value"})
+	var abs := _abs(PATH)
+	FileAccess.set_unix_permissions(abs, 0x1A4)  # 0644
+	assert_eq(FileAccess.get_unix_permissions(abs), 0x1A4, "the probe must start world-readable")
+
+	var back = _mgr._read_file(PATH)
+
+	assert_eq(back.get("kept"), "value", "the contents must load unchanged")
+	assert_eq(FileAccess.get_unix_permissions(abs), 0x180, "reading must repair the mode to 0600")
+
+## A symlink at a store path is not the store. The write path replaces it by
+## renaming over the link; the repair must not `chmod` whatever it points at,
+## or a planted link would change a file outside gPTY's stores.
+func test_a_symlinked_store_is_not_tightened_through():
+	if OS.get_name() == "Windows":
+		pending("file modes and symlinks are not a Windows notion")
+		return
+	var victim := PATH + ".victim"
+	_remove_path(victim)
+	var victim_file := FileAccess.open(_abs(victim), FileAccess.WRITE)
+	victim_file.store_string('{"victim": true}')
+	victim_file.close()
+	FileAccess.set_unix_permissions(_abs(victim), 0x1A4)  # 0644
+	_remove_path(PATH)
+	var dir := DirAccess.open(_abs(PATH).get_base_dir())
+	assert_not_null(dir, "the store directory must exist")
+	assert_eq(
+		dir.create_link(_abs(victim), _abs(PATH)),
+		OK,
+		"the probe must be able to plant a symlink"
+	)
+
+	var back = _mgr._read_file(PATH)
+
+	assert_true(back.get("victim"), "the store behind the link is still read")
+	assert_eq(
+		FileAccess.get_unix_permissions(_abs(victim)),
+		0x1A4,
+		"a symlink's target must never be chmod'd through the store path"
+	)
+
+## The directory holding the stores is the first line of defense: a 0700 root
+## hides every store inside it whatever a file's own mode says.
+func test_the_user_root_is_owner_only():
+	if OS.get_name() == "Windows":
+		pending("file modes are not a Windows notion")
+		return
+	var root := BasePersistenceManager.user_root()
+	assert_true(DirAccess.dir_exists_absolute(root), "the harness creates the test root")
+	FileAccess.set_unix_permissions(root, 0x1ED)  # 0755
+	assert_eq(FileAccess.get_unix_permissions(root), 0x1ED, "the probe must start open")
+
+	BasePersistenceManager.secure_user_root()
+
+	assert_eq(FileAccess.get_unix_permissions(root), 0x1C0, "the root must be owner-only (0700)")
+
+## A filesystem that refuses the change is a diagnostic, not a failed load: the
+## refusal is reported once per store per run rather than once per read, and
+## the caller carries on with the store as it is.
+func test_a_refused_repair_is_reported_once_per_store():
+	if OS.get_name() == "Windows":
+		pending("file modes are not a Windows notion")
+		return
+	BasePersistenceManager._mode_failure_reported.clear()
+	# A regular file occupies a path component, so the store path cannot even be
+	# opened for the repair - the shape of a filesystem refusing the change.
+	_mgr._write_file(PATH, {"blocker": true})
+	var blocked := _abs(PATH).path_join("inner.json")
+	_mgr._tighten_store_mode(blocked)
+	_mgr._tighten_store_mode(blocked)
+
+	assert_true(
+		BasePersistenceManager._mode_failure_reported.has(blocked),
+		"the refusal must be recorded"
+	)
+	assert_eq(
+		BasePersistenceManager._mode_failure_reported.size(),
+		1,
+		"and reported once, not once per read"
+	)
+	BasePersistenceManager._mode_failure_reported.clear()
+
+## The engine's log directory is tightened with the root: Godot writes
+## `user://logs/godot.log` with the process umask once file logging is on, and
+## a log line is program text, which this project never wants world-readable.
+func test_the_log_directory_is_tightened_with_the_root():
+	if OS.get_name() == "Windows":
+		pending("file modes are not a Windows notion")
+		return
+	var logs := BasePersistenceManager.user_root().path_join("logs")
+	DirAccess.make_dir_recursive_absolute(logs)
+	FileAccess.set_unix_permissions(logs, 0x1ED)  # 0755
+	var log_file := logs.path_join("godot.log")
+	var handle := FileAccess.open(log_file, FileAccess.WRITE)
+	handle.store_string("engine log")
+	handle.close()
+	FileAccess.set_unix_permissions(log_file, 0x1A4)  # 0644
+
+	BasePersistenceManager.secure_user_root()
+
+	assert_eq(FileAccess.get_unix_permissions(logs), 0x1C0, "the log directory must be 0700")
+	assert_eq(FileAccess.get_unix_permissions(log_file), 0x180, "and its files 0600")
+	assert_eq(
+		FileAccess.get_file_as_string(log_file),
+		"engine log",
+		"repairing a log file must not rewrite it"
+	)
+	DirAccess.remove_absolute(log_file)
+	DirAccess.remove_absolute(logs)

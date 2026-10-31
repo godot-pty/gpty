@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+"""Keep program input and output out of gPTY's log calls.
+
+The policy (AGENTS.md, SECURITY.md) is that what a program writes - a pane's
+output, a captured buffer, injected or pasted text, an environment value, a
+backend's stderr - is never logged above `debug` and never written to a file by
+default. Nothing enforced that, and the one call that broke it,
+`log::warn!("cli backend stderr: {line}")`, had been there since the CLI backend
+was written: an adapter's stderr can quote a prompt or a credential, and `warn`
+is the level the GDExtension forwards into Godot's console and its log file.
+
+This is the tripwire. It reads every `log::*!` in `crates/`, resolves the names
+the call formats (named captures in the format string plus the identifiers in
+its arguments), and fails when one names program content:
+
+    text  data  output  payload  stdout  stderr  line  lines
+    input  capture  content  body  prompt  command  argv  env
+
+A call that is genuinely safe - a sanitized line, a byte count, a boolean shaped
+from four bytes of it - says so on the call or the line above it:
+
+    // log-ok: sanitized and bounded by `logtext::sanitize`, and at debug
+    log::debug!("{label} stderr: {line}");
+
+The marker is a claim a reviewer checks; it is deliberately not a list of paths
+in this script, because a path list goes stale the moment the file moves and
+then the check quietly stops covering it.
+
+Exit codes: 0 clean, 1 violations found. Reads only; never writes.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+CRATES = ROOT / "crates"
+
+LOG_CALL = re.compile(r"log::(?:trace|debug|info|warn|error)!\s*\(")
+# Names of program content: what a child wrote, what a caller captured, what a
+# user injected. `id`, `path`, `error`, `reason` and `rc` are not here - an id
+# names a pane, a path names a file, and an errno is not text.
+FLAGGED = {
+    "text",
+    "data",
+    "output",
+    "payload",
+    "stdout",
+    "stderr",
+    "line",
+    "lines",
+    "input",
+    "capture",
+    "content",
+    "body",
+    "prompt",
+    "command",
+    "argv",
+    "env",
+}
+ALLOW = "log-ok:"
+FORMAT_LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
+# `{name}`, `{name:?}`, `{a.b}` and `{a.b:>8}`: the last segment is what is
+# actually formatted, and a field named `text` is the same leak.
+NAMED_CAPTURE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)")
+IDENTIFIER = re.compile(r"\b([a-z_][a-zA-Z0-9_]*)\b")
+
+
+def strip_comments(source: str) -> str:
+    """Blank out `//` and `/* */` comments, keeping line structure.
+
+    Without this, a doc comment that quotes a bad call would be reported as the
+    call itself. The scanner understands ordinary string literals and char
+    literals; Rust raw strings are not handled, and no log call in this repo
+    formats one.
+    """
+    out: list[str] = []
+    i = 0
+    state = "code"
+    while i < len(source):
+        c = source[i]
+        pair = source[i : i + 2]
+        if state == "code":
+            if pair == "//":
+                state = "line"
+                out.append("  ")
+                i += 2
+                continue
+            if pair == "/*":
+                state = "block"
+                out.append("  ")
+                i += 2
+                continue
+            if c == '"':
+                state = "string"
+            elif c == "'" and source[i + 2 : i + 3] == "'":
+                out.append(source[i : i + 3])
+                i += 3
+                continue
+            out.append(c)
+        elif state == "line":
+            if c == "\n":
+                state = "code"
+                out.append("\n")
+            else:
+                out.append(" ")
+        elif state == "block":
+            if pair == "*/":
+                state = "code"
+                out.append("  ")
+                i += 2
+                continue
+            out.append("\n" if c == "\n" else " ")
+        else:  # string
+            if c == "\\":
+                out.append(source[i : i + 2])
+                i += 2
+                continue
+            if c == '"':
+                state = "code"
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def balanced_call(source: str, open_paren: int) -> tuple[str, int]:
+    """The macro's argument text and the index just past its closing paren."""
+    depth = 0
+    i = open_paren
+    while i < len(source):
+        c = source[i]
+        if c == '"':
+            i += 1
+            while i < len(source):
+                if source[i] == "\\":
+                    i += 2
+                    continue
+                if source[i] == '"':
+                    break
+                i += 1
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return source[open_paren + 1 : i], i + 1
+        i += 1
+    return source[open_paren + 1 :], len(source)
+
+
+def formatted_names(args: str) -> set[str]:
+    """The identifiers one call puts into its message."""
+    names: set[str] = set()
+    literal = FORMAT_LITERAL.search(args)
+    if literal:
+        for capture in NAMED_CAPTURE.findall(literal.group(1)):
+            names.update(capture.split("."))
+        rest = args[literal.end() :]
+    else:
+        rest = args
+    # Dotted paths count by their spelled name (`frame.text`), and a `&` or a
+    # method call still carries the identifier.
+    names.update(IDENTIFIER.findall(rest))
+    return names
+
+
+def violations(path: Path) -> list[tuple[int, str, list[str]]]:
+    raw = path.read_text()
+    source = strip_comments(raw)
+    # The allow marker is a comment, so it is read from the raw lines; both
+    # texts have the same line count (stripping preserves newlines).
+    raw_lines = raw.splitlines()
+    found: list[tuple[int, str, list[str]]] = []
+    for match in LOG_CALL.finditer(source):
+        args, _ = balanced_call(source, match.end() - 1)
+        hits = sorted(formatted_names(args) & FLAGGED)
+        if not hits:
+            continue
+        line_no = source.count("\n", 0, match.start()) + 1
+        window = "\n".join(raw_lines[max(0, line_no - 5) : line_no])
+        if ALLOW in window:
+            continue
+        call = " ".join(args.split())
+        found.append((line_no, call, hits))
+    return found
+
+
+def main() -> int:
+    problems: list[str] = []
+    files = 0
+    for path in sorted(CRATES.rglob("*.rs")):
+        files += 1
+        for line_no, call, hits in violations(path):
+            where = f"{path.relative_to(ROOT)}:{line_no}"
+            problems.append(f"{where}: log call formats program content ({', '.join(hits)})")
+            problems.append(f"    log!(...{call}...)")
+    if problems:
+        print("check-log-hygiene: program input/output must not be logged above debug")
+        for problem in problems:
+            print(f"  {problem}")
+        print(
+            f"  {len(problems) // 2} call(s): log ids, counts or paths instead, drop the level "
+            f"to debug, or mark the call `// {ALLOW} <why it is safe>`"
+        )
+        return 1
+    print(f"check-log-hygiene: no program content in {files} Rust files' log calls")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

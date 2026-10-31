@@ -10,6 +10,10 @@
 //! | [`BackendKind::Omp`] | [`omp`] | Oh-My-Pi via `omp --mode rpc` |
 //! | [`BackendKind::Cli`] | [`cli`] | Any CLI via a subprocess NDJSON bridge |
 //!
+//! Both process backends route their child's stderr through [`logtext`]: one
+//! sanitized, bounded line at a time at `debug`, plus a bounded tail for a
+//! failure message.
+//!
 //! Future: OpenAI-compatible HTTP, Anthropic, other harnesses (ACP, print mode).
 //!
 //! Each Godot bridge owns one private [`AiSession`]. A session keeps one
@@ -19,6 +23,7 @@
 pub mod backend;
 pub mod binary;
 pub mod cli;
+pub mod logtext;
 pub mod mock;
 pub mod omp;
 pub mod prompt;

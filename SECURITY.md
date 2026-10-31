@@ -299,9 +299,19 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   per-pane environment model can claim, and it is why environment is treated as authority rather
   than configuration.
 - **Scrollback is plaintext** in `user://`. The store, its WAL siblings and the JSON stores beside
-  it are created owner-only (0600) rather than with your umask, but the content is not encrypted:
-  anything printed in a pane - tokens included - is stored on disk the same way a shell history file
-  would be.
+  it are created owner-only (0600) rather than with your umask, a store written by an older build is
+  repaired to that mode when it is next read, and the directory that holds them is kept at 0700 -
+  but the content is not encrypted: anything printed in a pane - tokens included - is stored on
+  disk the same way a shell history file would be.
+- **Logs do not carry program text by default.** gPTY ships with Godot's file logging off
+  (`project.godot` leaves `debug/file_logging` unset). The log calls that do run name ids, paths,
+  counts and error discriminants; pane output, a captured buffer, injected or pasted text, an
+  environment value and an agent backend's stderr are `debug`-level, stripped of terminal control
+  sequences and bounded, because those programs can print a prompt or a credential in an error. If
+  you opt into file logging (`--log-file`), a log directory inside the user directory is repaired to
+  0700 and its files to 0600 at the next launch; a path you choose elsewhere is yours to protect.
+  The rule is stated in AGENTS.md and enforced for Rust log calls by `scripts/check-log-hygiene` in
+  CI, so a new call that formats program text fails the build rather than leaking at runtime.
 - **The update check is notify-only.** It fetches release metadata over TLS and shows a toast; it
   never downloads or executes anything, and the response is treated as display data.
 - **Release artifacts are not code-signed, but carry build provenance.** There is no Authenticode or
