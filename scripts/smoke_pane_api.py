@@ -951,6 +951,22 @@ class Smoke:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(store), encoding="utf-8")
 
+    # ── Vault registry seed ───────────────────────────────────────────
+    # `vaultSearch`/`vaultRead`/`vaultWeight` answer only inside a root the
+    # user registered (the user-owned list in `user://vaults.json`, written by
+    # the pane settings UI). A harness has no settings UI, so it seeds the
+    # store before launch - the same seam this file already uses for concepts
+    # and the plugin record. The directory is created here because the GUI
+    # reads the store once at startup and pushes it to the native handlers.
+    VAULT_PATH = "vault"
+
+    def seed_vault_registry(self) -> None:
+        vault = self.tmp / self.VAULT_PATH
+        (vault / "notes").mkdir(parents=True, exist_ok=True)
+        path = self.user_dir() / "vaults.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"roots": [str(vault)]}), encoding="utf-8")
+
     # ── Plugin store seed ─────────────────────────────────────────────
     # The profiles migration moved the five tool layouts onto plugin repos, and
     # the GUI reads what `gpty plugin install` recorded in the store (it never
@@ -1115,6 +1131,7 @@ def main() -> int:
         # Same for the plugin store: its records are what the GUI lists as
         # installed-plugin profiles.
         smoke.seed_plugin()
+        smoke.seed_vault_registry()
         smoke.launch()
 
         # ── a second instance must not take the endpoint ──────────────
@@ -1740,8 +1757,7 @@ def main() -> int:
         # GDScript hop), and search re-indexes changed notes first so a note
         # edited outside gPTY is visible to the next query.
         smoke.enter("vault")
-        vault = smoke.tmp / "vault"
-        (vault / "notes").mkdir(parents=True)
+        vault = smoke.tmp / smoke.VAULT_PATH
         (vault / "Alpha.md").write_text(
             "# Alpha\n\nownership and lifetimes\n", encoding="utf-8"
         )

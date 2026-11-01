@@ -241,8 +241,31 @@ These are load-bearing guards. Reports that require removing one of them should 
   local **regular file** (a FIFO or device is refused before FFmpeg sees it), the demuxer's alias
   list is checked after opening, and the selected stream's codec id is checked against the same
   list before a decoder runs. Caps: 16 streams, 4096 px per side, 34 MiB per decoded frame, 8 audio
-  channels, bounded queues and a 10 s open/probe budget. Decode runs on its own thread; no hardware
-  decoder and no network protocol is compiled in.
+  channels, bounded queues and a 10 s open/probe budget. The size caps are re-checked on the
+  *decoded* frame, not only on the probe - a frame wider or taller than 4096 px, or carrying more
+  than 8 channels, is refused - and a resampled audio frame is bounded at one second per channel
+  (`MAX_AUDIO_FRAME_SAMPLES`) *before* allocation, because a file claiming a tiny sample rate
+  otherwise amplifies a 4 KiB packet into hundreds of megabytes. Decode runs on its own thread; a
+  panic there fails the session instead of leaving it on "opening". No hardware decoder and no
+  network protocol is compiled in.
+- **Vault verbs answer only inside a registered root (v0.7.1)**: `vaultSearch`, `vaultRead` and
+  `vaultWeight` take a `vault_path` from the caller, so without a list the control socket's
+  knowledge base would be a file-read primitive over any directory a client names. They answer only
+  for a root in the user's own `user://vaults.json`, written solely by the pane settings UI - a
+  layout, profile, plugin or IPC call cannot add one, and neither can a Wiki pane merely being
+  pointed at a directory. The shipped knowledge base is the exception, because it comes from gPTY's
+  own bundle and a Wiki pane registers it itself. A refusal is `-32000` with
+  `data.code = "not_registered"`. The same list gates `vaultWeight` before it writes the user's
+  `link_weights.json`: an unregistered root could otherwise fill that store and, at its vault cap,
+  evict the user's own entries. The native handlers read an in-process mirror of the list, and a GUT
+  test asserts the mirror and the store agree.
+- **Agent backends are bounded readers (v0.7.1)**: both process backends (`omp`, `cli`) read their
+  child's stdout through one bounded line reader (`gpty_ai::frame`), so a backend that streams bytes
+  without a newline cannot grow the GUI for the turn timeout, and a single OMP answer is capped at
+  8 MiB before it is assembled. Backends are user-chosen programs with the user's own authority, so
+  this is a memory bound, not a trust boundary. The prompt reaches the child on stdin (never argv),
+  and the child's environment is stripped of `GPTY_SECRET`, `GPTY_SOCKET`, the event capability and
+  the pane markers.
 
 ## Known limitations
 

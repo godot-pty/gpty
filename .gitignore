@@ -67,3 +67,7 @@ dist/ffmpeg/
 # Local media bundle output (scripts/build -> scripts/bundle-media)
 dist/lib*.so*
 dist/licenses/
+
+# Bytecode from `scripts/audit-probes.py` importing `scripts/smoke_pane_api.py`
+__pycache__/
+*.pyc
