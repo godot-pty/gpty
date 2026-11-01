@@ -241,16 +241,21 @@ These are load-bearing guards. Reports that require removing one of them should 
   local **regular file**, and the bytes FFmpeg reads come from a descriptor this process opened:
   `O_NONBLOCK | O_NOFOLLOW`, verified with `fstat`, and handed over through a custom AVIO context, so
   FFmpeg never opens the path itself. A name swapped for a FIFO or device between the check and the
-  open therefore cannot block the session - a blocked `open(2)` cannot be interrupted, and a pane's
-  close joins the decode worker - and cannot redirect what is played. The demuxer's alias
+  open therefore cannot block the session - a blocked `open(2)` cannot be interrupted - and cannot
+  redirect what is played. The demuxer's alias
   list is checked after opening, and the selected stream's codec id is checked against the same
   list before a decoder runs. Caps: 16 streams, 4096 px per side, 34 MiB per decoded frame, 8 audio
-  channels, bounded queues and a 10 s open/probe budget. The size caps are re-checked on the
+  channels, bounded queues, a 10 s open/probe budget and a 2 s close budget (`CLOSE_TIMEOUT_MS`). The size caps are re-checked on the
   *decoded* frame, not only on the probe - a frame wider or taller than 4096 px, or carrying more
   than 8 channels, is refused - and a resampled audio frame is bounded at one second per channel
   (`MAX_AUDIO_FRAME_SAMPLES`) *before* allocation, because a file claiming a tiny sample rate
   otherwise amplifies a 4 KiB packet into hundreds of megabytes. Decode runs on its own thread; a
-  panic there fails the session instead of leaving it on "opening". No hardware decoder and no
+  panic there fails the session instead of leaving it on "opening". The close budget is what
+  keeps that thread from holding the GUI: a worker inside a decoder call cannot see the stop flag,
+  so past the budget it is detached rather than joined (a pane close, and the window quit that
+  drops every session). Nothing frees FFmpeg contexts under a running decoder - the abandoned
+  thread frees its own if the call returns, and it is the one cost if it does not, ending with
+  the process. No hardware decoder and no
   network protocol is compiled in.
 - **Vault verbs answer only inside a registered root (v0.7.1)**: `vaultSearch`, `vaultRead` and
   `vaultWeight` take a `vault_path` from the caller, so without a list the control socket's
