@@ -374,7 +374,9 @@ mod tests {
     /// Sets or clears environment variables through the shared test-env
     /// guard (`crate::test_env`) — see that module for why every test module
     /// that touches `std::env` uses the same lock.
-    use crate::test_env::{EnvVar, EnvVars};
+    use crate::test_env::EnvVar;
+    #[cfg(unix)]
+    use crate::test_env::EnvVars;
 
     /// The Windows state directory must exist by the time `state_dir()`
     /// returns it: a store opens its database inside without creating the

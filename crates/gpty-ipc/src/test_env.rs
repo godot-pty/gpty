@@ -52,11 +52,18 @@ impl Drop for EnvVar {
 /// The same guard for a test that needs several variables at once: taking two
 /// [`EnvVar`]s deadlocks on the shared lock (it did — the whole `xdg` module
 /// hung), so the variables one resolution reads are set together.
+///
+/// Unix-only, like its only callers: the resolution tests that need several
+/// variables at once are the `xdg` ones, so a Windows test build must not
+/// carry this type (it did, unused, until `rust-windows` started running
+/// `cargo test -p gpty-ipc` and `-Dwarnings` failed the build).
+#[cfg(unix)]
 pub(crate) struct EnvVars {
     previous: Vec<(&'static str, Option<std::ffi::OsString>)>,
     _lock: MutexGuard<'static, ()>,
 }
 
+#[cfg(unix)]
 impl EnvVars {
     /// Set or clear each variable under one guard; `None` clears a key.
     pub(crate) fn apply(changes: &[(&'static str, Option<&str>)]) -> Self {
@@ -80,6 +87,7 @@ impl EnvVars {
     }
 }
 
+#[cfg(unix)]
 impl Drop for EnvVars {
     fn drop(&mut self) {
         for (key, previous) in self.previous.drain(..) {
