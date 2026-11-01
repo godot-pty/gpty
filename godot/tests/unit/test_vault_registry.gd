@@ -63,8 +63,11 @@ func test_the_native_mirror_is_this_list():
 	assert_true(VaultRegistry.register(_vault))
 	var roots := _mirror()
 	assert_eq(roots.size(), 1, "registration reaches the native handlers")
+	# Rust's `canonicalize` answers backslashes (and a `\\?\` prefix) on
+	# Windows, so the suffix check normalizes the separator rather than
+	# asserting the host's spelling.
 	assert_true(
-		str(roots[0]).ends_with("/vault_registry_probe"),
+		str(roots[0]).replace("\\", "/").ends_with("/vault_registry_probe"),
 		"the mirror holds the canonical root (%s)" % roots
 	)
 	MockAutoloads.set_store(VaultRegistry.VAULTS_FILE, {"roots": []})
