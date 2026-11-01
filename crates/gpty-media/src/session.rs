@@ -16,8 +16,8 @@ use ffmpeg_the_third as ffmpeg;
 use crate::error::MediaError;
 use crate::probe::{AudioStream, OpenedInput, VideoStream, frame_time_us, open_input};
 use crate::{
-    MAX_CHANNELS, MAX_FRAME_BYTES, MAX_SAMPLE_RATE, MAX_VIDEO_DIMENSION, MIN_SAMPLE_RATE,
-    OPEN_TIMEOUT_MS,
+    MAX_AUDIO_FRAME_SAMPLES, MAX_CHANNELS, MAX_FRAME_BYTES, MAX_SAMPLE_RATE, MAX_VIDEO_DIMENSION,
+    MIN_SAMPLE_RATE, OPEN_TIMEOUT_MS,
 };
 
 /// Frames buffered ahead of the UI. Two 4K frames is already the largest
@@ -304,17 +304,30 @@ impl MediaSession {
         let (ready_tx, ready_rx) = sync_channel(1);
         let shared = Arc::new(Shared::new());
         let worker_shared = shared.clone();
+        // A panic in the worker (a bug in a C binding, never a file refusal)
+        // must surface as a failed session: without this the thread dies
+        // without sending `Startup` or touching the status, and the pane sits
+        // on "Opening" forever while `drop` joins the dead thread.
+        let panic_ready = ready_tx.clone();
+        let panic_shared = shared.clone();
         let worker = thread::Builder::new()
             .name("gpty-media".to_string())
             .spawn(move || {
-                worker_main(
-                    config,
-                    command_rx,
-                    video_tx,
-                    audio_tx,
-                    ready_tx,
-                    worker_shared,
-                )
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    worker_main(
+                        config,
+                        command_rx,
+                        video_tx,
+                        audio_tx,
+                        ready_tx,
+                        worker_shared,
+                    )
+                }));
+                if outcome.is_err() {
+                    let error = MediaError::decode("decode worker panicked");
+                    panic_shared.fail(error.clone());
+                    let _ = panic_ready.send(Startup::Failed(error));
+                }
             })
             .map_err(|e| MediaError::io(format!("cannot start media worker: {e}")))?;
 
@@ -860,6 +873,15 @@ impl VideoPipeline {
         if width == 0 || height == 0 {
             return Err(MediaError::decode("decoded a zero-sized frame"));
         }
+        // The probe refuses a stream that *declares* more than the cap, and
+        // this refuses a frame that decodes beyond it: a container whose
+        // parameters understate the picture would otherwise reach the scaler
+        // with an 8K frame and only the byte cap standing in the way.
+        if width > MAX_VIDEO_DIMENSION || height > MAX_VIDEO_DIMENSION {
+            return Err(MediaError::too_large(format!(
+                "decoded frame {width}x{height} exceeds the {MAX_VIDEO_DIMENSION} per-side cap"
+            )));
+        }
         let (out_w, out_h) = fit_frame(width, height, self.max_width, self.max_height);
         let bytes = (out_w as usize)
             .checked_mul(out_h as usize)
@@ -983,7 +1005,13 @@ impl AudioPipeline {
             self.next_pts_us = frame_time_us(pts, time_base);
         }
 
-        let source_channels = frame.ch_layout().channels().max(1);
+        let decoded_channels = frame.ch_layout().channels();
+        if decoded_channels > MAX_CHANNELS as u32 {
+            return Err(MediaError::too_large(format!(
+                "decoded audio frame has {decoded_channels} channels; the cap is {MAX_CHANNELS}"
+            )));
+        }
+        let source_channels = decoded_channels.max(1);
         // PCM files may carry an unspecified channel layout (no mask);
         // `swresample` needs a mask, and it also compares the *frame's* layout
         // with the configured input. Normalize the frame itself, not just the
@@ -1012,9 +1040,22 @@ impl AudioPipeline {
             .resampler
             .as_mut()
             .ok_or_else(|| MediaError::decode("resampler missing"))?;
-        let capacity = ((frame.samples() as u64 * self.target_rate as u64) / source_rate as u64)
-            as usize
-            + 512;
+        // The output size is the source's samples scaled by the rate ratio, so
+        // a file that claims a tiny rate turns a small packet into a huge
+        // allocation. Check the arithmetic before `frame::Audio::new` allocates
+        // anything, and refuse rather than truncate: a truncated frame would
+        // desynchronise audio from the clock.
+        let requested_samples =
+            (frame.samples() as u64).saturating_mul(self.target_rate as u64) / source_rate as u64;
+        if requested_samples > MAX_AUDIO_FRAME_SAMPLES {
+            return Err(MediaError::too_large(format!(
+                "resampling a {}-sample {source_rate} Hz frame to {} Hz needs \
+                 {requested_samples} samples per channel; the cap is {MAX_AUDIO_FRAME_SAMPLES}",
+                frame.samples(),
+                self.target_rate
+            )));
+        }
+        let capacity = requested_samples as usize + 512;
         let mut output = ffmpeg::frame::Audio::new(
             ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Packed),
             capacity,
@@ -1130,5 +1171,82 @@ impl AudioPipeline {
                 .iter()
                 .map(|b| f32::from_ne_bytes(*b)),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stereo_mask() -> ffmpeg::ChannelLayoutMask {
+        ffmpeg::ChannelLayout::default_for_channels(2)
+            .mask()
+            .expect("a defined stereo mask")
+    }
+
+    /// The amplification defect the audit's follow-up found: a tiny file can
+    /// claim a tiny sample rate, and the resampler's output is `samples ×
+    /// target_rate / source_rate`. A 4096-sample frame at 1 Hz would ask for
+    /// 196 million samples per channel (≈780 MB) before any byte cap sees it.
+    #[test]
+    fn a_low_rate_frame_is_refused_before_the_allocation() {
+        let mut pipeline = AudioPipeline::new(48_000, 2);
+        let mut frame = ffmpeg::frame::Audio::new(
+            ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Packed),
+            4096,
+            stereo_mask(),
+        );
+        frame.set_rate(1);
+        let error = pipeline
+            .push_frame(&mut frame, ffmpeg::Rational(1, 1))
+            .expect_err("a 1 Hz frame must be refused instead of amplified");
+        assert_eq!(error.code(), crate::MediaErrorCode::TooLarge);
+    }
+
+    /// A rate that merely stretches a normal frame is still fine: the cap is
+    /// on the allocation, not on low-rate audio as such.
+    #[test]
+    fn an_eight_kilohertz_frame_still_resamples() {
+        let mut pipeline = AudioPipeline::new(48_000, 2);
+        let mut frame = ffmpeg::frame::Audio::new(
+            ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Packed),
+            1024,
+            stereo_mask(),
+        );
+        frame.set_rate(8_000);
+        let chunks = pipeline
+            .push_frame(&mut frame, ffmpeg::Rational(1, 1000))
+            .expect("8 kHz is within the cap");
+        assert!(!chunks.is_empty(), "the frame must produce audio");
+    }
+
+    /// The probe refuses a stream that *declares* too large a picture; this is
+    /// the decode-side check for a frame that arrives bigger than declared.
+    #[test]
+    fn a_decoded_frame_beyond_the_side_cap_is_refused() {
+        let mut pipeline = VideoPipeline::new(0, 0);
+        let frame = ffmpeg::frame::Video::new(ffmpeg::format::Pixel::YUV420P, 5000, 2);
+        let error = pipeline
+            .convert(&frame)
+            .expect_err("a 5000 px side exceeds the cap");
+        assert_eq!(error.code(), crate::MediaErrorCode::TooLarge);
+    }
+
+    /// Channel count is checked on the decoded frame, not only on the stream
+    /// parameters (which a container can understate).
+    #[test]
+    fn a_decoded_frame_beyond_the_channel_cap_is_refused() {
+        let mut pipeline = AudioPipeline::new(48_000, 2);
+        let sixteen = ffmpeg::ChannelLayout::default_for_channels(16);
+        let mut frame = ffmpeg::frame::Audio::new(
+            ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Packed),
+            256,
+            sixteen.mask().expect("a 16-channel mask"),
+        );
+        frame.set_rate(48_000);
+        let error = pipeline
+            .push_frame(&mut frame, ffmpeg::Rational(1, 48_000))
+            .expect_err("16 channels exceeds the cap");
+        assert_eq!(error.code(), crate::MediaErrorCode::TooLarge);
     }
 }

@@ -32,10 +32,15 @@ and codec allowlists in `src/lib.rs` are checked after FFmpeg opens the file.
 `components.txt` is the closed component set compiled into the shipped FFmpeg;
 `tests/build_recipe.rs` checks it against the runtime lists in both directions.
 
-Caps: at most 16 streams, 4096 px per video side, 8192 audio channels (the
-session config accepts up to 8), 48 MB per frame budget (`MAX_FRAME_BYTES`),
-bounded queues (2 video frames / 16 audio chunks), and a 10 s open/probe
-deadline. No hardware decode and no network protocols are compiled in.
+Caps: at most 16 streams, 4096 px per video side, 8 audio channels, 34 MiB per
+decoded frame (`MAX_FRAME_BYTES`), bounded queues (2 video frames / 16 audio
+chunks), and a 10 s open/probe deadline. The dimension and channel caps are
+re-checked on the **decoded** frame, not only on the probe, and a resampled
+audio frame is bounded at one second per channel (`MAX_AUDIO_FRAME_SAMPLES`)
+*before* `frame::Audio::new`: the output size is `samples × target_rate /
+source_rate`, so a file claiming a tiny source rate would otherwise turn a
+4 KiB packet into hundreds of megabytes. No hardware decode and no network
+protocols are compiled in.
 
 ## Binding rules
 

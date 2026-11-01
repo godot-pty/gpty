@@ -66,6 +66,16 @@ pub const MAX_STREAMS: usize = 16;
 /// Most audio channels accepted from a file (and requested by a caller).
 pub const MAX_CHANNELS: u16 = 8;
 
+/// Most samples per channel a resampled audio frame may hold.
+///
+/// The resampler's output size is `samples × target_rate / source_rate`, so a
+/// file that claims a tiny source rate amplifies: a 4096-sample frame at 1 Hz
+/// becomes 196 million samples at 48 kHz, and `frame::Audio::new` would
+/// allocate it before any byte cap sees it. One second at the highest accepted
+/// output rate is far above any real codec's frame (typical: 1024–4096
+/// samples) and bounds the allocation at 192 000 × 8 channels × 4 bytes.
+pub const MAX_AUDIO_FRAME_SAMPLES: u64 = MAX_SAMPLE_RATE as u64;
+
 /// Lowest and highest sample rates accepted for decode output.
 pub const MIN_SAMPLE_RATE: u32 = 8_000;
 pub const MAX_SAMPLE_RATE: u32 = 192_000;
