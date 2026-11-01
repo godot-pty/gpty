@@ -70,8 +70,8 @@ pub struct IpcServer {
     socket_path: String,
     /// Optional shared secret; when set, requests must carry a matching gpty_secret.
     secret: Option<String>,
-    /// Windows: whether the next pipe instance this *endpoint* creates may
-    /// claim the name.
+    /// Windows: whether a pipe instance has ever been created for this
+    /// endpoint.
     ///
     /// `FILE_FLAG_FIRST_PIPE_INSTANCE` fails when any instance of the name
     /// exists, which is the only thing that stops another process from owning
@@ -82,8 +82,13 @@ pub struct IpcServer {
     /// a process-global flag let whichever created first consume the claim, so
     /// the second one created a pipe on a name another instance already owned
     /// — silently, because Windows allows several instances of a name.
-    #[cfg(windows)]
-    first_pipe_instance: std::sync::atomic::AtomicBool,
+    ///
+    /// The flag records a *successful* create, not an attempt: consuming it
+    /// before the create means a transient failure leaves every later attempt
+    /// non-first, so a racing process can own the name and the restarted GUI
+    /// attaches to it instead of refusing.
+    #[cfg(any(windows, test))]
+    any_instance_created: std::sync::atomic::AtomicBool,
 }
 
 impl IpcServer {
@@ -93,9 +98,28 @@ impl IpcServer {
             handlers: HashMap::new(),
             socket_path: socket_path.into(),
             secret: None,
-            #[cfg(windows)]
-            first_pipe_instance: std::sync::atomic::AtomicBool::new(true),
+            #[cfg(any(windows, test))]
+            any_instance_created: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Run one create attempt, spending the first-instance claim only when it
+    /// succeeds.
+    ///
+    /// `first_pipe_instance(true)` makes the create fail when the name already
+    /// has an owner; a failed attempt created nothing, so the next attempt must
+    /// still claim it. Both halves of that invariant live here so a test can
+    /// drive the sequence without a pipe.
+    #[cfg(any(windows, test))]
+    fn create_with<T, F>(&self, create: F) -> io::Result<T>
+    where
+        F: FnOnce(bool) -> io::Result<T>,
+    {
+        use std::sync::atomic::Ordering;
+        let first = !self.any_instance_created.load(Ordering::SeqCst);
+        let value = create(first)?;
+        self.any_instance_created.store(true, Ordering::SeqCst);
+        Ok(value)
     }
 
     /// Require clients to present this shared secret (GPTY_SECRET).
@@ -258,7 +282,7 @@ impl IpcServer {
                 // handler and prepare the next instance. Multiple instances
                 // of the same pipe name may coexist, so in-flight connections
                 // do not block new ones.
-                let server = match self.create_pipe_instance().await {
+                let server = match self.create_pipe_instance() {
                     Ok(s) => s,
                     Err(e) if pipe_name_is_taken(&e) => {
                         // The Unix branch refuses the same way. Without this,
@@ -341,23 +365,17 @@ impl IpcServer {
     }
 
     #[cfg(windows)]
-    async fn create_pipe_instance(
-        &self,
-    ) -> io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
-        use std::sync::atomic::Ordering;
+    fn create_pipe_instance(&self) -> io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
         use tokio::net::windows::named_pipe;
-
-        // True for the first instance this endpoint creates and false after,
-        // which is what blocks another local process from owning the name
-        // (see the field's comment for why this cannot be process-global).
-        let first = self.first_pipe_instance.swap(false, Ordering::SeqCst);
 
         // Named pipes are network-reachable by default; this daemon is
         // local-only, so reject remote clients.
-        named_pipe::ServerOptions::new()
-            .reject_remote_clients(true)
-            .first_pipe_instance(first)
-            .create(&self.socket_path)
+        self.create_with(|first| {
+            named_pipe::ServerOptions::new()
+                .reject_remote_clients(true)
+                .first_pipe_instance(first)
+                .create(&self.socket_path)
+        })
     }
 }
 
@@ -880,6 +898,37 @@ mod tests {
         assert!(!constant_time_eq(b"s3cre", b"s3cret"));
         assert!(!constant_time_eq(b"", b"s3cret"));
         assert!(constant_time_eq(b"", b""));
+    }
+
+    /// A failed create must not spend the claim: `first_pipe_instance` is what
+    /// makes a racing process's pipe name unusable to us, so a transient
+    /// failure that consumed it would leave every later instance non-first and
+    /// let the winner own the name (the restarted GUI would then attach to it
+    /// instead of refusing).
+    #[test]
+    fn a_failed_create_does_not_spend_the_first_instance_claim() {
+        let server = IpcServer::new("\\\\.\\pipe\\gpty-claim-test");
+        let error = server
+            .create_with(|first| {
+                assert!(first, "the first attempt must claim first-instance");
+                Err::<(), _>(io::Error::from(io::ErrorKind::WouldBlock))
+            })
+            .expect_err("the injected failure must surface");
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+
+        server
+            .create_with(|first| {
+                assert!(first, "a retry after a failed attempt must still claim it");
+                Ok(())
+            })
+            .expect("the retry succeeds");
+
+        server
+            .create_with(|first| {
+                assert!(!first, "after an instance exists the claim stays spent");
+                Ok(())
+            })
+            .expect("later instances are non-first");
     }
 
     #[cfg(unix)]
