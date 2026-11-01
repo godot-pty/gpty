@@ -34,6 +34,17 @@ and the drain given a bounded moment so its account is not lost to a race).
 `scripts/check-log-hygiene` in `ci-check` fails a `log::*!` that formats
 program content without a `// log-ok:` marker.
 
+### Stdout is bounded
+
+A backend child is also a program that can wedge: `Lines::next_line` buffers a
+whole line before returning it, so a size check after the fact bounds nothing.
+Both process backends read their child's stdout through `frame::read_frame`,
+which fails as soon as a frame's content passes the caller's limit (64 KiB for
+the `cli` bridge, `MAX_REASSEMBLED_FRAME_BYTES` for OMP's RPC frames), and one
+OMP answer is capped at `MAX_ASSEMBLED_ANSWER_BYTES` before it is assembled.
+A new backend reads stdout through that function rather than growing its own
+reader - the CLI bridge had the bound and the OMP stream did not.
+
 ### CLI bridge contract
 
 The `cli` backend runs a user-configured command (argv from the Inspector

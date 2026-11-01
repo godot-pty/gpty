@@ -28,7 +28,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -139,52 +139,6 @@ async fn run_one_prompt(
     }
 }
 
-/// Read one newline-terminated frame, failing as soon as it exceeds `limit`
-/// bytes.
-///
-/// `Lines::next_line` buffers a whole line before returning it, so a size
-/// check applied afterwards bounds nothing: a wedged adapter that streams
-/// bytes without a newline grows the buffer for the entire frame timeout.
-/// Filling and consuming in bounded steps caps the memory instead.
-async fn read_frame(
-    reader: &mut BufReader<ChildStdout>,
-    limit: usize,
-) -> Result<Option<String>, String> {
-    let mut line: Vec<u8> = Vec::new();
-    loop {
-        let chunk = reader
-            .fill_buf()
-            .await
-            .map_err(|e| format!("cli backend read: {e}"))?;
-        if chunk.is_empty() {
-            // EOF: a final unterminated line is still delivered.
-            break;
-        }
-        let take = match chunk.iter().position(|&b| b == b'\n') {
-            Some(pos) => pos + 1,
-            None => chunk.len(),
-        };
-        line.extend_from_slice(&chunk[..take]);
-        reader.consume(take);
-        if line.len() > limit {
-            return Err(format!("cli backend frame exceeds {limit} bytes"));
-        }
-        if line.last() == Some(&b'\n') {
-            break;
-        }
-    }
-    if line.is_empty() {
-        return Ok(None);
-    }
-    line.pop(); // trailing newline
-    if line.last() == Some(&b'\r') {
-        line.pop();
-    }
-    String::from_utf8(line)
-        .map(Some)
-        .map_err(|e| format!("cli backend frame not UTF-8: {e}"))
-}
-
 fn spawn_child(config: &SessionOpenRequest) -> Result<Child, String> {
     let mut command = Command::new(&config.command[0]);
     command
@@ -281,7 +235,7 @@ async fn drive_child(
         }
         let line = match timeout(
             FRAME_TIMEOUT,
-            read_frame(&mut bridge.stdout, MAX_FRAME_BYTES),
+            crate::frame::read_frame(&mut bridge.stdout, MAX_FRAME_BYTES, "cli"),
         )
         .await
         {

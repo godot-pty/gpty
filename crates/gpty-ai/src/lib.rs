@@ -23,6 +23,7 @@
 pub mod backend;
 pub mod binary;
 pub mod cli;
+pub mod frame;
 pub mod logtext;
 pub mod mock;
 pub mod omp;

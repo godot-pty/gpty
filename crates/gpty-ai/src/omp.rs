@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -26,6 +26,10 @@ const CANCEL_WAIT: Duration = Duration::from_secs(2);
 const STDERR_SETTLE: Duration = Duration::from_millis(500);
 const MAX_REASSEMBLED_FRAME_BYTES: usize = 64 * 1024 * 1024;
 const MAX_CHUNKS: usize = 4096;
+/// Most answer text one turn may assemble for its final `Done` event. Deltas
+/// stream to the pane as they arrive; this bounds the copy kept alongside them,
+/// so a backend that never stops talking cannot grow the GUI without limit.
+const MAX_ASSEMBLED_ANSWER_BYTES: usize = 8 * 1024 * 1024;
 static NEXT_COMMAND_ID: AtomicU64 = AtomicU64::new(1);
 
 pub struct OmpBackend {
@@ -136,7 +140,7 @@ pub(crate) async fn run_omp_session(
 struct OmpProcess {
     child: Child,
     stdin: ChildStdin,
-    lines: Lines<BufReader<ChildStdout>>,
+    stdout: BufReader<ChildStdout>,
     decoder: RpcFrameDecoder,
     stderr_task: JoinHandle<()>,
     /// Bounded, sanitized stderr of the child (`crate::logtext`). The lines are
@@ -221,7 +225,7 @@ impl OmpProcess {
         let mut process = Self {
             child,
             stdin,
-            lines: BufReader::new(stdout).lines(),
+            stdout: BufReader::new(stdout),
             decoder: RpcFrameDecoder::default(),
             stderr_task,
             stderr_tail,
@@ -318,6 +322,13 @@ impl OmpProcess {
                 Some("agent_start") | Some("message_update") => {
                     for event in events_from_rpc_frame(&frame, &mut saw_answer) {
                         if let AiEvent::Delta { text } = &event {
+                            if assembled.len() + text.len() > MAX_ASSEMBLED_ANSWER_BYTES {
+                                self.abort_and_wait().await;
+                                return Err(BackendError::Message(format!(
+                                    "omp answer exceeds {} MiB",
+                                    MAX_ASSEMBLED_ANSWER_BYTES / (1024 * 1024)
+                                )));
+                            }
                             assembled.push_str(text);
                         }
                         sink.emit(turn_id, run_id, event);
@@ -397,7 +408,15 @@ impl OmpProcess {
 
     async fn next_frame(&mut self) -> Result<Option<Value>, BackendError> {
         loop {
-            let line = match self.lines.next_line().await {
+            // Bounded like the CLI bridge's frames: a backend that streams
+            // bytes without a newline must not grow this process's memory.
+            let line = match crate::frame::read_frame(
+                &mut self.stdout,
+                MAX_REASSEMBLED_FRAME_BYTES,
+                "omp",
+            )
+            .await
+            {
                 Ok(Some(line)) => line,
                 Ok(None) => {
                     self.dead = true;
@@ -405,7 +424,7 @@ impl OmpProcess {
                 }
                 Err(error) => {
                     self.dead = true;
-                    return Err(error.into());
+                    return Err(BackendError::Message(error));
                 }
             };
             if line.trim().is_empty() {
