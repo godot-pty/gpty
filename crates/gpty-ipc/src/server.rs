@@ -684,13 +684,18 @@ fn json_kind(value: &serde_json::Value) -> &'static str {
     }
 }
 
-/// Handle a single connection: read one JSON-RPC request, dispatch, respond.
+/// Handle a connection: serve newline-framed requests until the client
+/// closes it.
 ///
-/// I/O (the request read and the response write) is bounded by
-/// [`IO_TIMEOUT`]; the handler dispatches under its own registered budget.
-/// The two are separate on purpose — one connection-wide deadline made every
-/// method whose answer is deliberately held (`paneWait`, `pluginInstall`)
-/// die at that deadline, no matter what the method or the client promised.
+/// The socket is public API, so a client may pipeline: every frame after the
+/// first byte of a newline is a complete request, and each is answered in
+/// order on the same connection. Each frame is read under its own
+/// [`MAX_REQUEST_LEN`] bound and its own [`IO_TIMEOUT`] read wait (the first
+/// frame's wait is what keeps a connection that sends nothing from holding a
+/// slot); the handler dispatches under its own registered budget. The two
+/// timeouts are separate on purpose — one connection-wide deadline made every
+/// method whose answer is deliberately held (`paneWait`, `pluginInstall`) die
+/// at that deadline, no matter what the method or the client promised.
 async fn handle_connection(
     stream: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     handlers: &HashMap<String, RegisteredHandler>,
@@ -698,20 +703,49 @@ async fn handle_connection(
 ) -> io::Result<()> {
     let (reader, mut writer) = tokio::io::split(stream);
     let mut buf_reader = BufReader::new(reader);
-    let mut line = String::new();
+    loop {
+        match handle_frame(&mut buf_reader, &mut writer, handlers, secret).await? {
+            NextFrame::Continue => {}
+            NextFrame::Close => return Ok(()),
+        }
+    }
+}
 
-    // Read one newline-delimited JSON request, bounded to MAX_REQUEST_LEN
-    // bytes so a malicious client cannot force unbounded allocation. The
-    // bound also keeps a connection that connects and sends nothing from
-    // holding a slot.
-    let mut limited = BufReader::new((&mut buf_reader).take(MAX_REQUEST_LEN as u64 + 1));
+/// What the connection does after one frame.
+enum NextFrame {
+    /// The stream is still frame-aligned: read the next request.
+    Continue,
+    /// EOF, an unframed stream, or a client that must not continue.
+    Close,
+}
+
+/// Read one newline-delimited JSON request, dispatch it and answer it.
+async fn handle_frame<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    handlers: &HashMap<String, RegisteredHandler>,
+    secret: Option<&str>,
+) -> io::Result<NextFrame>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    // Read one frame, bounded to MAX_REQUEST_LEN bytes so a malicious client
+    // cannot force unbounded allocation. `take` on the already-buffered
+    // reader caps the slice it hands out instead of wrapping a second buffer:
+    // an extra `BufReader` here would swallow the start of the next pipelined
+    // frame when it was dropped.
+    let mut line = String::new();
+    let mut limited = (&mut *reader).take(MAX_REQUEST_LEN as u64 + 1);
     let n = tokio::time::timeout(IO_TIMEOUT, limited.read_line(&mut line))
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "request read timed out"))??;
     if n == 0 {
-        return Ok(()); // EOF
+        return Ok(NextFrame::Close); // EOF
     }
     if !line.ends_with('\n') && line.len() == MAX_REQUEST_LEN + 1 {
+        // The frame is longer than the bound, so the rest of the stream is no
+        // longer frame-aligned: answer, then close rather than parse a tail.
         let resp = protocol::build_error(
             0,
             JsonRpcError::new(
@@ -719,12 +753,14 @@ async fn handle_connection(
                 format!("request exceeds {MAX_REQUEST_LEN} bytes"),
             ),
         );
-        write_response(&mut writer, &resp).await?;
-        return Ok(());
+        write_response(writer, &resp).await?;
+        return Ok(NextFrame::Close);
     }
     let line = line.trim().to_string();
     if line.is_empty() {
-        return Ok(());
+        // A blank frame carries nothing; it is not a request and does not end
+        // a pipeline.
+        return Ok(NextFrame::Continue);
     }
 
     // Parse request.
@@ -735,8 +771,10 @@ async fn handle_connection(
                 0,
                 JsonRpcError::new(JsonRpcError::PARSE_ERROR, format!("Parse error: {e}")),
             );
-            write_response(&mut writer, &resp).await?;
-            return Ok(());
+            write_response(writer, &resp).await?;
+            // The frame ended at its newline, so the next one still frames
+            // correctly: an unparseable document costs itself, not the batch.
+            return Ok(NextFrame::Continue);
         }
     };
 
@@ -744,13 +782,15 @@ async fn handle_connection(
     // an unauthenticated notification is dropped, not answered; a request
     // that merely carries `"id": 0` still runs the auth path below.
     if req.is_notification() {
-        return Ok(());
+        return Ok(NextFrame::Continue);
     }
 
     // Response id for a real request; `id` is present whenever we get here.
     let id = req.id.unwrap_or(0);
 
-    // Auth: when the server has a secret configured, require a match.
+    // Auth: when the server has a secret configured, require a match. A bad
+    // credential ends the connection — every later frame would carry it too,
+    // and closing keeps an unauthenticated peer from holding a slot.
     if let Some(expected) = secret {
         let provided = req.gpty_secret.as_deref().unwrap_or("");
         if !constant_time_eq(provided.as_bytes(), expected.as_bytes()) {
@@ -761,8 +801,8 @@ async fn handle_connection(
                     "unauthorized: missing or invalid gpty_secret",
                 ),
             );
-            write_response(&mut writer, &resp).await?;
-            return Ok(());
+            write_response(writer, &resp).await?;
+            return Ok(NextFrame::Close);
         }
     }
 
@@ -788,8 +828,8 @@ async fn handle_connection(
                 ),
             ),
         );
-        write_response(&mut writer, &resp).await?;
-        return Ok(());
+        write_response(writer, &resp).await?;
+        return Ok(NextFrame::Continue);
     }
     let resp = match handlers.get(&req.method) {
         Some(entry) => match tokio::time::timeout(entry.timeout, (entry.handler)(params)).await {
@@ -819,9 +859,9 @@ async fn handle_connection(
         ),
     };
 
-    write_response(&mut writer, &resp).await?;
+    write_response(writer, &resp).await?;
 
-    Ok(())
+    Ok(NextFrame::Continue)
 }
 
 // ── Tests ────────────────────────────────────────────────
@@ -1164,6 +1204,87 @@ mod tests {
                     "the handler must be called with null params"
                 );
             }
+
+            let _ = std::fs::remove_file(&socket_path);
+        }
+
+        /// The socket is public API, so a pipelined client is a valid one:
+        /// every frame written on one connection is answered in order without
+        /// waiting for EOF, and a frame that cannot be parsed costs only
+        /// itself. Before the connection loop this got one response and a
+        /// closed connection (`scripts/audit-probes.py malformed-batch`).
+        #[tokio::test]
+        async fn a_pipelined_batch_is_answered_frame_by_frame() {
+            use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+            let socket_path = format!("/tmp/gpty-ipc-pipeline-{}.sock", std::process::id());
+            let _ = std::fs::remove_file(&socket_path);
+
+            let mut server = IpcServer::new(&socket_path);
+            server.register(
+                "echo",
+                Arc::new(|params| Box::pin(async move { Ok(params) })),
+            );
+            let server_path = socket_path.clone();
+            tokio::spawn(async move {
+                let _ = server.serve().await;
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+            // Five frames in one write: served, refused, unparseable, blank,
+            // served. The write half is never closed, so every answer must
+            // arrive while the connection is still open.
+            let frames = [
+                r#"{"jsonrpc":"2.0","id":1,"method":"echo","params":{"a":1}}"#,
+                r#"{"jsonrpc":"2.0","id":2,"method":"echo","params":[1,2]}"#,
+                r#"{"jsonrpc":"2.0","id":3,"method":"#,
+                "",
+                r#"{"jsonrpc":"2.0","id":4,"method":"echo","params":{"b":2}}"#,
+            ];
+            let payload = format!("{}\n", frames.join("\n"));
+
+            let mut stream = tokio::net::UnixStream::connect(&server_path).await.unwrap();
+            stream.write_all(payload.as_bytes()).await.unwrap();
+
+            let mut reader = BufReader::new(stream);
+            let mut responses = Vec::new();
+            // Four answers for five frames: the blank line is not a request.
+            for _ in 0..4 {
+                let mut line = String::new();
+                let read = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    reader.read_line(&mut line),
+                )
+                .await
+                .expect("every pipelined frame is answered")
+                .unwrap();
+                assert!(
+                    read > 0,
+                    "the connection closed after {} answers",
+                    responses.len()
+                );
+                responses.push(serde_json::from_str::<Response>(line.trim()).unwrap());
+            }
+
+            let ids: Vec<u64> = responses.iter().map(|resp| resp.id).collect();
+            assert_eq!(ids, vec![1, 2, 0, 4], "one answer per request, in order");
+            assert_eq!(
+                responses[0].result.as_ref().unwrap(),
+                &serde_json::json!({"a": 1})
+            );
+            assert_eq!(
+                responses[1].error.as_ref().unwrap().code,
+                JsonRpcError::INVALID_PARAMS
+            );
+            assert_eq!(
+                responses[2].error.as_ref().unwrap().code,
+                JsonRpcError::PARSE_ERROR,
+                "an unparseable frame is named, not silently dropped"
+            );
+            assert_eq!(
+                responses[3].result.as_ref().unwrap(),
+                &serde_json::json!({"b": 2})
+            );
 
             let _ = std::fs::remove_file(&socket_path);
         }

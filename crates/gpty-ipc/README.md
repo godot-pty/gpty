@@ -17,7 +17,7 @@ JSON-RPC 2.0 IPC transport, client, and server for gpty workspace control.
 |--------|---------|
 | [`protocol`](src/protocol.rs) | JSON-RPC 2.0 types: `Request`, `Response`, `JsonRpcError` with builders |
 | [`transport`](src/transport.rs) | Platform-specific socket connection (Unix domain, named pipe) |
-| [`server`](src/server.rs) | Async IPC server: bind socket, accept connections, dispatch to handlers |
+| [`server`](src/server.rs) | Async IPC server: bind socket, accept connections, serve newline-framed requests (a connection may carry a pipelined batch; each frame is answered in order) |
 | [`client`](src/client.rs) | Async IPC client: connect, send request, read response with timeout |
 
 ## Architecture

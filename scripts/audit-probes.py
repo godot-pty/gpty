@@ -640,30 +640,38 @@ def probe_malformed_batch() -> None:
         ]
 
         # ── Shape 1: three frames in ONE write on one connection. ─────
-        # The server reads exactly one request per connection and closes
-        # (`IpcServer::handle_connection`), and every shipped client opens a
-        # connection per call - so this records the wire contract rather than
-        # pretending a pipeline is supported. The audit's defect was the GUI's
-        # *queue*, and shape 2 below reproduces it in the shape it really takes.
+        # The server loops over newline-framed requests until EOF, so a
+        # pipelined client gets one answer per frame, in order: the socket is
+        # public API, and silently dropping the tail of a batch is not a
+        # contract a caller can be expected to know.
         raw = batch_control(smoke, requests)
         lines = [line for line in raw.decode(errors="replace").splitlines() if line.strip()]
         print(
             f"pipelined: 3 framed requests ({sum(len(json.dumps(r)) + 1 for r in requests)} "
-            f"bytes) in one write -> {len(lines)} response line(s); the rest of the "
-            f"pipeline is dropped with the connection",
+            f"bytes) in one write -> {len(lines)} response line(s)",
             flush=True,
         )
         smoke.require(
-            len(lines) == 1,
-            "one request per connection is the server's contract; a change here "
-            "means the contract moved",
+            len(lines) == 3,
+            "a pipelined batch must answer one response per request",
             lines,
         )
-        first = json.loads(lines[0])
+        answers = [json.loads(line) for line in lines]
         smoke.require(
-            first.get("id") == 1 and "result" in first,
-            "the frame the server reads must be the first one, served",
-            first,
+            [answer.get("id") for answer in answers] == [1, 2, 3],
+            "the answers must be in request order",
+            [answer.get("id") for answer in answers],
+        )
+        smoke.require(
+            "result" in answers[0] and "result" in answers[2],
+            "the frames around the bad one must both be served",
+            answers,
+        )
+        malformed = (answers[1].get("error") or {}).get("code")
+        smoke.require(
+            int(malformed or 0) == -32602,
+            "the non-object params must be refused as invalid params",
+            answers[1],
         )
 
         # ── Shape 2: the queue the audit's defect lived in. ───────────
@@ -716,9 +724,9 @@ def probe_malformed_batch() -> None:
             answers[3],
         )
         print(
-            "OBSERVED one request per connection; a queued batch answers every "
-            "request, the malformed one is -32602 naming params, and the request "
-            "behind it is served",
+            "OBSERVED every pipelined frame on one connection is answered in "
+            "order (3 of 3), and a queued batch answers every request with the "
+            "malformed one as -32602 naming params",
             flush=True,
         )
     finally:
