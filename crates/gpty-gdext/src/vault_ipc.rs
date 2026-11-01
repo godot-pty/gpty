@@ -108,12 +108,24 @@ fn int_param(params: &Value, key: &str, default: i64) -> i64 {
 }
 
 /// The vault root, held to the same rule every caller applies: an absolute
-/// path that is a directory. A malformed request, so `-32602`.
+/// path that is a directory, and one the user registered. The first is a
+/// malformed request (`-32602`); the second is a valid request the server
+/// refuses (`-32000` with `data.code = "not_registered"`), because the caller
+/// can fix it by opening the vault in a pane's settings.
+///
+/// Without the second check these handlers are a file-read primitive over any
+/// directory a client names: a same-user process could read those files
+/// anyway, but a prompt-injected agent confined to gPTY's own tools could not.
 fn vault_root(params: &Value) -> Result<String, JsonRpcError> {
     let path = string_param(params, "vault_path")?;
     match vault_path_problem(&path) {
         Some(problem) => Err(JsonRpcError::new(JsonRpcError::INVALID_PARAMS, problem)),
-        None => Ok(path),
+        None if crate::vault_api::vault_root_registered(&path) => Ok(path),
+        None => Err(JsonRpcError::with_data(
+            JsonRpcError::SERVER_ERROR,
+            format!("vault is not registered: {path} - open it in a Wiki pane's settings first"),
+            serde_json::json!({ "code": "not_registered" }),
+        )),
     }
 }
 
@@ -222,6 +234,15 @@ mod tests {
 
     impl Fixture {
         fn new() -> Self {
+            Self::make(true)
+        }
+
+        /// A vault the user never registered: the handlers must refuse it.
+        fn unregistered() -> Self {
+            Self::make(false)
+        }
+
+        fn make(register: bool) -> Self {
             let nanos = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("clock after the epoch")
@@ -232,7 +253,14 @@ mod tests {
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
             std::fs::create_dir_all(dir.join("vault/notes")).expect("create the vault");
-            Self { dir }
+            let fixture = Self { dir };
+            if register {
+                assert!(
+                    crate::vault_api::register_vault_root(&fixture.root()),
+                    "the fixture's vault must register"
+                );
+            }
+            fixture
         }
 
         fn vault(&self) -> PathBuf {
@@ -391,5 +419,61 @@ mod tests {
         let no_path = read_work(&serde_json::json!({"vault_path": fixture.root()}))
             .expect_err("a missing note path is refused");
         assert_eq!(no_path.code, JsonRpcError::INVALID_PARAMS);
+    }
+
+    /// The gate this test pins: a control-socket client may not point the
+    /// vault verbs at a directory the user never registered. It is a valid
+    /// request the server refuses (its own code), and registering the very
+    /// same root makes the identical request answer - so the test cannot pass
+    /// because the path was unusable for some other reason.
+    #[test]
+    fn a_vault_root_the_user_never_registered_is_refused() {
+        let fixture = Fixture::unregistered();
+        fixture.write("Alpha.md", "registered later\n");
+
+        let refused = search_work(
+            &fixture.db(),
+            &serde_json::json!({"vault_path": fixture.root(), "pattern": "later"}),
+        )
+        .expect_err("an unregistered vault is refused");
+        assert_eq!(refused.code, JsonRpcError::SERVER_ERROR);
+        assert_eq!(
+            refused.data.as_ref().expect("a stable code")["code"],
+            "not_registered",
+            "the refusal names the condition, not just a sentence"
+        );
+
+        let read_refused = read_work(&serde_json::json!({
+            "vault_path": fixture.root(),
+            "path": "Alpha.md"
+        }))
+        .expect_err("the read handler applies the same gate");
+        assert_eq!(read_refused.code, JsonRpcError::SERVER_ERROR);
+
+        assert!(crate::vault_api::register_vault_root(&fixture.root()));
+        let answer = search(
+            &fixture,
+            serde_json::json!({"vault_path": fixture.root(), "pattern": "later"}),
+        );
+        assert_eq!(
+            answer["total"], 1,
+            "registration is what the refusal wanted"
+        );
+    }
+
+    /// One spelling per vault: a trailing separator or a `..` detour must not
+    /// slip past a registered root.
+    #[test]
+    fn a_registered_root_is_matched_by_canonical_spelling() {
+        let fixture = Fixture::unregistered();
+        fixture.write("Alpha.md", "canonical\n");
+        assert!(crate::vault_api::register_vault_root(&fixture.root()));
+
+        let detour = format!("{}/./notes/..", fixture.root());
+        let answer = search(
+            &fixture,
+            serde_json::json!({"vault_path": detour, "pattern": "canonical"}),
+        );
+        assert_eq!(answer["total"], 1);
     }
 }

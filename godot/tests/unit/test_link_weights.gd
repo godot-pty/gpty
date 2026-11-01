@@ -17,6 +17,10 @@ func before_each():
 	MockAutoloads.setup()
 	_ipc_vault = TestPaths.user_path("link_weights_probe")
 	DirAccess.make_dir_recursive_absolute(_ipc_vault)
+	# The agent verb answers only inside a root the user registered. This is
+	# the effect of the pane settings UI's write, reduced to the store call:
+	# `VaultRegistry` is that UI's single writer.
+	assert_true(VaultRegistry.register(_ipc_vault), "the probe vault must register")
 
 func after_each():
 	DirAccess.remove_absolute(_ipc_vault)
@@ -317,3 +321,26 @@ func test_the_ipc_verb_refuses_bad_params_before_writing():
 				"a malformed request is INVALID_PARAMS: %s" % params)
 	assert_eq(LinkWeightsStore.vault_weights(_ipc_vault), {},
 		"nothing invalid reached the store")
+
+
+func test_the_ipc_verb_refuses_a_vault_the_user_never_registered():
+	# The verb takes its root from the caller, and it writes a user-owned store
+	# keyed by that root. An unregistered root would let any client add entries
+	# for a directory the user never opened (and, at the store's vault cap,
+	# evict the user's own), so the registry is consulted before any write.
+	var foreign := TestPaths.user_path("link_weights_foreign")
+	DirAccess.make_dir_recursive_absolute(foreign)
+	var answer: Dictionary = WorkspaceIpcHandlers.handle(null, "vaultWeight", {
+		"vault_path": foreign,
+		"src": "a.md",
+		"target": "b.md",
+		"weight": 5,
+	})
+	var problem: Variant = answer.get("error")
+	assert_true(problem is Dictionary, "an unregistered vault is refused")
+	if problem is Dictionary:
+		assert_eq(int(problem.get("code", 0)), -32000, "a valid request the server refuses")
+		assert_string_contains(str(problem.get("message", "")), "not registered")
+	assert_eq(LinkWeightsStore.vault_weights(foreign), {},
+		"nothing was written for the unregistered vault")
+	DirAccess.remove_absolute(foreign)

@@ -133,6 +133,7 @@ gpty/
         │   ├── pane_inspector_store.gd # User-owned Inspector aim (prompt + switches), keyed by attachment_id
         │   ├── trusted_store.gd    # Workspace Trust consent memory (builtins + plugins)
         │   ├── link_weights_store.gd # User-owned declared link weights (display-only)
+        │   ├── vault_registry.gd   # User-owned vault roots the socket's vault verbs may read
         │   ├── focus_manager.gd
         │   ├── toast_manager.gd
         │   ├── shortcut_manager.gd

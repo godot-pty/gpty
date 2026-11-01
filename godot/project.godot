@@ -31,6 +31,7 @@ PaneInspectorStore="*res://scenes/autoloads/pane_inspector_store.gd"
 TrustedStore="*res://scenes/autoloads/trusted_store.gd"
 LinkWeightsStore="*res://scenes/autoloads/link_weights_store.gd"
 KnowledgeStore="*res://scenes/autoloads/knowledge_store.gd"
+VaultRegistry="*res://scenes/autoloads/vault_registry.gd"
 
 [display]
 

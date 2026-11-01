@@ -9,6 +9,52 @@
 
 use crate::GptyTerminal;
 use godot::prelude::*;
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard};
+
+/// The vault roots the user has registered, canonicalized.
+///
+/// `VaultRegistry` (GDScript, `user://vaults.json`) owns this list; this is
+/// its in-process mirror, because the control socket's two vault handlers run
+/// on the blocking pool outside GDScript and must answer from the same
+/// decision the pane settings UI wrote. Canonical spellings mean `/v`, `/v/`,
+/// `/v/../v` and a symlink to `v` are one entry - a caller cannot register one
+/// name and ask under another.
+static REGISTERED_VAULT_ROOTS: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+
+fn registered_roots() -> MutexGuard<'static, BTreeSet<PathBuf>> {
+    // The set carries no invariant that a panic could break, so a poisoned
+    // lock is still usable - a refused registration must not cascade.
+    REGISTERED_VAULT_ROOTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Add one root to the mirror. False when the value is not an existing
+/// directory (checked through `canonicalize`, so a broken link is refused too).
+pub(crate) fn register_vault_root(root: &str) -> bool {
+    let Ok(canonical) = std::fs::canonicalize(root) else {
+        return false;
+    };
+    if !canonical.is_dir() {
+        return false;
+    }
+    registered_roots().insert(canonical)
+}
+
+/// Drop every root, so a reload replaces the list instead of growing it.
+pub(crate) fn clear_vault_roots() {
+    registered_roots().clear();
+}
+
+/// Whether the user registered `root`.
+pub(crate) fn vault_root_registered(root: &str) -> bool {
+    match std::fs::canonicalize(root) {
+        Ok(canonical) => registered_roots().contains(&canonical),
+        Err(_) => false,
+    }
+}
 
 /// Where the vault index lives: the app's private state directory, beside the
 /// CLI's other process-shared files and never inside a vault. A vault is user
@@ -841,5 +887,35 @@ impl GptyTerminal {
             }
             Err(e) => scratch_error(e),
         }
+    }
+
+    /// Register one vault root the user opened, so the control socket's vault
+    /// verbs may answer for it. `VaultRegistry` (GDScript) is the writer and
+    /// the persisted list; this mirror exists because `vaultSearch`/`vaultRead`
+    /// run on the blocking pool and cannot read a `user://` store. False when
+    /// the value is not an existing directory.
+    #[func]
+    fn vault_register_root(root: GString) -> bool {
+        let path = root.to_string();
+        register_vault_root(&path)
+    }
+
+    /// Replace the mirror with an empty list; `VaultRegistry` calls this before
+    /// pushing a reloaded set, so a removed root stops answering at once.
+    #[func]
+    fn vault_clear_roots() {
+        clear_vault_roots();
+    }
+
+    /// The registered roots as a JSON array, in canonical spelling. The seam a
+    /// test reads to check GDScript's list and the handlers' list agree.
+    #[func]
+    fn vault_registered_roots() -> GString {
+        let roots: Vec<String> = registered_roots()
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+        let document = serde_json::json!(roots).to_string();
+        GString::from(document.as_str())
     }
 }

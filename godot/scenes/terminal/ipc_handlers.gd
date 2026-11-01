@@ -116,6 +116,17 @@ static func handle(ws, method: String, params: Dictionary):
 			if not LinkWeights.valid_vault_path(vw_vault) \
 				or not DirAccess.dir_exists_absolute(vw_vault):
 				return error("Vault is not an absolute directory: %s" % vw_vault, -32602)
+			# The caller-chosen root is the whole exposure: this verb writes a
+			# user-owned store keyed by the vault, so an unregistered root would
+			# let any client add entries (and, at the store's vault cap, evict
+			# the user's own). The native search/read handlers apply the same
+			# gate; `VaultRegistry` is the one list both read.
+			if not VaultRegistry.has_root(vw_vault):
+				return error(
+					"Vault is not registered: %s - open it in a Wiki pane's settings first"
+						% vw_vault,
+					-32000
+				)
 			var vw_src := str(params.get("src", ""))
 			var vw_target := str(params.get("target", ""))
 			if not LinkWeights.valid_note_path(vw_src) \

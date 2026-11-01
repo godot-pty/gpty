@@ -550,6 +550,14 @@ func _clear_note() -> void:
 ## notes into the user data directory and returns that copy.
 func _resolve_vault() -> void:
 	_vault_root = KnowledgeStore.resolve(vault_path)
+	# The shipped knowledge base is the one root that is app-supplied (it is
+	# seeded from a bundle that travels with gPTY), so a pane showing it
+	# registers it for the control socket's vault verbs without a settings
+	# write. A file-supplied `vault_path` does not register: pointing a pane at
+	# a directory is the pane's business, while letting the API answer for that
+	# directory is the user's decision, taken in the pane settings.
+	if vault_path == KnowledgeStore.TOKEN and _vault_root != "":
+		VaultRegistry.register(_vault_root)
 
 ## Why the vault cannot be opened, or "" when it can.
 func _vault_problem() -> String:

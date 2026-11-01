@@ -99,6 +99,14 @@ func _ready():
 				str(settings.get("system_prompt", "")),
 				settings.get("auto_run", false) == true,
 				settings.get("accept_concept_captures", false) == true)
+		if body is WikiPane and settings.has("vault_path"):
+			# The control socket's vault verbs answer only inside a registered
+			# root, and this UI write is the only place a root becomes one: the
+			# user pointed a pane at it. Restoring a tile, creating one over IPC
+			# or a profile naming a path all leave the registry alone, so a
+			# downloaded file (or an agent driving the API) cannot widen what
+			# the next question may read.
+			VaultRegistry.register(str(settings.get("vault_path", "")))
 		_apply_active_workspace_view())
 
 	_build_sidebar()
