@@ -27,10 +27,14 @@ are microseconds.
 ## Trust boundary
 
 A path is untrusted input (layout, profile, IPC). `validate_path` requires an
-absolute local **regular file** - no scheme, no FIFO/device - and the demuxer
-and codec allowlists in `src/lib.rs` are checked after FFmpeg opens the file.
-`components.txt` is the closed component set compiled into the shipped FFmpeg;
-`tests/build_recipe.rs` checks it against the runtime lists in both directions.
+absolute local **regular file** - no scheme, no FIFO/device - and `source.rs`
+opens that file itself (`O_NONBLOCK | O_NOFOLLOW`, `fstat`-verified), handing
+FFmpeg a custom `AVIOContext` over the descriptor: FFmpeg never opens a path,
+so a name swapped for a FIFO or device after the check can neither block the
+worker nor redirect the session. The demuxer and codec allowlists in `src/lib.rs`
+are checked after the input is open. `components.txt` is the closed component
+set compiled into the shipped FFmpeg; `tests/build_recipe.rs` checks it against
+the runtime lists in both directions.
 
 Caps: at most 16 streams, 4096 px per video side, 8 audio channels, 34 MiB per
 decoded frame (`MAX_FRAME_BYTES`), bounded queues (2 video frames / 16 audio
