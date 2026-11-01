@@ -107,36 +107,6 @@ pub fn check_error(resp: &Response) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use gpty_ipc::protocol::{JsonRpcError, build_error, build_response};
-
-    /// The envelope is printed for parsing, and the failure is propagated:
-    /// `--json` is not a mode in which a refused command reports success.
-    #[test]
-    fn an_error_fails_the_command_in_both_output_modes() {
-        let error = build_error(1, JsonRpcError::new(-32000, "refused"));
-        assert!(
-            format_response(&error, true).is_err(),
-            "--json must still fail the command"
-        );
-        assert!(format_response(&error, false).is_err());
-
-        let ok = build_response(1, serde_json::json!({"ok": true}));
-        assert!(format_response(&ok, true).is_ok());
-        assert!(format_response(&ok, false).is_ok());
-    }
-
-    #[test]
-    fn check_error_is_the_shared_failure_rule() {
-        let error = build_error(1, JsonRpcError::new(-32001, "nope"));
-        let message = check_error(&error).unwrap_err().to_string();
-        assert_eq!(message, "rpc error -32001: nope");
-        assert!(check_error(&build_response(1, serde_json::json!(null))).is_ok());
-    }
-}
-
 /// Call a method and handle the response.
 pub async fn call_and_format(
     client: &IpcClient,
@@ -196,4 +166,34 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
         std::mem::swap(&mut prev, &mut curr);
     }
     prev[m]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpty_ipc::protocol::{JsonRpcError, build_error, build_response};
+
+    /// The envelope is printed for parsing, and the failure is propagated:
+    /// `--json` is not a mode in which a refused command reports success.
+    #[test]
+    fn an_error_fails_the_command_in_both_output_modes() {
+        let error = build_error(1, JsonRpcError::new(-32000, "refused"));
+        assert!(
+            format_response(&error, true).is_err(),
+            "--json must still fail the command"
+        );
+        assert!(format_response(&error, false).is_err());
+
+        let ok = build_response(1, serde_json::json!({"ok": true}));
+        assert!(format_response(&ok, true).is_ok());
+        assert!(format_response(&ok, false).is_ok());
+    }
+
+    #[test]
+    fn check_error_is_the_shared_failure_rule() {
+        let error = build_error(1, JsonRpcError::new(-32001, "nope"));
+        let message = check_error(&error).unwrap_err().to_string();
+        assert_eq!(message, "rpc error -32001: nope");
+        assert!(check_error(&build_response(1, serde_json::json!(null))).is_ok());
+    }
 }

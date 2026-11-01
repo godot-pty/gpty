@@ -379,7 +379,7 @@ mod tests {
             return IPC_HANDLERS_SRC[at + arm.len()..]
                 .lines()
                 .take_while(|line| !line.starts_with("\t\t\"") && !line.starts_with("\t\t_:"))
-                .filter_map(|line| line.split("params.get(\"").skip(1).next())
+                .filter_map(|line| line.split("params.get(\"").nth(1))
                 .filter_map(|rest| rest.split('"').next())
                 .filter(|key| !key.is_empty())
                 .map(str::to_string)
@@ -390,7 +390,7 @@ mod tests {
             return IPC_HANDLERS_SRC[at + branch.len()..]
                 .lines()
                 .take_while(|line| !line.starts_with("\tif method =="))
-                .filter_map(|line| line.split("params.get(\"").skip(1).next())
+                .filter_map(|line| line.split("params.get(\"").nth(1))
                 .filter_map(|rest| rest.split('"').next())
                 .filter(|key| !key.is_empty())
                 .map(str::to_string)

@@ -1233,7 +1233,7 @@ actions = [{target = "code_viewer"}]
                 )
             })
             .collect();
-        let manifest = parse_manifest(&format!(
+        let manifest = parse_manifest(
             r#"
 id = "owner/repo"
 name = "Demo"
@@ -1243,13 +1243,13 @@ min_gpty_version = "0.5.0"
 [[profiles]]
 name = "Tools"
 tiles = [
-  {{ col = 0, row = 0, cspan = 30, rspan = 60, settings = {{ type = "terminal", command = "omp" }} }},
-  {{ col = 30, row = 0, cspan = 30, rspan = 60, settings = {{ type = "terminal", command = "omp" }} }},
-  {{ col = 0, row = 0, cspan = 60, rspan = 60, settings = {{ type = "code_viewer" }} }},
-  {{ col = 0, row = 0, cspan = 60, rspan = 60, settings = {{ type = "terminal", command = "nvim" }} }},
+  { col = 0, row = 0, cspan = 30, rspan = 60, settings = { type = "terminal", command = "omp" } },
+  { col = 30, row = 0, cspan = 30, rspan = 60, settings = { type = "terminal", command = "omp" } },
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "code_viewer" } },
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "terminal", command = "nvim" } },
 ]
-"#
-        ))
+"#,
+        )
         .unwrap();
         let summary = review_summary(&manifest, &parse_target("owner/repo").unwrap(), "abc123");
         // Distinct, tile order, and a tile with no `command` contributes

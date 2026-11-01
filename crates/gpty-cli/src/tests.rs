@@ -5,6 +5,12 @@
 //! The server chmods its socket 0600, satisfying the client-side socket
 //! validation (`transport::validate_socket_path`).
 
+// The spawn-env mutex serializes `GPTY_GUI` mutation across test threads, and
+// the tests that take it hold it while awaiting `ensure_running`, which reads
+// the environment. `#[tokio::test]` is the current-thread runtime, so a held
+// guard cannot deadlock a task; holding it for the whole test is the point.
+#![allow(clippy::await_holding_lock)]
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

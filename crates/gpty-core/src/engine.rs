@@ -1631,13 +1631,12 @@ mod tests {
         );
     }
 
-    fn test_session() -> (
-        CaptureSession,
-        Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>>,
-        Arc<Mutex<Vec<CapturedOutput>>>,
-    ) {
-        let bufs: Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
-        let queue: Arc<Mutex<Vec<CapturedOutput>>> = Arc::new(Mutex::new(Vec::new()));
+    type CaptureBufs = Arc<Mutex<HashMap<u64, Vec<Vec<u8>>>>>;
+    type CaptureQueue = Arc<Mutex<Vec<CapturedOutput>>>;
+
+    fn test_session() -> (CaptureSession, CaptureBufs, CaptureQueue) {
+        let bufs: CaptureBufs = Arc::new(Mutex::new(HashMap::new()));
+        let queue: CaptureQueue = Arc::new(Mutex::new(Vec::new()));
         let session = CaptureSession::new(Arc::clone(&bufs), Arc::clone(&queue));
         (session, bufs, queue)
     }
