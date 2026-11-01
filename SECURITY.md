@@ -238,7 +238,11 @@ These are load-bearing guards. Reports that require removing one of them should 
 - **Media decoding**: the media backend links a pinned FFmpeg (LGPLv3, dynamically linked) built
   with `--disable-everything --disable-network`, so only the containers and codecs in
   `crates/gpty-media/components.txt` exist in the shipped libraries. A media path must be an absolute
-  local **regular file** (a FIFO or device is refused before FFmpeg sees it), the demuxer's alias
+  local **regular file**, and the bytes FFmpeg reads come from a descriptor this process opened:
+  `O_NONBLOCK | O_NOFOLLOW`, verified with `fstat`, and handed over through a custom AVIO context, so
+  FFmpeg never opens the path itself. A name swapped for a FIFO or device between the check and the
+  open therefore cannot block the session - a blocked `open(2)` cannot be interrupted, and a pane's
+  close joins the decode worker - and cannot redirect what is played. The demuxer's alias
   list is checked after opening, and the selected stream's codec id is checked against the same
   list before a decoder runs. Caps: 16 streams, 4096 px per side, 34 MiB per decoded frame, 8 audio
   channels, bounded queues and a 10 s open/probe budget. The size caps are re-checked on the

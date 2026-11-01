@@ -11,7 +11,14 @@
 //! an IPC caller. [`validate_path`] is therefore applied here as well as at
 //! the GDScript edge — absolute, a regular file, no URL scheme — and the
 //! demuxer/codec allowlists below are checked after FFmpeg has opened the
-//! file. The shipped FFmpeg build is configured with
+//! file.
+//!
+//! The path gate is not the whole boundary, because it describes a name that
+//! another process can replace. The descriptor is opened by this crate
+//! (`source`), verified with `fstat`, and handed to FFmpeg through a custom
+//! AVIO context, so FFmpeg never opens the path itself and a path swapped for
+//! a FIFO or device between the check and the open cannot block or redirect
+//! the session. The shipped FFmpeg build is configured with
 //! `--disable-everything --disable-network` and only the components in the
 //! `scripts/media-deps` allowlist, so this check is defense in depth rather
 //! than the only gate.
@@ -45,6 +52,7 @@ use std::sync::LazyLock;
 pub mod error;
 pub mod probe;
 pub mod session;
+mod source;
 
 pub use error::{MediaError, MediaErrorCode};
 pub use probe::{AudioInfo, MediaInfo, StreamInfo, StreamKind, VideoInfo, probe};
@@ -124,9 +132,11 @@ pub(crate) fn ensure_ffmpeg_init() -> Result<(), MediaError> {
 ///
 /// The rule is the one the media pane and the file tree already apply:
 /// absolute, local, no scheme, and a **regular file** — a FIFO or device must
-/// never reach FFmpeg's open, which would block the decode thread. The
-/// metadata check follows symlinks, which is intended: a link to a regular
-/// file is playable, a link to a device is not.
+/// never reach an open, which would block the decode thread. This is the
+/// cheap refusal: the descriptor that is actually read is opened and verified
+/// by `source::MediaFile`, so a name replaced after this check cannot
+/// change what a session plays. The metadata check follows symlinks, which is
+/// intended: a link to a regular file is playable, a link to a device is not.
 pub fn validate_path(path: &str) -> Result<PathBuf, MediaError> {
     let trimmed = path.trim();
     if trimmed.is_empty() {

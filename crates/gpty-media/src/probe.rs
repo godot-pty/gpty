@@ -11,10 +11,10 @@ use std::time::{Duration, Instant};
 use ffmpeg_the_third as ffmpeg;
 
 use crate::error::MediaError;
+use crate::source::{InputSource, MediaFile};
 use crate::{
     ALLOWED_DEMUXERS, MAX_CHANNELS, MAX_SAMPLE_RATE, MAX_STREAMS, MAX_VIDEO_DIMENSION,
-    OPEN_TIMEOUT_MS, audio_codec_allowed, ensure_ffmpeg_init, timestamp_to_us, validate_path,
-    video_codec_allowed,
+    OPEN_TIMEOUT_MS, audio_codec_allowed, ensure_ffmpeg_init, timestamp_to_us, video_codec_allowed,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +73,7 @@ pub struct MediaInfo {
 /// The decoder contexts are created during inspection so a caller cannot
 /// select a stream and then forget to build its decoder.
 pub(crate) struct OpenedInput {
-    pub input: ffmpeg::format::context::Input,
+    pub input: InputSource,
     pub info: MediaInfo,
     pub video: Option<VideoStream>,
     pub audio: Option<AudioStream>,
@@ -107,7 +107,7 @@ pub(crate) fn open_input(
     want_audio: bool,
 ) -> Result<OpenedInput, MediaError> {
     ensure_ffmpeg_init()?;
-    let path = validate_path(path)?;
+    let file = MediaFile::open(path)?;
 
     // The deadline applies to open/probe only. The callback lives in the
     // input context for the session's lifetime, so keeping it armed would
@@ -118,7 +118,7 @@ pub(crate) fn open_input(
     let input = {
         let stop_cb = stop.clone();
         let deadline_cb = deadline.clone();
-        ffmpeg::format::input_with_interrupt(&path, move || {
+        file.into_input(Box::new(move || {
             if stop_cb.load(Ordering::Relaxed) {
                 return true;
             }
@@ -127,9 +127,8 @@ pub(crate) fn open_input(
                 .ok()
                 .and_then(|d| *d)
                 .is_some_and(|d| Instant::now() >= d)
-        })
-    }
-    .map_err(|e| MediaError::open(format!("cannot open media: {e}")))?;
+        }))?
+    };
     *deadline
         .lock()
         .map_err(|_| MediaError::open("media open lock poisoned"))? = None;
@@ -303,7 +302,7 @@ pub(crate) fn open_input(
 
     log::debug!(
         "media: opened {} ({}), streams: {}",
-        path.display(),
+        path,
         info.container,
         info.streams.len()
     );

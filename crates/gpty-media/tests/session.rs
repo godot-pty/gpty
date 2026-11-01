@@ -368,3 +368,38 @@ fn dropping_a_session_while_it_has_queued_frames_does_not_hang() {
         started.elapsed()
     );
 }
+
+/// A FIFO at the media path is a non-blocking refusal, not a wait for a
+/// writer: the probe never reaches an `open(2)` on it.
+#[cfg(unix)]
+#[test]
+fn a_fifo_at_the_media_path_is_refused_without_waiting() {
+    let path = std::env::temp_dir().join(format!("gpty-media-fifo-{}", std::process::id()));
+    std::fs::remove_file(&path).ok();
+    let name = std::ffi::CString::new(path.to_string_lossy().as_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+
+    let started = Instant::now();
+    let error = probe(&path.to_string_lossy()).unwrap_err();
+    let elapsed = started.elapsed();
+    std::fs::remove_file(&path).ok();
+    assert_eq!(error.code(), MediaErrorCode::BadPath);
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "the FIFO probe waited {elapsed:?}"
+    );
+}
+
+/// The documented exception to the regular-file rule: a symlink to a regular
+/// file is playable, and is resolved once by the descriptor open.
+#[cfg(unix)]
+#[test]
+fn a_symlink_to_a_regular_file_is_playable() {
+    let path = std::env::temp_dir().join(format!("gpty-media-link-{}", std::process::id()));
+    std::fs::remove_file(&path).ok();
+    std::os::unix::fs::symlink(fixture("wav.wav"), &path).unwrap();
+    let info = probe(&path.to_string_lossy()).expect("a symlinked media file opens");
+    std::fs::remove_file(&path).ok();
+    assert_eq!(info.container, "wav");
+    assert!(info.duration_us.is_some_and(|duration| duration > 0));
+}
