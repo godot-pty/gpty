@@ -32,35 +32,30 @@ git log v<PREVIOUS_TAG>..HEAD --oneline
 
 ### 2. CHANGELOG
 
-File: `CHANGELOG.md`
+Files: `CHANGELOG.md` (an index) and one page per release under `docs/content/docs/changelog/`.
 
-- Reconcile the `## [X.Y.Z] — Unreleased` section with the classified commits under `### Added`, `### Changed`, `### Fixed` (Keep a Changelog format). The section is maintained incrementally during development (write entries in the same PR as features land); the commit analysis is the completeness check.
-- If the section is missing or behind — sessions that closed roadmap items without touching this file leave it that way — reconstruct the whole version from the commit range of step 1. Never reconstruct from memory, and never drop a commit that shipped something user-visible (a relicense or a bundle-layout change belongs in the notes even when no feature did).
-- At tag time: replace `## [X.Y.Z] — Unreleased` with `## [X.Y.Z] — YYYY-MM-DD` and remove `(unreleased)` from the version link at the bottom.
+- There is no `## [X.Y.Z] — Unreleased` section to reconcile: `CHANGELOG.md` holds the opening text and a newest-first link list, and each release's notes live in `docs/content/docs/changelog/vX.Y.Z.md` with front matter (`title: "vX.Y.Z - YYYY-MM-DD"`, `weight`). Write the page from step 1's classification under `## Added` / `### Changed` / `### Fixed` (Keep a Changelog buckets) and open it with the compare link `[Release on GitHub](https://github.com/godot-pty/gpty/compare/vPREVIOUS...vX.Y.Z)`.
+- `weight` is a ladder with one slot per release and the newest smallest: today 150 (`v0.1.0`) up to 10 (`v0.7.0`) in steps of 10, so the next release takes the next lower slot (0 after 10). Do not renumber the older pages unless a slot is genuinely exhausted.
+- Prepend the link to `CHANGELOG.md`'s list in the same commit: `- [X.Y.Z - YYYY-MM-DD](docs/content/docs/changelog/vX.Y.Z.md)`. `scripts/docs-check` holds the index and the page directory in bijection - a page nobody links, and a link with no page, both fail the gate.
+- If a roadmap row kept the user-facing summary (the release's DOCS row does), it is the checklist for that page: every item it names must appear, and the commit range is what catches the ones it forgot. Never reconstruct from memory.
 
 ### 3. README
 
 File: `README.md`
 
-- At tag time, update installation table links from previous version to new version:
-  ```
-  | Linux | `gpty-vX.Y.Z-linux-x86_64.tar.gz` — extract and run `./gpty` |
-  | macOS | `gpty-vX.Y.Z-macos.zip` — unzip, right-click the `.app` → Open |
-  | Windows | `gpty-vX.Y.Z-windows-x86_64.zip` — unzip and run `gpty.exe` |
-  ```
-- Update the docs landing screenshot reference in `docs/content/_index.md` from the previous version to `/images/vX.Y.Z_1.png` — the landing page must show the current release, not an old one.
+- The install table uses a `<version>` placeholder (`gpty-v<version>-linux-x86_64.tar.gz`, …), so a release edits **nothing** there. Check it still matches the current bundle layout (the CLI as `gpty`, the GUI as `gpty-gui` and its pack) rather than editing a version into it.
+- What a release does touch in the README is the implementation-phase checklist when the release completes a phase, and any count or name the release changed. Grep for both instead of assuming.
+- `docs/content/_index.md` currently embeds no image, so there is no landing screenshot to repoint. If one is added, it shows the current release's `vX.Y.Z_1.png` and nothing else.
 
 **Home page image rule (inviolable):** the website home page has exactly ONE image — the home-screen screenshot of the most recent release (`vX.Y.Z_1.png`). Feature screenshots (`vX.Y.Z_2.png`, …) appear ONLY inside the blog entry, never on the home page.
 
 ### 4. ROADMAP
 
-File: `ROADMAP.md`
+Files: `ROADMAP.md` (an index over the chains) and `docs/content/docs/roadmap/vX.Y.md` (the release chain pages).
 
-- Fill the `## vX.Y.Z` section from the commit analysis — one `[x]` bullet per shipped feature, following the section-title convention (`## vX.Y.Z — <theme>`).
-- Flip every shipped-but-still-`[ ]` item in the version section to `[x]` — release time is the catch-all for items completed without a checkpoint flip.
-- Move planned-but-unshipped items to the next version's section, keeping their wording and tagging `(Deferred from vX.Y.Z.)` — never leave unchecked items in a released section, and never silently drop them.
-- An empty section (`- [ ]`) means the version shipped unplanned work — replace it entirely with the derived features.
-- Verify all items under the version section are `[x]` complete before tagging.
+- Nothing is filled in at release time: a shipped row is closed when the work lands, with its evidence, tests and measured numbers, and that text is the release record. `ROADMAP.md` only carries the per-chain status (`released` / `in progress` / `planned` / `unscheduled`) — update that word for the release's chain.
+- Verify no `⬜` is left in the release's section, then mark the chain released. Anything unshipped moves to the next chain's page in priority position, keeping its wording and tagged `(Deferred from vX.Y.Z.)`; a released section never keeps an open row and nothing is dropped silently.
+- A release whose last row closes on its own tag (the asset-set row) carries that closer in a post-release commit and says in the row what the published list measured.
 
 ### 5. Crate Versions
 
