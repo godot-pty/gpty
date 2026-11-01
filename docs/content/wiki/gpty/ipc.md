@@ -53,6 +53,8 @@ An error uses the standard envelope:
 
 The client wrappers reshape them into command flags and tool arguments.
 
+One connection may carry more than one of these lines. The server reads frames until the client closes the connection and answers each in order, so a client that pipelines three requests gets three responses; a frame it cannot parse is answered `-32700` and the rest of the batch is still served. The shipped clients do not pipeline - each invocation is one connection, one request, one response - but the wire allows it.
+
 ## Where the socket lives
 
 | Platform | Path | Override |
