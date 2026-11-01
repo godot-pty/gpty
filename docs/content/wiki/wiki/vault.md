@@ -48,12 +48,14 @@ A note is read and stored at the same 1 MiB cap. That shared cut is not cosmetic
 
 ## Reaching a vault from outside the pane
 
-The absolute vault path is the only handle needed. The CLI and the MCP server expose the same operations over the control socket:
+A vault the user has opened in Pane Settings is reachable from outside the pane: the CLI and the MCP server expose the same operations over the control socket, and a root that was never registered there is refused with `not registered`.
 
 ```bash
 gpty vault search ~/notes "atomic save" --limit 20
 gpty vault read ~/notes wiki/vault.md
 ```
+
+The path must be one the user has registered (opened in Pane Settings, or the bundled knowledge base, which registers itself): the vault verbs take their root from the caller, so the list is what keeps them from reading Markdown under any directory a client names.
 
 Search answers `{results, total, truncated}` and read answers the note document `{path, text, truncated, crlf, mtime, size}`. The MCP tools are `vault-search`, `vault-read`, and `vault-weight`; the two reads are answered natively by the Rust side off the GUI thread, because a vault is a directory rather than workspace state. Curating link weights is the exception — `gpty vault weight <vault> <src> <target> --weight N` goes to the running GUI, because the store belongs to it, as [[declared-link-weights|Declared Link Weights]] explains. The full method surface is in [[control-api|Control API]].
 

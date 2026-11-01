@@ -27,7 +27,7 @@ For reading a single arbitrary file, the [[code-viewer|Code Viewer]] is lighter 
 
 The pane has no keyboard shortcut of its own. A new pane has no vault until one is set in Pane Settings (or supplied by a profile or layout); a hand-set path must be absolute and existing, and it is validated every time it is used rather than trusted once. The built-in **Knowledge Base** profile stores the `@knowledge` token instead of a machine path: the pane resolves it to the copy seeded from the app's bundle on first use, and a later release with changed notes seeds a new copy rather than overwriting local edits. The repository ships this wiki at `docs/content/wiki` — that directory is a good first vault in a checkout.
 
-The same vault is reachable without a pane: the control surface exposes `vault-search`, `vault-read` and `vault-weight`, so an agent or a script can query notes and set link weights while you work. Those tools share the pane's index rules, so both agree on what a note is.
+Once the user has opened that vault here in Pane Settings, the same vault is reachable without a pane: the control surface exposes `vault-search`, `vault-read` and `vault-weight`, so an agent or a script can query notes and set link weights while you work. A root the user never registered is refused with `not registered` - pointing the pane at a directory is the pane's business, while letting the API answer for it is the user's decision. Those tools share the pane's index rules, so both agree on what a note is.
 
 ## What it shows and how it is driven
 

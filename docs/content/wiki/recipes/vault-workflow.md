@@ -74,7 +74,7 @@ Recovery copies are kept outside the vault, are never applied automatically, and
 ## Expose the vault to an agent
 
 1. Note the absolute vault path — an agent needs the same one you typed into the pane.
-2. Give the agent read access with the two read-only commands:
+2. Give the agent read access with the two read-only commands. The control surface answers only inside a root the user opened in Pane Settings, so type the path into the pane's settings first - a path only the agent knows is refused with `not registered`:
 
 ```bash
 gpty vault search /path/to/gpty/docs/content/wiki "link graph" --limit 20

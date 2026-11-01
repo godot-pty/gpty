@@ -30,6 +30,8 @@ Twenty-two tools are published, mirroring CLI actions and kebab-cased:
 
 Two CLI commands are deliberately **not** tools. `state` declares the agent state of the pane the command runs in and reaches the event socket, not the control socket — an MCP client has no pane, so advertising it would publish a tool that cannot dispatch. `plugin` installs and manages plugins: install waits on a human reading a review dialog, and the admin verbs touch local state rather than the workspace API. Both exclusions are enforced by a test, not a comment.
 
+The three vault tools answer only for a vault root the user has registered in a Wiki pane's settings; an unregistered `vault_path` is a tool error (`isError: true` with `not registered`), not a protocol error.
+
 The heavy hitters for an agent are `pane-wait` and `pane-read`. Together they turn a terminal into a synchronous function call: run a command, wait for the line that means done, read the output. `pane-run` returns as soon as the pane exists, so the exit code is not the answer — `pane-status` is.
 
 ## The name gate

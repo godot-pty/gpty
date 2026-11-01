@@ -85,6 +85,8 @@ gpty vault search ~/notes "ownership" --limit 20
 gpty vault read ~/notes notes/idea.md
 ```
 
+Both answer only for a vault root the user has opened in Pane Settings (the shipped knowledge base registers itself); any other path is refused with `not registered`.
+
 Tell the workspace what the pane you are running in is doing:
 
 ```bash

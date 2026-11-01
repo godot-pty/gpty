@@ -96,6 +96,8 @@ The fallbacks cover sessions with no runtime directory (a cron job, a stripped l
 
 `vaultWeight` is the exception that proves the rule. Its store is Godot's `user://link_weights.json`, so the write is routed to GDScript like every other stateful method — the split is by ownership.
 
+All three vault methods also check the user's registered-vault list (`VaultRegistry`, `user://vaults.json`) before they touch a directory or the store: a `vault_path` the user never opened in Pane Settings is refused with `-32000` and `data.code = "not_registered"`. The root is the caller's choice, and the file-read reach it would grant is the user's to make.
+
 ## Security rules
 
 The channel can create panes, inject keystrokes, and shut the workspace down, so it is hardened against other local users:

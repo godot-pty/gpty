@@ -39,6 +39,8 @@ All three reach the same handlers in the running GUI. The CLI is a stateless cli
 | `version` | — | `{version, protocol}` |
 | `shutdown` | — | `{success}` |
 
+`vaultSearch`, `vaultRead` and `vaultWeight` answer only inside a vault root the user has **registered** - the user-owned `user://vaults.json`, whose only writer is the pane settings UI. A Wiki pane showing a directory is not enough (the pane reads it; the API does not answer for it), and the shipped knowledge base registers itself when a pane opens it. An unregistered root is refused with `-32000` and `data.code = "not_registered"`, so a client cannot use these methods to read Markdown under a directory the user never opened.
+
 The `layout*` methods are named for the arrangement they restore, but in this build they save, load, and list **profiles**: `layoutSave` captures the active workspace as a reusable profile, and `layoutLoad` replaces the active workspace with that profile's tiles. See [[profile]] for the trust rules that apply to loading one, and [[layout]] for the arrangement itself.
 
 The MCP door adds tools that are client-side rather than IPC methods: `daemon-start`, `daemon-stop`, `daemon-status`, and the layout/concept wrappers. It exposes 22 tools in total. Two CLI verbs are deliberately not tools: `state` (it reads the credentials of the pane it runs in) and the plugin verbs (install/enable/remove changes what code runs as you, so a human does it).
