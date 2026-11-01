@@ -148,6 +148,13 @@ impl SpawnedTerminal {
     /// closed its pty and outlived the pane — leaves `exit_code: null` forever,
     /// which on its own reads as "still running" and hangs every consumer that
     /// waits for exit. `exit_reason` is what makes the difference visible.
+    ///
+    /// `running` stays false in that last state on purpose: it answers "is an
+    /// exit code still to come", which is what a waiter must not keep waiting
+    /// for. Whether a process a close would destroy is still alive is the
+    /// separate question `child_alive` answers, and the GUI's close
+    /// confirmation is its consumer — a pane whose task died but whose child
+    /// survives must still ask before teardown SIGKILLs that process group.
     pub fn status_json(&self, grid: &TermGrid) -> String {
         let s = &grid.status;
         let task_alive = !self.task_finished();
@@ -165,6 +172,7 @@ impl SpawnedTerminal {
             "exit_reason": exit_reason,
             "idle_ms": idle_ms,
             "foreground_job": s.foreground_job,
+            "child_alive": s.child_alive,
             "agent_state": grid.agent_state.state.as_str(),
             "agent_state_tier": grid.agent_state.tier.map(|t| t as u8),
         })
@@ -274,7 +282,12 @@ impl WorkspaceEngine {
         )?;
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<StdinInput>();
 
-        let grid = Arc::new(Mutex::new(TermGrid::new(rows, cols)));
+        let mut grid = TermGrid::new(rows, cols);
+        // The child exists from the spawn above, whether or not the task has
+        // been polled yet — and this is the only liveness signal the document
+        // has left if the task ends without reaping it.
+        grid.status.child_alive = true;
+        let grid = Arc::new(Mutex::new(grid));
         let grid_clone = Arc::clone(&grid);
 
         let capture_queue: Arc<Mutex<Vec<CapturedOutput>>> = Arc::new(Mutex::new(Vec::new()));
@@ -749,6 +762,11 @@ async fn run_terminal_task(
                     // the teardown below still reads the same answer.
                     child_exit = pty_handle.try_wait();
                     if child_exit.is_some() {
+                        if let Some(g) = &grid
+                            && let Some(mut locked) = lock_or_warn(g, "pane grid")
+                        {
+                            locked.status.child_alive = false;
+                        }
                         exit_quiet_until =
                             Some(now + Duration::from_millis(EXIT_DRAIN_QUIET_MS));
                     }
@@ -1004,6 +1022,10 @@ async fn run_terminal_task(
         && let Some(mut locked) = lock_or_warn(g, "pane grid")
     {
         locked.status.exit_code = exit_code;
+        // The final answer for the close guard: a reap that found nothing
+        // means a process is still out there, even though nothing drains this
+        // pane any more. (`running` stays false — see `status_json`.)
+        locked.status.child_alive = exit_code.is_none();
         // Tier 3 exit heuristic (display only): a shell that died with a
         // non-zero code failed; zero exits fall back to Idle.
         if let Some(code) = locked.status.exit_code
@@ -1202,6 +1224,16 @@ mod tests {
             serde_json::json!("task_ended"),
             "the status must say why the pane stopped: {status}"
         );
+        // `running` answers "is an exit code still to come", and that is what
+        // keeps a waiter from hanging. The close guard asks the other
+        // question — a close still SIGKILLs this process group — and this
+        // field is its answer: the `sleep` outlived the task, so the child
+        // was never reaped.
+        assert_eq!(
+            status["child_alive"],
+            serde_json::json!(true),
+            "the child outlived the task; a close would still kill it: {status}"
+        );
     }
 
     /// The other branch of the same document: a pane that is up is running, and
@@ -1226,6 +1258,11 @@ mod tests {
             "a live pane must report running: {status}"
         );
         assert_eq!(status["exit_reason"], serde_json::Value::Null);
+        assert_eq!(
+            status["child_alive"],
+            serde_json::json!(true),
+            "the spawned child has not been reaped: {status}"
+        );
     }
 
     /// The close confirmation's observable: a shell at its prompt reports no
@@ -1420,6 +1457,10 @@ mod tests {
             serde_json::json!("exited"),
             "{status}"
         );
+        // The shell was reaped; its background descendant never owned the
+        // terminal, so it is not a foreground job and does not make the child
+        // read as alive either.
+        assert_eq!(status["child_alive"], serde_json::json!(false), "{status}");
 
         // Ending the task early is only correct if what the pty already held
         // was still delivered.

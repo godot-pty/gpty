@@ -272,6 +272,58 @@ func test_closing_an_idle_shell_does_not_ask():
 func _status_text(body: Control) -> String:
 	return "status=%s" % str(body._terminal.get_status())
 
+## The dead-task half of the same question: a child that closes its pty and
+## keeps running outlives the terminal task, so nothing samples a foreground
+## job for that pane any more and `running` says false (a waiter must stop).
+## Teardown still SIGKILLs the surviving process group, so the guard has to
+## fall back to the document's `child_alive` and ask.
+func test_closing_a_terminal_whose_task_died_asks_first():
+	if ShellFixtures.is_windows():
+		pending("the pty-close idiom (exec 0<&- ...) has no cmd.exe equivalent")
+		return
+	if not ClassDB.class_exists("GptyTerminal"):
+		pending("the GDExtension is not loaded")
+		return
+	var body = _ws._spawn_pane("terminal", {
+		"shell_command": "sh",
+		"shell_args": ["-c", "exec 0<&- 1>&- 2>&-; sleep 30"],
+	})
+	assert_not_null(body, "the test needs a real terminal")
+	assert_true(body is TerminalPane)
+	assert_true(await _wait_for_task_end(body, 30000),
+		"the task must end while its child survives: %s" % _status_text(body))
+	var status = JSON.parse_string(str(body._terminal.get_status()))
+	assert_false(bool(status.get("running", true)),
+		"a pane nothing drains is not running: %s" % _status_text(body))
+	assert_true(bool(status.get("child_alive", false)),
+		"the child outlived the task: %s" % _status_text(body))
+	assert_true(body.has_running_work(),
+		"a surviving child is work a close would stop: %s" % _status_text(body))
+
+	var tiles_before: int = _ws._tm.tiles.size()
+	_ws._kill(body)
+	assert_true(is_instance_valid(body), "the pane stays until the running ask answers")
+	assert_eq(_ws._tm.tiles.size(), tiles_before)
+	var dialog := _expect_running_ask()
+	assert_string_contains(dialog.dialog_text, body.pane_label)
+	dialog.canceled.emit()
+	await get_tree().process_frame
+	assert_true(is_instance_valid(body), "canceling keeps the pane, and its child")
+
+	_ws._kill(body)
+	_expect_running_ask().confirmed.emit()
+	await get_tree().process_frame
+	assert_false(is_instance_valid(body), "confirming closes the pane")
+
+func _wait_for_task_end(body: Control, timeout_ms: int) -> bool:
+	var deadline := Time.get_ticks_msec() + timeout_ms
+	while Time.get_ticks_msec() < deadline:
+		var status = JSON.parse_string(str(body._terminal.get_status()))
+		if status is Dictionary and str(status.get("exit_reason", "")) == "task_ended":
+			return true
+		await get_tree().create_timer(0.05).timeout
+	return false
+
 # ── Quit (the workspace's seam) ────────────────────────────────────────
 
 func test_quitting_a_clean_workspace_quits():

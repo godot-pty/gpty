@@ -88,7 +88,7 @@ The fallbacks cover sessions with no runtime directory (a cron job, a stripped l
 | `version` | GUI version and IPC protocol version |
 | `shutdown` | Ask the GUI to exit |
 
-`paneStatus` carries `pid`, `running`, `exit_code`, `exit_reason`, `idle_ms`, `agent_state`, and `agent_state_tier`; `exit_reason` is `exited`, `task_ended`, or null while running. With no pane it returns every tile, non-terminals carrying `status: null` so the list is complete rather than silently shorter.
+`paneStatus` carries `pid`, `running`, `exit_code`, `exit_reason`, `idle_ms`, `foreground_job`, `child_alive`, `agent_state`, and `agent_state_tier`; `exit_reason` is `exited`, `task_ended`, or null while running. `running` and `child_alive` answer different questions and must not be merged: `running` means an exit code is still to come, so a pane whose terminal task died answers false and a waiter stops, while `child_alive` says the spawned child was never reaped - that pane still owns a process the close path would kill, so closing it asks first. With no pane it returns every tile, non-terminals carrying `status: null` so the list is complete rather than silently shorter.
 
 ## Why some methods are answered natively
 

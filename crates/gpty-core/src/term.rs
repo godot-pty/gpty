@@ -141,6 +141,16 @@ pub struct TermStatus {
     /// where the platform cannot tell (Windows/ConPTY), which callers must
     /// treat as "could be busy".
     pub foreground_job: Option<bool>,
+    /// Whether the spawned child has not been reaped yet.
+    ///
+    /// The task's last `try_wait` answer, so the document still says a process
+    /// exists after the task itself is gone: a child that closed its pty and
+    /// outlived the pane keeps running, nothing samples a foreground job for
+    /// it any more, and teardown still SIGKILLs its process group. Written
+    /// like `foreground_job` — sampled by the task, not probed on read — so a
+    /// child that exits after the task ended keeps reading as alive, which
+    /// costs one unnecessary close confirmation and never the reverse.
+    pub child_alive: bool,
 }
 
 pub struct TermGrid {

@@ -239,23 +239,37 @@ func _take_focus():
 	if is_inside_tree():
 		grab_focus()
 
-## Whether a command typed at this pane's shell prompt is still running.
+## Whether destroying this pane would stop work that is still running.
 ##
-## Unix answers from the PTY's foreground process group, so a background job
-## does not count; a platform that cannot report one (Windows/ConPTY) answers
-## `true` for a live shell, because the alternative is ending work silently.
-## A shell that has already exited has nothing left to stop. The status sample
-## is refreshed by the engine's 200 ms child poll, so a command started and
-## closed within that window reads as idle — the close is a human action
-## measured in seconds, not a race the dialog has to win.
+## Two liveness states count, and the status document keeps them apart. While
+## the terminal task runs, the answer is its foreground sample: Unix reports
+## the PTY's process group, so a background job does not count, and a platform
+## that cannot report one (Windows/ConPTY) reads a live shell as possibly
+## busy — the alternative is ending work silently. A task that ended can
+## still leave its child running (`running: false`, `exit_reason:
+## task_ended`): nothing samples a foreground job for that pane any more, and
+## teardown still SIGKILLs its process group, so the process is known to be
+## alive and the close asks.
+##
+## The status sample is refreshed by the engine's 200 ms child poll, so a
+## command started and closed within that window reads as idle — the close is
+## a human action measured in seconds, not a race the dialog has to win.
 func has_running_work() -> bool:
 	if _terminal == null:
 		return false
-	var status = JSON.parse_string(str(_terminal.get_status()))
-	if not (status is Dictionary) or not bool(status.get("running", false)):
+	return running_work_from_status(JSON.parse_string(str(_terminal.get_status())))
+
+## The pure half of `has_running_work`, so the decision is testable without a
+## live child. `running` alone is not the answer: it means "an exit code is
+## still to come" — deliberately false for a pane whose task died, so a
+## waiter stops waiting — and such a pane can still own a running process.
+static func running_work_from_status(status: Variant) -> bool:
+	if not (status is Dictionary):
 		return false
-	var foreground = status.get("foreground_job")
-	return foreground == null or bool(foreground)
+	if bool(status.get("running", false)):
+		var foreground = status.get("foreground_job")
+		return foreground == null or bool(foreground)
+	return bool(status.get("child_alive", false))
 
 ## Commit buffered scrollback before the pane goes away. Output lines are
 ## queued and written by a background thread, and the process may exit without

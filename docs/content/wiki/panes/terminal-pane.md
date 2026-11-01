@@ -46,7 +46,7 @@ Pasting treats the clipboard as untrusted input. Both modes drop control charact
 
 Wheel scrolling moves three lines by default. Output that scrolls past the viewport goes to the pane's scrollback, which is written to SQLite and restored when the pane comes back after a restart; the default depth is 10,000 lines and the global setting clamps it to 100–100,000.
 
-`paneStatus` reports the process and the grid as a document with `pid`, `running`, `exit_code`, `exit_reason`, `idle_ms`, `agent_state` and `agent_state_tier`. The titlebar badge and the status document share one source: the tiered agent-state tracker, where capability-authenticated events outrank OSC declarations, which outrank heuristics. All three are display-only and never trigger an action.
+`paneStatus` reports the process and the grid as a document with `pid`, `running`, `exit_code`, `exit_reason`, `idle_ms`, `foreground_job`, `child_alive`, `agent_state` and `agent_state_tier`. The titlebar badge and the status document share one source: the tiered agent-state tracker, where capability-authenticated events outrank OSC declarations, which outrank heuristics. All three are display-only and never trigger an action.
 
 ## Settings that matter
 
@@ -68,7 +68,7 @@ There is also no per-pane working directory. A pane inherits the directory of it
 
 ## What it does not do
 
-It does not edit files, render Markdown, or browse a directory — those are the [[code-viewer|Code Viewer]] and [[file-tree|File Tree]] panes. It does not mediate your keystrokes beyond its own shortcuts, which is why `Ctrl+V` reaches the child. It does not keep a process alive after the pane is closed: closing stops the pane's work, and the workspace asks first when a foreground job is running (on platforms that can report the foreground process group; a Windows ConPTY shell answers "live" while it lives, because the alternative is ending work silently).
+It does not edit files, render Markdown, or browse a directory — those are the [[code-viewer|Code Viewer]] and [[file-tree|File Tree]] panes. It does not mediate your keystrokes beyond its own shortcuts, which is why `Ctrl+V` reaches the child. It does not keep a process alive after the pane is closed: closing stops the pane's work, and the workspace asks first when a foreground job is running (on platforms that can report the foreground process group; a Windows ConPTY shell answers "live" while it lives, because the alternative is ending work silently). It asks for a surviving child too: a program that closes its PTY and keeps running outlives the terminal task, so nothing samples a foreground job for that pane any more, and the status document's `child_alive` is what tells the close path a process is still there.
 
 ## Limits and edge cases
 

@@ -437,9 +437,9 @@ impl GptyTerminal {
     }
 
     /// Process status primitives as JSON: pid, running, exit_code, idle_ms,
-    /// exit_reason, agent_state, agent_state_tier. Built in core
-    /// (`SpawnedTerminal::status_json`) so the document the pane API promises
-    /// is the one under test.
+    /// exit_reason, foreground_job, child_alive, agent_state, agent_state_tier.
+    /// Built in core (`SpawnedTerminal::status_json`) so the document the pane
+    /// API promises is the one under test.
     #[func]
     fn get_status(&self) -> GString {
         let Some(spawned) = self.spawned.as_ref() else {
