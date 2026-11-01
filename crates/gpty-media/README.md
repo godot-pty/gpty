@@ -16,9 +16,12 @@ pane consumes packed RGBA frames and interleaved f32 samples.
   most `CLOSE_TIMEOUT_MS`.
 - `poll_video(max)` / `poll_audio(max)` - non-blocking drains of bounded
   queues. A full queue blocks the decoder, not the caller.
-- `seek(position_us)` - acknowledged by the worker before it returns, so
-  already-queued pre-seek output is discarded by epoch and the next item is
-  from the new position.
+- `seek(position_us)` - never waits for the worker: it claims a serial, queues
+  the command and returns. The worker publishes that serial as the applied
+  epoch, and the drains deliver nothing while the caller's serial is ahead of
+  it (they still consume the queues, so a decoder blocked on backpressure
+  reaches its command check). A seek the worker cannot apply fails the session,
+  which `status()` reports.
 - `SessionStatus` - state, position, duration, stream info and the last
   error. `Finished` keeps the worker alive so a seek/replay can restart it.
 

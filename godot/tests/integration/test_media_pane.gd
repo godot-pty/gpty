@@ -291,7 +291,14 @@ func test_transport_pause_and_seek_are_reported():
 	pane._toggle_pause()
 	assert_false(pane._paused)
 	pane._seek_to(1_500_000)
+	# The seek no longer blocks until the worker applies it, so the reported
+	# position moves on the worker's next packet rather than by return.
+	var deadline := Time.get_ticks_msec() + 8000
 	var after = pane.status_document()
+	while after is Dictionary and int(after["position_us"]) < 1_400_000 \
+			and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+		after = pane.status_document()
 	assert_true(after is Dictionary)
 	assert_gte(int(after["position_us"]), 1_400_000, "seek must move the transport position")
 	assert_false(after["paused"])

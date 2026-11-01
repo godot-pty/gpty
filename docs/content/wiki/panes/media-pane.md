@@ -38,7 +38,7 @@ The transport bar appears under the content:
 | Control | Effect |
 |---|---|
 | Play / Pause | toggles playback at the current position |
-| Seek slider | drag to seek; the seek is acknowledged by the backend before playback continues |
+| Seek slider | drag to seek; the backend applies it before its next packet and drops frames from the replaced timeline, so a step never freezes the window |
 | Time label | position and duration (`0:00 / 0:00`) |
 | Loop | replays from the start at end of stream; stored with the tile |
 

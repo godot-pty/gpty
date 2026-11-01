@@ -160,8 +160,12 @@ struct StatusInner {
 
 struct Shared {
     stop: Arc<AtomicBool>,
-    /// Incremented when the worker applies a seek. Frames carry the epoch
-    /// they were queued under; `poll_*` discards everything older.
+    /// Highest seek the caller has issued and successfully queued. A frame is
+    /// presentable only once `epoch` has caught up with it, so nothing queued
+    /// on the timeline being replaced reaches the pane while a seek is applied.
+    pending: AtomicU64,
+    /// Highest seek the worker has applied. Frames carry the epoch they were
+    /// queued under; `poll_*` discards everything older.
     epoch: AtomicU64,
     inner: Mutex<StatusInner>,
 }
@@ -170,6 +174,7 @@ impl Shared {
     fn new() -> Self {
         Self {
             stop: Arc::new(AtomicBool::new(false)),
+            pending: AtomicU64::new(0),
             epoch: AtomicU64::new(0),
             inner: Mutex::new(StatusInner {
                 state: Some(SessionState::Opening),
@@ -197,8 +202,24 @@ impl Shared {
         }
     }
 
-    fn next_epoch(&self) -> u64 {
-        self.epoch.fetch_add(1, Ordering::Relaxed) + 1
+    /// Claim the next seek serial; the caller queues the command carrying it.
+    fn begin_seek(&self) -> u64 {
+        self.pending.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Undo [`Self::begin_seek`] for a seek the command queue refused.
+    ///
+    /// The compare-exchange fails when a later seek was issued in between,
+    /// which is the right answer: that one still has to be applied.
+    fn abandon_seek(&self, serial: u64) {
+        let _ =
+            self.pending
+                .compare_exchange(serial, serial - 1, Ordering::SeqCst, Ordering::SeqCst);
+    }
+
+    /// True when every frame queued so far belongs to a seek the worker applied.
+    fn settled(&self, epoch: u64) -> bool {
+        self.pending.load(Ordering::SeqCst) == epoch
     }
 
     fn set_playing(&self) {
@@ -239,10 +260,14 @@ impl Shared {
 }
 
 enum Command {
-    /// Target position and the acknowledgement the caller waits for. Waiting
-    /// for the worker to apply the seek is what lets the caller drop every
-    /// queued pre-seek frame without racing the decode loop.
-    Seek(u64, SyncSender<Result<(), MediaError>>),
+    /// Target position and the seek serial the worker must publish as the
+    /// applied epoch. There is no acknowledgement: the caller must not wait on
+    /// a decoder that may be stuck inside a libavcodec call, and `poll_*`
+    /// filters the replaced timeline instead.
+    Seek {
+        position_us: u64,
+        serial: u64,
+    },
     Stop,
 }
 
@@ -368,68 +393,57 @@ impl MediaSession {
         self.shared.status()
     }
 
-    /// Ask the worker to seek to `position_us`. The seek is applied before the
-    /// next packet; already-decoded frames are dropped by the decoder flush.
+    /// Ask the worker to seek to `position_us`, without waiting for it.
+    ///
+    /// The command carries a serial the worker publishes as the applied epoch;
+    /// until it does, `poll_video`/`poll_audio` deliver nothing, so the pane
+    /// never shows a frame from the timeline being replaced. Waiting here
+    /// instead held the Godot thread for as long as a stuck decoder kept the
+    /// worker away from its command queue - the old contract's 5 s deadline,
+    /// once per slider step. A seek the worker cannot apply fails the session,
+    /// which `status()` reports.
     pub fn seek(&self, position_us: u64) -> Result<(), MediaError> {
         if self.shared.stop.load(Ordering::Relaxed) {
             return Err(MediaError::closed());
         }
-        let (ack_tx, ack_rx) = sync_channel(1);
-        let mut ack_tx = Some(ack_tx);
+        let serial = self.shared.begin_seek();
         let deadline = std::time::Instant::now() + COMMAND_TIMEOUT;
         loop {
-            let sender = ack_tx.take().expect("seek ack sender missing");
-            match self.commands.try_send(Command::Seek(position_us, sender)) {
-                Ok(()) => break,
-                Err(TrySendError::Full(Command::Seek(_, sender))) => {
-                    ack_tx = Some(sender);
+            match self.commands.try_send(Command::Seek {
+                position_us,
+                serial,
+            }) {
+                Ok(()) => return Ok(()),
+                Err(TrySendError::Full(_)) => {
                     if std::time::Instant::now() >= deadline {
+                        self.shared.abandon_seek(serial);
                         return Err(MediaError::seek("decode worker is busy"));
                     }
                     thread::sleep(Duration::from_millis(5));
                 }
-                Err(TrySendError::Full(_)) => {
-                    return Err(MediaError::seek("decode worker is busy"));
-                }
-                Err(TrySendError::Disconnected(_)) => return Err(MediaError::closed()),
-            }
-        }
-        // The worker only checks commands between packets, and it may be
-        // blocked on a full output queue; draining here both discards the
-        // stale frames and lets it reach the command check. Waiting without
-        // draining would deadlock the two of us.
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        loop {
-            match ack_rx.try_recv() {
-                Ok(Ok(())) => {
-                    // Frames queued before the seek carry the previous
-                    // epoch; `poll_*` discards them, so draining here would
-                    // also throw away valid post-seek frames.
-                    return Ok(());
-                }
-                Ok(Err(error)) => return Err(error),
-                Err(TryRecvError::Disconnected) => {
-                    return Err(MediaError::seek("decode worker ended"));
-                }
-                Err(TryRecvError::Empty) => {
-                    while self.video_rx.try_recv().is_ok() {}
-                    while self.audio_rx.try_recv().is_ok() {}
-                    if std::time::Instant::now() >= deadline {
-                        return Err(MediaError::seek("decode worker did not answer the seek"));
-                    }
-                    thread::sleep(Duration::from_millis(2));
+                Err(TrySendError::Disconnected(_)) => {
+                    self.shared.abandon_seek(serial);
+                    return Err(MediaError::closed());
                 }
             }
         }
     }
 
     /// Drain up to `max_frames` decoded frames. Never blocks.
+    ///
+    /// While a seek is in flight (`pending` ahead of `epoch`) every queued
+    /// frame belongs to the timeline being replaced: the loop consumes and
+    /// drops them instead of returning them. It must keep consuming - the
+    /// worker blocks on a full queue and only reaches its command check once
+    /// there is room, so returning early here would deadlock the seek against
+    /// a decoder that is merely busy.
     pub fn poll_video(&self, max_frames: usize) -> Vec<VideoFrame> {
         let epoch = self.shared.epoch.load(Ordering::Relaxed);
+        let settled = self.shared.settled(epoch);
         let mut frames = Vec::new();
         for _ in 0..max_frames {
             match self.video_rx.try_recv() {
-                Ok(queued) if queued.epoch == epoch => frames.push(queued.frame),
+                Ok(queued) if settled && queued.epoch == epoch => frames.push(queued.frame),
                 Ok(_) => continue,
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
             }
@@ -438,12 +452,17 @@ impl MediaSession {
     }
 
     /// Drain up to `max_chunks` decoded audio chunks. Never blocks.
+    ///
+    /// Same gate as [`Self::poll_video`]: pre-seek chunks are dropped, not
+    /// delivered, and the queue is still drained so the worker can reach its
+    /// command check.
     pub fn poll_audio(&self, max_chunks: usize) -> Vec<AudioChunk> {
         let epoch = self.shared.epoch.load(Ordering::Relaxed);
+        let settled = self.shared.settled(epoch);
         let mut chunks = Vec::new();
         for _ in 0..max_chunks {
             match self.audio_rx.try_recv() {
-                Ok(queued) if queued.epoch == epoch => chunks.push(queued.chunk),
+                Ok(queued) if settled && queued.epoch == epoch => chunks.push(queued.chunk),
                 Ok(_) => continue,
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
             }
@@ -516,9 +535,17 @@ mod stuck {
     }
 
     static SEAM: Mutex<Option<Seam>> = Mutex::new(None);
+    /// Serialises the tests that arm the seam: it is one global slot and
+    /// `cargo test` runs them on parallel threads.
+    static LOCK: Mutex<()> = Mutex::new(());
     /// Workers that returned, so a test can tell that a detached thread still
     /// finishes by itself once the stuck call comes back.
     static EXITED: AtomicUsize = AtomicUsize::new(0);
+
+    /// Take the seam for the duration of one test.
+    pub(super) fn lock() -> std::sync::MutexGuard<'static, ()> {
+        LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
+    }
 
     /// Arm the seam for the next worker. Returns the two ends the test keeps.
     pub(super) fn arm() -> (Receiver<()>, SyncSender<()>) {
@@ -599,7 +626,10 @@ fn worker_main(
             while let Ok(command) = commands.try_recv() {
                 match command {
                     Command::Stop => return,
-                    Command::Seek(position_us, ack) => {
+                    Command::Seek {
+                        position_us,
+                        serial,
+                    } => {
                         if let Err(error) = seek(
                             &mut input,
                             position_us,
@@ -607,19 +637,17 @@ fn worker_main(
                             audio.as_mut(),
                             &mut audio_pipeline,
                         ) {
-                            let _ = ack.send(Err(error.clone()));
                             shared.fail(error);
                             break 'decode;
                         }
-                        shared.next_epoch();
+                        shared.epoch.store(serial, Ordering::Relaxed);
                         shared.set_position(position_us);
                         video_cursor.last_pts_us = position_us;
                         video_cursor.skip_until = Some(position_us);
                         audio_cursor.skip_until = Some(position_us);
-                        // Armed before the caller resumes, so it can drop queued
-                        // pre-seek frames and the next frame it receives is one
-                        // the skip rule admitted.
-                        let _ = ack.send(Ok(()));
+                        // Published before the loop resumes, so `poll_*` starts
+                        // delivering this timeline's frames and the skip rule
+                        // admits the next one.
                     }
                 }
             }
@@ -719,7 +747,10 @@ fn worker_main(
             }
             match commands.recv_timeout(Duration::from_millis(100)) {
                 Ok(Command::Stop) => return,
-                Ok(Command::Seek(position_us, ack)) => {
+                Ok(Command::Seek {
+                    position_us,
+                    serial,
+                }) => {
                     match seek(
                         &mut input,
                         position_us,
@@ -729,16 +760,14 @@ fn worker_main(
                     ) {
                         Ok(()) => {
                             shared.set_playing();
-                            shared.next_epoch();
+                            shared.epoch.store(serial, Ordering::Relaxed);
                             shared.set_position(position_us);
                             video_cursor.last_pts_us = position_us;
                             video_cursor.skip_until = Some(position_us);
                             audio_cursor.skip_until = Some(position_us);
-                            let _ = ack.send(Ok(()));
                             continue 'session;
                         }
                         Err(error) => {
-                            let _ = ack.send(Err(error.clone()));
                             shared.fail(error);
                             return;
                         }
@@ -1359,6 +1388,7 @@ mod tests {
     /// of joining the worker forever.
     #[test]
     fn a_stuck_decode_call_does_not_hold_the_close() {
+        let _serial = stuck::lock();
         let (parked, release) = stuck::arm();
         let before = stuck::exits();
         let session =
@@ -1392,5 +1422,59 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(5));
         }
+    }
+
+    /// A seek must not hold the caller while the decoder is stuck.
+    ///
+    /// The worker is parked where `receive_frame` would spin, which is exactly
+    /// the case the old contract waited out: `seek` blocked for an
+    /// acknowledgement with a 5 s deadline, so one slider step on such a file
+    /// froze the whole window. The seek now returns once queued, and nothing
+    /// from the replaced timeline is presentable until the worker applies it.
+    #[test]
+    fn a_stuck_decode_call_does_not_hold_a_seek() {
+        let _serial = stuck::lock();
+        let (parked, release) = stuck::arm();
+        let target = 1_500_000;
+        let session = MediaSession::open(OpenConfig::new(fixture("long_h264.mp4")))
+            .expect("the mp4 fixture opens");
+        parked
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the worker never reached the decode call");
+
+        let started = Instant::now();
+        session
+            .seek(target)
+            .expect("a seek must be accepted while the worker is parked");
+        let elapsed = started.elapsed();
+        eprintln!("seek returned in {elapsed:?} with the decoder parked");
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "a seek blocked for {elapsed:?} while the decoder was stuck"
+        );
+        assert!(
+            session.poll_video(4).is_empty(),
+            "no frame may be delivered while the seek is in flight"
+        );
+
+        // Releasing the call lets the worker reach the command queue, apply the
+        // seek and decode past the target.
+        release.send(()).expect("the worker is gone");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let frame = loop {
+            assert!(
+                Instant::now() < deadline,
+                "the seek never applied: no frame arrived"
+            );
+            if let Some(frame) = session.poll_video(4).into_iter().next() {
+                break frame;
+            }
+            thread::sleep(Duration::from_millis(5));
+        };
+        assert!(
+            frame.pts_us >= target,
+            "a frame from before the target was delivered: {} < {target}",
+            frame.pts_us
+        );
     }
 }
