@@ -3,21 +3,22 @@
 //! The thread owns the FFmpeg input and decoder contexts for its whole life.
 //! The caller owns the session handle and polls the queues; when a queue is
 //! full the worker blocks in `send_timeout` (checking the stop flag), which is
-//! backpressure, not loss. Closing drops the handle, sets the flag, and joins.
+//! backpressure, not loss. Closing drops the handle, sets the flag, and joins
+//! the worker for at most [`CLOSE_TIMEOUT_MS`] before abandoning it.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ffmpeg_the_third as ffmpeg;
 
 use crate::error::MediaError;
 use crate::probe::{AudioStream, OpenedInput, VideoStream, frame_time_us, open_input};
 use crate::{
-    MAX_AUDIO_FRAME_SAMPLES, MAX_CHANNELS, MAX_FRAME_BYTES, MAX_SAMPLE_RATE, MAX_VIDEO_DIMENSION,
-    MIN_SAMPLE_RATE, OPEN_TIMEOUT_MS,
+    CLOSE_TIMEOUT_MS, MAX_AUDIO_FRAME_SAMPLES, MAX_CHANNELS, MAX_FRAME_BYTES, MAX_SAMPLE_RATE,
+    MAX_VIDEO_DIMENSION, MIN_SAMPLE_RATE, OPEN_TIMEOUT_MS,
 };
 
 /// Frames buffered ahead of the UI. Two 4K frames is already the largest
@@ -29,6 +30,8 @@ const AUDIO_QUEUE_CHUNKS: usize = 16;
 const AUDIO_CHUNK_FRAMES: usize = 2048;
 /// How often a worker blocked on a full queue re-checks `stop`.
 const SEND_POLL: Duration = Duration::from_millis(5);
+/// How often the close path re-checks whether the worker has left.
+const JOIN_POLL: Duration = Duration::from_millis(10);
 /// Longest a seek caller waits for room in the worker's command queue.
 const COMMAND_TIMEOUT: Duration = Duration::from_millis(50);
 
@@ -272,7 +275,8 @@ struct AudioCursor {
     skip_until: Option<u64>,
 }
 
-/// A live media session. Dropping it stops the worker and joins it.
+/// A live media session. Dropping it stops the worker and joins it for at most
+/// [`CLOSE_TIMEOUT_MS`]; a worker stuck inside a decode call is abandoned.
 pub struct MediaSession {
     commands: SyncSender<Command>,
     video_rx: Receiver<QueuedVideo>,
@@ -328,6 +332,8 @@ impl MediaSession {
                     panic_shared.fail(error.clone());
                     let _ = panic_ready.send(Startup::Failed(error));
                 }
+                #[cfg(test)]
+                stuck::record_exit();
             })
             .map_err(|e| MediaError::io(format!("cannot start media worker: {e}")))?;
 
@@ -447,16 +453,99 @@ impl MediaSession {
 
     fn stop_and_join(&mut self) {
         self.shared.stop.store(true, Ordering::Relaxed);
+        // Wakes the worker out of the finished-state wait, or out of a full
+        // queue, so a healthy one leaves immediately.
         let _ = self.commands.try_send(Command::Stop);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
+        self.join_worker();
+    }
+
+    /// Join the worker, but never for longer than [`CLOSE_TIMEOUT_MS`].
+    ///
+    /// A worker inside a libavcodec call - the demuxer's read, or a decoder a
+    /// crafted bitstream makes spin - cannot see `stop`, and joining it would
+    /// hold the Godot thread forever: the pane close, and the window quit that
+    /// drops every session. Past the budget the handle is dropped, which
+    /// detaches the thread. Its FFmpeg contexts stay allocated and are freed by
+    /// the thread itself when the call returns; nothing may free them under a
+    /// running decoder.
+    fn join_worker(&mut self) {
+        let Some(worker) = self.worker.take() else {
+            return;
+        };
+        let deadline = Instant::now() + Duration::from_millis(CLOSE_TIMEOUT_MS);
+        while !worker.is_finished() {
+            if Instant::now() >= deadline {
+                log::warn!(
+                    "media decode worker did not stop within {CLOSE_TIMEOUT_MS} ms; \
+                     abandoning its thread"
+                );
+                return;
+            }
+            thread::sleep(JOIN_POLL);
         }
+        let _ = worker.join();
     }
 }
 
 impl Drop for MediaSession {
     fn drop(&mut self) {
         self.stop_and_join();
+    }
+}
+
+/// A decoder call that never returns, for the close bound's test.
+///
+/// `Packet::read`, `send_packet` and `receive_frame` are calls into C: a
+/// crafted file can keep the worker inside one of them without it ever
+/// consulting `stop`, and no fixture produces that on demand. The seam parks
+/// the worker at the same point instead - the first call the loop would make
+/// into libavcodec - until the test releases it. It is `cfg(test)` only, so
+/// the shipped worker has no branch to take, and the test that arms it lives
+/// in this file because an integration test cannot see the item.
+#[cfg(test)]
+mod stuck {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+
+    struct Seam {
+        /// Worker to test: the worker has reached the parked call.
+        parked: SyncSender<()>,
+        /// Test to worker: the parked call may return.
+        release: Receiver<()>,
+    }
+
+    static SEAM: Mutex<Option<Seam>> = Mutex::new(None);
+    /// Workers that returned, so a test can tell that a detached thread still
+    /// finishes by itself once the stuck call comes back.
+    static EXITED: AtomicUsize = AtomicUsize::new(0);
+
+    /// Arm the seam for the next worker. Returns the two ends the test keeps.
+    pub(super) fn arm() -> (Receiver<()>, SyncSender<()>) {
+        let (parked_tx, parked_rx) = sync_channel(1);
+        let (release_tx, release_rx) = sync_channel(1);
+        *SEAM.lock().expect("stuck seam lock") = Some(Seam {
+            parked: parked_tx,
+            release: release_rx,
+        });
+        (parked_rx, release_tx)
+    }
+
+    /// The worker side: park once, where a libavcodec call would run.
+    pub(super) fn park() {
+        let seam = SEAM.lock().expect("stuck seam lock").take();
+        if let Some(seam) = seam {
+            let _ = seam.parked.send(());
+            let _ = seam.release.recv();
+        }
+    }
+
+    pub(super) fn record_exit() {
+        EXITED.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(super) fn exits() -> usize {
+        EXITED.load(Ordering::SeqCst)
     }
 }
 
@@ -491,6 +580,9 @@ fn worker_main(
     if ready_tx.send(Startup::Ready).is_err() {
         return;
     }
+    // Stands in for the first call into libavcodec below (tests only).
+    #[cfg(test)]
+    stuck::park();
 
     let mut video_pipeline = VideoPipeline::new(config.max_width, config.max_height);
     let mut audio_pipeline = AudioPipeline::new(config.sample_rate, config.channels);
@@ -1248,5 +1340,57 @@ mod tests {
             .push_frame(&mut frame, ffmpeg::Rational(1, 48_000))
             .expect_err("16 channels exceeds the cap");
         assert_eq!(error.code(), crate::MediaErrorCode::TooLarge);
+    }
+
+    fn fixture(name: &str) -> String {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(name)
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// A decode call that never returns must not hold the close.
+    ///
+    /// The worker is parked where `receive_frame` would spin (a call that
+    /// consults no interrupt callback, so `stop` is unreadable from inside it)
+    /// and the session is dropped, which is exactly what a pane close and a
+    /// window quit do. The drop has to return inside the close budget instead
+    /// of joining the worker forever.
+    #[test]
+    fn a_stuck_decode_call_does_not_hold_the_close() {
+        let (parked, release) = stuck::arm();
+        let before = stuck::exits();
+        let session =
+            MediaSession::open(OpenConfig::new(fixture("wav.wav"))).expect("the wav fixture opens");
+        parked
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the worker never reached the decode call");
+
+        let started = Instant::now();
+        drop(session);
+        let elapsed = started.elapsed();
+        assert_eq!(
+            stuck::exits(),
+            before,
+            "the parked worker cannot have returned yet"
+        );
+        assert!(
+            elapsed < Duration::from_millis(CLOSE_TIMEOUT_MS + 1_500),
+            "dropping a session stuck in a decode call took {elapsed:?}"
+        );
+
+        // Releasing the call lets the abandoned thread see `stop` and free its
+        // FFmpeg contexts itself: only a call that truly never returns leaks,
+        // and it leaks alone.
+        release.send(()).expect("the worker is gone");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while stuck::exits() == before {
+            assert!(
+                Instant::now() < deadline,
+                "the detached worker never returned"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 }

@@ -97,6 +97,17 @@ pub const MAX_PATH_BYTES: usize = 4096;
 /// swapped for a blocking node cannot pin the decode thread forever.
 pub const OPEN_TIMEOUT_MS: u64 = 10_000;
 
+/// Wall-clock budget for stopping the decode worker when a session closes.
+///
+/// A healthy worker notices `stop` between packets, between queued frames and
+/// every 5 ms while blocked on a full queue, so it leaves in milliseconds. One
+/// that is inside a libavcodec call (`Packet::read`, `send_packet`,
+/// `receive_frame`) cannot notice anything: the open deadline's interrupt
+/// callback is cleared once the file is open, and no codec consults it anyway.
+/// Past this budget the worker is abandoned instead of joined, so closing a
+/// pane - or quitting the window, which drops every session - stays bounded.
+pub const CLOSE_TIMEOUT_MS: u64 = 2_000;
+
 /// Container demuxers the backend will open, by FFmpeg's own short name.
 /// This mirrors the component list in `scripts/media-deps` and the
 /// user-facing `MediaFiles` table.
