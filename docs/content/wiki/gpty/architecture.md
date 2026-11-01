@@ -81,7 +81,7 @@ media pane ──► GptyMedia ──► gpty-media worker thread (FFmpeg)
                          poll_video / poll_audio
 ```
 
-These four are deliberately separate from the terminal path. An agent event cannot mutate a grid; a media decoder cannot block the GUI; an Inspector answer cannot reach a shell.
+These four are deliberately separate from the terminal path. An agent event cannot mutate a grid; a media decoder cannot block the GUI (a close waits at most `CLOSE_TIMEOUT_MS` for its thread, then abandons it); an Inspector answer cannot reach a shell.
 
 ## The FFI contract
 

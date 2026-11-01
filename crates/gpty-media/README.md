@@ -11,7 +11,9 @@ pane consumes packed RGBA frames and interleaved f32 samples.
   thread; `open` waits for stream info, `start` returns immediately. `video`
   and `audio` select which decoders run (default both): a caller that polls
   only one queue must turn the other off, because an unconsumed queue is
-  backpressure and would stall the stream it is not reading.
+  backpressure and would stall the stream it is not reading. Dropping the
+  session stops the worker (waking it from a full queue) and joins it for at
+  most `CLOSE_TIMEOUT_MS`.
 - `poll_video(max)` / `poll_audio(max)` - non-blocking drains of bounded
   queues. A full queue blocks the decoder, not the caller.
 - `seek(position_us)` - acknowledged by the worker before it returns, so
@@ -38,13 +40,22 @@ the runtime lists in both directions.
 
 Caps: at most 16 streams, 4096 px per video side, 8 audio channels, 34 MiB per
 decoded frame (`MAX_FRAME_BYTES`), bounded queues (2 video frames / 16 audio
-chunks), and a 10 s open/probe deadline. The dimension and channel caps are
-re-checked on the **decoded** frame, not only on the probe, and a resampled
-audio frame is bounded at one second per channel (`MAX_AUDIO_FRAME_SAMPLES`)
-*before* `frame::Audio::new`: the output size is `samples × target_rate /
-source_rate`, so a file claiming a tiny source rate would otherwise turn a
-4 KiB packet into hundreds of megabytes. No hardware decode and no network
-protocols are compiled in.
+chunks), a 10 s open/probe deadline, and a 2 s close budget
+(`CLOSE_TIMEOUT_MS`). The dimension and channel caps are re-checked on the
+**decoded** frame, not only on the probe, and a resampled audio frame is
+bounded at one second per channel (`MAX_AUDIO_FRAME_SAMPLES`) *before*
+`frame::Audio::new`: the output size is `samples × target_rate / source_rate`,
+so a file claiming a tiny source rate would otherwise turn a 4 KiB packet into
+hundreds of megabytes. No hardware decode and no network protocols are
+compiled in.
+
+The close budget exists because a worker inside `Packet::read`,
+`send_packet` or `receive_frame` cannot see `stop`: those are calls into C, the
+open deadline's interrupt callback is cleared once the file is open, and no
+codec consults it anyway. Past the budget the thread is **detached, not
+killed** - it frees its own FFmpeg contexts when the call returns, and leaks
+only if it never does. Nothing may free those contexts under a running
+decoder.
 
 ## Binding rules
 
