@@ -191,7 +191,10 @@ jobs:
       - name: Check Windows build
         env:
           RUSTFLAGS: -Dwarnings
-        run: cargo check --workspace
+        # `--tests` too: a helper or import that is dead only on Windows
+        # (`#[cfg(unix)]` tests, a Unix-only fixture) compiles in no other
+        # job, and `cargo check` alone never builds a test profile.
+        run: cargo check --workspace --tests
 
       # The named-pipe arm is Windows-only, so its unit test never runs on the
       # Unix jobs; without this step the first-instance claim logic is only
@@ -454,3 +457,73 @@ jobs:
 
       - name: Run cargo-audit
         run: cargo audit --deny warnings
+
+  # ── Dependency policy: licences, sources, duplicate versions ──────────
+  #
+  # `cargo audit` above owns advisories; this owns the rest of `deny.toml`:
+  # the licence allow-list, crates.io-only sources, yanked crates, and
+  # duplicate versions as a warning. The action pins the cargo-deny version,
+  # so the policy cannot drift under a green build, and `[graph] all-features`
+  # keeps the checked graph identical to the local gate's.
+  cargo-deny:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Check the dependency policy
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+
+  # ── Fuzz targets compile (nightly; runs are the scheduled Fuzz workflow) ──
+  #
+  # Build only, on every pull request: a run needs minutes per target, so the
+  # bounded runs live in .github/workflows/fuzz.yml. This job keeps the targets
+  # from rotting — a target that stops compiling (an API moves, a helper is
+  # made private again) fails on the change that did it instead of weeks later.
+  fuzz-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: nightly
+
+      - name: Cache cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          # The fuzz crate is its own workspace, so its target dir is
+          # `fuzz/target`; the registry is shared with the stable jobs.
+          path: |
+            ~/.cargo/registry
+            fuzz/target
+          key: ${{ runner.os }}-fuzz-${{ hashFiles('fuzz/Cargo.toml', 'fuzz/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-fuzz-
+
+      - name: Cache cargo-fuzz
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-0.13.2-${{ runner.os }}
+
+      - name: Cache FFmpeg
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: dist/ffmpeg/linux-x86_64
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-ffmpeg-
+
+      - name: Build media dependencies
+        run: ./scripts/media-deps
+
+      - name: Install cargo-fuzz
+        run: command -v cargo-fuzz >/dev/null || cargo install cargo-fuzz --locked --version 0.13.2
+
+      - name: Build the fuzz targets
+        run: |
+          source dist/ffmpeg/linux-x86_64/env.sh
+          cargo fuzz build

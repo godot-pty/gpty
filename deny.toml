@@ -1,0 +1,46 @@
+# Dependency policy for gpty. `cargo audit` stays the advisory gate; this file
+# owns everything else a release has to answer for: the licences it ships, the
+# sources it accepts, and duplicate versions.
+#
+# A licence is allowed only when the project can ship it. The project itself is
+# GPL-3.0-or-later, the shipped data files are Apache-2.0, and the permissive
+# licences below are what the dependency graph actually uses. The two FFmpeg
+# binding crates are WTFPL (the C libraries they bind are LGPLv3 and are
+# handled by LICENSE-EXCEPTIONS.md, not by this file), so they are named
+# exceptions rather than a blanket allowance.
+
+[graph]
+# One graph for both gates: a licence, source or duplicate that only appears
+# under an optional feature must fail here, not at a release build.
+all-features = true
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+confidence-threshold = 0.9
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    "GPL-3.0-or-later",
+]
+exceptions = [
+    { name = "ffmpeg-the-third", allow = ["WTFPL"] },
+    { name = "ffmpeg-sys-the-third", allow = ["WTFPL"] },
+]
+
+[bans]
+multiple-versions = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

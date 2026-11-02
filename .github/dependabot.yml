@@ -1,0 +1,33 @@
+# Dependency updates are a security control, not a convenience: the actions are
+# pinned to commit SHAs, so without this nothing moves them, and a pinned action
+# with a known CVE stays pinned. One grouped pull request per ecosystem per
+# week, and one for the fuzz workspace's own lockfile (it is not a member of the
+# repository workspace, so the root cargo entry does not see it).
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      rust-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: "cargo"
+    directory: "/fuzz"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      fuzz-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]

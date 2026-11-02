@@ -1,0 +1,91 @@
+name: Fuzz
+
+# The unbounded-time half of the harness. `ci.yml`'s `fuzz-build` compiles every
+# target on each pull request; this workflow gives each one a bounded run on a
+# schedule, so a crash found here becomes a committed regression test in the
+# crate that owns the code instead of a red pull request. `workflow_dispatch`
+# is for a one-off run after a parser changes.
+on:
+  schedule:
+    # Nightly, off the hour. A scheduled run never gates a release, and a crash
+    # it finds is filed, not merged.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz
+  cancel-in-progress: false
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: nightly
+
+      - name: Cache cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            fuzz/target
+          key: ${{ runner.os }}-fuzz-${{ hashFiles('fuzz/Cargo.toml', 'fuzz/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-fuzz-
+
+      - name: Cache cargo-fuzz
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-0.13.2-${{ runner.os }}
+
+      - name: Cache FFmpeg
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: dist/ffmpeg/linux-x86_64
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-ffmpeg-
+
+      - name: Build media dependencies
+        run: ./scripts/media-deps
+
+      - name: Install cargo-fuzz
+        run: command -v cargo-fuzz >/dev/null || cargo install cargo-fuzz --locked --version 0.13.2
+
+      # Each target's own budget, not the job's: seven targets at five minutes
+      # is the 60-minute job cap with room for the build. `-timeout` is the
+      # per-input hang bound, `-rss_limit_mb` the allocation bound (libFuzzer
+      # aborts and writes the input), and `-max_len` keeps a run from spending
+      # its budget growing one input past what the socket or pane can pass.
+      - name: Fuzz every target
+        run: |
+          source dist/ffmpeg/linux-x86_64/env.sh
+          for target in $(ls fuzz/fuzz_targets | sed 's/\.rs$//'); do
+            echo "::group::${target}"
+            cargo fuzz run "$target" -- \
+              -max_total_time=300 \
+              -max_len=65536 \
+              -timeout=10 \
+              -rss_limit_mb=2048
+            echo "::endgroup::"
+          done
+
+      # A crash's reproducer is the input libFuzzer wrote; without it the red
+      # run is all a maintainer sees.
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts
+          if-no-files-found: ignore

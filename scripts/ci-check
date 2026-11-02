@@ -339,11 +339,28 @@ fi
 # too instead of surfacing first on GitHub.
 header "windows cross-check"
 WIN_TARGET="x86_64-pc-windows-msvc"
+# The FFmpeg-backed crates are part of the check, but a `cargo check` never
+# links: the host's media prefix answers pkg-config for the Windows target
+# (`PKG_CONFIG_ALLOW_CROSS`), so the binding surface and our Rust code compile
+# without a Windows FFmpeg sysroot. The real Windows build and link is the
+# native `rust-windows` job. Before this, the step only passed while a cached
+# build-script output matched, and failed on a clean target or a feature change.
+case "$(uname -s)" in
+    Linux*) HOST_PLATFORM="linux" ;;
+    Darwin*) HOST_PLATFORM="macos" ;;
+    *) HOST_PLATFORM="windows" ;;
+esac
+case "$(uname -m)" in
+    amd64|x86_64) HOST_ARCH="x86_64" ;;
+    *) HOST_ARCH="arm64" ;;
+esac
+HOST_MEDIA_PREFIX="$REPO_ROOT/dist/ffmpeg/${HOST_PLATFORM}-${HOST_ARCH}"
 WIN_OK=true
 if rustup target list --installed 2>/dev/null | grep -q "^${WIN_TARGET}$" \
     && command -v clang-cl >/dev/null 2>&1 \
     && command -v llvm-lib >/dev/null 2>&1 \
-    && [ -d "$HOME/.xwin/crt" ]; then
+    && [ -d "$HOME/.xwin/crt" ] \
+    && [ -d "$HOST_MEDIA_PREFIX/lib/pkgconfig" ]; then
     XWIN_CC="$HOME/.local/bin/xwin-clang-cl"
     if [ ! -x "$XWIN_CC" ]; then
         printf '#!/bin/sh\nexec clang-cl --target=x86_64-pc-windows-msvc "$@"\n' > "$XWIN_CC"
@@ -351,20 +368,26 @@ if rustup target list --installed 2>/dev/null | grep -q "^${WIN_TARGET}$" \
     fi
     XWIN_INCLUDE="$HOME/.xwin/crt/include;$HOME/.xwin/sdk/include/ucrt;$HOME/.xwin/sdk/include/um;$HOME/.xwin/sdk/include/shared"
     XWIN_LIB="$HOME/.xwin/crt/lib/x86_64;$HOME/.xwin/sdk/lib/ucrt/x86_64;$HOME/.xwin/sdk/lib/um/x86_64"
-    if CC_x86_64_pc_windows_msvc="$XWIN_CC" \
+    # `--tests` is the half that was missing: a test-only `#[cfg(windows)]`
+    # breakage (an import or helper dead on Windows) compiled in no local gate,
+    # so it reached CI's `rust-windows` job first. Test profiles for every crate
+    # are built here now.
+    if PKG_CONFIG_ALLOW_CROSS=1 \
+        PKG_CONFIG_PATH="$HOST_MEDIA_PREFIX/lib/pkgconfig" \
+        CC_x86_64_pc_windows_msvc="$XWIN_CC" \
         CXX_x86_64_pc_windows_msvc="$XWIN_CC" \
         AR_x86_64_pc_windows_msvc="llvm-lib" \
         INCLUDE="$XWIN_INCLUDE" \
         LIB="$XWIN_LIB" \
         RUSTFLAGS="-Dwarnings" \
-        cargo check --workspace --target "$WIN_TARGET" 2>&1; then
+        cargo check --workspace --tests --target "$WIN_TARGET" 2>&1; then
         pass "windows cross-check"
     else
         fail "windows cross-check"
         check_failed
     fi
 else
-    warn "windows cross-check — needs: rustup target add ${WIN_TARGET}; clang-cl + llvm-lib; xwin splat into ~/.xwin (enforced by CI job rust-windows)"
+    warn "windows cross-check — needs: rustup target add ${WIN_TARGET}; clang-cl + llvm-lib; xwin splat into ~/.xwin; ./scripts/media-deps for ${HOST_MEDIA_PREFIX} (enforced by CI job rust-windows)"
 fi
 # ── Step 3.7: peer-credential cross-check (BSD) ────────────────────────
 # The peer-credential functions are selected by `cfg(target_os)`, so the arms
@@ -514,6 +537,23 @@ if command -v cargo-audit &>/dev/null; then
     fi
 else
     skip_gate "cargo-audit not installed — run: cargo install cargo-audit"
+fi
+
+# ── Step 6.1: cargo deny ───────────────────────────────────────────────
+header "cargo deny"
+
+if command -v cargo-deny &>/dev/null; then
+    # deny.toml owns the policy: licence allow-list + named exceptions,
+    # crates.io-only sources, yanked = deny, duplicate versions as warnings,
+    # and [graph] all-features so the graph matches CI's.
+    if cargo deny check 2>&1; then
+        pass "cargo deny"
+    else
+        fail "cargo deny"
+        check_failed
+    fi
+else
+    skip_gate "cargo-deny not installed — run: cargo install cargo-deny --locked"
 fi
 
 # ── Summary ────────────────────────────────────────────────────────────

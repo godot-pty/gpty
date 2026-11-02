@@ -115,6 +115,43 @@ for root_md, folder in (('ROADMAP.md', 'roadmap'), ('CHANGELOG.md', 'changelog')
     if not os.path.exists(os.path.join(ROOT, d, '_index.md')):
         bad(d, '_index.md is missing (the section would not render the root file)')
 
+# ── code citations in roadmap rows ───────────────────────────────────────
+# A row's proof is often a `path:line` reference, and nothing checked that the
+# file still exists: a rename or a move turned the evidence into an
+# unverifiable claim with every gate green. Existence is the honest test, not
+# line content - a line that moved is still useful evidence, while a deleted
+# subject is not. A bare basename is accepted when it names exactly one file;
+# an ambiguous one fails, and the fix is the repo path in the row.
+REPO_FILES = []
+for dirpath, dirnames, filenames in os.walk(ROOT):
+    rel_dir = rel(dirpath) + '/'
+    dirnames[:] = [d for d in dirnames
+                   if not (rel_dir + d + '/').startswith(
+                       SKIP_PREFIXES + ('dist/', 'godot/bin/', 'godot/.godot/', 'fuzz/target/'))]
+    for name in filenames:
+        REPO_FILES.append(rel(os.path.join(dirpath, name)))
+BY_BASENAME = {}
+for f in REPO_FILES:
+    BY_BASENAME.setdefault(os.path.basename(f), []).append(f)
+CITATION = re.compile(
+    r'`([\w.+\-/]+\.(?:rs|gd|py|sh|ya?ml|md|toml|json|cfg|ts|js)):(\d+)(?:-\d+)?`')
+
+
+def check_citation(where, item):
+    for m in CITATION.finditer(item):
+        path = m.group(1)
+        citation = m.group(0)[1:-1]
+        if '/' in path:
+            if not os.path.exists(os.path.join(ROOT, path)):
+                bad(where, f'citation to missing file: {citation}')
+            continue
+        hits = BY_BASENAME.get(path, [])
+        if not hits:
+            bad(where, f'citation to missing file: {citation}')
+        elif len(hits) > 1:
+            bad(where, f'ambiguous citation {citation} ({len(hits)} files); '
+                       f'use a repo path, e.g. {hits[0]}')
+
 # ── roadmap tables ───────────────────────────────────────────────────────
 m = re.search(r'Area column names[^(]*\(([A-Z, ]+)\)', read('ROADMAP.md'))
 AREAS = {a.strip() for a in m.group(1).split(',')} if m else set()
@@ -137,6 +174,7 @@ for p in sorted(os.listdir(os.path.join(ROOT, rd))):
             bad(where, 'row is not `| ✅/⬜ | AREA | **Title** - text |`')
             continue
         done, area, item = r.groups()
+        check_citation(where, item)
         if area not in AREAS:
             bad(where, f'unknown area {area}')
         if re.search(r'(?<!\\)\|', item):
