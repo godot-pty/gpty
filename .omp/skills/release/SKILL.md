@@ -152,8 +152,13 @@ git push origin main
 # included — before tagging. release.yml builds the artifacts from the tagged
 # commit, so tagging first means shipping whatever that run would have caught.
 
-# Tag and push (triggers release workflow)
-git tag vX.Y.Z
+# Tag and push (triggers release workflow). The tag is signed: the repository's
+# `tag` ruleset requires a signature for every non-bypass actor, and the tag is
+# the release's identity. Configure a key first (`user.signingkey`, or
+# `gpg.format ssh` plus the public-key path), and `git tag -v` must verify
+# before the push - being the admin bypasses the rule, not the reason for it.
+git tag -s vX.Y.Z -m "vX.Y.Z"
+git tag -v vX.Y.Z
 git push origin vX.Y.Z
 ```
 
@@ -202,7 +207,7 @@ The release is not finished when the tag is pushed:
 - **`.uid` files must be committed.** Godot 4 `.uid` files are essential for stable resource referencing — always commit them alongside `.gd` files.
 - **Screenshot capture.** `scripts/screenshot-gpty` needs XWayland (Godot's window visible in the X tree) — on a pure-Wayland session the window won't be found; report and ask the user. The vision sanity pass is advisory: it catches gross breakage, but its text readings need source verification.
 - **Screenshot sandbox.** `scripts/screenshot-gpty` redirects `XDG_DATA_HOME`/`XDG_CONFIG_HOME` but not `XDG_RUNTIME_DIR`/`GPTY_SOCKET`, so a GUI already running on the desktop owns the control socket: the sandboxed app refuses the bind and renders "Another gPTY window is already running — this one will close." instead of the app, and the capture is a doomed second instance. Until the script creates its own runtime sandbox (queued in the v0.8.0 roadmap), run it as `RT=$(mktemp -d); ST=$(mktemp -d); chmod 700 "$RT" "$ST"; XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="$ST" GPTY_SOCKET="$RT/gpty.sock" env -u GPTY_SECRET scripts/screenshot-gpty <out> <app-command>; rm -rf "$RT" "$ST"`. Verified on the v0.6.0 capture (2026-10-19); the first attempt captured the refusal screen.
-- **Tag immutability.** If you need to move a tag (e.g., to include a last-minute fix), use `git tag -f vX.Y.Z && git push -f origin vX.Y.Z`. The release workflow will re-run.
+- **Tag immutability.** If you need to move a tag (e.g., to include a last-minute fix), use `git tag -f -s vX.Y.Z -m "vX.Y.Z" && git push -f origin vX.Y.Z`, then `git tag -v` it again. The release workflow will re-run.
 - **Docs mirrors are build artifacts.** `docs/assets/repo/`, `docs/data/`, `docs/.cache/` are gitignored; `docs.yml` runs `docs/setup.sh` to regenerate them from the root files on every docs-touching push. Never commit them.
 - **Tool tarballs clobber repo files.** The Hugo release tarball ships `README.md` and `LICENSE`; extracting it in the workspace root overwrites the repo's copies before the docs mirror step reads them (this shipped Hugo's README as our docs for several deploys). Always extract with the member name (`tar -xzf …tar.gz hugo`) or into a temp dir.
 - **Docs workflow trigger paths.** `.github/workflows/docs.yml` itself is NOT in its own `paths` filter — workflow-only changes don't fire the docs build. Trigger it with a docs-touching change or `workflow_dispatch`.

@@ -37,7 +37,7 @@ A fix without a failing-before observation is a guess. Reproduce on a fresh buil
 | IPC method / MCP tool | `cargo test -p gpty` — the package is `gpty`; there is no `gpty-cli` package. `mcp.rs` reads the real registrations, the GDScript dispatch arms and every CLI call literal, and `wire.rs` checks translated argument keys against the handler's own |
 | any doc/roadmap edit | `python3 scripts/docs-check` |
 | app-visible behavior | `python3 scripts/smoke_pane_api.py`, or `skill://gpty-live-gui-smoke`; UI claims → `skill://gpty-ui-review` |
-| anything | `./scripts/ci-check` before committing (full: fmt, workflow lint, docs, clippy, ffi surface, log hygiene, cross-target checks, tests twice, gdext build, import, GUT, live smoke, `cargo audit --deny warnings`) |
+| anything | `./scripts/ci-check` before committing (full: fmt, workflow lint, docs, clippy, ffi surface, log hygiene, cross-target checks, tests twice, gdext build, import, GUT, live smoke, `cargo audit --deny warnings`, `cargo deny check`) |
 
 A missing toolchain SKIPs locally but FAILS under `CI`/`GITHUB_ACTIONS`, so a local PASS can be weaker than CI. Never `--no-verify`. Do not run the full suite mid-flight, and do not re-run a gate that already passed.
 

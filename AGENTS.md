@@ -114,6 +114,10 @@ gpty/
 │           └── media_api.rs    # GptyMedia: JSON + packed arrays over gpty-media
 ├── extensions/
 │   └── gpty-omp-events/        # Explicit OMP plugin; dormant unless GPTY_EVENT_* is set
+├── fuzz/                       # cargo-fuzz workspace: its own lockfile, not a repository member
+│   ├── Cargo.toml              # targets + pinned deps; `cargo +nightly fuzz run <target>`
+│   ├── fuzz_targets/           # grid_feed, line_parser, ipc_request, vault_links, markdown, ai_frame, media_probe
+│   └── corpus/                 # committed seeds; libFuzzer's 40-hex discoveries are gitignored
 └── godot/                      # Godot 4.7 project
     ├── project.godot
     ├── gpty.gdextension
