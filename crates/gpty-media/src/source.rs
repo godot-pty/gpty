@@ -244,9 +244,25 @@ impl Avio {
 
 impl Drop for Avio {
     fn drop(&mut self) {
-        // Frees the context and its buffer, never the descriptor.
-        // SAFETY: created by `avio_alloc_context`, freed exactly once here.
-        unsafe { ffi::avio_context_free(&mut self.context) };
+        // `avio_context_free` frees the AVIOContext, never the buffer: FFmpeg
+        // treats a buffer passed to `avio_alloc_context` as the caller's
+        // (ffmpeg 9.0.2, libavformat/aviobuf.c). `ffio_ensure_seekback` may
+        // have replaced it with a reallocated block, so the pointer current at
+        // drop time is the one to free. Measured before the fix: a probe of a
+        // crafted header left 32 KiB unreachable per call (ASAN, 2000 calls)
+        // and the plain build grew 6-8 KiB per open.
+        // SAFETY: created by `avio_alloc_context` and replaced only by FFmpeg's
+        // own realloc of this same field; freed exactly once here, after the
+        // context that used it is gone.
+        unsafe {
+            if !self.context.is_null() {
+                let buffer = (*self.context).buffer;
+                ffi::avio_context_free(&mut self.context);
+                if !buffer.is_null() {
+                    ffi::av_free(buffer.cast());
+                }
+            }
+        }
     }
 }
 
@@ -307,6 +323,8 @@ unsafe extern "C" fn read_packet(opaque: *mut c_void, buffer: *mut u8, size: i32
     // SAFETY: `opaque` is the `File` inside `Avio`, which outlives the AVIO
     // context; `buffer` is FFmpeg's write-into buffer of `size` bytes.
     let file = unsafe { &mut *(opaque as *mut File) };
+    // SAFETY: FFmpeg passes a writable region of `size` bytes (the read
+    // callback's contract); nothing else aliases it for this call.
     let destination = unsafe { std::slice::from_raw_parts_mut(buffer, size as usize) };
     loop {
         match file.read(destination) {

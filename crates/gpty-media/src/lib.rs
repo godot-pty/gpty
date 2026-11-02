@@ -1,3 +1,11 @@
+// This is the FFI crate: it owns the FFmpeg binding, so it cannot forbid
+// `unsafe` altogether. The fence is the same pair of lints the other crates
+// use - an operation inside an `unsafe fn` needs its own block, and every
+// unsafe block states its invariant in a `// SAFETY:` line, which
+// `clippy -D warnings` enforces.
+#![deny(unsafe_op_in_unsafe_fn)]
+#![deny(clippy::undocumented_unsafe_blocks)]
+
 //! Media probe and decode backend for gpty's media pane.
 //!
 //! This crate is the one owner of the FFmpeg binding. Everything above it
