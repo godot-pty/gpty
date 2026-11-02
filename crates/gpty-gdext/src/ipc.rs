@@ -622,6 +622,7 @@ mod integration_tests {
     // B4: a bind refused because another instance holds the socket must leave
     // this process asking to quit, with a reason the GUI can show — the
     // alternative is a second window whose workspace nothing can reach.
+    #[cfg(unix)]
     #[tokio::test]
     #[serial]
     async fn a_refused_bind_records_the_failure_and_asks_to_quit() {

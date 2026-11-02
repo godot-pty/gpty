@@ -122,11 +122,17 @@ impl GptyMarkdown {
 }
 
 /// Render without wikilink syntax — the callers that have no vault.
-fn render_markdown(markdown: &str) -> Rendered {
+///
+/// Public (with [`render_markdown_with`]) so the fuzz harness drives the real
+/// renderer; the GDScript callers still enter through `GptyMarkdown.render`.
+pub fn render_markdown(markdown: &str) -> Rendered {
     render_markdown_with(markdown, false)
 }
 
 /// Render `markdown`, optionally turning `[[…]]` mentions into internal links.
+///
+/// Public so the fuzz harness drives the real renderer (see
+/// [`render_markdown`]).
 ///
 /// Wikilinks are replaced *before* Markdown parsing, with the occurrence set
 /// [`gpty_core::links::parse_links`] produces — the same scanner the index
@@ -146,7 +152,7 @@ fn render_markdown(markdown: &str) -> Rendered {
 /// it is inside a link or image, and to a `gpty-note:` link everywhere else.
 /// The alternative (an inner link that wins) would make a link's own label
 /// silently navigate somewhere other than the link's `href`.
-fn render_markdown_with(markdown: &str, wikilinks: bool) -> Rendered {
+pub fn render_markdown_with(markdown: &str, wikilinks: bool) -> Rendered {
     let source = truncate_utf8(markdown, MAX_MARKDOWN_BYTES);
     let shown = source.len();
     let (prepared, mentions) = if wikilinks && source.contains("[[") {

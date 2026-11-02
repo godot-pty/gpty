@@ -1,3 +1,12 @@
+// Unsafe is fenced at the crate boundary: an operation inside an `unsafe fn`
+// needs its own block, and every unsafe block carries a `// SAFETY:` line, which
+// `clippy -D warnings` enforces. Panics are a separate, already-closed door:
+// `godot-core` wraps every GDScript-callable method varcall and virtual callback
+// in `handle_panic`, so a panic here is reported to Godot rather than unwinding
+// into the engine.
+#![deny(unsafe_op_in_unsafe_fn)]
+#![deny(clippy::undocumented_unsafe_blocks)]
+
 //! Godot 4 GDExtension for gpty — bridges the Rust terminal engine
 //! to Godot's rendering pipeline.
 //!
@@ -28,7 +37,7 @@ mod diagnostics;
 mod grid_api;
 mod history_api;
 mod ipc;
-mod markdown;
+pub mod markdown;
 mod media_api;
 mod omp_events;
 mod store_api;
@@ -983,6 +992,9 @@ fn pin_library() {
 #[cfg(not(any(unix, windows)))]
 fn pin_library() {}
 
+// SAFETY: `ExtensionLibrary` may be implemented once per library; this is the
+// extension's only implementation, and `#[gdextension]` generates the entry
+// point the engine loads. `GptyExtension` is the crate's sole class registry.
 #[gdextension]
 unsafe impl ExtensionLibrary for GptyExtension {
     fn on_stage_init(stage: InitStage) {
