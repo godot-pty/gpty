@@ -18,7 +18,7 @@ portable-pty = "0.9"
 vte = "0.15"
 log = "0.4"
 alacritty_terminal = "0.26.0"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 
 [dev-dependencies]
 # Test-only: `TempDir` removes a test's files and directories when the guard
