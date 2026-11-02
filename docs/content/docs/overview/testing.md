@@ -34,7 +34,9 @@ uses for `history.db`. On Windows, where Godot's `user://` resolves through the
 Known Folder API and cannot be redirected by an environment variable, it
 additionally sandboxes `LOCALAPPDATA`/`APPDATA`. The GUT run leaves Godot's
 file logging off (so there is no engine log to redirect) and caps the suite at
-`GUT_TIMEOUT` (600 s) so a hung test fails the gate, and it does not pass
+`GUT_TIMEOUT` (600 s) so a hung test fails the gate, stops a run that has
+produced no output for `GUT_STALL_TIMEOUT` (120 s) with the last test it
+started and the command that re-runs that file alone, and it does not pass
 `-d` (Godot treats it as `--debug`, so a runtime test error would break into
 the interactive debugger instead of being reported); the live smoke uses
 `--log-file` because it needs a failure-time engine log. The

@@ -123,11 +123,21 @@ done
 # that, and waiting for the deadline hides the error the gate exists to report
 # (measured: a deliberate parse error used to spend the whole timeout). The
 # escalation is SIGTERM, one second, SIGKILL.
+#
+# A stalled run fails long before that deadline. The suite starts a test every
+# ~0.15 s (913 tests in 134 s), and the longest single test waits 2.1 s, so
+# two minutes with no output at all is a hang, not a slow test. Detecting that
+# turns the measured wedge (a pane-spawning test stopped the suite; the run
+# then burned the whole deadline) into a failure that names the test it stopped
+# in, instead of a timeout a reader cannot attribute. `0` disables the check.
 GUT_TIMEOUT="${GUT_TIMEOUT:-600}"
-if [[ ! "$GUT_TIMEOUT" =~ ^[0-9]+$ ]]; then
-    echo "gut-check: GUT_TIMEOUT must be a whole number of seconds" >&2
-    exit 1
-fi
+GUT_STALL_TIMEOUT="${GUT_STALL_TIMEOUT:-120}"
+for var in GUT_TIMEOUT GUT_STALL_TIMEOUT; do
+    if [[ ! "${!var}" =~ ^[0-9]+$ ]]; then
+        echo "gut-check: $var must be a whole number of seconds" >&2
+        exit 1
+    fi
+done
 
 # `tail -f` streams the log to the terminal while the watchdog reads the same
 # file; both stop once the child is reaped.
@@ -144,10 +154,21 @@ set +e
 STATUS=0
 TIMEOUT_HIT=0
 PARSE_ABORT=0
+STALL_HIT=0
+LAST_SIZE=-1
+LAST_PROGRESS=$SECONDS
 DEADLINE=$(( SECONDS + GUT_TIMEOUT ))
 while kill -0 "$GUT_PID" 2>/dev/null; do
     if grep -qE 'SCRIPT ERROR|Parse Error|Failed to load script' "$LOG" 2>/dev/null; then
         PARSE_ABORT=1
+        break
+    fi
+    SIZE="$(wc -c <"$LOG" 2>/dev/null || echo -1)"
+    if [[ "$SIZE" != "$LAST_SIZE" ]]; then
+        LAST_SIZE="$SIZE"
+        LAST_PROGRESS=$SECONDS
+    elif (( GUT_STALL_TIMEOUT > 0 && SECONDS - LAST_PROGRESS >= GUT_STALL_TIMEOUT )); then
+        STALL_HIT=1
         break
     fi
     if (( SECONDS >= DEADLINE )); then
@@ -156,7 +177,7 @@ while kill -0 "$GUT_PID" 2>/dev/null; do
     fi
     sleep 0.2
 done
-if (( PARSE_ABORT || TIMEOUT_HIT )); then
+if (( PARSE_ABORT || TIMEOUT_HIT || STALL_HIT )); then
     kill -TERM "$GUT_PID" 2>/dev/null || true
     for _ in 1 2 3 4 5; do
         kill -0 "$GUT_PID" 2>/dev/null || break
@@ -173,13 +194,39 @@ set -e
 ESC=$'\033'
 sed -E "s/${ESC}\[[0-9;?]*[A-Za-z]//g" "$LOG" > "$PLAIN"
 
+# Where a killed run stopped: GUT prints the script's `.gd` path and then
+# `* <test name>` as each test begins, so the tail of the log names the test and
+# file to reproduce. Read before the message so a stall and a deadline report
+# the same way.
+LAST_TEST="$(awk '/^\* / { name = $0 } END { print name }' "$PLAIN" | sed -E 's/^\* //')"
+LAST_SCRIPT="$(awk '{
+        if (match($0, /[a-z]+:\/\/[^ ]*\.gd/)) last = substr($0, RSTART, RLENGTH)
+    }
+    END { print last }' "$PLAIN")"
+
 PROBLEMS=()
 
-if (( TIMEOUT_HIT )); then
+if (( STALL_HIT )); then
+    PROBLEMS+=("the run produced no output for ${GUT_STALL_TIMEOUT}s and was killed (a hung test or process)")
+elif (( TIMEOUT_HIT )); then
     PROBLEMS+=("the suite exceeded ${GUT_TIMEOUT}s and was killed (a hung test or process)")
-elif (( PARSE_ABORT )); then
+fi
+if (( STALL_HIT || TIMEOUT_HIT )); then
+    if [[ -n "$LAST_TEST" ]]; then
+        PROBLEMS+=("the last test started was: $LAST_TEST")
+    fi
+    if [[ -n "$LAST_SCRIPT" ]]; then
+        PROBLEMS+=("in $LAST_SCRIPT")
+        PROBLEMS+=("re-run it alone: ${GODOT} --headless --path godot -s addons/gut/gut_cmdln.gd -gdir=res://tests/unit -gdir=res://tests/integration -gselect=$(basename "$LAST_SCRIPT" .gd) -gexit")
+    fi
+    PROBLEMS+=("the last lines were:")
+    while IFS= read -r line; do
+        PROBLEMS+=("    $line")
+    done < <(tail -n 8 "$PLAIN")
+fi
+if (( PARSE_ABORT )); then
     PROBLEMS+=("the run was aborted as soon as Godot reported a script/parse error — it cannot be judged")
-elif [[ "$STATUS" -ne 0 ]]; then
+elif [[ "$STATUS" -ne 0 ]] && (( ! STALL_HIT && ! TIMEOUT_HIT )); then
     PROBLEMS+=("godot exited $STATUS")
 fi
 
@@ -195,7 +242,8 @@ fi
 SCRIPTS_RAN="$(awk '$1 == "Scripts" && $2 ~ /^[0-9]+$/ { print $2; exit }' "$PLAIN")"
 TESTS_RAN="$(awk '$1 == "Tests" && $2 ~ /^[0-9]+$/ { print $2; exit }' "$PLAIN")"
 
-if [[ -z "$SCRIPTS_RAN" || -z "$TESTS_RAN" ]]; then
+if [[ -z "$SCRIPTS_RAN" || -z "$TESTS_RAN" ]] \
+    && (( ! STALL_HIT && ! TIMEOUT_HIT && ! PARSE_ABORT )); then
     PROBLEMS+=("no Run Summary in the output — the run stopped before it finished")
 fi
 
@@ -227,6 +275,9 @@ elif [[ "$PENDING" != "0" ]] && grep -qE -- '---- [0-9]+ pending/risky tests\. -
     # pending test once while it runs and again in the Run Summary. What matters
     # is that the only non-passing category is `pending` — `risky` already
     # failed above — and that every pending test is listed for review below.
+    :
+elif (( STALL_HIT || TIMEOUT_HIT || PARSE_ABORT )); then
+    # The failure above already says why there is no summary.
     :
 else
     PROBLEMS+=("the run did not end with 'All tests passed!'")
