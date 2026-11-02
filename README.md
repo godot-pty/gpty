@@ -4,7 +4,9 @@
 
 <div align="center">
 
-  [![Build](https://img.shields.io/github/actions/workflow/status/godot-pty/gpty/ci.yml?branch=main)](https://github.com/godot-pty/gpty/actions/workflows/ci.yml) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/godot-pty/gpty/total) ![LLM-powered](https://img.shields.io/badge/LLM-powered-6A5ACD) [![r/gPTY](https://img.shields.io/reddit/subreddit-subscribers/gPTY?label=r%2FgPTY&style=social)](https://www.reddit.com/r/gPTY/)
+  [![Build](https://img.shields.io/github/actions/workflow/status/godot-pty/gpty/ci.yml?branch=main)](https://github.com/godot-pty/gpty/actions/workflows/ci.yml) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/godot-pty/gpty/total) ![LLM-powered](https://img.shields.io/badge/LLM-powered-6A5ACD)
+
+  [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16201/badge)](https://www.bestpractices.dev/projects/16201) [![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/godot-pty/gpty#verifying-releases)
 
 </div>
 
@@ -39,6 +41,8 @@
 
 gPTY is a side project in active development. A vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using LLMs under human review; and as such, the underlying code may contain unidiomatic patterns and/or bugs. Roadmap & documentation: https://gpty.dev/
 
+**Project health.** The repository runs OpenSSF Scorecard and is registered in the [OpenSSF Best Practices badge program](https://www.bestpractices.dev/projects/16201) (project 16201); release assets carry [SLSA Build Level 2](https://slsa.dev/spec/v1.0/levels) provenance; and the project has applied to the Linux Foundation's [LFX Health Insights](https://insights.linuxfoundation.org/) program, whose badge will be added after approval.
+
 | Component | Choice | Rationale |
 |----------|--------|-----------|
 | PTY library | `portable-pty` | Cross-platform (Linux `/dev/ptmx` + Windows ConPTY) with a single API |
@@ -65,6 +69,8 @@ Standalone binaries (no Godot install required) are published on [GitHub Release
 Every release also bundles the gPTY knowledge base; the **Knowledge Base** profile in the sidebar opens the bundled wiki from your user data.
 
 In the file names, `<version>` is the release tag you downloaded (for example `v0.7.0`).
+
+### Verifying releases
 
 Each release publishes a `SHA256SUMS` listing every asset. Check the file you downloaded before running it:
 

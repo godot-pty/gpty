@@ -24,11 +24,23 @@ menu:
       weight: 5
       params:
         type: search
-    - name: GitHub
+    - name: Reddit
       weight: 6
+      url: https://www.reddit.com/r/gPTY/
+      params:
+        icon: reddit
+    - name: GitHub
+      weight: 7
       url: https://github.com/godot-pty/gpty
       params:
         icon: github
+
+# The favicon set lives with the brand source at the repo root, so the app and
+# the site have one place to update. Everything in that directory is served at
+# the site root, which is where Hextra's favicons partial looks for it.
+staticDir:
+  - static
+  - ../assets/site-icons
 
 params:
   navbar:
