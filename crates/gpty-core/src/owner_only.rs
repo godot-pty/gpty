@@ -103,6 +103,8 @@ fn restrict(path: &Path, want: u32, want_dir: bool) -> Restriction {
         Err(e) => return Restriction::Failed(e),
     };
     if meta.is_dir() != want_dir
+        // SAFETY: `geteuid` takes no arguments, cannot fail, and touches no
+        // memory; the call is unsafe only because every libc extern is.
         || meta.uid() != unsafe { libc::geteuid() }
         || meta.mode() & 0o077 == 0
     {

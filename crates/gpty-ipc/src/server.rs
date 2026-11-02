@@ -451,6 +451,7 @@ fn owned_by_current_uid(meta: &std::fs::Metadata) -> bool {
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn peer_uid_matches(stream: &tokio::net::UnixStream) -> bool {
     match stream.peer_cred() {
+        // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
         Ok(cred) => cred.uid() == unsafe { libc::geteuid() },
         Err(e) => {
             log::warn!("IPC peer credential lookup failed: {e}");

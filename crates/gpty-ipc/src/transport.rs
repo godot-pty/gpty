@@ -95,6 +95,7 @@ pub fn default_socket_path() -> String {
 
     #[cfg(target_os = "linux")]
     {
+        // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
         let uid = unsafe { libc::geteuid() };
         if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR")
             && dir.starts_with('/')
@@ -111,6 +112,7 @@ pub fn default_socket_path() -> String {
 
     #[cfg(target_os = "macos")]
     {
+        // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
         let uid = unsafe { libc::geteuid() };
         let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
         if is_secure_runtime_dir(&tmp, uid) {
@@ -206,6 +208,7 @@ fn xdg_dir(env_var: &str, home_suffix: &str, uid: u32) -> Option<std::path::Path
 pub fn state_dir() -> Option<std::path::PathBuf> {
     #[cfg(unix)]
     {
+        // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
         private_state_dir(unsafe { libc::geteuid() })
     }
     #[cfg(windows)]
@@ -226,6 +229,7 @@ pub fn state_dir() -> Option<std::path::PathBuf> {
 pub fn data_dir() -> Option<std::path::PathBuf> {
     #[cfg(unix)]
     {
+        // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
         xdg_dir("XDG_DATA_HOME", ".local/share", unsafe { libc::geteuid() })
     }
     #[cfg(windows)]
@@ -323,6 +327,7 @@ pub fn validate_socket_path(path: &str) -> io::Result<()> {
                 "refusing to connect: GPTY_SOCKET is not a socket",
             ));
         }
+        // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
         let uid = unsafe { libc::geteuid() };
         if meta.uid() != uid {
             return Err(io::Error::new(
@@ -357,6 +362,7 @@ pub fn validate_gui_binary(path: &std::path::Path) -> bool {
         let Ok(meta) = std::fs::metadata(path) else {
             return false;
         };
+        // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
         meta.is_file() && meta.uid() == unsafe { libc::geteuid() } && meta.mode() & 0o022 == 0
     }
     #[cfg(not(unix))]
@@ -573,6 +579,7 @@ mod tests {
                     ("XDG_STATE_HOME", Some(state_root.to_str().unwrap())),
                     ("HOME", None),
                 ]);
+                // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
                 path = fallback_socket_path(unsafe { libc::geteuid() });
             }
             let expected = state_root.join("gpty/gpty.sock");
@@ -599,6 +606,7 @@ mod tests {
                     ("XDG_STATE_HOME", Some(state_root.to_str().unwrap())),
                     ("HOME", None),
                 ]);
+                // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
                 path = fallback_socket_path(unsafe { libc::geteuid() });
             }
 
@@ -618,10 +626,12 @@ mod tests {
             let path;
             {
                 let _env = EnvVars::apply(&[("XDG_STATE_HOME", None), ("HOME", None)]);
+                // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
                 path = fallback_socket_path(unsafe { libc::geteuid() });
             }
             assert_eq!(
                 path,
+                // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
                 format!("/tmp/gpty-{}.sock", unsafe { libc::geteuid() }),
                 "with no private directory the last resort is the shared temp path"
             );
@@ -635,10 +645,12 @@ mod tests {
             let path;
             {
                 let _env = EnvVars::apply(&[("XDG_STATE_HOME", Some(&relative)), ("HOME", None)]);
+                // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
                 path = fallback_socket_path(unsafe { libc::geteuid() });
             }
             assert_eq!(
                 path,
+                // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
                 format!("/tmp/gpty-{}.sock", unsafe { libc::geteuid() }),
                 "a relative XDG_STATE_HOME must be ignored, not joined onto the working directory"
             );

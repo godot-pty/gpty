@@ -178,6 +178,8 @@ pub fn validate_executable(program: &str) -> Result<(), String> {
             return Err(format!("group/other-writable executable: {program}"));
         }
         let owner = meta.uid();
+        // SAFETY: `geteuid` takes no arguments, cannot fail, and touches no
+        // memory; the call is unsafe only because every libc extern is.
         let me = unsafe { libc::geteuid() };
         if owner != me && owner != 0 {
             return Err(format!(
@@ -1052,6 +1054,9 @@ mod tests {
         }
         if !gone {
             // Leave no stray process behind for the rest of the suite.
+            // SAFETY: `kill` is called with a positive pid this test spawned
+            // and has been polling; it targets that one process, not a group,
+            // and no other thread can have that pid.
             unsafe { libc::kill(pid, libc::SIGKILL) };
         }
         assert!(gone, "closing the pane must kill the shell's children too");

@@ -43,7 +43,10 @@ impl EnvVar {
 impl Drop for EnvVar {
     fn drop(&mut self) {
         match self.previous.take() {
+            // SAFETY: this guard holds the shared lock until its fields drop,
+            // which is after this body, so no test can observe the change.
             Some(previous) => unsafe { std::env::set_var(self.key, previous) },
+            // SAFETY: same lock as above; the variable is restored under it.
             None => unsafe { std::env::remove_var(self.key) },
         }
     }
@@ -92,7 +95,10 @@ impl Drop for EnvVars {
     fn drop(&mut self) {
         for (key, previous) in self.previous.drain(..) {
             match previous {
+                // SAFETY: this guard still holds the shared lock (its fields
+                // drop after this body), so no test is reading the variables.
                 Some(previous) => unsafe { std::env::set_var(key, previous) },
+                // SAFETY: same lock as above; the variable is restored under it.
                 None => unsafe { std::env::remove_var(key) },
             }
         }

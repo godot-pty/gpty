@@ -1,3 +1,8 @@
+// The CLI touches no FFI: its only `unsafe` is in tests (`std::env::set_var`
+// is unsafe in edition 2024). Outside tests that is forbidden outright, so a
+// future block cannot be added here at all.
+#![cfg_attr(not(test), forbid(unsafe_code))]
+
 //! # gpty — terminal workspace CLI
 //!
 //! Controls the gpty GUI over JSON-RPC IPC.
