@@ -79,12 +79,39 @@ func test_store_paths_follow_only_an_absolute_test_root():
 	var abs_untouched := BasePersistenceManager.resolve_store_path("/absolute/settings.json")
 	OS.set_environment("GPTY_TEST_USER_DIR", "relative/root")
 	var relative_ignored := BasePersistenceManager.resolve_store_path("user://settings.json")
+	# A scheme is not a directory, so it cannot be the sandbox either.
+	OS.set_environment("GPTY_TEST_USER_DIR", "user://elsewhere")
+	var virtual_ignored := BasePersistenceManager.resolve_store_path("user://settings.json")
 	OS.set_environment("GPTY_TEST_USER_DIR", previous)
 
 	assert_eq(redirected, root.path_join("settings.json"))
 	assert_eq(res_untouched, "res://profiles.default.json")
 	assert_eq(abs_untouched, "/absolute/settings.json")
 	assert_eq(relative_ignored, "user://settings.json", "a relative root is ignored")
+	assert_eq(virtual_ignored, "user://settings.json", "a virtual root is ignored")
+
+
+## Godot calls `res://` and `user://` absolute (measured on 4.7.2), so
+## "absolute" alone cannot guard a path that leaves Godot's resolution. These
+## are the predicates every such boundary asks.
+func test_virtual_paths_are_not_real_paths():
+	assert_true(BasePersistenceManager.is_virtual_path("user://knowledge"))
+	assert_true(BasePersistenceManager.is_virtual_path("res://knowledge.json"))
+	assert_false(BasePersistenceManager.is_virtual_path("/tmp/notes"))
+	assert_false(BasePersistenceManager.is_virtual_path("relative/notes"))
+
+	assert_false(BasePersistenceManager.is_real_absolute_path("user://knowledge"))
+	assert_false(BasePersistenceManager.is_real_absolute_path("res://knowledge.json"))
+	assert_false(BasePersistenceManager.is_real_absolute_path("relative/notes"))
+	assert_false(BasePersistenceManager.is_real_absolute_path(""))
+	assert_true(BasePersistenceManager.is_real_absolute_path("/tmp/notes"))
+
+	var real := BasePersistenceManager.real_path("user://store_root_probe")
+	assert_false(BasePersistenceManager.is_virtual_path(real), real)
+	assert_true(BasePersistenceManager.is_real_absolute_path(real), real)
+	assert_eq(BasePersistenceManager.real_path("/tmp/notes"), "/tmp/notes")
+	assert_true(BasePersistenceManager.real_path("res://profiles.default.json").ends_with(
+		"profiles.default.json"))
 
 func test_replaces_existing_content():
 	_mgr._write_file(PATH, {"old": true})

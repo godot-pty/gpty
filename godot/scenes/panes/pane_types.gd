@@ -554,12 +554,12 @@ static func _value_for_rule(rule: Dictionary, v) -> Variant:
 				return ""
 			if path.length() > 4096 or path.contains("\uFFFD"):
 				return null
-			# `res://` and `user://` are "absolute" to Godot, but they are
-			# virtual: a data value may only name a real filesystem file. The
-			# bundled fonts are `res://` constants no file ever supplies.
-			if path.begins_with("res://") or path.begins_with("user://"):
-				return null
-			if not path.is_absolute_path() or not font_extension_ok(path):
+			# A data value may only name a real filesystem file, never a Godot
+			# scheme — and `is_absolute_path()` alone calls `res://`/`user://`
+			# absolute. The bundled fonts are `res://` constants no file ever
+			# supplies.
+			if not BasePersistenceManager.is_real_absolute_path(path) \
+					or not font_extension_ok(path):
 				return null
 			return path
 		"scheme_path":

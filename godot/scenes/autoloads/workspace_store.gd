@@ -101,7 +101,9 @@ func sanitize_cwd(raw: String) -> String:
 		var code := ch.unicode_at(0)
 		if code < 32 or code == 127:
 			return ""
-	if not out.is_absolute_path():
+	# The spawn is Rust: a `res://`/`user://` value is "absolute" to Godot and
+	# meaningless to `chdir`, so the tile keeps a real path only.
+	if not is_real_absolute_path(out):
 		return ""
 	return out
 

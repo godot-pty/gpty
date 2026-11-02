@@ -57,9 +57,11 @@ func reset() -> void:
 func last_error() -> String:
 	return _error
 
-## The vault path a configured value names. Anything but the token is returned
-## unchanged — the Wiki pane still applies its own absolute-directory check to
-## a user-typed path.
+## The vault path a configured value names. The token answers the seeded
+## directory's **real** absolute path, never the `user://` spelling, because
+## the vault API is Rust and no scheme survives that boundary. Anything but
+## the token is returned unchanged — the Wiki pane still applies its own
+## real-directory check to a user-typed path.
 func resolve(configured: String) -> String:
 	if configured != TOKEN:
 		return configured
@@ -84,12 +86,13 @@ func _seed() -> String:
 	var version := str(parsed["version"])
 	var notes: Array = parsed["notes"]
 
-	# The suite redirects every `user://` store through `GPTY_TEST_USER_DIR`;
-	# resolving the store root the same way keeps the 52 seeded notes out of a
-	# developer's real profile. An absolute test root passes through.
-	var root := resolve_store_path(store_root)
-	if not root.is_absolute_path():
-		root = ProjectSettings.globalize_path(root)
+	# The root is a real path before any directory is named. The suite redirects
+	# every `user://` store through `GPTY_TEST_USER_DIR`, so `real_path` keeps
+	# the 52 seeded notes out of a developer's real profile; in a release it
+	# globalizes the scheme. `is_absolute_path()` alone is not that check —
+	# Godot calls `user://` absolute — and the resolved directory is handed to
+	# the vault API, whose Rust side sees only a filesystem path.
+	var root := real_path(store_root)
 	var final_dir := root.path_join(version)
 	# A seeded directory is never rewritten: the hash names the content, and
 	# whatever is in it may be the user's edits.

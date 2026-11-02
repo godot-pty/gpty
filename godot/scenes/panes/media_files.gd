@@ -71,14 +71,15 @@ static func check(path: String) -> Dictionary:
 	var trimmed := path.strip_edges()
 	if trimmed == "":
 		return {"kind": "", "error": ""}
-	if trimmed.begins_with("res://") or trimmed.begins_with("user://"):
-		return {"kind": "", "error": "Media path must be absolute."}
-	if trimmed.contains("://"):
+	if trimmed.contains("://") and not trimmed.begins_with("res://") \
+			and not trimmed.begins_with("user://"):
 		return {
 			"kind": "",
 			"error": "Remote media is not supported — choose a local file.",
 		}
-	if not trimmed.is_absolute_path():
+	# A scheme (`res://`, `user://`) is absolute to Godot and virtual to the
+	# decoder, so the gate is the same real-path predicate the text panes use.
+	if not BasePersistenceManager.is_real_absolute_path(trimmed):
 		return {"kind": "", "error": "Media path must be absolute."}
 	var kind := kind_for(trimmed)
 	if kind == "":

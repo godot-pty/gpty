@@ -386,6 +386,11 @@ func test_a_wiki_pane_opens_the_bundled_vault_from_its_token():
 	assert_not_null(restored[0]._list, "the wiki body must be ready")
 	assert_gt(restored[0]._list.item_count, 40,
 		"the wiki pane must resolve @knowledge to the seeded vault")
+	# The pane hands this root to the Rust vault API, which has no schemes: the
+	# v0.7.1 download resolved the token to `user://knowledge/<hash>` and the
+	# guard below accepted it because `DirAccess` opens virtual paths too.
+	assert_false(BasePersistenceManager.is_virtual_path(restored[0]._vault_root),
+		restored[0]._vault_root)
 
 func test_the_shipped_builtins_are_program_free():
 	# The five tool-specific built-ins (OMP, Herdr, Lazygit, Neovim, Claude)

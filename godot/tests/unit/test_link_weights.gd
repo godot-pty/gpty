@@ -50,6 +50,9 @@ func test_vault_normalization_is_one_spelling():
 	assert_eq(LinkWeights.normalize_vault("/test/./vault"), VAULT)
 	assert_eq(LinkWeights.normalize_vault("/"), "/", "a filesystem root keeps its separator")
 	assert_false(LinkWeights.valid_vault_path("relative/vault"))
+	# Godot calls these absolute; the vault API is Rust and has no scheme.
+	assert_false(LinkWeights.valid_vault_path("user://vault"), "a virtual path is not a vault")
+	assert_false(LinkWeights.valid_vault_path("res://vault"), "a virtual path is not a vault")
 	assert_true(LinkWeights.valid_vault_path(VAULT))
 
 

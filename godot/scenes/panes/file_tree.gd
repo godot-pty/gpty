@@ -64,8 +64,8 @@ func _ready():
 ## `system`) keeps the existing confirm-then-system path, so a binary, an image
 ## or a downloaded `.desktop` behaves exactly as before.
 func _open_activated(path: String) -> void:
-	if not path.is_absolute_path():
-		ToastManager.warn("Refusing to open a non-absolute path: %s" % path, 4.0, "File Tree")
+	if not BasePersistenceManager.is_real_absolute_path(path):
+		ToastManager.warn("Refusing to open a non-filesystem path: %s" % path, 4.0, "File Tree")
 		return
 	if open_in != "system":
 		var viewer := ViewableFiles.viewer_for(path)
@@ -91,8 +91,8 @@ func _open_activated(path: String) -> void:
 const OPEN_SCHEME := "file://"
 
 func _confirm_open(path: String) -> void:
-	if not path.is_absolute_path():
-		ToastManager.warn("Refusing to open a non-absolute path: %s" % path, 4.0, "File Tree")
+	if not BasePersistenceManager.is_real_absolute_path(path):
+		ToastManager.warn("Refusing to open a non-filesystem path: %s" % path, 4.0, "File Tree")
 		return
 	var uri := OPEN_SCHEME + path
 	var dialog := ConfirmationDialog.new()
@@ -108,7 +108,8 @@ func _confirm_open(path: String) -> void:
 	dialog.popup_centered()
 
 func _populate(parent: TreeItem, path: String):
-	if path == "" or not path.is_absolute_path() or not DirAccess.dir_exists_absolute(path):
+	if not BasePersistenceManager.is_real_absolute_path(path) \
+			or not DirAccess.dir_exists_absolute(path):
 		return
 	var dir = DirAccess.open(path)
 	if not dir: return

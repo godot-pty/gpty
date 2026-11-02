@@ -24,9 +24,36 @@ func _on_init():
 ## absolute directory, and the harness creates it.
 static func user_root_override() -> String:
 	var root := OS.get_environment("GPTY_TEST_USER_DIR")
-	if root == "" or not root.is_absolute_path():
+	if not is_real_absolute_path(root):
 		return ""
 	return root.trim_suffix("/").trim_suffix("\\")
+
+## Whether `path` names a Godot virtual location rather than a filesystem one.
+##
+## `String.is_absolute_path()` answers true for `res://` and `user://` too
+## (measured on 4.7.2), so it is not the guard at a boundary that hands a path
+## to code outside Godot's path resolution — `FileAccess`, `DirAccess` and
+## `DirAccess.*_absolute` all accept the schemes, `std::path`, FFmpeg and a
+## desktop handler do not.
+static func is_virtual_path(path: String) -> bool:
+	return path.begins_with("res://") or path.begins_with("user://")
+
+## `path` as a real filesystem path: a virtual path is globalized through
+## [`method resolve_store_path`] (so a redirected test root keeps its
+## meaning), every other value — absolute or relative — is returned unchanged.
+static func real_path(path: String) -> String:
+	if path == "" or not is_virtual_path(path):
+		return path
+	var redirected := resolve_store_path(path)
+	if not is_virtual_path(redirected):
+		return redirected
+	return ProjectSettings.globalize_path(redirected)
+
+## Whether `path` is an absolute *real* path. This is the guard for a value
+## that will leave Godot: it rejects an empty or relative path and a
+## `res://`/`user://` scheme, which `is_absolute_path()` accepts.
+static func is_real_absolute_path(path: String) -> bool:
+	return path != "" and path.is_absolute_path() and not is_virtual_path(path)
 
 ## Translate a `user://` store path into the test root when one is set.
 ## Every other path (an absolute path, `res://`) is returned unchanged.

@@ -3,7 +3,8 @@ extends RefCounted
 ## One definition of the capped untrusted-path read.
 ##
 ## A pane's path can come from an untrusted layout/profile (or a typo), so
-## every read is gated the same way: absolute paths only, the path must be a
+## every read is gated the same way: absolute real paths only (not a Godot
+## `res://`/`user://` scheme, which Godot calls absolute), the path must be a
 ## regular file, and at most [constant DEFAULT_MAX_BYTES] is read — the reader
 ## runs on the GUI thread.
 ##
@@ -24,7 +25,7 @@ const DEFAULT_MAX_BYTES := 1 << 20
 ## non-regular file, a bad size, or a failed open. `text` decodes a torn UTF-8
 ## tail by hand when the cap landed inside a sequence.
 static func read_prefix(path: String, cap: int = DEFAULT_MAX_BYTES) -> Dictionary:
-	if path == "" or not path.is_absolute_path():
+	if path == "" or not BasePersistenceManager.is_real_absolute_path(path):
 		return {"ok": false, "text": "", "truncated": false, "size": 0}
 	if not FileAccess.file_exists(path):
 		return {"ok": false, "text": "", "truncated": false, "size": 0}

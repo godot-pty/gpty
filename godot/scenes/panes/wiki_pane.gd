@@ -568,7 +568,8 @@ func _vault_problem() -> String:
 			var why := KnowledgeStore.last_error()
 			return why if why != "" else "The bundled knowledge base could not be opened."
 		return "Not a vault directory: " + _shown_path(vault_path)
-	if not _vault_root.is_absolute_path() or not DirAccess.dir_exists_absolute(_vault_root):
+	if not BasePersistenceManager.is_real_absolute_path(_vault_root) \
+			or not DirAccess.dir_exists_absolute(_vault_root):
 		return "Not a vault directory: " + _shown_path(_vault_root)
 	return ""
 

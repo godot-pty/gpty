@@ -83,3 +83,35 @@ func test_the_shipped_bundle_seeds_and_indexes_without_ghosts():
 		if node is Dictionary and bool(node.get("ghost", false)):
 			ghosts += 1
 	assert_eq(ghosts, 0, "the bundled vault has no unresolved links")
+
+
+## The release path with no test redirection: the store root is the engine's
+## own `user://` and the answer must be a real path, because `vault_index` is
+## Rust. Reproduced on the v0.7.1 download: `resolve()` answered
+## `user://knowledge/<hash>` — `is_absolute_path()` calls that absolute, the
+## globalize fallback never ran, and the index refused it with "not an
+## absolute path". The suite's `GPTY_TEST_USER_DIR` hid it: that root is
+## already absolute, so this branch never executed.
+func test_the_production_seed_answers_a_real_path():
+	var previous := OS.get_environment("GPTY_TEST_USER_DIR")
+	var rel_root := "user://knowledge_probe_%d" % Time.get_ticks_usec()
+	var root := ProjectSettings.globalize_path(rel_root)
+	OS.set_environment("GPTY_TEST_USER_DIR", "")
+	KnowledgeStore.store_root = rel_root
+	KnowledgeStore.reset()
+	var path := KnowledgeStore.resolve(KnowledgeStore.TOKEN)
+	OS.set_environment("GPTY_TEST_USER_DIR", previous)
+	assert_ne(path, "", KnowledgeStore.last_error())
+	assert_false(BasePersistenceManager.is_virtual_path(path), path)
+	assert_true(path.is_absolute_path(), path)
+	assert_true(DirAccess.dir_exists_absolute(path), path)
+
+	var index = JSON.parse_string(str(GptyTerminal.vault_index(path)))
+	assert_true(index is Dictionary and not index.has("error"),
+		"the seeded vault indexes: " + str(index))
+	assert_gt((index.get("notes", []) as Array).size(), 0, "and it lists notes")
+
+	# The test owned this directory: remove it, so a developer's real profile
+	# only ever saw a unique probe name.
+	Store._remove_tree(path)
+	Store._remove_tree(root)

@@ -44,8 +44,7 @@ static func load_for(path: String, fallback: String) -> Font:
 ## directory, which is never what a setting means (and the bundled `res://`
 ## fonts are loaded through the trusted constant, not through their bytes).
 static func _is_data_path(path: String) -> bool:
-	return path != "" and path.is_absolute_path() \
-		and not path.begins_with("res://") and not path.begins_with("user://")
+	return BasePersistenceManager.is_real_absolute_path(path)
 
 ## The trusted fallback font. `path` is a compile-time constant from the
 ## caller; it never carries file data.

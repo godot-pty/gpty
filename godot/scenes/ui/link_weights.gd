@@ -85,13 +85,16 @@ static func valid_note_path(path: String) -> bool:
 			return false
 	return parts[parts.size() - 1].get_extension().to_lower() == "md"
 
-## A vault root the store may key on: an absolute path, bounded. The directory
-## need not exist to load the file (a vault on an unmounted drive must keep its
-## declarations); callers that act on a vault check it exists themselves.
+## A vault root the store may key on: an absolute **real** path, bounded. The
+## `res://`/`user://` schemes are absolute to Godot but virtual, and the vault
+## API (and the control socket's mirror of this list) is Rust, so a scheme
+## would register here and answer nowhere. The directory need not exist to
+## load the file (a vault on an unmounted drive must keep its declarations);
+## callers that act on a vault check it exists themselves.
 static func valid_vault_path(root: String) -> bool:
 	return not root.is_empty() \
 		and root.length() <= MAX_VAULT_PATH_BYTES \
-		and root.is_absolute_path()
+		and BasePersistenceManager.is_real_absolute_path(root)
 
 ## One spelling per vault: `simplify_path()` collapses `.`/`..` and doubled
 ## separators, and the trailing separator goes away, so `/vault` and `/vault/`

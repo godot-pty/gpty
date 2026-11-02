@@ -117,6 +117,20 @@ func test_a_non_directory_vault_is_refused():
 	assert_eq(relative_pane.vault_path, "not/absolute")
 
 
+## `user://` and `res://` are absolute to Godot but virtual: `DirAccess` would
+## open them and the vault API would answer its own refusal ("not an absolute
+## path") one call later. Reproduced on the v0.7.1 download, where the shipped
+## knowledge base resolved to `user://knowledge/<hash>` and the pane's guard
+## passed it through.
+func test_a_godot_virtual_vault_path_is_refused():
+	for path in ["user://wiki_probe_virtual", "res://wiki_probe_virtual"]:
+		var pane := _make_pane(path)
+		assert_true(pane._placeholder.visible, "%s must not be a vault" % path)
+		assert_eq(pane._list.item_count, 0, path)
+		assert_string_contains(pane._placeholder.text, "Not a vault directory")
+		assert_eq(pane.vault_path, path, "the typed value stays so it can be fixed")
+
+
 func test_lists_markdown_notes_recursively_and_skips_hidden():
 	_write(_tmp.path_join("note.md"), "# Heading")
 	DirAccess.make_dir_recursive_absolute(_tmp.path_join("sub"))
