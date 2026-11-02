@@ -41,7 +41,11 @@
 
 gPTY is a side project in active development. A vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using LLMs under human review; and as such, the underlying code may contain unidiomatic patterns and/or bugs. Roadmap & documentation: https://gpty.dev/
 
-**Project health.** The repository runs OpenSSF Scorecard and is registered in the [OpenSSF Best Practices badge program](https://www.bestpractices.dev/projects/16201) (project 16201); release assets carry [SLSA Build Level 2](https://slsa.dev/spec/v1.0/levels) provenance; and the project has applied to the Linux Foundation's [LFX Health Insights](https://insights.linuxfoundation.org/) program, whose badge will be added after approval.
+#### Project Health
+
+- The repository tracks OpenSSF recommendations (registered as [OpenSSF Project 16201](https://www.bestpractices.dev/projects/16201)).
+- Release assets carry [SLSA Build Level 2](https://slsa.dev/spec/v1.0/levels) provenance.
+- [Linux Foundation's LFX Health Insights](https://insights.linuxfoundation.org/) program application is in progress/under evaluation ([discussion 2476](https://github.com/linuxfoundation/insights/discussions/2476)).
 
 | Component | Choice | Rationale |
 |----------|--------|-----------|
