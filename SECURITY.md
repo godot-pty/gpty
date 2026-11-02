@@ -22,8 +22,8 @@ backported to prior releases as feasible.
 
 ## Reporting a vulnerability
 
-**Use GitHub's private vulnerability reporting**: repository **Security** tab → **Report a
-vulnerability**. It opens a private advisory thread visible only to the maintainers. Please do not
+**Use GitHub's private vulnerability reporting**: [open a private advisory](https://github.com/godot-pty/gpty/security/advisories/new) (repository **Security** tab → **Report a
+vulnerability**). It opens a private advisory thread visible only to the maintainers. Please do not
 open a public issue, pull request, or discussion for a suspected vulnerability - that exposes every
 user before a fix exists.
 
