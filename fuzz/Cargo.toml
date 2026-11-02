@@ -1,0 +1,77 @@
+[package]
+name = "gpty-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Outside the repository workspace on purpose. A fuzz build needs nightly and a
+# codegen flag (-Zsanitizer) the stable build cannot take, and its dependency
+# graph must never decide the workspace's feature set or lockfile.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "io-util"] }
+# The same facade gpty-media binds; the media target silences its per-input
+# container logs, which the default level would otherwise print for every
+# rejected fuzz case.
+ffmpeg-the-third = { version = "6.0.0", default-features = false, features = ["codec", "format", "software-scaling", "software-resampling"] }
+
+gpty-ai = { path = "../crates/gpty-ai" }
+gpty-core = { path = "../crates/gpty-core" }
+gpty-gdext = { path = "../crates/gpty-gdext" }
+gpty-ipc = { path = "../crates/gpty-ipc" }
+gpty-media = { path = "../crates/gpty-media" }
+
+[[bin]]
+name = "ai_frame"
+path = "fuzz_targets/ai_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "grid_feed"
+path = "fuzz_targets/grid_feed.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ipc_request"
+path = "fuzz_targets/ipc_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "line_parser"
+path = "fuzz_targets/line_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "markdown"
+path = "fuzz_targets/markdown.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "media_probe"
+path = "fuzz_targets/media_probe.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "vault_links"
+path = "fuzz_targets/vault_links.rs"
+test = false
+doc = false
+bench = false

@@ -20,7 +20,11 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 ///
 /// The trailing `\n` (and a `\r` before it) is stripped. An unterminated final
 /// line at EOF is still delivered; `Ok(None)` is EOF.
-pub(crate) async fn read_frame<R>(
+///
+/// Public so the workspace's fuzz harness (`fuzz/fuzz_targets/ai_frame.rs`)
+/// drives the exact function the backends use; the alternative — a copy of the
+/// loop in the target — would fuzz a reader that ships to nobody.
+pub async fn read_frame<R>(
     reader: &mut R,
     limit: usize,
     label: &str,
