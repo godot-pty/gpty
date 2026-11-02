@@ -1,3 +1,10 @@
+// Unsafe is fenced at the crate boundary: an operation inside an `unsafe fn`
+// needs its own block, and every unsafe block carries a `// SAFETY:` line, which
+// `clippy -D warnings` enforces. The point is that a new block cannot land
+// without the invariant it relies on being written down.
+#![deny(unsafe_op_in_unsafe_fn)]
+#![deny(clippy::undocumented_unsafe_blocks)]
+
 //! # gpty-ai
 //!
 //! Pluggable AI backends for gpty's Inspector pane.
@@ -30,7 +37,7 @@ pub mod omp;
 pub mod prompt;
 pub mod registry;
 pub mod stream;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) mod test_temp_script;
 pub mod types;
 

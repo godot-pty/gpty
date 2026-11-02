@@ -661,6 +661,7 @@ fn base64_value(byte: u8) -> Result<u8, BackendError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::test_temp_script::TempScript;
 
     /// Poll a session until a terminal event arrives.
@@ -669,6 +670,7 @@ mod tests {
     /// parallel `cargo test --workspace` run forks children from every module
     /// at once, and a spawned `sh` can take seconds to greet. A tight budget
     /// then reports a protocol failure that is not there.
+    #[cfg(unix)]
     async fn drain_turn(
         session: &crate::registry::AiSession,
     ) -> Vec<crate::types::AiEventEnvelope> {
@@ -729,6 +731,7 @@ mod tests {
     /// binary from the process-global `GPTY_OMP`. Tests run on parallel
     /// threads, so they must not clobber each other's override — without this
     /// lock one test's session spawns the other test's script.
+    #[cfg(unix)]
     static OMP_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     /// A path that cannot collide, even between two creations in the same
@@ -737,6 +740,7 @@ mod tests {
     /// counter is the guarantee. The parallel test gate (`ci-check` step 4.2)
     /// exists to catch exactly this class — two tests racing on a shared temp
     /// path once reported a spawn failure as "Text file busy".
+    #[cfg(unix)]
     fn fake_script_path(kind: &str) -> std::path::PathBuf {
         static SCRIPT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let nanos = std::time::SystemTime::now()
@@ -786,6 +790,9 @@ mod tests {
         // resolve_omp_binary accepts GPTY_OMP when it is absolute, owned by
         // this user, and not group/other writable — the helper satisfies all
         // three, and no other test in this crate reads the override.
+        // SAFETY: edition 2024 makes environment mutation unsafe because it can
+        // race another thread; this test holds OMP_ENV_LOCK, which every test
+        // that reads GPTY_OMP takes, so nothing else observes the change.
         unsafe { std::env::set_var("GPTY_OMP", script.path()) };
 
         let session = AiSession::open(
@@ -822,6 +829,8 @@ mod tests {
         );
 
         session.close();
+        // SAFETY: the paired set_var above ran under OMP_ENV_LOCK, which this
+        // test still holds; the environment is not read by another thread.
         unsafe { std::env::remove_var("GPTY_OMP") };
     }
 
@@ -849,6 +858,9 @@ mod tests {
         .unwrap();
         drop(file);
         std::fs::set_permissions(script.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        // SAFETY: edition 2024 makes environment mutation unsafe because it can
+        // race another thread; this test holds OMP_ENV_LOCK, which every test
+        // that reads GPTY_OMP takes, so nothing else observes the change.
         unsafe { std::env::set_var("GPTY_OMP", script.path()) };
 
         // The session spawns its child on the first prompt, so the failure
@@ -869,6 +881,8 @@ mod tests {
             })
             .unwrap();
         let events = drain_turn(&session).await;
+        // SAFETY: the paired set_var above ran under OMP_ENV_LOCK, which this
+        // test still holds; the environment is not read by another thread.
         unsafe { std::env::remove_var("GPTY_OMP") };
 
         let message = events
@@ -921,6 +935,9 @@ mod tests {
         .unwrap();
         drop(file);
         std::fs::set_permissions(script.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        // SAFETY: edition 2024 makes environment mutation unsafe because it can
+        // race another thread; this test holds OMP_ENV_LOCK, which every test
+        // that reads GPTY_OMP takes, so nothing else observes the change.
         unsafe { std::env::set_var("GPTY_OMP", script.path()) };
 
         let session = AiSession::open(
@@ -956,6 +973,8 @@ mod tests {
         );
 
         session.close();
+        // SAFETY: the paired set_var above ran under OMP_ENV_LOCK, which this
+        // test still holds; the environment is not read by another thread.
         unsafe { std::env::remove_var("GPTY_OMP") };
     }
 }

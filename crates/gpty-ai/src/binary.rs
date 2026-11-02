@@ -28,6 +28,8 @@ pub fn validate_omp_binary(path: &Path) -> bool {
         let Ok(meta) = std::fs::metadata(path) else {
             return false;
         };
+        // SAFETY: `geteuid` takes no arguments, cannot fail, and touches no
+        // memory; the call is unsafe only because every libc extern is.
         meta.is_file() && meta.uid() == unsafe { libc::geteuid() } && meta.mode() & 0o022 == 0
     }
     #[cfg(not(unix))]
