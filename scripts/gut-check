@@ -115,17 +115,58 @@ done
 
 # A hung suite must fail the gate, not hold the runner until GitHub's six-hour
 # job cap. The suite is ~1.5 min here and ~3-5 min on Windows; 15 min is slack
-# for a loaded runner. `timeout` is absent on stock macOS, where the gate simply
-# runs unbounded as before.
+# for a loaded runner. The deadline is enforced here rather than by `timeout`:
+# Godot does not die on SIGTERM while a script waits, so `timeout 300` was
+# still alive with its Godot child after seven minutes (measured 2026-11-02) —
+# exactly how runs survived a 600 s cutoff. The same loop ends a run as soon as
+# Godot reports a script/parse error: the collector cannot be judged after
+# that, and waiting for the deadline hides the error the gate exists to report
+# (measured: a deliberate parse error used to spend the whole timeout). The
+# escalation is SIGTERM, one second, SIGKILL.
 GUT_TIMEOUT="${GUT_TIMEOUT:-600}"
-set +e
-if command -v timeout >/dev/null 2>&1; then
-    timeout "$GUT_TIMEOUT" "$GODOT" --headless --path godot "${GUT_ARGS[@]}" 2>&1 | tee "$LOG"
-    STATUS="${PIPESTATUS[0]}"
-else
-    "$GODOT" --headless --path godot "${GUT_ARGS[@]}" 2>&1 | tee "$LOG"
-    STATUS="${PIPESTATUS[0]}"
+if [[ ! "$GUT_TIMEOUT" =~ ^[0-9]+$ ]]; then
+    echo "gut-check: GUT_TIMEOUT must be a whole number of seconds" >&2
+    exit 1
 fi
+
+# `tail -f` streams the log to the terminal while the watchdog reads the same
+# file; both stop once the child is reaped.
+"$GODOT" --headless --path godot "${GUT_ARGS[@]}" >"$LOG" 2>&1 &
+GUT_PID=$!
+tail -n +1 -f "$LOG" 2>/dev/null &
+TAIL_PID=$!
+stop_tail() {
+    kill "$TAIL_PID" 2>/dev/null || true
+    wait "$TAIL_PID" 2>/dev/null || true
+}
+
+set +e
+STATUS=0
+TIMEOUT_HIT=0
+PARSE_ABORT=0
+DEADLINE=$(( SECONDS + GUT_TIMEOUT ))
+while kill -0 "$GUT_PID" 2>/dev/null; do
+    if grep -qE 'SCRIPT ERROR|Parse Error|Failed to load script' "$LOG" 2>/dev/null; then
+        PARSE_ABORT=1
+        break
+    fi
+    if (( SECONDS >= DEADLINE )); then
+        TIMEOUT_HIT=1
+        break
+    fi
+    sleep 0.2
+done
+if (( PARSE_ABORT || TIMEOUT_HIT )); then
+    kill -TERM "$GUT_PID" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do
+        kill -0 "$GUT_PID" 2>/dev/null || break
+        sleep 0.2
+    done
+    kill -KILL "$GUT_PID" 2>/dev/null || true
+fi
+wait "$GUT_PID"
+STATUS=$?
+stop_tail
 set -e
 
 # GUT colourises through a pipe too; match on a plain copy.
@@ -134,8 +175,10 @@ sed -E "s/${ESC}\[[0-9;?]*[A-Za-z]//g" "$LOG" > "$PLAIN"
 
 PROBLEMS=()
 
-if [[ "$STATUS" -eq 124 ]]; then
+if (( TIMEOUT_HIT )); then
     PROBLEMS+=("the suite exceeded ${GUT_TIMEOUT}s and was killed (a hung test or process)")
+elif (( PARSE_ABORT )); then
+    PROBLEMS+=("the run was aborted as soon as Godot reported a script/parse error — it cannot be judged")
 elif [[ "$STATUS" -ne 0 ]]; then
     PROBLEMS+=("godot exited $STATUS")
 fi
