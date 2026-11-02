@@ -16,6 +16,7 @@ on:
     branches: [main, master]
     paths-ignore:
       - "docs/**"
+      - "assets/site-icons/**"
       - "**/*.md"
       - "godot/knowledge.json"
       - "LICENSE"
@@ -29,6 +30,7 @@ on:
     # job to say so.
     paths-ignore:
       - "docs/**"
+      - "assets/site-icons/**"
       - "**/*.md"
       - "godot/knowledge.json"
       - "LICENSE"

@@ -121,7 +121,7 @@ changed_paths() {
 # executed by a gate.
 docs_class_path() {
     case "$1" in
-        docs/*|*.md|godot/knowledge.json|LICENSE) return 0 ;;
+        docs/*|assets/site-icons/*|*.md|godot/knowledge.json|LICENSE) return 0 ;;
         scripts/docs-check|scripts/build-wiki) return 0 ;;
         *) return 1 ;;
     esac

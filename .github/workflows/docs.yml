@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      # The site's favicon set is mounted into the Hugo build from here.
+      - "assets/site-icons/**"
       # Editing this workflow must run it, or a fix to the build/verify steps
       # cannot be validated by the job it repairs.
       - ".github/workflows/docs.yml"
