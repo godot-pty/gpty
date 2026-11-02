@@ -718,22 +718,23 @@ mod tests {
     use super::*;
     use std::fs;
 
-    /// Unique temp DB path per test; removed in drop-guard style by caller.
-    fn temp_db_path(name: &str) -> String {
-        format!(
-            "{}/gpty_history_test_{}_{}.db",
-            std::env::temp_dir().display(),
-            name,
-            std::process::id()
-        )
+    /// A test's own directory and a DB path inside it. The returned guard
+    /// must outlive the store: it removes the file and its WAL siblings.
+    fn temp_db_path(name: &str) -> (tempfile::TempDir, String) {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let path = dir
+            .path()
+            .join(format!("gpty_history_test_{name}.db"))
+            .to_string_lossy()
+            .into_owned();
+        (dir, path)
     }
 
     /// The store holds every pane's scrollback; the umask must not decide who
     /// can read it.
     #[test]
     fn the_store_and_its_wal_siblings_are_owner_only() {
-        let path = temp_db_path("owner_only");
-        let _ = fs::remove_file(&path);
+        let (_tmp, path) = temp_db_path("owner_only");
         // A store written before this hardening is permissive; opening it must
         // tighten it, not leave the old mode in place.
         #[cfg(unix)]
@@ -760,9 +761,6 @@ mod tests {
                 assert_eq!(mode, 0o600, "{candidate} must be owner-only, got {mode:o}");
             }
         }
-        for candidate in [path.clone(), format!("{path}-wal"), format!("{path}-shm")] {
-            let _ = fs::remove_file(&candidate);
-        }
     }
 
     /// Every pane's writer holds its own connection to the SAME file, so a
@@ -770,8 +768,7 @@ mod tests {
     /// SQLITE_BUSY — on Windows that dropped rows as "database is locked".
     #[test]
     fn writers_wait_for_the_lock_instead_of_failing() {
-        let path = temp_db_path("busy_timeout");
-        let _ = fs::remove_file(&path);
+        let (_tmp, path) = temp_db_path("busy_timeout");
         let store = HistoryStore::open(&path, "pane-a", 100).unwrap();
         let timeout: i64 = store
             .conn
@@ -781,9 +778,6 @@ mod tests {
             timeout, 5000,
             "concurrent writers must wait for the lock, not drop batches"
         );
-        for candidate in [path.clone(), format!("{path}-wal"), format!("{path}-shm")] {
-            let _ = fs::remove_file(&candidate);
-        }
     }
 
     /// The busy timeout above is a *backstop*: this process's own writers
@@ -798,8 +792,7 @@ mod tests {
     fn in_process_commits_serialize_on_one_file() {
         use std::sync::atomic::{AtomicBool, Ordering};
 
-        let path = temp_db_path("serialize");
-        let _ = fs::remove_file(&path);
+        let (_tmp, path) = temp_db_path("serialize");
         let reader = HistoryStore::open(&path, "pane-x", 100).unwrap();
 
         // Control: with nobody holding the guard, the commit just happens —
@@ -843,19 +836,13 @@ mod tests {
             "and proceed once it is released"
         );
         assert_eq!(reader.max_line_num().unwrap(), 2, "both commits landed");
-        for candidate in [path.clone(), format!("{path}-wal"), format!("{path}-shm")] {
-            let _ = fs::remove_file(&candidate);
-        }
     }
 
     /// What the settings panel shows must be the real footprint, not a guess:
     /// the store's own file plus the WAL siblings SQLite keeps beside it.
     #[test]
     fn store_size_on_disk_counts_the_store_and_its_siblings() {
-        let path = temp_db_path("size");
-        for candidate in [path.clone(), format!("{path}-wal"), format!("{path}-shm")] {
-            let _ = fs::remove_file(&candidate);
-        }
+        let (_tmp, path) = temp_db_path("size");
 
         // Nothing written yet: no files, no bytes.
         assert_eq!(store_size_on_disk(&path), 0);
@@ -876,10 +863,6 @@ mod tests {
             .sum();
         assert!(on_disk > 0, "a store with rows must occupy bytes");
         assert_eq!(on_disk, expected);
-
-        for candidate in [path.clone(), format!("{path}-wal"), format!("{path}-shm")] {
-            let _ = fs::remove_file(&candidate);
-        }
     }
 
     #[test]
@@ -961,7 +944,7 @@ mod tests {
     #[test]
     fn pane_isolation() {
         // Two stores over the SAME file must not see each other's rows.
-        let path = temp_db_path("isolation");
+        let (_tmp, path) = temp_db_path("isolation");
         let store1 = HistoryStore::open(&path, "pane-a", 100).unwrap();
         let store2 = HistoryStore::open(&path, "pane-b", 100).unwrap();
         store1.append(0, "pane1").unwrap();
@@ -970,7 +953,6 @@ mod tests {
         assert_eq!(store2.line_count().unwrap(), 1);
         assert_eq!(store1.max_line_num().unwrap(), 0);
         assert_eq!(store2.max_line_num().unwrap(), 0);
-        fs::remove_file(&path).ok();
     }
 
     #[test]
@@ -985,7 +967,7 @@ mod tests {
 
     #[test]
     fn prune_missing_panes_reclaims_orphans_and_keeps_known() {
-        let path = temp_db_path("prune");
+        let (_tmp, path) = temp_db_path("prune");
         let live = HistoryStore::open(&path, "pane-live", 100).unwrap();
         let dead = HistoryStore::open(&path, "pane-dead", 100).unwrap();
         live.append(0, "live line kept").unwrap();
@@ -1033,8 +1015,6 @@ mod tests {
             0,
             "FTS index still returns deleted text"
         );
-
-        fs::remove_file(&path).ok();
     }
 
     #[test]
@@ -1053,7 +1033,7 @@ mod tests {
 
     #[test]
     fn max_line_num_persists_across_reopen() {
-        let path = temp_db_path("reopen");
+        let (_tmp, path) = temp_db_path("reopen");
         {
             let store = HistoryStore::open(&path, "pane-a", 100).unwrap();
             for i in 0..3 {
@@ -1063,12 +1043,11 @@ mod tests {
         let store = HistoryStore::open(&path, "pane-a", 100).unwrap();
         assert_eq!(store.max_line_num().unwrap(), 2);
         assert_eq!(store.line_count().unwrap(), 3);
-        fs::remove_file(&path).ok();
     }
 
     #[test]
     fn legacy_schema_v1_rows_dropped() {
-        let path = temp_db_path("legacy");
+        let (_tmp, path) = temp_db_path("legacy");
         {
             // Hand-build a v1 database: integer pane ids, user_version unset.
             let conn = Connection::open(&path).unwrap();
@@ -1089,7 +1068,6 @@ mod tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, 2);
-        fs::remove_file(&path).ok();
     }
 
     /// A batch lands complete, in one transaction, and is searchable.
@@ -1171,7 +1149,7 @@ mod tests {
     /// writer thread, in order, without the caller ever touching SQLite.
     #[test]
     fn pushed_lines_reach_the_store_and_a_flush_waits_for_them() {
-        let path = temp_db_path("push");
+        let (_tmp, path) = temp_db_path("push");
         let history = PaneHistory::open(&path, "pane-a", 100).unwrap();
         let store = Arc::clone(history.store());
         for i in 1..=50 {
@@ -1194,7 +1172,6 @@ mod tests {
             51,
             "a closing writer must commit what it still holds"
         );
-        fs::remove_file(&path).ok();
     }
 
     /// The writer commits on its own, without a flush call.
@@ -1220,7 +1197,7 @@ mod tests {
     /// rows back through `feed_restore_lines`).
     #[test]
     fn a_reopened_pane_reads_back_what_the_writer_committed() {
-        let path = temp_db_path("restore");
+        let (_tmp, path) = temp_db_path("restore");
         {
             let history = PaneHistory::open(&path, "pane-a", 100).unwrap();
             for i in 1..=3 {
@@ -1249,6 +1226,5 @@ mod tests {
         assert_eq!(store.search_user_text("session one", 10).unwrap().len(), 3);
         drop(store);
         drop(reopened);
-        fs::remove_file(&path).ok();
     }
 }

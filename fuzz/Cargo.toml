@@ -15,6 +15,9 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 serde_json = "1"
+# The media target writes its input to a scratch file inside a `TempDir`, so a
+# normal or panicking return removes it (an abort or OOM still does not).
+tempfile = "3"
 tokio = { version = "1", features = ["rt", "io-util"] }
 # The same facade gpty-media binds; the media target silences its per-input
 # container logs, which the default level would otherwise print for every

@@ -20,5 +20,10 @@ log = "0.4"
 alacritty_terminal = "0.26.0"
 rusqlite = { version = "0.31", features = ["bundled"] }
 
+[dev-dependencies]
+# Test-only: `TempDir` removes a test's files and directories when the guard
+# drops, including on a panic, so a gate run leaves nothing behind (v0.7.2).
+tempfile = "3"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

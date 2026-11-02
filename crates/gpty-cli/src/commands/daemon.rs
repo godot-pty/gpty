@@ -566,10 +566,12 @@ fn status_answer(probe: &Probe) -> Option<(i32, serde_json::Value, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
-    /// A private temp file, mirroring the `validate_gui_binary` tests.
-    fn temp_file(name: &str, mode: u32) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("gpty-{name}-{}", std::process::id()));
+    /// A private script inside the test's `TempDir`, mirroring the
+    /// `validate_gui_binary` tests.
+    fn temp_file(dir: &TempDir, name: &str, mode: u32) -> PathBuf {
+        let path = dir.path().join(name);
         std::fs::write(&path, b"#!/bin/sh\n").unwrap();
         #[cfg(unix)]
         {
@@ -695,21 +697,22 @@ mod tests {
 
     #[test]
     fn launchable_requires_a_private_regular_file() {
-        let ok = temp_file("gui-ok", 0o755);
+        let tmp = TempDir::new().expect("temp dir");
+
+        let ok = temp_file(&tmp, "gui-ok", 0o755);
         assert!(launchable(&ok));
 
-        let world_writable = temp_file("gui-world-writable", 0o777);
+        let world_writable = temp_file(&tmp, "gui-world-writable", 0o777);
         #[cfg(unix)]
         assert!(
             !launchable(&world_writable),
             "a candidate anyone can replace must not be spawned"
         );
+        #[cfg(not(unix))]
+        let _ = &world_writable;
 
         assert!(!launchable(Path::new("/nonexistent/gpty-gui")));
         assert!(!launchable(Path::new("gpty-gui")), "relative path");
-        assert!(!launchable(&std::env::temp_dir()), "a directory");
-
-        std::fs::remove_file(&ok).unwrap();
-        std::fs::remove_file(&world_writable).unwrap();
+        assert!(!launchable(tmp.path()), "a directory");
     }
 }

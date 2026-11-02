@@ -719,8 +719,9 @@ mod tests {
         // A system binary owned by root is fine.
         assert!(validate_executable("/bin/sh").is_ok());
 
-        // An absolute path in a shared, writable location is not.
-        let path = std::env::temp_dir().join(format!("gpty_exec_{}", std::process::id()));
+        // An absolute path whose file is group/other-writable is not.
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let path = tmp.path().join("gpty-exec");
         std::fs::write(&path, b"#!/bin/sh\n").unwrap();
         let mut perms = std::fs::metadata(&path).unwrap().permissions();
         perms.set_mode(0o777);
@@ -732,17 +733,14 @@ mod tests {
         std::fs::set_permissions(&path, perms).unwrap();
         let accepted = validate_executable(&path.to_string_lossy()).is_ok();
 
-        // Remove the file before asserting: an unconditional cleanup that runs
-        // first cannot leave a world-writable executable behind on a
-        // panicking run.
-        let _ = std::fs::remove_file(&path);
         assert!(refused, "group/other-writable executable must be refused");
         assert!(accepted, "a private executable must be accepted");
 
         // A safe 0755 binary is still replaceable when its *directory* is
         // writable by group or others. This is the /tmp-without-`t` case.
-        let shared = std::env::temp_dir().join(format!("gpty_exec_dir_{}", std::process::id()));
-        std::fs::create_dir_all(&shared).unwrap();
+        let shared_tmp = tempfile::TempDir::new().expect("temp dir");
+        let shared = shared_tmp.path().join("shared");
+        std::fs::create_dir(&shared).unwrap();
         std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
         let inner = shared.join("payload");
         std::fs::write(&inner, b"#!/bin/sh\n").unwrap();
@@ -753,10 +751,6 @@ mod tests {
         std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o1777)).unwrap();
         let in_sticky_dir = validate_executable(&inner.to_string_lossy());
 
-        // Restore and remove before asserting: an unconditional cleanup that
-        // runs first cannot leave a world-writable directory behind.
-        let _ = std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o700));
-        let _ = std::fs::remove_dir_all(&shared);
         assert!(
             in_open_dir.is_err(),
             "0755 file in a 0777 non-sticky directory must be refused"
@@ -788,7 +782,8 @@ mod tests {
     fn a_bare_name_is_validated_after_path_resolution() {
         use std::os::unix::fs::PermissionsExt;
 
-        let base = std::env::temp_dir().join(format!("gpty_path_{}", std::process::id()));
+        let base_tmp = tempfile::TempDir::new().expect("temp dir");
+        let base = base_tmp.path().to_path_buf();
         let safe_dir = base.join("safe");
         let open_dir = base.join("open");
         std::fs::create_dir_all(&safe_dir).unwrap();
@@ -806,9 +801,7 @@ mod tests {
         let open_path = open_dir.to_string_lossy().to_string();
 
         // Resolution order decides which file the child runs; the first match
-        // is the one that has to pass. The verdicts are captured before the
-        // cleanup below, which must run first so a panicking assert cannot
-        // leave a world-writable directory behind.
+        // is the one that has to pass.
         let safe_ok = validate_program("probe-tool", Some(&safe_path)).is_ok();
         let open_first_err =
             validate_program("probe-tool", Some(&format!("{open_path}:{safe_path}"))).is_err();
@@ -819,9 +812,6 @@ mod tests {
         let cargo_toml_err = validate_program("Cargo.toml", Some("")).is_err();
         let empty_ok = validate_program("probe-tool", Some("")).is_ok();
         let relative_err = validate_program("./probe-tool", Some(&safe_path)).is_err();
-
-        let _ = std::fs::set_permissions(&open_dir, std::fs::Permissions::from_mode(0o700));
-        let _ = std::fs::remove_dir_all(&base);
 
         assert!(
             safe_ok,
@@ -861,8 +851,9 @@ mod tests {
     fn spawn_refuses_a_bare_name_that_resolves_into_a_writable_directory() {
         use std::os::unix::fs::PermissionsExt;
 
-        let open_dir = std::env::temp_dir().join(format!("gpty_spawn_path_{}", std::process::id()));
-        std::fs::create_dir_all(&open_dir).unwrap();
+        let open_tmp = tempfile::TempDir::new().expect("temp dir");
+        let open_dir = open_tmp.path().join("open");
+        std::fs::create_dir(&open_dir).unwrap();
         let tool = open_dir.join("probe-tool");
         std::fs::write(&tool, b"#!/bin/sh\necho SHOULD_NOT_RUN\n").unwrap();
         std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -872,8 +863,6 @@ mod tests {
         let envs = vec![format!("PATH={}", open_dir.display())];
         let refusal = PtyHandle::spawn(9201, "probe-tool", &[], &envs, &[], tx);
         let Err(error) = refusal else {
-            std::fs::set_permissions(&open_dir, std::fs::Permissions::from_mode(0o700)).ok();
-            std::fs::remove_dir_all(&open_dir).ok();
             panic!("a bare name resolving into a writable directory must be refused");
         };
         let message = error.to_string();
@@ -882,10 +871,6 @@ mod tests {
             "the refusal must say why, got: {message}"
         );
 
-        // Restore and remove before asserting: an unconditional cleanup that
-        // runs first cannot leave a world-writable directory behind.
-        std::fs::set_permissions(&open_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
-        std::fs::remove_dir_all(&open_dir).unwrap();
         assert!(
             message.contains(&open_dir.display().to_string()) || message.contains("probe-tool"),
             "the refusal must name the program, got: {message}"
@@ -896,8 +881,8 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn spawn_with_cwd_starts_the_child_there() {
-        let dir = std::env::temp_dir().join(format!("gpty_cwd_probe_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let dir = tmp.path().to_path_buf();
         let expected = dir.canonicalize().unwrap();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(16);
@@ -916,7 +901,6 @@ mod tests {
         .expect("the child must exit and close its output");
 
         drop(handle);
-        std::fs::remove_dir_all(&dir).ok();
 
         assert!(
             output.contains(&expected.display().to_string()),
@@ -930,8 +914,8 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn spawn_with_cwd_sets_pwd_for_direct_programs() {
-        let dir = std::env::temp_dir().join(format!("gpty_pwd_probe_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let dir = tmp.path().to_path_buf();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
         let handle = PtyHandle::spawn_with_cwd(9501, "env", &[], &[], &[], Some(&dir), tx)
@@ -948,7 +932,6 @@ mod tests {
         .expect("env must exit and close its output");
 
         drop(handle);
-        std::fs::remove_dir_all(&dir).ok();
 
         let expected = format!("PWD={}", dir.display());
         assert!(

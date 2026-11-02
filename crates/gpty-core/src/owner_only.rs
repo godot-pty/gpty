@@ -128,18 +128,20 @@ fn restrict(_path: &Path, _want: u32, _want_dir: bool) -> Restriction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
-    /// A directory of this test's own, removed by `cleanup`.
-    fn scratch(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("gpty_owner_only_{}_{}", name, std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
+    /// A directory of this test's own, removed when the guard drops.
+    fn scratch(name: &str) -> (tempfile::TempDir, PathBuf) {
+        let guard = tempfile::Builder::new()
+            .prefix(&format!("gpty_owner_only_{name}_"))
+            .tempdir()
+            .expect("temp dir");
+        let dir = guard.path().to_path_buf();
+        (guard, dir)
     }
 
     #[cfg(unix)]
@@ -150,7 +152,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_loose_file_is_tightened() {
-        let dir = scratch("loose_file");
+        let (_tmp, dir) = scratch("loose_file");
         let path = dir.join("store.json");
         fs::write(&path, b"{}").unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
@@ -166,20 +168,18 @@ mod tests {
             b"{}",
             "tightening must not touch content"
         );
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]
     #[test]
     fn an_owner_only_file_is_left_alone() {
-        let dir = scratch("already_private");
+        let (_tmp, dir) = scratch("already_private");
         let path = dir.join("store.json");
         fs::write(&path, b"{}").unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(FILE_MODE)).unwrap();
 
         assert!(matches!(restrict_file(&path), Restriction::Untouched));
         assert_eq!(mode_of(&path), FILE_MODE);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     /// The repair must never reach through a link: a symlink at a store path
@@ -188,7 +188,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_symlink_is_skipped_and_its_target_is_untouched() {
-        let dir = scratch("symlink");
+        let (_tmp, dir) = scratch("symlink");
         let victim = dir.join("victim.txt");
         fs::write(&victim, b"not a store").unwrap();
         fs::set_permissions(&victim, fs::Permissions::from_mode(0o644)).unwrap();
@@ -202,13 +202,12 @@ mod tests {
             "the link's target must keep its mode"
         );
         assert_eq!(mode_of(&link), 0o644, "and the link is a link, not a mode");
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]
     #[test]
     fn a_loose_directory_is_tightened_and_a_private_one_is_not() {
-        let dir = scratch("directory");
+        let (_tmp, dir) = scratch("directory");
         let target = dir.join("stores");
         fs::create_dir(&target).unwrap();
         fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).unwrap();
@@ -216,7 +215,6 @@ mod tests {
         assert!(matches!(restrict_dir(&target), Restriction::Tightened));
         assert_eq!(mode_of(&target), DIR_MODE);
         assert!(matches!(restrict_dir(&target), Restriction::Untouched));
-        let _ = fs::remove_dir_all(&dir);
     }
 
     /// The kind is part of the contract: a store read must not `chmod` a
@@ -226,7 +224,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_wrong_kind_is_left_alone() {
-        let dir = scratch("wrong_kind");
+        let (_tmp, dir) = scratch("wrong_kind");
         let target = dir.join("stores");
         fs::create_dir(&target).unwrap();
         fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).unwrap();
@@ -239,17 +237,15 @@ mod tests {
         fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
         assert!(matches!(restrict_dir(&file), Restriction::Untouched));
         assert_eq!(mode_of(&file), 0o644);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn a_missing_path_is_not_a_failure() {
-        let dir = scratch("missing");
+        let (_tmp, dir) = scratch("missing");
         let missing = dir.join("never-written.json");
         assert!(matches!(restrict_file(&missing), Restriction::Untouched));
         assert!(matches!(restrict_dir(&missing), Restriction::Untouched));
         assert!(restrict_file(&missing).problem("x").is_none());
-        let _ = fs::remove_dir_all(&dir);
     }
 
     /// A path whose *parent chain* is not a directory cannot even be opened for
@@ -258,7 +254,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn an_unopenable_path_reports_the_reason() {
-        let dir = scratch("unopenable");
+        let (_tmp, dir) = scratch("unopenable");
         let blocker = dir.join("store.json");
         fs::write(&blocker, b"{}").unwrap();
         let unreachable = blocker.join("inner.json");
@@ -272,6 +268,5 @@ mod tests {
             text.starts_with("store: "),
             "the message names the path: {text}"
         );
-        let _ = fs::remove_dir_all(&dir);
     }
 }

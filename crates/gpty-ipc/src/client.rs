@@ -187,8 +187,13 @@ mod tests {
 
         #[tokio::test]
         async fn client_server_round_trip() {
-            let socket_path = format!("/tmp/gpty-ipc-client-test-{}.sock", std::process::id());
-            let _ = std::fs::remove_file(&socket_path);
+            let tmp = tempfile::TempDir::new().expect("temp dir");
+            let socket_path = tmp
+                .path()
+                .join("client-round-trip.sock")
+                .to_str()
+                .expect("UTF-8")
+                .to_string();
 
             let mut server = IpcServer::new(&socket_path);
             server.register(
@@ -226,8 +231,13 @@ mod tests {
 
         #[tokio::test]
         async fn client_authenticates_with_secret() {
-            let socket_path = format!("/tmp/gpty-ipc-secret-test-{}.sock", std::process::id());
-            let _ = std::fs::remove_file(&socket_path);
+            let tmp = tempfile::TempDir::new().expect("temp dir");
+            let socket_path = tmp
+                .path()
+                .join("client-secret.sock")
+                .to_str()
+                .expect("UTF-8")
+                .to_string();
 
             let mut server = IpcServer::new(&socket_path);
             server.set_secret("s3cret".into());
@@ -264,7 +274,13 @@ mod tests {
 
         #[tokio::test]
         async fn client_timeout() {
-            let socket_path = format!("/tmp/gpty-ipc-timeout-test-{}.sock", std::process::id());
+            let tmp = tempfile::TempDir::new().expect("temp dir");
+            let socket_path = tmp
+                .path()
+                .join("client-timeout.sock")
+                .to_str()
+                .expect("UTF-8")
+                .to_string();
             let client = IpcClient::new(&socket_path, Duration::from_millis(100));
             let result = client.call("version", None).await;
             assert!(result.is_err());

@@ -52,7 +52,10 @@ async fn main() {
         .await
         .expect("spawn");
 
-    let db = std::env::temp_dir().join(format!("flood-probe-{}.db", std::process::id()));
+    // The store is a probe artifact, not a result to keep: the guard removes
+    // it when the run ends, however it ends.
+    let db_tmp = tempfile::TempDir::new().expect("temp dir");
+    let db = db_tmp.path().join("flood-probe.db");
     let history = PaneHistory::open(db.to_str().unwrap(), "probe", 10_000).expect("history");
     let store = std::sync::Arc::clone(history.store());
     let history = std::sync::Arc::new(history);
@@ -99,5 +102,4 @@ async fn main() {
         last_sample = Instant::now();
     }
     println!("peak rss {} MiB", peak_rss / 1024);
-    let _ = std::fs::remove_file(&db);
 }

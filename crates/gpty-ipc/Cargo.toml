@@ -17,6 +17,11 @@ tokio = { version = "1", features = ["net", "io-util", "time", "rt", "sync"] }
 thiserror = "2"
 log = "0.4"
 
+[dev-dependencies]
+# Test-only: `TempDir` removes a test's sockets and files when the guard drops,
+# including on a panic, so a gate run leaves nothing behind (v0.7.2).
+tempfile = "3"
+
 [target.'cfg(unix)'.dependencies]
 tokio = { version = "1", features = ["net"] }
 libc = "0.2"

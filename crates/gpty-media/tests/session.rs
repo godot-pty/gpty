@@ -299,18 +299,18 @@ fn path_gate_refuses_non_local_and_non_regular_paths() {
         let error = probe(path).unwrap_err();
         assert_eq!(error.code(), MediaErrorCode::BadPath, "{path:?}");
     }
-    let directory = std::env::temp_dir();
-    let error = probe(&directory.to_string_lossy()).unwrap_err();
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let error = probe(&tmp.path().to_string_lossy()).unwrap_err();
     assert_eq!(error.code(), MediaErrorCode::BadPath);
-    let missing = directory.join("gpty-media-definitely-missing.mp4");
+    let missing = tmp.path().join("definitely-missing.mp4");
     let error = probe(&missing.to_string_lossy()).unwrap_err();
     assert_eq!(error.code(), MediaErrorCode::BadPath);
 }
 
 #[test]
 fn garbage_and_truncated_files_fail_without_panicking() {
-    let dir = std::env::temp_dir();
-    let garbage = dir.join(format!("gpty-media-garbage-{}.bin", std::process::id()));
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let garbage = tmp.path().join("garbage.bin");
     std::fs::write(&garbage, b"this is not a media file, not even close").unwrap();
     let error = probe(&garbage.to_string_lossy()).unwrap_err();
     assert!(
@@ -322,10 +322,9 @@ fn garbage_and_truncated_files_fail_without_panicking() {
         ),
         "garbage error: {error}"
     );
-    std::fs::remove_file(&garbage).ok();
 
     let source = std::fs::read(fixture("h264.mp4")).unwrap();
-    let truncated = dir.join(format!("gpty-media-truncated-{}.mp4", std::process::id()));
+    let truncated = tmp.path().join("truncated.mp4");
     std::fs::write(&truncated, &source[..64.min(source.len())]).unwrap();
     let error = probe(&truncated.to_string_lossy()).unwrap_err();
     assert!(
@@ -337,7 +336,6 @@ fn garbage_and_truncated_files_fail_without_panicking() {
         ),
         "truncated error: {error}"
     );
-    std::fs::remove_file(&truncated).ok();
 }
 
 #[test]
@@ -374,15 +372,14 @@ fn dropping_a_session_while_it_has_queued_frames_does_not_hang() {
 #[cfg(unix)]
 #[test]
 fn a_fifo_at_the_media_path_is_refused_without_waiting() {
-    let path = std::env::temp_dir().join(format!("gpty-media-fifo-{}", std::process::id()));
-    std::fs::remove_file(&path).ok();
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let path = tmp.path().join("fifo");
     let name = std::ffi::CString::new(path.to_string_lossy().as_bytes()).unwrap();
     assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
 
     let started = Instant::now();
     let error = probe(&path.to_string_lossy()).unwrap_err();
     let elapsed = started.elapsed();
-    std::fs::remove_file(&path).ok();
     assert_eq!(error.code(), MediaErrorCode::BadPath);
     assert!(
         elapsed < Duration::from_secs(1),
@@ -395,11 +392,10 @@ fn a_fifo_at_the_media_path_is_refused_without_waiting() {
 #[cfg(unix)]
 #[test]
 fn a_symlink_to_a_regular_file_is_playable() {
-    let path = std::env::temp_dir().join(format!("gpty-media-link-{}", std::process::id()));
-    std::fs::remove_file(&path).ok();
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let path = tmp.path().join("link.wav");
     std::os::unix::fs::symlink(fixture("wav.wav"), &path).unwrap();
     let info = probe(&path.to_string_lossy()).expect("a symlinked media file opens");
-    std::fs::remove_file(&path).ok();
     assert_eq!(info.container, "wav");
     assert!(info.duration_us.is_some_and(|duration| duration > 0));
 }

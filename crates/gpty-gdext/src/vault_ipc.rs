@@ -221,15 +221,14 @@ fn read_work(params: &Value) -> Result<Value, JsonRpcError> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static NEXT: AtomicU64 = AtomicU64::new(0);
 
     /// A vault and its own index under one private temp directory, so tests
     /// never touch the developer's state directory or run against each other
-    /// (the repo's parallel-test rule: no fixed temp paths).
+    /// (the repo's parallel-test rule: no fixed temp paths). The `TempDir`
+    /// guard removes the whole tree when the fixture drops, including on a
+    /// panic, so a failing run leaves nothing in the shared temp directory.
     struct Fixture {
-        dir: PathBuf,
+        dir: tempfile::TempDir,
     }
 
     impl Fixture {
@@ -243,16 +242,8 @@ mod tests {
         }
 
         fn make(register: bool) -> Self {
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock after the epoch")
-                .as_nanos();
-            let dir = std::env::temp_dir().join(format!(
-                "gpty-vault-ipc-{}-{nanos}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
-            std::fs::create_dir_all(dir.join("vault/notes")).expect("create the vault");
+            let dir = tempfile::TempDir::new().expect("a private temp directory");
+            std::fs::create_dir_all(dir.path().join("vault/notes")).expect("create the vault");
             let fixture = Self { dir };
             if register {
                 assert!(
@@ -264,11 +255,15 @@ mod tests {
         }
 
         fn vault(&self) -> PathBuf {
-            self.dir.join("vault")
+            self.dir.path().join("vault")
         }
 
         fn db(&self) -> String {
-            self.dir.join("vaults.db").to_string_lossy().into_owned()
+            self.dir
+                .path()
+                .join("vaults.db")
+                .to_string_lossy()
+                .into_owned()
         }
 
         fn root(&self) -> String {
@@ -277,12 +272,6 @@ mod tests {
 
         fn write(&self, rel_path: &str, body: &str) {
             std::fs::write(self.vault().join(rel_path), body).expect("write a note");
-        }
-    }
-
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
 

@@ -369,19 +369,11 @@ mod tests {
     /// A path that cannot be opened: the gate refuses it on every platform.
     #[test]
     fn a_directory_is_refused_as_a_media_source() {
-        let directory = std::env::temp_dir();
-        let error = MediaFile::open(&directory.to_string_lossy())
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let error = MediaFile::open(&tmp.path().to_string_lossy())
             .err()
             .expect("a directory is not a media source");
         assert_eq!(error.code(), MediaErrorCode::BadPath);
-    }
-
-    #[cfg(unix)]
-    fn scratch_path(name: &str) -> PathBuf {
-        let path =
-            std::env::temp_dir().join(format!("gpty-media-source-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_file(&path);
-        path
     }
 
     #[cfg(unix)]
@@ -395,7 +387,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_fifo_is_refused_without_blocking() {
-        let path = scratch_path("fifo");
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let path = tmp.path().join("fifo");
         make_fifo(&path);
         let (tx, rx) = mpsc::channel();
         let probe_path = path.clone();
@@ -404,7 +397,6 @@ mod tests {
             let _ = tx.send(result.err().map(|error| error.code()));
         });
         let outcome = rx.recv_timeout(Duration::from_secs(5));
-        let _ = std::fs::remove_file(&path);
         assert_eq!(
             outcome.expect("open blocked on a FIFO"),
             Some(MediaErrorCode::BadPath)
@@ -419,13 +411,14 @@ mod tests {
     #[test]
     fn a_swapped_fifo_never_reaches_ffmpeg() {
         let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/wav.wav");
-        let path = scratch_path("swapped.wav");
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let path = tmp.path().join("swapped.wav");
         std::fs::copy(&source, &path).unwrap();
         let file = MediaFile::open(&path.to_string_lossy()).unwrap();
 
         // The attack: the name now points at a FIFO instead of the file the
         // descriptor was opened from.
-        let fifo = scratch_path("swapped.fifo");
+        let fifo = tmp.path().join("swapped.fifo");
         make_fifo(&fifo);
         std::fs::rename(&fifo, &path).unwrap();
         let hint = file.path.clone();
@@ -437,7 +430,6 @@ mod tests {
             let _ = tx.send(outcome.map_err(|error| error.code()));
         });
         let outcome = rx.recv_timeout(Duration::from_secs(5));
-        let _ = std::fs::remove_file(&path);
         let opened = outcome.unwrap_or_else(|_| {
             panic!("opening blocked: the input reopened {hint:?} instead of the descriptor")
         });
@@ -451,11 +443,11 @@ mod tests {
     #[test]
     fn a_symlink_to_a_regular_file_is_playable() {
         let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/wav.wav");
-        let path = scratch_path("link.wav");
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let path = tmp.path().join("link.wav");
         std::os::unix::fs::symlink(&source, &path).unwrap();
         let input = MediaFile::open(&path.to_string_lossy())
             .and_then(|file| file.into_input(Box::new(|| false)));
-        let _ = std::fs::remove_file(&path);
         let input = input.expect("a link to a regular file opens");
         assert!(input.duration() > 0);
     }

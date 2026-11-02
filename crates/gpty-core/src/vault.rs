@@ -2096,24 +2096,31 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn temp_db(tag: &str) -> String {
-        let path = format!(
-            "{}/gpty_vault_test_{}_{}.db",
-            std::env::temp_dir().display(),
-            tag,
-            std::process::id()
-        );
-        for suffix in ["", "-wal", "-shm"] {
-            let _ = fs::remove_file(format!("{path}{suffix}"));
-        }
-        path
+    /// A store path inside a directory the caller must keep alive: the guard
+    /// removes the store and its WAL siblings when it drops.
+    fn temp_db(tag: &str) -> (tempfile::TempDir, String) {
+        let guard = tempfile::Builder::new()
+            .prefix(&format!("gpty_vault_test_{tag}_"))
+            .tempdir()
+            .expect("temp dir");
+        let path = guard
+            .path()
+            .join(format!("gpty_vault_test_{tag}.db"))
+            .to_string_lossy()
+            .into_owned();
+        (guard, path)
     }
 
-    fn temp_vault(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("gpty_vault_{tag}_{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
+    /// A vault one level inside a directory of its own, so a path that escapes
+    /// the vault still lands inside the test's guard — and is removed with it.
+    fn temp_vault(tag: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let guard = tempfile::Builder::new()
+            .prefix(&format!("gpty_vault_{tag}_"))
+            .tempdir()
+            .expect("temp dir");
+        let vault = guard.path().join("vault");
+        fs::create_dir_all(&vault).unwrap();
+        (guard, vault)
     }
 
     fn write_note(dir: &Path, rel: &str, text: &str) {
@@ -2130,8 +2137,8 @@ mod tests {
 
     #[test]
     fn open_creates_the_schema_and_is_idempotent() {
-        let path = temp_db("open");
-        let vault = temp_vault("open");
+        let (_tmp_path, path) = temp_db("open");
+        let (_tmp_vault, vault) = temp_vault("open");
         {
             let store = VaultStore::open(&path).unwrap();
             assert_eq!(store.note_count(&root_str(&vault)).unwrap(), 0);
@@ -2146,7 +2153,7 @@ mod tests {
     #[test]
     fn the_store_file_is_owner_only() {
         use std::os::unix::fs::PermissionsExt;
-        let path = temp_db("owner");
+        let (_tmp_path, path) = temp_db("owner");
         fs::write(&path, b"").unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
         let _store = VaultStore::open(&path).unwrap();
@@ -2159,8 +2166,8 @@ mod tests {
 
     #[test]
     fn upsert_and_search_find_a_note() {
-        let path = temp_db("search");
-        let vault = temp_vault("search");
+        let (_tmp_path, path) = temp_db("search");
+        let (_tmp_vault, vault) = temp_vault("search");
         let mut store = VaultStore::open(&path).unwrap();
         store
             .upsert_batch(&[NoteRow {
@@ -2187,8 +2194,8 @@ mod tests {
 
     #[test]
     fn a_search_is_scoped_to_one_vault() {
-        let path = temp_db("scope");
-        let vault = temp_vault("scope_a");
+        let (_tmp_path, path) = temp_db("scope");
+        let (_tmp_vault, vault) = temp_vault("scope_a");
         let mut store = VaultStore::open(&path).unwrap();
         let row = |vault_id: &str, rel: &str| NoteRow {
             vault_id: vault_id.into(),
@@ -2217,8 +2224,8 @@ mod tests {
 
     #[test]
     fn porter_stemming_matches_a_word_form() {
-        let path = temp_db("porter");
-        let vault = temp_vault("porter");
+        let (_tmp_path, path) = temp_db("porter");
+        let (_tmp_vault, vault) = temp_vault("porter");
         let mut store = VaultStore::open(&path).unwrap();
         store
             .upsert_batch(&[NoteRow {
@@ -2238,8 +2245,8 @@ mod tests {
 
     #[test]
     fn a_punctuation_only_query_is_not_an_error() {
-        let path = temp_db("empty_query");
-        let vault = temp_vault("empty_query");
+        let (_tmp_path, path) = temp_db("empty_query");
+        let (_tmp_vault, vault) = temp_vault("empty_query");
         let store = VaultStore::open(&path).unwrap();
         let hits = store
             .search_user_text(&root_str(&vault), "!!! ???", 10)
@@ -2249,7 +2256,7 @@ mod tests {
 
     #[test]
     fn the_walk_skips_hidden_entries_and_non_markdown() {
-        let vault = temp_vault("walk");
+        let (_tmp_vault, vault) = temp_vault("walk");
         write_note(&vault, "note.md", "# Heading");
         write_note(&vault, "sub/nested.md", "# Nested");
         write_note(&vault, ".hidden/secret.md", "# Secret");
@@ -2262,7 +2269,7 @@ mod tests {
 
     #[test]
     fn the_walk_honors_the_depth_cap() {
-        let vault = temp_vault("depth");
+        let (_tmp_vault, vault) = temp_vault("depth");
         let mut deep = vault.clone();
         for i in 0..MAX_DEPTH + 1 {
             deep = deep.join(format!("d{i}"));
@@ -2281,7 +2288,7 @@ mod tests {
 
     #[test]
     fn the_walk_caps_notes_and_reports_truncation() {
-        let vault = temp_vault("cap");
+        let (_tmp_vault, vault) = temp_vault("cap");
         for i in 0..3 {
             write_note(&vault, &format!("n{i}.md"), "# N");
         }
@@ -2298,9 +2305,9 @@ mod tests {
     #[test]
     fn symlinks_out_of_the_vault_are_not_listed_or_indexed() {
         use std::os::unix::fs::symlink;
-        let path = temp_db("outside_links");
-        let vault = temp_vault("outside_links");
-        let outside = temp_vault("outside_links_target");
+        let (_tmp_path, path) = temp_db("outside_links");
+        let (_tmp_vault, vault) = temp_vault("outside_links");
+        let (_tmp_outside, outside) = temp_vault("outside_links_target");
         write_note(&vault, "real.md", "# Real\ninside");
         fs::write(outside.join("secret.md"), "# Secret\nOUTSIDETOKEN").unwrap();
         symlink(outside.join("secret.md"), vault.join("file.md")).unwrap();
@@ -2333,7 +2340,7 @@ mod tests {
     #[test]
     fn a_symlink_inside_the_vault_lists_its_notes_once() {
         use std::os::unix::fs::symlink;
-        let vault = temp_vault("inside_dir_link");
+        let (_tmp_vault, vault) = temp_vault("inside_dir_link");
         write_note(&vault, "old/one.md", "# One");
         write_note(&vault, "old/two.md", "# Two");
         write_note(&vault, "top.md", "# Top");
@@ -2350,7 +2357,7 @@ mod tests {
     #[test]
     fn a_symlink_loop_terminates_and_lists_each_note_once() {
         use std::os::unix::fs::symlink;
-        let vault = temp_vault("link_loop");
+        let (_tmp_vault, vault) = temp_vault("link_loop");
         write_note(&vault, "sub/note.md", "# Note");
         symlink("..", vault.join("sub/up")).unwrap();
         symlink(".", vault.join("self")).unwrap();
@@ -2366,8 +2373,8 @@ mod tests {
 
     #[test]
     fn indexing_adds_updates_and_removes_notes() {
-        let path = temp_db("index");
-        let vault = temp_vault("index");
+        let (_tmp_path, path) = temp_db("index");
+        let (_tmp_vault, vault) = temp_vault("index");
         let root = root_str(&vault);
         let mut store = VaultStore::open(&path).unwrap();
         write_note(&vault, "a.md", "# First\nalpha");
@@ -2401,8 +2408,8 @@ mod tests {
 
     #[test]
     fn a_truncated_walk_never_prunes_notes_it_did_not_reach() {
-        let path = temp_db("truncated");
-        let vault = temp_vault("truncated");
+        let (_tmp_path, path) = temp_db("truncated");
+        let (_tmp_vault, vault) = temp_vault("truncated");
         let root = root_str(&vault);
         let mut store = VaultStore::open(&path).unwrap();
         for i in 0..3 {
@@ -2422,7 +2429,7 @@ mod tests {
 
     #[test]
     fn a_torn_utf8_tail_at_the_cap_is_dropped_not_replaced() {
-        let vault = temp_vault("torn");
+        let (_tmp_vault, vault) = temp_vault("torn");
         let mut body = vec![b'a'; (MAX_NOTE_BYTES - 1) as usize];
         body.extend_from_slice("é".as_bytes()); // 2 bytes: the read stops after its lead
         fs::write(vault.join("torn.md"), &body).unwrap();
@@ -2492,8 +2499,8 @@ mod tests {
     fn a_frontmatter_note_is_found_and_labelled_by_its_heading() {
         // The item was reported from search results, so this pins what a hit
         // *says* after a real index pass, not just what `note_title` returns.
-        let path = temp_db("frontmatter_search");
-        let vault = temp_vault("frontmatter_search");
+        let (_tmp_path, path) = temp_db("frontmatter_search");
+        let (_tmp_vault, vault) = temp_vault("frontmatter_search");
         let root = root_str(&vault);
         let mut store = VaultStore::open(&path).unwrap();
         write_note(
@@ -2534,8 +2541,8 @@ mod tests {
 
     #[test]
     fn a_note_row_writes_its_edges_and_their_backlink() {
-        let path = temp_db("links_write");
-        let vault = temp_vault("links_write");
+        let (_tmp_path, path) = temp_db("links_write");
+        let (_tmp_vault, vault) = temp_vault("links_write");
         let root = root_str(&vault);
         let mut store = VaultStore::open(&path).unwrap();
         store
@@ -2604,8 +2611,8 @@ mod tests {
 
     #[test]
     fn an_ambiguous_target_is_unresolved_and_names_its_candidates() {
-        let path = temp_db("links_ambiguous");
-        let vault = temp_vault("links_ambiguous");
+        let (_tmp_path, path) = temp_db("links_ambiguous");
+        let (_tmp_vault, vault) = temp_vault("links_ambiguous");
         let root = root_str(&vault);
         let mut store = VaultStore::open(&path).unwrap();
         store
@@ -2645,8 +2652,8 @@ mod tests {
 
     #[test]
     fn a_graph_node_is_every_indexed_note_even_without_edges() {
-        let path = temp_db("graph_nodes");
-        let vault = temp_vault("graph_nodes");
+        let (_tmp_path, path) = temp_db("graph_nodes");
+        let (_tmp_vault, vault) = temp_vault("graph_nodes");
         let root = root_str(&vault);
         let mut store = VaultStore::open(&path).unwrap();
         store
@@ -2681,8 +2688,8 @@ mod tests {
 
     #[test]
     fn mentions_aggregate_per_pair_and_ghosts_stand_for_unresolved_targets() {
-        let path = temp_db("graph_edges");
-        let vault = temp_vault("graph_edges");
+        let (_tmp_path, path) = temp_db("graph_edges");
+        let (_tmp_vault, vault) = temp_vault("graph_edges");
         let root = root_str(&vault);
         let mut store = VaultStore::open(&path).unwrap();
         store
@@ -2725,8 +2732,8 @@ mod tests {
 
     #[test]
     fn a_self_reference_is_an_ordinary_edge() {
-        let path = temp_db("graph_self");
-        let vault = temp_vault("graph_self");
+        let (_tmp_path, path) = temp_db("graph_self");
+        let (_tmp_vault, vault) = temp_vault("graph_self");
         let root = root_str(&vault);
         let mut store = VaultStore::open(&path).unwrap();
         store
@@ -2748,8 +2755,8 @@ mod tests {
 
     #[test]
     fn a_graph_cap_truncates_and_drops_edges_without_a_ghost() {
-        let path = temp_db("graph_capped");
-        let vault = temp_vault("graph_capped");
+        let (_tmp_path, path) = temp_db("graph_capped");
+        let (_tmp_vault, vault) = temp_vault("graph_capped");
         let root = root_str(&vault);
         let mut store = VaultStore::open(&path).unwrap();
         store
@@ -2775,8 +2782,8 @@ mod tests {
 
     #[test]
     fn an_empty_vault_has_an_empty_graph() {
-        let path = temp_db("graph_empty");
-        let vault = temp_vault("graph_empty");
+        let (_tmp_path, path) = temp_db("graph_empty");
+        let (_tmp_vault, vault) = temp_vault("graph_empty");
         let root = root_str(&vault);
         let store = VaultStore::open(&path).unwrap();
 
@@ -2793,8 +2800,8 @@ mod tests {
 
     #[test]
     fn a_cleared_vault_returns_no_edges() {
-        let path = temp_db("graph_cleared");
-        let vault = temp_vault("graph_cleared");
+        let (_tmp_path, path) = temp_db("graph_cleared");
+        let (_tmp_vault, vault) = temp_vault("graph_cleared");
         let root = root_str(&vault);
         let mut store = VaultStore::open(&path).unwrap();
         store
@@ -2810,8 +2817,8 @@ mod tests {
 
     #[test]
     fn resolve_target_answers_a_clicked_mention_from_the_same_rules() {
-        let path = temp_db("links_resolve");
-        let vault = temp_vault("links_resolve");
+        let (_tmp_path, path) = temp_db("links_resolve");
+        let (_tmp_vault, vault) = temp_vault("links_resolve");
         let root = root_str(&vault);
         let mut store = VaultStore::open(&path).unwrap();
         store
@@ -2852,9 +2859,10 @@ mod tests {
 
     #[test]
     fn the_pass_resolves_a_stub_that_appears_and_releases_one_that_vanishes() {
-        let vault = temp_vault("links_move");
+        let (_tmp_vault, vault) = temp_vault("links_move");
         let root = root_str(&vault);
-        let mut store = VaultStore::open(&temp_db("links_move")).unwrap();
+        let (_tmp_db_move, db) = temp_db("links_move");
+        let mut store = VaultStore::open(&db).unwrap();
         write_note(&vault, "x.md", "# X\nsee [[later]] and [[gone]]\n");
         write_note(&vault, "gone.md", "# Gone\n");
         index_vault(&mut store, &root).unwrap();
@@ -2883,9 +2891,10 @@ mod tests {
 
     #[test]
     fn a_second_note_with_the_same_stem_stops_a_resolved_link() {
-        let vault = temp_vault("links_stem");
+        let (_tmp_vault, vault) = temp_vault("links_stem");
         let root = root_str(&vault);
-        let mut store = VaultStore::open(&temp_db("links_stem")).unwrap();
+        let (_tmp_db_stem, db) = temp_db("links_stem");
+        let mut store = VaultStore::open(&db).unwrap();
         write_note(&vault, "a/note.md", "# A\n");
         write_note(&vault, "x.md", "# X\n[[note]]\n");
         index_vault(&mut store, &root).unwrap();
@@ -2910,9 +2919,10 @@ mod tests {
 
     #[test]
     fn a_removed_note_takes_its_own_edges_and_clear_vault_takes_the_rest() {
-        let vault = temp_vault("links_remove");
+        let (_tmp_vault, vault) = temp_vault("links_remove");
         let root = root_str(&vault);
-        let mut store = VaultStore::open(&temp_db("links_remove")).unwrap();
+        let (_tmp_db_remove, db) = temp_db("links_remove");
+        let mut store = VaultStore::open(&db).unwrap();
         write_note(&vault, "x.md", "# X\n[[y]]\n");
         write_note(&vault, "y.md", "# Y\n");
         index_vault(&mut store, &root).unwrap();
@@ -2942,8 +2952,8 @@ mod tests {
     #[test]
     fn the_schema_bump_rebuilds_the_derived_tables() {
         // A version-1 store: notes, no links.
-        let path = temp_db("links_bump");
-        let vault = temp_vault("links_bump");
+        let (_tmp_path, path) = temp_db("links_bump");
+        let (_tmp_vault, vault) = temp_vault("links_bump");
         let root = root_str(&vault);
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(
@@ -2984,8 +2994,8 @@ mod tests {
 
     #[test]
     fn clear_vault_forgets_only_that_vault() {
-        let path = temp_db("clear");
-        let vault = temp_vault("clear");
+        let (_tmp_path, path) = temp_db("clear");
+        let (_tmp_vault, vault) = temp_vault("clear");
         let mut store = VaultStore::open(&path).unwrap();
         store
             .upsert_batch(&[
@@ -3016,7 +3026,7 @@ mod tests {
 
     #[test]
     fn a_vault_note_round_trips_through_read_and_write() {
-        let vault = temp_vault("note_round_trip");
+        let (_tmp_vault, vault) = temp_vault("note_round_trip");
         write_note(&vault, "note.md", "# One\n\nbody\n");
         let root = root_str(&vault);
 
@@ -3041,7 +3051,7 @@ mod tests {
 
     #[test]
     fn a_stale_stamp_refuses_a_save_and_a_forced_one_goes_through() {
-        let vault = temp_vault("note_stale");
+        let (_tmp_vault, vault) = temp_vault("note_stale");
         write_note(&vault, "note.md", "first");
         let root = root_str(&vault);
         let loaded = read_vault_note(&root, "note.md").unwrap();
@@ -3064,7 +3074,7 @@ mod tests {
 
     #[test]
     fn note_paths_must_stay_in_the_vault_vocabulary() {
-        let vault = temp_vault("note_paths");
+        let (_tmp_vault, vault) = temp_vault("note_paths");
         write_note(&vault, "note.md", "x");
         let root = root_str(&vault);
         // Every path the walk could never have produced: escaping, absolute,
@@ -3090,17 +3100,17 @@ mod tests {
                 "the write must refuse {rel:?}"
             );
         }
+        // The vault sits one level inside its guard, so the file "../escape.md"
+        // would have written is the guard's own `escape.md` — not a shared one.
         assert!(
-            !std::path::Path::new(&std::env::temp_dir())
-                .join("escape.md")
-                .exists(),
+            !_tmp_vault.path().join("escape.md").exists(),
             "no refused path may have created a file"
         );
     }
 
     #[test]
     fn a_write_refuses_a_directory_and_a_missing_note_and_oversized_content() {
-        let vault = temp_vault("note_refuse");
+        let (_tmp_vault, vault) = temp_vault("note_refuse");
         fs::create_dir_all(vault.join("dir.md")).unwrap();
         write_note(&vault, "note.md", "x");
         let root = root_str(&vault);
@@ -3131,8 +3141,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_symlink_out_of_the_vault_is_neither_read_nor_written() {
-        let vault = temp_vault("note_symlink_out");
-        let outside = temp_vault("note_symlink_target");
+        let (_tmp_vault, vault) = temp_vault("note_symlink_out");
+        let (_tmp_outside, outside) = temp_vault("note_symlink_target");
         fs::write(outside.join("secret.md"), "outside").unwrap();
         std::os::unix::fs::symlink(outside.join("secret.md"), vault.join("link.md")).unwrap();
         let root = root_str(&vault);
@@ -3156,7 +3166,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_symlink_inside_the_vault_is_written_through() {
-        let vault = temp_vault("note_symlink_in");
+        let (_tmp_vault, vault) = temp_vault("note_symlink_in");
         write_note(&vault, "real.md", "one");
         std::os::unix::fs::symlink("real.md", vault.join("alias.md")).unwrap();
         let root = root_str(&vault);
@@ -3178,7 +3188,7 @@ mod tests {
     #[test]
     fn a_write_keeps_the_notes_mode() {
         use std::os::unix::fs::PermissionsExt;
-        let vault = temp_vault("note_mode");
+        let (_tmp_vault, vault) = temp_vault("note_mode");
         write_note(&vault, "note.md", "x");
         let path = vault.join("note.md");
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
@@ -3195,7 +3205,7 @@ mod tests {
 
     #[test]
     fn a_note_can_be_created_but_never_over_an_existing_entry() {
-        let vault = temp_vault("note_create");
+        let (_tmp_vault, vault) = temp_vault("note_create");
         let root = root_str(&vault);
 
         let stamp = create_vault_note(&root, "fresh.md", "# Fresh\n").unwrap();
@@ -3246,7 +3256,7 @@ mod tests {
 
     #[test]
     fn deleting_a_note_removes_the_entry_and_nothing_else() {
-        let vault = temp_vault("note_delete");
+        let (_tmp_vault, vault) = temp_vault("note_delete");
         write_note(&vault, "note.md", "x");
         write_note(&vault, "other.md", "y");
         fs::create_dir_all(vault.join("dir.md")).unwrap();
@@ -3279,7 +3289,7 @@ mod tests {
 
     #[test]
     fn renaming_moves_the_note_and_refuses_an_existing_destination() {
-        let vault = temp_vault("note_rename");
+        let (_tmp_vault, vault) = temp_vault("note_rename");
         write_note(&vault, "a.md", "content");
         write_note(&vault, "b.md", "other");
         let root = root_str(&vault);
@@ -3315,7 +3325,7 @@ mod tests {
 
     #[test]
     fn a_rename_rewrites_only_the_mentions_that_resolved_to_the_note() {
-        let vault = temp_vault("link_rewrite");
+        let (_tmp_vault, vault) = temp_vault("link_rewrite");
         write_note(&vault, "sub/old.md", "# Old\n");
         write_note(&vault, "other.md", "# Other\n");
         write_note(
@@ -3353,7 +3363,7 @@ mod tests {
 
     #[test]
     fn a_rename_leaves_an_ambiguous_stem_and_the_notes_own_text_alone() {
-        let vault = temp_vault("link_rewrite_ambiguous");
+        let (_tmp_vault, vault) = temp_vault("link_rewrite_ambiguous");
         write_note(&vault, "a/note.md", "self [[a/note]]\n");
         write_note(&vault, "b/note.md", "# B\n");
         write_note(&vault, "src.md", "[[note]] and [[a/note]]\n");
@@ -3380,7 +3390,7 @@ mod tests {
 
     #[test]
     fn a_rename_rewrites_the_notes_own_mentions_when_the_caller_includes_it() {
-        let vault = temp_vault("link_rewrite_self");
+        let (_tmp_vault, vault) = temp_vault("link_rewrite_self");
         write_note(
             &vault,
             "old.md",
@@ -3425,7 +3435,7 @@ mod tests {
 
     #[test]
     fn a_renamed_note_without_self_mentions_answers_no_body() {
-        let vault = temp_vault("link_rewrite_self_clean");
+        let (_tmp_vault, vault) = temp_vault("link_rewrite_self_clean");
         write_note(&vault, "old.md", "# Old\n");
         let root = root_str(&vault);
         rename_vault_note(&root, "old.md", "new.md").unwrap();
@@ -3441,7 +3451,7 @@ mod tests {
 
     #[test]
     fn a_renamed_note_past_the_read_cap_is_skipped_even_when_included() {
-        let vault = temp_vault("link_rewrite_self_cap");
+        let (_tmp_vault, vault) = temp_vault("link_rewrite_self_cap");
         let mut body = String::from("[[old]]\n");
         body.push_str(&"x".repeat(MAX_NOTE_BYTES as usize));
         write_note(&vault, "old.md", &body);
@@ -3457,7 +3467,7 @@ mod tests {
 
     #[test]
     fn a_reference_update_keeps_a_notes_line_endings() {
-        let vault = temp_vault("link_rewrite_crlf");
+        let (_tmp_vault, vault) = temp_vault("link_rewrite_crlf");
         write_note(&vault, "old.md", "# Old\n");
         write_note(&vault, "src.md", "one\r\nSee [[old]]\r\ntwo\r\n");
         let root = root_str(&vault);
@@ -3476,7 +3486,7 @@ mod tests {
 
     #[test]
     fn a_new_name_a_link_cannot_spell_refuses_the_pass() {
-        let vault = temp_vault("link_rewrite_spell");
+        let (_tmp_vault, vault) = temp_vault("link_rewrite_spell");
         write_note(&vault, "old.md", "# Old\n");
         write_note(&vault, "src.md", "[[old]]\n");
         let root = root_str(&vault);
@@ -3497,7 +3507,7 @@ mod tests {
 
     #[test]
     fn a_note_past_the_read_cap_is_counted_and_left_alone() {
-        let vault = temp_vault("link_rewrite_cap");
+        let (_tmp_vault, vault) = temp_vault("link_rewrite_cap");
         write_note(&vault, "old.md", "# Old\n");
         let mut body = String::from("[[old]]\n");
         body.push_str(&"x".repeat(MAX_NOTE_BYTES as usize));
@@ -3521,8 +3531,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn create_and_rename_refuse_a_directory_symlinked_out_of_the_vault() {
-        let vault = temp_vault("note_dir_escape");
-        let outside = temp_vault("note_dir_escape_target");
+        let (_tmp_vault, vault) = temp_vault("note_dir_escape");
+        let (_tmp_outside, outside) = temp_vault("note_dir_escape_target");
         std::os::unix::fs::symlink(&outside, vault.join("out")).unwrap();
         write_note(&vault, "note.md", "x");
         let root = root_str(&vault);
@@ -3546,8 +3556,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn delete_and_rename_move_the_entry_not_a_symlinked_target() {
-        let vault = temp_vault("note_entry");
-        let outside = temp_vault("note_entry_target");
+        let (_tmp_vault, vault) = temp_vault("note_entry");
+        let (_tmp_outside, outside) = temp_vault("note_entry_target");
         fs::write(outside.join("secret.md"), "outside").unwrap();
         std::os::unix::fs::symlink(outside.join("secret.md"), vault.join("outside.md")).unwrap();
         write_note(&vault, "real.md", "real");
@@ -3579,17 +3589,21 @@ mod tests {
         );
     }
 
-    fn temp_scratch(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("gpty_scratch_{tag}_{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        dir
+    /// An empty recovery-copy directory the caller must keep alive.
+    fn temp_scratch(tag: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let guard = tempfile::Builder::new()
+            .prefix(&format!("gpty_scratch_{tag}_"))
+            .tempdir()
+            .expect("temp dir");
+        let scratch = guard.path().to_path_buf();
+        (guard, scratch)
     }
 
     #[test]
     fn a_recovery_copy_round_trips_and_clears() {
-        let vault = temp_vault("scratch_round_trip");
+        let (_tmp_vault, vault) = temp_vault("scratch_round_trip");
         write_note(&vault, "note.md", "one\n");
-        let dir = temp_scratch("round_trip");
+        let (_tmp_dir, dir) = temp_scratch("round_trip");
         let root = root_str(&vault);
         let dir = root_str(&dir);
         let stamp = NoteStamp {
@@ -3631,12 +3645,13 @@ mod tests {
 
     #[test]
     fn a_recovery_copy_is_keyed_by_vault_and_note() {
-        let vault = temp_vault("scratch_keys");
-        let other_vault = temp_vault("scratch_keys_other");
+        let (_tmp_vault, vault) = temp_vault("scratch_keys");
+        let (_tmp_other_vault, other_vault) = temp_vault("scratch_keys_other");
         write_note(&vault, "a.md", "a");
         write_note(&vault, "b.md", "b");
         write_note(&other_vault, "a.md", "a");
-        let dir = root_str(&temp_scratch("keys"));
+        let (_tmp_scratch_keys, scratch_dir) = temp_scratch("keys");
+        let dir = root_str(&scratch_dir);
         let root = root_str(&vault);
         let other_root = root_str(&other_vault);
         let stamp = NoteStamp { mtime: 7, size: 1 };
@@ -3664,9 +3679,10 @@ mod tests {
 
     #[test]
     fn a_copy_that_names_another_note_is_never_restored() {
-        let vault = temp_vault("scratch_identity");
+        let (_tmp_vault, vault) = temp_vault("scratch_identity");
         write_note(&vault, "note.md", "x");
-        let dir = root_str(&temp_scratch("identity"));
+        let (_tmp_scratch_identity, scratch_dir) = temp_scratch("identity");
+        let dir = root_str(&scratch_dir);
         let root = root_str(&vault);
 
         // The file is named by a hash, so what it *says* is the safety net:
@@ -3698,9 +3714,10 @@ mod tests {
 
     #[test]
     fn a_copy_can_only_belong_to_a_note_path() {
-        let vault = temp_vault("scratch_paths");
+        let (_tmp_vault, vault) = temp_vault("scratch_paths");
         write_note(&vault, "note.md", "x");
-        let dir = root_str(&temp_scratch("paths"));
+        let (_tmp_scratch_paths, scratch_dir) = temp_scratch("paths");
+        let dir = root_str(&scratch_dir);
         let root = root_str(&vault);
         let stamp = NoteStamp { mtime: 1, size: 1 };
 
@@ -3748,9 +3765,10 @@ mod tests {
     #[test]
     fn the_recovery_copy_is_owner_only() {
         use std::os::unix::fs::PermissionsExt;
-        let vault = temp_vault("scratch_mode");
+        let (_tmp_vault, vault) = temp_vault("scratch_mode");
         write_note(&vault, "note.md", "x");
-        let dir = root_str(&temp_scratch("mode"));
+        let (_tmp_scratch_mode, scratch_dir) = temp_scratch("mode");
+        let dir = root_str(&scratch_dir);
         let root = root_str(&vault);
         write_scratch(&dir, &root, "note.md", "x", NoteStamp { mtime: 1, size: 1 }).unwrap();
 
@@ -3763,13 +3781,14 @@ mod tests {
 
     #[test]
     fn a_write_prunes_copies_of_vaults_that_are_gone() {
-        let live = temp_vault("scratch_prune_live");
-        let moved = temp_vault("scratch_prune_moved");
-        let replaced = temp_vault("scratch_prune_replaced");
+        let (_tmp_live, live) = temp_vault("scratch_prune_live");
+        let (_tmp_moved, moved) = temp_vault("scratch_prune_moved");
+        let (_tmp_replaced, replaced) = temp_vault("scratch_prune_replaced");
         for vault in [&live, &moved, &replaced] {
             write_note(vault, "note.md", "x");
         }
-        let dir = root_str(&temp_scratch("prune"));
+        let (_tmp_scratch_prune, scratch_dir) = temp_scratch("prune");
+        let dir = root_str(&scratch_dir);
         let live_root = root_str(&live);
         let moved_root = root_str(&moved);
         let replaced_root = root_str(&replaced);
@@ -3813,10 +3832,11 @@ mod tests {
 
     #[test]
     fn a_copy_survives_its_note_leaving_the_vault() {
-        let vault = temp_vault("scratch_prune_note");
+        let (_tmp_vault, vault) = temp_vault("scratch_prune_note");
         write_note(&vault, "note.md", "x");
         write_note(&vault, "other.md", "y");
-        let dir = root_str(&temp_scratch("prune_note"));
+        let (_tmp_scratch_prune_note, scratch_dir) = temp_scratch("prune_note");
+        let dir = root_str(&scratch_dir);
         let root = root_str(&vault);
         let stamp = NoteStamp { mtime: 1, size: 1 };
 
@@ -3842,9 +3862,10 @@ mod tests {
 
     #[test]
     fn a_prune_keeps_what_it_cannot_judge() {
-        let vault = temp_vault("scratch_prune_unreadable");
+        let (_tmp_vault, vault) = temp_vault("scratch_prune_unreadable");
         write_note(&vault, "note.md", "x");
-        let dir = root_str(&temp_scratch("prune_unreadable"));
+        let (_tmp_scratch_prune_unreadable, scratch_dir) = temp_scratch("prune_unreadable");
+        let dir = root_str(&scratch_dir);
         let root = root_str(&vault);
         let stamp = NoteStamp { mtime: 1, size: 1 };
         write_scratch(&dir, &root, "note.md", "typed", stamp).unwrap();
@@ -3882,9 +3903,10 @@ mod tests {
 
     #[test]
     fn a_prune_reclaims_the_remains_of_an_interrupted_write() {
-        let vault = temp_vault("scratch_prune_temp");
+        let (_tmp_vault, vault) = temp_vault("scratch_prune_temp");
         write_note(&vault, "note.md", "x");
-        let dir = root_str(&temp_scratch("prune_temp"));
+        let (_tmp_scratch_prune_temp, scratch_dir) = temp_scratch("prune_temp");
+        let dir = root_str(&scratch_dir);
         let root = root_str(&vault);
         let stamp = NoteStamp { mtime: 1, size: 1 };
 
@@ -3921,13 +3943,14 @@ mod tests {
     #[test]
     fn a_vault_that_cannot_be_read_keeps_its_copies() {
         use std::os::unix::fs::PermissionsExt;
-        let outer = temp_vault("scratch_prune_eacces");
+        let (_tmp_outer, outer) = temp_vault("scratch_prune_eacces");
         let vault = outer.join("vault");
         fs::create_dir_all(&vault).unwrap();
         write_note(&vault, "note.md", "x");
-        let live = temp_vault("scratch_prune_eacces_live");
+        let (_tmp_live, live) = temp_vault("scratch_prune_eacces_live");
         write_note(&live, "note.md", "y");
-        let dir = root_str(&temp_scratch("prune_eacces"));
+        let (_tmp_scratch_prune_eacces, scratch_dir) = temp_scratch("prune_eacces");
+        let dir = root_str(&scratch_dir);
         let root = root_str(&vault);
         let live_root = root_str(&live);
         let stamp = NoteStamp { mtime: 1, size: 1 };
@@ -3953,7 +3976,7 @@ mod tests {
 
     #[test]
     fn reading_flags_crlf_and_a_body_past_the_cap() {
-        let vault = temp_vault("note_read_flags");
+        let (_tmp_vault, vault) = temp_vault("note_read_flags");
         write_note(&vault, "crlf.md", "# A\r\nline\r\n");
         let root = root_str(&vault);
         let loaded = read_vault_note(&root, "crlf.md").unwrap();

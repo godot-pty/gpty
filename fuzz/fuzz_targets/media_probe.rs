@@ -19,10 +19,18 @@ fuzz_target!(|data: &[u8]| {
     if data.len() > 1 << 20 {
         return;
     }
-    let path = std::env::temp_dir().join(format!("gpty-fuzz-media-{}.mkv", std::process::id()));
+    // One private directory per input: the guard removes the file on a normal
+    // or panicking return. An abort or OOM runs no destructor, so a killed fuzz
+    // process can still leave the directory behind — that is libFuzzer's
+    // crash path, not a leak this target can close. A host that cannot give us
+    // a scratch directory skips the input: an environmental `ENOSPC`/`EMFILE`
+    // must never be reported as a crash.
+    let Ok(tmp) = tempfile::TempDir::new() else {
+        return;
+    };
+    let path = tmp.path().join("input.mkv");
     if std::fs::write(&path, data).is_err() {
         return;
     }
     let _ = gpty_media::probe(path.to_string_lossy().as_ref());
-    let _ = std::fs::remove_file(&path);
 });

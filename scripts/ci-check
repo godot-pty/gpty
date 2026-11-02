@@ -436,8 +436,15 @@ else
 fi
 
 # ── Step 4: cargo test ─────────────────────────────────────────────────
+# Both passes run under an empty TMPDIR so the suite's temp discipline is
+# measured, not assumed: a test that writes outside its guard leaves the file
+# here, and the check below fails the run on it. `std::env::temp_dir()` honours
+# TMPDIR, so every artifact a test creates lands inside this directory.
+TEMP_PROBE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gpty-gate-tmp.XXXXXX")"
+# An interrupted run still cleans up: the probe directory is not an artifact.
+trap 'rm -rf "$TEMP_PROBE_DIR"' EXIT
 header "cargo test"
-if cargo test --workspace -- --test-threads=1 2>&1; then
+if TMPDIR="$TEMP_PROBE_DIR" cargo test --workspace -- --test-threads=1 2>&1; then
     pass "cargo test"
 else
     fail "cargo test"
@@ -451,12 +458,28 @@ fi
 # queue tests clearing state another module was using — stayed invisible
 # for as long as the suite was only ever run serialised.
 header "cargo test (parallel)"
-if cargo test --workspace 2>&1; then
+if TMPDIR="$TEMP_PROBE_DIR" cargo test --workspace 2>&1; then
     pass "cargo test (parallel)"
 else
     fail "cargo test (parallel) — the suite must also pass with default parallelism"
     check_failed
 fi
+
+# ── Step 4.3: the suite left no temp artifacts ────────────────────────
+# A guard (tempfile::TempDir) removes each test's sockets, databases and
+# scratch files when it drops. Anything still here was written outside one:
+# a leaked socket keeps its inode until reboot, and unbounded leaks fill the
+# shared temp directory until a spawn fails.
+LEFTOVERS="$(find "$TEMP_PROBE_DIR" -mindepth 1 -maxdepth 1 -print 2>/dev/null || true)"
+header "temp artifacts"
+if [[ -n "$LEFTOVERS" ]]; then
+    fail "cargo test left temp artifacts behind — give each one a tempfile guard"
+    detail "$LEFTOVERS"
+    check_failed
+else
+    pass "cargo test left no temp artifacts"
+fi
+rm -rf "$TEMP_PROBE_DIR"
 
 # ── Step 4.5: OMP extension tests ──────────────────────────────────────
 header "OMP extension tests"

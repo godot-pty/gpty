@@ -579,32 +579,36 @@ fn validated_id_component(id: &str) -> StoreResult<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     /// A private directory per test — the atomicity test scans for leftover
     /// temp files, and the process-wide temp dir is shared with every other
     /// parallel test (the class the parallel cargo-test gate exists to
-    /// catch).
-    fn test_dir(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("gpty-plugin-store-{}-{name}", std::process::id()))
+    /// catch). The guard must outlive the store, so `make_store` hands it
+    /// back to the test body.
+    fn test_dir(name: &str) -> TempDir {
+        tempfile::Builder::new()
+            .prefix(&format!("gpty-plugin-store-{name}-"))
+            .tempdir()
+            .expect("temp dir")
     }
 
-    fn make_store(name: &str) -> PluginStore {
+    fn make_store(name: &str) -> (TempDir, PluginStore) {
         let dir = test_dir(name);
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        PluginStore::at(dir.join("plugins.json"))
+        let store = PluginStore::at(dir.path().join("plugins.json"));
+        (dir, store)
     }
 
     #[test]
     fn missing_file_is_an_empty_store() {
-        let store = make_store("missing");
+        let (_tmp, store) = make_store("missing");
         assert_eq!(store.records().unwrap(), Vec::new());
         assert_eq!(store.record("owner/name").unwrap(), None);
     }
 
     #[test]
     fn upsert_roundtrips_and_refreshes_installed_at() {
-        let store = make_store("roundtrip");
+        let (_tmp, store) = make_store("roundtrip");
         let first = store
             .upsert("owner/name", "abc123def456", &[], &[])
             .unwrap();
@@ -627,7 +631,7 @@ mod tests {
 
     #[test]
     fn remove_deletes_only_the_named_record() {
-        let store = make_store("remove");
+        let (_tmp, store) = make_store("remove");
         store.upsert("owner/a", "aaaaaaa", &[], &[]).unwrap();
         store.upsert("owner/b", "bbbbbbb", &[], &[]).unwrap();
         assert!(store.remove("owner/a").unwrap());
@@ -643,7 +647,7 @@ mod tests {
 
     #[test]
     fn set_enabled_reports_unknown_ids() {
-        let store = make_store("enable");
+        let (_tmp, store) = make_store("enable");
         assert_eq!(store.set_enabled("owner/x", true).unwrap(), None);
         store.upsert("owner/x", "aaaaaaa", &[], &[]).unwrap();
         let record = store.set_enabled("owner/x", false).unwrap().unwrap();
@@ -652,7 +656,7 @@ mod tests {
 
     #[test]
     fn ids_are_validated_before_any_write() {
-        let store = make_store("bad-id");
+        let (_tmp, store) = make_store("bad-id");
         // A path separator in an id must never reach a path join.
         assert!(store.upsert("owner/../etc", "aaaaaaa", &[], &[]).is_err());
         assert!(store.upsert("Owner/UPPER", "aaaaaaa", &[], &[]).is_err());
@@ -664,7 +668,7 @@ mod tests {
 
     #[test]
     fn revisions_are_validated() {
-        let store = make_store("bad-rev");
+        let (_tmp, store) = make_store("bad-rev");
         assert!(store.upsert("owner/x", "short", &[], &[]).is_err());
         assert!(
             store
@@ -678,7 +682,7 @@ mod tests {
 
     #[test]
     fn corrupt_json_is_an_error_not_a_drop() {
-        let store = make_store("corrupt");
+        let (_tmp, store) = make_store("corrupt");
         std::fs::write(&store.path, "{not json").unwrap();
         let err = store.records().unwrap_err();
         assert!(err.0.contains("corrupt"), "error names the file: {err}");
@@ -688,7 +692,7 @@ mod tests {
 
     #[test]
     fn wrong_shaped_entry_is_an_error() {
-        let store = make_store("shape");
+        let (_tmp, store) = make_store("shape");
         std::fs::write(
             &store.path,
             r#"{"plugins": [{"id": "owner/x", "revision": "aaaaaaa", "enabled": "yes", "installed_at": 1}]}"#,
@@ -699,7 +703,7 @@ mod tests {
 
     #[test]
     fn cap_on_record_count() {
-        let store = make_store("cap");
+        let (_tmp, store) = make_store("cap");
         let mut records = Vec::new();
         for i in 0..=MAX_PLUGINS {
             records.push(serde_json::json!({
@@ -716,7 +720,7 @@ mod tests {
         .unwrap();
         assert!(store.records().unwrap_err().0.contains("more than"));
         // The write side enforces the same cap.
-        let write_store = make_store("cap-write");
+        let (_tmp_w, write_store) = make_store("cap-write");
         for i in 0..MAX_PLUGINS {
             write_store
                 .upsert(&format!("owner/p{i}"), "aaaaaaa", &[], &[])
@@ -731,7 +735,7 @@ mod tests {
 
     #[test]
     fn writes_are_atomic_and_leave_no_temp_files() {
-        let store = make_store("atomic");
+        let (_tmp, store) = make_store("atomic");
         store.upsert("owner/x", "aaaaaaa", &[], &[]).unwrap();
         let dir = store.path.parent().unwrap().to_path_buf();
         let leftovers: Vec<_> = std::fs::read_dir(&dir)
@@ -752,7 +756,7 @@ mod tests {
     #[test]
     fn store_file_is_private() {
         use std::os::unix::fs::PermissionsExt;
-        let store = make_store("mode");
+        let (_tmp, store) = make_store("mode");
         store.upsert("owner/x", "aaaaaaa", &[], &[]).unwrap();
         let mode = std::fs::metadata(store.path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "the store holds install records");
@@ -769,7 +773,7 @@ mod tests {
     /// it is the GUI's only view of the plugin's tiles.
     #[test]
     fn profiles_roundtrip_and_follow_the_revision() {
-        let store = make_store("profiles-roundtrip");
+        let (_tmp, store) = make_store("profiles-roundtrip");
         let profiles = vec![
             PluginProfileRecord {
                 name: "OMP".into(),
@@ -834,7 +838,7 @@ mod tests {
     /// it must read as "this plugin ships none", not as a corrupt store.
     #[test]
     fn missing_profiles_key_reads_as_empty() {
-        let store = make_store("profiles-absent");
+        let (_tmp, store) = make_store("profiles-absent");
         std::fs::write(
             &store.path,
             r#"{"plugins": [{"id": "owner/x", "revision": "aaaaaaa", "enabled": true, "installed_at": 1}]}"#,
@@ -890,7 +894,7 @@ mod tests {
             ),
         ];
         for (label, profiles, expected) in cases {
-            let store = make_store(&format!("profiles-shape-{label}"));
+            let (_tmp, store) = make_store(&format!("profiles-shape-{label}"));
             std::fs::write(
                 &store.path,
                 serde_json::to_vec(&serde_json::json!({"plugins": [{
@@ -913,7 +917,7 @@ mod tests {
 
     #[test]
     fn cap_on_stored_profile_and_tile_counts() {
-        let store = make_store("profiles-cap");
+        let (_tmp, store) = make_store("profiles-cap");
         let profiles: Vec<serde_json::Value> = (0..=MAX_PROFILE_RECORDS)
             .map(|i| serde_json::json!({"name": format!("p{i}"), "tiles": []}))
             .collect();
@@ -966,7 +970,7 @@ mod tests {
     /// re-install replaces them, like the profiles.
     #[test]
     fn concepts_roundtrip_and_follow_the_revision() {
-        let store = make_store("concepts-roundtrip");
+        let (_tmp, store) = make_store("concepts-roundtrip");
         let concepts = vec![
             serde_json::json!({
                 "name": "cat",
@@ -1002,7 +1006,7 @@ mod tests {
     /// must read as "this plugin ships none", not as a corrupt store.
     #[test]
     fn missing_concepts_key_reads_as_empty() {
-        let store = make_store("concepts-absent");
+        let (_tmp, store) = make_store("concepts-absent");
         std::fs::write(
             &store.path,
             r#"{"plugins": [{"id": "owner/x", "revision": "aaaaaaa", "enabled": true, "installed_at": 1}]}"#,
@@ -1048,7 +1052,7 @@ mod tests {
             ),
         ];
         for (label, concepts, expected) in cases {
-            let store = make_store(&format!("concepts-shape-{label}"));
+            let (_tmp, store) = make_store(&format!("concepts-shape-{label}"));
             std::fs::write(
                 &store.path,
                 serde_json::to_vec(&serde_json::json!({"plugins": [{
@@ -1068,7 +1072,7 @@ mod tests {
             );
 
             if let Some(entries) = concepts.as_array() {
-                let write_store = make_store(&format!("concepts-write-{label}"));
+                let (_tmp_w, write_store) = make_store(&format!("concepts-write-{label}"));
                 assert!(
                     write_store
                         .upsert("owner/x", "aaaaaaa", &[], entries)
@@ -1081,7 +1085,7 @@ mod tests {
 
     #[test]
     fn cap_on_stored_concept_count() {
-        let store = make_store("concepts-cap");
+        let (_tmp, store) = make_store("concepts-cap");
         let concepts: Vec<serde_json::Value> = (0..=MAX_CONCEPT_RECORDS)
             .map(|i| serde_json::json!({"name": format!("c{i}"), "trigger": "x"}))
             .collect();

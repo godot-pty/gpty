@@ -335,7 +335,6 @@ mod tests {
     use crate::registry::AiSession;
     use crate::test_temp_script::TempScript;
     use crate::types::{AiEventEnvelope, SessionPromptRequest};
-    use std::io::Write;
 
     /// Write a fake adapter script that speaks the NDJSON contract, returning
     /// its path and the argv to run it.
@@ -349,27 +348,15 @@ mod tests {
     /// Permission denied" }` before a single frame, which `wait_terminal`
     /// treats as terminal, so no Thinking frame ever arrived.
     ///
-    /// The name is still unique per call *and* per run: tests run in parallel
-    /// and must not read each other's script.
+    /// The script is private per call *and* per run: its own temporary
+    /// directory, so parallel tests cannot read each other's script.
     fn fake_adapter(script: &str) -> (TempScript, Vec<String>) {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let dir = std::env::temp_dir();
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
-        let path = dir.join(format!(
-            "gpty_fake_adapter_{}_{}_{}.sh",
-            std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            nanos
-        ));
-        let mut file = std::fs::File::create(&path).unwrap();
-        file.write_all(script.as_bytes()).unwrap();
-        (
-            TempScript::new(path.clone()),
-            vec!["/bin/sh".to_string(), path.to_string_lossy().to_string()],
-        )
+        let script = TempScript::write("fake_adapter.sh", script.as_bytes());
+        let command = vec![
+            "/bin/sh".to_string(),
+            script.path().to_string_lossy().into_owned(),
+        ];
+        (script, command)
     }
 
     fn prompt(text: &str) -> SessionPromptRequest {

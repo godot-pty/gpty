@@ -937,6 +937,17 @@ mod tests {
         use super::*;
         use crate::protocol::{Request, Response};
 
+        /// A socket path inside a directory that removes itself when the test
+        /// ends (on success or on panic): a gate run must leave the shared
+        /// temp directory as it found it, and unique per call so the serial
+        /// and parallel passes cannot collide.
+        fn temp_socket(name: &str) -> (tempfile::TempDir, String) {
+            let dir = tempfile::TempDir::new().expect("a private temp directory");
+            let path = dir.path().join(format!("{name}.sock"));
+            let path = path.to_str().expect("the temp path is UTF-8").to_string();
+            (dir, path)
+        }
+
         /// The credential path itself, not just its effect on the accept loop:
         /// both ends of a socket pair belong to this process, so the check must
         /// answer "same user". (The rejection case needs a second UID and is
@@ -973,8 +984,7 @@ mod tests {
         #[cfg(unix)]
         #[tokio::test]
         async fn a_planted_socket_path_is_refused_not_unlinked() {
-            let path = format!("/tmp/gpty-ipc-planted-{}.sock", std::process::id());
-            let _ = std::fs::remove_file(&path);
+            let (_tmp, path) = temp_socket("planted");
             std::fs::write(&path, b"not a socket").unwrap();
 
             let server = IpcServer::new(&path);
@@ -991,7 +1001,6 @@ mod tests {
                 b"not a socket",
                 "the refused path must be left exactly as it was found"
             );
-            let _ = std::fs::remove_file(&path);
         }
 
         /// The bind-time decision table, probed directly: a live listener, a
@@ -1001,8 +1010,7 @@ mod tests {
         async fn the_probe_distinguishes_live_stale_and_absent() {
             use std::path::Path;
 
-            let path = format!("/tmp/gpty-ipc-probe-{}.sock", std::process::id());
-            let _ = std::fs::remove_file(&path);
+            let (_tmp, path) = temp_socket("probe");
             assert_eq!(
                 probe_socket(Path::new(&path)).await,
                 SocketState::Absent,
@@ -1032,7 +1040,6 @@ mod tests {
                 "an accepted connection means a server is there"
             );
             drop(live);
-            let _ = std::fs::remove_file(&path);
         }
 
         /// The defect this rule exists for: a second instance used to unlink a
@@ -1040,8 +1047,7 @@ mod tests {
         /// processes kept running, every client going to the newcomer).
         #[tokio::test]
         async fn a_live_socket_is_refused_and_left_reachable() {
-            let path = format!("/tmp/gpty-ipc-live-{}.sock", std::process::id());
-            let _ = std::fs::remove_file(&path);
+            let (_tmp, path) = temp_socket("live");
 
             let mut first = IpcServer::new(&path);
             first.register(
@@ -1076,16 +1082,13 @@ mod tests {
                 .await
                 .expect("the live server must still answer after a refused bind");
             assert_eq!(resp.result.unwrap(), serde_json::json!({"still": "here"}));
-
-            let _ = std::fs::remove_file(&path);
         }
 
         /// A leftover from a crash must still be replaced, or a restart after
         /// `SIGKILL` could never bind.
         #[tokio::test]
         async fn a_stale_socket_is_replaced() {
-            let path = format!("/tmp/gpty-ipc-stale-{}.sock", std::process::id());
-            let _ = std::fs::remove_file(&path);
+            let (_tmp, path) = temp_socket("stale");
             drop(tokio::net::UnixListener::bind(&path).expect("bind"));
             assert!(std::fs::symlink_metadata(&path).is_ok(), "leftover file");
 
@@ -1111,14 +1114,11 @@ mod tests {
                 .await
                 .expect("a stale socket must be replaced by a working server");
             assert_eq!(resp.result.unwrap(), serde_json::json!({"fresh": true}));
-
-            let _ = std::fs::remove_file(&path);
         }
 
         #[tokio::test]
         async fn round_trip() {
-            let socket_path = format!("/tmp/gpty-ipc-test-{}.sock", std::process::id());
-            let _ = std::fs::remove_file(&socket_path);
+            let (_tmp, socket_path) = temp_socket("round-trip");
 
             let mut server = IpcServer::new(&socket_path);
             server.register(
@@ -1188,8 +1188,7 @@ mod tests {
         /// the audit reproduced with.
         #[tokio::test]
         async fn non_object_params_are_refused_and_the_server_keeps_serving() {
-            let socket_path = format!("/tmp/gpty-ipc-params-{}.sock", std::process::id());
-            let _ = std::fs::remove_file(&socket_path);
+            let (_tmp, socket_path) = temp_socket("params");
 
             let mut server = IpcServer::new(&socket_path);
             server.register(
@@ -1254,8 +1253,6 @@ mod tests {
                     "the handler must be called with null params"
                 );
             }
-
-            let _ = std::fs::remove_file(&socket_path);
         }
 
         /// The socket is public API, so a pipelined client is a valid one:
@@ -1267,8 +1264,7 @@ mod tests {
         async fn a_pipelined_batch_is_answered_frame_by_frame() {
             use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-            let socket_path = format!("/tmp/gpty-ipc-pipeline-{}.sock", std::process::id());
-            let _ = std::fs::remove_file(&socket_path);
+            let (_tmp, socket_path) = temp_socket("pipeline");
 
             let mut server = IpcServer::new(&socket_path);
             server.register(
@@ -1335,8 +1331,6 @@ mod tests {
                 responses[3].result.as_ref().unwrap(),
                 &serde_json::json!({"b": 2})
             );
-
-            let _ = std::fs::remove_file(&socket_path);
         }
 
         /// A handler that outlives its budget is answered with a JSON-RPC
@@ -1345,8 +1339,7 @@ mod tests {
         /// a connection-wide deadline cannot express.
         #[tokio::test]
         async fn a_wedged_handler_answers_a_timeout_instead_of_dropping_the_connection() {
-            let socket_path = format!("/tmp/gpty-ipc-budget-{}.sock", std::process::id());
-            let _ = std::fs::remove_file(&socket_path);
+            let (_tmp, socket_path) = temp_socket("budget");
 
             let mut server = IpcServer::new(&socket_path);
             server.register_with_timeout(
@@ -1406,14 +1399,11 @@ mod tests {
                 .expect("a handler inside its budget must answer");
             assert_eq!(held.id, 2);
             assert_eq!(held.result.unwrap(), serde_json::json!({"held": true}));
-
-            let _ = std::fs::remove_file(&socket_path);
         }
 
         #[tokio::test]
         async fn oversized_request_is_rejected() {
-            let socket_path = format!("/tmp/gpty-ipc-oversize-{}.sock", std::process::id());
-            let _ = std::fs::remove_file(&socket_path);
+            let (_tmp, socket_path) = temp_socket("oversize");
 
             let mut server = IpcServer::new(&socket_path);
             server.register(
@@ -1444,8 +1434,7 @@ mod tests {
 
         #[tokio::test]
         async fn secret_enforced_when_configured() {
-            let socket_path = format!("/tmp/gpty-ipc-auth-{}.sock", std::process::id());
-            let _ = std::fs::remove_file(&socket_path);
+            let (_tmp, socket_path) = temp_socket("auth");
 
             let mut server = IpcServer::new(&socket_path);
             server.set_secret("s3cret".into());
@@ -1503,8 +1492,7 @@ mod tests {
 
         #[tokio::test]
         async fn connection_limit_drops_excess_connections() {
-            let socket_path = format!("/tmp/gpty-ipc-cap-{}.sock", std::process::id());
-            let _ = std::fs::remove_file(&socket_path);
+            let (_tmp, socket_path) = temp_socket("cap");
 
             let mut server = IpcServer::new(&socket_path);
             server.register(

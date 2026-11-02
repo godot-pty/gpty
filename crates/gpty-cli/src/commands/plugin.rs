@@ -1354,9 +1354,8 @@ tiles = [
 
     #[test]
     fn read_manifest_caps_size() {
-        let dir =
-            std::env::temp_dir().join(format!("gpty-plugin-manifest-cap-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let dir = tmp.path().join("plugin");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join(plugin_manifest::MANIFEST_FILENAME),
@@ -1369,6 +1368,5 @@ tiles = [
                 .to_string()
                 .contains("at most")
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

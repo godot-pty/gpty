@@ -585,15 +585,20 @@ mod integration_tests {
         PENDING_RESPONSES.lock().unwrap().clear();
     }
 
-    fn start_test_server(name: &str) -> String {
-        let socket_path = format!("/tmp/gpty-ipc-test-{}-{name}.sock", std::process::id());
-        let _ = std::fs::remove_file(&socket_path);
+    fn start_test_server(name: &str) -> (tempfile::TempDir, String) {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let socket_path = tmp
+            .path()
+            .join(format!("ipc-{name}.sock"))
+            .to_str()
+            .expect("UTF-8")
+            .to_string();
         let sp = socket_path.clone();
         crate::RUNTIME.spawn(async move {
             start_ipc_server_inner(&sp).await;
         });
         std::thread::sleep(Duration::from_millis(100));
-        socket_path
+        (tmp, socket_path)
     }
 
     fn make_client(socket_path: &str) -> IpcClient {
@@ -604,7 +609,7 @@ mod integration_tests {
     #[serial]
     async fn version_handler_responds_locally() {
         clear_state();
-        let socket_path = start_test_server("b1_version");
+        let (_tmp, socket_path) = start_test_server("b1_version");
         let client = make_client(&socket_path);
         let resp = client
             .call("version", None)
@@ -617,7 +622,6 @@ mod integration_tests {
             gpty_ipc::protocol::PROTOCOL_VERSION,
             "the wire value comes from the one definition"
         );
-        let _ = std::fs::remove_file(&socket_path);
     }
     // B4: a bind refused because another instance holds the socket must leave
     // this process asking to quit, with a reason the GUI can show — the
@@ -626,8 +630,13 @@ mod integration_tests {
     #[tokio::test]
     #[serial]
     async fn a_refused_bind_records_the_failure_and_asks_to_quit() {
-        let socket_path = format!("/tmp/gpty-ipc-test-{}-refused.sock", std::process::id());
-        let _ = std::fs::remove_file(&socket_path);
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let socket_path = tmp
+            .path()
+            .join("refused.sock")
+            .to_str()
+            .expect("UTF-8")
+            .to_string();
         // A live listener stands in for the other instance.
         let live = tokio::net::UnixListener::bind(&socket_path).expect("bind");
 
@@ -658,7 +667,6 @@ mod integration_tests {
         );
 
         drop(live);
-        let _ = std::fs::remove_file(&socket_path);
     }
 
     // B2: GDScript-routed method times out without polling
@@ -666,7 +674,7 @@ mod integration_tests {
     #[serial]
     async fn gdscript_method_times_out() {
         clear_state();
-        let socket_path = start_test_server("b2_timeout");
+        let (_tmp, socket_path) = start_test_server("b2_timeout");
         let client = make_client(&socket_path);
         let resp = client
             .call("listPanes", None)
@@ -676,7 +684,6 @@ mod integration_tests {
         let err = resp.error.expect("should have error");
         assert_eq!(err.code, -32000);
         assert!(err.message.contains("timeout"));
-        let _ = std::fs::remove_file(&socket_path);
     }
 
     // B3: GDScript roundtrip via pending queue
@@ -684,7 +691,7 @@ mod integration_tests {
     #[serial]
     async fn gdscript_roundtrip_via_queue() {
         clear_state();
-        let socket_path = start_test_server("b3_roundtrip");
+        let (_tmp, socket_path) = start_test_server("b3_roundtrip");
         let client_path = socket_path.clone();
 
         // Spawn client call in background
@@ -717,7 +724,5 @@ mod integration_tests {
         let result = resp.result.expect("should have result");
         assert_eq!(result["pane_id"], "T1");
         assert_eq!(result["type"], "terminal");
-
-        let _ = std::fs::remove_file(&socket_path);
     }
 }

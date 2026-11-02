@@ -27,3 +27,6 @@ libc = "0.2"
 
 [dev-dependencies]
 serial_test = "4"
+# Test-only: `TempDir` removes each test's socket and vault when its guard
+# drops, so a gate run leaves the shared temp directory as it found it.
+tempfile = "3"

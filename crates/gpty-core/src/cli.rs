@@ -676,17 +676,12 @@ mod process_tests {
         use std::os::unix::fs::PermissionsExt;
         // A real, runnable script — so the only thing that can stop it is the
         // rule under test, not a missing file or a bad interpreter.
-        // A name no other test process can be using: the parallel run has
-        // several test binaries in flight, and a collision would let another
-        // test's swap of the same path decide this one.
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let path = std::env::temp_dir().join(format!(
-            "gpty_cli_view_writable_{}_{unique}",
-            std::process::id()
-        ));
+        // A directory of this test's own: the parallel run has several test
+        // binaries in flight, and a collision would let another test's swap
+        // of the same path decide this one. The guard removes the script even
+        // when an assert panics.
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let path = tmp.path().join("gpty-cli-view-writable");
         std::fs::write(&path, b"#!/bin/sh\nexit 0\n").unwrap();
         let program = path.to_string_lossy().to_string();
 
@@ -715,10 +710,6 @@ mod process_tests {
                 _ => break,
             }
         }
-
-        // Remove the file before asserting, so a failing run cannot leave a
-        // world-writable executable behind.
-        let _ = std::fs::remove_file(&path);
 
         let error = match refused {
             Ok(_) => panic!("a group/other-writable program must be refused"),

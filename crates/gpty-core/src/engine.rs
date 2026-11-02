@@ -1165,8 +1165,8 @@ mod tests {
             "a poisoned grid must report the refusal to the caller"
         );
 
-        let report = std::env::temp_dir().join(format!("gpty_resize_{}", std::process::id()));
-        let _ = std::fs::remove_file(&report);
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let report = tmp.path().join("resize-report");
         spawned
             .handle
             .send_line(&format!("stty size > '{}'", report.display()));
@@ -1176,7 +1176,6 @@ mod tests {
                 .unwrap_or(false)
         })
         .await;
-        let _ = std::fs::remove_file(&report);
         assert!(
             observed,
             "the child must still report the size it was spawned at"

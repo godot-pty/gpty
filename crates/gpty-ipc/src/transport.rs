@@ -390,14 +390,13 @@ mod tests {
     /// else had made it.
     #[test]
     fn local_app_dir_is_created_on_first_use() {
-        let base = std::env::temp_dir().join(format!("gpty-localappdata-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let base = tmp.path().join("localappdata");
         let dir = local_app_dir(base.to_str().expect("temp dir is UTF-8"))
             .expect("a writable temp base must be usable");
         assert!(dir.is_dir(), "the gpty state directory must be created");
         assert_eq!(dir, base.join("gpty"));
         assert_eq!(local_app_dir(""), None, "an empty LOCALAPPDATA is unusable");
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -425,43 +424,40 @@ mod tests {
         use super::*;
         use std::os::unix::fs::PermissionsExt;
 
-        fn tmp_socket(mode: u32) -> std::path::PathBuf {
-            let path =
-                std::env::temp_dir().join(format!("gpty-val-test-{}-{}", std::process::id(), mode));
-            let _ = std::fs::remove_file(&path);
+        fn tmp_socket(mode: u32) -> (tempfile::TempDir, std::path::PathBuf) {
+            let tmp = tempfile::TempDir::new().expect("temp dir");
+            let path = tmp.path().join(format!("val-test-{mode}"));
             let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
             drop(listener);
-            path
+            (tmp, path)
         }
 
         #[test]
         fn insecure_mode_socket_rejected() {
-            let path = tmp_socket(0o666);
+            let (_tmp, path) = tmp_socket(0o666);
             assert!(validate_socket_path(path.to_str().unwrap()).is_err());
-            std::fs::remove_file(&path).unwrap();
         }
 
         #[test]
         fn secure_mode_socket_accepted() {
-            let path = tmp_socket(0o600);
+            let (_tmp, path) = tmp_socket(0o600);
             assert!(validate_socket_path(path.to_str().unwrap()).is_ok());
-            std::fs::remove_file(&path).unwrap();
         }
 
         #[test]
         fn missing_file_is_ok() {
-            let path = std::env::temp_dir().join("gpty-val-missing-99999.sock");
-            let _ = std::fs::remove_file(&path);
+            let tmp = tempfile::TempDir::new().expect("temp dir");
+            let path = tmp.path().join("val-missing.sock");
             assert!(validate_socket_path(path.to_str().unwrap()).is_ok());
         }
 
         #[test]
         fn regular_file_rejected() {
-            let path = std::env::temp_dir().join(format!("gpty-val-reg-{}", std::process::id()));
+            let tmp = tempfile::TempDir::new().expect("temp dir");
+            let path = tmp.path().join("val-reg");
             std::fs::write(&path, b"x").unwrap();
             assert!(validate_socket_path(path.to_str().unwrap()).is_err());
-            std::fs::remove_file(&path).unwrap();
         }
 
         #[test]
@@ -471,20 +467,20 @@ mod tests {
 
         #[test]
         fn gui_binary_world_writable_rejected() {
-            let path = std::env::temp_dir().join(format!("gpty-val-bin-{}", std::process::id()));
+            let tmp = tempfile::TempDir::new().expect("temp dir");
+            let path = tmp.path().join("val-bin");
             std::fs::write(&path, b"#!/bin/sh\n").unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o777)).unwrap();
             assert!(!validate_gui_binary(&path));
-            std::fs::remove_file(&path).unwrap();
         }
 
         #[test]
         fn gui_binary_private_owned_accepted() {
-            let path = std::env::temp_dir().join(format!("gpty-val-bin-ok-{}", std::process::id()));
+            let tmp = tempfile::TempDir::new().expect("temp dir");
+            let path = tmp.path().join("val-bin-ok");
             std::fs::write(&path, b"#!/bin/sh\n").unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
             assert!(validate_gui_binary(&path));
-            std::fs::remove_file(&path).unwrap();
         }
     }
 
@@ -497,41 +493,39 @@ mod tests {
         // here guards it through the shared `EnvVar` above (the previous value
         // is restored on drop, including on panic).
 
-        fn make_dir(name: &str, mode: u32) -> std::path::PathBuf {
-            let dir = std::env::temp_dir().join(format!("{name}-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap();
+        fn make_dir(mode: u32) -> tempfile::TempDir {
+            let dir = tempfile::TempDir::new().expect("temp dir");
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(mode)).unwrap();
             dir
         }
 
         #[test]
         fn default_socket_path_follows_a_secure_xdg_runtime_dir() {
-            let secure = make_dir("gpty-xdg-test", 0o700);
+            let secure = make_dir(0o700);
             {
                 // `GPTY_SOCKET` outranks the runtime dir, and a gpty pane
                 // exports it to its children — so a developer running the
                 // tests from inside gpty would otherwise see its value here.
                 let _env = EnvVars::apply(&[
                     ("GPTY_SOCKET", None),
-                    ("XDG_RUNTIME_DIR", Some(secure.to_str().unwrap())),
+                    ("XDG_RUNTIME_DIR", Some(secure.path().to_str().unwrap())),
                 ]);
                 assert_eq!(
                     default_socket_path(),
-                    format!("{}/gpty.sock", secure.display())
+                    format!("{}/gpty.sock", secure.path().display())
                 );
             }
-            std::fs::remove_dir_all(&secure).unwrap();
         }
 
         #[test]
         fn insecure_xdg_runtime_dir_is_rejected() {
-            let insecure = make_dir("gpty-xdg-insecure", 0o777);
+            let insecure = make_dir(0o777);
             {
                 // With `GPTY_SOCKET` set the runtime dir is never consulted and
                 // this assertion would hold whatever the check did.
                 let _env = EnvVars::apply(&[
                     ("GPTY_SOCKET", None),
-                    ("XDG_RUNTIME_DIR", Some(insecure.to_str().unwrap())),
+                    ("XDG_RUNTIME_DIR", Some(insecure.path().to_str().unwrap())),
                 ]);
                 // The directory and the returned path are deliberately not
                 // echoed: a panic message is a log sink and would carry
@@ -539,20 +533,19 @@ mod tests {
                 // which directory was consulted.
                 let path = default_socket_path();
                 assert!(
-                    !path.starts_with(&format!("{}/", insecure.display())),
+                    !path.starts_with(&format!("{}/", insecure.path().display())),
                     "insecure XDG_RUNTIME_DIR must not be used"
                 );
             }
-            std::fs::remove_dir_all(&insecure).unwrap();
         }
 
         #[test]
         fn unset_xdg_runtime_dir_still_names_the_socket() {
-            let state = std::env::temp_dir().join(format!("gpty-state-{}", std::process::id()));
+            let state = make_dir(0o700);
             let _env = EnvVars::apply(&[
                 ("GPTY_SOCKET", None),
                 ("XDG_RUNTIME_DIR", None),
-                ("XDG_STATE_HOME", Some(state.to_str().unwrap())),
+                ("XDG_STATE_HOME", Some(state.path().to_str().unwrap())),
             ]);
             // Not echoed for the same reason: a panic message is a log sink.
             let path = default_socket_path();
@@ -572,22 +565,21 @@ mod tests {
         /// before reaching here.
         #[test]
         fn the_fallback_prefers_a_private_state_dir_over_the_shared_tmp_path() {
-            let state_root = make_dir("gpty-state-home", 0o700);
+            let state_root = make_dir(0o700);
             let path;
             {
                 let _env = EnvVars::apply(&[
-                    ("XDG_STATE_HOME", Some(state_root.to_str().unwrap())),
+                    ("XDG_STATE_HOME", Some(state_root.path().to_str().unwrap())),
                     ("HOME", None),
                 ]);
                 // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
                 path = fallback_socket_path(unsafe { libc::geteuid() });
             }
-            let expected = state_root.join("gpty/gpty.sock");
+            let expected = state_root.path().join("gpty/gpty.sock");
             assert_eq!(path, expected.to_string_lossy());
             // Created and private: that is what makes the path un-squattable.
-            let meta = std::fs::metadata(state_root.join("gpty")).unwrap();
+            let meta = std::fs::metadata(state_root.path().join("gpty")).unwrap();
             assert_eq!(meta.permissions().mode() & 0o777, 0o700);
-            std::fs::remove_dir_all(&state_root).unwrap();
         }
 
         /// A state directory that exists but is lax is tightened, not rejected
@@ -595,15 +587,15 @@ mod tests {
         /// must not leave the socket's directory open to others.
         #[test]
         fn the_fallback_tightens_a_lax_state_dir() {
-            let state_root = make_dir("gpty-state-lax", 0o700);
-            let lax = state_root.join("gpty");
+            let state_root = make_dir(0o700);
+            let lax = state_root.path().join("gpty");
             std::fs::create_dir_all(&lax).unwrap();
             std::fs::set_permissions(&lax, std::fs::Permissions::from_mode(0o755)).unwrap();
 
             let path;
             {
                 let _env = EnvVars::apply(&[
-                    ("XDG_STATE_HOME", Some(state_root.to_str().unwrap())),
+                    ("XDG_STATE_HOME", Some(state_root.path().to_str().unwrap())),
                     ("HOME", None),
                 ]);
                 // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
@@ -616,7 +608,6 @@ mod tests {
                 0o700,
                 "an existing state dir this user owns must be tightened to 0700"
             );
-            std::fs::remove_dir_all(&state_root).unwrap();
         }
 
         /// With nowhere private to go, the documented last resort is the
