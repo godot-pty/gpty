@@ -1040,7 +1040,9 @@ async fn run_terminal_task(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Action, CaptureMode, Concept, TerminalConfig};
+    #[cfg(unix)]
+    use crate::types::Action;
+    use crate::types::{CaptureMode, Concept, TerminalConfig};
     use regex::Regex;
     #[tokio::test]
     async fn test_spawn_terminal_and_resize() {
@@ -1476,6 +1478,7 @@ mod tests {
     }
 
     /// Poll the spawned terminal's agent state until it leaves Idle.
+    #[cfg(unix)]
     async fn wait_for_state(spawned: &SpawnedTerminal) -> crate::agent_state::AgentState {
         let observed = wait_until(Duration::from_secs(20), || match spawned.grid.lock() {
             Ok(grid) => {
