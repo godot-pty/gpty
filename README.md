@@ -1,4 +1,4 @@
-[gPTY](https://gpty.dev/) - a desktop workspace built on Rust and Godot. It provides a tiling grid for panes (terminals, code viewers, file trees, wikis, media, and more), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI. Every pane can be driven from a shell, a script, or an agent over one public API.
+[gPTY](https://gpty.dev/) - a desktop workspace built on Rust and Godot. It provides a tiling grid for panes (terminals, code viewers, file trees, wikis, media, and more), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI. Every pane can be driven from a shell, a script, or an agent over one public API. It is a side project in active development and a vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using various LLMs under human review; and as such, the underlying code may contain unidiomatic patterns and/or bugs. It *does not* follow the core UNIX philosophy very well, as in, it does aim to do several things; though it does also intend to do them all well.
 
 ## Overview
 
@@ -32,18 +32,16 @@
 - **Observability panes** - Reasoning passively shows documented agent lifecycle events (OMP today, adapter-neutral vocabulary); Inspector is a private, tool-free Q&A session. gPTY never orchestrates agent state.
 - **Concepts** - regex triggers on terminal output capture the reply and route it into an adjacent pane. Write your own in Settings, by hand or in the visual graph editor. Concepts display only; they never type into a shell.
 
-**Extensible, with limits**
+**Limited Extensibility**
 
 - **Plugins** - manifest-based, reviewed in the GUI before install, with a public [registry](https://gpty.dev/plugins/).
-- **A written threat model** - see [SECURITY.md](SECURITY.md). Releases ship `SHA256SUMS` and build-provenance attestations; the control socket is owner-only.
 
 ### Status
 
-gPTY is a side project in active development. A vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using LLMs under human review; and as such, the underlying code may contain unidiomatic patterns and/or bugs. Roadmap & documentation: https://gpty.dev/
-
-#### Project Health
-
+- Roadmap & documentation: https://gpty.dev/
+- See [SECURITY.md](SECURITY.md) for the threat model.
 - The repository tracks OpenSSF recommendations (registered as [OpenSSF Project 16201](https://www.bestpractices.dev/projects/16201)).
+- Releases ship `SHA256SUMS` and build-provenance attestations; the control socket is owner-only.
 - Release assets carry [SLSA Build Level 2](https://slsa.dev/spec/v1.0/levels) provenance.
 - [Linux Foundation's LFX Health Insights](https://insights.linuxfoundation.org/) program application is in progress/under evaluation ([discussion 2476](https://github.com/linuxfoundation/insights/discussions/2476)).
 
