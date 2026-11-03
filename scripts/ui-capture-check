@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# Prove the UI capture harness is deterministic and its diffs are local.
+#
+# Usage: scripts/ui-capture-check [--keep <dir>] [state...]
+#
+# For every state: capture it twice in separate sandboxes and require the two
+# PNGs to be pixel-identical. Then capture every state once more with one
+# control shifted in a single state (`--perturb`) and require exactly that
+# state's image to differ. The second half is what makes the first half
+# useful: a diff local to one state means captures do not leak state into one
+# another, so an audit diff can be attributed to a real UI change.
+#
+# The state list comes from the harness (`scripts/ui-capture --list`), so a
+# new state is covered without a second list.
+#
+# Needs a display (see scripts/ui-capture). Not part of ci-check: CI has no
+# display, and a capture is not a unit test — this is the audit gate in
+# docs/content/docs/agents/testing.md.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CAPTURE="$ROOT/scripts/ui-capture"
+PERTURB=settings
+KEEP=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --keep)
+            [[ $# -ge 2 ]] || { echo "ui-capture-check: --keep needs a directory" >&2; exit 2; }
+            KEEP="$(realpath -m "$2")"
+            shift 2
+            ;;
+        --perturb)
+            [[ $# -ge 2 ]] || { echo "ui-capture-check: --perturb needs a state" >&2; exit 2; }
+            PERTURB="$2"
+            shift 2
+            ;;
+        -*)
+            echo "ui-capture-check: unknown option $1" >&2
+            exit 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if [[ $# -gt 0 ]]; then
+    STATES=("$@")
+else
+    mapfile -t STATES < <("$CAPTURE" --list)
+fi
+[[ ${#STATES[@]} -gt 0 ]] || { echo "ui-capture-check: no states" >&2; exit 2; }
+
+found=false
+for state in "${STATES[@]}"; do
+    [[ "$state" == "$PERTURB" ]] && found=true
+done
+$found || { echo "ui-capture-check: perturb state '$PERTURB' is not in the state list" >&2; exit 2; }
+
+case "$(uname -s)" in
+    Linux)
+        [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] || {
+            echo "ui-capture-check: needs a display (DISPLAY/WAYLAND_DISPLAY) — it captures the app viewport" >&2
+            exit 3
+        }
+        ;;
+esac
+
+WORK=""
+if [[ -n "$KEEP" ]]; then
+    WORK="$KEEP"
+    mkdir -p "$WORK"
+else
+    WORK="$(mktemp -d)"
+    trap 'rm -rf "$WORK"' EXIT
+fi
+
+FAILED=0
+fail() {
+    echo "  FAIL $1"
+    FAILED=1
+}
+
+# capture <state> <out-dir> [--perturb <state>]
+capture() {
+    local state="$1" out="$2"
+    shift 2
+    if ! "$CAPTURE" "$state" "$out" "$@" >"$WORK/$state-$(basename "$out").log" 2>&1; then
+        echo "  log: $WORK/$state-$(basename "$out").log"
+        tail -20 "$WORK/$state-$(basename "$out").log" | sed 's/^/    /'
+        return 1
+    fi
+}
+
+echo "== two runs of every state must be pixel-identical"
+for state in "${STATES[@]}"; do
+    if ! capture "$state" "$WORK/first" || ! capture "$state" "$WORK/second"; then
+        fail "$state did not capture"
+        continue
+    fi
+    if output="$("$CAPTURE" --compare "$WORK/first/$state.png" "$WORK/second/$state.png" 2>&1)"; then
+        echo "  PASS $state"
+    else
+        fail "$state differs between two runs"
+        echo "$output" | sed 's/^/    /'
+    fi
+done
+
+echo "== perturbing '$PERTURB' must change exactly that state's image"
+for state in "${STATES[@]}"; do
+    if ! capture "$state" "$WORK/perturbed" --perturb "$PERTURB"; then
+        fail "$state did not capture (perturbed)"
+    fi
+done
+differing=()
+for state in "${STATES[@]}"; do
+    [[ -f "$WORK/perturbed/$state.png" ]] || continue
+    if ! "$CAPTURE" --compare "$WORK/first/$state.png" "$WORK/perturbed/$state.png" >/dev/null 2>&1; then
+        differing+=("$state")
+    fi
+done
+if [[ "${differing[*]:-}" == "$PERTURB" ]]; then
+    echo "  PASS only '$PERTURB' changed"
+elif [[ ${#differing[@]} -eq 0 ]]; then
+    fail "the perturbed control changed no image — the harness is not capturing it"
+else
+    fail "expected only '$PERTURB' to change, but [${differing[*]}] did"
+fi
+
+echo
+if [[ $FAILED -ne 0 ]]; then
+    trap - EXIT
+    echo "ui-capture-check: FAILED (artifacts kept: $WORK)"
+    exit 1
+fi
+echo "ui-capture-check: PASS (${#STATES[@]} states)"

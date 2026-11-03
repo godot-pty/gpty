@@ -169,6 +169,12 @@ omp plugin link "$(pwd)/extensions/gpty-omp-events"
 # Terminal renderer cost (needs a display; see the script header)
 godot --path godot --disable-vsync -s res://tests/bench/draw_bench.gd
 
+# UI captures (need a display): list the committed states, save one, or prove
+# two runs are pixel-identical and a perturbation is local
+./scripts/ui-capture --list
+./scripts/ui-capture palette /tmp/ui-captures
+./scripts/ui-capture-check
+
 # Markdown preview cost: Rust render + parse + the label's shape pass
 godot --headless --path godot -s res://tests/bench/markdown_bench.gd
 ```

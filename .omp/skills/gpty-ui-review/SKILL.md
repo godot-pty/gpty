@@ -11,28 +11,20 @@ A router plus the operational recipe. The method is normative in `docs/content/d
 
 - **Do not write a UI inventory** ("the sidebar lists X, the palette offers Y", every control and its behaviour). Every v0.8.0 GUI row changes the UI, so a written inventory is stale the moment it is committed and an agent trusting it is worse off than one that looks. Enumerate the surface by running the app and reading `godot/scenes/`: `ui/sidebar.gd`, `ui/status_bar.gd`, `ui/settings_panel.gd`, `ui/window_chrome.gd`, `ui/palette.gd` (colours), `panes/pane_types.gd` (pane types and palette commands).
 - Do not commit an audit report or a design review. Findings and outcomes become roadmap rows (repo rule); only the captures a row points at are kept.
-- Do not modify project files while assessing. The one exception is the staging scene below, deleted after the capture.
+- Do not modify project files while assessing. A surface that needs a capture becomes a `STATES` entry in the committed driver; nothing is staged in a temporary scene any more.
 
 ## Launch a deterministic instance
 
-Fresh first-run state, private everything — a live GUI on the desktop owns the control socket and the sandboxed app renders "Another gPTY window is already running — this one will close." instead of the app:
-
-```bash
-RT=$(mktemp -d); ST=$(mktemp -d); chmod 700 "$RT" "$ST"
-XDG_DATA_HOME="$RT/data" XDG_CONFIG_HOME="$RT/config" XDG_RUNTIME_DIR="$RT" \
-XDG_STATE_HOME="$ST" GPTY_SOCKET="$RT/gpty.sock" env -u GPTY_SECRET <app-command>
-```
-
-`scripts/screenshot-gpty` sandboxes only data/config, so this outer wrapper is still required (queued fix: v0.8.0 BUILD row). Build first (`cargo build --workspace`): panes spawn `target/debug/gpty`.
+`scripts/ui-capture <state> <out-dir>` stages a committed state in a private sandbox and writes the app's own viewport (`scripts/ui-capture --list` prints the states). `scripts/screenshot-gpty --state <name>` stages the same state behind a desktop grab. Both source `scripts/ui-sandbox`, which creates a 0700 temp root and exports `HOME`, the `XDG_*` directories, `GPTY_TEST_USER_DIR` and `GPTY_SOCKET`, and clears `GPTY_SECRET` plus login/prompt variables — without the runtime/socket parts, a live GUI on the desktop owns the control socket and the sandboxed app renders "Another gPTY window is already running — this one will close." instead of the app. Build first (`cargo build --workspace`): panes spawn `target/debug/gpty`.
 
 ## Capture
 
-- **Evidence is the app's own viewport**, never a desktop grab: `root.get_texture().get_image().save_png(path)` after `await RenderingServer.frame_post_draw`. Working precedent: `godot/tests/bench/draw_bench.gd:112`.
-- Needs a real display driver (`DisplayServer.get_name() != "headless"`). Under `--headless` there is no redraw pass: `frame_post_draw` never fires and a script awaiting it hangs. Pass `--disable-vsync` so a vsync-locked present cannot block on a window the compositor never shows.
+- **Evidence is the app's own viewport**, never a desktop grab: the driver (`godot/tests/bench/ui_capture.gd`) saves `root.get_texture()` after `await RenderingServer.frame_post_draw`. A real display driver is required (`--headless` has no redraw pass: `frame_post_draw` never fires and a script awaiting it hangs); `--disable-vsync` keeps a vsync-locked present from blocking on a window the compositor never shows.
 - This path is the portable one — it does not need XWayland. `scripts/screenshot-gpty` (x11grab) and `scripts/record-demo` are X11/XWayland-only and fail on a pure Wayland session.
 - Desktop grabs are only for release/blog images, where the OS window itself is the point.
-- Small windows (800×500, 560×340) go in an embedded viewport: accurate for layout, **not** for OS window behaviour. Say so when the finding is about window managers.
-- Stage a state that needs clicks with a temporary scene inside the project (`godot/tmp_capture.tscn` + `.gd`: a `Control` whose `_ready` seeds state through the real autoloads, opens the overlay, idles). Never stage through GUT — a non-headless GUT run captures GUT's runner panel instead of the app. Delete both files afterwards.
+- Small windows (800×500, 560×340) resize the root viewport, so the image is the layout at that size, **not** OS window behaviour. Say so when the finding is about window managers.
+- **A state that needs clicks or keys is a `STATES` entry, not a temporary scene.** The table seeds through `WorkspaceStore` (real restore path), drives the visible controls with synthetic input, and waits for grid generations, pane titles and the toast queue to settle; overlays are opened through their real controls (the sidebar Settings button, the pane title bar's settings button, Ctrl+Shift+P). Never stage through GUT — a non-headless GUT run captures GUT's runner panel instead of the app.
+- Two runs of one state are pixel-identical: the status bar's clock and FPS are pinned, cursor blink is off, and the pointer is parked. `scripts/ui-capture-check` proves that and that a perturbed control changes exactly one image; run it after touching the driver, the state table or a widget the states show.
 - Size the window to something that fits a *physical* screen (`DisplayServer.screen_get_size()` can report a multi-monitor desktop much larger than any single screen; an off-screen window captures clipped).
 
 ## Judge
@@ -74,6 +66,5 @@ Check all ten on every pass; each maps to at least one v0.8.0 row:
 
 ## Maintenance
 
-- **The scratch-driver step is temporary.** When v0.8.0's *The UI audit has a committed capture harness* row lands, replace the staging-scene and viewport-capture bullets with the committed driver (`godot/tests/bench/ui_capture.gd`, `scripts/screenshot-gpty --state`). The defect classes, the severity vocabulary and the vision-pass limits stay as written.
-- **The sandbox wrapper is temporary too.** *The release screenshot script captures a doomed second instance* moves the runtime/socket sandbox into `scripts/screenshot-gpty`; when it lands, the wrapper above shrinks to "the script sandboxes itself".
+- **A new audited surface is a new state.** Add it to `STATES` in `godot/tests/bench/ui_capture.gd` (a window size, a pane count, the interaction its `open`/`close_all` keys name) and run `scripts/ui-capture-check`: two runs must be pixel-identical, and perturbing one state must change that state's image only. A state that needs a control no other state shows can use the same `_perturb` branch.
 - **The defect classes are dated October 2026.** Re-derive them from the current audit once the v0.8.0 rows close, instead of trusting this list as a description of the current UI.

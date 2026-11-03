@@ -29,7 +29,7 @@ godot/
     │   ├── DejaVuSansMono-Bold.ttf
     │   ├── DejaVuSansMono-Oblique.ttf
     │   └── Phosphor-Regular.ttf
-    └── scenes/
+    ├── scenes/
         ├── main.tscn            # Root scene (Workspace)
         ├── autoloads/           # 14 singleton managers
         │   ├── base_persistence_manager.gd  # Shared JSON I/O base
@@ -81,6 +81,16 @@ godot/
             ├── reasoning_pane.gd
             ├── media_pane.gd    # Local audio/video playback
             └── wiki_pane.gd     # Vault browser, Markdown note editor, link graph
+
+    └── tests/                   # GUT suite and display drivers
+        ├── unit/                # Pure-logic tests
+        ├── integration/         # Scene-tree tests
+        ├── helpers/             # Shared fixtures (ShellFixtures, MockAutoloads)
+        └── bench/               # Cost and capture drivers (need a real display)
+            ├── draw_bench.gd    # Terminal renderer cost
+            ├── markdown_bench.gd
+            ├── reasoning_bench.gd
+            └── ui_capture.gd    # Committed UI state staging -> viewport PNGs
 ```
 
 ## Key Bindings

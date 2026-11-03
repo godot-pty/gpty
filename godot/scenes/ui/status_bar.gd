@@ -7,6 +7,11 @@ const BG_COLOR = Color(0.12, 0.12, 0.14, 1.0)
 
 var _pane_label: Label
 var _right_label: Label
+## Capture mode (see `tests/bench/ui_capture.gd`): a wall clock and a measured
+## FPS are the only parts of this bar that change while nothing does, so two
+## captures of one state would differ. Frozen readouts are display values
+## only — nothing reads them back.
+var _readouts_frozen := false
 
 func _ready():
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -52,8 +57,9 @@ func _ready():
 	_right_update()
 
 func _right_update():
-	var t = Time.get_time_dict_from_system()
-	_clock_text = "%02d:%02d:%02d" % [t.hour, t.minute, t.second]
+	if not _readouts_frozen:
+		var t = Time.get_time_dict_from_system()
+		_clock_text = "%02d:%02d:%02d" % [t.hour, t.minute, t.second]
 	# Clock sits immediately left of the version; the FPS segment is the only
 	# one that can still be empty (first frame, before the first sample).
 	var parts := PackedStringArray()
@@ -72,7 +78,24 @@ func set_pane_info(label: String, type_name: String):
 	_pane_label.text = "%s %s  %s" % [icon, label, type_name] if label != "" else ""
 
 func set_fps(fps: int, fetch_ms: int, draw_ms: int):
+	if _readouts_frozen:
+		return
 	_fps_text = "%d FPS" % fps
 	if fetch_ms >= 0:
 		_fps_text += "  %d/%dms" % [fetch_ms, draw_ms]
+	_right_update()
+
+## Pin the two live readouts so a viewport capture is repeatable.
+##
+## The clock ticks once a second and the FPS is whatever the frame produced,
+## so the same state captured twice would otherwise never be pixel-identical.
+## `tests/bench/ui_capture.gd` calls this before it saves the PNG; the values
+## are placeholders, not measurements.
+func freeze_readouts(clock_text := "00:00:00", fps_text := "60 FPS") -> void:
+	_readouts_frozen = true
+	_clock_text = clock_text
+	_fps_text = fps_text
+	var timer := get_node_or_null("ClockTimer")
+	if timer:
+		timer.stop()
 	_right_update()

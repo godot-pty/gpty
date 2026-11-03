@@ -1,16 +1,28 @@
 #!/usr/bin/env bash
 # Capture a screenshot of a running gpty app window.
 #
-# Launches the app in a sandboxed user-data dir (fresh home screen),
-# finds its window on the X server (XWayland), waits for first frames,
-# captures it with ImageMagick, and tears everything down.
+# Launches the app in a private sandbox (fresh user data, HOME, runtime dir and
+# control socket — see scripts/ui-sandbox), finds its window on the X server
+# (XWayland), waits for first frames, captures it with ImageMagick, and tears
+# everything down.
 #
 # Usage: scripts/screenshot-gpty <output.png> <app-command...>
+#        scripts/screenshot-gpty <output.png> --state <name> <app-command...>
 #   e.g. scripts/screenshot-gpty docs/static/images/v0.5.1_1.png godot --path godot
 #
+# `--state <name>` stages a committed UI state through
+# godot/tests/bench/ui_capture.gd before the grab (scripts/ui-capture --list
+# prints the names): the harness keeps the window open and reports the state
+# ready, and only then is the window captured. The app command must accept
+# Godot's `-s <script>` — pass the Godot binary with `--path godot`. For an
+# audit PNG of the app's own viewport rather than the desktop window, use
+# scripts/ui-capture directly; this script is for release/blog images, where
+# the window itself is the point.
+#
 # SCREENSHOT_WAIT=<seconds> (default 2) is how long to let the window settle
-# before the capture. Raise it when the frame to capture takes longer to
-# arrive than a plain startup — a test-driven UI state, a slow machine.
+# after it appears (or after `--state` reports ready) before the capture.
+# Raise it when the frame to capture takes longer to arrive than a plain
+# startup — a test-driven UI state, a slow machine.
 #
 # Requires: ffmpeg (preferred, `x11grab -window_id`) or an ImageMagick built
 # with X11 support (`import -window`), python3 + python-xlib, and a graphical
@@ -19,7 +31,15 @@ set -euo pipefail
 
 OUT="${1:?output path}"
 shift
-[[ $# -ge 1 ]] || { echo "usage: screenshot-gpty <out.png> <app-command...>" >&2; exit 2; }
+STATE=""
+if [[ "${1:-}" == "--state" ]]; then
+    STATE="${2:?--state needs a value}"
+    shift 2
+fi
+[[ $# -ge 1 ]] || {
+    echo "usage: screenshot-gpty <out.png> [--state <name>] <app-command...>" >&2
+    exit 2
+}
 
 command -v python3 >/dev/null || { echo "missing tool: python3 (need python3-xlib)" >&2; exit 3; }
 CAPTURE=""
@@ -35,18 +55,32 @@ else
 fi
 [[ -n "${DISPLAY:-}" ]] || { echo "no DISPLAY — the app window must exist on X11/XWayland" >&2; exit 3; }
 
-TMP="$(mktemp -d)"
-export XDG_DATA_HOME="$TMP/data"
-export XDG_CONFIG_HOME="$TMP/config"
+. "$(dirname "${BASH_SOURCE[0]}")/ui-sandbox"
+gpty_sandbox_init
+TMP="$GPTY_SANDBOX"
 APP_PID=""
 cleanup() {
     [[ -n "$APP_PID" ]] && kill "$APP_PID" 2>/dev/null || true
     [[ -n "$APP_PID" ]] && wait "$APP_PID" 2>/dev/null || true
-    rm -rf "$TMP"
+    gpty_sandbox_cleanup
 }
 trap cleanup EXIT
 
-"$@" >"$TMP/app.log" 2>&1 &
+READY=""
+CMD=("$@")
+if [[ -n "$STATE" ]]; then
+    for arg in "$@"; do
+        case "$arg" in
+            -s | --script | --)
+                echo "--state cannot be combined with a command that already passes $arg" >&2
+                exit 2
+                ;;
+        esac
+    done
+    READY="$TMP/ui-ready"
+    CMD+=(--disable-vsync -s res://tests/bench/ui_capture.gd -- --state "$STATE" --hold --ready "$READY")
+fi
+"${CMD[@]}" >"$TMP/app.log" 2>&1 &
 APP_PID=$!
 
 WID=""
@@ -91,6 +125,22 @@ done
     tail -20 "$TMP/app.log" >&2
     exit 4
 }
+
+# The window exists before the state is staged: the driver has to restore the
+# workspace, wait for the panes and drain its toasts. Capturing now would grab
+# whatever frame the staging happened to be on.
+if [[ -n "$READY" ]]; then
+    for _ in $(seq 1 120); do
+        [[ -f "$READY" ]] && break
+        kill -0 "$APP_PID" 2>/dev/null || break
+        sleep 0.5
+    done
+    [[ -f "$READY" ]] || {
+        echo "state '$STATE' did not stage within 60 s. App log tail:" >&2
+        tail -20 "$TMP/app.log" >&2
+        exit 6
+    }
+fi
 
 sleep "${SCREENSHOT_WAIT:-2}"  # let the first frames settle (SCREENSHOT_WAIT raises it)
 case "$CAPTURE" in

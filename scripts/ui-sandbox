@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# A private, throwaway environment for a GUI launch. Source this file; it is
+# not a command.
+#
+#   . "$ROOT/scripts/ui-sandbox"
+#   gpty_sandbox_init       # creates the sandbox and exports every path
+#   ...
+#   gpty_sandbox_cleanup    # removes it (call from your own EXIT trap)
+#
+# Why every variable: a GUI launched against the developer's desktop state is
+# not the thing being captured. `XDG_DATA_HOME`/`XDG_CONFIG_HOME` move Godot's
+# own files; `HOME` keeps a pane's shell from reading a personal `.bashrc`
+# (the prompt and any banner are part of the image); `XDG_RUNTIME_DIR` and
+# `GPTY_SOCKET` keep the app from finding a live gPTY's control socket — without
+# them a second instance refuses the bind and renders "Another gPTY window is
+# already running - this one will close." instead of the app; and
+# `GPTY_TEST_USER_DIR` moves every `user://` store (settings, workspaces, the
+# history database) into the sandbox, which is the same seam `gut-check` and
+# the live smoke use.
+#
+# The sandbox is 0700, and `gpty_sandbox_init` runs before the app starts, so
+# the app's first write sees an owner-only root it never has to repair.
+#
+# Sourcing this file takes over the environment: it is meant for a dedicated
+# script process (screenshot-gpty, ui-capture), not for an interactive shell.
+# `gpty_sandbox_cleanup` removes the directory and unsets what init exported,
+# so a script may init/cleanup once per capture.
+
+gpty_sandbox_init() {
+    if [[ -n "${GPTY_SANDBOX:-}" ]]; then
+        echo "ui-sandbox: a sandbox is already active ($GPTY_SANDBOX)" >&2
+        return 1
+    fi
+    GPTY_SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/gpty-ui.XXXXXX")"
+    chmod 700 "$GPTY_SANDBOX"
+    mkdir -p "$GPTY_SANDBOX"/{home,data,config,state,cache,runtime,user}
+    chmod 700 "$GPTY_SANDBOX"/{home,data,config,state,cache,runtime,user}
+
+    export HOME="$GPTY_SANDBOX/home"
+    export XDG_DATA_HOME="$GPTY_SANDBOX/data"
+    export XDG_CONFIG_HOME="$GPTY_SANDBOX/config"
+    export XDG_STATE_HOME="$GPTY_SANDBOX/state"
+    export XDG_CACHE_HOME="$GPTY_SANDBOX/cache"
+    export XDG_RUNTIME_DIR="$GPTY_SANDBOX/runtime"
+    export GPTY_TEST_USER_DIR="$GPTY_SANDBOX/user"
+    export GPTY_SOCKET="$GPTY_SANDBOX/gpty.sock"
+    export GPTY_SANDBOX
+
+    # A secret belongs to the desktop's live instance, and login-script or
+    # prompt variables would put a developer's own shell text into the panes.
+    unset GPTY_SECRET BASH_ENV ENV PROMPT_COMMAND PS1 PS2 CDPATH HISTFILE
+}
+
+gpty_sandbox_cleanup() {
+    if [[ -n "${GPTY_SANDBOX:-}" ]]; then
+        rm -rf "$GPTY_SANDBOX"
+    fi
+    unset GPTY_SANDBOX HOME XDG_DATA_HOME XDG_CONFIG_HOME XDG_STATE_HOME \
+        XDG_CACHE_HOME XDG_RUNTIME_DIR GPTY_TEST_USER_DIR GPTY_SOCKET
+}

@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Stage one UI state in a private sandbox and save the app's own viewport.
+#
+# Usage: scripts/ui-capture <state> <out-dir>     # writes <out-dir>/<state>.png
+#        scripts/ui-capture --list                # the state names
+#        scripts/ui-capture --compare <a> <b>     # pixel comparison, exit 0/1
+#
+# `--perturb <state>` may follow a capture: it is the harness's locality
+# self-test (one control shifted in that state only), and the only caller is
+# scripts/ui-capture-check.
+#
+# The staging procedure is committed at godot/tests/bench/ui_capture.gd; this
+# script only provides the environment it needs (see scripts/ui-sandbox) and
+# the Godot command line. A real display driver is required for a capture —
+# under `--headless` there is no redraw pass. `--list` and `--compare` are
+# headless and need no display.
+#
+# Requires: godot on PATH (GODOT=<path> overrides), a graphical session.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GODOT_BIN="${GODOT:-$(command -v godot || true)}"
+if [[ -z "$GODOT_BIN" ]]; then
+    echo "ui-capture: godot not found on PATH (set GODOT=<path>)" >&2
+    exit 3
+fi
+
+usage() {
+    echo "usage: ui-capture <state> <out-dir> [--perturb <state>] | --list | --compare <a.png> <b.png>" >&2
+    exit 2
+}
+
+MODE=""
+STATE=""
+OUT=""
+LEFT=""
+RIGHT=""
+case "${1:-}" in
+    --list)
+        MODE=list
+        shift
+        ;;
+    --compare)
+        [[ $# -eq 3 ]] || usage
+        MODE=compare
+        LEFT="$2"
+        RIGHT="$3"
+        shift 3
+        ;;
+    "" | -*)
+        usage
+        ;;
+    *)
+        [[ $# -ge 2 ]] || usage
+        MODE=capture
+        STATE="$1"
+        OUT="$2"
+        shift 2
+        ;;
+esac
+
+EXTRA=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --perturb)
+            [[ "$MODE" == capture && $# -ge 2 ]] || usage
+            EXTRA+=(--perturb "$2")
+            shift 2
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
+if [[ "$MODE" == capture ]]; then
+    case "$(uname -s)" in
+        Linux)
+            [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] || {
+                echo "ui-capture: no display — the app viewport needs a real driver (DISPLAY/WAYLAND_DISPLAY)" >&2
+                exit 3
+            }
+            ;;
+    esac
+fi
+
+# shellcheck source=scripts/ui-sandbox
+. "$ROOT/scripts/ui-sandbox"
+gpty_sandbox_init
+trap gpty_sandbox_cleanup EXIT
+cd "$ROOT"
+
+HARNESS=res://tests/bench/ui_capture.gd
+case "$MODE" in
+    list)
+        # Godot prints its banner and driver lines on stdout too; a state name
+        # is the only kind of line this filter keeps, so callers get one name
+        # per line with no engine noise.
+        "$GODOT_BIN" --headless --path "$ROOT/godot" -s "$HARNESS" -- --list \
+            | grep -E '^[a-z][a-z0-9-]*$'
+        ;;
+    compare)
+        "$GODOT_BIN" --headless --path "$ROOT/godot" -s "$HARNESS" -- --compare "$LEFT" "$RIGHT"
+        ;;
+    capture)
+        "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync -s "$HARNESS" \
+            -- --state "$STATE" --out "$OUT" "${EXTRA[@]}"
+        ;;
+esac
