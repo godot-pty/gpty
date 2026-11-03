@@ -11,7 +11,7 @@ Usage:
   ./scripts/mcp-registry check     validate server.json (CI gate)
 
 Publishing is deliberately not here: it needs `mcp-publisher login` and a
-published crate (see the v0.8.0 roadmap row).
+published crate (see the v0.9.6 roadmap row).
 """
 import json
 import os

@@ -95,7 +95,7 @@ One documentation fix rode along: the manual test checklist told testers to copy
 There is no one-click way back to live output yet. That affordance - a floating chevron shown only
 while the pane is scrolled back, which must not clear the selection or be reported to a TUI that
 owns the mouse - is queued in
-[the v0.8.0 roadmap](https://github.com/godot-pty/gpty/blob/main/docs/content/docs/roadmap/v0.8.md).
+[the v0.8.1 roadmap](https://github.com/godot-pty/gpty/blob/main/docs/content/docs/roadmap/v0.8.md).
 
 Source: [github.com/godot-pty/gpty](https://github.com/godot-pty/gpty). The next release's
 changelog will name these fixes.

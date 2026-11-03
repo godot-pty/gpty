@@ -10,7 +10,7 @@ description: "Work one gpty roadmap row end to end: pick and re-verify the row, 
 ## 1. Pick, then re-verify the row
 
 - First ⬜ on the earliest unfinished chain page; within a release, row order is the priority.
-- **Rows go stale.** They are written on one build and implemented days later: reproduce the claim on the current build before writing code, and re-locate any `file:line` (numbers drift). The v0.8.1 probe pass found rows already fixed, half-fixed, and describing code that had moved.
+- **Rows go stale.** They are written on one build and implemented days later: reproduce the claim on the current build before writing code, and re-locate any `file:line` (numbers drift). The fidelity probe pass found rows already fixed, half-fixed, and describing code that had moved.
 - Already fixed? Close it with the evidence. Narrowed? Rewrite the row to what remains. Never add a "corrections" row.
 
 ## 2. Read the guides the area touches
@@ -57,3 +57,4 @@ A missing toolchain SKIPs locally but FAILS under `CI`/`GITHUB_ACTIONS`, so a lo
 
 - The gate table mirrors `scripts/ci-check`; when a step is renamed or added, the script wins — update the table rather than trusting it.
 - The skills are committed at `.omp/skills/<name>/SKILL.md`; OMP's native project provider discovers them at startup, so a clone carries them. Keep that copy authoritative: `~/.omp/agent/managed-skills` is lower precedence, and an edit made there reaches nobody else.
+- **Restructuring chains** - when releases are renumbered or split, preserve the old pages first (`git show HEAD:docs/content/docs/roadmap/<page>.md`), move rows by their unique bold title instead of retyping them, and verify with a global title-set diff: extract the `| ⬜/✅ | AREA | **Title** -` titles from the old and new trees and `comm -23` them. The 2026-11 remap lost one row until that diff caught it. Then sweep `v0.<n>.<m>` outside the roadmap pages - guide text (`testing.md`, `security.md`), blog links and script comments all repeat release numbers - and finish with `scripts/docs-check`.

@@ -17,7 +17,7 @@ Probes
   two-pane-control          a program in pane A drives the control surface with
                             no secret set, because the CLI derives the socket
                             from the inherited XDG_RUNTIME_DIR (documented
-                            limitation, queued in v0.9.0) -- Linux only.
+                            limitation, queued in v0.10.1) -- Linux only.
   crafted-layout-resource   a legacy `user://layout.json` aims a terminal tile's
                             `font_path` (and `color_scheme_path`) at a `.tres`
                             whose embedded script writes a sentinel file. The
