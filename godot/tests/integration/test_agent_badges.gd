@@ -100,15 +100,68 @@ func test_declaration_lights_badge_and_swaps_glyph():
 		return b != null and b.visible and b.text == Icons.CHECK_CIRCLE),
 		"completed declaration must swap the badge to the check glyph")
 
-func test_failed_declaration_shows_warning():
+func test_failed_declaration_shows_the_x_circle():
 	if _needs_osc_delivery():
 		return
 	var ws = await _make_workspace()
 	var body = _first_body(ws)
 	await _declare_after_settle(body, "failed")
 	assert_true(await _wait_until(ws, func(b: Label) -> bool:
-		return b != null and b.visible and b.text == Icons.WARNING_CIRCLE),
-		"failed declaration must show the warning badge")
+		return b != null and b.visible and b.text == Icons.X_CIRCLE),
+		"failed declaration must show the x-circle badge")
+
+## `failed` and `needs-attention` used to share one warning glyph and differ
+## only by hue, which a protan/deutan user cannot rely on. Every state now has
+## its own shape, and the glyph is checked against the bundled font: a wrong
+## codepoint renders tofu, which no colour difference can rescue.
+func test_every_state_has_its_own_glyph():
+	var by_glyph := {}
+	for state in TerminalPane.BADGE_STATES:
+		var spec: Dictionary = TerminalPane.BADGE_STATES[state]
+		var glyph := str(spec["glyph"])
+		assert_eq(glyph.length(), 1, "%s: the glyph must be one codepoint" % state)
+		assert_true(Icons.font_resource.has_char(glyph.unicode_at(0)),
+			"%s: %s is not a glyph in the bundled Phosphor font" % [state, glyph])
+		assert_false(by_glyph.has(glyph),
+			"%s and %s share the glyph %s" % [state, by_glyph.get(glyph, ""), glyph])
+		by_glyph[glyph] = state
+		assert_ne(str(spec["label"]), "",
+			"%s: a label is the tooltip and the accessible name" % state)
+	assert_eq(by_glyph.size(), 4, "the four visible states must map to four glyphs")
+	assert_eq(str(TerminalPane.BADGE_STATES["failed"]["glyph"]), Icons.X_CIRCLE,
+		"failed is the X-circle")
+	assert_eq(str(TerminalPane.BADGE_STATES["needs-attention"]["glyph"]), Icons.WARNING,
+		"needs-attention is the warning triangle")
+	assert_false(TerminalPane.BADGE_STATES.has("idle"), "idle hides the badge")
+
+## The state reaches a user who cannot see the colour or the shape at all: the
+## tooltip needs a hover target (a MOUSE_FILTER_IGNORE label is never one) and
+## the accessible name is what a screen reader reads instead of a private-use
+## codepoint. Tier 1 is set directly, so this path also covers Windows, where
+## the OSC declaration the other tests use is consumed by ConPTY.
+func test_badge_carries_text_for_pointer_and_screen_reader():
+	var ws = await _make_workspace()
+	var body = _first_body(ws)
+	body._terminal.set_agent_state("needs-attention")
+	assert_true(await _wait_until(ws, func(b: Label) -> bool:
+		return b != null and b.visible and b.text == Icons.WARNING),
+		"a Tier 1 needs-attention state must show the triangle")
+	var badge := _badge(ws)
+	assert_eq(badge.tooltip_text, "Needs attention", "the tooltip names the state")
+	assert_eq(badge.accessibility_name, "Needs attention",
+		"the accessible name names the state, not a codepoint")
+	assert_ne(badge.mouse_filter, Control.MOUSE_FILTER_IGNORE,
+		"a tooltip needs the badge to be the control under the pointer")
+	assert_eq(badge.accessibility_live, TerminalManager.ACCESSIBILITY_LIVE_POLITE,
+		"a state change must reach a screen reader without focus")
+	# `get_tooltip()` is the engine's own resolver for the badge, so the string
+	# a dwell would show is asserted here. The popup itself is not: headless
+	# Godot tracks no pointer at all (`gui_get_hovered_control()` is null even
+	# over a plain `Button`), and the hover was verified on the headed build
+	# instead - the badge is the control under the pointer, which is the
+	# precondition this `mouse_filter` line protects.
+	assert_eq(badge.get_tooltip(), "Needs attention",
+		"the tooltip the engine would show must name the state")
 
 func test_badge_is_display_only_projection():
 	if _needs_osc_delivery():

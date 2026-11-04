@@ -44,6 +44,10 @@ extends SceneTree
 ##     (user dir, XDG dirs, HOME, socket); refuse to run without one rather
 ##     than seed a developer's real profile.
 ##   - Cursor blink off, so the caret is not mid-blink.
+##   - A staged agent-state badge is pinned to its table glyph and its pane's
+##     per-frame work is stopped (`_apply_agent_states`): the spinner cycles and
+##     the attention pulse are wall-clock driven, so a live badge would never
+##     repeat from one run to the next.
 ##   - The status bar's clock and FPS pinned (`StatusBar.freeze_readouts`);
 ##     they are the only readouts that move while nothing does.
 ##   - The capture waits for every terminal grid generation, every pane title
@@ -74,6 +78,24 @@ const STATES := {
 	"concept-editor": {"size": DEFAULT_SIZE, "panes": 1, "open": "concept-editor"},
 	"plugin-review": {"size": DEFAULT_SIZE, "panes": 1, "open": "plugin-review"},
 	"workspace-trust": {"size": DEFAULT_SIZE, "tiles": [UNTRUSTED_TILE], "open": "workspace-trust"},
+	# The four visible agent states side by side. The point of the state is the
+	# glyph: `failed` (an X-circle) and `needs-attention` (a warning triangle)
+	# differ in shape, so the distinction survives a protan/deutan view, a
+	# monochrome screenshot and a greyscale print - red versus amber does not.
+	"agent-badges": {
+		"size": Vector2i(1280, 420),
+		"agent_states": ["working", "completed", "failed", "needs-attention"],
+		"tiles": [
+			{"col": 0, "row": 0, "cspan": 15, "rspan": 60,
+				"settings": {"type": "terminal", "attachment_id": "capture-badge-working"}},
+			{"col": 15, "row": 0, "cspan": 15, "rspan": 60,
+				"settings": {"type": "terminal", "attachment_id": "capture-badge-completed"}},
+			{"col": 30, "row": 0, "cspan": 15, "rspan": 60,
+				"settings": {"type": "terminal", "attachment_id": "capture-badge-failed"}},
+			{"col": 45, "row": 0, "cspan": 15, "rspan": 60,
+				"settings": {"type": "terminal", "attachment_id": "capture-badge-attention"}},
+		],
+	},
 }
 ## The bundled wiki is a real vault (notes on disk, indexed by the Rust side),
 ## so the Wiki and link-graph states need no fixture of their own.
@@ -261,6 +283,9 @@ func _settle_window(size: Vector2i) -> void:
 # ── The state's interaction ────────────────────────────────────────────
 
 func _apply_state(state_name: String, state: Dictionary) -> bool:
+	if state.has("agent_states"):
+		if not await _apply_agent_states(state["agent_states"]):
+			return false
 	match str(state.get("open", "")):
 		"settings":
 			await _click(_button_with_label(_workspace._sidebar, "Settings"))
@@ -356,6 +381,48 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 		if not _workspace._tm.tiles.is_empty():
 			_fail("Close All left %d panes" % _workspace._tm.tiles.size())
 			return false
+	return true
+
+## Put each pane into its named agent state through the real Tier 1 entry point
+## (the same `set_agent_state` the capability event socket calls), wait for the
+## badge to paint it, then freeze the animation.
+##
+## The freeze is what makes the image repeat: the spinner cycles three glyphs at
+## 8 fps and `needs-attention` pulses its alpha at 1.2 Hz, both from wall-clock
+## time, so two runs of the same state would differ. Re-applying the state pins
+## `_badge_anim` to 0 and the text to the table's glyph - the frame a user sees
+## when the badge appears - and stopping the pane's per-frame work keeps the
+## spinner and the pulse from moving it again.
+func _apply_agent_states(states: Array) -> bool:
+	var tiles: Array = _workspace._tm.tiles
+	if tiles.size() < states.size():
+		_fail("this state needs %d panes, the restore built %d" % [states.size(), tiles.size()])
+		return false
+	var bodies: Array = []
+	for i in states.size():
+		var body = _workspace._tm._find_body(tiles[i].wrapper)
+		if not _is_terminal(body) or body._terminal == null:
+			_fail("pane %d is not a terminal" % i)
+			return false
+		body._terminal.set_agent_state(str(states[i]))
+		bodies.append(body)
+	var deadline := Time.get_ticks_msec() + 5000
+	var painted := false
+	while Time.get_ticks_msec() < deadline and not painted:
+		await process_frame
+		painted = true
+		for i in states.size():
+			var badge: Label = tiles[i].wrapper.get_node_or_null("BodyVBox/TitleBar/StateBadge")
+			if badge == null or not badge.visible or badge.tooltip_text == "":
+				painted = false
+	if not painted:
+		_fail("the badges did not paint their declared states within 5 s")
+		return false
+	for i in states.size():
+		# The pane polls its terminal on a tick, so the badge that is on screen
+		# now is the polled one; this pins the frame and the glyph.
+		bodies[i]._apply_badge(str(states[i]))
+		bodies[i].set_process(false)
 	return true
 
 ## Shift the one control that only this state shows, so a diff is attributable.

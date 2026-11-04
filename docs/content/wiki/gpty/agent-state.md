@@ -32,6 +32,8 @@ Tier 3 exists to catch the obvious signals a terminal can see — `test result: 
 
 The terminal pane renders a badge from its state, and panes that observe the same terminal receive the same deliveries through a body hook. Programmatically, `paneStatus` reports `agent_state` and `agent_state_tier` alongside liveness and `idle_ms`, which is enough to build a dashboard or an alert without scraping the screen.
 
+The badge spells the state with a shape, not a colour: a check circle for finished, an X-circle for failed, a warning triangle for needs-attention, and a spinner while working. Red versus amber alone would be unreadable for a protan/deutan user and unrecoverable in a monochrome screenshot, so `failed` and `needs-attention` differ in silhouette. The same word is the badge's hover tooltip and its accessible name, because the glyph itself is a private-use codepoint that a screen reader cannot read out, and the badge's live region is what announces a change to a connected screen reader without it having to look. `idle` hides the badge.
+
 Nothing else consumes it. Agent state does not trigger actions, start captures, enable or disable concepts, change layouts, or send IPC. That is a guarantee, not an implementation detail: the tiers exist to answer "what does this look like", and the untrusted tier cannot reach any code path that acts.
 
 ## Declaring state from inside a pane

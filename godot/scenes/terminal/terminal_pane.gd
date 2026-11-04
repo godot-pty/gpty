@@ -597,6 +597,20 @@ const BADGE_ATTENTION_COLOR := Color(1.0, 0.78, 0.25)
 const BADGE_WORKING_COLOR := Color(0.5, 0.75, 1.0)
 const BADGE_SPINNER_FRAMES := [Icons.SPINNER, Icons.SPINNER_GAP, Icons.CIRCLE_NOTCH]
 
+## Every agent state's badge, in one table. The glyph is the signal that has to
+## survive a colour-vision deficiency, a monochrome screenshot and a screen
+## reader, so `failed` and `needs-attention` carry different *shapes*
+## (X-circle vs warning triangle) instead of the one warning glyph tinted red
+## or amber. `label` is both the hover tooltip and the accessible name: the
+## glyph is a private-use codepoint, so without it a screen reader reads out
+## nothing usable. `idle` is absent on purpose - it hides the badge.
+const BADGE_STATES := {
+	"completed": {"glyph": Icons.CHECK_CIRCLE, "color": BADGE_COMPLETED_COLOR, "label": "Completed"},
+	"failed": {"glyph": Icons.X_CIRCLE, "color": BADGE_FAILED_COLOR, "label": "Failed"},
+	"needs-attention": {"glyph": Icons.WARNING, "color": BADGE_ATTENTION_COLOR, "label": "Needs attention"},
+	"working": {"glyph": Icons.SPINNER_GAP, "color": BADGE_WORKING_COLOR, "label": "Working"},
+}
+
 ## Read the terminal's declared agent state. Called from the slow poll — the
 ## state changes on event arrival, not per frame, and each read crosses FFI.
 ##
@@ -645,26 +659,19 @@ func _apply_badge(state: String):
 		return
 	_badge_label = label
 	_badge_anim = 0.0
-	match state:
-		"completed":
-			_badge_label.visible = true
-			_badge_label.text = Icons.CHECK_CIRCLE
-			_badge_label.modulate = BADGE_COMPLETED_COLOR
-		"failed":
-			_badge_label.visible = true
-			_badge_label.text = Icons.WARNING_CIRCLE
-			_badge_label.modulate = BADGE_FAILED_COLOR
-		"needs-attention":
-			_badge_label.visible = true
-			_badge_label.text = Icons.WARNING_CIRCLE
-			_badge_label.modulate = BADGE_ATTENTION_COLOR
-		"working":
-			_badge_label.visible = true
-			_badge_label.text = Icons.SPINNER_GAP
-			_badge_label.modulate = BADGE_WORKING_COLOR
-		_:
-			_badge_label.visible = false
-			_badge_label.modulate = Color.WHITE
+	var spec: Dictionary = BADGE_STATES.get(state, {})
+	if spec.is_empty():
+		_badge_label.visible = false
+		_badge_label.modulate = Color.WHITE
+		# A hidden badge must not keep announcing the state it last showed.
+		_badge_label.tooltip_text = ""
+		_badge_label.accessibility_name = ""
+		return
+	_badge_label.visible = true
+	_badge_label.text = str(spec["glyph"])
+	_badge_label.modulate = spec["color"]
+	_badge_label.tooltip_text = str(spec["label"])
+	_badge_label.accessibility_name = str(spec["label"])
 
 func _resolve_badge() -> Label:
 	var parent := get_parent()
