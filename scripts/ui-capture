@@ -17,6 +17,8 @@
 # headless and need no display.
 #
 # Requires: godot on PATH (GODOT=<path> overrides), a graphical session.
+# CAPTURE_TIMEOUT bounds one launch (default 120 s); a launch that produces no
+# result is killed, so a stalled engine start cannot hold the caller.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -97,6 +99,41 @@ gpty_sandbox_init
 trap gpty_sandbox_cleanup EXIT
 cd "$ROOT"
 
+# A capture is a few seconds. A launch that never presents a frame must not
+# hold the caller: a stalled Godot sits in an event loop that never runs, so it
+# leaves a blank window that ignores its close request and cannot be closed by
+# hand (measured 2026-11-04: one launch stalled in engine start-up and blocked a
+# UI-capture-check run for 23 minutes). Godot does not die on SIGTERM while a
+# script waits, so the escalation is TERM, a moment, KILL.
+CAPTURE_TIMEOUT="${CAPTURE_TIMEOUT:-120}"
+if [[ ! "$CAPTURE_TIMEOUT" =~ ^[0-9]+$ || "$CAPTURE_TIMEOUT" -eq 0 ]]; then
+    echo "ui-capture: CAPTURE_TIMEOUT must be a whole number of seconds" >&2
+    exit 2
+fi
+
+run_bounded() {
+    local label="$1"
+    shift
+    "$@" &
+    local pid=$!
+    local deadline=$(( SECONDS + CAPTURE_TIMEOUT ))
+    while kill -0 "$pid" 2>/dev/null; do
+        if (( SECONDS >= deadline )); then
+            echo "ui-capture: $label produced no result in ${CAPTURE_TIMEOUT}s — killing the launch" >&2
+            kill -TERM "$pid" 2>/dev/null || true
+            for _ in 1 2 3 4 5; do
+                kill -0 "$pid" 2>/dev/null || break
+                sleep 0.2
+            done
+            kill -KILL "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            return 1
+        fi
+        sleep 0.2
+    done
+    wait "$pid"
+}
+
 HARNESS=res://tests/bench/ui_capture.gd
 case "$MODE" in
     list)
@@ -110,11 +147,11 @@ case "$MODE" in
         "$GODOT_BIN" --headless --path "$ROOT/godot" -s "$HARNESS" -- --compare "$LEFT" "$RIGHT"
         ;;
     capture)
-        "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync -s "$HARNESS" \
-            -- --state "$STATE" --out "$OUT" "${EXTRA[@]}"
+        run_bounded "$STATE" "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync \
+            -s "$HARNESS" -- --state "$STATE" --out "$OUT" "${EXTRA[@]}"
         ;;
     audit)
-        "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync -s "$HARNESS" \
-            -- --state "$STATE" --audit-focus
+        run_bounded "$STATE" "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync \
+            -s "$HARNESS" -- --state "$STATE" --audit-focus
         ;;
 esac
