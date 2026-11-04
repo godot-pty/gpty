@@ -26,6 +26,9 @@ extends SceneTree
 ##   --perturb <name>   shift that one state's topmost overlay (or its first
 ##                      pane) by 16 px; `scripts/ui-capture-check` uses it to
 ##                      prove a capture diff is local to one state
+##   --audit-focus      stage the state, print what keyboard traversal can
+##                      reach (focus owner, tab order, focus-none controls)
+##                      and exit; `scripts/ui-capture --audit-focus <state>`
 ##   --list             print the state names, one per line, and exit
 ##   --compare a b      compare two PNGs pixel for pixel and exit 0/1
 ##
@@ -63,6 +66,34 @@ const STATES := {
 	"workspace-1280x760": {"size": Vector2i(1280, 760), "panes": 4},
 	"window-800x500": {"size": Vector2i(800, 500), "panes": 4},
 	"window-560x340": {"size": Vector2i(560, 340), "panes": 4},
+	# The surfaces the October 2026 audit did not reach. Each seeds the real
+	# content the surface needs (the bundled vault, a wiki tile, an untrusted
+	# spawn plan) instead of a mock, so the capture shows the shipped UI.
+	"wiki-vault": {"size": DEFAULT_SIZE, "tiles": [WIKI_TILE]},
+	"wiki-graph": {"size": DEFAULT_SIZE, "tiles": [WIKI_TILE], "open": "wiki-graph"},
+	"concept-editor": {"size": DEFAULT_SIZE, "panes": 1, "open": "concept-editor"},
+	"plugin-review": {"size": DEFAULT_SIZE, "panes": 1, "open": "plugin-review"},
+	"workspace-trust": {"size": DEFAULT_SIZE, "tiles": [UNTRUSTED_TILE], "open": "workspace-trust"},
+}
+## The bundled wiki is a real vault (notes on disk, indexed by the Rust side),
+## so the Wiki and link-graph states need no fixture of their own.
+const WIKI_TILE := {
+	"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+	"settings": {
+		"type": "wiki", "attachment_id": "capture-wiki",
+		"vault_path": "@knowledge", "view_mode": "split",
+		"open_note": "index.md",
+	},
+}
+## A saved tile whose program differs from the configured default: the restore
+## gate must ask before it spawns anything. The dialog is the surface; the
+## tile is never restored in a capture.
+const UNTRUSTED_TILE := {
+	"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+	"settings": {
+		"type": "terminal", "attachment_id": "capture-untrusted",
+		"pane_name": "Untrusted Terminal", "command": "/bin/sh",
+	},
 }
 ## How long a signature must stay unchanged before the state counts as settled.
 const SETTLE_MS := 250
@@ -106,8 +137,8 @@ func _initialize() -> void:
 			+ "Run scripts/ui-capture, which owns the private sandbox; staging "
 			+ "writes through WorkspaceStore and the app binds its control socket.")
 		return
-	if not args.has("out") and not args.get("hold", false):
-		_fail("--out <dir> is required unless --hold is given")
+	if not args.has("out") and not args.get("hold", false) and not args.get("audit_focus", false):
+		_fail("--out <dir> is required unless --hold or --audit-focus is given")
 		return
 
 	await _run(state_name, STATES[state_name], args)
@@ -123,7 +154,7 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	_settings.cfg_show_titlebar = true
 	_settings.cfg_window_size = size
 	_settings.cfg_check_updates = false
-	_seed_workspace(int(state.get("panes", 0)))
+	_seed_workspace(state)
 
 	_workspace = load("res://scenes/main.tscn").instantiate()
 	root.add_child(_workspace)
@@ -131,7 +162,7 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	# A seeded layout restores its panes unfocused; pin the active pane so the
 	# status bar and the sidebar accent cannot depend on restore order. The
 	# first-launch state keeps the app's own focus — that behaviour is audited.
-	if int(state.get("panes", 0)) > 0:
+	if int(state.get("panes", 0)) > 0 or not state.get("tiles", []).is_empty():
 		var bodies: Array = _workspace._pane_bodies(_workspace._active_workspace())
 		if not bodies.is_empty():
 			_workspace.activate_pane(bodies[0])
@@ -150,6 +181,13 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	await _settle()
 	_park_pointer()
 
+	if args.get("audit_focus", false):
+		# The keyboard half of the audit: this surface's reachability, printed
+		# instead of captured. Same staged state, same sandbox.
+		await _audit_focus(state_name)
+		quit(0)
+		return
+
 	if args.get("hold", false):
 		_write_ready(str(args.get("ready", "")), state_name, size)
 		print("ui_capture: ready state=%s size=%dx%d" % [state_name, size.x, size.y])
@@ -167,20 +205,28 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 ## find them. Tile settings go through `PaneTypes.sanitize_tile` at restore,
 ## so a state definition that drifts from the schema fails visibly instead of
 ## silently spawning something else.
-func _seed_workspace(panes: int) -> void:
-	if panes <= 0:
-		return
-	var grid := PaneTypes.GRID
-	var tiles: Array[Dictionary] = []
-	if panes == 1:
-		tiles.append(_tile(1, 0, 0, grid, grid))
+func _seed_workspace(state: Dictionary) -> void:
+	var tiles: Array = []
+	if state.has("tiles"):
+		# A surface state names its exact tiles: the pane type and the settings
+		# the real restore path sanitizes (a wiki's vault, an untrusted plan).
+		tiles = state["tiles"]
 	else:
-		var half := grid / 2
-		var index := 1
-		for row in 2:
-			for col in 2:
-				tiles.append(_tile(index, col * half, row * half, half, half))
-				index += 1
+		var panes := int(state.get("panes", 0))
+		if panes <= 0:
+			return
+		var grid := PaneTypes.GRID
+		if panes == 1:
+			tiles.append(_tile(1, 0, 0, grid, grid))
+		else:
+			var half := grid / 2
+			var index := 1
+			for row in 2:
+				for col in 2:
+					tiles.append(_tile(index, col * half, row * half, half, half))
+					index += 1
+	if tiles.is_empty():
+		return
 	# A saved layout carries its panes' public ids; naming them here keeps the
 	# Pane Settings capture free of a random `pane-…` handle.
 	var workspaces: Array[Dictionary] = [
@@ -239,6 +285,63 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			await _wait_frames(3)
 			if _workspace._palette == null or not _workspace._palette.visible:
 				_fail("Ctrl+Shift+P did not open the command palette")
+				return false
+		"wiki-graph":
+			var wiki: Control = _workspace._tm.tiles[0].wrapper
+			var list: ItemList = wiki.find_child("NoteList", true, false) as ItemList
+			if list == null or list.item_count == 0:
+				_fail("the bundled vault produced no notes for the wiki pane")
+				return false
+			var graph_button := _button_with_label(wiki, "Graph")
+			if graph_button == null:
+				_fail("the wiki pane has no Graph button")
+				return false
+			await _click(graph_button)
+			await _wait_frames(3)
+			var graph: Node = _find_script(wiki, "res://scenes/ui/vault_graph_view.gd")
+			if graph == null or not (graph as Control).visible:
+				_fail("clicking Graph did not show the link graph")
+				return false
+		"concept-editor":
+			await _click(_button_with_label(_workspace._sidebar, "Settings"))
+			await _wait_frames(3)
+			var panel: Control = _workspace._settings_panel
+			if panel == null or not panel.visible:
+				_fail("clicking Settings did not open the Settings panel")
+				return false
+			var tab_scroll: Node = panel.find_child("Concepts", true, false)
+			if tab_scroll == null:
+				_fail("the Settings panel has no Concepts tab")
+				return false
+			var tabs := tab_scroll.get_parent() as TabContainer
+			if tabs == null:
+				_fail("the Concepts tab is not inside a TabContainer")
+				return false
+			tabs.current_tab = tabs.get_tab_idx_from_control(tab_scroll as Control)
+			await _wait_frames(2)
+			var editor_button := _button_with_label(panel, "Open Visual Editor")
+			if editor_button == null:
+				_fail("the Concepts tab has no Open Visual Editor button")
+				return false
+			await _click(editor_button)
+			await _wait_frames(3)
+			if _workspace._concept_graph == null or not _workspace._concept_graph.visible:
+				_fail("Open Visual Editor did not open the concept graph")
+				return false
+		"plugin-review":
+			# There is no in-app install button: the CLI sends the summary and
+			# this is the handler's own seam (the IPC dispatch lands here). The
+			# dialog is the surface; nothing is installed in a capture.
+			_workspace._show_plugin_review(1, _plugin_review_params(), 60000)
+			await _wait_frames(3)
+			if _dialog_titled(_workspace, "Plugin Install Review") == null:
+				_fail("the plugin install review did not open")
+				return false
+		"workspace-trust":
+			# The restore gate asks before it builds anything, so the dialog is
+			# the whole state. Missing means the untrusted tile never tripped it.
+			if _dialog_titled(_workspace, "Workspace Trust") == null:
+				_fail("the untrusted tile did not raise the Workspace Trust dialog")
 				return false
 	if state.get("close_all", false):
 		await _click(_button_with_label(_workspace._sidebar, "Close All"))
@@ -332,6 +435,10 @@ func _button_with_label(node: Node, text: String) -> Button:
 func _has_label(node: Node, text: String) -> bool:
 	if node is Label and (node as Label).text == text:
 		return true
+	# A plain Button draws its own text (the sidebar's action buttons carry
+	# Label children instead), so both spellings name the same control.
+	if node is Button and (node as Button).text == text:
+		return true
 	for child in node.get_children():
 		if _has_label(child, text):
 			return true
@@ -398,6 +505,49 @@ func _wait_toasts() -> void:
 			return
 	_fail("toasts did not clear within %d ms" % TOAST_TIMEOUT_MS)
 
+## The visible dialog with this window title. A ConfirmationDialog is an
+## embedded subwindow, so it is in the captured viewport but is not part of
+## the Control tree a button lookup walks.
+func _dialog_titled(node: Node, title: String) -> AcceptDialog:
+	if node is AcceptDialog:
+		var dialog := node as AcceptDialog
+		if dialog.title == title and dialog.visible:
+			return dialog
+	for child in node.get_children():
+		var found := _dialog_titled(child, title)
+		if found != null:
+			return found
+	return null
+
+## The summary `gpty plugin install` sends for its review. It is display data
+## only (the dialog is the surface under audit); the fields exercise every
+## section the builder can render.
+func _plugin_review_params() -> Dictionary:
+	return {
+		"id": "example/omp-events",
+		"name": "OMP Events",
+		"version": "0.2.0",
+		"revision": "6a1f0c9e3b7d",
+		"requested_ref": "v0.2.0",
+		"source": "github.com/example/omp-events",
+		"actions": [
+			{"name": "start", "command": "new-pane", "args": {"type": "terminal"}},
+			{"name": "inspect", "command": "pane-read", "args": {"pane": "omp"}},
+		],
+		"events": [{"name": "turns", "type": "agent.*"}],
+		"link_handlers": [{"scheme": "omp", "command": ["omp", "--open"]}],
+		"build": ["npm", "install"],
+		"startup": ["node", "dist/index.js"],
+		"concepts": [
+			{"name": "Test failures", "enabled": true, "targets": ["reasoning"]},
+			{"name": "Build errors", "enabled": false, "notify_only": true},
+		],
+		"profiles": [
+			{"name": "OMP Workspace", "tiles": 3, "programs": ["omp"], "plans": ["omp"]},
+			{"name": "OMP", "tiles": 1, "programs": ["omp"], "plans": ["omp"]},
+		],
+	}
+
 ## Find a node by its script path. `is <Class>` would compile the script (and
 ## its autoload identifiers) into this one; see `_is_terminal`.
 func _find_script(node: Node, path: String) -> Node:
@@ -416,6 +566,115 @@ func _find_script(node: Node, path: String) -> Node:
 ## `-s` script is first compiled (measured: `Identifier not found`).
 func _is_terminal(body) -> bool:
 	return body != null and is_instance_valid(body) and "_terminal" in body
+
+
+# ── Keyboard reachability ──────────────────────────────────────────────
+
+## Print what keyboard traversal reaches in the staged state: who owns focus,
+## which visible controls are focusable, which interactive controls are
+## FOCUS_NONE (mouse-only), and the Tab order from the first one. The audit's
+## evidence is this output, not a judgement — a mouse-only control is a
+## defect only when its action has no keyboard path (the palette's shortcut,
+## a terminal's own input) is considered by the reader.
+func _audit_focus(state_name: String) -> void:
+	print("focus-audit: state=%s" % state_name)
+	var owner: Control = _workspace.get_viewport().gui_get_focus_owner()
+	print("focus-audit: focus-owner=%s" % ("<none>" if owner == null else _short_path(owner)))
+	# An embedded dialog is its own viewport, so its focus is not the root
+	# viewport's. Report both; otherwise "the dialog took focus" is unverifiable.
+	var dialog := _visible_dialog(_workspace)
+	if dialog != null:
+		var dialog_owner: Control = dialog.get_viewport().gui_get_focus_owner()
+		print("focus-audit: dialog=%s focus-owner=%s"
+			% [dialog.title, "<none>" if dialog_owner == null else _short_path(dialog_owner)])
+	# Does Escape close the surface the state opened? Send it before grabbing
+	# focus for the walk, so the result reflects the state as staged.
+	var overlay = _visible_overlay(dialog)
+	if overlay != null:
+		var overlay_name := str(overlay.name)
+		await _press_key(KEY_ESCAPE)
+		await _wait_frames(3)
+		# A canceled dialog queue_frees itself, so validity is part of "closed".
+		var closed: bool = not is_instance_valid(overlay) or not overlay.visible
+		print("focus-audit: escape overlay=%s closed=%s" % [overlay_name, closed])
+	var controls := _all_controls(_workspace)
+	var focusable: Array[Control] = []
+	var unreachable: Array[BaseButton] = []
+	var canvases: Array[Control] = []
+	for c in controls:
+		if not c.is_visible_in_tree():
+			continue
+		if c.focus_mode != Control.FOCUS_NONE:
+			focusable.append(c)
+			continue
+		if c is BaseButton:
+			var button := c as BaseButton
+			if not button.disabled:
+				unreachable.append(button)
+		elif c.get_script() != null and (c.get_script() as Script).resource_path == "res://scenes/ui/vault_graph_view.gd":
+			canvases.append(c)
+	print("focus-audit: controls=%d focusable=%d focus-none-buttons=%d"
+		% [controls.size(), focusable.size(), unreachable.size()])
+	for button in unreachable:
+		print("focus-audit: mouse-only button text=%s tooltip=%s path=%s"
+			% [button.text, button.tooltip_text, _short_path(button)])
+	for canvas in canvases:
+		print("focus-audit: mouse-only canvas path=%s" % _short_path(canvas))
+	var chain: Array[String] = []
+	var cur: Control = null
+	if owner != null and is_instance_valid(owner) and owner.is_visible_in_tree():
+		cur = owner
+	else:
+		for c in focusable:
+			if c.is_visible_in_tree():
+				cur = c
+				break
+	if cur != null:
+		cur.grab_focus()
+		var first := cur
+		for _i in 100:
+			chain.append(_short_path(cur))
+			var nxt := cur.find_next_valid_focus()
+			if nxt == null or nxt == first:
+				break
+			cur = nxt
+		print("focus-audit: tab-order=%s" % ", ".join(chain))
+
+## The topmost visible dialog the state opened, if any.
+func _visible_dialog(node: Node) -> AcceptDialog:
+	if node is AcceptDialog and (node as AcceptDialog).visible:
+		return node as AcceptDialog
+	for child in node.get_children():
+		var found := _visible_dialog(child)
+		if found != null:
+			return found
+	return null
+
+## The overlay the rest of the state opened (dialog, concept editor, settings,
+## pane settings or palette), or null for an ordinary workspace.
+func _visible_overlay(dialog: AcceptDialog):
+	if dialog != null:
+		return dialog
+	for candidate in [
+		_workspace._concept_graph,
+		_workspace._settings_panel,
+		_workspace._tm._pane_settings_panel,
+		_workspace._palette,
+	]:
+		if candidate is CanvasItem and (candidate as CanvasItem).visible:
+			return candidate
+	return null
+
+func _all_controls(node: Node) -> Array[Control]:
+	var out: Array[Control] = []
+	if node is Control:
+		out.append(node as Control)
+	for child in node.get_children():
+		out.append_array(_all_controls(child))
+	return out
+
+func _short_path(node: Node) -> String:
+	return str(_workspace.get_path_to(node))
 
 
 # ── Capture ────────────────────────────────────────────────────────────
@@ -520,6 +779,8 @@ func _parse_args(raw: PackedStringArray) -> Dictionary:
 				out["perturb"] = raw[i]
 			"--hold":
 				out["hold"] = true
+			"--audit-focus":
+				out["audit_focus"] = true
 			"--list":
 				out["list"] = true
 			"--compare":

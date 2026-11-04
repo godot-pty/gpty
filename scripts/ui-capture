@@ -2,6 +2,7 @@
 # Stage one UI state in a private sandbox and save the app's own viewport.
 #
 # Usage: scripts/ui-capture <state> <out-dir>     # writes <out-dir>/<state>.png
+#        scripts/ui-capture --audit-focus <state> # print keyboard reachability
 #        scripts/ui-capture --list                # the state names
 #        scripts/ui-capture --compare <a> <b>     # pixel comparison, exit 0/1
 #
@@ -26,7 +27,7 @@ if [[ -z "$GODOT_BIN" ]]; then
 fi
 
 usage() {
-    echo "usage: ui-capture <state> <out-dir> [--perturb <state>] | --list | --compare <a.png> <b.png>" >&2
+    echo "usage: ui-capture <state> <out-dir> [--perturb <state>] | --audit-focus <state> | --list | --compare <a.png> <b.png>" >&2
     exit 2
 }
 
@@ -46,6 +47,12 @@ case "${1:-}" in
         LEFT="$2"
         RIGHT="$3"
         shift 3
+        ;;
+    --audit-focus)
+        [[ $# -eq 2 ]] || usage
+        MODE=audit
+        STATE="$2"
+        shift 2
         ;;
     "" | -*)
         usage
@@ -73,11 +80,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ "$MODE" == capture ]]; then
+if [[ "$MODE" == capture || "$MODE" == audit ]]; then
     case "$(uname -s)" in
         Linux)
             [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] || {
-                echo "ui-capture: no display — the app viewport needs a real driver (DISPLAY/WAYLAND_DISPLAY)" >&2
+                echo "ui-capture: no display — staging needs a real driver (DISPLAY/WAYLAND_DISPLAY)" >&2
                 exit 3
             }
             ;;
@@ -105,5 +112,9 @@ case "$MODE" in
     capture)
         "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync -s "$HARNESS" \
             -- --state "$STATE" --out "$OUT" "${EXTRA[@]}"
+        ;;
+    audit)
+        "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync -s "$HARNESS" \
+            -- --state "$STATE" --audit-focus
         ;;
 esac
