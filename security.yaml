@@ -1,0 +1,274 @@
+header:
+  schema-version: 2.0.0
+  last-updated: '2026-11-04'
+  last-reviewed: '2026-11-04'
+  url: https://github.com/godot-pty/gpty
+  comment: >-
+    This file contains all possible information for both project and repository,
+    though it is not required to include all of this information every time. Nor
+    is it required to include both a project and repository section if the
+    project section is intended to be inherited by repositories via
+    header.project-si-source
+project:
+  name: gPTY
+  homepage: https://gpty.dev/
+  funding: ''
+  roadmap: https://gpty.dev/docs/roadmap/
+  steward:
+    uri: https://github.com/1nv1n
+    comment: Project maintainer.
+  administrators:
+    - name: Neil Pathare
+      affiliation: ''
+      email: ''
+      social: https://github.com/1nv1n
+      primary: true
+  documentation:
+    quickstart-guide: https://github.com/godot-pty/gpty/blob/main/README.md#installation--usage
+    detailed-guide: https://gpty.dev/docs/
+    code-of-conduct: ''
+    release-process: https://github.com/godot-pty/gpty/blob/main/.omp/skills/release/SKILL.md
+    support-policy: https://github.com/godot-pty/gpty/blob/main/SECURITY.md#supported-versions
+    signature-verification: https://github.com/godot-pty/gpty/blob/main/README.md#verifying-releases
+  repositories:
+    - name: gPTY
+      url: https://github.com/godot-pty/gpty
+      comment: >-
+        A desktop workspace built on Rust and Godot. It provides a tiling grid
+        for panes (terminals, code viewers, file trees, wikis, media, and more),
+        a concept capture engine, and a JSON-RPC/MCP control surface
+  vulnerability-reporting:
+    reports-accepted: true
+    bug-bounty-available: false
+    bug-bounty-program: ''
+    contact:
+      name: Neil Pathare
+      email: ''
+      primary: true
+    security-policy: https://github.com/godot-pty/gpty/blob/main/SECURITY.md
+    in-scope:
+      - >-
+        Untrusted data reaching a privileged action: process spawn, a file write
+        outside the app's own data directory, control-socket access, or input
+        delivered to a pane the user did not target.
+      - >-
+        Cross-user attacks on shared hosts: socket squatting, world-writable
+        paths, and PATH or environment manipulation.
+      - Remote content driving a local action.
+      - >-
+        A lower-trust pane influencing a higher-trust one, such as a shell pane
+        feeding a root shell or an SSH session.
+      - Denial of service that locks the GUI thread or grows memory without a bound.
+    out-of-scope:
+      - Processes outside gPTY that run as the same user and control it.
+      - >-
+        Spoofable display state: the `gpty_state` OSC declaration and the
+        heuristic agent-state badges, which are display-only.
+      - >-
+        What happens after the user approves a Workspace Trust prompt, activates
+        a downloaded profile, or installs a third-party extension.
+      - >-
+        The absence of platform code signing; release artifacts ship checksums
+        and build-provenance attestations instead.
+      - >-
+        Third-party CLIs, editors, agents and plugins run inside a pane, the
+        files they write, and a user pasting content or running a command they
+        typed.
+    pgp-key: ''
+    comment: >-
+      Private vulnerability reporting is enabled on GitHub. SECURITY.md states
+      the response targets, threat model, and known limitations.
+repository:
+  url: https://github.com/godot-pty/gpty
+  status: active
+  bug-fixes-only: false
+  accepts-change-request: true
+  accepts-automated-change-request: true
+  no-third-party-packages: false
+  core-team:
+    - name: Neil Pathare
+      affiliation: ''
+      email: ''
+      social: https://github.com/1nv1n
+      primary: true
+  license:
+    url: https://github.com/godot-pty/gpty/blob/main/LICENSE
+    expression: GPL-3.0-or-later
+  documentation:
+    contributing-guide: https://github.com/godot-pty/gpty/blob/main/CONTRIBUTING.md
+    review-policy: ''
+    security-policy: https://github.com/godot-pty/gpty/blob/main/SECURITY.md
+    governance: ''
+    dependency-management-policy: https://github.com/godot-pty/gpty/blob/main/deny.toml
+  release:
+    changelog: https://github.com/godot-pty/gpty/blob/main/CHANGELOG.md
+    automated-pipeline: true
+    attestations:
+      - name: GitHub build-provenance attestations (SLSA)
+        predicate-uri: https://slsa.dev/provenance/v1
+        location: https://github.com/godot-pty/gpty/attestations
+        comment: >-
+          Every release asset is attested by actions/attest-build-provenance;
+          verify one with `gh attestation verify <asset> --repo godot-pty/gpty`.
+    distribution-points:
+      - uri: https://github.com/godot-pty/gpty/releases
+        comment: >-
+          Standalone Linux, macOS and Windows archives, plus SHA256SUMS and
+          build-provenance attestations.
+      - uri: https://crates.io/crates/gpty
+        comment: The gpty CLI crate (`cargo install gpty`).
+    license:
+      url: https://github.com/godot-pty/gpty/blob/main/LICENSE
+      expression: GPL-3.0-or-later
+  security:
+    assessments:
+      self:
+        evidence: https://www.bestpractices.dev/projects/16201
+        date: 03/11/2026
+        comment: >-
+          OpenSSF Best Practices badge: passing (tiered percentage 109),
+          updated 2026-11-02.
+      third-party: []
+    champions:
+      - name: Neil Pathare
+        email: ''
+        primary: true
+    tools:
+      - name: CodeQL
+        type: SAST
+        version: ''
+        rulesets:
+          - default
+        results:
+          adhoc:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+          ci:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+          release:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+        integration:
+          adhoc: true
+          ci: true
+          release: false
+        comment: >-
+          Runs on pull requests and weekly for actions, JavaScript/TypeScript,
+          Python and Rust; results upload to GitHub code scanning.
+      - name: OpenSSF Scorecard
+        type: other
+        version: v5.6.0
+        rulesets:
+          - default
+        results:
+          adhoc:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+          ci:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+          release:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+        integration:
+          adhoc: true
+          ci: true
+          release: false
+        comment: >-
+          Weekly and on push to main; publish_results sends the score to the
+          public OpenSSF Scorecard API.
+      - name: cargo-audit
+        type: SCA
+        version: 0.22.2
+        rulesets:
+          - RustSec advisory database
+        results:
+          adhoc:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+          ci:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+          release:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+        integration:
+          adhoc: false
+          ci: true
+          release: false
+        comment: '`cargo audit --deny warnings` in .github/workflows/ci.yml.'
+      - name: cargo-deny
+        type: SCA
+        version: ''
+        rulesets:
+          - deny.toml
+        results:
+          adhoc:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+          ci:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+          release:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+        integration:
+          adhoc: false
+          ci: true
+          release: false
+        comment: >-
+          `cargo deny check` in .github/workflows/ci.yml; enforces the licence,
+          source, bans and advisory policy in deny.toml.
+      - name: cargo-fuzz
+        type: fuzzing
+        version: 0.13.2
+        rulesets:
+          - default
+        results:
+          adhoc:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+          ci:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+          release:
+            name: ''
+            predicate-uri: ''
+            location: ''
+            comment: ''
+        integration:
+          adhoc: true
+          ci: true
+          release: false
+        comment: >-
+          Seven targets; every target is compiled on each pull request, and
+          nightly five-minute runs live in .github/workflows/fuzz.yml.
