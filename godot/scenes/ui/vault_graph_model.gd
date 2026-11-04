@@ -563,6 +563,36 @@ static func _segment_distance(point: Vector2, a: Vector2, b: Vector2) -> float:
 	var t := clampf((point - a).dot(ab) / length_sq, 0.0, 1.0)
 	return point.distance_to(a + ab * t)
 
+## Which of a frame's label rectangles can be drawn without printing over
+## another one.
+##
+## `rects` is in priority order — the node the keyboard aims at first, then the
+## pointer's, the open note's, then the busiest — and the answer is the indices
+## to draw. A rectangle that intersects one already accepted is skipped, and one
+## entirely outside `view` is skipped too (it would be clipped anyway).
+##
+## Text over text is unreadable, which is what this prevents; a label over a
+## node's dot is still legible, so node circles are deliberately not obstacles —
+## measured on the bundled vault, blocking against them deleted nearly every
+## label in the crowded centre instead of keeping the useful ones.
+static func cull_labels(rects: Array, view: Rect2) -> Array:
+	var out := []
+	var taken: Array = []
+	for i in rects.size():
+		var rect = rects[i]
+		if not (rect is Rect2) or not view.intersects(rect):
+			continue
+		var blocked := false
+		for taken_rect in taken:
+			if (taken_rect as Rect2).intersects(rect):
+				blocked = true
+				break
+		if blocked:
+			continue
+		taken.append(rect)
+		out.append(i)
+	return out
+
 # ═══════════════════════════════════════════════════════════════════════
 # Determinism
 # ═══════════════════════════════════════════════════════════════════════

@@ -380,3 +380,88 @@ func test_enter_on_an_edge_opens_its_weight_actions():
 		"Enter opened the weight actions for the edge under the crosshair")
 	assert_eq(str(view._pending_edge.get("b", "")), "b.md")
 	view._edge_menu.hide()
+
+
+# ── Labels at density ──────────────────────────────────────────────────
+#
+# The v0.8.0 row "The vault graph's labels overlap at the bundled vault's
+# density": every node used to print its title at the fitted zoom, so titles
+# landed on top of each other. Placement is now a priority list culled against
+# itself and the node circles, and the fit reserves room for the labels.
+
+func test_a_dense_cluster_keeps_only_the_labels_that_fit():
+	# Eight notes within a few pixels of each other — the bundled vault's
+	# crowded centre at the fitted zoom.
+	var graph := {"nodes": [], "edges": [], "truncated": false}
+	for i in 8:
+		graph["nodes"].append({"id": "n%d.md" % i, "label": "Note %d" % i, "ghost": false})
+	var view := _make_view(graph, "n0.md")
+	view.positions = {}
+	for i in 8:
+		view.positions["n%d.md" % i] = Vector2(i * 3, i * 2)
+	view._zoom = 1.0
+	view._pan = view.size * 0.5
+	view.grab_focus()
+
+	var placements := view.label_placements()
+	assert_lt(placements.size(), 8, "the cluster cannot print every label")
+	assert_gt(placements.size(), 0, "the ones that fit still draw")
+	var ids := []
+	for placement in placements:
+		ids.append(placement["id"])
+	assert_has(ids, "n0.md", "the open note keeps its label")
+
+
+func test_no_two_placed_labels_overlap():
+	# Three notes far enough apart that every label can be placed: the
+	# pair-wise assertion below is only meaningful when more than one survives.
+	var view := _make_view()
+	view.positions = {
+		"a.md": Vector2(-300, -200),
+		"b.md": Vector2(300, 200),
+		"ghost:Missing": Vector2(-300, 250),
+	}
+	view._zoom = 1.0
+	view._pan = view.size * 0.5
+	var placed := view.label_placements()
+	assert_gte(placed.size(), 2, "the labels that fit are still drawn")
+	for i in placed.size():
+		for j in range(i + 1, placed.size()):
+			var a: Rect2 = placed[i]["rect"]
+			var b: Rect2 = placed[j]["rect"]
+			assert_false(a.intersects(b),
+				"%s and %s must not print over each other" % [placed[i]["id"], placed[j]["id"]])
+
+
+func test_fit_leaves_room_for_the_labels():
+	# The fit used node positions only, so a fitted map's right-hand labels ran
+	# off the canvas. Every node's label box now lands inside the view.
+	var view := _make_view()
+	view.fit_to_view()
+	var font := view.get_theme_default_font()
+	for node in view.nodes:
+		var id := str(node["id"])
+		var point := view.to_screen(view.positions[id] as Vector2)
+		var width := font.get_string_size(
+			str(node["label"]), HORIZONTAL_ALIGNMENT_LEFT, -1, VaultGraphView.LABEL_FONT_SIZE
+		).x
+		assert_between(point.x, 0.0, view.size.x)
+		assert_lte(point.x + width, view.size.x,
+			"%s's label must fit at the fitted zoom" % id)
+
+
+func test_past_the_label_cap_only_the_aimed_at_nodes_are_named():
+	# 120+ notes: the always-on labels would be a wall of text, so only the
+	# selected/hovered/aimed node keeps its name (the pre-cull view drew one for
+	# every node, which is where the overlap came from).
+	var graph := {"nodes": [], "edges": [], "truncated": false}
+	for i in VaultGraphView.MAX_ALWAYS_LABELS + 10:
+		graph["nodes"].append({"id": "n%03d.md" % i, "label": "Note %d" % i, "ghost": false})
+	var view := _make_view(graph, "n000.md")
+	view._zoom = 1.0
+
+	var ids := []
+	for placement in view.label_placements():
+		ids.append(placement["id"])
+	assert_eq(ids.size(), 1, "past the cap the open note is the only label")
+	assert_has(ids, "n000.md")

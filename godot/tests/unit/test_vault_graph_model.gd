@@ -315,3 +315,41 @@ func test_hit_test_edge_breaks_overlapping_ties_by_pair_id():
 	}
 	var hit := VaultGraphModel.hit_test_edge(edges, positions, Vector2(50.0, 0.0), 5.0)
 	assert_eq(str(hit.get("a", "")), "a.md", "the a-then-b order is deterministic")
+
+
+# ── Label placement ────────────────────────────────────────────────────
+#
+# The canvas's density cull: which label boxes fit without printing over each
+# other or over a node (the v0.8.0 row "The vault graph's labels overlap at the
+# bundled vault's density").
+
+func test_cull_labels_keeps_every_non_overlapping_box():
+	var rects := [Rect2(0, 0, 40, 12), Rect2(100, 0, 40, 12)]
+	assert_eq(
+		VaultGraphModel.cull_labels(rects, Rect2(0, 0, 200, 100)),
+		[0, 1],
+		"two boxes that do not touch both survive"
+	)
+
+
+func test_cull_labels_drops_a_box_that_would_overlap_an_accepted_one():
+	var rects := [Rect2(0, 0, 40, 12), Rect2(20, 4, 40, 12)]
+	assert_eq(
+		VaultGraphModel.cull_labels(rects, Rect2(0, 0, 200, 100)),
+		[0],
+		"priority order decides: the first box keeps the space"
+	)
+
+
+func test_cull_labels_skips_a_box_outside_the_view():
+	var rects := [Rect2(400, 0, 40, 12), Rect2(10, 10, 40, 12)]
+	assert_eq(
+		VaultGraphModel.cull_labels(rects, Rect2(0, 0, 200, 100)),
+		[1],
+		"a box the view clips anyway is not worth drawing"
+	)
+
+
+
+func test_cull_labels_is_empty_for_no_candidates():
+	assert_eq(VaultGraphModel.cull_labels([], Rect2(0, 0, 200, 100)), [])

@@ -61,6 +61,14 @@ const PAN_STEP := 48.0
 const PAN_FAST := 4.0
 ## The crosshair's arms, in screen pixels.
 const CURSOR_ARM := 7.0
+## Label type size, in screen pixels. Labels are screen-space text — they do
+## not scale with the zoom — so this is also what the fit reserves room for.
+const LABEL_FONT_SIZE := 11
+## Screen pixels between a node's circle and its label.
+const LABEL_GAP := 4.0
+## Most of the view's width `fit_to_view` will reserve for labels: a long note
+## title must not shrink the map to nothing.
+const MAX_LABEL_BLOCK := 180.0
 
 var nodes: Array = []
 var edges: Array = []
@@ -83,6 +91,9 @@ var _needs_fit := true
 var _truncated := false
 var _max_count := 1
 var _max_degree := 1
+## Widest label this graph draws, in screen pixels — what `fit_to_view`
+## reserves on the right so the fitted map's labels stay inside the view.
+var _label_block_w := 0.0
 var _degrees: Dictionary = {}
 var _status: Label
 var _hint: Label
@@ -125,6 +136,7 @@ func show_graph(data: Dictionary, current_id := "") -> void:
 	_max_degree = 1
 	for id in _degrees:
 		_max_degree = maxi(_max_degree, int(_degrees[id]["in"]) + int(_degrees[id]["out"]))
+	_label_block_w = _measure_label_block()
 	_recompute_weight_scale()
 	if current_id != "" and _has_node(current_id):
 		selected_id = current_id
@@ -175,15 +187,23 @@ func relayout() -> void:
 	call_deferred("_fit_if_needed")
 
 
-## Scale and centre the graph in the view.
+## Scale and centre the graph in the view, leaving room for the labels.
+##
+## The fit used node positions only, so a fitted map's right-hand labels were
+## clipped at the edge. A label is screen-space text of a known width, so the
+## widest one is reserved out of the usable box (and the box is centred with
+## that strip, not just around the nodes): the extreme node's label lands
+## inside the padding instead of outside the view.
 func fit_to_view() -> void:
 	var box := VaultGraphModel.bounds(positions)
 	if box.size.x <= 0.0 or box.size.y <= 0.0 or size.x < 2.0 or size.y < 2.0:
 		return
-	var usable := Vector2(size) * (1.0 - 2.0 * FIT_PADDING)
+	var usable := Vector2(size) * (1.0 - 2.0 * FIT_PADDING) - Vector2(_label_block_w, 0.0)
+	usable.x = maxf(usable.x, 1.0)
+	usable.y = maxf(usable.y, 1.0)
 	var scale := minf(usable.x / maxf(box.size.x, 0.001), usable.y / maxf(box.size.y, 0.001))
 	_zoom = clampf(scale, ZOOM_MIN, ZOOM_MAX)
-	_pan = size * 0.5 - box.get_center() * _zoom
+	_pan = size * 0.5 - box.get_center() * _zoom - Vector2(_label_block_w * 0.5, 0.0)
 	queue_redraw()
 
 
@@ -287,6 +307,106 @@ func _make_button(text: String, tooltip: String) -> Button:
 	button.add_theme_font_size_override("font_size", 11)
 	return button
 
+
+## The widest label this graph draws, in screen pixels (capped): what the fit
+## reserves so the fitted map's labels are not clipped.
+func _measure_label_block() -> float:
+	var font := get_theme_default_font()
+	if font == null:
+		return 0.0
+	var widest := 0.0
+	for node in nodes:
+		if not (node is Dictionary):
+			continue
+		var text := str(node.get("label", node.get("id", "")))
+		widest = maxf(widest, font.get_string_size(
+			text, HORIZONTAL_ALIGNMENT_LEFT, -1, LABEL_FONT_SIZE).x + LABEL_GAP)
+	return minf(widest, MAX_LABEL_BLOCK)
+
+## The node labels this frame draws, in priority order, as
+## `[{id, text, rect, color}]`.
+##
+## Two rules make a dense map readable. Labels are always-on only while the view
+## is zoomed in enough to read them and the graph is small enough to be worth
+## labelling (`LABEL_ZOOM`/`MAX_ALWAYS_LABELS`); past either threshold only the
+## nodes the user is pointing at keep one. Beyond that, placement is a collision
+## problem: the nodes the user is looking at come first (the crosshair's, the
+## pointer's, the open note's), then the busiest, and
+## `VaultGraphModel.cull_labels` drops every label that would print over one
+## already placed. The bundled 52-note vault at the fitted zoom is exactly the
+## density that used to print titles on top of each other.
+func label_placements() -> Array:
+	if nodes.is_empty():
+		return []
+	var font := get_theme_default_font()
+	if font == null:
+		return []
+	var labels_all := _zoom >= LABEL_ZOOM and nodes.size() <= MAX_ALWAYS_LABELS
+	var view := Rect2(Vector2.ZERO, size)
+	var text_color := get_theme_color("font_color", "Label")
+	var accent := Palette.ACCENT_COLOR
+	var cursor := cursor_hit() if has_focus() else ""
+	var candidates: Array = []
+	for node in nodes:
+		if not (node is Dictionary):
+			continue
+		var id := str(node.get("id", ""))
+		if not positions.has(id):
+			continue
+		var point := to_screen(positions[id] as Vector2)
+		if not view.grow(12.0).has_point(point):
+			continue
+		var ghost := bool(node.get("ghost", false))
+		var degree := int(_degrees.get(id, {}).get("in", 0)) + int(_degrees.get(id, {}).get("out", 0))
+		var radius := clampf(
+			VaultGraphModel.node_radius(degree, _max_degree) * _zoom, 2.0, 22.0)
+		# Priority: what the keyboard aims at, then the pointer, then the open
+		# note, then the busiest — then id, so the same graph always keeps the
+		# same labels.
+		var rank := 3
+		if id == cursor:
+			rank = 0
+		elif id == hovered_id:
+			rank = 1
+		elif id == selected_id:
+			rank = 2
+		if not labels_all and rank == 3:
+			continue
+		var text := str(node.get("label", id))
+		var color := text_color
+		if ghost:
+			color = Color(text_color, 0.75)
+		elif id == selected_id:
+			color = accent
+		var width := font.get_string_size(
+			text, HORIZONTAL_ALIGNMENT_LEFT, -1, LABEL_FONT_SIZE).x
+		var baseline := point.y + LABEL_FONT_SIZE * 0.35
+		candidates.append({
+			"rank": rank,
+			"degree": degree,
+			"id": id,
+			"text": text,
+			"rect": Rect2(
+				Vector2(point.x + radius + LABEL_GAP, baseline - LABEL_FONT_SIZE),
+				Vector2(width, LABEL_FONT_SIZE + 2.0)
+			),
+			"color": color,
+		})
+	candidates.sort_custom(func(a, b):
+		if a["rank"] != b["rank"]:
+			return a["rank"] < b["rank"]
+		if a["degree"] != b["degree"]:
+			return a["degree"] > b["degree"]
+		return a["id"] < b["id"]
+	)
+	var rects: Array = []
+	for candidate in candidates:
+		rects.append(candidate["rect"])
+	var keep := VaultGraphModel.cull_labels(rects, view)
+	var out: Array = []
+	for i in keep:
+		out.append(candidates[i])
+	return out
 
 func _has_node(id: String) -> bool:
 	for node in nodes:
@@ -547,11 +667,7 @@ func _draw() -> void:
 	var edge_color := Color(text_color, 0.28)
 	var selected_edge := Color(accent, 0.85)
 	var cursor := cursor_hit() if has_focus() else ""
-	var labels_all := _zoom >= LABEL_ZOOM and nodes.size() <= MAX_ALWAYS_LABELS
 	var font := get_theme_default_font()
-	# A fixed, small label size: the graph is a map, not a text view, and the
-	# default theme's 16 px turns a dense vault into a wall of words.
-	var font_size := 11
 	if font == null:
 		return
 	for edge in edges:
@@ -612,20 +728,21 @@ func _draw() -> void:
 		# stay tellable apart when they are the same node.
 		if id == cursor:
 			draw_arc(point, radius + 5.5, 0.0, TAU, 32, Color(accent, 0.9), 1.5, true)
-		if labels_all or id == hovered_id or id == selected_id or id == cursor:
-			var label := str(node.get("label", id))
-			var label_color := accent if id == selected_id else text_color
-			if ghost:
-				label_color = Color(text_color, 0.75)
-			draw_string(
-				font,
-				point + Vector2(radius + 4.0, font_size * 0.35),
-				label,
-				HORIZONTAL_ALIGNMENT_LEFT,
-				-1,
-				font_size,
-				label_color
-			)
+	# Labels last, over the edges and the node rings they name. Only the placed
+	# ones draw: `label_placements` is the density cull, and it is the same
+	# answer the pointer and keyboard use, so a label is never printed twice or
+	# over another.
+	for placement in label_placements():
+		var rect: Rect2 = placement["rect"]
+		draw_string(
+			font,
+			Vector2(rect.position.x, rect.position.y + LABEL_FONT_SIZE),
+			str(placement["text"]),
+			HORIZONTAL_ALIGNMENT_LEFT,
+			-1,
+			LABEL_FONT_SIZE,
+			placement["color"]
+		)
 	# Last, so the crosshair sits over the graph it aims at.
 	if has_focus():
 		var mid := _cursor_screen()
