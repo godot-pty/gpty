@@ -1600,9 +1600,17 @@ func _on_overlay_keyboard_released(overlay: OverlayPanel) -> void:
 	var target: Control = overlay.return_focus
 	overlay.return_focus = null
 	var below := _keyboard_overlay()
-	if below != null and target != null and is_instance_valid(target) \
-			and target.is_visible_in_tree() and below.is_ancestor_of(target):
-		target.grab_focus()
+	if below != null:
+		# Back to the overlay underneath, never to a pane: it is still open and
+		# owns the keyboard. Its remembered control is the ideal target; when
+		# that control is gone, or the closed overlay opened with no focus owner
+		# at all, the overlay takes a control again rather than leaving the
+		# terminal behind both with the keyboard while an overlay is visible.
+		if target != null and is_instance_valid(target) \
+				and target.is_visible_in_tree() and below.is_ancestor_of(target):
+			target.grab_focus()
+		else:
+			below.grab_keyboard()
 		return
 	var ws := _active_workspace()
 	if ws.is_empty():

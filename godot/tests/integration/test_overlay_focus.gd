@@ -199,6 +199,29 @@ func test_escape_from_the_concept_editor_returns_to_settings():
 	assert_true(_is_inside(settings, ws.get_viewport().gui_get_focus_owner()),
 		"the keyboard goes back to the panel, not to the terminal behind it")
 
+func test_closing_an_overlay_over_another_never_hands_the_keyboard_to_the_pane():
+	# The overlay underneath is still open, so it still owns the keyboard. When
+	# the closed overlay remembers no usable control there, the one underneath
+	# has to take a control again - falling through to the pane would leave a
+	# visible overlay with the keyboard in the terminal behind it.
+	var ws = await _start_workspace()
+	var body = _first_terminal(ws)
+	ws._toggle_settings()
+	var settings: SettingsPanel = ws._settings_panel
+	ws._toggle_palette()
+	var palette: CommandPalette = ws._palette
+	await get_tree().process_frame
+	assert_true(settings.visible and palette.visible, "precondition: both overlays are open")
+
+	palette.return_focus = null
+	palette.close()
+	await get_tree().process_frame
+
+	var owner := ws.get_viewport().gui_get_focus_owner()
+	assert_ne(owner, body, "the terminal must not take the keyboard behind an open overlay")
+	assert_true(_is_inside(settings, owner),
+		"the panel underneath takes a control again (owner: %s)" % _focus_owner_path(ws))
+
 func test_a_command_that_spawns_a_pane_keeps_the_new_pane_focused():
 	# The palette gives the keyboard back before it runs the command, so the
 	# thing the command focuses must win, not the pane the palette was opened

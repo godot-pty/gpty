@@ -34,6 +34,13 @@ var return_focus: Control = null
 ## keyboard on the pane behind it.
 func open() -> void:
 	_before_open()
+	grab_keyboard()
+
+## Take the keyboard without rebuilding content: remember who had it and focus
+## a control inside, so a typed character lands here instead of in the terminal
+## behind it. An overlay that is already visible calls this when a stacked
+## overlay closes and the keyboard comes back to it (`Workspace`).
+func grab_keyboard() -> void:
 	var vp := get_viewport()
 	return_focus = vp.gui_get_focus_owner() if vp != null else null
 	visible = true
