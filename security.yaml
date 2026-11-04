@@ -26,7 +26,7 @@ project:
   documentation:
     quickstart-guide: https://github.com/godot-pty/gpty/blob/main/README.md#installation--usage
     detailed-guide: https://gpty.dev/docs/
-    code-of-conduct: ''
+    code-of-conduct: https://github.com/godot-pty/gpty/blob/main/CODE_OF_CONDUCT.md
     release-process: https://github.com/godot-pty/gpty/blob/main/.omp/skills/release/SKILL.md
     support-policy: https://github.com/godot-pty/gpty/blob/main/SECURITY.md#supported-versions
     signature-verification: https://github.com/godot-pty/gpty/blob/main/README.md#verifying-releases
@@ -96,9 +96,9 @@ repository:
     expression: GPL-3.0-or-later
   documentation:
     contributing-guide: https://github.com/godot-pty/gpty/blob/main/CONTRIBUTING.md
-    review-policy: ''
+    review-policy: https://github.com/godot-pty/gpty/blob/main/GOVERNANCE.md
     security-policy: https://github.com/godot-pty/gpty/blob/main/SECURITY.md
-    governance: ''
+    governance: https://github.com/godot-pty/gpty/blob/main/GOVERNANCE.md
     dependency-management-policy: https://github.com/godot-pty/gpty/blob/main/deny.toml
   release:
     changelog: https://github.com/godot-pty/gpty/blob/main/CHANGELOG.md
