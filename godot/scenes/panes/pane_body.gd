@@ -103,6 +103,19 @@ func _get_layout_state() -> Dictionary:
 func _pane_type() -> String:
 	return "base"  # overridden by concrete types
 
+## The control that takes the keyboard when this pane is entered from outside:
+## pane chrome's Escape, or a chrome action that leaves the pane on screen
+## (`TerminalManager._return_focus_to_body`). Null means the pane has no aim of
+## its own and the caller falls back to `KeyboardFocus.first_reachable`, the
+## pane's first tab stop.
+##
+## A terminal is its own grid. A wiki pane showing a note aims at the buffer,
+## because that is where a keyboard user continues and the toolbar is one chord
+## away from it; the pane's first tab stop would be Back, a top-row action the
+## note view does not need as an entry.
+func keyboard_entry() -> Control:
+	return null
+
 ## Status primitives for `paneStatus`, or null when the pane has none.
 ##
 ## A terminal returns its process/grid document; the media pane returns its

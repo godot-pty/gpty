@@ -147,6 +147,7 @@ func _ready():
 	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _toggle_sidebar)
 	ShortcutManager.register("app:toggle_palette", "Ctrl+Shift+P", _toggle_palette)
 	ShortcutManager.register("app:focus_pane_chrome", "Ctrl+Shift+E", _focus_active_pane_chrome)
+	ShortcutManager.register("app:focus_note_toolbar", "Ctrl+Shift+K", _focus_note_toolbar)
 	ShortcutManager.register("app:toggle_fullscreen", "F11", _chrome.toggle_fullscreen)
 	ShortcutManager.register("app:toggle_fullscreen_alt", "Ctrl+Shift+M", _chrome.toggle_fullscreen)
 	ShortcutManager.register("app:reset_workspace", "Ctrl+Shift+R", func():
@@ -1574,6 +1575,38 @@ func _focus_active_pane_chrome() -> void:
 	var body: Control = ws.tm.last_body
 	if body != null and is_instance_valid(body):
 		ws.tm.focus_title_bar(body)
+
+## Move the keyboard from a wiki note's buffer into that note's toolbar — the
+## note view's counterpart to `Ctrl+Shift+E`. The toolbar is one ring
+## (`WikiPane._wire_note_toolbar`), but a focused `CodeEdit` keeps Tab for
+## indentation, so the chord is the way in; Escape in the toolbar returns to the
+## buffer, and only the buffer's own Escape leaves the note.
+##
+## The pane is the one that owns the focus owner: the chord is typed from inside
+## the note, and `last_body` can still name the pane the user last clicked —
+## measured: a wiki pane opened from the list kept `last_body` on the startup
+## terminal, so a `last_body`-only rule did nothing from the very buffer the
+## chord exists for. The active pane is the fallback, so the chord has a target
+## when nothing in the pane holds focus. Inert when that pane is not a wiki pane
+## in a note, and while an overlay owns the keyboard.
+func _focus_note_toolbar() -> void:
+	if _keyboard_overlay() != null:
+		return
+	var wiki: WikiPane = null
+	var owner := get_viewport().gui_get_focus_owner()
+	if owner != null:
+		var focused := _body_of_focus_owner(owner)
+		if focused is WikiPane:
+			wiki = focused as WikiPane
+	if wiki == null:
+		var ws := _active_workspace()
+		if ws.is_empty():
+			return
+		var body: Control = ws.tm.last_body
+		if body is WikiPane:
+			wiki = body as WikiPane
+	if wiki != null and is_instance_valid(wiki):
+		wiki.focus_note_toolbar()
 
 ## The overlay that owns the keyboard while it is visible, topmost first.
 ## Opening Settings closes Pane Settings, the concept editor opens over

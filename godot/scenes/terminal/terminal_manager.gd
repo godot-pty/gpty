@@ -326,23 +326,14 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 
 	return lbl
 
-## Make the title bar's buttons a keyboard toolbar: an explicit ring
-## (`focus_next`/`focus_previous` between the buttons in visual order), so Tab
-## moves through the chrome and wraps instead of leaking into the next pane's
-## tile. A focused terminal consumes Tab for its child, so the way in is
-## `Workspace`'s chrome shortcut and the way out is Escape in
-## `Workspace._escape_pane_chrome`; without both, the buttons would be reachable
-## only by a traversal no user can trigger.
+## Make the title bar's buttons a keyboard toolbar: one explicit ring
+## (`KeyboardFocus.ring`), so Tab moves through the chrome and wraps instead of
+## leaking into the next pane's tile. A focused terminal consumes Tab for its
+## child, so the way in is `Workspace`'s chrome shortcut and the way out is
+## Escape in `Workspace._escape_pane_chrome`; without both, the buttons would be
+## reachable only by a traversal no user can trigger.
 func _wire_chrome_keyboard(row: HBoxContainer) -> void:
-	var buttons: Array[Button] = []
-	for child in row.get_children():
-		if child is Button:
-			buttons.append(child as Button)
-	for i in buttons.size():
-		var b := buttons[i]
-		b.focus_mode = Control.FOCUS_ALL
-		b.focus_next = b.get_path_to(buttons[(i + 1) % buttons.size()])
-		b.focus_previous = b.get_path_to(buttons[(i - 1 + buttons.size()) % buttons.size()])
+	KeyboardFocus.ring(KeyboardFocus.reachable_children(row))
 
 ## Focus the first title-bar button of `body`'s tile. False when that pane has
 ## no title bar to focus (the bar is hidden by a setting, or the body is gone).
@@ -365,13 +356,20 @@ func focus_title_bar(body: Control) -> bool:
 ## Chrome actions end with the keyboard back in the pane. A mouse click focuses
 ## the clicked button (Godot does that for any `FOCUS_ALL` control), so a pane
 ## whose action leaves it on screen would otherwise swallow the next keystroke.
-## A terminal takes the keyboard itself; a read-only pane cannot hold focus, so
-## its content is where the user continues (the wiki's note list or search).
+## A terminal takes the keyboard itself; another pane may name its own entry
+## point (`PaneBody.keyboard_entry` — a wiki note aims at its buffer), and a
+## pane without one gets its first tab stop (the wiki's note list or search).
 func _return_focus_to_body(body: Control) -> void:
 	if body == null or not is_instance_valid(body) or not body.is_visible_in_tree():
 		return
 	if body is TerminalPane:
 		body._take_focus()
+		return
+	var entry: Control = null
+	if body is PaneBody:
+		entry = (body as PaneBody).keyboard_entry()
+	if entry != null and entry.is_visible_in_tree():
+		entry.grab_focus()
 		return
 	var target := KeyboardFocus.first_reachable(body)
 	if target != null:

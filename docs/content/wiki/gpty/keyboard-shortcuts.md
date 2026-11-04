@@ -36,11 +36,12 @@ These are handled by the focused terminal before the workspace sees them. `Ctrl+
 | `Ctrl+Shift+B` | Toggle the sidebar |
 | `Ctrl+Shift+P` | Open the command palette |
 | `Ctrl+Shift+E` | Move the keyboard into the focused pane's title-bar buttons |
+| `Ctrl+Shift+K` | Move the keyboard into the open note's toolbar (Wiki pane) |
 | `F11` or `Ctrl+Shift+M` | Toggle fullscreen |
 | `Alt+←` `Alt+→` `Alt+↑` `Alt+↓` | Move focus to the adjacent pane |
 | `Ctrl+PageDown` | Next workspace |
 | `Ctrl+PageUp` | Previous workspace |
-| `Escape` | Close the palette, a search bar, or a settings popup; leave a wiki note; return from pane chrome to the pane |
+| `Escape` | Close the palette, a search bar, or a settings popup; leave a wiki note; return from pane chrome to the pane, or from the note toolbar to the buffer |
 
 New panes use the normal split rule: the largest tile halves along its longer axis, and the spawn is refused when both halves would be smaller than the 6-unit minimum. The four pane-type shortcuts are the only ones gPTY binds directly; Reasoning, CLI View, Wiki, and Media panes are spawned from the sidebar's Add Pane grid, the command palette, or the control API.
 
@@ -63,9 +64,12 @@ The commands are one `new <type>` entry for each of the eight pane types, then `
 | Shortcut | Action |
 |---|---|
 | `Ctrl+S` | Save the open note |
-| `Escape` | Leave the note (asks about unsaved changes) |
+| `Ctrl+Shift+K` | Move the keyboard into the note toolbar |
+| `Escape` | Return from the toolbar to the buffer; from the buffer, leave the note (asks about unsaved changes) |
 
 The wiki pane's editor saves explicitly: the Save button or `Ctrl+S` writes the note. There is no autosave; edits mark the note dirty, and leaving a dirty note raises Save / Discard / Cancel. `Escape` is Back: it leaves the note (or the link graph) for the note list and writes nothing unless you answered Save, and the list takes the keyboard so `Enter` can reopen a note. A recovery copy is kept outside the vault between saves, so a crash does not cost the buffer, but it is offered back rather than applied automatically.
+
+The note toolbar — Edit / Split / Preview, Rename, Delete and Save — is a keyboard ring: `Tab` moves through it in visual order and wraps. A focused editor keeps `Tab` for indentation, so `Ctrl+Shift+K` is the way in from the buffer, and `Escape` in the toolbar returns to the buffer without leaving the note. Only the buffer's own `Escape` goes back to the list, so the ladder is one level out per press: toolbar → buffer → list. With no note open, or in `Preview` mode where there is no buffer on screen, the chord does nothing and the toolbar is reachable with plain `Tab` from Back.
 
 ## Where shortcuts come from
 

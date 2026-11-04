@@ -82,6 +82,10 @@ var _back: Button
 var _search: LineEdit
 var _list: ItemList
 var _note_box: VBoxContainer
+## The note view's action row: the three mode buttons, Rename, Delete and Save.
+## One keyboard ring (`_wire_note_toolbar`), entered by `Ctrl+Shift+K` because a
+## focused buffer keeps Tab for indentation.
+var _toolbar: HBoxContainer
 var _note_title: Label
 var _editor: CodeEdit
 var _reader: MarkdownView
@@ -206,9 +210,9 @@ func _ready():
 	_note_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(_note_box)
 
-	var toolbar = HBoxContainer.new()
-	toolbar.name = "NoteToolbar"
-	_note_box.add_child(toolbar)
+	_toolbar = HBoxContainer.new()
+	_toolbar.name = "NoteToolbar"
+	_note_box.add_child(_toolbar)
 
 	_note_title = Label.new()
 	_note_title.name = "NoteTitle"
@@ -216,7 +220,7 @@ func _ready():
 	_note_title.clip_text = true
 	_note_title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_note_title.add_theme_font_size_override("font_size", 12)
-	toolbar.add_child(_note_title)
+	_toolbar.add_child(_note_title)
 
 	var group := ButtonGroup.new()
 	for mode in VIEW_MODES:
@@ -234,35 +238,40 @@ func _ready():
 			if on:
 				_set_view_mode(mode)
 		)
-		toolbar.add_child(button)
+		_toolbar.add_child(button)
 		_mode_buttons[mode] = button
 
 	_dirty_label = Label.new()
 	_dirty_label.name = "DirtyState"
 	_dirty_label.visible = false
 	_dirty_label.add_theme_font_size_override("font_size", 12)
-	toolbar.add_child(_dirty_label)
+	_toolbar.add_child(_dirty_label)
 
 	_rename_button = Button.new()
 	_rename_button.name = "RenameNote"
 	_rename_button.text = "Rename"
 	_rename_button.tooltip_text = "Move this note to another vault-relative path"
 	_rename_button.pressed.connect(_ask_rename)
-	toolbar.add_child(_rename_button)
+	_toolbar.add_child(_rename_button)
 
 	_delete_button = Button.new()
 	_delete_button.name = "DeleteNote"
 	_delete_button.text = "Delete"
 	_delete_button.tooltip_text = "Delete this note from the vault"
 	_delete_button.pressed.connect(_ask_delete)
-	toolbar.add_child(_delete_button)
+	_toolbar.add_child(_delete_button)
 
 	_save_button = Button.new()
 	_save_button.name = "Save"
 	_save_button.text = "Save"
 	_save_button.tooltip_text = "Write the note back to disk (Ctrl+S)"
 	_save_button.pressed.connect(func(): _save())
-	toolbar.add_child(_save_button)
+	_toolbar.add_child(_save_button)
+
+	# One keyboard ring over the toolbar's actions. The way in is the chord
+	# (`Ctrl+Shift+K`, `Workspace._focus_note_toolbar`) because a focused
+	# buffer keeps Tab for indentation; Escape returns to the buffer.
+	_wire_note_toolbar()
 
 	var split := HSplitContainer.new()
 	split.name = "NoteSplit"
@@ -1608,6 +1617,35 @@ func _save_after_dialog(dialog: Window, answer: Callable, force := false) -> voi
 	await get_tree().process_frame
 	_save(force, answer)
 
+## The note toolbar is one keyboard ring (`KeyboardFocus.ring`), the same rule
+## pane chrome uses: Tab moves through the modes, Rename, Delete and Save and
+## wraps inside the bar instead of wandering into the editor (which keeps Tab
+## for indentation) or the next pane.
+func _wire_note_toolbar() -> void:
+	KeyboardFocus.ring(KeyboardFocus.reachable_children(_toolbar))
+
+## Focus the toolbar's first action. False when no note is on screen or the
+## buffer is not (`preview` mode): the chord exists for the buffer's Tab trap,
+## and a toolbar with no buffer to return to is already one Tab away from Back.
+func focus_note_toolbar() -> bool:
+	if _toolbar == null or not _note_box.visible or not _editor.visible:
+		return false
+	var first := KeyboardFocus.first_reachable(_toolbar)
+	if first == null:
+		return false
+	first.grab_focus()
+	return true
+
+## Escape in the note toolbar goes back where the entry came from: the buffer,
+## which keeps the note open (Escape in the buffer is Back, and that one asks
+## about unsaved changes, so the ladder ends at the list). Preview mode has no
+## buffer on screen, so the ladder ends at Back, the note view's exit door.
+func _return_from_note_toolbar() -> void:
+	if _editor.visible:
+		_editor.grab_focus()
+	else:
+		_back.grab_focus()
+
 ## Escape is Back. The note view (and the graph over it) hides the list and the
 ## search, so without this a note is a keyboard trap: the editor consumes Tab
 ## for indentation and nothing else returns to the list.
@@ -1629,6 +1667,11 @@ func _input(event: InputEvent) -> void:
 	if owner == null or not (owner == self or is_ancestor_of(owner)):
 		return
 	get_viewport().set_input_as_handled()
+	# One level out, not out of the note: the toolbar's Escape returns to the
+	# buffer, the same way pane chrome's Escape returns to the pane.
+	if _toolbar != null and _toolbar.is_ancestor_of(owner):
+		_return_from_note_toolbar()
+		return
 	# The same guarded leave the Back button uses: a dirty buffer asks
 	# Save/Discard/Cancel, and Cancel keeps the note open.
 	_request_leave(func(proceed: bool):
@@ -1758,6 +1801,16 @@ func _get_layout_state() -> Dictionary:
 
 func _pane_type() -> String:
 	return "wiki"
+
+## Entering the pane from outside (chrome Escape, a chrome action that leaves
+## the pane on screen) aims at the buffer, not at the pane's first tab stop:
+## Back is a top-row action, and the note view's entry point is the text being
+## read. A read-only note (over the read cap) keeps the fallback `_open_note`
+## gives it: Back, the only action left for it.
+func keyboard_entry() -> Control:
+	if _note_box.visible and _editor.visible and _editor.editable:
+		return _editor
+	return null
 
 func _build_pane_settings_ui(panel: Control) -> Control:
 	var v = VBoxContainer.new()
