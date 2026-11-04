@@ -83,7 +83,7 @@ jobs:
 
       - name: Checkout
         if: steps.release.outputs.publish != 'false'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The released tree, not the default branch: server.json must be the
           # one the tag carries. A dispatched run checks out its selected ref.
