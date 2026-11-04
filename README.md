@@ -2,9 +2,11 @@
 
 <div align="center">
 
-  [![Build](https://img.shields.io/github/actions/workflow/status/godot-pty/gpty/ci.yml?branch=main)](https://github.com/godot-pty/gpty/actions/workflows/ci.yml) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/godot-pty/gpty/total) [![Linux Foundation](https://img.shields.io/badge/Linux_Foundation-blue?logo=linuxfoundation&logoColor=white)](https://insights.linuxfoundation.org/project/godot-pty-gpty)
+  [![Build](https://img.shields.io/github/actions/workflow/status/godot-pty/gpty/ci.yml?branch=main)](https://github.com/godot-pty/gpty/actions/workflows/ci.yml) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16201/badge)](https://www.bestpractices.dev/projects/16201)
 
-  [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/godot-pty/gpty/badge)](https://securityscorecards.dev/viewer/?uri=github.com/godot-pty/gpty) [![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/godot-pty/gpty#verifying-releases) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16201/badge)](https://www.bestpractices.dev/projects/16201) ![LLM-powered](https://img.shields.io/badge/LLM-powered-6A5ACD)
+  ![GitHub Downloads](https://img.shields.io/github/downloads/godot-pty/gpty/total) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/godot-pty/gpty/badge)](https://securityscorecards.dev/viewer/?uri=github.com/godot-pty/gpty) [![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/godot-pty/gpty#verifying-releases)
+
+  [![Linux Foundation](https://img.shields.io/badge/LFX-Linux_Foundation-blue?logo=linuxfoundation&logoColor=white)](https://insights.linuxfoundation.org/project/godot-pty-gpty) [![GitHub Releases](https://img.shields.io/badge/platform-x86--64--Windows--Linux--macOS-blue)](https://github.com/godot-pty/gpty/releases/latest) ![LLM-powered](https://img.shields.io/badge/code-LLM_Powered-blue)
 
 </div>
 
