@@ -182,7 +182,14 @@ func _ready():
 	_graph_button.name = "GraphView"
 	_graph_button.text = "Graph"
 	_graph_button.tooltip_text = "Map this vault's links (re-reads the index)"
-	_graph_button.pressed.connect(_show_graph)
+	_graph_button.pressed.connect(func():
+		_show_graph()
+		# The keyboard follows the map, the same rule the note view follows for
+		# its buffer: the button that opened it is no longer the surface the
+		# user is looking at.
+		if _graph_view.visible:
+			_graph_view.grab_focus()
+	)
 	top.add_child(_graph_button)
 
 	var content = VBoxContainer.new()
@@ -1803,11 +1810,15 @@ func _pane_type() -> String:
 	return "wiki"
 
 ## Entering the pane from outside (chrome Escape, a chrome action that leaves
-## the pane on screen) aims at the buffer, not at the pane's first tab stop:
-## Back is a top-row action, and the note view's entry point is the text being
-## read. A read-only note (over the read cap) keeps the fallback `_open_note`
-## gives it: Back, the only action left for it.
+## the pane on screen) aims at the surface the pane is showing: the graph's
+## canvas when the link map is up, otherwise the note buffer. Both are the
+## place a keyboard user continues; the pane's first tab stop would be Back, a
+## top-row action the note view does not need as an entry. A read-only note
+## (over the read cap) keeps the fallback `_open_note` gives it: Back, the only
+## action left for it.
 func keyboard_entry() -> Control:
+	if _graph_view != null and _graph_view.visible:
+		return _graph_view
 	if _note_box.visible and _editor.visible and _editor.editable:
 		return _editor
 	return null

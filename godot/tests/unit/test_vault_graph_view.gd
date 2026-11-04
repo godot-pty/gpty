@@ -259,3 +259,124 @@ func test_the_edge_menu_opens_for_a_drawn_edge():
 		"the edge under the pointer is the menu's target")
 	assert_true(view._edge_menu.visible, "the menu actually opened")
 	view._edge_menu.hide()
+
+
+# ── Keyboard ───────────────────────────────────────────────────────────
+#
+# The map is keyboard-operable (the v0.8.0 row "The vault link graph is
+# mouse-only"): the canvas and its three actions are one ring, arrows pan the
+# view, `+`/`-` zoom about the crosshair, and Enter acts on whatever the
+# crosshair covers — through the same `hit_test`/`hit_test_edge` the pointer
+# uses, so the two cannot disagree about what is under the cursor.
+
+func _press(keycode: Key, shift := false) -> void:
+	var down := InputEventKey.new()
+	down.keycode = keycode
+	down.physical_keycode = keycode
+	down.shift_pressed = shift
+	down.pressed = true
+	Input.parse_input_event(down)
+	Input.flush_buffered_events()
+	await wait_process_frames(1)
+	var up: InputEventKey = down.duplicate()
+	up.pressed = false
+	Input.parse_input_event(up)
+	Input.flush_buffered_events()
+	await wait_process_frames(1)
+
+
+## A focused view whose transform the test sets, not the fit: zoom 1 and the
+## world origin under the crosshair (the canvas centre), so `a.md` sits at the
+## centre and `b.md`/the ghost are known distances away.
+func _centred_view() -> VaultGraphView:
+	var view := _make_view()
+	view.positions = {
+		"a.md": Vector2.ZERO,
+		"b.md": Vector2(300, 0),
+		"ghost:Missing": Vector2(0, 300),
+	}
+	view._zoom = 1.0
+	view._pan = view.size * 0.5
+	view.grab_focus()
+	return view
+
+
+func test_the_graph_is_one_keyboard_ring():
+	var view := _make_view()
+	var ring: Array[Control] = [
+		view, view._arrows_button, view._relayout_button, view._fit_button,
+	]
+	for i in ring.size():
+		var c: Control = ring[i]
+		var next: Control = ring[(i + 1) % ring.size()]
+		var prev: Control = ring[(i - 1 + ring.size()) % ring.size()]
+		assert_ne(c.focus_mode, Control.FOCUS_NONE, "%s must be a tab stop" % c.name)
+		assert_eq(c.get_node(c.focus_next), next, "%s must tab to %s" % [c.name, next.name])
+		assert_eq(c.get_node(c.focus_previous), prev,
+			"%s must shift-tab to %s" % [c.name, prev.name])
+
+
+func test_arrows_pan_and_shift_pans_four_times_further():
+	var view := _centred_view()
+	assert_eq(view.get_viewport().gui_get_focus_owner(), view,
+		"precondition: the canvas holds the keyboard")
+	var x := view._pan.x
+	await _press(KEY_RIGHT)
+	assert_almost_eq(view._pan.x, x + VaultGraphView.PAN_STEP, 0.01)
+	await _press(KEY_RIGHT, true)
+	assert_almost_eq(view._pan.x,
+		x + VaultGraphView.PAN_STEP * (1.0 + VaultGraphView.PAN_FAST), 0.01)
+	var y := view._pan.y
+	await _press(KEY_DOWN)
+	assert_almost_eq(view._pan.y, y + VaultGraphView.PAN_STEP, 0.01)
+	await _press(KEY_UP)
+	assert_almost_eq(view._pan.y, y, 0.01, "the four arrows are up/down/left/right pan")
+
+
+func test_the_zoom_keys_scale_about_the_crosshair():
+	var view := _centred_view()
+	var zoom := view._zoom
+	await _press(KEY_EQUAL)
+	assert_gt(view._zoom, zoom, "`=` (the unshifted `+`) zooms in")
+	assert_eq(view.cursor_hit(), "a.md", "the node under the crosshair stays under it")
+	await _press(KEY_MINUS)
+	assert_almost_eq(view._zoom, zoom, 0.0001, "`-` undoes the step")
+	assert_almost_eq(view.to_world(view._cursor_screen()).length(), 0.0, 0.0001,
+		"zooming about the crosshair keeps the world point fixed")
+
+
+func test_enter_opens_the_node_under_the_crosshair():
+	var view := _centred_view()
+	var opened := []
+	view.node_activated.connect(func(id: String): opened.append(id))
+	assert_eq(view.cursor_hit(), "a.md", "the crosshair covers the node at the centre")
+	await _press(KEY_ENTER)
+	assert_eq(opened, ["a.md"])
+
+
+func test_enter_resolves_a_ghost_under_the_crosshair():
+	var view := _centred_view()
+	view._pan = view.size * 0.5 - (view.positions["ghost:Missing"] as Vector2) * view._zoom
+	var resolved := []
+	view.ghost_activated.connect(func(target: String): resolved.append(target))
+	assert_eq(view.cursor_hit(), "ghost:Missing")
+	await _press(KEY_ENTER)
+	assert_eq(resolved, ["Missing"], "a ghost resolves to its bare target")
+
+
+func test_enter_on_an_edge_opens_its_weight_actions():
+	var view := _make_view()
+	view.positions = {
+		"a.md": Vector2(-120, 0),
+		"b.md": Vector2(120, 0),
+		"ghost:Missing": Vector2(0, 900),
+	}
+	view._zoom = 1.0
+	view._pan = view.size * 0.5
+	view.grab_focus()
+	assert_eq(view.cursor_hit(), "", "the crosshair is on the segment, not on a node")
+	await _press(KEY_ENTER)
+	assert_eq(str(view._pending_edge.get("a", "")), "a.md",
+		"Enter opened the weight actions for the edge under the crosshair")
+	assert_eq(str(view._pending_edge.get("b", "")), "b.md")
+	view._edge_menu.hide()

@@ -54,6 +54,13 @@ const MAX_ALWAYS_LABELS := 120
 ## A dragged node may not be moved past this world box (roughly the layout box
 ## and a generous margin), so it cannot be lost off-canvas by accident.
 const DRAG_BOUND := 4000.0
+## Screen pixels one arrow-key press pans, and the multiplier while Shift is
+## held. The keyboard's camera is the canvas centre (the crosshair), so panning
+## is how the keyboard walks the map.
+const PAN_STEP := 48.0
+const PAN_FAST := 4.0
+## The crosshair's arms, in screen pixels.
+const CURSOR_ARM := 7.0
 
 var nodes: Array = []
 var edges: Array = []
@@ -92,6 +99,11 @@ func _ready() -> void:
 	clip_contents = true
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_build_chrome()
+	# The focus ring and the crosshair are drawn by this canvas, so a focus
+	# change is a repaint. `KeyboardFocus.ring` in `_build_chrome` is what makes
+	# the canvas a tab stop in the first place.
+	focus_entered.connect(queue_redraw)
+	focus_exited.connect(queue_redraw)
 	set_process_unhandled_key_input(false)
 
 
@@ -236,6 +248,13 @@ func _build_chrome() -> void:
 	_fit_button.pressed.connect(fit_to_view)
 	controls.add_child(_fit_button)
 
+	# The graph is one keyboard ring: the canvas first, then its three actions,
+	# wrapping back to the canvas. The ring is what makes any of them tab stops
+	# (`KeyboardFocus.ring` sets `focus_mode`), so Tab stays on the surface the
+	# user is looking at instead of walking into the sidebar, and Escape (the
+	# pane's Back) leaves the graph.
+	KeyboardFocus.ring([self, _arrows_button, _relayout_button, _fit_button])
+
 	# The edge menu is the authored layer's only human control: right-click an
 	# edge to set or clear its declared weight. Ghost edges are not offered —
 	# a declaration names two notes.
@@ -248,7 +267,7 @@ func _build_chrome() -> void:
 
 	_hint = Label.new()
 	_hint.name = "GraphHint"
-	_hint.text = "Drag to pan · Wheel to zoom · Drag a node to move it · Click a note to open it · Right-click an edge to declare its weight"
+	_hint.text = "Drag to pan · Wheel to zoom · Drag a node to move it · Click a note to open it · Right-click an edge to declare its weight · Arrows pan · +/− zoom · Enter opens what the crosshair covers"
 	_hint.add_theme_font_size_override("font_size", 10)
 	_hint.modulate = Color(1, 1, 1, 0.55)
 	_hint.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
@@ -264,7 +283,6 @@ func _build_chrome() -> void:
 func _make_button(text: String, tooltip: String) -> Button:
 	var button := Button.new()
 	button.text = text
-	button.focus_mode = Control.FOCUS_NONE
 	button.tooltip_text = tooltip
 	button.add_theme_font_size_override("font_size", 11)
 	return button
@@ -364,6 +382,67 @@ func _gui_input(event: InputEvent) -> void:
 			queue_redraw()
 		else:
 			_hover(event.position)
+	elif event is InputEventKey:
+		if event.pressed and not event.echo and _handle_key(event):
+			accept_event()
+
+## The screen point the keyboard acts from: the canvas centre. Panning moves
+## the world under it, which is how a keyboard user reaches any node.
+func _cursor_screen() -> Vector2:
+	return size * 0.5
+
+## The node under the crosshair — what Enter acts on, and what the canvas
+## highlights while it holds focus. One answer for the draw and the gesture, so
+## the highlight cannot disagree with the action.
+func cursor_hit() -> String:
+	if nodes.is_empty():
+		return ""
+	return VaultGraphModel.hit_test(
+		nodes, positions, to_world(_cursor_screen()), HIT_RADIUS / _zoom
+	)
+
+## Every pointer gesture has a key, except dragging one node (that is a layout
+## choice, and Relayout resets it): arrows pan the view, Shift makes that four
+## times faster, `+`/`-` zoom about the crosshair, and Enter acts on what the
+## crosshair covers — a note opens, a ghost resolves, and an edge offers its
+## declared-weight menu (the same `hit_test`/`hit_test_edge` the pointer uses,
+## not a second navigation model).
+func _handle_key(event: InputEventKey) -> bool:
+	var step := PAN_STEP * (PAN_FAST if event.shift_pressed else 1.0)
+	match event.keycode:
+		KEY_LEFT:
+			_pan.x -= step
+		KEY_RIGHT:
+			_pan.x += step
+		KEY_UP:
+			_pan.y -= step
+		KEY_DOWN:
+			_pan.y += step
+		KEY_PLUS, KEY_EQUAL, KEY_KP_ADD:
+			zoom_at(_cursor_screen(), ZOOM_STEP)
+		KEY_MINUS, KEY_KP_SUBTRACT:
+			zoom_at(_cursor_screen(), 1.0 / ZOOM_STEP)
+		KEY_ENTER, KEY_KP_ENTER:
+			_activate_at_cursor()
+		_:
+			return false
+	queue_redraw()
+	return true
+
+## Enter's action: the node under the crosshair first (an 11 px radius beats
+## the edge's 6 px one), otherwise the edge under it. A ghost edge is never
+## offered a weight — a declaration names two notes.
+func _activate_at_cursor() -> void:
+	var hit := cursor_hit()
+	if hit != "":
+		if hit.begins_with("ghost:"):
+			ghost_activated.emit(hit.trim_prefix("ghost:"))
+		else:
+			node_activated.emit(hit)
+		return
+	var edge := _edge_at(_cursor_screen())
+	if not edge.is_empty() and not bool(edge.get("ghost", false)):
+		_open_edge_menu(_cursor_screen())
 
 
 func _begin_press(screen_point: Vector2) -> void:
@@ -452,6 +531,13 @@ func _on_edge_menu_pressed(id: int) -> void:
 # ── Drawing ────────────────────────────────────────────────────────────
 
 func _draw() -> void:
+	# The focus ring is the only visible sign that the canvas holds the
+	# keyboard: a custom-drawn control has no theme stylebox to draw it.
+	if has_focus():
+		draw_rect(
+			Rect2(Vector2(1, 1), size - Vector2(2, 2)),
+			Palette.ACCENT_COLOR, false, 2.0
+		)
 	if nodes.is_empty():
 		_draw_empty()
 		return
@@ -460,6 +546,7 @@ func _draw() -> void:
 	var accent := Palette.ACCENT_COLOR
 	var edge_color := Color(text_color, 0.28)
 	var selected_edge := Color(accent, 0.85)
+	var cursor := cursor_hit() if has_focus() else ""
 	var labels_all := _zoom >= LABEL_ZOOM and nodes.size() <= MAX_ALWAYS_LABELS
 	var font := get_theme_default_font()
 	# A fixed, small label size: the graph is a map, not a text view, and the
@@ -520,7 +607,12 @@ func _draw() -> void:
 			draw_arc(point, radius + 2.0, 0.0, TAU, 24, Color(text_color, 0.5), 1.0, true)
 		if id == selected_id:
 			draw_arc(point, radius + 3.5, 0.0, TAU, 28, accent, 2.0, true)
-		if labels_all or id == hovered_id or id == selected_id:
+		# The crosshair's node: what Enter would open. Drawn outside the
+		# selection ring, so "the open note" and "where the keyboard is aiming"
+		# stay tellable apart when they are the same node.
+		if id == cursor:
+			draw_arc(point, radius + 5.5, 0.0, TAU, 32, Color(accent, 0.9), 1.5, true)
+		if labels_all or id == hovered_id or id == selected_id or id == cursor:
 			var label := str(node.get("label", id))
 			var label_color := accent if id == selected_id else text_color
 			if ghost:
@@ -534,6 +626,12 @@ func _draw() -> void:
 				font_size,
 				label_color
 			)
+	# Last, so the crosshair sits over the graph it aims at.
+	if has_focus():
+		var mid := _cursor_screen()
+		var ink := Color(accent, 0.9)
+		draw_line(mid - Vector2(CURSOR_ARM, 0), mid + Vector2(CURSOR_ARM, 0), ink, 1.5, true)
+		draw_line(mid - Vector2(0, CURSOR_ARM), mid + Vector2(0, CURSOR_ARM), ink, 1.5, true)
 
 
 func _draw_empty() -> void:

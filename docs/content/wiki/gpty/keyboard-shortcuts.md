@@ -71,6 +71,18 @@ The wiki pane's editor saves explicitly: the Save button or `Ctrl+S` writes the 
 
 The note toolbar — Edit / Split / Preview, Rename, Delete and Save — is a keyboard ring: `Tab` moves through it in visual order and wraps. A focused editor keeps `Tab` for indentation, so `Ctrl+Shift+K` is the way in from the buffer, and `Escape` in the toolbar returns to the buffer without leaving the note. Only the buffer's own `Escape` goes back to the list, so the ladder is one level out per press: toolbar → buffer → list. With no note open, or in `Preview` mode where there is no buffer on screen, the chord does nothing and the toolbar is reachable with plain `Tab` from Back.
 
+## Vault link graph
+
+| Input | Action |
+|---|---|
+| `Tab` / `Shift+Tab` | Move through the canvas, **Arrows**, **Relayout** and **Fit** — one ring |
+| `←` `→` `↑` `↓` | Pan the map; hold `Shift` to pan four times further |
+| `+` / `-` | Zoom about the crosshair at the canvas centre |
+| `Enter` | Act on what the crosshair covers: open the note, create the note a ghost stands for, or open an edge's weight actions |
+| `Escape` | Back to the note list |
+
+Opening the graph hands the keyboard to the canvas, and the canvas draws a focus frame and the crosshair while it holds the keyboard; Escape leaves for the list the way it does from a note. The crosshair is the canvas centre, so panning is how the keyboard walks the map. `Enter` resolves through the same hit test the pointer uses, so the node that is highlighted is the node that opens; on an edge (nothing under the crosshair) it offers the declared-weight actions instead. Dragging one node to rearrange the map stays a pointer gesture — **Relayout** resets the arrangement from the keyboard.
+
 ## Where shortcuts come from
 
 Workspace shortcuts are registered once at startup, with fixed bindings. Pane-type spawn shortcuts are registered from the pane registry, so the tooltip on a sidebar button always names the same chord that actually works. Terminal chords are handled inside the terminal pane's keyboard path rather than through the global action map, which is why `Ctrl+V` and `Ctrl+F` can pass through to programs while `Ctrl+Shift+V` and `Ctrl+Shift+F` do not.

@@ -63,7 +63,7 @@ godot/
         │   ├── concept_graph_editor.gd # Visual rule editor overlay (GraphEdit)
         │   ├── concept_graph_model.gd  # Pure canvas/build/validate/compile logic
         │   ├── vault_graph_model.gd    # Pure vault link-graph normalize/layout/hit-test
-        │   ├── vault_graph_view.gd     # Custom-drawn vault link-graph canvas
+        │   ├── vault_graph_view.gd     # Custom-drawn link-graph canvas (pointer + keyboard, focus ring)
         │   ├── link_weights.gd         # Pure declared-weight vocabulary (paths, range, lookup)
         │   ├── palette.gd       # Shared UI accent colors
         │   ├── toast_overlay.gd

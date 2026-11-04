@@ -1747,3 +1747,37 @@ func test_the_weight_question_is_one_ask_at_a_time():
 	assert_eq(_dialogs_of(pane)[0].name, "WeightConfirm")
 	pane._ask_declared_weight("a.md", "b.md", 0)
 	assert_eq(_dialogs_of(pane).size(), 1, "the second question does not stack")
+
+
+# ── The graph's keyboard entry ─────────────────────────────────────────
+#
+# The link map is the pane's only surface while it is up, so it is where the
+# keyboard goes — the same rule the note view follows for its buffer
+# (`WikiPane.keyboard_entry`).
+
+func test_opening_the_graph_hands_the_keyboard_to_the_canvas():
+	_write(_tmp.path_join("note.md"), "# Note\n\n[[b]]\n")
+	_write(_tmp.path_join("b.md"), "# B\n")
+	var pane := _make_pane(_tmp)
+
+	pane._graph_button.pressed.emit()
+
+	assert_true(pane._graph_view.visible, "the map is up")
+	assert_eq(pane.get_viewport().gui_get_focus_owner(), pane._graph_view,
+		"the map takes the keyboard; the button that opened it does not keep it")
+	assert_eq(pane.keyboard_entry(), pane._graph_view,
+		"entering the pane aims at the map while it is showing")
+
+
+func test_escape_from_the_graph_canvas_returns_to_the_list():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	var pane := _make_pane(_tmp)
+	pane._show_graph()
+	pane._graph_view.grab_focus()
+
+	await _escape()
+
+	assert_false(pane._graph_view.visible, "Escape leaves the map")
+	assert_true(pane._list.visible, "the list is back")
+	assert_eq(pane.get_viewport().gui_get_focus_owner(), pane._list,
+		"the list takes the keyboard back")
