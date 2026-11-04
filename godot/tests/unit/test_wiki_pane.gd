@@ -272,6 +272,93 @@ func _type_into(pane: WikiPane, text: String) -> void:
 	await wait_process_frames(1)
 
 
+## Dispatch Escape the way a keyboard does: through the GUI, from the control
+## that holds focus. The pane handles it in `_gui_input`, reached only by that
+## bubbling, so this proves the path a real key takes rather than calling the
+## handler directly.
+func _escape() -> void:
+	var ev := InputEventKey.new()
+	ev.keycode = KEY_ESCAPE
+	ev.physical_keycode = KEY_ESCAPE
+	ev.pressed = true
+	Input.parse_input_event(ev)
+	Input.flush_buffered_events()
+	await wait_process_frames(1)
+	var up: InputEventKey = ev.duplicate()
+	up.pressed = false
+	Input.parse_input_event(up)
+	Input.flush_buffered_events()
+	await wait_process_frames(1)
+
+
+func _all_controls(node: Node, out: Array = []) -> Array:
+	if node is Control:
+		out.append(node)
+	for child in node.get_children():
+		_all_controls(child, out)
+	return out
+
+
+func test_opening_a_note_gives_the_keyboard_to_the_buffer():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	var pane := _make_pane(_tmp)
+	pane._list.item_activated.emit(0)
+	assert_eq(pane.get_viewport().gui_get_focus_owner(), pane._editor,
+		"the buffer takes the keyboard when a note opens")
+
+
+func test_escape_returns_from_a_note_to_the_list_without_writing():
+	var path := _write(_tmp.path_join("note.md"), "# Note\n")
+	var pane := _make_pane(_tmp)
+	pane._list.item_activated.emit(0)
+	assert_true(pane._note_box.visible)
+
+	await _escape()
+
+	assert_false(pane._note_box.visible, "Escape leaves the note")
+	assert_true(pane._list.visible, "the list is back")
+	assert_eq(_read(path), "# Note\n", "leaving must not write the note")
+	assert_eq(pane.get_viewport().gui_get_focus_owner(), pane._list,
+		"the list takes the keyboard back")
+
+
+func test_escape_from_a_dirty_note_asks_first_and_cancel_keeps_it():
+	var path := _write(_tmp.path_join("note.md"), "# Note\n")
+	var pane := _make_pane(_tmp)
+	pane._list.item_activated.emit(0)
+	await _type_into(pane, "# Edited\n")
+
+	await _escape()
+
+	assert_true(pane._note_box.visible, "the note stays until the user answers")
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "Escape on a dirty note must ask first")
+	dialogs[0].canceled.emit()
+	await wait_process_frames(1)
+	assert_true(pane._note_box.visible, "canceling keeps the note")
+	assert_eq(_read(path), "# Note\n", "a canceled Escape writes nothing")
+	assert_eq(_dialogs_of(pane).size(), 0, "the question closes with the answer")
+
+
+func test_no_visible_wiki_action_is_mouse_only():
+	# A note with a link so the link rows exist too: they are actions (open the
+	# target) and must not be pointer-only.
+	_write(_tmp.path_join("other.md"), "# Other\n")
+	_write(_tmp.path_join("note.md"), "# Note\n\n[[other]]\n")
+	var pane := _make_pane(_tmp)
+	pane._list.item_activated.emit(0)
+	await wait_process_frames(1)
+
+	var mouse_only: Array[String] = []
+	for c in _all_controls(pane):
+		if c is BaseButton and c.is_visible_in_tree() \
+				and c.focus_mode == Control.FOCUS_NONE \
+				and not (c as BaseButton).disabled:
+			mouse_only.append(str(c.name))
+	assert_eq(mouse_only, [],
+		"every visible wiki action needs a keyboard path: %s" % [mouse_only])
+
+
 func test_opening_a_note_fills_the_editor_and_saving_writes_it_back():
 	_write(_tmp.path_join("note.md"), "# One\n\nbody\n")
 	var pane := _make_pane(_tmp)

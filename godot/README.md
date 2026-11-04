@@ -59,6 +59,7 @@ godot/
         │   ├── settings_panel.gd
         │   ├── overlay_panel.gd  # Shared keyboard contract for the four overlays
         │   ├── command_palette.gd # Ctrl+Shift+P command list (OverlayPanel)
+        │   ├── keyboard_focus.gd # The one keyboard-entry walk (overlay focus, read-only pane content)
         │   ├── concept_graph_editor.gd # Visual rule editor overlay (GraphEdit)
         │   ├── concept_graph_model.gd  # Pure canvas/build/validate/compile logic
         │   ├── vault_graph_model.gd    # Pure vault link-graph normalize/layout/hit-test

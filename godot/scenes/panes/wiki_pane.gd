@@ -151,7 +151,6 @@ func _ready():
 	_back = Button.new()
 	_back.name = "BackToNotes"
 	_back.text = "Back to notes"
-	_back.focus_mode = Control.FOCUS_NONE
 	_back.pressed.connect(func(): _request_leave(func(proceed: bool):
 		if proceed:
 			_show_list()
@@ -161,7 +160,6 @@ func _ready():
 	_new_button = Button.new()
 	_new_button.name = "NewNote"
 	_new_button.text = "New note"
-	_new_button.focus_mode = Control.FOCUS_NONE
 	_new_button.tooltip_text = "Create a Markdown note in this vault"
 	_new_button.visible = false
 	_new_button.pressed.connect(_ask_new_note)
@@ -179,7 +177,6 @@ func _ready():
 	_graph_button = Button.new()
 	_graph_button.name = "GraphView"
 	_graph_button.text = "Graph"
-	_graph_button.focus_mode = Control.FOCUS_NONE
 	_graph_button.tooltip_text = "Map this vault's links (re-reads the index)"
 	_graph_button.pressed.connect(_show_graph)
 	top.add_child(_graph_button)
@@ -227,7 +224,6 @@ func _ready():
 		button.name = "Mode_" + mode
 		button.text = mode.capitalize()
 		button.toggle_mode = true
-		button.focus_mode = Control.FOCUS_NONE
 		button.button_group = group
 		button.tooltip_text = {
 			"edit": "Source only (Ctrl+S saves)",
@@ -250,7 +246,6 @@ func _ready():
 	_rename_button = Button.new()
 	_rename_button.name = "RenameNote"
 	_rename_button.text = "Rename"
-	_rename_button.focus_mode = Control.FOCUS_NONE
 	_rename_button.tooltip_text = "Move this note to another vault-relative path"
 	_rename_button.pressed.connect(_ask_rename)
 	toolbar.add_child(_rename_button)
@@ -258,7 +253,6 @@ func _ready():
 	_delete_button = Button.new()
 	_delete_button.name = "DeleteNote"
 	_delete_button.text = "Delete"
-	_delete_button.focus_mode = Control.FOCUS_NONE
 	_delete_button.tooltip_text = "Delete this note from the vault"
 	_delete_button.pressed.connect(_ask_delete)
 	toolbar.add_child(_delete_button)
@@ -266,7 +260,6 @@ func _ready():
 	_save_button = Button.new()
 	_save_button.name = "Save"
 	_save_button.text = "Save"
-	_save_button.focus_mode = Control.FOCUS_NONE
 	_save_button.tooltip_text = "Write the note back to disk (Ctrl+S)"
 	_save_button.pressed.connect(func(): _save())
 	toolbar.add_child(_save_button)
@@ -518,6 +511,13 @@ func _show_placeholder(text: String, searchable := true) -> void:
 ## vault, so the list also reflects an edit that just landed.
 func _show_list() -> void:
 	_refresh()
+	# And the keyboard follows it back: the note view's controls are hidden
+	# now, so the list (or the search field when there is no list to show)
+	# has to take focus or leaving a note strands the keyboard.
+	if _list.visible:
+		_list.grab_focus()
+	elif _search.visible:
+		_search.grab_focus()
 
 ## Forget the open note. Only drops state — saving before leaving is
 ## `_request_leave`'s business — so a stale path can never be written by a
@@ -642,6 +642,15 @@ func _open_note(rel: String, fragment := "", line := 0) -> void:
 	# The index's view of this note (outgoing mentions and backlinks); it is
 	# rebuilt, not polled, and a save re-indexes so it refreshes again there.
 	_refresh_links()
+	# The keyboard follows the note: the list it replaced is hidden, so focus
+	# left there would be nowhere. The buffer is where a reader continues; a
+	# note past the cap is read-only, and Back (the only action left for it)
+	# takes the keyboard instead. Before `_offer_scratch`, whose question owns
+	# the keyboard itself.
+	if _editor.editable:
+		_editor.grab_focus()
+	else:
+		_back.grab_focus()
 	# Last, so the note is on screen when the question appears.
 	_offer_scratch(rel)
 
@@ -898,7 +907,6 @@ func _add_link_row(parent: VBoxContainer, text: String, action: Callable, toolti
 	var row := Button.new()
 	row.flat = true
 	row.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	row.focus_mode = Control.FOCUS_NONE
 	row.text = text
 	row.tooltip_text = tooltip
 	row.add_theme_font_size_override("font_size", 12)
@@ -1599,6 +1607,34 @@ func _save_after_dialog(dialog: Window, answer: Callable, force := false) -> voi
 	dialog.queue_free()
 	await get_tree().process_frame
 	_save(force, answer)
+
+## Escape is Back. The note view (and the graph over it) hides the list and the
+## search, so without this a note is a keyboard trap: the editor consumes Tab
+## for indentation and nothing else returns to the list.
+##
+## Read at the raw input stage, before GUI: `_gui_input` is delivered to the
+## focused control only (measured on 4.7.2 - it does not bubble to ancestors),
+## and whether the editor, the button or the list holds focus must not change
+## the answer. The focus-owner check is what scopes it: an inactive wiki pane in
+## the same window, or one behind an overlay, never reacts, and the terminal's
+## own Escape is consumed in `_handle_keyboard` before this stage.
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventKey) or not event.pressed or event.echo:
+		return
+	if event.keycode != KEY_ESCAPE:
+		return
+	if not (_note_box.visible or _graph_view.visible):
+		return
+	var owner := get_viewport().gui_get_focus_owner()
+	if owner == null or not (owner == self or is_ancestor_of(owner)):
+		return
+	get_viewport().set_input_as_handled()
+	# The same guarded leave the Back button uses: a dirty buffer asks
+	# Save/Discard/Cancel, and Cancel keeps the note open.
+	_request_leave(func(proceed: bool):
+		if proceed:
+			_show_list()
+	)
 
 ## Ask before the buffer is lost. Every path that would end its life comes
 ## here — leaving the note, a pane close, a layout reset, quitting the app —

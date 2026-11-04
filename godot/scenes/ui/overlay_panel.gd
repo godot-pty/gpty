@@ -8,9 +8,9 @@ class_name OverlayPanel
 ## focus nor blocks the terminal behind it":
 ##
 ##  - `open()` shows the overlay and takes the keyboard: it remembers who had
-##    focus and focuses a control inside, so a typed character lands here
-##    instead of in the terminal behind it (a terminal only reads keys while it
-##    owns focus).
+##    focus and focuses a control inside (`KeyboardFocus.first_reachable`), so a
+##    typed character lands here instead of in the terminal behind it (a
+##    terminal only reads keys while it owns focus).
 ##  - `Workspace` handles Escape in `_input`, a stage no `_gui_input` can
 ##    pre-empt, and calls `close()`. A focused terminal can therefore never turn
 ##    Escape into the raw ESC byte it would otherwise send its child.
@@ -39,7 +39,7 @@ func open() -> void:
 	visible = true
 	var target := _initial_focus()
 	if target == null or not target.is_visible_in_tree():
-		target = first_focusable(self)
+		target = KeyboardFocus.first_reachable(self)
 	if target != null:
 		target.grab_focus()
 
@@ -75,21 +75,3 @@ func _before_close() -> bool:
 ## Release state that only makes sense while the overlay is visible.
 func _after_close() -> void:
 	pass
-
-## The first control under `root`, in tree order, that keyboard traversal can
-## reach — the one Tab would land on first. Hidden, disabled and
-## `FOCUS_NONE` controls are skipped, and a hidden branch is not searched.
-static func first_focusable(root: Control) -> Control:
-	for child in root.get_children():
-		if not child is Control:
-			continue
-		var c := child as Control
-		if not c.visible or c.is_queued_for_deletion():
-			continue
-		if c.focus_mode != Control.FOCUS_NONE \
-				and not (c is BaseButton and (c as BaseButton).disabled):
-			return c
-		var nested := first_focusable(c)
-		if nested != null:
-			return nested
-	return null

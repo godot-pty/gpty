@@ -14,6 +14,9 @@ class_name TerminalManager
 const TITLE_BAR_HEIGHT = 26
 const BUTTON_MIN_WIDTH = 22
 const BUTTON_MIN_HEIGHT = 18
+## The title bar's button row, named so the chrome keyboard path can find it
+## (`focus_title_bar`) and a test can name one button.
+const TITLE_BAR_BUTTONS = "TitleBarButtons"
 
 const _PaneScripts := {
 	"terminal":    preload("res://scenes/terminal/terminal_pane.gd"),
@@ -144,6 +147,11 @@ func _build_wrapper_body(body: Control, title: String) -> Control:
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(body)
+	# A traversal that leaves the body visits this pane's own chrome before the
+	# next tile's (tree order would otherwise walk into the neighbouring pane).
+	var row := vbox.get_node_or_null("TitleBar/" + TITLE_BAR_BUTTONS)
+	if row != null and row.get_child_count() > 0 and body is Control:
+		(body as Control).focus_next = body.get_path_to(row.get_child(0))
 
 	# Edge strips: they must be the wrapper's topmost children, because Godot
 	# picks the last sibling first and the pane body consumes every event over
@@ -241,6 +249,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 
 
 	var btn_hbox = HBoxContainer.new()
+	btn_hbox.name = TITLE_BAR_BUTTONS
 	btn_hbox.add_theme_constant_override("separation", 2)
 	btn_hbox.anchor_left = 1.0; btn_hbox.anchor_right = 1.0
 	btn_hbox.anchor_top = 0.0; btn_hbox.anchor_bottom = 1.0
@@ -250,7 +259,8 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	bar.add_child(btn_hbox)
 
 	var min_btn = Button.new()
-	min_btn.text = Icons.MINIMIZE; min_btn.focus_mode = Control.FOCUS_NONE
+	min_btn.name = "Minimize"
+	min_btn.text = Icons.MINIMIZE
 	min_btn.tooltip_text = "Minimize / Restore"
 	Icons.style_button(min_btn)
 	min_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
@@ -258,7 +268,8 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	btn_hbox.add_child(min_btn)
 
 	var pos_swap_btn = Button.new()
-	pos_swap_btn.text = Icons.SWAP; pos_swap_btn.focus_mode = Control.FOCUS_NONE
+	pos_swap_btn.name = "SwapPosition"
+	pos_swap_btn.text = Icons.SWAP
 	Icons.style_button(pos_swap_btn)
 	pos_swap_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	pos_swap_btn.tooltip_text = "Swap position with another pane"
@@ -269,7 +280,8 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	)
 	btn_hbox.add_child(pos_swap_btn)
 	var swap_btn = Button.new()
-	swap_btn.text = Icons.RESET; swap_btn.focus_mode = Control.FOCUS_NONE
+	swap_btn.name = "ChangeType"
+	swap_btn.text = Icons.RESET
 	swap_btn.tooltip_text = "Change pane type"
 	Icons.style_button(swap_btn)
 	swap_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
@@ -293,7 +305,8 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	root.add_child(swap_menu)
 
 	var settings_btn = Button.new()
-	settings_btn.text = Icons.SETTINGS; settings_btn.focus_mode = Control.FOCUS_NONE
+	settings_btn.name = "PaneSettings"
+	settings_btn.text = Icons.SETTINGS
 	settings_btn.tooltip_text = "Pane settings"
 	Icons.style_button(settings_btn)
 	settings_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
@@ -301,14 +314,68 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	btn_hbox.add_child(settings_btn)
 
 	var close_btn = Button.new()
-	close_btn.text = Icons.CLOSE; close_btn.focus_mode = Control.FOCUS_NONE
+	close_btn.name = "ClosePane"
+	close_btn.text = Icons.CLOSE
 	close_btn.tooltip_text = "Close pane"
 	Icons.style_button(close_btn)
 	close_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	close_btn.pressed.connect(func(): _handle_close(_find_body(root)))
 	btn_hbox.add_child(close_btn)
 
+	_wire_chrome_keyboard(btn_hbox)
+
 	return lbl
+
+## Make the title bar's buttons a keyboard toolbar: an explicit ring
+## (`focus_next`/`focus_previous` between the buttons in visual order), so Tab
+## moves through the chrome and wraps instead of leaking into the next pane's
+## tile. A focused terminal consumes Tab for its child, so the way in is
+## `Workspace`'s chrome shortcut and the way out is Escape in
+## `Workspace._escape_pane_chrome`; without both, the buttons would be reachable
+## only by a traversal no user can trigger.
+func _wire_chrome_keyboard(row: HBoxContainer) -> void:
+	var buttons: Array[Button] = []
+	for child in row.get_children():
+		if child is Button:
+			buttons.append(child as Button)
+	for i in buttons.size():
+		var b := buttons[i]
+		b.focus_mode = Control.FOCUS_ALL
+		b.focus_next = b.get_path_to(buttons[(i + 1) % buttons.size()])
+		b.focus_previous = b.get_path_to(buttons[(i - 1 + buttons.size()) % buttons.size()])
+
+## Focus the first title-bar button of `body`'s tile. False when that pane has
+## no title bar to focus (the bar is hidden by a setting, or the body is gone).
+func focus_title_bar(body: Control) -> bool:
+	if not (body is Control) or not is_instance_valid(body):
+		return false
+	for t in tiles:
+		if _find_body(t.wrapper) != body:
+			continue
+		var bar: Control = t.wrapper.get_node_or_null("BodyVBox/TitleBar")
+		if bar == null or not bar.visible:
+			return false
+		for child in bar.get_node(TITLE_BAR_BUTTONS).get_children():
+			if child is Control and (child as Control).focus_mode != Control.FOCUS_NONE:
+				(child as Control).grab_focus()
+				return true
+		return false
+	return false
+
+## Chrome actions end with the keyboard back in the pane. A mouse click focuses
+## the clicked button (Godot does that for any `FOCUS_ALL` control), so a pane
+## whose action leaves it on screen would otherwise swallow the next keystroke.
+## A terminal takes the keyboard itself; a read-only pane cannot hold focus, so
+## its content is where the user continues (the wiki's note list or search).
+func _return_focus_to_body(body: Control) -> void:
+	if body == null or not is_instance_valid(body) or not body.is_visible_in_tree():
+		return
+	if body is TerminalPane:
+		body._take_focus()
+		return
+	var target := KeyboardFocus.first_reachable(body)
+	if target != null:
+		target.grab_focus()
 
 # ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -539,6 +606,9 @@ func _toggle_minimize(w: Control, btn: Button):
 	if body:
 		body.visible = not body.visible
 		btn.text = Icons.MINIMIZE if body.visible else Icons.RESTORE
+		# Restoring brings the pane back and the keyboard with it (hiding it
+		# leaves nothing to focus, on purpose).
+		_return_focus_to_body(body)
 
 func _handle_close(body: Control):
 	if on_close.is_valid():
@@ -620,6 +690,7 @@ func show_position_swap_popup(for_body: Control, menu_parent: Control, at_pos: V
 			ToastManager.warn("Swap cancelled — that pane is no longer open")
 			return
 		_swap_tile_positions(pair.x, pair.y)
+		_return_focus_to_body(for_body)
 		tiles_resized.emit()
 	)
 	menu_parent.add_child(menu)

@@ -99,6 +99,14 @@ func test_colliding_punctuation_keys():
 			"keycode %d must send '%s'" % [keycode, cases[keycode]])
 
 
+func test_escape_still_reaches_the_child():
+	# The title bar's Escape (which hands the keyboard back to the pane) only
+	# runs for a key that bubbles out of a focused bar button: a focused pane
+	# consumes Escape in `_handle_keyboard`, so the child keeps its ESC.
+	_pane._gui_input(_key_event(KEY_ESCAPE, 0))
+	assert_eq(_pane.sent, ["\u001b"], "Escape is the child's ESC, not a gpty action")
+
+
 func test_special_keys_still_mapped():
 	# Positive controls: the printable guard must not break special keys.
 	_pane._handle_keyboard(_key_event(KEY_LEFT, 0))

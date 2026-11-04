@@ -146,6 +146,7 @@ func _ready():
 	ShortcutManager.register("app:close_pane", "Ctrl+Shift+W", func(): _kill_last())
 	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _toggle_sidebar)
 	ShortcutManager.register("app:toggle_palette", "Ctrl+Shift+P", _toggle_palette)
+	ShortcutManager.register("app:focus_pane_chrome", "Ctrl+Shift+E", _focus_active_pane_chrome)
 	ShortcutManager.register("app:toggle_fullscreen", "F11", _chrome.toggle_fullscreen)
 	ShortcutManager.register("app:toggle_fullscreen_alt", "Ctrl+Shift+M", _chrome.toggle_fullscreen)
 	ShortcutManager.register("app:reset_workspace", "Ctrl+Shift+R", func():
@@ -1538,6 +1539,42 @@ func _restore():
 # Overlay keyboard ownership
 # ═══════════════════════════════════════════════════════════════════════
 
+## Escape from a pane-chrome button hands the keyboard back to the pane. Chrome
+## is a toolbar of focusable buttons (`TerminalManager._wire_chrome_keyboard`);
+## a focused button has no typing and no other Escape meaning, so the key is
+## claimed here, at the raw stage, rather than in `_gui_input` (delivered to the
+## focused control only). A terminal's own Escape never gets here: its
+## `_handle_keyboard` accepts the event first.
+func _escape_pane_chrome() -> bool:
+	var owner := get_viewport().gui_get_focus_owner()
+	if owner == null:
+		return false
+	var ws := _active_workspace()
+	if ws.is_empty():
+		return false
+	for t in ws.tm.tiles:
+		var bar: Control = t.wrapper.get_node_or_null("BodyVBox/TitleBar")
+		if bar == null or not bar.is_ancestor_of(owner):
+			continue
+		ws.tm._return_focus_to_body(ws.tm._find_body(t.wrapper))
+		return true
+	return false
+
+## Move the keyboard from the active pane into its title bar. A focused
+## terminal consumes Tab for its child, so this is the only way a keyboard user
+## enters pane chrome; Escape in the bar returns to the pane, and the bar's
+## buttons ring among themselves (`TerminalManager._wire_chrome_keyboard`). An
+## open overlay keeps the keyboard: the shortcut does nothing while one is up.
+func _focus_active_pane_chrome() -> void:
+	if _keyboard_overlay() != null:
+		return
+	var ws := _active_workspace()
+	if ws.is_empty():
+		return
+	var body: Control = ws.tm.last_body
+	if body != null and is_instance_valid(body):
+		ws.tm.focus_title_bar(body)
+
 ## The overlay that owns the keyboard while it is visible, topmost first.
 ## Opening Settings closes Pane Settings, the concept editor opens over
 ## Settings and the palette can open over either, so this order is the stacking
@@ -1588,6 +1625,9 @@ func _input(event):
 		var overlay := _keyboard_overlay()
 		if overlay != null:
 			overlay.close()
+			get_viewport().set_input_as_handled()
+			return
+		if _escape_pane_chrome():
 			get_viewport().set_input_as_handled()
 			return
 	# An in-flight pane-edge drag owns the mouse the same way: it starts on a
