@@ -4,9 +4,9 @@
 
 <div align="center">
 
-  [![Build](https://img.shields.io/github/actions/workflow/status/godot-pty/gpty/ci.yml?branch=main)](https://github.com/godot-pty/gpty/actions/workflows/ci.yml) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/godot-pty/gpty/total) ![LLM-powered](https://img.shields.io/badge/LLM-powered-6A5ACD) [![Linux Foundation](https://img.shields.io/badge/Linux_Foundation-blue?logo=linuxfoundation&logoColor=white)](https://insights.linuxfoundation.org/project/godot-pty-gpty)
+  [![Build](https://img.shields.io/github/actions/workflow/status/godot-pty/gpty/ci.yml?branch=main)](https://github.com/godot-pty/gpty/actions/workflows/ci.yml) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/godot-pty/gpty/total) [![Linux Foundation](https://img.shields.io/badge/Linux_Foundation-blue?logo=linuxfoundation&logoColor=white)](https://insights.linuxfoundation.org/project/godot-pty-gpty)
 
-  [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16201/badge)](https://www.bestpractices.dev/projects/16201) [![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/godot-pty/gpty#verifying-releases) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/godot-pty/gpty/badge)](https://securityscorecards.dev/viewer/?uri=github.com/godot-pty/gpty)
+  [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/godot-pty/gpty/badge)](https://securityscorecards.dev/viewer/?uri=github.com/godot-pty/gpty) [![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/godot-pty/gpty#verifying-releases) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16201/badge)](https://www.bestpractices.dev/projects/16201) ![LLM-powered](https://img.shields.io/badge/LLM-powered-6A5ACD)
 
 </div>
 
@@ -38,12 +38,11 @@
 
 ### Status
 
-- Roadmap & documentation: https://gpty.dev/
-- See [SECURITY.md](SECURITY.md) for the threat model.
-- The repository tracks OpenSSF recommendations (registered as [OpenSSF Project 16201](https://www.bestpractices.dev/projects/16201)).
+- Documentation & Blogs: https://gpty.dev
 - Releases ship `SHA256SUMS` and build-provenance attestations; the control socket is owner-only.
+- The repository tracks OpenSSF recommendations; registered as [OpenSSF Project 16201](https://www.bestpractices.dev/projects/16201), scorecard: [securityscorecards.dev](https://securityscorecards.dev/viewer/?uri=github.com/godot-pty/gpty).
 - Release assets carry [SLSA Build Level 2](https://slsa.dev/spec/v1.0/levels) provenance.
-- The project is listed in [Linux Foundation LFX Health Insights](https://insights.linuxfoundation.org/project/godot-pty-gpty).
+- The project has been added to the [Linux Foundation](https://insights.linuxfoundation.org/project/godot-pty-gpty) & health will be tracked via LFX Insights.
 
 | Component | Choice | Rationale |
 |----------|--------|-----------|
