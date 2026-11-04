@@ -489,7 +489,7 @@ pub fn drain_events() -> Vec<OmpSemanticEvent> {
 
 fn random_hex(bytes: usize) -> std::io::Result<String> {
     let mut raw = vec![0_u8; bytes];
-    getrandom::getrandom(&mut raw).map_err(std::io::Error::other)?;
+    getrandom::fill(&mut raw).map_err(std::io::Error::other)?;
     let mut out = String::with_capacity(bytes * 2);
     for byte in raw {
         use std::fmt::Write;
