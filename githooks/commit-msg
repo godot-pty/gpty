@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# commit-msg: enforce Conventional Commits format
-# Validates the commit message against the exact types and scopes from AGENTS.md.
+# commit-msg: enforce Conventional Commits format and the DCO sign-off
+# Validates the message against the types and scopes from AGENTS.md, and
+# requires a Signed-off-by trailer (git commit -s).
 
 COMMIT_MSG_FILE="$1"
 COMMIT_MSG="$(cat "$COMMIT_MSG_FILE")"

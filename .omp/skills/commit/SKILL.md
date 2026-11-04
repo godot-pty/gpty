@@ -60,11 +60,13 @@ Scopes: match the project's approved scopes per AGENTS.md: `settings`, `terminal
 
 ### 5. Commit
 
+Every commit needs a DCO `Signed-off-by` trailer; `git commit -s` adds it and `githooks/commit-msg` refuses a commit without one.
+
 Commit each group separately with a meaningful message:
 
 ```bash
 git add <files in group>
-git commit -m "type(scope): description" -m "Additional body details if needed"
+git commit -s -m "type(scope): description" -m "Additional body details if needed"
 ```
 
 ### 6. Report
@@ -119,5 +121,6 @@ Do not guess, and do not re-run until it passes by luck.
   - **New GDScript files or autoloads**: → update `godot/README.md` structure section
   - **Feature completion**: phase checklist item marked done → update root `README.md` implementation phases
   - **Architecture changes**: data flow, concept system, new pitfalls → update root `README.md` and/or `AGENTS.md`
+- **DCO**: every commit carries a `Signed-off-by` trailer (`git commit -s`); `githooks/commit-msg` refuses a commit without one. Existing commits are grandfathered.
 - **Pre-commit gate**: `scripts/ci-check` runs automatically in the pre-commit hook (fast checks: fmt, workflow lint, clippy). The pre-push hook runs the full suite. Run `./scripts/ci-check` explicitly before staging to avoid amend churn. The hooks are the enforcement layer; this skill is the guided workflow that should produce passing commits.
 - **Done means both halves**: local gate green *and* the pushed run green (when the project has CI). Never report a task complete while its CI is red or never run.

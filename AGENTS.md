@@ -288,6 +288,7 @@ gPTY is evolving from a multi-terminal emulator into an ADE - a graphical PTY fo
 ## Commits
 
 - Format: [Conventional Commits](https://www.conventionalcommits.org/) - `feat(scope):`, `fix(scope):`, `chore(scope):`
+- DCO: every commit carries a `Signed-off-by` trailer (`git commit -s`); `githooks/commit-msg` refuses a commit without one.
 - Scopes: `settings`, `terminal`, `layout`, `workspace`, `sidebar`, `ui`, `gdext`, `core`, `cli`, `ipc`, `profiles`, `concepts`, `icons`, `ci`, `ai`, `inspector`
 - Workflow: Use the commit skill (`skill://commit`) to discover changes, group them logically, and produce correctly-formatted messages. The git hooks (pre-commit, commit-msg, pre-push) are the enforcement layer that catches bypasses.
 - CI gates: `pre-commit` runs fast checks (fmt, workflow lint, clippy). `pre-push` runs the full `./scripts/ci-check` suite. Install with `./scripts/install-hooks` once per clone.
@@ -295,7 +296,7 @@ gPTY is evolving from a multi-terminal emulator into an ADE - a graphical PTY fo
 ## Commit Discipline
 
 - Use the commit skill (`skill://commit`) as the normal workflow - it handles grouping, README freshness, and Conventional Commits.
-- The git hooks are the safety net: pre-commit catches fmt/lint issues, commit-msg enforces message format, pre-push runs the full CI suite.
+- The git hooks are the safety net: pre-commit catches fmt/lint issues, commit-msg enforces message format and the DCO sign-off, pre-push runs the full CI suite.
 - NEVER commit without running `./scripts/ci-check` first. If it fails, fix the failures before committing.
 - `cargo fmt` and `cargo clippy` run automatically in the pre-commit hook - but run them explicitly before staging to avoid amend churn.
 - If a test fails: fix the SOURCE code, not the test. Only update a test if the behavior change is intentional AND documented in the commit message body.
