@@ -1,4 +1,4 @@
-extends Control
+extends OverlayPanel
 class_name SettingsPanel
 
 ## Asks the workspace to open the visual concept editor over this panel.
@@ -25,11 +25,6 @@ func _ready():
 func _notification(what: int):
 	if what == NOTIFICATION_VISIBILITY_CHANGED and visible:
 		_refresh_history_size()
-
-func _unhandled_input(event):
-	if visible and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		visible = false
-		get_viewport().set_input_as_handled()
 
 func _build_ui():
 	var cc = CenterContainer.new()
@@ -237,7 +232,7 @@ func _add_settings_header(v: VBoxContainer):
 	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL; h.add_child(t)
 	var x = Button.new(); x.text = Icons.CLOSE; x.flat = true
 	Icons.style_button(x)
-	x.pressed.connect(func(): visible = false); h.add_child(x)
+	x.pressed.connect(close); h.add_child(x)
 	v.add_child(h)
 
 func _lbl(t: String) -> Label:

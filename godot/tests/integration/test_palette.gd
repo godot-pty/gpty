@@ -93,16 +93,14 @@ func test_close_active_removes_the_last_spawned_pane():
 	assert_eq(ws._tm.tiles.size(), before - 1, "'close active' closes one pane")
 
 func _palette_results(ws: Control) -> Array:
-	# Panel -> VBox [margin(LineEdit), results]
-	var box: VBoxContainer = ws._palette.get_child(0)
 	var out := []
-	for b in box.get_child(1).get_children():
+	for b in ws._palette._results.get_children():
 		if not b.is_queued_for_deletion():
 			out.append((b as Button).text)
 	return out
 
 func _palette_input(ws: Control) -> LineEdit:
-	return (ws._palette.get_child(0) as VBoxContainer).get_child(0).get_child(0)
+	return ws._palette._field
 
 func test_typing_in_the_palette_filters_its_commands():
 	var ws = await _make_workspace()

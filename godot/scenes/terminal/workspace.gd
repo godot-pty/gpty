@@ -35,10 +35,10 @@ const MAX_LIVE_PANES := 96
 
 var _sidebar: Sidebar
 var _sidebar_bg: ColorRect
-var _palette: Control
+var _palette: CommandPalette
 var _grid: Control
 var _settings_panel: SettingsPanel
-var _concept_graph: Control = null
+var _concept_graph: ConceptGraphEditor = null
 var _tm: TerminalManager = TerminalManager.new()
 var _status_bar: StatusBar
 var _titlebar: Control = null
@@ -70,6 +70,8 @@ func _ready():
 	add_child(pane_settings)
 	pane_settings.z_index = 100
 	_tm._pane_settings_panel = pane_settings
+	pane_settings.keyboard_released.connect(
+		_on_overlay_keyboard_released.bind(pane_settings))
 	# The pane settings can rename a pane's public id (that is how IPC
 	# addresses it), and a typed duplicate would land *after* the pane was
 	# attached — the one path that used to skip the uniqueness check. The id
@@ -837,7 +839,7 @@ func _wire_tm(tm: TerminalManager):
 		# The pane settings popup and the global settings panel are sibling
 		# overlays; opening one closes the other so they never stack.
 		if _settings_panel and _settings_panel.visible:
-			_settings_panel.visible = false
+			_settings_panel.close()
 		if tm._pane_settings_panel:
 			tm._pane_settings_panel.open_for(body)
 
@@ -1533,13 +1535,44 @@ func _restore():
 	_ask_close_then(_all_pane_bodies(), _init_workspaces)
 
 # ═══════════════════════════════════════════════════════════════════════
-# Palette
+# Overlay keyboard ownership
 # ═══════════════════════════════════════════════════════════════════════
 
-func _unhandled_input(event):
-	if _palette and _palette.visible and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		_palette.visible = false
-		get_viewport().set_input_as_handled()
+## The overlay that owns the keyboard while it is visible, topmost first.
+## Opening Settings closes Pane Settings, the concept editor opens over
+## Settings and the palette can open over either, so this order is the stacking
+## order (each opener moves its overlay to the last child).
+func _keyboard_overlay() -> OverlayPanel:
+	var candidates: Array[Node] = [_palette, _concept_graph, _settings_panel]
+	if _tm != null:
+		candidates.append(_tm._pane_settings_panel)
+	for candidate in candidates:
+		if candidate is OverlayPanel and (candidate as OverlayPanel).visible:
+			return candidate
+	return null
+
+## The overlay hid while it still owned the keyboard, and Godot drops focus for
+## a hidden control, so put the keyboard back: to the overlay underneath when
+## there is one (the concept editor opens over Settings, and that panel must
+## keep the keyboard it had), otherwise to the workspace's active pane. A
+## sidebar button that happened to open the overlay is not a restore target —
+## Escape means the user is done with overlays and a focused button would
+## swallow every letter typed next. A close caused by a click elsewhere never
+## reaches here, so a click is never overridden.
+func _on_overlay_keyboard_released(overlay: OverlayPanel) -> void:
+	var target: Control = overlay.return_focus
+	overlay.return_focus = null
+	var below := _keyboard_overlay()
+	if below != null and target != null and is_instance_valid(target) \
+			and target.is_visible_in_tree() and below.is_ancestor_of(target):
+		target.grab_focus()
+		return
+	var ws := _active_workspace()
+	if ws.is_empty():
+		return
+	var body: Control = ws.tm.last_body
+	if body != null and is_instance_valid(body) and body.is_visible_in_tree():
+		activate_pane(body)
 
 func _input(event):
 	# Raw input — fires before GUI consumption, which is required: pane
@@ -1547,6 +1580,16 @@ func _input(event):
 	# and _unhandled_input would never see them. The workspace fills the
 	# window, so the event's viewport position maps 1:1 to canvas space.
 	#
+	# Escape belongs to the open overlay, and this is the only stage that can
+	# deliver it: a focused terminal consumes every key in `_gui_input` (Escape
+	# becomes the raw ESC byte its child expects), so no overlay
+	# `_unhandled_input` handler ever runs while a terminal holds the keyboard.
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		var overlay := _keyboard_overlay()
+		if overlay != null:
+			overlay.close()
+			get_viewport().set_input_as_handled()
+			return
 	# An in-flight pane-edge drag owns the mouse the same way: it starts on a
 	# strip at the pane's border, so the very next motion is already over the
 	# pane body (which would read it as a text selection). Driving the drag
@@ -1569,6 +1612,12 @@ func activate_pane(body: Control) -> void:
 	var bws := _workspace_for_body(body)
 	if not bws.is_empty():
 		bws.tm.last_body = body
+	# An open overlay owns the keyboard: a shortcut-spawned pane, an IPC
+	# `focusPane` or a click behind it may change which pane is active, but
+	# focus must not move to a terminal while the overlay is still there (the
+	# overlay closes with Escape and only then hands the keyboard back).
+	if _keyboard_overlay() != null:
+		return
 	if body is TerminalPane:
 		body._take_focus()
 	else:
@@ -1584,11 +1633,11 @@ func _activate_pane_under_mouse(mouse: Vector2):
 	var ws := _active_workspace()
 	if ws.is_empty():
 		return
-	# A visible pane settings popup owns its clicks: activating (or
-	# releasing focus from) panes underneath the overlay while the user
-	# interacts with it corrupts the interaction.
-	var panel: Control = ws.tm._pane_settings_panel
-	if panel and panel.visible:
+	# An open overlay owns the click as well as the keyboard: the raw stage runs
+	# before GUI picking, so without this a click on the panel (or anywhere over
+	# a tile) would re-focus the pane underneath and typing would reach the
+	# shell while the overlay is still open.
+	if _keyboard_overlay() != null:
 		return
 	for t in ws.tm.tiles:
 		var w: Control = t.wrapper
@@ -1602,61 +1651,21 @@ func _activate_pane_under_mouse(mouse: Vector2):
 
 func _toggle_palette():
 	if _palette == null:
-		_palette = _build_palette()
-		_palette.visible = false  # start hidden — the first toggle must OPEN it
+		_palette = CommandPalette.new()
+		_palette.name = "Palette"
 		_palette.z_index = 100
 		add_child(_palette)
+		_palette.visible = false  # start hidden — the first toggle must OPEN it
 		_palette.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	_palette.visible = not _palette.visible
+		_palette.command_chosen.connect(_execute_command)
+		_palette.keyboard_released.connect(_on_overlay_keyboard_released.bind(_palette))
 	if _palette.visible:
-		# Input picking uses reverse tree order (z_index is rendering-only);
-		# keep the palette topmost over workspaces added after first use.
-		move_child(_palette, -1)
-		var inp = _palette.find_child("*", true, false) as LineEdit
-		if inp: inp.grab_focus()
-
-
-func _build_palette() -> Control:
-	var bg = Panel.new()
-	bg.custom_minimum_size = Vector2(320, 160)
-	bg.name = "Palette"
-	var v = VBoxContainer.new()
-	v.add_theme_constant_override("separation", 4)
-	bg.add_child(v)
-	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var mc = MarginContainer.new()
-	mc.add_theme_constant_override("margin_left", 8)
-	mc.add_theme_constant_override("margin_right", 8)
-	mc.add_theme_constant_override("margin_top", 8)
-	mc.add_theme_constant_override("margin_bottom", 8)
-	v.add_child(mc)
-	var inp = LineEdit.new()
-	inp.placeholder_text = "Type command..."
-	inp.add_theme_font_size_override("font_size", 14)
-	mc.add_child(inp)
-	var results = VBoxContainer.new()
-	v.add_child(results)
-
-	var cmds = PaneTypes.build_palette_commands()
-	inp.text_changed.connect(func(t: String):
-		for c in results.get_children(): c.queue_free()
-		for cmd in cmds:
-			if t == "" or cmd.findn(t) != -1:
-				var btn = Button.new()
-				btn.text = cmd; btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-				btn.add_theme_font_size_override("font_size", 13)
-				btn.pressed.connect(func():
-					_execute_command(cmd); _palette.visible = false
-				)
-				results.add_child(btn)
-	)
-
-	inp.text_submitted.connect(func(_t: String):
-		if results.get_child_count() > 0:
-			(results.get_child(0) as Button).pressed.emit()
-	)
-
-	return bg
+		_palette.close()
+		return
+	# Input picking uses reverse tree order (z_index is rendering-only);
+	# keep the palette topmost over workspaces added after first use.
+	move_child(_palette, -1)
+	_palette.open()
 
 func _execute_command(cmd: String):
 	if cmd.begins_with("new "):
@@ -2270,16 +2279,20 @@ func _toggle_settings():
 		add_child(_settings_panel)
 		_settings_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_settings_panel.request_graph_editor.connect(_open_concept_graph)
-	if not _settings_panel.visible:
-		# Opening global settings closes the pane settings overlay so the
-		# two overlays never stack.
-		var panel: Control = _tm._pane_settings_panel
-		if panel and panel.visible:
-			panel.close()
-		# Input picking uses reverse tree order (z_index is rendering-only);
-		# stay topmost even when workspaces were added after first open.
-		move_child(_settings_panel, -1)
-	_settings_panel.visible = not _settings_panel.visible
+		_settings_panel.keyboard_released.connect(
+			_on_overlay_keyboard_released.bind(_settings_panel))
+	if _settings_panel.visible:
+		_settings_panel.close()
+		return
+	# Opening global settings closes the pane settings overlay so the
+	# two overlays never stack.
+	var panel: Control = _tm._pane_settings_panel
+	if panel and panel.visible:
+		panel.close()
+	# Input picking uses reverse tree order (z_index is rendering-only);
+	# stay topmost even when workspaces were added after first open.
+	move_child(_settings_panel, -1)
+	_settings_panel.open()
 
 ## Open the visual concept editor over the settings panel it was launched
 ## from. Created lazily; `open()` reloads the canvas, so an edit made in the
@@ -2292,6 +2305,8 @@ func _open_concept_graph():
 		_concept_graph.z_index = 100
 		add_child(_concept_graph)
 		_concept_graph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_concept_graph.keyboard_released.connect(
+			_on_overlay_keyboard_released.bind(_concept_graph))
 	# Input picking uses reverse tree order (z_index is rendering-only); stay
 	# topmost over workspaces added after the first open.
 	move_child(_concept_graph, -1)

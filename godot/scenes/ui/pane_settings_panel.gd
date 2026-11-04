@@ -1,4 +1,4 @@
-extends Control
+extends OverlayPanel
 class_name PaneSettingsPanel
 # Type-aware pane settings overlay. Builds a shared shell (header, close, ESC)
 # and delegates content to the target pane's _build_pane_settings_ui().
@@ -28,11 +28,6 @@ func _process(_delta: float):
 	if visible and (_target == null or not is_instance_valid(_target)):
 		close()
 
-func _unhandled_input(event):
-	if visible and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		close()
-		get_viewport().set_input_as_handled()
-
 func open_for(body: Control):
 	_target = body
 	if _target == null or not is_instance_valid(_target):
@@ -47,10 +42,9 @@ func open_for(body: Control):
 	# both picking and rendering while open.
 	if get_parent():
 		get_parent().move_child(self, -1)
-	visible = true
+	open()
 
-func close():
-	visible = false
+func _after_close() -> void:
 	_target = null
 	_gather_func = Callable()
 

@@ -1,5 +1,5 @@
 class_name ConceptGraphEditor
-extends Control
+extends OverlayPanel
 ## Visual concept-rule editor — a GraphEdit canvas over the concept store.
 ##
 ## Each rule is one chain: trigger → condition* → action. The canvas is stored
@@ -176,28 +176,29 @@ func _add_toolbar(v: VBoxContainer) -> void:
 # ═══════════════════════════════════════════════════════════════════════
 
 ## Reload the canvas from ConceptManager (a manual-dialog edit or another
-## session may have changed the entries) and show the editor.
-func open() -> void:
+## session may have changed the entries) before the overlay takes the keyboard.
+func _before_open() -> void:
 	_load_from_manager()
 	_rebuild_canvas_ui()
 	_dirty = false
 	_update_status()
-	visible = true
-	_graph.grab_focus()
+
+## The canvas is where a keyboard user starts: the rules live there and the
+## toolbar's buttons follow it in Tab order.
+func _initial_focus() -> Control:
+	return _graph
 
 ## Save-on-close. A canvas with content errors would silently drop those
 ## rules to drafts, so it asks first; a clean canvas just saves.
-func close() -> void:
-	if not visible:
-		return
+func _before_close() -> bool:
 	_sync_positions_from_nodes()
 	var result := _analyze()
 	if _dirty and result["errors"].size() > 0:
 		_confirm_close_with_errors()
-		return
+		return false
 	if _dirty:
 		_save()
-	visible = false
+	return true
 
 func _confirm_close_with_errors() -> void:
 	var dialog := ConfirmationDialog.new()
@@ -213,15 +214,10 @@ func _confirm_close_with_errors() -> void:
 	dialog.confirmed.connect(func():
 		dialog.queue_free()
 		_save()
-		visible = false
+		close()
 	)
 	dialog.canceled.connect(func(): dialog.queue_free())
 	dialog.popup_centered()
-
-func _unhandled_input(event: InputEvent) -> void:
-	if visible and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		close()
-		get_viewport().set_input_as_handled()
 
 # ═══════════════════════════════════════════════════════════════════════
 # Data flow

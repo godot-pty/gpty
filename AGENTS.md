@@ -154,6 +154,8 @@ gpty/
         ├── ui/
         │   ├── sidebar.gd
         │   ├── settings_panel.gd
+        │   ├── overlay_panel.gd     # Overlay keyboard contract (focus, Escape, focus return)
+        │   ├── command_palette.gd   # Ctrl+Shift+P command list (OverlayPanel)
         │   ├── status_bar.gd
         │   ├── toast_overlay.gd
         │   ├── window_chrome.gd    # Titlebar + window-mode/fullscreen handling (extracted)

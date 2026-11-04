@@ -57,6 +57,8 @@ godot/
         ├── ui/                  # UI components
         │   ├── sidebar.gd       # Vertical stack: window mode, workspaces, panes, profiles
         │   ├── settings_panel.gd
+        │   ├── overlay_panel.gd  # Shared keyboard contract for the four overlays
+        │   ├── command_palette.gd # Ctrl+Shift+P command list (OverlayPanel)
         │   ├── concept_graph_editor.gd # Visual rule editor overlay (GraphEdit)
         │   ├── concept_graph_model.gd  # Pure canvas/build/validate/compile logic
         │   ├── vault_graph_model.gd    # Pure vault link-graph normalize/layout/hit-test
