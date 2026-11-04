@@ -23,7 +23,8 @@ A router plus the operational recipe. The method is normative in `docs/content/d
 - This path is the portable one — it does not need XWayland. `scripts/screenshot-gpty` (x11grab) and `scripts/record-demo` are X11/XWayland-only and fail on a pure Wayland session.
 - Desktop grabs are only for release/blog images, where the OS window itself is the point.
 - Small windows (800×500, 560×340) resize the root viewport, so the image is the layout at that size, **not** OS window behaviour. Say so when the finding is about window managers.
-- **A state that needs clicks or keys is a `STATES` entry, not a temporary scene.** The table seeds through `WorkspaceStore` (real restore path), drives the visible controls with synthetic input, and waits for grid generations, pane titles and the toast queue to settle; overlays are opened through their real controls (the sidebar Settings button, the pane title bar's settings button, Ctrl+Shift+P). Never stage through GUT — a non-headless GUT run captures GUT's runner panel instead of the app.
+- **A state that needs clicks or keys is a `STATES` entry, not a temporary scene.** The table seeds through `WorkspaceStore` (real restore path), drives the visible controls with synthetic input, and waits for grid generations, pane titles and the toast queue to settle; overlays are opened through their real controls (the sidebar Settings button, the pane title bar's settings button, Ctrl+Shift+P, the Concepts tab's Open Visual Editor). The five surfaces the October 2026 pass missed are states now (`wiki-vault`, `wiki-graph`, `concept-editor`, `plugin-review`, `workspace-trust`). Never stage through GUT — a non-headless GUT run captures GUT's runner panel instead of the app.
+- **Keyboard reachability is measured, not eyeballed.** `scripts/ui-capture --audit-focus <state>` stages the same state and prints the focus owner, the visible dialog's own focus owner, whether Escape closes the surface, every visible `FOCUS_NONE` button, and the Tab order. A control with no key path is a finding even if a shortcut exists for one of its siblings; a modal that focuses its OK button and closes on Escape is a pass, so say that too.
 - Two runs of one state are pixel-identical: the status bar's clock and FPS are pinned, cursor blink is off, and the pointer is parked. `scripts/ui-capture-check` proves that and that a perturbed control changes exactly one image; run it after touching the driver, the state table or a widget the states show.
 - Size the window to something that fits a *physical* screen (`DisplayServer.screen_get_size()` can report a multi-monitor desktop much larger than any single screen; an off-screen window captures clipped).
 
@@ -49,6 +50,10 @@ Check all ten on every pass; each maps to at least one v0.8.0 row:
 8. State feedback: no search match count or next/prev, toasts stating the obvious, unset values rendered as unexplained checkerboards.
 9. Padding/alignment: text touching pane edges, inconsistent empty-state quality across panes.
 10. Keyboard-only reachability for everything above.
+11. App-chrome keyboard reachability: pane title bars, the Wiki toolbar and the vault graph are `FOCUS_NONE` (`--audit-focus` measures it).
+12. Overlay canvases that inherit the theme's translucent `Panel` (Settings, Pane Settings, the concept editor's `GraphBg`).
+13. State signalled by colour alone (the agent-state badge's failed vs needs-attention).
+14. Graph label collisions at density (labels drawn for every node).
 
 ## Output contract
 
