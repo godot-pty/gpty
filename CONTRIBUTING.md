@@ -214,6 +214,14 @@ See [AGENTS.md](AGENTS.md) for the full directory tree.
 
 See the agent guide for the complete conventions and patterns: [Rust](docs/content/docs/agents/rust.md), [GDScript](docs/content/docs/agents/gdscript.md), and [pitfalls](docs/content/docs/agents/pitfalls.md).
 
+## Dependencies
+
+- Rust crates come from crates.io only. `deny.toml` denies unknown registries and git sources.
+- The licence allow-list lives in `deny.toml`: MIT, Apache-2.0 (and its LLVM exception), BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, Unicode-3.0, Unlicense, Zlib and GPL-3.0-or-later, with named WTFPL exceptions for the two FFmpeg binding crates. A dependency outside the policy fails `cargo deny check` with the crate named; the fix is a decision - allow the licence, add a named exception with its reason, or drop the dependency - not a config edit.
+- Dependabot opens one grouped pull request per ecosystem per week: Cargo, the fuzz workspace's own lockfile, and GitHub Actions. Every third-party action is pinned to a full commit SHA.
+- `./scripts/ci-check` runs `cargo audit --deny warnings` for advisories and `cargo deny check` for licences, sources, yanked crates and duplicate versions; CI runs the same two gates.
+- A release publishes the three archives, `SHA256SUMS` and build-provenance attestations. The release runbook is `.omp/skills/release/SKILL.md`; the workflow is `.github/workflows/release.yml`.
+
 ## Pull Request Process
 
 1. Fork the repository.
@@ -222,12 +230,13 @@ See the agent guide for the complete conventions and patterns: [Rust](docs/conte
 4. Test your changes (functionally).
 5. Run `./scripts/ci-check` - ensure all checks pass
 6. Add or update test cases as applicable.
-7. See [AGENTS.md](AGENTS.md) for commit information.
-8. Submit a pull request.
+7. Sign off every commit with `git commit -s` (DCO); the `commit-msg` hook refuses a commit without the trailer.
+8. See [AGENTS.md](AGENTS.md) for commit information.
+9. Submit a pull request.
 
 ## Governance
 
-The maintainer roster, access rules and succession are in [MAINTAINERS.md](MAINTAINERS.md) and [GOVERNANCE.md](GOVERNANCE.md); code ownership is declared in [.github/CODEOWNERS](.github/CODEOWNERS). The maintainer makes the final decision on a change.
+The maintainer roster, access rules and succession are in [MAINTAINERS.md](MAINTAINERS.md) and [GOVERNANCE.md](GOVERNANCE.md); code ownership is declared in [.github/CODEOWNERS](.github/CODEOWNERS). The maintainer makes the final decision on a change. Participation is covered by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## Security
 

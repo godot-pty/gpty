@@ -12,6 +12,13 @@ SCOPES="settings|terminal|layout|workspace|sidebar|ui|gdext|core|cli|ipc|profile
 # Regex: type(scope): description  — scope is optional
 PATTERN="^(${TYPES})(\((${SCOPES})\))?!?: .+"
 
+# DCO: every commit asserts the right to submit it. `git commit -s` adds the trailer.
+if ! grep -qE '^Signed-off-by: .+ <[^ <>]+@[^ <>]+>$' "$COMMIT_MSG_FILE"; then
+    echo "ERROR: Commit message is missing a DCO sign-off." >&2
+    echo "Use 'git commit -s' to add 'Signed-off-by: Name <email>'." >&2
+    exit 1
+fi
+
 if echo "$COMMIT_MSG" | grep -qE "$PATTERN"; then
     exit 0
 fi

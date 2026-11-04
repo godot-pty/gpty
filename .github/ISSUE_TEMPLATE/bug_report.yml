@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible defect in gPTY.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report security vulnerabilities here. Follow [SECURITY.md](https://github.com/godot-pty/gpty/blob/main/SECURITY.md) instead.
+  - type: input
+    id: version
+    attributes:
+      label: gPTY version
+      description: The release tag, or the output of `gpty --version`.
+      placeholder: v0.7.2
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS and version, plus the display server (X11 or Wayland) on Linux.
+      placeholder: Arch Linux, Wayland
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence that shows the defect.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead. Attach a log or screenshot if useful; remove secrets and private data first.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: The pane type, layout or profile, and anything else that narrows it down.
+    validations:
+      required: false
