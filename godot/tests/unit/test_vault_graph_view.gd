@@ -465,3 +465,24 @@ func test_past_the_label_cap_only_the_aimed_at_nodes_are_named():
 		ids.append(placement["id"])
 	assert_eq(ids.size(), 1, "past the cap the open note is the only label")
 	assert_has(ids, "n000.md")
+
+
+func test_zooming_out_keeps_only_the_aimed_at_labels():
+	# The other half of the density rule: past LABEL_ZOOM (zoomed out too far to
+	# read them) the map keeps the aimed-at/pointed-at/open names instead of
+	# going nameless — it does not stop labelling altogether.
+	var view := _make_view()
+	view.positions = {
+		"a.md": Vector2(-300, -200),
+		"b.md": Vector2(300, 200),
+		"ghost:Missing": Vector2(-300, 250),
+	}
+	view._pan = view.size * 0.5
+	view._zoom = VaultGraphView.LABEL_ZOOM
+	assert_eq(view.label_placements().size(), 3,
+		"at the legibility threshold every label still draws")
+
+	view._zoom = VaultGraphView.LABEL_ZOOM * 0.5
+	var narrow := view.label_placements()
+	assert_eq(narrow.size(), 1, "zoomed out, only the nodes the user is on keep a label")
+	assert_eq(String(narrow[0]["id"]), "a.md", "the open note keeps its name")
