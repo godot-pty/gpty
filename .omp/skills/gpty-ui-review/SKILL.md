@@ -24,7 +24,7 @@ A router plus the operational recipe. The method is normative in `docs/content/d
 - Desktop grabs are only for release/blog images, where the OS window itself is the point.
 - Small windows (800×500, 560×340) resize the root viewport, so the image is the layout at that size, **not** OS window behaviour. Say so when the finding is about window managers.
 - **A state that needs clicks or keys is a `STATES` entry, not a temporary scene.** The table seeds through `WorkspaceStore` (real restore path), drives the visible controls with synthetic input, and waits for grid generations, pane titles and the toast queue to settle; overlays are opened through their real controls (the sidebar Settings button, the pane title bar's settings button, Ctrl+Shift+P, the Concepts tab's Open Visual Editor). The five surfaces the October 2026 pass missed are states now (`wiki-vault`, `wiki-graph`, `concept-editor`, `plugin-review`, `workspace-trust`). Never stage through GUT — a non-headless GUT run captures GUT's runner panel instead of the app.
-- **Keyboard reachability is measured, not eyeballed.** `scripts/ui-capture --audit-focus <state>` stages the same state and prints the focus owner, the visible dialog's own focus owner, whether Escape closes the surface, every visible `FOCUS_NONE` button, and the Tab order. A control with no key path is a finding even if a shortcut exists for one of its siblings; a modal that focuses its OK button and closes on Escape is a pass, so say that too.
+- **Keyboard reachability is measured, not eyeballed.** `scripts/ui-capture --audit-focus <state>` stages the same state and prints the focus owner, the visible dialog's own focus owner, whether Escape closes the surface, every visible `FOCUS_NONE` button, and the Tab order. A control with no key path is a finding even if a shortcut exists for one of its siblings; a modal that focuses its OK button and closes on Escape is a pass, so say that too. The Tab-order walk follows explicit `focus_next` rings, so it reports the first ring it enters and stops there — read `focusable=` and the `mouse-only` lines for the whole surface, and stage a state whose first focusable control is the surface you mean.
 - Two runs of one state are pixel-identical: the status bar's clock and FPS are pinned, cursor blink is off, and the pointer is parked. `scripts/ui-capture-check` proves that and that a perturbed control changes exactly one image; run it after touching the driver, the state table or a widget the states show.
 - Size the window to something that fits a *physical* screen (`DisplayServer.screen_get_size()` can report a multi-monitor desktop much larger than any single screen; an off-screen window captures clipped).
 
@@ -50,10 +50,10 @@ Check all ten on every pass; each maps to at least one v0.8.0 row:
 8. State feedback: no search match count or next/prev, toasts stating the obvious, unset values rendered as unexplained checkerboards.
 9. Padding/alignment: text touching pane edges, inconsistent empty-state quality across panes.
 10. Keyboard-only reachability for everything above.
-11. App-chrome keyboard reachability: pane title bars, the Wiki toolbar and the vault graph are `FOCUS_NONE` (`--audit-focus` measures it).
+11. App-chrome keyboard reachability: pane title bars, the Wiki note toolbar and the vault graph each need a key path (`--audit-focus` measures it). The three rings are the current answer — `Ctrl+Shift+E` for a title bar, `Ctrl+Shift+K` for the note toolbar, arrows/`+`/`-`/Enter on the graph canvas — so a control added to any of them that is `FOCUS_NONE`, or a `FOCUS_NONE` canvas that is the whole surface, is a finding.
 12. Overlay canvases that inherit the theme's translucent `Panel` (Settings, Pane Settings, the concept editor's `GraphBg`).
 13. State signalled by colour alone (the agent-state badge's failed vs needs-attention).
-14. Graph label collisions at density (labels drawn for every node).
+14. Graph label collisions at density: every node labelled at the fitted zoom prints titles on top of each other — `VaultGraphView.label_placements` culls them now, so a new label source (or a new canvas) must go through that placement, and a label outside the fitted view is a finding (`fit_to_view` reserves their width).
 
 ## Output contract
 
