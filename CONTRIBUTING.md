@@ -225,6 +225,10 @@ See the agent guide for the complete conventions and patterns: [Rust](docs/conte
 7. See [AGENTS.md](AGENTS.md) for commit information.
 8. Submit a pull request.
 
+## Governance
+
+The maintainer roster, access rules and succession are in [MAINTAINERS.md](MAINTAINERS.md) and [GOVERNANCE.md](GOVERNANCE.md); code ownership is declared in [.github/CODEOWNERS](.github/CODEOWNERS). The maintainer makes the final decision on a change.
+
 ## Security
 
 See the [security rules](docs/content/docs/agents/security.md) for the full list, including Concept Engine ReDoS prevention and OSC 52 clipboard restrictions.

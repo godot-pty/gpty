@@ -4,9 +4,9 @@
 
 <div align="center">
 
-  [![Build](https://img.shields.io/github/actions/workflow/status/godot-pty/gpty/ci.yml?branch=main)](https://github.com/godot-pty/gpty/actions/workflows/ci.yml) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/godot-pty/gpty/total) ![LLM-powered](https://img.shields.io/badge/LLM-powered-6A5ACD)
+  [![Build](https://img.shields.io/github/actions/workflow/status/godot-pty/gpty/ci.yml?branch=main)](https://github.com/godot-pty/gpty/actions/workflows/ci.yml) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/godot-pty/gpty/total) ![LLM-powered](https://img.shields.io/badge/LLM-powered-6A5ACD) [![Linux Foundation](https://img.shields.io/badge/Linux_Foundation-blue?logo=linuxfoundation&logoColor=white)](https://insights.linuxfoundation.org/project/godot-pty-gpty)
 
-  [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16201/badge)](https://www.bestpractices.dev/projects/16201) [![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/godot-pty/gpty#verifying-releases)
+  [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16201/badge)](https://www.bestpractices.dev/projects/16201) [![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/godot-pty/gpty#verifying-releases) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/godot-pty/gpty/badge)](https://securityscorecards.dev/viewer/?uri=github.com/godot-pty/gpty)
 
 </div>
 
@@ -43,7 +43,7 @@
 - The repository tracks OpenSSF recommendations (registered as [OpenSSF Project 16201](https://www.bestpractices.dev/projects/16201)).
 - Releases ship `SHA256SUMS` and build-provenance attestations; the control socket is owner-only.
 - Release assets carry [SLSA Build Level 2](https://slsa.dev/spec/v1.0/levels) provenance.
-- [Linux Foundation's LFX Health Insights](https://insights.linuxfoundation.org/) program application is in progress/under evaluation ([discussion 2476](https://github.com/linuxfoundation/insights/discussions/2476)).
+- The project is listed in [Linux Foundation LFX Health Insights](https://insights.linuxfoundation.org/project/godot-pty-gpty).
 
 | Component | Choice | Rationale |
 |----------|--------|-----------|
@@ -181,7 +181,7 @@ See [SECURITY.md](SECURITY.md) for the threat model, reporting process, and what
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, build commands, testing, code style, and the pull request process.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, build commands, testing, code style, and the pull request process. Project roles, access and succession are in [MAINTAINERS.md](MAINTAINERS.md) and [GOVERNANCE.md](GOVERNANCE.md).
 
 ---
 
