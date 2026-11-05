@@ -41,15 +41,15 @@ func _show_next():
 	lbl.z_index = 100
 	lbl.text = data.text
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.add_theme_font_size_override("font_size", 13)
+	lbl.add_theme_font_size_override("font_size", UiTokens.FS_CONTROL)
 
+	# INFO keeps the theme's TEXT; a toast has no background of its own, so the
+	# level only replaces the colour when the level means something.
 	match data.level:
-		ToastManager.INFO:
-			lbl.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
 		ToastManager.WARN:
-			lbl.add_theme_color_override("font_color", Color.YELLOW)
+			lbl.add_theme_color_override("font_color", UiTokens.WARNING)
 		ToastManager.ERROR:
-			lbl.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
+			lbl.add_theme_color_override("font_color", UiTokens.DANGER)
 
 	add_child(lbl)
 	lbl.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)

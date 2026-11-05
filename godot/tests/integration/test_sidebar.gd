@@ -412,3 +412,16 @@ func test_catalog_hint_row_is_last_with_and_without_plugin_profiles():
 	assert_eq(_sidebar._profile_list.get_child(0).get_child(0).text, "OMP")
 	assert_eq(_sidebar._profile_list.get_child(1).get_child(0).name,
 		"CatalogHintBtn", "the catalog hint must be the last row")
+
+func test_the_panes_heading_hides_with_an_empty_list():
+	# A fresh workspace showed a "Panes:" section title over nothing; the
+	# heading belongs to the list, not to the section.
+	assert_not_null(_sidebar._pane_heading, "the builder captures the heading")
+	_sidebar.update_pane_list([])
+	assert_false(_sidebar._pane_heading.visible, "no panes, no heading")
+
+	var body = PaneBody.new()
+	body.pane_label = "T1"
+	add_child_autofree(body)
+	_sidebar.update_pane_list([body], body)
+	assert_true(_sidebar._pane_heading.visible, "a pane brings the heading back")

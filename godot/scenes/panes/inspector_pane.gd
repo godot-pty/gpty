@@ -42,7 +42,6 @@ func _ready():
 	_status = Label.new()
 	_status.name = "Status"
 	_status.text = "Inspector idle — private Q&A, not the terminal OMP session"
-	_status.add_theme_font_size_override("font_size", 12)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	root.add_child(_status)
 
@@ -334,12 +333,11 @@ func apply_settings(settings: Dictionary):
 
 func _build_pane_settings_ui(panel: Control) -> Control:
 	var v = VBoxContainer.new()
-	v.add_theme_constant_override("separation", 6)
+	v.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 
 	var hint = Label.new()
 	hint.text = "Private Q&A. Does not follow the terminal OMP conversation."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.add_theme_font_size_override("font_size", 12)
 	v.add_child(hint)
 
 	var name_le = LineEdit.new()
@@ -405,7 +403,6 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	sys_te.text_changed.connect(func(): panel._debounce_timer.start())
 	var sys_lbl = Label.new()
 	sys_lbl.text = "System prompt:"
-	sys_lbl.add_theme_font_size_override("font_size", 12)
 	v.add_child(sys_lbl)
 	v.add_child(sys_te)
 
@@ -448,7 +445,6 @@ func _add_setting_row(parent: VBoxContainer, label: String, control: Control):
 	var hb = HBoxContainer.new()
 	var lbl = Label.new()
 	lbl.text = label
-	lbl.add_theme_font_size_override("font_size", 12)
 	hb.add_child(lbl)
 	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hb.add_child(control)

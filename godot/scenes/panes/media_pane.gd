@@ -125,13 +125,13 @@ func _build_ui():
 
 	var box := VBoxContainer.new()
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.add_theme_constant_override("separation", 8)
+	box.add_theme_constant_override("separation", UiTokens.SPACE_LG)
 	_placeholder.add_child(box)
 
 	var icon := Label.new()
 	icon.text = str(PaneTypes.ALL.get("media", {}).get("icon", "|>"))
 	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	icon.add_theme_font_size_override("font_size", 36)
+	icon.add_theme_font_size_override("font_size", UiTokens.FS_HERO)
 	box.add_child(icon)
 
 	# A file name is file-supplied text: the title is a single line, so it
@@ -156,7 +156,7 @@ func _build_ui():
 	_transport = HBoxContainer.new()
 	_transport.name = "Transport"
 	_transport.visible = false
-	_transport.add_theme_constant_override("separation", 6)
+	_transport.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	root.add_child(_transport)
 
 	_play_button = Button.new()
@@ -191,7 +191,7 @@ func _build_ui():
 	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_status.clip_text = true
 	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_status.add_theme_font_size_override("font_size", maxi(10, font_size - 2))
+	_status.add_theme_font_size_override("font_size", maxi(UiTokens.FS_CAPTION, font_size - 2))
 	root.add_child(_status)
 
 	# Audible output is the player's own child node: it has no visual, so it
@@ -685,7 +685,7 @@ func apply_settings(settings: Dictionary):
 
 func _build_pane_settings_ui(panel: Control) -> Control:
 	var v = VBoxContainer.new()
-	v.add_theme_constant_override("separation", 6)
+	v.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 
 	var name_le = LineEdit.new()
 	name_le.text = pane_name
@@ -725,7 +725,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	var hint := Label.new()
 	hint.text = "Local files only. Supported: %s." % MediaFiles.supported_text()
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.add_theme_font_size_override("font_size", 11)
+	hint.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
 	v.add_child(hint)
 
 	panel._gather_func = func():
@@ -742,7 +742,6 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 func _add_setting_row(parent: VBoxContainer, label: String, control: Control):
 	var hb = HBoxContainer.new()
 	var lbl = Label.new(); lbl.text = label
-	lbl.add_theme_font_size_override("font_size", 12)
 	hb.add_child(lbl)
 	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hb.add_child(control)

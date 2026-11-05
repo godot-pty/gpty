@@ -35,7 +35,6 @@ func build(ws: Control) -> Control:
 	var label = Label.new()
 	label.name = "AppTitle"
 	label.text = "gpty"
-	label.add_theme_color_override("font_color", Color.WHITE)
 	label.anchor_left = 0.0
 	label.anchor_right = 0.0
 	label.offset_left = 10
@@ -143,15 +142,13 @@ func _make_titlebar_button(icon: String, callback: Callable) -> Button:
 	btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	btn.custom_minimum_size = Vector2(36, HEIGHT)
 	btn.flat = true
-	btn.add_theme_color_override("font_color", Color.WHITE)
 	btn.pressed.connect(callback)
 	# Use a Label child for the icon glyph — Button text with theme font
 	# overrides doesn't reliably render PUA codepoints in Godot 4.
 	var lbl = Label.new()
 	lbl.text = icon
 	lbl.add_theme_font_override("font", Icons.font_resource)
-	lbl.add_theme_font_size_override("font_size", 14)
-	lbl.add_theme_color_override("font_color", Color.WHITE)
+	lbl.add_theme_font_size_override("font_size", UiTokens.FS_BODY)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

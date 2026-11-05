@@ -67,6 +67,10 @@ const STATES := {
 	"pane-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "pane-settings"},
 	"palette": {"size": DEFAULT_SIZE, "panes": 1, "open": "palette"},
 	"empty-workspace": {"size": DEFAULT_SIZE, "panes": 1, "close_all": true},
+	# The UI scale setting at its 125 % step, on the app's own first-launch
+	# workspace. The only visual proof that the setting scales the chrome and
+	# the terminal text together; a later release recaptures it.
+	"ui-scale-125": {"size": DEFAULT_SIZE, "panes": 0, "ui_scale": 125},
 	"workspace-1280x760": {"size": Vector2i(1280, 760), "panes": 4},
 	"window-800x500": {"size": Vector2i(800, 500), "panes": 4},
 	"window-560x340": {"size": Vector2i(560, 340), "panes": 4},
@@ -77,6 +81,10 @@ const STATES := {
 	"wiki-graph": {"size": DEFAULT_SIZE, "tiles": [WIKI_TILE], "open": "wiki-graph"},
 	"concept-editor": {"size": DEFAULT_SIZE, "panes": 1, "open": "concept-editor"},
 	"plugin-review": {"size": DEFAULT_SIZE, "panes": 1, "open": "plugin-review"},
+	# The Save Profile form, whose command fields are the measured clipping
+	# defect (69 px against `/bin/bash`'s 75). Two panes, so the form shows
+	# the field widths it is judged on.
+	"save-profile": {"size": DEFAULT_SIZE, "panes": 2, "open": "save-profile"},
 	"workspace-trust": {"size": DEFAULT_SIZE, "tiles": [UNTRUSTED_TILE], "open": "workspace-trust"},
 	# The four visible agent states side by side. The point of the state is the
 	# glyph: `failed` (an X-circle) and `needs-attention` (a warning triangle)
@@ -176,6 +184,11 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	_settings.cfg_show_titlebar = true
 	_settings.cfg_window_size = size
 	_settings.cfg_check_updates = false
+	# Before the scene exists: the workspace lays itself out against the
+	# window's content scale on its first frame, so a scale applied later
+	# would be a second layout rather than the one captured.
+	_settings.cfg_ui_scale = int(state.get("ui_scale", 100))
+	_settings.apply_ui_scale()
 	_seed_workspace(state)
 
 	_workspace = load("res://scenes/main.tscn").instantiate()
@@ -352,6 +365,16 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			await _wait_frames(3)
 			if _workspace._concept_graph == null or not _workspace._concept_graph.visible:
 				_fail("Open Visual Editor did not open the concept graph")
+				return false
+		"save-profile":
+			var save_btn := _workspace._sidebar.find_child("SaveProfileBtn", true, false) as Button
+			if save_btn == null:
+				_fail("the sidebar has no save-profile button")
+				return false
+			await _click(save_btn)
+			await _wait_frames(3)
+			if _dialog_titled(_workspace, "Save Profile") == null:
+				_fail("the save-profile dialog did not open")
 				return false
 		"plugin-review":
 			# There is no in-app install button: the CLI sends the summary and

@@ -142,7 +142,7 @@ func _build_ui():
 
 	var header := HBoxContainer.new()
 	header.name = "Header"
-	header.add_theme_constant_override("separation", 6)
+	header.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	root.add_child(header)
 
 	_status = Label.new()
@@ -150,7 +150,6 @@ func _build_ui():
 	_status.text = "Idle"
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_status.add_theme_font_size_override("font_size", 12)
 	header.add_child(_status)
 
 	_restart_btn = Button.new()
@@ -250,7 +249,7 @@ func apply_settings(settings: Dictionary):
 
 func _build_pane_settings_ui(panel: Control) -> Control:
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 6)
+	v.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 
 	var name_le := LineEdit.new()
 	name_le.text = pane_name
@@ -289,7 +288,6 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	var note := Label.new()
 	note.text = "Program and argument changes take effect on Restart."
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	note.add_theme_font_size_override("font_size", 12)
 	v.add_child(note)
 
 	panel._gather_func = func():
@@ -316,7 +314,6 @@ func _add_setting_row(parent: VBoxContainer, label: String, control: Control):
 	var hb := HBoxContainer.new()
 	var lbl := Label.new()
 	lbl.text = label
-	lbl.add_theme_font_size_override("font_size", 12)
 	hb.add_child(lbl)
 	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hb.add_child(control)

@@ -254,7 +254,6 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	# read, and `live` is what makes a change reach it without focus.
 	state_badge.accessibility_live = ACCESSIBILITY_LIVE_POLITE
 	state_badge.add_theme_font_override("font", Icons.font_resource)
-	state_badge.add_theme_font_size_override("font_size", 12)
 	state_badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	state_badge.anchor_left = 0.0; state_badge.anchor_right = 0.0
 	state_badge.anchor_top = 0.0; state_badge.anchor_bottom = 1.0
@@ -264,7 +263,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 
 	var btn_hbox = HBoxContainer.new()
 	btn_hbox.name = TITLE_BAR_BUTTONS
-	btn_hbox.add_theme_constant_override("separation", 2)
+	btn_hbox.add_theme_constant_override("separation", UiTokens.SPACE_XS)
 	btn_hbox.anchor_left = 1.0; btn_hbox.anchor_right = 1.0
 	btn_hbox.anchor_top = 0.0; btn_hbox.anchor_bottom = 1.0
 	var btn_total = 5 * BUTTON_MIN_WIDTH + 12

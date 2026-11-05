@@ -288,10 +288,8 @@ func _confirm_link(meta):
 		return
 	if not (url.begins_with("https://") or url.begins_with("http://") or url.begins_with("mailto:")):
 		return
-	var dialog = ConfirmationDialog.new()
-	dialog.title = "Open external link?"
-	dialog.dialog_text = url
-	add_child(dialog)
+	var dialog := AppDialog.confirm(self, "Open external link?")
+	AppDialog.set_body(dialog, url)
 	dialog.confirmed.connect(func():
 		OS.shell_open(url)
 		dialog.queue_free()

@@ -206,7 +206,7 @@ func apply_settings(settings: Dictionary):
 
 func _build_pane_settings_ui(panel: Control) -> Control:
 	var v = VBoxContainer.new()
-	v.add_theme_constant_override("separation", 6)
+	v.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	
 	# ── Shared pane controls ──
 	var name_le = LineEdit.new()
@@ -259,7 +259,6 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 func _add_setting_row(parent: VBoxContainer, label: String, control: Control):
 	var hb = HBoxContainer.new()
 	var lbl = Label.new(); lbl.text = label
-	lbl.add_theme_font_size_override("font_size", 12)
 	hb.add_child(lbl)
 	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hb.add_child(control)

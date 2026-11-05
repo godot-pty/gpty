@@ -42,22 +42,18 @@ func _build_ui():
 	cc.add_child(bg)
 
 	var mc = MarginContainer.new()
-	mc.add_theme_constant_override("margin_left", 16)
-	mc.add_theme_constant_override("margin_right", 16)
-	mc.add_theme_constant_override("margin_top", 16)
-	mc.add_theme_constant_override("margin_bottom", 16)
+	UiTheme.margins(mc, UiTokens.SPACE_XXL)
 	bg.add_child(mc)
 	mc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	var v = VBoxContainer.new(); v.name = "VBox"
-	v.add_theme_constant_override("separation", 6)
+	v.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	mc.add_child(v)
 
 	_add_settings_header(v)
 	v.add_child(HSeparator.new())
 
 	var tabs = TabContainer.new()
-	tabs.add_theme_font_size_override("font_size", 13)
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(tabs)
 
@@ -120,6 +116,7 @@ func _build_ui():
 	var t_app = _create_tab(tabs, "Appearance")
 	var font_btn = _add_font_picker(t_app)
 	var fs_spin = _add_font_control(t_app)
+	var scale_opt = _add_ui_scale_control(t_app)
 	t_app.add_child(HSeparator.new())
 	var scheme_btn = _add_scheme_picker(t_app)
 	t_app.add_child(HSeparator.new())
@@ -132,6 +129,7 @@ func _build_ui():
 	_add_tab_reset(t_app, func():
 		SettingsManager.cfg_font_path = "res://fonts/DejaVuSansMono.ttf"
 		SettingsManager.cfg_font_size = 14
+		SettingsManager.cfg_ui_scale = 100
 		SettingsManager.cfg_color_scheme_path = ""
 		SettingsManager.cfg_show_titlebar = true
 		SettingsManager.cfg_wrapper_bg = SettingsManager.WRAPPER_BG_COLOR
@@ -144,6 +142,7 @@ func _build_ui():
 		font_btn.text = "DejaVuSansMono.ttf"
 		scheme_btn.text = "(none)"
 		fs_spin.value = 14
+		scale_opt.selected = 0
 		show_tb_cb.button_pressed = true
 		_reset_colors(color_btns)
 		SettingsManager.save_settings()
@@ -212,23 +211,20 @@ func _create_tab(tabs: TabContainer, title: String) -> VBoxContainer:
 	tabs.add_child(sc)
 
 	var mc = MarginContainer.new()
-	mc.add_theme_constant_override("margin_left", 8)
-	mc.add_theme_constant_override("margin_right", 8)
-	mc.add_theme_constant_override("margin_top", 8)
-	mc.add_theme_constant_override("margin_bottom", 8)
+	UiTheme.margins(mc, UiTokens.SPACE_LG)
 	mc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.add_child(mc)
 
 	var v = VBoxContainer.new()
-	v.add_theme_constant_override("separation", 8)
+	v.add_theme_constant_override("separation", UiTokens.SPACE_LG)
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mc.add_child(v)
 	return v
 
 func _add_settings_header(v: VBoxContainer):
 	var h = HBoxContainer.new()
-	var t = Label.new(); t.text = "Settings"; t.add_theme_font_size_override("font_size", 18)
+	var t = Label.new(); t.text = "Settings"; t.add_theme_font_size_override("font_size", UiTokens.FS_TITLE)
 	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL; h.add_child(t)
 	var x = Button.new(); x.text = Icons.CLOSE; x.flat = true
 	Icons.style_button(x)
@@ -236,7 +232,7 @@ func _add_settings_header(v: VBoxContainer):
 	v.add_child(h)
 
 func _lbl(t: String) -> Label:
-	var l = Label.new(); l.text = t; l.add_theme_font_size_override("font_size", 12); return l
+	var l = Label.new(); l.text = t; return l
 
 func _add_cursor_control(v: VBoxContainer) -> OptionButton:
 	var hs = HBoxContainer.new()
@@ -250,7 +246,6 @@ func _add_cursor_control(v: VBoxContainer) -> OptionButton:
 
 func _add_blink_control(v: VBoxContainer) -> CheckBox:
 	var cb = CheckBox.new(); cb.name = "BlinkCb"; cb.text = "Cursor blink"
-	cb.add_theme_font_size_override("font_size", 12)
 	cb.button_pressed = SettingsManager.cfg_cursor_blink
 	v.add_child(cb)
 	return cb
@@ -259,7 +254,6 @@ func _add_blink_speed_control(v: VBoxContainer) -> SpinBox:
 	var hb = HBoxContainer.new()
 	hb.add_child(_lbl("Blink speed:"))
 	var spin = SpinBox.new(); spin.name = "BlinkSpeedSpin"
-	spin.get_line_edit().add_theme_font_size_override("font_size", 12)
 	spin.min_value = 0.1; spin.max_value = 2.0; spin.step = 0.1
 	spin.value = SettingsManager.cfg_cursor_blink_speed
 	hb.add_child(spin)
@@ -270,12 +264,39 @@ func _add_font_control(v: VBoxContainer) -> SpinBox:
 	var hf = HBoxContainer.new()
 	hf.add_child(_lbl("Font size:"))
 	var spin = SpinBox.new(); spin.name = "FontSpin"
-	spin.get_line_edit().add_theme_font_size_override("font_size", 12)
 	spin.min_value = 8; spin.max_value = 32
 	spin.value = SettingsManager.cfg_font_size
 	hf.add_child(spin)
 	v.add_child(hf)
 	return spin
+
+## The UI scale, in the percentage steps `UI_SCALE_PRESETS` offers. Written and
+## saved on selection rather than through `_debounce_timer`: the point of the
+## control is to see the change, and `settings_changed` applies it.
+func _add_ui_scale_control(v: VBoxContainer) -> OptionButton:
+	var hf = HBoxContainer.new()
+	hf.add_child(_lbl("UI scale:"))
+
+	var scale_opt = OptionButton.new(); scale_opt.name = "UiScaleOpt"
+	var presets: Array = SettingsManager.UI_SCALE_PRESETS.duplicate()
+	for p in presets:
+		scale_opt.add_item("%d%%" % p)
+	var scale_idx: int = presets.find(SettingsManager.cfg_ui_scale)
+	if scale_idx < 0:
+		# The same trap the FPS picker documents: `find()` returns -1 for a
+		# stored value that is not a step, and `selected = -1` leaves the
+		# dropdown blank with no way to see the current value.
+		presets.append(SettingsManager.cfg_ui_scale)
+		scale_opt.add_item("%d%% (custom)" % SettingsManager.cfg_ui_scale)
+		scale_idx = presets.size() - 1
+	scale_opt.selected = scale_idx
+	scale_opt.item_selected.connect(func(idx: int):
+		SettingsManager.cfg_ui_scale = presets[idx]
+		SettingsManager.save_settings()
+	)
+	hf.add_child(scale_opt)
+	v.add_child(hf)
+	return scale_opt
 
 func _add_reasoning_control(v: VBoxContainer) -> Array:
 	var h1 = HBoxContainer.new()
@@ -305,7 +326,6 @@ func _add_scroll_control(v: VBoxContainer) -> SpinBox:
 	var hs = HBoxContainer.new()
 	hs.add_child(_lbl("Scroll lines:"))
 	var spin = SpinBox.new(); spin.name = "ScrollSpin"
-	spin.get_line_edit().add_theme_font_size_override("font_size", 12)
 	spin.min_value = 1; spin.max_value = 10; spin.step = 1
 	spin.value = SettingsManager.cfg_scroll_lines
 	hs.add_child(spin)
@@ -316,7 +336,6 @@ func _add_history_control(v: VBoxContainer) -> SpinBox:
 	var hs = HBoxContainer.new()
 	hs.add_child(_lbl("History lines:"))
 	var spin = SpinBox.new(); spin.name = "HistorySpin"
-	spin.get_line_edit().add_theme_font_size_override("font_size", 12)
 	spin.min_value = 100; spin.max_value = 100000; spin.step = 100
 	spin.value = SettingsManager.cfg_history_lines
 	hs.add_child(spin)
@@ -333,7 +352,6 @@ func _add_history_size_row(v: VBoxContainer) -> void:
 	hs.add_child(_lbl("On disk:"))
 	var size = Label.new()
 	size.name = "HistorySizeLabel"
-	size.add_theme_font_size_override("font_size", 12)
 	hs.add_child(size)
 	v.add_child(hs)
 	_history_size_label = size
@@ -374,13 +392,11 @@ func _add_dims_control(v: VBoxContainer) -> Array:
 	var hr = HBoxContainer.new()
 	hr.add_child(_lbl("Default size:"))
 	var rspin = SpinBox.new()
-	rspin.get_line_edit().add_theme_font_size_override("font_size", 12)
 	rspin.min_value = 10; rspin.max_value = 100
 	rspin.value = SettingsManager.cfg_default_rows
 	hr.add_child(rspin)
 	hr.add_child(_lbl("×"))
 	var cspin = SpinBox.new()
-	cspin.get_line_edit().add_theme_font_size_override("font_size", 12)
 	cspin.min_value = 40; cspin.max_value = 200
 	cspin.value = SettingsManager.cfg_default_cols
 	hr.add_child(cspin)
@@ -462,7 +478,6 @@ func _add_file_picker(v: VBoxContainer, label: String, current_path: String, fil
 	h.add_child(_lbl(label))
 	var btn = Button.new()
 	btn.text = current_path.get_file() if current_path != "" else "(none)"
-	btn.add_theme_font_size_override("font_size", 12)
 	btn.clip_text = true
 	btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -499,7 +514,6 @@ func _add_fps_control(v: VBoxContainer) -> OptionButton:
 	hf.add_child(_lbl("Max FPS:"))
 	
 	var fps_opt = OptionButton.new(); fps_opt.name = "FpsOpt"
-	fps_opt.add_theme_font_size_override("font_size", 12)
 	fps_opt.add_item("60");
 	fps_opt.add_item("120");
 	fps_opt.add_item("144")
@@ -528,7 +542,6 @@ func _add_fps_control(v: VBoxContainer) -> OptionButton:
 
 func _add_show_titlebar_control(v: VBoxContainer) -> CheckBox:
 	var cb = CheckBox.new(); cb.name = "ShowTitlebarCb"; cb.text = "Show titlebar"
-	cb.add_theme_font_size_override("font_size", 12)
 	cb.button_pressed = SettingsManager.cfg_show_titlebar
 	v.add_child(cb)
 	return cb
@@ -547,7 +560,6 @@ func _add_window_mode_control(v: VBoxContainer) -> OptionButton:
 
 func _add_check_updates_control(v: VBoxContainer) -> CheckBox:
 	var cb = CheckBox.new(); cb.name = "CheckUpdatesCb"; cb.text = "Check for updates on startup"
-	cb.add_theme_font_size_override("font_size", 12)
 	cb.button_pressed = SettingsManager.cfg_check_updates
 	v.add_child(cb)
 	return cb
@@ -572,7 +584,6 @@ func _add_cursor_thickness_control(v: VBoxContainer) -> Array:
 	var h1 = HBoxContainer.new()
 	h1.add_child(_lbl("Beam width (|):"))
 	var bspin = SpinBox.new()
-	bspin.get_line_edit().add_theme_font_size_override("font_size", 12)
 	bspin.min_value = 1; bspin.max_value = 8
 	bspin.value = SettingsManager.cfg_beam_width
 	h1.add_child(bspin)
@@ -582,7 +593,6 @@ func _add_cursor_thickness_control(v: VBoxContainer) -> Array:
 	var h2 = HBoxContainer.new()
 	h2.add_child(_lbl("Underline height (_):"))
 	var uspin = SpinBox.new()
-	uspin.get_line_edit().add_theme_font_size_override("font_size", 12)
 	uspin.min_value = 1; uspin.max_value = 8
 	uspin.value = SettingsManager.cfg_underline_height
 	h2.add_child(uspin)
@@ -603,7 +613,6 @@ func _reset_colors(btns: Array):
 func _add_tab_reset(v: VBoxContainer, reset_func: Callable):
 	v.add_child(HSeparator.new())
 	var btn = Button.new(); btn.text = "Reset tab to defaults"
-	btn.add_theme_font_size_override("font_size", 12)
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	btn.pressed.connect(reset_func)
@@ -615,7 +624,6 @@ func _add_shell_control(v: VBoxContainer) -> LineEdit:
 	var le = LineEdit.new()
 	le.text = SettingsManager.cfg_shell_command
 	le.placeholder_text = SettingsManager.default_shell_command()
-	le.add_theme_font_size_override("font_size", 12)
 	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	le.text_changed.connect(func(t: String):
 		SettingsManager.cfg_shell_command = t
@@ -631,7 +639,7 @@ func _add_env_control(v: VBoxContainer) -> TextEdit:
 	te.text = SettingsManager.cfg_shell_env
 	te.placeholder_text = "KEY=value (one per line)"
 	te.custom_minimum_size = Vector2(0, 60)
-	te.add_theme_font_size_override("font_size", 11)
+	te.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
 	te.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	te.text_changed.connect(func():
 		SettingsManager.cfg_shell_env = te.text
@@ -649,7 +657,7 @@ func _add_about_section(v: VBoxContainer):
 	_version_label = Label.new()
 	_version_label.name = "VersionLabel"
 	_version_label.text = "gpty v" + GptyTerminal.get_app_version()
-	_version_label.add_theme_font_size_override("font_size", 14)
+	_version_label.add_theme_font_size_override("font_size", UiTokens.FS_BODY)
 	v.add_child(_version_label)
 
 	v.add_child(HSeparator.new())
@@ -661,14 +669,12 @@ func _add_about_section(v: VBoxContainer):
 	_protocol_label = Label.new()
 	_protocol_label.name = "ProtocolLabel"
 	_protocol_label.text = GptyTerminal.get_ipc_protocol_version()
-	_protocol_label.add_theme_font_size_override("font_size", 12)
 	ipc_row.add_child(_protocol_label)
 	v.add_child(ipc_row)
 
 	var url_lbl = Label.new()
 	url_lbl.name = "RepoUrl"
 	url_lbl.text = "github.com/godot-pty/gpty"
-	url_lbl.add_theme_font_size_override("font_size", 12)
 	v.add_child(url_lbl)
 
 func _add_concept_section(v: VBoxContainer):
@@ -730,12 +736,12 @@ func _refresh_concept_list():
 		h.add_child(toggle)
 		var lbl = Label.new()
 		lbl.text = "%s  →  %s" % [c.get("name", "?"), c.get("trigger", "?")]
-		lbl.add_theme_font_size_override("font_size", 11)
+		lbl.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
 		if provenance != "":
 			lbl.tooltip_text = provenance
 		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if not enabled:
-			lbl.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+			lbl.add_theme_color_override("font_color", UiTokens.TEXT_MUTED)
 		h.add_child(lbl)
 		var edit_btn = Button.new(); edit_btn.text = "Edit"
 		edit_btn.pressed.connect(_show_concept_dialog.bind(i))
@@ -747,13 +753,12 @@ func _refresh_concept_list():
 		_concept_list.add_child(h)
 
 func _show_concept_dialog(idx: int):
-	var dlg = AcceptDialog.new()
-	dlg.title = "Edit Concept" if idx >= 0 else "Add Concept"
+	var dlg := AppDialog.alert(self, "Edit Concept" if idx >= 0 else "Add Concept")
 	# 90% of the settings menu width — the default dialog is cramped for
 	# regex triggers and target labels.
 	dlg.min_size = Vector2i(int(_menu_width * 0.9), 0)
 	var v = VBoxContainer.new()
-	dlg.add_child(v)
+	AppDialog.content(dlg).add_child(v)
 	var name_le = LineEdit.new(); name_le.placeholder_text = "Concept name"
 	var regex_le = LineEdit.new(); regex_le.placeholder_text = "Regex trigger"
 	var target_row := _lbl("Target:"); var target_le = LineEdit.new()
@@ -823,7 +828,6 @@ func _show_concept_dialog(idx: int):
 			conditions_te.text.split("\n"))
 		dlg.queue_free()
 	)
-	add_child(dlg)
 	dlg.popup_centered()
 
 ## Persist a concept. Concepts capture-and-route or notify; they never carry a

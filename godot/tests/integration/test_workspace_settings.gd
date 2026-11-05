@@ -547,3 +547,32 @@ func test_restored_layout_keeps_its_share_of_the_screen():
 		"the two panes must fill the grid between them")
 	assert_almost_eq(right.position.x, left.position.x + left.size.x, 1.0,
 		"the second pane must start where the first ends")
+
+func test_an_emptied_workspace_shows_the_guide():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	ws.size = Vector2(1200, 800)
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var empty := ws.get_node_or_null("EmptyState") as Control
+	assert_not_null(empty, "the workspace builds the empty state")
+	assert_false(empty.visible, "a spawned pane replaces the guide")
+
+	ws._reset_now()
+	await get_tree().process_frame
+
+	assert_true(empty.visible, "closing the last pane brings the guide back")
+	var lines: VBoxContainer = empty.get_node("Lines")
+	assert_eq(lines.get_child_count(), 2, "a title and one line of guidance")
+	assert_eq((lines.get_child(0) as Label).text, "No panes")
+	assert_eq((lines.get_child(1) as Label).text, "Ctrl+Shift+N opens a terminal",
+		"the shortcut named is the binding PaneTypes carries")
+
+	ws._spawn()
+	await get_tree().process_frame
+	assert_false(empty.visible, "spawning hides the guide again")
+
+	# Wait out the deferred concept push so it cannot resume after the free.
+	await get_tree().create_timer(2.1).timeout

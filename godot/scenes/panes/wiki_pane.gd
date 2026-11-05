@@ -226,7 +226,6 @@ func _ready():
 	_note_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_note_title.clip_text = true
 	_note_title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_note_title.add_theme_font_size_override("font_size", 12)
 	_toolbar.add_child(_note_title)
 
 	var group := ButtonGroup.new()
@@ -251,7 +250,6 @@ func _ready():
 	_dirty_label = Label.new()
 	_dirty_label.name = "DirtyState"
 	_dirty_label.visible = false
-	_dirty_label.add_theme_font_size_override("font_size", 12)
 	_toolbar.add_child(_dirty_label)
 
 	_rename_button = Button.new()
@@ -340,7 +338,7 @@ func _ready():
 	_links_footer = Label.new()
 	_links_footer.name = "LinksFooter"
 	_links_footer.visible = false
-	_links_footer.add_theme_font_size_override("font_size", 11)
+	_links_footer.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
 	links_rows.add_child(_links_footer)
 
 	# ── The link graph: the vault's structure, generated on demand ──
@@ -733,9 +731,8 @@ func _on_graph_ghost_activated(target: String) -> void:
 func _ask_declared_weight(a: String, b: String, current: int) -> void:
 	if _has_open_ask():
 		return
-	var dialog := ConfirmationDialog.new()
+	var dialog := AppDialog.confirm(self, "Declared weight")
 	dialog.name = "WeightConfirm"
-	dialog.title = "Declared weight"
 	dialog.ok_button_text = "Set"
 	var box := VBoxContainer.new()
 	# A fixed content width: AcceptDialog fits a child to the dialog's content
@@ -756,8 +753,7 @@ func _ask_declared_weight(a: String, b: String, current: int) -> void:
 	spin.value = current if current > 0 else LinkWeights.DEFAULT_WEIGHT
 	spin.custom_minimum_size.x = 120
 	box.add_child(spin)
-	dialog.add_child(box)
-	add_child(dialog)
+	AppDialog.content(dialog).add_child(box)
 	dialog.confirmed.connect(func():
 		# Hide before writing: the write re-applies the canvas, and a visible
 		# dialog would keep `_has_open_ask` true behind it.
@@ -912,7 +908,6 @@ func _add_link_heading(parent: VBoxContainer, text: String) -> Label:
 	var label := Label.new()
 	label.name = text.validate_node_name()
 	label.text = text
-	label.add_theme_font_size_override("font_size", 12)
 	parent.add_child(label)
 	return label
 
@@ -925,7 +920,6 @@ func _add_link_row(parent: VBoxContainer, text: String, action: Callable, toolti
 	row.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	row.text = text
 	row.tooltip_text = tooltip
-	row.add_theme_font_size_override("font_size", 12)
 	row.disabled = not action.is_valid()
 	parent.add_child(row)
 	if action.is_valid():
@@ -1220,7 +1214,7 @@ func _ask_rename() -> void:
 func _ask_note_name(title: String, initial: String, ok_text: String, hint: String, answer: Callable) -> void:
 	if _has_open_ask():
 		return
-	var dialog := ConfirmationDialog.new()
+	var dialog := AppDialog.confirm(self)
 	dialog.name = "NoteNameConfirm"
 	dialog.title = title
 	dialog.ok_button_text = ok_text
@@ -1239,9 +1233,8 @@ func _ask_note_name(title: String, initial: String, ok_text: String, hint: Strin
 	field.text = initial
 	field.select_all()
 	box.add_child(field)
-	dialog.add_child(box)
+	AppDialog.content(dialog).add_child(box)
 	dialog.register_text_enter(field)
-	add_child(dialog)
 	dialog.confirmed.connect(func():
 		var value := _normalized_note_name(field.text)
 		# Hide before running the action: a real OK press hides the dialog
@@ -1354,16 +1347,15 @@ func _offer_link_update(previous: String, new_rel: String, include_renamed: bool
 	if files <= 0:
 		return
 	var mentions := int(preview.get("mentions", 0))
-	var dialog := ConfirmationDialog.new()
+	var dialog := AppDialog.confirm(self, "Update references?")
 	dialog.name = "UpdateReferencesConfirm"
-	dialog.title = "Update references?"
-	dialog.dialog_text = "%d mention(s) in %d note(s) still name %s.\n\nUpdate them to %s?" % [
+	var text := "%d mention(s) in %d note(s) still name %s.\n\nUpdate them to %s?" % [
 		mentions, files, previous, new_rel,
 	]
 	if bool(preview.get("truncated", false)):
-		dialog.dialog_text += "\n\nThis vault has more notes than the walk lists, so some were not checked."
+		text += "\n\nThis vault has more notes than the walk lists, so some were not checked."
+	AppDialog.set_text(dialog, text)
 	dialog.ok_button_text = "Update"
-	add_child(dialog)
 	dialog.confirmed.connect(func():
 		dialog.queue_free()
 		_apply_link_update(previous, new_rel)
@@ -1439,14 +1431,13 @@ func _adopt_rewritten_note(source: Dictionary) -> void:
 func _ask_delete() -> void:
 	if _current_rel == "" or _has_open_ask():
 		return
-	var dialog := ConfirmationDialog.new()
+	var dialog := AppDialog.confirm(self, "Delete note")
 	dialog.name = "DeleteConfirm"
-	dialog.title = "Delete note"
-	dialog.dialog_text = "Delete %s? This cannot be undone." % _current_rel
+	var text := "Delete %s? This cannot be undone." % _current_rel
 	if _is_dirty():
-		dialog.dialog_text += "\n\nUnsaved changes to it will be lost."
+		text += "\n\nUnsaved changes to it will be lost."
+	AppDialog.set_text(dialog, text)
 	dialog.ok_button_text = "Delete"
-	add_child(dialog)
 	dialog.confirmed.connect(func():
 		dialog.queue_free()
 		_delete_open_note()
@@ -1544,13 +1535,11 @@ func _offer_scratch(rel: String) -> void:
 		# A typed change that was undone: leftover, not a question.
 		_drop_scratch(_vault_root, rel)
 		return
-	var dialog := ConfirmationDialog.new()
+	var dialog := AppDialog.confirm(self, "Unsaved changes recovered")
 	dialog.name = "RestoreConfirm"
-	dialog.title = "Unsaved changes recovered"
-	dialog.dialog_text = "%s had unsaved changes when gpty last closed.\n\nRestore them?" % rel
+	AppDialog.set_text(dialog, "%s had unsaved changes when gpty last closed.\n\nRestore them?" % rel)
 	dialog.ok_button_text = "Restore"
 	dialog.add_button("Discard", true, "discard")
-	add_child(dialog)
 	_restore_copy = copy
 	_restore_rel = rel
 	dialog.confirmed.connect(_apply_restore.bind(dialog))
@@ -1598,12 +1587,10 @@ func _discard_restore(action: String, dialog: Window) -> void:
 ## hears `false` when the overwrite is declined, so a close behind this save
 ## is cancelled rather than left waiting.
 func _ask_overwrite(answer := Callable()) -> void:
-	var dialog := ConfirmationDialog.new()
+	var dialog := AppDialog.confirm(self, "Note changed on disk")
 	dialog.name = "OverwriteConfirm"
-	dialog.title = "Note changed on disk"
-	dialog.dialog_text = "%s changed on disk since it was opened.\n\nOverwrite it with your version?" % _current_rel
+	AppDialog.set_text(dialog, "%s changed on disk since it was opened.\n\nOverwrite it with your version?" % _current_rel)
 	dialog.ok_button_text = "Overwrite"
-	add_child(dialog)
 	dialog.confirmed.connect(func(): _save_after_dialog(dialog, answer, true))
 	dialog.canceled.connect(func():
 		dialog.queue_free()
@@ -1701,13 +1688,11 @@ func _request_leave(answer: Callable) -> void:
 	if _has_open_ask():
 		answer.call(false)
 		return
-	var dialog := ConfirmationDialog.new()
+	var dialog := AppDialog.confirm(self, "Unsaved changes")
 	dialog.name = "DiscardConfirm"
-	dialog.title = "Unsaved changes"
-	dialog.dialog_text = "%s has unsaved changes." % _current_rel
+	AppDialog.set_text(dialog, "%s has unsaved changes." % _current_rel)
 	dialog.ok_button_text = "Save"
 	dialog.add_button("Discard", true, "discard")
-	add_child(dialog)
 	dialog.confirmed.connect(func(): _save_after_dialog(dialog, answer))
 	dialog.custom_action.connect(func(action):
 		if action == "discard":
@@ -1825,7 +1810,7 @@ func keyboard_entry() -> Control:
 
 func _build_pane_settings_ui(panel: Control) -> Control:
 	var v = VBoxContainer.new()
-	v.add_theme_constant_override("separation", 6)
+	v.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 
 	# ── Shared pane controls ──
 	var name_le = LineEdit.new()
@@ -1852,7 +1837,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	var vault_hint := Label.new()
 	vault_hint.text = "Bundled knowledge base — opened from a copy in your user data."
 	vault_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vault_hint.add_theme_font_size_override("font_size", 11)
+	vault_hint.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
 	vault_hint.visible = vault_path == KnowledgeStore.TOKEN
 	v.add_child(vault_hint)
 	vault_le.text_changed.connect(func(text):
@@ -1880,7 +1865,6 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 func _add_setting_row(parent: VBoxContainer, label: String, control: Control):
 	var hb = HBoxContainer.new()
 	var lbl = Label.new(); lbl.text = label
-	lbl.add_theme_font_size_override("font_size", 12)
 	hb.add_child(lbl)
 	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hb.add_child(control)

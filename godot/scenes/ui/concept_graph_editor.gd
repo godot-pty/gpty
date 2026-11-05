@@ -63,8 +63,7 @@ func _ready():
 func _build_ui():
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 16)
+	UiTheme.margins(margin, UiTokens.SPACE_XXL)
 	add_child(margin)
 
 	var bg := Panel.new()
@@ -73,13 +72,12 @@ func _build_ui():
 
 	var inner := MarginContainer.new()
 	inner.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left", "right", "top", "bottom"]:
-		inner.add_theme_constant_override("margin_" + side, 12)
+	UiTheme.margins(inner, UiTokens.SPACE_XL)
 	bg.add_child(inner)
 
 	var v := VBoxContainer.new()
 	v.name = "GraphLayout"
-	v.add_theme_constant_override("separation", 6)
+	v.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	inner.add_child(v)
 
 	_add_header(v)
@@ -116,28 +114,28 @@ func _build_ui():
 	_error_label = Label.new()
 	_error_label.name = "GraphErrors"
 	_error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_error_label.add_theme_font_size_override("font_size", 11)
-	_error_label.add_theme_color_override("font_color", Color(1.0, 0.6, 0.5))
+	_error_label.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
+	_error_label.add_theme_color_override("font_color", UiTokens.DANGER)
 	_error_label.visible = false
 	v.add_child(_error_label)
 
 	var hint := Label.new()
 	hint.text = RULE_HINT
-	hint.add_theme_font_size_override("font_size", 11)
-	hint.add_theme_color_override("font_color", Color(0.6, 0.65, 0.7))
+	hint.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
+	hint.add_theme_color_override("font_color", UiTokens.TEXT_MUTED)
 	v.add_child(hint)
 
 func _add_header(v: VBoxContainer) -> void:
 	var h := HBoxContainer.new()
 	var title := Label.new()
 	title.text = "Concept Graph"
-	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_font_size_override("font_size", UiTokens.FS_TITLE)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(title)
 	_status_label = Label.new()
 	_status_label.name = "GraphStatus"
-	_status_label.add_theme_font_size_override("font_size", 11)
-	_status_label.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
+	_status_label.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
+	_status_label.add_theme_color_override("font_color", UiTokens.TEXT_MUTED)
 	h.add_child(_status_label)
 	_save_button = Button.new()
 	_save_button.text = "Save"
@@ -154,7 +152,7 @@ func _add_header(v: VBoxContainer) -> void:
 
 func _add_toolbar(v: VBoxContainer) -> void:
 	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 6)
+	h.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	for entry in [["Add Trigger", "trigger"], ["Add Condition", "condition"], ["Add Action", "action"]]:
 		var btn := Button.new()
 		btn.text = entry[0]
@@ -201,16 +199,12 @@ func _before_close() -> bool:
 	return true
 
 func _confirm_close_with_errors() -> void:
-	var dialog := ConfirmationDialog.new()
-	dialog.title = "Concept Graph"
-	dialog.dialog_text = (
+	var dialog := AppDialog.confirm(self, "Concept Graph", "Save anyway", "Keep editing")
+	AppDialog.set_text(dialog, (
 		"%d rule(s) have problems (see the red line below).\n"
 		% _errors.size()
 		+ "They are kept as drafts so nothing you typed is lost, and they will not run."
-	)
-	dialog.ok_button_text = "Save anyway"
-	dialog.cancel_button_text = "Keep editing"
-	add_child(dialog)
+	))
 	dialog.confirmed.connect(func():
 		dialog.queue_free()
 		_save()
@@ -327,7 +321,7 @@ func _create_frames() -> void:
 		frame.autoshrink_enabled = true
 		frame.autoshrink_margin = 40
 		frame.tint_color_enabled = true
-		frame.tint_color = Color(0.45, 0.7, 1.0, 0.12)
+		frame.tint_color = Color(UiTokens.ACCENT, 0.12)
 		_graph.add_child(frame)
 		_frames.append(frame)
 
@@ -408,11 +402,11 @@ func _make_graph_node(node: Dictionary) -> GraphNode:
 	gn.set_meta("graph_id", str(node["id"]))
 	var enable_left := kind != ConceptGraphModel.KIND_TRIGGER
 	var enable_right := kind != ConceptGraphModel.KIND_ACTION
-	var port_color := Color(0.55, 0.8, 1.0)
+	var port_color := UiTokens.ACCENT
 	if kind == ConceptGraphModel.KIND_CONDITION:
-		port_color = Color(1.0, 0.8, 0.4)
+		port_color = UiTokens.WARNING
 	elif kind == ConceptGraphModel.KIND_ACTION:
-		port_color = Color(0.6, 0.9, 0.6)
+		port_color = UiTokens.SUCCESS
 	gn.set_slot(0, enable_left, 0, port_color, enable_right, 0, port_color)
 	gn.position_offset_changed.connect(func():
 		_positions[str(node["id"])] = gn.position_offset
@@ -427,7 +421,7 @@ func _make_graph_node(node: Dictionary) -> GraphNode:
 	box.name = "Fields"
 	box.position = Vector2(10, 38)
 	box.custom_minimum_size = Vector2(320, 0)
-	box.add_theme_constant_override("separation", 4)
+	box.add_theme_constant_override("separation", UiTokens.SPACE_SM)
 	gn.add_child(box)
 	match kind:
 		ConceptGraphModel.KIND_TRIGGER:
@@ -556,7 +550,7 @@ func _labeled_row(label_text: String, control: Control) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	var label := Label.new()
 	label.text = label_text
-	label.add_theme_font_size_override("font_size", 11)
+	label.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
 	label.custom_minimum_size = Vector2(96, 0)
 	row.add_child(label)
 	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -612,7 +606,7 @@ func _update_error_display() -> void:
 	for id in _node_names:
 		var gn := _graph.get_node_or_null(NodePath(_node_names[id]))
 		if gn is GraphNode:
-			gn.self_modulate = Color(1.0, 0.7, 0.7) if error_ids.has(id) else Color.WHITE
+			gn.self_modulate = UiTokens.DANGER if error_ids.has(id) else UiTokens.TEXT
 
 func _refresh_frames() -> void:
 	# A field edit can turn a compiled rule into a draft (invalid regex) but
@@ -687,10 +681,8 @@ func _request_delete(ids: Array) -> void:
 	if rule_names.is_empty():
 		_do_delete(ids)
 		return
-	var dialog := ConfirmationDialog.new()
-	dialog.title = "Delete rule"
-	dialog.dialog_text = "Delete %s? The rule is removed from the concepts file when you save." % ", ".join(PackedStringArray(rule_names))
-	add_child(dialog)
+	var dialog := AppDialog.confirm(self, "Delete rule")
+	AppDialog.set_text(dialog, "Delete %s? The rule is removed from the concepts file when you save." % ", ".join(PackedStringArray(rule_names)))
 	dialog.confirmed.connect(func():
 		dialog.queue_free()
 		_do_delete(ids)

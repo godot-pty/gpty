@@ -51,7 +51,6 @@ func _ready():
 	_status.selection_enabled = true
 	_status.context_menu_enabled = true
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status.add_theme_font_size_override("normal_font_size", 12)
 	_status.text = _idle_status()
 	root.add_child(_status)
 

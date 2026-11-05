@@ -13,15 +13,15 @@ const CURSOR_BLINK_INTERVAL = 0.5
 const SCROLL_LINES = 3
 @export var scroll_lines: int = SCROLL_LINES
 const PADDING = 4
-const FOCUS_BORDER_COLOR = Color(0.4, 0.7, 1.0, 0.3)
+const FOCUS_BORDER_COLOR = UiTokens.TERMINAL_FOCUS
 const FOCUS_BORDER_WIDTH = 2.0
-const SELECTION_COLOR = Color(0.3, 0.5, 1.0, 0.4)
+const SELECTION_COLOR = UiTokens.SELECTION
 const SCROLLBACK_INDICATOR_COLOR = Color.YELLOW
 const BEAM_CURSOR_WIDTH = 2
 const UNDERLINE_CURSOR_HEIGHT = 3
 const PRINTABLE_ASCII_MIN = 32
-const SEARCH_HIGHLIGHT_COLOR = Color(1.0, 0.8, 0.0, 0.35)
-const SEARCH_ACTIVE_COLOR = Color(1.0, 0.5, 0.0, 0.5)
+const SEARCH_HIGHLIGHT_COLOR = UiTokens.SEARCH_HIGHLIGHT
+const SEARCH_ACTIVE_COLOR = UiTokens.SEARCH_ACTIVE
 const PRINTABLE_ASCII_MAX = 126
 ## Cell attribute bits, packed by the Rust grid reader (`get_grid_updates_packed`).
 ## SGR 7 is deliberately absent: `CellInfo::paint_colors` has already swapped
@@ -591,10 +591,10 @@ var _badge_label: Label = null
 var _badge_state := ""
 var _badge_anim := 0.0
 
-const BADGE_COMPLETED_COLOR := Color(0.36, 0.83, 0.45)
-const BADGE_FAILED_COLOR := Color(0.95, 0.35, 0.32)
-const BADGE_ATTENTION_COLOR := Color(1.0, 0.78, 0.25)
-const BADGE_WORKING_COLOR := Color(0.5, 0.75, 1.0)
+const BADGE_COMPLETED_COLOR := UiTokens.SUCCESS
+const BADGE_FAILED_COLOR := UiTokens.DANGER
+const BADGE_ATTENTION_COLOR := UiTokens.WARNING
+const BADGE_WORKING_COLOR := UiTokens.ACCENT
 const BADGE_SPINNER_FRAMES := [Icons.SPINNER, Icons.SPINNER_GAP, Icons.CIRCLE_NOTCH]
 
 ## Every agent state's badge, in one table. The glyph is the signal that has to
@@ -1220,7 +1220,6 @@ func _rebuild_history_panel():
 		var lbl := Label.new()
 		lbl.text = msg
 		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		lbl.add_theme_font_size_override("font_size", 12)
 		lbl.custom_minimum_size = Vector2(0, 24)
 		_history_list.add_child(lbl)
 	else:
@@ -1310,7 +1309,7 @@ func _default_title() -> String:
 
 func _build_pane_settings_ui(panel: Control) -> Control:
 	var v = VBoxContainer.new()
-	v.add_theme_constant_override("separation", 6)
+	v.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 
 	# ── Shared pane controls ──
 	var name_le = LineEdit.new()
@@ -1322,6 +1321,15 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	attach_le.text = attachment_id
 	attach_le.placeholder_text = "omp-terminal"
 	_make_row(v, "Attachment ID:", attach_le, panel)
+	# The one field that needs a sentence: it is how a command, an MCP tool
+	# or an agent names this pane, and the old panel showed `pane-…` with no
+	# explanation of what would read it.
+	var attach_hint = Label.new()
+	attach_hint.text = "The id IPC, MCP and agent commands address this pane by."
+	attach_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	attach_hint.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
+	attach_hint.add_theme_color_override("font_color", UiTokens.TEXT_MUTED)
+	v.add_child(attach_hint)
 
 	var font_spin = SpinBox.new()
 	font_spin.min_value = PaneTypes.FONT_SIZE_MIN; font_spin.max_value = PaneTypes.FONT_SIZE_MAX
@@ -1335,11 +1343,10 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	env_te.text = PaneEnvStore.env_for(attachment_id)
 	env_te.placeholder_text = "KEY=value (one per line) — empty inherits the global environment"
 	env_te.custom_minimum_size = Vector2(0, 60)
-	env_te.add_theme_font_size_override("font_size", 11)
+	env_te.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
 	env_te.text_changed.connect(func(): panel._debounce_timer.start())
 	var env_lbl = Label.new()
 	env_lbl.text = "Environment:"
-	env_lbl.add_theme_font_size_override("font_size", 12)
 	v.add_child(env_lbl)
 	v.add_child(env_te)
 
@@ -1478,7 +1485,6 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 func _make_row(parent: VBoxContainer, label: String, control: Control, panel: Control):
 	var hb = HBoxContainer.new()
 	var lbl = Label.new(); lbl.text = label
-	lbl.add_theme_font_size_override("font_size", 12)
 	hb.add_child(lbl)
 	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hb.add_child(control)

@@ -228,7 +228,7 @@ func to_screen(world_point: Vector2) -> Vector2:
 func _build_chrome() -> void:
 	_status = Label.new()
 	_status.name = "GraphStatus"
-	_status.add_theme_font_size_override("font_size", 11)
+	_status.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
 	_status.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	_status.offset_left = 8
 	_status.offset_top = 5
@@ -288,7 +288,7 @@ func _build_chrome() -> void:
 	_hint = Label.new()
 	_hint.name = "GraphHint"
 	_hint.text = "Drag to pan · Wheel to zoom · Drag a node to move it · Click a note to open it · Right-click an edge to declare its weight · Arrows pan · +/− zoom · Enter opens what the crosshair covers"
-	_hint.add_theme_font_size_override("font_size", 10)
+	_hint.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
 	_hint.modulate = Color(1, 1, 1, 0.55)
 	_hint.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	_hint.offset_left = 8
@@ -304,7 +304,7 @@ func _make_button(text: String, tooltip: String) -> Button:
 	var button := Button.new()
 	button.text = text
 	button.tooltip_text = tooltip
-	button.add_theme_font_size_override("font_size", 11)
+	button.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
 	return button
 
 
@@ -343,8 +343,8 @@ func label_placements() -> Array:
 		return []
 	var labels_all := _zoom >= LABEL_ZOOM and nodes.size() <= MAX_ALWAYS_LABELS
 	var view := Rect2(Vector2.ZERO, size)
-	var text_color := get_theme_color("font_color", "Label")
-	var accent := Palette.ACCENT_COLOR
+	var text_color := UiTokens.TEXT
+	var accent := UiTokens.ACCENT
 	var cursor := cursor_hit() if has_focus() else ""
 	var candidates: Array = []
 	for node in nodes:
@@ -656,14 +656,14 @@ func _draw() -> void:
 	if has_focus():
 		draw_rect(
 			Rect2(Vector2(1, 1), size - Vector2(2, 2)),
-			Palette.ACCENT_COLOR, false, 2.0
+			UiTokens.ACCENT, false, 2.0
 		)
 	if nodes.is_empty():
 		_draw_empty()
 		return
 	var view := Rect2(Vector2.ZERO, size)
-	var text_color := get_theme_color("font_color", "Label")
-	var accent := Palette.ACCENT_COLOR
+	var text_color := UiTokens.TEXT
+	var accent := UiTokens.ACCENT
 	var edge_color := Color(text_color, 0.28)
 	var selected_edge := Color(accent, 0.85)
 	var cursor := cursor_hit() if has_focus() else ""
@@ -767,7 +767,7 @@ func _draw_empty() -> void:
 		HORIZONTAL_ALIGNMENT_LEFT,
 		-1,
 		font_size,
-		Color(get_theme_color("font_color", "Label"), 0.6)
+		Color(UiTokens.TEXT, 0.6)
 	)
 
 

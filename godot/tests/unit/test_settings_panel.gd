@@ -53,6 +53,7 @@ func test_appearance_reset_restores_only_appearance_settings():
 	SettingsManager.cfg_font_size = 22
 	SettingsManager.cfg_wrapper_bg = Color(1.0, 0.0, 0.0)
 	SettingsManager.cfg_color_scheme_path = "/tmp/scheme.csv"
+	SettingsManager.cfg_ui_scale = 175
 	SettingsManager.cfg_shell_command = "/bin/zsh"  # Terminal-tab setting, must survive
 
 	var btn := _tab_reset_button("Appearance")
@@ -62,6 +63,7 @@ func test_appearance_reset_restores_only_appearance_settings():
 	assert_eq(SettingsManager.cfg_font_size, 14, "font size must reset to default")
 	assert_eq(SettingsManager.cfg_wrapper_bg, SettingsManager.WRAPPER_BG_COLOR,
 		"wrapper bg must reset to default")
+	assert_eq(SettingsManager.cfg_ui_scale, 100, "the UI scale must reset to 100 %")
 	assert_eq(SettingsManager.cfg_color_scheme_path, "", "scheme path must reset to empty")
 	assert_eq(SettingsManager.cfg_shell_command, "/bin/zsh",
 		"other tabs' settings must not be touched")
@@ -312,3 +314,50 @@ func test_format_bytes_scales_through_the_units():
 	assert_eq(SettingsPanel.format_bytes(5 * 1024 * 1024), "5.0 MiB")
 	assert_eq(SettingsPanel.format_bytes(3 * 1024 * 1024 * 1024), "3.0 GiB")
 	assert_eq(SettingsPanel.format_bytes(-1), "unavailable")
+
+# ── The UI scale picker ────────────────────────────────────────────────
+
+func _ui_scale_opt() -> OptionButton:
+	for opt in _panel.find_children("*", "OptionButton", true, false):
+		if opt.name == "UiScaleOpt":
+			return opt
+	return null
+
+func test_the_ui_scale_picker_offers_every_preset():
+	var opt := _ui_scale_opt()
+	assert_not_null(opt, "the Appearance tab carries a UI scale picker")
+	assert_eq(opt.item_count, SettingsManager.UI_SCALE_PRESETS.size())
+	for i in SettingsManager.UI_SCALE_PRESETS.size():
+		assert_eq(opt.get_item_text(i), "%d%%" % SettingsManager.UI_SCALE_PRESETS[i])
+	assert_eq(opt.selected, 0, "a fresh install sits at 100 %")
+
+func test_selecting_a_scale_writes_and_saves_it():
+	var opt := _ui_scale_opt()
+	var idx := SettingsManager.UI_SCALE_PRESETS.find(150)
+	opt.item_selected.emit(idx)
+	assert_eq(SettingsManager.cfg_ui_scale, 150)
+	assert_eq(MockAutoloads.get_store(SettingsManager.SETTINGS_FILE).get("ui_scale"), 150,
+		"the picker saves, so the choice survives a restart")
+	# Leave the shared autoload at its default for the suites that follow.
+	SettingsManager.cfg_ui_scale = 100
+	SettingsManager.apply_ui_scale()
+
+func test_a_stored_value_that_is_not_a_preset_is_shown_as_its_own_entry():
+	# The FPS picker's documented trap, in the same shape: `find()` returns -1
+	# and `selected = -1` would leave the dropdown blank, hiding the value.
+	# A second panel is built because the picker's items are fixed at
+	# construction.
+	SettingsManager.cfg_ui_scale = 133
+	var panel := SettingsPanel.new(_ws)
+	add_child_autofree(panel)
+	await get_tree().process_frame
+	var opt: OptionButton = null
+	for o in panel.find_children("*", "OptionButton", true, false):
+		if o.name == "UiScaleOpt":
+			opt = o
+			break
+	assert_not_null(opt)
+	assert_eq(opt.item_count, SettingsManager.UI_SCALE_PRESETS.size() + 1)
+	assert_eq(opt.get_item_text(opt.item_count - 1), "133% (custom)")
+	assert_eq(opt.selected, opt.item_count - 1, "the stored value is the visible selection")
+	SettingsManager.cfg_ui_scale = 100

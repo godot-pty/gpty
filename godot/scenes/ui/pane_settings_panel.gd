@@ -64,21 +64,18 @@ func _build_ui():
 	cc.add_child(bg)
 
 	var mc = MarginContainer.new()
-	mc.add_theme_constant_override("margin_left", 16)
-	mc.add_theme_constant_override("margin_right", 16)
-	mc.add_theme_constant_override("margin_top", 16)
-	mc.add_theme_constant_override("margin_bottom", 16)
+	UiTheme.margins(mc, UiTokens.SPACE_XXL)
 	bg.add_child(mc)
 	mc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	var v = VBoxContainer.new()
-	v.add_theme_constant_override("separation", 6)
+	v.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	mc.add_child(v)
 
 	# Header with close button
 	var h = HBoxContainer.new()
 	var t = Label.new(); t.text = "Pane Settings"
-	t.add_theme_font_size_override("font_size", 18)
+	t.add_theme_font_size_override("font_size", UiTokens.FS_TITLE)
 	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL; h.add_child(t)
 	var x = Button.new(); x.text = Icons.CLOSE; x.flat = true
 	Icons.style_button(x)

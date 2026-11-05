@@ -37,6 +37,9 @@ var _sidebar: Sidebar
 var _sidebar_bg: ColorRect
 var _palette: CommandPalette
 var _grid: Control
+## The centred "no panes" screen; one node over the active grid, synced by
+## `_apply_layout()` because every create and kill path reaches it.
+var _empty_state: Control = null
 var _settings_panel: SettingsPanel
 var _concept_graph: ConceptGraphEditor = null
 var _tm: TerminalManager = TerminalManager.new()
@@ -54,11 +57,18 @@ var _quit_asking: bool = false  # a pane-ask walk for quitting is in flight
 
 func _ready():
 	show()
+	# One Theme for the whole window: the workspace is the scene root, so every
+	# pane, overlay, popup and dialog below it inherits this instance.
+	theme = UiTheme.build()
+	# Where nothing is drawn the viewport's clear colour shows: an empty
+	# workspace used to be Godot's default grey.
+	RenderingServer.set_default_clear_color(UiTokens.BG)
 	_chrome = WindowChrome.new()
 	_titlebar = _chrome.build(self)
 
 	_grid = Control.new()
 	add_child(_grid)
+	_build_empty_state()
 
 	var overlay = load("res://scenes/ui/toast_overlay.gd").new()
 	add_child(overlay)
@@ -171,6 +181,9 @@ func _ready():
 	if SettingsManager.cfg_window_mode == 0: _chrome.restore_position()
 
 func _on_settings_changed():
+	# Before anything measured: the scale changes the layout space every later
+	# call in this chain (and the resize it triggers) lays out against.
+	SettingsManager.apply_ui_scale()
 	for t in _tm.tiles:
 		var body = _tm._find_body(t.wrapper)
 		if body and body is TerminalPane:
@@ -240,6 +253,33 @@ func _apply_window_mode():
 # Layout
 # ═══════════════════════════════════════════════════════════════════════
 
+## The screen a first launch shows. Nothing is drawn under the grid, so the
+## clear colour was all a new user got: two lines name the state and the one
+## shortcut that leaves it. The shortcut text comes from `PaneTypes`, so it
+## cannot drift from the binding it names.
+func _build_empty_state():
+	_empty_state = CenterContainer.new()
+	_empty_state.name = "EmptyState"
+	_empty_state.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var lines := VBoxContainer.new()
+	lines.name = "Lines"
+	lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lines.add_theme_constant_override("separation", UiTokens.SPACE_SM)
+	var title := Label.new()
+	title.text = "No panes"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", UiTokens.FS_TITLE)
+	title.add_theme_color_override("font_color", UiTokens.TEXT)
+	lines.add_child(title)
+	var hint := Label.new()
+	hint.text = "%s opens a terminal" % PaneTypes.ALL["terminal"]["shortcut"]
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", UiTokens.FS_SMALL)
+	hint.add_theme_color_override("font_color", UiTokens.TEXT_MUTED)
+	lines.add_child(hint)
+	_empty_state.add_child(lines)
+	add_child(_empty_state)
+
 func _apply_layout():
 	if _grid == null: return
 	var top_offset = TITLEBAR_HEIGHT if (_titlebar and _titlebar.visible) else 0.0
@@ -250,6 +290,13 @@ func _apply_layout():
 	_grid.offset_top = top_offset; _grid.offset_bottom = -bottom_offset
 	_grid.anchor_left = 0.0; _grid.anchor_right = 1.0
 	_grid.anchor_top = 0.0; _grid.anchor_bottom = 1.0
+
+	if _empty_state:
+		_empty_state.offset_left = m; _empty_state.offset_right = 0
+		_empty_state.offset_top = top_offset; _empty_state.offset_bottom = -bottom_offset
+		_empty_state.anchor_left = 0.0; _empty_state.anchor_right = 1.0
+		_empty_state.anchor_top = 0.0; _empty_state.anchor_bottom = 1.0
+		_empty_state.visible = _tm.tiles.is_empty()
 
 	if _status_bar:
 		_status_bar.anchor_left = 0.0; _status_bar.anchor_right = 1.0
@@ -448,12 +495,11 @@ func _ask_running_then(bodies: Array, next: Callable, declined := Callable()) ->
 		names.append(str(busy[i].get("pane_label")))
 	if busy.size() > shown:
 		names.append("…and %d more" % (busy.size() - shown))
-	var dialog := ConfirmationDialog.new()
+	var dialog := AppDialog.confirm(self, "Stop running processes?")
 	dialog.name = "RunningWorkConfirm"
-	dialog.title = "Stop running processes?"
-	dialog.dialog_text = (
+	AppDialog.set_text(dialog, (
 		"Closing will stop processes still running in:\n\n%s\n\nClose anyway?"
-		% "\n".join(names))
+		% "\n".join(names)))
 	dialog.ok_button_text = "Close anyway"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():
@@ -467,7 +513,6 @@ func _ask_running_then(bodies: Array, next: Callable, declined := Callable()) ->
 		if declined.is_valid():
 			declined.call()
 	)
-	add_child(dialog)
 	dialog.popup_centered()
 
 func _ask_close_step(bodies: Array, index: int, next: Callable, declined: Callable) -> void:
@@ -1084,9 +1129,8 @@ func _set_workspace_cwd(idx: int, dir: String):
 ## layout saved from them will start in `clean` on the next restore. The
 ## dialog names both so the new directory is the decision, not a side note.
 func _ask_workspace_cwd_change(idx: int, clean: String, tiles: Array[Dictionary]):
-	var dialog := ConfirmationDialog.new()
-	dialog.title = "Workspace Trust"
-	dialog.dialog_text = "Workspace '%s' would start these panes in a new directory the next time it is restored.\n\n%s\n\nChange the directory anyway?" % [str(_workspaces[idx].get("name", "")), _untrusted_details(tiles, clean)]
+	var dialog := AppDialog.confirm(self, "Workspace Trust")
+	AppDialog.set_body(dialog, "Workspace '%s' would start these panes in a new directory the next time it is restored.\n\n%s\n\nChange the directory anyway?" % [str(_workspaces[idx].get("name", "")), _untrusted_details(tiles, clean)])
 	dialog.ok_button_text = "Change Directory"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():
@@ -1094,7 +1138,6 @@ func _ask_workspace_cwd_change(idx: int, clean: String, tiles: Array[Dictionary]
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)
-	add_child(dialog)
 	dialog.popup_centered()
 
 func _apply_workspace_cwd(idx: int, clean: String):
@@ -1493,8 +1536,7 @@ func _untrusted_details(tiles: Array[Dictionary], cwd := "") -> String:
 	return "\n".join(lines)
 
 func _show_multi_trust_dialog(entries: Array[Dictionary], active: int, untrusted: Array):
-	var dialog = ConfirmationDialog.new()
-	dialog.title = "Workspace Trust"
+	var dialog := AppDialog.confirm(self, "Workspace Trust")
 	# Grouped per workspace: the directory is workspace-scoped, so flattening
 	# the tiles would show one workspace's panes under another's directory (or
 	# no directory at all, which is exactly what this dialog has to name).
@@ -1514,7 +1556,7 @@ func _show_multi_trust_dialog(entries: Array[Dictionary], active: int, untrusted
 		if lines.size() >= PaneTypes.TRUST_MAX_DETAIL_LINES:
 			break
 	var details := "\n".join(lines)
-	dialog.dialog_text = "This layout contains %d workspace(s) whose panes start a different program or pass extra arguments than your current default shell (%s).\n\n%s\n\nRestore them anyway?" % [untrusted.size(), SettingsManager.cfg_shell_command, details]
+	AppDialog.set_body(dialog, "This layout contains %d workspace(s) whose panes start a different program or pass extra arguments than your current default shell (%s).\n\n%s\n\nRestore them anyway?" % [untrusted.size(), SettingsManager.cfg_shell_command, details])
 	dialog.ok_button_text = "Restore"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():
@@ -1528,7 +1570,6 @@ func _show_multi_trust_dialog(entries: Array[Dictionary], active: int, untrusted
 		_build_workspaces(entries, active)
 		dialog.queue_free()
 	)
-	add_child(dialog)
 	dialog.popup_centered()
 
 func _restore():
@@ -2238,10 +2279,9 @@ func _show_plugin_review(id: int, params: Dictionary, timeout_ms: int):
 	if _pending_plugin_reviews.size() >= PLUGIN_REVIEW_MAX_PENDING:
 		GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error("Too many pending plugin reviews")["error"]))
 		return
-	var dialog = ConfirmationDialog.new()
+	var dialog := AppDialog.confirm(self, "Plugin Install Review")
 	dialog.name = "PluginReviewDialog"
-	dialog.title = "Plugin Install Review"
-	dialog.dialog_text = PluginReviewText.build(params)
+	AppDialog.set_body(dialog, PluginReviewText.build(params), AppDialog.REVIEW_BODY_SIZE)
 	dialog.ok_button_text = "Install"
 	dialog.cancel_button_text = "Decline"
 	var expiry := Timer.new()
@@ -2274,7 +2314,6 @@ func _show_plugin_review(id: int, params: Dictionary, timeout_ms: int):
 		_finish_plugin_review(id)
 		GptyTerminal.respond_ipc(id, true, JSON.stringify({"accepted": false}))
 	)
-	add_child(dialog)
 	dialog.popup_centered()
 
 ## Drop a pending review's dialog and expiry timer (idempotent — the answer
@@ -2490,24 +2529,28 @@ func _save_current_as_profile():
 		return
 
 	# Build save dialog
-	var dialog = ConfirmationDialog.new()
-	dialog.title = "Save Profile"
+	var dialog := AppDialog.confirm(self, "Save Profile")
 	dialog.ok_button_text = "Save"
 	dialog.cancel_button_text = "Cancel"
 
 	var v = VBoxContainer.new()
-	v.add_theme_constant_override("separation", 6)
-	dialog.add_child(v)
+	v.add_theme_constant_override("separation", UiTokens.SPACE_MD)
+	AppDialog.content(dialog).add_child(v)
 
 	var name_label = Label.new(); name_label.text = "Profile name:"
 	v.add_child(name_label)
 	var name_inp = LineEdit.new(); name_inp.placeholder_text = "My Profile"
+	name_inp.custom_minimum_size.x = 320
 	v.add_child(name_inp)
 
 	var panes_label = Label.new(); panes_label.text = "Pane commands (edit to customize):"
 	v.add_child(panes_label)
+	# The form's widths are the dialog's widths: a ScrollContainer reports only
+	# its own minimum, so the rows below it were laid out at the LineEdit's
+	# 69 px minimum and `/bin/bash` clipped to `/bin/ba` (measured 2026-11-03 on
+	# a 316 px dialog). Each row now carries a real minimum instead.
 	var sc = ScrollContainer.new()
-	sc.custom_minimum_size = Vector2(300, 200)
+	sc.custom_minimum_size = Vector2(340, 200)
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(sc)
 	var panes_v = VBoxContainer.new()
@@ -2520,6 +2563,7 @@ func _save_current_as_profile():
 		lbl.custom_minimum_size = Vector2(55, 0)
 		row.add_child(lbl)
 		var le = LineEdit.new(); le.text = ts[i].get("settings", {}).get("shell", SettingsManager.cfg_shell_command)
+		le.custom_minimum_size = Vector2(220, 0)
 		le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		shell_editors.append(le)
 		row.add_child(le)
@@ -2542,7 +2586,6 @@ func _save_current_as_profile():
 	)
 	dialog.canceled.connect(dialog.queue_free)
 
-	add_child(dialog)
 	dialog.popup_centered()
 	# Disable OK initially (empty name)
 	name_inp.text_changed.emit("")
@@ -2604,14 +2647,13 @@ func _profile_tiles(profile: Dictionary) -> Array[Dictionary]:
 ## profile's programs once, and the approval must not silently redirect the
 ## click into the current workspace (or the other way round).
 func _show_profile_trust_dialog(profile: Dictionary, tiles: Array, open_in_new := false):
-	var dialog = ConfirmationDialog.new()
-	dialog.title = "Workspace Trust"
+	var dialog := AppDialog.confirm(self, "Workspace Trust")
 	var details_tiles: Array[Dictionary] = []
 	for td in tiles:
 		if td is Dictionary:
 			details_tiles.append(td)
 	var details := _untrusted_details(details_tiles, _spawn_cwd(_active_workspace()))
-	dialog.dialog_text = "This profile contains panes that start a different program or pass extra arguments than your current default shell (%s).\n\n%s\n\nDo you want to activate it anyway?" % [SettingsManager.cfg_shell_command, details]
+	AppDialog.set_body(dialog, "This profile contains panes that start a different program or pass extra arguments than your current default shell (%s).\n\n%s\n\nDo you want to activate it anyway?" % [SettingsManager.cfg_shell_command, details])
 	dialog.ok_button_text = "Activate"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():
@@ -2620,15 +2662,13 @@ func _show_profile_trust_dialog(profile: Dictionary, tiles: Array, open_in_new :
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)
-	add_child(dialog)
 	dialog.popup_centered()
 
 func _do_profile_activate(profile: Dictionary):
 	# Confirm if workspace has existing panes
 	if _tm.tiles.size() > 0:
-		var dialog = ConfirmationDialog.new()
-		dialog.title = "Activate Profile"
-		dialog.dialog_text = "Activating a profile will replace your current layout. Continue?"
+		var dialog := AppDialog.confirm(self, "Activate Profile")
+		AppDialog.set_text(dialog, "Activating a profile will replace your current layout. Continue?")
 		dialog.ok_button_text = "Activate"
 		dialog.cancel_button_text = "Cancel"
 		dialog.confirmed.connect(func():
@@ -2636,7 +2676,6 @@ func _do_profile_activate(profile: Dictionary):
 			dialog.queue_free()
 		)
 		dialog.canceled.connect(dialog.queue_free)
-		add_child(dialog)
 		dialog.popup_centered()
 	else:
 		_do_activate(profile)

@@ -218,7 +218,7 @@ func test_file_tree_activation_of_an_unsupported_file_still_confirms():
 	assert_eq(requests, [], "an unsupported type must not reach a pane")
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "the system route asks first")
-	assert_string_contains(dialogs[0].dialog_text, "picture.png",
+	assert_string_contains(AppDialog.body_of(dialogs[0]), "picture.png",
 		"the confirmation must show what will be opened")
 	assert_eq(opened, [], "nothing opens before the answer")
 	dialogs[0].confirmed.emit()

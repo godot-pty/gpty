@@ -6,6 +6,9 @@ const font_resource := preload("res://assets/fonts/Phosphor-Regular.ttf")
 
 static func style_button(btn: Button) -> void:
 	btn.add_theme_font_override("font", font_resource)
+	# The glyph is a heading, not body text: an icon button renders at this size
+	# on every chrome surface, and the engine's 16 px default is what it used.
+	btn.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
 
 const CLOSE    = "\uE4F6"  # x
 const DELETE   = "\uE4A6"  # trash

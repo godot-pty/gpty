@@ -27,20 +27,17 @@ func _init() -> void:
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 4)
+	v.add_theme_constant_override("separation", UiTokens.SPACE_SM)
 	bg.add_child(v)
 	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	var mc := MarginContainer.new()
-	mc.add_theme_constant_override("margin_left", 8)
-	mc.add_theme_constant_override("margin_right", 8)
-	mc.add_theme_constant_override("margin_top", 8)
-	mc.add_theme_constant_override("margin_bottom", 8)
+	UiTheme.margins(mc, UiTokens.SPACE_LG)
 	v.add_child(mc)
 
 	_field = LineEdit.new()
 	_field.placeholder_text = "Type command..."
-	_field.add_theme_font_size_override("font_size", 14)
+	_field.add_theme_font_size_override("font_size", UiTokens.FS_BODY)
 	mc.add_child(_field)
 
 	_results = VBoxContainer.new()
@@ -61,7 +58,7 @@ func _refresh(query: String) -> void:
 			var btn := Button.new()
 			btn.text = command
 			btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-			btn.add_theme_font_size_override("font_size", 13)
+			btn.add_theme_font_size_override("font_size", UiTokens.FS_CONTROL)
 			btn.pressed.connect(_choose.bind(command))
 			_results.add_child(btn)
 

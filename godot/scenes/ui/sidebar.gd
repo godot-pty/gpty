@@ -31,6 +31,9 @@ var _pane_list: VBoxContainer
 var _profile_list: VBoxContainer
 var _workspace_list: VBoxContainer
 var _active_pane: Control = null
+## The "Panes:" heading; hidden while the list is empty so a fresh workspace
+## does not show a section title over nothing.
+var _pane_heading: Label = null
 
 
 func _ready():
@@ -44,15 +47,15 @@ func build(bg_rect: ColorRect):
 	margin.name = "SidebarMargin"
 	# Left/right 8px ≈ scrollbar width: rows never start at the sidebar's
 	# edge, and an appearing scrollbar fills the reserved space.
-	margin.add_theme_constant_override("margin_left", 8)
-	margin.add_theme_constant_override("margin_right", 8)
-	margin.add_theme_constant_override("margin_top", 6)
-	margin.add_theme_constant_override("margin_bottom", 6)
+	margin.add_theme_constant_override("margin_left", UiTokens.SPACE_LG)
+	margin.add_theme_constant_override("margin_right", UiTokens.SPACE_LG)
+	margin.add_theme_constant_override("margin_top", UiTokens.SPACE_MD)
+	margin.add_theme_constant_override("margin_bottom", UiTokens.SPACE_MD)
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(margin)
 
 	var v = VBoxContainer.new(); v.name = "SidebarContent"
-	v.add_theme_constant_override("separation", 4)
+	v.add_theme_constant_override("separation", UiTokens.SPACE_SM)
 	margin.add_child(v)
 
 	_add_header(v)
@@ -68,11 +71,13 @@ func build(bg_rect: ColorRect):
 func update_pane_list(panes: Array, active_body: Control = null):
 	if not _pane_list: return
 	_active_pane = active_body
+	if _pane_heading:
+		_pane_heading.visible = not panes.is_empty()
 	for c in _pane_list.get_children(): c.queue_free()
 	for i in panes.size():
 		var body = panes[i]
 		var row = HBoxContainer.new()
-		row.add_theme_constant_override("separation", 1)
+		row.add_theme_constant_override("separation", UiTokens.SPACE_HAIR)
 		row.set_meta("body", body)
 
 		var btn = _make_row_label_button(
@@ -145,7 +150,7 @@ func _make_row_action_button(icon: String, tooltip: String) -> Button:
 func _add_header(v: VBoxContainer):
 	var h = HBoxContainer.new(); h.name = "Header"
 	h.add_theme_constant_override("separation", 0)
-	var title = Label.new(); title.text = " gPTY"; title.add_theme_font_size_override("font_size", 16)
+	var title = Label.new(); title.text = " gPTY"; title.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
 	title.name = "SidebarTitle"; title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(title)
 	var arrow = Button.new()
@@ -168,7 +173,7 @@ func _add_buttons(v: VBoxContainer):
 	settings_btn.pressed.connect(func(): request_settings.emit())
 	v.add_child(settings_btn)
 
-	var reset_btn = _make_icon_text_button(Icons.DELETE, "Close All", Color(0.85, 0.2, 0.2, 1.0))
+	var reset_btn = _make_icon_text_button(Icons.DELETE, "Close All", UiTokens.DANGER)
 	reset_btn.tooltip_text = "Close every pane in this workspace (Ctrl+Shift+R)"
 	reset_btn.pressed.connect(func(): request_reset.emit())
 	v.add_child(reset_btn)
@@ -186,7 +191,7 @@ func _make_icon_text_button(icon: String, text: String, tint := Color.WHITE) -> 
 
 	var h = HBoxContainer.new()
 	h.name = "IconTextRow"
-	h.add_theme_constant_override("separation", 6)
+	h.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	h.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	h.offset_left = 6  # breathing room before the icon (nbsp-equivalent)
@@ -199,7 +204,7 @@ func _make_icon_text_button(icon: String, text: String, tint := Color.WHITE) -> 
 	# Same size as the text label so both center on the same axis in the
 	# stretched full-height labels (a smaller glyph font centers on a
 	# different baseline and looks misaligned).
-	icon_lbl.add_theme_font_size_override("font_size", 16)
+	icon_lbl.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
 	icon_lbl.add_theme_color_override("font_color", tint)
 	icon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	icon_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -207,7 +212,7 @@ func _make_icon_text_button(icon: String, text: String, tint := Color.WHITE) -> 
 
 	var text_lbl = Label.new()
 	text_lbl.text = text
-	text_lbl.add_theme_font_size_override("font_size", 16)
+	text_lbl.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
 	text_lbl.add_theme_color_override("font_color", tint)
 	text_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	text_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -228,8 +233,7 @@ func _add_window_mode(v: VBoxContainer):
 func _add_pane_buttons(v: VBoxContainer):
 	var lbl = Label.new()
 	lbl.text = " Add Pane:"
-	lbl.add_theme_font_size_override("font_size", 12)
-	lbl.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
+	lbl.add_theme_color_override("font_color", UiTokens.TEXT)
 	v.add_child(lbl)
 
 	# A two-row grid, not a strip: eight pane types in one row overflow the
@@ -240,8 +244,8 @@ func _add_pane_buttons(v: VBoxContainer):
 	row.name = "PaneTypeRow"
 	row.columns = 4
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_theme_constant_override("h_separation", 2)
-	row.add_theme_constant_override("v_separation", 2)
+	row.add_theme_constant_override("h_separation", UiTokens.SPACE_XS)
+	row.add_theme_constant_override("v_separation", UiTokens.SPACE_XS)
 
 	for key in PaneTypes.ALL:
 		var info = PaneTypes.ALL[key]
@@ -279,7 +283,6 @@ func _add_workspace_section(parent: VBoxContainer):
 
 	var header = HBoxContainer.new(); header.name = "WorkspaceHeader"
 	var lbl = Label.new(); lbl.text = "Workspaces:"
-	lbl.add_theme_font_size_override("font_size", 12)
 	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(lbl)
 	var add_btn = Button.new(); add_btn.text = Icons.ADD; add_btn.name = "AddWorkspaceBtn"
@@ -342,9 +345,9 @@ func _apply_row_accent(btn: Button, active: bool):
 		# A pressed button resolves text from font_pressed_color, which
 		# otherwise falls back to the theme default — override all three
 		# states or the accent vanishes exactly when the row is active.
-		btn.add_theme_color_override("font_color", Palette.ACCENT_COLOR)
-		btn.add_theme_color_override("font_hover_color", Palette.ACCENT_HOVER_COLOR)
-		btn.add_theme_color_override("font_pressed_color", Palette.ACCENT_COLOR)
+		btn.add_theme_color_override("font_color", UiTokens.ACCENT)
+		btn.add_theme_color_override("font_hover_color", UiTokens.ACCENT_HOVER)
+		btn.add_theme_color_override("font_pressed_color", UiTokens.ACCENT)
 	else:
 		btn.remove_theme_color_override("font_color")
 		btn.remove_theme_color_override("font_hover_color")
@@ -352,7 +355,7 @@ func _apply_row_accent(btn: Button, active: bool):
 
 func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close: bool, cwd := "") -> HBoxContainer:
 	var row = HBoxContainer.new()
-	row.add_theme_constant_override("separation", 2)
+	row.add_theme_constant_override("separation", UiTokens.SPACE_XS)
 
 	var dir_hint := cwd if cwd != "" else "default (gpty's own directory)"
 	var btn = _make_row_label_button(ws_name)
@@ -374,7 +377,7 @@ func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close:
 	dir_btn.tooltip_text = "Working directory: %s" % dir_hint
 	dir_btn.custom_minimum_size = Vector2(22, 0)
 	if cwd != "":
-		dir_btn.add_theme_color_override("font_color", Palette.ACCENT_COLOR)
+		dir_btn.add_theme_color_override("font_color", UiTokens.ACCENT)
 	dir_btn.pressed.connect(func(): request_workspace_cwd.emit(idx))
 	row.add_child(dir_btn)
 
@@ -433,8 +436,11 @@ func _on_workspace_row_input(idx: int, btn: Button, ev: InputEvent):
 func _add_pane_list_ui(v: VBoxContainer):
 	var lbl = Label.new()
 	lbl.text = " Panes:"
-	lbl.add_theme_font_size_override("font_size", 12)
+	# Hidden until the list has a row: a workspace that never restores (a trust dialog is waiting) must not show a section title over nothing.
+	# `update_pane_list` is the one switch.
+	lbl.visible = false
 	v.add_child(lbl)
+	_pane_heading = lbl
 
 	var sc = ScrollContainer.new()
 	sc.name = "PaneScroll"
@@ -481,7 +487,6 @@ func _add_profile_section(parent: VBoxContainer):
 
 	var header = HBoxContainer.new(); header.name = "ProfileHeader"
 	var lbl = Label.new(); lbl.text = "Profiles:"
-	lbl.add_theme_font_size_override("font_size", 12)
 	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(lbl)
 	var save_btn = Button.new(); save_btn.text = Icons.ADD; save_btn.name = "SaveProfileBtn"

@@ -3,7 +3,6 @@ extends Control
 # gpty Status Bar — bottom bar showing pane info, FPS, clock, and version.
 
 const HEIGHT = 22.0
-const BG_COLOR = Color(0.12, 0.12, 0.14, 1.0)
 
 var _pane_label: Label
 var _right_label: Label
@@ -18,7 +17,7 @@ func _ready():
 	custom_minimum_size = Vector2(0, HEIGHT)
 
 	var bg = ColorRect.new()
-	bg.color = BG_COLOR
+	bg.color = UiTokens.SURFACE_RAISED
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
@@ -26,8 +25,7 @@ func _ready():
 	# Left — active pane info
 	_pane_label = Label.new()
 	_pane_label.name = "PaneInfo"
-	_pane_label.add_theme_font_size_override("font_size", 11)
-	_pane_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	_pane_label.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
 	_pane_label.anchor_left = 0.0
 	_pane_label.offset_left = 8
 	_pane_label.offset_top = 2
@@ -37,8 +35,9 @@ func _ready():
 	# Right — combined FPS + clock + version (single label, no layout drift)
 	_right_label = Label.new()
 	_right_label.name = "RightInfo"
-	_right_label.add_theme_font_size_override("font_size", 11)
-	_right_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+	# 4.15:1 before the token set; TEXT_MUTED measures 6.35:1 on this bar.
+	_right_label.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
+	_right_label.add_theme_color_override("font_color", UiTokens.TEXT_MUTED)
 	_right_label.anchor_right = 1.0
 	_right_label.offset_right = -8
 	_right_label.offset_top = 2

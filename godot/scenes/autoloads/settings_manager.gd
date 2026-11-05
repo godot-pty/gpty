@@ -2,14 +2,18 @@ extends BasePersistenceManager
 
 const SETTINGS_FILE = "user://settings.json"
 
-const WRAPPER_BG_COLOR = Color(0.1, 0.1, 0.1, 1.0)
-const TITLE_BAR_BG_COLOR = Color(0.18, 0.18, 0.20, 1.0)
-const WRAPPER_BORDER_COLOR = Color(0.25, 0.25, 0.25, 0.6)
-const SIDEBAR_BG_COLOR = Color(0.12, 0.12, 0.15, 1.0)
-const FOCUS_BORDER_COLOR = Color(0.4, 0.7, 1.0, 0.3)
-const SELECTION_COLOR = Color(0.3, 0.5, 1.0, 0.4)
-const SCROLLBACK_INDICATOR_COLOR = Color(1.0, 1.0, 0.0)
+const WRAPPER_BG_COLOR = UiTokens.BG
+const TITLE_BAR_BG_COLOR = UiTokens.SURFACE_RAISED
+const WRAPPER_BORDER_COLOR = UiTokens.BORDER
+const SIDEBAR_BG_COLOR = UiTokens.SIDEBAR
+const FOCUS_BORDER_COLOR = UiTokens.TERMINAL_FOCUS
+const SELECTION_COLOR = UiTokens.SELECTION
+const SCROLLBACK_INDICATOR_COLOR = UiTokens.SCROLLBACK_INDICATOR
 const WINDOW_MODE_LABELS := ["OS", "Windowed", "Windowless"]
+## The UI-scale steps the Appearance picker offers, in percent. 100 is the
+## layout every measurement and screenshot was taken at; the ceiling matches the
+## loader's clamp so a stored value cannot exceed what the picker can show.
+const UI_SCALE_PRESETS := [100, 110, 125, 150, 175, 200]
 
 var cfg_cursor_shape := 0
 var cfg_cursor_blink := true
@@ -40,6 +44,8 @@ var cfg_shell_env := ""
 var cfg_reasoning_max_turns := 16
 var cfg_reasoning_max_turn_bytes := 65536
 var cfg_check_updates := true
+## Percent; the whole interface scales by this against the 100 % layout.
+var cfg_ui_scale := 100
 
 ## The shell a fresh install opens panes with.
 ##
@@ -59,6 +65,7 @@ signal settings_changed
 
 func _on_init():
 	load_settings()
+	apply_ui_scale()
 
 func load_settings():
 	var d = _read_file(SETTINGS_FILE)
@@ -96,12 +103,17 @@ func load_settings():
 	cfg_reasoning_max_turns = clampi(_as_int(d, "reasoning_max_turns", 16), 1, 64)
 	cfg_reasoning_max_turn_bytes = clampi(_as_int(d, "reasoning_max_turn_bytes", 65536), 4096, 1048576)
 	cfg_check_updates = _as_bool(d, "check_updates", true)
+	# The floor is 100: the setting exists to make the interface bigger on a
+	# dense display, and a stored value below it would lay the UI out smaller
+	# than the layout was ever measured at.
+	cfg_ui_scale = clampi(_as_int(d, "ui_scale", 100), 100, UI_SCALE_PRESETS.max())
 
 func save_settings():
 	var d = {"cursor_shape": cfg_cursor_shape, "cursor_blink": cfg_cursor_blink, "cursor_blink_speed": cfg_cursor_blink_speed, "scroll_lines": cfg_scroll_lines, "default_rows": cfg_default_rows, "default_cols": cfg_default_cols, "beam_width": cfg_beam_width, "underline_height": cfg_underline_height, "wrapper_bg": cfg_wrapper_bg.to_html(), "title_bar_bg": cfg_title_bar_bg.to_html(), "wrapper_border": cfg_wrapper_border.to_html(), "sidebar_bg": cfg_sidebar_bg.to_html(), "focus_border": cfg_focus_border.to_html(), "selection": cfg_selection.to_html(), "scrollback_indicator": cfg_scrollback_indicator.to_html(), "color_scheme": cfg_color_scheme_path, "max_fps": cfg_max_fps, "font_path": cfg_font_path, "font_size": cfg_font_size, "shell_command": cfg_shell_command, "shell_env": cfg_shell_env, "show_titlebar": cfg_show_titlebar, "window_mode": cfg_window_mode, "window_position": {"x": cfg_window_position.x, "y": cfg_window_position.y}, "window_size": {"x": cfg_window_size.x, "y": cfg_window_size.y}}
 	d["reasoning_max_turns"] = cfg_reasoning_max_turns
 	d["reasoning_max_turn_bytes"] = cfg_reasoning_max_turn_bytes
 	d["check_updates"] = cfg_check_updates
+	d["ui_scale"] = cfg_ui_scale
 	d["history_lines"] = cfg_history_lines
 	_write_file(SETTINGS_FILE, d)
 	settings_changed.emit()
@@ -127,6 +139,23 @@ func apply_to_terminal(body: Control):
 
 func apply_pane_settings(body: Control, settings: Dictionary):
 	body.apply_settings(settings)
+
+## The window's content scale, as a multiplier.
+func ui_scale_factor() -> float:
+	return float(cfg_ui_scale) / 100.0
+
+## Push `cfg_ui_scale` at the window.
+##
+## `content_scale_factor` is what "UI scale" has to mean here: Godot scales the
+## whole interface uniformly, layout space shrinking while the pixel grid stays
+## put, so hard-coded minimum sizes and margins grow with the type. Multiplying
+## each token font size instead would leave every `custom_minimum_size` at its
+## old pixel size, which is exactly the clipping a dense display produces. The
+## resize this causes is what re-lays the workspace out.
+func apply_ui_scale() -> void:
+	var w := get_window()
+	if w != null:
+		w.content_scale_factor = ui_scale_factor()
 
 ## A stored `{"x": .., "y": ..}` pair, or `fallback` when it is not one.
 func _window_vec(d: Dictionary, key: String, fallback: Vector2i) -> Vector2i:
