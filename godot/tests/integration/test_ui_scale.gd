@@ -10,9 +10,20 @@ extends GutTest
 const WorkspaceScript = preload("res://scenes/terminal/workspace.gd")
 
 var _ws: Control
+var _original_window_size := Vector2i.ZERO
+
+## Pin the window to the size the assertions measure the cap against, and prove
+## it took: a headless or developer window of any other size would move every
+## expected number.
+func _pin_window(size: Vector2i) -> void:
+	get_window().size = size
+	assert_eq(get_window().size, size,
+		"the test window must take a size the cap can be measured against")
 
 func before_each():
+	_original_window_size = get_window().size
 	MockAutoloads.setup()
+	_pin_window(Vector2i(1920, 1080))
 	SettingsManager.cfg_ui_scale = 100
 	SettingsManager.apply_ui_scale()
 
@@ -25,6 +36,7 @@ func after_each():
 		_ws = null
 	SettingsManager.cfg_ui_scale = 100
 	SettingsManager.apply_ui_scale()
+	get_window().size = _original_window_size
 	MockAutoloads.teardown()
 
 func test_the_factor_is_the_percentage():
@@ -72,3 +84,56 @@ func test_the_workspace_applies_the_scale_and_the_theme():
 
 	# Wait out the deferred concept push so it cannot resume after the free.
 	await get_tree().create_timer(2.1).timeout
+
+# ── The window's cap on the applied scale ──────────────────────────────
+#
+# `content_scale_factor` divides the layout space, so a request the window
+# cannot hold must fall back instead of laying the chrome out under its own
+# minimums.
+
+func test_the_ceiling_is_the_layout_floor():
+	# 500 / 560 = 0.89: an 800x500 window cannot show even 100 % of the floor.
+	assert_eq(UiTokens.ui_scale_ceiling(Vector2i(800, 500)), 89)
+	# Height binds at 1920x1080: 1080 / 560 = 1.92.
+	assert_eq(UiTokens.ui_scale_ceiling(Vector2i(1920, 1080)), 192)
+	# 760 / 560 = 1.35, so 125 % fits and 150 % does not.
+	assert_eq(UiTokens.ui_scale_ceiling(Vector2i(1280, 760)), 135)
+	assert_eq(UiTokens.ui_scale_ceiling(Vector2i.ZERO), -1,
+		"an unmeasurable window caps nothing")
+
+func test_the_cap_falls_back_to_100_percent():
+	assert_eq(SettingsManager.capped_ui_scale_percent(125, Vector2i(800, 500)), 100)
+	assert_eq(SettingsManager.capped_ui_scale_percent(200, Vector2i(800, 500)), 100)
+	assert_eq(SettingsManager.capped_ui_scale_percent(125, Vector2i(1920, 1080)), 125)
+	assert_eq(SettingsManager.capped_ui_scale_percent(200, Vector2i(1920, 1080)), 192,
+		"the tallest step the window can show, not the requested one")
+	assert_eq(SettingsManager.capped_ui_scale_percent(200, Vector2i.ZERO), 200,
+		"an unmeasurable window keeps the request")
+	assert_eq(SettingsManager.capped_ui_scale_percent(40, Vector2i(1920, 1080)), 100,
+		"the floor is 100 %, never a smaller interface")
+
+func test_applying_caps_the_scale_at_the_window():
+	_pin_window(Vector2i(800, 500))
+	SettingsManager.cfg_ui_scale = 125
+	SettingsManager.apply_ui_scale()
+	assert_eq(SettingsManager.applied_ui_scale_percent(), 100)
+	assert_almost_eq(get_window().content_scale_factor, 1.0, 0.0001,
+		"the window gets 100 %, not the 125 % the setting holds")
+	assert_almost_eq(SettingsManager.ui_scale_factor(), 1.25, 0.0001,
+		"the request itself is untouched")
+	assert_eq(SettingsManager.cfg_ui_scale, 125, "the setting keeps what the user chose")
+
+func test_a_resize_moves_the_cap_with_the_window():
+	_pin_window(Vector2i(1920, 1080))
+	SettingsManager.cfg_ui_scale = 125
+	SettingsManager.apply_ui_scale()
+	assert_eq(SettingsManager.applied_ui_scale_percent(), 125)
+	get_window().size = Vector2i(800, 500)
+	await get_tree().process_frame
+	assert_eq(SettingsManager.applied_ui_scale_percent(), 100,
+		"the resize hook re-applies the cap with no settings change")
+	assert_almost_eq(get_window().content_scale_factor, 1.0, 0.0001)
+	get_window().size = Vector2i(1920, 1080)
+	await get_tree().process_frame
+	assert_almost_eq(get_window().content_scale_factor, 1.25, 0.0001,
+		"growing the window restores the user's scale")

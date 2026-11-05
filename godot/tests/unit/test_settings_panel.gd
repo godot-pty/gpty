@@ -9,8 +9,10 @@ class MockWorkspace extends Control:
 
 var _ws: MockWorkspace
 var _panel: SettingsPanel
+var _original_window_size := Vector2i.ZERO
 
 func before_each():
+	_original_window_size = get_window().size
 	MockAutoloads.setup()
 	_ws = MockWorkspace.new()
 	add_child_autofree(_ws)
@@ -23,6 +25,9 @@ func after_each():
 	# re-theme every later suite.
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
 	SettingsManager.apply_appearance()
+	# A failed assertion must not leave a small window for the rest of the
+	# process; the layout assertions in this file are the card's own minimums.
+	get_window().size = _original_window_size
 	MockAutoloads.teardown()
 
 # ── Helpers ────────────────────────────────────────────────────────────
@@ -50,6 +55,14 @@ func _row_reset(label_text: String) -> Button:
 			if c is Button and c.text == Icons.RESET:
 				return c
 	return null
+
+## Pin the window to the size an assertion measures the cap against, and prove
+## it took: a headless or developer window of any other size would move the
+## expected number.
+func _pin_window(size: Vector2i) -> void:
+	get_window().size = size
+	assert_eq(get_window().size, size,
+		"the test window must take a size the cap can be measured against")
 
 # ── Per-tab resets ─────────────────────────────────────────────────────
 
@@ -365,6 +378,30 @@ func test_a_stored_value_that_is_not_a_preset_is_shown_as_its_own_entry():
 	assert_eq(opt.get_item_text(opt.item_count - 1), "133% (custom)")
 	assert_eq(opt.selected, opt.item_count - 1, "the stored value is the visible selection")
 	SettingsManager.cfg_ui_scale = 100
+
+## The hint is the row's other half: the window can refuse a scale, and a
+## picker that shows only the request would hide what is on screen.
+func test_the_scale_hint_names_the_scale_the_window_shows():
+	assert_eq(SettingsPanel.ui_scale_hint(125, 125), "",
+		"no hint when the window shows the request")
+	assert_eq(SettingsPanel.ui_scale_hint(125, 100), "shown at 100 %")
+	assert_string_contains(SettingsPanel.ui_scale_hint_tooltip(125, 100), "540 x 560")
+	assert_eq(SettingsPanel.ui_scale_hint_tooltip(125, 125), "")
+
+func test_the_hint_follows_the_capped_scale():
+	_pin_window(Vector2i(800, 500))
+	SettingsManager.cfg_ui_scale = 125
+	SettingsManager.apply_ui_scale()
+	_panel._refresh_ui_scale_hint()
+	var hint: Label = _panel.find_child("UiScaleHint", true, false)
+	assert_not_null(hint, "the scale row carries the hint label")
+	assert_eq(hint.text, "shown at 100 %")
+	assert_eq(hint.theme_type_variation, UiTheme.MUTED_LABEL)
+	assert_eq(hint.mouse_filter, Control.MOUSE_FILTER_STOP,
+		"a MOUSE_FILTER_IGNORE label is never a hover target, so the tooltip would never show")
+	# Leave the shared autoload at its default for the suites that follow.
+	SettingsManager.cfg_ui_scale = 100
+	SettingsManager.apply_ui_scale()
 
 # ── Appearance mode ────────────────────────────────────────────────────
 

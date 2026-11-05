@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""Keep GDScript from caching a palette colour.
+
+`godot/scenes/ui/ui_palette.gd` carries a complete dark and a complete light
+colour set, and the mode switches while the app runs. A colour read at draw time
+follows the switch; a colour copied into a field, an `@export` initializer or a
+`add_theme_*_override` keeps the set that was active when the copy was made, so
+the light theme silently shows dark chrome. That is exactly the class of bug the
+light palette was built to remove, and nothing enforced the rule.
+
+This is the tripwire. It reads every GDScript under `godot/scenes/` and fails
+when a line
+
+  * calls `add_theme_color_override`, or
+  * reads `UiPalette.active()` at class-body level (a field or `const`
+    initializer, an `@export` default, an inner class's field, or a class-level
+    lambda body) - inside a `func` the read happens per call and is correct.
+
+A line that is genuinely fine - a doc comment quoting the API is skipped, but a
+code line that names it - says so:
+
+    var _accent: Color = UiPalette.active().ACCENT  # theme-ok: read once, never repainted
+
+The marker is a claim a reviewer checks; it is deliberately not a list of paths
+in this script, because a path list goes stale the moment the file moves and
+then the check quietly stops covering it.
+
+Exit codes: 0 clean, 1 violations found. Reads only; never writes.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SCENES = ROOT / "godot" / "scenes"
+
+OVERRIDE = "add_theme_color_override"
+CLASS_BODY_READ = "UiPalette.active("
+ALLOW = "theme-ok:"
+# A function body opens here; its own line is a body line, not a read site.
+FUNC_OPEN = re.compile(r"^(?:static\s+)?func\s")
+
+# Indentation of the open `func` bodies, outermost first. A GDScript class body
+# carries no delimiter of its own - indentation is the only nesting signal.
+def outside_function(lines: list[str]) -> list[bool]:
+    """True for each line that sits at class-body level (not inside a `func`)."""
+    outside: list[bool] = []
+    stack: list[int] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            outside.append(False)
+            continue
+        indent = len(line) - len(line.lstrip(" \t"))
+        while stack and indent <= stack[-1]:
+            stack.pop()
+        if FUNC_OPEN.match(stripped):
+            stack.append(indent)
+            outside.append(False)
+            continue
+        outside.append(not stack)
+    return outside
+
+
+def allowed(lines: list[str], index: int) -> bool:
+    """The marker lives on the line itself or within the three above it."""
+    window = "\n".join(lines[max(0, index - 3) : index + 1])
+    return ALLOW in window
+
+
+def violations(path: Path) -> list[tuple[int, str]]:
+    """`(line number, reason)` for every cached or pinned palette colour."""
+    lines = path.read_text().splitlines()
+    class_body = outside_function(lines)
+    found: list[tuple[int, str]] = []
+    for i, line in enumerate(lines):
+        if line.strip().startswith("#") or allowed(lines, i):
+            continue
+        if OVERRIDE in line:
+            found.append(
+                (i + 1, "a widget colour override pins the mode it was built under")
+            )
+        if CLASS_BODY_READ in line and class_body[i]:
+            found.append(
+                (i + 1, "a palette read at class-body level caches the mode it was created under")
+            )
+    return found
+
+
+def main() -> int:
+    reports: list[str] = []
+    files = 0
+    for path in sorted(SCENES.rglob("*.gd")):
+        files += 1
+        for line_no, reason in violations(path):
+            where = f"{path.relative_to(ROOT)}:{line_no}"
+            text = path.read_text().splitlines()[line_no - 1].strip()
+            reports.append(f"check-theme-tokens: {where}: {reason}")
+            reports.append(f"    {text}")
+    if reports:
+        print("check-theme-tokens: read a palette colour at draw time, never cache it")
+        for report in reports:
+            print(report)
+        print(
+            f"  {len(reports) // 2} violation(s): name a Theme type variation "
+            f"(UiTheme.MUTED_LABEL/DANGER_LABEL/WARNING_LABEL/ACCENT_BUTTON), read "
+            f"`UiPalette.active()` from inside a function, or mark the line "
+            f"`# {ALLOW} <why it is safe>`"
+        )
+        return 1
+    print(f"check-theme-tokens: no cached palette colours in {files} GDScript files")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

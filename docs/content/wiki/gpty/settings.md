@@ -48,11 +48,13 @@ The shell field is the program a new terminal runs. On Linux and macOS it defaul
 | Appearance | Dark | Dark / Light / Follow system - Follow system uses the desktop's own dark-mode preference |
 | Font | `DejaVuSansMono.ttf` | Any `.ttf` |
 | Font size | 14 px | 8–32 px — the terminal's text, independent of the UI scale |
-| UI scale | 100 % | 100 / 110 / 125 / 150 / 175 / 200 %. Scales the whole interface, terminals included: every panel, dialog and control grows together, so a dense display does not need a magnifier |
+| UI scale | 100 % | 100 / 110 / 125 / 150 / 175 / 200 %. Scales the whole interface, terminals included: every panel, dialog and control grows together, so a dense display does not need a magnifier. Capped by the window — see below |
 | Color scheme | None | Optional `.txt`, `.json`, or `.csv` scheme file |
 | Show titlebar | On | Per-pane title bars |
 
-The UI scale is the window's content scale: text and every fixed size scale together, and the layout shrinks by the same factor, so no control is clipped. Font size is separate and only touches the terminal grid — use it when the terminal text should differ from the chrome. At 125 % on a 1920x1080 window the interface behaves like a 1536x864 one, so a very small window at a high scale has less room than the same window at 100 %.
+The UI scale is the window's content scale: text and every fixed size scale together, and the layout shrinks by the same factor, so no control is clipped. Font size is separate and only touches the terminal grid — use it when the terminal text should differ from the chrome. At 125 % on a 1920x1080 window the interface behaves like a 1536x864 one.
+
+The applied scale is capped so the layout never falls under 540x560 layout pixels — the Settings card's size, and the narrowest space the 180 px sidebar plus a 2x2 pane grid is drawn at. A window that cannot hold the requested scale gets the largest whole percentage it can show, never less than 100 %: the Appearance row then reads `shown at N %`, with the reason in its tooltip, while the picker keeps the request, and growing the window restores the full scale without a restart. A window already smaller than 540x560 shows the 100 % layout clipped rather than a smaller interface — that is the small-window layout work (*Small windows adapt instead of clipping*), not something a lower scale can fix.
 
 The chrome ships a complete dark and a complete light colour set (`godot/scenes/ui/ui_palette.gd`), so **Appearance** decides the whole interface at once: the sidebar, pane title bars, panels, dialogs, toasts and the status bar switch together, and the window's background with them. `Follow system` reads the desktop's dark-mode preference and re-themes live when it changes; a platform or session that cannot answer is treated as dark. Nothing restarts and nothing reopens.
 

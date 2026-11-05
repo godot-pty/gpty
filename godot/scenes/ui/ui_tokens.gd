@@ -1,6 +1,7 @@
 class_name UiTokens
 ## The design tokens that do not change with the mode: the type scale, the
-## spacing steps, the corner radius, and the WCAG contrast maths.
+## spacing steps, the corner radius, the layout floor, and the WCAG contrast
+## maths.
 ##
 ## Colours live in `ui_palette.gd` (`UiPalette`), which carries a complete dark
 ## and a complete light set and the one active one — read them through
@@ -35,6 +36,26 @@ const SPACE_XXL := 16
 
 ## Corner radius on buttons, inputs and popups.
 const RADIUS := 3
+
+# --- Layout floor --------------------------------------------------------------
+## The smallest layout space the chrome is designed for, in layout pixels. The
+## Settings card is 540 x 560 and is the largest fixed surface; 540 also leaves
+## the 180 px sidebar plus a 2x2 grid of 180 px tiles, the narrowest a pane
+## title bar (five 22 px buttons and a title) is drawn at. `SettingsManager`
+## caps the applied UI scale so the layout never falls under it; the v0.8.2
+## small-window work may lower it once the card, the sidebar and the dialogs
+## adapt instead of clipping.
+const MIN_LAYOUT := Vector2(540, 560)
+
+## The largest whole-percent UI scale a `window_size`-pixel window can show
+## without the layout (`window_size / scale`) falling under `MIN_LAYOUT`.
+## -1 when the size cannot be measured (a zero or negative axis, as a headless
+## display reports): an unmeasurable window must not cap the user's choice.
+static func ui_scale_ceiling(window_size: Vector2i) -> int:
+	if window_size.x <= 0 or window_size.y <= 0:
+		return -1
+	var fits := minf(float(window_size.x) / MIN_LAYOUT.x, float(window_size.y) / MIN_LAYOUT.y)
+	return int(fits * 100.0)
 
 ## The WCAG 2.1 contrast ratio of `fg` drawn on `bg`, alpha composited.
 ##

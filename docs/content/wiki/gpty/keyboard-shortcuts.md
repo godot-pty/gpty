@@ -45,6 +45,8 @@ These are handled by the focused terminal before the workspace sees them. `Ctrl+
 
 New panes use the normal split rule: the largest tile halves along its longer axis, and the spawn is refused when both halves would be smaller than the 6-unit minimum. The four pane-type shortcuts are the only ones gPTY binds directly; Reasoning, CLI View, Wiki, and Media panes are spawned from the sidebar's Add Pane grid, the command palette, or the control API.
 
+While an overlay is open — Settings, Pane Settings, the command palette or the concept graph editor — only the window actions act: `Ctrl+Shift+P`, `Ctrl+Shift+B`, `F11`/`Ctrl+Shift+M`, and `Escape` to close the overlay. Every other chord is swallowed rather than executed, so `Ctrl+Shift+N`, `Ctrl+Shift+W` and `Ctrl+Shift+R` cannot spawn, close or reset the workspace a panel is configuring, and the key never reaches the terminal behind it either.
+
 Closing a pane is guarded. If a command is still running, gPTY asks once before stopping it, and a pane holding unsaved work — a wiki note, for example — can cancel the close. `Ctrl+Shift+W` targets the focused pane; if focus is on a read-only pane, the workspace remembers the last terminal you clicked, so the shortcut still has a sensible target.
 
 `Alt` plus an arrow moves focus to the nearest pane in that direction, judged by pane centers. It only works while a pane holds keyboard focus, which is the normal state after clicking into a pane. The workspace claims the chord before the terminal's key handling, so the arrow does not become a shell escape sequence; every other `Alt` combination still reaches the program.

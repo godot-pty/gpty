@@ -320,6 +320,19 @@ else
     check_failed
 fi
 
+# ── Step 3.3: Theme tokens ─────────────────────────────────────────────
+# The light theme holds only because nothing caches a palette colour or pins one
+# in a widget override (docs/content/docs/agents/gdscript.md). A cached copy
+# compiles, passes the suite, and silently keeps the mode it was built under, so
+# the rule is a gate. Static, no build.
+header "theme tokens"
+if ./scripts/check-theme-tokens 2>&1; then
+    pass "theme tokens"
+else
+    fail "theme tokens — a palette colour is cached or overridden"
+    check_failed
+fi
+
 # ── Fast mode stops here ───────────────────────────────────────────────
 if $FAST; then
     printf "\n"

@@ -267,10 +267,9 @@ func test_a_click_behind_an_open_overlay_does_not_take_the_keyboard():
 	assert_null(ws._tm.last_body,
 		"a click behind an open overlay must not activate a pane")
 
-func test_a_pane_shortcut_while_an_overlay_is_open_does_not_take_the_keyboard():
-	# The shortcut layer is global on purpose (Ctrl+Shift+B toggles the sidebar
-	# while a panel is open), so a spawn shortcut still runs — but the pane it
-	# creates must not steal the keyboard from the overlay that owns it.
+func test_a_pane_shortcut_while_an_overlay_is_open_spawns_nothing():
+	# The registry decides, not each callback: with an overlay up, a chord that
+	# changes the workspace is refused and consumed.
 	var ws = await _start_workspace()
 	ws._sidebar.request_settings.emit()
 	var settings: SettingsPanel = ws._settings_panel
@@ -280,7 +279,21 @@ func test_a_pane_shortcut_while_an_overlay_is_open_does_not_take_the_keyboard():
 	await _press_key(KEY_N, true, true)
 	await get_tree().process_frame
 
-	assert_eq(ws._tm.tiles.size(), before + 1, "Ctrl+Shift+N still spawns a terminal")
+	assert_eq(ws._tm.tiles.size(), before,
+		"Ctrl+Shift+N spawns nothing while Settings owns the keyboard")
 	assert_true(_is_inside(settings, ws.get_viewport().gui_get_focus_owner()),
-		"the open overlay keeps the keyboard the spawn would have taken (owner: %s)"
-		% _focus_owner_path(ws))
+		"the refused chord leaves the keyboard in the panel (owner: %s)" % _focus_owner_path(ws))
+
+func test_a_window_shortcut_still_works_over_an_overlay():
+	var ws = await _start_workspace()
+	ws._sidebar.request_settings.emit()
+	var settings: SettingsPanel = ws._settings_panel
+	assert_true(settings.visible, "precondition: Settings is open")
+
+	await _press_key(KEY_P, true, true)
+	await get_tree().process_frame
+
+	assert_not_null(ws._palette, "Ctrl+Shift+P created the palette")
+	assert_true(ws._palette.visible, "the palette opens over Settings")
+	assert_true(_is_inside(ws._palette, ws.get_viewport().gui_get_focus_owner()),
+		"the palette takes the keyboard from Settings (owner: %s)" % _focus_owner_path(ws))

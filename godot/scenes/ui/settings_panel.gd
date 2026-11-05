@@ -10,6 +10,8 @@ var _menu_width: float = 540.0  # settings panel width — dialogs size relative
 ## The disk-usage row in the Terminal tab; refreshed whenever the panel opens,
 ## because the panel outlives a single visit and scrollback keeps growing.
 var _history_size_label: Label = null
+## The scale row's "shown at N %" hint; see `_refresh_ui_scale_hint`.
+var _ui_scale_hint: Label = null
 ## The seven chrome-colour rows, kept so a palette switch can re-point their
 ## swatches: an untouched colour moves with the palette, and the picker must
 ## show the value the setting actually holds.
@@ -27,8 +29,15 @@ func _ready():
 	_build_ui()
 
 func _notification(what: int):
-	if what == NOTIFICATION_VISIBILITY_CHANGED and visible:
+	if not visible:
+		return
+	if what == NOTIFICATION_VISIBILITY_CHANGED:
 		_refresh_history_size()
+		_refresh_ui_scale_hint()
+	elif what == NOTIFICATION_RESIZED:
+		# The window (and with it the layout space) changed, so the scale it can
+		# show may have moved while the panel is open.
+		_refresh_ui_scale_hint()
 
 func _build_ui():
 	var cc = CenterContainer.new()
@@ -41,7 +50,10 @@ func _build_ui():
 	# clipped tab only becomes visible in the bar after being clicked,
 	# stretching the tab bar while the panel keeps its old width (mangled
 	# layout). Keep every tab visible from the start.
-	bg.custom_minimum_size = Vector2(540, 560)
+	#
+	# This card *is* the layout floor: `UiTokens.MIN_LAYOUT` is the size
+	# `SettingsManager` caps the UI scale against, so the two cannot drift.
+	bg.custom_minimum_size = UiTokens.MIN_LAYOUT
 	_menu_width = bg.custom_minimum_size.x
 	cc.add_child(bg)
 
@@ -300,10 +312,47 @@ func _add_ui_scale_control(v: VBoxContainer) -> OptionButton:
 	scale_opt.item_selected.connect(func(idx: int):
 		SettingsManager.cfg_ui_scale = presets[idx]
 		SettingsManager.save_settings()
+		_refresh_ui_scale_hint()
 	)
 	hf.add_child(scale_opt)
+	# What the window actually shows, in the same row and on one line, so the
+	# card's measured 540 x 560 does not move. Empty unless the clamp bites.
+	_ui_scale_hint = Label.new()
+	_ui_scale_hint.name = "UiScaleHint"
+	_ui_scale_hint.theme_type_variation = UiTheme.MUTED_LABEL
+	_ui_scale_hint.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_ui_scale_hint.mouse_filter = Control.MOUSE_FILTER_STOP  # a tooltip needs a hover target
+	hf.add_child(_ui_scale_hint)
 	v.add_child(hf)
+	_refresh_ui_scale_hint()
 	return scale_opt
+
+## The scale row's second half: the scale the window shows, when the cap in
+## `SettingsManager.applied_ui_scale_percent()` is below the picker's value.
+func _refresh_ui_scale_hint() -> void:
+	if _ui_scale_hint == null:
+		return
+	var requested := SettingsManager.cfg_ui_scale
+	var applied := SettingsManager.applied_ui_scale_percent()
+	_ui_scale_hint.text = ui_scale_hint(requested, applied)
+	_ui_scale_hint.tooltip_text = ui_scale_hint_tooltip(requested, applied)
+
+## The hint's text, pure so the wording is pinned without a window: empty when
+## the window shows the request, otherwise the scale it does show.
+static func ui_scale_hint(requested: int, applied: int) -> String:
+	if requested == applied:
+		return ""
+	return "shown at %d %%" % applied
+
+## The hint's tooltip, same shape and the same condition.
+static func ui_scale_hint_tooltip(requested: int, applied: int) -> String:
+	if requested == applied:
+		return ""
+	return (
+		"This window shows the interface at %d %% instead of %d %%: at the larger "
+		+ "scale the layout would be smaller than %d x %d px and the Settings card "
+		+ "would not fit. Make the window bigger to use the full scale."
+	) % [applied, requested, int(UiTokens.MIN_LAYOUT.x), int(UiTokens.MIN_LAYOUT.y)]
 
 func _add_reasoning_control(v: VBoxContainer) -> Array:
 	var h1 = HBoxContainer.new()

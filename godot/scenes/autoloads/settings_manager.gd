@@ -37,13 +37,13 @@ var cfg_underline_height := 3
 # The palette is not constant, so these defaults are `apply_appearance()`'s to
 # re-derive: they start on the dark set (or whatever is active when the autoload
 # is created) and follow the mode until the user picks a colour.
-var cfg_wrapper_bg: Color = UiPalette.active().BG
-var cfg_title_bar_bg: Color = UiPalette.active().SURFACE_RAISED
-var cfg_wrapper_border: Color = UiPalette.active().BORDER
-var cfg_sidebar_bg: Color = UiPalette.active().SIDEBAR
-var cfg_focus_border: Color = UiPalette.active().TERMINAL_FOCUS
-var cfg_selection: Color = UiPalette.active().SELECTION
-var cfg_scrollback_indicator: Color = UiPalette.active().SCROLLBACK_INDICATOR
+var cfg_wrapper_bg: Color = _chrome_default("wrapper_bg")
+var cfg_title_bar_bg: Color = _chrome_default("title_bar_bg")
+var cfg_wrapper_border: Color = _chrome_default("wrapper_border")
+var cfg_sidebar_bg: Color = _chrome_default("sidebar_bg")
+var cfg_focus_border: Color = _chrome_default("focus_border")
+var cfg_selection: Color = _chrome_default("selection")
+var cfg_scrollback_indicator: Color = _chrome_default("scrollback_indicator")
 var cfg_color_scheme_path := ""
 var cfg_max_fps := 0
 var cfg_font_path := "res://fonts/DejaVuSansMono.ttf"
@@ -96,6 +96,9 @@ signal settings_changed
 func _on_init():
 	load_settings()
 	apply_ui_scale()
+	var window := get_window()
+	if window != null and not window.size_changed.is_connected(_on_window_resized):
+		window.size_changed.connect(_on_window_resized)
 	apply_appearance()
 	# The desktop theme flip arrives through the engine's message loop; the
 	# dispatch is deferred so the palette switch runs on the main thread like
@@ -155,13 +158,13 @@ func load_settings():
 	cfg_default_cols = _as_int(d, "default_cols", 80)
 	cfg_beam_width = _as_int(d, "beam_width", 2)
 	cfg_underline_height = _as_int(d, "underline_height", 3)
-	cfg_wrapper_bg = _color_from_hex(_as_string(d, "wrapper_bg", ""), UiPalette.active().BG)
-	cfg_title_bar_bg = _color_from_hex(_as_string(d, "title_bar_bg", ""), UiPalette.active().SURFACE_RAISED)
-	cfg_wrapper_border = _color_from_hex(_as_string(d, "wrapper_border", ""), UiPalette.active().BORDER)
-	cfg_sidebar_bg = _color_from_hex(_as_string(d, "sidebar_bg", ""), UiPalette.active().SIDEBAR)
-	cfg_focus_border = _color_from_hex(_as_string(d, "focus_border", ""), UiPalette.active().TERMINAL_FOCUS)
-	cfg_selection = _color_from_hex(_as_string(d, "selection", ""), UiPalette.active().SELECTION)
-	cfg_scrollback_indicator = _color_from_hex(_as_string(d, "scrollback_indicator", ""), UiPalette.active().SCROLLBACK_INDICATOR)
+	cfg_wrapper_bg = _color_from_hex(_as_string(d, "wrapper_bg", ""), _chrome_default("wrapper_bg"))
+	cfg_title_bar_bg = _color_from_hex(_as_string(d, "title_bar_bg", ""), _chrome_default("title_bar_bg"))
+	cfg_wrapper_border = _color_from_hex(_as_string(d, "wrapper_border", ""), _chrome_default("wrapper_border"))
+	cfg_sidebar_bg = _color_from_hex(_as_string(d, "sidebar_bg", ""), _chrome_default("sidebar_bg"))
+	cfg_focus_border = _color_from_hex(_as_string(d, "focus_border", ""), _chrome_default("focus_border"))
+	cfg_selection = _color_from_hex(_as_string(d, "selection", ""), _chrome_default("selection"))
+	cfg_scrollback_indicator = _color_from_hex(_as_string(d, "scrollback_indicator", ""), _chrome_default("scrollback_indicator"))
 	cfg_color_scheme_path = _as_string(d, "color_scheme", "")
 	cfg_max_fps = _as_int(d, "max_fps", 0)
 	cfg_window_mode = _as_int(d, "window_mode", 0)
@@ -217,22 +220,63 @@ func apply_to_terminal(body: Control):
 func apply_pane_settings(body: Control, settings: Dictionary):
 	body.apply_settings(settings)
 
-## The window's content scale, as a multiplier.
+## `cfg_ui_scale` as a factor: what the user asked for, before the window's cap.
 func ui_scale_factor() -> float:
 	return float(cfg_ui_scale) / 100.0
 
-## Push `cfg_ui_scale` at the window.
+## The factor the window actually gets. See `applied_ui_scale_percent`.
+func applied_ui_scale_factor() -> float:
+	return float(applied_ui_scale_percent()) / 100.0
+
+## `cfg_ui_scale`, capped so the layout space (`window pixels / scale`) never
+## falls under `UiTokens.MIN_LAYOUT`: below it the Settings card is clipped and a
+## pane title runs under its own buttons. Never under 100 % -- a window already
+## smaller than the floor needs the small-window work, not a smaller interface.
+## The setting keeps the user's request; the Appearance row prints
+## `shown at N %` when this answers below it.
+func applied_ui_scale_percent() -> int:
+	var w := get_window()
+	return capped_ui_scale_percent(cfg_ui_scale, w.size if w != null else Vector2i.ZERO)
+
+## `requested` capped for a `window_size`-pixel window. Static and pure, so the
+## rule is testable without a real window.
+static func capped_ui_scale_percent(requested: int, window_size: Vector2i) -> int:
+	var ceiling := UiTokens.ui_scale_ceiling(window_size)
+	if ceiling < 0:
+		return requested
+	return clampi(requested, 100, maxi(ceiling, 100))
+
+## Push the applied scale at the window.
 ##
 ## `content_scale_factor` is what "UI scale" has to mean here: Godot scales the
 ## whole interface uniformly, layout space shrinking while the pixel grid stays
 ## put, so hard-coded minimum sizes and margins grow with the type. Multiplying
 ## each token font size instead would leave every `custom_minimum_size` at its
 ## old pixel size, which is exactly the clipping a dense display produces. The
-## resize this causes is what re-lays the workspace out.
+## resize this causes is what re-lays the workspace out. A no-change guard keeps
+## the `size_changed` the assignment emits from re-entering this function.
 func apply_ui_scale() -> void:
 	var w := get_window()
-	if w != null:
-		w.content_scale_factor = ui_scale_factor()
+	if w == null:
+		return
+	var factor := applied_ui_scale_factor()
+	if is_equal_approx(w.content_scale_factor, factor):
+		return
+	w.content_scale_factor = factor
+
+## A resize changes what the layout has room for, so the cap moves with it: a
+## window dragged smaller steps the scale down and dragging it back restores the
+## user's choice.
+func _on_window_resized() -> void:
+	apply_ui_scale()
+
+## A chrome colour's default from the active palette, by settings key. The field
+## initializers and `load_settings`' fallbacks both go through it, so one table
+## says which token a setting defaults to and no initializer reads the palette
+## directly (which would pin the mode it was created under --
+## `scripts/check-theme-tokens`).
+static func _chrome_default(key: String) -> Color:
+	return UiPalette.active().color(CHROME_COLOR_TOKENS[key])
 
 ## A stored `{"x": .., "y": ..}` pair, or `fallback` when it is not one.
 func _window_vec(d: Dictionary, key: String, fallback: Vector2i) -> Vector2i:

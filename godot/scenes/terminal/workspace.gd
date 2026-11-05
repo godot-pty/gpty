@@ -143,6 +143,10 @@ func _ready():
 	# the restored workspace set and a started terminal for the FFI handle.
 	_prune_history_deferred()
 
+	# The one predicate the shortcut layer asks before it acts: an overlay owns
+	# the keyboard, so only a window action may land while one is open.
+	ShortcutManager.overlay_owns_keyboard = func() -> bool: return _keyboard_overlay() != null
+
 	# Per-type keyboard shortcuts
 	for key in PaneTypes.ALL:
 		var info = PaneTypes.ALL[key]
@@ -154,12 +158,12 @@ func _ready():
 		# leaves the pane unrecorded as active (so "close active" skips it).
 		ShortcutManager.register("app:new_" + key, shortcut, func(): var b = _spawn_pane(key); if b: activate_pane(b))
 	ShortcutManager.register("app:close_pane", "Ctrl+Shift+W", func(): _kill_last())
-	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _toggle_sidebar)
-	ShortcutManager.register("app:toggle_palette", "Ctrl+Shift+P", _toggle_palette)
+	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _toggle_sidebar, true)
+	ShortcutManager.register("app:toggle_palette", "Ctrl+Shift+P", _toggle_palette, true)
 	ShortcutManager.register("app:focus_pane_chrome", "Ctrl+Shift+E", _focus_active_pane_chrome)
 	ShortcutManager.register("app:focus_note_toolbar", "Ctrl+Shift+K", _focus_note_toolbar)
-	ShortcutManager.register("app:toggle_fullscreen", "F11", _chrome.toggle_fullscreen)
-	ShortcutManager.register("app:toggle_fullscreen_alt", "Ctrl+Shift+M", _chrome.toggle_fullscreen)
+	ShortcutManager.register("app:toggle_fullscreen", "F11", _chrome.toggle_fullscreen, true)
+	ShortcutManager.register("app:toggle_fullscreen_alt", "Ctrl+Shift+M", _chrome.toggle_fullscreen, true)
 	ShortcutManager.register("app:reset_workspace", "Ctrl+Shift+R", func():
 		_do_reset()
 	)
@@ -263,6 +267,11 @@ func _notification(what):
 # reliably whenever the scene tree is torn down.
 
 func _exit_tree():
+	# The shortcut layer holds this workspace's predicate in a process-global
+	# slot; a freed workspace must not be reachable from a later key press (a
+	# test's tree, or a second workspace instance), so the slot goes back to the
+	# neutral answer before anything else here runs.
+	ShortcutManager.overlay_owns_keyboard = func() -> bool: return false
 	_chrome.save_position()
 	_save()
 	SettingsManager.save_settings()

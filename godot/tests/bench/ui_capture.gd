@@ -71,6 +71,11 @@ const STATES := {
 	# workspace. The only visual proof that the setting scales the chrome and
 	# the terminal text together; a later release recaptures it.
 	"ui-scale-125": {"size": DEFAULT_SIZE, "panes": 0, "ui_scale": 125},
+	# The same 125 % request in a window that cannot hold it: the layout would be
+	# 640x400, under the 540x560 Settings card. The applied scale must fall back
+	# to 100 %, and the harness prints both numbers so the log and the image
+	# agree about which scale produced it.
+	"ui-scale-125-800x500": {"size": Vector2i(800, 500), "panes": 0, "ui_scale": 125},
 	# The light chrome, on the same workspace the dark states capture. Both
 	# exist so the light theme is reproducible by name, and so the v0.8.4
 	# recapture can use them instead of a scratch driver.
@@ -207,6 +212,11 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	_workspace = load("res://scenes/main.tscn").instantiate()
 	root.add_child(_workspace)
 	await _settle_window(size)
+	# The scale the window actually got. `ui-scale-125-800x500` exists to prove
+	# the cap, and only a number can say which scale the image shows.
+	print("ui_capture: window=%dx%d ui_scale requested=%d%% applied=%d%%" % [
+		size.x, size.y, _settings.cfg_ui_scale,
+		_settings.applied_ui_scale_percent()])
 	# A seeded layout restores its panes unfocused; pin the active pane so the
 	# status bar and the sidebar accent cannot depend on restore order. The
 	# first-launch state keeps the app's own focus — that behaviour is audited.
