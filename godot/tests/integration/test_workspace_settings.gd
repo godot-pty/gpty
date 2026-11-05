@@ -17,6 +17,10 @@ func before_each():
 	SettingsManager.cfg_cursor_shape = 1
 
 func after_each():
+	# The palette is process-global: leave the suite on the dark set, whatever a
+	# switch test did.
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+	SettingsManager.apply_appearance()
 	# Free synchronously while mocks are still active: _exit_tree() → _save()
 	# would otherwise write the real layout/settings after teardown restores
 	# the real persistence scripts.
@@ -573,6 +577,48 @@ func test_an_emptied_workspace_shows_the_guide():
 	ws._spawn()
 	await get_tree().process_frame
 	assert_false(empty.visible, "spawning hides the guide again")
+
+	# Wait out the deferred concept push so it cannot resume after the free.
+	await get_tree().create_timer(2.1).timeout
+
+## The row's end-to-end proof: a mode change through the settings save re-themes
+## the live window - the one Theme, the clear colour, the user-coloured chrome
+## and the token-only status bar - and switching back restores it.
+func test_the_chrome_follows_the_appearance_mode_live():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var wrapper: PanelContainer = ws._tm.tiles[0].wrapper
+	var sb = wrapper.get_theme_stylebox("panel") as StyleBoxFlat
+	assert_not_null(sb, "wrapper must carry a panel stylebox")
+
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_LIGHT
+	SettingsManager.save_settings()
+
+	var panel := ws.theme.get_stylebox("panel", "Panel") as StyleBoxFlat
+	assert_eq(panel.bg_color, UiPalette.light().SURFACE,
+		"the panel is the light surface")
+	assert_eq(ws.theme.get_color("font_color", "Label"), UiPalette.light().TEXT,
+		"the chrome's ink inverted")
+	assert_eq(RenderingServer.get_default_clear_color(), UiPalette.light().BG,
+		"the content area's clear colour followed")
+	assert_eq(sb.bg_color, UiPalette.light().BG,
+		"the existing wrapper followed without a respawn")
+	assert_eq(ws._sidebar_bg.color, UiPalette.light().SIDEBAR,
+		"the sidebar followed")
+	assert_not_null(ws._status_bar, "the status bar exists")
+	assert_eq(ws._status_bar._bg.color, UiPalette.light().SURFACE_RAISED,
+		"the status bar's own surface followed")
+
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+	SettingsManager.save_settings()
+	panel = ws.theme.get_stylebox("panel", "Panel") as StyleBoxFlat
+	assert_eq(panel.bg_color, UiPalette.dark().SURFACE, "and back again")
+	assert_eq(sb.bg_color, UiPalette.dark().BG)
 
 	# Wait out the deferred concept push so it cannot resume after the free.
 	await get_tree().create_timer(2.1).timeout

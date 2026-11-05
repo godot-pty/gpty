@@ -173,7 +173,7 @@ func _add_buttons(v: VBoxContainer):
 	settings_btn.pressed.connect(func(): request_settings.emit())
 	v.add_child(settings_btn)
 
-	var reset_btn = _make_icon_text_button(Icons.DELETE, "Close All", UiTokens.DANGER)
+	var reset_btn = _make_icon_text_button(Icons.DELETE, "Close All", UiTheme.DANGER_LABEL)
 	reset_btn.tooltip_text = "Close every pane in this workspace (Ctrl+Shift+R)"
 	reset_btn.pressed.connect(func(): request_reset.emit())
 	v.add_child(reset_btn)
@@ -181,7 +181,11 @@ func _add_buttons(v: VBoxContainer):
 ## One clickable button holding an icon Label and a text Label in an HBox —
 ## the container aligns the PUA glyph and the label on the same baseline,
 ## which a sibling-icon layout could never do reliably.
-func _make_icon_text_button(icon: String, text: String, tint := Color.WHITE) -> Button:
+##
+## `variation` names a theme colour role (`UiTheme.DANGER_LABEL`) rather than a
+## colour: a `Color.WHITE` default was invisible on a light sidebar, and an
+## override would pin whichever palette the sidebar was built under.
+func _make_icon_text_button(icon: String, text: String, variation := &"") -> Button:
 	var btn = Button.new()
 	btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -205,7 +209,7 @@ func _make_icon_text_button(icon: String, text: String, tint := Color.WHITE) -> 
 	# stretched full-height labels (a smaller glyph font centers on a
 	# different baseline and looks misaligned).
 	icon_lbl.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
-	icon_lbl.add_theme_color_override("font_color", tint)
+	icon_lbl.theme_type_variation = variation
 	icon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	icon_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	h.add_child(icon_lbl)
@@ -213,7 +217,7 @@ func _make_icon_text_button(icon: String, text: String, tint := Color.WHITE) -> 
 	var text_lbl = Label.new()
 	text_lbl.text = text
 	text_lbl.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
-	text_lbl.add_theme_color_override("font_color", tint)
+	text_lbl.theme_type_variation = variation
 	text_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	text_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	h.add_child(text_lbl)
@@ -233,7 +237,6 @@ func _add_window_mode(v: VBoxContainer):
 func _add_pane_buttons(v: VBoxContainer):
 	var lbl = Label.new()
 	lbl.text = " Add Pane:"
-	lbl.add_theme_color_override("font_color", UiTokens.TEXT)
 	v.add_child(lbl)
 
 	# A two-row grid, not a strip: eight pane types in one row overflow the
@@ -341,17 +344,10 @@ func _apply_row_accent(btn: Button, active: bool):
 	# managed by this helper on every refresh, so clicks never corrupt it.
 	btn.toggle_mode = true
 	btn.button_pressed = active
-	if active:
-		# A pressed button resolves text from font_pressed_color, which
-		# otherwise falls back to the theme default — override all three
-		# states or the accent vanishes exactly when the row is active.
-		btn.add_theme_color_override("font_color", UiTokens.ACCENT)
-		btn.add_theme_color_override("font_hover_color", UiTokens.ACCENT_HOVER)
-		btn.add_theme_color_override("font_pressed_color", UiTokens.ACCENT)
-	else:
-		btn.remove_theme_color_override("font_color")
-		btn.remove_theme_color_override("font_hover_color")
-		btn.remove_theme_color_override("font_pressed_color")
+	# The accent is a theme role, not three overrides: a pressed button resolves
+	# text from font_pressed_color, so the variation carries all three states and
+	# a palette switch re-colours the row without this helper running.
+	btn.theme_type_variation = UiTheme.ACCENT_BUTTON if active else &""
 
 func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close: bool, cwd := "") -> HBoxContainer:
 	var row = HBoxContainer.new()
@@ -377,7 +373,7 @@ func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close:
 	dir_btn.tooltip_text = "Working directory: %s" % dir_hint
 	dir_btn.custom_minimum_size = Vector2(22, 0)
 	if cwd != "":
-		dir_btn.add_theme_color_override("font_color", UiTokens.ACCENT)
+		dir_btn.theme_type_variation = UiTheme.ACCENT_BUTTON
 	dir_btn.pressed.connect(func(): request_workspace_cwd.emit(idx))
 	row.add_child(dir_btn)
 

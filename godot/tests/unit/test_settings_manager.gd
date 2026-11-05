@@ -10,6 +10,12 @@ func before_each():
 	add_child(_scene)
 
 func after_each():
+	# The palette and the seam are process-global: a test that left the chrome
+	# light (or a desktop answer stubbed) would re-theme every later suite.
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+	SettingsManager.system_is_dark = func() -> bool:
+		return DisplayServer.is_dark_mode() if DisplayServer.is_dark_mode_supported() else true
+	SettingsManager.apply_appearance()
 	for c in _scene.get_children():
 		c.queue_free()
 	MockAutoloads.teardown()
@@ -85,3 +91,70 @@ func test_load_settings_uses_defaults_when_empty():
 	SettingsManager.cfg_font_size = 14  # set a known default
 	SettingsManager.load_settings()  # store is empty, so nothing changes
 	assert_eq(SettingsManager.cfg_font_size, 14, "default should persist when no saved data")
+
+# ── Appearance mode ────────────────────────────────────────────────────
+
+func test_appearance_mode_roundtrips():
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_LIGHT
+	SettingsManager.save_settings()
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_appearance_mode, SettingsManager.APPEARANCE_LIGHT)
+
+func test_a_hand_edited_appearance_mode_is_clamped():
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE, {"appearance_mode": 9})
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_appearance_mode, SettingsManager.APPEARANCE_SYSTEM,
+		"a mode past the last entry clamps to Follow system")
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE, {"appearance_mode": -5})
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_appearance_mode, SettingsManager.APPEARANCE_DARK,
+		"a mode below the first entry clamps to Dark")
+
+func test_light_selects_the_light_palette():
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_LIGHT
+	SettingsManager.apply_appearance()
+	assert_false(SettingsManager.is_dark_appearance())
+	assert_eq(UiPalette.active().BG, UiPalette.light().BG)
+	assert_eq(UiPalette.active().TEXT, UiPalette.light().TEXT)
+
+func test_follow_system_uses_the_desktop_answer():
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_SYSTEM
+	SettingsManager.system_is_dark = func() -> bool: return false
+	SettingsManager.apply_appearance()
+	assert_false(SettingsManager.is_dark_appearance(), "the desktop said light")
+	assert_eq(UiPalette.active().SURFACE, UiPalette.light().SURFACE)
+
+	SettingsManager.system_is_dark = func() -> bool: return true
+	SettingsManager.apply_appearance()
+	assert_true(SettingsManager.is_dark_appearance(), "the desktop said dark")
+	assert_eq(UiPalette.active().SURFACE, UiPalette.dark().SURFACE)
+
+func test_apply_appearance_is_idempotent():
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+	SettingsManager.apply_appearance()
+	watch_signals(SettingsManager)
+	SettingsManager.apply_appearance()
+	assert_signal_not_emitted(SettingsManager, "appearance_changed",
+		"a save that did not move the mode must not cost a theme rebuild")
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_LIGHT
+	SettingsManager.apply_appearance()
+	assert_signal_emitted(SettingsManager, "appearance_changed")
+
+## A value equal to either set's default has never been chosen, so it follows
+## the palette: a store written by a light run still renders dark on a dark one.
+func test_an_uncustomised_chrome_colour_follows_the_palette():
+	SettingsManager.cfg_title_bar_bg = UiPalette.light().SURFACE_RAISED
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+	SettingsManager.save_settings()
+	assert_eq(SettingsManager.cfg_title_bar_bg, UiPalette.dark().SURFACE_RAISED)
+	assert_eq(SettingsManager.cfg_wrapper_bg, UiPalette.dark().BG)
+
+## ...while a colour the user actually picked is theirs to keep.
+func test_a_custom_chrome_colour_survives_a_palette_switch():
+	SettingsManager.cfg_title_bar_bg = Color(0.9, 0.1, 0.1)
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_LIGHT
+	SettingsManager.save_settings()
+	assert_eq(SettingsManager.cfg_title_bar_bg, Color(0.9, 0.1, 0.1))
+	assert_eq(SettingsManager.cfg_sidebar_bg, UiPalette.light().SIDEBAR,
+		"the untouched colours still follow")

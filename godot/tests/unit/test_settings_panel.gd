@@ -19,6 +19,10 @@ func before_each():
 	await get_tree().process_frame
 
 func after_each():
+	# The palette is process-global; a picker test that left it light would
+	# re-theme every later suite.
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+	SettingsManager.apply_appearance()
 	MockAutoloads.teardown()
 
 # ── Helpers ────────────────────────────────────────────────────────────
@@ -61,8 +65,8 @@ func test_appearance_reset_restores_only_appearance_settings():
 	btn.pressed.emit()
 
 	assert_eq(SettingsManager.cfg_font_size, 14, "font size must reset to default")
-	assert_eq(SettingsManager.cfg_wrapper_bg, SettingsManager.WRAPPER_BG_COLOR,
-		"wrapper bg must reset to default")
+	assert_eq(SettingsManager.cfg_wrapper_bg, UiPalette.active().BG,
+		"wrapper bg must reset to the active palette's background")
 	assert_eq(SettingsManager.cfg_ui_scale, 100, "the UI scale must reset to 100 %")
 	assert_eq(SettingsManager.cfg_color_scheme_path, "", "scheme path must reset to empty")
 	assert_eq(SettingsManager.cfg_shell_command, "/bin/zsh",
@@ -133,8 +137,8 @@ func test_wrapper_bg_color_reset():
 	var reset := _row_reset("Wrapper bg")
 	assert_not_null(reset, "Wrapper bg row must have a reset button")
 	reset.pressed.emit()
-	assert_eq(SettingsManager.cfg_wrapper_bg, SettingsManager.WRAPPER_BG_COLOR,
-		"per-color reset must restore the default wrapper bg")
+	assert_eq(SettingsManager.cfg_wrapper_bg, UiPalette.active().BG,
+		"per-color reset must restore the active palette's background")
 
 func test_scrollback_color_reset():
 	SettingsManager.cfg_scrollback_indicator = Color(0.1, 0.2, 0.9)
@@ -142,7 +146,7 @@ func test_scrollback_color_reset():
 	assert_not_null(reset, "Scroll row must have a reset button")
 	reset.pressed.emit()
 	assert_eq(SettingsManager.cfg_scrollback_indicator,
-		SettingsManager.SCROLLBACK_INDICATOR_COLOR,
+		UiPalette.active().SCROLLBACK_INDICATOR,
 		"per-color reset must restore the default scrollback indicator color")
 
 # ── Uniform picker width (issue: haphazard widths) ─────────────────────
@@ -361,3 +365,45 @@ func test_a_stored_value_that_is_not_a_preset_is_shown_as_its_own_entry():
 	assert_eq(opt.get_item_text(opt.item_count - 1), "133% (custom)")
 	assert_eq(opt.selected, opt.item_count - 1, "the stored value is the visible selection")
 	SettingsManager.cfg_ui_scale = 100
+
+# ── Appearance mode ────────────────────────────────────────────────────
+
+## The picker belongs to the tab whose colours it decides, and it must show the
+## stored value rather than a fixed default - the panel reads it when it is
+## built, which is what a restart on a stored Light mode looks like.
+func test_the_appearance_picker_is_in_the_appearance_tab():
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_LIGHT
+	SettingsManager.apply_appearance()
+	var panel := SettingsPanel.new(_ws)
+	add_child_autofree(panel)
+	await get_tree().process_frame
+	var opt: OptionButton = panel.find_child("AppearanceOpt", true, false)
+	assert_not_null(opt, "the Appearance tab must expose the colour mode")
+	assert_eq(_tab_of(opt), "Appearance", "the picker lives in the Appearance tab")
+	assert_eq(opt.item_count, 3, "Dark, Light, Follow system")
+	assert_eq(opt.selected, SettingsManager.APPEARANCE_LIGHT,
+		"the picker reflects the stored mode")
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+	SettingsManager.apply_appearance()
+
+func test_picking_light_applies_it():
+	watch_signals(SettingsManager)
+	var opt: OptionButton = _panel.find_child("AppearanceOpt", true, false)
+	opt.item_selected.emit(SettingsManager.APPEARANCE_LIGHT)
+	assert_eq(SettingsManager.cfg_appearance_mode, SettingsManager.APPEARANCE_LIGHT)
+	assert_signal_emitted(SettingsManager, "appearance_changed")
+	assert_eq(UiPalette.active().SURFACE, UiPalette.light().SURFACE,
+		"the save resolves the palette the mode chose")
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+	SettingsManager.apply_appearance()
+
+func test_appearance_reset_returns_to_dark():
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_LIGHT
+	SettingsManager.apply_appearance()
+	var btn := _tab_reset_button("Appearance")
+	assert_not_null(btn, "the Appearance tab must have a reset")
+	btn.pressed.emit()
+	assert_eq(SettingsManager.cfg_appearance_mode, SettingsManager.APPEARANCE_DARK)
+	assert_eq(UiPalette.active().SURFACE, UiPalette.dark().SURFACE)
+	assert_eq(SettingsManager.cfg_wrapper_bg, UiPalette.active().BG,
+		"the colour rows reset to the palette the reset just chose")

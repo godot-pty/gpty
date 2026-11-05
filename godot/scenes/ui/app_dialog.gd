@@ -61,7 +61,6 @@ static func set_text(dialog: AcceptDialog, text: String) -> Label:
 	label.name = TEXT_NAME
 	label.text = text
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.add_theme_color_override("font_color", UiTokens.TEXT)
 	content(dialog).add_child(label)
 	dialog.dialog_text = text
 	return label

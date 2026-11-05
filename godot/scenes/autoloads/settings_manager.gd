@@ -2,14 +2,24 @@ extends BasePersistenceManager
 
 const SETTINGS_FILE = "user://settings.json"
 
-const WRAPPER_BG_COLOR = UiTokens.BG
-const TITLE_BAR_BG_COLOR = UiTokens.SURFACE_RAISED
-const WRAPPER_BORDER_COLOR = UiTokens.BORDER
-const SIDEBAR_BG_COLOR = UiTokens.SIDEBAR
-const FOCUS_BORDER_COLOR = UiTokens.TERMINAL_FOCUS
-const SELECTION_COLOR = UiTokens.SELECTION
-const SCROLLBACK_INDICATOR_COLOR = UiTokens.SCROLLBACK_INDICATOR
 const WINDOW_MODE_LABELS := ["OS", "Windowed", "Windowless"]
+## The chrome's colour mode: an index into `APPEARANCE_LABELS`.
+const APPEARANCE_DARK := 0
+const APPEARANCE_LIGHT := 1
+const APPEARANCE_SYSTEM := 2
+const APPEARANCE_LABELS := ["Dark", "Light", "Follow system"]
+## The chrome colour settings that default to a token, keyed by settings key.
+## A stored value equal to either set's default has never been customised, so a
+## palette switch carries it instead of pinning the surface it was saved from.
+const CHROME_COLOR_TOKENS := {
+	"wrapper_bg": "BG",
+	"title_bar_bg": "SURFACE_RAISED",
+	"wrapper_border": "BORDER",
+	"sidebar_bg": "SIDEBAR",
+	"focus_border": "TERMINAL_FOCUS",
+	"selection": "SELECTION",
+	"scrollback_indicator": "SCROLLBACK_INDICATOR",
+}
 ## The UI-scale steps the Appearance picker offers, in percent. 100 is the
 ## layout every measurement and screenshot was taken at; the ceiling matches the
 ## loader's clamp so a stored value cannot exceed what the picker can show.
@@ -24,13 +34,16 @@ var cfg_default_rows := 24
 var cfg_default_cols := 80
 var cfg_beam_width := 2
 var cfg_underline_height := 3
-var cfg_wrapper_bg := WRAPPER_BG_COLOR
-var cfg_title_bar_bg := TITLE_BAR_BG_COLOR
-var cfg_wrapper_border := WRAPPER_BORDER_COLOR
-var cfg_sidebar_bg := SIDEBAR_BG_COLOR
-var cfg_focus_border := FOCUS_BORDER_COLOR
-var cfg_selection := SELECTION_COLOR
-var cfg_scrollback_indicator := SCROLLBACK_INDICATOR_COLOR
+# The palette is not constant, so these defaults are `apply_appearance()`'s to
+# re-derive: they start on the dark set (or whatever is active when the autoload
+# is created) and follow the mode until the user picks a colour.
+var cfg_wrapper_bg: Color = UiPalette.active().BG
+var cfg_title_bar_bg: Color = UiPalette.active().SURFACE_RAISED
+var cfg_wrapper_border: Color = UiPalette.active().BORDER
+var cfg_sidebar_bg: Color = UiPalette.active().SIDEBAR
+var cfg_focus_border: Color = UiPalette.active().TERMINAL_FOCUS
+var cfg_selection: Color = UiPalette.active().SELECTION
+var cfg_scrollback_indicator: Color = UiPalette.active().SCROLLBACK_INDICATOR
 var cfg_color_scheme_path := ""
 var cfg_max_fps := 0
 var cfg_font_path := "res://fonts/DejaVuSansMono.ttf"
@@ -46,6 +59,23 @@ var cfg_reasoning_max_turn_bytes := 65536
 var cfg_check_updates := true
 ## Percent; the whole interface scales by this against the 100 % layout.
 var cfg_ui_scale := 100
+## Which chrome colour set is active: `APPEARANCE_DARK`, `APPEARANCE_LIGHT`, or
+## `APPEARANCE_SYSTEM` (the desktop's own preference).
+var cfg_appearance_mode := APPEARANCE_DARK
+
+## Emitted when the resolved mode moves — a settings save, or the desktop theme
+## flipping while `Follow system` is selected. The workspace rebuilds its Theme
+## and re-pushes every colour it owns.
+signal appearance_changed(is_dark: bool)
+
+## The desktop's dark-mode answer. A seam, so a test can model a desktop that
+## reports light, dark, or nothing at all — a platform or a session without the
+## query answers `true`, the app's own default.
+var system_is_dark: Callable = func() -> bool:
+	return DisplayServer.is_dark_mode() if DisplayServer.is_dark_mode_supported() else true
+
+## -1 until the first `apply_appearance()`, so that call always resolves.
+var _applied_appearance := -1
 
 ## The shell a fresh install opens panes with.
 ##
@@ -66,6 +96,48 @@ signal settings_changed
 func _on_init():
 	load_settings()
 	apply_ui_scale()
+	apply_appearance()
+	# The desktop theme flip arrives through the engine's message loop; the
+	# dispatch is deferred so the palette switch runs on the main thread like
+	# every other settings apply.
+	if DisplayServer.is_dark_mode_supported():
+		DisplayServer.set_system_theme_change_callback(_on_system_theme_changed)
+
+func _on_system_theme_changed() -> void:
+	if cfg_appearance_mode == APPEARANCE_SYSTEM:
+		apply_appearance.call_deferred()
+
+## Whether the chrome should be dark right now.
+func is_dark_appearance() -> bool:
+	match cfg_appearance_mode:
+		APPEARANCE_LIGHT:
+			return false
+		APPEARANCE_SYSTEM:
+			return bool(system_is_dark.call())
+		_:
+			return true
+
+## Resolve the mode, select the palette, and carry every uncustomised chrome
+## colour to it. Idempotent: the signal fires only when the answer moves, so a
+## settings save that did not touch the appearance costs no theme rebuild.
+func apply_appearance() -> void:
+	var dark := is_dark_appearance()
+	UiPalette.use(UiPalette.MODE_DARK if dark else UiPalette.MODE_LIGHT)
+	_carry_chrome_defaults()
+	if _applied_appearance != -1 and (_applied_appearance == 1) == dark:
+		return
+	_applied_appearance = 1 if dark else 0
+	appearance_changed.emit(dark)
+
+## A chrome colour equal to either set's default has never been chosen by the
+## user, so it follows the new set instead of pinning the surface it was loaded
+## from (a store written by a light run still switches back to dark).
+func _carry_chrome_defaults() -> void:
+	for key in CHROME_COLOR_TOKENS:
+		var token: String = CHROME_COLOR_TOKENS[key]
+		var current: Color = get("cfg_" + key)
+		if current == UiPalette.dark().color(token) or current == UiPalette.light().color(token):
+			set("cfg_" + key, UiPalette.active().color(token))
 
 func load_settings():
 	var d = _read_file(SETTINGS_FILE)
@@ -83,13 +155,13 @@ func load_settings():
 	cfg_default_cols = _as_int(d, "default_cols", 80)
 	cfg_beam_width = _as_int(d, "beam_width", 2)
 	cfg_underline_height = _as_int(d, "underline_height", 3)
-	cfg_wrapper_bg = _color_from_hex(_as_string(d, "wrapper_bg", ""), WRAPPER_BG_COLOR)
-	cfg_title_bar_bg = _color_from_hex(_as_string(d, "title_bar_bg", ""), TITLE_BAR_BG_COLOR)
-	cfg_wrapper_border = _color_from_hex(_as_string(d, "wrapper_border", ""), WRAPPER_BORDER_COLOR)
-	cfg_sidebar_bg = _color_from_hex(_as_string(d, "sidebar_bg", ""), SIDEBAR_BG_COLOR)
-	cfg_focus_border = _color_from_hex(_as_string(d, "focus_border", ""), FOCUS_BORDER_COLOR)
-	cfg_selection = _color_from_hex(_as_string(d, "selection", ""), SELECTION_COLOR)
-	cfg_scrollback_indicator = _color_from_hex(_as_string(d, "scrollback_indicator", ""), SCROLLBACK_INDICATOR_COLOR)
+	cfg_wrapper_bg = _color_from_hex(_as_string(d, "wrapper_bg", ""), UiPalette.active().BG)
+	cfg_title_bar_bg = _color_from_hex(_as_string(d, "title_bar_bg", ""), UiPalette.active().SURFACE_RAISED)
+	cfg_wrapper_border = _color_from_hex(_as_string(d, "wrapper_border", ""), UiPalette.active().BORDER)
+	cfg_sidebar_bg = _color_from_hex(_as_string(d, "sidebar_bg", ""), UiPalette.active().SIDEBAR)
+	cfg_focus_border = _color_from_hex(_as_string(d, "focus_border", ""), UiPalette.active().TERMINAL_FOCUS)
+	cfg_selection = _color_from_hex(_as_string(d, "selection", ""), UiPalette.active().SELECTION)
+	cfg_scrollback_indicator = _color_from_hex(_as_string(d, "scrollback_indicator", ""), UiPalette.active().SCROLLBACK_INDICATOR)
 	cfg_color_scheme_path = _as_string(d, "color_scheme", "")
 	cfg_max_fps = _as_int(d, "max_fps", 0)
 	cfg_window_mode = _as_int(d, "window_mode", 0)
@@ -107,6 +179,7 @@ func load_settings():
 	# dense display, and a stored value below it would lay the UI out smaller
 	# than the layout was ever measured at.
 	cfg_ui_scale = clampi(_as_int(d, "ui_scale", 100), 100, UI_SCALE_PRESETS.max())
+	cfg_appearance_mode = clampi(_as_int(d, "appearance_mode", APPEARANCE_DARK), APPEARANCE_DARK, APPEARANCE_SYSTEM)
 
 func save_settings():
 	var d = {"cursor_shape": cfg_cursor_shape, "cursor_blink": cfg_cursor_blink, "cursor_blink_speed": cfg_cursor_blink_speed, "scroll_lines": cfg_scroll_lines, "default_rows": cfg_default_rows, "default_cols": cfg_default_cols, "beam_width": cfg_beam_width, "underline_height": cfg_underline_height, "wrapper_bg": cfg_wrapper_bg.to_html(), "title_bar_bg": cfg_title_bar_bg.to_html(), "wrapper_border": cfg_wrapper_border.to_html(), "sidebar_bg": cfg_sidebar_bg.to_html(), "focus_border": cfg_focus_border.to_html(), "selection": cfg_selection.to_html(), "scrollback_indicator": cfg_scrollback_indicator.to_html(), "color_scheme": cfg_color_scheme_path, "max_fps": cfg_max_fps, "font_path": cfg_font_path, "font_size": cfg_font_size, "shell_command": cfg_shell_command, "shell_env": cfg_shell_env, "show_titlebar": cfg_show_titlebar, "window_mode": cfg_window_mode, "window_position": {"x": cfg_window_position.x, "y": cfg_window_position.y}, "window_size": {"x": cfg_window_size.x, "y": cfg_window_size.y}}
@@ -114,8 +187,12 @@ func save_settings():
 	d["reasoning_max_turn_bytes"] = cfg_reasoning_max_turn_bytes
 	d["check_updates"] = cfg_check_updates
 	d["ui_scale"] = cfg_ui_scale
+	d["appearance_mode"] = cfg_appearance_mode
 	d["history_lines"] = cfg_history_lines
 	_write_file(SETTINGS_FILE, d)
+	# The palette follows the setting before anyone hears about the save, so a
+	# listener that pushes colours reads the set this file just chose.
+	apply_appearance()
 	settings_changed.emit()
 
 func apply_to_terminal(body: Control):

@@ -47,9 +47,9 @@ func _show_next():
 	# level only replaces the colour when the level means something.
 	match data.level:
 		ToastManager.WARN:
-			lbl.add_theme_color_override("font_color", UiTokens.WARNING)
+			lbl.theme_type_variation = UiTheme.WARNING_LABEL
 		ToastManager.ERROR:
-			lbl.add_theme_color_override("font_color", UiTokens.DANGER)
+			lbl.theme_type_variation = UiTheme.DANGER_LABEL
 
 	add_child(lbl)
 	lbl.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)

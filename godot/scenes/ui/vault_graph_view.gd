@@ -343,8 +343,8 @@ func label_placements() -> Array:
 		return []
 	var labels_all := _zoom >= LABEL_ZOOM and nodes.size() <= MAX_ALWAYS_LABELS
 	var view := Rect2(Vector2.ZERO, size)
-	var text_color := UiTokens.TEXT
-	var accent := UiTokens.ACCENT
+	var text_color := UiPalette.active().TEXT
+	var accent := UiPalette.active().ACCENT
 	var cursor := cursor_hit() if has_focus() else ""
 	var candidates: Array = []
 	for node in nodes:
@@ -450,6 +450,9 @@ func _notification(what: int) -> void:
 		queue_redraw()
 	elif what == NOTIFICATION_VISIBILITY_CHANGED and is_visible_in_tree():
 		_fit_if_needed()
+	elif what == NOTIFICATION_THEME_CHANGED:
+		# `_draw()` reads the palette itself, so a switch only needs a repaint.
+		queue_redraw()
 
 
 func _fit_if_needed() -> void:
@@ -656,14 +659,14 @@ func _draw() -> void:
 	if has_focus():
 		draw_rect(
 			Rect2(Vector2(1, 1), size - Vector2(2, 2)),
-			UiTokens.ACCENT, false, 2.0
+			UiPalette.active().ACCENT, false, 2.0
 		)
 	if nodes.is_empty():
 		_draw_empty()
 		return
 	var view := Rect2(Vector2.ZERO, size)
-	var text_color := UiTokens.TEXT
-	var accent := UiTokens.ACCENT
+	var text_color := UiPalette.active().TEXT
+	var accent := UiPalette.active().ACCENT
 	var edge_color := Color(text_color, 0.28)
 	var selected_edge := Color(accent, 0.85)
 	var cursor := cursor_hit() if has_focus() else ""
@@ -767,7 +770,7 @@ func _draw_empty() -> void:
 		HORIZONTAL_ALIGNMENT_LEFT,
 		-1,
 		font_size,
-		Color(UiTokens.TEXT, 0.6)
+		Color(UiPalette.active().TEXT, 0.6)
 	)
 
 

@@ -13,15 +13,10 @@ const CURSOR_BLINK_INTERVAL = 0.5
 const SCROLL_LINES = 3
 @export var scroll_lines: int = SCROLL_LINES
 const PADDING = 4
-const FOCUS_BORDER_COLOR = UiTokens.TERMINAL_FOCUS
 const FOCUS_BORDER_WIDTH = 2.0
-const SELECTION_COLOR = UiTokens.SELECTION
-const SCROLLBACK_INDICATOR_COLOR = Color.YELLOW
 const BEAM_CURSOR_WIDTH = 2
 const UNDERLINE_CURSOR_HEIGHT = 3
 const PRINTABLE_ASCII_MIN = 32
-const SEARCH_HIGHLIGHT_COLOR = UiTokens.SEARCH_HIGHLIGHT
-const SEARCH_ACTIVE_COLOR = UiTokens.SEARCH_ACTIVE
 const PRINTABLE_ASCII_MAX = 126
 ## Cell attribute bits, packed by the Rust grid reader (`get_grid_updates_packed`).
 ## SGR 7 is deliberately absent: `CellInfo::paint_colors` has already swapped
@@ -35,9 +30,17 @@ const ATTR_WIDE := 16
 
 @export var beam_cursor_width: int = BEAM_CURSOR_WIDTH
 @export var underline_cursor_height: int = UNDERLINE_CURSOR_HEIGHT
-@export var focus_border_color: Color = FOCUS_BORDER_COLOR
-@export var selection_color: Color = SELECTION_COLOR
-@export var scrollback_indicator_color: Color = SCROLLBACK_INDICATOR_COLOR
+# No `= <constant>` defaults: a token is not a compile-time constant once the
+# palette switches, so `_init` reads the active set and `apply_to_terminal`
+# re-pushes these on every settings and appearance change.
+@export var focus_border_color: Color
+@export var selection_color: Color
+@export var scrollback_indicator_color: Color
+
+func _init() -> void:
+	focus_border_color = UiPalette.active().TERMINAL_FOCUS
+	selection_color = UiPalette.active().SELECTION
+	scrollback_indicator_color = UiPalette.active().SCROLLBACK_INDICATOR
 var color_scheme_path: String = "":
 	set(value):
 		color_scheme_path = value
@@ -591,10 +594,6 @@ var _badge_label: Label = null
 var _badge_state := ""
 var _badge_anim := 0.0
 
-const BADGE_COMPLETED_COLOR := UiTokens.SUCCESS
-const BADGE_FAILED_COLOR := UiTokens.DANGER
-const BADGE_ATTENTION_COLOR := UiTokens.WARNING
-const BADGE_WORKING_COLOR := UiTokens.ACCENT
 const BADGE_SPINNER_FRAMES := [Icons.SPINNER, Icons.SPINNER_GAP, Icons.CIRCLE_NOTCH]
 
 ## Every agent state's badge, in one table. The glyph is the signal that has to
@@ -603,12 +602,14 @@ const BADGE_SPINNER_FRAMES := [Icons.SPINNER, Icons.SPINNER_GAP, Icons.CIRCLE_NO
 ## (X-circle vs warning triangle) instead of the one warning glyph tinted red
 ## or amber. `label` is both the hover tooltip and the accessible name: the
 ## glyph is a private-use codepoint, so without it a screen reader reads out
-## nothing usable. `idle` is absent on purpose - it hides the badge.
+## nothing usable. `role` names the palette token, resolved when the badge is
+## applied, so a light chrome gets its own semantic colours. `idle` is absent
+## on purpose - it hides the badge.
 const BADGE_STATES := {
-	"completed": {"glyph": Icons.CHECK_CIRCLE, "color": BADGE_COMPLETED_COLOR, "label": "Completed"},
-	"failed": {"glyph": Icons.X_CIRCLE, "color": BADGE_FAILED_COLOR, "label": "Failed"},
-	"needs-attention": {"glyph": Icons.WARNING, "color": BADGE_ATTENTION_COLOR, "label": "Needs attention"},
-	"working": {"glyph": Icons.SPINNER_GAP, "color": BADGE_WORKING_COLOR, "label": "Working"},
+	"completed": {"glyph": Icons.CHECK_CIRCLE, "role": "SUCCESS", "label": "Completed"},
+	"failed": {"glyph": Icons.X_CIRCLE, "role": "DANGER", "label": "Failed"},
+	"needs-attention": {"glyph": Icons.WARNING, "role": "WARNING", "label": "Needs attention"},
+	"working": {"glyph": Icons.SPINNER_GAP, "role": "ACCENT", "label": "Working"},
 }
 
 ## Read the terminal's declared agent state. Called from the slow poll — the
@@ -669,7 +670,7 @@ func _apply_badge(state: String):
 		return
 	_badge_label.visible = true
 	_badge_label.text = str(spec["glyph"])
-	_badge_label.modulate = spec["color"]
+	_badge_label.modulate = UiPalette.active().color(str(spec["role"]))
 	_badge_label.tooltip_text = str(spec["label"])
 	_badge_label.accessibility_name = str(spec["label"])
 
@@ -1291,7 +1292,9 @@ func _draw_search_highlights(off: Vector2):
 		if display_row < 0 or display_row >= rows: continue
 		var match_col: int = cols_arr[i]
 		if match_col < 0 or match_col >= n_cols: continue
-		var color = SEARCH_ACTIVE_COLOR if i == current else SEARCH_HIGHLIGHT_COLOR
+		# Read at draw time: the palette switches at runtime.
+		var p := UiPalette.active()
+		var color = p.SEARCH_ACTIVE if i == current else p.SEARCH_HIGHLIGHT
 		draw_rect(Rect2(off.x + match_col * _cell_w, off.y + display_row * _cell_h, _cell_w, _cell_h), color)
 
 ## The process/grid document the pane API promises, unchanged for terminals.
@@ -1328,7 +1331,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	attach_hint.text = "The id IPC, MCP and agent commands address this pane by."
 	attach_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	attach_hint.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
-	attach_hint.add_theme_color_override("font_color", UiTokens.TEXT_MUTED)
+	attach_hint.theme_type_variation = UiTheme.MUTED_LABEL
 	v.add_child(attach_hint)
 
 	var font_spin = SpinBox.new()

@@ -65,10 +65,10 @@ func test_the_workspace_applies_the_scale_and_the_theme():
 		"the workspace's own settings pass applies the scale")
 	assert_not_null(_ws.theme, "the workspace carries the one Theme")
 	var panel := _ws.theme.get_stylebox("panel", "Panel") as StyleBoxFlat
-	assert_eq(panel.bg_color, UiTokens.SURFACE, "the theme is UiTheme.build()")
+	assert_eq(panel.bg_color, UiPalette.active().SURFACE, "the theme is UiTheme.build()")
 	# The content area's clear colour is the background token, not the engine's
 	# default grey (that is what an empty workspace used to show).
-	assert_eq(RenderingServer.get_default_clear_color(), UiTokens.BG)
+	assert_eq(RenderingServer.get_default_clear_color(), UiPalette.active().BG)
 
 	# Wait out the deferred concept push so it cannot resume after the free.
 	await get_tree().create_timer(2.1).timeout

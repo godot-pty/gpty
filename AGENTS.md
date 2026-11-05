@@ -165,8 +165,9 @@ gpty/
         │   ├── vault_graph_model.gd # Pure vault link-graph normalize/layout/hit-test
         │   ├── link_weights.gd      # Pure declared-weight vocabulary (paths, range, lookup)
         │   ├── vault_graph_view.gd  # Custom-drawn vault link-graph canvas
-        │   ├── ui_tokens.gd        # The design tokens (colours, type scale, spacing) + contrast table
-        │   ├── ui_theme.gd         # The one Theme, built from the tokens and applied at the root
+        │   ├── ui_palette.gd       # The chrome colours in two complete sets (dark/light) and the active one
+        │   ├── ui_tokens.gd        # The type scale, spacing, radius and the WCAG contrast maths
+        │   ├── ui_theme.gd         # The one Theme, built from the palette and applied at the root
         │   ├── app_dialog.gd       # The one modal builder (theme, grouped buttons, selectable body)
         │   └── icons.gd            # Phosphor icon constants
         └── panes/

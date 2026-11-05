@@ -6,6 +6,7 @@ const HEIGHT = 22.0
 
 var _pane_label: Label
 var _right_label: Label
+var _bg: ColorRect = null
 ## Capture mode (see `tests/bench/ui_capture.gd`): a wall clock and a measured
 ## FPS are the only parts of this bar that change while nothing does, so two
 ## captures of one state would differ. Frozen readouts are display values
@@ -16,11 +17,12 @@ func _ready():
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	custom_minimum_size = Vector2(0, HEIGHT)
 
-	var bg = ColorRect.new()
-	bg.color = UiTokens.SURFACE_RAISED
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(bg)
+	_bg = ColorRect.new()
+	_bg.name = "StatusBarBg"
+	_bg.color = UiPalette.active().SURFACE_RAISED
+	_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_bg)
 
 	# Left — active pane info
 	_pane_label = Label.new()
@@ -37,7 +39,7 @@ func _ready():
 	_right_label.name = "RightInfo"
 	# 4.15:1 before the token set; TEXT_MUTED measures 6.35:1 on this bar.
 	_right_label.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
-	_right_label.add_theme_color_override("font_color", UiTokens.TEXT_MUTED)
+	_right_label.theme_type_variation = UiTheme.MUTED_LABEL
 	_right_label.anchor_right = 1.0
 	_right_label.offset_right = -8
 	_right_label.offset_top = 2
@@ -54,6 +56,12 @@ func _ready():
 
 	_version_text = "v" + GptyTerminal.get_app_version()
 	_right_update()
+
+## The bar's surface is a token, not a user colour, so a palette switch has to
+## re-point it; the workspace calls this after rebuilding the Theme.
+func apply_chrome_colors() -> void:
+	if _bg:
+		_bg.color = UiPalette.active().SURFACE_RAISED
 
 func _right_update():
 	if not _readouts_frozen:

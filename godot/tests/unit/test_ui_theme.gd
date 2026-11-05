@@ -12,7 +12,13 @@ extends GutTest
 var _theme: Theme
 
 func before_each():
+	UiPalette.use(UiPalette.MODE_DARK)
 	_theme = UiTheme.build()
+
+func after_each():
+	# The palette is process-global; a test that left it light would re-theme
+	# every later suite.
+	UiPalette.use(UiPalette.MODE_DARK)
 
 func test_panels_are_opaque():
 	for type in ["Panel", "PanelContainer", "PopupPanel", "AcceptDialog", "GraphEdit", "Tree", "ItemList"]:
@@ -23,7 +29,7 @@ func test_panels_are_opaque():
 func test_the_chrome_panels_use_the_surface_token():
 	for type in ["Panel", "PanelContainer", "PopupPanel", "AcceptDialog", "GraphEdit"]:
 		var box := _theme.get_stylebox("panel", type) as StyleBoxFlat
-		assert_eq(box.bg_color, UiTokens.SURFACE, "%s panel is the surface token" % type)
+		assert_eq(box.bg_color, UiPalette.active().SURFACE, "%s panel is the surface token" % type)
 
 func test_buttons_are_opaque_and_padded():
 	# A StyleBoxFlat with no content margin collapses the button onto its label;
@@ -56,10 +62,10 @@ func test_the_type_scale_comes_from_the_tokens():
 	assert_eq(_theme.get_font_size("title_font_size", "Window"), UiTokens.FS_CONTROL)
 
 func test_text_colours_come_from_the_tokens():
-	assert_eq(_theme.get_color("font_color", "Label"), UiTokens.TEXT)
-	assert_eq(_theme.get_color("font_color", "Button"), UiTokens.TEXT)
-	assert_eq(_theme.get_color("font_placeholder_color", "LineEdit"), UiTokens.TEXT_MUTED)
-	assert_eq(_theme.get_color("font_unselected_color", "TabBar"), UiTokens.TEXT_MUTED)
+	assert_eq(_theme.get_color("font_color", "Label"), UiPalette.active().TEXT)
+	assert_eq(_theme.get_color("font_color", "Button"), UiPalette.active().TEXT)
+	assert_eq(_theme.get_color("font_placeholder_color", "LineEdit"), UiPalette.active().TEXT_MUTED)
+	assert_eq(_theme.get_color("font_unselected_color", "TabBar"), UiPalette.active().TEXT_MUTED)
 
 func test_a_confirmation_dialog_resolves_the_accept_dialog_panel():
 	# ConfirmationDialog defines no panel of its own; the class-chain fallback is
@@ -70,7 +76,7 @@ func test_a_confirmation_dialog_resolves_the_accept_dialog_panel():
 	await wait_frames(1)
 	var box := dlg.get_theme_stylebox("panel") as StyleBoxFlat
 	assert_not_null(box)
-	assert_eq(box.bg_color, UiTokens.SURFACE)
+	assert_eq(box.bg_color, UiPalette.active().SURFACE)
 	assert_eq(box.bg_color.a, 1.0)
 
 func test_the_dialog_panel_carries_its_own_padding():
@@ -79,7 +85,7 @@ func test_the_dialog_panel_carries_its_own_padding():
 	# whole surface: it must be opaque and pad the content itself.
 	var box := _theme.get_stylebox("panel", "AcceptDialog") as StyleBoxFlat
 	assert_not_null(box)
-	assert_eq(box.bg_color, UiTokens.SURFACE)
+	assert_eq(box.bg_color, UiPalette.active().SURFACE)
 	assert_eq(box.bg_color.a, 1.0)
 	for side in ["content_margin_left", "content_margin_top", "content_margin_right", "content_margin_bottom"]:
 		assert_eq(box.get(side), UiTokens.SPACE_XXL, "the panel pads %s" % side)
@@ -91,3 +97,42 @@ func test_margins_sets_all_four_sides():
 	for side in ["left", "top", "right", "bottom"]:
 		assert_eq(mc.get_theme_constant("margin_%s" % side), UiTokens.SPACE_XXL,
 			"margin_%s" % side)
+
+## The whole point of the split: the same builder, a second colour set, so a
+## palette switch is a rebuild and not a second theme.
+func test_the_light_set_builds_a_light_theme():
+	UiPalette.use(UiPalette.MODE_LIGHT)
+	_theme = UiTheme.build()
+	var panel := _theme.get_stylebox("panel", "Panel") as StyleBoxFlat
+	assert_eq(panel.bg_color, UiPalette.light().SURFACE)
+	assert_eq(_theme.get_color("font_color", "Label"), UiPalette.light().TEXT)
+	var button := _theme.get_stylebox("normal", "Button") as StyleBoxFlat
+	assert_eq(button.bg_color, UiPalette.light().SURFACE_RAISED)
+	assert_eq(_theme.get_stylebox("panel", "TabContainer").bg_color, UiPalette.light().SURFACE)
+
+## A role is how a widget asks for a colour it does not own: the theme answers,
+## so a palette switch reaches it without the widget holding a token.
+func test_role_variations_resolve():
+	for role in [[UiTheme.MUTED_LABEL, "Label", _theme.get_color("font_color", UiTheme.MUTED_LABEL)],
+			[UiTheme.DANGER_LABEL, "Label", _theme.get_color("font_color", UiTheme.DANGER_LABEL)],
+			[UiTheme.WARNING_LABEL, "Label", _theme.get_color("font_color", UiTheme.WARNING_LABEL)]]:
+		assert_eq(_theme.get_type_variation_base(role[0]), role[1],
+			"%s is a %s variation" % [role[0], role[1]])
+	assert_eq(_theme.get_color("font_color", UiTheme.MUTED_LABEL), UiPalette.dark().TEXT_MUTED)
+	assert_eq(_theme.get_color("font_color", UiTheme.DANGER_LABEL), UiPalette.dark().DANGER)
+	assert_eq(_theme.get_color("font_color", UiTheme.WARNING_LABEL), UiPalette.dark().WARNING)
+	assert_eq(_theme.get_type_variation_base(UiTheme.ACCENT_BUTTON), "Button")
+	assert_eq(_theme.get_color("font_color", UiTheme.ACCENT_BUTTON), UiPalette.dark().ACCENT)
+	assert_eq(_theme.get_color("font_pressed_color", UiTheme.ACCENT_BUTTON), UiPalette.dark().ACCENT)
+
+## And the resolution is live, not just the table: a Label that names the role
+## reads the role's colour through its ancestor's theme.
+func test_a_role_label_reads_the_themes_colour():
+	var host := Control.new()
+	host.theme = _theme
+	add_child_autofree(host)
+	var lbl := Label.new()
+	lbl.theme_type_variation = UiTheme.MUTED_LABEL
+	host.add_child(lbl)
+	await wait_frames(1)
+	assert_eq(lbl.get_theme_color("font_color"), UiPalette.dark().TEXT_MUTED)

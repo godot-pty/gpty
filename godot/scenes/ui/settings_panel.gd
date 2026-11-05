@@ -10,6 +10,10 @@ var _menu_width: float = 540.0  # settings panel width — dialogs size relative
 ## The disk-usage row in the Terminal tab; refreshed whenever the panel opens,
 ## because the panel outlives a single visit and scrollback keeps growing.
 var _history_size_label: Label = null
+## The seven chrome-colour rows, kept so a palette switch can re-point their
+## swatches: an untouched colour moves with the palette, and the picker must
+## show the value the setting actually holds.
+var _color_rows: Array[Dictionary] = []
 ## How the row reads the store size. Overridable so a test can pin a number:
 ## the real store grows while the suite runs (every pane has a writer thread).
 var _history_stats_provider := Callable()
@@ -114,6 +118,7 @@ func _build_ui():
 
 	# Tab 3: Appearance
 	var t_app = _create_tab(tabs, "Appearance")
+	var appearance_opt = _add_appearance_control(t_app)
 	var font_btn = _add_font_picker(t_app)
 	var fs_spin = _add_font_control(t_app)
 	var scale_opt = _add_ui_scale_control(t_app)
@@ -132,17 +137,18 @@ func _build_ui():
 		SettingsManager.cfg_ui_scale = 100
 		SettingsManager.cfg_color_scheme_path = ""
 		SettingsManager.cfg_show_titlebar = true
-		SettingsManager.cfg_wrapper_bg = SettingsManager.WRAPPER_BG_COLOR
-		SettingsManager.cfg_title_bar_bg = SettingsManager.TITLE_BAR_BG_COLOR
-		SettingsManager.cfg_wrapper_border = SettingsManager.WRAPPER_BORDER_COLOR
-		SettingsManager.cfg_sidebar_bg = SettingsManager.SIDEBAR_BG_COLOR
-		SettingsManager.cfg_focus_border = SettingsManager.FOCUS_BORDER_COLOR
-		SettingsManager.cfg_selection = SettingsManager.SELECTION_COLOR
-		SettingsManager.cfg_scrollback_indicator = SettingsManager.SCROLLBACK_INDICATOR_COLOR
+		SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+		# Resolve first: the rows below reset to the palette's own values, and
+		# the mode just went back to dark.
+		SettingsManager.apply_appearance()
+		for key in SettingsManager.CHROME_COLOR_TOKENS:
+			SettingsManager.set("cfg_" + key,
+				UiPalette.active().color(SettingsManager.CHROME_COLOR_TOKENS[key]))
 		font_btn.text = "DejaVuSansMono.ttf"
 		scheme_btn.text = "(none)"
 		fs_spin.value = 14
 		scale_opt.selected = 0
+		appearance_opt.selected = SettingsManager.APPEARANCE_DARK
 		show_tb_cb.button_pressed = true
 		_reset_colors(color_btns)
 		SettingsManager.save_settings()
@@ -203,6 +209,7 @@ func _build_ui():
 	reason_spins[1].value_changed.connect(func(_v): _debounce_timer.start())
 	show_tb_cb.toggled.connect(func(_pressed): _debounce_timer.start())
 	check_updates_cb.toggled.connect(func(_pressed): _debounce_timer.start())
+	SettingsManager.appearance_changed.connect(func(_dark: bool): _sync_color_rows())
 
 func _create_tab(tabs: TabContainer, title: String) -> VBoxContainer:
 	var sc = ScrollContainer.new()
@@ -403,7 +410,26 @@ func _add_dims_control(v: VBoxContainer) -> Array:
 	v.add_child(hr)
 	return [rspin, cspin]
 
-func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: Callable, default_color: Color) -> ColorPickerButton:
+## The chrome's colour mode. Its own row at the top of the tab: it decides the
+## palette every other control on this page renders in.
+func _add_appearance_control(v: VBoxContainer) -> OptionButton:
+	var hb = HBoxContainer.new()
+	hb.add_child(_lbl("Appearance:"))
+	var opt = OptionButton.new(); opt.name = "AppearanceOpt"
+	for label in SettingsManager.APPEARANCE_LABELS:
+		opt.add_item(label)
+	opt.selected = SettingsManager.cfg_appearance_mode
+	opt.tooltip_text = "Dark, light, or whatever the desktop is using"
+	# Immediate, not debounced: a mode is one decision, not a slider.
+	opt.item_selected.connect(func(idx: int):
+		SettingsManager.cfg_appearance_mode = idx
+		SettingsManager.save_settings()
+	)
+	hb.add_child(opt)
+	v.add_child(hb)
+	return opt
+
+func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: Callable, default_color: Callable) -> ColorPickerButton:
 	var h = HBoxContainer.new()
 	var lbl = _lbl(label)
 	# Uniform label column: without a fixed width the expand-fill picker
@@ -423,9 +449,12 @@ func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: C
 	Icons.style_button(reset)
 	# ColorPickerButton.color assignment does not emit color_changed when set
 	# programmatically — call the setter explicitly so cfg + debounced save run.
+	# The default is a provider, not a captured colour: it is the active
+	# palette's token, which moves when the mode does.
 	reset.pressed.connect(func():
-		btn.color = default_color
-		setter.call(default_color)
+		var c: Color = default_color.call()
+		btn.color = c
+		setter.call(c)
 	)
 	h.add_child(reset)
 	v.add_child(h)
@@ -457,21 +486,37 @@ func _attach_color_picker_buttons(btn: ColorPickerButton):
 	hb.add_child(ok)
 	picker.add_child(hb)
 
+## The seven chrome colours, one row each. A row is driven by its settings key,
+## so the default it resets to and the value it shows are both the active
+## palette's — never a colour captured when the panel was built.
 func _add_color_section(v: VBoxContainer) -> Array:
 	v.add_child(_lbl("UI Colors:"))
-	var btns = []
+	_color_rows.clear()
 	for item in [
-		["Wrapper bg", SettingsManager.cfg_wrapper_bg, SettingsManager.WRAPPER_BG_COLOR, func(c: Color): SettingsManager.cfg_wrapper_bg = c; _debounce_timer.start()],
-		["Title bar", SettingsManager.cfg_title_bar_bg, SettingsManager.TITLE_BAR_BG_COLOR, func(c: Color): SettingsManager.cfg_title_bar_bg = c; _debounce_timer.start()],
-		["Border", SettingsManager.cfg_wrapper_border, SettingsManager.WRAPPER_BORDER_COLOR, func(c: Color): SettingsManager.cfg_wrapper_border = c; _debounce_timer.start()],
-		["Sidebar", SettingsManager.cfg_sidebar_bg, SettingsManager.SIDEBAR_BG_COLOR, func(c: Color): SettingsManager.cfg_sidebar_bg = c; _debounce_timer.start()],
-		["Focus", SettingsManager.cfg_focus_border, SettingsManager.FOCUS_BORDER_COLOR, func(c: Color): SettingsManager.cfg_focus_border = c; _debounce_timer.start()],
-		["Selection", SettingsManager.cfg_selection, SettingsManager.SELECTION_COLOR, func(c: Color): SettingsManager.cfg_selection = c; _debounce_timer.start()],
-		["Scroll", SettingsManager.cfg_scrollback_indicator, SettingsManager.SCROLLBACK_INDICATOR_COLOR, func(c: Color): SettingsManager.cfg_scrollback_indicator = c; _debounce_timer.start()],
+		["Wrapper bg", "wrapper_bg"],
+		["Title bar", "title_bar_bg"],
+		["Border", "wrapper_border"],
+		["Sidebar", "sidebar_bg"],
+		["Focus", "focus_border"],
+		["Selection", "selection"],
+		["Scroll", "scrollback_indicator"],
 	]:
-		var b = _add_color_control(v, item[0], item[1], item[3], item[2])
-		btns.append([item[0], b, item[2]])
-	return btns
+		var key: String = item[1]
+		var setter := func(c: Color):
+			SettingsManager.set("cfg_" + key, c)
+			_debounce_timer.start()
+		var default_color := func() -> Color:
+			return UiPalette.active().color(SettingsManager.CHROME_COLOR_TOKENS[key])
+		var btn := _add_color_control(v, item[0], SettingsManager.get("cfg_" + key), setter, default_color)
+		_color_rows.append({"label": item[0], "key": key, "button": btn, "set": setter})
+	return _color_rows
+
+## Re-point every swatch at the value its setting now holds, after a palette
+## switch carried the untouched ones. Assigning `color` emits nothing, so this
+## cannot feed back into the debounced save.
+func _sync_color_rows() -> void:
+	for row in _color_rows:
+		(row["button"] as ColorPickerButton).color = SettingsManager.get("cfg_" + row["key"])
 
 func _add_file_picker(v: VBoxContainer, label: String, current_path: String, filters: Array, on_selected: Callable, reset_to_default: Callable = Callable()) -> Button:
 	var h = HBoxContainer.new()
@@ -601,12 +646,13 @@ func _add_cursor_thickness_control(v: VBoxContainer) -> Array:
 
 	return [bspin, uspin]
 
-func _reset_colors(btns: Array):
-	# Entries are [label, ColorPickerButton, default_color]; assigning
-	# btn.color fires color_changed → setter → cfg + debounced save.
-	for entry in btns:
-		if entry is Array and entry.size() >= 3:
-			(entry[1] as ColorPickerButton).color = entry[2]
+func _reset_colors(rows: Array) -> void:
+	# Assigning `color` does not emit `color_changed`, so each row's setter runs
+	# explicitly — that is what reaches cfg and the debounced save.
+	for row in rows:
+		var c: Color = UiPalette.active().color(SettingsManager.CHROME_COLOR_TOKENS[row["key"]])
+		(row["button"] as ColorPickerButton).color = c
+		(row["set"] as Callable).call(c)
 
 ## Per-tab reset: each tab's button restores ONLY that tab's settings.
 ## The button spans the tab's full width with centered text.
@@ -741,7 +787,7 @@ func _refresh_concept_list():
 			lbl.tooltip_text = provenance
 		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if not enabled:
-			lbl.add_theme_color_override("font_color", UiTokens.TEXT_MUTED)
+			lbl.theme_type_variation = UiTheme.MUTED_LABEL
 		h.add_child(lbl)
 		var edit_btn = Button.new(); edit_btn.text = "Edit"
 		edit_btn.pressed.connect(_show_concept_dialog.bind(i))

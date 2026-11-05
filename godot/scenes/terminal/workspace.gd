@@ -62,7 +62,7 @@ func _ready():
 	theme = UiTheme.build()
 	# Where nothing is drawn the viewport's clear colour shows: an empty
 	# workspace used to be Godot's default grey.
-	RenderingServer.set_default_clear_color(UiTokens.BG)
+	RenderingServer.set_default_clear_color(UiPalette.active().BG)
 	_chrome = WindowChrome.new()
 	_titlebar = _chrome.build(self)
 
@@ -173,6 +173,7 @@ func _ready():
 	)
 
 	SettingsManager.settings_changed.connect(_on_settings_changed)
+	SettingsManager.appearance_changed.connect(_on_appearance_changed)
 	# Concept changes are pushed by their owner (`ConceptManager`), one listener
 	# per process: the engine's set is process-wide, so a per-workspace connect
 	# both duplicated the push and collided across workspace instances.
@@ -182,8 +183,11 @@ func _ready():
 
 func _on_settings_changed():
 	# Before anything measured: the scale changes the layout space every later
-	# call in this chain (and the resize it triggers) lays out against.
+	# call in this chain (and the resize it triggers) lays out against. The
+	# appearance resolves next, so every colour pushed below reads the palette
+	# the settings just chose.
 	SettingsManager.apply_ui_scale()
+	SettingsManager.apply_appearance()
 	for t in _tm.tiles:
 		var body = _tm._find_body(t.wrapper)
 		if body and body is TerminalPane:
@@ -192,6 +196,20 @@ func _on_settings_changed():
 	_sync_pane_titlebars()
 	_apply_fps_setting()
 	_apply_window_mode()
+
+## A palette switch, wherever it came from: the Theme is rebuilt (every widget's
+## colours and the role variations), the clear colour and the user-coloured
+## chrome are re-pushed, terminals take their overlay colours again, and the
+## custom-drawn surfaces repaint through the theme notification.
+func _on_appearance_changed(_is_dark: bool) -> void:
+	theme = UiTheme.build()
+	RenderingServer.set_default_clear_color(UiPalette.active().BG)
+	for ws in _workspaces:
+		for t in ws.tm.tiles:
+			var body = ws.tm._find_body(t.wrapper)
+			if body and body is TerminalPane:
+				SettingsManager.apply_to_terminal(body)
+	_apply_ui_colors()
 
 ## UI chrome colors (wrapper bg/border, pane titlebars, sidebar, window
 ## titlebar) are read at build time; without a live re-apply they'd only
@@ -216,6 +234,8 @@ func _apply_ui_colors():
 				var tbg := tb.get_node_or_null("TitleBarBg")
 				if tbg is ColorRect:
 					tbg.color = SettingsManager.cfg_title_bar_bg
+	if _status_bar:
+		_status_bar.apply_chrome_colors()
 
 func _sync_pane_titlebars():
 	for t in _tm.tiles:
@@ -269,13 +289,12 @@ func _build_empty_state():
 	title.text = "No panes"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", UiTokens.FS_TITLE)
-	title.add_theme_color_override("font_color", UiTokens.TEXT)
 	lines.add_child(title)
 	var hint := Label.new()
 	hint.text = "%s opens a terminal" % PaneTypes.ALL["terminal"]["shortcut"]
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_font_size_override("font_size", UiTokens.FS_SMALL)
-	hint.add_theme_color_override("font_color", UiTokens.TEXT_MUTED)
+	hint.theme_type_variation = UiTheme.MUTED_LABEL
 	lines.add_child(hint)
 	_empty_state.add_child(lines)
 	add_child(_empty_state)

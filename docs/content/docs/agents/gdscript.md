@@ -4,15 +4,19 @@ weight: 30
 ---
 
 - Indentation: tabs
-- Chrome has one owner: `ui/ui_tokens.gd` (the colours, the `FS_*` type scale, the `SPACE_*` steps,
-  `RADIUS`, and `CONTRAST_PAIRS` with `contrast_ratio()`) and `ui/ui_theme.gd` (`build()`, applied
-  once on the `Workspace` root, which every pane, overlay, popup and dialog inherits). A new surface
-  takes the theme's defaults; an `add_theme_*_override` is only for a value that genuinely differs
-  from its type's default and must read a token - never a number or a `Color(...)` literal
-  (`grep -rn "add_theme_" godot/scenes` is the census, and two deliberate `0` separations are the
-  only numeric constants left). A colour used as text on a surface belongs in `CONTRAST_PAIRS`;
-  `tests/unit/test_ui_tokens.gd` fails the build under 4.5:1, and `TEXT_DISABLED` is exempt on
-  purpose. Modals go through `ui/app_dialog.gd` (`confirm`/`alert`/`content`/`text`/`set_body`),
+- Chrome has one owner: `ui/ui_palette.gd` (every colour, in a complete `DARK` and a complete
+  `LIGHT` set, read through `UiPalette.active()`), `ui/ui_tokens.gd` (the mode-independent tokens:
+  the `FS_*` type scale, the `SPACE_*` steps, `RADIUS`, and `contrast_ratio()`) and `ui/ui_theme.gd`
+  (`build()`, applied on the `Workspace` root and rebuilt whenever the palette switches; every pane,
+  overlay, popup and dialog inherits it). Read a colour **at draw time** — never cache a token in a
+  field, an `@export` initializer or an `add_theme_*_override`: the mode switches at runtime, and a
+  cached copy keeps the palette it was built under. A widget that needs a colour its type's default
+  does not carry names a `Theme` type variation (`UiTheme.MUTED_LABEL`/`DANGER_LABEL`/`WARNING_LABEL`
+  for labels, `ACCENT_BUTTON` for a link-style button); `grep -rn "add_theme_color_override"
+  godot/scenes` must print nothing, and `grep -rn "add_theme_" godot/scenes` is the census of what is
+  left (fonts, sizes, constants - and two deliberate `0` separations). A colour used as text on a
+  surface belongs in `UiPalette.CONTRAST_PAIRS`; `tests/unit/test_ui_palette.gd` grades every pair
+  against both sets under 4.5:1, and `TEXT_DISABLED` is exempt on purpose. Modals go through `ui/app_dialog.gd` (`confirm`/`alert`/`content`/`text`/`set_body`),
   never a bare `ConfirmationDialog.new()`: it parents the dialog, groups the buttons at the right
   edge and puts read-and-copy text in a selectable body. Dialogs are borderless with their own
   header because Godot paints an embedded window's title band from its own default theme (see

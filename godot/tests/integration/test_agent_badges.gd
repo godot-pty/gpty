@@ -127,6 +127,11 @@ func test_every_state_has_its_own_glyph():
 		by_glyph[glyph] = state
 		assert_ne(str(spec["label"]), "",
 			"%s: a label is the tooltip and the accessible name" % state)
+		# The tint is a palette role, not a captured colour: the badge has to
+		# read on a light title bar too.
+		var role := str(spec.get("role", ""))
+		assert_true(UiPalette.DARK.has(role), "%s: role %s is a dark token" % [state, role])
+		assert_true(UiPalette.LIGHT.has(role), "%s: role %s is a light token" % [state, role])
 	assert_eq(by_glyph.size(), 4, "the four visible states must map to four glyphs")
 	assert_eq(str(TerminalPane.BADGE_STATES["failed"]["glyph"]), Icons.X_CIRCLE,
 		"failed is the X-circle")

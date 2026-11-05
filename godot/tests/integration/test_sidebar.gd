@@ -7,6 +7,9 @@ var _sidebar: Sidebar
 func before_each():
 	MockAutoloads.setup()
 	_scene = TestScene.create()
+	# The chrome's one Theme, as the workspace applies it: the sidebar's accent
+	# rows name a theme role now, so the colour only resolves under it.
+	_scene.theme = UiTheme.build()
 	add_child(_scene)
 
 	# Build a minimal Sidebar (requires a bg ColorRect for parent)
@@ -269,10 +272,13 @@ func test_update_pane_list_accents_active_body():
 	var btn2: Button = rows[1].get_child(0)
 	assert_false(btn1.button_pressed, "inactive pane row must not be pressed")
 	assert_true(btn2.button_pressed, "active pane row must be pressed")
-	assert_true(btn2.has_theme_color_override("font_color"), "active pane row must carry the accent")
-	assert_true(btn2.has_theme_color_override("font_pressed_color"),
+	assert_eq(btn2.theme_type_variation, UiTheme.ACCENT_BUTTON,
+		"active pane row names the accent role")
+	assert_eq(btn2.get_theme_color("font_color"), UiPalette.active().ACCENT,
+		"active pane row renders the accent")
+	assert_eq(btn2.get_theme_color("font_pressed_color"), UiPalette.active().ACCENT,
 		"pressed active row must keep the accent (font_pressed_color falls back to theme otherwise)")
-	assert_false(btn1.has_theme_color_override("font_color"), "inactive pane row must not carry the accent")
+	assert_eq(btn1.theme_type_variation, &"", "inactive pane row does not name the accent role")
 
 func test_set_active_pane_moves_accent_without_rebuild():
 	var b1 = PaneBody.new(); b1.pane_label = "T1"
@@ -296,9 +302,12 @@ func test_update_profile_list_accents_active_profile():
 	var rows = _sidebar._profile_list.get_children()
 	assert_false((rows[0].get_child(0) as Button).button_pressed, "unactivated profile must not be pressed")
 	assert_true((rows[1].get_child(0) as Button).button_pressed, "active profile row must be pressed")
-	assert_true((rows[1].get_child(0) as Button).has_theme_color_override("font_color"),
-		"active profile row must carry the accent")
-	assert_true((rows[1].get_child(0) as Button).has_theme_color_override("font_pressed_color"),
+	var active: Button = rows[1].get_child(0)
+	assert_eq(active.theme_type_variation, UiTheme.ACCENT_BUTTON,
+		"active profile row names the accent role")
+	assert_eq(active.get_theme_color("font_color"), UiPalette.active().ACCENT,
+		"active profile row renders the accent")
+	assert_eq(active.get_theme_color("font_pressed_color"), UiPalette.active().ACCENT,
 		"pressed active profile row must keep the accent")
 
 ## The row names both destinations, and they stay separate signals: the label

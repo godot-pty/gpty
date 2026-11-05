@@ -115,14 +115,14 @@ func _build_ui():
 	_error_label.name = "GraphErrors"
 	_error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_error_label.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
-	_error_label.add_theme_color_override("font_color", UiTokens.DANGER)
+	_error_label.theme_type_variation = UiTheme.DANGER_LABEL
 	_error_label.visible = false
 	v.add_child(_error_label)
 
 	var hint := Label.new()
 	hint.text = RULE_HINT
 	hint.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
-	hint.add_theme_color_override("font_color", UiTokens.TEXT_MUTED)
+	hint.theme_type_variation = UiTheme.MUTED_LABEL
 	v.add_child(hint)
 
 func _add_header(v: VBoxContainer) -> void:
@@ -135,7 +135,7 @@ func _add_header(v: VBoxContainer) -> void:
 	_status_label = Label.new()
 	_status_label.name = "GraphStatus"
 	_status_label.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
-	_status_label.add_theme_color_override("font_color", UiTokens.TEXT_MUTED)
+	_status_label.theme_type_variation = UiTheme.MUTED_LABEL
 	h.add_child(_status_label)
 	_save_button = Button.new()
 	_save_button.text = "Save"
@@ -321,7 +321,7 @@ func _create_frames() -> void:
 		frame.autoshrink_enabled = true
 		frame.autoshrink_margin = 40
 		frame.tint_color_enabled = true
-		frame.tint_color = Color(UiTokens.ACCENT, 0.12)
+		frame.tint_color = Color(UiPalette.active().ACCENT, 0.12)
 		_graph.add_child(frame)
 		_frames.append(frame)
 
@@ -402,11 +402,11 @@ func _make_graph_node(node: Dictionary) -> GraphNode:
 	gn.set_meta("graph_id", str(node["id"]))
 	var enable_left := kind != ConceptGraphModel.KIND_TRIGGER
 	var enable_right := kind != ConceptGraphModel.KIND_ACTION
-	var port_color := UiTokens.ACCENT
+	var port_color := UiPalette.active().ACCENT
 	if kind == ConceptGraphModel.KIND_CONDITION:
-		port_color = UiTokens.WARNING
+		port_color = UiPalette.active().WARNING
 	elif kind == ConceptGraphModel.KIND_ACTION:
-		port_color = UiTokens.SUCCESS
+		port_color = UiPalette.active().SUCCESS
 	gn.set_slot(0, enable_left, 0, port_color, enable_right, 0, port_color)
 	gn.position_offset_changed.connect(func():
 		_positions[str(node["id"])] = gn.position_offset
@@ -606,7 +606,14 @@ func _update_error_display() -> void:
 	for id in _node_names:
 		var gn := _graph.get_node_or_null(NodePath(_node_names[id]))
 		if gn is GraphNode:
-			gn.self_modulate = UiTokens.DANGER if error_ids.has(id) else UiTokens.TEXT
+			gn.self_modulate = UiPalette.active().DANGER if error_ids.has(id) else UiPalette.active().TEXT
+
+## The error tint is a palette colour: a switch while the editor is open must
+## re-tint the nodes. The frames' 12 % accent wash refreshes on the next open
+## (the editor is rebuilt per visit).
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_THEME_CHANGED:
+		_update_error_display()
 
 func _refresh_frames() -> void:
 	# A field edit can turn a compiled rule into a draft (invalid regex) but

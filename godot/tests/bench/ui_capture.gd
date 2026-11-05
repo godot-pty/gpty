@@ -71,6 +71,13 @@ const STATES := {
 	# workspace. The only visual proof that the setting scales the chrome and
 	# the terminal text together; a later release recaptures it.
 	"ui-scale-125": {"size": DEFAULT_SIZE, "panes": 0, "ui_scale": 125},
+	# The light chrome, on the same workspace the dark states capture. Both
+	# exist so the light theme is reproducible by name, and so the v0.8.4
+	# recapture can use them instead of a scratch driver.
+	"light-workspace": {"size": Vector2i(1280, 760), "panes": 4,
+		"settings": {"cfg_appearance_mode": 1}},
+	"light-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings",
+		"settings": {"cfg_appearance_mode": 1}},
 	"workspace-1280x760": {"size": Vector2i(1280, 760), "panes": 4},
 	"window-800x500": {"size": Vector2i(800, 500), "panes": 4},
 	"window-560x340": {"size": Vector2i(560, 340), "panes": 4},
@@ -188,7 +195,13 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	# window's content scale on its first frame, so a scale applied later
 	# would be a second layout rather than the one captured.
 	_settings.cfg_ui_scale = int(state.get("ui_scale", 100))
+	# A state may set any SettingsManager field through `settings`. The
+	# appearance mode has to land before the scene exists, for the same reason
+	# as the UI scale: the workspace builds its Theme on its first frame.
+	for key in state.get("settings", {}):
+		_settings.set(str(key), state["settings"][key])
 	_settings.apply_ui_scale()
+	_settings.apply_appearance()
 	_seed_workspace(state)
 
 	_workspace = load("res://scenes/main.tscn").instantiate()
