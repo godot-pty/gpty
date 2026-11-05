@@ -30,6 +30,10 @@ When adding a new user-facing setting to the gpty terminal emulator, follow this
   `_debounce_timer.start()`. Immediate settings (anything the user judges by looking at the window,
   like the UI scale) write the `cfg_` and call `SettingsManager.save_settings()` on selection -
   `settings_changed` is what applies it - and need no debounce line
+- A control whose default is not a fixed value takes a *provider* instead of a captured colour:
+  the seven chrome-colour rows reset through `func() -> Color: return UiPalette.active().color(token)`,
+  and `appearance_changed` re-points their swatches. A captured default silently restores the
+  palette the panel was built under
 - Add the reset to the owning tab's `_add_tab_reset(tab, func(): ...)` lambda **and** set the
   control's own value/selection there: the lambda restores the `cfg_` values, and the visible
   control does not follow by itself
@@ -37,6 +41,11 @@ When adding a new user-facing setting to the gpty terminal emulator, follow this
 ## 3. Workspace (`godot/scenes/terminal/workspace.gd`)
 
 - In `_on_settings_changed()`, add logic to apply the new setting
+- A setting that switches a whole surface (the chrome palette) gets its own signal and listener
+  rather than living in `_on_settings_changed`: `SettingsManager.apply_appearance()` resolves the
+  mode and emits `appearance_changed`, and `Workspace._on_appearance_changed()` rebuilds the
+  `Theme`, the clear colour and every pushed colour. `save_settings()` resolves the appearance
+  *before* it emits `settings_changed`, so a listener never reads the previous palette
 - If the setting affects window state, use `DisplayServer` APIs (see window mode patterns)
 - For visual changes, call `_apply_layout()` if needed
 
