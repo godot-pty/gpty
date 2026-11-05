@@ -10,19 +10,29 @@ When adding a new user-facing setting to the gpty terminal emulator, follow this
 ## 1. SettingsManager (`godot/scenes/autoloads/settings_manager.gd`)
 
 - Add `var cfg_NEW_SETTING := DEFAULT_VALUE` with the other `cfg_*` vars
-- Add `cfg_NEW_SETTING = d.get("new_setting", DEFAULT_VALUE)` in `load_settings()`
+- Add `cfg_NEW_SETTING = _as_<type>(d, "new_setting", DEFAULT_VALUE)` in `load_settings()`
+  (`_as_int`/`_as_bool`/`_as_float`/`_as_string`; a raw `d.get()` assigned to a typed var raises on a
+  wrong-typed JSON value and aborts the loader, dropping every key after it). Clamp a bounded value
+  in the same line with `clampi`/`clampf` - the store is a hand-editable file.
 - Add `"new_setting": cfg_NEW_SETTING` to the dictionary in `save_settings()`
 
 **Critical**: Always add the load + save lines as a pair. Missing `load_settings` means the value silently defaults on restart. Missing `save_settings` means it never persists.
 
 ## 2. Settings Panel (`godot/scenes/ui/settings_panel.gd`)
 
-- Add a control function (e.g., `_add_NEW_control(v: VBoxContainer) -> ControlType`)
-- In `_build_ui()`, call it to get the control reference
-- In the debounce timer callback, add: `SettingsManager.cfg_NEW_SETTING = name_of_control.value`
-- Connect the control's changed signal to `_debounce_timer.start()`
-- In `_add_reset_button`, add a reset line
-- Update `_add_reset_button` call with the new control parameter
+- Add a control function (e.g., `_add_NEW_control(v: VBoxContainer) -> ControlType`); the house
+  shape is `_add_fps_control` (label row + `OptionButton` with a `name`, a presets array, and a
+  trailing `"(custom)"` entry when the stored value is not a preset - `find()` returns -1 and
+  `selected = -1` leaves the dropdown blank)
+- In `_build_ui()`, call it from the owning tab to get the control reference
+- Delayed settings: write `SettingsManager.cfg_NEW_SETTING = name_of_control.value` in the
+  `_debounce_timer.timeout` callback and connect the control's changed signal to
+  `_debounce_timer.start()`. Immediate settings (anything the user judges by looking at the window,
+  like the UI scale) write the `cfg_` and call `SettingsManager.save_settings()` on selection -
+  `settings_changed` is what applies it - and need no debounce line
+- Add the reset to the owning tab's `_add_tab_reset(tab, func(): ...)` lambda **and** set the
+  control's own value/selection there: the lambda restores the `cfg_` values, and the visible
+  control does not follow by itself
 
 ## 3. Workspace (`godot/scenes/terminal/workspace.gd`)
 

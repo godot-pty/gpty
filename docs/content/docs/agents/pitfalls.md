@@ -83,6 +83,18 @@ weight: 80
 
 - App icon and bundle version are project settings, not packaging details: `godot/project.godot`'s `config/icon` (`godot/icon.png`, cropped square from `assets/icon-source.jpg`) is what macOS turns into `Contents/Resources/icon.icns` and what Linux uses as the window icon, while the Windows preset needs the explicit `application/icon="res://icon.ico"` (Godot 4.7 embeds the PE resources itself - no rcedit). `config/version` feeds macOS `CFBundleShortVersionString`/`CFBundleVersion`, so the release workflow overwrites it from the tag and the committed value stays at the last release. Keep `application/app_category` single-word: Godot lowercases it verbatim, so a multi-word name becomes an invalid UTI (`public.app-category.developer tools`).
 
+- An embedded `Window`'s frame and title band are painted from **Godot's own default theme**, not
+  from a `Theme` set on a Control ancestor: `Window/embedded_border` (and
+  `embedded_unfocused_border`) had no effect on 4.7.2 - a magenta `StyleBoxFlat` produced no
+  pixels, and merely defining the item took the band from the default grey to unpainted, leaving
+  the pane behind showing through. `StyleBox.expand_margin_top` on `AcceptDialog/panel` cannot
+  cover it either, because the window's canvas clips drawing to the window rect. `AppDialog`
+  therefore builds modals `borderless` with its own header. Two more things that follow from the
+  same layout rule: an `AcceptDialog` lays out **every** direct child Control over the same content
+  rect (two children overlap, so one `VBoxContainer` is the only workable structure), and its
+  internal `dialog_text` label keeps rendering whatever you add until it is hidden - `AppDialog`
+  hides it and keeps `dialog_text` as the string so tests and `body_of` agree.
+
 ## Agent tool notes
 
 - A renamed or unmarshaled `#[func]` breaks GDScript at runtime, not at parse time: the call is syntactically valid and fails only in the pane that exercises it. `scripts/check-ffi-surface` (run by `ci-check`) cross-checks every call on a GDExtension handle against the exported surface - name and arity. A `#[func]` is attributed to the class its enclosing `#[godot_api] impl` block names (primary or `#[godot_api(secondary)]`, which is how one class is implemented across files), and a `#[func]` outside such a block is reported - the old rule took the first `struct` in the file, so a class split across files would have quietly lost every moved method from the checked surface. It is fail-closed: a Godot-inherited member it does not know about (`has_method` is allowlisted) is reported, so add it to `INHERITED_MEMBERS` deliberately rather than widening the check. The same walk reads the crate's own prose - `crates/gpty-gdext/README.md` and its `///` comments - where a backticked `name(...)` must be an export, a plain `fn` in the crate, or a reasoned `DOC_ALLOWED_NAMES` entry: the reference is what a caller reads before writing the first call, and a name that exists nowhere (three prose mentions of `get_grid_rows()`, a method no version of the class ever had) costs the same round trip as a renamed export.
