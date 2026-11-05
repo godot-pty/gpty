@@ -52,7 +52,7 @@ Check all ten on every pass; each maps to at least one v0.8.0 row:
 10. Keyboard-only reachability for everything above.
 11. App-chrome keyboard reachability: pane title bars, the Wiki note toolbar and the vault graph each need a key path (`--audit-focus` measures it). The three rings are the current answer — `Ctrl+Shift+E` for a title bar, `Ctrl+Shift+K` for the note toolbar, arrows/`+`/`-`/Enter on the graph canvas — so a control added to any of them that is `FOCUS_NONE`, or a `FOCUS_NONE` canvas that is the whole surface, is a finding.
 12. Overlay canvases that inherit the theme's translucent `Panel` (Settings, Pane Settings, the concept editor's `GraphBg`).
-13. State signalled by colour alone (the agent-state badge's failed vs needs-attention).
+13. State signalled by colour alone. The report's own example - the agent-state badge's failed vs needs-attention - is closed: every state has its own glyph, the state word is both its tooltip and its accessible name, and its live region announces a change (v0.8.0 row with the same title). Do not re-report it; a new status surface must carry a second channel (shape, text, position) plus a text form an assistive technology can read.
 14. Graph label collisions at density: every node labelled at the fitted zoom prints titles on top of each other — `VaultGraphView.label_placements` culls them now, so a new label source (or a new canvas) must go through that placement, and a label outside the fitted view is a finding (`fit_to_view` reserves their width).
 
 ## Output contract
@@ -71,5 +71,5 @@ Check all ten on every pass; each maps to at least one v0.8.0 row:
 
 ## Maintenance
 
-- **A new audited surface is a new state.** Add it to `STATES` in `godot/tests/bench/ui_capture.gd` (a window size, a pane count, the interaction its `open`/`close_all` keys name) and run `scripts/ui-capture-check`: two runs must be pixel-identical, and perturbing one state must change that state's image only. A state that needs a control no other state shows can use the same `_perturb` branch.
+- **A new audited surface is a new state.** Add it to `STATES` in `godot/tests/bench/ui_capture.gd` (a window size, a pane count, the interaction its `open`/`close_all` keys name) and run `scripts/ui-capture-check`: two runs must be pixel-identical, and perturbing one state must change that state's image only. A state that needs a control no other state shows can use the same `_perturb` branch. A state that *stages an animation* must pin it in the staging code, because a wall-clock animation never repeats: `agent-badges` declares its four states through the engine (`set_agent_state`), waits for the badges to paint, then re-applies the state and stops the pane's per-frame work, which pins the spinner and the attention pulse to the frame a user sees when the badge appears.
 - **The defect classes are dated October 2026.** Re-derive them from the current audit once the v0.8.0 rows close, instead of trusting this list as a description of the current UI.
