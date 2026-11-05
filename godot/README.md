@@ -65,7 +65,9 @@ godot/
         │   ├── vault_graph_model.gd    # Pure vault link-graph normalize/layout/hit-test
         │   ├── vault_graph_view.gd     # Custom-drawn link-graph canvas (pointer + keyboard, focus ring)
         │   ├── link_weights.gd         # Pure declared-weight vocabulary (paths, range, lookup)
-        │   ├── palette.gd       # Shared UI accent colors
+        │   ├── ui_tokens.gd    # The design tokens (colours, type scale, spacing) + contrast table
+        │   ├── ui_theme.gd     # The one Theme, built from the tokens and applied at the root
+        │   ├── app_dialog.gd   # The one modal builder (theme, grouped buttons, selectable body)
         │   ├── toast_overlay.gd
         │   ├── window_chrome.gd # Titlebar + window-mode/fullscreen handling
         │   ├── markdown_view.gd # Safe shared Markdown renderer

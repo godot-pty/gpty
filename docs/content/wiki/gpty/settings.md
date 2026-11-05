@@ -46,11 +46,14 @@ The shell field is the program a new terminal runs. On Linux and macOS it defaul
 | Setting | Default | Notes |
 |---|---|---|
 | Font | `DejaVuSansMono.ttf` | Any `.ttf` |
-| Font size | 14 px | 8–32 px |
+| Font size | 14 px | 8–32 px — the terminal's text, independent of the UI scale |
+| UI scale | 100 % | 100 / 110 / 125 / 150 / 175 / 200 %. Scales the whole interface, terminals included: every panel, dialog and control grows together, so a dense display does not need a magnifier |
 | Color scheme | None | Optional `.txt`, `.json`, or `.csv` scheme file |
 | Show titlebar | On | Per-pane title bars |
 
-Below those, seven color pickers control the chrome: wrapper background, title-bar background, wrapper border, sidebar background, focus border, selection, and the scrollback indicator. The scheme file supplies the terminal's own palette; clearing it returns terminals to the built-in palette, which is applied live.
+The UI scale is the window's content scale: text and every fixed size scale together, and the layout shrinks by the same factor, so no control is clipped. Font size is separate and only touches the terminal grid — use it when the terminal text should differ from the chrome. At 125 % on a 1920x1080 window the interface behaves like a 1536x864 one, so a very small window at a high scale has less room than the same window at 100 %.
+
+Below those, seven color pickers control the chrome: wrapper background, title-bar background, wrapper border, sidebar background, focus border, selection, and the scrollback indicator. Their defaults, and every colour the app draws its own chrome with, come from one token set (`godot/scenes/ui/ui_tokens.gd`), so the palette is consistent across panels, dialogs and the status bar. The scheme file supplies the terminal's own palette; clearing it returns terminals to the built-in palette, which is applied live.
 
 ## Reasoning
 

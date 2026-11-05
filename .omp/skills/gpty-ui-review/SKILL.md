@@ -9,7 +9,7 @@ A router plus the operational recipe. The method is normative in `docs/content/d
 
 ## Do not
 
-- **Do not write a UI inventory** ("the sidebar lists X, the palette offers Y", every control and its behaviour). Every v0.8.0 GUI row changes the UI, so a written inventory is stale the moment it is committed and an agent trusting it is worse off than one that looks. Enumerate the surface by running the app and reading `godot/scenes/`: `ui/sidebar.gd`, `ui/status_bar.gd`, `ui/settings_panel.gd`, `ui/window_chrome.gd`, `ui/palette.gd` (colours), `panes/pane_types.gd` (pane types and palette commands).
+- **Do not write a UI inventory** ("the sidebar lists X, the palette offers Y", every control and its behaviour). Every v0.8.0 GUI row changes the UI, so a written inventory is stale the moment it is committed and an agent trusting it is worse off than one that looks. Enumerate the surface by running the app and reading `godot/scenes/`: `ui/sidebar.gd`, `ui/status_bar.gd`, `ui/settings_panel.gd`, `ui/window_chrome.gd`, `ui/ui_tokens.gd` (the colours, sizes and spacing), `ui/ui_theme.gd` (what the theme does to each type), `ui/app_dialog.gd` (modals), `panes/pane_types.gd` (pane types and palette commands).
 - Do not commit an audit report or a design review. Findings and outcomes become roadmap rows (repo rule); only the captures a row points at are kept.
 - Do not modify project files while assessing. A surface that needs a capture becomes a `STATES` entry in the committed driver; nothing is staged in a temporary scene any more.
 
@@ -32,7 +32,7 @@ A router plus the operational recipe. The method is normative in `docs/content/d
 
 - The vision pass is advisory: ask for defects only (giant overlays, clipped controls, overlapping sections), and treat every text reading as unverified until checked in source.
 - Vision misses thin 1 px wires and gaps, small text, subtle contrast, and off-by-one clipping — prefer objective probes for geometry (connection counts, `Rect2` intersection, sampled pixels). `godot-graph-edit-canvas` learned this the hard way.
-- Contrast is a WCAG ratio computed from `ui/palette.gd` constants or sampled pixels, not an impression.
+- Contrast is a WCAG ratio computed from `ui/ui_tokens.gd` (its `CONTRAST_PAIRS` table and `contrast_ratio()`) or sampled pixels, not an impression.
 - Back styling claims with a count: `add_theme_*_override` calls, hard-coded `Color(...)` literals, font sizes outside the scale.
 - Mark every finding **verified** / **observed** / **code** (+ *not tested*, *measured* for probes). List what was not examined and queue it as a row instead of dropping it.
 
