@@ -66,6 +66,7 @@ Check all ten on every pass; each maps to at least one v0.8.0 row:
 `scripts/record-demo <showcase|panes|agents|concepts|wiki|media|cli-view>` - the header is the usage source (sandbox, seeded workspace, CLI-driven, no synthetic input). One scenario is one workflow: `showcase` is the README's always-visible clip, the rest sit behind `<details>` there and under one homepage section each. Judgment the header does not carry:
 
 - Verify the **encoded** output (GIF frames, not the raw capture): legibility at `GIF_WIDTH`, caption pacing, no frame where a pane is mid-repaint.
+- A cue that prints an error, or a pane that renders blank, is a finding - not something to crop or caption around: fix the cue, and queue what the product did as a roadmap row. Three cues in the 2026-11-06 set surfaced exactly that way (an unregistered vault root, a `cli_view` child in the wrong directory, a `-c` pane with an empty body).
 - Re-record whenever a UI change lands in a recorded workspace - the README and the homepage embed the clips.
 - Add a workflow by adding a `LAYOUTS` entry, a cue arm and a `case` name, never a second recorder. A pane whose settings the CLI cannot pass (no `--settings` on `new-pane`) is seeded in the layout instead of spawned by a cue, or the cue spawns a terminal that runs the command.
 
