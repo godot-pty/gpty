@@ -71,6 +71,9 @@ const STATES := {
 	"sidebar": {"size": DEFAULT_SIZE, "panes": 4},
 	"settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings"},
 	"pane-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "pane-settings"},
+	# The workspace-directory picker: the app's own header over the engine's
+	# picker column (row *A FileDialog still wears Godot's stock grey frame*).
+	"file-dialog": {"size": DEFAULT_SIZE, "panes": 1, "open": "file-dialog"},
 	"palette": {"size": DEFAULT_SIZE, "panes": 1, "open": "palette"},
 	"empty-workspace": {"size": DEFAULT_SIZE, "panes": 1, "close_all": true},
 	# The UI scale setting at its 125 % step, on the app's own first-launch
@@ -343,6 +346,17 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			if _workspace._settings_panel == null or not _workspace._settings_panel.visible:
 				_fail("clicking Settings did not open the Settings panel")
 				return false
+		"file-dialog":
+			var dir_button := _button_with_accessible_name(_workspace._sidebar,
+				"Choose workspace directory")
+			if dir_button == null:
+				_fail("the sidebar has no workspace-directory button")
+				return false
+			await _click(dir_button)
+			await _wait_frames(3)
+			if _visible_dialog(_workspace) == null:
+				_fail("clicking the workspace directory did not open a picker")
+				return false
 		"pane-settings":
 			var wrapper: Control = _workspace._tm.tiles[0].wrapper
 			var button := _button_with_tooltip(wrapper, "Pane settings")
@@ -558,6 +572,18 @@ func _button_with_label(node: Node, text: String) -> Button:
 		if found != null:
 			return found
 	return null
+
+## An icon-only button has no text to match (its glyph is a child Label), so a
+## state that clicks one names it the way a screen reader does.
+func _button_with_accessible_name(node: Node, accessible_name: String) -> Button:
+	if node is Button and (node as Button).accessibility_name == accessible_name:
+		return node as Button
+	for child in node.get_children():
+		var found := _button_with_accessible_name(child, accessible_name)
+		if found != null:
+			return found
+	return null
+
 
 func _has_label(node: Node, text: String) -> bool:
 	if node is Label and (node as Label).text == text:

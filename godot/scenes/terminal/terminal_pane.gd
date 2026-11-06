@@ -1520,9 +1520,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	font_btn.clip_text = true
 	font_btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	font_btn.pressed.connect(func():
-		var dlg = FileDialog.new()
-		dlg.access = FileDialog.ACCESS_FILESYSTEM
-		dlg.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+		var dlg := AppDialog.picker(panel, "Font", FileDialog.FILE_MODE_OPEN_FILE)
 		dlg.current_path = font_btn.get_meta("path", "")
 		dlg.add_filter(PaneTypes.font_filter(), "Fonts")
 		dlg.file_selected.connect(func(path: String):
@@ -1531,7 +1529,6 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			panel._debounce_timer.start()
 			dlg.queue_free())
 		dlg.canceled.connect(dlg.queue_free)
-		panel.add_child(dlg)
 		dlg.popup_centered())
 	_make_row(v, "Font:", font_btn, panel)
 
@@ -1542,9 +1539,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	scheme_btn.clip_text = true
 	scheme_btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	scheme_btn.pressed.connect(func():
-		var dlg = FileDialog.new()
-		dlg.access = FileDialog.ACCESS_FILESYSTEM
-		dlg.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+		var dlg := AppDialog.picker(panel, "Color scheme", FileDialog.FILE_MODE_OPEN_FILE)
 		dlg.current_path = scheme_btn.get_meta("path", "")
 		dlg.add_filter("*.txt; *.json; *.csv", "Scheme files")
 		dlg.file_selected.connect(func(path: String):
@@ -1553,7 +1548,6 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			panel._debounce_timer.start()
 			dlg.queue_free())
 		dlg.canceled.connect(dlg.queue_free)
-		panel.add_child(dlg)
 		dlg.popup_centered())
 	_make_row(v, "Color scheme:", scheme_btn, panel)
 

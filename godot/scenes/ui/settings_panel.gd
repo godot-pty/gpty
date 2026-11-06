@@ -574,9 +574,7 @@ func _add_file_picker(v: VBoxContainer, label: String, current_path: String, fil
 	btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn.pressed.connect(func():
-		var dlg = FileDialog.new()
-		dlg.access = FileDialog.ACCESS_FILESYSTEM
-		dlg.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+		var dlg := AppDialog.picker(self, label.trim_suffix(":"), FileDialog.FILE_MODE_OPEN_FILE)
 		dlg.current_path = current_path
 		for f in filters: dlg.add_filter(f[0], f[1])
 		dlg.file_selected.connect(func(path: String):
@@ -584,7 +582,6 @@ func _add_file_picker(v: VBoxContainer, label: String, current_path: String, fil
 			on_selected.call(path)
 			dlg.queue_free())
 		dlg.canceled.connect(dlg.queue_free)
-		add_child(dlg)
 		dlg.popup_centered())
 	h.add_child(btn)
 	if reset_to_default.is_valid():
