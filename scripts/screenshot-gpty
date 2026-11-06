@@ -42,14 +42,26 @@ fi
 }
 
 command -v python3 >/dev/null || { echo "missing tool: python3 (need python3-xlib)" >&2; exit 3; }
-CAPTURE=""
-if command -v ffmpeg >/dev/null; then
-    CAPTURE=ffmpeg
-elif command -v import >/dev/null; then
+# A backend is *tried*, not trusted: ffmpeg's `x11grab -window_id` hangs rather
+# than failing when it cannot attach to the window (measured on an XWayland
+# session: no output for 30 s, where `import` produced the frame at once), and
+# a capture that never returns fails the whole run with no clue why. Each
+# backend runs under `CAPTURE_TIMEOUT` and the next one takes over when it
+# produces nothing. SCREENSHOT_CAPTURE=ffmpeg|import pins one.
+BACKENDS=()
+case "${SCREENSHOT_CAPTURE:-}" in
+    ffmpeg) command -v ffmpeg >/dev/null || { echo "missing tool: ffmpeg" >&2; exit 3; }; BACKENDS=(ffmpeg) ;;
+    import) command -v import >/dev/null || { echo "missing tool: imagemagick (import)" >&2; exit 3; }; BACKENDS=(import) ;;
+    "") ;;
+    *) echo "SCREENSHOT_CAPTURE must be ffmpeg or import" >&2; exit 2 ;;
+esac
+if [[ ${#BACKENDS[@]} -eq 0 ]]; then
+    command -v ffmpeg >/dev/null && BACKENDS+=(ffmpeg)
+    command -v import >/dev/null && BACKENDS+=(import)
+fi
+if [[ ${#BACKENDS[@]} -eq 0 ]]; then
     # An ImageMagick built without X11 fails at capture time with a
     # "missing an image filename" error that names the output path.
-    CAPTURE=import
-else
     echo "missing tool: ffmpeg or imagemagick (import)" >&2
     exit 3
 fi
@@ -146,9 +158,24 @@ if [[ -n "$READY" ]]; then
 fi
 
 sleep "${SCREENSHOT_WAIT:-2}"  # let the first frames settle (SCREENSHOT_WAIT raises it)
-case "$CAPTURE" in
-    ffmpeg) ffmpeg -y -loglevel error -f x11grab -window_id "$WID" -i "${DISPLAY:-:0}" -frames:v 1 "$OUT" ;;
-    import) import -window "$WID" "$OUT" ;;
-esac
-[[ -s "$OUT" ]] || { echo "capture produced no image (${CAPTURE})" >&2; exit 5; }
+CAPTURE_TIMEOUT="${SCREENSHOT_TIMEOUT:-20}"
+# `if`, not a bare call: under `set -e` a backend that fails (or that `timeout`
+# kills at the deadline) aborts the script instead of handing over to the next
+# one, which is how the ffmpeg hang above turned into a silent exit.
+grab() {
+    case "$1" in
+        ffmpeg) timeout "$CAPTURE_TIMEOUT" ffmpeg -y -loglevel error \
+                    -f x11grab -window_id "$WID" -i "${DISPLAY:-:0}" -frames:v 1 "$OUT" ;;
+        import) timeout "$CAPTURE_TIMEOUT" import -window "$WID" "$OUT" ;;
+    esac
+}
+CAPTURE=""
+for backend in "${BACKENDS[@]}"; do
+    if grab "$backend" && [[ -s "$OUT" ]]; then
+        CAPTURE="$backend"
+        break
+    fi
+    rm -f "$OUT"
+done
+[[ -n "$CAPTURE" ]] || { echo "capture produced no image (tried: ${BACKENDS[*]})" >&2; exit 5; }
 echo "captured: $OUT (${CAPTURE})"
