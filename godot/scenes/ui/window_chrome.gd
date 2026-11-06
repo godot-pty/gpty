@@ -11,6 +11,9 @@ const MIN_WINDOW_H = 300
 
 var titlebar: Control = null
 var _ws: Control = null
+## The titlebar's maximize/restore control, which acts as what it says: the
+## glyph and the name follow the window mode.
+var _max_btn: Button = null
 
 
 func build(ws: Control) -> Control:
@@ -58,13 +61,15 @@ func build(ws: Control) -> Control:
 	var min_btn = _make_titlebar_button(Icons.MINIMIZE, func():
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MINIMIZED),
 		"Minimize window")
+	min_btn.name = "Minimize"
 	btn_cont.add_child(min_btn)
 
-	var max_btn = _make_titlebar_button(Icons.MAXIMIZE_WIN, toggle_fullscreen, "Maximize window")
-	btn_cont.add_child(max_btn)
-	titlebar.set_meta("_max_btn", max_btn)
+	_max_btn = _make_titlebar_button(Icons.MAXIMIZE_WIN, toggle_fullscreen, "Maximize window")
+	_max_btn.name = "Maximize"
+	btn_cont.add_child(_max_btn)
 
 	var close_btn = _make_titlebar_button(Icons.CLOSE, func(): _ws.request_quit(), "Close window")
+	close_btn.name = "Close"
 	btn_cont.add_child(close_btn)
 
 	titlebar.add_child(btn_cont)
@@ -88,17 +93,20 @@ func apply_mode():
 			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 			if titlebar: titlebar.visible = true
-	# Swap titlebar maximize/restore icon
-	if titlebar:
-		var max_btn = titlebar.get_meta("_max_btn", null)
-		if max_btn != null:
-			if SettingsManager.cfg_window_mode == 2 and max_btn.text == Icons.MAXIMIZE_WIN:
-				max_btn.text = Icons.RESTORE_WIN
-				max_btn.accessibility_name = "Restore window"
-			elif SettingsManager.cfg_window_mode != 2 and max_btn.text == Icons.RESTORE_WIN:
-				max_btn.text = Icons.MAXIMIZE_WIN
-				max_btn.accessibility_name = "Maximize window"
+	_sync_max_button()
 	_ws._apply_layout()
+
+
+## The maximize control swaps glyph and name with the mode, read from the
+## setting rather than from the previous glyph: the glyph is a child Label, so
+## comparing `Button.text` (always empty here) was why it never swapped.
+func _sync_max_button() -> void:
+	if _max_btn == null:
+		return
+	var fullscreen := SettingsManager.cfg_window_mode == 2
+	# The name goes first so `set_glyph` mirrors it onto the glyph Label.
+	_max_btn.accessibility_name = "Restore window" if fullscreen else "Maximize window"
+	Icons.set_glyph(_max_btn, Icons.RESTORE_WIN if fullscreen else Icons.MAXIMIZE_WIN)
 
 
 func toggle_fullscreen():
@@ -139,28 +147,18 @@ func restore_position():
 		DisplayServer.window_set_size(sz)
 
 
-## `accessible_name` is required for the same reason `Icons.icon_button` takes
-## one: the glyph is a child Label, so the Button's own text is empty and
-## nothing else would name it.
+## A titlebar control is the shared icon-button treatment at the bar's own
+## target size; `Icons.icon_button` draws the glyph in a child Label (Button
+## text with theme font overrides does not render PUA codepoints reliably) and
+## names it. The size is set first so the bar's 36 px target wins over the
+## shared floor.
 func _make_titlebar_button(icon: String, callback: Callable, accessible_name: String) -> Button:
 	var btn = Button.new()
 	btn.focus_mode = Control.FOCUS_NONE
 	btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	btn.custom_minimum_size = Vector2(36, HEIGHT)
-	btn.flat = true
-	btn.accessibility_name = accessible_name
 	btn.pressed.connect(callback)
-	# Use a Label child for the icon glyph — Button text with theme font
-	# overrides doesn't reliably render PUA codepoints in Godot 4.
-	var lbl = Label.new()
-	lbl.text = icon
-	lbl.add_theme_font_override("font", Icons.font_resource)
-	lbl.add_theme_font_size_override("font_size", UiTokens.FS_BODY)
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	btn.add_child(lbl)
+	Icons.icon_button(btn, icon, accessible_name)
 	return btn
 
 

@@ -24,6 +24,14 @@ const DANGER_LABEL := &"DangerLabel"
 const WARNING_LABEL := &"WarningLabel"
 ## A link-style button: the sidebar's active row and its accent glyphs.
 const ACCENT_BUTTON := &"AccentButton"
+## An icon-only Button: the glyph alone at rest, an accent-tinted hover/pressed
+## and the keyboard focus ring. Text buttons keep the filled `Button` base.
+## Applied by `Icons.icon_button`; a glyph that changes at runtime swaps its
+## codepoint, never the variation.
+const ICON_BUTTON := &"IconButton"
+## A glyph in the accent colour: a Button's own font colours cannot reach the
+## child `Label` that draws an icon-button glyph.
+const ACCENT_LABEL := &"AccentLabel"
 
 static func build() -> Theme:
 	var p := UiPalette.active()
@@ -146,9 +154,9 @@ static func build() -> Theme:
 	# The embedded frame stylebox is left to the engine: a `Window`'s title band is
 	# painted from Godot's default theme and a Control's theme cannot reach it
 	# (measured 2026-11-04: a magenta `Window/embedded_border` painted nothing).
-	# `AppDialog` therefore makes its modals borderless and draws its own header;
-	# the engine windows that keep a frame (FileDialog) keep it at the engine's
-	# own chrome, which is what a native file picker looks like.
+	# `AppDialog` therefore makes its modals and its file pickers borderless and
+	# draws a header of its own (`AppDialog.picker` inserts one above the
+	# engine-built column, so the picker's own controls stay where they are).
 	t.set_font_size("title_font_size", "Window", UiTokens.FS_CONTROL)
 	t.set_color("title_color", "Window", p.TEXT)
 	t.set_stylebox("panel", "AcceptDialog", _padded(_flat(p.SURFACE, p.BORDER, 1), UiTokens.SPACE_XXL))
@@ -165,7 +173,8 @@ static func build() -> Theme:
 	# One registration per colour role, so no widget has to hold a token itself.
 	for role in [[MUTED_LABEL, "Label", p.TEXT_MUTED],
 			[DANGER_LABEL, "Label", p.DANGER],
-			[WARNING_LABEL, "Label", p.WARNING]]:
+			[WARNING_LABEL, "Label", p.WARNING],
+			[ACCENT_LABEL, "Label", p.ACCENT]]:
 		t.set_type_variation(role[0], role[1])
 		t.set_color("font_color", role[0], role[2])
 	t.set_type_variation(ACCENT_BUTTON, "Button")
@@ -173,6 +182,17 @@ static func build() -> Theme:
 	t.set_color("font_hover_color", ACCENT_BUTTON, p.ACCENT_HOVER)
 	t.set_color("font_pressed_color", ACCENT_BUTTON, p.ACCENT)
 	t.set_color("font_focus_color", ACCENT_BUTTON, p.ACCENT)
+
+	# The icon-only treatment: no chrome at rest, an accent wash under the
+	# pointer, and the same 1 px accent focus ring an input gets. `StyleBoxEmpty`
+	# is what makes a glyph button read as a glyph instead of a filled text
+	# button; the focus box is the only state with an outline.
+	t.set_type_variation(ICON_BUTTON, "Button")
+	t.set_stylebox("normal", ICON_BUTTON, StyleBoxEmpty.new())
+	t.set_stylebox("disabled", ICON_BUTTON, StyleBoxEmpty.new())
+	t.set_stylebox("hover", ICON_BUTTON, _flat(Color(p.ACCENT, 0.16)))
+	t.set_stylebox("pressed", ICON_BUTTON, _flat(Color(p.ACCENT, 0.32)))
+	t.set_stylebox("focus", ICON_BUTTON, _padded(_flat(Color.TRANSPARENT, p.ACCENT, 1), UiTokens.SPACE_XS))
 
 	return t
 

@@ -27,7 +27,8 @@ extends SceneTree
 ##                      pane) by 16 px; `scripts/ui-capture-check` uses it to
 ##                      prove a capture diff is local to one state
 ##   --audit-focus      stage the state, print what keyboard traversal can
-##                      reach (focus owner, tab order, focus-none controls)
+##                      reach (focus owner, every traversal component, the
+##                      components/rings/reached totals, focus-none controls)
 ##                      and exit; `scripts/ui-capture --audit-focus <state>`
 ##   --audit-accessibility
 ##                      stage the state, print the accessible surface (names,
@@ -70,6 +71,9 @@ const STATES := {
 	"sidebar": {"size": DEFAULT_SIZE, "panes": 4},
 	"settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings"},
 	"pane-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "pane-settings"},
+	# The workspace-directory picker: the app's own header over the engine's
+	# picker column (row *A FileDialog still wears Godot's stock grey frame*).
+	"file-dialog": {"size": DEFAULT_SIZE, "panes": 1, "open": "file-dialog"},
 	"palette": {"size": DEFAULT_SIZE, "panes": 1, "open": "palette"},
 	"empty-workspace": {"size": DEFAULT_SIZE, "panes": 1, "close_all": true},
 	# The UI scale setting at its 125 % step, on the app's own first-launch
@@ -342,6 +346,23 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			if _workspace._settings_panel == null or not _workspace._settings_panel.visible:
 				_fail("clicking Settings did not open the Settings panel")
 				return false
+		"file-dialog":
+			var dir_button := _button_with_accessible_name(_workspace._sidebar,
+				"Choose workspace directory")
+			if dir_button == null:
+				_fail("the sidebar has no workspace-directory button")
+				return false
+			await _click(dir_button)
+			await _wait_frames(3)
+			var picker := _visible_dialog(_workspace) as FileDialog
+			if picker == null:
+				_fail("clicking the workspace directory did not open a picker")
+				return false
+			# A fixed directory: the picker opens in the sandbox's HOME, whose
+			# per-run path made two captures differ in the path field. The root
+			# listing is the same on both runs of one machine.
+			picker.current_dir = "/"
+			await _wait_frames(3)
 		"pane-settings":
 			var wrapper: Control = _workspace._tm.tiles[0].wrapper
 			var button := _button_with_tooltip(wrapper, "Pane settings")
@@ -558,6 +579,18 @@ func _button_with_label(node: Node, text: String) -> Button:
 			return found
 	return null
 
+## An icon-only button has no text to match (its glyph is a child Label), so a
+## state that clicks one names it the way a screen reader does.
+func _button_with_accessible_name(node: Node, accessible_name: String) -> Button:
+	if node is Button and (node as Button).accessibility_name == accessible_name:
+		return node as Button
+	for child in node.get_children():
+		var found := _button_with_accessible_name(child, accessible_name)
+		if found != null:
+			return found
+	return null
+
+
 func _has_label(node: Node, text: String) -> bool:
 	if node is Label and (node as Label).text == text:
 		return true
@@ -698,10 +731,12 @@ func _is_terminal(body) -> bool:
 
 ## Print what keyboard traversal reaches in the staged state: who owns focus,
 ## which visible controls are focusable, which interactive controls are
-## FOCUS_NONE (mouse-only), and the Tab order from the first one. The audit's
-## evidence is this output, not a judgement — a mouse-only control is a
-## defect only when its action has no keyboard path (the palette's shortcut,
-## a terminal's own input) is considered by the reader.
+## FOCUS_NONE (mouse-only), and every traversal component — the first as
+## `tab-order`, the rest as `ring[n]` (closed) or `flow[n]` (runs into a claimed
+## control), plus the totals. The audit's evidence is this output, not a
+## judgement — a mouse-only control is a defect only when its action has no
+## keyboard path (the palette's shortcut, a terminal's own input) is considered
+## by the reader.
 func _audit_focus(state_name: String) -> void:
 	print("focus-audit: state=%s" % state_name)
 	var owner: Control = _workspace.get_viewport().gui_get_focus_owner()
@@ -746,25 +781,34 @@ func _audit_focus(state_name: String) -> void:
 			% [button.text, button.tooltip_text, _short_path(button)])
 	for canvas in canvases:
 		print("focus-audit: mouse-only canvas path=%s" % _short_path(canvas))
-	var chain: Array[String] = []
-	var cur: Control = null
+	# Every component, not just the one ring a single start sits inside: a
+	# `focus_next` ring caps a walk, so walking from one control reported 5 of
+	# this state's 178 controls. The focus owner goes first, so `tab-order` is
+	# still the component the keyboard starts in.
+	var ordered: Array[Control] = []
 	if owner != null and is_instance_valid(owner) and owner.is_visible_in_tree():
-		cur = owner
-	else:
-		for c in focusable:
-			if c.is_visible_in_tree():
-				cur = c
-				break
-	if cur != null:
-		cur.grab_focus()
-		var first := cur
-		for _i in 100:
-			chain.append(_short_path(cur))
-			var nxt := cur.find_next_valid_focus()
-			if nxt == null or nxt == first:
-				break
-			cur = nxt
-		print("focus-audit: tab-order=%s" % ", ".join(chain))
+		ordered.append(owner)
+	for c in focusable:
+		if c.is_visible_in_tree() and not ordered.has(c):
+			ordered.append(c)
+	var components := KeyboardFocus.tab_components(ordered)
+	var reached := 0
+	var rings := 0
+	for index in components.size():
+		var component: Array = components[index]["controls"]
+		var closed: bool = components[index]["closed"]
+		reached += component.size()
+		if closed:
+			rings += 1
+		var paths: Array[String] = []
+		for c in component:
+			paths.append(_short_path(c))
+		var key := "tab-order"
+		if index > 0:
+			key = "ring[%d]" % index if closed else "flow[%d]" % index
+		print("focus-audit: %s=%s" % [key, ", ".join(paths)])
+	print("focus-audit: components=%d rings=%d reached=%d"
+		% [components.size(), rings, reached])
 
 ## Print the accessible surface the staged state exposes: every Control that
 ## carries a name, a description, a live mode or a recorded value, the count of

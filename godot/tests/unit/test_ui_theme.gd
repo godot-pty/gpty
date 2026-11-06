@@ -136,3 +136,29 @@ func test_a_role_label_reads_the_themes_colour():
 	host.add_child(lbl)
 	await wait_frames(1)
 	assert_eq(lbl.get_theme_color("font_color"), UiPalette.dark().TEXT_MUTED)
+
+
+## The icon-only treatment: nothing at rest, an accent wash under the pointer,
+## and the same 1 px accent ring an input gets. Text buttons keep the filled
+## base, so one variation cannot leak into the other.
+func test_the_icon_button_variation_is_flat_until_pointed_at():
+	assert_eq(_theme.get_type_variation_base(UiTheme.ICON_BUTTON), "Button")
+	assert_true(_theme.get_stylebox("normal", UiTheme.ICON_BUTTON) is StyleBoxEmpty,
+		"an icon button draws no box at rest")
+	assert_true(_theme.get_stylebox("disabled", UiTheme.ICON_BUTTON) is StyleBoxEmpty)
+	for state in ["hover", "pressed"]:
+		var box := _theme.get_stylebox(state, UiTheme.ICON_BUTTON) as StyleBoxFlat
+		assert_not_null(box, "%s is a fill, not an empty box" % state)
+		assert_gt(box.bg_color.a, 0.0, "%s washes the glyph's background" % state)
+		assert_eq(box.bg_color.r, UiPalette.dark().ACCENT.r, "%s is the accent" % state)
+	var focus := _theme.get_stylebox("focus", UiTheme.ICON_BUTTON) as StyleBoxFlat
+	assert_not_null(focus, "the keyboard ring is an outline, not a fill")
+	assert_gt(focus.border_width_left, 0, "the ring draws a border")
+	assert_eq(focus.border_color, UiPalette.dark().ACCENT)
+	assert_eq(_theme.get_stylebox("normal", "Button").bg_color.r,
+		UiPalette.dark().SURFACE_RAISED.r, "a text button keeps the filled base")
+
+
+func test_the_accent_label_role_resolves_to_the_accent():
+	assert_eq(_theme.get_type_variation_base(UiTheme.ACCENT_LABEL), "Label")
+	assert_eq(_theme.get_color("font_color", UiTheme.ACCENT_LABEL), UiPalette.dark().ACCENT)

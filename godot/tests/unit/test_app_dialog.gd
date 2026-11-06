@@ -122,3 +122,62 @@ func test_set_text_renders_one_wrapping_label():
 	assert_ne(label.autowrap_mode, TextServer.AUTOWRAP_OFF)
 	assert_eq(AppDialog.body_of(dialog), label.text)
 	assert_false(dialog.get_label().visible, "the engine label does not render it twice")
+
+
+## The picker wears the app's frame for the reason a modal does (the engine's
+## band is stock grey), but its layout is the engine's: the header is inserted at
+## the top of the picker's own column so nothing of it moves.
+func test_the_picker_takes_the_apps_own_frame():
+	var dialog := AppDialog.picker(_host, "Working directory", FileDialog.FILE_MODE_OPEN_DIR)
+	assert_true(dialog is FileDialog)
+	assert_true(dialog.borderless, "no engine title band")
+	assert_false(dialog.get_label().visible, "the engine label would be a second title")
+	assert_eq(dialog.file_mode, FileDialog.FILE_MODE_OPEN_DIR, "the site's mode is kept")
+	assert_eq(dialog.title, "Working directory")
+
+	var column: VBoxContainer = null
+	for child in dialog.get_children(true):
+		if child is VBoxContainer:
+			column = child
+	assert_not_null(column, "the picker builds its own column")
+	var header := column.get_child(0) as HBoxContainer
+	assert_not_null(header, "the header is the column's first child")
+	assert_eq(str(header.name), AppDialog.HEADER_NAME)
+
+	var heading := header.get_node_or_null(NodePath(AppDialog.TITLE_NAME)) as Label
+	assert_not_null(heading, "the header carries the title")
+	assert_eq(heading.text, "Working directory")
+	var close := header.get_node_or_null(NodePath(AppDialog.CLOSE_NAME)) as Button
+	assert_not_null(close, "the header carries a close control")
+	assert_eq(Icons.glyph(close), Icons.CLOSE)
+	assert_eq(close.accessibility_name, "Close")
+
+	# Inserted, not wrapped: the picker's own path field is still in the column
+	# and is not a child of the header.
+	var fields := column.find_children("*", "LineEdit", true, false)
+	assert_gt(fields.size(), 0, "the picker's path field is untouched")
+	assert_false(header.is_ancestor_of(fields[0]),
+		"the header sits above the picker's controls, it does not contain them")
+
+
+func test_the_picker_header_close_takes_the_engines_cancel_path():
+	var dialog := AppDialog.picker(_host, "Font")
+	watch_signals(dialog)
+	var header := dialog.find_child(AppDialog.HEADER_NAME, true, false)
+	var close := header.get_node(AppDialog.CLOSE_NAME) as Button
+	close.pressed.emit()
+	assert_signal_emitted(dialog, "canceled",
+		"the site's `canceled` -> `queue_free` runs exactly as for the Cancel button")
+
+
+func test_the_picker_header_is_inserted_once_across_a_popup():
+	var dialog := AppDialog.picker(_host, "Font")
+	dialog.popup_centered()
+	await wait_frames(3)
+	var headers := 0
+	for child in dialog.get_children(true):
+		if child is VBoxContainer:
+			for grandchild in child.get_children():
+				if str(grandchild.name) == AppDialog.HEADER_NAME:
+					headers += 1
+	assert_eq(headers, 1, "a second popup must not stack a second header")

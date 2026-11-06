@@ -12,8 +12,6 @@ class_name TerminalManager
 ## an older one.
 ## The divider drag over these units lives in tile_drag.gd.
 const TITLE_BAR_HEIGHT = 26
-const BUTTON_MIN_WIDTH = 22
-const BUTTON_MIN_HEIGHT = 18
 ## Godot 4.7.2 binds `Control.accessibility_live` as a plain int (its property
 ## hint is `Off,Polite,Assertive`) with no named constants, so the level a
 ## status readout wants is spelled here: polite announces a change when the
@@ -266,26 +264,24 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	btn_hbox.add_theme_constant_override("separation", UiTokens.SPACE_XS)
 	btn_hbox.anchor_left = 1.0; btn_hbox.anchor_right = 1.0
 	btn_hbox.anchor_top = 0.0; btn_hbox.anchor_bottom = 1.0
-	var btn_total = 5 * BUTTON_MIN_WIDTH + 12
+	var btn_total = 5 * UiTokens.BUTTON_MIN_WIDTH + 12
 	btn_hbox.offset_left = -btn_total
 	btn_hbox.offset_right = -2
 	bar.add_child(btn_hbox)
 
 	var min_btn = Button.new()
 	min_btn.name = "Minimize"
-	min_btn.text = Icons.MINIMIZE
 	min_btn.tooltip_text = "Minimize / Restore"
-	Icons.icon_button(min_btn, "Minimize pane")
-	min_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
+	min_btn.custom_minimum_size = Vector2(UiTokens.BUTTON_MIN_WIDTH, UiTokens.BUTTON_MIN_HEIGHT)
+	Icons.icon_button(min_btn, Icons.MINIMIZE, "Minimize pane")
 	min_btn.pressed.connect(func(): _toggle_minimize(root, min_btn))
 	btn_hbox.add_child(min_btn)
 
 	var pos_swap_btn = Button.new()
 	pos_swap_btn.name = "SwapPosition"
-	pos_swap_btn.text = Icons.SWAP
-	Icons.icon_button(pos_swap_btn, "Swap pane position")
-	pos_swap_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	pos_swap_btn.tooltip_text = "Swap position with another pane"
+	pos_swap_btn.custom_minimum_size = Vector2(UiTokens.BUTTON_MIN_WIDTH, UiTokens.BUTTON_MIN_HEIGHT)
+	Icons.icon_button(pos_swap_btn, Icons.SWAP, "Swap pane position")
 	pos_swap_btn.pressed.connect(func():
 		var b = _find_body(root)
 		if b:
@@ -294,10 +290,9 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	btn_hbox.add_child(pos_swap_btn)
 	var swap_btn = Button.new()
 	swap_btn.name = "ChangeType"
-	swap_btn.text = Icons.RESET
 	swap_btn.tooltip_text = "Change pane type"
-	Icons.icon_button(swap_btn, "Change pane type")
-	swap_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
+	swap_btn.custom_minimum_size = Vector2(UiTokens.BUTTON_MIN_WIDTH, UiTokens.BUTTON_MIN_HEIGHT)
+	Icons.icon_button(swap_btn, Icons.RESET, "Change pane type")
 	# PopupMenu listing all pane types
 	var swap_menu = PopupMenu.new()
 	swap_menu.name = "SwapMenu"
@@ -319,19 +314,17 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 
 	var settings_btn = Button.new()
 	settings_btn.name = "PaneSettings"
-	settings_btn.text = Icons.SETTINGS
 	settings_btn.tooltip_text = "Pane settings"
-	Icons.icon_button(settings_btn, "Pane settings")
-	settings_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
+	settings_btn.custom_minimum_size = Vector2(UiTokens.BUTTON_MIN_WIDTH, UiTokens.BUTTON_MIN_HEIGHT)
+	Icons.icon_button(settings_btn, Icons.SETTINGS, "Pane settings")
 	settings_btn.pressed.connect(func(): _open_pane_settings(_find_body(root)))
 	btn_hbox.add_child(settings_btn)
 
 	var close_btn = Button.new()
 	close_btn.name = "ClosePane"
-	close_btn.text = Icons.CLOSE
 	close_btn.tooltip_text = "Close pane"
-	Icons.icon_button(close_btn, "Close pane")
-	close_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
+	close_btn.custom_minimum_size = Vector2(UiTokens.BUTTON_MIN_WIDTH, UiTokens.BUTTON_MIN_HEIGHT)
+	Icons.icon_button(close_btn, Icons.CLOSE, "Close pane")
 	close_btn.pressed.connect(func(): _handle_close(_find_body(root)))
 	btn_hbox.add_child(close_btn)
 
@@ -616,9 +609,10 @@ func _toggle_minimize(w: Control, btn: Button):
 	var body = _find_body(w)
 	if body:
 		body.visible = not body.visible
-		btn.text = Icons.MINIMIZE if body.visible else Icons.RESTORE
-		# The name moves with the glyph: the button acts as what it says.
+		# The name moves with the glyph: the button acts as what it says. The
+		# name goes first so `set_glyph` mirrors it onto the glyph Label.
 		btn.accessibility_name = "Minimize pane" if body.visible else "Restore pane"
+		Icons.set_glyph(btn, Icons.MINIMIZE if body.visible else Icons.RESTORE)
 		# Restoring brings the pane back and the keyboard with it (hiding it
 		# leaves nothing to focus, on purpose).
 		_return_focus_to_body(body)

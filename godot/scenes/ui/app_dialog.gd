@@ -28,6 +28,9 @@ const REVIEW_BODY_SIZE := Vector2(720, 360)
 const LAYOUT_NAME := "Layout"
 const TITLE_NAME := "DialogTitle"
 const TEXT_NAME := "BodyText"
+## The picker's own header (see `picker`): the strip above the engine's column.
+const HEADER_NAME := "Header"
+const CLOSE_NAME := "DialogClose"
 
 ## A `ConfirmationDialog` added to `parent`. Empty strings leave the button
 ## labels alone, so a site can set them later.
@@ -47,6 +50,85 @@ static func alert(parent: Node, title := "", ok_text := "") -> AcceptDialog:
 		dialog.ok_button_text = ok_text
 	_adopt(parent, dialog, title)
 	return dialog
+
+## A file or directory picker in the app's own frame.
+##
+## A `FileDialog` is an `AcceptDialog`, so it is borderless for the reason
+## `_adopt` gives: the engine paints its title band from Godot's default theme,
+## which a Control's theme cannot reach, and the band showed the pane behind it.
+## Unlike a modal, the engine has already built the picker's layout (one internal
+## `VBoxContainer` holding the path bar, the list and the name row), so the
+## header is inserted at the top of that column instead of a new column being
+## added: nothing of the picker's own controls moves, and inserting a child is
+## stable — measured on 4.7.2, the column is not rebuilt by `file_mode`,
+## `access`, a filter add or a re-popup.
+static func picker(parent: Node, title: String, file_mode := FileDialog.FILE_MODE_OPEN_FILE,
+		access := FileDialog.ACCESS_FILESYSTEM) -> FileDialog:
+	var dialog := FileDialog.new()
+	# The mode's setter renames the window ("Open a File", "Open a Directory"),
+	# so the caller's title is applied after it, not before.
+	dialog.file_mode = file_mode
+	dialog.access = access
+	dialog.title = title
+	parent.add_child(dialog)
+	dialog.borderless = true
+	# The engine's label is a second title that would sit in the content rect.
+	dialog.get_label().hide()
+	_attach_picker_header(dialog, title)
+	# One hook rather than a call at every site, for the reason `_adopt` gives,
+	# and the one moment a repair is safe: the header is a child of the engine's
+	# column, so a future engine that rebuilds it on show loses it, not the
+	# picker's layout.
+	dialog.about_to_popup.connect(func():
+		_attach_picker_header(dialog, title)
+		group_buttons(dialog))
+	return dialog
+
+## The picker's column: the engine's internal `VBoxContainer` (unnamed, so found
+## by type). Falls back to the column holding the path field, and gives up with
+## a warning rather than reparenting anything of the picker's.
+static func _picker_column(dialog: FileDialog) -> VBoxContainer:
+	for child in dialog.get_children(true):
+		if child is VBoxContainer and child.get_child_count() > 0:
+			return child as VBoxContainer
+	for node in dialog.find_children("*", "VBoxContainer", true, false):
+		var column := node as VBoxContainer
+		if not column.find_children("*", "LineEdit", true, false).is_empty():
+			return column
+	return null
+
+static func _attach_picker_header(dialog: FileDialog, title: String) -> void:
+	var column := _picker_column(dialog)
+	if column == null:
+		push_warning("AppDialog.picker: the picker's content column was not found; "
+			+ "the dialog stays borderless without a header")
+		return
+	if column.get_node_or_null(NodePath(HEADER_NAME)) != null:
+		return
+	var header := HBoxContainer.new()
+	header.name = HEADER_NAME
+	header.add_theme_constant_override("separation", UiTokens.SPACE_LG)
+	var heading := Label.new()
+	heading.name = TITLE_NAME
+	heading.text = title
+	heading.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
+	heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(heading)
+	# The engine's own cancel path, so `canceled` fires and a site's
+	# `queue_free` runs exactly as it does for the Cancel button.
+	var close := Button.new()
+	close.name = CLOSE_NAME
+	close.tooltip_text = "Close"
+	Icons.icon_button(close, Icons.CLOSE, "Close")
+	close.pressed.connect(func(): dialog.get_cancel_button().pressed.emit())
+	header.add_child(close)
+	column.add_child(header)
+	column.move_child(header, 0)
+	# The window's minimum size is computed from the picker's own content, which
+	# does not count a header this module added: without this the strip would
+	# overlap the path bar instead of sitting above it.
+	dialog.min_size.y += UiTokens.FS_HEADING + 2 * UiTokens.SPACE_SM
 
 ## Where a site puts its own controls. The dialog lays every direct child out
 ## over the same rect, so there is exactly one container and one shape.

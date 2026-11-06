@@ -1104,10 +1104,8 @@ func _open_workspace_cwd_dialog(idx: int):
 	if idx < 0 or idx >= _workspaces.size():
 		return
 	var ws: Dictionary = _workspaces[idx]
-	var dialog := FileDialog.new()
-	dialog.title = "Working directory for %s" % str(ws.get("name", ""))
-	dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
-	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	var dialog := AppDialog.picker(self, "Working directory for %s" % str(ws.get("name", "")),
+		FileDialog.FILE_MODE_OPEN_DIR)
 	var start := str(ws.get("cwd", ""))
 	if start == "":
 		start = OS.get_environment("HOME")
@@ -1126,7 +1124,6 @@ func _open_workspace_cwd_dialog(idx: int):
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)
-	add_child(dialog)
 	dialog.popup_centered_ratio(0.6)
 
 func _set_workspace_cwd(idx: int, dir: String):

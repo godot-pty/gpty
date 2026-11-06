@@ -59,3 +59,37 @@ func test_a_tree_with_no_reachable_control_answers_null():
 	var root := _row([Label.new(), HSeparator.new()])
 	assert_null(KeyboardFocus.first_reachable(root),
 		"an overlay with no focusable control has no entry point")
+
+
+## A ring caps a walk, so one start sees one ring — which is why an audit that
+## walked from one control reported 5 of the wiki state's 178 controls. The map
+## is every component, in the caller's order.
+func test_tab_components_maps_every_ring():
+	var a := Button.new()
+	var b := Button.new()
+	var c := Button.new()
+	var d := Button.new()
+	var e := Button.new()
+	_row([a, b, c, d, e])
+	KeyboardFocus.ring([a, b, c])
+	KeyboardFocus.ring([d, e])
+
+	var components := KeyboardFocus.tab_components([a, d])
+	assert_eq(components.size(), 2, "two rings are two components")
+	var first: Array = components[0]["controls"]
+	var second: Array = components[1]["controls"]
+	assert_eq(first.size(), 3, "the first ring is three stops")
+	assert_eq(second.size(), 2, "the second ring is two stops")
+	assert_true(components[0]["closed"], "a ring closes on its own first member")
+	assert_true(components[1]["closed"], "the second ring closes too")
+	assert_same(second[0], d, "components keep the caller's order")
+
+
+func test_tab_components_skips_members_a_component_already_claimed():
+	var a := Button.new()
+	var b := Button.new()
+	_row([a, b])
+	KeyboardFocus.ring([a, b])
+	var components := KeyboardFocus.tab_components([a, b, b])
+	assert_eq(components.size(), 1, "a second start inside the ring adds nothing")
+	assert_eq((components[0]["controls"] as Array).size(), 2)

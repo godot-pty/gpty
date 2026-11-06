@@ -13,19 +13,29 @@
 #      switch a desktop's assistive-technology setting throws);
 #   3. launches the app with `--accessibility always --accessibility-driver
 #      accesskit`, waits for the engine's `adapter created` line, then walks the
-#      registry's root with python-dbus and prints every node's name;
+#      registry's root with python-dbus and prints every node's name. The app
+#      publishes its elements while it builds, so the walk is repeated until the
+#      names below are all present (bounded: `REQUIRED_ATTEMPTS`), because a
+#      single sweep right after start-up can see a half-built tree;
 #   4. asserts the controls this repo named are in the tree and that the
-#      terminal pane publishes its visible grid as text;
+#      terminal pane publishes its visible grid as text, and prints a
+#      report-only `a11y-values:` line — the count of nodes that answer the
+#      `Text` and `Value` interfaces, whether the typed marker reached either,
+#      and every distinct role name. That line is how a newer engine is graded:
+#      it never gates the run;
 #   5. restores the switch and kills the app.
 #
 # What the tree looks like (measured on the 4.7.2 export, 2026-11-05):
 #   - the adapter implements the `Name` *property*, not the deprecated
 #     `GetName` method, and no role method: nodes are names here, not roles;
+#   - `AccessibilityServer.update_set_value`/`update_set_role` never reach the
+#     node, and a custom `Control` carries no `Text`/`Value` interface, so an
+#     element's value has no path to AT on this engine — hence the values line;
 #   - a `PaneBody` is a leaf — its own children are never published, so the
 #     terminal's content nodes live on the tile's title bar instead;
 #   - a Control's name is a snapshot taken when its element is created: later
 #     writes do not reach the adapter, so dynamic content is re-published as a
-#     fresh node (`A11y.publish`).
+#     fresh node (`A11y.publish`, which leaves an unchanged slot alone).
 #
 # The editor build on this distribution has no driver (measured 2026-10-31), so
 # the probe needs the export: run ./scripts/build first. It is deliberately not
@@ -131,12 +141,15 @@ export A11Y_ADDR
 A11Y_PYTHON_OUT="$(python3 <<'PY'
 import os
 import sys
+import time
 
 import dbus
 from dbus.exceptions import DBusException
 
 ACC = "org.a11y.atspi.Accessible"
 PROPS = "org.freedesktop.DBus.Properties"
+TEXT = "org.a11y.atspi.Text"
+VALUE = "org.a11y.atspi.Value"
 REG_DEST = "org.a11y.atspi.Registry"
 REG_PATH = "/org/a11y/atspi/accessible/root"
 ## Names this repo commits to. Substrings, because the engine appends a
@@ -151,6 +164,12 @@ REQUIRED = (
 )
 MAX_NODES = 1200
 MAX_DEPTH = 12
+## How many distinct role names the report line spells before it truncates.
+MAX_ROLES = 12
+## How many sweeps the walk gets while the app is still publishing its tree, and
+## how long it waits between them.
+REQUIRED_ATTEMPTS = 8
+RETRY_DELAY_S = 0.4
 
 
 def call(bus, dest, path, iface, method, signature="", args=()):
@@ -173,6 +192,28 @@ def name_of(dest, path):
         return str(call(bus, dest, path, PROPS, "Get", "ss", (ACC, "Name")))
     except DBusException:
         return ""
+
+
+def probe_interfaces(dest, path):
+    """What this node exposes beyond its name: text, a numeric value, a role.
+
+    `None` means the interface or method answered with an error (measured on
+    4.7.2: the adapter implements no role method); a string is an answer, even
+    an empty one. Report-only: this discovery never gates the run.
+    """
+    try:
+        text = str(call(bus, dest, path, TEXT, "GetText", "ii", (0, -1)))
+    except DBusException:
+        text = None
+    try:
+        value = str(call(bus, dest, path, PROPS, "Get", "ss", (VALUE, "CurrentValue")))
+    except DBusException:
+        value = None
+    try:
+        role = str(call(bus, dest, path, ACC, "GetRoleName"))
+    except DBusException:
+        role = None
+    return text, value, role
 
 
 def append_child(out, ref):
@@ -224,34 +265,75 @@ if not selected:
     )
     sys.exit(1)
 
-names = []
-queue = [(dest, path, 0) for _, dest, path in selected]
-seen = set()
-while queue and len(names) < MAX_NODES:
-    dest, path, depth = queue.pop(0)
-    if (dest, path) in seen:
-        continue
-    seen.add((dest, path))
-    names.append(name_of(dest, path))
-    if depth < MAX_DEPTH:
-        for child_dest, child_path in children_of(dest, path):
-            queue.append((child_dest, child_path, depth + 1))
+def walk_tree():
+    """One bounded sweep of the app's tree: names, interface answers, role names."""
+    names = []
+    text_nodes = 0
+    value_nodes = 0
+    roles = []
+    marker_in_value = False
+    queue = [(dest, path, 0) for _, dest, path in selected]
+    seen = set()
+    while queue and len(names) < MAX_NODES:
+        dest, path, depth = queue.pop(0)
+        if (dest, path) in seen:
+            continue
+        seen.add((dest, path))
+        names.append(name_of(dest, path))
+        text, value, role = probe_interfaces(dest, path)
+        if text is not None:
+            text_nodes += 1
+            marker_in_value = marker_in_value or "A11Y_PROBE_MARKER" in text
+        if value is not None:
+            value_nodes += 1
+            marker_in_value = marker_in_value or "A11Y_PROBE_MARKER" in value
+        if role and role not in roles:
+            roles.append(role)
+        if depth < MAX_DEPTH:
+            for child_dest, child_path in children_of(dest, path):
+                queue.append((child_dest, child_path, depth + 1))
+    return names, text_nodes, value_nodes, roles, marker_in_value
+
+
+# The app publishes its elements while it builds, so the first sweep after the
+# adapter appears can catch a half-built tree (measured: 14 of 79 nodes on a
+# cold start). Re-sweep until every name this repo commits to is there, bounded
+# so a real regression still fails fast instead of hanging.
+attempt = 0
+while True:
+    names, text_nodes, value_nodes, roles, marker_in_value = walk_tree()
+    joined = "\n".join(names)
+    attempt += 1
+    if all(required in joined for required in REQUIRED) and "A11Y_PROBE_MARKER" in joined:
+        break
+    if attempt >= REQUIRED_ATTEMPTS:
+        break
+    time.sleep(RETRY_DELAY_S)
 
 for name in names:
     if name:
         print("a11y: %s" % name.replace("\n", " | ")[:200])
 
-joined = "\n".join(names)
+# The element-value answer, measured rather than asserted: how a newer engine
+# is graded in one command (see the header).
+roles_text = ", ".join(roles[:MAX_ROLES]) if roles else "-"
+if len(roles) > MAX_ROLES:
+    roles_text += ", ..."
+print(
+    "a11y-values: text-interfaces=%d value-interfaces=%d marker-in-value=%s role-names=%s"
+    % (text_nodes, value_nodes, "yes" if marker_in_value else "no", roles_text)
+)
+
 missing = [required for required in REQUIRED if required not in joined]
 if missing:
     print("a11y-fail: names missing from the tree: %s" % ", ".join(missing))
     sys.exit(1)
 # The visible grid is published as a text node on the pane's title bar, so its
 # name is the whole screen and carries the marker the probe typed into it.
-if not any("A11Y_PROBE_MARKER" in name for name in names):
+if "A11Y_PROBE_MARKER" not in joined:
     print("a11y-fail: no published terminal text (a name carrying A11Y_PROBE_MARKER)")
     sys.exit(1)
-print("a11y-probe: asserted %d nodes" % len(names))
+print("a11y-probe: asserted %d nodes after %d sweep(s)" % (len(names), attempt))
 PY
 )" || { echo "$A11Y_PYTHON_OUT"; exit 1; }
 echo "$A11Y_PYTHON_OUT"

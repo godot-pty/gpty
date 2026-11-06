@@ -80,6 +80,28 @@ func test_publish_ignores_empty_text():
 	assert_eq(host.get_child_count(), 0)
 
 
+## A reader holds the node it was given. Republishing the same line must not
+## take it away (an idle pane's tick would churn it once a second).
+func test_publish_leaves_an_unchanged_slot_alone():
+	var host := Control.new()
+	add_child_autofree(host)
+	var first := A11y.publish(host, "A11yLive", "same line", A11y.LIVE_POLITE)
+	var second := A11y.publish(host, "A11yLive", "same line", A11y.LIVE_POLITE)
+	assert_same(second, first, "an unchanged slot is the same element")
+	assert_eq(host.get_child_count(), 1)
+	assert_false(first.is_queued_for_deletion(), "the node AT reads must stay alive")
+
+
+func test_publish_replaces_when_the_live_mode_changes():
+	var host := Control.new()
+	add_child_autofree(host)
+	var first := A11y.publish(host, "A11yLive", "same line", A11y.LIVE_POLITE)
+	var second := A11y.publish(host, "A11yLive", "same line", A11y.LIVE_OFF)
+	assert_ne(second, first, "a different live mode is a different element")
+	assert_eq(second.accessibility_live, A11y.LIVE_OFF)
+	assert_eq(host.get_child_count(), 1, "the slot still holds one node")
+
+
 func test_set_value_records_the_value_without_a_driver():
 	var control := Control.new()
 	add_child_autofree(control)
@@ -136,17 +158,19 @@ func test_terminal_exposes_its_visible_grid():
 
 ## Every glyph-only button in the workspace must carry a word. Godot names a
 ## Button from its text before its tooltip, and each glyph here is a
-## private-use codepoint, so an unnamed one is read aloud as a codepoint.
+## private-use codepoint drawn by a child Label, so an unnamed button is read
+## aloud as a codepoint.
 func test_every_glyph_button_has_an_accessible_name():
 	var ws = await _make_workspace()
 	var checked := 0
 	for button in _all_buttons(ws):
-		if not _is_glyph(button.text):
+		var glyph := Icons.glyph(button)
+		if glyph == "":
 			continue
 		checked += 1
 		assert_ne(button.accessibility_name, "",
 			"glyph button %s has no accessible name" % _short_path(ws, button))
-		assert_ne(button.accessibility_name, button.text,
+		assert_ne(button.accessibility_name, glyph,
 			"glyph button %s is named by its codepoint" % _short_path(ws, button))
 	assert_gt(checked, 0, "the sweep must actually find the chrome's glyph buttons")
 
@@ -184,13 +208,6 @@ func _all_buttons(node: Node) -> Array[Button]:
 	for child in node.get_children():
 		out.append_array(_all_buttons(child))
 	return out
-
-
-func _is_glyph(text: String) -> bool:
-	if text.length() != 1:
-		return false
-	var c := text.unicode_at(0)
-	return c >= 0xE000 and c <= 0xF8FF
 
 
 func _short_path(root: Node, node: Node) -> String:

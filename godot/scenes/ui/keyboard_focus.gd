@@ -69,3 +69,38 @@ static func first_reachable(root: Control) -> Control:
 		if nested != null:
 			return nested
 	return null
+
+## The keyboard traversal of `controls`, grouped into the components
+## `find_next_valid_focus` forms: `[{"controls": Array, "closed": bool}, …]`, in
+## the order each component's first member appears in `controls`.
+##
+## `closed` is true when the walk returned to its own first member — an explicit
+## ring, which is what `ring` builds — and false when it ran into a member
+## another component already claimed, or into nothing. One walk from one start
+## therefore sees at most one ring, which is why an audit built that way
+## reported 5 of the wiki state's 178 controls; this is the whole map.
+static func tab_components(controls: Array) -> Array:
+	var seen := {}
+	var components := []
+	for control in controls:
+		var start := control as Control
+		if start == null or not start.is_inside_tree() or seen.has(start):
+			continue
+		var component := []
+		var cur := start
+		var closed := false
+		# A component cannot be longer than the list it came from.
+		for _i in controls.size() + 1:
+			component.append(cur)
+			seen[cur] = true
+			var nxt := cur.find_next_valid_focus()
+			if nxt == null or not nxt.is_inside_tree():
+				break
+			if nxt == start:
+				closed = true
+				break
+			if seen.has(nxt):
+				break
+			cur = nxt
+		components.append({"controls": component, "closed": closed})
+	return components
