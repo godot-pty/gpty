@@ -6,15 +6,21 @@
 # with the gpty CLI exactly the way an agent would, records the app window with
 # ffmpeg, then burns captions in and writes a GIF, an MP4 and a WebM.
 #
-# Usage: scripts/record-demo <hero|tour> [out-dir]
+# Usage: scripts/record-demo <showcase|panes|agents|concepts|wiki|media|cli-view> [out-dir]
 #   out-dir defaults to docs/static/images; files are demo-<scenario>.{gif,mp4,webm}
+#
+# One scenario is one workflow, and every action in it is a `gpty` call a reader
+# can repeat: no synthetic input, no staged screenshot. `showcase` is the single
+# clip the README always shows; the rest pair with one feature section each.
 #
 # Build first: `cargo build --workspace` (the GUI loads the debug GDExtension and the
 # panes use target/debug/gpty). Override the GUI command with DEMO_APP.
 #
 # Env: DEMO_FONT=22       font size (large enough to read at GIF width)
 #      DEMO_SIZE=1280x760  window size        DEMO_FPS=15   capture frame rate
-#      GIF_WIDTH=1000      GIF width          GIF_FPS=12    GIF frame rate
+#      GIF_WIDTH=1000      showcase GIF width  GIF_FPS=12   showcase GIF frame rate
+#      GIF_WIDTH_OVERRIDE  GIF width for the feature clips (default 900)
+#      GIF_FPS_OVERRIDE    GIF frame rate for the feature clips (default 10)
 #      DEMO_KEEP=1         keep the raw capture and cue files next to the output
 #
 # Requires: ffmpeg (x11grab, drawtext), python3 + python-xlib, git, a graphical
@@ -25,14 +31,23 @@
 set -euo pipefail
 export LC_ALL=C
 
-SCENARIO="${1:?usage: record-demo <hero|tour> [out-dir]}"
+SCENARIO="${1:?usage: record-demo <showcase|panes|agents|concepts|wiki|media|cli-view> [out-dir]}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${2:-$ROOT/docs/static/images}"
 SIZE="${DEMO_SIZE:-1280x760}"
 FPS="${DEMO_FPS:-15}"
 GIF_WIDTH="${GIF_WIDTH:-1000}"
 GIF_FPS="${GIF_FPS:-12}"
-case "$SCENARIO" in hero | tour) ;; *) echo "scenario must be hero or tour" >&2; exit 2 ;; esac
+case "$SCENARIO" in
+    showcase | panes | agents | concepts | wiki | media | cli-view) ;;
+    *) echo "scenario must be one of: showcase panes agents concepts wiki media cli-view" >&2; exit 2 ;;
+esac
+# The README shows the showcase clip at full width; a feature clip rides inside
+# an expanded section, so it can be smaller and cheaper.
+if [[ "$SCENARIO" != showcase ]]; then
+    GIF_WIDTH="${GIF_WIDTH_OVERRIDE:-900}"
+    GIF_FPS="${GIF_FPS_OVERRIDE:-10}"
+fi
 
 for tool in ffmpeg python3 git; do
     command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 3; }
@@ -79,8 +94,10 @@ sed -i "s#__ROOT__#$ROOT#; s#__SOCK__#$GPTY_SOCKET#" "$HOME/.bashrc"
     git commit -q --allow-empty -m "add CI workflow"
     git commit -q --allow-empty -m "release 0.1"
 )
-if [[ "$SCENARIO" == tour ]]; then
-    ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=640x360:rate=24" \
+if [[ "$SCENARIO" == media ]]; then
+    # `testsrc` (not testsrc2): static colour bars with one moving box and a
+    # running timer, so the clip proves playback while the GIF stays small.
+    ffmpeg -loglevel error -y -f lavfi -i "testsrc=size=640x360:rate=24" \
         -f lavfi -i "sine=frequency=330:sample_rate=48000" -t 30 \
         -c:v libx264 -pix_fmt yuv420p -c:a aac "$HOME/clip.mp4"
 fi
@@ -94,23 +111,53 @@ home, scenario = os.environ["HOME_DIR"], os.environ["SCENARIO"]
 FONT = int(os.environ.get("DEMO_FONT", "22"))  # large enough to read at GIF width
 def tile(col, row, cspan, rspan, **settings):
     return {"col": col, "row": row, "cspan": cspan, "rspan": rspan, "settings": settings}
-if scenario == "hero":
-    layout = [
-        tile(0, 0, 33, 60, type="terminal", pane_name="agent", font_size=FONT),
-        tile(33, 0, 27, 60, type="code_viewer", pane_name="viewer", font_size=FONT),
-    ]
-else:
-    layout = [
-        tile(0, 0, 32, 60, type="wiki", pane_name="notes", vault_path=home + "/vault", open_note="index.md", graph=True, font_size=FONT),
-        tile(32, 0, 28, 34, type="media", pane_name="clip", file_path=home + "/clip.mp4", loop=True),
-        tile(32, 34, 28, 26, type="terminal", pane_name="agent", font_size=FONT),
-    ]
+
+# Each grid is 60 columns by 60 rows of `grid_unit`. The tiles named below carry
+# only keys from that pane type's closed settings table (pane_types.gd).
+LAYOUTS = {
+    "showcase": [
+        tile(0, 0, 32, 60, type="terminal", pane_name="agent", font_size=FONT),
+        tile(32, 0, 28, 60, type="code_viewer", pane_name="viewer", font_size=FONT),
+    ],
+    "panes": [
+        tile(0, 0, 60, 60, type="terminal", pane_name="agent", font_size=FONT),
+    ],
+    "agents": [
+        tile(0, 0, 60, 60, type="terminal", pane_name="agent", font_size=FONT),
+    ],
+    "concepts": [
+        tile(0, 0, 32, 60, type="terminal", pane_name="agent", font_size=FONT),
+        tile(32, 0, 28, 60, type="code_viewer", pane_name="viewer", font_size=FONT),
+    ],
+    "wiki": [
+        tile(0, 0, 26, 60, type="terminal", pane_name="agent", font_size=FONT),
+        tile(26, 0, 34, 30, type="wiki", pane_name="notes", vault_path=home + "/vault",
+             open_note="index.md", view_mode="split", font_size=FONT),
+        tile(26, 30, 34, 30, type="wiki", pane_name="graph", vault_path=home + "/vault",
+             graph=True, font_size=FONT),
+    ],
+    "media": [
+        tile(0, 0, 36, 60, type="media", pane_name="clip", file_path=home + "/clip.mp4", loop=True),
+        tile(36, 0, 24, 60, type="terminal", pane_name="agent", font_size=FONT),
+    ],
+    "cli-view": [
+        tile(0, 0, 60, 60, type="terminal", pane_name="agent", font_size=FONT),
+    ],
+}
+layout = LAYOUTS[scenario]
 print(json.dumps({"version": 1, "active": 0,
                   "workspaces": [{"name": "demo", "layout": layout, "grid_unit": 60}]}))
 PY
 
 # The terminal font comes from the global setting at spawn, not from the tile.
 printf '{"font_size": %s}\n' "${DEMO_FONT:-22}" >"$DATA_DIR/settings.json"
+
+# The vault verbs answer only inside a registered root, and the pane settings UI
+# is the registry's only writer (a restored layout cannot register one), so seed
+# what a user produces by opening this vault once. Sandbox only.
+if [[ "$SCENARIO" == wiki ]]; then
+    printf '{"roots": ["%s"]}\n' "$HOME/vault" >"$DATA_DIR/vaults.json"
+fi
 
 # ── launch ───────────────────────────────────────────────────────────────
 APP_CMD="${DEMO_APP:-godot --path $ROOT/godot --display-driver x11 --windowed --resolution $SIZE}"
@@ -181,21 +228,28 @@ for p in panes:
         print(p.get("label") or p.get("id")); break
 ' "$1"
 }
+json_label() { # json_label -> the `label` of a `--json` command result
+    python3 -c 'import json,sys; d=json.load(sys.stdin); r=d.get("result", d); print(r.get("label",""))'
+}
 type_line() { gpty inject "$AGENT" --text "$1" >/dev/null; }
+inject_into() { gpty inject "$1" --text "$2" >/dev/null; }
 
 sleep 1.5
+# Resolve the pane this script types into before any cue spawns another terminal:
+# a later spawn would otherwise move "the first terminal" out from under the run.
 AGENT="$(label_of terminal)"
 [[ -n "$AGENT" ]] || { echo "no terminal pane found; pane list:" >&2; gpty list-panes >&2; exit 5; }
 
-if [[ "$SCENARIO" == hero ]]; then
-    caption "A tiling grid of real terminals"
+case "$SCENARIO" in
+showcase)
+    caption "A tiling grid of real PTY panes"
     sleep 2.5
-    caption "Concepts route a command's output into a viewer pane"
+    caption "A concept captures a command's output into the adjacent pane"
     type_line "cat src/main.rs"
     sleep 5
     type_line "clear"
     sleep 0.8
-    caption "Any script or agent can drive panes: same API for the CLI, JSON-RPC and MCP"
+    caption "One control API: the CLI, JSON-RPC and MCP drive the same panes"
     type_line "gpty pane-run --command 'for i in 1 2 3 4 5; do echo \"compiling step \$i\"; sleep 1; done; echo BUILD OK'"
     sleep 2.5
     BUILD="$(gpty list-panes --json | python3 -c '
@@ -203,25 +257,106 @@ import json, sys
 d = json.load(sys.stdin); r = d.get("result", d)
 ps = r.get("panes", r) if isinstance(r, dict) else r
 print(next((p.get("label") or p.get("id") for p in ps if (p.get("type") or p.get("pane_type")) == "terminal" and (p.get("label") or p.get("id")) != sys.argv[1]), ""))' "$AGENT")"
-    caption "Wait for output instead of guessing, then check the exit status"
+    caption "Wait on output instead of guessing, then read the pane status"
     type_line "gpty pane-wait $BUILD --pattern 'BUILD OK' --timeout-ms 20000 && gpty pane-status $BUILD"
     sleep 6
     caption "Stream any command into its own pane"
-    type_line "gpty new-pane -t cli_view -c git --arg log --arg=--oneline --title history"
+    type_line "gpty new-pane -t cli_view -c git --arg=-C --arg \"\$HOME\" --arg log --arg=--oneline --arg=-5 --title history"
     sleep 4
     caption "gPTY - github.com/godot-pty/gpty"
     sleep 2.5
-else
-    caption "A local knowledge base: Markdown notes and the link graph between them"
-    sleep 5.5
-    caption "Audio and video play in a pane, next to your terminal"
-    sleep 5
-    caption "Agents search the same vault through the CLI and MCP"
-    type_line "gpty vault search $HOME/vault agent"
+    ;;
+panes)
+    caption "One shell, and a grid that splits on demand"
+    sleep 2.5
+    caption "A second shell splits in beside it"
+    FILES="$(gpty new-pane -t terminal --title files --split right --json | json_label)"
+    sleep 2.5
+    inject_into "$FILES" "ls"
+    sleep 2
+    caption "and a third below"
+    LOG="$(gpty new-pane -t terminal --title log --split bottom --json | json_label)"
+    sleep 2.5
+    inject_into "$LOG" "git log --oneline --graph"
+    sleep 3
+    caption "Close one; the grid reflows"
+    type_line "gpty kill-pane active"
+    sleep 2.5
+    caption "gPTY - github.com/godot-pty/gpty"
+    sleep 2
+    ;;
+agents)
+    caption "Spawn panes from a script and tag them"
+    A="$(gpty new-pane -t terminal --title build-a --tags build --split right --json | json_label)"
+    sleep 2.5
+    B="$(gpty new-pane -t terminal --title build-b --tags build --split bottom --json | json_label)"
+    sleep 2.5
+    caption "One broadcast reaches every tagged pane"
+    type_line "gpty broadcast --tags build --text 'for i in 1 2 3; do echo \"job \$i\"; sleep 1; done'"
+    sleep 4.5
+    caption "An agent declares its own state from inside its pane"
+    inject_into "$A" "gpty state working"
+    sleep 3
+    caption "failed and needs-attention are different glyphs, not just colours"
+    inject_into "$B" "gpty state failed"
+    sleep 1.5
+    inject_into "$A" "gpty state needs-attention"
+    sleep 3
+    caption "The same state is readable over the API"
+    type_line "gpty pane-status"
+    sleep 3.5
+    caption "gPTY - github.com/godot-pty/gpty"
+    sleep 2
+    ;;
+concepts)
+    caption "Regex triggers watch a command's output"
+    sleep 2.5
+    type_line "gpty concept list"
+    sleep 3
+    caption "Enable one from the CLI"
+    type_line "gpty concept toggle git_diff"
+    sleep 2.5
+    caption "The trigger captures the reply into the adjacent pane"
+    type_line "echo '// demo change' >> src/main.rs"
+    sleep 1.2
+    type_line "git diff"
     sleep 5
     caption "gPTY - github.com/godot-pty/gpty"
+    sleep 2
+    ;;
+wiki)
+    caption "Plain Markdown notes: preview, backlinks and the graph"
+    sleep 3
+    caption "The CLI searches the vault the panes show"
+    type_line "gpty vault search \$HOME/vault agent"
+    sleep 4
+    caption "and reads a note back by path"
+    type_line "gpty vault read \$HOME/vault agents.md"
+    sleep 4
+    caption "gPTY - github.com/godot-pty/gpty"
+    sleep 2
+    ;;
+media)
+    caption "Audio and video play in a pane, through a pinned FFmpeg"
+    sleep 5
+    caption "The terminal beside it keeps working"
+    type_line "git log --oneline"
+    sleep 3
+    caption "gPTY - github.com/godot-pty/gpty"
+    sleep 2
+    ;;
+cli-view)
+    caption "Stream any command's output into its own pane"
     sleep 2.5
-fi
+    type_line "gpty new-pane -t cli_view -c git --arg=-C --arg \"\$HOME\" --arg log --arg=--oneline --arg=-5 --title history"
+    sleep 4
+    caption "argv, not a shell string: the pane runs the program directly"
+    type_line "gpty new-pane -t cli_view -c git --arg=-C --arg \"\$HOME\" --arg show --arg=--stat --arg=--oneline --arg=HEAD~3 --title last-commit --split right"
+    sleep 4
+    caption "gPTY - github.com/godot-pty/gpty"
+    sleep 2
+    ;;
+esac
 cue_end
 kill -INT "$REC_PID" 2>/dev/null || true
 wait "$REC_PID" 2>/dev/null || true

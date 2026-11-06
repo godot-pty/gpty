@@ -12,22 +12,64 @@
 
 [gPTY](https://gpty.dev/) - a desktop workspace built on Rust and Godot. It provides a tiling grid for panes (terminals, code viewers, file trees, wikis, media, and more), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI. Every pane can be driven from a shell, a script, or an agent over one public API. It is a side project in active development and a vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using various LLMs under human review; and as such, the underlying code may contain unidiomatic patterns and/or bugs. It *does not* follow the core UNIX philosophy very well, as in, it does aim to do several things; though it does also intend to do them all well.
 
-![A script drives gPTY: cat routes into a viewer pane, pane-run opens a build pane, pane-wait blocks on its output, new-pane streams git log](docs/static/images/demo-hero.gif)
+![A script drives gPTY: a concept routes cat into a viewer pane, pane-run opens a build pane, pane-wait blocks on its output, and cli_view streams git log](docs/static/images/demo-showcase.gif)
 
 ### Features
 
 **Panes**
 
+<details>
+<summary>Watch: the pane grid split and reflow</summary>
+
+![Two more shells split in beside the first, then one closes and the grid reflows](docs/static/images/demo-panes.gif)
+
+</details>
+
 - **Tiling grid** - split, resize, and rearrange independent shell sessions; save and reload named layouts, workspaces (tab sets), and profiles.
 - **Emulation** - `alacritty_terminal` grid with `16`/`256`/`true color`, scrollback with regex search, and wrapped text selection.
 - **Memory** - scrollback, settings, and workspaces restore on restart, with full-text search across each pane's history.
 - **File Tree** - Native Godot OS file tree browser.
-- **Code Viewer** - Text and Markdown rendered
-- **Wiki** - a vault of plain Markdown notes with full-text search, a live-preview editor, `[[wikilinks]]`, backlinks, and a link graph, reopened where you left off. The shipped **Knowledge Base** profile opens the bundled wiki inside a release. [Watch the panes tour](docs/static/images/demo-tour.mp4).
+- **Code Viewer** - Text and Markdown rendered in a pane.
+- **Wiki** - a vault of plain Markdown notes with full-text search, a live-preview editor, `[[wikilinks]]`, backlinks, and a link graph, reopened where you left off. The shipped **Knowledge Base** profile opens the bundled wiki inside a release.
 - **Media** - play local audio and video in a pane through a pinned, minimal FFmpeg backend (v0.7).
 - **`cli_view`** - stream any command's output into a pane, so a plugin can add UI without a Godot SDK.
 
+<details>
+<summary>Watch: the wiki vault, its link graph and a CLI search</summary>
+
+![The wiki pane, the link graph, and a vault search over the same notes](docs/static/images/demo-wiki.gif)
+
+</details>
+
+<details>
+<summary>Watch: audio and video in a pane</summary>
+
+![A video clip playing in a media pane beside a terminal](docs/static/images/demo-media.gif)
+
+</details>
+
+<details>
+<summary>Watch: a command streamed into its own pane</summary>
+
+![Two cli_view panes streaming git log and git status](docs/static/images/demo-cli-view.gif)
+
+</details>
+
 **Agents & Automation**
+
+<details>
+<summary>Watch: tagged panes, one broadcast and agent state badges</summary>
+
+![Two tagged panes run the same broadcast, then declare working and failed](docs/static/images/demo-agents.gif)
+
+</details>
+
+<details>
+<summary>Watch: a concept routing output into the adjacent pane</summary>
+
+![A concept routing git log output into a code viewer](docs/static/images/demo-concepts.gif)
+
+</details>
 
 - **One API, three doors** - the same operations are available as a JSON-RPC socket, the `gpty` CLI, and an MCP server: spawn panes, inject input, read output, run a command and wait for a pattern, broadcast to tagged panes. The server is listed in the [official MCP registry](https://registry.modelcontextprotocol.io/?search=gpty) as `io.github.godot-pty/gpty`.
 - **Agent state badges** - an agent declares `working` or `needs attention` from its own pane and the tab shows it. Display only.
