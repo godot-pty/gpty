@@ -354,9 +354,15 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 				return false
 			await _click(dir_button)
 			await _wait_frames(3)
-			if _visible_dialog(_workspace) == null:
+			var picker := _visible_dialog(_workspace) as FileDialog
+			if picker == null:
 				_fail("clicking the workspace directory did not open a picker")
 				return false
+			# A fixed directory: the picker opens in the sandbox's HOME, whose
+			# per-run path made two captures differ in the path field. The root
+			# listing is the same on both runs of one machine.
+			picker.current_dir = "/"
+			await _wait_frames(3)
 		"pane-settings":
 			var wrapper: Control = _workspace._tm.tiles[0].wrapper
 			var button := _button_with_tooltip(wrapper, "Pane settings")
