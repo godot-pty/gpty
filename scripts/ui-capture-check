@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prove the UI capture harness is deterministic and its diffs are local.
 #
-# Usage: scripts/ui-capture-check [--keep <dir>] [state...]
+# Usage: scripts/ui-capture-check [--keep <dir>] [--perturb <state>] [state...]
 #
 # For every state: capture it twice in separate sandboxes and require the two
 # PNGs to be pixel-identical. Then capture every state once more with one
@@ -9,6 +9,11 @@
 # state's image to differ. The second half is what makes the first half
 # useful: a diff local to one state means captures do not leak state into one
 # another, so an audit diff can be attributed to a real UI change.
+#
+# The perturb target defaults to `settings` when the state list has it, else
+# the first named state, so a subset works without the caller knowing this
+# rule. A state with nothing to shift (no overlay, no pane) cannot be the
+# target: the harness refuses it rather than reporting a non-local diff.
 #
 # The state list comes from the harness (`scripts/ui-capture --list`), so a
 # new state is covered without a second list.
@@ -20,7 +25,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CAPTURE="$ROOT/scripts/ui-capture"
-PERTURB=settings
+PERTURB=""
 KEEP=""
 
 while [[ $# -gt 0 ]]; do
@@ -51,6 +56,16 @@ else
     mapfile -t STATES < <("$CAPTURE" --list)
 fi
 [[ ${#STATES[@]} -gt 0 ]] || { echo "ui-capture-check: no states" >&2; exit 2; }
+
+# The locality half needs one state to shift. Prefer `settings` (what the full
+# run has always perturbed), and fall back to the first named state so a subset
+# works without the caller having to know this rule.
+if [[ -z "$PERTURB" ]]; then
+    PERTURB="${STATES[0]}"
+    for state in "${STATES[@]}"; do
+        [[ "$state" == settings ]] && PERTURB=settings
+    done
+fi
 
 found=false
 for state in "${STATES[@]}"; do
@@ -108,8 +123,11 @@ for state in "${STATES[@]}"; do
 done
 
 echo "== perturbing '$PERTURB' must change exactly that state's image"
+perturbed=0
 for state in "${STATES[@]}"; do
-    if ! capture "$state" "$WORK/perturbed" --perturb "$PERTURB"; then
+    if capture "$state" "$WORK/perturbed" --perturb "$PERTURB"; then
+        perturbed=$((perturbed + 1))
+    else
         fail "$state did not capture (perturbed)"
     fi
 done
@@ -122,6 +140,10 @@ for state in "${STATES[@]}"; do
 done
 if [[ "${differing[*]:-}" == "$PERTURB" ]]; then
     echo "  PASS only '$PERTURB' changed"
+elif [[ $perturbed -eq 0 ]]; then
+    # Every perturbed capture failed and said why; a diff verdict would only
+    # restate it as "the harness is not capturing it", which names the wrong cause.
+    fail "no perturbed capture produced an image (see the cause above)"
 elif [[ ${#differing[@]} -eq 0 ]]; then
     fail "the perturbed control changed no image — the harness is not capturing it"
 else

@@ -239,7 +239,7 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 		return
 
 	if args.get("perturb", "") == state_name:
-		_perturb()
+		_perturb(state_name)
 
 	await _wait_toasts()
 	await _settle()
@@ -506,7 +506,7 @@ func _apply_agent_states(states: Array) -> bool:
 	return true
 
 ## Shift the one control that only this state shows, so a diff is attributable.
-func _perturb() -> void:
+func _perturb(state_name: String) -> void:
 	var target: Control = null
 	if _workspace._settings_panel != null and _workspace._settings_panel.visible:
 		target = _workspace._settings_panel
@@ -519,6 +519,8 @@ func _perturb() -> void:
 	if target != null:
 		target.offset_left += 16.0
 		print("ui_capture: perturbed %s by 16 px" % target.name)
+	else:
+		_fail("state '%s' has no overlay or pane to perturb" % state_name)
 
 
 # ── Input ──────────────────────────────────────────────────────────────
