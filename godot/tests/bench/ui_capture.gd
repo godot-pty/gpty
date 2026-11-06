@@ -27,7 +27,8 @@ extends SceneTree
 ##                      pane) by 16 px; `scripts/ui-capture-check` uses it to
 ##                      prove a capture diff is local to one state
 ##   --audit-focus      stage the state, print what keyboard traversal can
-##                      reach (focus owner, tab order, focus-none controls)
+##                      reach (focus owner, every traversal component, the
+##                      components/rings/reached totals, focus-none controls)
 ##                      and exit; `scripts/ui-capture --audit-focus <state>`
 ##   --audit-accessibility
 ##                      stage the state, print the accessible surface (names,
@@ -698,10 +699,12 @@ func _is_terminal(body) -> bool:
 
 ## Print what keyboard traversal reaches in the staged state: who owns focus,
 ## which visible controls are focusable, which interactive controls are
-## FOCUS_NONE (mouse-only), and the Tab order from the first one. The audit's
-## evidence is this output, not a judgement — a mouse-only control is a
-## defect only when its action has no keyboard path (the palette's shortcut,
-## a terminal's own input) is considered by the reader.
+## FOCUS_NONE (mouse-only), and every traversal component — the first as
+## `tab-order`, the rest as `ring[n]` (closed) or `flow[n]` (runs into a claimed
+## control), plus the totals. The audit's evidence is this output, not a
+## judgement — a mouse-only control is a defect only when its action has no
+## keyboard path (the palette's shortcut, a terminal's own input) is considered
+## by the reader.
 func _audit_focus(state_name: String) -> void:
 	print("focus-audit: state=%s" % state_name)
 	var owner: Control = _workspace.get_viewport().gui_get_focus_owner()
@@ -746,25 +749,34 @@ func _audit_focus(state_name: String) -> void:
 			% [button.text, button.tooltip_text, _short_path(button)])
 	for canvas in canvases:
 		print("focus-audit: mouse-only canvas path=%s" % _short_path(canvas))
-	var chain: Array[String] = []
-	var cur: Control = null
+	# Every component, not just the one ring a single start sits inside: a
+	# `focus_next` ring caps a walk, so walking from one control reported 5 of
+	# this state's 178 controls. The focus owner goes first, so `tab-order` is
+	# still the component the keyboard starts in.
+	var ordered: Array[Control] = []
 	if owner != null and is_instance_valid(owner) and owner.is_visible_in_tree():
-		cur = owner
-	else:
-		for c in focusable:
-			if c.is_visible_in_tree():
-				cur = c
-				break
-	if cur != null:
-		cur.grab_focus()
-		var first := cur
-		for _i in 100:
-			chain.append(_short_path(cur))
-			var nxt := cur.find_next_valid_focus()
-			if nxt == null or nxt == first:
-				break
-			cur = nxt
-		print("focus-audit: tab-order=%s" % ", ".join(chain))
+		ordered.append(owner)
+	for c in focusable:
+		if c.is_visible_in_tree() and not ordered.has(c):
+			ordered.append(c)
+	var components := KeyboardFocus.tab_components(ordered)
+	var reached := 0
+	var rings := 0
+	for index in components.size():
+		var component: Array = components[index]["controls"]
+		var closed: bool = components[index]["closed"]
+		reached += component.size()
+		if closed:
+			rings += 1
+		var paths: Array[String] = []
+		for c in component:
+			paths.append(_short_path(c))
+		var key := "tab-order"
+		if index > 0:
+			key = "ring[%d]" % index if closed else "flow[%d]" % index
+		print("focus-audit: %s=%s" % [key, ", ".join(paths)])
+	print("focus-audit: components=%d rings=%d reached=%d"
+		% [components.size(), rings, reached])
 
 ## Print the accessible surface the staged state exposes: every Control that
 ## carries a name, a description, a live mode or a recorded value, the count of
