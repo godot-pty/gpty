@@ -35,7 +35,7 @@ Only `title` and `date`. Slug is the kebab-case of the title's claim. A future `
 ## Images and video
 
 - Story posts have been text-only. Add a capture only when it explains something prose cannot; capture it with `skill://gpty-ui-review` and reference it as `![…](/images/<file>.png)` — `docs-check` fails when the file is missing under `docs/static/images/`.
-- Clips go through the shortcode because raw HTML is disabled in Markdown: `{{< video "demo-hero" >}}` plays `docs/static/images/demo-hero.{webm,mp4}`.
+- Clips go through the shortcode: `{{< video "demo-showcase" >}}` plays `docs/static/images/demo-showcase.{webm,mp4}`. Every set is `scripts/record-demo <scenario>`; keep to the same codec pair so the `<source>` list stays valid.
 - Never put an image inside a table row (`docs-check` rejects it).
 
 ## Verify

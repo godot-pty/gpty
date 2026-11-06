@@ -12,6 +12,11 @@ signed tags, a dependency policy, fuzzing, and a test gate that now says which t
 
 ![Screenshot](/images/v0.7.2_1.png)
 
+The panes tour recorded during the 0.7 cycle - the bundled vault, its link graph, playback in a
+pane, and a vault search over the CLI:
+
+{{< video "demo-tour" >}}
+
 **The Knowledge Base profile opens again.** A v0.7.1 install seeded its 52 bundled notes and then
 listed nothing. The store's root was `user://knowledge/<hash>`, and the Rust vault index refused it
 with "not an absolute path", because no Godot scheme survives into `std::path`. The fallback that

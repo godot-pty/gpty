@@ -56,3 +56,11 @@ params:
 # SECURITY.md (mirrored into /docs/security/) uses :white_check_mark: / :x: in
 # its tables; GitHub renders them, so the site must too.
 enableEmoji: true
+
+# The README mirror at /docs/overview/ carries raw HTML blocks (the centred
+# badge row, the <details> clip wrappers). All site content is authored in this
+# repository; goldmark otherwise replaces each block with "raw HTML omitted".
+markup:
+  goldmark:
+    renderer:
+      unsafe: true
