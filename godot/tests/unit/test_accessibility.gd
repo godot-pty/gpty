@@ -80,6 +80,28 @@ func test_publish_ignores_empty_text():
 	assert_eq(host.get_child_count(), 0)
 
 
+## A reader holds the node it was given. Republishing the same line must not
+## take it away (an idle pane's tick would churn it once a second).
+func test_publish_leaves_an_unchanged_slot_alone():
+	var host := Control.new()
+	add_child_autofree(host)
+	var first := A11y.publish(host, "A11yLive", "same line", A11y.LIVE_POLITE)
+	var second := A11y.publish(host, "A11yLive", "same line", A11y.LIVE_POLITE)
+	assert_same(second, first, "an unchanged slot is the same element")
+	assert_eq(host.get_child_count(), 1)
+	assert_false(first.is_queued_for_deletion(), "the node AT reads must stay alive")
+
+
+func test_publish_replaces_when_the_live_mode_changes():
+	var host := Control.new()
+	add_child_autofree(host)
+	var first := A11y.publish(host, "A11yLive", "same line", A11y.LIVE_POLITE)
+	var second := A11y.publish(host, "A11yLive", "same line", A11y.LIVE_OFF)
+	assert_ne(second, first, "a different live mode is a different element")
+	assert_eq(second.accessibility_live, A11y.LIVE_OFF)
+	assert_eq(host.get_child_count(), 1, "the slot still holds one node")
+
+
 func test_set_value_records_the_value_without_a_driver():
 	var control := Control.new()
 	add_child_autofree(control)

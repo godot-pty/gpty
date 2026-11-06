@@ -9,8 +9,15 @@ class_name A11y
 ## A custom `_draw()` Control has no text element. Its visible content is
 ## published as a text node on the tile's title bar (`publish`) and its one-line
 ## announcements replace a live node there; the element's value is recorded too
-## (`set_text`), for adapters that map it. See the module's notes on the
-## 4.7.2 adapter in `docs/content/docs/agents/gdscript.md`.
+## (`set_text`), for adapters that map it.
+##
+## Measured on the 4.7.2 AccessKit export (2026-11-05): an element carries the
+## name snapshot taken when it was created, and neither the value nor the role
+## from `AccessibilityServer.update_set_value`/`update_set_role` reaches AT-SPI,
+## so a replacement is the only way content changes and an unchanged slot is
+## left alone instead of being churned. `scripts/accessibility-probe` prints an
+## `a11y-values:` line that grades a later engine in one command. See
+## `docs/content/docs/agents/gdscript.md`.
 
 const LIVE_NAME := "A11yLive"
 ## The readable content node: a static text element whose name is the surface's
@@ -103,12 +110,22 @@ static func _push_value(control: Control, text: String, role: int) -> void:
 ## node added after the change is published with its text, so content is a
 ## replacement, not an update. The caller owns the cadence.
 ##
+## A slot whose text and live mode are unchanged is returned as it is: the
+## replacement is only how *new* content reaches AT, and a reader is holding the
+## node that is there. `TerminalPane._a11y_tick` republishes its last output
+## line every `A11Y_PUSH_MS`, so a churning idle pane used to drop the node AT
+## was on once a second.
+##
 ## `host` must be a Control whose own children are published — a pane body is a
 ## leaf in the exposed tree, the tile's title bar is not (see `announce_host`).
 static func publish(host: Control, slot: String, text: String, live := LIVE_OFF) -> Label:
 	if host == null or not is_instance_valid(host) or text == "":
 		return null
 	var previous := host.get_node_or_null(NodePath(slot))
+	if previous is Label:
+		var label := previous as Label
+		if label.text == text and label.accessibility_live == live:
+			return label
 	if previous != null:
 		# The node is what AT holds, so the old one leaves the tree before the
 		# replacement claims the name.
