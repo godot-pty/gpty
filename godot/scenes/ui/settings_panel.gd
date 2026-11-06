@@ -245,8 +245,8 @@ func _add_settings_header(v: VBoxContainer):
 	var h = HBoxContainer.new()
 	var t = Label.new(); t.text = "Settings"; t.add_theme_font_size_override("font_size", UiTokens.FS_TITLE)
 	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL; h.add_child(t)
-	var x = Button.new(); x.text = Icons.CLOSE; x.flat = true
-	Icons.icon_button(x, "Close settings")
+	var x = Button.new()
+	Icons.icon_button(x, Icons.CLOSE, "Close settings")
 	x.pressed.connect(close); h.add_child(x)
 	v.add_child(h)
 
@@ -492,10 +492,8 @@ func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: C
 	btn.picker_created.connect(_attach_color_picker_buttons.bind(btn))
 	h.add_child(btn)
 	var reset = Button.new()
-	reset.text = Icons.RESET
-	reset.flat = true
 	reset.tooltip_text = "Reset to default"
-	Icons.icon_button(reset, "Reset to default")
+	Icons.icon_button(reset, Icons.RESET, "Reset to default")
 	# ColorPickerButton.color assignment does not emit color_changed when set
 	# programmatically — call the setter explicitly so cfg + debounced save run.
 	# The default is a provider, not a captured colour: it is the active
@@ -591,10 +589,8 @@ func _add_file_picker(v: VBoxContainer, label: String, current_path: String, fil
 	h.add_child(btn)
 	if reset_to_default.is_valid():
 		var reset = Button.new()
-		reset.text = Icons.RESET
-		reset.flat = true
 		reset.tooltip_text = "Reset to default"
-		Icons.icon_button(reset, "Reset to default")
+		Icons.icon_button(reset, Icons.RESET, "Reset to default")
 		reset.pressed.connect(func():
 			btn.text = "(none)"
 			reset_to_default.call()
@@ -841,8 +837,8 @@ func _refresh_concept_list():
 		var edit_btn = Button.new(); edit_btn.text = "Edit"
 		edit_btn.pressed.connect(_show_concept_dialog.bind(i))
 		h.add_child(edit_btn)
-		var del_btn = Button.new(); del_btn.text = Icons.DELETE
-		Icons.icon_button(del_btn, "Delete concept")
+		var del_btn = Button.new()
+		Icons.icon_button(del_btn, Icons.DELETE, "Delete concept")
 		del_btn.pressed.connect(func(): _delete_concept(i))
 		h.add_child(del_btn)
 		_concept_list.add_child(h)

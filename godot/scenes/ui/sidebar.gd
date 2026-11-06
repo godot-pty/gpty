@@ -141,12 +141,10 @@ func _make_row_label_button(text: String) -> Button:
 ## affordances are the sidebar's idiom, so the tooltip carries the meaning.
 func _make_row_action_button(icon: String, tooltip: String) -> Button:
 	var btn = Button.new()
-	btn.text = icon; btn.flat = true
 	btn.tooltip_text = tooltip
-	btn.custom_minimum_size = Vector2(20, 0)
 	# The row's action, not its glyph: the tooltip is already the sentence a
 	# pointer user reads, and the accessible name must not drift from it.
-	Icons.icon_button(btn, tooltip)
+	Icons.icon_button(btn, icon, tooltip)
 	return btn
 
 func _add_header(v: VBoxContainer):
@@ -156,9 +154,9 @@ func _add_header(v: VBoxContainer):
 	title.name = "SidebarTitle"; title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(title)
 	var arrow = Button.new()
-	arrow.text = Icons.COLLAPSE; arrow.name = "SidebarArrow"
-	Icons.icon_button(arrow, "Hide sidebar")
-	arrow.custom_minimum_size = Vector2(22, 22)
+	arrow.name = "SidebarArrow"
+	arrow.custom_minimum_size = Vector2(UiTokens.BUTTON_MIN_WIDTH, UiTokens.BUTTON_MIN_HEIGHT)
+	Icons.icon_button(arrow, Icons.COLLAPSE, "Hide sidebar")
 	arrow.pressed.connect(_toggle_sidebar)
 	h.add_child(arrow)
 	v.add_child(h)
@@ -255,12 +253,11 @@ func _add_pane_buttons(v: VBoxContainer):
 	for key in PaneTypes.ALL:
 		var info = PaneTypes.ALL[key]
 		var btn = Button.new()
-		btn.text = info["icon"]
 		var shortcut := str(info.get("shortcut", ""))
 		btn.tooltip_text = "New " + info["name"]
 		if shortcut != "":
 			btn.tooltip_text += " (" + shortcut + ")"
-		Icons.icon_button(btn, btn.tooltip_text)
+		Icons.icon_button(btn, info["icon"], btn.tooltip_text)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.custom_minimum_size = Vector2(0, 28)
 		btn.pressed.connect(func(): request_new_pane.emit(key))
@@ -290,11 +287,9 @@ func _add_workspace_section(parent: VBoxContainer):
 	var lbl = Label.new(); lbl.text = "Workspaces:"
 	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(lbl)
-	var add_btn = Button.new(); add_btn.text = Icons.ADD; add_btn.name = "AddWorkspaceBtn"
-	Icons.icon_button(add_btn, "New workspace (max 8)")
+	var add_btn = Button.new(); add_btn.name = "AddWorkspaceBtn"
 	add_btn.tooltip_text = "New workspace (max 8)"
-	add_btn.flat = true
-	add_btn.custom_minimum_size = Vector2(22, 0)
+	Icons.icon_button(add_btn, Icons.ADD, "New workspace (max 8)")
 	add_btn.pressed.connect(func(): request_workspace_add.emit())
 	header.add_child(add_btn)
 	section.add_child(header)
@@ -370,22 +365,19 @@ func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close:
 	# exist yet. A workspace settings menu (sensitive flag, and the rest) is
 	# queued for when there is more than one setting to put in it.
 	var dir_btn = Button.new(); dir_btn.name = "WorkspaceCwdBtn"
-	dir_btn.text = Icons.FOLDER; dir_btn.flat = true
-	# The tooltip states the current path; the name states the action.
-	Icons.icon_button(dir_btn, "Choose workspace directory")
+	# The tooltip states the current path; the name states the action. A set
+	# directory tints the glyph: the variation is on the Label, not the button.
+	Icons.icon_button(dir_btn, Icons.FOLDER, "Choose workspace directory",
+		UiTheme.ACCENT_LABEL if cwd != "" else &"")
 	dir_btn.tooltip_text = "Working directory: %s" % dir_hint
-	dir_btn.custom_minimum_size = Vector2(22, 0)
-	if cwd != "":
-		dir_btn.theme_type_variation = UiTheme.ACCENT_BUTTON
 	dir_btn.pressed.connect(func(): request_workspace_cwd.emit(idx))
 	row.add_child(dir_btn)
 
 	# Close button only when more than one workspace exists (min-1 invariant).
 	if show_close:
-		var x = Button.new(); x.text = Icons.CLOSE; x.flat = true
-		Icons.icon_button(x, "Close workspace")
+		var x = Button.new()
 		x.tooltip_text = "Close workspace"
-		x.custom_minimum_size = Vector2(22, 0)
+		Icons.icon_button(x, Icons.CLOSE, "Close workspace")
 		x.pressed.connect(func(): request_workspace_close.emit(idx))
 		row.add_child(x)
 	return row
@@ -453,9 +445,9 @@ func _add_pane_list_ui(v: VBoxContainer):
 
 func _add_collapsed_button():
 	var btn = Button.new()
-	btn.text = Icons.EXPAND; btn.name = "SidebarCollapsedBtn"
-	Icons.icon_button(btn, "Show sidebar")
+	btn.name = "SidebarCollapsedBtn"
 	btn.custom_minimum_size = Vector2(18, 22)
+	Icons.icon_button(btn, Icons.EXPAND, "Show sidebar")
 	btn.offset_left = 1; btn.offset_top = 2
 	btn.offset_right = 19; btn.visible = false
 	btn.pressed.connect(_toggle_sidebar)
@@ -488,11 +480,9 @@ func _add_profile_section(parent: VBoxContainer):
 	var lbl = Label.new(); lbl.text = "Profiles:"
 	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(lbl)
-	var save_btn = Button.new(); save_btn.text = Icons.ADD; save_btn.name = "SaveProfileBtn"
-	Icons.icon_button(save_btn, "Save current layout as profile")
+	var save_btn = Button.new(); save_btn.name = "SaveProfileBtn"
 	save_btn.tooltip_text = "Save current layout as profile"
-	save_btn.flat = true
-	save_btn.custom_minimum_size = Vector2(22, 0)
+	Icons.icon_button(save_btn, Icons.ADD, "Save current layout as profile")
 	save_btn.pressed.connect(func(): request_save_profile.emit())
 	header.add_child(save_btn)
 	section.add_child(header)
@@ -554,9 +544,8 @@ func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 					_begin_inline_rename(btn, func(t: String):
 						request_profile_rename.emit(user_index, t))
 			)
-			var x = Button.new(); x.text = Icons.DELETE; x.flat = true
-			Icons.icon_button(x, "Delete profile")
-			x.custom_minimum_size = Vector2(22, 0)
+			var x = Button.new()
+			Icons.icon_button(x, Icons.DELETE, "Delete profile")
 			x.pressed.connect(func(): request_delete_profile.emit(user_index))
 			row.add_child(x)
 		_profile_list.add_child(row)

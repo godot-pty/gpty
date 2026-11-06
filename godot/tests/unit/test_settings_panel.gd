@@ -52,7 +52,7 @@ func _row_reset(label_text: String) -> Button:
 		if row == null:
 			continue
 		for c in row.get_children():
-			if c is Button and c.text == Icons.RESET:
+			if c is Button and Icons.glyph(c) == Icons.RESET:
 				return c
 	return null
 

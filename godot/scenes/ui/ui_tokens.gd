@@ -37,6 +37,11 @@ const SPACE_XXL := 16
 ## Corner radius on buttons, inputs and popups.
 const RADIUS := 3
 
+## The floor every icon-only button takes, so a pane title bar's five actions
+## and the sidebar's trailing glyphs agree on one target size.
+const BUTTON_MIN_WIDTH := 22
+const BUTTON_MIN_HEIGHT := 18
+
 # --- Layout floor --------------------------------------------------------------
 ## The smallest layout space the chrome is designed for, in layout pixels. The
 ## Settings card is 540 x 560 and is the largest fixed surface; 540 also leaves

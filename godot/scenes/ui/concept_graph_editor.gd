@@ -144,10 +144,8 @@ func _add_header(v: VBoxContainer) -> void:
 	_save_button.pressed.connect(_save)
 	h.add_child(_save_button)
 	var close_btn := Button.new()
-	close_btn.text = Icons.CLOSE
-	close_btn.flat = true
-	Icons.icon_button(close_btn, "Close concept editor")
 	close_btn.tooltip_text = "Close (Esc)"
+	Icons.icon_button(close_btn, Icons.CLOSE, "Close concept editor")
 	close_btn.pressed.connect(close)
 	h.add_child(close_btn)
 	v.add_child(h)

@@ -2,9 +2,10 @@ class_name A11y
 ## The app's accessible surface: identity, value and announcements, in one
 ## place, so a custom-drawn pane reads the same way the themed chrome does.
 ##
-## Godot names a Button from its text before its tooltip, and every glyph
-## button's text is a private-use codepoint — hence `Icons.icon_button(btn,
-## name)`, which writes `accessibility_name` at the choke point.
+## Godot names a Button from its text before its tooltip, and a glyph is a
+## private-use codepoint — hence `Icons.icon_button(btn, glyph, name)`, which
+## draws the glyph in a child Label (leaving `Button.text` empty) and writes
+## `accessibility_name` at the choke point.
 ##
 ## A custom `_draw()` Control has no text element. Its visible content is
 ## published as a text node on the tile's title bar (`publish`) and its one-line
