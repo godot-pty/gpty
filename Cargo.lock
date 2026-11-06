@@ -603,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "gpty"
-version = "0.7.2"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -621,7 +621,7 @@ dependencies = [
 
 [[package]]
 name = "gpty-ai"
-version = "0.7.2"
+version = "0.8.0"
 dependencies = [
  "libc",
  "log",
@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "gpty-core"
-version = "0.7.2"
+version = "0.8.0"
 dependencies = [
  "alacritty_terminal",
  "libc",
@@ -651,7 +651,7 @@ dependencies = [
 
 [[package]]
 name = "gpty-gdext"
-version = "0.7.2"
+version = "0.8.0"
 dependencies = [
  "getrandom 0.4.3",
  "godot",
@@ -671,7 +671,7 @@ dependencies = [
 
 [[package]]
 name = "gpty-ipc"
-version = "0.7.2"
+version = "0.8.0"
 dependencies = [
  "gpty-core",
  "libc",
@@ -685,7 +685,7 @@ dependencies = [
 
 [[package]]
 name = "gpty-media"
-version = "0.7.2"
+version = "0.8.0"
 dependencies = [
  "ffmpeg-the-third",
  "libc",

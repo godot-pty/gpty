@@ -3,7 +3,7 @@
   "name": "io.github.godot-pty/gpty",
   "title": "gPTY",
   "description": "Spawn panes, inject input and read output in a tiling terminal workspace",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "websiteUrl": "https://gpty.dev/",
   "repository": {
     "url": "https://github.com/godot-pty/gpty",
@@ -13,7 +13,7 @@
     {
       "registryType": "cargo",
       "identifier": "gpty",
-      "version": "0.7.2",
+      "version": "0.8.0",
       "transport": {
         "type": "stdio"
       },

@@ -33,6 +33,7 @@
 - **Wiki** - a vault of plain Markdown notes with full-text search, a live-preview editor, `[[wikilinks]]`, backlinks, and a link graph, reopened where you left off. The shipped **Knowledge Base** profile opens the bundled wiki inside a release.
 - **Media** - play local audio and video in a pane through a pinned, minimal FFmpeg backend (v0.7).
 - **`cli_view`** - stream any command's output into a pane, so a plugin can add UI without a Godot SDK.
+- **Interface** - one design system across every pane, overlay and dialog: a dark theme and a light theme that follows the desktop, a UI scale, keyboard rings on the pane chrome, the Wiki pane and the vault graph, and accessible names for screen readers (v0.8).
 
 <details>
 <summary>Watch: the wiki vault, its link graph and a CLI search</summary>

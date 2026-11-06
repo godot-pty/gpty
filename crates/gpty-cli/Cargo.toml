@@ -1,6 +1,6 @@
 [package]
 name = "gpty"
-version = "0.7.2"
+version = "0.8.0"
 edition = "2024"
 description = "gpty CLI — control the terminal workspace over JSON-RPC IPC"
 license = "GPL-3.0-or-later"
@@ -14,8 +14,8 @@ name = "gpty"
 path = "src/main.rs"
 
 [dependencies]
-gpty-ipc = { path = "../gpty-ipc", version = "0.7.2" }
-gpty-core = { path = "../gpty-core", version = "0.7.2" }
+gpty-ipc = { path = "../gpty-ipc", version = "0.8.0" }
+gpty-core = { path = "../gpty-core", version = "0.8.0" }
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"

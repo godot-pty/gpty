@@ -4,6 +4,7 @@ Log all notable changes to the project. The format is based on [Keep a Changelog
 
 ## Releases
 
+- [0.8.0 - 2026-11-06](docs/content/docs/changelog/v0.8.0.md)
 - [0.7.2 - 2026-11-02](docs/content/docs/changelog/v0.7.2.md)
 - [0.7.1 - 2026-11-01](docs/content/docs/changelog/v0.7.1.md)
 - [0.7.0 - 2026-10-20](docs/content/docs/changelog/v0.7.0.md)

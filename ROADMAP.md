@@ -15,7 +15,7 @@ The source of truth for all `gPTY` features; past, present, and planned.
 - [v0.5 - ADE Foundation](docs/content/docs/roadmap/v0.5.md) - released
 - [v0.6 - Knowledge Base & Wiki](docs/content/docs/roadmap/v0.6.md) - released
 - [v0.7 - Media Pane & Trust Boundary](docs/content/docs/roadmap/v0.7.md) - released
-- [v0.8 - UI/UX & Graphical Fidelity](docs/content/docs/roadmap/v0.8.md) - planned
+- [v0.8 - UI/UX & Graphical Fidelity](docs/content/docs/roadmap/v0.8.md) - in progress
 - [v0.9 - Instrumentation, Fidelity & Health](docs/content/docs/roadmap/v0.9.md) - planned
 - [v0.10 - Headless Daemon & Reattach](docs/content/docs/roadmap/v0.10.md) - planned
 - [v0.11 - Game Pane](docs/content/docs/roadmap/v0.11.md) - planned
