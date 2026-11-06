@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+# Prove the app's accessible tree reaches an assistive technology.
+#
+#   scripts/accessibility-probe            # dist/gpty, built by scripts/build
+#   GPTY_A11Y_BIN=/path/to/gpty scripts/accessibility-probe
+#
+# What it does:
+#   1. refuses unless a display exists, the binary is an export that carries the
+#      AccessKit driver (`Accessibility: AccessKit driver loaded.`), and the
+#      session's at-spi bus answers;
+#   2. emulates a screen reader on the session bus
+#      (`org.a11y.Status.IsEnabled=true`, restored on exit — it is the same
+#      switch a desktop's assistive-technology setting throws);
+#   3. launches the app with `--accessibility always --accessibility-driver
+#      accesskit`, waits for the engine's `adapter created` line, then walks the
+#      registry's root with python-dbus and prints every node's name;
+#   4. asserts the controls this repo named are in the tree and that the
+#      terminal pane publishes its visible grid as text;
+#   5. restores the switch and kills the app.
+#
+# What the tree looks like (measured on the 4.7.2 export, 2026-11-05):
+#   - the adapter implements the `Name` *property*, not the deprecated
+#     `GetName` method, and no role method: nodes are names here, not roles;
+#   - a `PaneBody` is a leaf — its own children are never published, so the
+#     terminal's content nodes live on the tile's title bar instead;
+#   - a Control's name is a snapshot taken when its element is created: later
+#     writes do not reach the adapter, so dynamic content is re-published as a
+#     fresh node (`A11y.publish`).
+#
+# The editor build on this distribution has no driver (measured 2026-10-31), so
+# the probe needs the export: run ./scripts/build first. It is deliberately not
+# part of ci-check — it needs a display, a live at-spi bus and a rebuilt export.
+#
+# Exit codes: 0 the tree asserted, 1 an assertion failed (the output says
+# which), 3 a prerequisite is missing.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BIN="${GPTY_A11Y_BIN:-$ROOT/dist/gpty}"
+PROBE_TIMEOUT="${A11Y_PROBE_TIMEOUT:-90}"
+
+missing() { echo "accessibility-probe: $*" >&2; exit 3; }
+
+if [[ ! "$PROBE_TIMEOUT" =~ ^[0-9]+$ || "$PROBE_TIMEOUT" -eq 0 ]]; then
+    echo "accessibility-probe: A11Y_PROBE_TIMEOUT must be a whole number of seconds" >&2
+    exit 2
+fi
+
+[[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] \
+    || missing "no display — an AT-SPI tree needs a real window (DISPLAY/WAYLAND_DISPLAY)"
+[[ -x "$BIN" ]] || missing "no binary at $BIN — run ./scripts/build, or set GPTY_A11Y_BIN"
+grep -aq 'AccessKit driver loaded' "$BIN" \
+    || missing "$BIN carries no AccessKit driver (an editor build on this distribution does not; only the export does)"
+command -v busctl >/dev/null || missing "busctl (systemd) is required to reach the at-spi bus"
+command -v python3 >/dev/null || missing "python3 is required"
+python3 -c 'import dbus' 2>/dev/null || missing "python3-dbus is required (Arch: python-dbus)"
+
+# shellcheck source=scripts/ui-sandbox
+. "$ROOT/scripts/ui-sandbox"
+gpty_sandbox_init
+
+APP_PID=""
+OLD_ENABLED=""
+restore() {
+    if [[ -n "$APP_PID" ]]; then
+        kill "$APP_PID" 2>/dev/null || true
+        wait "$APP_PID" 2>/dev/null || true
+    fi
+    # Put the desktop's own accessibility setting back exactly as it was.
+    if [[ -n "$OLD_ENABLED" ]]; then
+        busctl --user set-property org.a11y.Bus /org/a11y/bus \
+            org.a11y.Status IsEnabled b "$OLD_ENABLED" >/dev/null 2>&1 || true
+    fi
+    gpty_sandbox_cleanup
+}
+trap restore EXIT
+
+OLD_ENABLED="$(busctl --user get-property org.a11y.Bus /org/a11y/bus \
+    org.a11y.Status IsEnabled 2>/dev/null | awk '{print $2}')" || true
+case "$OLD_ENABLED" in
+    true|false) ;;
+    *)
+        missing "org.a11y.Status.IsEnabled is not readable — is at-spi running (at-spi2-registryd)?"
+        ;;
+esac
+busctl --user set-property org.a11y.Bus /org/a11y/bus \
+    org.a11y.Status IsEnabled b true
+echo "accessibility-probe: screen-reader emulation on (was $OLD_ENABLED)"
+
+LOG="$GPTY_SANDBOX/app.log"
+# --verbose is what makes the engine print its Accessibility: lines; the
+# driver's own "driver loaded" and "adapter created" are verbose output
+# (measured on the 4.7.2 export).
+"$BIN" --accessibility always --accessibility-driver accesskit --verbose >"$LOG" 2>&1 &
+APP_PID=$!
+
+deadline=$(( SECONDS + PROBE_TIMEOUT ))
+while (( SECONDS < deadline )); do
+    if ! kill -0 "$APP_PID" 2>/dev/null; then
+        echo "accessibility-probe: the app exited during start-up" >&2
+        tail -n 20 "$LOG" >&2 || true
+        exit 1
+    fi
+    grep -q 'adapter created' "$LOG" && break
+    sleep 0.2
+done
+if ! grep -q 'adapter created' "$LOG"; then
+    echo "accessibility-probe: no 'adapter created' line in ${PROBE_TIMEOUT}s" >&2
+    tail -n 20 "$LOG" >&2 || true
+    exit 1
+fi
+# The registry learns about a new application through its own bus; give the
+# adapter a moment to publish the tree before the walk.
+sleep 3
+
+# Make the pane say something only it can say: the grid's published text must
+# carry it. The app's own CLI talks to the sandbox socket.
+if command -v gpty >/dev/null; then
+    gpty inject --text "echo A11Y_PROBE_MARKER" T1 >/dev/null 2>&1 || true
+    sleep 2
+fi
+
+# The sandbox moved XDG_RUNTIME_DIR, so the session bus is not discoverable
+# through dbus-python's defaults. Ask busctl (which still reaches the user bus)
+# for the at-spi bus address and hand the walk an explicit one.
+A11Y_ADDR="$(busctl --user call org.a11y.Bus /org/a11y/bus org.a11y.Bus GetAddress \
+    2>/dev/null | sed -E 's/^s "(.*)"$/\1/')" || true
+[[ "$A11Y_ADDR" == unix:* ]] || missing "could not resolve the at-spi bus address (org.a11y.Bus.GetAddress)"
+export A11Y_ADDR
+
+A11Y_PYTHON_OUT="$(python3 <<'PY'
+import os
+import sys
+
+import dbus
+from dbus.exceptions import DBusException
+
+ACC = "org.a11y.atspi.Accessible"
+PROPS = "org.freedesktop.DBus.Properties"
+REG_DEST = "org.a11y.atspi.Registry"
+REG_PATH = "/org/a11y/atspi/accessible/root"
+## Names this repo commits to. Substrings, because the engine appends a
+## button's text to its explicit name ("Minimize pane: <glyph>").
+REQUIRED = (
+    "T1: Terminal",
+    "Minimize pane",
+    "Close pane",
+    "New workspace (max 8)",
+    "Settings",
+    "Close All",
+)
+MAX_NODES = 1200
+MAX_DEPTH = 12
+
+
+def call(bus, dest, path, iface, method, signature="", args=()):
+    return bus.call_blocking(dest, path, iface, method, signature, args)
+
+
+address = os.environ.get("A11Y_ADDR", "")
+if not address.startswith("unix:"):
+    print("a11y-fail: no at-spi bus address was resolved")
+    sys.exit(1)
+try:
+    bus = dbus.bus.BusConnection(address)
+except DBusException as error:
+    print("a11y-fail: the at-spi bus is unreachable (%s)" % error)
+    sys.exit(1)
+
+
+def name_of(dest, path):
+    try:
+        return str(call(bus, dest, path, PROPS, "Get", "ss", (ACC, "Name")))
+    except DBusException:
+        return ""
+
+
+def append_child(out, ref):
+    # AT-SPI's null reference is ("", "/org/a11y/atspi/accessible/null"); a
+    # child slot that holds it is not a node, and calling into it is an error.
+    dest, path = str(ref[0]), str(ref[1])
+    if dest == "" or path.endswith("/null"):
+        return
+    out.append((dest, path))
+
+
+def children_of(dest, path):
+    try:
+        count = int(call(bus, dest, path, ACC, "GetChildCount"))
+    except DBusException:
+        count = -1  # the registry root: enumerate by index until it errors
+    out = []
+    if count >= 0:
+        for index in range(count):
+            try:
+                append_child(out, call(bus, dest, path, ACC, "GetChildAtIndex", "i", (index,)))
+            except DBusException:
+                continue
+        return out
+    for index in range(512):
+        try:
+            ref = call(bus, dest, path, ACC, "GetChildAtIndex", "i", (index,))
+        except DBusException:
+            break
+        before = len(out)
+        append_child(out, ref)
+        if len(out) == before:
+            break
+    return out
+
+
+# The registry lists every application on the session (panels, tray, other
+# windows); print them so a run that cannot find the app says why.
+apps = []
+for app_dest, app_path in children_of(REG_DEST, REG_PATH):
+    apps.append((name_of(app_dest, app_path), app_dest, app_path))
+for app_name, _, _ in apps:
+    print("a11y-app: %s" % app_name[:80])
+selected = [app for app in apps if app[0] == "gpty"]
+if not selected:
+    print(
+        "a11y-fail: gpty's application node is not in the registry (%d applications; "
+        "if the adapter loaded, the app did not publish a tree)" % len(apps)
+    )
+    sys.exit(1)
+
+names = []
+queue = [(dest, path, 0) for _, dest, path in selected]
+seen = set()
+while queue and len(names) < MAX_NODES:
+    dest, path, depth = queue.pop(0)
+    if (dest, path) in seen:
+        continue
+    seen.add((dest, path))
+    names.append(name_of(dest, path))
+    if depth < MAX_DEPTH:
+        for child_dest, child_path in children_of(dest, path):
+            queue.append((child_dest, child_path, depth + 1))
+
+for name in names:
+    if name:
+        print("a11y: %s" % name.replace("\n", " | ")[:200])
+
+joined = "\n".join(names)
+missing = [required for required in REQUIRED if required not in joined]
+if missing:
+    print("a11y-fail: names missing from the tree: %s" % ", ".join(missing))
+    sys.exit(1)
+# The visible grid is published as a text node on the pane's title bar, so its
+# name is the whole screen and carries the marker the probe typed into it.
+if not any("A11Y_PROBE_MARKER" in name for name in names):
+    print("a11y-fail: no published terminal text (a name carrying A11Y_PROBE_MARKER)")
+    sys.exit(1)
+print("a11y-probe: asserted %d nodes" % len(names))
+PY
+)" || { echo "$A11Y_PYTHON_OUT"; exit 1; }
+echo "$A11Y_PYTHON_OUT"
+
+echo "accessibility-probe: ok"

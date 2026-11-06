@@ -130,6 +130,20 @@ var _sync_interval: float = 1.0 / 60.0
 const SLOW_POLL_INTERVAL := 0.25
 var _slow_poll_timer: float = 0.0
 
+## Accessible-output cadence. Announcements are for a pane the user is NOT
+## reading: the grid must be quiet for `A11Y_SETTLE_MS` (a command's output
+## arrives over many frames) and the push itself is limited to one per
+## `A11Y_PUSH_MS`, so a flood cannot become a speech flood.
+const A11Y_SETTLE_MS := 500
+const A11Y_PUSH_MS := 1000
+## Where the pane's published text nodes live (see `A11y.announce_host`).
+var _a11y_host: Control
+## When the grid last changed; a push waits for this to settle.
+var _a11y_changed_ms: int = 0
+var _a11y_push_ms: int = -A11Y_PUSH_MS
+## The value last pushed, so an idle pane does not re-push every window.
+var _a11y_last_value: String = ""
+
 ## Grid work (fetch + repaint) a pane may spend per frame before it starts
 ## looking at the grid less often, in ms. Under flood the damage covers the
 ## screen every frame: the fetch packs thousands of cells across the FFI and
@@ -287,6 +301,13 @@ func _exit_tree():
 
 func _ready():
 	super._ready()
+	# The published text lives on the tile's title bar: a pane body is a leaf in
+	# the exposed tree (its own children are not published — measured on the
+	# 4.7.2 export, 2026-11-05), while the bar's children are.
+	_a11y_host = A11y.announce_host(self)
+	# Entering the pane reads the screen that is on it; the tick announces
+	# output only while the pane is not focused.
+	focus_entered.connect(_on_a11y_focus_entered)
 	_terminal = GptyTerminal.new()
 	_terminal.name = "GptyTerminal"
 	add_child(_terminal)
@@ -520,6 +541,7 @@ func _process(delta):
 		var gen = _terminal.get_grid_generation()
 		if gen != _last_grid_gen:
 			_last_grid_gen = gen
+			_a11y_changed_ms = Time.get_ticks_msec()
 			var t0 = Time.get_ticks_msec()
 			# Damage tracking: fetch only modified cells unless the cache is empty (force full pack)
 			var updates = _terminal.get_grid_updates_packed(_cell_cache.is_empty())
@@ -586,6 +608,80 @@ func _process(delta):
 		_poll_agent_state()
 	# The badge animates every frame; only its state source is throttled.
 	_animate_badge(delta)
+	_a11y_tick(Time.get_ticks_msec())
+
+# ── Accessible output ──────────────────────────────────────────────────
+# A custom-drawn grid has no text element, so its content is exposed as the
+# element's value (`A11y.set_text`) and published as text nodes on the tile's
+# title bar (`A11y.publish`). `_cell_cache` is damage-tracked and already
+# reflects the scroll offset and selection, so the value is the visible screen
+# — no second read of the backend, and nothing that can disagree with the draw.
+
+## The drawn grid as plain text: one line per viewport row, right-trimmed,
+## trailing empty rows dropped.
+func visible_text() -> String:
+	var chars: Array = _cell_cache.get("chars", [])
+	var lines: Array = []
+	for i in chars.size():
+		lines.append(str(chars[i]).strip_edges(false, true))
+	while not lines.is_empty() and str(lines[lines.size() - 1]) == "":
+		lines.remove_at(lines.size() - 1)
+	return "\n".join(lines)
+
+
+## The newest non-empty line — one sentence for a live announcement, never the
+## whole buffer.
+func _last_output_line() -> String:
+	var chars: Array = _cell_cache.get("chars", [])
+	for i in range(chars.size() - 1, -1, -1):
+		var line := str(chars[i]).strip_edges()
+		if line != "":
+			return line
+	return ""
+
+
+func _a11y_tick(now: int) -> void:
+	if not A11y.enabled():
+		return
+	if now - _a11y_changed_ms < A11Y_SETTLE_MS:
+		return
+	if now - _a11y_push_ms < A11Y_PUSH_MS:
+		return
+	_a11y_push_ms = now
+	# The value tracks the screen whether or not the pane is focused: a reader
+	# user who is in the pane reads it from the element. Only the *announcement*
+	# waits for a background pane — a focused one is being worked in, and the
+	# shell already echoes.
+	_push_accessibility_value()
+	if has_focus():
+		return
+	A11y.publish(_a11y_host, A11y.LIVE_NAME,
+		A11y.one_line(_last_output_line()), A11y.LIVE_POLITE)
+
+
+func _on_a11y_focus_entered() -> void:
+	# Focus asks "what is on this screen now": force the next push even when
+	# the text has not changed since the last one.
+	_a11y_last_value = ""
+	_push_accessibility_value()
+
+
+func _push_accessibility_value() -> void:
+	# Before the first sync the cache has no geometry: a "0 rows" description
+	# is worse than none.
+	var rows := int(_cell_cache.get("rows", 0))
+	var cols := int(_cell_cache.get("cols", 0))
+	if rows > 0 and cols > 0:
+		accessibility_description = "%d rows, %d columns" % [rows, cols]
+	var text := visible_text()
+	if text == _a11y_last_value:
+		return
+	_a11y_last_value = text
+	# The visible grid reaches AT as a readable text node (its name is the
+	# content); the live line above is the announcement. `set_text` records the
+	# value too, for the adapter that maps element values.
+	A11y.set_text(self, text)
+	A11y.publish(_a11y_host, A11y.TEXT_NAME, text)
 
 # ── Agent-state badge (display only) ───────────────────────────────────
 # Mirrors the tiered AgentState tracker from the engine. The badge never

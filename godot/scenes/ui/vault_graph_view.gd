@@ -97,6 +97,11 @@ var _label_block_w := 0.0
 var _degrees: Dictionary = {}
 var _status: Label
 var _hint: Label
+## Where the cursor sentence is published (see `A11y.announce_host`).
+var _a11y_host: Control
+## The node the crosshair last announced, so a pan that changes nothing is
+## silent.
+var _a11y_cursor := ""
 var _relayout_button: Button
 var _fit_button: Button
 var _arrows_button: Button
@@ -129,6 +134,15 @@ func show_graph(data: Dictionary, current_id := "") -> void:
 	nodes = data.get("nodes", []) if data.get("nodes") is Array else []
 	edges = data.get("edges", []) if data.get("edges") is Array else []
 	_truncated = bool(data.get("truncated", false))
+	# A canvas has no text element: the shape and the gesture legend are its
+	# description, and the crosshair sentence below is its live cursor.
+	accessibility_description = (
+		"%d notes, %d links. Arrows pan, plus and minus zoom, "
+		+ "Enter opens what the crosshair covers."
+	) % [nodes.size(), edges.size()]
+	if _truncated:
+		accessibility_description += " (map truncated)"
+	_a11y_cursor = ""
 	var first_show := positions.is_empty()
 	var previous := positions
 	positions = VaultGraphModel.layout(nodes, edges, previous)
@@ -174,6 +188,8 @@ func set_selected(id: String) -> void:
 	if next == selected_id:
 		return
 	selected_id = next
+	# Re-entering the graph must re-announce where the crosshair is.
+	_a11y_cursor = ""
 	_update_status()
 	queue_redraw()
 
@@ -299,6 +315,9 @@ func _build_chrome() -> void:
 	_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_hint)
 
+	accessibility_name = "Vault link graph"
+	_a11y_host = A11y.announce_host(self)
+
 
 func _make_button(text: String, tooltip: String) -> Button:
 	var button := Button.new()
@@ -413,6 +432,33 @@ func _has_node(id: String) -> bool:
 		if node is Dictionary and str(node.get("id", "")) == id:
 			return true
 	return false
+
+
+## The text this graph draws for a node: its label, else its id — the same
+## fallback the label placements use.
+func _label_for(id: String) -> String:
+	for node in nodes:
+		if node is Dictionary and str(node.get("id", "")) == id:
+			return str(node.get("label", id))
+	return id
+
+
+## Announce what the crosshair covers after a keyboard pan or zoom: the
+## crosshair is the only thing a keyboard user aims, and one sentence is all a
+## screen reader should hear for one key press. Pointer movement does not
+## announce (a mouse user's hover is not a request to read aloud).
+func _announce_cursor() -> void:
+	var hit := cursor_hit()
+	if hit == _a11y_cursor:
+		return
+	_a11y_cursor = hit
+	if hit == "":
+		A11y.publish(_a11y_host, A11y.LIVE_NAME, "Cursor: none", A11y.LIVE_POLITE)
+		return
+	var degrees: Dictionary = _degrees.get(hit, {})
+	var degree := int(degrees.get("in", 0)) + int(degrees.get("out", 0))
+	A11y.publish(_a11y_host, A11y.LIVE_NAME,
+		"Cursor: %s, %d links" % [_label_for(hit), degree], A11y.LIVE_POLITE)
 
 
 func _update_status() -> void:
@@ -550,6 +596,7 @@ func _handle_key(event: InputEventKey) -> bool:
 		_:
 			return false
 	queue_redraw()
+	_announce_cursor()
 	return true
 
 ## Enter's action: the node under the crosshair first (an 11 px radius beats

@@ -144,7 +144,9 @@ func _make_row_action_button(icon: String, tooltip: String) -> Button:
 	btn.text = icon; btn.flat = true
 	btn.tooltip_text = tooltip
 	btn.custom_minimum_size = Vector2(20, 0)
-	Icons.style_button(btn)
+	# The row's action, not its glyph: the tooltip is already the sentence a
+	# pointer user reads, and the accessible name must not drift from it.
+	Icons.icon_button(btn, tooltip)
 	return btn
 
 func _add_header(v: VBoxContainer):
@@ -155,7 +157,7 @@ func _add_header(v: VBoxContainer):
 	h.add_child(title)
 	var arrow = Button.new()
 	arrow.text = Icons.COLLAPSE; arrow.name = "SidebarArrow"
-	Icons.style_button(arrow)
+	Icons.icon_button(arrow, "Hide sidebar")
 	arrow.custom_minimum_size = Vector2(22, 22)
 	arrow.pressed.connect(_toggle_sidebar)
 	h.add_child(arrow)
@@ -258,7 +260,7 @@ func _add_pane_buttons(v: VBoxContainer):
 		btn.tooltip_text = "New " + info["name"]
 		if shortcut != "":
 			btn.tooltip_text += " (" + shortcut + ")"
-		Icons.style_button(btn)
+		Icons.icon_button(btn, btn.tooltip_text)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.custom_minimum_size = Vector2(0, 28)
 		btn.pressed.connect(func(): request_new_pane.emit(key))
@@ -289,7 +291,7 @@ func _add_workspace_section(parent: VBoxContainer):
 	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(lbl)
 	var add_btn = Button.new(); add_btn.text = Icons.ADD; add_btn.name = "AddWorkspaceBtn"
-	Icons.style_button(add_btn)
+	Icons.icon_button(add_btn, "New workspace (max 8)")
 	add_btn.tooltip_text = "New workspace (max 8)"
 	add_btn.flat = true
 	add_btn.custom_minimum_size = Vector2(22, 0)
@@ -369,7 +371,8 @@ func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close:
 	# queued for when there is more than one setting to put in it.
 	var dir_btn = Button.new(); dir_btn.name = "WorkspaceCwdBtn"
 	dir_btn.text = Icons.FOLDER; dir_btn.flat = true
-	Icons.style_button(dir_btn)
+	# The tooltip states the current path; the name states the action.
+	Icons.icon_button(dir_btn, "Choose workspace directory")
 	dir_btn.tooltip_text = "Working directory: %s" % dir_hint
 	dir_btn.custom_minimum_size = Vector2(22, 0)
 	if cwd != "":
@@ -380,7 +383,7 @@ func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close:
 	# Close button only when more than one workspace exists (min-1 invariant).
 	if show_close:
 		var x = Button.new(); x.text = Icons.CLOSE; x.flat = true
-		Icons.style_button(x)
+		Icons.icon_button(x, "Close workspace")
 		x.tooltip_text = "Close workspace"
 		x.custom_minimum_size = Vector2(22, 0)
 		x.pressed.connect(func(): request_workspace_close.emit(idx))
@@ -451,7 +454,7 @@ func _add_pane_list_ui(v: VBoxContainer):
 func _add_collapsed_button():
 	var btn = Button.new()
 	btn.text = Icons.EXPAND; btn.name = "SidebarCollapsedBtn"
-	Icons.style_button(btn)
+	Icons.icon_button(btn, "Show sidebar")
 	btn.custom_minimum_size = Vector2(18, 22)
 	btn.offset_left = 1; btn.offset_top = 2
 	btn.offset_right = 19; btn.visible = false
@@ -486,7 +489,7 @@ func _add_profile_section(parent: VBoxContainer):
 	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(lbl)
 	var save_btn = Button.new(); save_btn.text = Icons.ADD; save_btn.name = "SaveProfileBtn"
-	Icons.style_button(save_btn)
+	Icons.icon_button(save_btn, "Save current layout as profile")
 	save_btn.tooltip_text = "Save current layout as profile"
 	save_btn.flat = true
 	save_btn.custom_minimum_size = Vector2(22, 0)
@@ -552,7 +555,7 @@ func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 						request_profile_rename.emit(user_index, t))
 			)
 			var x = Button.new(); x.text = Icons.DELETE; x.flat = true
-			Icons.style_button(x)
+			Icons.icon_button(x, "Delete profile")
 			x.custom_minimum_size = Vector2(22, 0)
 			x.pressed.connect(func(): request_delete_profile.emit(user_index))
 			row.add_child(x)

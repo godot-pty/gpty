@@ -111,6 +111,8 @@ func _build_ui():
 
 	_video_surface = TextureRect.new()
 	_video_surface.name = "Video"
+	# A TextureRect has no text: the name is what says a picture is there.
+	_video_surface.accessibility_name = "Video"
 	_video_surface.visible = false
 	_video_surface.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_video_surface.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -166,6 +168,7 @@ func _build_ui():
 	_transport.add_child(_play_button)
 
 	_seek_slider = HSlider.new()
+	_seek_slider.accessibility_name = "Playback position"
 	_seek_slider.min_value = 0
 	_seek_slider.max_value = 1
 	_seek_slider.step = 1
@@ -225,6 +228,8 @@ func load_media(path: String) -> void:
 	_kind = verdict.kind
 	_placeholder.visible = false
 	_status.visible = true
+	# The surface is named for what it shows; a failed open resets it.
+	_video_surface.accessibility_name = "Video: %s" % path.get_file()
 	_open_media(path, _kind == MediaFiles.VIDEO, true)
 	if _kind == MediaFiles.AUDIO:
 		_show_audio_placeholder(path)
@@ -595,6 +600,8 @@ func _stop_backend():
 
 func _show_idle():
 	_stop_backend()
+	if _video_surface != null:
+		_video_surface.accessibility_name = "Video"
 	_placeholder.visible = true
 	_placeholder_title.text = "Media"
 	_placeholder_hint.text = "No file selected — set an absolute path in pane settings."
@@ -610,6 +617,8 @@ func _show_error(message: String):
 	file_path = ""
 	_kind = ""
 	_stop_backend()
+	if _video_surface != null:
+		_video_surface.accessibility_name = "Video"
 	_placeholder.visible = true
 	_placeholder_title.text = "Media"
 	_placeholder_hint.text = message

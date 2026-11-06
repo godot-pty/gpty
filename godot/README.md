@@ -69,6 +69,7 @@ godot/
         │   ├── ui_tokens.gd    # Type scale, spacing, radius and the WCAG contrast maths
         │   ├── ui_theme.gd     # The one Theme, built from the palette and applied at the root
         │   ├── app_dialog.gd   # The one modal builder (theme, grouped buttons, selectable body)
+        │   ├── accessibility.gd # Accessible surface owner: names, values, published text (see docs agents/gdscript.md)
         │   ├── toast_overlay.gd
         │   ├── window_chrome.gd # Titlebar + window-mode/fullscreen handling
         │   ├── markdown_view.gd # Safe shared Markdown renderer

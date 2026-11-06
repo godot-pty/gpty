@@ -3,6 +3,7 @@
 #
 # Usage: scripts/ui-capture <state> <out-dir>     # writes <out-dir>/<state>.png
 #        scripts/ui-capture --audit-focus <state> # print keyboard reachability
+#        scripts/ui-capture --audit-accessibility <state> # print the AT surface
 #        scripts/ui-capture --list                # the state names
 #        scripts/ui-capture --compare <a> <b>     # pixel comparison, exit 0/1
 #
@@ -29,7 +30,7 @@ if [[ -z "$GODOT_BIN" ]]; then
 fi
 
 usage() {
-    echo "usage: ui-capture <state> <out-dir> [--perturb <state>] | --audit-focus <state> | --list | --compare <a.png> <b.png>" >&2
+    echo "usage: ui-capture <state> <out-dir> [--perturb <state>] | --audit-focus <state> | --audit-accessibility <state> | --list | --compare <a.png> <b.png>" >&2
     exit 2
 }
 
@@ -53,6 +54,12 @@ case "${1:-}" in
     --audit-focus)
         [[ $# -eq 2 ]] || usage
         MODE=audit
+        STATE="$2"
+        shift 2
+        ;;
+    --audit-accessibility)
+        [[ $# -eq 2 ]] || usage
+        MODE=audit_a11y
         STATE="$2"
         shift 2
         ;;
@@ -82,7 +89,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ "$MODE" == capture || "$MODE" == audit ]]; then
+if [[ "$MODE" == capture || "$MODE" == audit || "$MODE" == audit_a11y ]]; then
     case "$(uname -s)" in
         Linux)
             [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] || {
@@ -153,5 +160,9 @@ case "$MODE" in
     audit)
         run_bounded "$STATE" "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync \
             -s "$HARNESS" -- --state "$STATE" --audit-focus
+        ;;
+    audit_a11y)
+        run_bounded "$STATE" "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync \
+            -s "$HARNESS" -- --state "$STATE" --audit-accessibility
         ;;
 esac

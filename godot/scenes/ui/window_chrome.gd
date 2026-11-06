@@ -56,14 +56,15 @@ func build(ws: Control) -> Control:
 	btn_cont.alignment = BoxContainer.ALIGNMENT_END
 
 	var min_btn = _make_titlebar_button(Icons.MINIMIZE, func():
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MINIMIZED))
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MINIMIZED),
+		"Minimize window")
 	btn_cont.add_child(min_btn)
 
-	var max_btn = _make_titlebar_button(Icons.MAXIMIZE_WIN, toggle_fullscreen)
+	var max_btn = _make_titlebar_button(Icons.MAXIMIZE_WIN, toggle_fullscreen, "Maximize window")
 	btn_cont.add_child(max_btn)
 	titlebar.set_meta("_max_btn", max_btn)
 
-	var close_btn = _make_titlebar_button(Icons.CLOSE, func(): _ws.request_quit())
+	var close_btn = _make_titlebar_button(Icons.CLOSE, func(): _ws.request_quit(), "Close window")
 	btn_cont.add_child(close_btn)
 
 	titlebar.add_child(btn_cont)
@@ -93,8 +94,10 @@ func apply_mode():
 		if max_btn != null:
 			if SettingsManager.cfg_window_mode == 2 and max_btn.text == Icons.MAXIMIZE_WIN:
 				max_btn.text = Icons.RESTORE_WIN
+				max_btn.accessibility_name = "Restore window"
 			elif SettingsManager.cfg_window_mode != 2 and max_btn.text == Icons.RESTORE_WIN:
 				max_btn.text = Icons.MAXIMIZE_WIN
+				max_btn.accessibility_name = "Maximize window"
 	_ws._apply_layout()
 
 
@@ -136,12 +139,16 @@ func restore_position():
 		DisplayServer.window_set_size(sz)
 
 
-func _make_titlebar_button(icon: String, callback: Callable) -> Button:
+## `accessible_name` is required for the same reason `Icons.icon_button` takes
+## one: the glyph is a child Label, so the Button's own text is empty and
+## nothing else would name it.
+func _make_titlebar_button(icon: String, callback: Callable, accessible_name: String) -> Button:
 	var btn = Button.new()
 	btn.focus_mode = Control.FOCUS_NONE
 	btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	btn.custom_minimum_size = Vector2(36, HEIGHT)
 	btn.flat = true
+	btn.accessibility_name = accessible_name
 	btn.pressed.connect(callback)
 	# Use a Label child for the icon glyph — Button text with theme font
 	# overrides doesn't reliably render PUA codepoints in Godot 4.

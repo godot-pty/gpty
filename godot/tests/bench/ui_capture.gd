@@ -29,6 +29,11 @@ extends SceneTree
 ##   --audit-focus      stage the state, print what keyboard traversal can
 ##                      reach (focus owner, tab order, focus-none controls)
 ##                      and exit; `scripts/ui-capture --audit-focus <state>`
+##   --audit-accessibility
+##                      stage the state, print the accessible surface (names,
+##                      descriptions, live modes, recorded values, glyph
+##                      buttons with no name) and exit;
+##                      `scripts/ui-capture --audit-accessibility <state>`
 ##   --list             print the state names, one per line, and exit
 ##   --compare a b      compare two PNGs pixel for pixel and exit 0/1
 ##
@@ -179,8 +184,9 @@ func _initialize() -> void:
 			+ "Run scripts/ui-capture, which owns the private sandbox; staging "
 			+ "writes through WorkspaceStore and the app binds its control socket.")
 		return
-	if not args.has("out") and not args.get("hold", false) and not args.get("audit_focus", false):
-		_fail("--out <dir> is required unless --hold or --audit-focus is given")
+	if not args.has("out") and not args.get("hold", false) \
+			and not args.get("audit_focus", false) and not args.get("audit_accessibility", false):
+		_fail("--out <dir> is required unless --hold, --audit-focus or --audit-accessibility is given")
 		return
 
 	await _run(state_name, STATES[state_name], args)
@@ -243,6 +249,13 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 		# The keyboard half of the audit: this surface's reachability, printed
 		# instead of captured. Same staged state, same sandbox.
 		await _audit_focus(state_name)
+		quit(0)
+		return
+
+	if args.get("audit_accessibility", false):
+		# The accessible half of the audit: what a screen reader is offered by
+		# this surface, printed instead of captured. Same staged state.
+		await _audit_accessibility(state_name)
 		quit(0)
 		return
 
@@ -753,6 +766,71 @@ func _audit_focus(state_name: String) -> void:
 			cur = nxt
 		print("focus-audit: tab-order=%s" % ", ".join(chain))
 
+## Print the accessible surface the staged state exposes: every Control that
+## carries a name, a description, a live mode or a recorded value, the count of
+## live regions, and every glyph-only button that would be announced as its
+## private-use codepoint instead of a word.
+##
+## A driver is not needed for this half — the editor build has none, so
+## `A11y.screen_reader()` is false and no value reaches an element server; the
+## recorded value meta is what this reads. The exposed tree itself is
+## `scripts/accessibility-probe`'s job, against a rebuilt export.
+func _audit_accessibility(state_name: String) -> void:
+	print("a11y-audit: state=%s" % state_name)
+	print("a11y-audit: support=%s driver=%s screen-reader-active=%d" % [
+		str(ProjectSettings.get_setting("accessibility/general/accessibility_support")),
+		str(ProjectSettings.get_setting("accessibility/general/accessibility_driver")),
+		DisplayServer.accessibility_screen_reader_active()])
+	var controls := _all_controls(_workspace)
+	var live_regions := 0
+	var glyph_buttons := 0
+	var unnamed := 0
+	for c in controls:
+		if not c.is_visible_in_tree():
+			continue
+		var name_text: String = c.accessibility_name
+		var desc: String = c.accessibility_description
+		var live: int = c.accessibility_live
+		var value := str(c.get_meta(A11y.VALUE_META, ""))
+		if name_text != "" or desc != "" or live != 0 or value != "":
+			var line := "a11y-audit: %s name=%s desc=%s live=%d" % [
+				c.get_class(), name_text, desc, live]
+			if value != "":
+				line += " value=%s" % value.left(80).replace("\n", "\\n")
+			line += " path=%s" % _short_path(c)
+			print(line)
+		if live != 0:
+			live_regions += 1
+		if c is BaseButton:
+			var glyph := _button_glyph(c as BaseButton)
+			if glyph != "":
+				glyph_buttons += 1
+				if name_text == "" or name_text == glyph:
+					unnamed += 1
+					print("a11y-audit: unnamed-glyph text=%s tooltip=%s path=%s"
+						% [glyph, (c as BaseButton).tooltip_text, _short_path(c)])
+	print("a11y-audit: controls=%d live-regions=%d glyph-buttons=%d unnamed=%d"
+		% [controls.size(), live_regions, glyph_buttons, unnamed])
+
+
+## The private-use glyph a button renders: its own text, or a child Label's
+## (the window controls paint the codepoint into a Label). "" for a text button.
+func _button_glyph(button: BaseButton) -> String:
+	if _is_glyph(button.text):
+		return button.text
+	for child in button.get_children():
+		if child is Label and _is_glyph((child as Label).text):
+			return (child as Label).text
+	return ""
+
+
+static func _is_glyph(text: String) -> bool:
+	if text.length() != 1:
+		return false
+	var c := text.unicode_at(0)
+	return c >= 0xE000 and c <= 0xF8FF
+
+
 ## The topmost visible dialog the state opened, if any.
 func _visible_dialog(node: Node) -> AcceptDialog:
 	if node is AcceptDialog and (node as AcceptDialog).visible:
@@ -894,6 +972,8 @@ func _parse_args(raw: PackedStringArray) -> Dictionary:
 				out["hold"] = true
 			"--audit-focus":
 				out["audit_focus"] = true
+			"--audit-accessibility":
+				out["audit_accessibility"] = true
 			"--list":
 				out["list"] = true
 			"--compare":

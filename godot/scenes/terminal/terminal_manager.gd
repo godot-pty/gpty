@@ -275,7 +275,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	min_btn.name = "Minimize"
 	min_btn.text = Icons.MINIMIZE
 	min_btn.tooltip_text = "Minimize / Restore"
-	Icons.style_button(min_btn)
+	Icons.icon_button(min_btn, "Minimize pane")
 	min_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	min_btn.pressed.connect(func(): _toggle_minimize(root, min_btn))
 	btn_hbox.add_child(min_btn)
@@ -283,7 +283,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	var pos_swap_btn = Button.new()
 	pos_swap_btn.name = "SwapPosition"
 	pos_swap_btn.text = Icons.SWAP
-	Icons.style_button(pos_swap_btn)
+	Icons.icon_button(pos_swap_btn, "Swap pane position")
 	pos_swap_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	pos_swap_btn.tooltip_text = "Swap position with another pane"
 	pos_swap_btn.pressed.connect(func():
@@ -296,7 +296,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	swap_btn.name = "ChangeType"
 	swap_btn.text = Icons.RESET
 	swap_btn.tooltip_text = "Change pane type"
-	Icons.style_button(swap_btn)
+	Icons.icon_button(swap_btn, "Change pane type")
 	swap_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	# PopupMenu listing all pane types
 	var swap_menu = PopupMenu.new()
@@ -321,7 +321,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	settings_btn.name = "PaneSettings"
 	settings_btn.text = Icons.SETTINGS
 	settings_btn.tooltip_text = "Pane settings"
-	Icons.style_button(settings_btn)
+	Icons.icon_button(settings_btn, "Pane settings")
 	settings_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	settings_btn.pressed.connect(func(): _open_pane_settings(_find_body(root)))
 	btn_hbox.add_child(settings_btn)
@@ -330,7 +330,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	close_btn.name = "ClosePane"
 	close_btn.text = Icons.CLOSE
 	close_btn.tooltip_text = "Close pane"
-	Icons.style_button(close_btn)
+	Icons.icon_button(close_btn, "Close pane")
 	close_btn.custom_minimum_size = Vector2(BUTTON_MIN_WIDTH, BUTTON_MIN_HEIGHT)
 	close_btn.pressed.connect(func(): _handle_close(_find_body(root)))
 	btn_hbox.add_child(close_btn)
@@ -617,6 +617,8 @@ func _toggle_minimize(w: Control, btn: Button):
 	if body:
 		body.visible = not body.visible
 		btn.text = Icons.MINIMIZE if body.visible else Icons.RESTORE
+		# The name moves with the glyph: the button acts as what it says.
+		btn.accessibility_name = "Minimize pane" if body.visible else "Restore pane"
 		# Restoring brings the pane back and the keyboard with it (hiding it
 		# leaves nothing to focus, on purpose).
 		_return_focus_to_body(body)

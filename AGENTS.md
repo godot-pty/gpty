@@ -169,6 +169,7 @@ gpty/
         │   ├── ui_tokens.gd        # The type scale, spacing, radius and the WCAG contrast maths
         │   ├── ui_theme.gd         # The one Theme, built from the palette and applied at the root
         │   ├── app_dialog.gd       # The one modal builder (theme, grouped buttons, selectable body)
+        │   ├── accessibility.gd    # Accessible surface owner: names, values, published text (A11y)
         │   └── icons.gd            # Phosphor icon constants
         └── panes/
             ├── pane_body.gd        # Base class + routed-content contract

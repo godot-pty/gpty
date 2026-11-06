@@ -85,6 +85,8 @@ func _build_ui():
 
 	_graph = GraphEdit.new()
 	_graph.name = "Graph"
+	_graph.accessibility_name = "Concept graph"
+	_graph.accessibility_description = "Triggers, conditions and actions. Drag from a trigger to a condition to link them."
 	_graph.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_graph.show_grid = true
@@ -144,7 +146,7 @@ func _add_header(v: VBoxContainer) -> void:
 	var close_btn := Button.new()
 	close_btn.text = Icons.CLOSE
 	close_btn.flat = true
-	Icons.style_button(close_btn)
+	Icons.icon_button(close_btn, "Close concept editor")
 	close_btn.tooltip_text = "Close (Esc)"
 	close_btn.pressed.connect(close)
 	h.add_child(close_btn)
@@ -318,6 +320,7 @@ func _create_frames() -> void:
 		var frame := GraphFrame.new()
 		frame.name = "frame_%d" % i
 		frame.title = str(path.get("name", "Rule"))
+		frame.accessibility_name = frame.title
 		frame.autoshrink_enabled = true
 		frame.autoshrink_margin = 40
 		frame.tint_color_enabled = true
@@ -373,6 +376,7 @@ func _rewrite_titles() -> void:
 		var gn := _graph.get_node_or_null(NodePath(_node_names[id]))
 		if gn is GraphNode:
 			gn.title = _title_for(node)
+			gn.accessibility_name = gn.title
 
 func _create_nodes() -> void:
 	_node_serial = 0
@@ -399,6 +403,7 @@ func _make_graph_node(node: Dictionary) -> GraphNode:
 	gn.resizable = false
 	gn.custom_minimum_size = Vector2(340, 0)
 	gn.title = _title_for(node)
+	gn.accessibility_name = gn.title
 	gn.set_meta("graph_id", str(node["id"]))
 	var enable_left := kind != ConceptGraphModel.KIND_TRIGGER
 	var enable_right := kind != ConceptGraphModel.KIND_ACTION
@@ -563,6 +568,7 @@ func _on_field_edited(node: Dictionary) -> void:
 		var gn := _graph.get_node_or_null(NodePath(_node_names[id]))
 		if gn is GraphNode:
 			gn.title = _title_for(node)
+			gn.accessibility_name = gn.title
 	_dirty = true
 	_update_status()
 	_analyze_debounced()
@@ -625,6 +631,7 @@ func _refresh_frames() -> void:
 			continue
 		if i < _paths.size():
 			frame.title = str(_paths[i].get("name", "Rule"))
+			frame.accessibility_name = frame.title
 			frame.visible = true
 		else:
 			frame.visible = false

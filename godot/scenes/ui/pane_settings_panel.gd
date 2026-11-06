@@ -78,7 +78,7 @@ func _build_ui():
 	t.add_theme_font_size_override("font_size", UiTokens.FS_TITLE)
 	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL; h.add_child(t)
 	var x = Button.new(); x.text = Icons.CLOSE; x.flat = true
-	Icons.style_button(x)
+	Icons.icon_button(x, "Close pane settings")
 	x.pressed.connect(close); h.add_child(x)
 	v.add_child(h)
 	v.add_child(HSeparator.new())

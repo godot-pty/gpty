@@ -4,11 +4,18 @@ class_name Icons
 
 const font_resource := preload("res://assets/fonts/Phosphor-Regular.ttf")
 
-static func style_button(btn: Button) -> void:
+## Style one glyph button and give it its accessible name.
+##
+## The name is a required argument, not a separate call: a Button is named
+## from its `text` before its tooltip, every glyph here is a private-use
+## codepoint, and a newly added icon button is exactly the kind of site a
+## convention loses. The parameter makes the compiler ask for the words.
+static func icon_button(btn: Button, accessible_name: String) -> void:
 	btn.add_theme_font_override("font", font_resource)
 	# The glyph is a heading, not body text: an icon button renders at this size
 	# on every chrome surface, and the engine's 16 px default is what it used.
 	btn.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
+	btn.accessibility_name = accessible_name
 
 const CLOSE    = "\uE4F6"  # x
 const DELETE   = "\uE4A6"  # trash

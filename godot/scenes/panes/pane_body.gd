@@ -15,7 +15,10 @@ signal title_changed(new_title: String)
 ## request created anything.
 signal request_pane(type: String, settings: Dictionary)
 
-@export var pane_name := ""
+@export var pane_name := "":
+	set(value):
+		pane_name = value
+		refresh_accessibility_name()
 ## Stable logical link used by profiles and companion panes. Unlike
 ## `pane_label`, this value survives save/restore.
 @export var attachment_id := ""
@@ -28,11 +31,29 @@ signal request_pane(type: String, settings: Dictionary)
 			_recompute_cell_metrics()
 
 
-var pane_label: String = ""  # "T1", "C3", etc. Assigned by TerminalManager.
+## "T1", "C3", etc. Assigned by TerminalManager. The pane's accessible name is
+## derived from it, so every assignment refreshes the identity.
+var pane_label: String = "":
+	set(value):
+		pane_label = value
+		refresh_accessibility_name()
 var _font: Font  # set by concrete types that render text
 
 func _ready():
 	add_to_group("panes")
+	refresh_accessibility_name()
+
+
+## The pane's accessible identity: its label plus the type (or the user's own
+## name for it). A screen reader meets a pane as one named region before it
+## reads the body, so the name has to say both which pane and what kind.
+func refresh_accessibility_name() -> void:
+	var type_name := _default_title()
+	var info: Variant = PaneTypes.ALL.get(_pane_type())
+	if info is Dictionary:
+		type_name = str(info.get("name", type_name))
+	var display := pane_name if pane_name != "" else type_name
+	accessibility_name = ("%s: %s" % [pane_label, display]) if pane_label != "" else display
 
 func _recompute_cell_metrics():
 	pass  # overridden by types that render text
