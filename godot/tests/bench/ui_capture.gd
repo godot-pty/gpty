@@ -90,7 +90,7 @@ const STATES := {
 	# recapture can use them instead of a scratch driver.
 	"light-workspace": {"size": Vector2i(1280, 760), "panes": 4,
 		"settings": {"cfg_appearance_mode": 1}},
-	"light-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings",
+	"light-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Appearance",
 		"settings": {"cfg_appearance_mode": 1}},
 	"workspace-1280x760": {"size": Vector2i(1280, 760), "panes": 4},
 	"window-800x500": {"size": Vector2i(800, 500), "panes": 4},
@@ -346,6 +346,22 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			if _workspace._settings_panel == null or not _workspace._settings_panel.visible:
 				_fail("clicking Settings did not open the Settings panel")
 				return false
+			# `"tab": "<name>"` opens the panel on that tab instead of System.
+			# The Appearance tab is where the release's own controls live (the
+			# appearance mode and the UI scale), so a capture of the theme that
+			# cannot show them would be a picture of a card.
+			if state.has("tab"):
+				var tab_title := str(state["tab"])
+				var tab_body: Node = _workspace._settings_panel.find_child(tab_title, true, false)
+				if tab_body == null:
+					_fail("the Settings panel has no '%s' tab" % tab_title)
+					return false
+				var tab_container := tab_body.get_parent() as TabContainer
+				if tab_container == null:
+					_fail("the '%s' tab is not inside a TabContainer" % tab_title)
+					return false
+				tab_container.current_tab = tab_container.get_tab_idx_from_control(tab_body as Control)
+				await _wait_frames(2)
 		"file-dialog":
 			var dir_button := _button_with_accessible_name(_workspace._sidebar,
 				"Choose workspace directory")
