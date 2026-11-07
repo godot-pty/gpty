@@ -16,18 +16,28 @@ gpty is a multi-PTY terminal emulator with a tiling grid GUI. It exposes a full 
 
 | Tool | Description |
 |---|---|
-| `new-pane` | Spawn a new pane (terminal, code_viewer, file_tree, observer). Supports split direction, shell command, and title. |
-| `list-panes` | List all active panes with IDs, types, and labels. |
-| `kill-pane` | Close a pane by ID. Use `"active"` for the focused pane. |
-| `focus-pane` | Focus a specific pane by ID. |
-| `inject` | Send text to a terminal pane's PTY (trailing newline added). |
-| `layout-save` | Save the current workspace layout with a name. |
-| `layout-load` | Restore a saved workspace layout by name. |
-| `layout-list` | List all saved layout names. |
-| `daemon-start` | Start the gpty GUI daemon if not running. |
-| `daemon-stop` | Stop the running gpty GUI. |
-| `daemon-status` | Check if the GUI daemon is running. |
-| `version` | Print gpty version info. |
+| `new-pane` | Spawn a new pane (any type in the table below), with split direction, shell command, and title |
+| `list-panes` | List all active panes with IDs, types, and labels |
+| `kill-pane` | Close a pane by ID. Use `"active"` for the focused pane |
+| `focus-pane` | Focus a specific pane by ID |
+| `inject` | Send text to a terminal pane's PTY (trailing newline added) |
+| `pane-read` | Read a pane's output - screen plus scrollback |
+| `pane-status` | Agent state for one pane, or for every pane when the pane is omitted |
+| `pane-run` | Run a command in a new terminal pane, executed through the configured shell |
+| `pane-wait` | Wait for a pane's output to match a regex pattern |
+| `broadcast` | Inject text into every tagged terminal pane |
+| `layout-save` | Save the current workspace layout with a name |
+| `layout-load` | Restore a saved workspace layout by name |
+| `layout-list` | List all saved layout names |
+| `daemon-start` | Start the gpty GUI daemon if not running |
+| `daemon-stop` | Stop the running gpty GUI |
+| `daemon-status` | Check if the GUI daemon is running |
+| `concept-list` | List every concept with its enabled/disabled status |
+| `concept-toggle` | Enable or disable a concept by name |
+| `vault-search` | Search a vault's notes by text (indexes changed notes first) |
+| `vault-read` | Read one note from a vault |
+| `vault-weight` | Declare, or clear, a display weight for one vault link |
+| `version` | Print version info |
 
 ## Usage Patterns
 
@@ -92,14 +102,20 @@ gpty inject T3 -t "Here is the fix: change line 42..."
 
 **Requires OMP harness support for multi-stream output** — the harness must route thinking text to one MCP tool (`inject` with thinking pane ID) and response text to another (`inject` with response pane ID). gpty provides the pipes; OMP decides where to point them.
 
+**Built-in alternative for thinking:** a `reasoning` pane attached to a terminal (its `source_attachment_id` naming that terminal) already shows that terminal's OMP thinking - the `@gpty/omp-events` extension forwards coalesced `thinking_delta` over `gpty-events.sock`. No `cat` pane and no harness routing are needed for the thinking stream; the `cat` pattern is for arbitrary text that no pane type reads.
+
 ## Pane Types
 
 | Type | Description |
 |---|---|
 | `terminal` | PTY-backed shell session |
-| `code_viewer` | Read-only CodeEdit display — receives concept captures |
+| `code_viewer` | Read-only CodeEdit display - receives concept captures |
 | `file_tree` | Directory listing via DirAccess |
-| `observer` | Display-only pane for monitoring output |
+| `inspector` | Private, tool-free Q&A against a model backend - receives concept captures |
+| `reasoning` | Passive projection of one terminal's OMP thinking, picked by `source_attachment_id` |
+| `cli_view` | A configured argv command's stdout streamed into a pane |
+| `wiki` | Vault browser and Markdown note editor |
+| `media` | Local audio/video playback through the pinned FFmpeg backend |
 
 ## Notes
 
