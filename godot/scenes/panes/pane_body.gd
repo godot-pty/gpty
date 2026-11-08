@@ -55,6 +55,79 @@ func refresh_accessibility_name() -> void:
 	var display := pane_name if pane_name != "" else type_name
 	accessibility_name = ("%s: %s" % [pane_label, display]) if pane_label != "" else display
 
+## The inset every pane's content keeps from the pane's own edge.
+##
+## The tile wrapper adds a 1 px border and `BodyVBox` adds no separation, so a
+## pane that laid its root out at the full rect printed its first line on the
+## border. Six pixels is a token step: enough to separate text from the frame,
+## little enough for a 180 px tile.
+const CONTENT_INSET := UiTokens.SPACE_MD
+
+## Lay `node` out as this pane's content frame: the full rect, inset by
+## `CONTENT_INSET` on every side. One definition, because five panes were each
+## about to spell the same four offsets. A pane whose surface is its own pixels
+## edge to edge (a terminal's grid, a video's frame) does not call it.
+func _fill_content(node: Control) -> void:
+	node.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	node.offset_left += CONTENT_INSET
+	node.offset_top += CONTENT_INSET
+	node.offset_right -= CONTENT_INSET
+	node.offset_bottom -= CONTENT_INSET
+
+## The one "nothing to show yet" surface: a centred hero glyph, a title and a
+## sentence that names the fix, laid over `content`.
+##
+## The media pane's placeholder was this shape inline while the code viewer had
+## only a disabled Reload button, so one pane explained itself and the other did
+## not. `title` and `hint` may be empty when the pane owns its wording (media
+## rewrites both from `_show_idle`/`_show_error`). The wiki pane keeps its single
+## centred sentence: its toolbar stays live above it and every message it shows
+## is a one-line diagnostic, not a state.
+##
+## Returns `{host, title, hint}` so the pane keeps the refs it needs to rewrite
+## the text without rebuilding the surface.
+static func empty_state(content: Control, glyph: String, title: String, hint: String, font_px: int) -> Dictionary:
+	var host := CenterContainer.new()
+	content.add_child(host)
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	var box := VBoxContainer.new()
+	box.name = "EmptyBox"
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", UiTokens.SPACE_LG)
+	host.add_child(box)
+
+	var glyph_label := Label.new()
+	glyph_label.name = "EmptyGlyph"
+	glyph_label.text = glyph
+	glyph_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	glyph_label.add_theme_font_size_override("font_size", UiTokens.FS_HERO)
+	box.add_child(glyph_label)
+
+	# A title can carry file-supplied text (a media file's name): one line that
+	# ellipsizes inside a fixed width, so it cannot stretch the pane's minimum
+	# width to the length of a 120-character name.
+	var title_label := Label.new()
+	title_label.name = "EmptyTitle"
+	title_label.text = title
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_label.add_theme_font_size_override("font_size", font_px + 2)
+	title_label.clip_text = true
+	title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	title_label.custom_minimum_size.x = 200
+	box.add_child(title_label)
+
+	var hint_label := Label.new()
+	hint_label.name = "EmptyHint"
+	hint_label.text = hint
+	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint_label.add_theme_font_size_override("font_size", font_px)
+	hint_label.custom_minimum_size.x = 200
+	box.add_child(hint_label)
+
+	return {"host": host, "title": title_label, "hint": hint_label}
+
 func _recompute_cell_metrics():
 	pass  # overridden by types that render text
 

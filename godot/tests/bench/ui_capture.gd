@@ -76,6 +76,21 @@ const STATES := {
 	"file-dialog": {"size": DEFAULT_SIZE, "panes": 1, "open": "file-dialog"},
 	"palette": {"size": DEFAULT_SIZE, "panes": 1, "open": "palette"},
 	"empty-workspace": {"size": DEFAULT_SIZE, "panes": 1, "close_all": true},
+	# The pane inset and the code viewer's empty state, side by side: four panes
+	# that each have nothing to show (row *Pane chrome: distinct icons, a compact
+	# action menu, padding and consistent empty states*). The measurement is the
+	# gap between each pane's first line and its tile's 1 px border on all four
+	# sides.
+	"pane-empty-states": {"size": Vector2i(1280, 760), "tiles": [
+		{"col": 0, "row": 0, "cspan": 30, "rspan": 30,
+			"settings": {"type": "code_viewer", "attachment_id": "capture-empty-code"}},
+		{"col": 30, "row": 0, "cspan": 30, "rspan": 30,
+			"settings": {"type": "cli_view", "attachment_id": "capture-empty-cli"}},
+		{"col": 0, "row": 30, "cspan": 30, "rspan": 30,
+			"settings": {"type": "reasoning", "attachment_id": "capture-empty-reasoning"}},
+		{"col": 30, "row": 30, "cspan": 30, "rspan": 30,
+			"settings": {"type": "inspector", "attachment_id": "capture-empty-inspector"}},
+	]},
 	# The UI scale setting at its 125 % step, on the app's own first-launch
 	# workspace. The only visual proof that the setting scales the chrome and
 	# the terminal text together; a later release recaptures it.

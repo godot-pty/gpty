@@ -34,7 +34,7 @@ func _ready():
 	_debug = OS.get_environment("GPTY_REASONING_DEBUG") != ""
 
 	var root := VBoxContainer.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_fill_content(root)
 	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(root)

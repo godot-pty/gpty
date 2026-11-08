@@ -120,40 +120,16 @@ func _build_ui():
 	content.add_child(_video_surface)
 	_video_surface.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	_placeholder = CenterContainer.new()
+	# The one empty-state surface (PaneBody.empty_state): its wording is set by
+	# `_show_idle`/`_show_audio_placeholder`/`_show_error`, which own it.
+	var empty := PaneBody.empty_state(
+		content,
+		str(PaneTypes.ALL.get("media", {}).get("icon", "|>")),
+		"", "", font_size)
+	_placeholder = empty["host"] as CenterContainer
 	_placeholder.name = "Placeholder"
-	content.add_child(_placeholder)
-	_placeholder.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-
-	var box := VBoxContainer.new()
-	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.add_theme_constant_override("separation", UiTokens.SPACE_LG)
-	_placeholder.add_child(box)
-
-	var icon := Label.new()
-	icon.text = str(PaneTypes.ALL.get("media", {}).get("icon", "|>"))
-	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	icon.add_theme_font_size_override("font_size", UiTokens.FS_HERO)
-	box.add_child(icon)
-
-	# A file name is file-supplied text: the title is a single line, so it
-	# ellipsizes inside a fixed placeholder width instead of making the pane's
-	# minimum width follow a 120-character name, and the hint wraps in the
-	# same box.
-	_placeholder_title = Label.new()
-	_placeholder_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_placeholder_title.add_theme_font_size_override("font_size", font_size + 2)
-	_placeholder_title.clip_text = true
-	_placeholder_title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_placeholder_title.custom_minimum_size.x = 200
-	box.add_child(_placeholder_title)
-
-	_placeholder_hint = Label.new()
-	_placeholder_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_placeholder_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_placeholder_hint.add_theme_font_size_override("font_size", font_size)
-	_placeholder_hint.custom_minimum_size.x = 200
-	box.add_child(_placeholder_hint)
+	_placeholder_title = empty["title"] as Label
+	_placeholder_hint = empty["hint"] as Label
 
 	_transport = HBoxContainer.new()
 	_transport.name = "Transport"

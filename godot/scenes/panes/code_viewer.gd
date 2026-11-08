@@ -11,6 +11,10 @@ var _editor: CodeEdit
 var _markdown: MarkdownView
 var _view_toggle: Button
 var _reload_button: Button
+var _toolbar: HBoxContainer
+## The "nothing to show" surface the pane shows while it has neither a file nor
+## routed content.
+var _empty: Control
 ## The editor's text: the read plus its notice when the read hit the cap.
 var _content := ""
 ## What the rendered view gets: the read itself, with no notice in it — a
@@ -27,14 +31,14 @@ func _ready():
 	super._ready()
 
 	var root = VBoxContainer.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_fill_content(root)
 	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(root)
 
-	var toolbar = HBoxContainer.new()
-	toolbar.name = "Toolbar"
-	root.add_child(toolbar)
+	_toolbar = HBoxContainer.new()
+	_toolbar.name = "Toolbar"
+	root.add_child(_toolbar)
 
 	# Opening the same file again focuses this pane instead of re-reading it
 	# (a viewer's scroll, selection and mode belong to its document), so a
@@ -45,13 +49,13 @@ func _ready():
 	_reload_button.focus_mode = Control.FOCUS_NONE
 	_reload_button.tooltip_text = "Re-read this file from disk"
 	_reload_button.pressed.connect(reload)
-	toolbar.add_child(_reload_button)
+	_toolbar.add_child(_reload_button)
 
 	_view_toggle = Button.new()
 	_view_toggle.name = "ViewToggle"
 	_view_toggle.focus_mode = Control.FOCUS_NONE
 	_view_toggle.pressed.connect(_toggle_view)
-	toolbar.add_child(_view_toggle)
+	_toolbar.add_child(_view_toggle)
 
 	var content_root = Control.new()
 	content_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -75,6 +79,18 @@ func _ready():
 	_markdown.add_theme_font_size_override("mono_font_size", font_size)
 	content_root.add_child(_markdown)
 	_markdown.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	# A pane with no file used to be a blank editor under a disabled Reload: no
+	# text, no explanation, no route to a file. It now says what it is and the
+	# two ways out (the File Tree, or the pane's own settings), on the same
+	# surface the media pane shows.
+	_empty = PaneBody.empty_state(
+		content_root,
+		str(PaneTypes.ALL.get("code_viewer", {}).get("icon", "{}")),
+		"No file open",
+		"Open a file from the File Tree, or set a path in pane settings.",
+		font_size)["host"] as Control
+	_empty.name = "EmptyState"
 
 	if file_path != "":
 		load_file(file_path)
@@ -142,12 +158,19 @@ func _is_markdown() -> bool:
 	return effective == "md" or effective == "markdown"
 
 func _refresh_view():
-	if _editor == null or _markdown == null or _view_toggle == null:
+	if _editor == null or _markdown == null or _view_toggle == null or _empty == null:
 		return
+	# A routed capture is content without a file (`receive_content` clears
+	# `file_path` on purpose), so "nothing to show" is both being empty.
+	var empty := file_path == "" and _content == ""
 	var can_render = _is_markdown()
 	_show_rendered = can_render and view_mode != "source"
-	_editor.visible = not _show_rendered
-	_markdown.visible = _show_rendered
+	# An empty pane shows its own state and no toolbar: a disabled Reload over a
+	# blank editor was the whole empty state before, and it explains nothing.
+	_toolbar.visible = not empty
+	_empty.visible = empty
+	_editor.visible = not empty and not _show_rendered
+	_markdown.visible = not empty and _show_rendered
 	_reload_button.disabled = file_path == ""
 	_view_toggle.visible = can_render
 	_view_toggle.text = "View source" if _show_rendered else "Render Markdown"
