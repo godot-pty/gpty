@@ -38,7 +38,7 @@ A router plus the operational recipe. The method is normative in `docs/content/d
 
 ## Defect classes the October 2026 audit kept finding
 
-Check all ten on every pass; each maps to at least one v0.8.0 row:
+Check every one on each pass; each maps to at least one row (a closed one says so - do not re-report it):
 
 1. Translucent `Panel` defaults — content bleeding through overlays.
 2. Empty states: project clear colour, no guidance, no CTA.
@@ -46,9 +46,9 @@ Check all ten on every pass; each maps to at least one v0.8.0 row:
 4. Small-window clipping: panels spilling over the sidebar, titles running under their own buttons, lists cut after one row.
 5. Stock-Godot `Window`/`AcceptDialog`/`ConfirmationDialog` styling, clipped form fields, jargon labels.
 6. Discoverability: icon-only controls, tooltip-only names, shortcuts listed nowhere, dropdowns that read "OS".
-7. Icon semantics: one glyph for destructive and benign actions, five duplicated buttons per pane row, current state unmarked in the type-swap menu.
+7. Icon semantics: one glyph for destructive and benign actions, five duplicated buttons per pane row, current state unmarked in the type-swap menu. All three are closed (v0.8.1 row *Pane chrome: distinct icons, a compact action menu, padding and consistent empty states*): the destructive close carries `Icons.DELETE`, `Icons.RESET` means reset-a-value only, a title bar and a sidebar row are three controls, and `TerminalManager.show_pane_actions_popup` radio-marks the pane's current type. A new control still has to pass the same test - one meaning per codepoint, and a pair of surfaces that offer the same actions must open the same builder rather than a copy.
 8. State feedback: no search match count or next/prev, toasts stating the obvious, unset values rendered as unexplained checkerboards.
-9. Padding/alignment: text touching pane edges, inconsistent empty-state quality across panes.
+9. Padding/alignment: text touching pane edges, inconsistent empty-state quality across panes. The pane half is closed by the same v0.8.1 row: every text pane is inset by `PaneBody.CONTENT_INSET` (via `_fill_content`) and shows "nothing here" through `PaneBody.empty_state`, so a new pane must call both - a pane that prints on its tile's 1 px border, or one whose empty surface is a bare disabled button, is a finding again. Surfaces outside the panes still carry their own rows.
 10. Keyboard-only reachability for everything above.
 11. App-chrome keyboard reachability: pane title bars, the Wiki note toolbar and the vault graph each need a key path (`--audit-focus` measures it). The three rings are the current answer — `Ctrl+Shift+E` for a title bar, `Ctrl+Shift+K` for the note toolbar, arrows/`+`/`-`/Enter on the graph canvas — so a control added to any of them that is `FOCUS_NONE`, or a `FOCUS_NONE` canvas that is the whole surface, is a finding.
 12. Overlay canvases that inherit the theme's translucent `Panel` (Settings, Pane Settings, the concept editor's `GraphBg`).
