@@ -91,6 +91,17 @@ const STATES := {
 		{"col": 30, "row": 30, "cspan": 30, "rspan": 30,
 			"settings": {"type": "inspector", "attachment_id": "capture-empty-inspector"}},
 	]},
+	# The File Tree's two "cannot be listed" states, side by side: it used to
+	# render an empty list for both (row *The File Tree shows an empty list when
+	# its root cannot be listed, and says nothing*).
+	"file-tree-missing-root": {"size": Vector2i(1280, 520), "tiles": [
+		{"col": 0, "row": 0, "cspan": 30, "rspan": 60,
+			"settings": {"type": "file_tree", "attachment_id": "capture-tree-unset",
+				"root_path": ""}},
+		{"col": 30, "row": 0, "cspan": 30, "rspan": 60,
+			"settings": {"type": "file_tree", "attachment_id": "capture-tree-missing",
+				"root_path": "/gpty-capture-missing-root"}},
+	]},
 	# The UI scale setting at its 125 % step, on the app's own first-launch
 	# workspace. The only visual proof that the setting scales the chrome and
 	# the terminal text together; a later release recaptures it.

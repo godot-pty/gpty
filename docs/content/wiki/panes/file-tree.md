@@ -29,6 +29,8 @@ A fresh pane starts at `/`. The CLI and the `new-pane` tool have no root paramet
 
 The tree shows the root's direct entries and grows on demand: activating a directory lists its children the first time and then expands or collapses it. Nothing below the root is read until you ask for it, so pointing a tree at a large directory costs one listing.
 
+When the root cannot be listed the pane says why instead of showing an empty list, on the same centred surface the Code Viewer and the Media Pane use: **No folder open** (no root set, or a value that is not an absolute path — the message repeats it), **Not a folder** (the path names a file), **Folder not found** (nothing at that path on this machine) and **Cannot list this folder** (the path exists but cannot be read). A folder that really is empty keeps its own sentence, which also says hidden entries are not listed. Every message names the resolved path and where to fix it, because a saved layout or a profile can carry a path this machine does not have.
+
 Entries whose names begin with `.` are skipped at every level, so `.git`, `.env` and editor state directories never appear. Only one directory's worth of names is held per expanded node; there is no search box and no filter.
 
 Activating a file goes through one of three routes:
@@ -52,7 +54,7 @@ Directories and files are both validated at activation: a path that is no longer
 | Root path | absolute directory to list; changing it clears and re-lists |
 | Open files | `Viewer pane` or `System application` |
 
-The root is validated at use — an empty, relative or missing path simply lists nothing. A saved layout records `root_path` and `open_in`; an unknown `open_in` value from a file falls back to the default rather than leaving the pane with neither route authoritative.
+The root is validated at use: a value that is not absolute, a file, a folder that does not exist and a folder that cannot be read each get their own message in the pane (never a silent empty list), and a folder that really is empty says so. A saved layout records `root_path` and `open_in`; an unknown `open_in` value from a file falls back to the default rather than leaving the pane with neither route authoritative.
 
 ## What it does not do
 
@@ -60,7 +62,7 @@ It does not rename, delete, move, copy or create files. It does not show hidden 
 
 ## Limits and edge cases
 
-Only absolute paths are ever opened, and only regular files reach a handler; this is why a FIFO or device node that appears in a listing produces a refusal rather than hanging the GUI thread. The system route constructs the `file://` URI itself and shows the exact path in a confirmation, which is the guard against a filename that looks like another scheme. Because listing is lazy, a directory that changes after it was expanded is not refreshed — children stay as first read. Re-applying the root path in Pane Settings rebuilds the tree from disk.
+Only absolute paths are ever opened, and only regular files reach a handler; this is why a FIFO or device node that appears in a listing produces a refusal rather than hanging the GUI thread. The system route constructs the `file://` URI itself and shows the exact path in a confirmation, which is the guard against a filename that looks like another scheme. Because listing is lazy, a directory that changes after it was expanded is not refreshed — children stay as first read. A subdirectory that cannot be listed when you expand it says so in a toast, since only the root has the pane's own surface. Re-applying the root path in Pane Settings rebuilds the tree from disk.
 
 ## Related
 

@@ -21,7 +21,19 @@ const DEFAULT_OPEN_MODE := "viewer"
 ## open never touches the system path.
 var open_external: Callable = func(uri: String) -> void: OS.shell_open(uri)
 
+## Test seam: the one place this pane opens a folder for listing. Production
+## leaves it as Godot's own static; a test replaces it to reach the gate a
+## folder's permissions normally close (a path that exists but cannot be
+## listed) without depending on the suite's privileges.
+var open_dir: Callable = func(path: String) -> DirAccess: return DirAccess.open(path)
+
 var _tree: Tree
+## The pane's "nothing to show" surface and its two lines, rewritten per root
+## state (the media pane's `_placeholder*` pattern). The tree and this surface
+## are siblings at the full rect; exactly one of them is visible.
+var _empty_host: Control
+var _empty_title: Label
+var _empty_hint: Label
 
 func _ready():
 	super._ready()
@@ -33,8 +45,16 @@ func _ready():
 	add_child(_tree)
 	_tree.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	
-	_tree.create_item()
-	_populate(_tree.get_root(), root_path)
+	var empty := PaneBody.empty_state(
+		self,
+		str(PaneTypes.ALL.get("file_tree", {}).get("icon", "/>")),
+		"", "", font_size)
+	_empty_host = empty["host"] as Control
+	_empty_host.name = "EmptyState"
+	_empty_title = empty["title"] as Label
+	_empty_hint = empty["hint"] as Label
+
+	_refresh_root()
 	
 	_tree.item_activated.connect(func():
 		var item = _tree.get_selected()
@@ -47,7 +67,11 @@ func _ready():
 			# Lazy-load children on first expand
 			if item.get_child_count() == 0:
 				_populate(item, path)
-			item.collapsed = not item.collapsed
+			# Only fold what has rows: a folder that cannot be listed has
+			# already toasted its reason, and an empty one has nothing to show
+			# either way.
+			if item.get_child_count() > 0:
+				item.collapsed = not item.collapsed
 		elif FileAccess.file_exists(path):
 			_open_activated(path)
 		else:
@@ -104,12 +128,50 @@ func _confirm_open(path: String) -> void:
 	dialog.canceled.connect(func(): dialog.queue_free())
 	dialog.popup_centered()
 
-func _populate(parent: TreeItem, path: String):
-	if not BasePersistenceManager.is_real_absolute_path(path) \
-			or not DirAccess.dir_exists_absolute(path):
-		return
-	var dir = DirAccess.open(path)
-	if not dir: return
+## The one gate for a folder this pane is asked to list: `{dir, problem}`.
+## `dir` is null exactly when `problem` says why; `{}` means the folder opened
+## (it may still be empty). Each state is separate because each has a different
+## fix, and each hint names the path and the field that fixes it.
+static func open_for_listing(path: String, opener: Callable) -> Dictionary:
+	if not BasePersistenceManager.is_real_absolute_path(path):
+		return {"dir": null, "problem": no_folder_problem(path)}
+	if not DirAccess.dir_exists_absolute(path):
+		if FileAccess.file_exists(path):
+			return {"dir": null, "problem": not_a_folder_problem(path)}
+		return {"dir": null, "problem": missing_folder_problem(path)}
+	var dir: DirAccess = opener.call(path)
+	if dir == null:
+		return {"dir": null, "problem": unlistable_folder_problem(path)}
+	return {"dir": dir, "problem": {}}
+
+static func no_folder_problem(path: String) -> Dictionary:
+	if path == "":
+		return {"title": "No folder open",
+			"hint": "Set an absolute folder path in pane settings."}
+	return {"title": "No folder open",
+		"hint": "Not an absolute folder path: %s — set one in pane settings." % path}
+
+static func not_a_folder_problem(path: String) -> Dictionary:
+	return {"title": "Not a folder",
+		"hint": "%s is a file — choose the folder that contains it." % path}
+
+static func missing_folder_problem(path: String) -> Dictionary:
+	return {"title": "Folder not found",
+		"hint": "%s does not exist on this machine — fix the path in pane settings." % path}
+
+static func unlistable_folder_problem(path: String) -> Dictionary:
+	return {"title": "Cannot list this folder",
+		"hint": "%s exists but cannot be read — check its permissions." % path}
+
+static func empty_folder_problem(path: String) -> Dictionary:
+	return {"title": "This folder is empty",
+		"hint": "%s holds no entries — hidden files are not listed." % path}
+
+## Add one row per non-hidden entry of the open `dir` under `parent`, naming
+## children from the path the folder was opened with. Returns how many rows
+## were added (0 means the folder holds no entries).
+func _fill(parent: TreeItem, dir: DirAccess, path: String) -> int:
+	var count := 0
 	dir.list_dir_begin()
 	var file_name = dir.get_next()
 	while file_name != "":
@@ -118,10 +180,41 @@ func _populate(parent: TreeItem, path: String):
 			continue
 		var item = _tree.create_item(parent)
 		item.set_text(0, file_name)
-		var full = path.path_join(file_name)
-		item.set_metadata(0, full)
+		item.set_metadata(0, path.path_join(file_name))
+		count += 1
 		file_name = dir.get_next()
 	dir.list_dir_end()
+	return count
+
+## List a directory's children on first expand. The root has the pane's own
+## surface for a folder it cannot read; a nested folder has only a toast, so it
+## says so there instead of staying silently blank.
+func _populate(parent: TreeItem, path: String) -> void:
+	var listed := open_for_listing(path, open_dir)
+	var problem: Dictionary = listed.problem
+	if not problem.is_empty():
+		ToastManager.warn("%s — %s" % [problem["title"], problem["hint"]], 5.0, "File Tree")
+		return
+	var dir: DirAccess = listed.dir
+	_fill(parent, dir, path)
+
+## Rebuild the pane from `root_path`, or say why it cannot be listed: the
+## surface is either the folder's rows or the one sentence that explains their
+## absence. An empty list with no reason is the defect this replaced.
+func _refresh_root() -> void:
+	_tree.clear()
+	var root := _tree.create_item()
+	var listed := open_for_listing(root_path, open_dir)
+	var problem: Dictionary = listed.problem
+	if problem.is_empty():
+		var dir: DirAccess = listed.dir
+		if _fill(root, dir, root_path) == 0:
+			problem = empty_folder_problem(root_path)
+	_tree.visible = problem.is_empty()
+	_empty_host.visible = not problem.is_empty()
+	if not problem.is_empty():
+		_empty_title.text = problem["title"]
+		_empty_hint.text = problem["hint"]
 
 func _pane_type() -> String:
 	return "file_tree"
@@ -141,9 +234,7 @@ func apply_settings(settings: Dictionary):
 	if settings.get("open_in") is String and settings["open_in"] in OPEN_MODES:
 		open_in = settings["open_in"]
 	if settings.has("root_path") and settings["root_path"] is String and _tree != null:
-		_tree.clear()
-		_tree.create_item()
-		_populate(_tree.get_root(), settings["root_path"])
+		_refresh_root()
 
 func _build_pane_settings_ui(panel: Control) -> Control:
 	var v = VBoxContainer.new()
