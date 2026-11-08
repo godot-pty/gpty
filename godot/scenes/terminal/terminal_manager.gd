@@ -558,6 +558,14 @@ func _edge_group(rm: Dictionary, vertical_edge: bool, far_side: bool) -> Array:
 func _find_body(w: Control) -> Control:
 	return w.get_node_or_null("BodyVBox/Body")
 
+## Tell a tile's pane that `_apply_layout` positioned it (see
+## `PaneBody.mark_tile_laid_out`). A terminal's child is spawned on that first
+## laid-out size, never on the container's minimum.
+func mark_tile_laid_out(t: Dictionary) -> void:
+	var body: Control = _find_body(t.wrapper)
+	if body is PaneBody:
+		body.mark_tile_laid_out()
+
 ## Index of the tile whose wrapper owns `body`, or -1 when no tile does.
 ## Indices shift whenever a pane is added or removed, so a body must be
 ## re-found by identity rather than remembered by index.

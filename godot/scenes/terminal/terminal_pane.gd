@@ -44,7 +44,9 @@ func _init() -> void:
 var color_scheme_path: String = "":
 	set(value):
 		color_scheme_path = value
-		if _terminal != null:
+		# Before the child exists there is no palette to set: the start path
+		# applies the stored scheme itself.
+		if _started:
 			_apply_stored_scheme()
 
 
@@ -61,6 +63,9 @@ var color_scheme_path: String = "":
 ## a profile is a layout template, while the directory belongs to the
 ## workspace instance. Empty inherits gpty's own directory.
 var workspace_cwd := ""
+## The grid a child is born at when its tile cannot hold the minimum grid
+## (`_start_child_if_ready`). In every normal tile the fitted pixel size wins:
+## these are the pre-layout fallback, never a size the pane keeps.
 @export var rows: int = 24
 @export var cols: int = 80
 
@@ -108,6 +113,29 @@ var _draw_ms: int = 0
 
 var _resize_pending: bool = false
 var _resize_timer: float = 0.0
+## Whether the child exists. False from `_ready` until the first layout pass
+## (`_start_child_if_ready`): a fresh pane reports size (0,0) until its
+## container sorts, and a grid chosen before that is the 24x80 guess a TUI
+## snapshots and keeps.
+var _started := false
+## Whether the grid has positioned this pane's tile (`mark_tile_laid_out`).
+## A tile that was never positioned is only as big as the container's minimum,
+## which is not a size to spawn a child at.
+var _laid_out := false
+## The process frame `_apply_layout` marked the tile on. The container sorts at
+## the end of that frame, so the body's size is only final on the next one -
+## `_process` uses this to start a pane whose size never changed (a tile that
+## clamps the body to its minimum) without ever reading a stale size.
+var _laid_out_frame := -1
+## Input that arrived before the child did, in order, with its kind
+## (`{"line": bool, "text": String}`) and its cap (the inject API's own
+## per-call limit). A queued line must go through `send_line` at flush, not
+## raw bytes: `StdinInput::Line` is what feeds typed-input concept triggers
+## (`engine.rs`), so re-sending it as text would quietly drop them. Flushed
+## immediately after `start_shell`.
+var _pending_input: Array[Dictionary] = []
+var _pending_bytes := 0
+const MAX_PENDING_INPUT := 65536
 const RESIZE_DEBOUNCE = 0.05
 const MIN_COLS = 8
 const MIN_ROWS = 3
@@ -318,10 +346,6 @@ func _ready():
 	var own_env := PaneEnvStore.env_for(attachment_id)
 	if own_env != "":
 		shell_env = own_env
-	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines, JSON.stringify(shell_args), workspace_cwd)
-
-	if color_scheme_path != "":
-		_apply_stored_scheme()
 
 	_font = _load_font(font_path, "res://fonts/DejaVuSansMono.ttf")
 	_font_bold = _load_font(font_bold_path, "res://fonts/DejaVuSansMono-Bold.ttf")
@@ -377,15 +401,69 @@ func _ready():
 	_history_panel.add_child(_history_list)
 	add_child(_history_panel)
 
+	_start_child_if_ready()
+
+## The grid `size` can show, or `Vector2i.ZERO` when it cannot hold the minimum
+## grid. The spawn and the resize debounce share it, so the size a child is born
+## at is exactly the size the debounce would settle on, and both refuse the
+## same transient layouts.
+func _grid_for_size(px: Vector2) -> Vector2i:
+	if _cell_w <= 0.0 or _cell_h <= 0.0:
+		return Vector2i.ZERO
+	var fitted_cols := int((px.x - PADDING) / _cell_w)
+	var fitted_rows := int((px.y - PADDING) / _cell_h)
+	if fitted_cols < MIN_COLS or fitted_rows < MIN_ROWS:
+		return Vector2i.ZERO
+	return Vector2i(fitted_cols, fitted_rows)
+
+## Spawn the child at the size the pane is drawn at, once: called from `_ready`
+## (a pane that already has a size), from `_on_resize` on the first laid-out
+## size (no debounce - the tile has never had another size), from `_process` one
+## frame after the layout marked the tile, and it is the only place
+## `start_shell` is called.
+func _start_child_if_ready() -> void:
+	if _started or _terminal == null or _cell_w <= 0.0:
+		return
+	var fitted := _grid_for_size(size)
+	if fitted != Vector2i.ZERO:
+		cols = fitted.x
+		rows = fitted.y
+	elif _laid_out and size.x > 0.0 and size.y > 0.0:
+		# A tile too small to hold the minimum grid still gets a shell: born at
+		# the pane's configured grid and corrected by the next real size. The
+		# debounce refuses to *shrink* to such a size for the same reason, so
+		# both paths use one threshold.
+		pass
+	else:
+		# No laid-out size yet (the container has not sized the body, or the
+		# grid has never positioned this tile): wait for one.
+		return
+	_started = true
+	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines, JSON.stringify(shell_args), workspace_cwd)
+	if color_scheme_path != "":
+		_apply_stored_scheme()
+	_flush_pending_input()
+
+## `Workspace._apply_layout` gave this pane's tile the rect it is drawn at. The
+## container sorts at the end of that frame, so `_process` waits for the next
+## one before trusting `size`.
+func mark_tile_laid_out() -> void:
+	_laid_out = true
+	_laid_out_frame = Engine.get_process_frames()
+
 func _on_resize():
 	if _terminal == null or _cell_w == 0: return
+	if not _started:
+		# The first real size a pane gets is the one it is drawn at: start the
+		# child there instead of at the pre-layout guess, and arm no debounce -
+		# the tile has never held another size, so there is nothing to settle.
+		_start_child_if_ready()
+		return
 	# Transient layout states (collapsed sizes during splits, minimize, or
 	# restore) must not collapse the grid into a tiny rewrap. Layout noise
 	# computes to 4x2 cells; a real tile (grid layout guarantees >= 1/6 of
 	# the window) is never below these floors, so reject anything smaller.
-	if size.x < custom_minimum_size.x or size.y < custom_minimum_size.y:
-		return
-	if int((size.x - PADDING) / _cell_w) < MIN_COLS or int((size.y - PADDING) / _cell_h) < MIN_ROWS:
+	if _grid_for_size(size) == Vector2i.ZERO:
 		return
 	_resize_pending = true
 	_resize_timer = 0.0
@@ -425,14 +503,6 @@ func apply_settings(settings: Dictionary):
 	if settings.has("shell_args"):
 		# Untrusted layout data: sanitize before it reaches a spawn.
 		shell_args = PaneTypes.sanitize_shell_args(settings.get("shell_args"))
-	if settings.has("rows") or settings.has("cols"):
-		# Apply-time guard, mirroring the debounce path: a stored size may only
-		# seed the grid before the tile is laid out. Once the tile has a real
-		# size the pixel-derived resize owns rows/cols — applying a larger
-		# stored grid draws content the tile cannot show (the cursor lands
-		# off-screen behind clip_contents) and the next resize reverts it.
-		if _terminal != null and size.x < custom_minimum_size.x:
-			_terminal.resize_grid(rows, cols)
 	# Colors, cursor shape and metrics are all read in _draw(); the grid
 	# generation does not move for them, so repaint once here.
 	queue_redraw()
@@ -493,6 +563,15 @@ func _recompute_cell_metrics():
 	queue_redraw()
 
 func _process(delta):
+	if not _started and _laid_out and Engine.get_process_frames() > _laid_out_frame:
+		# The container sorts at the end of the frame that marked the tile, so
+		# the body's size is final only now. This is also the only path that
+		# starts a pane whose size never changes - a tile that cannot hold the
+		# minimum grid clamps the body to its minimum, and laying that out
+		# raises no resize. A hidden workspace does not process, so this never
+		# fires for one.
+		_start_child_if_ready()
+
 	if cursor_blink:
 		_cursor_blink_timer += delta
 		if _cursor_blink_timer > cursor_blink_speed:
@@ -505,12 +584,8 @@ func _process(delta):
 	if _resize_pending:
 		_resize_timer += delta
 		if _resize_timer >= RESIZE_DEBOUNCE:
-			if (
-				size.x < custom_minimum_size.x
-				or size.y < custom_minimum_size.y
-				or int((size.x - PADDING) / _cell_w) < MIN_COLS
-				or int((size.y - PADDING) / _cell_h) < MIN_ROWS
-			):
+			var fitted := _grid_for_size(size)
+			if fitted == Vector2i.ZERO:
 				# Size collapsed between event and apply — keep waiting for
 				# the stable geometry instead of applying a tiny grid.
 				_resize_timer = 0.0
@@ -518,9 +593,7 @@ func _process(delta):
 				_resize_pending = false
 				# Recompute from the CURRENT size so the grid applies the
 				# final stable geometry, never an intermediate cascade size.
-				var new_cols = maxi(int((size.x - PADDING) / _cell_w), MIN_COLS)
-				var new_rows = maxi(int((size.y - PADDING) / _cell_h), MIN_ROWS)
-				if new_cols != cols or new_rows != rows:
+				if fitted.x != cols or fitted.y != rows:
 					# Keep the debounce armed until the backend reports it took
 					# the size. A refused resize answers false (poisoned grid
 					# lock) and a panic in the call never returns at all — the
@@ -530,9 +603,9 @@ func _process(delta):
 					# applied and the comparison above never asks again.
 					_resize_pending = true
 					_resize_timer = 0.0
-					if _terminal.resize_grid(new_rows, new_cols):
-						cols = new_cols
-						rows = new_rows
+					if _terminal.resize_grid(fitted.y, fitted.x):
+						cols = fitted.x
+						rows = fitted.y
 						_resize_pending = false
 
 	_time_since_sync += delta
@@ -1120,10 +1193,40 @@ func _snap_to_bottom():
 	_terminal.scroll_reset()
 
 func _send_to_term(text: String):
+	if not _started:
+		_buffer_input(text, false)
+		return
 	_terminal.send_text(text)
 
 func _send_line_to_term(text: String):
+	if not _started:
+		_buffer_input(text, true)
+		return
 	_terminal.send_line(text)
+
+## Hold input for a child that does not exist yet: `inject`/`broadcast` can
+## reach a pane in the frame it was created, and writing then would reach a
+## terminal with no session and vanish.
+func _buffer_input(text: String, as_line: bool):
+	var room := MAX_PENDING_INPUT - _pending_bytes
+	if room <= 0:
+		return
+	var chunk := text.left(room)
+	_pending_bytes += chunk.length()
+	_pending_input.append({"line": as_line, "text": chunk})
+
+func _flush_pending_input():
+	if _pending_input.is_empty():
+		return
+	var queued := _pending_input
+	_pending_input = []
+	_pending_bytes = 0
+	for seg in queued:
+		if bool(seg["line"]):
+			_terminal.send_line(str(seg["text"]))
+		else:
+			_terminal.send_text(str(seg["text"]))
+
 func _handle_keyboard(event: InputEventKey):
 	# Search bar escape — close search
 	if _search_visible and event.keycode == KEY_ESCAPE:
@@ -1487,16 +1590,10 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	v.add_child(HSeparator.new())
 
 	# ── Grid ──
-	var rows_spin = SpinBox.new()
-	rows_spin.min_value = 10; rows_spin.max_value = 100
-	rows_spin.value = rows
-	_make_row(v, "Rows:", rows_spin, panel)
-
-	var cols_spin = SpinBox.new()
-	cols_spin.min_value = 40; cols_spin.max_value = 200
-	cols_spin.value = cols
-	_make_row(v, "Cols:", cols_spin, panel)
-
+	# No Rows/Cols controls: the pixel fit owns the grid. `rows`/`cols` are the
+	# fallback for a tile that cannot hold the minimum grid, and they come from
+	# a saved layout - not from a control that would look like it resizes the
+	# live pane (it used to, and the next resize reverted it).
 	var scroll_spin = SpinBox.new()
 	scroll_spin.min_value = 1; scroll_spin.max_value = 10
 	scroll_spin.value = scroll_lines
@@ -1564,8 +1661,6 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"cursor_color": cursor_color_btn.color,
 			"beam_cursor_width": int(beam_spin.value),
 			"underline_cursor_height": int(uline_spin.value),
-			"rows": int(rows_spin.value),
-			"cols": int(cols_spin.value),
 			"scroll_lines": int(scroll_spin.value),
 			"default_fg": fg_btn.color,
 			"default_bg": bg_btn.color,

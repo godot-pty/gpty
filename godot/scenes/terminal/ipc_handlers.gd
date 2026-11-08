@@ -392,7 +392,7 @@ static func handle(ws, method: String, params: Dictionary):
 			var body: Control = in_found["body"]
 			if not body is TerminalPane:
 				return error("Pane '%s' is not a terminal" % pane_id)
-			body._terminal.send_line(text)
+			body._send_line_to_term(text)
 			return {"success": true}
 		"broadcast":
 			var b_tags: Array = PaneTypes.sanitize_tags(params.get("tags", []))
@@ -410,7 +410,7 @@ static func handle(ws, method: String, params: Dictionary):
 						b_hit = true
 						break
 				if b_hit:
-					b_body._terminal.send_line(b_text)
+					b_body._send_line_to_term(b_text)
 					b_count += 1
 			return {"success": true, "count": b_count}
 		"layoutSave":

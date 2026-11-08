@@ -125,6 +125,31 @@ impl Drop for SpawnedTerminal {
     }
 }
 
+/// The pane API's status document, built in one place for a terminal that has a
+/// session and one that has none, so the two shapes cannot drift.
+///
+/// Field order is the document's key order. `agent_state_tier` is a plain
+/// `u8`: the wire shape carries the tier's discriminant, which is what a
+/// caller compares against.
+#[derive(serde::Serialize)]
+struct StatusDocument {
+    pid: Option<u32>,
+    running: bool,
+    exit_code: Option<i32>,
+    exit_reason: Option<&'static str>,
+    idle_ms: Option<u64>,
+    foreground_job: Option<bool>,
+    child_alive: bool,
+    agent_state: &'static str,
+    agent_state_tier: Option<u8>,
+}
+
+impl StatusDocument {
+    fn json(self) -> String {
+        serde_json::to_string(&self).unwrap_or_else(|_| String::from("{}"))
+    }
+}
+
 impl SpawnedTerminal {
     /// Whether the terminal task has ended — for any reason: the child exited,
     /// the pane is being torn down, or **the task panicked**, which tokio
@@ -165,18 +190,18 @@ impl SpawnedTerminal {
             (None, false) => Some("task_ended"),
             (None, true) => None,
         };
-        serde_json::json!({
-            "pid": s.pid,
-            "running": running,
-            "exit_code": s.exit_code,
-            "exit_reason": exit_reason,
-            "idle_ms": idle_ms,
-            "foreground_job": s.foreground_job,
-            "child_alive": s.child_alive,
-            "agent_state": grid.agent_state.state.as_str(),
-            "agent_state_tier": grid.agent_state.tier.map(|t| t as u8),
-        })
-        .to_string()
+        StatusDocument {
+            pid: s.pid,
+            running,
+            exit_code: s.exit_code,
+            exit_reason,
+            idle_ms,
+            foreground_job: s.foreground_job,
+            child_alive: s.child_alive,
+            agent_state: grid.agent_state.state.as_str(),
+            agent_state_tier: grid.agent_state.tier.map(|t| t as u8),
+        }
+        .json()
     }
 
     /// Apply `rows × cols` to the grid and to the PTY — all-or-nothing.
@@ -207,6 +232,29 @@ impl SpawnedTerminal {
         self.handle.resize_pty(rows as u16, cols as u16);
         true
     }
+}
+
+/// The pane API's status document for a terminal with **no session**: never
+/// spawned, or the spawn was refused.
+///
+/// Every terminal now spends its first frame here — a pane starts its child on
+/// the first layout pass, so a fresh pane has no session until its container
+/// sorts. Answering `{}` in that frame would make the documented nine-key
+/// document appear late, and a `paneStatus` read taken in a pane's own spawn
+/// frame would fail to parse instead of saying nothing is running yet.
+pub fn unstarted_status_json() -> String {
+    StatusDocument {
+        pid: None,
+        running: false,
+        exit_code: None,
+        exit_reason: None,
+        idle_ms: None,
+        foreground_job: None,
+        child_alive: false,
+        agent_state: AgentState::Idle.as_str(),
+        agent_state_tier: None,
+    }
+    .json()
 }
 
 // ── WorkspaceEngine ───────────────────────────────────────────────────
@@ -271,12 +319,20 @@ impl WorkspaceEngine {
         // this process. See `OUTPUT_QUEUE_CHUNKS` for the sizing and why
         // dropping chunks is not an option.
         let (pty_tx, pty_rx) = mpsc::channel(crate::pty::OUTPUT_QUEUE_CHUNKS);
+        // The pty opens at the size the pane chose, before the child exists:
+        // this is the size the child's first window-size read answers. Sizing
+        // it afterwards (portable-pty's 24x80 default, then a resize) is what
+        // left a TUI that snapshots its size at startup at 80x24.
+        let pty_rows = rows.clamp(1, u16::MAX as usize) as u16;
+        let pty_cols = cols.clamp(1, u16::MAX as usize) as u16;
         let pty_handle = crate::pty::PtyHandle::spawn_with_cwd(
             config.id,
             command,
             args,
             envs,
             trusted_envs,
+            pty_rows,
+            pty_cols,
             cwd,
             pty_tx,
         )?;
@@ -1263,6 +1319,70 @@ mod tests {
             status["child_alive"],
             serde_json::json!(true),
             "the spawned child has not been reaped: {status}"
+        );
+    }
+
+    /// A pane now starts its child on the first layout pass, so every terminal
+    /// reports one frame with no session at all. That frame must still answer
+    /// the documented document — a status read taken in a pane's own spawn
+    /// frame parses it instead of failing, and says nothing is running yet.
+    #[tokio::test]
+    async fn the_unstarted_status_document_has_the_keys_a_live_one_has() {
+        let engine = WorkspaceEngine::new(vec![]);
+        #[cfg(windows)]
+        let cmd = "cmd.exe";
+        #[cfg(not(windows))]
+        let cmd = "sh";
+        let spawned = engine
+            .spawn_terminal_with_grid(TerminalConfig { id: 16 }, cmd, &[], &[], &[], 24, 80)
+            .await
+            .expect("spawn");
+
+        let live = pane_status(&spawned);
+        let unstarted: serde_json::Value =
+            serde_json::from_str(&unstarted_status_json()).expect("unstarted status JSON");
+        let live_object = live.as_object().expect("live status object");
+        let unstarted_object = unstarted.as_object().expect("unstarted status object");
+        assert_eq!(
+            live_object.keys().collect::<Vec<_>>(),
+            unstarted_object.keys().collect::<Vec<_>>(),
+            "the no-session document must carry every key a live one does: {unstarted}"
+        );
+        assert_eq!(
+            unstarted["running"],
+            serde_json::json!(false),
+            "{unstarted}"
+        );
+        assert_eq!(unstarted["pid"], serde_json::Value::Null, "{unstarted}");
+        assert_eq!(
+            unstarted["exit_code"],
+            serde_json::Value::Null,
+            "{unstarted}"
+        );
+        assert_eq!(
+            unstarted["exit_reason"],
+            serde_json::Value::Null,
+            "{unstarted}"
+        );
+        assert_eq!(
+            unstarted["foreground_job"],
+            serde_json::Value::Null,
+            "{unstarted}"
+        );
+        assert_eq!(
+            unstarted["child_alive"],
+            serde_json::json!(false),
+            "{unstarted}"
+        );
+        assert_eq!(
+            unstarted["agent_state"],
+            serde_json::json!("idle"),
+            "{unstarted}"
+        );
+        assert_eq!(
+            unstarted["agent_state_tier"],
+            serde_json::Value::Null,
+            "{unstarted}"
         );
     }
 

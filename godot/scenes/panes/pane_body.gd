@@ -218,6 +218,14 @@ func keyboard_entry() -> Control:
 func status_document() -> Variant:
 	return null
 
+## The grid has given this pane's tile the rect it is drawn at, on every layout
+## pass (`Workspace._apply_layout`). A pane that must know its drawn size — a
+## terminal spawns its child at it — waits for this, because a tile the grid has
+## never positioned is only as big as the container's minimum. The default panes
+## read their size from Godot's layout and do not need it.
+func mark_tile_laid_out() -> void:
+	pass
+
 ## Routed-content capability contract.
 ##
 ## Routers must ask before delivery, and acknowledge source data only when

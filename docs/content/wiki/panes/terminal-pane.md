@@ -58,9 +58,10 @@ Pane Settings for a terminal edits the presentation and the environment, not the
 | Font size, Font file, Color scheme | rendering |
 | Environment | `KEY=value` lines, stored per pane in `user://pane_env.json` |
 | Cursor shape, blink, speed, colour, beam width, underline height | rendering |
-| Rows / Cols | the grid, 10–100 rows and 40–200 columns in the UI |
 | Scroll lines | wheel step, 1–10 |
 | Default FG / BG | the fallback colours behind a scheme |
+
+There is no Rows / Cols control: the grid is the size the pane's pixels can show. A pane starts its child on its first layout pass, at that fitted size (one size, never a 80×24 guess followed by a resize), and a later resize reflows it through the 50 ms debounce. A tile too small to hold the minimum grid starts its child at the `rows`/`cols` a saved tile carries; those values are a layout-data fallback, not a setting.
 
 The program and its arguments are not here. `shell_command` and `shell_args` come from a profile or from a saved layout tile. The call that creates a pane can set the program (`gpty new-pane -t terminal -c <program>`); `--arg` values are an argv for a [[cli-view|CLI View]] pane, not for a terminal. A file-supplied program or argv is what Workspace Trust exists for: restoring a tile that would run something other than your defaults asks you to approve the exact program and arguments, and a tile's `shell_env` is stripped on restore because environment belongs to you.
 

@@ -448,15 +448,19 @@ impl GptyTerminal {
     /// Process status primitives as JSON: pid, running, exit_code, idle_ms,
     /// exit_reason, foreground_job, child_alive, agent_state, agent_state_tier.
     /// Built in core (`SpawnedTerminal::status_json`) so the document the pane
-    /// API promises is the one under test.
+    /// API promises is the one under test. A terminal with no session (never
+    /// spawned, or the spawn was refused) answers the same document with
+    /// nothing running, never `{}`: a pane reports its first frame before it
+    /// starts its child.
     #[func]
     fn get_status(&self) -> GString {
+        let unstarted = || GString::from(gpty_core::engine::unstarted_status_json().as_str());
         let Some(spawned) = self.spawned.as_ref() else {
-            return GString::from("{}");
+            return unstarted();
         };
         self.with_grid(
             |g| GString::from(spawned.status_json(g).as_str()),
-            GString::from("{}"),
+            unstarted(),
         )
     }
 

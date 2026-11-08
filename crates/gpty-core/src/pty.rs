@@ -136,8 +136,6 @@ pub fn sanitize_envs(envs: &[String]) -> Vec<(String, String)> {
     }
     out
 }
-const DEFAULT_ROWS: u16 = 24;
-const DEFAULT_COLS: u16 = 80;
 const READ_BUF_SIZE: usize = 4096;
 /// Reject a program path that the untrusted layout/profile data could have
 /// aimed at a file another user controls.
@@ -379,18 +377,29 @@ impl PtyHandle {
     /// process. A full queue is not an error and never drops bytes — the
     /// thread only stops when the receiver is gone (pane teardown) or the read
     /// side closes (child exit).
+    // The same argument list `spawn_with_cwd` takes, minus the directory: one
+    // argument per value the pty is opened with, and the two stay in step.
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         id: u32,
         command: &str,
         args: &[&str],
         envs: &[String],
         trusted_envs: &[(String, String)],
+        rows: u16,
+        cols: u16,
         tx: Sender<Vec<u8>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Self::spawn_with_cwd(id, command, args, envs, trusted_envs, None, tx)
+        Self::spawn_with_cwd(id, command, args, envs, trusted_envs, rows, cols, None, tx)
     }
 
     /// Like [`Self::spawn`], but starts the child in `cwd` when given.
+    ///
+    /// `rows`/`cols` are the pty's size **at open**, before the child exists:
+    /// they are what the child's first `stty size` (or any TUI's first query)
+    /// answers. The pane used to open at portable-pty's 24x80 default and resize
+    /// afterwards, which a TUI that snapshots its size at startup kept until
+    /// something resized the pane.
     ///
     /// The caller owns path validation: an invalid or missing directory is a
     /// spawn error, not a silent fallback, because the workspace that supplied
@@ -403,6 +412,8 @@ impl PtyHandle {
         args: &[&str],
         envs: &[String],
         trusted_envs: &[(String, String)],
+        rows: u16,
+        cols: u16,
         cwd: Option<&Path>,
         tx: Sender<Vec<u8>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
@@ -446,8 +457,8 @@ impl PtyHandle {
         }
 
         let pty_pair = pty_system.openpty(PtySize {
-            rows: DEFAULT_ROWS,
-            cols: DEFAULT_COLS,
+            rows: rows.max(1),
+            cols: cols.max(1),
             pixel_width: 0,
             pixel_height: 0,
         })?;
@@ -861,7 +872,7 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(4);
         let envs = vec![format!("PATH={}", open_dir.display())];
-        let refusal = PtyHandle::spawn(9201, "probe-tool", &[], &envs, &[], tx);
+        let refusal = PtyHandle::spawn(9201, "probe-tool", &[], &envs, &[], 24, 80, tx);
         let Err(error) = refusal else {
             panic!("a bare name resolving into a writable directory must be refused");
         };
@@ -877,6 +888,35 @@ mod tests {
         );
     }
 
+    /// The child's first read of its window size is the size the caller asked
+    /// for, not portable-pty's 24x80 default: the pty is opened sized, and
+    /// `stty size` runs before gpty can send any resize. A TUI that snapshots
+    /// its size at startup reads this answer and keeps it.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn the_childs_first_view_of_its_size_is_the_requested_size() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        let handle = PtyHandle::spawn(9600, "sh", &["-c", "stty size"], &[], &[], 31, 97, tx)
+            .expect("spawn");
+
+        let output = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let mut bytes = Vec::new();
+            while let Some(chunk) = rx.recv().await {
+                bytes.extend_from_slice(&chunk);
+            }
+            String::from_utf8_lossy(&bytes).into_owned()
+        })
+        .await
+        .expect("the child must exit and close its output");
+
+        drop(handle);
+
+        assert!(
+            output.lines().any(|line| line.trim() == "31 97"),
+            "the child must see the size the pty was opened at, got: {output}"
+        );
+    }
+
     /// A workspace's directory reaches the child, not just gpty's own cwd.
     #[tokio::test]
     #[cfg(unix)]
@@ -886,9 +926,18 @@ mod tests {
         let expected = dir.canonicalize().unwrap();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(16);
-        let handle =
-            PtyHandle::spawn_with_cwd(9500, "sh", &["-c", "pwd -P"], &[], &[], Some(&dir), tx)
-                .expect("spawn in an existing directory");
+        let handle = PtyHandle::spawn_with_cwd(
+            9500,
+            "sh",
+            &["-c", "pwd -P"],
+            &[],
+            &[],
+            24,
+            80,
+            Some(&dir),
+            tx,
+        )
+        .expect("spawn in an existing directory");
 
         let output = tokio::time::timeout(std::time::Duration::from_secs(10), async {
             let mut bytes = Vec::new();
@@ -918,7 +967,7 @@ mod tests {
         let dir = tmp.path().to_path_buf();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
-        let handle = PtyHandle::spawn_with_cwd(9501, "env", &[], &[], &[], Some(&dir), tx)
+        let handle = PtyHandle::spawn_with_cwd(9501, "env", &[], &[], &[], 24, 80, Some(&dir), tx)
             .expect("spawn env in an existing directory");
 
         let output = tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -996,6 +1045,8 @@ mod tests {
             &["-c", "trap \"\" HUP; sleep 300 & echo GRANDCHILD=$!; wait"],
             &[],
             &[],
+            24,
+            80,
             tx,
         )
         .expect("spawn");
@@ -1061,7 +1112,7 @@ mod tests {
         let (cmd, args) = ("sh", vec!["-c", "sleep 30"]);
 
         let (tx, _rx) = tokio::sync::mpsc::channel(4);
-        let mut handle = PtyHandle::spawn(9300, cmd, &args, &[], &[], tx).expect("spawn");
+        let mut handle = PtyHandle::spawn(9300, cmd, &args, &[], &[], 24, 80, tx).expect("spawn");
 
         // 1 MiB, in 64 KiB pieces: far past the input buffer, and far past
         // what a blocking writer would accept before stopping. Written from
@@ -1108,7 +1159,7 @@ mod tests {
         let (cmd, args) = ("sh", vec!["-c", "seq 1 4000"]);
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(2);
-        let handle = PtyHandle::spawn(9100, cmd, &args, &[], &[], tx).expect("spawn");
+        let handle = PtyHandle::spawn(9100, cmd, &args, &[], &[], 24, 80, tx).expect("spawn");
 
         let collected = tokio::time::timeout(std::time::Duration::from_secs(60), async {
             let mut collected = Vec::new();

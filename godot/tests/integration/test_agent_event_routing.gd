@@ -88,6 +88,10 @@ func test_events_reach_only_the_source_terminal_s_workspace():
 	await get_tree().process_frame
 	var term_b = ws._spawn_pane_into(ws._workspaces[1], "terminal", {})
 	assert_not_null(term_b, "the second workspace gets a terminal")
+	# A pane starts its child on its first layout pass, so the PTY session
+	# exists one frame after the spawn, not immediately.
+	await get_tree().process_frame
+	await get_tree().process_frame
 	var probe_b := EventProbe.new()
 	_attach_probe(ws, probe_b, 1)
 

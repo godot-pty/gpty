@@ -102,6 +102,14 @@ const STATES := {
 			"settings": {"type": "file_tree", "attachment_id": "capture-tree-missing",
 				"root_path": "/gpty-capture-missing-root"}},
 	]},
+	# The size a fresh pane's child is born at: the program prints the PTY's
+	# own dimensions, so the image and the grid agree. Row *A fresh pane's
+	# child starts at 80x24 and only learns its real size 50 ms later*.
+	"pane-spawn-size": {"size": Vector2i(1280, 760), "tiles": [
+		{"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+			"settings": {"type": "terminal", "attachment_id": "capture-spawn-size",
+				"shell_args": ["-c", 'set -- $(stty size); echo "born at $1 rows, $2 cols"; sleep 600']}},
+	]},
 	# The UI scale setting at its 125 % step, on the app's own first-launch
 	# workspace. The only visual proof that the setting scales the chrome and
 	# the terminal text together; a later release recaptures it.
@@ -334,6 +342,20 @@ func _seed_workspace(state: Dictionary) -> void:
 		{"name": "Workspace 1", "cwd": "", "layout": tiles},
 	]
 	_store.save(0, workspaces)
+	# A state may seed a tile that starts something other than the default
+	# shell (this one prints its own PTY size). The restore gate asks before
+	# spawning such a tile, and a trust dialog is not the state being
+	# captured, so the plans this state itself seeds are recorded as approved
+	# under a capture-owned name.
+	var plans: Array = []
+	for td in tiles:
+		if td is Dictionary:
+			var key := PaneTypes.tile_plan_key(td)
+			if key != "":
+				plans.append(key)
+	if not plans.is_empty():
+		var trusted: Node = root.get_node("TrustedStore")
+		trusted.approve_builtin("ui-capture", GptyTerminal.get_app_version(), plans)
 
 func _tile(index: int, col: int, row: int, cspan: int, rspan: int) -> Dictionary:
 	return {

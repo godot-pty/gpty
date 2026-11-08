@@ -60,15 +60,24 @@ func test_apply_settings_font_size():
 	assert_gt(body._cell_h, cell_h, "a larger font must heighten the cell")
 	assert_eq(body._font.fixed_size, 28, "the font itself is resized, not just the property")
 
-func test_apply_settings_rows_cols():
+## A stored `rows`/`cols` no longer resizes a live grid: the pixel fit owns the
+## size, because a grid larger than the tile draws cells the tile cannot show
+## (the cursor lands off-screen behind `clip_contents`) and the next resize
+## would revert it anyway. The fields remain the pre-layout fallback.
+func test_apply_settings_rows_cols_never_resizes_a_live_grid():
 	var body = _tm.create_body("terminal")
 	_scene.add_child(body)
 	assert_not_null(body._terminal, "the pane must own a grid for this test")
+	body.size = Vector2(900, 600)
+	var fitted_rows := int((body.size.y - TerminalPane.PADDING) / body._cell_h)
+	assert_eq(body._terminal.get_rows(), fitted_rows,
+		"the pane started its child at the size it is drawn at")
+
 	body.apply_settings({"rows": 30, "cols": 100})
-	assert_eq(body.rows, 30)
-	assert_eq(body.cols, 100)
-	assert_eq(body._terminal.get_rows(), 30, "the terminal grid is resized to the setting")
-	assert_eq(body._terminal.get_cols(), 100)
+
+	assert_eq([body.rows, body.cols], [30, 100], "the fallback the settings name is kept")
+	assert_eq(body._terminal.get_rows(), fitted_rows,
+		"a stored size must never resize the live grid")
 
 func test_apply_settings_pane_name():
 	var body = _tm.create_body("code_viewer")

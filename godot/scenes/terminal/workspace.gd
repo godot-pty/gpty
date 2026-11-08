@@ -343,6 +343,10 @@ func _apply_layout():
 		t.wrapper.offset_right = x + w; t.wrapper.offset_bottom = y + h
 		t.wrapper.anchor_left = 0.0; t.wrapper.anchor_right = 0.0
 		t.wrapper.anchor_top = 0.0; t.wrapper.anchor_bottom = 0.0
+		# The tile now holds the rect it is drawn at, so a pane that has not
+		# started its child may start it at this size (a tile the grid has
+		# never positioned is only the container's minimum).
+		_tm.mark_tile_laid_out(t)
 
 # ═══════════════════════════════════════════════════════════════════════
 # Spawn / Kill — delegate to TerminalManager
