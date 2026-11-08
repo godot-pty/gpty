@@ -44,16 +44,16 @@ The header's `+` saves the current arrangement as a new profile; the dialog asks
 
 The Panes section mirrors the active workspace's grid, one row per tile in tile order. It is a second way to reach each pane, and it stays useful when a pane is hidden by minimize.
 
-A row has a label button (`T1`, `C1`, `F1`, and so on — the type's prefix plus a running number) followed by five icon buttons:
+A row has a label button (`T1`, `C1`, `F1`, and so on — the type's prefix plus a running number) followed by three icon buttons:
 
 | Control | What it does |
 |---|---|
 | Label | Focuses that pane; the row is accented when it is active |
-| Minimize / Restore | Hides or shows the pane body; its grid tile and reserved space stay |
-| Swap position | Opens a list of the other tiles and exchanges this pane's geometry with the chosen one |
-| Change pane type | Opens a list of the eight pane types and rebuilds this tile as the chosen type |
 | Pane settings | Opens the type-aware settings popup for that pane |
+| More pane actions | Opens the same menu the title bar's overflow button opens: minimize/restore, swap position, and the eight pane types with the current one marked |
 | Close | Closes that pane, after the running-work and unsaved-work questions |
+
+The three are the title bar's three. Both surfaces call one builder (`TerminalManager.show_pane_actions_popup`), so they cannot offer different actions or disagree about which type a pane is, and choosing the pane's own type from the menu does nothing rather than rebuilding it. Minimize and swap position are in that menu because neither is worth a permanent button: the tile keeps its space while a pane is hidden, and a swap needs a second pane to be meaningful.
 
 The label is also the pane's public identity: `T3` is what the CLI and MCP tools accept when you target a pane. Changing the type destroys the old pane body, so it asks the same questions as closing one. Minimizing a terminal keeps its process running; the tile does not change, so restoring it puts it back exactly where it was.
 

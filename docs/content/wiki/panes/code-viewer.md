@@ -8,6 +8,8 @@ The body is `CodeViewerPane` (`godot/scenes/panes/code_viewer.gd`). It holds two
 
 The pane is a viewer, not an editor. There is no save path and no writable state: the file's bytes are read once on open, and the only way to see a newer version is the toolbar's **Reload** button. That is a deliberate trade — the pane's scroll position, selection and rendered/source mode belong to its document, so it is stable while you read.
 
+With nothing to show — a pane opened from the CLI or API, or one whose path no longer reads — the pane does not sit on a blank editor. It shows **No file open** and the two ways to open one (the File Tree, or the path in pane settings), and hides its toolbar until there is something to act on. A routed capture is content without a file, so it counts as something to show.
+
 ## When to use it
 
 Use it to read source, config, logs, diffs, or documentation without leaving gPTY. It is also what `cat`-style captures and `git diff` output land in when a concept routes to a code viewer, which makes it the usual place to inspect what a command produced.
