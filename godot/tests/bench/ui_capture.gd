@@ -110,6 +110,14 @@ const STATES := {
 			"settings": {"type": "terminal", "attachment_id": "capture-spawn-size",
 				"shell_args": ["-c", 'set -- $(stty size); echo "born at $1 rows, $2 cols"; sleep 600']}},
 	]},
+	# The scrollbar column: the Terminal tab overflows its 540x560 card by
+	# 62 px, so its ScrollContainer must show a real bar with a thumb inside a
+	# track (row *Every scrollable surface has a 0 px scrollbar*). The 150 %
+	# twin proves the same geometry under the window's content scale - the
+	# column is layout pixels, so it scales with the rest of the chrome.
+	"settings-terminal": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Terminal"},
+	"settings-terminal-150": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Terminal",
+		"ui_scale": 150},
 	# The UI scale setting at its 125 % step, on the app's own first-launch
 	# workspace. The only visual proof that the setting scales the chrome and
 	# the terminal text together; a later release recaptures it.
@@ -593,7 +601,14 @@ func _click(control: Control) -> void:
 	if control == null or not is_instance_valid(control):
 		_fail("cannot click an invalid control")
 		return
-	var pos := control.get_global_rect().get_center()
+	# `Input.parse_input_event` takes window coordinates while a Control's global
+	# rect is in viewport (layout) coordinates. At a content scale other than
+	# 100 % the two differ - measured 2026-11-08: the `settings-terminal-150`
+	# state's click on the sidebar's Settings landed 2/3 of the way to its target
+	# and the panel never opened, because the views are 1280x720 layout space in
+	# a 1920x1080 window. The viewport's final transform is the one mapping
+	# between them (identity at 100 %, so every 100 % capture is unchanged).
+	var pos := root.get_final_transform() * control.get_global_rect().get_center()
 	await _send_motion(pos)
 	await _send_button(pos, true)
 	await process_frame

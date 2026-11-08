@@ -144,11 +144,31 @@ static func build() -> Theme:
 	t.set_constant("separation", "HSeparator", UiTokens.SPACE_LG)
 	t.set_constant("separation", "VSeparator", UiTokens.SPACE_LG)
 	t.set_stylebox("panel", "ScrollContainer", StyleBoxEmpty.new())
-	t.set_stylebox("scroll", "ScrollBar", StyleBoxEmpty.new())
-	t.set_stylebox("scroll_focus", "ScrollBar", StyleBoxEmpty.new())
-	t.set_stylebox("grabber", "ScrollBar", _flat(Color(p.TEXT_MUTED, 0.35)))
-	t.set_stylebox("grabber_highlight", "ScrollBar", _flat(Color(p.TEXT_MUTED, 0.55)))
-	t.set_stylebox("grabber_pressed", "ScrollBar", _flat(Color(p.ACCENT, 0.7)))
+	# A scrollbar is a control, not a hairline. `ScrollBar::get_minimum_size`
+	# takes a bar's thickness from the track stylebox's content margins plus the
+	# type's padding constants, and a thumb's minimum length from the grabber's
+	# margins - so an empty track is a 0 px bar: nothing to see, nothing to
+	# drag, and no column reserved beside the content. The track fills the
+	# column; the padding constants inset the thumb inside it.
+	var thumb_width := UiTokens.SCROLLBAR_THICKNESS - UiTokens.SCROLLBAR_INSET * 2
+	var bar_track := _flat(p.SURFACE_RAISED)
+	bar_track.set_content_margin_all(thumb_width / 2)
+	var bar_track_focus := _flat(p.SURFACE_RAISED, p.ACCENT, 1)
+	bar_track_focus.set_content_margin_all(thumb_width / 2)
+	var bar_thumb := _flat(Color(p.TEXT_MUTED, 0.75))
+	var bar_thumb_hl := _flat(p.ACCENT_HOVER)
+	var bar_thumb_pressed := _flat(p.ACCENT)
+	for box in [bar_thumb, bar_thumb_hl, bar_thumb_pressed]:
+		box.set_content_margin_all(UiTokens.SCROLLBAR_MIN_THUMB / 2)
+	t.set_stylebox("scroll", "ScrollBar", bar_track)
+	t.set_stylebox("scroll_focus", "ScrollBar", bar_track_focus)
+	t.set_stylebox("grabber", "ScrollBar", bar_thumb)
+	t.set_stylebox("grabber_highlight", "ScrollBar", bar_thumb_hl)
+	t.set_stylebox("grabber_pressed", "ScrollBar", bar_thumb_pressed)
+	t.set_constant("padding_left", "VScrollBar", UiTokens.SCROLLBAR_INSET)
+	t.set_constant("padding_right", "VScrollBar", UiTokens.SCROLLBAR_INSET)
+	t.set_constant("padding_top", "HScrollBar", UiTokens.SCROLLBAR_INSET)
+	t.set_constant("padding_bottom", "HScrollBar", UiTokens.SCROLLBAR_INSET)
 
 	# --- Windows and dialogs ---------------------------------------------------
 	# The embedded frame stylebox is left to the engine: a `Window`'s title band is

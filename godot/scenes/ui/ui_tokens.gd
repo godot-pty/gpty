@@ -42,6 +42,19 @@ const RADIUS := 3
 const BUTTON_MIN_WIDTH := 22
 const BUTTON_MIN_HEIGHT := 18
 
+# --- Scrollbars ---------------------------------------------------------------
+## The scrollbar column in layout pixels: the thumb plus `SCROLLBAR_INSET` on
+## each side. 8 px is the engine's own default bar width and the width the
+## sidebar's margins were designed around, so the column a `ScrollContainer`
+## reserves matches the rest of the chrome. `UiTheme` derives the track's
+## content margins and the thumb inset from these numbers, so the bar's
+## thickness and its thumb's width cannot disagree.
+const SCROLLBAR_THICKNESS := 8
+const SCROLLBAR_INSET := 1
+## The shortest a thumb may get, so a long transcript's thumb stays a drag
+## target instead of a sliver.
+const SCROLLBAR_MIN_THUMB := 24
+
 # --- Layout floor --------------------------------------------------------------
 ## The smallest layout space the chrome is designed for, in layout pixels. The
 ## Settings card is 540 x 560 and is the largest fixed surface; 540 also leaves

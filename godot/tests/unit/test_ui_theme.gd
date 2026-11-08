@@ -162,3 +162,74 @@ func test_the_icon_button_variation_is_flat_until_pointed_at():
 func test_the_accent_label_role_resolves_to_the_accent():
 	assert_eq(_theme.get_type_variation_base(UiTheme.ACCENT_LABEL), "Label")
 	assert_eq(_theme.get_color("font_color", UiTheme.ACCENT_LABEL), UiPalette.dark().ACCENT)
+
+
+## Every scrollable surface used to reserve no column: the theme's track and
+## grabber styleboxes were empty, and the engine reads a bar's thickness from
+## the track's content margins plus the type's padding constants. This asserts
+## the bar's own minimum, because that is what `ScrollContainer` subtracts from
+## its content area.
+func test_a_scrollbar_reserves_a_column():
+	var vbar := VScrollBar.new()
+	vbar.theme = _theme
+	add_child_autofree(vbar)
+	var hbar := HScrollBar.new()
+	hbar.theme = _theme
+	add_child_autofree(hbar)
+	await wait_frames(1)
+	assert_eq(vbar.get_minimum_size().x, UiTokens.SCROLLBAR_THICKNESS,
+		"the vertical bar reserves its column")
+	assert_eq(hbar.get_minimum_size().y, UiTokens.SCROLLBAR_THICKNESS,
+		"the horizontal bar reserves its row")
+	# The column has to be the theme's, not the engine fallback: an 8 px engine
+	# bar carries no padding and no surface-coloured track.
+	assert_eq(vbar.get_theme_constant("padding_left"), UiTokens.SCROLLBAR_INSET)
+	assert_eq(vbar.get_theme_constant("padding_right"), UiTokens.SCROLLBAR_INSET)
+	assert_eq(hbar.get_theme_constant("padding_top"), UiTokens.SCROLLBAR_INSET)
+	assert_eq(hbar.get_theme_constant("padding_bottom"), UiTokens.SCROLLBAR_INSET)
+
+
+func test_the_scrollbar_track_and_thumb_are_visible_controls():
+	var track := _theme.get_stylebox("scroll", "ScrollBar") as StyleBoxFlat
+	assert_not_null(track, "the track is a fill, not an empty box")
+	if track == null:
+		return
+	assert_eq(track.bg_color, UiPalette.active().SURFACE_RAISED)
+	var focus := _theme.get_stylebox("scroll_focus", "ScrollBar") as StyleBoxFlat
+	assert_not_null(focus, "the focused track is a fill too")
+	if focus == null:
+		return
+	assert_eq(focus.border_color, UiPalette.active().ACCENT)
+	assert_eq(focus.border_width_left, 1, "focus is a 1 px accent outline")
+	assert_eq((_theme.get_stylebox("grabber_highlight", "ScrollBar") as StyleBoxFlat).bg_color,
+		UiPalette.active().ACCENT_HOVER)
+	assert_eq((_theme.get_stylebox("grabber_pressed", "ScrollBar") as StyleBoxFlat).bg_color,
+		UiPalette.active().ACCENT)
+	for state in ["grabber", "grabber_highlight", "grabber_pressed"]:
+		var thumb := _theme.get_stylebox(state, "ScrollBar") as StyleBoxFlat
+		assert_not_null(thumb, "%s is a fill" % state)
+		if thumb == null:
+			continue
+		assert_gt(thumb.bg_color.a, 0.0, "%s is visible" % state)
+		assert_eq(thumb.get_minimum_size().y, UiTokens.SCROLLBAR_MIN_THUMB,
+			"%s keeps a grabbable length" % state)
+
+
+## The end of the defect: content taller than the container must produce a bar
+## with a real width.
+func test_an_overflowing_scroll_container_gets_a_real_bar():
+	var host := Control.new()
+	host.theme = _theme
+	host.size = Vector2(200, 100)
+	add_child_autofree(host)
+	var sc := ScrollContainer.new()
+	sc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.add_child(sc)
+	var content := Control.new()
+	content.custom_minimum_size = Vector2(100, 400)
+	sc.add_child(content)
+	await wait_frames(2)
+	var bar := sc.get_v_scroll_bar()
+	assert_gt(bar.max_value, bar.page, "the content really overflows")
+	assert_true(bar.visible, "the overflow shows a bar")
+	assert_eq(bar.size.x, UiTokens.SCROLLBAR_THICKNESS, "the bar takes its own column")
