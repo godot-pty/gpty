@@ -84,6 +84,12 @@ this is what it looks like.
 - **Sandboxed data lands in `$XDG_DATA_HOME/godot/app_userdata/gPTY/`** — `history.db`
   (+ `-wal`/`-shm`), `settings.json`, `workspaces.json`, `profiles.json`. Inspect with `sqlite3`
   (the WAL holds recent rows; a plain `cat` shows nothing).
+- **A size or layout claim needs a window.** `godot --headless` leaves the root viewport at 0×0, so
+  every tile is 0×0 and a terminal pane starts at its configured fallback grid (24×80) — on a build
+  where the fix is present. Measured 2026-11-08: the headless `new-pane` answered `stty size` with
+  `24 80` while the same build in a window answered `60 205`. Launch `godot --path godot` (or use
+  `scripts/ui-capture`) for pane size, `_apply_layout`, capture or UI claims; headless is for IPC,
+  PTY and output claims that do not depend on geometry. Detail: `pitfalls.md`.
 - **Core warnings do reach the log** (since v0.5.4): `diagnostics.rs` forwards `warn`+ from
   targets starting with `gpty` to Godot's console as `WARNING: [gpty_core::…] …`. An `info`/`debug`
   line from a core crate still will not appear — raise it to `warn` if you need to see it.
