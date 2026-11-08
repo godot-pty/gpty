@@ -671,16 +671,10 @@ func _kill_last():
 		return
 	_kill(_tm.last_body)
 
-func _on_pane_minimize(body: Control):
-	body.visible = not body.visible
-	_apply_layout()
-	_list()  # refresh sidebar to update minimize icon
-
-func _on_pane_position_swap(body: Control, source_btn: Button):
-	_tm.show_position_swap_popup(body, self, source_btn.get_screen_position() + Vector2(0, source_btn.size.y))
-
-func _on_pane_type_swap(body: Control, source_btn: Button):
-	_tm.show_type_swap_popup(body, self, source_btn.get_screen_position() + Vector2(0, source_btn.size.y))
+## The sidebar row's one menu — the same builder the title bar's overflow button
+## opens, so both surfaces list the same actions and mark the same current type.
+func _on_pane_menu(body: Control, source_btn: Button):
+	_tm.show_pane_actions_popup(body, self, source_btn.get_screen_position() + Vector2(0, source_btn.size.y))
 
 ## The reset primitive: every pane of the active workspace goes, no asking.
 ## Only the guarded entries below and the layout-rebuild internals call it.
@@ -1849,9 +1843,7 @@ func _wire_sidebar_signals():
 		# `activate_pane`).
 		activate_pane(body)
 	)
-	_sidebar.request_minimize.connect(func(body: Control): _on_pane_minimize(body))
-	_sidebar.request_position_swap.connect(func(body: Control, btn: Button): _on_pane_position_swap(body, btn))
-	_sidebar.request_type_swap.connect(func(body: Control, btn: Button): _on_pane_type_swap(body, btn))
+	_sidebar.request_pane_menu.connect(func(body: Control, btn: Button): _on_pane_menu(body, btn))
 	_sidebar.request_pane_settings.connect(func(body: Control): _tm._open_pane_settings(body))
 	_sidebar.toggled.connect(func(): _on_sidebar_toggled())
 	_sidebar.request_profile.connect(_activate_profile)

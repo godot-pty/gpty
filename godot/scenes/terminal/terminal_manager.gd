@@ -264,53 +264,13 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	btn_hbox.add_theme_constant_override("separation", UiTokens.SPACE_XS)
 	btn_hbox.anchor_left = 1.0; btn_hbox.anchor_right = 1.0
 	btn_hbox.anchor_top = 0.0; btn_hbox.anchor_bottom = 1.0
-	var btn_total = 5 * UiTokens.BUTTON_MIN_WIDTH + 12
+	# Three controls, not five. Settings, the one menu that holds everything
+	# else, and close: the type list alone used to cost a whole button, and the
+	# ~122 px the five reserves is what squeezed a narrow pane's title.
+	var btn_total = 3 * UiTokens.BUTTON_MIN_WIDTH + 8
 	btn_hbox.offset_left = -btn_total
 	btn_hbox.offset_right = -2
 	bar.add_child(btn_hbox)
-
-	var min_btn = Button.new()
-	min_btn.name = "Minimize"
-	min_btn.tooltip_text = "Minimize / Restore"
-	min_btn.custom_minimum_size = Vector2(UiTokens.BUTTON_MIN_WIDTH, UiTokens.BUTTON_MIN_HEIGHT)
-	Icons.icon_button(min_btn, Icons.MINIMIZE, "Minimize pane")
-	min_btn.pressed.connect(func(): _toggle_minimize(root, min_btn))
-	btn_hbox.add_child(min_btn)
-
-	var pos_swap_btn = Button.new()
-	pos_swap_btn.name = "SwapPosition"
-	pos_swap_btn.tooltip_text = "Swap position with another pane"
-	pos_swap_btn.custom_minimum_size = Vector2(UiTokens.BUTTON_MIN_WIDTH, UiTokens.BUTTON_MIN_HEIGHT)
-	Icons.icon_button(pos_swap_btn, Icons.SWAP, "Swap pane position")
-	pos_swap_btn.pressed.connect(func():
-		var b = _find_body(root)
-		if b:
-			_show_swap_popup(b, bar, pos_swap_btn.get_screen_position() + Vector2(0, pos_swap_btn.size.y))
-	)
-	btn_hbox.add_child(pos_swap_btn)
-	var swap_btn = Button.new()
-	swap_btn.name = "ChangeType"
-	swap_btn.tooltip_text = "Change pane type"
-	swap_btn.custom_minimum_size = Vector2(UiTokens.BUTTON_MIN_WIDTH, UiTokens.BUTTON_MIN_HEIGHT)
-	Icons.icon_button(swap_btn, Icons.RESET, "Change pane type")
-	# PopupMenu listing all pane types
-	var swap_menu = PopupMenu.new()
-	swap_menu.name = "SwapMenu"
-	for key in PaneTypes.ALL:
-		swap_menu.add_item(PaneTypes.ALL[key]["name"])
-		swap_menu.set_item_metadata(swap_menu.item_count - 1, key)
-	swap_menu.index_pressed.connect(func(idx: int):
-		var type_name = swap_menu.get_item_metadata(idx)
-		_handle_swap(_find_body(root), type_name, swap_menu)
-	)
-	swap_btn.pressed.connect(func():
-		swap_menu.position = swap_btn.get_screen_position() + Vector2(0, swap_btn.size.y)
-		swap_menu.reset_size()
-		swap_menu.popup()
-	)
-	btn_hbox.add_child(swap_btn)
-	# PopupMenu must be a child of root to receive input
-	root.add_child(swap_menu)
 
 	var settings_btn = Button.new()
 	settings_btn.name = "PaneSettings"
@@ -319,6 +279,17 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	Icons.icon_button(settings_btn, Icons.SETTINGS, "Pane settings")
 	settings_btn.pressed.connect(func(): _open_pane_settings(_find_body(root)))
 	btn_hbox.add_child(settings_btn)
+
+	var more_btn = Button.new()
+	more_btn.name = "MoreActions"
+	more_btn.tooltip_text = "More pane actions"
+	more_btn.custom_minimum_size = Vector2(UiTokens.BUTTON_MIN_WIDTH, UiTokens.BUTTON_MIN_HEIGHT)
+	Icons.icon_button(more_btn, Icons.MORE, "More pane actions")
+	more_btn.pressed.connect(func():
+		show_pane_actions_popup(_find_body(root), root,
+			more_btn.get_screen_position() + Vector2(0, more_btn.size.y))
+	)
+	btn_hbox.add_child(more_btn)
 
 	var close_btn = Button.new()
 	close_btn.name = "ClosePane"
@@ -605,16 +576,15 @@ func _tile_index_for_wrapper(wrapper: Control) -> int:
 			return i
 	return -1
 
-func _toggle_minimize(w: Control, btn: Button):
-	var body = _find_body(w)
-	if body:
-		body.visible = not body.visible
-		# The name moves with the glyph: the button acts as what it says. The
-		# name goes first so `set_glyph` mirrors it onto the glyph Label.
-		btn.accessibility_name = "Minimize pane" if body.visible else "Restore pane"
-		Icons.set_glyph(btn, Icons.MINIMIZE if body.visible else Icons.RESTORE)
-		# Restoring brings the pane back and the keyboard with it (hiding it
-		# leaves nothing to focus, on purpose).
+## The one minimize/restore transition, for the title bar and the sidebar alike.
+## Hiding a pane leaves nothing to focus on purpose; restoring brings the
+## keyboard back, so the next keystroke is not swallowed by chrome that is no
+## longer there.
+func toggle_pane_minimize(body: Control) -> void:
+	if body == null or not is_instance_valid(body):
+		return
+	body.visible = not body.visible
+	if body.visible:
 		_return_focus_to_body(body)
 
 func _handle_close(body: Control):
@@ -637,18 +607,16 @@ func _open_pane_settings(body: Control):
 
 
 
-func _show_swap_popup(body: Control, bar: Control, pos: Vector2):
-	var root = bar.get_parent().get_parent()  # BodyVBox -> PanelContainer
-	if root is PanelContainer:
-		show_position_swap_popup(body, root, pos)
-
 func _swap_tile_positions(a: int, b: int):
 	var ta = tiles[a]
 	var tb = tiles[b]
 	var tmp = {"col": ta.col, "row": ta.row, "cspan": ta.cspan, "rspan": ta.rspan}
 	ta.col = tb.col; ta.row = tb.row; ta.cspan = tb.cspan; ta.rspan = tb.rspan
 	tb.col = tmp.col; tb.row = tmp.row; tb.cspan = tmp.cspan; tb.rspan = tmp.rspan
-func _handle_swap(body: Control, new_type_name: String, _menu: PopupMenu):
+
+## Every type change goes through here: the workspace owns the transaction (the
+## running-work/unsaved-work guard, the rebuild, the toast).
+func _handle_swap(body: Control, new_type_name: String) -> void:
 	if on_swap.is_valid():
 		on_swap.call(body, new_type_name)
 
@@ -668,6 +636,63 @@ func resolve_swap_pair(a: Variant, b: Variant) -> Vector2i:
 	if ia == -1 or ib == -1:
 		return Vector2i(-1, -1)
 	return Vector2i(ia, ib)
+
+## A pane's type key, or "" for a control that is not a pane (a tile mid-build).
+func _pane_type_of(body: Control) -> String:
+	return body._pane_type() if body != null and body.has_method("_pane_type") else ""
+
+## The one pane-action menu: everything a pane's chrome offers, with its current
+## type marked. The title bar's overflow button and the sidebar's row both open
+## this, so the two cannot disagree about what a pane can do or which type it is.
+##
+## Built per open and freed when it closes (the `show_position_swap_popup`
+## pattern): a minimized pane reads "Restore pane", and the check mark follows a
+## type change, without a menu that outlives the pane it describes.
+func show_pane_actions_popup(for_body: Control, menu_parent: Control, at_pos: Vector2) -> void:
+	if for_body == null or not is_instance_valid(for_body):
+		return
+	var menu := PopupMenu.new()
+	menu.name = "PaneActionsMenu"
+	var current := _pane_type_of(for_body)
+	menu.add_item("Restore pane" if not for_body.visible else "Minimize pane")
+	menu.set_item_metadata(menu.item_count - 1, {"kind": "minimize"})
+	menu.add_item("Swap position\u2026")
+	menu.set_item_metadata(menu.item_count - 1, {"kind": "position"})
+	# One tile has nothing to swap with: a live item that opens nothing reads as
+	# a broken click.
+	menu.set_item_disabled(menu.item_count - 1, tiles.size() < 2)
+	menu.add_separator()
+	for key in PaneTypes.ALL:
+		menu.add_radio_check_item(PaneTypes.ALL[key]["name"])
+		var idx := menu.item_count - 1
+		menu.set_item_metadata(idx, {"kind": "type", "key": key})
+		menu.set_item_checked(idx, key == current)
+	menu.index_pressed.connect(func(idx: int):
+		var meta = menu.get_item_metadata(idx)
+		menu.queue_free()
+		if not (meta is Dictionary):
+			return
+		var action: Dictionary = meta
+		match str(action.get("kind", "")):
+			"minimize":
+				toggle_pane_minimize(for_body)
+			"position":
+				show_position_swap_popup(for_body, menu_parent, at_pos)
+			"type":
+				var key := str(action.get("key", ""))
+				# The checked item is the pane's own type: choosing it is a
+				# no-op, not a request to destroy and rebuild an identical body
+				# (`swap_pane` does allow a same-type swap - a test pins it).
+				if key == "" or key == current:
+					_return_focus_to_body(for_body)
+					return
+				_handle_swap(for_body, key)
+	)
+	menu_parent.add_child(menu)
+	menu.position = at_pos
+	menu.reset_size()
+	menu.popup()
+	menu.popup_hide.connect(menu.queue_free)
 
 func show_position_swap_popup(for_body: Control, menu_parent: Control, at_pos: Vector2):
 	var this_ti := _tile_index_of(for_body)
@@ -699,22 +724,6 @@ func show_position_swap_popup(for_body: Control, menu_parent: Control, at_pos: V
 		_swap_tile_positions(pair.x, pair.y)
 		_return_focus_to_body(for_body)
 		tiles_resized.emit()
-	)
-	menu_parent.add_child(menu)
-	menu.position = at_pos
-	menu.reset_size()
-	menu.popup()
-	menu.popup_hide.connect(menu.queue_free)
-
-func show_type_swap_popup(for_body: Control, menu_parent: Control, at_pos: Vector2):
-	var menu = PopupMenu.new()
-	menu.name = "SwapTypeMenu"
-	for key in PaneTypes.ALL:
-		menu.add_item(PaneTypes.ALL[key]["name"])
-		menu.set_item_metadata(menu.item_count - 1, key)
-	menu.index_pressed.connect(func(idx: int):
-		var type_name = menu.get_item_metadata(idx)
-		_handle_swap(for_body, type_name, menu)
 	)
 	menu_parent.add_child(menu)
 	menu.position = at_pos

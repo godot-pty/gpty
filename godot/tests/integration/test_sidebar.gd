@@ -135,10 +135,10 @@ func test_a_pane_rows_buttons_each_act_on_that_pane():
 	_sidebar.update_pane_list([body])
 	var row = _sidebar._pane_list.get_child(0)
 	var actions := [
-		"request_focus", "request_minimize", "request_position_swap",
-		"request_type_swap", "request_pane_settings", "request_close",
+		"request_focus", "request_pane_settings", "request_pane_menu",
+		"request_close",
 	]
-	assert_eq(row.get_child_count(), actions.size(), "a row is label + six actions")
+	assert_eq(row.get_child_count(), actions.size(), "a row is label + three actions")
 	watch_signals(_sidebar)
 	for i in actions.size():
 		(row.get_child(i) as Button).pressed.emit()

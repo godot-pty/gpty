@@ -76,7 +76,7 @@ func test_every_title_bar_button_is_a_tab_stop_in_an_explicit_ring():
 	var body: Control = ws._tm.last_body
 	assert_true(body is TerminalPane, "the startup tile holds a terminal")
 	var row: HBoxContainer = _bar(ws, body).get_node(TerminalManager.TITLE_BAR_BUTTONS)
-	assert_eq(row.get_child_count(), 5, "the bar carries five actions")
+	assert_eq(row.get_child_count(), 3, "the bar carries settings, more and close")
 
 	for child in row.get_children():
 		var b := child as Button
@@ -111,7 +111,7 @@ func test_the_chrome_shortcut_enters_the_bar_and_escape_returns_to_the_pane():
 		return
 	assert_eq(owner.get_parent().name, TerminalManager.TITLE_BAR_BUTTONS,
 		"focus lands in the active pane's bar")
-	assert_eq(owner.name, "Minimize", "the bar is entered at its first action")
+	assert_eq(owner.name, "PaneSettings", "the bar is entered at its first action")
 
 	await _press_key(KEY_ESCAPE)
 	assert_eq(ws.get_viewport().gui_get_focus_owner(), body,
@@ -131,14 +131,12 @@ func test_the_chrome_shortcut_leaves_an_open_overlay_alone():
 func test_restoring_a_minimized_pane_brings_the_keyboard_back():
 	var ws = await _make_workspace()
 	var body: Control = ws._tm.last_body
-	var min_btn: Button = _bar(ws, body).get_node(
-		TerminalManager.TITLE_BAR_BUTTONS + "/Minimize")
 
-	min_btn.pressed.emit()
+	ws._tm.toggle_pane_minimize(body)
 	assert_false(body.visible, "minimize hides the pane")
 
-	min_btn.pressed.emit()
-	assert_true(body.visible, "the second press restores it")
+	ws._tm.toggle_pane_minimize(body)
+	assert_true(body.visible, "the second call restores it")
 	assert_eq(ws.get_viewport().gui_get_focus_owner(), body,
 		"a restored pane takes the keyboard, so the next keystroke is not swallowed")
 

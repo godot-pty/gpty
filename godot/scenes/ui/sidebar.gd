@@ -6,9 +6,7 @@ signal request_close(body: Control)
 signal request_settings
 signal request_reset
 signal request_focus(body: Control)
-signal request_minimize(body: Control)
-signal request_position_swap(body: Control, source_btn: Button)
-signal request_type_swap(body: Control, source_btn: Button)
+signal request_pane_menu(body: Control, source_btn: Button)
 signal request_pane_settings(body: Control)
 signal toggled
 signal request_profile(name: String)
@@ -86,21 +84,16 @@ func update_pane_list(panes: Array, active_body: Control = null):
 		btn.pressed.connect(func(): request_focus.emit(body))
 		row.add_child(btn)
 
-		var min_btn = _make_row_action_button(Icons.RESTORE if not body.visible else Icons.MINIMIZE, "Minimize / Restore")
-		min_btn.pressed.connect(func(): request_minimize.emit(body))
-		row.add_child(min_btn)
-
-		var pos_btn = _make_row_action_button(Icons.SWAP, "Swap position")
-		pos_btn.pressed.connect(func(): request_position_swap.emit(body, pos_btn))
-		row.add_child(pos_btn)
-
-		var type_btn = _make_row_action_button(Icons.RESET, "Change pane type")
-		type_btn.pressed.connect(func(): request_type_swap.emit(body, type_btn))
-		row.add_child(type_btn)
-
+		# Three trailing actions, the same three the title bar shows: settings,
+		# the one menu (minimize, swap position, type list with the current type
+		# marked), close. The five it used to carry left ~49 px for the label.
 		var set_btn = _make_row_action_button(Icons.SETTINGS, "Pane settings")
 		set_btn.pressed.connect(func(): request_pane_settings.emit(body))
 		row.add_child(set_btn)
+
+		var menu_btn = _make_row_action_button(Icons.MORE, "More pane actions")
+		menu_btn.pressed.connect(func(): request_pane_menu.emit(body, menu_btn))
+		row.add_child(menu_btn)
 
 		var cls_btn = _make_row_action_button(Icons.CLOSE, "Close pane")
 		cls_btn.pressed.connect(func(): request_close.emit(body))
