@@ -75,6 +75,12 @@ var cfg_appearance_mode := APPEARANCE_DARK
 ## and re-pushes every colour it owns.
 signal appearance_changed(is_dark: bool)
 
+## The window mode as a reader hears it, from the same table the sidebar's
+## dropdown fills from: the Feedback issue's build block names the mode without
+## re-indexing the array, and it stays in step with the dropdown by construction.
+func window_mode_label() -> String:
+	return WINDOW_MODE_LABELS[clampi(cfg_window_mode, 0, WINDOW_MODE_LABELS.size() - 1)]
+
 ## The desktop's dark-mode answer. A seam, so a test can model a desktop that
 ## reports light, dark, or nothing at all — a platform or a session without the
 ## query answers `true`, the app's own default.

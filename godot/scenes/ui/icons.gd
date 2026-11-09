@@ -91,6 +91,7 @@ const NEW_WORKSPACE = "\uE5DE"  # arrow-square-out (open a profile in its own wo
 const RESET    = "\uE038"  # arrow-counter-clockwise (reset a value to its default)
 const MORE     = "\uE204"  # dots-three-outline (a pane's overflow actions)
 const QUESTION = "\uE3E8"  # question (the section Help affordance)
+const FEEDBACK = "\uE16C"  # chat-circle-dots (the sidebar's Feedback row)
 const MAXIMIZE_WIN = "\uE0A2"  # arrows-out (expand/fullscreen)
 const RESTORE_WIN = "\uE09A"  # arrows-in (restore from fullscreen)
 const WINDOW_MODE = "\uE32E"  # monitor (window mode cycling)

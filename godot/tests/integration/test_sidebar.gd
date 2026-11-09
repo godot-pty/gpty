@@ -494,3 +494,62 @@ func test_the_add_pane_help_lists_every_glyph_and_the_action_it_takes():
 	assert_eq((table.get_child(2) as Label).text,
 		ShortcutManager.chord("app:new_terminal"),
 		"the chord is the binding the tile's tooltip names, not a literal")
+
+# ── Feedback ───────────────────────────────────────────────────────────
+
+var _opened: Array = []
+var _copied: Array = []
+var _open_result: Error = OK
+
+func _record_open(uri: String) -> Error:
+	_opened.append(uri)
+	return _open_result
+
+func _record_copy(text: String) -> void:
+	_copied.append(text)
+
+func _use_recorders() -> void:
+	_opened.clear()
+	_copied.clear()
+	_open_result = OK
+	_sidebar.open_external = _record_open
+	_sidebar.copy_text = _record_copy
+
+func test_the_feedback_row_is_the_last_action_below_close_all():
+	var close_all := _icon_text_button("Close All")
+	var feedback := _icon_text_button("Feedback")
+	assert_not_null(close_all, "Close All must exist")
+	assert_not_null(feedback, "the Feedback row must exist")
+	assert_eq(feedback.get_parent(), close_all.get_parent(),
+		"both are footer actions in the same column")
+	assert_eq(feedback.get_index(), close_all.get_index() + 1,
+		"Feedback sits directly below Close All")
+	var row := feedback.get_node_or_null("IconTextRow")
+	assert_eq((row.get_child(0) as Label).text, Icons.FEEDBACK,
+		"the row draws its own glyph, not a neighbour's")
+
+func test_the_feedback_button_opens_a_prefilled_issue():
+	_use_recorders()
+	_icon_text_button("Feedback").pressed.emit()
+	assert_eq(_opened.size(), 1, "one link, one open")
+	assert_true(str(_opened[0]).begins_with(FeedbackText.ISSUE_URL),
+		"the blank issue editor, not a template form")
+	var decoded := str(_opened[0]).uri_decode()
+	assert_string_contains(decoded, GptyTerminal.get_app_version(),
+		"the body names this build")
+	assert_string_contains(decoded, SettingsManager.window_mode_label())
+	assert_eq(_copied.size(), 0, "a successful open does not touch the clipboard")
+
+func test_a_failed_open_copies_the_text_and_says_so():
+	_use_recorders()
+	_open_result = ERR_CANT_OPEN
+	watch_signals(ToastManager)
+	_icon_text_button("Feedback").pressed.emit()
+	assert_eq(_copied.size(), 1, "the text is the fallback")
+	assert_eq(str(_copied[0]), FeedbackText.body(_sidebar.feedback_about()),
+		"exactly the body the URL would have carried")
+	assert_signal_emit_count(ToastManager, "toast_requested", 1)
+	var toast: Dictionary = get_signal_parameters(ToastManager, "toast_requested")[0]
+	assert_eq(toast["level"], ToastManager.WARN)
+	assert_string_contains(str(toast["text"]), "copied",
+		"the toast says where the text went")

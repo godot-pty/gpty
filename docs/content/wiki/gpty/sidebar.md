@@ -4,7 +4,7 @@ The sidebar is the 180 px panel on the left of the window. It gives one place to
 
 ## Shape and collapse
 
-The panel has a header with the gPTY title and a collapse arrow, then four sections in this order: window mode, workspaces, profiles, and panes. Between the window-mode row and the sections sit the Add Pane grid and three actions — Search, Settings, and Close All.
+The panel has a header with the gPTY title and a collapse arrow, then four sections in this order: window mode, workspaces, profiles, and panes. Between the window-mode row and the sections sit the Add Pane grid and four actions — Search, Settings, Close All, and Feedback.
 
 Collapsing shrinks the sidebar to a 20 px strip with a single expand button; the pane grid widens to take the space. `Ctrl+Shift+B` toggles it, and the arrow in the header or the expand button does the same. The collapsed state is not saved, so each run starts expanded.
 
@@ -27,6 +27,7 @@ Below it:
 - **Search** opens the search strip on the active terminal (or the workspace's first terminal when a non-terminal is focused). Same as `Ctrl+Shift+F`.
 - **Settings** opens the global settings panel described in [[settings]].
 - **Close All** closes every pane in the active workspace. It asks before stopping running commands or discarding unsaved work; a Cancel leaves everything in place. Same as `Ctrl+Shift+R`.
+- **Feedback** opens a prefilled GitHub issue in your browser. The title reads `Feedback: ` and the body carries three prompts — what happened, what you expected, steps to reproduce — over an "About this build" block naming the gPTY version, the operating system and its version, and the window mode. Only those four facts are prefilled: never pane output, a command, selected text, a path, an environment value, or a log. Nothing is submitted by gPTY and no token or network call is involved — the issue is an ordinary GitHub page you review and file yourself. When no browser can be opened (offline, headless, no default handler) the same text is copied to the clipboard instead and a toast says so.
 
 ## Workspaces
 

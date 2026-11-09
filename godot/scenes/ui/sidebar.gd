@@ -180,6 +180,11 @@ func _add_buttons(v: VBoxContainer):
 	reset_btn.pressed.connect(func(): request_reset.emit())
 	v.add_child(reset_btn)
 
+	var feedback_btn = _make_icon_text_button(Icons.FEEDBACK, "Feedback")
+	feedback_btn.tooltip_text = "Report a bug or request a feature - opens a prefilled GitHub issue in your browser"
+	feedback_btn.pressed.connect(_on_feedback_pressed)
+	v.add_child(feedback_btn)
+
 ## One clickable button holding an icon Label and a text Label in an HBox —
 ## the container aligns the PUA glyph and the label on the same baseline,
 ## which a sibling-icon layout could never do reliably.
@@ -307,6 +312,35 @@ func _pane_help_rows() -> Array[Dictionary]:
 func _with_chord(text: String, action: String) -> String:
 	var chord := ShortcutManager.chord(action)
 	return text if chord == "" else "%s (%s)" % [text, chord]
+
+## The Feedback row's two outbound effects, replaceable in tests (the file
+## tree's `open_external` precedent): both cross the process boundary, so a
+## headless run can only assert what was handed to them.
+var open_external: Callable = func(uri: String) -> Error: return OS.shell_open(uri)
+var copy_text: Callable = func(text: String) -> void: DisplayServer.clipboard_set(text)
+
+## What the Feedback issue reports about this build - the four facts the row
+## allows and nothing else: no pane type, no profile, no path, no environment.
+func feedback_about() -> Dictionary:
+	return {
+		"version": GptyTerminal.get_app_version(),
+		"os": OS.get_name(),
+		"os_version": OS.get_version(),
+		"window_mode": SettingsManager.window_mode_label(),
+	}
+
+## Open the prefilled issue; when no browser can be reached (offline, headless,
+## no default handler) the same text goes to the clipboard instead, so the
+## report is one paste away and nothing is submitted by the app.
+func _on_feedback_pressed() -> void:
+	var about := feedback_about()
+	var err: Error = open_external.call(FeedbackText.url(about))
+	if err == OK:
+		return
+	copy_text.call(FeedbackText.body(about))
+	ToastManager.warn(
+		"Couldn't open a browser - issue text copied; paste it at github.com/godot-pty/gpty/issues/new",
+		6.0, "Feedback")
 
 func _on_pane_tile_entered(key: String) -> void:
 	_add_pane_hover = key
