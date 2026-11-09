@@ -35,7 +35,7 @@ New `#[derive(GodotClass)]` in a NEW file under `crates/gpty-gdext/src/`; regist
 
 ## 5. Tests and docs
 
-- `godot/tests/integration/test_palette.gd` pins `PaneTypes.ALL.size()` (rename the `..._has_six_entries` test to the new count) and each `new <name>` palette entry.
+- `godot/tests/integration/test_palette.gd` pins the palette's half: `test_the_palette_lists_one_new_command_per_pane_type_then_the_actions` checks `PaneTypes.ALL.size()` rows (`PaletteModel.entries()` derives them), and `test_every_new_command_spawns_its_own_pane_type` runs each `new <name>`. `godot/tests/unit/test_palette_model.gd` pins the model itself (registry order, unique commands, labels that differ from ids).
 - `godot/tests/integration/test_pane_spawning.gd` pins the type list and label prefixes.
 - `godot/tests/unit/test_pane_hardening.gd` if the pane spawns something (trust coverage).
 - Unit/integration test for real behavior (`godot/tests/unit/test_<key>.gd` or `integration/`), asserting the observable read API and the visible widget content, not UI wording.
