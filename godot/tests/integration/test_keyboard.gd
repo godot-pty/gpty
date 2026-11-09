@@ -237,3 +237,37 @@ func test_keys_that_send_input_still_snap_to_bottom():
 	assert_eq(_pane.snaps, 2, "a keymap key returns the view to live output")
 	_pane._handle_keyboard(_key_event(KEY_ENTER, 13))
 	assert_eq(_pane.snaps, 3, "Enter returns the view to live output")
+
+
+# ── The declared chords are the handler's source of truth ──────────────
+#
+# `term:copy`/`term:paste`/`term:search` are declared in ShortcutManager so a
+# surface can print them (Settings > About, a sidebar tooltip). The handler must
+# follow the same declaration: these derive the event from the binding, so a
+# chord rebound in the registry without the handler is caught here.
+
+## The event the declared action is bound to, as the pane receives it.
+func _declared_event(action: String) -> InputEventKey:
+	var chord := ShortcutManager.chord(action)
+	assert_ne(chord, "", "%s must be declared for this test to mean anything" % action)
+	var ev := ShortcutManager._parse_bind(chord)
+	ev.pressed = true
+	return ev
+
+func test_the_declared_search_chord_toggles_the_search_bar():
+	_pane._handle_keyboard(_declared_event("term:search"))
+	assert_eq(_pane.search_toggles, 1)
+	assert_eq(_pane.sent, [], "the chord is the pane's, not input for the child")
+
+func test_the_declared_copy_chord_copies_and_consumes():
+	_pane.sel_text = "abc"
+	_pane._handle_keyboard(_declared_event("term:copy"))
+	assert_eq(_pane.sent, [], "copy must not send bytes to the shell")
+	assert_eq(_pane.clears, 1, "copy consumed the chord and dismissed the selection")
+
+func test_the_declared_paste_chord_pastes_through_the_gui_gate():
+	# `_gui_input` is the real entry point: its early return lets the pane-local
+	# chord through to the pane's own handler, which is what makes `declare`
+	# different from `register`.
+	_pane._gui_input(_declared_event("term:paste"))
+	assert_eq(_pane.sent, ["clip-payload"])

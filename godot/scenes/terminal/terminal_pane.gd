@@ -1140,7 +1140,13 @@ func _is_bracketed_paste() -> bool:
 	return _terminal != null and _terminal.is_bracketed_paste()
 
 func _is_copy_paste(event: InputEventKey) -> bool:
-	return (event.keycode == KEY_C or event.keycode == KEY_V) and event.ctrl_pressed and event.shift_pressed
+	return _is_chord(event, &"term:copy") or _is_chord(event, &"term:paste")
+
+## Whether `event` is a declared pane-local chord. `InputMap.has_action` is
+## checked first: `InputEvent.is_action` on a missing action logs an engine
+## error, which the GUT gate counts as a failure.
+static func _is_chord(event: InputEvent, action: StringName) -> bool:
+	return InputMap.has_action(action) and event.is_action(action, true)
 
 func _get_clipboard_text() -> String:
 	return DisplayServer.clipboard_get()
@@ -1232,15 +1238,18 @@ func _handle_keyboard(event: InputEventKey):
 	if _search_visible and event.keycode == KEY_ESCAPE:
 		_close_search()
 		accept_event(); return
-	# Ctrl+Shift+F toggles the search bar. Plain Ctrl+F is deliberately NOT
-	# intercepted: it must keep flowing to the PTY (vim/less page-forward)
-	# through the keymap/unicode path below. Auto-repeat is consumed but
-	# ignored: holding the chord must not flip the bar on every repeat.
-	if event.keycode == KEY_F and event.ctrl_pressed and event.shift_pressed:
+	# The terminal's chords are declared in ShortcutManager (`term:*`), so this
+	# handler and the About list read one spelling. Plain Ctrl+F is deliberately
+	# NOT intercepted: it must keep flowing to the PTY (vim/less page-forward)
+	# through the keymap/unicode path below — `is_action(…, true)` compares the
+	# modifiers exactly, so only the chord reaches this branch. Auto-repeat is
+	# consumed but ignored: holding the chord must not flip the bar on every
+	# repeat.
+	if _is_chord(event, &"term:search"):
 		if not event.echo:
 			_toggle_search()
 		accept_event(); return
-	if event.keycode == KEY_C and event.ctrl_pressed and event.shift_pressed:
+	if _is_chord(event, &"term:copy"):
 		# Copy-only: always consume the event so it can never fall through
 		# to a workspace shortcut. No selection → silent no-op.
 		if not event.echo:
@@ -1250,7 +1259,7 @@ func _handle_keyboard(event: InputEventKey):
 			_clear_selection()
 		accept_event()
 		return
-	if event.keycode == KEY_V and event.ctrl_pressed and event.shift_pressed:
+	if _is_chord(event, &"term:paste"):
 		# Consume repeats as well: falling through would reach _key_to_text
 		# and send a literal ^V for every repeat of the chord.
 		if not event.echo:

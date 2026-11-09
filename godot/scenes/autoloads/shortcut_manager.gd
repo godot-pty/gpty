@@ -14,6 +14,12 @@ var _actions: Dictionary = {}
 
 func _ready():
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# Pane-local chords: the terminal's handler owns the behaviour and the
+	# registry owns the spelling, so a surface that names a chord (Settings >
+	# About, a sidebar tooltip) cannot drift from the binding that works.
+	declare("term:search", "Ctrl+Shift+F")
+	declare("term:copy", "Ctrl+Shift+C")
+	declare("term:paste", "Ctrl+Shift+V")
 
 ## Wire an action to the chord that fires it. `survives_overlay` is only for an
 ## action that acts on the window itself (the palette and sidebar toggles and
@@ -27,6 +33,19 @@ func register(action_name: String, default_bind: String, callback: Callable, sur
 			InputMap.action_add_event(action_name, event)
 	_actions[action_name] = callback
 	_survives_overlay[action_name] = survives_overlay
+
+## Bind a chord in the InputMap without a workspace callback: a pane-local chord
+## (the terminal's copy, paste and search) that the pane's own key handler reads
+## with `InputEvent.is_action`. `is_shortcut` answers only for actions that carry
+## a callback, so a declared chord still reaches the pane that declares it and
+## never fires a workspace action behind it.
+func declare(action_name: String, default_bind: String) -> void:
+	if InputMap.has_action(action_name):
+		return
+	InputMap.add_action(action_name)
+	var event = _parse_bind(default_bind)
+	if event:
+		InputMap.action_add_event(action_name, event)
 
 ## The chord an action is bound to, spelled the way `register` accepts it
 ## ("Ctrl+Shift+W"), so a surface that names a shortcut reads the binding it
@@ -70,6 +89,9 @@ func _parse_bind(bind_str: String) -> InputEventKey:
 			ev.keycode = kc
 	return ev
 
+## Whether `event` is a chord a **callback** action owns. A declared action
+## (`declare`) is deliberately not a shortcut here: it belongs to the pane that
+## reads it, so the terminal is offered the key before the workspace refuses it.
 func is_shortcut(event: InputEvent) -> bool:
 	if not event is InputEventKey: return false
 	for action in _actions.keys():
