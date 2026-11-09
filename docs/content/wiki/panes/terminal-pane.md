@@ -38,7 +38,7 @@ Keys the pane recognises itself:
 |---|---|
 | `Ctrl+Shift+C` | copy the selection |
 | `Ctrl+Shift+V` | paste (bracketed paste when the child asked for it; control bytes are stripped either way) |
-| `Ctrl+Shift+F` | toggle the scrollback search strip at the pane's top edge (regular expressions); Enter steps to the next match, Shift+Enter to the previous one |
+| `Ctrl+Shift+F` | toggle the scrollback search strip at the pane's top edge (regular expressions); Enter steps to the next match, Shift+Enter to the previous one; in the History scope Up/Down walk the result rows and Enter copies the cursor's line |
 | `PageUp` / `PageDown` | scroll the viewport |
 | `Ctrl+V` | deliberately passed through to the child as `^V` |
 

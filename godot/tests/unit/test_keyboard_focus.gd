@@ -93,3 +93,33 @@ func test_tab_components_skips_members_a_component_already_claimed():
 	var components := KeyboardFocus.tab_components([a, b, b])
 	assert_eq(components.size(), 1, "a second start inside the ring adds nothing")
 	assert_eq((components[0]["controls"] as Array).size(), 2)
+
+
+## The one clamped cursor step (`next_index`), shared by the command palette and
+## the terminal's history results: the ends are stops, not wraps, and a cursor
+## that is not on anything yet starts at the end the arrow points from.
+func test_next_index_clamps_at_the_ends():
+	assert_eq(KeyboardFocus.next_index(0, 3, -1), 0, "the first row stays put")
+	assert_eq(KeyboardFocus.next_index(2, 3, 1), 2, "the last row stays put")
+	assert_eq(KeyboardFocus.next_index(1, 3, 1), 2, "a middle step moves one row")
+	assert_eq(KeyboardFocus.next_index(1, 3, -1), 0, "and moves back by one")
+
+func test_next_index_starts_at_the_first_or_last_row_from_none():
+	assert_eq(KeyboardFocus.next_index(-1, 3, 1), 0, "Down from nothing selects the first row")
+	assert_eq(KeyboardFocus.next_index(-1, 3, -1), 2, "Up from nothing selects the last row")
+	assert_eq(KeyboardFocus.next_index(-1, 0, 1), -1, "an empty list has no cursor")
+	assert_eq(KeyboardFocus.next_index(0, 3, 0), -1, "a zero step is not a move")
+
+## The declaration the focus audit reads: a control that leaves its action to a
+## chord names the keyboard path, and an empty reason clears it again.
+func test_a_declared_mouse_only_button_reports_its_reason():
+	var btn := Button.new()
+	assert_eq(KeyboardFocus.mouse_only_reason(btn), "",
+		"a control that never declared itself has no reason")
+	KeyboardFocus.declare_mouse_only(btn, "Enter acts from the field")
+	assert_eq(KeyboardFocus.mouse_only_reason(btn), "Enter acts from the field",
+		"the reason is what the audit prints")
+	KeyboardFocus.declare_mouse_only(btn, "")
+	assert_eq(KeyboardFocus.mouse_only_reason(btn), "",
+		"an empty reason clears the declaration")
+	btn.free()

@@ -147,6 +147,8 @@ var _search_error: String = ""
 var _scope_btn: Button
 var _scope_history: bool = false
 var _history_results: Array = []  # [[line_num, text], ...]
+## The result row the keyboard cursor is on, or -1.
+var _history_cursor: int = -1
 ## Lines persisted for this pane, so an empty result can say whether the pane
 ## has any history at all.
 var _history_stored_lines: int = 0
@@ -384,8 +386,9 @@ func _ready():
 	_scope_btn.text = "Live"
 	_scope_btn.tooltip_text = "Search scope: this screen, or the pane's saved history"
 	_scope_btn.custom_minimum_size.x = 60
-	# Never steal focus from the search bar — typing continues after toggling.
-	_scope_btn.focus_mode = Control.FOCUS_NONE
+	# A tab stop, and `_on_scope_toggled` hands the field the keyboard back, so
+	# reaching the History scope no longer needs the pointer.
+	_scope_btn.focus_mode = Control.FOCUS_ALL
 	_scope_btn.pressed.connect(_on_scope_toggled)
 	strip_row.add_child(_scope_btn)
 
@@ -410,11 +413,13 @@ func _ready():
 	_search_count.mouse_filter = Control.MOUSE_FILTER_STOP  # the tooltip's hover target
 	strip_row.add_child(_search_count)
 
-	# Mouse-only like the scope toggle: Enter and Shift+Enter do the same from
-	# the field, and focus returns to the field so typing never stops.
+	# Enter and Shift+Enter step from the field, and focus returns to the field
+	# so typing never stops; the declaration is what makes the focus audit count
+	# these two as answered rather than as oversights.
 	_search_prev = Button.new()
 	_search_prev.name = "SearchPrev"
 	_search_prev.focus_mode = Control.FOCUS_NONE
+	KeyboardFocus.declare_mouse_only(_search_prev, "Enter / Shift+Enter step matches from the field")
 	_search_prev.tooltip_text = "Previous match (Shift+Enter)"
 	Icons.icon_button(_search_prev, Icons.COLLAPSE, "Previous match")
 	_search_prev.pressed.connect(_on_search_step.bind(-1))
@@ -423,6 +428,7 @@ func _ready():
 	_search_next = Button.new()
 	_search_next.name = "SearchNext"
 	_search_next.focus_mode = Control.FOCUS_NONE
+	KeyboardFocus.declare_mouse_only(_search_next, "Enter / Shift+Enter step matches from the field")
 	_search_next.tooltip_text = "Next match (Enter)"
 	Icons.icon_button(_search_next, Icons.EXPAND, "Next match")
 	_search_next.pressed.connect(_on_search_step.bind(1))
@@ -1357,14 +1363,25 @@ func _key_to_text(event: InputEventKey) -> String:
 	if event.unicode >= 32 and event.unicode != 127:
 		return char(event.unicode)
 	return ""
+## The strip owns the arrow keys while it is open: letting them through reaches
+## `_handle_keyboard`, which sends an arrow sequence to the child and snaps the
+## view to the bottom. In the Live scope they are consumed and do nothing; in
+## the History scope they move the results cursor.
 func _on_search_bar_input(event):
-	if event is InputEventKey and event.pressed and event.shift_pressed \
-			and event.keycode in [KEY_ENTER, KEY_KP_ENTER]:
+	if not (event is InputEventKey) or not (event as InputEventKey).pressed:
+		return
+	var key := event as InputEventKey
+	if key.keycode in [KEY_UP, KEY_DOWN]:
+		if _scope_history:
+			_move_history_cursor(-1 if key.keycode == KEY_UP else 1)
+		_search_bar.accept_event()
+		return
+	if key.shift_pressed and key.keycode in [KEY_ENTER, KEY_KP_ENTER]:
 		# Shift+Enter steps back; plain Enter stays the LineEdit's own submit.
 		_jump_to_match(-1)
 		_search_bar.accept_event()
 		return
-	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+	if key.keycode == KEY_ESCAPE:
 		_close_search()
 		_search_bar.accept_event()
 		return
@@ -1372,13 +1389,16 @@ func _on_search_bar_input(event):
 func _toggle_search():
 	_search_visible = not _search_visible
 	_search_strip.visible = _search_visible
-	_history_panel.visible = _search_visible and _scope_history and _history_results.size() > 0
+	# The panel is visible iff the History scope has something to say; a fresh
+	# open has no results in the list yet.
+	_history_panel.visible = _scope_history and _history_list.get_child_count() > 0
 	if _search_visible:
 		_search_bar.grab_focus()
 		_search_bar.select_all()
 	else:
 		_search_results.clear()
 		_search_error = ""
+		_clear_history_results()
 		queue_redraw()
 	_refresh_search_count()
 
@@ -1429,6 +1449,10 @@ func _on_search_text_changed(new_text: String):
 
 func _on_search_submitted(_new_text: String):
 	if _scope_history:
+		# Enter copies the row the cursor shows, so the results never need the
+		# pointer for the one action they exist for.
+		if _history_cursor >= 0:
+			_on_history_result_clicked(_history_cursor)
 		return
 	if _search_results.get("count", 0) == 0:
 		return
@@ -1463,6 +1487,10 @@ func _on_scope_toggled():
 	if _search_visible and _search_bar.text != "":
 		_do_search(_search_bar.text)
 	_refresh_search_count()
+	# Toggling is a click on a tab stop; the keyboard goes back to the field so
+	# the next keystroke keeps filtering.
+	if _search_visible:
+		_search_bar.grab_focus()
 
 func _do_search(pattern: String):
 	if pattern == "":
@@ -1502,8 +1530,8 @@ func _do_history_search(pattern: String):
 	_refresh_search_count()
 
 func _rebuild_history_panel():
-	for c in _history_list.get_children():
-		c.queue_free()
+	_clear_history_list()
+	_history_cursor = -1
 	if _history_results.is_empty():
 		# A failed query, a missing store and a genuine no-match all used to
 		# look identical: an empty panel that never even appeared. Say which.
@@ -1521,28 +1549,104 @@ func _rebuild_history_panel():
 		_history_list.add_child(lbl)
 	else:
 		for entry in _history_results:
+			var index := _history_list.get_child_count()
 			var line_num: int = int(entry[0])
 			var full_text: String = str(entry[1])
-			var btn = Button.new()
+			var btn := Button.new()
 			btn.text = "line %d: %s" % [line_num, full_text.left(200)]
 			btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-			btn.focus_mode = Control.FOCUS_NONE
+			# A tab stop with the palette's cursor: Up/Down walk the rows, Enter
+			# copies the focused one, and `_history_cursor` holds the same value
+			# whichever way the user got there.
+			btn.focus_mode = Control.FOCUS_ALL
+			btn.toggle_mode = true
+			btn.theme_type_variation = UiTheme.SELECTED_ROW
+			btn.tooltip_text = "Copy line %d to the clipboard (Enter)" % line_num
 			btn.clip_text = true
 			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			btn.pressed.connect(_on_history_result_clicked.bind(full_text, line_num))
+			btn.pressed.connect(_on_history_result_clicked.bind(index))
+			btn.focus_entered.connect(_on_history_row_focused.bind(index))
+			btn.gui_input.connect(_on_history_row_input.bind(btn))
 			_history_list.add_child(btn)
 	# Shown whenever the History scope is active with a query, so the
 	# explanation for an empty list is visible rather than implied.
 	_history_panel.visible = _scope_history and _search_visible
 
+## The result rows in list order. The explanation row is a Label, not a row.
+func _history_row_buttons() -> Array[Button]:
+	var out: Array[Button] = []
+	for c in _history_list.get_children():
+		if c is Button:
+			out.append(c as Button)
+	return out
+
+## Drop the list's children now rather than at the end of the frame: a queued
+## child still reports as a child, and a cursor move in the same frame would
+## count a row that is on its way out.
+func _clear_history_list() -> void:
+	for c in _history_list.get_children():
+		_history_list.remove_child(c)
+		c.queue_free()
+
+## Show the cursor. A focused row sets the same cursor, so an arrow-walked list
+## and a Tab-walked one cannot disagree about what Enter copies; the pressed
+## state of `SELECTED_ROW` is the cursor, which is why the row's focus stylebox
+## can stay empty.
+func _apply_history_cursor() -> void:
+	var rows := _history_row_buttons()
+	for i in rows.size():
+		rows[i].set_pressed_no_signal(i == _history_cursor)
+	if _history_cursor >= 0 and _history_cursor < rows.size():
+		_history_panel.ensure_control_visible(rows[_history_cursor])
+
+## Up/Down from the field: move the cursor over the rows, clamped.
+func _move_history_cursor(delta: int) -> void:
+	var count := _history_row_buttons().size()
+	if count == 0:
+		return
+	_history_cursor = KeyboardFocus.next_index(_history_cursor, count, delta)
+	_apply_history_cursor()
+
+func _on_history_row_focused(index: int) -> void:
+	_history_cursor = index
+	_apply_history_cursor()
+
+## Up/Down on a focused row move focus, and with it the cursor, instead of
+## reaching the child process as arrow keys.
+func _on_history_row_input(event: InputEvent, row: Button) -> void:
+	if not (event is InputEventKey) or not (event as InputEventKey).pressed:
+		return
+	var key := event as InputEventKey
+	var step := 0
+	match key.keycode:
+		KEY_UP: step = -1
+		KEY_DOWN: step = 1
+		_: return
+	row.accept_event()
+	var rows := _history_row_buttons()
+	var index := rows.find(row)
+	if index < 0:
+		return
+	var next_i := KeyboardFocus.next_index(index, rows.size(), step)
+	if next_i >= 0 and next_i != index:
+		rows[next_i].grab_focus()
+
 func _clear_history_results():
 	_history_results.clear()
-	for c in _history_list.get_children():
-		c.queue_free()
+	_history_cursor = -1
+	_clear_history_list()
 	_history_panel.visible = false
 
-func _on_history_result_clicked(text: String, line_num: int):
-	DisplayServer.clipboard_set(text)
+## The one copy path: a click, a focused row's Enter and the field's Enter all
+## arrive here, so the toast and the cursor always name the same row.
+func _on_history_result_clicked(index: int) -> void:
+	if index < 0 or index >= _history_results.size():
+		return
+	var entry: Array = _history_results[index]
+	var line_num := int(entry[0])
+	_history_cursor = index
+	_apply_history_cursor()
+	DisplayServer.clipboard_set(str(entry[1]))
 	ToastManager.info("Copied line %d" % line_num)
 
 func _jump_to_match(direction: int):

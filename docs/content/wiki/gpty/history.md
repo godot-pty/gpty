@@ -32,6 +32,8 @@ The search box takes free text as a person types it, not an FTS5 query. Raw inpu
 
 A query that could not run at all reports an error, distinct from "no match", so an empty result is honest.
 
+The results themselves are driven from the field. `Up`/`Down` move a cursor over the hits, `Enter` copies the cursor's line to the clipboard through the same path a click takes, `Escape` closes the strip and returns the keyboard to the pane, and the scope toggle is a tab stop that hands the field the keyboard back - so the History scope has no pointer-only step.
+
 ## What it costs on disk
 
 Scrollback is plaintext. The point of a history store is that you can read it after the process is gone, and search it by content, so it is not encrypted.

@@ -13,7 +13,7 @@ Most of gPTY's actions are reachable from the keyboard. Shortcuts fall into two 
 | `PageDown` | Scroll forward one screenful |
 | `Ctrl+V` | Sent to the shell as `^V` — deliberately not paste |
 
-These are handled by the focused terminal before the workspace sees them. `Ctrl+Shift+F` opens the search strip along the pane's top edge; its right-hand end reads `n/m` for the highlighted match out of the count, `Enter` steps to the next match and `Shift+Enter` to the previous one, and `Escape` closes it. Plain `Ctrl+F` is deliberately **not** intercepted, because full-screen programs like `vim` and `less` use it to page forward, so it reaches the PTY like any other key.
+These are handled by the focused terminal before the workspace sees them. `Ctrl+Shift+F` opens the search strip along the pane's top edge; its right-hand end reads `n/m` for the highlighted match out of the count, `Enter` steps to the next match and `Shift+Enter` to the previous one, and `Escape` closes it. The strip's scope toggle is a tab stop; in the History scope `Up`/`Down` walk the result rows, `Enter` copies the row the cursor is on, and both arrows are consumed by the strip rather than reaching the child as arrow keys. Plain `Ctrl+F` is deliberately **not** intercepted, because full-screen programs like `vim` and `less` use it to page forward, so it reaches the PTY like any other key.
 
 `Ctrl+Shift+C` copies only. With nothing selected it still consumes the chord and does nothing — it never falls through to a workspace shortcut, and it never clears the search strip or triggers an action. After a copy the selection is cleared.
 

@@ -152,6 +152,17 @@ const STATES := {
 					'for i in 1 2 3 4 5 6 7 8; do echo "output line $i"; done; '
 					+ 'printf "alpha one\\nalpha two\\nbeta three\\nalpha four\\n"; sleep 600']}},
 	], "open": "search", "query": "alpha"},
+	# The same strip in its History scope: FTS5 hits from this pane's own stored
+	# scrollback, the scope reached with a real click on the toggle, and the
+	# keyboard cursor on the first hit (Down). Row *The history search results
+	# are mouse-only*.
+	"search-history": {"size": Vector2i(1280, 760), "tiles": [
+		{"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+			"settings": {"type": "terminal", "attachment_id": "capture-search-history",
+				"shell_args": ["-c",
+					'for i in 1 2 3 4 5 6 7 8; do echo "output line $i"; done; '
+					+ 'printf "alpha one\\nalpha two\\nbeta three\\nalpha four\\n"; sleep 600']}},
+	], "open": "search-history", "query": "alpha"},
 	"workspace-1280x760": {"size": Vector2i(1280, 760), "panes": 4},
 	"window-800x500": {"size": Vector2i(800, 500), "panes": 4},
 	"window-560x340": {"size": Vector2i(560, 340), "panes": 4},
@@ -529,32 +540,13 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 				field.text_changed.emit(field.text)
 				await _wait_frames(3)
 		"search":
-			var body = _workspace._tm._find_body(_workspace._tm.tiles[0].wrapper)
-			if not _is_terminal(body):
-				_fail("the search state's first tile is not a terminal")
+			var opened_live: bool = await _open_search(state_name, state, false)
+			if not opened_live:
 				return false
-			# The child's output has to reach the grid before the search runs,
-			# or the image would show 0/0 for a pane that does match.
-			for _i in 300:
-				if "alpha four" in str(body._terminal.get_plain_text(200)):
-					break
-				await process_frame
-			# The pane answers `term:search` from its own `_gui_input`, so it has
-			# to own the keyboard: `grab_focus()` (not a click) is what the harness
-			# can do without depending on where the grid's centre lands.
-			body.grab_focus()
-			await _press_key(KEY_F, true, true)
-			await _wait_frames(3)
-			if not body._search_visible:
-				_fail("Ctrl+Shift+F did not open the search strip")
+		"search-history":
+			var opened_history: bool = await _open_search(state_name, state, true)
+			if not opened_history:
 				return false
-			body._search_bar.text = str(state.get("query", ""))
-			body._search_bar.text_changed.emit(body._search_bar.text)
-			await _wait_frames(2)
-			# One Enter selects the first match past the view, so the capture shows
-			# `1/3` and the active highlight instead of `0/3`.
-			await _press_key(KEY_ENTER)
-			await _wait_frames(3)
 		"wiki-graph":
 			var wiki: Control = _workspace._tm.tiles[0].wrapper
 			var list: ItemList = wiki.find_child("NoteList", true, false) as ItemList
@@ -1075,6 +1067,71 @@ static func _is_glyph(text: String) -> bool:
 	var c := text.unicode_at(0)
 	return c >= 0xE000 and c <= 0xF8FF
 
+
+## Open the search strip through the pane's own chord and type the state's query
+## the way a keystroke does. The History scope is reached with a real click on
+## the strip's toggle; its results need the pane's scrollback committed (the
+## writer flushes on its own interval), so the commit is asked for and then
+## waited for rather than assumed.
+func _open_search(state_name: String, state: Dictionary, history_scope: bool) -> bool:
+	var body = _workspace._tm._find_body(_workspace._tm.tiles[0].wrapper)
+	if not _is_terminal(body):
+		_fail("the %s state's first tile is not a terminal" % state_name)
+		return false
+	# The child's output has to reach the grid before the search runs, or the
+	# image would show 0/0 for a pane that does match.
+	for _i in 300:
+		if "alpha four" in str(body._terminal.get_plain_text(200)):
+			break
+		await process_frame
+	# The pane answers `term:search` from its own `_gui_input`, so it has to own
+	# the keyboard: `grab_focus()` (not a click) is what the harness can do
+	# without depending on where the grid's centre lands.
+	body.grab_focus()
+	await _press_key(KEY_F, true, true)
+	await _wait_frames(3)
+	if not body._search_visible:
+		_fail("Ctrl+Shift+F did not open the search strip")
+		return false
+	if history_scope:
+		await _click(body._scope_btn)
+		await _wait_frames(3)
+		if not body._scope_history:
+			_fail("clicking the scope toggle did not switch to the History scope")
+			return false
+		body._terminal.flush_history()
+		var committed: bool = await _wait_for_history(body)
+		if not committed:
+			return false
+	body._search_bar.text = str(state.get("query", ""))
+	body._search_bar.text_changed.emit(body._search_bar.text)
+	await _wait_frames(2)
+	if history_scope:
+		if body._history_results.is_empty():
+			_fail("the History search returned no rows for '%s'"
+				% str(state.get("query", "")))
+			return false
+		# One Down puts the cursor on the first hit, so the capture shows the
+		# selected treatment instead of an empty list.
+		await _press_key(KEY_DOWN)
+	else:
+		# One Enter selects the first match past the view, so the capture shows
+		# `1/3` and the active highlight instead of `0/3`.
+		await _press_key(KEY_ENTER)
+	await _wait_frames(3)
+	return true
+
+## The scrollback writer commits on its own interval (200 ms), and a search can
+## miss output still queued; `flush_history` asks for the commit, this waits for
+## it to be visible to the store.
+func _wait_for_history(body) -> bool:
+	for _i in 300:
+		var parsed = JSON.parse_string(str(body._terminal.search_history("alpha", 1)))
+		if parsed is Dictionary and int(parsed.get("stored_lines", 0)) > 0:
+			return true
+		await process_frame
+	_fail("the pane's scrollback never reached the history store")
+	return false
 
 ## The topmost visible dialog the state opened, if any.
 func _visible_dialog(node: Node) -> AcceptDialog:
