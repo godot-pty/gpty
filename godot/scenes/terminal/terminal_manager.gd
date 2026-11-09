@@ -32,9 +32,13 @@ const _PaneScripts := {
 	"media":       preload("res://scenes/panes/media_pane.gd"),
 }
 
-var on_close: Callable  # set by workspace to refresh layout after kill
+## The three callbacks the workspace binds (bound methods, never lambdas that
+## capture this manager - see `_wire_tm` in workspace.gd). `on_open_pane_settings`
+## receives `(manager, body)` so the hook can reach this manager's panel without
+## the closure capturing it.
+var on_close: Callable    # set by workspace to refresh layout after kill
 var on_swap: Callable    # set by workspace to handle pane type swap
-var on_open_pane_settings: Callable  # workspace closes conflicting overlays first
+var on_open_pane_settings: Callable  # (manager, body): workspace closes conflicting overlays first
 
 var tiles: Array[Dictionary] = []
 var last_body: Control
@@ -596,7 +600,7 @@ func _open_pane_settings(body: Control):
 		push_warning("_open_pane_settings: no panel assigned by workspace")
 		return
 	if on_open_pane_settings.is_valid():
-		on_open_pane_settings.call(body)
+		on_open_pane_settings.call(self, body)
 	else:
 		_pane_settings_panel.open_for(body)
 

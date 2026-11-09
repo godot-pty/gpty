@@ -11,11 +11,22 @@ class_name TileDrag
 ## for the four entry points the workspace and the edge strips call. Everything
 ## this object moves lives in the manager's tile list, reached through `_tm`.
 
-var _tm: TerminalManager
-
+## The manager that owns this object, held weakly.
+##
+## The manager stores this instance, and this instance reads the manager's tile
+## list back, so a strong reference here closes a `RefCounted` cycle neither
+## side can release: the manager, its drag and the two scripts they hold
+## survived every exit (and every closed workspace tab). The manager outlives
+## the drag by construction - it owns it - so `_tm` is null only during
+## teardown, after which nothing calls into a drag.
+var _tm_ref: WeakRef
 
 func _init(manager: TerminalManager) -> void:
-	_tm = manager
+	_tm_ref = weakref(manager)
+
+var _tm: TerminalManager:
+	get:
+		return _tm_ref.get_ref() as TerminalManager if _tm_ref else null
 
 
 # ── Edge Drag Resize ───────────────────────────────────────────────────
@@ -53,7 +64,7 @@ func drag_active() -> bool:
 ## An edge on the window border has no tile on its far side, so it has nothing
 ## to move and must not become a drag: `_setup_drag_geometry` rejects it.
 func begin_edge_drag(wrapper: Control, edge: String, at: Vector2):
-	if _tm.tiles.size() < 2:
+	if _tm == null or _tm.tiles.size() < 2:
 		# A single pane fills the grid; there is no divider to move. The strips
 		# already show an arrow cursor in that state (see `_sync_edge_strips`),
 		# this is the belt under those braces.

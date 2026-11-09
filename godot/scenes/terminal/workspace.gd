@@ -882,16 +882,29 @@ func _body_of_focus_owner(owner: Control) -> Control:
 	_focus_body_cache = found
 	return found
 
+## Wire a manager's three callbacks to workspace methods.
+##
+## These are bound methods, never lambdas. A lambda that captures `tm` is stored
+## *on* `tm`, and `TerminalManager` is `RefCounted`: that is a reference cycle
+## the engine can never release, so every closed workspace tab and every exit
+## leaked the manager, its `TileDrag` and the scripts they hold (13 leaked
+## instances, 85 unclaimed StringNames). `on_open_pane_settings` receives the
+## manager as an argument for the same reason - no capture needed.
 func _wire_tm(tm: TerminalManager):
-	tm.on_close = func(body: Control): _kill(body)
+	tm.on_close = _on_pane_closed
 	tm.on_swap = _swap_pane
-	tm.on_open_pane_settings = func(body: Control):
-		# The pane settings popup and the global settings panel are sibling
-		# overlays; opening one closes the other so they never stack.
-		if _settings_panel and _settings_panel.visible:
-			_settings_panel.close()
-		if tm._pane_settings_panel:
-			tm._pane_settings_panel.open_for(body)
+	tm.on_open_pane_settings = _open_pane_settings_for
+
+func _on_pane_closed(body: Control) -> void:
+	_kill(body)
+
+## The pane settings popup and the global settings panel are sibling overlays;
+## opening one closes the other so they never stack.
+func _open_pane_settings_for(tm: TerminalManager, body: Control) -> void:
+	if _settings_panel and _settings_panel.visible:
+		_settings_panel.close()
+	if tm._pane_settings_panel:
+		tm._pane_settings_panel.open_for(body)
 
 func _active_workspace() -> Dictionary:
 	if _workspaces.is_empty() or _active < 0 or _active >= _workspaces.size():

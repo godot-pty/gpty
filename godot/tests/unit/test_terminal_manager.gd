@@ -628,3 +628,47 @@ func test_scale_layout_prefers_a_declared_unit():
 	var same: Array = TerminalManager.scale_layout(legacy, PaneTypes.GRID)
 	assert_eq(same[0]["cspan"], 12,
 		"a declared unit of 60 means the payload is already in grid units")
+
+# ── Teardown ───────────────────────────────────────────────────────────
+
+## The manager owns its drag, and the drag reads the manager's tile list back.
+## A strong reference in both directions is a `RefCounted` cycle the engine can
+## never collect: one manager + drag per workspace leaked at every exit, and
+## every closed workspace tab leaked its pair, holding both scripts alive (the
+## "2 resources still in use" and 85 unclaimed StringNames in that report).
+func test_a_dropped_manager_frees_its_drag():
+	var tm := TerminalManager.new()
+	var alive: WeakRef = weakref(tm)
+	assert_not_null(alive.get_ref(), "sanity: the local reference holds it")
+	tm = null
+	assert_null(alive.get_ref(), "manager and drag must not reference each other")
+
+## The workspace installs three callbacks on the manager. A lambda that captures
+## `tm` is stored *on* `tm`, so the manager keeps itself alive; the bindings are
+## bound methods, and the settings hook takes the manager as an argument.
+func test_wiring_a_workspace_does_not_pin_its_manager():
+	var tm := TerminalManager.new()
+	var ws := Workspace.new()  # never added to the tree: `_ready` does not run
+	ws._wire_tm(tm)
+	var alive: WeakRef = weakref(tm)
+	ws.free()
+	tm = null
+	assert_null(alive.get_ref(), "wiring must leave no cycle back to the manager")
+
+## The settings hook receives the manager so it can read that manager's panel
+## without a capturing lambda (see the teardown test above).
+func test_pane_settings_hook_receives_the_manager():
+	var body := Control.new()
+	var panel := Control.new()
+	_tm._pane_settings_panel = panel
+	var seen := []
+	# GDScript lambdas capture locals by value: only a mutation of the captured
+	# container is visible here, not a reassignment.
+	_tm.on_open_pane_settings = func(manager: TerminalManager, target: Control) -> void:
+		seen.append(manager)
+		seen.append(target)
+	_tm._open_pane_settings(body)
+	assert_eq(seen, [_tm, body], "the hook gets (manager, body)")
+	_tm._pane_settings_panel = null
+	panel.free()
+	body.free()
