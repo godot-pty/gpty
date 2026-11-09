@@ -46,7 +46,7 @@ A missing toolchain SKIPs locally but FAILS under `CI`/`GITHUB_ACTIONS`, so a lo
 
 - Flip ⬜ to ✅ **in place**. The text becomes the record: what shipped, measured numbers (not adjectives), the tests by name, the failure mode now closed. A reader must be able to tell whether it is done without opening the commit.
 - Corrections fold into that row.
-- Screenshots: the row ends "Screenshot (under Screenshots below): *Caption*."; the file and the numbered-box key live in the page's `## Screenshots`; never an image inside a cell.
+- Screenshots: the row ends "Screenshot (under Screenshots below): *Caption*."; the file and its key live in the page's `## Screenshots` - numbered boxes where the image needs pointing at (the numbers live in the image and nothing else explains them), or the controls named in words where one capture shows a single surface whole (the page's preamble says which is which); never an image inside a cell.
 - A defect found on the way gets **its own row** in priority position, with the evidence that makes it actionable and the fix direction — not a silent fix, not a comment, not folded into this row unless it is genuinely part of this row's contract.
 - The changelog is written at release time (`docs/content/docs/changelog/vX.Y.Z.md`); a release's DOCS row carries that work. Do not write it mid-cycle — do record the user-facing summary the row will need.
 
