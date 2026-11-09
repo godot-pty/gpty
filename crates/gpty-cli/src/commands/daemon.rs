@@ -2,6 +2,7 @@ use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::Duration;
 
@@ -81,7 +82,7 @@ async fn probe_with(socket_path: &str, timeout: Duration) -> Probe {
     let client = IpcClient::new(socket_path, timeout);
     match client.call("version", None).await {
         Ok(resp) if resp.error.is_none() => {
-            note_gui_version(&resp);
+            note_gui_version(socket_path, &resp);
             Probe::Running(resp)
         }
         Ok(resp) if auth_denied(&resp) => Probe::Auth,
@@ -102,9 +103,13 @@ async fn probe_with(socket_path: &str, timeout: Duration) -> Probe {
     }
 }
 
-/// Set once a `version` response has been read in this process, so the
-/// best-effort check some call sites run first skips its probe afterwards.
-static VERSION_OBSERVED: AtomicBool = AtomicBool::new(false);
+/// The endpoints whose `version` response has been read in this process, so the
+/// best-effort check some call sites run first skips its probe afterwards. The
+/// key is the path rather than a bare flag because a test binds its own
+/// endpoint, and a process-global flag let one test's probe silence another's
+/// (the parallel-thread shared-state class in the pitfalls page); production
+/// has one endpoint, so it still probes once.
+static VERSION_OBSERVED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// Set once a stale-binary warning has been printed. `daemon start` can see
 /// two version responses (its pre-check and the connect loop), and the
 /// mismatch is a property of the binaries, not of the command.
@@ -121,7 +126,11 @@ pub const VERSION_CHECK_BUDGET: Duration = Duration::from_millis(500);
 /// read. Never fails and never gates: the caller's real work runs whatever
 /// the probe finds.
 pub async fn warn_on_version_mismatch(socket_path: &str, budget: Duration) {
-    if VERSION_OBSERVED.load(AtomicOrdering::Relaxed) {
+    let observed = VERSION_OBSERVED
+        .lock()
+        .map(|seen| seen.iter().any(|seen_path| seen_path == socket_path))
+        .unwrap_or(true);
+    if observed {
         return;
     }
     let _ = probe_with(socket_path, budget).await;
@@ -132,18 +141,25 @@ pub async fn warn_on_version_mismatch(socket_path: &str, budget: Duration) {
 /// test's probe (the parallel-thread shared-state class in the pitfalls page).
 #[cfg(test)]
 pub(crate) fn reset_version_latch() {
-    VERSION_OBSERVED.store(false, AtomicOrdering::Relaxed);
+    if let Ok(mut seen) = VERSION_OBSERVED.lock() {
+        seen.clear();
+    }
     VERSION_WARNED.store(false, AtomicOrdering::Relaxed);
 }
 
-/// Record a `version` response and warn, once per process, when the GUI it
+/// Record a `version` response (and its endpoint, so the best-effort check does
+/// not probe that endpoint again) and warn, once per process, when the GUI it
 /// came from disagrees with this CLI about the IPC protocol or the version.
 ///
 /// `gpty version` is local-only by design (it cannot probe a GUI), and a
 /// subcommand this build lacks dies in clap before any IPC — so without this
 /// a stale `gpty` on `PATH` never says so; its commands just fail opaquely.
-fn note_gui_version(resp: &Response) {
-    VERSION_OBSERVED.store(true, AtomicOrdering::Relaxed);
+fn note_gui_version(socket_path: &str, resp: &Response) {
+    if let Ok(mut seen) = VERSION_OBSERVED.lock()
+        && !seen.iter().any(|seen_path| seen_path == socket_path)
+    {
+        seen.push(socket_path.to_string());
+    }
     let Some(result) = resp.result.as_ref() else {
         return;
     };
