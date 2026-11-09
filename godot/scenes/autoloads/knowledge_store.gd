@@ -193,7 +193,11 @@ static func note_path_problem(rel: String) -> String:
 		return "empty path"
 	if rel.to_utf8_buffer().size() > MAX_PATH_BYTES:
 		return "path is too long"
-	if rel.begins_with("/") or rel.contains("\\") or rel.contains(":") or rel.contains("\u0000"):
+	# No NUL check: a Godot String cannot carry U+0000 - a source `\u0000`
+	# literal, `char(0)` and a JSON `\u0000` all decode to U+FFFD (and a
+	# literal prints "Unicode parsing error" on every start-up), so such a
+	# check could never fire. `pitfalls.md` records the same trap.
+	if rel.begins_with("/") or rel.contains("\\") or rel.contains(":"):
 		return "path is not vault-relative"
 	var parts := rel.split("/")
 	if parts.is_empty() or not parts[parts.size() - 1].ends_with(".md"):
