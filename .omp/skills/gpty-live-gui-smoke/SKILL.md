@@ -1,6 +1,6 @@
 ---
 name: gpty-live-gui-smoke
-description: "Verify a gpty change against the real app: launch the GUI headless in a sandbox, drive it with the gpty CLI, sample RSS, check shutdown/persistence, and get a backtrace if it crashes."
+description: "Verify a gpty change against the real app: launch the GUI headless in a sandbox, drive it with the gpty CLI, sample RSS, check shutdown/persistence, time an interaction in a windowed run, and get a backtrace if it crashes."
 ---
 
 # gPTY live GUI smoke
@@ -75,6 +75,36 @@ thread), mean the thread was executing code from an **unmapped** library — i.e
 the GDExtension while our threads lived in it. The extension pins itself with `RTLD_NODELETE`
 (`pin_library`, `InitStage::Core`); if that ever gets removed or a new platform is not covered,
 this is what it looks like.
+
+## Timing an interaction
+
+"Switching workspaces is slow" becomes a number here. The cost is synchronous GDScript plus
+the frame it delays, so headless cannot measure it (no draw, no compositor round-trip), and one
+repetition is not a number (measured 2026-11-09: the first switch after launch was 551 ms, every
+later one 63-75 ms).
+
+1. **Keep the reporter's layout, sandbox the rest.** Copy their store under a private
+   `XDG_DATA_HOME` (`cp -r ~/.local/share/godot/app_userdata/gPTY …`) and delete `history.db`
+   from the copy - a store copied while the live app holds it answers `file is not a database`
+   (warnings only, but they bury real ones).
+2. **Isolate both sockets** with `GPTY_SOCKET` (the event socket derives from it); otherwise the
+   live GUI owns the default path and this instance quits at startup.
+3. **Run it in a window:** `env -u WAYLAND_DISPLAY DISPLAY=:0 godot --path godot
+   --display-driver x11 --position 60,60`.
+4. **Add a temporary, env-gated coroutine** called from `workspace.gd::_ready()`
+   (`if OS.get_environment("GPTY_BENCH") != "": _bench.call_deferred()`), and delete it before
+   committing: it is a probe, not a fixture. `ui_capture.gd` is the committed surface, and a
+   timing probe has no pixel output to pin.
+5. **Attribute before theorising.** Time the call with `Time.get_ticks_usec()` marks around each
+   step (and each sub-step), then the frame after it with `await get_tree().process_frame` four
+   times and divide. Print one line per repetition and repeat at least three times, alternating
+   direction - the 74 ms workspace switch was `_update_workspace_ui` 35 ms +
+   `_refresh_profile_buttons` 17 ms + `_list()` 10 ms, with the panes at 0.1 ms.
+6. **Seed content through the pane**, not the layout: `body._terminal.send_text("lazygit\n")` (or
+   a redraw loop) puts a real TUI in the pane the report is about; wait a few seconds, then
+   measure. `_fetch_ms`/`_draw_ms` are already recorded per pane and shown in the status bar, so
+   frame cost needs no new instrumentation.
+7. **Quit explicitly** (`get_tree().quit()`), or `timeout` kills the run and you get exit 124.
 
 ## Gotchas (each cost a debugging round)
 
