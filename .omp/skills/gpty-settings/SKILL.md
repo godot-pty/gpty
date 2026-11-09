@@ -37,6 +37,10 @@ When adding a new user-facing setting to the gpty terminal emulator, follow this
 - Add the reset to the owning tab's `_add_tab_reset(tab, func(): ...)` lambda **and** set the
   control's own value/selection there: the lambda restores the `cfg_` values, and the visible
   control does not follow by itself
+- A tab that holds the user's own content gets **no** `_add_tab_reset`: Concepts (the concept list)
+  and Commands (`user://commands.json`) have no footer, because "reset this tab" there would delete
+  authored data rather than restore a shipped default. User-owned stores have their own write path
+  (the tab's Add/Edit/Delete controls), not a reset lambda
 
 ## 3. Workspace (`godot/scenes/terminal/workspace.gd`)
 
