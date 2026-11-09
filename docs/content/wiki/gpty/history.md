@@ -26,7 +26,7 @@ Two caps bound a pane's store: a row cap from Settings (default 10,000 lines, ad
 
 ## Searching
 
-`Ctrl+Shift+F` opens the search bar in the active terminal. Results are newest-first; the UI asks for 100 hits, and the API clamps the request to 1–500. History search is per pane — it searches that terminal's store, not every pane's.
+`Ctrl+Shift+F` opens the search strip in the active terminal. Results are newest-first; the UI asks for 100 hits, and the API clamps the request to 1–500. History search is per pane — it searches that terminal's store, not every pane's.
 
 The search box takes free text as a person types it, not an FTS5 query. Raw input would make ordinary searches fail: `main.rs` is a syntax error in FTS5, `error: x` reads as a column filter, an unclosed quote fails. Input is therefore sanitized into word-only terms, quoted and joined by a space, which FTS5 treats as AND. Punctuation is searchable because it becomes a separator; searching for `main.rs` finds `main.rs`.
 

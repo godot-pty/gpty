@@ -24,7 +24,7 @@ Clicking a button spawns that pane into the active workspace using the same spli
 
 Below it:
 
-- **Search** opens the scrollback search bar on the active terminal (or the workspace's first terminal when a non-terminal is focused). Same as `Ctrl+Shift+F`.
+- **Search** opens the search strip on the active terminal (or the workspace's first terminal when a non-terminal is focused). Same as `Ctrl+Shift+F`.
 - **Settings** opens the global settings panel described in [[settings]].
 - **Close All** closes every pane in the active workspace. It asks before stopping running commands or discarding unsaved work; a Cancel leaves everything in place. Same as `Ctrl+Shift+R`.
 

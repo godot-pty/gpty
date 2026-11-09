@@ -8,14 +8,14 @@ Most of gPTY's actions are reachable from the keyboard. Shortcuts fall into two 
 |---|---|
 | `Ctrl+Shift+C` | Copy the terminal selection |
 | `Ctrl+Shift+V` | Paste the clipboard into the terminal |
-| `Ctrl+Shift+F` | Toggle the scrollback search bar |
+| `Ctrl+Shift+F` | Toggle the search strip on the pane's top edge |
 | `PageUp` | Scroll back one screenful |
 | `PageDown` | Scroll forward one screenful |
 | `Ctrl+V` | Sent to the shell as `^V` — deliberately not paste |
 
-These are handled by the focused terminal before the workspace sees them. `Ctrl+Shift+F` opens a search bar over the pane; Escape closes it. Plain `Ctrl+F` is deliberately **not** intercepted, because full-screen programs like `vim` and `less` use it to page forward, so it reaches the PTY like any other key.
+These are handled by the focused terminal before the workspace sees them. `Ctrl+Shift+F` opens the search strip along the pane's top edge; its right-hand end reads `n/m` for the highlighted match out of the count, `Enter` steps to the next match and `Shift+Enter` to the previous one, and `Escape` closes it. Plain `Ctrl+F` is deliberately **not** intercepted, because full-screen programs like `vim` and `less` use it to page forward, so it reaches the PTY like any other key.
 
-`Ctrl+Shift+C` copies only. With nothing selected it still consumes the chord and does nothing — it never falls through to a workspace shortcut, and it never clears the search bar or triggers an action. After a copy the selection is cleared.
+`Ctrl+Shift+C` copies only. With nothing selected it still consumes the chord and does nothing — it never falls through to a workspace shortcut, and it never clears the search strip or triggers an action. After a copy the selection is cleared.
 
 `Ctrl+Shift+V` pastes. When the program running in the terminal has enabled bracketed paste, gPTY wraps the text the way the terminal protocol expects, so a shell or editor can tell a paste from typing. Either way the text is filtered first: control characters other than tab and newline are removed, escape included, so a clipboard that carries a paste terminator or an interrupt cannot end the bracket early or act as a keypress. Newlines and tabs survive, so a multi-line paste stays a multi-line paste.
 
@@ -41,7 +41,7 @@ These are handled by the focused terminal before the workspace sees them. `Ctrl+
 | `Alt+←` `Alt+→` `Alt+↑` `Alt+↓` | Move focus to the adjacent pane |
 | `Ctrl+PageDown` | Next workspace |
 | `Ctrl+PageUp` | Previous workspace |
-| `Escape` | Close the palette, a search bar, or a settings popup; leave a wiki note; return from pane chrome to the pane, or from the note toolbar to the buffer |
+| `Escape` | Close the palette, a search strip, or a settings popup; leave a wiki note; return from pane chrome to the pane, or from the note toolbar to the buffer |
 
 New panes use the normal split rule: the largest tile halves along its longer axis, and the spawn is refused when both halves would be smaller than the 6-unit minimum. The four pane-type shortcuts are the only ones gPTY binds directly; Reasoning, CLI View, Wiki, and Media panes are spawned from the sidebar's Add Pane grid, the command palette, or the control API.
 

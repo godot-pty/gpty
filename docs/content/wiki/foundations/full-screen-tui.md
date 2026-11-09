@@ -22,7 +22,7 @@ The grid can report whether the alternate screen is active. That answer keeps th
 
 Mode state also reaches the UI. Mouse reporting is exposed as a bitmask of click, drag, motion, and SGR encoding; when the application has enabled reporting the pane forwards mouse events to it, and when the mask is zero the pane keeps the mouse for selection and scrollback. Bracketed paste is exposed so a paste is wrapped in `ESC[200~`/`ESC[201~` instead of being fed line by line. If the application hides the cursor, the pane paints no cursor at all rather than drawing one at a stale position.
 
-What the user sees is the application filling the pane, with gPTY's own chrome around it: the tile border, the pane title (often set by an OSC title sequence), and the pane's search bar if opened. Resizing the tile sends the application a resize notification; well-behaved TUIs redraw, and the alternate screen returns when they exit.
+What the user sees is the application filling the pane, with gPTY's own chrome around it: the tile border, the pane title (often set by an OSC title sequence), and the pane's search strip if opened. Resizing the tile sends the application a resize notification; well-behaved TUIs redraw, and the alternate screen returns when they exit.
 
 ## Why it is not a separate protocol
 
