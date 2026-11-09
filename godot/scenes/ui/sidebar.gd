@@ -33,6 +33,15 @@ var _active_pane: Control = null
 ## does not show a section title over nothing.
 var _pane_heading: Label = null
 
+## The Add Pane header: its heading renames itself to the tile the pointer (or,
+## failing that, the keyboard cursor) is on, and its Help button lists what
+## every glyph adds.
+const ADD_PANE_TITLE := " Add Pane:"
+const ADD_PANE_HELP_TEXT := "Each button adds one pane of that type to the active workspace: the largest tile splits in two. Hover a glyph to read its name beside the heading, or press Tab to reach the buttons."
+var _add_pane_heading: Label = null
+var _add_pane_hover := ""
+var _add_pane_focus := ""
+
 
 func _ready():
 	clip_contents = true
@@ -158,7 +167,7 @@ func _add_buttons(v: VBoxContainer):
 	_add_pane_buttons(v)
 
 	var search_btn = _make_icon_text_button(Icons.SEARCH, "Search")
-	search_btn.tooltip_text = "Search the active terminal (Ctrl+Shift+F)"
+	search_btn.tooltip_text = _with_chord("Search the active terminal", "term:search")
 	search_btn.pressed.connect(func(): request_search.emit())
 	v.add_child(search_btn)
 
@@ -167,7 +176,7 @@ func _add_buttons(v: VBoxContainer):
 	v.add_child(settings_btn)
 
 	var reset_btn = _make_icon_text_button(Icons.DELETE, "Close All", UiTheme.DANGER_LABEL)
-	reset_btn.tooltip_text = "Close every pane in this workspace (Ctrl+Shift+R)"
+	reset_btn.tooltip_text = _with_chord("Close every pane in this workspace", "app:reset_workspace")
 	reset_btn.pressed.connect(func(): request_reset.emit())
 	v.add_child(reset_btn)
 
@@ -223,14 +232,32 @@ func _add_window_mode(v: VBoxContainer):
 	for label in SettingsManager.WINDOW_MODE_LABELS:
 		wm_dropdown.add_item(label)
 	wm_dropdown.select(SettingsManager.cfg_window_mode)
+	# The control's own name is what a reader hears, and the tooltip says what
+	# each value draws: three bare words were the whole explanation before.
+	wm_dropdown.accessibility_name = SettingsManager.WINDOW_MODE_TITLE
+	wm_dropdown.tooltip_text = SettingsManager.WINDOW_MODE_HINT
 	wm_dropdown.item_selected.connect(func(idx: int): request_window_mode.emit(idx))
 	v.add_child(wm_dropdown)
 	_wm_dropdown = wm_dropdown
 
 func _add_pane_buttons(v: VBoxContainer):
-	var lbl = Label.new()
-	lbl.text = " Add Pane:"
-	v.add_child(lbl)
+	# The heading and the section's Help button share one row: the glyph grid is
+	# compact, so what each glyph adds is a press away, and the heading names the
+	# tile under the pointer without every tile spending a line on its name.
+	var header = HBoxContainer.new(); header.name = "AddPaneHeader"
+	_add_pane_heading = Label.new(); _add_pane_heading.name = "AddPaneHeading"
+	_add_pane_heading.text = ADD_PANE_TITLE
+	# The heading renames itself on hover, so its text must never widen the
+	# section: `clip_text` drops the text from the label's minimum width (the
+	# mechanism `_make_row_label_button` relies on) and the overrun ellipsizes.
+	_add_pane_heading.clip_text = true
+	_add_pane_heading.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_add_pane_heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(_add_pane_heading)
+	# The popup is parented to the sidebar's background rect, not the sidebar:
+	# the sidebar clips its content, which would cut a modal in half.
+	SectionHelp.attach(header, bg if bg != null else self, "Add Pane", ADD_PANE_HELP_TEXT, _pane_help_rows)
+	v.add_child(header)
 
 	# A two-row grid, not a strip: eight pane types in one row overflow the
 	# 164 px content width (the eighth icon was clipped to `|` when the media
@@ -246,17 +273,71 @@ func _add_pane_buttons(v: VBoxContainer):
 	for key in PaneTypes.ALL:
 		var info = PaneTypes.ALL[key]
 		var btn = Button.new()
-		var shortcut := str(info.get("shortcut", ""))
-		btn.tooltip_text = "New " + info["name"]
-		if shortcut != "":
-			btn.tooltip_text += " (" + shortcut + ")"
+		# The chord comes from the registry, not the pane type's own field: one
+		# spelling for the tooltip, the Help table and the key that works.
+		btn.tooltip_text = _with_chord("New " + info["name"], "app:new_" + key)
 		Icons.icon_button(btn, info["icon"], btn.tooltip_text)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.custom_minimum_size = Vector2(0, 28)
 		btn.pressed.connect(func(): request_new_pane.emit(key))
+		btn.mouse_entered.connect(_on_pane_tile_entered.bind(key))
+		btn.mouse_exited.connect(_on_pane_tile_exited.bind(key))
+		btn.focus_entered.connect(_on_pane_tile_focused.bind(key))
+		btn.focus_exited.connect(_on_pane_tile_unfocused.bind(key))
 		row.add_child(btn)
 
 	v.add_child(row)
+
+## The rows the Add Pane Help popup shows, read when it opens: one per registry
+## entry in grid order. The chord is the binding the key path actually reads, so
+## the table cannot name a chord that does not fire.
+func _pane_help_rows() -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	for key in PaneTypes.ALL:
+		var info = PaneTypes.ALL[key]
+		rows.append({
+			"glyph": info["icon"],
+			"action": "Add a %s pane" % info["name"],
+			"chord": ShortcutManager.chord("app:new_" + key),
+		})
+	return rows
+
+## A sentence plus the chord `action` is bound to, or the sentence alone when it
+## has none: a tooltip that names a chord must read the binding that works.
+func _with_chord(text: String, action: String) -> String:
+	var chord := ShortcutManager.chord(action)
+	return text if chord == "" else "%s (%s)" % [text, chord]
+
+func _on_pane_tile_entered(key: String) -> void:
+	_add_pane_hover = key
+	_sync_add_pane_heading()
+
+func _on_pane_tile_exited(key: String) -> void:
+	# Only this tile's own report clears it: moving between two tiles delivers
+	# the new `mouse_entered` and the old `mouse_exited` in either order.
+	if _add_pane_hover == key:
+		_add_pane_hover = ""
+	_sync_add_pane_heading()
+
+func _on_pane_tile_focused(key: String) -> void:
+	_add_pane_focus = key
+	_sync_add_pane_heading()
+
+func _on_pane_tile_unfocused(key: String) -> void:
+	if _add_pane_focus == key:
+		_add_pane_focus = ""
+	_sync_add_pane_heading()
+
+## The pointer's tile first, then the keyboard cursor's: a click that leaves
+## focus behind must not pin a stale name while the user browses the grid.
+func _sync_add_pane_heading() -> void:
+	if _add_pane_heading == null:
+		return
+	var key := _add_pane_hover if _add_pane_hover != "" else _add_pane_focus
+	if key == "" or not PaneTypes.ALL.has(key):
+		_add_pane_heading.text = ADD_PANE_TITLE
+		return
+	_add_pane_heading.text = " Add a %s Pane" % PaneTypes.ALL[key]["name"]
 
 func _sync_window_mode():
 	if _wm_dropdown:

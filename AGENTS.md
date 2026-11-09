@@ -158,6 +158,7 @@ gpty/
         │   ├── overlay_panel.gd     # Overlay keyboard contract (focus, Escape, focus return)
         │   ├── command_palette.gd   # Ctrl+Shift+P command list (OverlayPanel)
         │   ├── palette_model.gd     # Palette entries, matching and ranking (pure)
+        │   ├── shortcut_catalog.gd  # The About tab's keyboard-shortcut list as data (chords from the binding registry)
         │   ├── keyboard_focus.gd   # The one keyboard-entry walk (overlay focus, read-only content)
         │   ├── status_bar.gd
         │   ├── toast_overlay.gd
@@ -171,6 +172,7 @@ gpty/
         │   ├── ui_tokens.gd        # The type scale, spacing, radius and the WCAG contrast maths
         │   ├── ui_theme.gd         # The one Theme, built from the palette and applied at the root
         │   ├── app_dialog.gd       # The one modal builder (theme, grouped buttons, selectable body)
+        │   ├── section_help.gd      # The shared "Help" affordance a section header carries (glyph → action → chord table)
         │   ├── accessibility.gd    # Accessible surface owner: names, values, published text (A11y)
         │   └── icons.gd            # Phosphor icon constants
         └── panes/

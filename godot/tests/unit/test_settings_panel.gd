@@ -631,3 +631,70 @@ func test_all_seven_tabs_fit_the_card():
 	assert_true(total <= bar.size.x,
 		"the seven tabs need %.1f px of a %.1f px bar: the overflow would be hidden behind a dropdown"
 		% [total, bar.size.x])
+
+# ── About: the keyboard-shortcut table ─────────────────────────────────
+
+## The chord the list prints for one description, read out of the About tab's
+## grids: each row is `[chord, description]`.
+func _row_chord(description: String) -> String:
+	var list := _panel.find_child("ShortcutList", true, false) as VBoxContainer
+	if list == null:
+		return ""
+	for grid in list.find_children("*", "GridContainer", true, false):
+		var kids := grid.get_children()
+		for i in range(0, kids.size() - 1, 2):
+			if (kids[i + 1] as Label).text == description:
+				return (kids[i] as Label).text
+	return ""
+
+func test_open_about_lands_on_the_about_tab():
+	_panel.open_about()
+	await wait_frames(2)
+	assert_true(_panel.visible, "opening, never toggling")
+	assert_eq(_panel._tabs.get_tab_title(_panel._tabs.current_tab), "About",
+		"the palette's Keyboard Shortcuts row asks for this tab")
+
+func test_the_shortcut_list_prints_the_registry_spelling():
+	_panel.open_about()
+	await wait_frames(2)
+	# `term:*` is declared by the autoload, so it is bound in a bare panel; the
+	# workspace's own app:* rows need a workspace and are covered by
+	# `test_discoverability.gd`.
+	assert_eq(_row_chord("Copy the selection"), ShortcutManager.chord("term:copy"))
+	assert_eq(_row_chord("Copy the selection"), "Ctrl+Shift+C",
+		"a literal here would be the drift this table exists to prevent")
+	assert_eq(_row_chord("Open the scrollback search bar"), "Ctrl+Shift+F")
+	assert_eq(_row_chord("Paste the clipboard"), "Ctrl+Shift+V")
+
+func test_a_second_open_rebuilds_the_list_instead_of_appending():
+	_panel.open_about()
+	await wait_frames(2)
+	var list := _panel.find_child("ShortcutList", true, false) as VBoxContainer
+	assert_not_null(list)
+	var first := list.get_child_count()
+	assert_gt(first, 0, "the declared chords give the list at least one row")
+	_panel.open_about()
+	await wait_frames(2)
+	assert_eq(list.get_child_count(), first,
+		"the previous table is freed, not stacked under the new one")
+
+func test_every_group_caption_precedes_its_rows_and_no_heading_is_empty():
+	_panel.open_about()
+	await wait_frames(2)
+	var list := _panel.find_child("ShortcutList", true, false) as VBoxContainer
+	# Read as pairs, not against a fixed count: another suite in this process
+	# may have registered the workspace's own app:* actions, so which groups
+	# appear depends on the run order - the structure does not.
+	var expect_caption := true
+	for child in list.get_children():
+		if expect_caption:
+			assert_true(child is Label, "a group starts with its heading")
+			assert_ne((child as Label).text, "")
+			assert_eq((child as Label).theme_type_variation, UiTheme.MUTED_LABEL,
+				"a heading recedes instead of competing with the chords")
+		else:
+			assert_true(child is GridContainer, "a heading is followed by its rows")
+			assert_gt(child.get_child_count(), 0,
+				"an unbound group contributes no heading, so no grid is ever empty")
+		expect_caption = not expect_caption
+	assert_true(expect_caption, "the list ends on a grid, never a dangling heading")

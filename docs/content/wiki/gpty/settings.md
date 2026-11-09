@@ -15,10 +15,10 @@ Per-pane settings are a separate popup reached from a sidebar pane row or a pane
 | Setting | Default | Values |
 |---|---|---|
 | Max FPS | Unlimited (`0`) | 60, 120, 144, 165, 240, Native (`-1`, follows the monitor), Unlimited |
-| Window Mode | OS | OS, Windowed, Windowless |
+| Window Mode | System Frame | System Frame, Borderless, Fullscreen |
 | Check for updates on startup | On | On / Off |
 
-`Native` asks the display server for its refresh rate and caps there; `Unlimited` removes the cap entirely. Window Mode is the same value as the sidebar's window-mode dropdown: `OS` keeps the operating system's window frame and hides gPTY's own titlebar, `Windowed` is a borderless window that draws gPTY's titlebar, and `Windowless` is fullscreen with that titlebar. The update check is a startup query only; it installs nothing on its own.
+`Native` asks the display server for its refresh rate and caps there; `Unlimited` removes the cap entirely. Window Mode is the same value as the sidebar's window-mode dropdown, and the control's tooltip says what each value draws: `System Frame` keeps the operating system's window frame and its controls and hides gPTY's own titlebar, `Borderless` is a window with no desktop frame that draws gPTY's titlebar, and `Fullscreen` fills the screen and keeps that titlebar. The update check is a startup query only; it installs nothing on its own.
 
 ## Terminal
 
@@ -82,6 +82,8 @@ Choosing a saved command types it into the **active terminal pane** and nothing 
 ## About
 
 Version, the IPC protocol version gPTY speaks, and the repository address. The protocol number is useful when a CLI and a GUI from different builds disagree about the wire format.
+
+Below those, **Keyboard Shortcuts** lists every binding the app knows, grouped as Workspace, New Panes, Panes, Keyboard Focus, and Terminal. Each row is the chord and what it does, and the chords are read from the binding registry rather than typed in, so the list cannot name a key that does nothing. The list is the in-app copy of [[keyboard-shortcuts]]; the palette's `Keyboard Shortcuts` row opens this tab directly.
 
 ## Global settings versus per-pane settings
 

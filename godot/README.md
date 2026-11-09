@@ -61,6 +61,7 @@ godot/
         │   ├── overlay_panel.gd  # Shared keyboard contract for the four overlays
         │   ├── command_palette.gd # Ctrl+Shift+P command list (OverlayPanel)
         │   ├── palette_model.gd # Palette entries, matching and ranking (pure)
+        │   ├── shortcut_catalog.gd # The About tab's keyboard-shortcut list as data (chords from the binding registry)
         │   ├── keyboard_focus.gd # Keyboard-entry walk + the toolbar-ring pair (overlay focus, pane content, chrome/note toolbars)
         │   ├── concept_graph_editor.gd # Visual rule editor overlay (GraphEdit)
         │   ├── concept_graph_model.gd  # Pure canvas/build/validate/compile logic
@@ -71,6 +72,7 @@ godot/
         │   ├── ui_tokens.gd    # Type scale, spacing, radius and the WCAG contrast maths
         │   ├── ui_theme.gd     # The one Theme, built from the palette and applied at the root
         │   ├── app_dialog.gd   # The one modal builder (theme, grouped buttons, selectable body)
+        │   ├── section_help.gd # The shared "Help" affordance a section header carries (glyph → action → chord table, rows read on press)
         │   ├── accessibility.gd # Accessible surface owner: names, values, published text (see docs agents/gdscript.md)
         │   ├── toast_overlay.gd
         │   ├── window_chrome.gd # Titlebar + window-mode/fullscreen handling

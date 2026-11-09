@@ -128,33 +128,15 @@ func _ready():
 			VaultRegistry.register(str(settings.get("vault_path", "")))
 		_apply_active_workspace_view())
 
-	_build_sidebar()
-
-	_status_bar = StatusBar.new()
-	_status_bar.name = "StatusBar"
-	add_child(_status_bar)
-
-	ProfileManager.load_profiles()
-	_wire_sidebar_signals()
-	_refresh_profile_buttons()
-	_wire_tm(_tm)
-	_init_workspaces()
-
-	# A quit request comes to us, not straight to the engine: panes holding
-	# unsaved work get to ask before the window goes away (see `request_quit`).
-	get_tree().auto_accept_quit = false
-
-	# Push concepts to Rust engine — must wait for first frame (GDExtension ready)
-	_push_concepts_deferred()
-	# Reclaim scrollback rows of panes that no longer exist — same wait; needs
-	# the restored workspace set and a started terminal for the FFI handle.
-	_prune_history_deferred()
-
 	# The one predicate the shortcut layer asks before it acts: an overlay owns
 	# the keyboard, so only a window action may land while one is open.
 	ShortcutManager.overlay_owns_keyboard = func() -> bool: return _keyboard_overlay() != null
 
-	# Per-type keyboard shortcuts
+	# Per-type keyboard shortcuts.
+	#
+	# Registered before the sidebar is built: its tooltips and help table spell
+	# chords from this registry, so a registration after it would render as an
+	# unbound action.
 	for key in PaneTypes.ALL:
 		var info = PaneTypes.ALL[key]
 		var shortcut := str(info.get("shortcut", ""))
@@ -182,6 +164,28 @@ func _ready():
 		if not _workspaces.is_empty():
 			_switch_workspace(clampi(_active - 1, 0, _workspaces.size() - 1))
 	)
+
+	_build_sidebar()
+
+	_status_bar = StatusBar.new()
+	_status_bar.name = "StatusBar"
+	add_child(_status_bar)
+
+	ProfileManager.load_profiles()
+	_wire_sidebar_signals()
+	_refresh_profile_buttons()
+	_wire_tm(_tm)
+	_init_workspaces()
+
+	# A quit request comes to us, not straight to the engine: panes holding
+	# unsaved work get to ask before the window goes away (see `request_quit`).
+	get_tree().auto_accept_quit = false
+
+	# Push concepts to Rust engine — must wait for first frame (GDExtension ready)
+	_push_concepts_deferred()
+	# Reclaim scrollback rows of panes that no longer exist — same wait; needs
+	# the restored workspace set and a started terminal for the FFI handle.
+	_prune_history_deferred()
 
 	SettingsManager.settings_changed.connect(_on_settings_changed)
 	SettingsManager.appearance_changed.connect(_on_appearance_changed)
@@ -1813,6 +1817,7 @@ func _execute_command(cmd: String):
 	match cmd:
 		"close active": _kill_last()
 		"settings": _toggle_settings()
+		"shortcuts": _open_shortcuts_settings()
 		"save command": _open_commands_settings()
 		"close all": _reset()
 		"save": _save()
@@ -2475,6 +2480,14 @@ func _open_commands_settings() -> void:
 	var settings := _ensure_settings_panel()
 	_raise_settings_panel(settings)
 	settings.open_commands(true)
+
+## The palette's "Keyboard Shortcuts": the About tab, where the list lives.
+## The panel reads the registry when it opens, so a chord rebound since the last
+## look is spelled as it is now.
+func _open_shortcuts_settings() -> void:
+	var settings := _ensure_settings_panel()
+	_raise_settings_panel(settings)
+	settings.open_about()
 
 ## Put the settings panel in front and close the pane settings overlay, so the
 ## two overlays never stack. Input picking uses reverse tree order (z_index is

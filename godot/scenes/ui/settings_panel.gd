@@ -46,6 +46,10 @@ func _notification(what: int):
 		# The list outlives a visit: a command saved from the palette while the
 		# panel was closed must be there on the next open.
 		_refresh_command_list()
+		# The About tab's chords are read from the registry, which a workspace
+		# fills after this panel may already exist: re-read on every show so the
+		# table cannot print a binding from before that happened.
+		_refresh_shortcut_list()
 	elif what == NOTIFICATION_RESIZED:
 		# The window (and with it the layout space) changed, so the scale it can
 		# show may have moved while the panel is open.
@@ -658,6 +662,10 @@ func _add_window_mode_control(v: VBoxContainer) -> OptionButton:
 	for label in SettingsManager.WINDOW_MODE_LABELS:
 		opt.add_item(label)
 	opt.selected = SettingsManager.cfg_window_mode
+	# Same name and explanation as the sidebar's dropdown: the two select the
+	# same setting, and three bare words never said what a mode draws.
+	opt.accessibility_name = SettingsManager.WINDOW_MODE_TITLE
+	opt.tooltip_text = SettingsManager.WINDOW_MODE_HINT
 	opt.item_selected.connect(func(_idx): _debounce_timer.start())
 	hb.add_child(opt)
 	v.add_child(hb)
@@ -758,6 +766,13 @@ var _version_label: Label
 var _protocol_label: Label
 var _concept_list: VBoxContainer
 var _concept_terminal: GptyTerminal  # any terminal for global concept FFI
+## The About tab and its shortcut table, kept so `open_about()` can land on the
+## right tab and `_refresh_shortcut_list()` can rebuild the table on each open.
+var _about_tab: VBoxContainer = null
+var _shortcut_list: VBoxContainer = null
+## The aligned chord column's floor: the widest chord in the list is
+## "Ctrl+PageDown".
+const SHORTCUT_CHORD_WIDTH := 108.0
 
 func _add_about_section(v: VBoxContainer):
 	_version_label = Label.new()
@@ -782,6 +797,57 @@ func _add_about_section(v: VBoxContainer):
 	url_lbl.name = "RepoUrl"
 	url_lbl.text = "github.com/godot-pty/gpty"
 	v.add_child(url_lbl)
+
+	_about_tab = v
+	v.add_child(HSeparator.new())
+	var shortcut_heading := Label.new()
+	shortcut_heading.name = "ShortcutHeading"
+	shortcut_heading.text = "Keyboard Shortcuts"
+	shortcut_heading.add_theme_font_size_override("font_size", UiTokens.FS_BODY)
+	v.add_child(shortcut_heading)
+	_shortcut_list = VBoxContainer.new()
+	_shortcut_list.name = "ShortcutList"
+	_shortcut_list.add_theme_constant_override("separation", UiTokens.SPACE_SM)
+	v.add_child(_shortcut_list)
+	_refresh_shortcut_list()
+
+## Rebuild the shortcut table from the registry. Called on construction, on
+## `open_about()` and whenever the panel is shown: a chord is only known once
+## the workspace has registered it, so the list is re-read rather than
+## snapshotted here.
+func _refresh_shortcut_list() -> void:
+	if _shortcut_list == null:
+		return
+	# Freed immediately, not queued: this runs on every open, and a queued free
+	# would leave the previous table on screen for the first frame.
+	for child in _shortcut_list.get_children():
+		_shortcut_list.remove_child(child)
+		child.free()
+	var group := ""
+	var grid: GridContainer = null
+	for row in ShortcutCatalog.rows(func(action: String): return ShortcutManager.chord(action)):
+		if row["group"] != group:
+			group = str(row["group"])
+			var caption := Label.new()
+			caption.text = group
+			caption.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
+			caption.theme_type_variation = UiTheme.MUTED_LABEL
+			_shortcut_list.add_child(caption)
+			grid = GridContainer.new()
+			grid.columns = 2
+			grid.add_theme_constant_override("h_separation", UiTokens.SPACE_XL)
+			grid.add_theme_constant_override("v_separation", UiTokens.SPACE_XS)
+			_shortcut_list.add_child(grid)
+		var chord_lbl := Label.new()
+		chord_lbl.text = str(row["chord"])
+		chord_lbl.custom_minimum_size.x = SHORTCUT_CHORD_WIDTH
+		chord_lbl.add_theme_font_size_override("font_size", UiTokens.FS_SMALL)
+		grid.add_child(chord_lbl)
+		var desc_lbl := Label.new()
+		desc_lbl.text = str(row["label"])
+		desc_lbl.add_theme_font_size_override("font_size", UiTokens.FS_SMALL)
+		desc_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(desc_lbl)
 
 func _add_concept_section(v: VBoxContainer):
 	_concept_terminal = _workspace.get_terminal_for_ffi()
@@ -1016,6 +1082,16 @@ func open_commands(add_now := false) -> void:
 	_refresh_command_list()
 	if add_now:
 		_show_command_dialog(-1)
+
+## The palette's "Keyboard Shortcuts": the About tab, where the list lives.
+## Opening, never toggling, so a second run cannot close what it just opened.
+func open_about() -> void:
+	open()
+	if _tabs != null and _about_tab != null:
+		_tabs.current_tab = _tabs.get_tab_idx_from_control(_tab_control(_about_tab))
+	# Read after the tab is up: the workspace registers its bindings once, and a
+	# panel built before that would otherwise show the previous set.
+	_refresh_shortcut_list()
 
 ## The direct child `TabContainer` indexes for a tab: `_create_tab` hands back
 ## the VBox *inside* the tab's ScrollContainer, and `get_tab_idx_from_control`

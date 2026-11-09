@@ -12,11 +12,15 @@ The workspace and profile lists show at most five rows at full height and gain a
 
 ## Window mode
 
-The top dropdown switches how gPTY presents its window: `OS`, `Windowed`, or `Windowless`. This is the same setting as Window Mode in the Settings panel's System tab; changing either updates the other. `OS` keeps the operating system's window frame and hides gPTY's own titlebar, `Windowed` is a borderless window that draws gPTY's titlebar, and `Windowless` is fullscreen with that titlebar. The fullscreen shortcut toggles between the last two (see [[keyboard-shortcuts]]).
+The top dropdown switches how gPTY presents its window: `System Frame`, `Borderless`, or `Fullscreen`. This is the same setting as Window Mode in the Settings panel's System tab; changing either updates the other. Its tooltip spells out what each value draws: `System Frame` keeps the operating system's window frame and its controls and hides gPTY's own titlebar, `Borderless` is a window with no desktop frame that draws gPTY's titlebar, and `Fullscreen` fills the screen and keeps that titlebar. The fullscreen shortcut toggles between the last two (see [[keyboard-shortcuts]]).
 
 ## Add Pane and the actions
 
-`Add Pane` is a two-row grid of eight buttons, one per pane type: Terminal, Code Viewer, File Tree, Inspector, Reasoning, CLI View, Wiki, and Media. Tooltips name the type and, where one exists, its shortcut. Clicking a button spawns that pane into the active workspace using the same split rule as every other spawn: the largest tile halves along its longer axis, and the spawn is refused if the halves would fall below the 6-unit minimum. The new pane becomes active, and a terminal takes the keyboard.
+`Add Pane` is a two-row grid of eight buttons, one per pane type: Terminal, Code Viewer, File Tree, Inspector, Reasoning, CLI View, Wiki, and Media. Each tooltip names the type and, where one exists, its shortcut, read from the binding the key path actually answers.
+
+The heading at the left of the row reads `Add Pane:` until you point at a tile or move the keyboard cursor onto one, then names that tile (`Add a Terminal Pane`) and reverts when you leave; a tile under the pointer wins over a tile that merely has focus. The question-mark **Help** button at the right of the heading opens a table of the same information: the glyph, what pressing it adds, and the chord, for every pane type.
+
+Clicking a button spawns that pane into the active workspace using the same split rule as every other spawn: the largest tile halves along its longer axis, and the spawn is refused if the halves would fall below the 6-unit minimum. The new pane becomes active, and a terminal takes the keyboard.
 
 Below it:
 

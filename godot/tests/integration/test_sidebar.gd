@@ -434,3 +434,63 @@ func test_the_panes_heading_hides_with_an_empty_list():
 	add_child_autofree(body)
 	_sidebar.update_pane_list([body], body)
 	assert_true(_sidebar._pane_heading.visible, "a pane brings the heading back")
+
+# ── Add Pane header: names, Help, registry chords ──────────────────────
+
+func _pane_tile(idx: int) -> Button:
+	var row := _sidebar.find_child("PaneTypeRow", true, false) as GridContainer
+	assert_not_null(row, "the grid exists")
+	return row.get_child(idx) as Button
+
+func test_the_add_pane_header_carries_the_section_help_button():
+	var btn := _sidebar.find_child(SectionHelp.BUTTON_NAME, true, false) as Button
+	assert_not_null(btn, "the section header carries the shared Help affordance")
+	assert_eq(btn.accessibility_name, SectionHelp.NAME)
+	assert_eq(Icons.glyph(btn), Icons.QUESTION)
+	# Before the fix the heading was a bare Label and the names lived only in
+	# per-tile tooltips.
+	var heading := _sidebar.find_child("AddPaneHeading", true, false) as Label
+	assert_not_null(heading)
+	assert_eq(heading.text, Sidebar.ADD_PANE_TITLE)
+	# The heading renames itself, so it must never claim the section's width.
+	assert_true(heading.clip_text, "a renaming heading cannot widen the section")
+
+func test_hovering_a_pane_tile_names_it_beside_the_heading():
+	var heading := _sidebar.find_child("AddPaneHeading", true, false) as Label
+	var tile := _pane_tile(0)  # registry order: terminal first
+	tile.mouse_entered.emit()
+	assert_eq(heading.text, " Add a Terminal Pane")
+	tile.mouse_exited.emit()
+	assert_eq(heading.text, Sidebar.ADD_PANE_TITLE, "the heading reverts on exit")
+
+func test_the_pointer_wins_over_the_keyboard_cursor_and_hands_back():
+	var heading := _sidebar.find_child("AddPaneHeading", true, false) as Label
+	var first := _pane_tile(0)
+	var second := _pane_tile(1)
+	first.focus_entered.emit()
+	assert_eq(heading.text, " Add a Terminal Pane")
+	second.mouse_entered.emit()
+	assert_eq(heading.text, " Add a Code Viewer Pane",
+		"the tile under the pointer is the one the user is asking about")
+	second.mouse_exited.emit()
+	assert_eq(heading.text, " Add a Terminal Pane",
+		"handing the pointer back falls to the tile the keyboard cursor is on")
+	first.focus_exited.emit()
+	assert_eq(heading.text, Sidebar.ADD_PANE_TITLE)
+
+func test_the_add_pane_help_lists_every_glyph_and_the_action_it_takes():
+	var btn := _sidebar.find_child(SectionHelp.BUTTON_NAME, true, false) as Button
+	btn.pressed.emit()
+	# Parented to the sidebar's background rect, not the sidebar itself: the
+	# sidebar clips its content, which would cut a modal in half.
+	var table := _sidebar.bg.find_child(SectionHelp.TABLE_NAME, true, false) as GridContainer
+	assert_not_null(table, "the popup opens over the panel")
+	assert_eq(table.get_child_count(), PaneTypes.ALL.size() * 3,
+		"one row per registry entry, in grid order")
+	assert_eq((table.get_child(0) as Label).text, str(PaneTypes.ALL["terminal"]["icon"]),
+		"the glyph the tile draws")
+	assert_eq((table.get_child(1) as Label).text, "Add a Terminal pane",
+		"the words say what the press adds")
+	assert_eq((table.get_child(2) as Label).text,
+		ShortcutManager.chord("app:new_terminal"),
+		"the chord is the binding the tile's tooltip names, not a literal")

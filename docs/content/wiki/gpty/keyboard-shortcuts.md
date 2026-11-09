@@ -59,7 +59,7 @@ Each pane's title-bar buttons are keyboard stops, but a focused terminal sends `
 
 `Ctrl+Shift+P` opens a centred card with a filter field and the full list already showing. Typing matches the command's name first (a name that starts with the query outranks one that contains it), then the command id and keywords, so `new` lists every pane type, `close` lists the close actions, and `load` lists the reload action. `Up`/`Down` move a highlighted cursor - it stops at both ends rather than wrapping - and `Enter` runs the highlighted row, not merely the first match; clicking a row runs it too, and `Escape` closes the palette. The field keeps the keyboard while the arrows move the cursor, so `Tab` is not needed to pick a row (and does not move between rows). A query that matches nothing says so instead of showing an empty card.
 
-Each row shows the command's name, the pane type's glyph, and the chord that runs it directly when one is bound (`Ctrl+Shift+N` for a terminal, `Ctrl+Shift+W` for closing, and so on). The commands are one `New <type>` entry for each of the eight pane types, then `Close Active Pane`, `Open Settings`, `Save Command…`, `Close All Panes`, `Save Workspaces`, and `Reload Saved Workspaces`. The last one and `Close All Panes` are shown in the danger colour because they destroy the open panes: `Reload Saved Workspaces` asks every pane to close and then restores the saved set from disk, while `Save Workspaces` writes the current set. See [[layout]].
+Each row shows the command's name, the pane type's glyph, and the chord that runs it directly when one is bound (`Ctrl+Shift+N` for a terminal, `Ctrl+Shift+W` for closing, and so on). The commands are one `New <type>` entry for each of the eight pane types, then `Close Active Pane`, `Open Settings`, `Keyboard Shortcuts`, `Save Command…`, `Close All Panes`, `Save Workspaces`, and `Reload Saved Workspaces`. `Keyboard Shortcuts` opens the Settings panel's About tab, which lists every binding (see [[settings]]). The last one and `Close All Panes` are shown in the danger colour because they destroy the open panes: `Reload Saved Workspaces` asks every pane to close and then restores the saved set from disk, while `Save Workspaces` writes the current set. See [[layout]].
 
 Your own saved commands follow under a **Saved commands** heading, in the order the Commands tab puts them, each row hinting `Insert` or `Run`. Choosing one writes it into the active terminal pane: `Insert` leaves it at the prompt to read and edit, `Run` sends Enter with it. `Save Command…` opens the Commands tab with the add form already up. When the active pane is not a terminal the rows are greyed out and their tooltip says why — a saved command is never delivered to a pane you are not looking at. See [[settings]].
 
@@ -89,7 +89,11 @@ Opening the graph hands the keyboard to the canvas, and the canvas draws a focus
 
 ## Where shortcuts come from
 
-Workspace shortcuts are registered once at startup, with fixed bindings. Pane-type spawn shortcuts are registered from the pane registry, so the tooltip on a sidebar button always names the same chord that actually works. Terminal chords are handled inside the terminal pane's keyboard path rather than through the global action map, which is why `Ctrl+V` and `Ctrl+F` can pass through to programs while `Ctrl+Shift+V` and `Ctrl+Shift+F` do not.
+Workspace shortcuts are registered once at startup, with fixed bindings. Pane-type spawn shortcuts are registered from the pane registry, so the tooltip on a sidebar button always names the same chord that actually works.
+
+The terminal's three chords are *declared* rather than registered with a callback: `term:copy`, `term:paste` and `term:search` exist in the same binding registry so Settings → About and the sidebar tooltips can spell them, while the terminal pane's own keyboard path is still the code that acts on them. That split is what keeps `Ctrl+V` and `Ctrl+F` passing through to programs while `Ctrl+Shift+V` and `Ctrl+Shift+F` do not: a declared chord never becomes a workspace action, so the pane is offered the key first.
+
+Every surface that names a chord — the About list, the palette rows, the sidebar's tooltips — reads it from that registry with `chord(action)` instead of repeating a literal, so a list can never advertise a key that does nothing.
 
 ## Related
 

@@ -34,6 +34,8 @@ const ACTIONS: Array[Dictionary] = [
 		"action": "app:close_pane", "keywords": "close kill active pane", "variation": &""},
 	{"command": "settings", "label": "Open Settings", "glyph": Icons.SETTINGS,
 		"action": "", "keywords": "settings preferences options appearance", "variation": &""},
+	{"command": "shortcuts", "label": "Keyboard Shortcuts", "glyph": Icons.QUESTION,
+		"action": "", "keywords": "shortcuts keys bindings help about", "variation": &""},
 	{"command": "save command", "label": "Save Command\u2026", "glyph": Icons.ADD,
 		"action": "", "keywords": "save command saved commands", "variation": &""},
 	{"command": "close all", "label": "Close All Panes", "glyph": Icons.DELETE,

@@ -2,7 +2,14 @@ extends BasePersistenceManager
 
 const SETTINGS_FILE = "user://settings.json"
 
-const WINDOW_MODE_LABELS := ["OS", "Windowed", "Windowless"]
+## The window modes, in the order the index means them: the desktop's own frame,
+## gPTY's borderless title bar, fullscreen. The stored value is the index, so
+## these labels are display-only and an old settings file needs no migration.
+const WINDOW_MODE_LABELS := ["System Frame", "Borderless", "Fullscreen"]
+## What the window-mode dropdown is, and one sentence per mode saying what it
+## draws (`WindowChrome.apply_mode` is what the values actually do).
+const WINDOW_MODE_TITLE := "Window Mode"
+const WINDOW_MODE_HINT := "System Frame: the desktop draws the window frame and its controls. Borderless: gPTY's own title bar, with no desktop frame. Fullscreen: fills the screen and keeps that title bar."
 ## The chrome's colour mode: an index into `APPEARANCE_LABELS`.
 const APPEARANCE_DARK := 0
 const APPEARANCE_LIGHT := 1
