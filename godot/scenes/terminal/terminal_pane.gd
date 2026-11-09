@@ -152,6 +152,10 @@ var _history_results: Array = []  # [[line_num, text], ...]
 var _history_stored_lines: int = 0
 var _history_panel: ScrollContainer
 var _history_list: VBoxContainer
+var _search_strip: PanelContainer
+var _search_count: Label
+var _search_prev: Button
+var _search_next: Button
 var _sync_interval: float = 1.0 / 60.0
 ## Title and agent-state reads are FFI calls that allocate and take the grid
 ## mutex; they change on OSC title / event arrival, not per frame.
@@ -356,45 +360,83 @@ func _ready():
 	focus_mode = Control.FOCUS_CLICK
 	clip_contents = true
 
-	# Search bar (hidden by default) — anchored to the pane's BOTTOM EDGE.
-	# anchor_top MUST be 1.0 alongside anchor_bottom: with the default 0.0
-	# the control stretches to full pane height (giant overlay).
-	_search_bar = LineEdit.new()
-	_search_bar.name = "SearchBar"
-	_search_bar.placeholder_text = "Search (regex)..."
-	_search_bar.visible = false
-	_search_bar.anchor_left = 0.0; _search_bar.anchor_right = 1.0
-	_search_bar.anchor_top = 1.0; _search_bar.anchor_bottom = 1.0
-	_search_bar.offset_left = 74; _search_bar.offset_right = -6
-	_search_bar.offset_top = -42; _search_bar.offset_bottom = -6
-	_search_bar.text_changed.connect(_on_search_text_changed)
-	_search_bar.text_submitted.connect(_on_search_submitted)
-	_search_bar.gui_input.connect(_on_search_bar_input)
-	add_child(_search_bar)
+	# Search strip (hidden by default) — anchored to the pane's TOP edge. It sat
+	# on the bottom edge and covered the prompt and the last two output rows;
+	# the top rows are the oldest visible output, and the prompt stays readable
+	# while a search runs.
+	_search_strip = PanelContainer.new()
+	_search_strip.name = "SearchStrip"
+	_search_strip.theme_type_variation = UiTheme.RAISED_PANEL
+	_search_strip.visible = false
+	_search_strip.anchor_left = 0.0; _search_strip.anchor_right = 1.0
+	_search_strip.anchor_top = 0.0; _search_strip.anchor_bottom = 0.0
+	_search_strip.offset_left = 6; _search_strip.offset_right = -6
+	_search_strip.offset_top = 6; _search_strip.offset_bottom = 42
+	add_child(_search_strip)
+	var strip_row := HBoxContainer.new()
+	strip_row.name = "SearchRow"
+	strip_row.add_theme_constant_override("separation", UiTokens.SPACE_SM)
+	_search_strip.add_child(strip_row)
 
 	# Search scope toggle (Live grid / persisted history)
 	_scope_btn = Button.new()
 	_scope_btn.name = "ScopeBtn"
 	_scope_btn.text = "Live"
-	_scope_btn.tooltip_text = "Search scope"
+	_scope_btn.tooltip_text = "Search scope: this screen, or the pane's saved history"
+	_scope_btn.custom_minimum_size.x = 60
 	# Never steal focus from the search bar — typing continues after toggling.
 	_scope_btn.focus_mode = Control.FOCUS_NONE
-	_scope_btn.visible = false
-	_scope_btn.anchor_left = 0.0; _scope_btn.anchor_right = 0.0
-	_scope_btn.anchor_top = 1.0; _scope_btn.anchor_bottom = 1.0
-	_scope_btn.offset_left = 6; _scope_btn.offset_right = 66
-	_scope_btn.offset_top = -42; _scope_btn.offset_bottom = -6
 	_scope_btn.pressed.connect(_on_scope_toggled)
-	add_child(_scope_btn)
+	strip_row.add_child(_scope_btn)
 
-	# History search results panel (above the search bar)
+	_search_bar = LineEdit.new()
+	_search_bar.name = "SearchBar"
+	_search_bar.placeholder_text = "Search (regex)..."
+	_search_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_search_bar.text_changed.connect(_on_search_text_changed)
+	_search_bar.text_submitted.connect(_on_search_submitted)
+	_search_bar.gui_input.connect(_on_search_bar_input)
+	strip_row.add_child(_search_bar)
+
+	# `n/m`: the highlighted match's ordinal out of the count — `0/m` until the
+	# first jump, `Invalid pattern` when the engine refused the expression (the
+	# error was set and never shown before).
+	_search_count = Label.new()
+	_search_count.name = "SearchCount"
+	_search_count.custom_minimum_size.x = 72
+	_search_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_search_count.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
+	_search_count.theme_type_variation = UiTheme.MUTED_LABEL
+	_search_count.mouse_filter = Control.MOUSE_FILTER_STOP  # the tooltip's hover target
+	strip_row.add_child(_search_count)
+
+	# Mouse-only like the scope toggle: Enter and Shift+Enter do the same from
+	# the field, and focus returns to the field so typing never stops.
+	_search_prev = Button.new()
+	_search_prev.name = "SearchPrev"
+	_search_prev.focus_mode = Control.FOCUS_NONE
+	_search_prev.tooltip_text = "Previous match (Shift+Enter)"
+	Icons.icon_button(_search_prev, Icons.COLLAPSE, "Previous match")
+	_search_prev.pressed.connect(_on_search_step.bind(-1))
+	strip_row.add_child(_search_prev)
+
+	_search_next = Button.new()
+	_search_next.name = "SearchNext"
+	_search_next.focus_mode = Control.FOCUS_NONE
+	_search_next.tooltip_text = "Next match (Enter)"
+	Icons.icon_button(_search_next, Icons.EXPAND, "Next match")
+	_search_next.pressed.connect(_on_search_step.bind(1))
+	strip_row.add_child(_search_next)
+
+	# History search results panel (below the strip).
 	_history_panel = ScrollContainer.new()
 	_history_panel.name = "HistoryResults"
+	_history_panel.theme_type_variation = UiTheme.RAISED_PANEL
 	_history_panel.visible = false
 	_history_panel.anchor_left = 0.0; _history_panel.anchor_right = 1.0
-	_history_panel.anchor_top = 1.0; _history_panel.anchor_bottom = 1.0
+	_history_panel.anchor_top = 0.0; _history_panel.anchor_bottom = 0.0
 	_history_panel.offset_left = 6; _history_panel.offset_right = -6
-	_history_panel.offset_top = -246; _history_panel.offset_bottom = -48
+	_history_panel.offset_top = 48; _history_panel.offset_bottom = 246
 	_history_list = VBoxContainer.new()
 	_history_list.name = "Results"
 	_history_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -888,7 +930,10 @@ func _draw():
 	# Scrollback indicator
 	var so = _terminal.get_scroll_offset()
 	if so > 0:
-		draw_string(_font, Vector2(off.x + _cell_w * 0.5, off.y + _cell_h * 0.5),
+		# The search strip covers the pane's first two rows, so the indicator
+		# moves below it while the strip is open instead of vanishing under it.
+		var indicator_row := 2.5 if _search_visible else 0.5
+		draw_string(_font, Vector2(off.x + _cell_w * 0.5, off.y + _cell_h * indicator_row),
 			"[Scroll: %d/%d lines]" % [so, _terminal.get_history_size()],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, scrollback_indicator_color)
 
@@ -1313,6 +1358,12 @@ func _key_to_text(event: InputEventKey) -> String:
 		return char(event.unicode)
 	return ""
 func _on_search_bar_input(event):
+	if event is InputEventKey and event.pressed and event.shift_pressed \
+			and event.keycode in [KEY_ENTER, KEY_KP_ENTER]:
+		# Shift+Enter steps back; plain Enter stays the LineEdit's own submit.
+		_jump_to_match(-1)
+		_search_bar.accept_event()
+		return
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		_close_search()
 		_search_bar.accept_event()
@@ -1320,8 +1371,7 @@ func _on_search_bar_input(event):
 
 func _toggle_search():
 	_search_visible = not _search_visible
-	_search_bar.visible = _search_visible
-	_scope_btn.visible = _search_visible
+	_search_strip.visible = _search_visible
 	_history_panel.visible = _search_visible and _scope_history and _history_results.size() > 0
 	if _search_visible:
 		_search_bar.grab_focus()
@@ -1330,16 +1380,49 @@ func _toggle_search():
 		_search_results.clear()
 		_search_error = ""
 		queue_redraw()
+	_refresh_search_count()
 
 func _close_search():
 	_search_visible = false
-	_search_bar.visible = false
-	_scope_btn.visible = false
+	_search_strip.visible = false
 	_search_results.clear()
 	_search_error = ""
 	_clear_history_results()
 	queue_redraw()
+	_refresh_search_count()
 	grab_focus()
+
+## Step through the matches from the strip's two buttons. Focus returns to the
+## field so a click never stops the typing.
+func _on_search_step(direction: int) -> void:
+	_jump_to_match(direction)
+	_search_bar.grab_focus()
+
+## `n/m` on the strip: the highlighted ordinal out of the count, `0/m` before
+## the first jump, or the engine's refusal. Hidden in the history scope, whose
+## own results panel carries the answer.
+func _refresh_search_count() -> void:
+	var live := _search_visible and not _scope_history
+	_search_count.visible = live
+	_search_prev.visible = live
+	_search_next.visible = live
+	if not live:
+		return
+	if _search_error != "":
+		_search_count.text = "Invalid pattern"
+		_search_count.theme_type_variation = UiTheme.DANGER_LABEL
+		_search_count.tooltip_text = _search_error
+		return
+	_search_count.theme_type_variation = UiTheme.MUTED_LABEL
+	_search_count.tooltip_text = "Enter: next match · Shift+Enter: previous match"
+	var count := int(_search_results.get("count", 0))
+	var current := int(_search_results.get("current", -1))
+	if count == 0:
+		_search_count.text = "0/0"
+	elif current < 0:
+		_search_count.text = "0/%d" % count
+	else:
+		_search_count.text = "%d/%d" % [current + 1, count]
 
 func _on_search_text_changed(new_text: String):
 	_do_search(new_text)
@@ -1379,6 +1462,7 @@ func _on_scope_toggled():
 	queue_redraw()
 	if _search_visible and _search_bar.text != "":
 		_do_search(_search_bar.text)
+	_refresh_search_count()
 
 func _do_search(pattern: String):
 	if pattern == "":
@@ -1386,6 +1470,7 @@ func _do_search(pattern: String):
 		_search_error = ""
 		_clear_history_results()
 		queue_redraw()
+		_refresh_search_count()
 		return
 	if _scope_history:
 		_do_history_search(pattern)
@@ -1399,6 +1484,7 @@ func _do_search(pattern: String):
 		_search_results = result
 		_search_results["current"] = -1
 	queue_redraw()
+	_refresh_search_count()
 
 func _do_history_search(pattern: String):
 	var parsed = JSON.parse_string(str(_terminal.search_history(pattern, 100)))
@@ -1407,11 +1493,13 @@ func _do_history_search(pattern: String):
 		_history_results = []
 		_history_stored_lines = 0
 		_rebuild_history_panel()
+		_refresh_search_count()
 		return
 	_search_error = str(parsed.get("error", ""))
 	_history_stored_lines = int(parsed.get("stored_lines", 0))
 	_history_results = parsed.get("results", [])
 	_rebuild_history_panel()
+	_refresh_search_count()
 
 func _rebuild_history_panel():
 	for c in _history_list.get_children():
@@ -1479,6 +1567,7 @@ func _jump_to_match(direction: int):
 		_note_view_input()
 		_terminal.scroll_down(-delta)
 	queue_redraw()
+	_refresh_search_count()
 
 func _draw_search_highlights(off: Vector2):
 	if _search_results.is_empty(): return
@@ -1584,7 +1673,8 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 
 	var cursor_color_btn = ColorPickerButton.new()
 	cursor_color_btn.color = cursor_color
-	_make_row(v, "Cursor color:", cursor_color_btn, panel)
+	var cursor_lbl := _make_row(v, "Cursor color:", cursor_color_btn, panel)
+	ColorSwatch.attach(cursor_lbl, cursor_color_btn)
 
 	var beam_spin = SpinBox.new()
 	beam_spin.min_value = 1; beam_spin.max_value = 8
@@ -1613,11 +1703,13 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	# ── Appearance ──
 	var fg_btn = ColorPickerButton.new()
 	fg_btn.color = default_fg
-	_make_row(v, "Default FG:", fg_btn, panel)
+	var fg_lbl := _make_row(v, "Default FG:", fg_btn, panel)
+	ColorSwatch.attach(fg_lbl, fg_btn)
 
 	var bg_btn = ColorPickerButton.new()
 	bg_btn.color = default_bg
-	_make_row(v, "Default BG:", bg_btn, panel)
+	var bg_lbl := _make_row(v, "Default BG:", bg_btn, panel)
+	ColorSwatch.attach(bg_lbl, bg_btn)
 
 	# Font path picker — stored as metadata to avoid closure capture issues
 	var font_btn = Button.new()
@@ -1679,7 +1771,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 
 	return v
 
-func _make_row(parent: VBoxContainer, label: String, control: Control, panel: Control):
+func _make_row(parent: VBoxContainer, label: String, control: Control, panel: Control) -> Label:
 	var hb = HBoxContainer.new()
 	var lbl = Label.new(); lbl.text = label
 	hb.add_child(lbl)
@@ -1694,3 +1786,4 @@ func _make_row(parent: VBoxContainer, label: String, control: Control, panel: Co
 		control.item_selected.connect(func(_idx: int): panel._debounce_timer.start())
 	elif control is ColorPickerButton:
 		control.color_changed.connect(func(_c: Color): panel._debounce_timer.start())
+	return lbl

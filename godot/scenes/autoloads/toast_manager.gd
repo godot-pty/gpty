@@ -1,6 +1,11 @@
 extends Node
 # Toast Notification Manager — autoload singleton.
 # Pure event bus for non-intrusive notifications.
+#
+# A toast reports a result the user cannot otherwise see. It never restates the
+# action they just took: a new tile, a closed pane and a swapped type are all
+# visible in the grid, and a burst of them (a spawn loop, an API caller) would
+# only preempt itself.
 
 const INFO = 0
 const WARN = 1

@@ -406,20 +406,16 @@ func _spawn_pane_into(ws: Dictionary, type_name: String, opts := {}) -> Control:
 		ToastManager.warn("Cannot add pane — grid is full")
 		return null
 	var w = tm.tiles[-1].wrapper
-	_add_body_to_grid_into(ws, w, body, PaneTypes.ALL[type_name]["name"])
+	_add_body_to_grid_into(ws, w, body)
 	return body
 
-func _add_body_to_grid(w: Control, body: Control, label: String):
-	_add_body_to_grid_into(_active_workspace(), w, body, label)
-
-func _add_body_to_grid_into(ws: Dictionary, w: Control, body: Control, label: String):
+func _add_body_to_grid_into(ws: Dictionary, w: Control, body: Control):
 	if ws.is_empty():
 		return
 	_attach_pane_into(ws, w, body)
 	_sync_pane_titlebars()
 	_apply_layout()
 	_list()
-	ToastManager.info("%s spawned" % label)
 
 ## Answer a pane's `request_pane` (the file tree opening a file in a viewer,
 ## and any future origin). The type is held to the pane registry — the request
@@ -597,7 +593,6 @@ func _kill_now(body: Control):
 			if survivor is TerminalPane:
 				activate_pane(survivor)
 				break
-	ToastManager.info("Pane closed")
 
 ## Close the pane settings popup when its target pane is torn down. The
 ## panel also self-closes via _process when its target is freed by other
@@ -651,7 +646,6 @@ func _swap_pane_now(body: Control, new_type_name: String):
 	# apply the one focus rule (a terminal takes the keyboard, a read-only
 	# pane releases it).
 	activate_pane(new_body)
-	ToastManager.info("Swapped to %s" % PaneTypes.ALL[new_type_name]["name"])
 
 func _kill_last():
 	if not is_instance_valid(_tm.last_body):

@@ -165,14 +165,36 @@ func test_scrollback_color_reset():
 # ── Uniform picker width (issue: haphazard widths) ─────────────────────
 
 func test_color_labels_have_uniform_minimum_width():
-	var labels := []
-	for lbl in _panel.find_children("*", "Label", true, false):
-		if lbl.text in ["Wrapper bg", "Title bar", "Border", "Sidebar", "Focus", "Selection", "Scroll"]:
-			labels.append(lbl)
-	assert_eq(labels.size(), 7, "all seven UI color rows must exist")
-	for lbl in labels:
+	for name in ["Wrapper bg", "Title bar", "Border", "Sidebar", "Focus", "Selection", "Scroll"]:
+		var lbl := _row_label_prefix(name)
+		assert_not_null(lbl, "the %s row must exist" % name)
 		assert_eq(lbl.custom_minimum_size.x, 96.0,
 			"color row labels must share one minimum width so pickers align")
+	assert_string_contains(_row_label_prefix("Selection").text, "(40%)",
+		"a translucent swatch names its opacity in the row")
+	assert_string_contains(_row_label_prefix("Focus").text, "(30%)")
+
+## The swatch's reading is its label: a pick updates it and the reset restores
+## both the palette's colour and the words.
+func test_swatch_label_follows_a_pick_and_the_reset():
+	# Selection starts at the palette's translucent value and says so.
+	assert_eq(_row_label_prefix("Selection").text, "Selection (40%)")
+	var sel: ColorPickerButton = null
+	for c in _row_label_prefix("Selection").get_parent().get_children():
+		if c is ColorPickerButton:
+			sel = c
+	assert_not_null(sel, "the Selection row carries a picker")
+	sel.color = Color(0.9, 0.1, 0.2)
+	sel.color_changed.emit(sel.color)          # assignment does not emit; a pick does
+	assert_eq(_row_label_prefix("Selection").text, "Selection",
+		"an opaque colour drops the reading")
+	assert_eq(_row_label_prefix("Selection").tooltip_text, "")
+	var reset := _row_reset_prefix("Selection")
+	assert_not_null(reset)
+	reset.pressed.emit()
+	assert_almost_eq(SettingsManager.cfg_selection.a, 0.4, 0.001)
+	assert_eq(_row_label_prefix("Selection").text, "Selection (40%)",
+		"the reset restores the palette's colour and the label says so again")
 
 # ── Reset button layout ────────────────────────────────────────────────
 
@@ -234,6 +256,24 @@ func _row_label(label_text: String) -> Label:
 	for lbl in _panel.find_children("*", "Label", true, false):
 		if lbl.text == label_text:
 			return lbl
+	return null
+
+## The colour row for `text`. Five rows read as their setting name; two carry
+## their swatch's reading in brackets (`Selection (40%)`). The bracket guard
+## keeps `Scroll` away from the Terminal tab's `Scroll lines:`.
+func _row_label_prefix(text: String) -> Label:
+	for lbl in _panel.find_children("*", "Label", true, false):
+		if lbl.text == text or lbl.text.begins_with(text + " ("):
+			return lbl
+	return null
+
+func _row_reset_prefix(text: String) -> Button:
+	var lbl := _row_label_prefix(text)
+	if lbl == null:
+		return null
+	for c in lbl.get_parent().get_children():
+		if c is Button and Icons.glyph(c) == Icons.RESET:
+			return c
 	return null
 
 func test_color_pickers_have_ok_cancel_buttons():

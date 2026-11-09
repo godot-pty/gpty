@@ -37,6 +37,16 @@ const ACCENT_LABEL := &"AccentLabel"
 ## `ACCENT_BUTTON`: that role means "this is the current item" (the sidebar's
 ## active row), and a cursor is not a state a row owns.
 const SELECTED_ROW := &"SelectedRow"
+## An opaque raised surface for a control that floats over the terminal grid
+## (the search strip, its results list): the theme's `PanelContainer` base is
+## opaque but carries no padding, and a `ScrollContainer` has no panel of its
+## own, so live terminal text read through both.
+const RAISED_PANEL := &"RaisedPanel"
+## A toast's surface. The level is a 3 px leading edge plus the border, so
+## severity does not rest on the label's ink alone.
+const TOAST_PANEL := &"ToastPanel"
+const TOAST_WARN_PANEL := &"ToastWarnPanel"
+const TOAST_ERROR_PANEL := &"ToastErrorPanel"
 
 static func build() -> Theme:
 	var p := UiPalette.active()
@@ -126,6 +136,25 @@ static func build() -> Theme:
 	# --- Surfaces -------------------------------------------------------------
 	for type in ["Panel", "PanelContainer", "PopupPanel"]:
 		t.set_stylebox("panel", type, _flat(p.SURFACE, p.BORDER, 1))
+
+	# Floating cards. A control that floats over the terminal grid (the search
+	# strip, its results list) needs an opaque, padded surface; the base
+	# `PanelContainer` box above is opaque but has no content margin, so its
+	# child text sits on the border.
+	t.set_type_variation(RAISED_PANEL, "PanelContainer")
+	t.set_stylebox("panel", RAISED_PANEL,
+		_padded(_flat(p.SURFACE_RAISED, p.BORDER, 1), UiTokens.SPACE_SM))
+
+	# A toast is a message over whatever is running, so it needs a surface of its
+	# own. The level is a 3 px leading edge plus the border: severity does not
+	# rest on the label's ink alone.
+	for role in [[TOAST_PANEL, p.BORDER], [TOAST_WARN_PANEL, p.WARNING],
+			[TOAST_ERROR_PANEL, p.DANGER]]:
+		t.set_type_variation(role[0], "PanelContainer")
+		var box := _padded(_flat(p.SURFACE_RAISED, role[1], 1), UiTokens.SPACE_MD)
+		box.border_width_left = 3
+		box.content_margin_left = UiTokens.SPACE_MD + 3
+		t.set_stylebox("panel", role[0], box)
 
 	# --- Lists and trees (content surfaces: the background is BG) --------------
 	for type in ["Tree", "ItemList"]:

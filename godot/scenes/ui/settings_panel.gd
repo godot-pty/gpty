@@ -500,7 +500,7 @@ func _add_appearance_control(v: VBoxContainer) -> OptionButton:
 	v.add_child(hb)
 	return opt
 
-func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: Callable, default_color: Callable) -> ColorPickerButton:
+func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: Callable, default_color: Callable) -> Array:
 	var h = HBoxContainer.new()
 	var lbl = _lbl(label)
 	# Uniform label column: without a fixed width the expand-fill picker
@@ -512,6 +512,7 @@ func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: C
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn.color_changed.connect(setter)
 	btn.picker_created.connect(_attach_color_picker_buttons.bind(btn))
+	ColorSwatch.attach(lbl, btn)
 	h.add_child(btn)
 	var reset = Button.new()
 	reset.tooltip_text = "Reset to default"
@@ -523,11 +524,12 @@ func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: C
 	reset.pressed.connect(func():
 		var c: Color = default_color.call()
 		btn.color = c
+		ColorSwatch.sync(lbl, btn)
 		setter.call(c)
 	)
 	h.add_child(reset)
 	v.add_child(h)
-	return btn
+	return [btn, lbl]
 
 ## Add explicit OK/Cancel buttons to a ColorPickerButton's popup pane.
 ## Colors apply live while picking; Cancel restores the pre-open color so
@@ -576,8 +578,9 @@ func _add_color_section(v: VBoxContainer) -> Array:
 			_debounce_timer.start()
 		var default_color := func() -> Color:
 			return UiPalette.active().color(SettingsManager.CHROME_COLOR_TOKENS[key])
-		var btn := _add_color_control(v, item[0], SettingsManager.get("cfg_" + key), setter, default_color)
-		_color_rows.append({"label": item[0], "key": key, "button": btn, "set": setter})
+		var row: Array = _add_color_control(v, item[0], SettingsManager.get("cfg_" + key), setter, default_color)
+		var btn: ColorPickerButton = row[0]
+		_color_rows.append({"label": item[0], "label_node": row[1], "key": key, "button": btn, "set": setter})
 	return _color_rows
 
 ## Re-point every swatch at the value its setting now holds, after a palette
@@ -585,7 +588,9 @@ func _add_color_section(v: VBoxContainer) -> Array:
 ## cannot feed back into the debounced save.
 func _sync_color_rows() -> void:
 	for row in _color_rows:
-		(row["button"] as ColorPickerButton).color = SettingsManager.get("cfg_" + row["key"])
+		var btn := row["button"] as ColorPickerButton
+		btn.color = SettingsManager.get("cfg_" + row["key"])
+		ColorSwatch.sync(row["label_node"] as Label, btn)
 
 func _add_file_picker(v: VBoxContainer, label: String, current_path: String, filters: Array, on_selected: Callable, reset_to_default: Callable = Callable()) -> Button:
 	var h = HBoxContainer.new()
@@ -719,7 +724,9 @@ func _reset_colors(rows: Array) -> void:
 	# explicitly — that is what reaches cfg and the debounced save.
 	for row in rows:
 		var c: Color = UiPalette.active().color(SettingsManager.CHROME_COLOR_TOKENS[row["key"]])
-		(row["button"] as ColorPickerButton).color = c
+		var btn := row["button"] as ColorPickerButton
+		btn.color = c
+		ColorSwatch.sync(row["label_node"] as Label, btn)
 		(row["set"] as Callable).call(c)
 
 ## Per-tab reset: each tab's button restores ONLY that tab's settings.

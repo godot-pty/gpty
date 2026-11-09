@@ -397,7 +397,7 @@ func test_search_button_opens_active_terminal_search():
 	# Wait out the deferred concept push timer so it doesn't resume after free.
 	await get_tree().create_timer(2.1).timeout
 
-func test_search_bar_is_compact_bottom_strip():
+func test_search_bar_is_a_compact_strip_at_the_pane_top():
 	var ws = WorkspaceScript.new()
 	_ws = ws
 	add_child(ws)
@@ -411,14 +411,93 @@ func test_search_bar_is_compact_bottom_strip():
 	body._toggle_search()
 	await get_tree().process_frame
 
-	# Regression: a missing anchor_top made every search control stretch to
-	# full pane height — the bar covered the whole terminal as an overlay.
-	assert_gt(body._search_bar.size.y, 20.0, "search bar must have real height")
-	assert_lt(body._search_bar.size.y, 50.0, "search bar must be a compact strip, not a full-pane overlay")
-	assert_lt(body._scope_btn.size.y, 50.0, "scope button must be a compact strip")
-	assert_lt(body._history_panel.size.y, 250.0, "results panel must be bounded above the bar")
-	assert_gt(body._search_bar.size.x, 400.0, "search bar must span most of the pane width")
+	# The strip used to sit on the bottom edge and cover the prompt and the
+	# last two output rows. It is anchored to the top now.
+	var body_rect: Rect2 = body.get_global_rect()
+	var strip_rect: Rect2 = body._search_strip.get_global_rect()
+	assert_lt(strip_rect.position.y - body_rect.position.y, 10.0,
+		"the strip sits on the pane's top edge, not over the prompt")
+	assert_gt(strip_rect.size.y, 20.0, "the strip has real height")
+	assert_lt(strip_rect.size.y, 50.0, "the strip is a compact row, not a full-pane overlay")
+	assert_gt(body._search_bar.size.x, 400.0, "the field spans most of the pane width")
+	assert_lt(strip_rect.end.y - body_rect.position.y, body_rect.size.y * 0.25,
+		"the strip never reaches the prompt at the bottom")
+	assert_gte(body._history_panel.position.y, strip_rect.size.y + 6.0,
+		"the results panel hangs below the strip")
+	assert_lt(body._history_panel.size.y, 250.0, "the results panel is bounded")
 	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
+## `n/m` on the strip, both step directions, and the engine's refusal shown as
+## words instead of an invisible `_search_error`.
+func test_search_shows_the_match_count_and_steps_both_ways():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var body = ws._tm._find_body(ws._tm.tiles[0].wrapper)
+	assert_true(body is TerminalPane, "startup must spawn a terminal")
+	body._terminal.send_line("printf 'alpha one\\nalpha two\\nbeta three\\nalpha four\\n'")
+	# The count is read from the grid, so the child's output has to land first.
+	# The shell echoes the typed command, so the expected count is not 3: read
+	# it from the results and build every string from it.
+	for _i in 300:
+		if "alpha four" in str(body._terminal.get_plain_text(200)):
+			break
+		await get_tree().process_frame
+	body._toggle_search()
+	await get_tree().process_frame
+	body._do_search("alpha")
+	var count := int(body._search_results.get("count", 0))
+	assert_gte(count, 3, "the three printed alpha lines are matches")
+	assert_eq(body._search_count.text, "0/%d" % count,
+		"no match is highlighted before the first jump")
+	body._jump_to_match(1)
+	assert_eq(body._search_count.text, "1/%d" % count)
+	var ev := InputEventKey.new()
+	ev.keycode = KEY_ENTER
+	ev.pressed = true
+	ev.shift_pressed = true
+	body._on_search_bar_input(ev)
+	assert_eq(body._search_count.text, "%d/%d" % [count, count],
+		"Shift+Enter wraps back to the last match")
+	body._do_search("[")
+	assert_ne(body._search_error, "", "precondition: the engine refused the expression")
+	assert_eq(body._search_count.text, "Invalid pattern")
+	assert_eq(body._search_count.theme_type_variation, UiTheme.DANGER_LABEL)
+	body._on_scope_toggled()
+	assert_false(body._search_count.visible,
+		"the history scope's own panel carries its answer")
+	await get_tree().create_timer(2.1).timeout
+
+## A spawn, a swap and a close are visible in the grid; a toast that repeats
+## them is noise. The refusal below is the positive control: same recorder,
+## and it must catch something.
+func test_spawn_swap_and_close_do_not_toast():
+	var seen: Array[String] = []
+	var recorder := func(d: Dictionary): seen.append(str(d.get("text", "")))
+	ToastManager.toast_requested.connect(recorder)
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_eq(seen.size(), 0, "the startup spawn is visible in the tiles; got %s" % [seen])
+	var second = ws._spawn_pane("terminal")
+	assert_not_null(second)
+	await get_tree().process_frame
+	assert_eq(seen.size(), 0, "a spawn is visible in the tiles; got %s" % [seen])
+	ws._swap_pane_now(second, "code_viewer")
+	await get_tree().process_frame
+	assert_eq(seen.size(), 0, "a swapped type is visible in the pane; got %s" % [seen])
+	ws._kill_now(ws._tm._find_body(ws._tm.tiles[-1].wrapper))
+	await get_tree().process_frame
+	assert_eq(seen.size(), 0, "a close is visible in the tiles; got %s" % [seen])
+	ws._close_workspace(0)   # the last workspace: a refusal that is kept
+	ToastManager.toast_requested.disconnect(recorder)
+	assert_has(seen, "Cannot close the last workspace",
+		"the recorder is wired: refusing a close is not a visible action")
 	await get_tree().create_timer(2.1).timeout
 
 func test_profile_activation_refreshes_layout_and_pane_list():

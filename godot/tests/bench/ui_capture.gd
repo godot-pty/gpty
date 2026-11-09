@@ -140,6 +140,18 @@ const STATES := {
 		"settings": {"cfg_appearance_mode": 1}},
 	"light-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Appearance",
 		"settings": {"cfg_appearance_mode": 1}},
+	# The search strip at the pane's top edge with a match count and the two
+	# step controls. Filler output comes first so the strip's two rows do not
+	# hide the matches themselves; three `alpha` lines then sit in view
+	# (`-c` means no echoed command line, so the count is exactly three).
+	# Row *Search, toasts and appearance swatches*.
+	"search": {"size": Vector2i(1280, 760), "tiles": [
+		{"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+			"settings": {"type": "terminal", "attachment_id": "capture-search",
+				"shell_args": ["-c",
+					'for i in 1 2 3 4 5 6 7 8; do echo "output line $i"; done; '
+					+ 'printf "alpha one\\nalpha two\\nbeta three\\nalpha four\\n"; sleep 600']}},
+	], "open": "search", "query": "alpha"},
 	"workspace-1280x760": {"size": Vector2i(1280, 760), "panes": 4},
 	"window-800x500": {"size": Vector2i(800, 500), "panes": 4},
 	"window-560x340": {"size": Vector2i(560, 340), "panes": 4},
@@ -516,6 +528,33 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 				field.text = str(state["query"])
 				field.text_changed.emit(field.text)
 				await _wait_frames(3)
+		"search":
+			var body = _workspace._tm._find_body(_workspace._tm.tiles[0].wrapper)
+			if not _is_terminal(body):
+				_fail("the search state's first tile is not a terminal")
+				return false
+			# The child's output has to reach the grid before the search runs,
+			# or the image would show 0/0 for a pane that does match.
+			for _i in 300:
+				if "alpha four" in str(body._terminal.get_plain_text(200)):
+					break
+				await process_frame
+			# The pane answers `term:search` from its own `_gui_input`, so it has
+			# to own the keyboard: `grab_focus()` (not a click) is what the harness
+			# can do without depending on where the grid's centre lands.
+			body.grab_focus()
+			await _press_key(KEY_F, true, true)
+			await _wait_frames(3)
+			if not body._search_visible:
+				_fail("Ctrl+Shift+F did not open the search strip")
+				return false
+			body._search_bar.text = str(state.get("query", ""))
+			body._search_bar.text_changed.emit(body._search_bar.text)
+			await _wait_frames(2)
+			# One Enter selects the first match past the view, so the capture shows
+			# `1/3` and the active highlight instead of `0/3`.
+			await _press_key(KEY_ENTER)
+			await _wait_frames(3)
 		"wiki-graph":
 			var wiki: Control = _workspace._tm.tiles[0].wrapper
 			var list: ItemList = wiki.find_child("NoteList", true, false) as ItemList
