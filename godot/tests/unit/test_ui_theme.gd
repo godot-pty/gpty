@@ -58,7 +58,13 @@ func test_the_type_scale_comes_from_the_tokens():
 	assert_eq(_theme.get_font_size("font_size", "Button"), UiTokens.FS_SMALL)
 	assert_eq(_theme.get_font_size("font_size", "LineEdit"), UiTokens.FS_SMALL)
 	assert_eq(_theme.get_font_size("normal_font_size", "RichTextLabel"), UiTokens.FS_SMALL)
-	assert_eq(_theme.get_font_size("font_size", "TabBar"), UiTokens.FS_CONTROL)
+	# The tab bar is one step below the theme's default: seven tabs (System …
+	# About) have to fit the settings card's 500 px bar, and the engine hides an
+	# overflow behind a dropdown rather than widening the bar. Both types are
+	# pinned because the engine draws the bar from the *container's* item.
+	assert_eq(_theme.get_font_size("font_size", "TabBar"), UiTokens.FS_CAPTION)
+	assert_eq(_theme.get_font_size("font_size", "TabContainer"), UiTokens.FS_CAPTION,
+		"the container's font_size is the one the internal TabBar reads")
 	assert_eq(_theme.get_font_size("title_font_size", "Window"), UiTokens.FS_CONTROL)
 
 func test_text_colours_come_from_the_tokens():

@@ -134,7 +134,20 @@ static func build() -> Theme:
 		t.set_stylebox("panel", type, _padded(_flat(p.BG, p.BORDER, 1), UiTokens.SPACE_SM))
 
 	# --- Tabs -----------------------------------------------------------------
-	t.set_font_size("font_size", "TabBar", UiTokens.FS_CONTROL)
+	# The tab bar is the one chrome surface below the theme's default size:
+	# seven tabs (System … About) have to fit the settings card's bar without
+	# the engine hiding the overflow behind a dropdown, and a hidden tab is
+	# invisible until clicked - then the bar re-lays itself out and the card's
+	# measured 540 x 560 is mangled. Measured on this tree, the seven tabs need
+	# 520 px of the card's 500 px bar at the theme's default size (12 px text,
+	# 8 px tab padding) and 490 px here - 11 px text with 6 px of padding - so
+	# this is what makes the seventh tab fit at all.
+	t.set_font_size("font_size", "TabBar", UiTokens.FS_CAPTION)
+	# The container's own item is what reaches the bar it draws: the engine
+	# creates the internal `TabBar` with a `font_size` *override* taken from the
+	# `TabContainer`, so the `TabBar` entry above alone leaves the live bar at
+	# the theme's default size (measured: 12 px, 520 px of tabs in a 500 px bar).
+	t.set_font_size("font_size", "TabContainer", UiTokens.FS_CAPTION)
 	t.set_color("font_selected_color", "TabBar", p.TEXT)
 	t.set_color("font_unselected_color", "TabBar", p.TEXT_MUTED)
 	t.set_color("font_hovered_color", "TabBar", p.ACCENT_HOVER)
@@ -271,8 +284,8 @@ static func _tab_box(selected: bool) -> StyleBoxFlat:
 	if selected:
 		box.border_width_top = 2
 		box.border_color = p.ACCENT
-	box.content_margin_left = UiTokens.SPACE_LG
-	box.content_margin_right = UiTokens.SPACE_LG
+	box.content_margin_left = UiTokens.SPACE_MD
+	box.content_margin_right = UiTokens.SPACE_MD
 	box.content_margin_top = UiTokens.SPACE_SM
 	box.content_margin_bottom = UiTokens.SPACE_SM
 	return box
