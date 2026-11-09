@@ -161,12 +161,21 @@ const STATES := {
 	# them below the fold.
 	"palette-commands": {"size": DEFAULT_SIZE, "panes": 1, "open": "palette",
 		"query": "saved", "commands": COMMAND_FIXTURE},
+	# The Settings > About keyboard-shortcut table (row *Discoverability: pane
+	# names, shortcuts and the window-mode control*).
+	"shortcuts": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "About"},
+	# The sidebar's section Help popup: the Add Pane glyph table, opened through
+	# the section's own Help button (same row).
+	"pane-help": {"size": DEFAULT_SIZE, "panes": 1, "open": "help"},
 	"plugin-review": {"size": DEFAULT_SIZE, "panes": 1, "open": "plugin-review"},
 	# The Save Profile form, whose command fields are the measured clipping
 	# defect (69 px against `/bin/bash`'s 75). Two panes, so the form shows
 	# the field widths it is judged on.
 	"save-profile": {"size": DEFAULT_SIZE, "panes": 2, "open": "save-profile"},
-	"workspace-trust": {"size": DEFAULT_SIZE, "tiles": [UNTRUSTED_TILE], "open": "workspace-trust"},
+	# `approve_seeded_plans: false`: the Workspace Trust dialog is this state's
+	# subject, so its plan must stay unapproved - see the staging block.
+	"workspace-trust": {"size": DEFAULT_SIZE, "tiles": [UNTRUSTED_TILE], "open": "workspace-trust",
+		"approve_seeded_plans": false},
 	# The four visible agent states side by side. The point of the state is the
 	# glyph: `failed` (an X-circle) and `needs-attention` (a warning triangle)
 	# differ in shape, so the distinction survives a protan/deutan view, a
@@ -377,18 +386,27 @@ func _seed_workspace(state: Dictionary) -> void:
 	_store.save(0, workspaces)
 	# A state may seed a tile that starts something other than the default
 	# shell (this one prints its own PTY size). The restore gate asks before
-	# spawning such a tile, and a trust dialog is not the state being
-	# captured, so the plans this state itself seeds are recorded as approved
-	# under a capture-owned name.
-	var plans: Array = []
-	for td in tiles:
-		if td is Dictionary:
-			var key := PaneTypes.tile_plan_key(td)
-			if key != "":
-				plans.append(key)
-	if not plans.is_empty():
-		var trusted: Node = root.get_node("TrustedStore")
-		trusted.approve_builtin("ui-capture", GptyTerminal.get_app_version(), plans)
+	# spawning such a tile, and a trust dialog is not the state being captured,
+	# so the plans this state itself seeds are recorded as approved under a
+	# capture-owned name.
+	#
+	# `"approve_seeded_plans": false` opts a state out, because for the
+	# workspace-trust state the dialog *is* the capture: approving its plan
+	# first is exactly what silenced it (measured on the 0.8.0+ tree - the
+	# state asked for the "the untrusted tile did not raise the Workspace Trust
+	# dialog" failure on every run, including a pristine `git archive HEAD`
+	# checkout, because this block approved the very plan the state exists to
+	# have reviewed).
+	if state.get("approve_seeded_plans", true) == true:
+		var plans: Array = []
+		for td in tiles:
+			if td is Dictionary:
+				var key := PaneTypes.tile_plan_key(td)
+				if key != "":
+					plans.append(key)
+		if not plans.is_empty():
+			var trusted: Node = root.get_node("TrustedStore")
+			trusted.approve_builtin("ui-capture", GptyTerminal.get_app_version(), plans)
 
 func _tile(index: int, col: int, row: int, cspan: int, rspan: int) -> Dictionary:
 	return {
@@ -460,6 +478,18 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			# listing is the same on both runs of one machine.
 			picker.current_dir = "/"
 			await _wait_frames(3)
+		"help":
+			var help_btn := _button_with_accessible_name(_workspace._sidebar, SectionHelp.NAME)
+			if help_btn == null:
+				_fail("the sidebar's Add Pane header has no Help button")
+				return false
+			await _click(help_btn)
+			await _wait_frames(3)
+			# The popup is parented to the sidebar's background rect (the sidebar
+			# clips its content), so that is where the table lives.
+			if _workspace._sidebar_bg.find_child(SectionHelp.TABLE_NAME, true, false) == null:
+				_fail("clicking Help did not open the glyph table")
+				return false
 		"pane-settings":
 			var wrapper: Control = _workspace._tm.tiles[0].wrapper
 			var button := _button_with_tooltip(wrapper, "Pane settings")
