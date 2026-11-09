@@ -133,6 +133,22 @@ func _scrolled_pane() -> Control:
 	var deadline := Time.get_ticks_msec() + 20000
 	while body._terminal.get_history_size() < 20 and Time.get_ticks_msec() < deadline:
 		await get_tree().create_timer(0.05).timeout
+	# Wait for the child to stop printing. A scrolled-back pane anchors its view
+	# to the output it holds - a line appended between the scroll and the key
+	# moves the offset by that many lines - so the assertion below only means
+	# something once nothing more is arriving (measured on windows-smoke: the
+	# offset doubled 44 -> 88 while cmd.exe was still flushing).
+	var quiescent := 0
+	var last_size := -1
+	var quiet_deadline := Time.get_ticks_msec() + 30000
+	while Time.get_ticks_msec() < quiet_deadline and quiescent < 6:
+		var size_now: int = body._terminal.get_history_size()
+		if size_now == last_size:
+			quiescent += 1
+		else:
+			quiescent = 0
+			last_size = size_now
+		await get_tree().create_timer(0.05).timeout
 	body._search_visible = false
 	body._search_strip.visible = false
 	body._toggle_search()
@@ -206,6 +222,9 @@ func test_the_arrows_never_reach_the_child_while_the_strip_is_open():
 	var offset: int = body._terminal.get_scroll_offset()
 	assert_gt(offset, 0, "the view is scrolled back")
 	await _press_key(KEY_UP)
-	assert_eq(body._terminal.get_scroll_offset(), offset,
+	var after: int = body._terminal.get_scroll_offset()
+	assert_gt(after, 0,
 		"an arrow in the strip must not reach the child and snap the view to the bottom")
+	assert_eq(after, offset,
+		"no output arrived during the key, so the view cannot have been anchored forward")
 	await get_tree().create_timer(2.1).timeout
