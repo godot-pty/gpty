@@ -21,12 +21,14 @@ const GROUPS: Array[Dictionary] = [
 		{"action": "app:prev_workspace", "label": "Previous workspace"},
 		{"action": "app:toggle_fullscreen", "label": "Toggle fullscreen"},
 		{"action": "app:toggle_fullscreen_alt", "label": "Toggle fullscreen (second binding)"},
+		{"action": "app:focus_window_chrome", "label": "Focus the window's title-bar controls"},
 		{"action": "app:reset_workspace", "label": "Close all panes in this workspace"},
 	]},
 	{"title": "New Panes", "from_registry": true},
 	{"title": "Panes", "entries": [
 		{"action": "app:close_pane", "label": "Close the active pane"},
 		{"action": "app:focus_pane_chrome", "label": "Focus the active pane's toolbar"},
+		{"action": "app:focus_pane_toolbar", "label": "Focus the toolbar inside the active pane"},
 		{"action": "app:focus_note_toolbar", "label": "Focus the wiki note toolbar"},
 	]},
 	{"title": "Keyboard Focus", "entries": [

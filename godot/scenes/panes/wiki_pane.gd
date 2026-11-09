@@ -220,6 +220,7 @@ func _ready():
 	_toolbar = HBoxContainer.new()
 	_toolbar.name = "NoteToolbar"
 	_note_box.add_child(_toolbar)
+	_action_bar = _toolbar
 
 	_note_title = Label.new()
 	_note_title.name = "NoteTitle"
@@ -1630,16 +1631,6 @@ func focus_note_toolbar() -> bool:
 	first.grab_focus()
 	return true
 
-## Escape in the note toolbar goes back where the entry came from: the buffer,
-## which keeps the note open (Escape in the buffer is Back, and that one asks
-## about unsaved changes, so the ladder ends at the list). Preview mode has no
-## buffer on screen, so the ladder ends at Back, the note view's exit door.
-func _return_from_note_toolbar() -> void:
-	if _editor.visible:
-		_editor.grab_focus()
-	else:
-		_back.grab_focus()
-
 ## Escape is Back. The note view (and the graph over it) hides the list and the
 ## search, so without this a note is a keyboard trap: the editor consumes Tab
 ## for indentation and nothing else returns to the list.
@@ -1660,12 +1651,13 @@ func _input(event: InputEvent) -> void:
 	var owner := get_viewport().gui_get_focus_owner()
 	if owner == null or not (owner == self or is_ancestor_of(owner)):
 		return
-	get_viewport().set_input_as_handled()
-	# One level out, not out of the note: the toolbar's Escape returns to the
-	# buffer, the same way pane chrome's Escape returns to the pane.
-	if _toolbar != null and _toolbar.is_ancestor_of(owner):
-		_return_from_note_toolbar()
+	# One level out, not out of the note: a focus owner in the note toolbar is
+	# `Workspace._escape_pane_toolbar`'s (it calls `PaneBody.leave_toolbar`,
+	# which returns to `keyboard_entry`), so this pane declines the key and
+	# leaves the step to the one shared ladder the view panes also use.
+	if toolbar_has_focus(owner):
 		return
+	get_viewport().set_input_as_handled()
 	# The same guarded leave the Back button uses: a dirty buffer asks
 	# Save/Discard/Cancel, and Cancel keeps the note open.
 	_request_leave(func(proceed: bool):
@@ -1798,14 +1790,16 @@ func _pane_type() -> String:
 ## the pane on screen) aims at the surface the pane is showing: the graph's
 ## canvas when the link map is up, otherwise the note buffer. Both are the
 ## place a keyboard user continues; the pane's first tab stop would be Back, a
-## top-row action the note view does not need as an entry. A read-only note
-## (over the read cap) keeps the fallback `_open_note` gives it: Back, the only
-## action left for it.
+## top-row action the note view does not need as an entry. A note with no buffer
+## on screen (preview mode, or read-only over the read cap) ends at Back, which
+## is also where the note toolbar's Escape goes.
 func keyboard_entry() -> Control:
 	if _graph_view != null and _graph_view.visible:
 		return _graph_view
 	if _note_box.visible and _editor.visible and _editor.editable:
 		return _editor
+	if _note_box.visible and _back != null and _back.is_visible_in_tree():
+		return _back
 	return null
 
 func _build_pane_settings_ui(panel: Control) -> Control:

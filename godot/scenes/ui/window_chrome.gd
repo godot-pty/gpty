@@ -14,6 +14,8 @@ var _ws: Control = null
 ## The titlebar's maximize/restore control, which acts as what it says: the
 ## glyph and the name follow the window mode.
 var _max_btn: Button = null
+## The three window controls as one keyboard ring; `focus_controls` enters it.
+var _controls: HBoxContainer = null
 
 
 func build(ws: Control) -> Control:
@@ -50,6 +52,7 @@ func build(ws: Control) -> Control:
 
 	var btn_cont = HBoxContainer.new()
 	btn_cont.name = "WinControls"
+	_controls = btn_cont
 	btn_cont.anchor_left = 1.0
 	btn_cont.anchor_right = 1.0
 	btn_cont.offset_left = -120
@@ -76,6 +79,9 @@ func build(ws: Control) -> Control:
 	titlebar.gui_input.connect(_on_titlebar_gui_input)
 
 	ws.add_child(titlebar)
+	# After the bar joins the tree: `ring` stores `get_path_to` results, which
+	# are empty for nodes that are not yet in the same tree.
+	KeyboardFocus.ring(KeyboardFocus.reachable_children(_controls))
 	titlebar.visible = false
 	return titlebar
 
@@ -107,6 +113,19 @@ func _sync_max_button() -> void:
 	# The name goes first so `set_glyph` mirrors it onto the glyph Label.
 	_max_btn.accessibility_name = "Restore window" if fullscreen else "Maximize window"
 	Icons.set_glyph(_max_btn, Icons.RESTORE_WIN if fullscreen else Icons.MAXIMIZE_WIN)
+
+## Move the keyboard into the window's own title bar, the way pane chrome is
+## entered. False when the bar is not on screen - the decorated mode hides it -
+## or it offers no stop, so the chord that calls this is inert instead of
+## focusing something invisible.
+func focus_controls() -> bool:
+	if titlebar == null or not titlebar.visible or _controls == null:
+		return false
+	var first := KeyboardFocus.first_reachable(_controls)
+	if first == null:
+		return false
+	first.grab_focus()
+	return true
 
 
 func toggle_fullscreen():
@@ -154,7 +173,6 @@ func restore_position():
 ## shared floor.
 func _make_titlebar_button(icon: String, callback: Callable, accessible_name: String) -> Button:
 	var btn = Button.new()
-	btn.focus_mode = Control.FOCUS_NONE
 	btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	btn.custom_minimum_size = Vector2(36, HEIGHT)
 	btn.pressed.connect(callback)

@@ -51,6 +51,17 @@ static func ring(controls: Array) -> void:
 	var count := controls.size()
 	if count == 0:
 		return
+	# A one-member ring has nowhere to wrap to: leave the two paths empty so the
+	# engine falls back to tree order instead of a self-referential "." path -
+	# and clear the paths a larger ring left behind, or a member that just lost
+	# its partner (a CLI view's Stop after the child exits) would still be walked
+	# to as if it were reachable.
+	if count < 2:
+		var only := controls[0] as Control
+		only.focus_mode = Control.FOCUS_ALL
+		only.focus_next = NodePath()
+		only.focus_previous = NodePath()
+		return
 	for i in count:
 		var c := controls[i] as Control
 		if c == null:

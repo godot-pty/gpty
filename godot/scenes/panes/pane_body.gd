@@ -210,6 +210,44 @@ func _pane_type() -> String:
 func keyboard_entry() -> Control:
 	return null
 
+## The pane's own action bar - a view pane's Reload / Restart row - when it has
+## one. It is a keyboard ring (`KeyboardFocus.ring`) and Escape leaves it for
+## `keyboard_entry`. Null on a pane whose actions live in its title bar.
+var _action_bar: Control = null
+
+## Move the keyboard into the action bar's first stop. False when the pane has
+## no bar on screen or it offers no stop (an empty viewer hides its toolbar, and
+## a stopped CLI view disables both buttons).
+func focus_toolbar() -> bool:
+	if _action_bar == null or not _action_bar.is_visible_in_tree():
+		return false
+	var first := KeyboardFocus.first_reachable(_action_bar)
+	if first == null:
+		return false
+	first.grab_focus()
+	return true
+
+## Whether `owner` is one of this pane's action-bar controls - the scope test
+## the shared Escape ladder uses, so an inactive pane never reacts.
+func toolbar_has_focus(owner: Control) -> bool:
+	return _action_bar != null and owner != null and _action_bar.is_ancestor_of(owner)
+
+## Escape from the action bar goes one level out, to the control the pane is
+## entered through (`keyboard_entry`). A pane with nothing to return to releases
+## the keyboard rather than leaving it on a button, and never falls back into the
+## bar itself - that would make Escape a no-op inside the one ring it owns.
+func leave_toolbar() -> void:
+	var back := keyboard_entry()
+	if back != null and (not back.is_visible_in_tree() \
+			or (_action_bar != null and _action_bar.is_ancestor_of(back))):
+		back = null
+	if back != null:
+		back.grab_focus()
+		return
+	var owner := get_viewport().gui_get_focus_owner()
+	if owner != null:
+		owner.release_focus()
+
 ## Status primitives for `paneStatus`, or null when the pane has none.
 ##
 ## A terminal returns its process/grid document; the media pane returns its

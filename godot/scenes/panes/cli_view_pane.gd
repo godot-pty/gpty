@@ -132,6 +132,17 @@ func _sync_buttons():
 	var configured := _cli != null and command != ""
 	_restart_btn.disabled = not configured
 	_stop_btn.disabled = not _running
+	# A disabled button must not be a stop the engine can walk to either: its own
+	# tree-order traversal does not skip one (measured on 4.7.2 - the
+	# `cli-view-content` audit kept listing Stop after the child exited), so the
+	# focus mode, not just the ring, has to follow `disabled`.
+	for btn in [_restart_btn, _stop_btn]:
+		btn.focus_mode = Control.FOCUS_NONE if btn.disabled else Control.FOCUS_ALL
+	# Re-ringed here, not once in `_build_ui`: `reachable_children` skips a
+	# disabled button, so a stop list built before the first `_sync_buttons`
+	# would keep naming a control the user cannot reach.
+	if _action_bar != null:
+		KeyboardFocus.ring(KeyboardFocus.reachable_children(_action_bar))
 
 func _build_ui():
 	var root := VBoxContainer.new()
@@ -144,6 +155,7 @@ func _build_ui():
 	header.name = "Header"
 	header.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	root.add_child(header)
+	_action_bar = header
 
 	_status = Label.new()
 	_status.name = "Status"
@@ -155,14 +167,12 @@ func _build_ui():
 	_restart_btn = Button.new()
 	_restart_btn.name = "RestartButton"
 	_restart_btn.text = "Restart"
-	_restart_btn.focus_mode = Control.FOCUS_NONE
 	_restart_btn.pressed.connect(_on_restart_pressed)
 	header.add_child(_restart_btn)
 
 	_stop_btn = Button.new()
 	_stop_btn.name = "StopButton"
 	_stop_btn.text = "Stop"
-	_stop_btn.focus_mode = Control.FOCUS_NONE
 	_stop_btn.pressed.connect(_on_stop_pressed)
 	header.add_child(_stop_btn)
 
@@ -173,6 +183,13 @@ func _build_ui():
 	_editor.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_editor.add_theme_font_size_override("font_size", font_size)
 	root.add_child(_editor)
+
+## The output view is where a read continues; without this the chrome handback
+## and the toolbar's Escape would land on Restart, the bar's first stop.
+func keyboard_entry() -> Control:
+	if _editor != null and _editor.is_visible_in_tree():
+		return _editor
+	return null
 
 ## Append a batch of complete lines to the ring and the view.
 ##

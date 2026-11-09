@@ -164,6 +164,22 @@ const STATES := {
 					+ 'printf "alpha one\\nalpha two\\nbeta three\\nalpha four\\n"; sleep 600']}},
 	], "open": "search-history", "query": "alpha"},
 	"workspace-1280x760": {"size": Vector2i(1280, 760), "panes": 4},
+	# The window's own title bar: `apply_mode` hides it in the default decorated
+	# mode, so without this state neither the focus audit nor an image can see
+	# the three controls at all.
+	"window-chrome-borderless": {"size": DEFAULT_SIZE, "panes": 1,
+		"settings": {"cfg_window_mode": 1}},
+	# The two view panes' own toolbars. `pane-empty-states` seeds both empty,
+	# where the toolbars are hidden, so these two states carry real content -
+	# the audit cannot see a control that is not on screen.
+	"code-viewer-content": {"size": DEFAULT_SIZE, "tiles": [
+		{"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+			"settings": {"type": "code_viewer", "attachment_id": "capture-code-content",
+				"file_path": VIEWER_FIXTURE, "view_mode": "rendered"}}]},
+	"cli-view-content": {"size": DEFAULT_SIZE, "tiles": [
+		{"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+			"settings": {"type": "cli_view", "attachment_id": "capture-cli-content",
+				"command": "/bin/sh", "shell_args": ["-c", "printf 'ready\\n'"]}}]},
 	"window-800x500": {"size": Vector2i(800, 500), "panes": 4},
 	"window-560x340": {"size": Vector2i(560, 340), "panes": 4},
 	# The surfaces the October 2026 audit did not reach. Each seeds the real
@@ -238,6 +254,10 @@ const UNTRUSTED_TILE := {
 		"pane_name": "Untrusted Terminal", "command": "/bin/sh",
 	},
 }
+## A Markdown fixture written into the sandbox before the scene exists. A const
+## state cannot compute a path and `TextRead` refuses a `res://` scheme, so a
+## tile names this token and `_seed_workspace` substitutes the written path.
+const VIEWER_FIXTURE := "@viewer-fixture"
 ## How long a signature must stay unchanged before the state counts as settled.
 const SETTLE_MS := 250
 ## Upper bound on waiting for a state to settle, so a stuck pane fails the run
@@ -401,10 +421,21 @@ func _seed_workspace(state: Dictionary) -> void:
 					index += 1
 	if tiles.is_empty():
 		return
+	# A tile that names the Markdown fixture gets the path it was just written
+	# to; the copy keeps the const state free of a path that depends on the
+	# sandbox.
+	var resolved: Array = []
+	for tile in tiles:
+		var copy: Dictionary = (tile as Dictionary).duplicate(true)
+		var tile_settings: Dictionary = copy.get("settings", {})
+		if str(tile_settings.get("file_path", "")) == VIEWER_FIXTURE:
+			tile_settings["file_path"] = _write_viewer_fixture()
+			copy["settings"] = tile_settings
+		resolved.append(copy)
 	# A saved layout carries its panes' public ids; naming them here keeps the
 	# Pane Settings capture free of a random `pane-…` handle.
 	var workspaces: Array[Dictionary] = [
-		{"name": "Workspace 1", "cwd": "", "layout": tiles},
+		{"name": "Workspace 1", "cwd": "", "layout": resolved},
 	]
 	_store.save(0, workspaces)
 	# A state may seed a tile that starts something other than the default
@@ -436,6 +467,23 @@ func _tile(index: int, col: int, row: int, cspan: int, rspan: int) -> Dictionary
 		"col": col, "row": row, "cspan": cspan, "rspan": rspan,
 		"settings": {"type": "terminal", "attachment_id": "capture-%d" % index},
 	}
+
+## The `VIEWER_FIXTURE` tile's document, written before the scene exists so the
+## viewer restores its file the way a saved layout would. Returns the absolute
+## path `TextRead` accepts (a `res://` path is refused by design).
+func _write_viewer_fixture() -> String:
+	var path := "user://ui-capture-viewer.md"
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		push_error("ui_capture: cannot write %s" % path)
+		return ProjectSettings.globalize_path(path)
+	f.store_string(
+		"# Capture fixture\n\n"
+		+ "A short Markdown document, so the viewer's toolbar sits over real "
+		+ "content.\n\n"
+		+ "| Column | Value |\n|---|---|\n| one | 1 |\n| two | 2 |\n")
+	f.close()
+	return ProjectSettings.globalize_path(path)
 
 ## `_chrome.restore_position()` runs deferred at launch and re-applies the
 ## saved window size through `DisplayServer`, which does not resize the root

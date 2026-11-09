@@ -39,6 +39,7 @@ func _ready():
 	_toolbar = HBoxContainer.new()
 	_toolbar.name = "Toolbar"
 	root.add_child(_toolbar)
+	_action_bar = _toolbar
 
 	# Opening the same file again focuses this pane instead of re-reading it
 	# (a viewer's scroll, selection and mode belong to its document), so a
@@ -46,14 +47,12 @@ func _ready():
 	_reload_button = Button.new()
 	_reload_button.name = "ReloadButton"
 	_reload_button.text = "Reload"
-	_reload_button.focus_mode = Control.FOCUS_NONE
 	_reload_button.tooltip_text = "Re-read this file from disk"
 	_reload_button.pressed.connect(reload)
 	_toolbar.add_child(_reload_button)
 
 	_view_toggle = Button.new()
 	_view_toggle.name = "ViewToggle"
-	_view_toggle.focus_mode = Control.FOCUS_NONE
 	_view_toggle.pressed.connect(_toggle_view)
 	_toolbar.add_child(_view_toggle)
 
@@ -128,6 +127,16 @@ func load_file(path: String):
 			_editor.add_comment_delimiter("//", "", true)
 	_refresh_view()
 
+## Entering this pane from its title bar lands in the text, not on Reload: the
+## `first_reachable` fallback would now pick the toolbar's first button.
+func keyboard_entry() -> Control:
+	if _editor != null and _editor.is_visible_in_tree():
+		return _editor
+	if _markdown != null and _markdown.is_visible_in_tree() \
+			and _markdown.focus_mode != Control.FOCUS_NONE:
+		return _markdown
+	return null
+
 ## Re-read the file being shown. `load_file` is the same gate a first open
 ## uses (regular file, 1 MiB cap, torn-tail drop), so a file that is gone or
 ## became non-regular clears the pane rather than showing stale text as if it
@@ -178,6 +187,9 @@ func _refresh_view():
 		_markdown.set_source_notice(_notice)
 		_markdown.render_now(_source)
 	_markdown.scroll_to_line(0)
+	# The ring names only the buttons on screen: the view toggle is hidden for
+	# anything that is not Markdown, and a one-member ring is a stop with no wrap.
+	KeyboardFocus.ring(KeyboardFocus.reachable_children(_toolbar))
 
 func _toggle_view():
 	if not _is_markdown():

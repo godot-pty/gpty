@@ -94,6 +94,34 @@ func test_tab_components_skips_members_a_component_already_claimed():
 	assert_eq(components.size(), 1, "a second start inside the ring adds nothing")
 	assert_eq((components[0]["controls"] as Array).size(), 2)
 
+## A toolbar whose second button is disabled or hidden is one stop: it must be
+## focusable (Escape's return target and `first_reachable` both need it), but it
+## must not carry a `"."` self-path, which the engine resolves back to itself
+## and which no wrap test can distinguish from a real ring.
+func test_a_one_member_ring_is_a_stop_without_a_wrap():
+	var only := Button.new()
+	only.focus_mode = Control.FOCUS_NONE
+	_row([only])
+	KeyboardFocus.ring([only])
+	assert_eq(only.focus_mode, Control.FOCUS_ALL, "the single member is a stop")
+	assert_eq(only.focus_next, NodePath(), "no self-referential wrap")
+	assert_eq(only.focus_previous, NodePath())
+
+## The CLI view rebuilds its ring whenever a button becomes disabled or
+## enabled, so a member that loses its partner must lose the path to it too: a
+## stale path would keep a disabled button in the tab walk (measured: the
+## `cli-view-content` capture's audit printed both Restart and Stop after the
+## child had exited).
+func test_shrinking_a_ring_clears_the_path_to_the_gone_member():
+	var first := Button.new()
+	var second := Button.new()
+	_row([first, second])
+	KeyboardFocus.ring([first, second])
+	assert_ne(first.focus_next, NodePath())
+	KeyboardFocus.ring([first])
+	assert_eq(first.focus_next, NodePath(), "the stale partner is cleared")
+	assert_eq(first.focus_previous, NodePath())
+
 
 ## The one clamped cursor step (`next_index`), shared by the command palette and
 ## the terminal's history results: the ends are stops, not wraps, and a cursor

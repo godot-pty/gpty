@@ -36,12 +36,14 @@ These are handled by the focused terminal before the workspace sees them. `Ctrl+
 | `Ctrl+Shift+B` | Toggle the sidebar |
 | `Ctrl+Shift+P` | Open the command palette |
 | `Ctrl+Shift+E` | Move the keyboard into the focused pane's title-bar buttons |
+| `Ctrl+Shift+A` | Move the keyboard into the window's own title bar (minimize / maximize / close) |
+| `Ctrl+Shift+L` | Move the keyboard into the active pane's own toolbar (code viewer, CLI view) |
 | `Ctrl+Shift+K` | Move the keyboard into the open note's toolbar (Wiki pane) |
 | `F11` or `Ctrl+Shift+M` | Toggle fullscreen |
 | `Alt+←` `Alt+→` `Alt+↑` `Alt+↓` | Move focus to the adjacent pane |
 | `Ctrl+PageDown` | Next workspace |
 | `Ctrl+PageUp` | Previous workspace |
-| `Escape` | Close the palette, a search strip, or a settings popup; leave a wiki note; return from pane chrome to the pane, or from the note toolbar to the buffer |
+| `Escape` | Close the palette, a search strip, or a settings popup; leave a wiki note; return from pane chrome or the window's title bar to the pane, or from the note toolbar to the buffer |
 
 New panes use the normal split rule: the largest tile halves along its longer axis, and the spawn is refused when both halves would be smaller than the 6-unit minimum. The four pane-type shortcuts are the only ones gPTY binds directly; Reasoning, CLI View, Wiki, and Media panes are spawned from the sidebar's Add Pane grid, the command palette, or the control API.
 
@@ -54,6 +56,10 @@ Closing a pane is guarded. If a command is still running, gPTY asks once before 
 Fullscreen is the same action on both bindings: `F11` and `Ctrl+Shift+M`. The sidebar's collapse state is independent of fullscreen, and `Ctrl+Shift+B` works in either mode.
 
 Each pane's title-bar buttons are keyboard stops, but a focused terminal sends `Tab` to its program, so `Ctrl+Shift+E` is the way in: it focuses the first control (pane settings), `Tab` moves through the three and wraps inside the bar, and `Escape` hands the keyboard back to the pane. A chrome action that leaves the pane on screen (a restore from the menu, a completed swap) also gives the keyboard back, so the next keystroke still reaches the shell.
+
+The window's own title bar is a ring of its own: minimize, maximize/restore and close are that ring, `Ctrl+Shift+A` moves the keyboard into it (first stop: minimize), `Tab` wraps inside it, and `Escape` gives the keyboard back to the active pane. In `System Frame` mode the desktop draws the frame and the bar is not on screen, so the chord does nothing there — it is the `Borderless` and `Fullscreen` modes that show it.
+
+A view pane's own toolbar is a ring too. The code viewer's **Reload** and view toggle and the CLI view's **Restart** and **Stop** are the stops; their read-only text keeps `Tab` for indentation, so `Ctrl+Shift+L` is the way in (first stop: Reload or Restart), `Tab` wraps inside the row, and `Escape` gives the keyboard back to the pane's text. A button that cannot be pressed is not a stop — the view toggle exists only for Markdown, and a CLI view that is not configured or is stopped disables the matching buttons — so `Ctrl+Shift+L` in a pane with nothing to offer does nothing. The Wiki pane's note toolbar keeps its own chord (`Ctrl+Shift+K`) because it is inert without a buffer on screen, but Escape from it now takes the same one-level-out step.
 
 ## Command palette
 

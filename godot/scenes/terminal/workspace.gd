@@ -150,7 +150,9 @@ func _ready():
 	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _toggle_sidebar, true)
 	ShortcutManager.register("app:toggle_palette", "Ctrl+Shift+P", _toggle_palette, true)
 	ShortcutManager.register("app:focus_pane_chrome", "Ctrl+Shift+E", _focus_active_pane_chrome)
+	ShortcutManager.register("app:focus_window_chrome", "Ctrl+Shift+A", _focus_window_chrome)
 	ShortcutManager.register("app:focus_note_toolbar", "Ctrl+Shift+K", _focus_note_toolbar)
+	ShortcutManager.register("app:focus_pane_toolbar", "Ctrl+Shift+L", _focus_pane_toolbar)
 	ShortcutManager.register("app:toggle_fullscreen", "F11", _chrome.toggle_fullscreen, true)
 	ShortcutManager.register("app:toggle_fullscreen_alt", "Ctrl+Shift+M", _chrome.toggle_fullscreen, true)
 	ShortcutManager.register("app:reset_workspace", "Ctrl+Shift+R", func():
@@ -1630,6 +1632,28 @@ func _focus_active_pane_chrome() -> void:
 	if body != null and is_instance_valid(body):
 		ws.tm.focus_title_bar(body)
 
+## Escape from the window's own title bar hands the keyboard back to the active
+## pane - the same one-level-out step pane chrome takes. `_escape_pane_chrome`
+## never matches it: the bar is outside every tile.
+func _escape_window_chrome() -> bool:
+	var owner := get_viewport().gui_get_focus_owner()
+	if owner == null or _chrome.titlebar == null or not _chrome.titlebar.is_ancestor_of(owner):
+		return false
+	var ws := _active_workspace()
+	if ws.is_empty():
+		owner.release_focus()
+	else:
+		ws.tm._return_focus_to_body(ws.tm.last_body)
+	return true
+
+## Enter the window's own title bar from the keyboard. The bar is not a pane's
+## chrome, so it has its own entry: the same overlay guard, then WindowChrome's
+## own predicate for "the bar is on screen and has a stop".
+func _focus_window_chrome() -> void:
+	if _keyboard_overlay() != null:
+		return
+	_chrome.focus_controls()
+
 ## Move the keyboard from a wiki note's buffer into that note's toolbar — the
 ## note view's counterpart to `Ctrl+Shift+E`. The toolbar is one ring
 ## (`WikiPane._wire_note_toolbar`), but a focused `CodeEdit` keeps Tab for
@@ -1661,6 +1685,40 @@ func _focus_note_toolbar() -> void:
 			wiki = body as WikiPane
 	if wiki != null and is_instance_valid(wiki):
 		wiki.focus_note_toolbar()
+
+## Enter the active pane's own action bar (a code viewer's Reload and view
+## toggle, a CLI view's Restart and Stop). The pane resolution is the note
+## toolbar's: the pane that owns the focus owner, else the workspace's last
+## active pane, because the chord may be typed while a read-only pane is active
+## without holding a focus owner inside it.
+func _focus_pane_toolbar() -> void:
+	if _keyboard_overlay() != null:
+		return
+	var body: Control = null
+	var owner := get_viewport().gui_get_focus_owner()
+	if owner != null:
+		body = _body_of_focus_owner(owner)
+	if body == null:
+		var ws := _active_workspace()
+		if not ws.is_empty():
+			body = ws.tm.last_body
+	if body is PaneBody and is_instance_valid(body):
+		(body as PaneBody).focus_toolbar()
+
+## Escape inside a pane's own action bar returns to the pane's content - the
+## same one-level-out step pane chrome takes, and the branch the Wiki pane's
+## note toolbar shares instead of its own copy.
+func _escape_pane_toolbar() -> bool:
+	var owner := get_viewport().gui_get_focus_owner()
+	if owner == null:
+		return false
+	var body := _body_of_focus_owner(owner)
+	if body == null or not body is PaneBody:
+		return false
+	if not (body as PaneBody).toolbar_has_focus(owner):
+		return false
+	(body as PaneBody).leave_toolbar()
+	return true
 
 ## The overlay that owns the keyboard while it is visible, topmost first.
 ## Opening Settings closes Pane Settings, the concept editor opens over
@@ -1723,6 +1781,12 @@ func _input(event):
 			get_viewport().set_input_as_handled()
 			return
 		if _escape_pane_chrome():
+			get_viewport().set_input_as_handled()
+			return
+		if _escape_window_chrome():
+			get_viewport().set_input_as_handled()
+			return
+		if _escape_pane_toolbar():
 			get_viewport().set_input_as_handled()
 			return
 	# An in-flight pane-edge drag owns the mouse the same way: it starts on a
