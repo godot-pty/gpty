@@ -59,6 +59,7 @@ godot/
         │   ├── settings_panel.gd
         │   ├── overlay_panel.gd  # Shared keyboard contract for the four overlays
         │   ├── command_palette.gd # Ctrl+Shift+P command list (OverlayPanel)
+        │   ├── palette_model.gd # Palette entries, matching and ranking (pure)
         │   ├── keyboard_focus.gd # Keyboard-entry walk + the toolbar-ring pair (overlay focus, pane content, chrome/note toolbars)
         │   ├── concept_graph_editor.gd # Visual rule editor overlay (GraphEdit)
         │   ├── concept_graph_model.gd  # Pure canvas/build/validate/compile logic
@@ -77,7 +78,7 @@ godot/
         │   └── icons.gd         # Phosphor icon constants
         └── panes/               # Specialty pane types
             ├── pane_body.gd
-            ├── pane_types.gd    # Pane registry, sanitizers, palette command list
+            ├── pane_types.gd    # Pane registry, sanitizers
             ├── viewable_files.gd # Closed table: which paths open in the viewer
             ├── media_files.gd   # Closed table + path gate for the media pane
             ├── code_viewer.gd

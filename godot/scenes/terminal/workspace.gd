@@ -436,34 +436,6 @@ func _request_pane_into(ws: Dictionary, type_name: String, settings: Dictionary)
 	if body != null:
 		activate_pane(body)
 
-func _spawn_bulk(count: int, shell := ""):
-	var room := _live_pane_room()
-	if room == 0:
-		ToastManager.warn(_pane_ceiling_refusal())
-		return
-	var start_size = _tm.tiles.size()
-	var bodies = _tm.spawn_bulk(mini(count, room), shell, str(_active_workspace().get("cwd", "")))
-	if bodies.is_empty():
-		ToastManager.warn("Cannot add terminals — grid is full")
-		return
-	for i in bodies.size():
-		var w = _tm.tiles[start_size + i].wrapper
-		var body = bodies[i]
-		_ensure_unique_attachment_id(body)
-		_grid.add_child(w)
-		body.focus_entered.connect(func(): _tm.last_body = body)
-	_apply_layout()
-	_list()
-	ToastManager.info("Spawned %d terminals" % bodies.size())
-	# The clamp is silent only when nothing was asked past the ceiling; a bulk
-	# spawn that stopped short says why, from the same refusal text as a single
-	# one.
-	if bodies.size() < count:
-		var refused := _pane_ceiling_refusal()
-		if refused != "":
-			ToastManager.warn(refused)
-	if bodies.size() > 0: activate_pane(bodies[-1])
-
 # ── Close guards ───────────────────────────────────────────────────────
 # Destroying a pane, or quitting the app, is the one action that cannot be
 # undone, so every path that does it asks the panes first
@@ -1801,7 +1773,10 @@ func _toggle_palette():
 		_palette.z_index = 100
 		add_child(_palette)
 		_palette.visible = false  # start hidden — the first toggle must OPEN it
-		_palette.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+		# Full rect: the palette centres its own card, so the workspace never
+		# positions it (a centre preset here ran while the size was zero, which
+		# put the card's top-left on the workspace centre).
+		_palette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_palette.command_chosen.connect(_execute_command)
 		_palette.keyboard_released.connect(_on_overlay_keyboard_released.bind(_palette))
 	if _palette.visible:
@@ -1824,7 +1799,6 @@ func _execute_command(cmd: String):
 		return
 	match cmd:
 		"close active": _kill_last()
-		"spawn 16 terminals": _spawn_bulk(16)
 		"settings": _toggle_settings()
 		"close all": _reset()
 		"save": _save()

@@ -250,13 +250,17 @@ func test_a_click_behind_an_open_overlay_does_not_take_the_keyboard():
 	var palette: CommandPalette = ws._palette
 	await get_tree().process_frame
 
-	# A point inside the tile but outside the palette: without the guard the
-	# raw input stage would activate the pane and focus it while the overlay
-	# is still open, and the next letters would reach the shell.
+	# A point inside the tile but outside the palette's card: without the guard
+	# the raw input stage would activate the pane and focus it while the overlay
+	# is still open, and the next letters would reach the shell. The palette's
+	# host is full-rect (it centres the card itself), so the invariant is about
+	# the card plus the host's mouse filter, not about a small overlay rect.
 	var rect: Rect2 = ws._tm.tiles[0].wrapper.get_global_rect()
 	var point: Vector2 = rect.position + Vector2(10, 10)
-	assert_false(palette.get_global_rect().has_point(point),
-		"precondition: the click lands behind the palette, not on it")
+	assert_false(palette._card.get_global_rect().has_point(point),
+		"precondition: the click lands behind the card, not on it")
+	assert_eq(palette.mouse_filter, Control.MOUSE_FILTER_IGNORE,
+		"the host above the workspace does not swallow clicks around the card")
 
 	ws._tm.last_body = null
 	var ev := InputEventMouseButton.new()

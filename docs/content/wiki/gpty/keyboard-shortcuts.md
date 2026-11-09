@@ -57,9 +57,9 @@ Each pane's title-bar buttons are keyboard stops, but a focused terminal sends `
 
 ## Command palette
 
-`Ctrl+Shift+P` opens a small input with a filtered list. Typing matches anywhere in a command name, so `new` lists every pane type, `close` lists the close actions, and `load` lists the reload action. Enter runs the first match; clicking a row runs it too.
+`Ctrl+Shift+P` opens a centred card with a filter field and the full list already showing. Typing matches the command's name first (a name that starts with the query outranks one that contains it), then the command id and keywords, so `new` lists every pane type, `close` lists the close actions, and `load` lists the reload action. `Up`/`Down` move a highlighted cursor - it stops at both ends rather than wrapping - and `Enter` runs the highlighted row, not merely the first match; clicking a row runs it too, and `Escape` closes the palette. The field keeps the keyboard while the arrows move the cursor, so `Tab` is not needed to pick a row (and does not move between rows). A query that matches nothing says so instead of showing an empty card.
 
-The commands are one `new <type>` entry for each of the eight pane types, then `close active`, `spawn 16 terminals`, `settings`, `close all`, `save`, and `load`. `save` writes the current workspace set, and `load` reloads the saved set from disk after asking every pane to close. See [[layout]].
+Each row shows the command's name, the pane type's glyph, and the chord that runs it directly when one is bound (`Ctrl+Shift+N` for a terminal, `Ctrl+Shift+W` for closing, and so on). The commands are one `New <type>` entry for each of the eight pane types, then `Close Active Pane`, `Open Settings`, `Close All Panes`, `Save Workspaces`, and `Reload Saved Workspaces`. The last one and `Close All Panes` are shown in the danger colour because they destroy the open panes: `Reload Saved Workspaces` asks every pane to close and then restores the saved set from disk, while `Save Workspaces` writes the current set. See [[layout]].
 
 ## Wiki editor
 

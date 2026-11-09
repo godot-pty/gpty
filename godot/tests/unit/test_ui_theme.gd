@@ -233,3 +233,16 @@ func test_an_overflowing_scroll_container_gets_a_real_bar():
 	assert_gt(bar.max_value, bar.page, "the content really overflows")
 	assert_true(bar.visible, "the overflow shows a bar")
 	assert_eq(bar.size.x, UiTokens.SCROLLBAR_THICKNESS, "the bar takes its own column")
+
+## The command palette's keyboard cursor. It is a row state the widget toggles,
+## not the "current item" role the sidebar's active row uses, and it marks the
+## row with a leading edge as well as a wash so the cursor is not colour alone.
+func test_the_selected_row_variation_is_a_cursor_not_a_button():
+	assert_eq(_theme.get_type_variation_base(UiTheme.SELECTED_ROW), "Button")
+	assert_true(_theme.get_stylebox("normal", UiTheme.SELECTED_ROW) is StyleBoxEmpty,
+		"an unselected row draws nothing at rest")
+	var cursor := _theme.get_stylebox("pressed", UiTheme.SELECTED_ROW) as StyleBoxFlat
+	assert_not_null(cursor, "the cursor is a fill")
+	assert_gt(cursor.bg_color.a, 0.0, "the cursor is visible")
+	assert_eq(cursor.border_width_left, 2, "the cursor has a second, non-colour channel")
+	assert_eq(cursor.border_color, UiPalette.active().ACCENT)

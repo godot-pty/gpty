@@ -32,6 +32,11 @@ const ICON_BUTTON := &"IconButton"
 ## A glyph in the accent colour: a Button's own font colours cannot reach the
 ## child `Label` that draws an icon-button glyph.
 const ACCENT_LABEL := &"AccentLabel"
+## The keyboard cursor of a list whose focus stays in one field (the command
+## palette): a filled accent wash with a 2 px accent leading edge. Not
+## `ACCENT_BUTTON`: that role means "this is the current item" (the sidebar's
+## active row), and a cursor is not a state a row owns.
+const SELECTED_ROW := &"SelectedRow"
 
 static func build() -> Theme:
 	var p := UiPalette.active()
@@ -214,6 +219,16 @@ static func build() -> Theme:
 	t.set_stylebox("pressed", ICON_BUTTON, _flat(Color(p.ACCENT, 0.32)))
 	t.set_stylebox("focus", ICON_BUTTON, _padded(_flat(Color.TRANSPARENT, p.ACCENT, 1), UiTokens.SPACE_XS))
 
+	# The palette's keyboard cursor: nothing at rest, a faint wash under a
+	# parked pointer (hover never selects), and the filled cursor when pressed
+	# (the row is a toggle whose pressed state *is* the selection).
+	t.set_type_variation(SELECTED_ROW, "Button")
+	t.set_stylebox("normal", SELECTED_ROW, StyleBoxEmpty.new())
+	t.set_stylebox("disabled", SELECTED_ROW, StyleBoxEmpty.new())
+	t.set_stylebox("focus", SELECTED_ROW, StyleBoxEmpty.new())
+	t.set_stylebox("hover", SELECTED_ROW, _flat(Color(p.ACCENT, 0.10)))
+	t.set_stylebox("pressed", SELECTED_ROW, _selected_row_box())
+
 	return t
 
 ## The four-side margin block every card sets by hand today.
@@ -239,6 +254,16 @@ static func _button_box(state: String) -> StyleBoxFlat:
 			return _padded(_flat(Color.TRANSPARENT, p.ACCENT, 1), UiTokens.SPACE_SM)
 		_:
 			return _padded(_flat(p.SURFACE_RAISED, p.BORDER, 1), UiTokens.SPACE_SM)
+
+## The palette's cursor: an accent wash plus a 2 px leading edge, so the row
+## Enter would run is identifiable without colour alone.
+static func _selected_row_box() -> StyleBoxFlat:
+	var p := UiPalette.active()
+	var box := _flat(Color(p.ACCENT, 0.22))
+	box.border_width_left = 2
+	box.border_color = p.ACCENT
+	box.set_content_margin_all(UiTokens.SPACE_SM)
+	return box
 
 static func _tab_box(selected: bool) -> StyleBoxFlat:
 	var p := UiPalette.active()

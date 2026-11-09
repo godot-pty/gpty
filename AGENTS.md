@@ -156,6 +156,7 @@ gpty/
         │   ├── settings_panel.gd
         │   ├── overlay_panel.gd     # Overlay keyboard contract (focus, Escape, focus return)
         │   ├── command_palette.gd   # Ctrl+Shift+P command list (OverlayPanel)
+        │   ├── palette_model.gd     # Palette entries, matching and ranking (pure)
         │   ├── keyboard_focus.gd   # The one keyboard-entry walk (overlay focus, read-only content)
         │   ├── status_bar.gd
         │   ├── toast_overlay.gd
@@ -173,7 +174,7 @@ gpty/
         │   └── icons.gd            # Phosphor icon constants
         └── panes/
             ├── pane_body.gd        # Base class + routed-content contract
-            ├── pane_types.gd       # Pane registry, sanitizers, palette command list
+            ├── pane_types.gd       # Pane registry, sanitizers
             ├── viewable_files.gd   # Closed table: which paths open in the viewer
             ├── media_files.gd      # Closed table + path gate for the media pane
             ├── code_viewer.gd

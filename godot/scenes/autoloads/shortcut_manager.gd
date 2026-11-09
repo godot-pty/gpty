@@ -28,6 +28,31 @@ func register(action_name: String, default_bind: String, callback: Callable, sur
 	_actions[action_name] = callback
 	_survives_overlay[action_name] = survives_overlay
 
+## The chord an action is bound to, spelled the way `register` accepts it
+## ("Ctrl+Shift+W"), so a surface that names a shortcut reads the binding it
+## actually has. "" when the action is not registered or carries no key event.
+func chord(action_name: String) -> String:
+	if not InputMap.has_action(action_name):
+		return ""
+	for ev in InputMap.action_get_events(action_name):
+		if ev is InputEventKey:
+			return format_chord(ev)
+	return ""
+
+## One key event as a chord string: modifiers in the order `register`'s own
+## literals use, then the key. Pure, so the parser/formatter pair is testable
+## without an InputMap.
+static func format_chord(ev: InputEventKey) -> String:
+	var parts: Array[String] = []
+	if ev.ctrl_pressed:
+		parts.append("Ctrl")
+	if ev.shift_pressed:
+		parts.append("Shift")
+	if ev.alt_pressed:
+		parts.append("Alt")
+	parts.append(OS.get_keycode_string(ev.keycode))
+	return "+".join(parts)
+
 func _parse_bind(bind_str: String) -> InputEventKey:
 	if bind_str.strip_edges() == "":
 		return null

@@ -53,19 +53,6 @@ func spawn(shell := "", cwd := "") -> Control:
 		"cols": SettingsManager.cfg_default_cols,
 	}, cwd)
 
-func spawn_bulk(count: int, shell := "", cwd := "") -> Array[Control]:
-	var spawned: Array[Control] = []
-	var s = shell if shell != "" else SettingsManager.cfg_shell_command
-	for i in count:
-		var body = spawn_pane("terminal", {
-			"shell_command": s,
-			"rows": SettingsManager.cfg_default_rows,
-			"cols": SettingsManager.cfg_default_cols,
-		}, cwd)
-		if body == null: break
-		spawned.append(body)
-	return spawned
-
 func spawn_pane(type_name: String, opts: Dictionary = {}, workspace_cwd := "") -> Control:
 	var script = _PaneScripts.get(type_name)
 	if script == null:
