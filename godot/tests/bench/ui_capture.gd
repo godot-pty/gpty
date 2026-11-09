@@ -916,10 +916,12 @@ func _is_terminal(body) -> bool:
 ## which visible controls are focusable, which interactive controls are
 ## FOCUS_NONE (mouse-only), and every traversal component — the first as
 ## `tab-order`, the rest as `ring[n]` (closed) or `flow[n]` (runs into a claimed
-## control), plus the totals. The audit's evidence is this output, not a
-## judgement — a mouse-only control is a defect only when its action has no
-## keyboard path (the palette's shortcut, a terminal's own input) is considered
-## by the reader.
+## control), plus the totals. A mouse-only control is declared with
+## `KeyboardFocus.declare_mouse_only` when its action has a keyboard path
+## elsewhere (the palette's rows, the search strip's step buttons); the report
+## prints that reason and counts only the undeclared ones as `unaccounted`. An
+## open overlay is snapshotted before the Escape that closes it, or its own rows
+## would be counted as zero.
 func _audit_focus(state_name: String) -> void:
 	print("focus-audit: state=%s" % state_name)
 	var owner: Control = _workspace.get_viewport().gui_get_focus_owner()
@@ -931,10 +933,15 @@ func _audit_focus(state_name: String) -> void:
 		var dialog_owner: Control = dialog.get_viewport().gui_get_focus_owner()
 		print("focus-audit: dialog=%s focus-owner=%s"
 			% [dialog.title, "<none>" if dialog_owner == null else _short_path(dialog_owner)])
-	# Does Escape close the surface the state opened? Send it before grabbing
-	# focus for the walk, so the result reflects the state as staged.
+	# Does Escape close the surface the state opened? The overlay's own
+	# mouse-only controls have to be snapshotted *before* it: a dialog
+	# queue-frees itself and the palette hides, so a count taken afterwards is
+	# blind to exactly the surface the state staged (the palette's rows were
+	# reported as `focus-none-buttons=0`).
 	var overlay = _visible_overlay(dialog)
+	var mouse_only: Array[Dictionary] = []
 	if overlay != null:
+		mouse_only.append_array(_mouse_only_entries(overlay, "overlay"))
 		var overlay_name := str(overlay.name)
 		await _press_key(KEY_ESCAPE)
 		await _wait_frames(3)
@@ -943,7 +950,6 @@ func _audit_focus(state_name: String) -> void:
 		print("focus-audit: escape overlay=%s closed=%s" % [overlay_name, closed])
 	var controls := _all_controls(_workspace)
 	var focusable: Array[Control] = []
-	var unreachable: Array[BaseButton] = []
 	var canvases: Array[Control] = []
 	for c in controls:
 		if not c.is_visible_in_tree():
@@ -952,16 +958,28 @@ func _audit_focus(state_name: String) -> void:
 			focusable.append(c)
 			continue
 		if c is BaseButton:
-			var button := c as BaseButton
-			if not button.disabled:
-				unreachable.append(button)
+			continue
 		elif c.get_script() != null and (c.get_script() as Script).resource_path == "res://scenes/ui/vault_graph_view.gd":
 			canvases.append(c)
-	print("focus-audit: controls=%d focusable=%d focus-none-buttons=%d"
-		% [controls.size(), focusable.size(), unreachable.size()])
-	for button in unreachable:
-		print("focus-audit: mouse-only button text=%s tooltip=%s path=%s"
-			% [button.text, button.tooltip_text, _short_path(button)])
+	# The workspace's own mouse-only buttons, after the escape. A control that is
+	# still visible was already snapshotted from the overlay walk.
+	var seen := {}
+	for entry in mouse_only:
+		seen[entry["path"]] = true
+	for entry in _mouse_only_entries(_workspace, "workspace"):
+		if not seen.has(entry["path"]):
+			mouse_only.append(entry)
+	var declared := 0
+	for entry in mouse_only:
+		if str(entry["reason"]) != "":
+			declared += 1
+			print("focus-audit: mouse-only button scope=%s text=%s tooltip=%s reason=%s path=%s"
+				% [entry["scope"], entry["text"], entry["tooltip"], entry["reason"], entry["path"]])
+		else:
+			print("focus-audit: unaccounted button scope=%s text=%s tooltip=%s path=%s"
+				% [entry["scope"], entry["text"], entry["tooltip"], entry["path"]])
+	print("focus-audit: controls=%d focusable=%d focus-none-buttons=%d declared=%d unaccounted=%d"
+		% [controls.size(), focusable.size(), mouse_only.size(), declared, mouse_only.size() - declared])
 	for canvas in canvases:
 		print("focus-audit: mouse-only canvas path=%s" % _short_path(canvas))
 	# Every component, not just the one ring a single start sits inside: a
@@ -1089,6 +1107,28 @@ func _all_controls(node: Node) -> Array[Control]:
 		out.append(node as Control)
 	for child in node.get_children():
 		out.append_array(_all_controls(child))
+	return out
+
+## The visible, enabled `FOCUS_NONE` buttons under `node`, as report lines. Every
+## field is snapshotted as text: the audit must be able to name a control inside
+## an overlay after the Escape that closes it has queue-freed it.
+func _mouse_only_entries(node: Node, scope: String) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for c in _all_controls(node):
+		if not c.is_visible_in_tree():
+			continue
+		if c.focus_mode != Control.FOCUS_NONE or not (c is BaseButton):
+			continue
+		var button := c as BaseButton
+		if button.disabled:
+			continue
+		out.append({
+			"scope": scope,
+			"text": button.text,
+			"tooltip": button.tooltip_text,
+			"reason": KeyboardFocus.mouse_only_reason(button),
+			"path": _short_path(button),
+		})
 	return out
 
 func _short_path(node: Node) -> String:

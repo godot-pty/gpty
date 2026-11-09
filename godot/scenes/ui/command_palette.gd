@@ -19,7 +19,9 @@ class_name CommandPalette
 ## the cursor (not "whatever matched first"). Rows are deliberately
 ## `FOCUS_NONE` — Tab must not park a user on a row that cannot also type the
 ## filter. What the list offers is `PaletteModel`, so an entry's cost is data,
-## not code here.
+## not code here. The reason is declared through
+## `KeyboardFocus.declare_mouse_only`, so the focus audit reports the rows as
+## accounted for rather than as an oversight.
 
 ## A command chosen from the list or submitted from the field, exactly as
 ## `PaletteModel.commands()` spells it.
@@ -185,17 +187,16 @@ func _first_enabled() -> int:
 
 ## Move the cursor. Clamped, not wrapped: the ends stay put so holding an
 ## arrow cannot tour the list without a stop. Refused rows are stepped over, so
-## Enter can never land on a row that would do nothing.
+## Enter can never land on a row that would do nothing. The step itself is
+## `KeyboardFocus.next_index`, shared with the terminal's history results.
 func _move_selection(delta: int) -> void:
-	if _rows.is_empty():
+	if _rows.is_empty() or signi(delta) == 0:
 		return
 	var step := signi(delta)
-	if step == 0:
-		return
-	var i := _selected if _selected >= 0 else (0 if step > 0 else _rows.size() - 1)
+	var i := _selected
 	while true:
-		var next := i + step
-		if next < 0 or next >= _rows.size():
+		var next := KeyboardFocus.next_index(i, _rows.size(), step)
+		if next < 0 or next == i:
 			return
 		i = next
 		if not (_rows[i] as Button).disabled:
@@ -261,6 +262,10 @@ func _make_row(entry: Dictionary) -> Button:
 	var row := Button.new()
 	row.name = "Row"
 	row.focus_mode = Control.FOCUS_NONE
+	# The keyboard path is the field: ↑/↓ move the cursor, Enter runs it. Say so
+	# on the row itself, or the focus audit reads a mouse-only button as an
+	# oversight.
+	KeyboardFocus.declare_mouse_only(row, "arrow keys move the cursor and Enter runs it from the field")
 	row.toggle_mode = true
 	row.theme_type_variation = UiTheme.SELECTED_ROW
 	row.custom_minimum_size.y = ROW_HEIGHT

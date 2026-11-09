@@ -14,6 +14,13 @@ class_name KeyboardFocus
 ## (`WikiPane._wire_note_toolbar`) build their `focus_next`/`focus_previous`
 ## rings through them, so a row of actions has one definition of "these stops,
 ## in this order, wrapping at the ends".
+##
+## `declare_mouse_only` + `mouse_only_reason` are the third pair: the focus
+## audit (`scripts/ui-capture --audit-focus`) cannot tell a deliberately
+## mouse-only control from an oversight, so a control that leaves its action to
+## a chord or to a field declares the reason on itself. `next_index` is the one
+## clamped cursor step, shared by the palette and the terminal's history
+## results.
 
 ## The controls under `root` that keyboard traversal can visit, in tree order:
 ## visible, not queued for deletion, not `FOCUS_NONE`, and not a disabled
@@ -104,3 +111,35 @@ static func tab_components(controls: Array) -> Array:
 			cur = nxt
 		components.append({"controls": component, "closed": closed})
 	return components
+
+## The meta a control carries once it declares itself intentionally mouse-only.
+const MOUSE_ONLY_META := &"gpty_mouse_only_reason"
+
+## Record that a `FOCUS_NONE` control is mouse-only on purpose, and name the
+## keyboard path that does the same thing. `scripts/ui-capture --audit-focus`
+## prints such a control with its reason and counts only the undeclared ones as
+## unaccounted: without the declaration a mouse-only button is
+## indistinguishable from an oversight. An empty reason clears the declaration.
+static func declare_mouse_only(control: Control, reason: String) -> void:
+	if reason == "":
+		control.remove_meta(MOUSE_ONLY_META)
+		return
+	control.set_meta(MOUSE_ONLY_META, reason)
+
+## The declared reason, or "" when the control is not declared mouse-only.
+static func mouse_only_reason(control: Control) -> String:
+	if not control.has_meta(MOUSE_ONLY_META):
+		return ""
+	return str(control.get_meta(MOUSE_ONLY_META))
+
+## The index a list cursor moves to from `current` by `delta`: clamped to
+## `0..count-1`, so the ends stay put and holding an arrow cannot tour the list;
+## from -1 (nothing selected yet) the first step lands on the first row for a
+## positive delta and on the last for a negative one. -1 when there is nothing
+## to move over.
+static func next_index(current: int, count: int, delta: int) -> int:
+	if count <= 0 or delta == 0:
+		return -1
+	if current < 0:
+		return 0 if delta > 0 else count - 1
+	return clampi(current + signi(delta), 0, count - 1)
