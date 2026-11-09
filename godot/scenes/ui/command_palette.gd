@@ -25,6 +25,10 @@ class_name CommandPalette
 ## `PaletteModel.commands()` spells it.
 signal command_chosen(command: String)
 
+## The saved-command rows' heading. Named so the keyboard/screen-reader audits
+## can find it (it is a Label, never a row: a heading must not take the cursor).
+const SECTION_LABEL_NAME := "SectionHeader"
+
 const PALETTE_WIDTH := 560
 const PALETTE_HEIGHT := 480
 const ROW_HEIGHT := 28
@@ -39,6 +43,13 @@ var _empty: Label
 var _card: Panel
 var _rows: Array[Button] = []
 var _selected: int = -1
+## The user's saved commands, handed in by the workspace before `open()`: this
+## overlay reaches no store itself (`CommandPalette` only ever names a command).
+var _saved: Array = []
+## Why a saved command cannot be typed anywhere right now, or "". The same
+## sentence the dispatcher would toast, so the row's refusal and the execution's
+## cannot disagree.
+var _saved_refusal := ""
 
 func _init() -> void:
 	# The card swallows its own clicks; the host must not block the workspace
@@ -104,6 +115,14 @@ func _init() -> void:
 func _initial_focus() -> Control:
 	return _field
 
+## What the palette offers beyond `PaletteModel`'s fixed rows: the store's
+## entries and the reason (if any) they cannot be delivered right now. Called
+## on every open, so a command saved elsewhere in this session shows up without
+## a restart.
+func set_saved_commands(entries: Array, refusal: String) -> void:
+	_saved = entries.duplicate(true)
+	_saved_refusal = refusal
+
 ## Opening always starts from an unfiltered list: the field is cleared (a
 ## stale query from the last visit used to hide every entry) and the list is
 ## rebuilt before focus moves in. The card is also clamped to the overlay's own
@@ -125,21 +144,64 @@ func _refresh(query: String) -> void:
 		_results.remove_child(child)
 		child.queue_free()
 	_rows.clear()
-	for entry in PaletteModel.filter(query):
+	var heading := ""
+	for entry in PaletteModel.filter(query, _saved):
+		var section := str(entry.get("section", ""))
+		if section != "" and section != heading:
+			heading = section
+			_results.add_child(_make_heading(section))
 		var row := _make_row(entry)
 		_results.add_child(row)
 		_rows.append(row)
-	_selected = 0 if not _rows.is_empty() else -1
+	_selected = _first_enabled()
 	_empty.visible = _rows.is_empty()
 	_apply_selection()
 
+## A section heading: an inset label between rows, so the cursor, Enter and the
+## arrow keys keep working on `_rows` alone. Its left inset is the rows' own
+## (`RowBody`'s SPACE_MD), so the heading sits on the same column as the names
+## it introduces instead of on the card's edge.
+func _make_heading(text: String) -> Control:
+	var box := MarginContainer.new()
+	box.name = SECTION_LABEL_NAME
+	box.add_theme_constant_override("margin_left", UiTokens.SPACE_MD)
+	box.add_theme_constant_override("margin_top", UiTokens.SPACE_SM)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var label := Label.new()
+	label.text = text
+	label.theme_type_variation = UiTheme.MUTED_LABEL
+	label.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(label)
+	return box
+
+## The first row the cursor may sit on, or -1 when every row is refused (a
+## filtered list of saved commands with no terminal to send them to).
+func _first_enabled() -> int:
+	for i in _rows.size():
+		if not (_rows[i] as Button).disabled:
+			return i
+	return -1
+
 ## Move the cursor. Clamped, not wrapped: the ends stay put so holding an
-## arrow cannot tour the list without a stop.
+## arrow cannot tour the list without a stop. Refused rows are stepped over, so
+## Enter can never land on a row that would do nothing.
 func _move_selection(delta: int) -> void:
 	if _rows.is_empty():
 		return
-	_selected = clampi(_selected + delta, 0, _rows.size() - 1)
-	_apply_selection()
+	var step := signi(delta)
+	if step == 0:
+		return
+	var i := _selected if _selected >= 0 else (0 if step > 0 else _rows.size() - 1)
+	while true:
+		var next := i + step
+		if next < 0 or next >= _rows.size():
+			return
+		i = next
+		if not (_rows[i] as Button).disabled:
+			_selected = i
+			_apply_selection()
+			return
 
 func _apply_selection() -> void:
 	for i in _rows.size():
@@ -185,8 +247,16 @@ func _make_row(entry: Dictionary) -> Button:
 	var command := str(entry["command"])
 	var label := str(entry["label"])
 	var action := str(entry["action"])
-	var hint := ShortcutManager.chord(action) if action != "" else ""
+	# A saved row carries its own hint ("Insert" / "Run"); the fixed rows hint
+	# the chord that would run them.
+	var hint := str(entry.get("hint", ""))
+	if hint == "" and action != "":
+		hint = ShortcutManager.chord(action)
 	var variation: StringName = entry.get("variation", &"")
+	# A saved command with nowhere to go is listed, refused, and unclickable:
+	# its reason is the tooltip and the accessible description.
+	var refused := _saved_refusal != "" and str(entry.get("section", "")) == PaletteModel.SAVED_SECTION
+	var label_variation: StringName = UiTheme.MUTED_LABEL if refused else variation
 
 	var row := Button.new()
 	row.name = "Row"
@@ -196,7 +266,10 @@ func _make_row(entry: Dictionary) -> Button:
 	row.custom_minimum_size.y = ROW_HEIGHT
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.accessibility_name = label
-	row.tooltip_text = label if hint == "" else "%s (%s)" % [label, hint]
+	row.tooltip_text = _saved_refusal if refused else (label if hint == "" else "%s (%s)" % [label, hint])
+	if refused:
+		row.accessibility_description = _saved_refusal
+		row.disabled = true
 	row.set_meta("command", command)
 	row.set_meta("hint", hint)
 	row.pressed.connect(_choose.bind(command))
@@ -219,7 +292,7 @@ func _make_row(entry: Dictionary) -> Button:
 	glyph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	glyph.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	glyph.theme_type_variation = variation
+	glyph.theme_type_variation = label_variation
 	body.add_child(glyph)
 
 	var name_lbl := Label.new()
@@ -231,7 +304,7 @@ func _make_row(entry: Dictionary) -> Button:
 	name_lbl.clip_text = true
 	name_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	name_lbl.theme_type_variation = variation
+	name_lbl.theme_type_variation = label_variation
 	body.add_child(name_lbl)
 
 	var hint_lbl := Label.new()

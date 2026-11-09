@@ -11,6 +11,22 @@ extends GutTest
 
 const WorkspaceScript = preload("res://scenes/terminal/workspace.gd")
 
+## A pane that records what a saved command writes, without a PTY: the exact
+## bytes, and whether Enter followed them, are the contract under test.
+class _RecordingPane extends TerminalPane:
+	var sent: Array[String] = []
+	var sent_lines: Array[String] = []
+	var snaps := 0
+
+	func _send_to_term(text: String):
+		sent.append(text)
+
+	func _send_line_to_term(text: String):
+		sent_lines.append(text)
+
+	func _snap_to_bottom():
+		snaps += 1
+
 var _ws: Control
 
 func before_each():
@@ -39,15 +55,19 @@ func _new_commands() -> Array:
 func _rows(ws: Control) -> Array:
 	return ws._palette._results.get_children()
 
+## The rows' command ids. Only Buttons are rows: a saved-command section draws
+## a heading Label among them, and a heading is not selectable.
 func _commands(ws: Control) -> Array:
 	var out := []
 	for row in _rows(ws):
-		out.append(str(row.get_meta("command")))
+		if row is Button:
+			out.append(str(row.get_meta("command")))
 	return out
 
 func _row(ws: Control, command: String) -> Button:
 	for row in _rows(ws):
-		if str(row.get_meta("command")) == command:
+		# A section heading is a Label among the rows and carries no meta.
+		if row is Button and str(row.get_meta("command")) == command:
 			return row
 	return null
 
@@ -260,3 +280,154 @@ func test_the_card_is_sized_and_centred():
 		"clamped by SPACE_XXL on each side of the 560x340 floor")
 	assert_true(card.global_position.y - ws.global_position.y + card.size.y <= 340.0,
 		"the palette never draws outside its host")
+
+# ── Saved commands ─────────────────────────────────────────────────────
+
+func _seed_saved() -> void:
+	SavedCommandStore.add("Build", "cargo build --workspace", false)
+	SavedCommandStore.add("Deploy", "make deploy", true)
+
+## How many times `needle` appears in a pane's drained grid.
+func _count(body: Control, needle: String) -> int:
+	return str(body._terminal.get_plain_text(4000)).count(needle)
+
+## Poll the grid until `needle` appears `at_least` times.
+func _wait_for_count(body: Control, needle: String, at_least: int,
+		timeout_ms := 20000) -> int:
+	var deadline := Time.get_ticks_msec() + timeout_ms
+	while Time.get_ticks_msec() < deadline:
+		var n := _count(body, needle)
+		if n >= at_least:
+			return n
+		await get_tree().create_timer(0.05).timeout
+	return _count(body, needle)
+
+func test_saved_commands_list_under_one_heading_after_the_actions():
+	var ws = await _make_workspace()
+	_seed_saved()
+	ws._toggle_palette()
+	var rows := _rows(ws)
+	var headings := []
+	for child in rows:
+		if child.name == CommandPalette.SECTION_LABEL_NAME:
+			headings.append(child)
+	assert_eq(headings.size(), 1, "one heading, not one per row")
+	# The heading is an inset box holding the label, so the label is a child.
+	var heading_label := (headings[0] as Node).get_child(0) as Label
+	assert_not_null(heading_label, "the heading carries its text")
+	assert_eq(heading_label.text, PaletteModel.SAVED_SECTION)
+	var last_action := rows.find(_row(ws, "load"))
+	assert_gt(rows.find(headings[0]), last_action,
+		"the section follows the whole fixed list")
+	assert_eq(_commands(ws).slice(-2), ["saved: Build", "saved: Deploy"],
+		"store order under the heading")
+
+func test_a_saved_command_with_nowhere_to_go_is_refused_by_the_palette():
+	var ws = await _make_workspace()
+	_seed_saved()
+	# A code viewer is a pane, not a shell: the rows must say so instead of
+	# arming themselves and doing nothing when clicked.
+	ws._execute_command("new code viewer")
+	var reason: String = ws._saved_command_refusal()
+	assert_eq(reason, Workspace.SAVED_NOT_TERMINAL)
+	ws._toggle_palette()
+	var build := _row(ws, "saved: Build")
+	assert_true(build.disabled, "a refused row cannot be clicked")
+	assert_eq(build.tooltip_text, reason, "the tooltip is the dispatcher's own sentence")
+	assert_eq(build.accessibility_description, reason, "and a screen reader gets it too")
+	assert_false(_row(ws, "new terminal").disabled, "the rest of the palette still works")
+
+	# Enter cannot land on one either: the cursor only rests on enabled rows.
+	ws._palette._field.text_changed.emit("build")
+	assert_eq(_commands(ws), ["saved: Build"], "the query leaves only the refused row")
+	assert_eq(ws._palette._selected, -1, "nothing enabled is selected")
+	ws._palette._field.text_submitted.emit("build")
+	assert_true(ws._palette.visible, "Enter on a refused row does nothing, not even close")
+
+func test_an_insert_writes_the_text_and_a_run_writes_a_line():
+	var ws = await _make_workspace()
+	var pane := _RecordingPane.new()
+	ws._deliver_saved_command(pane, {"name": "Build", "command": "cargo build", "run": false})
+	assert_eq(pane.sent, ["cargo build"], "the exact characters, nothing appended")
+	assert_eq(pane.sent_lines, [], "an insert does not press Enter")
+	ws._deliver_saved_command(pane, {"name": "Test", "command": "cargo test", "run": true})
+	assert_eq(pane.sent_lines, ["cargo test"], "run sends the line, which carries the Enter")
+	assert_eq(pane.sent, ["cargo build"], "and never sends the text twice")
+	assert_eq(pane.snaps, 2, "the pane comes back to the prompt either way")
+	pane.free()
+
+## The real shell is the proof the recording pane cannot give: an insert leaves
+## the command at the prompt unexecuted, a run executes it. Each half is judged
+## by a file the command would create, not by an occurrence count: the shell
+## redraws a pending line (a resize makes it redraw in place or again), so the
+## echo can appear any number of times and is only useful as "it arrived".
+func test_insert_and_run_differ_through_a_real_shell():
+	if ShellFixtures.is_windows():
+		pending("a POSIX shell is the harness here; the recording pane proves the bytes on Windows")
+		return
+	var ws = await _make_workspace()
+	var root := BasePersistenceManager.user_root()
+	var insert_probe := root.path_join("insert-probe.txt")
+	var run_probe := root.path_join("run-probe.txt")
+	for path in [insert_probe, run_probe]:
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(path)
+
+	ws._execute_command("new terminal")
+	var insert_pane: Control = ws._tm.last_body
+	assert_not_null(insert_pane, "the spawned terminal is the active pane")
+	SavedCommandStore.add("Insert", "touch '%s' # MARK_INSERT" % insert_probe, false)
+	ws._execute_command("saved: Insert")
+	assert_gt(await _wait_for_count(insert_pane, "MARK_INSERT", 1), 0,
+		"the inserted text reaches the shell's line")
+	await get_tree().create_timer(0.5).timeout
+	assert_false(FileAccess.file_exists(insert_probe),
+		"nothing pressed Enter, so the command did not run")
+
+	# A second pane for the run half: the first prompt still holds the insert.
+	ws._execute_command("new terminal")
+	var run_pane: Control = ws._tm.last_body
+	assert_ne(run_pane, insert_pane, "a second terminal is the active pane")
+	SavedCommandStore.add("Run", "touch '%s' # MARK_RUN" % run_probe, true)
+	ws._execute_command("saved: Run")
+	assert_true(await _wait_for_file(run_probe),
+		"a run executes: the shell created the file")
+	assert_eq(_count(insert_pane, "MARK_RUN"), 0,
+		"the other pane was never written to")
+	if FileAccess.file_exists(run_probe):
+		DirAccess.remove_absolute(run_probe)
+
+## Poll for a path the child shell would create.
+func _wait_for_file(path: String, timeout_ms := 20000) -> bool:
+	var deadline := Time.get_ticks_msec() + timeout_ms
+	while Time.get_ticks_msec() < deadline:
+		if FileAccess.file_exists(path):
+			return true
+		await get_tree().create_timer(0.05).timeout
+	return FileAccess.file_exists(path)
+
+func test_a_command_deleted_from_the_store_writes_nothing():
+	var ws = await _make_workspace()
+	var pane := _RecordingPane.new()
+	ws._tm.last_body = pane
+	SavedCommandStore.add("Gone", "echo NOPE", false)
+	SavedCommandStore.remove(0)
+	ws._execute_command("saved: Gone")
+	assert_eq(pane.sent, [], "an unknown name is not guessed at")
+	assert_eq(pane.sent_lines, [])
+	pane.free()
+
+func test_the_save_command_entry_opens_the_commands_tab_with_the_form():
+	var ws = await _make_workspace()
+	ws._execute_command("save command")
+	var panel: SettingsPanel = ws._settings_panel
+	assert_not_null(panel, "the palette command builds the settings panel")
+	assert_true(panel.visible, "and shows it")
+	assert_eq(panel._tabs.get_tab_title(panel._tabs.current_tab), "Commands",
+		"it lands on the Commands tab, not the first one")
+	var dialogs := []
+	for child in panel.get_children():
+		if child is AcceptDialog:
+			dialogs.append(child)
+	assert_eq(dialogs.size(), 1, "the add form is already open")
+	assert_true((dialogs[0] as AcceptDialog).visible)

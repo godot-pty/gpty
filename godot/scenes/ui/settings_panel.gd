@@ -19,6 +19,15 @@ var _color_rows: Array[Dictionary] = []
 ## How the row reads the store size. Overridable so a test can pin a number:
 ## the real store grows while the suite runs (every pane has a writer thread).
 var _history_stats_provider := Callable()
+## The tab bar and the Commands tab, kept so `open_commands()` can land on the
+## right one whatever order the tabs are built in.
+var _tabs: TabContainer = null
+var _command_tab: VBoxContainer = null
+var _command_list: ItemList = null
+var _command_empty: Label = null
+## The Commands tab's row buttons by role ("add", "edit", "delete", "up",
+## "down"), so `_sync_command_buttons` enables them by what the selection is.
+var _command_actions := {}
 
 func _init(workspace: Control):
 	_workspace = workspace
@@ -34,6 +43,9 @@ func _notification(what: int):
 	if what == NOTIFICATION_VISIBILITY_CHANGED:
 		_refresh_history_size()
 		_refresh_ui_scale_hint()
+		# The list outlives a visit: a command saved from the palette while the
+		# panel was closed must be there on the next open.
+		_refresh_command_list()
 	elif what == NOTIFICATION_RESIZED:
 		# The window (and with it the layout space) changed, so the scale it can
 		# show may have moved while the panel is open.
@@ -45,7 +57,7 @@ func _build_ui():
 	cc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	var bg = Panel.new()
-	# Wide enough that all six tabs fit the TabContainer without clipping.
+	# Wide enough that all seven tabs fit the TabContainer without clipping.
 	# When tabs overflow, Godot hides trailing tabs behind a dropdown; a
 	# clipped tab only becomes visible in the bar after being clicked,
 	# stretching the tab bar while the panel keeps its old width (mangled
@@ -72,6 +84,7 @@ func _build_ui():
 	var tabs = TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(tabs)
+	_tabs = tabs
 
 	# Tab 1: System
 	var t_sys = _create_tab(tabs, "System")
@@ -181,7 +194,12 @@ func _build_ui():
 	var t_con = _create_tab(tabs, "Concepts")
 	_add_concept_section(t_con)
 
-	# Tab 6: About
+	# Tab 6: Commands — before About, so the shipped tabs keep their positions
+	var t_cmd = _create_tab(tabs, "Commands")
+	_command_tab = t_cmd
+	_add_command_section(t_cmd)
+
+	# Tab 7: About
 	var t_about = _create_tab(tabs, "About")
 	_add_about_section(t_about)
 
@@ -986,3 +1004,197 @@ func _delete_concept(idx: int):
 		kept.append({"name": concept_name, "enabled": false})
 	ConceptManager.save_concepts(kept)
 	_refresh_concept_list()
+
+# ── Commands ───────────────────────────────────────────────────────────
+
+## The palette's "Save Command…" lands here: the Commands tab, and, when asked,
+## the add form already open so the next thing typed is the command itself.
+func open_commands(add_now := false) -> void:
+	open()
+	if _tabs != null and _command_tab != null:
+		_tabs.current_tab = _tabs.get_tab_idx_from_control(_tab_control(_command_tab))
+	_refresh_command_list()
+	if add_now:
+		_show_command_dialog(-1)
+
+## The direct child `TabContainer` indexes for a tab: `_create_tab` hands back
+## the VBox *inside* the tab's ScrollContainer, and `get_tab_idx_from_control`
+## answers only for a direct child (measured: it returns -1 and reports the
+## parent mismatch).
+func _tab_control(body: Control) -> Control:
+	var node := body
+	while node != null and node.get_parent() != _tabs:
+		node = node.get_parent()
+	return node
+
+## Saved commands are the user's own list, so this tab is where they are
+## authored and the palette only lists what is stored. There is deliberately no
+## "reset tab to defaults" here: it would delete the one thing the tab holds.
+func _add_command_section(v: VBoxContainer) -> void:
+	var hint := Label.new()
+	hint.text = "Saved commands appear in the command palette (Ctrl+Shift+P). " \
+		+ "Choosing one types it into the active terminal; Run also presses Enter."
+	hint.theme_type_variation = UiTheme.MUTED_LABEL
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.add_theme_font_size_override("font_size", UiTokens.FS_SMALL)
+	v.add_child(hint)
+
+	_command_list = ItemList.new()
+	_command_list.name = "CommandList"
+	_command_list.custom_minimum_size = Vector2(0, 140)
+	_command_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_command_list.item_selected.connect(func(_i: int): _sync_command_buttons())
+	_command_list.item_activated.connect(func(_i: int): _edit_selected_command())
+	v.add_child(_command_list)
+
+	_command_empty = Label.new()
+	_command_empty.name = "CommandEmpty"
+	_command_empty.text = "No saved commands yet. Add\u2026 saves one here, and it appears in the palette."
+	_command_empty.theme_type_variation = UiTheme.MUTED_LABEL
+	_command_empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(_command_empty)
+
+	var row := HBoxContainer.new()
+	v.add_child(row)
+
+	_command_actions["add"] = _command_button(row, "Add\u2026", "Append a command",
+		func(): _show_command_dialog(-1))
+	_command_actions["edit"] = _command_button(row, "Edit\u2026", "Edit the selected command",
+		_edit_selected_command)
+	var del_btn := _command_button(row, "", "Delete the selected command",
+		_delete_selected_command)
+	Icons.icon_button(del_btn, Icons.DELETE, "Delete the selected command")
+	_command_actions["delete"] = del_btn
+	_command_actions["up"] = _command_button(row, "Up", "Move the selected command up",
+		func(): _move_selected_command(-1))
+	_command_actions["down"] = _command_button(row, "Down", "Move the selected command down",
+		func(): _move_selected_command(1))
+	_refresh_command_list()
+
+## One button in the Commands tab's row. `Add…` and `Edit…` take the generous
+## share of the width and the icon/`Up`/`Down` buttons keep their natural size,
+## so a long list never widens the card.
+func _command_button(row: HBoxContainer, text: String, tooltip: String,
+		pressed: Callable) -> Button:
+	var btn := Button.new()
+	btn.text = text
+	btn.tooltip_text = tooltip
+	if text != "":
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn.pressed.connect(pressed)
+	row.add_child(btn)
+	return btn
+
+## Rebuild the list from the store. The selection survives an edit (the row keeps
+## its index) and lands on the neighbour after a delete.
+func _refresh_command_list() -> void:
+	if _command_list == null:
+		return
+	var selected := _command_list.get_selected_items()
+	var keep := int(selected[0]) if not selected.is_empty() else -1
+	_command_list.clear()
+	var entries := SavedCommandStore.all()
+	for entry in entries:
+		var idx := _command_list.add_item("%s  (%s)" % [
+			str(entry.get("name", "")),
+			"Run" if bool(entry.get("run", false)) else "Insert",
+		])
+		# The command itself is the row's tooltip: the list is a name index, and
+		# the text nobody can read at a glance is what a tooltip is for.
+		_command_list.set_item_tooltip(idx, str(entry.get("command", "")))
+	_command_list.visible = not entries.is_empty()
+	_command_empty.visible = entries.is_empty()
+	if keep >= 0 and keep < _command_list.item_count:
+		_command_list.select(keep)
+	_sync_command_buttons()
+
+func _sync_command_buttons() -> void:
+	if _command_list == null or _command_actions.is_empty():
+		return
+	var selected := _command_list.get_selected_items()
+	var index := int(selected[0]) if not selected.is_empty() else -1
+	var last := _command_list.item_count - 1
+	(_command_actions["edit"] as Button).disabled = index < 0
+	(_command_actions["delete"] as Button).disabled = index < 0
+	(_command_actions["up"] as Button).disabled = index <= 0
+	(_command_actions["down"] as Button).disabled = index < 0 or index >= last
+
+## The add/edit form. `index` is -1 for a new command.
+##
+## The dialog does not close on OK by itself: a refusal (a duplicate name, an
+## empty field) keeps the dialog and the text, and only a stored entry closes
+## it. `run` starts off for a new command — the first encounter with a saved
+## command is an insert the user can read before running.
+func _show_command_dialog(index: int) -> void:
+	var entries := SavedCommandStore.all()
+	var editing := index >= 0 and index < entries.size()
+	var existing: Dictionary = entries[index] if editing else {}
+	var dlg := AppDialog.confirm(self, "Edit Command" if editing else "Add Command",
+		"Save", "Cancel")
+	# 90% of the settings menu width, the concept dialog's size: the command
+	# field has to hold a real command line, not a word.
+	dlg.min_size = Vector2i(int(_menu_width * 0.9), 0)
+	dlg.dialog_hide_on_ok = false
+
+	var v = VBoxContainer.new()
+	AppDialog.content(dlg).add_child(v)
+
+	var name_le = LineEdit.new()
+	name_le.name = "CommandName"
+	name_le.placeholder_text = "Name (e.g. Build)"
+	name_le.text = str(existing.get("name", ""))
+	var command_le = LineEdit.new()
+	command_le.name = "CommandText"
+	command_le.placeholder_text = "cargo build --workspace"
+	command_le.text = str(existing.get("command", ""))
+	var run_cb = CheckBox.new()
+	run_cb.name = "CommandRun"
+	run_cb.text = "Press Enter after inserting (run it)"
+	run_cb.button_pressed = bool(existing.get("run", false))
+
+	v.add_child(_lbl("Name:"))
+	v.add_child(name_le)
+	v.add_child(_lbl("Command:"))
+	v.add_child(command_le)
+	v.add_child(run_cb)
+
+	dlg.confirmed.connect(func():
+		var problem := ""
+		if editing:
+			problem = SavedCommandStore.update(index, name_le.text, command_le.text,
+				run_cb.button_pressed)
+		else:
+			problem = SavedCommandStore.add(name_le.text, command_le.text,
+				run_cb.button_pressed)
+		if problem != "":
+			ToastManager.warn(problem)
+			return
+		_refresh_command_list()
+		dlg.queue_free()
+	)
+	# Cancelling frees it too: a hidden dialog left in the tree would be a
+	# second "Add Command" the next time the form opens.
+	dlg.canceled.connect(func(): dlg.queue_free())
+	dlg.popup_centered()
+
+func _edit_selected_command() -> void:
+	var selected := _command_list.get_selected_items()
+	if selected.is_empty():
+		return
+	_show_command_dialog(int(selected[0]))
+
+func _delete_selected_command() -> void:
+	var selected := _command_list.get_selected_items()
+	if selected.is_empty():
+		return
+	SavedCommandStore.remove(int(selected[0]))
+	_refresh_command_list()
+
+func _move_selected_command(delta: int) -> void:
+	var selected := _command_list.get_selected_items()
+	if selected.is_empty():
+		return
+	var moved := SavedCommandStore.move(int(selected[0]), delta)
+	_refresh_command_list()
+	_command_list.select(moved)
+	_sync_command_buttons()

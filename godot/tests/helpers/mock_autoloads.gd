@@ -33,6 +33,7 @@ static func setup():
 	_override_script("PaneInspectorStore", _MockPaneInspectorStore)
 	_override_script("TrustedStore", _MockTrustedStore)
 	_override_script("LinkWeightsStore", _MockLinkWeightsStore)
+	_override_script("SavedCommandStore", _MockSavedCommandStore)
 	_override_script("VaultRegistry", _MockVaultRegistry)
 
 	# For node-only autoloads, just ensure they're valid nodes
@@ -47,6 +48,7 @@ static func teardown():
 	_restore_script("PaneInspectorStore")
 	_restore_script("TrustedStore")
 	_restore_script("LinkWeightsStore")
+	_restore_script("SavedCommandStore")
 	_restore_script("VaultRegistry")
 	_store.clear()
 	_original_scripts.clear()
@@ -146,6 +148,18 @@ class _MockLinkWeightsStore extends "res://scenes/autoloads/link_weights_store.g
 		MockAutoloads.set_store(path, data)
 	func _on_init():
 		reload()
+## The saved-command store loads through the mocked backend, so a test can
+## seed `MockAutoloads.set_store(SavedCommandStore.COMMANDS_FILE, ...)` and then
+## call `SavedCommandStore.reload()` to see the seeded file.
+class _MockSavedCommandStore extends "res://scenes/autoloads/saved_command_store.gd":
+	func _read_file(path: String) -> Dictionary:
+		return MockAutoloads.get_store(path)
+	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.set_store(path, data)
+	func _on_init():
+		reload()
+
+
 class _MockVaultRegistry extends "res://scenes/autoloads/vault_registry.gd":
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)

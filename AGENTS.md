@@ -134,6 +134,7 @@ gpty/
         │   ├── concept_manager.gd
         │   ├── workspace_store.gd  # Named workspace (tab set) persistence
         │   ├── pane_env_store.gd   # User-owned per-pane env, keyed by attachment_id
+        │   ├── saved_command_store.gd # User-owned saved commands (name / one line / run flag), in palette order
         │   ├── pane_inspector_store.gd # User-owned Inspector aim (prompt + switches), keyed by attachment_id
         │   ├── trusted_store.gd    # Workspace Trust consent memory (builtins + plugins)
         │   ├── link_weights_store.gd # User-owned declared link weights (display-only)

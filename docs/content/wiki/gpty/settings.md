@@ -1,6 +1,6 @@
 # Settings
 
-Settings is the global panel for how gPTY looks and behaves. It has six tabs — System, Terminal, Appearance, Reasoning, Concepts, and About — and writes to `user://settings.json`.
+Settings is the global panel for how gPTY looks and behaves. It has seven tabs — System, Terminal, Appearance, Reasoning, Concepts, Commands, and About — and writes to `user://settings.json`.
 
 ## Opening, applying, resetting
 
@@ -72,6 +72,12 @@ These bound the Reasoning pane's retained session: how many turns it keeps and h
 ## Concepts
 
 This tab lists the concept rules that are active for the terminal engine, with a button to open the visual graph editor and a button to add a rule. Each row can be enabled or disabled and deleted. Concepts are covered in [[concepts]]; nothing here executes commands — rules capture and route display content.
+
+## Commands
+
+Your own saved commands: a name, one line of shell text, and whether choosing it should also press Enter. They are listed in the command palette's own **Saved commands** section (`Ctrl+Shift+P`), and stored in `user://commands.json` — at most 200 entries, a 64-character name and a 1024-character command, with control characters stripped so an entry is always one line. `Run` is off for a new command, so the first time you use one it is typed at the prompt, unexecuted, for you to read before running it. `Add…`, `Edit…`, `Delete` and `Up`/`Down` manage the list; the order is the palette's order.
+
+Choosing a saved command types it into the **active terminal pane** and nothing else. When the active pane is not a terminal (a code viewer, a note, a wiki page) the palette lists the commands greyed out with the reason as their tooltip, and refuses to send rather than picking another pane. Nothing expands: the text goes to the shell exactly as written, so `$HOME` and `$(…)` are the shell's business, not gPTY's. Saved commands are GUI-local — there is no IPC method, CLI verb or MCP tool for them, a plugin cannot supply them, and they never run at spawn (a pane's startup command is the layout/profile `launch` key, covered in [[layout]]).
 
 ## About
 

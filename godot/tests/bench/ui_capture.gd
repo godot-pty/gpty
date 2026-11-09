@@ -64,6 +64,12 @@ extends SceneTree
 ##     clamps windows cannot change the image.
 
 const DEFAULT_SIZE := Vector2i(1920, 1080)
+## Two saved commands, one insert and one run. Shared by the two states that
+## show this feature's surfaces: the Commands tab and the palette section.
+const COMMAND_FIXTURE := [
+	{"name": "Build", "command": "cargo build --workspace", "run": false},
+	{"name": "Test", "command": "cargo test --workspace", "run": true},
+]
 ## Pane count before the state's interaction runs. 0 leaves the workspace
 ## store empty, so the app's own first-launch path creates the first terminal.
 const STATES := {
@@ -143,6 +149,18 @@ const STATES := {
 	"wiki-vault": {"size": DEFAULT_SIZE, "tiles": [WIKI_TILE]},
 	"wiki-graph": {"size": DEFAULT_SIZE, "tiles": [WIKI_TILE], "open": "wiki-graph"},
 	"concept-editor": {"size": DEFAULT_SIZE, "panes": 1, "open": "concept-editor"},
+	# The Commands tab with two seeded commands: the list, the Insert/Run hint
+	# each row carries, and the seven-tab bar that has to hold it. The entries
+	# are written through the store's own API, so the image cannot show a state
+	# the app cannot reach.
+	"commands": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Commands",
+		"commands": COMMAND_FIXTURE},
+	# The same commands in the palette, filtered to their own words: the section
+	# heading, the Insert/Run hints and the row order are the half of this
+	# feature the Settings tab cannot show, and the unfiltered list would put
+	# them below the fold.
+	"palette-commands": {"size": DEFAULT_SIZE, "panes": 1, "open": "palette",
+		"query": "saved", "commands": COMMAND_FIXTURE},
 	"plugin-review": {"size": DEFAULT_SIZE, "panes": 1, "open": "plugin-review"},
 	# The Save Profile form, whose command fields are the measured clipping
 	# defect (69 px against `/bin/bash`'s 75). Two panes, so the form shows
@@ -323,6 +341,13 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 ## so a state definition that drifts from the schema fails visibly instead of
 ## silently spawning something else.
 func _seed_workspace(state: Dictionary) -> void:
+	if state.has("commands"):
+		# The real store API, in the order the state lists: the tab, the palette
+		# and a later recapture all read the same file.
+		var commands: Node = root.get_node("SavedCommandStore")
+		for entry in state["commands"]:
+			commands.add(str(entry.get("name", "")), str(entry.get("command", "")),
+				bool(entry.get("run", false)))
 	var tiles: Array = []
 	if state.has("tiles"):
 		# A surface state names its exact tiles: the pane type and the settings
@@ -453,6 +478,14 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			if _workspace._palette == null or not _workspace._palette.visible:
 				_fail("Ctrl+Shift+P did not open the command palette")
 				return false
+			# `"query": "<text>"` filters the list the way typing does, so a state
+			# can show a section at the bottom of a long list without capturing
+			# the list's top instead.
+			if state.has("query"):
+				var field: LineEdit = _workspace._palette._field
+				field.text = str(state["query"])
+				field.text_changed.emit(field.text)
+				await _wait_frames(3)
 		"wiki-graph":
 			var wiki: Control = _workspace._tm.tiles[0].wrapper
 			var list: ItemList = wiki.find_child("NoteList", true, false) as ItemList

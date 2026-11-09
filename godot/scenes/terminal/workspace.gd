@@ -32,6 +32,13 @@ const MAX_WORKSPACES := 8
 ## spend a machine's processes and memory without end.
 const MAX_LIVE_PANES := 96
 
+## The three reasons a saved command has nowhere to go. One wording each: the
+## palette shows the refused rows' tooltip from these same strings, so a hint
+## and the toast that follows it cannot disagree.
+const SAVED_NO_PANE := "Saved commands go to a terminal pane, and no pane is active"
+const SAVED_NOT_TERMINAL := "Saved commands go to the active terminal pane, and the active pane is not a terminal"
+const SAVED_MINIMIZED := "Saved commands go to the active terminal pane, and it is minimized"
+
 
 var _sidebar: Sidebar
 var _sidebar_bg: ColorRect
@@ -1785,9 +1792,15 @@ func _toggle_palette():
 	# Input picking uses reverse tree order (z_index is rendering-only);
 	# keep the palette topmost over workspaces added after first use.
 	move_child(_palette, -1)
+	# The user's own commands, and whether they have anywhere to go, are read
+	# here and not by the palette: `CommandPalette` reaches no store.
+	_palette.set_saved_commands(SavedCommandStore.all(), _saved_command_refusal())
 	_palette.open()
 
 func _execute_command(cmd: String):
+	if cmd.begins_with(PaletteModel.SAVED_PREFIX):
+		_run_saved_command(cmd.substr(PaletteModel.SAVED_PREFIX.length()))
+		return
 	if cmd.begins_with("new "):
 		var type_label = cmd.substr(4).strip_edges()
 		for key in PaneTypes.ALL:
@@ -1800,9 +1813,55 @@ func _execute_command(cmd: String):
 	match cmd:
 		"close active": _kill_last()
 		"settings": _toggle_settings()
+		"save command": _open_commands_settings()
 		"close all": _reset()
 		"save": _save()
 		"load": _restore()
+
+## A saved command (`user://commands.json`) is typed into the ACTIVE terminal
+## pane and nowhere else: the text is the user's own words for the shell they
+## are looking at, so it is never routed to another pane and never expanded.
+## The palette asks `_saved_command_refusal` before it opens and the dispatcher
+## asks again before it writes — one refusal, two readers.
+func _run_saved_command(name: String) -> void:
+	var entry := SavedCommandStore.find(name)
+	if entry.is_empty():
+		ToastManager.warn("The saved command '%s' no longer exists" % name)
+		return
+	var body := _saved_command_target()
+	if body == null:
+		ToastManager.warn(_saved_command_refusal())
+		return
+	_deliver_saved_command(body, entry)
+
+## `run` writes a line (Enter included); an insert writes the bytes only, so
+## the command is at the prompt, unexecuted, for the user to read and edit.
+func _deliver_saved_command(body: TerminalPane, entry: Dictionary) -> void:
+	var text := str(entry.get("command", ""))
+	if bool(entry.get("run", false)):
+		body._send_line_to_term(text)
+	else:
+		body._send_to_term(text)
+	# The command is about to appear at the prompt: a scrolled-back pane would
+	# hide the only feedback an insert gets.
+	body._snap_to_bottom()
+
+## The pane a saved command may be written to, or null when there is none.
+func _saved_command_target() -> TerminalPane:
+	if _saved_command_refusal() != "":
+		return null
+	return _tm.last_body as TerminalPane
+
+## Why no pane can take a saved command right now, or "".
+func _saved_command_refusal() -> String:
+	var body: Control = _tm.last_body
+	if body == null or not is_instance_valid(body):
+		return SAVED_NO_PANE
+	if not (body is TerminalPane):
+		return SAVED_NOT_TERMINAL
+	if not body.is_visible_in_tree():
+		return SAVED_MINIMIZED
+	return ""
 
 # ═══════════════════════════════════════════════════════════════════════
 # Sidebar
@@ -2385,7 +2444,10 @@ func _resolve_pane_target(target: String) -> Dictionary:
 		],
 	}
 
-func _toggle_settings():
+## The global settings panel, created on first use. Extracted from
+## `_toggle_settings` so a palette command can open the panel on one of its
+## tabs instead of toggling it blind.
+func _ensure_settings_panel() -> SettingsPanel:
 	if _settings_panel == null:
 		_settings_panel = SettingsPanel.new(self)
 		_settings_panel.name = "SettingsPanel"
@@ -2396,18 +2458,33 @@ func _toggle_settings():
 		_settings_panel.request_graph_editor.connect(_open_concept_graph)
 		_settings_panel.keyboard_released.connect(
 			_on_overlay_keyboard_released.bind(_settings_panel))
-	if _settings_panel.visible:
-		_settings_panel.close()
+	return _settings_panel
+
+func _toggle_settings():
+	var settings := _ensure_settings_panel()
+	if settings.visible:
+		settings.close()
 		return
-	# Opening global settings closes the pane settings overlay so the
-	# two overlays never stack.
+	_raise_settings_panel(settings)
+	settings.open()
+
+## The palette's "Save Command…": the settings panel on its Commands tab with
+## the add form already open. Opening, never toggling — the user asked for that
+## tab, so a second palette run must not close what it just opened.
+func _open_commands_settings() -> void:
+	var settings := _ensure_settings_panel()
+	_raise_settings_panel(settings)
+	settings.open_commands(true)
+
+## Put the settings panel in front and close the pane settings overlay, so the
+## two overlays never stack. Input picking uses reverse tree order (z_index is
+## rendering-only), so the panel has to stay topmost even when workspaces were
+## added after its first open.
+func _raise_settings_panel(settings: SettingsPanel) -> void:
 	var panel: Control = _tm._pane_settings_panel
 	if panel and panel.visible:
 		panel.close()
-	# Input picking uses reverse tree order (z_index is rendering-only);
-	# stay topmost even when workspaces were added after first open.
-	move_child(_settings_panel, -1)
-	_settings_panel.open()
+	move_child(settings, -1)
 
 ## Open the visual concept editor over the settings panel it was launched
 ## from. Created lazily; `open()` reloads the canvas, so an edit made in the

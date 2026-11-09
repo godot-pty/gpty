@@ -479,3 +479,155 @@ func test_appearance_reset_returns_to_dark():
 	assert_eq(UiPalette.active().SURFACE, UiPalette.dark().SURFACE)
 	assert_eq(SettingsManager.cfg_wrapper_bg, UiPalette.active().BG,
 		"the colour rows reset to the palette the reset just chose")
+
+# ── Commands tab ───────────────────────────────────────────────────────
+
+func _command_list() -> ItemList:
+	return _panel.find_child("CommandList", true, false)
+
+func _command_button(role: String) -> Button:
+	return _panel._command_actions.get(role)
+
+func _seed_commands() -> void:
+	SavedCommandStore.add("Build", "cargo build", false)
+	SavedCommandStore.add("Deploy", "make deploy", true)
+	_panel._refresh_command_list()
+
+func test_the_commands_tab_sits_before_about():
+	var titles := []
+	for i in _panel._tabs.get_tab_count():
+		titles.append(_panel._tabs.get_tab_title(i))
+	assert_eq(titles, ["System", "Terminal", "Appearance", "Reasoning", "Concepts",
+		"Commands", "About"], "the shipped tabs keep their positions")
+
+func test_the_commands_tab_lists_the_store_in_order():
+	_seed_commands()
+	var list := _command_list()
+	assert_not_null(list, "the Commands tab carries the list")
+	assert_eq(_tab_of(list), "Commands")
+	assert_eq(list.item_count, 2)
+	assert_eq(list.get_item_text(0), "Build  (Insert)", "a row says how it behaves")
+	assert_eq(list.get_item_text(1), "Deploy  (Run)")
+	assert_eq(list.get_item_tooltip(0), "cargo build", "the command itself is the tooltip")
+
+func test_the_empty_state_says_how_to_start():
+	var list := _command_list()
+	assert_false(list.visible, "an empty store hides the list")
+	var empty: Label = _panel.find_child("CommandEmpty", true, false)
+	assert_true(empty.visible)
+	assert_string_contains(empty.text, "Add")
+
+func test_add_stores_the_typed_command_with_run_off():
+	_panel._show_command_dialog(-1)
+	var dlg := _find_accept_dialog(_panel)
+	assert_not_null(dlg, "the form opens")
+	var name_le: LineEdit = dlg.find_child("CommandName", true, false)
+	var command_le: LineEdit = dlg.find_child("CommandText", true, false)
+	var run_cb: CheckBox = dlg.find_child("CommandRun", true, false)
+	assert_false(run_cb.button_pressed, "a new command inserts; pressing Enter is opt-in")
+	name_le.text = "Build"
+	command_le.text = "cargo build"
+	dlg.confirmed.emit()
+	assert_eq(SavedCommandStore.all(),
+		[{"name": "Build", "command": "cargo build", "run": false}])
+	assert_eq(_command_list().item_count, 1)
+	await wait_frames(1)
+	assert_false(is_instance_valid(dlg), "a stored entry closes the form")
+
+## A refusal must not cost the text the user just typed: the dialog is built
+## with `dialog_hide_on_ok = false` so only a stored entry closes it.
+func test_a_duplicate_name_keeps_the_form_and_the_text():
+	_seed_commands()
+	_panel._show_command_dialog(-1)
+	var dlg := _find_accept_dialog(_panel)
+	assert_false(dlg.dialog_hide_on_ok, "a refusal has to be able to keep the dialog")
+	var name_le: LineEdit = dlg.find_child("CommandName", true, false)
+	name_le.text = "build"
+	dlg.confirmed.emit()
+	await wait_frames(1)
+	assert_true(is_instance_valid(dlg), "the form stays open after a refusal")
+	assert_eq(name_le.text, "build", "what the user typed survives")
+	assert_eq(SavedCommandStore.all().size(), 2, "the store is unchanged")
+	dlg.queue_free()
+
+func test_edit_rewrites_the_selected_entry_in_place():
+	_seed_commands()
+	_panel._command_list.select(1)
+	_panel._edit_selected_command()
+	var dlg := _find_accept_dialog(_panel)
+	assert_not_null(dlg, "Edit opens the form on the selected entry")
+	assert_eq((dlg.find_child("CommandName", true, false) as LineEdit).text, "Deploy",
+		"the form starts from the entry")
+	(dlg.find_child("CommandText", true, false) as LineEdit).text = "make deploy PROD=1"
+	(dlg.find_child("CommandRun", true, false) as CheckBox).button_pressed = false
+	dlg.confirmed.emit()
+	assert_eq(SavedCommandStore.all()[1],
+		{"name": "Deploy", "command": "make deploy PROD=1", "run": false})
+	assert_eq(SavedCommandStore.all()[0]["name"], "Build", "the other entry is untouched")
+
+func test_delete_and_reorder_follow_the_store():
+	_seed_commands()
+	_panel._command_list.select(0)
+	_panel._move_selected_command(1)
+	assert_eq(SavedCommandStore.all().map(func(e): return e["name"]), ["Deploy", "Build"])
+	assert_eq(Array(_panel._command_list.get_selected_items()), [1],
+		"the moved row stays selected")
+	_panel._delete_selected_command()
+	assert_eq(SavedCommandStore.all().map(func(e): return e["name"]), ["Deploy"])
+
+func test_the_row_buttons_follow_the_selection():
+	_seed_commands()
+	var list := _command_list()
+	assert_eq(Array(list.get_selected_items()), [], "a fresh list selects nothing")
+	_panel._sync_command_buttons()
+	assert_true(_command_button("edit").disabled, "nothing selected, nothing to edit")
+	assert_true(_command_button("delete").disabled)
+	assert_false(_command_button("add").disabled, "Add works with nothing selected")
+	list.select(0)
+	_panel._sync_command_buttons()
+	assert_false(_command_button("edit").disabled)
+	assert_true(_command_button("up").disabled, "the first row cannot move up")
+	assert_false(_command_button("down").disabled)
+	list.select(1)
+	_panel._sync_command_buttons()
+	assert_false(_command_button("up").disabled)
+	assert_true(_command_button("down").disabled, "the last row cannot move down")
+
+func test_open_commands_lands_on_the_tab_and_can_open_the_form():
+	_panel.open_commands()
+	assert_true(_panel.visible)
+	assert_eq(_panel._tabs.get_tab_title(_panel._tabs.current_tab), "Commands")
+	assert_null(_find_accept_dialog(_panel), "no form unless asked for")
+	_panel.open_commands(true)
+	assert_not_null(_find_accept_dialog(_panel), "add_now opens the form")
+
+## A seventh tab must stay on the bar. The engine does not widen the bar for
+## an overflow: it hides trailing tabs behind a dropdown, and then re-lays the
+## bar out on the first click, which mangles the card's measured 540 x 560.
+func test_all_seven_tabs_fit_the_card():
+	_pin_window(Vector2i(1920, 1080))
+	SettingsManager.cfg_ui_scale = 100
+	SettingsManager.apply_ui_scale()
+	_panel.theme = UiTheme.build()
+	_panel.open()
+	await wait_frames(2)
+	var tabs := _panel._tabs
+	assert_eq(tabs.get_tab_count(), 7)
+	var bar := tabs.get_tab_bar()
+	assert_gt(bar.size.x, 0.0, "the bar has been laid out")
+	# The rects are read as a running row: a tab the engine has hidden comes
+	# back with a zero-based rect (measured: tab 6 read 0..56 on a bar whose
+	# tabs ended at 464), so neither a per-tab end check nor a width sum alone
+	# proves the row fits - the positions have to be contiguous as well.
+	var edge := 0.0
+	var total := 0.0
+	for i in tabs.get_tab_count():
+		var rect := bar.get_tab_rect(i)
+		assert_almost_eq(rect.position.x, edge, 0.5,
+			"tab %d (%s) starts at %.1f px after the tabs before it end at %.1f: the engine has hidden it or started a new row"
+			% [i, tabs.get_tab_title(i), rect.position.x, edge])
+		edge = rect.end.x
+		total += rect.size.x
+	assert_true(total <= bar.size.x,
+		"the seven tabs need %.1f px of a %.1f px bar: the overflow would be hidden behind a dropdown"
+		% [total, bar.size.x])

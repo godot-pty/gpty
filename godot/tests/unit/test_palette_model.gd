@@ -77,3 +77,47 @@ func test_mutating_a_returned_entry_does_not_touch_the_model():
 	first[0]["label"] = "Mutated"
 	assert_eq(str(PaletteModel.entries()[0]["label"]), "New Terminal",
 		"a caller edits its own copy, never the const")
+
+# ── Saved commands ─────────────────────────────────────────────────────
+
+func _saved() -> Array:
+	return [
+		{"name": "Build", "command": "cargo build", "run": false},
+		{"name": "Deploy", "command": "make deploy", "run": true},
+	]
+
+func test_saved_entries_follow_the_actions_in_store_order():
+	var all := PaletteModel.entries(_saved())
+	assert_eq(all.size(), PaneTypes.ALL.size() + PaletteModel.ACTIONS.size() + 2)
+	var build: Dictionary = all[all.size() - 2]
+	var deploy: Dictionary = all[all.size() - 1]
+	assert_eq(build, {
+		"command": "saved: Build", "label": "Build", "glyph": "", "action": "",
+		"keywords": "saved command insert run", "variation": &"",
+		"section": "Saved commands", "hint": "Insert", "run": false,
+	})
+	assert_eq(deploy["hint"], "Run", "the hint is the entry's own run flag")
+	assert_true(bool(deploy["run"]))
+	assert_eq(build["command"], PaletteModel.SAVED_PREFIX + "Build",
+		"the dispatcher round-trips the exact name")
+
+func test_nothing_saved_is_the_untruncated_list():
+	assert_eq(PaletteModel.entries(), PaletteModel.entries([]),
+		"the store being empty must not change one row")
+	assert_eq(PaletteModel.commands(), PaletteModel.commands([]))
+	assert_eq(PaletteModel.filter(""), PaletteModel.entries())
+
+func test_a_bad_saved_item_costs_itself():
+	var all := PaletteModel.entries([{"name": "", "command": "ls"}, "junk",
+		{"command": "no name"}])
+	assert_eq(all.size(), PaletteModel.entries().size())
+
+func test_filtering_a_saved_command_by_name():
+	var hits := PaletteModel.filter("build", _saved())
+	assert_eq(_commands_of(hits), ["saved: Build"])
+	assert_eq(_commands_of(PaletteModel.filter("deploy", _saved())), ["saved: Deploy"])
+
+func test_a_saved_command_is_reachable_by_its_keywords():
+	var hits := PaletteModel.filter("insert", _saved())
+	assert_eq(_commands_of(hits), ["saved: Build", "saved: Deploy"],
+		"both entries say how they behave, and the words stay in model order")

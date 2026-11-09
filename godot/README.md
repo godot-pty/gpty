@@ -31,7 +31,7 @@ godot/
     │   └── Phosphor-Regular.ttf
     ├── scenes/
         ├── main.tscn            # Root scene (Workspace)
-        ├── autoloads/           # 14 singleton managers
+        ├── autoloads/           # 15 singleton managers
         │   ├── base_persistence_manager.gd  # Shared JSON I/O base
         │   ├── settings_manager.gd
         │   ├── profile_manager.gd
@@ -41,6 +41,7 @@ godot/
         │   ├── pane_inspector_store.gd # User-owned Inspector aim (prompt + switches), keyed by attachment_id
         │   ├── trusted_store.gd    # Workspace Trust consent memory (builtins + plugins)
         │   ├── link_weights_store.gd # User-owned declared link weights (display-only)
+        │   ├── saved_command_store.gd # User-owned saved commands (name / one line / run flag), in palette order
         │   ├── vault_registry.gd   # User-owned vault roots the socket's vault verbs may read
         │   ├── focus_manager.gd
         │   ├── toast_manager.gd
