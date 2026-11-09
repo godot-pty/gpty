@@ -201,7 +201,11 @@ These are load-bearing guards. Reports that require removing one of them should 
   prompt and its two switches are the same kind of user-owned state, in `user://pane_inspector.json`:
   the settings table refuses them from files, the pane settings UI is the only writer, and the pane
   reads its own record at attach - so a profile cannot aim an Inspector, while a prompt and switches
-  the user set survive a restart for the pane that carries that id.
+  the user set survive a restart for the pane that carries that id. Saved commands
+  (`user://commands.json`) are that class with no spawn reach at all: the Commands tab is their only
+  writer, choosing one types its text into the *active* terminal pane (Enter only when the entry's
+  `run` flag is set), no IPC method, CLI verb or plugin can add one, and nothing in a saved command
+  is expanded - it is the user's own words for the shell they are looking at.
 - **Workspace directories (v0.7.1)**: a workspace's working directory comes from
   `workspaces.json` and is handed to every terminal that workspace starts. A directory is not
   executable on its own, so a plain shell in a file-supplied directory restores without a prompt
