@@ -2904,8 +2904,8 @@ func _save_current_as_profile():
 			var s = ts[i].get("settings", {})
 			s["shell"] = shell_editors[i].text
 			if not ts[i].has("settings"): ts[i]["settings"] = s
-		ProfileManager.add_profile(profile_name, ts)
-		ToastManager.info("Profile '%s' saved" % profile_name)
+		var stored := ProfileManager.add_profile(profile_name, ts)
+		ToastManager.info("Profile '%s' saved" % stored)
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)

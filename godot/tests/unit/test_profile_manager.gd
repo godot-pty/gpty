@@ -277,3 +277,11 @@ func test_refresh_plugin_profiles_emits_profiles_changed():
 	watch_signals(ProfileManager)
 	_set_plugin_json(JSON.stringify([_installed("OMP")]))
 	assert_signal_emitted(ProfileManager, "profiles_changed")
+
+func test_add_profile_answers_the_name_the_store_kept():
+	assert_eq(ProfileManager.add_profile("Dev", []), "Dev")
+	assert_eq(ProfileManager.add_profile("Dev", []), "Dev (2)",
+		"a duplicate name is stored with a suffix, so the answer must name that row")
+	assert_eq(ProfileManager.add_profile("Dev", []), "Dev (3)")
+	assert_eq(ProfileManager.add_profile("", []), "",
+		"a request with no name stores nothing and answers no name")

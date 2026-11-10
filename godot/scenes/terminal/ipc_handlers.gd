@@ -473,8 +473,11 @@ static func handle(ws, method: String, params: Dictionary):
 				return bad_param("Profile name required")
 			if profile_name.length() > 128:
 				return bad_param("Profile name too long")
-			ProfileManager.add_profile(profile_name, ws._gather_tiles())
-			return {"success": true, "name": profile_name}
+			# The store is the authority on the name it kept (`add_profile`
+			# suffixes a duplicate), so the answer names the row a later
+			# `layoutLoad` resolves instead of the one the caller asked for.
+			var stored := ProfileManager.add_profile(profile_name, ws._gather_tiles())
+			return {"success": true, "name": stored}
 		"layoutLoad":
 			var profile_name = str(params.get("name", ""))
 			var profile := ProfileManager.find_profile(profile_name)
@@ -523,7 +526,11 @@ static func handle(ws, method: String, params: Dictionary):
 			var concept_name = str(params.get("name", ""))
 			if concept_name == "":
 				return bad_param("Concept name required")
-			ConceptManager.toggle_concept(concept_name)
+			# The toggle only knows the merged set; a name it does not hold is a
+			# bad parameter (an unknown enum member), and `toggle_concept`
+			# writes nothing for it.
+			if not ConceptManager.toggle_concept(concept_name):
+				return bad_param("Unknown concept: %s" % concept_name)
 			ConceptManager._push_to_rust()
 			return {"success": true, "name": concept_name}
 		_:

@@ -589,6 +589,25 @@ func test_layout_list_reports_the_profiles_the_store_holds():
 		"a saved profile must appear in layoutList"
 	)
 
+func test_layout_save_answers_the_name_the_store_kept():
+	# A save captures the active workspace, so empty it first: the two saves
+	# then differ in nothing but their name, and the answered profile loads
+	# without a trust prompt.
+	for pane in _ws._pane_bodies(_ws._active_workspace()):
+		_ws._kill_now(pane)
+	var first = WorkspaceIpcHandlers.handle(_ws, "layoutSave", {"name": "contract-dedupe"})
+	assert_true(first.get("success", false), "the first save must succeed")
+	assert_eq(str(first.get("name", "")), "contract-dedupe")
+	var second = WorkspaceIpcHandlers.handle(_ws, "layoutSave", {"name": "contract-dedupe"})
+	assert_true(second.get("success", false), "the second save must succeed too")
+	assert_eq(str(second.get("name", "")), "contract-dedupe (2)",
+		"a duplicate name is stored with a suffix, so the answer must name that row")
+	var listed = WorkspaceIpcHandlers.handle(_ws, "layoutList", {})
+	assert_true((listed.get("layouts", []) as Array).has("contract-dedupe (2)"),
+		"the answered name must be the one layoutList reports")
+	var loaded = WorkspaceIpcHandlers.handle(_ws, "layoutLoad", {"name": "contract-dedupe (2)"})
+	assert_true(loaded.get("success", false), "the answered name must load")
+
 func test_layout_load_refuses_an_untrusted_profile():
 	ProfileManager.add_profile("contract-untrusted", [
 		{
@@ -925,6 +944,7 @@ func test_every_refusal_arm_answers_the_code_its_kind_owns():
 		["layoutSave", {}, -32602, "Profile name required"],
 		["layoutSave", {"name": "x".repeat(129)}, -32602, "Profile name too long"],
 		["conceptToggle", {}, -32602, "Concept name required"],
+		["conceptToggle", {"name": "gpty-no-such-concept"}, -32602, "Unknown concept"],
 		["pluginsChanged", {"action": "nuke", "id": "ok-id"}, -32602, "Unknown plugin action"],
 		["pluginsChanged", {"action": "enable", "id": "BAD ID"}, -32602, "Malformed plugin id"],
 		["vaultWeight", {"vault_path": "relative", "src": "a.md", "target": "b.md", "weight": 5},
@@ -960,3 +980,22 @@ func test_every_refusal_arm_answers_the_code_its_kind_owns():
 			"%s must name its reason" % where)
 	_ws._kill_now(terminal)
 	_ws._kill_now(viewer)
+
+## The store is the door the row closed: a name the merged set does not hold
+## cannot be invented into `concepts.json` one IPC call at a time.
+func test_an_unknown_concept_toggle_is_refused_and_writes_nothing():
+	var before: Array = ConceptManager._read_file(ConceptManager.CONCEPTS_FILE).get("concepts", []).duplicate(true)
+	var refused = WorkspaceIpcHandlers.handle(_ws, "conceptToggle", {"name": "gpty-no-such-concept"})
+	assert_true(refused.has("error"), "an unknown concept must be refused")
+	assert_eq(int(refused["error"]["code"]), -32602,
+		"an unknown name is a bad parameter, like an unknown pane type")
+	assert_string_contains(str(refused["error"]["message"]), "Unknown concept")
+	var after: Array = ConceptManager._read_file(ConceptManager.CONCEPTS_FILE).get("concepts", [])
+	assert_eq(after.size(), before.size(), "a refused toggle must not grow the store")
+	assert_true(_find_concept(after, "gpty-no-such-concept").is_empty(),
+		"and must not store the name")
+	var listed = WorkspaceIpcHandlers.handle(_ws, "conceptList", {})
+	assert_true(_find_concept(listed.get("concepts", []), "gpty-no-such-concept").is_empty(),
+		"conceptList must not report a phantom row")
+	var toggled = WorkspaceIpcHandlers.handle(_ws, "conceptToggle", {"name": "cat_command"})
+	assert_true(toggled.get("success", false), "a name the merged set holds must still toggle")

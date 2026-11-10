@@ -174,11 +174,11 @@ See `crates/gpty-gdext/src/omp_events.rs` and
 | `paneRun` | `command` | `{pane_id, label, type}` (exit code via `paneStatus`) |
 | `paneWait` | `pane_id`, `pattern`, `timeout_ms?` (100–60000) | `{matched, line?}` / `{matched: false, timed_out}` - response held server-side until match or deadline |
 | `broadcast` | `tags`, `text` | `{success, count}` |
-| `layoutSave` | `name` | `{success, name}` |
+| `layoutSave` | `name` | `{success, name}` - the name the store kept; a name already taken is stored and answered with a ` (2)`-style suffix, and that is the name `layoutLoad` resolves |
 | `layoutLoad` | `name` | `{success}` |
 | `layoutList` | - | `{layouts: [string]}` |
 | `conceptList` | - | `{concepts: [{name, enabled, trigger, actions, …}]}` |
-| `conceptToggle` | `name` | `{success, name}` |
+| `conceptToggle` | `name` | `{success, name}` - an unknown name is refused `-32602` and nothing is written |
 | `vaultSearch` | `vault_path`, `pattern`, `limit?` (1–500) | `{results: [{path, title, snippet}], total, truncated}` - re-indexes changed notes first, then queries the FTS index (answered natively, off the GUI thread) |
 | `vaultRead` | `vault_path`, `path` | `{path, text, truncated, crlf, mtime, size}` - a refusal is `-32000` with `data.code` (`bad_path`, `not_found`, `outside_vault`, …) |
 | `version` | - | `{version, protocol}` |

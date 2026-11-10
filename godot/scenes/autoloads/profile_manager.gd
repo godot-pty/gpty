@@ -85,9 +85,14 @@ func save_profiles():
 	_write_file(PROFILES_FILE, d)
 	profiles_changed.emit()
 
-func add_profile(p_name: String, p_tiles: Array[Dictionary]):
+## Save one user profile. Returns the name the store kept: a name already
+## spoken for (another user profile, or a builtin) gets the same " (n)" suffix
+## `rename_profile` gives, so a caller that saves twice under one name answers
+## the row it actually created instead of the one it asked for. "" when the
+## request names nothing (nothing is stored).
+func add_profile(p_name: String, p_tiles: Array[Dictionary]) -> String:
 	if p_name == "":
-		return
+		return ""
 	var result_name = p_name
 	var base = p_name
 	var n = 1
@@ -97,6 +102,7 @@ func add_profile(p_name: String, p_tiles: Array[Dictionary]):
 	profiles.append({"name": result_name, "tiles": p_tiles})
 	_derive_plugin_profiles()
 	save_profiles()
+	return result_name
 
 func update_profile(index: int, p_name: String, p_tiles: Array[Dictionary]):
 	if index < 0 or index >= profiles.size():

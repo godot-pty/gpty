@@ -302,14 +302,23 @@ func _parse_plugin_concepts():
 	return j.get_data()
 
 ## Toggle a concept's enabled flag in the user overrides file.
+##
+## False — and no write at all — when the merged set holds no concept by that
+## name: an unknown name is the caller's error, and appending `{name, enabled}`
+## for it would invent a rule with no trigger and no actions, which never fires
+## but is listed by `conceptList` and grows `concepts.json` one call at a time.
 func toggle_concept(name: String) -> bool:
 	# Find the current enabled state from merged concepts
 	var merged = _merge_concepts()
 	var current_enabled = true
+	var known := false
 	for c in merged:
 		if c is Dictionary and c.get("name", "") == name:
 			current_enabled = c.get("enabled", true)
+			known = true
 			break
+	if not known:
+		return false
 	var new_enabled = not current_enabled
 	var user = _load_from_file()
 	var found = false

@@ -469,6 +469,16 @@ func test_a_toggle_overlays_a_plugin_concept_instead_of_duplicating_it():
 	ConceptManager.toggle_concept("watch")
 	assert_eq(_find_by_name(ConceptManager._merge_concepts(), "watch").get("enabled", false), true)
 
+func test_toggle_refuses_a_name_the_merged_set_does_not_hold():
+	var before: Array = ConceptManager._read_file(ConceptManager.CONCEPTS_FILE).get("concepts", []).duplicate(true)
+	assert_false(ConceptManager.toggle_concept("no-such-concept"),
+		"a name the merged set does not hold must not toggle")
+	var after: Array = ConceptManager._read_file(ConceptManager.CONCEPTS_FILE).get("concepts", [])
+	assert_eq(after.size(), before.size(), "and nothing may be appended to the store")
+	assert_null(_find_by_name(after, "no-such-concept"), "the name must not be stored")
+	assert_null(_find_by_name(ConceptManager._merge_concepts(), "no-such-concept"),
+		"the merged set must not report an invented rule")
+
 func test_a_plugin_name_yields_to_defaults_and_to_earlier_plugins():
 	var defaults = ConceptManager._load_defaults()
 	assert_gt(defaults.size(), 0, "the shipped defaults are the other name holder here")
