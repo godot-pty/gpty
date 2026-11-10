@@ -11,23 +11,23 @@ const ABOUT := {
 	"window_mode": "System Frame",
 }
 
-const EXPECTED_BODY := """What happened:
+## The expected body as lines, joined at use: a triple-quoted literal carries
+## the checkout's line endings (CRLF on Windows, where `core.autocrlf` is on
+## and the repo sets no `eol` attribute), while the builder always emits `\n`
+## - measured as a `windows-smoke` failure where the two printed identically.
+const EXPECTED_LINES := [
+	"What happened:", "",
+	"What I expected:", "",
+	"Steps to reproduce:", "1.", "2.", "3.", "",
+	"---", "About this build",
+	"- gPTY 0.8.0", "- Linux 6.10.2", "- Window: System Frame",
+]
 
-What I expected:
-
-Steps to reproduce:
-1.
-2.
-3.
-
----
-About this build
-- gPTY 0.8.0
-- Linux 6.10.2
-- Window: System Frame"""
+func _expected() -> String:
+	return "\n".join(PackedStringArray(EXPECTED_LINES))
 
 func test_the_body_names_the_three_prompts_and_the_build_block():
-	assert_eq(FeedbackText.body(ABOUT), EXPECTED_BODY)
+	assert_eq(FeedbackText.body(ABOUT), _expected())
 
 func test_a_missing_field_degrades_to_a_placeholder_line():
 	var body := FeedbackText.body({})
@@ -41,9 +41,9 @@ func test_a_field_with_newlines_cannot_break_the_block():
 	var about := ABOUT.duplicate()
 	about["os_version"] = "6.10.2\n## Injected heading"
 	var body := FeedbackText.body(about)
-	assert_eq(body.split("\n").size(), EXPECTED_BODY.split("\n").size(),
+	assert_eq(body.split("\n").size(), _expected().split("\n").size(),
 		"a newline inside a value is folded, not honoured")
-	assert_eq(body, EXPECTED_BODY.replace("6.10.2", "6.10.2 ## Injected heading"),
+	assert_eq(body, _expected().replace("6.10.2", "6.10.2 ## Injected heading"),
 		"the value stays on its own line")
 	assert_false(FeedbackText.body({}).contains("##"), "no user field can open a heading")
 
@@ -82,4 +82,4 @@ func test_a_body_over_the_cap_is_trimmed_with_a_marker():
 		"the build block is kept whole")
 
 func test_a_body_under_the_cap_is_untouched():
-	assert_eq(FeedbackText.trimmed(EXPECTED_BODY), EXPECTED_BODY)
+	assert_eq(FeedbackText.trimmed(_expected()), _expected())
