@@ -158,6 +158,10 @@ var _search_strip: PanelContainer
 var _search_count: Label
 var _search_prev: Button
 var _search_next: Button
+## The return-to-live control, shown while the viewport is scrolled off live
+## output. A Button child, so its click is pane chrome even when the child owns
+## the mouse.
+var _scroll_end_btn: Button
 var _sync_interval: float = 1.0 / 60.0
 ## Title and agent-state reads are FFI calls that allocate and take the grid
 ## mutex; they change on OSC title / event arrival, not per frame.
@@ -449,6 +453,24 @@ func _ready():
 	_history_panel.add_child(_history_list)
 	add_child(_history_panel)
 
+	# The return-to-live control: a real Button child, so Godot's picking
+	# delivers its click before `_handle_mouse` reaches the mouse-reporting
+	# branch — the arrow stays pane chrome in a TUI that owns the mouse, the
+	# search strip's rule. It never takes focus or sends input.
+	_scroll_end_btn = Button.new()
+	_scroll_end_btn.name = "ScrollToBottom"
+	_scroll_end_btn.visible = false
+	_scroll_end_btn.anchor_left = 1.0; _scroll_end_btn.anchor_right = 1.0
+	_scroll_end_btn.anchor_top = 1.0; _scroll_end_btn.anchor_bottom = 1.0
+	_scroll_end_btn.offset_left = -30; _scroll_end_btn.offset_right = -6
+	_scroll_end_btn.offset_top = -30; _scroll_end_btn.offset_bottom = -6
+	_scroll_end_btn.focus_mode = Control.FOCUS_NONE
+	KeyboardFocus.declare_mouse_only(_scroll_end_btn, "PageDown, the wheel or typing return to live output")
+	_scroll_end_btn.tooltip_text = "Return to live output"
+	Icons.icon_button(_scroll_end_btn, Icons.CARET_DOWN, "Return to live output")
+	_scroll_end_btn.pressed.connect(_on_scroll_end_pressed)
+	add_child(_scroll_end_btn)
+
 	_start_child_if_ready()
 
 ## The grid `size` can show, or `Vector2i.ZERO` when it cannot hold the minimum
@@ -706,6 +728,7 @@ func _process(delta):
 			# The selection is grid-space: a scroll or new output moves its
 			# viewport rows without changing the selection itself.
 			_refresh_selection()
+			_sync_scroll_end_button()
 			# Repaint only when the grid actually changed. Every other
 			# visual trigger queues its own redraw (cursor blink, selection,
 			# search, settings, metric changes), and scroll/resize/palette
@@ -1101,9 +1124,11 @@ func _handle_mouse(event: InputEvent):
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			_note_view_input()
 			_terminal.scroll_up(scroll_lines)
+			_sync_scroll_end_button()
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
 			_note_view_input()
 			_terminal.scroll_down(scroll_lines)
+			_sync_scroll_end_button()
 	if event is InputEventMouseMotion and _selecting:
 		_extend_selection_to(_mouse_to_cell(event.position))
 
@@ -1248,6 +1273,22 @@ func _refresh_selection():
 ## input asks for it: an unstarted grid makes the FFI call itself a no-op.
 func _snap_to_bottom():
 	_terminal.scroll_reset()
+	_sync_scroll_end_button()
+
+## The chevron is shown exactly while the view is scrolled off live output.
+func _sync_scroll_end_button() -> void:
+	if _scroll_end_btn == null or _terminal == null:
+		return
+	_scroll_end_btn.visible = _terminal.get_scroll_offset() > 0
+
+## One click back to live output. The selection is grid-space, so the jump
+## moves the highlight with its text; nothing here clears it.
+func _on_scroll_end_pressed() -> void:
+	_note_view_input()
+	# The reset hides the control itself, so the two cannot disagree.
+	_snap_to_bottom()
+	_refresh_selection()
+	queue_redraw()
 
 func _send_to_term(text: String):
 	if not _started:
@@ -1321,10 +1362,12 @@ func _handle_keyboard(event: InputEventKey):
 
 	if event.keycode == KEY_PAGEUP:
 		_note_view_input()
-		_terminal.scroll_up(rows); accept_event(); return
+		_terminal.scroll_up(rows)
+		_sync_scroll_end_button(); accept_event(); return
 	if event.keycode == KEY_PAGEDOWN:
 		_note_view_input()
-		_terminal.scroll_down(rows); accept_event(); return
+		_terminal.scroll_down(rows)
+		_sync_scroll_end_button(); accept_event(); return
 	if event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
 		_clear_selection()
 		_send_line_to_term(""); _snap_to_bottom(); accept_event(); return
@@ -1670,6 +1713,7 @@ func _jump_to_match(direction: int):
 	elif delta < 0:
 		_note_view_input()
 		_terminal.scroll_down(-delta)
+	_sync_scroll_end_button()
 	queue_redraw()
 	_refresh_search_count()
 

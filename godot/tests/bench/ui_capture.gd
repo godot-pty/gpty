@@ -116,6 +116,14 @@ const STATES := {
 			"settings": {"type": "terminal", "attachment_id": "capture-spawn-size",
 				"shell_args": ["-c", 'set -- $(stty size); echo "born at $1 rows, $2 cols"; sleep 600']}},
 	]},
+	# The scrollback-return affordance: the pane is scrolled back so the
+	# floating chevron draws (row *A scrolled-back pane returns to live output
+	# in one click*).
+	"scrollback-return": {"size": Vector2i(1280, 760), "open": "scrollback-return", "tiles": [
+		{"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+			"settings": {"type": "terminal", "attachment_id": "capture-scrollback",
+				"shell_args": ["-c", "seq 1 300; sleep 600"]}},
+	]},
 	# The scrollbar column: the Terminal tab overflows its 540x560 card by
 	# 62 px, so its ScrollContainer must show a real bar with a thumb inside a
 	# track (row *Every scrollable surface has a 0 px scrollbar*). The 150 %
@@ -662,6 +670,45 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			if _dialog_titled(_workspace, "Workspace Trust") == null:
 				_fail("the untrusted tile did not raise the Workspace Trust dialog")
 				return false
+		"scrollback-return":
+			var scroll_body = _workspace._tm._find_body(_workspace._tm.tiles[0].wrapper)
+			if not _is_terminal(scroll_body) or scroll_body._terminal == null:
+				_fail("the scrollback-return state needs a terminal pane")
+				return false
+			# The wheel is measured against a fixed amount of output: wait for
+			# it to finish, or a line arriving after the scroll would move the
+			# offset this image is about.
+			var filled := false
+			var last_history := -1
+			var quiet := 0
+			for _i in 200:
+				var size_now: int = scroll_body._terminal.get_history_size()
+				if size_now > 40:
+					filled = true
+					# The wheel is measured against the whole program's fixed
+					# output: stop once the history has stopped growing, or a
+					# line arriving between the scroll and the frame would move
+					# the offset this image is about.
+					if size_now == last_history:
+						quiet += 1
+						if quiet >= 5:
+							break
+					else:
+						quiet = 0
+				last_history = size_now
+				await process_frame
+			if not filled:
+				_fail("the capture pane never produced scrollback (history %d)"
+					% scroll_body._terminal.get_history_size())
+				return false
+			await _send_wheel(scroll_body, MOUSE_BUTTON_WHEEL_UP, 5)
+			await _wait_frames(4)
+			if scroll_body._terminal.get_scroll_offset() <= 0 \
+					or not scroll_body._scroll_end_btn.visible:
+				_fail("the chevron did not show (offset %d, button visible %s)" % [
+					scroll_body._terminal.get_scroll_offset(),
+					scroll_body._scroll_end_btn.visible])
+				return false
 	if state.get("close_all", false):
 		await _click(_button_with_label(_workspace._sidebar, "Close All"))
 		await _wait_frames(2)
@@ -772,6 +819,23 @@ func _send_button(pos: Vector2, pressed: bool) -> void:
 	event.global_position = pos
 	Input.parse_input_event(event)
 	await process_frame
+
+## Scroll a control with the wheel the way a pointer does: the same
+## window-coordinate mapping as `_click`, one notch per press.
+func _send_wheel(control: Control, button: MouseButton, times: int) -> void:
+	if control == null or not is_instance_valid(control):
+		_fail("cannot scroll an invalid control")
+		return
+	var pos := root.get_final_transform() * control.get_global_rect().get_center()
+	for _i in times:
+		var event := InputEventMouseButton.new()
+		event.button_index = button
+		event.pressed = true
+		event.factor = 1.0
+		event.position = pos
+		event.global_position = pos
+		Input.parse_input_event(event)
+		await process_frame
 
 func _press_key(keycode: Key, ctrl := false, shift := false) -> void:
 	var down := InputEventKey.new()

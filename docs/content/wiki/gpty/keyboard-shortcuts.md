@@ -21,7 +21,7 @@ These are handled by the focused terminal before the workspace sees them. `Ctrl+
 
 `Ctrl+V` is the deliberate exception. It is passed through to the shell as a literal `^V` instead of pasting, because programs use it: readline's quoted-insert and vim's visual-block mode both rely on receiving it. Paste is `Ctrl+Shift+V` for this reason, not by convention.
 
-`PageUp` and `PageDown` move the viewport through scrollback one screen at a time, without sending anything to the program. Typing, or pressing Enter, returns the view to the live prompt.
+`PageUp` and `PageDown` move the viewport through scrollback one screen at a time, without sending anything to the program. Typing, or pressing Enter, returns the view to the live prompt. When the view is scrolled back, a chevron at the pane's bottom-right returns to live output in one click.
 
 ## Workspace and panes
 

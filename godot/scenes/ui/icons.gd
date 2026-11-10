@@ -84,6 +84,7 @@ const SEARCH   = "\uE30C"  # magnifying-glass
 const MINIMIZE = "\uE32A"  # minus
 const COLLAPSE = "\uE138"  # caret-left
 const EXPAND   = "\uE13A"  # caret-right
+const CARET_DOWN = "\uE136"  # caret-down (return to live output)
 const ADD      = "\uE3D4"  # plus
 const SETTINGS = "\uE272"  # gear-six
 const FOLDER   = "\uE24A"  # folder (a directory picker, not a settings surface)
