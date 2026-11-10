@@ -28,18 +28,25 @@ on:
   workflow_dispatch:
 
 # Least privilege: jobs inherit this unless they declare their own block (the
-# build job does, for Pages and the OIDC token). A new job added here must not
-# silently inherit the repository default.
+# deploy job declares the Pages, OIDC and artifact-list scopes it needs). A new
+# job added here must not silently inherit the repository default.
 permissions:
   contents: read
+
+# One deploy at a time. Two runs deploying at once is the failure, not a race
+# worth running: the newer one is refused with "Deployment request failed …
+# due to in progress deployment" (400). Queue rather than cancel, so every
+# push's content steps still run; GitHub keeps only the newest pending run,
+# which is the one that must deploy last.
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pages: write
-      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -137,5 +144,50 @@ jobs:
         with:
           path: docs/public/
 
+  # Deploy from its own job so `gh run rerun --failed` re-runs only this job: a
+  # rerun of a job that uploads would add a second `github-pages` artifact to
+  # the run, and deploy-pages refuses that ("Multiple artifacts named
+  # \"github-pages\" were unexpectedly found … Artifact count is 2").
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    # A stuck deployment holds the `pages` group for every later run.
+    timeout-minutes: 15
+    permissions:
+      actions: read # list this run's artifacts (the wait below)
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Wait for the pages artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # deploy-pages reads the artifact through the REST API the moment the
+          # upload finalises, and that list can lag by a fraction of a second -
+          # which is fatal (run 42688595589: "Finalizing artifact upload" at
+          # 19:59:37.397, "Found 0 artifact(s)" at 19:59:37.790). Poll the
+          # precondition instead of hoping the list caught up.
+          for _ in $(seq 1 30); do
+            count=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+              --jq '[.artifacts[] | select(.name == "github-pages")] | length')
+            case "$count" in
+              0) sleep 2 ;;
+              1) echo "the github-pages artifact is visible"; exit 0 ;;
+              *)
+                echo "this run holds ${count} github-pages artifacts; rerun only the failed job" >&2
+                exit 1
+                ;;
+            esac
+          done
+          echo "the build job's github-pages artifact never became visible" >&2
+          exit 1
+
       - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
