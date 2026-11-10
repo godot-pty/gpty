@@ -349,8 +349,9 @@ impl TermGrid {
 
     /// Plain-text lines of the visible screen plus scrollback, oldest
     /// first, most recent last. No ANSI, no trailing spaces, wide-char
-    /// spacers skipped. Capped at `limit` lines (most recent kept).
-    /// This backs `paneRead`.
+    /// spacers skipped. Trailing blank rows are dropped (the screen's
+    /// padding below the last line is not content); the result is then
+    /// capped at `limit` lines (most recent kept). This backs `paneRead`.
     pub fn plain_text(&self, limit: usize) -> Vec<String> {
         let grid = self.term.grid();
         let history = grid.history_size() as i32;
@@ -374,6 +375,14 @@ impl TermGrid {
                 text.pop();
             }
             out.push(text);
+        }
+        // A pane's screen is blank rows below its last line; a read that took
+        // the last N rows would return nothing but padding. Trailing blanks are
+        // not content - the limit is applied after this, so it bounds the
+        // answer instead of hiding the text above it. A blank row *between*
+        // two lines is output and stays.
+        while out.last().is_some_and(|line| line.is_empty()) {
+            out.pop();
         }
         if out.len() > limit {
             let skip = out.len() - limit;
@@ -1166,6 +1175,33 @@ mod tests {
             recent.iter().any(|l| l == "L7"),
             "limit must retain the newest lines: {recent:?}"
         );
+    }
+
+    #[test]
+    fn plain_text_drops_trailing_blank_rows_before_the_limit() {
+        let mut g = TermGrid::new(5, 20);
+        g.feed(b"one");
+        // Every limit from one up answers the text, not the screen's padding:
+        // the last non-blank line is the whole content.
+        for limit in [1, 5, 200] {
+            assert_eq!(
+                g.plain_text(limit),
+                vec!["one".to_string()],
+                "limit {limit} must bound the answer, not pad it"
+            );
+        }
+
+        // A blank row between two lines is output and stays.
+        let mut gapped = TermGrid::new(5, 20);
+        gapped.feed(b"a\r\n\r\nb");
+        assert_eq!(
+            gapped.plain_text(10),
+            vec!["a".to_string(), String::new(), "b".to_string()]
+        );
+
+        // No text at all answers nothing, so the caller's join is the empty
+        // string rather than a run of newlines.
+        assert!(TermGrid::new(5, 20).plain_text(10).is_empty());
     }
 
     #[test]

@@ -43,7 +43,8 @@ impl GptyTerminal {
     }
 
     /// Plain-text snapshot of the pane: screen plus scrollback, oldest
-    /// first, newline-joined, capped at `limit` lines (1..=2000).
+    /// first, newline-joined with trailing blank rows dropped, capped at
+    /// `limit` lines (1..=2000).
     #[func]
     fn get_plain_text(&self, limit: i64) -> GString {
         self.with_grid(
