@@ -74,6 +74,7 @@ godot/
         │   ├── ui_theme.gd     # The one Theme, built from the palette and applied at the root
         │   ├── app_dialog.gd   # The one modal builder (theme, grouped buttons, selectable body)
         │   ├── section_help.gd # The shared "Help" affordance a section header carries (glyph → action → chord table, rows read on press)
+        │   ├── feedback_text.gd # Pure Feedback issue title/body/URL builder (build facts only, capped)
         │   ├── accessibility.gd # Accessible surface owner: names, values, published text (see docs agents/gdscript.md)
         │   ├── toast_overlay.gd
         │   ├── window_chrome.gd # Titlebar + window-mode/fullscreen handling
