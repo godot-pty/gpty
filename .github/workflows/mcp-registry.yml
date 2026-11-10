@@ -14,6 +14,13 @@ name: MCP Registry
 # has to stay visible: a green release with no registry entry is exactly the
 # silent failure this job exists to prevent.
 #
+# The released tag is read through the contents API, never checked out, and the
+# validator always comes from `main`: this job holds `id-token: write`, so a
+# tree fetched by an event-derived ref must not be executed (code scanning
+# alert 13). A consequence is that publishing an old tag uses the current
+# validator - which is the point: the checks are the ones this repository
+# enforces now, not the ones the tag shipped.
+#
 # No secret is involved. Authentication is this workflow's OIDC identity, which
 # the registry maps to the `io.github.godot-pty` namespace - a crates.io token
 # or PAT here would turn "can push a v* tag" into "can publish in the project's
@@ -81,24 +88,48 @@ jobs:
           echo "publish=true" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout
+      # The published tree is data here, never code. This job holds
+      # `id-token: write` and publishes under the project's name, so checking
+      # out the released tag and running anything from it is the pwn request
+      # the actions/untrusted-checkout rules describe (code scanning alert 13).
+      # The validator is default-branch code - the same source this workflow
+      # file is served from - and the tag is read through the contents API.
+      - name: Checkout the validator (default branch)
         if: steps.release.outputs.publish != 'false'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The released tree, not the default branch: server.json must be the
-          # one the tag carries. A dispatched run checks out its selected ref.
-          ref: ${{ steps.release.outputs.tag || github.ref }}
+          # A literal: every event-derived `ref:` value is untrusted in a
+          # `workflow_run` workflow, and the checkout queries treat it as such.
+          ref: main
+          persist-credentials: false
+
+      - name: Fetch the released descriptor
+        if: steps.release.outputs.publish != 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ steps.release.outputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/descriptor"
+          mkdir -p "${root}/crates/gpty-cli"
+          for path in server.json crates/gpty-cli/Cargo.toml crates/gpty-cli/README.md; do
+            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${REF}" \
+              -H "Accept: application/vnd.github.raw" > "${root}/${path}"
+          done
+          echo "DESCRIPTOR_ROOT=${root}" >> "$GITHUB_ENV"
 
       # The descriptor is the claim the registry stores, and the registry only
       # checks the package at publish time. Fail here, with a message that says
-      # what to fix, instead of inside the publisher's error.
+      # what to fix, instead of inside the publisher's error. The validator runs
+      # from the default branch against the staged copy, so the checks CI runs
+      # on the tree apply to the tree the tag carries.
       - name: Check the descriptor
         if: steps.release.outputs.publish != 'false'
         env:
           TAG: ${{ steps.release.outputs.tag }}
         run: |
-          python3 scripts/mcp-registry check
-          VERSION=$(python3 -c 'import json; print(json.load(open("server.json"))["version"])')
+          python3 scripts/mcp-registry check "$DESCRIPTOR_ROOT"
+          VERSION=$(jq -r .version "$DESCRIPTOR_ROOT/server.json")
           if [ -n "${TAG}" ] && [ "v${VERSION}" != "${TAG}" ]; then
             echo "server.json publishes ${VERSION}, but this release is ${TAG}" >&2
             echo "bump server.json with the crates in the release commit (step 5 of the release skill)" >&2
@@ -125,6 +156,7 @@ jobs:
         if: steps.release.outputs.publish != 'false'
         run: |
           set -euo pipefail
+          cd "$DESCRIPTOR_ROOT"
           os="$(uname -s | tr '[:upper:]' '[:lower:]')"
           arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
           archive="mcp-publisher_${os}_${arch}.tar.gz"
@@ -144,6 +176,8 @@ jobs:
       - name: Validate and publish
         if: steps.release.outputs.publish != 'false'
         run: |
+          set -euo pipefail
+          cd "$DESCRIPTOR_ROOT"
           ./mcp-publisher validate
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish

@@ -8,7 +8,14 @@ those claims itself at publish time; this catches the ones that can be checked
 offline, so a typo fails CI instead of the release.
 
 Usage:
-  ./scripts/mcp-registry check     validate server.json (CI gate)
+  ./scripts/mcp-registry check [ROOT]   validate ROOT/server.json and the crate
+                                        files under ROOT (default: the repository
+                                        root)
+
+ROOT exists because the registry publish job validates a staged copy of the
+released tag: it fetches `server.json`, `crates/gpty-cli/Cargo.toml` and
+`crates/gpty-cli/README.md` from the tag as data and runs this script from the
+default branch, so the privileged workflow never executes the released tree.
 
 Publishing is deliberately not here: it needs `mcp-publisher login` and a
 published crate (see the v0.9.6 roadmap row).
@@ -19,9 +26,20 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DESCRIPTOR = os.path.join(ROOT, "server.json")
-CLI_MANIFEST = os.path.join(ROOT, "crates", "gpty-cli", "Cargo.toml")
-CLI_README = os.path.join(ROOT, "crates", "gpty-cli", "README.md")
+
+
+def descriptor():
+    return os.path.join(ROOT, "server.json")
+
+
+def cli_manifest():
+    return os.path.join(ROOT, "crates", "gpty-cli", "Cargo.toml")
+
+
+def cli_readme():
+    return os.path.join(ROOT, "crates", "gpty-cli", "README.md")
+
+
 REPO_URL = "https://github.com/godot-pty/gpty"
 # The types the official registry accepts today. A new one is a spec change, so
 # a closed set here is the point: it fails loudly rather than publishing junk.
@@ -49,10 +67,13 @@ def read_json(path):
 
 
 def crate_version():
-    with open(CLI_MANIFEST, encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith("version ="):
-                return line.split("=", 1)[1].strip().strip('"')
+    try:
+        with open(cli_manifest(), encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("version ="):
+                    return line.split("=", 1)[1].strip().strip('"')
+    except FileNotFoundError:
+        bad("crates/gpty-cli/Cargo.toml is missing")
     return ""
 
 
@@ -71,10 +92,11 @@ def check_header(server):
     elif "\n" in description:
         bad("description must be one line")
     version = server.get("version", "")
+    expected = crate_version()
     if not SEMVER.match(version):
         bad(f"version {version!r} is not semver")
-    elif version != crate_version():
-        bad(f"version {version} does not match crates/gpty-cli ({crate_version()})")
+    elif expected and version != expected:
+        bad(f"version {version} does not match crates/gpty-cli ({expected})")
     repository = server.get("repository") or {}
     if repository.get("url") != REPO_URL or repository.get("source") != "github":
         bad(f"repository must be {REPO_URL} with source github")
@@ -112,9 +134,14 @@ def check_cargo(package, where, name):
         bad(f"{where}.packageArguments must start the `mcp` subcommand")
     # crates.io strips HTML comments, so the ownership token has to be visible
     # text in the crate README for the registry's verification to find it.
-    with open(CLI_README, encoding="utf-8") as handle:
-        if f"mcp-name: {name}" not in handle.read():
-            bad(f"crates/gpty-cli/README.md lacks the visible `mcp-name: {name}` token")
+    try:
+        with open(cli_readme(), encoding="utf-8") as handle:
+            readme = handle.read()
+    except FileNotFoundError:
+        bad(f"{os.path.relpath(cli_readme(), ROOT)} is missing")
+        return
+    if f"mcp-name: {name}" not in readme:
+        bad(f"crates/gpty-cli/README.md lacks the visible `mcp-name: {name}` token")
 
 
 def check_placeholders(server):
@@ -124,10 +151,13 @@ def check_placeholders(server):
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] != "check":
-        print("usage: mcp-registry check", file=sys.stderr)
+    global ROOT
+    if len(sys.argv) not in (2, 3) or sys.argv[1] != "check":
+        print("usage: mcp-registry check [ROOT]", file=sys.stderr)
         return 2
-    server = read_json(DESCRIPTOR)
+    if len(sys.argv) == 3:
+        ROOT = os.path.abspath(sys.argv[2])
+    server = read_json(descriptor())
     if server is not None:
         if not isinstance(server, dict):
             bad("server.json must be a JSON object")
@@ -135,6 +165,13 @@ def main():
             check_placeholders(server)
             name, version = check_header(server)
             check_packages(server, name, version)
+    else:
+        # The staging job fetches three files; if the descriptor is absent the
+        # fetch loop failed, so name every file it was meant to produce rather
+        # than stopping at the first.
+        for path in (cli_manifest(), cli_readme()):
+            if not os.path.exists(path):
+                bad(f"{os.path.relpath(path, ROOT)} is missing")
     if problems:
         for problem in problems:
             print(f"mcp-registry: {problem}", file=sys.stderr)
