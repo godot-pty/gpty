@@ -44,15 +44,23 @@ func _ready():
 	refresh_accessibility_name()
 
 
-## The pane's accessible identity: its label plus the type (or the user's own
-## name for it). A screen reader meets a pane as one named region before it
-## reads the body, so the name has to say both which pane and what kind.
-func refresh_accessibility_name() -> void:
+## The name a surface shows for this pane: the user's own name for it, else its
+## type's display name. Never the shell's title: that is program-controlled
+## text and stays on the pane, not in the app's own chrome.
+func display_name() -> String:
+	if pane_name != "":
+		return pane_name
 	var type_name := _default_title()
 	var info: Variant = PaneTypes.ALL.get(_pane_type())
 	if info is Dictionary:
 		type_name = str(info.get("name", type_name))
-	var display := pane_name if pane_name != "" else type_name
+	return type_name
+
+## The pane's accessible identity: its label plus the type (or the user's own
+## name for it). A screen reader meets a pane as one named region before it
+## reads the body, so the name has to say both which pane and what kind.
+func refresh_accessibility_name() -> void:
+	var display := display_name()
 	accessibility_name = ("%s: %s" % [pane_label, display]) if pane_label != "" else display
 
 ## The inset every pane's content keeps from the pane's own edge.

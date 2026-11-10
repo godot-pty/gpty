@@ -9,6 +9,32 @@ const TITLEBAR_HEIGHT = WindowChrome.HEIGHT
 ## a bulk close of sixteen panes must still be readable in one dialog.
 const RUNNING_ASK_MAX_NAMES = 8
 
+## The running-work confirmation's first line: the caller's action phrase, then
+## how much of the set it would stop. Both counts are panes, not processes: a
+## pane's foreground job can be a whole process group.
+static func running_ask_intro(action: String, busy: int, total: int) -> String:
+	if total <= 1:
+		return "%s will stop a running process:" % action
+	if busy == total:
+		return "%s will stop running processes in all %d panes:" % [action, total]
+	if busy == 1:
+		return "%s will stop a running process in 1 of %d panes:" % [action, total]
+	return "%s will stop running processes in %d of %d panes:" % [action, busy, total]
+
+## One pane line of that dialog: its label, the name a user reads for it, and
+## its workspace unless the intro already named the workspace.
+static func running_ask_entry(
+		label: String, display: String, workspace_name: String, qualify: bool) -> String:
+	var entry := A11y.one_line(label)
+	var shown := A11y.one_line(display)
+	if shown != "":
+		entry += " (%s)" % shown
+	if qualify:
+		var ws_shown := A11y.one_line(workspace_name)
+		if ws_shown != "":
+			entry = "'%s': %s" % [ws_shown, entry]
+	return entry
+
 ## The workspace cap: the sidebar's new-workspace button, the profile's
 ## "open in a new workspace" action and the store's clamped `active` index all
 ## use it, so a ninth tab can never be created by one path and refused by
@@ -481,10 +507,11 @@ func _all_pane_bodies() -> Array:
 ## for unsaved work: naming the action is its consent to stop processes.
 func _ask_close_then(
 		bodies: Array, next: Callable, declined := Callable(),
-		ask_running := true) -> void:
+		ask_running := true, action := "Closing", qualify_entries := true) -> void:
 	if ask_running:
 		_ask_running_then(
-			bodies, func(): _ask_close_step(bodies, 0, next, declined), declined)
+			bodies, func(): _ask_close_step(bodies, 0, next, declined), declined,
+			action, qualify_entries)
 	else:
 		_ask_close_step(bodies, 0, next, declined)
 
@@ -494,10 +521,20 @@ func _ask_close_then(
 ## process group) and conservative where it cannot (Windows: a live shell).
 ## A clean action calls `next` synchronously, so nothing is shown for a close
 ## that loses nothing.
-func _ask_running_then(bodies: Array, next: Callable, declined := Callable()) -> void:
+##
+## `action` is the caller's phrase for what is about to happen ("Closing the
+## 'git' workspace", "Quitting"); `qualify_entries` is false when that phrase
+## already names the workspace, so the pane lines do not repeat it.
+func _ask_running_then(
+		bodies: Array, next: Callable, declined := Callable(),
+		action := "Closing", qualify_entries := true) -> void:
 	var busy: Array = []
+	var total := 0
 	for body in bodies:
-		if is_instance_valid(body) and body.has_running_work():
+		if not is_instance_valid(body):
+			continue
+		total += 1
+		if body.has_running_work():
 			busy.append(body)
 	if busy.is_empty():
 		next.call()
@@ -505,14 +542,20 @@ func _ask_running_then(bodies: Array, next: Callable, declined := Callable()) ->
 	var names := PackedStringArray()
 	var shown := mini(busy.size(), RUNNING_ASK_MAX_NAMES)
 	for i in shown:
-		names.append(str(busy[i].get("pane_label")))
+		var body = busy[i]
+		var display := str(body.call("display_name")) if body.has_method("display_name") else ""
+		var ws_name := ""
+		if body is Control:
+			ws_name = str(_workspace_for_body(body).get("name", ""))
+		names.append(running_ask_entry(
+			str(body.get("pane_label")), display, ws_name, qualify_entries))
 	if busy.size() > shown:
 		names.append("…and %d more" % (busy.size() - shown))
 	var dialog := AppDialog.confirm(self, "Stop running processes?")
 	dialog.name = "RunningWorkConfirm"
 	AppDialog.set_text(dialog, (
-		"Closing will stop processes still running in:\n\n%s\n\nClose anyway?"
-		% "\n".join(names)))
+		"%s\n\n%s\n\nClose anyway?"
+		% [running_ask_intro(action, busy.size(), total), "\n".join(names)]))
 	dialog.ok_button_text = "Close anyway"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():
@@ -558,6 +601,7 @@ func request_quit() -> void:
 			_quit_asking = false
 			quit_action.call(),
 		func(): _quit_asking = false,
+		true, "Quitting",
 	)
 
 ## Close one pane the user asked to close. Stopping a running command and
@@ -611,7 +655,7 @@ func _swap_pane(body: Control, new_type_name: String):
 	var ws := _workspace_for_body(body)
 	if ws.is_empty():
 		return
-	_ask_close_then([body], func(): _swap_pane_now(body, new_type_name))
+	_ask_close_then([body], func(): _swap_pane_now(body, new_type_name), Callable(), true, "Changing the pane type")
 
 func _swap_pane_now(body: Control, new_type_name: String):
 	var ws := _workspace_for_body(body)
@@ -666,15 +710,25 @@ func _reset_now():
 	_apply_layout()
 	_list()
 
+## The action phrase for a close-all: the palette's "Close all panes" names no
+## workspace, so the confirmation has to.
+func _active_close_all_action() -> String:
+	var ws_name := A11y.one_line(str(_active_workspace().get("name", "")))
+	return "Closing all panes in the '%s' workspace" % ws_name
+
 ## Reset the active workspace's panes — the user-facing paths (sidebar,
 ## shortcut, palette) and profile activation ask first.
 func _reset():
-	_ask_close_then(_pane_bodies(_active_workspace()), _reset_now)
+	_ask_close_then(
+		_pane_bodies(_active_workspace()), _reset_now, Callable(), true,
+		_active_close_all_action(), false)
 
 ## User-facing reset: clears the active workspace's panes AND the
 ## profile-accent state (a reset layout is no longer "that profile").
 func _do_reset():
-	_ask_close_then(_pane_bodies(_active_workspace()), _do_reset_now)
+	_ask_close_then(
+		_pane_bodies(_active_workspace()), _do_reset_now, Callable(), true,
+		_active_close_all_action(), false)
 
 func _do_reset_now():
 	_reset_now()
@@ -1052,9 +1106,11 @@ func _close_workspace(idx: int):
 	if _workspaces.size() <= 1:
 		ToastManager.info("Cannot close the last workspace")
 		return
-	_ask_close_then(_pane_bodies(_workspaces[idx]), func():
-		_close_workspace_now(idx)
-	)
+	var ws: Dictionary = _workspaces[idx]
+	var ws_name := A11y.one_line(str(ws.get("name", "")))
+	_ask_close_then(
+		_pane_bodies(ws), func(): _close_workspace_now(idx), Callable(), true,
+		"Closing the '%s' workspace" % ws_name, false)
 
 func _close_workspace_now(idx: int):
 	# Re-checked: the ask is deferred, so the list it was made against may
@@ -1590,7 +1646,9 @@ func _show_multi_trust_dialog(entries: Array[Dictionary], active: int, untrusted
 func _restore():
 	# Palette "load": reload the saved workspace set from disk. Every pane in
 	# every workspace is about to be destroyed, so all of them are asked.
-	_ask_close_then(_all_pane_bodies(), _init_workspaces)
+	_ask_close_then(
+		_all_pane_bodies(), _init_workspaces, Callable(), true,
+		"Restoring the saved workspaces")
 
 # ═══════════════════════════════════════════════════════════════════════
 # Overlay keyboard ownership
@@ -2853,7 +2911,8 @@ func _do_activate(profile: Dictionary, ask_running := true, open_in_new := false
 	if ws.is_empty():
 		return
 	_ask_close_then(
-		_pane_bodies(ws), func(): _activate_now(ws, profile), Callable(), ask_running)
+		_pane_bodies(ws), func(): _activate_now(ws, profile), Callable(), ask_running,
+		"Activating the '%s' profile" % A11y.one_line(str(profile.get("name", ""))))
 
 func _activate_now(ws: Dictionary, profile: Dictionary):
 	_reset_now()

@@ -190,6 +190,26 @@ func test_running_work_is_asked_once_for_the_whole_action():
 		"consent to stopping processes moves the walk to the per-pane questions")
 	assert_eq(done, [true])
 
+func test_running_ask_intro_counts_busy_panes_against_the_action_set():
+	assert_eq(WorkspaceScript.running_ask_intro("Closing the 'git' workspace", 1, 5),
+		"Closing the 'git' workspace will stop a running process in 1 of 5 panes:")
+	assert_eq(WorkspaceScript.running_ask_intro("Quitting", 2, 5),
+		"Quitting will stop running processes in 2 of 5 panes:")
+	assert_eq(WorkspaceScript.running_ask_intro("Quitting", 3, 3),
+		"Quitting will stop running processes in all 3 panes:")
+	assert_eq(WorkspaceScript.running_ask_intro("Closing", 1, 1),
+		"Closing will stop a running process:")
+
+func test_running_ask_entries_name_the_pane_and_its_workspace():
+	assert_eq(WorkspaceScript.running_ask_entry("T1", "Terminal", "git", false),
+		"T1 (Terminal)")
+	assert_eq(WorkspaceScript.running_ask_entry("T1", "lazygit", "git", true),
+		"'git': T1 (lazygit)")
+	assert_eq(WorkspaceScript.running_ask_entry("T2", "", "git", true),
+		"'git': T2")
+	assert_eq(WorkspaceScript.running_ask_entry("T1", "a\nb", "git", false),
+		"T1 (a b)", "a pane name cannot add a line to the confirmation")
+
 ## The live half: a command typed at the shell prompt is a foreground job, and
 ## closing the pane asks before killing it. A platform that cannot report one
 ## (Windows/ConPTY) treats a live shell as possibly busy — the documented
@@ -445,3 +465,43 @@ func test_closing_a_workspace_asks_before_its_panes_go():
 	await get_tree().process_frame
 	assert_false(is_instance_valid(pane), "discarding closes it")
 	assert_eq(_ws._workspaces.size(), workspaces - 1)
+
+## The reported case: closing a workspace whose terminal is running work must
+## name the workspace, not just the pane label.
+func test_closing_a_workspace_with_a_running_terminal_names_it():
+	if not ClassDB.class_exists("GptyTerminal"):
+		pending("the GDExtension is not loaded")
+		return
+	var before: int = _ws._workspaces.size()
+	_ws._add_workspace()
+	var ws_name := str(_ws._active_workspace().get("name", ""))
+	_spawn_wiki()  # a second pane, so the count has a denominator
+	var body = _ws._spawn_pane("terminal")
+	assert_not_null(body, "the test needs a real terminal")
+	assert_true(await _wait_for_shell_output(body, 30000),
+		"the shell must print before it is typed into: %s" % _status_text(body))
+	if ShellFixtures.is_windows():
+		assert_true(body.has_running_work(),
+			"ConPTY cannot report a foreground group; a live shell is conservatively busy")
+	else:
+		body._terminal.send_line("sleep 600")
+		assert_true(await _wait_for_work_state(body, true, 10000),
+			"the typed command must be a foreground job: %s" % _status_text(body))
+
+	_ws._close_workspace(_ws._active)
+	assert_true(is_instance_valid(body), "the workspace close waits for the answer")
+	var dialog := _expect_running_ask()
+	assert_string_contains(dialog.dialog_text,
+		"Closing the '%s' workspace will stop a running process in 1 of 2 panes:" % ws_name,
+		"the dialog names the workspace and counts the panes")
+	assert_string_contains(dialog.dialog_text, "%s (Terminal)" % body.pane_label,
+		"the busy pane is named by label and type")
+	assert_false(dialog.dialog_text.contains("'%s':" % ws_name),
+		"the intro already named the workspace; the pane line does not repeat it")
+
+	dialog.canceled.emit()
+	await get_tree().process_frame
+	assert_true(is_instance_valid(body), "canceling keeps the workspace")
+	_ws._close_workspace_now(_ws._active)
+	await get_tree().process_frame
+	assert_eq(_ws._workspaces.size(), before, "the test removed its workspace")
