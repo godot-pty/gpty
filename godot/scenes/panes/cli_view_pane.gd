@@ -29,6 +29,12 @@ var _stop_btn: Button
 ## Complete lines, oldest first — the source of truth for `get_text()`.
 var _lines := PackedStringArray()
 var _running := false
+## Why the last `_start` refused (`""` when it started, or when no program is
+## configured yet). `_ready` starts the child synchronously, so `newPane` reads
+## this right after the spawn: a pane the API was told it created must not be a
+## status label with no child, and the label is the surface for a *restart*
+## that fails after the pane already exists.
+var _start_error := ""
 
 func _ready():
 	super._ready()
@@ -65,6 +71,12 @@ func get_text(max_lines := 200) -> String:
 func is_running() -> bool:
 	return _running
 
+## Why the pane's program could not be started: `_cli.start`'s own sentence,
+## which names the program. Empty when it started or when no program is
+## configured yet. The IPC spawn handler answers this instead of a pane.
+func start_error() -> String:
+	return _start_error
+
 func _process(_delta):
 	if _cli == null:
 		return
@@ -98,12 +110,14 @@ func _start():
 	var resp = JSON.parse_string(raw)
 	if resp is Dictionary and bool(resp.get("ok", false)):
 		_running = true
+		_start_error = ""
 		_status.text = "Running (pid %s)" % str(resp.get("pid", "?"))
 	else:
 		_running = false
 		var err := "failed to start"
 		if resp is Dictionary:
 			err = str(resp.get("error", err))
+		_start_error = err
 		_status.text = err
 	_sync_buttons()
 

@@ -345,6 +345,29 @@ func test_a_failed_spawn_answers_an_error_and_leaves_no_pane():
 	assert_string_contains(str(toasts[0].get("text", "")), "gpty-no-such-program",
 		"the toast must name the same program the error names")
 
+# The `cli_view` arm starts its program from `_ready`, so its answer is
+# synchronous — but it is the same contract: a pane that cannot run is an
+# error naming the program, with no tile left behind.
+
+func test_new_pane_cli_view_refuses_a_program_that_cannot_start():
+	var tiles_before: int = _ws._tm.tiles.size()
+	var toasts: Array = []
+	var capture := func(data: Dictionary): toasts.append(data)
+	ToastManager.toast_requested.connect(capture)
+	var answer = WorkspaceIpcHandlers.handle(_ws, "newPane", {
+		"type": "cli_view", "command": "/nonexistent/gpty-no-such-program",
+	})
+	ToastManager.toast_requested.disconnect(capture)
+
+	assert_true(answer is Dictionary and answer.has("error"),
+		"a program that cannot start must not answer a pane: %s" % answer)
+	assert_string_contains(str(answer["error"]["message"]), "gpty-no-such-program",
+		"the error must name the program that could not be started")
+	assert_eq(_ws._tm.tiles.size(), tiles_before, "the refused pane must be closed")
+	assert_eq(toasts.size(), 1, "the refusal must also reach the user")
+	assert_string_contains(str(toasts[0].get("text", "")), "gpty-no-such-program",
+		"the toast must name the same program the error names")
+
 # ── paneStatus: one target, or every pane ──────────────────────────────
 
 func test_pane_status_without_a_pane_covers_every_pane():

@@ -276,6 +276,16 @@ static func handle(ws, method: String, params: Dictionary):
 			if body == null:
 				var np_refused: String = ws._pane_ceiling_refusal()
 				return error(np_refused if np_refused != "" else "Grid is full")
+			# A `cli_view` pane starts its program from `_ready`, so a refusal
+			# is already known here: answer it and close the tile. A terminal
+			# defers to the same rule from the other side (its child starts
+			# after this returns, so `_hold_pane_answer` waits for it).
+			if body is CliViewPane:
+				var np_start_error: String = body.start_error()
+				if np_start_error != "":
+					ToastManager.warn(np_start_error)
+					ws._kill_now(body)
+					return error(np_start_error)
 			# Focus last: `activate_pane` resolves the pane's workspace, which
 			# only exists once the body is in the grid.
 			if np_focus:
