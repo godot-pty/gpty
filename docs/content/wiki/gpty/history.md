@@ -12,6 +12,8 @@ The store is keyed by a pane's stable `attachment_id`. A pane created without on
 
 History lives in one SQLite database, `user://history.db`, with an FTS5 full-text index beside the plain rows. FTS5 is the same engine the Wiki pane uses for note search; the difference is the tokenizer. Terminal lines use the default tokenizer so paths, flags, and identifiers stay searchable; the wiki uses stemming because prose is prose.
 
+A store file that SQLite cannot read at all — a copy taken while the app was writing, a damaged disk, a file another tool replaced — used to end scrollback for every pane: each pane's open failed with `file is not a database`, and what those panes printed from then on was never saved. That is a repairable condition now. The unreadable file and its `-wal`/`-shm` siblings are moved to `history.db.corrupt` beside it, a fresh store takes the path, and the first launch after the damage warns once instead of once per pane; the next pane works normally. The moved file is kept rather than deleted, because it is the user's scrollback — but a file in that state is usually unusable (`sqlite3 .recover` fails when the schema page is gone), so it can be deleted once looked at. Only *this is not a database* triggers the move: a store that is busy, read-only or unwritable is left exactly where it is.
+
 Writers never touch SQLite on the terminal path:
 
 | Stage | Behaviour |

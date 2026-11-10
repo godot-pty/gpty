@@ -85,8 +85,9 @@ later one 63-75 ms).
 
 1. **Keep the reporter's layout, sandbox the rest.** Copy their store under a private
    `XDG_DATA_HOME` (`cp -r ~/.local/share/godot/app_userdata/gPTY …`) and delete `history.db`
-   from the copy - a store copied while the live app holds it answers `file is not a database`
-   (warnings only, but they bury real ones).
+   from the copy - a store copied while the live app holds it can answer `file is not a database`,
+   and since v0.8.1 the sandbox then moves that copy aside as `history.db.corrupt` (one warning,
+   but it buries real ones and the copied scrollback is unusable anyway).
 2. **Isolate both sockets** with `GPTY_SOCKET` (the event socket derives from it); otherwise the
    live GUI owns the default path and this instance quits at startup.
 3. **Run it in a window:** `env -u WAYLAND_DISPLAY DISPLAY=:0 godot --path godot

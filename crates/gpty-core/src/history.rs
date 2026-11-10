@@ -120,7 +120,9 @@ pub(crate) fn restrict_to_owner(path: &str) {
 /// process). It is always the *innermost* lock — acquired inside a store
 /// method, so a caller may hold the per-pane store mutex while taking it, and
 /// nothing may take a store mutex while holding it — so the order cannot
-/// invert, and it is held only across one transaction.
+/// invert, and it is held only across one transaction — or, for
+/// [`HistoryStore::open`], across one open, which may also move a damaged file
+/// aside and must not interleave with another pane creating the same path.
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 /// Serialize this process's writes to any one SQLite store file.
@@ -141,14 +143,96 @@ pub(crate) fn write_guard() -> Option<MutexGuard<'static, ()>> {
     lock_or_warn(&WRITE_LOCK, "history write lock")
 }
 
+/// Whether `err` says the file at the path is not a database at all.
+///
+/// The distinction is the difference between a store that is unusable and one
+/// that is merely busy or unwritable: only these two codes mean no future open
+/// will ever succeed, so only these two license moving the file aside. A
+/// `SQLITE_BUSY` or a permission error must leave it where it is.
+fn is_unreadable_store(err: &rusqlite::Error) -> bool {
+    matches!(
+        err,
+        rusqlite::Error::SqliteFailure(inner, _)
+            if matches!(
+                inner.code,
+                rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt
+            )
+    )
+}
+
 impl HistoryStore {
     /// Open or create the history database at `path` for `pane_key`.
+    ///
+    /// A file SQLite cannot read at all ([`is_unreadable_store`]) is moved to
+    /// `<path>.corrupt` and a fresh store takes its place, so one damaged
+    /// file does not end scrollback persistence for every pane from then on.
+    pub fn open(path: &str, pane_key: &str, cap: u32) -> Result<Self, rusqlite::Error> {
+        // The whole open runs under the write guard, not just the replacement:
+        // SQLite *creates* a database that is missing, so a pane opening this
+        // path while another pane is moving a damaged file aside would either
+        // have its fresh store renamed away with the damaged one, or create
+        // the file in the gap between the move and the replacement.
+        let _serialized = write_guard();
+        match Self::open_at(path, pane_key, cap) {
+            Err(e) if is_unreadable_store(&e) => {
+                log::warn!(
+                    "scrollback store {path} is unreadable ({e}); moving it aside for a new one"
+                );
+                Self::replace_unreadable(path, pane_key, cap).map_err(|failed| {
+                    log::warn!(
+                        "could not replace the unreadable scrollback store {path}: {failed}"
+                    );
+                    // The caller's message stays the one that names the real
+                    // problem; the recovery's own failure is the second line.
+                    e
+                })
+            }
+            other => other,
+        }
+    }
+
+    /// Replace a store file that SQLite cannot read, and open the new one.
+    ///
+    /// The unreadable file is moved, never deleted: it is the user's
+    /// scrollback, and a damaged one may still be worth recovering by hand.
+    /// The `-wal` and `-shm` siblings move with it, *before* the database
+    /// itself — a stale `-wal` left beside the fresh store could replay the
+    /// old file's frames into it — and a sibling that cannot be moved stops
+    /// the whole replacement while the database is still in place, so a
+    /// failure leaves the store exactly as unusable as it was.
+    ///
+    /// The target is one fixed name, not a timestamped one: a file that
+    /// cannot be opened is opened again on every launch, and accumulating a
+    /// copy per launch would be a slow leak in `user://`.
+    ///
+    /// The caller holds [`write_guard`], which is what makes the move
+    /// exclusive to this process — every pane opens a store, and they all
+    /// open the same file at startup.
+    fn replace_unreadable(path: &str, pane_key: &str, cap: u32) -> Result<Self, rusqlite::Error> {
+        let aside = format!("{path}.corrupt");
+        for suffix in ["-wal", "-shm", ""] {
+            let source = format!("{path}{suffix}");
+            match std::fs::rename(&source, format!("{aside}{suffix}")) {
+                Ok(()) => {}
+                // Never existed: there is no part of the damaged store at this
+                // path to move.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    log::warn!("could not move the unreadable store {source} aside: {e}");
+                    return Self::open_at(path, pane_key, cap);
+                }
+            }
+        }
+        Self::open_at(path, pane_key, cap)
+    }
+
+    /// The open itself: create the file, schema and pragmas.
     ///
     /// Creates tables on first use; migrates pre-v2 databases by dropping
     /// their rows (legacy rows were keyed by per-node counters that collide
     /// across panes and orphan across restarts — unrecoverable). Uses WAL
     /// mode for concurrent access. `cap` bounds retained lines per pane.
-    pub fn open(path: &str, pane_key: &str, cap: u32) -> Result<Self, rusqlite::Error> {
+    fn open_at(path: &str, pane_key: &str, cap: u32) -> Result<Self, rusqlite::Error> {
         let conn = Connection::open(path)?;
         // The backstop for another *process* holding the write lock: this
         // process serializes its own writers in [`write_guard`] before SQLite
@@ -836,6 +920,146 @@ mod tests {
             "and proceed once it is released"
         );
         assert_eq!(reader.max_line_num().unwrap(), 2, "both commits landed");
+    }
+
+    /// A store SQLite cannot read used to be a dead end: every pane opened the
+    /// same damaged file, every open warned, and no pane persisted scrollback
+    /// again until the user removed the file by hand.
+    #[test]
+    fn an_unreadable_store_is_moved_aside_and_replaced() {
+        let (_tmp, path) = temp_db_path("unreadable");
+        let damage = b"\x0d\x00\x00\x00 this is not a database".repeat(200);
+        fs::write(&path, &damage).unwrap();
+        fs::write(format!("{path}-wal"), b"stale wal frames").unwrap();
+        fs::write(format!("{path}-shm"), b"stale wal index").unwrap();
+
+        let store = HistoryStore::open(&path, "pane-a", 100).unwrap();
+        assert_eq!(
+            store.max_line_num().unwrap(),
+            0,
+            "the replacement must not inherit the damaged file's rows"
+        );
+
+        // The damaged file is kept, byte for byte, under one fixed name.
+        assert_eq!(
+            fs::read(format!("{path}.corrupt")).unwrap(),
+            damage,
+            "the damaged store is moved, never deleted"
+        );
+        // Nothing of the damaged store may stay at the store's own path: a
+        // `-wal` there could replay its frames into the replacement.
+        for (suffix, junk) in [
+            ("-wal", &b"stale wal frames"[..]),
+            ("-shm", &b"stale wal index"[..]),
+        ] {
+            let bytes = fs::read(format!("{path}{suffix}")).unwrap_or_default();
+            assert!(
+                bytes != junk,
+                "the damaged store's {suffix} must not stay beside its replacement"
+            );
+        }
+
+        store.append(1, "written after recovery").unwrap();
+        drop(store);
+        let reopened = HistoryStore::open(&path, "pane-a", 100).unwrap();
+        assert_eq!(
+            reopened.max_line_num().unwrap(),
+            1,
+            "the replacement is an ordinary store that survives a reopen"
+        );
+        assert_eq!(
+            fs::read(format!("{path}.corrupt")).unwrap(),
+            damage,
+            "a healthy store is never moved aside"
+        );
+    }
+
+    /// The WAL siblings move *with* the database, before it, under the same
+    /// fixed name. `open` rarely gets to do this — SQLite deletes an
+    /// unreadable `-wal` itself while failing — so this drives the move
+    /// directly: a sibling left at the store's path is the one state that
+    /// could corrupt the replacement.
+    #[test]
+    fn recovery_moves_the_wal_siblings_with_the_store() {
+        let (_tmp, path) = temp_db_path("sibling_move");
+        fs::write(&path, b"not a database").unwrap();
+        fs::write(format!("{path}-wal"), b"stale wal frames").unwrap();
+        fs::write(format!("{path}-shm"), b"stale wal index").unwrap();
+
+        let guard = write_guard();
+        assert!(guard.is_some(), "the write lock must be healthy");
+        let store = HistoryStore::replace_unreadable(&path, "pane-a", 100).unwrap();
+        drop(guard);
+
+        assert_eq!(
+            fs::read(format!("{path}.corrupt")).unwrap(),
+            b"not a database"
+        );
+        assert_eq!(
+            fs::read(format!("{path}.corrupt-wal")).unwrap(),
+            b"stale wal frames"
+        );
+        assert_eq!(
+            fs::read(format!("{path}.corrupt-shm")).unwrap(),
+            b"stale wal index"
+        );
+        store.append(1, "the replacement works").unwrap();
+        assert_eq!(store.max_line_num().unwrap(), 1);
+    }
+
+    /// Only SQLite's "this is not a database" licenses the move. A path that
+    /// cannot be opened at all is a different problem — a directory here, a
+    /// permission in real life — and moving the file would destroy the
+    /// evidence without making the store work.
+    #[test]
+    fn a_store_that_cannot_be_opened_is_not_moved() {
+        let (_tmp, path) = temp_db_path("cannot_open");
+        fs::create_dir(&path).unwrap();
+
+        assert!(
+            HistoryStore::open(&path, "pane-a", 100).is_err(),
+            "a directory is not a store, and open must say so"
+        );
+        assert!(fs::metadata(&path).unwrap().is_dir(), "nothing was moved");
+        assert!(
+            !std::path::Path::new(&format!("{path}.corrupt")).exists(),
+            "no quarantine copy appears for a file that was never moved"
+        );
+    }
+
+    /// Every pane restores at startup and every pane opens the same file.
+    /// Exactly one of them may move the damaged store aside; a second move
+    /// would take the replacement the first one just created.
+    #[test]
+    fn concurrent_opens_of_a_damaged_store_replace_it_once() {
+        let (_tmp, path) = temp_db_path("concurrent_recovery");
+        let damage = b"not a database".repeat(512);
+        fs::write(&path, &damage).unwrap();
+
+        let opens = (0..4)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    let store = HistoryStore::open(&path, "pane-a", 100).unwrap();
+                    store.append(1, "a line from a racing pane").unwrap();
+                })
+            })
+            .collect::<Vec<_>>();
+        for open in opens {
+            open.join().expect("every pane's open must succeed");
+        }
+
+        assert_eq!(
+            fs::read(format!("{path}.corrupt")).unwrap(),
+            damage,
+            "the damaged store is the one that was moved, once"
+        );
+        let store = HistoryStore::open(&path, "pane-a", 100).unwrap();
+        assert_eq!(
+            store.line_count().unwrap(),
+            4,
+            "every racing pane wrote to the replacement, not to the quarantine"
+        );
     }
 
     /// What the settings panel shows must be the real footprint, not a guess:
