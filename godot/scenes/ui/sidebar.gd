@@ -313,12 +313,6 @@ func _with_chord(text: String, action: String) -> String:
 	var chord := ShortcutManager.chord(action)
 	return text if chord == "" else "%s (%s)" % [text, chord]
 
-## The Feedback row's two outbound effects, replaceable in tests (the file
-## tree's `open_external` precedent): both cross the process boundary, so a
-## headless run can only assert what was handed to them.
-var open_external: Callable = func(uri: String) -> Error: return OS.shell_open(uri)
-var copy_text: Callable = func(text: String) -> void: DisplayServer.clipboard_set(text)
-
 ## What the Feedback issue reports about this build - the four facts the row
 ## allows and nothing else: no pane type, no profile, no path, no environment.
 func feedback_about() -> Dictionary:
@@ -334,13 +328,10 @@ func feedback_about() -> Dictionary:
 ## report is one paste away and nothing is submitted by the app.
 func _on_feedback_pressed() -> void:
 	var about := feedback_about()
-	var err: Error = open_external.call(FeedbackText.url(about))
-	if err == OK:
-		return
-	copy_text.call(FeedbackText.body(about))
-	ToastManager.warn(
+	ExternalLink.open(
+		FeedbackText.url(about), FeedbackText.body(about),
 		"Couldn't open a browser - issue text copied; paste it at github.com/godot-pty/gpty/issues/new",
-		6.0, "Feedback")
+		"Feedback")
 
 func _on_pane_tile_entered(key: String) -> void:
 	_add_pane_hover = key
@@ -688,6 +679,6 @@ func _make_catalog_hint_row() -> HBoxContainer:
 	var btn = _make_row_label_button(CATALOG_HINT_TEXT)
 	btn.name = "CatalogHintBtn"
 	btn.tooltip_text = "Browse the plugin registry"
-	btn.pressed.connect(func(): OS.shell_open(PLUGINS_CATALOG_URL))
+	btn.pressed.connect(func(): ExternalLink.open(PLUGINS_CATALOG_URL))
 	row.add_child(btn)
 	return row

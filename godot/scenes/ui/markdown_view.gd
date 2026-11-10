@@ -291,7 +291,7 @@ func _confirm_link(meta):
 	var dialog := AppDialog.confirm(self, "Open external link?")
 	AppDialog.set_body(dialog, url)
 	dialog.confirmed.connect(func():
-		OS.shell_open(url)
+		ExternalLink.open(url)
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)

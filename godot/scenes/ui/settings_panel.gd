@@ -780,6 +780,8 @@ var _shortcut_list: VBoxContainer = null
 ## The aligned chord column's floor: the widest chord in the list is
 ## "Ctrl+PageDown".
 const SHORTCUT_CHORD_WIDTH := 108.0
+## The About tab's one outbound link.
+const REPO_URL := "https://github.com/godot-pty/gpty"
 
 func _add_about_section(v: VBoxContainer):
 	_version_label = Label.new()
@@ -800,10 +802,15 @@ func _add_about_section(v: VBoxContainer):
 	ipc_row.add_child(_protocol_label)
 	v.add_child(ipc_row)
 
-	var url_lbl = Label.new()
-	url_lbl.name = "RepoUrl"
-	url_lbl.text = "github.com/godot-pty/gpty"
-	v.add_child(url_lbl)
+	var url_btn := Button.new()
+	url_btn.name = "RepoUrl"
+	url_btn.text = "github.com/godot-pty/gpty"
+	url_btn.flat = true
+	url_btn.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	url_btn.theme_type_variation = UiTheme.ACCENT_BUTTON
+	url_btn.tooltip_text = "Open the gPTY repository in your browser"
+	url_btn.pressed.connect(func(): ExternalLink.open(REPO_URL))
+	v.add_child(url_btn)
 
 	_about_tab = v
 	v.add_child(HSeparator.new())

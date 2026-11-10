@@ -3,9 +3,15 @@ extends GutTest
 
 var _scene: Control
 var _sidebar: Sidebar
+var _saved_open: Callable
+var _saved_copy: Callable
 
 func before_each():
 	MockAutoloads.setup()
+	# The link seams are process-global statics: this suite replaces them, so
+	# it puts back what it found.
+	_saved_open = ExternalLink.open_external
+	_saved_copy = ExternalLink.copy_text
 	_scene = TestScene.create()
 	# The chrome's one Theme, as the workspace applies it: the sidebar's accent
 	# rows name a theme role now, so the colour only resolves under it.
@@ -26,6 +32,8 @@ func before_each():
 	_sidebar.build(bg)
 
 func after_each():
+	ExternalLink.open_external = _saved_open
+	ExternalLink.copy_text = _saved_copy
 	MockAutoloads.teardown()
 	if _scene:
 		for c in _scene.get_children():
@@ -512,8 +520,8 @@ func _use_recorders() -> void:
 	_opened.clear()
 	_copied.clear()
 	_open_result = OK
-	_sidebar.open_external = _record_open
-	_sidebar.copy_text = _record_copy
+	ExternalLink.open_external = _record_open
+	ExternalLink.copy_text = _record_copy
 
 func test_the_feedback_row_is_the_last_action_below_close_all():
 	var close_all := _icon_text_button("Close All")
@@ -553,3 +561,20 @@ func test_a_failed_open_copies_the_text_and_says_so():
 	assert_eq(toast["level"], ToastManager.WARN)
 	assert_string_contains(str(toast["text"]), "copied",
 		"the toast says where the text went")
+
+func test_a_refused_catalog_open_copies_the_url_and_warns():
+	_use_recorders()
+	_open_result = ERR_CANT_OPEN
+	watch_signals(ToastManager)
+	_sidebar.update_profile_list([], "")
+	var hint := _sidebar.find_child("CatalogHintBtn", true, false) as Button
+	assert_not_null(hint, "the catalog hint row must exist")
+	hint.pressed.emit()
+	assert_eq(_opened, [Sidebar.PLUGINS_CATALOG_URL], "the registry page, not a profile")
+	assert_eq(_copied, [Sidebar.PLUGINS_CATALOG_URL],
+		"the URL itself is the fallback text, not the row's label")
+	assert_signal_emit_count(ToastManager, "toast_requested", 1)
+	var toast: Dictionary = get_signal_parameters(ToastManager, "toast_requested")[0]
+	assert_eq(toast["level"], ToastManager.WARN)
+	assert_string_contains(str(toast["text"]), "gpty.dev/plugins",
+		"the toast names the link that could not open")
