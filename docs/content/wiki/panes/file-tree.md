@@ -62,7 +62,7 @@ It does not rename, delete, move, copy or create files. It does not show hidden 
 
 ## Limits and edge cases
 
-Only absolute paths are ever opened, and only regular files reach a handler; this is why a FIFO or device node that appears in a listing produces a refusal rather than hanging the GUI thread. The system route constructs the `file://` URI itself and shows the exact path in a confirmation, which is the guard against a filename that looks like another scheme. Because listing is lazy, a directory that changes after it was expanded is not refreshed — children stay as first read. A subdirectory that cannot be listed when you expand it says so in a toast, since only the root has the pane's own surface. Re-applying the root path in Pane Settings rebuilds the tree from disk.
+Only absolute paths are ever opened, and only regular files reach a handler; this is why a FIFO or device node that appears in a listing produces a refusal rather than hanging the GUI thread. The system route constructs the `file://` URI itself and shows the exact path in a confirmation, which is the guard against a filename that looks like another scheme. If no application on the system accepts the URI, the URI is copied to the clipboard and a warning toast names it, so a refused open does not look like a dead press. Because listing is lazy, a directory that changes after it was expanded is not refreshed — children stay as first read. A subdirectory that cannot be listed when you expand it says so in a toast, since only the root has the pane's own surface. Re-applying the root path in Pane Settings rebuilds the tree from disk.
 
 ## Related
 
