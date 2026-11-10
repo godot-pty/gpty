@@ -175,6 +175,7 @@ gpty/
         │   ├── app_dialog.gd       # The one modal builder (theme, grouped buttons, selectable body)
         │   ├── section_help.gd      # The shared "Help" affordance a section header carries (glyph → action → chord table)
         │   ├── feedback_text.gd     # Pure Feedback issue title/body/URL builder (build facts only, capped)
+        │   ├── external_link.gd     # The one outbound-link path: OS.shell_open, clipboard fallback, WARN toast
         │   ├── accessibility.gd    # Accessible surface owner: names, values, published text (A11y)
         │   └── icons.gd            # Phosphor icon constants
         └── panes/
