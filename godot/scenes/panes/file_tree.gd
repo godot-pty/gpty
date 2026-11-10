@@ -7,7 +7,7 @@ class_name FileTreePane
 @export var root_path := "/"
 ## How an activation opens a file: `viewer` (default) asks the workspace for
 ## a `code_viewer` pane when `ViewableFiles` supports the path; `system` keeps
-## the confirm-then-`OS.shell_open` path for every file. Per-tree rather than
+## the confirm-then-system-handler path for every file. Per-tree rather than
 ## global: the tree is the origin of the action, and several trees may want
 ## different behavior. A file the table does not name always stays on the
 ## system path, because the in-app route is an allowlist, not a sniff.
@@ -15,11 +15,6 @@ class_name FileTreePane
 
 const OPEN_MODES: Array[String] = ["viewer", "system"]
 const DEFAULT_OPEN_MODE := "viewer"
-
-## Test seam: the one place a path reaches the system's default handler.
-## Production leaves it as the OS call; a test replaces it to prove an in-app
-## open never touches the system path.
-var open_external: Callable = func(uri: String) -> void: OS.shell_open(uri)
 
 ## Test seam: the one place this pane opens a folder for listing. Production
 ## leaves it as Godot's own static; a test replaces it to reach the gate a
@@ -106,12 +101,14 @@ func _open_activated(path: String) -> void:
 
 ## Opening a file hands its path to the desktop's default handler, which is a
 ## sharper sink than it looks: a downloaded `.desktop` file is *run*, not
-## displayed, by the mime handler. Two guards, mirroring `markdown_view`'s
+## displayed, by the mime handler. Three guards, mirroring `markdown_view`'s
 ## link policy:
 ##   1. Scheme allowlist: only an absolute local path is ever turned into a
 ##      `file://` URI, and that URI is constructed here — a file name cannot
 ##      contain `/`, so no other scheme can be injected through the tree.
 ##   2. Confirmation: the user sees the exact path before anything is opened.
+##   3. Reporting: the handoff is `ExternalLink.open`, so a handler that
+##      refuses the URI copies it and raises a WARN toast instead of nothing.
 const OPEN_SCHEME := "file://"
 
 func _confirm_open(path: String) -> void:
@@ -123,7 +120,10 @@ func _confirm_open(path: String) -> void:
 	AppDialog.set_body(dialog, "Open this file with the system's default application?\n\n%s" % path)
 	dialog.confirmed.connect(func():
 		dialog.queue_free()
-		open_external.call(uri)
+		# The one outbound path: a system with no handler for the type answers
+		# with an `Error` there, which copies the URI and warns instead of
+		# leaving a dead press.
+		ExternalLink.open(uri, "", ExternalLink.refused_file_message(uri), "File Tree")
 	)
 	dialog.canceled.connect(func(): dialog.queue_free())
 	dialog.popup_centered()

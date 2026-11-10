@@ -1,10 +1,10 @@
 class_name ExternalLink
-## The one outbound-link path: `OS.shell_open`, and when the OS refuses (no
-## browser handler, headless, a scheme the platform will not take) the text goes
-## to the clipboard and a warning toast names it, so a press never looks dead.
-## `open_external`/`copy_text` are the replaceable seams (the file tree's
-## `open_external` precedent): both cross the process boundary, so a headless
-## run can only assert what was handed to them.
+## The one outbound path: `OS.shell_open`, and when the OS refuses (no browser
+## handler, no mime handler for a file, headless, a scheme the platform will not
+## take) the text goes to the clipboard and a warning toast names it, so a press
+## never looks dead.
+## `open_external`/`copy_text` are the replaceable seams: both cross the
+## process boundary, so a headless run can only assert what was handed to them.
 
 const SOURCE := "Link"
 ## The toast is one line; a note's URL can be arbitrarily long.
@@ -29,6 +29,12 @@ static func open(url: String, fallback_text := "", message := "", source := SOUR
 ## toast only: the clipboard always gets the whole thing.
 static func refused_message(url: String) -> String:
 	return "Couldn't open a browser - copied %s" % shown(url)
+
+## "Couldn't open this file - copied <uri>". A file open hands the path to the
+## system's mime handler, which may *run* the target, so its refusal names the
+## file rather than a browser; the shortening is the toast's only.
+static func refused_file_message(uri: String) -> String:
+	return "Couldn't open this file - copied %s" % shown(uri)
 
 static func shown(url: String) -> String:
 	return url if url.length() <= MAX_TOAST_URL else url.left(MAX_TOAST_URL - 1) + "…"

@@ -3,17 +3,42 @@ extends GutTest
 # tree's confirmation before a name reaches the system's default handler.
 
 var _tmp: String
+# The system handler is one process-global seam; a test that replaces it puts
+# it back, so no later suite inherits the recorder.
+var _opened: Array = []
+var _copied: Array = []
+var _open_result: Error = OK
+var _saved_open: Callable
+var _saved_copy: Callable
 
 
 func before_each():
 	MockAutoloads.setup()
 	_tmp = TestPaths.user_path("file_sink_probe")
 	DirAccess.make_dir_recursive_absolute(_tmp)
+	_saved_open = ExternalLink.open_external
+	_saved_copy = ExternalLink.copy_text
+	_opened.clear()
+	_copied.clear()
+	_open_result = OK
+	ExternalLink.open_external = _record_open
+	ExternalLink.copy_text = _record_copy
 
 
 func after_each():
+	ExternalLink.open_external = _saved_open
+	ExternalLink.copy_text = _saved_copy
 	_remove_tree(_tmp)
 	MockAutoloads.teardown()
+
+
+func _record_open(uri: String) -> Error:
+	_opened.append(uri)
+	return _open_result
+
+
+func _record_copy(text: String) -> void:
+	_copied.append(text)
 
 
 func _remove_tree(path: String):
@@ -173,8 +198,6 @@ func test_file_tree_activation_of_a_supported_file_requests_a_viewer():
 	var path := _write(_tmp.path_join("note.md"), "# hi\n")
 	var pane := _make_tree(_tmp)
 	await get_tree().process_frame
-	var opened := []
-	pane.open_external = func(uri: String): opened.append(uri)
 	var requests := _requests(pane)
 
 	_activate(pane, "note.md")
@@ -183,7 +206,8 @@ func test_file_tree_activation_of_a_supported_file_requests_a_viewer():
 	assert_eq(requests[0][0], "code_viewer", "Markdown is a viewer type")
 	assert_eq(requests[0][1].get("file_path"), path, "the request carries the exact path")
 	assert_eq(_dialogs_of(pane).size(), 0, "the in-app route never asks for confirmation")
-	assert_eq(opened, [], "the in-app route never reaches the system handler")
+	assert_eq(_opened, [], "the in-app route never reaches the system handler")
+	assert_eq(_copied, [], "and copies nothing")
 
 ## A supported media file takes the media-pane route, like a text file takes
 ## the viewer route: no confirmation and no system handler.
@@ -191,8 +215,6 @@ func test_file_tree_activation_of_a_media_file_requests_the_media_pane():
 	var path := _write(_tmp.path_join("clip.ogv"), "OggS — not decoded: the tree only requests a pane")
 	var pane := _make_tree(_tmp)
 	await get_tree().process_frame
-	var opened := []
-	pane.open_external = func(uri: String): opened.append(uri)
 	var requests := _requests(pane)
 
 	_activate(pane, "clip.ogv")
@@ -201,7 +223,8 @@ func test_file_tree_activation_of_a_media_file_requests_the_media_pane():
 	assert_eq(requests[0][0], "media", "an Ogg video is a media type")
 	assert_eq(requests[0][1].get("file_path"), path, "the request carries the exact path")
 	assert_eq(_dialogs_of(pane).size(), 0, "the in-app route never asks for confirmation")
-	assert_eq(opened, [], "the in-app route never reaches the system handler")
+	assert_eq(_opened, [], "the in-app route never reaches the system handler")
+	assert_eq(_copied, [], "and copies nothing")
 
 ## Anything the table does not name keeps the old behavior exactly: confirm,
 ## then hand the constructed `file://` URI to the system's default handler.
@@ -209,8 +232,6 @@ func test_file_tree_activation_of_an_unsupported_file_still_confirms():
 	_write(_tmp.path_join("picture.png"), "not really a png")
 	var pane := _make_tree(_tmp)
 	await get_tree().process_frame
-	var opened := []
-	pane.open_external = func(uri: String): opened.append(uri)
 	var requests := _requests(pane)
 
 	_activate(pane, "picture.png")
@@ -220,11 +241,39 @@ func test_file_tree_activation_of_an_unsupported_file_still_confirms():
 	assert_eq(dialogs.size(), 1, "the system route asks first")
 	assert_string_contains(AppDialog.body_of(dialogs[0]), "picture.png",
 		"the confirmation must show what will be opened")
-	assert_eq(opened, [], "nothing opens before the answer")
+	assert_eq(_opened, [], "nothing opens before the answer")
 	dialogs[0].confirmed.emit()
-	assert_eq(opened.size(), 1, "a confirmed open reaches the handler")
-	assert_true(opened[0].begins_with(pane.OPEN_SCHEME),
+	assert_eq(_opened.size(), 1, "a confirmed open reaches the handler")
+	assert_true(_opened[0].begins_with(pane.OPEN_SCHEME),
 		"the sink constructs the URI itself")
+
+## The one sink where the system *runs* the target rather than displaying it
+## gets the same promise as every link: a handler that refuses the open copies
+## the URI and says so, instead of leaving a dead press after the dialog closed.
+func test_a_refused_system_open_copies_the_uri_and_warns():
+	var path := _write(_tmp.path_join("picture.png"), "not really a png")
+	var pane := _make_tree(_tmp)
+	await get_tree().process_frame
+	_open_result = ERR_CANT_OPEN
+	watch_signals(ToastManager)
+
+	_activate(pane, "picture.png")
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the system route asks first")
+	assert_eq(_copied, [], "nothing is copied before the user answers")
+	dialogs[0].confirmed.emit()
+
+	var uri: String = pane.OPEN_SCHEME + path
+	assert_eq(_opened, [uri], "the confirmed open still reaches the handler")
+	assert_eq(_copied, [uri], "a refusal copies the exact URI")
+	assert_signal_emit_count(ToastManager, "toast_requested", 1)
+	var toast: Dictionary = get_signal_parameters(ToastManager, "toast_requested")[0]
+	assert_eq(toast["level"], ToastManager.WARN, "a dead press is a warning, not a note")
+	assert_string_contains(str(toast["text"]), "Couldn't open this file",
+		"the sentence names the sink, not a browser")
+	assert_eq(str(toast["text"]), ExternalLink.refused_file_message(uri),
+		"the toast carries the file sentence for this exact URI")
+	assert_eq(str(toast["source"]), "File Tree")
 
 ## The per-tree setting can keep every file on the system path, including the
 ## types the viewer supports.
