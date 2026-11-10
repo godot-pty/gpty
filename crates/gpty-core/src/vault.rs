@@ -7,10 +7,11 @@
 //! allowed to touch ([`write_vault_note`]: the same path vocabulary,
 //! containment through symlinks, a stamp that refuses to overwrite an outside
 //! edit, and an atomic replacement that keeps the note's own mode). It reuses
-//! the scrollback store's skeleton deliberately ([`crate::history`]):
+//! the scrollback store's skeleton deliberately ([`crate::store`]):
 //! external-content FTS5 with the three triggers, the same pragmas, the same
-//! owner-only mode, and the same process-wide write lock — so the v0.5.1
-//! engine's operational lessons carry over instead of being re-learned.
+//! owner-only mode, the same process-wide write lock, and the same recovery
+//! when SQLite cannot read the file — so the v0.5.1 engine's operational
+//! lessons carry over instead of being re-learned.
 //!
 //! The store file lives in the app's state directory (`state_dir()/vaults.db`),
 //! never inside a vault: a vault is the user's own data, and the roadmap's
@@ -23,8 +24,9 @@ use std::time::UNIX_EPOCH;
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::history::{restrict_to_owner, sanitize_fts_query, write_guard};
+use crate::history::sanitize_fts_query;
 use crate::links;
+use crate::store::{open_with_recovery, restrict_to_owner, write_guard};
 
 /// Notes one walk keeps, and how deep it descends. Moved here from the wiki
 /// pane's GDScript scan so the pane's list and the search index cannot
@@ -1427,9 +1429,19 @@ impl VaultStore {
     /// The pragmas, the owner-only mode on the file and its `-wal`/`-shm`
     /// siblings, and the external-content FTS5 triggers mirror
     /// `HistoryStore::open` — the same store shape, the same umask problem,
-    /// the same fix. `user_version` is this schema's own version gate (the
+    /// the same fix — and so does the recovery
+    /// ([`crate::store::open_with_recovery`]): a file SQLite cannot read is
+    /// moved to `<path>.corrupt` and replaced, because the index is a cache of
+    /// the vault and the next [`index_vault`] pass rebuilds every row from the
+    /// notes themselves. `user_version` is this schema's own version gate (the
     /// history store's 2 must never be mistaken for it).
     pub fn open(path: &str) -> Result<Self, rusqlite::Error> {
+        open_with_recovery("vault index", path, || Self::open_at(path))
+    }
+
+    /// The open itself: the pragmas, the version gate, the schema and the
+    /// owner-only repair of the store and its siblings.
+    fn open_at(path: &str) -> Result<Self, rusqlite::Error> {
         let conn = Connection::open(path)?;
         // The backstop for another *process* on the same file; this process's
         // own writers are serialized by [`write_guard`] before SQLite sees
@@ -2147,6 +2159,51 @@ mod tests {
         // CREATE ... IF NOT EXISTS or the version gate.
         let store = VaultStore::open(&path).unwrap();
         assert_eq!(store.note_count("any").unwrap(), 0);
+    }
+
+    /// The vault index is a cache of the vault, so a file SQLite cannot read
+    /// is recoverable by definition: it moves aside and the next pass rebuilds
+    /// every row from the notes themselves.
+    #[test]
+    fn a_damaged_index_is_moved_aside_and_rebuilt_from_the_vault() {
+        let (_tmp_path, path) = temp_db("recover");
+        let (_tmp_vault, vault) = temp_vault("recover");
+        write_note(&vault, "a.md", "# A\n\nalpha token\n[[b]]\n");
+        write_note(&vault, "b.md", "# B\n");
+        let root = root_str(&vault);
+        {
+            let mut store = VaultStore::open(&path).unwrap();
+            assert_eq!(index_vault(&mut store, &root).unwrap().notes.len(), 2);
+        }
+
+        let damage = b"\x0d\x00\x00\x00 this is not a database".repeat(200);
+        fs::write(&path, &damage).unwrap();
+
+        let mut store = VaultStore::open(&path).unwrap();
+        assert_eq!(
+            fs::read(format!("{path}.corrupt")).unwrap(),
+            damage,
+            "the damaged index is moved, never deleted"
+        );
+        assert_eq!(
+            store.note_count(&root).unwrap(),
+            0,
+            "the replacement starts empty: the index is a cache"
+        );
+
+        let outcome = index_vault(&mut store, &root).unwrap();
+        assert_eq!(outcome.added, 2, "the next pass re-reads every note");
+        assert_eq!(store.note_count(&root).unwrap(), 2);
+        assert_eq!(
+            store.search_user_text(&root, "alpha", 10).unwrap().len(),
+            1,
+            "the replacement's search index is live"
+        );
+        assert_eq!(
+            store.links_for(&root, "b.md").unwrap().backlinks.len(),
+            1,
+            "and its links are rebuilt in the same pass"
+        );
     }
 
     #[cfg(unix)]

@@ -20,6 +20,7 @@ Library crate for the gpty multi-PTY emulator. This is the engine - all terminal
 | [`keymap`](src/keymap.rs) | Keyboard event → byte sequence translation | `key_event_to_bytes()` |
 | [`lock`](src/lock.rs) | Poison-tolerant locking: skip the work, report the first occurrence | `lock_or_warn()`, `read_or_warn()`, `write_or_warn()` |
 | [`history`](src/history.rs) | SQLite-backed scrollback history store and its write-behind thread | `HistoryStore`, `PaneHistory` |
+| [`store`](src/store.rs) | Shared SQLite store plumbing for the scrollback and vault indexes: one process-wide write lock, an unreadable file quarantined to `<path>.corrupt` and replaced, and owner-only repair of a store and its WAL siblings | `write_guard()`, `open_with_recovery()`, `restrict_to_owner()` |
 | [`vault`](src/vault.rs) | SQLite + FTS5 index over a directory of Markdown notes - the wiki pane's list and search | `VaultStore`, `scan_vault()`, `index_vault()` |
 | [`owner_only`](src/owner_only.rs) | Owner-only modes for gPTY's own files: a looser 0600/0700 is repaired on a descriptor opened with `O_NOFOLLOW`, so a symlink is skipped and another account's file is left alone | `restrict_file()`, `restrict_dir()`, `Restriction` |
 | [`links`](src/links.rs) | `[[wikilink]]` parsing (occurrences with their line; code and escapes are literal) and resolution against a note set (stem or path, exact case then a unique case-insensitive match, ambiguity never silently picked) | `parse_links()`, `Link`, `NoteIndex`, `Resolution` |

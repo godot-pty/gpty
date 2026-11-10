@@ -10,10 +10,11 @@ That compatibility is deliberate. The index, the search table, and the link edge
 
 ## The index lives outside the vault
 
-The note list, search hits, wikilink edges, and the [[link-graph|link graph]] all come from one SQLite store at `state_dir()/vaults.db`. `state_dir()` is gPTY's own private state directory, never the vault, which has three consequences worth knowing:
+The note list, search hits, wikilink edges, and the [[link-graph|link graph]] all come from one SQLite store at `state_dir()/vaults.db`. `state_dir()` is gPTY's own private state directory, never the vault, which has four consequences worth knowing:
 
 - Copying or syncing the vault moves your notes and nothing else. The index is rebuilt locally.
 - Deleting the store loses nothing. The next index pass re-reads the files and recreates every derived row.
+- A store file SQLite cannot read is moved to `vaults.db.corrupt` and the next pass rebuilds it — the same recovery the [[history]] store has, because the index is a cache and the notes are the data.
 - The control socket and the CLI can reach the store without resolving Godot's `user://` paths, which is why an agent can search a vault with no pane open.
 
 ## What the walk calls a note

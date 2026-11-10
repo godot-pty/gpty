@@ -1795,6 +1795,28 @@ def main() -> int:
             fresh,
         )
 
+        # A damaged index must recover, not end the verb: the store is a cache
+        # of the vault, so the next search re-reads it. The damaged file is
+        # moved aside under a fixed name and a fresh store answers.
+        index = smoke.state_dir() / "vaults.db"
+        damage = b"\x0d\x00\x00\x00 this is not a database" * 200
+        index.write_bytes(damage)
+        recovered = smoke.result(
+            smoke.cli("vault", "search", str(vault), "pinning", "--json"),
+            "vault search (after index damage)",
+        )
+        smoke.require(
+            recovered.get("total") == 1,
+            "a damaged vault index must be replaced and rebuilt from the vault",
+            recovered,
+        )
+        quarantine = smoke.state_dir() / "vaults.db.corrupt"
+        smoke.require(
+            quarantine.exists() and quarantine.read_bytes() == damage,
+            "the damaged index must be moved aside, never deleted",
+            str(quarantine),
+        )
+
         note = smoke.result(
             smoke.cli("vault", "read", str(vault), "notes/Beta.md", "--json"),
             "vault read",

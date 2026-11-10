@@ -61,6 +61,7 @@ gpty/
 │   │       ├── keymap.rs       # Key event → byte sequence
 │   │       ├── cli.rs          # CliProcess: piped argv child, line queue
 │   │       ├── history.rs      # SQLite scrollback store
+│   │       ├── store.rs        # Shared SQLite store plumbing: write lock, damaged-file recovery
 │   │       └── vault.rs        # SQLite + FTS5 vault index (wiki pane's notes and search)
 │   ├── gpty-media/            # Media backend: pinned FFmpeg binding, sessions, packed frames/PCM
 │   │   ├── components.txt     # Closed FFmpeg component set (build recipe ↔ runtime allowlists)

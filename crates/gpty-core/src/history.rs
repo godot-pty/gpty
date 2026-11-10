@@ -15,11 +15,12 @@
 //! mutex the UI renders under.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex};
 
 use rusqlite::{Connection, params, params_from_iter};
 
 use crate::lock::lock_or_warn;
+use crate::store::{open_with_recovery, restrict_to_owner, write_guard};
 
 /// Maximum terms carried from user input into an FTS5 query.
 const MAX_QUERY_TERMS: usize = 32;
@@ -87,143 +88,17 @@ pub fn store_size_on_disk(path: &str) -> u64 {
         .sum()
 }
 
-/// Restrict a store file to its owner.
-///
-/// SQLite creates the database (and the `-wal`/`-shm` siblings it needs) with
-/// the process umask, so under a permissive umask — or a `user://` another
-/// account can read — every pane's scrollback is readable by others. The same
-/// rule guards the vault index ([`crate::vault::VaultStore`]), which is why
-/// this is crate-visible. The mechanism is
-/// [`crate::owner_only::restrict_file`], shared with the GDScript stores'
-/// repair path, so a symlink at the database path is skipped rather than
-/// chmod'd through. Best effort by design: a sibling may not exist yet, and a
-/// mode that cannot be set is worth a log line, not a failed pane.
-pub(crate) fn restrict_to_owner(path: &str) {
-    if let Some(problem) =
-        crate::owner_only::restrict_file(std::path::Path::new(path)).problem(path)
-    {
-        log::warn!("could not restrict a store to its owner ({problem})");
-    }
-}
-
-/// One writer per history file at a time, for this whole process.
-///
-/// Every pane's writer owns its *own* connection to the same file
-/// ([`HistoryStore::open`]), and SQLite serializes writers per file: N panes
-/// meant N writers racing for the write lock, with only `busy_timeout` between
-/// them and `SQLITE_BUSY`. That wait is not a queue and can starve a writer —
-/// measured on `windows-smoke`, a commit passed a 5 s expiry and the batch was
-/// dropped with `history append failed (2 rows): database is locked`.
-///
-/// Taking this guard around each write makes that impossible by construction
-/// for anything inside this process (which is every pane; a GUI is one
-/// process). It is always the *innermost* lock — acquired inside a store
-/// method, so a caller may hold the per-pane store mutex while taking it, and
-/// nothing may take a store mutex while holding it — so the order cannot
-/// invert, and it is held only across one transaction — or, for
-/// [`HistoryStore::open`], across one open, which may also move a damaged file
-/// aside and must not interleave with another pane creating the same path.
-static WRITE_LOCK: Mutex<()> = Mutex::new(());
-
-/// Serialize this process's writes to any one SQLite store file.
-///
-/// `None` — the lock was poisoned by a panic on another thread — means the
-/// write proceeds **unserialized** rather than not at all: losing the
-/// serialization risks a `SQLITE_BUSY` that the busy timeout still waits out,
-/// while skipping the write would lose the rows outright. (Elsewhere the
-/// policy is the opposite, and [`lock_or_warn`]'s doc says why: skipping is how
-/// a pane keeps rendering through someone else's panic. A dropped batch's only
-/// second chance was the retention window.)
-///
-/// Crate-visible because the vault index ([`crate::vault::VaultStore`]) opens
-/// its own connection to its own file the same way and needs the same
-/// "innermost lock, held across one transaction" discipline; one process-wide
-/// lock for both stores keeps that a single rule.
-pub(crate) fn write_guard() -> Option<MutexGuard<'static, ()>> {
-    lock_or_warn(&WRITE_LOCK, "history write lock")
-}
-
-/// Whether `err` says the file at the path is not a database at all.
-///
-/// The distinction is the difference between a store that is unusable and one
-/// that is merely busy or unwritable: only these two codes mean no future open
-/// will ever succeed, so only these two license moving the file aside. A
-/// `SQLITE_BUSY` or a permission error must leave it where it is.
-fn is_unreadable_store(err: &rusqlite::Error) -> bool {
-    matches!(
-        err,
-        rusqlite::Error::SqliteFailure(inner, _)
-            if matches!(
-                inner.code,
-                rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt
-            )
-    )
-}
-
 impl HistoryStore {
     /// Open or create the history database at `path` for `pane_key`.
     ///
-    /// A file SQLite cannot read at all ([`is_unreadable_store`]) is moved to
-    /// `<path>.corrupt` and a fresh store takes its place, so one damaged
-    /// file does not end scrollback persistence for every pane from then on.
+    /// A file SQLite cannot read at all is moved to `<path>.corrupt` and a
+    /// fresh store takes its place ([`crate::store::open_with_recovery`]), so
+    /// one damaged file does not end scrollback persistence for every pane
+    /// from then on.
     pub fn open(path: &str, pane_key: &str, cap: u32) -> Result<Self, rusqlite::Error> {
-        // The whole open runs under the write guard, not just the replacement:
-        // SQLite *creates* a database that is missing, so a pane opening this
-        // path while another pane is moving a damaged file aside would either
-        // have its fresh store renamed away with the damaged one, or create
-        // the file in the gap between the move and the replacement.
-        let _serialized = write_guard();
-        match Self::open_at(path, pane_key, cap) {
-            Err(e) if is_unreadable_store(&e) => {
-                log::warn!(
-                    "scrollback store {path} is unreadable ({e}); moving it aside for a new one"
-                );
-                Self::replace_unreadable(path, pane_key, cap).map_err(|failed| {
-                    log::warn!(
-                        "could not replace the unreadable scrollback store {path}: {failed}"
-                    );
-                    // The caller's message stays the one that names the real
-                    // problem; the recovery's own failure is the second line.
-                    e
-                })
-            }
-            other => other,
-        }
-    }
-
-    /// Replace a store file that SQLite cannot read, and open the new one.
-    ///
-    /// The unreadable file is moved, never deleted: it is the user's
-    /// scrollback, and a damaged one may still be worth recovering by hand.
-    /// The `-wal` and `-shm` siblings move with it, *before* the database
-    /// itself — a stale `-wal` left beside the fresh store could replay the
-    /// old file's frames into it — and a sibling that cannot be moved stops
-    /// the whole replacement while the database is still in place, so a
-    /// failure leaves the store exactly as unusable as it was.
-    ///
-    /// The target is one fixed name, not a timestamped one: a file that
-    /// cannot be opened is opened again on every launch, and accumulating a
-    /// copy per launch would be a slow leak in `user://`.
-    ///
-    /// The caller holds [`write_guard`], which is what makes the move
-    /// exclusive to this process — every pane opens a store, and they all
-    /// open the same file at startup.
-    fn replace_unreadable(path: &str, pane_key: &str, cap: u32) -> Result<Self, rusqlite::Error> {
-        let aside = format!("{path}.corrupt");
-        for suffix in ["-wal", "-shm", ""] {
-            let source = format!("{path}{suffix}");
-            match std::fs::rename(&source, format!("{aside}{suffix}")) {
-                Ok(()) => {}
-                // Never existed: there is no part of the damaged store at this
-                // path to move.
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => {
-                    log::warn!("could not move the unreadable store {source} aside: {e}");
-                    return Self::open_at(path, pane_key, cap);
-                }
-            }
-        }
-        Self::open_at(path, pane_key, cap)
+        open_with_recovery("scrollback store", path, || {
+            Self::open_at(path, pane_key, cap)
+        })
     }
 
     /// The open itself: create the file, schema and pragmas.
@@ -972,39 +847,6 @@ mod tests {
             damage,
             "a healthy store is never moved aside"
         );
-    }
-
-    /// The WAL siblings move *with* the database, before it, under the same
-    /// fixed name. `open` rarely gets to do this — SQLite deletes an
-    /// unreadable `-wal` itself while failing — so this drives the move
-    /// directly: a sibling left at the store's path is the one state that
-    /// could corrupt the replacement.
-    #[test]
-    fn recovery_moves_the_wal_siblings_with_the_store() {
-        let (_tmp, path) = temp_db_path("sibling_move");
-        fs::write(&path, b"not a database").unwrap();
-        fs::write(format!("{path}-wal"), b"stale wal frames").unwrap();
-        fs::write(format!("{path}-shm"), b"stale wal index").unwrap();
-
-        let guard = write_guard();
-        assert!(guard.is_some(), "the write lock must be healthy");
-        let store = HistoryStore::replace_unreadable(&path, "pane-a", 100).unwrap();
-        drop(guard);
-
-        assert_eq!(
-            fs::read(format!("{path}.corrupt")).unwrap(),
-            b"not a database"
-        );
-        assert_eq!(
-            fs::read(format!("{path}.corrupt-wal")).unwrap(),
-            b"stale wal frames"
-        );
-        assert_eq!(
-            fs::read(format!("{path}.corrupt-shm")).unwrap(),
-            b"stale wal index"
-        );
-        store.append(1, "the replacement works").unwrap();
-        assert_eq!(store.max_line_num().unwrap(), 1);
     }
 
     /// Only SQLite's "this is not a database" licenses the move. A path that
