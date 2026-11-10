@@ -6,7 +6,7 @@
 
   ![GitHub Downloads](https://img.shields.io/github/downloads/godot-pty/gpty/total) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/godot-pty/gpty/badge)](https://securityscorecards.dev/viewer/?uri=github.com/godot-pty/gpty) [![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/godot-pty/gpty#verifying-releases)
 
-  [![Linux Foundation](https://img.shields.io/badge/LFX-Linux_Foundation-blue?logo=linuxfoundation&logoColor=white)](https://insights.linuxfoundation.org/project/godot-pty-gpty) [![GitHub Releases](https://img.shields.io/badge/platform-x86--64--Windows--Linux--macOS-blue)](https://github.com/godot-pty/gpty/releases/latest) ![LLM-powered](https://img.shields.io/badge/code-LLM_Powered-blue)
+  [![LFX Health Score](https://insights.linuxfoundation.org/api/badge/health-score?project=godot-pty-gpty)](https://insights.linuxfoundation.org/project/godot-pty-gpty) [![GitHub Releases](https://img.shields.io/badge/platform-x86--64--Windows--Linux--macOS-blue)](https://github.com/godot-pty/gpty/releases/latest) ![LLM-powered](https://img.shields.io/badge/code-LLM_Powered-blue)
 
 </div>
 
