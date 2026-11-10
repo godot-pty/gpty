@@ -460,6 +460,18 @@ jobs:
       - name: Run cargo-audit
         run: cargo audit --deny warnings
 
+      # The fuzz workspace is outside the repository workspace and commits its
+      # own lockfile, so the audit above never reads it - and GitHub's
+      # dependency graph does. That is how RUSTSEC-2026-0459 (`libsqlite3-sys`
+      # 0.28.0, left behind by a stale `fuzz/Cargo.lock`) reached Scorecard's
+      # Vulnerabilities check while this job was green. `--locked` keeps the
+      # sync check from re-resolving the very file it is checking.
+      - name: Verify the fuzz lockfile is in sync
+        run: cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
+
+      - name: Run cargo-audit on the fuzz workspace
+        run: cargo audit --file fuzz/Cargo.lock --deny warnings
+
   # ── Dependency policy: licences, sources, duplicate versions ──────────
   #
   # `cargo audit` above owns advisories; this owns the rest of `deny.toml`:

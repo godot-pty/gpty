@@ -219,7 +219,7 @@ See the agent guide for the complete conventions and patterns: [Rust](docs/conte
 - Rust crates come from crates.io only. `deny.toml` denies unknown registries and git sources.
 - The licence allow-list lives in `deny.toml`: MIT, Apache-2.0 (and its LLVM exception), BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, Unicode-3.0, Unlicense, Zlib and GPL-3.0-or-later, with named WTFPL exceptions for the two FFmpeg binding crates. A dependency outside the policy fails `cargo deny check` with the crate named; the fix is a decision - allow the licence, add a named exception with its reason, or drop the dependency - not a config edit.
 - Dependabot opens one grouped pull request per ecosystem per week: Cargo, the fuzz workspace's own lockfile, and GitHub Actions. Every third-party action is pinned to a full commit SHA.
-- `./scripts/ci-check` runs `cargo audit --deny warnings` for advisories and `cargo deny check` for licences, sources, yanked crates and duplicate versions; CI runs the same two gates.
+- `./scripts/ci-check` runs `cargo audit --deny warnings` for advisories over both committed lockfiles, the workspace's `Cargo.lock` and the fuzz workspace's `fuzz/Cargo.lock`, each behind a `cargo metadata --locked` drift check because GitHub's dependency graph reads both - and `cargo deny check` for licences, sources, yanked crates and duplicate versions; CI runs the same gates.
 - A release publishes the three archives, `SHA256SUMS` and build-provenance attestations. The release runbook is `.omp/skills/release/SKILL.md`; the workflow is `.github/workflows/release.yml`.
 
 ## Pull Request Process

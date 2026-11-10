@@ -571,6 +571,23 @@ if command -v cargo-audit &>/dev/null; then
         fail "cargo audit"
         check_failed
     fi
+    # The fuzz workspace pins its own lockfile and sits outside this workspace,
+    # so the audit above never reads it - but GitHub's dependency graph does,
+    # and a stale `fuzz/Cargo.lock` is how Scorecard's Vulnerabilities check
+    # found RUSTSEC-2026-0459 (`libsqlite3-sys` 0.28.0) while this gate was
+    # green. `--locked` reports drift instead of re-resolving the file.
+    if cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml >/dev/null 2>&1; then
+        pass "fuzz lockfile in sync"
+    else
+        fail "fuzz lockfile in sync — run: cargo metadata --format-version 1 --manifest-path fuzz/Cargo.toml"
+        check_failed
+    fi
+    if cargo audit --file fuzz/Cargo.lock --deny warnings 2>&1; then
+        pass "cargo audit (fuzz)"
+    else
+        fail "cargo audit (fuzz)"
+        check_failed
+    fi
 else
     skip_gate "cargo-audit not installed — run: cargo install cargo-audit"
 fi
