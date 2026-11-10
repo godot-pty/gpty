@@ -39,6 +39,8 @@ All three reach the same handlers in the running GUI. The CLI is a stateless cli
 | `version` | — | `{version, protocol}` |
 | `shutdown` | — | `{success}` |
 
+`newPane` and `paneRun` run their `command` **through the configured shell** (`-c`, or `/c` for `cmd.exe`) — a command line, the same authority `inject` has, so `&&`, pipes and globs work. A program is not settable through the API at all: a profile and a saved layout tile are the two surfaces that own one. Both methods hold their answer until the new pane's child has started, so a shell that cannot be started answers an error naming it and closes the tile instead of reporting a pane that can never run anything.
+
 `vaultSearch`, `vaultRead` and `vaultWeight` answer only inside a vault root the user has **registered** - the user-owned `user://vaults.json`, whose only writer is the pane settings UI. A Wiki pane showing a directory is not enough (the pane reads it; the API does not answer for it), and the shipped knowledge base registers itself when a pane opens it. An unregistered root is refused with `-32000` and `data.code = "not_registered"`, so a client cannot use these methods to read Markdown under a directory the user never opened.
 
 The `layout*` methods are named for the arrangement they restore, but in this build they save, load, and list **profiles**: `layoutSave` captures the active workspace as a reusable profile, and `layoutLoad` replaces the active workspace with that profile's tiles. See [[profile]] for the trust rules that apply to loading one, and [[layout]] for the arrangement itself.

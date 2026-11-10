@@ -32,7 +32,7 @@ Two CLI commands are deliberately **not** tools. `state` declares the agent stat
 
 The three vault tools answer only for a vault root the user has registered in a Wiki pane's settings; an unregistered `vault_path` is a tool error (`isError: true` with `not registered`), not a protocol error.
 
-The heavy hitters for an agent are `pane-wait` and `pane-read`. Together they turn a terminal into a synchronous function call: run a command, wait for the line that means done, read the output. `pane-run` returns as soon as the pane exists, so the exit code is not the answer — `pane-status` is.
+The heavy hitters for an agent are `pane-wait` and `pane-read`. Together they turn a terminal into a synchronous function call: run a command, wait for the line that means done, read the output. `pane-run` answers once the new pane's child (your shell) has started — not when the command line inside it finishes — so its own answer carries no exit code and `pane-status` is the one that does.
 
 ## The name gate
 

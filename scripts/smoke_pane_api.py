@@ -537,6 +537,37 @@ class Smoke:
         )
         self.cli("kill-pane", new_id)
 
+    def new_pane_command(self) -> None:
+        """`new-pane --command` is a command LINE, run through the shell.
+
+        The flag was documented as a command line and implemented as the
+        pane's *program*: `-c "echo hi"` answered a `pane_id` over a child that
+        never started (`pane-status` read `pid: null`, `pane-read` was empty).
+        A two-command line proves both halves reach the shell that runs it.
+        """
+        self.enter("new-pane --command")
+        # `;` separates commands in a POSIX shell, `&` in cmd.exe — the pane
+        # runs whatever the configured shell is.
+        separator = "&" if os.name == "nt" else ";"
+        line = f"echo SMOKE_NP_ONE{separator} echo SMOKE_NP_TWO"
+        payload = self.result(
+            self.cli("new-pane", "-t", "terminal", "--command", line, "--json"),
+            "new-pane --command",
+        )
+        pane_id = str(payload.get("pane_id", ""))
+        self.require(bool(pane_id), "new-pane --command must answer a pane", payload)
+        self.require(
+            self.wait_for_output(pane_id, "SMOKE_NP_TWO").get("matched") is True,
+            "a two-command line must run in the new pane", payload,
+        )
+        text = self.read_pane(pane_id)
+        self.require(
+            "SMOKE_NP_ONE" in text and "SMOKE_NP_TWO" in text,
+            "every command of the line must reach the pane, not just the last",
+            text[-400:],
+        )
+        self.cli("kill-pane", pane_id)
+
     def subscribe(self) -> str:
         """Wait for the event listener, then subscribe to it.
 
@@ -1149,6 +1180,9 @@ def main() -> int:
 
         # ── new-pane --split places the pane on the named side ────────
         smoke.split_direction()
+
+        # ── new-pane --command runs a command line, not a program ─────
+        smoke.new_pane_command()
 
         # ── new-pane (the default shell for this platform) ─────────────
         smoke.enter("new-pane")

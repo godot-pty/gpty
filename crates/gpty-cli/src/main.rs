@@ -79,7 +79,7 @@ enum Commands {
         #[arg(short = 't', long, default_value = "terminal")]
         pane_type: String,
 
-        /// Shell command to run (terminal only)
+        /// Command line run through your shell (terminal), or the program to run (cli_view)
         #[arg(short, long)]
         command: Option<String>,
 

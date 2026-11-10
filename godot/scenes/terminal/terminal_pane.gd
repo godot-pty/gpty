@@ -9,6 +9,16 @@ class_name TerminalPane
 ## path from tracker to display.
 signal agent_state_changed(state: String)
 
+## The child started. Emitted once, from `_start_child_if_ready`, one idle
+## frame after `start_shell` answered success (deferred out of the container
+## sort that produced the first layout): a pane's IPC answer is held until
+## then, so this is what releases it.
+signal child_started
+## The child could not be started; `reason` is `start_shell`'s own sentence
+## naming what failed. The workspace toasts it and closes the pane. Deferred
+## like `child_started`.
+signal child_start_failed(reason: String)
+
 const CURSOR_BLINK_INTERVAL = 0.5
 const SCROLL_LINES = 3
 @export var scroll_lines: int = SCROLL_LINES
@@ -113,11 +123,15 @@ var _draw_ms: int = 0
 
 var _resize_pending: bool = false
 var _resize_timer: float = 0.0
-## Whether the child exists. False from `_ready` until the first layout pass
-## (`_start_child_if_ready`): a fresh pane reports size (0,0) until its
-## container sorts, and a grid chosen before that is the 24x80 guess a TUI
-## snapshots and keeps.
+## Whether the child's start has been attempted. False from `_ready` until the
+## first layout pass (`_start_child_if_ready`): a fresh pane reports size (0,0)
+## until its container sorts, and a grid chosen before that is the 24x80 guess
+## a TUI snapshots and keeps. True after that attempt whether it succeeded or
+## not — there is one attempt per pane, ever — so `child_start_resolved()`
+## answers whether the pane's fate is known.
 var _started := false
+## What `start_shell` answered when it refused to spawn (`""` when it started).
+var _start_error := ""
 ## Whether the grid has positioned this pane's tile (`mark_tile_laid_out`).
 ## A tile that was never positioned is only as big as the container's minimum,
 ## which is not a size to spawn a child at.
@@ -486,11 +500,17 @@ func _grid_for_size(px: Vector2) -> Vector2i:
 		return Vector2i.ZERO
 	return Vector2i(fitted_cols, fitted_rows)
 
+## Whether the child's start has been decided (`_started`, whether it
+## succeeded or not). A held pane answer waits for this.
+func child_start_resolved() -> bool:
+	return _started
+
 ## Spawn the child at the size the pane is drawn at, once: called from `_ready`
 ## (a pane that already has a size), from `_on_resize` on the first laid-out
 ## size (no debounce - the tile has never had another size), from `_process` one
 ## frame after the layout marked the tile, and it is the only place
-## `start_shell` is called.
+## `start_shell` is called. Reports the outcome through `child_started` /
+## `child_start_failed`.
 func _start_child_if_ready() -> void:
 	if _started or _terminal == null or _cell_w <= 0.0:
 		return
@@ -509,10 +529,20 @@ func _start_child_if_ready() -> void:
 		# grid has never positioned this tile): wait for one.
 		return
 	_started = true
-	_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines, JSON.stringify(shell_args), workspace_cwd)
+	_start_error = str(_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines, JSON.stringify(shell_args), workspace_cwd))
+	if _start_error != "":
+		# No child: nothing to flush into and no scheme to apply. Whoever
+		# hears this closes the pane — a tile with no child would draw an
+		# empty grid forever. Deferred because a pane's first layout runs
+		# inside the container's sort (`_on_resize`), and the listener closes
+		# the tile: a tree mutation must not happen mid-sort.
+		child_start_failed.emit.call_deferred(_start_error)
+		return
 	if color_scheme_path != "":
 		_apply_stored_scheme()
 	_flush_pending_input()
+	# Deferred for the same reason, and so both outcomes arrive alike.
+	child_started.emit.call_deferred()
 
 ## `Workspace._apply_layout` gave this pane's tile the rect it is drawn at. The
 ## container sorts at the end of that frame, so `_process` waits for the next

@@ -19,7 +19,7 @@ The second point matters for automation: a typo in a pane type fails immediately
 
 | Command | What it does |
 |---|---|
-| `new-pane` | Open a pane. `-t/--pane-type` (terminal, code_viewer, file_tree, inspector, reasoning, cli_view, wiki, media), `-c/--command`, `--arg` (repeatable, `cli_view` argv), `-s/--split left\|right\|top\|bottom` (a side of the largest tile; when it cannot fit, the tile's aspect decides), `--title`, `-f/--focus true\|false` (default true), `--tags` |
+| `new-pane` | Open a pane. `-t/--pane-type` (terminal, code_viewer, file_tree, inspector, reasoning, cli_view, wiki, media), `-c/--command` (a command line run through your shell for a terminal; the program for `cli_view`), `--arg` (repeatable, `cli_view` argv), `-s/--split left\|right\|top\|bottom` (a side of the largest tile; when it cannot fit, the tile's aspect decides), `--title`, `-f/--focus true\|false` (default true), `--tags` |
 | `list-panes` | Every pane with id, label, type, and grid position |
 | `kill-pane` | Close a pane by id, or `"active"` for the focused one |
 | `focus-pane` | Focus a pane by id |
@@ -63,6 +63,8 @@ Open a pane and give it work:
 ```bash
 gpty new-pane --pane-type terminal --command "cargo test" --focus true
 ```
+
+`--command` is a **command line**, run through your configured shell (`-c`, or `/c` for `cmd.exe`) — the same authority `pane-run` and `inject` have, so compound commands, pipes and globs work. It is not the pane's program: that comes from a profile or a saved tile. Both `new-pane` and `pane-run` answer only once the new pane's child has started, so a shell that cannot be started answers an error naming it and leaves no pane behind.
 
 Run a command in a fresh pane, then check on it:
 

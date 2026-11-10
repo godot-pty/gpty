@@ -27,7 +27,7 @@ client ──▶ socket / named pipe ──▶ IpcServer (tokio task)
 client ◀──────── response ──────────┘
 ```
 
-`drain_ipc_requests()` hands back `{id, method, params, timeout_ms}`, where `timeout_ms` is what remains of the request's budget — a dialog that needs a human arms its own timer from it and cannot outlive the request. Deferred methods such as `paneWait` are held server-side: the connection stays open until the pattern matches or the deadline passes.
+`drain_ipc_requests()` hands back `{id, method, params, timeout_ms}`, where `timeout_ms` is what remains of the request's budget — a dialog that needs a human arms its own timer from it and cannot outlive the request. Deferred methods are held server-side: `paneWait` until the pattern matches or the deadline passes, `pluginInstall` until the review dialog closes, and `newPane`/`paneRun` until the pane they created has a child — which is why an error from either of those means no pane was left behind.
 
 A method call is asynchronous from the GUI's point of view, and a long call does not block the frame loop — but it does occupy one connection slot.
 
@@ -36,7 +36,7 @@ A method call is asynchronous from the GUI's point of view, and a long call does
 All traffic is newline-delimited JSON-RPC 2.0: one JSON object per line, both directions. A request:
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"newPane","params":{"type":"terminal","command":"/bin/bash","focus":true}}
+{"jsonrpc":"2.0","id":1,"method":"newPane","params":{"type":"terminal","command":"cargo test","focus":true}}
 ```
 
 The answer:
@@ -69,7 +69,7 @@ The fallbacks cover sessions with no runtime directory (a cron job, a stripped l
 
 | Method | Purpose |
 |---|---|
-| `newPane` | Create a pane; `type`, optional `command`, `split` (`left`/`right`/`top`/`bottom`), `title`, `focus`, `tags` |
+| `newPane` | Create a pane; `type`, optional `command` (a command line run through the configured shell, like `paneRun`), `split` (`left`/`right`/`top`/`bottom`), `title`, `focus`, `tags` |
 | `listPanes` | Every pane with id, label, type, title, cell position, tags |
 | `killPane` | Close a pane by id, or `"active"` for the focused one |
 | `focusPane` | Focus a pane by id or `"active"` |

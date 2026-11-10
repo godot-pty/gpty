@@ -152,10 +152,23 @@ impl GptyTerminal {
     /// than failing the pane, so a workspace restored after its directory
     /// moved still opens a shell.
     ///
+    /// Returns `""` when the child started, otherwise one sentence naming what
+    /// could not be started and why. GDScript shows that sentence to the user
+    /// (a toast) and answers its own control-API request with it: a caller
+    /// told a pane had started, over a tile with no child, is a success answer
+    /// over a dead pane.
+    ///
+    /// A refusal is printed at plain `godot_print!` level, not logged as an
+    /// engine warning or error: it is a handled outcome the caller answers and
+    /// the user is told about, while Godot's warn/error levels mean "something
+    /// unexpected happened" (and GUT fails a test on either of them, so a
+    /// deliberately bad shell program in a test would read as a bug).
+    ///
     /// # Edge cases
     /// - Calling twice replaces the previous session.
-    /// - If spawning fails, the grid stays empty: `get_rows()` and `get_cols()`
-    ///   answer `0`, and `get_grid_updates_packed()` returns an empty dictionary.
+    /// - A failed spawn leaves the grid empty (`get_rows()` and `get_cols()`
+    ///   answer `0`, `get_grid_updates_packed()` returns an empty dictionary)
+    ///   and answers the reason instead of `""`: nothing is left running.
     /// - `rows` and `cols` are clamped to ≥1.
     // FFI boundary: GDScript callers pass positionally; no object to group into.
     #[allow(clippy::too_many_arguments)]
@@ -170,17 +183,19 @@ impl GptyTerminal {
         history_lines: i64,
         args_json: GString,
         cwd: GString,
-    ) {
+    ) -> GString {
         let command = command.to_string();
         if command.is_empty() || command.len() > 1024 || command.contains('\0') {
-            godot_error!("Refusing to spawn invalid shell command (empty, oversized, or NUL)");
-            return;
+            let reason = "Cannot start a pane: the shell program is empty, over 1024 characters, or contains a NUL";
+            godot_print!("{reason}");
+            return GString::from(reason);
         }
         // Saved tiles and profiles choose this program, so an absolute path
         // must not name a file another user could have written.
         if let Err(e) = gpty_core::pty::validate_executable(&command) {
-            godot_error!("Refusing to spawn: {e}");
-            return;
+            let reason = format!("Cannot start the pane's shell: {e}");
+            godot_print!("{reason}");
+            return GString::from(reason.as_str());
         }
 
         let id = NEXT_TERMINAL_ID.fetch_add(1, Ordering::Relaxed);
@@ -348,9 +363,13 @@ impl GptyTerminal {
                 if let Some((session_id, _)) = event_registration {
                     omp_events::unregister_terminal(&session_id);
                 }
-                godot_error!("Failed to spawn PTY for '{command}': {e}");
+                let reason = format!("Cannot start '{command}': {e}");
+                godot_print!("{reason}");
+                return GString::from(reason.as_str());
             }
         }
+        // The child is running: no reason to hand back.
+        GString::from("")
     }
 
     /// Send raw text to the PTY — NO newline appended.

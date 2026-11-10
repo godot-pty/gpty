@@ -51,7 +51,7 @@ const PLUGIN_ADMIN_ACTIONS := ["uninstall", "enable", "disable"]
 ## bookkeeping and the success/error envelope unexercised. Each entry is
 ## `{id, success, payload}`; an empty array means the answer is deferred
 ## (`paneWait` answers from the wait poll, `pluginInstall` from the review
-## dialog).
+## dialog, and a pane-creating method from its new pane's own start).
 ##
 ## A refusal's payload is the flat error object `error()` builds, not the
 ## `{"error": ...}` envelope: `respond_ipc` hands it to the Rust edge, which
@@ -89,6 +89,13 @@ static func dispatch_request(ws, req: Dictionary) -> Array:
 	var result = ws._handle_ipc_method(method, params)
 	if result is Dictionary and result.has("error"):
 		return [_answer(id, false, result["error"])]
+	# A pane answer is only true once that pane can run. A terminal starts its
+	# child from the first size its tile is laid out at, which is after this
+	# returns, so an answer naming a pane is held (`_hold_pane_answer`) until
+	# the pane reports the outcome: a spawn that failed answers an error
+	# instead of a success over a tile that can never run anything.
+	if result is Dictionary and result.has("pane_id") and ws._hold_pane_answer(int(id), result):
+		return []
 	return [_answer(id, true, result)]
 
 
@@ -232,9 +239,20 @@ static func handle(ws, method: String, params: Dictionary):
 					"tags": np_tags,
 				}
 			else:
-				var shell: String = PaneTypes.sanitize_shell(
-					params.get("command"), SettingsManager.cfg_shell_command)
-				np_opts = {"shell_command": shell, "tags": np_tags}
+				# `command` on a terminal is a command LINE, run through the
+				# same configured shell `paneRun` uses (`-c`, or `/c` for
+				# `cmd.exe`), never the pane's program: the old mapping put
+				# the line into `shell_command`, so "echo hi" was spawned as a
+				# program of that name and the call answered a success over a
+				# child that never started. A program is set by a profile or a
+				# saved tile — the two surfaces that own one.
+				var np_shell: String = SettingsManager.cfg_shell_command
+				np_opts = {"shell_command": np_shell, "tags": np_tags}
+				var np_command := str(params.get("command", "")).strip_edges()
+				if np_command != "":
+					if np_command.length() > 1024 or np_command.contains("\uFFFD"):
+						return error("Invalid command", -32602)
+					np_opts["shell_args"] = PaneTypes.shell_run_args(np_shell, np_command)
 			# A display title, never the pane's addressable label
 			# (`pane_label`): the request names it `title`, the spawn options
 			# name it `title_label` (what `spawn_pane` reads), and an empty

@@ -87,6 +87,12 @@ var _history_pruned: bool = false  # orphaned-scrollback sweep already attempted
 ## without ending the run (`_history_stats_provider`'s pattern).
 var quit_action: Callable = func(): get_tree().quit()
 var _quit_asking: bool = false  # a pane-ask walk for quitting is in flight
+## The one place a JSON-RPC answer leaves the GUI, behind a seam for the same
+## reason as `quit_action`: `GptyTerminal.respond_ipc` has no push point from
+## GUT, so the drain's deferred-answer tests replace this to observe what a
+## held answer said (and to keep answering a socket nobody listens on).
+var send_ipc_answer: Callable = func(id: int, ok: bool, payload: String) -> void:
+	GptyTerminal.respond_ipc(id, ok, payload)
 
 func _ready():
 	show()
@@ -902,6 +908,12 @@ func _attach_pane_into(ws: Dictionary, w: Control, body: Control):
 			var lbl = w.get_node_or_null("BodyVBox/TitleBar/TitleLabel")
 			if lbl: lbl.text = " " + t
 		)
+		# A pane answer is held until its child starts, so the outcome comes
+		# back through here: success releases the answer, a refusal answers it
+		# with the reason and closes the tile. Both are emitted a frame after
+		# the start attempt, outside the container sort that caused it.
+		body.child_started.connect(func(): _on_pane_child_started(body))
+		body.child_start_failed.connect(func(reason: String): _on_pane_child_failed(body, reason))
 		# Agent-state contract: this terminal is the source of its own state.
 		# The state itself is dispatched by `_prime_new_pane_observers` /
 		# `_dispatch_agent_state` — panes are primed by the scan, not here, so
@@ -2057,6 +2069,19 @@ var _pending_waits: Dictionary = {}
 # pluginInstall reviews waiting on the dialog: id -> summary params
 var _pending_plugin_reviews: Dictionary = {}
 
+## How long a pane answer waits for its pane's child before it answers an
+## error. The child starts within a frame or two of the handler returning, so
+## this is a guard against a wedged frame, not a latency anyone should see —
+## and the Rust edge's own fallback (`GDS_RESPONSE_TIMEOUT`, 5 s) started
+## earlier, so a request that waits this long has already been answered.
+const PANE_START_ANSWER_TIMEOUT_MS := 5000
+## Pane answers held until their pane's child starts, keyed by the body's
+## instance id: {id: int, pane_id: String, body: Control, answer: Dictionary,
+## deadline_ms: int}. `newPane`/`paneRun` answer a `pane_id` before that pane's
+## child exists, so the answer is only true once `child_started` (or an error,
+## via `child_start_failed`) says what happened — `_hold_pane_answer`.
+var _pending_pane_starts: Dictionary = {}
+
 func _process(_delta: float):
 	# Concept event polling — must run even before sidebar is ready
 	_poll_agent_events()
@@ -2064,6 +2089,7 @@ func _process(_delta: float):
 	_poll_concept_events()
 	_poll_ipc_requests()
 	_poll_pending_waits()
+	_poll_pending_pane_starts()
 	if _sidebar == null: return
 	# FPS counter update (throttled to ~4 Hz)
 	if Engine.get_process_frames() % 15 == 0:
@@ -2410,7 +2436,7 @@ func _poll_ipc_requests():
 			# A handler may already return its JSON as a string (`vaultRead`
 			# does); everything else is serialized once, here.
 			var text = payload if typeof(payload) == TYPE_STRING else JSON.stringify(payload)
-			GptyTerminal.respond_ipc(int(answer["id"]), bool(answer["success"]), text)
+			send_ipc_answer.call(int(answer["id"]), bool(answer["success"]), text)
 
 # Poll registered paneWait requests each frame: respond on first regex match
 # or deadline. Matching happens in Rust (standard regex crate) per pane.
@@ -2423,18 +2449,88 @@ func _poll_pending_waits():
 		var w = _pending_waits[wid]
 		var wbody = _resolve_pane_target(str(w.get("attachment_id", ""))).get("body")
 		if wbody == null or not (wbody is TerminalPane):
-			GptyTerminal.respond_ipc(int(wid), false, JSON.stringify(_ipc_error("Pane gone")["error"]))
+			send_ipc_answer.call(int(wid), false, JSON.stringify(_ipc_error("Pane gone")["error"]))
 			done.append(wid)
 			continue
 		var line = str(wbody._terminal.check_lines(w["pattern"]))
 		if line != "":
-			GptyTerminal.respond_ipc(int(wid), true, JSON.stringify({"matched": true, "line": line}))
+			send_ipc_answer.call(int(wid), true, JSON.stringify({"matched": true, "line": line}))
 			done.append(wid)
 		elif now >= w["deadline_ms"]:
-			GptyTerminal.respond_ipc(int(wid), true, JSON.stringify({"matched": false, "timed_out": true}))
+			send_ipc_answer.call(int(wid), true, JSON.stringify({"matched": false, "timed_out": true}))
 			done.append(wid)
 	for wid in done:
 		_pending_waits.erase(wid)
+
+## Hold an answer that names a pane until that pane's child has started.
+##
+## A terminal starts its child from the first size its tile is laid out at,
+## which happens after the IPC drain returns — so answering here would report a
+## spawn that has not happened yet, and a spawn that then failed would have
+## been reported as a success (the defect this exists for). Returns true when
+## the answer was held, false when it can go out now: the target is not a
+## terminal (nothing to wait for), it has already resolved its start, or its id
+## names no pane at all — an answer is never swallowed.
+func _hold_pane_answer(id: int, answer: Dictionary) -> bool:
+	var pane_id := str(answer.get("pane_id", ""))
+	var body = _resolve_pane_target(pane_id).get("body")
+	if body == null or not (body is TerminalPane):
+		return false
+	if body.child_start_resolved():
+		return false
+	_pending_pane_starts[body.get_instance_id()] = {
+		"id": id,
+		"pane_id": pane_id,
+		"body": body,
+		"answer": answer,
+		"deadline_ms": Time.get_ticks_msec() + PANE_START_ANSWER_TIMEOUT_MS,
+	}
+	return true
+
+## Answer a held pane request: its document on success, or the flat
+## `{code, message}` error object the Rust edge turns into the JSON-RPC error.
+func _send_held_pane_answer(held: Dictionary, reason := "") -> void:
+	if reason == "":
+		send_ipc_answer.call(int(held["id"]), true, JSON.stringify(held["answer"]))
+	else:
+		send_ipc_answer.call(int(held["id"]), false, JSON.stringify(_ipc_error(reason)["error"]))
+
+func _on_pane_child_started(body: Control) -> void:
+	var held = _pending_pane_starts.get(body.get_instance_id())
+	if held == null:
+		return
+	_pending_pane_starts.erase(body.get_instance_id())
+	_send_held_pane_answer(held)
+
+## The child refused to start: answer the caller with the reason, tell the
+## user, and close the tile. A pane with no child can never run anything, so
+## leaving it would hand the user an empty grid that looks like a hung shell.
+func _on_pane_child_failed(body: Control, reason: String) -> void:
+	var held = _pending_pane_starts.get(body.get_instance_id())
+	if held != null:
+		_pending_pane_starts.erase(body.get_instance_id())
+		_send_held_pane_answer(held, reason)
+	ToastManager.warn(reason)
+	_kill_now(body)
+
+## Deadline sweep: a pane that neither started nor failed (a pane closed in the
+## frame before its first layout, a frame that never ran) must still answer its
+## caller rather than leaving the request to the Rust edge's generic timeout.
+func _poll_pending_pane_starts():
+	if _pending_pane_starts.is_empty():
+		return
+	var now = Time.get_ticks_msec()
+	var expired: Array = []
+	for key in _pending_pane_starts:
+		var held = _pending_pane_starts[key]
+		var body = held["body"]
+		if body != null and is_instance_valid(body) and now < int(held["deadline_ms"]):
+			continue
+		expired.append(key)
+	for key in expired:
+		var held = _pending_pane_starts[key]
+		_pending_pane_starts.erase(key)
+		_send_held_pane_answer(held, "Pane '%s' never started" % str(held["pane_id"]))
 
 func _handle_ipc_method(method: String, params):
 	return WorkspaceIpcHandlers.handle(self, method, params)
@@ -2465,7 +2561,7 @@ func _show_plugin_review(id: int, params: Dictionary, timeout_ms: int):
 		# channel left to answer: do not open a dialog for it.
 		return
 	if _pending_plugin_reviews.size() >= PLUGIN_REVIEW_MAX_PENDING:
-		GptyTerminal.respond_ipc(id, false, JSON.stringify(_ipc_error("Too many pending plugin reviews")["error"]))
+		send_ipc_answer.call(id, false, JSON.stringify(_ipc_error("Too many pending plugin reviews")["error"]))
 		return
 	var dialog := AppDialog.confirm(self, "Plugin Install Review")
 	dialog.name = "PluginReviewDialog"
@@ -2492,7 +2588,7 @@ func _show_plugin_review(id: int, params: Dictionary, timeout_ms: int):
 			str(params.get("id", "")), str(params.get("revision", "")),
 			PluginReviewText.plans(params))
 		_finish_plugin_review(id)
-		GptyTerminal.respond_ipc(id, true, JSON.stringify({"accepted": true}))
+		send_ipc_answer.call(id, true, JSON.stringify({"accepted": true}))
 		# The CLI only moves the clone into place after it reads this answer,
 		# so the installed profiles and concepts are not on disk yet — pick
 		# them up once they are (same wait the deferred concept push uses).
@@ -2500,7 +2596,7 @@ func _show_plugin_review(id: int, params: Dictionary, timeout_ms: int):
 	)
 	dialog.canceled.connect(func():
 		_finish_plugin_review(id)
-		GptyTerminal.respond_ipc(id, true, JSON.stringify({"accepted": false}))
+		send_ipc_answer.call(id, true, JSON.stringify({"accepted": false}))
 	)
 	dialog.popup_centered()
 

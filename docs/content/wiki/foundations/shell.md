@@ -61,11 +61,13 @@ from a file someone sent you.
 ## How gPTY uses it
 
 A terminal pane's program is configurable, but not from the Pane Settings popup. The
-program and its arguments come from the tile that created the pane — a profile, a saved
-layout tile, or the creation call (`gpty new-pane -c ...`) — while the working directory
-comes from the workspace's default directory. The pane settings popup does own the
-environment override. Together those values are what is started on the PTY slave; left
-alone, the program is a shell, so the pane looks and feels like a terminal.
+program and its arguments come from the tile that created the pane — a profile or a saved
+layout tile — while the working directory comes from the workspace's default directory.
+The pane settings popup does own the environment override. Together those values are what
+is started on the PTY slave; left alone, the program is a shell, so the pane looks and
+feels like a terminal. The control API is not a third source: `gpty new-pane -c ...` (like
+`pane-run`) runs its string through the configured shell, so what it starts is that shell
+with the string as an argument, never a program of the caller's choosing.
 
 Two gPTY features deliberately take different paths, and the difference is worth
 memorizing:

@@ -16,6 +16,13 @@ extends GutTest
 const WorkspaceScript = preload("res://scenes/terminal/workspace.gd")
 
 var _ws: Control
+## Everything the workspace answered through its `send_ipc_answer` seam, as
+## `{id, ok, payload}`. A deferred answer has no socket behind it in a GUT run
+## (`respond_ipc` writes to the Rust queue), so this is how one is observed.
+var _sent: Array = []
+
+func _collect_answer(id: int, ok: bool, payload: String) -> void:
+	_sent.append({"id": id, "ok": ok, "payload": payload})
 
 func before_all():
 	MockAutoloads.setup()
@@ -28,6 +35,7 @@ func before_all():
 	ConceptManager.plugin_concepts_source = func(): return "[]"
 	ConceptManager.refresh_plugin_concepts()
 	_ws = WorkspaceScript.new()
+	_ws.send_ipc_answer = _collect_answer
 	add_child(_ws)
 	_ws.size = Vector2(1200, 800)
 	await get_tree().process_frame
@@ -237,6 +245,105 @@ func test_an_expired_plugin_review_opens_no_dialog():
 		"id": 45, "method": "pluginInstall", "params": "{}", "timeout_ms": 0,
 	})
 	assert_eq(answers, [], "an expired review has no channel left to answer")
+
+# ── A pane answer waits for that pane's child ──────────────────────────
+#
+# `newPane`/`paneRun` answer a `pane_id` before the pane's child exists: a
+# terminal starts it from the first size its tile is laid out at, after the
+# drain returns. So the answer is held until the pane reports the start —
+# without that, a spawn that failed answered a success over a tile that could
+# never run anything (the `new-pane --command` defect, where the command line
+# was spawned as the pane's program).
+
+const START_SETTLE_TIMEOUT_MS := 5000
+
+## Wait out a held pane answer (the start lands a frame or two after dispatch).
+func _settle_pane_starts() -> void:
+	var deadline := Time.get_ticks_msec() + START_SETTLE_TIMEOUT_MS
+	while not _ws._pending_pane_starts.is_empty() and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+
+## Dispatch one request the way the drain loop does, then wait out whatever it
+## deferred.
+func _dispatch_and_settle(req: Dictionary) -> Array:
+	var answers = WorkspaceIpcHandlers.dispatch_request(_ws, req)
+	await _settle_pane_starts()
+	return answers
+
+## The pane's text, once it holds `marker` (or when the deadline passes).
+func _read_until(pane_id: String, marker: String) -> String:
+	var text := ""
+	var deadline := Time.get_ticks_msec() + START_SETTLE_TIMEOUT_MS
+	while Time.get_ticks_msec() < deadline:
+		text = str(WorkspaceIpcHandlers.handle(
+			_ws, "paneRead", {"pane_id": pane_id, "lines": 200}).get("text", ""))
+		if text.contains(marker):
+			return text
+		await get_tree().process_frame
+	return text
+
+func test_new_pane_command_runs_a_compound_command_line():
+	_sent.clear()
+	var answers = await _dispatch_and_settle({
+		"id": 51, "method": "newPane", "timeout_ms": 4000,
+		"params": JSON.stringify({
+			"type": "terminal", "command": "echo NP_ONE; echo NP_TWO",
+		}),
+	})
+	assert_eq(answers, [], "a pane answer is held until its child has started")
+	assert_eq(_sent.size(), 1, "the held answer must still arrive")
+	assert_eq(int(_sent[0]["id"]), 51, "the answer must answer the request that asked")
+	assert_true(bool(_sent[0]["ok"]), "a started pane answers success: %s" % _sent[0]["payload"])
+	var doc = JSON.parse_string(str(_sent[0]["payload"]))
+	assert_true(doc is Dictionary and doc.has("pane_id"), "a success payload is the pane document")
+	assert_eq(str(doc.get("type", "")), "terminal")
+
+	var body := _target(str(doc["pane_id"]))
+	assert_not_null(body, "the answer's pane_id must address the pane it created")
+	# The line is an argument of the configured shell, never the program.
+	assert_eq(str(body.shell_command), str(SettingsManager.cfg_shell_command),
+		"the configured shell must stay the pane's program")
+	var args: Array = body.shell_args
+	assert_eq(args.size(), 2, "one run flag and the command line")
+	assert_true(str(args[0]) in ["-c", "/c"], "the shell family's own run flag")
+	assert_eq(str(args[1]), "echo NP_ONE; echo NP_TWO",
+		"the whole command line must be one argument, not a program name")
+
+	var text := await _read_until(str(doc["pane_id"]), "NP_TWO")
+	assert_true(text.contains("NP_ONE") and text.contains("NP_TWO"),
+		"both halves of a `;`-separated command line must run: %s" % text)
+	_ws._kill_now(body)
+
+func test_a_failed_spawn_answers_an_error_and_leaves_no_pane():
+	_sent.clear()
+	var toasts: Array = []
+	var capture := func(data: Dictionary): toasts.append(data)
+	ToastManager.toast_requested.connect(capture)
+	var tiles_before: int = _ws._tm.tiles.size()
+	var saved_shell := SettingsManager.cfg_shell_command
+	# The spawn failure a shell-program contract can still produce: the program
+	# the settings name does not exist.
+	SettingsManager.cfg_shell_command = "/nonexistent/gpty-no-such-program"
+	var answers = await _dispatch_and_settle({
+		"id": 52, "method": "newPane", "timeout_ms": 4000,
+		"params": JSON.stringify({"type": "terminal"}),
+	})
+	SettingsManager.cfg_shell_command = saved_shell
+	ToastManager.toast_requested.disconnect(capture)
+
+	assert_eq(answers, [], "the answer must wait for the start, not report it early")
+	assert_eq(_sent.size(), 1, "a refusal must still answer its request")
+	assert_false(bool(_sent[0]["ok"]), "a pane with no child is not a success")
+	var err = JSON.parse_string(str(_sent[0]["payload"]))
+	assert_true(err is Dictionary, "the payload is the flat error object, not an envelope")
+	assert_string_contains(str(err.get("message", "")), "gpty-no-such-program",
+		"the error must name the program that could not be started")
+	assert_eq(int(err.get("code", 0)), -32000, "a failed spawn is an application error")
+	assert_eq(_ws._tm.tiles.size(), tiles_before,
+		"a pane that could not start must be closed, not left as an empty grid")
+	assert_eq(toasts.size(), 1, "the refusal must also reach the user")
+	assert_string_contains(str(toasts[0].get("text", "")), "gpty-no-such-program",
+		"the toast must name the same program the error names")
 
 # ── paneStatus: one target, or every pane ──────────────────────────────
 
