@@ -51,6 +51,8 @@ An error uses the standard envelope:
 {"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"Unknown method: badMethod"}}
 ```
 
+A refusal's numeric `code` separates *fix the call* from *the app refused*: `-32602` is a value the request named and the handler cannot accept (missing, unknown, the wrong JSON type, over a cap), `-32000` is a well-formed request naming app state the app cannot satisfy (an unknown, gone or ambiguous pane, a full grid, a pane that cannot start, a profile the user has not approved), and `-32601` is an unknown method. Where a verb carries one, `error.data.code` is a finer string kind (`not_registered`, `not_found`, …).
+
 The client wrappers reshape them into command flags and tool arguments.
 
 One connection may carry more than one of these lines. The server reads frames until the client closes the connection and answers each in order, so a client that pipelines three requests gets three responses; a frame it cannot parse is answered `-32700` and the rest of the batch is still served. The shipped clients do not pipeline - each invocation is one connection, one request, one response - but the wire allows it.

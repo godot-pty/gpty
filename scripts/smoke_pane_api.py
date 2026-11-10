@@ -482,7 +482,9 @@ class Smoke:
         `{"error": {...}}` document stringified into the JSON-RPC message, so
         `pane-read` on a missing pane printed a nested blob instead of naming
         the pane. The drain loop now sends the flat error object and the Rust
-        edge builds the JSON-RPC error from it.
+        edge builds the JSON-RPC error from it. The code says which kind of
+        refusal it is: -32602 for a value the request named, -32000 for app
+        state the request named correctly.
         """
         self.enter("handler error shape")
         bad = self.control_rpc("paneRead", {"pane_id": "nosuchpane", "lines": 50})
@@ -496,6 +498,21 @@ class Smoke:
             str(error.get("message", "")) == "Pane 'nosuchpane' not found",
             "the message must be the handler's sentence, not a nested JSON blob",
             bad,
+        )
+        # A value the request named is the other half of the same contract:
+        # still a flat sentence, but -32602 so a script can tell "fix the call"
+        # from "the app refused".
+        bad_param = self.control_rpc("paneRead", {"pane_id": ""})
+        bad_param_error = bad_param.get("error") or {}
+        self.require(
+            int(bad_param_error.get("code") or 0) == -32602,
+            "a missing required value must be refused as invalid params",
+            bad_param,
+        )
+        self.require(
+            str(bad_param_error.get("message", "")) == "Pane target required",
+            "the bad-param refusal must be the handler's own sentence",
+            bad_param,
         )
         code, _payload, detail = self.cli_run("pane-read", "nosuchpane")
         self.require(code != 0, "a refused pane-read must exit non-zero", detail)

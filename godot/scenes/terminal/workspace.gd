@@ -2624,8 +2624,13 @@ func _expire_plugin_review(id: int):
 		"Plugin install review expired — the requesting command already timed out. Nothing was installed.",
 		8.0)
 
-func _ipc_error(msg: String, code := -32000):
-	return WorkspaceIpcHandlers.error(msg, code)
+## The deferred answers' refusal (`_poll_pending_waits`,
+## `_send_held_pane_answer`, `_show_plugin_review`). All three name app state —
+## a pane that went away, a child that never started, too many open reviews —
+## so there is no code parameter: `WorkspaceIpcHandlers.refused` is the kind,
+## and nothing here is a caller's bad value.
+func _ipc_error(msg: String) -> Dictionary:
+	return WorkspaceIpcHandlers.refused(msg)
 
 ## Resolve an IPC pane target to the pane it names.
 ##
@@ -2638,13 +2643,18 @@ func _ipc_error(msg: String, code := -32000):
 ## cannot be ambiguous), a label that matches exactly one pane in one
 ## workspace still resolves, and a label that matches several is refused.
 ##
-## Returns `{body: Control}` on success, `{error: String}` when the target
-## names nothing or names several panes; the refusal lists every candidate's
-## workspace and attachment id, which is what the caller needs to address the
-## pane it meant.
+## Returns `{body: Control}` on success, `{error: String, code: int}` when the
+## target names nothing or names several panes; the refusal lists every
+## candidate's workspace and attachment id, which is what the caller needs to
+## address the pane it meant. The code is the refusal's JSON-RPC kind, decided
+## here so no handler re-decides it: a missing target is a malformed request
+## (`-32602`), an unknown or ambiguous one is app state (`-32000`).
 func _resolve_pane_target(target: String) -> Dictionary:
 	if target == "":
-		return {"error": "Pane target required"}
+		return {
+			"error": "Pane target required",
+			"code": WorkspaceIpcHandlers.CODE_INVALID_PARAMS,
+		}
 	for ws in _workspaces:
 		if ws.is_empty() or not ws.has("tm"):
 			continue
@@ -2664,7 +2674,10 @@ func _resolve_pane_target(target: String) -> Dictionary:
 	if matches.size() == 1:
 		return {"body": matches[0]["body"]}
 	if matches.is_empty():
-		return {"error": "Pane '%s' not found" % target}
+		return {
+			"error": "Pane '%s' not found" % target,
+			"code": WorkspaceIpcHandlers.CODE_SERVER_ERROR,
+		}
 	var candidates: Array[String] = []
 	for hit in matches:
 		candidates.append("%s (%s)" % [hit["workspace"], str(hit["body"].attachment_id)])
@@ -2672,6 +2685,7 @@ func _resolve_pane_target(target: String) -> Dictionary:
 		"error": "Pane '%s' is ambiguous: it names %s - address the pane by its id" % [
 			target, ", ".join(candidates),
 		],
+		"code": WorkspaceIpcHandlers.CODE_SERVER_ERROR,
 	}
 
 ## The global settings panel, created on first use. Extracted from

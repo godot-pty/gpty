@@ -39,6 +39,8 @@ All three reach the same handlers in the running GUI. The CLI is a stateless cli
 | `version` | — | `{version, protocol}` |
 | `shutdown` | — | `{success}` |
 
+A request the app cannot even read is `-32602`: a missing required field (`pane_id`, `name`), an unknown `type`, a string over its cap. A request it understood and refused is `-32000`: an unknown or ambiguous pane, a pane that cannot do what was asked, a full grid, a profile the user has not approved.
+
 `newPane` and `paneRun` run a **terminal's** `command` through the configured shell (`-c`, or `/c` for `cmd.exe`) — a command line, the same authority `inject` has, so `&&`, pipes and globs work. A terminal's *program* is not settable through the API at all: a profile and a saved layout tile are the two surfaces that own one (`cli_view` is the exception — there `command` is the program and `args` its argv, never a shell string). Either way a pane that cannot run is an error naming the program and the tile is closed, never a reported success: a terminal's answer is held until its child starts, while a `cli_view` pane starts its program before the handler returns.
 
 `vaultSearch`, `vaultRead` and `vaultWeight` answer only inside a vault root the user has **registered** - the user-owned `user://vaults.json`, whose only writer is the pane settings UI. A Wiki pane showing a directory is not enough (the pane reads it; the API does not answer for it), and the shipped knowledge base registers itself when a pane opens it. An unregistered root is refused with `-32000` and `data.code = "not_registered"`, so a client cannot use these methods to read Markdown under a directory the user never opened.

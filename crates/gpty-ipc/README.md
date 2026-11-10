@@ -81,6 +81,15 @@ gpty method takes by-name, and a non-object value used to abort the GUI's whole
 request batch — the requests already dequeued behind it were never answered, and
 each caller waited out its own timeout.
 
+A refusal's numeric `code` separates *fix the call* from *the app refused*:
+`-32602` is a value the request named and the handler cannot accept (missing,
+unknown, the wrong JSON type, over a cap), `-32000` is a well-formed request
+naming app state the app cannot satisfy (an unknown, gone or ambiguous pane, a
+full grid, a pane that cannot start, a profile the user has not approved).
+`-32601` is an unknown method. The GUI builds every refusal from one of two
+named constructors (`WorkspaceIpcHandlers.bad_param`/`refused`) so no arm picks
+its own code.
+
 ## Security
 
 The IPC channel controls the whole workspace, so the server hardens the

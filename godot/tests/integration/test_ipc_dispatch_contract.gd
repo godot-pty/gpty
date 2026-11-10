@@ -363,6 +363,8 @@ func test_new_pane_cli_view_refuses_a_program_that_cannot_start():
 		"a program that cannot start must not answer a pane: %s" % answer)
 	assert_string_contains(str(answer["error"]["message"]), "gpty-no-such-program",
 		"the error must name the program that could not be started")
+	assert_eq(int(answer["error"].get("code", 0)), -32000,
+		"a pane that cannot start is app state, not a bad parameter")
 	assert_eq(_ws._tm.tiles.size(), tiles_before, "the refused pane must be closed")
 	assert_eq(toasts.size(), 1, "the refusal must also reach the user")
 	assert_string_contains(str(toasts[0].get("text", "")), "gpty-no-such-program",
@@ -876,3 +878,85 @@ func _find_concept(concepts: Array, name: String) -> Dictionary:
 		if c is Dictionary and c.get("name", "") == name:
 			return c
 	return {}
+
+# ── Refusal codes: a bad parameter is -32602, app state is -32000 ───────
+#
+# The pane API's refusals were split by whichever code the arm happened to
+# inherit: `newPane`'s `focus`/`split`/`command` checks answered -32602 while
+# `Unknown pane type`, `Command required`, `Invalid command`, the plugin
+# action/id checks and the wait-pattern checks answered -32000, so a script
+# branching on `error.code` could not tell "fix the call" from "the app
+# refused" inside one method family. The rule now lives on
+# `WorkspaceIpcHandlers.bad_param`/`refused`; this table is what holds every
+# arm to it.
+
+func _refusal_params(params: Dictionary, terminal: Control, viewer: Control) -> Dictionary:
+	var out := {}
+	for key in params:
+		var value = params[key]
+		if value is String and value == "@terminal":
+			out[key] = str(terminal.attachment_id)
+		elif value is String and value == "@viewer":
+			out[key] = str(viewer.attachment_id)
+		else:
+			out[key] = value
+	return out
+
+## One row per refusal arm of the pane API. A new arm adds its row here, and
+## cannot pick a code without saying which kind of refusal it is.
+func test_every_refusal_arm_answers_the_code_its_kind_owns():
+	var terminal := _spawn("terminal")
+	var viewer := _spawn("code_viewer")
+	var long_text := "x".repeat(1025)
+	var rows := [
+		# A value the request named and the handler cannot accept: -32602.
+		["newPane", {"type": "nosuchtype"}, -32602, "Unknown pane type"],
+		["newPane", {"type": "terminal", "focus": "yes"}, -32602, "`focus` must be a boolean"],
+		["newPane", {"type": "terminal", "split": "diagonal"}, -32602, "`split` must be one of"],
+		["newPane", {"type": "terminal", "command": long_text}, -32602, "Invalid command"],
+		["paneRun", {}, -32602, "Command required"],
+		["paneRun", {"command": long_text}, -32602, "Invalid command"],
+		["paneWait", {"pane_id": "@terminal", "pattern": ""}, -32602, "Invalid wait pattern"],
+		["paneWait", {"pane_id": "@terminal", "pattern": long_text}, -32602, "Invalid wait pattern"],
+		["paneRead", {"pane_id": ""}, -32602, "Pane target required"],
+		["killPane", {}, -32602, "Pane target required"],
+		["inject", {"pane_id": "@terminal", "text": "x".repeat(65537)}, -32602, "exceeds 64 KiB"],
+		["broadcast", {}, -32602, "Invalid broadcast request"],
+		["layoutSave", {}, -32602, "Profile name required"],
+		["layoutSave", {"name": "x".repeat(129)}, -32602, "Profile name too long"],
+		["conceptToggle", {}, -32602, "Concept name required"],
+		["pluginsChanged", {"action": "nuke", "id": "ok-id"}, -32602, "Unknown plugin action"],
+		["pluginsChanged", {"action": "enable", "id": "BAD ID"}, -32602, "Malformed plugin id"],
+		["vaultWeight", {"vault_path": "relative", "src": "a.md", "target": "b.md", "weight": 5},
+			-32602, "not an absolute directory"],
+		# App state a well-formed request names: -32000.
+		["paneRead", {"pane_id": "nosuchpane"}, -32000, "not found"],
+		["paneRead", {"pane_id": "@viewer"}, -32000, "has no readable output"],
+		["paneStatus", {"pane_id": "@viewer"}, -32000, "no status primitives"],
+		["paneWait", {"pane_id": "@viewer", "pattern": "x"}, -32000, "is not a terminal"],
+		["inject", {"pane_id": "@viewer", "text": "x"}, -32000, "is not a terminal"],
+		["focusPane", {"pane_id": "nosuchpane"}, -32000, "not found"],
+		["killPane", {"pane_id": "nosuchpane"}, -32000, "not found"],
+		["layoutLoad", {"name": "gpty-no-such-profile"}, -32000, "not found"],
+	]
+	var next_id := 900
+	for row in rows:
+		next_id += 1
+		var where := "%s %s" % [row[0], JSON.stringify(row[1])]
+		var answers = WorkspaceIpcHandlers.dispatch_request(_ws, {
+			"id": next_id,
+			"method": row[0],
+			"params": JSON.stringify(_refusal_params(row[1], terminal, viewer)),
+			"timeout_ms": 5000,
+		})
+		assert_eq(answers.size(), 1, "%s must be answered in the batch" % where)
+		if answers.size() != 1:
+			continue
+		assert_false(bool(answers[0]["success"]), "%s must be refused" % where)
+		var payload: Dictionary = answers[0]["payload"]
+		assert_eq(int(payload.get("code", 0)), int(row[2]),
+			"%s answered %s; a bad parameter is -32602 and app state is -32000" % [where, payload])
+		assert_string_contains(str(payload.get("message", "")), str(row[3]),
+			"%s must name its reason" % where)
+	_ws._kill_now(terminal)
+	_ws._kill_now(viewer)

@@ -54,7 +54,7 @@ The second point matters for automation: a typo in a pane type fails immediately
 | `--no-daemon` | Never auto-spawn the GUI, even for the two commands that otherwise would |
 | `-v`, `--verbose` | Verbose output on stderr |
 
-`--json` is the switch to reach for in automation. Without it, results are printed for a human; with it, every command answers with the JSON document the socket returned. A failure is still exit code 1, and the envelope's `error.data.code` is the stable discriminator — `not_found`, `bad_path`, `outside_vault` and friends — so a script can branch on the failure kind instead of parsing a message.
+`--json` is the switch to reach for in automation. Without it, results are printed for a human; with it, every command answers with the JSON document the socket returned. A failure is still exit code 1, and the envelope's numeric `error.code` is the kind discriminator — `-32602` you fix by changing the call, `-32000` the app refused a well-formed one — while `error.data.code` is the finer string kind a vault verb adds (`not_found`, `bad_path`, `outside_vault`, …), so a script branches without parsing a message.
 
 ## Examples
 

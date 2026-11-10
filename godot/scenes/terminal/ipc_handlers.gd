@@ -7,8 +7,39 @@ class_name WorkspaceIpcHandlers
 ## end-to-end contract check.
 
 
-static func error(msg: String, code := -32000) -> Dictionary:
+## The JSON-RPC error codes a refusal may carry (`JsonRpcError`'s, in
+## `crates/gpty-ipc/src/protocol.rs`). Every arm names one through
+## `bad_param`/`refused`; `error()` itself has no default so no arm can inherit
+## a code it never decided.
+const CODE_INVALID_PARAMS := -32602
+const CODE_SERVER_ERROR := -32000
+const CODE_METHOD_NOT_FOUND := -32601
+
+
+static func error(msg: String, code: int) -> Dictionary:
 	return {"error": {"code": code, "message": msg}}
+
+
+## The request body named a value this handler cannot accept: a missing
+## required key, an unknown enum member, a wrong JSON type, a string over its
+## cap. JSON-RPC `-32602` - the caller fixes this by changing the call.
+static func bad_param(msg: String) -> Dictionary:
+	return error(msg, CODE_INVALID_PARAMS)
+
+
+## The request was well formed and names app state this handler cannot
+## satisfy: an unknown, gone or ambiguous pane, a pane of the wrong kind, a
+## full grid, a pane that cannot start, an unsaved pane, a profile the user
+## has not approved. JSON-RPC `-32000` - the call was right, the world is not.
+static func refused(msg: String) -> Dictionary:
+	return error(msg, CODE_SERVER_ERROR)
+
+
+## `Workspace._resolve_pane_target`'s answer, as the refusal it holds. The
+## resolver decides its own code (a missing target is a bad param; an unknown
+## or ambiguous one is app state), so no arm re-decides it.
+static func target_refusal(found: Dictionary) -> Dictionary:
+	return error(str(found["error"]), int(found.get("code", CODE_SERVER_ERROR)))
 
 
 ## Parse one queued request's `params` field for the drain loop.
@@ -63,19 +94,19 @@ static func dispatch_request(ws, req: Dictionary) -> Array:
 	if parsed.has("error"):
 		# -32602 matches what the Rust edge answers for the same input, so a
 		# client sees one contract whichever layer refused it.
-		return [_answer(id, false, error(str(parsed["error"]), -32602)["error"])]
+		return [_answer(id, false, bad_param(str(parsed["error"]))["error"])]
 	var params: Dictionary = parsed["params"]
 	var method = str(req.get("method", ""))
 	if method == "paneWait":
 		var w_found: Dictionary = ws._resolve_pane_target(str(params.get("pane_id", "")))
 		if w_found.has("error"):
-			return [_answer(id, false, error(str(w_found["error"]))["error"])]
+			return [_answer(id, false, target_refusal(w_found)["error"])]
 		var w_body = w_found["body"]
 		if not (w_body is TerminalPane):
-			return [_answer(id, false, error("Pane '%s' is not a terminal" % params.get("pane_id", ""))["error"])]
+			return [_answer(id, false, refused("Pane '%s' is not a terminal" % params.get("pane_id", ""))["error"])]
 		var w_pattern = str(params.get("pattern", ""))
 		if w_pattern == "" or w_pattern.length() > 1024:
-			return [_answer(id, false, error("Invalid wait pattern")["error"])]
+			return [_answer(id, false, bad_param("Invalid wait pattern")["error"])]
 		var w_timeout = clampi(int(params.get("timeout_ms", 10000)), 100, 60000)
 		ws._pending_waits[str(id)] = {
 			"attachment_id": w_body.attachment_id,
@@ -122,31 +153,29 @@ static func handle(ws, method: String, params: Dictionary):
 			var vw_vault := LinkWeights.normalize_vault(str(params.get("vault_path", "")))
 			if not LinkWeights.valid_vault_path(vw_vault) \
 				or not DirAccess.dir_exists_absolute(vw_vault):
-				return error("Vault is not an absolute directory: %s" % vw_vault, -32602)
+				return bad_param("Vault is not an absolute directory: %s" % vw_vault)
 			# The caller-chosen root is the whole exposure: this verb writes a
 			# user-owned store keyed by the vault, so an unregistered root would
 			# let any client add entries (and, at the store's vault cap, evict
 			# the user's own). The native search/read handlers apply the same
 			# gate; `VaultRegistry` is the one list both read.
 			if not VaultRegistry.has_root(vw_vault):
-				return error(
+				return refused(
 					"Vault is not registered: %s - open it in a Wiki pane's settings first"
-						% vw_vault,
-					-32000
+						% vw_vault
 				)
 			var vw_src := str(params.get("src", ""))
 			var vw_target := str(params.get("target", ""))
 			if not LinkWeights.valid_note_path(vw_src) \
 				or not LinkWeights.valid_note_path(vw_target):
-				return error(
-					"`src` and `target` must be vault-relative note paths (.md, no hidden component)",
-					-32602
+				return bad_param(
+					"`src` and `target` must be vault-relative note paths (.md, no hidden component)"
 				)
 			var vw_raw = params.get("weight")
 			if vw_raw == null or (vw_raw is String and str(vw_raw).strip_edges() == ""):
 				var vw_cleared := LinkWeightsStore.clear_weight(vw_vault, vw_src, vw_target)
 				if vw_cleared != "":
-					return error(vw_cleared)
+					return refused(vw_cleared)
 				return {"vault": vw_vault, "src": vw_src, "target": vw_target, "weight": 0}
 			var vw_weight := 0
 			if vw_raw is int:
@@ -156,23 +185,21 @@ static func handle(ws, method: String, params: Dictionary):
 			elif vw_raw is String and str(vw_raw).strip_edges().is_valid_int():
 				vw_weight = str(vw_raw).strip_edges().to_int()
 			else:
-				return error(
+				return bad_param(
 					"`weight` must be an integer between %d and %d, or omitted to clear"
-						% [LinkWeights.MIN_WEIGHT, LinkWeights.MAX_WEIGHT],
-					-32602
+						% [LinkWeights.MIN_WEIGHT, LinkWeights.MAX_WEIGHT]
 				)
 			if vw_weight < LinkWeights.MIN_WEIGHT or vw_weight > LinkWeights.MAX_WEIGHT:
-				return error(
+				return bad_param(
 					"`weight` must be between %d and %d" % [
 						LinkWeights.MIN_WEIGHT, LinkWeights.MAX_WEIGHT,
-					],
-					-32602
+					]
 				)
 			var vw_problem := LinkWeightsStore.set_weight(
 				vw_vault, vw_src, vw_target, vw_weight
 			)
 			if vw_problem != "":
-				return error(vw_problem)
+				return refused(vw_problem)
 			return {
 				"vault": vw_vault,
 				"src": vw_src,
@@ -204,10 +231,10 @@ static func handle(ws, method: String, params: Dictionary):
 			# mirror lives beside the consent records that key on the same id.
 			var pc_action := str(params.get("action", ""))
 			if not PLUGIN_ADMIN_ACTIONS.has(pc_action):
-				return error("Unknown plugin action: %s" % pc_action)
+				return bad_param("Unknown plugin action: %s" % pc_action)
 			var pc_id := str(params.get("id", ""))
 			if not TrustedStore.valid_plugin_id(pc_id):
-				return error("Malformed plugin id: %s" % pc_id)
+				return bad_param("Malformed plugin id: %s" % pc_id)
 			ProfileManager.refresh_plugin_profiles()
 			ConceptManager.refresh_plugin_concepts()
 			return {"refreshed": true, "action": pc_action, "id": pc_id}
@@ -219,7 +246,7 @@ static func handle(ws, method: String, params: Dictionary):
 			# `title` -> `title_label`).
 			var type_name = str(params.get("type", "terminal"))
 			if not PaneTypes.ALL.has(type_name):
-				return error("Unknown pane type: %s" % type_name)
+				return bad_param("Unknown pane type: %s" % type_name)
 			# Validated before anything spawns: a refused call must not leave a
 			# pane behind. Absent means focus (the documented default), and a
 			# value that is not a boolean is refused rather than coerced —
@@ -227,7 +254,7 @@ static func handle(ws, method: String, params: Dictionary):
 			# of what the caller asked for.
 			var np_focus = params.get("focus", true)
 			if typeof(np_focus) != TYPE_BOOL:
-				return error("`focus` must be a boolean", -32602)
+				return bad_param("`focus` must be a boolean")
 			var np_tags: Array = PaneTypes.sanitize_tags(params.get("tags", []))
 			var np_opts: Dictionary
 			if type_name == "cli_view":
@@ -251,7 +278,7 @@ static func handle(ws, method: String, params: Dictionary):
 				var np_command := str(params.get("command", "")).strip_edges()
 				if np_command != "":
 					if np_command.length() > 1024 or np_command.contains("\uFFFD"):
-						return error("Invalid command", -32602)
+						return bad_param("Invalid command")
 					np_opts["shell_args"] = PaneTypes.shell_run_args(np_shell, np_command)
 			# A display title, never the pane's addressable label
 			# (`pane_label`): the request names it `title`, the spawn options
@@ -268,14 +295,13 @@ static func handle(ws, method: String, params: Dictionary):
 			var np_split = params.get("split", "")
 			if np_split != "":
 				if not (np_split is String) or not PaneTypes.SPLIT_SIDES.has(np_split):
-					return error(
-						"`split` must be one of: %s" % ", ".join(PackedStringArray(PaneTypes.SPLIT_SIDES)),
-						-32602)
+					return bad_param(
+						"`split` must be one of: %s" % ", ".join(PackedStringArray(PaneTypes.SPLIT_SIDES)))
 				np_opts["split"] = np_split
 			var body = ws._spawn_pane(type_name, np_opts)
 			if body == null:
 				var np_refused: String = ws._pane_ceiling_refusal()
-				return error(np_refused if np_refused != "" else "Grid is full")
+				return refused(np_refused if np_refused != "" else "Grid is full")
 			# A `cli_view` pane starts its program from `_ready`, so a refusal
 			# is already known here: answer it and close the tile. A terminal
 			# defers to the same rule from the other side (its child starts
@@ -285,7 +311,7 @@ static func handle(ws, method: String, params: Dictionary):
 				if np_start_error != "":
 					ToastManager.warn(np_start_error)
 					ws._kill_now(body)
-					return error(np_start_error)
+					return refused(np_start_error)
 			# Focus last: `activate_pane` resolves the pane's workspace, which
 			# only exists once the body is in the grid.
 			if np_focus:
@@ -295,7 +321,7 @@ static func handle(ws, method: String, params: Dictionary):
 		"paneRead":
 			var pr_found: Dictionary = ws._resolve_pane_target(str(params.get("pane_id", "")))
 			if pr_found.has("error"):
-				return error(str(pr_found["error"]))
+				return target_refusal(pr_found)
 			var pr_body: Control = pr_found["body"]
 			var pr_lines = clampi(int(params.get("lines", 200)), 1, 2000)
 			if pr_body is TerminalPane:
@@ -304,7 +330,7 @@ static func handle(ws, method: String, params: Dictionary):
 				# A cli_view has no terminal buffer; its body text is the
 				# drained child output the pane already displays.
 				return {"text": pr_body.get_text(pr_lines)}
-			return error("Pane '%s' has no readable output" % params.get("pane_id", ""))
+			return refused("Pane '%s' has no readable output" % params.get("pane_id", ""))
 		"paneStatus":
 			# No target = every pane's status (the CLI's no-argument mode and
 			# the MCP tool's): one document, built here where the pane list and
@@ -329,21 +355,21 @@ static func handle(ws, method: String, params: Dictionary):
 				return {"panes": ps_panes}
 			var ps_found: Dictionary = ws._resolve_pane_target(ps_target)
 			if ps_found.has("error"):
-				return error(str(ps_found["error"]))
+				return target_refusal(ps_found)
 			var ps_body: Control = ps_found["body"]
 			# Existing but with no status primitives: the pane is real, it just
 			# has nothing to report. Say that instead of "not found", which sent
 			# an agent looking for a pane it can already see in listPanes.
 			var ps_status = ps_body.status_document()
 			if not (ps_status is Dictionary):
-				return error("Pane '%s' has no status primitives" % ps_target)
+				return refused("Pane '%s' has no status primitives" % ps_target)
 			return ps_status
 		"paneRun":
 			var run_cmd := str(params.get("command", "")).strip_edges()
 			if run_cmd == "":
-				return error("Command required")
+				return bad_param("Command required")
 			if run_cmd.length() > 1024 or run_cmd.contains("\uFFFD"):
-				return error("Invalid command")
+				return bad_param("Invalid command")
 			# Execute through the configured shell so compound commands
 			# (&&, pipes, globs) work like a normal CLI invocation. The
 			# command is an argument, never the program itself, and the
@@ -354,7 +380,7 @@ static func handle(ws, method: String, params: Dictionary):
 			})
 			if run_body == null:
 				var run_refused: String = ws._pane_ceiling_refusal()
-				return error(run_refused if run_refused != "" else "Grid is full")
+				return refused(run_refused if run_refused != "" else "Grid is full")
 			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "spawned", "pane_id": run_body.attachment_id, "label": run_body.pane_label}))
 			return {"pane_id": run_body.attachment_id, "label": run_body.pane_label, "type": "terminal"}
 		"listPanes":
@@ -381,16 +407,16 @@ static func handle(ws, method: String, params: Dictionary):
 			else:
 				var kp_found: Dictionary = ws._resolve_pane_target(kp_pane_id)
 				if kp_found.has("error"):
-					return error(str(kp_found["error"]))
+					return target_refusal(kp_found)
 				kp_target = kp_found["body"]
 			if kp_target == null:
-				return error("Pane '%s' not found" % kp_pane_id)
+				return refused("Pane '%s' not found" % kp_pane_id)
 			# A caller cannot answer a dialog, so a pane holding unsaved work
 			# is refused rather than asked (the rule `layoutLoad` already
 			# applies to an untrusted profile): naming a pane is not consent
 			# to throw away what the user typed into it.
 			if kp_target.has_unsaved_state():
-				return error("Pane '%s' has unsaved changes; save or discard them in the pane, then retry" % kp_pane_id)
+				return refused("Pane '%s' has unsaved changes; save or discard them in the pane, then retry" % kp_pane_id)
 			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "killed", "pane_id": kp_target.attachment_id, "label": kp_target.pane_label}))
 			# The kill primitive, not `_kill`: the GUI's close path asks about a
 			# foreground process, and this caller cannot answer a dialog. Naming
@@ -402,7 +428,7 @@ static func handle(ws, method: String, params: Dictionary):
 			var pane_id = str(params.get("pane_id", ""))
 			var fp_found: Dictionary = ws._resolve_pane_target(pane_id)
 			if fp_found.has("error"):
-				return error(str(fp_found["error"]))
+				return target_refusal(fp_found)
 			var body: Control = fp_found["body"]
 			# The same activation a click or a sidebar row performs: the pane
 			# becomes the active one, and only a pane that can hold keyboard
@@ -413,20 +439,20 @@ static func handle(ws, method: String, params: Dictionary):
 			var pane_id = str(params.get("pane_id", ""))
 			var text = str(params.get("text", ""))
 			if text.length() > 65536:
-				return error("Injected text exceeds 64 KiB limit")
+				return bad_param("Injected text exceeds 64 KiB limit")
 			var in_found: Dictionary = ws._resolve_pane_target(pane_id)
 			if in_found.has("error"):
-				return error(str(in_found["error"]))
+				return target_refusal(in_found)
 			var body: Control = in_found["body"]
 			if not body is TerminalPane:
-				return error("Pane '%s' is not a terminal" % pane_id)
+				return refused("Pane '%s' is not a terminal" % pane_id)
 			body._send_line_to_term(text)
 			return {"success": true}
 		"broadcast":
 			var b_tags: Array = PaneTypes.sanitize_tags(params.get("tags", []))
 			var b_text = str(params.get("text", ""))
 			if b_tags.is_empty() or b_text == "" or b_text.length() > 65536:
-				return error("Invalid broadcast request")
+				return bad_param("Invalid broadcast request")
 			var b_count = 0
 			for t in ws._tm.tiles:
 				var b_body = ws._tm._find_body(t.wrapper)
@@ -444,16 +470,16 @@ static func handle(ws, method: String, params: Dictionary):
 		"layoutSave":
 			var profile_name = str(params.get("name", ""))
 			if profile_name == "":
-				return error("Profile name required")
+				return bad_param("Profile name required")
 			if profile_name.length() > 128:
-				return error("Profile name too long")
+				return bad_param("Profile name too long")
 			ProfileManager.add_profile(profile_name, ws._gather_tiles())
 			return {"success": true, "name": profile_name}
 		"layoutLoad":
 			var profile_name = str(params.get("name", ""))
 			var profile := ProfileManager.find_profile(profile_name)
 			if profile.is_empty():
-				return error("Profile '%s' not found" % profile_name)
+				return refused("Profile '%s' not found" % profile_name)
 			# Restoring a profile can start a different program, pass argv, or set
 			# an environment — the same decision the sidebar gates behind the
 			# Workspace Trust dialog. A caller cannot answer that dialog, and
@@ -469,7 +495,7 @@ static func handle(ws, method: String, params: Dictionary):
 				if td is Dictionary:
 					profile_tiles.append(td)
 			if ws._tiles_untrusted(profile_tiles) and not ws._profile_consented(profile):
-				return error(
+				return refused(
 					"Profile '%s' needs confirmation in the GUI (it starts a different program or passes arguments)"
 					% profile_name)
 			# Activating a profile resets the active workspace, so a pane
@@ -480,7 +506,7 @@ static func handle(ws, method: String, params: Dictionary):
 			# GUI from raising a dialog this caller cannot answer.
 			for pane in ws._pane_bodies(ws._active_workspace()):
 				if pane.has_unsaved_state():
-					return error("A pane in the active workspace has unsaved changes; save or discard them in the pane, then retry")
+					return refused("A pane in the active workspace has unsaved changes; save or discard them in the pane, then retry")
 			ws._do_activate(profile, false)
 			return {"success": true}
 		"layoutList":
@@ -496,9 +522,9 @@ static func handle(ws, method: String, params: Dictionary):
 		"conceptToggle":
 			var concept_name = str(params.get("name", ""))
 			if concept_name == "":
-				return error("Concept name required")
+				return bad_param("Concept name required")
 			ConceptManager.toggle_concept(concept_name)
 			ConceptManager._push_to_rust()
 			return {"success": true, "name": concept_name}
 		_:
-			return error("Unknown method: %s" % method, -32601)
+			return error("Unknown method: %s" % method, CODE_METHOD_NOT_FOUND)
