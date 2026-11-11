@@ -92,15 +92,25 @@ later one 63-75 ms).
    live GUI owns the default path and this instance quits at startup.
 3. **Run it in a window:** `env -u WAYLAND_DISPLAY DISPLAY=:0 godot --path godot
    --display-driver x11 --position 60,60`.
-4. **Add a temporary, env-gated coroutine** called from `workspace.gd::_ready()`
-   (`if OS.get_environment("GPTY_BENCH") != "": _bench.call_deferred()`), and delete it before
-   committing: it is a probe, not a fixture. `ui_capture.gd` is the committed surface, and a
-   timing probe has no pixel output to pin.
+4. **Prefer the committed bench; add a probe only for a question it cannot answer.**
+   `godot/tests/bench/switch_bench.gd` (`-s`, windowed, `--disable-vsync`) measures a workspace
+   switch: `SWITCH_CMD_A`/`SWITCH_CMD_B` are the two payloads, `SWITCH_REPS` the repetitions,
+   `SWITCH_WINDOW` the window, and it prints `sync_us frame_us fetch_ms draw_ms backoff_ms` per
+   switch plus `apply_mode_us` and a median. A question no harness covers gets an env-gated
+   coroutine called from `workspace.gd::_ready()` (`if OS.get_environment("GPTY_BENCH") != "":
+   _bench.call_deferred()`), deleted before committing - a timing probe outside a committed
+   harness has no output to pin.
 5. **Attribute before theorising.** Time the call with `Time.get_ticks_usec()` marks around each
    step (and each sub-step), then the frame after it with `await get_tree().process_frame` four
    times and divide. Print one line per repetition and repeat at least three times, alternating
    direction - the 74 ms workspace switch was `_update_workspace_ui` 35 ms +
-   `_refresh_profile_buttons` 17 ms + `_list()` 10 ms, with the panes at 0.1 ms.
+   `_refresh_profile_buttons` 17 ms + `_list()` 10 ms, with the panes at 0.1 ms. To measure the
+   *before* side once the change is committed, `git stash push -- <paths>` is a no-op: check the
+   old files out (`git checkout <pre-change-commit> -- <paths>`), run the same bench, restore
+   with `git checkout HEAD -- <paths>`. A harness warm-up must end on the state the measured loop
+   starts from, and a same-target switch must fail the run rather than reprint the previous
+   timing (measured 2026-11-11: a warm-up ending on workspace 1 made rep 1 record the warm-up's
+   numbers).
 6. **Seed content through the pane**, not the layout: `body._terminal.send_text("lazygit\n")` (or
    a redraw loop) puts a real TUI in the pane the report is about; wait a few seconds, then
    measure. `_fetch_ms`/`_draw_ms` are already recorded per pane and shown in the status bar, so
@@ -149,3 +159,5 @@ later one 63-75 ms).
   lag, RSS, no GUI needed.
 - `godot --headless --path godot -s res://tests/bench/draw_bench.gd` — render cost
   (`BENCH_FLOOD=1` for the flood variant).
+- `godot --path godot --disable-vsync -s res://tests/bench/switch_bench.gd` — workspace-switch
+  cost (windowed; payloads via `SWITCH_CMD_A`/`SWITCH_CMD_B`, window via `SWITCH_WINDOW`).

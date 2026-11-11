@@ -23,7 +23,11 @@ weight: 30
   surface belongs in `UiPalette.CONTRAST_PAIRS`; `tests/unit/test_ui_palette.gd` grades every pair
   against both sets under 4.5:1, and `TEXT_DISABLED` is exempt on purpose. Modals go through `ui/app_dialog.gd` (`confirm`/`alert`/`content`/`text`/`set_body`),
   never a bare `ConfirmationDialog.new()`: it parents the dialog, groups the buttons at the right
-  edge and puts read-and-copy text in a selectable body. Dialogs are borderless with their own
+  edge and puts read-and-copy text in a selectable body. Open it with `AppDialog.popup(dialog[,
+  ratio])`, never `popup_centered()`/`popup_centered_ratio()`: that sets `max_size` to the
+  viewport's limit and centres clamped, so a long body cannot put its buttons past the window
+  edge - and `set_text`'s autowrap label gets a width floor, because an unfixed autowrap label is
+  first shaped one word per line and sets the card's height from that shape. Dialogs are borderless with their own
   header because Godot paints an embedded window's title band from its own default theme (see
   `pitfalls.md`). A file or directory picker is `AppDialog.picker(parent, title, file_mode, access)`
   for the same reason: it sets `borderless`, hides the engine label, and inserts its header at the
