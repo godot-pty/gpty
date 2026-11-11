@@ -105,7 +105,16 @@ later one 63-75 ms).
    a redraw loop) puts a real TUI in the pane the report is about; wait a few seconds, then
    measure. `_fetch_ms`/`_draw_ms` are already recorded per pane and shown in the status bar, so
    frame cost needs no new instrumentation.
-7. **Quit explicitly** (`get_tree().quit()`), or `timeout` kills the run and you get exit 124.
+7. **Typing latency is the pane's refresh cadence, not the key path.** A key writes to the PTY on
+   the UI thread; the echo is painted at the pane's next grid sync (`TerminalPane._process`, gated
+   by `_sync_interval + _sync_backoff`). An env-gated coroutine that pushes `InputEventKey`
+   events needs `keycode` **and** `physical_keycode` **and** `unicode` (plain letters reach the
+   PTY through `_key_to_text`, which reads `unicode`; a keycode alone sends nothing), then counts
+   `_last_grid_gen` changes per 300 ms: a streaming pane in the flood back-off measured 2-3
+   refreshes per 300 ms with `_sync_backoff` pegged at 93.9 ms, and 14-19 once input exempts it.
+   Print `_sync_backoff`, `_fetch_ms`, `_draw_ms` and `Engine.get_frames_per_second()` beside the
+   count, and toggle the other pane (btop vs an idle shell) between phases to separate the two.
+8. **Quit explicitly** (`get_tree().quit()`), or `timeout` kills the run and you get exit 124.
 
 ## Gotchas (each cost a debugging round)
 
