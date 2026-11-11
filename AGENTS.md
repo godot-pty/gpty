@@ -178,6 +178,7 @@ gpty/
         │   ├── feedback_text.gd     # Pure Feedback issue title/body/URL builder (build facts only, capped)
         │   ├── external_link.gd     # The one outbound-link path: OS.shell_open, clipboard fallback, WARN toast
         │   ├── accessibility.gd    # Accessible surface owner: names, values, published text (A11y)
+        │   ├── agent_badge.gd      # Title-bar agent-state badge: the four silhouettes, painted
         │   └── icons.gd            # Phosphor icon constants
         └── panes/
             ├── pane_body.gd        # Base class + routed-content contract

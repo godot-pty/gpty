@@ -726,14 +726,14 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 
 ## Put each pane into its named agent state through the real Tier 1 entry point
 ## (the same `set_agent_state` the capability event socket calls), wait for the
-## badge to paint it, then freeze the animation.
+## badge to paint it, then freeze the badge's clock.
 ##
-## The freeze is what makes the image repeat: the spinner cycles three glyphs at
-## 8 fps and `needs-attention` pulses its alpha at 1.2 Hz, both from wall-clock
-## time, so two runs of the same state would differ. Re-applying the state pins
-## `_badge_anim` to 0 and the text to the table's glyph - the frame a user sees
-## when the badge appears - and stopping the pane's per-frame work keeps the
-## spinner and the pulse from moving it again.
+## The freeze is what makes the image repeat: the badge owns the animation (the
+## `working` ring turns its notch, `needs-attention` pulses its alpha, both from
+## wall-clock time), so two runs of the same state would differ. Re-applying the
+## state pins the badge's phase to 0 - the frame a user sees when the badge
+## appears - and stopping the badge's own per-frame work keeps it from moving
+## that frame again. Stopping the pane alone no longer does this.
 func _apply_agent_states(states: Array) -> bool:
 	var tiles: Array = _workspace._tm.tiles
 	if tiles.size() < states.size():
@@ -753,16 +753,23 @@ func _apply_agent_states(states: Array) -> bool:
 		await process_frame
 		painted = true
 		for i in states.size():
-			var badge: Label = tiles[i].wrapper.get_node_or_null("BodyVBox/TitleBar/StateBadge")
-			if badge == null or not badge.visible or badge.tooltip_text == "":
+			var badge: AgentBadge = tiles[i].wrapper.get_node_or_null("BodyVBox/TitleBar/StateBadge")
+			# The state is what is painted; the tooltip alone would not prove
+			# which silhouette is on the tile.
+			if badge == null or not badge.visible or badge.state() != str(states[i]):
 				painted = false
 	if not painted:
 		_fail("the badges did not paint their declared states within 5 s")
 		return false
 	for i in states.size():
-		# The pane polls its terminal on a tick, so the badge that is on screen
-		# now is the polled one; this pins the frame and the glyph.
+		# The pane polls its terminal on a tick, so the badge on screen now is
+		# the polled one. `_apply_badge` pins the badge's phase to 0; the badge
+		# also stops its own frame work, because it animates on its own clock
+		# and stopping the pane no longer stops it.
+		var badge: AgentBadge = tiles[i].wrapper.get_node_or_null("BodyVBox/TitleBar/StateBadge")
 		bodies[i]._apply_badge(str(states[i]))
+		if badge != null:
+			badge.set_process(false)
 		bodies[i].set_process(false)
 	return true
 

@@ -12,11 +12,6 @@ class_name TerminalManager
 ## an older one.
 ## The divider drag over these units lives in tile_drag.gd.
 const TITLE_BAR_HEIGHT = 26
-## Godot 4.7.2 binds `Control.accessibility_live` as a plain int (its property
-## hint is `Off,Polite,Assertive`) with no named constants, so the level a
-## status readout wants is spelled here: polite announces a change when the
-## screen reader is idle instead of interrupting what it is reading.
-const ACCESSIBILITY_LIVE_POLITE := 1
 ## The title bar's button row, named so the chrome keyboard path can find it
 ## (`focus_title_bar`) and a test can name one button.
 const TITLE_BAR_BUTTONS = "TitleBarButtons"
@@ -228,26 +223,14 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 
 	# Agent-state badge (display only) — written by TerminalPane from the
 	# tiered AgentState tracker; hidden while idle. Never a decision input.
-	#
-	# PASS, not IGNORE: the badge's tooltip is its text form ("Failed" vs
-	# "Needs attention"), and Godot only resolves a tooltip for the control
-	# under the pointer. The title bar itself has no click or drag handler, so
-	# the hover leaves every other gesture unchanged.
-	var state_badge = Label.new()
+	# `agent_badge.gd` owns the silhouette, its tint and its own animation.
+	var state_badge := AgentBadge.new()
 	state_badge.name = "StateBadge"
-	state_badge.text = Icons.CHECK_CIRCLE
-	state_badge.visible = false
-	state_badge.mouse_filter = Control.MOUSE_FILTER_PASS
-	# The glyph is a private-use codepoint: `accessibility_name` (set by
-	# TerminalPane with the state) is the only thing an assistive technology can
-	# read, and `live` is what makes a change reach it without focus.
-	state_badge.accessibility_live = ACCESSIBILITY_LIVE_POLITE
-	state_badge.add_theme_font_override("font", Icons.font_resource)
-	state_badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	bar.add_child(state_badge)
 	state_badge.anchor_left = 0.0; state_badge.anchor_right = 0.0
 	state_badge.anchor_top = 0.0; state_badge.anchor_bottom = 1.0
-	state_badge.offset_left = 6; state_badge.offset_right = 24
-	bar.add_child(state_badge)
+	state_badge.offset_left = UiTokens.SPACE_MD
+	state_badge.offset_right = UiTokens.SPACE_MD + UiTokens.BUTTON_MIN_WIDTH
 
 
 	var btn_hbox = HBoxContainer.new()

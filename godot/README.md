@@ -76,6 +76,7 @@ godot/
         │   ├── section_help.gd # The shared "Help" affordance a section header carries (glyph → action → chord table, rows read on press)
         │   ├── feedback_text.gd # Pure Feedback issue title/body/URL builder (build facts only, capped)
         │   ├── accessibility.gd # Accessible surface owner: names, values, published text (see docs agents/gdscript.md)
+        │   ├── agent_badge.gd  # Title-bar agent-state badge: the four silhouettes, painted
         │   ├── toast_overlay.gd
         │   ├── window_chrome.gd # Titlebar + window-mode/fullscreen handling
         │   ├── markdown_view.gd # Safe shared Markdown renderer

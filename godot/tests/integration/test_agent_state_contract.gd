@@ -52,7 +52,7 @@ func _first_body(ws: Control) -> Control:
 	var tm: TerminalManager = ws._tm
 	return tm._find_body(tm.tiles[0].wrapper)
 
-func _badge(ws: Control) -> Label:
+func _badge(ws: Control) -> AgentBadge:
 	var tm: TerminalManager = ws._tm
 	return tm.tiles[0].wrapper.get_node_or_null("BodyVBox/TitleBar/StateBadge")
 

@@ -780,8 +780,6 @@ func _process(delta):
 			var display_title = pane_name if pane_name != "" else t
 			title_changed.emit(display_title)
 		_poll_agent_state()
-	# The badge animates every frame; only its state source is throttled.
-	_animate_badge(delta)
 	_a11y_tick(Time.get_ticks_msec())
 
 # ── Accessible output ──────────────────────────────────────────────────
@@ -860,27 +858,7 @@ func _push_accessibility_value() -> void:
 # ── Agent-state badge (display only) ───────────────────────────────────
 # Mirrors the tiered AgentState tracker from the engine. The badge never
 # feeds decisions — it is a projection of what the terminal declared.
-var _badge_label: Label = null
 var _badge_state := ""
-var _badge_anim := 0.0
-
-const BADGE_SPINNER_FRAMES := [Icons.SPINNER, Icons.SPINNER_GAP, Icons.CIRCLE_NOTCH]
-
-## Every agent state's badge, in one table. The glyph is the signal that has to
-## survive a colour-vision deficiency, a monochrome screenshot and a screen
-## reader, so `failed` and `needs-attention` carry different *shapes*
-## (X-circle vs warning triangle) instead of the one warning glyph tinted red
-## or amber. `label` is both the hover tooltip and the accessible name: the
-## glyph is a private-use codepoint, so without it a screen reader reads out
-## nothing usable. `role` names the palette token, resolved when the badge is
-## applied, so a light chrome gets its own semantic colours. `idle` is absent
-## on purpose - it hides the badge.
-const BADGE_STATES := {
-	"completed": {"glyph": Icons.CHECK_CIRCLE, "role": "SUCCESS", "label": "Completed"},
-	"failed": {"glyph": Icons.X_CIRCLE, "role": "DANGER", "label": "Failed"},
-	"needs-attention": {"glyph": Icons.WARNING, "role": "WARNING", "label": "Needs attention"},
-	"working": {"glyph": Icons.SPINNER_GAP, "role": "ACCENT", "label": "Working"},
-}
 
 ## Read the terminal's declared agent state. Called from the slow poll — the
 ## state changes on event arrival, not per frame, and each read crosses FFI.
@@ -911,47 +889,19 @@ func on_agent_state_changed(state: String) -> void:
 	_badge_state = state
 	_apply_badge(state)
 
-func _animate_badge(delta: float):
-	_badge_anim += delta
-	match _badge_state:
-		"working":
-			if _badge_label and _badge_label.visible:
-				# Spinner illusion: cycle three notch glyphs at ~8 fps.
-				var frame := int(_badge_anim * 8.0) % BADGE_SPINNER_FRAMES.size()
-				_badge_label.text = BADGE_SPINNER_FRAMES[frame]
-		"needs-attention":
-			if _badge_label and _badge_label.visible:
-				# Pulsing amber at ~1.2 Hz.
-				_badge_label.modulate.a = 0.55 + 0.45 * sin(_badge_anim * TAU * 1.2)
-
 func _apply_badge(state: String):
-	var label := _resolve_badge()
-	if label == null:
-		return
-	_badge_label = label
-	_badge_anim = 0.0
-	var spec: Dictionary = BADGE_STATES.get(state, {})
-	if spec.is_empty():
-		_badge_label.visible = false
-		_badge_label.modulate = Color.WHITE
-		# A hidden badge must not keep announcing the state it last showed.
-		_badge_label.tooltip_text = ""
-		_badge_label.accessibility_name = ""
-		return
-	_badge_label.visible = true
-	_badge_label.text = str(spec["glyph"])
-	_badge_label.modulate = UiPalette.active().color(str(spec["role"]))
-	_badge_label.tooltip_text = str(spec["label"])
-	_badge_label.accessibility_name = str(spec["label"])
+	var badge := _resolve_badge()
+	if badge != null:
+		badge.show_state(state)
 
-func _resolve_badge() -> Label:
+func _resolve_badge() -> AgentBadge:
 	var parent := get_parent()
 	if parent == null:
 		return null
 	var tb := parent.get_node_or_null("TitleBar")
 	if tb == null:
 		return null
-	return tb.get_node_or_null("StateBadge")
+	return tb.get_node_or_null("StateBadge") as AgentBadge
 
 func _request_cursor_redraw() -> void:
 	queue_redraw()
