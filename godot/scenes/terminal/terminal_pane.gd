@@ -213,16 +213,23 @@ const VIEW_INPUT_GRACE_MS := 500
 ## Stretch added to `_sync_interval` while a pane is over budget. Grows
 ## geometrically, recovers as soon as a sync finds nothing new.
 var _sync_backoff: float = 0.0
-## When the user last changed the view themselves. Autonomous output must not
-## push a pane the user is scrolling into the flood cadence: that work is
-## bounded by how fast the user scrolls, and it is the one case where the
-## repaint rate is visible. Starts far in the past so a fresh pane is never
-## exempt.
+## When the user last drove this pane themselves: scrolled it, or sent it
+## input. Autonomous output must not push a pane the user is interacting with
+## into the flood cadence - that work is bounded by what the user does, and it
+## is the one case where the repaint rate is visible. Starts far in the past so
+## a fresh pane is never exempt.
 var _view_input_ms: int = -1_000_000
 
-## Mark a view change the user asked for (wheel, PageUp/Down, search jump).
+## Mark input the user asked for (wheel, PageUp/Down, search jump, a keystroke,
+## a paste, mouse reporting). Also drops the flood back-off: a pane being typed
+## into must look at its grid on the next frame, because a keystroke's echo is
+## exactly what the user is watching for. Without this reset one streaming
+## child holds the pane at the 10 Hz ceiling (measured 2026-11-11: a 60-line/s
+## coloured stream pegged `_sync_backoff` at 93.9 ms and refreshed the grid 2-3
+## times per 300 ms, so a typed character could appear ~100 ms late).
 func _note_view_input():
 	_view_input_ms = Time.get_ticks_msec()
+	_sync_backoff = 0.0
 
 ## Mouse reporting the child process has enabled, read from the grid
 ## (`GptyTerminal.get_mouse_mode`). The bit values are the FFI contract with
@@ -1271,12 +1278,14 @@ func _on_scroll_end_pressed() -> void:
 	queue_redraw()
 
 func _send_to_term(text: String):
+	_note_view_input()
 	if not _started:
 		_buffer_input(text, false)
 		return
 	_terminal.send_text(text)
 
 func _send_line_to_term(text: String):
+	_note_view_input()
 	if not _started:
 		_buffer_input(text, true)
 		return

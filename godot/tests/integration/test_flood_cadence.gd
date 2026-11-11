@@ -55,6 +55,20 @@ func test_user_driven_view_change_is_exempt():
 		_probe._sync_backoff, 0.0,
 		"scrolling the user asked for must not be pushed into the flood cadence")
 
+## Typing is the user driving the pane too: a keystroke must drop the flood
+## back-off, not just be exempt from growing it. One streaming child used to
+## hold the pane at the 10 Hz ceiling, so a typed character's echo could
+## appear ~100 ms late (measured 2026-11-11).
+func test_typed_input_reclaims_the_frame_cadence():
+	_probe._sync_backoff = TerminalPane.MAX_SYNC_INTERVAL - _probe._sync_interval
+	_probe._send_to_term("a")
+	assert_eq(_probe._sync_backoff, 0.0, "typing must drop the flood back-off")
+	assert_true(_probe._view_input_ms > 0, "typing must count as user input")
+	_run_over_budget_sync(TerminalPane.PANE_WORK_BUDGET_MS + 20)
+	assert_eq(
+		_probe._sync_backoff, 0.0,
+		"a pane being typed into must not be pushed into the flood cadence")
+
 func test_backoff_never_exceeds_the_cadence_ceiling():
 	for _i in 20:
 		_run_over_budget_sync(TerminalPane.PANE_WORK_BUDGET_MS + 20)
