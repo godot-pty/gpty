@@ -69,7 +69,7 @@ func test_the_sidebar_tooltips_spell_the_registered_chords():
 	assert_eq(search.tooltip_text, "Search the active terminal (Ctrl+Shift+F)")
 
 	var reset := _tooltip_button("Close every pane in this workspace")
-	assert_not_null(reset, "the sidebar's Close All row exists")
+	assert_not_null(reset, "the panes header's close-all button exists")
 	assert_eq(reset.tooltip_text, "Close every pane in this workspace (Ctrl+Shift+R)")
 
 	var row := _ws._sidebar.find_child("PaneTypeRow", true, false) as GridContainer

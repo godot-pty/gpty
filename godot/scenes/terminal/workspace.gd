@@ -41,6 +41,10 @@ static func running_ask_entry(
 ## another.
 const MAX_WORKSPACES := 8
 
+## The workspace a first pane creates when there is none: the app has no seeded
+## workspace, so the implicit one is the default the user starts in.
+const IMPLIED_WORKSPACE_NAME := "Default"
+
 ## The live-pane ceiling for the whole window — every workspace, because a
 ## hidden workspace's panes keep their PTY, child process and grid alive. Every
 ## path that can create a pane shares `_pane_ceiling_refusal`: the control
@@ -76,6 +80,10 @@ var _empty_state: Control = null
 var _settings_panel: SettingsPanel
 var _concept_graph: ConceptGraphEditor = null
 var _tm: TerminalManager = TerminalManager.new()
+## The permanent empty host. `_tm`/`_grid` point at the active workspace, and
+## at this pair when there is none; it is never freed.
+var _home_grid: Control
+var _home_tm: TerminalManager
 var _status_bar: StatusBar
 var _titlebar: Control = null
 var _chrome: WindowChrome = null
@@ -107,6 +115,8 @@ func _ready():
 
 	_grid = Control.new()
 	add_child(_grid)
+	_home_grid = _grid
+	_home_tm = _tm
 	_build_empty_state()
 
 	var overlay = load("res://scenes/ui/toast_overlay.gd").new()
@@ -437,6 +447,11 @@ func _spawn(shell := "") -> Control:
 
 func _spawn_pane(type_name: String, opts := {}, activate := true) -> Control:
 	var ws := _active_workspace()
+	if ws.is_empty():
+		# Every pane belongs to a workspace: the first one the user creates
+		# makes the implicit "Default" workspace.
+		_add_workspace()
+		ws = _active_workspace()
 	if ws.is_empty():
 		return null
 	return _spawn_pane_into(ws, type_name, opts, activate)
@@ -1002,6 +1017,10 @@ func _wire_tm(tm: TerminalManager):
 	tm.on_close = _on_pane_closed
 	tm.on_swap = _swap_pane
 	tm.on_open_pane_settings = _open_pane_settings_for
+	# Every manager, not just the home pair's: the first workspace a session
+	# creates is no longer workspace 0, so a manager without this connection
+	# would stop relayouting after a divider drag.
+	tm.tiles_resized.connect(_apply_layout)
 
 func _on_pane_closed(body: Control) -> void:
 	_kill(body)
@@ -1080,6 +1099,7 @@ func _fallback_active_body() -> Control:
 
 func _apply_active_workspace_view():
 	if _workspaces.is_empty():
+		_apply_empty_workspace_view()
 		return
 	_tm = _workspaces[_active].tm
 	_grid = _workspaces[_active].grid
@@ -1111,6 +1131,21 @@ func _apply_active_workspace_view():
 	if body:
 		activate_pane(body)
 
+## The state with no workspace: the home pair is an empty host, the guide owns
+## the content area, and the sidebar shows no rows and no close-all trash.
+func _apply_empty_workspace_view():
+	_active = -1
+	_tm = _home_tm
+	_grid = _home_grid
+	_grid.visible = false
+	_grid.process_mode = Node.PROCESS_MODE_DISABLED
+	_active_profile = ""
+	_refresh_profile_buttons()
+	_update_workspace_ui()
+	_apply_layout()
+	_list()
+	_refresh_status_bar()
+
 func _switch_workspace(idx: int):
 	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size() or idx == _active:
 		return
@@ -1124,14 +1159,15 @@ func _switch_workspace(idx: int):
 	_apply_active_workspace_view()
 
 func _add_workspace():
-	if _workspaces.is_empty():
-		return
 	if _workspaces.size() >= MAX_WORKSPACES:
 		ToastManager.warn("Maximum %d workspaces" % MAX_WORKSPACES)
 		return
-	var ws_name = "Workspace %d" % _next_workspace_number()
+	# The first workspace a session creates is the default one; there is no
+	# seeded workspace to inherit a name or a directory from.
+	var ws_name = IMPLIED_WORKSPACE_NAME if _workspaces.is_empty() \
+		else "Workspace %d" % _next_workspace_number()
 	# A new workspace starts where the current one points, the way a new
-	# terminal tab does; the cog changes it independently afterwards.
+	# terminal tab does; the folder menu changes it independently afterwards.
 	var ws = _new_workspace_container(ws_name, str(_active_workspace().get("cwd", "")))
 	_workspaces.append(ws)
 	# Blank slate: no auto-spawned terminal — the user decides what fills it.
@@ -1140,10 +1176,10 @@ func _add_workspace():
 ## A blank workspace for `profile`, switched to so `_tm`, the grid and the
 ## sidebar follow it. Named after the profile (a second one from the same
 ## profile gets " 2", " 3" …) and pointing where the current workspace points,
-## the same way a new tab inherits its directory. Returns {} at the cap or when
-## there is no active workspace to inherit from.
+## the same way a new tab inherits its directory. Returns {} at the cap; with
+## no active workspace it simply starts without an inherited directory.
 func _create_workspace_for_profile(profile: Dictionary) -> Dictionary:
-	if _workspaces.is_empty() or _workspaces.size() >= MAX_WORKSPACES:
+	if _workspaces.size() >= MAX_WORKSPACES:
 		return {}
 	var taken := {}
 	for ws in _workspaces:
@@ -1158,9 +1194,6 @@ func _create_workspace_for_profile(profile: Dictionary) -> Dictionary:
 func _close_workspace(idx: int):
 	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size():
 		return
-	if _workspaces.size() <= 1:
-		ToastManager.info("Cannot close the last workspace")
-		return
 	var ws: Dictionary = _workspaces[idx]
 	var ws_name := A11y.one_line(str(ws.get("name", "")))
 	_ask_close_then(
@@ -1172,13 +1205,17 @@ func _close_workspace_now(idx: int):
 	# have moved on (another close, a restore) by the time it is answered.
 	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size():
 		return
-	if _workspaces.size() <= 1:
-		ToastManager.info("Cannot close the last workspace")
-		return
-	var ws = _workspaces[idx]
+	var ws: Dictionary = _workspaces[idx]
 	_workspaces.remove_at(idx)
 	ws.tm.reset()
-	ws.grid.queue_free()
+	# The home pair is the empty host for the zero-workspace state; it is
+	# never freed. Every other workspace owns its grid.
+	if ws.grid != _home_grid:
+		ws.grid.queue_free()
+	if _workspaces.is_empty():
+		_apply_empty_workspace_view()
+		_save_workspaces_to_store()
+		return
 	if idx == _active:
 		_active = clampi(idx, 0, _workspaces.size() - 1)
 		_apply_active_workspace_view()
@@ -1187,6 +1224,97 @@ func _close_workspace_now(idx: int):
 		_active -= 1
 	_update_workspace_ui()
 	_save_workspaces_to_store()
+
+## The Workspaces title row's close-all. Every pane in every workspace is asked
+## first, the same walk a workspace close uses; the entries name their workspace.
+func _close_all_workspaces():
+	if _workspaces.is_empty():
+		return
+	_ask_close_then(
+		_all_pane_bodies(), _close_all_workspaces_now, Callable(), true,
+		"Closing all workspaces")
+
+func _close_all_workspaces_now():
+	for ws in _workspaces:
+		ws.tm.reset()
+		if ws.grid != _home_grid:
+			ws.grid.queue_free()
+	_workspaces.clear()
+	_home_tm.reset()
+	_apply_empty_workspace_view()
+	_save_workspaces_to_store()
+
+## The workspace More menu's Clear Workspace: empty `idx` without switching to
+## it. The ask names the workspace and walks its panes (running work and unsaved
+## edits), exactly as closing that workspace would.
+func _clear_workspace(idx: int):
+	if idx < 0 or idx >= _workspaces.size():
+		return
+	var ws: Dictionary = _workspaces[idx]
+	var ws_name := A11y.one_line(str(ws.get("name", "")))
+	_ask_close_then(
+		_pane_bodies(ws), func(): _clear_workspace_now(ws), Callable(), true,
+		"Closing all panes in the '%s' workspace" % ws_name, false)
+
+func _clear_workspace_now(ws: Dictionary):
+	if _workspaces.find(ws) == -1:
+		return
+	ws.tm.reset()
+	# A cleared workspace is no longer the profile it was built from, the same
+	# rule `_do_reset_now` applies to the active one.
+	ws["profile"] = ""
+	if ws.tm == _tm:
+		_active_profile = ""
+		_apply_active_workspace_view()
+	_save_workspaces_to_store()
+
+## The one workspace-row menu. Built per open and freed on close (the
+## `show_pane_actions_popup` pattern), so it always names the current directory.
+func _on_workspace_menu(idx: int, source_btn: Button):
+	if idx < 0 or idx >= _workspaces.size():
+		return
+	var ws: Dictionary = _workspaces[idx]
+	var menu := PopupMenu.new()
+	menu.name = "WorkspaceActionsMenu"
+	var dir := str(ws.get("cwd", ""))
+	var dir_tip := "Working directory: %s" % (
+		dir if dir != "" else "default (gpty's own directory)")
+	_add_workspace_menu_item(menu, Icons.FOLDER, "Set Directory", dir_tip,
+		{"kind": "cwd", "index": idx})
+	_add_workspace_menu_item(menu, Icons.DELETE, "Clear Workspace",
+		"Close every pane in '%s'" % str(ws.get("name", "")),
+		{"kind": "clear", "index": idx})
+	menu.index_pressed.connect(func(i: int):
+		var meta = menu.get_item_metadata(i)
+		menu.queue_free()
+		if not (meta is Dictionary):
+			return
+		var action: Dictionary = meta
+		var at := int(action.get("index", -1))
+		if at < 0 or at >= _workspaces.size():
+			return
+		match str(action.get("kind", "")):
+			"cwd": _open_workspace_cwd_dialog(at)
+			"clear": _clear_workspace(at)
+	)
+	add_child(menu)
+	menu.position = source_btn.get_screen_position() + Vector2(0, source_btn.size.y)
+	menu.reset_size()
+	menu.popup()
+	menu.popup_hide.connect(menu.queue_free)
+
+## One menu item with the glyph texture the icon font supplies, and the tooltip
+## that carries the directory or the target workspace.
+func _add_workspace_menu_item(menu: PopupMenu, glyph: String, text: String,
+		tip: String, meta: Dictionary):
+	var texture := Icons.glyph_texture(glyph, UiPalette.active().TEXT)
+	if texture != null:
+		menu.add_icon_item(texture, text)
+	else:
+		menu.add_item(text)
+	var i := menu.item_count - 1
+	menu.set_item_tooltip(i, tip)
+	menu.set_item_metadata(i, meta)
 
 func _rename_workspace(idx: int, new_name: String):
 	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size():
@@ -1303,8 +1431,7 @@ func _save():
 	_save_workspaces_to_store()
 
 func _save_workspaces_to_store():
-	if _workspaces.is_empty():
-		return
+	# Zero workspaces is a saved state too: the next launch restores the guide.
 	WorkspaceStore.save(_active, _all_layouts())
 
 func _all_layouts() -> Array[Dictionary]:
@@ -1326,16 +1453,14 @@ func _init_workspaces():
 	_teardown_workspaces()
 	var store = WorkspaceStore.load()
 	var wss: Array = store.get("workspaces", [])
-	# A store with no workspaces at all is a first run (or a wiped file), and a
-	# first run opens with one terminal. A store that holds a workspace whose
-	# `layout` is empty is a user's own decision and restores empty - the seed
-	# is `_restore_into`'s `seed_terminal`, set only from here.
-	var fresh: bool = wss.is_empty()
+	# No store and no legacy layout is a real state: a first run has no
+	# workspace and no pane, and the first pane the user creates makes the
+	# "Default" workspace. Only the legacy import synthesizes a workspace,
+	# because it is migrating a layout the user actually saved.
 	if wss.is_empty():
 		var legacy = WorkspaceStore.import_legacy_layout()
 		if not legacy.is_empty():
 			wss = [{"name": "Workspace 1", "layout": legacy}]
-			fresh = false
 	var entries: Array[Dictionary] = []
 	for entry in wss:
 		if not (entry is Dictionary):
@@ -1345,9 +1470,7 @@ func _init_workspaces():
 			"cwd": WorkspaceStore.sanitize_cwd(str(entry.get("cwd", ""))),
 			"layout": _tiles_from(entry.get("layout", [])),
 		})
-	if entries.is_empty():
-		entries = [{"name": "Workspace 1", "layout": []}]
-	var active: int = clampi(int(store.get("active", 0)), 0, entries.size() - 1)
+	var active: int = clampi(int(store.get("active", 0)), 0, maxi(entries.size() - 1, 0))
 
 	# Workspace trust: warn if any saved shell differs from the configured
 	# default. Cancel keeps the layout but swaps untrusted shells out —
@@ -1363,32 +1486,42 @@ func _init_workspaces():
 	if not untrusted.is_empty():
 		_show_multi_trust_dialog(entries, active, untrusted)
 		return
-	_build_workspaces(entries, active, fresh)
+	_build_workspaces(entries, active)
 
 func _teardown_workspaces():
-	for i in _workspaces.size():
-		var ws = _workspaces[i]
+	for ws in _workspaces:
 		ws.tm.reset()
-		if i > 0:
+		if ws.grid != _home_grid:
 			ws.grid.queue_free()
 	_workspaces.clear()
+	# The home pair is the empty host. Resetting it here clears a workspace 0
+	# from an earlier restore and removes the window where `_tm`/`_grid` could
+	# point at a just-freed grid while the trust dialog is open.
+	_home_tm.reset()
+	_tm = _home_tm
+	_grid = _home_grid
+	_home_grid.visible = false
+	_home_grid.process_mode = Node.PROCESS_MODE_DISABLED
+	_apply_layout()
 
-func _build_workspaces(entries: Array[Dictionary], active: int, seed_first := false):
+func _build_workspaces(entries: Array[Dictionary], active: int):
 	for i in entries.size():
 		var ws: Dictionary
 		var ws_cwd := str(entries[i].get("cwd", ""))
 		if i == 0:
-			ws = {"name": entries[i].get("name", "Workspace 1"), "grid": _grid, "tm": _tm, "profile": "", "cwd": ws_cwd}
+			ws = {"name": entries[i].get("name", "Workspace 1"),
+				"grid": _home_grid, "tm": _home_tm, "profile": "", "cwd": ws_cwd}
 		else:
 			ws = _new_workspace_container(str(entries[i].get("name", "")), ws_cwd)
 		_workspaces.append(ws)
 		var layout: Array = entries[i].get("layout", [])
 		layout = TerminalManager.scale_layout(layout, int(entries[i].get("grid_unit", 0)))
-		_restore_into(ws, _tiles_from(layout), seed_first and i == 0)
-	_active = clampi(active, 0, _workspaces.size() - 1)
+		_restore_into(ws, _tiles_from(layout))
+	_active = -1 if _workspaces.is_empty() \
+		else clampi(active, 0, _workspaces.size() - 1)
 	_apply_active_workspace_view()
 
-func _restore_into(ws: Dictionary, tiles: Array[Dictionary], seed_terminal := false):
+func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 	var tm: TerminalManager = ws.tm
 	tm.reset()
 	# Sanitize the whole set first: an id collision is a property of the set
@@ -1463,15 +1596,9 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary], seed_terminal := fa
 		tm.tiles.append({wrapper = w, col = st["col"], row = st["row"],
 			cspan = st["cspan"], rspan = st["rspan"]})
 		restored += 1
-	if seed_terminal and tm.tiles.is_empty() and skipped_by_limit == 0:
-		# A first run (no store at all) opens with one terminal, so a fresh
-		# install has a prompt. A workspace the user emptied stays empty: its
-		# saved layout is the state, and `_apply_layout` shows the guide. When
-		# tiles were skipped, the notice below already says why there are none,
-		# and a second toast would repeat it.
-		_spawn_pane_into(ws, "terminal", {}, false)
-	else:
-		tm._sync_edge_strips()
+	# A workspace's saved layout is the whole state: an empty one stays empty
+	# and `_apply_layout` shows the guide. There is no first-run seed.
+	tm._sync_edge_strips()
 
 	if skipped_by_limit > 0:
 		ToastManager.warn(
@@ -2086,11 +2213,11 @@ func _wire_sidebar_signals():
 	_sidebar.request_workspace_switch.connect(_switch_workspace)
 	_sidebar.request_workspace_add.connect(_add_workspace)
 	_sidebar.request_workspace_close.connect(_close_workspace)
+	_sidebar.request_workspaces_close_all.connect(_close_all_workspaces)
+	_sidebar.request_workspace_menu.connect(func(idx: int, btn: Button): _on_workspace_menu(idx, btn))
 	_sidebar.request_workspace_rename.connect(_rename_workspace)
-	_sidebar.request_workspace_cwd.connect(_open_workspace_cwd_dialog)
 	_sidebar.request_save_profile.connect(_save_current_as_profile)
 	_sidebar.request_delete_profile.connect(_delete_profile)
-	_tm.tiles_resized.connect(_apply_layout)
 	ProfileManager.profiles_changed.connect(_refresh_profile_buttons)
 
 func _list():
@@ -3067,6 +3194,11 @@ func _do_activate(profile: Dictionary, ask_running := true, open_in_new := false
 		_activate_now(fresh, profile)
 		return
 	var ws := _active_workspace()
+	if ws.is_empty():
+		# A profile is an explicit "give me this layout": with no workspace to
+		# replace, create the default one and activate into it.
+		_add_workspace()
+		ws = _active_workspace()
 	if ws.is_empty():
 		return
 	_ask_close_then(

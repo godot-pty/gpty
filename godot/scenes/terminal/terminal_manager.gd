@@ -269,7 +269,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	close_btn.name = "ClosePane"
 	close_btn.tooltip_text = "Close pane"
 	close_btn.custom_minimum_size = Vector2(UiTokens.BUTTON_MIN_WIDTH, UiTokens.BUTTON_MIN_HEIGHT)
-	Icons.icon_button(close_btn, Icons.CLOSE, "Close pane")
+	Icons.icon_button(close_btn, Icons.DELETE, "Close pane")
 	close_btn.pressed.connect(func(): _handle_close(_find_body(root)))
 	btn_hbox.add_child(close_btn)
 

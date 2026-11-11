@@ -533,6 +533,21 @@ class Smoke:
         self.enter("new-pane --split top")
         before = self.result(self.cli("list-panes", "--json"), "list-panes")
         panes = before.get("panes") or []
+        if not panes:
+            # A first run has no workspace and no pane; the first pane creates
+            # the "Default" workspace. Seed the tile this step splits through
+            # the same public API, then wait for the listing (the spawn answer
+            # can precede the child, but the tile is in the list synchronously).
+            self.result(
+                self.cli("new-pane", "-t", "terminal", "--json"),
+                "new-pane (seed)",
+            )
+            for _ in range(20):
+                before = self.result(self.cli("list-panes", "--json"), "list-panes")
+                panes = before.get("panes") or []
+                if panes:
+                    break
+                time.sleep(0.1)
         self.require(bool(panes), "the workspace must hold a pane to split", before)
         target = max(panes, key=lambda p: int(p["cspan"]) * int(p["rspan"]))
         payload = self.result(

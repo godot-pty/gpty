@@ -54,6 +54,44 @@ static func set_glyph(btn: Button, glyph: String) -> void:
 	label.text = glyph
 	label.accessibility_name = btn.accessibility_name
 
+## A glyph as a `Texture2D` for a native menu item (`PopupMenu.add_icon_item`):
+## the icon font stays the one icon source. The dynamic-font atlas is LA8 with
+## white glyphs and the coverage in the alpha channel (Godot's text server
+## initialises it white/transparent), so the alpha shapes the result and the
+## colour follows the active palette. Cached per glyph and colour.
+static var _textures: Dictionary = {}
+
+static func glyph_texture(glyph: String, color: Color) -> Texture2D:
+	var key := "%s|%s" % [glyph, color.to_html()]
+	var cached: Texture2D = _textures.get(key)
+	if cached != null:
+		return cached
+	var font := font_resource as FontFile
+	if font == null:
+		return null
+	var size := Vector2i(UiTokens.FS_HEADING, 0)
+	var index := font.get_glyph_index(size.x, glyph.unicode_at(0), 0)
+	if index == 0:
+		return null
+	font.render_glyph(0, size, index)
+	var uv := font.get_glyph_uv_rect(0, size, index)
+	var texture_index := font.get_glyph_texture_idx(0, size, index)
+	var atlas := font.get_texture_image(0, size, texture_index)
+	if atlas == null or uv.size.x < 1.0 or uv.size.y < 1.0:
+		return null
+	var rect := Rect2i(Vector2i(uv.position), Vector2i(uv.size))
+	if not Rect2i(Vector2i.ZERO, atlas.get_size()).encloses(rect):
+		return null
+	var image := atlas.get_region(rect)
+	image.convert(Image.FORMAT_RGBA8)
+	for y in image.get_height():
+		for x in image.get_width():
+			var a := image.get_pixel(x, y).a
+			image.set_pixel(x, y, Color(color.r, color.g, color.b, a))
+	var texture := ImageTexture.create_from_image(image)
+	_textures[key] = texture
+	return texture
+
 static func _labeled_glyph(btn: Button) -> Label:
 	var existing := btn.get_node_or_null(NodePath(GLYPH_NAME))
 	return existing as Label if existing is Label else null
@@ -96,6 +134,7 @@ const FEEDBACK = "\uE16C"  # chat-circle-dots (the sidebar's Feedback row)
 const MAXIMIZE_WIN = "\uE0A2"  # arrows-out (expand/fullscreen)
 const RESTORE_WIN = "\uE09A"  # arrows-in (restore from fullscreen)
 const WINDOW_MODE = "\uE32E"  # monitor (window mode cycling)
+const CHECK    = "\uE182"  # check (confirm an inline close)
 const CHECK_CIRCLE = "\uE184"  # check-circle (agent state: completed)
 const X_CIRCLE = "\uE4F8"  # x-circle (agent state: failed)
 const WARNING = "\uE4E0"  # warning, the triangle (agent state: needs-attention)

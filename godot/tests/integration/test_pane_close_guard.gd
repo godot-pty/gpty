@@ -505,3 +505,48 @@ func test_closing_a_workspace_with_a_running_terminal_names_it():
 	_ws._close_workspace_now(_ws._active)
 	await get_tree().process_frame
 	assert_eq(_ws._workspaces.size(), before, "the test removed its workspace")
+
+## Clear Workspace on a hidden workspace runs the same running-work walk as a
+## close, and clearing it never switches the active workspace.
+func test_clearing_a_hidden_workspace_asks_for_its_running_terminal():
+	if not ClassDB.class_exists("GptyTerminal"):
+		pending("the GDExtension is not loaded")
+		return
+	var before: int = _ws._workspaces.size()
+	var hidden: Dictionary = _ws._active_workspace()
+	var hidden_name := str(hidden.get("name", ""))
+	# Start the shell while its workspace is active: a hidden grid never starts
+	# a child, so the pane is made busy first and only then hidden by the
+	# switch to a second workspace.
+	var body = _ws._spawn_pane("terminal")
+	assert_not_null(body, "the test needs a real terminal")
+	assert_true(await _wait_for_shell_output(body, 30000),
+		"the shell must print before it is typed into: %s" % _status_text(body))
+	if ShellFixtures.is_windows():
+		assert_true(body.has_running_work(),
+			"ConPTY cannot report a foreground group; a live shell is conservatively busy")
+	else:
+		body._terminal.send_line("sleep 600")
+		assert_true(await _wait_for_work_state(body, true, 10000),
+			"the typed command must be a foreground job: %s" % _status_text(body))
+	_ws._add_workspace()  # switch away; the first workspace is now hidden
+	assert_eq(_ws._active, 1, "the second workspace is the active one")
+
+	_ws._clear_workspace(0)
+	var dialog := _expect_running_ask()
+	assert_string_contains(dialog.dialog_text,
+		"Closing all panes in the '%s' workspace will stop a running process" % hidden_name,
+		"the clear names the workspace it is about to empty")
+	assert_false(dialog.dialog_text.contains("'%s':" % hidden_name),
+		"the intro already named the workspace; the pane line does not repeat it")
+	dialog.canceled.emit()
+	await get_tree().process_frame
+	assert_eq(hidden.tm.tiles.size(), 1, "canceling keeps the hidden pane")
+	assert_eq(_ws._active, 1, "canceling leaves the active workspace alone")
+
+	_ws._clear_workspace(0)
+	_expect_running_ask().get_ok_button().pressed.emit()
+	await get_tree().process_frame
+	assert_eq(hidden.tm.tiles.size(), 0, "confirming clears the hidden workspace")
+	assert_eq(_ws._active, 1, "clearing never switches the active workspace")
+	assert_eq(_ws._workspaces.size(), before + 1, "and never removes the workspace")

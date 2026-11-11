@@ -36,6 +36,22 @@ static func setup():
 	_override_script("SavedCommandStore", _MockSavedCommandStore)
 	_override_script("VaultRegistry", _MockVaultRegistry)
 
+	# Integration fixtures start from the pre-change first run: one workspace
+	# with one terminal. A test of the empty first run replaces this with
+	# `set_store(WorkspaceStore.FILE, {"active": 0, "workspaces": []})`; the
+	# store's own unit tests clear it to test a missing file.
+	_store[WorkspaceStore.FILE] = {
+		"active": 0,
+		"workspaces": [{
+			"name": "Workspace 1",
+			"layout": [{
+				"col": 0, "row": 0,
+				"cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID,
+				"settings": {"type": "terminal"},
+			}],
+		}],
+	}
+
 	# For node-only autoloads, just ensure they're valid nodes
 	# (they exist from project.godot autoload registration)
 

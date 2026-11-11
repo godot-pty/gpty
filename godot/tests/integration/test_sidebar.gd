@@ -122,31 +122,38 @@ func test_the_settings_button_requests_settings_and_nothing_else():
 	assert_signal_emit_count(_sidebar, "request_settings", 1)
 	assert_signal_not_emitted(_sidebar, "request_reset")
 
-func test_the_close_all_panes_button_requests_reset_and_nothing_else():
-	var btn := _icon_text_button("Close All")
-	assert_not_null(btn, "the Close all panes button must exist")
-	# UX-02: the bulk close used the same counter-clockwise-arrow glyph as
-	# "change pane type" and pane defaults, so the destructive action looked
-	# like a refresh. It must keep its own icon.
-	var row := btn.get_node_or_null("IconTextRow")
-	assert_not_null(row)
-	assert_eq((row.get_child(0) as Label).text, Icons.DELETE,
-		"the bulk close must not reuse the pane-type swap glyph")
+func test_the_panes_title_row_close_asks_first():
+	var body = autofree(PaneBody.new())
+	body.pane_label = "T1"
+	_sidebar.update_pane_list([body])
+	var close_all := _sidebar.find_child("PanesCloseAllBtn", true, false) as Button
+	assert_not_null(close_all, "the panes title row carries a close-all button")
+	# The bulk close uses the discard glyph, not the old counter-clockwise
+	# arrow that looked like a refresh.
+	assert_eq(Icons.glyph(close_all), Icons.DELETE)
 	watch_signals(_sidebar)
-	btn.pressed.emit()
+	close_all.pressed.emit()
+	assert_signal_not_emitted(_sidebar, "request_reset",
+		"the trash only opens the inline question")
+	var confirm := _sidebar.find_child("PanesCloseAllConfirm", true, false) as HBoxContainer
+	assert_not_null(confirm)
+	assert_true(confirm.visible, "the check/cross replaces the row's actions")
+	assert_false(close_all.visible, "the trash hides while the question is open")
+	(confirm.get_child(1) as Button).pressed.emit()
+	assert_signal_not_emitted(_sidebar, "request_reset", "the cross cancels")
+	close_all.pressed.emit()
+	(confirm.get_child(0) as Button).pressed.emit()
 	assert_signal_emit_count(_sidebar, "request_reset", 1)
-	assert_signal_not_emitted(_sidebar, "request_settings")
+	assert_true(close_all.visible, "the question reverted to the row's actions")
 
 func test_a_pane_rows_buttons_each_act_on_that_pane():
 	var body = autofree(PaneBody.new())
 	body.pane_label = "T1"
 	_sidebar.update_pane_list([body])
 	var row = _sidebar._pane_list.get_child(0)
-	var actions := [
-		"request_focus", "request_pane_settings", "request_pane_menu",
-		"request_close",
-	]
-	assert_eq(row.get_child_count(), actions.size(), "a row is label + three actions")
+	assert_eq(row.get_child_count(), 5,
+		"label + three actions + the check/cross pair")
+	var actions := ["request_focus", "request_pane_settings", "request_pane_menu"]
 	watch_signals(_sidebar)
 	for i in actions.size():
 		(row.get_child(i) as Button).pressed.emit()
@@ -158,6 +165,19 @@ func test_a_pane_rows_buttons_each_act_on_that_pane():
 		for a in actions:
 			total += get_signal_emit_count(_sidebar, a)
 		assert_eq(total, i + 1, "button %d must not also fire another action" % i)
+
+	var close_btn := row.get_child(3) as Button
+	assert_eq(Icons.glyph(close_btn), Icons.DELETE,
+		"the row's close is the discard glyph")
+	close_btn.pressed.emit()
+	assert_signal_not_emitted(_sidebar, "request_close",
+		"the row's close asks in place first")
+	await get_tree().process_frame
+	row = _sidebar._pane_list.get_child(0)
+	var confirm := row.get_child(4) as HBoxContainer
+	assert_true(confirm.visible, "the check/cross is in the row")
+	(confirm.get_child(0) as Button).pressed.emit()
+	assert_signal_emitted_with_parameters(_sidebar, "request_close", [body])
 
 
 func test_update_pane_list_shows_label():
@@ -214,16 +234,43 @@ func test_workspace_row_double_click_renames():
 	assert_eq(_sidebar._workspace_list.get_child_count(), 2,
 		"workspace rows must survive the post-commit blur")
 
-func test_workspace_directory_button_emits_cwd_request():
+func test_a_workspace_row_opens_the_menu():
 	_sidebar.update_workspace_list(["Repo"], 0, ["/tmp/repo"])
 	var row = _sidebar._workspace_list.get_child(0)
-	var dir_btn: Button = row.get_node_or_null("WorkspaceCwdBtn")
-	assert_not_null(dir_btn, "each workspace row carries a directory button")
-	assert_string_contains(dir_btn.tooltip_text, "/tmp/repo",
-		"the button names the workspace's current directory")
+	var more_btn: Button = row.get_node_or_null("WorkspaceMoreBtn")
+	assert_not_null(more_btn, "each workspace row carries a More button")
+	assert_eq(Icons.glyph(more_btn), Icons.MORE)
+	var close_btn: Button = row.get_node_or_null("WorkspaceCloseBtn")
+	assert_not_null(close_btn, "the close is always present, even for one workspace")
+	assert_eq(Icons.glyph(close_btn), Icons.DELETE,
+		"the workspace's close is the discard glyph")
 	watch_signals(_sidebar)
-	dir_btn.pressed.emit()
-	assert_signal_emitted_with_parameters(_sidebar, "request_workspace_cwd", [0])
+	more_btn.pressed.emit()
+	assert_signal_emitted_with_parameters(_sidebar, "request_workspace_menu", [0, more_btn])
+	assert_signal_not_emitted(_sidebar, "request_workspace_close")
+
+func test_a_workspace_rows_close_asks_first():
+	_sidebar.update_workspace_list(["Repo"], 0, ["/tmp/repo"])
+	var row = _sidebar._workspace_list.get_child(0)
+	var close_btn: Button = row.get_node_or_null("WorkspaceCloseBtn")
+	watch_signals(_sidebar)
+	close_btn.pressed.emit()
+	assert_signal_not_emitted(_sidebar, "request_workspace_close",
+		"the trash only opens the inline question")
+	await get_tree().process_frame
+	row = _sidebar._workspace_list.get_child(0)
+	var confirm := row.get_child(3) as HBoxContainer
+	assert_true(confirm.visible)
+	(confirm.get_child(1) as Button).pressed.emit()
+	assert_signal_not_emitted(_sidebar, "request_workspace_close", "the cross cancels")
+	await get_tree().process_frame
+	row = _sidebar._workspace_list.get_child(0)
+	(row.get_node("WorkspaceCloseBtn") as Button).pressed.emit()
+	await get_tree().process_frame
+	row = _sidebar._workspace_list.get_child(0)
+	confirm = row.get_child(3) as HBoxContainer
+	(confirm.get_child(0) as Button).pressed.emit()
+	assert_signal_emitted_with_parameters(_sidebar, "request_workspace_close", [0])
 
 func test_profile_row_double_click_renames():
 	var profiles: Array[Dictionary] = [
@@ -430,6 +477,24 @@ func test_catalog_hint_row_is_last_with_and_without_plugin_profiles():
 	assert_eq(_sidebar._profile_list.get_child(1).get_child(0).name,
 		"CatalogHintBtn", "the catalog hint must be the last row")
 
+func test_the_workspaces_title_row_close_all_asks_first():
+	_sidebar.update_workspace_list([], -1)
+	var close_all := _sidebar.find_child("WorkspacesCloseAllBtn", true, false) as Button
+	assert_not_null(close_all)
+	assert_false(close_all.visible, "no workspace, no close-all")
+	assert_true(_sidebar._workspaces_add_btn.visible, "the add button stays")
+	_sidebar.update_workspace_list(["Repo"], 0, [""])
+	assert_true(close_all.visible, "one workspace is enough to close all")
+	watch_signals(_sidebar)
+	close_all.pressed.emit()
+	assert_signal_not_emitted(_sidebar, "request_workspaces_close_all")
+	var confirm := _sidebar.find_child("WorkspacesCloseAllConfirm", true, false) as HBoxContainer
+	assert_true(confirm.visible)
+	assert_false(_sidebar._workspaces_add_btn.visible,
+		"the add hides with the trash while the question is open")
+	(confirm.get_child(0) as Button).pressed.emit()
+	assert_signal_emit_count(_sidebar, "request_workspaces_close_all", 1)
+
 func test_the_panes_heading_hides_with_an_empty_list():
 	# A fresh workspace showed a "Panes:" section title over nothing; the
 	# heading belongs to the list, not to the section.
@@ -523,15 +588,15 @@ func _use_recorders() -> void:
 	ExternalLink.open_external = _record_open
 	ExternalLink.copy_text = _record_copy
 
-func test_the_feedback_row_is_the_last_action_below_close_all():
-	var close_all := _icon_text_button("Close All")
+func test_the_feedback_row_is_the_last_action_below_settings():
+	var settings := _icon_text_button("Settings")
 	var feedback := _icon_text_button("Feedback")
-	assert_not_null(close_all, "Close All must exist")
+	assert_not_null(settings, "Settings must exist")
 	assert_not_null(feedback, "the Feedback row must exist")
-	assert_eq(feedback.get_parent(), close_all.get_parent(),
+	assert_eq(feedback.get_parent(), settings.get_parent(),
 		"both are footer actions in the same column")
-	assert_eq(feedback.get_index(), close_all.get_index() + 1,
-		"Feedback sits directly below Close All")
+	assert_eq(feedback.get_index(), settings.get_index() + 1,
+		"Feedback sits directly below Settings")
 	var row := feedback.get_node_or_null("IconTextRow")
 	assert_eq((row.get_child(0) as Label).text, Icons.FEEDBACK,
 		"the row draws its own glyph, not a neighbour's")

@@ -148,8 +148,10 @@ godot/
 
 - [+ Terminal] - spawn a new terminal
 - [Settings] - open global settings panel
-- [Close All] - close every pane in this workspace; if a command is still running, it asks first
-- [Folder button on a workspace row] - choose that workspace's default directory; every terminal spawned there, including one activated from a profile, starts in it (`Use default` clears it). Changing it asks when the workspace holds a pane that names its own program
+- [More (⋯) on a workspace row] - the workspace menu: **Set Directory** (that workspace's default directory; every terminal spawned there, including one activated from a profile, starts in it, and `Use default` clears it; changing it asks when the workspace holds a pane that names its own program) and **Clear Workspace** (close every pane in it, asking first; a hidden workspace is cleared without switching)
+- [Trash on a workspace row] - close that workspace. The last workspace can be closed, leaving the zero-workspace guide; the first pane created there makes the **Default** workspace
+- [Trash on the Workspaces: / Panes: title rows] - close every workspace / every pane in the active workspace. The row swaps to a check/cross first; the running-work prompt follows the check
+- [Trash on a pane row or its title bar] - close that pane. The sidebar row asks check/cross first; the title bar closes immediately, still asking about running work and unsaved edits
 - [Profile row] - the name activates that layout in the current workspace (it asks before replacing panes); the arrow button opens it in a new workspace named after the profile and leaves the current one untouched
 
 Layout is auto-saved on close and auto-restored on startup via `user://layout.json`.

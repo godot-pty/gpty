@@ -30,7 +30,7 @@ const SAVED_SECTION := "Saved commands"
 ## keywords  - extra lowercase words the filter matches
 ## variation - a `UiTheme` label role (destructive actions read as dangerous)
 const ACTIONS: Array[Dictionary] = [
-	{"command": "close active", "label": "Close Active Pane", "glyph": Icons.CLOSE,
+	{"command": "close active", "label": "Close Active Pane", "glyph": Icons.DELETE,
 		"action": "app:close_pane", "keywords": "close kill active pane", "variation": &""},
 	{"command": "settings", "label": "Open Settings", "glyph": Icons.SETTINGS,
 		"action": "", "keywords": "settings preferences options appearance", "variation": &""},

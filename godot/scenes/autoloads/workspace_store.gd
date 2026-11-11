@@ -47,7 +47,9 @@ func save(active: int, workspaces: Array[Dictionary]):
 		})
 	var d = {
 		"version": 1,
-		"active": clampi(active, 0, out.size() - 1),
+		# Same clamp as `load()`: an empty store is a valid store, and the
+		# range (0, -1) would write a degenerate active index.
+		"active": clampi(active, 0, maxi(out.size() - 1, 0)),
 		"workspaces": out,
 	}
 	_write_file(FILE, d)

@@ -71,7 +71,8 @@ const COMMAND_FIXTURE := [
 	{"name": "Test", "command": "cargo test --workspace", "run": true},
 ]
 ## Pane count before the state's interaction runs. 0 leaves the workspace
-## store empty, so the app's own first-launch path creates the first terminal.
+## store empty: a first launch now has no workspace and no pane, and the guide
+## is the whole view (the first pane creates the "Default" workspace).
 const STATES := {
 	"first-launch": {"size": DEFAULT_SIZE, "panes": 0},
 	"sidebar": {"size": DEFAULT_SIZE, "panes": 4},
@@ -771,17 +772,23 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 					scroll_body._scroll_end_btn.visible])
 				return false
 	if state.get("close_all", false):
-		await _click(_button_with_label(_workspace._sidebar, "Close All"))
+		# The panes title row's trash opens the inline check/cross; its check
+		# is what asks about running work. A live shell counts as running work,
+		# so the modal appears and is its own OS window: press its OK button's
+		# signal, which is what a click on it emits.
+		await _click(_button_with_accessible_name(
+			_workspace._sidebar, "Close all panes in this workspace"))
 		await _wait_frames(2)
-		# A live shell counts as running work, so Close All asks first. The
-		# modal is its own OS window; press its OK button's signal, which is
-		# what a click on it emits.
+		await _click(_button_with_accessible_name(
+			_workspace._sidebar, "Confirm closing all panes"))
+		await _wait_frames(2)
 		var dialog := _workspace.get_node_or_null("RunningWorkConfirm")
 		if dialog != null:
 			dialog.get_ok_button().pressed.emit()
 		await _wait_frames(4)
 		if not _workspace._tm.tiles.is_empty():
-			_fail("Close All left %d panes" % _workspace._tm.tiles.size())
+			_fail("the panes title row's close-all left %d panes"
+				% _workspace._tm.tiles.size())
 			return false
 	return true
 

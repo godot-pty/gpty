@@ -71,6 +71,10 @@ func _make_workspace() -> Control:
 	add_child(ws)
 	await get_tree().process_frame
 	await get_tree().process_frame
+	# A store with no workspaces now starts with none (a first run); this
+	# fixture operates on a workspace, so add the blank one it expects.
+	if ws._workspaces.is_empty():
+		ws._add_workspace()
 	return ws
 
 ## Restore `tiles` through the real restore path; return the rebuilt bodies in
@@ -79,7 +83,8 @@ func _make_workspace() -> Control:
 ## The store is cleared first: `Workspace._ready` restores its own entry, and a
 ## tile naming a non-default program would stop there on the trust dialog
 ## (leaving `_workspaces` empty) — this test is about `_restore_into`, so it
-## starts from a plain workspace.
+## starts from a plain workspace. A store with no workspaces is now a real
+## first run, so `_make_workspace` adds the blank workspace this needs.
 func _restore(tiles: Array[Dictionary], cwd := "") -> Array:
 	WorkspaceStore.save(0, [])
 	var ws = await _make_workspace()

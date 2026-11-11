@@ -20,7 +20,8 @@ signal request_workspace_switch(index: int)
 signal request_workspace_add
 signal request_workspace_close(index: int)
 signal request_workspace_rename(index: int, name: String)
-signal request_workspace_cwd(index: int)
+signal request_workspace_menu(index: int, source_btn: Button)
+signal request_workspaces_close_all
 
 
 var bg: ColorRect
@@ -29,9 +30,26 @@ var _pane_list: VBoxContainer
 var _profile_list: VBoxContainer
 var _workspace_list: VBoxContainer
 var _active_pane: Control = null
-## The "Panes:" heading; hidden while the list is empty so a fresh workspace
-## does not show a section title over nothing.
-var _pane_heading: Label = null
+## The "Panes:" heading row; hidden while the list is empty so a fresh
+## workspace does not show a section title over nothing.
+var _pane_heading: HBoxContainer = null
+
+## The one inline close question. The row (or title row) it belongs to renders
+## check/cross in place of its actions. Kinds: "workspace" (index + name),
+## "pane" (body), "workspaces_all", "panes_all". `snapshot` pins a title-row
+## action to the list it was opened against; `ok` is the visible check button.
+var _pending_close: Dictionary = {}
+## The last lists the workspace handed over, so a confirm click can re-render.
+var _ws_names: Array[String] = []
+var _ws_active := -1
+var _ws_cwds: Array[String] = []
+var _pane_items: Array = []
+var _pane_active: Control = null
+var _workspaces_add_btn: Button = null
+var _workspaces_close_all_btn: Button = null
+var _workspaces_confirm: HBoxContainer = null
+var _panes_close_all_btn: Button = null
+var _panes_confirm: HBoxContainer = null
 
 ## The Add Pane header: its heading renames itself to the tile the pointer (or,
 ## failing that, the keyboard cursor) is on, and its Help button lists what
@@ -77,37 +95,51 @@ func build(bg_rect: ColorRect):
 
 func update_pane_list(panes: Array, active_body: Control = null):
 	if not _pane_list: return
+	_pane_items.assign(panes)
 	_active_pane = active_body
-	if _pane_heading:
-		_pane_heading.visible = not panes.is_empty()
-	for c in _pane_list.get_children(): c.queue_free()
-	for i in panes.size():
-		var body = panes[i]
-		var row = HBoxContainer.new()
-		row.add_theme_constant_override("separation", UiTokens.SPACE_HAIR)
-		row.set_meta("body", body)
+	_pane_active = active_body
+	_render_panes()
 
-		var btn = _make_row_label_button(
-			body.get("pane_label") if body.get("pane_label") != "" else "%s?" % PaneTypes.ALL.get(body._pane_type(), {}).get("label_prefix", "?"))
-		_apply_row_accent(btn, body == active_body)
-		btn.pressed.connect(func(): request_focus.emit(body))
-		row.add_child(btn)
+## One pane row: label, settings, More, Close, and the hidden check/cross pair.
+## The close asks in this row first; only the check emits `request_close`.
+func _make_pane_row(body: Control, is_active: bool) -> HBoxContainer:
+	var row = HBoxContainer.new()
+	row.add_theme_constant_override("separation", UiTokens.SPACE_HAIR)
+	row.set_meta("body", body)
 
-		# Three trailing actions, the same three the title bar shows: settings,
-		# the one menu (minimize, swap position, type list with the current type
-		# marked), close. The five it used to carry left ~49 px for the label.
-		var set_btn = _make_row_action_button(Icons.SETTINGS, "Pane settings")
-		set_btn.pressed.connect(func(): request_pane_settings.emit(body))
-		row.add_child(set_btn)
+	var pane_label := str(body.get("pane_label"))
+	var label := pane_label if pane_label != "" else "%s?" % PaneTypes.ALL.get(body._pane_type(), {}).get("label_prefix", "?")
+	var btn = _make_row_label_button(label)
+	_apply_row_accent(btn, is_active)
+	btn.pressed.connect(func(): request_focus.emit(body))
+	row.add_child(btn)
 
-		var menu_btn = _make_row_action_button(Icons.MORE, "More pane actions")
-		menu_btn.pressed.connect(func(): request_pane_menu.emit(body, menu_btn))
-		row.add_child(menu_btn)
+	# The three trailing actions, the same three the title bar shows: settings,
+	# the one menu (minimize, swap position, type list with the current type
+	# marked), close. The five it used to carry left ~49 px for the label.
+	var set_btn = _make_row_action_button(Icons.SETTINGS, "Pane settings")
+	set_btn.pressed.connect(func(): request_pane_settings.emit(body))
+	row.add_child(set_btn)
 
-		var cls_btn = _make_row_action_button(Icons.CLOSE, "Close pane")
-		cls_btn.pressed.connect(func(): request_close.emit(body))
-		row.add_child(cls_btn)
-		_pane_list.add_child(row)
+	var menu_btn = _make_row_action_button(Icons.MORE, "More pane actions")
+	menu_btn.pressed.connect(func(): request_pane_menu.emit(body, menu_btn))
+	row.add_child(menu_btn)
+
+	var cls_btn = _make_row_action_button(Icons.DELETE, "Close pane")
+	cls_btn.name = "ClosePaneRowBtn"
+	cls_btn.pressed.connect(func(): _request_close_confirm("pane", 0, "", body, cls_btn))
+	row.add_child(cls_btn)
+
+	var confirm := _confirm_row("CloseConfirmOk", "CloseConfirmCancel", "'%s'" % label)
+	row.add_child(confirm)
+	var pending := _pending_pane(body)
+	set_btn.visible = not pending
+	menu_btn.visible = not pending
+	cls_btn.visible = not pending
+	confirm.visible = pending
+	if pending:
+		_pending_close["ok"] = confirm.get_child(0)
+	return row
 
 ## Move the active-row accent without rebuilding the list — called on pane
 ## focus changes (the workspace polls `_tm.last_body` each frame).
@@ -115,6 +147,7 @@ func set_active_pane(body: Control):
 	if body == _active_pane:
 		return
 	_active_pane = body
+	_pane_active = body
 	for row in _pane_list.get_children():
 		var btn = row.get_child(0) as Button
 		if btn == null:
@@ -174,11 +207,6 @@ func _add_buttons(v: VBoxContainer):
 	var settings_btn = _make_icon_text_button(Icons.SETTINGS, "Settings")
 	settings_btn.pressed.connect(func(): request_settings.emit())
 	v.add_child(settings_btn)
-
-	var reset_btn = _make_icon_text_button(Icons.DELETE, "Close All", UiTheme.DANGER_LABEL)
-	reset_btn.tooltip_text = _with_chord("Close every pane in this workspace", "app:reset_workspace")
-	reset_btn.pressed.connect(func(): request_reset.emit())
-	v.add_child(reset_btn)
 
 	var feedback_btn = _make_icon_text_button(Icons.FEEDBACK, "Feedback")
 	feedback_btn.tooltip_text = "Report a bug or request a feature - opens a prefilled GitHub issue in your browser"
@@ -391,6 +419,23 @@ func _add_workspace_section(parent: VBoxContainer):
 	Icons.icon_button(add_btn, Icons.ADD, "New workspace (max 8)")
 	add_btn.pressed.connect(func(): request_workspace_add.emit())
 	header.add_child(add_btn)
+	_workspaces_add_btn = add_btn
+
+	# The section's close-all: visible only while a workspace exists, and it
+	# asks in place (check/cross) before the running-work walk.
+	var all_btn = Button.new(); all_btn.name = "WorkspacesCloseAllBtn"
+	Icons.icon_button(all_btn, Icons.DELETE, "Close all workspaces")
+	all_btn.tooltip_text = "Close all workspaces"
+	all_btn.visible = false
+	all_btn.pressed.connect(func(): _request_close_confirm("workspaces_all", 0, "", null, all_btn))
+	header.add_child(all_btn)
+	_workspaces_close_all_btn = all_btn
+
+	var confirm := _confirm_row("WorkspacesCloseAllConfirmOk",
+		"WorkspacesCloseAllConfirmCancel", "all workspaces")
+	confirm.name = "WorkspacesCloseAllConfirm"
+	header.add_child(confirm)
+	_workspaces_confirm = confirm
 	section.add_child(header)
 
 	# No fixed cap on visible rows beyond 5: five rows fully shown, an
@@ -406,17 +451,171 @@ func _add_workspace_section(parent: VBoxContainer):
 
 func update_workspace_list(names: Array[String], active: int, cwds: Array[String] = []):
 	if not _workspace_list: return
+	_ws_names.assign(names)
+	_ws_active = active
+	_ws_cwds.assign(cwds)
+	_render_workspaces()
+
+## Rebuild the workspace rows from the stored lists, then sync the header. A
+## pending row question survives a rebuild only while its target is still there.
+func _render_workspaces():
+	if not _workspace_list: return
+	_validate_workspace_pending()
 	for c in _workspace_list.get_children(): c.queue_free()
-	var show_close := names.size() > 1
 	var rows: Array[Control] = []
-	for i in names.size():
-		var cwd := str(cwds[i]) if i < cwds.size() else ""
-		var row := _make_workspace_row(i, names[i], i == active, show_close, cwd)
+	for i in _ws_names.size():
+		var cwd := str(_ws_cwds[i]) if i < _ws_cwds.size() else ""
+		var row := _make_workspace_row(i, _ws_names[i], i == _ws_active, cwd)
 		_workspace_list.add_child(row)
 		rows.append(row)
 	var sc = _workspace_list.get_parent() as ScrollContainer
 	if sc:
 		sc.custom_minimum_size.y = _measured_section_height(_workspace_list, rows)
+	_sync_workspace_header()
+
+func _validate_workspace_pending():
+	match str(_pending_close.get("kind", "")):
+		"workspace":
+			var idx := int(_pending_close.get("index", -1))
+			if idx < 0 or idx >= _ws_names.size() \
+					or _ws_names[idx] != str(_pending_close.get("name", "")):
+				_pending_close.clear()
+		"workspaces_all":
+			if _ws_names != _pending_close.get("snapshot", []):
+				_pending_close.clear()
+
+func _sync_workspace_header():
+	var all := str(_pending_close.get("kind", "")) == "workspaces_all"
+	var any := not _ws_names.is_empty()
+	_workspaces_add_btn.visible = not all
+	_workspaces_close_all_btn.visible = not all and any
+	_workspaces_confirm.visible = all and any
+	if all and any:
+		_pending_close["ok"] = _workspaces_confirm.get_child(0)
+
+func _render_panes():
+	if not _pane_list: return
+	_validate_pane_pending()
+	for c in _pane_list.get_children(): c.queue_free()
+	for body in _pane_items:
+		_pane_list.add_child(_make_pane_row(body, body == _pane_active))
+	_sync_pane_header()
+
+func _validate_pane_pending():
+	match str(_pending_close.get("kind", "")):
+		"pane":
+			var body = _pending_close.get("body")
+			if body == null or not is_instance_valid(body) or not _pane_items.has(body):
+				_pending_close.clear()
+		"panes_all":
+			if _pane_items.is_empty() or _pane_items != _pending_close.get("snapshot", []):
+				_pending_close.clear()
+
+func _sync_pane_header():
+	var all := str(_pending_close.get("kind", "")) == "panes_all"
+	var any := not _pane_items.is_empty()
+	_pane_heading.visible = any
+	_panes_close_all_btn.visible = any and not all
+	_panes_confirm.visible = any and all
+	if all and any:
+		_pending_close["ok"] = _panes_confirm.get_child(0)
+
+func _pending_workspace(idx: int, ws_name: String) -> bool:
+	return str(_pending_close.get("kind", "")) == "workspace" \
+		and int(_pending_close.get("index", -1)) == idx \
+		and str(_pending_close.get("name", "")) == ws_name
+
+func _pending_pane(body: Control) -> bool:
+	return str(_pending_close.get("kind", "")) == "pane" \
+		and _pending_close.get("body") == body
+
+## The one inline question: set the target, re-render both sections (so an
+## older question is replaced, not left on screen), and focus the check.
+func _request_close_confirm(kind: String, index := 0, ws_name := "",
+		body: Control = null, source: Button = null):
+	_pending_close = {"kind": kind, "index": index, "name": ws_name,
+		"body": body, "source": source}
+	if kind == "workspaces_all":
+		_pending_close["snapshot"] = _ws_names.duplicate()
+	elif kind == "panes_all":
+		_pending_close["snapshot"] = _pane_items.duplicate()
+	_render_workspaces()
+	_render_panes()
+	_focus_pending_confirm()
+
+func _accept_close_confirm():
+	if _pending_close.is_empty():
+		return
+	var state := _pending_close.duplicate()
+	_pending_close.clear()
+	_render_workspaces()
+	_render_panes()
+	match str(state.get("kind", "")):
+		"workspace":
+			request_workspace_close.emit(int(state.get("index", -1)))
+		"pane":
+			var body = state.get("body")
+			if body != null and is_instance_valid(body):
+				request_close.emit(body)
+		"workspaces_all":
+			request_workspaces_close_all.emit()
+		"panes_all":
+			request_reset.emit()
+
+func _cancel_close_confirm():
+	if _pending_close.is_empty():
+		return
+	var state := _pending_close.duplicate()
+	_pending_close.clear()
+	_render_workspaces()
+	_render_panes()
+	_focus_close_trigger(state)
+
+func _focus_pending_confirm():
+	var ok = _pending_close.get("ok")
+	if ok is Button and is_instance_valid(ok) and ok.is_visible_in_tree():
+		ok.grab_focus()
+
+## Two glyph buttons replacing a row's actions: check confirms, cross cancels.
+## The first child is the check; `_pending_close.ok` points at it for focus.
+func _confirm_row(ok_name: String, cancel_name: String, what: String) -> HBoxContainer:
+	var box := HBoxContainer.new()
+	box.name = "CloseConfirm"
+	box.add_theme_constant_override("separation", UiTokens.SPACE_XS)
+	var ok := Button.new()
+	ok.name = ok_name
+	Icons.icon_button(ok, Icons.CHECK, "Confirm closing %s" % what)
+	ok.tooltip_text = "Confirm closing %s" % what
+	ok.pressed.connect(_accept_close_confirm)
+	box.add_child(ok)
+	var no := Button.new()
+	no.name = cancel_name
+	Icons.icon_button(no, Icons.CLOSE, "Cancel closing %s" % what)
+	no.tooltip_text = "Cancel closing %s" % what
+	no.pressed.connect(_cancel_close_confirm)
+	box.add_child(no)
+	box.visible = false
+	return box
+
+func _focus_close_trigger(state: Dictionary):
+	match str(state.get("kind", "")):
+		"workspace":
+			var idx := int(state.get("index", -1))
+			for row in _workspace_list.get_children():
+				if row.is_queued_for_deletion() or int(row.get_meta("workspace_index", -1)) != idx:
+					continue
+				var btn := row.get_node_or_null("WorkspaceCloseBtn") as Button
+				if btn: btn.grab_focus()
+		"pane":
+			for row in _pane_list.get_children():
+				if row.is_queued_for_deletion() or row.get_meta("body") != state.get("body"):
+					continue
+				var btn := row.get_node_or_null("ClosePaneRowBtn") as Button
+				if btn: btn.grab_focus()
+		"workspaces_all":
+			_workspaces_close_all_btn.grab_focus()
+		"panes_all":
+			_panes_close_all_btn.grab_focus()
 
 ## Sum the real combined minimum heights of `rows` (plus the list's
 ## separation), capped at SECTION_MAX_VISIBLE_ROWS fully-visible rows. No
@@ -445,9 +644,10 @@ func _apply_row_accent(btn: Button, active: bool):
 	# a palette switch re-colours the row without this helper running.
 	btn.theme_type_variation = UiTheme.ACCENT_BUTTON if active else &""
 
-func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close: bool, cwd := "") -> HBoxContainer:
+func _make_workspace_row(idx: int, ws_name: String, is_active: bool, cwd := "") -> HBoxContainer:
 	var row = HBoxContainer.new()
 	row.add_theme_constant_override("separation", UiTokens.SPACE_XS)
+	row.set_meta("workspace_index", idx)
 
 	var dir_hint := cwd if cwd != "" else "default (gpty's own directory)"
 	var btn = _make_row_label_button(ws_name)
@@ -457,28 +657,28 @@ func _make_workspace_row(idx: int, ws_name: String, is_active: bool, show_close:
 	btn.gui_input.connect(func(ev: InputEvent): _on_workspace_row_input(idx, btn, ev))
 	row.add_child(btn)
 
-	# Per-workspace working directory. The profile stays a layout template,
-	# so the directory is edited on the workspace instance instead. The glyph
-	# is a folder, not a gear: this button opens a directory picker and does
-	# nothing else, and a gear would promise a settings surface that does not
-	# exist yet. A workspace settings menu (sensitive flag, and the rest) is
-	# queued for when there is more than one setting to put in it.
-	var dir_btn = Button.new(); dir_btn.name = "WorkspaceCwdBtn"
-	# The tooltip states the current path; the name states the action. A set
-	# directory tints the glyph: the variation is on the Label, not the button.
-	Icons.icon_button(dir_btn, Icons.FOLDER, "Choose workspace directory",
-		UiTheme.ACCENT_LABEL if cwd != "" else &"")
-	dir_btn.tooltip_text = "Working directory: %s" % dir_hint
-	dir_btn.pressed.connect(func(): request_workspace_cwd.emit(idx))
-	row.add_child(dir_btn)
+	# The row's actions are one menu (directory, clear) and the discard. The
+	# folder is no longer its own button: the menu carries it with its icon and
+	# the current path in the tooltip. Close is always the right-most glyph,
+	# including on the last workspace — closing it is a real state now.
+	var more_btn := _make_row_action_button(Icons.MORE, "More workspace actions")
+	more_btn.name = "WorkspaceMoreBtn"
+	more_btn.pressed.connect(func(): request_workspace_menu.emit(idx, more_btn))
+	row.add_child(more_btn)
 
-	# Close button only when more than one workspace exists (min-1 invariant).
-	if show_close:
-		var x = Button.new()
-		x.tooltip_text = "Close workspace"
-		Icons.icon_button(x, Icons.CLOSE, "Close workspace")
-		x.pressed.connect(func(): request_workspace_close.emit(idx))
-		row.add_child(x)
+	var close_btn := _make_row_action_button(Icons.DELETE, "Close workspace")
+	close_btn.name = "WorkspaceCloseBtn"
+	close_btn.pressed.connect(func(): _request_close_confirm("workspace", idx, ws_name, null, close_btn))
+	row.add_child(close_btn)
+
+	var confirm := _confirm_row("CloseConfirmOk", "CloseConfirmCancel", "'%s'" % ws_name)
+	row.add_child(confirm)
+	var pending := _pending_workspace(idx, ws_name)
+	more_btn.visible = not pending
+	close_btn.visible = not pending
+	confirm.visible = pending
+	if pending:
+		_pending_close["ok"] = confirm.get_child(0)
 	return row
 
 ## Swap a row label Button for an inline LineEdit; commits exactly once
@@ -524,13 +724,33 @@ func _on_workspace_row_input(idx: int, btn: Button, ev: InputEvent):
 	_begin_inline_rename(btn, func(t: String): request_workspace_rename.emit(idx, t))
 
 func _add_pane_list_ui(v: VBoxContainer):
+	var header = HBoxContainer.new(); header.name = "PaneHeader"
 	var lbl = Label.new()
 	lbl.text = " Panes:"
-	# Hidden until the list has a row: a workspace that never restores (a trust dialog is waiting) must not show a section title over nothing.
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(lbl)
+
+	# The section's close-all: visible only while a pane exists. The check
+	# that follows it emits the same reset the old footer button did.
+	var all_btn = Button.new(); all_btn.name = "PanesCloseAllBtn"
+	Icons.icon_button(all_btn, Icons.DELETE, "Close all panes in this workspace")
+	all_btn.tooltip_text = _with_chord("Close every pane in this workspace", "app:reset_workspace")
+	all_btn.pressed.connect(func(): _request_close_confirm("panes_all", 0, "", null, all_btn))
+	header.add_child(all_btn)
+	_panes_close_all_btn = all_btn
+
+	var confirm := _confirm_row("PanesCloseAllConfirmOk",
+		"PanesCloseAllConfirmCancel", "all panes")
+	confirm.name = "PanesCloseAllConfirm"
+	header.add_child(confirm)
+	_panes_confirm = confirm
+
+	# Hidden until the list has a row: a workspace that never restores (a trust
+	# dialog is waiting) must not show a section title over nothing.
 	# `update_pane_list` is the one switch.
-	lbl.visible = false
-	v.add_child(lbl)
-	_pane_heading = lbl
+	header.visible = false
+	v.add_child(header)
+	_pane_heading = header
 
 	var sc = ScrollContainer.new()
 	sc.name = "PaneScroll"

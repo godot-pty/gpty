@@ -31,19 +31,24 @@ func after_each():
 		_ws = null
 	MockAutoloads.teardown()
 
-func test_startup_spawn_gets_global_settings():
+func test_a_spawned_terminal_gets_global_settings():
+	# A first run has no workspace; seed one empty workspace so the spawn has a
+	# target, then prove the user-initiated spawn gets the global settings.
+	MockAutoloads.set_store(WorkspaceStore.FILE, {
+		"active": 0,
+		"workspaces": [{"name": "W", "layout": []}],
+	})
 	var ws = WorkspaceScript.new()
 	_ws = ws
 	add_child(ws)
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	var tm: TerminalManager = ws._tm
-	assert_gt(tm.tiles.size(), 0, "workspace should spawn a terminal on empty layout")
-	var body = tm._find_body(tm.tiles[0].wrapper)
+	var body = ws._spawn_pane("terminal")
+	assert_not_null(body, "the workspace can spawn a terminal")
 	assert_eq(body.font_size, 17, "spawned terminal should get cfg font size")
 	assert_eq(body.cursor_shape, 1, "spawned terminal should get cfg cursor shape")
-	var tb = tm.tiles[0].wrapper.get_node_or_null("BodyVBox/TitleBar")
+	var tb = ws._tm.tiles[-1].wrapper.get_node_or_null("BodyVBox/TitleBar")
 	assert_false(tb.visible, "spawned titlebar should be hidden when cfg_show_titlebar is false")
 	# Wait out the deferred concept push timer so it doesn't resume after free.
 	await get_tree().create_timer(2.1).timeout
@@ -51,8 +56,8 @@ func test_startup_spawn_gets_global_settings():
 func test_a_workspace_the_store_kept_empty_stays_empty():
 	# `WorkspaceStore` writes `layout: []` for a workspace whose panes the user
 	# closed. That is a saved state, so the restore keeps it empty and shows the
-	# guide; only a store with no workspaces at all (a first run, pinned by the
-	# test above) opens with a terminal.
+	# guide; a store with no workspaces at all is a first run with no workspace,
+	# pinned by `test_a_first_run_has_no_workspace_and_no_pane`.
 	MockAutoloads.set_store(WorkspaceStore.FILE, {
 		"active": 0,
 		"workspaces": [{"name": "Emptied", "layout": []}],
@@ -545,10 +550,184 @@ func test_spawn_swap_and_close_do_not_toast():
 	ws._kill_now(ws._tm._find_body(ws._tm.tiles[-1].wrapper))
 	await get_tree().process_frame
 	assert_eq(seen.size(), 0, "a close is visible in the tiles; got %s" % [seen])
-	ws._close_workspace(0)   # the last workspace: a refusal that is kept
+	# The positive control: a refusal the user must see still reaches the toast
+	# queue. Then the last workspace closes without one.
+	ws._set_workspace_cwd(0, "relative/path")
+	assert_has(seen, "That working directory is not a usable absolute path",
+		"the recorder is wired: a refusal the user must see is caught")
+	seen.clear()
+	ws._close_workspace_now(0)
 	ToastManager.toast_requested.disconnect(recorder)
-	assert_has(seen, "Cannot close the last workspace",
-		"the recorder is wired: refusing a close is not a visible action")
+	assert_true(ws._workspaces.is_empty(), "the last workspace is discardable")
+	assert_eq(seen.size(), 0,
+		"closing the last workspace is visible in the sidebar, not a toast")
+	await get_tree().create_timer(2.1).timeout
+
+func test_a_first_run_has_no_workspace_and_no_pane():
+	MockAutoloads.set_store(WorkspaceStore.FILE, {"active": 0, "workspaces": []})
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_eq(ws._workspaces.size(), 0, "a first run has no workspace")
+	assert_eq(ws._tm.tiles.size(), 0, "and no pane")
+	assert_eq(ws._active, -1, "there is no active workspace")
+	assert_true(ws._empty_state.visible, "the guide owns the screen")
+	assert_eq(ws._sidebar._workspace_list.get_child_count(), 0, "no workspace rows")
+	assert_false(ws._sidebar._workspaces_close_all_btn.visible,
+		"no workspace, no close-all")
+	assert_true(ws._sidebar._workspaces_add_btn.visible, "the add button remains")
+	assert_false(ws._sidebar._pane_heading.visible, "no panes, no heading")
+	await get_tree().create_timer(2.1).timeout
+
+func test_the_first_pane_creates_the_default_workspace():
+	MockAutoloads.set_store(WorkspaceStore.FILE, {"active": 0, "workspaces": []})
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var body = ws._spawn_pane("terminal")
+	assert_not_null(body, "a pane can be created with no workspace")
+	assert_eq(ws._workspaces.size(), 1, "the pane creates its workspace")
+	assert_eq(str(ws._workspaces[0].name), "Default")
+	assert_eq(ws._tm.tiles.size(), 1)
+	assert_false(ws._empty_state.visible, "the guide leaves")
+	await get_tree().create_timer(2.1).timeout
+
+func test_the_add_button_creates_default_from_zero():
+	MockAutoloads.set_store(WorkspaceStore.FILE, {"active": 0, "workspaces": []})
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	ws._add_workspace()
+	assert_eq(ws._workspaces.size(), 1)
+	assert_eq(str(ws._workspaces[0].name), "Default")
+	assert_eq(ws._tm.tiles.size(), 0, "the add button creates a blank workspace")
+	assert_true(ws._empty_state.visible, "the guide stays until a pane exists")
+	await get_tree().create_timer(2.1).timeout
+
+func test_closing_the_last_workspace_enters_the_empty_state():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_eq(ws._workspaces.size(), 1, "the fixture starts with one workspace")
+	ws._close_workspace_now(0)
+	assert_true(ws._workspaces.is_empty(), "the last workspace is discardable")
+	assert_eq(ws._tm.tiles.size(), 0)
+	assert_true(ws._empty_state.visible, "the guide takes the screen")
+	await get_tree().process_frame
+	assert_eq(ws._sidebar._workspace_list.get_child_count(), 0, "no rows remain")
+	assert_false(ws._sidebar._workspaces_close_all_btn.visible,
+		"the close-all trash disappears with the last workspace")
+	await get_tree().create_timer(2.1).timeout
+
+func test_the_panes_title_row_closes_all_panes():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var close_all := ws._sidebar.find_child("PanesCloseAllBtn", true, false) as Button
+	assert_not_null(close_all, "the panes title row carries the close-all")
+	close_all.pressed.emit()
+	var ok := ws._sidebar.find_child("PanesCloseAllConfirmOk", true, false) as Button
+	assert_not_null(ok, "the trash opened the inline check")
+	ok.pressed.emit()
+	# An idle shell may or may not report foreground work on this platform; a
+	# running command would raise the modal (pinned in `test_pane_close_guard`).
+	var dialog := ws.find_child("RunningWorkConfirm", false, false) as ConfirmationDialog
+	if dialog != null:
+		dialog.get_ok_button().pressed.emit()
+		await get_tree().process_frame
+	assert_eq(ws._tm.tiles.size(), 0, "every pane is gone")
+	assert_true(ws._empty_state.visible)
+	assert_false(ws._sidebar._pane_heading.visible, "the empty section has no heading")
+	await get_tree().create_timer(2.1).timeout
+
+func test_the_workspaces_title_row_closes_all_workspaces():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	ws._add_workspace()
+	await get_tree().process_frame
+	var close_all := ws._sidebar.find_child("WorkspacesCloseAllBtn", true, false) as Button
+	assert_not_null(close_all, "the workspaces title row carries the close-all")
+	close_all.pressed.emit()
+	var ok := ws._sidebar.find_child("WorkspacesCloseAllConfirmOk", true, false) as Button
+	assert_not_null(ok, "the trash opened the inline check")
+	ok.pressed.emit()
+	var dialog := ws.find_child("RunningWorkConfirm", false, false) as ConfirmationDialog
+	if dialog != null:
+		dialog.get_ok_button().pressed.emit()
+		await get_tree().process_frame
+	assert_true(ws._workspaces.is_empty(), "every workspace is gone")
+	assert_eq(ws._tm.tiles.size(), 0)
+	assert_true(ws._empty_state.visible)
+	assert_false(ws._sidebar._workspaces_close_all_btn.visible)
+	await get_tree().create_timer(2.1).timeout
+
+func test_the_workspace_menu_lists_directory_and_clear():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var source := Button.new()
+	add_child_autofree(source)
+	ws._on_workspace_menu(0, source)
+	var menu := ws.find_child("WorkspaceActionsMenu", true, false) as PopupMenu
+	assert_not_null(menu, "the More button opens the workspace menu")
+	assert_eq(menu.item_count, 2)
+	assert_eq(menu.get_item_text(0), "Set Directory")
+	assert_string_contains(menu.get_item_tooltip(0), "Working directory:",
+		"the directory item carries the current path")
+	assert_not_null(menu.get_item_icon(0), "the folder glyph is a menu icon")
+	# A texture that is null is not the only failure: an opaque or blank atlas
+	# region would draw a square or nothing. The glyph's alpha must cover some
+	# pixels and not all of them.
+	var icon_image := (menu.get_item_icon(0) as ImageTexture).get_image()
+	var covered := 0
+	for y in icon_image.get_height():
+		for x in icon_image.get_width():
+			if icon_image.get_pixel(x, y).a > 0.0:
+				covered += 1
+	assert_gt(covered, 0, "the folder icon has glyph pixels")
+	assert_lt(covered, icon_image.get_width() * icon_image.get_height(),
+		"and is not a filled square")
+	assert_eq(menu.get_item_text(1), "Clear Workspace")
+	assert_string_contains(menu.get_item_tooltip(1), "Close every pane")
+	assert_not_null(menu.get_item_icon(1), "the trash glyph is a menu icon")
+	menu.queue_free()
+	await get_tree().create_timer(2.1).timeout
+
+func test_clearing_a_hidden_workspace_does_not_switch():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	ws._add_workspace()
+	await get_tree().process_frame
+	var first: Dictionary = ws._workspaces[0]
+	first["profile"] = "P"
+	var active_before: int = ws._active
+	ws._clear_workspace(0)
+	var dialog := ws.find_child("RunningWorkConfirm", false, false) as ConfirmationDialog
+	if dialog != null:
+		dialog.get_ok_button().pressed.emit()
+		await get_tree().process_frame
+	assert_eq(first.tm.tiles.size(), 0, "the hidden workspace is cleared")
+	assert_eq(ws._workspaces.size(), 2, "and not removed")
+	assert_eq(ws._active, active_before, "the active workspace never switched")
+	assert_eq(str(first.get("profile", "")), "", "a cleared workspace loses its profile")
 	await get_tree().create_timer(2.1).timeout
 
 func test_profile_activation_refreshes_layout_and_pane_list():
