@@ -66,6 +66,7 @@ Files: `ROADMAP.md` (an index over the chains) and `docs/content/docs/roadmap/vX
 - New workspace crates join the uniform bump automatically; `./scripts/ci-check` (step "crate versions") fails on any drift. Don't trust `grep '^version' crates/*/Cargo.toml` alone — dependency tables also match.
 - The bump is a **per-file** edit: `sed -i '0,/^version = "…"$/s//…/' crates/*/Cargo.toml` treats all files as ONE stream without GNU sed's `-s`, so only the first file's first match is replaced. Use `sed -si` (or loop per file), then re-check every crate.
 - Refresh the lockfile: `cargo check --workspace` (updates `Cargo.lock` entries for the path deps).
+- Refresh the fuzz workspace's lockfile as well: `fuzz/` is a separate cargo-fuzz workspace (`fuzz/Cargo.lock`, not a repository member), so `cargo check --workspace` never touches it and the bumped path-dep versions leave `ci-check`'s "fuzz lockfile in sync" gate red on a range that touched no Rust code (measured on v0.8.1). `cargo metadata --format-version 1 --manifest-path fuzz/Cargo.toml` rewrites its version lines; commit it with the bump.
 - Rebuild the gdext lib: `cargo build -p gpty-gdext` (keeps the local dev binary current).
 
 ### 6. Screenshots & Blog Entry
