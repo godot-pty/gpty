@@ -99,7 +99,11 @@ later one 63-75 ms).
    switch plus `apply_mode_us` and a median. A question no harness covers gets an env-gated
    coroutine called from `workspace.gd::_ready()` (`if OS.get_environment("GPTY_BENCH") != "":
    _bench.call_deferred()`), deleted before committing - a timing probe outside a committed
-   harness has no output to pin.
+   harness has no output to pin. Check what the bench's warm-up leaves behind before trusting a
+   fast number: `switch_bench` switches away after one frame, so the incoming pane's grid was
+   still empty (0-24 characters at every measured switch) and the focus-triggered accessibility
+   publish had nothing to shape - it reported 37 ms for a switch whose real-store cost was 992 ms
+   (2026-11-11). Populate and settle the pane, then re-measure.
 5. **Attribute before theorising.** Time the call with `Time.get_ticks_usec()` marks around each
    step (and each sub-step), then the frame after it with `await get_tree().process_frame` four
    times and divide. Print one line per repetition and repeat at least three times, alternating
