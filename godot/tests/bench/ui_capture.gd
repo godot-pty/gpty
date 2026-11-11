@@ -559,16 +559,24 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 				tab_container.current_tab = tab_container.get_tab_idx_from_control(tab_body as Control)
 				await _wait_frames(2)
 		"file-dialog":
-			var dir_button := _button_with_accessible_name(_workspace._sidebar,
-				"Choose workspace directory")
-			if dir_button == null:
-				_fail("the sidebar has no workspace-directory button")
+			var more_button := _button_with_accessible_name(_workspace._sidebar,
+				"More workspace actions")
+			if more_button == null:
+				_fail("the sidebar has no workspace More button")
 				return false
-			await _click(dir_button)
+			await _click(more_button)
+			await _wait_frames(2)
+			var menu := _workspace.find_child("WorkspaceActionsMenu", true, false) as PopupMenu
+			if menu == null:
+				_fail("clicking the workspace More button did not open its menu")
+				return false
+			# Set Directory is item 0; emitting the press is what a click on the
+			# item sends (the modal dialogs use the same seam).
+			menu.index_pressed.emit(0)
 			await _wait_frames(3)
 			var picker := _visible_dialog(_workspace) as FileDialog
 			if picker == null:
-				_fail("clicking the workspace directory did not open a picker")
+				_fail("the workspace menu's Set Directory did not open a picker")
 				return false
 			# A fixed directory: the picker opens in the sandbox's HOME, whose
 			# per-run path made two captures differ in the path field. The root
