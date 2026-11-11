@@ -49,9 +49,12 @@ func test_publish_carries_text_name_and_live_mode():
 	add_child_autofree(host)
 	var node := A11y.publish(host, "A11yLive", "built 3 files", A11y.LIVE_POLITE)
 	assert_not_null(node)
-	assert_eq(node.text, "built 3 files")
 	assert_eq(node.accessibility_name, "built 3 files",
 		"the published name is what a driver reads")
+	# The content must never be display text: a Label shapes `text`, and the
+	# whole screen that cost 992 ms of main-thread work in one workspace switch
+	# (4.7.2, 221x78, measured 2026-11-11). The name is the channel AT reads.
+	assert_eq(node.text, "", "content is carried by the accessible name, not shaped")
 	assert_eq(node.accessibility_live, A11y.LIVE_POLITE,
 		"an announcement must reach a reader without focus")
 	assert_eq(node.mouse_filter, Control.MOUSE_FILTER_IGNORE,
@@ -70,7 +73,8 @@ func test_publish_replaces_the_slot():
 	var second := A11y.publish(host, "A11yText", "second screen")
 	assert_eq(host.get_child_count(), 1, "the slot holds one node, not a history")
 	assert_eq(str(host.get_node("A11yText").get_instance_id()), str(second.get_instance_id()))
-	assert_eq(second.text, "second screen")
+	assert_eq(second.accessibility_name, "second screen")
+	assert_eq(second.text, "", "a replacement carries no display text either")
 
 
 func test_publish_ignores_empty_text():

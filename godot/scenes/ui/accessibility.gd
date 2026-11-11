@@ -108,10 +108,10 @@ static func _push_value(control: Control, text: String, role: int) -> void:
 ## publishes a Control's accessible name once, when its element is created, and
 ## later writes (`accessibility_name`, `text`, `queue_accessibility_update`) do
 ## not reach the AT-SPI adapter (measured on the 4.7.2 export, 2026-11-05). A
-## node added after the change is published with its text, so content is a
+## node added after the change is published with its name, so content is a
 ## replacement, not an update. The caller owns the cadence.
 ##
-## A slot whose text and live mode are unchanged is returned as it is: the
+## A slot whose name and live mode are unchanged is returned as it is: the
 ## replacement is only how *new* content reaches AT, and a reader is holding the
 ## node that is there. `TerminalPane._a11y_tick` republishes its last output
 ## line every `A11Y_PUSH_MS`, so a churning idle pane used to drop the node AT
@@ -125,7 +125,10 @@ static func publish(host: Control, slot: String, text: String, live := LIVE_OFF)
 	var previous := host.get_node_or_null(NodePath(slot))
 	if previous is Label:
 		var label := previous as Label
-		if label.text == text and label.accessibility_live == live:
+		# The name is the content channel, so it is what "unchanged" means: a
+		# comparison against `text` would never match now that the node carries
+		# no display text, and the slot would churn once per push.
+		if label.accessibility_name == text and label.accessibility_live == live:
 			return label
 	if previous != null:
 		# The node is what AT holds, so the old one leaves the tree before the
@@ -134,7 +137,13 @@ static func publish(host: Control, slot: String, text: String, live := LIVE_OFF)
 		previous.queue_free()
 	var node := Label.new()
 	node.name = slot
-	node.text = text
+	# `accessibility_name` alone is the name a driver reads:
+	# `Control::_get_accessibility_name` returns it and a Label does not derive
+	# a name from its text. Do NOT also set `node.text` — a Label shapes and
+	# lays out that string, and a terminal's full screen made one workspace
+	# switch cost 992 ms of main-thread text shaping (221x78 = 17 315 chars,
+	# measured 2026-11-11). The value Label.text feeds does not reach AT-SPI on
+	# 4.7.2 anyway (see the note above).
 	node.accessibility_name = text
 	node.accessibility_live = live
 	node.clip_text = true
