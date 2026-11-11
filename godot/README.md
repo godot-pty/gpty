@@ -104,6 +104,7 @@ godot/
             ├── draw_bench.gd    # Terminal renderer cost
             ├── markdown_bench.gd
             ├── reasoning_bench.gd
+            ├── switch_bench.gd  # Workspace-switch cost: sync call, mode, first frame
             └── ui_capture.gd    # Committed UI state staging -> viewport PNGs
 ```
 
