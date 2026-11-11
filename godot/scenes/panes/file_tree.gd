@@ -126,7 +126,7 @@ func _confirm_open(path: String) -> void:
 		ExternalLink.open(uri, "", ExternalLink.refused_file_message(uri), "File Tree")
 	)
 	dialog.canceled.connect(func(): dialog.queue_free())
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 ## The one gate for a folder this pane is asked to list: `{dir, problem}`.
 ## `dir` is null exactly when `problem` says why; `{}` means the folder opened

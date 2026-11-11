@@ -211,7 +211,7 @@ func _confirm_close_with_errors() -> void:
 		close()
 	)
 	dialog.canceled.connect(func(): dialog.queue_free())
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 # ═══════════════════════════════════════════════════════════════════════
 # Data flow
@@ -700,7 +700,7 @@ func _request_delete(ids: Array) -> void:
 		_do_delete(ids)
 	)
 	dialog.canceled.connect(func(): dialog.queue_free())
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 func _do_delete(ids: Array) -> void:
 	var removed := {}

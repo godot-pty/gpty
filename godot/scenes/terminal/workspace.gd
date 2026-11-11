@@ -174,10 +174,11 @@ func _ready():
 		var shortcut := str(info.get("shortcut", ""))
 		if shortcut.strip_edges() == "":
 			continue
-		# `activate_pane`, not `grab_focus()`: only terminals can take keyboard
-		# focus, so grabbing it on a new read-only pane is an engine error and
-		# leaves the pane unrecorded as active (so "close active" skips it).
-		ShortcutManager.register("app:new_" + key, shortcut, func(): var b = _spawn_pane(key); if b: activate_pane(b))
+		# The spawn itself activates (`_spawn_pane_into` -> `activate_pane`):
+		# only terminals can take keyboard focus, so a read-only pane is still
+		# recorded as active for "close active" and the sidebar accent, and the
+		# keys go back to the window instead of raising an engine error.
+		ShortcutManager.register("app:new_" + key, shortcut, func(): _spawn_pane(key))
 	ShortcutManager.register("app:close_pane", "Ctrl+Shift+W", func(): _kill_last())
 	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _toggle_sidebar, true)
 	ShortcutManager.register("app:toggle_palette", "Ctrl+Shift+P", _toggle_palette, true)
@@ -227,7 +228,9 @@ func _ready():
 	# per process: the engine's set is process-wide, so a per-workspace connect
 	# both duplicated the push and collided across workspace instances.
 	_on_settings_changed()
-	_apply_window_mode.call_deferred()
+	# Forced: the call above ran while the scene was still building, so this is
+	# the one that lands on a realized window.
+	_apply_window_mode.call_deferred(true)
 	if SettingsManager.cfg_window_mode == 0: _chrome.restore_position()
 
 func _on_settings_changed():
@@ -237,10 +240,14 @@ func _on_settings_changed():
 	# the settings just chose.
 	SettingsManager.apply_ui_scale()
 	SettingsManager.apply_appearance()
-	for t in _tm.tiles:
-		var body = _tm._find_body(t.wrapper)
-		if body and body is TerminalPane:
-			SettingsManager.apply_to_terminal(body)
+	# Every workspace, not just the visible one: hidden panes are live panes, and
+	# a broadcast that skipped them left the next switch applying stale settings
+	# to them. This is what the switch-time re-apply used to stand in for.
+	for ws in _workspaces:
+		for t in ws.tm.tiles:
+			var body = ws.tm._find_body(t.wrapper)
+			if body and body is TerminalPane:
+				SettingsManager.apply_to_terminal(body)
 	_apply_ui_colors()
 	_sync_pane_titlebars()
 	_apply_fps_setting()
@@ -286,10 +293,15 @@ func _apply_ui_colors():
 	if _status_bar:
 		_status_bar.apply_chrome_colors()
 
+## Every workspace's panes, not just the visible one: a title bar belongs to a
+## live pane while its workspace is hidden, so the setting must reach it there
+## (`_apply_ui_colors`'s pattern). The switch path no longer re-applies settings,
+## so this is the only write that keeps a hidden bar from going stale.
 func _sync_pane_titlebars():
-	for t in _tm.tiles:
-		var tb = t.wrapper.get_node_or_null("BodyVBox/TitleBar")
-		if tb: tb.visible = SettingsManager.cfg_show_titlebar
+	for ws in _workspaces:
+		for t in ws.tm.tiles:
+			var tb = t.wrapper.get_node_or_null("BodyVBox/TitleBar")
+			if tb: tb.visible = SettingsManager.cfg_show_titlebar
 
 func _apply_fps_setting():
 	if SettingsManager.cfg_max_fps == -1:
@@ -321,8 +333,8 @@ func _exit_tree():
 	_save()
 	SettingsManager.save_settings()
 
-func _apply_window_mode():
-	_chrome.apply_mode()
+func _apply_window_mode(force := false):
+	_chrome.apply_mode(force)
 # ═══════════════════════════════════════════════════════════════════════
 # Layout
 # ═══════════════════════════════════════════════════════════════════════
@@ -423,13 +435,13 @@ func _pane_ceiling_refusal() -> String:
 func _spawn(shell := "") -> Control:
 	return _spawn_pane("terminal", {"shell_command": shell})
 
-func _spawn_pane(type_name: String, opts := {}) -> Control:
+func _spawn_pane(type_name: String, opts := {}, activate := true) -> Control:
 	var ws := _active_workspace()
 	if ws.is_empty():
 		return null
-	return _spawn_pane_into(ws, type_name, opts)
+	return _spawn_pane_into(ws, type_name, opts, activate)
 
-func _spawn_pane_into(ws: Dictionary, type_name: String, opts := {}) -> Control:
+func _spawn_pane_into(ws: Dictionary, type_name: String, opts := {}, activate := true) -> Control:
 	var refused := _pane_ceiling_refusal()
 	if refused != "":
 		ToastManager.warn(refused)
@@ -441,6 +453,12 @@ func _spawn_pane_into(ws: Dictionary, type_name: String, opts := {}) -> Control:
 		return null
 	var w = tm.tiles[-1].wrapper
 	_add_body_to_grid_into(ws, w, body)
+	# A pane the user asked for is the pane they are working in: record it and
+	# hand it the keyboard. Only the active workspace can take focus (a hidden
+	# terminal's `grab_focus` is dropped by the engine), and a restore passes
+	# `false` so rebuilding a layout does not move the user's focus.
+	if activate and ws.tm == _tm:
+		activate_pane(body)
 	return body
 
 func _add_body_to_grid_into(ws: Dictionary, w: Control, body: Control):
@@ -473,9 +491,7 @@ func _request_pane_into(ws: Dictionary, type_name: String, settings: Dictionary)
 			if type_name == "media" and shown is MediaPane and shown.file_path == path:
 				activate_pane(shown)
 				return
-	var body := _spawn_pane_into(ws, type_name, settings)
-	if body != null:
-		activate_pane(body)
+	_spawn_pane_into(ws, type_name, settings)
 
 # ── Close guards ───────────────────────────────────────────────────────
 # Destroying a pane, or quitting the app, is the one action that cannot be
@@ -575,7 +591,7 @@ func _ask_running_then(
 		if declined.is_valid():
 			declined.call()
 	)
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 func _ask_close_step(bodies: Array, index: int, next: Callable, declined: Callable) -> void:
 	while index < bodies.size() and not is_instance_valid(bodies[index]):
@@ -619,12 +635,14 @@ func _kill(body: Control):
 	_ask_close_then([body], func(): _kill_now(body))
 
 func _kill_now(body: Control):
-	# _refresh_status_bar keeps last_body synced to the focus owner, so this
-	# tells us whether the pane being closed was the one holding the keyboard.
+	# `_refresh_status_bar` keeps last_body synced to the focus owner, so this
+	# tells us whether the pane being closed was the one holding the keyboard;
+	# the second test also covers a closed pane's own title-bar button holding
+	# the focus while another pane is "active".
 	var ws := _workspace_for_body(body)
 	if ws.is_empty():
 		return
-	var held_focus: bool = ws.tm.last_body == body
+	var held_focus: bool = ws.tm.last_body == body or _focus_owner_in(body)
 	# The user discarded this Inspector pane, so its stored aim goes with it: a
 	# later pane that reuses the id starts from the defaults, not from an
 	# instruction the user removed. Only this explicit-close path removes it —
@@ -635,16 +653,38 @@ func _kill_now(body: Control):
 	ws.tm.kill(body)
 	_close_pane_settings_for(body)
 	_apply_layout()
-	_list()
 	if held_focus:
 		# Otherwise the freed node takes focus with it and typing reaches
-		# nothing until the user clicks a pane. Only terminals take keyboard
-		# focus, so hand it to a surviving terminal.
-		for t in ws.tm.tiles:
-			var survivor = ws.tm._find_body(t.wrapper)
-			if survivor is TerminalPane:
-				activate_pane(survivor)
-				break
+		# nothing until the user clicks a pane. The survivor is the last pane in
+		# tile order - the one the tiling logic grows into the closed pane's
+		# space - and it is activated before `_list()` so the sidebar accent
+		# names it in this frame. A read-only survivor still becomes the active
+		# pane (accent, status bar, "close active") and releases the keyboard
+		# itself, the same rule a click applies.
+		var survivor := _last_pane_body(ws)
+		if survivor != null:
+			activate_pane(survivor)
+	_list()
+
+## The last pane of `ws` in tile order — the survivor when the active pane
+## closes (the tiling logic grows that tile into the freed space). Any type
+## qualifies: a read-only pane owns the sidebar accent and "close active".
+func _last_pane_body(ws: Dictionary) -> Control:
+	if ws.is_empty():
+		return null
+	var tiles: Array = ws.tm.tiles
+	for i in range(tiles.size() - 1, -1, -1):
+		var body = ws.tm._find_body(tiles[i].wrapper)
+		if body != null:
+			return body
+	return null
+
+## Whether the keyboard focus owner is `body` or a widget inside it. A pane can
+## be closed while its own title-bar button holds the focus, and that pane is
+## the one the user is working in even when `last_body` names another.
+func _focus_owner_in(body: Control) -> bool:
+	var owner := get_viewport().gui_get_focus_owner()
+	return owner != null and (owner == body or body.is_ancestor_of(owner))
 
 ## Close the pane settings popup when its target pane is torn down. The
 ## panel also self-closes via _process when its target is freed by other
@@ -1076,9 +1116,12 @@ func _switch_workspace(idx: int):
 		return
 	_save_workspaces_to_store()
 	_active = idx
+	# A view change only. Every setting already reached the hidden workspaces'
+	# panes through `_on_settings_changed`; re-applying them here pushed the
+	# palette into grids that had not changed and, through the window mode, paid
+	# a window-server round trip on every switch (the measured second in
+	# "A workspace switch costs about a second on the daily-use set").
 	_apply_active_workspace_view()
-	# Hidden panes missed settings broadcasts; re-apply to the incoming set.
-	_on_settings_changed()
 
 func _add_workspace():
 	if _workspaces.is_empty():
@@ -1182,7 +1225,7 @@ func _open_workspace_cwd_dialog(idx: int):
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)
-	dialog.popup_centered_ratio(0.6)
+	AppDialog.popup(dialog, 0.6)
 
 func _set_workspace_cwd(idx: int, dir: String):
 	if idx < 0 or idx >= _workspaces.size():
@@ -1221,7 +1264,7 @@ func _ask_workspace_cwd_change(idx: int, clean: String, tiles: Array[Dictionary]
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 func _apply_workspace_cwd(idx: int, clean: String):
 	if idx < 0 or idx >= _workspaces.size():
@@ -1283,10 +1326,16 @@ func _init_workspaces():
 	_teardown_workspaces()
 	var store = WorkspaceStore.load()
 	var wss: Array = store.get("workspaces", [])
+	# A store with no workspaces at all is a first run (or a wiped file), and a
+	# first run opens with one terminal. A store that holds a workspace whose
+	# `layout` is empty is a user's own decision and restores empty - the seed
+	# is `_restore_into`'s `seed_terminal`, set only from here.
+	var fresh: bool = wss.is_empty()
 	if wss.is_empty():
 		var legacy = WorkspaceStore.import_legacy_layout()
 		if not legacy.is_empty():
 			wss = [{"name": "Workspace 1", "layout": legacy}]
+			fresh = false
 	var entries: Array[Dictionary] = []
 	for entry in wss:
 		if not (entry is Dictionary):
@@ -1314,7 +1363,7 @@ func _init_workspaces():
 	if not untrusted.is_empty():
 		_show_multi_trust_dialog(entries, active, untrusted)
 		return
-	_build_workspaces(entries, active)
+	_build_workspaces(entries, active, fresh)
 
 func _teardown_workspaces():
 	for i in _workspaces.size():
@@ -1324,7 +1373,7 @@ func _teardown_workspaces():
 			ws.grid.queue_free()
 	_workspaces.clear()
 
-func _build_workspaces(entries: Array[Dictionary], active: int):
+func _build_workspaces(entries: Array[Dictionary], active: int, seed_first := false):
 	for i in entries.size():
 		var ws: Dictionary
 		var ws_cwd := str(entries[i].get("cwd", ""))
@@ -1335,11 +1384,11 @@ func _build_workspaces(entries: Array[Dictionary], active: int):
 		_workspaces.append(ws)
 		var layout: Array = entries[i].get("layout", [])
 		layout = TerminalManager.scale_layout(layout, int(entries[i].get("grid_unit", 0)))
-		_restore_into(ws, _tiles_from(layout))
+		_restore_into(ws, _tiles_from(layout), seed_first and i == 0)
 	_active = clampi(active, 0, _workspaces.size() - 1)
 	_apply_active_workspace_view()
 
-func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
+func _restore_into(ws: Dictionary, tiles: Array[Dictionary], seed_terminal := false):
 	var tm: TerminalManager = ws.tm
 	tm.reset()
 	# Sanitize the whole set first: an id collision is a property of the set
@@ -1414,11 +1463,13 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 		tm.tiles.append({wrapper = w, col = st["col"], row = st["row"],
 			cspan = st["cspan"], rspan = st["rspan"]})
 		restored += 1
-	if tm.tiles.is_empty() and skipped_by_limit == 0:
-		# A workspace restored from an empty layout, not one the ceiling emptied:
-		# when tiles were skipped, the notice below already says why there are
-		# none, and a second toast would repeat it.
-		_spawn_pane_into(ws, "terminal")
+	if seed_terminal and tm.tiles.is_empty() and skipped_by_limit == 0:
+		# A first run (no store at all) opens with one terminal, so a fresh
+		# install has a prompt. A workspace the user emptied stays empty: its
+		# saved layout is the state, and `_apply_layout` shows the guide. When
+		# tiles were skipped, the notice below already says why there are none,
+		# and a second toast would repeat it.
+		_spawn_pane_into(ws, "terminal", {}, false)
 	else:
 		tm._sync_edge_strips()
 
@@ -1653,7 +1704,7 @@ func _show_multi_trust_dialog(entries: Array[Dictionary], active: int, untrusted
 		_build_workspaces(entries, active)
 		dialog.queue_free()
 	)
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 func _restore():
 	# Palette "load": reload the saved workspace set from disk. Every pane in
@@ -1950,9 +2001,7 @@ func _execute_command(cmd: String):
 		var type_label = cmd.substr(4).strip_edges()
 		for key in PaneTypes.ALL:
 			if PaneTypes.ALL[key]["name"].to_lower() == type_label:
-				var body = _spawn_pane(key)
-				# Same rule as the "new pane" shortcuts: see `activate_pane`.
-				if body: activate_pane(body)
+				_spawn_pane(key)
 				return
 		return
 	match cmd:
@@ -2598,7 +2647,7 @@ func _show_plugin_review(id: int, params: Dictionary, timeout_ms: int):
 		_finish_plugin_review(id)
 		send_ipc_answer.call(id, true, JSON.stringify({"accepted": false}))
 	)
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 ## Drop a pending review's dialog and expiry timer (idempotent — the answer
 ## path and the expiry path both land here).
@@ -2910,7 +2959,7 @@ func _save_current_as_profile():
 	)
 	dialog.canceled.connect(dialog.queue_free)
 
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 	# Disable OK initially (empty name)
 	name_inp.text_changed.emit("")
 
@@ -2986,7 +3035,7 @@ func _show_profile_trust_dialog(profile: Dictionary, tiles: Array, open_in_new :
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 func _do_profile_activate(profile: Dictionary):
 	# Confirm if workspace has existing panes
@@ -3000,7 +3049,7 @@ func _do_profile_activate(profile: Dictionary):
 			dialog.queue_free()
 		)
 		dialog.canceled.connect(dialog.queue_free)
-		dialog.popup_centered()
+		AppDialog.popup(dialog)
 	else:
 		_do_activate(profile)
 

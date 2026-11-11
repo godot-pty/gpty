@@ -24,6 +24,17 @@ const BODY_MIN_SIZE := Vector2(720, 180)
 ## and two declared hooks, and it is the dialog a user is asked to approve.
 const REVIEW_BODY_SIZE := Vector2(720, 360)
 
+## How much of the window a modal may take, and the gap it keeps from the edge.
+## A share rather than a pixel cap: the same card has to fit a 500x300 window and
+## a 4K one. `popup_centered()` used to centre the card at its content minimum,
+## which a long line or an unwrapped autowrap label could push past the window.
+const VIEWPORT_RATIO := 0.75
+const VIEWPORT_MARGIN := 24
+## The floor the limit may never go under, and the floor a text body always has.
+## Both are under the app's own minimum window (`WindowChrome.MIN_WINDOW_W/H`,
+## 500x300), so the limit never claims more room than the window can give.
+const LIMIT_FLOOR := Vector2i(240, 160)
+
 ## Node names: `content` finds the layout, and a test can name both.
 const LAYOUT_NAME := "Layout"
 const TITLE_NAME := "DialogTitle"
@@ -31,6 +42,41 @@ const TEXT_NAME := "BodyText"
 ## The picker's own header (see `picker`): the strip above the engine's column.
 const HEADER_NAME := "Header"
 const CLOSE_NAME := "DialogClose"
+
+## The largest size a modal may take inside `available` (viewport pixels): a
+## share of the window, less a margin on each edge. Pure, so the maths is
+## testable without a window.
+static func modal_limit(available: Vector2i, ratio := VIEWPORT_RATIO) -> Vector2i:
+	return Vector2i(
+		maxi(int(float(available.x) * ratio) - 2 * VIEWPORT_MARGIN, LIMIT_FLOOR.x),
+		maxi(int(float(available.y) * ratio) - 2 * VIEWPORT_MARGIN, LIMIT_FLOOR.y))
+
+## The width a text body wraps at: the modal's own limit less its padding, so
+## the label is shaped at the width it is drawn at, floored and capped so a
+## window smaller or larger than the body's design size still wraps.
+static func text_width(available: Vector2i, ratio := VIEWPORT_RATIO) -> int:
+	return clampi(modal_limit(available, ratio).x - 2 * UiTokens.SPACE_LG,
+		LIMIT_FLOOR.x, int(BODY_MIN_SIZE.x))
+
+## The window a dialog lives in. Resolved from its parent Control: the dialog is
+## a Window and `get_viewport()` would return the window itself.
+static func available_size(dialog: AcceptDialog) -> Vector2i:
+	var parent := dialog.get_parent()
+	if parent is CanvasItem and (parent as CanvasItem).is_inside_tree():
+		return Vector2i((parent as CanvasItem).get_viewport().get_visible_rect().size)
+	return Vector2i(1280, 720)
+
+## Centre `dialog` in the window and keep it there.
+##
+## `popup_centered()` sizes the card from its content minimum alone, so a long
+## line in the (hidden) engine label or an autowrap body shaped before its first
+## layout could make the card larger than the window - the running-work confirm's
+## "Close anyway" button ended up below the bottom edge. `max_size` is the
+## engine-level clamp; the bounded body widths in `set_text`/`set_body` are what
+## keep the minimum itself within it.
+static func popup(dialog: AcceptDialog, ratio := VIEWPORT_RATIO) -> void:
+	dialog.max_size = modal_limit(available_size(dialog), ratio)
+	dialog.popup_centered_clamped(Vector2i.ZERO, ratio)
 
 ## A `ConfirmationDialog` added to `parent`. Empty strings leave the button
 ## labels alone, so a site can set them later.
@@ -143,6 +189,12 @@ static func set_text(dialog: AcceptDialog, text: String) -> Label:
 	label.name = TEXT_NAME
 	label.text = text
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# An autowrap Label with no width floor is shaped one word per line before
+	# its first layout (`Label::get_minimum_size` reports the height at the
+	# current width, which is still 0), so the card's minimum height was
+	# unbounded and `popup_centered` centred it off screen. The floor is the
+	# modal's own width: the label shapes at the width it will be drawn at.
+	label.custom_minimum_size.x = text_width(available_size(dialog))
 	content(dialog).add_child(label)
 	dialog.dialog_text = text
 	return label
@@ -157,7 +209,11 @@ static func set_body(dialog: AcceptDialog, text: String, min_size := BODY_MIN_SI
 	body.text = text
 	body.editable = false
 	body.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	body.custom_minimum_size = min_size
+	# The requested size is a design size, not a promise the window can keep: a
+	# 720x360 body in an 800x500 window is clamped to the modal's own limit.
+	var limit := modal_limit(available_size(dialog))
+	body.custom_minimum_size = Vector2(
+		mini(int(min_size.x), limit.x), mini(int(min_size.y), limit.y))
 	body.add_theme_font_size_override("font_size", UiTokens.FS_SMALL)
 	content(dialog).add_child(body)
 	dialog.dialog_text = text
@@ -202,7 +258,11 @@ static func _adopt(parent: Node, dialog: AcceptDialog, title: String) -> void:
 	dialog.borderless = true
 	# The engine's own label shares the content rect with our layout; hiding it
 	# keeps `dialog_text` as data (see `set_text`) without rendering it twice.
+	# It is still a Control child, so the engine measures it for the window's
+	# content minimum: an unwrapped long line would push the card past the
+	# `popup` clamp. Clipping lets it shrink instead (it never renders).
 	dialog.get_label().hide()
+	dialog.get_label().clip_text = true
 
 	var layout := VBoxContainer.new()
 	layout.name = LAYOUT_NAME

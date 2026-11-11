@@ -72,7 +72,7 @@ static func show_table(host: Node, title: String, intro: String, rows: Array) ->
 	# the OK button (`confirmed`) and Escape/window close (`canceled`).
 	dialog.confirmed.connect(dialog.queue_free)
 	dialog.canceled.connect(dialog.queue_free)
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 	return dialog
 
 static func _glyph_label(glyph: String, action: String) -> Label:

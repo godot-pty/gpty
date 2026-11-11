@@ -295,4 +295,4 @@ func _confirm_link(meta):
 		dialog.queue_free()
 	)
 	dialog.canceled.connect(dialog.queue_free)
-	dialog.popup_centered()
+	AppDialog.popup(dialog)

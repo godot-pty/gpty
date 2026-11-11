@@ -609,7 +609,7 @@ func _add_file_picker(v: VBoxContainer, label: String, current_path: String, fil
 			on_selected.call(path)
 			dlg.queue_free())
 		dlg.canceled.connect(dlg.queue_free)
-		dlg.popup_centered())
+		AppDialog.popup(dlg))
 	h.add_child(btn)
 	if reset_to_default.is_valid():
 		var reset = Button.new()
@@ -1014,7 +1014,7 @@ func _show_concept_dialog(idx: int):
 			conditions_te.text.split("\n"))
 		dlg.queue_free()
 	)
-	dlg.popup_centered()
+	AppDialog.popup(dlg)
 
 ## Persist a concept. Concepts capture-and-route or notify; they never carry a
 ## command, so no command field is collected.
@@ -1265,7 +1265,7 @@ func _show_command_dialog(index: int) -> void:
 	# Cancelling frees it too: a hidden dialog left in the tree would be a
 	# second "Add Command" the next time the form opens.
 	dlg.canceled.connect(func(): dlg.queue_free())
-	dlg.popup_centered()
+	AppDialog.popup(dlg)
 
 func _edit_selected_command() -> void:
 	var selected := _command_list.get_selected_items()

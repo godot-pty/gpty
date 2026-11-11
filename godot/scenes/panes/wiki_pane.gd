@@ -763,7 +763,7 @@ func _ask_declared_weight(a: String, b: String, current: int) -> void:
 		_set_declared_weight(a, b, int(spin.value))
 	)
 	dialog.canceled.connect(dialog.queue_free)
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 ## Write one declared weight for the drawn pair and re-apply it to the canvas.
 func _set_declared_weight(a: String, b: String, weight: int) -> void:
@@ -1248,7 +1248,7 @@ func _ask_note_name(title: String, initial: String, ok_text: String, hint: Strin
 			_ask_note_name(title, field.text, ok_text, hint, answer)
 	)
 	dialog.canceled.connect(dialog.queue_free)
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 ## What a typed name means: trimmed, with `.md` appended when the last
 ## component has no extension at all. Any other extension is left alone — the
@@ -1362,7 +1362,7 @@ func _offer_link_update(previous: String, new_rel: String, include_renamed: bool
 		_apply_link_update(previous, new_rel)
 	)
 	dialog.canceled.connect(dialog.queue_free)
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 ## Apply the update the question offered. The core re-plans in this call, so
 ## the count is what actually landed (an edit made while the question was open
@@ -1444,7 +1444,7 @@ func _ask_delete() -> void:
 		_delete_open_note()
 	)
 	dialog.canceled.connect(dialog.queue_free)
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 func _delete_open_note() -> void:
 	if _current_rel == "":
@@ -1546,7 +1546,7 @@ func _offer_scratch(rel: String) -> void:
 	dialog.confirmed.connect(_apply_restore.bind(dialog))
 	dialog.custom_action.connect(_discard_restore.bind(dialog))
 	dialog.canceled.connect(dialog.queue_free)
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 ## The Restore answer: put the recovered buffer back in the editor.
 func _apply_restore(dialog: Window) -> void:
@@ -1598,7 +1598,7 @@ func _ask_overwrite(answer := Callable()) -> void:
 		if answer.is_valid():
 			answer.call(false)
 	)
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 ## Run the save once `dialog` is really gone. An exclusive child window
 ## outlives `queue_free` by a frame, and Godot refuses a second exclusive
@@ -1698,7 +1698,7 @@ func _request_leave(answer: Callable) -> void:
 		dialog.queue_free()
 		answer.call(false)
 	)
-	dialog.popup_centered()
+	AppDialog.popup(dialog)
 
 func _has_open_ask() -> bool:
 	# Only a *visible* dialog is still being asked. `AcceptDialog` hides itself

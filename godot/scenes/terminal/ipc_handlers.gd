@@ -298,7 +298,7 @@ static func handle(ws, method: String, params: Dictionary):
 					return bad_param(
 						"`split` must be one of: %s" % ", ".join(PackedStringArray(PaneTypes.SPLIT_SIDES)))
 				np_opts["split"] = np_split
-			var body = ws._spawn_pane(type_name, np_opts)
+			var body = ws._spawn_pane(type_name, np_opts, np_focus)
 			if body == null:
 				var np_refused: String = ws._pane_ceiling_refusal()
 				return refused(np_refused if np_refused != "" else "Grid is full")
@@ -312,10 +312,8 @@ static func handle(ws, method: String, params: Dictionary):
 					ToastManager.warn(np_start_error)
 					ws._kill_now(body)
 					return refused(np_start_error)
-			# Focus last: `activate_pane` resolves the pane's workspace, which
-			# only exists once the body is in the grid.
-			if np_focus:
-				ws.activate_pane(body)
+			# The spawn activated the pane unless the caller passed
+			# `focus: false` (`_spawn_pane_into` records and focuses it there).
 			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "spawned", "pane_id": body.attachment_id, "label": body.pane_label}))
 			return {"pane_id": body.attachment_id, "label": body.pane_label, "type": type_name}
 		"paneRead":
@@ -374,10 +372,12 @@ static func handle(ws, method: String, params: Dictionary):
 			# (&&, pipes, globs) work like a normal CLI invocation. The
 			# command is an argument, never the program itself, and the
 			# run flag follows the shell family (`cmd.exe` takes `/c`).
+			# An agent-driven run must not take the keyboard mid-typing, so this
+			# spawn is not an activation (`activate := false`).
 			var run_body = ws._spawn_pane("terminal", {
 				"shell_command": SettingsManager.cfg_shell_command,
 				"shell_args": PaneTypes.shell_run_args(SettingsManager.cfg_shell_command, run_cmd),
-			})
+			}, false)
 			if run_body == null:
 				var run_refused: String = ws._pane_ceiling_refusal()
 				return refused(run_refused if run_refused != "" else "Grid is full")

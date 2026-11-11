@@ -223,6 +223,23 @@ const STATES := {
 	# subject, so its plan must stay unapproved - see the staging block.
 	"workspace-trust": {"size": DEFAULT_SIZE, "tiles": [UNTRUSTED_TILE], "open": "workspace-trust",
 		"approve_seeded_plans": false},
+	# The running-work confirm at 800x500, the size where the card used to grow
+	# past the window and put "Close anyway" below the bottom edge (row *A dialog
+	# can grow past the window it opens in*). Four panes, each given a foreground
+	# command through the real input path (a `-c` child runs in the shell's own
+	# process group, which the foreground-job test correctly reads as no job), and
+	# the close goes through the real action, so `_ask_running_then` builds the
+	# card: the list of names it wraps is what made it tall.
+	"running-work": {"size": Vector2i(800, 500), "open": "running-work", "tiles": [
+		{"col": 0, "row": 0, "cspan": 30, "rspan": 30,
+			"settings": {"type": "terminal", "attachment_id": "capture-work-1"}},
+		{"col": 30, "row": 0, "cspan": 30, "rspan": 30,
+			"settings": {"type": "terminal", "attachment_id": "capture-work-2"}},
+		{"col": 0, "row": 30, "cspan": 30, "rspan": 30,
+			"settings": {"type": "terminal", "attachment_id": "capture-work-3"}},
+		{"col": 30, "row": 30, "cspan": 30, "rspan": 30,
+			"settings": {"type": "terminal", "attachment_id": "capture-work-4"}},
+	]},
 	# The four visible agent states side by side. The point of the state is the
 	# glyph: `failed` (an X-circle) and `needs-attention` (a warning triangle)
 	# differ in shape, so the distinction survives a protan/deutan view, a
@@ -669,6 +686,50 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			# the whole state. Missing means the untrusted tile never tripped it.
 			if _dialog_titled(_workspace, "Workspace Trust") == null:
 				_fail("the untrusted tile did not raise the Workspace Trust dialog")
+				return false
+		"running-work":
+			# The reported path: several busy panes in one workspace and the
+			# workspace closed, so the card carries the intro and one line per
+			# pane - the longest text the app wraps in a dialog.
+			var work_bodies: Array = _workspace._pane_bodies(_workspace._active_workspace())
+			if work_bodies.size() < 4:
+				_fail("the running-work state needs four panes (got %d)" % work_bodies.size())
+				return false
+			# The child starts on the first layout pass, and `send_line` before
+			# that would be buffered, not run: wait for the engine handle.
+			var child_deadline := Time.get_ticks_msec() + 5000
+			while Time.get_ticks_msec() < child_deadline:
+				if work_bodies.all(func(b): return b._terminal != null):
+					break
+				await process_frame
+			for b in work_bodies:
+				if b._terminal == null:
+					_fail("a capture pane never started its child")
+					return false
+				b._terminal.send_line("sleep 600")
+			# `has_running_work` reads the engine's status sample, refreshed by
+			# its own 200 ms child poll, and job control promotes the command to
+			# the foreground group only once the shell has started it.
+			var deadline := Time.get_ticks_msec() + 5000
+			while Time.get_ticks_msec() < deadline:
+				if work_bodies.all(func(b): return b.has_running_work()):
+					break
+				await process_frame
+			if not work_bodies.all(func(b): return b.has_running_work()):
+				var seen := []
+				for b in work_bodies:
+					seen.append(str(b._terminal.get_status()) if b._terminal != null else "no child")
+				_fail("the capture panes never reported a foreground job: %s" % str(seen))
+				return false
+			# A workspace close needs a second workspace to exist, and the ask
+			# is the workspace-scoped one (it qualifies every pane line only
+			# through the intro, which is the wrap under test).
+			_workspace._add_workspace()
+			await _wait_frames(2)
+			_workspace._close_workspace(0)
+			await _wait_frames(4)
+			if _dialog_titled(_workspace, "Stop running processes?") == null:
+				_fail("closing a workspace of busy panes did not raise the running-work confirm")
 				return false
 		"scrollback-return":
 			var scroll_body = _workspace._tm._find_body(_workspace._tm.tiles[0].wrapper)

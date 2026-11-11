@@ -181,3 +181,58 @@ func test_the_picker_header_is_inserted_once_across_a_popup():
 				if str(grandchild.name) == AppDialog.HEADER_NAME:
 					headers += 1
 	assert_eq(headers, 1, "a second popup must not stack a second header")
+
+
+# ── The window clamp ───────────────────────────────────────────────────
+
+func test_the_modal_limit_is_a_share_of_the_window_less_a_margin():
+	# 800x500 at the default 0.75 with a 24 px gap on each edge.
+	assert_eq(AppDialog.modal_limit(Vector2i(800, 500)), Vector2i(552, 327))
+	# A window smaller than the design size is floored, never negative: a 0x0
+	# viewport (a dialog built before the first layout) must still answer.
+	assert_eq(AppDialog.modal_limit(Vector2i(0, 0)), AppDialog.LIMIT_FLOOR)
+	assert_eq(AppDialog.modal_limit(Vector2i(64, 64)), AppDialog.LIMIT_FLOOR)
+	# A large window keeps the share, not an absolute cap.
+	assert_eq(AppDialog.modal_limit(Vector2i(3840, 2160)), Vector2i(2832, 1572))
+	# A site's own ratio is honoured (the cwd picker asks for 0.6).
+	assert_eq(AppDialog.modal_limit(Vector2i(1000, 1000), 0.6), Vector2i(552, 552))
+
+func test_a_modal_is_clamped_to_the_viewport():
+	# `popup_centered()` sized the card from its content minimum alone, so a long
+	# running-work list put "Close anyway" below the window's bottom edge. The
+	# popup path sets the engine-level clamp to the same limit.
+	var dialog := AppDialog.confirm(_host, "T")
+	AppDialog.popup(dialog)
+	assert_eq(dialog.max_size, AppDialog.modal_limit(AppDialog.available_size(dialog)),
+		"the card may not grow past the window share it was centred in")
+	dialog.queue_free()
+
+func test_a_text_body_wraps_at_a_width_floor():
+	# An autowrap Label with no width floor reports the height at the current
+	# width before its first layout - one word per line - so the card's minimum
+	# height was unbounded. The floor is the modal's own width.
+	var dialog := AppDialog.confirm(_host, "T")
+	var label := AppDialog.set_text(dialog, "one sentence long enough that an unbounded autowrap would shape it into a column")
+	assert_eq(label.custom_minimum_size.x, AppDialog.text_width(AppDialog.available_size(dialog)))
+	assert_gte(label.custom_minimum_size.x, AppDialog.LIMIT_FLOOR.x)
+	assert_lte(label.custom_minimum_size.x, AppDialog.BODY_MIN_SIZE.x)
+	dialog.queue_free()
+
+func test_a_selectable_body_is_clamped_to_the_window():
+	var dialog := AppDialog.confirm(_host, "T")
+	var body := AppDialog.set_body(dialog, "review text", AppDialog.REVIEW_BODY_SIZE)
+	var limit := AppDialog.modal_limit(AppDialog.available_size(dialog))
+	assert_lte(body.custom_minimum_size.x, limit.x,
+		"a 720 px body may not claim more than the window's share")
+	assert_lte(body.custom_minimum_size.y, limit.y)
+	dialog.queue_free()
+
+func test_the_hidden_engine_label_cannot_widen_the_card():
+	# The engine measures every Control child for the window's content minimum,
+	# hidden or not, and `set_text`/`set_body` keep `dialog_text` for readers. A
+	# long line in that hidden label would otherwise set the card's width again.
+	var dialog := AppDialog.confirm(_host, "T")
+	AppDialog.set_text(dialog, "x".repeat(400))
+	assert_true(dialog.get_label().clip_text,
+		"the hidden label must be able to shrink, not set a minimum width")
+	dialog.queue_free()

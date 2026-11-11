@@ -215,16 +215,30 @@ func test_restore_legacy_no_type_key():
 	assert_eq(restored[0].shell_command, shell,
 		"the legacy shell key is still honoured (and differs from the default)")
 
-func test_restoring_nothing_usable_still_leaves_a_terminal():
-	# Every tile in the file is junk (not a dict, unknown pane type): the
-	# restore must not leave the user with an empty workspace.
+func test_an_empty_saved_layout_restores_no_panes():
+	# A workspace the user emptied saves `layout: []`, and that is a state, not
+	# a missing file: the restore keeps it empty and shows the guide. The
+	# one-terminal seed belongs to a first run (no store at all), not to every
+	# empty layout.
+	var empty: Array[Dictionary] = []
+	var restored = await _restore(empty)
+	assert_eq(restored.size(), 0, "an empty layout restores no panes")
+	assert_eq(_ws._tm.tiles.size(), 0)
+	_ws._apply_layout()
+	assert_true(_ws._empty_state.visible, "the empty-state guide takes the grid")
+
+func test_a_junk_layout_restores_nothing_instead_of_inventing_a_pane():
+	# Every tile in the file is junk (unknown pane type). The restore used to
+	# pad the result with one terminal; now it restores what the file holds -
+	# nothing - and the workspace shows its empty state.
 	var junk: Array[Dictionary] = [{
 		"col": 0, "row": 0, "cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID,
 		"settings": {"type": "no_such_pane_type"},
 	}]
 	var restored = await _restore(junk)
-	assert_eq(restored.size(), 1, "the fallback is exactly one pane")
-	assert_true(restored[0] is TerminalPane, "and it is a terminal")
+	assert_eq(restored.size(), 0, "no usable tile means no pane")
+	_ws._apply_layout()
+	assert_true(_ws._empty_state.visible, "the guide is the surface for it")
 
 # ── Per-tile command field (ecosystem presets) ─────────────────────────
 # Profile data is untrusted: the restore path runs `command`/`shell` through

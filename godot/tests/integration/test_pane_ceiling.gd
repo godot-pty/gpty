@@ -128,9 +128,12 @@ func test_restore_into_one_workspace_leaves_room_for_the_next():
 	var ws: Workspace = await _make()
 	_window_holds(ws, WorkspaceScript.MAX_LIVE_PANES - 3)
 	ws._add_workspace()
-	var empty: Array[Dictionary] = []
-	ws._restore_into(ws._workspaces[0], empty)
-	assert_eq(ws._workspaces[0].tm.tiles.size(), 1, "an empty layout falls back to one terminal")
+	var one: Array[Dictionary] = [{
+		"col": 0, "row": 0, "cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID,
+		"settings": {"type": "code_viewer"},
+	}]
+	ws._restore_into(ws._workspaces[0], one)
+	assert_eq(ws._workspaces[0].tm.tiles.size(), 1, "the first workspace restores its tile")
 	var tiles: Array[Dictionary] = []
 	for i in 5:
 		tiles.append({"col": i * 6, "row": 0, "cspan": 6, "rspan": PaneTypes.GRID,
@@ -150,7 +153,7 @@ func test_a_restore_with_no_room_leaves_the_workspace_empty_and_says_it_once():
 		"settings": {"type": "code_viewer"},
 	}]
 	ws._restore_into(ws._workspaces[0], tiles)
-	assert_eq(ws._tm.tiles.size(), 0, "with no room the empty-layout fallback is refused too")
+	assert_eq(ws._tm.tiles.size(), 0, "with no room the workspace stays empty")
 	assert_signal_emit_count(ToastManager, "toast_requested", 1,
 		"the notice says why the workspace is empty; a second toast must not repeat it")
 

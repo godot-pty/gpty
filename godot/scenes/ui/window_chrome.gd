@@ -16,6 +16,12 @@ var _ws: Control = null
 var _max_btn: Button = null
 ## The three window controls as one keyboard ring; `focus_controls` enters it.
 var _controls: HBoxContainer = null
+## The mode `apply_mode` last put the OS window into, or -1 before the first
+## call. A mode change reaches here from the Settings control, the titlebar
+## toggle and the startup apply; every other caller (a settings broadcast, a
+## switch) asks for the mode already in effect, and `DisplayServer.window_set_mode`
+## is a window-server round trip.
+var _applied_mode: int = -1
 
 
 func build(ws: Control) -> Control:
@@ -86,7 +92,14 @@ func build(ws: Control) -> Control:
 	return titlebar
 
 
-func apply_mode():
+## Put the configured window mode on the window. `force` re-applies it even
+## when the setting has not moved: startup calls this twice - once while the
+## scene builds, once deferred after the first frame - and the second is the
+## one the window server is guaranteed to have a realized window for.
+func apply_mode(force := false):
+	if not force and _applied_mode == SettingsManager.cfg_window_mode:
+		return
+	_applied_mode = SettingsManager.cfg_window_mode
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	match SettingsManager.cfg_window_mode:
 		0:  # Decorated windowed

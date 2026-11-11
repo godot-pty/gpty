@@ -67,16 +67,19 @@ func _make_workspace() -> Control:
 ## A wiki pane on `_vault` with `note.md` open in the buffer — the state the
 ## finding is about: the user is typing.
 func _open_wiki_note(ws: Control) -> WikiPane:
-	var wiki = ws._spawn_pane("wiki", {"vault_path": _vault})
+	# `activate := false` is the restore route: the pane is built without a user
+	# gesture, exactly like a saved layout, so the startup terminal stays the
+	# active pane while the note's editor takes the keyboard.
+	var wiki = ws._spawn_pane_into(ws._active_workspace(), "wiki", {"vault_path": _vault}, false)
 	assert_true(wiki is WikiPane, "the workspace holds a wiki pane")
 	wiki._open_note("note.md")
 	assert_true(wiki._note_box.visible, "precondition: the note view is shown")
 	assert_eq(ws.get_viewport().gui_get_focus_owner(), wiki._editor,
 		"precondition: the buffer holds the keyboard")
-	# `_spawn_pane` does not activate the pane, so the active pane still names
-	# the startup terminal: the chord has to resolve the wiki pane from the
-	# focus owner, which is the state a real user reaches by opening a note from
-	# the list. A `last_body`-only rule did nothing here (measured).
+	# The active pane still names the startup terminal, so the chord has to
+	# resolve the wiki pane from the focus owner - the state a real user reaches
+	# by opening a note from the list. A `last_body`-only rule did nothing here
+	# (measured).
 	assert_ne(ws._tm.last_body, wiki, "precondition: the active pane is not the wiki")
 	return wiki
 

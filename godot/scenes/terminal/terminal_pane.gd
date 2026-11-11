@@ -53,6 +53,11 @@ func _init() -> void:
 	scrollback_indicator_color = UiPalette.active().SCROLLBACK_INDICATOR
 var color_scheme_path: String = "":
 	set(value):
+		# A settings broadcast passes this on every save, and an unchanged value
+		# used to call `set_palette("")` -> a generation bump -> a whole-grid
+		# repack of a pane that had not changed.
+		if value == color_scheme_path:
+			return
 		color_scheme_path = value
 		# Before the child exists there is no palette to set: the start path
 		# applies the stored scheme itself.
@@ -81,6 +86,10 @@ var workspace_cwd := ""
 
 @export var font_path: String = "res://fonts/DejaVuSansMono.ttf":
 	set(value):
+		# Reloading the face and recomputing the cell metrics repacks the whole
+		# grid; a settings broadcast that passes the same path must not.
+		if value == font_path:
+			return
 		font_path = value
 		if _font != null:
 			_reload_fonts()
@@ -98,6 +107,10 @@ var workspace_cwd := ""
 
 @export var max_fps: int = 0:
 	set(value):
+		# Every broadcast passes the FPS, and an unchanged value asked the display
+		# server for the refresh rate twice per pane.
+		if value == max_fps:
+			return
 		max_fps = value
 		var target = float(max_fps) if max_fps > 0 else (DisplayServer.screen_get_refresh_rate() if DisplayServer.screen_get_refresh_rate() > 0 else 60.0)
 		_sync_interval = 1.0 / target
@@ -1864,7 +1877,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			panel._debounce_timer.start()
 			dlg.queue_free())
 		dlg.canceled.connect(dlg.queue_free)
-		dlg.popup_centered())
+		AppDialog.popup(dlg))
 	_make_row(v, "Font:", font_btn, panel)
 
 	# Color scheme picker — stored as metadata to avoid closure capture issues
@@ -1883,7 +1896,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			panel._debounce_timer.start()
 			dlg.queue_free())
 		dlg.canceled.connect(dlg.queue_free)
-		dlg.popup_centered())
+		AppDialog.popup(dlg))
 	_make_row(v, "Color scheme:", scheme_btn, panel)
 
 	# ── Gather func ──

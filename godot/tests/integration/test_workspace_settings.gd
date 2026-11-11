@@ -48,6 +48,57 @@ func test_startup_spawn_gets_global_settings():
 	# Wait out the deferred concept push timer so it doesn't resume after free.
 	await get_tree().create_timer(2.1).timeout
 
+func test_a_workspace_the_store_kept_empty_stays_empty():
+	# `WorkspaceStore` writes `layout: []` for a workspace whose panes the user
+	# closed. That is a saved state, so the restore keeps it empty and shows the
+	# guide; only a store with no workspaces at all (a first run, pinned by the
+	# test above) opens with a terminal.
+	MockAutoloads.set_store(WorkspaceStore.FILE, {
+		"active": 0,
+		"workspaces": [{"name": "Emptied", "layout": []}],
+	})
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_eq(ws._workspaces.size(), 1, "the stored workspace is rebuilt")
+	assert_eq(ws._tm.tiles.size(), 0, "a saved empty layout restores no panes")
+	ws._apply_layout()
+	assert_true(ws._empty_state.visible, "the empty-state guide takes the grid")
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
+func test_a_settings_save_reaches_a_hidden_workspace():
+	# A workspace switch no longer re-applies settings to the incoming panes, so
+	# the broadcast itself must reach a workspace that is not visible: a hidden
+	# pane has to be current before the user can switch to it, or every switch
+	# would show the settings from whenever that workspace was last active.
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	ws._add_workspace()
+	assert_eq(ws._active, 1, "precondition: the new workspace is active")
+	var hidden = ws._spawn_pane("terminal")
+	assert_not_null(hidden, "the second workspace holds a terminal")
+	ws._switch_workspace(0)
+	assert_eq(ws._active, 0, "precondition: the second workspace is hidden")
+
+	SettingsManager.cfg_font_size = 21
+	SettingsManager.cfg_show_titlebar = true
+	SettingsManager.save_settings()
+	await get_tree().process_frame
+
+	assert_eq(hidden.font_size, 21, "the hidden terminal took the font size")
+	var tb = ws._workspaces[1].tm.tiles[0].wrapper.get_node_or_null("BodyVBox/TitleBar")
+	assert_not_null(tb, "the hidden pane keeps its title bar node")
+	assert_true(tb.visible, "the hidden pane's title bar took the setting too")
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
 func test_profile_activation_respects_show_titlebar():
 	var ws = WorkspaceScript.new()
 	_ws = ws
@@ -531,21 +582,28 @@ func test_profile_activation_refreshes_layout_and_pane_list():
 	await get_tree().create_timer(2.1).timeout
 
 
-func test_killing_the_focused_pane_hands_focus_to_a_survivor():
+func test_killing_the_focused_pane_hands_focus_to_the_last_survivor():
 	# Closing the active pane used to leave keyboard focus unowned: the freed
 	# node released it, last_body went null, and typing reached nothing until
-	# the user clicked a pane.
+	# the user clicked a pane. It then handed focus to the *first* terminal,
+	# although the tiling logic grows the last tile into the freed space:
+	# T1,T2,T3 minus T3 must leave T2 active, not T1.
 	var ws = WorkspaceScript.new()
 	_ws = ws
 	add_child(ws)
 	await get_tree().process_frame
 	await get_tree().process_frame
 
+	var first = ws._tm._find_body(ws._tm.tiles[0].wrapper)
+	assert_not_null(first, "precondition: the startup terminal")
+	var middle = ws._spawn_pane("terminal")
+	assert_not_null(middle, "the second terminal must spawn")
 	var victim = ws._spawn_pane("terminal")
-	assert_not_null(victim)
-	victim.grab_focus()
-	await get_tree().process_frame
-	ws._tm.last_body = victim
+	assert_not_null(victim, "the third terminal must spawn")
+	assert_eq(ws._tm.tiles.size(), 3, "precondition: three panes")
+	assert_eq(ws._tm._find_body(ws._tm.tiles[-1].wrapper), victim,
+		"precondition: the newest pane is the last tile")
+	assert_eq(ws._tm.last_body, victim, "a spawned pane is the active pane")
 	assert_true(victim.has_focus(), "precondition: the pane to close holds focus")
 
 	ws._kill_now(victim)
@@ -556,8 +614,38 @@ func test_killing_the_focused_pane_hands_focus_to_a_survivor():
 	assert_not_null(survivor, "some pane must hold focus after the active one is closed")
 	assert_true(is_instance_valid(survivor))
 	assert_ne(survivor, victim, "focus must not stay on the closed pane")
-	assert_true(survivor is TerminalPane, "only terminals take keyboard focus")
+	assert_eq(survivor, middle, "the last surviving tile becomes the active pane")
+	assert_ne(survivor, first, "not the first pane in the list")
 	assert_true(survivor.has_focus(), "the surviving terminal must hold keyboard focus")
+
+	await get_tree().create_timer(2.1).timeout
+
+func test_closing_the_active_pane_records_a_read_only_last_pane():
+	# A read-only survivor cannot take the keyboard, but it is still the active
+	# pane - the sidebar accent, the status bar and "close active" all name it -
+	# and the keys go back to the window rather than staying on the freed pane.
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var terminal = ws._tm._find_body(ws._tm.tiles[0].wrapper)
+	assert_not_null(terminal, "precondition: the startup terminal")
+	var viewer = ws._spawn_pane("code_viewer", {})
+	assert_not_null(viewer, "the read-only pane must spawn")
+	ws.activate_pane(terminal)
+	assert_eq(ws.get_viewport().gui_get_focus_owner(), terminal,
+		"precondition: the terminal holds the keyboard")
+
+	ws._kill_now(terminal)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	assert_eq(ws._tm.last_body, viewer,
+		"the last surviving pane becomes the active one, read-only or not")
+	assert_null(ws.get_viewport().gui_get_focus_owner(),
+		"and it releases the keyboard instead of grabbing it")
 
 	await get_tree().create_timer(2.1).timeout
 

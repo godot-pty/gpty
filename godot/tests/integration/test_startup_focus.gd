@@ -48,8 +48,8 @@ func after_each():
 		_ws = null
 	MockAutoloads.teardown()
 
-## An empty (mocked) workspace store: the workspace builds its first tile
-## through `_restore_into`'s empty-layout fallback, exactly like a first run.
+## An empty (mocked) workspace store is a first run: `_init_workspaces` marks it
+## fresh and `_restore_into` seeds its one terminal, exactly like a real launch.
 func _start_workspace() -> Control:
 	var ws = WorkspaceScript.new()
 	_ws = ws
@@ -114,13 +114,31 @@ func test_a_fresh_workspace_focuses_its_first_terminal_and_takes_typing():
 	assert_true(await _wait_for_grid_count(body, MARKER, 2, OUTPUT_ARRIVAL_MS),
 		"the typed line must be echoed and run without a click: %s" % _grid_text(body).right(400))
 
+func test_a_spawned_pane_is_the_active_pane():
+	# The sidebar's Add Pane used to leave the new pane inactive: `last_body`
+	# stayed on the previous pane (or null in a fresh workspace) and the keyboard
+	# stayed on the sidebar button, so typing reached nothing until a click.
+	var ws = await _start_workspace()
+	var before = ws._tm.last_body
+	assert_not_null(before, "precondition: launch activates the startup terminal")
+
+	var count: int = ws._tm.tiles.size()
+	ws._sidebar.request_new_pane.emit("terminal")
+	assert_eq(ws._tm.tiles.size(), count + 1, "the sidebar request spawns a pane")
+	var spawned = ws._tm._find_body(ws._tm.tiles[-1].wrapper)
+	assert_not_null(spawned, "the new pane is the last tile")
+	assert_ne(spawned, before, "precondition: a genuinely new pane")
+	assert_eq(ws._tm.last_body, spawned, "the new pane is the active pane")
+	assert_eq(ws.get_viewport().gui_get_focus_owner(), spawned,
+		"and it holds the keyboard without a click")
+
 func test_switching_to_a_restored_but_unvisited_workspace_focuses_its_first_terminal():
 	var ws = await _start_workspace()
 	ws._add_workspace()
 	assert_eq(ws._active, 1, "precondition: the new workspace is active")
-	# Spawning does not activate: `_spawn_pane_into` attaches the tile, and
-	# `_restore_into` is the same route for every restored pane.
-	var spawned = ws._spawn_pane("terminal")
+	# A restored pane is not a user gesture: `_restore_into` spawns with
+	# `activate := false`, so the workspace it builds was never activated.
+	var spawned = ws._spawn_pane_into(ws._workspaces[1], "terminal", {}, false)
 	assert_not_null(spawned, "precondition: the second workspace holds a terminal")
 	var tm: TerminalManager = ws._workspaces[1].tm
 	assert_null(tm.last_body, "precondition: building the workspace activated no pane")
