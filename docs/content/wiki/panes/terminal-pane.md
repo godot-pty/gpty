@@ -65,7 +65,7 @@ There is no Rows / Cols control: the grid is the size the pane's pixels can show
 
 The program and its arguments are not here. `shell_command` and `shell_args` come from a profile or from a saved layout tile. The call that creates a pane can set the program (`gpty new-pane -t terminal -c <program>`); `--arg` values are an argv for a [[cli-view|CLI View]] pane, not for a terminal. A file-supplied program or argv is what Workspace Trust exists for: restoring a tile that would run something other than your defaults asks you to approve the exact program and arguments, and a tile's `shell_env` is stripped on restore because environment belongs to you.
 
-There is also no per-pane working directory. A pane inherits the directory of its workspace, which is the workspace row's folder button, and the workspace wins over any stored key.
+There is also no per-pane working directory. A pane inherits the directory of its workspace, which is the workspace row's **More → Set Directory**, and the workspace wins over any stored key.
 
 ## What it does not do
 

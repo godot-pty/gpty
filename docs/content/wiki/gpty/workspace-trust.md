@@ -25,7 +25,7 @@ The prompt appears when a restore would spawn a different program or extra argum
 
 - restoring the saved workspace set at startup, or reloading it with the palette's load action;
 - activating a profile from the sidebar;
-- changing a workspace's directory with the sidebar's folder button, when that workspace holds an untrusted tile. A workspace whose panes all run your default shell changes directory without asking.
+- changing a workspace's directory with **More → Set Directory** on its row, when that workspace holds an untrusted tile. A workspace whose panes all run your default shell changes directory without asking.
 
 On the workspace path the dialog describes every affected workspace. Cancelling does not run the file's programs: the affected workspaces are rebuilt with their panes dropped, so the app opens without the untrusted spawns.
 

@@ -87,7 +87,7 @@ Per-pane environment is the exception that is user-owned: it is edited in Pane S
 
 ## Closing and restoring
 
-Closing a pane asks when a command is still running in it; a terminal with a foreground job is not removed by a single click. A wiki pane with unsaved text uses the same leave guard as its Back button. Closing every pane in a workspace is **Close All** in the sidebar (also `Ctrl+Shift+R`), and it asks once for the workspace.
+Closing a pane asks when a command is still running in it; a terminal with a foreground job is not removed by a single click. A wiki pane with unsaved text uses the same leave guard as its Back button. Closing every pane in a workspace is the **Panes** title row's trash (also `Ctrl+Shift+R`): the row swaps to a check/cross first, then asks once for the workspace. A pane row's trash asks in place the same way; the pane title bar's trash closes immediately and still asks about running work.
 
 Tiles are restored from the workspace's saved layout on startup, and a layout or profile that would spawn a different program or argv goes through [[workspace-trust]] first. A pane whose configured program is the child (a full-screen tool) reports that state through the same status document as any other terminal.
 

@@ -4,7 +4,7 @@ The sidebar is the 180 px panel on the left of the window. It gives one place to
 
 ## Shape and collapse
 
-The panel has a header with the gPTY title and a collapse arrow, then four sections in this order: window mode, workspaces, profiles, and panes. Between the window-mode row and the sections sit the Add Pane grid and four actions — Search, Settings, Close All, and Feedback.
+The panel has a header with the gPTY title and a collapse arrow, then four sections in this order: window mode, workspaces, profiles, and panes. Between the window-mode row and the sections sit the Add Pane grid and three actions — Search, Settings, and Feedback.
 
 Collapsing shrinks the sidebar to a 20 px strip with a single expand button; the pane grid widens to take the space. `Ctrl+Shift+B` toggles it, and the arrow in the header or the expand button does the same. The collapsed state is not saved, so each run starts expanded.
 
@@ -26,18 +26,21 @@ Below it:
 
 - **Search** opens the search strip on the active terminal (or the workspace's first terminal when a non-terminal is focused). Same as `Ctrl+Shift+F`.
 - **Settings** opens the global settings panel described in [[settings]].
-- **Close All** closes every pane in the active workspace. It asks before stopping running commands or discarding unsaved work; a Cancel leaves everything in place. Same as `Ctrl+Shift+R`.
 - **Feedback** opens a prefilled GitHub issue in your browser. The title reads `Feedback: ` and the body carries three prompts — what happened, what you expected, steps to reproduce — over an "About this build" block naming the gPTY version, the operating system and its version, and the window mode. Only those four facts are prefilled: never pane output, a command, selected text, a path, an environment value, or a log. Nothing is submitted by gPTY and no token or network call is involved — the issue is an ordinary GitHub page you review and file yourself. When no browser can be opened (offline, headless, no default handler) the same text is copied to the clipboard instead and a toast says so.
 
 ## Workspaces
 
-This section answers "which tab am I in". Its header has a `+` button that creates a workspace (up to eight), and each row has three parts:
+This section answers "which tab am I in". Its header has a `+` button that creates a workspace (up to eight) and a **trash** that closes every workspace; the trash is shown only while at least one workspace exists. Each row has three parts:
 
 - The **name** switches to that workspace on a click and begins an inline rename on a double-click. Enter or clicking away commits; Escape restores the old name. Names are trimmed to 32 characters and default to `Workspace`.
-- The **folder button** opens a directory picker for that workspace's default directory. A set directory colours the button and appears in the tooltip; `Use default` clears it. New terminals spawned there inherit it, including terminals created by profile activation, but running shells are never moved. There is no per-pane directory setting.
-- The **close button** appears only when more than one workspace exists. Closing asks the workspace's panes first and cannot close the last tab.
+- The **More** button (⋯) opens that workspace's menu. **Set Directory** opens the directory picker for the workspace's default directory; its tooltip names the current path and `Use default` clears it. New terminals spawned there inherit it, including terminals created by profile activation, but running shells are never moved. **Clear Workspace** closes every pane in that workspace; a hidden workspace is cleared without switching to it. Both actions use the same running-work and unsaved-work questions a close does.
+- The **close button** (trash) is always shown, including on the last workspace. It swaps the row's actions for a check and a cross first; the check runs the close, the cross cancels. Closing the last workspace is allowed and leaves the zero-workspace state below.
 
-The active workspace is accented. Because the sidebar only ever shows the active workspace's panes, workspace rows are how you move between arrangements; see [[workspace]] for what a workspace owns.
+The two title rows use the same in-place question: the trash hides, a check and cross appear, and only the check proceeds to the running-work and unsaved-work walk. A row's label stays visible while its question is open, so you can see which workspace or pane you are confirming.
+
+When no workspace exists, the Workspaces header keeps only the `+` and the Panes section is hidden. The window shows the guide ("No panes" and the terminal shortcut); the first pane you create makes a workspace named **Default**, and `+` alone also creates **Default**.
+
+The active workspace is accented. Because the sidebar only ever shows the active workspace's panes, workspace rows are how you move between arrangements; see [[workspace]] for what a workspace owns. The header's **Panes:** trash is the section's close-all: it closes every pane in the active workspace, after the same check/cross and running-work walk (same as `Ctrl+Shift+R`).
 
 ## Profiles
 
@@ -56,9 +59,11 @@ A row has a label button (`T1`, `C1`, `F1`, and so on — the type's prefix plus
 | Label | Focuses that pane; the row is accented when it is active |
 | Pane settings | Opens the type-aware settings popup for that pane |
 | More pane actions | Opens the same menu the title bar's overflow button opens: minimize/restore, swap position, and the eight pane types with the current one marked |
-| Close | Closes that pane, after the running-work and unsaved-work questions |
+| Close (trash) | Swaps the row to a check/cross first, then closes that pane after the running-work and unsaved-work questions |
 
-The three are the title bar's three. Both surfaces call one builder (`TerminalManager.show_pane_actions_popup`), so they cannot offer different actions or disagree about which type a pane is, and choosing the pane's own type from the menu does nothing rather than rebuilding it. Minimize and swap position are in that menu because neither is worth a permanent button: the tile keeps its space while a pane is hidden, and a swap needs a second pane to be meaningful.
+The `Panes:` heading carries a trash of its own while the list has at least one pane; it closes every pane in the active workspace through the same check/cross and running-work walk, and the whole section is hidden when there is no pane.
+
+The three are the title bar's three, with one difference in friction: the sidebar row's trash asks check/cross first, while the title bar's trash closes immediately and still asks about running work and unsaved edits. Both surfaces call one builder for the More menu (`TerminalManager.show_pane_actions_popup`), so they cannot offer different actions or disagree about which type a pane is, and choosing the pane's own type from the menu does nothing rather than rebuilding it. Minimize and swap position are in that menu because neither is worth a permanent button: the tile keeps its space while a pane is hidden, and a swap needs a second pane to be meaningful.
 
 The label is also the pane's public identity: `T3` is what the CLI and MCP tools accept when you target a pane. Changing the type destroys the old pane body, so it asks the same questions as closing one. Minimizing a terminal keeps its process running; the tile does not change, so restoring it puts it back exactly where it was.
 

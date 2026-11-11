@@ -36,7 +36,7 @@ Where a profile came from is recorded by gPTY when it loads it, not read from th
 
 A saved-by-you profile never writes a consent record, so it is a fresh decision each activation. The dialog's Cancel activates nothing and leaves the workspace as it was.
 
-The activated profile's name is remembered by the workspace that activated it, and its row is accented while that workspace is active. Resetting the workspace's panes (`Ctrl+Shift+R` or Close All) clears that state, because an empty layout is no longer that profile.
+The activated profile's name is remembered by the workspace that activated it, and its row is accented while that workspace is active. Resetting the workspace's panes (`Ctrl+Shift+R` or the Panes title row's close-all) clears that state, because an empty layout is no longer that profile. **Clear Workspace** in a workspace row's More menu clears that workspace's accent too.
 
 ## Automation
 
