@@ -86,6 +86,7 @@ godot/
         └── panes/               # Specialty pane types
             ├── pane_body.gd
             ├── pane_types.gd    # Pane registry, sanitizers
+            ├── backend_choice.gd # Inspector backend vocabulary (aliases, dropdown rows)
             ├── viewable_files.gd # Closed table: which paths open in the viewer
             ├── media_files.gd   # Closed table + path gate for the media pane
             ├── code_viewer.gd

@@ -16,6 +16,8 @@ class_name InspectorPane
 ## sanitized like shell_args — never shell-evaluated).
 @export var command: Array = []
 
+const CLI_EMPTY_HINT := "The CLI backend needs an adapter command; a session cannot open without one."
+
 var _display: MarkdownView
 var _status: Label
 var _prompt: LineEdit
@@ -314,7 +316,10 @@ func apply_settings(settings: Dictionary):
 	var prev_command = command.duplicate()
 	super.apply_settings(settings)
 	if settings.get("backend") is String:
-		backend = settings["backend"]
+		# One vocabulary: a known alias collapses to its kind, and a value the
+		# parser does not know is kept exactly so the panel can show it as
+		# `Custom:` instead of silently rewriting the user's file.
+		backend = BackendChoice.selected_kind(settings["backend"])
 	if settings.get("auto_run") is bool:
 		auto_run = settings["auto_run"]
 	if settings.get("accept_concept_captures") is bool:
@@ -361,29 +366,68 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 
 	v.add_child(HSeparator.new())
 
-	var backend_le = LineEdit.new()
-	backend_le.text = backend
-	backend_le.placeholder_text = "mock | omp | cli"
-	backend_le.text_changed.connect(func(_s): panel._debounce_timer.start())
-	_add_setting_row(v, "Backend:", backend_le)
+	var backend_rows := BackendChoice.options(_backend_roster(), backend)
+	var backend_select = OptionButton.new()
+	backend_select.name = "BackendSelect"
+	var backend_kinds: Array = []
+	for row in backend_rows:
+		backend_select.add_item(str(row["label"]))
+		backend_kinds.append(str(row["kind"]))
+	backend_select.selected = maxi(0, backend_kinds.find(BackendChoice.selected_kind(backend)))
+	_add_setting_row(v, "Backend:", backend_select)
+
+	var backend_hint = Label.new()
+	backend_hint.name = "BackendHint"
+	backend_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	backend_hint.theme_type_variation = UiTheme.WARNING_LABEL
+	v.add_child(backend_hint)
 
 	var model_le = LineEdit.new()
 	model_le.text = model
-	model_le.placeholder_text = "optional omp --model"
+	model_le.placeholder_text = "optional model override"
 	model_le.text_changed.connect(func(_s): panel._debounce_timer.start())
 	_add_setting_row(v, "Model:", model_le)
 
 	var command_le = LineEdit.new()
+	command_le.name = "CommandEdit"
 	command_le.text = " ".join(command)
 	command_le.placeholder_text = "cli backend: adapter command (argv, no shell)"
-	command_le.text_changed.connect(func(_s): panel._debounce_timer.start())
-	_add_setting_row(v, "Command:", command_le)
+	var command_row: HBoxContainer = _add_setting_row(v, "Command:", command_le)
+	command_row.name = "CommandRow"
+	var command_hint = Label.new()
+	command_hint.name = "CommandHint"
+	command_hint.text = CLI_EMPTY_HINT
+	command_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	command_hint.theme_type_variation = UiTheme.WARNING_LABEL
+	v.add_child(command_hint)
 	# The field renders argv joined by spaces, which cannot represent an
 	# argument that contains a space. Re-splitting it on every gather would
 	# therefore fragment such an argument whenever any *other* setting was
 	# edited; keep the argv and only re-parse a field the user actually changed.
 	var command_text: String = command_le.text
 	var command_argv: Array = command.duplicate()
+
+	# The Command row and both hints follow the selected backend: a pane that
+	# is not the cli bridge has no command to show, and a hint only speaks
+	# when it has something to say (a missing program, an unknown name, a cli
+	# session with no command).
+	var sync_backend_fields := func():
+		var row: Dictionary = backend_rows[maxi(0, backend_select.selected)]
+		var hint_text := str(row.get("hint", ""))
+		backend_hint.text = hint_text
+		backend_hint.visible = hint_text != ""
+		var is_cli := str(row.get("kind", "")) == "cli"
+		command_row.visible = is_cli
+		command_hint.visible = is_cli and command_le.text.strip_edges() == ""
+	backend_select.item_selected.connect(func(_i):
+		sync_backend_fields.call()
+		panel._debounce_timer.start()
+	)
+	command_le.text_changed.connect(func(_s):
+		sync_backend_fields.call()
+		panel._debounce_timer.start()
+	)
+	sync_backend_fields.call()
 
 	var auto_cb = CheckButton.new()
 	auto_cb.button_pressed = auto_run
@@ -419,7 +463,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"pane_name": name_le.text.strip_edges(),
 			"attachment_id": PaneTypes.sanitize_attachment_id(attach_le.text.strip_edges()),
 			"font_size": int(font_spin.value),
-			"backend": backend_le.text.strip_edges(),
+			"backend": str(backend_rows[maxi(0, backend_select.selected)]["kind"]),
 			"model": model_le.text.strip_edges(),
 			"command": _command_from_field(command_le.text, command_text, command_argv),
 			"auto_run": auto_cb.button_pressed,
@@ -428,6 +472,14 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 		}
 
 	return v
+
+## The dropdown's roster, read on every panel build: availability is a property
+## of this machine right now (an `omp` installed since the pane opened), and the
+## panel rebuilds its content on every open, so a cached list would go stale.
+func _backend_roster() -> Array:
+	if _ai == null or not _ai.has_method("list_backends"):
+		return []
+	return BackendChoice.roster(str(_ai.list_backends()))
 
 ## Parse the Command field back into argv.
 ##
@@ -441,7 +493,7 @@ func _command_from_field(text: String, shown_text: String, shown_argv: Array) ->
 		return shown_argv.duplicate()
 	return text.strip_edges().split(" ", false)
 
-func _add_setting_row(parent: VBoxContainer, label: String, control: Control):
+func _add_setting_row(parent: VBoxContainer, label: String, control: Control) -> HBoxContainer:
 	var hb = HBoxContainer.new()
 	var lbl = Label.new()
 	lbl.text = label
@@ -449,3 +501,4 @@ func _add_setting_row(parent: VBoxContainer, label: String, control: Control):
 	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hb.add_child(control)
 	parent.add_child(hb)
+	return hb
