@@ -34,7 +34,7 @@ func test_version_is_rightmost_segment():
 	assert_string_contains(last, GptyTerminal.get_app_version())
 
 func test_clock_sits_left_of_version_with_no_window_mode_segment():
-	_bar.set_fps(60, 1, 2)
+	_bar.set_fps(60)
 	var parts := _bar._right_label.text.split("  |  ")
 	assert_eq(parts.size(), 3, "Right label must be exactly FPS | clock | version")
 	var re := RegEx.new()
@@ -47,6 +47,16 @@ func test_clock_sits_left_of_version_with_no_window_mode_segment():
 		parts[2].begins_with("v"),
 		"Clock must immediately precede the version (got '%s')" % parts[2]
 	)
+
+func test_right_label_carries_no_ms_readout():
+	# The pane's fetch/draw timings moved out of the bar; they belong to the
+	# diagnostics pane, so nothing here may print a `ms` figure again.
+	_bar.set_fps(60)
+	for part in _bar._right_label.text.split("  |  "):
+		assert_false(
+			part.contains("ms"),
+			"Right label segment must not carry a millisecond readout (got '%s')" % part
+		)
 
 func test_pane_label_starts_at_left_edge():
 	# Restoring the original offset — pane info should not be displaced.

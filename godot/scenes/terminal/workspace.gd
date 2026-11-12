@@ -2304,15 +2304,8 @@ func _process(_delta: float):
 	_poll_pending_pane_starts()
 	if _sidebar == null: return
 	# FPS counter update (throttled to ~4 Hz)
-	if Engine.get_process_frames() % 15 == 0:
-		var fps = Engine.get_frames_per_second()
-		var body = _tm.last_body
-		var fetch_ms = -1; var draw_ms = -1
-		if body and body.has_method("_draw"):
-			fetch_ms = body.get("_fetch_ms") if "_fetch_ms" in body else -1
-			draw_ms = body.get("_draw_ms") if "_draw_ms" in body else -1
-		if _status_bar:
-			_status_bar.set_fps(fps, fetch_ms, draw_ms)
+	if Engine.get_process_frames() % 15 == 0 and _status_bar:
+		_status_bar.set_fps(Engine.get_frames_per_second())
 	_refresh_status_bar()
 
 ## Last pane identity pushed to the status bar, so the per-frame refresh can

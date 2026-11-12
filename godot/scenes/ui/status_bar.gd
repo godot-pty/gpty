@@ -84,12 +84,10 @@ func set_pane_info(label: String, type_name: String):
 	var icon = PaneTypes.ALL.get(type_name, {}).get("icon", "?")
 	_pane_label.text = "%s %s  %s" % [icon, label, type_name] if label != "" else ""
 
-func set_fps(fps: int, fetch_ms: int, draw_ms: int):
+func set_fps(fps: int):
 	if _readouts_frozen:
 		return
 	_fps_text = "%d FPS" % fps
-	if fetch_ms >= 0:
-		_fps_text += "  %d/%dms" % [fetch_ms, draw_ms]
 	_right_update()
 
 ## Pin the two live readouts so a viewport capture is repeatable.
