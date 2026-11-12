@@ -129,7 +129,7 @@ func set_saved_commands(entries: Array, refusal: String) -> void:
 ## stale query from the last visit used to hide every entry) and the list is
 ## rebuilt before focus moves in. The card is also clamped to the overlay's own
 ## rect first: at the 560x340 layout floor a fixed 480 px card would hang
-## outside the window (the small-window rework is v0.8.2's; the palette just
+## outside the window (the small-window rework is v0.8.3's; the palette just
 ## never draws outside its host).
 func _before_open() -> void:
 	var edge := float(UiTokens.SPACE_XXL)

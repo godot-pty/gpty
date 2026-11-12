@@ -1,6 +1,6 @@
 [package]
 name = "gpty-gdext"
-version = "0.8.1"
+version = "0.8.2"
 edition = "2024"
 description = "Godot 4 GDExtension for gpty — bridges the Rust terminal engine to Godot's renderer"
 license = "GPL-3.0-or-later"
@@ -13,7 +13,7 @@ godot = { version = "0.5", features = ["api-4-4"] }
 gpty-core = { path = "../gpty-core" }
 gpty-ai = { path = "../gpty-ai" }
 gpty-media = { path = "../gpty-media" }
-gpty-plugin = { path = "../gpty-plugin", version = "0.8.1" }
+gpty-plugin = { path = "../gpty-plugin", version = "0.8.2" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 log = "0.4"
 regex = "1"

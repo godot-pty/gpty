@@ -1,13 +1,13 @@
 [package]
 name = "gpty-plugin"
-version = "0.8.1"
+version = "0.8.2"
 edition = "2024"
 description = "Installed-plugin store and shared schema caps for gpty"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/godot-pty/gpty"
 
 [dependencies]
-gpty-ipc = { path = "../gpty-ipc", version = "0.8.1" }
+gpty-ipc = { path = "../gpty-ipc", version = "0.8.2" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

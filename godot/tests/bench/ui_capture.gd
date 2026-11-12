@@ -148,7 +148,7 @@ const STATES := {
 	# agree about which scale produced it.
 	"ui-scale-125-800x500": {"size": Vector2i(800, 500), "panes": 0, "ui_scale": 125},
 	# The light chrome, on the same workspace the dark states capture. Both
-	# exist so the light theme is reproducible by name, and so the v0.8.4
+	# exist so the light theme is reproducible by name, and so the v0.8.5
 	# recapture can use them instead of a scratch driver.
 	"light-workspace": {"size": Vector2i(1280, 760), "panes": 4,
 		"settings": {"cfg_appearance_mode": 1}},

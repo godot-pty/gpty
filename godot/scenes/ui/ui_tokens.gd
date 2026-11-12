@@ -60,7 +60,7 @@ const SCROLLBAR_MIN_THUMB := 24
 ## Settings card is 540 x 560 and is the largest fixed surface; 540 also leaves
 ## the 180 px sidebar plus a 2x2 grid of 180 px tiles, the narrowest a pane
 ## title bar (three 22 px controls and a title) is drawn at. `SettingsManager`
-## caps the applied UI scale so the layout never falls under it; the v0.8.2
+## caps the applied UI scale so the layout never falls under it; the v0.8.3
 ## small-window work may lower it once the card, the sidebar and the dialogs
 ## adapt instead of clipping.
 const MIN_LAYOUT := Vector2(540, 560)
