@@ -188,13 +188,14 @@ These are load-bearing guards. Reports that require removing one of them should 
   that starts a different program or passes extra arguments raises the Workspace Trust prompt before
   it runs, and `layoutLoad` over the control socket refuses such a profile (a caller cannot answer a
   dialog, so naming the profile is not consent to what the file asks for) - unless the consent memory
-  covers it: the approval must match the content - a built-in's name and app version plus the spawn
-  plans (program, argv and the workspace directory) recorded with it, a plugin's id and pinned
-  revision plus the plans its install review listed, or a user profile whose every untrusted tile's
-  exact program+argv at that directory was approved - because the record is proof the user approved
-  that content in the GUI. A new app version, a new plugin revision, or different tiles under the
-  same name or revision re-prompts. Provenance is gPTY's: fields inside a user profile file cannot
-  make it a built-in or plugin profile, because they are stripped on load. Environment is not a file
+  covers it: a pre-seed built-in's name and app version plus the spawn plans (program, argv and the
+  workspace directory) recorded with it, a plugin's id and pinned revision plus the plans its
+  install review listed, or a user profile whose every untrusted tile's exact program+argv at that
+  directory was approved - because the record is proof the user approved that content in the GUI.
+  The two shipped defaults are seeded into the user profile file and carry no built-in record. A new
+  app version, a new plugin revision, or different tiles under the same name or revision re-prompts.
+  Provenance is gPTY's: fields inside a user profile file cannot make it a plugin profile, and the
+  legacy built-in claim is stripped on load too. Environment is not a file
   decision: a tile's `shell_env` is dropped on restore with a notice naming what was dropped, and
   per-pane environment is the user's own - `user://pane_env.json`, written only by the pane settings
   UI and keyed by the pane's id, applied at spawn over the user's global environment. The Inspector's

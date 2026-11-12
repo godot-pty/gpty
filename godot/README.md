@@ -23,7 +23,7 @@ godot/
 ├── project.godot            # Godot 4.7 project config
 ├── gpty.gdextension      # GDExtension library config
     ├── concepts.default.json    # Shipped default concepts
-    ├── profiles.default.json    # Shipped recommended layouts (Agent Workspace)
+    ├── profiles.default.json    # Shipped seed layouts (Agent Workspace, Knowledge Base)
     ├── fonts/                   # Bundled fonts (DejaVu Sans Mono + Phosphor icons)
     │   ├── DejaVuSansMono.ttf
     │   ├── DejaVuSansMono-Bold.ttf
@@ -62,7 +62,7 @@ godot/
         │   ├── command_palette.gd # Ctrl+Shift+P command list (OverlayPanel)
         │   ├── palette_model.gd # Palette entries, matching and ranking (pure)
         │   ├── shortcut_catalog.gd # The About tab's keyboard-shortcut list as data (chords from the binding registry)
-        │   ├── shortcut_guide.gd # The empty workspace's shortcut guide: live keycap demo + every binding (data-driven providers)
+        │   ├── shortcut_guide.gd # The empty workspace guide: clickable live keycap + every binding (data-driven)
         │   ├── keyboard_focus.gd # Keyboard-entry walk + the toolbar-ring pair (overlay focus, pane content, chrome/note toolbars)
         │   ├── concept_graph_editor.gd # Visual rule editor overlay (GraphEdit)
         │   ├── concept_graph_model.gd  # Pure canvas/build/validate/compile logic
@@ -154,13 +154,18 @@ godot/
 - [Trash on the Workspaces: / Panes: title rows] - close every workspace / every pane in the active workspace. The row swaps to a check/cross first; the running-work prompt follows the check
 - [Trash on a pane row or its title bar] - close that pane. The sidebar row asks check/cross first; the title bar closes immediately, still asking about running work and unsaved edits
 - [Profile row] - the name activates that layout in the current workspace (it asks before replacing panes); the arrow button opens it in a new workspace named after the profile and leaves the current one untouched
+- [Trash on a user profile row] - deletes it immediately. The two shipped layouts are copied into your user profiles on first launch, so Agent Workspace and Knowledge Base use this same trash; a deleted copy is not restored
+- [Trash on a plugin profile row] - uninstalls the plugin after check/cross, removing every profile and concept it ships. Plugin rows have no rename. Saving or renaming into an existing user-profile name asks **Replace Profile?** first, and an install whose profile name collides names the replacement in its review
 
 Layout is auto-saved on close and auto-restored on startup via `user://layout.json`.
 
-The shipped **Agent Workspace** profile opens a normal terminal plus separate
-Inspector (private Q&A) and Reasoning (passive agent thinking) panes. Five
-single-pane ecosystem presets ship alongside it: herdr, lazygit, nvim,
-claude, and OMP - each restores one full-screen terminal running that tool.
+The two shipped layouts are seeded into `user://profiles.json` on first launch and
+are ordinary user profiles afterwards: **Agent Workspace** opens a normal terminal
+plus separate Inspector (private Q&A) and Reasoning (passive agent thinking)
+panes, and **Knowledge Base** opens the bundled wiki. The five tool presets -
+herdr, lazygit, nvim, claude, and OMP - live in plugin repositories now, each
+restoring one full-screen terminal running that tool; Agent Workspace and
+Knowledge Base are also published as plugins for a fresh install or a reinstall.
 None of them install the OMP extension or launch `omp`; the user does that in
 the terminal. Inspector does not follow the terminal conversation. Reasoning
 requires the `@gpty/omp-events` extension and gpty's Unix event socket

@@ -38,7 +38,7 @@ This section answers "which tab am I in". Its header has a `+` button that creat
 
 The two title rows use the same in-place question: the trash hides, a check and cross appear, and only the check proceeds to the running-work and unsaved-work walk. A row's label stays visible while its question is open, so you can see which workspace or pane you are confirming.
 
-When no workspace exists, the Workspaces header keeps only the `+` and the Panes section is hidden. The window shows the empty-workspace guide — a live keycap demo of the spawn chords, an **Open a Terminal** button, and every registered binding in grouped cards; the first pane you create makes a workspace named **Default**, and `+` alone also creates **Default**.
+When no workspace exists, the Workspaces header keeps only the `+` and the Panes section is hidden. The window shows the empty-workspace guide — a clickable live keycap demo of the spawn chords and every registered binding in grouped cards; the first pane you create makes a workspace named **Default**, and `+` alone also creates **Default**.
 
 The active workspace is accented. Because the sidebar only ever shows the active workspace's panes, workspace rows are how you move between arrangements; see [[workspace]] for what a workspace owns. The header's **Panes:** trash is the section's close-all: it closes every pane in the active workspace, after the same check/cross and running-work walk (same as `Ctrl+Shift+R`).
 
@@ -46,7 +46,7 @@ The active workspace is accented. Because the sidebar only ever shows the active
 
 Profiles are reusable tile sets. Clicking a row activates that profile into the active workspace, replacing its panes after a confirmation when the workspace is not empty. A profile row is accented while the active workspace was built from it, until the layout is reset or another profile is activated.
 
-The header's `+` saves the current arrangement as a new profile; the dialog asks for a name and lets you edit each pane's command. A user profile can be renamed by double-clicking its row and deleted with its trash button. Built-in and plugin-provided profiles have no rename or delete: the built-in ships with the application and plugin profiles follow their plugin. A plugin row's tooltip names the plugin and revision it came from, and the section ends with a `More layouts →` row that opens the plugin registry in your browser. [[profile]] covers the sources, storage, and the trust check activation runs.
+The header's `+` saves the current arrangement as a new profile; the dialog asks for a name and lets you edit each pane's command. A user profile can be renamed by double-clicking its row and deleted with its trash button. The two shipped layouts, Agent Workspace and Knowledge Base, are copied into `user://profiles.json` on first launch and are ordinary user rows from then on, so they have the same rename and delete controls; a deleted copy is not re-added. Saving or renaming into an existing user-profile name asks **Replace Profile?** first. A plugin profile offers no rename; its row carries a trash that asks with a check/cross and then uninstalls the plugin, removing every profile and concept it ships. A plugin row's tooltip names the plugin and revision it came from, and the section ends with a `More layouts →` row that opens the plugin registry in your browser. There is no delete-all control in the Profiles header. [[profile]] covers the sources, storage, and the trust check activation runs.
 
 ## Panes
 

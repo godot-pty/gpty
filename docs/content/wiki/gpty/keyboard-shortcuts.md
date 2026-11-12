@@ -101,7 +101,7 @@ The terminal's three chords are *declared* rather than registered with a callbac
 
 Every surface that names a chord — the About list, the palette rows, the sidebar's tooltips, the empty-workspace guide — reads it from that registry with `chord(action)` instead of repeating a literal, so a list can never advertise a key that does nothing.
 
-The empty-workspace guide is the discovery half of the same rule: with no panes open it lists every registered binding in grouped cards, a live keycap cycles the four spawn chords, and its **Open a Terminal** button spawns through the same path as `Ctrl+Shift+N`. It re-reads the registry each time the workspace becomes empty, so a rebound chord cannot be advertised wrongly.
+The empty-workspace guide is the discovery half of the same rule: with no panes open it lists every registered binding in grouped cards, and a clickable live keycap cycles the four spawn chords and starts the pane it is showing, through the same path as the matching shortcut. It re-reads the registry each time the workspace becomes empty, so a rebound chord cannot be advertised wrongly.
 
 ## Related
 

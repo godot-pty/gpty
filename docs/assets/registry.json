@@ -8,7 +8,11 @@
       "description": "A terminal running OMP (oh-my-pi) — the agent workspace profile.",
       "category": "agent",
       "min_gpty_version": "0.5.4",
-      "platforms": ["linux", "macos", "windows"]
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ]
     },
     {
       "id": "godot-pty/gpty-claude",
@@ -17,7 +21,11 @@
       "description": "A terminal running Claude Code.",
       "category": "agent",
       "min_gpty_version": "0.5.4",
-      "platforms": ["linux", "macos", "windows"]
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ]
     },
     {
       "id": "godot-pty/gpty-herdr",
@@ -26,7 +34,11 @@
       "description": "A terminal running Herdr, the session multiplexer.",
       "category": "multiplexer",
       "min_gpty_version": "0.5.4",
-      "platforms": ["linux", "macos", "windows"]
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ]
     },
     {
       "id": "godot-pty/gpty-lazygit",
@@ -35,7 +47,11 @@
       "description": "A terminal running Lazygit, the Git TUI.",
       "category": "git",
       "min_gpty_version": "0.5.4",
-      "platforms": ["linux", "macos", "windows"]
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ]
     },
     {
       "id": "godot-pty/gpty-neovim",
@@ -44,7 +60,37 @@
       "description": "A terminal running Neovim.",
       "category": "editor",
       "min_gpty_version": "0.5.4",
-      "platforms": ["linux", "macos", "windows"]
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ]
+    },
+    {
+      "id": "godot-pty/gpty-agent-workspace",
+      "repo": "https://github.com/godot-pty/gpty-agent-workspace",
+      "name": "Agent Workspace",
+      "description": "The shipped agent layout: an OMP terminal with Inspector and Reasoning panes.",
+      "category": "agent",
+      "min_gpty_version": "0.5.5",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ]
+    },
+    {
+      "id": "godot-pty/gpty-knowledge-base",
+      "repo": "https://github.com/godot-pty/gpty-knowledge-base",
+      "name": "Knowledge Base",
+      "description": "The shipped gPTY wiki vault, opened in a Wiki pane.",
+      "category": "utility",
+      "min_gpty_version": "0.5.5",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ]
     }
   ]
 }

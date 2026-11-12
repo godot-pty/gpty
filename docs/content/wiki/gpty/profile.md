@@ -12,13 +12,13 @@ Activating a profile resets the active workspace and rebuilds its panes from the
 
 There are three sources, shown in one list in the sidebar's Profiles section.
 
-**Built in.** gPTY ships exactly one built-in profile, **Agent Workspace**: a wide terminal on the left with an Inspector and a Reasoning pane stacked on the right. Its terminal, Inspector, and Reasoning tiles carry stable attachment ids (`omp-terminal`, `omp-inspector`, `omp-reasoning`) so the Inspector and Reasoning panes can be wired to that terminal. The built-in is read from `res://profiles.default.json`, which ships with the application and is never written.
+**Shipped, then seeded.** gPTY ships two layouts in `res://profiles.default.json`: **Agent Workspace** — a wide terminal on the left with an Inspector and a Reasoning pane stacked on the right, wired by the stable attachment ids `omp-terminal`, `omp-inspector`, and `omp-reasoning` — and **Knowledge Base**, a Wiki pane opened on the bundled vault through the `@knowledge` token. On the first launch of this build both are copied into `user://profiles.json` as ordinary user profiles; the seed file is never written back, and the `seeded_defaults` marker stops a deleted copy from returning. Both name no program, so activating one raises no trust dialog. Because they are user profiles, they are renamed and deleted exactly like any other row.
 
-**Installed with a plugin.** The single-pane tool presets — Herdr, Lazygit, Neovim, Claude, and OMP — arrive from their own plugin repositories, one profile per tool, each restoring a full-window terminal that runs that tool. None of them installs the OMP event extension or launches `omp` for you; you do that inside the terminal. Plugin profiles are re-read from the installed-plugin store, are never written into the user profile file, and disappear with the plugin. Their sidebar rows show where they came from (`owner/repo@revision`) and offer no rename or delete, because the plugin owns them.
+**Installed with a plugin.** The single-pane tool presets — Herdr, Lazygit, Neovim, Claude, and OMP — arrive from their own plugin repositories, one profile per tool, each restoring a full-window terminal that runs that tool. The two shipped layouts are also published as `godot-pty/gpty-agent-workspace` and `godot-pty/gpty-knowledge-base`. None of the tool presets installs the OMP event extension or launches `omp` for you; you do that inside the terminal. Plugin profiles are re-read from the installed-plugin store, are never written into the user profile file, and disappear with the plugin. Their sidebar rows show where they came from (`owner/repo@revision`) and carry a trash that uninstalls the plugin after an in-place check/cross; uninstalling removes every profile and concept the plugin ships. Plugin rows offer no rename. Installing a plugin whose profile name matches one of your profiles names the replacement in the install review; accepting gives the plugin's copy the bare name once the install lands.
 
 **Saved by you.** The `+` button in the Profiles header captures the active workspace's current tiles as a new profile. The dialog asks for a name and lets you edit each pane's command before saving, which is how you turn a working arrangement into a repeatable one. User profiles live in `user://profiles.json`.
 
-Name collisions are resolved with a ` (n)` suffix rather than overwriting: built-in and user names keep the bare name and a colliding plugin profile yields, while among plugin profiles the first one wins. Double-clicking a user profile row renames it; its delete button removes it. Deleting or renaming a profile also clears or updates the accent on any workspace that had activated it.
+Name collisions are resolved with a ` (n)` suffix rather than overwriting: a user profile keeps the bare name and a colliding plugin profile yields, while among plugin profiles the first one wins. Saving or renaming a user profile into an existing user-profile name asks to replace it; a name held only by a plugin is not a replacement target, so the user profile takes it and the plugin yields. Double-clicking a user profile row renames it; its delete button removes it. Deleting or renaming a profile also clears or updates the accent on any workspace that had activated it.
 
 ## Activating a profile
 
@@ -28,11 +28,12 @@ Before anything is torn down, the trust check runs. A profile whose tiles would 
 
 | Profile source | What an approval covers |
 |---|---|
-| Built-in | That profile name at the current app version, and the spawn plans recorded with it; a new release asks again, and so does different content under the same name |
 | Plugin | That plugin id at the exact installed revision, and the spawn plans the install review listed; a new revision asks again, and so does different content under the same revision |
-| Saved by you | Ask every time, unless every untrusted spawn plan was already approved through a shipped profile |
+| Saved by you (including the seeded defaults) | Ask every time, unless every untrusted spawn plan was already approved through an old built-in record |
 
-Where a profile came from is recorded by gPTY when it loads it, not read from the file. A hand-written `profiles.json` entry cannot claim to be a built-in or to belong to an installed plugin: those fields are stripped on load, so the entry is your profile and goes through the same plan check as any other. An approval also covers only the plans it recorded, which is why a profile whose tiles changed under an approved name or revision asks again.
+Where a profile came from is recorded by gPTY when it loads it, not read from the file. A hand-written `profiles.json` entry cannot claim to belong to an installed plugin (the legacy `builtin` claim is stripped too): those fields are removed on load, so the entry is your profile and goes through the same plan check as any other. An approval also covers only the plans it recorded, which is why a profile whose tiles changed under an approved revision asks again.
+
+The seeded defaults are user profiles, so they consult no name+version record of their own. `trusted.json`'s legacy `builtins` namespace and `approved_plan_keys()` stay readable so a workspace saved from a pre-seed built-in still restores under the approval it recorded; both shipped defaults name no program, so they would not prompt anyway.
 
 A saved-by-you profile never writes a consent record, so it is a fresh decision each activation. The dialog's Cancel activates nothing and leaves the workspace as it was.
 

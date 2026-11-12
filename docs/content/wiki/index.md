@@ -17,7 +17,7 @@ Because the vault is just Markdown files, it also opens in Obsidian or any edito
 
 ## In a packaged build
 
-Release builds carry this vault as a generated bundle: the built-in **Knowledge Base** profile opens a copy seeded into your user data on first use, so the notes are available without a source checkout. The seed is keyed by the vault's content hash — a release whose notes changed seeds a new copy instead of writing over edits you made in the previous one. A checkout keeps `docs/content/wiki` as the source of truth; `scripts/build-wiki` refreshes the bundle and `scripts/build-wiki --check` fails CI when the two drift.
+Release builds carry this vault as a generated bundle: the shipped **Knowledge Base** profile (seeded into your user profiles) opens a copy seeded into your user data on first use, so the notes are available without a source checkout. The seed is keyed by the vault's content hash — a release whose notes changed seeds a new copy instead of writing over edits you made in the previous one. A checkout keeps `docs/content/wiki` as the source of truth; `scripts/build-wiki` refreshes the bundle and `scripts/build-wiki --check` fails CI when the two drift.
 
 ## Pick a path
 

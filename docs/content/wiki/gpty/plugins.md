@@ -49,6 +49,8 @@ Install clones `https://github.com/<owner>/<repo>` — git driven by argv, never
 
 Before anything lands it gates the manifest: the `id` must equal the install target, the current platform must be declared, and `min_gpty_version` must not exceed the CLI. Then, because the plugin's actions will run as you, it sends a summary over the `pluginInstall` IPC method for a human to accept in the GUI. The review dialog shows the requested ref beside the resolved revision and prints the distinct programs a profile's tiles would run. No GUI answering — declined, disconnected, `--no-daemon` — means nothing installs.
 
+The review also names a same-name profile replacement — `Replaces your profile(s): …` — when a profile the plugin ships already exists as one of your user profiles (including a seeded default). Install is the confirmation: the plugin lands first, and only then are the matching user profiles deleted so the plugin's copies take the bare names. A failed or slow install deletes nothing and leaves your profile in place; the plugin row would remain deduped with ` (n)`.
+
 Content moves to `data_dir()/plugins/<id>`, runtime directories are created under `state_dir()/plugins/<id>/{config,state,logs}`, and a record lands in `state_dir()/plugins.json` with the resolved SHA and the manifest's profiles and concepts. **The store pins the SHA**, not the tag: a moved tag is a new revision and triggers a re-review. The GUI never parses TOML: the validator stays the single gate, and a broken record degrades one entry at a time.
 
 Every `plugin` command reads the running GUI's version before it does anything else — bounded, best-effort, silent when no GUI answers. The store is shared state, so a CLI older than the GUI beside it rejects record keys it does not know and reports `plugins.json` as corrupt; that is what a stale `gpty` on `PATH` looks like. The warning names both versions and the fix: reinstall the CLI, or use the one shipped beside the GUI.
@@ -73,6 +75,7 @@ What none of this prevents is a plugin running arbitrary code in the panes it sp
 | `gpty plugin list` | Installed records, their revision, and enabled state |
 | `gpty plugin enable <id>` / `disable <id>` | Flip the record; a running GUI updates its profile list, or reads the store on next launch |
 | `gpty plugin uninstall <id>` | Remove the record and directories; the GUI drops its profiles |
+| Trash on a plugin profile row | Uninstall that plugin through the same store removal, after an in-place check/cross; every profile and concept it ships disappears. The row's tooltip names the plugin and revision |
 | `gpty plugin logs <id>` | Read the plugin's captured action output |
 | `gpty plugin run <id> <action>` | Spawn the action's CLI command through `GPTY_BIN_PATH` and print its output |
 | `gpty plugin validate <path>` | Run the shipped install validator offline |
@@ -82,7 +85,7 @@ What none of this prevents is a plugin running arbitrary code in the panes it sp
 
 `gpty plugin validate` is the whole local loop: it runs the same parser and gates the install uses, on a plugin directory or its manifest, with no GUI and no network. `--json` prints `{"ok": …}` and exits 1 on rejection, which is what a plugin repo's CI runs. Each first-party plugin repo — one per tool, each a single manifest — validates its own checkout and keeps a one-line assertion that its `id` equals the repo name, because that equality is the install gate's contract and the validator cannot see the repo.
 
-The plugin verbs are CLI-only: `install` waits on a human, and the admin verbs touch local state rather than the workspace API, so none of them are MCP tools.
+The plugin verbs remain CLI-only: `install` waits on a human, and the admin verbs touch local state rather than the workspace API, so none of them are MCP tools. The sidebar's trash is not an IPC method either — it calls the same store removal in-process through `GptyTerminal.uninstall_plugin()`, so the CLI and the GUI cannot disagree about what an uninstall did.
 
 ## Related
 
