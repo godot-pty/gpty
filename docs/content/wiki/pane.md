@@ -53,7 +53,7 @@ Each pane has a display label and an attachment ID.
 - Tags are lowercase identifiers attached at creation (`gpty new-pane --tags ci,backend`) and used by `broadcast` to address several panes at once. They follow the same pattern and are not edited in Pane Settings.
 - A terminal also receives `GPTY_ENV=1`, `GPTY_PANE_ID`, and the event-socket credentials in its environment, which is how a program inside the pane can address the workspace.
 
-Duplicate attachment IDs are regenerated at spawn. They would otherwise make `inject`, `pane-read`, `pane-status`, `pane-wait`, `kill-pane`, and `focus-pane` silently act on the wrong pane.
+Duplicate attachment IDs are regenerated at spawn. They would otherwise make `inject`, `pane-read`, `pane-status`, `pane-view`, `pane-wait`, `kill-pane`, and `focus-pane` silently act on the wrong pane.
 
 ## What a pane can be asked to do
 

@@ -25,6 +25,7 @@ All three reach the same handlers in the running GUI. The CLI is a stateless cli
 | `inject` | `pane_id`, `text` | `{success}` |
 | `paneRead` | `pane_id`, `lines?` (1–2000) | `{text}` — screen plus scrollback |
 | `paneStatus` | `pane_id?` | One status document, or `{panes: [...]}` for every pane |
+| `paneView` | `pane_id`, `graph?`, `note?`, `mode?` | `{success, pane_id, label, type, graph, note, view_mode}` — display-only: changes what a wiki pane shows (link graph, a note, the note view mode) without activating it. Applied note, mode, graph; the answer reads the pane back |
 | `paneRun` | `command` | `{pane_id, label, type}` |
 | `paneWait` | `pane_id`, `pattern`, `timeout_ms?` (100–60000) | `{matched, line?}` or `{matched: false, timed_out}` |
 | `broadcast` | `tags`, `text` | `{success, count}` |

@@ -17,6 +17,7 @@ The commit skill already lists README freshness (root phases, `crates/*/README.m
 | A contract other code relies on (attach hooks, per-pane state, restore paths, companion routing) | the owning guide under `docs/content/docs/agents/` (`rust`, `gdscript`, `inspector-reasoning-omp`, `concept-capture`, `plugins`) |
 | A gate, command, or trap | `docs/content/docs/agents/testing.md` (what a pass means) or `pitfalls.md` (traps) - one owner, never a second copy |
 | User-visible behavior | the wiki pages under `docs/content/wiki/**` that describe it, then the bundle step below |
+| A demo clip or a README asset | regenerate it - `./scripts/record-demo <scenario>`, which needs a graphical session (x11grab), a built `target/debug/gpty` and Godot - and commit the `gif`/`mp4`/`webm` together with the script change; a rewritten script with old binaries is the half-commit this row exists for |
 | A closed or narrowed roadmap row | row flipped in place with evidence/tests/measured numbers; every new defect queued as its own row |
 | A count repeated in prose (autoloads, pane types, crates) | every place the number appears - `grep` the number, not just the sentence you remember |
 

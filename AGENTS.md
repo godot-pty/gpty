@@ -230,7 +230,7 @@ media pane → GptyMedia.open(JSON) → gpty-media MediaSession worker thread (p
 
 ## MCP Integration
 
-gPTY ships an MCP server (`gpty mcp`) that exposes 22 tools for AI agent integration.
+gPTY ships an MCP server (`gpty mcp`) that exposes 23 tools for AI agent integration.
 AI agents and coding harnesses can discover these via the `mcp.json` that's at the root of the repository.
 
 ```json

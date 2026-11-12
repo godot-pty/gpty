@@ -171,6 +171,7 @@ See `crates/gpty-gdext/src/omp_events.rs` and
 | `inject` | `pane_id`, `text` | `{success: true}` |
 | `paneRead` | `pane_id`, `lines?` (1–2000) | `{text}` |
 | `paneStatus` | `pane_id?` | The status document (`{pid, running, exit_code, exit_reason, idle_ms, foreground_job, child_alive, agent_state, agent_state_tier}` - `exit_reason` is `exited`, `task_ended`, or `null` while running; `child_alive` stays true for a pane whose task ended without reaping its child, which `running: false` alone would hide). With no `pane_id`, the aggregate `{panes: [{pane_id, label, type, status}]}` for every tile, non-terminals carrying `status: null` |
+| `paneView` | `pane_id`, `graph?`, `note?`, `mode?` | `{success, pane_id, label, type, graph, note, view_mode}` - changes what a wiki pane shows without activating it. `note`, then `mode`, then `graph`; the answer reads the pane back rather than echoing the request, so `graph: true` is the canvas that is up |
 | `paneRun` | `command` | `{pane_id, label, type}` (exit code via `paneStatus`) |
 | `paneWait` | `pane_id`, `pattern`, `timeout_ms?` (100–60000) | `{matched, line?}` / `{matched: false, timed_out}` - response held server-side until match or deadline |
 | `broadcast` | `tags`, `text` | `{success, count}` |
