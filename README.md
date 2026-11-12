@@ -10,7 +10,11 @@
 
 </div>
 
-[gPTY](https://gpty.dev/) - a desktop workspace built on Rust and Godot. It provides a tiling grid for panes (terminals, code viewers, file trees, wikis, media, and more), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI. Every pane can be driven from a shell, a script, or an agent over one public API. It is a side project in active development and a vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using various LLMs under human review; and as such, the underlying code may contain unidiomatic patterns and/or bugs. It *does not* follow the core UNIX philosophy very well, as in, it does aim to do several things; though it does also intend to do them all well.
+[gPTY](https://gpty.dev/) - a desktop workspace built on Rust and Godot. It provides a tiling grid for panes (terminals, code viewers, file trees, wikis, media, and more), a concept capture engine, and a JSON-RPC/MCP control surface so AI agents and automation tools can spawn panes, inject text, and observe output on terminals without scraping a TUI. Every pane can be driven from a shell, a script, or an agent over one public API.
+
+It is a side project in active development and a vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using various LLMs under human review; and as such, the underlying code may contain unidiomatic patterns and/or bugs. It *does not* follow the core UNIX philosophy very well, as in, it does aim to do several things; though it does also intend to do them all well.
+
+The chosen stack also brings with it more costs, much more than terminal emulators. A TUI can just draw into cells the terminal already owns, while gPTY runs a Godot renderer - an idle window can hold around 650 MB of resident memory, all of it owned by the renderer (multiple panes/terminals themselves are cheap in the GUI's own memory ([RSS](https://en.wikipedia.org/wiki/Resident_set_size)), under 1 MB each, but each one runs a shell in its own process at about 6 MB, up to the 96-pane ceiling). A first Forward+ launch (the implicit default, since `project.godot` names no renderer) holds about 1 GB because the graphics driver compiles its pipelines into that process; about 430 MB of it stays resident for the run, and later launches drop the number back to ~650 MB. Another drawback of a game engine is that it draws a frame every frame whether or not anything changed, whereas a terminal emulator composites only when its cells change (output, a blinking cursor, a resize). A GPU window that repaints even while idle draws power that a standard PTY simply would not. Memory usage and power draw remain areas that the project aims to continually refine and reduce, rather than have them be fixed prices to pay. Refer to the [Trade-offs](#trade-offs) section for up-to-date statistics.
 
 ![A script drives gPTY: a concept routes cat into a viewer pane, pane-run opens a build pane, pane-wait blocks on its output, and cli_view streams git log](docs/static/images/demo-showcase.gif)
 
@@ -99,6 +103,24 @@
 | Grid rendering | `alacritty_terminal` | Full DEC STD 070 grid state machine; pass arrays to Godot `_draw()` |
 | Godot bridge | `gdext 0.5` | Native GDExtension for Godot 4.7+ |
 | Rust edition | 2024 | Requires Rust >= 1.85 |
+
+### Trade-offs
+
+Hosting a terminal inside a game engine is expensive, in terms of RAM & power usage. The following are measured on the shipped v0.8.1 Linux build (captured on CachyOS with Godot 4.7.2, Vulkan 1.4, `VmRSS` from `/proc` in a private sandbox):
+
+| Configuration | Resident Memory |
+|---|---|
+| One pane, idle (Forward+, the default) | 647 MB |
+| Zero panes, renderer still up | 655 MB - the cost is the renderer, not the terminals |
+| First launch, cold pipeline cache | 1076 MB, back to ~650 MB on every later run |
+| Same build, `--rendering-driver opengl3`, warm | 290 MB |
+| 30,000 lines through one pane, past the 10,000-row scrollback cap | +39 MB, then flat |
+
+The above is Electron-level memory for what a TUI does inside a terminal window, and power follows from it: the window is GPU-composited and repaints while idle, so an idle gPTY is not "free" the way an idle shell (basically) is. Both of these issues are acknowledged, and are treated as debts with a plan, rather than leaving them as a permanent tax.
+
+- **The renderer is the lever.** Compatibility (OpenGL3) is 2.2x lighter than Forward+ on the same build; the per-platform choice is an open item in the [v0.8 roadmap](docs/content/docs/roadmap/v0.8.md), and will be decided by running both through `scripts/ui-capture` (both themes, the visual-effect shaders, an 8-pane layout) rather than by preference.
+- **Repaint is already bounded.** The `max_fps` setting and the terminal flood back-off limit how often a pane redraws; what is missing is an idle-frame measurement to hold it to.
+- **Cost becomes a number in v0.9.** The [v0.9.0 instrumentation release](docs/content/docs/roadmap/v0.9.md) adds an in-app frame-time, CPU, memory and power readout (read from the OS, "unavailable" where the OS exposes nothing) and a gated performance budget, so later reductions are measured instead of claimed.
 
 ---
 
