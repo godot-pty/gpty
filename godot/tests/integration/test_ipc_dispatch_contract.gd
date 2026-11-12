@@ -20,6 +20,10 @@ var _ws: Control
 ## `{id, ok, payload}`. A deferred answer has no socket behind it in a GUT run
 ## (`respond_ipc` writes to the Rust queue), so this is how one is observed.
 var _sent: Array = []
+## The vault the `paneView` tests read, made once and removed in `after_all`
+## (a leaked recovery copy is keyed by vault path and would ask its question
+## in a later run).
+var _vault := ""
 
 func _collect_answer(id: int, ok: bool, payload: String) -> void:
 	_sent.append({"id": id, "ok": ok, "payload": payload})
@@ -47,6 +51,12 @@ func after_all():
 	remove_child(_ws)
 	_ws.free()
 	_ws = null
+	if _vault != "":
+		for rel in ["index.md", "note.md"]:
+			GptyTerminal.vault_scratch_clear(_vault, rel)
+			DirAccess.remove_absolute(_vault.path_join(rel))
+		DirAccess.remove_absolute(_vault)
+		_vault = ""
 	ConceptManager.plugin_concepts_source = Callable()
 	ConceptManager._plugin_concept_entries = []
 	MockAutoloads.teardown()
@@ -881,6 +891,79 @@ func _find_concept(concepts: Array, name: String) -> Dictionary:
 			return c
 	return {}
 
+# ── paneView: the pane's view surface over IPC ─────────────────────────
+
+## A vault with one wikilink: the graph needs an edge to be a graph, and the
+## pane needs a real directory (an unset vault refuses every view with its own
+## reason, which is a different arm).
+func _view_vault() -> String:
+	if _vault != "":
+		return _vault
+	_vault = TestPaths.user_path("ipc_contract_vault_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(_vault)
+	_write_note("index.md", "# Index\n\n[[note]]\n")
+	_write_note("note.md", "# Note\n\nbody\n")
+	return _vault
+
+func _write_note(rel: String, text: String) -> void:
+	var file := FileAccess.open(_vault.path_join(rel), FileAccess.WRITE)
+	assert_not_null(file, "a test note must be writable")
+	file.store_string(text)
+	file.close()
+
+func _wiki_pane() -> Control:
+	var body = _ws._spawn_pane("wiki", {"vault_path": _view_vault()})
+	assert_not_null(body, "a wiki pane must spawn on a real vault")
+	return body
+
+## The three gestures one path serves, applied in the order `apply_view`
+## documents: note, mode, graph - so a call naming both a note and the graph
+## selects the note the graph's Back returns to.
+func test_pane_view_opens_the_graph_then_a_note():
+	var wiki := _wiki_pane()
+	var id := str(wiki.attachment_id)
+
+	var graph = WorkspaceIpcHandlers.handle(_ws, "paneView", {"pane_id": id, "graph": true})
+	assert_true(graph.get("success", false), "the link graph must open: %s" % graph)
+	assert_true(bool(graph.get("graph", false)), "the answer must report the canvas that is up")
+	assert_true(wiki._graph_view.visible, "the pane must be showing the graph")
+	assert_eq(str(graph.get("view_mode", "")), "split", "the answer reports the drawn mode")
+
+	var note = WorkspaceIpcHandlers.handle(
+		_ws, "paneView", {"pane_id": id, "note": "note.md", "mode": "preview"})
+	assert_true(note.get("success", false), "a note must open: %s" % note)
+	assert_false(wiki._graph_view.visible, "opening a note leaves the graph")
+	assert_eq(str(note.get("note", "")), "note.md", "the answer names the note that opened")
+	assert_eq(str(note.get("view_mode", "")), "preview")
+	assert_eq(wiki.view_mode, "preview", "the pane holds the mode the answer names")
+	_ws._kill_now(wiki)
+
+## The guard `killPane` and `layoutLoad` already apply: a caller cannot answer
+## the save/discard question, so the swap is refused rather than asked - and a
+## refused swap leaves the open note exactly where it was.
+func test_pane_view_refuses_to_replace_an_unsaved_note():
+	var wiki := _wiki_pane()
+	var id := str(wiki.attachment_id)
+	var opened = WorkspaceIpcHandlers.handle(_ws, "paneView", {"pane_id": id, "note": "note.md"})
+	assert_true(opened.get("success", false), "the first note must open")
+
+	wiki._editor.text = str(wiki._editor.text) + "\nmore\n"
+	await get_tree().process_frame
+	assert_true(wiki.has_unsaved_state(), "typing must mark the note dirty")
+
+	var refused = WorkspaceIpcHandlers.handle(_ws, "paneView", {"pane_id": id, "note": "index.md"})
+	assert_true(refused.has("error"), "an unsaved buffer must refuse the swap")
+	assert_eq(int(refused["error"]["code"]), -32000, "app state, not a bad parameter")
+	assert_string_contains(str(refused["error"]["message"]), "unsaved changes")
+	assert_eq(wiki._current_rel, "note.md", "the refused swap must not change the open note")
+
+	# Leave it clean: a dirty buffer would keep a recovery copy and a close
+	# question alive past this test.
+	wiki._editor.text = wiki._saved_text
+	await get_tree().process_frame
+	assert_false(wiki.has_unsaved_state(), "reverting must clear the dirty state")
+	_ws._kill_now(wiki)
+
 # ── Refusal codes: a bad parameter is -32602, app state is -32000 ───────
 #
 # The pane API's refusals were split by whichever code the arm happened to
@@ -921,6 +1004,10 @@ func test_every_refusal_arm_answers_the_code_its_kind_owns():
 		["paneWait", {"pane_id": "@terminal", "pattern": ""}, -32602, "Invalid wait pattern"],
 		["paneWait", {"pane_id": "@terminal", "pattern": long_text}, -32602, "Invalid wait pattern"],
 		["paneRead", {"pane_id": ""}, -32602, "Pane target required"],
+		["paneView", {"pane_id": "@viewer"}, -32602, "One of `graph`, `note` or `mode` is required"],
+		["paneView", {"pane_id": "@viewer", "graph": "yes"}, -32602, "`graph` must be a boolean"],
+		["paneView", {"pane_id": "@viewer", "note": "x".repeat(513)}, -32602, "`note` is too long"],
+		["paneView", {"pane_id": "@viewer", "mode": "bogus"}, -32602, "`mode` must be one of"],
 		["killPane", {}, -32602, "Pane target required"],
 		["inject", {"pane_id": "@terminal", "text": "x".repeat(65537)}, -32602, "exceeds 64 KiB"],
 		["broadcast", {}, -32602, "Invalid broadcast request"],
@@ -939,6 +1026,8 @@ func test_every_refusal_arm_answers_the_code_its_kind_owns():
 		["paneWait", {"pane_id": "@viewer", "pattern": "x"}, -32000, "is not a terminal"],
 		["inject", {"pane_id": "@viewer", "text": "x"}, -32000, "is not a terminal"],
 		["focusPane", {"pane_id": "nosuchpane"}, -32000, "not found"],
+		["paneView", {"pane_id": "nosuchpane", "graph": true}, -32000, "not found"],
+		["paneView", {"pane_id": "@viewer", "graph": true}, -32000, "wiki panes"],
 		["killPane", {"pane_id": "nosuchpane"}, -32000, "not found"],
 		["layoutLoad", {"name": "gpty-no-such-profile"}, -32000, "not found"],
 	]

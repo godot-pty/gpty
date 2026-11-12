@@ -22,6 +22,7 @@ You are running inside one pane of a gPTY terminal workspace. Use the `gpty` CLI
 | `kill-pane` | `gpty kill-pane <pane>` |
 | `focus-pane` | `gpty focus-pane <pane>` |
 | `inject` | `gpty inject <pane> --text "..."` |
+| `pane-view` | `gpty pane-view <pane> --graph` (or `--note <path>`, `--mode edit\|split\|preview`) |
 | `layout-save` | `gpty layout save <name>` |
 | `layout-load` | `gpty layout load <name>` |
 | `layout-list` | `gpty layout list` |

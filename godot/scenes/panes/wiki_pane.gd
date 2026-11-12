@@ -605,14 +605,24 @@ func _on_note_activated(index: int) -> void:
 ## 1-based source line a backlink row names; one of them is where the view
 ## lands instead of the top. Both are navigation only — the note that opened
 ## is the resolved path, never anything the fragment says.
-func _open_note(rel: String, fragment := "", line := 0) -> void:
+##
+## `take_focus` is what a click means and a caller over the control socket does
+## not: the note becomes the keyboard's surface, and a pending recovery copy
+## asks its question. A script gets neither — taking the keyboard would fight
+## whoever is typing, and the question would open in a workspace the user may
+## not be looking at, so the offer waits for a real visit.
+##
+## Returns whether the note was opened, so a caller that cannot see the screen
+## does not report success for a note that is not there; the toast has already
+## said why on the failure path.
+func _open_note(rel: String, fragment := "", line := 0, take_focus := true) -> bool:
 	var answer = JSON.parse_string(str(GptyTerminal.vault_note_read(_vault_root, rel)))
 	if not (answer is Dictionary) or answer.has("error"):
 		# The path came from a just-completed walk or search; a failure here
 		# means the note moved or was replaced between the two.
 		var why := str(answer["error"]) if answer is Dictionary and answer.has("error") else "unreadable"
 		ToastManager.warn("Could not open note: " + why, 4.0, "Wiki")
-		return
+		return false
 	_current_rel = rel
 	# The editor works in LF; `_payload` puts the CRLFs back on save. The text
 	# "dirty" is measured against has to be in that same space, or every CRLF
@@ -662,12 +672,14 @@ func _open_note(rel: String, fragment := "", line := 0) -> void:
 	# note past the cap is read-only, and Back (the only action left for it)
 	# takes the keyboard instead. Before `_offer_scratch`, whose question owns
 	# the keyboard itself.
-	if _editor.editable:
-		_editor.grab_focus()
-	else:
-		_back.grab_focus()
-	# Last, so the note is on screen when the question appears.
-	_offer_scratch(rel)
+	if take_focus:
+		if _editor.editable:
+			_editor.grab_focus()
+		else:
+			_back.grab_focus()
+		# Last, so the note is on screen when the question appears.
+		_offer_scratch(rel)
+	return true
 
 # ── The link graph: the vault's structure, generated on demand ──────────
 
@@ -712,6 +724,56 @@ func _show_graph() -> void:
 	_back.visible = true
 	_graph_view.visible = true
 	_graph_view.show_graph(graph, _current_rel)
+
+## The pane's `pane-view` surface: the same three things the pane chrome does,
+## for a caller that cannot click - open the link graph (the Graph button),
+## open a note (a list click), change the note view mode (the mode buttons).
+##
+## `request` carries only what the IPC edge already validated: `graph` (bool),
+## `note` (vault-relative path) and `mode` (one of `VIEW_MODES`), and a missing
+## key means "leave it alone", which is what lets one path serve three
+## gestures. Returns "" when the request landed, or the reason it did not, so
+## the caller learns the outcome instead of a blanket ack.
+##
+## Order is note, mode, graph: a note must be chosen before its mode matters,
+## and the graph comes last because opening a note clears it - `--note a.md
+## --graph` therefore selects what the graph's Back returns to.
+func apply_view(request: Dictionary) -> String:
+	var note := str(request.get("note", ""))
+	if note != "":
+		var problem := _vault_problem()
+		if problem != "":
+			return problem
+		# The list's click path assumes the buffer is not dirty (Back asks
+		# first, and a click only happens from a list Back reached); a caller
+		# cannot answer that ask, so the exchange is refused instead.
+		if _is_dirty():
+			return "Pane has unsaved changes to %s; save or discard them in the pane, then retry" % _current_rel
+		if not _open_note(note, "", 0, false):
+			return "Note '%s' is not in this vault" % _shown_path(note)
+	var mode := str(request.get("mode", ""))
+	if mode != "" and mode != view_mode:
+		view_mode = mode
+		_apply_view_mode()
+	if bool(request.get("graph", false)):
+		var graph_problem := _vault_problem()
+		if graph_problem != "":
+			return graph_problem
+		_show_graph()
+		# The graph is shown synchronously or the pane has put the reason on
+		# its placeholder instead; either way the canvas is the truth.
+		if _graph_view == null or not _graph_view.visible:
+			return "The link graph could not be built for this vault"
+	return ""
+
+## What the pane is showing, read back after a request rather than echoed, so
+## an answer that says `graph: true` is the canvas that is actually up.
+func view_document() -> Dictionary:
+	return {
+		"graph": _graph_view != null and _graph_view.visible,
+		"note": _current_rel,
+		"view_mode": view_mode,
+	}
 
 ## A node opens its note, behind the same ask a Back makes: the click can
 ## replace a buffer that is still unsaved, so the graph cannot open over it.

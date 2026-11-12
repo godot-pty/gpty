@@ -362,6 +362,66 @@ static func handle(ws, method: String, params: Dictionary):
 			if not (ps_status is Dictionary):
 				return refused("Pane '%s' has no status primitives" % ps_target)
 			return ps_status
+		"paneView":
+			# Display-only: the only pane verb that changes what a pane shows
+			# without taking the keyboard, because it never calls
+			# `activate_pane`. A script can open the graph while a person types
+			# in another pane.
+			#
+			# Values are checked here rather than trusted from the caller: clap
+			# validates the CLI's `--mode` and `wire.rs` validates the MCP
+			# tool's JSON types, and neither is the only door to the socket.
+			# Params are validated before the pane-type check so a malformed
+			# request is -32602 whatever pane it names.
+			var pv_target := str(params.get("pane_id", ""))
+			var pv_found: Dictionary = ws._resolve_pane_target(pv_target)
+			if pv_found.has("error"):
+				return target_refusal(pv_found)
+			var pv_body: Control = pv_found["body"]
+			var pv_request := {}
+			# `get(…, null)` rather than `has(…)`: an absent key and a JSON
+			# null both mean "leave it alone", which is what makes one verb
+			# serve three gestures without a fourth "did you mean it" flag.
+			var pv_graph = params.get("graph", null)
+			if pv_graph != null:
+				if typeof(pv_graph) != TYPE_BOOL:
+					return bad_param("`graph` must be a boolean")
+				pv_request["graph"] = pv_graph
+			var pv_note = params.get("note", null)
+			if pv_note != null:
+				if not (pv_note is String):
+					return bad_param("`note` must be a string")
+				if pv_note.length() > WikiPane.MAX_RESTORE_NOTE:
+					return bad_param(
+						"`note` is too long (max %d characters)" % WikiPane.MAX_RESTORE_NOTE)
+				if pv_note.contains("\uFFFD"):
+					return bad_param("Invalid note path")
+				pv_request["note"] = pv_note
+			var pv_mode = params.get("mode", null)
+			if pv_mode != null:
+				if not (pv_mode is String) or not (pv_mode in WikiPane.VIEW_MODES):
+					return bad_param(
+						"`mode` must be one of: %s" % ", ".join(PackedStringArray(WikiPane.VIEW_MODES)))
+				pv_request["mode"] = pv_mode
+			if pv_request.is_empty():
+				return bad_param("One of `graph`, `note` or `mode` is required")
+			if not (pv_body is WikiPane):
+				return refused(
+					"Pane '%s' is a %s pane; pane-view options exist for wiki panes"
+					% [pv_target, pv_body._pane_type()])
+			var pv_error: String = pv_body.apply_view(pv_request)
+			if pv_error != "":
+				return refused(pv_error)
+			var pv_view: Dictionary = pv_body.view_document()
+			return {
+				"success": true,
+				"pane_id": pv_body.attachment_id,
+				"label": pv_body.pane_label,
+				"type": "wiki",
+				"graph": bool(pv_view["graph"]),
+				"note": str(pv_view["note"]),
+				"view_mode": str(pv_view["view_mode"]),
+			}
 		"paneRun":
 			var run_cmd := str(params.get("command", "")).strip_edges()
 			if run_cmd == "":

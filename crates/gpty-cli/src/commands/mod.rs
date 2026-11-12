@@ -13,6 +13,7 @@ pub(crate) mod new_pane;
 pub(crate) mod pane_read;
 pub(crate) mod pane_run;
 pub(crate) mod pane_status;
+pub(crate) mod pane_view;
 pub(crate) mod pane_wait;
 pub mod plugin;
 pub mod schema;
@@ -56,6 +57,22 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
         }
         Commands::PaneStatus { pane_id } => {
             pane_status::run(client, pane_id.as_deref(), json).await
+        }
+        Commands::PaneView {
+            pane_id,
+            graph,
+            note,
+            mode,
+        } => {
+            pane_view::run(
+                client,
+                pane_id,
+                *graph,
+                note.as_deref(),
+                mode.as_deref(),
+                json,
+            )
+            .await
         }
         Commands::PaneRun { command } => pane_run::run(client, command, json).await,
         Commands::PaneWait {

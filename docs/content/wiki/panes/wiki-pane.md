@@ -58,6 +58,12 @@ In the preview, `[[wikilinks]]` render as internal links and are followed in pla
 | Vault path | absolute directory to index and edit |
 | Note view | `Edit`, `Split` or `Preview` |
 
+## From the CLI and MCP
+
+The pane's three view gestures are one verb, so a script can drive what a person clicks: `gpty pane-view <pane> --graph` opens the link graph, `--note <path>` opens a note by vault-relative path, and `--mode edit|split|preview` sets the note view. They apply in that order - note, mode, graph - which is why `--note index.md --graph` selects the note the graph's Back returns to.
+
+The call is display-only. It does not activate the pane and does not take the keyboard, so an agent can open a graph while someone types in another pane, and the answer is what the pane is showing afterwards (`graph`, `note`, `view_mode`), read back rather than echoed: `--graph` fails instead of reporting success if the canvas did not come up. It refuses rather than asks when the open note has unsaved changes, when the pane has no vault, and when the graph cannot be built - the same rule `layout load` applies to a profile and `kill-pane` to a pane, because a caller cannot answer the save/discard question.
+
 ## What it does not do
 
 It does not index anything but `.md` files, and it does not show hidden files. It does not write outside the vault, and it does not store note content in the database: the index is derived and can be rebuilt. It does not treat front matter as metadata — a `---` block is text. It does not auto-save, auto-reload an outside edit, or silently apply a recovery copy.

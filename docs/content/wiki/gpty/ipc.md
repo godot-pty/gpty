@@ -78,6 +78,7 @@ The fallbacks cover sessions with no runtime directory (a cron job, a stripped l
 | `inject` | Write text to a terminal pane's PTY input, verbatim |
 | `paneRead` | Plain text of a pane's screen plus scrollback (`lines` 1–2000) |
 | `paneStatus` | Status document for one pane, or every pane when no id is given |
+| `paneView` | Change what a pane shows without activating it: `graph` (a wiki pane's link graph), `note` (a vault-relative path), `mode` (`edit`/`split`/`preview`), in that order; the answer reads the pane back (`graph`, `note`, `view_mode`) |
 | `paneRun` | Run a command in a **new** terminal pane through the configured shell |
 | `paneWait` | Hold the response until recent output matches a Rust regex (100–60000 ms) |
 | `broadcast` | Inject text into every pane carrying one of the given tags |

@@ -26,6 +26,7 @@ The second point matters for automation: a typo in a pane type fails immediately
 | `inject` | Send text to a terminal pane by id |
 | `pane-read` | Screen plus scrollback text (`--lines` 1–2000) |
 | `pane-status` | Status of one pane, or of every pane when no id is given |
+| `pane-view` | Change what a pane shows, without activating it: `--graph` (a wiki pane's link graph), `--note <path>` (a vault-relative note), `--mode edit\|split\|preview`. Applied in the order note, mode, graph; one of the three is required |
 | `pane-run` | Run a command in a new terminal pane (`--command`) |
 | `pane-wait` | Wait for output matching a regex (`--pattern`, `--timeout-ms` 100–60000) |
 | `state` | Declare the current pane's agent state (`idle`, `working`, `needs-attention`, `completed`, `failed`) |

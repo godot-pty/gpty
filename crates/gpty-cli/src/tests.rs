@@ -232,6 +232,70 @@ async fn inject_roundtrip() {
 }
 
 #[tokio::test]
+async fn pane_view_roundtrip_carries_only_the_views_it_was_given() {
+    let seen: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+    let seen_h = Arc::clone(&seen);
+    let (_tmp, socket) = start_server(
+        "pane_view",
+        vec![("paneView", {
+            move |params: Value| {
+                *seen_h.lock().unwrap() = Some(params.clone());
+                serde_json::json!({
+                    "success": true, "pane_id": "W1", "label": "notes",
+                    "type": "wiki", "graph": true, "note": "a.md", "view_mode": "split",
+                })
+            }
+        })],
+    )
+    .await;
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+    commands::pane_view::run(&client, "W1", true, Some("a.md"), Some("split"), false)
+        .await
+        .expect("pane-view should succeed");
+
+    let params = seen
+        .lock()
+        .unwrap()
+        .take()
+        .expect("server handler should have been called");
+    assert_eq!(params["pane_id"], "W1");
+    assert_eq!(params["graph"], true);
+    assert_eq!(params["note"], "a.md");
+    assert_eq!(params["mode"], "split");
+}
+
+#[tokio::test]
+async fn pane_view_without_a_view_never_reaches_the_socket() {
+    let calls: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
+    let calls_h = Arc::clone(&calls);
+    let (_tmp, socket) = start_server(
+        "pane_view_empty",
+        vec![("paneView", {
+            move |_params: Value| {
+                *calls_h.lock().unwrap() += 1;
+                serde_json::json!({"success": true})
+            }
+        })],
+    )
+    .await;
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+    let err = commands::pane_view::run(&client, "W1", false, None, None, false)
+        .await
+        .expect_err("a pane-view with no view must fail client-side");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("--graph, --note or --mode"),
+        "the refusal must name the options: {msg}"
+    );
+    assert_eq!(
+        *calls.lock().unwrap(),
+        0,
+        "a no-op view must not be a round-trip that answers success"
+    );
+}
+
+#[tokio::test]
 async fn invalid_pane_type_never_reaches_server() {
     let calls: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
     let calls_h = Arc::clone(&calls);

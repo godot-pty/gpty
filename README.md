@@ -187,6 +187,11 @@ gpty pane-read T1 --lines 200
 gpty pane-run --command "cargo test"
 gpty pane-wait T1 --pattern "tests passed" --timeout-ms 30000
 
+# Change what a pane shows without taking the keyboard: a wiki pane's link
+# graph, a note by vault-relative path, or the note view mode
+gpty pane-view W1 --graph
+gpty pane-view W1 --note index.md --mode split
+
 # Search and read a wiki vault
 gpty vault search <vault> <pattern>
 gpty vault read <vault> <path>
@@ -226,7 +231,7 @@ gpty ships an MCP (Model Context Protocol) server so AI agents and coding harnes
 {"mcpServers": {"gpty": {"command": "gpty", "args": ["mcp"]}}}
 ```
 
-- **Direct**: run `gpty mcp` over stdio - exposes a tool per CLI subcommand (`new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `pane-read`, `pane-status`, `pane-run`, `pane-wait`, `broadcast`, `vault-search`, `vault-read`, `vault-weight`, `layout-*`, `daemon-*`, `concept-*`, `version`).
+- **Direct**: run `gpty mcp` over stdio - exposes a tool per CLI subcommand (`new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `pane-read`, `pane-status`, `pane-view`, `pane-run`, `pane-wait`, `broadcast`, `vault-search`, `vault-read`, `vault-weight`, `layout-*`, `daemon-*`, `concept-*`, `version`).
 - **Manifest**: `gpty schema --format mcp` prints the MCP tool manifest (JSON Schema, works without a running GUI) for hand-off to agent configurations.
 
 Tool schemas are generated from the same clap definitions as the CLI (`crates/gpty-cli/src/commands/schema.rs`), so they cannot drift from `gpty --help`.

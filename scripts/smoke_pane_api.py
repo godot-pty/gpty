@@ -2,7 +2,7 @@
 """Live pane-API smoke: boots the GUI headless and drives the JSON-RPC CLI
 end-to-end (new-pane -> status (one pane, then every pane) -> inject ->
 wait -> read -> scrollback -> broadcast -> pane-run exit code -> concept
-from output -> cli_view stdout -> wiki pane -> media pane -> vault search/read/weight ->
+from output -> cli_view stdout -> wiki pane -> pane-view -> media pane -> vault search/read/weight ->
 plugin-provided profile -> kill), plus a Linux-only process-hardening check
 (a pane must not read the GUI's or a CLI client's environment) and
 subscribe/eventsPoll on the event listener.
@@ -1804,6 +1804,31 @@ def main() -> int:
         smoke.require(bool(wiki_id), "new-pane must return a wiki pane_id", wiki)
         smoke.require(wiki.get("type") == "wiki", "the pane must report the wiki type", wiki)
         smoke.cli("kill-pane", wiki_id, "--json")
+
+        # ── pane-view: the pane's view surface over the socket ────────
+        # One verb for what a person clicks. The mode arm needs no vault and
+        # pins params -> registry -> handler -> the pane read-back; the graph
+        # arm on the same vault-less pane is the refusal half (it answers an
+        # app-state error, not a crash). Display-only, so it stays headless.
+        smoke.enter("pane-view")
+        view = smoke.result(smoke.cli("new-pane", "-t", "wiki", "--json"), "new-pane (view)")
+        view_id = view.get("pane_id")
+        smoke.require(bool(view_id), "new-pane must return a wiki pane_id", view)
+        viewed = smoke.result(
+            smoke.cli("pane-view", view_id, "--mode", "preview", "--json"), "pane-view"
+        )
+        smoke.require(
+            viewed.get("view_mode") == "preview",
+            "pane-view must report the mode the pane now shows",
+            viewed,
+        )
+        graphless = smoke.cli("pane-view", view_id, "--graph", "--json", check=False)
+        smoke.require(
+            isinstance(graphless.get("error"), dict),
+            "a pane with no vault must refuse the link graph",
+            graphless,
+        )
+        smoke.cli("kill-pane", view_id, "--json")
 
         # ── media: a file-backed pane type ───────────────────────────
         # Playback is GUI-side and its formats are a closed local table, so

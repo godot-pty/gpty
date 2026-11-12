@@ -169,6 +169,24 @@ enum Commands {
         lines: i64,
     },
 
+    /// Change what a pane shows: the wiki link graph, a note, or the view mode
+    PaneView {
+        /// Target pane ID, or a label unique across workspaces
+        pane_id: String,
+
+        /// Show the vault's link graph (wiki panes)
+        #[arg(long)]
+        graph: bool,
+
+        /// Open a note by vault-relative path (wiki panes)
+        #[arg(long)]
+        note: Option<String>,
+
+        /// Note view mode: edit, split, or preview (wiki panes)
+        #[arg(long, value_parser = ["edit", "split", "preview"])]
+        mode: Option<String>,
+    },
+
     /// Pane status; omit the pane for every pane's status
     PaneStatus {
         /// Target pane ID, or a label unique across workspaces (omit for all panes)
@@ -378,6 +396,7 @@ fn may_autospawn(cmd: &Commands) -> bool {
         | Commands::Concept { .. }
         | Commands::Plugin { .. }
         | Commands::PaneRead { .. }
+        | Commands::PaneView { .. }
         | Commands::PaneStatus { .. }
         | Commands::State { .. }
         | Commands::PaneRun { .. }

@@ -115,6 +115,7 @@ gpty version
 | `inject` | Send text to a terminal pane by id |
 | `pane-read` | Read a pane's plain-text output (screen + scrollback, `--lines` 1–2000) |
 | `pane-status` | Status primitives for a pane (`pid`, `running`, `exit_code`, `exit_reason`, `idle_ms`); no argument answers `{panes: [{pane_id, label, type, status}]}` for every pane, with `status: null` for panes that have no status primitives (non-terminals) |
+| `pane-view` | Change what a pane shows, without activating it: `--graph` opens a wiki pane's link graph, `--note <path>` opens a vault-relative note, `--mode edit\|split\|preview` sets the note view. The three combine in the order note, mode, graph, so `--note index.md --graph` selects the note the graph's Back returns to. Display-only and focus-free (a script can drive a workspace a person is typing in); one of the three is required, and a refusal (no vault, an unsaved buffer) answers instead of opening a dialog a caller cannot answer |
 | `pane-run` | Run a command in a new terminal pane (`--command`) |
 | `pane-wait` | Wait for a pane's output to match a regex (`--pattern`, `--timeout-ms` 100–60000) |
 | `state` | Declare the state of the pane the command runs in (`idle`, `working`, `needs-attention`, `completed`, `failed`). Needs the credentials a pane injects (`GPTY_EVENT_*`), submits over the event socket, and is not an MCP tool |

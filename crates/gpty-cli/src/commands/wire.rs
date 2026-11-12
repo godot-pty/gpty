@@ -353,6 +353,9 @@ mod tests {
             "kill-pane" | "focus-pane" | "pane-status" => json!({"pane_id": "p1"}),
             "inject" => json!({"pane_id": "p1", "text": "x"}),
             "pane-read" => json!({"pane_id": "p1", "lines": 20}),
+            "pane-view" => json!({
+                "pane_id": "p1", "graph": true, "note": "a.md", "mode": "split",
+            }),
             "pane-run" => json!({"command": "true"}),
             "pane-wait" => json!({"pane_id": "p1", "pattern": "x", "timeout_ms": 500}),
             "broadcast" => json!({"tags": ["agent"], "text": "x"}),
