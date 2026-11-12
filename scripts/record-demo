@@ -6,7 +6,7 @@
 # with the gpty CLI exactly the way an agent would, records the app window with
 # ffmpeg, then burns captions in and writes a GIF, an MP4 and a WebM.
 #
-# Usage: scripts/record-demo <showcase|panes|agents|concepts|wiki|media|cli-view> [out-dir]
+# Usage: scripts/record-demo <showcase|panes|agents|concepts|wiki|media|cli-view|profiles> [out-dir]
 #   out-dir defaults to docs/static/images; files are demo-<scenario>.{gif,mp4,webm}
 #
 # One scenario is one workflow, and every action in it is a `gpty` call a reader
@@ -31,7 +31,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-SCENARIO="${1:?usage: record-demo <showcase|panes|agents|concepts|wiki|media|cli-view> [out-dir]}"
+SCENARIO="${1:?usage: record-demo <showcase|panes|agents|concepts|wiki|media|cli-view|profiles> [out-dir]}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${2:-$ROOT/docs/static/images}"
 SIZE="${DEMO_SIZE:-1280x760}"
@@ -39,15 +39,24 @@ FPS="${DEMO_FPS:-15}"
 GIF_WIDTH="${GIF_WIDTH:-1000}"
 GIF_FPS="${GIF_FPS:-12}"
 case "$SCENARIO" in
-    showcase | panes | agents | concepts | wiki | media | cli-view) ;;
-    *) echo "scenario must be one of: showcase panes agents concepts wiki media cli-view" >&2; exit 2 ;;
+    showcase | panes | agents | concepts | wiki | media | cli-view | profiles) ;;
+    *) echo "scenario must be one of: showcase panes agents concepts wiki media cli-view profiles" >&2; exit 2 ;;
 esac
 # The README shows the showcase clip at full width; a feature clip rides inside
-# an expanded section, so it can be smaller and cheaper.
-if [[ "$SCENARIO" != showcase ]]; then
-    GIF_WIDTH="${GIF_WIDTH_OVERRIDE:-900}"
-    GIF_FPS="${GIF_FPS_OVERRIDE:-10}"
-fi
+# an expanded section, so it can be smaller and cheaper. `profiles` is the
+# exception: it shows the three-pane Agent Workspace, and a pane narrower than
+# a third of 900 px is a texture rather than information.
+case "$SCENARIO" in
+    showcase) ;;
+    profiles)
+        GIF_WIDTH="${GIF_WIDTH_OVERRIDE:-1200}"
+        GIF_FPS="${GIF_FPS_OVERRIDE:-10}"
+        ;;
+    *)
+        GIF_WIDTH="${GIF_WIDTH_OVERRIDE:-900}"
+        GIF_FPS="${GIF_FPS_OVERRIDE:-10}"
+        ;;
+esac
 
 for tool in ffmpeg python3 git; do
     command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 3; }
@@ -93,6 +102,9 @@ sed -i "s#__ROOT__#$ROOT#; s#__SOCK__#$GPTY_SOCKET#" "$HOME/.bashrc"
     echo "// sorted output" >>src/main.rs && git commit -q -am "sort the output"
     git commit -q --allow-empty -m "add CI workflow"
     git commit -q --allow-empty -m "release 0.1"
+    # Left uncommitted on purpose: the concept's `git diff` needs a change to
+    # route, and `git status` needs a file to name. No clip stages it.
+    echo "// demo change" >>src/main.rs
 )
 if [[ "$SCENARIO" == media ]]; then
     # `testsrc` (not testsrc2): static colour bars with one moving box and a
@@ -116,13 +128,24 @@ def tile(col, row, cspan, rspan, **settings):
 # only keys from that pane type's closed settings table (pane_types.gd).
 LAYOUTS = {
     "showcase": [
-        tile(0, 0, 32, 60, type="terminal", pane_name="agent", font_size=FONT),
-        tile(32, 0, 28, 60, type="code_viewer", pane_name="viewer", font_size=FONT),
+        tile(0, 0, 34, 60, type="terminal", pane_name="agent", font_size=FONT),
+        # The concept's receiver, already open on a file: an empty viewer's
+        # "Prelude" is the first thing a new window shows, and a hero should
+        # not open on it.
+        tile(34, 0, 26, 30, type="code_viewer", pane_name="viewer", font_size=FONT,
+             file_path=home + "/src/main.rs"),
+        # The shipped knowledge base, closed last with `pane-view --graph`:
+        # the pane that shows the graph without a click.
+        tile(34, 30, 26, 30, type="wiki", pane_name="knowledge", vault_path="@knowledge",
+             view_mode="preview", open_note="index.md", font_size=FONT),
     ],
     "panes": [
         tile(0, 0, 60, 60, type="terminal", pane_name="agent", font_size=FONT),
     ],
     "agents": [
+        tile(0, 0, 60, 60, type="terminal", pane_name="agent", font_size=FONT),
+    ],
+    "profiles": [
         tile(0, 0, 60, 60, type="terminal", pane_name="agent", font_size=FONT),
     ],
     "concepts": [
@@ -242,29 +265,29 @@ AGENT="$(label_of terminal)"
 
 case "$SCENARIO" in
 showcase)
-    caption "A tiling grid of real PTY panes"
-    sleep 2.5
-    caption "A concept captures a command's output into the adjacent pane"
-    type_line "cat src/main.rs"
-    sleep 5
-    type_line "clear"
-    sleep 0.8
-    caption "One control API: the CLI, JSON-RPC and MCP drive the same panes"
-    type_line "gpty pane-run --command 'for i in 1 2 3 4 5; do echo \"compiling step \$i\"; sleep 1; done; echo BUILD OK'"
-    sleep 2.5
-    BUILD="$(gpty list-panes --json | python3 -c '
-import json, sys
-d = json.load(sys.stdin); r = d.get("result", d)
-ps = r.get("panes", r) if isinstance(r, dict) else r
-print(next((p.get("label") or p.get("id") for p in ps if (p.get("type") or p.get("pane_type")) == "terminal" and (p.get("label") or p.get("id")) != sys.argv[1]), ""))' "$AGENT")"
-    caption "Wait on output instead of guessing, then read the pane status"
-    type_line "gpty pane-wait $BUILD --pattern 'BUILD OK' --timeout-ms 20000 && gpty pane-status $BUILD"
-    sleep 6
-    caption "Stream any command into its own pane"
-    type_line "gpty new-pane -t cli_view -c git --arg=-C --arg \"\$HOME\" --arg log --arg=--oneline --arg=-5 --title history"
+    # Six real gestures and no theatre: nothing here prints a string it then
+    # "waits for", and no JSON blob fills the frame. Every beat is one line,
+    # because the terminal is 34/60 wide and a wrapped command reads as noise.
+    caption "A tiling workspace, not a terminal"
+    sleep 2
+    caption "Panes are real PTYs"
+    type_line "python3 -m unittest -q"
+    sleep 3
+    caption "A concept routes output into the pane beside it"
+    type_line "cat <(git diff)"
+    sleep 4.5
+    caption "Any command can own a pane"
+    type_line "gpty new-pane -t cli_view -c git --arg=status --title status --split bottom"
+    sleep 4
+    caption "An agent declares its own state"
+    type_line "gpty state needs-attention"
+    sleep 3
+    KB="$(label_of wiki)"
+    caption "One call opens the shipped knowledge base's link graph"
+    type_line "gpty pane-view $KB --graph"
     sleep 4
     caption "gPTY - github.com/godot-pty/gpty"
-    sleep 2.5
+    sleep 2
     ;;
 panes)
     caption "One shell, and a grid that splits on demand"
@@ -342,6 +365,23 @@ media)
     caption "The terminal beside it keeps working"
     type_line "git log --oneline"
     sleep 3
+    caption "gPTY - github.com/godot-pty/gpty"
+    sleep 2
+    ;;
+profiles)
+    # Both profiles ship in the binary (`res://profiles.default.json`) and are
+    # program-free, so neither needs a running agent: the panes open on their
+    # own idle state and `layoutLoad` answers with the toast that names the
+    # profile. Recorded at 1200 px because the Agent Workspace is three panes.
+    caption "Agent Workspace: a terminal, an Inspector and a Reasoning pane"
+    type_line "gpty layout load 'Agent Workspace'"
+    sleep 4
+    # The load replaced the workspace, and the pane this script types into
+    # with it: resolve the new terminal before the next beat.
+    AGENT="$(label_of terminal)"
+    caption "Knowledge Base: the shipped wiki, opened from its profile"
+    type_line "gpty layout load 'Knowledge Base'"
+    sleep 4
     caption "gPTY - github.com/godot-pty/gpty"
     sleep 2
     ;;
