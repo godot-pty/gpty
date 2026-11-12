@@ -360,11 +360,11 @@ func _apply_window_mode(force := false):
 # ═══════════════════════════════════════════════════════════════════════
 
 ## The screen a first launch shows. It is one scrollable guide, not two labels:
-## the title, the live keycap demo, the primary action and every binding in
-## `ShortcutCatalog` (read from the registry on every show). The shortcut text
-## comes from `ShortcutManager.chord`, so it cannot drift from the binding it
-## names. `_apply_layout` shows it exactly when the active workspace has no
-## tiles.
+## the title, the live keycap demo (clickable, it starts the pane it shows) and
+## every binding in `ShortcutCatalog` (read from the registry on every show). The
+## shortcut text comes from `ShortcutManager.chord`, so it cannot drift from the
+## binding it names. `_apply_layout` shows it exactly when the active workspace
+## has no tiles.
 func _build_empty_state():
 	_empty_state = ScrollContainer.new()
 	_empty_state.name = "EmptyState"
@@ -390,8 +390,7 @@ func _build_empty_state():
 	_shortcut_guide = ShortcutGuide.new()
 	_shortcut_guide.name = "ShortcutGuide"
 	_shortcut_guide.configure(
-		"No panes",
-		"Every shortcut the window answers, in one place.",
+		"Getting Started",
 		func() -> Array:
 			return ShortcutCatalog.rows(func(action: String): return ShortcutManager.chord(action)),
 		func() -> Array:
@@ -405,13 +404,7 @@ func _build_empty_state():
 					"chord": chord,
 					"label": str(entry["label"]).trim_suffix(" pane"),
 				})
-			return out,
-		func() -> Dictionary:
-			return {
-				"label": "Open a Terminal",
-				"type": "terminal",
-				"chord": ShortcutManager.chord("app:new_terminal"),
-			})
+			return out)
 	_shortcut_guide.new_pane_requested.connect(func(type_name: String): _spawn_pane(type_name))
 	_empty_center.add_child(_shortcut_guide)
 
@@ -1508,8 +1501,11 @@ func _init_workspaces():
 	# No store and no legacy layout is a real state: a first run has no
 	# workspace and no pane, and the first pane the user creates makes the
 	# "Default" workspace. Only the legacy import synthesizes a workspace,
-	# because it is migrating a layout the user actually saved.
-	if wss.is_empty():
+	# because it is migrating a layout the user actually saved - and only a
+	# missing store migrates. An empty `wss` is also the saved "closed every
+	# workspace" state; importing there resurrected the old layout on every
+	# launch after a close-all.
+	if wss.is_empty() and not WorkspaceStore.has_store():
 		var legacy = WorkspaceStore.import_legacy_layout()
 		if not legacy.is_empty():
 			wss = [{"name": "Workspace 1", "layout": legacy}]

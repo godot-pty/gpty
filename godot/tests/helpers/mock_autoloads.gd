@@ -19,6 +19,13 @@ static func set_store(key: String, value):
 static func get_store(key: String):
 	return _store.get(key, {})
 
+## Drop a key so a test can model a store file that has never been written.
+static func remove_store(key: String):
+	_store.erase(key)
+
+static func has_store(key: String) -> bool:
+	return _store.has(key)
+
 # ── Setup / teardown ───────────────────────────────────────────────────
 
 static func setup():
@@ -36,10 +43,12 @@ static func setup():
 	_override_script("SavedCommandStore", _MockSavedCommandStore)
 	_override_script("VaultRegistry", _MockVaultRegistry)
 
-	# Integration fixtures start from the pre-change first run: one workspace
-	# with one terminal. A test of the empty first run replaces this with
-	# `set_store(WorkspaceStore.FILE, {"active": 0, "workspaces": []})`; the
-	# store's own unit tests clear it to test a missing file.
+	# Integration fixtures start from the pre-change shape: one workspace
+	# with one terminal. A test of the zero-workspace state replaces this with
+	# `set_store(WorkspaceStore.FILE, {"active": 0, "workspaces": []})`; a test
+	# of a true first run removes the key with `remove_store(WorkspaceStore.FILE)`
+	# so the legacy-layout migration is eligible. The store's own unit tests
+	# clear it to test a missing file.
 	_store[WorkspaceStore.FILE] = {
 		"active": 0,
 		"workspaces": [{
@@ -105,6 +114,8 @@ class _MockWorkspaceStore extends "res://scenes/autoloads/workspace_store.gd":
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):
 		MockAutoloads.set_store(path, data)
+	func has_store() -> bool:
+		return MockAutoloads.has_store(FILE)
 	func _on_init():
 		pass
 

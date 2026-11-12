@@ -27,10 +27,19 @@ func test_save_load_roundtrip():
 	assert_eq((wss[1].get("layout", []) as Array).size(), 1)
 
 func test_load_empty_when_no_file():
-	MockAutoloads.set_store(WorkspaceStore.FILE, {})
+	MockAutoloads.remove_store(WorkspaceStore.FILE)
 	var store = WorkspaceStore.load()
 	assert_eq(store.get("active"), 0)
 	assert_eq((store.get("workspaces", []) as Array).size(), 0)
+
+func test_has_store_distinguishes_missing_from_empty():
+	MockAutoloads.remove_store(WorkspaceStore.FILE)
+	assert_false(WorkspaceStore.has_store(), "no store file is a first run")
+
+	WorkspaceStore.save(0, [])
+	assert_true(WorkspaceStore.has_store(),
+		"a saved empty workspace set is a store, not a first run")
+	assert_eq((WorkspaceStore.load().get("workspaces", []) as Array).size(), 0)
 
 func test_saving_zero_workspaces_round_trips():
 	WorkspaceStore.save(0, [])

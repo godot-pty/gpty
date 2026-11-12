@@ -2,12 +2,12 @@ extends GutTest
 # ShortcutGuide — the empty workspace's shortcut surface. The card content comes
 # from the caller (the workspace passes `ShortcutCatalog` and the registry), so
 # what is asserted here is the surface's own contract: every row reaches a card,
-# the primary action emits its pane type, the one clock cycles and pins, and the
-# responsive width owns the column count. The real chords are pinned once in the
-# integration test, so nothing is copied into a second list here.
+# the clickable hero keycap emits its current pane type, the one clock cycles and
+# pins, and the responsive width owns the column count. The real chords are
+# pinned once in the integration test, so nothing is copied into a second list
+# here.
 
-const TITLE := "No panes"
-const SUBTITLE := "Every shortcut the window answers, in one place."
+const TITLE := "Getting Started"
 
 var _rows := [
 	{"group": "Workspace", "label": "Command palette", "chord": "Ctrl+Shift+P"},
@@ -16,17 +16,15 @@ var _rows := [
 ]
 var _steps := [
 	{"type": "terminal", "chord": "Ctrl+Shift+N", "label": "New Terminal"},
-	{"type": "file_tree", "chord": "Ctrl+Shift+T", "label": "New File Tree"},
+	{"type": "code_viewer", "chord": "Ctrl+Shift+D", "label": "New Code Viewer"},
 ]
-var _primary := {"label": "Open a Terminal", "type": "terminal", "chord": "Ctrl+Shift+N"}
 
-func _make(rows: Array, steps: Array, primary: Dictionary) -> ShortcutGuide:
+func _make(rows: Array, steps: Array) -> ShortcutGuide:
 	var guide := ShortcutGuide.new()
 	guide.theme = UiTheme.build()
-	guide.configure(TITLE, SUBTITLE,
+	guide.configure(TITLE,
 		func() -> Array: return rows,
-		func() -> Array: return steps,
-		func() -> Dictionary: return primary)
+		func() -> Array: return steps)
 	add_child_autofree(guide)
 	return guide
 
@@ -39,7 +37,7 @@ func _labels(guide: ShortcutGuide) -> Array:
 # ── Cards and action ───────────────────────────────────────────────────
 
 func test_the_atlas_lists_every_row_in_its_group():
-	var guide := _make(_rows, _steps, _primary)
+	var guide := _make(_rows, _steps)
 	await get_tree().process_frame
 	assert_eq(guide.rows(), _rows, "the surface reports the rows it was given")
 	var texts := _labels(guide)
@@ -49,29 +47,40 @@ func test_the_atlas_lists_every_row_in_its_group():
 	assert_true(texts.has("Workspace"), "the group heading is on screen")
 	assert_true(texts.has("Panes"), "every group heading is on screen")
 	assert_eq((guide.find_child("Title", true, false) as Label).text, TITLE)
+	assert_null(guide.find_child("Subtitle", true, false),
+		"the guide carries no subtitle")
+	assert_null(guide.find_child("PrimaryAction", true, false),
+		"the hero keycap is the only action")
 
-func test_the_primary_action_emits_its_type():
-	var guide := _make(_rows, _steps, _primary)
+func test_the_hero_action_emits_the_current_steps_type():
+	var guide := _make(_rows, _steps)
 	await get_tree().process_frame
 	watch_signals(guide)
-	var primary := guide.find_child("PrimaryAction", true, false) as Button
-	assert_not_null(primary)
-	assert_eq(primary.text, "Open a Terminal")
-	primary.pressed.emit()
+	var hero := guide.find_child("HeroKeycap", true, false) as Button
+	assert_not_null(hero, "the keycap is a button")
+	assert_eq(hero.tooltip_text, "New Terminal (Ctrl+Shift+N)")
+	assert_eq(hero.accessibility_name, "New Terminal")
+	hero.pressed.emit()
 	assert_signal_emitted_with_parameters(guide, "new_pane_requested", ["terminal"])
 
+	guide._process(ShortcutGuide.HERO_CYCLE + 0.01)
+	assert_eq(hero.tooltip_text, "New Code Viewer (Ctrl+Shift+D)",
+		"the action follows the step on screen")
+	hero.pressed.emit()
+	assert_signal_emit_count(guide, "new_pane_requested", 2)
+	assert_signal_emitted_with_parameters(guide, "new_pane_requested", ["code_viewer"], -1)
+
 func test_configure_again_replaces_the_atlas():
-	var guide := _make([{"group": "A", "label": "One", "chord": "Ctrl+1"}], [], {})
+	var guide := _make([{"group": "A", "label": "One", "chord": "Ctrl+1"}], [])
 	await get_tree().process_frame
 	assert_eq(guide.rows().size(), 1)
 	var next_rows := [
 		{"group": "A", "label": "Two", "chord": "Ctrl+2"},
 		{"group": "A", "label": "Three", "chord": "Ctrl+3"},
 	]
-	guide.configure(TITLE, SUBTITLE,
+	guide.configure(TITLE,
 		func() -> Array: return next_rows,
-		func() -> Array: return [],
-		func() -> Dictionary: return {})
+		func() -> Array: return [])
 	assert_eq(guide.rows().size(), 2, "the new provider is read")
 	var texts := _labels(guide)
 	assert_true(texts.has("Ctrl+2"))
@@ -80,7 +89,7 @@ func test_configure_again_replaces_the_atlas():
 # ── The one clock ──────────────────────────────────────────────────────
 
 func test_the_hero_cycles_and_pins():
-	var guide := _make(_rows, _steps, _primary)
+	var guide := _make(_rows, _steps)
 	await get_tree().process_frame
 	guide.pin_animation()
 	assert_eq(guide._step, 0, "the pin always starts at the first step")
@@ -88,12 +97,12 @@ func test_the_hero_cycles_and_pins():
 	assert_eq(chord.text, "Ctrl+Shift+N", "the first step is the terminal spawn")
 	guide._process(ShortcutGuide.HERO_CYCLE + 0.01)
 	assert_eq(guide._step, 1, "the clock advances one step per cycle")
-	assert_eq(chord.text, "Ctrl+Shift+T", "the caption and chord follow the step")
+	assert_eq(chord.text, "Ctrl+Shift+D", "the caption and chord follow the step")
 	guide.pin_animation()
 	assert_eq(guide._step, 0, "a second pin returns to the first frame")
 
 func test_the_clock_stops_when_hidden():
-	var guide := _make(_rows, _steps, _primary)
+	var guide := _make(_rows, _steps)
 	await get_tree().process_frame
 	assert_true(guide.is_processing(), "a visible guide animates")
 	guide.visible = false
@@ -107,7 +116,7 @@ func test_the_clock_stops_when_hidden():
 # ── Responsive columns ────────────────────────────────────────────────
 
 func test_fit_width_clamps_and_switches_columns():
-	var guide := _make(_rows, _steps, _primary)
+	var guide := _make(_rows, _steps)
 	await get_tree().process_frame
 	guide.fit_width(800.0)
 	assert_almost_eq(guide.custom_minimum_size.x, 752.0, 0.01,

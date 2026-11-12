@@ -32,8 +32,8 @@ func after_each():
 	MockAutoloads.teardown()
 
 func test_a_spawned_terminal_gets_global_settings():
-	# A first run has no workspace; seed one empty workspace so the spawn has a
-	# target, then prove the user-initiated spawn gets the global settings.
+	# A fresh launch has no workspace; seed one empty workspace so the spawn has
+	# a target, then prove the user-initiated spawn gets the global settings.
 	MockAutoloads.set_store(WorkspaceStore.FILE, {
 		"active": 0,
 		"workspaces": [{"name": "W", "layout": []}],
@@ -56,8 +56,8 @@ func test_a_spawned_terminal_gets_global_settings():
 func test_a_workspace_the_store_kept_empty_stays_empty():
 	# `WorkspaceStore` writes `layout: []` for a workspace whose panes the user
 	# closed. That is a saved state, so the restore keeps it empty and shows the
-	# guide; a store with no workspaces at all is a first run with no workspace,
-	# pinned by `test_a_first_run_has_no_workspace_and_no_pane`.
+	# guide; a missing store is a first run with no workspace, pinned by
+	# `test_a_first_run_has_no_workspace_and_no_pane`.
 	MockAutoloads.set_store(WorkspaceStore.FILE, {
 		"active": 0,
 		"workspaces": [{"name": "Emptied", "layout": []}],
@@ -564,7 +564,7 @@ func test_spawn_swap_and_close_do_not_toast():
 	await get_tree().create_timer(2.1).timeout
 
 func test_a_first_run_has_no_workspace_and_no_pane():
-	MockAutoloads.set_store(WorkspaceStore.FILE, {"active": 0, "workspaces": []})
+	MockAutoloads.remove_store(WorkspaceStore.FILE)
 	var ws = WorkspaceScript.new()
 	_ws = ws
 	add_child(ws)
@@ -579,6 +579,44 @@ func test_a_first_run_has_no_workspace_and_no_pane():
 		"no workspace, no close-all")
 	assert_true(ws._sidebar._workspaces_add_btn.visible, "the add button remains")
 	assert_false(ws._sidebar._pane_heading.visible, "no panes, no heading")
+	await get_tree().create_timer(2.1).timeout
+
+func test_an_empty_saved_store_does_not_reimport_the_legacy_layout():
+	# Close-all persists `workspaces: []`, and the pre-workspaces `layout.json`
+	# beside it is a one-shot migration source. Treating the saved empty set as
+	# a first run re-imported those old panes on the next launch (and asked
+	# about their different shell) instead of showing the empty state.
+	MockAutoloads.set_store(WorkspaceStore.FILE, {"active": 0, "workspaces": []})
+	MockAutoloads.set_store(WorkspaceStore.LEGACY_FILE, {"tiles": [{
+		"col": 0, "row": 0, "cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID,
+		"settings": {"type": "terminal"},
+	}]})
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_eq(ws._workspaces.size(), 0, "the saved empty set is not a first run")
+	assert_eq(ws._tm.tiles.size(), 0, "the legacy layout's panes are not spawned")
+	assert_true(ws._empty_state.visible, "the empty-state guide takes the grid")
+	await get_tree().create_timer(2.1).timeout
+
+func test_a_missing_store_still_imports_the_legacy_layout():
+	# The migration is still a first-run path: no store file at all means the
+	# old layout is the only saved state there is.
+	MockAutoloads.remove_store(WorkspaceStore.FILE)
+	MockAutoloads.set_store(WorkspaceStore.LEGACY_FILE, {"tiles": [{
+		"col": 0, "row": 0, "cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID,
+		"settings": {"type": "terminal"},
+	}]})
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_eq(ws._workspaces.size(), 1, "the legacy layout becomes Workspace 1")
+	assert_eq(str(ws._workspaces[0].name), "Workspace 1")
+	assert_eq(ws._tm.tiles.size(), 1, "its pane is restored")
 	await get_tree().create_timer(2.1).timeout
 
 func test_the_first_pane_creates_the_default_workspace():
@@ -920,20 +958,36 @@ func test_an_emptied_workspace_shows_the_guide():
 	assert_eq(guide.rows(),
 		ShortcutCatalog.rows(func(action: String): return ShortcutManager.chord(action)),
 		"every registered binding is listed")
-	assert_eq((guide.find_child("Title", true, false) as Label).text, "No panes")
-	var primary := guide.find_child("PrimaryAction", true, false) as Button
-	assert_not_null(primary)
-	assert_eq(primary.text, "Open a Terminal")
-	assert_eq((guide.find_child("PrimaryChord", true, false) as Label).text,
-		ShortcutManager.chord("app:new_terminal"))
+	assert_eq((guide.find_child("Title", true, false) as Label).text, "Getting Started")
+	assert_null(guide.find_child("Subtitle", true, false), "the guide has no subtitle")
+	assert_null(guide.find_child("PrimaryAction", true, false),
+		"the hero keycap is the only action")
+	var hero := guide.find_child("HeroKeycap", true, false) as Button
+	assert_not_null(hero, "the animated keycap is clickable")
+	assert_eq(hero.tooltip_text, "New Terminal (Ctrl+Shift+N)")
 	assert_almost_eq(guide.get_global_rect().get_center().y,
 		empty.get_global_rect().get_center().y, 2.0,
 		"the guide is centred when it fits")
 
-	primary.pressed.emit()
+	guide.pin_animation()
+	hero.pressed.emit()
 	await get_tree().process_frame
-	assert_eq(ws._tm.tiles.size(), 1, "the primary action spawns a terminal")
+	assert_eq(ws._tm.tiles.size(), 1, "the keycap spawns the pane it shows")
 	assert_false(empty.visible, "spawning hides the guide again")
+
+	# The second step is the code viewer: clicking then must start that pane,
+	# not a terminal. The clock is pinned so the step under test is exact.
+	ws._reset_now()
+	await get_tree().process_frame
+	assert_true(empty.visible, "closing the pane brings the guide back")
+	guide.pin_animation()
+	guide._process(ShortcutGuide.HERO_CYCLE + 0.01)
+	assert_eq(hero.tooltip_text, "New Code Viewer (Ctrl+Shift+D)")
+	hero.pressed.emit()
+	await get_tree().process_frame
+	assert_eq(ws._tm.tiles.size(), 1)
+	var body = ws._tm._find_body(ws._tm.tiles[0].wrapper)
+	assert_true(body is CodeViewerPane, "the code-viewer step starts a code viewer")
 
 	# Wait out the deferred concept push so it cannot resume after the free.
 	await get_tree().create_timer(2.1).timeout

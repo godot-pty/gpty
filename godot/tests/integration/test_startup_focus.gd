@@ -48,8 +48,8 @@ func after_each():
 		_ws = null
 	MockAutoloads.teardown()
 
-## An empty (mocked) workspace store is a first run: `_init_workspaces` marks it
-## fresh and `_restore_into` seeds its one terminal, exactly like a real launch.
+## The mock store ships one workspace with one terminal: `_init_workspaces`
+## rebuilds it and `_restore_into` spawns its pane, exactly like a real launch.
 func _start_workspace() -> Control:
 	var ws = WorkspaceScript.new()
 	_ws = ws

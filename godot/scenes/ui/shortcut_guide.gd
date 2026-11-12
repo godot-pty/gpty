@@ -1,14 +1,13 @@
 class_name ShortcutGuide
 extends VBoxContainer
 ## The empty workspace's guide: a title, an animated keycap that demonstrates
-## the spawn bindings, a primary action, and every registered shortcut as
-## grouped cards.
+## the spawn bindings and starts the pane it is showing, and every registered
+## shortcut as grouped cards.
 ##
-## Data-driven on purpose: the rows, the hero steps and the primary action come
-## from callables, so a later guided tour can reuse the surface with its own
-## step list, and a test can drive it with fixtures. The rows are re-read on
-## every show (`refresh`), because a chord is only known after the workspace
-## registers its bindings.
+## Data-driven on purpose: the rows and the hero steps come from callables, so a
+## later guided tour can reuse the surface with its own step list, and a test can
+## drive it with fixtures. The rows are re-read on every show (`refresh`),
+## because a chord is only known after the workspace registers its bindings.
 ##
 ## `fit_width` owns the responsive rule: the guide is a centred column capped at
 ## MAX_WIDTH, and the atlas splits into two columns only when the grid can hold
@@ -56,26 +55,19 @@ class Ripple extends Control:
 
 var _rows: Array = []
 var _steps: Array = []
-var _primary: Dictionary = {}
 var _rows_of: Callable
 var _steps_of: Callable
-var _primary_of: Callable
 var _step := 0
 var _phase := 0.0
 var _columns := 1
 var _pinned := false
 
 var _title: Label
-var _subtitle: Label
 var _hero: Control
-var _hero_keycap: PanelContainer
+var _hero_keycap: Button
 var _hero_chord: Label
 var _hero_caption: Label
 var _ripple: Ripple
-var _primary_row: HBoxContainer
-var _primary_button: Button
-var _primary_chip: PanelContainer
-var _primary_chord: Label
 var _atlas_heading: Label
 var _atlas: HBoxContainer
 var _atlas_columns: Array[VBoxContainer] = []
@@ -101,13 +93,10 @@ func _process(delta: float) -> void:
 ## Store the content providers and paint the first frame. The providers are
 ## called now and again on every show; a provider may return fewer rows, so the
 ## step index is clamped and the atlas rebuilt from scratch.
-func configure(title: String, subtitle: String, rows_of: Callable, steps_of: Callable,
-		primary_of: Callable) -> void:
+func configure(title: String, rows_of: Callable, steps_of: Callable) -> void:
 	_title.text = title
-	_subtitle.text = subtitle
 	_rows_of = rows_of
 	_steps_of = steps_of
-	_primary_of = primary_of
 	refresh()
 
 func refresh() -> void:
@@ -117,12 +106,8 @@ func refresh() -> void:
 	if _steps_of.is_valid():
 		var raw_steps = _steps_of.call()
 		_steps = raw_steps if raw_steps is Array else []
-	if _primary_of.is_valid():
-		var raw_primary = _primary_of.call()
-		_primary = raw_primary if raw_primary is Dictionary else {}
 	_step = clampi(_step, 0, maxi(_steps.size() - 1, 0))
 	_apply_step()
-	_apply_primary()
 	_rebuild_atlas()
 
 ## The rows the last `refresh` read, for a consumer that wants the same answer
@@ -218,20 +203,28 @@ func _apply_step() -> void:
 	if _steps.is_empty() or not (_steps[_step] is Dictionary):
 		_hero_chord.text = ""
 		_hero_caption.text = ""
+		_hero_keycap.tooltip_text = ""
+		_hero_keycap.accessibility_name = ""
+		_hero_keycap.disabled = true
 		return
 	var step: Dictionary = _steps[_step]
-	_hero_chord.text = str(step.get("chord", ""))
-	_hero_caption.text = str(step.get("label", ""))
+	var chord := str(step.get("chord", ""))
+	var label := str(step.get("label", ""))
+	_hero_chord.text = chord
+	_hero_caption.text = label
+	_hero_keycap.tooltip_text = label if chord == "" else "%s (%s)" % [label, chord]
+	_hero_keycap.accessibility_name = label
+	_hero_keycap.disabled = false
 
-func _apply_primary() -> void:
-	var label := str(_primary.get("label", "Open a Terminal"))
-	var type_name := str(_primary.get("type", ""))
-	var chord := str(_primary.get("chord", ""))
-	_primary_button.text = label
-	_primary_row.visible = type_name != ""
-	_primary_chip.visible = chord != ""
-	_primary_chord.text = chord
-	_primary_button.tooltip_text = label if chord == "" else "%s (%s)" % [label, chord]
+## The keycap is the action, not only a demonstration: the step on screen names
+## the pane it would spawn, and pressing the keycap (pointer or Enter/Space)
+## starts that pane through the same signal the workspace already routes.
+func _activate_step() -> void:
+	if _steps.is_empty() or not (_steps[_step] is Dictionary):
+		return
+	var type_name := str((_steps[_step] as Dictionary).get("type", ""))
+	if type_name != "":
+		new_pane_requested.emit(type_name)
 
 ## One clock drives both halves of the flare: the keycap dips and returns over
 ## PRESS_TIME, and the ripple expands over RIPPLE_TIME. Between them nothing is
@@ -253,19 +246,10 @@ func _animate() -> void:
 func _build_ui() -> void:
 	_title = Label.new()
 	_title.name = "Title"
-	_title.text = "No panes"
+	_title.text = "Getting Started"
 	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_title.add_theme_font_size_override("font_size", UiTokens.FS_HERO)
 	add_child(_title)
-
-	_subtitle = Label.new()
-	_subtitle.name = "Subtitle"
-	_subtitle.text = "Every shortcut the window answers, in one place."
-	_subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_subtitle.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_subtitle.theme_type_variation = UiTheme.MUTED_LABEL
-	_subtitle.add_theme_font_size_override("font_size", UiTokens.FS_BODY)
-	add_child(_subtitle)
 
 	_hero = Control.new()
 	_hero.name = "Hero"
@@ -292,11 +276,11 @@ func _build_ui() -> void:
 	column.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	centre.add_child(column)
 
-	_hero_keycap = PanelContainer.new()
+	_hero_keycap = Button.new()
 	_hero_keycap.name = "HeroKeycap"
-	_hero_keycap.theme_type_variation = UiTheme.RAISED_PANEL
 	_hero_keycap.custom_minimum_size = Vector2(190, 48)
-	_hero_keycap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hero_keycap.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_hero_keycap.pressed.connect(_activate_step)
 	column.add_child(_hero_keycap)
 
 	_hero_chord = Label.new()
@@ -307,6 +291,7 @@ func _build_ui() -> void:
 	_hero_chord.add_theme_font_size_override("font_size", UiTokens.FS_BODY)
 	_hero_chord.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hero_keycap.add_child(_hero_chord)
+	_hero_chord.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	_hero_caption = Label.new()
 	_hero_caption.name = "HeroCaption"
@@ -317,34 +302,6 @@ func _build_ui() -> void:
 	column.add_child(_hero_caption)
 
 	_ripple.target = _hero_keycap
-
-	_primary_row = HBoxContainer.new()
-	_primary_row.name = "PrimaryRow"
-	_primary_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	_primary_row.add_theme_constant_override("separation", UiTokens.SPACE_LG)
-	add_child(_primary_row)
-
-	_primary_button = Button.new()
-	_primary_button.name = "PrimaryAction"
-	_primary_button.text = "Open a Terminal"
-	_primary_button.pressed.connect(func(): new_pane_requested.emit(str(_primary.get("type", ""))))
-	_primary_row.add_child(_primary_button)
-
-	_primary_chip = PanelContainer.new()
-	_primary_chip.name = "PrimaryChordChip"
-	_primary_chip.theme_type_variation = UiTheme.RAISED_PANEL
-	_primary_chip.custom_minimum_size.y = 24
-	_primary_chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_primary_row.add_child(_primary_chip)
-
-	_primary_chord = Label.new()
-	_primary_chord.name = "PrimaryChord"
-	_primary_chord.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_primary_chord.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_primary_chord.theme_type_variation = UiTheme.ACCENT_LABEL
-	_primary_chord.add_theme_font_size_override("font_size", UiTokens.FS_SMALL)
-	_primary_chord.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_primary_chip.add_child(_primary_chord)
 
 	_atlas_heading = Label.new()
 	_atlas_heading.name = "AtlasHeading"

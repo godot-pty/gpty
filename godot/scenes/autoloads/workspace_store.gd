@@ -11,6 +11,16 @@ const MAX_NAME_LENGTH = 32
 const MAX_CWD_LENGTH = 4096
 
 
+## Whether the named-workspace store has ever been written.
+##
+## `load()` returns an empty list both for a missing file and for a saved empty
+## workspace set, and the two mean opposite things: the legacy layout import is
+## a first-run migration, while zero workspaces is a state the user chose (the
+## close-all path persists it). Only a missing file may start the migration.
+func has_store() -> bool:
+	return FileAccess.file_exists(resolve_store_path(FILE))
+
+
 func load() -> Dictionary:
 	var d = _read_file(FILE)
 	if d.is_empty():
