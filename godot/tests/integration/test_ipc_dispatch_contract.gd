@@ -633,27 +633,10 @@ func test_layout_load_refuses_an_untrusted_profile():
 
 func test_consented_content_skips_the_trust_gates():
 	var version: String = GptyTerminal.get_app_version()
-	# A builtin is covered once its own approval covers the tiles it ships at
-	# this app version — never before, never from another version's approval,
-	# and never for different tiles under the same name.
-	var builtin := {"_origin": "builtin", "name": "contract-builtin", "tiles": [
-		{"settings": {"type": "terminal", "command": "contract-tool"}},
-	]}
-	assert_false(_ws._profile_consented(builtin), "an unapproved builtin is not consented")
-	TrustedStore.approve_builtin("contract-builtin", version, ["contract-tool"])
-	assert_true(_ws._profile_consented(builtin), "an approved builtin at this version is consented")
-	TrustedStore.approve_builtin("contract-stale", "0.0.0", ["contract-tool"])
-	var stale := {"_origin": "builtin", "name": "contract-stale", "tiles": [
-		{"settings": {"type": "terminal", "command": "contract-tool"}},
-	]}
-	assert_false(_ws._profile_consented(stale), "an approval from another app version is stale")
-
-	# The name is not the approval: the recorded plans are. Content that
-	# changed under an approved builtin's name is a new decision.
-	var changed := {"_origin": "builtin", "name": "contract-builtin", "tiles": [
-		{"settings": {"type": "terminal", "command": "contract-other"}},
-	]}
-	assert_false(_ws._profile_consented(changed), "a builtin's changed tiles re-prompt")
+	# A legacy builtin approval still covers the plan it recorded; the seeded
+	# defaults are user profiles now, so their consent comes through this
+	# plan-key walk rather than a builtin origin.
+	TrustedStore.approve_builtin("contract-legacy", version, ["contract-tool"])
 
 	# A user profile is covered when every untrusted tile's exact plan was
 	# approved; any uncovered plan keeps the gate.

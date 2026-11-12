@@ -12,6 +12,7 @@ signal toggled
 signal request_profile(name: String)
 signal request_profile_in_new_workspace(name: String)
 signal request_profile_rename(index: int, name: String)
+signal request_profile_uninstall(plugin_id: String)
 signal request_save_profile
 signal request_delete_profile(index: int)
 signal request_window_mode(mode: int)
@@ -45,6 +46,10 @@ var _ws_active := -1
 var _ws_cwds: Array[String] = []
 var _pane_items: Array = []
 var _pane_active: Control = null
+## The last profile list handed over, so a confirm click can rebuild it
+## without the workspace re-sending the model.
+var _profile_items: Array = []
+var _profile_active_name := ""
 var _workspaces_add_btn: Button = null
 var _workspaces_close_all_btn: Button = null
 var _workspaces_confirm: HBoxContainer = null
@@ -541,6 +546,7 @@ func _request_close_confirm(kind: String, index := 0, ws_name := "",
 		_pending_close["snapshot"] = _pane_items.duplicate()
 	_render_workspaces()
 	_render_panes()
+	_render_profiles()
 	_focus_pending_confirm()
 
 func _accept_close_confirm():
@@ -550,6 +556,7 @@ func _accept_close_confirm():
 	_pending_close.clear()
 	_render_workspaces()
 	_render_panes()
+	_render_profiles()
 	match str(state.get("kind", "")):
 		"workspace":
 			request_workspace_close.emit(int(state.get("index", -1)))
@@ -561,6 +568,8 @@ func _accept_close_confirm():
 			request_workspaces_close_all.emit()
 		"panes_all":
 			request_reset.emit()
+		"plugin_profile":
+			request_profile_uninstall.emit(str(state.get("plugin_id", "")))
 
 func _cancel_close_confirm():
 	if _pending_close.is_empty():
@@ -569,6 +578,7 @@ func _cancel_close_confirm():
 	_pending_close.clear()
 	_render_workspaces()
 	_render_panes()
+	_render_profiles()
 	_focus_close_trigger(state)
 
 func _focus_pending_confirm():
@@ -578,20 +588,21 @@ func _focus_pending_confirm():
 
 ## Two glyph buttons replacing a row's actions: check confirms, cross cancels.
 ## The first child is the check; `_pending_close.ok` points at it for focus.
-func _confirm_row(ok_name: String, cancel_name: String, what: String) -> HBoxContainer:
+func _confirm_row(ok_name: String, cancel_name: String, what: String,
+		action := "closing") -> HBoxContainer:
 	var box := HBoxContainer.new()
 	box.name = "CloseConfirm"
 	box.add_theme_constant_override("separation", UiTokens.SPACE_XS)
 	var ok := Button.new()
 	ok.name = ok_name
-	Icons.icon_button(ok, Icons.CHECK, "Confirm closing %s" % what)
-	ok.tooltip_text = "Confirm closing %s" % what
+	Icons.icon_button(ok, Icons.CHECK, "Confirm %s %s" % [action, what])
+	ok.tooltip_text = "Confirm %s %s" % [action, what]
 	ok.pressed.connect(_accept_close_confirm)
 	box.add_child(ok)
 	var no := Button.new()
 	no.name = cancel_name
-	Icons.icon_button(no, Icons.CLOSE, "Cancel closing %s" % what)
-	no.tooltip_text = "Cancel closing %s" % what
+	Icons.icon_button(no, Icons.CLOSE, "Cancel %s %s" % [action, what])
+	no.tooltip_text = "Cancel %s %s" % [action, what]
 	no.pressed.connect(_cancel_close_confirm)
 	box.add_child(no)
 	box.visible = false
@@ -616,6 +627,14 @@ func _focus_close_trigger(state: Dictionary):
 			_workspaces_close_all_btn.grab_focus()
 		"panes_all":
 			_panes_close_all_btn.grab_focus()
+		"plugin_profile":
+			var profile_name := str(state.get("profile_name", ""))
+			for row in _profile_list.get_children():
+				if row.is_queued_for_deletion() \
+						or str(row.get_meta("profile_name", "")) != profile_name:
+					continue
+				var btn := row.get_node_or_null("ProfileUninstallBtn") as Button
+				if btn: btn.grab_focus()
 
 ## Sum the real combined minimum heights of `rows` (plus the list's
 ## separation), capped at SECTION_MAX_VISIBLE_ROWS fully-visible rows. No
@@ -817,24 +836,32 @@ func _add_profile_section(parent: VBoxContainer):
 
 func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 	if not _profile_list: return
+	_profile_items.assign(profiles)
+	_profile_active_name = active_name
+	_render_profiles()
+
+func _render_profiles():
+	if not _profile_list: return
+	_validate_profile_pending()
 	for c in _profile_list.get_children(): c.queue_free()
 	var rows: Array[Control] = []
-	for i in profiles.size():
-		var p = profiles[i]
-		var p_name = p.get("name", "Unnamed")
+	for i in _profile_items.size():
+		var p = _profile_items[i]
+		var p_name = str(p.get("name", "Unnamed"))
 		# `== true` rather than a typed cast: a user profile comes from a
 		# hand-editable file, and a stray value must read as "not a plugin"
 		# instead of raising on the assignment.
 		var is_plugin: bool = p.get("plugin", false) == true
 		var row = HBoxContainer.new()
+		row.set_meta("profile_name", p_name)
 		var btn = _make_row_label_button(p_name)
 		btn.tooltip_text = str(p.get("description", ""))
-		_apply_row_accent(btn, p_name == active_name)
+		_apply_row_accent(btn, p_name == _profile_active_name)
 		# Toggle-mode buttons flip on click; re-assert so a canceled
 		# activation dialog doesn't leave a phantom pressed row.
 		btn.pressed.connect(func():
 			request_profile.emit(p_name)
-			_apply_row_accent(btn, p_name == active_name)
+			_apply_row_accent(btn, p_name == _profile_active_name)
 		)
 		row.add_child(btn)
 
@@ -851,10 +878,27 @@ func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 		row.add_child(new_ws_btn)
 		if is_plugin:
 			# An installed plugin owns its profiles: they arrive and are
-			# replaced with the plugin, so there is nothing to rename or
-			# delete here — the row only says where it came from.
+			# replaced with the plugin. The row says where it came from and
+			# offers the plugin's one destructive action, uninstall.
 			btn.tooltip_text = _plugin_provenance(p)
-		elif not p.get("builtin", false):
+			var plugin_id := str(p.get("plugin_id", ""))
+			if plugin_id != "":
+				var uninstall_btn := _make_row_action_button(
+					Icons.DELETE, "Uninstall plugin '%s' and everything it installed" % plugin_id)
+				uninstall_btn.name = "ProfileUninstallBtn"
+				uninstall_btn.pressed.connect(func():
+					_request_profile_uninstall_confirm(p_name, plugin_id, uninstall_btn))
+				row.add_child(uninstall_btn)
+				var confirm := _confirm_row("ProfileUninstallConfirmOk",
+					"ProfileUninstallConfirmCancel", "plugin '%s'" % plugin_id, "uninstalling")
+				row.add_child(confirm)
+				var pending := _pending_profile(p_name)
+				new_ws_btn.visible = not pending
+				uninstall_btn.visible = not pending
+				confirm.visible = pending
+				if pending:
+					_pending_close["ok"] = confirm.get_child(0)
+		else:
 			var user_index := int(p.get("_user_index", i))
 			btn.tooltip_text += "\nDouble-click to rename"
 			btn.gui_input.connect(func(ev: InputEvent):
@@ -880,8 +924,33 @@ func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 
 	# Show up to SECTION_MAX_VISIBLE_ROWS rows at full measured height; a
 	# scrollbar appears only beyond that.
-	var sc = _profile_list.get_parent() as ScrollContainer
+	var sc := _profile_list.get_parent() as ScrollContainer
 	if sc: sc.custom_minimum_size.y = _measured_section_height(_profile_list, rows)
+
+func _pending_profile(profile_name: String) -> bool:
+	return str(_pending_close.get("kind", "")) == "plugin_profile" \
+		and str(_pending_close.get("profile_name", "")) == profile_name
+
+## A profile-uninstall question survives a model refresh only while the
+## plugin row it named is still there.
+func _validate_profile_pending():
+	if str(_pending_close.get("kind", "")) != "plugin_profile":
+		return
+	var profile_name := str(_pending_close.get("profile_name", ""))
+	for p in _profile_items:
+		if p is Dictionary and p.get("plugin", false) == true \
+				and str(p.get("name", "")) == profile_name:
+			return
+	_pending_close.clear()
+
+func _request_profile_uninstall_confirm(profile_name: String, plugin_id: String,
+		source: Button):
+	_pending_close = {"kind": "plugin_profile", "profile_name": profile_name,
+		"plugin_id": plugin_id, "source": source}
+	_render_workspaces()
+	_render_panes()
+	_render_profiles()
+	_focus_pending_confirm()
 
 ## Where a plugin-sourced profile came from. The second sentence is the
 ## reason such a row has no rename or delete: the plugin replaces it whole.
@@ -889,7 +958,7 @@ func _plugin_provenance(profile: Dictionary) -> String:
 	return "Installed from %s@%s" % [
 		str(profile.get("plugin_id", "")),
 		str(profile.get("revision", "")),
-	] + " — plugin profiles follow the plugin"
+	] + " — plugin profiles follow the plugin\nTrash uninstalls the plugin and every profile and concept it ships"
 
 ## The profiles section's catalog hint row. Same row shape as a profile row
 ## (a Button inside a row container) so the section's measured height sees

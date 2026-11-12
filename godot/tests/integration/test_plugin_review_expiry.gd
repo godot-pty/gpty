@@ -121,3 +121,76 @@ func test_accepting_a_review_records_its_revision_and_plans():
 	# while the mock is still installed (the workspace tear-down would leave
 	# the callback on a freed object otherwise).
 	await get_tree().create_timer(2.1).timeout
+
+# ── Same-name profile replacement ──────────────────────────────────────
+
+func _replacement_params() -> Dictionary:
+	var params := _review_params()
+	params["profiles"] = [{
+		"name": "Agent Workspace", "tiles": 3, "programs": [], "plans": [],
+	}]
+	return params
+
+func test_the_review_names_a_user_profile_it_will_replace():
+	var ws := await _make_workspace()
+	ProfileManager.add_profile("Agent Workspace", [])
+	ws._show_plugin_review(21, _replacement_params(), 60_000)
+	var dialog := _dialog(ws)
+	assert_not_null(dialog)
+	assert_string_contains(AppDialog.body_of(dialog),
+		"Replaces your profile(s): Agent Workspace",
+		"the review is the consent surface for the replacement")
+	await get_tree().create_timer(2.1).timeout
+
+func test_accepting_a_replacement_deletes_the_profile_after_the_plugin_lands():
+	var ws := await _make_workspace()
+	ProfileManager.add_profile("Agent Workspace", [])
+	ConceptManager.plugin_concepts_source = func(): return "[]"
+	ws._show_plugin_review(22, _replacement_params(), 60_000)
+	var dialog := _dialog(ws)
+	assert_not_null(dialog)
+	gut.error_tracker.disabled = true
+	dialog.confirmed.emit()
+	gut.error_tracker.disabled = false
+	assert_true(ws._pending_profile_replacements.has("owner/demo"),
+		"the accepted install remembers the replacement")
+
+	# The CLI writes the record after it reads the answer; answer with the
+	# plugin's raw profile before the deferred pickup fires.
+	ProfileManager.plugin_profiles_source = func(): return JSON.stringify([{
+		"plugin_id": "owner/demo", "revision": "abc1234",
+		"name": "Agent Workspace", "tiles": [],
+	}])
+	await get_tree().create_timer(2.1).timeout
+
+	assert_eq(ProfileManager.find_user_profile("Agent Workspace"), -1,
+		"the user's copy is gone once the plugin really landed")
+	var plugin_rows := 0
+	for profile in ProfileManager.get_all_profiles():
+		if profile.get("plugin", false) == true:
+			plugin_rows += 1
+			assert_eq(profile.get("name"), "Agent Workspace",
+				"the plugin takes the bare name after the replacement")
+	assert_eq(plugin_rows, 1)
+	ConceptManager.plugin_concepts_source = Callable()
+
+func test_a_failed_install_does_not_delete_the_user_profile():
+	var ws := await _make_workspace()
+	ProfileManager.add_profile("Agent Workspace", [])
+	ConceptManager.plugin_concepts_source = func(): return "[]"
+	ws._show_plugin_review(23, _replacement_params(), 60_000)
+	var dialog := _dialog(ws)
+	assert_not_null(dialog)
+	gut.error_tracker.disabled = true
+	dialog.confirmed.emit()
+	gut.error_tracker.disabled = false
+
+	# No plugin record ever appears.
+	ProfileManager.plugin_profiles_source = func(): return "[]"
+	await get_tree().create_timer(2.1).timeout
+
+	assert_ne(ProfileManager.find_user_profile("Agent Workspace"), -1,
+		"an install that never landed must leave the user's profile alone")
+	assert_false(ws._pending_profile_replacements.has("owner/demo"),
+		"the pending promise is settled either way")
+	ConceptManager.plugin_concepts_source = Callable()

@@ -129,6 +129,35 @@ impl GptyTerminal {
         )
     }
 
+    /// Remove an installed plugin and its content/runtime directories.
+    ///
+    /// Static, like the installed-content readers: the store describes the
+    /// process, not one terminal. Answers JSON:
+    /// `{"ok": true, "id": ..., "warnings": [...]}` or
+    /// `{"ok": false, "error": ...}`. The sidebar's profile-row trash calls
+    /// this after the user confirms; the record is the source of truth and
+    /// directory removal is best-effort, exactly like `gpty plugin uninstall`.
+    #[func]
+    fn uninstall_plugin(plugin_id: GString) -> GString {
+        let id = plugin_id.to_string();
+        let answer = match gpty_plugin::store::uninstall(&id) {
+            Ok(outcome) if outcome.removed => serde_json::json!({
+                "ok": true,
+                "id": id,
+                "warnings": outcome.warnings,
+            }),
+            Ok(_) => serde_json::json!({
+                "ok": false,
+                "error": format!("plugin `{id}` is not installed"),
+            }),
+            Err(e) => serde_json::json!({
+                "ok": false,
+                "error": e.to_string(),
+            }),
+        };
+        GString::from(&answer.to_string())
+    }
+
     /// Counters for the OMP event pipeline (the event socket → drain path).
     ///
     /// Static, like the other process-level statics: it describes the

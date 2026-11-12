@@ -24,7 +24,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::plugin_manifest::{
+use crate::schema::{
     CONCEPT_KEYS, MAX_CONCEPT_NAME_LEN, MAX_CONCEPT_TRIGGER_LEN, MAX_CONCEPTS, MAX_NAME_LEN,
     valid_plugin_id,
 };
@@ -488,7 +488,7 @@ fn now_secs() -> u64 {
 /// with the pid and a per-process counter. The name only needs to be
 /// unpredictable to another local writer; it is not a secret. Also names
 /// the install CLI's staging dirs.
-pub(crate) fn temp_suffix() -> u64 {
+pub fn temp_suffix() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let nanos = std::time::SystemTime::now()
@@ -576,6 +576,56 @@ fn validated_id_component(id: &str) -> StoreResult<&str> {
     Ok(id)
 }
 
+// ── Uninstall ────────────────────────────────────────────────────────
+
+/// What `uninstall`/`uninstall_with` did. `removed == false` means no record
+/// matched; directories are never touched in that case.
+#[derive(Debug, PartialEq)]
+pub struct UninstallOutcome {
+    pub removed: bool,
+    pub warnings: Vec<String>,
+}
+
+/// Remove an installed plugin: its store record first, then the content and
+/// runtime directories. Directory removal is best-effort, exactly like
+/// `gpty plugin uninstall`: a half-removed directory is reported in
+/// `warnings`, not retried, because the record is the source of truth.
+pub fn uninstall(id: &str) -> StoreResult<UninstallOutcome> {
+    let store = PluginStore::open()?;
+    // Resolve both paths before touching the record: a path-resolution
+    // failure must not leave the plugin installed but half-removed.
+    let content = content_dir(id)?;
+    let runtime = runtime_dir(id)?;
+    uninstall_with(&store, &content, &runtime, id)
+}
+
+/// The testable half with explicit paths (no process-wide state dir).
+pub fn uninstall_with(
+    store: &PluginStore,
+    content_dir: &Path,
+    runtime_dir: &Path,
+    id: &str,
+) -> StoreResult<UninstallOutcome> {
+    if !store.remove(id)? {
+        return Ok(UninstallOutcome {
+            removed: false,
+            warnings: Vec::new(),
+        });
+    }
+    let mut warnings = Vec::new();
+    for dir in [content_dir, runtime_dir] {
+        match std::fs::remove_dir_all(dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => warnings.push(format!("could not remove {}: {e}", dir.display())),
+        }
+    }
+    Ok(UninstallOutcome {
+        removed: true,
+        warnings,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -643,6 +693,34 @@ mod tests {
             .map(|record| record.id)
             .collect();
         assert_eq!(ids, vec!["owner/b".to_string()]);
+    }
+
+    #[test]
+    fn uninstall_removes_the_record_and_both_directories() {
+        let (tmp, store) = make_store("uninstall");
+        store.upsert("owner/x", "aaaaaaa", &[], &[]).unwrap();
+        let content = tmp.path().join("data/plugins/owner/x");
+        let runtime = tmp.path().join("state/plugins/owner/x");
+        std::fs::create_dir_all(&content).unwrap();
+        std::fs::create_dir_all(&runtime).unwrap();
+
+        let outcome = uninstall_with(&store, &content, &runtime, "owner/x").unwrap();
+        assert!(outcome.removed);
+        assert!(outcome.warnings.is_empty());
+        assert!(!content.exists(), "content follows the record");
+        assert!(!runtime.exists(), "runtime follows the record");
+        assert!(store.records().unwrap().is_empty());
+
+        // A second call finds no record and must not touch paths that may
+        // belong to a reinstall.
+        std::fs::create_dir_all(&content).unwrap();
+        let again = uninstall_with(&store, &content, &runtime, "owner/x").unwrap();
+        assert!(!again.removed);
+        assert!(again.warnings.is_empty());
+        assert!(content.exists(), "an unknown id leaves directories alone");
+
+        let invalid = uninstall_with(&store, &content, &runtime, "owner/../etc");
+        assert!(invalid.is_err(), "an invalid id never reaches a path join");
     }
 
     #[test]

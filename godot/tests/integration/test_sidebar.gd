@@ -349,8 +349,8 @@ func test_set_active_pane_moves_accent_without_rebuild():
 
 func test_update_profile_list_accents_active_profile():
 	var profiles: Array[Dictionary] = [
-		{"name": "A", "description": ""},
-		{"name": "B", "description": "", "builtin": true},
+		{"name": "A", "description": "", "_user_index": 0},
+		{"name": "B", "description": "", "_user_index": 1},
 	]
 	_sidebar.update_profile_list(profiles, "B")
 
@@ -371,8 +371,8 @@ func test_update_profile_list_accents_active_profile():
 ## panes, so it stays a deliberate choice rather than a side effect.
 func test_profile_row_offers_both_destinations_as_separate_actions():
 	var profiles: Array[Dictionary] = [
-		{"name": "Agent Workspace", "builtin": true},
-		{"name": "Mine", "_user_index": 0},
+		{"name": "Agent Workspace", "_user_index": 0},
+		{"name": "Mine", "_user_index": 1},
 	]
 	_sidebar.update_profile_list(profiles, "")
 	watch_signals(_sidebar)
@@ -408,7 +408,7 @@ func _plugin_profile(name := "OMP") -> Dictionary:
 		"tiles": [{"col": 0, "row": 0, "cspan": 60, "rspan": 60}],
 	}
 
-func test_plugin_profile_row_shows_provenance_without_delete():
+func test_plugin_profile_row_shows_provenance_and_uninstall():
 	var profiles: Array[Dictionary] = [_plugin_profile()]
 	_sidebar.update_profile_list(profiles, "")
 
@@ -417,16 +417,66 @@ func test_plugin_profile_row_shows_provenance_without_delete():
 	var row = _sidebar._profile_list.get_child(0)
 	var btn := row.get_child(0) as Button
 	assert_eq(btn.text, "OMP")
-	assert_eq(row.get_child_count(), 2,
-		"a plugin profile is a label plus the new-workspace button, with no delete")
+	assert_eq(row.get_child_count(), 4,
+		"label + new-workspace + uninstall + the hidden confirm")
 	assert_eq((row.get_child(1) as Button).name, "ProfileNewWorkspaceBtn",
 		"a plugin profile must still open in a new workspace")
+	var trash := row.get_node_or_null("ProfileUninstallBtn") as Button
+	assert_not_null(trash, "a plugin profile carries its plugin's trash")
+	assert_eq(Icons.glyph(trash), Icons.DELETE)
+	assert_string_contains(trash.tooltip_text, "godot-pty/gpty-omp")
 	assert_eq((_sidebar._profile_list.get_child(1).get_child(0) as Button).name,
 		"CatalogHintBtn", "the catalog hint must stay the last row")
 	assert_string_contains(btn.tooltip_text, "Installed from godot-pty/gpty-omp@a1b2c3d4e5f6",
 		"the tooltip must name where the profile came from")
 	assert_string_contains(btn.tooltip_text, "plugin profiles follow the plugin",
 		"the tooltip must say why the row cannot be edited")
+
+func test_plugin_profile_trash_asks_before_uninstalling():
+	_sidebar.update_profile_list([_plugin_profile()], "")
+	watch_signals(_sidebar)
+	var row = _sidebar._profile_list.get_child(0)
+	var trash := row.get_node_or_null("ProfileUninstallBtn") as Button
+	assert_not_null(trash)
+	trash.pressed.emit()
+	assert_signal_not_emitted(_sidebar, "request_profile_uninstall",
+		"the trash opens the inline question first")
+
+	await get_tree().process_frame
+	row = _sidebar._profile_list.get_child(0)
+	var confirm := row.get_node_or_null("CloseConfirm") as HBoxContainer
+	assert_not_null(confirm)
+	assert_true(confirm.visible, "the check/cross replaces the row's actions")
+	assert_false((row.get_node("ProfileUninstallBtn") as Button).visible)
+	(confirm.get_child(1) as Button).pressed.emit()
+	assert_signal_not_emitted(_sidebar, "request_profile_uninstall", "the cross cancels")
+
+	await get_tree().process_frame
+	row = _sidebar._profile_list.get_child(0)
+	trash = row.get_node_or_null("ProfileUninstallBtn") as Button
+	trash.pressed.emit()
+	await get_tree().process_frame
+	row = _sidebar._profile_list.get_child(0)
+	confirm = row.get_node_or_null("CloseConfirm") as HBoxContainer
+	(confirm.get_child(0) as Button).pressed.emit()
+	assert_signal_emitted_with_parameters(_sidebar, "request_profile_uninstall",
+		["godot-pty/gpty-omp"])
+
+func test_plugin_profile_without_an_id_has_no_uninstall():
+	var profile := _plugin_profile()
+	profile["plugin_id"] = ""
+	_sidebar.update_profile_list([profile], "")
+	var row = _sidebar._profile_list.get_child(0)
+	assert_null(row.get_node_or_null("ProfileUninstallBtn"),
+		"a malformed plugin row has no id to uninstall")
+	assert_null(row.get_node_or_null("CloseConfirm"))
+
+func test_a_user_row_has_delete_but_no_uninstall():
+	_sidebar.update_profile_list([{"name": "Mine", "_user_index": 0}], "")
+	var row = _sidebar._profile_list.get_child(0)
+	assert_null(row.get_node_or_null("ProfileUninstallBtn"))
+	assert_eq(row.get_child_count(), 3, "label + new-workspace + user delete")
+	assert_eq(Icons.glyph(row.get_child(2) as Button), Icons.DELETE)
 
 func test_plugin_profile_row_does_not_offer_rename():
 	var profiles: Array[Dictionary] = [_plugin_profile()]
@@ -445,8 +495,8 @@ func test_plugin_profile_row_does_not_offer_rename():
 
 func test_catalog_hint_row_is_last_with_and_without_plugin_profiles():
 	var profiles: Array[Dictionary] = [
-		{"name": "Agent Workspace", "builtin": true},
-		{"name": "Mine", "description": "", "_user_index": 0},
+		{"name": "Agent Workspace", "_user_index": 0},
+		{"name": "Mine", "description": "", "_user_index": 1},
 	]
 	_sidebar.update_profile_list(profiles, "")
 

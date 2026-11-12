@@ -1,9 +1,7 @@
 {
   "profiles": [
     {
-      "id": "omp-workspace",
       "name": "Agent Workspace",
-      "builtin": true,
       "description": "An agent workspace for OMP with separate Inspector and Reasoning panes.",
       "tiles": [
         {
@@ -44,9 +42,7 @@
       ]
     },
     {
-      "id": "knowledge-base",
       "name": "Knowledge Base",
-      "builtin": true,
       "description": "The bundled gPTY wiki: project and terminal concepts, linked. Opens a copy in your user data.",
       "tiles": [
         {

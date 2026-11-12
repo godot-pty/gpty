@@ -33,6 +33,21 @@ func test_actions_list_command_and_args():
 	})
 	assert_true(text.contains("run-tests: gpty pane-run command=cargo test"), text)
 
+func test_a_same_name_replacement_is_named_before_the_plugin_sections():
+	var text := PluginReviewText.build({
+		"id": "owner/demo",
+		"profiles": [{"name": "Agent Workspace", "tiles": 3, "programs": []}],
+	}, ["Agent Workspace"])
+	assert_string_contains(text,
+		"Replaces your profile(s): Agent Workspace — the plugin's version takes the name of each.")
+	assert_lt(text.find("Replaces your profile(s):"),
+		text.find("Profiles -- what each one would start:"),
+		"the replacement notice is above the capped profile section")
+
+	var no_replaces := PluginReviewText.build({"id": "owner/demo"}, [])
+	assert_false("Replaces your profile(s):" in no_replaces,
+		"an install with no collision says nothing about replacing")
+
 func test_profiles_show_what_they_would_start():
 	# The line that makes the review informed consent: a profile approved here
 	# is one the trust gate later activates at the pinned revision, and the

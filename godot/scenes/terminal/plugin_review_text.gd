@@ -14,7 +14,7 @@ const MAX_LISTED := 8
 const MAX_PROGRAMS_SHOWN := 8
 
 
-static func build(params: Dictionary) -> String:
+static func build(params: Dictionary, replaces: Array = []) -> String:
 	var lines: Array[String] = []
 	lines.append("Plugin: %s (%s)" % [field(params, "name", 64), field(params, "id", 64)])
 	lines.append("Version %s  ·  revision %s" % [field(params, "version", 16), field(params, "revision", 64)])
@@ -23,6 +23,17 @@ static func build(params: Dictionary) -> String:
 	# revision above.
 	lines.append("Requested: %s" % field(params, "requested_ref", 96))
 	lines.append("Source: %s" % field(params, "source", 96))
+
+	# A same-name profile replacement is part of what Install consents to.
+	# It sits above the capped sections so the 40-line limit cannot hide it.
+	if not replaces.is_empty():
+		var names: Array[String] = []
+		for name in replaces:
+			if names.size() >= MAX_LISTED:
+				break
+			names.append(short(str(name), 64))
+		lines.append("")
+		lines.append("Replaces your profile(s): %s — the plugin's version takes the name of each." % ", ".join(names))
 
 	var actions: Array = params.get("actions", [])
 	if actions is Array and not actions.is_empty():

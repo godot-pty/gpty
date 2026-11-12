@@ -1055,3 +1055,90 @@ func test_the_chrome_follows_the_appearance_mode_live():
 
 	# Wait out the deferred concept push so it cannot resume after the free.
 	await get_tree().create_timer(2.1).timeout
+
+# ── Same-name profile replacement ─────────────────────────────────────
+
+func _find_dialog(ws: Control, needle: String) -> ConfirmationDialog:
+	for child in ws.get_children():
+		if child is ConfirmationDialog:
+			if needle in AppDialog.body_of(child):
+				return child
+	return null
+
+func _open_workspace_for_profiles() -> Control:
+	MockAutoloads.set_store(WorkspaceStore.FILE, {
+		"active": 0, "workspaces": [{"name": "W", "layout": [{
+			"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+			"settings": {"type": "code_viewer"},
+		}]}],
+	})
+	var ws: Control = WorkspaceScript.new()
+	_ws = ws
+	ws.size = Vector2(1200, 800)
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	return ws
+
+func test_renaming_to_an_existing_user_profile_asks_to_replace():
+	var ws := await _open_workspace_for_profiles()
+	ProfileManager.add_profile("Target", [])
+	ProfileManager.add_profile("Source", [])
+
+	ws._rename_profile(1, "Target")
+	var dialog := _find_dialog(ws, "already exists")
+	assert_not_null(dialog, "a same-name rename must ask first")
+	assert_string_contains(AppDialog.body_of(dialog), "Target")
+	dialog.confirmed.emit()
+
+	assert_eq(ProfileManager.profiles.size(), 1,
+		"confirming replaces the target, it does not keep both")
+	assert_eq(ProfileManager.profiles[0].get("name"), "Target")
+	await get_tree().create_timer(2.1).timeout
+
+func test_cancelling_a_replace_rename_keeps_both_profiles():
+	var ws := await _open_workspace_for_profiles()
+	ProfileManager.add_profile("Target", [])
+	ProfileManager.add_profile("Source", [])
+
+	ws._rename_profile(1, "Target")
+	var dialog := _find_dialog(ws, "already exists")
+	assert_not_null(dialog)
+	dialog.canceled.emit()
+
+	assert_eq(ProfileManager.profiles.size(), 2, "cancel keeps both profiles")
+	assert_eq(ProfileManager.profiles[0].get("name"), "Target")
+	assert_eq(ProfileManager.profiles[1].get("name"), "Source")
+	await get_tree().create_timer(2.1).timeout
+
+func test_saving_over_an_existing_profile_asks_before_replacing_tiles():
+	var ws := await _open_workspace_for_profiles()
+	ProfileManager.add_profile("Target", [])
+	var before := (ProfileManager.profiles[0].get("tiles") as Array).size()
+
+	ws._save_current_as_profile()
+	var save_dialog: ConfirmationDialog = null
+	for child in ws.get_children():
+		if child is ConfirmationDialog and AppDialog.body_of(child) == "":
+			save_dialog = child
+			break
+	assert_not_null(save_dialog, "the Save Profile dialog must open")
+	var name_input: LineEdit = null
+	for node in save_dialog.find_children("*", "LineEdit", true, false):
+		name_input = node as LineEdit
+		if name_input != null and name_input.placeholder_text == "My Profile":
+			break
+	assert_not_null(name_input, "the save dialog has a name field")
+	name_input.text = "Target"
+	save_dialog.confirmed.emit()
+
+	var replace_dialog := _find_dialog(ws, "already exists")
+	assert_not_null(replace_dialog, "a same-name save must ask before replacing")
+	assert_eq((ProfileManager.profiles[0].get("tiles") as Array).size(), before,
+		"the old tiles stay until the replacement is confirmed")
+	replace_dialog.confirmed.emit()
+
+	assert_eq(ProfileManager.profiles.size(), 1, "the save replaces, not duplicates")
+	assert_gt((ProfileManager.profiles[0].get("tiles") as Array).size(), before,
+		"confirming writes the current workspace's tiles")
+	await get_tree().create_timer(2.1).timeout

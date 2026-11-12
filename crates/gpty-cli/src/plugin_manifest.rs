@@ -34,6 +34,13 @@ use std::fmt;
 use clap::CommandFactory;
 use gpty_core::types::PaneType;
 
+/// Caps shared with the installed-plugin store (`gpty-plugin`). Re-exported
+/// so this module's callers keep one path to the same numbers.
+pub use gpty_plugin::schema::{
+    CONCEPT_KEYS, MAX_CONCEPT_NAME_LEN, MAX_CONCEPT_TRIGGER_LEN, MAX_CONCEPTS, MAX_NAME_LEN,
+    valid_plugin_id,
+};
+
 /// The manifest's file name in a plugin directory.
 pub const MANIFEST_FILENAME: &str = "gpty-plugin.toml";
 
@@ -45,18 +52,7 @@ pub const MAX_EVENTS: usize = 64;
 pub const MAX_LINK_HANDLERS: usize = 16;
 pub const MAX_PROFILES: usize = 64;
 pub const MAX_PROFILE_TILES: usize = 64;
-/// The engine's own concept cap (`gpty_core::concept::MAX_CONCEPTS`) — a
-/// manifest cannot exceed what the engine will load.
-pub const MAX_CONCEPTS: usize = 128;
-/// The engine parser's own caps for one concept entry
-/// (`concepts_from_json`): the manifest validator, the store reader, and the
-/// engine all judge a name and a trigger by the same numbers.
-pub const MAX_CONCEPT_NAME_LEN: usize = 256;
-pub const MAX_CONCEPT_TRIGGER_LEN: usize = 1024;
 
-/// Identifier shapes.
-pub const MAX_NAME_LEN: usize = 64;
-pub const MAX_ID_PART_LEN: usize = 63;
 /// `name` fields on actions/events: the pane `attachment_id` pattern.
 pub const MAX_SPEC_NAME_LEN: usize = 32;
 pub const MAX_SCHEME_LEN: usize = 32;
@@ -107,20 +103,6 @@ pub const EVENT_TYPES: &[&str] = &[
     "turn.started",
     "tool.call",
     "thinking.delta",
-];
-
-/// The keys a `[[concepts]]` entry may carry — the closed set the visual
-/// editor compiles (`ConceptGraphModel.entry_for_path`). A plugin concept
-/// cannot smuggle another key into the engine.
-pub const CONCEPT_KEYS: &[&str] = &[
-    "name",
-    "trigger",
-    "enabled",
-    "conditions",
-    "capture_mode",
-    "stop_timeout_ms",
-    "stop_on_input",
-    "actions",
 ];
 
 /// The `capture_mode` values the file vocabulary carries: absent (capture),
@@ -971,26 +953,6 @@ fn reject_unknown_keys(entry: &toml::Table, known: &[&str], path: &str) -> Manif
 }
 
 // ── Identifier shapes ─────────────────────────────────────────────────
-
-/// `owner/name` — the registry's plugin identity. Both parts lowercase
-/// alphanumeric with hyphens, 1-63 characters each. Public because the
-/// install CLI validates ids before joining them into paths
-/// (`plugin_store`), and the store keys on them.
-pub fn valid_plugin_id(id: &str) -> bool {
-    let Some((owner, name)) = id.split_once('/') else {
-        return false;
-    };
-    !owner.is_empty()
-        && !name.is_empty()
-        && owner.len() <= MAX_ID_PART_LEN
-        && name.len() <= MAX_ID_PART_LEN
-        && owner
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
 
 /// The pane `attachment_id` shape, reused for action/event names.
 fn valid_spec_name(name: &str) -> bool {

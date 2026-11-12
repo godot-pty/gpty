@@ -25,7 +25,7 @@ use crate::plugin_manifest::{
     self, ActionSpec, MAX_CONCEPT_NAME_LEN, Manifest, Platform, ProfileSpec, current_version,
     parse_manifest, valid_plugin_id,
 };
-use crate::plugin_store::{self, PluginProfileRecord, PluginStore};
+use gpty_plugin::store::{self as plugin_store, PluginProfileRecord, PluginStore};
 
 /// The review dialog waits on a human; the request deadline (and this
 /// client's timeout) are minutes, not the default 5 s.
@@ -696,21 +696,14 @@ fn set_enabled(id: &str, enabled: bool, json: bool) -> anyhow::Result<()> {
 }
 
 fn uninstall(id: &str, json: bool) -> anyhow::Result<()> {
-    let store = PluginStore::open()?;
-    if !store.remove(id)? {
+    let outcome = plugin_store::uninstall(id)?;
+    if !outcome.removed {
         bail!("plugin `{id}` is not installed");
     }
-    // The record is the source of truth and is already gone; the content is
-    // best-effort (a half-removed dir is reported, not retried).
-    for dir in [
-        plugin_store::content_dir(id)?,
-        plugin_store::runtime_dir(id)?,
-    ] {
-        match std::fs::remove_dir_all(&dir) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => eprintln!("warning: could not remove {}: {e}", dir.display()),
-        }
+    // The record is the source of truth and is already gone; directory
+    // removal is best-effort, so a warning does not fail the command.
+    for warning in &outcome.warnings {
+        eprintln!("warning: {warning}");
     }
     print_result(
         json,

@@ -371,7 +371,7 @@ fn spawn_gui(log: File) -> anyhow::Result<Child> {
 fn startup_log_file() -> io::Result<(PathBuf, File)> {
     let path = std::env::temp_dir().join(format!(
         "gpty-gui-startup-{:016x}.log",
-        crate::plugin_store::temp_suffix()
+        gpty_plugin::store::temp_suffix()
     ));
     let mut options = OpenOptions::new();
     // `create_new` is O_EXCL: a planted name cannot divert the write.

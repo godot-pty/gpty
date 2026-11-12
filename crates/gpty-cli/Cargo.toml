@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 gpty-ipc = { path = "../gpty-ipc", version = "0.8.1" }
 gpty-core = { path = "../gpty-core", version = "0.8.1" }
+gpty-plugin = { path = "../gpty-plugin", version = "0.8.1" }
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"

@@ -333,3 +333,10 @@ func test_the_test_user_root_redirects_the_history_store():
 		root.path_join("history.db").replace("\\", "/")
 	)
 	DirAccess.remove_absolute(root)
+
+func test_uninstall_plugin_refuses_an_absent_id_with_an_error_envelope():
+	var answer = JSON.parse_string(str(GptyTerminal.uninstall_plugin("owner/not-installed")))
+	assert_true(answer is Dictionary, "uninstall_plugin must answer JSON")
+	assert_false(answer.get("ok", true), "an absent plugin is not removed")
+	var error := str(answer.get("error", ""))
+	assert_gt(error.length(), 0, "the refusal names why: %s" % answer)

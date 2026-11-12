@@ -15,7 +15,6 @@
 
 mod commands;
 mod plugin_manifest;
-mod plugin_store;
 #[cfg(test)]
 mod tests;
 

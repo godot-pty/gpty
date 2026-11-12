@@ -1741,23 +1741,18 @@ static func _plan_approved(approved, key: String) -> bool:
 ##
 ## Trust comes from `_origin` — the stamp `ProfileManager.get_all_profiles`
 ## puts on an entry — and never from fields inside the profile: a user file
-## cannot claim `builtin` or `plugin_id` (the loader strips them), and an
-## unstamped dict is user content. Each origin binds the approval to the
-## content it covers:
+## cannot claim `plugin_id` (the loader strips it), and an unstamped dict is
+## user content. Each origin binds the approval to the content it covers:
 ##
 ## - plugin: the plugin id + revision the install review approved, AND every
 ##   untrusted tile's plan that review listed. A different revision re-prompts,
 ##   and so does different content under the same revision. The record stays
 ##   keyed on program + argv, without a directory: the review runs before any
 ##   workspace is chosen, and a plugin is arbitrary code either way.
-## - builtin: its name + app version, AND the plans recorded with that
-##   approval - each carrying the directory it was approved for, because the
-##   activation target is the active workspace (a profile opened in a new
-##   workspace inherits that workspace's directory). A release ships new
-##   content, which the version re-prompts.
-## - user: every untrusted tile's plan covered by an approved builtin at this
-##   directory — a workspace saved from one restores the same way. Nothing is
-##   ever recorded for a user profile, so it asks again.
+## - user: every untrusted tile's plan covered by an approval recorded for a
+##   pre-seed builtin at this directory — a workspace saved from one restores
+##   the same way. Nothing is ever recorded for a user profile, so it asks
+##   again.
 func _profile_consented(profile: Dictionary) -> bool:
 	var tiles = profile.get("tiles", [])
 	var cwd := _spawn_cwd(_active_workspace())
@@ -1769,34 +1764,18 @@ func _profile_consented(profile: Dictionary) -> bool:
 				TrustedStore.is_plugin_approved(plugin_id, revision)
 				and _plans_covered(tiles, TrustedStore.plugin_plans(plugin_id, revision), "")
 			)
-		ProfileManager.ORIGIN_BUILTIN:
-			var name := str(profile.get("name", ""))
-			var version := GptyTerminal.get_app_version()
-			return (
-				TrustedStore.is_builtin_approved(name, version)
-				and _plans_covered(tiles, TrustedStore.builtin_plans(name, version), cwd)
-			)
 	return _plans_covered(
 		tiles, TrustedStore.approved_plan_keys(GptyTerminal.get_app_version()), cwd)
 
-## The trust dialog's consent is remembered only for content gpty ships or a
-## plugin pinned. A builtin records its name + app version and the spawn plans
-## the dialog showed - each keyed with the directory the activation will start
-## them in, so editing a workspace file to point the same approved program at
-## another directory is a new decision. A plugin profile whose tiles changed
-## under an approved revision adds the plans the dialog just showed to that
-## record (program + argv only: the install review approved those before any
-## workspace directory existed) — the revision itself is only ever approved by
-## the install review, which shows the whole manifest. User-authored profiles
-## never record consent, so approving one does not make the next activation
-## silent.
+## The trust dialog's consent is remembered only for a plugin pinned at an
+## approved revision. A plugin profile whose tiles changed under that revision
+## adds the plans the dialog just showed to the record (program + argv only:
+## the install review approved those before any workspace directory existed) —
+## the revision itself is only ever approved by the install review, which
+## shows the whole manifest. User-authored profiles never record consent, so
+## approving one does not make the next activation silent.
 func _remember_profile_consent(profile: Dictionary, tiles: Array):
-	var cwd := _spawn_cwd(_active_workspace())
 	match str(profile.get("_origin", ProfileManager.ORIGIN_USER)):
-		ProfileManager.ORIGIN_BUILTIN:
-			TrustedStore.approve_builtin(
-				str(profile.get("name", "")), GptyTerminal.get_app_version(),
-				_untrusted_plan_keys(tiles, cwd))
 		ProfileManager.ORIGIN_PLUGIN:
 			var plugin_id := str(profile.get("plugin_id", ""))
 			var revision := str(profile.get("revision", ""))
@@ -2266,6 +2245,7 @@ func _wire_sidebar_signals():
 	_sidebar.request_workspace_rename.connect(_rename_workspace)
 	_sidebar.request_save_profile.connect(_save_current_as_profile)
 	_sidebar.request_delete_profile.connect(_delete_profile)
+	_sidebar.request_profile_uninstall.connect(_uninstall_profile_plugin)
 	ProfileManager.profiles_changed.connect(_refresh_profile_buttons)
 
 func _list():
@@ -2292,6 +2272,10 @@ func _on_sidebar_toggled():
 var _pending_waits: Dictionary = {}
 # pluginInstall reviews waiting on the dialog: id -> summary params
 var _pending_plugin_reviews: Dictionary = {}
+# Accepted installs that promised a same-name replacement: plugin id -> raw
+# profile names the review named. Applied only after the plugin's record is
+# visible, so a failed install deletes nothing.
+var _pending_profile_replacements: Dictionary = {}
 
 ## How long a pane answer waits for its pane's child before it answers an
 ## error. The child starts within a frame or two of the handler returning, so
@@ -2769,6 +2753,25 @@ func _handle_ipc_method(method: String, params):
 
 const PLUGIN_REVIEW_MAX_PENDING := 4
 
+## The summary's profile names that already exist as user profiles. Only
+## those get the replacement consent line; a plugin-owned name is not a
+## replacement target (the user profile would take the bare name and the
+## plugin would re-derive with a suffix).
+func _profile_names_colliding(params: Dictionary) -> Array[String]:
+	var names: Array[String] = []
+	var profiles = params.get("profiles", [])
+	if not (profiles is Array):
+		return names
+	for entry in profiles:
+		if not (entry is Dictionary):
+			continue
+		var name := str(entry.get("name", ""))
+		if name == "" or names.has(name):
+			continue
+		if ProfileManager.find_user_profile(name) >= 0:
+			names.append(name)
+	return names
+
 ## Ask the user to review a plugin install. The IPC response is deferred:
 ## the answer lands when the dialog closes, and the Rust-side fallback
 ## deadline for this method is minutes, not seconds.
@@ -2787,9 +2790,10 @@ func _show_plugin_review(id: int, params: Dictionary, timeout_ms: int):
 	if _pending_plugin_reviews.size() >= PLUGIN_REVIEW_MAX_PENDING:
 		send_ipc_answer.call(id, false, JSON.stringify(_ipc_error("Too many pending plugin reviews")["error"]))
 		return
+	var replaces := _profile_names_colliding(params)
 	var dialog := AppDialog.confirm(self, "Plugin Install Review")
 	dialog.name = "PluginReviewDialog"
-	AppDialog.set_body(dialog, PluginReviewText.build(params), AppDialog.REVIEW_BODY_SIZE)
+	AppDialog.set_body(dialog, PluginReviewText.build(params, replaces), AppDialog.REVIEW_BODY_SIZE)
 	dialog.ok_button_text = "Install"
 	dialog.cancel_button_text = "Decline"
 	var expiry := Timer.new()
@@ -2811,6 +2815,8 @@ func _show_plugin_review(id: int, params: Dictionary, timeout_ms: int):
 		TrustedStore.approve_plugin(
 			str(params.get("id", "")), str(params.get("revision", "")),
 			PluginReviewText.plans(params))
+		if not replaces.is_empty():
+			_pending_profile_replacements[str(params.get("id", ""))] = replaces.duplicate()
 		_finish_plugin_review(id)
 		send_ipc_answer.call(id, true, JSON.stringify({"accepted": true}))
 		# The CLI only moves the clone into place after it reads this answer,
@@ -3024,6 +3030,42 @@ func _refresh_plugin_content_deferred():
 		return
 	ProfileManager.refresh_plugin_profiles()
 	ConceptManager.refresh_plugin_concepts()
+	_apply_pending_profile_replacements()
+
+## A plugin install was accepted with one or more same-name user profiles.
+## Delete them only after the plugin's store record is visible and only for
+## names the installed plugin actually ships; a failed install (or a store
+## that has not caught up) therefore leaves every user profile intact.
+func _apply_pending_profile_replacements():
+	if _pending_profile_replacements.is_empty():
+		return
+	var pending := _pending_profile_replacements.duplicate()
+	_pending_profile_replacements.clear()
+	for plugin_id in pending:
+		var names = pending[plugin_id]
+		if not (names is Array):
+			continue
+		var shipped := ProfileManager.raw_plugin_profile_names(str(plugin_id))
+		if shipped.is_empty():
+			continue
+		var kept: Array[String] = []
+		for name in names:
+			if not (name is String):
+				continue
+			if shipped.has(name) and ProfileManager.find_user_profile(name) >= 0:
+				kept.append(name)
+		if kept.is_empty():
+			continue
+		var removed := ProfileManager.delete_profiles_named(kept)
+		if removed.is_empty():
+			continue
+		for ws in _workspaces:
+			if removed.has(str(ws.get("profile", ""))):
+				ws["profile"] = ""
+		if removed.has(_active_profile):
+			_active_profile = ""
+		ToastManager.info("Replaced profile(s) with the plugin's version: %s" % ", ".join(removed))
+		_refresh_profile_buttons()
 
 func get_terminal_for_ffi() -> GptyTerminal:
 	for t in _tm.tiles:
@@ -3067,6 +3109,26 @@ func _prune_history_deferred():
 				continue
 			ids.append(id)
 	term.prune_history(JSON.stringify(ids))
+
+## The one same-name confirmation used by Save Profile and the sidebar's
+## rename. Callers hide their own dialog first when one is open; this helper
+## only owns the question and its callbacks.
+func _confirm_replace_profile(profile_name: String, on_replace: Callable, on_cancel := Callable()):
+	var dialog := AppDialog.confirm(self, "Replace Profile")
+	AppDialog.set_text(dialog,
+		"A profile named '%s' already exists. Replace it?" % A11y.one_line(profile_name))
+	dialog.ok_button_text = "Replace"
+	dialog.cancel_button_text = "Cancel"
+	dialog.confirmed.connect(func():
+		on_replace.call()
+		dialog.queue_free()
+	)
+	dialog.canceled.connect(func():
+		if on_cancel.is_valid():
+			on_cancel.call()
+		dialog.queue_free()
+	)
+	AppDialog.popup(dialog)
 
 func _save_current_as_profile():
 	# Gather current tiles
@@ -3128,6 +3190,24 @@ func _save_current_as_profile():
 			var s = ts[i].get("settings", {})
 			s["shell"] = shell_editors[i].text
 			if not ts[i].has("settings"): ts[i]["settings"] = s
+		var existing := ProfileManager.find_user_profile(profile_name)
+		if existing >= 0:
+			dialog.hide()
+			_confirm_replace_profile(profile_name, func():
+				var current := ProfileManager.find_user_profile(profile_name)
+				if current >= 0:
+					ProfileManager.update_profile(current, profile_name, ts)
+					ToastManager.info("Profile '%s' replaced" % profile_name)
+				else:
+					var stored := ProfileManager.add_profile(profile_name, ts)
+					ToastManager.info("Profile '%s' saved" % stored)
+				dialog.queue_free()
+			, func():
+				if is_instance_valid(dialog):
+					AppDialog.popup(dialog)
+					name_inp.grab_focus()
+			)
+			return
 		var stored := ProfileManager.add_profile(profile_name, ts)
 		ToastManager.info("Profile '%s' saved" % stored)
 		dialog.queue_free()
@@ -3269,6 +3349,36 @@ func _activate_now(ws: Dictionary, profile: Dictionary):
 	_apply_active_workspace_view()
 	ToastManager.info("Profile '%s' activated" % profile.get("name", ""))
 
+## The sidebar's plugin-profile trash. The FFI removes the plugin record and
+## its directories; this clears the accents of the profiles it provided,
+## refreshes the sidebar and the engine's plugin concepts, and reports the
+## result. Live panes stay: uninstalling removes the template, not the work.
+func _uninstall_profile_plugin(plugin_id: String):
+	var removed: Array[String] = []
+	for profile in ProfileManager.get_all_profiles():
+		if profile.get("plugin", false) == true \
+				and str(profile.get("plugin_id", "")) == plugin_id:
+			removed.append(str(profile.get("name", "")))
+	var result := ProfileManager.uninstall_plugin(plugin_id)
+	if not bool(result.get("ok", false)):
+		ToastManager.warn("Could not uninstall plugin '%s': %s" % [
+			plugin_id, str(result.get("error", ""))])
+		return
+	for ws in _workspaces:
+		if removed.has(str(ws.get("profile", ""))):
+			ws["profile"] = ""
+	if removed.has(_active_profile):
+		_active_profile = ""
+	ProfileManager.refresh_plugin_profiles()
+	ConceptManager.refresh_plugin_concepts()
+	var warnings = result.get("warnings", [])
+	if warnings is Array and not warnings.is_empty():
+		ToastManager.warn("Uninstalled plugin '%s'; some files could not be removed: %s" % [
+			plugin_id, ", ".join(warnings)])
+	else:
+		ToastManager.info("Uninstalled plugin '%s' (%d profile(s) removed)" % [
+			plugin_id, removed.size()])
+
 func _delete_profile(idx: int):
 	# The sidebar's index is a user-profile index (the `_user_index` it
 	# received), so it addresses `get_profiles()` — `get_all_profiles()` puts
@@ -3289,18 +3399,50 @@ func _delete_profile(idx: int):
 func _rename_profile(idx: int, new_name: String):
 	# Same index space as the sidebar's rows: user profiles only.
 	var profiles := ProfileManager.get_profiles()
-	var old_name := ""
-	if idx >= 0 and idx < profiles.size():
-		old_name = str(profiles[idx].get("name", ""))
-	var renamed := ProfileManager.rename_profile(idx, new_name)
+	if idx < 0 or idx >= profiles.size():
+		return
+	var old_name := str(profiles[idx].get("name", ""))
+	var trimmed := new_name.strip_edges()
+	var target := -1
+	if trimmed != "":
+		target = ProfileManager.find_user_profile(trimmed)
+	if target >= 0 and target != idx:
+		_confirm_replace_profile(trimmed, func():
+			_apply_profile_rename(idx, old_name, trimmed, true)
+		, func():
+			# The inline editor committed; rebuilding the row puts the
+			# original name back after a cancel.
+			_refresh_profile_buttons()
+		)
+		return
+	_apply_profile_rename(idx, old_name, new_name, false)
+
+func _apply_profile_rename(idx: int, old_name: String, new_name: String, replace_existing: bool):
+	# The sidebar's index can be stale after an IPC save; the old name is the
+	# stable identity the user pointed at.
+	var current := ProfileManager.find_user_profile(old_name)
+	if current < 0:
+		_refresh_profile_buttons()
+		return
+	idx = current
+	var replaced_name := new_name.strip_edges() if replace_existing else ""
+	var renamed := ProfileManager.rename_profile(idx, new_name, replace_existing)
 	if renamed == "":
 		ToastManager.warn("Cannot rename profile")
+		_refresh_profile_buttons()
+		return
+	for ws in _workspaces:
+		if replace_existing and str(ws.get("profile", "")) == replaced_name:
+			ws["profile"] = ""
+		elif str(ws.get("profile", "")) == old_name:
+			ws["profile"] = renamed
+	if replace_existing and _active_profile == replaced_name:
+		_active_profile = ""
+	elif old_name != "" and _active_profile == old_name:
+		_active_profile = renamed
+	if replace_existing:
+		ToastManager.info("Profile '%s' replaced by '%s'" % [replaced_name, renamed])
 	else:
-		for ws in _workspaces:
-			if str(ws.get("profile", "")) == old_name:
-				ws["profile"] = renamed
-		if old_name != "" and old_name == _active_profile:
-			_active_profile = renamed
 		ToastManager.info("Profile renamed to '%s'" % renamed)
 	_refresh_profile_buttons()
 

@@ -88,6 +88,33 @@ func test_rename_profile_rejects_invalid():
 	# Renaming to its own name is a no-op returning the same name.
 	assert_eq(ProfileManager.rename_profile(idx, "Real"), "Real")
 
+func test_rename_profile_replaces_a_same_named_user_profile():
+	ProfileManager.add_profile("Target", [])
+	ProfileManager.add_profile("Source", [])
+	assert_eq(ProfileManager.rename_profile(1, "Target", true), "Target")
+	assert_eq(ProfileManager.profiles.size(), 1, "the target is removed")
+	assert_eq(ProfileManager.profiles[0].get("name"), "Target")
+
+func test_rename_profile_replacing_an_earlier_index_shifts_the_source():
+	ProfileManager.add_profile("Target", [])
+	ProfileManager.add_profile("Keep", [])
+	ProfileManager.add_profile("Source", [])
+	assert_eq(ProfileManager.rename_profile(2, "Target", true), "Target")
+	assert_eq(ProfileManager.profiles.size(), 2)
+	assert_eq(ProfileManager.profiles[0].get("name"), "Keep")
+	assert_eq(ProfileManager.profiles[1].get("name"), "Target")
+
+func test_delete_profiles_named_removes_once_and_returns_names():
+	ProfileManager.add_profile("A", [])
+	ProfileManager.add_profile("B", [])
+	ProfileManager.add_profile("C", [])
+	var removed := ProfileManager.delete_profiles_named(["A", "C", "missing"])
+	assert_eq(removed.size(), 2)
+	assert_true(removed.has("A") and removed.has("C"),
+		"both requested names are reported")
+	assert_eq(ProfileManager.profiles.size(), 1)
+	assert_eq(ProfileManager.profiles[0].get("name"), "B")
+
 # ── Provenance ─────────────────────────────────────────────────────────
 
 func test_a_user_file_cannot_claim_where_it_came_from():
@@ -116,19 +143,80 @@ func test_a_user_file_cannot_claim_where_it_came_from():
 	assert_eq(all[all.size() - 1].get("_origin"), ProfileManager.ORIGIN_USER,
 		"the loader's stamp is what the gate reads")
 
-func test_get_all_profiles_stamps_each_where_each_one_came_from():
+func test_seeding_defaults_once_makes_them_user_profiles():
 	MockAutoloads.set_store(ProfileManager.DEFAULTS_FILE, {"profiles": [
-		{"id": "shipped", "name": "Shipped", "tiles": []},
+		{"id": "seed-a", "builtin": true, "name": "Agent Workspace",
+		 "description": "seed description", "tiles": [{"col": 0}]},
+		{"name": "Knowledge Base", "tiles": []},
 	]})
 	ProfileManager._load_defaults()
-	_set_plugin_json(JSON.stringify([_installed("OMP")]))
-	ProfileManager.add_profile("Mine", [])
+	ProfileManager.load_profiles()
+	ProfileManager._seed_defaults_once()
 
-	var all := ProfileManager.get_all_profiles()
-	assert_eq(all.size(), 3)
-	assert_eq(all[0].get("_origin"), ProfileManager.ORIGIN_BUILTIN)
-	assert_eq(all[1].get("_origin"), ProfileManager.ORIGIN_PLUGIN)
-	assert_eq(all[2].get("_origin"), ProfileManager.ORIGIN_USER)
+	assert_eq(ProfileManager.profiles.size(), 2, "both defaults are copied")
+	assert_eq(ProfileManager.profiles[0].get("name"), "Agent Workspace",
+		"seed order is the file's order")
+	assert_eq(ProfileManager.profiles[1].get("name"), "Knowledge Base")
+	assert_eq(ProfileManager.profiles[0].get("description"), "seed description")
+	for profile in ProfileManager.get_all_profiles():
+		assert_eq(profile.get("_origin"), ProfileManager.ORIGIN_USER,
+			"a seeded default is a user profile")
+		assert_false(profile.has("builtin"), "the seed claim is not copied")
+		assert_false(profile.has("id"), "the authoring id is not copied")
+	var stored: Dictionary = MockAutoloads.get_store(ProfileManager.PROFILES_FILE)
+	assert_true(stored.get("seeded_defaults", false), "the marker is persisted")
+
+	ProfileManager._seed_defaults_once()
+	assert_eq(ProfileManager.profiles.size(), 2, "the marker stops a second copy")
+	ProfileManager.delete_profile(0)
+	ProfileManager._seed_defaults_once()
+	assert_eq(ProfileManager.profiles.size(), 1,
+		"a deleted default is not restored on the next seed check")
+
+func test_seeding_migrates_an_existing_store_once():
+	MockAutoloads.set_store(ProfileManager.DEFAULTS_FILE, {"profiles": [
+		{"name": "Agent Workspace", "tiles": []},
+		{"name": "Knowledge Base", "tiles": []},
+	]})
+	MockAutoloads.set_store(ProfileManager.PROFILES_FILE, {"profiles": [
+		{"name": "Mine", "tiles": []},
+	]})
+	ProfileManager._load_defaults()
+	ProfileManager.load_profiles()
+	ProfileManager._seed_defaults_once()
+
+	var names: Array[String] = []
+	for profile in ProfileManager.get_all_profiles():
+		names.append(str(profile.get("name", "")))
+	assert_eq(names, ["Agent Workspace", "Knowledge Base", "Mine"],
+		"existing installs get the seeds prepended once")
+
+func test_the_seed_marker_keeps_an_empty_store_empty():
+	MockAutoloads.set_store(ProfileManager.DEFAULTS_FILE, {"profiles": [
+		{"name": "Agent Workspace", "tiles": []},
+	]})
+	MockAutoloads.set_store(ProfileManager.PROFILES_FILE, {
+		"profiles": [], "seeded_defaults": true,
+	})
+	ProfileManager._load_defaults()
+	ProfileManager.load_profiles()
+	ProfileManager._seed_defaults_once()
+	assert_eq(ProfileManager.profiles.size(), 0,
+		"a store that already seeded stays as the user left it")
+
+func test_seeding_keeps_an_existing_same_named_profile():
+	MockAutoloads.set_store(ProfileManager.DEFAULTS_FILE, {"profiles": [
+		{"name": "Agent Workspace", "tiles": [{"col": 9}]},
+	]})
+	MockAutoloads.set_store(ProfileManager.PROFILES_FILE, {"profiles": [
+		{"name": "Agent Workspace", "tiles": [{"col": 1}]},
+	]})
+	ProfileManager._load_defaults()
+	ProfileManager.load_profiles()
+	ProfileManager._seed_defaults_once()
+	assert_eq(ProfileManager.profiles.size(), 1, "first-wins, never a duplicate")
+	assert_eq((ProfileManager.profiles[0].get("tiles") as Array)[0].get("col"), 1,
+		"the user's existing entry is untouched")
 
 # ── Installed-plugin profiles ──────────────────────────────────────────
 #
@@ -148,27 +236,23 @@ func _installed(name: String, plugin_id := "godot-pty/gpty-omp", revision := "a1
 			"settings": {"type": "terminal", "command": "omp"}}],
 	}
 
-func test_plugin_profiles_merge_between_builtins_and_user_profiles():
-	# A builtin read from the shipped defaults, a user profile, and one
-	# installed plugin profile.
-	MockAutoloads.set_store(ProfileManager.DEFAULTS_FILE, {"profiles": [
-		{"id": "builtin", "name": "Built-in", "tiles": []},
-	]})
-	ProfileManager._load_defaults()
+func test_user_profiles_come_before_plugin_profiles():
+	# A user profile and one installed plugin profile: user rows lead, then
+	# installed content.
 	ProfileManager.add_profile("Mine", [])
 	_set_plugin_json(JSON.stringify([_installed("OMP")]))
 
 	var all := ProfileManager.get_all_profiles()
-	assert_eq(all.size(), 3, "builtin + plugin + user")
-	assert_eq(all[0].get("name"), "Built-in")
+	assert_eq(all.size(), 2, "user + plugin")
+	assert_eq(all[0].get("name"), "Mine")
+	assert_eq(all[0].get("_origin"), ProfileManager.ORIGIN_USER)
 	assert_eq(all[1].get("name"), "OMP")
-	assert_eq(all[2].get("name"), "Mine")
 	assert_true(all[1].get("plugin", false), "a plugin profile is marked as one")
 	assert_eq(all[1].get("plugin_id"), "godot-pty/gpty-omp")
 	assert_eq(all[1].get("revision"), "a1b2c3d4e5f6")
 	assert_eq((all[1].get("tiles") as Array).size(), 1, "the plugin's tiles come through as they are")
 	assert_false(all[1].has("_user_index"), "a plugin profile is not a user profile")
-	assert_eq(all[2].get("_user_index"), 0, "user rows keep the delete/rename index space")
+	assert_eq(all[0].get("_user_index"), 0, "user rows keep the delete/rename index space")
 
 	# The plugin's own profiles never land in the user store.
 	assert_eq(ProfileManager.get_profiles().size(), 1, "only the user profile is persisted")
@@ -189,22 +273,9 @@ func test_user_profile_keeps_the_bare_name_when_a_plugin_collides():
 	_set_plugin_json(JSON.stringify([_installed("OMP")]))
 
 	var all := ProfileManager.get_all_profiles()
-	assert_eq(all[0].get("name"), "OMP (2)", "the plugin profile yields the name")
-	assert_true(all[0].get("plugin", false))
-	assert_eq(all[1].get("name"), "OMP", "the user profile keeps the bare name")
-	assert_false(all[1].get("plugin", false))
-
-func test_builtin_keeps_the_bare_name_when_a_plugin_collides():
-	MockAutoloads.set_store(ProfileManager.DEFAULTS_FILE, {"profiles": [
-		{"id": "omp", "name": "OMP", "tiles": []},
-	]})
-	ProfileManager._load_defaults()
-	_set_plugin_json(JSON.stringify([_installed("OMP")]))
-
-	var all := ProfileManager.get_all_profiles()
-	assert_eq(all[0].get("name"), "OMP", "the builtin keeps the bare name")
-	assert_true(all[0].get("builtin", false))
-	assert_eq(all[1].get("name"), "OMP (2)", "the plugin profile takes the suffix")
+	assert_eq(all[0].get("name"), "OMP", "the user profile keeps the bare name")
+	assert_false(all[0].get("plugin", false))
+	assert_eq(all[1].get("name"), "OMP (2)", "the plugin profile yields the name")
 	assert_true(all[1].get("plugin", false))
 
 func test_plugin_profiles_dedupe_among_themselves():
@@ -228,21 +299,21 @@ func test_a_plugin_profile_yields_a_name_the_user_takes_later():
 
 	# The user saves their own "OMP" while the plugin is installed. The name is
 	# theirs, so the plugin yields it now — not at the next launch, where
-	# `get_all_profiles` would have listed the plugin first and resolved a click
+	# `get_all_profiles` would have listed the user first and resolved a click
 	# on the user's row (and `layoutLoad "OMP"`) to the plugin's profile.
 	ProfileManager.add_profile("OMP", [])
 
 	var all := ProfileManager.get_all_profiles()
-	assert_eq(all[0].get("name"), "OMP (2)", "the plugin yields the name it was holding")
-	assert_true(all[0].get("plugin", false))
-	assert_eq(all[1].get("name"), "OMP", "the user profile keeps the bare name")
+	assert_eq(all[0].get("name"), "OMP", "the user profile keeps the bare name")
+	assert_eq(all[1].get("name"), "OMP (2)", "the plugin yields the name it was holding")
+	assert_true(all[1].get("plugin", false))
 	assert_eq(ProfileManager.find_profile("OMP").get("_user_index"), 0,
 		"the bare name resolves to the user's profile, not the plugin's")
 
 func test_deleting_a_user_profile_gives_the_name_back_to_the_plugin():
 	_set_plugin_json(JSON.stringify([_installed("OMP")]))
 	ProfileManager.add_profile("OMP", [])
-	assert_eq(ProfileManager.get_all_profiles()[0].get("name"), "OMP (2)")
+	assert_eq(ProfileManager.get_all_profiles()[1].get("name"), "OMP (2)")
 
 	ProfileManager.delete_profile(0)
 	assert_eq(ProfileManager.get_all_profiles()[0].get("name"), "OMP",

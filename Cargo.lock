@@ -611,6 +611,7 @@ dependencies = [
  "env_logger",
  "gpty-core",
  "gpty-ipc",
+ "gpty-plugin",
  "log",
  "serde",
  "serde_json",
@@ -659,6 +660,7 @@ dependencies = [
  "gpty-core",
  "gpty-ipc",
  "gpty-media",
+ "gpty-plugin",
  "libc",
  "log",
  "pulldown-cmark",
@@ -690,6 +692,16 @@ dependencies = [
  "ffmpeg-the-third",
  "libc",
  "log",
+ "tempfile",
+]
+
+[[package]]
+name = "gpty-plugin"
+version = "0.8.1"
+dependencies = [
+ "gpty-ipc",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 
