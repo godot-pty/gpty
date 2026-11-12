@@ -62,6 +62,7 @@ godot/
         │   ├── command_palette.gd # Ctrl+Shift+P command list (OverlayPanel)
         │   ├── palette_model.gd # Palette entries, matching and ranking (pure)
         │   ├── shortcut_catalog.gd # The About tab's keyboard-shortcut list as data (chords from the binding registry)
+        │   ├── shortcut_guide.gd # The empty workspace's shortcut guide: live keycap demo + every binding (data-driven providers)
         │   ├── keyboard_focus.gd # Keyboard-entry walk + the toolbar-ring pair (overlay focus, pane content, chrome/note toolbars)
         │   ├── concept_graph_editor.gd # Visual rule editor overlay (GraphEdit)
         │   ├── concept_graph_model.gd  # Pure canvas/build/validate/compile logic

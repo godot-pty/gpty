@@ -82,6 +82,8 @@ const CONTRAST_PAIRS := [
 	["DANGER", "SIDEBAR", 4.5, "danger on sidebar"],
 	["WARNING", "SURFACE_RAISED", 4.5, "warning on surface_raised"],
 	["SUCCESS", "SURFACE_RAISED", 4.5, "success on surface_raised"],
+	["TEXT_MUTED", "BG", 4.5, "muted on bg"],
+	["ACCENT", "BG", 4.5, "accent on bg"],
 ]
 
 # --- One value per token ------------------------------------------------------

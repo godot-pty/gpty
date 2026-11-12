@@ -74,9 +74,14 @@ var _sidebar: Sidebar
 var _sidebar_bg: ColorRect
 var _palette: CommandPalette
 var _grid: Control
-## The centred "no panes" screen; one node over the active grid, synced by
-## `_apply_layout()` because every create and kill path reaches it.
-var _empty_state: Control = null
+## The scrollable "no panes" guide; one node over the active grid, synced by
+## `_apply_layout()` because every create and kill path reaches it. The guide
+## itself is `_shortcut_guide`, built once and re-read on every show.
+var _empty_state: ScrollContainer = null
+## The guide's centre: its minimum height is set to the empty viewport so a
+## guide shorter than the window is centred, while a taller one scrolls.
+var _empty_center: CenterContainer = null
+var _shortcut_guide: ShortcutGuide = null
 var _settings_panel: SettingsPanel
 var _concept_graph: ConceptGraphEditor = null
 var _tm: TerminalManager = TerminalManager.new()
@@ -209,6 +214,11 @@ func _ready():
 		if not _workspaces.is_empty():
 			_switch_workspace(clampi(_active - 1, 0, _workspaces.size() - 1))
 	)
+
+	# The guide is built before these registrations; its first show would
+	# otherwise list only the bindings that existed then.
+	if _shortcut_guide:
+		_shortcut_guide.refresh()
 
 	_build_sidebar()
 
@@ -349,31 +359,61 @@ func _apply_window_mode(force := false):
 # Layout
 # ═══════════════════════════════════════════════════════════════════════
 
-## The screen a first launch shows. Nothing is drawn under the grid, so the
-## clear colour was all a new user got: two lines name the state and the one
-## shortcut that leaves it. The shortcut text comes from `PaneTypes`, so it
-## cannot drift from the binding it names.
+## The screen a first launch shows. It is one scrollable guide, not two labels:
+## the title, the live keycap demo, the primary action and every binding in
+## `ShortcutCatalog` (read from the registry on every show). The shortcut text
+## comes from `ShortcutManager.chord`, so it cannot drift from the binding it
+## names. `_apply_layout` shows it exactly when the active workspace has no
+## tiles.
 func _build_empty_state():
-	_empty_state = CenterContainer.new()
+	_empty_state = ScrollContainer.new()
 	_empty_state.name = "EmptyState"
-	_empty_state.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var lines := VBoxContainer.new()
-	lines.name = "Lines"
-	lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	lines.add_theme_constant_override("separation", UiTokens.SPACE_SM)
-	var title := Label.new()
-	title.text = "No panes"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", UiTokens.FS_TITLE)
-	lines.add_child(title)
-	var hint := Label.new()
-	hint.text = "%s opens a terminal" % PaneTypes.ALL["terminal"]["shortcut"]
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_font_size_override("font_size", UiTokens.FS_SMALL)
-	hint.theme_type_variation = UiTheme.MUTED_LABEL
-	lines.add_child(hint)
-	_empty_state.add_child(lines)
+	_empty_state.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_empty_state.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_empty_state.follow_focus = true
 	add_child(_empty_state)
+
+	var margin := MarginContainer.new()
+	margin.name = "Margin"
+	UiTheme.margins(margin, UiTokens.SPACE_XXL)
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_empty_state.add_child(margin)
+
+	_empty_center = CenterContainer.new()
+	_empty_center.name = "Center"
+	_empty_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_empty_center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_empty_center.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_child(_empty_center)
+
+	_shortcut_guide = ShortcutGuide.new()
+	_shortcut_guide.name = "ShortcutGuide"
+	_shortcut_guide.configure(
+		"No panes",
+		"Every shortcut the window answers, in one place.",
+		func() -> Array:
+			return ShortcutCatalog.rows(func(action: String): return ShortcutManager.chord(action)),
+		func() -> Array:
+			var out: Array = []
+			for entry in ShortcutCatalog.new_pane_entries():
+				var chord := ShortcutManager.chord(str(entry["action"]))
+				if chord == "":
+					continue
+				out.append({
+					"type": str(entry["action"]).trim_prefix("app:new_"),
+					"chord": chord,
+					"label": str(entry["label"]).trim_suffix(" pane"),
+				})
+			return out,
+		func() -> Dictionary:
+			return {
+				"label": "Open a Terminal",
+				"type": "terminal",
+				"chord": ShortcutManager.chord("app:new_terminal"),
+			})
+	_shortcut_guide.new_pane_requested.connect(func(type_name: String): _spawn_pane(type_name))
+	_empty_center.add_child(_shortcut_guide)
 
 func _apply_layout():
 	if _grid == null: return
@@ -391,7 +431,19 @@ func _apply_layout():
 		_empty_state.offset_top = top_offset; _empty_state.offset_bottom = -bottom_offset
 		_empty_state.anchor_left = 0.0; _empty_state.anchor_right = 1.0
 		_empty_state.anchor_top = 0.0; _empty_state.anchor_bottom = 1.0
+		var was_visible := _empty_state.visible
 		_empty_state.visible = _tm.tiles.is_empty()
+		# A guide scrolled to the atlas must come back at its title, not where
+		# the previous empty workspace left it.
+		if _empty_state.visible and not was_visible:
+			_empty_state.scroll_vertical = 0
+		# The centre's floor is the viewport height, so a guide shorter than the
+		# window is centred; a taller one keeps its own minimum and scrolls.
+		if _empty_center:
+			_empty_center.custom_minimum_size.y = maxf(0.0,
+				_empty_state.size.y - UiTokens.SPACE_XXL * 2.0)
+		if _shortcut_guide:
+			_shortcut_guide.fit_width(_grid.size.x)
 
 	if _status_bar:
 		_status_bar.anchor_left = 0.0; _status_bar.anchor_right = 1.0

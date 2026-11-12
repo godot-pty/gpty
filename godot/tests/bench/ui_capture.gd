@@ -83,6 +83,11 @@ const STATES := {
 	"file-dialog": {"size": DEFAULT_SIZE, "panes": 1, "open": "file-dialog"},
 	"palette": {"size": DEFAULT_SIZE, "panes": 1, "open": "palette"},
 	"empty-workspace": {"size": DEFAULT_SIZE, "panes": 1, "close_all": true},
+	# The empty guide at the layout floor: the atlas must scroll inside the empty
+	# surface instead of clipping. A zero-pane first launch is the store state
+	# here; the close-all path is covered by `empty-workspace` at 1920x1080,
+	# where the sidebar's trash is inside the synthetic click's reach.
+	"empty-workspace-560x340": {"size": Vector2i(560, 340), "panes": 0},
 	# The pane inset and the code viewer's empty state, side by side: four panes
 	# that each have nothing to show (row *Pane chrome: distinct icons, a compact
 	# action menu, padding and consistent empty states*). The measurement is the
@@ -375,6 +380,7 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	await _settle()
 	if not await _apply_state(state_name, state):
 		return
+	_pin_empty_guide()
 
 	if args.get("perturb", "") == state_name:
 		_perturb(state_name)
@@ -410,6 +416,13 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 
 	await _capture(state_name, str(args.get("out", "")))
 	quit(0)
+
+## The empty guide animates on a wall clock (the keycap press and ripple); pin
+## it to the first frame and stop its clock so two runs of the same state are
+## pixel-identical. The same rule `_apply_agent_states` applies to AgentBadge.
+func _pin_empty_guide() -> void:
+	if _workspace._shortcut_guide != null and _workspace._empty_state.visible:
+		_workspace._shortcut_guide.pin_animation()
 
 
 # ── Seeding ────────────────────────────────────────────────────────────

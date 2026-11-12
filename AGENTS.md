@@ -160,6 +160,7 @@ gpty/
         │   ├── command_palette.gd   # Ctrl+Shift+P command list (OverlayPanel)
         │   ├── palette_model.gd     # Palette entries, matching and ranking (pure)
         │   ├── shortcut_catalog.gd  # The About tab's keyboard-shortcut list as data (chords from the binding registry)
+        │   ├── shortcut_guide.gd    # The empty workspace's shortcut guide: live keycap demo + every binding (data-driven providers)
         │   ├── keyboard_focus.gd   # The keyboard-entry walk + the toolbar-ring pair
         │   ├── status_bar.gd
         │   ├── toast_overlay.gd

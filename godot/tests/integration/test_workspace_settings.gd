@@ -912,19 +912,52 @@ func test_an_emptied_workspace_shows_the_guide():
 
 	ws._reset_now()
 	await get_tree().process_frame
+	await get_tree().process_frame
 
 	assert_true(empty.visible, "closing the last pane brings the guide back")
-	var lines: VBoxContainer = empty.get_node("Lines")
-	assert_eq(lines.get_child_count(), 2, "a title and one line of guidance")
-	assert_eq((lines.get_child(0) as Label).text, "No panes")
-	assert_eq((lines.get_child(1) as Label).text, "Ctrl+Shift+N opens a terminal",
-		"the shortcut named is the binding PaneTypes carries")
+	var guide: ShortcutGuide = ws._shortcut_guide
+	assert_not_null(guide, "the empty state builds the shortcut guide")
+	assert_eq(guide.rows(),
+		ShortcutCatalog.rows(func(action: String): return ShortcutManager.chord(action)),
+		"every registered binding is listed")
+	assert_eq((guide.find_child("Title", true, false) as Label).text, "No panes")
+	var primary := guide.find_child("PrimaryAction", true, false) as Button
+	assert_not_null(primary)
+	assert_eq(primary.text, "Open a Terminal")
+	assert_eq((guide.find_child("PrimaryChord", true, false) as Label).text,
+		ShortcutManager.chord("app:new_terminal"))
+	assert_almost_eq(guide.get_global_rect().get_center().y,
+		empty.get_global_rect().get_center().y, 2.0,
+		"the guide is centred when it fits")
 
-	ws._spawn()
+	primary.pressed.emit()
 	await get_tree().process_frame
+	assert_eq(ws._tm.tiles.size(), 1, "the primary action spawns a terminal")
 	assert_false(empty.visible, "spawning hides the guide again")
 
 	# Wait out the deferred concept push so it cannot resume after the free.
+	await get_tree().create_timer(2.1).timeout
+
+func test_the_empty_guide_scrolls_at_the_layout_floor():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	ws.size = Vector2(540, 560)  # UiTokens.MIN_LAYOUT
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	ws._reset_now()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var empty: ScrollContainer = ws._empty_state
+	assert_not_null(empty)
+	assert_true(empty.visible, "the guide owns an empty workspace")
+	var guide: ShortcutGuide = ws._shortcut_guide
+	assert_not_null(guide)
+	assert_true(guide.size.x <= empty.size.x, "the guide fits the grid width")
+	assert_true(empty.get_v_scroll_bar().max_value > empty.size.y,
+		"the atlas scrolls instead of clipping at the layout floor")
+
 	await get_tree().create_timer(2.1).timeout
 
 ## The row's end-to-end proof: a mode change through the settings save re-themes
