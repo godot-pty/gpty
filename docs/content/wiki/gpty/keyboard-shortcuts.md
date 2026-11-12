@@ -99,7 +99,9 @@ Workspace shortcuts are registered once at startup, with fixed bindings. Pane-ty
 
 The terminal's three chords are *declared* rather than registered with a callback: `term:copy`, `term:paste` and `term:search` exist in the same binding registry so Settings → About and the sidebar tooltips can spell them, while the terminal pane's own keyboard path is still the code that acts on them. That split is what keeps `Ctrl+V` and `Ctrl+F` passing through to programs while `Ctrl+Shift+V` and `Ctrl+Shift+F` do not: a declared chord never becomes a workspace action, so the pane is offered the key first.
 
-Every surface that names a chord — the About list, the palette rows, the sidebar's tooltips — reads it from that registry with `chord(action)` instead of repeating a literal, so a list can never advertise a key that does nothing.
+Every surface that names a chord — the About list, the palette rows, the sidebar's tooltips, the empty-workspace guide — reads it from that registry with `chord(action)` instead of repeating a literal, so a list can never advertise a key that does nothing.
+
+The empty-workspace guide is the discovery half of the same rule: with no panes open it lists every registered binding in grouped cards, a live keycap cycles the four spawn chords, and its **Open a Terminal** button spawns through the same path as `Ctrl+Shift+N`. It re-reads the registry each time the workspace becomes empty, so a rebound chord cannot be advertised wrongly.
 
 ## Related
 

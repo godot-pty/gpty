@@ -41,7 +41,7 @@ A router plus the operational recipe. The method is normative in `docs/content/d
 Check every one on each pass; each maps to at least one row (a closed one says so - do not re-report it):
 
 1. Translucent `Panel` defaults — content bleeding through overlays.
-2. Empty states: project clear colour, no guidance, no CTA.
+2. Empty states: the window-level empty workspace is closed (the v0.8.4 row *The empty workspace teaches every shortcut, with a living keycap*: a guide with a keycap demo, a primary action and every binding). Check pane-level empties and any new empty surface; a new empty state with no guidance or CTA is a finding again.
 3. Overlay focus: focus never grabbed (type-cast, not `find_child("*")`), list empty until typed, Escape not handled once focused, Enter only runs the first match, no arrow selection.
 4. Small-window clipping: panels spilling over the sidebar, titles running under their own buttons, lists cut after one row.
 5. Stock-Godot `Window`/`AcceptDialog`/`ConfirmationDialog` styling, clipped form fields, jargon labels.

@@ -38,7 +38,7 @@ This section answers "which tab am I in". Its header has a `+` button that creat
 
 The two title rows use the same in-place question: the trash hides, a check and cross appear, and only the check proceeds to the running-work and unsaved-work walk. A row's label stays visible while its question is open, so you can see which workspace or pane you are confirming.
 
-When no workspace exists, the Workspaces header keeps only the `+` and the Panes section is hidden. The window shows the guide ("No panes" and the terminal shortcut); the first pane you create makes a workspace named **Default**, and `+` alone also creates **Default**.
+When no workspace exists, the Workspaces header keeps only the `+` and the Panes section is hidden. The window shows the empty-workspace guide — a live keycap demo of the spawn chords, an **Open a Terminal** button, and every registered binding in grouped cards; the first pane you create makes a workspace named **Default**, and `+` alone also creates **Default**.
 
 The active workspace is accented. Because the sidebar only ever shows the active workspace's panes, workspace rows are how you move between arrangements; see [[workspace]] for what a workspace owns. The header's **Panes:** trash is the section's close-all: it closes every pane in the active workspace, after the same check/cross and running-work walk (same as `Ctrl+Shift+R`).
 
