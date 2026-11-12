@@ -583,9 +583,10 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			if menu == null:
 				_fail("clicking the workspace More button did not open its menu")
 				return false
-			# Set Directory is item 0; emitting the press is what a click on the
-			# item sends (the modal dialogs use the same seam).
-			menu.index_pressed.emit(0)
+			# Set Directory is item 1 (Rename Workspace is item 0); emitting the
+			# press is what a click on the item sends (the modal dialogs use the
+			# same seam).
+			menu.index_pressed.emit(1)
 			await _wait_frames(3)
 			var picker := _visible_dialog(_workspace) as FileDialog
 			if picker == null:

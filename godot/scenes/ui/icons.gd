@@ -126,6 +126,7 @@ const CARET_DOWN = "\uE136"  # caret-down (return to live output)
 const ADD      = "\uE3D4"  # plus
 const SETTINGS = "\uE272"  # gear-six
 const FOLDER   = "\uE24A"  # folder (a directory picker, not a settings surface)
+const PENCIL   = "\uE3B4"  # pencil-simple (rename a workspace)
 const NEW_WORKSPACE = "\uE5DE"  # arrow-square-out (open a profile in its own workspace)
 const RESET    = "\uE038"  # arrow-counter-clockwise (reset a value to its default)
 const MORE     = "\uE204"  # dots-three-outline (a pane's overflow actions)

@@ -1324,6 +1324,9 @@ func _on_workspace_menu(idx: int, source_btn: Button):
 	var dir := str(ws.get("cwd", ""))
 	var dir_tip := "Working directory: %s" % (
 		dir if dir != "" else "default (gpty's own directory)")
+	_add_workspace_menu_item(menu, Icons.PENCIL, "Rename Workspace",
+		"Rename '%s'" % str(ws.get("name", "")),
+		{"kind": "rename", "index": idx})
 	_add_workspace_menu_item(menu, Icons.FOLDER, "Set Directory", dir_tip,
 		{"kind": "cwd", "index": idx})
 	_add_workspace_menu_item(menu, Icons.DELETE, "Clear Workspace",
@@ -1339,6 +1342,7 @@ func _on_workspace_menu(idx: int, source_btn: Button):
 		if at < 0 or at >= _workspaces.size():
 			return
 		match str(action.get("kind", "")):
+			"rename": _sidebar.begin_workspace_rename.call_deferred(at)
 			"cwd": _open_workspace_cwd_dialog(at)
 			"clear": _clear_workspace(at)
 	)

@@ -86,6 +86,27 @@ func _icon_text_button(label: String) -> Button:
 				return b
 	return null
 
+func test_sidebar_text_buttons_center_their_content():
+	for label in ["Search", "Settings", "Feedback"]:
+		var btn := _icon_text_button(label)
+		assert_not_null(btn, "%s must exist" % label)
+		if btn == null:
+			continue
+		var row := btn.get_node_or_null("IconTextRow") as HBoxContainer
+		assert_not_null(row, "%s must hold its icon+text row" % label)
+		if row == null:
+			continue
+		assert_eq(row.alignment, BoxContainer.ALIGNMENT_CENTER,
+			"%s centres its glyph and text as one group" % label)
+		assert_eq(row.offset_left, 0.0,
+			"%s must not shift the centred group toward the edge" % label)
+
+	_sidebar.update_workspace_list(["Workspace 1"], 0)
+	var ws_row = _sidebar._workspace_list.get_child(0)
+	var ws_btn: Button = ws_row.get_child(0)
+	assert_eq(ws_btn.alignment, HORIZONTAL_ALIGNMENT_CENTER,
+		"section row labels keep the same centred alignment")
+
 func test_build_offers_one_add_button_per_pane_type():
 	var row = _sidebar.find_child("PaneTypeRow", true, false)
 	assert_not_null(row, "the Add Pane row must exist after build")
@@ -233,6 +254,55 @@ func test_workspace_row_double_click_renames():
 	await get_tree().process_frame
 	assert_eq(_sidebar._workspace_list.get_child_count(), 2,
 		"workspace rows must survive the post-commit blur")
+
+func test_an_unchanged_or_cancelled_workspace_rename_restores_the_row():
+	_sidebar.update_workspace_list(["Workspace 1"], 0)
+	var row = _sidebar._workspace_list.get_child(0)
+	var btn: Button = row.get_child(0)
+	var ev = InputEventMouseButton.new()
+	ev.button_index = MOUSE_BUTTON_LEFT
+	ev.pressed = true
+	ev.double_click = true
+	_sidebar._on_workspace_row_input(0, btn, ev)
+	var le := row.get_node_or_null("InlineRename") as LineEdit
+	assert_not_null(le, "double-click opens the inline editor")
+	assert_false(btn.visible, "the label hides during rename")
+	if le == null:
+		return
+
+	# The More menu's Rename is the second entry route; it must focus the open
+	# editor, not stack a second one in the row.
+	_sidebar.begin_workspace_rename(0)
+	var editors := 0
+	for c in row.get_children():
+		if c is LineEdit:
+			editors += 1
+	assert_eq(editors, 1, "the menu and double-click share one editor")
+	assert_true(row.get_node_or_null("InlineRename") == le,
+		"starting again focuses the editor already open")
+
+	# Enter with the same name is a workspace no-op: no list rebuild happens,
+	# so the sidebar must restore the row itself.
+	le.text_submitted.emit("Workspace 1")
+	await get_tree().process_frame
+	assert_true(btn.visible, "an unchanged name brings the label back")
+	assert_null(row.get_node_or_null("InlineRename"),
+		"and removes the editor instead of leaving it editable")
+
+	# Escape is the other no-change commit path.
+	_sidebar._on_workspace_row_input(0, btn, ev)
+	le = row.get_node_or_null("InlineRename") as LineEdit
+	assert_not_null(le, "the second edit opens a fresh editor")
+	if le == null:
+		return
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.keycode = KEY_ESCAPE
+	le.gui_input.emit(key)
+	await get_tree().process_frame
+	assert_true(btn.visible, "Escape restores the label too")
+	assert_null(row.get_node_or_null("InlineRename"),
+		"and removes the editor")
 
 func test_a_workspace_row_opens_the_menu():
 	_sidebar.update_workspace_list(["Repo"], 0, ["/tmp/repo"])

@@ -28,12 +28,14 @@ Below it:
 - **Settings** opens the global settings panel described in [[settings]].
 - **Feedback** opens a prefilled GitHub issue in your browser. The title reads `Feedback: ` and the body carries three prompts — what happened, what you expected, steps to reproduce — over an "About this build" block naming the gPTY version, the operating system and its version, and the window mode. Only those four facts are prefilled: never pane output, a command, selected text, a path, an environment value, or a log. Nothing is submitted by gPTY and no token or network call is involved — the issue is an ordinary GitHub page you review and file yourself. When no browser can be opened (offline, headless, no default handler) the same text is copied to the clipboard instead and a toast says so.
 
+All three action rows center their glyph and text in the panel, the same alignment the Workspace and Profile row labels use.
+
 ## Workspaces
 
 This section answers "which tab am I in". Its header has a `+` button that creates a workspace (up to eight) and a **trash** that closes every workspace; the trash is shown only while at least one workspace exists. Each row has three parts:
 
-- The **name** switches to that workspace on a click and begins an inline rename on a double-click. Enter or clicking away commits; Escape restores the old name. Names are trimmed to 32 characters and default to `Workspace`.
-- The **More** button (⋯) opens that workspace's menu. **Set Directory** opens the directory picker for the workspace's default directory; its tooltip names the current path and `Use default` clears it. New terminals spawned there inherit it, including terminals created by profile activation, but running shells are never moved. **Clear Workspace** closes every pane in that workspace; a hidden workspace is cleared without switching to it. Both actions use the same running-work and unsaved-work questions a close does.
+- The **name** switches to that workspace on a click and begins an inline rename on a double-click or from the row's **More** menu. Enter or clicking away commits; Escape restores the old name. Names are trimmed to 32 characters and default to `Workspace`.
+- The **More** button (⋯) opens that workspace's menu. **Rename Workspace** opens that row's inline rename editor (the same one a double-click opens). **Set Directory** opens the directory picker for the workspace's default directory; its tooltip names the current path and `Use default` clears it. New terminals spawned there inherit it, including terminals created by profile activation, but running shells are never moved. **Clear Workspace** closes every pane in that workspace; a hidden workspace is cleared without switching to it, after the same running-work and unsaved-work questions a close uses.
 - The **close button** (trash) is always shown, including on the last workspace. It swaps the row's actions for a check and a cross first; the check runs the close, the cross cancels. Closing the last workspace is allowed and leaves the zero-workspace state below.
 
 The two title rows use the same in-place question: the trash hides, a check and cross appear, and only the check proceeds to the running-work and unsaved-work walk. A row's label stays visible while its question is open, so you can see which workspace or pane you are confirming.

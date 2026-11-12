@@ -712,7 +712,7 @@ func test_the_workspaces_title_row_closes_all_workspaces():
 	assert_false(ws._sidebar._workspaces_close_all_btn.visible)
 	await get_tree().create_timer(2.1).timeout
 
-func test_the_workspace_menu_lists_directory_and_clear():
+func test_the_workspace_menu_lists_rename_directory_and_clear():
 	var ws = WorkspaceScript.new()
 	_ws = ws
 	add_child(ws)
@@ -723,15 +723,18 @@ func test_the_workspace_menu_lists_directory_and_clear():
 	ws._on_workspace_menu(0, source)
 	var menu := ws.find_child("WorkspaceActionsMenu", true, false) as PopupMenu
 	assert_not_null(menu, "the More button opens the workspace menu")
-	assert_eq(menu.item_count, 2)
-	assert_eq(menu.get_item_text(0), "Set Directory")
-	assert_string_contains(menu.get_item_tooltip(0), "Working directory:",
+	assert_eq(menu.item_count, 3)
+	assert_eq(menu.get_item_text(0), "Rename Workspace")
+	assert_string_contains(menu.get_item_tooltip(0), "Rename")
+	assert_not_null(menu.get_item_icon(0), "the pencil glyph is a menu icon")
+	assert_eq(menu.get_item_text(1), "Set Directory")
+	assert_string_contains(menu.get_item_tooltip(1), "Working directory:",
 		"the directory item carries the current path")
-	assert_not_null(menu.get_item_icon(0), "the folder glyph is a menu icon")
+	assert_not_null(menu.get_item_icon(1), "the folder glyph is a menu icon")
 	# A texture that is null is not the only failure: an opaque or blank atlas
 	# region would draw a square or nothing. The glyph's alpha must cover some
 	# pixels and not all of them.
-	var icon_image := (menu.get_item_icon(0) as ImageTexture).get_image()
+	var icon_image := (menu.get_item_icon(1) as ImageTexture).get_image()
 	var covered := 0
 	for y in icon_image.get_height():
 		for x in icon_image.get_width():
@@ -740,10 +743,37 @@ func test_the_workspace_menu_lists_directory_and_clear():
 	assert_gt(covered, 0, "the folder icon has glyph pixels")
 	assert_lt(covered, icon_image.get_width() * icon_image.get_height(),
 		"and is not a filled square")
-	assert_eq(menu.get_item_text(1), "Clear Workspace")
-	assert_string_contains(menu.get_item_tooltip(1), "Close every pane")
-	assert_not_null(menu.get_item_icon(1), "the trash glyph is a menu icon")
+	assert_eq(menu.get_item_text(2), "Clear Workspace")
+	assert_string_contains(menu.get_item_tooltip(2), "Close every pane")
+	assert_not_null(menu.get_item_icon(2), "the trash glyph is a menu icon")
 	menu.queue_free()
+	await get_tree().create_timer(2.1).timeout
+
+func test_the_workspace_menu_rename_opens_the_inline_editor():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var source := Button.new()
+	add_child_autofree(source)
+	ws._on_workspace_menu(0, source)
+	var menu := ws.find_child("WorkspaceActionsMenu", true, false) as PopupMenu
+	assert_not_null(menu, "the More button opens the workspace menu")
+	menu.index_pressed.emit(0)
+	# The menu item defers the editor until the popup has closed and restored
+	# focus, so the row is only populated after the idle phase.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var row = ws._sidebar._workspace_list.get_child(0)
+	var le := row.get_node_or_null("InlineRename") as LineEdit
+	assert_not_null(le, "the Rename item opens the row's inline editor")
+	if le == null:
+		return
+	le.text = "Renamed"
+	le.text_submitted.emit("Renamed")
+	assert_eq(str(ws._workspaces[0].get("name", "")), "Renamed",
+		"the editor commits through the workspace's rename path")
 	await get_tree().create_timer(2.1).timeout
 
 func test_clearing_a_hidden_workspace_does_not_switch():

@@ -6,7 +6,7 @@ A workspace is a tab that holds its own layout. Switching tabs changes which pan
 
 A window has at most eight workspaces and can have none: a first run starts with no workspace and no pane, and the first pane you create makes a workspace named **Default**. Each one owns a grid, a set of tiles, and a default working directory. Panes are not shared between workspaces: a terminal in one tab is a different process from a terminal in another, and closing a workspace closes the panes it contains.
 
-The sidebar lists them in its Workspaces section, with the active one accented. Clicking a row switches to it; double-clicking the name edits it in place (Enter or clicking away commits, Escape cancels). The add button creates one. Every row carries a **More** menu (**Set Directory** / **Clear Workspace**) and an always-present close trash — including on the last workspace — and a close asks in place with a check/cross before the pane and unsaved-work questions.
+The sidebar lists them in its Workspaces section, with the active one accented. Clicking a row switches to it; double-clicking the name, or choosing **Rename Workspace** from its **More** menu, edits it in place (Enter or clicking away commits, Escape cancels). The add button creates one. Every row carries a **More** menu (**Rename Workspace** / **Set Directory** / **Clear Workspace**) and an always-present close trash — including on the last workspace — and a close asks in place with a check/cross before the pane and unsaved-work questions.
 
 Rows show the workspace's name and, when one is set, its directory; hovering explains the directory. The profile accent is per workspace — activating a profile in one workspace does not light that row while another workspace is active.
 

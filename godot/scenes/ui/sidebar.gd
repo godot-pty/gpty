@@ -114,7 +114,7 @@ func _make_pane_row(body: Control, is_active: bool) -> HBoxContainer:
 
 	var pane_label := str(body.get("pane_label"))
 	var label := pane_label if pane_label != "" else "%s?" % PaneTypes.ALL.get(body._pane_type(), {}).get("label_prefix", "?")
-	var btn = _make_row_label_button(label)
+	var btn = _make_sidebar_button(label)
 	_apply_row_accent(btn, is_active)
 	btn.pressed.connect(func(): request_focus.emit(body))
 	row.add_child(btn)
@@ -159,22 +159,49 @@ func set_active_pane(body: Control):
 			continue
 		_apply_row_accent(btn, row.get_meta("body") == body)
 
-## A section row's label Button.
+## The one constructor for a sidebar button that carries text: a section row's
+## label (`icon == ""`) and a full-width icon+text action (Search, Settings,
+## Feedback). Centering lives here so every new sidebar text button inherits it
+## instead of choosing its own alignment.
 ##
-## The sidebar is a fixed 180 px panel (16 px of margins), so a row must never
-## size itself to its text: a long name — a user-authored workspace, profile or
-## pane name, or the catalog hint — would stretch the section's VBox past the
-## panel and clip *every* row's right edge. Measured: the 27-character catalog
-## hint wanted 220 px and cut the profile row above it to "Agent Workspac",
-## which had fit before. `clip_text` removes the text from the button's minimum
-## width and the overrun behavior ellipsizes it, so a name that cannot fit
-## reads as truncated instead of silently slicing neighbouring rows.
-func _make_row_label_button(text: String) -> Button:
-	var btn = Button.new()
-	btn.text = text
-	btn.clip_text = true
-	btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+## Row labels keep `clip_text`: a user-authored name must not size the button to
+## its text and drag the fixed 180 px panel's other rows out of view; the
+## overrun ellipsizes instead of slicing the row. An icon+text action centers
+## its glyph and label as one group in a full-rect HBox; the Button itself has
+## no text, so it keeps its explicit 28 px height.
+func _make_sidebar_button(text: String, icon := "") -> Button:
+	var btn := Button.new()
+	btn.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if icon == "":
+		btn.text = text
+		btn.clip_text = true
+		btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		return btn
+
+	btn.custom_minimum_size.y = 28
+	var h := HBoxContainer.new()
+	h.name = "IconTextRow"
+	h.add_theme_constant_override("separation", UiTokens.SPACE_MD)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	h.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn.add_child(h)
+
+	var icon_lbl := Label.new()
+	icon_lbl.text = icon
+	icon_lbl.add_theme_font_override("font", Icons.font_resource)
+	icon_lbl.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
+	icon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	icon_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(icon_lbl)
+
+	var text_lbl := Label.new()
+	text_lbl.text = text
+	text_lbl.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
+	text_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	text_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(text_lbl)
 	return btn
 
 ## A trailing glyph on a section row (pane and profile rows). Glyph-only
@@ -204,64 +231,19 @@ func _add_header(v: VBoxContainer):
 func _add_buttons(v: VBoxContainer):
 	_add_pane_buttons(v)
 
-	var search_btn = _make_icon_text_button(Icons.SEARCH, "Search")
+	var search_btn = _make_sidebar_button("Search", Icons.SEARCH)
 	search_btn.tooltip_text = _with_chord("Search the active terminal", "term:search")
 	search_btn.pressed.connect(func(): request_search.emit())
 	v.add_child(search_btn)
 
-	var settings_btn = _make_icon_text_button(Icons.SETTINGS, "Settings")
+	var settings_btn = _make_sidebar_button("Settings", Icons.SETTINGS)
 	settings_btn.pressed.connect(func(): request_settings.emit())
 	v.add_child(settings_btn)
 
-	var feedback_btn = _make_icon_text_button(Icons.FEEDBACK, "Feedback")
+	var feedback_btn = _make_sidebar_button("Feedback", Icons.FEEDBACK)
 	feedback_btn.tooltip_text = "Report a bug or request a feature - opens a prefilled GitHub issue in your browser"
 	feedback_btn.pressed.connect(_on_feedback_pressed)
 	v.add_child(feedback_btn)
-
-## One clickable button holding an icon Label and a text Label in an HBox —
-## the container aligns the PUA glyph and the label on the same baseline,
-## which a sibling-icon layout could never do reliably.
-##
-## `variation` names a theme colour role (`UiTheme.DANGER_LABEL`) rather than a
-## colour: a `Color.WHITE` default was invisible on a light sidebar, and an
-## override would pin whichever palette the sidebar was built under.
-func _make_icon_text_button(icon: String, text: String, variation := &"") -> Button:
-	var btn = Button.new()
-	btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# A Button does not derive its minimum size from child Controls and this
-	# one has no text of its own — without an explicit height it collapses.
-	btn.custom_minimum_size.y = 28
-
-	var h = HBoxContainer.new()
-	h.name = "IconTextRow"
-	h.add_theme_constant_override("separation", UiTokens.SPACE_MD)
-	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	h.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	h.offset_left = 6  # breathing room before the icon (nbsp-equivalent)
-	h.alignment = BoxContainer.ALIGNMENT_BEGIN
-	btn.add_child(h)
-
-	var icon_lbl = Label.new()
-	icon_lbl.text = icon
-	icon_lbl.add_theme_font_override("font", Icons.font_resource)
-	# Same size as the text label so both center on the same axis in the
-	# stretched full-height labels (a smaller glyph font centers on a
-	# different baseline and looks misaligned).
-	icon_lbl.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
-	icon_lbl.theme_type_variation = variation
-	icon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	icon_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	h.add_child(icon_lbl)
-
-	var text_lbl = Label.new()
-	text_lbl.text = text
-	text_lbl.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
-	text_lbl.theme_type_variation = variation
-	text_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	text_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	h.add_child(text_lbl)
-	return btn
 
 func _add_window_mode(v: VBoxContainer):
 	var wm_dropdown = OptionButton.new()
@@ -287,7 +269,7 @@ func _add_pane_buttons(v: VBoxContainer):
 	_add_pane_heading.text = ADD_PANE_TITLE
 	# The heading renames itself on hover, so its text must never widen the
 	# section: `clip_text` drops the text from the label's minimum width (the
-	# mechanism `_make_row_label_button` relies on) and the overrun ellipsizes.
+	# mechanism `_make_sidebar_button` relies on) and the overrun ellipsizes.
 	_add_pane_heading.clip_text = true
 	_add_pane_heading.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_add_pane_heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -669,7 +651,7 @@ func _make_workspace_row(idx: int, ws_name: String, is_active: bool, cwd := "") 
 	row.set_meta("workspace_index", idx)
 
 	var dir_hint := cwd if cwd != "" else "default (gpty's own directory)"
-	var btn = _make_row_label_button(ws_name)
+	var btn = _make_sidebar_button(ws_name)
 	btn.tooltip_text = "Switch workspace (double-click to rename)\nWorking directory: %s" % dir_hint
 	_apply_row_accent(btn, is_active)
 	btn.pressed.connect(func(): request_workspace_switch.emit(idx))
@@ -706,11 +688,21 @@ func _make_workspace_row(idx: int, ws_name: String, is_active: bool, cwd := "") 
 ## LineEdit still fires focus_exited, and a second commit on a freed
 ## object corrupted the rebuild (rows vanished until restart).
 func _begin_inline_rename(btn: Button, on_commit: Callable):
+	var row := btn.get_parent()
+	for c in row.get_children():
+		var open := c as LineEdit
+		if open != null and open.name == "InlineRename" \
+				and not open.is_queued_for_deletion():
+			open.grab_focus()
+			open.select_all()
+			return
+
 	var le = LineEdit.new()
+	le.name = "InlineRename"
 	le.text = btn.text
 	le.custom_minimum_size.y = btn.size.y
 	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn.get_parent().add_child(le)
+	row.add_child(le)
 	btn.visible = false
 	le.grab_focus()
 	le.select_all()
@@ -720,12 +712,14 @@ func _begin_inline_rename(btn: Button, on_commit: Callable):
 			return
 		committed[0] = true
 		on_commit.call(t)
+		_finish_inline_rename(btn, le)
 	)
 	le.focus_exited.connect(func():
 		if committed[0] or not is_instance_valid(le):
 			return
 		committed[0] = true
 		on_commit.call(le.text)
+		_finish_inline_rename(btn, le)
 	)
 	le.gui_input.connect(func(e2: InputEvent):
 		if e2 is InputEventKey and e2.pressed and e2.keycode == KEY_ESCAPE:
@@ -733,14 +727,44 @@ func _begin_inline_rename(btn: Button, on_commit: Callable):
 				return
 			committed[0] = true
 			on_commit.call(btn.text)
+			_finish_inline_rename(btn, le)
 	)
+
+## End the inline edit: remove the editor and, when its row still exists,
+## show the label again. A commit that changed the name rebuilds the list and
+## queues the old row for deletion; restoring its label then would paint the
+## old row beside the new one for a frame, so only a surviving row is restored.
+func _finish_inline_rename(btn: Button, le: LineEdit) -> void:
+	if not is_instance_valid(le):
+		return
+	var row := le.get_parent()
+	le.visible = false
+	le.queue_free()
+	if is_instance_valid(btn) and is_instance_valid(row) \
+			and not row.is_queued_for_deletion():
+		btn.visible = true
+
+func _start_workspace_rename(idx: int, btn: Button) -> void:
+	_begin_inline_rename(btn, func(t: String): request_workspace_rename.emit(idx, t))
+
+## The workspace More menu's Rename: the same inline editor double-click opens.
+func begin_workspace_rename(idx: int) -> void:
+	if _workspace_list == null:
+		return
+	for row in _workspace_list.get_children():
+		if row.is_queued_for_deletion() or int(row.get_meta("workspace_index", -1)) != idx:
+			continue
+		var btn := row.get_child(0) as Button
+		if btn != null:
+			_start_workspace_rename(idx, btn)
+		return
 
 func _on_workspace_row_input(idx: int, btn: Button, ev: InputEvent):
 	if not (ev is InputEventMouseButton):
 		return
 	if not ev.double_click or ev.button_index != MOUSE_BUTTON_LEFT:
 		return
-	_begin_inline_rename(btn, func(t: String): request_workspace_rename.emit(idx, t))
+	_start_workspace_rename(idx, btn)
 
 func _add_pane_list_ui(v: VBoxContainer):
 	var header = HBoxContainer.new(); header.name = "PaneHeader"
@@ -854,7 +878,7 @@ func _render_profiles():
 		var is_plugin: bool = p.get("plugin", false) == true
 		var row = HBoxContainer.new()
 		row.set_meta("profile_name", p_name)
-		var btn = _make_row_label_button(p_name)
+		var btn = _make_sidebar_button(p_name)
 		btn.tooltip_text = str(p.get("description", ""))
 		_apply_row_accent(btn, p_name == _profile_active_name)
 		# Toggle-mode buttons flip on click; re-assert so a canceled
@@ -965,7 +989,7 @@ func _plugin_provenance(profile: Dictionary) -> String:
 ## it; pressing it opens the registry page.
 func _make_catalog_hint_row() -> HBoxContainer:
 	var row = HBoxContainer.new()
-	var btn = _make_row_label_button(CATALOG_HINT_TEXT)
+	var btn = _make_sidebar_button(CATALOG_HINT_TEXT)
 	btn.name = "CatalogHintBtn"
 	btn.tooltip_text = "Browse the plugin registry"
 	btn.pressed.connect(func(): ExternalLink.open(PLUGINS_CATALOG_URL))
