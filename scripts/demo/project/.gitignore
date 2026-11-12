@@ -1,0 +1,8 @@
+__pycache__/
+# Not the project: the sandbox's vault, prompt, shell history and (media
+# scenario) clip. `local` is what the app writes into its throwaway HOME.
+vault/
+.bashrc
+.bash_history
+.local/
+clip.mp4

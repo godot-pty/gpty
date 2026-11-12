@@ -38,6 +38,10 @@ SIZE="${DEMO_SIZE:-1280x760}"
 FPS="${DEMO_FPS:-15}"
 GIF_WIDTH="${GIF_WIDTH:-1000}"
 GIF_FPS="${GIF_FPS:-12}"
+# Where a burned-in caption sits: the default is the bottom centre, which is
+# also where a toast appears. A clip whose point is the toast puts its (short)
+# caption at the bottom left instead of covering the question.
+CAPTION_POS="${CAPTION_POS:-}"
 case "$SCENARIO" in
     showcase | panes | agents | concepts | wiki | media | cli-view | profiles) ;;
     *) echo "scenario must be one of: showcase panes agents concepts wiki media cli-view profiles" >&2; exit 2 ;;
@@ -49,8 +53,12 @@ esac
 case "$SCENARIO" in
     showcase) ;;
     profiles)
-        GIF_WIDTH="${GIF_WIDTH_OVERRIDE:-1200}"
+        # Three panes: 900 px is a texture rather than information, and this
+        # clip's own beats are the profile toast, so each caption is short and
+        # sits bottom left, clear of the toast at bottom centre.
+        GIF_WIDTH="${GIF_WIDTH_OVERRIDE:-1000}"
         GIF_FPS="${GIF_FPS_OVERRIDE:-10}"
+        CAPTION_POS="${CAPTION_POS:-x=20:y=h-text_h-22}"
         ;;
     *)
         GIF_WIDTH="${GIF_WIDTH_OVERRIDE:-900}"
@@ -98,7 +106,8 @@ sed -i "s#__ROOT__#$ROOT#; s#__SOCK__#$GPTY_SOCKET#" "$HOME/.bashrc"
     cd "$HOME"
     export GIT_AUTHOR_NAME=demo GIT_AUTHOR_EMAIL=demo@example.com GIT_COMMITTER_NAME=demo GIT_COMMITTER_EMAIL=demo@example.com
     git init -q -b main .
-    git add src && git commit -q -m "word counts for log lines"
+    git add src counts.py test_counts.py .gitignore
+    git commit -q -m "word counts for log lines"
     echo "// sorted output" >>src/main.rs && git commit -q -am "sort the output"
     git commit -q --allow-empty -m "add CI workflow"
     git commit -q --allow-empty -m "release 0.1"
@@ -265,8 +274,10 @@ AGENT="$(label_of terminal)"
 
 case "$SCENARIO" in
 showcase)
-    # Six real gestures and no theatre: nothing here prints a string it then
-    # "waits for", and no JSON blob fills the frame. Every beat is one line,
+    # Five real gestures and no theatre: nothing prints a string it then
+    # "waits for", no JSON document fills the frame (a spawn and a pane-view
+    # print one, so their stdout goes to /dev/null - the pane appearing and
+    # the canvas changing are the confirmation), and every line fits the pane,
     # because the terminal is 34/60 wide and a wrapped command reads as noise.
     caption "A tiling workspace, not a terminal"
     sleep 2
@@ -275,17 +286,17 @@ showcase)
     sleep 3
     caption "A concept routes output into the pane beside it"
     type_line "cat <(git diff)"
-    sleep 4.5
+    sleep 4
+    # `-C $HOME`: a cli_view starts in the app's directory, not the pane's,
+    # so an unqualified `git status` reports the gPTY repository itself.
     caption "Any command can own a pane"
-    type_line "gpty new-pane -t cli_view -c git --arg=status --title status --split bottom"
+    type_line "gpty new-pane -t cli_view -c git --arg=-C --arg \"\$HOME\" --arg=status --title status --split bottom >/dev/null"
     sleep 4
-    caption "An agent declares its own state"
-    type_line "gpty state needs-attention"
-    sleep 3
     KB="$(label_of wiki)"
+    [[ -n "$KB" ]] || { echo "no wiki pane; pane list:" >&2; gpty list-panes >&2; exit 5; }
     caption "One call opens the shipped knowledge base's link graph"
-    type_line "gpty pane-view $KB --graph"
-    sleep 4
+    type_line "gpty pane-view $KB --graph >/dev/null"
+    sleep 4.5
     caption "gPTY - github.com/godot-pty/gpty"
     sleep 2
     ;;
@@ -373,15 +384,15 @@ profiles)
     # program-free, so neither needs a running agent: the panes open on their
     # own idle state and `layoutLoad` answers with the toast that names the
     # profile. Recorded at 1200 px because the Agent Workspace is three panes.
-    caption "Agent Workspace: a terminal, an Inspector and a Reasoning pane"
+    caption "Agent Workspace"
     type_line "gpty layout load 'Agent Workspace'"
-    sleep 4
+    sleep 3.5
     # The load replaced the workspace, and the pane this script types into
     # with it: resolve the new terminal before the next beat.
     AGENT="$(label_of terminal)"
-    caption "Knowledge Base: the shipped wiki, opened from its profile"
+    caption "Knowledge Base"
     type_line "gpty layout load 'Knowledge Base'"
-    sleep 4
+    sleep 3.5
     caption "gPTY - github.com/godot-pty/gpty"
     sleep 2
     ;;
@@ -407,7 +418,7 @@ REC_PID=""
 FONT="$(fc-match -f '%{file}' 'sans:bold' 2>/dev/null || true)"
 DRAW=""
 while IFS=$'\t' read -r a b n; do
-    DRAW+="drawtext=${FONT:+fontfile=$FONT:}textfile=$TMP/cue$n.txt:fontsize=26:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=14:x=(w-text_w)/2:y=h-text_h-28:enable='between(t,$a,$b)',"
+    DRAW+="drawtext=${FONT:+fontfile=$FONT:}textfile=$TMP/cue$n.txt:fontsize=26:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=14:${CAPTION_POS:-x=(w-text_w)/2:y=h-text_h-28}:enable='between(t,$a,$b)',"
 done <"$CUES"
 DRAW="${DRAW%,}"; [[ -n "$DRAW" ]] || DRAW="null"
 mkdir -p "$OUT_DIR"

@@ -16,7 +16,7 @@ It is a side project in active development and a vast majority of this codebase,
 
 The chosen stack also brings with it more costs, much more than terminal emulators. A TUI can just draw into cells the terminal already owns, while gPTY runs a Godot renderer - an idle window can hold around 650 MB of resident memory, all of it owned by the renderer (multiple panes/terminals themselves are cheap in the GUI's own memory ([RSS](https://en.wikipedia.org/wiki/Resident_set_size)), under 1 MB each, but each one runs a shell in its own process at about 6 MB, up to the 96-pane ceiling). A first Forward+ launch (the implicit default, since `project.godot` names no renderer) holds about 1 GB because the graphics driver compiles its pipelines into that process; about 430 MB of it stays resident for the run, and later launches drop the number back to ~650 MB. Another drawback of a game engine is that it draws a frame every frame whether or not anything changed, whereas a terminal emulator composites only when its cells change (output, a blinking cursor, a resize). A GPU window that repaints even while idle draws power that a standard PTY simply would not. Memory usage and power draw remain areas that the project aims to continually refine and reduce, rather than have them be fixed prices to pay. Refer to the [Trade-offs](#trade-offs) section for up-to-date statistics.
 
-![A script drives gPTY: a concept routes cat into a viewer pane, pane-run opens a build pane, pane-wait blocks on its output, and cli_view streams git log](docs/static/images/demo-showcase.gif)
+![A script runs the tests, a concept routes the diff into the viewer, a cli_view runs git status, and pane-view opens the bundled knowledge base's link graph](docs/static/images/demo-showcase.gif)
 
 ### Features
 
@@ -38,6 +38,13 @@ The chosen stack also brings with it more costs, much more than terminal emulato
 - **Media** - play local audio and video in a pane through a pinned, minimal FFmpeg backend (v0.7).
 - **`cli_view`** - stream any command's output into a pane, so a plugin can add UI without a Godot SDK.
 - **Interface** - one design system across every pane, overlay and dialog: a dark theme and a light theme that follows the desktop, a UI scale, keyboard rings on the pane chrome, the Wiki pane and the vault graph, a command palette with saved commands, and accessible names for screen readers (v0.8).
+
+<details>
+<summary>Watch: the two profiles the app ships open from the sidebar</summary>
+
+![The Agent Workspace profile loads a terminal, an Inspector and a Reasoning pane, then the Knowledge Base profile loads the bundled wiki](docs/static/images/demo-profiles.gif)
+
+</details>
 
 <details>
 <summary>Watch: the wiki vault, its link graph and a CLI search</summary>
