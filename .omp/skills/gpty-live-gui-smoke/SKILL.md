@@ -41,6 +41,17 @@ GODOT_PID="$(pgrep -f 'godot --headless --path godot' | head -1)"
 rss_mib() { awk '/VmRSS/{printf "%d", $2/1024}' "/proc/$GODOT_PID/status"; }
 ```
 
+`/proc/$PID/maps` is denied unless the process is dumpable, and gPTY clears `PR_SET_DUMPABLE`
+(`crates/gpty-core/src/hardening.rs`): launch with `GPTY_ALLOW_DEBUG=1` when the question is which
+library or file the app has mapped.
+
+Resolve the pid from the OS, never from the shell's `$!`: `setsid` forks when the caller is
+already a process-group leader (so `$!` is the short-lived wrapper), and an embeddable tool shell
+can report pids `/proc` does not have. `pgrep -n -f '^\./dist/gpty'` plus `cat /proc/$PID/comm`
+is the check. A kill that misses leaves the app holding its control socket, and the next launch
+then refuses with "another gpty instance is already listening", exits 0 and serves nothing — the
+symptom reads as "the build is broken".
+
 ## Shutdown / exit claims
 
 Anything touching quit, teardown, or persistence must be checked on all three axes, because
@@ -162,6 +173,8 @@ later one 63-75 ms).
 - `cargo run --release -p gpty-core --example flood_probe -- <seconds>` — pane throughput, store
   lag, RSS, no GUI needed.
 - `godot --headless --path godot -s res://tests/bench/draw_bench.gd` — render cost
-  (`BENCH_FLOOD=1` for the flood variant).
+  (`BENCH_FLOOD=1` for the flood variant; add `--max-fps 60` when the question is the terminal's
+  refresh cadence, where the flood line's `syncs`/`sync_hz`/`backoff_ms` are the numbers —
+  unthrottled the loop outruns the flood back-off, every frame syncs, and the rate is meaningless).
 - `godot --path godot --disable-vsync -s res://tests/bench/switch_bench.gd` — workspace-switch
   cost (windowed; payloads via `SWITCH_CMD_A`/`SWITCH_CMD_B`, window via `SWITCH_WINDOW`).
