@@ -22,6 +22,8 @@ If it spawns a program: name the settings `command` (program) + `shell_args` (ar
 
 If it takes a file/directory path: name the export var **exactly** the settings key (`file_path`, `root_path`, `vault_path`) — `PaneBody._set_typed` only applies a key that names a declared property — keep the typed value when invalid (the settings field keeps the typo; the view shows the reason), validate at use (`is_absolute_path` + `FileAccess.file_exists` / `DirAccess.dir_exists_absolute`), and read through `TextRead.read_prefix` (the shared regular-file gate + 1 MiB cap + torn-UTF8 decode) rather than a second copy.
 
+**A scrolling body gets the shared chevrons.** `ui/scroll_hints.gd` (`ScrollHints.attach(self, body[, up_name, down_name])`, then `bind_bar(body.get_v_scroll_bar())` for a `ScrollContainer`/`TextEdit`/`RichTextLabel`, `bind_tree(tree)` for a `Tree`, or `bind_custom(...)` for a surface with no `Range` behind it) is the one scroll affordance: each chevron shows only while its direction has content, and the pair steps clear of a bound scrollbar's column. Do not build a second scroll button — the terminal's old bespoke one is the pattern this replaced. `gdscript.md` carries the full convention.
+
 If it is a companion that should follow a terminal's agent state, implement `agent_state_source_id()` (return the observed terminal's `attachment_id`) and `on_agent_state_changed(state)`: `workspace.gd` dispatches it (primed once when the pane enters the tree, then on every change) and both methods are display-only — never feed a decision, action, capture, or IPC.
 
 ## 3. Rust mirrors
