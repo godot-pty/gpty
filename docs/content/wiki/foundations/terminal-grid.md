@@ -39,7 +39,12 @@ many times per second and the visible change is usually tiny.
    or `Partial` (a list of row/column bounds).
 2. `TermGrid::get_grid_updates(force_full)` converts that into `GridUpdate::Full` — all
    rows — or `GridUpdate::Partial`, a flat list of `CellUpdate { row, col, cell }`.
-3. The UI repaints only those cells.
+3. The pane fetches only those cells, and repaints only the rows they fall in: each
+   row's background and glyphs are their own canvas layer, so a change on one line never
+   rebuilds the rest of the screen. Changes that move or restyle the whole rectangle — a
+   scroll, a resize, a palette switch, a selection or a search highlight — repaint every
+   row, while the cursor, the selection and the highlights live in a separate layer above
+   the grid that a blink or a drag repaints alone.
 
 A full update is forced in three situations, and they are worth knowing because they
 explain a visible behavior: the first frame after a resize or open, a change to the color

@@ -172,9 +172,14 @@ later one 63-75 ms).
 - `scripts/smoke-pane-api` — published pane API end to end (already in `ci-check`).
 - `cargo run --release -p gpty-core --example flood_probe -- <seconds>` — pane throughput, store
   lag, RSS, no GUI needed.
-- `godot --headless --path godot -s res://tests/bench/draw_bench.gd` — render cost
-  (`BENCH_FLOOD=1` for the flood variant; add `--max-fps 60` when the question is the terminal's
-  refresh cadence, where the flood line's `syncs`/`sync_hz`/`backoff_ms` are the numbers —
-  unthrottled the loop outruns the flood back-off, every frame syncs, and the rate is meaningless).
+- `godot --headless --path godot -s res://tests/bench/draw_bench.gd` — render cost:
+  `forced_us` (a full repaint), `row_us` (one row's background + text bands) and `overlay_us` (the
+  cursor layer alone) against `idle_us`. `BENCH_FLOOD=1` is the full-screen repaint loop and
+  `BENCH_SPARSE=1` the one-line-per-0.2 s stream; both print `sync_us` (fetch + repaint per damage
+  sync), `avg_rows` (rows repainted per sync, after the initial load) and `backoff_ms`. Add
+  `--max-fps 60` when the question is the terminal's refresh cadence — unthrottled the loop outruns
+  the flood back-off, every frame syncs, and the rate is meaningless.
 - `godot --path godot --disable-vsync -s res://tests/bench/switch_bench.gd` — workspace-switch
-  cost (windowed; payloads via `SWITCH_CMD_A`/`SWITCH_CMD_B`, window via `SWITCH_WINDOW`).
+  cost (windowed; payloads via `SWITCH_CMD_A`/`SWITCH_CMD_B`, window via `SWITCH_WINDOW`). It
+  settles both panes before measuring and prints `chars=` per rep; a `FAIL … pane was empty` means
+  the payload never painted a screen, so the number would not have included the arrival work.
