@@ -38,6 +38,27 @@ const ATTR_UNDERLINE := 4
 ## Set on the first cell of a wide character; the next cell is its spacer.
 const ATTR_WIDE := 16
 
+## One repaintable slice of the grid. Godot rebuilds a CanvasItem's whole
+## command list on any `queue_redraw()`, and a control draws before its
+## children, so a partial repaint needs child items: every row's `BG` band, then
+## every row's `TEXT` band in the same order - which is the order the old
+## single-canvas two-pass paint used, so a glyph that overhangs its row keeps
+## overhanging the next row's background - then `OVERLAY` above them all.
+class Layer extends Node2D:
+	const BG := 0
+	const TEXT := 1
+	const OVERLAY := 2
+	var pane = null
+	var kind := BG
+	var row := 0
+	func _draw() -> void:
+		if pane == null:
+			return
+		match kind:
+			TEXT: pane._draw_row_text(self, row)
+			OVERLAY: pane._draw_overlay(self)
+			_: pane._draw_row_background(self, row)
+
 @export var beam_cursor_width: int = BEAM_CURSOR_WIDTH
 @export var underline_cursor_height: int = UNDERLINE_CURSOR_HEIGHT
 # No `= <constant>` defaults: a token is not a compile-time constant once the
@@ -132,7 +153,24 @@ var _selecting: bool = false
 var _sel_cells: PackedInt32Array = PackedInt32Array()
 var _last_grid_gen: int = -1
 var _fetch_ms: int = 0
-var _draw_ms: int = 0
+## Milliseconds the last frame's draws cost: the sum over the ground rect, both
+## bands of every row that repainted and the overlay. The cadence budget
+## compares it with `_fetch_ms`, so a one-row update reads as one row.
+var _draw_ms: float = 0.0
+
+## Paint layers, in child order: `_row_backgrounds[0..n-1]`, then
+## `_row_texts[0..n-1]`, then `_overlay`. Each is its own CanvasItem, so a
+## partial grid update repaints only the rows its damage covers.
+var _row_backgrounds: Array[Node2D] = []
+var _row_texts: Array[Node2D] = []
+var _overlay: Node2D = null
+## The rows the last repaint queued, ascending. A full repaint queues every row;
+## a partial update only the rows its damage covers. Read by `draw_bench` and
+## asserted by `test_terminal_repaint.gd`.
+var _painted_rows: PackedInt32Array = PackedInt32Array()
+## The row count the child order was last built for, so a full repaint only
+## reorders the tree when that count actually changed.
+var _layers_ordered := -1
 
 var _resize_pending: bool = false
 var _resize_timer: float = 0.0
@@ -578,6 +616,11 @@ func mark_tile_laid_out() -> void:
 	_laid_out_frame = Engine.get_process_frames()
 
 func _on_resize():
+	# A size change moves the grid's origin and the ground rect covers the new
+	# rect; the grid's own dimensions follow the debounce. No child is added or
+	# removed here - the row count is written by the full-sync branch alone,
+	# which never runs inside a resize notification.
+	_repaint_all()
 	if _terminal == null or _cell_w == 0: return
 	if not _started:
 		# The first real size a pane gets is the one it is drawn at: start the
@@ -634,9 +677,9 @@ func apply_settings(settings: Dictionary):
 	if settings.has("shell_args"):
 		# Untrusted layout data: sanitize before it reaches a spawn.
 		shell_args = PaneTypes.sanitize_shell_args(settings.get("shell_args"))
-	# Colors, cursor shape and metrics are all read in _draw(); the grid
-	# generation does not move for them, so repaint once here.
-	queue_redraw()
+	# Colors, cursor shape and metrics are all read by the draw passes; the grid
+	# generation does not move for them, so repaint the layers once here.
+	_repaint_all()
 
 func _restore_color_strings(dict: Dictionary):
 	for key in ["default_fg", "default_bg", "cursor_color", "focus_border_color", "selection_color", "scrollback_indicator_color"]:
@@ -690,8 +733,8 @@ func _recompute_cell_metrics():
 	_cell_h = _font.get_height(font_size)
 	custom_minimum_size = Vector2(PADDING * _cell_w + PADDING, _cell_h * 2 + PADDING)
 	# Glyph metrics changed: existing cells must be redrawn even when the
-	# derived rows/cols happen to be unchanged.
-	queue_redraw()
+	# derived rows/cols happen to be unchanged, and every band moves.
+	_repaint_all()
 
 func _process(delta):
 	if not _started and _laid_out and Engine.get_process_frames() > _laid_out_frame:
@@ -749,7 +792,9 @@ func _process(delta):
 			var t0 = Time.get_ticks_msec()
 			# Damage tracking: fetch only modified cells unless the cache is empty (force full pack)
 			var updates = _terminal.get_grid_updates_packed(_cell_cache.is_empty())
-			if updates.get("is_full", true):
+			var full: bool = updates.get("is_full", true)
+			var damaged: Dictionary = {}
+			if full:
 				# Full grid sync (e.g. initial load, resize, or massive scroll)
 				_cell_cache = updates
 			else:
@@ -774,6 +819,7 @@ func _process(delta):
 					cc_fg[idx] = fg[i]
 					cc_bg[idx] = bg[i]
 					cc_attrs[idx] = attrs[i]
+					damaged[r] = true
 			_fetch_ms = Time.get_ticks_msec() - t0
 			# The budget is a share of the wall clock, not of one 60 Hz frame:
 			# at a stretched cadence the same sync is a smaller duty cycle, and
@@ -797,17 +843,19 @@ func _process(delta):
 			# viewport rows without changing the selection itself.
 			_refresh_selection()
 			_sync_scroll_hints()
-			# Repaint only when the grid actually changed. Every other
-			# visual trigger queues its own redraw (cursor blink, selection,
-			# search, settings, metric changes), and scroll/resize/palette
-			# all bump the generation. Repainting unconditionally here made
-			# every visible pane rebuild its full canvas command list every
-			# frame — the fetch was damage-tracked, the draw was not.
-			queue_redraw()
+			# Repaint what the update touched: a partial update queues the rows
+			# its damage covers, a full one the whole grid. Every other visual
+			# trigger queues its own layer (cursor blink, selection, search,
+			# settings, metrics), and scroll/resize/palette all land on the
+			# full branch because they bump the generation with new damage.
+			if full:
+				_repaint_all()
+			else:
+				_repaint_rows(damaged)
 		else:
 			# Nothing new since the last look: the pane has caught up.
 			_relax_sync_backoff()
-	_draw_ms = 0  # will be set on next _draw() call
+	_draw_ms = 0.0  # will be set on next _draw() call
 	_slow_poll_timer += delta
 	if _slow_poll_timer >= SLOW_POLL_INTERVAL:
 		_slow_poll_timer = 0.0
@@ -951,7 +999,7 @@ func _resolve_badge() -> AgentBadge:
 	return tb.get_node_or_null("StateBadge") as AgentBadge
 
 func _request_cursor_redraw() -> void:
-	queue_redraw()
+	_repaint_overlay()
 
 func _grid_offset() -> Vector2:
 	# Before the first grid sync the cache is empty; return a neutral
@@ -963,82 +1011,145 @@ func _grid_offset() -> Vector2:
 	var tw = gc * _cell_w; var th = gr * _cell_h
 	return Vector2(2 + maxf((size.x - PADDING - tw) / 2.0, 0), 2 + maxf((size.y - PADDING - th) / 2.0, 0))
 
-func _draw():
-	var t0 = Time.get_ticks_msec()
-	if _cell_cache.is_empty() or _cell_cache.get("rows", 0) == 0:
-		_draw_ms = Time.get_ticks_msec() - t0
+## Create, free and order the paint layers for the grid the cache holds.
+## Runs from a full repaint only: a partial update can never change the row
+## count, and the tree is touched only when that count changed, so this is safe
+## from `_on_resize`'s layout pass (the row count is written by the full-sync
+## branch alone, which never runs inside a resize notification).
+func _sync_layers():
+	var n := int(_cell_cache.get("rows", 0))
+	while _row_backgrounds.size() > n:
+		var extra: Node2D = _row_backgrounds.pop_back()
+		remove_child(extra)
+		extra.queue_free()
+	while _row_texts.size() > n:
+		var extra_text: Node2D = _row_texts.pop_back()
+		remove_child(extra_text)
+		extra_text.queue_free()
+	while _row_backgrounds.size() < n:
+		_row_backgrounds.append(_new_layer(Layer.BG, _row_backgrounds.size()))
+	while _row_texts.size() < n:
+		_row_texts.append(_new_layer(Layer.TEXT, _row_texts.size()))
+	if _overlay == null:
+		_overlay = _new_layer(Layer.OVERLAY, 0)
+	# The bands stay at the origin and draw at the grid's absolute coordinates.
+	# A per-band transform would change the glyph subpixel phase: the text server
+	# picks its raster from the position passed to `draw_string`, not from the
+	# composed transform, so shifting the item instead of the pen repaints every
+	# glyph with a different antialiasing than the single-canvas pass did.
+	# The bands go to the front of the child list, so the search strip and the
+	# scroll-hint buttons stay above the grid. Two separate passes: moving a
+	# background band and then its text band interleaved leaves every text band
+	# after the strip whenever the strip sits between the two groups, because
+	# each `move_child` shifts the not-yet-placed siblings.
+	if _layers_ordered != n:
+		_layers_ordered = n
+		for r in n:
+			move_child(_row_backgrounds[r], r)
+		for r in n:
+			move_child(_row_texts[r], n + r)
+		move_child(_overlay, 2 * n)
+
+func _new_layer(kind: int, row: int) -> Node2D:
+	var layer := Layer.new()
+	layer.pane = self
+	layer.kind = kind
+	layer.row = row
+	add_child(layer)
+	return layer
+
+## Repaint the whole grid: the ground rect, both bands of every row and the
+## overlay. Anything that moves or recolours the grid calls this.
+func _repaint_all():
+	_sync_layers()
+	_painted_rows.resize(_row_texts.size())
+	for r in _row_texts.size():
+		_painted_rows[r] = r
+		_row_backgrounds[r].queue_redraw()
+		_row_texts[r].queue_redraw()
+	queue_redraw()
+	if _overlay != null:
+		_overlay.queue_redraw()
+
+## Repaint the rows a partial grid update damaged, and the overlay (the cursor
+## may have moved onto one of them).
+func _repaint_rows(damaged: Dictionary):
+	_painted_rows.resize(damaged.size())
+	var i := 0
+	for r in damaged:
+		_painted_rows[i] = r
+		i += 1
+	_painted_rows.sort()
+	for r in _painted_rows:
+		_repaint_row(r)
+	if _overlay != null:
+		_overlay.queue_redraw()
+
+func _repaint_row(row: int):
+	if row < 0 or row >= _row_texts.size():
 		return
+	_row_backgrounds[row].queue_redraw()
+	_row_texts[row].queue_redraw()
 
-	var off = _grid_offset()
-	var baseline = _font.get_ascent(font_size)
+## The band above the rows: a cursor blink or a highlight change never pays for
+## a row.
+func _repaint_overlay():
+	if _overlay != null:
+		_overlay.queue_redraw()
 
-	draw_rect(Rect2(Vector2.ZERO, size), default_bg)
-	_draw_cells(off, baseline)
+func _draw():
+	var t0 = Time.get_ticks_usec()
+	# The pane's own canvas draws under every child, so it carries only the
+	# ground: one rect that changes with the pane's size or the palette, never
+	# with the grid's content.
+	if not _cell_cache.is_empty() and int(_cell_cache.get("rows", 0)) > 0:
+		draw_rect(Rect2(Vector2.ZERO, size), default_bg)
+	_draw_ms += float(Time.get_ticks_usec() - t0) / 1000.0
 
-	# Focus border
-	if has_focus():
-		draw_rect(Rect2(0, 0, size.x, size.y), focus_border_color, false, FOCUS_BORDER_WIDTH)
 
-	# Cursor
-	if _cursor_visible:
-		_draw_cursor(off, baseline)
-
-	# Scrollback indicator
-	var so = _terminal.get_scroll_offset()
-	if so > 0:
-		# The search strip covers the pane's first two rows, so the indicator
-		# moves below it while the strip is open instead of vanishing under it.
-		var indicator_row := 2.5 if _search_visible else 0.5
-		draw_string(_font, Vector2(off.x + _cell_w * 0.5, off.y + _cell_h * indicator_row),
-			"[Scroll: %d/%d lines]" % [so, _terminal.get_history_size()],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, scrollback_indicator_color)
-
-	# Selection
-	if not _sel_cells.is_empty():
-		_draw_selection(off)
-
-	# Search highlights
-	_draw_search_highlights(off)
-	_draw_ms = Time.get_ticks_msec() - t0
-
-func _draw_cells(off: Vector2, baseline: float):
-	var grid: Dictionary = _cell_cache
-	if grid.is_empty(): return
-	var n_rows: int = grid["rows"]; var n_cols: int = grid["cols"]
-	var chars: Array = grid["chars"]
-	var fg_arr: PackedColorArray = grid["fg"]; var bg_arr: PackedColorArray = grid["bg"]
-	var attrs: PackedInt32Array = grid["attrs"]
-
-	# ── Step C: Batched backgrounds ──
-	# Collapse ~n_rows×n_cols draw_rect calls into ~50 by merging
-	# consecutive cells with the same background color.
-	for r in n_rows:
+## One row's background band. Consecutive cells of one colour merge into one
+## rect, the merge the single-canvas pass ran. The band has no transform of its
+## own (see `_sync_layers`), so every rect is at the grid's absolute position.
+func _draw_row_background(item: CanvasItem, r: int):
+	var t0 = Time.get_ticks_usec()
+	var n_cols: int = _cell_cache.get("cols", 0)
+	if n_cols > 0 and r < int(_cell_cache.get("rows", 0)):
+		var bg_arr: PackedColorArray = _cell_cache["bg"]
+		var off: Vector2 = _grid_offset()
+		var row_y: float = off.y + r * _cell_h
 		var c: int = 0
 		while c < n_cols:
-			var idx: int = r * n_cols + c
-			var bg: Color = bg_arr[idx] as Color
+			var bg: Color = bg_arr[r * n_cols + c]
 			var start_c: int = c
 			c += 1
-			while c < n_cols:
-				var next_bg: Color = bg_arr[r * n_cols + c] as Color
-				if next_bg != bg: break
+			while c < n_cols and bg_arr[r * n_cols + c] == bg:
 				c += 1
 			# One rect for the entire run of same-background cells
-			draw_rect(Rect2(off.x + start_c * _cell_w, off.y + r * _cell_h, (c - start_c) * _cell_w, _cell_h), bg)
+			item.draw_rect(Rect2(off.x + start_c * _cell_w, row_y, (c - start_c) * _cell_w, _cell_h), bg)
+	_draw_ms += float(Time.get_ticks_usec() - t0) / 1000.0
 
-	# ── Text + underline pass: glyph runs ──
-	# Consecutive cells that share font, color, and underline state go out as
-	# ONE draw_string. Per-cell calls were the per-frame cost: a full 80×24
-	# pane issued up to ~1 900 canvas items per repaint, nearly all of them a
-	# single glyph in a color the neighbor already used.
-	for r in n_rows:
+
+## One row's text band. Consecutive cells that share font, colour and underline
+## state go out as ONE `draw_string`: per-cell calls were the per-frame cost
+## (a full 80×24 pane issued up to ~1 900 canvas items per repaint, nearly all
+## of them a single glyph in a colour the neighbour already used).
+func _draw_row_text(item: CanvasItem, r: int):
+	var t0 = Time.get_ticks_usec()
+	var n_cols: int = _cell_cache.get("cols", 0)
+	if n_cols > 0 and r < int(_cell_cache.get("rows", 0)):
+		var chars: Array = _cell_cache["chars"]
+		var fg_arr: PackedColorArray = _cell_cache["fg"]
+		var attrs: PackedInt32Array = _cell_cache["attrs"]
+		var line: String = chars[r]
+		var off: Vector2 = _grid_offset()
+		var baseline: float = off.y + r * _cell_h + _font.get_ascent(font_size)
 		var c := 0
 		# The cell after a wide character is its zero-width spacer.
 		var wide_prev := false
 		while c < n_cols:
 			var idx: int = r * n_cols + c
 			var a: int = attrs[idx]
-			var ch: String = chars[r][c]
+			var ch: String = line[c]
 			if wide_prev or ch == " " or ch == "":
 				# The old per-cell pass drew an underline for EVERY cell
 				# carrying the attribute, spaces included; a text run stops at
@@ -1047,8 +1158,8 @@ func _draw_cells(off: Vector2, baseline: float):
 				# its own and never was.
 				if a & ATTR_UNDERLINE != 0 and not wide_prev:
 					var seg_fg: Color = fg_arr[idx] as Color
-					var seg_y: float = off.y + r * _cell_h + baseline + 2
-					draw_line(Vector2(off.x + c * _cell_w, seg_y),
+					var seg_y: float = baseline + 2
+					item.draw_line(Vector2(off.x + c * _cell_w, seg_y),
 						Vector2(off.x + (c + 1) * _cell_w, seg_y), seg_fg, 1.0)
 				wide_prev = a & ATTR_WIDE != 0
 				c += 1
@@ -1065,7 +1176,7 @@ func _draw_cells(off: Vector2, baseline: float):
 			# character, whose spacer must not be drawn.
 			while run_end < n_cols and not wide:
 				var nidx: int = r * n_cols + run_end
-				var nch: String = chars[r][run_end]
+				var nch: String = line[run_end]
 				if nch == " " or nch == "": break
 				var na: int = attrs[nidx]
 				var nfg: Color = fg_arr[nidx] as Color
@@ -1078,14 +1189,46 @@ func _draw_cells(off: Vector2, baseline: float):
 				wide = na & ATTR_WIDE != 0
 				run_end += 1
 			var x: float = off.x + c * _cell_w
-			var y: float = off.y + r * _cell_h + baseline
-			draw_string(run_font, Vector2(x, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, run_fg)
+			var y: float = baseline
+			item.draw_string(run_font, Vector2(x, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, run_fg)
 			if run_underline:
-				draw_line(Vector2(x, y + 2), Vector2(x + text.length() * _cell_w, y + 2), run_fg, 1.0)
+				item.draw_line(Vector2(x, y + 2), Vector2(x + text.length() * _cell_w, y + 2), run_fg, 1.0)
 			wide_prev = wide
 			c = run_end
+	_draw_ms += float(Time.get_ticks_usec() - t0) / 1000.0
 
-func _draw_cursor(off: Vector2, baseline: float):
+
+## The band above the rows: everything the single-canvas paint drew after the
+## cells, in the same order - focus border, cursor, scrollback indicator,
+## selection, search highlights.
+func _draw_overlay(item: CanvasItem):
+	var t0 = Time.get_ticks_usec()
+	if _terminal != null and not _cell_cache.is_empty() and int(_cell_cache.get("rows", 0)) > 0:
+		var off: Vector2 = _grid_offset()
+		var baseline: float = _font.get_ascent(font_size)
+		# Focus border
+		if has_focus():
+			item.draw_rect(Rect2(0, 0, size.x, size.y), focus_border_color, false, FOCUS_BORDER_WIDTH)
+		# Cursor
+		if _cursor_visible:
+			_draw_cursor(item, off, baseline)
+		# Scrollback indicator
+		var so := _terminal.get_scroll_offset()
+		if so > 0:
+			# The search strip covers the pane's first two rows, so the indicator
+			# moves below it while the strip is open instead of vanishing under it.
+			var indicator_row := 2.5 if _search_visible else 0.5
+			item.draw_string(_font, Vector2(off.x + _cell_w * 0.5, off.y + _cell_h * indicator_row),
+				"[Scroll: %d/%d lines]" % [so, _terminal.get_history_size()],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, scrollback_indicator_color)
+		# Selection
+		if not _sel_cells.is_empty():
+			_draw_selection(item, off)
+		# Search highlights
+		_draw_search_highlights(item, off)
+	_draw_ms += float(Time.get_ticks_usec() - t0) / 1000.0
+
+func _draw_cursor(item: CanvasItem, off: Vector2, baseline: float):
 	var cr = _terminal.get_cursor_row(); var cc = _terminal.get_cursor_col()
 	if cr < 0 or cc < 0: return
 	var cx = off.x + cc * _cell_w; var cy = off.y + cr * _cell_h
@@ -1096,24 +1239,24 @@ func _draw_cursor(off: Vector2, baseline: float):
 
 	match cursor_shape:
 		0:
-			draw_rect(Rect2(cx, cy, _cell_w, _cell_h), cursor_color)
+			item.draw_rect(Rect2(cx, cy, _cell_w, _cell_h), cursor_color)
 			if cursor_ch != " " and cursor_ch != "":
-				draw_string(_font, Vector2(cx, cy + baseline), cursor_ch, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.BLACK)
+				item.draw_string(_font, Vector2(cx, cy + baseline), cursor_ch, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.BLACK)
 		1:
-			draw_rect(Rect2(cx, cy + _cell_h - underline_cursor_height, _cell_w, underline_cursor_height), cursor_color)
+			item.draw_rect(Rect2(cx, cy + _cell_h - underline_cursor_height, _cell_w, underline_cursor_height), cursor_color)
 		2:
-			draw_rect(Rect2(cx, cy, beam_cursor_width, _cell_h), cursor_color)
+			item.draw_rect(Rect2(cx, cy, beam_cursor_width, _cell_h), cursor_color)
 		_:
-			draw_rect(Rect2(cx, cy, _cell_w, _cell_h), cursor_color)
+			item.draw_rect(Rect2(cx, cy, _cell_w, _cell_h), cursor_color)
 			if cursor_ch != " " and cursor_ch != "":
-				draw_string(_font, Vector2(cx, cy + baseline), cursor_ch, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.BLACK)
+				item.draw_string(_font, Vector2(cx, cy + baseline), cursor_ch, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.BLACK)
 
-func _draw_selection(off: Vector2):
+func _draw_selection(item: CanvasItem, off: Vector2):
 	for i in range(0, _sel_cells.size(), 3):
 		var row: int = _sel_cells[i]
 		var c0: int = _sel_cells[i + 1]
 		var c1: int = _sel_cells[i + 2]
-		draw_rect(Rect2(
+		item.draw_rect(Rect2(
 			off.x + c0 * _cell_w, off.y + row * _cell_h,
 			(c1 - c0 + 1) * _cell_w, _cell_h), selection_color)
 
@@ -1147,7 +1290,7 @@ func _handle_mouse(event: InputEvent):
 			if event.pressed:
 				_take_focus(); _selecting = true
 				_select_at(_mouse_to_cell(event.position))
-			else: _selecting = false; queue_redraw()
+			else: _selecting = false; _repaint_overlay()
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			_note_view_input()
 			_terminal.scroll_up(scroll_lines)
@@ -1258,7 +1401,7 @@ func _clear_selection():
 	if _terminal != null:
 		_terminal.selection_clear()
 	_sel_cells = PackedInt32Array()
-	queue_redraw()
+	_repaint_overlay()
 
 ## Start a selection at a viewport cell. A drag past the grid edge clamps to
 ## the nearest cell, and a pane with no grid yet ignores the press.
@@ -1268,7 +1411,7 @@ func _select_at(cell: Vector2i):
 		return
 	_terminal.selection_start(c.y, c.x)
 	_refresh_selection()
-	queue_redraw()
+	_repaint_overlay()
 
 ## Extend the live selection to a viewport cell.
 func _extend_selection_to(cell: Vector2i):
@@ -1277,7 +1420,7 @@ func _extend_selection_to(cell: Vector2i):
 		return
 	_terminal.selection_extend(c.y, c.x)
 	_refresh_selection()
-	queue_redraw()
+	_repaint_overlay()
 
 ## Mouse coordinates outside the grid clamp to the nearest cell; a pane with
 ## no grid reports (-1, -1).
@@ -1325,7 +1468,7 @@ func _jump_to_start() -> void:
 	_note_view_input()
 	_terminal.scroll_up(_terminal.get_history_size())
 	_refresh_selection()
-	queue_redraw()
+	_repaint_overlay()
 
 ## One click back to live output, with the same grid-space selection rule.
 func _jump_to_live() -> void:
@@ -1333,7 +1476,7 @@ func _jump_to_live() -> void:
 	# The reset hides the control itself, so the two cannot disagree.
 	_snap_to_bottom()
 	_refresh_selection()
-	queue_redraw()
+	_repaint_overlay()
 
 func _send_to_term(text: String):
 	_note_view_input()
@@ -1490,7 +1633,7 @@ func _toggle_search():
 		_search_results.clear()
 		_search_error = ""
 		_clear_history_results()
-		queue_redraw()
+		_repaint_overlay()
 	_refresh_search_count()
 
 func _close_search():
@@ -1500,7 +1643,7 @@ func _close_search():
 	_search_results.clear()
 	_search_error = ""
 	_clear_history_results()
-	queue_redraw()
+	_repaint_overlay()
 	_refresh_search_count()
 	grab_focus()
 
@@ -1575,7 +1718,7 @@ func _on_scope_toggled():
 	_search_bar.placeholder_text = "Search (FTS5)..." if _scope_history else "Search (regex)..."
 	_search_results.clear()
 	_clear_history_results()
-	queue_redraw()
+	_repaint_overlay()
 	if _search_visible and _search_bar.text != "":
 		_do_search(_search_bar.text)
 	_refresh_search_count()
@@ -1589,7 +1732,7 @@ func _do_search(pattern: String):
 		_search_results.clear()
 		_search_error = ""
 		_clear_history_results()
-		queue_redraw()
+		_repaint_overlay()
 		_refresh_search_count()
 		return
 	if _scope_history:
@@ -1603,7 +1746,7 @@ func _do_search(pattern: String):
 		_search_error = ""
 		_search_results = result
 		_search_results["current"] = -1
-	queue_redraw()
+	_repaint_overlay()
 	_refresh_search_count()
 
 func _do_history_search(pattern: String):
@@ -1763,10 +1906,10 @@ func _jump_to_match(direction: int):
 		_note_view_input()
 		_terminal.scroll_down(-delta)
 	_sync_scroll_hints()
-	queue_redraw()
+	_repaint_overlay()
 	_refresh_search_count()
 
-func _draw_search_highlights(off: Vector2):
+func _draw_search_highlights(item: CanvasItem, off: Vector2):
 	if _search_results.is_empty(): return
 	var count: int = _search_results.get("count", 0)
 	if count == 0: return
@@ -1789,7 +1932,7 @@ func _draw_search_highlights(off: Vector2):
 		# Read at draw time: the palette switches at runtime.
 		var p := UiPalette.active()
 		var color = p.SEARCH_ACTIVE if i == current else p.SEARCH_HIGHLIGHT
-		draw_rect(Rect2(off.x + match_col * _cell_w, off.y + display_row * _cell_h, _cell_w, _cell_h), color)
+		item.draw_rect(Rect2(off.x + match_col * _cell_w, off.y + display_row * _cell_h, _cell_w, _cell_h), color)
 
 ## The process/grid document the pane API promises, unchanged for terminals.
 func status_document() -> Variant:
