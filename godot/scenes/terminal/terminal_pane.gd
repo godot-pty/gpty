@@ -197,13 +197,16 @@ var _slow_poll_timer: float = 0.0
 
 ## Accessible-output cadence. Announcements are for a pane the user is NOT
 ## reading: the grid must be quiet for `A11Y_SETTLE_MS` (a command's output
-## arrives over many frames) and the push itself is limited to one per
-## `A11Y_PUSH_MS`, so a flood cannot become a speech flood.
+## arrives over many frames), and a pane that is being worked in says nothing.
+## The value follows the screen text instead and is limited only by
+## `A11Y_PUSH_MS`, so a flood cannot become a speech flood and an idle pane
+## does not re-push its unchanged screen.
 const A11Y_SETTLE_MS := 500
 const A11Y_PUSH_MS := 1000
 ## Where the pane's published text nodes live (see `A11y.announce_host`).
 var _a11y_host: Control
-## When the grid last changed; a push waits for this to settle.
+## When the grid last changed. Gates the announcement only — the value is
+## gated on the text (see `_a11y_tick`).
 var _a11y_changed_ms: int = 0
 var _a11y_push_ms: int = -A11Y_PUSH_MS
 ## The value last pushed, so an idle pane does not re-push every window.
@@ -834,17 +837,23 @@ func _last_output_line() -> String:
 func _a11y_tick(now: int) -> void:
 	if not A11y.enabled():
 		return
-	if now - _a11y_changed_ms < A11Y_SETTLE_MS:
-		return
-	if now - _a11y_push_ms < A11Y_PUSH_MS:
-		return
-	_a11y_push_ms = now
-	# The value tracks the screen whether or not the pane is focused: a reader
-	# user who is in the pane reads it from the element. Only the *announcement*
-	# waits for a background pane — a focused one is being worked in, and the
-	# shell already echoes.
-	_push_accessibility_value()
+	# The value follows the screen and is limited only by `A11Y_PUSH_MS`. It is
+	# deliberately NOT gated on the settle window: that window keys off the
+	# grid's damage counter, which a repainting or resizing child refreshes
+	# faster than the window elapses — so every pane that keeps changing never
+	# published at all (measured 2026-11-13 on the v0.8.3 export: the pane's
+	# element carried the description and a Text interface, and no `A11yText`
+	# node existed for any pane). The screen text is what says whether there is
+	# news; the counter is not.
+	if now - _a11y_push_ms >= A11Y_PUSH_MS:
+		_a11y_push_ms = now
+		_push_accessibility_value()
+	# The announcement says one line and waits for the grid to be quiet, so a
+	# command's output arrives as one sentence instead of once per chunk. A
+	# focused pane stays silent: its shell already echoes.
 	if has_focus():
+		return
+	if now - _a11y_changed_ms < A11Y_SETTLE_MS:
 		return
 	A11y.publish(_a11y_host, A11y.LIVE_NAME,
 		A11y.one_line(_last_output_line()), A11y.LIVE_POLITE)
@@ -858,6 +867,10 @@ func _on_a11y_focus_entered() -> void:
 
 
 func _push_accessibility_value() -> void:
+	# Resolved per push, not once in `_ready`: a tile rebuilt under the body (a
+	# profile activation, a pane move) replaces the bar, and a host captured at
+	# `_ready` then publishes into a freed node for the rest of the session.
+	_a11y_host = A11y.announce_host(self)
 	# Before the first sync the cache has no geometry: a "0 rows" description
 	# is worse than none.
 	var rows := int(_cell_cache.get("rows", 0))

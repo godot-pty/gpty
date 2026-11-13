@@ -8,22 +8,25 @@ class_name A11y
 ## `accessibility_name` at the choke point.
 ##
 ## A custom `_draw()` Control has no text element. Its visible content is
-## published as a text node on the tile's title bar (`publish`) and its one-line
-## announcements replace a live node there; the element's value is recorded too
-## (`set_text`), for adapters that map it, and written by `apply_update` from
-## the host's own `NOTIFICATION_ACCESSIBILITY_UPDATE` — the one place the engine
-## accepts that write.
+## published as a content node on the tile's title bar (`publish`) and its
+## one-line announcements replace a live node there; the element's value is
+## recorded too (`set_text`), for adapters that map it, and written by
+## `apply_update` from the owning control's own
+## `NOTIFICATION_ACCESSIBILITY_UPDATE` — the one place the engine accepts that
+## write.
 ##
-## Measured on the 4.7.2 AccessKit export (2026-11-05): an element carries the
-## name snapshot taken when it was created, and neither the value nor the role
-## from `AccessibilityServer.update_set_value`/`update_set_role` reaches AT-SPI,
-## so a replacement is the only way content changes and an unchanged slot is
-## left alone instead of being churned. `scripts/accessibility-probe` prints an
-## `a11y-values:` line that grades a later engine in one command. See
-## `docs/content/docs/agents/gdscript.md`.
+## Measured on the 4.7.2 AccessKit export: an element carries the name snapshot
+## taken when it was created, so a replacement is the only way content changes
+## and an unchanged slot is left alone instead of being churned (2026-11-05).
+## `update_set_role` does reach AT-SPI — a terminal pane's element answers
+## `GetRole` and exposes `Text` — while `update_set_value` still answers `""`
+## through `Text.GetText` even for a pushed screen (2026-11-13), so the
+## published name is the channel that carries content.
+## `scripts/accessibility-probe` prints an `a11y-values:` line that grades a
+## later engine in one command. See `docs/content/docs/agents/gdscript.md`.
 
 const LIVE_NAME := "A11yLive"
-## The readable content node: a static text element whose name is the surface's
+## The readable content node: an `A11yContent` whose name is the surface's
 ## visible text. It is not live — a screen reader reads it on demand — so a
 ## changing buffer is never announced in full.
 const TEXT_NAME := "A11yText"
@@ -55,6 +58,11 @@ const LIVE_POLITE := 1
 static var _active := false
 static var _checked_ms := -POLL_MS
 
+## Test seam: -1 asks the engine, 0 and 1 answer for it. Headless has no
+## accessibility driver, so a GUT test that exercises the gated push path sets
+## this and restores `-1` in `after_each`. App code never writes it.
+static var force_enabled := -1
+
 
 ## Whether accessible output is worth producing: an accessibility driver is
 ## loaded, or a screen reader reports itself attached.
@@ -65,7 +73,12 @@ static var _checked_ms := -POLL_MS
 ## no screen-reader flag. Gating on the flag alone left the export silent;
 ## `is_supported()` is the half that is true exactly when an element server
 ## exists. A false positive costs one string per second.
+##
+## `force_enabled` overrides the answer so the gated path is reachable from a
+## headless test, which is the only place the push cadence can be asserted.
 static func enabled() -> bool:
+	if force_enabled >= 0:
+		return force_enabled == 1
 	return AccessibilityServer.is_supported() or screen_reader()
 
 
@@ -138,7 +151,7 @@ static func apply_update(control: Control) -> void:
 	AccessibilityServer.update_set_value(element, text)
 
 
-## Publish a text node in `slot` under `host`, replacing what was there.
+## Publish a content node in `slot` under `host`, replacing what was there.
 ##
 ## Dynamic content cannot be edited into an existing element: the engine
 ## publishes a Control's accessible name once, when its element is created, and
@@ -153,41 +166,46 @@ static func apply_update(control: Control) -> void:
 ## line every `A11Y_PUSH_MS`, so a churning idle pane used to drop the node AT
 ## was on once a second.
 ##
+## The node is an `A11yContent` (a `Control` that writes its own role), never a
+## `Label` and never a bare `Control`: a Label's AT-SPI name is its display text
+## (so content carried only in `accessibility_name` published an empty name),
+## and a bare Control keeps the container role AccessKit drops from the tree —
+## measured 2026-11-13, the published slot showed as an unnamed node with a
+## Label and not at all with a Control, while the pane body's role-carrying
+## element reads its name back intact. A Control has no text of its own to
+## shape either, which is what keeps the whole-screen publish cheap (a Label
+## given the full screen as text cost 992 ms of shaping, 221x78 = 17 315 chars,
+## measured 2026-11-11).
+##
 ## `host` must be a Control whose own children are published — a pane body is a
 ## leaf in the exposed tree, the tile's title bar is not (see `announce_host`).
-static func publish(host: Control, slot: String, text: String, live := LIVE_OFF) -> Label:
+static func publish(host: Control, slot: String, text: String, live := LIVE_OFF) -> Control:
 	if host == null or not is_instance_valid(host) or text == "":
 		return null
 	var previous := host.get_node_or_null(NodePath(slot))
-	if previous is Label:
-		var label := previous as Label
-		# The name is the content channel, so it is what "unchanged" means: a
-		# comparison against `text` would never match now that the node carries
-		# no display text, and the slot would churn once per push.
-		if label.accessibility_name == text and label.accessibility_live == live:
-			return label
+	if previous is Control:
+		var node := previous as Control
+		# The name is the content channel, so it is what "unchanged" means.
+		if node.accessibility_name == text and node.accessibility_live == live:
+			return node
 	if previous != null:
 		# The node is what AT holds, so the old one leaves the tree before the
 		# replacement claims the name.
 		host.remove_child(previous)
 		previous.queue_free()
-	var node := Label.new()
+	var node := A11yContent.new()
 	node.name = slot
-	# `accessibility_name` alone is the name a driver reads:
-	# `Control::_get_accessibility_name` returns it and a Label does not derive
-	# a name from its text. Do NOT also set `node.text` — a Label shapes and
-	# lays out that string, and a terminal's full screen made one workspace
-	# switch cost 992 ms of main-thread text shaping (221x78 = 17 315 chars,
-	# measured 2026-11-11). The value Label.text feeds does not reach AT-SPI on
-	# 4.7.2 anyway (see the note above).
 	node.accessibility_name = text
 	node.accessibility_live = live
-	node.clip_text = true
+	node.clip_contents = true
 	node.focus_mode = Control.FOCUS_NONE
 	node.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	node.modulate = Color(1, 1, 1, 0)
 	node.size = Vector2(1, 1)
 	host.add_child(node)
+	# The role that makes the element survive into the tree; it is written from
+	# the node's own update notification (see `A11yContent`).
+	A11y.set_text(node, text)
 	return node
 
 

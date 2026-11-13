@@ -18,6 +18,7 @@ func before_each():
 
 
 func after_each():
+	A11y.force_enabled = -1
 	if _ws:
 		if _ws.get_parent():
 			_ws.get_parent().remove_child(_ws)
@@ -51,10 +52,11 @@ func test_publish_carries_text_name_and_live_mode():
 	assert_not_null(node)
 	assert_eq(node.accessibility_name, "built 3 files",
 		"the published name is what a driver reads")
-	# The content must never be display text: a Label shapes `text`, and the
-	# whole screen that cost 992 ms of main-thread work in one workspace switch
-	# (4.7.2, 221x78, measured 2026-11-11). The name is the channel AT reads.
-	assert_eq(node.text, "", "content is carried by the accessible name, not shaped")
+	# The node must not be a Label: on 4.7.2 a Label's AT-SPI name is its
+	# display text, so content carried in `accessibility_name` alone published
+	# an empty name (measured 2026-11-13), while a Label given the whole screen
+	# as text cost 992 ms of shaping (221x78, measured 2026-11-11).
+	assert_false(node is Label, "content is carried by a plain Control's name")
 	assert_eq(node.accessibility_live, A11y.LIVE_POLITE,
 		"an announcement must reach a reader without focus")
 	assert_eq(node.mouse_filter, Control.MOUSE_FILTER_IGNORE,
@@ -74,7 +76,7 @@ func test_publish_replaces_the_slot():
 	assert_eq(host.get_child_count(), 1, "the slot holds one node, not a history")
 	assert_eq(str(host.get_node("A11yText").get_instance_id()), str(second.get_instance_id()))
 	assert_eq(second.accessibility_name, "second screen")
-	assert_eq(second.text, "", "a replacement carries no display text either")
+	assert_false(second is Label, "a replacement is a plain Control too")
 
 
 func test_publish_ignores_empty_text():
@@ -183,6 +185,97 @@ func test_terminal_exposes_its_visible_grid():
 	assert_not_null(host)
 	assert_eq(str(host.name), "TitleBar",
 		"published text must go to the tile's title bar, not the pane body")
+
+
+## The gap this row exists to close: the test above recomputed
+## `A11y.announce_host(body)` and never looked at the body's own host or the
+## node it published, and nothing exercised the gated push at all. This drives
+## the tick itself, on a restored body, and asserts what a driver would read.
+func test_a_restored_terminal_publishes_its_screen_on_its_own_host():
+	A11y.force_enabled = 1
+	var ws = await _make_workspace()
+	var body = _first_body(ws)
+	body._terminal.send_line("echo A11Y_MARKER")
+	assert_true(await _wait_until(func() -> bool:
+		return body.visible_text().contains("A11Y_MARKER")),
+		"visible_text must carry what the grid draws: %s" % body.visible_text().left(200))
+	# The tick is the thing under test, not `_process`'s cadence: clear the
+	# rate limit so this call must publish.
+	body._a11y_push_ms = -1000000
+	body._a11y_tick(Time.get_ticks_msec())
+	assert_eq(str(body._a11y_host.name), "TitleBar",
+		"the body publishes on its own resolved host, not a recomputed one")
+	var node: Node = body._a11y_host.get_node_or_null(A11y.TEXT_NAME)
+	assert_not_null(node, "the screen reaches AT as a published text node")
+	assert_true(node.accessibility_name.contains("A11Y_MARKER"),
+		"the published name carries the grid's text")
+	# Compare against the snapshot the push took, not a fresh `visible_text()`:
+	# the shell's next prompt can land between the tick and the assert.
+	assert_eq(node.accessibility_name, body._a11y_last_value)
+	assert_eq(str(body.get_meta(A11y.VALUE_META, "")), body._a11y_last_value,
+		"the element value records the same screen")
+
+
+## The starvation this row found: a churning grid generation refreshed the
+## settle stamp every sync, so the push never ran. The value must not depend on
+## it.
+func test_a_churning_grid_still_publishes_the_value():
+	A11y.force_enabled = 1
+	var ws = await _make_workspace()
+	var body = _first_body(ws)
+	body._terminal.send_line("echo A11Y_MARKER")
+	assert_true(await _wait_until(func() -> bool:
+		return body.visible_text().contains("A11Y_MARKER")))
+	body._a11y_changed_ms = Time.get_ticks_msec()
+	body._a11y_push_ms = -1000000
+	body._a11y_last_value = ""
+	body._a11y_tick(Time.get_ticks_msec())
+	assert_not_null(body._a11y_host.get_node_or_null(A11y.TEXT_NAME),
+		"a settle stamp inside its window must not stop the value")
+
+
+## The rate limit is what keeps an idle pane from rebuilding the node once per
+## frame; the node must survive an immediate second tick.
+func test_the_value_push_is_rate_limited():
+	A11y.force_enabled = 1
+	var ws = await _make_workspace()
+	var body = _first_body(ws)
+	body._terminal.send_line("echo A11Y_MARKER")
+	assert_true(await _wait_until(func() -> bool:
+		return body.visible_text().contains("A11Y_MARKER")))
+	var now := Time.get_ticks_msec()
+	body._a11y_push_ms = -1000000
+	body._a11y_last_value = ""
+	body._a11y_tick(now)
+	var first: Node = body._a11y_host.get_node_or_null(A11y.TEXT_NAME)
+	assert_not_null(first)
+	body._a11y_last_value = ""
+	body._a11y_tick(now + 1)
+	assert_eq(str(body._a11y_host.get_node_or_null(A11y.TEXT_NAME).get_instance_id()),
+		str(first.get_instance_id()), "a second tick inside the window must not re-publish")
+
+
+## The announcement keeps the settle rule: a focused pane says nothing, and an
+## unfocused one waits for the grid to be quiet.
+func test_the_announcement_waits_for_a_quiet_grid():
+	A11y.force_enabled = 1
+	var ws = await _make_workspace()
+	var body = _first_body(ws)
+	body._terminal.send_line("echo A11Y_MARKER")
+	assert_true(await _wait_until(func() -> bool:
+		return body.visible_text().contains("A11Y_MARKER")))
+	var now := Time.get_ticks_msec()
+	body._a11y_push_ms = -1000000
+	body._a11y_changed_ms = Time.get_ticks_msec()
+	body._a11y_tick(now)
+	assert_null(body._a11y_host.get_node_or_null(A11y.LIVE_NAME),
+		"a grid that changed a moment ago is not announced yet")
+	body._a11y_changed_ms = now - TerminalPane.A11Y_SETTLE_MS - 1
+	if body.has_focus():
+		body.release_focus()
+	body._a11y_tick(now)
+	assert_not_null(body._a11y_host.get_node_or_null(A11y.LIVE_NAME),
+		"a quiet grid announces its last line")
 
 
 # ── Glyph buttons ──────────────────────────────────────────────────────

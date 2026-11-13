@@ -3,11 +3,15 @@
 #
 #   scripts/accessibility-probe            # dist/gpty, built by scripts/build
 #   GPTY_A11Y_BIN=/path/to/gpty scripts/accessibility-probe
+#   GPTY_CLI=/path/to/gpty scripts/accessibility-probe   # the marker injector
 #
 # What it does:
 #   1. refuses unless a display exists, the binary is an export that carries the
-#      AccessKit driver (`Accessibility: AccessKit driver loaded.`), and the
-#      session's at-spi bus answers;
+#      AccessKit driver (`Accessibility: AccessKit driver loaded.`), the
+#      session's at-spi bus answers, and a `gpty` CLI can type the marker
+#      (`GPTY_CLI`, else `gpty` on `PATH`, else `target/release/gpty` or
+#      `target/debug/gpty`) — without one this probe cannot assert the half it
+#      exists for, so it exits 3 instead of failing a marker nothing typed;
 #   2. emulates a screen reader on the session bus
 #      (`org.a11y.Status.IsEnabled=true`, restored on exit — it is the same
 #      switch a desktop's assistive-technology setting throws);
@@ -21,19 +25,26 @@
 #      terminal pane publishes its visible grid as text, and prints a
 #      report-only `a11y-values:` line — the count of nodes that answer the
 #      `Text` and `Value` interfaces, whether the typed marker reached either,
-#      and every distinct role name. That line is how a newer engine is graded:
-#      it never gates the run — but the log is: the app must not call the
-#      accessibility server outside its update notification (see the end);
+#      and every distinct role name — plus the first few non-empty `a11y-text:`
+#      answers. That line is how a newer engine is graded: it never gates the
+#      run — but the log is: the app must not call the accessibility server
+#      outside its update notification (see the end);
 #   5. restores the switch and kills the app.
 #
-# What the tree looks like (measured on the 4.7.2 export, 2026-11-05):
+# What the tree looks like (measured on the 4.7.2 export, 2026-11-05 unless
+# dated otherwise):
 #   - the adapter implements the `Name` *property*, not the deprecated
 #     `GetName` method, and no role method: nodes are names here, not roles;
-#   - `AccessibilityServer.update_set_value`/`update_set_role` never reach the
-#     node, and a custom `Control` carries no `Text`/`Value` interface, so an
-#     element's value has no path to AT on this engine — hence the values line;
-#   - a `PaneBody` is a leaf — its own children are never published, so the
-#     terminal's content nodes live on the tile's title bar instead;
+#   - the role and value writes are accepted only inside the node's update
+#     notification (anywhere else is an engine error and the write is dropped;
+#     the run fails on that log line). The role does reach the node — a
+#     terminal's element answers `Text` — while `Text.GetText(0, -1)` on that
+#     element answers `""` even for a screen the app pushed (measured
+#     2026-11-13), so an element value still carries nothing and the published
+#     name is the channel that carries content;
+#   - the terminal publishes its content node on the tile's title bar (see
+#     `A11y.announce_host`); a body's own children were not observed in the
+#     tree on 4.7.2 (2026-11-05), which is why the bar is the host;
 #   - a Control's name is a snapshot taken when its element is created: later
 #     writes do not reach the adapter, so dynamic content is re-published as a
 #     fresh node (`A11y.publish`, which leaves an unchanged slot alone).
@@ -65,6 +76,20 @@ grep -aq 'AccessKit driver loaded' "$BIN" \
 command -v busctl >/dev/null || missing "busctl (systemd) is required to reach the at-spi bus"
 command -v python3 >/dev/null || missing "python3 is required"
 python3 -c 'import dbus' 2>/dev/null || missing "python3-dbus is required (Arch: python-dbus)"
+
+# The marker is the half of this probe that proves the grid's text reaches AT,
+# and it can only arrive through the CLI. A run without one cannot assert it,
+# so a missing CLI is a prerequisite, never a silent skip (measured
+# 2026-11-13: no `gpty` on PATH, the injection never happened, and the run
+# failed as if the app had lost its text). A checkout's own build is accepted.
+CLI="${GPTY_CLI:-$(command -v gpty || true)}"
+if [[ ! -x "$CLI" ]]; then
+    for candidate in "$ROOT/target/release/gpty" "$ROOT/target/debug/gpty"; do
+        [[ -x "$candidate" ]] && { CLI="$candidate"; break; }
+    done
+fi
+[[ -x "$CLI" ]] \
+    || missing "no gpty CLI to inject the probe marker with — set GPTY_CLI, or run cargo build -p gpty-cli"
 
 # shellcheck source=scripts/ui-sandbox
 . "$ROOT/scripts/ui-sandbox"
@@ -133,11 +158,10 @@ fi
 sleep 3
 
 # Make the pane say something only it can say: the grid's published text must
-# carry it. The app's own CLI talks to the sandbox socket.
-if command -v gpty >/dev/null; then
-    gpty inject --text "echo A11Y_PROBE_MARKER" T1 >/dev/null 2>&1 || true
-    sleep 2
-fi
+# carry it. A refused inject is this probe's own failure, not a warning to
+# swallow — the sandbox trap cleans the app up either way.
+"$CLI" inject --text "echo A11Y_PROBE_MARKER" T1 >/dev/null
+sleep 2
 
 # The sandbox moved XDG_RUNTIME_DIR, so the session bus is not discoverable
 # through dbus-python's defaults. Ask busctl (which still reaches the user bus)
@@ -190,6 +214,8 @@ MAX_NODES = 1200
 MAX_DEPTH = 12
 ## How many distinct role names the report line spells before it truncates.
 MAX_ROLES = 12
+## How many non-empty `Text` answers the report line prints.
+MAX_TEXT_SAMPLES = 3
 ## How many sweeps the walk gets while the app is still publishing its tree, and
 ## how long it waits between them.
 REQUIRED_ATTEMPTS = 8
@@ -296,6 +322,11 @@ def walk_tree():
     value_nodes = 0
     roles = []
     marker_in_value = False
+    # The first few non-empty Text answers, printed by the caller: on 4.7.2 the
+    # pane element answers the interface with an empty string even when the app
+    # pushed a screen (measured 2026-11-13), so a later engine is graded by
+    # what actually came back, not only by the interface count.
+    text_samples = []
     queue = [(dest, path, 0) for _, dest, path in selected]
     seen = set()
     while queue and len(names) < MAX_NODES:
@@ -308,6 +339,8 @@ def walk_tree():
         if text is not None:
             text_nodes += 1
             marker_in_value = marker_in_value or "A11Y_PROBE_MARKER" in text
+            if text and len(text_samples) < MAX_TEXT_SAMPLES:
+                text_samples.append(text)
         if value is not None:
             value_nodes += 1
             marker_in_value = marker_in_value or "A11Y_PROBE_MARKER" in value
@@ -316,7 +349,7 @@ def walk_tree():
         if depth < MAX_DEPTH:
             for child_dest, child_path in children_of(dest, path):
                 queue.append((child_dest, child_path, depth + 1))
-    return names, text_nodes, value_nodes, roles, marker_in_value
+    return names, text_nodes, value_nodes, roles, marker_in_value, text_samples
 
 
 # The app publishes its elements while it builds, so the first sweep after the
@@ -325,7 +358,7 @@ def walk_tree():
 # so a real regression still fails fast instead of hanging.
 attempt = 0
 while True:
-    names, text_nodes, value_nodes, roles, marker_in_value = walk_tree()
+    names, text_nodes, value_nodes, roles, marker_in_value, text_samples = walk_tree()
     joined = "\n".join(names)
     attempt += 1
     if all(required in joined for required in REQUIRED) and "A11Y_PROBE_MARKER" in joined:
@@ -337,6 +370,9 @@ while True:
 for name in names:
     if name:
         print("a11y: %s" % name.replace("\n", " | ")[:200])
+
+for sample in text_samples:
+    print("a11y-text: %r" % sample[:120])
 
 # The element-value answer, measured rather than asserted: how a newer engine
 # is graded in one command (see the header).
