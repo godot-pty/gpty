@@ -1,5 +1,5 @@
 {
-  "note": "Memory cost per release, in MiB of VmRSS, measured with scripts/measure-cost. This file is the ledger the README chart (docs/static/images/cost-history.svg) is rendered from: scripts/measure-cost --record appends one entry per release, scripts/render-cost-chart redraws, and scripts/ci-check fails when the two disagree. Values are the release's own measurement on the reference machine (Linux, NVIDIA 620.70.06, Vulkan 1.4.363 loader, Godot 4.7.2); they are not comparable across driver stacks.",
+  "note": "Memory cost per release, in MiB of VmRSS, measured with scripts/measure-cost on this machine (Linux, NVIDIA 620.70.06, Vulkan 1.4.363 loader, 1920x1080, five readings per row after the app answers on its control socket or passes the render baseline). Releases before v0.8.2 were backfilled from their own shipped Linux archive with scripts/backfill-cost-history, so each point is what that build cost as shipped - its engine included - not a rebuild. Panes are normalised to one where the build's control socket allows it; v0.1.0 and v0.2.0 predate the socket and are measured as they open (panes: -1). Not comparable across GPU/driver stacks: re-running on a different machine moves every point, most of all the OpenGL3 row.",
   "series": {
     "idle_forward": {
       "label": "Idle, one pane (Forward+)",
@@ -16,26 +16,231 @@
   },
   "releases": [
     {
-      "version": "0.8.1",
-      "date": "2026-11-11",
-      "source": "README, as published",
+      "version": "0.1.0",
+      "date": "2026-11-13",
+      "source": "shipped archive godopty-v0.1.0-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": -1,
       "values": {
-        "idle_forward": 647,
-        "cold": 1076
-      },
-      "omitted": {
-        "idle_opengl3": "290 MB was recorded there and has not reproduced (a v0.8.1 rebuild measures 366 MB)"
+        "idle_forward": 607,
+        "idle_opengl3": 304,
+        "cold": 1014
+      }
+    },
+    {
+      "version": "0.2.0",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.2.0-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": -1,
+      "values": {
+        "idle_forward": 606,
+        "idle_opengl3": 318,
+        "cold": 1036
+      }
+    },
+    {
+      "version": "0.3.1",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.3.1-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 614,
+        "idle_opengl3": 318,
+        "cold": 1032
+      }
+    },
+    {
+      "version": "0.3.2",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.3.2-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 606,
+        "idle_opengl3": 318,
+        "cold": 1038
+      }
+    },
+    {
+      "version": "0.4.0",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.4.0-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 610,
+        "idle_opengl3": 321,
+        "cold": 1032
+      }
+    },
+    {
+      "version": "0.5.0",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.5.0-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 610,
+        "idle_opengl3": 322,
+        "cold": 1020
+      }
+    },
+    {
+      "version": "0.5.1",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.5.1-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 612,
+        "idle_opengl3": 326,
+        "cold": 1035
+      }
+    },
+    {
+      "version": "0.5.2",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.5.2-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 615,
+        "idle_opengl3": 330,
+        "cold": 1046
+      }
+    },
+    {
+      "version": "0.5.3",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.5.3-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 618,
+        "idle_opengl3": 339,
+        "cold": 1045
+      }
+    },
+    {
+      "version": "0.5.4",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.5.4-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 623,
+        "idle_opengl3": 330,
+        "cold": 1043
+      }
+    },
+    {
+      "version": "0.5.5",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.5.5-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 623,
+        "idle_opengl3": 334,
+        "cold": 1070
+      }
+    },
+    {
+      "version": "0.5.6",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.5.6-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 624,
+        "idle_opengl3": 333,
+        "cold": 1052
+      }
+    },
+    {
+      "version": "0.6.0",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.6.0-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 641,
+        "idle_opengl3": 341,
+        "cold": 1061
+      }
+    },
+    {
+      "version": "0.7.0",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.7.0-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 641,
+        "idle_opengl3": 344,
+        "cold": 1067
+      }
+    },
+    {
+      "version": "0.7.1",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.7.1-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 640,
+        "idle_opengl3": 348,
+        "cold": 1066
+      }
+    },
+    {
+      "version": "0.7.2",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.7.2-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 640,
+        "idle_opengl3": 349,
+        "cold": 1060
+      }
+    },
+    {
+      "version": "0.8.0",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.8.0-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 646,
+        "idle_opengl3": 356,
+        "cold": 1069
+      }
+    },
+    {
+      "version": "0.8.1",
+      "date": "2026-11-13",
+      "source": "shipped archive gpty-v0.8.1-linux-x86_64",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
+      "values": {
+        "idle_forward": 655,
+        "idle_opengl3": 373,
+        "cold": 1080
       }
     },
     {
       "version": "0.8.2",
       "date": "2026-11-13",
-      "source": "scripts/measure-cost on the v0.8.2 build",
+      "source": "shipped archive gpty-v0.8.2-linux-x86_64",
       "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "panes": 1,
       "values": {
-        "idle_forward": 656,
-        "idle_opengl3": 363,
-        "cold": 1079
+        "idle_forward": 663,
+        "idle_opengl3": 373,
+        "cold": 1096
       }
     }
   ]

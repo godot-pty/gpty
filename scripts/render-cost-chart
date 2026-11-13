@@ -106,10 +106,26 @@ def x_positions(box, count):
     return [left + 26 + (right - left - 52) * (i / (count - 1)) for i in range(count)]
 
 
+def label_indices(count, limit=7):
+    """Indices to label: every `stride`, plus the newest release, minus any
+    neighbour the newest one would collide with."""
+    stride = max(1, (count + limit - 1) // limit)
+    chosen = {i for i in range(count) if i % stride == 0}
+    if count:
+        chosen.add(count - 1)
+        # The newest label wins over a neighbour it would sit on top of.
+        for i in sorted(chosen):
+            if i != count - 1 and count - 1 - i < stride:
+                chosen.discard(i)
+    return chosen
+
+
 def panel(svg, box, title, series_ids, releases, ymax):
     left, top, right, bottom = box
     height = bottom - top
-    xs = x_positions(box, len(releases))
+    count = len(releases)
+    xs = x_positions(box, count)
+    shown = label_indices(count)
 
     svg.append(
         f'<text class="ttl" x="{left}" y="{top - 16}" fill="#1f2328" font-size="12" '
@@ -131,7 +147,9 @@ def panel(svg, box, title, series_ids, releases, ymax):
         f'<line class="axis" x1="{left}" y1="{bottom}" x2="{right}" y2="{bottom}" '
         f'stroke="#d0d7de" stroke-width="1"/>'
     )
-    for x, release in zip(xs, releases):
+    for i, (x, release) in enumerate(zip(xs, releases)):
+        if i not in shown:
+            continue
         svg.append(
             f'<text class="txt" x="{x:.1f}" y="{bottom + 19}" text-anchor="middle" '
             f'fill="#6e7781" font-size="11">v{esc(release["version"])}</text>'
@@ -159,13 +177,22 @@ def panel(svg, box, title, series_ids, releases, ymax):
                 f'stroke-width="2" stroke-linejoin="round"/>'
             )
 
-        for x, y, value, previous in points:
+        radius = 4 if count <= 10 else 2.5
+        for position, (x, y, value, previous) in enumerate(points):
             light = SERIES_STYLE[series_id][0]
-            svg.append(f'<circle class="s{index}" cx="{x:.1f}" cy="{y:.1f}" r="4" fill="{light}"/>')
+            svg.append(
+                f'<circle class="s{index}" cx="{x:.1f}" cy="{y:.1f}" r="{radius}" fill="{light}"/>'
+            )
+            # The first release and the current one always carry their number;
+            # the ones between them only when the axis is short enough to hold
+            # them without collision.
+            last = position == len(points) - 1
+            if not (last or position == 0 or count <= 7):
+                continue
             label_x = min(max(x, left + 20), right - 20)
-            # A flat line still has a story: carry the change against the
-            # series' previous point beside the value it belongs to.
-            label = f"{value} ({value - previous:+d})" if previous is not None else str(value)
+            # A flat line still has a story: the change against the series'
+            # previous point rides beside the current one.
+            label = f"{value} ({value - previous:+d})" if last and previous is not None else str(value)
             svg.append(
                 f'<text class="val" x="{label_x:.1f}" y="{y - 10:.1f}" text-anchor="middle" '
                 f'fill="#1f2328" font-size="11">{label}</text>'

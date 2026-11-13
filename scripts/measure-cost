@@ -9,6 +9,13 @@
 #        scripts/measure-cost --record     # measure, print the table, and append the
 #                                          # run to docs/data/cost-history.json, which
 #                                          # redraws the README chart
+#        scripts/measure-cost --release-dir DIR [--json]
+#                                          # measure one shipped archive (cold, idle,
+#                                          # OpenGL3) for the history: the CLI drives
+#                                          # the panes where the build answers it, and
+#                                          # a build that predates the socket is
+#                                          # measured as it opens (scripts/backfill-
+#                                          # cost-history walks a folder of them)
 #
 # The README's "Trade-offs" table is a published claim, not a changelog: an
 # idle gPTY costs what it costs, and a release that quietly grows the renderer
@@ -59,27 +66,44 @@ SETTLE="${MEASURE_SETTLE:-5}"
 SAMPLES="${MEASURE_SAMPLES:-5}"
 TOLERANCE="${MEASURE_TOLERANCE:-10}"
 FLOOD_LINES="${MEASURE_FLOOD_LINES:-30000}"
+PANE_OPS=1
+RSS_FLOOR="${MEASURE_RSS_FLOOR:-150}"
 
 MODE=measure
 JSON=0
 RECORD=0
-for arg in "$@"; do
-    case "$arg" in
+RELEASE_DIR=""
+while (($#)); do
+    case "$1" in
         --measure) ;;
         --check) MODE=check ;;
         --stamp) MODE=stamp ;;
         --json) JSON=1 ;;
         --record) RECORD=1 ;;
+        --release-dir)
+            [[ $# -ge 2 ]] || {
+                echo "measure-cost: --release-dir needs a path" >&2
+                exit 2
+            }
+            RELEASE_DIR="$2"
+            shift
+            ;;
         -h | --help)
-            sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
-            echo "measure-cost: unknown argument '$arg' (see --help)" >&2
+            echo "measure-cost: unknown argument '$1' (see --help)" >&2
             exit 2
             ;;
     esac
+    shift
 done
+if [[ -n "$RELEASE_DIR" ]]; then
+    [[ "$MODE" == measure ]] ||
+        die "--release-dir measures one shipped build; --check and --stamp belong to the workspace" 2
+    MODE=release
+fi
 
 die() {
     echo "measure-cost: $*" >&2
@@ -121,7 +145,26 @@ fi
 if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
     die "no display: the cost is the renderer, so there is nothing to measure under --headless (run this in a graphical session)" 3
 fi
+RELEASE_VERSION=""
+APP_DIR="$ROOT"
+if [[ "$MODE" == release ]]; then
+    RELEASE_DIR="$(cd "$RELEASE_DIR" && pwd)" || die "$RELEASE_DIR does not exist" 3
+    # gpty-gui from v0.7.0, the single gpty binary before it (godopty at v0.1.0);
+    # every one of them is an engine export with its .pck beside it.
+    for candidate in gpty-gui gpty godopty; do
+        if [[ -x "$RELEASE_DIR/$candidate" && -f "$RELEASE_DIR/$candidate.pck" ]]; then
+            BIN="$RELEASE_DIR/$candidate"
+            break
+        fi
+    done
+    [[ -n "$BIN" && -x "$BIN" ]] || die "no GUI binary with a .pck beside it in $RELEASE_DIR" 3
+    APP_DIR="$RELEASE_DIR"
+    RELEASE_VERSION="$(basename "$RELEASE_DIR" | sed -n 's/.*-v\([0-9][0-9.]*\)-linux.*/\1/p')"
+    [[ -n "$RELEASE_VERSION" ]] || die "cannot read a version out of $(basename "$RELEASE_DIR")" 3
+fi
 [[ -x "$BIN" ]] || die "$BIN is not executable - run './scripts/build' first (or set GPTY_GUI_BIN)" 3
+# One client for every release: the workspace CLI speaks the protocol all of
+# them answer, so a historical run is not also a per-version client change.
 CLI="$ROOT/target/release/gpty"
 [[ -x "$CLI" ]] || CLI="$ROOT/target/debug/gpty"
 [[ -x "$CLI" ]] || die "no gpty CLI at target/release or target/debug - build one to drive the panes" 3
@@ -182,11 +225,28 @@ kill_all_panes() {
 # The app is up when its control socket answers a list-panes call: the socket
 # file appears before the engine is ready, the call is the readiness signal.
 wait_ready() {
-    local deadline=$((SECONDS + TIMEOUT))
+    local label="$1" deadline=$((SECONDS + TIMEOUT)) cli_deadline=$((SECONDS + 15)) rss
     while ((SECONDS < deadline)); do
-        kill -0 "$APP_PID" 2>/dev/null || die "the app exited during launch (log: $GPTY_SANDBOX/$1.log)" 5
-        if [[ -S "$GPTY_SOCKET" ]] && cli list-panes --json >/dev/null 2>&1; then
-            return 0
+        kill -0 "$APP_PID" 2>/dev/null || die "the app exited during launch (log: $GPTY_SANDBOX/$label.log)" 5
+        if [[ -S "$GPTY_SOCKET" ]]; then
+            # A pre-v0.3.x-era build binds its socket with the caller's umask and
+            # the current CLI refuses 0644+ on purpose (its hijack guard). The
+            # sandbox is 0700 and the socket is ours, so tighten the file rather
+            # than weaken the client.
+            [[ "$MODE" == release ]] && chmod 600 "$GPTY_SOCKET" 2>/dev/null || true
+            if cli list-panes --json >/dev/null 2>&1; then
+                PANE_OPS=1
+                return 0
+            fi
+        fi
+        if [[ "$MODE" == release ]] && ((SECONDS >= cli_deadline)); then
+            # v0.1.0 and v0.2.0 predate the control socket: the only readiness
+            # signal they offer is a renderer that has taken its baseline.
+            rss="$(awk '/^VmRSS:/{printf "%d", $2/1024}' "/proc/$APP_PID/status" 2>/dev/null || echo 0)"
+            if ((rss >= RSS_FLOOR)); then
+                PANE_OPS=0
+                return 0
+            fi
         fi
         sleep 0.5
     done
@@ -197,12 +257,15 @@ launch() {
     local label="$1"
     shift
     # setsid without --fork execs the app in place, so $! stays the app's pid
-    # and the app becomes its own session/group leader.
+    # and the app becomes its own session/group leader. The release's own
+    # directory is the working directory, the way a user starts it.
+    pushd "$APP_DIR" >/dev/null
     setsid "$@" >"$GPTY_SANDBOX/$label.log" 2>&1 &
     APP_PID=$!
+    popd >/dev/null
     wait_ready "$label"
     case "$(cat "/proc/$APP_PID/comm" 2>/dev/null)" in
-        *gpty* | *godot*) ;;
+        *gpty* | *godopty* | *godot*) ;;
         *) die "pid $APP_PID is not the app (comm: $(cat "/proc/$APP_PID/comm" 2>/dev/null)) - refusing to measure a wrapper" 5 ;;
     esac
 }
@@ -231,9 +294,49 @@ record() {
     ROWS+=("$1|$2|$3|${4:-}")
 }
 
+RELEASE_PANES=""
+panes_json() {
+    # Captured during the idle row (the app is dead by the time JSON is emitted).
+    [[ -n "$RELEASE_PANES" ]] && printf '%s' "$RELEASE_PANES" && return
+    if ((PANE_OPS)); then pane_count; else printf -- '-1'; fi
+}
+
+# A historical build opens whatever its own default layout says (one terminal
+# through v0.5.x, the empty guide from v0.8.0). Bring it to one pane where the
+# CLI can, so the series measures the same thing across the years; where it
+# cannot (v0.1.0, v0.2.0) the row records what the build shipped.
+normalize_one_pane() {
+    ((PANE_OPS)) || return 0
+    kill_all_panes || true
+    cli new-pane -t terminal --title cost-idle >/dev/null 2>&1 ||
+        cli new-pane >/dev/null 2>&1 || true
+}
+
+measure_release() {
+    local cold one gl
+    launch cold "$BIN"
+    record "First launch, cold pipeline cache" "$(sample_rss)" "$(PANE_OPS && pane_count || printf -- '-1')"
+    stop_app
+
+    launch warm "$BIN"
+    normalize_one_pane
+    RELEASE_PANES="$(panes_json)"
+    one="$(sample_rss)"
+    record "Idle, one pane (Forward+, the default)" "$one" "$RELEASE_PANES"
+    stop_app
+
+    launch gl "$BIN" --rendering-driver opengl3
+    normalize_one_pane
+    record "Same build, --rendering-driver opengl3, warm" "$(sample_rss)" "$(panes_json)"
+    stop_app
+}
+
 gpty_sandbox_init
 echo "measure-cost: $BIN, workspace $(crate_version), $(driver_note), sandbox $GPTY_SANDBOX" >&2
 
+if [[ "$MODE" == release ]]; then
+    measure_release
+else
 # ── First launch, cold pipeline cache ───────────────────────────────────
 # A fresh sandbox has an empty XDG_CACHE_HOME, so the driver compiles its
 # pipelines into this process. Sample the launch as it comes up, whatever the
@@ -283,6 +386,8 @@ new_pane "sleep 3600" "cost-idle"
 record "Same build, --rendering-driver opengl3, warm" "$(sample_rss)" "1"
 stop_app
 
+fi
+
 # ── Report ──────────────────────────────────────────────────────────────
 # stdout is the pasteable table (the README has no spread or pane column);
 # the spread and the pane count it was taken at go to stderr with the reasons.
@@ -296,6 +401,21 @@ row_med() {
 }
 
 emit_json() {
+    if [[ "$MODE" == release ]]; then
+        printf '{\n'
+        printf '  "version": "%s",\n' "$RELEASE_VERSION"
+        printf '  "date": "%s",\n' "$(date -u +%F)"
+        printf '  "source": "shipped archive %s",\n' "$(basename "$RELEASE_DIR")"
+        printf '  "driver": "%s",\n' "$(driver_note)"
+        printf '  "panes": %s,\n' "$(panes_json)"
+        printf '  "values": {\n'
+        printf '    "idle_forward": %s,\n' "$(row_med 1)"
+        printf '    "idle_opengl3": %s,\n' "$(row_med 2)"
+        printf '    "cold": %s\n' "$(row_med 0)"
+        printf '  }\n'
+        printf '}\n'
+        return
+    fi
     printf '{\n'
     printf '  "version": "%s",\n' "$(crate_version)"
     printf '  "date": "%s",\n' "$(date -u +%F)"

@@ -125,7 +125,7 @@ Hosting a terminal inside a game engine is expensive, in terms of RAM & power us
 
 ![Memory cost by release: an idle one-pane window on Forward+ and on OpenGL3, and the first launch of a release with a cold pipeline cache](docs/static/images/cost-history.svg)
 
-The chart is that table's history: `docs/data/cost-history.json` holds one entry per release, `scripts/measure-cost --record` takes the measurement, and `scripts/render-cost-chart` draws it - so the line is the project's own record, not a hand-drawn impression.
+The chart is that table's history: every release from v0.1.0 was measured from its own shipped Linux archive on one machine (`scripts/backfill-cost-history` for the ones that shipped before the harness existed, `scripts/measure-cost --record` from now on), `docs/data/cost-history.json` holds the ledger, and `scripts/render-cost-chart` draws it - so the line is the project's own record, not a hand-drawn impression. Each point is what that build cost as shipped, its Godot engine included; a run is one launch sampled five times, so neighbours within a percent of each other are run-to-run noise rather than a change. v0.1.0 and v0.2.0 predate the control socket, so they are measured as they open (one terminal) rather than driven to a known pane count.
 
 The above is Electron-level memory for what a TUI does inside a terminal window, and power follows from it: the window is GPU-composited and repaints while idle, so an idle gPTY is not "free" the way an idle shell (basically) is. Both of these issues are acknowledged, and are treated as debts with a plan, rather than leaving them as a permanent tax.
 

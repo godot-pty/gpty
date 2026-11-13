@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# Measure every shipped Linux release under one or more roots and extend the ledger.
+#
+# Usage: scripts/backfill-cost-history [ROOT...] [--force] [--dry-run]
+#
+#   ROOT            a folder of `gpty-vX.Y.Z-linux-x86_64` /
+#                   `godopty-vX.Y.Z-linux-x86_64` directories and/or their
+#                   `.tar.gz` archives. Defaults to $GPTY_RELEASES, then
+#                   /mnt/App/gPTY.
+#   --force         re-measure a version already in docs/data/cost-history.json
+#                   (default: skip it, so the run is cheap to repeat).
+#   --dry-run       print the plan and exit.
+#
+# An archive with no extracted directory beside it is extracted into a temp dir
+# once, so a release folder that keeps only tarballs still backfills.
+#
+# Each version is measured by `scripts/measure-cost --release-dir`, which takes
+# three launches in a private sandbox (cold, warm idle, OpenGL3) and reports the
+# values in the ledger's shape; the entry is appended with
+# `scripts/render-cost-chart --record`, which redraws the README chart.
+#
+# A version that will not run on this machine is reported and skipped - it is
+# not written to the ledger, because an unmeasured point would be a guess.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+LEDGER="$ROOT/docs/data/cost-history.json"
+FORCE=0
+DRY=0
+ROOTS=()
+for arg in "$@"; do
+    case "$arg" in
+        --force) FORCE=1 ;;
+        --dry-run) DRY=1 ;;
+        -h | --help)
+            sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        -*)
+            echo "backfill-cost-history: unknown flag '$arg'" >&2
+            exit 2
+            ;;
+        *) ROOTS+=("$arg") ;;
+    esac
+done
+if ((${#ROOTS[@]} == 0)); then
+    ROOTS=("${GPTY_RELEASES:-/mnt/App/gPTY}")
+fi
+
+for root in "${ROOTS[@]}"; do
+    [[ -d "$root" ]] || {
+        echo "backfill-cost-history: $root is not a directory" >&2
+        exit 2
+    }
+done
+
+# One `version<TAB>dir` line per release. A directory wins over its archive;
+# an archive with no directory is unpacked into the temp workspace.
+TMPWORK="$(mktemp -d "${TMPDIR:-/tmp}/gpty-backfill.XXXXXX")"
+trap 'rm -rf "$TMPWORK"' EXIT
+
+version_of() {
+    sed -n 's/.*-v\([0-9][0-9.]*\)-linux.*/\1/p' <<<"$(basename "$1")"
+}
+
+PLAN=""
+for root in "${ROOTS[@]}"; do
+    while IFS= read -r dir; do
+        [[ -n "$dir" ]] || continue
+        version="$(version_of "$dir")"
+        [[ -n "$version" ]] || continue
+        PLAN+="${version}"$'\t'"${dir}"$'\n'
+    done < <(find "$root" -maxdepth 1 -type d \( -name 'gpty-v*-linux-*' -o -name 'godopty-v*-linux-*' \) | sort)
+done
+
+# An archive whose directory is missing still counts.
+for root in "${ROOTS[@]}"; do
+    while IFS= read -r archive; do
+        [[ -n "$archive" ]] || continue
+        version="$(version_of "${archive%.tar.gz}")"
+        [[ -n "$version" ]] || continue
+        if grep -q $'\t' <<<"$PLAN" && awk -F'\t' -v v="$version" '$1 == v { found = 1 } END { exit !found }' <<<"$PLAN"; then
+            continue
+        fi
+        echo "backfill-cost-history: extracting $(basename "$archive")" >&2
+        mkdir -p "$TMPWORK/$version"
+        tar -xzf "$archive" -C "$TMPWORK/$version"
+        dir="$TMPWORK/$version/$(basename "${archive%.tar.gz}")"
+        [[ -d "$dir" ]] || dir="$(dirname "$(find "$TMPWORK/$version" -name '*.pck' -print -quit)")"
+        [[ -d "$dir" ]] && PLAN+="${version}"$'\t'"${dir}"$'\n'
+    done < <(find "$root" -maxdepth 1 -type f -name '*-linux-*.tar.gz' | sort)
+done
+
+PLAN="$(printf '%s' "$PLAN" | sort -u -t$'\t' -k1,1V)"
+
+known_versions() {
+    python3 - "$LEDGER" <<'PY'
+import json, sys
+for release in json.load(open(sys.argv[1]))["releases"]:
+    print(release["version"])
+PY
+}
+KNOWN="$(known_versions)"
+
+measured=0
+skipped=0
+failed=()
+
+while IFS=$'\t' read -r version dir; do
+    [[ -n "$version" ]] || continue
+    if ((!FORCE)) && grep -qx "$version" <<<"$KNOWN"; then
+        echo "backfill-cost-history: v$version already in the ledger - skipping (--force re-measures)" >&2
+        skipped=$((skipped + 1))
+        continue
+    fi
+    if ((DRY)); then
+        echo "would measure v$version from $dir"
+        continue
+    fi
+    echo "backfill-cost-history: v$version ($(basename "$dir"))" >&2
+    entry="$TMPWORK/v$version.json"
+    if "$ROOT/scripts/measure-cost" --release-dir "$dir" --json >"$entry" 2>"$TMPWORK/v$version.log"; then
+        "$ROOT/scripts/render-cost-chart" --record "$entry"
+        measured=$((measured + 1))
+    else
+        echo "backfill-cost-history: v$version did not measure - skipping it (log: $TMPWORK/v$version.log)" >&2
+        tail -3 "$TMPWORK/v$version.log" >&2 || true
+        failed+=("$version")
+    fi
+done <<<"$PLAN"
+
+echo
+echo "backfill-cost-history: measured $measured, skipped $skipped, failed ${#failed[@]}${failed[*]:+ (${failed[*]})}" >&2
+((DRY)) || "$ROOT/scripts/render-cost-chart" --check >&2
