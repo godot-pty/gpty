@@ -10,7 +10,9 @@ class_name A11y
 ## A custom `_draw()` Control has no text element. Its visible content is
 ## published as a text node on the tile's title bar (`publish`) and its one-line
 ## announcements replace a live node there; the element's value is recorded too
-## (`set_text`), for adapters that map it.
+## (`set_text`), for adapters that map it, and written by `apply_update` from
+## the host's own `NOTIFICATION_ACCESSIBILITY_UPDATE` — the one place the engine
+## accepts that write.
 ##
 ## Measured on the 4.7.2 AccessKit export (2026-11-05): an element carries the
 ## name snapshot taken when it was created, and neither the value nor the role
@@ -28,6 +30,15 @@ const TEXT_NAME := "A11yText"
 ## What `set_value` last pushed, readable by tests and `--audit-accessibility`
 ## (an element's value has no getter).
 const VALUE_META := &"a11y_value"
+## A role and value waiting for the control's own accessibility update.
+##
+## 4.7.2's AccessKit server refuses `update_set_role`/`update_set_value` outside
+## `NOTIFICATION_ACCESSIBILITY_UPDATE` and prints an engine error for each call
+## (`drivers/accesskit/accessibility_server_accesskit.cpp:746`, `:834`), so the
+## write happens in `apply_update`, which the host forwards from that
+## notification.
+const PENDING_ROLE_META := &"a11y_pending_role"
+const PENDING_VALUE_META := &"a11y_pending_value"
 const ANNOUNCE_CAP := 300
 ## How long the "is a screen reader attached" answer is reused. A reader
 ## attaching mid-session is not a sub-second event, and the engine call is
@@ -71,35 +82,60 @@ static func screen_reader() -> bool:
 	return _active
 
 
-## Record and (when supported) push a Control's text value, then notify the
-## server. The meta is written before the gate so the audit can read what the
-## surface would expose on a driver-capable engine.
+## Record a Control's text value and ask for its accessibility update.
+##
+## The meta is written before the gate so the audit can read what the surface
+## would expose on a driver-capable engine. The engine write itself happens in
+## `apply_update`, which the control must forward from its own
+## `NOTIFICATION_ACCESSIBILITY_UPDATE`: 4.7.2's server refuses it anywhere else
+## and prints an engine error for every attempt.
 static func set_value(control: Control, text: String) -> void:
-	_push_value(control, text, -1)
+	_queue_value(control, text, -1)
 
 
-## A custom-drawn surface whose value is text: the same push, plus the
+## A custom-drawn surface whose value is text: the same queue, plus the
 ## multiline-text-field role. Measured on 4.7.2's AccessKit adapter
 ## (2026-11-05): neither the value nor the role reaches AT-SPI — an element
 ## carries only the name snapshot taken at creation — so this is recorded for
 ## adapters that do map them, and `publish` is what exposes the content today.
 static func set_text(control: Control, text: String) -> void:
-	_push_value(control, text, AccessibilityServer.ROLE_MULTILINE_TEXT_FIELD)
+	_queue_value(control, text, AccessibilityServer.ROLE_MULTILINE_TEXT_FIELD)
 
 
-static func _push_value(control: Control, text: String, role: int) -> void:
+static func _queue_value(control: Control, text: String, role: int) -> void:
 	if control == null or not is_instance_valid(control):
 		return
 	control.set_meta(VALUE_META, text)
 	if not enabled():
 		return
+	control.set_meta(PENDING_VALUE_META, text)
+	control.set_meta(PENDING_ROLE_META, role)
+	control.queue_accessibility_update()
+
+## Write the role and value `set_value`/`set_text` queued. A host Control
+## forwards its own notification here:
+##
+##     func _notification(what):
+##         if what == NOTIFICATION_ACCESSIBILITY_UPDATE:
+##             A11y.apply_update(self)
+##
+## One-shot: the pending metas are consumed, and a control with nothing
+## waiting returns without touching the server.
+static func apply_update(control: Control) -> void:
+	if control == null or not is_instance_valid(control):
+		return
+	if not control.has_meta(PENDING_VALUE_META):
+		return
+	var text := str(control.get_meta(PENDING_VALUE_META, ""))
+	var role := int(control.get_meta(PENDING_ROLE_META, -1))
+	control.remove_meta(PENDING_VALUE_META)
+	control.remove_meta(PENDING_ROLE_META)
 	var element := control.get_accessibility_element()
 	if not element.is_valid():
 		return
 	if role >= 0:
 		AccessibilityServer.update_set_role(element, role)
 	AccessibilityServer.update_set_value(element, text)
-	control.queue_accessibility_update()
 
 
 ## Publish a text node in `slot` under `host`, replacing what was there.

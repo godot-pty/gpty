@@ -112,10 +112,37 @@ func test_set_value_records_the_value_without_a_driver():
 	A11y.set_value(control, "prompt$ ls")
 	assert_eq(str(control.get_meta(A11y.VALUE_META, "")), "prompt$ ls",
 		"the audit reads the recorded value; headless has no element server")
+	assert_false(control.has_meta(A11y.PENDING_VALUE_META),
+		"headless has no element server, so nothing is queued for a write")
 	assert_false(A11y.screen_reader(),
 		"the headless server reports an unknown reader state (-1), not an attached one")
 	assert_false(A11y.enabled(),
 		"headless has no accessibility driver: every push is gated on this and must no-op")
+
+
+## The engine accepts `update_set_role`/`update_set_value` only inside a
+## control's accessibility update, so a queued pair must leave with the flush.
+func test_apply_update_consumes_a_queued_value_once():
+	var control := Control.new()
+	add_child_autofree(control)
+	control.set_meta(A11y.PENDING_VALUE_META, "screen")
+	control.set_meta(A11y.PENDING_ROLE_META, AccessibilityServer.ROLE_MULTILINE_TEXT_FIELD)
+	A11y.apply_update(control)
+	assert_false(control.has_meta(A11y.PENDING_VALUE_META), "the queue is one-shot")
+	assert_false(control.has_meta(A11y.PENDING_ROLE_META))
+	A11y.apply_update(control)  # nothing queued: must be a no-op, not an error
+
+
+## The pane's own `_notification` is what lets the write happen at all: without
+## the forward, `apply_update` is never reached and the queued value is dropped.
+func test_a_terminal_forwards_its_accessibility_update():
+	var ws = await _make_workspace()
+	var body = _first_body(ws)
+	assert_true(body is TerminalPane, "the fixture's first pane is a terminal")
+	body.set_meta(A11y.PENDING_VALUE_META, "screen")
+	body._notification(Node.NOTIFICATION_ACCESSIBILITY_UPDATE)
+	assert_false(body.has_meta(A11y.PENDING_VALUE_META),
+		"the terminal must hand its accessibility update to A11y.apply_update")
 
 
 # ── Pane identity ──────────────────────────────────────────────────────

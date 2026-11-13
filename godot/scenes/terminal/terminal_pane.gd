@@ -589,7 +589,12 @@ func _on_resize():
 	_resize_timer = 0.0
 
 func _notification(what):
-	if what == NOTIFICATION_RESIZED: _on_resize()
+	match what:
+		NOTIFICATION_RESIZED: _on_resize()
+		# The engine accepts `update_set_role`/`update_set_value` only while it
+		# is updating this element, so the queued value is written here, not at
+		# the call site (`A11y.set_text`).
+		NOTIFICATION_ACCESSIBILITY_UPDATE: A11y.apply_update(self)
 
 func _get_layout_state() -> Dictionary:
 	var state = super._get_layout_state()

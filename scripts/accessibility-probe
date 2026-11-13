@@ -22,7 +22,8 @@
 #      report-only `a11y-values:` line — the count of nodes that answer the
 #      `Text` and `Value` interfaces, whether the typed marker reached either,
 #      and every distinct role name. That line is how a newer engine is graded:
-#      it never gates the run;
+#      it never gates the run — but the log is: the app must not call the
+#      accessibility server outside its update notification (see the end);
 #   5. restores the switch and kills the app.
 #
 # What the tree looks like (measured on the 4.7.2 export, 2026-11-05):
@@ -145,6 +146,17 @@ A11Y_ADDR="$(busctl --user call org.a11y.Bus /org/a11y/bus org.a11y.Bus GetAddre
     2>/dev/null | sed -E 's/^s "(.*)"$/\1/')" || true
 [[ "$A11Y_ADDR" == unix:* ]] || missing "could not resolve the at-spi bus address (org.a11y.Bus.GetAddress)"
 export A11Y_ADDR
+
+# The app must never call the accessibility server outside its update
+# notification: 4.7.2 answers each such call with an engine error and drops the
+# write (measured 2026-11-12, two lines per launch of the v0.8.1 export). This
+# runs before the walk so a tree assertion failing for an unrelated reason
+# cannot hide the refusal behind its own exit.
+if grep -q "Accessibility updates are only allowed" "$LOG"; then
+    echo "accessibility-probe: the app wrote to the accessibility server outside NOTIFICATION_ACCESSIBILITY_UPDATE:" >&2
+    grep -n -m 3 "Accessibility updates are only allowed" "$LOG" >&2 || true
+    exit 1
+fi
 
 A11Y_PYTHON_OUT="$(python3 <<'PY'
 import os
