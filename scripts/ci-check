@@ -15,8 +15,18 @@ set -euo pipefail
 # only gate it can influence is one the Docs workflow already runs: `docs/`,
 # Markdown, the generated bundle, the licenses, and the two scripts that are
 # nothing but that workflow's gates (`scripts/docs-check`,
-# `scripts/build-wiki`). Every other script under `scripts/` builds the app,
-# drives Godot, or is itself a gate runner, so it takes the code gates. Rust
+# `scripts/build-wiki`).
+#
+# A tooling-class change runs the docs gates, the cost gates and a syntax/plan
+# check of the measurement scripts themselves, and stops there. It is an
+# EXPLICIT allow-list - a script joins it only when `run_tooling_scripts`
+# executes it (so a break fails in seconds) and it can observe nothing the
+# Rust, GDScript or smoke gates test. The measurement scripts qualify: they are
+# bash/python over the release archives, they are run by `run_cost_stamp`, and
+# no workflow and no Rust test reads them. Everything else under `scripts/`
+# builds the app, drives Godot, or is itself a gate runner (including this
+# file - editing the gate is validated by running the gate), so it keeps the
+# code gates. Rust
 # and Godot are never split: the extension is one boundary, so a change on
 # either side runs both suites. The changed set is the push range when the
 # pre-push hook provides it (CI_CHECK_RANGE_FROM), the index under --fast, and
@@ -127,6 +137,36 @@ docs_class_path() {
     esac
 }
 
+# tooling_class_path: a measurement script whose own cheap gate runs it.
+# Deliberately an allow-list: adding a script here promises run_tooling_scripts
+# exercises it, so a break is caught in seconds instead of skipping the suite.
+tooling_class_path() {
+    case "$1" in
+        scripts/measure-cost | scripts/render-cost-chart | scripts/backfill-cost-history) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# tooling_class_change: at least one tooling path, and nothing outside docs or
+# tooling (a mixed change with app code is a code change).
+tooling_class_change() {
+    local paths p seen_tooling=0 seen=0
+    paths="$(changed_paths)"
+    [ -n "$paths" ] || return 1
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        seen=1
+        if tooling_class_path "$p"; then
+            seen_tooling=1
+        elif ! docs_class_path "$p"; then
+            return 1
+        fi
+    done <<EOF
+$paths
+EOF
+    [ "$seen" -eq 1 ] && [ "$seen_tooling" -eq 1 ]
+}
+
 docs_class_change() {
     local paths p seen=0
     paths="$(changed_paths)"
@@ -152,13 +192,21 @@ report_class() {
     fi
     while IFS= read -r p; do
         [ -n "$p" ] || continue
-        if docs_class_path "$p"; then p_class="docs"; else p_class="code"; fi
+        if docs_class_path "$p"; then
+            p_class="docs"
+        elif tooling_class_path "$p"; then
+            p_class="tooling"
+        else
+            p_class="code"
+        fi
         printf "  %-4s %s\n" "$p_class" "$p"
     done <<EOF
 $paths
 EOF
     if docs_class_change; then
         printf "\n  %b→ docs gates only (docs-check + knowledge bundle + cost figures)%b\n" "$BOLD" "$NC"
+    elif tooling_class_change; then
+        printf "\n  %b→ tooling gates (docs + cost + script syntax/plan); CI_CHECK_FULL=1 runs everything%b\n" "$BOLD" "$NC"
     else
         printf "\n  %b→ full suite (docs gates, static checks, Rust, Godot, smoke, audit)%b\n" "$BOLD" "$NC"
     fi
@@ -206,6 +254,50 @@ run_cost_stamp() {
     fi
 }
 
+# The measurement scripts are bash and python that never build the app. Each
+# one is executed here - bash -n for the shells, a compile for the renderer,
+# a planned (not run) backfill - so an edit that breaks one fails in seconds
+# instead of passing a 300 s suite that never touches it.
+run_tooling_scripts() {
+    header "tooling scripts"
+    local TOOL_OUT f
+    for f in scripts/measure-cost scripts/backfill-cost-history; do
+        if TOOL_OUT="$(bash -n "$f" 2>&1)"; then
+            pass "bash -n $f"
+        else
+            fail "bash -n $f"
+            detail "$TOOL_OUT"
+            check_failed
+        fi
+    done
+    if TOOL_OUT="$(python3 -c 'import py_compile, sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)' \
+        scripts/render-cost-chart "${TMPDIR:-/tmp}/render-cost-chart.pyc" 2>&1)"; then
+        pass "compile scripts/render-cost-chart"
+    else
+        fail "compile scripts/render-cost-chart"
+        detail "$TOOL_OUT"
+        check_failed
+    fi
+    # A folder of release archives when this machine has one, otherwise an
+    # empty temp root: the plan must parse and exit 0 either way.
+    local root="${GPTY_RELEASES:-/mnt/App/gPTY}"
+    if [ ! -d "$root" ]; then
+        root="$(mktemp -d "${TMPDIR:-/tmp}/gpty-tooling.XXXXXX")"
+        TOOLING_TMP="$root"
+    fi
+    if TOOL_OUT="$(./scripts/backfill-cost-history --dry-run "$root" 2>&1)"; then
+        pass "backfill plan"
+    else
+        fail "backfill plan — './scripts/backfill-cost-history --dry-run' failed"
+        detail "$TOOL_OUT"
+        check_failed
+    fi
+    if [ -n "${TOOLING_TMP:-}" ]; then
+        rm -rf "$TOOLING_TMP"
+    fi
+    return 0
+}
+
 # --classify answers "why did the gate run (or skip) that?" without running it.
 if $CLASSIFY; then
     report_class
@@ -229,6 +321,25 @@ if [ -z "${CI_CHECK_FULL:-}" ] \
         printf "${GREEN}${BOLD}Docs checks passed. Ready to push.${NC}\n"
     else
         printf "${RED}${BOLD}Docs checks failed. Fix before pushing.${NC}\n"
+    fi
+    exit $FAILED
+fi
+
+# A tooling-only range would otherwise buy a 300 s suite that never executes
+# the scripts it changed (no workflow runs them, no Rust test reads them).
+if [ -z "${CI_CHECK_FULL:-}" ] \
+    && { [ -n "${CI_CHECK_RANGE_FROM:-}" ] || ! $CI_MODE; } \
+    && tooling_class_change; then
+    printf "  %bTooling-class change%b — docs, cost and script gates only; CI_CHECK_FULL=1 runs everything\n" "$BOLD" "$NC"
+    run_docs_check
+    run_bundle_check
+    run_cost_stamp
+    run_tooling_scripts
+    printf "\n"
+    if [[ $FAILED -eq 0 ]]; then
+        printf "${GREEN}${BOLD}Tooling checks passed. Ready to push.${NC}\n"
+    else
+        printf "${RED}${BOLD}Tooling checks failed. Fix before pushing.${NC}\n"
     fi
     exit $FAILED
 fi
@@ -361,6 +472,7 @@ fi
 # itself needs a real renderer and is `scripts/measure-cost --check` at release
 # time (skill://release); this is the reminder that it is due.
 run_cost_stamp
+run_tooling_scripts
 
 # ── Fast mode stops here ───────────────────────────────────────────────
 if $FAST; then
