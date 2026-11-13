@@ -966,6 +966,46 @@ func test_restored_layout_keeps_its_share_of_the_screen():
 	assert_almost_eq(right.position.x, left.position.x + left.size.x, 1.0,
 		"the second pane must start where the first ends")
 
+## A store written in a coarser grid must restore to the same shares. The two
+## tiles stop at half the 12-unit grid, so inference alone would scale the
+## block back up to the whole screen; only the declared unit keeps the quarter.
+func test_a_store_written_in_a_coarser_unit_restores_the_same_shares():
+	MockAutoloads.set_store(WorkspaceStore.FILE, {
+		"version": 1, "active": 0,
+		"workspaces": [{
+			"name": "Legacy", "cwd": "", "grid_unit": PaneTypes.GRID_LEGACY,
+			"layout": [
+				{"col": 0, "row": 0, "cspan": 3, "rspan": 3,
+					"settings": {"type": "code_viewer", "pane_name": "C1"}},
+				{"col": 3, "row": 0, "cspan": 3, "rspan": 3,
+					"settings": {"type": "code_viewer", "pane_name": "C2"}},
+			],
+		}],
+	})
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var tm: TerminalManager = ws._tm
+	assert_eq(tm.tiles.size(), 2, "both tiles must restore")
+	var grid: Control = ws._grid
+	var a: Rect2 = (tm.tiles[0].wrapper as Control).get_global_rect()
+	var b: Rect2 = (tm.tiles[1].wrapper as Control).get_global_rect()
+	assert_almost_eq(a.size.x, grid.size.x * 0.25, grid.size.x * 0.02,
+		"a quarter of a 12-unit grid must be a quarter of the content area")
+	assert_almost_eq(a.size.y, grid.size.y * 0.25, grid.size.y * 0.02,
+		"and the same fraction of its height")
+	assert_almost_eq(b.position.x, a.position.x + a.size.x, 1.0,
+		"the second tile must start where the first ends")
+	# The grid is the content area (the 180 px sidebar is outside it), so the
+	# block's origin is measured against the grid, not the window.
+	var origin: Vector2 = grid.get_global_rect().position
+	assert_almost_eq(a.position.x, origin.x, 1.0, "the block starts at the grid's left edge")
+	assert_almost_eq(a.position.y, origin.y, 1.0, "and at its top")
+
 func test_an_emptied_workspace_shows_the_guide():
 	var ws = WorkspaceScript.new()
 	_ws = ws

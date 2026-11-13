@@ -153,6 +153,22 @@ static func tile_plan_key(td: Dictionary, cwd: String = "") -> String:
 const GRID := 60
 ## Smallest pane, in grid units (a tenth of the grid ≈ 100 px at 1000 px).
 const MIN_TILE := 6
+## The grid unit every layout written before the 60-unit refinement uses. A
+## saved layout declares the unit it was written in (see `sanitize_grid_unit`)
+## so a coarser store still restores to the same shares.
+const GRID_LEGACY := 12
+
+## `raw` as a grid unit this build can scale: `GRID` or `GRID_LEGACY`.
+## Anything else is 0 — "unknown" — and `TerminalManager.scale_layout` infers
+## the unit from the tiles' own extents instead. A store is user-editable, so a
+## declared unit is data, not a fact: a unit this build does not know must not
+## reach the scale factor unchecked.
+static func sanitize_grid_unit(raw) -> int:
+	if raw is int or raw is float:
+		var unit := int(raw)
+		if unit == GRID or unit == GRID_LEGACY:
+			return unit
+	return 0
 
 static func sanitize_tile(td, grid_size: int = GRID) -> Dictionary:
 	if not (td is Dictionary):

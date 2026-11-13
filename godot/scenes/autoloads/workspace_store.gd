@@ -36,6 +36,10 @@ func load() -> Dictionary:
 			# means "inherit gpty's directory", which is also what every
 			# workspace did before this field existed.
 			"cwd": sanitize_cwd(str(_as_string(item, "cwd", ""))),
+			# The unit the geometry was written in. An absent field is a store
+			# written before the field existed, so it is unknown (0) and the
+			# restore infers the unit from the tiles.
+			"grid_unit": PaneTypes.sanitize_grid_unit(_as_int(item, "grid_unit", 0)),
 			# A workspace whose `layout` is not a list used to abort the whole
 			# load (a typed parameter rejects it), taking every other
 			# workspace with it.
@@ -53,6 +57,9 @@ func save(active: int, workspaces: Array[Dictionary]):
 		out.append({
 			"name": sanitize_name(str(_as_string(ws, "name", ""))),
 			"cwd": sanitize_cwd(str(_as_string(ws, "cwd", ""))),
+			# A dict with no unit is this build's own (`_all_layouts` always
+			# supplies one); an unreadable one is written as unknown.
+			"grid_unit": PaneTypes.sanitize_grid_unit(ws.get("grid_unit", PaneTypes.GRID)),
 			"layout": _typed_tiles(_as_array(ws, "layout", [])),
 		})
 	var d = {

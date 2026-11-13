@@ -1520,6 +1520,9 @@ func _init_workspaces():
 		entries.append({
 			"name": WorkspaceStore.sanitize_name(str(entry.get("name", ""))),
 			"cwd": WorkspaceStore.sanitize_cwd(str(entry.get("cwd", ""))),
+			# Already sanitized by `WorkspaceStore.load`; the legacy-import
+			# branch's synthesized entry has no field and stays unknown.
+			"grid_unit": int(entry.get("grid_unit", 0)),
 			"layout": _tiles_from(entry.get("layout", [])),
 		})
 	var active: int = clampi(int(store.get("active", 0)), 0, maxi(entries.size() - 1, 0))

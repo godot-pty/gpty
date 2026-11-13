@@ -87,6 +87,27 @@ func test_cwd_roundtrip_and_sanitized():
 	assert_eq(wss[3].get("cwd"), "", "an oversized path must be dropped")
 	assert_eq(wss[4].get("cwd"), "", "an absent directory means the default")
 
+## The unit a layout was written in is the store's, not the reader's: a store
+## from a coarser grid must come back with its unit, and anything this build
+## cannot scale must read as unknown (0) so the restore infers instead.
+func test_grid_unit_round_trips_and_unknown_units_are_dropped():
+	var workspaces: Array[Dictionary] = [
+		{"name": "Legacy", "layout": [], "grid_unit": PaneTypes.GRID_LEGACY},
+		{"name": "Current", "layout": [], "grid_unit": PaneTypes.GRID},
+		{"name": "Unknown", "layout": [], "grid_unit": 7},
+		{"name": "Garbage", "layout": [], "grid_unit": "wide"},
+		{"name": "Absent", "layout": []},
+	]
+	WorkspaceStore.save(0, workspaces)
+	var wss: Array = WorkspaceStore.load().get("workspaces", [])
+	assert_eq(wss[0].get("grid_unit"), PaneTypes.GRID_LEGACY,
+		"a known coarser unit must survive the round trip")
+	assert_eq(wss[1].get("grid_unit"), PaneTypes.GRID)
+	assert_eq(wss[2].get("grid_unit"), 0, "a unit this build cannot scale means unknown")
+	assert_eq(wss[3].get("grid_unit"), 0, "a non-numeric unit means unknown")
+	assert_eq(wss[4].get("grid_unit"), PaneTypes.GRID,
+		"a dict with no unit is this build's own")
+
 func test_non_dict_entries_skipped():
 	var workspaces: Array[Dictionary] = [
 		{"name": "Good", "layout": [_tile("terminal"), "junk", 42, null]},
