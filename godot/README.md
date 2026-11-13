@@ -74,6 +74,7 @@ godot/
         │   ├── ui_tokens.gd    # Type scale, spacing, radius and the WCAG contrast maths
         │   ├── ui_theme.gd     # The one Theme, built from the palette and applied at the root
         │   ├── app_dialog.gd   # The one modal builder (theme, grouped buttons, selectable body)
+        │   ├── menu_items.gd   # The one native PopupMenu item builder (icon + text + tooltip + metadata)
         │   ├── section_help.gd # The shared "Help" affordance a section header carries (glyph → action → chord table, rows read on press)
         │   ├── scroll_hints.gd # The two scroll chevrons a pane overlays on its scrolling body (bar, tree or custom binding)
         │   ├── feedback_text.gd # Pure Feedback issue title/body/URL builder (build facts only, capped)

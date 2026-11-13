@@ -60,18 +60,18 @@ A row has a label button (`T1`, `C1`, `F1`, and so on — the type's prefix plus
 |---|---|
 | Label | Focuses that pane; the row is accented when it is active |
 | Pane settings | Opens the type-aware settings popup for that pane |
-| More pane actions | Opens the same menu the title bar's overflow button opens: minimize/restore, swap position, and the eight pane types with the current one marked |
+| More pane actions | Opens the same menu the title bar's overflow button opens: minimize/restore, **Swap pane**, and **Switch pane type** (which lists the eight types with their icons and the current one marked) |
 | Close (trash) | Swaps the row to a check/cross first, then closes that pane after the running-work and unsaved-work questions |
 
 The `Panes:` heading carries a trash of its own while the list has at least one pane; it closes every pane in the active workspace through the same check/cross and running-work walk, and the whole section is hidden when there is no pane.
 
-The three are the title bar's three, with one difference in friction: the sidebar row's trash asks check/cross first, while the title bar's trash closes immediately and still asks about running work and unsaved edits. Both surfaces call one builder for the More menu (`TerminalManager.show_pane_actions_popup`), so they cannot offer different actions or disagree about which type a pane is, and choosing the pane's own type from the menu does nothing rather than rebuilding it. Minimize and swap position are in that menu because neither is worth a permanent button: the tile keeps its space while a pane is hidden, and a swap needs a second pane to be meaningful.
+The three are the title bar's three, with one difference in friction: the sidebar row's trash asks check/cross first, while the title bar's trash closes immediately and still asks about running work and unsaved edits. Both surfaces call one builder for the More menu (`TerminalManager.show_pane_actions_popup`), so they cannot offer different actions; the type list lives behind **Switch pane type**, and choosing the pane's own type there does nothing rather than rebuilding it. Minimize and **Swap pane** are in that menu because neither is worth a permanent button: the tile keeps its space while a pane is hidden, and a swap needs a second pane to be meaningful.
 
 The label is also the pane's public identity: `T3` is what the CLI and MCP tools accept when you target a pane. Changing the type destroys the old pane body, so it asks the same questions as closing one. Minimizing a terminal keeps its process running; the tile does not change, so restoring it puts it back exactly where it was.
 
 ## What the sidebar is not
 
-It is not a settings panel and not a layout editor. Global look-and-feel lives in [[settings]], pane geometry is changed by dragging dividers or using swap position, and the arrangement itself is saved with the workspace. The sidebar shows the state; the workspace owns it.
+It is not a settings panel and not a layout editor. Global look-and-feel lives in [[settings]], pane geometry is changed by dragging dividers or using **Swap pane**, and the arrangement itself is saved with the workspace. The sidebar shows the state; the workspace owns it.
 
 ## Related
 

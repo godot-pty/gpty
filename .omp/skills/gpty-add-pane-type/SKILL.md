@@ -9,10 +9,10 @@ A pane type is registered in three places (plus tests and docs). Missing any one
 
 ## 1. Registry and script map
 
-- `godot/scenes/panes/pane_types.gd` — append to `PaneTypes.ALL` **last**: `{"name", "icon", "shortcut", "label_prefix"}`; add `"receives_content": true` only if the pane really accepts routed concept captures (then it appears in the visual editor's target picker).
+- `godot/scenes/panes/pane_types.gd` — append to `PaneTypes.ALL` **last**: `{"name", "icon", "menu_icon", "shortcut", "label_prefix"}`; `menu_icon` is the Phosphor codepoint the native **Switch pane type** popup draws (the text `icon` is for the label surfaces and cannot be rasterised by a menu), so a type without one renders a blank menu slot and fails `test_pane_actions_menu.gd`. Add `"receives_content": true` only if the pane really accepts routed concept captures (then it appears in the visual editor's target picker).
 - `godot/scenes/terminal/terminal_manager.gd` — `_PaneScripts` entry `"<key>": preload("res://scenes/panes/<file>.gd")`.
 
-Palette (`new <display name>`), sidebar buttons, the type-swap menus, the Add Pane help table, Settings → About's **New Panes** group and per-type shortcuts all iterate `PaneTypes.ALL`, so nothing else wires them. One of them keys off the field rather than the entry: the About group lists a type only when `shortcut` is non-empty (`ui/shortcut_catalog.gd::new_pane_entries`), so a type with no chord still appears in the help table and the sidebar tooltips but not there. The sidebar's tooltip and the help table take the chord from `ShortcutManager.chord("app:new_<key>")`, not from the registry field, so the field only decides *whether* a spawn shortcut exists.
+Palette (`new <display name>`), sidebar buttons, the **Switch pane type** popup, the Add Pane help table, Settings → About's **New Panes** group and per-type shortcuts all iterate `PaneTypes.ALL`, so nothing else wires them. One of them keys off the field rather than the entry: the About group lists a type only when `shortcut` is non-empty (`ui/shortcut_catalog.gd::new_pane_entries`), so a type with no chord still appears in the help table and the sidebar tooltips but not there. The sidebar's tooltip and the help table take the chord from `ShortcutManager.chord("app:new_<key>")`, not from the registry field, so the field only decides *whether* a spawn shortcut exists.
 
 ## 2. Pane script
 
