@@ -761,7 +761,7 @@ func _swap_pane(body: Control, new_type_name: String):
 	var ws := _workspace_for_body(body)
 	if ws.is_empty():
 		return
-	_ask_close_then([body], func(): _swap_pane_now(body, new_type_name), Callable(), true, "Changing the pane type")
+	_ask_close_then([body], func(): _swap_pane_now(body, new_type_name), Callable(), true, "Switching the pane type")
 
 func _swap_pane_now(body: Control, new_type_name: String):
 	var ws := _workspace_for_body(body)
@@ -1324,12 +1324,12 @@ func _on_workspace_menu(idx: int, source_btn: Button):
 	var dir := str(ws.get("cwd", ""))
 	var dir_tip := "Working directory: %s" % (
 		dir if dir != "" else "default (gpty's own directory)")
-	_add_workspace_menu_item(menu, Icons.PENCIL, "Rename Workspace",
+	MenuItems.add(menu, Icons.PENCIL, "Rename Workspace",
 		"Rename '%s'" % str(ws.get("name", "")),
 		{"kind": "rename", "index": idx})
-	_add_workspace_menu_item(menu, Icons.FOLDER, "Set Directory", dir_tip,
+	MenuItems.add(menu, Icons.FOLDER, "Set Directory", dir_tip,
 		{"kind": "cwd", "index": idx})
-	_add_workspace_menu_item(menu, Icons.DELETE, "Clear Workspace",
+	MenuItems.add(menu, Icons.DELETE, "Clear Workspace",
 		"Close every pane in '%s'" % str(ws.get("name", "")),
 		{"kind": "clear", "index": idx})
 	menu.index_pressed.connect(func(i: int):
@@ -1351,19 +1351,6 @@ func _on_workspace_menu(idx: int, source_btn: Button):
 	menu.reset_size()
 	menu.popup()
 	menu.popup_hide.connect(menu.queue_free)
-
-## One menu item with the glyph texture the icon font supplies, and the tooltip
-## that carries the directory or the target workspace.
-func _add_workspace_menu_item(menu: PopupMenu, glyph: String, text: String,
-		tip: String, meta: Dictionary):
-	var texture := Icons.glyph_texture(glyph, UiPalette.active().TEXT)
-	if texture != null:
-		menu.add_icon_item(texture, text)
-	else:
-		menu.add_item(text)
-	var i := menu.item_count - 1
-	menu.set_item_tooltip(i, tip)
-	menu.set_item_metadata(i, meta)
 
 func _rename_workspace(idx: int, new_name: String):
 	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size():

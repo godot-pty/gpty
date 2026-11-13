@@ -3,14 +3,14 @@ class_name PaneTypes
 # to display metadata. Consumers access PaneTypes.ALL directly.
 
 static var ALL: Dictionary = {
-	"terminal":    {"name": "Terminal",    "icon": ">_", "shortcut": "Ctrl+Shift+N", "label_prefix": "T"},
-	"code_viewer": {"name": "Code Viewer", "icon": "{}", "shortcut": "Ctrl+Shift+D", "label_prefix": "C", "receives_content": true},
-	"file_tree":   {"name": "File Tree",   "icon": "/>", "shortcut": "Ctrl+Shift+T", "label_prefix": "F"},
-	"inspector":   {"name": "Inspector",   "icon": "@",  "shortcut": "Ctrl+Shift+O", "label_prefix": "I", "receives_content": true},
-	"reasoning":   {"name": "Reasoning",   "icon": "?",  "shortcut": "", "label_prefix": "R"},
-	"cli_view":    {"name": "CLI View",    "icon": "$_", "shortcut": "", "label_prefix": "V"},
-	"wiki":        {"name": "Wiki",        "icon": "[]", "shortcut": "", "label_prefix": "W"},
-	"media":       {"name": "Media",       "icon": "|>", "shortcut": "", "label_prefix": "M"},
+	"terminal":    {"name": "Terminal",    "icon": ">_", "menu_icon": "\uE47E", "shortcut": "Ctrl+Shift+N", "label_prefix": "T"},
+	"code_viewer": {"name": "Code Viewer", "icon": "{}", "menu_icon": "\uE914", "shortcut": "Ctrl+Shift+D", "label_prefix": "C", "receives_content": true},
+	"file_tree":   {"name": "File Tree",   "icon": "/>", "menu_icon": "\uE25A", "shortcut": "Ctrl+Shift+T", "label_prefix": "F"},
+	"inspector":   {"name": "Inspector",   "icon": "@",  "menu_icon": "\uE0AC", "shortcut": "Ctrl+Shift+O", "label_prefix": "I", "receives_content": true},
+	"reasoning":   {"name": "Reasoning",   "icon": "?",  "menu_icon": "\uE74E", "shortcut": "", "label_prefix": "R"},
+	"cli_view":    {"name": "CLI View",    "icon": "$_", "menu_icon": "\uE1C4", "shortcut": "", "label_prefix": "V"},
+	"wiki":        {"name": "Wiki",        "icon": "[]", "menu_icon": "\uE0E6", "shortcut": "", "label_prefix": "W"},
+	"media":       {"name": "Media",       "icon": "|>", "menu_icon": "\uE792", "shortcut": "", "label_prefix": "M"},
 }
 
 ## Pane types whose body accepts a routed concept capture

@@ -623,35 +623,41 @@ func resolve_swap_pair(a: Variant, b: Variant) -> Vector2i:
 func _pane_type_of(body: Control) -> String:
 	return body._pane_type() if body != null and body.has_method("_pane_type") else ""
 
-## The one pane-action menu: everything a pane's chrome offers, with its current
-## type marked. The title bar's overflow button and the sidebar's row both open
-## this, so the two cannot disagree about what a pane can do or which type it is.
+## The one pane-action menu: everything a pane's chrome offers, with a named
+## action for changing the pane's type. The type list is its own popup
+## (`show_switch_type_popup`) because a type change discards the pane; as a
+## radio section in this menu it read as a harmless toggle.
 ##
 ## Built per open and freed when it closes (the `show_position_swap_popup`
-## pattern): a minimized pane reads "Restore pane", and the check mark follows a
-## type change, without a menu that outlives the pane it describes.
-func show_pane_actions_popup(for_body: Control, menu_parent: Control, at_pos: Vector2) -> void:
+## pattern): a minimized pane reads "Restore pane", and the type list is built
+## fresh from the pane's current type.
+func show_pane_actions_popup(for_body: Control, menu_parent: Control, at_pos: Vector2) -> PopupMenu:
 	if for_body == null or not is_instance_valid(for_body):
-		return
+		return null
 	var menu := PopupMenu.new()
 	menu.name = "PaneActionsMenu"
-	var current := _pane_type_of(for_body)
-	menu.add_item("Restore pane" if not for_body.visible else "Minimize pane")
-	menu.set_item_metadata(menu.item_count - 1, {"kind": "minimize"})
-	menu.add_item("Swap position\u2026")
-	menu.set_item_metadata(menu.item_count - 1, {"kind": "position"})
+	if for_body.visible:
+		MenuItems.add(menu, Icons.MINIMIZE, "Minimize pane",
+			"Hide this pane; its process keeps running.",
+			{"kind": "minimize"})
+	else:
+		MenuItems.add(menu, Icons.RESTORE_PANE, "Restore pane",
+			"Show this pane again.",
+			{"kind": "minimize"})
+	var swap_idx := MenuItems.add(menu, Icons.SWAP_PANE, "Swap pane",
+		"Exchange this pane's position with another pane.",
+		{"kind": "position"})
 	# One tile has nothing to swap with: a live item that opens nothing reads as
 	# a broken click.
-	menu.set_item_disabled(menu.item_count - 1, tiles.size() < 2)
-	menu.add_separator()
-	for key in PaneTypes.ALL:
-		menu.add_radio_check_item(PaneTypes.ALL[key]["name"])
-		var idx := menu.item_count - 1
-		menu.set_item_metadata(idx, {"kind": "type", "key": key})
-		menu.set_item_checked(idx, key == current)
+	menu.set_item_disabled(swap_idx, tiles.size() < 2)
+	MenuItems.add(menu, Icons.SWITCH_PANE, "Switch pane type",
+		"Replace this pane with another type; its current contents are closed.",
+		{"kind": "switch"})
 	menu.index_pressed.connect(func(idx: int):
 		var meta = menu.get_item_metadata(idx)
 		menu.queue_free()
+		if not is_instance_valid(for_body):
+			return
 		if not (meta is Dictionary):
 			return
 		var action: Dictionary = meta
@@ -660,21 +666,53 @@ func show_pane_actions_popup(for_body: Control, menu_parent: Control, at_pos: Ve
 				toggle_pane_minimize(for_body)
 			"position":
 				show_position_swap_popup(for_body, menu_parent, at_pos)
-			"type":
-				var key := str(action.get("key", ""))
-				# The checked item is the pane's own type: choosing it is a
-				# no-op, not a request to destroy and rebuild an identical body
-				# (`swap_pane` does allow a same-type swap - a test pins it).
-				if key == "" or key == current:
-					_return_focus_to_body(for_body)
-					return
-				_handle_swap(for_body, key)
+			"switch":
+				show_switch_type_popup(for_body, menu_parent, at_pos)
 	)
 	menu_parent.add_child(menu)
 	menu.position = at_pos
 	menu.reset_size()
 	menu.popup()
 	menu.popup_hide.connect(menu.queue_free)
+	return menu
+
+## The pane-type list behind "Switch pane type". A type change replaces the
+## body, so it is a separate popup opened by a named action rather than a radio
+## list inside the actions menu. Every row carries the type's Phosphor icon and
+## the current type is marked; choosing it stays a no-op.
+func show_switch_type_popup(for_body: Control, menu_parent: Control, at_pos: Vector2) -> PopupMenu:
+	if for_body == null or not is_instance_valid(for_body):
+		return null
+	var menu := PopupMenu.new()
+	menu.name = "PaneTypeMenu"
+	var current := _pane_type_of(for_body)
+	for key in PaneTypes.ALL:
+		var info: Dictionary = PaneTypes.ALL[key]
+		MenuItems.add_radio(menu, str(info.get("menu_icon", "")),
+			str(info["name"]), key == current, "",
+			{"kind": "type", "key": key})
+	menu.index_pressed.connect(func(idx: int):
+		var meta = menu.get_item_metadata(idx)
+		menu.queue_free()
+		if not is_instance_valid(for_body):
+			return
+		if not (meta is Dictionary):
+			return
+		var key := str(meta.get("key", ""))
+		# The checked item is the pane's own type: choosing it is a no-op, not a
+		# request to destroy and rebuild an identical body (`swap_pane` does allow
+		# a same-type swap - a test pins it).
+		if key == "" or key == _pane_type_of(for_body):
+			_return_focus_to_body(for_body)
+			return
+		_handle_swap(for_body, key)
+	)
+	menu_parent.add_child(menu)
+	menu.position = at_pos
+	menu.reset_size()
+	menu.popup()
+	menu.popup_hide.connect(menu.queue_free)
+	return menu
 
 func show_position_swap_popup(for_body: Control, menu_parent: Control, at_pos: Vector2):
 	var this_ti := _tile_index_of(for_body)
