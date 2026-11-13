@@ -187,3 +187,37 @@ func test_minimize_from_the_menu_hides_and_restores():
 	assert_true(body.visible, "Restore pane brings it back")
 	assert_eq(ws.get_viewport().gui_get_focus_owner(), body,
 		"a restored pane takes the keyboard, so the next keystroke is not swallowed")
+
+## Policy A's GUI half: the menu names the other workspace and the panes that
+## travel with this one, and the item opens a submenu rather than acting.
+func test_the_pane_menu_offers_move_to_workspace_with_its_followers():
+	var ws = await _make_workspace()
+	var body: Control = ws._tm.last_body
+	var follower: Control = ws._spawn_pane("reasoning", {}, false)
+	assert_not_null(follower, "the follower must spawn")
+	follower.apply_settings({"source_attachment_id": str(body.attachment_id)})
+	ws._add_workspace()
+	var other := str(ws._workspaces[1].name)
+	ws._switch_workspace(0)
+
+	var menu := _open(ws, body)
+	var idx := -1
+	for i in menu.item_count:
+		if menu.get_item_submenu(i) != "":
+			idx = i
+	assert_ne(idx, -1, "the menu must offer Move to workspace")
+	assert_eq(menu.get_item_submenu(idx), "MoveToWorkspaceMenu",
+		"the item must open a submenu, not act on the menu's own press")
+
+	var sub: PopupMenu = null
+	for c in menu.get_children():
+		if c is PopupMenu and c.name == "MoveToWorkspaceMenu":
+			sub = c
+	assert_not_null(sub, "the submenu must be a child the item names")
+	assert_eq(sub.item_count, 1, "the one other workspace must be the only target")
+	assert_string_contains(sub.get_item_text(0), other, "the target workspace must be named")
+	assert_string_contains(sub.get_item_text(0), str(follower.pane_label),
+		"the pane that follows must be named in the label")
+	var meta: Dictionary = sub.get_item_metadata(0)
+	assert_eq(str(meta.get("workspace", "")), other,
+		"the target must travel by name, so a close cannot repoint it")

@@ -463,6 +463,7 @@ func test_a_label_two_workspaces_share_is_refused_by_every_targeting_method():
 		"paneStatus": {"pane_id": "T1"},
 		"killPane": {"pane_id": "T1"},
 		"focusPane": {"pane_id": "T1"},
+		"movePane": {"pane": "T1", "workspace": second_ws},
 	}
 	for method in calls:
 		var refused = WorkspaceIpcHandlers.handle(_ws, method, calls[method])
@@ -1030,6 +1031,12 @@ func test_every_refusal_arm_answers_the_code_its_kind_owns():
 		["paneView", {"pane_id": "@viewer", "graph": true}, -32000, "wiki panes"],
 		["killPane", {"pane_id": "nosuchpane"}, -32000, "not found"],
 		["layoutLoad", {"name": "gpty-no-such-profile"}, -32000, "not found"],
+		["movePane", {}, -32602, "Workspace name required"],
+		["movePane", {"workspace": "x"}, -32602, "Pane id or label required"],
+		["movePane", {"pane": ["nosuchpane"],
+			"workspace": str(_ws._workspaces[0]["name"])}, -32000, "not found"],
+		["movePane", {"pane": ["T1"], "workspace": "gpty-no-such-workspace"},
+			-32000, "not found"],
 	]
 	var next_id := 900
 	for row in rows:
@@ -1071,3 +1078,62 @@ func test_an_unknown_concept_toggle_is_refused_and_writes_nothing():
 		"conceptList must not report a phantom row")
 	var toggled = WorkspaceIpcHandlers.handle(_ws, "conceptToggle", {"name": "cat_command"})
 	assert_true(toggled.get("success", false), "a name the merged set holds must still toggle")
+
+# ── Workspace listing and pane moves ───────────────────────────────────
+
+func test_workspace_list_reports_every_workspace():
+	var listed = WorkspaceIpcHandlers.handle(_ws, "workspaceList", {})
+	assert_true(listed is Dictionary and listed.has("workspaces"),
+		"workspaceList must answer a workspaces array")
+	var rows: Array = listed["workspaces"]
+	assert_eq(int(listed["count"]), _ws._workspaces.size(),
+		"count must match the live workspace list")
+	assert_eq(rows.size(), _ws._workspaces.size(), "every workspace must have a row")
+	var actives := 0
+	for i in rows.size():
+		var row: Dictionary = rows[i]
+		var ws: Dictionary = _ws._workspaces[i]
+		assert_eq(str(row["name"]), str(ws.name), "the row must name its workspace")
+		assert_eq(int(row["panes"]), ws.tm.tiles.size(),
+			"the row must carry the pane count")
+		if bool(row["active"]):
+			actives += 1
+	assert_eq(actives, 1, "exactly one workspace is active")
+
+func test_move_pane_by_id_moves_the_pane_and_its_followers():
+	var term = _spawn("terminal")
+	var follower = _spawn("reasoning")
+	follower.apply_settings({"source_attachment_id": str(term.attachment_id)})
+	_ws._add_workspace()
+	var target: Dictionary = _ws._workspaces[_ws._workspaces.size() - 1]
+	var target_name := str(target.name)
+
+	var answer = WorkspaceIpcHandlers.handle(_ws, "movePane", {
+		"pane": [str(term.attachment_id)],
+		"workspace": target_name,
+	})
+
+	assert_false(answer.has("error"), "a valid move must not be refused")
+	assert_eq(str(answer.get("workspace", "")), target_name, "the answer names the target")
+	var moved: Array = answer.get("moved", [])
+	assert_eq(moved.size(), 2, "the terminal and its follower must be reported")
+	assert_eq(_ws._workspace_for_body(term).tm, target.tm, "the terminal must move")
+	assert_eq(_ws._workspace_for_body(follower).tm, target.tm, "the follower must move")
+	_ws._close_workspace_now(_ws._workspaces.find(target))
+
+func test_move_pane_refuses_an_unknown_workspace():
+	var term = _spawn("terminal")
+	var before: int = _ws._workspace_for_body(term).tm.tiles.size()
+
+	var refused = WorkspaceIpcHandlers.handle(_ws, "movePane", {
+		"pane": [str(term.attachment_id)],
+		"workspace": "gpty-no-such-workspace",
+	})
+
+	assert_true(refused.has("error"), "an unknown workspace must be refused")
+	assert_eq(int(refused["error"]["code"]), -32000, "app state is -32000")
+	assert_string_contains(str(refused["error"]["message"]), "not found",
+		"the refusal must name what is missing")
+	assert_eq(_ws._workspace_for_body(term).tm.tiles.size(), before,
+		"a refused move must not touch a grid")
+	_ws._kill_now(term)

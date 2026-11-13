@@ -90,6 +90,9 @@ func _process(_delta):
 	_poll_backend()
 
 func _exit_tree():
+	# A move re-parents the wrapper and fires this too; the session keeps playing.
+	if backend_preserved:
+		return
 	_stop_backend()
 
 func _build_ui():

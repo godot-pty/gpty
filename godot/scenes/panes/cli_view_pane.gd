@@ -60,6 +60,9 @@ func _exit_tree():
 	# Closing the pane is the only thing that kills the child: the contract
 	# says the process dies with the pane, so it is stopped here rather than
 	# left for the extension's own Drop, which has no idea the pane is gone.
+	# A move re-parents the wrapper and fires this too; the child keeps running.
+	if backend_preserved:
+		return
 	if _cli != null:
 		_cli.stop()
 

@@ -484,6 +484,66 @@ static func handle(ws, method: String, params: Dictionary):
 			# the irreversible half that stays refused.
 			ws._kill_now(kp_target)
 			return {"success": true}
+		"workspaceList":
+			var wl: Array = []
+			for i in ws._workspaces.size():
+				var w: Dictionary = ws._workspaces[i]
+				wl.append({
+					"name": str(w.name),
+					"active": i == ws._active,
+					"panes": w.tm.tiles.size(),
+				})
+			return {"workspaces": wl, "count": wl.size()}
+		"movePane":
+			var mp_name := str(params.get("workspace", "")).strip_edges()
+			if mp_name == "":
+				return bad_param("Workspace name required")
+			var mp_raw = params.get("pane")
+			var mp_ids: Array = []
+			if mp_raw is String:
+				if str(mp_raw) != "":
+					mp_ids.append(str(mp_raw))
+			elif mp_raw is Array:
+				for v in mp_raw:
+					if v is String and str(v) != "":
+						mp_ids.append(str(v))
+			if mp_ids.is_empty():
+				return bad_param("Pane id or label required")
+			var mp_target: Dictionary = {}
+			for w in ws._workspaces:
+				if str(w.name) == mp_name:
+					mp_target = w
+					break
+			if mp_target.is_empty():
+				return refused("Workspace '%s' not found" % mp_name)
+			var mp_bodies: Array = []
+			for target in mp_ids:
+				var found: Dictionary = ws._resolve_pane_target(str(target))
+				if found.has("error"):
+					return target_refusal(found)
+				var pane: Control = found["body"]
+				if mp_bodies.has(pane):
+					continue
+				mp_bodies.append(pane)
+				var pws: Dictionary = ws._workspace_for_body(pane)
+				for f in ws._followers_of(pane, pws):
+					if not mp_bodies.has(f):
+						mp_bodies.append(f)
+			var mp_src: Dictionary = ws._workspace_for_body(mp_bodies[0])
+			for pane in mp_bodies:
+				if ws._workspace_for_body(pane).tm != mp_src.tm:
+					return refused("All panes must be in the same workspace")
+			var mp_refusal: String = ws._move_panes_into(mp_bodies, mp_src, mp_target)
+			if mp_refusal != "":
+				return refused(mp_refusal)
+			var mp_moved: Array = []
+			for pane in mp_bodies:
+				mp_moved.append({
+					"id": str(pane.attachment_id),
+					"label": str(pane.pane_label),
+					"type": str(pane._pane_type()),
+				})
+			return {"workspace": mp_name, "moved": mp_moved}
 		"focusPane":
 			var pane_id = str(params.get("pane_id", ""))
 			var fp_found: Dictionary = ws._resolve_pane_target(pane_id)

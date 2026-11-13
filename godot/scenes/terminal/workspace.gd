@@ -569,6 +569,144 @@ func _pane_bodies(ws: Dictionary) -> Array:
 			bodies.append(body)
 	return bodies
 
+## The panes that follow `body` inside `ws`: today the Reasoning pane's
+## `source_attachment_id` link (the one type implementing `retarget_source`).
+## Same-workspace only, mirroring `_retarget_companions`: a link into another
+## workspace already observes nothing, and pulling it would take the pane from
+## the workspace that owns it.
+func _followers_of(body: Control, ws: Dictionary) -> Array[Control]:
+	var out: Array[Control] = []
+	if ws.is_empty() or not (body is TerminalPane):
+		return out
+	var id := str(body.get("attachment_id"))
+	if id == "":
+		return out
+	for t in ws.tm.tiles:
+		var other = ws.tm._find_body(t.wrapper)
+		if other == null or other == body or not other.has_method("retarget_source"):
+			continue
+		if str(other.get("source_attachment_id")) == id:
+			out.append(other)
+	return out
+
+## A label is numbered per TerminalManager, so an admitted pane can collide
+## with one already there and label-addressed IPC then refuses every match as
+## ambiguous. The admitted pane takes the next free label of its type. Only on
+## collision: a label is how the user knows the pane.
+func _renumber_label_if_taken(tm: TerminalManager, body: Control) -> void:
+	var label := str(body.pane_label)
+	for t in tm.tiles:
+		var other = tm._find_body(t.wrapper)
+		if other == null or other == body:
+			continue
+		if str(other.pane_label) == label:
+			body.pane_label = tm._next_label(body._pane_type())
+			return
+
+## Move `bodies` (all in `src`) into `target`. Returns "" on success or a
+## refusal; a refusal mutates nothing. No ceiling check (the live count is
+## unchanged) and no Workspace Trust gate (nothing spawns).
+func _move_panes_into(bodies: Array, src: Dictionary, target: Dictionary) -> String:
+	if src.is_empty() or target.is_empty() or src.tm == target.tm:
+		return "That pane is already in '%s'" % str(target.get("name", ""))
+	if bodies.is_empty():
+		return "No pane to move"
+	for body in bodies:
+		if not is_instance_valid(body) or src.tm._tile_index_of(body) == -1:
+			return "Pane is no longer open"
+	var target_tm: TerminalManager = target.tm
+	if not target_tm.plan_adopt(bodies.size()):
+		return "Cannot move %d pane(s): the grid in '%s' is full" % [
+			bodies.size(), str(target.get("name", ""))]
+	for i in bodies.size():
+		var body: Control = bodies[i]
+		var w: Control = src.tm.detach(body).wrapper
+		body.backend_preserved = true
+		w.reparent(target.grid)
+		body.backend_preserved = false
+		if not target_tm.adopt(w):
+			push_error("movePane: adopt failed after a successful plan")
+		_renumber_label_if_taken(target_tm, body)
+		# The scan skips a record whose source id still matches, so a moved
+		# pane would never be re-primed in its new workspace and its badge
+		# would freeze.
+		_agent_state_primed.erase(body.get_instance_id())
+	_apply_layout()
+	_list()
+	_update_workspace_ui()
+	_sync_pane_titlebars()
+	_focus_owner_cache = null
+	_focus_body_cache = null
+	_save_workspaces_to_store()
+	if _tm.tiles.is_empty():
+		_tm.last_body = null
+	elif _tm.last_body == null or not is_instance_valid(_tm.last_body):
+		var fb := _fallback_active_body()
+		if fb != null:
+			activate_pane(fb)
+	_refresh_status_bar()
+	return ""
+
+## The GUI entry: this pane plus the panes that follow it, addressed by
+## workspace name because an index would repoint if a workspace closed.
+func _move_panes_to(body: Control, target_name: String) -> void:
+	var src := _workspace_for_body(body)
+	if src.is_empty():
+		return
+	var target: Dictionary = {}
+	for ws in _workspaces:
+		if str(ws.name) == target_name:
+			target = ws
+			break
+	if target.is_empty():
+		ToastManager.warn("Workspace '%s' no longer exists" % target_name)
+		return
+	var moved: Array = [body]
+	moved.append_array(_followers_of(body, src))
+	var refusal := _move_panes_into(moved, src, target)
+	if refusal != "":
+		ToastManager.warn(refusal)
+		return
+	var labels: Array[String] = []
+	for b in moved:
+		labels.append(str(b.pane_label))
+	ToastManager.info("Moved %s to \"%s\"" % [" + ".join(labels), target_name])
+	_warn_after_move(moved, target)
+
+## Policy A moves a terminal with its followers; the two links it cannot infer
+## are said out loud instead: a follower left without its source (moved on its
+## own), and an auto-run Inspector that starts answering the target
+## workspace's captures.
+func _move_notes(moved: Array, target: Dictionary) -> Array[String]:
+	var notes: Array[String] = []
+	var target_ids := {}
+	var other_terminals := false
+	for t in target.tm.tiles:
+		var b = target.tm._find_body(t.wrapper)
+		if b == null:
+			continue
+		target_ids[str(b.get("attachment_id"))] = true
+		if b is TerminalPane and moved.find(b) == -1:
+			other_terminals = true
+	for body in moved:
+		if not body.has_method("retarget_source"):
+			continue
+		var src_id := str(body.get("source_attachment_id"))
+		if src_id != "" and not target_ids.has(src_id):
+			notes.append("%s watches %s, which is in another workspace: it will observe nothing here." % [
+				str(body.pane_label), src_id])
+	if other_terminals:
+		for body in moved:
+			if str(body._pane_type()) == "inspector" and bool(body.get("auto_run")):
+				notes.append("%s auto-runs, so it will answer captures from \"%s\"." % [
+					str(body.pane_label), str(target.name)])
+	return notes
+
+func _warn_after_move(moved: Array, target: Dictionary) -> void:
+	var notes := _move_notes(moved, target)
+	if not notes.is_empty():
+		ToastManager.warn(" ".join(notes), 8.0)
+
 ## Every pane of every workspace — hidden workspaces keep live panes.
 func _all_pane_bodies() -> Array:
 	var bodies := []
@@ -997,11 +1135,12 @@ func _attach_pane_into(ws: Dictionary, w: Control, body: Control):
 	# route — spawn, restore, type swap — comes through here.
 	body.apply_user_state()
 	ws.grid.add_child(w)
-	_wire_pane_activation(ws, w, body)
+	_wire_pane_activation(body)
 	# Panes never spawn panes: a body that needs another pane emits
 	# `request_pane` and this workspace — the only spawner — answers it.
+	# Identity, not the workspace dictionary: a pane can move to another grid.
 	body.request_pane.connect(func(type_name: String, settings: Dictionary):
-		_request_pane_into(ws, type_name, settings)
+		_request_pane_for(body, type_name, settings)
 	)
 	if body is TerminalPane:
 		body.title_changed.connect(func(t: String):
@@ -1018,13 +1157,34 @@ func _attach_pane_into(ws: Dictionary, w: Control, body: Control):
 		# The state itself is dispatched by `_prime_new_pane_observers` /
 		# `_dispatch_agent_state` — panes are primed by the scan, not here, so
 		# every pane-entry route ends up informed.
-		body.agent_state_changed.connect(func(state: String): _dispatch_agent_state(ws, body.attachment_id, state))
+		body.agent_state_changed.connect(func(state: String):
+			_dispatch_agent_state_for(body, state)
+		)
 
-func _wire_pane_activation(ws: Dictionary, _w: Control, body: Control):
+func _wire_pane_activation(body: Control):
 	# Pane activation on plain clicks is handled in _input via wrapper
 	# hit-testing — container ancestors skip gui_input propagation, so
 	# wiring the wrapper does not work. This covers the focusable case.
-	body.focus_entered.connect(func(): ws.tm.last_body = body)
+	body.focus_entered.connect(func(): _record_active_pane(body))
+
+## Record `body` as its own workspace's active pane. The pane decides the
+## workspace, so nothing has to be rewired when it moves between grids.
+func _record_active_pane(body: Control) -> void:
+	var bws := _workspace_for_body(body)
+	if not bws.is_empty():
+		bws.tm.last_body = body
+
+func _request_pane_for(body: Control, type_name: String, settings: Dictionary) -> void:
+	var ws := _workspace_for_body(body)
+	if ws.is_empty():
+		return
+	_request_pane_into(ws, type_name, settings)
+
+func _dispatch_agent_state_for(body: Control, state: String) -> void:
+	var ws := _workspace_for_body(body)
+	if ws.is_empty():
+		return
+	_dispatch_agent_state(ws, str(body.attachment_id), state)
 
 ## Focus owner → owning pane. Called every frame from _refresh_status_bar,
 ## but the answer only changes when the focus owner does: walking every tile
@@ -1062,10 +1222,48 @@ func _wire_tm(tm: TerminalManager):
 	tm.on_close = _on_pane_closed
 	tm.on_swap = _swap_pane
 	tm.on_open_pane_settings = _open_pane_settings_for
+	tm.on_move_panes = _append_move_menu
 	# Every manager, not just the home pair's: the first workspace a session
 	# creates is no longer workspace 0, so a manager without this connection
 	# would stop relayouting after a divider drag.
 	tm.tiles_resized.connect(_apply_layout)
+
+## The pane menu's "Move to workspace" submenu. Targets are addressed by
+## workspace name, not index: a close or rename while the menu is open would
+## repoint an index.
+func _append_move_menu(menu: PopupMenu, body: Control) -> void:
+	var src := _workspace_for_body(body)
+	if src.is_empty() or _workspaces.size() < 2:
+		return
+	var sub := PopupMenu.new()
+	sub.name = "MoveToWorkspaceMenu"
+	menu.add_child(sub)
+	# `add_submenu_item`, not `set_item_submenu`: on 4.7.2 the setter accepts the
+	# name and does nothing (the item opens no submenu), while the add form
+	# binds it. No icon: the shared builder's item would need the setter.
+	menu.add_submenu_item("Move to workspace", sub.name)
+	menu.set_item_tooltip(menu.item_count - 1,
+		"Move this pane, and the panes that follow it, to another workspace.")
+	var followers := _followers_of(body, src)
+	for ws in _workspaces:
+		if ws.tm == src.tm:
+			continue
+		var label := "Move to \"%s\"" % str(ws.name)
+		if not followers.is_empty():
+			var names: Array[String] = []
+			for f in followers:
+				names.append(str(f.pane_label))
+			label += " (with %s)" % " + ".join(names)
+		sub.add_item(label)
+		sub.set_item_metadata(sub.item_count - 1,
+			{"kind": "move", "workspace": str(ws.name)})
+	sub.index_pressed.connect(func(idx: int):
+		var meta = sub.get_item_metadata(idx)
+		menu.queue_free()
+		if not (meta is Dictionary):
+			return
+		_move_panes_to(body, str(meta.get("workspace", "")))
+	)
 
 func _on_pane_closed(body: Control) -> void:
 	_kill(body)
@@ -2077,9 +2275,7 @@ func _input(event):
 func activate_pane(body: Control) -> void:
 	if body == null:
 		return
-	var bws := _workspace_for_body(body)
-	if not bws.is_empty():
-		bws.tm.last_body = body
+	_record_active_pane(body)
 	# An open overlay owns the keyboard: a shortcut-spawned pane, an IPC
 	# `focusPane` or a click behind it may change which pane is active, but
 	# focus must not move to a terminal while the overlay is still there (the

@@ -34,6 +34,7 @@ const _PaneScripts := {
 var on_close: Callable    # set by workspace to refresh layout after kill
 var on_swap: Callable    # set by workspace to handle pane type swap
 var on_open_pane_settings: Callable  # (manager, body): workspace closes conflicting overlays first
+var on_move_panes: Callable  # (menu: PopupMenu, body: Control): workspace appends its move submenu
 
 var tiles: Array[Dictionary] = []
 var last_body: Control
@@ -72,13 +73,9 @@ func spawn_pane(type_name: String, opts: Dictionary = {}, workspace_cwd := "") -
 	var title = opts.get("title_label", PaneTypes.ALL.get(type_name, {}).get("name", type_name))
 	var w = _build_wrapper_body(body, title)
 
-	if tiles.is_empty():
-		tiles.append({wrapper = w, col = 0, row = 0, cspan = PaneTypes.GRID, rspan = PaneTypes.GRID})
-	else:
-		if not _split_for(w, str(opts.get("split", ""))):
-			w.queue_free()
-			return null
-	_sync_edge_strips()
+	if not adopt(w, str(opts.get("split", ""))):
+		w.queue_free()
+		return null
 
 	# For terminal panes, resolve the shell override and wire dynamic title.
 	if type_name == "terminal":
@@ -344,16 +341,27 @@ func _sync_edge_strips():
 				(Control.CURSOR_HSIZE if edge == "left" or edge == "right" else Control.CURSOR_VSIZE)
 				if resizable else Control.CURSOR_ARROW)
 
-func kill(body: Control):
-	if last_body == body: last_body = null
+## Remove `body`'s tile and give its rectangle back to the grid, WITHOUT
+## freeing the wrapper: a move re-parents it into another workspace's grid.
+## `kill` is this plus `queue_free`.
+func detach(body: Control) -> Dictionary:
+	if last_body == body:
+		last_body = null
 	var wi := _tile_index_of(body)
-	if wi == -1: return
-	var rm = tiles[wi]
+	if wi == -1:
+		return {}
+	var rm: Dictionary = tiles[wi]
 	tiles.remove_at(wi)
 	if not _expand_exact(rm):
 		_expand_partial(rm)
-	rm.wrapper.queue_free()
 	_sync_edge_strips()
+	return rm
+
+func kill(body: Control):
+	var rm := detach(body)
+	if rm.is_empty():
+		return
+	rm.wrapper.queue_free()
 
 func swap_pane(body: Control, new_type_name: String) -> Control:
 	# Find the tile owning this body.
@@ -460,6 +468,45 @@ func _split_vertical(s: Dictionary, w: Control, new_on_top: bool) -> bool:
 		tiles.append({wrapper = w, col = s.col, row = row, cspan = s.cspan, rspan = rest})
 	else:
 		tiles.append({wrapper = w, col = s.col, row = row + half, cspan = s.cspan, rspan = rest})
+	return true
+
+## The one empty-grid tile: the whole grid.
+static func _full_tile(w: Control) -> Dictionary:
+	return {"wrapper": w, "col": 0, "row": 0,
+		"cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID}
+
+## True when `count` more panes fit, in the order a caller would adopt them.
+## Runs the real `_split_for` against a scratch copy of the geometry; the
+## commit replays the identical sequence with the real wrappers, so the plan
+## and the placement cannot disagree. A refused plan mutates nothing.
+func plan_adopt(count: int) -> bool:
+	var saved := tiles
+	var scratch: Array[Dictionary] = []
+	for t in saved:
+		scratch.append({"wrapper": null, "col": t.col, "row": t.row,
+			"cspan": t.cspan, "rspan": t.rspan})
+	tiles = scratch
+	var ok := true
+	for i in count:
+		if tiles.is_empty():
+			tiles.append(_full_tile(null))
+			continue
+		if not _split_for(null, ""):
+			ok = false
+			break
+	tiles = saved
+	return ok
+
+## Place `w` in the grid, splitting the largest tile. Returns false when no
+## tile can be halved; a caller that planned capacity first cannot see false.
+func adopt(w: Control, side: String = "") -> bool:
+	if tiles.is_empty():
+		tiles.append(_full_tile(w))
+		_sync_edge_strips()
+		return true
+	if not _split_for(w, side):
+		return false
+	_sync_edge_strips()
 	return true
 
 func _expand_exact(rm: Dictionary) -> bool:
@@ -653,6 +700,8 @@ func show_pane_actions_popup(for_body: Control, menu_parent: Control, at_pos: Ve
 	MenuItems.add(menu, Icons.SWITCH_PANE, "Switch pane type",
 		"Replace this pane with another type; its current contents are closed.",
 		{"kind": "switch"})
+	if on_move_panes.is_valid():
+		on_move_panes.call(menu, for_body)
 	menu.index_pressed.connect(func(idx: int):
 		var meta = menu.get_item_metadata(idx)
 		menu.queue_free()

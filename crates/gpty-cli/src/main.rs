@@ -106,6 +106,9 @@ enum Commands {
     /// List all active panes
     ListPanes,
 
+    /// List live workspaces and their pane counts
+    WorkspaceList,
+
     /// Close a pane
     KillPane {
         /// Pane ID, a label unique across workspaces, or "active"
@@ -116,6 +119,17 @@ enum Commands {
     FocusPane {
         /// Pane ID, or a label unique across workspaces
         pane_id: String,
+    },
+
+    /// Move panes (each terminal brings the panes that follow it) to another workspace
+    MovePane {
+        /// Pane ID or label; repeatable
+        #[arg(short, long = "pane", value_name = "ID", required = true)]
+        pane: Vec<String>,
+
+        /// Destination workspace name (as shown in the sidebar and `workspace-list`)
+        #[arg(short, long)]
+        workspace: String,
     },
 
     /// Send text to a terminal pane
@@ -387,8 +401,10 @@ fn may_autospawn(cmd: &Commands) -> bool {
             action: LayoutAction::Load { .. },
         } => true,
         Commands::ListPanes
+        | Commands::WorkspaceList
         | Commands::KillPane { .. }
         | Commands::FocusPane { .. }
+        | Commands::MovePane { .. }
         | Commands::Inject { .. }
         | Commands::Schema { .. }
         | Commands::Daemon { .. }

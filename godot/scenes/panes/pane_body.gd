@@ -22,6 +22,11 @@ signal request_pane(type: String, settings: Dictionary)
 ## Stable logical link used by profiles and companion panes. Unlike
 ## `pane_label`, this value survives save/restore.
 @export var attachment_id := ""
+## True only while the workspace is moving this pane to another grid. A move
+## is not a close, but re-parenting the wrapper fires `_exit_tree`; the pane
+## types that stop a backend there must leave it running. Set around the
+## reparent and cleared immediately after (`Workspace._move_panes_into`).
+var backend_preserved := false
 ## Broadcast-targeting tags; each sanitized like attachment_id.
 @export var tags: Array = []
 @export var font_size: int = 14:

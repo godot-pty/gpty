@@ -89,6 +89,10 @@ func _ready():
 		_ai = null
 
 func _exit_tree():
+	# A move re-parents the wrapper and fires this too; the session and its
+	# conversation survive the move.
+	if backend_preserved:
+		return
 	_close_session()
 
 func _recompute_cell_metrics():

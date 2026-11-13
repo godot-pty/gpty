@@ -50,7 +50,7 @@ The text is written verbatim; the shell in each pane interprets it, so quoting a
 ## Outside a pane: the MCP door
 
 1. Start the app if it is not running: `gpty daemon start`. From an MCP client, the equivalent is the `daemon-start` tool.
-2. Launch the server: `gpty mcp`. It speaks JSON-RPC over stdio and exposes 23 tools covering the same operations — pane lifecycle, `inject`, `pane-read`, `pane-status`, `pane-run`, `pane-wait`, `broadcast`, layouts, concepts, the vault reads and weights, `daemon-*` and `version`.
+2. Launch the server: `gpty mcp`. It speaks JSON-RPC over stdio and exposes 25 tools covering the same operations — pane lifecycle (including `workspace-list` and `move-pane`), `inject`, `pane-read`, `pane-status`, `pane-run`, `pane-wait`, `broadcast`, layouts, concepts, the vault reads and weights, `daemon-*` and `version`.
 3. Check health with `gpty daemon status`, and stop the app with `gpty daemon stop` when the harness is done.
 
 MCP never auto-spawns a workspace. A tool call that finds no GUI answers with that fact and names `daemon-start`, which is the explicit bootstrap. This is a safety property: a background model server should not be able to open a desktop application as a side effect of a query.

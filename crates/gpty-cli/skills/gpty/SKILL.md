@@ -19,8 +19,10 @@ You are running inside one pane of a gPTY terminal workspace. Use the `gpty` CLI
 | --- | --- |
 | `new-pane` | `gpty new-pane --pane-type terminal` |
 | `list-panes` | `gpty list-panes` |
+| `workspace-list` | `gpty workspace-list` |
 | `kill-pane` | `gpty kill-pane <pane>` |
 | `focus-pane` | `gpty focus-pane <pane>` |
+| `move-pane` | `gpty move-pane --pane <pane> --workspace <name>` |
 | `inject` | `gpty inject <pane> --text "..."` |
 | `pane-view` | `gpty pane-view <pane> --graph` (or `--note <path>`, `--mode edit\|split\|preview`) |
 | `layout-save` | `gpty layout save <name>` |

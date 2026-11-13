@@ -293,8 +293,10 @@ pub async fn start_ipc_server_inner(socket_path: &str) {
     let gdscript_methods = [
         "newPane",
         "listPanes",
+        "workspaceList",
         "killPane",
         "focusPane",
+        "movePane",
         "inject",
         "paneRead",
         "paneStatus",

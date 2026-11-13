@@ -9,6 +9,7 @@ pub(crate) mod kill_pane;
 pub(crate) mod layout;
 pub(crate) mod list_panes;
 pub mod mcp;
+pub(crate) mod move_pane;
 pub(crate) mod new_pane;
 pub(crate) mod pane_read;
 pub(crate) mod pane_run;
@@ -20,6 +21,7 @@ pub mod schema;
 pub mod state;
 pub(crate) mod vault;
 pub(crate) mod wire;
+pub(crate) mod workspace_list;
 
 use crate::Commands;
 use gpty_ipc::client::IpcClient;
@@ -49,8 +51,12 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
             .await
         }
         Commands::ListPanes => list_panes::run(client, json).await,
+        Commands::WorkspaceList => workspace_list::run(client, json).await,
         Commands::KillPane { pane_id } => kill_pane::run(client, pane_id, json).await,
         Commands::FocusPane { pane_id } => focus_pane::run(client, pane_id, json).await,
+        Commands::MovePane { pane, workspace } => {
+            move_pane::run(client, pane, workspace, json).await
+        }
         Commands::Inject { pane_id, text } => inject::run(client, pane_id, text, json).await,
         Commands::PaneRead { pane_id, lines } => {
             pane_read::run(client, pane_id, *lines, json).await

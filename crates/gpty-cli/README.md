@@ -27,6 +27,12 @@ gpty new-pane -t terminal -c "htop" -f
 # List all active panes
 gpty list-panes
 
+# List live workspaces and their pane counts
+gpty workspace-list
+
+# Move a pane (and the panes that follow it) to another workspace
+gpty move-pane --pane T1 --workspace "Workspace 2"
+
 # Close a pane
 gpty kill-pane T1
 
@@ -110,8 +116,10 @@ gpty version
 |---------|-------------|
 | `new-pane` | Open a new pane (`-t, --pane-type` terminal/code_viewer/file_tree/inspector/reasoning/cli_view/wiki/media, `-c, --command` command, `--arg` program argument for `cli_view` (repeatable), `-s, --split left\|right\|top\|bottom` preferred split side, `--title` pane title, `-f, --focus true\|false` focus the new pane (default true), `--tags` broadcast tags). `observer` is a deprecated alias for `inspector`. |
 | `list-panes` | List all active panes with stable ids, labels, types, and positions |
+| `workspace-list` | List live workspaces (`name`, `active`, `panes`), the targets `move-pane` names |
 | `kill-pane` | Close a pane by id or `"active"` |
 | `focus-pane` | Focus a pane by id |
+| `move-pane` | Move panes to a named workspace (`--pane` repeatable, `--workspace`); each named terminal brings the panes that follow it |
 | `inject` | Send text to a terminal pane by id |
 | `pane-read` | Read a pane's plain-text output (screen + scrollback, `--lines` 1–2000) |
 | `pane-status` | Status primitives for a pane (`pid`, `running`, `exit_code`, `exit_reason`, `idle_ms`); no argument answers `{panes: [{pane_id, label, type, status}]}` for every pane, with `status: null` for panes that have no status primitives (non-terminals) |

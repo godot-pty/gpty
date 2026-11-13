@@ -349,8 +349,11 @@ mod tests {
                 "focus": true,
                 "tags": ["agent"],
             }),
-            "list-panes" | "concept-list" | "layout-list" | "version" => json!({}),
+            "list-panes" | "workspace-list" | "concept-list" | "layout-list" | "version" => {
+                json!({})
+            }
             "kill-pane" | "focus-pane" | "pane-status" => json!({"pane_id": "p1"}),
+            "move-pane" => json!({"pane": ["p1"], "workspace": "W"}),
             "inject" => json!({"pane_id": "p1", "text": "x"}),
             "pane-read" => json!({"pane_id": "p1", "lines": 20}),
             "pane-view" => json!({
