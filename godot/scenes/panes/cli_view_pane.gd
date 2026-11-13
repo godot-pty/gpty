@@ -26,6 +26,8 @@ var _status: Label
 var _editor: CodeEdit
 var _restart_btn: Button
 var _stop_btn: Button
+## The two scroll chevrons over the output body.
+var _scroll_hints: ScrollHints
 ## Complete lines, oldest first — the source of truth for `get_text()`.
 var _lines := PackedStringArray()
 var _running := false
@@ -197,6 +199,11 @@ func _build_ui():
 	_editor.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_editor.add_theme_font_size_override("font_size", font_size)
 	root.add_child(_editor)
+
+	# The two scroll chevrons over the output. The region is the editor, so
+	# they sit under the header (status + Restart/Stop) rather than over it.
+	_scroll_hints = ScrollHints.attach(self, _editor)
+	_scroll_hints.bind_bar(_editor.get_v_scroll_bar())
 
 ## The output view is where a read continues; without this the chrome handback
 ## and the toolbar's Escape would land on Restart, the bar's first stop.

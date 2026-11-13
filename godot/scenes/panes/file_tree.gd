@@ -23,6 +23,8 @@ const DEFAULT_OPEN_MODE := "viewer"
 var open_dir: Callable = func(path: String) -> DirAccess: return DirAccess.open(path)
 
 var _tree: Tree
+## The two scroll chevrons over the tree.
+var _scroll_hints: ScrollHints
 ## The pane's "nothing to show" surface and its two lines, rewritten per root
 ## state (the media pane's `_placeholder*` pattern). The tree and this surface
 ## are siblings at the full rect; exactly one of them is visible.
@@ -48,6 +50,11 @@ func _ready():
 	_empty_host.name = "EmptyState"
 	_empty_title = empty["title"] as Label
 	_empty_hint = empty["hint"] as Label
+
+	# The two scroll chevrons over the tree. `Tree` has no content-change
+	# signal, so the pane reports its own rebuilds to them.
+	_scroll_hints = ScrollHints.attach(self, _tree)
+	_scroll_hints.bind_tree(_tree)
 
 	_refresh_root()
 	
@@ -197,6 +204,8 @@ func _populate(parent: TreeItem, path: String) -> void:
 		return
 	var dir: DirAccess = listed.dir
 	_fill(parent, dir, path)
+	if _scroll_hints != null:
+		_scroll_hints.sync()
 
 ## Rebuild the pane from `root_path`, or say why it cannot be listed: the
 ## surface is either the folder's rows or the one sentence that explains their
@@ -215,6 +224,8 @@ func _refresh_root() -> void:
 	if not problem.is_empty():
 		_empty_title.text = problem["title"]
 		_empty_hint.text = problem["hint"]
+	if _scroll_hints != null:
+		_scroll_hints.sync()
 
 func _pane_type() -> String:
 	return "file_tree"

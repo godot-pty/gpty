@@ -123,6 +123,7 @@ const MINIMIZE = "\uE32A"  # minus
 const COLLAPSE = "\uE138"  # caret-left
 const EXPAND   = "\uE13A"  # caret-right
 const CARET_DOWN = "\uE136"  # caret-down (return to live output)
+const CARET_UP   = "\uE13C"  # caret-up (jump to the start of the scrollback)
 const ADD      = "\uE3D4"  # plus
 const SETTINGS = "\uE272"  # gear-six
 const FOLDER   = "\uE24A"  # folder (a directory picker, not a settings surface)

@@ -787,11 +787,12 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 				return false
 			await _send_wheel(scroll_body, MOUSE_BUTTON_WHEEL_UP, 5)
 			await _wait_frames(4)
+			var up_visible: bool = scroll_body._scroll_hints.top_button.visible
+			var down_visible: bool = scroll_body._scroll_hints.bottom_button.visible
 			if scroll_body._terminal.get_scroll_offset() <= 0 \
-					or not scroll_body._scroll_end_btn.visible:
-				_fail("the chevron did not show (offset %d, button visible %s)" % [
-					scroll_body._terminal.get_scroll_offset(),
-					scroll_body._scroll_end_btn.visible])
+					or not down_visible or not up_visible:
+				_fail("the chevrons did not both show (offset %d, up %s, down %s)" % [
+					scroll_body._terminal.get_scroll_offset(), up_visible, down_visible])
 				return false
 	if state.get("close_all", false):
 		# The panes title row's trash opens the inline check/cross; its check

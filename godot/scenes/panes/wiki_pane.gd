@@ -89,6 +89,10 @@ var _toolbar: HBoxContainer
 var _note_title: Label
 var _editor: CodeEdit
 var _reader: MarkdownView
+## The two scroll chevrons, one pair per half of the note view: source and
+## preview scroll independently, and the mode decides which is on screen.
+var _editor_hints: ScrollHints
+var _reader_hints: ScrollHints
 var _save_button: Button
 var _dirty_label: Label
 var _mode_buttons: Dictionary = {}
@@ -305,6 +309,13 @@ func _ready():
 	_reader.wikilinks_enabled = true
 	_reader.note_link_clicked.connect(_on_mention_clicked)
 	split.add_child(_reader)
+
+	# One pair per half: source and preview scroll on their own, and a hidden
+	# half's pair hides with it. The list and the link graph get none.
+	_editor_hints = ScrollHints.attach(self, _editor)
+	_editor_hints.bind_bar(_editor.get_v_scroll_bar())
+	_reader_hints = ScrollHints.attach(self, _reader)
+	_reader_hints.bind_bar(_reader.get_v_scroll_bar())
 
 	# ── The link panel: this note's mentions and its backlinks ──
 	_links_box = VBoxContainer.new()

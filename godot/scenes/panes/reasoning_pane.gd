@@ -18,6 +18,8 @@ const TURN_SCHEMA := 1
 var _status: RichTextLabel
 var _turn_scroll: ScrollContainer
 var _turn_list: VBoxContainer
+## The two scroll chevrons over the turn list.
+var _scroll_hints: ScrollHints
 ## JSON-shaped turn records. Do not store node refs here.
 var _turns: Array[Dictionary] = []
 var _fold_by_id: Dictionary = {}
@@ -75,6 +77,11 @@ func _ready():
 		# makes the view catch up in the same frame as the new content, even
 		# though the first scroll was clamped at the previous bottom.
 		vbar.changed.connect(_on_scroll_range_changed)
+
+	# The two scroll chevrons over the turn list. The follow logic above needs
+	# no change: a jump moves the same bar value the wheel does.
+	_scroll_hints = ScrollHints.attach(self, _turn_scroll)
+	_scroll_hints.bind_bar(_turn_scroll.get_v_scroll_bar())
 
 var _last_vbar_visible := false
 

@@ -351,8 +351,12 @@ func test_no_visible_wiki_action_is_mouse_only():
 
 	var mouse_only: Array[String] = []
 	for c in _all_controls(pane):
+		# A declared mouse-only control is answered elsewhere (the scroll
+		# chevrons are the wheel and PageUp/PageDown); this test is about
+		# actions that are pointer-only by accident.
 		if c is BaseButton and c.is_visible_in_tree() \
 				and c.focus_mode == Control.FOCUS_NONE \
+				and KeyboardFocus.mouse_only_reason(c) == "" \
 				and not (c as BaseButton).disabled:
 			mouse_only.append(str(c.name))
 	assert_eq(mouse_only, [],

@@ -185,10 +185,10 @@ var _search_strip: PanelContainer
 var _search_count: Label
 var _search_prev: Button
 var _search_next: Button
-## The return-to-live control, shown while the viewport is scrolled off live
-## output. A Button child, so its click is pane chrome even when the child owns
-## the mouse.
-var _scroll_end_btn: Button
+## The two scroll chevrons, shown while the viewport is scrolled off live
+## output. Real Button children, so a click is pane chrome even when the child
+## owns the mouse.
+var _scroll_hints: ScrollHints
 var _sync_interval: float = 1.0 / 60.0
 ## Title and agent-state reads are FFI calls that allocate and take the grid
 ## mutex; they change on OSC title / event arrival, not per frame.
@@ -487,23 +487,17 @@ func _ready():
 	_history_panel.add_child(_history_list)
 	add_child(_history_panel)
 
-	# The return-to-live control: a real Button child, so Godot's picking
-	# delivers its click before `_handle_mouse` reaches the mouse-reporting
-	# branch — the arrow stays pane chrome in a TUI that owns the mouse, the
-	# search strip's rule. It never takes focus or sends input.
-	_scroll_end_btn = Button.new()
-	_scroll_end_btn.name = "ScrollToBottom"
-	_scroll_end_btn.visible = false
-	_scroll_end_btn.anchor_left = 1.0; _scroll_end_btn.anchor_right = 1.0
-	_scroll_end_btn.anchor_top = 1.0; _scroll_end_btn.anchor_bottom = 1.0
-	_scroll_end_btn.offset_left = -30; _scroll_end_btn.offset_right = -6
-	_scroll_end_btn.offset_top = -30; _scroll_end_btn.offset_bottom = -6
-	_scroll_end_btn.focus_mode = Control.FOCUS_NONE
-	KeyboardFocus.declare_mouse_only(_scroll_end_btn, "PageDown, the wheel or typing return to live output")
-	_scroll_end_btn.tooltip_text = "Return to live output"
-	Icons.icon_button(_scroll_end_btn, Icons.CARET_DOWN, "Return to live output")
-	_scroll_end_btn.pressed.connect(_on_scroll_end_pressed)
-	add_child(_scroll_end_btn)
+	# The two scroll chevrons: one shared widget draws both, and the terminal
+	# binds it to the grid instead of a scroll bar. Its buttons are real Button
+	# children, so Godot's picking delivers a click before `_handle_mouse`
+	# reaches the mouse-reporting branch - the arrow stays pane chrome in a TUI
+	# that owns the mouse, the search strip's rule. The down chevron returns to
+	# live output; the up one jumps to the oldest line the in-memory grid still
+	# holds (the persisted store goes further back, a different surface).
+	_scroll_hints = ScrollHints.attach(self, self,
+		"Return to the start of the scrollback", "Return to live output")
+	_scroll_hints.bind_custom(_can_scroll_start, _can_scroll_live,
+		_jump_to_start, _jump_to_live)
 
 	_start_child_if_ready()
 
@@ -783,7 +777,7 @@ func _process(delta):
 			# The selection is grid-space: a scroll or new output moves its
 			# viewport rows without changing the selection itself.
 			_refresh_selection()
-			_sync_scroll_end_button()
+			_sync_scroll_hints()
 			# Repaint only when the grid actually changed. Every other
 			# visual trigger queues its own redraw (cursor blink, selection,
 			# search, settings, metric changes), and scroll/resize/palette
@@ -1129,11 +1123,11 @@ func _handle_mouse(event: InputEvent):
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			_note_view_input()
 			_terminal.scroll_up(scroll_lines)
-			_sync_scroll_end_button()
+			_sync_scroll_hints()
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
 			_note_view_input()
 			_terminal.scroll_down(scroll_lines)
-			_sync_scroll_end_button()
+			_sync_scroll_hints()
 	if event is InputEventMouseMotion and _selecting:
 		_extend_selection_to(_mouse_to_cell(event.position))
 
@@ -1278,17 +1272,35 @@ func _refresh_selection():
 ## input asks for it: an unstarted grid makes the FFI call itself a no-op.
 func _snap_to_bottom():
 	_terminal.scroll_reset()
-	_sync_scroll_end_button()
+	_sync_scroll_hints()
 
-## The chevron is shown exactly while the view is scrolled off live output.
-func _sync_scroll_end_button() -> void:
-	if _scroll_end_btn == null or _terminal == null:
+## Re-read the grid offset. Which chevrons show (and where) is the widget's
+## rule; this is the terminal's one sync point for it.
+func _sync_scroll_hints() -> void:
+	if _scroll_hints == null or _terminal == null:
 		return
-	_scroll_end_btn.visible = _terminal.get_scroll_offset() > 0
+	_scroll_hints.sync()
 
-## One click back to live output. The selection is grid-space, so the jump
-## moves the highlight with its text; nothing here clears it.
-func _on_scroll_end_pressed() -> void:
+## Up while any in-memory scrollback is above the viewport, and never while the
+## search strip covers the pane's top edge (the strip owns that corner then).
+func _can_scroll_start() -> bool:
+	return _terminal != null and not _search_strip.visible \
+		and _terminal.get_scroll_offset() < _terminal.get_history_size()
+
+## Down while the view is off live output.
+func _can_scroll_live() -> bool:
+	return _terminal != null and _terminal.get_scroll_offset() > 0
+
+## One jump to the oldest line the grid holds. The selection is grid-space, so
+## the jump moves the highlight with its text; nothing here clears it.
+func _jump_to_start() -> void:
+	_note_view_input()
+	_terminal.scroll_up(_terminal.get_history_size())
+	_refresh_selection()
+	queue_redraw()
+
+## One click back to live output, with the same grid-space selection rule.
+func _jump_to_live() -> void:
 	_note_view_input()
 	# The reset hides the control itself, so the two cannot disagree.
 	_snap_to_bottom()
@@ -1370,11 +1382,11 @@ func _handle_keyboard(event: InputEventKey):
 	if event.keycode == KEY_PAGEUP:
 		_note_view_input()
 		_terminal.scroll_up(rows)
-		_sync_scroll_end_button(); accept_event(); return
+		_sync_scroll_hints(); accept_event(); return
 	if event.keycode == KEY_PAGEDOWN:
 		_note_view_input()
 		_terminal.scroll_down(rows)
-		_sync_scroll_end_button(); accept_event(); return
+		_sync_scroll_hints(); accept_event(); return
 	if event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
 		_clear_selection()
 		_send_line_to_term(""); _snap_to_bottom(); accept_event(); return
@@ -1439,6 +1451,7 @@ func _on_search_bar_input(event):
 func _toggle_search():
 	_search_visible = not _search_visible
 	_search_strip.visible = _search_visible
+	_sync_scroll_hints()
 	# The panel is visible iff the History scope has something to say; a fresh
 	# open has no results in the list yet.
 	_history_panel.visible = _scope_history and _history_list.get_child_count() > 0
@@ -1455,6 +1468,7 @@ func _toggle_search():
 func _close_search():
 	_search_visible = false
 	_search_strip.visible = false
+	_sync_scroll_hints()
 	_search_results.clear()
 	_search_error = ""
 	_clear_history_results()
@@ -1720,7 +1734,7 @@ func _jump_to_match(direction: int):
 	elif delta < 0:
 		_note_view_input()
 		_terminal.scroll_down(-delta)
-	_sync_scroll_end_button()
+	_sync_scroll_hints()
 	queue_redraw()
 	_refresh_search_count()
 

@@ -23,6 +23,8 @@ var _content := ""
 var _source := ""
 var _notice := ""
 var _show_rendered := false
+## The two scroll chevrons over the body, rebound to whichever view is shown.
+var _scroll_hints: ScrollHints
 
 static var _langs := ["", "md", "gd", "py", "rs", "c", "cpp", "h", "js", "ts"]
 static var _view_modes := ["auto", "source", "rendered"]
@@ -78,6 +80,11 @@ func _ready():
 	_markdown.add_theme_font_size_override("mono_font_size", font_size)
 	content_root.add_child(_markdown)
 	_markdown.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	# The two scroll chevrons, over the body below the toolbar. The region is
+	# `content_root`, which both views fill, so their corner is the same in
+	# source and rendered mode; `_refresh_view` rebinds the bar.
+	_scroll_hints = ScrollHints.attach(self, content_root)
 
 	# A pane with no file used to be a blank editor under a disabled Reload: no
 	# text, no explanation, no route to a file. It now says what it is and the
@@ -190,6 +197,9 @@ func _refresh_view():
 	# The ring names only the buttons on screen: the view toggle is hidden for
 	# anything that is not Markdown, and a one-member ring is a stop with no wrap.
 	KeyboardFocus.ring(KeyboardFocus.reachable_children(_toolbar))
+	# The chevrons drive whichever body is in front; an empty pane binds a
+	# hidden view's empty bar, which shows neither.
+	_scroll_hints.bind_bar((_markdown if _show_rendered else _editor).get_v_scroll_bar())
 
 func _toggle_view():
 	if not _is_markdown():

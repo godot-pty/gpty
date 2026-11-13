@@ -164,6 +164,7 @@ gpty/
         │   ├── keyboard_focus.gd   # The keyboard-entry walk + the toolbar-ring pair
         │   ├── status_bar.gd
         │   ├── toast_overlay.gd
+        │   ├── scroll_hints.gd     # The two scroll chevrons a pane overlays on a scrolling body
         │   ├── window_chrome.gd    # Titlebar + window-mode/fullscreen handling (extracted)
         │   ├── markdown_view.gd     # Safe, debounced Markdown RichTextLabel
         │   ├── markdown_anchors.gd  # Pure ATX heading scan for fragment/line navigation

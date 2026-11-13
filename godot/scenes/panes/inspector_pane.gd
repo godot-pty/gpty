@@ -23,6 +23,8 @@ var _status: Label
 var _prompt: LineEdit
 var _thinking_display: MarkdownView
 var _ai: Node
+## The two scroll chevrons over the answer body.
+var _scroll_hints: ScrollHints
 var _session_id := ""
 var _run_id := ""
 var _assembled := ""
@@ -67,6 +69,11 @@ func _ready():
 	_prompt.placeholder_text = "Ask (private Inspector session)…"
 	_prompt.text_submitted.connect(_on_prompt_submitted)
 	root.add_child(_prompt)
+
+	# The two scroll chevrons over the answer. The thinking fold and the prompt
+	# keep their own behaviour; the answer is the pane's primary body.
+	_scroll_hints = ScrollHints.attach(self, _display)
+	_scroll_hints.bind_bar(_display.get_v_scroll_bar())
 
 	_apply_font_sizes()
 
