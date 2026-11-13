@@ -92,28 +92,32 @@ func test_the_workspace_applies_the_scale_and_the_theme():
 # minimums.
 
 func test_the_ceiling_is_the_layout_floor():
-	# 500 / 560 = 0.89: an 800x500 window cannot show even 100 % of the floor.
-	assert_eq(UiTokens.ui_scale_ceiling(Vector2i(800, 500)), 89)
-	# Height binds at 1920x1080: 1080 / 560 = 1.92.
-	assert_eq(UiTokens.ui_scale_ceiling(Vector2i(1920, 1080)), 192)
-	# 760 / 560 = 1.35, so 125 % fits and 150 % does not.
-	assert_eq(UiTokens.ui_scale_ceiling(Vector2i(1280, 760)), 135)
+	# 800 / 560 = 1.42: the 125 % step fits the 640x400 layout an 800x500
+	# window shows, which is what the small-window work unlocked.
+	assert_eq(UiTokens.ui_scale_ceiling(Vector2i(800, 500)), 142)
+	# Height binds at 1920x1080: 1080 / 340 = 3.17.
+	assert_eq(UiTokens.ui_scale_ceiling(Vector2i(1920, 1080)), 317)
+	# Height binds here too: 760 / 340 = 2.23, so 200 % fits and 250 % does not.
+	assert_eq(UiTokens.ui_scale_ceiling(Vector2i(1280, 760)), 223)
 	assert_eq(UiTokens.ui_scale_ceiling(Vector2i.ZERO), -1,
 		"an unmeasurable window caps nothing")
 
 func test_the_cap_falls_back_to_100_percent():
-	assert_eq(SettingsManager.capped_ui_scale_percent(125, Vector2i(800, 500)), 100)
-	assert_eq(SettingsManager.capped_ui_scale_percent(200, Vector2i(800, 500)), 100)
+	assert_eq(SettingsManager.capped_ui_scale_percent(125, Vector2i(800, 500)), 125,
+		"the 800x500 layout holds 125 % now that the surfaces clamp to the window")
+	assert_eq(SettingsManager.capped_ui_scale_percent(125, Vector2i(560, 340)), 100,
+		"the floor itself holds 100 % and no more")
+	assert_eq(SettingsManager.capped_ui_scale_percent(200, Vector2i(560, 340)), 100)
 	assert_eq(SettingsManager.capped_ui_scale_percent(125, Vector2i(1920, 1080)), 125)
-	assert_eq(SettingsManager.capped_ui_scale_percent(200, Vector2i(1920, 1080)), 192,
-		"the tallest step the window can show, not the requested one")
+	assert_eq(SettingsManager.capped_ui_scale_percent(200, Vector2i(1920, 1080)), 200,
+		"the tallest preset the window can show")
 	assert_eq(SettingsManager.capped_ui_scale_percent(200, Vector2i.ZERO), 200,
 		"an unmeasurable window keeps the request")
 	assert_eq(SettingsManager.capped_ui_scale_percent(40, Vector2i(1920, 1080)), 100,
 		"the floor is 100 %, never a smaller interface")
 
 func test_applying_caps_the_scale_at_the_window():
-	_pin_window(Vector2i(800, 500))
+	_pin_window(Vector2i(560, 340))
 	SettingsManager.cfg_ui_scale = 125
 	SettingsManager.apply_ui_scale()
 	assert_eq(SettingsManager.applied_ui_scale_percent(), 100)
@@ -128,7 +132,7 @@ func test_a_resize_moves_the_cap_with_the_window():
 	SettingsManager.cfg_ui_scale = 125
 	SettingsManager.apply_ui_scale()
 	assert_eq(SettingsManager.applied_ui_scale_percent(), 125)
-	get_window().size = Vector2i(800, 500)
+	get_window().size = Vector2i(560, 340)
 	await get_tree().process_frame
 	assert_eq(SettingsManager.applied_ui_scale_percent(), 100,
 		"the resize hook re-applies the cap with no settings change")

@@ -116,6 +116,9 @@ func _build_ui():
 	_error_label = Label.new()
 	_error_label.name = "GraphErrors"
 	_error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# The tooltip carries every error; a Label defaults to MOUSE_FILTER_IGNORE,
+	# which the tooltip lookup skips, so the "+N more" list could never be read.
+	_error_label.mouse_filter = Control.MOUSE_FILTER_STOP
 	_error_label.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
 	_error_label.theme_type_variation = UiTheme.DANGER_LABEL
 	_error_label.visible = false

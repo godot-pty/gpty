@@ -7,7 +7,9 @@ weight: 30
 - Chrome has one owner: `ui/ui_palette.gd` (every colour, in a complete `DARK` and a complete
   `LIGHT` set, read through `UiPalette.active()`), `ui/ui_tokens.gd` (the mode-independent tokens:
   the `FS_*` type scale, the `SPACE_*` steps, `RADIUS`, `contrast_ratio()`, and `MIN_LAYOUT` - the
-  layout floor the applied UI scale is capped against and the Settings card sizes itself to) and
+  smallest layout the chrome is asserted at, which is what the applied UI scale is capped against;
+  no surface sizes itself to it: a panel card carries its own design size and clamps to the window
+  with `OverlayPanel.fit_card(card, design)`) and
   `ui/ui_theme.gd`
   (`build()`, applied on the `Workspace` root and rebuilt whenever the palette switches; every pane,
   overlay, popup and dialog inherits it). Read a colour **at draw time** — never cache a token in a

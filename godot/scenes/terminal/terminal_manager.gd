@@ -12,6 +12,10 @@ class_name TerminalManager
 ## an older one.
 ## The divider drag over these units lives in tile_drag.gd.
 const TITLE_BAR_HEIGHT = 26
+## The width the title bar's three controls reserve at the bar's right edge:
+## three icon buttons plus their separations and the 2 px edge. The title label
+## ends here, and the button row starts here.
+const TITLE_BTN_RESERVE := 3 * UiTokens.BUTTON_MIN_WIDTH + 8
 ## The title bar's button row, named so the chrome keyboard path can find it
 ## (`focus_title_bar`) and a test can name one button.
 const TITLE_BAR_BUTTONS = "TitleBarButtons"
@@ -81,10 +85,7 @@ func spawn_pane(type_name: String, opts: Dictionary = {}, workspace_cwd := "") -
 	if type_name == "terminal":
 		var s = opts.get("shell_command", SettingsManager.cfg_shell_command)
 		body.shell_command = s if s != "" else SettingsManager.cfg_shell_command
-		body.title_changed.connect(func(t: String):
-			var lbl = w.get_node_or_null("BodyVBox/TitleBar/TitleLabel")
-			if lbl: lbl.text = " " + t
-		)
+		body.title_changed.connect(func(t: String): set_title_label(w, t))
 
 	return body
 
@@ -211,12 +212,26 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 
 	var lbl = Label.new()
 	lbl.name = "TitleLabel"
-	lbl.text = " " + title
-	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lbl.text = ""
+	# A tooltip needs a hover target: a Label defaults to MOUSE_FILTER_IGNORE,
+	# which the viewport's tooltip lookup skips (row *A concept row's provenance
+	# tooltip can never show*, the same trap one surface over).
+	lbl.mouse_filter = Control.MOUSE_FILTER_STOP
+	# A title wider than its pane used to draw past the bar and under the three
+	# controls. It ellipsizes now, and the full string is on the tooltip.
+	lbl.clip_text = true
+	lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	bar.add_child(lbl)
-	lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Anchored inside the bar rather than over it: the left inset clears the
+	# agent badge (6 px + 22 px) and the right one the button column, so the
+	# title trims in the space it actually has.
+	lbl.anchor_left = 0.0; lbl.anchor_right = 1.0
+	lbl.anchor_top = 0.0; lbl.anchor_bottom = 1.0
+	lbl.offset_left = UiTokens.SPACE_MD + UiTokens.BUTTON_MIN_WIDTH + UiTokens.SPACE_XS
+	lbl.offset_right = -(TITLE_BTN_RESERVE + UiTokens.SPACE_XS)
+	set_title_label(root, title)
 
 	# Agent-state badge (display only) — written by TerminalPane from the
 	# tiered AgentState tracker; hidden while idle. Never a decision input.
@@ -238,8 +253,7 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	# Three controls, not five. Settings, the one menu that holds everything
 	# else, and close: the type list alone used to cost a whole button, and the
 	# ~122 px the five reserves is what squeezed a narrow pane's title.
-	var btn_total = 3 * UiTokens.BUTTON_MIN_WIDTH + 8
-	btn_hbox.offset_left = -btn_total
+	btn_hbox.offset_left = -TITLE_BTN_RESERVE
 	btn_hbox.offset_right = -2
 	bar.add_child(btn_hbox)
 
@@ -273,6 +287,17 @@ func _add_title_bar(parent: VBoxContainer, title: String, root: Control) -> Labe
 	_wire_chrome_keyboard(btn_hbox)
 
 	return lbl
+
+## The one place a pane title's text is written: the leading space keeps the
+## centred label off the bar's edge, and the tooltip carries the full title so an
+## ellipsized one is still readable. Both `title_changed` handlers and the bar's
+## own construction go through here.
+static func set_title_label(wrapper: Control, text: String) -> void:
+	var lbl := wrapper.get_node_or_null("BodyVBox/TitleBar/TitleLabel") as Label
+	if lbl == null:
+		return
+	lbl.text = " " + text
+	lbl.tooltip_text = text
 
 ## Make the title bar's buttons a keyboard toolbar: one explicit ring
 ## (`KeyboardFocus.ring`), so Tab moves through the chrome and wraps instead of

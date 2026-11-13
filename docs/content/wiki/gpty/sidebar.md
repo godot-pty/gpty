@@ -8,7 +8,7 @@ The panel has a header with the gPTY title and a collapse arrow, then four secti
 
 Collapsing shrinks the sidebar to a 20 px strip with a single expand button; the pane grid widens to take the space. `Ctrl+Shift+B` toggles it, and the arrow in the header or the expand button does the same. The collapsed state is not saved, so each run starts expanded.
 
-The workspace and profile lists show at most five rows at full height and gain an inner scrollbar beyond that, so a long list cannot push the rest of the panel off-screen; the pane list takes the remaining height and scrolls. Row labels are clipped with an ellipsis rather than stretching the 180 px panel and clipping their neighbours.
+The workspace, profile and pane lists all show at most five rows at full height and gain an inner scrollbar beyond that, and the whole column of sections scrolls when the window is too short to hold them — so a long list, or a small window, cannot push a section off the bottom of the panel. On a tall window the pane list takes the height the sections above it leave over; on a short one the column scrolls to it. Row labels are clipped with an ellipsis rather than stretching the 180 px panel and clipping their neighbours; a pane title bar ellipsizes the same way and keeps the full title on its tooltip.
 
 ## Window mode
 

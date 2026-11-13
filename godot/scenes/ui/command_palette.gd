@@ -128,16 +128,19 @@ func set_saved_commands(entries: Array, refusal: String) -> void:
 ## Opening always starts from an unfiltered list: the field is cleared (a
 ## stale query from the last visit used to hide every entry) and the list is
 ## rebuilt before focus moves in. The card is also clamped to the overlay's own
-## rect first: at the 560x340 layout floor a fixed 480 px card would hang
-## outside the window (the small-window rework is v0.8.3's; the palette just
-## never draws outside its host).
+## rect first, keeping its own floating edge: at the 560x340 layout floor a fixed
+## 480 px card would hang outside the window.
 func _before_open() -> void:
-	var edge := float(UiTokens.SPACE_XXL)
-	_card.custom_minimum_size = Vector2(
-		minf(PALETTE_WIDTH, size.x - edge * 2.0),
-		minf(PALETTE_HEIGHT, size.y - edge * 2.0))
+	fit_card(_card, Vector2(PALETTE_WIDTH, PALETTE_HEIGHT), float(UiTokens.SPACE_XXL))
 	_field.text = ""
 	_refresh("")
+
+## The window can shrink while the palette is open; the card follows it rather
+## than keeping the clamp it was opened with. Not `_before_open()`, which would
+## also clear the query under the user's cursor.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_RESIZED and is_instance_valid(_card):
+		fit_card(_card, Vector2(PALETTE_WIDTH, PALETTE_HEIGHT), float(UiTokens.SPACE_XXL))
 
 func _refresh(query: String) -> void:
 	# Remove before freeing so the list a caller (or a test) reads in this

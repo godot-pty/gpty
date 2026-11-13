@@ -1065,7 +1065,7 @@ func test_an_emptied_workspace_shows_the_guide():
 func test_the_empty_guide_scrolls_at_the_layout_floor():
 	var ws = WorkspaceScript.new()
 	_ws = ws
-	ws.size = Vector2(540, 560)  # UiTokens.MIN_LAYOUT
+	ws.size = UiTokens.MIN_LAYOUT  # the layout floor
 	add_child(ws)
 	await get_tree().process_frame
 	await get_tree().process_frame

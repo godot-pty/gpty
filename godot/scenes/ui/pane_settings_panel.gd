@@ -11,13 +11,31 @@ class_name PaneSettingsPanel
 ## per-pane state (the env store) when the id changed.
 signal settings_applied(body: Control, settings: Dictionary, previous_id: String)
 
+## The card's design size. A smaller window clamps it (`fit_card`), and the
+## content scroll container inside it takes the slack the same way a Settings
+## tab does.
+const CARD_SIZE := Vector2(380, 420)
+
 var _target: Control
 var _debounce_timer: Timer
 var _gather_func: Callable
+## The card, so a window resize while the panel is open re-clamps it.
+var _card: Panel = null
 
 func _ready():
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	visible = false
+
+## The card is rebuilt on every open, so only a resize while the panel is open
+## needs the clamp recomputed.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_RESIZED and _card != null:
+		fit_card(_card, CARD_SIZE)
+
+## `open_for` has just rebuilt the card at its design size; this is where the
+## window it has to fit in is known.
+func _before_open() -> void:
+	fit_card(_card, CARD_SIZE)
 
 func _process(_delta: float):
 	# The popup is a shared workspace-level overlay: its target pane can be
@@ -54,13 +72,19 @@ func _build_ui():
 	# reopening for another pane.
 	for c in get_children():
 		c.free()
+	_card = null
 
 	var cc = CenterContainer.new()
 	add_child(cc)
 	cc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	var bg = Panel.new()
-	bg.custom_minimum_size = Vector2(380, 420)
+	bg.name = "Card"
+	# The design size; clamped to the window on open and on a resize while open
+	# (`fit_card`), because `open_for` builds this card while the panel is still
+	# hidden.
+	_card = bg
+	_card.custom_minimum_size = CARD_SIZE
 	cc.add_child(bg)
 
 	var mc = MarginContainer.new()

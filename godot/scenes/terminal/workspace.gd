@@ -1143,10 +1143,7 @@ func _attach_pane_into(ws: Dictionary, w: Control, body: Control):
 		_request_pane_for(body, type_name, settings)
 	)
 	if body is TerminalPane:
-		body.title_changed.connect(func(t: String):
-			var lbl = w.get_node_or_null("BodyVBox/TitleBar/TitleLabel")
-			if lbl: lbl.text = " " + t
-		)
+		body.title_changed.connect(func(t: String): TerminalManager.set_title_label(w, t))
 		# A pane answer is held until its child starts, so the outcome comes
 		# back through here: success releases the answer, a refusal answers it
 		# with the reason and closes the tile. Both are emitted a frame after
@@ -3174,13 +3171,13 @@ func _build_sidebar():
 	_sidebar_bg.name = "SidebarBg"
 	_sidebar_bg.color = SettingsManager.cfg_sidebar_bg
 	_sidebar_bg.anchor_top = 0.0; _sidebar_bg.anchor_bottom = 1.0
-	_sidebar_bg.offset_right = 180
+	_sidebar_bg.offset_right = Sidebar.WIDTH
 	add_child(_sidebar_bg)
 
 	_sidebar = Sidebar.new()
 	_sidebar.name = "Sidebar"
 	_sidebar_bg.add_child(_sidebar)
-	_sidebar.offset_right = 180
+	_sidebar.offset_right = Sidebar.WIDTH
 	_sidebar.build(_sidebar_bg)
 
 # ═══════════════════════════════════════════════════════════════════════

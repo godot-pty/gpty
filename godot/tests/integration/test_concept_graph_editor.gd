@@ -105,3 +105,26 @@ func test_fit_re_rows_the_canvas_without_reordering():
 		"tidying re-rows the canvas in the order it already has")
 	assert_lt(_node("beta#t").position_offset.x, _node("beta#a").position_offset.x,
 		"a chain still reads left to right")
+
+# ── The error line ─────────────────────────────────────────────────────
+
+## The status label shortens a long error list to three and puts the whole list
+## on its tooltip, so the label has to stop the mouse: a `Label` defaults to
+## `MOUSE_FILTER_IGNORE`, which the viewport's tooltip lookup skips (row *A
+## concept row's provenance tooltip can never show*, the same trap).
+func test_the_error_line_is_a_hover_target():
+	var errors := []
+	for i in 5:
+		errors.append({"message": "rule %d is unreachable" % i, "ids": []})
+	_editor._errors = errors
+	_editor._update_error_display()
+	var lbl: Label = _editor._error_label
+	assert_not_null(lbl)
+	if lbl == null:
+		return
+	assert_true(lbl.visible, "an error shows the line")
+	assert_string_contains(lbl.text, "(+2 more)", "the text carries the count, not the list")
+	assert_string_contains(lbl.tooltip_text, "rule 4 is unreachable",
+		"the tooltip carries the whole list")
+	assert_eq(lbl.mouse_filter, Control.MOUSE_FILTER_STOP,
+		"a MOUSE_FILTER_IGNORE label is never a hover target, so the list could never be read")

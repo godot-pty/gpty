@@ -24,8 +24,22 @@ signal request_workspace_rename(index: int, name: String)
 signal request_workspace_menu(index: int, source_btn: Button)
 signal request_workspaces_close_all
 
+## The sidebar's width open and collapsed. One owner: `Workspace._build_sidebar`
+## and `_toggle_sidebar` both read these, so the fold's own state test cannot
+## drift from the width it sets.
+const WIDTH := 180
+const COLLAPSED_WIDTH := 20
+
 
 var bg: ColorRect
+## The column's own scroll container and the VBox inside it. The window can be
+## shorter than the sections' minimum heights (a 340 px window holds ~530 px of
+## chrome), so the whole column scrolls instead of its tail being clipped.
+var _content_scroll: ScrollContainer = null
+## The header's title and collapse glyph, toggled with the fold (the fold used
+## to find them by node path, which an added container would have broken).
+var _title_label: Label = null
+var _collapse_arrow: Button = null
 var _wm_dropdown: OptionButton
 var _pane_list: VBoxContainer
 var _profile_list: VBoxContainer
@@ -84,9 +98,22 @@ func build(bg_rect: ColorRect):
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(margin)
 
+	# The whole column scrolls, so a short window reaches every section instead
+	# of clipping the last one. `SIZE_EXPAND_FILL` on the content keeps today's
+	# tall-window behaviour: a `ScrollContainer` stretches an expand-flagged
+	# child to its own size, so the pane list still fills the leftover height.
+	var sc := ScrollContainer.new(); sc.name = "SidebarScroll"
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	sc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_child(sc)
+	_content_scroll = sc
+
 	var v = VBoxContainer.new(); v.name = "SidebarContent"
 	v.add_theme_constant_override("separation", UiTokens.SPACE_SM)
-	margin.add_child(v)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sc.add_child(v)
 
 	_add_header(v)
 	_add_window_mode(v)
@@ -220,12 +247,14 @@ func _add_header(v: VBoxContainer):
 	var title = Label.new(); title.text = " gPTY"; title.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
 	title.name = "SidebarTitle"; title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(title)
+	_title_label = title
 	var arrow = Button.new()
 	arrow.name = "SidebarArrow"
 	arrow.custom_minimum_size = Vector2(UiTokens.BUTTON_MIN_WIDTH, UiTokens.BUTTON_MIN_HEIGHT)
 	Icons.icon_button(arrow, Icons.COLLAPSE, "Hide sidebar")
 	arrow.pressed.connect(_toggle_sidebar)
 	h.add_child(arrow)
+	_collapse_arrow = arrow
 	v.add_child(h)
 
 func _add_buttons(v: VBoxContainer):
@@ -484,8 +513,18 @@ func _render_panes():
 	if not _pane_list: return
 	_validate_pane_pending()
 	for c in _pane_list.get_children(): c.queue_free()
+	var rows: Array[Control] = []
 	for body in _pane_items:
-		_pane_list.add_child(_make_pane_row(body, body == _pane_active))
+		var row := _make_pane_row(body, body == _pane_active)
+		_pane_list.add_child(row)
+		rows.append(row)
+	# The same five-row cap the workspace and profile lists take. Without a
+	# minimum the list is only the pixels left over after the fixed blocks
+	# above it - 33 px of a 500 px window, one row cut in half - and the outer
+	# column would never need to scroll.
+	var sc := _pane_list.get_parent() as ScrollContainer
+	if sc:
+		sc.custom_minimum_size.y = _measured_section_height(_pane_list, rows)
 	_sync_pane_header()
 
 func _validate_pane_pending():
@@ -816,22 +855,19 @@ func _add_collapsed_button():
 	add_child(btn)
 
 func _toggle_sidebar():
-	var on = (offset_right != 180)
-	var content = get_node_or_null("SidebarMargin/SidebarContent")
-	var title = get_node_or_null("SidebarMargin/SidebarContent/Header/SidebarTitle")
-	var a = get_node_or_null("SidebarMargin/SidebarContent/Header/SidebarArrow")
+	var on = (offset_right != WIDTH)
 	var coll = get_node_or_null("SidebarCollapsedBtn")
 	if on:
-		offset_right = 180; bg.size.x = 180
-		if content: content.show()
-		if title: title.visible = true
-		if a: a.visible = true
+		offset_right = WIDTH; bg.size.x = WIDTH
+		if _content_scroll: _content_scroll.show()
+		if _title_label: _title_label.visible = true
+		if _collapse_arrow: _collapse_arrow.visible = true
 		if coll: coll.visible = false
 	else:
-		offset_right = 20; bg.size.x = 20
-		if content: content.hide()
-		if title: title.visible = false
-		if a: a.visible = false
+		offset_right = COLLAPSED_WIDTH; bg.size.x = COLLAPSED_WIDTH
+		if _content_scroll: _content_scroll.hide()
+		if _title_label: _title_label.visible = false
+		if _collapse_arrow: _collapse_arrow.visible = false
 		if coll: coll.visible = true
 	toggled.emit()
 

@@ -56,14 +56,20 @@ const SCROLLBAR_INSET := 1
 const SCROLLBAR_MIN_THUMB := 24
 
 # --- Layout floor --------------------------------------------------------------
-## The smallest layout space the chrome is designed for, in layout pixels. The
-## Settings card is 540 x 560 and is the largest fixed surface; 540 also leaves
-## the 180 px sidebar plus a 2x2 grid of 180 px tiles, the narrowest a pane
-## title bar (three 22 px controls and a title) is drawn at. `SettingsManager`
-## caps the applied UI scale so the layout never falls under it; the v0.8.3
-## small-window work may lower it once the card, the sidebar and the dialogs
-## adapt instead of clipping.
-const MIN_LAYOUT := Vector2(540, 560)
+## The smallest layout space the chrome is asserted at, in layout pixels: what
+## `SettingsManager` caps the applied UI scale against, not what a surface sizes
+## itself to (the cards carry their own design sizes and clamp to the window -
+## see `OverlayPanel.fit_card`).
+##
+## 560 x 340 is the size the v0.8.3 small-window work asserts
+## (`godot/tests/integration/test_small_window.gd`) and the smallest at which the
+## Settings card keeps all seven tabs on its bar (a 540 px card against the tab
+## bar's 490 plus the card's margins). The app's own minimum window stays
+## `WindowChrome.MIN_WINDOW_W/H` (500 x 300): a window that small still adapts -
+## the card clamps to 484, the sidebar scrolls as one column, a title ellipsizes -
+## but it is not the floor a scale is measured against, and the cap never takes a
+## legal window below 100 %.
+const MIN_LAYOUT := Vector2(560, 340)
 
 ## The largest whole-percent UI scale a `window_size`-pixel window can show
 ## without the layout (`window_size / scale`) falling under `MIN_LAYOUT`.

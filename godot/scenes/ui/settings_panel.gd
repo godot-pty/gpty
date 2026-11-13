@@ -6,7 +6,12 @@ signal request_graph_editor
 
 var _debounce_timer: Timer = null
 var _workspace: Control
-var _menu_width: float = 540.0  # settings panel width — dialogs size relative to it
+## The card's design size: the width all seven tabs fit the bar at and the
+## height the tabs were laid out for. A smaller window clamps it (`fit_card`).
+const CARD_SIZE := Vector2(540, 560)
+## The card itself, so a resize and every dialog can read its real width - below
+## a 556 px window the clamp makes it narrower than the design size.
+var _card: Panel = null
 ## The disk-usage row in the Terminal tab; refreshed whenever the panel opens,
 ## because the panel outlives a single visit and scrollback keeps growing.
 var _history_size_label: Label = null
@@ -37,6 +42,11 @@ func _ready():
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_build_ui()
 
+## The window can have changed size while the panel was hidden, so the clamp is
+## recomputed on the way in as well as on a resize while it is open.
+func _before_open() -> void:
+	fit_card(_card, CARD_SIZE)
+
 func _notification(what: int):
 	if not visible:
 		return
@@ -52,8 +62,11 @@ func _notification(what: int):
 		_refresh_shortcut_list()
 	elif what == NOTIFICATION_RESIZED:
 		# The window (and with it the layout space) changed, so the scale it can
-		# show may have moved while the panel is open.
+		# show may have moved while the panel is open - and the card that fitted
+		# the old window may not fit this one.
 		_refresh_ui_scale_hint()
+		if _card != null:
+			fit_card(_card, CARD_SIZE)
 
 func _build_ui():
 	var cc = CenterContainer.new()
@@ -61,16 +74,15 @@ func _build_ui():
 	cc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	var bg = Panel.new()
-	# Wide enough that all seven tabs fit the TabContainer without clipping.
-	# When tabs overflow, Godot hides trailing tabs behind a dropdown; a
-	# clipped tab only becomes visible in the bar after being clicked,
-	# stretching the tab bar while the panel keeps its old width (mangled
-	# layout). Keep every tab visible from the start.
-	#
-	# This card *is* the layout floor: `UiTokens.MIN_LAYOUT` is the size
-	# `SettingsManager` caps the UI scale against, so the two cannot drift.
-	bg.custom_minimum_size = UiTokens.MIN_LAYOUT
-	_menu_width = bg.custom_minimum_size.x
+	bg.name = "Card"
+	# The design size: wide enough that all seven tabs fit the TabContainer
+	# without clipping (the bar needs ~490 px and the card's margins take 32).
+	# It is clamped to the window on every open and on a resize while open
+	# (`fit_card`), never here - at construction the overlay's own rect may not
+	# be laid out yet, and a transient size would pin a card far smaller than the
+	# design for the rest of the panel's life.
+	_card = bg
+	_card.custom_minimum_size = CARD_SIZE
 	cc.add_child(bg)
 
 	var mc = MarginContainer.new()
@@ -338,7 +350,7 @@ func _add_ui_scale_control(v: VBoxContainer) -> OptionButton:
 	)
 	hf.add_child(scale_opt)
 	# What the window actually shows, in the same row and on one line, so the
-	# card's measured 540 x 560 does not move. Empty unless the clamp bites.
+	# card's design size (540 x 560) does not move. Empty unless the clamp bites.
 	_ui_scale_hint = Label.new()
 	_ui_scale_hint.name = "UiScaleHint"
 	_ui_scale_hint.theme_type_variation = UiTheme.MUTED_LABEL
@@ -372,8 +384,8 @@ static func ui_scale_hint_tooltip(requested: int, applied: int) -> String:
 		return ""
 	return (
 		"This window shows the interface at %d %% instead of %d %%: at the larger "
-		+ "scale the layout would be smaller than %d x %d px and the Settings card "
-		+ "would not fit. Make the window bigger to use the full scale."
+		+ "scale the layout would be smaller than %d x %d px, the smallest the "
+		+ "interface is laid out for. Make the window bigger to use the full scale."
 	) % [applied, requested, int(UiTokens.MIN_LAYOUT.x), int(UiTokens.MIN_LAYOUT.y)]
 
 func _add_reasoning_control(v: VBoxContainer) -> Array:
@@ -430,6 +442,9 @@ func _add_history_size_row(v: VBoxContainer) -> void:
 	hs.add_child(_lbl("On disk:"))
 	var size = Label.new()
 	size.name = "HistorySizeLabel"
+	# Its tooltip is the store's path; a Label defaults to MOUSE_FILTER_IGNORE,
+	# which the tooltip lookup skips, so the path could never be read.
+	size.mouse_filter = Control.MOUSE_FILTER_STOP
 	hs.add_child(size)
 	v.add_child(hs)
 	_history_size_label = size
@@ -902,47 +917,59 @@ func _refresh_concept_list():
 	var plugin_sources: Dictionary = ConceptManager.plugin_sources() if _concept_terminal else {}
 	for i in concepts.size():
 		var c = concepts[i]
-		var enabled: bool = c.get("enabled", true)
-		var h = HBoxContainer.new()
 		var source: Dictionary = plugin_sources.get(str(c.get("name", "")), {})
 		var provenance := ""
 		if not source.is_empty():
 			provenance = "From plugin %s (revision %s)" % [
 				source.get("plugin_id", "?"), source.get("revision", "?")]
-			h.tooltip_text = provenance
-		# Enabled toggle
-		var toggle = CheckButton.new()
-		toggle.button_pressed = enabled
-		toggle.toggled.connect(func(_on: bool):
-			if _concept_terminal == null:
-				return
-			ConceptManager.toggle_concept(str(c.get("name", "")))
-			_refresh_concept_list()
-		)
-		h.add_child(toggle)
-		var lbl = Label.new()
-		lbl.text = "%s  →  %s" % [c.get("name", "?"), c.get("trigger", "?")]
-		lbl.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
-		if provenance != "":
-			lbl.tooltip_text = provenance
-		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		if not enabled:
-			lbl.theme_type_variation = UiTheme.MUTED_LABEL
-		h.add_child(lbl)
-		var edit_btn = Button.new(); edit_btn.text = "Edit"
-		edit_btn.pressed.connect(_show_concept_dialog.bind(i))
-		h.add_child(edit_btn)
-		var del_btn = Button.new()
-		Icons.icon_button(del_btn, Icons.DELETE, "Delete concept")
-		del_btn.pressed.connect(func(): _delete_concept(i))
-		h.add_child(del_btn)
-		_concept_list.add_child(h)
+		_concept_list.add_child(_make_concept_row(c, bool(c.get("enabled", true)), provenance, i))
+
+## One concept's row: the enabled toggle, the name and trigger, Edit and
+## Delete. `row` indexes the concept in the list the buttons act on. Split out
+## so the row - and the provenance tooltip on its label - is testable without a
+## terminal, which is the only thing that makes `_refresh_concept_list` build
+## anything.
+func _make_concept_row(c: Dictionary, enabled: bool, provenance: String, row: int) -> HBoxContainer:
+	var h = HBoxContainer.new()
+	var toggle = CheckButton.new()
+	toggle.button_pressed = enabled
+	toggle.toggled.connect(func(_on: bool):
+		if _concept_terminal == null:
+			return
+		ConceptManager.toggle_concept(str(c.get("name", "")))
+		_refresh_concept_list()
+	)
+	h.add_child(toggle)
+	var lbl = Label.new()
+	lbl.text = "%s  →  %s" % [c.get("name", "?"), c.get("trigger", "?")]
+	lbl.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
+	if provenance != "":
+		# The provenance belongs on the text a reader points at, and a Label
+		# defaults to MOUSE_FILTER_IGNORE - which the tooltip lookup skips - so
+		# the one sentence explaining where a concept came from could never show.
+		lbl.tooltip_text = provenance
+		lbl.mouse_filter = Control.MOUSE_FILTER_STOP
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if not enabled:
+		lbl.theme_type_variation = UiTheme.MUTED_LABEL
+	# A hit-testable name for the tests: a row's label is the tooltip carrier.
+	lbl.name = "ConceptName"
+	h.add_child(lbl)
+	var edit_btn = Button.new(); edit_btn.text = "Edit"
+	edit_btn.pressed.connect(_show_concept_dialog.bind(row))
+	h.add_child(edit_btn)
+	var del_btn = Button.new()
+	Icons.icon_button(del_btn, Icons.DELETE, "Delete concept")
+	del_btn.pressed.connect(func(): _delete_concept(row))
+	h.add_child(del_btn)
+	return h
 
 func _show_concept_dialog(idx: int):
 	var dlg := AppDialog.alert(self, "Edit Concept" if idx >= 0 else "Add Concept")
-	# 90% of the settings menu width — the default dialog is cramped for
-	# regex triggers and target labels.
-	dlg.min_size = Vector2i(int(_menu_width * 0.9), 0)
+	# 90% of the card's own width — the default dialog is cramped for regex
+	# triggers and target labels. Read from the card, not a constant: a small
+	# window shrinks the card and the dialog follows it.
+	dlg.min_size = Vector2i(int(_card.size.x * 0.9), 0)
 	var v = VBoxContainer.new()
 	AppDialog.content(dlg).add_child(v)
 	var name_le = LineEdit.new(); name_le.placeholder_text = "Concept name"
@@ -1221,9 +1248,9 @@ func _show_command_dialog(index: int) -> void:
 	var existing: Dictionary = entries[index] if editing else {}
 	var dlg := AppDialog.confirm(self, "Edit Command" if editing else "Add Command",
 		"Save", "Cancel")
-	# 90% of the settings menu width, the concept dialog's size: the command
+	# 90% of the card's own width, the concept dialog's size: the command
 	# field has to hold a real command line, not a word.
-	dlg.min_size = Vector2i(int(_menu_width * 0.9), 0)
+	dlg.min_size = Vector2i(int(_card.size.x * 0.9), 0)
 	dlg.dialog_hide_on_ok = false
 
 	var v = VBoxContainer.new()

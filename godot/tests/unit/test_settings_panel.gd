@@ -209,7 +209,7 @@ func test_reset_buttons_are_tab_wide_and_centered():
 
 ## The Terminal tab overflows the 540x560 card by 62 px, so the row *Every
 ## scrollable surface has a 0 px scrollbar* needs that overflow to have a real
-## bar. The card is the layout floor, so the column must not widen it.
+## bar. The card keeps its design size here, so the column must not widen it.
 func test_the_terminal_tab_shows_a_scrollbar_column():
 	SettingsManager.cfg_ui_scale = 100
 	_pin_window(Vector2i(1920, 1080))
@@ -240,7 +240,8 @@ func test_the_terminal_tab_shows_a_scrollbar_column():
 	assert_true(bar.visible, "the overflow shows a bar")
 	assert_eq(bar.size.x, UiTokens.SCROLLBAR_THICKNESS, "the bar reserves the column it draws in")
 	var card := (_panel.get_child(0) as Control).get_child(0) as Control
-	assert_eq(card.size, UiTokens.MIN_LAYOUT, "the card stays the layout floor")
+	assert_eq(card.size, SettingsPanel.CARD_SIZE,
+		"the card keeps its design size in a window that fits it")
 
 # ── Color picker OK/Cancel ─────────────────────────────────────────────
 
@@ -316,12 +317,12 @@ func _find_accept_dialog(node: Node) -> AcceptDialog:
 			return found
 	return null
 
-func test_concept_dialog_is_90_percent_of_menu_width():
+func test_concept_dialog_is_90_percent_of_card_width():
 	_panel._show_concept_dialog(-1)
 	var dlg := _find_accept_dialog(_panel)
 	assert_not_null(dlg, "concept dialog must exist after opening")
-	assert_almost_eq(float(dlg.min_size.x), _panel._menu_width * 0.9, 0.01,
-		"concept dialog must be 90 percent of the settings menu width")
+	assert_almost_eq(float(dlg.min_size.x), _panel._card.size.x * 0.9, 0.01,
+		"concept dialog must be 90 percent of the settings card's own width")
 
 # ── Titlebar toggle placement ──────────────────────────────────────────
 
@@ -380,8 +381,11 @@ func test_terminal_tab_reports_the_scrollback_store_size():
 		"the row must be a byte count; got '%s'" % label.text
 	)
 	# The path behind the number is worth a hover: it is where the user would
-	# look (or delete) if the number got large.
+	# look (or delete) if the number got large - and a hover needs a target,
+	# because the tooltip lookup skips a MOUSE_FILTER_IGNORE control.
 	assert_string_contains(label.tooltip_text, "history.db")
+	assert_eq(label.mouse_filter, Control.MOUSE_FILTER_STOP,
+		"a MOUSE_FILTER_IGNORE label is never a hover target, so the tooltip would never show")
 
 ## The row must show what the store answers, in the units it answers in — the
 ## provider is pinned here because the real store grows while the suite runs.
@@ -397,6 +401,21 @@ func test_the_row_reports_what_the_store_answers():
 	assert_not_null(label)
 	assert_eq(label.text, "1.5 KiB")
 	assert_string_contains(label.tooltip_text, "/tmp/user/history.db")
+
+## Every label in the panel that carries a tooltip must be reachable by the
+## pointer: the viewport's tooltip lookup skips a `MOUSE_FILTER_IGNORE` control,
+## so the sentence is unreadable however good it is. The per-row fixes in this
+## file are the concrete cases; this is the one assertion a new row cannot get
+## past. (`Button`, `OptionButton` and the swatch rows are hover targets by
+## construction, and their tooltips are not labels.)
+func test_no_tooltip_label_ignores_the_mouse():
+	for label in _panel.find_children("*", "Label", true, false):
+		var lbl := label as Label
+		if lbl == null or lbl.tooltip_text == "":
+			continue
+		assert_ne(lbl.mouse_filter, Control.MOUSE_FILTER_IGNORE,
+			"the '%s' label carries a tooltip ('%s') but ignores the mouse"
+			% [lbl.name, lbl.tooltip_text])
 
 func test_format_bytes_scales_through_the_units():
 	assert_eq(SettingsPanel.format_bytes(0), "0 B")
@@ -460,11 +479,11 @@ func test_the_scale_hint_names_the_scale_the_window_shows():
 	assert_eq(SettingsPanel.ui_scale_hint(125, 125), "",
 		"no hint when the window shows the request")
 	assert_eq(SettingsPanel.ui_scale_hint(125, 100), "shown at 100 %")
-	assert_string_contains(SettingsPanel.ui_scale_hint_tooltip(125, 100), "540 x 560")
+	assert_string_contains(SettingsPanel.ui_scale_hint_tooltip(125, 100), "560 x 340")
 	assert_eq(SettingsPanel.ui_scale_hint_tooltip(125, 125), "")
 
 func test_the_hint_follows_the_capped_scale():
-	_pin_window(Vector2i(800, 500))
+	_pin_window(Vector2i(560, 340))
 	SettingsManager.cfg_ui_scale = 125
 	SettingsManager.apply_ui_scale()
 	_panel._refresh_ui_scale_hint()

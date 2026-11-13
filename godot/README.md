@@ -58,7 +58,7 @@ godot/
         ├── ui/                  # UI components
         │   ├── sidebar.gd       # Vertical stack: window mode, workspaces, panes, profiles
         │   ├── settings_panel.gd
-        │   ├── overlay_panel.gd  # Shared keyboard contract for the four overlays
+        │   ├── overlay_panel.gd  # Shared keyboard contract for the four overlays + the card clamp (fit_card)
         │   ├── command_palette.gd # Ctrl+Shift+P command list (OverlayPanel)
         │   ├── palette_model.gd # Palette entries, matching and ranking (pure)
         │   ├── shortcut_catalog.gd # The About tab's keyboard-shortcut list as data (chords from the binding registry)

@@ -242,11 +242,10 @@ func applied_ui_scale_factor() -> float:
 	return float(applied_ui_scale_percent()) / 100.0
 
 ## `cfg_ui_scale`, capped so the layout space (`window pixels / scale`) never
-## falls under `UiTokens.MIN_LAYOUT`: below it the Settings card is clipped and a
-## pane title runs under its own buttons. Never under 100 % -- a window already
-## smaller than the floor needs the small-window work, not a smaller interface.
-## The setting keeps the user's request; the Appearance row prints
-## `shown at N %` when this answers below it.
+## falls under `UiTokens.MIN_LAYOUT` - the smallest layout the chrome is asserted
+## at. Never under 100 %: the cap only refuses a scale that would squeeze a
+## legal window's layout below the floor. The setting keeps the user's request;
+## the Appearance row prints `shown at N %` when this answers below it.
 func applied_ui_scale_percent() -> int:
 	var w := get_window()
 	return capped_ui_scale_percent(cfg_ui_scale, w.size if w != null else Vector2i.ZERO)

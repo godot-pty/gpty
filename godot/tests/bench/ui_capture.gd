@@ -142,10 +142,11 @@ const STATES := {
 	# workspace. The only visual proof that the setting scales the chrome and
 	# the terminal text together; a later release recaptures it.
 	"ui-scale-125": {"size": DEFAULT_SIZE, "panes": 0, "ui_scale": 125},
-	# The same 125 % request in a window that cannot hold it: the layout would be
-	# 640x400, under the 540x560 Settings card. The applied scale must fall back
-	# to 100 %, and the harness prints both numbers so the log and the image
-	# agree about which scale produced it.
+	# The same 125 % request in a small window. It used to be refused - a
+	# 640x400 layout under the 540x560 Settings card forced 100 % - and since the
+	# small-window work the surfaces clamp to the window, so 640x400 is above the
+	# 560x340 floor and the request is honoured. The harness prints both numbers,
+	# so the log and the image agree about which scale produced it.
 	"ui-scale-125-800x500": {"size": Vector2i(800, 500), "panes": 0, "ui_scale": 125},
 	# The light chrome, on the same workspace the dark states capture. Both
 	# exist so the light theme is reproducible by name, and so the v0.8.5
@@ -194,8 +195,29 @@ const STATES := {
 		{"col": 0, "row": 0, "cspan": 60, "rspan": 60,
 			"settings": {"type": "cli_view", "attachment_id": "capture-cli-content",
 				"command": "/bin/sh", "shell_args": ["-c", "printf 'ready\\n'"]}}]},
-	"window-800x500": {"size": Vector2i(800, 500), "panes": 4},
+	# The small-window row. Four tiles named with titles wider than their own
+	# tile, so a title that ran under its three controls would show here: the
+	# OSC title is set by the child itself, which is the one part of the title
+	# this capture can make independent of the developer's shell.
+	"window-800x500": {"size": Vector2i(800, 500), "tiles": [
+		{"col": 0, "row": 0, "cspan": 30, "rspan": 30, "settings": {
+			"type": "terminal", "attachment_id": "capture-small-1",
+			"shell_args": ["-c", "printf '\\033]0;%s\\007' 'cachyos: ~/Projects/godot-pty/gpty'; sleep 600"]}},
+		{"col": 30, "row": 0, "cspan": 30, "rspan": 30, "settings": {
+			"type": "terminal", "attachment_id": "capture-small-2",
+			"shell_args": ["-c", "printf '\\033]0;%s\\007' 'a second title long enough to overrun'; sleep 600"]}},
+		{"col": 0, "row": 30, "cspan": 30, "rspan": 30, "settings": {
+			"type": "terminal", "attachment_id": "capture-small-3",
+			"shell_args": ["-c", "printf '\\033]0;%s\\007' 'vim ~/Projects/godot-pty/gpty/AGENTS.md'; sleep 600"]}},
+		{"col": 30, "row": 30, "cspan": 30, "rspan": 30, "settings": {
+			"type": "terminal", "attachment_id": "capture-small-4",
+			"shell_args": ["-c", "printf '\\033]0;%s\\007' 'cargo test --workspace'; sleep 600"]}},
+	]},
 	"window-560x340": {"size": Vector2i(560, 340), "panes": 4},
+	# The adapt-or-clip row's own surface: the Settings card in a small window,
+	# with a pane behind it so the card, a title and the sidebar share a frame.
+	"settings-800x500": {"size": Vector2i(800, 500), "panes": 1, "open": "settings"},
+	"settings-560x340": {"size": Vector2i(560, 340), "panes": 1, "open": "settings"},
 	# The surfaces the October 2026 audit did not reach. Each seeds the real
 	# content the surface needs (the bundled vault, a wiki tile, an untrusted
 	# spawn plan) instead of a mock, so the capture shows the shipped UI.
@@ -550,7 +572,14 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			return false
 	match str(state.get("open", "")):
 		"settings":
-			await _click(_button_with_label(_workspace._sidebar, "Settings"))
+			# At a 340 px window the sidebar's column overflows, so the button
+			# must be scrolled into the column before a real click can land on it.
+			var settings_btn := _button_with_label(_workspace._sidebar, "Settings")
+			var stack: ScrollContainer = _workspace._sidebar._content_scroll
+			if stack != null and settings_btn != null:
+				stack.ensure_control_visible(settings_btn)
+				await _wait_frames(2)
+			await _click(settings_btn)
 			await _wait_frames(3)
 			if _workspace._settings_panel == null or not _workspace._settings_panel.visible:
 				_fail("clicking Settings did not open the Settings panel")

@@ -29,6 +29,29 @@ signal keyboard_released
 ## back to.
 var return_focus: Control = null
 
+## The room a card keeps from this overlay's own edge when the window is too
+## small for its design size. A settings card fills a small window, so it keeps a
+## small margin; the command palette floats and passes `SPACE_XXL`.
+const CARD_EDGE := float(UiTokens.SPACE_LG)
+
+## Clamp `card` to `design`, never larger than this overlay's own rect less
+## `edge` on each side.
+##
+## A `CenterContainer` centres its child at the child's minimum, so a fixed
+## design size is pushed off-screen as soon as the window is smaller than it: the
+## 540x560 Settings card in an 800x500 window started at y = -30 and ran 60 px
+## past the bottom edge. The card shrinks instead, and its content scrolls.
+## A card whose *content* has a larger minimum still wins over the clamp - the
+## engine never sizes a Container's child below its minimum - which is why the
+## Settings tabs are scroll containers; an overlay that has not been laid out yet
+## keeps the design size.
+func fit_card(card: Control, design: Vector2, edge := CARD_EDGE) -> void:
+	var room := size - Vector2(edge, edge) * 2.0
+	if room.x <= 0.0 or room.y <= 0.0:
+		card.custom_minimum_size = design
+		return
+	card.custom_minimum_size = Vector2(minf(design.x, room.x), minf(design.y, room.y))
+
 ## Show this overlay and take the keyboard. The one entry point: an overlay is
 ## never shown by a bare `visible = true`, because that path would leave the
 ## keyboard on the pane behind it.
