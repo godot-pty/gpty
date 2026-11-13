@@ -11,6 +11,9 @@ extends SceneTree
 # A real display driver is required: under `--headless` there is no redraw pass
 # and every timing reads zero. `--disable-vsync` matters because a vsync-locked
 # present can block indefinitely on a window the compositor never shows.
+# `BENCH_FLOOD=1` needs `--max-fps 60` added when the question is the pane's
+# cadence: unthrottled, the loop outruns the flood back-off and every frame
+# syncs, which measures the cost but not the rate.
 #
 #   BENCH_COLS, BENCH_ROWS  grid size (default 90×30)
 #   BENCH_TAG               suffix of the saved PNG (default "run")
@@ -44,6 +47,10 @@ func _initialize():
 ## a screenful of lines). Every frame sees full-grid damage — the case that
 ## makes a pane expensive — while the write rate stays bounded, so this
 ## measures the UI-thread cost rather than the unbounded output channel.
+## Run it under `--max-fps 60` to measure the pane's own cadence too: the
+## unthrottled loop outruns the back-off, and `syncs` then counts the times
+## the pane actually looked at its grid (its own `_last_grid_gen` moving),
+## while `gen_changes` counts the times the grid had new damage.
 func _measure_flood(cols: int, rows: int):
 	await _new_pane(cols, rows, "while :; do printf '\\033[2J\\033[H'; seq -f 'flood %g 0123456789 abcdefghijklmnopqrstuvwxyz' 1 35; done")
 	var start := Time.get_ticks_usec()
@@ -52,6 +59,8 @@ func _measure_flood(cols: int, rows: int):
 	var busy_frames := 0
 	var gen_changes := 0
 	var last_gen := -1
+	var syncs := 0
+	var last_sync_gen: int = _pane._last_grid_gen
 	while frames < FRAMES and (Time.get_ticks_usec() - start) / 1000 < DEADLINE_MS:
 		await process_frame
 		var frame_work: int = _pane._fetch_ms + _pane._draw_ms
@@ -62,12 +71,16 @@ func _measure_flood(cols: int, rows: int):
 		if gen != last_gen:
 			gen_changes += 1
 			last_gen = gen
+		if _pane._last_grid_gen != last_sync_gen:
+			syncs += 1
+			last_sync_gen = _pane._last_grid_gen
 		frames += 1
 	var elapsed_ms := float(Time.get_ticks_usec() - start) / 1000.0
-	print("flood grid=%dx%d frames=%d fps=%.1f avg_frame_ms=%.2f avg_work_ms=%.3f busy_frames=%d gen_changes=%d" % [
+	print("flood grid=%dx%d frames=%d fps=%.1f avg_frame_ms=%.2f avg_work_ms=%.3f busy_frames=%d gen_changes=%d syncs=%d sync_hz=%.1f backoff_ms=%.1f" % [
 		cols, rows, frames, float(frames) * 1000.0 / elapsed_ms,
 		elapsed_ms / maxf(float(frames), 1.0), float(work) / maxf(float(frames), 1.0),
-		busy_frames, gen_changes])
+		busy_frames, gen_changes, syncs, float(syncs) * 1000.0 / elapsed_ms,
+		_pane._sync_backoff * 1000.0])
 	quit()
 
 func _new_pane(cols: int, rows: int, cmd: String):

@@ -212,22 +212,25 @@ var _a11y_push_ms: int = -A11Y_PUSH_MS
 ## The value last pushed, so an idle pane does not re-push every window.
 var _a11y_last_value: String = ""
 
-## Grid work (fetch + repaint) a pane may spend per frame before it starts
-## looking at the grid less often, in ms. Under flood the damage covers the
-## screen every frame: the fetch packs thousands of cells across the FFI and
-## the merge rebuilds a row string per damaged cell — that, not the drawing,
-## is what locks the UI thread up. A quarter of a 60 Hz frame, so four panes
-## may each be at their limit and still leave the frame mostly free. The pane
-## is unreadable at that rate, and the damage tracker coalesces everything
-## into the newest grid state, so a slower cadence costs latency and nothing
-## else.
+## Grid work (fetch + repaint) a pane may spend per frame **at the configured
+## cadence**, in ms: a constant share of wall time, not an absolute cost. Under
+## flood the damage covers the screen every frame: the fetch packs thousands of
+## cells across the FFI and the merge rebuilds a row string per damaged cell —
+## that, not the drawing, is what locks the UI thread up. A quarter of a 60 Hz
+## frame, so four panes may each be at their limit and still leave the frame
+## mostly free, and a stretched cadence earns a proportionally larger budget
+## (`PANE_WORK_BUDGET_MS * cadence / _sync_interval`), so that share holds at
+## every rate. The pane is unreadable at the ceiling, and the damage tracker
+## coalesces everything into the newest grid state, so a slower cadence costs
+## latency and nothing else.
 const PANE_WORK_BUDGET_MS := 4
 ## Longest grid cadence the flood back-off may stretch a pane to (~10/s).
 const MAX_SYNC_INTERVAL := 0.1
 ## How long a scroll or search jump keeps the pane exempt from the back-off.
 const VIEW_INPUT_GRACE_MS := 500
-## Stretch added to `_sync_interval` while a pane is over budget. Grows
-## geometrically, recovers as soon as a sync finds nothing new.
+## Stretch added to `_sync_interval` while a pane is over its share of wall
+## time. Grows geometrically while a sync is over budget, shrinks while one
+## fits it or finds nothing new.
 var _sync_backoff: float = 0.0
 ## When the user last drove this pane themselves: scrolled it, or sent it
 ## input. Autonomous output must not push a pane the user is interacting with
@@ -246,6 +249,12 @@ var _view_input_ms: int = -1_000_000
 func _note_view_input():
 	_view_input_ms = Time.get_ticks_msec()
 	_sync_backoff = 0.0
+
+## Walk the flood cadence back toward the configured interval, one step. A sync
+## that found nothing new, or one whose cost fits its share of the wall clock
+## at the current cadence, has budget to spare.
+func _relax_sync_backoff() -> void:
+	_sync_backoff = maxf(_sync_backoff * 0.5 - _sync_interval, 0.0)
 
 ## Mouse reporting the child process has enabled, read from the grid
 ## (`GptyTerminal.get_mouse_mode`). The bit values are the FFI contract with
@@ -766,15 +775,22 @@ func _process(delta):
 					cc_bg[idx] = bg[i]
 					cc_attrs[idx] = attrs[i]
 			_fetch_ms = Time.get_ticks_msec() - t0
-			# A sync that cost more than the pane's frame budget (measured:
-			# this fetch plus the repaint it just queued, which is the
-			# previous frame's `_draw_ms`) stretches the next cadence — unless
-			# the user is the one driving the view right now.
+			# The budget is a share of the wall clock, not of one 60 Hz frame:
+			# at a stretched cadence the same sync is a smaller duty cycle, and
+			# measuring it against the frame budget re-armed the back-off on
+			# every sync, so a streaming pane parked at the ceiling (measured
+			# 2026-11-13: 9 ms per sync is 2.25x a 60 Hz frame's budget and 9 %
+			# of a 100 ms window). Over the scaled budget the cadence stretches;
+			# under it, it walks back. A user-driven view is exempt from both.
 			var user_driving := Time.get_ticks_msec() - _view_input_ms < VIEW_INPUT_GRACE_MS
-			if not user_driving and _fetch_ms + _draw_ms > PANE_WORK_BUDGET_MS:
-				_sync_backoff = minf(
-					maxf(_sync_backoff * 2.0, _sync_interval),
-					maxf(MAX_SYNC_INTERVAL - _sync_interval, 0.0))
+			if not user_driving:
+				var budget_ms := PANE_WORK_BUDGET_MS * (_sync_interval + _sync_backoff) / _sync_interval
+				if _fetch_ms + _draw_ms > budget_ms:
+					_sync_backoff = minf(
+						maxf(_sync_backoff * 2.0, _sync_interval),
+						maxf(MAX_SYNC_INTERVAL - _sync_interval, 0.0))
+				else:
+					_relax_sync_backoff()
 			_cursor_visible = true
 			_cursor_blink_timer = 0.0
 			# The selection is grid-space: a scroll or new output moves its
@@ -789,9 +805,8 @@ func _process(delta):
 			# frame — the fetch was damage-tracked, the draw was not.
 			queue_redraw()
 		else:
-			# Nothing new since the last look: the pane has caught up, so walk
-			# the cadence back toward the configured interval.
-			_sync_backoff = maxf(_sync_backoff * 0.5 - _sync_interval, 0.0)
+			# Nothing new since the last look: the pane has caught up.
+			_relax_sync_backoff()
 	_draw_ms = 0  # will be set on next _draw() call
 	_slow_poll_timer += delta
 	if _slow_poll_timer >= SLOW_POLL_INTERVAL:
