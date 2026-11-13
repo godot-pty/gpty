@@ -1,0 +1,402 @@
+#!/usr/bin/env bash
+# Measure the memory cost the README publishes, and hold it to what the README says.
+#
+# Usage: scripts/measure-cost              # measure, print the markdown table
+#        scripts/measure-cost --check      # measure, fail on drift vs README
+#        scripts/measure-cost --stamp      # no GPU: fail when README's build stamp
+#                                          # is not the current crate version
+#        scripts/measure-cost --json       # the run as one JSON object (no table)
+#        scripts/measure-cost --record     # measure, print the table, and append the
+#                                          # run to docs/data/cost-history.json, which
+#                                          # redraws the README chart
+#
+# The README's "Trade-offs" table is a published claim, not a changelog: an
+# idle gPTY costs what it costs, and a release that quietly grows the renderer
+# must not keep quoting the previous release's number. This script owns the
+# method behind that table - `README.md` carries the figures, this header and
+# `skill://release` carry how they are taken and when they must be re-taken.
+#
+# The method (the one that produced the v0.8.1 figures on 2026-11-11):
+#   - a private sandbox per run (`scripts/ui-sandbox`), so the store, the
+#     control socket and - decisively - `XDG_CACHE_HOME` are empty. An empty
+#     shader/pipeline cache is what the "first launch" row measures; a second
+#     launch in the same sandbox is the warm one.
+#   - the GUI is launched directly (default `dist/gpty`, the `./scripts/build`
+#     output), never through the CLI, so `$!` is the app's own pid and `VmRSS`
+#     is read from its `/proc/<pid>/status`. A `setsid` launch makes it a
+#     session leader, so one group kill takes the pane shells with it.
+#   - RSS is sampled at steady state: `MEASURE_SETTLE` seconds after the
+#     control socket answers a `list-panes`, then `MEASURE_SAMPLES` readings
+#     one second apart; the median is the figure and the printed spread is the
+#     run-to-run noise. A drift inside the spread is not a regression.
+#   - every row prints the pane count it was taken at, because the zero-pane
+#     row is the one that proves the renderer owns the memory: it is the same
+#     process with every pane killed.
+#
+# `--stamp` is the half CI can run (no display, no GPU): the table names the
+# build it was measured on, a release bumps the crate version, and a table
+# still naming the previous release fails. It is the reminder, not the
+# measurement.
+#
+# `--check` needs a real GPU session, because the numbers do: under
+# `--headless` there is no renderer and nothing to measure. It fails when a row
+# is off by more than `MEASURE_TOLERANCE` percent (default 10, the tolerance
+# the v0.9.0 performance budget uses), when the scrollback delta moves, or when
+# a qualitative claim the prose makes stops holding (Compatibility must stay
+# materially lighter than Forward+; killing the panes must not move the figure).
+#
+# Requires: Linux (the published figures are a Linux/Vulkan claim), a graphical
+# session, a built app (`./scripts/build` writes `dist/`), and a Rust CLI
+# (`target/release/gpty` or `target/debug/gpty`) to drive the panes.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+BIN="${GPTY_GUI_BIN:-$ROOT/dist/gpty}"
+TIMEOUT="${MEASURE_TIMEOUT:-120}"
+SETTLE="${MEASURE_SETTLE:-5}"
+SAMPLES="${MEASURE_SAMPLES:-5}"
+TOLERANCE="${MEASURE_TOLERANCE:-10}"
+FLOOD_LINES="${MEASURE_FLOOD_LINES:-30000}"
+
+MODE=measure
+JSON=0
+RECORD=0
+for arg in "$@"; do
+    case "$arg" in
+        --measure) ;;
+        --check) MODE=check ;;
+        --stamp) MODE=stamp ;;
+        --json) JSON=1 ;;
+        --record) RECORD=1 ;;
+        -h | --help)
+            sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            echo "measure-cost: unknown argument '$arg' (see --help)" >&2
+            exit 2
+            ;;
+    esac
+done
+
+die() {
+    echo "measure-cost: $*" >&2
+    exit "${2:-1}"
+}
+
+driver_note() {
+    local gpu="" loader=""
+    [[ -r /sys/module/nvidia/version ]] && gpu="NVIDIA $(< /sys/module/nvidia/version)"
+    if command -v vulkaninfo >/dev/null 2>&1; then
+        loader="$(vulkaninfo --summary 2>/dev/null | sed -n 's/^Vulkan Instance Version: //p' | head -1)"
+    fi
+    printf '%s' "${gpu:-no nvidia module}${loader:+ (Vulkan ${loader})}"
+}
+
+crate_version() {
+    sed -n 's/^version = "\(.*\)"$/\1/p' crates/gpty-cli/Cargo.toml | head -1
+}
+
+readme_stamp() {
+    sed -n 's/.*measured on the shipped v\([0-9][0-9.]*\) Linux build.*/\1/p' README.md | head -1
+}
+
+# ── --stamp: the cheap half ─────────────────────────────────────────────
+if [[ "$MODE" == stamp ]]; then
+    version="$(crate_version)"
+    stamp="$(readme_stamp)"
+    [[ -n "$version" ]] || die "could not read crates/gpty-cli/Cargo.toml's version"
+    [[ -n "$stamp" ]] || die "README.md has no 'measured on the shipped vX.Y.Z Linux build' stamp - the Trade-offs table lost its provenance"
+    if [[ "$stamp" != "$version" ]]; then
+        die "README.md's cost table is stamped v$stamp but the workspace is at $version: re-measure with './scripts/measure-cost --check' and move the table and every figure the paragraph repeats to this build"
+    fi
+    echo "measure-cost: README cost table stamped v$stamp, workspace $version - OK"
+    exit 0
+fi
+
+# ── environment ─────────────────────────────────────────────────────────
+[[ "$(uname -s)" == Linux ]] || die "the published figures are a Linux/Vulkan claim; measure on Linux" 3
+if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+    die "no display: the cost is the renderer, so there is nothing to measure under --headless (run this in a graphical session)" 3
+fi
+[[ -x "$BIN" ]] || die "$BIN is not executable - run './scripts/build' first (or set GPTY_GUI_BIN)" 3
+CLI="$ROOT/target/release/gpty"
+[[ -x "$CLI" ]] || CLI="$ROOT/target/debug/gpty"
+[[ -x "$CLI" ]] || die "no gpty CLI at target/release or target/debug - build one to drive the panes" 3
+
+# shellcheck source=scripts/ui-sandbox
+. "$ROOT/scripts/ui-sandbox"
+
+APP_PID=""
+cleanup() {
+    stop_app
+    gpty_sandbox_cleanup
+}
+trap cleanup EXIT
+
+stop_app() {
+    [[ -n "$APP_PID" ]] || return 0
+    # The app is a session leader (see `launch`), so the group kill takes the
+    # pane shells with it; a bare TERM to Godot would leave `sleep 3600`
+    # children behind in the sandbox forever.
+    kill -TERM -- "-$APP_PID" 2>/dev/null || kill -TERM "$APP_PID" 2>/dev/null || true
+    for _ in $(seq 1 15); do
+        kill -0 "$APP_PID" 2>/dev/null || break
+        sleep 0.2
+    done
+    kill -KILL -- "-$APP_PID" 2>/dev/null || true
+    wait "$APP_PID" 2>/dev/null || true
+    APP_PID=""
+}
+
+cli() {
+    "$CLI" "$@" --socket "$GPTY_SOCKET" --no-daemon
+}
+
+pane_ids() {
+    cli list-panes --json 2>/dev/null | python3 -c 'import json,sys
+try: print("\n".join(p["id"] for p in json.load(sys.stdin)["result"]["panes"]))
+except Exception: pass'
+}
+
+pane_count() {
+    local ids
+    ids="$(pane_ids)"
+    if [[ -z "$ids" ]]; then echo 0; else wc -l <<<"$ids" | tr -d ' '; fi
+}
+
+new_pane() {
+    cli new-pane -t terminal -c "$1" --title "$2" >/dev/null
+}
+
+kill_all_panes() {
+    local id
+    while read -r id; do
+        [[ -n "$id" ]] || continue
+        cli kill-pane "$id" >/dev/null 2>&1 || true
+    done <<<"$(pane_ids)"
+}
+
+# The app is up when its control socket answers a list-panes call: the socket
+# file appears before the engine is ready, the call is the readiness signal.
+wait_ready() {
+    local deadline=$((SECONDS + TIMEOUT))
+    while ((SECONDS < deadline)); do
+        kill -0 "$APP_PID" 2>/dev/null || die "the app exited during launch (log: $GPTY_SANDBOX/$1.log)" 5
+        if [[ -S "$GPTY_SOCKET" ]] && cli list-panes --json >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.5
+    done
+    die "the app did not answer on $GPTY_SOCKET within ${TIMEOUT}s" 5
+}
+
+launch() {
+    local label="$1"
+    shift
+    # setsid without --fork execs the app in place, so $! stays the app's pid
+    # and the app becomes its own session/group leader.
+    setsid "$@" >"$GPTY_SANDBOX/$label.log" 2>&1 &
+    APP_PID=$!
+    wait_ready "$label"
+    case "$(cat "/proc/$APP_PID/comm" 2>/dev/null)" in
+        *gpty* | *godot*) ;;
+        *) die "pid $APP_PID is not the app (comm: $(cat "/proc/$APP_PID/comm" 2>/dev/null)) - refusing to measure a wrapper" 5 ;;
+    esac
+}
+
+# Median of SAMPLES readings after SETTLE, in MiB, and the spread across them.
+sample_rss() {
+    sleep "$SETTLE"
+    local readings=()
+    for _ in $(seq 1 "$SAMPLES"); do
+        readings+=("$(awk '/^VmRSS:/{printf "%d", $2/1024}' "/proc/$APP_PID/status" 2>/dev/null || echo 0)")
+        sleep 1
+    done
+    printf '%s\n' "${readings[@]}" | sort -n | awk '
+        { v[NR] = $1 }
+        END {
+            if (NR == 0) { print "0 0"; exit }
+            med = (NR % 2) ? v[(NR + 1) / 2] : int((v[NR / 2] + v[NR / 2 + 1]) / 2)
+            printf "%d %d\n", med, v[NR] - v[1]
+        }'
+}
+
+ROWS=()
+
+record() {
+    # $1 label, $2 "med spread", $3 pane count, $4 optional display value
+    ROWS+=("$1|$2|$3|${4:-}")
+}
+
+gpty_sandbox_init
+echo "measure-cost: $BIN, workspace $(crate_version), $(driver_note), sandbox $GPTY_SANDBOX" >&2
+
+# ── First launch, cold pipeline cache ───────────────────────────────────
+# A fresh sandbox has an empty XDG_CACHE_HOME, so the driver compiles its
+# pipelines into this process. Sample the launch as it comes up, whatever the
+# first-run profile leaves in it; the pane count is printed with the row.
+launch cold "$BIN"
+record "First launch, cold pipeline cache" "$(sample_rss)" "$(pane_count)"
+stop_app
+
+# ── One pane idle, the same process with every pane killed, and the flood ─
+# One warm launch carries three rows, because that is the method the published
+# figures used: the pane is created live, measured, killed (the zero-pane row
+# is the same process with the renderer still up), then replaced by the flood.
+# Creating panes over IPC and expecting the workspace store to restore them
+# across a TERM does not work - measured 2026-11-13, the restore came back with
+# zero panes - so nothing here depends on persistence.
+launch warm "$BIN"
+kill_all_panes
+new_pane "sleep 3600" "cost-idle"
+[[ "$(pane_count)" == 1 ]] || die "expected one idle pane, found $(pane_count) - the rows would not be comparable" 5
+one="$(sample_rss)"
+record "One pane, idle (Forward+, the default)" "$one" "1"
+
+kill_all_panes
+record "Zero panes, renderer still up" "$(sample_rss)" "0"
+
+new_pane "seq 1 $FLOOD_LINES; sleep 3600" "cost-flood"
+flood_pane="$(pane_ids | tail -1)"
+flooded=0
+for _ in 1 2 3; do
+    if cli pane-wait "$flood_pane" --pattern "^${FLOOD_LINES}$" --timeout-ms 60000 >/dev/null 2>&1; then
+        flooded=1
+        break
+    fi
+done
+((flooded)) || die "the flood pane never reached line $FLOOD_LINES - raise MEASURE_TIMEOUT or check the pane's shell" 5
+flood="$(sample_rss)"
+delta=$(( ${flood% *} - ${one% *} ))
+record "30,000 lines through one pane, past the 10,000-row scrollback cap" "$flood" "1" "+${delta} MB"
+stop_app
+
+# ── Compatibility (OpenGL3), warm ───────────────────────────────────────
+# A second launch with the same warm cache and one live pane, so the row
+# differs from the Forward+ one by the driver alone.
+launch gl "$BIN" --rendering-driver opengl3
+kill_all_panes
+new_pane "sleep 3600" "cost-idle"
+record "Same build, --rendering-driver opengl3, warm" "$(sample_rss)" "1"
+stop_app
+
+# ── Report ──────────────────────────────────────────────────────────────
+# stdout is the pasteable table (the README has no spread or pane column);
+# the spread and the pane count it was taken at go to stderr with the reasons.
+
+# The JSON is what `--record` hands the chart's ledger; the table below is what
+# a human pastes into README.md. Both describe this run and nothing else.
+row_med() {
+    local reading
+    IFS='|' read -r _ reading _ _ <<<"${ROWS[$1]}"
+    printf '%s' "${reading% *}"
+}
+
+emit_json() {
+    printf '{\n'
+    printf '  "version": "%s",\n' "$(crate_version)"
+    printf '  "date": "%s",\n' "$(date -u +%F)"
+    printf '  "source": "scripts/measure-cost on the v%s build",\n' "$(crate_version)"
+    printf '  "driver": "%s",\n' "$(driver_note)"
+    printf '  "values": {\n'
+    printf '    "idle_forward": %s,\n' "$(row_med 1)"
+    printf '    "idle_opengl3": %s,\n' "$(row_med 4)"
+    printf '    "cold": %s\n' "$(row_med 0)"
+    printf '  }\n'
+    printf '}\n'
+}
+
+if ((JSON)); then
+    emit_json
+    exit 0
+fi
+
+echo
+echo "| Configuration | Resident Memory |"
+echo "|---|---|"
+for row in "${ROWS[@]}"; do
+    IFS='|' read -r label reading panes display <<<"$row"
+    med="${reading% *}"
+    spread="${reading#* }"
+    value="${med} MB"
+    [[ -n "$display" ]] && value="${display}"
+    printf '| %s | %s |\n' "$label" "$value"
+    printf 'measure-cost:   %s = %s MB (spread %s over %s samples, %s pane(s))\n' \
+        "$label" "$med" "$spread" "$SAMPLES" "$panes" >&2
+done
+echo
+
+if ((RECORD)); then
+    recorded="$(mktemp "${TMPDIR:-/tmp}/cost-run.XXXXXX")"
+    emit_json >"$recorded"
+    "$ROOT/scripts/render-cost-chart" --record "$recorded"
+    rm -f "$recorded"
+fi
+
+if [[ "$MODE" != check ]]; then
+    exit 0
+fi
+
+# ── --check: compare against the README's published rows ────────────────
+# Each README row is matched by text from its configuration cell (the cell
+# holds prose, so the match is a prefix) and its figure is the first "N MB".
+readme_figure() {
+    grep -E -m1 "\| *$1[^|]*\|" README.md | grep -oE '[0-9]+ MB' | head -1 | grep -oE '[0-9]+'
+}
+
+fail=0
+compare() {
+    local measured="$1" row="$2" pattern="$3"
+    local published
+    published="$(readme_figure "$pattern" || true)"
+    if [[ -z "$published" ]]; then
+        echo "measure-cost: README has no row matching '$pattern'" >&2
+        fail=1
+        return
+    fi
+    local delta=$((measured - published))
+    local abs=${delta#-}
+    local pct=$((abs * 100 / (published == 0 ? 1 : published)))
+    if ((pct > TOLERANCE)); then
+        echo "measure-cost: DRIFT $row: measured ${measured} MB, README says ${published} MB (${pct}% > ${TOLERANCE}%)" >&2
+        fail=1
+    else
+        echo "measure-cost: OK $row: ${measured} MB vs README ${published} MB" >&2
+    fi
+}
+
+compare "$(row_med 0)" "first-launch-cold" "First launch, cold pipeline cache"
+compare "$(row_med 1)" "one-pane" "One pane, idle"
+compare "$(row_med 2)" "zero-pane" "Zero panes, renderer still up"
+compare "${delta}" "scrollback-delta" "30,000 lines"
+compare "$(row_med 4)" "opengl3" "Same build,"
+
+# The claims an absolute tolerance cannot see.
+if (( $(row_med 2) > $(row_med 1) * 115 / 100 )); then
+    echo "measure-cost: CLAIM BROKEN: killing every pane grew the figure ($(row_med 2) MB > $(row_med 1) MB) - the prose says the renderer, not the terminals, owns the memory" >&2
+    fail=1
+fi
+claimed_ratio="$(sed -n 's/.*Compatibility (OpenGL3) is \([0-9][0-9.]*\)x lighter.*/\1/p' README.md | head -1)"
+if [[ -n "$claimed_ratio" ]]; then
+    # measured ratio in hundredths, compared against the claim less the tolerance
+    measured_hundredths=$(( $(row_med 1) * 100 / ($(row_med 4) == 0 ? 1 : $(row_med 4)) ))
+    claimed_hundredths="$(awk -v r="$claimed_ratio" -v t="$TOLERANCE" 'BEGIN { printf "%d", r * 100 * (100 - t) / 100 }')"
+    if (( measured_hundredths < claimed_hundredths )); then
+        echo "measure-cost: CLAIM BROKEN: Forward+ $(row_med 1) MB against opengl3 $(row_med 4) MB is $(awk -v m="$measured_hundredths" 'BEGIN { printf "%.2f", m / 100 }')x, below the README's ${claimed_ratio}x less ${TOLERANCE}%" >&2
+        fail=1
+    fi
+fi
+stamp="$(readme_stamp)"
+if [[ "$stamp" != "$(crate_version)" ]]; then
+    echo "measure-cost: STAMP: README names v$stamp, workspace is $(crate_version) - move the table and the paragraph to this build" >&2
+    fail=1
+fi
+
+if ((fail)); then
+    echo "measure-cost: FAILED - update README.md's Trade-offs table and every figure its paragraph repeats" >&2
+    exit 1
+fi
+echo "measure-cost: README's cost table matches this build" >&2

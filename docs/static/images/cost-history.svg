@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 312" width="900" height="312" role="img" aria-labelledby="chart-title chart-desc" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
+<title id="chart-title">gPTY memory cost by release</title>
+<desc id="chart-desc">Resident memory (VmRSS) in MiB: an idle one-pane window on the Forward+ and OpenGL3 renderers, and the first launch of a release with a cold pipeline cache. Rendered from docs/data/cost-history.json.</desc>
+<style>
+@media (prefers-color-scheme:dark){
+.axis{stroke:#30363d}.grid{stroke:#21262d}
+.txt{fill:#8b949e}.ttl,.val{fill:#e6edf3}
+.s0{fill:#4493f8}
+.s0l{stroke:#4493f8}
+.s1{fill:#f0883e}
+.s1l{stroke:#f0883e}
+.s2{fill:#3fb950}
+.s2l{stroke:#3fb950}
+}
+</style>
+<text class="ttl" x="64" y="48" fill="#1f2328" font-size="12" font-weight="600">Idle, one pane (MiB)</text>
+<line class="grid" x1="64" y1="236.0" x2="420" y2="236.0" stroke="#eaeef2" stroke-width="1"/>
+<text class="txt" x="54" y="240.0" text-anchor="end" fill="#6e7781" font-size="11">0</text>
+<line class="grid" x1="64" y1="193.0" x2="420" y2="193.0" stroke="#eaeef2" stroke-width="1"/>
+<text class="txt" x="54" y="197.0" text-anchor="end" fill="#6e7781" font-size="11">200</text>
+<line class="grid" x1="64" y1="150.0" x2="420" y2="150.0" stroke="#eaeef2" stroke-width="1"/>
+<text class="txt" x="54" y="154.0" text-anchor="end" fill="#6e7781" font-size="11">400</text>
+<line class="grid" x1="64" y1="107.0" x2="420" y2="107.0" stroke="#eaeef2" stroke-width="1"/>
+<text class="txt" x="54" y="111.0" text-anchor="end" fill="#6e7781" font-size="11">600</text>
+<line class="grid" x1="64" y1="64.0" x2="420" y2="64.0" stroke="#eaeef2" stroke-width="1"/>
+<text class="txt" x="54" y="68.0" text-anchor="end" fill="#6e7781" font-size="11">800</text>
+<line class="axis" x1="64" y1="236" x2="420" y2="236" stroke="#d0d7de" stroke-width="1"/>
+<text class="txt" x="90.0" y="255" text-anchor="middle" fill="#6e7781" font-size="11">v0.8.1</text>
+<text class="txt" x="394.0" y="255" text-anchor="middle" fill="#6e7781" font-size="11">v0.8.2</text>
+<path class="s0l" d="M90.0,96.9 L394.0,95.0" fill="none" stroke="#0969da" stroke-width="2" stroke-linejoin="round"/>
+<circle class="s0" cx="90.0" cy="96.9" r="4" fill="#0969da"/>
+<text class="val" x="90.0" y="86.9" text-anchor="middle" fill="#1f2328" font-size="11">647</text>
+<circle class="s0" cx="394.0" cy="95.0" r="4" fill="#0969da"/>
+<text class="val" x="394.0" y="85.0" text-anchor="middle" fill="#1f2328" font-size="11">656 (+9)</text>
+<circle class="s1" cx="394.0" cy="158.0" r="4" fill="#bc4c00"/>
+<text class="val" x="394.0" y="148.0" text-anchor="middle" fill="#1f2328" font-size="11">363</text>
+<text class="ttl" x="520" y="48" fill="#1f2328" font-size="12" font-weight="600">First launch, cold cache (MiB)</text>
+<line class="grid" x1="520" y1="236.0" x2="876" y2="236.0" stroke="#eaeef2" stroke-width="1"/>
+<text class="txt" x="510" y="240.0" text-anchor="end" fill="#6e7781" font-size="11">0</text>
+<line class="grid" x1="520" y1="193.0" x2="876" y2="193.0" stroke="#eaeef2" stroke-width="1"/>
+<text class="txt" x="510" y="197.0" text-anchor="end" fill="#6e7781" font-size="11">300</text>
+<line class="grid" x1="520" y1="150.0" x2="876" y2="150.0" stroke="#eaeef2" stroke-width="1"/>
+<text class="txt" x="510" y="154.0" text-anchor="end" fill="#6e7781" font-size="11">600</text>
+<line class="grid" x1="520" y1="107.0" x2="876" y2="107.0" stroke="#eaeef2" stroke-width="1"/>
+<text class="txt" x="510" y="111.0" text-anchor="end" fill="#6e7781" font-size="11">900</text>
+<line class="grid" x1="520" y1="64.0" x2="876" y2="64.0" stroke="#eaeef2" stroke-width="1"/>
+<text class="txt" x="510" y="68.0" text-anchor="end" fill="#6e7781" font-size="11">1200</text>
+<line class="axis" x1="520" y1="236" x2="876" y2="236" stroke="#d0d7de" stroke-width="1"/>
+<text class="txt" x="546.0" y="255" text-anchor="middle" fill="#6e7781" font-size="11">v0.8.1</text>
+<text class="txt" x="850.0" y="255" text-anchor="middle" fill="#6e7781" font-size="11">v0.8.2</text>
+<path class="s2l" d="M546.0,81.8 L850.0,81.3" fill="none" stroke="#1a7f37" stroke-width="2" stroke-linejoin="round"/>
+<circle class="s2" cx="546.0" cy="81.8" r="4" fill="#1a7f37"/>
+<text class="val" x="546.0" y="71.8" text-anchor="middle" fill="#1f2328" font-size="11">1076</text>
+<circle class="s2" cx="850.0" cy="81.3" r="4" fill="#1a7f37"/>
+<text class="val" x="850.0" y="71.3" text-anchor="middle" fill="#1f2328" font-size="11">1079 (+3)</text>
+<circle class="s0" cx="68" cy="282" r="3.5" fill="#0969da"/>
+<text class="txt" x="78" y="286" fill="#6e7781" font-size="11">Idle, one pane (Forward+)</text>
+<circle class="s1" cx="238.0" cy="282" r="3.5" fill="#bc4c00"/>
+<text class="txt" x="248.0" y="286" fill="#6e7781" font-size="11">Idle, one pane (OpenGL3)</text>
+<circle class="s2" cx="402.4" cy="282" r="3.5" fill="#1a7f37"/>
+<text class="txt" x="412.4" y="286" fill="#6e7781" font-size="11">First launch, cold pipeline cache</text>
+<text class="txt" x="64" y="306" fill="#6e7781" font-size="10">Idle, one pane (OpenGL3) has no v0.8.1 point: 290 MB was recorded there and has not reproduced (a v0.8.1 rebuild measures 366 MB)</text>
+</svg>

@@ -34,7 +34,8 @@ gpty/
 │   ├── content/docs/roadmap/   # One page per release chain (v0.N.md, future.md)
 │   ├── content/docs/changelog/ # One page per release (vX.Y.Z.md)
 │   ├── content/wiki/           # Knowledge-base vault; scripts/build-wiki packs it into godot/knowledge.json
-│   └── static/images/          # Release screenshots + roadmap evidence images
+│   ├── data/cost-history.json  # Memory-cost ledger; scripts/render-cost-chart draws the README chart from it
+│   └── static/images/          # Release screenshots, roadmap evidence images, the generated cost chart
 ├── LICENSE
 ├── LICENSE-EXCEPTIONS.md       # GPLv3 §7 permissions: plugins + data stay non-copyleft
 ├── scripts/                    # CI runner and setup scripts

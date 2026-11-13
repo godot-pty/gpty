@@ -1,0 +1,42 @@
+{
+  "note": "Memory cost per release, in MiB of VmRSS, measured with scripts/measure-cost. This file is the ledger the README chart (docs/static/images/cost-history.svg) is rendered from: scripts/measure-cost --record appends one entry per release, scripts/render-cost-chart redraws, and scripts/ci-check fails when the two disagree. Values are the release's own measurement on the reference machine (Linux, NVIDIA 620.70.06, Vulkan 1.4.363 loader, Godot 4.7.2); they are not comparable across driver stacks.",
+  "series": {
+    "idle_forward": {
+      "label": "Idle, one pane (Forward+)",
+      "panel": "idle"
+    },
+    "idle_opengl3": {
+      "label": "Idle, one pane (OpenGL3)",
+      "panel": "idle"
+    },
+    "cold": {
+      "label": "First launch, cold pipeline cache",
+      "panel": "cold"
+    }
+  },
+  "releases": [
+    {
+      "version": "0.8.1",
+      "date": "2026-11-11",
+      "source": "README, as published",
+      "values": {
+        "idle_forward": 647,
+        "cold": 1076
+      },
+      "omitted": {
+        "idle_opengl3": "290 MB was recorded there and has not reproduced (a v0.8.1 rebuild measures 366 MB)"
+      }
+    },
+    {
+      "version": "0.8.2",
+      "date": "2026-11-13",
+      "source": "scripts/measure-cost on the v0.8.2 build",
+      "driver": "NVIDIA 620.70.06 (Vulkan 1.4.363)",
+      "values": {
+        "idle_forward": 656,
+        "idle_opengl3": 363,
+        "cold": 1079
+      }
+    }
+  ]
+}

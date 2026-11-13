@@ -1,0 +1,306 @@
+#!/usr/bin/env python3
+"""Render the README's memory-cost chart from its ledger, and keep the two in sync.
+
+    scripts/render-cost-chart                 # ledger -> docs/static/images/cost-history.svg
+    scripts/render-cost-chart --check         # exit 1 when the SVG is not the ledger's render
+    scripts/render-cost-chart --record FILE   # append/replace one release, then render
+    scripts/render-cost-chart --require 0.9.0 # exit 1 when the ledger has no entry for it
+    scripts/render-cost-chart --check --require-current  # both, against the crate version
+
+The ledger is `docs/data/cost-history.json`; the numbers in it come from
+`scripts/measure-cost` (the same harness behind the README's Trade-offs table),
+so the chart is the project's own record rather than a hand-drawn impression.
+`--check` is the part CI can run - no GPU, no display - and it is what stops the
+picture from drifting away from the table it sits under.
+
+The SVG renders on both GitHub themes: every colour is declared twice, once as
+the light default and once under `prefers-color-scheme: dark`, and the root
+carries `color-scheme: light dark` so an embedding browser picks the right set.
+It is one file with no external font, image or script, so it renders the same
+everywhere.
+"""
+
+import json
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+LEDGER = ROOT / "docs/data/cost-history.json"
+OUT = ROOT / "docs/static/images/cost-history.svg"
+
+PANEL_IDLE = (64, 64, 420, 236)   # left, top, right, bottom
+PANEL_COLD = (520, 64, 876, 236)
+IDLE_MAX = 800
+COLD_MAX = 1200
+WIDTH, HEIGHT = 900, 312
+
+# One colour per series, for the light theme and for the dark one. Order here
+# is the drawing order and the legend order.
+SERIES_ORDER = ["idle_forward", "idle_opengl3", "cold"]
+SERIES_STYLE = {
+    "idle_forward": ("#0969da", "#4493f8"),
+    "idle_opengl3": ("#bc4c00", "#f0883e"),
+    "cold": ("#1a7f37", "#3fb950"),
+}
+
+
+def die(msg):
+    print(f"render-cost-chart: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def load(path=LEDGER):
+    try:
+        return json.loads(pathlib.Path(path).read_text())
+    except FileNotFoundError:
+        die(f"no ledger at {path}")
+    except json.JSONDecodeError as exc:
+        die(f"{path} is not valid JSON: {exc}")
+
+
+def version_key(release):
+    key = []
+    for chunk in str(release.get("version", "0")).split("."):
+        digits = "".join(c for c in chunk if c.isdigit())
+        key.append(int(digits) if digits else 0)
+    return key
+
+
+def esc(text):
+    return (
+        str(text)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def style_block():
+    """Dark-theme overrides only.
+
+    The light palette is written as presentation attributes on each element, so
+    a renderer that ignores `<style>` (a sandboxed rasteriser, a strict SVG
+    converter) still draws the chart in full colour; CSS beats presentation
+    attributes in the cascade, so the query below wins wherever it is supported.
+    """
+    lines = [
+        "<style>",
+        "@media (prefers-color-scheme:dark){",
+        ".axis{stroke:#30363d}.grid{stroke:#21262d}",
+        ".txt{fill:#8b949e}.ttl,.val{fill:#e6edf3}",
+    ]
+    for index, key in enumerate(SERIES_ORDER):
+        _, dark = SERIES_STYLE[key]
+        lines.append(f".s{index}{{fill:{dark}}}")
+        lines.append(f".s{index}l{{stroke:{dark}}}")
+    lines.append("}")
+    lines.append("</style>")
+    return "\n".join(lines)
+
+
+def x_positions(box, count):
+    left, _, right, _ = box
+    if count == 1:
+        return [left + (right - left) / 2]
+    return [left + 26 + (right - left - 52) * (i / (count - 1)) for i in range(count)]
+
+
+def panel(svg, box, title, series_ids, releases, ymax):
+    left, top, right, bottom = box
+    height = bottom - top
+    xs = x_positions(box, len(releases))
+
+    svg.append(
+        f'<text class="ttl" x="{left}" y="{top - 16}" fill="#1f2328" font-size="12" '
+        f'font-weight="600">{esc(title)}</text>'
+    )
+
+    for value in range(0, ymax + 1, ymax // 4):
+        y = bottom - value / ymax * height
+        svg.append(
+            f'<line class="grid" x1="{left}" y1="{y:.1f}" x2="{right}" y2="{y:.1f}" '
+            f'stroke="#eaeef2" stroke-width="1"/>'
+        )
+        svg.append(
+            f'<text class="txt" x="{left - 10}" y="{y + 4:.1f}" text-anchor="end" '
+            f'fill="#6e7781" font-size="11">{value}</text>'
+        )
+
+    svg.append(
+        f'<line class="axis" x1="{left}" y1="{bottom}" x2="{right}" y2="{bottom}" '
+        f'stroke="#d0d7de" stroke-width="1"/>'
+    )
+    for x, release in zip(xs, releases):
+        svg.append(
+            f'<text class="txt" x="{x:.1f}" y="{bottom + 19}" text-anchor="middle" '
+            f'fill="#6e7781" font-size="11">v{esc(release["version"])}</text>'
+        )
+
+    for series_id in series_ids:
+        index = SERIES_ORDER.index(series_id)
+        points = []
+        previous = None
+        for x, release in zip(xs, releases):
+            value = release.get("values", {}).get(series_id)
+            if value is None:
+                continue
+            points.append((x, bottom - value / ymax * height, value, previous))
+            previous = value
+
+        if len(points) > 1:
+            path = " ".join(
+                ("M" if i == 0 else "L") + f"{x:.1f},{y:.1f}"
+                for i, (x, y, *_rest) in enumerate(points)
+            )
+            light = SERIES_STYLE[series_id][0]
+            svg.append(
+                f'<path class="s{index}l" d="{path}" fill="none" stroke="{light}" '
+                f'stroke-width="2" stroke-linejoin="round"/>'
+            )
+
+        for x, y, value, previous in points:
+            light = SERIES_STYLE[series_id][0]
+            svg.append(f'<circle class="s{index}" cx="{x:.1f}" cy="{y:.1f}" r="4" fill="{light}"/>')
+            label_x = min(max(x, left + 20), right - 20)
+            # A flat line still has a story: carry the change against the
+            # series' previous point beside the value it belongs to.
+            label = f"{value} ({value - previous:+d})" if previous is not None else str(value)
+            svg.append(
+                f'<text class="val" x="{label_x:.1f}" y="{y - 10:.1f}" text-anchor="middle" '
+                f'fill="#1f2328" font-size="11">{label}</text>'
+            )
+
+
+def render(ledger):
+    releases = sorted(ledger["releases"], key=version_key)
+    idle_ids = [k for k in SERIES_ORDER if ledger["series"].get(k, {}).get("panel") == "idle"]
+    cold_ids = [k for k in SERIES_ORDER if ledger["series"].get(k, {}).get("panel") == "cold"]
+
+    svg = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {WIDTH} {HEIGHT}" '
+        f'width="{WIDTH}" height="{HEIGHT}" role="img" aria-labelledby="chart-title chart-desc" '
+        f'font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">',
+        '<title id="chart-title">gPTY memory cost by release</title>',
+        '<desc id="chart-desc">Resident memory (VmRSS) in MiB: an idle one-pane window on the '
+        "Forward+ and OpenGL3 renderers, and the first launch of a release with a cold pipeline "
+        "cache. Rendered from docs/data/cost-history.json.</desc>",
+        style_block(),
+    ]
+
+    panel(svg, PANEL_IDLE, "Idle, one pane (MiB)", idle_ids, releases, IDLE_MAX)
+    panel(svg, PANEL_COLD, "First launch, cold cache (MiB)", cold_ids, releases, COLD_MAX)
+
+    # Legend under the idle panel, in the same order the series were drawn.
+    x = PANEL_IDLE[0]
+    y = HEIGHT - 26
+    for series_id in idle_ids + cold_ids:
+        index = SERIES_ORDER.index(series_id)
+        label = ledger["series"][series_id]["label"]
+        light = SERIES_STYLE[series_id][0]
+        svg.append(f'<circle class="s{index}" cx="{x + 4}" cy="{y - 4}" r="3.5" fill="{light}"/>')
+        svg.append(
+            f'<text class="txt" x="{x + 14}" y="{y}" fill="#6e7781" font-size="11">{esc(label)}</text>'
+        )
+        x += 30 + 5.6 * len(label)
+
+    # A series that starts at the second release would read as an omission;
+    # say why, and only when it is true.
+    if len(releases) > 1:
+        reasons = []
+        for sid in idle_ids + cold_ids:
+            if releases[0].get("values", {}).get(sid) is not None:
+                continue
+            omitted = ledger.get("omitted_for", {}).get(sid) or releases[0].get("omitted", {}).get(sid)
+            reason = omitted or "no measurement was recorded for it"
+            reasons.append(f'{esc(ledger["series"][sid]["label"])} has no v{esc(releases[0]["version"])} point: {esc(reason)}')
+    else:
+        reasons = []
+    if reasons:
+        note = "; ".join(reasons)
+        svg.append(
+            f'<text class="txt" x="{PANEL_IDLE[0]}" y="{HEIGHT - 6}" fill="#6e7781" '
+            f'font-size="10">{esc(note)}</text>'
+        )
+
+    svg.append("</svg>")
+    return "\n".join(svg) + "\n"
+
+
+def main(argv):
+    args = list(argv)
+    mode = "render"
+    record = None
+    require = None
+    require_current = False
+    while args:
+        arg = args.pop(0)
+        if arg == "--check":
+            mode = "check"
+        elif arg == "--record" and args:
+            record = pathlib.Path(args.pop(0))
+        elif arg == "--require" and args:
+            require = args.pop(0)
+        elif arg == "--require-current":
+            require_current = True
+        elif arg in ("-h", "--help"):
+            print(__doc__.strip())
+            return 0
+        else:
+            die(f"unknown argument '{arg}' (see --help)")
+
+    ledger = load()
+
+    if record is not None:
+        try:
+            entry = json.loads(record.read_text())
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            die(f"cannot read the measurement from {record}: {exc}")
+        for field in ("version", "date", "values"):
+            if field not in entry:
+                die(f"{record} has no '{field}' - it must be the JSON 'scripts/measure-cost --json' prints")
+        releases = [r for r in ledger["releases"] if str(r.get("version")) != str(entry["version"])]
+        releases.append(entry)
+        ledger["releases"] = sorted(releases, key=version_key)
+        LEDGER.write_text(json.dumps(ledger, indent=2) + "\n")
+        print(
+            f"render-cost-chart: recorded v{entry['version']} in {LEDGER.relative_to(ROOT)} "
+            f"({len(ledger['releases'])} releases)",
+            file=sys.stderr,
+        )
+        mode = "render"
+
+    if require_current:
+        crate = ROOT / "crates/gpty-cli/Cargo.toml"
+        match = [ln.split('"')[1] for ln in crate.read_text().splitlines() if ln.startswith('version = "')]
+        if not match:
+            die(f"cannot read a version from {crate.relative_to(ROOT)}")
+        require = match[0]
+
+    if require is not None:
+        known = {str(r.get("version")) for r in ledger["releases"]}
+        if require not in known:
+            die(
+                f"the ledger has no entry for v{require} - measure it and run "
+                f"'./scripts/measure-cost --record' before releasing"
+            )
+
+    rendered = render(ledger)
+
+    if mode == "check":
+        try:
+            committed = OUT.read_text()
+        except FileNotFoundError:
+            die(f"{OUT.relative_to(ROOT)} does not exist - run scripts/render-cost-chart")
+        if committed != rendered:
+            die(f"{OUT.relative_to(ROOT)} is not the ledger's render - run scripts/render-cost-chart")
+        print(f"render-cost-chart: {OUT.relative_to(ROOT)} matches {LEDGER.relative_to(ROOT)} - OK")
+        return 0
+
+    OUT.write_text(rendered)
+    print(f"render-cost-chart: wrote {OUT.relative_to(ROOT)}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -19,7 +19,7 @@ The commit skill already lists README freshness (root phases, `crates/*/README.m
 | User-visible behavior | the wiki pages under `docs/content/wiki/**` that describe it, then the bundle step below |
 | A demo clip or a README asset | regenerate it - `./scripts/record-demo <scenario>`, which needs a graphical session (x11grab), a built `target/debug/gpty` and Godot - and commit the `gif`/`mp4`/`webm` together with the script change; a rewritten script with old binaries is the half-commit this row exists for |
 | A closed or narrowed roadmap row | row flipped in place with evidence/tests/measured numbers; every new defect queued as its own row |
-| A count repeated in prose (autoloads, pane types, crates) | every place the number appears - `grep` the number, not just the sentence you remember |
+| A count or a measured figure repeated in prose (autoloads, pane types, crates, the README's RSS table) | every place it appears - `grep` the number, not just the sentence you remember. A measured figure is `scripts/measure-cost`'s to re-take, and the prose around it moves with it (its `--check` is the gate; `--stamp` holds the build it names) |
 
 Changelog pages are release-time work: do not write one mid-cycle. Leave the release's DOCS row queued and keep the user-facing summary in the closed row.
 

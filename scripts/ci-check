@@ -158,7 +158,7 @@ report_class() {
 $paths
 EOF
     if docs_class_change; then
-        printf "\n  %b→ docs gates only (docs-check + knowledge bundle)%b\n" "$BOLD" "$NC"
+        printf "\n  %b→ docs gates only (docs-check + knowledge bundle + cost figures)%b\n" "$BOLD" "$NC"
     else
         printf "\n  %b→ full suite (docs gates, static checks, Rust, Godot, smoke, audit)%b\n" "$BOLD" "$NC"
     fi
@@ -186,6 +186,26 @@ run_bundle_check() {
     fi
 }
 
+run_cost_stamp() {
+    header "cost figures"
+    if STAMP_OUT="$(./scripts/measure-cost --stamp 2>&1)"; then
+        pass "README cost table"
+    else
+        fail "README cost table — re-measure with './scripts/measure-cost --check' and move the figures the paragraph repeats"
+        detail "$STAMP_OUT"
+        check_failed
+    fi
+    # No GPU: the ledger is the source and the SVG must be its render, and the
+    # ledger must carry this version before a release can leave the tag.
+    if CHART_OUT="$(./scripts/render-cost-chart --check --require-current 2>&1)"; then
+        pass "cost chart"
+    else
+        fail "cost chart — './scripts/measure-cost --record' takes the measurement and redraws"
+        detail "$CHART_OUT"
+        check_failed
+    fi
+}
+
 # --classify answers "why did the gate run (or skip) that?" without running it.
 if $CLASSIFY; then
     report_class
@@ -203,6 +223,7 @@ if [ -z "${CI_CHECK_FULL:-}" ] \
     printf "  %bDocs-class change%b — docs gates only; CI_CHECK_FULL=1 runs everything\n" "$BOLD" "$NC"
     run_docs_check
     run_bundle_check
+    run_cost_stamp
     printf "\n"
     if [[ $FAILED -eq 0 ]]; then
         printf "${GREEN}${BOLD}Docs checks passed. Ready to push.${NC}\n"
@@ -332,6 +353,14 @@ else
     fail "theme tokens — a palette colour is cached or overridden"
     check_failed
 fi
+
+# ── Step 3.4: README cost table provenance ─────────────────────────────
+# The README's Trade-offs table names the build it was measured on, and a
+# release bumps the crate version, so a table still quoting the previous
+# release is the failure mode this catches without a GPU. The measurement
+# itself needs a real renderer and is `scripts/measure-cost --check` at release
+# time (skill://release); this is the reminder that it is due.
+run_cost_stamp
 
 # ── Fast mode stops here ───────────────────────────────────────────────
 if $FAST; then
