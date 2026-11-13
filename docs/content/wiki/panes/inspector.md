@@ -51,9 +51,9 @@ A capture routed from a terminal concept can reach the pane only when you enable
 |---|---|
 | Name, Attachment ID | title and stable id |
 | Font size | 8–32 px |
-| Backend | `omp`, `cli`, `mock` |
-| Model | optional model passed to the backend |
-| Command | the `cli` backend's adapter argv (whitespace-split, no shell) |
+| Backend | `omp`, `cli` or `mock`, chosen from a list built by the extension; one whose program is missing stays selectable and says so |
+| Model | optional model override passed to the backend |
+| Command | the `cli` backend's adapter argv (whitespace-split, no shell); the row appears only for `cli`, and a session cannot open while it is empty |
 | Auto-run | whether a capture starts a turn immediately (user-owned, off by default) |
 | Accept terminal concept captures | the opt-in gate for routed output (user-owned, off by default) |
 | System prompt | replaces the default inspector prompt (user-owned) |
@@ -68,7 +68,7 @@ It does not attach to the OMP conversation hosted in a terminal, and it does not
 
 ## Limits and edge cases
 
-One session per pane, so a second Inspector is a second conversation with its own history. The `omp` backend needs `omp` on `PATH`; a stale extension build reports that the bridge is missing and asks for a rebuild rather than failing silently. The thinking area is not a log — it is the current turn's reasoning. When a backend fails, the pane's error shows what that program said on stderr, with terminal control sequences stripped and each line bounded; the rest of its stderr is not written to a log file, so this message is where the child's own account of a failure survives. Captures are gated per pane, so enabling the opt-in on one Inspector does not enable it on another, and a restore keeps the choice you stored for that pane rather than one a file names. Because captures leave the pane, treat that toggle as a data-sharing decision, not a display preference.
+One session per pane, so a second Inspector is a second conversation with its own history. The `omp` backend needs `omp` on `PATH`; Pane Settings re-reads the backend list on every open, so an `omp` installed while the app is running is offered the next time the panel opens, and one that is missing is flagged next to the Backend row rather than at the first prompt. A stale extension build reports that the bridge is missing and asks for a rebuild rather than failing silently. The thinking area is not a log — it is the current turn's reasoning. When a backend fails, the pane's error shows what that program said on stderr, with terminal control sequences stripped and each line bounded; the rest of its stderr is not written to a log file, so this message is where the child's own account of a failure survives. Captures are gated per pane, so enabling the opt-in on one Inspector does not enable it on another, and a restore keeps the choice you stored for that pane rather than one a file names. Because captures leave the pane, treat that toggle as a data-sharing decision, not a display preference.
 
 ## Related
 
