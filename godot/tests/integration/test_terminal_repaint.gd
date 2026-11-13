@@ -104,8 +104,14 @@ func test_a_partial_update_queues_only_the_rows_it_damages():
 		"a repaint past the last band records nothing")
 
 ## The end-to-end half: a real shell, a typed line, and the sync that consumes
-## its damage. The rows are the cursor's, not the top of the grid.
-func test_a_typed_line_repaints_only_the_rows_near_the_cursor():
+## its damage. The repaint must cover every row whose text changed and stay a
+## handful of rows - never the grid.
+##
+## It must NOT assert that the repainted rows are the cursor's: ConPTY rewrites
+## the rows it relays, so a typed line there damaged rows 0, 3, 4 and 6 with the
+## cursor on 6 and still repainted 4 of 20 (Windows CI, 2026-11-13). The
+## platform-neutral direction is text-changed => repainted.
+func test_a_typed_line_repaints_only_the_rows_it_changed():
 	var body = await _pane_with_a_shell()
 	if body == null:
 		return
@@ -114,23 +120,25 @@ func test_a_typed_line_repaints_only_the_rows_near_the_cursor():
 	var settled_gen := await _settle(body)
 	var rows_total: int = int(body._cell_cache.get("rows", 0))
 	assert_gte(rows_total, 10, "the pane needs a real grid: %s" % _pane_state(body))
+	var before: Array = body._cell_cache["chars"].duplicate()
 	body._send_line_to_term("echo REPAINT_MARKER")
 	var deadline := Time.get_ticks_msec() + OUTPUT_WAIT_MS
 	while Time.get_ticks_msec() < deadline and body._last_grid_gen == settled_gen:
 		await get_tree().create_timer(0.05).timeout
 	assert_ne(body._last_grid_gen, settled_gen,
 		"the typed line must reach the pane: %s" % _pane_state(body))
+	var after: Array = body._cell_cache["chars"]
+	var changed: Array[int] = []
+	for r in mini(before.size(), after.size()):
+		if str(before[r]) != str(after[r]):
+			changed.append(r)
+	assert_gt(changed.size(), 0, "the typed line must change at least one row: %s" % _pane_state(body))
 	var painted: PackedInt32Array = body._painted_rows
-	# The shell's prompt sits at the top of the screen here, so "the cursor's
-	# rows" is not "the bottom of the grid": the repaint must follow the cursor
-	# wherever it is (alacritty damages the cell it left and the one it reached).
-	var cursor_row: int = body._terminal.get_cursor_row()
 	assert_lte(painted.size(), 4,
 		"one typed line must not repaint the screen (%d of %d rows)" % [painted.size(), rows_total])
-	for r in painted:
-		assert_lte(absi(r - cursor_row), 3,
-			"a repainted row must be the cursor's, not one elsewhere (painted %s, cursor row %d)" % [
-				str(painted), cursor_row])
+	for r in changed:
+		assert_true(painted.has(r),
+			"a row whose text changed must be repainted (row %d, painted %s)" % [r, str(painted)])
 	# The bands are children of the pane, so their order against the pane's own
 	# chrome decides what covers what: every band must sit below the search
 	# strip and the scroll hints, or the grid paints over them.
