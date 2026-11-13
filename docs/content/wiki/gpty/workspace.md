@@ -32,7 +32,7 @@ Because a profile is a layout template rather than a workspace, the directory is
 
 ## Persistence
 
-The whole set lives in `user://workspaces.json` under `version`, `active`, and `workspaces`. Each workspace entry stores its sanitized name (at most 32 characters, defaulting to `Workspace`), its `cwd`, and its layout array. The layout is the tile geometry described in [[layout]]; the workspace is the container around it.
+The whole set lives in `user://workspaces.json` under `version`, `active`, and `workspaces`. Each workspace entry stores its sanitized name (at most 32 characters, defaulting to `Workspace`), its `cwd`, the `grid_unit` its geometry was written in (a file that predates the field has none, and the restore then infers the unit from the tiles), and its layout array. The layout is the tile geometry described in [[layout]]; the workspace is the container around it.
 
 On startup gPTY loads the store, clamps the active index into range, and rebuilds every workspace. If the store is missing or empty and a legacy `user://layout.json` exists, it is imported as a single workspace named `Workspace 1`; that migration exists so older installs keep their arrangement. Otherwise the window starts with zero workspaces, and the zero state is saved on quit, so relaunching restores the guide.
 
