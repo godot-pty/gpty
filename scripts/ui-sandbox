@@ -23,8 +23,14 @@
 #
 # Sourcing this file takes over the environment: it is meant for a dedicated
 # script process (screenshot-gpty, ui-capture), not for an interactive shell.
-# `gpty_sandbox_cleanup` removes the directory and unsets what init exported,
-# so a script may init/cleanup once per capture.
+# `gpty_sandbox_cleanup` removes the directory and puts back exactly what init
+# found — including the unset case — so a shell that sandboxed, cleaned up and
+# then ran another tool under `set -u` does not meet `HOME: unbound variable`
+# (measured 2026-11-13: `./scripts/build` died in its export-template check
+# after a probe run's cleanup).
+
+# name=value pairs for what init overrode; a bare name means "was unset".
+GPTY_SANDBOX_SAVED=()
 
 gpty_sandbox_init() {
     if [[ -n "${GPTY_SANDBOX:-}" ]]; then
@@ -35,6 +41,18 @@ gpty_sandbox_init() {
     chmod 700 "$GPTY_SANDBOX"
     mkdir -p "$GPTY_SANDBOX"/{home,data,config,state,cache,runtime,user}
     chmod 700 "$GPTY_SANDBOX"/{home,data,config,state,cache,runtime,user}
+
+    GPTY_SANDBOX_SAVED=()
+    local var
+    for var in HOME XDG_DATA_HOME XDG_CONFIG_HOME XDG_STATE_HOME XDG_CACHE_HOME \
+        XDG_RUNTIME_DIR GPTY_TEST_USER_DIR GPTY_SOCKET GPTY_SECRET BASH_ENV ENV \
+        PROMPT_COMMAND PS1 PS2 CDPATH HISTFILE; do
+        if [[ -v $var ]]; then
+            GPTY_SANDBOX_SAVED+=("$var=${!var}")
+        else
+            GPTY_SANDBOX_SAVED+=("$var")
+        fi
+    done
 
     export HOME="$GPTY_SANDBOX/home"
     export XDG_DATA_HOME="$GPTY_SANDBOX/data"
@@ -55,6 +73,15 @@ gpty_sandbox_cleanup() {
     if [[ -n "${GPTY_SANDBOX:-}" ]]; then
         rm -rf "$GPTY_SANDBOX"
     fi
-    unset GPTY_SANDBOX HOME XDG_DATA_HOME XDG_CONFIG_HOME XDG_STATE_HOME \
-        XDG_CACHE_HOME XDG_RUNTIME_DIR GPTY_TEST_USER_DIR GPTY_SOCKET
+    local entry name
+    for entry in "${GPTY_SANDBOX_SAVED[@]}"; do
+        name="${entry%%=*}"
+        if [[ "$entry" == *=* ]]; then
+            export "$name=${entry#*=}"
+        else
+            unset "$name"
+        fi
+    done
+    GPTY_SANDBOX_SAVED=()
+    unset GPTY_SANDBOX
 }

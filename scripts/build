@@ -89,7 +89,14 @@ ok "gdext release build"
 
 step "Install library into godot/bin/"
 mkdir -p godot/bin
-cp "$LIB_SRC" "$LIB_DST"
+# Install by rename, never in place. A running GUI has this library mapped, and
+# writing into the file under that mapping kills the process with SIGBUS
+# ("Misaligned address error", measured 2026-11-13 on `godot --path godot`,
+# twice). A rename swaps the directory entry and leaves the old inode alive
+# for whoever already mapped it, so a build no longer takes the dev GUI down.
+cp "$LIB_SRC" "$LIB_DST.new"
+chmod 0755 "$LIB_DST.new"
+mv -f "$LIB_DST.new" "$LIB_DST"
 ok "$LIB_DST"
 
 # ── Step 2: Godot export ───────────────────────────────────────────────
