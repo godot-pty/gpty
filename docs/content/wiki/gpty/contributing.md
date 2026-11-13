@@ -41,7 +41,7 @@ godot --path godot
 godot --path godot --headless
 ```
 
-A one-shot standalone build is the script's job — it detects the host, builds release, stages the binary, exports into `dist/`, and bundles the media runtime:
+A one-shot standalone build is the script's job — it detects the host, builds release, stages the binary, exports into `dist/`, and bundles the media runtime. Every install is a rename, so a GUI or an export that is already running keeps the build it started with:
 
 ```bash
 ./scripts/build

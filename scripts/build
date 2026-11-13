@@ -29,6 +29,32 @@ ok()    { printf "  ${GREEN}OK${NC} %s\n" "$1"; }
 warn()  { printf "  ${YELLOW}NOTE${NC} %s\n" "$1"; }
 die()   { printf "  ${RED}ERROR${NC} %s\n" "$1" >&2; exit 1; }
 
+# ── Atomic install ──────────────────────────────────────────────────────
+# Put a finished artifact in place by renaming it, never by writing over the
+# live one. A process that already mapped the old inode keeps it, so a build
+# can never kill a running GUI - writing into a mapped file raised SIGBUS
+# ("Misaligned address error", measured 2026-11-13, on `godot --path godot`
+# and on a running export). Callers stage on the destination's own
+# filesystem: a rename across filesystems degrades to copy+unlink and the
+# guarantee is gone. A directory is replaced under the same rule - the old
+# one is renamed aside, the new one renamed in, then the old removed, so the
+# destination is never missing an entry.
+install_atomic() {
+    local src="$1" dst="$2"
+    if [ -d "$src" ]; then
+        local old="$dst.old.$$"
+        if [ -e "$dst" ]; then
+            mv -f "$dst" "$old"
+        fi
+        mv -f "$src" "$dst"
+        if [ -e "$old" ]; then
+            rm -rf "$old"
+        fi
+        return 0
+    fi
+    mv -f "$src" "$dst"
+}
+
 # ── Detect host platform ────────────────────────────────────────────────
 OS_NAME="$(uname -s)"
 ARCH="$(uname -m)"
@@ -62,21 +88,22 @@ case "$PLATFORM" in
         LIB_SRC="target/release/libgpty_gdext.so"
         LIB_DST="godot/bin/libgpty_gdext.linux.x86_64.so"
         EXPORT_PRESET="Linux/X11"
-        EXPORT_DST="dist/gpty"
+        EXPORT_NAME="gpty"
         ;;
     macos)
         LIB_SRC="target/release/libgpty_gdext.dylib"
         LIB_DST="godot/bin/libgpty_gdext.macos.$ARCH.dylib"
         EXPORT_PRESET="macOS"
-        EXPORT_DST="dist/gpty.zip"
+        EXPORT_NAME="gpty.zip"
         ;;
     windows)
         LIB_SRC="target/release/gpty_gdext.dll"
         LIB_DST="godot/bin/gpty_gdext.windows.x86_64.dll"
         EXPORT_PRESET="Windows Desktop"
-        EXPORT_DST="dist/gpty.exe"
+        EXPORT_NAME="gpty.exe"
         ;;
 esac
+EXPORT_DST="dist/$EXPORT_NAME"
 
 GODOT_BIN="${GODOT_BIN:-godot}"
 
@@ -89,14 +116,11 @@ ok "gdext release build"
 
 step "Install library into godot/bin/"
 mkdir -p godot/bin
-# Install by rename, never in place. A running GUI has this library mapped, and
-# writing into the file under that mapping kills the process with SIGBUS
-# ("Misaligned address error", measured 2026-11-13 on `godot --path godot`,
-# twice). A rename swaps the directory entry and leaves the old inode alive
-# for whoever already mapped it, so a build no longer takes the dev GUI down.
+# A running `godot --path godot` has this library mapped, so it is staged
+# beside the destination and renamed (see install_atomic).
 cp "$LIB_SRC" "$LIB_DST.new"
 chmod 0755 "$LIB_DST.new"
-mv -f "$LIB_DST.new" "$LIB_DST"
+install_atomic "$LIB_DST.new" "$LIB_DST"
 ok "$LIB_DST"
 
 # ── Step 2: Godot export ───────────────────────────────────────────────
@@ -146,33 +170,46 @@ step "Import Godot project"
 ok "project imported"
 
 step "Export $EXPORT_PRESET"
+# The export writes whatever path it is given, and a running `dist/gpty` has
+# the executable and the libraries mapped and the .pck open. Stage the set inside
+# dist/ (same filesystem, so every install below is a rename) and put it in
+# place only once it is complete: nothing is written over a live file, and a
+# failed export leaves the previous build untouched.
 mkdir -p dist
-"$GODOT_BIN" --headless --path godot --export-release "$EXPORT_PRESET" "$REPO_ROOT/$EXPORT_DST"
-ok "$EXPORT_DST"
+STAGE="$(mktemp -d "$REPO_ROOT/dist/.stage.XXXXXX")"
+trap 'rm -rf "$STAGE"' EXIT
+"$GODOT_BIN" --headless --path godot --export-release "$EXPORT_PRESET" "$STAGE/$EXPORT_NAME"
+ok "$STAGE/$EXPORT_NAME"
 
 # Windows: Godot does not pack the GDExtension dll into the export, so it
 # must sit next to the executable (mirrors release.yml).
 if [[ "$PLATFORM" == "windows" ]]; then
-    cp "$LIB_DST" "dist/"
-    ok "dist/gpty_gdext.windows.x86_64.dll"
+    cp "$LIB_DST" "$STAGE/"
 fi
 
 step "Bundle the pinned FFmpeg runtime"
 case "$PLATFORM" in
     linux)
-        "$REPO_ROOT/scripts/bundle-media" linux "$REPO_ROOT/dist" \
+        "$REPO_ROOT/scripts/bundle-media" linux "$STAGE" \
             "$REPO_ROOT/dist/ffmpeg/linux-$ARCH"
         ;;
     windows)
-        "$REPO_ROOT/scripts/bundle-media" windows "$REPO_ROOT/dist" \
+        "$REPO_ROOT/scripts/bundle-media" windows "$STAGE" \
             "$REPO_ROOT/dist/ffmpeg/windows-$ARCH"
         ;;
     macos)
-        "$REPO_ROOT/scripts/bundle-media" macos-zip "$REPO_ROOT/dist/gpty.zip" \
+        "$REPO_ROOT/scripts/bundle-media" macos-zip "$STAGE/$EXPORT_NAME" \
             "$REPO_ROOT/dist/ffmpeg/macos-$ARCH"
         ;;
 esac
 ok "media runtime beside the export"
+
+step "Install the export into dist/"
+for entry in "$STAGE"/*; do
+    [ -e "$entry" ] || continue
+    install_atomic "$entry" "$REPO_ROOT/dist/$(basename "$entry")"
+    ok "dist/$(basename "$entry")"
+done
 
 # ── Summary ────────────────────────────────────────────────────────────
 printf "\n${GREEN}${BOLD}Build complete.${NC}\n"

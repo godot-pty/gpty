@@ -58,6 +58,8 @@ docs/data/*
 docs/.cache/
 
 # ── Local build output (scripts/build) ────────────────────────────────────
+# Export staging (scripts/build); its EXIT trap normally removes it
+dist/.stage.*
 dist/gpty
 dist/gpty.pck
 dist/gpty.exe
