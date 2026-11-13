@@ -3251,9 +3251,15 @@ func _apply_pending_profile_replacements():
 		_refresh_profile_buttons()
 
 func get_terminal_for_ffi() -> GptyTerminal:
+	# Only a terminal has the backend this returns: reading `_terminal` off any
+	# other body is a script error that aborts the lookup, so a workspace whose
+	# first tile is a Reasoning pane answered null even with a terminal beside
+	# it (measured 2026-11-13: opening Settings raised "Invalid access to
+	# property or key '_terminal' on a base object of type Control
+	# (ReasoningPane)" and left the Concepts section empty).
 	for t in _tm.tiles:
 		var body = _tm._find_body(t.wrapper)
-		if body and body._terminal:
+		if body is TerminalPane and body._terminal != null:
 			return body._terminal
 	return null
 
