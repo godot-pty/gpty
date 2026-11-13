@@ -79,6 +79,7 @@ godot/
         │   ├── scroll_hints.gd # The two scroll chevrons a pane overlays on its scrolling body (bar, tree or custom binding)
         │   ├── feedback_text.gd # Pure Feedback issue title/body/URL builder (build facts only, capped)
         │   ├── accessibility.gd # Accessible surface owner: names, values, published text (see docs agents/gdscript.md)
+        │   ├── a11y_content.gd # A published content node: a Control that writes its own accessible role
         │   ├── agent_badge.gd  # Title-bar agent-state badge: the four silhouettes, painted
         │   ├── toast_overlay.gd
         │   ├── window_chrome.gd # Titlebar + window-mode/fullscreen handling
