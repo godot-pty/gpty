@@ -12,21 +12,20 @@ func _ready():
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ToastManager.toast_requested.connect(_enqueue)
 
+## A burst is a report, not a competition: nine messages in flight is a caller in
+## a loop, so the queue is bounded and keeps the newest.
+const MAX_QUEUE := 8
+
 func _enqueue(data: Dictionary):
 	if not data.has("text"): return
-	if _active:
-		_dismiss_current()
+	if _queue.size() >= MAX_QUEUE:
+		_queue.pop_front()
 	_queue.append(data)
-	_show_next()
-
-func _dismiss_current():
-	if _current_tween:
-		_current_tween.kill()
-		_current_tween = null
-	if _current_panel:
-		_current_panel.queue_free()
-		_current_panel = null
-	_active = false
+	# The visible toast owns its lifetime; its tween's final callback starts the
+	# next. Dismissing here cut every message short and left only the last of a
+	# burst on screen.
+	if not _active:
+		_show_next()
 
 func _show_next():
 	if _queue.is_empty():

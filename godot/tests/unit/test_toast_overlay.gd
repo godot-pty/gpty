@@ -19,8 +19,8 @@ func after_each():
 	MockAutoloads.teardown()
 
 func _panel_of() -> PanelContainer:
-	# The newest toast is the last panel child: a preempted toast is queue_free'd
-	# but still a child until the frame ends.
+	# The newest toast is the last panel child: an older panel is queue_free'd
+	# but still a child until the frame that frees it ends.
 	for i in range(_overlay.get_child_count() - 1, -1, -1):
 		var c := _overlay.get_child(i)
 		if c is PanelContainer:
@@ -42,11 +42,44 @@ func test_a_toast_is_an_opaque_padded_panel():
 
 func test_the_level_is_a_leading_edge_not_only_ink():
 	var p := UiPalette.active()
-	ToastManager.warn("Careful")
+	# One toast at a time: the levels are checked in sequence, each after the
+	# previous message's own lifetime (the queue serializes them now).
+	ToastManager.warn("Careful", 0.0)
 	var warn_box := _panel_of().get_theme_stylebox("panel") as StyleBoxFlat
 	assert_eq(warn_box.border_color, p.WARNING)
 	assert_eq(warn_box.border_width_left, 3, "the level has a leading edge, not only ink")
-	ToastManager.error("Broken")
+	await wait_seconds(0.9)
+	ToastManager.error("Broken", 0.0)
 	var err_box := _panel_of().get_theme_stylebox("panel") as StyleBoxFlat
 	assert_eq(err_box.border_color, p.DANGER)
 	assert_eq(err_box.border_width_left, 3)
+
+func test_a_second_message_waits_for_the_first():
+	ToastManager.info("first")
+	ToastManager.info("second")
+	assert_eq(_overlay._toast_count, 1, "the burst shows one toast, not one per message")
+	assert_eq(_overlay._queue.size(), 1, "the second message is queued")
+	assert_eq((_panel_of().get_child(0) as Label).text, "first",
+		"the visible message keeps its lifetime")
+
+func test_the_dismissal_starts_the_queued_message():
+	ToastManager.info("first", 0.0)
+	ToastManager.info("second")
+	# A zero-length message still fades in and out (0.2 s + 0.5 s).
+	await wait_seconds(0.9)
+	assert_true(_overlay._active, "the queued message is showing, not dropped")
+	assert_eq(_overlay._queue.size(), 0)
+	var panel := _panel_of()
+	assert_not_null(panel)
+	assert_eq((panel.get_child(0) as Label).text, "second")
+
+func test_the_queue_is_bounded_and_keeps_the_newest():
+	ToastManager.info("first", 60.0)
+	for i in 100:
+		ToastManager.info("m%d" % i)
+	assert_eq(_overlay._queue.size(), ToastOverlay.MAX_QUEUE,
+		"a caller in a loop must not grow the queue without bound")
+	assert_eq(str(_overlay._queue[-1]["text"]), "m99", "the newest message is kept")
+	assert_eq(str(_overlay._queue[0]["text"]), "m92", "the oldest queued message is dropped")
+	assert_eq((_panel_of().get_child(0) as Label).text, "first",
+		"the visible message was not replaced")

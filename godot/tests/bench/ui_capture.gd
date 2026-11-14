@@ -342,8 +342,10 @@ const SETTLE_MS := 250
 ## Upper bound on waiting for a state to settle, so a stuck pane fails the run
 ## instead of hanging it.
 const SETTLE_TIMEOUT_MS := 20000
-## Upper bound on draining the toast queue (the longest toast lasts 8 s).
-const TOAST_TIMEOUT_MS := 15000
+## Upper bound on draining the toast queue. The queue serializes now, so the
+## drain costs the sum of its messages rather than the longest: eight 8 s errors
+## is the cap `ToastOverlay.MAX_QUEUE` sets.
+const TOAST_TIMEOUT_MS := 70000
 
 var _workspace: Control = null
 ## Autoloads are not compile-time identifiers for a `-s` script (measured:
