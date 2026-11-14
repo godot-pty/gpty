@@ -208,7 +208,7 @@ Verbose logging: `RUST_LOG=debug cargo run --bin gpty -- version`
 
 ## Project Structure
 
-See [AGENTS.md](AGENTS.md) for the full directory tree.
+See the [repository map](docs/content/docs/agents/repo-map.md) for the full directory tree; [AGENTS.md](AGENTS.md) holds the rules every change needs.
 
 ## Code Style
 

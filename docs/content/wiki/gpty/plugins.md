@@ -61,8 +61,8 @@ The review dialog is not a formality. A plugin's actions run as the user, throug
 
 The blast radius is bounded by published surfaces, not by sandboxing:
 
-- **Actions may only name published tools.** `[[actions]].command` is validated against the same list `schema::mcp_tool_names()` derives — the 22 MCP tools. A manifest cannot name anything else on the socket.
-- **Event types are a closed vocabulary.** `pane.spawned`, `pane.killed`, `concept.matched`, `state.declared`, plus the generic OMP set (`session.bound`, `agent.started`, `turn.started`, `tool.call`, `thinking.delta`). Adding one is a deliberate change in lockstep with the emitting side.
+- **Actions may only name published tools.** `[[actions]].command` is validated against the same list `schema::mcp_tool_names()` derives — the 27 MCP tools. A manifest cannot name anything else on the socket.
+- **Event types are a closed vocabulary.** `pane.spawned`, `pane.killed`, `concept.matched`, `state.declared`, plus the generic OMP set (`session.bound`, `agent.started`, `turn.started`, `tool.call`, `thinking.delta`). The event socket itself also carries `session.shutdown`, `agent.settled`, `turn.finished` and `tool.finished`, which a manifest cannot declare yet. Adding one is a deliberate change in lockstep with the emitting side.
 - **Concepts capture and route display content only**; they never execute. Plugin concepts are the same engine objects a hand-written concept is.
 - **Profiles are consented at the pinned revision, down to their spawn plans.** Opening a tile that would spawn a different program or argv is already a [[workspace-trust|Workspace Trust]] decision; plugin profiles go through the same gate, and the install approval records the exact plans the review listed — a profile whose tiles change under the same revision asks again.
 

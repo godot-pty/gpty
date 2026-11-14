@@ -5,7 +5,7 @@ weight: 20
 
 - Edition: 2024 (requires Rust ≥ 1.85)
 - Format: standard `rustfmt`
-- Async runtime: `tokio` (global `LazyLock` runtime in gdext)
+- Async runtime: `tokio` (one global `LazyLock` runtime in gdext, initialised once and shared by every `GptyTerminal`)
 - Grid sharing: `Arc<Mutex<TermGrid>>` - lock briefly, clone the grid, release
 - Thread Safety: Godot's SceneTree is strictly single-threaded. NEVER call Godot methods, mutate nodes, or emit signals directly from background `tokio` threads. Instead, queue the state changes for GDScript to poll, or use Godot's thread-safe `call_deferred()`.
 - Lifecycle & Teardown: When a `GptyTerminal` is destroyed (e.g., `queue_free()` in Godot), the Rust side MUST ensure the spawned shell and background `tokio` tasks are cleanly terminated (via the `Drop` trait) to prevent zombie processes or memory leaks.

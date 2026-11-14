@@ -152,6 +152,31 @@ def check_citation(where, item):
             bad(where, f'ambiguous citation {citation} ({len(hits)} files); '
                        f'use a repo path, e.g. {hits[0]}')
 
+# ── repo paths named by the agent guide ─────────────────────────────────
+# A guide that names `crates/...`, `godot/...`, `scripts/...` or `docs/...`
+# is claiming the path exists. A rename turned that into a dead pointer with
+# every gate green (the plugin store moved into `crates/gpty-plugin` and the
+# guide kept the CLI path), so existence is checked the way a roadmap
+# citation is. Illustrative names and generated trees are skipped.
+GUIDE_PREFIXES = ('crates/', 'godot/', 'scripts/', 'docs/', 'dist/', 'fuzz/',
+                  'extensions/', 'githooks/')
+GUIDE_TOKEN = re.compile(r'`([\w.+\-/]+)`')
+agent_dir = 'docs/content/docs/agents'
+guides = ['AGENTS.md'] + [
+    f'{agent_dir}/{p}' for p in sorted(os.listdir(os.path.join(ROOT, agent_dir)))
+    if p.endswith('.md')]
+for guide in guides:
+    for m in GUIDE_TOKEN.finditer(read(guide)):
+        token = m.group(1)
+        if not token.startswith(GUIDE_PREFIXES):
+            continue
+        if '<' in token or '*' in token or 'XXXXXX' in token:
+            continue
+        if token.startswith(('dist/', 'godot/.godot/')):
+            continue
+        if not os.path.exists(os.path.join(ROOT, token)):
+            bad(guide, f'path does not exist: {token}')
+
 # ── roadmap tables ───────────────────────────────────────────────────────
 m = re.search(r'Area column names[^(]*\(([A-Z, ]+)\)', read('ROADMAP.md'))
 AREAS = {a.strip() for a in m.group(1).split(',')} if m else set()

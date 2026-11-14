@@ -15,7 +15,7 @@ description: "Work one gpty roadmap row end to end: pick and re-verify the row, 
 
 ## 2. Read the guides the area touches
 
-AGENTS.md's table: `rust.md`, `gdscript.md`, `security.md`, `pitfalls.md`, `concept-capture.md`, `plugins.md`. `security.md` is mandatory for IPC, PTY, filesystem, plugins, networking or secrets — read before editing, not after.
+AGENTS.md's table: `testing.md`, `rust.md`, `gdscript.md`, `concept-capture.md`, `inspector-reasoning-omp.md`, `plugins.md`, `security.md`, `pitfalls.md` (and `repo-map.md` for which module owns a behaviour). `security.md` is mandatory for IPC, PTY, filesystem, plugins, networking or secrets — read before editing, not after.
 
 ## 3. Bug rows: reproduce first
 
