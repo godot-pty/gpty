@@ -1,37 +1,33 @@
 name: MCP Registry
 
-# Publishes server.json to the official MCP registry when a release's workflow
-# completes, not when the release is published: release.yml creates the release
-# with the workflow's `GITHUB_TOKEN`, and GitHub starts no run for an event that
-# token produced, so `release: [published]` never fired for any release this
-# repository published (v0.7.1's entry exists only because the workflow was
-# dispatched by hand). `workflow_run` fires on the Release run's completion -
-# that run was started by the tag push, not by a token - and only after a
-# successful one, so a release that failed to build publishes nothing.
+# Publishes server.json to the official MCP registry.
+#
+# Dispatch-only, because the registry refuses a package that is not on
+# crates.io yet and publishing the crates is a maintainer step (their token
+# must never live in CI while any repository writer can push a v* tag - see the
+# v0.7.1 tag-ruleset row). The release's own completion is therefore too early:
+# a `workflow_run` trigger fired while the crates were still unpublished and
+# failed its crates.io pre-check every release (v0.8.0, v0.8.3). The order is
+# release -> publish the crates by hand -> dispatch this workflow.
 #
 # Separate from release.yml on purpose. The release artifacts are the primary
 # artifact and must not be blocked by a registry outage, but a failed publish
 # has to stay visible: a green release with no registry entry is exactly the
 # silent failure this job exists to prevent.
 #
-# The released tag is read through the contents API, never checked out, and the
-# validator always comes from `main`: this job holds `id-token: write`, so a
-# tree fetched by an event-derived ref must not be executed (code scanning
+# The descriptor is read through the contents API at the dispatched ref, and
+# the validator always comes from `main`: this job holds `id-token: write`, so
+# a tree fetched by an event-derived ref must not be executed (code scanning
 # alert 13). A consequence is that publishing an old tag uses the current
 # validator - which is the point: the checks are the ones this repository
 # enforces now, not the ones the tag shipped.
 #
 # No secret is involved. Authentication is this workflow's OIDC identity, which
-# the registry maps to the `io.github.godot-pty` namespace - a crates.io token
-# or PAT here would turn "can push a v* tag" into "can publish in the project's
-# name" (see the v0.7.1 tag-ruleset row).
+# the registry maps to the `io.github.godot-pty` namespace.
 on:
-  workflow_run:
-    workflows: ["Release"]
-    types: [completed]
   # First publication, a descriptor fix for a version whose release already
   # ran, or a release created outside the Release workflow. Publishes whatever
-  # server.json says on the selected ref.
+  # server.json says on the selected ref, after the crates are live.
   workflow_dispatch:
 
 # Least privilege: reading the repository is all this job needs beyond the OIDC
@@ -49,10 +45,6 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # A failed or cancelled release run publishes nothing. A prerelease is
-    # skipped by the resolve step (`publish=false`), because the `workflow_run`
-    # payload carries no release object to read that flag from.
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     timeout-minutes: 10
     permissions:
       contents: read
@@ -60,54 +52,25 @@ jobs:
     env:
       MCP_PUBLISHER_VERSION: v1.8.1
     steps:
-      # The `workflow_run` payload names the tag, not the release: resolve the
-      # release the run produced and carry it to every later step. A prerelease
-      # stops here as `publish=false`; for a dispatch the outputs stay empty and
-      # the `!= 'false'` gates below let the job run against the selected ref.
-      - name: Resolve the release
-        id: release
-        if: github.event_name == 'workflow_run'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.workflow_run.head_branch }}
-        run: |
-          set -euo pipefail
-          case "$TAG" in
-            v*) ;;
-            *) echo "the Release run's head_branch is '${TAG}', not a v* tag" >&2; exit 1 ;;
-          esac
-          if ! release=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"); then
-            echo "the Release run for ${TAG} concluded successfully but no release exists for that tag" >&2
-            exit 1
-          fi
-          if [ "$(jq -r .prerelease <<<"${release}")" = "true" ]; then
-            echo "${TAG} is a prerelease; nothing to publish"
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "publish=true" >> "$GITHUB_OUTPUT"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-
       # The published tree is data here, never code. This job holds
       # `id-token: write` and publishes under the project's name, so checking
-      # out the released tag and running anything from it is the pwn request
+      # out an event-derived ref and running anything from it is the pwn request
       # the actions/untrusted-checkout rules describe (code scanning alert 13).
       # The validator is default-branch code - the same source this workflow
-      # file is served from - and the tag is read through the contents API.
+      # file is served from - and the descriptor is read through the contents
+      # API at the dispatched ref.
       - name: Checkout the validator (default branch)
-        if: steps.release.outputs.publish != 'false'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # A literal: every event-derived `ref:` value is untrusted in a
-          # `workflow_run` workflow, and the checkout queries treat it as such.
+          # A literal: the checkout never follows a dispatched ref, even though
+          # a manual dispatch is less exposed than an event-derived one.
           ref: main
           persist-credentials: false
 
-      - name: Fetch the released descriptor
-        if: steps.release.outputs.publish != 'false'
+      - name: Fetch the descriptor
         env:
           GH_TOKEN: ${{ github.token }}
-          REF: ${{ steps.release.outputs.tag || github.ref_name }}
+          REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           root="${RUNNER_TEMP}/descriptor"
@@ -122,19 +85,11 @@ jobs:
       # checks the package at publish time. Fail here, with a message that says
       # what to fix, instead of inside the publisher's error. The validator runs
       # from the default branch against the staged copy, so the checks CI runs
-      # on the tree apply to the tree the tag carries.
+      # on the tree apply to the descriptor this run would publish.
       - name: Check the descriptor
-        if: steps.release.outputs.publish != 'false'
-        env:
-          TAG: ${{ steps.release.outputs.tag }}
         run: |
           python3 scripts/mcp-registry check "$DESCRIPTOR_ROOT"
           VERSION=$(jq -r .version "$DESCRIPTOR_ROOT/server.json")
-          if [ -n "${TAG}" ] && [ "v${VERSION}" != "${TAG}" ]; then
-            echo "server.json publishes ${VERSION}, but this release is ${TAG}" >&2
-            echo "bump server.json with the crates in the release commit (step 5 of the release skill)" >&2
-            exit 1
-          fi
           # The registry verifies package existence at publish; ask crates.io
           # first so a missing publish reads as one, not as a registry error.
           code=$(curl -sS -o /dev/null -w '%{http_code}' \
@@ -146,14 +101,12 @@ jobs:
           fi
 
       - name: Install cosign
-        if: steps.release.outputs.publish != 'false'
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
 
       # Pinned release, verified against the publisher's own Sigstore bundle
       # before it runs: `releases/latest` is mutable and this binary holds the
       # credential that publishes under the project's name.
       - name: Download and verify mcp-publisher
-        if: steps.release.outputs.publish != 'false'
         run: |
           set -euo pipefail
           cd "$DESCRIPTOR_ROOT"
@@ -174,7 +127,6 @@ jobs:
           ./mcp-publisher --version
 
       - name: Validate and publish
-        if: steps.release.outputs.publish != 'false'
         run: |
           set -euo pipefail
           cd "$DESCRIPTOR_ROOT"
