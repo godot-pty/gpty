@@ -108,9 +108,17 @@ func test_a_partial_update_queues_only_the_rows_it_damages():
 	assert_eq(Array(_probe._painted_rows), [2, 5],
 		"a repaint past the last band records nothing")
 
-## The end-to-end half: a real shell, a typed line, and the sync that consumes
-## its damage. The repaint must cover every row whose text changed and stay a
-## handful of rows - never the grid.
+## The end-to-end half: a real shell, a typed line, and the syncs that consume
+## its damage. Each sync's repaint must cover the rows that sync changed and
+## stay a handful of rows - never the grid.
+##
+## The assertion is per sync, not "the last paint against the whole diff": a
+## typed line can arrive in two bursts (the echo, then the command's output),
+## and the earlier version judged the rows the *first* burst changed against
+## the paint of the *last* one - which failed whenever the two did not fall in
+## one sync. Measured on Windows CI, 2026-11-14: row 3 changed while the last
+## `_painted_rows` held [4, 6] (run 43533705570), and on this machine 3 of 3
+## runs of this file alone failed the same way.
 ##
 ## It must NOT assert that the repainted rows are the cursor's: ConPTY rewrites
 ## the rows it relays, so a typed line there damaged rows 0, 3, 4 and 6 with the
@@ -121,29 +129,47 @@ func test_a_typed_line_repaints_only_the_rows_it_changed():
 	if body == null:
 		return
 	# The pane's own resize debounce produces one full sync; wait for it to
-	# settle so the sync the typing lands in cannot be that one.
+	# settle so the syncs the typing lands in cannot be that one.
 	var settled_gen := await _settle(body)
 	var rows_total: int = int(body._cell_cache.get("rows", 0))
 	assert_gte(rows_total, 10, "the pane needs a real grid: %s" % _pane_state(body))
-	var before: Array = body._cell_cache["chars"].duplicate()
+	# Sample every frame: a sync is a frame whose generation moved, the rows it
+	# changed are the diff against the previous sample, and the paint set is
+	# `_painted_rows` as that sync left it.
+	var prev_chars: Array = body._cell_cache["chars"].duplicate()
+	var prev_gen: int = body._last_grid_gen
+	var synced := 0
+	var failures: Array[String] = []
 	body._send_line_to_term("echo REPAINT_MARKER")
 	var deadline := Time.get_ticks_msec() + OUTPUT_WAIT_MS
-	while Time.get_ticks_msec() < deadline and body._last_grid_gen == settled_gen:
-		await get_tree().create_timer(0.05).timeout
-	assert_ne(body._last_grid_gen, settled_gen,
-		"the typed line must reach the pane: %s" % _pane_state(body))
-	var after: Array = body._cell_cache["chars"]
-	var changed: Array[int] = []
-	for r in mini(before.size(), after.size()):
-		if str(before[r]) != str(after[r]):
-			changed.append(r)
-	assert_gt(changed.size(), 0, "the typed line must change at least one row: %s" % _pane_state(body))
-	var painted: PackedInt32Array = body._painted_rows
-	assert_lte(painted.size(), 4,
-		"one typed line must not repaint the screen (%d of %d rows)" % [painted.size(), rows_total])
-	for r in changed:
-		assert_true(painted.has(r),
-			"a row whose text changed must be repainted (row %d, painted %s)" % [r, str(painted)])
+	var quiet_frames := 0
+	while Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+		if body._last_grid_gen == prev_gen:
+			quiet_frames += 1
+			# A few quiet frames after the first sync: the echo and the
+			# command's output may be separate bursts, so a fixed number of
+			# frames is what ends the observation, not the first quiet one.
+			if synced > 0 and quiet_frames >= 30:
+				break
+			continue
+		quiet_frames = 0
+		prev_gen = body._last_grid_gen
+		synced += 1
+		var now: Array = body._cell_cache["chars"]
+		var painted: PackedInt32Array = body._painted_rows
+		if painted.size() > 4:
+			failures.append(
+				"one typed line must not repaint the screen (sync %d painted %d of %d rows: %s)"
+				% [synced, painted.size(), rows_total, str(painted)])
+		for r in mini(prev_chars.size(), now.size()):
+			if str(prev_chars[r]) != str(now[r]) and not painted.has(r):
+				failures.append(
+					"a row whose text changed must be repainted in the sync that changed it "
+					+ "(sync %d, row %d, painted %s)" % [synced, r, str(painted)])
+		prev_chars = now.duplicate()
+	assert_gt(synced, 0, "the typed line must reach the pane: %s" % _pane_state(body))
+	assert_eq(failures, [], "\n".join(failures))
 	# The bands are children of the pane, so their order against the pane's own
 	# chrome decides what covers what: every band must sit below the search
 	# strip and the scroll hints, or the grid paints over them.
