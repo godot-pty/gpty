@@ -20,10 +20,9 @@ extends SceneTree
 ##   SPAWN_BENCH_MARKS  iterations per pass micro-measure (default 20)
 ##
 ## A real display driver is required: under `--headless` a `-s` launch clamps the
-## root to 64x64, every tile is too small to hold the minimum grid, and no child
-## starts - the run fails rather than reporting numbers for a path it never
-## exercised. POSIX only - the payload runs through `/bin/sh` and RSS/child
-## counts come from `/proc`.
+## root to 64x64 and no pane starts its child - the run fails rather than
+## reporting numbers for a path it never exercised. POSIX only - the payload runs
+## through `/bin/sh` and RSS/child counts come from `/proc`.
 ##
 ## Two numbers per spawn:
 ##   sync_us   the synchronous create call (`_spawn_pane`, what the CLI's
@@ -58,7 +57,7 @@ var _sync_by_pane: Dictionary = {}
 
 func _initialize() -> void:
 	if DisplayServer.get_name() == "headless":
-		_fail("spawn_bench needs a real display driver: a headless -s root is 64x64 and no pane can start its child")
+		_fail("spawn_bench needs a real display driver: a headless -s root is 64x64 and no pane starts its child")
 		return
 	if OS.get_name() == "Windows":
 		_fail("spawn_bench is POSIX-only: its payload runs through /bin/sh and it reads /proc")
