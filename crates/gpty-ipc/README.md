@@ -164,7 +164,7 @@ See `crates/gpty-gdext/src/omp_events.rs` and
 
 | Method | Params | Result |
 |--------|--------|--------|
-| `newPane` | `type`, `command?`, `split?`, `title?`, `focus?`, `tags?` | `{pane_id, label, type}` |
+| `newPane` | `type`, `command?`, `args?`, `split?`, `title?`, `focus?`, `tags?`, `settings?` | `{pane_id, label, type, settings}` - `settings` is the tile document the new pane holds; the request's `settings` is validated through the closed per-type table before anything spawns |
 | `listPanes` | - | `{panes: [{id, label, type, title, col, row, tags, …}], count}` |
 | `killPane` | `pane_id` | `{success: true}` |
 | `focusPane` | `pane_id` | `{success: true}` |
@@ -172,6 +172,8 @@ See `crates/gpty-gdext/src/omp_events.rs` and
 | `paneRead` | `pane_id`, `lines?` (1–2000) | `{text}` |
 | `paneStatus` | `pane_id?` | The status document (`{pid, running, exit_code, exit_reason, idle_ms, foreground_job, child_alive, agent_state, agent_state_tier}` - `exit_reason` is `exited`, `task_ended`, or `null` while running; `child_alive` stays true for a pane whose task ended without reaping its child, which `running: false` alone would hide). With no `pane_id`, the aggregate `{panes: [{pane_id, label, type, status}]}` for every tile, non-terminals carrying `status: null` |
 | `paneView` | `pane_id`, `graph?`, `note?`, `mode?` | `{success, pane_id, label, type, graph, note, view_mode}` - changes what a wiki pane shows without activating it. `note`, then `mode`, then `graph`; the answer reads the pane back rather than echoing the request, so `graph: true` is the canvas that is up |
+| `paneSet` | `pane_id`, `settings` (an object of the pane type's keys) | `{success, pane_id, label, type, changed, settings}` - sets the pane's own settings through the closed table, without activating it. All or nothing: a refused key applies nothing and answers `-32602` naming it; `changed` names the tile keys whose value moved, `settings` is the tile document. Keys marked `ipc: false` (per-pane env, the Inspector's aim, the pane id, `rows`/`cols`, the wiki graph/note gestures) are refused, and a `vault_path` change over an unsaved note answers `-32000` |
+| `paneSettings` | - | `{types: {<type>: {<key>: {kind, file, ipc, min?, max?}}}}` - the closed per-type table, projected at call time from `PaneTypes.settings_schema` |
 | `paneRun` | `command` | `{pane_id, label, type}` (exit code via `paneStatus`) |
 | `paneWait` | `pane_id`, `pattern`, `timeout_ms?` (100–60000) | `{matched, line?}` / `{matched: false, timed_out}` - response held server-side until match or deadline |
 | `broadcast` | `tags`, `text` | `{success, count}` |

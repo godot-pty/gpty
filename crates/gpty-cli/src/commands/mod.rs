@@ -13,12 +13,15 @@ pub(crate) mod move_pane;
 pub(crate) mod new_pane;
 pub(crate) mod pane_read;
 pub(crate) mod pane_run;
+pub(crate) mod pane_set;
+pub(crate) mod pane_settings;
 pub(crate) mod pane_status;
 pub(crate) mod pane_view;
 pub(crate) mod pane_wait;
 pub mod plugin;
 pub mod schema;
-pub mod state;
+pub(crate) mod settings_args;
+pub(crate) mod state;
 pub(crate) mod vault;
 pub(crate) mod wire;
 pub(crate) mod workspace_list;
@@ -36,6 +39,7 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
             title,
             focus,
             tags,
+            settings,
         } => {
             new_pane::run(
                 client,
@@ -46,10 +50,15 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
                 title.as_deref(),
                 *focus,
                 tags,
+                settings,
                 json,
             )
             .await
         }
+        Commands::PaneSet { pane_id, settings } => {
+            pane_set::run(client, pane_id, settings, json).await
+        }
+        Commands::PaneSettings => pane_settings::run(client, json).await,
         Commands::ListPanes => list_panes::run(client, json).await,
         Commands::WorkspaceList => workspace_list::run(client, json).await,
         Commands::KillPane { pane_id } => kill_pane::run(client, pane_id, json).await,

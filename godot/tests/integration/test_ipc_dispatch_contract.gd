@@ -1100,6 +1100,14 @@ func test_every_refusal_arm_answers_the_code_its_kind_owns():
 		["paneView", {"pane_id": "@viewer", "graph": "yes"}, -32602, "`graph` must be a boolean"],
 		["paneView", {"pane_id": "@viewer", "note": "x".repeat(513)}, -32602, "`note` is too long"],
 		["paneView", {"pane_id": "@viewer", "mode": "bogus"}, -32602, "`mode` must be one of"],
+		["paneSet", {"pane_id": "@viewer", "settings": {}}, -32602,
+			"name at least one setting"],
+		["paneSet", {"pane_id": "@viewer", "settings": "x"}, -32602,
+			"must be an object of pane setting keys"],
+		["paneSet", {"pane_id": "@viewer", "settings": {"bogus": 1}}, -32602,
+			"cannot be applied"],
+		["newPane", {"type": "terminal", "settings": {"tags": ["a"]}}, -32602,
+			"request field on new-pane"],
 		["killPane", {}, -32602, "Pane target required"],
 		["inject", {"pane_id": "@terminal", "text": "x".repeat(65537)}, -32602, "exceeds 64 KiB"],
 		["broadcast", {}, -32602, "Invalid broadcast request"],
@@ -1119,6 +1127,7 @@ func test_every_refusal_arm_answers_the_code_its_kind_owns():
 		["inject", {"pane_id": "@viewer", "text": "x"}, -32000, "is not a terminal"],
 		["focusPane", {"pane_id": "nosuchpane"}, -32000, "not found"],
 		["paneView", {"pane_id": "nosuchpane", "graph": true}, -32000, "not found"],
+		["paneSet", {"pane_id": "nosuchpane", "settings": {"pane_name": "x"}}, -32000, "not found"],
 		["paneView", {"pane_id": "@viewer", "graph": true}, -32000, "wiki panes"],
 		["killPane", {"pane_id": "nosuchpane"}, -32000, "not found"],
 		["layoutLoad", {"name": "gpty-no-such-profile"}, -32000, "not found"],
@@ -1228,3 +1237,136 @@ func test_move_pane_refuses_an_unknown_workspace():
 	assert_eq(_ws._workspace_for_body(term).tm.tiles.size(), before,
 		"a refused move must not touch a grid")
 	_ws._kill_now(term)
+
+# ── paneSet / paneSettings: a pane's own settings over the socket ──────
+#
+# The closed table (`PaneTypes.PANE_SETTINGS`) was reachable only from a saved
+# tile: `new-pane` carried no per-type settings and nothing could set them on a
+# live pane. These hold the one verb that does to the table, to the pane it
+# reports, and to the refusals the table's `ipc: false` markers own.
+
+## The row's motivating case: a pane created over the API is configured after
+## the fact, and the answer is the pane read back rather than the request
+## echoed. The title bar proves the rename reached the chrome, not only the
+## property.
+func test_pane_set_applies_settings_and_reads_them_back():
+	var viewer := _spawn("code_viewer")
+	var id := str(viewer.attachment_id)
+
+	var answer = WorkspaceIpcHandlers.handle(_ws, "paneSet", {
+		"pane_id": id,
+		"settings": {"pane_name": "Docs", "font_size": 18},
+	})
+
+	assert_false(answer.has("error"), "a valid settings object must apply: %s" % answer)
+	assert_true(bool(answer.get("success", false)))
+	var changed: Array = answer.get("changed", [])
+	assert_true(changed.has("pane_name"), "the renamed key must be reported: %s" % str(changed))
+	assert_true(changed.has("font_size"), "the resized key must be reported: %s" % str(changed))
+	var settings: Dictionary = answer.get("settings", {})
+	assert_eq(int(settings.get("font_size", 0)), 18, "the answer reports the pane's own value")
+	assert_eq(str(settings.get("pane_name", "")), "Docs")
+	assert_eq(viewer.font_size, 18, "the pane holds the value the answer names")
+	var label := viewer.get_parent().get_parent() \
+		.get_node_or_null("BodyVBox/TitleBar/TitleLabel") as Label
+	assert_not_null(label, "the tile must carry a title bar")
+	assert_eq(label.text, " Docs", "the rename must reach the title bar")
+	_ws._kill_now(viewer)
+
+
+## A key the table reserves refuses the whole request - nothing is half
+## applied - and the message names the keys it cannot take.
+func test_pane_set_refuses_keys_the_table_reserves():
+	var media := _spawn("media")
+	var inspector := _spawn("inspector")
+	var id := str(media.attachment_id)
+	var rows := [
+		{"settings": {"rows": 30}, "why": "rows"},
+		{"settings": {"attachment_id": "other"}, "why": "attachment_id"},
+		{"settings": {"file_path": "/x", "bogus": 1}, "why": "bogus"},
+	]
+	for row in rows:
+		var refused = WorkspaceIpcHandlers.handle(_ws, "paneSet", {
+			"pane_id": id, "settings": row["settings"],
+		})
+		assert_true(refused.has("error"), "%s must be refused" % row["why"])
+		assert_eq(int(refused["error"]["code"]), -32602, "a bad parameter is -32602")
+		assert_string_contains(str(refused["error"]["message"]), str(row["why"]))
+	assert_eq(str(media.file_path), "", "a refused call must apply nothing")
+
+	var insp = WorkspaceIpcHandlers.handle(_ws, "paneSet", {
+		"pane_id": str(inspector.attachment_id), "settings": {"system_prompt": "x"},
+	})
+	assert_true(insp.has("error"), "the Inspector's aim is the user's own record")
+	assert_eq(int(insp["error"]["code"]), -32602)
+	assert_eq(str(inspector.system_prompt), "", "nothing applied")
+	_ws._kill_now(media)
+	_ws._kill_now(inspector)
+
+
+## The save/discard question a vault change asks belongs to the user: a caller
+## that cannot answer it is refused, and the open note survives.
+func test_pane_set_refuses_to_discard_an_unsaved_note():
+	var wiki := _wiki_pane()
+	var id := str(wiki.attachment_id)
+	var opened = WorkspaceIpcHandlers.dispatch_request(_ws, {
+		"id": 71,
+		"method": "paneView",
+		"params": JSON.stringify({"pane_id": id, "note": "note.md"}),
+		"timeout_ms": 5000,
+	})
+	assert_eq(opened.size(), 1, "a note-only request answers in the batch")
+	assert_true(bool(opened[0]["success"]), "the note must open: %s" % opened[0]["payload"])
+	var before := str(wiki.vault_path)
+
+	wiki._editor.text = str(wiki._editor.text) + "\nmore\n"
+	await get_tree().process_frame
+	assert_true(wiki.has_unsaved_state(), "typing must mark the note dirty")
+
+	var refused = WorkspaceIpcHandlers.handle(_ws, "paneSet", {
+		"pane_id": id, "settings": {"vault_path": "/tmp/gpty-elsewhere"},
+	})
+	assert_true(refused.has("error"), "an unsaved buffer must refuse the vault change")
+	assert_eq(int(refused["error"]["code"]), -32000, "app state, not a bad parameter")
+	assert_string_contains(str(refused["error"]["message"]), "unsaved changes")
+	assert_eq(str(wiki.vault_path), before, "the refused change must not move the vault")
+
+	wiki._editor.text = wiki._saved_text
+	await get_tree().process_frame
+	assert_false(wiki.has_unsaved_state(), "reverting must clear the dirty state")
+	_ws._kill_now(wiki)
+
+
+## The creation door carries the same vocabulary: a pane can be built already
+## configured, and its answer is the tile document it holds.
+func test_new_pane_carries_settings_into_the_spawn():
+	var answer = WorkspaceIpcHandlers.handle(_ws, "newPane", {
+		"type": "code_viewer",
+		"settings": {"pane_name": "Created", "view_mode": "source"},
+	})
+	assert_false(answer.has("error"), "valid settings must spawn: %s" % answer)
+	var settings: Dictionary = answer.get("settings", {})
+	assert_eq(str(settings.get("pane_name", "")), "Created")
+	assert_eq(str(settings.get("view_mode", "")), "source")
+	var body = _target(str(answer.get("pane_id", "")))
+	assert_not_null(body, "the answer must name the pane it built")
+	assert_eq(str(body.pane_name), "Created", "the spawn carries the setting")
+	_ws._kill_now(body)
+
+
+## Discovery: the table the verb enforces, projected for a caller, with the
+## markers that explain a refusal.
+func test_pane_settings_reports_the_closed_table():
+	var table = WorkspaceIpcHandlers.handle(_ws, "paneSettings", {})
+	assert_true(table.has("types"), "the answer must carry every type's table")
+	var types: Dictionary = table["types"]
+	assert_eq(types.size(), PaneTypes.ALL.size(), "every registered type must be listed")
+	var media: Dictionary = types["media"]
+	assert_eq(str(media["file_path"]["kind"]), "text")
+	assert_eq(float(media["volume_db"]["min"]), -40.0, "the rule's range is published")
+	assert_eq(float(media["volume_db"]["max"]), 6.0)
+	assert_eq(media["file_path"]["ipc"], true, "a caller may point a media pane at a file")
+	assert_eq(types["terminal"]["shell_env"]["ipc"], false,
+		"env is the user's own store, and the table says so")
+	assert_eq(types["inspector"]["system_prompt"]["ipc"], false)
+	assert_eq(types["terminal"]["shell_env"]["file"], false)

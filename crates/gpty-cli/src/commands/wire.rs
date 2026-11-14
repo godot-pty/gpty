@@ -171,7 +171,12 @@ pub fn wire_params(tool: &str, arguments: &Value) -> Result<Value, String> {
                     .find(|spec| spec.id == *id)
                     .ok_or_else(|| unknown_argument(tool, id, &specs))?;
                 let key = wire_key(tool, id).unwrap_or(id.as_str());
-                params.insert(key.to_string(), coerce(spec, value)?);
+                let value = if key == "settings" {
+                    settings_argument(value)?
+                } else {
+                    coerce(spec, value)?
+                };
+                params.insert(key.to_string(), value);
             }
         }
         other => {
@@ -250,6 +255,35 @@ fn split_delimited(text: &str, delim: Option<char>) -> Vec<Value> {
             .split_whitespace()
             .map(|part| Value::String(part.to_string()))
             .collect(),
+    }
+}
+
+/// `settings` — the pane-configuration argument `pane-set` and `new-pane`
+/// share. clap can only advertise a list, and the GUI reads one object, so the
+/// pair list is converted here; an object already in the wire shape passes
+/// through, so an MCP client is not forced through the CLI's spelling.
+fn settings_argument(value: &Value) -> Result<Value, String> {
+    match value {
+        Value::Object(_) => Ok(value.clone()),
+        Value::Array(items) => {
+            let mut pairs = Vec::with_capacity(items.len());
+            for (at, item) in items.iter().enumerate() {
+                match item.as_str() {
+                    Some(text) => pairs.push(text.to_string()),
+                    None => {
+                        return Err(format!(
+                            "argument 'settings' must be an array of KEY=VALUE strings; entry {at} is {}",
+                            json_type(item)
+                        ));
+                    }
+                }
+            }
+            super::settings_args::object_from(&pairs)
+        }
+        other => Err(format!(
+            "argument 'settings' must be an object of settings or an array of KEY=VALUE strings, got {}",
+            json_type(other)
+        )),
     }
 }
 
@@ -348,11 +382,16 @@ mod tests {
                 "title": "sample",
                 "focus": true,
                 "tags": ["agent"],
+                "settings": ["pane_name=sample"],
             }),
-            "list-panes" | "workspace-list" | "concept-list" | "layout-list" | "version" => {
+            "list-panes" | "workspace-list" | "concept-list" | "layout-list" | "version"
+            | "pane-settings" => {
                 json!({})
             }
             "kill-pane" | "focus-pane" | "pane-status" => json!({"pane_id": "p1"}),
+            "pane-set" => {
+                json!({"pane_id": "p1", "settings": ["pane_name=sample", "font_size=16"]})
+            }
             "move-pane" => json!({"pane": ["p1"], "workspace": "W"}),
             "inject" => json!({"pane_id": "p1", "text": "x"}),
             "pane-read" => json!({"pane_id": "p1", "lines": 20}),
@@ -593,6 +632,35 @@ mod tests {
         let mut both = set.clone();
         both["clear"] = json!(true);
         assert!(wire_params("vault-weight", &both).is_err());
+    }
+
+    #[test]
+    fn settings_accept_the_object_and_the_pair_list() {
+        let pairs = wire_params(
+            "pane-set",
+            &json!({"pane_id": "p1", "settings": ["file_path=/x", "muted=true"]}),
+        )
+        .unwrap();
+        assert_eq!(pairs["settings"], json!({"file_path": "/x", "muted": true}));
+
+        let object = wire_params(
+            "pane-set",
+            &json!({"pane_id": "p1", "settings": {"font_size": 16}}),
+        )
+        .unwrap();
+        assert_eq!(
+            object["settings"],
+            json!({"font_size": 16}),
+            "an MCP client may send the wire shape directly"
+        );
+
+        let why = wire_params(
+            "pane-set",
+            &json!({"pane_id": "p1", "settings": ["no-equals"]}),
+        )
+        .unwrap_err();
+        assert!(why.contains("KEY=VALUE"), "{why}");
+        assert!(wire_params("pane-set", &json!({"pane_id": "p1", "settings": 5})).is_err());
     }
 
     #[test]

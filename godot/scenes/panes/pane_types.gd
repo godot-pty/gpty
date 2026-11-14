@@ -342,7 +342,10 @@ static func sanitize_shell_args(raw) -> Array:
 # is dropped (and counted for the restore notice), a known key is coerced and
 # clamped by its rule, and a rule marked `file: false` is refused to files: the
 # user's own settings, the pane panel and the app's spawn options still set it
-# through SOURCE_RUNTIME. The values are the pane's *saved* vocabulary
+# through SOURCE_RUNTIME. A rule marked `ipc: false` is refused to the control
+# surface (`paneSet`, `new-pane --setting`): those values are the user's own
+# record, the pane's identity, or state a restore consumes rather than a
+# setting. The values are the pane's *saved* vocabulary
 # (`_get_layout_state`) plus what the app itself applies; a new pane property
 # meant to survive a layout must be added here, and
 # `test_pane_settings.gd` fails when a saved key is not accepted.
@@ -350,16 +353,29 @@ static func sanitize_shell_args(raw) -> Array:
 const SOURCE_FILE := 0     ## workspaces.json / profiles.json / plugin JSON
 const SOURCE_RUNTIME := 1  ## global settings, pane panel, spawn options
 
+## A control-surface caller (`paneSet`, `new-pane --setting`): a live program
+## with the socket's authority, not a file, and not the user's own gesture.
+## It may set what the pane settings panel may, minus the values whose owner is
+## the user (env, the Inspector's aim), the pane's identity and its geometry -
+## each carries `ipc: false` in the table below.
+const SOURCE_IPC := 2
+
 ## The font-size range, shared by the settings rule and the pane panel's
 ## spinbox so the two cannot disagree.
 const FONT_SIZE_MIN := 8
 const FONT_SIZE_MAX := 32
 
 ## Shared by every pane type.
+##
+## `type` and `attachment_id` are `ipc: false`: the discriminator is read, never
+## set (a type swap is its own gesture with its own path), and the id is the
+## pane's address - renaming it re-keys the user's per-pane stores, retargets
+## companions and strands every pending wait, so the pane settings panel stays
+## its only writer.
 const COMMON_SETTINGS := {
-	"type": {"kind": "text", "max": 32},          # discriminator; read, never set
+	"type": {"kind": "text", "max": 32, "ipc": false},  # discriminator; read, never set
 	"pane_name": {"kind": "text", "max": 128},
-	"attachment_id": {"kind": "id"},
+	"attachment_id": {"kind": "id", "ipc": false},
 	"tags": {"kind": "tags"},
 	"font_size": {"kind": "int", "min": FONT_SIZE_MIN, "max": FONT_SIZE_MAX},
 }
@@ -375,11 +391,16 @@ const FONT_EXTENSIONS := ["ttf", "otf", "ttc", "woff", "woff2"]
 const SPAWN_KEYS := ["shell", "command", "shell_env"]
 
 const TERMINAL_SETTINGS := {
-	"rows": {"kind": "int", "min": 1, "max": PANE_MAX_ROWS},
-	"cols": {"kind": "int", "min": 1, "max": PANE_MAX_COLS},
+	# Geometry is the tile's: a stored size seeds a restore, and a live grid
+	# never resizes from these (`test_apply_settings_rows_cols_never_resizes_a_live_grid`),
+	# so an IPC caller setting one would change nothing it could see.
+	"rows": {"kind": "int", "min": 1, "max": PANE_MAX_ROWS, "ipc": false},
+	"cols": {"kind": "int", "min": 1, "max": PANE_MAX_COLS, "ipc": false},
 	"shell_args": {"kind": "argv"},
 	"shell_command": {"kind": "shell", "file": false},
-	"shell_env": {"kind": "text", "max": 65536, "file": false},
+	# Env is the user's own store (`PaneEnvStore`, keyed by the pane's id and
+	# written only by the pane settings UI), never a caller's block.
+	"shell_env": {"kind": "text", "max": 65536, "file": false, "ipc": false},
 	"font_path": {"kind": "font_path"},
 	# A file must not name a scheme: the read itself is capped and harmless,
 	# but appearance paths are the user's, not a shared layout's. The pane
@@ -419,10 +440,13 @@ const INSPECTOR_SETTINGS := {
 	# gesture at all - a shared profile plus a routing concept is otherwise an
 	# untrusted-instruction channel. The pane panel (SOURCE_RUNTIME) sets all
 	# three for the live pane; a restored pane starts from its own defaults
-	# (auto-send off, no prompt), and none of them is layout state.
-	"auto_run": {"kind": "bool", "file": false},
-	"accept_concept_captures": {"kind": "bool", "file": false},
-	"system_prompt": {"kind": "text", "max": 65536, "file": false},
+	# (auto-send off, no prompt), and none of them is layout state. `ipc: false`
+	# for the same reason as the panel: the aim is the user's own record
+	# (`PaneInspectorStore`), and a live-only aim would vanish at the next
+	# restart with nothing to show for it.
+	"auto_run": {"kind": "bool", "file": false, "ipc": false},
+	"accept_concept_captures": {"kind": "bool", "file": false, "ipc": false},
+	"system_prompt": {"kind": "text", "max": 65536, "file": false, "ipc": false},
 	"model": {"kind": "text", "max": 128},
 }
 
@@ -438,8 +462,11 @@ const CLI_VIEW_SETTINGS := {
 const WIKI_SETTINGS := {
 	"vault_path": {"kind": "text", "max": 4096},
 	"view_mode": {"kind": "text", "max": 32},
-	"open_note": {"kind": "text", "max": 512},
-	"graph": {"kind": "bool"},
+	# Restore-only state: both are replayed at attach and ignored on a live pane
+	# (`WikiPane.apply_settings` clears them once it is in the tree), and the
+	# gestures themselves belong to `pane-view --note` / `--graph`.
+	"open_note": {"kind": "text", "max": 512, "ipc": false},
+	"graph": {"kind": "bool", "ipc": false},
 }
 
 const MEDIA_SETTINGS := {
@@ -486,6 +513,9 @@ static func sanitize_settings(type_name: String, raw: Dictionary, source: int = 
 			dropped.append(str(key))
 			continue
 		if source == SOURCE_FILE and rule.get("file", true) == false:
+			dropped.append(key)
+			continue
+		if source == SOURCE_IPC and rule.get("ipc", true) == false:
 			dropped.append(key)
 			continue
 		var value = _value_for_rule(rule, raw[key])

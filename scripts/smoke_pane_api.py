@@ -1834,6 +1834,72 @@ def main() -> int:
         )
         smoke.cli("kill-pane", view_id, "--json")
 
+        # ── pane-settings / pane-set: a pane's own settings ───────────
+        # The closed table is GDScript, so `pane-settings` is the discovery
+        # door an agent uses instead of guessing key names; `pane-set` writes
+        # through the same table and answers the pane read back. A reserved
+        # key (`rows` is the tile's) must refuse the whole call, and
+        # `new-pane --setting` carries the vocabulary into the spawn.
+        smoke.enter("pane-settings")
+        table = smoke.result(smoke.cli("pane-settings", "--json"), "pane-settings")
+        types = table.get("types") or {}
+        media_keys = types.get("media") or {}
+        smoke.require(
+            (media_keys.get("file_path") or {}).get("kind") == "text",
+            "pane-settings must publish a media pane's keys",
+            media_keys,
+        )
+        smoke.require(
+            (types.get("terminal") or {}).get("shell_env", {}).get("ipc") is False,
+            "the table must mark the user's own env as not settable over IPC",
+            types.get("terminal"),
+        )
+
+        smoke.enter("pane-set")
+        created = smoke.result(
+            smoke.cli(
+                "new-pane", "-t", "code_viewer",
+                "--setting", "pane_name=SmokeCreated", "--json",
+            ),
+            "new-pane --setting",
+        )
+        created_id = created.get("pane_id")
+        smoke.require(bool(created_id), "new-pane must return a pane_id", created)
+        smoke.require(
+            (created.get("settings") or {}).get("pane_name") == "SmokeCreated",
+            "new-pane must answer the settings the pane holds",
+            created,
+        )
+        applied = smoke.result(
+            smoke.cli(
+                "pane-set", created_id,
+                "--setting", "pane_name=SmokeSettings",
+                "--setting", "view_mode=source",
+                "--json",
+            ),
+            "pane-set",
+        )
+        changed = applied.get("changed") or []
+        smoke.require("pane_name" in changed, "pane-set must report the keys that moved", applied)
+        smoke.require("view_mode" in changed, "a second setting must land in one call", applied)
+        smoke.require(
+            (applied.get("settings") or {}).get("pane_name") == "SmokeSettings",
+            "the answer must read the pane back",
+            applied,
+        )
+        reserved = smoke.cli("pane-set", created_id, "--setting", "rows=30", "--json", check=False)
+        smoke.require(
+            isinstance(reserved.get("error"), dict),
+            "a key the table reserves must be refused",
+            reserved,
+        )
+        smoke.require(
+            "cannot be applied" in str(reserved["error"].get("message", "")),
+            "the refusal must name what it cannot take",
+            reserved,
+        )
+        smoke.cli("kill-pane", created_id, "--json")
+
         # ── media: a file-backed pane type ───────────────────────────
         # Playback is GUI-side and its formats are a closed local table, so
         # the API half this pins is the registration: `new-pane -t media`

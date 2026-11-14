@@ -333,6 +333,14 @@ func request_close(answer: Callable) -> void:
 func has_unsaved_state() -> bool:
 	return false
 
+## Whether applying `settings` would discard work this pane holds unsaved.
+##
+## The save/discard question belongs to the user, so a caller that cannot answer
+## it (an IPC verb) refuses instead of asking. A pane whose settings never touch
+## its document answers false, which is every pane but the wiki's vault change.
+func would_discard_unsaved(_settings: Dictionary) -> bool:
+	return false
+
 ## Whether destroying this pane would stop work that is still running — the
 ## other thing a close can lose, and a different question from unsaved state:
 ## a process can be restarted, a lost edit cannot. A caller that can show a

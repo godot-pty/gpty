@@ -1927,6 +1927,13 @@ func request_close(answer: Callable) -> void:
 func has_unsaved_state() -> bool:
 	return _is_dirty()
 
+## A vault change discards the open note's buffer — with a toast when a person
+## makes the change in the pane settings. `paneSet` asks this first and refuses
+## instead: a caller cannot answer the save/discard question.
+func would_discard_unsaved(settings: Dictionary) -> bool:
+	return _is_dirty() and settings.has("vault_path") \
+		and str(settings["vault_path"]) != vault_path
+
 func apply_settings(settings: Dictionary):
 	var previous_vault := vault_path
 	var previous_root := _vault_root

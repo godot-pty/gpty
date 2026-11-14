@@ -23,6 +23,7 @@ pub async fn run(
     title: Option<&str>,
     focus: bool,
     tags: &[String],
+    settings: &[String],
     json: bool,
 ) -> anyhow::Result<()> {
     // Validate pane type with "did you mean?" suggestions.
@@ -77,5 +78,12 @@ pub async fn run(
             .map(|t| serde_json::Value::String(t.clone()))
             .collect(),
     );
+    // The pane's own settings, through the GUI's closed table: the object the
+    // handler validates before anything spawns, so a refused key leaves no
+    // pane behind. `gpty pane-settings` lists the keys.
+    if !settings.is_empty() {
+        params["settings"] =
+            super::settings_args::object_from(settings).map_err(anyhow::Error::msg)?;
+    }
     super::call_and_format(client, "newPane", params, json).await
 }

@@ -301,6 +301,8 @@ pub async fn start_ipc_server_inner(socket_path: &str) {
         "paneRead",
         "paneStatus",
         "paneView",
+        "paneSet",
+        "paneSettings",
         "paneRun",
         "paneWait",
         "broadcast",

@@ -18,7 +18,7 @@ All three reach the same handlers in the running GUI. The CLI is a stateless cli
 
 | Method | Params | Answers |
 |---|---|---|
-| `newPane` | `type`, `command?`, `split?` (`left`/`right`/`top`/`bottom`), `title?`, `focus?`, `tags?` | `{pane_id, label, type}` |
+| `newPane` | `type`, `command?`, `args?`, `split?` (`left`/`right`/`top`/`bottom`), `title?`, `focus?`, `tags?`, `settings?` (the pane's own keys, from `paneSettings`) | `{pane_id, label, type, settings}` — `settings` is the tile document the new pane holds |
 | `listPanes` | — | `{panes: [{id, label, type, title, col, row, tags, …}], count}` |
 | `killPane` | `pane_id` | `{success}` |
 | `focusPane` | `pane_id` | `{success}` |
@@ -26,6 +26,8 @@ All three reach the same handlers in the running GUI. The CLI is a stateless cli
 | `paneRead` | `pane_id`, `lines?` (1–2000) | `{text}` — screen plus scrollback |
 | `paneStatus` | `pane_id?` | One status document, or `{panes: [...]}` for every pane |
 | `paneView` | `pane_id`, `graph?`, `note?`, `mode?` | `{success, pane_id, label, type, graph, note, view_mode}` — display-only: changes what a wiki pane shows (link graph, a note, the note view mode) without activating it. Applied note, mode, graph; the answer reads the pane back |
+| `paneSet` | `pane_id`, `settings` (an object of the pane type's keys) | `{success, pane_id, label, type, changed, settings}` — display-only and focus-free: sets the pane's own settings through the closed table. All or nothing (a refused key applies nothing and answers `-32602` naming it); `changed` names the tile keys whose value moved, `settings` is the tile document the pane now holds. Keys marked `ipc: false` (per-pane env, the Inspector's aim, the pane id, `rows`/`cols`, the wiki graph/note gestures) are refused, and a `vault_path` change that would discard an unsaved note answers `-32000` |
+| `paneSettings` | — | `{types: {<type>: {<key>: {kind, file, ipc, min?, max?}}}}` — the closed per-type table, projected from the GUI's own definitions so it cannot drift from what `paneSet` enforces |
 | `paneRun` | `command` | `{pane_id, label, type}` |
 | `paneWait` | `pane_id`, `pattern`, `timeout_ms?` (100–60000) | `{matched, line?}` or `{matched: false, timed_out}` |
 | `broadcast` | `tags`, `text` | `{success, count}` |

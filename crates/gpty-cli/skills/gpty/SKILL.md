@@ -25,6 +25,8 @@ You are running inside one pane of a gPTY terminal workspace. Use the `gpty` CLI
 | `move-pane` | `gpty move-pane --pane <pane> --workspace <name>` |
 | `inject` | `gpty inject <pane> --text "..."` |
 | `pane-view` | `gpty pane-view <pane> --graph` (or `--note <path>`, `--mode edit\|split\|preview`) |
+| `pane-set` | `gpty pane-set <pane> --setting KEY=VALUE` (repeatable) |
+| `pane-settings` | `gpty pane-settings` |
 | `layout-save` | `gpty layout save <name>` |
 | `layout-load` | `gpty layout load <name>` |
 | `layout-list` | `gpty layout list` |
@@ -46,7 +48,7 @@ says so and names `daemon-start`, which is the explicit bootstrap over MCP.
 
 - `gpty schema` prints the full command set as JSON Schema (`--format mcp` for the MCP tool manifest). It needs no running GUI and is generated from the same definitions as `gpty --help`, so it is the authority when this table and the binary disagree.
 - `gpty mcp` is the MCP server itself, speaking over stdio. You are already using it if the tools above appear in your tool list; it is not something to call from a shell recipe.
-- `new-pane` takes the pane's display title (`--title`), its broadcast tags (`--tags a,b`), its placement (`--split left|right|top|bottom`, a side of the largest tile; when that side cannot fit, the tile's aspect decides), and `--focus true|false` (default: true). The `new-pane` tool's parameters are those same options under their clap ids — `pane_type`, `command`, `args`, `split`, `title`, `tags`, `focus` — so a tool call and the CLI reach the same spawn. `command` is a command line run through your shell for a terminal (so compound commands, pipes and globs work) and the program for a `cli_view` pane; a terminal's program itself comes from a profile or a saved tile, and both `new-pane` and `pane-run` answer only after the new pane's child has started.
+- `new-pane` takes the pane's display title (`--title`), its broadcast tags (`--tags a,b`), its placement (`--split left|right|top|bottom`, a side of the largest tile; when that side cannot fit, the tile's aspect decides), `--focus true|false` (default: true), and `--setting KEY=VALUE` for the pane's own settings (below). The `new-pane` tool's parameters are those same options under their clap ids — `pane_type`, `command`, `args`, `split`, `title`, `tags`, `focus`, `settings` — so a tool call and the CLI reach the same spawn. `command` is a command line run through your shell for a terminal (so compound commands, pipes and globs work) and the program for a `cli_view` pane; a terminal's program itself comes from a profile, a saved tile, or a `--setting shell_command=…`, and both `new-pane` and `pane-run` answer only after the new pane's child has started.
 - A tool that fails answers a successful `tools/call` response with `isError: true` and the handler's own sentence; a JSON-RPC error means the call itself was malformed or no GUI is running.
 - `gpty plugin` installs and manages plugins, which run code as the user. Installing one is a human decision made in a review dialog in the GUI. Never install, enable, or remove a plugin on your own; if a task needs one, tell the user which and why.
 
@@ -98,6 +100,29 @@ gpty pane-read V1 --lines 100
 
 Arguments after `--arg` are passed verbatim (no shell evaluation), and
 `pane-read` returns the body text, so you can check on it later.
+
+### Configure a pane
+
+A pane's own settings (`file_path`, `vault_path`, `volume_db`, `tags`,
+`font_size`, …) come from its type's closed table, the same one the pane
+settings panel writes. Ask for it instead of guessing:
+
+```
+gpty pane-settings                     # every type's keys, with kind/range/file/ipc
+gpty new-pane -t media --setting file_path=/clip.mp4
+gpty pane-set C1 --setting 'tags=["ci"]' --setting font_size=16
+```
+
+A `KEY=VALUE` value is JSON when it parses (`true`, `-6`, `["a","b"]`) and a
+string otherwise, so `file_path=/x/y` needs no quotes; an empty value clears
+(`--setting file_path=`). A call is all-or-nothing: every key is checked first,
+and a refusal names the keys it cannot take, so a typo never half-applies.
+The answer reads the pane back — `changed` lists the saved keys whose value
+moved. A key with `ipc: false` in `pane-settings` is refused: per-pane env, the
+Inspector's prompt and switches, the pane id, `rows`/`cols` and the wiki
+graph/note gestures belong to the person at the GUI (`pane-view` owns the last
+two). The answer's `settings` is the tile document, which names a terminal's
+program `shell`.
 
 ### Waiting for output patterns
 

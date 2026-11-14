@@ -82,18 +82,20 @@ func spawn_pane(type_name: String, opts: Dictionary = {}, workspace_cwd := "") -
 	if body is TerminalPane:
 		body.workspace_cwd = str(workspace_cwd)
 
-	var title = opts.get("title_label", PaneTypes.ALL.get(type_name, {}).get("name", type_name))
+	# The pane's own name, once `apply_settings` has had it: a spawn that names
+	# `pane_name` shows it, and a nameless pane shows its type's name.
+	var title = opts.get("title_label", body.display_name())
 	var w = _build_wrapper_body(body, title)
 
 	if not adopt(w, str(opts.get("split", ""))):
 		w.queue_free()
 		return null
 
-	# For terminal panes, resolve the shell override and wire dynamic title.
+	# For terminal panes, resolve the shell override. The title wiring lives in
+	# `Workspace._attach_pane_into`, which every entry route goes through.
 	if type_name == "terminal":
 		var s = opts.get("shell_command", SettingsManager.cfg_shell_command)
 		body.shell_command = s if s != "" else SettingsManager.cfg_shell_command
-		body.title_changed.connect(func(t: String): set_title_label(w, t))
 
 	return body
 

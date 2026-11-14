@@ -196,7 +196,13 @@ static func dispatch_request(ws, req: Dictionary) -> Array:
 	# returns, so an answer naming a pane is held (`_hold_pane_answer`) until
 	# the pane reports the outcome: a spawn that failed answers an error
 	# instead of a success over a tile that can never run anything.
-	if result is Dictionary and result.has("pane_id") and ws._hold_pane_answer(int(id), result):
+	#
+	# Only the two methods that create the pane they name inherit that rule.
+	# `paneSet` answers for a pane that already exists: holding it until some
+	# (restored, never shown) terminal starts would answer a settings call with
+	# "Pane 'X' never started".
+	if result is Dictionary and result.has("pane_id") \
+			and method in ["newPane", "paneRun"] and ws._hold_pane_answer(int(id), result):
 		return []
 	return [_answer(id, true, result)]
 
@@ -224,6 +230,30 @@ static func view_answer(pane) -> Dictionary:
 	answer["note"] = str(view["note"])
 	answer["view_mode"] = str(view["view_mode"])
 	return answer
+
+
+## Validate one request's `settings` object against a pane type's closed table
+## at the IPC source (`PaneTypes.SOURCE_IPC`).
+##
+## Returns `{"settings": Dictionary}` — every key accepted, coerced and clamped —
+## or `{"error": String}` when any key was refused. All or nothing: nothing is
+## applied on a refusal, because a caller cannot inspect a half-applied pane and
+## a key silently dropped is the defect these verbs exist to remove.
+##
+## `paneSet` and `newPane` both read it, so a `new-pane --setting` and a later
+## `pane-set` can never disagree about what the table accepts.
+static func settings_request(type_name: String, raw) -> Dictionary:
+	if not (raw is Dictionary):
+		return {"error": "`settings` must be an object of pane setting keys"}
+	if raw.is_empty():
+		return {"error": "`settings` must name at least one setting"}
+	var filtered: Dictionary = PaneTypes.sanitize_settings(type_name, raw, PaneTypes.SOURCE_IPC)
+	if not filtered["dropped"].is_empty():
+		return {
+			"error": "`settings` cannot be applied to this pane: %s (an unknown key, a value of the wrong type, or a key reserved to the pane's own settings UI)"
+				% ", ".join(filtered["dropped"]),
+		}
+	return {"settings": filtered["settings"]}
 
 
 static func handle(ws, method: String, params: Dictionary):
@@ -348,30 +378,50 @@ static func handle(ws, method: String, params: Dictionary):
 			if typeof(np_focus) != TYPE_BOOL:
 				return bad_param("`focus` must be a boolean")
 			var np_tags: Array = PaneTypes.sanitize_tags(params.get("tags", []))
-			var np_opts: Dictionary
+			# A pane's own settings ride the same closed table the pane settings
+			# panel uses, at the IPC source: `new-pane --setting file_path=/x`
+			# is how a caller creates a media pane that plays something.
+			var np_settings: Dictionary = {}
+			if params.has("settings"):
+				var np_parsed: Dictionary = settings_request(type_name, params.get("settings", null))
+				if np_parsed.has("error"):
+					return bad_param(str(np_parsed["error"]))
+				np_settings = np_parsed["settings"]
+				# `tags` is a request field on this verb; two doors for one value
+				# would make one of them silent.
+				if np_settings.has("tags"):
+					return bad_param("`tags` is a request field on new-pane, not a setting")
+			# Settings seed the spawn options; the dedicated flags below override
+			# them, so `--setting shell_command=/bin/zsh --command "echo hi"`
+			# composes: the program from the setting, the argv from the command.
+			var np_opts: Dictionary = np_settings.duplicate()
 			if type_name == "cli_view":
 				# argv, not a shell string: the pane runs the program directly,
 				# so `command` is the program and `args` its argument vector.
-				np_opts = {
-					"command": PaneTypes.sanitize_shell(params.get("command"), ""),
-					"shell_args": PaneTypes.sanitize_shell_args(params.get("args", [])),
-					"tags": np_tags,
-				}
+				var np_program := PaneTypes.sanitize_shell(params.get("command"), "")
+				if np_program != "":
+					np_opts["command"] = np_program
+				var np_args: Array = PaneTypes.sanitize_shell_args(params.get("args", []))
+				if not np_args.is_empty() or not np_opts.has("shell_args"):
+					np_opts["shell_args"] = np_args
 			else:
 				# `command` on a terminal is a command LINE, run through the
-				# same configured shell `paneRun` uses (`-c`, or `/c` for
-				# `cmd.exe`), never the pane's program: the old mapping put
-				# the line into `shell_command`, so "echo hi" was spawned as a
-				# program of that name and the call answered a success over a
-				# child that never started. A program is set by a profile or a
-				# saved tile — the two surfaces that own one.
-				var np_shell: String = SettingsManager.cfg_shell_command
-				np_opts = {"shell_command": np_shell, "tags": np_tags}
+				# pane's shell (`-c`, or `/c` for `cmd.exe`), never the pane's
+				# program: the old mapping put the line into `shell_command`, so
+				# "echo hi" was spawned as a program of that name and the call
+				# answered a success over a child that never started. A program
+				# comes from a profile, a saved tile, or a `settings` entry - the
+				# three surfaces that own one - and a settings-supplied program is
+				# the shell the command line runs through, so `shell_run_args`
+				# reads the effective one.
+				var np_shell: String = str(np_opts.get("shell_command", SettingsManager.cfg_shell_command))
+				np_opts["shell_command"] = np_shell
 				var np_command := str(params.get("command", "")).strip_edges()
 				if np_command != "":
 					if np_command.length() > 1024 or np_command.contains("\uFFFD"):
 						return bad_param("Invalid command")
 					np_opts["shell_args"] = PaneTypes.shell_run_args(np_shell, np_command)
+			np_opts["tags"] = np_tags
 			# A display title, never the pane's addressable label
 			# (`pane_label`): the request names it `title`, the spawn options
 			# name it `title_label` (what `spawn_pane` reads), and an empty
@@ -407,7 +457,69 @@ static func handle(ws, method: String, params: Dictionary):
 			# The spawn activated the pane unless the caller passed
 			# `focus: false` (`_spawn_pane_into` records and focuses it there).
 			GptyTerminal.emit_event(JSON.stringify({"type": "pane", "event": "spawned", "pane_id": body.attachment_id, "label": body.pane_label}))
-			return {"pane_id": body.attachment_id, "label": body.pane_label, "type": type_name}
+			# `settings` is the tile document the pane now holds, read back
+			# rather than echoed: it is how a `--setting` caller confirms what
+			# was built without a second call.
+			return {
+				"pane_id": body.attachment_id, "label": body.pane_label,
+				"type": type_name, "settings": body._get_layout_state(),
+			}
+		"paneSet":
+			# The pane's own settings, at the IPC source: the closed table decides
+			# what may be set. The answer reads the pane back, so a value the pane
+			# normalizes is visible as `changed: []` instead of a success the
+			# caller cannot check. Focus-free, like `paneView`.
+			var pset_target := str(params.get("pane_id", ""))
+			var pset_found: Dictionary = ws._resolve_pane_target(pset_target)
+			if pset_found.has("error"):
+				return target_refusal(pset_found)
+			var pset_body: Control = pset_found["body"]
+			var pset_valid: Dictionary = settings_request(pset_body._pane_type(), params.get("settings", null))
+			if pset_valid.has("error"):
+				return bad_param(str(pset_valid["error"]))
+			var pset_applied: Dictionary = pset_valid["settings"]
+			# A caller cannot answer the save/discard question a vault change
+			# asks; the rule `paneView`'s note swap and `killPane` already follow.
+			if pset_body.would_discard_unsaved(pset_applied):
+				return refused("Pane '%s' has unsaved changes; save or discard them in the pane, then retry" % pset_target)
+			var pset_before: Dictionary = pset_body._get_layout_state()
+			pset_body.apply_settings(pset_applied)
+			var pset_after: Dictionary = pset_body._get_layout_state()
+			var pset_changed := []
+			for pset_key in pset_after:
+				if not pset_before.has(pset_key) or pset_before[pset_key] != pset_after[pset_key]:
+					pset_changed.append(str(pset_key))
+			# Assignments, not a literal: `mcp.rs` reads every two-tab quoted
+			# literal in this file as a dispatch arm (`view_answer`'s rule).
+			var pset_answer := {}
+			pset_answer["success"] = true
+			pset_answer["pane_id"] = pset_body.attachment_id
+			pset_answer["label"] = pset_body.pane_label
+			pset_answer["type"] = pset_body._pane_type()
+			pset_answer["changed"] = pset_changed
+			pset_answer["settings"] = pset_after
+			return pset_answer
+		"paneSettings":
+			# The closed table itself: a caller that may set a pane's settings has
+			# to be able to ask what they are called. Projected at call time from
+			# `PaneTypes.settings_schema`, so it cannot drift from the table
+			# `sanitize_settings` enforces.
+			var pst_types := {}
+			for pst_type in PaneTypes.ALL:
+				var pst_schema: Dictionary = PaneTypes.settings_schema(pst_type)
+				var pst_keys := {}
+				for pst_key in pst_schema:
+					var pst_rule: Dictionary = pst_schema[pst_key]
+					var pst_out := {}
+					pst_out["kind"] = str(pst_rule.get("kind", ""))
+					pst_out["file"] = pst_rule.get("file", true)
+					pst_out["ipc"] = pst_rule.get("ipc", true)
+					for pst_bound in ["min", "max"]:
+						if pst_rule.has(pst_bound):
+							pst_out[pst_bound] = pst_rule[pst_bound]
+					pst_keys[pst_key] = pst_out
+				pst_types[pst_type] = pst_keys
+			return {"types": pst_types}
 		"paneRead":
 			var pr_found: Dictionary = ws._resolve_pane_target(str(params.get("pane_id", "")))
 			if pr_found.has("error"):

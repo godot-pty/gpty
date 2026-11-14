@@ -19,7 +19,7 @@ The second point matters for automation: a typo in a pane type fails immediately
 
 | Command | What it does |
 |---|---|
-| `new-pane` | Open a pane. `-t/--pane-type` (terminal, code_viewer, file_tree, inspector, reasoning, cli_view, wiki, media), `-c/--command` (a command line run through your shell for a terminal; the program for `cli_view`), `--arg` (repeatable, `cli_view` argv), `-s/--split left\|right\|top\|bottom` (a side of the largest tile; when it cannot fit, the tile's aspect decides), `--title`, `-f/--focus true\|false` (default true), `--tags` |
+| `new-pane` | Open a pane. `-t/--pane-type` (terminal, code_viewer, file_tree, inspector, reasoning, cli_view, wiki, media), `-c/--command` (a command line run through your shell for a terminal; the program for `cli_view`), `--arg` (repeatable, `cli_view` argv), `-s/--split left\|right\|top\|bottom` (a side of the largest tile; when it cannot fit, the tile's aspect decides), `--title`, `-f/--focus true\|false` (default true), `--tags`, `--setting KEY=VALUE` (repeatable; a pane setting from the closed table `pane-set` writes, which the dedicated flags win over) |
 | `list-panes` | Every pane with id, label, type, and grid position |
 | `kill-pane` | Close a pane by id, or `"active"` for the focused one |
 | `focus-pane` | Focus a pane by id |
@@ -27,6 +27,8 @@ The second point matters for automation: a typo in a pane type fails immediately
 | `pane-read` | Screen plus scrollback text (`--lines` 1–2000) |
 | `pane-status` | Status of one pane, or of every pane when no id is given |
 | `pane-view` | Change what a pane shows, without activating it: `--graph` (a wiki pane's link graph), `--note <path>` (a vault-relative note), `--mode edit\|split\|preview`. Applied in the order note, mode, graph; one of the three is required |
+| `pane-set` | Change a pane's own settings, without activating it: `--setting KEY=VALUE` (repeatable; a value is JSON when it parses, otherwise a string). The keys are the pane type's closed table (`gpty pane-settings` lists them, with `file`/`ipc` markers for who may set each one); every key is checked before anything applies, a refusal names the keys it cannot take, and the answer reads the pane back (`changed`, `settings`) |
+| `pane-settings` | Every pane type's settable settings and their rules (`kind`, `min`/`max`, `file`, `ipc`), projected from the GUI's own table; needs a running GUI |
 | `pane-run` | Run a command in a new terminal pane (`--command`) |
 | `pane-wait` | Wait for output matching a regex (`--pattern`, `--timeout-ms` 100–60000) |
 | `state` | Declare the current pane's agent state (`idle`, `working`, `needs-attention`, `completed`, `failed`) |

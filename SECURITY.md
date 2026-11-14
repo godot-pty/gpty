@@ -323,7 +323,10 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   panes do not exist while it opens); and an rc file that exports `GPTY_SECRET` puts it back into
   every pane's own shell, because
   the PTY strip happens before that shell starts. The reach is the whole control surface - `inject`, `pane-run`,
-  `broadcast`, `new-pane`, `kill-pane` and `pane-read` - so another pane's input *and* its output. Any
+  `broadcast`, `new-pane`, `kill-pane`, `pane-read` and `pane-set` - so another pane's input *and* its output, and
+  the settings that decide what it shows or, at its next restart, what it runs. `pane-set` cannot touch the
+  user-owned stores (per-pane env, the Inspector's aim, the vault root registry) or a pane's identity: those keys
+  are refused over the socket, so the reach is the pane's own configuration, not the user's consent records. Any
   process that can run in a pane (an install script, a `curl | sh`, a compromised dependency, an agent
   following an injected prompt) can type into your other panes, including a root shell or an SSH
   session, and read what they print. gPTY does not separate panes from each other and makes no such

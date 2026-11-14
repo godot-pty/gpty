@@ -101,6 +101,10 @@ enum Commands {
         /// Comma-separated pane tags for broadcast targeting
         #[arg(long, value_delimiter = ',')]
         tags: Vec<String>,
+
+        /// Pane setting as KEY=VALUE (repeatable); `pane-settings` lists the keys
+        #[arg(long = "setting", value_name = "KEY=VALUE")]
+        settings: Vec<String>,
     },
 
     /// List all active panes
@@ -182,6 +186,19 @@ enum Commands {
         #[arg(long, default_value = "200")]
         lines: i64,
     },
+
+    /// Change a pane's own settings (per-type keys from `pane-settings`)
+    PaneSet {
+        /// Target pane ID, or a label unique across workspaces
+        pane_id: String,
+
+        /// Pane setting as KEY=VALUE (repeatable; `pane-settings` lists the keys)
+        #[arg(long = "setting", value_name = "KEY=VALUE", required = true)]
+        settings: Vec<String>,
+    },
+
+    /// List each pane type's settable settings and their rules
+    PaneSettings,
 
     /// Change what a pane shows: the wiki link graph, a note, or the view mode
     PaneView {
@@ -389,9 +406,11 @@ enum PluginAction {
 /// saved layout. Every other command needs a workspace that already exists —
 /// starting one would add a window and then fail at the command's actual
 /// work, so those answer with `daemon::NO_GUI_HINT` instead (the same
-/// message `--no-daemon` produces for the two that may spawn). `plugin
-/// install` and `daemon start` never reach this gate: each is handled in its
-/// own arm (the install review, and the explicit start).
+/// message `--no-daemon` produces for the two that may spawn). That includes
+/// `pane-set`/`pane-settings`: a fresh GUI has no pane to set, and the table
+/// answers only once a workspace exists. `plugin install` and `daemon start`
+/// never reach this gate: each is handled in its own arm (the install review,
+/// and the explicit start).
 ///
 /// Exhaustive on purpose: a new subcommand must choose a side.
 fn may_autospawn(cmd: &Commands) -> bool {
@@ -412,6 +431,8 @@ fn may_autospawn(cmd: &Commands) -> bool {
         | Commands::Concept { .. }
         | Commands::Plugin { .. }
         | Commands::PaneRead { .. }
+        | Commands::PaneSet { .. }
+        | Commands::PaneSettings
         | Commands::PaneView { .. }
         | Commands::PaneStatus { .. }
         | Commands::State { .. }

@@ -35,6 +35,7 @@ gpty/
 │   ├── content/docs/changelog/ # One page per release (vX.Y.Z.md)
 │   ├── content/wiki/           # Knowledge-base vault; scripts/build-wiki packs it into godot/knowledge.json
 │   ├── data/cost-history.json  # Memory-cost ledger; scripts/render-cost-chart draws the README chart from it
+│   ├── data/capabilities/      # Capability catalogue, one JSON per area (state, not the queue); scripts/check-capabilities gates it
 │   └── static/images/          # Release screenshots, roadmap evidence images, the generated cost chart
 ├── LICENSE
 ├── LICENSE-EXCEPTIONS.md       # GPLv3 §7 permissions: plugins + data stay non-copyleft
@@ -234,7 +235,7 @@ media pane → GptyMedia.open(JSON) → gpty-media MediaSession worker thread (p
 
 ## MCP Integration
 
-gPTY ships an MCP server (`gpty mcp`) that exposes 25 tools for AI agent integration.
+gPTY ships an MCP server (`gpty mcp`) that exposes 27 tools for AI agent integration.
 AI agents and coding harnesses can discover these via the `mcp.json` that's at the root of the repository.
 
 ```json
@@ -242,7 +243,7 @@ AI agents and coding harnesses can discover these via the `mcp.json` that's at t
 {"mcpServers": {"gpty": {"command": "gpty", "args": ["mcp"]}}}
 ```
 
-Tools: `new-pane`, `list-panes`, `workspace-list`, `kill-pane`, `focus-pane`, `move-pane`, `inject`, `layout-save`, `layout-load`, `layout-list`, `daemon-start`, `daemon-stop`, `daemon-status`, `concept-list`, `concept-toggle`, `pane-read`, `pane-status`, `pane-view`, `pane-run`, `pane-wait`, `broadcast`, `vault-search`, `vault-read`, `vault-weight`, `version`.
+Tools: `new-pane`, `list-panes`, `workspace-list`, `kill-pane`, `focus-pane`, `move-pane`, `inject`, `layout-save`, `layout-load`, `layout-list`, `daemon-start`, `daemon-stop`, `daemon-status`, `concept-list`, `concept-toggle`, `pane-read`, `pane-status`, `pane-view`, `pane-set`, `pane-settings`, `pane-run`, `pane-wait`, `broadcast`, `vault-search`, `vault-read`, `vault-weight`, `version`.
 
 `tools/call` validates the requested name against `schema::mcp_tool_names()` before dispatch: the kebab→camel mapping turns any string into an IPC method, so without the gate a client reaches methods that were never published as tools (e.g. `shutdown`).
 

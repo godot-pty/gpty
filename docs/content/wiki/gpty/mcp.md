@@ -16,11 +16,12 @@ Configure it the way your harness documents a stdio server: command `gpty`, argu
 
 ## The tool set
 
-Twenty-three tools are published, mirroring CLI actions and kebab-cased:
+Twenty-seven tools are published, mirroring CLI actions and kebab-cased:
 
 | Area | Tools |
 |---|---|
-| Panes | `new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `inject`, `pane-read`, `pane-status`, `pane-view`, `pane-run`, `pane-wait` |
+| Panes | `new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `move-pane`, `inject`, `pane-read`, `pane-status`, `pane-view`, `pane-set`, `pane-settings`, `pane-run`, `pane-wait` |
+| Workspaces | `workspace-list` |
 | Fan-out | `broadcast` |
 | Layout | `layout-save`, `layout-load`, `layout-list` |
 | Daemon | `daemon-start`, `daemon-stop`, `daemon-status` |

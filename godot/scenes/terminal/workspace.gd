@@ -1179,8 +1179,10 @@ func _attach_pane_into(ws: Dictionary, w: Control, body: Control):
 	body.request_pane.connect(func(type_name: String, settings: Dictionary):
 		_request_pane_for(body, type_name, settings)
 	)
+	# Every pane may be renamed (pane settings, `paneSet`); only terminals used
+	# to be wired for it, so a renamed viewer kept its old title.
+	body.title_changed.connect(func(t: String): TerminalManager.set_title_label(w, t))
 	if body is TerminalPane:
-		body.title_changed.connect(func(t: String): TerminalManager.set_title_label(w, t))
 		# A pane answer is held until its child starts, so the outcome comes
 		# back through here: success releases the answer, a refusal answers it
 		# with the reason and closes the tile. Both are emitted a frame after

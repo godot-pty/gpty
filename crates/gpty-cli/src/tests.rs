@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use clap::CommandFactory;
 use gpty_ipc::client::IpcClient;
 use gpty_ipc::server::{HandlerFn, IpcServer};
 use serde_json::Value;
@@ -125,6 +126,7 @@ async fn new_pane_roundtrip_params_and_output() {
         Some("MARKER"),
         true,
         &["ci".to_string()],
+        &[],
         true,
     )
     .await
@@ -179,6 +181,7 @@ async fn cli_view_roundtrip_carries_argv() {
         Some("right"),
         None,
         true,
+        &[],
         &[],
         true,
     )
@@ -265,6 +268,84 @@ async fn pane_view_roundtrip_carries_only_the_views_it_was_given() {
 }
 
 #[tokio::test]
+async fn pane_set_roundtrip_carries_the_settings_object() {
+    let seen: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+    let seen_h = Arc::clone(&seen);
+    let (_tmp, socket) = start_server(
+        "pane_set",
+        vec![("paneSet", {
+            move |params: Value| {
+                *seen_h.lock().unwrap() = Some(params.clone());
+                serde_json::json!({
+                    "success": true, "pane_id": "C1", "label": "notes",
+                    "type": "code_viewer", "changed": ["pane_name"],
+                    "settings": {"pane_name": "Docs", "file_path": "/x"},
+                })
+            }
+        })],
+    )
+    .await;
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+    let settings = vec!["file_path=/x".to_string(), "loop=true".to_string()];
+    commands::pane_set::run(&client, "C1", &settings, false)
+        .await
+        .expect("pane-set should succeed");
+
+    let params = seen
+        .lock()
+        .unwrap()
+        .take()
+        .expect("server handler should have been called");
+    assert_eq!(params["pane_id"], "C1");
+    assert_eq!(
+        params["settings"],
+        serde_json::json!({"file_path": "/x", "loop": true})
+    );
+}
+
+/// `--setting` is `required = true`, so clap refuses the call before any
+/// runner sees it. The GUI's `settings_request` refuses an empty object as the
+/// second layer; this is the client-side half, which must not be a round trip.
+#[test]
+fn pane_set_without_a_setting_never_reaches_the_socket() {
+    let err = crate::Cli::command()
+        .try_get_matches_from(["gpty", "pane-set", "C1"])
+        .expect_err("a pane-set with no --setting must be refused");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("setting"),
+        "the refusal must name --setting: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn pane_settings_asks_for_the_table_with_no_arguments() {
+    let seen: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+    let seen_h = Arc::clone(&seen);
+    let (_tmp, socket) = start_server(
+        "pane_settings",
+        vec![("paneSettings", {
+            move |params: Value| {
+                *seen_h.lock().unwrap() = Some(params.clone());
+                serde_json::json!({"types": {"media": {"file_path": {"kind": "text"}}}})
+            }
+        })],
+    )
+    .await;
+    let client = IpcClient::new(&socket, Duration::from_secs(5));
+    commands::pane_settings::run(&client, false)
+        .await
+        .expect("pane-settings should succeed");
+    assert_eq!(
+        seen.lock()
+            .unwrap()
+            .take()
+            .expect("the handler must be called"),
+        serde_json::json!({})
+    );
+}
+
+#[tokio::test]
 async fn pane_view_without_a_view_never_reaches_the_socket() {
     let calls: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
     let calls_h = Arc::clone(&calls);
@@ -310,9 +391,20 @@ async fn invalid_pane_type_never_reaches_server() {
     )
     .await;
     let client = IpcClient::new(&socket, Duration::from_secs(5));
-    let err = commands::new_pane::run(&client, "obsever", None, &[], None, None, true, &[], true)
-        .await
-        .expect_err("invalid pane type must fail client-side");
+    let err = commands::new_pane::run(
+        &client,
+        "obsever",
+        None,
+        &[],
+        None,
+        None,
+        true,
+        &[],
+        &[],
+        true,
+    )
+    .await
+    .expect_err("invalid pane type must fail client-side");
 
     let msg = err.to_string();
     assert!(msg.contains("did you mean"), "error should suggest: {msg}");

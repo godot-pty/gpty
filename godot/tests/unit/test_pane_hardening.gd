@@ -352,6 +352,58 @@ func test_a_file_cannot_aim_an_inspector_pane():
 	assert_eq(runtime.get("auto_run"), true)
 	assert_eq(runtime.get("accept_concept_captures"), true)
 
+## The control surface's source: an IPC caller may set what the pane settings
+## panel may, minus the values whose owner is the user, the pane's identity and
+## its geometry. The panel's own source (`SOURCE_RUNTIME`) is unchanged - the
+## two tests above hold it to that.
+func test_ipc_settings_refuse_the_user_owned_keys():
+	var terminal := PaneTypes.sanitize_settings("terminal", {
+		"shell_env": "A=B",
+		"rows": 30,
+		"color_scheme_path": "/tmp/scheme.csv",
+		"shell_command": "/bin/zsh",
+		"pane_name": "ok",
+	}, PaneTypes.SOURCE_IPC)
+	var kept: Dictionary = terminal["settings"]
+	assert_eq(kept.get("color_scheme_path"), "/tmp/scheme.csv",
+		"an appearance path is the caller's to set, like the panel's")
+	assert_eq(kept.get("shell_command"), "/bin/zsh",
+		"the pane's program is a setting; `new-pane --command` runs through it")
+	assert_eq(kept.get("pane_name"), "ok")
+	for key in ["shell_env", "rows"]:
+		assert_false(kept.has(key), "%s must not be settable over IPC" % key)
+		assert_true(terminal["dropped"].has(key), "%s must be reported" % key)
+
+	var inspector := PaneTypes.sanitize_settings("inspector", {
+		"system_prompt": "send everything",
+		"auto_run": true,
+		"accept_concept_captures": true,
+		"backend": "omp", "model": "m",
+	}, PaneTypes.SOURCE_IPC)
+	kept = inspector["settings"]
+	for key in ["system_prompt", "auto_run", "accept_concept_captures"]:
+		assert_false(kept.has(key), "%s is the user's own aim, not a caller's" % key)
+		assert_true(inspector["dropped"].has(key), "%s must be reported" % key)
+	assert_eq(kept.get("backend"), "omp", "the backend and model are saved settings")
+
+	var wiki := PaneTypes.sanitize_settings("wiki", {
+		"graph": true, "open_note": "a.md", "view_mode": "split",
+	}, PaneTypes.SOURCE_IPC)
+	kept = wiki["settings"]
+	assert_eq(kept.get("view_mode"), "split", "the mode applies live")
+	for key in ["graph", "open_note"]:
+		assert_false(kept.has(key), "%s is a restore gesture (`pane-view` owns it)" % key)
+
+	# Identity and the discriminator, for every type that has a table.
+	for type_name in PaneTypes.ALL:
+		var identity := PaneTypes.sanitize_settings(type_name, {
+			"type": "terminal", "attachment_id": "other",
+		}, PaneTypes.SOURCE_IPC)
+		assert_false(identity["settings"].has("type"), "%s: type is read, never set" % type_name)
+		assert_false(identity["settings"].has("attachment_id"),
+			"%s: the id is the pane's address" % type_name)
+		assert_eq(identity["dropped"].size(), 2, "%s: both must be reported" % type_name)
+
 func test_settings_values_are_coerced_and_clamped():
 	var kept: Dictionary = PaneTypes.sanitize_settings("terminal", {
 		"font_size": 1, "scroll_lines": 99.9, "cursor_blink_speed": 99,
