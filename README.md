@@ -203,6 +203,11 @@ gpty pane-wait T1 --pattern "tests passed" --timeout-ms 30000
 gpty pane-view W1 --graph
 gpty pane-view W1 --note index.md --mode split
 
+# Configure a pane's own settings - the same closed per-type table the pane
+# settings panel writes (gpty pane-settings lists every key)
+gpty new-pane --pane-type media --setting file_path=/clip.mp4
+gpty pane-set W1 --setting vault_path=/notes --setting font_size=16
+
 # Search and read a wiki vault
 gpty vault search <vault> <pattern>
 gpty vault read <vault> <path>
@@ -242,7 +247,7 @@ gpty ships an MCP (Model Context Protocol) server so AI agents and coding harnes
 {"mcpServers": {"gpty": {"command": "gpty", "args": ["mcp"]}}}
 ```
 
-- **Direct**: run `gpty mcp` over stdio - exposes a tool per CLI subcommand (`new-pane`, `list-panes`, `workspace-list`, `kill-pane`, `focus-pane`, `move-pane`, `inject`, `pane-read`, `pane-status`, `pane-view`, `pane-run`, `pane-wait`, `broadcast`, `vault-search`, `vault-read`, `vault-weight`, `layout-*`, `daemon-*`, `concept-*`, `version`).
+- **Direct**: run `gpty mcp` over stdio - exposes a tool per CLI subcommand (`new-pane`, `list-panes`, `workspace-list`, `kill-pane`, `focus-pane`, `move-pane`, `inject`, `pane-read`, `pane-status`, `pane-view`, `pane-set`, `pane-settings`, `pane-run`, `pane-wait`, `broadcast`, `vault-search`, `vault-read`, `vault-weight`, `layout-*`, `daemon-*`, `concept-*`, `version`).
 - **Manifest**: `gpty schema --format mcp` prints the MCP tool manifest (JSON Schema, works without a running GUI) for hand-off to agent configurations.
 
 Tool schemas are generated from the same clap definitions as the CLI (`crates/gpty-cli/src/commands/schema.rs`), so they cannot drift from `gpty --help`.
