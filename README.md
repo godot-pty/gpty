@@ -113,15 +113,15 @@ The chosen stack also brings with it more costs, much more than terminal emulato
 
 ### Trade-offs
 
-Hosting a terminal inside a game engine is expensive, in terms of RAM & power usage. The following are measured on the shipped v0.8.2 Linux build (captured on CachyOS with Godot 4.7.2, the NVIDIA 620.70.06 driver and Vulkan 1.4.363 loader, `VmRSS` from `/proc` in a private sandbox, five readings per row after the app answers on its control socket):
+Hosting a terminal inside a game engine is expensive, in terms of RAM & power usage. The following are measured on the shipped v0.8.3 Linux build (captured on CachyOS with Godot 4.7.2, the NVIDIA 620.70.06 driver and Vulkan 1.4.363 loader, `VmRSS` from `/proc` in a private sandbox, five readings per row after the app answers on its control socket):
 
 | Configuration | Resident Memory |
 |---|---|
-| One pane, idle (Forward+, the default) | 656 MB |
-| Zero panes, renderer still up | 656 MB - the cost is the renderer, not the terminals |
-| First launch, cold pipeline cache | 1079 MB, back to ~656 MB on every later run |
-| Same build, `--rendering-driver opengl3`, warm | 363 MB |
-| 30,000 lines through one pane, past the 10,000-row scrollback cap | +52 MB, then flat |
+| One pane, idle (Forward+, the default) | 660 MB |
+| Zero panes, renderer still up | 660 MB - the cost is the renderer, not the terminals |
+| First launch, cold pipeline cache | 1082 MB, back to ~660 MB on every later run |
+| Same build, `--rendering-driver opengl3`, warm | 364 MB |
+| 30,000 lines through one pane, past the 10,000-row scrollback cap | +51 MB, then flat |
 
 ![Memory cost by release: an idle one-pane window on Forward+ and on OpenGL3, and the first launch of a release with a cold pipeline cache](docs/static/images/cost-history.svg)
 
