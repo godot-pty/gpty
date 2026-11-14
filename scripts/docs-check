@@ -16,6 +16,7 @@ Standard library only; run from anywhere. Exits 1 and lists every problem found.
 """
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -122,14 +123,24 @@ for root_md, folder in (('ROADMAP.md', 'roadmap'), ('CHANGELOG.md', 'changelog')
 # line content - a line that moved is still useful evidence, while a deleted
 # subject is not. A bare basename is accepted when it names exactly one file;
 # an ambiguous one fails, and the fix is the repo path in the row.
-REPO_FILES = []
-for dirpath, dirnames, filenames in os.walk(ROOT):
-    rel_dir = rel(dirpath) + '/'
-    dirnames[:] = [d for d in dirnames
-                   if not (rel_dir + d + '/').startswith(
-                       SKIP_PREFIXES + ('dist/', 'godot/bin/', 'godot/.godot/', 'fuzz/target/'))]
-    for name in filenames:
-        REPO_FILES.append(rel(os.path.join(dirpath, name)))
+#
+# The answer is the repository's truth, so the index is `git ls-files`, never a
+# worktree walk: a built extension library or a fuzz run's output exists on the
+# machine that produced it and not in a clean checkout, which would let the
+# gate pass locally and fail in CI on the same commit (v0.8.3).
+try:
+    REPO_FILES = [p for p in subprocess.run(
+        ['git', '-C', ROOT, 'ls-files', '-z'], check=True,
+        capture_output=True, text=True).stdout.split('\0') if p]
+except (OSError, subprocess.CalledProcessError) as exc:
+    print(f'docs-check: cannot list tracked paths with git: {exc}', file=sys.stderr)
+    sys.exit(2)
+REPO_FILE_SET = set(REPO_FILES)
+TRACKED_DIRS = set()
+for _f in REPO_FILES:
+    _parts = _f.split('/')[:-1]
+    for _i in range(1, len(_parts) + 1):
+        TRACKED_DIRS.add('/'.join(_parts[:_i]))
 BY_BASENAME = {}
 for f in REPO_FILES:
     BY_BASENAME.setdefault(os.path.basename(f), []).append(f)
@@ -139,10 +150,13 @@ CITATION = re.compile(
 
 def check_citation(where, item):
     for m in CITATION.finditer(item):
-        path = m.group(1)
+        raw = m.group(1)
+        path = raw.removeprefix('./')
         citation = m.group(0)[1:-1]
-        if '/' in path:
-            if not os.path.exists(os.path.join(ROOT, path)):
+        # A directory component - even `./` - makes this a repo path; only a
+        # bare basename is resolved against the unique-name index.
+        if '/' in raw:
+            if path not in REPO_FILE_SET:
                 bad(where, f'citation to missing file: {citation}')
             continue
         hits = BY_BASENAME.get(path, [])
@@ -160,6 +174,12 @@ def check_citation(where, item):
 # citation is. Illustrative names and generated trees are skipped.
 GUIDE_PREFIXES = ('crates/', 'godot/', 'scripts/', 'docs/', 'dist/', 'fuzz/',
                   'extensions/', 'githooks/')
+# Trees a clean checkout never carries: build output and run artifacts. A guide
+# names them as things a command produces, so their absence is not a dead
+# pointer - and their presence on the machine that built them is not evidence.
+GENERATED_TREES = ('dist', 'target', 'godot/bin', 'godot/.godot',
+                   'fuzz/artifacts', 'fuzz/target', 'docs/public',
+                   'docs/assets', 'docs/.cache', 'node_modules')
 GUIDE_TOKEN = re.compile(r'`([\w.+\-/]+)`')
 agent_dir = 'docs/content/docs/agents'
 guides = ['AGENTS.md'] + [
@@ -167,14 +187,15 @@ guides = ['AGENTS.md'] + [
     if p.endswith('.md')]
 for guide in guides:
     for m in GUIDE_TOKEN.finditer(read(guide)):
-        token = m.group(1)
+        token = m.group(1).rstrip('/')
         if not token.startswith(GUIDE_PREFIXES):
             continue
         if '<' in token or '*' in token or 'XXXXXX' in token:
             continue
-        if token.startswith(('dist/', 'godot/.godot/')):
+        if any(token == tree or token.startswith(tree + '/')
+               for tree in GENERATED_TREES):
             continue
-        if not os.path.exists(os.path.join(ROOT, token)):
+        if token not in REPO_FILE_SET and token not in TRACKED_DIRS:
             bad(guide, f'path does not exist: {token}')
 
 # ── roadmap tables ───────────────────────────────────────────────────────
