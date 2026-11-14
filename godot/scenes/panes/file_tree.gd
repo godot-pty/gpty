@@ -66,13 +66,16 @@ func _ready():
 		if not path:
 			return
 		if DirAccess.dir_exists_absolute(path):
-			# Lazy-load children on first expand
+			# Lazy-load children on first expand. A `TreeItem` starts with
+			# `collapsed == false`, so a folder that has never been listed is
+			# opening here: the rows are added and the folder stays expanded.
+			# The toggle belongs to the activations after that, and only to a
+			# folder with rows - one that cannot be listed has already toasted
+			# its reason, and an empty one has nothing to show either way.
 			if item.get_child_count() == 0:
 				_populate(item, path)
-			# Only fold what has rows: a folder that cannot be listed has
-			# already toasted its reason, and an empty one has nothing to show
-			# either way.
-			if item.get_child_count() > 0:
+				item.collapsed = false
+			else:
 				item.collapsed = not item.collapsed
 		elif FileAccess.file_exists(path):
 			_open_activated(path)

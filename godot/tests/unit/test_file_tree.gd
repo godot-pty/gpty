@@ -112,6 +112,26 @@ func test_fixing_the_root_swaps_the_message_for_the_rows():
 	assert_eq(pane._tree.get_root().get_child_count(), 1)
 
 
+## The first activation of a folder both lists it and leaves it open. The old
+## handler populated the rows and *then* toggled `collapsed` off its default
+## (`false`), so the first double-click only made the expand arrow appear and a
+## second one was needed to see the rows.
+func test_the_first_activation_expands_a_folder():
+	DirAccess.make_dir_recursive_absolute(_tmp.path_join("sub"))
+	_write("sub/inner.txt", "x")
+	var pane := _make_pane(_tmp)
+	var folder := pane._tree.get_root().get_first_child()
+	assert_eq(folder.get_text(0), "sub")
+	assert_eq(folder.get_child_count(), 0, "nothing is listed until activation")
+	folder.select(0)
+	pane._tree.item_activated.emit()
+	assert_eq(folder.get_child_count(), 1, "the first activation lists the folder")
+	assert_false(folder.collapsed, "the first activation opens the folder; it must not fold it")
+	folder.select(0)
+	pane._tree.item_activated.emit()
+	assert_true(folder.collapsed, "a later activation folds a populated folder")
+
+
 func test_the_gate_hands_back_the_open_folder():
 	var listed := FileTreePane.open_for_listing(
 		_tmp, func(path: String) -> DirAccess: return DirAccess.open(path))
