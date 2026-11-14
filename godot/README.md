@@ -111,7 +111,7 @@ godot/
             ├── markdown_bench.gd
             ├── reasoning_bench.gd
             ├── spawn_bench.gd   # Pane-spawn cost: per-call latency as the grid fills
-            ├── switch_bench.gd  # Workspace-switch cost: sync call, mode, first frame
+            ├── switch_bench.gd  # Workspace-switch cost: sync call, mode, first frame, the first switch after launch
             └── ui_capture.gd    # Committed UI state staging -> viewport PNGs
 ```
 

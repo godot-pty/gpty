@@ -16,6 +16,8 @@ A new workspace starts blank: gPTY does not auto-spawn a terminal, so you decide
 
 Switching keeps every pane in the previous workspace running. Only the visible grid is processed, so hidden terminals do not redraw, but their shells and programs continue. The workspace set is saved to disk on each switch, so a crash loses at most the current tab's latest change.
 
+A restored workspace is live before you visit it: after the launch frame gPTY lays out each saved workspace's tiles and starts their programs, one workspace per frame, so the first switch into one is the same view change as every later switch. A saved pane whose program cannot start says so at launch and the tile closes, exactly as it would on a visible workspace.
+
 Closing a workspace from its row's trash swaps the row to a check/cross first, then asks its panes — a running command raises one confirmation for the whole set, and a pane with unsaved work (such as a wiki note) can cancel the close. When it proceeds, the workspace's panes are torn down and its grid freed. The Workspaces header's trash closes every workspace the same way, and **Clear Workspace** in a row's More menu empties a workspace without removing it (or switching to it). Closing the last workspace is allowed and leaves the guide; the zero state is a real state, not a refusal.
 
 With no workspace, the window shows the guide and the Workspaces header keeps only `+`; the first pane (or `+`) creates **Default**.

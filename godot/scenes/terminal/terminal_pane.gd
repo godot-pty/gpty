@@ -600,17 +600,24 @@ func child_start_resolved() -> bool:
 ## Spawn the child at the size the pane is drawn at, once: called from `_ready`
 ## (a pane that already has a size), from `_on_resize` on the first laid-out
 ## size (no debounce - the tile has never had another size), from `_process` one
-## frame after the layout marked the tile, and it is the only place
-## `start_shell` is called. Reports the outcome through `child_started` /
-## `child_start_failed`.
-func _start_child_if_ready() -> void:
+## frame after the layout marked the tile, from `Workspace`'s launch primer, and
+## it is the only place `start_shell` is called. Reports the outcome through
+## `child_started` / `child_start_failed`.
+##
+## `size_hint` is the rect the pane will be drawn at when its container has not
+## sized it yet - a restored workspace that has never been shown. The pane's own
+## size wins as soon as it has one.
+func _start_child_if_ready(size_hint := Vector2.ZERO) -> void:
 	if _started or _terminal == null or _cell_w <= 0.0:
 		return
-	var fitted := _grid_for_size(size)
+	var px := size
+	if px.x <= 0.0 or px.y <= 0.0:
+		px = size_hint
+	var fitted := _grid_for_size(px)
 	if fitted != Vector2i.ZERO:
 		cols = fitted.x
 		rows = fitted.y
-	elif _laid_out and size.x > 0.0 and size.y > 0.0:
+	elif _laid_out and px.x > 0.0 and px.y > 0.0:
 		# A tile too small to hold the minimum grid still gets a shell: born at
 		# the pane's configured grid and corrected by the next real size. The
 		# debounce refuses to *shrink* to such a size for the same reason, so

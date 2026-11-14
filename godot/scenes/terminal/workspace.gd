@@ -448,12 +448,22 @@ func _apply_layout(refresh_dividers := true):
 		_status_bar.anchor_top = 1.0; _status_bar.anchor_bottom = 1.0
 		_status_bar.offset_top = -StatusBar.HEIGHT; _status_bar.offset_bottom = 0
 
+	_layout_tiles(_grid, _tm)
+	# The divider grab bands follow the tiles: one refresh point for every
+	# spawn, kill, swap, restore, workspace switch and window resize.
+	if refresh_dividers:
+		_refresh_dividers()
+
+## Give every tile of `tm` the rect its grid's own size implies. The active
+## layout pass and the launch primer share it, so a restored workspace that
+## has never been drawn still gets the geometry it will be drawn at.
+func _layout_tiles(grid: Control, tm: TerminalManager) -> void:
 	# The grid unit comes from PaneTypes — the same constant the sanitizer and
 	# the drag math use. A local copy once drifted and sized every restored
 	# pane several times the grid.
-	var cw = maxf(_grid.size.x, 1.0) / PaneTypes.GRID
-	var ch = maxf(_grid.size.y, 1.0) / PaneTypes.GRID
-	for t in _tm.tiles:
+	var cw = maxf(grid.size.x, 1.0) / PaneTypes.GRID
+	var ch = maxf(grid.size.y, 1.0) / PaneTypes.GRID
+	for t in tm.tiles:
 		var x = t.col * cw; var y = t.row * ch
 		var w = t.cspan * cw; var h = t.rspan * ch
 		t.wrapper.offset_left = x; t.wrapper.offset_top = y
@@ -463,11 +473,46 @@ func _apply_layout(refresh_dividers := true):
 		# The tile now holds the rect it is drawn at, so a pane that has not
 		# started its child may start it at this size (a tile the grid has
 		# never positioned is only the container's minimum).
-		_tm.mark_tile_laid_out(t)
-	# The divider grab bands follow the tiles: one refresh point for every
-	# spawn, kill, swap, restore, workspace switch and window resize.
-	if refresh_dividers:
-		_refresh_dividers()
+		tm.mark_tile_laid_out(t)
+
+## Which restored workspace the launch primer supplies next.
+var _prime_index := 0
+
+## A restored workspace's panes are built without a rect (`_restore_into` only
+## attaches them) and `_apply_layout` positions the active workspace's tiles
+## alone, so a workspace that has never been visited has no layout and no
+## started children - and the first visit to it paid both inside the switch
+## (roadmap: "The first workspace switch after launch takes 551 ms", measured
+## 551 ms against a 12.3 ms steady state). One workspace per frame after
+## restore, off the launch frame: a switch into it becomes the same view change
+## every later switch is, and its programs are already running.
+##
+## A pane whose program cannot start answers at launch the way it would on a
+## visible workspace: a warning, and the tile closes.
+func _prime_restored_workspaces() -> void:
+	if _prime_index >= _workspaces.size():
+		return
+	var i := _prime_index
+	_prime_index += 1
+	if i == _active:
+		return
+	var ws: Dictionary = _workspaces[i]
+	_layout_tiles(ws.grid, ws.tm)
+	for t in ws.tm.tiles:
+		var body = ws.tm._find_body(t.wrapper)
+		if body is TerminalPane and not body.child_start_resolved():
+			body._start_child_if_ready(_primed_body_rect(t))
+
+## The rect `t` will give its body once the tile is drawn: the wrapper minus
+## the panel's 1px borders and the title bar. A hidden workspace's container
+## has not sorted the tile, so the primer asks with this rather than the body's
+## own size.
+func _primed_body_rect(t: Dictionary) -> Vector2:
+	var wrapper: Control = t.wrapper
+	var h := wrapper.size.y - 2.0
+	if SettingsManager.cfg_show_titlebar:
+		h -= TerminalManager.TITLE_BAR_HEIGHT
+	return Vector2(maxf(wrapper.size.x - 2.0, 0.0), maxf(h, 0.0))
 
 ## One deferred band refresh per frame, however many spawns queued it.
 var _dividers_refresh_queued := false
@@ -1805,6 +1850,8 @@ func _teardown_workspaces():
 		if ws.grid != _home_grid:
 			ws.grid.queue_free()
 	_workspaces.clear()
+	# A re-restore (reset, import, the trust dialog's retry) primes again.
+	_prime_index = 0
 	# The home pair is the empty host. Resetting it here clears a workspace 0
 	# from an earlier restore and removes the window where `_tm`/`_grid` could
 	# point at a just-freed grid while the trust dialog is open.
@@ -2571,6 +2618,7 @@ func _process(_delta: float):
 	_poll_pending_waits()
 	_poll_pending_pane_starts()
 	_poll_pending_graph_answers()
+	_prime_restored_workspaces()  # one restored workspace per frame
 	if _sidebar == null: return
 	# FPS counter update (throttled to ~4 Hz)
 	if Engine.get_process_frames() % 15 == 0 and _status_bar:

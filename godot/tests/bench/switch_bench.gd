@@ -18,6 +18,14 @@ extends SceneTree
 ## the pane needed no sync), and `first_sync_us` is the wall time from the
 ## switch to it.
 ##
+## The first switch after launch is reported on its own (`cold`): a restored
+## workspace that has never been visited has no tile rects and no started
+## children, so that switch laid its tiles out and spawned their programs
+## (roadmap: "The first workspace switch after launch takes 551 ms"). It used
+## to be swallowed by the warm-up, so a regression there was invisible in a
+## median of warm switches. `started=n/m` counts the arriving workspace's
+## terminal panes whose child had already started at the switch.
+##
 ##   . scripts/ui-sandbox && gpty_sandbox_init && \
 ##       SWITCH_CMD_A=omp SWITCH_CMD_B=btop godot --path godot \
 ##       --disable-vsync -s res://tests/bench/switch_bench.gd
@@ -128,15 +136,25 @@ func _initialize() -> void:
 	await process_frame
 	print("switch_bench: apply_mode_us=%.1f (per call, %d calls)" % [float(mode_us) / 20.0, 20])
 
-	# Warm-up: the first switch into a workspace builds/lays out its panes for
-	# the first time, which is not the steady-state cost under test. It must end
-	# on the workspace the measured loop starts from (0), or the loop's first
-	# switch is a no-op that re-prints the warm-up's numbers. Each workspace's
-	# pane is settled while it is on screen: switching away one frame after
-	# arriving left the incoming grid empty, so the focus-time work a real
-	# switch pays - the publish of the screen it arrives at - was never there
-	# to measure.
+	# The first switch after launch is its own measurement, not a warm-up to
+	# discard: a restored workspace that has never been visited has no tile
+	# rects and no started children, so the switch into it lays its tiles out
+	# and spawns their programs. Record the sample and print it in the clear.
+	# The warm-up then carries on to the workspace the measured loop starts
+	# from (0), or the loop's first switch is a no-op that re-prints these
+	# numbers. Each workspace's pane is settled while it is on screen: switching
+	# away one frame after arriving left the incoming grid empty, so the
+	# focus-time work a real switch pays - the publish of the screen it arrives
+	# at - was never there to measure.
 	await _switch(1, false)
+	var cold_sync_us := _last_sync_us
+	var cold_frame_us := _last_frame_us
+	var cold_first_sync_us := _last_first_sync_us
+	var cold_started := _last_started
+	var cold_panes := _last_panes
+	print("switch_bench: cold to=1 (first switch after launch) sync_us=%d frame_us=%d first_sync_frame=%d first_sync_us=%d started=%d/%d chars=%d"
+		% [cold_sync_us, cold_frame_us, _last_sync_frame, cold_first_sync_us,
+			cold_started, cold_panes, _last_chars])
 	await _settle_pane(1)
 	await _switch(0)
 	await _settle_pane(0)
@@ -170,6 +188,14 @@ func _initialize() -> void:
 		_median(forward), _median(forward_frame), _median(forward_sync)])
 	print("switch_bench: median 1->0 sync_us=%d frame_us=%d first_sync_us=%d" % [
 		_median(backward), _median(backward_frame), _median(backward_sync)])
+	# The row's question in one line: how much of the first switch is the launch
+	# state rather than the switch path. The comparison is the cold switch's own
+	# direction (0->1): the other one may not sync at all within the wait (a
+	# quiet pane has nothing new), and a -1 in the average would fake a ratio.
+	var steady_first_sync := float(_median(forward_sync))
+	print("switch_bench: first_switch first_sync_us=%d steady_median_first_sync_us=%d ratio=%.2fx started=%d/%d"
+		% [cold_first_sync_us, int(steady_first_sync),
+			float(cold_first_sync_us) / maxf(steady_first_sync, 1.0), cold_started, cold_panes])
 	quit(0)
 
 
@@ -187,6 +213,10 @@ var _last_backoff_ms := -1.0
 ## Characters on the incoming pane's screen at the switch: the bench must never
 ## report a switch into an empty one.
 var _last_chars := 0
+## The arriving workspace's terminal panes, and how many already had their
+## child, sampled at the switch instant.
+var _last_started := 0
+var _last_panes := 0
 
 
 ## The pane a workspace shows: the one its last switch left active, else its
@@ -243,6 +273,20 @@ func _switch(to: int, require_screen: bool = true) -> void:
 	# hidden pane does not process, so its counter stands still while the grid
 	# behind it keeps advancing, and a move is exactly one fetch+repaint.
 	var gen0: int = int(pane.get("_last_grid_gen")) if pane != null else -1
+	# A restored workspace arrives with no started children until the launch
+	# primer has been through it; the count is what says whether the switch is a
+	# view change or a setup.
+	_last_started = 0
+	_last_panes = 0
+	# Duck-typed on purpose: naming `TerminalPane` here compiles
+	# `terminal_pane.gd` while this `-s` script is still loading, before the
+	# autoloads it reads exist (the trap `_initialize`'s untyped `tm` documents).
+	for t in _workspace._workspaces[to].tm.tiles:
+		var b = _workspace._workspaces[to].tm._find_body(t.wrapper)
+		if b != null and b.has_method("child_start_resolved"):
+			_last_panes += 1
+			if b.child_start_resolved():
+				_last_started += 1
 	var t0 := Time.get_ticks_usec()
 	_workspace._switch_workspace(to)
 	_last_sync_us = Time.get_ticks_usec() - t0

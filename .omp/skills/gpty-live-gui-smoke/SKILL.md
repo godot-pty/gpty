@@ -183,6 +183,9 @@ later one 63-75 ms).
   cost (windowed; payloads via `SWITCH_CMD_A`/`SWITCH_CMD_B`, window via `SWITCH_WINDOW`). It
   settles both panes before measuring and prints `chars=` per rep; a `FAIL … pane was empty` means
   the payload never painted a screen, so the number would not have included the arrival work.
+  The first switch after launch is printed as its own `cold` sample with the arriving panes'
+  started count (`started=n/m`, and a `first_switch … ratio=` line against the steady median);
+  that switch used to be the silent warm-up.
 - `godot --path godot --disable-vsync -s res://tests/bench/spawn_bench.gd` — pane-spawn cost
   (windowed; `SPAWN_BENCH_MAX` panes, default 64, and `SPAWN_BENCH_MARKS`). It prints per-spawn
   `sync_us` and child-resolved `total_us` as the grid fills, a slope, RSS and `children` at each
