@@ -56,6 +56,15 @@ func test_unstarted_grid_functions_are_safe():
 	assert_eq(str(_t.get_selection_text()), "", "no grid means nothing is selected")
 	assert_eq(_t.get_selection_cells().size(), 0, "no grid means nothing to highlight")
 	_t.selection_clear()
+	# The background pair must answer before a child exists: a pane applies its
+	# saved `default_bg` through `set_background_color` on the restore path,
+	# which can run before `start_shell`, and `get_background_color` is what the
+	# pane's ground is read from.
+	assert_eq(_t.get_background_color(), Color.BLACK,
+		"an unstarted grid answers the default background")
+	_t.set_background_color(Color8(10, 20, 30))
+	assert_eq(_t.get_background_color(), Color.BLACK,
+		"setting a background on an unstarted grid is a no-op, not a crash")
 	pass # no crash is the assertion
 
 func test_markdown_renderer_formats_and_sanitizes():
