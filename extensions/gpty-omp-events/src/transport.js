@@ -90,6 +90,18 @@ export function createEventForwarder(config, options = {}) {
 
       try {
         socket = netModule.createConnection(config.socketPath);
+        // The event server answers each request and then closes the
+        // connection. That answer has to be taken off the wire: a socket
+        // whose readable side is never consumed stays paused, so neither
+        // `end` nor `close` fires and every event waits out `timeoutMs`
+        // before the next one is even attempted. Measured with the real
+        // transport and server: 4 events/s stalled, ~5 000/s consumed — a
+        // token-rate reasoning stream (the extension flushes every 16 ms)
+        // backed up in the outbox, and the pane and the agent badge ran
+        // seconds behind the session. The bytes are discarded, not parsed:
+        // the channel stays fire-and-forget, because a rejected submission
+        // must not affect the omp session.
+        socket.resume?.();
         socket.setTimeout?.(timeoutMs);
         socket.once?.("connect", () => {
           try {

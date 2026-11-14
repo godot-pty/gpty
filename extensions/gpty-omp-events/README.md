@@ -49,7 +49,10 @@ both platforms (the `windows-smoke` CI job is the Windows leg).
 ## Forwarded data
 
 The JSON-RPC method is `ompEvent`. Every event opens a fresh socket connection,
-writes one newline-terminated JSON-RPC 2.0 request, and closes it. Parameters
+writes one newline-terminated JSON-RPC 2.0 request, and closes it. The answer is
+read and discarded - a stream only reaches `end`/`close` once its readable side
+is consumed, so not reading it made every event wait out the timeout (4 events/s
+against ~5 000/s) - and the timeout itself is only a stall guard. Parameters
 contain protocol version, capability, terminal session ID, the current OMP
 session ID, and one event.
 

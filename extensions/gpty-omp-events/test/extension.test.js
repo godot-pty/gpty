@@ -334,6 +334,63 @@ test("uses one JSON-RPC request per connection", async () => {
   assert.equal(requests[0].params.omp_session_id, "omp-1");
 });
 
+test("takes the answer off the wire so a connection can finish", { timeout: 2000 }, async () => {
+  // The real server writes one response, then closes. A stream reaches
+  // `end`/`close` only once its readable side has been consumed, so a client
+  // that never reads it waits out `timeoutMs` on every event — measured
+  // against the running server, 4 events/s stalled against ~5 000/s consumed,
+  // which made reasoning deltas arrive seconds late. This double closes only
+  // after its bytes have been taken, so a transport that stops reading fails
+  // here instead of silently capping the channel.
+  class AnsweredSocket extends EventEmitter {
+    setTimeout() {}
+    resume() {
+      this.reading = true;
+      this.maybeClose();
+    }
+    end() {
+      this.written = true;
+      queueMicrotask(() =>
+        this.emit("data", Buffer.from('{"jsonrpc":"2.0","id":1,"result":{"accepted":true}}\n')),
+      );
+      this.maybeClose();
+    }
+    destroy() {
+      this.closed = true;
+    }
+    maybeClose() {
+      if (!this.written || !this.reading || this.closed) return;
+      this.closed = true;
+      queueMicrotask(() => this.emit("close"));
+    }
+  }
+
+  let connections = 0;
+  const forwarder = createEventForwarder(
+    {
+      socketPath: "/tmp/gpty.sock",
+      terminalSessionId: "terminal-1",
+      capability: "capability",
+    },
+    {
+      // Far past the test deadline: only reading the answer can finish it.
+      timeoutMs: 60_000,
+      validateSocket: () => true,
+      netModule: {
+        createConnection() {
+          connections += 1;
+          const socket = new AnsweredSocket();
+          queueMicrotask(() => socket.emit("connect"));
+          return socket;
+        },
+      },
+    },
+  );
+
+  await forwarder.enqueue({ name: "omp.agent.started" }, "omp-1");
+  assert.equal(connections, 1);
+});
+
 test("bounds the pending outbox and drops oldest entries", async () => {
   class StalledSocket extends EventEmitter {
     setTimeout() {}
