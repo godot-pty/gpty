@@ -55,6 +55,9 @@ docs/data/*
 !docs/data/icons.yaml
 # The cost ledger the README chart is rendered from (scripts/render-cost-chart).
 !docs/data/cost-history.json
+# The capability catalogue, one file per area (scripts/check-capabilities
+# gates it; docs-check reads markdown only, so this is its only consumer).
+!docs/data/capabilities/
 docs/.cache/
 
 # ── Local build output (scripts/build) ────────────────────────────────────

@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""Keep the capability catalogue honest: `docs/data/capabilities/<AREA>.json`.
+
+The catalogue is the product's feature list as records rather than prose - one
+record per capability, each carrying what is true (`statement`), the design
+choice behind it (`mechanism`), and whether we have it (`status`). The roadmap
+stays the queue; this file is the state. Nothing generated it, so the failure
+mode is drift: an id that no longer parses, an `evidence` path that moved, a
+`row` that names a roadmap title nobody has, a status outside the vocabulary.
+
+Checks, per file:
+
+  * the file's `area` matches its name and is one the roadmap declares (read
+    from ROADMAP.md's opening text, the same list docs-check validates rows
+    against, so a new area is one edit)
+  * only the known top-level keys, and only the known record keys: a free-form
+    field is where a paragraph - or a product name - would go
+  * `id` shape (`sgr.attr.undercurl`, two to four lowercase segments) and
+    uniqueness across every area
+  * `status` in {done, partial, planned, rejected, undecided}
+  * `statement` and `mechanism` are single lines under their cap
+  * `evidence` names a file that exists in this repo; an anchor after it
+    (`:138`, `:CellInfo`) is not checked, because a line number that moves is
+    not a defect in what the record claims
+  * `row` names a roadmap row's bold title exactly, so the join to the queue
+    cannot rot silently
+  * no URL anywhere: the catalogue cites specifications and our own tree, and
+    a link is how a vendor name would get in
+
+Exit codes: 0 clean, 1 problems found. Reads only; never writes.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+DATA = ROOT / "docs" / "data" / "capabilities"
+ROADMAP_DIR = ROOT / "docs" / "content" / "docs" / "roadmap"
+
+STATUSES = {"done", "partial", "planned", "rejected", "undecided"}
+TOP_KEYS = {"area", "capabilities"}
+RECORD_KEYS = {"id", "statement", "status", "spec", "mechanism", "evidence", "row"}
+REQUIRED = {"id", "statement", "status"}
+ID = re.compile(r"^[a-z][a-z0-9]*(?:\.[a-z0-9][a-z0-9-]*){1,3}$")
+ROW = re.compile(r"^\| (✅|⬜) \| ([A-Z]+) \| (.+) \|$")
+TITLE = re.compile(r"\*\*(.+?)\*\*( - |$)")
+URL = re.compile(r"https?://|www\.", re.I)
+
+STATEMENT_MAX = 200
+MECHANISM_MAX = 500
+
+
+def areas() -> set[str]:
+    """The Area column's vocabulary, from ROADMAP.md's opening text."""
+    m = re.search(
+        r"Area column names[^(]*\(([A-Z, ]+)\)",
+        (ROOT / "ROADMAP.md").read_text(encoding="utf-8"),
+    )
+    return {a.strip() for a in m.group(1).split(",")} if m else set()
+
+
+def roadmap_titles() -> set[str]:
+    """Every bold title on every chain page, `**Title**` up to its ` - `."""
+    titles: set[str] = set()
+    for path in sorted(ROADMAP_DIR.glob("*.md")):
+        if path.name == "_index.md":
+            continue
+        for line in path.read_text(encoding="utf-8").split("\n"):
+            row = ROW.match(line)
+            if not row:
+                continue
+            title = TITLE.match(row.group(3))
+            if title:
+                titles.add(title.group(1))
+    return titles
+
+
+def evidence_file(value: str) -> bool:
+    """A repo-relative file that exists; any `:anchor` is informational."""
+    base = value.split(":", 1)[0]
+    if not base or base.startswith("/") or ".." in Path(base).parts:
+        return False
+    return (ROOT / base).is_file()
+
+
+def one_line(record: dict, key: str, cap: int, where: str, problems: list[str]) -> None:
+    value = record.get(key)
+    if not isinstance(value, str):
+        problems.append(f"{where}: `{key}` must be a string")
+        return
+    if "\n" in value:
+        problems.append(f"{where}: `{key}` must be one line")
+    if len(value) > cap:
+        problems.append(f"{where}: `{key}` is {len(value)} characters (cap {cap})")
+
+
+def check_file(path: Path, known_areas: set[str], titles: set[str],
+               seen: dict[str, str], problems: list[str]) -> dict[str, int]:
+    name = f"docs/data/capabilities/{path.name}"
+    counts = {s: 0 for s in STATUSES}
+    raw = path.read_text(encoding="utf-8")
+    if URL.search(raw):
+        problems.append(f"{name}: a URL - cite a specification or a repo path")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        problems.append(f"{name}: not JSON: {exc}")
+        return counts
+    if not isinstance(data, dict):
+        problems.append(f"{name}: top level must be an object")
+        return counts
+    unknown = set(data) - TOP_KEYS
+    if unknown:
+        problems.append(f"{name}: unknown top-level key(s): {', '.join(sorted(unknown))}")
+    area = data.get("area")
+    if area != path.stem:
+        problems.append(f"{name}: `area` is {area!r}, the file is {path.stem!r}")
+    if area not in known_areas:
+        problems.append(f"{name}: unknown area {area!r} (ROADMAP.md lists {', '.join(sorted(known_areas))})")
+    records = data.get("capabilities")
+    if not isinstance(records, list):
+        problems.append(f"{name}: `capabilities` must be a list")
+        return counts
+    for i, record in enumerate(records):
+        where = f"{name}[{i}]"
+        if not isinstance(record, dict):
+            problems.append(f"{where}: must be an object")
+            continue
+        extra = set(record) - RECORD_KEYS
+        if extra:
+            problems.append(f"{where}: unknown key(s): {', '.join(sorted(extra))}")
+        missing = REQUIRED - set(record)
+        if missing:
+            problems.append(f"{where}: missing {', '.join(sorted(missing))}")
+            continue
+        cid = record["id"]
+        if not isinstance(cid, str) or not ID.match(cid):
+            problems.append(f"{where}: id {cid!r} is not `<subject>[.<qualifier>]`, lowercase, 2-4 segments")
+        elif cid in seen:
+            problems.append(f"{where}: id {cid!r} already used by {seen[cid]}")
+        else:
+            seen[cid] = where
+            where = f"{name}[{i}] {cid}"
+        status = record["status"]
+        if status not in STATUSES:
+            problems.append(f"{where}: status {status!r} is not one of {', '.join(sorted(STATUSES))}")
+        else:
+            counts[status] += 1
+        one_line(record, "statement", STATEMENT_MAX, where, problems)
+        if "mechanism" in record:
+            one_line(record, "mechanism", MECHANISM_MAX, where, problems)
+        if "spec" in record:
+            one_line(record, "spec", STATEMENT_MAX, where, problems)
+        if "evidence" in record:
+            ev = record["evidence"]
+            if not isinstance(ev, str) or not evidence_file(ev):
+                problems.append(f"{where}: evidence {ev!r} is not a file in this repo")
+        if "row" in record:
+            row = record["row"]
+            if not isinstance(row, str):
+                problems.append(f"{where}: `row` must be a string")
+            elif row not in titles:
+                problems.append(f"{where}: row {row!r} is not a roadmap row's bold title")
+    return counts
+
+
+def main() -> int:
+    problems: list[str] = []
+    known_areas = areas()
+    if not known_areas:
+        print("check-capabilities: could not read the Area list from ROADMAP.md")
+        return 1
+    titles = roadmap_titles()
+    if not titles:
+        print("check-capabilities: could not read roadmap titles")
+        return 1
+    files = sorted(DATA.glob("*.json")) if DATA.is_dir() else []
+    if not files:
+        print("check-capabilities: no capability files under docs/data/capabilities/")
+        return 0
+    seen: dict[str, str] = {}
+    totals = {s: 0 for s in STATUSES}
+    for path in files:
+        counts = check_file(path, known_areas, titles, seen, problems)
+        for status, n in counts.items():
+            totals[status] += n
+        summary = ", ".join(f"{n} {s}" for s, n in counts.items() if n)
+        print(f"  {path.stem:<6} {len(json.loads(path.read_text(encoding='utf-8'))['capabilities']):>3}  {summary}")
+    if problems:
+        print("check-capabilities: the catalogue has records that do not hold up")
+        for problem in problems:
+            print(f"  {problem}")
+        return 1
+    print(
+        f"check-capabilities: {sum(totals.values())} capabilities in {len(files)} areas "
+        f"({', '.join(f'{n} {s}' for s, n in totals.items() if n)})"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

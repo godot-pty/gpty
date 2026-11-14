@@ -21,6 +21,7 @@ on:
       - "godot/knowledge.json"
       - "LICENSE"
       - "scripts/docs-check"
+      - "scripts/check-capabilities"
       - "scripts/build-wiki"
   pull_request:
     branches: [main, master]
@@ -35,6 +36,7 @@ on:
       - "godot/knowledge.json"
       - "LICENSE"
       - "scripts/docs-check"
+      - "scripts/check-capabilities"
       - "scripts/build-wiki"
 
 # Least privilege: every job here only reads the repository. Without this

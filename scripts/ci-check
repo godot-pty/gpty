@@ -13,9 +13,9 @@ set -euo pipefail
 # GDScript or smoke gates test - and CI skips its code workflow for one too
 # (`paths-ignore` in .github/workflows/ci.yml). A path is docs-class when the
 # only gate it can influence is one the Docs workflow already runs: `docs/`,
-# Markdown, the generated bundle, the licenses, and the two scripts that are
-# nothing but that workflow's gates (`scripts/docs-check`,
-# `scripts/build-wiki`).
+# Markdown, the generated bundle, the capability catalogue, the licenses, and
+# the three scripts that are nothing but that workflow's gates
+# (`scripts/docs-check`, `scripts/build-wiki`, `scripts/check-capabilities`).
 #
 # A tooling-class change runs the docs gates, the cost gates and a syntax/plan
 # check of the measurement scripts themselves, and stops there. It is an
@@ -132,7 +132,7 @@ changed_paths() {
 docs_class_path() {
     case "$1" in
         docs/*|assets/site-icons/*|*.md|godot/knowledge.json|LICENSE) return 0 ;;
-        scripts/docs-check|scripts/build-wiki) return 0 ;;
+        scripts/docs-check|scripts/build-wiki|scripts/check-capabilities) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -219,6 +219,30 @@ run_docs_check() {
     else
         fail "docs-check"
         detail "$DOCS_OUT"
+        check_failed
+    fi
+}
+
+# The catalogue is data, not markdown: docs-check skips docs/data/, so nothing
+# else reads it. Static and tiny (it stat()s each evidence path and joins each
+# row to a roadmap title), which is why it rides with the docs gates.
+run_capability_check() {
+    header "capability catalogue"
+    if CAP_OUT="$(./scripts/check-capabilities 2>&1)"; then
+        pass "capability catalogue"
+    else
+        fail "capability catalogue — a record does not hold up"
+        detail "$CAP_OUT"
+        check_failed
+    fi
+    # The renderer is a view, not a gate: nothing else runs it, so compile it
+    # here or a syntax error ships in silence.
+    if CAPC_OUT="$(python3 -c 'import py_compile, sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)' \
+        scripts/render-capabilities "${TMPDIR:-/tmp}/render-capabilities.pyc" 2>&1)"; then
+        pass "compile render-capabilities"
+    else
+        fail "compile scripts/render-capabilities"
+        detail "$CAPC_OUT"
         check_failed
     fi
 }
@@ -314,6 +338,7 @@ if [ -z "${CI_CHECK_FULL:-}" ] \
     && docs_class_change; then
     printf "  %bDocs-class change%b — docs gates only; CI_CHECK_FULL=1 runs everything\n" "$BOLD" "$NC"
     run_docs_check
+    run_capability_check
     run_bundle_check
     run_cost_stamp
     printf "\n"
@@ -398,6 +423,7 @@ fi
 
 # ── Docs: markdown links, roadmap tables, split pages ──────────────────
 run_docs_check
+run_capability_check
 
 # ── MCP registry descriptor ────────────────────────────────────────────
 # server.json is the claim the registry publishes: the package it names, the

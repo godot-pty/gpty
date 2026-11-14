@@ -1,0 +1,211 @@
+{
+  "area": "IPC",
+  "capabilities": [
+    {
+      "id": "rpc.frame.jsonrpc2",
+      "statement": "a caller and the app exchange JSON-RPC 2.0 objects over one local socket",
+      "spec": "JSON-RPC 2.0",
+      "status": "done",
+      "mechanism": "one request/response shape shared by the client and the server, so a method is a name and a params object",
+      "evidence": "crates/gpty-ipc/src/protocol.rs"
+    },
+    {
+      "id": "rpc.transport.local-socket",
+      "statement": "the same protocol runs over a Unix socket or a Windows named pipe",
+      "status": "done",
+      "mechanism": "one transport module per platform behind an identical connect call; callers do not branch",
+      "evidence": "crates/gpty-ipc/src/transport.rs"
+    },
+    {
+      "id": "rpc.client.timeout",
+      "statement": "a client call fails with a timeout instead of hanging",
+      "status": "done",
+      "mechanism": "the client bounds each call and surfaces the elapsed budget in the error",
+      "evidence": "crates/gpty-ipc/src/client.rs"
+    },
+    {
+      "id": "rpc.error.flat-refusal",
+      "statement": "a refused call carries the handler's own sentence and code, not a nested envelope",
+      "status": "done",
+      "mechanism": "the drain loop answers the handler's error object and the Rust edge builds the RPC error from it",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd"
+    },
+    {
+      "id": "rpc.version",
+      "statement": "a caller reads the running app's version over the control surface",
+      "status": "done",
+      "mechanism": "registered in the native server from the crate's own version string",
+      "evidence": "crates/gpty-gdext/src/ipc.rs"
+    },
+    {
+      "id": "rpc.shutdown",
+      "statement": "a caller can ask the app to exit",
+      "status": "done",
+      "mechanism": "a native handler on the same server; deliberately not published as an MCP tool",
+      "evidence": "crates/gpty-gdext/src/ipc.rs"
+    },
+    {
+      "id": "pane.create",
+      "statement": "a caller creates a pane of a known type and gets its stable id back",
+      "status": "done",
+      "mechanism": "the type is checked against the pane registry and the reply carries the persisted `attachment_id`",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd",
+      "row": "Stable public pane IDs"
+    },
+    {
+      "id": "pane.list",
+      "statement": "a caller lists panes with their id, type, label and focus state",
+      "status": "done",
+      "mechanism": "one read over the live tile set; ids are the public ones, not engine session ids",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd"
+    },
+    {
+      "id": "pane.kill",
+      "statement": "a caller closes a pane by its id",
+      "status": "done",
+      "mechanism": "resolves the id to a tile, frees the pane, and does not touch a sibling's state",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd"
+    },
+    {
+      "id": "pane.focus",
+      "statement": "a caller moves focus to a named pane",
+      "status": "done",
+      "mechanism": "focus is a workspace-level call so the reply can report the previous holder",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd"
+    },
+    {
+      "id": "pane.move",
+      "statement": "a caller moves a pane into another slot of the grid",
+      "status": "done",
+      "mechanism": "the tile set is swapped in place; the pane keeps its id and its pty",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd"
+    },
+    {
+      "id": "pane.inject",
+      "statement": "a caller writes text into a pane's pty",
+      "status": "done",
+      "mechanism": "the bytes go through the pane's own write path, so a running program sees them as input",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd"
+    },
+    {
+      "id": "pane.read",
+      "statement": "a caller reads a pane's screen text back",
+      "status": "done",
+      "mechanism": "the grid's plain-text rows are packed for the wire; no escape bytes survive",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd"
+    },
+    {
+      "id": "pane.status",
+      "statement": "a pane reports its type, grid size, scrollback rows and child exit code",
+      "status": "done",
+      "mechanism": "primitives only, so a caller can poll without parsing prose",
+      "evidence": "crates/gpty-core/src/engine.rs:138"
+    },
+    {
+      "id": "pane.view",
+      "statement": "a caller reads one addressed element of a pane's body by kind",
+      "status": "done",
+      "mechanism": "the pane body answers a routed-content contract, so a new pane type does not add a verb",
+      "evidence": "godot/scenes/panes/pane_body.gd"
+    },
+    {
+      "id": "pane.set",
+      "statement": "a caller changes a pane's runtime settings",
+      "status": "done",
+      "mechanism": "one settings choke point per pane, with file-sourced and runtime-sourced keys distinguished",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd"
+    },
+    {
+      "id": "pane.settings.dropped-keys",
+      "statement": "a settings write answers the keys it dropped, so a caller learns instead of guessing",
+      "status": "done",
+      "mechanism": "the sanitizer returns the filtered settings and the refused names in the same reply",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd"
+    },
+    {
+      "id": "pane.run",
+      "statement": "a caller runs a command in a pane and gets a handle to wait on",
+      "status": "done",
+      "mechanism": "argv only, validated like a spawn; never a shell string",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd"
+    },
+    {
+      "id": "pane.wait",
+      "statement": "a caller waits for a pattern in a pane's output, bounded by a deadline",
+      "status": "done",
+      "mechanism": "polls the same text the read verb returns, so a wait cannot see more than a read",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd"
+    },
+    {
+      "id": "pane.broadcast",
+      "statement": "one input can be delivered to several panes at once",
+      "status": "done",
+      "mechanism": "the caller names the targets; the reply reports per-pane success",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd"
+    },
+    {
+      "id": "layout.save-load",
+      "statement": "a named layout can be saved and restored as a set of tiles",
+      "status": "done",
+      "mechanism": "the tile set is serialized through the same sanitizer a restore runs, and listing names what exists",
+      "evidence": "crates/gpty-cli/src/commands/layout.rs"
+    },
+    {
+      "id": "workspace.list",
+      "statement": "a caller lists workspaces and sees which one is active",
+      "status": "done",
+      "mechanism": "the store is the source; the reply marks the active workspace by name",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd"
+    },
+    {
+      "id": "concept.list-toggle",
+      "statement": "the concept set can be listed and a concept toggled over the control surface",
+      "status": "done",
+      "mechanism": "the same engine store the settings UI writes, so a toggle is visible everywhere at once",
+      "evidence": "crates/gpty-gdext/src/capture_api.rs"
+    },
+    {
+      "id": "plugin.install.review",
+      "statement": "a plugin install is a review handshake the user answers, not a write a caller can finish alone",
+      "status": "done",
+      "mechanism": "the CLI stages the clone and the GUI asks; consent is remembered by the trust store",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd",
+      "row": "Plugin install & lifecycle"
+    },
+    {
+      "id": "plugin.changed.notify",
+      "statement": "the running app learns of a CLI-side plugin change without a restart",
+      "status": "done",
+      "mechanism": "a notify verb after the store is written, so the GUI reloads the registry it reads",
+      "evidence": "godot/scenes/terminal/ipc_handlers.gd"
+    },
+    {
+      "id": "tool.mcp.published-only",
+      "statement": "an MCP call reaches only a published tool, not any method its kebab name could spell",
+      "status": "done",
+      "mechanism": "the requested name is checked against the generated tool list before the name-to-method mapping runs",
+      "evidence": "crates/gpty-cli/src/commands/schema.rs"
+    },
+    {
+      "id": "tool.mcp.argument-contract",
+      "statement": "a tool argument is translated from the CLI definition, and an unknown key is refused with the nearest valid one",
+      "status": "done",
+      "mechanism": "the wire table derives each argument's JSON type and refuses a wrong type or contradictory pair",
+      "evidence": "crates/gpty-cli/src/commands/wire.rs"
+    },
+    {
+      "id": "event.capability-scoped",
+      "statement": "a pane's event socket carries only what that pane is entitled to emit",
+      "status": "done",
+      "mechanism": "the connection is bound to one capability at accept time, so a socket cannot speak for another pane",
+      "evidence": "crates/gpty-gdext/src/omp_events.rs"
+    },
+    {
+      "id": "vault.root.user-only",
+      "statement": "the list of readable vault roots can only be changed in the pane settings UI",
+      "status": "done",
+      "mechanism": "no verb, layout, profile or plugin can register a root; the handlers answer only inside the list",
+      "evidence": "godot/scenes/autoloads/vault_registry.gd"
+    }
+  ]
+}

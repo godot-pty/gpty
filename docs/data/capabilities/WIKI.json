@@ -1,0 +1,236 @@
+{
+  "area": "WIKI",
+  "capabilities": [
+    {
+      "id": "vault.walk.notes",
+      "statement": "the vault walk lists only Markdown files, skipping hidden entries at every level",
+      "status": "done",
+      "mechanism": "`scan_vault` recurses with `MAX_NOTES` 2000 and `MAX_DEPTH` 16, skips any name starting with `.`, takes only `.md` case-insensitively, and sorts by vault-relative path so the list, the index and the graph agree",
+      "evidence": "crates/gpty-core/src/vault.rs",
+      "row": "Vault model"
+    },
+    {
+      "id": "vault.walk.containment",
+      "statement": "a note or directory that resolves outside the vault is skipped and counted, never listed",
+      "status": "done",
+      "mechanism": "the walk canonicalizes every link and directory against the canonical root and keeps only what stays inside; the count travels as `ScanResult.outside` to the pane footer",
+      "evidence": "crates/gpty-core/src/vault.rs:269",
+      "row": "The vault walk follows symlinks the note reader refuses"
+    },
+    {
+      "id": "vault.index.incremental",
+      "statement": "a re-index reads only the notes whose modification time or size changed",
+      "status": "done",
+      "mechanism": "`index_vault` compares each walked note's (mtime, size) with the indexed row, re-reads only a mismatch, drops vanished rows only from a complete walk, and rewrites rows and their links in one transaction",
+      "evidence": "crates/gpty-core/src/vault.rs:1978",
+      "row": "Vault model"
+    },
+    {
+      "id": "vault.store.fts5",
+      "statement": "note titles and bodies are searchable as prose, ranked by relevance",
+      "spec": "SQLite FTS5, porter unicode61",
+      "status": "done",
+      "mechanism": "an external-content FTS5 table behind `notes` with three sync triggers, `bm25()` ordering and a 24-token `snippet()`; the store lives in the app's state directory, never inside the vault",
+      "evidence": "crates/gpty-core/src/vault.rs:1925"
+    },
+    {
+      "id": "vault.search.api",
+      "statement": "a caller searches a vault by free text and gets a path, a title and context for each hit",
+      "status": "done",
+      "mechanism": "the query is reduced to quoted word terms (32 at most, ANDed) before `MATCH`, the limit is clamped to 1..500, and the control-socket verb re-indexes first so an outside edit is searchable",
+      "evidence": "crates/gpty-gdext/src/vault_ipc.rs"
+    },
+    {
+      "id": "vault.note.read",
+      "statement": "opening a note returns at most 1 MiB of text and refuses anything that is not a regular file",
+      "status": "done",
+      "mechanism": "`read_vault_note` resolves the path inside the vault, requires a regular file so a planted FIFO cannot block the caller, cuts at `MAX_NOTE_BYTES` with the torn UTF-8 tail dropped, and reports the CRLF flag and the stamp",
+      "evidence": "crates/gpty-core/src/vault.rs:549"
+    },
+    {
+      "id": "vault.note.write",
+      "statement": "saving a note replaces the file atomically, and only if the loaded revision is unchanged",
+      "status": "done",
+      "mechanism": "a hidden temp sibling with a random name is written, given the note's own mode, then renamed over it; an (mtime, size) mismatch answers `changed_on_disk` unless the caller forces the save",
+      "evidence": "crates/gpty-core/src/vault.rs:580"
+    },
+    {
+      "id": "vault.note.create-delete",
+      "statement": "a note can be created without overwriting, and deleted without following a link out of the vault",
+      "status": "done",
+      "mechanism": "create claims the path with `create_new` after its directory resolves inside the root; delete unlinks the entry itself, so a symlinked note's target stays where it is",
+      "evidence": "crates/gpty-core/src/vault.rs:633"
+    },
+    {
+      "id": "vault.note.rename",
+      "statement": "a note can be renamed inside the vault without replacing an existing file",
+      "status": "done",
+      "mechanism": "the destination is claimed with `create_new` before the rename, its directory must resolve inside the vault, and a failed move removes the claim it left behind",
+      "evidence": "crates/gpty-core/src/vault.rs:701"
+    },
+    {
+      "id": "vault.links.parse",
+      "statement": "a note's `[[mentions]]` are parsed with their line, alias and heading fragment",
+      "status": "done",
+      "mechanism": "`parse_links` scans line by line and skips fenced blocks, inline code spans and escaped openers, keeping at most 512 occurrences per note and targets up to 1024 bytes",
+      "evidence": "crates/gpty-core/src/links.rs:68"
+    },
+    {
+      "id": "vault.links.resolve",
+      "statement": "a mention resolves to a note by path or by unique stem, and an ambiguity stays unresolved",
+      "status": "done",
+      "mechanism": "a target containing `/` matches a path and a bare target a file stem; exact case wins, then a unique case-insensitive match, and more than one match answers the sorted candidates",
+      "evidence": "crates/gpty-core/src/links.rs:251"
+    },
+    {
+      "id": "vault.links.backlinks",
+      "statement": "the open note lists what it mentions, what mentions it, and what does not resolve",
+      "status": "done",
+      "mechanism": "`links_for` reads the stored rows in both directions, re-parses the body to attach the fragment the table does not keep, and derives ambiguity candidates by re-running the same resolver",
+      "evidence": "crates/gpty-core/src/vault.rs:1698",
+      "row": "Wikilinks & backlinks - the pane half"
+    },
+    {
+      "id": "vault.rename.rewrite",
+      "statement": "renaming a note offers to respell the mentions that used its old name before writing any",
+      "status": "done",
+      "mechanism": "a preview returns files, mentions, skipped and truncated counts; the apply rewrites only occurrences that resolved to the moved note, keeps alias, fragment and line endings, and writes each through `write_vault_note`",
+      "evidence": "crates/gpty-core/src/vault.rs:775",
+      "row": "Create, rename, and delete notes"
+    },
+    {
+      "id": "vault.graph.aggregate",
+      "statement": "the link graph is one edge per note pair plus one ghost node per unresolved target",
+      "status": "done",
+      "mechanism": "`graph_limited` aggregates mentions per ordered pair, orders by count then name, caps edges at 10000 and ghosts at 2000, and reports `truncated` instead of presenting a cut graph as whole",
+      "evidence": "crates/gpty-core/src/vault.rs:1791"
+    },
+    {
+      "id": "vault.graph.geometry",
+      "statement": "the graph's layout is deterministic and a click selects the nearest node or edge",
+      "status": "done",
+      "mechanism": "a hash-seeded relaxation with 24..240 sweeps keeps positions the view already holds; hit tests take the nearest node within 11 screen pixels or the nearest edge segment within 6, each converted to world units by the zoom",
+      "evidence": "godot/scenes/ui/vault_graph_model.gd"
+    },
+    {
+      "id": "vault.graph.build-offscreen",
+      "statement": "opening the link graph does not stall the frame, whatever the vault's size",
+      "status": "done",
+      "mechanism": "the index query, the model parse and the layout run as one `WorkerThreadPool` task; the pane polls it, and a result for a vault the pane has left is dropped rather than drawn",
+      "evidence": "godot/scenes/panes/wiki_pane.gd:745",
+      "row": "Opening the link graph blocks the frame, and `pane-view --graph` inherits it"
+    },
+    {
+      "id": "vault.weights.declared",
+      "statement": "an authored weight from 1 to 100 can override an edge's measured thickness and panel order",
+      "status": "done",
+      "mechanism": "`user://link_weights.json` keyed (vault, source, target) with path-shape and range checks; a bad entry costs itself, and no decision other than display reads a declaration",
+      "evidence": "godot/scenes/autoloads/link_weights_store.gd",
+      "row": "Declared edge weights - the authored layer"
+    },
+    {
+      "id": "vault.weights.rekey",
+      "statement": "a declared weight follows a note renamed inside the pane",
+      "status": "done",
+      "mechanism": "the rename path calls `rekey_note`, rebuilding both endpoint keys to the new path; an outside move looks like a delete here and its declarations are pruned instead",
+      "evidence": "godot/scenes/autoloads/link_weights_store.gd",
+      "row": "A note rename does not re-key its declared link weights"
+    },
+    {
+      "id": "vault.weights.outside-move",
+      "statement": "a declared weight survives a note moved by a program other than this one",
+      "status": "planned",
+      "mechanism": "it does not: a complete graph prunes declarations whose endpoints vanished, and an outside move cannot be told from a deletion, so following one needs an explicit graph-side action",
+      "evidence": "godot/scenes/autoloads/link_weights_store.gd",
+      "row": "Declared link weights cannot follow a note moved outside gPTY"
+    },
+    {
+      "id": "note.markdown.render",
+      "statement": "note text is rendered as Markdown through a sanitized path, never as raw markup",
+      "spec": "CommonMark, GFM",
+      "status": "done",
+      "mechanism": "`GptyMarkdown.render` escapes raw HTML and BBCode, reduces images to alt text, admits only http, https and mailto link targets, and emits indented list lines instead of list tags",
+      "evidence": "crates/gpty-gdext/src/markdown.rs",
+      "row": "Safe Markdown rendering"
+    },
+    {
+      "id": "note.markdown.cap",
+      "statement": "a note at the read cap renders whole, and a larger source says what it did not show",
+      "status": "done",
+      "mechanism": "`MAX_MARKDOWN_BYTES` is the same 1 MiB the note reader cuts at, and the answer carries `truncated`, `shown` and `size` for the view's notice",
+      "evidence": "crates/gpty-gdext/src/markdown.rs:52",
+      "row": "The Markdown preview no longer stops at a cap of its own"
+    },
+    {
+      "id": "note.preview.anchors",
+      "statement": "a link naming a note's heading lands on that heading in the preview",
+      "status": "done",
+      "mechanism": "`MarkdownAnchors` scans ATX headings past frontmatter and fenced blocks, exact text first then case-insensitive, and `MarkdownView` scrolls to the matching rendered line",
+      "evidence": "godot/scenes/ui/markdown_anchors.gd:24",
+      "row": "Wikilink navigation polish - heading fragments, line jumps, and nested labels"
+    },
+    {
+      "id": "note.preview.setext",
+      "statement": "a link naming a setext heading lands on that heading",
+      "status": "planned",
+      "mechanism": "the scanner recognizes ATX headings only, so a title over `===` renders but derives no anchor and the jump falls to the ATX heading above it",
+      "evidence": "godot/scenes/ui/markdown_anchors.gd",
+      "row": "Setext headings have no anchor"
+    },
+    {
+      "id": "note.edit.modes",
+      "statement": "a note is edited in place with an optional live preview of the unsaved buffer",
+      "status": "done",
+      "mechanism": "edit, split and preview modes persist as the tile's `view_mode`; the preview renders the buffer after a 0.4 s quiet window, and edit mode renders nothing",
+      "evidence": "godot/scenes/panes/wiki_pane.gd",
+      "row": "Markdown editor & preview"
+    },
+    {
+      "id": "note.edit.close-guard",
+      "statement": "a note with unsaved text asks before the pane, or the app, takes the buffer away",
+      "status": "done",
+      "mechanism": "`request_close` runs the same save-or-discard question as leaving the note, and `has_unsaved_state` lets a caller that cannot answer a dialog refuse instead",
+      "evidence": "godot/scenes/panes/wiki_pane.gd:1921",
+      "row": "Closing a pane or quitting the app loses unsaved wiki edits"
+    },
+    {
+      "id": "note.scratch.copy",
+      "statement": "a dirty buffer is snapshotted outside the vault and offered back after a crash",
+      "status": "done",
+      "mechanism": "a throttled 1.5 s copy under the state directory is keyed by a stated FNV-1a hash of the canonical root and path, written atomically and owner-only, then offered as Restore, Discard or later on reopen",
+      "evidence": "crates/gpty-core/src/vault.rs:1162",
+      "row": "A crash no longer takes the wiki buffer"
+    },
+    {
+      "id": "note.frontmatter.title",
+      "statement": "a note whose file opens with a properties block is titled by its first heading",
+      "status": "done",
+      "mechanism": "`note_title` skips a closed `---` block before scanning for a heading and falls back to the file stem; the block itself is indexed and renders as ordinary text",
+      "evidence": "crates/gpty-core/src/vault.rs:1060",
+      "row": "A note with frontmatter loses its title in search results"
+    },
+    {
+      "id": "pane.wiki.browse",
+      "statement": "the wiki pane lists a vault, searches it as the user types, and reopens the note it showed",
+      "status": "done",
+      "mechanism": "the list is one `vault_index` call with a footer for a capped listing and skipped links; search debounces 0.15 s for 200 hits; `open_note` and `graph` replay once from the saved tile state",
+      "evidence": "godot/scenes/panes/wiki_pane.gd",
+      "row": "Wiki pane type"
+    },
+    {
+      "id": "vault.root.registry",
+      "statement": "the control-socket vault verbs answer only inside a root the user registered",
+      "status": "done",
+      "mechanism": "`user://vaults.json` is written by the pane settings UI alone and mirrored into the extension's process; a caller naming an unregistered root is refused with `not_registered`",
+      "evidence": "godot/scenes/autoloads/vault_registry.gd"
+    },
+    {
+      "id": "note.templates",
+      "statement": "a template's tokens are expanded into the open note as an edit",
+      "status": "planned",
+      "mechanism": "no expander exists; the planned token table is closed (date, time, title, vault), expanded in Rust and inserted as an edit so no second write path into the vault opens",
+      "evidence": "godot/scenes/panes/wiki_pane.gd",
+      "row": "Templates"
+    }
+  ]
+}

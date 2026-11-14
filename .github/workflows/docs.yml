@@ -11,6 +11,7 @@ on:
       # cannot be validated by the job it repairs.
       - ".github/workflows/docs.yml"
       - "scripts/docs-check"
+      - "scripts/check-capabilities"
       # The knowledge bundle ships inside the app and is generated from
       # `docs/content/wiki`, so a wiki-only commit changes this file and must
       # still be validated here - CI ignores documentation-only pushes.
@@ -64,6 +65,12 @@ jobs:
 
       - name: Check markdown (links, roadmap tables, split pages)
         run: ./scripts/docs-check
+
+      # The catalogue is data, not markdown (docs-check skips docs/data/), so
+      # nothing else reads it. It stats every evidence path and joins every
+      # `row` to a roadmap title; no build, milliseconds.
+      - name: Check the capability catalogue
+        run: ./scripts/check-capabilities
 
       # The bundle is tracked and generated; a stale one would ship an app
       # whose wiki disagrees with the notes. This is the only place CI can

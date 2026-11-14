@@ -1,0 +1,318 @@
+{
+  "area": "TERM",
+  "capabilities": [
+    {
+      "id": "sgr.attr.bold",
+      "statement": "bold runs are drawn heavier than body text",
+      "spec": "SGR 1 (ECMA-48)",
+      "status": "done",
+      "mechanism": "`CellInfo.bold` carries the flag from the grid to the draw batch",
+      "evidence": "crates/gpty-core/src/term.rs"
+    },
+    {
+      "id": "sgr.attr.italic",
+      "statement": "italic runs are drawn with the family's italic face",
+      "spec": "SGR 3 (ECMA-48)",
+      "status": "done",
+      "mechanism": "`CellInfo.italic` carries the flag; the draw batch selects the italic face",
+      "evidence": "crates/gpty-core/src/term.rs"
+    },
+    {
+      "id": "sgr.attr.underline",
+      "statement": "underlined runs are drawn with an underline under the cell",
+      "spec": "SGR 4 (ECMA-48)",
+      "status": "done",
+      "mechanism": "`CellInfo.underline` carries the flag; the pane draws a rule in the cell rect",
+      "evidence": "crates/gpty-core/src/term.rs"
+    },
+    {
+      "id": "sgr.attr.inverse",
+      "statement": "a cell's foreground and background can be swapped",
+      "spec": "SGR 7 (ECMA-48)",
+      "status": "done",
+      "mechanism": "`CellInfo.inverse` carries the flag and the colour resolution swaps the pair",
+      "evidence": "crates/gpty-core/src/term.rs"
+    },
+    {
+      "id": "cell.width.east-asian",
+      "statement": "a wide character occupies two cells and is never split across a batch boundary",
+      "spec": "Unicode East Asian Width",
+      "status": "done",
+      "mechanism": "`CellInfo.wide` marks the lead cell; the packer keeps the pair in one run",
+      "evidence": "crates/gpty-core/src/term.rs"
+    },
+    {
+      "id": "title.osc-set",
+      "statement": "a program names its pane through a terminal title escape",
+      "spec": "OSC 0 / 2 (xterm)",
+      "status": "done",
+      "mechanism": "`TitleListener` in the grid's event listener takes `TermEvent::Title` and stores it",
+      "evidence": "crates/gpty-core/src/term.rs"
+    },
+    {
+      "id": "pane.exit-code.report",
+      "statement": "a pane reports its child's exit code over the control surface",
+      "status": "done",
+      "mechanism": "`TermStatus.exit_code` is written by the child's exit path and read by `paneStatus`",
+      "evidence": "crates/gpty-core/src/engine.rs:138"
+    },
+    {
+      "id": "scrollback.store",
+      "statement": "scrollback is persisted per pane and survives a restart",
+      "status": "done",
+      "mechanism": "a SQLite store per workspace, flushed from the grid on the engine's schedule",
+      "evidence": "crates/gpty-core/src/history.rs"
+    },
+    {
+      "id": "search.scrollback",
+      "statement": "persisted scrollback is searchable by text",
+      "status": "done",
+      "mechanism": "FTS5 over the scrollback table; the query is sanitized and each hit carries its line",
+      "evidence": "crates/gpty-gdext/src/history_api.rs"
+    },
+    {
+      "id": "selection.copy",
+      "statement": "a mouse selection can be copied out of the grid",
+      "status": "done",
+      "mechanism": "the pane tracks anchor and focus in grid coordinates and writes the run's text",
+      "evidence": "godot/scenes/terminal/terminal_pane.gd"
+    },
+    {
+      "id": "osc.4.palette-set",
+      "statement": "a program can set an indexed palette colour",
+      "spec": "OSC 4",
+      "status": "partial",
+      "mechanism": "the parser stores the value in the grid's colour table; cells still resolve from the pane's own 16-entry palette",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "A program's palette change is stored by the parser and then ignored by the renderer"
+    },
+    {
+      "id": "osc.10.foreground-set",
+      "statement": "a program can set the default foreground colour",
+      "spec": "OSC 10",
+      "status": "partial",
+      "mechanism": "parsed into the grid's colour table, then overwritten by the pane's resolved default",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "A program's palette change is stored by the parser and then ignored by the renderer"
+    },
+    {
+      "id": "osc.11.background-set",
+      "statement": "a program can set the default background colour",
+      "spec": "OSC 11",
+      "status": "partial",
+      "mechanism": "parsed into the grid's colour table, then overwritten by the pane's resolved default",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "A program's palette change is stored by the parser and then ignored by the renderer"
+    },
+    {
+      "id": "sgr.attr.strikethrough",
+      "statement": "struck-through runs are drawn with a line through the cell",
+      "spec": "SGR 9 (ECMA-48)",
+      "status": "planned",
+      "mechanism": "the flag is parsed and dropped: `CellInfo` carries no strikeout bit",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "Text attributes the emulator parses are drawn: strikethrough, dim, hidden, curly/dotted/dashed/double underline and underline colour"
+    },
+    {
+      "id": "sgr.attr.dim",
+      "statement": "dim runs are drawn at reduced intensity",
+      "spec": "SGR 2 (ECMA-48)",
+      "status": "planned",
+      "mechanism": "the flag is parsed and dropped: `CellInfo` carries no dim bit",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "Text attributes the emulator parses are drawn: strikethrough, dim, hidden, curly/dotted/dashed/double underline and underline colour"
+    },
+    {
+      "id": "sgr.attr.hidden",
+      "statement": "hidden runs are drawn as background-only cells",
+      "spec": "SGR 8 (ECMA-48)",
+      "status": "planned",
+      "mechanism": "the flag is parsed and dropped: `CellInfo` carries no hidden bit",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "Text attributes the emulator parses are drawn: strikethrough, dim, hidden, curly/dotted/dashed/double underline and underline colour"
+    },
+    {
+      "id": "sgr.attr.undercurl",
+      "statement": "a curly underline is drawn in a colour of its own",
+      "spec": "SGR 4:3, SGR 58",
+      "status": "planned",
+      "mechanism": "the variant and its colour are parsed and dropped before the packer; `CellInfo` has one underline bit",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "Text attributes the emulator parses are drawn: strikethrough, dim, hidden, curly/dotted/dashed/double underline and underline colour"
+    },
+    {
+      "id": "sgr.attr.underline-variants",
+      "statement": "double, dotted and dashed underlines are drawn as their own strokes",
+      "spec": "SGR 4:2 / 4:4 / 4:5",
+      "status": "planned",
+      "mechanism": "the variant number is parsed and dropped; the pane draws one solid rule",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "Text attributes the emulator parses are drawn: strikethrough, dim, hidden, curly/dotted/dashed/double underline and underline colour"
+    },
+    {
+      "id": "sgr.attr.underline-colour",
+      "statement": "an underline carries a colour independent of the foreground",
+      "spec": "SGR 58",
+      "status": "planned",
+      "mechanism": "`CellInfo` has no per-cell underline colour slot; the wire carries one style word",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "Text attributes the emulator parses are drawn: strikethrough, dim, hidden, curly/dotted/dashed/double underline and underline colour"
+    },
+    {
+      "id": "cell.box-drawing",
+      "statement": "box-drawing characters join their neighbours with no gap",
+      "spec": "Unicode U+2500..U+257F",
+      "status": "planned",
+      "mechanism": "the glyph comes from the font, whose advance and ascent do not match the fractional cell size",
+      "evidence": "godot/scenes/terminal/terminal_pane.gd",
+      "row": "Box-drawing, block and braille characters are drawn by gPTY, not taken from the font"
+    },
+    {
+      "id": "cell.block-elements",
+      "statement": "block elements tile their cells without seams",
+      "spec": "Unicode U+2580..U+259F",
+      "status": "planned",
+      "mechanism": "the glyph comes from the font and is sized to the font, not to the cell",
+      "evidence": "godot/scenes/terminal/terminal_pane.gd",
+      "row": "Box-drawing, block and braille characters are drawn by gPTY, not taken from the font"
+    },
+    {
+      "id": "cell.braille",
+      "statement": "braille patterns are drawn at cell resolution",
+      "spec": "Unicode U+2800..U+28FF",
+      "status": "planned",
+      "mechanism": "the glyph comes from the font and is sized to the font, not to the cell",
+      "evidence": "godot/scenes/terminal/terminal_pane.gd",
+      "row": "Box-drawing, block and braille characters are drawn by gPTY, not taken from the font"
+    },
+    {
+      "id": "font.fallback-chain",
+      "statement": "a glyph missing from the chosen family is drawn from a fallback family",
+      "status": "planned",
+      "mechanism": "one font file is loaded per pane and no fallback list is set",
+      "evidence": "godot/scenes/terminal/terminal_fonts.gd",
+      "row": "Fonts: a chosen family with a fallback chain, so Nerd Font icons and combining marks render"
+    },
+    {
+      "id": "cell.combining-marks",
+      "statement": "a combining mark is drawn over its base character",
+      "spec": "Unicode combining marks",
+      "status": "planned",
+      "mechanism": "`CellInfo.ch` is one `char`, so a zero-width mark has nowhere to live",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "Fonts: a chosen family with a fallback chain, so Nerd Font icons and combining marks render"
+    },
+    {
+      "id": "csi.14t.text-area-pixels",
+      "statement": "a program can ask for the text area size in pixels",
+      "spec": "CSI 14 t (xterm)",
+      "status": "planned",
+      "mechanism": "the grid raises the event and the frontend drops it into `_ => {}`",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "Answer the terminal-state queries the emulator raises: OSC 4/10/11/12 colours and text-area size"
+    },
+    {
+      "id": "csi.18t.text-area-chars",
+      "statement": "a program can ask for the text area size in cells",
+      "spec": "CSI 18 t (xterm)",
+      "status": "planned",
+      "mechanism": "the grid raises the event and the frontend drops it into `_ => {}`",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "Answer the terminal-state queries the emulator raises: OSC 4/10/11/12 colours and text-area size"
+    },
+    {
+      "id": "osc.11.background-query",
+      "statement": "a program can ask for the background colour",
+      "spec": "OSC 11 (query)",
+      "status": "planned",
+      "mechanism": "the query is parsed and no reply is written back to the pty",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "Answer the terminal-state queries the emulator raises: OSC 4/10/11/12 colours and text-area size"
+    },
+    {
+      "id": "bell.visual",
+      "statement": "a bell draws a visible mark on the pane instead of being dropped",
+      "spec": "BEL (ECMA-48)",
+      "status": "planned",
+      "mechanism": "the event falls into `_ => {}`; nothing reads it",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "The bell is seen"
+    },
+    {
+      "id": "osc.52.clipboard-write",
+      "statement": "a program can write to the clipboard under a per-pane consent policy",
+      "spec": "OSC 52",
+      "status": "planned",
+      "mechanism": "the store event is dropped before any policy could be consulted",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "Clipboard writes from programs (OSC 52), consent-gated and write-only"
+    },
+    {
+      "id": "osc.52.clipboard-read",
+      "statement": "a program can read the clipboard",
+      "spec": "OSC 52 (query)",
+      "status": "rejected",
+      "mechanism": "a program reading the user's clipboard is an exfiltration path; the store half is gated, the load half stays unimplemented",
+      "row": "Clipboard writes from programs (OSC 52), consent-gated and write-only"
+    },
+    {
+      "id": "osc.7.cwd-report",
+      "statement": "the shell's working directory is known to the host",
+      "spec": "OSC 7",
+      "status": "planned",
+      "mechanism": "the byte stream is not tapped for it; the `gpty_state` tap is the precedent",
+      "evidence": "crates/gpty-core/src/parser.rs",
+      "row": "The shell's working directory is known: OSC 7 as display, \"new pane here\" as the default"
+    },
+    {
+      "id": "mode.focus-reporting.1004",
+      "statement": "a program is told when its pane gains or loses focus",
+      "spec": "DECSET 1004",
+      "status": "planned",
+      "mechanism": "no mode negotiation turned up in the keymap or the pane's input path",
+      "evidence": "crates/gpty-core/src/keymap.rs",
+      "row": "Verify and fill the modern-TUI protocol set: kitty keyboard, focus reporting, synchronized output"
+    },
+    {
+      "id": "mode.sync-output.2026",
+      "statement": "a frame is presented whole rather than half-drawn",
+      "spec": "DECSET 2026",
+      "status": "planned",
+      "mechanism": "the begin and end markers are not tracked; the renderer presents on its own cadence",
+      "evidence": "crates/gpty-core/src/term.rs",
+      "row": "Verify and fill the modern-TUI protocol set: kitty keyboard, focus reporting, synchronized output"
+    },
+    {
+      "id": "input.kitty-keyboard",
+      "statement": "modified keys are reported unambiguously to the program",
+      "spec": "kitty keyboard protocol",
+      "status": "planned",
+      "mechanism": "`keymap.rs` names the protocol in its header, but no mode negotiation exists",
+      "evidence": "crates/gpty-core/src/keymap.rs",
+      "row": "Verify and fill the modern-TUI protocol set: kitty keyboard, focus reporting, synchronized output"
+    },
+    {
+      "id": "shell.default.user-shell",
+      "statement": "a fresh pane starts the user's login shell",
+      "status": "planned",
+      "mechanism": "the default is the literal path `/bin/bash` on every non-Windows platform",
+      "evidence": "godot/scenes/autoloads/settings_manager.gd",
+      "row": "The default shell is the user's shell, not `/bin/bash`"
+    },
+    {
+      "id": "pane.exit.footer",
+      "statement": "a pane whose child exited says so and offers restart or close",
+      "status": "planned",
+      "mechanism": "the exit code is tracked and reported, but the pane draws nothing for it",
+      "evidence": "crates/gpty-core/src/engine.rs:138",
+      "row": "A pane whose shell has exited says so and offers Restart or Close"
+    },
+    {
+      "id": "graphics.sixel",
+      "statement": "a program can draw an image into the grid",
+      "spec": "sixel",
+      "status": "undecided",
+      "mechanism": "needs a memory-safe decoder, a size cap and a wire channel the packed batch does not have; no demand measured"
+    }
+  ]
+}

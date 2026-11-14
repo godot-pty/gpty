@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""Render the capability catalogue: a table for reading, or a vault for the wiki.
+
+    scripts/render-capabilities                  # internal table, every area
+    scripts/render-capabilities --public         # status + statement only
+    scripts/render-capabilities --area TERM      # one area
+    scripts/render-capabilities --vault DIR      # generate a Markdown vault
+
+The catalogue (`docs/data/capabilities/<AREA>.json`) is the source and
+`scripts/check-capabilities` is its gate; this script only reads it. Nothing
+here is committed: a rendering that had to be kept in sync would be a second
+thing to update on every record, which is the drift the catalogue exists to
+avoid.
+
+The internal table groups by status, gaps first, because the question it
+answers is "what do we not have yet". `--public` drops the mechanism and the
+evidence and keeps the two fields that describe the product from outside.
+
+`--vault` writes the projection the wiki pane and the link graph consume: one
+note per area index, one per capability, and one per roadmap row a record
+points at, with `[[wikilinks]]` joining them (capability -> area, capability ->
+row, row -> capabilities). It refuses a directory that is not empty and does
+not carry the `.generated` marker it wrote last time, so a typo cannot empty a
+notes vault.
+
+Exit codes: 0 written, 1 refused or unusable input. `--vault` writes; every
+other mode prints to stdout.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import shutil
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+DATA = ROOT / "docs" / "data" / "capabilities"
+MARKER = ".generated"
+
+STATUS_ORDER = ["planned", "partial", "undecided", "done", "rejected"]
+
+
+def load(area: str | None) -> list[dict]:
+    areas = []
+    for path in sorted(DATA.glob("*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if area and data["area"] != area:
+            continue
+        areas.append(data)
+    return areas
+
+
+def cell(text: str) -> str:
+    """A table cell: pipes escaped, newlines flattened."""
+    return text.replace("|", "\\|").replace("\n", " ").strip()
+
+
+def count(records: list[dict]) -> dict[str, int]:
+    totals = {s: 0 for s in STATUS_ORDER}
+    for record in records:
+        totals[record["status"]] = totals.get(record["status"], 0) + 1
+    return totals
+
+
+def table(areas: list[dict], public: bool) -> str:
+    out: list[str] = []
+    every = [r for a in areas for r in a["capabilities"]]
+    totals = count(every)
+    summary = ", ".join(f"{n} {s}" for s, n in totals.items() if n)
+    out.append(f"{len(every)} capabilities in {len(areas)} area(s): {summary}")
+    out.append("")
+    for area in areas:
+        records = sorted(area["capabilities"], key=lambda r: (STATUS_ORDER.index(r["status"]), r["id"]))
+        out.append(f"## {area['area']}")
+        out.append("")
+        if public:
+            out.append("| Status | Capability |")
+            out.append("|---|---|")
+            for r in records:
+                out.append(f"| {r['status']} | {cell(r['statement'])} |")
+        else:
+            out.append("| Status | Capability | How | Evidence |")
+            out.append("|---|---|---|---|")
+            for r in records:
+                how = cell(r.get("mechanism", ""))
+                ev = cell(r.get("evidence", ""))
+                out.append(f"| {r['status']} | {cell(r['statement'])} | {how} | {ev} |")
+        out.append("")
+    return "\n".join(out)
+
+
+def slug(title: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return s[:80] or "row"
+
+
+def note(record: dict, area: str, rows: dict[str, list[dict]], area_of: dict[str, str]) -> str:
+    lines = [
+        "---",
+        f"id: {record['id']}",
+        f"area: {area}",
+        f"status: {record['status']}",
+        "---",
+        "",
+        f"# {record['statement']}",
+        "",
+        f"**Status** {record['status']} · **Area** [[{area}/index|{area}]]",
+    ]
+    if "spec" in record:
+        lines[-1] += f" · **Spec** {record['spec']}"
+    lines.append("")
+    if "mechanism" in record:
+        lines.append(f"**Mechanism**: {record['mechanism']}")
+        lines.append("")
+    if "evidence" in record:
+        lines.append(f"**Evidence**: `{record['evidence']}`")
+        lines.append("")
+    if "row" in record:
+        lines.append(f"**Roadmap**: [[rows/{slug(record['row'])}|{record['row']}]]")
+        lines.append("")
+        siblings = [r for r in rows[record["row"]] if r["id"] != record["id"]]
+        if siblings:
+            lines.append("## Also from that row")
+            lines.append("")
+            for s in siblings:
+                lines.append(f"- [[{area_of[s['id']]}/{s['id']}|{s['statement']}]]")
+            lines.append("")
+    return "\n".join(lines)
+
+
+def vault(areas: list[dict], target: Path) -> int:
+    if target.exists():
+        if not target.is_dir() or (any(target.iterdir()) and not (target / MARKER).exists()):
+            print(
+                f"render-capabilities: {target} is not empty and carries no {MARKER} marker; "
+                "refusing to overwrite a directory this script did not write"
+            )
+            return 1
+        shutil.rmtree(target)
+    target.mkdir(parents=True, exist_ok=True)
+    (target / MARKER).write_text(
+        "Written by scripts/render-capabilities --vault. Safe to delete.\n", encoding="utf-8"
+    )
+
+    rows: dict[str, list[dict]] = {}
+    area_of: dict[str, str] = {}
+    for area in areas:
+        for record in area["capabilities"]:
+            area_of[record["id"]] = area["area"]
+            if "row" in record:
+                rows.setdefault(record["row"], []).append(record)
+
+    index = ["# Capabilities", "", "The product's capability catalogue, one note per fact.", ""]
+    for area in areas:
+        counts = count(area["capabilities"])
+        summary = ", ".join(f"{n} {s}" for s, n in counts.items() if n)
+        index.append(f"- [[{area['area']}/index|{area['area']}]] — {len(area['capabilities'])} ({summary})")
+    if rows:
+        index.append("")
+        index.append(f"## Roadmap rows ({len(rows)})")
+        index.append("")
+        for title in sorted(rows):
+            index.append(f"- [[rows/{slug(title)}|{title}]]")
+    (target / "index.md").write_text("\n".join(index) + "\n", encoding="utf-8")
+
+    for area in areas:
+        name = area["area"]
+        records = sorted(area["capabilities"], key=lambda r: (STATUS_ORDER.index(r["status"]), r["id"]))
+        lines = [
+            "---",
+            f"area: {name}",
+            "---",
+            "",
+            f"# {name}",
+            "",
+            f"[[index|Capabilities]] · {len(records)} records",
+            "",
+            "| Status | Capability | Spec |",
+            "|---|---|---|",
+        ]
+        for r in records:
+            lines.append(f"| {r['status']} | [[{name}/{r['id']}|{cell(r['statement'])}]] | {cell(r.get('spec', ''))} |")
+        (target / name / "index.md").parent.mkdir(parents=True, exist_ok=True)
+        (target / name / "index.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        for r in records:
+            (target / name / f"{r['id']}.md").write_text(note(r, name, rows, area_of), encoding="utf-8")
+
+    for title, records in rows.items():
+        lines = [
+            "---",
+            "kind: roadmap-row",
+            "---",
+            "",
+            f"# {title}",
+            "",
+            "A roadmap row's bold title, joined from the capability catalogue.",
+            "",
+            "## Capabilities",
+            "",
+        ]
+        for r in sorted(records, key=lambda r: r["id"]):
+            lines.append(f"- [[{area_of[r['id']]}/{r['id']}|{r['statement']}]] ({r['status']})")
+        (target / "rows" / f"{slug(title)}.md").parent.mkdir(parents=True, exist_ok=True)
+        (target / "rows" / f"{slug(title)}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    files = len(list(target.rglob("*.md")))
+    print(f"render-capabilities: wrote {files} notes to {target}")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Render the capability catalogue.")
+    parser.add_argument("--public", action="store_true", help="status and statement only")
+    parser.add_argument("--area", help="one area, e.g. TERM")
+    parser.add_argument("--vault", metavar="DIR", help="generate a Markdown vault")
+    args = parser.parse_args()
+
+    if not DATA.is_dir():
+        print("render-capabilities: no docs/data/capabilities/")
+        return 1
+    areas = load(args.area)
+    if not areas:
+        print(f"render-capabilities: no area {args.area!r}")
+        return 1
+    if args.vault:
+        return vault(areas, Path(args.vault).resolve())
+    print(table(areas, args.public))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
