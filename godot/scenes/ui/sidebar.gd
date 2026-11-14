@@ -61,18 +61,23 @@ var _ws_names: Array[String] = []
 var _ws_active := -1
 var _ws_cwds: Array[String] = []
 var _pane_items: Array = []
-## What each list's rows were last built from, one string per row. A refresh that
-## matches moves the accent only: building a row is 7-10.4 ms (three Phosphor
-## glyph Labels at 3.3-3.5 ms each), an accent on an attached row is free.
+## What the workspace and profile lists' rows were last built from, one string
+## per row. A refresh that matches moves the accent only: building a row is
+## 7-10.4 ms (three Phosphor glyph Labels at 3.3-3.5 ms each), an accent on an
+## attached row is free. The pane list never rebuilds: `_pane_rows` mutates it.
 var _ws_rendered: Array[String] = []
 var _profile_rendered: Array[String] = []
-var _pane_rendered: Array[String] = []
-## Whether each list has been built at least once. An empty model matches an
-## empty signature, so without this the first refresh would skip the rows that
-## must exist (the profile section's catalog hint is always there).
+## body instance id -> {"body": Control, "row": HBoxContainer}. A spawn adds one
+## row and a close removes one; rebuilding every row made a spawn cost grow with
+## the live pane count (roadmap: "Creating a pane gets slower as the window
+## fills", measured 11.5 ms per live pane).
+var _pane_rows: Dictionary = {}
+## Whether the workspace and profile lists have been built at least once. An
+## empty model matches an empty signature, so without this the first refresh
+## would skip the rows that must exist (the profile section's catalog hint is
+## always there).
 var _ws_drawn := false
 var _profile_drawn := false
-var _pane_drawn := false
 ## The last profile list handed over, so a confirm click can rebuild it
 ## without the workspace re-sending the model.
 var _profile_items: Array = []
@@ -142,24 +147,11 @@ func update_pane_list(panes: Array, active_body: Control = null):
 	if not _pane_list: return
 	_pane_items.assign(panes)
 	_pane_active = active_body
-	var content := _pane_signature()
-	if _pane_drawn and _pending_close.is_empty() and content == _pane_rendered:
-		_apply_pane_state()
-		return
-	_pane_drawn = true
-	_pane_rendered = content
-	_render_panes()
-
-## Which pane a row is, and the label it wears: an id keeps two panes of one type
-## apart, and a close renumbers the labels of the survivors.
-func _pane_signature() -> Array[String]:
-	var sig: Array[String] = []
-	for body in _pane_items:
-		sig.append("%d\u001f%s" % [body.get_instance_id(), str(body.get("pane_label"))])
-	return sig
+	_sync_pane_rows()
 
 ## Move the list's state without touching its rows: the active accent and the
-## section's header. Everything else a row shows is in `_pane_signature`.
+## section's header. Everything else a row shows is updated by
+## `_sync_pane_rows`.
 func _apply_pane_state() -> void:
 	for row in _pane_list.get_children():
 		if row.is_queued_for_deletion():
@@ -176,8 +168,7 @@ func _make_pane_row(body: Control, is_active: bool) -> HBoxContainer:
 	row.add_theme_constant_override("separation", UiTokens.SPACE_HAIR)
 	row.set_meta("body", body)
 
-	var pane_label := str(body.get("pane_label"))
-	var label := pane_label if pane_label != "" else "%s?" % PaneTypes.ALL.get(body._pane_type(), {}).get("label_prefix", "?")
+	var label := _pane_label_of(body)
 	var btn = _make_sidebar_button(label)
 	_apply_row_accent(btn, is_active)
 	btn.pressed.connect(func(): request_focus.emit(body))
@@ -201,14 +192,42 @@ func _make_pane_row(body: Control, is_active: bool) -> HBoxContainer:
 
 	var confirm := _confirm_row("CloseConfirmOk", "CloseConfirmCancel", "'%s'" % label)
 	row.add_child(confirm)
-	var pending := _pending_pane(body)
-	set_btn.visible = not pending
-	menu_btn.visible = not pending
-	cls_btn.visible = not pending
+	_apply_row_pending(row, _pending_pane(body))
+	return row
+
+## The label a pane's row wears: its addressable label, or the type's prefix when
+## a body has not been given one yet.
+func _pane_label_of(body: Control) -> String:
+	var pane_label := str(body.get("pane_label"))
+	if pane_label != "":
+		return pane_label
+	return "%s?" % PaneTypes.ALL.get(body._pane_type(), {}).get("label_prefix", "?")
+
+## The one close question a row can show: its three actions and the check/cross
+## pair are always its five children, so the question is a visibility swap on an
+## attached row rather than a rebuild of every row in the list.
+func _apply_row_pending(row: HBoxContainer, pending: bool) -> void:
+	for i in range(1, 4):
+		var action := row.get_child(i) as Button
+		if action != null:
+			action.visible = not pending
+	var confirm := row.get_child(4) as HBoxContainer
+	if confirm == null:
+		return
 	confirm.visible = pending
 	if pending:
 		_pending_close["ok"] = confirm.get_child(0)
-	return row
+
+## Re-sync an attached row in place: a close renumbers the survivors' labels and
+## focus moves the accent, neither of which may cost a row rebuild.
+func _update_pane_row(row: HBoxContainer, body: Control) -> void:
+	var btn := row.get_child(0) as Button
+	if btn == null:
+		return
+	var label := _pane_label_of(body)
+	if btn.text != label:
+		btn.text = label
+	_apply_row_accent(btn, body == _pane_active)
 
 ## Move the active-row accent without rebuilding the list — called on pane
 ## focus changes (the workspace polls `_tm.last_body` each frame).
@@ -635,14 +654,41 @@ func _sync_workspace_header():
 	if all and any:
 		_pending_close["ok"] = _workspaces_confirm.get_child(0)
 
-func _render_panes():
+## Bring the pane list to the model by touching only the rows that differ: a
+## spawn adds one row, a close detaches one, a renumber rewrites one label. The
+## old clear-and-rebuild ran five glyph Labels per live pane on every change,
+## which is what made a spawn cost grow with the grid's fill.
+func _sync_pane_rows():
 	if not _pane_list: return
 	_validate_pane_pending()
-	for c in _pane_list.get_children(): c.queue_free()
-	var rows: Array[Control] = []
+	var live := {}
 	for body in _pane_items:
-		var row := _make_pane_row(body, body == _pane_active)
-		_pane_list.add_child(row)
+		live[body.get_instance_id()] = true
+	# Detach before freeing: `queue_free` alone leaves the row a child until the
+	# frame ends, and the reorder below would count it.
+	for key in _pane_rows.keys():
+		if live.has(key):
+			continue
+		var row = _pane_rows[key]["row"]
+		if is_instance_valid(row):
+			if row.get_parent() == _pane_list:
+				_pane_list.remove_child(row)
+			row.queue_free()
+		_pane_rows.erase(key)
+	var rows: Array[Control] = []
+	for i in _pane_items.size():
+		var body = _pane_items[i]
+		var key: int = body.get_instance_id()
+		var row: HBoxContainer = _pane_rows[key]["row"] if _pane_rows.has(key) else null
+		if row == null or not is_instance_valid(row):
+			row = _make_pane_row(body, body == _pane_active)
+			_pane_list.add_child(row)
+			_pane_rows[key] = {"body": body, "row": row}
+		else:
+			_update_pane_row(row, body)
+		if row.get_index() != i:
+			_pane_list.move_child(row, i)
+		_apply_row_pending(row, _pending_pane(body))
 		rows.append(row)
 	# The same five-row cap the workspace and profile lists take. Without a
 	# minimum the list is only the pixels left over after the fixed blocks
@@ -692,7 +738,7 @@ func _request_close_confirm(kind: String, index := 0, ws_name := "",
 	elif kind == "panes_all":
 		_pending_close["snapshot"] = _pane_items.duplicate()
 	_render_workspaces()
-	_render_panes()
+	_sync_pane_rows()
 	_render_profiles()
 	_focus_pending_confirm()
 
@@ -702,7 +748,7 @@ func _accept_close_confirm():
 	var state := _pending_close.duplicate()
 	_pending_close.clear()
 	_render_workspaces()
-	_render_panes()
+	_sync_pane_rows()
 	_render_profiles()
 	match str(state.get("kind", "")):
 		"workspace":
@@ -724,7 +770,7 @@ func _cancel_close_confirm():
 	var state := _pending_close.duplicate()
 	_pending_close.clear()
 	_render_workspaces()
-	_render_panes()
+	_sync_pane_rows()
 	_render_profiles()
 	_focus_close_trigger(state)
 
@@ -1152,7 +1198,7 @@ func _request_profile_uninstall_confirm(profile_name: String, plugin_id: String,
 	_pending_close = {"kind": "plugin_profile", "profile_name": profile_name,
 		"plugin_id": plugin_id, "source": source}
 	_render_workspaces()
-	_render_panes()
+	_sync_pane_rows()
 	_render_profiles()
 	_focus_pending_confirm()
 

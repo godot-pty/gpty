@@ -409,7 +409,11 @@ func _build_empty_state():
 	_shortcut_guide.new_pane_requested.connect(func(type_name: String): _spawn_pane(type_name))
 	_empty_center.add_child(_shortcut_guide)
 
-func _apply_layout():
+## Where the active workspace's tiles sit. `refresh_dividers` is false for a
+## spawn, which queues the band refresh for the next idle instead
+## (`_queue_divider_refresh`): the bands are visual and their whole-model scan
+## is O(grid x tiles), the largest remaining create step at a full grid.
+func _apply_layout(refresh_dividers := true):
 	if _grid == null: return
 	var top_offset = TITLEBAR_HEIGHT if (_titlebar and _titlebar.visible) else 0.0
 	var bottom_offset = StatusBar.HEIGHT if _status_bar else 0.0
@@ -462,9 +466,25 @@ func _apply_layout():
 		_tm.mark_tile_laid_out(t)
 	# The divider grab bands follow the tiles: one refresh point for every
 	# spawn, kill, swap, restore, workspace switch and window resize.
+	if refresh_dividers:
+		_refresh_dividers()
+
+## One deferred band refresh per frame, however many spawns queued it.
+var _dividers_refresh_queued := false
+
+## Re-derive the divider bands from the active workspace's tiles.
+func _refresh_dividers():
+	_dividers_refresh_queued = false
 	var dividers := _grid.get_node_or_null("DividerHandles")
 	if dividers != null:
 		dividers.refresh()
+
+## Queue the band refresh a spawn would otherwise pay inside the create call.
+func _queue_divider_refresh():
+	if _dividers_refresh_queued:
+		return
+	_dividers_refresh_queued = true
+	_refresh_dividers.call_deferred()
 
 # ═══════════════════════════════════════════════════════════════════════
 # Spawn / Kill — delegate to TerminalManager
@@ -531,8 +551,14 @@ func _add_body_to_grid_into(ws: Dictionary, w: Control, body: Control):
 	if ws.is_empty():
 		return
 	_attach_pane_into(ws, w, body)
-	_sync_pane_titlebars()
-	_apply_layout()
+	# The new bar already follows `cfg_show_titlebar` (`TerminalManager._add_title_bar`
+	# reads it), so a spawn does not pay a whole-window sweep; `_sync_pane_titlebars`
+	# stays for the settings change and the workspace switch.
+	# The tile must hold its rect this frame - the child starts at that size - but
+	# the divider bands are visual and can follow on the next idle: their
+	# whole-model scan is the largest remaining create step at a full grid.
+	_apply_layout(false)
+	_queue_divider_refresh()
 	_list()
 
 ## Answer a pane's `request_pane` (the file tree opening a file in a viewer,

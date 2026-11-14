@@ -105,10 +105,11 @@ godot/
         ├── unit/                # Pure-logic tests
         ├── integration/         # Scene-tree tests
         ├── helpers/             # Shared fixtures (ShellFixtures, MockAutoloads)
-        └── bench/               # Cost and capture drivers (need a real display)
+        └── bench/               # Cost and capture drivers
             ├── draw_bench.gd    # Terminal renderer cost
             ├── markdown_bench.gd
             ├── reasoning_bench.gd
+            ├── spawn_bench.gd   # Pane-spawn cost: per-call latency as the grid fills
             ├── switch_bench.gd  # Workspace-switch cost: sync call, mode, first frame
             └── ui_capture.gd    # Committed UI state staging -> viewport PNGs
 ```

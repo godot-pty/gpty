@@ -818,6 +818,81 @@ func test_a_changed_pane_list_still_shows_the_new_set():
 	assert_eq(live.size(), 1, "a close drops its row")
 	assert_eq((live[0].get_child(0) as Button).text, "T1")
 
+## The growth fix: a spawn builds one row and leaves every attached row alone.
+## The old clear-and-rebuild rebuilt all of them at 7-10.4 ms each, so a create
+## cost grew with the live pane count (roadmap: "Creating a pane gets slower as
+## the window fills").
+func test_a_spawn_adds_one_row_and_keeps_the_attached_ones():
+	var a := PaneBody.new()
+	a.pane_label = "T1"
+	add_child_autofree(a)
+	var b := PaneBody.new()
+	b.pane_label = "T2"
+	add_child_autofree(b)
+	_sidebar.update_pane_list([a])
+	var first := _sidebar._pane_list.get_child(0)
+	_sidebar.update_pane_list([a, b])
+	assert_eq(_sidebar._pane_list.get_child_count(), 2)
+	assert_same(_sidebar._pane_list.get_child(0), first,
+		"the attached row is the same node, not a rebuild")
+	assert_eq((_sidebar._pane_list.get_child(1).get_child(0) as Button).text, "T2",
+		"the spawned pane is the row that was built")
+
+func test_a_closed_pane_row_leaves_in_the_same_call():
+	var a := PaneBody.new()
+	a.pane_label = "T1"
+	add_child_autofree(a)
+	var b := PaneBody.new()
+	b.pane_label = "T2"
+	add_child_autofree(b)
+	_sidebar.update_pane_list([a, b])
+	var survivor := _sidebar._pane_list.get_child(0)
+	_sidebar.update_pane_list([a])
+	# No frame wait: the row is detached from the list, not queued behind a
+	# later frame. A queued-free row would still answer 2 here.
+	assert_eq(_sidebar._pane_list.get_child_count(), 1)
+	assert_same(_sidebar._pane_list.get_child(0), survivor)
+
+func test_a_renumbered_pane_rewrites_its_row_label():
+	var a := PaneBody.new()
+	a.pane_label = "T1"
+	add_child_autofree(a)
+	var b := PaneBody.new()
+	b.pane_label = "T2"
+	add_child_autofree(b)
+	_sidebar.update_pane_list([a, b])
+	var row := _sidebar._pane_list.get_child(1)
+	b.pane_label = "T7"
+	_sidebar.update_pane_list([a, b])
+	assert_same(_sidebar._pane_list.get_child(1), row,
+		"a renumber must not rebuild the row")
+	assert_eq((row.get_child(0) as Button).text, "T7",
+		"the row wears the label the pane now has")
+
+func test_a_close_confirm_swaps_only_its_rows_actions():
+	var a := PaneBody.new()
+	a.pane_label = "T1"
+	add_child_autofree(a)
+	var b := PaneBody.new()
+	b.pane_label = "T2"
+	add_child_autofree(b)
+	_sidebar.update_pane_list([a, b])
+	var row_a := _sidebar._pane_list.get_child(0)
+	var row_b := _sidebar._pane_list.get_child(1)
+	(row_b.get_child(3) as Button).pressed.emit()
+	assert_same(_sidebar._pane_list.get_child(0), row_a,
+		"the neighbouring row is untouched by this pane's question")
+	assert_same(_sidebar._pane_list.get_child(1), row_b,
+		"the asking row is still the same node")
+	assert_true((row_b.get_child(4) as HBoxContainer).visible,
+		"the check/cross replaces this row's actions")
+	assert_true((row_a.get_child(3) as Button).visible,
+		"another row keeps its own actions")
+	((row_b.get_child(4) as HBoxContainer).get_child(1) as Button).pressed.emit()
+	assert_false((row_b.get_child(4) as HBoxContainer).visible)
+	assert_true((row_b.get_child(3) as Button).visible,
+		"cancel puts the asking row's actions back")
+
 ## The rows a rebuild has not queued for freeing: `queue_free` leaves the old
 ## rows in the list for the rest of the frame, so a raw child count is not the
 ## row count.
