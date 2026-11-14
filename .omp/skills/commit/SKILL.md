@@ -69,6 +69,8 @@ git add <files in group>
 git commit -s -m "type(scope): description" -m "Additional body details if needed"
 ```
 
+**Under OMP's harness, never `git add`/`git commit`**: the worktree is shared with other agents and the user, so the `commit` namespace (`commit.draft()` then `d.commit(subject, …)`) is what selects only your own lines. Two traps there, each of which costs a round of failures: the JS signature takes an **options object** - `d.commit("type(scope): x", { body: ["- …"] })` - so a positional array commits a subject-only message in silence, and the helper does not add `-s`, so the `Signed-off-by: Name <email>` line must be the last entry of that body array (the hook sees the message it is handed, so the omission reads as "missing a DCO sign-off").
+
 ### 6. Report
 
 Summarize what was committed, in which groups, and why. Note any files deliberately left uncommitted and why.
