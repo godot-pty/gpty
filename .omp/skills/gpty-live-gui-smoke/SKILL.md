@@ -7,7 +7,7 @@ description: "Verify a gpty change against the real app: launch the GUI headless
 
 Use when a change must be proven against the running app (PTY behaviour, IPC surface,
 scrollback, flood/RSS, pane lifecycle, shutdown) rather than in unit tests.
-`scripts/smoke-pane-api` covers the published pane API; this recipe is for *ad-hoc* claims.
+`python3 scripts/smoke_pane_api.py` covers the published pane API; this recipe is for *ad-hoc* claims.
 
 ## Recipe
 
@@ -169,7 +169,7 @@ later one 63-75 ms).
 
 ## Cheaper alternatives first
 
-- `scripts/smoke-pane-api` — published pane API end to end (already in `ci-check`).
+- `python3 scripts/smoke_pane_api.py` — published pane API end to end (already in `ci-check`).
 - `cargo run --release -p gpty-core --example flood_probe -- <seconds>` — pane throughput, store
   lag, RSS, no GUI needed.
 - `godot --headless --path godot -s res://tests/bench/draw_bench.gd` — render cost:
