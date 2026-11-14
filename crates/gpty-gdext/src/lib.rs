@@ -553,6 +553,44 @@ impl GptyTerminal {
         }
     }
 
+    /// The grid's background colour: `palette[0]`, which is what every cell
+    /// paints its own background with (`NamedColor::Background` resolves to it
+    /// in `color_to_rgb`). A renderer reads it instead of guessing, so the
+    /// area a pane grows into during a resize is the same colour as the cells
+    /// beside it.
+    #[func]
+    fn get_background_color(&self) -> Color {
+        self.with_grid(
+            |g| {
+                let bg = g.palette[0];
+                Color::from_rgb(
+                    bg[0] as f32 * RGB_SCALE,
+                    bg[1] as f32 * RGB_SCALE,
+                    bg[2] as f32 * RGB_SCALE,
+                )
+            },
+            Color::BLACK,
+        )
+    }
+
+    /// Set the grid's background: writes `palette[0]` and forces a full
+    /// repaint, so every cell re-resolves through `CellInfo::from_cell`
+    /// against the new palette instead of keeping the colour it was written
+    /// under.
+    #[func]
+    fn set_background_color(&mut self, color: Color) {
+        let to_byte = |v: f32| (v * 255.0).round().clamp(0.0, 255.0) as u8;
+        let rgb = [to_byte(color.r), to_byte(color.g), to_byte(color.b)];
+        self.with_grid_mut(|g| {
+            if g.palette[0] == rgb {
+                return;
+            }
+            g.palette[0] = rgb;
+            g.generation += 1;
+            g.palette_changed = true;
+        });
+    }
+
     /// Convert a Godot key event to the raw PTY bytes (escape sequences for
     /// special keys, empty for unhandled keys that should use the unicode path).
     #[func]

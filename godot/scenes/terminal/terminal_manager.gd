@@ -4,10 +4,11 @@ class_name TerminalManager
 # Now supports any PaneBody type via spawn_pane().
 
 ## The layout grid lives in PaneTypes: `PaneTypes.GRID`/`PaneTypes.MIN_TILE` are defined once
-## there. One unit is the *commit* granularity — a divider drag previews in
-## pixels and snaps to whole units on release, so the divider follows the
-## pointer continuously while the tile model stays integer (60 units over a
-## 1000 px pane: 12 was an 83 px jump, "resize is jarring").
+## there. One unit is both the model's and the drag preview's granularity — the
+## divider moves a unit at a time while the button is held, so what is shown is
+## what the release commits (60 units over a 1000 px pane: 12 was an 83 px
+## jump, "resize is jarring"). The panes reflow at a throttled cadence while the
+## drag runs, which is what makes the divider follow the pointer.
 ## Saved layouts record the unit they were written in; `scale_layout` converts
 ## an older one.
 ## The divider drag over these units lives in tile_drag.gd.
@@ -43,6 +44,13 @@ var on_move_panes: Callable  # (menu: PopupMenu, body: Control): workspace appen
 var tiles: Array[Dictionary] = []
 var last_body: Control
 signal tiles_resized
+## A divider drag started on `axis` ("x" or "y"). The workspace forwards it to
+## the panes, which reflow at a throttle while the drag runs, and sets the
+## pointer's shape for the axis.
+signal divider_drag_started(axis: String)
+## A divider drag committed and `tiles_resized` has been emitted: the panes ask
+## for the one final reflow the throttle may have left pending.
+signal divider_drag_finished()
 
 
 var _pane_settings_panel  # set by workspace
@@ -140,51 +148,7 @@ func _build_wrapper_body(body: Control, title: String) -> Control:
 	if row != null and row.get_child_count() > 0 and body is Control:
 		(body as Control).focus_next = body.get_path_to(row.get_child(0))
 
-	# Edge strips: they must be the wrapper's topmost children, because Godot
-	# picks the last sibling first and the pane body consumes every event over
-	# it. They live in a plain Control of their own: a PanelContainer fits
-	# *all* of its children into the content rect, so direct children would be
-	# stretched over the whole pane and swallow every click.
-	var edge_host := Control.new()
-	edge_host.name = "EdgeHost"
-	edge_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(edge_host)
-	for edge in EDGE_EDGES:
-		edge_host.add_child(_make_edge_strip(edge, root))
 	return root
-
-## Thickness of a pane's edge-drag strips.
-##
-## The pane body fills the wrapper, and a Control with `MOUSE_FILTER_STOP`
-## consumes the events over it, so the wrapper's own `gui_input` only ever
-## fired inside its 1 px stylebox border — a 4 px edge test was unreachable
-## (landing within one pixel of the border and pressing without moving is not
-## a gesture), and the imperative `cursor_set_shape` was overwritten by the
-## body's default arrow cursor the moment the pointer entered it, which is
-## why the resize cursor only flashed. The strips sit on top of the body, know
-## their own edge, and carry the cursor shape as `mouse_default_cursor_shape`,
-## which Godot applies on hover without any imperative call.
-const EDGE_STRIP := 6
-const EDGE_EDGES := ["left", "right", "top", "bottom"]
-
-func _make_edge_strip(edge: String, root: Control) -> Control:
-	var strip := Control.new()
-	strip.name = "Edge" + edge.capitalize()
-	strip.mouse_filter = Control.MOUSE_FILTER_STOP
-	strip.mouse_default_cursor_shape = (
-		Control.CURSOR_HSIZE if edge == "left" or edge == "right"
-		else Control.CURSOR_VSIZE)
-	strip.anchor_top = 0.0 if edge != "bottom" else 1.0
-	strip.anchor_bottom = 1.0 if edge != "top" else 0.0
-	strip.anchor_left = 0.0 if edge != "right" else 1.0
-	strip.anchor_right = 1.0 if edge != "left" else 0.0
-	match edge:
-		"left": strip.offset_right = EDGE_STRIP
-		"right": strip.offset_left = -EDGE_STRIP
-		"top": strip.offset_bottom = EDGE_STRIP
-		"bottom": strip.offset_top = -EDGE_STRIP
-	strip.gui_input.connect(func(event: InputEvent): _on_edge_strip_input(event, root, edge))
-	return strip
 
 func _make_vbox() -> VBoxContainer:
 	var v = VBoxContainer.new()
@@ -350,22 +314,6 @@ func _return_focus_to_body(body: Control) -> void:
 
 # ── Lifecycle ──────────────────────────────────────────────────────────
 
-## Edge strips advertise a resize only when there is a divider to drag: with a
-## single pane every edge is the grid's own border, and showing the resize
-## cursor over an edge that cannot move is a lie the user will chase.
-func _sync_edge_strips():
-	var resizable := tiles.size() >= 2
-	for t in tiles:
-		var w: Control = t.wrapper
-		for edge in EDGE_EDGES:
-			var strip: Control = w.get_node_or_null("EdgeHost/Edge" + edge.capitalize())
-			if strip == null: continue
-			strip.mouse_filter = (
-				Control.MOUSE_FILTER_STOP if resizable else Control.MOUSE_FILTER_IGNORE)
-			strip.mouse_default_cursor_shape = (
-				(Control.CURSOR_HSIZE if edge == "left" or edge == "right" else Control.CURSOR_VSIZE)
-				if resizable else Control.CURSOR_ARROW)
-
 ## Remove `body`'s tile and give its rectangle back to the grid, WITHOUT
 ## freeing the wrapper: a move re-parents it into another workspace's grid.
 ## `kill` is this plus `queue_free`.
@@ -379,7 +327,6 @@ func detach(body: Control) -> Dictionary:
 	tiles.remove_at(wi)
 	if not _expand_exact(rm):
 		_expand_partial(rm)
-	_sync_edge_strips()
 	return rm
 
 func kill(body: Control):
@@ -425,13 +372,11 @@ func swap_pane(body: Control, new_type_name: String) -> Control:
 
 	if last_body == body:
 		last_body = new_body
-	_sync_edge_strips()
 	return new_body
 func reset():
 	for t in tiles: t.wrapper.queue_free()
 	tiles.clear()
 	last_body = null
-	_sync_edge_strips()
 
 # ── Tiling ─────────────────────────────────────────────────────────────
 
@@ -527,11 +472,9 @@ func plan_adopt(count: int) -> bool:
 func adopt(w: Control, side: String = "") -> bool:
 	if tiles.is_empty():
 		tiles.append(_full_tile(w))
-		_sync_edge_strips()
 		return true
 	if not _split_for(w, side):
 		return false
-	_sync_edge_strips()
 	return true
 
 func _expand_exact(rm: Dictionary) -> bool:
@@ -825,7 +768,7 @@ func show_position_swap_popup(for_body: Control, menu_parent: Control, at_pos: V
 	menu.popup()
 	menu.popup_hide.connect(menu.queue_free)
 
-# ── Edge drag resize (the state machine lives in tile_drag.gd) ─────────
+# ── Divider drag (the state machine lives in tile_drag.gd) ─────────────
 
 var _drag: TileDrag
 
@@ -833,29 +776,35 @@ var _drag: TileDrag
 func _init() -> void:
 	_drag = TileDrag.new(self)
 
-## True while an edge drag owns the mouse.
+## True while a divider drag owns the mouse.
 func drag_active() -> bool:
 	return _drag.drag_active()
 
-## Start a resize drag. Called by an edge strip's press; the drag itself is
-## driven by `drive_edge_drag` from the workspace's raw input, because the
-## motion after a press on the border immediately leaves the strip for the pane
-## body. The geometry snapshot, preview and commit live in TileDrag.
-func begin_edge_drag(wrapper: Control, edge: String, at: Vector2) -> void:
-	_drag.begin_edge_drag(wrapper, edge, at)
+## Start a resize drag on the divider line `line` (grid units) of `axis`.
+## Called by the handle layer's press; the drag itself is driven by
+## `drive_edge_drag` from the workspace's raw input, because the motion after a
+## press on the divider immediately leaves the handle for the pane body. The
+## geometry snapshot, preview and commit live in TileDrag. Returns false when
+## the line cannot move.
+func begin_line_drag(axis: String, line: int, at: Vector2) -> bool:
+	return _drag.begin_line_drag(axis, line, at)
 
-## End the drag: snap the previewed travel to whole units, apply it to the tile
-## model, and emit `tiles_resized` once (the only thing that moves a tile).
+## Whether the divider line `line` on `axis` can move, and how far. The handle
+## layer asks this before it offers a resize cursor.
+func divider_limits(axis: String, line: int) -> Dictionary:
+	return _drag.line_limits(axis, line)
+
+## End the drag: apply the previewed travel to the tile model, and emit
+## `tiles_resized` once (the only thing that moves a tile) then
+## `divider_drag_finished`.
 func end_edge_drag() -> void:
 	_drag.end_edge_drag()
 
-## Drive an in-flight drag; true when the event belonged to it, so the caller
-## consumes it and the pane body does not read the motion as a text selection.
+## Drive an in-flight drag; true when the caller must consume the event - the
+## motion, never the release, so the viewport sees the release of the press the
+## handle took (see `TileDrag.drive_edge_drag`).
 func drive_edge_drag(event: InputEvent) -> bool:
 	return _drag.drive_edge_drag(event)
-
-func _on_edge_strip_input(event: InputEvent, wrapper: Control, edge: String) -> void:
-	_drag.on_strip_input(event, wrapper, edge)
 
 ## Convert a saved layout written against a different grid unit to today's
 ## `PaneTypes.GRID`, so a restored pane keeps its share of the screen instead of a

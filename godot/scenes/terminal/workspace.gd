@@ -120,6 +120,7 @@ func _ready():
 
 	_grid = Control.new()
 	add_child(_grid)
+	_attach_dividers(_grid, _tm)
 	_home_grid = _grid
 	_home_tm = _tm
 	_build_empty_state()
@@ -459,6 +460,11 @@ func _apply_layout():
 		# started its child may start it at this size (a tile the grid has
 		# never positioned is only the container's minimum).
 		_tm.mark_tile_laid_out(t)
+	# The divider grab bands follow the tiles: one refresh point for every
+	# spawn, kill, swap, restore, workspace switch and window resize.
+	var dividers := _grid.get_node_or_null("DividerHandles")
+	if dividers != null:
+		dividers.refresh()
 
 # ═══════════════════════════════════════════════════════════════════════
 # Spawn / Kill — delegate to TerminalManager
@@ -1135,6 +1141,11 @@ func _attach_pane_into(ws: Dictionary, w: Control, body: Control):
 	# route — spawn, restore, type swap — comes through here.
 	body.apply_user_state()
 	ws.grid.add_child(w)
+	# The handle layer is always the grid's topmost child: Godot picks the last
+	# sibling first, and a divider's band must sit over the panes it separates.
+	var dividers = ws.grid.get_node_or_null("DividerHandles")
+	if dividers != null:
+		ws.grid.move_child(dividers, -1)
 	_wire_pane_activation(body)
 	# Panes never spawn panes: a body that needs another pane emits
 	# `request_pane` and this workspace — the only spawner — answers it.
@@ -1224,6 +1235,40 @@ func _wire_tm(tm: TerminalManager):
 	# creates is no longer workspace 0, so a manager without this connection
 	# would stop relayouting after a divider drag.
 	tm.tiles_resized.connect(_apply_layout)
+	# The panes must know a divider drag is in flight: that is what turns their
+	# quiet-period resize debounce into a throttle, and what puts the axis's
+	# pointer shape on the window while the divider moves.
+	tm.divider_drag_started.connect(_on_divider_drag_started.bind(tm))
+	tm.divider_drag_finished.connect(_on_divider_drag_finished.bind(tm))
+
+## Build a workspace grid's divider grab bands: one transparent layer over the
+## tiles, kept topmost by `_attach_pane_into`, refreshed by `_apply_layout`.
+func _attach_dividers(grid: Control, tm: TerminalManager) -> DividerHandles:
+	var layer := DividerHandles.new(tm)
+	grid.add_child(layer)
+	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	return layer
+
+## A divider drag started on `axis`. The panes of the dragging manager reflow at
+## a throttled cadence, and the pointer takes the axis's resize shape for the
+## whole drag - the handle under the pointer is left behind on the first motion,
+## so `mouse_default_cursor_shape` alone cannot carry it.
+func _on_divider_drag_started(axis: String, tm: TerminalManager) -> void:
+	_set_panes_drag_resizing(tm, true)
+	Input.set_default_cursor_shape(
+		Input.CURSOR_HSIZE if axis == "x" else Input.CURSOR_VSIZE)
+
+## The drag committed (the grid is the released one): ask the panes for their
+## one final reflow and give the pointer back to whatever it hovers.
+func _on_divider_drag_finished(tm: TerminalManager) -> void:
+	_set_panes_drag_resizing(tm, false)
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+
+func _set_panes_drag_resizing(tm: TerminalManager, active: bool) -> void:
+	for t in tm.tiles:
+		var body: Control = tm._find_body(t.wrapper)
+		if body is TerminalPane:
+			(body as TerminalPane).set_drag_resizing(active)
 
 ## The pane menu's "Move to workspace" submenu. Targets are addressed by
 ## workspace name, not index: a close or rename while the menu is open would
@@ -1293,6 +1338,7 @@ func _new_workspace_container(ws_name: String, ws_cwd := "") -> Dictionary:
 	add_child(grid)
 	var tm = TerminalManager.new()
 	tm._pane_settings_panel = _tm._pane_settings_panel
+	_attach_dividers(grid, tm)
 	_wire_tm(tm)
 	grid.visible = false
 	grid.process_mode = Node.PROCESS_MODE_DISABLED
@@ -1835,7 +1881,6 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 		restored += 1
 	# A workspace's saved layout is the whole state: an empty one stays empty
 	# and `_apply_layout` shows the guide. There is no first-run seed.
-	tm._sync_edge_strips()
 
 	if skipped_by_limit > 0:
 		ToastManager.warn(
@@ -2253,10 +2298,12 @@ func _input(event):
 		if _escape_pane_toolbar():
 			get_viewport().set_input_as_handled()
 			return
-	# An in-flight pane-edge drag owns the mouse the same way: it starts on a
-	# strip at the pane's border, so the very next motion is already over the
+	# An in-flight divider drag owns the mouse the same way: it starts on a
+	# handle over the divider line, so the very next motion is already over the
 	# pane body (which would read it as a text selection). Driving the drag
-	# from here keeps it alive across the whole window.
+	# from here keeps it alive across the whole window. Only what
+	# `drive_edge_drag` claims is consumed - the release is not, so the
+	# viewport sees it and its hover cursor keeps working after the drag.
 	if _tm != null and _tm.drag_active() and _tm.drive_edge_drag(event):
 		get_viewport().set_input_as_handled()
 		return

@@ -18,7 +18,11 @@ Minimizing a pane hides its body but keeps its tile, so the arrangement is uncha
 
 ## Resizing by dragging
 
-Each pane has thin edge strips on its borders. Dragging a strip moves the divider line that the edge sits on, and every tile touching that line moves with it — on both sides and along its whole length — so the result does not depend on which side of the divider you happened to grab. The drag previews in pixels while it runs and snaps to whole grid units when released, which keeps the model integral and the divider responsive. A tile never shrinks below `MIN_TILE`, and an edge on the window border does not start a drag because there is nothing on its far side.
+Each divider is one grab band centred on it (`DividerHandles`, 12 px), not a strip per pane edge: a band spans exactly the stretch of the line that has a tile on both sides, so a pane that runs across a line never has a handle over its own content, and there is no dead ribbon between two neighbouring panes. Hovering a band paints the accent colour down its middle, and the pointer takes the line's resize shape for the whole drag even where the platform cursor does not change. Dragging any part of a line moves every tile touching it — on both sides and along its whole length — so the result does not depend on which side of the divider you happened to grab.
+
+The divider moves a whole grid unit at a time, and the release commits the same unit it showed, so the divider never jumps when the button comes up. The panes themselves reflow while the drag runs, at about ten reflows a second rather than on every motion event, which is what makes the text follow the divider without a window-size signal to the shell per pixel; the released geometry gets one final reflow. A tile never shrinks below `MIN_TILE`, and a line with no tile on its far side (or no travel left at all) shows no handle and starts no drag.
+
+A terminal fills its whole rectangle with the same colour its cells paint — the grid's background, `palette[0]`, which a colour scheme's first entry sets — so the margin a resize exposes is never a band of a different grey.
 
 The sidebar's swap-position action exchanges two tiles' stored geometry without touching what runs inside them.
 

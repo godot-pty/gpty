@@ -25,6 +25,8 @@ class ProbePane:
 
 var _probe: ProbePane
 var _ws: Control
+## A scheme file a test wrote, deleted with the test.
+var _scheme_path := ""
 
 func before_each():
 	MockAutoloads.setup()
@@ -42,6 +44,9 @@ func after_each():
 			_ws.get_parent().remove_child(_ws)
 		_ws.free()
 		_ws = null
+	if _scheme_path != "":
+		DirAccess.remove_absolute(_scheme_path)
+		_scheme_path = ""
 	MockAutoloads.teardown()
 
 ## A synthetic packed cache: the grep of `_sync_layers` and `_repaint_rows` does
@@ -204,3 +209,51 @@ func _pane_state(body: Control) -> String:
 	if grid.length() > 400:
 		grid = grid.substr(grid.length() - 400)
 	return "grid=%s cache_empty=%s" % [grid.replace("\n", "\\n"), body._cell_cache.is_empty()]
+
+
+## The pane fills behind and around its grid with the grid's own background —
+## `palette[0]`, the colour every cell paints its background with — so the area
+## a resize exposes is never a band of a different grey. Defends the v0.8.3 row
+## *Resizing a pane is smooth*: the ground used to be a per-pane colour no cell
+## ever painted, and a scheme changed the cells without changing it.
+func test_the_ground_is_the_grid_background():
+	var body = await _pane_with_a_shell()
+	if body == null:
+		return
+	assert_eq(body.ground_color(), body._terminal.get_background_color(),
+		"the ground must be the colour the cells are painted on")
+	assert_eq(body.ground_color(), Color.BLACK,
+		"with no scheme the grid's background is the system palette's first entry")
+
+	# The pane's own Background setting is the terminal's background now, not
+	# only the margin's: both sides move together.
+	body.apply_settings({"default_bg": Color8(128, 26, 26)})
+	# 8-bit compare: the grid returns `byte * (1/255)` while `Color8` divides by
+	# 255, and the two float spellings of one colour are not `==`.
+	assert_eq(body._terminal.get_background_color().to_html(false),
+		Color8(128, 26, 26).to_html(false),
+		"the pane's background must reach the grid's palette")
+	assert_eq(body.ground_color(), body._terminal.get_background_color(),
+		"the ground must follow the pane's background")
+
+	# A scheme names its own background as its first colour, and while one is
+	# set it wins — the margin still matches the cells.
+	var hex := "#123456"
+	var rest := PackedStringArray()
+	for i in range(1, 16):
+		rest.append("#%02x%02x%02x" % [i * 4, i * 4, i * 4])
+	_scheme_path = OS.get_temp_dir().path_join("gpty-scheme-probe.txt")
+	var f := FileAccess.open(_scheme_path, FileAccess.WRITE)
+	assert_not_null(f, "the scheme fixture must be writable")
+	if f == null:
+		return
+	f.store_string(hex + "," + ",".join(rest))
+	f.close()
+	body.color_scheme_path = _scheme_path
+	assert_eq(body._terminal.get_background_color().to_html(false),
+		Color(hex).to_html(false),
+		"a scheme's first colour is the background")
+	assert_eq(body.ground_color(), body._terminal.get_background_color(),
+		"the ground must follow the scheme, or a resize would expose the old colour")
+	assert_ne(body.ground_color(), Color8(128, 26, 26),
+		"the scheme must override the pane's own background while it is set")

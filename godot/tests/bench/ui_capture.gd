@@ -224,6 +224,15 @@ const STATES := {
 	"wiki-vault": {"size": DEFAULT_SIZE, "tiles": [WIKI_TILE]},
 	"wiki-graph": {"size": DEFAULT_SIZE, "tiles": [WIKI_TILE], "open": "wiki-graph"},
 	"concept-editor": {"size": DEFAULT_SIZE, "panes": 1, "open": "concept-editor"},
+	# The divider grab band: a 12 px handle centred on the line between two
+	# panes, highlighted on hover (row *Resizing a pane is smooth*). The pointer
+	# is left on the band, so this state must not be parked.
+	"resize-hover": {"size": DEFAULT_SIZE, "tiles": RESIZE_TILES,
+		"open": "resize-hover", "keep_pointer": true},
+	# The same divider mid-drag, button still down: the grown pane's text has
+	# reflowed and the margin beside it is the terminal's own background.
+	"resize-drag": {"size": DEFAULT_SIZE, "tiles": RESIZE_TILES,
+		"open": "resize-drag", "keep_pointer": true},
 	# The Commands tab with two seeded commands: the list, the Insert/Run hint
 	# each row carries, and the seven-tab bar that has to hold it. The entries
 	# are written through the store's own API, so the image cannot show a state
@@ -287,6 +296,18 @@ const STATES := {
 		],
 	},
 }
+## Two side-by-side terminals with one divider between them: the resize states
+## only need one line to grab, and each pane prints a line so the drag capture
+## shows text in the grown pane rather than an empty prompt. `sleep 600` keeps
+## the shells alive while the capture settles.
+const RESIZE_TILES := [
+	{"col": 0, "row": 0, "cspan": 30, "rspan": 60,
+		"settings": {"type": "terminal", "attachment_id": "capture-resize-left",
+			"shell_args": ["-c", "printf 'left pane\\n'; sleep 600"]}},
+	{"col": 30, "row": 0, "cspan": 30, "rspan": 60,
+		"settings": {"type": "terminal", "attachment_id": "capture-resize-right",
+			"shell_args": ["-c", "printf 'right pane\\n'; sleep 600"]}},
+]
 ## The bundled wiki is a real vault (notes on disk, indexed by the Rust side),
 ## so the Wiki and link-graph states need no fixture of their own.
 const WIKI_TILE := {
@@ -413,7 +434,10 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	# Freeze last, then settle again: the pinned readout must not be the last
 	# thing to change the pixels.
 	await _settle()
-	_park_pointer()
+	# A hover is the subject of `resize-hover`: parking the pointer would erase
+	# exactly the state being captured.
+	if not state.get("keep_pointer", false):
+		_park_pointer()
 
 	if args.get("audit_focus", false):
 		# The keyboard half of the audit: this surface's reachability, printed
@@ -714,6 +738,28 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			if _workspace._concept_graph == null or not _workspace._concept_graph.visible:
 				_fail("Open Visual Editor did not open the concept graph")
 				return false
+		"resize-hover":
+			var band: Control = _divider_band()
+			if band == null:
+				return false
+			await _send_motion(root.get_final_transform() * _band_center(band))
+			await _wait_frames(3)
+			var layer: DividerHandles = _workspace._grid.get_node("DividerHandles")
+			if layer._hovered != 0:
+				_fail("the pointer did not land on the divider handle")
+				return false
+		"resize-drag":
+			var band: Control = _divider_band()
+			if band == null:
+				return false
+			var at: Vector2 = root.get_final_transform() * _band_center(band)
+			await _send_motion(at)
+			await _send_button(at, true)
+			await _send_motion(at + Vector2(60, 0))
+			await _settle()
+			if not _workspace._tm.drag_active():
+				_fail("the press on the divider did not start a drag")
+				return false
 		"save-profile":
 			var save_btn := _workspace._sidebar.find_child("SaveProfileBtn", true, false) as Button
 			if save_btn == null:
@@ -983,6 +1029,18 @@ func _press_key(keycode: Key, ctrl := false, shift := false) -> void:
 func _park_pointer() -> void:
 	await _send_motion(Vector2(root.size) - Vector2(4, 4))
 	await _wait_frames(2)
+
+## The first divider band a resize state grabs, or null after failing the run.
+func _divider_band() -> Control:
+	var layer: DividerHandles = _workspace._grid.get_node_or_null("DividerHandles")
+	if layer == null or layer._pool.is_empty():
+		_fail("the workspace grid has no divider handle")
+		return null
+	return layer._pool[0]
+
+## A band's centre in the workspace viewport's coordinates.
+func _band_center(band: Control) -> Vector2:
+	return band.global_position + band.size * 0.5
 
 func _button_with_label(node: Node, text: String) -> Button:
 	if node is Button and _has_label(node, text):

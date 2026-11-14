@@ -83,7 +83,7 @@ var color_scheme_path: String = "":
 		# Before the child exists there is no palette to set: the start path
 		# applies the stored scheme itself.
 		if _started:
-			_apply_stored_scheme()
+			_apply_palette()
 
 
 
@@ -124,7 +124,20 @@ var workspace_cwd := ""
 @export var cursor_blink_speed: float = CURSOR_BLINK_INTERVAL
 
 @export var default_fg: Color = Color(0.8, 0.8, 0.8)
-@export var default_bg: Color = Color(0.12, 0.12, 0.12)
+## The pane's own background: pushed into the grid's `palette[0]`, which is
+## what every cell paints its background with, so the margin a resize exposes
+## is the same colour as the cells beside it. Black matches the engine's own
+## palette, so the default look is the one a terminal had before this setting
+## reached the grid.
+@export var default_bg: Color = Color(0, 0, 0):
+	set(value):
+		# A settings broadcast passes every field on each save, and re-applying
+		# an unchanged background would re-set the palette - a generation bump
+		# and a whole-grid repack of a pane that had not changed.
+		if value == default_bg:
+			return
+		default_bg = value
+		_apply_palette()
 
 @export var max_fps: int = 0:
 	set(value):
@@ -140,6 +153,10 @@ var _terminal: GptyTerminal
 var _font_bold: Font
 var _font_italic: Font
 var _cell_cache: Dictionary = {}
+## The colour behind and around the grid: the grid's own background, read back
+## from it (`_apply_palette`) rather than guessed, so a resize can never expose
+## a band of a different grey between a pane's edge and its cells.
+var _ground: Color = Color(0, 0, 0)
 var _cell_w: float = 0.0
 var _cell_h: float = 0.0
 var _cursor_blink_timer: float = 0.0
@@ -174,6 +191,11 @@ var _layers_ordered := -1
 
 var _resize_pending: bool = false
 var _resize_timer: float = 0.0
+## True while a workspace divider drag is resizing this pane. The owner is the
+## workspace (via `TerminalManager.divider_drag_started`/`_finished`), because
+## only it knows a drag is in flight; the flag turns the quiet-period debounce
+## into the throttle above and asks for one last reflow when it clears.
+var _drag_resizing: bool = false
 ## Whether the child's start has been attempted. False from `_ready` until the
 ## first layout pass (`_start_child_if_ready`): a fresh pane reports size (0,0)
 ## until its container sorts, and a grid chosen before that is the 24x80 guess
@@ -202,6 +224,12 @@ var _pending_input: Array[Dictionary] = []
 var _pending_bytes := 0
 const MAX_PENDING_INPUT := 65536
 const RESIZE_DEBOUNCE = 0.05
+## How often the grid reflows to a size that is still moving: a divider drag
+## changes this pane's rect on every motion event, and the 50 ms quiet period
+## never expires while the button is held, so it would never follow the
+## divider. ~10 reflows a second keeps the text with the divider without a
+## window-size signal to the child on every pixel of travel.
+const RESIZE_DRAG_INTERVAL = 0.1
 const MIN_COLS = 8
 const MIN_ROWS = 3
 var _time_since_sync: float = 0.0
@@ -603,7 +631,7 @@ func _start_child_if_ready() -> void:
 		child_start_failed.emit.call_deferred(_start_error)
 		return
 	if color_scheme_path != "":
-		_apply_stored_scheme()
+		_apply_palette()
 	_flush_pending_input()
 	# Deferred for the same reason, and so both outcomes arrive alike.
 	child_started.emit.call_deferred()
@@ -634,8 +662,23 @@ func _on_resize():
 	# the window) is never below these floors, so reject anything smaller.
 	if _grid_for_size(size) == Vector2i.ZERO:
 		return
+	# A divider drag changes the size on every motion event: restarting the
+	# quiet period each time is what kept the text from following the divider.
+	# The throttle accumulates instead and applies every RESIZE_DRAG_INTERVAL.
 	_resize_pending = true
-	_resize_timer = 0.0
+	if not _drag_resizing:
+		_resize_timer = 0.0
+
+## The workspace's divider drag started or ended for this pane (see
+## `_drag_resizing`). The end asks for the one final reflow the drag's throttle
+## may have left pending, so the committed geometry is applied on the next
+## frame rather than after a quiet period.
+func set_drag_resizing(active: bool) -> void:
+	if _drag_resizing == active:
+		return
+	_drag_resizing = active
+	if not active and _resize_pending:
+		_resize_timer = maxf(_resize_timer, RESIZE_DEBOUNCE)
 
 func _notification(what):
 	match what:
@@ -701,21 +744,41 @@ func _reload_fonts():
 ## this is not a scheme, and the read happens on the GUI thread.
 const SCHEME_MAX_BYTES := 1 << 14
 
-## Apply the pane's colour scheme file. The path is data: `TextRead` gates it
-## to an absolute regular file and caps the read, so a scheme entry cannot make
-## the pane read a device, a FIFO, or a huge file.
-func _apply_stored_scheme():
-	if _terminal == null: return
+## Apply the pane's colours to the grid: the ANSI palette from its scheme file,
+## and the terminal's background.
+##
+## `default_bg` is the pane's own background and is pushed into the grid's
+## `palette[0]` - the entry every cell paints its background with
+## (`NamedColor::Background`) - so the margin a resize exposes is the same
+## colour as the cells beside it. A scheme file names its own background as its
+## first colour, which wins while one is set. `_ground` is then read back from
+## the grid rather than assumed, which is what makes the two agree.
+##
+## The path is data: `TextRead` gates it to an absolute regular file and caps
+## the read, so a scheme entry cannot make the pane read a device, a FIFO, or a
+## huge file.
+func _apply_palette():
+	if _terminal == null:
+		_ground = default_bg
+		return
 	var path = color_scheme_path
-	if path == "":
+	var applied := false
+	if path != "":
+		var r := TextRead.read_prefix(path, SCHEME_MAX_BYTES)
+		if r.ok:
+			var hex_csv: String = str(r.text).strip_edges().replace("\n", ",").replace("\r", ",").replace(" ", "")
+			_terminal.set_palette(hex_csv)
+			applied = true
+	if not applied:
 		_terminal.set_palette("")
-		return
-	var r := TextRead.read_prefix(path, SCHEME_MAX_BYTES)
-	if not r.ok:
-		_terminal.set_palette("")
-		return
-	var hex_csv: String = str(r.text).strip_edges().replace("\n", ",").replace("\r", ",").replace(" ", "")
-	_terminal.set_palette(hex_csv)
+		_terminal.set_background_color(default_bg)
+	_ground = _terminal.get_background_color()
+	_repaint_all()
+
+## The colour the pane fills behind and around its grid. Always the grid's own
+## background, so the draw pass and the cells agree by construction.
+func ground_color() -> Color:
+	return _ground
 
 ## Load one of the three font faces. `path` is data (a saved or global
 ## setting) and never reaches a resource loader: `TerminalFonts` reads bytes.
@@ -757,7 +820,8 @@ func _process(delta):
 
 	if _resize_pending:
 		_resize_timer += delta
-		if _resize_timer >= RESIZE_DEBOUNCE:
+		var resize_threshold := RESIZE_DRAG_INTERVAL if _drag_resizing else RESIZE_DEBOUNCE
+		if _resize_timer >= resize_threshold:
 			var fitted := _grid_for_size(size)
 			if fitted == Vector2i.ZERO:
 				# Size collapsed between event and apply — keep waiting for
@@ -1103,7 +1167,7 @@ func _draw():
 	# ground: one rect that changes with the pane's size or the palette, never
 	# with the grid's content.
 	if not _cell_cache.is_empty() and int(_cell_cache.get("rows", 0)) > 0:
-		draw_rect(Rect2(Vector2.ZERO, size), default_bg)
+		draw_rect(Rect2(Vector2.ZERO, size), _ground)
 	_draw_ms += float(Time.get_ticks_usec() - t0) / 1000.0
 
 
