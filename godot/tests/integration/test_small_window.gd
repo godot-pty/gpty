@@ -101,9 +101,11 @@ func test_a_pane_title_stops_before_its_buttons():
 	var ws = await _make_workspace(Vector2(560, 340))
 	var wrapper: Control = ws._tm.tiles[0].wrapper
 	var long_title := "a pane name long enough to overrun the tile and then keep going past it"
+	# Set and read in one call: a tile follows its child's OSC title, and a live
+	# shell can report one on any frame (cmd.exe does, as soon as ConPTY starts),
+	# which would replace the name under test. These assertions are the label's
+	# layout, not title precedence, so no frame may pass between the two.
 	TerminalManager.set_title_label(wrapper, long_title)
-	await get_tree().process_frame
-	await get_tree().process_frame
 	var lbl := wrapper.get_node("BodyVBox/TitleBar/TitleLabel") as Label
 	var row := wrapper.get_node("BodyVBox/TitleBar/TitleBarButtons") as Control
 	assert_not_null(lbl, "the tile carries a title label")
