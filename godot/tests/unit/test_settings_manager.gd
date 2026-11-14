@@ -11,8 +11,10 @@ func before_each():
 
 func after_each():
 	# The palette and the seam are process-global: a test that left the chrome
-	# light (or a desktop answer stubbed) would re-theme every later suite.
+	# light (or a desktop answer stubbed) would re-theme every later suite. A fold
+	# is the same kind of leak through `SettingsManager`'s own field.
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+	SettingsManager.cfg_sidebar_folded.clear()
 	SettingsManager.system_is_dark = func() -> bool:
 		return DisplayServer.is_dark_mode() if DisplayServer.is_dark_mode_supported() else true
 	SettingsManager.apply_appearance()
@@ -158,3 +160,33 @@ func test_a_custom_chrome_colour_survives_a_palette_switch():
 	assert_eq(SettingsManager.cfg_title_bar_bg, Color(0.9, 0.1, 0.1))
 	assert_eq(SettingsManager.cfg_sidebar_bg, UiPalette.light().SIDEBAR,
 		"the untouched colours still follow")
+
+# ── Sidebar section folds ──────────────────────────────────────────────
+
+func test_the_sidebar_fold_store_is_a_closed_vocabulary():
+	# A store written by another build, or hand-edited, may name a section this
+	# build has no header for, repeat one, or hold a non-string.
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE,
+		{"sidebar_folded": ["panes", "bogus", "panes", 3, "workspaces"]})
+	SettingsManager.load_settings()
+	var expected: Array[String] = ["workspaces", "panes"]
+	assert_eq(SettingsManager.cfg_sidebar_folded, expected,
+		"registry ids only, in registry order, without duplicates")
+
+func test_a_fold_is_saved_and_cleared():
+	SettingsManager.set_sidebar_folded("panes", true)
+	assert_true(SettingsManager.is_sidebar_folded("panes"))
+	SettingsManager.set_sidebar_folded("bogus", true)
+	assert_false(SettingsManager.is_sidebar_folded("bogus"),
+		"an id this build has no section for is refused")
+	var stored: Dictionary = MockAutoloads.get_store(SettingsManager.SETTINGS_FILE)
+	assert_eq(stored.get("sidebar_folded"), ["panes"], "the toggle writes the store")
+	SettingsManager.set_sidebar_folded("panes", false)
+	assert_false(SettingsManager.is_sidebar_folded("panes"))
+
+func test_a_fold_does_not_broadcast_settings_changed():
+	# `settings_changed` re-applies terminal settings to every pane in every
+	# workspace; a fold changes no pane.
+	watch_signals(SettingsManager)
+	SettingsManager.set_sidebar_folded("profiles", true)
+	assert_signal_not_emitted(SettingsManager, "settings_changed")

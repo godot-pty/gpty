@@ -76,6 +76,11 @@ const COMMAND_FIXTURE := [
 const STATES := {
 	"first-launch": {"size": DEFAULT_SIZE, "panes": 0},
 	"sidebar": {"size": DEFAULT_SIZE, "panes": 4},
+	# Workspaces and Profiles folded to their headers, the Pane list holding the
+	# height they gave back (row *The sidebar's three sections cannot be folded*).
+	# The toggles are pressed through their own accessible names, the way a
+	# reader reaches them.
+	"sidebar-folded": {"size": DEFAULT_SIZE, "panes": 4, "fold": ["workspaces", "profiles"]},
 	"settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings"},
 	"pane-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "pane-settings"},
 	# The workspace-directory picker: the app's own header over the engine's
@@ -594,6 +599,19 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 	if state.has("agent_states"):
 		if not await _apply_agent_states(state["agent_states"]):
 			return false
+	if state.has("fold"):
+		for raw in state["fold"]:
+			# By node name, not `Sidebar.SECTION_NAMES`: this script is a `-s`
+			# SceneTree entry point, which compiles before autoloads exist, and a
+			# static reference to `Sidebar` fails there (`SettingsManager` is not
+			# an identifier yet).
+			var toggle_name := str(raw).capitalize() + "FoldBtn"
+			var toggle := _workspace._sidebar.find_child(toggle_name, true, false) as Button
+			if toggle == null:
+				_fail("the sidebar has no '%s' toggle" % toggle_name)
+				return false
+			await _click(toggle)
+			await _wait_frames(2)
 	match str(state.get("open", "")):
 		"settings":
 			# At a 340 px window the sidebar's column overflows, so the button

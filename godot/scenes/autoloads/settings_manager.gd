@@ -70,6 +70,14 @@ var cfg_ui_scale := 100
 ## `APPEARANCE_SYSTEM` (the desktop's own preference).
 var cfg_appearance_mode := APPEARANCE_DARK
 
+## The foldable sidebar sections, in the order the sidebar stacks them. These ids
+## are the `sidebar_folded` vocabulary: a stored value that is not in this list is
+## a store written by another build and is dropped on load.
+const SIDEBAR_SECTIONS := ["workspaces", "profiles", "panes"]
+## Which sections the user folded, by id (`SIDEBAR_SECTIONS`). The whole-sidebar
+## collapse stays chrome and is never saved; this is only the per-section fold.
+var cfg_sidebar_folded: Array[String] = []
+
 ## Emitted when the resolved mode moves — a settings save, or the desktop theme
 ## flipping while `Follow system` is selected. The workspace rebuilds its Theme
 ## and re-pushes every colour it owns.
@@ -80,6 +88,31 @@ signal appearance_changed(is_dark: bool)
 ## re-indexing the array, and it stays in step with the dropdown by construction.
 func window_mode_label() -> String:
 	return WINDOW_MODE_LABELS[clampi(cfg_window_mode, 0, WINDOW_MODE_LABELS.size() - 1)]
+
+func is_sidebar_folded(section_id: String) -> bool:
+	return cfg_sidebar_folded.has(section_id)
+
+## Record one section's fold and write it. A fold is chrome: nothing a pane draws
+## reads it, so the save stays off `settings_changed`.
+func set_sidebar_folded(section_id: String, folded: bool) -> void:
+	if not SIDEBAR_SECTIONS.has(section_id) or is_sidebar_folded(section_id) == folded:
+		return
+	if folded:
+		cfg_sidebar_folded.append(section_id)
+	else:
+		cfg_sidebar_folded.erase(section_id)
+	_save_settings_file()
+
+## A stored `sidebar_folded` list, reduced to ids this build has a section for, in
+## registry order and without duplicates - a hand-edited file cannot fold a
+## section that does not exist, and cannot make the list disagree with the panel.
+static func _sidebar_folded_from(raw: Array) -> Array[String]:
+	var out: Array[String] = []
+	for id in SIDEBAR_SECTIONS:
+		var section_id := str(id)
+		if raw.has(section_id):
+			out.append(section_id)
+	return out
 
 ## The desktop's dark-mode answer. A seam, so a test can model a desktop that
 ## reports light, dark, or nothing at all — a platform or a session without the
@@ -196,8 +229,20 @@ func load_settings():
 	# than the layout was ever measured at.
 	cfg_ui_scale = clampi(_as_int(d, "ui_scale", 100), 100, UI_SCALE_PRESETS.max())
 	cfg_appearance_mode = clampi(_as_int(d, "appearance_mode", APPEARANCE_DARK), APPEARANCE_DARK, APPEARANCE_SYSTEM)
+	cfg_sidebar_folded = _sidebar_folded_from(_as_array(d, "sidebar_folded", []))
 
 func save_settings():
+	_save_settings_file()
+	# The palette follows the setting before anyone hears about the save, so a
+	# listener that pushes colours reads the set this file just chose.
+	apply_appearance()
+	settings_changed.emit()
+
+## Write the store without announcing it. Only state no listener acts on uses
+## this (`set_sidebar_folded`): `settings_changed` re-applies terminal settings
+## to every pane in every workspace and re-applies the window mode, which a
+## sidebar fold has no part in.
+func _save_settings_file():
 	var d = {"cursor_shape": cfg_cursor_shape, "cursor_blink": cfg_cursor_blink, "cursor_blink_speed": cfg_cursor_blink_speed, "scroll_lines": cfg_scroll_lines, "default_rows": cfg_default_rows, "default_cols": cfg_default_cols, "beam_width": cfg_beam_width, "underline_height": cfg_underline_height, "wrapper_bg": cfg_wrapper_bg.to_html(), "title_bar_bg": cfg_title_bar_bg.to_html(), "wrapper_border": cfg_wrapper_border.to_html(), "sidebar_bg": cfg_sidebar_bg.to_html(), "focus_border": cfg_focus_border.to_html(), "selection": cfg_selection.to_html(), "scrollback_indicator": cfg_scrollback_indicator.to_html(), "color_scheme": cfg_color_scheme_path, "max_fps": cfg_max_fps, "font_path": cfg_font_path, "font_size": cfg_font_size, "shell_command": cfg_shell_command, "shell_env": cfg_shell_env, "show_titlebar": cfg_show_titlebar, "window_mode": cfg_window_mode, "window_position": {"x": cfg_window_position.x, "y": cfg_window_position.y}, "window_size": {"x": cfg_window_size.x, "y": cfg_window_size.y}}
 	d["reasoning_max_turns"] = cfg_reasoning_max_turns
 	d["reasoning_max_turn_bytes"] = cfg_reasoning_max_turn_bytes
@@ -205,11 +250,8 @@ func save_settings():
 	d["ui_scale"] = cfg_ui_scale
 	d["appearance_mode"] = cfg_appearance_mode
 	d["history_lines"] = cfg_history_lines
+	d["sidebar_folded"] = cfg_sidebar_folded.duplicate()
 	_write_file(SETTINGS_FILE, d)
-	# The palette follows the setting before anyone hears about the save, so a
-	# listener that pushes colours reads the set this file just chose.
-	apply_appearance()
-	settings_changed.emit()
 
 func apply_to_terminal(body: Control):
 	body.apply_settings({

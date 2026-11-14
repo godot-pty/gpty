@@ -44,7 +44,9 @@ var _wm_dropdown: OptionButton
 var _pane_list: VBoxContainer
 var _profile_list: VBoxContainer
 var _workspace_list: VBoxContainer
-var _active_pane: Control = null
+## The pane row accented as active; `set_active_pane` is the only mover between
+## frames, and a rebuild re-derives it.
+var _pane_active: Control = null
 ## The "Panes:" heading row; hidden while the list is empty so a fresh
 ## workspace does not show a section title over nothing.
 var _pane_heading: HBoxContainer = null
@@ -59,7 +61,18 @@ var _ws_names: Array[String] = []
 var _ws_active := -1
 var _ws_cwds: Array[String] = []
 var _pane_items: Array = []
-var _pane_active: Control = null
+## What each list's rows were last built from, one string per row. A refresh that
+## matches moves the accent only: building a row is 7-10.4 ms (three Phosphor
+## glyph Labels at 3.3-3.5 ms each), an accent on an attached row is free.
+var _ws_rendered: Array[String] = []
+var _profile_rendered: Array[String] = []
+var _pane_rendered: Array[String] = []
+## Whether each list has been built at least once. An empty model matches an
+## empty signature, so without this the first refresh would skip the rows that
+## must exist (the profile section's catalog hint is always there).
+var _ws_drawn := false
+var _profile_drawn := false
+var _pane_drawn := false
 ## The last profile list handed over, so a confirm click can rebuild it
 ## without the workspace re-sending the model.
 var _profile_items: Array = []
@@ -128,9 +141,33 @@ func build(bg_rect: ColorRect):
 func update_pane_list(panes: Array, active_body: Control = null):
 	if not _pane_list: return
 	_pane_items.assign(panes)
-	_active_pane = active_body
 	_pane_active = active_body
+	var content := _pane_signature()
+	if _pane_drawn and _pending_close.is_empty() and content == _pane_rendered:
+		_apply_pane_state()
+		return
+	_pane_drawn = true
+	_pane_rendered = content
 	_render_panes()
+
+## Which pane a row is, and the label it wears: an id keeps two panes of one type
+## apart, and a close renumbers the labels of the survivors.
+func _pane_signature() -> Array[String]:
+	var sig: Array[String] = []
+	for body in _pane_items:
+		sig.append("%d\u001f%s" % [body.get_instance_id(), str(body.get("pane_label"))])
+	return sig
+
+## Move the list's state without touching its rows: the active accent and the
+## section's header. Everything else a row shows is in `_pane_signature`.
+func _apply_pane_state() -> void:
+	for row in _pane_list.get_children():
+		if row.is_queued_for_deletion():
+			continue
+		var btn := row.get_child(0) as Button
+		if btn != null:
+			_apply_row_accent(btn, row.get_meta("body") == _pane_active)
+	_sync_pane_header()
 
 ## One pane row: label, settings, More, Close, and the hidden check/cross pair.
 ## The close asks in this row first; only the check emits `request_close`.
@@ -176,15 +213,10 @@ func _make_pane_row(body: Control, is_active: bool) -> HBoxContainer:
 ## Move the active-row accent without rebuilding the list — called on pane
 ## focus changes (the workspace polls `_tm.last_body` each frame).
 func set_active_pane(body: Control):
-	if body == _active_pane:
+	if body == _pane_active:
 		return
-	_active_pane = body
 	_pane_active = body
-	for row in _pane_list.get_children():
-		var btn = row.get_child(0) as Button
-		if btn == null:
-			continue
-		_apply_row_accent(btn, row.get_meta("body") == body)
+	_apply_pane_state()
 
 ## The one constructor for a sidebar button that carries text: a section row's
 ## label (`icon == ""`) and a full-width icon+text action (Search, Settings,
@@ -412,10 +444,83 @@ func _sync_window_mode():
 	if _wm_dropdown:
 		_wm_dropdown.select(SettingsManager.cfg_window_mode)
 
+## The one header every section wears: the heading label, the section's own
+## controls in the order it passes them, then the fold toggle right-most. Adds the
+## header to `host`, binds the fold to the section's `scroll`, and returns the
+## header (the Panes section hides it while the list is empty).
+func _add_section_header(host: VBoxContainer, section_id: String, header_name: String,
+		actions: Array, scroll: ScrollContainer, expanding := false) -> HBoxContainer:
+	var header := HBoxContainer.new()
+	header.name = header_name
+	var lbl := Label.new()
+	lbl.name = section_id.capitalize() + "Heading"
+	lbl.text = str(SECTION_NAMES[section_id]) + ":"
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(lbl)
+	for b in actions:
+		header.add_child(b)
+	# The fold is the header's last control: every section has one, and Panes has
+	# no add button, so it is the only button there besides the close-all.
+	var toggle := Button.new()
+	toggle.name = section_id.capitalize() + "FoldBtn"
+	toggle.focus_mode = Control.FOCUS_ALL
+	toggle.pressed.connect(_toggle_section_fold.bind(section_id))
+	header.add_child(toggle)
+	host.add_child(header)
+	_fold_sections[section_id] = {"host": host, "scroll": scroll, "toggle": toggle,
+		"expanding": expanding}
+	_sync_section_fold(section_id)
+	return header
+
+## Draw one section's fold from the setting, the only place the state lives, so a
+## refresh, a rebuild and a second launch all read the same answer and none can
+## leave the button disagreeing with the list.
+##
+## Hiding the list's `ScrollContainer` is what drops the section's minimum to its
+## header: Godot's container sort skips a hidden child, and the scroll reserves
+## nothing of its own (measured 4.7.2: a 216 px section minimum becomes 62 px,
+## back to 216 when unfolded).
+func _sync_section_fold(section_id: String) -> void:
+	var s: Dictionary = _fold_sections.get(section_id, {})
+	if s.is_empty():
+		return
+	var folded := SettingsManager.is_sidebar_folded(section_id)
+	var section_name := str(SECTION_NAMES[section_id])
+	var toggle: Button = s["toggle"]
+	(s["scroll"] as Control).visible = not folded
+	var host: Control = s["host"]
+	var expanding := bool(s["expanding"]) and not folded
+	host.size_flags_vertical = Control.SIZE_EXPAND_FILL if expanding else Control.SIZE_FILL
+	# The name goes first: `Icons.set_glyph` mirrors the button's name onto the
+	# glyph Label, which is the node a screen reader reads.
+	toggle.accessibility_name = ("Show the %s section" if folded else "Fold the %s section") % section_name
+	toggle.tooltip_text = toggle.accessibility_name
+	Icons.set_glyph(toggle, Icons.CARET_UP if folded else Icons.CARET_DOWN)
+
+## A fold press: the setting is the state, so the write and the redraw are the
+## whole handler. `SettingsManager` rejects an id this build has no section for.
+func _toggle_section_fold(section_id: String) -> void:
+	if not _fold_sections.has(section_id):
+		return
+	SettingsManager.set_sidebar_folded(section_id,
+		not SettingsManager.is_sidebar_folded(section_id))
+	_sync_section_fold(section_id)
+
 ## Every section list (workspaces, profiles, panes) shares these: a
 ## five-row visibility cap before an inner scrollbar, one accent color for
 ## the active row, and measured (not hard-coded) section heights.
 const SECTION_MAX_VISIBLE_ROWS = 5
+
+## The three foldable sections' display names, keyed by the ids
+## `SettingsManager.SIDEBAR_SECTIONS` persists. A section not in this table has
+## no fold.
+const SECTION_NAMES := {"workspaces": "Workspaces", "profiles": "Profiles", "panes": "Panes"}
+
+## One entry per foldable section: `host` (the VBox whose combined minimum is the
+## section's height), `scroll` (the list container the fold hides), `toggle` (the
+## header's right-most button) and `expanding` (whether the section takes the
+## height the sections above leave over, which a fold must give back).
+var _fold_sections: Dictionary = {}
 
 ## The profiles section's catalog hint: with no installed plugin profile the
 ## only shipped layout is the built-in, and the tool layouts live in plugin
@@ -426,15 +531,10 @@ const CATALOG_HINT_TEXT := "More layouts \u2192"
 func _add_workspace_section(parent: VBoxContainer):
 	var section = VBoxContainer.new(); section.name = "WorkspaceSection"
 
-	var header = HBoxContainer.new(); header.name = "WorkspaceHeader"
-	var lbl = Label.new(); lbl.text = "Workspaces:"
-	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(lbl)
 	var add_btn = Button.new(); add_btn.name = "AddWorkspaceBtn"
 	add_btn.tooltip_text = "New workspace (max 8)"
 	Icons.icon_button(add_btn, Icons.ADD, "New workspace (max 8)")
 	add_btn.pressed.connect(func(): request_workspace_add.emit())
-	header.add_child(add_btn)
 	_workspaces_add_btn = add_btn
 
 	# The section's close-all: visible only while a workspace exists, and it
@@ -444,25 +544,24 @@ func _add_workspace_section(parent: VBoxContainer):
 	all_btn.tooltip_text = "Close all workspaces"
 	all_btn.visible = false
 	all_btn.pressed.connect(func(): _request_close_confirm("workspaces_all", 0, "", null, all_btn))
-	header.add_child(all_btn)
 	_workspaces_close_all_btn = all_btn
 
 	var confirm := _confirm_row("WorkspacesCloseAllConfirmOk",
 		"WorkspacesCloseAllConfirmCancel", "all workspaces")
 	confirm.name = "WorkspacesCloseAllConfirm"
-	header.add_child(confirm)
 	_workspaces_confirm = confirm
-	section.add_child(header)
 
 	# No fixed cap on visible rows beyond 5: five rows fully shown, an
 	# inner scrollbar appears only when there are more.
 	var sc = ScrollContainer.new(); sc.name = "WorkspaceScroll"
-	section.add_child(sc)
 
 	_workspace_list = VBoxContainer.new(); _workspace_list.name = "WorkspaceList"
 	_workspace_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sc.add_child(_workspace_list)
 
+	_add_section_header(section, "workspaces", "WorkspaceHeader",
+		[add_btn, all_btn, confirm], sc)
+	section.add_child(sc)
 	parent.add_child(section)
 
 func update_workspace_list(names: Array[String], active: int, cwds: Array[String] = []):
@@ -470,7 +569,34 @@ func update_workspace_list(names: Array[String], active: int, cwds: Array[String
 	_ws_names.assign(names)
 	_ws_active = active
 	_ws_cwds.assign(cwds)
+	var content := _workspace_signature()
+	if _ws_drawn and _pending_close.is_empty() and content == _ws_rendered:
+		_apply_workspace_state()
+		return
+	_ws_drawn = true
+	_ws_rendered = content
 	_render_workspaces()
+
+## One string per row, so equal models compare equal without a rebuild. The fields
+## are joined with U+001F, which a name or a path cannot contain: a printable
+## separator would let `a|b` + `c` collide with `a` + `b|c`.
+func _workspace_signature() -> Array[String]:
+	var sig: Array[String] = []
+	for i in _ws_names.size():
+		sig.append("%s\u001f%s" % [_ws_names[i], str(_ws_cwds[i]) if i < _ws_cwds.size() else ""])
+	return sig
+
+## Move the list's state without touching its rows: the active accent and the
+## header's buttons. A switch between workspaces whose names and directories did
+## not change costs this instead of five rows of control creation.
+func _apply_workspace_state() -> void:
+	for row in _workspace_list.get_children():
+		if row.is_queued_for_deletion():
+			continue
+		var btn := row.get_child(0) as Button
+		if btn != null:
+			_apply_row_accent(btn, int(row.get_meta("workspace_index", -1)) == _ws_active)
+	_sync_workspace_header()
 
 ## Rebuild the workspace rows from the stored lists, then sync the header. A
 ## pending row question survives a rebuild only while its target is still there.
@@ -806,11 +932,7 @@ func _on_workspace_row_input(idx: int, btn: Button, ev: InputEvent):
 	_start_workspace_rename(idx, btn)
 
 func _add_pane_list_ui(v: VBoxContainer):
-	var header = HBoxContainer.new(); header.name = "PaneHeader"
-	var lbl = Label.new()
-	lbl.text = " Panes:"
-	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(lbl)
+	var section = VBoxContainer.new(); section.name = "PaneSection"
 
 	# The section's close-all: visible only while a pane exists. The check
 	# that follows it emits the same reset the old footer button did.
@@ -818,31 +940,30 @@ func _add_pane_list_ui(v: VBoxContainer):
 	Icons.icon_button(all_btn, Icons.DELETE, "Close all panes in this workspace")
 	all_btn.tooltip_text = _with_chord("Close every pane in this workspace", "app:reset_workspace")
 	all_btn.pressed.connect(func(): _request_close_confirm("panes_all", 0, "", null, all_btn))
-	header.add_child(all_btn)
 	_panes_close_all_btn = all_btn
 
 	var confirm := _confirm_row("PanesCloseAllConfirmOk",
 		"PanesCloseAllConfirmCancel", "all panes")
 	confirm.name = "PanesCloseAllConfirm"
-	header.add_child(confirm)
 	_panes_confirm = confirm
-
-	# Hidden until the list has a row: a workspace that never restores (a trust
-	# dialog is waiting) must not show a section title over nothing.
-	# `update_pane_list` is the one switch.
-	header.visible = false
-	v.add_child(header)
-	_pane_heading = header
 
 	var sc = ScrollContainer.new()
 	sc.name = "PaneScroll"
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(sc)
 
 	_pane_list = VBoxContainer.new()
 	_pane_list.name = "PaneList"
 	_pane_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sc.add_child(_pane_list)
+
+	_pane_heading = _add_section_header(section, "panes", "PaneHeader",
+		[all_btn, confirm], sc, true)
+	section.add_child(sc)
+	# Hidden until the list has a row: a workspace that never restores (a trust
+	# dialog is waiting) must not show a section title over nothing.
+	# `update_pane_list` is the one switch.
+	_pane_heading.visible = false
+	v.add_child(section)
 
 func _add_collapsed_button():
 	var btn = Button.new()
@@ -874,31 +995,54 @@ func _toggle_sidebar():
 func _add_profile_section(parent: VBoxContainer):
 	var section = VBoxContainer.new(); section.name = "ProfileSection"
 
-	var header = HBoxContainer.new(); header.name = "ProfileHeader"
-	var lbl = Label.new(); lbl.text = "Profiles:"
-	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(lbl)
 	var save_btn = Button.new(); save_btn.name = "SaveProfileBtn"
 	save_btn.tooltip_text = "Save current layout as profile"
 	Icons.icon_button(save_btn, Icons.ADD, "Save current layout as profile")
 	save_btn.pressed.connect(func(): request_save_profile.emit())
-	header.add_child(save_btn)
-	section.add_child(header)
 
 	var sc = ScrollContainer.new(); sc.name = "ProfileScroll"
-	section.add_child(sc)
 
 	_profile_list = VBoxContainer.new(); _profile_list.name = "ProfileList"
 	_profile_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sc.add_child(_profile_list)
 
+	_add_section_header(section, "profiles", "ProfileHeader", [save_btn], sc)
+	section.add_child(sc)
 	parent.add_child(section)
 
 func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 	if not _profile_list: return
 	_profile_items.assign(profiles)
 	_profile_active_name = active_name
+	var content := _profile_signature()
+	if _profile_drawn and _pending_close.is_empty() and content == _profile_rendered:
+		_apply_profile_state()
+		return
+	_profile_drawn = true
+	_profile_rendered = content
 	_render_profiles()
+
+## Everything a profile row shows or binds, in order: the label, its tooltip, and
+## what the trailing buttons do. The active name is the accent, not the content.
+func _profile_signature() -> Array[String]:
+	var sig: Array[String] = []
+	for i in _profile_items.size():
+		var p: Dictionary = _profile_items[i]
+		sig.append("%s\u001f%s\u001f%s\u001f%s\u001f%s\u001f%d" % [
+			str(p.get("name", "Unnamed")), str(p.get("description", "")),
+			"1" if p.get("plugin", false) == true else "0",
+			str(p.get("plugin_id", "")), str(p.get("revision", "")),
+			int(p.get("_user_index", i))])
+	return sig
+
+func _apply_profile_state() -> void:
+	for row in _profile_list.get_children():
+		# The catalog hint is a row without a profile name: it is never accented.
+		if row.is_queued_for_deletion() or not row.has_meta("profile_name"):
+			continue
+		var btn := row.get_child(0) as Button
+		if btn != null:
+			_apply_row_accent(btn, str(row.get_meta("profile_name")) == _profile_active_name)
 
 func _render_profiles():
 	if not _profile_list: return

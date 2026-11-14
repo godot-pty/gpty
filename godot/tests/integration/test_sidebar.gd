@@ -688,6 +688,146 @@ func test_the_add_pane_help_lists_every_glyph_and_the_action_it_takes():
 		ShortcutManager.chord("app:new_terminal"),
 		"the chord is the binding the tile's tooltip names, not a literal")
 
+# ── Section folds ──────────────────────────────────────────────────────
+
+func test_folding_a_section_drops_its_minimum_to_the_header():
+	_sidebar.update_workspace_list(["Repo", "build"], 0, ["/tmp", ""])
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var s: Dictionary = _sidebar._fold_sections["workspaces"]
+	var host: VBoxContainer = s["host"]
+	var scroll: ScrollContainer = s["scroll"]
+	var header: Control = host.get_node("WorkspaceHeader")
+	var open_min := host.get_combined_minimum_size().y
+	assert_gt(open_min, header.get_combined_minimum_size().y + 20.0,
+		"an open section reserves its rows")
+	_sidebar._toggle_section_fold("workspaces")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_false(scroll.visible, "the fold hides the list")
+	assert_eq(host.get_combined_minimum_size().y, header.get_combined_minimum_size().y,
+		"a folded section reserves only its header")
+
+func test_an_update_while_folded_does_not_reopen_the_list():
+	var profiles: Array[Dictionary] = [{"name": "A"}, {"name": "B"}]
+	_sidebar.update_profile_list(profiles, "")
+	_sidebar._toggle_section_fold("profiles")
+	var scroll: ScrollContainer = _sidebar._fold_sections["profiles"]["scroll"]
+	assert_false(scroll.visible)
+	_sidebar.update_profile_list(profiles, "B")
+	await get_tree().process_frame
+	assert_false(scroll.visible, "a refresh redraws rows, it does not unfold")
+	assert_eq(_sidebar._profile_list.get_child_count(), profiles.size() + 1,
+		"the rows are still rendered while the section is folded")
+
+func test_the_fold_toggle_swaps_glyph_tooltip_and_name():
+	var toggle: Button = _sidebar._fold_sections["panes"]["toggle"]
+	assert_eq(Icons.glyph(toggle), Icons.CARET_DOWN)
+	assert_eq(toggle.tooltip_text, "Fold the Panes section")
+	assert_eq(toggle.accessibility_name, toggle.tooltip_text)
+	assert_eq(toggle.focus_mode, Control.FOCUS_ALL, "the keyboard can reach the fold")
+	toggle.pressed.emit()
+	assert_eq(Icons.glyph(toggle), Icons.CARET_UP)
+	assert_eq(toggle.tooltip_text, "Show the Panes section")
+	assert_eq(toggle.accessibility_name, toggle.tooltip_text)
+	toggle.pressed.emit()
+	assert_eq(Icons.glyph(toggle), Icons.CARET_DOWN, "pressing again opens it")
+
+func test_the_pane_section_gives_up_its_expand_while_folded():
+	var host: Control = _sidebar._fold_sections["panes"]["host"]
+	assert_eq(host.size_flags_vertical, Control.SIZE_EXPAND_FILL,
+		"an open Pane section takes the height the others leave over")
+	_sidebar._toggle_section_fold("panes")
+	assert_eq(host.size_flags_vertical, Control.SIZE_FILL,
+		"a folded Pane section must not hold an empty band open")
+
+func test_a_fold_survives_a_second_build():
+	_sidebar._fold_sections["profiles"]["toggle"].pressed.emit()
+	var stored: Dictionary = MockAutoloads.get_store(SettingsManager.SETTINGS_FILE)
+	assert_eq(stored.get("sidebar_folded"), ["profiles"])
+	# The store is the state a launch starts from: forget the in-memory list,
+	# reload it, and build a second sidebar from the setting.
+	SettingsManager.cfg_sidebar_folded.clear()
+	SettingsManager.load_settings()
+	assert_true(SettingsManager.is_sidebar_folded("profiles"))
+	var bg2 := ColorRect.new()
+	_scene.add_child(bg2)
+	var second := Sidebar.new()
+	bg2.add_child(second)
+	second.build(bg2)
+	var scroll: ScrollContainer = second._fold_sections["profiles"]["scroll"]
+	assert_false(scroll.visible, "a stored fold is what build() starts with")
+	assert_eq(Icons.glyph(second._fold_sections["profiles"]["toggle"]), Icons.CARET_UP)
+
+# ── A refresh that changes nothing allocates no rows ───────────────────
+
+func test_a_switch_with_an_unchanged_workspace_list_allocates_no_rows():
+	_sidebar.update_workspace_list(["Repo", "build"], 0, ["/tmp", ""])
+	var rows := _sidebar._workspace_list.get_children()
+	assert_eq(rows.size(), 2)
+	_sidebar.update_workspace_list(["Repo", "build"], 1, ["/tmp", ""])
+	var after := _sidebar._workspace_list.get_children()
+	assert_eq(after.size(), 2,
+		"a rebuild would leave the freed rows in the list for a frame")
+	assert_same(after[0], rows[0], "the row is the same node, not a rebuild")
+	assert_same(after[1], rows[1])
+	assert_false((after[0].get_child(0) as Button).button_pressed)
+	assert_true((after[1].get_child(0) as Button).button_pressed,
+		"the accent followed the active workspace")
+
+func test_a_renamed_workspace_rebuilds_the_row():
+	_sidebar.update_workspace_list(["Repo"], 0)
+	_sidebar.update_workspace_list(["Repo renamed"], 0)
+	var live := _live_rows(_sidebar._workspace_list)
+	assert_eq(live.size(), 1, "the renamed list is one row, not two")
+	assert_eq((live[0].get_child(0) as Button).text, "Repo renamed")
+
+func test_an_unchanged_profile_list_moves_only_the_accent():
+	var profiles: Array[Dictionary] = [{"name": "A"}, {"name": "B"}]
+	_sidebar.update_profile_list(profiles, "")
+	var rows := _sidebar._profile_list.get_children()
+	_sidebar.update_profile_list(profiles, "B")
+	var after := _sidebar._profile_list.get_children()
+	assert_same(after[0], rows[0], "no row was freed or built")
+	assert_true((after[1].get_child(0) as Button).button_pressed,
+		"the active profile's accent moved")
+	assert_false((after[0].get_child(0) as Button).button_pressed)
+	# The catalog hint is the last row and is never accented.
+	var hint := after[after.size() - 1].get_child(0) as Button
+	assert_false(hint.toggle_mode, "the hint row is not a state row")
+
+func test_a_changed_pane_list_still_shows_the_new_set():
+	# `add_child_autofree` only: the bodies live in the tree, so a plain
+	# `autofree` on the same object would free it twice.
+	var a := PaneBody.new()
+	a.pane_label = "T1"
+	add_child_autofree(a)
+	var b := PaneBody.new()
+	b.pane_label = "T2"
+	add_child_autofree(b)
+	_sidebar.update_pane_list([a], a)
+	var live := _live_rows(_sidebar._pane_list)
+	assert_eq(live.size(), 1)
+	_sidebar.update_pane_list([a, b], b)
+	live = _live_rows(_sidebar._pane_list)
+	assert_eq(live.size(), 2, "a spawn adds its row")
+	assert_eq((live[1].get_child(0) as Button).text, "T2")
+	assert_true((live[1].get_child(0) as Button).button_pressed, "the new pane is active")
+	_sidebar.update_pane_list([a], a)
+	live = _live_rows(_sidebar._pane_list)
+	assert_eq(live.size(), 1, "a close drops its row")
+	assert_eq((live[0].get_child(0) as Button).text, "T1")
+
+## The rows a rebuild has not queued for freeing: `queue_free` leaves the old
+## rows in the list for the rest of the frame, so a raw child count is not the
+## row count.
+func _live_rows(list: Node) -> Array:
+	var live: Array = []
+	for row in list.get_children():
+		if not row.is_queued_for_deletion():
+			live.append(row)
+	return live
+
 # ── Feedback ───────────────────────────────────────────────────────────
 
 var _opened: Array = []
