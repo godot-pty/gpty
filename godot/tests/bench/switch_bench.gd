@@ -10,6 +10,14 @@ extends SceneTree
 ## `_draw`) - and prints the incoming pane's own fetch/draw/back-off so a
 ## full-screen TUI's frame cost is distinguishable from the switch's.
 ##
+## The pane's readout is taken on its first grid sync after the switch, not on
+## the arrival frame: a hidden pane keeps its CanvasItem command list, so
+## becoming visible repaints nothing by itself and `draw_ms` read at the arrival
+## frame was 0.00 on every rep. `first_sync_frame` is how many frames after the
+## switch that sync landed (0 = still none within `SYNC_WAIT_MAX_FRAMES`, i.e.
+## the pane needed no sync), and `first_sync_us` is the wall time from the
+## switch to it.
+##
 ##   . scripts/ui-sandbox && gpty_sandbox_init && \
 ##       SWITCH_CMD_A=omp SWITCH_CMD_B=btop godot --path godot \
 ##       --disable-vsync -s res://tests/bench/switch_bench.gd
@@ -48,6 +56,10 @@ const QUIET := "echo quiet; sleep 600"
 const SETTLE_QUIET_FRAMES := 8
 const SETTLE_MIN_MS := 1500
 const SETTLE_MAX_MS := 20000
+## How long the bench waits for the incoming pane's first grid sync after a
+## switch: long enough to cover one `FLOOD` interval (0.4 s) plus the pane's
+## `MAX_SYNC_INTERVAL` cadence ceiling, even unthrottled at 165 fps.
+const SYNC_WAIT_MAX_FRAMES := 120
 
 var _workspace: Control = null
 var _settings: Node = null
@@ -134,20 +146,30 @@ func _initialize() -> void:
 	var backward: Array[int] = []
 	var forward_frame: Array[int] = []
 	var backward_frame: Array[int] = []
+	var forward_sync: Array[int] = []
+	var backward_sync: Array[int] = []
 	for rep in reps:
 		await _switch(1)
 		forward.append(_last_sync_us)
 		forward_frame.append(_last_frame_us)
-		print("switch_bench: rep=%d to=1 sync_us=%d frame_us=%d chars=%d fetch_ms=%.2f draw_ms=%.2f backoff_ms=%.2f"
-			% [rep + 1, _last_sync_us, _last_frame_us, _last_chars, _last_fetch_ms, _last_draw_ms, _last_backoff_ms])
+		forward_sync.append(_last_first_sync_us)
+		print("switch_bench: rep=%d to=1 sync_us=%d frame_us=%d first_sync_frame=%d first_sync_us=%d sync_work_ms=%.2f chars=%d fetch_ms=%.2f draw_ms=%.2f backoff_ms=%.2f"
+			% [rep + 1, _last_sync_us, _last_frame_us, _last_sync_frame, _last_first_sync_us,
+				maxf(_last_fetch_ms, 0.0) + maxf(_last_draw_ms, 0.0),
+				_last_chars, _last_fetch_ms, _last_draw_ms, _last_backoff_ms])
 		await _switch(0)
 		backward.append(_last_sync_us)
 		backward_frame.append(_last_frame_us)
-		print("switch_bench: rep=%d to=0 sync_us=%d frame_us=%d chars=%d fetch_ms=%.2f draw_ms=%.2f backoff_ms=%.2f"
-			% [rep + 1, _last_sync_us, _last_frame_us, _last_chars, _last_fetch_ms, _last_draw_ms, _last_backoff_ms])
+		backward_sync.append(_last_first_sync_us)
+		print("switch_bench: rep=%d to=0 sync_us=%d frame_us=%d first_sync_frame=%d first_sync_us=%d sync_work_ms=%.2f chars=%d fetch_ms=%.2f draw_ms=%.2f backoff_ms=%.2f"
+			% [rep + 1, _last_sync_us, _last_frame_us, _last_sync_frame, _last_first_sync_us,
+				maxf(_last_fetch_ms, 0.0) + maxf(_last_draw_ms, 0.0),
+				_last_chars, _last_fetch_ms, _last_draw_ms, _last_backoff_ms])
 
-	print("switch_bench: median 0->1 sync_us=%d frame_us=%d" % [_median(forward), _median(forward_frame)])
-	print("switch_bench: median 1->0 sync_us=%d frame_us=%d" % [_median(backward), _median(backward_frame)])
+	print("switch_bench: median 0->1 sync_us=%d frame_us=%d first_sync_us=%d" % [
+		_median(forward), _median(forward_frame), _median(forward_sync)])
+	print("switch_bench: median 1->0 sync_us=%d frame_us=%d first_sync_us=%d" % [
+		_median(backward), _median(backward_frame), _median(backward_sync)])
 	quit(0)
 
 
@@ -155,6 +177,10 @@ func _initialize() -> void:
 
 var _last_sync_us := 0
 var _last_frame_us := 0
+## Frames after the switch at which the incoming pane's grid synced (0 = none
+## within `SYNC_WAIT_MAX_FRAMES`), and the wall time to that frame.
+var _last_sync_frame := 0
+var _last_first_sync_us := -1
 var _last_fetch_ms := -1.0
 var _last_draw_ms := -1.0
 var _last_backoff_ms := -1.0
@@ -212,16 +238,31 @@ func _switch(to: int, require_screen: bool = true) -> void:
 		# loop would print them as a fresh measurement.
 		_fail("asked to switch to workspace %d while it is already active" % to)
 		return
+	var pane := _pane_of(to)
+	# The pane's own sync counter (`_last_grid_gen`), not the Rust grid's: a
+	# hidden pane does not process, so its counter stands still while the grid
+	# behind it keeps advancing, and a move is exactly one fetch+repaint.
+	var gen0: int = int(pane.get("_last_grid_gen")) if pane != null else -1
 	var t0 := Time.get_ticks_usec()
 	_workspace._switch_workspace(to)
 	_last_sync_us = Time.get_ticks_usec() - t0
 	_active = to
-	# The first frame that draws the incoming workspace: its terminal's
-	# `_process` (fetch/repack) and `_draw` both run in it.
+	# The first frame that draws the incoming workspace, then the frame the pane
+	# actually syncs. A hidden pane keeps its CanvasItem command list, so becoming
+	# visible repaints nothing by itself: the fetch/repack lands on the pane's
+	# next `_process`, in a later frame, and reading `_draw_ms` at the arrival
+	# frame was 0.00 on every rep.
 	var t1 := Time.get_ticks_usec()
 	await RenderingServer.frame_post_draw
 	_last_frame_us = Time.get_ticks_usec() - t1
-	var pane := _pane_of(to)
+	_last_sync_frame = 0
+	_last_first_sync_us = -1
+	for i in SYNC_WAIT_MAX_FRAMES:
+		if pane != null and int(pane.get("_last_grid_gen")) != gen0:
+			_last_sync_frame = i + 1
+			_last_first_sync_us = Time.get_ticks_usec() - t0
+			break
+		await RenderingServer.frame_post_draw
 	_last_fetch_ms = float(pane.get("_fetch_ms")) if pane and "_fetch_ms" in pane else -1.0
 	_last_draw_ms = float(pane.get("_draw_ms")) if pane and "_draw_ms" in pane else -1.0
 	_last_backoff_ms = float(pane.get("_sync_backoff")) if pane and "_sync_backoff" in pane else -1.0
