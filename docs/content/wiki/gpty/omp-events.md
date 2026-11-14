@@ -57,6 +57,8 @@ Wire names are the adapter's; the trust boundary translates them into an adapter
 
 The socket also carries gPTY's own workspace events: pane spawn, pane kill, and concept matches. Plugin manifests subscribe to those by the names `pane.spawned`, `pane.killed`, and `concept.matched`; a notify-only concept produces a concept match with no content attached.
 
+Only those workspace events reach a subscription. The `omp.*` and `gpty.state.declared` submissions above are consumed by the GUI's own drain (Reasoning pane, agent-state badge) and are never queued for `eventsPoll`; streaming them to an outside consumer is the v0.14 row **Nothing streams workspace, pane and agent state to a consumer**.
+
 ## What is forwarded, and what is not
 
 The extension is a separately installable component and its payload is untrusted, so translation is a field allowlist, not a passthrough. Each allowed field has a type and a cap — identifiers up to 128 bytes, a session reason up to 64 bytes, thinking text up to 8 KiB — and anything not listed is dropped, including fields a future extension version invents. A declaration naming an unknown state is rejected rather than silently ignored, and an oversized reasoning delta is rejected rather than truncated.
