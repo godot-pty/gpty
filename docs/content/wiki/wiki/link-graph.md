@@ -31,7 +31,7 @@ Relayout runs the deterministic pass again. It is also the moment a newly declar
 
 ## Using it
 
-The Graph button on the notes list opens it and re-reads the index. The interface is small and stated on screen:
+The Graph button on the notes list opens it and re-reads the index. The query, the model and the layout run on a worker thread, so opening a large vault's graph does not freeze the window: the canvas appears on the frame the build lands. The interface is small and stated on screen:
 
 - drag the background to pan, wheel to zoom, drag a node to move it
 - Fit frames the whole graph

@@ -82,7 +82,8 @@ const PLUGIN_ADMIN_ACTIONS := ["uninstall", "enable", "disable"]
 ## bookkeeping and the success/error envelope unexercised. Each entry is
 ## `{id, success, payload}`; an empty array means the answer is deferred
 ## (`paneWait` answers from the wait poll, `pluginInstall` from the review
-## dialog, and a pane-creating method from its new pane's own start).
+## dialog, `paneView --graph` from the pane's `graph_built` when the canvas
+## lands, and a pane-creating method from its new pane's own start).
 ##
 ## A refusal's payload is the flat error object `error()` builds, not the
 ## `{"error": ...}` envelope: `respond_ipc` hands it to the Rust edge, which
@@ -114,6 +115,76 @@ static func dispatch_request(ws, req: Dictionary) -> Array:
 			"deadline_ms": Time.get_ticks_msec() + w_timeout,
 		}
 		return []
+	if method == "paneView":
+		# Display-only: the only pane verb that changes what a pane shows
+		# without taking the keyboard, because it never calls
+		# `activate_pane`. A script can open the graph while a person types
+		# in another pane.
+		#
+		# Values are checked here rather than trusted from the caller: clap
+		# validates the CLI's `--mode` and `wire.rs` validates the MCP
+		# tool's JSON types, and neither is the only door to the socket.
+		# Params are validated before the pane-type check so a malformed
+		# request is -32602 whatever pane it names.
+		#
+		# The note and the mode are applied now; the graph is built on a
+		# worker thread, so a request naming it is answered from
+		# `_on_graph_answer` when the canvas is up (`_hold_graph_answer`).
+		var pv_target := str(params.get("pane_id", ""))
+		var pv_found: Dictionary = ws._resolve_pane_target(pv_target)
+		if pv_found.has("error"):
+			return [_answer(id, false, target_refusal(pv_found)["error"])]
+		var pv_body: Control = pv_found["body"]
+		var pv_request := {}
+		# `get(…, null)` rather than `has(…)`: an absent key and a JSON
+		# null both mean "leave it alone", which is what makes one verb
+		# serve three gestures without a fourth "did you mean it" flag.
+		var pv_graph = params.get("graph", null)
+		if pv_graph != null:
+			if typeof(pv_graph) != TYPE_BOOL:
+				return [_answer(id, false, bad_param("`graph` must be a boolean")["error"])]
+			pv_request["graph"] = pv_graph
+		var pv_note = params.get("note", null)
+		if pv_note != null:
+			if not (pv_note is String):
+				return [_answer(id, false, bad_param("`note` must be a string")["error"])]
+			if pv_note.length() > WikiPane.MAX_RESTORE_NOTE:
+				return [_answer(id, false, bad_param(
+					"`note` is too long (max %d characters)" % WikiPane.MAX_RESTORE_NOTE)["error"])]
+			if pv_note.contains("\uFFFD"):
+				return [_answer(id, false, bad_param("Invalid note path")["error"])]
+			pv_request["note"] = pv_note
+		var pv_mode = params.get("mode", null)
+		if pv_mode != null:
+			if not (pv_mode is String) or not (pv_mode in WikiPane.VIEW_MODES):
+				return [_answer(id, false, bad_param("`mode` must be one of: %s" % ", ".join(
+					PackedStringArray(WikiPane.VIEW_MODES)))["error"])]
+			pv_request["mode"] = pv_mode
+		if pv_request.is_empty():
+			return [_answer(id, false, bad_param(
+				"One of `graph`, `note` or `mode` is required")["error"])]
+		if not (pv_body is WikiPane):
+			return [_answer(id, false, refused(
+				"Pane '%s' is a %s pane; pane-view options exist for wiki panes"
+				% [pv_target, pv_body._pane_type()])["error"])]
+		var pv_wants_graph := bool(pv_request.get("graph", false))
+		pv_request.erase("graph")
+		var pv_error: String = pv_body.apply_view(pv_request)
+		if pv_error != "":
+			return [_answer(id, false, refused(pv_error)["error"])]
+		if not pv_wants_graph:
+			return [_answer(id, true, view_answer(pv_body))]
+		var pv_remaining := int(req.get("timeout_ms", 0))
+		if pv_remaining <= 0:
+			# The Rust edge's fallback already answered: nothing is listening,
+			# and starting a build nobody can be told about would only heat
+			# the index. `pluginInstall`'s expired branch is the same rule.
+			return []
+		var pv_start: String = pv_body.request_graph()
+		if pv_start != "":
+			return [_answer(id, false, refused(pv_start)["error"])]
+		ws._hold_graph_answer(int(id), pv_body, pv_remaining)
+		return []
 	if method == "pluginInstall":
 		ws._show_plugin_review(int(id), params, int(req.get("timeout_ms", 0)))
 		return []
@@ -132,6 +203,27 @@ static func dispatch_request(ws, req: Dictionary) -> Array:
 
 static func _answer(id, success: bool, payload) -> Dictionary:
 	return {"id": id, "success": success, "payload": payload}
+
+
+## The `paneView` success document, read back from the pane rather than echoed
+## — an answer that says `graph: true` is the canvas that is actually up. Both
+## the batch arm and the deferred answer (`Workspace._on_graph_answer`) build
+## it here, so the two shapes cannot drift.
+##
+## Written as assignments on purpose: `mcp.rs`'s dispatch-arm scan reads every
+## two-tab quoted literal in this file as a method arm, so a dictionary literal
+## here would register `success`, `note`, `view_mode`… as IPC methods.
+static func view_answer(pane) -> Dictionary:
+	var view: Dictionary = pane.view_document()
+	var answer := {}
+	answer["success"] = true
+	answer["pane_id"] = pane.attachment_id
+	answer["label"] = pane.pane_label
+	answer["type"] = "wiki"
+	answer["graph"] = bool(view["graph"])
+	answer["note"] = str(view["note"])
+	answer["view_mode"] = str(view["view_mode"])
+	return answer
 
 
 static func handle(ws, method: String, params: Dictionary):
@@ -362,66 +454,6 @@ static func handle(ws, method: String, params: Dictionary):
 			if not (ps_status is Dictionary):
 				return refused("Pane '%s' has no status primitives" % ps_target)
 			return ps_status
-		"paneView":
-			# Display-only: the only pane verb that changes what a pane shows
-			# without taking the keyboard, because it never calls
-			# `activate_pane`. A script can open the graph while a person types
-			# in another pane.
-			#
-			# Values are checked here rather than trusted from the caller: clap
-			# validates the CLI's `--mode` and `wire.rs` validates the MCP
-			# tool's JSON types, and neither is the only door to the socket.
-			# Params are validated before the pane-type check so a malformed
-			# request is -32602 whatever pane it names.
-			var pv_target := str(params.get("pane_id", ""))
-			var pv_found: Dictionary = ws._resolve_pane_target(pv_target)
-			if pv_found.has("error"):
-				return target_refusal(pv_found)
-			var pv_body: Control = pv_found["body"]
-			var pv_request := {}
-			# `get(…, null)` rather than `has(…)`: an absent key and a JSON
-			# null both mean "leave it alone", which is what makes one verb
-			# serve three gestures without a fourth "did you mean it" flag.
-			var pv_graph = params.get("graph", null)
-			if pv_graph != null:
-				if typeof(pv_graph) != TYPE_BOOL:
-					return bad_param("`graph` must be a boolean")
-				pv_request["graph"] = pv_graph
-			var pv_note = params.get("note", null)
-			if pv_note != null:
-				if not (pv_note is String):
-					return bad_param("`note` must be a string")
-				if pv_note.length() > WikiPane.MAX_RESTORE_NOTE:
-					return bad_param(
-						"`note` is too long (max %d characters)" % WikiPane.MAX_RESTORE_NOTE)
-				if pv_note.contains("\uFFFD"):
-					return bad_param("Invalid note path")
-				pv_request["note"] = pv_note
-			var pv_mode = params.get("mode", null)
-			if pv_mode != null:
-				if not (pv_mode is String) or not (pv_mode in WikiPane.VIEW_MODES):
-					return bad_param(
-						"`mode` must be one of: %s" % ", ".join(PackedStringArray(WikiPane.VIEW_MODES)))
-				pv_request["mode"] = pv_mode
-			if pv_request.is_empty():
-				return bad_param("One of `graph`, `note` or `mode` is required")
-			if not (pv_body is WikiPane):
-				return refused(
-					"Pane '%s' is a %s pane; pane-view options exist for wiki panes"
-					% [pv_target, pv_body._pane_type()])
-			var pv_error: String = pv_body.apply_view(pv_request)
-			if pv_error != "":
-				return refused(pv_error)
-			var pv_view: Dictionary = pv_body.view_document()
-			return {
-				"success": true,
-				"pane_id": pv_body.attachment_id,
-				"label": pv_body.pane_label,
-				"type": "wiki",
-				"graph": bool(pv_view["graph"]),
-				"note": str(pv_view["note"]),
-				"view_mode": str(pv_view["view_mode"]),
-			}
 		"paneRun":
 			var run_cmd := str(params.get("command", "")).strip_edges()
 			if run_cmd == "":

@@ -2532,6 +2532,16 @@ func _on_sidebar_toggled():
 var _pending_waits: Dictionary = {}
 # pluginInstall reviews waiting on the dialog: id -> summary params
 var _pending_plugin_reviews: Dictionary = {}
+## `paneView --graph` requests whose canvas is still being built: request id ->
+## `{pane: WeakRef, deadline_ms: int}`. The answer leaves from
+## `_on_graph_answer` when the pane reports the canvas, or from the deadline
+## sweep below when it never lands.
+var _pending_graph_answers: Dictionary = {}
+## How long before a request's own fallback this sweep answers. The Rust edge's
+## fallback (`GDS_RESPONSE_TIMEOUT`) fires on the same deadline, so a caller
+## reads what happened instead of a generic timeout — the margin decides which
+## sentence reaches it.
+const GRAPH_ANSWER_MARGIN_MS := 250
 # Accepted installs that promised a same-name replacement: plugin id -> raw
 # profile names the review named. Applied only after the plugin's record is
 # visible, so a failed install deletes nothing.
@@ -2558,6 +2568,7 @@ func _process(_delta: float):
 	_poll_ipc_requests()
 	_poll_pending_waits()
 	_poll_pending_pane_starts()
+	_poll_pending_graph_answers()
 	if _sidebar == null: return
 	# FPS counter update (throttled to ~4 Hz)
 	if Engine.get_process_frames() % 15 == 0 and _status_bar:
@@ -2992,6 +3003,61 @@ func _poll_pending_pane_starts():
 		var held = _pending_pane_starts[key]
 		_pending_pane_starts.erase(key)
 		_send_held_pane_answer(held, "Pane '%s' never started" % str(held["pane_id"]))
+
+# ── The link graph's deferred answer (paneView --graph) ───────────────
+#
+# A wiki pane builds its graph on a worker thread, so `paneView --graph`
+# cannot answer in the frame it was called. The request is booked here and
+# answered from the pane's `graph_built` — the same deferral `paneWait` and
+# `pluginInstall` use — with a deadline sweep that answers first, so a caller
+# reads a sentence instead of the Rust edge's generic timeout.
+
+## Hold a `paneView --graph` answer until that pane's canvas is up.
+##
+## The connection is one-shot: a build reports exactly one outcome, and a
+## request swept at its deadline leaves a connection that fires into a missing
+## entry instead of answering twice.
+func _hold_graph_answer(id: int, pane: Control, remaining_ms: int) -> void:
+	_pending_graph_answers[id] = {
+		"pane": weakref(pane),
+		"deadline_ms": Time.get_ticks_msec() + maxi(0, remaining_ms - GRAPH_ANSWER_MARGIN_MS),
+	}
+	pane.graph_built.connect(_on_graph_answer.bind(id), CONNECT_ONE_SHOT)
+
+## The pane's build landed: answer this request with the canvas it opened, or
+## with the pane's own reason it did not.
+func _on_graph_answer(ok: bool, reason: String, id: int) -> void:
+	if not _pending_graph_answers.has(id):
+		return
+	var held: Dictionary = _pending_graph_answers[id]
+	_pending_graph_answers.erase(id)
+	var pane = held["pane"].get_ref()
+	if ok and pane != null and is_instance_valid(pane):
+		send_ipc_answer.call(id, true, JSON.stringify(WorkspaceIpcHandlers.view_answer(pane)))
+	else:
+		send_ipc_answer.call(id, false, JSON.stringify(_ipc_error(reason)["error"]))
+
+## Deadline sweep for a build that outlived its request's read: a pane still
+## building gets a retry sentence, a pane that closed gets the close. Either
+## way the caller is answered before the Rust edge's own fallback fires.
+func _poll_pending_graph_answers():
+	if _pending_graph_answers.is_empty():
+		return
+	var now = Time.get_ticks_msec()
+	var expired: Array = []
+	for rid in _pending_graph_answers:
+		if now >= int(_pending_graph_answers[rid]["deadline_ms"]):
+			expired.append(rid)
+	for rid in expired:
+		var held: Dictionary = _pending_graph_answers[rid]
+		_pending_graph_answers.erase(rid)
+		var pane = held["pane"].get_ref()
+		var why := (
+			"The link graph is still being built; retry in a moment"
+			if pane != null and is_instance_valid(pane)
+			else "Pane closed before its link graph was built"
+		)
+		send_ipc_answer.call(int(rid), false, JSON.stringify(_ipc_error(why)["error"]))
 
 func _handle_ipc_method(method: String, params):
 	return WorkspaceIpcHandlers.handle(self, method, params)

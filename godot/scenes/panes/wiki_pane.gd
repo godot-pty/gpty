@@ -40,6 +40,26 @@ class_name WikiPane
 ## `preview` (rendered only). Split is what makes the preview live.
 @export var view_mode := "split"
 
+## The link graph's outcome: `true` once the canvas is up, `false` with the
+## reason it is not (the vault failed, or the pane left the graph before the
+## build landed). Emitted once per build, on the frame the result is applied.
+signal graph_built(ok: bool, reason: String)
+
+## The build in flight: a WorkerThreadPool task id, -1 when idle. The index
+## query, the model and the layout run on a worker so a large vault cannot
+## stall the frame that asked for them.
+var _graph_task := -1
+## Whether the pane wants the canvas. Set by `request_graph`, cleared when the
+## build lands (`_apply_graph_build`) or the pane leaves the graph
+## (`_hide_graph`); a result that lands with this false is dropped.
+var _graph_wanted := false
+## The keyboard follows the canvas when it lands — a Graph press, never a
+## restore or an IPC request.
+var _graph_focus_pending := false
+## The worker's one output slot: `[{root, graph, positions}]`, written once by
+## the task before it reports complete, cleared here when the result is read.
+var _graph_build_out: Array = []
+
 ## What a saved layout asks the pane to reopen where the user left off: the
 ## open note (a vault-relative path, read through the same gate as every
 ## other open) and whether the link graph was showing. Consumed once, by
@@ -187,12 +207,11 @@ func _ready():
 	_graph_button.text = "Graph"
 	_graph_button.tooltip_text = "Map this vault's links (re-reads the index)"
 	_graph_button.pressed.connect(func():
-		_show_graph()
 		# The keyboard follows the map, the same rule the note view follows for
 		# its buffer: the button that opened it is no longer the surface the
-		# user is looking at.
-		if _graph_view.visible:
-			_graph_view.grab_focus()
+		# user is looking at. The canvas is built on a worker, so the focus
+		# moves when it lands.
+		request_graph(true)
 	)
 	top.add_child(_graph_button)
 
@@ -392,9 +411,15 @@ func _ready():
 	# The spawn/restore apply_settings call runs before the node enters the
 	# tree, so the initial index pass belongs here (code_viewer's pattern).
 	# Resolve first: the bundled profile stores `@knowledge`, not a path.
+	# The build poll is the only reason this pane ticks; `request_graph`
+	# re-enables it (and `_restore_view` below may ask for one).
+	set_process(false)
 	_resolve_vault()
 	_refresh()
 	_restore_view()
+
+func _process(_delta: float) -> void:
+	_poll_graph_build()
 
 ## Reopen the note and graph a saved layout names. A path that no longer opens
 ## says so (`_open_note` toasts); an invalid vault leaves the placeholder alone.
@@ -408,7 +433,7 @@ func _restore_view() -> void:
 	if rel != "":
 		_open_note(rel)
 	if graph:
-		_show_graph()
+		request_graph()
 
 ## The editor and the preview share the pane's font size, which the settings
 ## panel can change after `_ready`.
@@ -427,7 +452,7 @@ func _refresh():
 	_clear_note()
 	_back.visible = false
 	_note_box.visible = false
-	_graph_view.visible = false
+	_hide_graph()
 	_footer.visible = false
 	_list.clear()
 	var problem := _vault_problem()
@@ -487,7 +512,7 @@ func _run_search() -> void:
 	_list.clear()
 	_footer.visible = false
 	_note_box.visible = false
-	_graph_view.visible = false
+	_hide_graph()
 	_back.visible = false
 	if not (answer is Dictionary):
 		_show_placeholder("Vault search unavailable.")
@@ -521,7 +546,7 @@ func _show_placeholder(text: String, searchable := true) -> void:
 	_placeholder.visible = true
 	_list.visible = false
 	_note_box.visible = false
-	_graph_view.visible = false
+	_hide_graph()
 	_back.visible = false
 	_search.visible = searchable
 	# A working vault with no note open can always gain one, even when the
@@ -664,7 +689,7 @@ func _open_note(rel: String, fragment := "", line := 0, take_focus := true) -> b
 	_list.visible = false
 	_footer.visible = false
 	_placeholder.visible = false
-	_graph_view.visible = false
+	_hide_graph()
 	_search.visible = false
 	_new_button.visible = false
 	_graph_button.visible = true
@@ -694,37 +719,130 @@ func _open_note(rel: String, fragment := "", line := 0, take_focus := true) -> b
 
 # ── The link graph: the vault's structure, generated on demand ──────────
 
-## Show the vault's link structure. The answer is read from the index on every
-## visit — the pane's own mutations (a save, a create, a rename, a delete, a
-## reference rewrite) all re-index before returning, so there is no cached
-## graph to go stale; the view keeps only its session geometry.
+## Open the link graph: start building it, off the frame.
+##
+## The answer is read from the index on every visit — the pane's own mutations
+## (a save, a create, a rename, a delete, a reference rewrite) all re-index
+## before returning, so there is no cached graph to go stale; the view keeps
+## only its session geometry.
+##
+## The index query, the model and the deterministic layout all scale with the
+## vault, and they used to run on the frame that pressed Graph or sent
+## `pane-view --graph` — so every pane stalled for the query's duration and a
+## large vault could outlast the caller's timeout. They now run as one
+## WorkerThreadPool task; this call returns once the task is queued and
+## `graph_built` reports the outcome on the frame the canvas goes up.
 ##
 ## Opening the graph does not disturb the open note: the buffer stays alive
 ## (and dirty) behind the canvas, so Back and a node click route through the
 ## same leave guard every other navigation uses, and a dirty buffer can never
 ## be replaced without its answer.
-func _show_graph() -> void:
+##
+## Returns "" when the build started, or when one is already in flight (its
+## result answers this request too — the answer is the index's, not this
+## caller's), otherwise the reason the vault cannot be drawn, which is also on
+## the pane's placeholder.
+func request_graph(take_focus := false) -> String:
 	var problem := _vault_problem()
 	if problem != "":
 		_show_placeholder(problem, false)
-		return
+		return problem
 	# A search still waiting on its debounce must not pull the pane back to
 	# the list after the graph has been opened.
 	_search_timer.stop()
-	var answer = JSON.parse_string(str(GptyTerminal.vault_graph(_vault_root)))
-	var graph := VaultGraphModel.parse(answer, LinkWeightsStore.vault_weights(_vault_root))
-	if not bool(graph["ok"]):
-		_show_placeholder("Vault graph failed: " + _shown_path(str(graph["error"])))
+	_graph_wanted = true
+	if take_focus:
+		_graph_focus_pending = true
+	if _graph_task == -1:
+		_start_graph_task()
+	return ""
+
+## Queue one build for the vault the pane shows now.
+##
+## The view's positions and the authored weights are read here, on the main
+## thread: the geometry is the view's session state and `LinkWeightsStore` is
+## an autoload a worker must not touch. Both are copied in, so the task needs
+## no access to the scene tree.
+func _start_graph_task() -> void:
+	var out: Array = []
+	_graph_build_out = out
+	var weights: Dictionary = LinkWeightsStore.vault_weights(_vault_root)
+	var prepared: Dictionary = _graph_view.positions if _graph_view != null else {}
+	_graph_task = WorkerThreadPool.add_task(
+		WikiPane._build_graph_document.bind(_vault_root, weights, prepared, out),
+		true, "gpty wiki graph")
+	set_process(true)
+
+## One graph build, on a worker thread: the index query, the model, the layout.
+##
+## Touches no node and no autoload — its inputs were copied on the main thread
+## and its one output slot is written once, before the task reports complete
+## (which is what makes the read in `_poll_graph_build` synchronized).
+## `GptyTerminal.vault_graph` is a static method over SQLite with no engine
+## state, and `VaultGraphModel` is pure GDScript, so both are safe off the main
+## thread.
+static func _build_graph_document(
+		root: String, weights: Dictionary, prepared: Dictionary, out: Array) -> void:
+	var answer = JSON.parse_string(str(GptyTerminal.vault_graph(root)))
+	var graph := VaultGraphModel.parse(answer, weights)
+	var positions := {}
+	if bool(graph["ok"]):
+		positions = VaultGraphModel.layout(graph["nodes"], graph["edges"], prepared)
+	out.append({"root": root, "graph": graph, "positions": positions})
+
+## Reap the build once the pool reports it done, and apply it.
+##
+## A stale result is dropped rather than drawn: the pane may have switched
+## vaults while the task ran, and a cancelled build's result must never
+## resurrect a canvas the user left. `_graph_wanted` and the root check are the
+## two ways a result can be stale; a wanted graph whose build read the wrong
+## root is rebuilt here, so the pane still ends up where the user asked.
+func _poll_graph_build() -> void:
+	if _graph_task == -1:
+		set_process(false)
 		return
-	# Lazy cleanup of declarations whose endpoints left the vault. A truncated
-	# answer must not prune: the edges it does not name are still real, and
-	# deleting their authored weights would be unrecoverable.
+	if not WorkerThreadPool.is_task_completed(_graph_task):
+		return
+	WorkerThreadPool.wait_for_task_completion(_graph_task)
+	_graph_task = -1
+	var built: Dictionary = _graph_build_out[0] if _graph_build_out.size() == 1 else {}
+	_graph_build_out = []
+	if not _graph_wanted:
+		return
+	if str(built.get("root", "")) != _vault_root:
+		_start_graph_task()
+		return
+	_apply_graph_build(built)
+
+## Show the built graph, or say why it is not there.
+##
+## Lazy cleanup of declarations whose endpoints left the vault runs here, on
+## the main thread, before the canvas is shown. A truncated answer must not
+## prune: the edges it does not name are still real, and deleting their
+## authored weights would be unrecoverable.
+func _apply_graph_build(built: Dictionary) -> void:
+	_graph_wanted = false
+	var take_focus := _graph_focus_pending
+	_graph_focus_pending = false
+	var graph: Dictionary = built.get("graph", {})
+	if not bool(graph.get("ok", false)):
+		var why := "Vault graph failed: " + _shown_path(str(graph.get("error", "")))
+		_show_placeholder(why)
+		graph_built.emit(false, why)
+		return
 	if not bool(graph["truncated"]):
 		var known := {}
 		for node in graph["nodes"]:
 			if node is Dictionary and not bool(node.get("ghost", false)):
 				known[str(node.get("id", ""))] = true
 		LinkWeightsStore.prune(_vault_root, known)
+	_show_graph_canvas(graph, built.get("positions", {}))
+	if take_focus:
+		_graph_view.grab_focus()
+	graph_built.emit(true, "")
+
+## Replace the content area with the link canvas.
+func _show_graph_canvas(graph: Dictionary, positions: Dictionary) -> void:
 	_list.visible = false
 	_footer.visible = false
 	_note_box.visible = false
@@ -734,21 +852,38 @@ func _show_graph() -> void:
 	_graph_button.visible = true
 	_back.visible = true
 	_graph_view.visible = true
-	_graph_view.show_graph(graph, _current_rel)
+	_graph_view.show_graph(graph, _current_rel, positions)
 
-## The pane's `pane-view` surface: the same three things the pane chrome does,
-## for a caller that cannot click - open the link graph (the Graph button),
-## open a note (a list click), change the note view mode (the mode buttons).
+## Every surface that takes the pane off the canvas goes through here, so a
+## build that is still running cannot land on top of what the user chose
+## instead: the pending flag clears (the result is dropped at
+## `_poll_graph_build`) and the caller that asked for the graph through
+## `pane-view --graph` is answered with the reason the canvas did not come up.
+func _hide_graph() -> void:
+	if _graph_view == null:
+		return
+	_graph_view.visible = false
+	if not _graph_wanted:
+		return
+	_graph_wanted = false
+	_graph_focus_pending = false
+	graph_built.emit(false, "The pane left the link graph before it was built")
+
+## The pane's `pane-view` surface, the two gestures that land in one frame:
+## open a note (a list click) and change the note view mode (the mode buttons).
 ##
-## `request` carries only what the IPC edge already validated: `graph` (bool),
-## `note` (vault-relative path) and `mode` (one of `VIEW_MODES`), and a missing
-## key means "leave it alone", which is what lets one path serve three
-## gestures. Returns "" when the request landed, or the reason it did not, so
-## the caller learns the outcome instead of a blanket ack.
+## `request` carries only what the IPC edge already validated: `note`
+## (vault-relative path) and `mode` (one of `VIEW_MODES`), and a missing key
+## means "leave it alone". Returns "" when the request landed, or the reason it
+## did not, so the caller learns the outcome instead of a blanket ack.
 ##
-## Order is note, mode, graph: a note must be chosen before its mode matters,
-## and the graph comes last because opening a note clears it - `--note a.md
-## --graph` therefore selects what the graph's Back returns to.
+## The third gesture — the link graph — is [method request_graph]: it builds on
+## a worker thread, so it cannot land here, and `pane-view --graph` applies it
+## after this returns and answers when the canvas is up.
+##
+## Order is note then mode: a note must be chosen before its mode matters, and
+## `--note a.md --graph` selects the note the graph's Back returns to because
+## the graph is applied last.
 func apply_view(request: Dictionary) -> String:
 	var note := str(request.get("note", ""))
 	if note != "":
@@ -766,15 +901,6 @@ func apply_view(request: Dictionary) -> String:
 	if mode != "" and mode != view_mode:
 		view_mode = mode
 		_apply_view_mode()
-	if bool(request.get("graph", false)):
-		var graph_problem := _vault_problem()
-		if graph_problem != "":
-			return graph_problem
-		_show_graph()
-		# The graph is shown synchronously or the pane has put the reason on
-		# its placeholder instead; either way the canvas is the truth.
-		if _graph_view == null or not _graph_view.visible:
-			return "The link graph could not be built for this vault"
 	return ""
 
 ## What the pane is showing, read back after a request rather than echoed, so
@@ -1850,9 +1976,11 @@ func _get_layout_state() -> Dictionary:
 	state.merge({
 		"vault_path": vault_path, "view_mode": view_mode,
 		# Where the user left off: the open note and the graph. Unsaved text is
-		# not part of this (the recovery copy covers a crash).
+		# not part of this (the recovery copy covers a crash). A graph that is
+		# still building counts as asked-for: a save in the frame after a
+		# restore must not record the canvas as closed.
 		"open_note": _current_rel,
-		"graph": _graph_view != null and _graph_view.visible,
+		"graph": _graph_wanted or (_graph_view != null and _graph_view.visible),
 	})
 	return state
 

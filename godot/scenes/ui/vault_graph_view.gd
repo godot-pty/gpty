@@ -130,7 +130,11 @@ func _ready() -> void:
 ## the graph). The first call fits the graph to the view; later calls keep the
 ## user's pan/zoom, because a re-query is often the same graph with one note
 ## added.
-func show_graph(data: Dictionary, current_id := "") -> void:
+##
+## `prepared_positions` is the arrangement a caller already computed off the
+## frame (the wiki pane's build task); an empty dictionary — including an empty
+## graph — lays the graph out here, which is what every other caller does.
+func show_graph(data: Dictionary, current_id := "", prepared_positions := {}) -> void:
 	nodes = data.get("nodes", []) if data.get("nodes") is Array else []
 	edges = data.get("edges", []) if data.get("edges") is Array else []
 	_truncated = bool(data.get("truncated", false))
@@ -145,7 +149,11 @@ func show_graph(data: Dictionary, current_id := "") -> void:
 	_a11y_cursor = ""
 	var first_show := positions.is_empty()
 	var previous := positions
-	positions = VaultGraphModel.layout(nodes, edges, previous)
+	positions = (
+		prepared_positions
+		if prepared_positions is Dictionary and not prepared_positions.is_empty()
+		else VaultGraphModel.layout(nodes, edges, previous)
+	)
 	_degrees = VaultGraphModel.degrees(edges)
 	_max_degree = 1
 	for id in _degrees:

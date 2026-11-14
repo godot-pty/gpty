@@ -357,7 +357,7 @@ mod tests {
     /// The other half of that vocabulary: the arms of
     /// `WorkspaceIpcHandlers.handle`, plus the methods
     /// `WorkspaceIpcHandlers.dispatch_request` intercepts before dispatch
-    /// (`paneWait` and `pluginInstall`, whose answers land later).
+    /// (`paneWait`, `pluginInstall` and `paneView`, whose answers land later).
     const IPC_HANDLERS_SRC: &str =
         include_str!("../../../../godot/scenes/terminal/ipc_handlers.gd");
 

@@ -324,10 +324,10 @@ mod tests {
     use super::*;
 
     /// The GDScript half of the vocabulary: the dispatch arms in
-    /// `WorkspaceIpcHandlers.handle`, plus the two methods
+    /// `WorkspaceIpcHandlers.handle`, plus the methods
     /// `WorkspaceIpcHandlers.dispatch_request` intercepts before it reaches
-    /// `handle` (`paneWait` and `pluginInstall`, whose answers land frames or a
-    /// dialog later).
+    /// `handle` (`paneWait`, `pluginInstall` and `paneView`, whose answers land
+    /// frames, a dialog or a worker-thread build later).
     const IPC_HANDLERS_SRC: &str =
         include_str!("../../../../godot/scenes/terminal/ipc_handlers.gd");
     /// The vault pair's handlers are native Rust (the walk and SQLite run on
@@ -375,10 +375,11 @@ mod tests {
 
     /// The `params.get("…")` keys a method's body reads.
     ///
-    /// The arms sit at two tabs; a block ends at the next arm. `paneWait` and
-    /// `pluginInstall` are intercepted before the match (a `\tif method ==`
-    /// branch at one tab inside `dispatch_request`), so their bodies are read
-    /// from there, and the vault pair's native handlers from their own module.
+    /// The arms sit at two tabs; a block ends at the next arm. `paneWait`,
+    /// `pluginInstall` and `paneView` are intercepted before the match (a
+    /// `\tif method ==` branch at one tab inside `dispatch_request`), so their
+    /// bodies are read from there, and the vault pair's native handlers from
+    /// their own module.
     fn handler_param_keys(method: &str) -> BTreeSet<String> {
         let arm = format!("\t\t\"{method}\":");
         if let Some(at) = IPC_HANDLERS_SRC.find(&arm) {

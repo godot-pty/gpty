@@ -280,6 +280,14 @@ func _dispatch_and_settle(req: Dictionary) -> Array:
 	await _settle_pane_starts()
 	return answers
 
+
+## Wait out a held `paneView --graph` answer: the pane builds on its own frames
+## and the answer leaves through `send_ipc_answer` when the canvas lands.
+func _settle_graph_answers() -> void:
+	var deadline := Time.get_ticks_msec() + START_SETTLE_TIMEOUT_MS
+	while not _ws._pending_graph_answers.is_empty() and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+
 ## The pane's text, once it holds `marker` (or when the deadline passes).
 func _read_until(pane_id: String, marker: String) -> String:
 	var text := ""
@@ -917,27 +925,98 @@ func _wiki_pane() -> Control:
 	assert_not_null(body, "a wiki pane must spawn on a real vault")
 	return body
 
-## The three gestures one path serves, applied in the order `apply_view`
-## documents: note, mode, graph - so a call naming both a note and the graph
-## selects the note the graph's Back returns to.
+## The three gestures one path serves, applied in the order the handler
+## documents: note and mode in the batch, then the graph — whose answer waits
+## for the canvas — so a call naming both selects the note the graph's Back
+## returns to.
 func test_pane_view_opens_the_graph_then_a_note():
 	var wiki := _wiki_pane()
 	var id := str(wiki.attachment_id)
+	_sent.clear()
 
-	var graph = WorkspaceIpcHandlers.handle(_ws, "paneView", {"pane_id": id, "graph": true})
-	assert_true(graph.get("success", false), "the link graph must open: %s" % graph)
+	var answers = WorkspaceIpcHandlers.dispatch_request(_ws, {
+		"id": 61,
+		"method": "paneView",
+		"params": JSON.stringify({"pane_id": id, "graph": true}),
+		"timeout_ms": 5000,
+	})
+	assert_eq(answers, [], "the graph answer waits for the canvas")
+	assert_true(_ws._pending_graph_answers.has(61), "the request must be booked")
+	await _settle_graph_answers()
+
+	assert_eq(_sent.size(), 1, "a landed canvas answers the request once")
+	var graph: Dictionary = JSON.parse_string(str(_sent[0]["payload"]))
+	assert_true(bool(_sent[0]["ok"]), "the answer must be a success: %s" % graph)
+	assert_true(bool(graph.get("success", false)), "the batch envelope's success flag")
 	assert_true(bool(graph.get("graph", false)), "the answer must report the canvas that is up")
-	assert_true(wiki._graph_view.visible, "the pane must be showing the graph")
 	assert_eq(str(graph.get("view_mode", "")), "split", "the answer reports the drawn mode")
+	assert_true(wiki._graph_view.visible, "the pane must be showing the graph")
 
-	var note = WorkspaceIpcHandlers.handle(
-		_ws, "paneView", {"pane_id": id, "note": "note.md", "mode": "preview"})
-	assert_true(note.get("success", false), "a note must open: %s" % note)
+	var note = WorkspaceIpcHandlers.dispatch_request(_ws, {
+		"id": 62,
+		"method": "paneView",
+		"params": JSON.stringify({"pane_id": id, "note": "note.md", "mode": "preview"}),
+		"timeout_ms": 5000,
+	})
+	assert_eq(note.size(), 1, "a note and a mode land in the same frame")
+	assert_true(bool(note[0]["success"]), "a note must open: %s" % note[0]["payload"])
 	assert_false(wiki._graph_view.visible, "opening a note leaves the graph")
-	assert_eq(str(note.get("note", "")), "note.md", "the answer names the note that opened")
-	assert_eq(str(note.get("view_mode", "")), "preview")
+	assert_eq(str(note[0]["payload"].get("note", "")), "note.md",
+		"the answer names the note that opened")
+	assert_eq(str(note[0]["payload"].get("view_mode", "")), "preview")
 	assert_eq(wiki.view_mode, "preview", "the pane holds the mode the answer names")
 	_ws._kill_now(wiki)
+
+
+## A person pressing Back in the frame the build started: the held answer must
+## say the canvas did not come up rather than report a view the pane left.
+func test_a_graph_request_is_refused_when_the_pane_left_the_graph():
+	var wiki := _wiki_pane()
+	var id := str(wiki.attachment_id)
+	_sent.clear()
+
+	var answers = WorkspaceIpcHandlers.dispatch_request(_ws, {
+		"id": 63,
+		"method": "paneView",
+		"params": JSON.stringify({"pane_id": id, "graph": true}),
+		"timeout_ms": 5000,
+	})
+	assert_eq(answers, [], "the answer is held")
+	wiki._show_list()
+	await _settle_graph_answers()
+
+	assert_eq(_sent.size(), 1, "the left graph answers the request")
+	assert_false(bool(_sent[0]["ok"]))
+	var refusal: Dictionary = JSON.parse_string(str(_sent[0]["payload"]))
+	assert_eq(int(refusal.get("code", 0)), -32000, "app state, not a bad parameter")
+	assert_string_contains(str(refusal.get("message", "")), "left the link graph")
+	assert_false(wiki._graph_view.visible, "the canvas must not come back")
+	_ws._kill_now(wiki)
+
+
+## A build that outlives its request's read: the sweep answers with a retry
+## sentence instead of letting the Rust edge's generic timeout fire.
+func test_a_graph_request_is_answered_before_its_own_deadline():
+	var wiki := _wiki_pane()
+	var id := str(wiki.attachment_id)
+	_sent.clear()
+
+	var answers = WorkspaceIpcHandlers.dispatch_request(_ws, {
+		"id": 64,
+		"method": "paneView",
+		"params": JSON.stringify({"pane_id": id, "graph": true}),
+		"timeout_ms": 1,
+	})
+	assert_eq(answers, [], "the answer is held")
+	await _settle_graph_answers()
+
+	assert_eq(_sent.size(), 1, "the sweep answers exactly once")
+	assert_false(bool(_sent[0]["ok"]))
+	var refusal: Dictionary = JSON.parse_string(str(_sent[0]["payload"]))
+	assert_eq(int(refusal.get("code", 0)), -32000)
+	assert_string_contains(str(refusal.get("message", "")), "still being built")
+	_ws._kill_now(wiki)
+
 
 ## The guard `killPane` and `layoutLoad` already apply: a caller cannot answer
 ## the save/discard question, so the swap is refused rather than asked - and a
@@ -945,17 +1024,29 @@ func test_pane_view_opens_the_graph_then_a_note():
 func test_pane_view_refuses_to_replace_an_unsaved_note():
 	var wiki := _wiki_pane()
 	var id := str(wiki.attachment_id)
-	var opened = WorkspaceIpcHandlers.handle(_ws, "paneView", {"pane_id": id, "note": "note.md"})
-	assert_true(opened.get("success", false), "the first note must open")
+	var opened = WorkspaceIpcHandlers.dispatch_request(_ws, {
+		"id": 65,
+		"method": "paneView",
+		"params": JSON.stringify({"pane_id": id, "note": "note.md"}),
+		"timeout_ms": 5000,
+	})
+	assert_eq(opened.size(), 1, "a note-only request answers in the batch")
+	assert_true(bool(opened[0]["success"]), "the first note must open")
 
 	wiki._editor.text = str(wiki._editor.text) + "\nmore\n"
 	await get_tree().process_frame
 	assert_true(wiki.has_unsaved_state(), "typing must mark the note dirty")
 
-	var refused = WorkspaceIpcHandlers.handle(_ws, "paneView", {"pane_id": id, "note": "index.md"})
-	assert_true(refused.has("error"), "an unsaved buffer must refuse the swap")
-	assert_eq(int(refused["error"]["code"]), -32000, "app state, not a bad parameter")
-	assert_string_contains(str(refused["error"]["message"]), "unsaved changes")
+	var refused = WorkspaceIpcHandlers.dispatch_request(_ws, {
+		"id": 66,
+		"method": "paneView",
+		"params": JSON.stringify({"pane_id": id, "note": "index.md"}),
+		"timeout_ms": 5000,
+	})
+	assert_eq(refused.size(), 1, "a refused swap answers in the batch")
+	assert_false(bool(refused[0]["success"]), "an unsaved buffer must refuse the swap")
+	assert_eq(int(refused[0]["payload"].get("code", 0)), -32000, "app state, not a bad parameter")
+	assert_string_contains(str(refused[0]["payload"].get("message", "")), "unsaved changes")
 	assert_eq(wiki._current_rel, "note.md", "the refused swap must not change the open note")
 
 	# Leave it clean: a dirty buffer would keep a recovery copy and a close

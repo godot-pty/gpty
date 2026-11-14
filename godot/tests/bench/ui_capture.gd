@@ -727,8 +727,17 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 				_fail("the wiki pane has no Graph button")
 				return false
 			await _click(graph_button)
-			await _wait_frames(3)
+			# The graph is queried, modelled and laid out on a worker thread:
+			# the canvas arrives when the pane's poll sees the task done, which
+			# under `--disable-vsync` can be many cheap frames later. Wait on
+			# the task with a wall-clock budget rather than a frame count.
 			var graph: Node = _find_script(wiki, "res://scenes/ui/vault_graph_view.gd")
+			var body = _workspace._tm._find_body(_workspace._tm.tiles[0].wrapper)
+			var deadline := Time.get_ticks_msec() + 10000
+			while body._graph_task != -1 and Time.get_ticks_msec() < deadline:
+				await _wait_frames(1)
+			await _wait_frames(1)
+			graph = _find_script(wiki, "res://scenes/ui/vault_graph_view.gd")
 			if graph == null or not (graph as Control).visible:
 				_fail("clicking Graph did not show the link graph")
 				return false

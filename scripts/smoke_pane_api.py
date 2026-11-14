@@ -1043,6 +1043,10 @@ class Smoke:
     PLUGIN_REVISION = "0123456789abcdef0123456789abcdef01234567"
     PLUGIN_PROFILE = "Smoke Layout"
     PLUGIN_TILE_ID = "smoke-tile"
+    # The built-in profile whose tile is a wiki pane on the bundled vault
+    # (`@knowledge`): the only vault the socket can reach without a pane-setting
+    # write, and what the `pane-view --graph` step draws.
+    KNOWLEDGE_PROFILE = "Knowledge Base"
     # The plugin's concept: the record carries it, the static FFI shapes it,
     # and ConceptManager merges it into the set the engine matches with — all
     # proven live below on whichever platform runs the smoke. Its trigger
@@ -1983,6 +1987,37 @@ def main() -> int:
             any(e.get("type") == "pane" and e.get("event") == "killed" for e in killed),
             "eventsPoll must deliver the pane killed event",
             killed[:3],
+        )
+
+        # ── pane-view --graph: the deferred answer, on a real vault ────
+        # The graph is queried, modelled and laid out on a worker thread, so the
+        # GUI answers the socket request when the canvas lands instead of from
+        # inside the drain loop. The Knowledge Base profile is a real vault
+        # (`@knowledge`), which is what the graph needs to have anything to
+        # draw. Loading it replaces the active workspace, so this runs after
+        # every step that holds a pane id from the earlier ones (`kill-pane`
+        # above kills the `new-pane` section's pane by that id).
+        smoke.enter("pane-view graph")
+        smoke.result(
+            smoke.cli("layout", "load", smoke.KNOWLEDGE_PROFILE, "--json"),
+            "layout load (knowledge base)",
+        )
+        kb_panes = smoke.result(
+            smoke.cli("list-panes", "--json"), "list-panes (knowledge)"
+        ).get("panes", [])
+        kb_wiki = next((p for p in kb_panes if p.get("type") == "wiki"), None)
+        smoke.require(
+            kb_wiki is not None,
+            "the Knowledge Base profile must open a wiki pane",
+            kb_panes,
+        )
+        kb_graphed = smoke.result(
+            smoke.cli("pane-view", kb_wiki["id"], "--graph", "--json"), "pane-view --graph"
+        )
+        smoke.require(
+            kb_graphed.get("graph") is True,
+            "pane-view --graph must answer with the canvas it opened",
+            kb_graphed,
         )
 
         # ── profiles provided by an installed plugin ──────────────────

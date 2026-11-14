@@ -74,6 +74,22 @@ func _make_pane(vault: String) -> WikiPane:
 	return pane
 
 
+## Wait for the graph build to land: the query, the model and the layout run on
+## a worker thread, so a test that wants the canvas has to let the pane's own
+## poll run.
+func _settle_graph(pane: WikiPane) -> void:
+	var deadline := Time.get_ticks_msec() + 10000
+	while pane._graph_task != -1 and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	assert_eq(pane._graph_task, -1, "the graph build must land")
+
+
+## Ask for the graph and wait for it.
+func _open_graph(pane: WikiPane) -> void:
+	assert_eq(pane.request_graph(), "", "this vault must accept a graph build")
+	await _settle_graph(pane)
+
+
 func _list_texts(pane: WikiPane) -> Array:
 	var out := []
 	for i in pane._list.item_count:
@@ -698,9 +714,12 @@ func test_layout_state_carries_the_open_note_and_graph():
 	assert_eq(state.get("open_note"), "note.md")
 	assert_false(bool(state.get("graph")))
 
-	pane._show_graph()
+	# The pending build is the user's answer too: a save in the frame after
+	# the request must not record the canvas as closed.
+	pane.request_graph()
 	state = pane._get_layout_state()
 	assert_true(bool(state.get("graph")))
+	await _settle_graph(pane)
 
 
 func test_a_layout_reopens_the_note_and_the_graph():
@@ -716,6 +735,10 @@ func test_a_layout_reopens_the_note_and_the_graph():
 	var graphed := WikiPane.new()
 	graphed.apply_settings({"vault_path": _tmp, "graph": true})
 	add_child_autofree(graphed)
+	# The graph is built off the frame, so the restore request is what is true
+	# at once; the canvas follows when the build lands.
+	assert_true(graphed._graph_wanted, "the saved graph view must be requested")
+	await _settle_graph(graphed)
 	assert_true(graphed._graph_view.visible, "the saved graph view is showing")
 
 
@@ -1553,7 +1576,7 @@ func test_graph_shows_notes_links_and_unresolved_targets():
 	_seed_linked_vault()
 	var pane := _make_pane(_tmp)
 
-	pane._show_graph()
+	await _open_graph(pane)
 	assert_true(pane._graph_view.visible)
 	assert_false(pane._list.visible)
 	assert_false(pane._note_box.visible)
@@ -1576,7 +1599,7 @@ func test_graph_click_opens_the_note():
 	_seed_linked_vault()
 	var pane := _make_pane(_tmp)
 
-	pane._show_graph()
+	await _open_graph(pane)
 	pane._graph_view.node_activated.emit("b.md")
 	assert_eq(pane._current_rel, "b.md")
 	assert_true(pane._note_box.visible)
@@ -1589,7 +1612,7 @@ func test_graph_click_asks_before_replacing_a_dirty_note():
 	pane._list.item_activated.emit(0)
 	await _type_into(pane, "# Unsaved\n")
 
-	pane._show_graph()
+	await _open_graph(pane)
 	pane._graph_view.node_activated.emit("b.md")
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "a click must not discard the buffer")
@@ -1607,7 +1630,7 @@ func test_the_graph_is_requeried_after_a_save():
 	await _type_into(pane, "# A\n\n[[later]]\n")
 	pane._save()
 
-	pane._show_graph()
+	await _open_graph(pane)
 	assert_has(_graph_ids(pane), "ghost:later",
 		"the save re-indexed, so the graph reads the new edge")
 
@@ -1616,7 +1639,7 @@ func test_graph_back_returns_to_the_list():
 	_seed_linked_vault()
 	var pane := _make_pane(_tmp)
 
-	pane._show_graph()
+	await _open_graph(pane)
 	pane._back.pressed.emit()
 	assert_true(pane._list.visible)
 	assert_false(pane._graph_view.visible)
@@ -1626,7 +1649,7 @@ func test_graph_ghost_click_offers_to_create_the_missing_note():
 	_seed_linked_vault()
 	var pane := _make_pane(_tmp)
 
-	pane._show_graph()
+	await _open_graph(pane)
 	pane._graph_view.ghost_activated.emit("Missing")
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "a missing target offers the create-from-link verb")
@@ -1637,6 +1660,89 @@ func test_a_vault_that_cannot_be_opened_hides_the_graph_entry():
 	var pane := _make_pane(_tmp.path_join("not-a-vault"))
 	assert_false(pane._graph_button.visible)
 	assert_false(pane._graph_view.visible)
+
+
+# ── The build is off the frame ─────────────────────────────────────────
+#
+# The index query, the model and the layout scale with the vault (2,000 notes,
+# 10,000 edges per class), so they run on a WorkerThreadPool task: the request
+# returns at once and the canvas arrives on the frame the build lands. A
+# synchronous build would fail every assertion below that the canvas is still
+# down when the request returns.
+
+func test_opening_the_graph_returns_before_the_canvas_is_built():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	var outcomes := []
+	pane.graph_built.connect(func(ok: bool, reason: String):
+		outcomes.append([ok, reason])
+	)
+
+	assert_eq(pane.request_graph(), "", "this vault accepts the request")
+	assert_false(pane._graph_view.visible,
+		"the frame that asks for the graph must not build it")
+	assert_true(pane._graph_wanted, "the build is on its way")
+	assert_eq(outcomes.size(), 0, "nothing lands before the poll runs")
+
+	await _settle_graph(pane)
+	assert_true(pane._graph_view.visible, "the canvas comes up when the build lands")
+	assert_has(_graph_ids(pane), "a.md")
+	assert_has(_graph_ids(pane), "b.md")
+	assert_eq(outcomes.size(), 1, "one build, one outcome")
+	assert_true(bool(outcomes[0][0]), "the outcome is a landed canvas")
+	assert_eq(str(outcomes[0][1]), "", "with no reason attached")
+
+
+func test_leaving_the_graph_before_it_lands_keeps_the_canvas_down():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	var pane := _make_pane(_tmp)
+	var outcomes := []
+	pane.graph_built.connect(func(ok: bool, reason: String):
+		outcomes.append([ok, reason])
+	)
+
+	assert_eq(pane.request_graph(), "")
+	# A person pressing Back in the frame the build started: the result must
+	# not resurrect the canvas over the list they asked for.
+	pane._show_list()
+	await _settle_graph(pane)
+
+	assert_false(pane._graph_view.visible, "the build must not override the list")
+	assert_true(pane._list.visible)
+	assert_eq(outcomes.size(), 1, "the request is answered once")
+	assert_false(bool(outcomes[0][0]))
+	assert_string_contains(str(outcomes[0][1]), "left the link graph")
+
+
+func test_a_build_that_lands_after_a_vault_change_is_rebuilt_for_the_new_vault():
+	_write(_tmp.path_join("a.md"), "# A\n")
+	var other := TestPaths.user_path("wiki_graph_other_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(other)
+	_write(other.path_join("other.md"), "# Other\n")
+	var pane := _make_pane(_tmp)
+
+	assert_eq(pane.request_graph(), "")
+	pane.apply_settings({"vault_path": other})
+	assert_eq(pane.request_graph(), "")
+	await _settle_graph(pane)
+
+	assert_true(pane._graph_view.visible, "the second request still brings a canvas up")
+	var ids := _graph_ids(pane)
+	assert_has(ids, "other.md", "the canvas is the new vault's graph")
+	assert_false(ids.has("a.md"), "the old vault's build must be dropped")
+	_remove_tree(other)
+
+
+func test_a_dragged_node_keeps_its_place_across_a_build():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	await _open_graph(pane)
+
+	pane._graph_view.positions["a.md"] = Vector2(11, 22)
+	await _open_graph(pane)
+
+	assert_eq(pane._graph_view.positions.get("a.md"), Vector2(11, 22),
+		"the pane hands the view's geometry to the build, so a drag survives")
 
 
 # ── Declared edge weights (the authored layer) ─────────────────────────
@@ -1653,13 +1759,13 @@ func test_a_declared_weight_reaches_the_graph_and_survives_a_requery():
 	var pane := _make_pane(_tmp)
 	LinkWeightsStore.set_pair(_tmp, "a.md", "b.md", 33)
 
-	pane._show_graph()
+	await _open_graph(pane)
 	var edge := _edge_in_graph(pane, "a.md", "b.md")
 	assert_eq(int(edge["declared"]), 33)
 	assert_eq(int(edge["weight"]), 33)
 	assert_eq(int(edge["count"]), 3, "the measured mentions are still there")
 
-	pane._show_graph()
+	await _open_graph(pane)
 	assert_eq(int(_edge_in_graph(pane, "a.md", "b.md")["declared"]), 33,
 		"a re-query re-applies the authored layer")
 
@@ -1667,7 +1773,7 @@ func test_a_declared_weight_reaches_the_graph_and_survives_a_requery():
 func test_the_graph_set_control_writes_both_directions_and_clears_them():
 	_seed_linked_vault()
 	var pane := _make_pane(_tmp)
-	pane._show_graph()
+	await _open_graph(pane)
 
 	pane._set_declared_weight("a.md", "b.md", 21)
 	assert_eq(LinkWeightsStore.weight_of(_tmp, "a.md", "b.md"), 21)
@@ -1696,7 +1802,7 @@ func test_showing_a_complete_graph_prunes_vanished_endpoints():
 	LinkWeightsStore.set_weight(_tmp, "a.md", "b.md", 5)
 	LinkWeightsStore.set_weight(_tmp, "a.md", "gone.md", 5)
 
-	pane._show_graph()
+	await _open_graph(pane)
 	assert_eq(LinkWeightsStore.weight_of(_tmp, "a.md", "b.md"), 5,
 		"a live endpoint keeps its declaration")
 	assert_eq(LinkWeightsStore.weight_of(_tmp, "a.md", "gone.md"), 0,
@@ -1744,7 +1850,7 @@ func test_a_declared_backlink_sorts_first_too():
 func test_the_weight_question_is_one_ask_at_a_time():
 	_seed_linked_vault()
 	var pane := _make_pane(_tmp)
-	pane._show_graph()
+	await _open_graph(pane)
 
 	pane._ask_declared_weight("a.md", "b.md", 0)
 	assert_eq(_dialogs_of(pane).size(), 1)
@@ -1765,6 +1871,7 @@ func test_opening_the_graph_hands_the_keyboard_to_the_canvas():
 	var pane := _make_pane(_tmp)
 
 	pane._graph_button.pressed.emit()
+	await _settle_graph(pane)
 
 	assert_true(pane._graph_view.visible, "the map is up")
 	assert_eq(pane.get_viewport().gui_get_focus_owner(), pane._graph_view,
@@ -1776,7 +1883,7 @@ func test_opening_the_graph_hands_the_keyboard_to_the_canvas():
 func test_escape_from_the_graph_canvas_returns_to_the_list():
 	_write(_tmp.path_join("note.md"), "# Note\n")
 	var pane := _make_pane(_tmp)
-	pane._show_graph()
+	await _open_graph(pane)
 	pane._graph_view.grab_focus()
 
 	await _escape()

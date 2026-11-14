@@ -107,6 +107,7 @@ godot/
         ├── helpers/             # Shared fixtures (ShellFixtures, MockAutoloads)
         └── bench/               # Cost and capture drivers
             ├── draw_bench.gd    # Terminal renderer cost
+            ├── graph_bench.gd   # Wiki link-graph cost: on-frame stall vs worker build
             ├── markdown_bench.gd
             ├── reasoning_bench.gd
             ├── spawn_bench.gd   # Pane-spawn cost: per-call latency as the grid fills

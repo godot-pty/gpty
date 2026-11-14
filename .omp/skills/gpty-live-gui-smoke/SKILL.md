@@ -189,3 +189,9 @@ later one 63-75 ms).
   milestone, plus one attribution line per whole-window pass; run it before and after a
   create-path change. Under `--headless` a `-s` root is 64x64 and no child starts, which the run
   fails on rather than printing numbers.
+- `godot --headless --path godot -s res://tests/bench/graph_bench.gd` — the wiki link graph's cost
+  (`BENCH_NOTES`, default 600, and `BENCH_LINKS`, default 5). It prints `query_us`/`parse_us`/
+  `layout_us` and their sum `old_stall_us` (the work one frame used to do), `request_us` (what
+  asking for the graph costs the frame now that the build is a `WorkerThreadPool` task),
+  `landed_ms` (request to canvas) and a warm pass. It seeds a scratch vault under the temp dir and
+  removes it.
