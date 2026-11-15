@@ -516,3 +516,38 @@ func test_the_shipped_builtins_are_program_free():
 			for key in ["command", "shell", "shell_args"]:
 				assert_false(settings.has(key),
 					"\"%s\" must not carry a spawn plan (%s)" % [profile.get("name", ""), key])
+
+## The three ids are one contract: the Reasoning tile must follow a terminal
+## that exists in the same profile, and the Inspector must inherit its
+## backend rather than pin one. A rename of one id and not the others leaves
+## a Reasoning pane watching nothing, which no other test would see.
+func test_the_agent_workspace_reasoning_tile_follows_its_terminal():
+	var workspace_profile := {}
+	for profile in _default_profiles():
+		if profile is Dictionary and profile.get("name", "") == "Agent Workspace":
+			workspace_profile = profile
+			break
+	assert_false(workspace_profile.is_empty(), "Agent Workspace must ship")
+	var terminal_ids := {}
+	var follower_ids: Array[String] = []
+	for tile in workspace_profile.get("tiles", []):
+		if not (tile is Dictionary):
+			continue
+		var settings: Dictionary = tile.get("settings", {})
+		match str(settings.get("type", "")):
+			"terminal":
+				terminal_ids[str(settings.get("attachment_id", ""))] = true
+			"reasoning":
+				follower_ids.append(str(settings.get("source_attachment_id", "")))
+			"inspector":
+				assert_false(settings.has("backend"),
+					"the Inspector must inherit the pane's default backend")
+	assert_eq(terminal_ids.size(), 1, "exactly one terminal")
+	assert_eq(follower_ids.size(), 1, "exactly one Reasoning pane")
+	for follower in follower_ids:
+		assert_true(terminal_ids.has(follower),
+			"the Reasoning pane must follow the profile's own terminal, got \"%s\"" % follower)
+	assert_eq(terminal_ids.keys()[0], "agent-terminal",
+		"the shipped terminal id is the generic one")
+	assert_eq(follower_ids[0], "agent-terminal",
+		"the shipped Reasoning pane follows it")

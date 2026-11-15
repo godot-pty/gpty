@@ -1,11 +1,11 @@
 extends GutTest
-# Reasoning pane — passive OMP projection; never owns jobs or captures.
+# Reasoning pane — passive agent-event projection; never owns jobs or captures.
 
 var _pane
 
 func before_each():
 	_pane = ReasoningPane.new()
-	_pane.source_attachment_id = "omp-terminal"
+	_pane.source_attachment_id = "agent-terminal"
 	add_child_autofree(_pane)
 	await get_tree().process_frame
 
@@ -21,18 +21,26 @@ func test_pane_type_is_reasoning():
 	assert_eq(_pane._pane_type(), "reasoning")
 	assert_eq(_pane._default_title(), "Reasoning")
 
+## The export default is where a palette-spawned Reasoning pane starts: it
+## follows the shipped built-in's terminal id, not a tool's, so the generic
+## workspace pairs without the user renaming anything.
+func test_default_source_is_the_built_in_agent_terminal():
+	var pane := ReasoningPane.new()
+	assert_eq(pane.source_attachment_id, "agent-terminal")
+	pane.free()
+
 func test_never_accepts_concept_captures():
 	assert_false(_pane.can_receive_content())
 	assert_false(_pane.receive_content("should not start"))
 
 func test_ignores_events_from_other_attachments():
 	_pane.receive_agent_event(_event("session.bound"), "other-terminal")
-	assert_string_contains(_pane._status.text, "Listening for OMP events")
+	assert_string_contains(_pane._status.text, "Listening for agent events")
 	assert_eq(_pane._turns.size(), 0)
 
 func test_projects_reasoning_deltas_from_attached_terminal():
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
-	_pane.receive_agent_event(_event("thinking.delta", {"text": "Inspecting output"}), "omp-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
+	_pane.receive_agent_event(_event("thinking.delta", {"text": "Inspecting output"}), "agent-terminal")
 	await get_tree().create_timer(0.1).timeout
 	assert_eq(_pane._turns.size(), 1)
 	assert_string_contains(_pane._turns[0]["text"], "Inspecting output")
@@ -42,17 +50,17 @@ func test_projects_reasoning_deltas_from_attached_terminal():
 	assert_eq(_pane._status.text, "Reasoning…")
 	assert_false(_pane._fold_at(0).folded)
 
-	_pane.receive_agent_event(_event("agent.settled"), "omp-terminal")
+	_pane.receive_agent_event(_event("agent.settled"), "agent-terminal")
 	assert_eq(_pane._status.text, "Done")
 	assert_eq(_pane._turns[0]["status"], "done")
 	assert_false(_pane._view_at(0).scroll_following)
 
 func test_two_turns_keep_history_in_collapsed_fold():
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
-	_pane.receive_agent_event(_event("thinking.delta", {"text": "first thought"}), "omp-terminal")
-	_pane.receive_agent_event(_event("agent.settled"), "omp-terminal")
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
-	_pane.receive_agent_event(_event("thinking.delta", {"text": "second thought"}), "omp-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
+	_pane.receive_agent_event(_event("thinking.delta", {"text": "first thought"}), "agent-terminal")
+	_pane.receive_agent_event(_event("agent.settled"), "agent-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
+	_pane.receive_agent_event(_event("thinking.delta", {"text": "second thought"}), "agent-terminal")
 	await get_tree().create_timer(0.1).timeout
 
 	assert_eq(_pane._turns.size(), 2)
@@ -68,8 +76,8 @@ func test_two_turns_keep_history_in_collapsed_fold():
 	assert_string_contains(_pane._fold_at(1).title, "Turn 2")
 
 func test_empty_settle_keeps_stub_fold():
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
-	_pane.receive_agent_event(_event("agent.settled"), "omp-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
+	_pane.receive_agent_event(_event("agent.settled"), "agent-terminal")
 	assert_eq(_pane._turns.size(), 1)
 	assert_eq(_pane._turns[0]["status"], "empty")
 	assert_eq(_pane._turns[0]["text"], "")
@@ -78,64 +86,64 @@ func test_empty_settle_keeps_stub_fold():
 	assert_string_contains(_pane._fold_at(0).title, "No reasoning")
 
 func test_new_omp_session_id_clears_folds():
-	_pane.receive_agent_event(_event("session.bound"), "omp-terminal")
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
-	_pane.receive_agent_event(_event("thinking.delta", {"text": "old session"}), "omp-terminal")
+	_pane.receive_agent_event(_event("session.bound"), "agent-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
+	_pane.receive_agent_event(_event("thinking.delta", {"text": "old session"}), "agent-terminal")
 	assert_eq(_pane._turns.size(), 1)
 
-	_pane.receive_agent_event(_event("session.bound", {}, "s2"), "omp-terminal")
+	_pane.receive_agent_event(_event("session.bound", {}, "s2"), "agent-terminal")
 	assert_eq(_pane._turns.size(), 0)
-	assert_eq(_pane._status.text, "Attached to OMP session")
+	assert_eq(_pane._status.text, "Attached to agent session")
 	assert_eq(_pane._turn_list.get_child_count(), 0)
 
 func test_same_session_bound_keeps_folds():
-	_pane.receive_agent_event(_event("session.bound"), "omp-terminal")
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
-	_pane.receive_agent_event(_event("thinking.delta", {"text": "keep me"}), "omp-terminal")
-	_pane.receive_agent_event(_event("session.bound"), "omp-terminal")
+	_pane.receive_agent_event(_event("session.bound"), "agent-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
+	_pane.receive_agent_event(_event("thinking.delta", {"text": "keep me"}), "agent-terminal")
+	_pane.receive_agent_event(_event("session.bound"), "agent-terminal")
 	assert_eq(_pane._turns.size(), 1)
 	assert_eq(_pane._turns[0]["text"], "keep me")
 
 func test_layout_state_omits_turns_and_session_id():
-	_pane.receive_agent_event(_event("session.bound"), "omp-terminal")
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
-	_pane.receive_agent_event(_event("thinking.delta", {"text": "secret thinking"}), "omp-terminal")
+	_pane.receive_agent_event(_event("session.bound"), "agent-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
+	_pane.receive_agent_event(_event("thinking.delta", {"text": "secret thinking"}), "agent-terminal")
 	var state: Dictionary = _pane._get_layout_state()
-	assert_eq(state.get("source_attachment_id"), "omp-terminal")
+	assert_eq(state.get("source_attachment_id"), "agent-terminal")
 	assert_false(state.has("turns"))
 	assert_false(state.has("omp_session_id"))
 	assert_false(JSON.stringify(state).contains("secret thinking"))
 	assert_false(JSON.stringify(state).contains("s1"))
 
 func test_omp_turn_index_events_do_not_relabel_history():
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
-	_pane.receive_agent_event(_event("thinking.delta", {"text": "x"}), "omp-terminal")
-	_pane.receive_agent_event(_event("turn.started", {"turn_index": 42}), "omp-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
+	_pane.receive_agent_event(_event("thinking.delta", {"text": "x"}), "agent-terminal")
+	_pane.receive_agent_event(_event("turn.started", {"turn_index": 42}), "agent-terminal")
 	await get_tree().create_timer(0.05).timeout
 	assert_string_contains(_pane._fold_at(0).title, "Turn 1")
 
 func test_rebind_updates_status_after_shutdown():
-	_pane.receive_agent_event(_event("session.bound", {"emitted_at_ms": 1000}), "omp-terminal")
-	assert_eq(_pane._status.text, "Attached to OMP session")
-	_pane.receive_agent_event(_event("session.shutdown", {"emitted_at_ms": 2000}), "omp-terminal")
-	assert_eq(_pane._status.text, "OMP session ended")
-	_pane.receive_agent_event(_event("session.bound", {"emitted_at_ms": 3000}), "omp-terminal")
-	assert_eq(_pane._status.text, "Attached to OMP session")
+	_pane.receive_agent_event(_event("session.bound", {"emitted_at_ms": 1000}), "agent-terminal")
+	assert_eq(_pane._status.text, "Attached to agent session")
+	_pane.receive_agent_event(_event("session.shutdown", {"emitted_at_ms": 2000}), "agent-terminal")
+	assert_eq(_pane._status.text, "Agent session ended")
+	_pane.receive_agent_event(_event("session.bound", {"emitted_at_ms": 3000}), "agent-terminal")
+	assert_eq(_pane._status.text, "Attached to agent session")
 
 func test_stale_shutdown_after_rebind_is_ignored():
-	_pane.receive_agent_event(_event("session.bound", {"emitted_at_ms": 3000}), "omp-terminal")
-	_pane.receive_agent_event(_event("session.shutdown", {"emitted_at_ms": 1000}), "omp-terminal")
-	assert_eq(_pane._status.text, "Attached to OMP session")
+	_pane.receive_agent_event(_event("session.bound", {"emitted_at_ms": 3000}), "agent-terminal")
+	_pane.receive_agent_event(_event("session.shutdown", {"emitted_at_ms": 1000}), "agent-terminal")
+	assert_eq(_pane._status.text, "Attached to agent session")
 
 func test_repeated_empty_agent_started_reuses_live_turn():
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
 	assert_eq(_pane._turns.size(), 1)
 	assert_string_contains(_pane._fold_at(0).title, "Turn 1")
 
 func test_reasoning_delta_before_agent_started_keeps_text_on_one_turn():
-	_pane.receive_agent_event(_event("thinking.delta", {"text": "early thought"}, "s1", 1), "omp-terminal")
-	_pane.receive_agent_event(_event("agent.started", {}, "s1", 2), "omp-terminal")
+	_pane.receive_agent_event(_event("thinking.delta", {"text": "early thought"}, "s1", 1), "agent-terminal")
+	_pane.receive_agent_event(_event("agent.started", {}, "s1", 2), "agent-terminal")
 	assert_eq(_pane._turns.size(), 1)
 	assert_eq(_pane._turns[0]["text"], "early thought")
 	# Streaming renders are coalesced; the view catches up after the delay.
@@ -143,10 +151,10 @@ func test_reasoning_delta_before_agent_started_keeps_text_on_one_turn():
 	assert_string_contains(_pane._view_at(0).get_parsed_text(), "early thought")
 
 func test_monotonic_seq_envelopes_still_render():
-	_pane.receive_agent_event(_event("session.bound", {}, "s1", 1), "omp-terminal")
-	_pane.receive_agent_event(_event("tool.call", {"tool_name": "bash"}, "s1", 2), "omp-terminal")
-	_pane.receive_agent_event(_event("agent.started", {}, "s1", 3), "omp-terminal")
-	_pane.receive_agent_event(_event("thinking.delta", {"text": "seq path"}, "s1", 4), "omp-terminal")
+	_pane.receive_agent_event(_event("session.bound", {}, "s1", 1), "agent-terminal")
+	_pane.receive_agent_event(_event("tool.call", {"tool_name": "bash"}, "s1", 2), "agent-terminal")
+	_pane.receive_agent_event(_event("agent.started", {}, "s1", 3), "agent-terminal")
+	_pane.receive_agent_event(_event("thinking.delta", {"text": "seq path"}, "s1", 4), "agent-terminal")
 	assert_eq(_pane._turns[0]["text"], "seq path")
 	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.05).timeout
 	assert_string_contains(_pane._view_at(0).get_parsed_text(), "seq path")
@@ -155,9 +163,9 @@ func test_monotonic_seq_envelopes_still_render():
 ## RENDER_DELAY: the old path called render_now per delta, so a fast stream
 ## re-parsed the whole turn (and every other turn) for every token.
 func test_streaming_deltas_render_coalesced():
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
 	for i in 30:
-		_pane.receive_agent_event(_event("thinking.delta", {"text": "chunk-%d " % i}), "omp-terminal")
+		_pane.receive_agent_event(_event("thinking.delta", {"text": "chunk-%d " % i}), "agent-terminal")
 	# The model is complete immediately ...
 	assert_string_contains(_pane._turns[0]["text"], "chunk-29")
 	# ... while the view has not been re-parsed for the burst yet.
@@ -171,18 +179,18 @@ func test_streaming_deltas_render_coalesced():
 ## old `_refresh_turn_layout` re-issued `set_markdown` for every turn on every
 ## delta, which re-rendered the whole accordion (and cleared any selection).
 func test_a_streaming_turn_does_not_re_render_completed_turns():
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
-	_pane.receive_agent_event(_event("thinking.delta", {"text": "first"}), "omp-terminal")
-	_pane.receive_agent_event(_event("agent.settled"), "omp-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
+	_pane.receive_agent_event(_event("thinking.delta", {"text": "first"}), "agent-terminal")
+	_pane.receive_agent_event(_event("agent.settled"), "agent-terminal")
 	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.1).timeout
 
 	var first_view: MarkdownView = _pane._view_at(0)
 	watch_signals(first_view)
 
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
 	for i in 5:
 		_pane.receive_agent_event(
-			_event("thinking.delta", {"text": "second %d " % i}), "omp-terminal")
+			_event("thinking.delta", {"text": "second %d " % i}), "agent-terminal")
 	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.2).timeout
 
 	assert_eq(get_signal_emit_count(first_view, "rendered"), 0,
@@ -193,9 +201,9 @@ func test_a_streaming_turn_does_not_re_render_completed_turns():
 ## Selection is the copy path. A streaming render replaces the body and would
 ## drop it, so the view holds the pending render while text is selected.
 func test_a_selection_survives_a_streaming_render():
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
 	_pane.receive_agent_event(
-		_event("thinking.delta", {"text": "first selection"}), "omp-terminal")
+		_event("thinking.delta", {"text": "first selection"}), "agent-terminal")
 	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.1).timeout
 
 	var view: MarkdownView = _pane._view_at(0)
@@ -220,9 +228,9 @@ func test_a_selection_survives_a_streaming_render():
 ## reason are visible in the turn.
 func test_the_turn_cap_is_visible():
 	_pane.max_turn_bytes = 32
-	_pane.receive_agent_event(_event("agent.started"), "omp-terminal")
+	_pane.receive_agent_event(_event("agent.started"), "agent-terminal")
 	_pane.receive_agent_event(
-		_event("thinking.delta", {"text": "x".repeat(80)}), "omp-terminal")
+		_event("thinking.delta", {"text": "x".repeat(80)}), "agent-terminal")
 	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.1).timeout
 
 	assert_true(_pane._turns[0].get("truncated", false), "the record says it was cut")
@@ -252,16 +260,16 @@ func test_a_live_turn_follows_the_bottom_until_the_user_scrolls_up():
 	host.size = Vector2(420, 320)
 	add_child_autofree(host)
 	var pane := ReasoningPane.new()
-	pane.source_attachment_id = "omp-terminal"
+	pane.source_attachment_id = "agent-terminal"
 	host.add_child(pane)
 	pane.size = Vector2(420, 320)
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	pane.receive_agent_event(_event("agent.started"), "omp-terminal")
+	pane.receive_agent_event(_event("agent.started"), "agent-terminal")
 	for i in 40:
 		pane.receive_agent_event(
-			_event("thinking.delta", {"text": "reasoning line %d\n" % i}), "omp-terminal")
+			_event("thinking.delta", {"text": "reasoning line %d\n" % i}), "agent-terminal")
 	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.35).timeout
 
 	var bar := pane._turn_scroll.get_v_scroll_bar()
@@ -275,7 +283,7 @@ func test_a_live_turn_follows_the_bottom_until_the_user_scrolls_up():
 	assert_false(pane._follow_live, "scrolling up clears follow")
 	for i in 10:
 		pane.receive_agent_event(
-			_event("thinking.delta", {"text": "more %d\n" % i}), "omp-terminal")
+			_event("thinking.delta", {"text": "more %d\n" % i}), "agent-terminal")
 	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.35).timeout
 	assert_eq(bar.value, 0, "a deliberate scroll-up is not overridden")
 
@@ -285,6 +293,6 @@ func test_a_live_turn_follows_the_bottom_until_the_user_scrolls_up():
 	assert_true(pane._follow_live, "scrolling back to the bottom re-arms follow")
 	for i in 10:
 		pane.receive_agent_event(
-			_event("thinking.delta", {"text": "tail %d\n" % i}), "omp-terminal")
+			_event("thinking.delta", {"text": "tail %d\n" % i}), "agent-terminal")
 	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.35).timeout
 	assert_gte(bar.value + bar.page, bar.max_value - 2.0, "it follows again")

@@ -1,7 +1,7 @@
 extends PaneBody
 class_name InspectorPane
 ## Private, tool-free, iterative Q&A. Owns one in-memory GptyAi session.
-## Does not attach to a terminal-hosted OMP conversation.
+## Does not attach to the agent conversation hosted in a terminal.
 
 @export var backend := "omp"
 ## Auto-send is off by default, and a file cannot turn it on (the settings
@@ -45,7 +45,7 @@ func _ready():
 
 	_status = Label.new()
 	_status.name = "Status"
-	_status.text = "Inspector idle — private Q&A, not the terminal OMP session"
+	_status.text = "Inspector idle — private Q&A, not the terminal session"
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	root.add_child(_status)
 
@@ -353,7 +353,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	v.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 
 	var hint = Label.new()
-	hint.text = "Private Q&A. Does not follow the terminal OMP conversation."
+	hint.text = "Private Q&A. Does not follow the terminal session."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(hint)
 
@@ -365,7 +365,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 
 	var attach_le = LineEdit.new()
 	attach_le.text = attachment_id
-	attach_le.placeholder_text = "omp-inspector"
+	attach_le.placeholder_text = "agent-inspector"
 	attach_le.text_changed.connect(func(_s): panel._debounce_timer.start())
 	_add_setting_row(v, "Attachment ID:", attach_le)
 

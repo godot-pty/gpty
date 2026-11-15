@@ -1,10 +1,10 @@
 extends PaneBody
 class_name ReasoningPane
 ## Passive projection of documented reasoning events from one terminal-hosted
-## OMP session. This pane never starts an agent or parses terminal output.
+## agent session. This pane never starts an agent or parses terminal output.
 ##
 ## Turn records (`_turns`) are the source of truth for the session accordion.
-## They stay in RAM for the current OMP session only and are the contract a
+## They stay in RAM for the current agent session only and are the contract a
 ## later SQLite writer can persist without a second in-memory format.
 
 ## User-tunable caps (Settings → Reasoning). Loaded from SettingsManager at
@@ -13,7 +13,7 @@ var max_turns: int = 16
 var max_turn_bytes: int = 65536
 const TURN_SCHEMA := 1
 
-@export var source_attachment_id := "omp-terminal"
+@export var source_attachment_id := "agent-terminal"
 
 var _status: RichTextLabel
 var _turn_scroll: ScrollContainer
@@ -229,7 +229,7 @@ func _on_scroll_changed(_value: float):
 
 func _idle_status() -> String:
 	var source := source_attachment_id if source_attachment_id != "" else "(unset)"
-	return "Listening for OMP events from %s. This pane does not scrape the TUI.\nLink the shipped extension, then restart omp:\n  omp plugin link <gpty>/extensions/gpty-omp-events\nIn that terminal, echo $GPTY_EVENT_PROTOCOL should print 1." % source
+	return "Listening for agent events from %s. This pane does not scrape the TUI.\nLink the shipped extension, then restart omp:\n  omp plugin link <gpty>/extensions/gpty-omp-events\nIn that terminal, echo $GPTY_EVENT_PROTOCOL should print 1." % source
 
 func _recompute_cell_metrics():
 	for rec in _turns:
@@ -256,7 +256,7 @@ func receive_agent_event(envelope: Dictionary, source_id: String):
 				return
 			_freeze_live(_event_ms(event))
 			_session_ended = true
-			_status.text = "OMP session ended"
+			_status.text = "Agent session ended"
 		"agent.started":
 			if _session_ended:
 				_bind_session(incoming, _event_ms(event))
@@ -319,7 +319,7 @@ func apply_settings(settings: Dictionary):
 
 ## Follow the terminal this pane watches when that terminal was renamed.
 ##
-## The *same* terminal under a new id, so the OMP session and the turns shown
+## The *same* terminal under a new id, so the agent session and the turns shown
 ## still belong to it and stay - unlike `apply_settings`, which treats a source
 ## change as a different terminal and resets them. `Workspace._retarget_companions`
 ## calls this for a rename in this pane's own workspace only.
@@ -342,7 +342,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	var v := VBoxContainer.new()
 	var source := LineEdit.new()
 	source.text = source_attachment_id
-	source.placeholder_text = "omp-terminal"
+	source.placeholder_text = "agent-terminal"
 	source.text_changed.connect(func(_text): panel._debounce_timer.start())
 	var label := Label.new()
 	label.text = "Source attachment ID (must match the terminal's Attachment ID, not its display name):"
@@ -425,7 +425,7 @@ func _bind_session(incoming: String, event_ms: int):
 	if event_ms > 0:
 		_last_bound_at_ms = event_ms
 	_session_ended = false
-	_status.text = "Attached to OMP session"
+	_status.text = "Attached to agent session"
 
 func _note_session_id(incoming: String):
 	if incoming == "":

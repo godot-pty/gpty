@@ -2041,7 +2041,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 
 	var attach_le = LineEdit.new()
 	attach_le.text = attachment_id
-	attach_le.placeholder_text = "omp-terminal"
+	attach_le.placeholder_text = "agent-terminal"
 	_make_row(v, "Attachment ID:", attach_le, panel)
 	# The one field that needs a sentence: it is how a command, an MCP tool
 	# or an agent names this pane, and the old panel showed `pane-…` with no

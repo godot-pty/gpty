@@ -577,7 +577,7 @@ func _migrate_trigger(entry: Dictionary, default: Dictionary):
 		entry["trigger"] = mig["new"]
 
 # Legacy concepts routed captures to the removed "observer" pane. Inspector
-# is private Q&A (not wired to the terminal OMP session). Reasoning never
+# is private Q&A (not wired to the terminal agent session). Reasoning never
 # accepts captures. Disable legacy observer-target concepts so terminal
 # redraws cannot silently start Inspector jobs.
 func _migrate_actions_target(entry: Dictionary):
