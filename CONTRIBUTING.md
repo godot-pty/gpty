@@ -118,12 +118,32 @@ cargo run --bin gpty -- inject T1 -t "echo hello"
 cargo run --bin gpty -- daemon stop
 ```
 
-`cargo run` always builds the CLI from this checkout, but a `cargo install`ed
-`gpty` on `PATH` can shadow a release bundle's CLI: after a version bump,
-reinstall it (`cargo install --path crates/gpty-cli --force`). The stale binary
-otherwise fails opaquely - a subcommand it lacks dies in clap before any IPC,
-which is why the CLI warns once when it reads a running GUI whose version or
-IPC protocol differs.
+`cargo run` always builds the CLI from this checkout, and a `gpty` earlier on
+`PATH` (a `cargo install`ed copy, the AUR package, or an old release bundle)
+shadows it. The stale binary fails opaquely - a subcommand it lacks dies in clap
+before any IPC, which is why the CLI warns once when it reads a running GUI
+whose version or IPC protocol differs. Reinstall a `cargo install`ed copy after a
+version bump (`cargo install --path crates/gpty-cli --force`), or install a
+release bundle as below and drop the cargo copy.
+
+To run a release CLI instead, install it once into a stable layout and rotate
+behind it:
+
+```bash
+scripts/install-cli ~/Downloads/gpty-v0.8.3-linux-x86_64.tar.gz   # or an extracted bundle dir
+scripts/install-cli --check                                       # diagnose install + PATH
+```
+
+It copies the bundle to `~/.local/opt/gpty/<version>`, points `current` at it,
+and links `~/.local/bin/gpty` and `gpty-gui` through that link - so an upgrade
+is the same command with the newer bundle, `--keep N` bounds how many old
+versions stay (default 2), and `--force` replaces a regular file or a
+same-version bundle from somewhere else. Nothing links a download directory, so
+cleaning `Downloads` cannot leave a dangling `gpty` behind. `--check` names every
+`gpty` on `PATH` in order - dangling, shadowing, or behind - and answers an MCP
+`initialize` through the CLI an MCP client would launch, exiting 1 when the
+lookup does not reach this install. `GPTY_INSTALL_ROOT` and `GPTY_BIN_DIR`
+override the two directories.
 
 Standalone commands (no GUI needed):
 

@@ -9,7 +9,7 @@ gpty is a multi-PTY terminal emulator with a tiling grid GUI. It exposes a full 
 
 ## Setup
 
-1. Ensure `gpty` is in your PATH (build with `cargo build -p gpty-cli` or install from [releases](https://github.com/godot-pty/gpty/releases))
+1. Ensure `gpty` is in your PATH (build with `cargo build -p gpty-cli`, install from [releases](https://github.com/godot-pty/gpty/releases) through `scripts/install-cli <bundle-or-tarball>`, or `cargo install gpty`). Check it with `scripts/install-cli --check`; a dangling or stale `gpty` on PATH is what makes OMP report `Executable not found in $PATH: "gpty"`.
 2. The MCP config is shipped as `mcp.json` in the gpty repo root — OMP discovers it automatically or place it at `.omp/mcp.json`
 
 ## Available Tools

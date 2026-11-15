@@ -1,0 +1,283 @@
+#!/usr/bin/env bash
+# install-cli: put one gpty release on PATH behind a stable link, so an
+# upgrade is one command and no download directory is ever a PATH entry.
+#
+#   scripts/install-cli <bundle-dir|release.tar.gz> [--keep N] [--force]
+#   scripts/install-cli --check      # diagnose the current install + PATH
+#   scripts/install-cli --current    # print the installed version
+#
+# Layout (both roots overridable):
+#
+#   $GPTY_INSTALL_ROOT (~/.local/opt/gpty)/<version>/   one extracted release
+#   $GPTY_INSTALL_ROOT/current -> <version>             the version in use
+#   $GPTY_BIN_DIR (~/.local/bin)/gpty -> current/gpty    the one PATH entry
+#   $GPTY_BIN_DIR/gpty-gui -> current/gpty-gui
+#
+# Why the indirection: an MCP client launches `gpty mcp` by name (`mcp.json`'s
+# `command`), and `gpty daemon start` finds the GUI as a sibling of the CLI's
+# real path, so both binaries must come from the same bundle. A download
+# directory linked straight into PATH leaves a dangling `gpty` behind when the
+# download is cleaned up, and the client then reports
+# `Executable not found in $PATH: "gpty"` while `ls ~/.local/bin/gpty` happily
+# shows the link.
+#
+# Linux, GNU coreutils (`cp -a`, `realpath -m`, `sort -V`, `timeout`).
+set -euo pipefail
+
+ROOT=${GPTY_INSTALL_ROOT:-$HOME/.local/opt/gpty}
+BIN=${GPTY_BIN_DIR:-$HOME/.local/bin}
+KEEP=2
+FORCE=0
+BUNDLE=""
+MODE=install
+TMP_EXTRACT=""
+INSTALLED_VERSION=""
+
+note() { printf '%s\n' "$*"; }
+warn() { printf 'install-cli: %s\n' "$*" >&2; }
+die() { printf 'install-cli: %s\n' "$*" >&2; exit 1; }
+real() { realpath -m -- "$1"; }
+
+cleanup() {
+    [[ -z $TMP_EXTRACT ]] || rm -rf -- "$TMP_EXTRACT"
+    return 0
+}
+trap cleanup EXIT
+
+usage() {
+    sed -n '2,/^$/p' "$0" | sed -e 's/^#//' -e 's/^ //'
+}
+
+# Split PATH into one directory per line, in order, duplicates dropped.
+path_dirs() {
+    local -A seen=()
+    local d
+    while IFS= read -r d; do
+        [[ -n $d && -z ${seen[$d]:-} ]] || continue
+        seen[$d]=1
+        printf '%s\n' "$d"
+    done < <(printf '%s\n' "${PATH//:/$'\n'}")
+}
+
+# A release bundle's version, read from the binary itself - the same answer
+# `gpty version` gives, so the install directory cannot disagree with it.
+bundle_version() {
+    local dir=$1 out
+    chmod +x -- "$dir/gpty" 2>/dev/null || true
+    out=$("$dir/gpty" version 2>/dev/null | head -n1) || true
+    case $out in
+        "gpty "[0-9]*.[0-9]*.[0-9]*) printf '%s\n' "${out#gpty }" ;;
+        *) return 1 ;;
+    esac
+}
+
+# A directory holding the bundle, extracting an archive into a temporary root
+# first. Accepts the `.tar.gz`, its extracted directory, or a directory above
+# the extracted `gpty-v<version>-<os>-<arch>/` (a downloads folder).
+resolve_bundle() {
+    local p=$1 found
+    [[ -e $p ]] || die "no such path: $p"
+    if [[ -f $p ]]; then
+        case $p in
+            *.tar.gz|*.tgz) ;;
+            *) die "expected a release .tar.gz or an extracted bundle directory: $p" ;;
+        esac
+        TMP_EXTRACT=$(mktemp -d "${TMPDIR:-/tmp}/gpty-install.XXXXXX")
+        # stderr: this function's stdout is captured as the bundle path.
+        printf '  extract %s\n' "$p" >&2
+        tar -xzf "$p" -C "$TMP_EXTRACT"
+        p=$TMP_EXTRACT
+    fi
+    if [[ ! -f $p/gpty ]]; then
+        found=$(find "$p" -maxdepth 3 -type f -name gpty -print -quit)
+        [[ -n $found ]] || die "no gpty binary under $(real "$p")"
+        p=$(dirname -- "$found")
+    fi
+    real "$p"
+}
+
+# Copy the bundle into $ROOT/<version>, repoint `current`, and link the two
+# binaries through it. Sets INSTALLED_VERSION.
+install_bundle() {
+    local src=$1 ver dst b
+    ver=$(bundle_version "$src") \
+        || die "cannot read a version from $src/gpty; is it a gpty release bundle?"
+    dst=$ROOT/$ver
+
+    if [[ -d $dst && $(real "$src") != "$(real "$dst")" ]]; then
+        if cmp -s -- "$src/gpty" "$dst/gpty"; then
+            note "  ok      $ver is already installed"
+        elif ((FORCE)); then
+            note "  replace $ver (different bundle)"
+            rm -rf -- "$dst"
+        else
+            die "$ver is installed from a different bundle at $dst; pass --force to replace it"
+        fi
+    fi
+
+    mkdir -p -- "$ROOT"
+    if [[ $(real "$src") != "$(real "$dst")" && ! -d $dst ]]; then
+        note "  copy    $ver"
+        cp -a -- "$src/." "$dst/"
+    fi
+    chmod +x -- "$dst/gpty" 2>/dev/null || true
+    chmod +x -- "$dst/gpty-gui" 2>/dev/null || true
+    [[ -f $dst/gpty-gui ]] || warn "no gpty-gui beside the CLI; 'gpty daemon start' will not find a GUI"
+
+    ln -sfn -- "$ver" "$ROOT/current"
+    note "  current $ver"
+
+    mkdir -p -- "$BIN"
+    for b in gpty gpty-gui; do
+        [[ -f $dst/$b ]] || continue
+        if [[ -e $BIN/$b && ! -L $BIN/$b ]] && ((!FORCE)); then
+            die "$BIN/$b is a regular file (a cargo-installed CLI?); pass --force to replace it"
+        fi
+        ln -sfn -- "$ROOT/current/$b" "$BIN/$b"
+        note "  link    $BIN/$b"
+    done
+    INSTALLED_VERSION=$ver
+}
+
+# Keep `current` plus the newest (KEEP - 1) other versions.
+prune_versions() {
+    local keep=$1 cur=$2 d v i=0
+    local -a versions=() sorted=()
+    for d in "$ROOT"/*/; do
+        v=$(basename -- "$d")
+        [[ $v =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+        versions+=("$v")
+    done
+    ((${#versions[@]})) || return 0
+    while IFS= read -r v; do sorted+=("$v"); done \
+        < <(printf '%s\n' "${versions[@]}" | sort -V -r)
+    for v in "${sorted[@]}"; do
+        [[ $v == "$cur" ]] && continue
+        i=$((i + 1))
+        ((i < keep)) && continue
+        note "  prune   $v"
+        rm -rf -- "$ROOT/$v"
+    done
+}
+
+# The handshake an MCP client performs. `gpty mcp` answers one request per
+# stdin line and exits, which is exactly how OMP starts it.
+mcp_probe() {
+    local reply
+    reply=$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"install-cli","version":"0"}}}' \
+        | timeout 15 "$BIN/gpty" mcp 2>/dev/null | head -c 4000) || true
+    [[ $reply == *'"result"'* ]]
+}
+
+# Diagnose: is `gpty` on PATH, and does it reach this install? Every other
+# `gpty` entry on PATH is named, because a stale one is what makes an upgrade
+# look like it did nothing.
+check() {
+    local failures=0 ours="" c d first=""
+    local -a candidates=()
+
+    note "install root   $ROOT"
+    if [[ -L $ROOT/current && -x $ROOT/current/gpty ]]; then
+        note "current        $(readlink -- "$ROOT/current")  ($("$ROOT/current/gpty" version 2>/dev/null | head -n1))"
+    elif [[ -L $ROOT/current ]]; then
+        note "current        $(readlink -- "$ROOT/current")  (DANGLING: $ROOT/$(readlink -- "$ROOT/current") is missing)"
+        failures=$((failures + 1))
+    else
+        note "current        (not installed)"
+        failures=$((failures + 1))
+    fi
+
+    if [[ -L $BIN/gpty && -e $BIN/gpty ]]; then
+        ours=$(real "$BIN/gpty")
+        note "bin/gpty       $BIN/gpty -> $(readlink -- "$BIN/gpty")"
+    elif [[ -L $BIN/gpty ]]; then
+        note "bin/gpty       $BIN/gpty -> $(readlink -- "$BIN/gpty")  (DANGLING)"
+        failures=$((failures + 1))
+    else
+        note "bin/gpty       $BIN/gpty  (missing, or not the symlink this script makes)"
+        failures=$((failures + 1))
+    fi
+
+    # PATH in order; `first` is what execvp would actually run.
+    while IFS= read -r d; do
+        [[ -e $d/gpty || -L $d/gpty ]] || continue
+        candidates+=("$d/gpty")
+        [[ -x $d/gpty && -z $first ]] && first=$d/gpty
+    done < <(path_dirs)
+
+    for c in "${candidates[@]}"; do
+        if [[ -L $c && ! -e $c ]]; then
+            note "PATH broken    $c -> $(readlink -- "$c")  (target missing, never executable)"
+        elif [[ $c != "$first" ]]; then
+            note "PATH behind    $c"
+        fi
+    done
+
+    if [[ -z $first ]]; then
+        note "PATH lookup    (no executable gpty on PATH; is $BIN on it?)"
+        failures=$((failures + 1))
+    elif [[ -z $ours || $(real "$first") != "$ours" ]]; then
+        note "PATH lookup    $first  (does not reach $BIN/gpty)"
+        failures=$((failures + 1))
+    else
+        note "PATH lookup    $first  ($("$first" version 2>/dev/null | head -n1))"
+        if mcp_probe; then
+            note "mcp            initialize answered"
+        else
+            note "mcp            no answer to initialize from $first mcp"
+            failures=$((failures + 1))
+        fi
+    fi
+
+    if ((failures)); then
+        note ""
+        note "$failures problem(s); 'scripts/install-cli <bundle>' installs and links a release"
+        return 1
+    fi
+    note ""
+    note "one install: $BIN/gpty -> $ours"
+    return 0
+}
+
+while (($#)); do
+    case $1 in
+        --keep)
+            KEEP=${2:-}
+            [[ $KEEP =~ ^[0-9]+$ ]] && ((KEEP >= 1)) || die "--keep wants a positive count"
+            shift 2
+            ;;
+        --force) FORCE=1; shift ;;
+        --check) MODE=check; shift ;;
+        --current) MODE=current; shift ;;
+        -h|--help) usage; exit 0 ;;
+        -*) die "unknown option: $1 (try --help)" ;;
+        *)
+            [[ -z $BUNDLE ]] || die "one bundle at a time"
+            BUNDLE=$1
+            shift
+            ;;
+    esac
+done
+
+case $MODE in
+    check)
+        if check; then exit 0; else exit 1; fi
+        ;;
+    current)
+        [[ -x $ROOT/current/gpty ]] || die "no gpty installed under $ROOT"
+        "$ROOT/current/gpty" version | head -n1
+        exit 0
+        ;;
+esac
+
+[[ -n $BUNDLE ]] || { usage; die "no release bundle given"; }
+
+note "installing into $ROOT"
+install_bundle "$(resolve_bundle "$BUNDLE")"
+prune_versions "$KEEP" "$INSTALLED_VERSION"
+note ""
+if check; then
+    exit 0
+fi
+warn "installed $INSTALLED_VERSION, but PATH does not reach it yet"
+exit 1
