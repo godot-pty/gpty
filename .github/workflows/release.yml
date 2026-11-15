@@ -192,6 +192,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The defect-class gate below describes the previous tag; the default
+          # shallow clone carries neither the tag nor the history to find it.
+          fetch-depth: 0
+
+      - name: Check the defect-class trailers
+        run: |
+          # Every fix since the previous release must name its Cause. The
+          # range is computed, so each `v*` tag runs the right one with no
+          # version to maintain; the first release has no previous tag and
+          # checks all history (the trailer rule is date-gated anyway).
+          if previous="$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null)"; then
+            ./scripts/fix-forensics --check --since "$previous"
+          else
+            ./scripts/fix-forensics --check
+          fi
 
       # project.godot carries the last released version; bundles must report the
       # tag (macOS reads CFBundleShortVersionString from it).

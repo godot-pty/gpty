@@ -30,7 +30,7 @@ git log v<PREVIOUS_TAG>..HEAD --oneline
 - Skip noise: debug-logging churn, revert commits, lockfile/gitignore chores, agent-facing AGENTS.md edits.
 - Fix sagas (multiple commits converging on one bug): write one bullet describing the net user-visible result.
 - Note which commits produced user-visible UI changes — this list feeds the feature-screenshot question in step 6.
-- Run `./scripts/fix-forensics --check --since v<PREVIOUS_TAG>` (it must exit 0) and carry the class mix into the release's chain-page section beside the closed rows.
+- Run `./scripts/fix-forensics --check --since v<PREVIOUS_TAG>` (it must exit 0) and carry the class mix into the release's chain-page section beside the closed rows. `release.yml` runs the same check against the computed previous tag before any asset is built, so a missed trailer also stops the tag.
 
 ### 2. CHANGELOG
 
