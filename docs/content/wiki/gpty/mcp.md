@@ -14,6 +14,8 @@ Configure it the way your harness documents a stdio server: command `gpty`, argu
 {"mcpServers":{"gpty":{"command":"gpty","args":["mcp"]}}}
 ```
 
+`command` is resolved on the harness's `PATH`, so the name has to reach an executable: a `gpty` link whose target was deleted reports `Executable not found in $PATH` - the message a missing binary gives - and `scripts/install-cli --check` names the broken entry.
+
 ## The tool set
 
 Twenty-seven tools are published, mirroring CLI actions and kebab-cased:

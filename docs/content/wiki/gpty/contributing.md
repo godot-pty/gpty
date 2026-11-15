@@ -57,7 +57,7 @@ cargo run --bin gpty -- new-pane --pane-type terminal
 cargo run --bin gpty -- list-panes
 ```
 
-If a `cargo install`ed `gpty` shadows the checkout, reinstall it after a version bump; a stale binary fails opaquely in clap before any IPC.
+If a `cargo install`ed `gpty` shadows the checkout, reinstall it after a version bump; a stale binary fails opaquely in clap before any IPC. A downloaded release bundle installs behind one stable link instead: `scripts/install-cli <bundle-or-tarball>` copies it to `~/.local/opt/gpty/<version>` and links `~/.local/bin/gpty` and `gpty-gui` through `current`, so an upgrade is the same command and no download directory is ever a PATH entry; `scripts/install-cli --check` prints every `gpty` on PATH in the order `execvp` walks it.
 
 One rule for the scripts that build pinned dependencies (`media-deps`, `bundle-media`): a build artifact's stamp or cache key must include everything that produces it — the pin, the input list, the platform, and the build script's own checksum. `media-deps` learned this the hard way: its `.stamp` covered version, components, platform and assembler but not its own flags, so CI (which keys its cache on `hashFiles('scripts/media-deps')`) noticed a flag change while a local run said "already built" and kept linking the old library. A stamp that outlives its script is a silent stale success, which is the one failure mode a stamp exists to prevent.
 
