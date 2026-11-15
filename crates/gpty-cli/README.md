@@ -4,7 +4,7 @@ CLI for controlling the gpty terminal workspace over JSON-RPC IPC. Connects to a
 
 ## Getting it
 
-Release bundles ship this CLI beside the GUI - `gpty-gui` on Linux and Windows, `gPTY.app` on macOS - and the CLI starts that GUI on demand, so a downloaded bundle needs no toolchain. From a source checkout, `cargo build -p gpty` (or `cargo build --workspace`) puts the binary in `target/debug/gpty`.
+Release bundles ship this CLI beside the GUI - `gpty-gui` on Linux and Windows, `gPTY.app` on macOS - and the CLI starts that GUI on demand, so a downloaded bundle needs no toolchain. From a source checkout, `cargo build -p gpty` (or `cargo build --workspace`) puts the binary in `target/debug/gpty`; `cargo install gpty` builds it from crates.io. To run a *downloaded* bundle, install it once behind a stable link - `scripts/install-cli <bundle-or-tarball>` copies it to `~/.local/opt/gpty/<version>`, points `current` at it, and links `~/.local/bin/gpty` and `gpty-gui` through `current`, so an upgrade is one command and no download directory is ever a PATH entry. `scripts/install-cli --check` prints the installed version and every `gpty` on PATH in the order `execvp` walks it: a dangling link is what makes an MCP client say `Executable not found in $PATH: "gpty"`.
 
 ## Role in the Workspace
 

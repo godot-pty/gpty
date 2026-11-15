@@ -26,6 +26,7 @@ gpty/
 │   ├── ci-check                # Run all CI checks locally (--fast for quick)
 │   ├── build-wiki              # Pack docs/content/wiki into godot/knowledge.json
 │   ├── install-hooks           # Symlink githooks into .git/hooks/
+│   ├── install-cli             # Install a release bundle behind a stable PATH link
 │   └── build                   # Build standalone app for the host platform
 ├── githooks/                   # Git hook scripts
 │   ├── pre-commit              # Fast checks (fmt, workflow lint, clippy)
