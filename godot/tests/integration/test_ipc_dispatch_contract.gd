@@ -1274,6 +1274,39 @@ func test_pane_set_applies_settings_and_reads_them_back():
 	_ws._kill_now(viewer)
 
 
+## A clear is a change. The answer names the key the pane dropped from its
+## read-back and the pair a launch line replaces: before this, setting or
+## clearing `launch` answered `changed: []` for `shell`/`shell_args` (gone from
+## the read-back) and for `launch` itself (only the after-dictionary was walked).
+func test_pane_set_names_a_key_the_read_back_dropped():
+	var term = _spawn("terminal")
+	var id := str(term.attachment_id)
+
+	var set_answer = WorkspaceIpcHandlers.handle(_ws, "paneSet", {
+		"pane_id": id,
+		"settings": {"launch": "lazygit"},
+	})
+	assert_false(set_answer.has("error"), "a launch line must apply: %s" % set_answer)
+	var set_changed: Array = set_answer.get("changed", [])
+	assert_true(set_changed.has("launch"), "the added key must be named: %s" % str(set_changed))
+	assert_true(set_changed.has("shell"),
+		"the program the launch line replaces must be named: %s" % str(set_changed))
+	assert_true(set_changed.has("shell_args"),
+		"the argv the launch line replaces must be named: %s" % str(set_changed))
+
+	var clear_answer = WorkspaceIpcHandlers.handle(_ws, "paneSet", {
+		"pane_id": id,
+		"settings": {"launch": ""},
+	})
+	assert_false(clear_answer.has("error"), "the documented clear must apply: %s" % clear_answer)
+	var clear_changed: Array = clear_answer.get("changed", [])
+	assert_true(clear_changed.has("launch"),
+		"the cleared key must be named: %s" % str(clear_changed))
+	assert_true(clear_changed.has("shell"),
+		"the restored program must be named: %s" % str(clear_changed))
+	_ws._kill_now(term)
+
+
 ## A key the table reserves refuses the whole request - nothing is half
 ## applied - and the message names the keys it cannot take.
 func test_pane_set_refuses_keys_the_table_reserves():

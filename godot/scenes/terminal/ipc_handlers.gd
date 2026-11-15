@@ -485,9 +485,20 @@ static func handle(ws, method: String, params: Dictionary):
 			var pset_before: Dictionary = pset_body._get_layout_state()
 			pset_body.apply_settings(pset_applied)
 			var pset_after: Dictionary = pset_body._get_layout_state()
-			var pset_changed := []
+			# A key the pane *dropped* is a change too: a launch line and the
+			# `shell`/`shell_args` pair are one plan written two ways, so
+			# setting a launch line removes the pair and clearing it restores
+			# it. The answer names every key that changed or left the
+			# read-back, not only the ones still there.
+			var pset_keys := {}
+			for pset_key in pset_before:
+				pset_keys[pset_key] = true
 			for pset_key in pset_after:
-				if not pset_before.has(pset_key) or pset_before[pset_key] != pset_after[pset_key]:
+				pset_keys[pset_key] = true
+			var pset_changed := []
+			for pset_key in pset_keys:
+				if not pset_before.has(pset_key) or not pset_after.has(pset_key) \
+						or pset_before[pset_key] != pset_after[pset_key]:
 					pset_changed.append(str(pset_key))
 			# Assignments, not a literal: `mcp.rs` reads every two-tab quoted
 			# literal in this file as a dispatch arm (`view_answer`'s rule).
