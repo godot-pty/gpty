@@ -363,7 +363,7 @@ mod tests {
 
     /// Routed methods that are deliberately never MCP tools. `pluginInstall`
     /// waits on a human answering the review dialog — an MCP client cannot
-    /// answer it (the rule that also refuses `layoutLoad` on untrusted
+    /// answer it (the rule that also refuses `profileLoad` on untrusted
     /// profiles), so the method exists for the CLI only. `pluginsChanged` is
     /// the CLI's notification that an admin action rewrote the plugin store
     /// (`gpty plugin uninstall|enable|disable`); an MCP client has no reason
@@ -566,7 +566,7 @@ mod tests {
     /// must be reachable from some tool — except the deliberately CLI-only
     /// handshakes named in [`NON_TOOL_ROUTED`]: a human answers
     /// `pluginInstall`'s review dialog, which an MCP client cannot do (the
-    /// same rule that refuses `layoutLoad` on untrusted profiles), so the
+    /// same rule that refuses `profileLoad` on untrusted profiles), so the
     /// method is routed but never advertised as a tool. `daemon-*` tools are
     /// answered by the MCP server itself and never reach the socket with a
     /// derived name.

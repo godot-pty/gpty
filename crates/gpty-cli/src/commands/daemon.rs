@@ -302,7 +302,7 @@ async fn connect_with(socket_path: &str, timeout: Duration) -> anyhow::Result<(R
 }
 
 /// Ensure a GUI is running and answering on `socket_path`. Called only for
-/// the commands that may start one (`new-pane`, `layout load`); every other
+/// the commands that may start one (`new-pane`, `profile load`); every other
 /// command reports [`NO_GUI_HINT`] through [`is_not_running`] instead of
 /// opening a window it cannot use.
 pub async fn ensure_running(socket_path: &str, timeout: Duration) -> anyhow::Result<()> {

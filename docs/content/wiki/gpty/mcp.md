@@ -23,7 +23,7 @@ Twenty-seven tools are published, mirroring CLI actions and kebab-cased:
 | Panes | `new-pane`, `list-panes`, `kill-pane`, `focus-pane`, `move-pane`, `inject`, `pane-read`, `pane-status`, `pane-view`, `pane-set`, `pane-settings`, `pane-run`, `pane-wait` |
 | Workspaces | `workspace-list` |
 | Fan-out | `broadcast` |
-| Layout | `layout-save`, `layout-load`, `layout-list` |
+| Profile | `profile-save`, `profile-load`, `profile-list` |
 | Daemon | `daemon-start`, `daemon-stop`, `daemon-status` |
 | Concepts | `concept-list`, `concept-toggle` |
 | Vault | `vault-search`, `vault-read`, `vault-weight` |
@@ -45,7 +45,7 @@ The consequence for an MCP author is simple: if a tool is not in `tools/list`, c
 
 Tool descriptions and argument schemas are generated from the clap command definitions in `crates/gpty-cli/src/commands/schema.rs`. Each subcommand becomes a tool, its arguments become JSON Schema properties typed the way clap parses them (an `--arg` list is an array of strings, a flag a boolean, an integer argument an integer), enums are pulled from clap's possible values, and required-argument marking follows the clap definition.
 
-Two transformations happen on the way. Nested subcommand groups are flattened: `daemon start` becomes `daemon-start`, `layout save` becomes `layout-save`. The concept and vault verbs are already flat. And the self-referential commands are skipped — `mcp` (the server describing itself as a tool makes no sense) and `schema` (an admin/discovery command, not a workspace action). Because both the schema and `--help` read the same definitions, `gpty schema --format mcp` is the authority whenever documentation and binary disagree.
+Two transformations happen on the way. Nested subcommand groups are flattened: `daemon start` becomes `daemon-start`, `profile save` becomes `profile-save`. The concept and vault verbs are already flat. And the self-referential commands are skipped — `mcp` (the server describing itself as a tool makes no sense) and `schema` (an admin/discovery command, not a workspace action). Because both the schema and `--help` read the same definitions, `gpty schema --format mcp` is the authority whenever documentation and binary disagree.
 
 ### From tool arguments to the wire
 
@@ -59,7 +59,7 @@ A refusal is still a successful response, with `isError: true`, the handler's ow
 
 ## No auto-spawn
 
-The [[cli|CLI]] starts a GUI on demand for `new-pane` and `layout load`. The MCP server never does: no tool call may open a window behind the user's back. When a call finds no GUI, the answer says so and names `daemon-start`, which is the one explicit bootstrap.
+The [[cli|CLI]] starts a GUI on demand for `new-pane` and `profile load`. The MCP server never does: no tool call may open a window behind the user's back. When a call finds no GUI, the answer says so and names `daemon-start`, which is the one explicit bootstrap.
 
 That asymmetry is deliberate. A CLI invocation is a deliberate act by a human or a script that named the command; an MCP client is a model calling tools in a loop, and it should not be able to fill the desktop with workspaces as a side effect of a retry. `daemon-start` exists so that "start the GUI" is a decision the model can make and the user can audit as a distinct tool call.
 

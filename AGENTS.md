@@ -68,13 +68,13 @@ AI agents and coding harnesses can discover these via the `mcp.json` that's at t
 {"mcpServers": {"gpty": {"command": "gpty", "args": ["mcp"]}}}
 ```
 
-Tools: `new-pane`, `list-panes`, `workspace-list`, `kill-pane`, `focus-pane`, `move-pane`, `inject`, `layout-save`, `layout-load`, `layout-list`, `daemon-start`, `daemon-stop`, `daemon-status`, `concept-list`, `concept-toggle`, `pane-read`, `pane-status`, `pane-view`, `pane-set`, `pane-settings`, `pane-run`, `pane-wait`, `broadcast`, `vault-search`, `vault-read`, `vault-weight`, `version`.
+Tools: `new-pane`, `list-panes`, `workspace-list`, `kill-pane`, `focus-pane`, `move-pane`, `inject`, `profile-save`, `profile-load`, `profile-list`, `daemon-start`, `daemon-stop`, `daemon-status`, `concept-list`, `concept-toggle`, `pane-read`, `pane-status`, `pane-view`, `pane-set`, `pane-settings`, `pane-run`, `pane-wait`, `broadcast`, `vault-search`, `vault-read`, `vault-weight`, `version`.
 
 `tools/call` validates the requested name against `schema::mcp_tool_names()` before dispatch: the kebab→camel mapping turns any string into an IPC method, so without the gate a client reaches methods that were never published as tools (e.g. `shutdown`).
 
 A tool's arguments travel under the ids clap gives them (`pane_type`), while the handler reads the CLI's wire key (`type`). `commands/wire.rs` is the one translation: it derives each argument's JSON type from the clap definition (an `Append` list, a boolean flag, an integer field), renames the handful of ids that differ (`RENAMES`), and refuses an unknown key (naming the nearest valid one), a value of the wrong JSON type, or a contradictory pair with `-32602`. A new argument needs no second list; a *renamed* wire key needs an entry in that table, and `wire_keys_are_the_keys_the_handlers_read` fails if a translated key is one no handler reads.
 
-The MCP tool schemas are auto-generated from clap command definitions in `crates/gpty-cli/src/commands/schema.rs`. Nested subcommands (`daemon`, `layout`) are flattened into prefixed tools. Self-referential tools (`mcp`, `schema`) are excluded.
+The MCP tool schemas are auto-generated from clap command definitions in `crates/gpty-cli/src/commands/schema.rs`. Nested subcommands (`daemon`, `profile`) are flattened into prefixed tools. Self-referential tools (`mcp`, `schema`) are excluded.
 
 A tool call the handler refuses is a *successful* `tools/call` response with `isError: true`, the handler's own sentence in the text content, and its code in `structuredContent`; JSON-RPC errors are reserved for a malformed call (the argument translation's `-32602`, an unknown tool or method) and a dead endpoint. Refusals travel flat end to end: the GUI's drain loop answers the handler's `{code, message}` error object itself, and the Rust edge builds the JSON-RPC error from it, so a CLI or MCP caller reads the sentence instead of a stringified envelope.
 

@@ -8,7 +8,7 @@
 //! Controls the gpty GUI over JSON-RPC IPC.
 //!
 //! A GUI is started on demand only for commands a fresh instance can satisfy
-//! — `new-pane` and `layout load` — and `--no-daemon` refuses even those.
+//! — `new-pane` and `profile load` — and `--no-daemon` refuses even those.
 //! Every other command answers with the shared "no gpty GUI is running"
 //! hint when nothing is listening, instead of opening a window it cannot
 //! use; `gpty daemon start` starts one explicitly (the hint names it).
@@ -159,10 +159,10 @@ enum Commands {
         action: DaemonAction,
     },
 
-    /// Save, load, or list workspace layouts
-    Layout {
+    /// Save, load, or list profiles
+    Profile {
         #[command(subcommand)]
-        action: LayoutAction,
+        action: ProfileAction,
     },
 
     /// List, enable, or disable concept triggers
@@ -341,12 +341,12 @@ enum DaemonAction {
 }
 
 #[derive(clap::Subcommand)]
-enum LayoutAction {
-    /// Save current layout
+enum ProfileAction {
+    /// Save the active workspace as a profile
     Save { name: String },
-    /// Load a saved layout
+    /// Activate a saved profile in the active workspace
     Load { name: String },
-    /// List saved layouts
+    /// List saved profiles
     List,
 }
 
@@ -403,7 +403,7 @@ enum PluginAction {
 /// Whether the generic gate may start a GUI for this command.
 ///
 /// Only commands a *fresh* GUI can satisfy: creating a pane, or restoring a
-/// saved layout. Every other command needs a workspace that already exists —
+/// saved profile. Every other command needs a workspace that already exists —
 /// starting one would add a window and then fail at the command's actual
 /// work, so those answer with `daemon::NO_GUI_HINT` instead (the same
 /// message `--no-daemon` produces for the two that may spawn). That includes
@@ -416,8 +416,8 @@ enum PluginAction {
 fn may_autospawn(cmd: &Commands) -> bool {
     match cmd {
         Commands::NewPane { .. } => true,
-        Commands::Layout {
-            action: LayoutAction::Load { .. },
+        Commands::Profile {
+            action: ProfileAction::Load { .. },
         } => true,
         Commands::ListPanes
         | Commands::WorkspaceList
@@ -427,7 +427,7 @@ fn may_autospawn(cmd: &Commands) -> bool {
         | Commands::Inject { .. }
         | Commands::Schema { .. }
         | Commands::Daemon { .. }
-        | Commands::Layout { .. }
+        | Commands::Profile { .. }
         | Commands::Concept { .. }
         | Commands::Plugin { .. }
         | Commands::PaneRead { .. }

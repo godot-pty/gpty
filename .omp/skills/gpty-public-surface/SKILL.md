@@ -32,7 +32,7 @@ Two surfaces, one shape: a list in one language that must agree with a list in a
 1. `main.rs` — an `enum Commands` variant with clap attributes.
 2. `commands/mod.rs` — a dispatch arm calling `commands/<name>::run(client, …, json).await`.
 3. `commands/<name>.rs` — build `serde_json::json!({…})` and call `super::call_and_format(client, "<camelCase method>", params, json)`.
-4. **`may_autospawn()` in `main.rs` is exhaustive on purpose: a new subcommand must choose a side.** `true` only for commands a *fresh* GUI can satisfy (`new-pane`, `layout load`); everything else answers `daemon::NO_GUI_HINT`. Choosing wrong either opens a window that then fails the command, or refuses one a fresh GUI could have served.
+4. **`may_autospawn()` in `main.rs` is exhaustive on purpose: a new subcommand must choose a side.** `true` only for commands a *fresh* GUI can satisfy (`new-pane`, `profile load`); everything else answers `daemon::NO_GUI_HINT`. Choosing wrong either opens a window that then fails the command, or refuses one a fresh GUI could have served.
 5. The runtime is current-thread: no `spawn_blocking`, no `tokio::process`. Do not add a command that assumes workers.
 
 ## D. MCP comes for free — and that is the trap

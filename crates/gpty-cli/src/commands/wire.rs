@@ -384,7 +384,7 @@ mod tests {
                 "tags": ["agent"],
                 "settings": ["pane_name=sample"],
             }),
-            "list-panes" | "workspace-list" | "concept-list" | "layout-list" | "version"
+            "list-panes" | "workspace-list" | "concept-list" | "profile-list" | "version"
             | "pane-settings" => {
                 json!({})
             }
@@ -402,7 +402,7 @@ mod tests {
             "pane-wait" => json!({"pane_id": "p1", "pattern": "x", "timeout_ms": 500}),
             "broadcast" => json!({"tags": ["agent"], "text": "x"}),
             "concept-toggle" => json!({"name": "agent-idle"}),
-            "layout-save" | "layout-load" => json!({"name": "sample"}),
+            "profile-save" | "profile-load" => json!({"name": "sample"}),
             "vault-search" => json!({"vault_path": "/v", "pattern": "p", "limit": 5}),
             "vault-read" => json!({"vault_path": "/v", "path": "a.md"}),
             "vault-weight" => json!({

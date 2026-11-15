@@ -242,7 +242,7 @@ func refresh_plugin_profiles():
 ## plugin's content, and without that re-run the sidebar shows two rows with
 ## one name for the rest of the session while `find_profile` resolves the
 ## colliding name to the user's row (users are listed first), so a click on
-## the plugin's row — or `layoutLoad` by that name — would activate the user's
+## the plugin's row — or `profileLoad` by that name — would activate the user's
 ## profile.
 func _derive_plugin_profiles():
 	_plugin_profiles = []
@@ -333,7 +333,7 @@ func _plugin_profile_exists(p_name: String) -> bool:
 
 ## User profiles first (the seeded defaults are prepended to `profiles`, so
 ## they lead), then installed-plugin profiles — the order the sidebar renders
-## and the order `find_profile` resolves a `layoutLoad` name in.
+## and the order `find_profile` resolves a `profileLoad` name in.
 ##
 ## This is also the one place that knows provenance, so it stamps `_origin` on
 ## every entry: it is what `Workspace._profile_consented` branches on, and a

@@ -8,7 +8,7 @@ The same method set is reachable three ways — a JSON-RPC socket, the `gpty` CL
 
 | Position | Door | May start the GUI? |
 |---|---|---|
-| Inside a gPTY pane | `gpty` CLI over the control socket | yes, for `new-pane` and `layout load` only |
+| Inside a gPTY pane | `gpty` CLI over the control socket | yes, for `new-pane` and `profile load` only |
 | Outside, as an MCP client | `gpty mcp`, JSON-RPC over stdio | never; `daemon-start` is the bootstrap |
 
 Both speak to a single running workspace, so the GUI is the state. Nothing an agent does here creates a second window: a `new-pane` call lands as a tile beside the others.

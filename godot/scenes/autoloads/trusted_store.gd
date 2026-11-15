@@ -2,7 +2,7 @@ extends BasePersistenceManager
 # TrustedStore — the consent memory behind the Workspace Trust dialog.
 #
 # `user://trusted.json` remembers approvals so consent made once counts once:
-# the sidebar profile gate, the workspace-restore gate, and the IPC layoutLoad
+# the sidebar profile gate, the workspace-restore gate, and the IPC profileLoad
 # gate consult it instead of re-asking forever (or refusing, over IPC) for
 # content the user already approved.
 #
@@ -175,7 +175,7 @@ func approved_plan_keys(version: String) -> Dictionary:
 func _save():
 	_write_file(TRUSTED_FILE, {"builtins": _builtins, "plugins": _plugins})
 
-## Profile names follow layoutSave's own cap.
+## Profile names follow profileSave's own cap.
 static func _valid_name(name: String) -> bool:
 	return not name.is_empty() and name.length() <= MAX_NAME_LEN
 

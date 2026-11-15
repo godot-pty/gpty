@@ -616,7 +616,7 @@ static func handle(ws, method: String, params: Dictionary):
 			if kp_target == null:
 				return refused("Pane '%s' not found" % kp_pane_id)
 			# A caller cannot answer a dialog, so a pane holding unsaved work
-			# is refused rather than asked (the rule `layoutLoad` already
+			# is refused rather than asked (the rule `profileLoad` already
 			# applies to an untrusted profile): naming a pane is not consent
 			# to throw away what the user typed into it.
 			if kp_target.has_unsaved_state():
@@ -731,7 +731,7 @@ static func handle(ws, method: String, params: Dictionary):
 					b_body._send_line_to_term(b_text)
 					b_count += 1
 			return {"success": true, "count": b_count}
-		"layoutSave":
+		"profileSave":
 			var profile_name = str(params.get("name", ""))
 			if profile_name == "":
 				return bad_param("Profile name required")
@@ -739,10 +739,10 @@ static func handle(ws, method: String, params: Dictionary):
 				return bad_param("Profile name too long")
 			# The store is the authority on the name it kept (`add_profile`
 			# suffixes a duplicate), so the answer names the row a later
-			# `layoutLoad` resolves instead of the one the caller asked for.
+			# `profileLoad` resolves instead of the one the caller asked for.
 			var stored := ProfileManager.add_profile(profile_name, ws._gather_tiles())
 			return {"success": true, "name": stored}
-		"layoutLoad":
+		"profileLoad":
 			var profile_name = str(params.get("name", ""))
 			var profile := ProfileManager.find_profile(profile_name)
 			if profile.is_empty():
@@ -768,19 +768,19 @@ static func handle(ws, method: String, params: Dictionary):
 			# Activating a profile resets the active workspace, so a pane
 			# holding unsaved work is refused for the same reason: a caller
 			# cannot answer the pane's Save/Discard dialog. A running process
-			# is not refused — the request to load a layout is consent to stop
-			# what the layout replaces — and `ask_running: false` keeps the
+			# is not refused — the request to activate a profile is consent to
+			# stop what it replaces — and `ask_running: false` keeps the
 			# GUI from raising a dialog this caller cannot answer.
 			for pane in ws._pane_bodies(ws._active_workspace()):
 				if pane.has_unsaved_state():
 					return refused("A pane in the active workspace has unsaved changes; save or discard them in the pane, then retry")
 			ws._do_activate(profile, false)
 			return {"success": true}
-		"layoutList":
+		"profileList":
 			var names = []
 			for p in ProfileManager.get_all_profiles():
 				names.append(p.get("name", ""))
-			return {"layouts": names}
+			return {"profiles": names}
 		# `version` and `shutdown` are answered in Rust (`ipc.rs` registers
 		# both locally, and never queues them), so an arm here would be dead.
 		"conceptList":

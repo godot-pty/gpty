@@ -9,7 +9,7 @@ The API is a control surface, not an orchestration layer. It can create a pane, 
 | Door | Transport | Who uses it | Starts a GUI? |
 |---|---|---|---|
 | IPC | Newline-delimited JSON-RPC 2.0 over a Unix socket or named pipe | Programs that speak the protocol directly | No |
-| CLI | The `gpty` binary, one request per invocation | Shells, scripts, agents inside a pane | Only `new-pane` and `layout load` |
+| CLI | The `gpty` binary, one request per invocation | Shells, scripts, agents inside a pane | Only `new-pane` and `profile load` |
 | MCP | JSON-RPC over stdio, one tool per method | Agent harnesses outside gPTY | Never; `daemon-start` is explicit |
 
 All three reach the same handlers in the running GUI. The CLI is a stateless client: it connects, sends one request, reads the answer, and exits. The MCP server is the same client underneath, wrapped in a tool interface.
@@ -31,9 +31,9 @@ All three reach the same handlers in the running GUI. The CLI is a stateless cli
 | `paneRun` | `command` | `{pane_id, label, type}` |
 | `paneWait` | `pane_id`, `pattern`, `timeout_ms?` (100–60000) | `{matched, line?}` or `{matched: false, timed_out}` |
 | `broadcast` | `tags`, `text` | `{success, count}` |
-| `layoutSave` | `name` | `{success, name}` — the name the store kept; a name already taken is stored and answered with a ` (2)`-style suffix |
-| `layoutLoad` | `name` | `{success}` |
-| `layoutList` | — | `{layouts: [string]}` |
+| `profileSave` | `name` | `{success, name}` — the name the store kept; a name already taken is stored and answered with a ` (2)`-style suffix |
+| `profileLoad` | `name` | `{success}` |
+| `profileList` | — | `{profiles: [string]}` |
 | `conceptList` | — | `{concepts: [{name, enabled, trigger, actions, …}]}` |
 | `conceptToggle` | `name` | `{success, name}` — an unknown name is refused `-32602` and nothing is written |
 | `vaultSearch` | `vault_path`, `pattern`, `limit?` (1–500) | `{results: [{path, title, snippet}], total, truncated}` |
@@ -48,9 +48,9 @@ A request the app cannot even read is `-32602`: a missing required field (`pane_
 
 `vaultSearch`, `vaultRead` and `vaultWeight` answer only inside a vault root the user has **registered** - the user-owned `user://vaults.json`, whose only writer is the pane settings UI. A Wiki pane showing a directory is not enough (the pane reads it; the API does not answer for it), and the shipped knowledge base registers itself when a pane opens it. An unregistered root is refused with `-32000` and `data.code = "not_registered"`, so a client cannot use these methods to read Markdown under a directory the user never opened.
 
-The `layout*` methods are named for the arrangement they restore, but in this build they save, load, and list **profiles**: `layoutSave` captures the active workspace as a reusable profile, and `layoutLoad` replaces the active workspace with that profile's tiles. `layoutSave` answers the name the store kept — a name already taken is stored and answered with a ` (2)`-style suffix, and that is the name `layoutLoad` resolves. See [[profile]] for the trust rules that apply to loading one, and [[layout]] for the arrangement itself.
+The `profile*` methods act on a profile — the named tile set — while a layout is the arrangement inside one workspace: `profileSave` captures the active workspace as a reusable profile, `profileLoad` replaces the active workspace with that profile's tiles, and `profileList` names the visible profiles. `profileSave` answers the name the store kept — a name already taken is stored and answered with a ` (2)`-style suffix, and that is the name `profileLoad` resolves. See [[profile]] for the trust rules that apply to activating one, and [[layout]] for the arrangement itself.
 
-The MCP door adds tools that are client-side rather than IPC methods: `daemon-start`, `daemon-stop`, `daemon-status`, and the layout/concept wrappers. It exposes 22 tools in total. Two CLI verbs are deliberately not tools: `state` (it reads the credentials of the pane it runs in) and the plugin verbs (install/enable/remove changes what code runs as you, so a human does it).
+The MCP door adds tools that are client-side rather than IPC methods: `daemon-start`, `daemon-stop`, `daemon-status`, and the profile/concept wrappers. It exposes 22 tools in total. Two CLI verbs are deliberately not tools: `state` (it reads the credentials of the pane it runs in) and the plugin verbs (install/enable/remove changes what code runs as you, so a human does it).
 
 ## Pane identity and status
 

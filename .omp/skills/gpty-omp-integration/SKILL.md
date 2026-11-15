@@ -26,9 +26,9 @@ gpty is a multi-PTY terminal emulator with a tiling grid GUI. It exposes a full 
 | `pane-run` | Run a command in a new terminal pane, executed through the configured shell |
 | `pane-wait` | Wait for a pane's output to match a regex pattern |
 | `broadcast` | Inject text into every tagged terminal pane |
-| `layout-save` | Save the current workspace layout with a name |
-| `layout-load` | Restore a saved workspace layout by name |
-| `layout-list` | List all saved layout names |
+| `profile-save` | Save the current workspace as a named profile |
+| `profile-load` | Activate a saved profile by name |
+| `profile-list` | List all saved profile names |
 | `daemon-start` | Start the gpty GUI daemon if not running |
 | `daemon-stop` | Stop the running gpty GUI |
 | `daemon-status` | Check if the GUI daemon is running |
@@ -57,14 +57,14 @@ gpty is a multi-PTY terminal emulator with a tiling grid GUI. It exposes a full 
 {"method": "tools/call", "params": {"name": "inject", "arguments": {"pane_id": "T2", "text": "echo hello"}}}
 ```
 
-### Save/restore workspace layouts
+### Save and activate profiles
 
 ```json
-// Save the current layout
-{"method": "tools/call", "params": {"name": "layout-save", "arguments": {"name": "debug-session"}}}
+// Save the current workspace as a profile
+{"method": "tools/call", "params": {"name": "profile-save", "arguments": {"name": "debug-session"}}}
 
-// Restore it later
-{"method": "tools/call", "params": {"name": "layout-load", "arguments": {"name": "debug-session"}}}
+// Activate it later
+{"method": "tools/call", "params": {"name": "profile-load", "arguments": {"name": "debug-session"}}}
 ```
 
 ### Lifecycle management

@@ -49,7 +49,7 @@ New panes join the tiling grid; there is no separate "split right" mode to learn
 Two ideas are worth separating now, because the rest of the app depends on them:
 
 - A **layout** is the arrangement of panes in one workspace. The palette's `save` writes the whole workspace set to disk, and `load` reloads it; the workspace you close is auto-saved too.
-- A **profile** is a reusable named set of tiles. Save one from the sidebar's Profiles `+` button, or with `gpty layout save <name>` (the CLI keeps the older "layout" verb; the record is a profile).
+- A **profile** is a reusable named set of tiles. Save one from the sidebar's Profiles `+` button, or with `gpty profile save <name>`.
 - A **workspace** is a tab containing its own layout and its own default directory. Create one from the sidebar; switch with `Ctrl+PageUp` / `Ctrl+PageDown`.
 
 The workspace you close is auto-saved and restored on the next launch. [[layout]], [[workspace]], and [[profile]] explain the differences; [[profile|Profiles]] also lists the shipped **Agent Workspace**.

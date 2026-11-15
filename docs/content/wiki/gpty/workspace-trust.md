@@ -29,7 +29,7 @@ The prompt appears when a restore would spawn a different program or extra argum
 
 On the workspace path the dialog describes every affected workspace. Cancelling does not run the file's programs: the affected workspaces are rebuilt with their panes dropped, so the app opens without the untrusted spawns.
 
-Over IPC, `layoutLoad` **refuses** an untrusted profile instead of prompting. A caller cannot answer a dialog, so naming a profile is not consent to what the file asks for. It loads only when the consent record already covers the content.
+Over IPC, `profileLoad` **refuses** an untrusted profile instead of prompting. A caller cannot answer a dialog, so naming a profile is not consent to what the file asks for. It loads only when the consent record already covers the content.
 
 ## The consent key
 

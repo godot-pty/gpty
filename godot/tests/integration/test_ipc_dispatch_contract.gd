@@ -535,7 +535,7 @@ func _dirty(pane: Control) -> void:
 func test_kill_pane_refuses_a_pane_holding_unsaved_work():
 	# A caller cannot answer the pane's Save/Discard dialog, so a pane with
 	# unsaved work is refused rather than silently thrown away — the rule
-	# `layoutLoad` already applies to an untrusted profile.
+	# `profileLoad` already applies to an untrusted profile.
 	var wiki = _spawn("wiki")
 	_dirty(wiki)
 	var wiki_id := str(wiki.attachment_id)
@@ -549,7 +549,7 @@ func test_kill_pane_refuses_a_pane_holding_unsaved_work():
 	var killed = WorkspaceIpcHandlers.handle(_ws, "killPane", {"pane_id": wiki_id})
 	assert_true(killed.get("success", false), "a clean pane kills as before")
 
-func test_layout_load_refuses_while_a_pane_holds_unsaved_work():
+func test_profile_load_refuses_while_a_pane_holds_unsaved_work():
 	# Activating a profile resets the active workspace, so the same refusal
 	# applies. The probe profile is empty, so nothing about it is untrusted and
 	# nothing spawns — the unsaved pane is the only thing that can refuse.
@@ -557,12 +557,12 @@ func test_layout_load_refuses_while_a_pane_holds_unsaved_work():
 	var wiki = _spawn("wiki")
 	_dirty(wiki)
 
-	var refused = WorkspaceIpcHandlers.handle(_ws, "layoutLoad", {"name": "Close guard probe"})
+	var refused = WorkspaceIpcHandlers.handle(_ws, "profileLoad", {"name": "Close guard probe"})
 	assert_true(refused.has("error"), "a load over unsaved work must refuse")
 	assert_true(is_instance_valid(wiki), "and nothing may be reset")
 
 	wiki._saved_text = wiki._editor.text
-	var loaded = WorkspaceIpcHandlers.handle(_ws, "layoutLoad", {"name": "Close guard probe"})
+	var loaded = WorkspaceIpcHandlers.handle(_ws, "profileLoad", {"name": "Close guard probe"})
 	assert_true(loaded.get("success", false), "a clean workspace loads as before")
 	await get_tree().process_frame
 	assert_false(is_instance_valid(wiki), "and the load really did replace the pane set")
@@ -597,37 +597,37 @@ func test_unknown_method_answers_method_not_found():
 	assert_true(result.has("error"), "an unknown method must answer an error")
 	assert_eq(int(result["error"]["code"]), -32601, "unknown methods answer JSON-RPC -32601")
 
-# ── layoutList / layoutLoad ────────────────────────────────────────────
+# ── profileList / profileLoad ────────────────────────────────────────────
 
-func test_layout_list_reports_the_profiles_the_store_holds():
+func test_profile_list_reports_the_profiles_the_store_holds():
 	ProfileManager.add_profile("contract-listed", [])
-	var result = WorkspaceIpcHandlers.handle(_ws, "layoutList", {})
-	assert_true(result is Dictionary and result.has("layouts"), "layoutList must answer layouts")
+	var result = WorkspaceIpcHandlers.handle(_ws, "profileList", {})
+	assert_true(result is Dictionary and result.has("profiles"), "profileList must answer profiles")
 	assert_true(
-		(result["layouts"] as Array).has("contract-listed"),
-		"a saved profile must appear in layoutList"
+		(result["profiles"] as Array).has("contract-listed"),
+		"a saved profile must appear in profileList"
 	)
 
-func test_layout_save_answers_the_name_the_store_kept():
+func test_profile_save_answers_the_name_the_store_kept():
 	# A save captures the active workspace, so empty it first: the two saves
 	# then differ in nothing but their name, and the answered profile loads
 	# without a trust prompt.
 	for pane in _ws._pane_bodies(_ws._active_workspace()):
 		_ws._kill_now(pane)
-	var first = WorkspaceIpcHandlers.handle(_ws, "layoutSave", {"name": "contract-dedupe"})
+	var first = WorkspaceIpcHandlers.handle(_ws, "profileSave", {"name": "contract-dedupe"})
 	assert_true(first.get("success", false), "the first save must succeed")
 	assert_eq(str(first.get("name", "")), "contract-dedupe")
-	var second = WorkspaceIpcHandlers.handle(_ws, "layoutSave", {"name": "contract-dedupe"})
+	var second = WorkspaceIpcHandlers.handle(_ws, "profileSave", {"name": "contract-dedupe"})
 	assert_true(second.get("success", false), "the second save must succeed too")
 	assert_eq(str(second.get("name", "")), "contract-dedupe (2)",
 		"a duplicate name is stored with a suffix, so the answer must name that row")
-	var listed = WorkspaceIpcHandlers.handle(_ws, "layoutList", {})
-	assert_true((listed.get("layouts", []) as Array).has("contract-dedupe (2)"),
-		"the answered name must be the one layoutList reports")
-	var loaded = WorkspaceIpcHandlers.handle(_ws, "layoutLoad", {"name": "contract-dedupe (2)"})
+	var listed = WorkspaceIpcHandlers.handle(_ws, "profileList", {})
+	assert_true((listed.get("profiles", []) as Array).has("contract-dedupe (2)"),
+		"the answered name must be the one profileList reports")
+	var loaded = WorkspaceIpcHandlers.handle(_ws, "profileLoad", {"name": "contract-dedupe (2)"})
 	assert_true(loaded.get("success", false), "the answered name must load")
 
-func test_layout_load_refuses_an_untrusted_profile():
+func test_profile_load_refuses_an_untrusted_profile():
 	ProfileManager.add_profile("contract-untrusted", [
 		{
 			"col": 0, "row": 0, "cspan": 60, "rspan": 60,
@@ -636,7 +636,7 @@ func test_layout_load_refuses_an_untrusted_profile():
 	])
 	var tiles_before: int = _ws._tm.tiles.size()
 
-	var refused = WorkspaceIpcHandlers.handle(_ws, "layoutLoad", {"name": "contract-untrusted"})
+	var refused = WorkspaceIpcHandlers.handle(_ws, "profileLoad", {"name": "contract-untrusted"})
 	assert_true(refused.has("error"), "an untrusted profile must be refused over IPC")
 	assert_string_contains(str(refused["error"]["message"]), "GUI", "the refusal must point at the GUI")
 	assert_eq(_ws._tm.tiles.size(), tiles_before, "a refused load must not touch the workspace")
@@ -644,7 +644,7 @@ func test_layout_load_refuses_an_untrusted_profile():
 	ProfileManager.add_profile("contract-trusted", [
 		{"col": 0, "row": 0, "cspan": 60, "rspan": 60, "settings": {"type": "code_viewer"}},
 	])
-	var loaded = WorkspaceIpcHandlers.handle(_ws, "layoutLoad", {"name": "contract-trusted"})
+	var loaded = WorkspaceIpcHandlers.handle(_ws, "profileLoad", {"name": "contract-trusted"})
 	assert_true(loaded.get("success", false), "a trusted profile must still load over IPC")
 	assert_eq(_ws._tm.tiles.size(), 1, "the trusted profile replaces the layout")
 
@@ -753,9 +753,9 @@ func test_a_user_profile_cannot_claim_where_it_came_from():
 	assert_false(_ws._profile_consented(claimed),
 		"fields inside a user profile never choose which record is consulted")
 
-func test_layout_load_sees_installed_plugin_profiles():
+func test_profile_load_sees_installed_plugin_profiles():
 	# The merge this item adds is what makes a plugin profile reachable by
-	# name over IPC — layoutList offers it and layoutLoad gates on the
+	# name over IPC — profileList offers it and profileLoad gates on the
 	# plugin's record. A plugin id of its own, so no other case in this
 	# script's shared consent store can stand in for the answer.
 	ProfileManager.plugin_profiles_source = func(): return JSON.stringify([{
@@ -766,18 +766,18 @@ func test_layout_load_sees_installed_plugin_profiles():
 	}])
 	ProfileManager.refresh_plugin_profiles()
 
-	var listed = WorkspaceIpcHandlers.handle(_ws, "layoutList", {})
-	assert_true(listed is Dictionary and listed.has("layouts"), "layoutList must answer layouts")
-	assert_true((listed["layouts"] as Array).has("contract-plugin-load"),
+	var listed = WorkspaceIpcHandlers.handle(_ws, "profileList", {})
+	assert_true(listed is Dictionary and listed.has("profiles"), "profileList must answer profiles")
+	assert_true((listed["profiles"] as Array).has("contract-plugin-load"),
 		"an installed plugin profile must be listed")
 
-	var refused = WorkspaceIpcHandlers.handle(_ws, "layoutLoad", {"name": "contract-plugin-load"})
+	var refused = WorkspaceIpcHandlers.handle(_ws, "profileLoad", {"name": "contract-plugin-load"})
 	assert_true(refused.has("error"), "an unapproved plugin profile must be refused over IPC")
 	assert_string_contains(str(refused["error"]["message"]), "GUI",
 		"the refusal must point at the GUI")
 
 	TrustedStore.approve_plugin("godot-pty/gpty-herdr", "c0ffee123456", ["-i"])
-	var loaded = WorkspaceIpcHandlers.handle(_ws, "layoutLoad", {"name": "contract-plugin-load"})
+	var loaded = WorkspaceIpcHandlers.handle(_ws, "profileLoad", {"name": "contract-plugin-load"})
 	assert_true(loaded.get("success", false),
 		"an approved plugin profile must load over IPC")
 	assert_eq(_ws._tm.tiles.size(), 1, "the plugin profile replaces the layout")
@@ -1018,7 +1018,7 @@ func test_a_graph_request_is_answered_before_its_own_deadline():
 	_ws._kill_now(wiki)
 
 
-## The guard `killPane` and `layoutLoad` already apply: a caller cannot answer
+## The guard `killPane` and `profileLoad` already apply: a caller cannot answer
 ## the save/discard question, so the swap is refused rather than asked - and a
 ## refused swap leaves the open note exactly where it was.
 func test_pane_view_refuses_to_replace_an_unsaved_note():
@@ -1111,8 +1111,8 @@ func test_every_refusal_arm_answers_the_code_its_kind_owns():
 		["killPane", {}, -32602, "Pane target required"],
 		["inject", {"pane_id": "@terminal", "text": "x".repeat(65537)}, -32602, "exceeds 64 KiB"],
 		["broadcast", {}, -32602, "Invalid broadcast request"],
-		["layoutSave", {}, -32602, "Profile name required"],
-		["layoutSave", {"name": "x".repeat(129)}, -32602, "Profile name too long"],
+		["profileSave", {}, -32602, "Profile name required"],
+		["profileSave", {"name": "x".repeat(129)}, -32602, "Profile name too long"],
 		["conceptToggle", {}, -32602, "Concept name required"],
 		["conceptToggle", {"name": "gpty-no-such-concept"}, -32602, "Unknown concept"],
 		["pluginsChanged", {"action": "nuke", "id": "ok-id"}, -32602, "Unknown plugin action"],
@@ -1130,7 +1130,7 @@ func test_every_refusal_arm_answers_the_code_its_kind_owns():
 		["paneSet", {"pane_id": "nosuchpane", "settings": {"pane_name": "x"}}, -32000, "not found"],
 		["paneView", {"pane_id": "@viewer", "graph": true}, -32000, "wiki panes"],
 		["killPane", {"pane_id": "nosuchpane"}, -32000, "not found"],
-		["layoutLoad", {"name": "gpty-no-such-profile"}, -32000, "not found"],
+		["profileLoad", {"name": "gpty-no-such-profile"}, -32000, "not found"],
 		["movePane", {}, -32602, "Workspace name required"],
 		["movePane", {"workspace": "x"}, -32602, "Pane id or label required"],
 		["movePane", {"pane": ["nosuchpane"],

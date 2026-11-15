@@ -300,7 +300,7 @@ func test_a_plugin_profile_yields_a_name_the_user_takes_later():
 	# The user saves their own "OMP" while the plugin is installed. The name is
 	# theirs, so the plugin yields it now — not at the next launch, where
 	# `get_all_profiles` would have listed the user first and resolved a click
-	# on the user's row (and `layoutLoad "OMP"`) to the plugin's profile.
+	# on the user's row (and `profileLoad "OMP"`) to the plugin's profile.
 	ProfileManager.add_profile("OMP", [])
 
 	var all := ProfileManager.get_all_profiles()

@@ -1,6 +1,6 @@
 # gpty-cli
 
-CLI for controlling the gpty terminal workspace over JSON-RPC IPC. Connects to a running gpty GUI instance; only `new-pane` and `layout load` may start one on demand, and `--no-daemon` refuses even those (a query must not open a workspace). Pane types are validated client-side with "did you mean?" suggestions before any IPC round-trip.
+CLI for controlling the gpty terminal workspace over JSON-RPC IPC. Connects to a running gpty GUI instance; only `new-pane` and `profile load` may start one on demand, and `--no-daemon` refuses even those (a query must not open a workspace). Pane types are validated client-side with "did you mean?" suggestions before any IPC round-trip.
 
 ## Getting it
 
@@ -89,10 +89,10 @@ gpty daemon start
 gpty daemon status
 gpty daemon stop
 
-# Save, load, and list workspace layouts
-gpty layout save mysetup
-gpty layout load mysetup
-gpty layout list
+# Save, load, and list profiles
+gpty profile save mysetup
+gpty profile load mysetup
+gpty profile list
 
 # Install, manage, and run plugins
 gpty plugin install godot-pty/gpty-omp

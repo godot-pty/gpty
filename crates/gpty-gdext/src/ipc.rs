@@ -306,9 +306,9 @@ pub async fn start_ipc_server_inner(socket_path: &str) {
         "paneRun",
         "paneWait",
         "broadcast",
-        "layoutSave",
-        "layoutLoad",
-        "layoutList",
+        "profileSave",
+        "profileLoad",
+        "profileList",
         "conceptList",
         "conceptToggle",
         // The link graph's authored layer (`gpty vault weight`): the store is
@@ -451,7 +451,7 @@ mod tests {
         assert_eq!(fallback_timeout("paneWait"), PANE_WAIT_TIMEOUT);
         assert_eq!(fallback_timeout("pluginInstall"), PLUGIN_REVIEW_TIMEOUT);
         assert_eq!(fallback_timeout("newPane"), GDS_RESPONSE_TIMEOUT);
-        assert_eq!(fallback_timeout("layoutLoad"), GDS_RESPONSE_TIMEOUT);
+        assert_eq!(fallback_timeout("profileLoad"), GDS_RESPONSE_TIMEOUT);
         assert!(
             PANE_WAIT_TIMEOUT >= std::time::Duration::from_secs(60),
             "the paneWait fallback must outlive the method's own deadline"

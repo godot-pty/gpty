@@ -1123,7 +1123,7 @@ func _attachment_id_in_use(id: String, except: Control) -> bool:
 ## rewrite the set's companion references through the same map.
 ##
 ## A profile can be activated in more than one workspace, so its saved ids
-## (e.g. `omp-terminal`) collide with the instance already live elsewhere. The
+## (e.g. `agent-terminal`) collide with the instance already live elsewhere. The
 ## attach path renames the duplicate, but by then a later tile may already have
 ## stored the original id as its `source_attachment_id`: the Reasoning pane
 ## would follow the *other* workspace's terminal. Inside a workspace the first
@@ -2095,7 +2095,7 @@ static func _plan_approved(approved, key: String) -> bool:
 		return approved.has(key)
 	return false
 
-## Consent check for profile activation (and the IPC layoutLoad gate).
+## Consent check for profile activation (and the IPC profileLoad gate).
 ##
 ## Trust comes from `_origin` — the stamp `ProfileManager.get_all_profiles`
 ## puts on an entry — and never from fields inside the profile: a user file
@@ -2202,7 +2202,7 @@ func _show_multi_trust_dialog(entries: Array[Dictionary], active: int, untrusted
 		if lines.size() >= PaneTypes.TRUST_MAX_DETAIL_LINES:
 			break
 	var details := "\n".join(lines)
-	AppDialog.set_body(dialog, "This layout contains %d workspace(s) whose panes start a different program or pass extra arguments than your current default shell (%s).\n\n%s\n\nRestore them anyway?" % [untrusted.size(), SettingsManager.cfg_shell_command, details])
+	AppDialog.set_body(dialog, "This saved workspace set contains %d workspace(s) whose panes start a different program or pass extra arguments than your current default shell (%s).\n\n%s\n\nRestore them anyway?" % [untrusted.size(), SettingsManager.cfg_shell_command, details])
 	dialog.ok_button_text = "Restore"
 	dialog.cancel_button_text = "Cancel"
 	dialog.confirmed.connect(func():

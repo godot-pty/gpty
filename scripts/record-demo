@@ -382,16 +382,16 @@ media)
 profiles)
     # Both profiles ship in the binary (`res://profiles.default.json`) and are
     # program-free, so neither needs a running agent: the panes open on their
-    # own idle state and `layoutLoad` answers with the toast that names the
+    # own idle state and `profileLoad` answers with the toast that names the
     # profile. Recorded at 1200 px because the Agent Workspace is three panes.
     caption "Agent Workspace"
-    type_line "gpty layout load 'Agent Workspace'"
+    type_line "gpty profile load 'Agent Workspace'"
     sleep 3.5
     # The load replaced the workspace, and the pane this script types into
     # with it: resolve the new terminal before the next beat.
     AGENT="$(label_of terminal)"
     caption "Knowledge Base"
-    type_line "gpty layout load 'Knowledge Base'"
+    type_line "gpty profile load 'Knowledge Base'"
     sleep 3.5
     caption "gPTY - github.com/godot-pty/gpty"
     sleep 2

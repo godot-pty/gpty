@@ -189,7 +189,7 @@ These are load-bearing guards. Reports that require removing one of them should 
   limitations.
 - **Restored layouts and profiles**: tile types, settings, and grid geometry are validated; a tile
   that starts a different program, passes extra arguments, or carries a `launch` line raises the
-  Workspace Trust prompt before it runs, and `layoutLoad` over the control socket refuses such a
+  Workspace Trust prompt before it runs, and `profileLoad` over the control socket refuses such a
   profile (a caller cannot answer a
   dialog, so naming the profile is not consent to what the file asks for) - unless the consent memory
   covers it: a pre-seed built-in's name and app version plus the spawn plans (program and argv, a

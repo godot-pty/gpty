@@ -29,7 +29,7 @@ The chosen stack also brings with it more costs, much more than terminal emulato
 
 </details>
 
-- **Tiling grid** - split, resize, and rearrange independent shell sessions; save and reload named layouts, workspaces (tab sets), and profiles.
+- **Tiling grid** - split, resize, and rearrange independent shell sessions; save and reload workspaces (tab sets) and named profiles.
 - **Emulation** - `alacritty_terminal` grid with `16`/`256`/`true color`, scrollback with regex search, and wrapped text selection.
 - **Memory** - scrollback, settings, and workspaces restore on restart, with full-text search across each pane's history.
 - **File Tree** - Native Godot OS file tree browser.
@@ -169,7 +169,7 @@ The binaries are not code-signed (see [SECURITY.md](SECURITY.md)).
 
 ### CLI
 
-The `gpty` binary controls a running GUI over JSON-RPC IPC, and every release bundle ships it next to the GUI. It is also on crates.io - `cargo install gpty` puts the same binary on `PATH` (a Rust toolchain and a C compiler are required, for its bundled SQLite), and that copy is what an MCP client launches for `gpty mcp`. The CLI starts one on demand only for commands a fresh workspace can satisfy - `new-pane` and `layout load` - while `gpty daemon start` starts one explicitly and `--no-daemon` never starts one. Every other command needs a workspace that already exists, so it fails with `no gpty GUI is running (start one with \`gpty daemon start\`)` instead of opening a window it cannot use. Building from source (`cargo build -p gpty`, or `cargo build --workspace`) is only needed when working on the CLI itself; if you install it that way, **reinstall it after a version bump** (`cargo install --path crates/gpty-cli --force`). A stale `gpty` earlier on `PATH` shadows the release's CLI and fails opaquely (a subcommand it lacks dies in clap before any IPC), which is why the CLI warns once, on stderr, when it sees that the running GUI's version or IPC protocol differs from its own - the warning names both sides, but the reinstall is the fix.
+The `gpty` binary controls a running GUI over JSON-RPC IPC, and every release bundle ships it next to the GUI. It is also on crates.io - `cargo install gpty` puts the same binary on `PATH` (a Rust toolchain and a C compiler are required, for its bundled SQLite), and that copy is what an MCP client launches for `gpty mcp`. The CLI starts one on demand only for commands a fresh workspace can satisfy - `new-pane` and `profile load` - while `gpty daemon start` starts one explicitly and `--no-daemon` never starts one. Every other command needs a workspace that already exists, so it fails with `no gpty GUI is running (start one with \`gpty daemon start\`)` instead of opening a window it cannot use. Building from source (`cargo build -p gpty`, or `cargo build --workspace`) is only needed when working on the CLI itself; if you install it that way, **reinstall it after a version bump** (`cargo install --path crates/gpty-cli --force`). A stale `gpty` earlier on `PATH` shadows the release's CLI and fails opaquely (a subcommand it lacks dies in clap before any IPC), which is why the CLI warns once, on stderr, when it sees that the running GUI's version or IPC protocol differs from its own - the warning names both sides, but the reinstall is the fix.
 
 Once the GUI is running (launched from Godot or a release binary), the CLI connects over a Unix socket (`$XDG_RUNTIME_DIR/gpty.sock` on Linux, or `GPTY_SOCKET` env var):
 
@@ -215,10 +215,10 @@ gpty vault read <vault> <path>
 # Close a pane
 gpty kill-pane T1
 
-# Save and load named layouts
-gpty layout save my-setup
-gpty layout load my-setup
-gpty layout list
+# Save, load, and activate profiles
+gpty profile save my-setup
+gpty profile load my-setup
+gpty profile list
 
 # Install a plugin (reviewed in the GUI - its actions run as you)
 gpty plugin install godot-pty/gpty-omp
@@ -247,7 +247,7 @@ gpty ships an MCP (Model Context Protocol) server so AI agents and coding harnes
 {"mcpServers": {"gpty": {"command": "gpty", "args": ["mcp"]}}}
 ```
 
-- **Direct**: run `gpty mcp` over stdio - exposes a tool per CLI subcommand (`new-pane`, `list-panes`, `workspace-list`, `kill-pane`, `focus-pane`, `move-pane`, `inject`, `pane-read`, `pane-status`, `pane-view`, `pane-set`, `pane-settings`, `pane-run`, `pane-wait`, `broadcast`, `vault-search`, `vault-read`, `vault-weight`, `layout-*`, `daemon-*`, `concept-*`, `version`).
+- **Direct**: run `gpty mcp` over stdio - exposes a tool per CLI subcommand (`new-pane`, `list-panes`, `workspace-list`, `kill-pane`, `focus-pane`, `move-pane`, `inject`, `pane-read`, `pane-status`, `pane-view`, `pane-set`, `pane-settings`, `pane-run`, `pane-wait`, `broadcast`, `vault-search`, `vault-read`, `vault-weight`, `profile-*`, `daemon-*`, `concept-*`, `version`).
 - **Manifest**: `gpty schema --format mcp` prints the MCP tool manifest (JSON Schema, works without a running GUI) for hand-off to agent configurations.
 
 Tool schemas are generated from the same clap definitions as the CLI (`crates/gpty-cli/src/commands/schema.rs`), so they cannot drift from `gpty --help`.

@@ -6,7 +6,6 @@ pub mod daemon;
 pub(crate) mod focus_pane;
 pub(crate) mod inject;
 pub(crate) mod kill_pane;
-pub(crate) mod layout;
 pub(crate) mod list_panes;
 pub mod mcp;
 pub(crate) mod move_pane;
@@ -19,6 +18,7 @@ pub(crate) mod pane_status;
 pub(crate) mod pane_view;
 pub(crate) mod pane_wait;
 pub mod plugin;
+pub(crate) mod profile;
 pub mod schema;
 pub(crate) mod settings_args;
 pub(crate) mod state;
@@ -98,7 +98,7 @@ pub async fn dispatch(cmd: &Commands, client: &IpcClient, json: bool) -> anyhow:
         Commands::Broadcast { tags, text } => broadcast::run(client, tags, text, json).await,
         Commands::Vault { action } => vault::run(client, action, json).await,
         Commands::Concept { action } => concept::run(client, action, json).await,
-        Commands::Layout { action } => layout::run(client, action, json).await,
+        Commands::Profile { action } => profile::run(client, action, json).await,
         Commands::Schema { .. }
         | Commands::Version
         | Commands::Mcp
@@ -129,7 +129,7 @@ pub fn format_response(resp: &Response, json: bool) -> anyhow::Result<()> {
 
 /// Propagate a response's error after the caller has emitted its output.
 ///
-/// Custom-output commands (`list-panes`, `layout list`, the all-panes
+/// Custom-output commands (`list-panes`, `profile list`, the all-panes
 /// `pane-status`) print their own shapes and share this so the failure
 /// message and the exit status stay one definition.
 pub fn check_error(resp: &Response) -> anyhow::Result<()> {

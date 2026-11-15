@@ -83,7 +83,7 @@ pub fn tool_defs(root: &clap::Command) -> Vec<ToolDef> {
         // `plugin` is the install/manage CLI: installing waits on a human
         // reading the review dialog (the `pluginInstall` handshake, which is
         // deliberately not an MCP tool — an MCP client cannot answer a
-        // dialog, the same rule that refuses `layoutLoad` on untrusted
+        // dialog, the same rule that refuses `profileLoad` on untrusted
         // profiles), and `list`/`enable`/`uninstall`/`logs` touch local
         // state, not the workspace API. `plugin run` *is* the way an action
         // reaches the MCP tool surface — each action names an advertised
@@ -91,7 +91,7 @@ pub fn tool_defs(root: &clap::Command) -> Vec<ToolDef> {
         if name == "plugin" {
             continue;
         }
-        // Flatten nested subcommands (daemon, layout) into prefixed tools
+        // Flatten nested subcommands (daemon, profile) into prefixed tools
         let nested: Vec<clap::Command> = sub.get_subcommands().cloned().collect();
         if nested.is_empty() {
             defs.push(ToolDef {
@@ -181,10 +181,10 @@ fn build_args_schema(sub: &clap::Command) -> (Map<String, Value>, Vec<String>) {
 const READ_ONLY_TOOLS: &[&str] = &[
     "concept-list",
     "daemon-status",
-    "layout-list",
     "list-panes",
     "pane-read",
     "pane-status",
+    "profile-list",
     "vault-read",
     "vault-search",
     "version",
@@ -197,8 +197,8 @@ const DESTRUCTIVE_TOOLS: &[&str] = &[
     "daemon-stop",
     "inject",
     "kill-pane",
-    "layout-load",
     "pane-run",
+    "profile-load",
 ];
 
 /// The MCP `annotations` a tool declares, from the two closed sets above.
@@ -475,10 +475,10 @@ mod tests {
         assert!(names.contains(&"daemon-start"));
         assert!(names.contains(&"daemon-stop"));
         assert!(names.contains(&"daemon-status"));
-        // Flattened layout subcommands
-        assert!(names.contains(&"layout-save"));
-        assert!(names.contains(&"layout-load"));
-        assert!(names.contains(&"layout-list"));
+        // Flattened profile subcommands
+        assert!(names.contains(&"profile-save"));
+        assert!(names.contains(&"profile-load"));
+        assert!(names.contains(&"profile-list"));
         // Self-referential tools excluded
         assert!(!names.contains(&"mcp"));
         assert!(!names.contains(&"schema"));

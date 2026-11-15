@@ -144,11 +144,11 @@
       "evidence": "godot/scenes/terminal/ipc_handlers.gd"
     },
     {
-      "id": "layout.save-load",
-      "statement": "a named layout can be saved and restored as a set of tiles",
+      "id": "profile.save-activate",
+      "statement": "a named profile can be saved from the active workspace and activated as a set of tiles",
       "status": "done",
-      "mechanism": "the tile set is serialized through the same sanitizer a restore runs, and listing names what exists",
-      "evidence": "crates/gpty-cli/src/commands/layout.rs"
+      "mechanism": "`profile save|load|list` over IPC; the tile set is serialized through the same sanitizer a restore runs, and listing names what exists",
+      "evidence": "crates/gpty-cli/src/commands/profile.rs"
     },
     {
       "id": "workspace.list",

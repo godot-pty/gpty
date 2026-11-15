@@ -10,7 +10,7 @@ The workspace — panes, their PTYs, layouts, concepts, the wiki index — lives
 
 The GUI is the single writer. A CLI invocation does not cache pane lists, hold a connection, or remember a session: it connects, sends exactly one request, reads exactly one response, exits. Two `gpty list-panes` calls a second apart are unrelated events — no login, no reconnect logic, no client-side model to go stale.
 
-The corollary is that the GUI must be running for a request to be answered. The CLI can start it on demand for two commands (`new-pane` and `layout load`); queries never spawn a window, and `--no-daemon` refuses even the two that would. The MCP server never spawns one at all.
+The corollary is that the GUI must be running for a request to be answered. The CLI can start it on demand for two commands (`new-pane` and `profile load`); queries never spawn a window, and `--no-daemon` refuses even the two that would. The MCP server never spawns one at all.
 
 ## The request path
 
@@ -84,9 +84,9 @@ The fallbacks cover sessions with no runtime directory (a cron job, a stripped l
 | `paneRun` | Run a command in a **new** terminal pane through the configured shell |
 | `paneWait` | Hold the response until recent output matches a Rust regex (100–60000 ms) |
 | `broadcast` | Inject text into every pane carrying one of the given tags |
-| `layoutSave` | Save the active workspace's tiles as a named profile |
-| `layoutLoad` | Activate a profile, replacing the active workspace's panes |
-| `layoutList` | Names of the visible profiles |
+| `profileSave` | Save the active workspace's tiles as a named profile |
+| `profileLoad` | Activate a profile, replacing the active workspace's panes |
+| `profileList` | Names of the visible profiles |
 | `conceptList` | Concept name, enabled flag, trigger, actions |
 | `conceptToggle` | Enable or disable a concept by name |
 | `vaultSearch` | FTS5 search over a Markdown vault (limit 1–500) |

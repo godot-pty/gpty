@@ -27,9 +27,9 @@ You are running inside one pane of a gPTY terminal workspace. Use the `gpty` CLI
 | `pane-view` | `gpty pane-view <pane> --graph` (or `--note <path>`, `--mode edit\|split\|preview`) |
 | `pane-set` | `gpty pane-set <pane> --setting KEY=VALUE` (repeatable) |
 | `pane-settings` | `gpty pane-settings` |
-| `layout-save` | `gpty layout save <name>` |
-| `layout-load` | `gpty layout load <name>` |
-| `layout-list` | `gpty layout list` |
+| `profile-save` | `gpty profile save <name>` |
+| `profile-load` | `gpty profile load <name>` |
+| `profile-list` | `gpty profile list` |
 | `daemon-start` | `gpty daemon start` |
 | `daemon-stop` | `gpty daemon stop` |
 | `daemon-status` | `gpty daemon status` |
@@ -40,7 +40,7 @@ You are running inside one pane of a gPTY terminal workspace. Use the `gpty` CLI
 | `vault-weight` | `gpty vault weight <vault> <src> <target> --weight N` |
 | `version` | `gpty version` |
 
-The CLI starts a GUI on demand for `new-pane` and `layout load`; the MCP
+The CLI starts a GUI on demand for `new-pane` and `profile load`; the MCP
 server never starts one implicitly - if a tool call finds no GUI, the answer
 says so and names `daemon-start`, which is the explicit bootstrap over MCP.
 

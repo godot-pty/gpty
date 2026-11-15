@@ -22,7 +22,7 @@ use serde_json::Value;
 use tempfile::TempDir;
 
 use crate::commands;
-use crate::{DaemonAction, LayoutAction, PluginAction, VaultAction};
+use crate::{DaemonAction, PluginAction, ProfileAction, VaultAction};
 
 /// A private directory for one test's artifacts; the guard deletes the tree
 /// when the test's body ends, so nothing leaks into the shared temp dir.
@@ -420,27 +420,27 @@ async fn invalid_pane_type_never_reaches_server() {
 }
 
 #[tokio::test]
-async fn layout_list_roundtrip() {
+async fn profile_list_roundtrip() {
     let calls: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
     let calls_h = Arc::clone(&calls);
     let (_tmp, socket) = start_server(
-        "layout_list",
-        vec![("layoutList", {
+        "profile_list",
+        vec![("profileList", {
             move |_params: Value| {
                 *calls_h.lock().unwrap() += 1;
-                serde_json::json!({"layouts": ["a", "b"]})
+                serde_json::json!({"profiles": ["a", "b"]})
             }
         })],
     )
     .await;
     let client = IpcClient::new(&socket, Duration::from_secs(5));
-    commands::layout::run(&client, &LayoutAction::List, true)
+    commands::profile::run(&client, &ProfileAction::List, true)
         .await
-        .expect("layout list should succeed");
+        .expect("profile list should succeed");
     assert_eq!(
         *calls.lock().unwrap(),
         1,
-        "layout list must reach the server exactly once"
+        "profile list must reach the server exactly once"
     );
 }
 
@@ -614,7 +614,7 @@ async fn json_mode_fails_on_an_rpc_error() {
     assert!(message.contains("no such note"), "got: {message}");
 }
 
-/// The custom-output commands (`layout list` prints names, not the envelope)
+/// The custom-output commands (`profile list` prints names, not the envelope)
 /// share the same rule through `check_error`.
 #[tokio::test]
 async fn json_mode_fails_a_custom_output_command_on_an_rpc_error() {
@@ -622,10 +622,10 @@ async fn json_mode_fails_a_custom_output_command_on_an_rpc_error() {
         Box::pin(async { Err(gpty_ipc::protocol::JsonRpcError::new(-32000, "refused")) })
     });
     let (_tmp, socket) =
-        start_server_with("layout_json_error", vec![("layoutList", handler)]).await;
+        start_server_with("profile_json_error", vec![("profileList", handler)]).await;
     let client = IpcClient::new(&socket, Duration::from_secs(5));
 
-    let result = commands::layout::run(&client, &LayoutAction::List, true).await;
+    let result = commands::profile::run(&client, &ProfileAction::List, true).await;
     let message = result
         .expect_err("a custom-output --json command must fail on an error response")
         .to_string();
@@ -1063,7 +1063,7 @@ fn spawn_policy_is_deliberate_per_command() {
     let cases: &[(&[&str], bool)] = &[
         // A fresh GUI can satisfy these two.
         (&["gpty", "new-pane"], true),
-        (&["gpty", "layout", "load", "Agent Workspace"], true),
+        (&["gpty", "profile", "load", "Agent Workspace"], true),
         // Everything else needs a workspace that already exists.
         (&["gpty", "list-panes"], false),
         (&["gpty", "kill-pane", "T1"], false),
@@ -1079,8 +1079,8 @@ fn spawn_policy_is_deliberate_per_command() {
         ),
         (&["gpty", "concept", "list"], false),
         (&["gpty", "concept", "toggle", "cat"], false),
-        (&["gpty", "layout", "save", "Saved"], false),
-        (&["gpty", "layout", "list"], false),
+        (&["gpty", "profile", "save", "Saved"], false),
+        (&["gpty", "profile", "list"], false),
         (&["gpty", "daemon", "status"], false),
         (&["gpty", "daemon", "stop"], false),
         (&["gpty", "mcp"], false),

@@ -38,7 +38,7 @@ The second point matters for automation: a typo in a pane type fails immediately
 | `schema` | Print JSON Schema for all commands; `--format mcp` for the MCP tool manifest |
 | `mcp` | Run as an MCP server over stdio |
 | `daemon` | `start`, `stop`, `status` |
-| `layout` | `save <name>`, `load <name>`, `list` |
+| `profile` | `save <name>`, `load <name>`, `list` |
 | `plugin` | `install <owner>/<repo>[@ref]`, `list`, `enable`/`disable <id>`, `uninstall <id>`, `logs <id>`, `run <id> <action>`, `validate <path>` |
 | `version` | Version information |
 
@@ -102,7 +102,7 @@ gpty state working
 
 ## Statelessness and auto-spawn
 
-The rule is narrow on purpose: the CLI starts the GUI only for `new-pane` and `layout load`. Both are requests whose entire meaning is "make a workspace appear" — refusing them because nothing is open would be pedantic. A query (`list-panes`, `pane-read`, `version`, `vault search`) never opens a window: a monitor that polls every second should not be able to litter the desktop with GUIs.
+The rule is narrow on purpose: the CLI starts the GUI only for `new-pane` and `profile load`. Both are requests whose entire meaning is "make a workspace appear" — refusing them because nothing is open would be pedantic. A query (`list-panes`, `pane-read`, `version`, `vault search`) never opens a window: a monitor that polls every second should not be able to litter the desktop with GUIs.
 
 `--no-daemon` disables even the two, so a CI job or a script that must not touch the user's session can guarantee it. With `--no-daemon` and no running GUI, the command fails rather than silently starting a second workspace.
 

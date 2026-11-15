@@ -415,7 +415,7 @@ func request_close(answer: Callable) -> void:
 ## The state half of the close contract: whether this pane holds work that a
 ## close would destroy. A caller that cannot show a dialog — an IPC client,
 ## which has no way to answer one — checks this and refuses instead of asking
-## (the same rule `layoutLoad` applies to an untrusted profile).
+## (the same rule `profileLoad` applies to an untrusted profile).
 func has_unsaved_state() -> bool:
 	return false
 

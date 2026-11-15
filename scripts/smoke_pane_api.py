@@ -1081,7 +1081,7 @@ class Smoke:
     # the GUI reads what `gpty plugin install` recorded in the store (it never
     # parses a manifest). Seeding a record is therefore the whole install as far
     # as the GUI is concerned — the step below proves store -> FFI ->
-    # ProfileManager -> layoutList/layoutLoad live. The state directory is
+    # ProfileManager -> profileList/profileLoad live. The state directory is
     # sandboxed (`XDG_STATE_HOME` on Unix, `LOCALAPPDATA` on Windows), so the
     # record lands in the run's temp tree.
 
@@ -2112,8 +2112,8 @@ def main() -> int:
         # above kills the `new-pane` section's pane by that id).
         smoke.enter("pane-view graph")
         smoke.result(
-            smoke.cli("layout", "load", smoke.KNOWLEDGE_PROFILE, "--json"),
-            "layout load (knowledge base)",
+            smoke.cli("profile", "load", smoke.KNOWLEDGE_PROFILE, "--json"),
+            "profile load (knowledge base)",
         )
         kb_panes = smoke.result(
             smoke.cli("list-panes", "--json"), "list-panes (knowledge)"
@@ -2137,12 +2137,12 @@ def main() -> int:
         # The profiles migration moved the five tool layouts out of the app and
         # onto plugin repos, and the GUI lists what `gpty plugin install`
         # recorded in the store (it never parses a manifest). Running this last
-        # also proves `layoutLoad` works on a plugin-sourced profile: the tile
+        # also proves `profileLoad` works on a plugin-sourced profile: the tile
         # below is a plain terminal, so activation starts a pane rather than
         # asking for trust in a dialog nobody can answer here.
         smoke.enter("plugin-provided profile")
-        names = smoke.result(smoke.cli("layout", "list", "--json"), "layout list").get(
-            "layouts", []
+        names = smoke.result(smoke.cli("profile", "list", "--json"), "profile list").get(
+            "profiles", []
         )
         smoke.require(
             smoke.PLUGIN_PROFILE in names,
@@ -2150,7 +2150,7 @@ def main() -> int:
             names,
         )
         smoke.result(
-            smoke.cli("layout", "load", smoke.PLUGIN_PROFILE, "--json"), "layout load"
+            smoke.cli("profile", "load", smoke.PLUGIN_PROFILE, "--json"), "profile load"
         )
         panes = smoke.result(smoke.cli("list-panes", "--json"), "list-panes").get(
             "panes", []
@@ -2168,7 +2168,7 @@ def main() -> int:
         # restart (before that, a running GUI read the store only at launch
         # and after an install review, so `disable` looked like it did
         # nothing). The answer to the notification is sent after the refresh,
-        # so the next `layout list` must already be missing the profile.
+        # so the next `profile list` must already be missing the profile.
         smoke.enter("plugin admin notice")
         # `plugin` prints its payload directly (no RPC envelope) — unlike the
         # pane-API commands, which answer with one.
@@ -2178,8 +2178,8 @@ def main() -> int:
             "uninstall must report the record removed",
             removed,
         )
-        names = smoke.result(smoke.cli("layout", "list", "--json"), "layout list").get(
-            "layouts", []
+        names = smoke.result(smoke.cli("profile", "list", "--json"), "profile list").get(
+            "profiles", []
         )
         smoke.require(
             smoke.PLUGIN_PROFILE not in names,
