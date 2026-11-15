@@ -187,8 +187,10 @@ func test_a_stale_override_falls_back_to_the_workspace_directory():
 ## to the workspace directory or dropped the argument.
 func test_a_real_terminal_child_starts_in_the_pane_directory():
 	if OS.get_name() == "Windows":
-		# `cmd /c cd` exits before the pane can be read, and the hold idiom
-		# differs there; the spawn plumbing above is the coverage.
+		# The hold idiom is POSIX (`sh -c "pwd; sleep"`), and a child that exits
+		# at once can be gone before the pane is read; the spawn plumbing above
+		# covers the same resolution on Windows.
+		pending("a PTY child's cwd read needs the POSIX hold idiom here")
 		return
 	var ws = await _make_workspace()
 	var container: Dictionary = ws._workspaces[0]
