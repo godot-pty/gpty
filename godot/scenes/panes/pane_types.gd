@@ -52,12 +52,21 @@ const TRUST_MAX_DETAIL_LINES := 24
 ## `PaneEnvStore`, written by the pane settings UI), so there is nothing to
 ## show. This is attacker-controlled file content rendered into a dialog, so
 ## it is escaped and capped.
+##
+## A launch tile is shown as the runner the spawn will use and the line
+## verbatim: those are the two facts a user consents to, and the plan key keeps
+## the line whole.
 static func untrusted_plan(td: Dictionary, default_program: String) -> PackedStringArray:
 	var out := PackedStringArray()
 	var settings = td.get("settings", {})
 	if not (settings is Dictionary):
 		return out
-	var program := str(settings.get("command", settings.get("shell", td.get("shell", ""))))
+	var launch := sanitize_launch(settings.get("launch", ""))
+	if launch != "":
+		out.append("program: " + _trust_text(default_program))
+		out.append("launch: " + _trust_text(launch))
+		return out
+	var program := tile_program(td, default_program)
 	if program != "" and program != default_program:
 		out.append("program: " + _trust_text(program))
 	var args = settings.get("shell_args", [])
@@ -91,11 +100,14 @@ static func _trust_text(text: String) -> String:
 ## that shipped `command` or an argv payload (`shell_args: ["-c", "…"]`).
 ## Environment is not a file decision: restore strips a tile's `shell_env`
 ## with a notice and never lets it reach a child, so there is no env clause
-## here to trigger.
+## here to trigger. A launch line always counts: it is a shell command line,
+## whatever the default program is.
 static func tile_spawns_untrusted(td: Dictionary, default_program: String) -> bool:
 	var settings = td.get("settings", {})
 	if not (settings is Dictionary):
 		return false
+	if tile_launch_line(td) != "":
+		return true
 	var program := str(settings.get("command", settings.get("shell", td.get("shell", ""))))
 	if program != "" and program != default_program:
 		return true
@@ -122,21 +134,24 @@ static func tile_spawns_untrusted(td: Dictionary, default_program: String) -> bo
 ## U+001E in a key always opens the directory, so an argv that ends in an
 ## absolute path cannot be mistaken for the directory.
 static func tile_plan_key(td: Dictionary, cwd: String = "") -> String:
-	var settings = td.get("settings", {})
-	if not (settings is Dictionary):
-		return ""
-	var program := str(settings.get("command", settings.get("shell", td.get("shell", ""))))
-	var parts: Array[String] = []
-	if program != "":
-		parts.append(program)
-	var args = settings.get("shell_args", [])
-	if args is Array:
-		for a in args:
-			if a is String:
-				parts.append(a)
-	if parts.is_empty():
-		return ""
-	var key := "\u001f".join(parts)
+	var key := LAUNCH_KEY_MARK + tile_launch_line(td)
+	if key == LAUNCH_KEY_MARK:
+		# No launch line: the program + argv form, unchanged.
+		var settings = td.get("settings", {})
+		if not (settings is Dictionary):
+			return ""
+		var program := str(settings.get("command", settings.get("shell", td.get("shell", ""))))
+		var parts: Array[String] = []
+		if program != "":
+			parts.append(program)
+		var args = settings.get("shell_args", [])
+		if args is Array:
+			for a in args:
+				if a is String:
+					parts.append(a)
+		if parts.is_empty():
+			return ""
+		key = "\u001f".join(parts)
 	if cwd != "":
 		key += "\u001e" + cwd
 	return key
@@ -316,6 +331,82 @@ static func shell_run_args(program: String, command: String) -> Array:
 	return ["-c", command]
 
 
+## A launch line is one shell command line a tile runs through the user's own
+## configured shell at spawn — the portable spelling of a startup program:
+## `omp update && exec omp` needs a shell, and the flag that runs a line
+## differs by shell family (`shell_run_args`), so a tile cannot name the argv
+## itself. One line, capped, without control characters: the same contract
+## `plugin_manifest::validate_tile` enforces.
+const LAUNCH_MAX_LENGTH := 1024
+
+## The first character of a launch tile's spawn-plan key. U+FFFD is the one
+## character every sanitizer here refuses, so no program or argv entry can
+## produce a key that begins with it: a launch plan can never collide with a
+## program+argv plan. The runner is deliberately absent — it is the user's
+## configured shell, not the file's choice, and the plugin review runs before a
+## shell could be known (`plugin.rs::tile_launch_line` mirrors this).
+const LAUNCH_KEY_MARK := "\uFFFD"
+
+## `v` as a launch line, or "" when it is not one. Trimmed; empty means
+## "inherit the pane's program". A control character (a newline would smuggle a
+## second line into a field that promises one), U+FFFD, or more than
+## `LAUNCH_MAX_LENGTH` characters is refused whole rather than truncated: a
+## truncated command is a different command.
+static func sanitize_launch(v) -> String:
+	if not (v is String):
+		return ""
+	var line: String = v.strip_edges()
+	if line == "" or line.length() > LAUNCH_MAX_LENGTH:
+		return ""
+	for ch in line:
+		var code: int = ch.unicode_at(0)
+		if code < 0x20 or (code >= 0x7f and code <= 0x9f) or ch == "\uFFFD":
+			return ""
+	return line
+
+## The launch line a tile names (its `settings.launch`), sanitized; "" when it
+## names none.
+static func tile_launch_line(td: Dictionary) -> String:
+	var settings = td.get("settings", {})
+	if not (settings is Dictionary):
+		return ""
+	return sanitize_launch(settings.get("launch", ""))
+
+## The program and argv one spawn uses. A launch line expands through `runner`
+## (the user's configured shell) and wins over the program field and argv,
+## because it is the plan. Sanitized here so every caller gets the same answer.
+static func spawn_argv(program: String, args: Array, launch: String, runner: String) -> Dictionary:
+	var line := sanitize_launch(launch)
+	if line != "":
+		var shell := runner if runner != "" else program
+		return {"program": shell, "args": shell_run_args(shell, line), "launch": line}
+	return {"program": program, "args": sanitize_shell_args(args), "launch": ""}
+
+## The program a tile starts, sanitized: `command` > `settings.shell` > the
+## tile's legacy `shell` > `default_program`. The derivation the restore path,
+## the trust dialog and the profile editor read. The plan key and the trust
+## gate keep their raw comparison, so a stored approval stays byte-identical.
+static func tile_program(td: Dictionary, default_program: String) -> String:
+	var settings = td.get("settings", {})
+	if not (settings is Dictionary):
+		settings = {}
+	var raw := str(settings.get("command", settings.get("shell", td.get("shell", ""))))
+	return sanitize_shell(raw, default_program)
+
+## The Save Profile dialog's write path: the launch field is the only key the
+## dialog owns, and an empty field is erased (inherit) rather than written as
+## "". Never writes `shell`/`shell_args` — one spelling.
+static func apply_launch_field(td: Dictionary, line: String) -> void:
+	var settings = td.get("settings", {})
+	if not (settings is Dictionary):
+		return
+	var clean := sanitize_launch(line)
+	if clean == "":
+		settings.erase("launch")
+	else:
+		settings["launch"] = clean
+	td["settings"] = settings
+
 ## Sanitize program arguments from untrusted layout/profile data: array of
 ## non-empty strings ≤4096 chars without U+FFFD, capped at 32 entries.
 static func sanitize_shell_args(raw) -> Array:
@@ -396,6 +487,10 @@ const TERMINAL_SETTINGS := {
 	# so an IPC caller setting one would change nothing it could see.
 	"rows": {"kind": "int", "min": 1, "max": PANE_MAX_ROWS, "ipc": false},
 	"cols": {"kind": "int", "min": 1, "max": PANE_MAX_COLS, "ipc": false},
+	# A shell line (the portable spelling of a startup program): the spawn
+	# expands it through the user's configured shell. `shell_args` is the
+	# explicit argv form, and a launch line wins over it.
+	"launch": {"kind": "launch"},
 	"shell_args": {"kind": "argv"},
 	"shell_command": {"kind": "shell", "file": false},
 	# Env is the user's own store (`PaneEnvStore`, keyed by the pane's id and
@@ -572,6 +667,15 @@ static func _value_for_rule(rule: Dictionary, v) -> Variant:
 			return sanitize_tags(v) if v is Array else null
 		"argv":
 			return sanitize_shell_args(v) if v is Array else null
+		"launch":
+			if not (v is String):
+				return null
+			var cleaned := sanitize_launch(v)
+			# "" is the cleared field ("inherit"); a non-empty value the
+			# sanitizer refused is dropped and named, never silently erased.
+			if cleaned == "" and str(v).strip_edges() != "":
+				return null
+			return cleaned
 		"shell":
 			if not (v is String):
 				return null

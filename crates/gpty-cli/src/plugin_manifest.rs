@@ -73,6 +73,9 @@ pub const GRID: i64 = 60;
 pub const PANE_MAX_ROWS: i64 = 500;
 pub const PANE_MAX_COLS: i64 = 2000;
 
+/// The longest `settings.launch` line a tile may name — `PaneTypes.LAUNCH_MAX_LENGTH`.
+pub const MAX_LAUNCH_LEN: usize = 1024;
+
 /// Pane types `PaneTypes.ALL` registers — the closed set a tile's `type` may
 /// name.
 ///
@@ -888,6 +891,27 @@ fn validate_tile(tile: &toml::Value, path: &str) -> ManifestResult<()> {
             ));
         }
     }
+    if let Some(v) = settings.get("launch") {
+        let Some(line) = v.as_str() else {
+            return Err(ManifestError::at(
+                &format!("{path}.settings.launch"),
+                "must be a string",
+            ));
+        };
+        let line = line.trim();
+        if line.chars().count() > MAX_LAUNCH_LEN {
+            return Err(ManifestError::at(
+                &format!("{path}.settings.launch"),
+                &format!("must be at most {MAX_LAUNCH_LEN} characters"),
+            ));
+        }
+        if line.chars().any(|ch| ch.is_control() || ch == '\u{fffd}') {
+            return Err(ManifestError::at(
+                &format!("{path}.settings.launch"),
+                "must be one line without control characters",
+            ));
+        }
+    }
     if let Some(v) = settings.get("attachment_id") {
         let Some(id) = v.as_str() else {
             return Err(ManifestError::at(
@@ -1415,6 +1439,45 @@ tiles = [
                 .expect("shell_args array")
                 .len(),
             4
+        );
+    }
+
+    /// A tile `launch` is one shell line: the manifest validator refuses what
+    /// the GUI's `sanitize_launch` refuses whole (a control character, an
+    /// oversize line, a non-string), because authored content is rejected
+    /// rather than clamped.
+    #[test]
+    fn a_launch_line_is_validated_as_one_line() {
+        let m = parse(
+            r#"id = "a/b"
+name = "x"
+version = "1.0.0"
+min_gpty_version = "0.5.5"
+[[profiles]]
+name = "Launch"
+tiles = [
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "terminal", launch = "omp update && exec omp" } },
+]
+"#,
+        );
+        assert_eq!(
+            m.profiles[0].tiles[0]["settings"]["launch"].as_str(),
+            Some("omp update && exec omp")
+        );
+        rejects(
+            "id = \"a/b\"\nname = \"x\"\nversion = \"1.0.0\"\nmin_gpty_version = \"0.5.5\"\n[[profiles]]\nname = \"P\"\ntiles = [{ settings = { type = \"terminal\", launch = \"a\\nb\" } }]\n",
+            "one line",
+        );
+        rejects(
+            "id = \"a/b\"\nname = \"x\"\nversion = \"1.0.0\"\nmin_gpty_version = \"0.5.5\"\n[[profiles]]\nname = \"P\"\ntiles = [{ settings = { type = \"terminal\", launch = 7 } }]\n",
+            "must be a string",
+        );
+        let long = "x".repeat(MAX_LAUNCH_LEN + 1);
+        rejects(
+            &format!(
+                "id = \"a/b\"\nname = \"x\"\nversion = \"1.0.0\"\nmin_gpty_version = \"0.5.5\"\n[[profiles]]\nname = \"P\"\ntiles = [{{ settings = {{ type = \"terminal\", launch = \"{long}\" }} }}]\n"
+            ),
+            "at most",
         );
     }
 

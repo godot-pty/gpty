@@ -600,6 +600,52 @@ class Smoke:
         )
         self.cli("kill-pane", pane_id)
 
+    def new_pane_launch(self) -> None:
+        """A tile's `launch` line is a shell line run through the configured shell.
+
+        The profile/layout spelling for a portable startup command: the tile
+        carries one line and the spawn expands it with the user's own shell
+        (`-c`, `/c` on cmd.exe). `--setting` is the closed table Pane Settings
+        writes, so this is the same door a user's field goes through.
+        """
+        self.enter("new-pane --setting launch")
+        separator = "&" if os.name == "nt" else ";"
+        line = f"echo SMOKE_LAUNCH_ONE{separator} echo SMOKE_LAUNCH_TWO"
+        payload = self.result(
+            self.cli(
+                "new-pane", "-t", "terminal", "--setting", "launch=" + line, "--json"
+            ),
+            "new-pane --setting launch",
+        )
+        pane_id = str(payload.get("pane_id", ""))
+        self.require(bool(pane_id), "new-pane must answer a pane", payload)
+        self.require(
+            (payload.get("settings") or {}).get("launch") == line,
+            "the answer must read the launch line back",
+            payload,
+        )
+        self.require(
+            self.wait_for_output(pane_id, "SMOKE_LAUNCH_TWO").get("matched") is True,
+            "a launch line must run in the new pane",
+            payload,
+        )
+        text = self.read_pane(pane_id)
+        self.require(
+            "SMOKE_LAUNCH_ONE" in text and "SMOKE_LAUNCH_TWO" in text,
+            "every command of the line must reach the pane",
+            text[-400:],
+        )
+        cleared = self.result(
+            self.cli("pane-set", pane_id, "--setting", "launch=", "--json"),
+            "pane-set (clear launch)",
+        )
+        self.require(
+            "launch" not in (cleared.get("settings") or {}),
+            "clearing the launch line must drop it from the saved tile",
+            cleared,
+        )
+        self.cli("kill-pane", pane_id)
+
     def subscribe(self) -> str:
         """Wait for the event listener, then subscribe to it.
 
@@ -1219,6 +1265,7 @@ def main() -> int:
 
         # ── new-pane --command runs a command line, not a program ─────
         smoke.new_pane_command()
+        smoke.new_pane_launch()
 
         # ── new-pane (the default shell for this platform) ─────────────
         smoke.enter("new-pane")

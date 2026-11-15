@@ -94,6 +94,11 @@ var color_scheme_path: String = "":
 @export var shell_command: String = SettingsManager.default_shell_command()
 @export var shell_args: Array = []  # program arguments; ["-c", cmd] = run through shell
 @export var shell_env := ""
+## The launch line this pane runs at its next start: one shell line, expanded
+## through the user's configured shell (`PaneTypes.spawn_argv`). Empty means
+## "the program in `shell_command`". Spawn-time state, like `rows`/`cols`:
+## setting it never changes the child already running here.
+var launch: String = ""
 ## The owning workspace's directory. Set by the workspace before this pane
 ## enters the tree, and deliberately never part of a profile or saved tile:
 ## a profile is a layout template, while the directory belongs to the
@@ -628,7 +633,13 @@ func _start_child_if_ready(size_hint := Vector2.ZERO) -> void:
 		# grid has never positioned this tile): wait for one.
 		return
 	_started = true
-	_start_error = str(_terminal.start_shell(shell_command, rows, cols, shell_env, attachment_id, SettingsManager.cfg_history_lines, JSON.stringify(shell_args), workspace_cwd))
+	var plan := PaneTypes.spawn_argv(
+		shell_command, shell_args, launch, SettingsManager.cfg_shell_command)
+	var plan_program: String = plan["program"]
+	var plan_args: Array = plan["args"]
+	_start_error = str(_terminal.start_shell(
+		plan_program, rows, cols, shell_env, attachment_id,
+		SettingsManager.cfg_history_lines, JSON.stringify(plan_args), workspace_cwd))
 	if _start_error != "":
 		# No child: nothing to flush into and no scheme to apply. Whoever
 		# hears this closes the pane — a tile with no child would draw an
@@ -699,8 +710,13 @@ func _get_layout_state() -> Dictionary:
 	var state = super._get_layout_state()
 	# `shell_env` is deliberately absent: a saved file must not carry env.
 	# The pane's own env lives in PaneEnvStore, keyed by attachment_id.
+	var launch_line := PaneTypes.sanitize_launch(launch)
+	# A launch line is the whole plan: its runner is the user's own shell, so
+	# no saved program or argv can disagree with it.
+	state.merge(
+		{"launch": launch_line} if launch_line != ""
+		else {"shell": shell_command, "shell_args": shell_args.duplicate()})
 	state.merge({
-		"shell": shell_command, "shell_args": shell_args.duplicate(),
 		"rows": rows, "cols": cols,
 		# `color_scheme_path` is deliberately absent: a file may not name a
 		# scheme (PaneTypes keeps it runtime-only), and on restore the global
@@ -2050,6 +2066,21 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	v.add_child(HSeparator.new())
 
 	# ── Shell ──
+	# The one writer of a spawn plan a user can reach. Spawn-time, not live:
+	# the child already running is a different process, and replacing it would
+	# discard its scrollback.
+	var launch_le = LineEdit.new()
+	launch_le.name = "LaunchCommand"
+	launch_le.text = launch
+	launch_le.placeholder_text = "Your shell (%s)" % SettingsManager.cfg_shell_command
+	_make_row(v, "Launch command:", launch_le, panel)
+	var launch_hint = Label.new()
+	launch_hint.text = "Runs through your shell at this pane's next start — it does not change the program already running here."
+	launch_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	launch_hint.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
+	launch_hint.theme_type_variation = UiTheme.MUTED_LABEL
+	v.add_child(launch_hint)
+
 	var env_te = TextEdit.new()
 	env_te.text = PaneEnvStore.env_for(attachment_id)
 	env_te.placeholder_text = "KEY=value (one per line) — empty inherits the global environment"
@@ -2166,6 +2197,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"pane_name": name_le.text.strip_edges(),
 			"attachment_id": PaneTypes.sanitize_attachment_id(attach_le.text.strip_edges()),
 			"font_size": int(font_spin.value),
+			"launch": launch_le.text.strip_edges(),
 			"shell_env": env_te.text,
 			"cursor_shape": cursor_shape_opt.selected,
 			"cursor_blink": cursor_blink_cb.button_pressed,

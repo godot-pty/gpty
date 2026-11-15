@@ -13,6 +13,9 @@ class FakePanePanel extends Control:
 
 	func _init():
 		_debounce_timer = Timer.new()
+		# A real panel's timer is a child; the builder connects every field to
+		# `start()`, so a tree-less Timer would log an error on the first edit.
+		add_child(_debounce_timer)
 
 
 func _option_with_item(root: Node, text: String) -> OptionButton:
@@ -21,6 +24,11 @@ func _option_with_item(root: Node, text: String) -> OptionButton:
 		for i in opt.item_count:
 			if opt.get_item_text(i) == text:
 				return opt
+	return null
+
+func _line_edit_named(root: Node, node_name: String) -> LineEdit:
+	for node in root.find_children(node_name, "LineEdit", true, false):
+		return node as LineEdit
 	return null
 
 func before_each():
@@ -167,6 +175,61 @@ func test_file_tree_open_in_round_trips_through_the_pane_settings_ui():
 	# default instead of leaving the route undefined.
 	twin.apply_settings({"open_in": "something-else"})
 	assert_eq(twin.open_in, "viewer", "the mode vocabulary is closed")
+
+## A terminal's launch line is the spawn plan a user can name: the panel
+## gathers it, `apply_settings` accepts it through the closed table, and the
+## saved tile carries the line instead of a program and argv.
+func test_launch_command_round_trips_through_the_pane_settings_ui():
+	var body = _tm.create_body("terminal")
+	_scene.add_child(body)
+	var panel := FakePanePanel.new()
+	_scene.add_child(panel)
+	var ui: Control = body._build_pane_settings_ui(panel)
+	_scene.add_child(ui)
+
+	var field := _line_edit_named(ui, "LaunchCommand")
+	assert_not_null(field, "Pane Settings must offer a launch command")
+	assert_eq(field.text, "", "a fresh pane inherits its program")
+	assert_eq(field.placeholder_text, "Your shell (%s)" % SettingsManager.cfg_shell_command,
+		"an empty field names what it inherits")
+
+	field.text = "omp update && exec omp"
+	var gathered: Dictionary = panel._gather_func.call()
+	assert_eq(gathered.get("launch"), "omp update && exec omp",
+		"the field is what the panel hands the pane")
+	body.apply_settings(gathered)
+
+	assert_eq(body.launch, "omp update && exec omp")
+	var state: Dictionary = body._get_layout_state()
+	assert_eq(state.get("launch"), "omp update && exec omp")
+	assert_false(state.has("shell"), "a launch line is the whole plan, not a program")
+	assert_false(state.has("shell_args"), "the argv is derived from the line at spawn")
+	var tile := PaneTypes.sanitize_tile({
+		"settings": state, "col": 0, "row": 0,
+		"cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID,
+	})
+	assert_eq(tile.get("dropped", PackedStringArray()).size(), 0,
+		"a saved launch tile must pass the file table")
+
+func test_clearing_the_launch_command_goes_back_to_the_pane_program():
+	var body = _tm.create_body("terminal")
+	_scene.add_child(body)
+	body.shell_command = "/bin/zsh"
+	body.launch = "omp update && exec omp"
+	var panel := FakePanePanel.new()
+	_scene.add_child(panel)
+	var ui: Control = body._build_pane_settings_ui(panel)
+	_scene.add_child(ui)
+	var field := _line_edit_named(ui, "LaunchCommand")
+	assert_eq(field.text, "omp update && exec omp", "the field reads the current line")
+
+	field.text = ""
+	body.apply_settings(panel._gather_func.call())
+	assert_eq(body.launch, "")
+	var state: Dictionary = body._get_layout_state()
+	assert_false(state.has("launch"))
+	assert_eq(state.get("shell"), "/bin/zsh", "an empty field inherits the pane's program")
+	assert_eq(state.get("shell_args"), [])
 
 # ── spawn_pane applies global settings ─────────────────────────────────
 

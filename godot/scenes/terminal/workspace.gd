@@ -1934,13 +1934,14 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 		if body == null: continue
 		body.apply_settings(settings)
 
-		# For terminals: apply global defaults, then the per-tile command.
-		# "command" carries a tool override (e.g. "herdr", "lazygit", "nvim");
-		# "shell" is the legacy shell-binary key.  Priority: command > shell > default.
-		# Both run through sanitize_shell — profile data is untrusted.
+		# A terminal tile's program comes from `command` (a tool override such
+		# as "lazygit"), then `shell`, then the tile's legacy `shell` key, and
+		# falls back to the configured shell. `tile_program` is that one
+		# derivation; the spawn itself expands a `launch` line instead.
 		if type_name == "terminal":
-			var raw = settings.get("command", settings.get("shell", plan["legacy_shell"]))
-			var sh: String = PaneTypes.sanitize_shell(raw, SettingsManager.cfg_shell_command)
+			var sh := PaneTypes.tile_program(
+				{"settings": settings, "shell": plan["legacy_shell"]},
+				SettingsManager.cfg_shell_command)
 			SettingsManager.apply_to_terminal(body)
 			body.shell_command = sh
 			if body is TerminalPane:
@@ -3525,10 +3526,11 @@ func _save_current_as_profile():
 	var name_label = Label.new(); name_label.text = "Profile name:"
 	v.add_child(name_label)
 	var name_inp = LineEdit.new(); name_inp.placeholder_text = "My Profile"
+	name_inp.name = "ProfileName"
 	name_inp.custom_minimum_size.x = 320
 	v.add_child(name_inp)
 
-	var panes_label = Label.new(); panes_label.text = "Pane commands (edit to customize):"
+	var panes_label = Label.new(); panes_label.text = "Launch commands (empty keeps each pane's program):"
 	v.add_child(panes_label)
 	# The form's widths are the dialog's widths: a ScrollContainer reports only
 	# its own minimum, so the rows below it were laid out at the LineEdit's
@@ -3541,18 +3543,35 @@ func _save_current_as_profile():
 	var panes_v = VBoxContainer.new()
 	sc.add_child(panes_v)
 
-	var shell_editors: Array[LineEdit] = []
+	# Only a terminal tile has a spawn plan a user can name. The field is the
+	# execution line (`launch`), never a second spelling of the program: typing
+	# `lazygit` here runs `lazygit` through the shell, exactly as the pane does.
+	var launch_rows: Array[Dictionary] = []
 	for i in ts.size():
+		var s: Dictionary = ts[i].get("settings", {})
+		if not (s is Dictionary) or str(s.get("type", "terminal")) != "terminal":
+			continue
 		var row = HBoxContainer.new()
-		var lbl = Label.new(); lbl.text = "Pane %d:" % (i + 1)
-		lbl.custom_minimum_size = Vector2(55, 0)
+		var named := str(s.get("pane_name", "")).strip_edges()
+		var lbl = Label.new()
+		lbl.text = "%s:" % (named if named != "" else "Pane %d" % (i + 1))
+		lbl.custom_minimum_size = Vector2(90, 0)
 		row.add_child(lbl)
-		var le = LineEdit.new(); le.text = ts[i].get("settings", {}).get("shell", SettingsManager.cfg_shell_command)
+		var le = LineEdit.new()
+		le.name = "LaunchRow%d" % i
+		le.text = str(s.get("launch", ""))
+		le.placeholder_text = "Inherited — runs %s" % PaneTypes.tile_program(
+			{"settings": s}, SettingsManager.cfg_shell_command)
 		le.custom_minimum_size = Vector2(220, 0)
 		le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		shell_editors.append(le)
+		launch_rows.append({"tile": i, "field": le})
 		row.add_child(le)
 		panes_v.add_child(row)
+	if launch_rows.is_empty():
+		var none = Label.new()
+		none.text = "No terminal panes — this profile is geometry only."
+		none.theme_type_variation = UiTheme.MUTED_LABEL
+		panes_v.add_child(none)
 
 	# OK only when name is non-empty
 	name_inp.text_changed.connect(func(t: String):
@@ -3561,10 +3580,9 @@ func _save_current_as_profile():
 	dialog.confirmed.connect(func():
 		var profile_name = name_inp.text.strip_edges()
 		if profile_name == "": return
-		for i in ts.size():
-			var s = ts[i].get("settings", {})
-			s["shell"] = shell_editors[i].text
-			if not ts[i].has("settings"): ts[i]["settings"] = s
+		for entry in launch_rows:
+			PaneTypes.apply_launch_field(
+				ts[int(entry["tile"])], (entry["field"] as LineEdit).text)
 		var existing := ProfileManager.find_user_profile(profile_name)
 		if existing >= 0:
 			dialog.hide()

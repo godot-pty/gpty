@@ -177,6 +177,73 @@ func test_restore_cannot_aim_an_inspector_pane():
 	assert_false(body.auto_run, "a file cannot turn auto-send on")
 	assert_false(body.accept_concept_captures, "a file cannot accept captures")
 
+# ── Launch lines ───────────────────────────────────────────────────────
+
+## A tile's launch line survives the round trip as a line: the program and
+## argv the spawn derives from it are not saved, so a profile stays portable
+## across shells and platforms.
+func test_a_launch_tile_restores_as_a_portable_line():
+	var restored := await _restore(_one_tile({
+		"type": "terminal",
+		"launch": "omp update && exec omp",
+		"shell": _other_shell(),
+		"shell_args": ["-x"],
+	}))
+	assert_eq(restored.size(), 1)
+	var body = restored[0]
+	assert_eq(body.launch, "omp update && exec omp", "the line reaches the pane")
+	assert_eq(body.shell_command, _other_shell(),
+		"the tile's program field is kept, though the launch line wins at spawn")
+	var state: Dictionary = body._get_layout_state()
+	assert_eq(state.get("launch"), "omp update && exec omp")
+	assert_false(state.has("shell"), "a launch tile saves the line alone")
+	assert_false(state.has("shell_args"), "the argv is derived from the line at spawn")
+
+## The Save Profile dialog is the one editor a user reaches without hand-editing
+## JSON: it writes the launch line for terminal tiles and leaves every other
+## tile untouched (no `shell` key for a code viewer).
+func test_save_profile_dialog_keeps_the_launch_line():
+	WorkspaceStore.save(0, [])
+	var ws = await _make_workspace()
+	var term = ws._spawn_pane("terminal")
+	assert_not_null(term, "the workspace has a terminal to save")
+	assert_not_null(ws._spawn_pane("code_viewer"), "and a non-terminal tile")
+	term.launch = "omp update && exec omp"
+
+	ws._save_current_as_profile()
+	var dialog: ConfirmationDialog = null
+	for child in ws.get_children():
+		if child is ConfirmationDialog:
+			dialog = child
+	assert_not_null(dialog, "Save Profile must open its dialog")
+	var name_field: LineEdit = null
+	var launch_field: LineEdit = null
+	for node in dialog.find_children("*", "LineEdit", true, false):
+		if node.name == "ProfileName":
+			name_field = node
+		elif str(node.name).begins_with("LaunchRow"):
+			launch_field = node
+	assert_not_null(name_field, "the dialog asks for a name")
+	assert_not_null(launch_field, "a terminal tile gets a launch field")
+	assert_eq(launch_field.text, "omp update && exec omp", "the field starts from the pane")
+	assert_eq(dialog.find_children("*", "LineEdit", true, false).size(), 2,
+		"only the terminal tile gets a field — the name plus one line")
+
+	name_field.text = "Launch Preset"
+	launch_field.text = "nvim ."
+	dialog.confirmed.emit()
+
+	var saved: Dictionary = ProfileManager.find_profile("Launch Preset")
+	assert_false(saved.is_empty(), "Save must store the profile")
+	var tiles: Array = saved.get("tiles", [])
+	assert_eq(tiles.size(), 2)
+	var term_settings: Dictionary = tiles[0].get("settings", {})
+	assert_eq(term_settings.get("launch"), "nvim .", "the edited line is what the profile keeps")
+	assert_false(term_settings.has("shell"), "the dialog writes the line, not a second spelling")
+	var viewer_settings: Dictionary = tiles[1].get("settings", {})
+	assert_false(viewer_settings.has("launch"), "a non-terminal tile carries no launch line")
+	assert_false(viewer_settings.has("shell"), "and no shell key is written for it")
+
 func test_set_workspace_cwd_persists_and_rejects_missing():
 	WorkspaceStore.save(0, [])
 	var ws = await _make_workspace()

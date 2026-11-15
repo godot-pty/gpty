@@ -71,7 +71,7 @@ The fallbacks cover sessions with no runtime directory (a cron job, a stripped l
 
 | Method | Purpose |
 |---|---|
-| `newPane` | Create a pane; `type`, optional `command` (a command line run through the configured shell, like `paneRun`), `args`, `split` (`left`/`right`/`top`/`bottom`), `title`, `focus`, `tags`, `settings` (the pane's own keys, validated through the closed table before anything spawns) |
+| `newPane` | Create a pane; `type`, optional `command` (a command line run through the configured shell, like `paneRun`), `args`, `split` (`left`/`right`/`top`/`bottom`), `title`, `focus`, `tags`, `settings` (the pane's own keys, validated through the closed table before anything spawns; a terminal's `settings.launch` is one shell line run through the configured shell at its next start — `paneSettings` lists it) |
 | `listPanes` | Every pane with id, label, type, title, cell position, tags |
 | `killPane` | Close a pane by id, or `"active"` for the focused one |
 | `focusPane` | Focus a pane by id or `"active"` |
@@ -79,7 +79,7 @@ The fallbacks cover sessions with no runtime directory (a cron job, a stripped l
 | `paneRead` | Plain text of a pane's screen plus scrollback (`lines` 1–2000) |
 | `paneStatus` | Status document for one pane, or every pane when no id is given |
 | `paneView` | Change what a pane shows without activating it: `graph` (a wiki pane's link graph), `note` (a vault-relative path), `mode` (`edit`/`split`/`preview`), in that order; the answer reads the pane back (`graph`, `note`, `view_mode`) |
-| `paneSet` | Set a pane's own settings through the closed per-type table, without activating it. One settings object, all-or-nothing: a refused key applies nothing and answers `-32602` naming it, a `vault_path` change over an unsaved note answers `-32000`; the answer reads the pane back (`changed`, `settings`) |
+| `paneSet` | Set a pane's own settings through the closed per-type table, without activating it. One settings object, all-or-nothing: a refused key applies nothing and answers `-32602` naming it, a `vault_path` change over an unsaved note answers `-32000`; the answer reads the pane back (`changed`, `settings`). A terminal's `launch` is the line its next start runs — setting it never touches the child already running |
 | `paneSettings` | Every pane type's settable settings and their rules (`kind`, `file`, `ipc`, `min`/`max`), projected from `PaneTypes.settings_schema` |
 | `paneRun` | Run a command in a **new** terminal pane through the configured shell |
 | `paneWait` | Hold the response until recent output matches a Rust regex (100–60000 ms) |

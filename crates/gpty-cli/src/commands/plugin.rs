@@ -508,26 +508,36 @@ const MAX_PROFILE_PROGRAMS: usize = 8;
 /// summary applies to the other displayed tile/argv values.
 const MAX_PROGRAM_LEN: usize = 64;
 
-/// The distinct `settings.command` values a profile's tiles name, in tile
-/// order: "what this profile would run". A tile that names no program
-/// (a code viewer, a file tree) contributes nothing. `settings.command` is
-/// authored content with no manifest-level length cap, so each entry is
-/// shortened for the dialog like every other displayed string.
+/// The distinct programs a profile's tiles name, in tile order: "what this
+/// profile would run". A launch line is the plan itself and is listed as
+/// written; otherwise the program is `settings.command`, then `settings.shell`,
+/// then the tile's legacy `shell` — the same precedence the plan key derives,
+/// so the dialog names what the record covers. A tile that names no program
+/// (a code viewer, a file tree) contributes nothing. Authored content has no
+/// manifest-level length cap, so each entry is shortened for the dialog like
+/// every other displayed string.
 fn profile_programs(profile: &ProfileSpec) -> Vec<String> {
     let mut programs: Vec<String> = Vec::new();
     for tile in &profile.tiles {
-        let Some(command) = tile
-            .get("settings")
-            .and_then(|settings| settings.get("command"))
-            .and_then(|command| command.as_str())
-        else {
+        let program = tile_launch_line(tile).or_else(|| {
+            tile.get("settings")
+                .and_then(|settings| settings.get("command"))
+                .or_else(|| {
+                    tile.get("settings")
+                        .and_then(|settings| settings.get("shell"))
+                })
+                .or_else(|| tile.get("shell"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        });
+        let Some(program) = program else {
             continue;
         };
-        let command = short(command, MAX_PROGRAM_LEN);
-        if command.is_empty() || programs.contains(&command) {
+        let program = short(&program, MAX_PROGRAM_LEN);
+        if program.is_empty() || programs.contains(&program) {
             continue;
         }
-        programs.push(command);
+        programs.push(program);
         if programs.len() >= MAX_PROFILE_PROGRAMS {
             break;
         }
@@ -542,6 +552,31 @@ fn profile_programs(profile: &ProfileSpec) -> Vec<String> {
 /// approval silently cover nothing.
 const MAX_PLAN_KEY_LEN: usize = 8192;
 
+/// The longest launch line a tile may name — `PaneTypes.LAUNCH_MAX_LENGTH`.
+const MAX_LAUNCH_LEN: usize = 1024;
+
+/// The first character of a launch tile's plan key — `PaneTypes.LAUNCH_KEY_MARK`.
+/// U+FFFD cannot appear in a sanitized program or argv, so a launch plan and a
+/// program+argv plan can never produce the same key. The runner is deliberately
+/// absent: it is the user's configured shell, not the profile's choice.
+const LAUNCH_KEY_MARK: char = '\u{fffd}';
+
+/// The launch line a profile tile runs through the user's own shell, or None —
+/// the mirror of `PaneTypes.sanitize_launch`: trimmed, one line, ≤1024
+/// characters, no control characters, no U+FFFD. An empty line is "inherit",
+/// i.e. no launch plan.
+fn tile_launch_line(tile: &toml::Value) -> Option<String> {
+    let raw = tile.get("settings")?.get("launch")?.as_str()?;
+    let line = raw.trim();
+    if line.is_empty()
+        || line.chars().count() > MAX_LAUNCH_LEN
+        || line.chars().any(|ch| ch.is_control() || ch == '\u{fffd}')
+    {
+        return None;
+    }
+    Some(line.to_string())
+}
+
 /// The exact spawn-plan keys a profile's tiles would produce, deduplicated in
 /// tile order — the Rust mirror of `PaneTypes.tile_plan_key` in the GUI's
 /// no-directory form, which is what the plugin activation gate compares them
@@ -550,10 +585,11 @@ const MAX_PLAN_KEY_LEN: usize = 8192;
 /// approval covers the programs, not a spawn directory.
 ///
 /// A tile contributes like `PaneTypes.tile_spawns_untrusted` says it would:
-/// a program (`settings.command`, then `settings.shell`, then the tile's
-/// legacy `shell`) and the string entries of `settings.shell_args`, joined
-/// with U+001F. A tile that names nothing to run (a code viewer, pure
-/// geometry) has no key — there is nothing to approve.
+/// a launch line is keyed by itself behind U+FFFD (the marker no program or
+/// argv can carry); otherwise a program (`settings.command`, then
+/// `settings.shell`, then the tile's legacy `shell`) and the string entries of
+/// `settings.shell_args`, joined with U+001F. A tile that names nothing to run
+/// (a code viewer, pure geometry) has no key — there is nothing to approve.
 ///
 /// Only strings are read. The GUI's `str()` would coerce a number into a
 /// program name, but a file-supplied non-string is dropped by the settings
@@ -563,6 +599,14 @@ fn profile_plan_keys(tiles: &[toml::Value]) -> Vec<String> {
     let mut keys: Vec<String> = Vec::new();
     for tile in tiles {
         let settings = tile.get("settings");
+        if let Some(line) = tile_launch_line(tile) {
+            let key = format!("{LAUNCH_KEY_MARK}{line}");
+            if key.chars().count() > MAX_PLAN_KEY_LEN || keys.contains(&key) {
+                continue;
+            }
+            keys.push(key);
+            continue;
+        }
         // First *present* key wins (the GUI's `get`-with-default chain), and
         // then it has to be a string.
         let program = settings
@@ -1296,6 +1340,15 @@ name = "Plain"
 tiles = [
   { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "code_viewer" } },
 ]
+
+[[profiles]]
+name = "Launch"
+tiles = [
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "terminal", launch = "omp update && exec omp" } },
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "terminal", launch = "omp update && exec omp" } },
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "terminal", launch = "nvim ." } },
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "terminal", shell_args = ["-c", "omp update && exec omp"] } },
+]
 "#,
         )
         .unwrap();
@@ -1309,6 +1362,54 @@ tiles = [
             summary["profiles"][1]["plans"],
             serde_json::json!([]),
             "a profile that runs nothing has nothing to approve"
+        );
+        assert_eq!(
+            summary["profiles"][2]["plans"],
+            serde_json::json!([
+                "\u{fffd}omp update && exec omp",
+                "\u{fffd}nvim .",
+                "-c\u{1f}omp update && exec omp",
+            ]),
+            "a launch line is keyed by itself (deduplicated), and a plain argv with the same text is a different plan"
+        );
+    }
+
+    #[test]
+    fn review_summary_lists_a_launch_line_as_what_the_profile_starts() {
+        let manifest = parse_manifest(
+            r#"
+id = "owner/repo"
+name = "Demo"
+version = "1.0.0"
+min_gpty_version = "0.5.0"
+
+[[profiles]]
+name = "Launch"
+tiles = [
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "terminal", launch = "omp update && exec omp" } },
+  { col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "terminal", shell = "zsh" } },
+]
+"#,
+        )
+        .unwrap();
+        let summary = review_summary(&manifest, &parse_target("owner/repo").unwrap(), "abc123");
+        assert_eq!(
+            summary["profiles"][0]["programs"],
+            serde_json::json!(["omp update && exec omp", "zsh"]),
+            "the dialog names the launch line, then the tile's program"
+        );
+    }
+
+    /// The launch plan key is one character the GUI derives and this module
+    /// mirrors. A drift here would silently stop covering approved plugins (or
+    /// worse, cover a plan the review never showed), so the marker is read
+    /// from the GUI's own source instead of restated.
+    #[test]
+    fn launch_plan_key_marker_matches_the_gui() {
+        const PANE_TYPES_SRC: &str = include_str!("../../../../godot/scenes/panes/pane_types.gd");
+        assert!(
+            PANE_TYPES_SRC.contains(r#"const LAUNCH_KEY_MARK := "\uFFFD""#),
+            "the launch plan-key marker is one character both sides must agree on"
         );
     }
 

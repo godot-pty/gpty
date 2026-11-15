@@ -50,11 +50,12 @@ Wheel scrolling moves three lines by default. Output that scrolls past the viewp
 
 ## Settings that matter
 
-Pane Settings for a terminal edits the presentation and the environment, not the spawn plan:
+Pane Settings for a terminal edits the presentation, the environment and the next spawn's launch line:
 
 | Setting | What it changes |
 |---|---|
 | Name, Attachment ID | the title, and the stable id used by per-pane env, tags and companion panes |
+| Launch command | a shell line run through your configured shell at this pane's next start (`-c`, or `/c` on `cmd.exe`); empty inherits the pane's program |
 | Font size, Font file, Color scheme | rendering |
 | Environment | `KEY=value` lines, stored per pane in `user://pane_env.json` |
 | Cursor shape, blink, speed, colour, beam width, underline height | rendering |
@@ -63,7 +64,9 @@ Pane Settings for a terminal edits the presentation and the environment, not the
 
 There is no Rows / Cols control: the grid is the size the pane's pixels can show. A pane starts its child on its first layout pass, at that fitted size (one size, never a 80×24 guess followed by a resize), and a later resize reflows it through the 50 ms debounce. A tile too small to hold the minimum grid starts its child at the `rows`/`cols` a saved tile carries; those values are a layout-data fallback, not a setting.
 
-The program and its arguments are not here. `shell_command` and `shell_args` come from a profile or from a saved layout tile. The call that creates a pane can set the program (`gpty new-pane -t terminal -c <program>`); `--arg` values are an argv for a [[cli-view|CLI View]] pane, not for a terminal. A file-supplied program or argv is what Workspace Trust exists for: restoring a tile that would run something other than your defaults asks you to approve the exact program and arguments, and a tile's `shell_env` is stripped on restore because environment belongs to you.
+Launch command is the one spawn-plan field here, and it is a line rather than a program: it runs through your configured shell at the pane's next start, so `omp update && exec omp` is one entry. It does not touch the child already running — a launch line is the plan for the next spawn, and replacing a live terminal's program would discard its scrollback. Empty means "inherit the pane's program": the `shell_command` and `shell_args` a profile or a saved tile supplies, or your configured shell when the tile names nothing. The Save Profile dialog writes the same field, and a saved tile carries the line alone (the argv is derived at spawn), which is what keeps a profile portable across shells and platforms.
+
+A program and its arguments can still come from a profile or a saved layout tile. The call that creates a pane can set the program (`gpty new-pane -t terminal -c <program>`); `--arg` values are an argv for a [[cli-view|CLI View]] pane, not for a terminal. A file-supplied launch line, program or argv is what Workspace Trust exists for: restoring a tile that would run something other than your defaults asks you to approve the exact line or program, and a tile's `shell_env` is stripped on restore because environment belongs to you.
 
 There is also no per-pane working directory. A pane inherits the directory of its workspace, which is the workspace row's **More → Set Directory**, and the workspace wins over any stored key.
 

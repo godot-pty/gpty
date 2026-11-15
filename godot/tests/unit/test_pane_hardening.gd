@@ -259,6 +259,83 @@ func test_untrusted_plan_caps_value_length():
 	assert_true(plan[0].length() < long_program.length() + 16,
 		"an oversized value must be truncated for display")
 
+# ── Launch lines (a tile's spawn-time shell command) ───────────────────
+
+func test_a_launch_line_is_one_trimmed_line():
+	assert_eq(PaneTypes.sanitize_launch("  omp update && exec omp  "), "omp update && exec omp")
+	assert_eq(PaneTypes.sanitize_launch(""), "")
+	assert_eq(PaneTypes.sanitize_launch("   "), "")
+	assert_eq(PaneTypes.sanitize_launch("a\nb"), "", "a newline is a second line")
+	assert_eq(PaneTypes.sanitize_launch("a\tb"), "")
+	assert_eq(PaneTypes.sanitize_launch("a\u007Fb"), "", "DEL is a control character too")
+	assert_eq(PaneTypes.sanitize_launch("a\u009Fb"), "", "the C1 range is control too")
+	assert_eq(PaneTypes.sanitize_launch("a\uFFFDb"), "", "invalid Unicode is refused whole")
+	assert_eq(PaneTypes.sanitize_launch(42), "", "a non-string is no line")
+	var longest: String = "x".repeat(PaneTypes.LAUNCH_MAX_LENGTH)
+	assert_eq(PaneTypes.sanitize_launch(longest), longest)
+	assert_eq(PaneTypes.sanitize_launch(longest + "x"), "",
+		"an oversize line is refused, never truncated")
+
+func test_a_launch_tile_is_untrusted_and_keyed_by_its_line():
+	var line := "omp update && exec omp"
+	var launch := {"settings": {"type": "terminal", "launch": line}}
+	assert_true(PaneTypes.tile_spawns_untrusted(launch, "/bin/bash"),
+		"a shell line is a spawn decision whatever the default program is")
+	assert_eq(PaneTypes.tile_plan_key(launch), PaneTypes.LAUNCH_KEY_MARK + line)
+	assert_ne(PaneTypes.tile_plan_key(launch),
+		PaneTypes.tile_plan_key({"settings": {"type": "terminal", "launch": "nvim ."}}),
+		"a changed line is a different plan")
+	assert_eq(PaneTypes.tile_plan_key(launch, "/srv/repo"),
+		PaneTypes.LAUNCH_KEY_MARK + line + "\u001e/srv/repo")
+	# The marker is U+FFFD: a plain argv carrying the same text derives a
+	# different key, so a launch approval can never cover it.
+	var argv := {"settings": {"type": "terminal", "shell_args": ["-c", line]}}
+	assert_ne(PaneTypes.tile_plan_key(argv), PaneTypes.tile_plan_key(launch))
+	assert_eq(PaneTypes.tile_plan_key({"settings": {"type": "terminal"}}), "",
+		"a tile with no plan and no launch has no key")
+
+func test_spawn_argv_expands_a_launch_line_through_the_configured_shell():
+	var line := "omp update && exec omp"
+	var posix := PaneTypes.spawn_argv("/bin/zsh", ["-x"], line, "/bin/bash")
+	assert_eq(posix["program"], "/bin/bash",
+		"the configured shell is the runner, not the tile's program")
+	assert_eq(posix["args"], ["-c", line], "a launch line wins over the tile's argv")
+	assert_eq(posix["launch"], line)
+	assert_eq(PaneTypes.spawn_argv("/bin/bash", [], line, "cmd.exe")["args"], ["/c", line])
+	assert_eq(PaneTypes.spawn_argv("/bin/bash", [], line, "pwsh")["args"], ["-c", line])
+	var inherited := PaneTypes.spawn_argv("/bin/zsh", ["-l"], "", "/bin/bash")
+	assert_eq(inherited["program"], "/bin/zsh", "no launch line keeps the pane's program")
+	assert_eq(inherited["args"], ["-l"])
+	assert_eq(inherited["launch"], "")
+	var refused := PaneTypes.spawn_argv("/bin/zsh", ["-l"], "a\nb", "/bin/bash")
+	assert_eq(refused["launch"], "",
+		"a refused line falls back to the program instead of spawning half of it")
+
+func test_untrusted_plan_names_the_runner_and_the_launch_line():
+	var plan := PaneTypes.untrusted_plan(
+		{"settings": {"type": "terminal", "launch": "omp update && exec omp"}}, "/bin/bash")
+	assert_eq("\n".join(plan), "program: /bin/bash\nlaunch: omp update && exec omp")
+
+func test_a_launch_line_is_a_terminal_setting_a_file_may_ship():
+	var kept: Dictionary = PaneTypes.sanitize_settings(
+		"terminal", {"launch": "omp update && exec omp"}, PaneTypes.SOURCE_FILE)
+	assert_eq(kept["settings"].get("launch"), "omp update && exec omp")
+	var other: Dictionary = PaneTypes.sanitize_settings(
+		"code_viewer", {"launch": "omp"}, PaneTypes.SOURCE_FILE)
+	assert_false(other["settings"].has("launch"), "only a terminal spawns a launch line")
+	assert_true(other["dropped"].has("launch"), "the refusal is reported")
+	var bad: Dictionary = PaneTypes.sanitize_settings(
+		"terminal", {"launch": "a\nb"}, PaneTypes.SOURCE_FILE)
+	assert_false(bad["settings"].has("launch"),
+		"a control character is refused, never silently emptied")
+	assert_true(bad["dropped"].has("launch"))
+	var tile := PaneTypes.sanitize_tile({
+		"settings": {"type": "terminal", "launch": "  nvim .  "},
+		"col": 0, "row": 0, "cspan": 6, "rspan": 12,
+	})
+	assert_eq(tile["settings"].get("launch"), "nvim .", "a file's line is trimmed and kept")
+	assert_eq(tile.get("dropped", PackedStringArray()).size(), 0)
+
 # ── PaneBody typed settings application ────────────────────────────────
 
 func test_pane_body_ignores_unknown_and_bad_type_keys():
