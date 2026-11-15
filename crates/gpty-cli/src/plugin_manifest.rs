@@ -98,20 +98,20 @@ pub fn pane_types() -> Vec<&'static str> {
 /// Platforms a manifest may declare.
 pub const PLATFORMS: &[&str] = &["linux", "macos", "windows"];
 
-/// The event-socket vocabulary a `[[events]].type` may name: gpty's own pane
-/// and concept events (emitted by `workspace.gd` / `ipc_handlers.gd`) plus
-/// the generic OMP translation (`omp_events.rs`).
-pub const EVENT_TYPES: &[&str] = &[
-    "pane.spawned",
-    "pane.killed",
-    "concept.matched",
-    "state.declared",
-    "session.bound",
-    "agent.started",
-    "turn.started",
-    "tool.call",
-    "thinking.delta",
-];
+/// gpty's own event names, emitted by the GUI itself (`workspace.gd` /
+/// `ipc_handlers.gd`) rather than translated onto the generic vocabulary.
+pub const NATIVE_EVENT_TYPES: &[&str] = &["pane.spawned", "pane.killed", "concept.matched"];
+
+/// The event-socket vocabulary a `[[events]].type` may name: the native names
+/// plus every generic name. Derived, never restated — `gpty_core::events` is
+/// the one copy of the generic list, and the extension's translation table is
+/// pinned against it, so an event the socket emits is one a manifest can
+/// subscribe to.
+pub fn event_types() -> Vec<&'static str> {
+    let mut names = NATIVE_EVENT_TYPES.to_vec();
+    names.extend_from_slice(gpty_core::events::GENERIC_EVENT_NAMES);
+    names
+}
 
 /// The `capture_mode` values the file vocabulary carries: absent (capture),
 /// or `"single_line"` (notify-only) — exactly what the visual editor writes.
@@ -208,7 +208,7 @@ pub struct ActionSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventSpec {
     pub name: String,
-    /// One of [`EVENT_TYPES`].
+    /// One of [`event_types`].
     pub kind: String,
 }
 
@@ -548,10 +548,10 @@ fn parse_events(table: &toml::Table) -> ManifestResult<Vec<EventSpec>> {
         reject_unknown_keys(entry, &["name", "type"], &path)?;
         let name = spec_name(entry, &path)?;
         let kind = required_string(entry, "type", &path)?;
-        if !EVENT_TYPES.contains(&kind.as_str()) {
+        if !event_types().contains(&kind.as_str()) {
             return Err(ManifestError::at(
                 &format!("{path}.type"),
-                &format!("`{kind}` is not an event gpty emits (see EVENT_TYPES)"),
+                &format!("`{kind}` is not an event gpty emits"),
             ));
         }
         out.push(EventSpec { name, kind });
@@ -1299,13 +1299,23 @@ tiles = [
         );
     }
 
+    /// The list a manifest is validated against is the socket's own: the
+    /// three native names plus every generic name, so the four events the
+    /// socket translated but the validator refused (`session.shutdown`,
+    /// `agent.settled`, `turn.finished`, `tool.finished`) now parse.
     #[test]
     fn event_types_are_the_socket_vocabulary() {
         rejects(
             "id = \"a/b\"\nname = \"x\"\nversion = \"1.0.0\"\nmin_gpty_version = \"0.5.5\"\n[[events]]\nname = \"x\"\ntype = \"pane.gone\"\n",
             "not an event gpty emits",
         );
-        for kind in EVENT_TYPES {
+        let kinds = event_types();
+        assert_eq!(
+            kinds.len(),
+            NATIVE_EVENT_TYPES.len() + gpty_core::events::GENERIC_EVENT_NAMES.len(),
+            "the vocabulary is the native names plus every generic name"
+        );
+        for kind in kinds {
             parse(&format!(
                 "id = \"a/b\"\nname = \"x\"\nversion = \"1.0.0\"\nmin_gpty_version = \"0.5.5\"\n[[events]]\nname = \"e\"\ntype = \"{kind}\"\n"
             ));

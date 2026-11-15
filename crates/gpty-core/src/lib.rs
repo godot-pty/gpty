@@ -22,6 +22,7 @@
 //! | [`cli`]    | `cli_view` backend: one argv child, stdout+stderr merged into a bounded line queue |
 //! | [`parser`] | Strips ANSI escape sequences from PTY output; extracts plain-text lines |
 //! | [`escstring`] | Bounds an unterminated escape string so a pane program cannot grow parser memory |
+//! | [`events`] | The adapter-neutral event vocabulary the event socket speaks (one copy, shared with the plugin validator) |
 //! | [`term`]   | Full terminal grid via `alacritty_terminal`; cursor, colors, scrolling |
 //! | [`owner_only`] | Repairs a store's or a store directory's mode to owner-only, never through a symlink |
 //! | [`store`] | Shared SQLite store plumbing for the scrollback and vault indexes: one process-wide write lock, an unreadable file quarantined to `<path>.corrupt` and replaced, and owner-only repair of a store and its WAL siblings |
@@ -48,6 +49,7 @@ pub mod color;
 pub mod concept;
 pub mod engine;
 pub mod escstring;
+pub mod events;
 pub mod hardening;
 pub mod history;
 pub mod keymap;

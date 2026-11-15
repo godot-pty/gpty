@@ -69,8 +69,10 @@ const ALLOWED_EVENTS: &[&str] = &[
 /// Adapter-neutral event vocabulary. The extension speaks OMP-specific
 /// names on the wire (protocol v1); gpty translates them at this trust
 /// boundary so everything downstream — Reasoning, AgentState Tier 1,
-/// future adapters — consumes one generic contract.
-const GENERIC_EVENT_NAMES: &[(&str, &str)] = &[
+/// future adapters — consumes one generic contract. The generic side is
+/// `gpty_core::events::GENERIC_EVENT_NAMES`, and a test here pins this table
+/// against it so the wire list and the shared vocabulary cannot drift.
+const WIRE_TO_GENERIC: &[(&str, &str)] = &[
     ("omp.session.bound", "session.bound"),
     ("omp.session.shutdown", "session.shutdown"),
     ("omp.agent.started", "agent.started"),
@@ -86,7 +88,7 @@ const GENERIC_EVENT_NAMES: &[(&str, &str)] = &[
 /// Translate a wire event name to the generic vocabulary. Unknown names
 /// pass through unchanged — the allowlist gates what reaches this point.
 pub fn to_generic_name(name: &str) -> &str {
-    for (wire, generic) in GENERIC_EVENT_NAMES {
+    for (wire, generic) in WIRE_TO_GENERIC {
         if *wire == name {
             return generic;
         }
@@ -848,6 +850,23 @@ mod tests {
             assert_eq!(to_generic_name(wire), generic, "wire name {wire}");
         }
         assert_eq!(to_generic_name("omp.unknown"), "omp.unknown");
+    }
+
+    /// The translation table's generic side is the shared vocabulary, name
+    /// for name and in the same order: the plugin validator accepts exactly
+    /// this list, and an event the socket emits must be one a manifest can
+    /// subscribe to.
+    #[test]
+    fn the_translation_covers_the_shared_vocabulary() {
+        let mapped: Vec<&str> = WIRE_TO_GENERIC
+            .iter()
+            .map(|(_, generic)| *generic)
+            .collect();
+        assert_eq!(
+            mapped,
+            gpty_core::events::GENERIC_EVENT_NAMES,
+            "every generic name, in the socket's order"
+        );
     }
 
     #[test]
