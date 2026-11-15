@@ -395,7 +395,8 @@ pub(crate) async fn review_install(
     }
 }
 
-/// The manifest's profiles as store records: the name plus its tiles as JSON.
+/// The manifest's profiles as store records: the name, the grid unit its
+/// geometry is written in, and its tiles as JSON.
 ///
 /// The store is the GUI's read model, so the tiles travel as
 /// `serde_json::Value` — `parse_manifest` already held every one of them to
@@ -406,6 +407,7 @@ pub(crate) fn profile_records(manifest: &Manifest) -> Vec<PluginProfileRecord> {
         .iter()
         .map(|profile| PluginProfileRecord {
             name: profile.name.clone(),
+            grid_unit: Some(profile.grid_unit),
             tiles: profile
                 .tiles
                 .iter()

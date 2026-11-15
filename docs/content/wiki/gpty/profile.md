@@ -4,7 +4,7 @@ A profile is a named, reusable set of tiles. Activating one replaces the panes o
 
 ## What is in a profile
 
-A profile holds a list of tiles, each with the same geometry a layout uses — `col`, `row`, `cspan`, `rspan` on the 60-unit grid — plus the settings for the pane that goes there. Because it is a template rather than a live workspace, it stores no processes, no scrollback, and no environment: a profile that once contained a terminal's `shell_env` is stripped on restore, with a notice, because environment is user-owned and lives in its own store (see [[settings]]).
+A profile holds a list of tiles, each with the same geometry a layout uses — `col`, `row`, `cspan`, `rspan` — plus the settings for the pane that goes there. The geometry is written against a grid unit, and the profile records which one: `60` for anything gPTY saves, and a coarser `12` for a plugin profile that declares it. Activation scales a coarser profile to the same shares it was authored with, rather than guessing the unit from wherever its furthest tile happens to end. Because it is a template rather than a live workspace, a profile stores no processes, no scrollback, and no environment: a profile that once contained a terminal's `shell_env` is stripped on restore, with a notice, because environment is user-owned and lives in its own store (see [[settings]]).
 
 Activating a profile resets the active workspace and rebuilds its panes from the profile's tiles. That is why a profile behaves like restoring a layout, and why it can trip the same Workspace Trust gate described in [[workspace-trust]].
 

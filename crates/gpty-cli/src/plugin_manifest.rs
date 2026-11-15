@@ -16,10 +16,11 @@
 //!   dialect, not GDScript's PCRE2.
 //! * Every `[[profiles]]` tile is held to the shape `PaneTypes.sanitize_tile`
 //!   accepts (pane type set, grid geometry, rows/cols ceilings,
-//!   `attachment_id` pattern). One deliberate difference: the sanitizer
-//!   *clamps* legacy files, while the validator *rejects* — a manifest is
-//!   authored content, so an out-of-range value is an authoring error rather
-//!   than something to quietly rewrite.
+//!   `attachment_id` pattern), judged in the grid the profile declares with its
+//!   optional `grid_unit` (`60` when it declares none). One deliberate
+//!   difference: the sanitizer *clamps* legacy files, while the validator
+//!   *rejects* — a manifest is authored content, so an out-of-range value is
+//!   an authoring error rather than something to quietly rewrite.
 //! * `[[actions]].command` must be one of the advertised MCP tool names
 //!   (`schema::mcp_tool_names` — the published agent-facing API surface).
 //! * `[[events]].type` must be one of the event-socket vocabulary strings
@@ -67,9 +68,13 @@ pub const MAX_ARGV_ENTRIES: usize = 32;
 pub const MAX_ARGV_CHARS: usize = 4096;
 
 /// Tile geometry and grid ceilings — the same numbers `PaneTypes` enforces
-/// (`GRID` = 60, `PANE_MAX_ROWS` = 500, `PANE_MAX_COLS` = 2000). Never
-/// re-declare these in the GUI; here they are the manifest's mirror.
+/// (`GRID` = 60, `GRID_LEGACY` = 12, `PANE_MAX_ROWS` = 500,
+/// `PANE_MAX_COLS` = 2000). Never re-declare these in the GUI; here they are
+/// the manifest's mirror.
 pub const GRID: i64 = 60;
+/// The unit a layout written before the 60-unit refinement uses; the GUI
+/// scales it to `GRID`, so a manifest may author a profile in it too.
+pub const GRID_LEGACY: i64 = 12;
 pub const PANE_MAX_ROWS: i64 = 500;
 pub const PANE_MAX_COLS: i64 = 2000;
 
@@ -220,6 +225,9 @@ pub struct ProfileSpec {
     pub name: String,
     /// Validated tile tables (sanitize-tile shape).
     pub tiles: Vec<toml::Value>,
+    /// The grid unit the tiles above are written in: `GRID` when the profile
+    /// declares none, `GRID_LEGACY` for a coarser authoring grid.
+    pub grid_unit: i64,
 }
 
 /// A validated manifest. `concepts` entries are validated *and*
@@ -794,7 +802,7 @@ fn parse_profiles(table: &toml::Table) -> ManifestResult<Vec<ProfileSpec>> {
         let Some(entry) = item.as_table() else {
             return Err(ManifestError::at(&path, "must be a table"));
         };
-        reject_unknown_keys(entry, &["name", "tiles"], &path)?;
+        reject_unknown_keys(entry, &["name", "tiles", "grid_unit"], &path)?;
         let name = required_string(entry, "name", &path)?;
         if name.is_empty() || name.chars().count() > MAX_NAME_LEN {
             return Err(ManifestError::at(
@@ -802,6 +810,21 @@ fn parse_profiles(table: &toml::Table) -> ManifestResult<Vec<ProfileSpec>> {
                 &format!("must be 1-{MAX_NAME_LEN} characters"),
             ));
         }
+        // The unit the tiles are authored against. Only the units the GUI
+        // scales between are accepted: a value it cannot consume would reach
+        // `scale_layout` unchecked.
+        let grid_unit = match entry.get("grid_unit") {
+            None => GRID,
+            Some(v) => match v.as_integer() {
+                Some(u) if u == GRID || u == GRID_LEGACY => u,
+                _ => {
+                    return Err(ManifestError::at(
+                        &format!("{path}.grid_unit"),
+                        &format!("must be {GRID_LEGACY} or {GRID} (the units gpty scales between)"),
+                    ));
+                }
+            },
+        };
         let tiles = match entry.get("tiles") {
             Some(toml::Value::Array(tiles)) => tiles.clone(),
             Some(_) => {
@@ -819,9 +842,13 @@ fn parse_profiles(table: &toml::Table) -> ManifestResult<Vec<ProfileSpec>> {
             ));
         }
         for (j, tile) in tiles.iter().enumerate() {
-            validate_tile(tile, &format!("{path}.tiles[{j}]"))?;
+            validate_tile(tile, &format!("{path}.tiles[{j}]"), grid_unit)?;
         }
-        out.push(ProfileSpec { name, tiles });
+        out.push(ProfileSpec {
+            name,
+            tiles,
+            grid_unit,
+        });
     }
     Ok(out)
 }
@@ -829,8 +856,9 @@ fn parse_profiles(table: &toml::Table) -> ManifestResult<Vec<ProfileSpec>> {
 /// Mirror `PaneTypes.sanitize_tile`'s contract — with one deliberate
 /// difference: the sanitizer clamps legacy files, the validator rejects,
 /// because a manifest is authored content and an out-of-range value is an
-/// authoring error.
-fn validate_tile(tile: &toml::Value, path: &str) -> ManifestResult<()> {
+/// authoring error. `grid` is the profile's declared unit: its geometry is
+/// judged in the grid the author wrote it against.
+fn validate_tile(tile: &toml::Value, path: &str, grid: i64) -> ManifestResult<()> {
     let Some(td) = tile.as_table() else {
         return Err(ManifestError::at(path, "must be a table"));
     };
@@ -928,21 +956,21 @@ fn validate_tile(tile: &toml::Value, path: &str) -> ManifestResult<()> {
     }
     let col = int_field(td, "col", 0, &format!("{path}.col"))?;
     let row = int_field(td, "row", 0, &format!("{path}.row"))?;
-    let cspan = int_field(td, "cspan", GRID, &format!("{path}.cspan"))?;
-    let rspan = int_field(td, "rspan", GRID, &format!("{path}.rspan"))?;
-    if !(0..GRID).contains(&col) || !(0..GRID).contains(&row) {
+    let cspan = int_field(td, "cspan", grid, &format!("{path}.cspan"))?;
+    let rspan = int_field(td, "rspan", grid, &format!("{path}.rspan"))?;
+    if !(0..grid).contains(&col) || !(0..grid).contains(&row) {
         return Err(ManifestError::at(
             path,
-            &format!("col/row must be 0-{}", GRID - 1),
+            &format!("col/row must be 0-{}", grid - 1),
         ));
     }
-    if !(1..=GRID).contains(&cspan) || !(1..=GRID).contains(&rspan) {
+    if !(1..=grid).contains(&cspan) || !(1..=grid).contains(&rspan) {
         return Err(ManifestError::at(
             path,
-            &format!("cspan/rspan must be 1-{GRID}"),
+            &format!("cspan/rspan must be 1-{grid}"),
         ));
     }
-    if col + cspan > GRID || row + rspan > GRID {
+    if col + cspan > grid || row + rspan > grid {
         return Err(ManifestError::at(path, "the tile must fit inside the grid"));
     }
     Ok(())
@@ -1478,6 +1506,68 @@ tiles = [
                 "id = \"a/b\"\nname = \"x\"\nversion = \"1.0.0\"\nmin_gpty_version = \"0.5.5\"\n[[profiles]]\nname = \"P\"\ntiles = [{{ settings = {{ type = \"terminal\", launch = \"{long}\" }} }}]\n"
             ),
             "at most",
+        );
+    }
+
+    /// A profile may say which grid its geometry is written in: the tiles are
+    /// judged in that unit, so a coarse authoring grid is legal content rather
+    /// than a set of slivers that happen to fit the 60-unit grid.
+    #[test]
+    fn a_profile_declares_the_grid_unit_its_tiles_are_written_in() {
+        let m = parse(
+            r#"id = "a/b"
+name = "x"
+version = "1.0.0"
+min_gpty_version = "0.8.4"
+[[profiles]]
+name = "Coarse"
+grid_unit = 12
+tiles = [
+  { col = 0, row = 0, cspan = 6, rspan = 12, settings = { type = "terminal" } },
+  { col = 6, row = 0, cspan = 6, rspan = 12, settings = { type = "terminal" } },
+]
+[[profiles]]
+name = "Current"
+tiles = [{ col = 0, row = 0, cspan = 60, rspan = 60, settings = { type = "terminal" } }]
+"#,
+        );
+        assert_eq!(m.profiles[0].grid_unit, GRID_LEGACY);
+        assert_eq!(m.profiles[0].tiles.len(), 2, "both coarse tiles parse");
+        assert_eq!(
+            m.profiles[1].grid_unit, GRID,
+            "a profile that declares no unit is the current grid"
+        );
+
+        // The span default follows the profile's unit: 60 would fail the
+        // 12-unit bound, so this tile parses only when the default is 12.
+        let defaulted = parse(
+            r#"id = "a/b"
+name = "x"
+version = "1.0.0"
+min_gpty_version = "0.8.4"
+[[profiles]]
+name = "Coarse"
+grid_unit = 12
+tiles = [{ col = 0, row = 0, settings = { type = "terminal" } }]
+"#,
+        );
+        assert_eq!(defaulted.profiles[0].tiles.len(), 1);
+
+        rejects(
+            "id = \"a/b\"\nname = \"x\"\nversion = \"1.0.0\"\nmin_gpty_version = \"0.8.4\"\n[[profiles]]\nname = \"P\"\ngrid_unit = 7\ntiles = [{ settings = { type = \"terminal\" } }]\n",
+            "must be 12 or 60",
+        );
+        rejects(
+            "id = \"a/b\"\nname = \"x\"\nversion = \"1.0.0\"\nmin_gpty_version = \"0.8.4\"\n[[profiles]]\nname = \"P\"\ngrid_unit = \"12\"\ntiles = [{ settings = { type = \"terminal\" } }]\n",
+            "must be 12 or 60",
+        );
+        rejects(
+            "id = \"a/b\"\nname = \"x\"\nversion = \"1.0.0\"\nmin_gpty_version = \"0.8.4\"\n[[profiles]]\nname = \"P\"\ngrid_unit = 12\ntiles = [{ col = 0, row = 0, cspan = 60, settings = { type = \"terminal\" } }]\n",
+            "cspan/rspan must be 1-12",
+        );
+        rejects(
+            "id = \"a/b\"\nname = \"x\"\nversion = \"1.0.0\"\nmin_gpty_version = \"0.8.4\"\n[[profiles]]\nname = \"P\"\ngrid_unit = 12\ntiles = [{ col = 10, row = 0, cspan = 4, settings = { type = \"terminal\" } }]\n",
+            "fit inside the grid",
         );
     }
 

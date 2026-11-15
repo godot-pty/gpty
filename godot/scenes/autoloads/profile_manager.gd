@@ -54,7 +54,14 @@ func _load_defaults():
 		var tiles = item.get("tiles")
 		if name == "" or not (tiles is Array):
 			continue
-		var profile := {"name": name, "tiles": tiles}
+		var profile := {
+			"name": name,
+			"tiles": tiles,
+			# The shipped file is this build's app content, so its tiles are in
+			# `GRID` unless it declares another unit; a declared unit this
+			# build cannot scale becomes 0, which `scale_layout` infers.
+			"grid_unit": PaneTypes.sanitize_grid_unit(item.get("grid_unit", PaneTypes.GRID)),
+		}
 		if item.get("description") is String:
 			profile["description"] = str(item["description"])
 		_default_profiles.append(profile)
@@ -115,6 +122,9 @@ func load_profiles():
 		if item is Dictionary:
 			var profile: Dictionary = item.duplicate(true)
 			_strip_provenance(profile)
+			# The store is user-editable: a declared unit is data, and a unit
+			# this build cannot scale becomes 0 ("infer from the extents").
+			profile["grid_unit"] = PaneTypes.sanitize_grid_unit(profile.get("grid_unit", 0))
 			profiles.append(profile)
 
 ## Remove whatever a file says about where it came from.
@@ -140,6 +150,10 @@ func save_profiles():
 ## `rename_profile` gives, so a caller that saves twice under one name answers
 ## the row it actually created instead of the one it asked for. "" when the
 ## request names nothing (nothing is stored).
+##
+## The saved tiles come from live tiles (`_gather_tiles`), which are always in
+## `PaneTypes.GRID`, so the entry records that unit — the read side then never
+## has to infer it from the layout's furthest edge.
 func add_profile(p_name: String, p_tiles: Array[Dictionary]) -> String:
 	if p_name == "":
 		return ""
@@ -149,7 +163,7 @@ func add_profile(p_name: String, p_tiles: Array[Dictionary]) -> String:
 	while _name_exists(result_name):
 		n += 1
 		result_name = "%s (%d)" % [base, n]
-	profiles.append({"name": result_name, "tiles": p_tiles})
+	profiles.append({"name": result_name, "tiles": p_tiles, "grid_unit": PaneTypes.GRID})
 	_derive_plugin_profiles()
 	save_profiles()
 	return result_name
@@ -157,7 +171,7 @@ func add_profile(p_name: String, p_tiles: Array[Dictionary]) -> String:
 func update_profile(index: int, p_name: String, p_tiles: Array[Dictionary]):
 	if index < 0 or index >= profiles.size():
 		return
-	profiles[index] = {"name": p_name, "tiles": p_tiles}
+	profiles[index] = {"name": p_name, "tiles": p_tiles, "grid_unit": PaneTypes.GRID}
 	_derive_plugin_profiles()
 	save_profiles()
 
@@ -259,6 +273,9 @@ func _derive_plugin_profiles():
 		_plugin_profiles.append({
 			"name": _plugin_profile_name(base),
 			"tiles": tiles,
+			# A record written before a profile could declare a unit carries
+			# none: 0 means "infer", which is what every activation did then.
+			"grid_unit": PaneTypes.sanitize_grid_unit(item.get("grid_unit", 0)),
 			"plugin": true,
 			"plugin_id": str(item.get("plugin_id", "")),
 			"revision": str(item.get("revision", "")),

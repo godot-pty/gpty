@@ -227,14 +227,19 @@ func _set_plugin_json(text: String):
 	ProfileManager.plugin_profiles_source = func(): return text
 	ProfileManager.refresh_plugin_profiles()
 
-func _installed(name: String, plugin_id := "godot-pty/gpty-omp", revision := "a1b2c3d4e5f6") -> Dictionary:
-	return {
+func _installed(name: String, plugin_id := "godot-pty/gpty-omp", revision := "a1b2c3d4e5f6", grid_unit := 0) -> Dictionary:
+	var entry := {
 		"plugin_id": plugin_id,
 		"revision": revision,
 		"name": name,
 		"tiles": [{"col": 0, "row": 0, "cspan": 60, "rspan": 60,
 			"settings": {"type": "terminal", "command": "omp"}}],
 	}
+	# A record written before a profile could declare a unit carries no key;
+	# only a declared unit is written here, so both shapes are covered.
+	if grid_unit > 0:
+		entry["grid_unit"] = grid_unit
+	return entry
 
 func test_user_profiles_come_before_plugin_profiles():
 	# A user profile and one installed plugin profile: user rows lead, then
@@ -356,3 +361,60 @@ func test_add_profile_answers_the_name_the_store_kept():
 	assert_eq(ProfileManager.add_profile("Dev", []), "Dev (3)")
 	assert_eq(ProfileManager.add_profile("", []), "",
 		"a request with no name stores nothing and answers no name")
+
+# ── Grid unit ──────────────────────────────────────────────────────────
+
+## A profile records the grid unit its geometry was written in, so a coarse
+## profile keeps its shares instead of being re-inferred from its furthest
+## edge. Every producer and the reader go through
+## `PaneTypes.sanitize_grid_unit`.
+func test_profile_grid_unit_round_trips_and_unknown_units_are_dropped():
+	# The save path stamps the unit its gathered tiles are in.
+	ProfileManager.add_profile("Saved", [])
+	assert_eq(ProfileManager.profiles[0].get("grid_unit"), PaneTypes.GRID,
+		"a saved profile records the live grid unit")
+	var stored: Dictionary = MockAutoloads.get_store(ProfileManager.PROFILES_FILE)
+	assert_eq((stored.get("profiles", []) as Array)[0].get("grid_unit"), PaneTypes.GRID,
+		"the unit reaches the store file")
+
+	# A hand-edited store is data: the two units this build scales survive,
+	# everything else becomes "unknown" (0), which activation infers.
+	MockAutoloads.set_store(ProfileManager.PROFILES_FILE, {"profiles": [
+		{"name": "Legacy", "tiles": [], "grid_unit": PaneTypes.GRID_LEGACY},
+		{"name": "Current", "tiles": [], "grid_unit": PaneTypes.GRID},
+		{"name": "Unknown", "tiles": [], "grid_unit": 7},
+		{"name": "Garbage", "tiles": [], "grid_unit": "wide"},
+	]})
+	ProfileManager.load_profiles()
+	assert_eq(ProfileManager.profiles[0].get("grid_unit"), PaneTypes.GRID_LEGACY)
+	assert_eq(ProfileManager.profiles[1].get("grid_unit"), PaneTypes.GRID)
+	assert_eq(ProfileManager.profiles[2].get("grid_unit"), 0,
+		"a unit this build cannot scale means unknown")
+	assert_eq(ProfileManager.profiles[3].get("grid_unit"), 0,
+		"a non-numeric unit means unknown")
+
+	# The shipped-defaults loader copies a unit the file declares, and stamps
+	# this build's grid on a file that declares none (it is app content, not
+	# an old user store).
+	MockAutoloads.set_store(ProfileManager.DEFAULTS_FILE, {"profiles": [
+		{"name": "Coarse", "tiles": [], "grid_unit": PaneTypes.GRID_LEGACY},
+		{"name": "Undeclared", "tiles": []},
+	]})
+	ProfileManager._load_defaults()
+	assert_eq(ProfileManager._default_profiles[0].get("grid_unit"), PaneTypes.GRID_LEGACY)
+	assert_eq(ProfileManager._default_profiles[1].get("grid_unit"), PaneTypes.GRID,
+		"an undeclared unit in the shipped file is this build's grid")
+
+	# An installed plugin's entry carries the unit it was authored in; a
+	# record written before the field existed carries none.
+	_set_plugin_json(JSON.stringify([
+		_installed("Coarse", "godot-pty/gpty-omp", "a1b2c3d4e5f6", PaneTypes.GRID_LEGACY),
+		_installed("Old", "godot-pty/gpty-omp-old", "f6e5d4c3b2a1"),
+	]))
+	var plugin_units := {}
+	for profile in ProfileManager.get_all_profiles():
+		if profile.get("_origin") == ProfileManager.ORIGIN_PLUGIN:
+			plugin_units[str(profile.get("name", ""))] = profile.get("grid_unit")
+	assert_eq(plugin_units.get("Coarse"), PaneTypes.GRID_LEGACY,
+		"a plugin profile's declared unit reaches the sidebar's profile")
+	assert_eq(plugin_units.get("Old"), 0, "an old record means unknown, as it always did")

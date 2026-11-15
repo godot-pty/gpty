@@ -759,6 +759,13 @@ fn profiles_json(store_text: &str) -> Result<String, String> {
             // turns into a pane, so re-validating here would only mean two
             // rules to keep in sync.
             entry.insert("tiles".into(), serde_json::Value::Array(tiles.clone()));
+            // The unit the tiles are written in travels with them, so a
+            // profile authored in a coarser grid activates to the same
+            // shares. A record written before the field existed has none and
+            // the GUI infers it, exactly as it always did.
+            if let Some(unit) = profile.get("grid_unit") {
+                entry.insert("grid_unit".into(), unit.clone());
+            }
             out.push(serde_json::Value::Object(entry));
         }
     }
@@ -1163,6 +1170,33 @@ mod tests {
                     "name": "Logs",
                     "tiles": [{"col": 1, "row": 0}]
                 }
+            ])
+        );
+    }
+
+    /// A profile authored in a coarser grid travels with its unit, so the GUI
+    /// can scale the tiles instead of inferring the unit from their furthest
+    /// edge. A record written before the field existed stays without it and
+    /// keeps the old inference.
+    #[test]
+    fn profiles_json_forwards_a_declared_grid_unit() {
+        let store = r#"{"plugins": [{
+            "id": "acme/grid", "revision": "eee5555", "enabled": true,
+            "installed_at": 5,
+            "profiles": [
+                {"name": "Coarse", "grid_unit": 12,
+                 "tiles": [{"col": 0, "row": 0, "cspan": 3, "rspan": 3}]},
+                {"name": "Old", "tiles": [{"col": 0, "row": 0}]}
+            ]
+        }]}"#;
+        assert_eq!(
+            parsed(store),
+            serde_json::json!([
+                {"plugin_id": "acme/grid", "revision": "eee5555",
+                 "name": "Coarse", "tiles": [{"col": 0, "row": 0, "cspan": 3, "rspan": 3}],
+                 "grid_unit": 12},
+                {"plugin_id": "acme/grid", "revision": "eee5555",
+                 "name": "Old", "tiles": [{"col": 0, "row": 0}]}
             ])
         );
     }

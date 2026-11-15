@@ -52,7 +52,8 @@ pub const MAX_PROFILE_NAME_LEN: usize = MAX_NAME_LEN;
 /// what a record may hold.
 pub const MAX_CONCEPT_RECORDS: usize = MAX_CONCEPTS;
 
-/// One profile a plugin ships: its name and its tiles.
+/// One profile a plugin ships: its name, its tiles, and the grid unit those
+/// tiles are written in.
 ///
 /// The tiles travel as JSON because the store is the GUI's read model — the
 /// GUI never parses TOML. The tile contract was enforced by
@@ -61,6 +62,11 @@ pub const MAX_CONCEPT_RECORDS: usize = MAX_CONCEPTS;
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct PluginProfileRecord {
     pub name: String,
+    /// The unit the tiles' geometry is written in (the manifest's
+    /// `grid_unit`). `None` for a record written before a profile could
+    /// declare one; the GUI then infers it, as it always did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grid_unit: Option<i64>,
     pub tiles: Vec<serde_json::Value>,
 }
 
@@ -329,7 +335,7 @@ fn parse_profiles(value: &serde_json::Value) -> Result<Vec<PluginProfileRecord>,
             return Err(format!("profile {i} is not an object"));
         };
         for key in table.keys() {
-            if !["name", "tiles"].contains(&key.as_str()) {
+            if !["name", "grid_unit", "tiles"].contains(&key.as_str()) {
                 return Err(format!("profile {i}: unknown key `{key}`"));
             }
         }
@@ -337,6 +343,15 @@ fn parse_profiles(value: &serde_json::Value) -> Result<Vec<PluginProfileRecord>,
             .get("name")
             .and_then(|v| v.as_str())
             .ok_or_else(|| format!("profile {i}: missing string `name`"))?;
+        // A record written before a profile could declare a unit has no key;
+        // that reads as "unknown", not as an error.
+        let grid_unit = match table.get("grid_unit") {
+            None => None,
+            Some(v) => Some(
+                v.as_i64()
+                    .ok_or_else(|| format!("profile {i}: `grid_unit` must be an integer"))?,
+            ),
+        };
         let tiles = table
             .get("tiles")
             .and_then(|v| v.as_array())
@@ -344,6 +359,7 @@ fn parse_profiles(value: &serde_json::Value) -> Result<Vec<PluginProfileRecord>,
         check_profile_shape(name, tiles).map_err(|what| format!("profile {i}: {what}"))?;
         out.push(PluginProfileRecord {
             name: name.to_string(),
+            grid_unit,
             tiles: tiles.clone(),
         });
     }
@@ -855,6 +871,7 @@ mod tests {
         let profiles = vec![
             PluginProfileRecord {
                 name: "OMP".into(),
+                grid_unit: Some(60),
                 tiles: vec![serde_json::json!({
                     "col": 0,
                     "row": 0,
@@ -865,6 +882,7 @@ mod tests {
             },
             PluginProfileRecord {
                 name: "Empty".into(),
+                grid_unit: Some(12),
                 tiles: Vec::new(),
             },
         ];
@@ -893,6 +911,7 @@ mod tests {
         let too_many: Vec<PluginProfileRecord> = (0..=MAX_PROFILE_RECORDS)
             .map(|i| PluginProfileRecord {
                 name: format!("p{i}"),
+                grid_unit: None,
                 tiles: Vec::new(),
             })
             .collect();
@@ -903,12 +922,60 @@ mod tests {
         );
         let unnamed = vec![PluginProfileRecord {
             name: String::new(),
+            grid_unit: None,
             tiles: Vec::new(),
         }];
         assert!(
             store
                 .upsert("owner/omp", "fedcba987654", &unnamed, &[])
                 .is_err()
+        );
+    }
+
+    /// A profile's declared grid unit is store data like its tiles: an
+    /// integer round-trips, a record from before the field existed keeps the
+    /// GUI's old inference, and a value that is not an integer is refused by
+    /// name.
+    #[test]
+    fn profile_grid_unit_round_trips_and_a_non_integer_is_rejected() {
+        let (_tmp, store) = make_store("profile-grid-unit");
+        let profiles = vec![PluginProfileRecord {
+            name: "Coarse".into(),
+            grid_unit: Some(12),
+            tiles: vec![serde_json::json!({"col": 0, "row": 0, "cspan": 3, "rspan": 3})],
+        }];
+        store.upsert("owner/x", "aaaaaaa", &profiles, &[]).unwrap();
+        assert_eq!(store.records().unwrap()[0].profiles, profiles);
+        let text = std::fs::read_to_string(&store.path).unwrap();
+        assert!(
+            text.contains("\"grid_unit\": 12"),
+            "the unit is written: {text}"
+        );
+
+        // Absent is `None` and stays absent on a rewrite.
+        std::fs::write(
+            &store.path,
+            r#"{"plugins": [{"id": "owner/x", "revision": "aaaaaaa", "enabled": true, "installed_at": 1, "profiles": [{"name": "Old", "tiles": []}]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(store.records().unwrap()[0].profiles[0].grid_unit, None);
+        store.set_enabled("owner/x", true).unwrap();
+        let text = std::fs::read_to_string(&store.path).unwrap();
+        assert!(
+            !text.contains("grid_unit"),
+            "an absent unit stays absent: {text}"
+        );
+
+        // A non-integer costs the record and names the field.
+        std::fs::write(
+            &store.path,
+            r#"{"plugins": [{"id": "owner/x", "revision": "aaaaaaa", "enabled": true, "installed_at": 1, "profiles": [{"name": "Bad", "grid_unit": "wide", "tiles": []}]}]}"#,
+        )
+        .unwrap();
+        let err = store.records().unwrap_err().0;
+        assert!(
+            err.contains("grid_unit"),
+            "the refusal names the field: {err}"
         );
     }
 
@@ -928,6 +995,7 @@ mod tests {
         // Re-installing one adds them without disturbing the rest.
         let profiles = vec![PluginProfileRecord {
             name: "P".into(),
+            grid_unit: None,
             tiles: vec![serde_json::json!({"settings": {"type": "terminal"}})],
         }];
         let updated = store.upsert("owner/x", "bbbbbbb", &profiles, &[]).unwrap();

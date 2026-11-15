@@ -28,13 +28,13 @@ The schema lives in `crates/gpty-cli/src/plugin_manifest.rs`. Top-level keys:
 | `platforms` | Subset of `linux`, `macos`, `windows`; default all |
 | `build`, `startup` | argv arrays, declared and displayed but not executed by any current item |
 
-The array-of-table sections each have a cap: `[[actions]]` ≤64 (`name`, `command`, optional `args`), `[[events]]` ≤64 (`name`, `type`), `[[link_handlers]]` ≤16 (`scheme`, `command` argv), `[[concepts]]` ≤128, `[[profiles]]` ≤64 with ≤64 tiles each.
+The array-of-table sections each have a cap: `[[actions]]` ≤64 (`name`, `command`, optional `args`), `[[events]]` ≤64 (`name`, `type`), `[[link_handlers]]` ≤16 (`scheme`, `command` argv), `[[concepts]]` ≤128, `[[profiles]]` ≤64 with ≤64 tiles each and an optional `grid_unit`.
 
 Three rules make the manifest safe to read:
 
 - **Nothing executes at parse or validation time.** `build`, `startup`, and link-handler commands are argv arrays, never shell strings, capped at 32 entries and 4096 characters; an action's `command` is a published tool name and its `args` become flags.
 - **Every concept is engine-accepted.** Each `[[concepts]]` entry round-trips through the real concept engine (`concepts_from_json`). An entry the engine would silently drop — a PCRE2 lookbehind, say, when the engine speaks Rust `regex` — rejects the manifest instead of vanishing.
-- **Tiles mirror the GUI's sanitizer.** Pane type must be one of the eight real types, grid geometry must fit the 60-unit grid, rows and cols within 500 and 2000. The sanitizer clamps legacy files; the validator rejects, because a manifest is authored content and an out-of-range value is an authoring error.
+- **Tiles mirror the GUI's sanitizer.** Pane type must be one of the eight real types, grid geometry must fit the profile's own unit — `grid_unit = 60` (the default) or `12` (the coarser authoring grid), with `cspan`/`rspan` defaulting to that unit — and rows and cols within 500 and 2000. The sanitizer clamps legacy files; the validator rejects, because a manifest is authored content and an out-of-range value is an authoring error. A profile that declares `grid_unit` must also set `min_gpty_version` to the first release that honours it (`0.8.4`): an older GUI ignores the field and infers the unit from the tiles' furthest edge.
 
 Unknown keys in manifest sections are rejected. The schema is closed: a typo fails at validate time instead of surfacing later as a missing feature.
 

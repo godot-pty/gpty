@@ -1006,6 +1006,54 @@ func test_a_store_written_in_a_coarser_unit_restores_the_same_shares():
 	assert_almost_eq(a.position.x, origin.x, 1.0, "the block starts at the grid's left edge")
 	assert_almost_eq(a.position.y, origin.y, 1.0, "and at its top")
 
+## A profile that declares a coarser grid unit activates to the same shares.
+## The tiles stop at a quarter of the 12-unit grid, so inference alone would
+## scale the block up to half the screen (it would read unit 6). This goes
+## through the producer path — the installed-plugin JSON into `ProfileManager`,
+## which used to drop the unit, so activation inferred — and out through
+## `_activate_now` into `scale_layout`.
+func test_a_profile_written_in_a_coarser_unit_activates_the_same_shares():
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	ws.size = Vector2(1200, 800)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	ProfileManager.plugin_profiles_source = func(): return JSON.stringify([{
+		"plugin_id": "godot-pty/gpty-omp",
+		"revision": "a1b2c3d4e5f6",
+		"name": "Coarse",
+		"grid_unit": PaneTypes.GRID_LEGACY,
+		"tiles": [
+			{"col": 0, "row": 0, "cspan": 3, "rspan": 3,
+				"settings": {"type": "code_viewer", "pane_name": "C1"}},
+			{"col": 3, "row": 0, "cspan": 3, "rspan": 3,
+				"settings": {"type": "code_viewer", "pane_name": "C2"}},
+		],
+	}])
+	ProfileManager.refresh_plugin_profiles()
+	var profile := ProfileManager.find_profile("Coarse")
+	assert_false(profile.is_empty(), "the installed profile must resolve by name")
+	assert_eq(profile.get("grid_unit"), PaneTypes.GRID_LEGACY,
+		"the producer must carry the declared unit into the profile")
+
+	ws._do_activate(profile, false)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var tm: TerminalManager = ws._tm
+	assert_eq(tm.tiles.size(), 2, "the profile must restore both panes")
+	var grid: Control = ws._grid
+	var a: Rect2 = (tm.tiles[0].wrapper as Control).get_global_rect()
+	var b: Rect2 = (tm.tiles[1].wrapper as Control).get_global_rect()
+	assert_almost_eq(a.size.x, grid.size.x * 0.25, grid.size.x * 0.02,
+		"a quarter of a 12-unit profile must be a quarter of the content area")
+	assert_almost_eq(a.size.y, grid.size.y * 0.25, grid.size.y * 0.02,
+		"and the same fraction of its height")
+	assert_almost_eq(b.position.x, a.position.x + a.size.x, 1.0,
+		"the second tile must start where the first ends")
+
 func test_an_emptied_workspace_shows_the_guide():
 	var ws = WorkspaceScript.new()
 	_ws = ws

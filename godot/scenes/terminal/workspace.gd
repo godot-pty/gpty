@@ -3777,7 +3777,8 @@ func _do_activate(profile: Dictionary, ask_running := true, open_in_new := false
 func _activate_now(ws: Dictionary, profile: Dictionary):
 	_reset_now()
 	var raw: Array = TerminalManager.scale_layout(
-		profile.get("tiles", []), int(profile.get("grid_unit", 0)))
+		profile.get("tiles", []),
+		PaneTypes.sanitize_grid_unit(profile.get("grid_unit", 0)))
 	var tiles: Array[Dictionary] = []
 	for td in raw:
 		if td is Dictionary:
