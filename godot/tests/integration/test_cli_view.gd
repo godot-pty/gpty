@@ -88,6 +88,15 @@ func _temp_dir(slug: String) -> String:
 	_dirs.append(dir)
 	return dir
 
+## One separator spelling for both sides of a path comparison.
+##
+## Godot's own paths use `/` even on Windows (`path_join`, `OS.get_user_data_dir`)
+## while a child process prints its cwd the way the OS does (`\` from `cmd`), so
+## a raw `contains` compares two spellings of the same directory and answers
+## false on Windows only. `/` also keeps the assertion text readable.
+func _slashed(path: String) -> String:
+	return path.replace("\\", "/")
+
 # ── Streaming ──────────────────────────────────────────────────────────
 
 func test_child_stdout_reaches_the_pane_and_the_process_ends():
@@ -122,18 +131,22 @@ func test_the_child_starts_in_the_panes_directory():
 	pane.shell_args = plan[1]
 	pane._start()
 	var ok := await _wait_until(
-		func(): return pane.get_text().contains(workspace), PROCESS_BUDGET_MS)
-	assert_true(ok, "the child must start in its workspace directory: %s"
-		% JSON.stringify(pane.get_text()))
+		func(): return _slashed(pane.get_text()).contains(_slashed(workspace)),
+		PROCESS_BUDGET_MS)
+	assert_true(ok, "the child must start in its workspace directory %s: %s (%s)"
+		% [_slashed(workspace), JSON.stringify(_slashed(pane.get_text())),
+		pane.start_error()])
 
 	# The pane's own directory is the first layer, and Restart re-resolves it.
 	var own := _temp_dir("own")
 	pane.pane_cwd = own
 	pane._start()
 	ok = await _wait_until(
-		func(): return pane.get_text().contains(own), PROCESS_BUDGET_MS)
-	assert_true(ok, "the pane's own directory replaces the workspace's at Restart: %s"
-		% JSON.stringify(pane.get_text()))
+		func(): return _slashed(pane.get_text()).contains(_slashed(own)),
+		PROCESS_BUDGET_MS)
+	assert_true(ok, "the pane's own directory %s must replace the workspace's at Restart: %s (%s)"
+		% [_slashed(own), JSON.stringify(_slashed(pane.get_text())),
+		pane.start_error()])
 
 func test_stop_kills_a_running_child():
 	if not _ffi_ready():
