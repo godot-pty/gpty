@@ -12,9 +12,9 @@ Activating a profile resets the active workspace and rebuilds its panes from the
 
 There are three sources, shown in one list in the sidebar's Profiles section.
 
-**Shipped, then seeded.** gPTY ships two layouts in `res://profiles.default.json`: **Agent Workspace** — a wide terminal on the left with an Inspector and a Reasoning pane stacked on the right, wired by the stable attachment ids `omp-terminal`, `omp-inspector`, and `omp-reasoning` — and **Knowledge Base**, a Wiki pane opened on the bundled vault through the `@knowledge` token. On the first launch of this build both are copied into `user://profiles.json` as ordinary user profiles; the seed file is never written back, and the `seeded_defaults` marker stops a deleted copy from returning. Both name no program, so activating one raises no trust dialog. Because they are user profiles, they are renamed and deleted exactly like any other row.
+**Shipped, then seeded.** gPTY ships two profiles in `res://profiles.default.json`: **Agent Workspace** — a wide terminal on the left with an Inspector and a Reasoning pane stacked on the right, wired by the stable attachment ids `agent-terminal`, `agent-inspector`, and `agent-reasoning` — and **Knowledge Base**, a Wiki pane opened on the bundled vault through the `@knowledge` token. Agent Workspace is core geometry, not an OMP feature: its terminal is a plain shell, and the Inspector's default backend happens to be OMP, the first adapter the observability panes support. On the first launch of this build both are copied into `user://profiles.json` as ordinary user profiles; the seed file is never written back, and the `seeded_defaults` marker stops a deleted copy from returning. Both name no program, so activating one raises no trust dialog. Because they are user profiles, they are renamed and deleted exactly like any other row.
 
-**Installed with a plugin.** The single-pane tool presets — Herdr, Lazygit, Neovim, Claude, and OMP — arrive from their own plugin repositories, one profile per tool, each restoring a full-window terminal that runs that tool. The two shipped layouts are also published as `godot-pty/gpty-agent-workspace` and `godot-pty/gpty-knowledge-base`. None of the tool presets installs the OMP event extension or launches `omp` for you; you do that inside the terminal. Plugin profiles are re-read from the installed-plugin store, are never written into the user profile file, and disappear with the plugin. Their sidebar rows show where they came from (`owner/repo@revision`) and carry a trash that uninstalls the plugin after an in-place check/cross; uninstalling removes every profile and concept the plugin ships. Plugin rows offer no rename. Installing a plugin whose profile name matches one of your profiles names the replacement in the install review; accepting gives the plugin's copy the bare name once the install lands.
+**Installed with a plugin.** The single-pane tool presets — Herdr, Lazygit, Neovim, Claude, and OMP — arrive from their own plugin repositories, one profile per tool, each restoring a full-window terminal that runs that tool. `godot-pty/gpty-omp` also ships **OMP Workspace**, the OMP-branded arrangement: a terminal running `omp`, an Inspector on the `omp` backend, and a Reasoning pane following that terminal, under its own `omp-ws-terminal`, `omp-ws-inspector`, and `omp-ws-reasoning` ids so it can sit beside the generic built-in without sharing its handles. The two shipped profiles are also published as `godot-pty/gpty-agent-workspace` and `godot-pty/gpty-knowledge-base`. None of the tool presets installs the OMP event extension or launches `omp` for you; you do that inside the terminal. Plugin profiles are re-read from the installed-plugin store, are never written into the user profile file, and disappear with the plugin. Their sidebar rows show where they came from (`owner/repo@revision`) and carry a trash that uninstalls the plugin after an in-place check/cross; uninstalling removes every profile and concept the plugin ships. Plugin rows offer no rename. Installing a plugin whose profile name matches one of your profiles names the replacement in the install review; accepting gives the plugin's copy the bare name once the install lands.
 
 **Saved by you.** The `+` button in the Profiles header captures the active workspace's current tiles as a new profile. The dialog asks for a name and lets you give each terminal pane a launch line before saving — one shell command run through your configured shell at the pane's next start, so `omp update && exec omp` is a single entry — which is how you turn a working arrangement into a repeatable one. An empty field keeps the program the pane already runs, and the dialog writes nothing for the other pane types. User profiles live in `user://profiles.json`.
 
@@ -41,15 +41,13 @@ The activated profile's name is remembered by the workspace that activated it, a
 
 ## Automation
 
-The control API's layout commands operate on profiles:
-
 ```bash
-gpty layout save "Review"
-gpty layout load "Review"
-gpty layout list
+gpty profile save "Review"
+gpty profile load "Review"
+gpty profile list
 ```
 
-`layout save` captures the active workspace under the given name, creating a user profile; `layout load` activates a profile by name; `layout list` prints every visible profile name. The same methods are available as the `layout-save`, `layout-load`, and `layout-list` MCP tools.
+`profile save` captures the active workspace under the given name, creating a user profile; `profile load` activates a profile by name; `profile list` prints every visible profile name. The same methods are available as the `profile-save`, `profile-load`, and `profile-list` MCP tools.
 
 A caller cannot answer a dialog, so these paths are stricter than the sidebar. Loading a profile that would spawn an unapproved program or argument list is refused with an explanation instead of prompting, and loading is refused when a pane in the active workspace holds unsaved changes. A running process is not a reason to refuse — naming the profile is taken as consent to stop what it replaces. Loading also starts the GUI when needed, unlike queries.
 

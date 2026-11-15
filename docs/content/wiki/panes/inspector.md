@@ -41,6 +41,8 @@ Backends:
 | `cli` | a subprocess NDJSON bridge: your adapter command is started per prompt, argv only, never through a shell |
 | `mock` | a deterministic local pass-through, used by tests and offline work |
 
+Pane Settings lists these from `GptyAi.list_backends()` in a dropdown rather than a free-text field, so a typo cannot survive until the first prompt: a program this machine does not have stays listed and selectable with a ` (not found)` suffix, and a value the list does not know is kept visible as `Custom: <value>` instead of being reset to a default you did not choose.
+
 The CLI bridge contract is one JSON request line in for a prompt and JSON event lines out (`thinking`, `delta`, `done`, `error`, `status`). Adapters translate a tool's documented hooks; nothing scrapes a TUI and nothing counts tokens.
 
 A capture routed from a terminal concept can reach the pane only when you enable **Accept terminal concept captures**. That gate is off by default and is the whole security story of the feature: a capture is terminal output, and delivering it means that text leaves the pane and goes to a model. With the gate on, captures queue in the pane; **Auto-run** decides whether a capture starts a turn immediately, and **Run on last capture** replays the most recent one by hand. Auto-run is off by default and no file can turn it on; when you set it in the pane panel it is stored as your own preference for that pane and comes back with it after a restart, so a capture arriving on a restored pane follows the choice you made rather than a file's.
@@ -64,7 +66,7 @@ Changing the backend, model, system prompt or CLI command closes the session, so
 
 ## What it does not do
 
-It does not attach to the OMP conversation hosted in a terminal, and it does not read terminal output on its own — a terminal session can be busy for an hour and this pane will not show a word of it. It does not use tools, skills, extensions or workspace rules, and it does not write anything to disk. Its session is in-memory: closing the pane ends it, and there is no transcript to reopen.
+It does not attach to the agent conversation hosted in a terminal, and it does not read terminal output on its own — a terminal session can be busy for an hour and this pane will not show a word of it. It does not use tools, skills, extensions or workspace rules, and it does not write anything to disk. Its session is in-memory: closing the pane ends it, and there is no transcript to reopen.
 
 ## Limits and edge cases
 

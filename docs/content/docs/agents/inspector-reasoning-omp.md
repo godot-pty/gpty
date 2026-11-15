@@ -8,8 +8,8 @@ gPTY is a graphical PTY foundation with an observability layer. It does **not** 
 | Surface | Role |
 |---------|------|
 | Terminal | User launches `omp` (or any CLI) normally. The CLI owns its TUI, auth, tools, and permissions. |
-| Inspector | Private, tool-free, iterative Q&A. Owns one in-memory `GptyAi` session; backends: `omp` (private `omp --mode rpc --no-session --no-tools --no-extensions --no-skills --no-rules`), `mock`, or `cli` (subprocess NDJSON bridge - a configured adapter command, argv never shell-evaluated, documented hooks only). Does not attach to the terminal OMP process. |
-| Reasoning | Passive view of documented reasoning/lifecycle events from **one** terminal in its own workspace, selected by `source_attachment_id`. Never starts jobs or accepts concept captures. Turn history is an in-memory accordion for the current OMP session only. |
+| Inspector | Private, tool-free, iterative Q&A. Owns one in-memory `GptyAi` session; backends: `omp` (private `omp --mode rpc --no-session --no-tools --no-extensions --no-skills --no-rules`), `mock`, or `cli` (subprocess NDJSON bridge - a configured adapter command, argv never shell-evaluated, documented hooks only). Does not attach to the terminal's agent process. |
+| Reasoning | Passive view of documented reasoning/lifecycle events from **one** terminal in its own workspace, selected by `source_attachment_id`. Never starts jobs or accepts concept captures. Turn history is an in-memory accordion for the terminal's current agent session only. |
 | `@gpty/omp-events` | Explicitly installed OMP extension. Dormant unless its configuration is complete: `GPTY_EVENT_PROTOCOL` = `1`, `GPTY_EVENT_SOCKET`, `GPTY_EVENT_CAPABILITY` and `GPTY_TERMINAL_SESSION_ID` (`transport.js`'s `readConfiguration`). Forwards bounded session/turn/tool metadata plus `thinking_delta` text only, **coalesced** (one event per 16 ms / ≤8 KiB UTF-8, split on code points). |
 
 - Inspector and Reasoning are **different sessions**. The shipped "Agent Workspace" profile opens Terminal + Inspector + Reasoning; only Reasoning is attached to the terminal.

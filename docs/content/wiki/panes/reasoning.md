@@ -1,10 +1,10 @@
 # Reasoning Pane
 
-A reasoning pane is a passive window onto an agent's lifecycle: it shows the reasoning an OMP session reports, turn by turn, without running the agent or reading the terminal's screen.
+A reasoning pane is a passive window onto an agent's lifecycle: it shows the reasoning an agent session reports, turn by turn, without running the agent or reading the terminal's screen.
 
 ## What it is
 
-The body is `ReasoningPane` (`godot/scenes/panes/reasoning_pane.gd`); the registered type key is `reasoning` and its label prefix is `R`. It listens to semantic events from one terminal in its own workspace, identified by that terminal's stable `attachment_id` (the default source is `omp-terminal`), and projects them into a scroll of foldable turns. Delivery is workspace-scoped: the dispatcher resolves the emitting PTY by its session id and hands the event only to receivers in that terminal's workspace, so activating the same profile in two workspaces keeps each Reasoning pane on its own terminal.
+The body is `ReasoningPane` (`godot/scenes/panes/reasoning_pane.gd`); the registered type key is `reasoning` and its label prefix is `R`. It listens to semantic events from one terminal in its own workspace, identified by that terminal's stable `attachment_id` (the default source is `agent-terminal`), and projects them into a scroll of foldable turns. Delivery is workspace-scoped: the dispatcher resolves the emitting PTY by its session id and hands the event only to receivers in that terminal's workspace, so activating the same profile in two workspaces keeps each Reasoning pane on its own terminal.
 
 The important word is *reported*. The pane never starts an agent, never sends it a prompt, and never scrapes the TUI. It only displays events the agent publishes through gPTY's event socket. When nothing publishes, the pane is a status line explaining what to link.
 
@@ -46,7 +46,7 @@ The event vocabulary it consumes is small and semantic:
 
 | Event | Effect on the pane |
 |---|---|
-| `session.bound` | binds the pane to an OMP session id |
+| `session.bound` | binds the pane to the event envelope's session id (`omp_session_id`) |
 | `agent.started` | starts a new turn and sets the status to `Reasoning…` |
 | `thinking.delta` | appends reasoning text to the live turn |
 | `agent.settled` | closes the turn; status becomes `Done` or `No reasoning emitted` |
@@ -54,7 +54,7 @@ The event vocabulary it consumes is small and semantic:
 
 The view follows the bottom while you are at the bottom, and stops following when you scroll up to read an earlier turn; scrolling back down re-arms it. This is a display state, not a mode you toggle.
 
-A turn record is the pane's own source of truth: it holds the turn index, the status, and the accumulated text up to the configured cap. Records live in RAM for the current OMP session; the pane does not write a transcript.
+A turn record is the pane's own source of truth: it holds the turn index, the status, and the accumulated text up to the configured cap. Records live in RAM for the current agent session; the pane does not write a transcript.
 
 ## Settings that matter
 
@@ -72,7 +72,7 @@ It does not run an agent, send prompts, or accept input. It does not parse termi
 
 ## Limits and edge cases
 
-The pane displays one source terminal at a time. Events from another terminal are ignored. A new OMP session rebinds the pane, and the session's `session.shutdown` marks the view as ended rather than silently freezing. The turn and byte caps bound memory, and the oldest turns are dropped first. If the view looks slow rather than empty, `GPTY_REASONING_DEBUG=1` prints a once-per-second line with the input rate, render rate and the event server's drop counters — enough to tell a slow model from a stalled GUI.
+The pane displays one source terminal at a time. Events from another terminal are ignored. A new agent session rebinds the pane, and the session's `session.shutdown` marks the view as ended rather than silently freezing. The turn and byte caps bound memory, and the oldest turns are dropped first. If the view looks slow rather than empty, `GPTY_REASONING_DEBUG=1` prints a once-per-second line with the input rate, render rate and the event server's drop counters — enough to tell a slow model from a stalled GUI.
 
 ## Related
 

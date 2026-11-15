@@ -542,10 +542,10 @@ const SECTION_NAMES := {"workspaces": "Workspaces", "profiles": "Profiles", "pan
 var _fold_sections: Dictionary = {}
 
 ## The profiles section's catalog hint: with no installed plugin profile the
-## only shipped layout is the built-in, and the tool layouts live in plugin
-## repos listed on this page.
+## only shipped profiles are the two built-ins, and the tool profiles live in
+## plugin repos listed on this page.
 const PLUGINS_CATALOG_URL := "https://gpty.dev/plugins/"
-const CATALOG_HINT_TEXT := "More layouts \u2192"
+const CATALOG_HINT_TEXT := "More profiles \u2192"
 
 func _add_workspace_section(parent: VBoxContainer):
 	var section = VBoxContainer.new(); section.name = "WorkspaceSection"

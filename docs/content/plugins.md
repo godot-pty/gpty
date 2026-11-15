@@ -4,7 +4,7 @@ weight: 2
 ---
 
 A gpty plugin is a repository containing a `gpty-plugin.toml` manifest. It can
-ship pure data - profiles (named layouts) and concepts (terminal-output
+ship pure data - profiles (named tile sets) and concepts (terminal-output
 triggers), both delivered to the running GUI - or name programs to run.
 
 Two sections are **declarations, never delivery**. Events: gpty dispatches

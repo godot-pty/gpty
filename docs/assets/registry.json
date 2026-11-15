@@ -5,9 +5,9 @@
       "id": "godot-pty/gpty-omp",
       "repo": "https://github.com/godot-pty/gpty-omp",
       "name": "OMP",
-      "description": "A terminal running OMP (oh-my-pi) — the agent workspace profile.",
+      "description": "An OMP terminal, plus the OMP-branded agent workspace: terminal, Inspector, Reasoning.",
       "category": "agent",
-      "min_gpty_version": "0.5.4",
+      "min_gpty_version": "0.5.5",
       "platforms": [
         "linux",
         "macos",

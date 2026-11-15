@@ -61,7 +61,7 @@ func test_profiles_show_what_they_would_start():
 		],
 	})
 	assert_true(text.contains("Lazygit: starts lazygit"), text)
-	assert_true(text.contains("Plain: no program (layout only)"),
+	assert_true(text.contains("Plain: no program (geometry only)"),
 		"a profile whose tiles name no program says so: " + text)
 
 func test_the_recorded_plans_are_the_ones_the_dialog_lists():

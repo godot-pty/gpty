@@ -176,7 +176,7 @@ static func concept_effect_text(entry: Dictionary) -> String:
 ## tiles are pure geometry) says so instead of showing nothing.
 static func programs_text(raw: Variant) -> String:
 	if not raw is Array or raw.is_empty():
-		return "no program (layout only)"
+		return "no program (geometry only)"
 	var parts: Array = []
 	for i in mini(raw.size(), MAX_PROGRAMS_SHOWN):
 		parts.append(short(str(raw[i]), 64))
