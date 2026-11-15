@@ -1835,7 +1835,7 @@ mod tests {
             .spawn_terminal_with_grid(
                 TerminalConfig { id: 55 },
                 "sh",
-                &["-c", "stty raw -echo; sleep 60"],
+                &["-c", "stty raw -echo; echo READY; sleep 60"],
                 &[],
                 &[],
                 24,
@@ -1843,6 +1843,22 @@ mod tests {
             )
             .await
             .expect("Failed to spawn terminal");
+
+        // A canonical-mode PTY discards the excess instead of blocking, so the
+        // child has to be in raw mode before the send loop; wait for the
+        // marker `stty` prints after it switches.
+        let ready = wait_until(Duration::from_secs(10), || {
+            spawned
+                .grid
+                .lock()
+                .map(|grid| visible_lines(&grid).join("\n").contains("READY"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            ready,
+            "the child must switch the PTY to raw mode before the sends"
+        );
 
         // 64 KiB per call is the inject API's own per-call cap. The PTY kernel
         // buffer absorbs one or two writes before the task blocks in
