@@ -144,6 +144,50 @@ func test_code_viewer_get_layout_state_round_trips_through_apply_settings():
 	twin.apply_settings(state)
 	assert_eq(twin._get_layout_state(), state, "state -> apply -> state is stable")
 
+## The panel re-applies its whole gathered dictionary on every debounced edit,
+## so a rename arrives with the same `file_path`. The viewer must not reload
+## then: the re-read resets the read-only editor's caret and scroll, losing the
+## reader's place for an unrelated edit.
+func test_a_name_edit_keeps_the_viewers_scroll():
+	var first := TestPaths.user_path("code_viewer_scroll_a.txt")
+	var second := TestPaths.user_path("code_viewer_scroll_b.txt")
+	var lines := PackedStringArray()
+	for i in 200:
+		lines.append("line %d of the probe" % i)
+	_write_probe(first, "\n".join(lines))
+	_write_probe(second, "a different document\n")
+
+	var body = _tm.create_body("code_viewer")
+	_scene.add_child(body)
+	body.size = Vector2(800, 600)
+	body.load_file(first)
+	await get_tree().process_frame
+	body._editor.scroll_vertical = 10
+	assert_gt(body._editor.scroll_vertical, 0,
+		"the probe needs a scrollable document to prove anything")
+	var scrolled: int = body._editor.scroll_vertical
+
+	body.apply_settings({"pane_name": "Renamed", "file_path": first})
+	await get_tree().process_frame
+	assert_eq(body._editor.scroll_vertical, scrolled,
+		"an unrelated edit must not reset the reader's place")
+	assert_string_contains(body._editor.text, "line 0 of the probe",
+		"the document is still the one it held")
+
+	# A path that really moved still reloads: the guard is not "never reload".
+	body.apply_settings({"file_path": second})
+	await get_tree().process_frame
+	assert_eq(body._editor.text, "a different document\n",
+		"a moved path must load the new file")
+
+	DirAccess.remove_absolute(first)
+	DirAccess.remove_absolute(second)
+
+func _write_probe(path: String, text: String):
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(text)
+	file.close()
+
 ## `open_in` is a closed vocabulary and travels the same path as every other
 ## pane setting: the settings UI gathers it, `apply_settings` accepts it, and
 ## the tile state carries it back.

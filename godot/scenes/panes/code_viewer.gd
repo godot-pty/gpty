@@ -239,13 +239,21 @@ func _get_layout_state() -> Dictionary:
 	return state
 
 func apply_settings(settings: Dictionary):
+	# The panel re-applies the whole gathered dict on every debounced edit, so
+	# a name or font change arrives with the same `file_path`. Reloading then
+	# would re-read the document and reset the read-only editor's caret and
+	# scroll for an unrelated edit; only a path that actually moved reloads.
+	var previous_path := file_path
 	super.apply_settings(settings)
 	if settings.get("language") is String:
 		language = settings["language"]
 	if settings.get("view_mode") is String and settings["view_mode"] in _view_modes:
 		view_mode = settings["view_mode"]
 	if settings.get("file_path") is String and _editor != null:
-		load_file(settings["file_path"])
+		if file_path != previous_path:
+			load_file(file_path)
+		elif is_inside_tree():
+			_refresh_view()
 	elif is_inside_tree():
 		_refresh_view()
 
