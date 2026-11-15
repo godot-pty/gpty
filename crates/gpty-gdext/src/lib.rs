@@ -1364,4 +1364,72 @@ mod tests {
         assert!(err.contains("not JSON"), "{err}");
         assert_eq!(concepts_emitted(""), "[]");
     }
+
+    /// The pane grid ceiling is declared three times - here for the FFI clamp,
+    /// in `PaneTypes` for the store, and in the plugin manifest for a profile's
+    /// geometry - and nothing compared them. A tile saved under one cap and
+    /// restored under another is the `one-fact-two-copies` class: the numbers
+    /// agree today, and the next edit to one of them is silent. There is no FFI
+    /// for a constant, so this reads both declarations, the way the markdown cap
+    /// test reads `TextRead.DEFAULT_MAX_BYTES`.
+    #[test]
+    fn the_grid_caps_are_declared_once() {
+        const PANE_TYPES: &str = include_str!("../../../godot/scenes/panes/pane_types.gd");
+        const PLUGIN_MANIFEST: &str =
+            include_str!("../../../crates/gpty-cli/src/plugin_manifest.rs");
+
+        fn declared<'a>(source: &'a str, prefix: &str) -> &'a str {
+            source
+                .lines()
+                .find_map(|line| line.trim().strip_prefix(prefix))
+                .unwrap_or_else(|| panic!("missing declaration: {prefix}"))
+                .trim()
+                .trim_end_matches(';')
+                .trim()
+        }
+
+        fn number(source: &str, prefix: &str, file: &str) -> i64 {
+            let text = declared(source, prefix);
+            text.parse::<i64>()
+                .unwrap_or_else(|_| panic!("{file}: {prefix} {text} is not an integer"))
+        }
+
+        let pane = (
+            number(
+                PANE_TYPES,
+                "const PANE_MAX_ROWS :=",
+                "godot/scenes/panes/pane_types.gd",
+            ),
+            number(
+                PANE_TYPES,
+                "const PANE_MAX_COLS :=",
+                "godot/scenes/panes/pane_types.gd",
+            ),
+        );
+        let manifest = (
+            number(
+                PLUGIN_MANIFEST,
+                "pub const PANE_MAX_ROWS: i64 =",
+                "crates/gpty-cli/src/plugin_manifest.rs",
+            ),
+            number(
+                PLUGIN_MANIFEST,
+                "pub const PANE_MAX_COLS: i64 =",
+                "crates/gpty-cli/src/plugin_manifest.rs",
+            ),
+        );
+        let expected = (super::MAX_ROWS, super::MAX_COLS);
+        let where_ = "godot/scenes/panes/pane_types.gd, crates/gpty-gdext/src/lib.rs, \
+                      crates/gpty-cli/src/plugin_manifest.rs";
+        assert_eq!(
+            pane, expected,
+            "PaneTypes {pane:?} vs gdext {expected:?} vs plugin manifest {manifest:?}; \
+             declarations in {where_}"
+        );
+        assert_eq!(
+            manifest, expected,
+            "PaneTypes {pane:?} vs gdext {expected:?} vs plugin manifest {manifest:?}; \
+             declarations in {where_}"
+        );
+    }
 }
