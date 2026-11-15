@@ -203,7 +203,12 @@ These are load-bearing guards. Reports that require removing one of them should 
   legacy built-in claim is stripped on load too. Environment is not a file
   decision: a tile's `shell_env` is dropped on restore with a notice naming what was dropped, and
   per-pane environment is the user's own - `user://pane_env.json`, written only by the pane settings
-  UI and keyed by the pane's id, applied at spawn over the user's global environment. The Inspector's
+  UI and keyed by the pane's id, applied at spawn over the user's global environment. A pane's own
+  working directory is the same class of state, in `user://pane_cwd.json`: keyed by the pane's id
+  *and* a workspace id this build generates (`ws-` plus 12 hex, minted on the first load of a store
+  that predates it), written only by the pane settings UI, and deliberately outside the trust plan
+  key - like the pane's own environment - because no file can name an entry and a path that has gone
+  missing falls back to the workspace's directory at spawn with one warning. The Inspector's
   prompt and its two switches are the same kind of user-owned state, in `user://pane_inspector.json`:
   the settings table refuses them from files, the pane settings UI is the only writer, and the pane
   reads its own record at attach - so a profile cannot aim an Inspector, while a prompt and switches
@@ -216,8 +221,12 @@ These are load-bearing guards. Reports that require removing one of them should 
   `workspaces.json` and is handed to every terminal that workspace starts. A directory is not
   executable on its own, so a plain shell in a file-supplied directory restores without a prompt
   (asking at every launch would train the user to dismiss the one dialog that matters), and a
-  tile, profile or plugin cannot carry a directory of its own - the workspace owns it. Where the
-  spawn is already untrusted, the directory joins the trust decision: an untrusted tile's approval
+  tile, profile or plugin cannot carry a directory of its own - the workspace owns it. A pane may
+  point somewhere else through its Pane Settings **Directory**, which is that pane's own user-owned
+  record (`PaneCwdStore`, above) and not an input to this gate: the plan key keeps naming the
+  workspace directory the file supplied, and the override exists only because the user set it on
+  that pane in that workspace. Where the spawn is already untrusted, the directory joins the trust
+  decision: an untrusted tile's approval
   is keyed on program + argv + the directory the spawn will actually use, the Workspace Trust dialog
   names that directory, and changing a workspace's directory through the folder picker re-asks when
   the workspace holds an untrusted tile, cancelling the change otherwise. Editing a workspace file to
