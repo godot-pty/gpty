@@ -24,8 +24,9 @@ class MouseProbePane:
 	func _mouse_to_cell(_pos: Vector2) -> Vector2i:
 		return cell
 
-	func _send_to_term(text: String):
+	func _send_to_term(text: String) -> bool:
 		sent += text
+		return true
 
 func before_each():
 	_probe = MouseProbePane.new()

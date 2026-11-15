@@ -85,8 +85,9 @@ class PasteProbePane:
 	func _get_clipboard_text() -> String:
 		return clipboard
 
-	func _send_to_term(text: String):
+	func _send_to_term(text: String) -> bool:
 		sent += text
+		return true
 
 func _paste_event() -> InputEventKey:
 	var event := InputEventKey.new()

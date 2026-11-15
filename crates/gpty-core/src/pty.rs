@@ -27,6 +27,16 @@ use tokio::sync::mpsc::Sender;
 /// costs at most `OUTPUT_QUEUE_CHUNKS * READ_BUF_SIZE` = 1 MiB per pane.
 pub const OUTPUT_QUEUE_CHUNKS: usize = 256;
 
+/// Chunks the PTY's writer thread may hold. This is the second and smaller
+/// stage after the engine's own stdin queue: a child that stops reading blocks
+/// the writer thread in `write_all` and fills this channel; [`PtyHandle::send`]
+/// then answers `WouldBlock`, the engine task retries with a short async sleep
+/// (never a synchronous write on a tokio worker), its own queue fills, and the
+/// handle's `try_send` finally refuses the input instead of growing the
+/// process. 16 chunks is 1 MiB at the inject API's 64 KiB per-call cap - enough
+/// to absorb a paste while the child catches up.
+pub const WRITER_QUEUE_CHUNKS: usize = 16;
+
 /// Environment variables that may not be set via pane/profile config.
 ///
 /// Two classes are blocked. The first is dynamic-loader injection: a shared or
@@ -293,7 +303,7 @@ pub struct PtyHandle {
     pub id: u32,
     /// Input goes to a dedicated thread, never straight to the PTY: see
     /// [`PtyHandle::send`].
-    writer_tx: std::sync::mpsc::Sender<Vec<u8>>,
+    writer_tx: std::sync::mpsc::SyncSender<Vec<u8>>,
     master: Box<dyn MasterPty + Send>,
     _child: Box<dyn portable_pty::Child + Send + Sync>,
     _read_thread: thread::JoinHandle<()>,
@@ -519,7 +529,7 @@ impl PtyHandle {
         // a synchronous write and abort only lands at an await point. The
         // thread can block as long as the child makes it; nothing else waits
         // on it.
-        let (writer_tx, writer_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let (writer_tx, writer_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(WRITER_QUEUE_CHUNKS);
         let write_thread = {
             let mut writer = writer;
             match thread::Builder::new()
@@ -564,8 +574,12 @@ impl PtyHandle {
 
     /// Write a line to the PTY (appends `\r` = Enter).
     pub fn write_line(&mut self, line: &str) -> Result<(), std::io::Error> {
-        self.send(line.as_bytes())?;
-        self.send(b"\r")
+        // One message, so a full queue cannot accept the text and refuse the
+        // Enter that submits it.
+        let mut bytes = Vec::with_capacity(line.len() + 1);
+        bytes.extend_from_slice(line.as_bytes());
+        bytes.push(b'\r');
+        self.send(&bytes)
     }
 
     /// Write raw bytes to the PTY (no newline appended).
@@ -575,13 +589,23 @@ impl PtyHandle {
 
     /// Hand bytes to the PTY's writer thread.
     ///
-    /// Returns as soon as they are queued; the only failure it can report is a
-    /// writer thread that is gone, which means the pane is gone with it. The
+    /// Never blocks: a full writer queue answers [`std::io::ErrorKind::WouldBlock`]
+    /// and the engine task retries after a yield. Blocking here would park a
+    /// tokio worker inside a synchronous write, where `abort` cannot reach it
+    /// and a pane close could never drop this handle to kill the child. The
     /// bytes reach the child in order, once the child reads.
     fn send(&self, data: &[u8]) -> Result<(), std::io::Error> {
-        self.writer_tx.send(data.to_vec()).map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "PTY writer thread is gone")
-        })
+        match self.writer_tx.try_send(data.to_vec()) {
+            Ok(()) => Ok(()),
+            Err(std::sync::mpsc::TrySendError::Full(_)) => Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "PTY writer queue is full",
+            )),
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "PTY writer thread is gone",
+            )),
+        }
     }
 
     /// Resize the PTY — sends SIGWINCH to the child process.

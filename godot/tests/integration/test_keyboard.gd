@@ -32,11 +32,13 @@ class RecordingPane:
 		clears += 1
 		sel_text = ""
 
-	func _send_to_term(text: String):
+	func _send_to_term(text: String) -> bool:
 		sent.append(text)
+		return true
 
-	func _send_line_to_term(text: String):
+	func _send_line_to_term(text: String) -> bool:
 		sent_lines.append(text)
+		return true
 
 	func _get_clipboard_text() -> String:
 		return clip

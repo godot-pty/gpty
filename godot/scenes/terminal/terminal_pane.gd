@@ -1560,30 +1560,33 @@ func _jump_to_live() -> void:
 	_refresh_selection()
 	_repaint_overlay()
 
-func _send_to_term(text: String):
+## Answers whether the input was queued. `false` means the child has stopped
+## reading and its bounded queue refused the text, so an IPC caller reports
+## that instead of claiming success; keyboard callers may ignore it.
+func _send_to_term(text: String) -> bool:
 	_note_view_input()
 	if not _started:
-		_buffer_input(text, false)
-		return
-	_terminal.send_text(text)
+		return _buffer_input(text, false)
+	return _terminal.send_text(text)
 
-func _send_line_to_term(text: String):
+func _send_line_to_term(text: String) -> bool:
 	_note_view_input()
 	if not _started:
-		_buffer_input(text, true)
-		return
-	_terminal.send_line(text)
+		return _buffer_input(text, true)
+	return _terminal.send_line(text)
 
 ## Hold input for a child that does not exist yet: `inject`/`broadcast` can
 ## reach a pane in the frame it was created, and writing then would reach a
-## terminal with no session and vanish.
-func _buffer_input(text: String, as_line: bool):
+## terminal with no session and vanish. Queues the whole text or nothing - a
+## partial line would reach the child cut in half, and the caller can be told
+## the queue is full instead.
+func _buffer_input(text: String, as_line: bool) -> bool:
 	var room := MAX_PENDING_INPUT - _pending_bytes
-	if room <= 0:
-		return
-	var chunk := text.left(room)
-	_pending_bytes += chunk.length()
-	_pending_input.append({"line": as_line, "text": chunk})
+	if text.length() > room:
+		return false
+	_pending_bytes += text.length()
+	_pending_input.append({"line": as_line, "text": text})
+	return true
 
 func _flush_pending_input():
 	if _pending_input.is_empty():

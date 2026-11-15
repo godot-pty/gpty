@@ -29,6 +29,14 @@ use crate::types::{CaptureMode, CapturedOutput, Concept, ConceptNotice, Terminal
 
 // ── Stdin input discrimination ────────────────────────────────────────
 
+/// Cap on queued stdin commands. A child that stops reading blocks the task
+/// inside `write_line`/`write_bytes`; this queue fills and `try_send` answers
+/// `Full`, so a pane cannot grow the process with every later keystroke,
+/// `inject` and `broadcast`. 256 messages is at most 16 MiB when every one is
+/// a 64 KiB `Raw` (the inject API's own per-call cap), the same order as the
+/// output queue's 256 chunks.
+const STDIN_QUEUE_CAP: usize = 256;
+
 /// Commands sent to a PTY from the outside (keyboard or IPC injection).
 enum StdinInput {
     Line(String),
@@ -57,32 +65,62 @@ pub struct WorkspaceEngine {
 /// A handle to a spawned PTY terminal, allowing the caller to inject input.
 pub struct PtyTerminalHandle {
     pub id: u32,
-    stdin_tx: mpsc::UnboundedSender<StdinInput>,
+    stdin_tx: mpsc::Sender<StdinInput>,
 }
 
 impl PtyTerminalHandle {
-    pub fn send_line(&self, text: &str) {
-        let _ = self.stdin_tx.send(StdinInput::Line(text.to_string()));
+    /// Queue a line (Enter follows). `false` means the bounded queue is full
+    /// or the task is gone, so nothing was sent.
+    pub fn send_line(&self, text: &str) -> bool {
+        self.stdin_tx
+            .try_send(StdinInput::Line(text.to_string()))
+            .is_ok()
     }
 
-    pub fn send_text(&self, text: &str) {
-        let _ = self
-            .stdin_tx
-            .send(StdinInput::Raw(text.as_bytes().to_vec()));
+    /// Queue raw bytes (no newline). `false` means the queue is full or the
+    /// task is gone, so nothing was sent.
+    pub fn send_text(&self, text: &str) -> bool {
+        self.stdin_tx
+            .try_send(StdinInput::Raw(text.as_bytes().to_vec()))
+            .is_ok()
     }
 
+    /// Resize the PTY. A full queue drops this attempt (the layout will ask
+    /// again on the next settle); it is internal plumbing, not user input, so
+    /// it has no caller to refuse.
     pub fn resize_pty(&self, rows: u16, cols: u16) {
-        let _ = self.stdin_tx.send(StdinInput::Resize { rows, cols });
+        if self
+            .stdin_tx
+            .try_send(StdinInput::Resize { rows, cols })
+            .is_err()
+        {
+            log::debug!("[Pane {}] resize dropped: input queue full", self.id);
+        }
     }
 
     /// Tell the terminal task to flush a captured buffer to the grid.
     pub fn flush_capture(&self, id: u64) {
-        let _ = self.stdin_tx.send(StdinInput::FlushCapture(id));
+        if self
+            .stdin_tx
+            .try_send(StdinInput::FlushCapture(id))
+            .is_err()
+        {
+            log::debug!("[Pane {}] capture flush dropped: input queue full", self.id);
+        }
     }
 
     /// Tell the terminal task to discard a captured buffer.
     pub fn acknowledge_capture(&self, id: u64) {
-        let _ = self.stdin_tx.send(StdinInput::AcknowledgeCapture(id));
+        if self
+            .stdin_tx
+            .try_send(StdinInput::AcknowledgeCapture(id))
+            .is_err()
+        {
+            log::debug!(
+                "[Pane {}] capture acknowledge dropped: input queue full",
+                self.id
+            );
+        }
     }
 }
 
@@ -336,7 +374,7 @@ impl WorkspaceEngine {
             cwd,
             pty_tx,
         )?;
-        let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<StdinInput>();
+        let (stdin_tx, stdin_rx) = mpsc::channel::<StdinInput>(STDIN_QUEUE_CAP);
 
         let mut grid = TermGrid::new(rows, cols);
         // The child exists from the spawn above, whether or not the task has
@@ -769,11 +807,36 @@ fn handle_command(
     }
 }
 
+/// Retry a PTY write that answered `WouldBlock` instead of blocking the task.
+///
+/// A child that stops reading leaves the writer queue full. Sleeping here (and
+/// not inside `PtyHandle::send`) keeps the task abortable: the engine's input
+/// channel backs up and finally refuses the caller at `try_send`, while a pane
+/// close can still land on the sleep and drop the handle that kills the child.
+async fn write_with_backpressure(
+    mut write: impl FnMut() -> Result<(), std::io::Error>,
+    id: u32,
+    what: &str,
+) {
+    loop {
+        match write() {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            Err(e) => {
+                log::error!("[Pane {id}] PTY write error ({what}): {e}");
+                return;
+            }
+        }
+    }
+}
+
 async fn run_terminal_task(
     mut ctx: TaskContext,
     mut pty_handle: crate::pty::PtyHandle,
     mut pty_rx: mpsc::Receiver<Vec<u8>>,
-    mut stdin_rx: mpsc::UnboundedReceiver<StdinInput>,
+    mut stdin_rx: mpsc::Receiver<StdinInput>,
     grid: Option<Arc<Mutex<TermGrid>>>,
 ) {
     // Initialize status primitives: pid and start time are known at spawn.
@@ -1003,14 +1066,20 @@ async fn run_terminal_task(
                                 timeout_sleep.as_mut().reset(deadline);
                             }
                         }
-                        if let Err(e) = pty_handle.write_line(line) {
-                            log::error!("[Pane {}] PTY write error (stdin): {e}", ctx.id);
-                        }
+                        write_with_backpressure(
+                            || pty_handle.write_line(line),
+                            ctx.id,
+                            "stdin",
+                        )
+                        .await;
                     }
                     StdinInput::Raw(data) => {
-                        if let Err(e) = pty_handle.write_bytes(data) {
-                            log::error!("[Pane {}] PTY write error (raw): {e}", ctx.id);
-                        }
+                        write_with_backpressure(
+                            || pty_handle.write_bytes(data),
+                            ctx.id,
+                            "raw",
+                        )
+                        .await;
                     }
                     StdinInput::Resize { rows, cols } => {
                         if let Err(e) = pty_handle.resize(*rows, *cols) {
@@ -1045,9 +1114,10 @@ async fn run_terminal_task(
             None => Vec::new(),
         };
         for reply in replies {
-            if let Err(e) = pty_handle.write_bytes(&reply) {
-                log::error!("[Pane {}] PTY write error (reply): {e}", ctx.id);
-            }
+            // A query's answer is not optional: dropping it leaves the TUI
+            // re-anchoring against a cursor position it never learned. Retry
+            // under the same backpressure as user input.
+            write_with_backpressure(|| pty_handle.write_bytes(&reply), ctx.id, "reply").await;
         }
     }
 
@@ -1750,6 +1820,57 @@ mod tests {
             wait_for_state(&spawned).await,
             AgentState::Failed,
             "a shell exiting non-zero must set Failed (Tier 3)"
+        );
+    }
+
+    /// A child that never reads its stdin must not grow the process: the
+    /// bounded queue refuses the input that would have queued, and the handle
+    /// reports it so `inject`/`broadcast` can answer the caller. `sleep` holds
+    /// the PTY open without reading a byte.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_child_that_stops_reading_refuses_input_instead_of_growing_the_queue() {
+        let engine = WorkspaceEngine::new(vec![]);
+        let spawned = engine
+            .spawn_terminal_with_grid(
+                TerminalConfig { id: 55 },
+                "sh",
+                &["-c", "stty raw -echo; sleep 60"],
+                &[],
+                &[],
+                24,
+                80,
+            )
+            .await
+            .expect("Failed to spawn terminal");
+
+        // 64 KiB per call is the inject API's own per-call cap. The PTY kernel
+        // buffer absorbs one or two writes before the task blocks in
+        // `write_bytes`; the queue's own cap is what must refuse the rest.
+        let payload = "x".repeat(64 * 1024);
+        let mut accepted = 0;
+        let mut refused = false;
+        for _ in 0..(super::STDIN_QUEUE_CAP + 32) {
+            if spawned.handle.send_text(&payload) {
+                accepted += 1;
+            } else {
+                refused = true;
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            refused,
+            "a child that never reads must eventually refuse input \
+             (accepted {accepted} calls)"
+        );
+        let bound = super::STDIN_QUEUE_CAP + crate::pty::WRITER_QUEUE_CHUNKS + 2;
+        assert!(
+            accepted <= bound,
+            "the queues must stay bounded: accepted {accepted} > {bound} \
+             (engine {} + writer {} + in-flight)",
+            super::STDIN_QUEUE_CAP,
+            crate::pty::WRITER_QUEUE_CHUNKS
         );
     }
 

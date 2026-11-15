@@ -113,8 +113,8 @@ and compiles no network protocol.
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `start_shell(cmd: String, rows: int, cols: int, envs: String, pane_id: String, history_lines: int, args_json: String, cwd: String)` | `String` | Start a PTY session (injects per-PTY event capability, `GPTY_ENV=1`, `GPTY_PANE_ID`); attaches the SQLite history store keyed by `pane_id` and restores the newest `history_lines` rows into scrollback. Answers `""` when the child started, otherwise one sentence naming what could not be started - a failed spawn leaves the grid empty (`get_rows()`/`get_cols()` answer `0`) and the caller shows that sentence and answers its own request with it. `args_json` is a JSON array of program arguments (≤32 entries, ≤4096 chars each) - `["-c", cmd]` runs through a shell. An absolute `cmd` must name a regular file that is not group/other-writable and is owned by this user or root; bare names resolve through `PATH`. `cwd` is the workspace's directory: empty inherits gpty's own, and a non-absolute or missing path is ignored rather than failing the pane |
-| `send_text(text: String)` | void | Send raw text to PTY (no newline) |
-| `send_line(text: String)` | void | Send a line to PTY (appends `\n`) |
+| `send_text(text: String)` | `bool` | Send raw text to PTY (no newline). `false` = the pane's bounded input queue is full (the child is not reading) or the task is gone; nothing was sent |
+| `send_line(text: String)` | `bool` | Send a line to PTY (appends `\r`, the Enter key). Same refusal as `send_text` |
 | `resize_grid(rows: int, cols: int)` | `bool` | Resize grid + send SIGWINCH. `false` = refused (grid lock poisoned) and nothing moved, PTY included; a pane with no shell answers `true` |
 | `set_palette(hex_csv: String)` | void | Load color scheme (16 hex colors, CSV) |
 | `get_terminal_session_id()` | `String` | Opaque id for the current PTY lifetime |

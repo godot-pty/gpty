@@ -710,7 +710,8 @@ static func handle(ws, method: String, params: Dictionary):
 			var body: Control = in_found["body"]
 			if not body is TerminalPane:
 				return refused("Pane '%s' is not a terminal" % pane_id)
-			body._send_line_to_term(text)
+			if not body._send_line_to_term(text):
+				return refused("Pane '%s' refused input: its queue is full; the child is not reading" % pane_id)
 			return {"success": true}
 		"broadcast":
 			var b_tags: Array = PaneTypes.sanitize_tags(params.get("tags", []))
@@ -718,6 +719,7 @@ static func handle(ws, method: String, params: Dictionary):
 			if b_tags.is_empty() or b_text == "" or b_text.length() > 65536:
 				return bad_param("Invalid broadcast request")
 			var b_count = 0
+			var b_refused = 0
 			for t in ws._tm.tiles:
 				var b_body = ws._tm._find_body(t.wrapper)
 				if b_body == null or not (b_body is TerminalPane):
@@ -728,9 +730,13 @@ static func handle(ws, method: String, params: Dictionary):
 						b_hit = true
 						break
 				if b_hit:
-					b_body._send_line_to_term(b_text)
-					b_count += 1
-			return {"success": true, "count": b_count}
+					if b_body._send_line_to_term(b_text):
+						b_count += 1
+					else:
+						b_refused += 1
+			if b_count == 0 and b_refused > 0:
+				return refused("No pane accepted the broadcast: every matching input queue is full")
+			return {"success": true, "count": b_count, "refused": b_refused}
 		"profileSave":
 			var profile_name = str(params.get("name", ""))
 			if profile_name == "":

@@ -377,22 +377,26 @@ impl GptyTerminal {
     /// Use this for interactive keyboard input. The shell's line discipline
     /// handles echo, backspace, and line buffering. For submitting a command
     /// (Enter key), use `send_line()`.
+    ///
+    /// Answers `false` when the pane's bounded input queue is full (a child
+    /// that stopped reading) or the task is gone; nothing was sent.
     #[func]
-    fn send_text(&self, text: GString) {
-        if let Some(ref spawned) = self.spawned {
-            spawned.handle.send_text(&text.to_string());
-        }
+    fn send_text(&self, text: GString) -> bool {
+        self.spawned
+            .as_ref()
+            .is_some_and(|spawned| spawned.handle.send_text(&text.to_string()))
     }
 
     /// Send a complete line to the PTY (appends `\n`).
     ///
     /// Use this for the Enter key to submit a command, or for concept-triggered
-    /// action commands.
+    /// action commands. Answers `false` when the input queue is full or the
+    /// task is gone; nothing was sent.
     #[func]
-    fn send_line(&self, text: GString) {
-        if let Some(ref spawned) = self.spawned {
-            spawned.handle.send_line(&text.to_string());
-        }
+    fn send_line(&self, text: GString) -> bool {
+        self.spawned
+            .as_ref()
+            .is_some_and(|spawned| spawned.handle.send_line(&text.to_string()))
     }
 
     // ── Grid access helpers ─────────────────────────────────────────

@@ -16,8 +16,9 @@ class ScrollProbe extends TerminalPane:
 	var sent: Array = []
 	func _mouse_mode() -> int:
 		return MOUSE_MODE_CLICK
-	func _send_to_term(text: String):
+	func _send_to_term(text: String) -> bool:
 		sent.append(text)
+		return true
 
 func before_each():
 	MockAutoloads.setup()

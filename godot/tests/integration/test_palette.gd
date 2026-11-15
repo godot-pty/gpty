@@ -18,11 +18,13 @@ class _RecordingPane extends TerminalPane:
 	var sent_lines: Array[String] = []
 	var snaps := 0
 
-	func _send_to_term(text: String):
+	func _send_to_term(text: String) -> bool:
 		sent.append(text)
+		return true
 
-	func _send_line_to_term(text: String):
+	func _send_line_to_term(text: String) -> bool:
 		sent_lines.append(text)
+		return true
 
 	func _snap_to_bottom():
 		snaps += 1
