@@ -63,3 +63,28 @@ func test_load_caps_entry_count():
 	for _id in PaneEnvStore._env:
 		count += 1
 	assert_eq(count, PaneEnvStore.MAX_ENTRIES, "a bloated file cannot grow the map")
+
+## The pane settings panel re-applies its gathered dictionary on every
+## debounced keystroke, so `set_env` arrives with the same value at typing
+## speed. An unchanged value must not rewrite the store: one write per actual
+## change, the rule `PaneCwdStore.set_dir` already follows.
+func test_setting_the_same_value_writes_nothing():
+	PaneEnvStore.set_env("pane-x", "A=1")
+	assert_eq(MockAutoloads.write_count(PaneEnvStore.ENV_FILE), 1,
+		"a real change writes")
+
+	PaneEnvStore.set_env("pane-x", "  A=1  ")
+	assert_eq(MockAutoloads.write_count(PaneEnvStore.ENV_FILE), 1,
+		"the same value (however padded) must not rewrite the store")
+	assert_eq(PaneEnvStore.env_for("pane-x"), "A=1")
+
+	PaneEnvStore.set_env("pane-x", "A=2")
+	assert_eq(MockAutoloads.write_count(PaneEnvStore.ENV_FILE), 2,
+		"a changed value writes again")
+
+	PaneEnvStore.remove_env("pane-absent")
+	assert_eq(MockAutoloads.write_count(PaneEnvStore.ENV_FILE), 2,
+		"removing an entry that is not there writes nothing")
+	PaneEnvStore.set_env("pane-absent", "  ")
+	assert_eq(MockAutoloads.write_count(PaneEnvStore.ENV_FILE), 2,
+		"clearing an entry that is not there writes nothing")

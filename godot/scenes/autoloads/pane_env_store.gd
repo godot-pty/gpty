@@ -56,6 +56,8 @@ func set_env(id: String, text: String):
 		return
 	if trimmed.length() > MAX_VALUE_CHARS:
 		trimmed = trimmed.left(MAX_VALUE_CHARS)
+	if str(_env.get(id, "")) == trimmed:
+		return  # the debounced panel re-applies on every keystroke
 	_env[id] = trimmed
 	_write_file(ENV_FILE, _env)
 

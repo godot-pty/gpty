@@ -26,10 +26,26 @@ static func remove_store(key: String):
 static func has_store(key: String) -> bool:
 	return _store.has(key)
 
+# ── Write counting ─────────────────────────────────────────────────────
+#
+# A mocked manager's `_write_file` is a write, so a test can assert that a
+# store is *not* rewritten when the value did not change — the file's bytes
+# are identical either way, so content alone cannot prove it.
+
+static var _writes: Dictionary = {}
+
+static func note_write(key: String):
+	_writes[key] = int(_writes.get(key, 0)) + 1
+
+## How many `_write_file` calls landed on `key` since `setup()`.
+static func write_count(key: String) -> int:
+	return int(_writes.get(key, 0))
+
 # ── Setup / teardown ───────────────────────────────────────────────────
 
 static func setup():
 	_store.clear()
+	_writes.clear()
 	_original_scripts.clear()
 
 	_override_script("SettingsManager", _MockSettingsManager)
@@ -78,6 +94,7 @@ static func teardown():
 	_restore_script("SavedCommandStore")
 	_restore_script("VaultRegistry")
 	_store.clear()
+	_writes.clear()
 	_original_scripts.clear()
 
 static func _override_script(name: String, mock_class):
@@ -98,6 +115,7 @@ class _MockSettingsManager extends "res://scenes/autoloads/settings_manager.gd":
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.note_write(path)
 		MockAutoloads.set_store(path, data)
 	func _on_init():
 		# Skip loading from disk during _ready
@@ -107,6 +125,7 @@ class _MockProfileManager extends "res://scenes/autoloads/profile_manager.gd":
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.note_write(path)
 		MockAutoloads.set_store(path, data)
 	func _on_init():
 		pass
@@ -115,6 +134,7 @@ class _MockWorkspaceStore extends "res://scenes/autoloads/workspace_store.gd":
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.note_write(path)
 		MockAutoloads.set_store(path, data)
 	func has_store() -> bool:
 		return MockAutoloads.has_store(FILE)
@@ -126,6 +146,7 @@ class _MockConceptManager extends "res://scenes/autoloads/concept_manager.gd":
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.note_write(path)
 		MockAutoloads.set_store(path, data)
 	func _on_init():
 		pass
@@ -138,6 +159,7 @@ class _MockPaneEnvStore extends "res://scenes/autoloads/pane_env_store.gd":
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.note_write(path)
 		MockAutoloads.set_store(path, data)
 	func _on_init():
 		reload()
@@ -150,6 +172,7 @@ class _MockPaneInspectorStore extends "res://scenes/autoloads/pane_inspector_sto
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.note_write(path)
 		MockAutoloads.set_store(path, data)
 	func _on_init():
 		reload()
@@ -162,6 +185,7 @@ class _MockPaneCwdStore extends "res://scenes/autoloads/pane_cwd_store.gd":
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.note_write(path)
 		MockAutoloads.set_store(path, data)
 	func _on_init():
 		reload()
@@ -174,6 +198,7 @@ class _MockTrustedStore extends "res://scenes/autoloads/trusted_store.gd":
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.note_write(path)
 		MockAutoloads.set_store(path, data)
 	func _on_init():
 		reload()
@@ -186,6 +211,7 @@ class _MockLinkWeightsStore extends "res://scenes/autoloads/link_weights_store.g
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.note_write(path)
 		MockAutoloads.set_store(path, data)
 	func _on_init():
 		reload()
@@ -196,6 +222,7 @@ class _MockSavedCommandStore extends "res://scenes/autoloads/saved_command_store
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.note_write(path)
 		MockAutoloads.set_store(path, data)
 	func _on_init():
 		reload()
@@ -205,4 +232,5 @@ class _MockVaultRegistry extends "res://scenes/autoloads/vault_registry.gd":
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)
 	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.note_write(path)
 		MockAutoloads.set_store(path, data)
