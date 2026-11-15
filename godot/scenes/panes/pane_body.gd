@@ -35,6 +35,14 @@ var backend_preserved := false
 		if _font != null:
 			_recompute_cell_metrics()
 
+## The workspace this pane was attached to (its `ws-<12 hex>` id), the pane's
+## own directory override from `PaneCwdStore`, and the workspace's directory.
+## All three are written by `Workspace` — never by a file, never over IPC — and
+## only panes that spawn a child read the pair (`spawn_cwd`).
+var workspace_id := ""
+var pane_cwd := ""
+var workspace_cwd := ""
+
 
 ## "T1", "C3", etc. Assigned by TerminalManager. The pane's accessible name is
 ## derived from it, so every assignment refreshes the identity.
@@ -183,11 +191,89 @@ func apply_settings(settings: Dictionary):
 ## Inspector's prompt and auto-send switches (`PaneInspectorStore`, keyed by
 ## `attachment_id`) — so they live in a user-owned store that a layout or
 ## profile cannot write, and the pane reads them here, once the id is final.
-## The base has no such state; a pane whose aim is user-owned overrides this.
+## The base reads the pane's own directory from `PaneCwdStore`; a pane with
+## more user-owned state overrides this and calls `super`.
 ## `Workspace._attach_pane_into` is the only caller, so every entry route
 ## (spawn, restore, type swap) applies it.
 func apply_user_state():
-	pass
+	# Keyed by (workspace, pane): `Workspace` sets `workspace_id` just before
+	# this call. A pane attached outside a workspace has no id and no entry.
+	pane_cwd = PaneCwdStore.dir_for(workspace_id, attachment_id)
+
+## The directory this pane's child starts in: its own override when usable,
+## else the workspace's, else "" (the child inherits gpty's own directory).
+##
+## Resolved at the moment of the spawn rather than cached, so a `cli_view`
+## Restart re-checks a path that may have been unmounted since.
+func spawn_cwd() -> String:
+	return PaneCwdStore.resolve(workspace_id, attachment_id, pane_cwd, workspace_cwd)
+
+## The Directory block Pane Settings shows on panes that spawn a child: the
+## pane's own directory (a picker), the action that clears it back to the
+## workspace's, and the value it inherits while empty. The current value lives
+## in the returned node's `path` meta; the caller's gather func reads it as
+## `pane_cwd`.
+##
+## One builder for the terminal and the CLI view: two copies of a picker plus a
+## clear action would drift, and the inherited line has to name what
+## `spawn_cwd` actually falls back to.
+func _build_pane_dir_row(panel: Control) -> VBoxContainer:
+	var box := VBoxContainer.new()
+	box.name = "PaneDirectoryBlock"
+	box.add_theme_constant_override("separation", UiTokens.SPACE_XS)
+
+	var title := Label.new()
+	title.text = "Directory:"
+	box.add_child(title)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", UiTokens.SPACE_SM)
+	box.add_child(row)
+
+	var inherited := workspace_cwd if workspace_cwd != "" else "gpty's own directory"
+	var value_btn := Button.new()
+	value_btn.name = "PaneDirectory"
+	value_btn.clip_text = true
+	value_btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	value_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	value_btn.tooltip_text = "This pane's own directory at its next start"
+	row.add_child(value_btn)
+
+	var clear_btn := Button.new()
+	clear_btn.text = "Use workspace directory"
+	clear_btn.tooltip_text = "Clear this pane's directory and inherit %s" % inherited
+	row.add_child(clear_btn)
+
+	# One writer for the row's own state, so the button text, the clear
+	# action's enabled state and the gathered value cannot disagree.
+	var show := func(path: String):
+		box.set_meta("path", path)
+		value_btn.text = path if path != "" else "Inherits %s" % inherited
+		clear_btn.disabled = path == ""
+	show.call(PaneCwdStore.dir_for(workspace_id, attachment_id))
+
+	value_btn.pressed.connect(func():
+		var dlg := AppDialog.picker(panel, "Directory for this pane", FileDialog.FILE_MODE_OPEN_DIR)
+		var start: String = str(box.get_meta("path", ""))
+		if start != "" and DirAccess.dir_exists_absolute(start):
+			dlg.current_dir = start
+		dlg.dir_selected.connect(func(dir: String):
+			show.call(dir)
+			panel._debounce_timer.start()
+			dlg.queue_free())
+		dlg.canceled.connect(dlg.queue_free)
+		AppDialog.popup(dlg, 0.6))
+	clear_btn.pressed.connect(func():
+		show.call("")
+		panel._debounce_timer.start())
+
+	var caption := Label.new()
+	caption.text = "Applies to this pane's next start — the program already running here does not move."
+	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	caption.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
+	caption.theme_type_variation = UiTheme.MUTED_LABEL
+	box.add_child(caption)
+	return box
 
 ## Every pane has a stable public id. Generate one when no saved
 ## attachment_id was applied (fresh panes, legacy wrappers).

@@ -81,9 +81,9 @@ Concepts are display-only. They can choose which pane shows captured output; the
 
 The **Pane Settings** popup is type-aware. For a terminal it edits the name, attachment ID, font size, environment, cursor shape and blink, grid rows and columns, scroll lines, default foreground and background, font file, and color scheme. The wiki pane adds its vault path and view mode; the media pane adds its volume and loop state.
 
-Two things it does **not** edit: the shell program and argv, and tags. A pane's program comes from its tile settings in a profile or layout, or from the creation call (`gpty new-pane -c ... --arg ...`); tags come from creation. The working directory is a workspace-level default inherited by new terminals, not a per-pane field.
+Two things it does **not** edit: the shell program and argv, and tags. A pane's program comes from its tile settings in a profile or layout, or from the creation call (`gpty new-pane -c ... --arg ...`); tags come from creation. The working directory is the workspace's default, and a pane may set its own override for its next start (**Directory**, with **Use workspace directory** to clear it) — see [[terminal-pane]] and [[workspace-trust]].
 
-Per-pane environment is the exception that is user-owned: it is edited in Pane Settings, stored in `user://pane_env.json` keyed by attachment ID, and never adopted from a layout or profile file. A file that carries `shell_env` has it stripped on restore with a notice.
+Per-pane environment is the exception that is user-owned: it is edited in Pane Settings, stored in `user://pane_env.json` keyed by attachment ID, and never adopted from a layout or profile file. A file that carries `shell_env` has it stripped on restore with a notice. The pane's own directory follows the same rule, in `user://pane_cwd.json`.
 
 ## Closing and restoring
 

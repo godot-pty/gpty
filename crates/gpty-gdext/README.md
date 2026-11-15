@@ -79,7 +79,7 @@ on drop.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `start(config_json: String)` | `String` | Start the CLI. JSON: `{command, args}` - `command` non-empty and ≤1024 chars, `args` ≤32 entries of ≤4096 chars, no U+FFFD in either. `{"ok":true,"pid":N}` or `{"ok":false,"error":"..."}`. An existing process is stopped first |
+| `start(config_json: String)` | `String` | Start the CLI. JSON: `{command, args, cwd}` - `command` non-empty and ≤1024 chars, `args` ≤32 entries of ≤4096 chars, `cwd` optional (≤4096 chars; absolute and an existing directory, else the start is refused), no U+FFFD in any of them. `{"ok":true,"pid":N}` or `{"ok":false,"error":"..."}`. An existing process is stopped first |
 | `poll_lines()` | `PackedStringArray` | Every complete line since the last call, stdout+stderr merged. Non-blocking |
 | `status_json()` | `String` | JSON: `{program, args, pid, running, exit_code, exit_reason}`. `pid` is null once the child is gone; `exit_reason` is `exited`, `killed` (stopped by us) or null while it runs. A pane that never started reports the same fields idle |
 | `stop()` | void | Kill the child and its process group. Safe with nothing running |

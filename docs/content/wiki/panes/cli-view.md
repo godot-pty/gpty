@@ -50,6 +50,9 @@ Backpressure is the design, not a side effect. The Rust queue holds up to 512 co
 | Font size | 8–32 px |
 | Program | the executable to run: a bare name is resolved through `PATH`, an absolute path must pass the executable gate |
 | Arguments | the argv, shown space-joined |
+| Directory | this pane's own working directory at its next start or Restart; empty inherits the workspace's |
+
+The child starts where its pane does: the pane's own directory, then the workspace's, then gPTY's own start directory. That is how a view of `git status` reports the repository the tile is about rather than the one gPTY happened to be launched from. A directory that has gone missing warns once and falls back to the workspace's; see [[workspace-trust]].
 
 The arguments field renders the argv joined by spaces, which cannot represent an argument containing a space. The pane therefore keeps the original argv and only re-parses the field when you actually edit it, so changing the font size cannot fragment an argument that contains whitespace.
 

@@ -287,10 +287,10 @@ showcase)
     caption "A concept routes output into the pane beside it"
     type_line "cat <(git diff)"
     sleep 4
-    # `-C $HOME`: a cli_view starts in the app's directory, not the pane's,
-    # so an unqualified `git status` reports the gPTY repository itself.
+    # A cli_view child starts where its pane does (the app's own directory
+    # here), so an unqualified `git status` reports the sandbox repo.
     caption "Any command can own a pane"
-    type_line "gpty new-pane -t cli_view -c git --arg=-C --arg \"\$HOME\" --arg=status --title status --split bottom >/dev/null"
+    type_line "gpty new-pane -t cli_view -c git --arg=status --title status --split bottom >/dev/null"
     sleep 4
     KB="$(label_of wiki)"
     [[ -n "$KB" ]] || { echo "no wiki pane; pane list:" >&2; gpty list-panes >&2; exit 5; }
@@ -399,10 +399,10 @@ profiles)
 cli-view)
     caption "Stream any command's output into its own pane"
     sleep 2.5
-    type_line "gpty new-pane -t cli_view -c git --arg=-C --arg \"\$HOME\" --arg log --arg=--oneline --arg=-5 --title history"
+    type_line "gpty new-pane -t cli_view -c git --arg log --arg=--oneline --arg=-5 --title history"
     sleep 4
     caption "argv, not a shell string: the pane runs the program directly"
-    type_line "gpty new-pane -t cli_view -c git --arg=-C --arg \"\$HOME\" --arg show --arg=--stat --arg=--oneline --arg=HEAD~3 --title last-commit --split right"
+    type_line "gpty new-pane -t cli_view -c git --arg show --arg=--stat --arg=--oneline --arg=HEAD~3 --title last-commit --split right"
     sleep 4
     caption "gPTY - github.com/godot-pty/gpty"
     sleep 2

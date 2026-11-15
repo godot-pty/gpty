@@ -79,7 +79,9 @@ func spawn_pane(type_name: String, opts: Dictionary = {}, workspace_cwd := "") -
 		SettingsManager.apply_to_terminal(body)
 	body.apply_settings(opts)
 	# The workspace owns the directory, so it wins over any stored tile key.
-	if body is TerminalPane:
+	# Terminals and `cli_view` children both start there; the pane's own
+	# override arrives at attach and `spawn_cwd()` resolves the two.
+	if "workspace_cwd" in body:
 		body.workspace_cwd = str(workspace_cwd)
 
 	# The pane's own name, once `apply_settings` has had it: a spawn that names

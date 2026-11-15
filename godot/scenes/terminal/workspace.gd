@@ -142,13 +142,18 @@ func _ready():
 	# attached — the one path that used to skip the uniqueness check. The id
 	# is regenerated here, and the pane list redrawn because it shows it.
 	# This handler is also the ONLY writer of the user-owned per-pane stores:
-	# env (`PaneEnvStore`) and the Inspector's aim (`PaneInspectorStore`). Both
-	# are keyed by the pane's id, so an entry follows a rename, and only what
-	# the user set in the pane settings UI ever lands in a trusted store.
+	# env (`PaneEnvStore`), the pane's own directory (`PaneCwdStore`) and the
+	# Inspector's aim (`PaneInspectorStore`). All are keyed by the pane's id
+	# (the directory also by workspace), so an entry follows a rename, and only
+	# what the user set in the pane settings UI ever lands in a trusted store.
 	pane_settings.settings_applied.connect(func(body: Control, settings: Dictionary, previous_id: String):
 		_ensure_unique_attachment_id(body)
+		# The pane's own directory lives in a user-owned store keyed by
+		# (workspace, pane); this handler is its only writer.
+		var body_ws := _workspace_for_body(body)
 		if previous_id != "" and body.attachment_id != previous_id:
 			_move_pane_env(previous_id, body.attachment_id)
+			PaneCwdStore.move_pane(str(body_ws.get("id", "")), previous_id, body.attachment_id)
 			PaneInspectorStore.move_state(previous_id, body.attachment_id)
 			# A companion follows its terminal by attachment id, so a rename
 			# that left it on the old id would silence it: events carry the
@@ -160,6 +165,12 @@ func _ready():
 				PaneEnvStore.remove_env(body.attachment_id)
 			else:
 				PaneEnvStore.set_env(body.attachment_id, env_text)
+		if settings.has("pane_cwd"):
+			# The user's own directory. A file cannot supply it (the table marks
+			# it `file: false`, and the key names a locally minted workspace id),
+			# and no IPC caller can: it applies at this pane's next start.
+			PaneCwdStore.set_dir(str(body_ws.get("id", "")), body.attachment_id,
+				str(settings.get("pane_cwd", "")))
 		if body is InspectorPane and settings.has("system_prompt"):
 			PaneInspectorStore.set_state(
 				body.attachment_id,
@@ -1207,9 +1218,13 @@ func _retarget_companions(body: Control, previous_id: String):
 ## type is wired correctly everywhere.
 func _attach_pane_into(ws: Dictionary, w: Control, body: Control):
 	_ensure_unique_attachment_id(body)
+	# The pane's own directory is keyed by (workspace, pane), so the workspace
+	# id must be on the body before it reads the store.
+	body.workspace_id = str(ws.get("id", ""))
 	# The id is final now, so the user's own per-pane state (the Inspector's
-	# prompt and switches) can be overlaid on the saved settings. Every entry
-	# route — spawn, restore, type swap — comes through here.
+	# prompt and switches, the pane's own directory) can be overlaid on the
+	# saved settings. Every entry route — spawn, restore, type swap — comes
+	# through here.
 	body.apply_user_state()
 	ws.grid.add_child(w)
 	# The handle layer is always the grid's topmost child: Godot picks the last
@@ -1403,7 +1418,7 @@ func _workspace_for_body(body: Control) -> Dictionary:
 				return ws
 	return {}
 
-func _new_workspace_container(ws_name: String, ws_cwd := "") -> Dictionary:
+func _new_workspace_container(ws_name: String, ws_cwd := "", ws_id := "") -> Dictionary:
 	var grid = Control.new()
 	grid.name = "Grid%d" % _workspaces.size()
 	grid.anchor_left = 0.0; grid.anchor_right = 1.0
@@ -1415,7 +1430,11 @@ func _new_workspace_container(ws_name: String, ws_cwd := "") -> Dictionary:
 	_wire_tm(tm)
 	grid.visible = false
 	grid.process_mode = Node.PROCESS_MODE_DISABLED
-	return {"name": ws_name, "grid": grid, "tm": tm, "profile": "", "cwd": ws_cwd}
+	return {"name": ws_name, "grid": grid, "tm": tm, "profile": "",
+		# The id outlives a rename and is what a pane's own directory is keyed
+		# by; a restored workspace keeps the one the store carried.
+		"id": ws_id if ws_id != "" else PaneTypes.new_workspace_id(),
+		"cwd": ws_cwd}
 
 func _workspace_names() -> Array[String]:
 	var out: Array[String] = []
@@ -1567,6 +1586,9 @@ func _close_workspace_now(idx: int):
 	var ws: Dictionary = _workspaces[idx]
 	_workspaces.remove_at(idx)
 	ws.tm.reset()
+	# A pane's own directory is keyed by workspace id, so a workspace that is
+	# gone takes its entries with it.
+	PaneCwdStore.drop_workspace(str(ws.get("id", "")))
 	# The home pair is the empty host for the zero-workspace state; it is
 	# never freed. Every other workspace owns its grid.
 	if ws.grid != _home_grid:
@@ -1595,6 +1617,7 @@ func _close_all_workspaces():
 
 func _close_all_workspaces_now():
 	for ws in _workspaces:
+		PaneCwdStore.drop_workspace(str(ws.get("id", "")))
 		ws.tm.reset()
 		if ws.grid != _home_grid:
 			ws.grid.queue_free()
@@ -1788,6 +1811,9 @@ func _all_layouts() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for ws in _workspaces:
 		out.append({
+			# The id a pane's own directory is keyed by, so a restore keeps
+			# the entries belonging to this workspace.
+			"id": str(ws.get("id", "")),
 			"name": ws.name,
 			"cwd": str(ws.get("cwd", "")),
 			"layout": _gather_tiles_from(ws.tm),
@@ -1818,7 +1844,14 @@ func _init_workspaces():
 	for entry in wss:
 		if not (entry is Dictionary):
 			continue
+		# `WorkspaceStore.load` mints an id for a store that predates the
+		# field; the legacy-import branch's synthesized entry has none, so it
+		# gets one here. Either way the workspace owns it from now on.
+		var entry_id := PaneTypes.sanitize_workspace_id(str(entry.get("id", "")))
+		if entry_id == "":
+			entry_id = PaneTypes.new_workspace_id()
 		entries.append({
+			"id": entry_id,
 			"name": WorkspaceStore.sanitize_name(str(entry.get("name", ""))),
 			"cwd": WorkspaceStore.sanitize_cwd(str(entry.get("cwd", ""))),
 			# Already sanitized by `WorkspaceStore.load`; the legacy-import
@@ -1827,6 +1860,15 @@ func _init_workspaces():
 			"layout": _tiles_from(entry.get("layout", [])),
 		})
 	var active: int = clampi(int(store.get("active", 0)), 0, maxi(entries.size() - 1, 0))
+
+	# A pane's own directory is keyed by workspace id, so an entry belonging to
+	# a workspace that no longer exists is dead weight: a hand-edited store, or
+	# a workspace closed while nothing pruned. This is the one place the window
+	# knows the complete surviving set.
+	var live_ids := PackedStringArray()
+	for entry in entries:
+		live_ids.append(str(entry.get("id", "")))
+	PaneCwdStore.retain_workspaces(live_ids)
 
 	# Workspace trust: warn if any saved shell differs from the configured
 	# default. Cancel keeps the layout but swaps untrusted shells out —
@@ -1868,9 +1910,11 @@ func _build_workspaces(entries: Array[Dictionary], active: int):
 		var ws_cwd := str(entries[i].get("cwd", ""))
 		if i == 0:
 			ws = {"name": entries[i].get("name", "Workspace 1"),
-				"grid": _home_grid, "tm": _home_tm, "profile": "", "cwd": ws_cwd}
+				"grid": _home_grid, "tm": _home_tm, "profile": "",
+				"id": str(entries[i].get("id", "")), "cwd": ws_cwd}
 		else:
-			ws = _new_workspace_container(str(entries[i].get("name", "")), ws_cwd)
+			ws = _new_workspace_container(
+				str(entries[i].get("name", "")), ws_cwd, str(entries[i].get("id", "")))
 		_workspaces.append(ws)
 		var layout: Array = entries[i].get("layout", [])
 		layout = TerminalManager.scale_layout(layout, int(entries[i].get("grid_unit", 0)))
@@ -1934,6 +1978,13 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 		if body == null: continue
 		body.apply_settings(settings)
 
+		# The workspace owns the directory; a tile cannot carry one. The pane's
+		# own override is read at attach (`apply_user_state`), and `spawn_cwd()`
+		# resolves the two at spawn. Every type that starts a child gets it,
+		# so a restored `cli_view` runs where its terminal neighbour does.
+		if "workspace_cwd" in body:
+			body.workspace_cwd = str(ws.get("cwd", ""))
+
 		# A terminal tile's program comes from `command` (a tool override such
 		# as "lazygit"), then `shell`, then the tile's legacy `shell` key, and
 		# falls back to the configured shell. `tile_program` is that one
@@ -1944,9 +1995,6 @@ func _restore_into(ws: Dictionary, tiles: Array[Dictionary]):
 				SettingsManager.cfg_shell_command)
 			SettingsManager.apply_to_terminal(body)
 			body.shell_command = sh
-			if body is TerminalPane:
-				# The workspace owns the directory; a tile cannot carry one.
-				body.workspace_cwd = str(ws.get("cwd", ""))
 
 		var title = PaneTypes.ALL.get(type_name, {}).get("name", type_name)
 		var w = tm._build_wrapper_body(body, title)

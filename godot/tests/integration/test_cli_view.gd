@@ -16,6 +16,8 @@ extends GutTest
 const PROCESS_BUDGET_MS := 20000
 
 var _scene: Control
+## Directories a test created for a working-directory assertion.
+var _dirs: Array[String] = []
 
 func before_each():
 	MockAutoloads.setup()
@@ -27,6 +29,9 @@ func after_each():
 	if _scene:
 		remove_child(_scene)
 		_scene.free()
+	for dir in _dirs:
+		DirAccess.remove_absolute(dir)
+	_dirs.clear()
 	MockAutoloads.teardown()
 
 ## The pane is a thin view over the `GptyCliView` extension class. With the
@@ -68,6 +73,21 @@ func _ffi_running(pane: CliViewPane) -> bool:
 	var status = JSON.parse_string(str(pane._cli.status_json()))
 	return status is Dictionary and bool(status.get("running", false))
 
+## A real program that prints its own working directory, as argv.
+func _pwd_plan() -> Array:
+	if ShellFixtures.is_windows():
+		var comspec := OS.get_environment("COMSPEC")
+		return [comspec if comspec != "" else "cmd.exe", ["/c", "cd"]]
+	return ["/bin/pwd", []]
+
+## An existing absolute directory in the throwaway user-data dir.
+func _temp_dir(slug: String) -> String:
+	var dir := OS.get_user_data_dir().path_join(
+		"gpty-test-cli-cwd-%s-%d" % [slug, Time.get_ticks_usec()])
+	DirAccess.make_dir_absolute(dir)
+	_dirs.append(dir)
+	return dir
+
 # ── Streaming ──────────────────────────────────────────────────────────
 
 func test_child_stdout_reaches_the_pane_and_the_process_ends():
@@ -86,6 +106,34 @@ func test_child_stdout_reaches_the_pane_and_the_process_ends():
 	assert_true(
 		pane._editor.text.contains("cli_view_marker"),
 		"the visible view must show the child's line: %s" % JSON.stringify(pane._editor.text))
+
+## The child starts where its pane resolved: the workspace's directory, then
+## the pane's own override on Restart. Before this, a `cli_view` child ran in
+## the GUI process's directory and `git status` in a view reported the app's
+## own repository.
+func test_the_child_starts_in_the_panes_directory():
+	if not _ffi_ready():
+		return
+	var plan := _pwd_plan()
+	var pane := _make_pane("", [])
+	var workspace := _temp_dir("workspace")
+	pane.workspace_cwd = workspace
+	pane.command = plan[0]
+	pane.shell_args = plan[1]
+	pane._start()
+	var ok := await _wait_until(
+		func(): return pane.get_text().contains(workspace), PROCESS_BUDGET_MS)
+	assert_true(ok, "the child must start in its workspace directory: %s"
+		% JSON.stringify(pane.get_text()))
+
+	# The pane's own directory is the first layer, and Restart re-resolves it.
+	var own := _temp_dir("own")
+	pane.pane_cwd = own
+	pane._start()
+	ok = await _wait_until(
+		func(): return pane.get_text().contains(own), PROCESS_BUDGET_MS)
+	assert_true(ok, "the pane's own directory replaces the workspace's at Restart: %s"
+		% JSON.stringify(pane.get_text()))
 
 func test_stop_kills_a_running_child():
 	if not _ffi_ready():

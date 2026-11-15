@@ -313,6 +313,7 @@ func _get_layout_state() -> Dictionary:
 ## a layout or profile that names the trio is still refused by the settings
 ## table before this runs.
 func apply_user_state():
+	super.apply_user_state()
 	var state := PaneInspectorStore.state_for(attachment_id)
 	if state.is_empty():
 		return

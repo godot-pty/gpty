@@ -11,6 +11,7 @@ use godot::builtin::PackedStringArray;
 use godot::prelude::*;
 use gpty_core::cli::{self, CliProcess};
 use serde_json::{Value, json};
+use std::path::PathBuf;
 
 /// Longest command (program) accepted, in characters.
 const MAX_COMMAND_CHARS: usize = 1024;
@@ -18,6 +19,8 @@ const MAX_COMMAND_CHARS: usize = 1024;
 const MAX_ARGS: usize = 32;
 /// Longest single argument accepted, in characters.
 const MAX_ARG_CHARS: usize = 4096;
+/// Longest working directory accepted, in characters (the store's cap).
+const MAX_CWD_CHARS: usize = 4096;
 /// The replacement character Godot's lossy string conversion leaves behind.
 const REPLACEMENT: char = '\u{FFFD}';
 
@@ -41,8 +44,9 @@ impl INode for GptyCliView {
 
 #[godot_api]
 impl GptyCliView {
-    /// Input: `{"command":"prog","args":["-x"]}` — argv, never a shell.
-    /// Output: `{"ok":true,"pid":N}` or `{"ok":false,"error":"..."}`.
+    /// Input: `{"command":"prog","args":["-x"],"cwd":"/abs/dir"}` — argv, never
+    /// a shell; `cwd` is optional and the child inherits gpty's directory
+    /// without it. Output: `{"ok":true,"pid":N}` or `{"ok":false,"error":"..."}`.
     #[func]
     fn start(&mut self, config_json: GString) -> GString {
         let raw = config_json.to_string();
@@ -64,12 +68,16 @@ impl GptyCliView {
             Ok(args) => args,
             Err(error) => return json_error(error),
         };
+        let cwd = match parse_cwd(&value) {
+            Ok(cwd) => cwd,
+            Err(error) => return json_error(error),
+        };
 
         // Replace before spawning: restarting a pane from its settings must
         // not leave the previous CLI (and its helpers) running behind the new
         // one, and the old process would still be holding that pane's output.
         self.stop();
-        match CliProcess::spawn(command, &args) {
+        match CliProcess::spawn(command, &args, cwd.as_deref()) {
             Ok(process) => {
                 // A process we just spawned is running, so it has a pid; the
                 // fallback only keeps the shape stable if that ever changes.
@@ -143,6 +151,28 @@ fn parse_args(value: &Value) -> Result<Vec<String>, String> {
         args.push(arg.to_string());
     }
     Ok(args)
+}
+
+/// Read the optional `cwd` the pane resolved (its own directory, then its
+/// workspace's, then none). A missing, `null` or empty value means "inherit
+/// gpty's own directory", which is what every pane did before workspace
+/// directories.
+///
+/// The core owns the path semantics (absolute, a real directory) so a
+/// GDScript caller and a test see one rule; this edge holds the size cap and
+/// the type, like every other field it parses.
+fn parse_cwd(value: &Value) -> Result<Option<PathBuf>, String> {
+    let raw = match value.get("cwd") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(raw)) => raw,
+        Some(_) => return Err("\"cwd\" must be a string".to_string()),
+    };
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    check_length(raw, MAX_CWD_CHARS, "cwd")?;
+    check_encoding(raw, "cwd")?;
+    Ok(Some(PathBuf::from(raw)))
 }
 
 /// Refuse a command that is empty, oversized, or mangled in transit.
@@ -230,5 +260,22 @@ mod tests {
         assert!(check_arg(&"x".repeat(MAX_ARG_CHARS + 1)).is_err());
         assert!(check_command("bad\u{FFFD}prog").is_err());
         assert!(check_arg("bad\u{FFFD}arg").is_err());
+        assert!(parse_cwd(&json!({"cwd": "x".repeat(MAX_CWD_CHARS + 1)})).is_err());
+        assert!(parse_cwd(&json!({"cwd": "bad\u{FFFD}dir"})).is_err());
+    }
+
+    #[test]
+    fn cwd_is_optional() {
+        assert_eq!(parse_cwd(&json!({})).unwrap(), None);
+        assert_eq!(parse_cwd(&json!({"cwd": null})).unwrap(), None);
+        assert_eq!(parse_cwd(&json!({"cwd": ""})).unwrap(), None);
+        assert_eq!(
+            parse_cwd(&json!({"cwd": "/tmp"})).unwrap(),
+            Some(PathBuf::from("/tmp"))
+        );
+        assert!(
+            parse_cwd(&json!({"cwd": 1})).is_err(),
+            "a number is not a path"
+        );
     }
 }

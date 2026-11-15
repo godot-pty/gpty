@@ -55,6 +55,24 @@ static func real_path(path: String) -> String:
 static func is_real_absolute_path(path: String) -> bool:
 	return path != "" and path.is_absolute_path() and not is_virtual_path(path)
 
+## A directory a store may hand a spawn: absolute, real, bounded, and free of
+## control bytes. One implementation for every store (the workspace's and the
+## pane's own) and for the settings table's `dir_path` rule, so a hand-edited
+## file cannot smuggle a relative or `res://` value past one of them.
+##
+## Existence is deliberately NOT checked: a repo can be unmounted, so the
+## spawn layer owns that question and turns a missing path into a fallback
+## rather than a lost setting.
+static func sanitize_absolute_dir(raw: String, max_chars := 4096) -> String:
+	var out := raw.strip_edges()
+	if out == "" or out.length() > max_chars:
+		return ""
+	for ch in out:
+		var code := ch.unicode_at(0)
+		if code < 32 or code == 127:
+			return ""
+	return out if is_real_absolute_path(out) else ""
+
 ## Translate a `user://` store path into the test root when one is set.
 ## Every other path (an absolute path, `res://`) is returned unchanged.
 static func resolve_store_path(path: String) -> String:

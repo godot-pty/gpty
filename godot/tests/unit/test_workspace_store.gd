@@ -150,3 +150,42 @@ func test_unique_name_suffixes_keep_the_length_cap():
 
 	# The suffix is computed from the sanitized name, not the raw one.
 	assert_eq(WorkspaceStore.unique_name("  Bad\tName ", {"BadName": true}), "BadName 2")
+
+# ── The stable workspace id ────────────────────────────────────────────
+#
+# A pane's own directory is keyed by `<workspace id>/<attachment id>`, so the
+# id must survive a rename, a resave and a launch. Entries are positional, so
+# an index could not do it.
+
+func test_ids_are_minted_on_load_and_written_back():
+	MockAutoloads.set_store(WorkspaceStore.FILE, {
+		"active": 0,
+		"workspaces": [{"name": "Old", "layout": [_tile("terminal")]}],
+	})
+	var first := str(WorkspaceStore.load()["workspaces"][0].get("id", ""))
+	assert_ne(first, "", "a store written before the field existed gets an id")
+	assert_eq(PaneTypes.sanitize_workspace_id(first), first, "the minted id is well-formed")
+	# The backfill is written immediately: a second load must answer the same
+	# id, or every per-pane directory entry would be orphaned on the next run.
+	var second := str(WorkspaceStore.load()["workspaces"][0].get("id", ""))
+	assert_eq(second, first, "the id is stable across loads")
+
+func test_ids_survive_a_rename_and_a_resave():
+	WorkspaceStore.save(0, [{"name": "Before", "layout": []}])
+	var saved: Dictionary = WorkspaceStore.load()["workspaces"][0]
+	var ws_id := str(saved.get("id", ""))
+	var renamed := saved.duplicate(true)
+	renamed["name"] = "After"
+	WorkspaceStore.save(0, [renamed])
+	var after: Dictionary = WorkspaceStore.load()["workspaces"][0]
+	assert_eq(str(after.get("name")), "After")
+	assert_eq(str(after.get("id")), ws_id, "a rename must not change the id")
+
+func test_an_invalid_stored_id_is_replaced():
+	MockAutoloads.set_store(WorkspaceStore.FILE, {
+		"active": 0,
+		"workspaces": [{"name": "Crafted", "id": "not-a-workspace-id", "layout": []}],
+	})
+	var ws_id := str(WorkspaceStore.load()["workspaces"][0].get("id", ""))
+	assert_ne(ws_id, "not-a-workspace-id")
+	assert_eq(PaneTypes.sanitize_workspace_id(ws_id), ws_id)

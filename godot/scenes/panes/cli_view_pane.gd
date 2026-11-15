@@ -111,7 +111,8 @@ func _start():
 	# process first), so Restart needs no separate stop. Output is kept: this
 	# is a log view, and a restart continues it rather than erasing what the
 	# previous run printed.
-	var raw := str(_cli.start(JSON.stringify({"command": command, "args": shell_args})))
+	var raw := str(_cli.start(JSON.stringify(
+		{"command": command, "args": shell_args, "cwd": spawn_cwd()})))
 	var resp = JSON.parse_string(raw)
 	if resp is Dictionary and bool(resp.get("ok", false)):
 		_running = true
@@ -272,6 +273,7 @@ func apply_settings(settings: Dictionary):
 	# supposed to reject.
 	var prev_command := command
 	var prev_args := shell_args.duplicate()
+	var prev_cwd := pane_cwd
 	super.apply_settings(settings)
 	if settings.has("command"):
 		command = PaneTypes.sanitize_shell(settings.get("command"), prev_command)
@@ -285,8 +287,8 @@ func apply_settings(settings: Dictionary):
 	# Never restart on a settings edit: the debounced panel re-applies on
 	# every keystroke, and relaunching a third-party CLI per keystroke is not
 	# a settings preview. Say what is needed instead.
-	if _running and (command != prev_command or shell_args != prev_args):
-		_status.text = "Command changed — Restart to apply"
+	if _running and (command != prev_command or shell_args != prev_args or pane_cwd != prev_cwd):
+		_status.text = "Program, arguments or directory changed — Restart to apply"
 
 func _build_pane_settings_ui(panel: Control) -> Control:
 	var v := VBoxContainer.new()
@@ -327,9 +329,14 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	var shown_argv: Array = shell_args.duplicate()
 
 	var note := Label.new()
-	note.text = "Program and argument changes take effect on Restart."
+	note.text = "Program, argument and directory changes take effect on Restart."
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(note)
+
+	# The pane's own directory (`PaneCwdStore`): the same row a terminal shows,
+	# so a command view runs where its terminal neighbour does.
+	var dir_block := _build_pane_dir_row(panel)
+	v.add_child(dir_block)
 
 	panel._gather_func = func():
 		return {
@@ -337,6 +344,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"font_size": int(font_spin.value),
 			"command": program_le.text.strip_edges(),
 			"shell_args": _args_from_field(args_le.text, shown_args, shown_argv),
+			"pane_cwd": dir_block.get_meta("path", ""),
 		}
 
 	return v

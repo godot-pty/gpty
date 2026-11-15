@@ -18,6 +18,7 @@
 
 use std::collections::VecDeque;
 use std::io::Read;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -82,7 +83,7 @@ pub struct CliProcess {
 }
 
 impl CliProcess {
-    /// Spawn `program` with `args` and start draining its pipes.
+    /// Spawn `program` with `args` in `cwd` and start draining its pipes.
     ///
     /// `program` is held to the same standard as a terminal's command
     /// ([`crate::pty::validate_program`]): a bare name is resolved through the
@@ -93,14 +94,42 @@ impl CliProcess {
     /// third-party CLI from a tile, and a tile is not a reason to hand one the
     /// control socket. stdin is `/dev/null`: a CLI here reports, it does not
     /// prompt.
-    pub fn spawn(program: &str, args: &[String]) -> Result<CliProcess, String> {
+    ///
+    /// `cwd` is the caller's resolved directory (the pane's own override, then
+    /// its workspace's, then none — the child inherits gpty's own). The caller
+    /// checks existence before handing it over, so an unusable path here is
+    /// refused rather than silently inherited: a view that ran somewhere other
+    /// than it says is worse than one that says why it did not start.
+    pub fn spawn(program: &str, args: &[String], cwd: Option<&Path>) -> Result<CliProcess, String> {
         crate::pty::validate_program(program, std::env::var("PATH").ok().as_deref())?;
+        if let Some(dir) = cwd {
+            if !dir.is_absolute() {
+                return Err(format!(
+                    "working directory must be absolute: {}",
+                    dir.display()
+                ));
+            }
+            if !dir.is_dir() {
+                return Err(format!(
+                    "working directory is not a directory: {}",
+                    dir.display()
+                ));
+            }
+        }
 
         let mut cmd = Command::new(program);
         cmd.args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(dir) = cwd {
+            cmd.current_dir(dir);
+            // `chdir` does not update the environment (the same reason
+            // `pty::spawn_with_cwd` sets it): a CLI that reads `PWD` would
+            // otherwise resolve relative paths against the GUI's directory.
+            #[cfg(unix)]
+            cmd.env("PWD", dir);
+        }
         for key in crate::pty::STRIPPED_INHERITED_ENV_KEYS {
             cmd.env_remove(key);
         }
@@ -522,7 +551,7 @@ mod process_tests {
 
     /// Spawn `/bin/sh -c <script>`, which is present wherever these tests run.
     fn shell(script: &str) -> CliProcess {
-        CliProcess::spawn("/bin/sh", &["-c".to_string(), script.to_string()])
+        CliProcess::spawn("/bin/sh", &["-c".to_string(), script.to_string()], None)
             .expect("spawning /bin/sh")
     }
 
@@ -661,13 +690,73 @@ mod process_tests {
 
     #[test]
     fn spawn_refuses_a_missing_absolute_path_and_names_it() {
-        let error = match CliProcess::spawn("/nonexistent/gpty-cli-view-test", &[]) {
+        let error = match CliProcess::spawn("/nonexistent/gpty-cli-view-test", &[], None) {
             Ok(_) => panic!("a missing absolute path must be refused"),
             Err(error) => error,
         };
         assert!(
             error.contains("/nonexistent/gpty-cli-view-test"),
             "the refusal must name the program: {error}"
+        );
+    }
+
+    /// The child starts where the pane resolved, not in the GUI's directory.
+    #[test]
+    fn spawn_starts_the_child_in_the_given_directory() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let expected = tmp.path().canonicalize().expect("canonicalize");
+        let process = CliProcess::spawn("/bin/pwd", &["-P".to_string()], Some(tmp.path()))
+            .expect("spawn /bin/pwd");
+        let lines = collect(&process, 1);
+        assert_eq!(
+            lines.first().map(|line| line.trim().to_string()),
+            Some(expected.display().to_string()),
+            "`pwd -P` must print the directory the child was started in"
+        );
+    }
+
+    /// `chdir` does not update the environment, so a direct program reading
+    /// `$PWD` would otherwise see the GUI's directory.
+    #[test]
+    fn spawn_sets_pwd_for_a_direct_program() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let process = CliProcess::spawn(
+            "/bin/sh",
+            &["-c".to_string(), "echo $PWD".to_string()],
+            Some(tmp.path()),
+        )
+        .expect("spawn /bin/sh");
+        let lines = collect(&process, 1);
+        assert_eq!(
+            lines.first().map(|line| line.trim().to_string()),
+            Some(tmp.path().display().to_string()),
+            "the child's PWD must be the directory it was started in"
+        );
+    }
+
+    #[test]
+    fn spawn_refuses_a_missing_directory() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let gone = tmp.path().join("gone");
+        let error = match CliProcess::spawn("/bin/pwd", &[], Some(&gone)) {
+            Ok(_) => panic!("a missing working directory must be refused"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("not a directory"),
+            "the refusal must say what is wrong: {error}"
+        );
+    }
+
+    #[test]
+    fn spawn_refuses_a_relative_directory() {
+        let error = match CliProcess::spawn("/bin/pwd", &[], Some(Path::new("some/relative/dir"))) {
+            Ok(_) => panic!("a relative working directory must be refused"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("must be absolute"),
+            "the refusal must name the rule: {error}"
         );
     }
 
@@ -686,7 +775,7 @@ mod process_tests {
         let program = path.to_string_lossy().to_string();
 
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o777)).unwrap();
-        let refused = CliProcess::spawn(&program, &[]);
+        let refused = CliProcess::spawn(&program, &[], None);
 
         // The control: the same file, private to its owner, runs. Without it
         // the refusal above could be any failure at all.
@@ -700,12 +789,12 @@ mod process_tests {
         // a descriptor that really leaked still fails the test - the rule under
         // test is the permission check, never the exec itself.
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let mut accepted = CliProcess::spawn(&program, &[]);
+        let mut accepted = CliProcess::spawn(&program, &[], None);
         for _ in 0..20 {
             match &accepted {
                 Err(error) if error.contains("Text file busy") => {
                     std::thread::sleep(std::time::Duration::from_millis(25));
-                    accepted = CliProcess::spawn(&program, &[]);
+                    accepted = CliProcess::spawn(&program, &[], None);
                 }
                 _ => break,
             }

@@ -263,6 +263,31 @@ static func generate_attachment_id() -> String:
 		s += CHARS[randi() % CHARS.length()]
 	return s
 
+## Workspace ids: the other half of a per-pane store key (`PaneCwdStore`).
+##
+## Minted locally and never authored in a file, so a downloaded profile or
+## layout cannot name one - which is what keeps a per-pane directory
+## unreachable from anything but the user's own pane settings. The grammar
+## lives here, beside `attachment_id`, because the two ids are joined into one
+## store key and must not drift apart.
+const WORKSPACE_ID_PREFIX := "ws-"
+const WORKSPACE_ID_HEX := 12
+
+static var _workspace_id_re: RegEx = null
+
+static func sanitize_workspace_id(v) -> String:
+	if not (v is String) or v.length() != WORKSPACE_ID_PREFIX.length() + WORKSPACE_ID_HEX:
+		return ""
+	if _workspace_id_re == null:
+		_workspace_id_re = RegEx.new()
+		_workspace_id_re.compile("^ws-[0-9a-f]{12}$")
+	return v if _workspace_id_re.search(v) != null else ""
+
+## A fresh workspace id. A rename keeps the id; only a new workspace mints one.
+static func new_workspace_id() -> String:
+	# 6 bytes -> 12 lowercase hex, the length `sanitize_workspace_id` enforces.
+	return WORKSPACE_ID_PREFIX + Crypto.new().generate_random_bytes(6).hex_encode()
+
 ## Sanitize a pane-tag list from untrusted layout/profile/IPC data.
 ## Each tag follows the attachment_id pattern; oversize/foreign values drop.
 ##
@@ -481,6 +506,11 @@ const FONT_EXTENSIONS := ["ttf", "otf", "ttc", "woff", "woff2"]
 ## where it is used (the trust gate + `sanitize_shell`).
 const SPAWN_KEYS := ["shell", "command", "shell_env"]
 
+## The pane's own directory: user-owned (`PaneCwdStore`), so a file cannot
+## choose it and no IPC caller can set it. A terminal and a `cli_view` both
+## spawn a child, so both tables carry it.
+const PANE_DIR_RULE := {"kind": "dir_path", "max": 4096, "file": false, "ipc": false}
+
 const TERMINAL_SETTINGS := {
 	# Geometry is the tile's: a stored size seeds a restore, and a live grid
 	# never resizes from these (`test_apply_settings_rows_cols_never_resizes_a_live_grid`),
@@ -496,6 +526,9 @@ const TERMINAL_SETTINGS := {
 	# Env is the user's own store (`PaneEnvStore`, keyed by the pane's id and
 	# written only by the pane settings UI), never a caller's block.
 	"shell_env": {"kind": "text", "max": 65536, "file": false, "ipc": false},
+	# The pane's own directory (`PaneCwdStore`): read at attach, resolved at
+	# spawn, and written only by the pane settings UI.
+	"pane_cwd": PANE_DIR_RULE,
 	"font_path": {"kind": "font_path"},
 	# A file must not name a scheme: the read itself is capped and harmless,
 	# but appearance paths are the user's, not a shared layout's. The pane
@@ -552,6 +585,7 @@ const REASONING_SETTINGS := {
 const CLI_VIEW_SETTINGS := {
 	"command": {"kind": "shell"},
 	"shell_args": {"kind": "argv"},
+	"pane_cwd": PANE_DIR_RULE,
 }
 
 const WIKI_SETTINGS := {
@@ -676,6 +710,18 @@ static func _value_for_rule(rule: Dictionary, v) -> Variant:
 			if cleaned == "" and str(v).strip_edges() != "":
 				return null
 			return cleaned
+		"dir_path":
+			# The pane's own directory. "" is the cleared field ("inherit the
+			# workspace's"), and the sanitizer owns absolute-only, the length
+			# cap and control bytes - the same check every store applies.
+			if not (v is String):
+				return null
+			var dir: String = v
+			if dir.strip_edges() == "":
+				return ""
+			var clean_dir := BasePersistenceManager.sanitize_absolute_dir(
+				dir, int(rule.get("max", 4096)))
+			return clean_dir if clean_dir != "" else null
 		"shell":
 			if not (v is String):
 				return null

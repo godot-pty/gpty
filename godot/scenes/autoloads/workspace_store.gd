@@ -4,6 +4,12 @@ extends BasePersistenceManager
 # Replaces LayoutManager: one layout file became N named pane sets.
 # import_legacy_layout() is a one-shot migration reader for the old
 # user://layout.json format.
+#
+# Each entry carries a generated `id` (`ws-<12 hex>`, `PaneTypes.new_workspace_id`):
+# entries are positional and names are renamable, but a pane's own directory is
+# keyed by `<workspace id>/<attachment id>`, so the id must outlive both. It is
+# minted on the first load of a store that lacks one and written straight back;
+# no file ever supplies it by hand.
 
 const FILE = "user://workspaces.json"
 const LEGACY_FILE = "user://layout.json"
@@ -27,10 +33,20 @@ func load() -> Dictionary:
 		return {"active": 0, "workspaces": []}
 	var raw: Array = _as_array(d, "workspaces", [])
 	var workspaces: Array[Dictionary] = []
+	var minted := false
 	for item in raw:
 		if not (item is Dictionary):
 			continue
+		# The id is what the pane's own directory is keyed by, so it must
+		# survive renames and launches. A store written before the field
+		# existed gets one here and is written back below, so the id cannot
+		# change again on the next load (which would orphan every entry).
+		var ws_id := PaneTypes.sanitize_workspace_id(str(_as_string(item, "id", "")))
+		if ws_id == "":
+			ws_id = PaneTypes.new_workspace_id()
+			minted = true
 		workspaces.append({
+			"id": ws_id,
 			"name": sanitize_name(str(_as_string(item, "name", ""))),
 			# The directory is a workspace instance's own setting. Empty
 			# means "inherit gpty's directory", which is also what every
@@ -48,13 +64,35 @@ func load() -> Dictionary:
 	# An empty list would make the clamp range (0, -1), which is itself a
 	# GDScript error; an empty store is a valid store.
 	var active: int = clampi(_as_int(d, "active", 0), 0, maxi(workspaces.size() - 1, 0))
+	if minted:
+		_write_file(FILE, _store_document(active, workspaces))
 	return {"active": active, "workspaces": workspaces}
+
+
+## The store's on-disk shape, in one place: `save()` and `load()`'s id
+## backfill both write it, so a field cannot land in one and go missing from
+## the other.
+func _store_document(active: int, out: Array[Dictionary]) -> Dictionary:
+	return {
+		"version": 1,
+		# Same clamp as `load()`: an empty store is a valid store, and the
+		# range (0, -1) would write a degenerate active index.
+		"active": clampi(active, 0, maxi(out.size() - 1, 0)),
+		"workspaces": out,
+	}
 
 
 func save(active: int, workspaces: Array[Dictionary]):
 	var out: Array[Dictionary] = []
 	for ws in workspaces:
+		# A workspace dict built by this build always carries its id
+		# (`_new_workspace_container` mints one); an entry from a hand-built
+		# save gets a fresh id rather than a colliding empty key.
+		var ws_id := PaneTypes.sanitize_workspace_id(str(_as_string(ws, "id", "")))
+		if ws_id == "":
+			ws_id = PaneTypes.new_workspace_id()
 		out.append({
+			"id": ws_id,
 			"name": sanitize_name(str(_as_string(ws, "name", ""))),
 			"cwd": sanitize_cwd(str(_as_string(ws, "cwd", ""))),
 			# A dict with no unit is this build's own (`_all_layouts` always
@@ -62,14 +100,7 @@ func save(active: int, workspaces: Array[Dictionary]):
 			"grid_unit": PaneTypes.sanitize_grid_unit(ws.get("grid_unit", PaneTypes.GRID)),
 			"layout": _typed_tiles(_as_array(ws, "layout", [])),
 		})
-	var d = {
-		"version": 1,
-		# Same clamp as `load()`: an empty store is a valid store, and the
-		# range (0, -1) would write a degenerate active index.
-		"active": clampi(active, 0, maxi(out.size() - 1, 0)),
-		"workspaces": out,
-	}
-	_write_file(FILE, d)
+	_write_file(FILE, _store_document(active, out))
 
 
 func import_legacy_layout() -> Array[Dictionary]:
@@ -111,20 +142,11 @@ func unique_name(base: String, taken: Dictionary) -> String:
 ## A workspace directory is accepted only as an absolute, bounded string with
 ## no control bytes. It is not a spawn surface — the pane layer re-checks that
 ## it exists before handing it to the PTY — but a hand-editable store must not
-## smuggle arbitrary bytes across the FFI.
+## smuggle arbitrary bytes across the FFI. The check itself is
+## `BasePersistenceManager.sanitize_absolute_dir`, shared with the per-pane
+## directory store and the settings table's `dir_path` rule.
 func sanitize_cwd(raw: String) -> String:
-	var out := raw.strip_edges()
-	if out == "" or out.length() > MAX_CWD_LENGTH:
-		return ""
-	for ch in out:
-		var code := ch.unicode_at(0)
-		if code < 32 or code == 127:
-			return ""
-	# The spawn is Rust: a `res://`/`user://` value is "absolute" to Godot and
-	# meaningless to `chdir`, so the tile keeps a real path only.
-	if not is_real_absolute_path(out):
-		return ""
-	return out
+	return sanitize_absolute_dir(raw, MAX_CWD_LENGTH)
 
 
 func _typed_tiles(raw: Array) -> Array[Dictionary]:

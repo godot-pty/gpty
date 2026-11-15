@@ -99,11 +99,6 @@ var color_scheme_path: String = "":
 ## "the program in `shell_command`". Spawn-time state, like `rows`/`cols`:
 ## setting it never changes the child already running here.
 var launch: String = ""
-## The owning workspace's directory. Set by the workspace before this pane
-## enters the tree, and deliberately never part of a profile or saved tile:
-## a profile is a layout template, while the directory belongs to the
-## workspace instance. Empty inherits gpty's own directory.
-var workspace_cwd := ""
 ## The grid a child is born at when its tile cannot hold the minimum grid
 ## (`_start_child_if_ready`). In every normal tile the fitted pixel size wins:
 ## these are the pre-layout fallback, never a size the pane keeps.
@@ -639,7 +634,7 @@ func _start_child_if_ready(size_hint := Vector2.ZERO) -> void:
 	var plan_args: Array = plan["args"]
 	_start_error = str(_terminal.start_shell(
 		plan_program, rows, cols, shell_env, attachment_id,
-		SettingsManager.cfg_history_lines, JSON.stringify(plan_args), workspace_cwd))
+		SettingsManager.cfg_history_lines, JSON.stringify(plan_args), spawn_cwd()))
 	if _start_error != "":
 		# No child: nothing to flush into and no scheme to apply. Whoever
 		# hears this closes the pane — a tile with no child would draw an
@@ -2081,6 +2076,11 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	launch_hint.theme_type_variation = UiTheme.MUTED_LABEL
 	v.add_child(launch_hint)
 
+	# The pane's own directory (`PaneCwdStore`): user-owned, spawn-time, and
+	# the one place a single tile can point somewhere other than its workspace.
+	var dir_block := _build_pane_dir_row(panel)
+	v.add_child(dir_block)
+
 	var env_te = TextEdit.new()
 	env_te.text = PaneEnvStore.env_for(attachment_id)
 	env_te.placeholder_text = "KEY=value (one per line) — empty inherits the global environment"
@@ -2198,6 +2198,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"attachment_id": PaneTypes.sanitize_attachment_id(attach_le.text.strip_edges()),
 			"font_size": int(font_spin.value),
 			"launch": launch_le.text.strip_edges(),
+			"pane_cwd": dir_block.get_meta("path", ""),
 			"shell_env": env_te.text,
 			"cursor_shape": cursor_shape_opt.selected,
 			"cursor_blink": cursor_blink_cb.button_pressed,

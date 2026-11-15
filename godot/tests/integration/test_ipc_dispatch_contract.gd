@@ -1370,3 +1370,10 @@ func test_pane_settings_reports_the_closed_table():
 		"env is the user's own store, and the table says so")
 	assert_eq(types["inspector"]["system_prompt"]["ipc"], false)
 	assert_eq(types["terminal"]["shell_env"]["file"], false)
+	assert_eq(types["terminal"]["pane_cwd"]["ipc"], false,
+		"a caller cannot set a pane's directory — it is the user's own store")
+	assert_eq(types["terminal"]["pane_cwd"]["file"], false,
+		"a file cannot choose a pane's directory either")
+	assert_eq(str(types["terminal"]["pane_cwd"]["kind"]), "dir_path")
+	assert_eq(types["cli_view"]["pane_cwd"]["ipc"], false)
+	assert_eq(types["cli_view"]["pane_cwd"]["file"], false)

@@ -59,6 +59,8 @@ Environment reaches a child as authority, not configuration. A saved tile's `she
 
 Per-pane environment is yours: it lives in `user://pane_env.json`, keyed by the pane's stable id, written only by the pane settings UI, and applied at spawn over your global environment. A file cannot supply it. The environment a pane still inherits is the GUI's own — that is a real boundary and is covered in [[security-model|Security Model]].
 
+A pane's own working directory follows the same rule. It lives in `user://pane_cwd.json`, keyed by the workspace and the pane's id, and only the pane settings UI writes it; the workspace half of the key is generated on this machine, so no profile or layout can name an entry. The trust dialog's plan key still carries the **workspace** directory — the file-supplied default — while the pane's override is your own gesture, applied at the next spawn; a stored path that has gone missing falls back to the workspace's directory with a warning.
+
 ## Limits
 
 The gate is about **what runs**, not about what a program then does. After you approve, gPTY runs what the file asks for, with your permissions, in a shell that can drive the rest of the workspace. The dialog exists so that decision is explicit, not so it is harmless. Approvals are also per machine and per user; copying `trusted.json` to another machine carries your decisions with it.
