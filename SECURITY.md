@@ -124,11 +124,14 @@ drive every other pane" under Known limitations).
   [CHANGELOG.md](CHANGELOG.md).)
 - **No scraping of agent TUIs.** Pane output is presentation, not a structured event source.
   Observability comes only from documented hooks (the OMP event extension) and the control API.
-- **No shell evaluation of configured "commands".** A saved tile or profile names a program and an
-  argv array; there is no shell string anywhere in the spawn path. A saved file cannot supply
-  environment at all: a tile's `shell_env` is dropped on restore with a notice, and the environment
-  a pane gets - the inherited one plus your own global and per-pane settings - passes through one
-  blocklist before it reaches a child.
+- **Configured "commands" are a program and an argv array, or one explicitly shell-evaluated launch
+  line.** A saved tile or profile names a program and an argv array, which reaches the child without
+  a shell; it may also name one `launch` line, which is the only shell string in the spawn path and
+  is run verbatim through *your* configured shell (`-c`, or `/c` for `cmd.exe`). Nothing in it is
+  expanded or templated, there is no profile-global command, and a launch tile always raises the
+  Workspace Trust prompt. A saved file cannot supply environment at all: a tile's `shell_env` is
+  dropped on restore with a notice, and the environment a pane gets - the inherited one plus your
+  own global and per-pane settings - passes through one blocklist before it reaches a child.
 
 ## Hardening in place
 
@@ -185,14 +188,16 @@ These are load-bearing guards. Reports that require removing one of them should 
   see Known
   limitations.
 - **Restored layouts and profiles**: tile types, settings, and grid geometry are validated; a tile
-  that starts a different program or passes extra arguments raises the Workspace Trust prompt before
-  it runs, and `layoutLoad` over the control socket refuses such a profile (a caller cannot answer a
+  that starts a different program, passes extra arguments, or carries a `launch` line raises the
+  Workspace Trust prompt before it runs, and `layoutLoad` over the control socket refuses such a
+  profile (a caller cannot answer a
   dialog, so naming the profile is not consent to what the file asks for) - unless the consent memory
-  covers it: a pre-seed built-in's name and app version plus the spawn plans (program, argv and the
-  workspace directory) recorded with it, a plugin's id and pinned revision plus the plans its
-  install review listed, or a user profile whose every untrusted tile's exact program+argv at that
-  directory was approved - because the record is proof the user approved that content in the GUI.
-  The two shipped defaults are seeded into the user profile file and carry no built-in record. A new
+  covers it: a pre-seed built-in's name and app version plus the spawn plans (program and argv, a
+  launch line, and the workspace directory) recorded with it, a plugin's id and pinned revision plus
+  the plans its install review listed, or a user profile whose every untrusted tile's exact
+  program+argv at that directory was approved - because the record is proof the user approved that
+  content in the GUI. A launch plan is the line itself and never names the shell runner, which is the
+  user's own setting rather than the file's. A new
   app version, a new plugin revision, or different tiles under the same name or revision re-prompts.
   Provenance is gPTY's: fields inside a user profile file cannot make it a plugin profile, and the
   legacy built-in claim is stripped on load too. Environment is not a file
