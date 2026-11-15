@@ -20,6 +20,30 @@ if ! grep -qE '^Signed-off-by: .+ <[^ <>]+@[^ <>]+>$' "$COMMIT_MSG_FILE"; then
     exit 1
 fi
 
+# Cause: a fix names the defect class it closes, so the classes can be counted
+# (scripts/fix-forensics) and a class that recurs gets a control instead of a
+# fourth prose bullet. The taxonomy lives in the script, not here.
+SUBJECT="$(grep -m1 -vE '^[[:space:]]*(#|$)' "$COMMIT_MSG_FILE" || true)"
+if printf '%s\n' "$SUBJECT" | grep -qE '^fix(\(|!|: )'; then
+    ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    if ! CLASSES="$("$ROOT/scripts/fix-forensics" --classes 2>/dev/null)"; then
+        echo "WARNING: scripts/fix-forensics cannot run; skipping the Cause: check." >&2
+    else
+        CAUSES="$(grep -cE '^Cause: [a-z-]+$' "$COMMIT_MSG_FILE" || true)"
+        CAUSE="$(grep -m1 -E '^Cause: [a-z-]+$' "$COMMIT_MSG_FILE" | sed 's/^Cause: //' || true)"
+        if [ "$CAUSES" -ne 1 ] || ! printf '%s\n' "$CLASSES" | grep -qxF -- "$CAUSE"; then
+            echo "ERROR: a fix commit needs exactly one 'Cause: <class>' trailer." >&2
+            echo "" >&2
+            echo "Valid classes:" >&2
+            printf '%s\n' "$CLASSES" | sed 's/^/  /' >&2
+            echo "" >&2
+            echo "Guide: docs/content/docs/agents/defect-classes.md" >&2
+            echo "Trailer: Cause: one-fact-two-copies" >&2
+            exit 1
+        fi
+    fi
+fi
+
 if echo "$COMMIT_MSG" | grep -qE "$PATTERN"; then
     exit 0
 fi

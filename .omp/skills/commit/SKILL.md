@@ -56,7 +56,7 @@ Types:
 - `test` — test additions or fixes
 - `style` — formatting, whitespace
 
-Scopes: match the project's approved scopes per AGENTS.md: `settings`, `terminal`, `layout`, `sidebar`, `gdext`, `core`, `cli`, `ipc`, `profiles`, `concepts`, `icons`, `ci`. For cross-cutting changes, use `core`.
+Scopes: match the project's approved scopes per AGENTS.md: `settings`, `terminal`, `layout`, `workspace`, `sidebar`, `ui`, `gdext`, `core`, `cli`, `ipc`, `profiles`, `concepts`, `icons`, `ci`, `ai`, `inspector`. For cross-cutting changes, use `core`.
 
 ### 5. Commit
 
@@ -70,6 +70,11 @@ git commit -s -m "type(scope): description" -m "Additional body details if neede
 ```
 
 **Under OMP's harness, never `git add`/`git commit`**: the worktree is shared with other agents and the user, so the `commit` namespace (`commit.draft()` then `d.commit(subject, …)`) is what selects only your own lines. Three traps there, each of which costs a round of failures: the JS signature takes an **options object** - `d.commit("type(scope): x", { body: ["- …"] })` - so a positional array commits a subject-only message in silence; the helper does not add `-s`, so the `Signed-off-by: Name <email>` line must be the last entry of that body array (the hook sees the message it is handed, so the omission reads as "missing a DCO sign-off"); and a binary file reported as "its shared-index entry holds someone else's staged changes" can be committed while the shared index keeps a staged **deletion** of it (`git status` shows `D` plus an untracked `??`). The commit's blob is right - verify `git hash-object <path>` equals `git rev-parse HEAD:<path>` - then repair only the index with `git update-index --add --cacheinfo <mode>,<blob>,<path>`, never `git add`/`git reset`. Take `<mode>` from `git ls-tree HEAD <path>`, not from this example: a file edited through bash (heredoc, sed, codegen) is the usual trigger, and hardcoding `100644` for an executable script (`scripts/record-demo` is `100755`) leaves `git status` showing `MM` with a zero-line diff until the mode is restored. The same entry on a path with no content change still counts - check `git status --porcelain` is empty afterwards, not just that the diff is.
+
+A `fix` commit's message carries `Cause: <class>`, one value from
+`docs/content/docs/agents/defect-classes.md` (`./scripts/fix-forensics --classes`
+prints them). Under the OMP `commit` namespace the body array ends
+`[…body, "Cause: <class>", "Signed-off-by: …"]` - the sign-off stays last.
 
 ### 6. Report
 

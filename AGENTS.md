@@ -9,6 +9,7 @@ This file holds the rules every change needs. The detailed rules live in one pag
 | Guide | Read it when |
 |---|---|
 | [Testing](docs/content/docs/agents/testing.md) | Writing or running tests, the gate commands, the UI/UX assessment method |
+| [Defect classes](docs/content/docs/agents/defect-classes.md) | Writing a bug fix, triaging a defect, or running the per-release defect review |
 | [Rust conventions](docs/content/docs/agents/rust.md) | Touching anything under `crates/` |
 | [GDScript conventions](docs/content/docs/agents/gdscript.md) | Touching anything under `godot/` |
 | [Concept capture](docs/content/docs/agents/concept-capture.md) | Concepts, triggers, stop conditions, routing |
@@ -137,6 +138,7 @@ gPTY is evolving from a multi-terminal emulator into an ADE - a graphical PTY fo
 - Format: [Conventional Commits](https://www.conventionalcommits.org/) - `feat(scope):`, `fix(scope):`, `chore(scope):`
 - DCO: every commit carries a `Signed-off-by` trailer (`git commit -s`); `githooks/commit-msg` refuses a commit without one.
 - Scopes: `settings`, `terminal`, `layout`, `workspace`, `sidebar`, `ui`, `gdext`, `core`, `cli`, `ipc`, `profiles`, `concepts`, `icons`, `ci`, `ai`, `inspector`
+- Every `fix` commit carries a `Cause: <class>` trailer naming one value from [Defect classes](docs/content/docs/agents/defect-classes.md) (`scripts/fix-forensics --classes` prints them); `githooks/commit-msg` refuses one without. `external` covers dependency advisories, upstream API changes and retired runners. If a fix honestly fits no class the taxonomy is missing one - add it to the guide and to `scripts/fix-forensics` in the same commit.
 - Workflow: use the commit skill (`skill://commit`) to discover changes, group them logically and write the message. The hooks are the enforcement layer: `pre-commit` runs `./scripts/ci-check --fast` (fmt, workflow lint, clippy), `pre-push` runs the full `./scripts/ci-check`; install them with `./scripts/install-hooks` once per clone.
 - Never commit without the full suite passing. `cargo fmt`/`cargo clippy` also run in pre-commit - run them explicitly before staging to avoid amend churn.
 - A failing test: fix the source, not the test. Update a test only when the behaviour change is intentional and documented in the commit body; a test-only commit without a source change is a red flag.

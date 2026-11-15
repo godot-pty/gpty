@@ -1,0 +1,519 @@
+#!/usr/bin/env python3
+"""Measure which defect classes gPTY's fix commits declare, and which recur.
+
+The repository had 402 `fix` commits out of 1432 and nothing aggregated them.
+Each body narrated a root cause, the lesson landed as a prose bullet in
+`pitfalls.md` (158 of them) or `testing.md`, and the next instance of the same
+mechanism was re-learned from scratch. The guides were the memory, and a memory
+with no index cannot answer "is this class getting rarer?".
+
+This is the index. It owns the taxonomy - one ordered `CLASSES` table - because
+three consumers read it: `githooks/commit-msg` requires the trailer on every
+`fix`, the guide pairs each class with the control that catches it, and this
+report counts them. A second copy of the class list would be the very defect
+class it measures (`one-fact-two-copies`).
+
+Reports never mix evidence with guesses:
+
+    ./scripts/fix-forensics                     # the last 100 commits, declared
+    ./scripts/fix-forensics --since v0.8.3      # everything since a tag
+    ./scripts/fix-forensics --all --infer       # inferred classes, labelled
+    ./scripts/fix-forensics --hotspots 15       # the files fixes return to
+    ./scripts/fix-forensics --no-test           # fixes that touched no test
+    ./scripts/fix-forensics --check --since v0.8.3   # release gate, exit 1
+    ./scripts/fix-forensics --classes           # the ids the hook accepts
+    ./scripts/fix-forensics --classes-md        # the guide's table
+    ./scripts/fix-forensics --check-guide       # guide covers every id
+
+An inferred class is a hypothesis produced by the ordered regexes below. It is
+printed in its own block, never added to the declared counts, and it becomes a
+number only after a human audits it. Exit codes: 0 clean, 1 a check failed.
+
+Reads git history and the guide; never writes.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import subprocess
+import sys
+from collections import Counter
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+GUIDE = "docs/content/docs/agents/defect-classes.md"
+# The day the trailer rule landed. A date, not a hash: no commit needs
+# rewriting after it, and if the date is a day off the only effect is that one
+# day's fixes are exempt. It must never move.
+TRAILER_FROM = "2026-11-15"
+
+# Ordered: the report prints this order for ties, and `--classes-md` emits it as
+# the guide's table. The definition is one sentence because a class is a
+# mechanism, not a file or a component.
+CLASSES: dict[str, str] = {
+    "one-fact-two-copies": "One fact (a cap, a vocabulary, a table, a unit) declared in two places that can drift.",
+    "missed-call-site": "A rule applied on some paths and not their siblings (a gate, a focus hand-off, a settings apply, a validation).",
+    "silent-failure": "A failure or an absence that reaches neither the user nor a gate.",
+    "unbounded": "A queue, buffer, result set or allocation with no cap.",
+    "stale-state": "A cache, counter or flag not invalidated when its subject changed.",
+    "race": "Code that assumes an ordering or an instant the platform does not guarantee.",
+    "lifecycle": "Something created but never released, finalized or reaped.",
+    "input-ownership": "Focus, keyboard, pointer or paint order left to a default the surface does not want.",
+    "untrusted-input": "File-, env- or socket-supplied data reaching a dangerous operation unvalidated.",
+    "gate-lies": "A test, harness or CI step that passes without asserting what it claims.",
+    "doc-drift": "Prose or a comment that contradicts the code.",
+    "platform-parity": "Behaviour or packaging that holds on one platform and not another.",
+    "wrong-constant": "A protocol, geometry or format constant or arithmetic that is wrong.",
+    "external": "A dependency advisory, upstream API change or retired runner - not our defect.",
+}
+
+FIX_SUBJECT = re.compile(r"^fix(\(|!|: )")
+CAUSE_LINE = re.compile(r"^Cause: ([a-z-]+)$", re.MULTILINE)
+SCOPE = re.compile(r"^[a-z]+(?:\(([^()]+)\))?!?: ")
+# A fix that touched one of these has a test next to it; the rest is context,
+# not a target.
+TEST_PATH = re.compile(
+    r"(^|/)(tests?|fuzz)/|test_.*\.gd$|.*_test\.rs$|tests\.rs$|_test\.py$"
+)
+
+DOC_SCOPES = ("docs", "site")
+EXTERNAL_BUILD = re.compile(
+    r"export|artifact|bundle|runner|DLL|dylib|ffmpeg|AUR|PKGBUILD|templates|"
+    r"release|zip|tar|desktop entry",
+    re.IGNORECASE,
+)
+
+
+class Commit:
+    __slots__ = ("sha", "parents", "date", "subject", "body")
+
+    def __init__(self, sha: str, parents: str, date: str, subject: str, body: str):
+        self.sha = sha
+        self.parents = parents
+        self.date = date
+        self.subject = subject
+        self.body = body
+
+    @property
+    def is_fix(self) -> bool:
+        return bool(FIX_SUBJECT.match(self.subject))
+
+    @property
+    def is_merge(self) -> bool:
+        return len(self.parents.split()) > 1
+
+
+# First match wins. The scope overrides come first because a `docs` commit
+# describing a code change is still the prose that drifted, and a `ci` export
+# change is tooling drift even when its body says "Windows". Ordered strongest
+# signal first: an advisory is not our defect, a vacuous test is not the code
+# under it, and a platform fix is a platform fix even when it also mentions a
+# race. Everything after that is a hypothesis and is labelled as one.
+INFER_RULES: list[tuple[str, re.Pattern[str]]] = [
+    (
+        "external",
+        re.compile(
+            r"RUSTSEC|cargo audit|Dependabot|clippy|retired|deprecated|upstream|"
+            r"rustix|getrandom",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "gate-lies",
+        re.compile(
+            r"vacuous|flaky|exit code|canary|SKIP|paths filter|"
+            r"the test (pinned|asserted) the wrong",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "platform-parity",
+        re.compile(r"\bWindows\b|\bConPTY\b|\bmacOS\b|\bBSD\b", re.IGNORECASE),
+    ),
+    (
+        "untrusted-input",
+        re.compile(
+            r"untrust|hostile|attacker|malicious|injection|squat|peer (cred|uid)|"
+            r"capability|constant-time|sanitiz|hijack|privilege",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "unbounded",
+        re.compile(
+            r"unbounded|grows? (with|without)|no cap|superlinear|memory (growth|bound)|"
+            r"\bcapped\b|\bcap\b|\bbounded\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "lifecycle",
+        re.compile(
+            r"\bleak|never (released|removed|collected|freed|reaped)|cycle|zombie|"
+            r"orphan|abort|finaliz|teardown|dangling",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "silent-failure",
+        re.compile(
+            r"\bsilen|swallow|dropped|ignored|discarded|no trace|"
+            r"nothing (happened|noticed|reported|surfaced)|never (ran|reached|reported)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "stale-state",
+        re.compile(r"\bstale|cache|generation|invalidat|remembered", re.IGNORECASE),
+    ),
+    (
+        "race",
+        re.compile(
+            r"\brace\b|window between|ordering|same frame|too early|too late|concurren",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "input-ownership",
+        re.compile(
+            r"focus|keyboard|z_index|z-order|mouse_filter|overlay|hover|tooltip|pointer",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "one-fact-two-copies",
+        re.compile(
+            r"two (places|copies|spellings|definitions)|one (definition|owner)|drift|"
+            r"second copy|vocabulary|mirror|duplicat",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "missed-call-site",
+        re.compile(
+            r"every path|call site|only the|other (paths|branches|arms|call sites)|"
+            r"both branches|bypass|not (applied|called|wired|registered)|"
+            r"missing (wiring|registration)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "wrong-constant",
+        re.compile(
+            r"CSI|escape sequence|byte|inverse|numpad|modifier|SGR|glyph|codepoint|"
+            r"span|overflow|wraps? to",
+            re.IGNORECASE,
+        ),
+    ),
+]
+
+
+def git(*args: str) -> str:
+    result = subprocess.run(
+        ["git", *args], cwd=ROOT, capture_output=True, text=True, check=False
+    )
+    if result.returncode != 0:
+        sys.stderr.write(result.stderr)
+        raise SystemExit(result.returncode)
+    return result.stdout
+
+
+def range_args(args: argparse.Namespace, everything: bool = False) -> list[str]:
+    """The git log range: `--all`, a `--since` range, or a newest-first limit.
+
+    `everything` is for `--check`: a release gate must see the whole range it
+    was given, and defaulting to the last 100 commits would silently stop
+    enforcing the trailer on older ones.
+    """
+    if everything or args.all:
+        return []
+    if args.since:
+        return [f"{args.since}..HEAD"]
+    return [f"-n{args.limit if args.limit is not None else 100}"]
+
+
+def load_commits(range_args_: list[str]) -> list[Commit]:
+    fmt = "%H%x1f%P%x1f%cs%x1f%s%x1f%b%x1e"
+    out = git("log", "--format=" + fmt, *range_args_)
+    commits: list[Commit] = []
+    for record in out.split("\x1e"):
+        record = record.strip("\n")
+        if not record:
+            continue
+        sha, parents, date, subject, body = record.split("\x1f", 4)
+        commits.append(Commit(sha, parents, date, subject, body))
+    return commits
+
+
+def load_files(range_args_: list[str]) -> dict[str, list[str]]:
+    """Changed paths per commit, one `git log` call instead of 402."""
+    out = git(
+        "log", "--no-renames", "--name-only", "--format=%x1e%H", *range_args_
+    )
+    files: dict[str, list[str]] = {}
+    current = ""
+    # `str.splitlines()` treats the 0x1e record separator as a line boundary and
+    # would eat the hash line; split on plain newlines.
+    for line in out.split("\n"):
+        if line.startswith("\x1e"):
+            current = line[1:].strip()
+            files[current] = []
+        elif line.strip() and current:
+            files[current].append(line.strip())
+    return files
+
+
+def declared_class(body: str) -> str | None:
+    match = CAUSE_LINE.search(body)
+    if match and match.group(1) in CLASSES:
+        return match.group(1)
+    return None
+
+
+def infer(commit: Commit) -> str:
+    text = f"{commit.subject}\n{commit.body}"
+    scope = parse_scope(commit.subject)
+    if scope in DOC_SCOPES:
+        return "doc-drift"
+    if scope in ("ci", "build") and EXTERNAL_BUILD.search(text):
+        return "external"
+    for class_id, pattern in INFER_RULES:
+        if pattern.search(text):
+            return class_id
+    return "unclassified"
+
+
+def parse_scope(subject: str) -> str:
+    match = SCOPE.match(subject)
+    if not match:
+        return "(none)"
+    return match.group(1) or "(none)"
+
+
+def declared_report(args: argparse.Namespace) -> int:
+    commits = load_commits(range_args(args))
+    fixes = [c for c in commits if c.is_fix]
+    total = len(commits)
+    declared = Counter()
+    undeclared: list[Commit] = []
+    for commit in fixes:
+        class_id = declared_class(commit.body)
+        if class_id:
+            declared[class_id] += 1
+        else:
+            undeclared.append(commit)
+
+    share = len(fixes) / total * 100 if total else 0.0
+    print(f"range: {total} commits, {len(fixes)} fixes ({share:.1f}%)")
+    coverage = len(fixes) - len(undeclared)
+    print(
+        f"declared causes: {coverage}/{len(fixes)} "
+        f"({coverage / len(fixes) * 100 if fixes else 0.0:.1f}%)"
+    )
+
+    rows = sorted(
+        ((class_id, declared[class_id]) for class_id in CLASSES if declared[class_id]),
+        key=lambda row: (-row[1], row[0]),
+    )
+    width = max([len(class_id) for class_id in CLASSES] + [len("undeclared")])
+    print()
+    print(f"{'class':<{width}}  declared  share")
+    for class_id, count in rows:
+        print(f"{class_id:<{width}}  {count:>8}  {count / len(fixes) * 100:>5.1f}%")
+    if undeclared:
+        print(
+            f"{'undeclared':<{width}}  {len(undeclared):>8}  "
+            f"{len(undeclared) / len(fixes) * 100:>5.1f}%"
+        )
+
+    if args.infer:
+        inferred = Counter(infer(commit) for commit in undeclared)
+        print()
+        print(f"inferred (hypothesis, not declared) - {len(undeclared)} undeclared commits")
+        print(f"{'class':<{width}}  inferred")
+        ordered = sorted(
+            ((class_id, inferred[class_id]) for class_id in CLASSES if inferred[class_id]),
+            key=lambda row: (-row[1], row[0]),
+        )
+        for class_id, count in ordered:
+            print(f"{class_id:<{width}}  {count:>8}")
+        if inferred["unclassified"]:
+            print(f"{'unclassified':<{width}}  {inferred['unclassified']:>8}")
+    return 0
+
+
+def hotspots(args: argparse.Namespace) -> int:
+    limit = args.hotspots
+    range_ = range_args(args)
+    commits = load_commits(range_)
+    fix_shas = {commit.sha for commit in commits if commit.is_fix}
+    files = load_files(range_)
+    counts: Counter[str] = Counter()
+    for sha, paths in files.items():
+        if sha not in fix_shas:
+            continue
+        for path in paths:
+            counts[path] += 1
+
+    rows: list[tuple[int, str, int, float]] = []
+    for path, count in counts.items():
+        file_path = ROOT / path
+        if not file_path.is_file():
+            continue
+        try:
+            lines = sum(1 for _ in file_path.open("rb"))
+        except OSError:
+            continue
+        rows.append((count, path, lines, count * 1000 / max(lines, 1)))
+    rows.sort(key=lambda row: (-row[0], row[1]))
+    print(f"{'fixes':>5}  {'lines':>7}  {'/1000':>6}  file")
+    for count, path, lines, rate in rows[:limit]:
+        print(f"{count:>5}  {lines:>7}  {rate:>6.1f}  {path}")
+    return 0
+
+
+def by_scope(args: argparse.Namespace) -> int:
+    commits = load_commits(range_args(args))
+    fixes = [commit for commit in commits if commit.is_fix]
+    counts = Counter(parse_scope(commit.subject) for commit in fixes)
+    print(f"{'scope':<16}  fixes")
+    for scope, count in counts.most_common():
+        print(f"{scope:<16}  {count:>5}")
+    return 0
+
+
+def no_test(args: argparse.Namespace) -> int:
+    range_ = range_args(args)
+    commits = load_commits(range_)
+    fixes = [commit for commit in commits if commit.is_fix]
+    files = load_files(range_)
+    missing = [
+        commit
+        for commit in fixes
+        if not any(TEST_PATH.search(path) for path in files.get(commit.sha, []))
+    ]
+    for commit in missing:
+        print(f"{commit.sha[:12]} {commit.subject}")
+    print()
+    print(f"{len(missing)}/{len(fixes)} fixes touched no test path")
+    return 0
+
+
+def check(args: argparse.Namespace) -> int:
+    commits = load_commits(range_args(args, everything=True))
+    fixes = [commit for commit in commits if commit.is_fix]
+    before = sum(1 for commit in fixes if commit.date < TRAILER_FROM)
+    recent = [commit for commit in fixes if commit.date >= TRAILER_FROM]
+    skipped = 0
+    violators: list[Commit] = []
+    for commit in recent:
+        if commit.is_merge or commit.subject.startswith("Revert "):
+            skipped += 1
+            continue
+        if declared_class(commit.body) is None:
+            violators.append(commit)
+
+    if violators:
+        for commit in violators:
+            print(f"{commit.sha[:12]} {commit.subject}")
+        print()
+        print("Every fix commit carries exactly one 'Cause: <class>' trailer.")
+        print("Valid classes: " + ", ".join(CLASSES))
+        print(f"Guide: {GUIDE}")
+        print("Trailer shape: Cause: one-fact-two-copies")
+        return 1
+
+    print(f"{before} before {TRAILER_FROM} skipped")
+    if skipped:
+        print(f"{skipped} merge/revert commits skipped")
+    print(f"declared causes: {len(recent) - skipped}/{len(recent) - skipped}")
+    return 0
+
+
+def check_guide() -> int:
+    path = ROOT / GUIDE
+    if not path.is_file():
+        print(f"missing guide: {GUIDE}")
+        return 1
+    text = path.read_text(encoding="utf-8")
+    missing = [class_id for class_id in CLASSES if f"`{class_id}`" not in text]
+    if missing:
+        print(f"{GUIDE} does not name: " + ", ".join(missing))
+        return 1
+    print(f"{GUIDE} names all {len(CLASSES)} classes")
+    return 0
+
+
+def classes_md() -> int:
+    print("| Class | Definition |")
+    print("|---|---|")
+    for class_id, definition in CLASSES.items():
+        print(f"| `{class_id}` | {definition} |")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Count the defect classes gPTY's fix commits declare.",
+        epilog=(
+            "Examples: ./scripts/fix-forensics --since v0.8.3 --infer; "
+            "./scripts/fix-forensics --hotspots 15; "
+            "./scripts/fix-forensics --check --since v0.8.3"
+        ),
+    )
+    parser.add_argument("--since", metavar="REV", help="exclusive lower bound, e.g. v0.8.3")
+    parser.add_argument("--limit", type=int, metavar="N", help="newest N commits (default 100)")
+    parser.add_argument("--all", action="store_true", help="every commit in history")
+    parser.add_argument(
+        "--infer",
+        action="store_true",
+        help="infer classes for undeclared fixes (hypothesis, not a count)",
+    )
+    parser.add_argument(
+        "--hotspots", type=int, metavar="N", help="N files fixes return to, with fixes/1000 lines"
+    )
+    parser.add_argument("--by-scope", action="store_true", help="fix commits per conventional scope")
+    parser.add_argument(
+        "--no-test", action="store_true", help="fix commits that touched no test path"
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="exit 1 when a fix on/after the trailer date has no valid Cause",
+    )
+    parser.add_argument(
+        "--check-guide", action="store_true", help="exit 1 unless the guide names every class"
+    )
+    parser.add_argument("--classes", action="store_true", help="one class id per line")
+    parser.add_argument("--classes-md", action="store_true", help="the guide's markdown table")
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    if args.classes:
+        print("\n".join(CLASSES))
+        return 0
+    if args.classes_md:
+        return classes_md()
+    if args.check_guide:
+        return check_guide()
+    if args.check:
+        return check(args)
+    if args.hotspots is not None:
+        return hotspots(args)
+    if args.by_scope:
+        return by_scope(args)
+    if args.no_test:
+        return no_test(args)
+    return declared_report(args)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except BrokenPipeError:
+        # `./scripts/fix-forensics --no-test | head` is a normal read; do not
+        # turn a closed pipe into a traceback.
+        sys.exit(0)
