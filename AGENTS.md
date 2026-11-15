@@ -12,6 +12,7 @@ This file holds the rules every change needs. The detailed rules live in one pag
 | [Defect classes](docs/content/docs/agents/defect-classes.md) | Writing a bug fix, triaging a defect, or running the per-release defect review |
 | [Rust conventions](docs/content/docs/agents/rust.md) | Touching anything under `crates/` |
 | [GDScript conventions](docs/content/docs/agents/gdscript.md) | Touching anything under `godot/` |
+| [GDScript performance](docs/content/docs/agents/gdscript-performance.md) | Auditing a GDScript hot path, or deciding whether work belongs in Rust |
 | [Concept capture](docs/content/docs/agents/concept-capture.md) | Concepts, triggers, stop conditions, routing |
 | [Inspector, Reasoning, and OMP](docs/content/docs/agents/inspector-reasoning-omp.md) | The agent-observability panes |
 | [Plugin manifest](docs/content/docs/agents/plugins.md) | Plugin manifests, catalog, install and trust |

@@ -1,0 +1,334 @@
+#!/usr/bin/env python3
+"""Rank the GDScript cost atoms in the scene tree.
+
+This is the repeatable half of the GDScript performance sweep (see
+docs/content/docs/agents/gdscript-performance.md). It is a *report* tool, not a
+gate: it names the mechanical candidates (per-element String work, node
+construction, per-call Dictionary defaults, NodePath walks, JSON in a loop,
+frame-rate image copies, and so on) and their enclosing function, and leaves
+the judgement to a reviewer. It is not in `scripts/ci-check`; a heuristic that
+fails CI either goes stale or grows a baseline that hides the next regression.
+
+The atoms are deliberately few and literal. A hit is a candidate, not a
+defect: native built-ins, one-off setup and a palette read at the top of a draw
+function are all expected to show up. The method page explains which ones to
+ignore and how to prove a real one with a probe.
+
+Usage:
+    ./scripts/gdscript-audit [--root godot/scenes] [--top 40] [--hot] [--json]
+
+Exit codes: 0 with findings, 1 when the root is missing or unreadable.
+Reads only; never writes.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+FUNC = re.compile(r"^(?P<indent>[ \t]*)(?:static\s+)?func\s+(?P<name>\w+)\s*\(")
+HOT = re.compile(
+    r"^(_process|_physics_process|_draw|_input|_gui_input|_unhandled_input|"
+    r"_notification|_poll|_sync|_refresh|_update|_present|_feed|_measure|"
+    r"_build|_on_|_draw_|_repaint)"
+)
+
+# name, pattern, weight, why. The pattern runs on the code part of a line
+# (a trailing `#` comment is stripped by `code_part`).
+ATOMS = [
+    (
+        "string-index",
+        re.compile(r"\b(?:line|row|text)\[(?!\s*[\"'])[^\]]+\]"),
+        3,
+        "a per-element String allocation (line[c] creates a 1-char String)",
+    ),
+    (
+        "string-append",
+        re.compile(
+            r"\b(?:text|out|body|result|joined|line|buf|buffer|acc)\w*\s*\+=\s*"
+        ),
+        3,
+        "a String append that copies the accumulated value",
+    ),
+    (
+        "string-concat",
+        re.compile(
+            r"(?:\[[\"']text[\"']\]|\b(?:text|body|out|joined|acc)\w*)\s*=\s*\w+\s*\+\s*\w+"
+        ),
+        2,
+        "a whole-buffer concatenation (per delta or per row)",
+    ),
+    (
+        "dict-default",
+        re.compile(r"\.get\([^)]*,\s*(?:\{\s*\}|\[\s*\])\)"),
+        2,
+        "the default container is allocated on every call",
+    ),
+    (
+        "node-path-lookup",
+        re.compile(r"get_node(?:_or_null)?\(\s*(?:NodePath\()?[\"']"),
+        2,
+        "a tree walk plus path conversion per call",
+    ),
+    (
+        "group-scan",
+        re.compile(r"get_nodes_in_group\("),
+        3,
+        "an all-node Array allocation per call",
+    ),
+    (
+        "image-per-frame",
+        re.compile(r"Image\.create_from_data\(|ImageTexture\.create_from_image\("),
+        3,
+        "a full frame object/copy per presented frame",
+    ),
+    (
+        "node-new",
+        re.compile(
+            r"\b(?:Button|Label|HBoxContainer|VBoxContainer|MarginContainer|"
+            r"Control|TextureRect|PanelContainer|GraphNode)\.new\("
+        ),
+        2,
+        "node construction; a Phosphor glyph Label costs 3.3-3.5 ms to enter the tree",
+    ),
+    (
+        "string-measure",
+        re.compile(r"get_string_size\("),
+        2,
+        "font shaping per call",
+    ),
+    (
+        "json",
+        re.compile(r"JSON\.(?:parse_string|stringify)\("),
+        2,
+        "a JSON encode/decode on a frame or delta path",
+    ),
+    (
+        "range-in-loop",
+        re.compile(r"for\s+\w+\s+in\s+range\("),
+        1,
+        "range() allocates an Array; `for i in n` does not",
+    ),
+    (
+        "theme-lookup",
+        re.compile(r"get_theme_|UiPalette\.active\("),
+        1,
+        "a theme/palette lookup; fine once per draw, suspect inside a loop",
+    ),
+    (
+        "container-write-in-loop",
+        re.compile(r"\b\w+\[[^\]]+\]\s*=(?!=)"),
+        1,
+        "a container write per element (audio interleave, cell fill)",
+    ),
+    (
+        "regex-new",
+        re.compile(r"RegEx\.new\("),
+        2,
+        "a regex compiled per call instead of cached",
+    ),
+    (
+        "await-hot",
+        re.compile(r"\bawait\b"),
+        5,
+        "a coroutine on a frame/draw path",
+    ),
+    (
+        "duplicate",
+        re.compile(r"\.duplicate\("),
+        1,
+        "a whole-container copy",
+    ),
+]
+
+
+def code_part(line: str) -> str:
+    """The line up to a `#`, unless the `#` is inside a quoted string."""
+    out = []
+    quote = ""
+    escaped = False
+    for ch in line:
+        if escaped:
+            out.append(ch)
+            escaped = False
+            continue
+        if ch == "\\":
+            out.append(ch)
+            escaped = True
+            continue
+        if quote:
+            out.append(ch)
+            if ch == quote:
+                quote = ""
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            out.append(ch)
+            continue
+        if ch == "#":
+            break
+        out.append(ch)
+    return "".join(out)
+
+
+def indent_len(line: str) -> int:
+    return len(line) - len(line.lstrip(" \t"))
+
+
+def functions(lines: list[str]) -> list[dict]:
+    """Top-level and inner-class functions, by indentation.
+
+    GDScript has no closing brace; a function ends at the next non-blank line
+    with the same or a smaller indent. That is also the inner-class boundary,
+    and it is what the palette/sidebar helpers need.
+    """
+    found = []
+    current = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        m = FUNC.match(line)
+        if m:
+            if current is not None:
+                found.append(current)
+            current = {
+                "name": m.group("name"),
+                "start": i,
+                "indent": indent_len(line),
+                "end": len(lines) - 1,
+            }
+            continue
+        if current is None:
+            continue
+        if indent_len(line) <= current["indent"]:
+            current["end"] = i - 1
+            found.append(current)
+            current = None
+    if current is not None:
+        found.append(current)
+    return found
+
+
+def owner(found: list[dict], line_no: int) -> dict | None:
+    """The innermost function containing `line_no` (0-based)."""
+    candidates = [f for f in found if f["start"] <= line_no <= f["end"]]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda f: f["start"])
+
+
+def hits(path: Path, rel: str) -> list[dict]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    found = functions(lines)
+    out = []
+    for i, raw in enumerate(lines):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        fn = owner(found, i)
+        if fn is None:
+            continue
+        code = code_part(raw)
+        if not code.strip():
+            continue
+        # Loop depth at this line, by indentation inside the function.
+        loops: list[int] = []
+        for j in range(fn["start"], i):
+            s = lines[j].strip()
+            if not s or s.startswith("#"):
+                continue
+            ind = indent_len(lines[j])
+            while loops and ind <= loops[-1]:
+                loops.pop()
+            if re.match(r"^(for|while)\b", s):
+                loops.append(ind)
+        in_loop = bool(loops) and indent_len(raw) > loops[-1]
+        for name, pattern, weight, why in ATOMS:
+            if not pattern.search(code):
+                continue
+            if name == "await-hot" and fn["name"] not in (
+                "_process",
+                "_physics_process",
+                "_draw",
+            ):
+                continue
+            if name == "string-append" and not in_loop:
+                continue
+            if name == "container-write-in-loop" and not in_loop:
+                continue
+            out.append(
+                {
+                    "path": rel,
+                    "line": i + 1,
+                    "function": fn["name"],
+                    "atom": name,
+                    "weight": weight,
+                    "score": weight * (2 if in_loop else 1),
+                    "in_loop": in_loop,
+                    "code": raw.strip(),
+                    "why": why,
+                }
+            )
+    return out
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Rank GDScript cost atoms (report only; not a CI gate)."
+    )
+    parser.add_argument("--root", default="godot/scenes", help="directory to scan")
+    parser.add_argument("--top", type=int, default=40, help="rows to print (0 = all)")
+    parser.add_argument("--hot", action="store_true", help="keep frame/event-named functions")
+    parser.add_argument("--json", action="store_true", help="machine-readable output")
+    args = parser.parse_args()
+
+    root = (ROOT / args.root).resolve()
+    if not root.is_dir():
+        print(f"gdscript-audit: no such directory: {args.root}", file=sys.stderr)
+        return 1
+    try:
+        files = sorted(p for p in root.rglob("*.gd") if "addons" not in p.parts)
+    except OSError as exc:
+        print(f"gdscript-audit: cannot read {args.root}: {exc}", file=sys.stderr)
+        return 1
+
+    all_hits = []
+    for path in files:
+        rel = path.relative_to(ROOT).as_posix()
+        try:
+            all_hits.extend(hits(path, rel))
+        except (OSError, UnicodeDecodeError) as exc:
+            print(f"gdscript-audit: cannot read {rel}: {exc}", file=sys.stderr)
+            return 1
+
+    if args.hot:
+        all_hits = [h for h in all_hits if HOT.match(h["function"])]
+
+    all_hits.sort(key=lambda h: (-h["score"], h["path"], h["line"], h["atom"]))
+    shown = all_hits if args.top == 0 else all_hits[: args.top]
+
+    if args.json:
+        print(json.dumps(shown, indent=2))
+        return 0
+
+    for h in shown:
+        print(
+            f"{h['score']:3d}  {h['path']}:{h['line']}  {h['function']}  "
+            f"{h['atom']}  {h['code']}"
+        )
+    funcs = len({(h["path"], h["function"]) for h in all_hits})
+    paths = len({h["path"] for h in all_hits})
+    print(
+        f"gdscript-audit: {len(all_hits)} candidate(s) in {funcs} function(s) "
+        f"across {paths} file(s)"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
