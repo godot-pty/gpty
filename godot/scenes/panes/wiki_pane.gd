@@ -83,8 +83,6 @@ const SEARCH_DEBOUNCE := 0.15
 ## every keystroke never fires during a long typing run, which is exactly when
 ## the most work is at risk — so at most this much typing can be lost.
 const SCRATCH_DEBOUNCE := 1.5
-## The note view's modes, in toolbar order.
-const VIEW_MODES := ["edit", "split", "preview"]
 ## Rows the link panel shows per section. One note can hold the parser's 512
 ## mentions and a popular one gathers many backlinks, so the panel is a
 ## summary — the rest is counted in its footer instead of pushing the editor
@@ -253,7 +251,7 @@ func _ready():
 	_toolbar.add_child(_note_title)
 
 	var group := ButtonGroup.new()
-	for mode in VIEW_MODES:
+	for mode in PaneTypes.WIKI_VIEW_MODES:
 		var button := Button.new()
 		button.name = "Mode_" + mode
 		button.text = mode.capitalize()
@@ -873,9 +871,9 @@ func _hide_graph() -> void:
 ## open a note (a list click) and change the note view mode (the mode buttons).
 ##
 ## `request` carries only what the IPC edge already validated: `note`
-## (vault-relative path) and `mode` (one of `VIEW_MODES`), and a missing key
-## means "leave it alone". Returns "" when the request landed, or the reason it
-## did not, so the caller learns the outcome instead of a blanket ack.
+## (vault-relative path) and `mode` (one of `PaneTypes.WIKI_VIEW_MODES`), and a
+## missing key means "leave it alone". Returns "" when the request landed, or the
+## reason it did not, so the caller learns the outcome instead of a blanket ack.
 ##
 ## The third gesture — the link graph — is [method request_graph]: it builds on
 ## a worker thread, so it cannot land here, and `pane-view --graph` applies it
@@ -1267,7 +1265,7 @@ func _apply_view_mode() -> void:
 		_reader.scroll_to_line(0)
 
 func _set_view_mode(mode: String) -> void:
-	if not (mode in VIEW_MODES) or mode == view_mode:
+	if not (mode in PaneTypes.WIKI_VIEW_MODES) or mode == view_mode:
 		return
 	view_mode = mode
 	_apply_view_mode()
@@ -1937,7 +1935,6 @@ func would_discard_unsaved(settings: Dictionary) -> bool:
 func apply_settings(settings: Dictionary):
 	var previous_vault := vault_path
 	var previous_root := _vault_root
-	var previous_mode := view_mode
 	super.apply_settings(settings)
 	# Remember what a restore asked for; only the spawn-time call (before the
 	# node is in the tree) is ever replayed, by `_restore_view`.
@@ -1945,10 +1942,6 @@ func apply_settings(settings: Dictionary):
 		_restore_note = settings["open_note"]
 	if settings.get("graph") is bool:
 		_restore_graph = settings["graph"]
-	# `view_mode` is a pane property only for its declared values; anything
-	# else (a typo in an untrusted layout) keeps the pane's own value.
-	if settings.get("view_mode") is String:
-		view_mode = settings["view_mode"] if settings["view_mode"] in VIEW_MODES else previous_mode
 	if not is_inside_tree():
 		return
 	_restore_note = ""
@@ -2048,9 +2041,9 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	)
 
 	var mode_opt = OptionButton.new()
-	for mode in VIEW_MODES:
+	for mode in PaneTypes.WIKI_VIEW_MODES:
 		mode_opt.add_item(mode.capitalize())
-	mode_opt.selected = maxi(0, VIEW_MODES.find(view_mode))
+	mode_opt.selected = maxi(0, PaneTypes.WIKI_VIEW_MODES.find(view_mode))
 	mode_opt.item_selected.connect(func(_idx): panel._debounce_timer.start())
 	_add_setting_row(v, "Note view:", mode_opt)
 
@@ -2059,7 +2052,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"pane_name": name_le.text.strip_edges(),
 			"font_size": int(font_spin.value),
 			"vault_path": vault_le.text.strip_edges(),
-			"view_mode": VIEW_MODES[mode_opt.selected] if mode_opt.selected >= 0 else "split",
+			"view_mode": PaneTypes.WIKI_VIEW_MODES[mode_opt.selected] if mode_opt.selected >= 0 else "split",
 		}
 
 	return v

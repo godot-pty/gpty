@@ -156,9 +156,9 @@ static func dispatch_request(ws, req: Dictionary) -> Array:
 			pv_request["note"] = pv_note
 		var pv_mode = params.get("mode", null)
 		if pv_mode != null:
-			if not (pv_mode is String) or not (pv_mode in WikiPane.VIEW_MODES):
+			if not (pv_mode is String) or not (pv_mode in PaneTypes.WIKI_VIEW_MODES):
 				return [_answer(id, false, bad_param("`mode` must be one of: %s" % ", ".join(
-					PackedStringArray(WikiPane.VIEW_MODES)))["error"])]
+					PackedStringArray(PaneTypes.WIKI_VIEW_MODES)))["error"])]
 			pv_request["mode"] = pv_mode
 		if pv_request.is_empty():
 			return [_answer(id, false, bad_param(
@@ -250,7 +250,7 @@ static func settings_request(type_name: String, raw) -> Dictionary:
 	var filtered: Dictionary = PaneTypes.sanitize_settings(type_name, raw, PaneTypes.SOURCE_IPC)
 	if not filtered["dropped"].is_empty():
 		return {
-			"error": "`settings` cannot be applied to this pane: %s (an unknown key, a value of the wrong type, or a key reserved to the pane's own settings UI)"
+			"error": "`settings` cannot be applied to this pane: %s (an unknown key, a value of the wrong type or outside a closed set, or a key reserved to the pane's own settings UI)"
 				% ", ".join(filtered["dropped"]),
 		}
 	return {"settings": filtered["settings"]}
@@ -528,6 +528,8 @@ static func handle(ws, method: String, params: Dictionary):
 					for pst_bound in ["min", "max"]:
 						if pst_rule.has(pst_bound):
 							pst_out[pst_bound] = pst_rule[pst_bound]
+					if pst_rule.has("values"):
+						pst_out["values"] = pst_rule["values"]
 					pst_keys[pst_key] = pst_out
 				pst_types[pst_type] = pst_keys
 			return {"types": pst_types}

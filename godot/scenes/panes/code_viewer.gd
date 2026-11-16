@@ -26,9 +26,6 @@ var _show_rendered := false
 ## The two scroll chevrons over the body, rebound to whichever view is shown.
 var _scroll_hints: ScrollHints
 
-static var _langs := ["", "md", "gd", "py", "rs", "c", "cpp", "h", "js", "ts"]
-static var _view_modes := ["auto", "source", "rendered"]
-
 func _ready():
 	super._ready()
 
@@ -245,10 +242,6 @@ func apply_settings(settings: Dictionary):
 	# scroll for an unrelated edit; only a path that actually moved reloads.
 	var previous_path := file_path
 	super.apply_settings(settings)
-	if settings.get("language") is String:
-		language = settings["language"]
-	if settings.get("view_mode") is String and settings["view_mode"] in _view_modes:
-		view_mode = settings["view_mode"]
 	if settings.get("file_path") is String and _editor != null:
 		if file_path != previous_path:
 			load_file(file_path)
@@ -284,17 +277,17 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	_add_setting_row(v, "File:", file_le)
 	
 	var lang_opt = OptionButton.new()
-	for lang in _langs:
+	for lang in PaneTypes.CODE_VIEWER_LANGUAGES:
 		lang_opt.add_item(lang if lang != "" else "(auto)")
-	var sel = maxi(0, _langs.find(language))
+	var sel = maxi(0, PaneTypes.CODE_VIEWER_LANGUAGES.find(language))
 	lang_opt.selected = sel
 	lang_opt.item_selected.connect(func(_idx): panel._debounce_timer.start())
 	_add_setting_row(v, "Language:", lang_opt)
 
 	var view_opt = OptionButton.new()
-	for mode in _view_modes:
+	for mode in PaneTypes.CODE_VIEWER_VIEW_MODES:
 		view_opt.add_item(mode.capitalize())
-	view_opt.selected = maxi(0, _view_modes.find(view_mode))
+	view_opt.selected = maxi(0, PaneTypes.CODE_VIEWER_VIEW_MODES.find(view_mode))
 	view_opt.item_selected.connect(func(_idx): panel._debounce_timer.start())
 	_add_setting_row(v, "View:", view_opt)
 
@@ -303,8 +296,8 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"pane_name": name_le.text.strip_edges(),
 			"font_size": int(font_spin.value),
 			"file_path": file_le.text.strip_edges(),
-			"language": _langs[lang_opt.selected] if lang_opt.selected >= 0 else "",
-			"view_mode": _view_modes[view_opt.selected] if view_opt.selected >= 0 else "auto",
+			"language": PaneTypes.CODE_VIEWER_LANGUAGES[lang_opt.selected] if lang_opt.selected >= 0 else "",
+			"view_mode": PaneTypes.CODE_VIEWER_VIEW_MODES[view_opt.selected] if view_opt.selected >= 0 else "auto",
 		}
 	
 	return v

@@ -1336,6 +1336,29 @@ func test_pane_set_refuses_keys_the_table_reserves():
 	_ws._kill_now(media)
 	_ws._kill_now(inspector)
 
+## A member of a closed set the pane does not know is a bad parameter, refused
+## with the key named - not a no-op reported as success.
+func test_pane_set_refuses_a_member_outside_a_closed_set():
+	var viewer := _spawn("code_viewer")
+	var id := str(viewer.attachment_id)
+
+	var refused = WorkspaceIpcHandlers.handle(_ws, "paneSet", {
+		"pane_id": id, "settings": {"view_mode": "bogus"},
+	})
+	assert_true(refused.has("error"), "an unknown member must be refused")
+	assert_eq(int(refused["error"]["code"]), -32602, "a bad parameter is -32602")
+	assert_string_contains(str(refused["error"]["message"]), "view_mode")
+	assert_eq(str(viewer.view_mode), "auto", "a refused call applies nothing")
+
+	var applied = WorkspaceIpcHandlers.handle(_ws, "paneSet", {
+		"pane_id": id, "settings": {"view_mode": "source"},
+	})
+	assert_false(applied.has("error"), "a member of the set applies: %s" % applied)
+	assert_true((applied.get("changed", []) as Array).has("view_mode"),
+		"the applied key must be named: %s" % str(applied.get("changed")))
+	assert_eq(str(viewer.view_mode), "source")
+	_ws._kill_now(viewer)
+
 
 ## The save/discard question a vault change asks belongs to the user: a caller
 ## that cannot answer it is refused, and the open note survives.
@@ -1410,3 +1433,13 @@ func test_pane_settings_reports_the_closed_table():
 	assert_eq(str(types["terminal"]["pane_cwd"]["kind"]), "dir_path")
 	assert_eq(types["cli_view"]["pane_cwd"]["ipc"], false)
 	assert_eq(types["cli_view"]["pane_cwd"]["file"], false)
+
+	var wiki_modes: Array = types["wiki"]["view_mode"]["values"]
+	assert_eq(wiki_modes.size(), 3, "a closed set is published: %s" % str(types["wiki"]["view_mode"]))
+	assert_true(wiki_modes.has("preview"))
+	assert_eq(str(types["inspector"]["backend"]["kind"]), "backend",
+		"the one canonicalizing rule says so")
+	var kinds: Array = types["inspector"]["backend"]["values"]
+	assert_eq(kinds.size(), BackendChoice.KINDS.size())
+	for kind in BackendChoice.KINDS:
+		assert_true(kinds.has(kind), "the canonical kind '%s' must be published" % kind)

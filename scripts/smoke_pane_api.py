@@ -1901,6 +1901,11 @@ def main() -> int:
             "the table must mark the user's own env as not settable over IPC",
             types.get("terminal"),
         )
+        smoke.require(
+            "preview" in (((types.get("wiki") or {}).get("view_mode") or {}).get("values") or []),
+            "pane-settings must publish a closed set a caller can pick from",
+            (types.get("wiki") or {}).get("view_mode"),
+        )
 
         smoke.enter("pane-set")
         created = smoke.result(
@@ -1944,6 +1949,19 @@ def main() -> int:
             "cannot be applied" in str(reserved["error"].get("message", "")),
             "the refusal must name what it cannot take",
             reserved,
+        )
+        closed = smoke.cli(
+            "pane-set", created_id, "--setting", "view_mode=bogus", "--json", check=False
+        )
+        smoke.require(
+            isinstance(closed.get("error"), dict),
+            "a value outside a closed set must be refused, not applied as a no-op",
+            closed,
+        )
+        smoke.require(
+            "view_mode" in str(closed["error"].get("message", "")),
+            "the refusal must name the key it cannot take",
+            closed,
         )
         smoke.cli("kill-pane", created_id, "--json")
 

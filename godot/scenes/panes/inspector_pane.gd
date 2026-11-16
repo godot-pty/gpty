@@ -327,11 +327,6 @@ func apply_settings(settings: Dictionary):
 	var prev_prompt = system_prompt
 	var prev_command = command.duplicate()
 	super.apply_settings(settings)
-	if settings.get("backend") is String:
-		# One vocabulary: a known alias collapses to its kind, and a value the
-		# parser does not know is kept exactly so the panel can show it as
-		# `Custom:` instead of silently rewriting the user's file.
-		backend = BackendChoice.selected_kind(settings["backend"])
 	if settings.get("auto_run") is bool:
 		auto_run = settings["auto_run"]
 	if settings.get("accept_concept_captures") is bool:

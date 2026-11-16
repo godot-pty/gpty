@@ -215,10 +215,36 @@ func test_file_tree_open_in_round_trips_through_the_pane_settings_ui():
 	assert_eq(twin.open_in, "system", "state -> apply restores the choice")
 	assert_eq(twin._get_layout_state(), state, "state -> apply -> state is stable")
 
-	# A saved file is untrusted input: an unknown mode falls back to the
-	# default instead of leaving the route undefined.
+	# A saved file is untrusted input: the table refuses an unknown member, so
+	# the pane keeps the route it had instead of silently falling back to one
+	# the user did not pick.
+	twin.open_in = "system"
 	twin.apply_settings({"open_in": "something-else"})
-	assert_eq(twin.open_in, "viewer", "the mode vocabulary is closed")
+	assert_eq(twin.open_in, "system", "a refused member changes nothing")
+
+## The row's motivating case: the table used to accept a value the pane then
+## dropped, so `paneSet` answered success with `changed: []`. The refusal now
+## happens in the table, before the property is touched.
+func test_a_closed_set_member_never_reaches_the_pane():
+	var wiki = _tm.create_body("wiki")
+	_scene.add_child(wiki)
+	wiki.view_mode = "preview"
+	wiki.apply_settings({"view_mode": "bogus"})
+	assert_eq(wiki.view_mode, "preview", "a refused note view changes nothing")
+
+	var viewer = _tm.create_body("code_viewer")
+	_scene.add_child(viewer)
+	viewer.view_mode = "rendered"
+	viewer.language = "md"
+	viewer.apply_settings({"view_mode": "bogus", "language": "klingon"})
+	assert_eq(viewer.view_mode, "rendered", "a refused view mode changes nothing")
+	assert_eq(viewer.language, "md", "a refused language changes nothing")
+
+	var tree = _tm.create_body("file_tree")
+	_scene.add_child(tree)
+	tree.open_in = "system"
+	tree.apply_settings({"open_in": "bogus"})
+	assert_eq(tree.open_in, "system", "a refused route changes nothing")
 
 ## A terminal's launch line is the spawn plan a user can name: the panel
 ## gathers it, `apply_settings` accepts it through the closed table, and the

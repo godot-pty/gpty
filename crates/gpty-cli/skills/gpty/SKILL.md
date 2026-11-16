@@ -108,7 +108,7 @@ A pane's own settings (`file_path`, `vault_path`, `volume_db`, `tags`,
 settings panel writes. Ask for it instead of guessing:
 
 ```
-gpty pane-settings                     # every type's keys, with kind/range/file/ipc
+gpty pane-settings                     # every type's keys, with kind/range/values/file/ipc
 gpty new-pane -t media --setting file_path=/clip.mp4
 gpty pane-set C1 --setting 'tags=["ci"]' --setting font_size=16
 ```
@@ -116,7 +116,9 @@ gpty pane-set C1 --setting 'tags=["ci"]' --setting font_size=16
 A `KEY=VALUE` value is JSON when it parses (`true`, `-6`, `["a","b"]`) and a
 string otherwise, so `file_path=/x/y` needs no quotes; an empty value clears
 (`--setting file_path=`). A call is all-or-nothing: every key is checked first,
-and a refusal names the keys it cannot take, so a typo never half-applies.
+and a refusal names the keys it cannot take, so a typo never half-applies. A
+value outside a closed set (`values` in the table) is refused too — `view_mode`,
+`language`, `open_in` and the Inspector's `backend` all come from the table now.
 The answer reads the pane back — `changed` lists the saved keys whose value
 moved. A key with `ipc: false` in `pane-settings` is refused: per-pane env, the
 Inspector's prompt and switches, the pane id, `rows`/`cols` and the wiki

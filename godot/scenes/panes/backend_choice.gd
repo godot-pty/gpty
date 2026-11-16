@@ -10,6 +10,11 @@ class_name BackendChoice
 ## reset to a default the user did not choose.
 
 const DEFAULT_KIND := "omp"
+## The canonical kinds `BackendKind::parse` accepts, in the parser's order -
+## also the set `PaneTypes.INSPECTOR_SETTINGS` publishes as `values`.
+const KINDS := ["mock", "omp", "cli"]
+## The spellings the parser folds into a kind.
+const ALIASES := {"oh-my-pi": "omp", "pi": "omp"}
 const OMP_HINT := "Not found — install Oh-My-Pi or set GPTY_OMP."
 const UNAVAILABLE_HINT := "Not found — a session cannot open until this program is installed."
 const CUSTOM_HINT := "Unknown backend — a session cannot open until this names mock, omp or cli."
@@ -17,14 +22,10 @@ const NO_ROSTER_HINT := "Backend list unavailable — rebuild gpty-gdext and res
 
 ## The canonical kind for a persisted value, or "" when the value is unknown.
 static func normalize(value: String) -> String:
-	match value.strip_edges().to_lower():
-		"mock":
-			return "mock"
-		"omp", "oh-my-pi", "pi":
-			return "omp"
-		"cli":
-			return "cli"
-	return ""
+	var folded := value.strip_edges().to_lower()
+	if KINDS.has(folded):
+		return folded
+	return str(ALIASES.get(folded, ""))
 
 ## The value the dropdown matches against and the pane stores: empty means the
 ## pane default, a known alias means its canonical kind, anything else stays

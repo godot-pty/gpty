@@ -13,9 +13,6 @@ class_name FileTreePane
 ## system path, because the in-app route is an allowlist, not a sniff.
 @export var open_in := "viewer"
 
-const OPEN_MODES: Array[String] = ["viewer", "system"]
-const DEFAULT_OPEN_MODE := "viewer"
-
 ## Test seam: the one place this pane opens a folder for listing. Production
 ## leaves it as Godot's own static; a test replaces it to reach the gate a
 ## folder's permissions normally close (a path that exists but cannot be
@@ -240,13 +237,6 @@ func _get_layout_state() -> Dictionary:
 
 func apply_settings(settings: Dictionary):
 	super.apply_settings(settings)
-	# `open_in` is a closed vocabulary; the base typed setter accepts any
-	# string from a saved layout, so the pane re-derives it here. An unknown
-	# value falls back to the default rather than leaving neither route
-	# authoritative.
-	open_in = DEFAULT_OPEN_MODE
-	if settings.get("open_in") is String and settings["open_in"] in OPEN_MODES:
-		open_in = settings["open_in"]
 	if settings.has("root_path") and settings["root_path"] is String and _tree != null:
 		_refresh_root()
 
@@ -276,12 +266,12 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	root_le.text_changed.connect(func(_s): panel._debounce_timer.start())
 	_add_setting_row(v, "Root path:", root_le)
 
-	# The row's labels must stay in `OPEN_MODES` order: the selected index is
-	# the stored value.
+	# The row's labels must stay in `PaneTypes.FILE_TREE_OPEN_MODES` order: the
+	# selected index is the stored value.
 	var open_opt = OptionButton.new()
 	open_opt.add_item("Viewer pane")
 	open_opt.add_item("System application")
-	open_opt.selected = maxi(0, OPEN_MODES.find(open_in))
+	open_opt.selected = maxi(0, PaneTypes.FILE_TREE_OPEN_MODES.find(open_in))
 	open_opt.item_selected.connect(func(_idx): panel._debounce_timer.start())
 	_add_setting_row(v, "Open files:", open_opt)
 	
@@ -290,7 +280,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"pane_name": name_le.text.strip_edges(),
 			"font_size": int(font_spin.value),
 			"root_path": root_le.text.strip_edges(),
-			"open_in": OPEN_MODES[open_opt.selected] if open_opt.selected >= 0 else DEFAULT_OPEN_MODE,
+			"open_in": PaneTypes.FILE_TREE_OPEN_MODES[open_opt.selected] if open_opt.selected >= 0 else PaneTypes.FILE_TREE_DEFAULT_OPEN_MODE,
 		}
 	
 	return v

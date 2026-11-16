@@ -481,6 +481,59 @@ func test_ipc_settings_refuse_the_user_owned_keys():
 			"%s: the id is the pane's address" % type_name)
 		assert_eq(identity["dropped"].size(), 2, "%s: both must be reported" % type_name)
 
+## A closed set is the table's, not the pane's: at every source an unknown
+## member is refused, and a member of the set survives unchanged.
+func test_a_closed_set_refuses_a_member_it_does_not_know():
+	var closed := [
+		["wiki", "view_mode", "bogus", "preview"],
+		["code_viewer", "view_mode", "bogus", "rendered"],
+		["code_viewer", "language", "klingon", "md"],
+		["file_tree", "open_in", "bogus", "system"],
+	]
+	for entry in closed:
+		var type_name: String = entry[0]
+		var key: String = entry[1]
+		for source in [PaneTypes.SOURCE_FILE, PaneTypes.SOURCE_RUNTIME, PaneTypes.SOURCE_IPC]:
+			var refused := PaneTypes.sanitize_settings(type_name, {key: entry[2]}, source)
+			assert_false(refused["settings"].has(key),
+				"%s.%s must refuse an unknown member" % [type_name, key])
+			assert_true(refused["dropped"].has(key),
+				"%s.%s must name the refusal" % [type_name, key])
+			var accepted := PaneTypes.sanitize_settings(type_name, {key: entry[3]}, source)
+			assert_eq(accepted["settings"].get(key), entry[3],
+				"%s.%s must accept a member of its set" % [type_name, key])
+			assert_eq(accepted["dropped"].size(), 0,
+				"%s.%s must report nothing dropped" % [type_name, key])
+
+## A file is the source the restore notice reads: a bad member is dropped from
+## the tile and named, never applied.
+func test_a_saved_tile_names_a_refused_closed_set_member():
+	var tile := PaneTypes.sanitize_tile({
+		"settings": {"type": "wiki", "view_mode": "bogus"},
+		"col": 0, "row": 0, "cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID,
+	})
+	assert_false(tile["settings"].has("view_mode"), "a refused mode never reaches the pane")
+	assert_true(tile["dropped"].has("view_mode"), "the restore notice names it")
+
+## The Inspector's backend is not a closed set: closing it would reset the
+## `Custom:` row a shipped row added on purpose.
+func test_a_backend_alias_folds_and_an_unknown_name_is_kept():
+	var aliased: Dictionary = PaneTypes.sanitize_settings("inspector", {
+		"backend": "pi",
+	}, PaneTypes.SOURCE_FILE)["settings"]
+	assert_eq(aliased.get("backend"), "omp", "an alias is stored as its kind")
+
+	var custom := PaneTypes.sanitize_settings("inspector", {"backend": "gpt-5"})
+	assert_eq(custom["settings"].get("backend"), "gpt-5", "an unknown name stays verbatim")
+	assert_eq(custom["dropped"].size(), 0, "a custom name is not a drop")
+
+	var defaulted: Dictionary = PaneTypes.sanitize_settings("inspector", {"backend": ""})["settings"]
+	assert_eq(defaulted.get("backend"), "omp", "an empty value is the pane default")
+
+	var too_long := PaneTypes.sanitize_settings("inspector", {"backend": "x".repeat(40)})
+	assert_false(too_long["settings"].has("backend"), "the rule's length cap still applies")
+	assert_true(too_long["dropped"].has("backend"))
+
 func test_settings_values_are_coerced_and_clamped():
 	var kept: Dictionary = PaneTypes.sanitize_settings("terminal", {
 		"font_size": 1, "scroll_lines": 99.9, "cursor_blink_speed": 99,

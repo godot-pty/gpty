@@ -549,19 +549,38 @@ const TERMINAL_SETTINGS := {
 	"scrollback_indicator_color": {"kind": "color", "file": false},
 }
 
+## The code viewer's two closed vocabularies, shared by its settings UI and its
+## rules so the dropdown and the table cannot disagree. `""` is "(auto)", which
+## renders by the file's extension.
+const CODE_VIEWER_LANGUAGES := ["", "md", "gd", "py", "rs", "c", "cpp", "h", "js", "ts"]
+const CODE_VIEWER_VIEW_MODES := ["auto", "source", "rendered"]
+
+## The file tree's two activation routes: the in-app viewer when `ViewableFiles`
+## supports the path, or the system handler.
+const FILE_TREE_OPEN_MODES := ["viewer", "system"]
+const FILE_TREE_DEFAULT_OPEN_MODE := "viewer"
+
+## The wiki pane's note-view modes, shared with `paneView`'s `mode` parameter.
+const WIKI_VIEW_MODES := ["edit", "split", "preview"]
+
 const CODE_VIEWER_SETTINGS := {
 	"file_path": {"kind": "text", "max": 4096},
-	"language": {"kind": "text", "max": 64},
-	"view_mode": {"kind": "text", "max": 32},
+	"language": {"kind": "text", "max": 64, "values": CODE_VIEWER_LANGUAGES},
+	"view_mode": {"kind": "text", "max": 32, "values": CODE_VIEWER_VIEW_MODES},
 }
 
 const FILE_TREE_SETTINGS := {
 	"root_path": {"kind": "text", "max": 4096},
-	"open_in": {"kind": "text", "max": 32},
+	"open_in": {"kind": "text", "max": 32, "values": FILE_TREE_OPEN_MODES},
 }
 
 const INSPECTOR_SETTINGS := {
-	"backend": {"kind": "text", "max": 32},
+	# The backend is a domain vocabulary, not free text: `BackendChoice` folds
+	# the parser's aliases (`oh-my-pi`, `pi`) into their kind and keeps a name
+	# it does not know verbatim, so Pane Settings can show that value as
+	# `Custom:` instead of resetting a user's file. `values` is the canonical
+	# set they fold into - the one `pane-settings` publishes.
+	"backend": {"kind": "backend", "max": 32, "values": BackendChoice.KINDS},
 	"command": {"kind": "argv"},
 	# A file may not aim the pane. The prompt decides what the model is asked,
 	# and the two switches decide whether a concept capture is sent with no
@@ -590,7 +609,7 @@ const CLI_VIEW_SETTINGS := {
 
 const WIKI_SETTINGS := {
 	"vault_path": {"kind": "text", "max": 4096},
-	"view_mode": {"kind": "text", "max": 32},
+	"view_mode": {"kind": "text", "max": 32, "values": WIKI_VIEW_MODES},
 	# Restore-only state: both are replayed at attach and ignored on a live pane
 	# (`WikiPane.apply_settings` clears them once it is in the tree), and the
 	# gestures themselves belong to `pane-view --note` / `--graph`.
@@ -662,6 +681,12 @@ static func _value_for_rule(rule: Dictionary, v) -> Variant:
 				return null
 			var text: String = v
 			if text.length() > int(rule.get("max", 128)) or text.contains("\uFFFD"):
+				return null
+			# A closed set: no pane re-derives one at apply time, so a member
+			# the table does not know must be refused here or it becomes a
+			# silent no-op that the read-back reports as a set that never moved.
+			var values = rule.get("values", null)
+			if values is Array and not values.has(text):
 				return null
 			return text
 		"int":
@@ -750,6 +775,16 @@ static func _value_for_rule(rule: Dictionary, v) -> Variant:
 			if scheme.length() > 4096 or scheme.contains("\uFFFD"):
 				return null
 			return scheme
+		"backend":
+			# The Inspector's vocabulary: an alias folds to its canonical kind,
+			# an empty value means the pane default, and a name the parser does
+			# not know stays verbatim (the dropdown shows it as `Custom:`).
+			if not (v is String):
+				return null
+			var named: String = v
+			if named.length() > int(rule.get("max", 32)) or named.contains("\uFFFD"):
+				return null
+			return BackendChoice.selected_kind(named)
 	return null
 
 static func _is_color_string(v: String) -> bool:
