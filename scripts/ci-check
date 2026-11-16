@@ -453,9 +453,21 @@ fi
 # A stale bundle ships old notes, so it fails here rather than at export.
 run_bundle_check
 
+# ── Step 2.9: workspace lockfile drift ─────────────────────────────────
+# Clippy/build/test below can re-resolve and rewrite a stale Cargo.lock, which
+# would make the audit read a graph that is not the one committed. Check the
+# committed lock before the first command that can touch it.
+header "Cargo.lock"
+if cargo metadata --locked --format-version 1 >/dev/null 2>&1; then
+    pass "Cargo.lock in sync"
+else
+    fail "Cargo.lock is out of sync — run: cargo metadata --format-version 1"
+    check_failed
+fi
+
 # ── Step 3: cargo clippy ───────────────────────────────────────────────
 header "cargo clippy"
-if cargo clippy --workspace -- -D warnings 2>&1; then
+if cargo clippy --workspace --locked -- -D warnings 2>&1; then
     pass "clippy"
 else
     fail "clippy"
@@ -582,7 +594,7 @@ if rustup target list --installed 2>/dev/null | grep -q "^${WIN_TARGET}$" \
         INCLUDE="$XWIN_INCLUDE" \
         LIB="$XWIN_LIB" \
         RUSTFLAGS="-Dwarnings" \
-        cargo check --workspace --tests --target "$WIN_TARGET" 2>&1; then
+        cargo check --workspace --tests --locked --target "$WIN_TARGET" 2>&1; then
         pass "windows cross-check"
     else
         fail "windows cross-check"
@@ -601,7 +613,7 @@ fi
 header "BSD cross-check"
 BSD_TARGET="x86_64-unknown-freebsd"
 if rustup target list --installed 2>/dev/null | grep -q "^${BSD_TARGET}$"; then
-    if cargo check -p gpty-ipc --target "$BSD_TARGET" 2>&1; then
+    if cargo check --locked -p gpty-ipc --target "$BSD_TARGET" 2>&1; then
         pass "BSD cross-check"
     else
         fail "BSD cross-check"
@@ -617,7 +629,7 @@ fi
 header "crate versions"
 if python3 -c 'import tomllib' 2>/dev/null; then
     if python3 - <<'EOF' 2>&1
-import glob, tomllib
+import glob, re, tomllib
 versions = {}
 for path in sorted(glob.glob("crates/*/Cargo.toml")):
     with open(path, "rb") as fh:
@@ -625,12 +637,21 @@ for path in sorted(glob.glob("crates/*/Cargo.toml")):
     versions[data["package"]["name"]] = data["package"]["version"]
 distinct = sorted(set(versions.values()))
 print("  " + ", ".join(f"{name}={ver}" for name, ver in versions.items()))
+if len(distinct) == 1:
+    with open("godot/project.godot", encoding="utf-8") as fh:
+        match = re.search(r'^config/version="([^"]+)"', fh.read(), re.M)
+    if not match:
+        print("godot/project.godot has no config/version")
+        raise SystemExit(1)
+    if match.group(1) != distinct[0]:
+        print(f"godot/project.godot is {match.group(1)}, crates are {distinct[0]}")
+        raise SystemExit(1)
 raise SystemExit(0 if len(distinct) == 1 else 1)
 EOF
     then
         pass "crate versions uniform"
     else
-        fail "crate versions differ — bump every crates/*/Cargo.toml to the same version"
+        fail "crate versions differ (or godot/project.godot is stale) — bump every crates/*/Cargo.toml and godot/project.godot together"
         check_failed
     fi
 else
@@ -646,7 +667,7 @@ TEMP_PROBE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gpty-gate-tmp.XXXXXX")"
 # An interrupted run still cleans up: the probe directory is not an artifact.
 trap 'rm -rf "$TEMP_PROBE_DIR"' EXIT
 header "cargo test"
-if TMPDIR="$TEMP_PROBE_DIR" cargo test --workspace -- --test-threads=1 2>&1; then
+if TMPDIR="$TEMP_PROBE_DIR" cargo test --workspace --locked -- --test-threads=1 2>&1; then
     pass "cargo test"
 else
     fail "cargo test"

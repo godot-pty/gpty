@@ -35,7 +35,11 @@ CACHE_TTL = 3600
 
 def fetch():
     url = f"https://api.github.com/repos/{REPO}/releases?per_page=5"
-    req = urllib.request.Request(url, headers={"User-Agent": "gpty-docs-setup"})
+    headers = {"User-Agent": "gpty-docs-setup"}
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read())
 

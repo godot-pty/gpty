@@ -4,13 +4,18 @@ on:
   push:
     tags: ["v*"]
 
-# Least privilege: the build jobs only read the repository. Without this block
-# they inherit the repository default, which is read-write on repositories
-# created before February 2023 and follows a transferred or forked repository.
-# `export-release` overrides it with exactly the writes it needs: release
-# contents, plus the OIDC identity the build-provenance attestation signs with.
+# Least privilege: the gate, build and export jobs only read the repository.
+# `publish` overrides it with exactly the writes it needs: release contents,
+# plus the OIDC identity the build-provenance attestation signs with. The
+# publish job downloads the staged files and runs only pinned actions - no
+# project code runs in the job that holds the write token or the OIDC identity.
 permissions:
   contents: read
+
+# One release per tag. A re-pushed tag queues instead of racing a publish.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,22 +24,28 @@ env:
 jobs:
   # ── Build GDExtension per platform ───────────────────────────────────
   build-linux:
+    needs: release-gate
     runs-on: ubuntu-22.04
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.96.0"
 
       - name: Build media dependencies
         run: ./scripts/media-deps
 
       - name: Build GDExtension (release)
-        run: cargo build -p gpty-gdext --release
+        run: cargo build --locked -p gpty-gdext --release
 
       - name: Build CLI (release)
-        run: cargo build -p gpty --release
+        run: cargo build --locked -p gpty --release
 
       - name: Package
         run: |
@@ -53,29 +64,35 @@ jobs:
           path: release/
 
   build-macos:
+    needs: release-gate
     strategy:
       matrix:
         target:
-          - runner: macos-latest
+          - runner: macos-15
             arch: arm64
           - runner: macos-15-intel
             arch: x86_64
     runs-on: ${{ matrix.target.runner }}
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.96.0"
 
       - name: Build media dependencies
         run: ./scripts/media-deps
 
       - name: Build GDExtension (release)
-        run: cargo build -p gpty-gdext --release
+        run: cargo build --locked -p gpty-gdext --release
 
       - name: Build CLI (release)
-        run: cargo build -p gpty --release
+        run: cargo build --locked -p gpty --release
 
       - name: Package
         run: |
@@ -88,7 +105,7 @@ jobs:
           if [ "${{ matrix.target.arch }}" = "arm64" ]; then
             # The app export is universal, so the CLI that ships inside it must be too.
             rustup target add x86_64-apple-darwin
-            cargo build -p gpty --release --target x86_64-apple-darwin
+            cargo build --locked -p gpty --release --target x86_64-apple-darwin
             lipo -create -output release/gpty target/release/gpty target/x86_64-apple-darwin/release/gpty
           else
             cp target/release/gpty release/gpty
@@ -104,11 +121,14 @@ jobs:
   # Combine them here (lipo needs macOS) and ad-hoc sign the results so the
   # export job can inject pre-signed libraries without touching a signature.
   bundle-macos:
-    needs: [build-macos]
-    runs-on: macos-latest
+    needs: [release-gate, build-macos]
+    runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Download macOS artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -128,13 +148,19 @@ jobs:
           path: release/ffmpeg
 
   build-windows:
-    runs-on: windows-latest
+    needs: release-gate
+    runs-on: windows-2025
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.96.0"
 
       - name: Cache vcpkg FFmpeg
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -154,10 +180,10 @@ jobs:
         run: ./scripts/media-deps
 
       - name: Build GDExtension (release)
-        run: cargo build -p gpty-gdext --release
+        run: cargo build --locked -p gpty-gdext --release
 
       - name: Build CLI (release)
-        run: cargo build -p gpty --release
+        run: cargo build --locked -p gpty --release
 
       - name: Package
         run: |
@@ -177,25 +203,60 @@ jobs:
           name: gpty-windows-x86_64
           path: release/
 
-  # ── Export standalone app + create GitHub Release ─────────────────────
-  export-release:
-    needs: [build-linux, build-macos, build-windows, bundle-macos]
-    runs-on: ubuntu-latest
+  # ── Release gate: tag, version and content checks before any build ───
+  release-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
-      contents: write
-      # Build-provenance attestation: `actions/attest-build-provenance` signs
-      # the staged artifacts with this workflow run's OIDC identity.
-      id-token: write
-      attestations: write
+      contents: read
     env:
       VERSION: ${{ github.ref_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The defect-class gate below describes the previous tag; the default
+          # The defect-class gate describes the previous tag; the default
           # shallow clone carries neither the tag nor the history to find it.
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.96.0"
+
+      - name: Check the tag format
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "release tags are vX.Y.Z (got $VERSION)" >&2; exit 1; }
+
+      - name: Check the tag is a signed annotated tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${VERSION}")"
+          type="$(jq -r '.object.type' <<<"$ref")"
+          sha="$(jq -r '.object.sha' <<<"$ref")"
+          [ "$type" = "tag" ] || { echo "tag $VERSION is not annotated" >&2; exit 1; }
+          verified="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${sha}" --jq '.verification.verified')"
+          [ "$verified" = "true" ] || { echo "tag $VERSION is not signed/verified" >&2; exit 1; }
+
+      - name: Check the tag is on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor HEAD FETCH_HEAD
+
+      - name: Check the version
+        run: |
+          set -euo pipefail
+          crate_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/gpty-cli/Cargo.toml | head -1)"
+          test "v$crate_version" = "$VERSION"
+          python3 scripts/mcp-registry check
+          cargo metadata --locked --format-version 1 > /dev/null
+          cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
 
       - name: Check the defect-class trailers
         run: |
@@ -208,6 +269,29 @@ jobs:
           else
             ./scripts/fix-forensics --check
           fi
+
+      - name: Check the docs and knowledge bundle
+        run: |
+          python3 scripts/docs-check
+          ./scripts/check-capabilities
+          python3 scripts/build-wiki --check
+
+  # ── Export standalone apps (read-only) ───────────────────────────────
+  export:
+    needs: [build-linux, build-macos, build-windows, bundle-macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
 
       # project.godot carries the last released version; bundles must report the
       # tag (macOS reads CFBundleShortVersionString from it).
@@ -254,13 +338,14 @@ jobs:
       - name: Stage GDExtension binaries into godot/bin/
         run: |
           mkdir -p godot/bin
-          find gdext-artifacts -type f \( -name '*.so' -o -name '*.dylib' -o -name '*.dll' \) | while read f; do
+          find gdext-artifacts -type f \( -name 'libgpty_gdext*' -o -name 'gpty_gdext*' \) | while read -r f; do
             cp "$f" godot/bin/
           done
+          for f in libgpty_gdext.linux.x86_64.so libgpty_gdext.macos.arm64.dylib \
+            libgpty_gdext.macos.x86_64.dylib gpty_gdext.windows.x86_64.dll; do
+            test -s "godot/bin/$f" || { echo "missing godot/bin/$f" >&2; exit 1; }
+          done
           ls -la godot/bin/
-
-      - name: Check the knowledge bundle
-        run: ./scripts/build-wiki --check
 
       - name: Import project
         run: godot --headless --path godot --import
@@ -286,7 +371,7 @@ jobs:
           B="$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64"
           mkdir -p "$B"
           godot --headless --path godot --export-release "Windows Desktop" "$B/gpty-gui.exe"
-          cp godot/bin/gpty_gdext.windows.x86_64.dll "$B/" 2>/dev/null || true
+          cp godot/bin/gpty_gdext.windows.x86_64.dll "$B/"
           cp gdext-artifacts/gpty-windows-x86_64/gpty.exe "$B/"
           cp LICENSE LICENSE-EXCEPTIONS.md "$B/"
           ./scripts/bundle-media windows "$B" gdext-artifacts/gpty-windows-x86_64/ffmpeg
@@ -321,6 +406,39 @@ jobs:
                     "gpty-${VERSION}-windows-x86_64.zip" \
                     "gpty-${VERSION}-macos.zip" > SHA256SUMS
           cat SHA256SUMS
+
+      - name: Upload release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gpty-release-dist
+          path: |
+            dist/gpty-${{ github.ref_name }}-linux-x86_64.tar.gz
+            dist/gpty-${{ github.ref_name }}-windows-x86_64.zip
+            dist/gpty-${{ github.ref_name }}-macos.zip
+            dist/SHA256SUMS
+          retention-days: 3
+
+  # ── Attest and publish (write token + OIDC; no project code) ─────────
+  publish:
+    needs: export
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      # Build-provenance attestation: `actions/attest-build-provenance` signs
+      # the staged artifacts with this workflow run's OIDC identity.
+      id-token: write
+      attestations: write
+      # List/download this run's gpty-release-dist artifact.
+      actions: read
+    environment:
+      name: release
+    steps:
+      - name: Download the release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gpty-release-dist
+          path: dist
 
       # Bind each asset to the workflow, commit and runner that produced it:
       # `gh attestation verify <asset> --repo godot-pty/gpty`. SHA256SUMS proves

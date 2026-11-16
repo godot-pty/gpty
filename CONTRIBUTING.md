@@ -246,7 +246,7 @@ See the agent guide for the complete conventions and patterns: [Rust](docs/conte
 
 `main` is the release branch. Every commit on it arrives through a release pull request from the active integration branch: `0.8.x` for the 0.8 line, `0.9.x` for 0.9. The maintainer approves the release PR and tags the release from `main`.
 
-Day-to-day changes land on the integration branch. Branch from it, open pull requests against it, and do not open feature pull requests against `main`. The `gpty-bot` GitHub App pushes the integration branch and opens the release PR; the bot never approves or merges.
+Day-to-day changes land on the integration branch. Branch from it, open pull requests against it, and do not open feature pull requests against `main`. The `gpty-bot` GitHub App pushes the integration branch and opens the release PR; the bot never approves or merges. Dependency updates target the active integration branch; bump `.github/dependabot.yml`'s three `target-branch` entries when the line rolls (`0.8.x` → `0.9.x`).
 
 ## Pull Request Process
 

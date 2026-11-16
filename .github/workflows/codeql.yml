@@ -7,7 +7,7 @@ on:
   # dormant tree still picks up a new query pack every week.
   # `workflow_dispatch` exists so the file can be exercised after an edit.
   pull_request:
-    branches: [main, master]
+    branches: [main, master, "0.*"]
     # The same documentation-only set the code workflow ignores: a note edit
     # cannot change what the scan analyses.
     paths-ignore:
@@ -31,7 +31,7 @@ concurrency:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # A stuck extractor must fail in minutes rather than at the six-hour cap.
     timeout-minutes: 20
     # A pull request from a fork cannot upload SARIF - its token is read-only
@@ -64,6 +64,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3

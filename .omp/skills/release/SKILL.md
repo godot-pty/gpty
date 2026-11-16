@@ -150,7 +150,7 @@ Wait for an explicit OK. The user may re-word the blog entry, replace images, or
 
 ### 8. Commit, open the release PR, and tag
 
-The active integration branch is `0.8.x` for the 0.8 line (use `0.9.x` for 0.9). Do not commit the release prep to `main`.
+The active integration branch is `0.8.x` for the 0.8 line (use `0.9.x` for 0.9). Do not commit the release prep to `main`. `0.8.x` is protected against deletion and non-fast-forward pushes and requires signed commits; dependency PRs target it, so bump the three `target-branch` entries in `.github/dependabot.yml` when the line rolls.
 
 ```bash
 # Run final ci-check
@@ -166,8 +166,8 @@ git commit -s -m "docs: finalize vX.Y.Z release — CHANGELOG date, README links
 ./scripts/bot-push 0.8.x
 ./scripts/bot-pr --base main --title "vX.Y.Z" --body-file /tmp/gpty-release-body.md
 
-# STOP: wait for the release PR's required checks (CodeQL, the 11 CI jobs,
-# secret-scan) to finish green, then approve it as the maintainer. The bot
+# STOP: wait for the release PR's 14 required checks (the CI jobs, docs,
+# commit-lint, CodeQL and secret-scan) to finish green, then approve it. The bot
 # authored the PR, so the maintainer's approval is accepted.
 gh pr review --approve <number>
 
@@ -205,6 +205,8 @@ Five workflows can fire:
 | `release.yml` | Tag `v*` | Build GDExtension per platform, export standalone apps, create GitHub Release |
 | `docs.yml` | Push to `main` | Build Hugo site, deploy to GitHub Pages |
 | `mcp-registry.yml` | Manual dispatch, after the crates are published | Publish `server.json` to the official MCP registry over OIDC; no secret |
+
+The `publish` job waits for the `release` environment's maintainer approval. Review the run's `gpty-release-dist` artifact (three archives plus `SHA256SUMS`) before approving; `mcp-registry.yml` uses the same environment.
 
 - All workflows use `${{ github.ref_name }}` — no hardcoded version numbers
 - Release artifacts are named: `gpty-vX.Y.Z-linux-x86_64.tar.gz`, `gpty-vX.Y.Z-windows-x86_64.zip`, `gpty-vX.Y.Z-macos.zip`

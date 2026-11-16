@@ -12,9 +12,21 @@ if [ -z "$branch" ]; then
     echo "bot-push: no current branch" >&2
     exit 2
 fi
+case "$branch" in
+    main|master)
+        echo "bot-push: refusing to push $branch; open a release pull request instead" >&2
+        exit 2
+        ;;
+esac
 
-token=$(./scripts/bot-token)
-export GPTY_BOT_TOKEN="$token"
+key=${GPTY_BOT_PRIVATE_KEY:-}
+token_file=$(mktemp "${TMPDIR:-/tmp}/gpty-bot-token.XXXXXX")
+chmod 600 "$token_file"
+trap 'rm -f "$token_file"' EXIT
+GPTY_BOT_PRIVATE_KEY="$key" ./scripts/bot-token > "$token_file"
+unset GPTY_BOT_PRIVATE_KEY key
+export GPTY_BOT_TOKEN_FILE="$token_file"
 export GIT_ASKPASS="$PWD/scripts/git-askpass-token"
+export GIT_TERMINAL_PROMPT=0
 
 git push "https://x-access-token@github.com/$repo.git" "HEAD:refs/heads/$branch"

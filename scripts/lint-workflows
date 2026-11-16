@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Lint the GitHub workflows: valid YAML, and an explicit least-privilege
-# `permissions:` block at the top of every workflow.
+# Lint the GitHub workflows: valid YAML, an explicit least-privilege
+# `permissions:` block, SHA-pinned actions, no persisted checkout credentials,
+# no dangerous triggers, a timeout on every job and a concurrency group on
+# every workflow.
 #
 # Why the permission rule: a workflow without one hands every job whatever the
 # repository default grants, which is read-write on repositories created before
@@ -9,29 +11,33 @@
 # green CI run says nothing about it - release.yml shipped that way until
 # 2026-10-24. A job that needs more declares its own block, which replaces the
 # workflow's scope for that job; the top-level read is the floor, not the
-# ceiling (see export-release in release.yml).
+# ceiling (see publish in release.yml).
+#
+# The pinning rule is the repository's supply-chain floor: a tag is mutable,
+# the commit SHA is the pin. `persist-credentials: false` keeps the checkout
+# token out of the build's git config; `timeout-minutes` and `concurrency` keep
+# a stuck or superseded run from holding a runner or racing a publish.
 #
 # ci-check and ci.yml both call this script, so the rule and the command that
 # enforces it cannot drift apart - the same reason scripts/gut-check owns the
-# GUT command.
+# GUT command. GPTY_WORKFLOW_DIR points the linter at a fixture for testing.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 python3 - <<'PY'
+import os
+import re
 import sys
 from pathlib import Path
 
 import yaml
 
-# Every workflow in the directory, not a list: a hard-coded four let a new
-# file ship without the permissions floor this script exists to enforce
-# (`codeql.yml` arrived that way on 2026-10-30 and this gate said nothing).
+WORKFLOW_DIR = Path(os.environ.get("GPTY_WORKFLOW_DIR", ".github/workflows"))
 WORKFLOWS = sorted(
-    set(Path(".github/workflows").glob("*.yml"))
-    | set(Path(".github/workflows").glob("*.yaml"))
+    set(WORKFLOW_DIR.glob("*.yml")) | set(WORKFLOW_DIR.glob("*.yaml"))
 )
 if not WORKFLOWS:
-    print("  ERROR: no workflows found under .github/workflows", file=sys.stderr)
+    print(f"  ERROR: no workflows found under {WORKFLOW_DIR}", file=sys.stderr)
     sys.exit(1)
 errors = []
 for path in WORKFLOWS:
@@ -44,15 +50,97 @@ for path in WORKFLOWS:
     if not isinstance(doc, dict):
         errors.append(f"{name}: not a YAML mapping")
         continue
+
+    file_errors = []
+
+    def bad(where, message):
+        file_errors.append(f"{name}{where}: {message}")
+
+    # Top-level least privilege.
     perms = doc.get("permissions")
     if perms is None:
-        errors.append(f"{name}: no top-level permissions block")
-        continue
-    # A mapping of scopes, or the shorthand levels `read-all` / `write-all`.
-    if not isinstance(perms, (dict, str)):
-        errors.append(f"{name}: permissions must be a mapping or a level name")
-        continue
-    print(f"  OK: {name} (permissions: {perms})")
+        bad("", "no top-level permissions block")
+    elif not isinstance(perms, (dict, str)):
+        bad("", "permissions must be a mapping or a level name")
+
+    # One concurrency group per workflow.
+    concurrency = doc.get("concurrency")
+    if not isinstance(concurrency, dict) or not concurrency.get("group"):
+        bad("", "no top-level concurrency block with a group")
+
+    # Dangerous triggers: a write-token workflow must not run a PR's tree.
+    triggers = doc.get("on", doc.get(True))
+    if isinstance(triggers, str):
+        trigger_names = {triggers}
+    elif isinstance(triggers, list):
+        trigger_names = set(triggers)
+    elif isinstance(triggers, dict):
+        trigger_names = set(triggers)
+    else:
+        trigger_names = set()
+    for dangerous in ("pull_request_target", "workflow_run"):
+        if dangerous in trigger_names:
+            bad("", f"dangerous trigger: {dangerous}")
+
+    jobs = doc.get("jobs")
+    if not isinstance(jobs, dict) or not jobs:
+        bad("", "no jobs mapping")
+    else:
+        for job_name, job in jobs.items():
+            where = f": {job_name}"
+            if not isinstance(job, dict):
+                bad(where, "job is not a mapping")
+                continue
+            timeout = job.get("timeout-minutes")
+            if type(timeout) is not int or timeout <= 0:
+                bad(where, "job has no positive integer timeout-minutes")
+
+            job_uses = job.get("uses")
+            if job_uses is not None:
+                steps = []
+                check_uses = (where, job_uses)
+            else:
+                steps = job.get("steps")
+                check_uses = None
+                if not isinstance(steps, list) or not steps:
+                    bad(where, "job has no steps")
+                    steps = []
+            if check_uses is not None:
+                uses = check_uses[1]
+                if not (isinstance(uses, str) and (
+                    uses.startswith("./")
+                    or re.search(r"@[0-9a-f]{40}$", uses)
+                    or re.search(r"@sha256:[0-9a-f]{64}$", uses)
+                )):
+                    bad(where, f"unpinned action {uses!r}")
+
+            for index, step in enumerate(steps):
+                step_where = f"{where}: step {index + 1}"
+                if not isinstance(step, dict):
+                    bad(step_where, "step is not a mapping")
+                    continue
+                uses = step.get("uses")
+                if uses is None:
+                    continue
+                if not isinstance(uses, str) or not uses:
+                    bad(step_where, "uses must be a non-empty string")
+                    continue
+                if uses.startswith("./"):
+                    pass
+                elif uses.startswith("docker://"):
+                    if not re.search(r"@sha256:[0-9a-f]{64}$", uses):
+                        bad(step_where, f"unpinned Docker action {uses!r}")
+                elif not re.search(r"@[0-9a-f]{40}$", uses):
+                    bad(step_where, f"unpinned action {uses!r}")
+                if uses.startswith("actions/checkout@"):
+                    with_ = step.get("with")
+                    if not isinstance(with_, dict) or with_.get("persist-credentials") not in (False, "false"):
+                        bad(step_where, "actions/checkout must set with.persist-credentials: false")
+
+    if file_errors:
+        errors.extend(file_errors)
+    else:
+        print(f"  OK: {name}")
 
 for err in errors:
     print(f"  ERROR: {err}", file=sys.stderr)

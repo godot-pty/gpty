@@ -39,6 +39,11 @@ if [ ! -f "$key" ]; then
     printf 'GPTY_BOT_PRIVATE_KEY does not name a file: %s\n' "$key" >&2
     exit 2
 fi
+mode=$(stat -c %a "$key" 2>/dev/null || stat -f %Lp "$key" 2>/dev/null || true)
+case "$mode" in
+    400|600|"") ;;
+    *) printf 'warning: %s is mode %s; chmod 600 it\n' "$key" "$mode" >&2 ;;
+esac
 
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 header=$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | b64url)
@@ -56,8 +61,8 @@ json() {
     fi
 }
 
-app=$(curl -fsS -H "Authorization: Bearer $jwt" -H "Accept: application/vnd.github+json" "$api/app" 2>/dev/null) || {
-    printf 'gpty-bot authentication failed: the app id or private key is wrong.\n' >&2
+app=$(curl -fsS -H "Authorization: Bearer $jwt" -H "Accept: application/vnd.github+json" "$api/app") || {
+    printf 'gpty-bot authentication failed: the app id or private key is wrong (see curl above).\n' >&2
     exit 1
 }
 

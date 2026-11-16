@@ -24,7 +24,7 @@ on:
       - "scripts/check-capabilities"
       - "scripts/build-wiki"
   pull_request:
-    branches: [main, master]
+    branches: [main, master, "0.*"]
     # Kept as a literal copy rather than a YAML anchor: the anchor would be
     # valid YAML, but this file is the thing that decides whether CI runs at
     # all, and an alias the server's parser rejected would fail closed with no
@@ -48,29 +48,91 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   # ── Workflow linting (YAML syntax) ────────────────────────────────────
   lint-workflows:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Lint workflows
         run: ./scripts/lint-workflows
 
-  # ── Rust tests (core + gdext + cli) ──────────────────────────────────
-  rust-tests:
-    runs-on: ubuntu-latest
+  # ── Documentation gates (links, roadmap rows, knowledge bundle) ──────
+  docs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check docs
+        run: |
+          python3 scripts/docs-check
+          ./scripts/check-capabilities
+          python3 scripts/build-wiki --check
+
+  # ── Commit policy (DCO + Conventional Commits) ───────────────────────
+  commit-lint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check every non-bot commit
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$BASE"
+          rc=0
+          while IFS= read -r sha; do
+            author="$(git log -1 --format=%an "$sha")"
+            case "$author" in
+              *"[bot]") continue ;;
+            esac
+            msg="$(mktemp)"
+            git log -1 --format=%B "$sha" > "$msg"
+            if ! ./githooks/commit-msg "$msg"; then
+              echo "::error::commit $sha failed the DCO/Conventional Commits check"
+              rc=1
+            fi
+            rm -f "$msg"
+          done < <(git rev-list --no-merges --reverse "origin/$BASE..HEAD")
+          exit "$rc"
+
+  # ── Rust tests (core + gdext + cli) ──────────────────────────────────
+  rust-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.96.0"
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -100,17 +162,20 @@ jobs:
         # every job that compiles or loads the extension needs the prefix.
         run: ./scripts/media-deps
 
+      - name: Verify Cargo.lock is in sync
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
       - name: Run clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --locked -- -D warnings
 
       - name: Run Rust tests
-        run: cargo test --workspace -- --test-threads=1
+        run: cargo test --workspace --locked -- --test-threads=1
 
       # Serial first (deterministic baseline), then default parallelism:
       # the second pass is what catches tests that only pass because nothing
       # else runs concurrently (shared statics, fixed paths).
       - name: Run Rust tests (parallel)
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       # The peer-credential code is `cfg(target_os)`-selected, so the BSD arm is
       # dead code on this runner: this is the only place it gets compiled.
@@ -119,14 +184,17 @@ jobs:
       - name: Cross-check the BSD peer-credential arm
         run: |
           rustup target add x86_64-unknown-freebsd
-          cargo check -p gpty-ipc --target x86_64-unknown-freebsd
+          cargo check --locked -p gpty-ipc --target x86_64-unknown-freebsd
 
   # ── OMP extension tests (Node, no omp install) ────────────────────────
   omp-events-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Run @gpty/omp-events tests
         run: node --test
@@ -136,7 +204,7 @@ jobs:
   # The release workflow builds gpty-gdext on windows-latest; without this
   # job, Windows-only compile errors only surface at tag time.
   rust-windows:
-    runs-on: windows-latest
+    runs-on: windows-2025
     # Same cap as windows-smoke: it runs the same `Build media dependencies`,
     # so a cold vcpkg rebuild has to fit here too, and a stuck rustc must not
     # hold the runner.
@@ -144,9 +212,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.96.0"
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -198,7 +270,7 @@ jobs:
         # `--tests` too: a helper or import that is dead only on Windows
         # (`#[cfg(unix)]` tests, a Unix-only fixture) compiles in no other
         # job, and `cargo check` alone never builds a test profile.
-        run: cargo check --workspace --tests
+        run: cargo check --workspace --tests --locked
 
       # The named-pipe arm is Windows-only, so its unit test never runs on the
       # Unix jobs; without this step the first-instance claim logic is only
@@ -206,7 +278,7 @@ jobs:
       - name: Run gpty-ipc tests
         env:
           RUSTFLAGS: -Dwarnings
-        run: cargo test -p gpty-ipc
+        run: cargo test --locked -p gpty-ipc
 
       # One binary, no Godot: asserts the process DACL directly (memory denied,
       # peer-check and terminate masks kept) so a DACL regression fails in
@@ -214,17 +286,19 @@ jobs:
       - name: Process hardening (Windows DACL)
         env:
           RUSTFLAGS: -Dwarnings
-        run: cargo test -p gpty-core --test windows_hardening -- --nocapture
+        run: cargo test --locked -p gpty-core --test windows_hardening -- --nocapture
 
   # ── GDScript tests (GUT headless) ────────────────────────────────────
   gut-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The same guard as the Windows jobs: this one boots Godot and the GUI, so
     # a hang must fail in minutes rather than at GitHub's six-hour cap.
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Godot headless
         run: |
@@ -239,6 +313,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.96.0"
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -267,7 +343,7 @@ jobs:
         run: ./scripts/media-deps
 
       - name: Build GDExtension
-        run: cargo build -p gpty-gdext
+        run: cargo build --locked -p gpty-gdext
 
       - name: Install GDExtension library
         run: cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
@@ -292,7 +368,7 @@ jobs:
   # windows-latest and drives the CLI against it: the same smoke harness as
   # Linux, whose only platform difference is the transport.
   windows-smoke:
-    runs-on: windows-latest
+    runs-on: windows-2025
     # A hung Godot or cargo would otherwise hold the runner to GitHub's
     # six-hour cap (gut-check's notes record one such hang on Windows). Green
     # is ~4.5 minutes here, but a cold vcpkg FFmpeg rebuild inside `Build
@@ -302,9 +378,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.96.0"
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -357,7 +437,7 @@ jobs:
         # and the only visible detail was build-script metadata, which named
         # nothing: a cargo error belongs in a step of its own. The smoke's own
         # build then finds the artifacts current and costs seconds.
-        run: cargo build -p gpty-gdext -p gpty
+        run: cargo build --locked -p gpty-gdext -p gpty
 
       - name: Install Godot (Windows, headless)
         shell: pwsh
@@ -406,14 +486,18 @@ jobs:
 
   # ── Rust formatting ───────────────────────────────────────────────────
   rust-fmt:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
+          toolchain: "1.96.0"
           components: rustfmt
 
       - name: Check formatting
@@ -421,13 +505,18 @@ jobs:
 
   # ── Dependency audit ──────────────────────────────────────────────────
   cargo-audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.96.0"
 
       # Audit the committed Cargo.lock. Never regenerate here:
       # generate-lockfile re-resolves to latest-compatible versions and
@@ -482,10 +571,13 @@ jobs:
   # so the policy cannot drift under a green build, and `[graph] all-features`
   # keeps the checked graph identical to the local gate's.
   cargo-deny:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check the dependency policy
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
@@ -497,15 +589,18 @@ jobs:
   # from rotting — a target that stops compiling (an API moves, a helper is
   # made private again) fails on the change that did it instead of weeks later.
   fuzz-build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-11-01
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
