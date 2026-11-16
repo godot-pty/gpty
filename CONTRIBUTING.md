@@ -242,6 +242,12 @@ See the agent guide for the complete conventions and patterns: [Rust](docs/conte
 - `./scripts/ci-check` runs `cargo audit --deny warnings` for advisories over both committed lockfiles, the workspace's `Cargo.lock` and the fuzz workspace's `fuzz/Cargo.lock`, each behind a `cargo metadata --locked` drift check because GitHub's dependency graph reads both - and `cargo deny check` for licences, sources, yanked crates and duplicate versions; CI runs the same gates.
 - A release publishes the three archives, `SHA256SUMS` and build-provenance attestations. The release runbook is `.omp/skills/release/SKILL.md`; the workflow is `.github/workflows/release.yml`.
 
+## Branches
+
+`main` is the release branch. Every commit on it arrives through a release pull request from the active integration branch: `0.8.x` for the 0.8 line, `0.9.x` for 0.9. The maintainer approves the release PR and tags the release from `main`.
+
+Day-to-day changes land on the integration branch. Branch from it, open pull requests against it, and do not open feature pull requests against `main`. The `gpty-bot` GitHub App pushes the integration branch and opens the release PR; the bot never approves or merges.
+
 ## Pull Request Process
 
 1. Fork the repository.
@@ -252,7 +258,7 @@ See the agent guide for the complete conventions and patterns: [Rust](docs/conte
 6. Add or update test cases as applicable.
 7. Sign off every commit with `git commit -s` (DCO); the `commit-msg` hook refuses a commit without the trailer.
 8. See [AGENTS.md](AGENTS.md) for commit information.
-9. Submit a pull request.
+9. Submit a pull request against the active integration branch (`0.8.x` for the 0.8 line), not `main`.
 
 ## Governance
 

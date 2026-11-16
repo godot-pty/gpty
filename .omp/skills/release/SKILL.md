@@ -5,12 +5,13 @@ description: "Release workflow for gpty: commit-range analysis, CHANGELOG, READM
 
 # gpty Release Process
 
-Trunk-based releases on `main`. Releases are triggered by pushing a `v*` tag.
+Release-train releases: day-to-day work lands on the active integration branch (`0.8.x` for the 0.8 line, `0.9.x` for 0.9). A release is a pull request from that branch to `main`, the maintainer's approval, a merge, and a `v*` tag on `main`.
 
 ## Pre-release Checklist
 
 - [ ] `./scripts/ci-check` passes (fmt, lint, clippy, tests, GUT, audit, crate versions, Windows cross-check)
-- [ ] CI is green on the pushed `main` for the commit that will be tagged — the `ci.yml` run, **including the Windows legs** (`windows-smoke`, the GUT suite on Windows). Those exist only in CI: `ci-check`'s xwin step compiles the Windows arms without running a Windows pane, and the tag fires `release.yml` off this commit
+- [ ] The `gpty-bot` app is installed on `godot-pty/gpty` and `./scripts/bot-token --check` passes with `GPTY_BOT_PRIVATE_KEY` set; the branch push and PR creation use the app token
+- [ ] CI is green on the release PR's head — the `ci.yml` run **including the Windows legs** (`windows-smoke`, the GUT suite on Windows). Those exist only in CI: `ci-check`'s xwin step compiles the Windows arms without running a Windows pane, and the tag fires `release.yml` off the merge commit on `main`
 - [ ] All planned ROADMAP items for the version are `[x]` done
 - [ ] Doc consistency — grep AGENTS.md/README for names and strings changed this version (e.g. "OMP Workspace", the MCP tool count); stale references are updated in the same release commit
 - [ ] The README's cost table is this build's — `./scripts/build` then `./scripts/measure-cost --check` in a graphical session (it re-measures the five published rows against `README.md`; the release's version bump already made `ci-check`'s `measure-cost --stamp` step fail until the table moves)
@@ -143,46 +144,66 @@ All prep work ends HERE. Do NOT commit or tag yet. Present to the user:
 - The CHANGELOG summary for the version
 - The blog draft path (and its text)
 - The captured screenshots
+- `/tmp/gpty-release-body.md`, the release PR body: one paragraph on the release's user-facing story plus the changelog link. `scripts/bot-pr --body-file` uses it.
 
 Wait for an explicit OK. The user may re-word the blog entry, replace images, or request additional feature screenshots. Iterate on their feedback, then proceed only on their go-ahead.
 
-### 8. Commit and Tag
+### 8. Commit, open the release PR, and tag
+
+The active integration branch is `0.8.x` for the 0.8 line (use `0.9.x` for 0.9). Do not commit the release prep to `main`.
 
 ```bash
 # Run final ci-check
 ./scripts/ci-check
 
+git switch 0.8.x
+git pull --ff-only
+
 git add CHANGELOG.md README.md ROADMAP.md docs/content/blog/vX.Y.Z/ docs/static/images/vX.Y.Z_*.png docs/content/_index.md crates/*/Cargo.toml Cargo.lock
-git commit -m "docs: finalize vX.Y.Z release — CHANGELOG date, README links, ROADMAP, crate versions, blog entry"
+git commit -s -m "docs: finalize vX.Y.Z release — CHANGELOG date, README links, ROADMAP, crate versions, blog entry"
 
-# Push commits
-git push origin main
+# Push the integration branch and open the release PR as gpty-bot.
+./scripts/bot-push 0.8.x
+./scripts/bot-pr --base main --title "vX.Y.Z" --body-file /tmp/gpty-release-body.md
 
-# STOP: wait for the ci.yml run on that push to finish green — Windows legs
-# included — before tagging. release.yml builds the artifacts from the tagged
-# commit, so tagging first means shipping whatever that run would have caught.
+# STOP: wait for the release PR's required checks (CodeQL, the 11 CI jobs,
+# secret-scan) to finish green, then approve it as the maintainer. The bot
+# authored the PR, so the maintainer's approval is accepted.
+gh pr review --approve <number>
+
+# Merge with a merge commit (not squash), so 0.8.x stays ancestral to main.
+gh pr merge --merge <number>
+
+git switch main
+git pull --ff-only
 
 # Tag and push (triggers release workflow). The tag is signed: the repository's
 # `tag` ruleset requires a signature for every non-bypass actor, and the tag is
 # the release's identity. Configure a key first (`user.signingkey`, or
 # `gpg.format ssh` plus the public-key path), and `git tag -v` must verify
-# before the push - being the admin bypasses the rule, not the reason for it.
+# before the push.
 git tag -s vX.Y.Z -m "vX.Y.Z"
 git tag -v vX.Y.Z
 git push origin vX.Y.Z
+
+# Bring the integration branch up to the release commit.
+git switch 0.8.x
+git merge --ff-only main
+git push origin 0.8.x
 ```
 
 The tag push also runs the `pre-push` hook (the full `ci-check`), so expect it to take a couple of minutes and to survive being backgrounded — the push lands after the hook finishes. Verify with `git ls-remote --tags origin vX.Y.Z` rather than assuming.
 
 ### 9. Verify CI
 
-Four workflows can fire:
+Five workflows can fire:
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | Push to `main` | Rust tests, clippy, fmt, GUT tests, Windows compile check |
+| `ci.yml` | Push to `main` or `0.*`, pull request | Rust tests, clippy, fmt, GUT tests, Windows compile check |
+| `secret-scan.yml` | Push to `main` or `0.*`, pull request, weekly | Full-history gitleaks scan |
 | `release.yml` | Tag `v*` | Build GDExtension per platform, export standalone apps, create GitHub Release |
-| `docs.yml` | Docs changes | Build Hugo site, deploy to GitHub Pages |
+| `docs.yml` | Push to `main` | Build Hugo site, deploy to GitHub Pages |
 | `mcp-registry.yml` | Manual dispatch, after the crates are published | Publish `server.json` to the official MCP registry over OIDC; no secret |
 
 - All workflows use `${{ github.ref_name }}` — no hardcoded version numbers
@@ -224,4 +245,4 @@ The release is not finished when the tag is pushed:
 - **Docs workflow trigger paths.** `.github/workflows/docs.yml` itself is NOT in its own `paths` filter — workflow-only changes don't fire the docs build. Trigger it with a docs-touching change or `workflow_dispatch`.
 - **Docs versions dropdown.** `docs/setup.sh` fetches release tags from the GitHub API (cached 1 hour). New releases appear automatically after cache expiry — no manual edit.
 - **CHANGELOG link format.** The version link at the bottom uses anchor format matching the heading: `#030--2026-08-09` for `## [0.3.0] — 2026-08-09`. Punctuation is stripped. Version-link definitions sit in a block right after their version's section (`[0.5.6]: …/compare/v0.5.5...v0.5.6`).
-- **No `dev/v*` branches.** Trunk-based development on `main` only. Feature branches are short-lived.
+- **No `dev/v*` branches.** The active integration branch (`0.8.x`, `0.9.x`, …) is long-lived; feature branches off it are short-lived and are PR'd back to it, not to `main`.

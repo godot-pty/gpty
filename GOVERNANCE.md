@@ -12,16 +12,16 @@ The maintainer roster and access rules are in [MAINTAINERS.md](MAINTAINERS.md).
 ## Decisions
 
 - The maintainer makes the final decision and records product work in [ROADMAP.md](ROADMAP.md).
-- Changes land through a pull request where practical. The repository's branch protection asks for a code-owner review and signed commits; because a solo maintainer cannot approve their own pull request, the maintainer's direct push is the current trunk-based path and is recorded here rather than hidden.
+- `main` is the release branch. Day-to-day work lands on the active integration branch (`0.8.x` for the 0.8 line, `0.9.x` for 0.9); every commit on `main` arrives through a release pull request from that branch, the maintainer approves it, and the release is tagged from `main`. The `gpty-bot` GitHub App opens the release pull request and may push the integration branch; it cannot bypass `main` protection.
 - Security reports and their handling follow [SECURITY.md](SECURITY.md). A confirmed vulnerability is fixed on `main`, shipped in the next release, and disclosed in a private advisory published with the fix.
 - A disagreement about a change is resolved in the issue or pull request; if it cannot be, the maintainer decides and gives the reason in the thread.
 
 ## Access
 
 - The organization requires two-factor authentication.
-- The maintainer holds organization-owner and repository-admin access; there are no other members with write access today.
-- Access is granted by the organization owner after a period of sustained contribution and review, recorded in [MAINTAINERS.md](MAINTAINERS.md), and revoked when the person steps down or is inactive for 90 days.
-- The `v*` tag ruleset and the `main` branch protection are the release and review gates. The repository settings are the source of truth when this page and the settings disagree.
+- The maintainer holds organization-owner and repository-admin access. The `gpty-bot` GitHub App is installed on `godot-pty/gpty` with contents write, pull-request write and metadata read; it has no administration permission and no bypass on `main`.
+- Access is granted by the organization owner after a period of sustained contribution and review, recorded in [MAINTAINERS.md](MAINTAINERS.md), and revoked when the person steps down or is inactive for 90 days. The app's private key is stored outside the repository and rotated from the app's settings; the app is not a collaborator and has no organization-owner access.
+- The `v*` tag ruleset, the `main` branch ruleset and classic branch protection are the release and review gates. The repository settings are the source of truth when this page and the settings disagree.
 
 ## Succession
 
