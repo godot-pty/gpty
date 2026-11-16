@@ -52,6 +52,38 @@ func fit_card(card: Control, design: Vector2, edge := CARD_EDGE) -> void:
 		return
 	card.custom_minimum_size = Vector2(minf(design.x, room.x), minf(design.y, room.y))
 
+## Clamp a card to its content and to this overlay's rect.
+##
+## `design` is the largest the card may be and `content` is what it needs on
+## each axis; the result is the smaller of the two on each axis, and never
+## larger than this overlay's own rect less `edge` on each side. For a card
+## inside a `CenterContainer` the engine then centres it.
+func fit_card_content(card: Control, design: Vector2, content: Vector2, edge := CARD_EDGE) -> void:
+	var room := size - Vector2(edge, edge) * 2.0
+	var wanted := Vector2(minf(design.x, content.x), minf(design.y, content.y))
+	if room.x <= 0.0 or room.y <= 0.0:
+		card.custom_minimum_size = wanted
+		return
+	card.custom_minimum_size = Vector2(minf(wanted.x, room.x), minf(wanted.y, room.y))
+
+## Place a card whose height follows its content, keeping the top edge a
+## design-sized card would have.
+##
+## A shrinking list must not move the control the pointer or the caret is in:
+## the palette's query field and a panel's own header stay where the user left
+## them while the card grows or shrinks downward. Used with a plain `Control`
+## host, not a `CenterContainer` (which would re-centre on every change).
+func place_card_top(card: Control, design: Vector2, content: Vector2, edge := CARD_EDGE) -> void:
+	var room := size - Vector2(edge, edge) * 2.0
+	if room.x <= 0.0 or room.y <= 0.0:
+		return
+	var fitted := Vector2(minf(design.x, room.x), minf(design.y, room.y))
+	var height := minf(content.y, fitted.y)
+	var top := maxf(edge, (size.y - fitted.y) * 0.5)
+	top = minf(top, size.y - height - edge)
+	card.size = Vector2(fitted.x, height)
+	card.position = Vector2((size.x - fitted.x) * 0.5, top)
+
 ## Show this overlay and take the keyboard. The one entry point: an overlay is
 ## never shown by a bare `visible = true`, because that path would leave the
 ## keyboard on the pane behind it.

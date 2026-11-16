@@ -9,7 +9,8 @@ weight: 30
   the `FS_*` type scale, the `SPACE_*` steps, `RADIUS`, `contrast_ratio()`, and `MIN_LAYOUT` - the
   smallest layout the chrome is asserted at, which is what the applied UI scale is capped against;
   no surface sizes itself to it: a panel card carries its own design size and clamps to the window
-  with `OverlayPanel.fit_card(card, design)`) and
+  with `OverlayPanel.fit_card(card, design)`; a card shorter than its design uses
+  `fit_card_content` (centred) or `place_card_top` (the palette, whose top edge must not move)) and
   `ui/ui_theme.gd`
   (`build()`, applied on the `Workspace` root and rebuilt whenever the palette switches; every pane,
   overlay, popup and dialog inherits it). Read a colour **at draw time** — never cache a token in a

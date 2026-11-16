@@ -52,11 +52,30 @@ func _open_settings(ws: Control) -> SettingsPanel:
 	await get_tree().process_frame
 	return panel
 
+## Make a tall tab current: the card is content-sized now, so a clamp test
+## needs content that actually reaches the clamp.
+func _select_settings_tab(panel: SettingsPanel, title: String) -> void:
+	var sc := panel.find_child(title, true, false) as ScrollContainer
+	if sc == null:
+		return
+	panel._tabs.current_tab = panel._tabs.get_tab_idx_from_control(sc)
+	await get_tree().process_frame
+
 # ── The Settings card ──────────────────────────────────────────────────
+
+func test_a_short_settings_tab_sizes_the_card_to_its_content():
+	var ws = await _make_workspace(Vector2(1200, 800))
+	var panel := await _open_settings(ws)
+	var card := panel._card
+	assert_eq(card.size.x, SettingsPanel.CARD_SIZE.x, "the design width is fixed")
+	assert_lt(card.size.y, SettingsPanel.CARD_SIZE.y,
+		"a short tab must not paint a dead band below its last row")
+	_assert_inside(card.get_global_rect(), ws.get_global_rect(), "the Settings card")
 
 func test_the_settings_card_fits_an_800x500_window():
 	var ws = await _make_workspace(Vector2(800, 500))
 	var panel := await _open_settings(ws)
+	await _select_settings_tab(panel, "Terminal")
 	var card := panel._card
 	assert_eq(card.size, Vector2(540, 484),
 		"the design width, and the window's height less the card edge on each side")
@@ -65,6 +84,7 @@ func test_the_settings_card_fits_an_800x500_window():
 func test_the_settings_card_fits_a_560x340_window():
 	var ws = await _make_workspace(Vector2(560, 340))
 	var panel := await _open_settings(ws)
+	await _select_settings_tab(panel, "Terminal")
 	var card := panel._card
 	assert_eq(card.size, Vector2(540, 324),
 		"the design width still fits (560 less the card edge on each side is 544); the height clamps")
@@ -73,6 +93,7 @@ func test_the_settings_card_fits_a_560x340_window():
 func test_the_card_reclamps_while_it_is_open():
 	var ws = await _make_workspace(Vector2(1200, 800))
 	var panel := await _open_settings(ws)
+	await _select_settings_tab(panel, "Terminal")
 	assert_eq(panel._card.size, SettingsPanel.CARD_SIZE, "the design size fits")
 	ws.size = Vector2(560, 340)
 	await get_tree().process_frame

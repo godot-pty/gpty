@@ -7,11 +7,14 @@ signal request_graph_editor
 var _debounce_timer: Timer = null
 var _workspace: Control
 ## The card's design size: the width all seven tabs fit the bar at and the
-## height the tabs were laid out for. A smaller window clamps it (`fit_card`).
+## height no tab may exceed. A short tab sizes the card to its content; a
+## smaller window clamps it (`fit_card_content`).
 const CARD_SIZE := Vector2(540, 560)
 ## The card itself, so a resize and every dialog can read its real width - below
 ## a 556 px window the clamp makes it narrower than the design size.
 var _card: Panel = null
+## The card's own column, so its natural height can size the card.
+var _card_body: VBoxContainer = null
 ## The disk-usage row in the Terminal tab; refreshed whenever the panel opens,
 ## because the panel outlives a single visit and scrollback keeps growing.
 var _history_size_label: Label = null
@@ -45,7 +48,39 @@ func _ready():
 ## The window can have changed size while the panel was hidden, so the clamp is
 ## recomputed on the way in as well as on a resize while it is open.
 func _before_open() -> void:
-	fit_card(_card, CARD_SIZE)
+	_fit_settings_card()
+
+## Size the card to the active tab's content, up to the design height and the
+## window. A short tab no longer paints a dead band below its last row; a tall
+## one keeps the design height and scrolls inside its own tab.
+##
+## The tab's content lives in a `ScrollContainer`, whose minimum size is zero
+## by default. Setting that scroll's minimum to the content's own height (less
+## whatever the card cannot give it) is what lets the height propagate to the
+## card; it is lowered again on a smaller window so the clamp still wins.
+func _fit_settings_card() -> void:
+	if _card == null or _card_body == null or _tabs == null:
+		return
+	var sc := _tabs.get_current_tab_control() as ScrollContainer
+	var current_min := sc.custom_minimum_size.y if sc != null else 0.0
+	# Everything the card needs besides the tab's content: margins, header,
+	# separator, tab bar and the column's separations.
+	var base := _card_body.get_combined_minimum_size().y - current_min
+	var margin := float(UiTokens.SPACE_XXL)
+	var room := size.y - float(CARD_EDGE) * 2.0
+	var max_total := CARD_SIZE.y
+	if room > 0.0:
+		max_total = minf(CARD_SIZE.y, room)
+	var max_list := maxf(0.0, max_total - margin * 2.0 - base)
+	if sc != null:
+		# `tab_changed` also fires while the tab is being built: the
+		# ScrollContainer is added to the TabContainer before its own content,
+		# so a zero-child tab is a normal intermediate state here.
+		var inner := sc.get_child(0) as Control if sc.get_child_count() > 0 else null
+		var want := inner.get_combined_minimum_size().y if inner != null else 0.0
+		sc.custom_minimum_size.y = minf(want, max_list)
+	var content_h := margin * 2.0 + base + (sc.custom_minimum_size.y if sc != null else 0.0)
+	fit_card_content(_card, CARD_SIZE, Vector2(CARD_SIZE.x, content_h))
 
 func _notification(what: int):
 	if not visible:
@@ -65,8 +100,7 @@ func _notification(what: int):
 		# show may have moved while the panel is open - and the card that fitted
 		# the old window may not fit this one.
 		_refresh_ui_scale_hint()
-		if _card != null:
-			fit_card(_card, CARD_SIZE)
+		_fit_settings_card()
 
 func _build_ui():
 	var cc = CenterContainer.new()
@@ -93,6 +127,7 @@ func _build_ui():
 	var v = VBoxContainer.new(); v.name = "VBox"
 	v.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	mc.add_child(v)
+	_card_body = v
 
 	_add_settings_header(v)
 	v.add_child(HSeparator.new())
@@ -101,6 +136,7 @@ func _build_ui():
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(tabs)
 	_tabs = tabs
+	tabs.tab_changed.connect(func(_tab: int): _fit_settings_card())
 
 	# Tab 1: System
 	var t_sys = _create_tab(tabs, "System")

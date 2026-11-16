@@ -283,6 +283,29 @@ func test_the_card_is_sized_and_centred():
 	assert_true(card.global_position.y - ws.global_position.y + card.size.y <= 340.0,
 		"the palette never draws outside its host")
 
+## Filtering to nothing shrinks the card from the bottom. The field stays
+## where it was (the card's top edge is pinned to the design position), so the
+## surface does not jump under the caret and no empty band is painted.
+func test_filtering_shrinks_the_card_and_keeps_the_field_still():
+	var ws = await _make_workspace()
+	ws.size = Vector2(1200, 800)
+	ws._toggle_palette()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var palette: CommandPalette = ws._palette
+	var open_height: float = palette._card.size.y
+	var field_y: float = palette._field.global_position.y
+	assert_eq(open_height, CommandPalette.PALETTE_HEIGHT,
+		"the unfiltered list fills the design height")
+	palette._refresh("zzzz-no-such-command")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_lt(palette._card.size.y, open_height, "an empty result set shrinks the card")
+	assert_almost_eq(palette._field.global_position.y, field_y, 0.01,
+		"the query field must not move while the list changes")
+	assert_true(palette._card.get_global_rect().end.y <= ws.get_global_rect().end.y,
+		"the shorter card still stays inside the workspace")
+
 # ── Saved commands ─────────────────────────────────────────────────────
 
 func _seed_saved() -> void:

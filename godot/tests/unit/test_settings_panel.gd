@@ -241,7 +241,7 @@ func test_the_terminal_tab_shows_a_scrollbar_column():
 	assert_eq(bar.size.x, UiTokens.SCROLLBAR_THICKNESS, "the bar reserves the column it draws in")
 	var card := (_panel.get_child(0) as Control).get_child(0) as Control
 	assert_eq(card.size, SettingsPanel.CARD_SIZE,
-		"the card keeps its design size in a window that fits it")
+		"a tall tab keeps the design height in a window that fits it")
 
 # ── Color picker OK/Cancel ─────────────────────────────────────────────
 
@@ -318,6 +318,15 @@ func _find_accept_dialog(node: Node) -> AcceptDialog:
 	return null
 
 func test_concept_dialog_is_90_percent_of_card_width():
+	# The card is content-sized now, and this panel's own rect is the 64x64
+	# headless viewport until it is given a size and refitted. A dialog whose
+	# width is a share of the card needs the real card, not that transient.
+	_panel.size = Vector2(1200, 800)
+	_panel._fit_settings_card()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_eq(_panel._card.size.x, SettingsPanel.CARD_SIZE.x,
+		"the fixture needs a card at its design width")
 	_panel._show_concept_dialog(-1)
 	var dlg := _find_accept_dialog(_panel)
 	assert_not_null(dlg, "concept dialog must exist after opening")

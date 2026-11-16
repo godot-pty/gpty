@@ -10,9 +10,12 @@ class_name CommandPalette
 ## terminal so a typed letter becomes part of the query instead of reaching the
 ## shell.
 ##
-## Layout: this overlay is a full-rect mouse-transparent host holding a centred
-## fixed-size card. The workspace used to anchor the whole panel `PRESET_CENTER`
-## while its size was still zero, which put the top-left corner on the centre.
+## Layout: this overlay is a full-rect mouse-transparent host holding a card
+## sized to the filtered list, up to the design height and the window. Its top
+## edge stays where a design-size card had it, so the field never moves while
+## the list shrinks. The workspace used to anchor the whole panel
+## `PRESET_CENTER` while its size was still zero, which put the top-left corner
+## on the centre.
 ##
 ## Keyboard: one surface. The field owns the keyboard and the arrow keys move a
 ## `UiTheme.SELECTED_ROW` cursor that stays visible underneath it; Enter runs
@@ -43,6 +46,7 @@ var _scroll: ScrollContainer
 var _results: VBoxContainer
 var _empty: Label
 var _card: Panel
+var _body: VBoxContainer
 var _rows: Array[Button] = []
 var _selected: int = -1
 ## The user's saved commands, handed in by the workspace before `open()`: this
@@ -58,14 +62,18 @@ func _init() -> void:
 	# around it (the same split `SettingsPanel` makes).
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-	var cc := CenterContainer.new()
-	add_child(cc)
-	cc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# A plain host, not a centre container: the card's height follows the
+	# filtered list, and its top edge must stay put while it does
+	# (`OverlayPanel.place_card_top`) so the field under the caret never moves.
+	var host := Control.new()
+	host.name = "Host"
+	host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(host)
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	_card = Panel.new()
 	_card.name = "Card"
-	_card.custom_minimum_size = Vector2(PALETTE_WIDTH, PALETTE_HEIGHT)
-	cc.add_child(_card)
+	host.add_child(_card)
 
 	var mc := MarginContainer.new()
 	UiTheme.margins(mc, UiTokens.SPACE_LG)
@@ -76,6 +84,7 @@ func _init() -> void:
 	body.name = "Body"
 	body.add_theme_constant_override("separation", UiTokens.SPACE_SM)
 	mc.add_child(body)
+	_body = body
 
 	_field = LineEdit.new()
 	_field.name = "Query"
@@ -127,20 +136,41 @@ func set_saved_commands(entries: Array, refusal: String) -> void:
 
 ## Opening always starts from an unfiltered list: the field is cleared (a
 ## stale query from the last visit used to hide every entry) and the list is
-## rebuilt before focus moves in. The card is also clamped to the overlay's own
-## rect first, keeping its own floating edge: at the 560x340 layout floor a fixed
+## rebuilt before focus moves in. `_refresh` sizes the card to what it built,
+## clamped to the overlay's own rect: at the 560x340 layout floor a fixed
 ## 480 px card would hang outside the window.
 func _before_open() -> void:
-	fit_card(_card, Vector2(PALETTE_WIDTH, PALETTE_HEIGHT), float(UiTokens.SPACE_XXL))
 	_field.text = ""
 	_refresh("")
 
 ## The window can shrink while the palette is open; the card follows it rather
-## than keeping the clamp it was opened with. Not `_before_open()`, which would
+## than keeping the size it was opened with. Not `_before_open()`, which would
 ## also clear the query under the user's cursor.
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_RESIZED and is_instance_valid(_card):
-		fit_card(_card, Vector2(PALETTE_WIDTH, PALETTE_HEIGHT), float(UiTokens.SPACE_XXL))
+	if what == NOTIFICATION_RESIZED:
+		_fit_card()
+
+## Size the card to the rows currently listed. The list keeps its own height
+## (up to `PALETTE_HEIGHT` less the field, the hint and the margins) and the
+## card's top edge stays where the design-size card had it, so filtering to
+## one row leaves the query field exactly where the user is typing and the
+## remaining surface is not painted as an empty band.
+func _fit_card() -> void:
+	if _card == null or _body == null:
+		return
+	var rows_h := _results.get_combined_minimum_size().y
+	var chrome := _body.get_combined_minimum_size().y - _scroll.custom_minimum_size.y
+	var margin := float(UiTokens.SPACE_LG)
+	var edge := float(UiTokens.SPACE_XXL)
+	var room := size.y - edge * 2.0
+	var max_total := PALETTE_HEIGHT
+	if room > 0.0:
+		max_total = minf(PALETTE_HEIGHT, room)
+	var max_list := maxf(0.0, max_total - margin * 2.0 - chrome)
+	_scroll.custom_minimum_size.y = minf(rows_h, max_list)
+	var content_h := margin * 2.0 + chrome + _scroll.custom_minimum_size.y
+	place_card_top(_card, Vector2(PALETTE_WIDTH, PALETTE_HEIGHT),
+		Vector2(PALETTE_WIDTH, content_h), edge)
 
 func _refresh(query: String) -> void:
 	# Remove before freeing so the list a caller (or a test) reads in this
@@ -161,6 +191,7 @@ func _refresh(query: String) -> void:
 	_selected = _first_enabled()
 	_empty.visible = _rows.is_empty()
 	_apply_selection()
+	_fit_card()
 
 ## A section heading: an inset label between rows, so the cursor, Enter and the
 ## arrow keys keep working on `_rows` alone. Its left inset is the rows' own
