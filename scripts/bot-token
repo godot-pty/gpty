@@ -48,7 +48,13 @@ sig=$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -sign "$key" | 
 jwt="$header.$payload.$sig"
 
 api=https://api.github.com
-json() { jq -r "$1" <<< "$2"; }
+json() {
+    if [ "$#" -ge 2 ]; then
+        jq -r "$1" <<< "$2"
+    else
+        jq -r "$1"
+    fi
+}
 
 app=$(curl -fsS -H "Authorization: Bearer $jwt" -H "Accept: application/vnd.github+json" "$api/app" 2>/dev/null) || {
     printf 'gpty-bot authentication failed: the app id or private key is wrong.\n' >&2
@@ -79,6 +85,16 @@ if [ "$check" -eq 1 ]; then
             missing=1
         fi
     done
+    extra=$(jq -r '.permissions | to_entries[]
+        | select(.key != "contents" and .key != "pull_requests" and .key != "metadata")
+        | "  \(.key): \(.value)"' <<< "$installation")
+    if [ -n "$extra" ]; then
+        printf 'warning: extra permissions granted; reduce them in the app settings:\n%s\n' "$extra" >&2
+    fi
+    selection=$(json '.repository_selection // "selected"' "$installation")
+    if [ "$selection" = "all" ]; then
+        printf 'warning: the installation covers all repositories; restrict it to %s in the app installation settings.\n' "$repo" >&2
+    fi
     exit "$missing"
 fi
 
