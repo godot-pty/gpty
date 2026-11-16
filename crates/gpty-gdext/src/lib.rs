@@ -521,6 +521,11 @@ impl GptyTerminal {
 
     /// Load a color scheme from a comma-separated string of 16 hex colors.
     /// Example: "#002b36,#dc322f,...". Empty string resets to default.
+    ///
+    /// A scheme replaces the whole palette: entries it does not carry (or
+    /// carries malformed) take the system default instead of the colour the
+    /// previous scheme left in that slot. The generation moves only when the
+    /// result differs, so re-applying the current scheme costs no repaint.
     #[func]
     fn set_palette(&mut self, hex_csv: GString) {
         let spawned = match &self.spawned {
@@ -531,29 +536,13 @@ impl GptyTerminal {
             Ok(g) => g,
             Err(_) => return,
         };
-        if hex_csv.is_empty() {
-            grid.palette = gpty_core::color::SYSTEM_COLORS;
-            grid.generation += 1;
-            grid.palette_changed = true;
-            return;
-        }
-        let s = hex_csv.to_string();
-        let mut changed = false;
-        for (i, hex) in s.split(',').enumerate().take(16) {
-            let h = hex.trim();
-            if h.len() == 7
-                && h.starts_with('#')
-                && let (Ok(r), Ok(g), Ok(b)) = (
-                    u8::from_str_radix(&h[1..3], 16),
-                    u8::from_str_radix(&h[3..5], 16),
-                    u8::from_str_radix(&h[5..7], 16),
-                )
-            {
-                grid.palette[i] = [r, g, b];
-                changed = true;
-            }
-        }
-        if changed {
+        let next = if hex_csv.is_empty() {
+            gpty_core::color::SYSTEM_COLORS
+        } else {
+            gpty_core::color::palette_from_csv(&hex_csv.to_string())
+        };
+        if grid.palette != next {
+            grid.palette = next;
             grid.generation += 1;
             grid.palette_changed = true;
         }

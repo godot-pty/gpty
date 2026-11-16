@@ -28,6 +28,30 @@ pub const SYSTEM_COLORS: [[u8; 3]; 16] = [
     [255, 255, 255], // 15 Bright White
 ];
 
+/// Build the 16-colour palette a scheme CSV describes.
+///
+/// A scheme may carry fewer than 16 entries, or a malformed one; those slots
+/// keep [`SYSTEM_COLORS`] rather than whatever the previous scheme left in the
+/// grid. That is why this answers a complete array instead of writing into the
+/// caller's: a scheme is a set, not a patch.
+pub fn palette_from_csv(csv: &str) -> [[u8; 3]; 16] {
+    let mut palette = SYSTEM_COLORS;
+    for (i, hex) in csv.split(',').enumerate().take(16) {
+        let h = hex.trim();
+        if h.len() == 7
+            && h.starts_with('#')
+            && let (Ok(r), Ok(g), Ok(b)) = (
+                u8::from_str_radix(&h[1..3], 16),
+                u8::from_str_radix(&h[3..5], 16),
+                u8::from_str_radix(&h[5..7], 16),
+            )
+        {
+            palette[i] = [r, g, b];
+        }
+    }
+    palette
+}
+
 /// Convert an alacritty/vte `Color` to an `[R, G, B]` triplet.
 ///
 /// Named colors use the standard xterm-256color palette. Indexed colors
@@ -122,6 +146,49 @@ mod tests {
         // Grayscale ramp boundaries
         assert_eq!(indexed_to_rgb(232, &palette), [8, 8, 8]);
         assert_eq!(indexed_to_rgb(255, &palette), [238, 238, 238]);
+    }
+
+    #[test]
+    fn a_short_scheme_keeps_no_colour_from_the_one_before_it() {
+        let first = palette_from_csv("#112233,#445566,#778899");
+        assert_eq!(first[0], [0x11, 0x22, 0x33]);
+        assert_eq!(first[1], [0x44, 0x55, 0x66]);
+        assert_eq!(first[2], [0x77, 0x88, 0x99]);
+        assert_eq!(
+            &first[3..],
+            &SYSTEM_COLORS[3..],
+            "the rest is the default set"
+        );
+
+        // The second scheme is built fresh; no slot can carry the first one.
+        let second = palette_from_csv("#aabbcc");
+        assert_eq!(second[0], [0xaa, 0xbb, 0xcc]);
+        for (i, colour) in second.iter().enumerate().skip(1) {
+            assert_eq!(*colour, SYSTEM_COLORS[i], "index {i} must not inherit");
+        }
+    }
+
+    #[test]
+    fn a_malformed_entry_keeps_the_default_in_its_slot() {
+        let palette = palette_from_csv("#112233, red, #44556, #zzzzzz,#445566");
+        assert_eq!(palette[0], [0x11, 0x22, 0x33]);
+        assert_eq!(palette[1], SYSTEM_COLORS[1]);
+        assert_eq!(palette[2], SYSTEM_COLORS[2]);
+        assert_eq!(palette[3], SYSTEM_COLORS[3]);
+        assert_eq!(palette[4], [0x44, 0x55, 0x66]);
+        assert_eq!(&palette[5..], &SYSTEM_COLORS[5..]);
+    }
+
+    #[test]
+    fn entries_after_the_sixteenth_are_ignored() {
+        let csv = (0..20)
+            .map(|i| format!("#{:02x}{:02x}{:02x}", i, i, i))
+            .collect::<Vec<_>>()
+            .join(",");
+        let palette = palette_from_csv(&csv);
+        assert_eq!(palette[0], [0, 0, 0]);
+        assert_eq!(palette[15], [15, 15, 15]);
+        assert_eq!(palette.len(), 16);
     }
 
     #[test]
