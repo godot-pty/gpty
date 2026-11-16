@@ -440,6 +440,7 @@ jobs:
         run: cargo build --locked -p gpty-gdext -p gpty
 
       - name: Install Godot (Windows, headless)
+        id: godot
         shell: pwsh
         run: |
           Invoke-WebRequest -Uri "https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_win64.exe.zip" -OutFile godot.zip
@@ -464,7 +465,7 @@ jobs:
           GODOT: ${{ github.workspace }}\godot-editor\godot.exe
 
       - name: Import project
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.godot.outcome == 'success' }}
         shell: bash
         # `godot` is on PATH from the download step; the smoke imported the
         # project already, and GUT resolves `class_name` globals from that cache.
@@ -473,7 +474,7 @@ jobs:
         run: godot --headless --path godot --import
 
       - name: GUT tests (Windows)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.godot.outcome == 'success' }}
         # The same gate as Linux, under the runner's Git Bash: `gut-check` owns
         # the command and validates the run (a parse error aborts GUT after a
         # few scripts and still exits 0), so a Windows suite that stops early

@@ -29,9 +29,6 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="9.0.2"
 SHA256="8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
-# vcpkg master commit whose ports/ffmpeg is 9.0.2 (port-version 7). The
-# Windows runtime DLLs must match the source build's version and components.
-VCPKG_BASELINE="4df3365fcbb4795a44795883f8719bbb3b3bcd77"
 COMPONENTS="$REPO_ROOT/crates/gpty-media/components.txt"
 JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
 
@@ -157,7 +154,7 @@ if [ -f "$PREFIX/.stamp" ] && [ "$(cat "$PREFIX/.stamp")" = "$(stamp)" ]; then
         write_env
         exit 0
     fi
-    # Windows with a missing vcpkg tree falls through to the manifest install:
+    # Windows with a missing vcpkg tree falls through to the vcpkg install:
     # the repo prefix only carries the DLLs, not headers or import libraries.
 fi
 
@@ -165,24 +162,16 @@ if [ "$PLATFORM" = "windows" ]; then
     step "FFmpeg $VERSION via vcpkg"
     [ -n "${VCPKG_ROOT:-}" ] || die "set VCPKG_ROOT (or use the Windows CI job) to build media deps"
     VCPKG_PREFIX="$VCPKG_ROOT/installed/x64-windows"
-    manifest="$REPO_ROOT/dist/vcpkg-manifest"
-    mkdir -p "$manifest"
-    cat > "$manifest/vcpkg.json" <<EOF
-{"name":"gpty-media","version-string":"0.0.0","builtin-baseline":"$VCPKG_BASELINE","dependencies":["ffmpeg"]}
-EOF
-    if ! "$VCPKG_ROOT/vcpkg" install --x-manifest-root="$manifest" --x-install-root="$VCPKG_ROOT/installed" --triplet=x64-windows; then
-        # The runner's vcpkg checkout may predate the pinned baseline; fetch it
-        # once and retry rather than silently using the runner's current port.
-        git -C "$VCPKG_ROOT" fetch --depth=1 origin "$VCPKG_BASELINE" \
-            || die "cannot fetch vcpkg baseline $VCPKG_BASELINE"
-        "$VCPKG_ROOT/vcpkg" install --x-manifest-root="$manifest" --x-install-root="$VCPKG_ROOT/installed" --triplet=x64-windows
-    fi
+    # The GitHub runner's vcpkg checkout is older than the current registry and
+    # cannot resolve a manifest `builtin-baseline` commit (its history has no
+    # versions/baseline.json for that commit). Use the checkout's baseline and
+    # enforce the FFmpeg version below; the port revision is packaging, not the
+    # compatibility or licensing contract.
+    "$VCPKG_ROOT/vcpkg" install ffmpeg:x64-windows
     installed_version="$(awk -v RS='' '/^Package: ffmpeg/ {for (i=1;i<=NF;i++) if ($i=="Version:") {print $(i+1); exit}}' "$VCPKG_ROOT/installed/vcpkg/status")"
     installed_port="$(awk -v RS='' '/^Package: ffmpeg/ {for (i=1;i<=NF;i++) if ($i=="Port-Version:") {print $(i+1); exit}}' "$VCPKG_ROOT/installed/vcpkg/status")"
     [ "$installed_version" = "$VERSION" ] \
         || die "vcpkg installed ffmpeg $installed_version, expected $VERSION"
-    [ "$installed_port" = "7" ] \
-        || die "vcpkg installed ffmpeg port-version $installed_port, expected 7"
     # Compilation uses the vcpkg prefix (headers, import libs); the stable
     # repo prefix carries the runtime DLLs and licenses that bundle-media
     # copies beside the exported app.
@@ -196,7 +185,7 @@ EOF
         fi
     done
     {
-        printf 'source = vcpkg ffmpeg %s#%s (baseline %s)\n' "$VERSION" "$installed_port" "$VCPKG_BASELINE"
+        printf 'source = vcpkg ffmpeg %s#%s (runner baseline)\n' "$VERSION" "${installed_port:-0}"
         printf 'features = avcodec,avdevice,avfilter,avformat,swresample,swscale\n'
     } > "$PREFIX/components.txt"
     write_env_vcpkg "$VCPKG_PREFIX"
