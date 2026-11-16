@@ -408,7 +408,7 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   with GitHub's build-provenance attestation (SLSA v1), signed by the release workflow's OIDC identity -
   verify with `gh attestation verify <asset> --repo godot-pty/gpty`. That binds a download to the
   workflow, commit and runner that produced it; checksums without the attestation only catch corruption
-  in transit. Verify the source or build locally if provenance is not enough for you.
+  in transit. Verify the source or build locally if provenance is not enough for you. The release workflow also requires a signed annotated tag reachable from `main`, checks the crate and `server.json` versions against the tag, and runs its write/OIDC `publish` job only on staged artifacts after the `release` environment's required reviewer approves; no project code runs in that job.
 - **Resource bounds are per-path, not global.** A program that floods a pane can still make that
   pane expensive: the output queue is bounded per pane (256 × 4 KiB, enforced by blocking the
   reader, so the child waits on the PTY buffer rather than the process growing - v0.5.4), and the

@@ -9,6 +9,7 @@ owns a behaviour; it is a map, not an inventory - `rg --files <dir>` enumerates.
 ```
 gpty/
 ├── Cargo.toml                  # Workspace root
+├── rust-toolchain.toml         # Pinned Rust 1.96.0 for local and CI builds
 ├── AGENTS.md                   # Agent guide core; topic pages live in docs/content/docs/agents/
 ├── ROADMAP.md                  # Opening text + links to the release-chain pages
 ├── CHANGELOG.md                # Opening text + links to the per-release pages
@@ -25,6 +26,7 @@ gpty/
 ├── scripts/                    # CI runner and setup scripts
 │   ├── ci-check                # Run all CI checks locally (--fast for quick)
 │   ├── check-secrets           # Refuse credential formats in the git index (ci-check --fast)
+│   ├── check-macos-minos       # Fail a Mach-O slice built for a newer macOS than the app
 │   ├── bot-token               # Mint the gpty-bot app installation token (--check for setup)
 │   ├── bot-push                # Push a branch as gpty-bot
 │   ├── bot-pr                  # Open a pull request as gpty-bot

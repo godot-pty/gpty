@@ -73,6 +73,7 @@ Files: `ROADMAP.md` (an index over the chains) and `docs/content/docs/roadmap/vX
 
 - Bump **every workspace crate** (`crates/*`) to X.Y.Z — currently `gpty-ai`, `gpty-cli`, `gpty-core`, `gpty-gdext`, `gpty-ipc`, `gpty-media`, `gpty-plugin`. They are internal, path-referenced crates with no external semver consumers — uniform release-versioning avoids drift (gpty-core/gpty-gdext once froze at 0.1.0 for three releases while the app shipped 0.2.0/0.3.0).
 - Bump `server.json` (the MCP registry descriptor) in the same pass: its `version` and `packages[0].version` are the *published crate* version, not the tag. `scripts/mcp-registry check` runs in `ci-check` and fails on any drift with `crates/gpty-cli`.
+- Bump `godot/project.godot`'s `config/version` in the same pass; `ci-check`'s crate-versions step fails when it is stale.
 - New workspace crates join the uniform bump automatically; `./scripts/ci-check` (step "crate versions") fails on any drift. Don't trust `grep '^version' crates/*/Cargo.toml` alone — dependency tables also match.
 - The bump is a **per-file** edit: `sed -i '0,/^version = "…"$/s//…/' crates/*/Cargo.toml` treats all files as ONE stream without GNU sed's `-s`, so only the first file's first match is replaced. Use `sed -si` (or loop per file), then re-check every crate.
 - Refresh the lockfile: `cargo check --workspace` (updates `Cargo.lock` entries for the path deps).
