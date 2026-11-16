@@ -24,6 +24,7 @@ gpty/
 ├── LICENSE-EXCEPTIONS.md       # GPLv3 §7 permissions: plugins + data stay non-copyleft
 ├── scripts/                    # CI runner and setup scripts
 │   ├── ci-check                # Run all CI checks locally (--fast for quick)
+│   ├── check-secrets           # Refuse credential formats in the git index (ci-check --fast)
 │   ├── build-wiki              # Pack docs/content/wiki into godot/knowledge.json
 │   ├── install-hooks           # Symlink githooks into .git/hooks/
 │   ├── install-cli             # Install a release bundle behind a stable PATH link

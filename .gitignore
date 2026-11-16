@@ -34,6 +34,20 @@ godot/mono_crash.*.json
 .env
 .env.local
 
+# ── Secrets ───────────────────────────────────────────────────────────────
+# scripts/check-secrets and .github/workflows/secret-scan.yml enforce this;
+# these patterns keep the common credential files out of `git add`.
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+credentials.json
+secrets.json
+
 # AI
 reasonix.toml
 .reasonix/
