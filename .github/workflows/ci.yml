@@ -635,6 +635,10 @@ jobs:
         run: command -v cargo-fuzz >/dev/null || cargo install cargo-fuzz --locked --version 0.13.2
 
       - name: Build the fuzz targets
+        env:
+          # rust-toolchain.toml pins the workspace to stable; cargo fuzz needs
+          # the nightly this job installs, so override it for the step.
+          RUSTUP_TOOLCHAIN: nightly-2026-11-01
         run: |
           source dist/ffmpeg/linux-x86_64/env.sh
           cargo fuzz build
