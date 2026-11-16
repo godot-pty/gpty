@@ -18,12 +18,13 @@ set -euo pipefail
 # (`scripts/docs-check`, `scripts/build-wiki`, `scripts/check-capabilities`).
 #
 # A tooling-class change runs the docs gates, the cost gates and a syntax/plan
-# check of the measurement scripts themselves, and stops there. It is an
+# check of the tooling scripts themselves, and stops there. It is an
 # EXPLICIT allow-list - a script joins it only when `run_tooling_scripts`
 # executes it (so a break fails in seconds) and it can observe nothing the
-# Rust, GDScript or smoke gates test. The measurement scripts qualify: they are
-# bash/python over the release archives, they are run by `run_cost_stamp`, and
-# no workflow and no Rust test reads them. Everything else under `scripts/`
+# Rust, GDScript or smoke gates test. The tooling scripts qualify: they are
+# bash/python over release archives or the installed CLI, they are run by
+# `run_cost_stamp` or `run_tooling_scripts`, and no workflow and no Rust test
+# reads them. Everything else under `scripts/`
 # builds the app, drives Godot, or is itself a gate runner (including this
 # file - editing the gate is validated by running the gate), so it keeps the
 # code gates. Rust
@@ -137,12 +138,12 @@ docs_class_path() {
     esac
 }
 
-# tooling_class_path: a measurement script whose own cheap gate runs it.
+# tooling_class_path: a tooling script whose own cheap gate runs it.
 # Deliberately an allow-list: adding a script here promises run_tooling_scripts
 # exercises it, so a break is caught in seconds instead of skipping the suite.
 tooling_class_path() {
     case "$1" in
-        scripts/measure-cost | scripts/render-cost-chart | scripts/backfill-cost-history | scripts/fix-forensics) return 0 ;;
+        scripts/measure-cost | scripts/render-cost-chart | scripts/backfill-cost-history | scripts/fix-forensics | scripts/install-cli) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -278,14 +279,14 @@ run_cost_stamp() {
     fi
 }
 
-# The measurement scripts are bash and python that never build the app. Each
+# The tooling scripts are bash and python that never build the app. Each
 # one is executed here - bash -n for the shells, a compile for the renderer,
 # a planned (not run) backfill - so an edit that breaks one fails in seconds
 # instead of passing a 300 s suite that never touches it.
 run_tooling_scripts() {
     header "tooling scripts"
     local TOOL_OUT f
-    for f in scripts/measure-cost scripts/backfill-cost-history; do
+    for f in scripts/measure-cost scripts/backfill-cost-history scripts/install-cli; do
         if TOOL_OUT="$(bash -n "$f" 2>&1)"; then
             pass "bash -n $f"
         else
