@@ -322,21 +322,14 @@ func apply_user_state():
 	accept_concept_captures = state.get("accept_concept_captures", false) == true
 
 func apply_settings(settings: Dictionary):
+	# The closed table (PaneTypes) assigns every value; this override only
+	# notices when the aim moved, because a change to the backend, model,
+	# prompt or argv makes the open session ask the wrong thing.
 	var prev_backend = backend
 	var prev_model = model
 	var prev_prompt = system_prompt
 	var prev_command = command.duplicate()
 	super.apply_settings(settings)
-	if settings.get("auto_run") is bool:
-		auto_run = settings["auto_run"]
-	if settings.get("accept_concept_captures") is bool:
-		accept_concept_captures = settings["accept_concept_captures"]
-	if settings.get("system_prompt") is String:
-		system_prompt = settings["system_prompt"]
-	if settings.get("model") is String:
-		model = settings["model"]
-	if settings.get("command") is Array:
-		command = PaneTypes.sanitize_shell_args(settings["command"])
 	if is_inside_tree() and (
 		backend != prev_backend or model != prev_model or system_prompt != prev_prompt
 		or command != prev_command

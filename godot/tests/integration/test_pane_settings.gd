@@ -246,6 +246,54 @@ func test_a_closed_set_member_never_reaches_the_pane():
 	tree.apply_settings({"open_in": "bogus"})
 	assert_eq(tree.open_in, "system", "a refused route changes nothing")
 
+## The closed table is the only rule owner: a value a rule refuses leaves the
+## property alone, and a pane's own `apply_settings` never re-applies the rule.
+## The duplicate that used to live in each override could silently diverge
+## from the table (it cleared a `shell_args` the table had dropped, re-clamped
+## a non-finite volume to the top of the range, and assigned a `model` past
+## its length cap), so each pane is held to the table's decision here.
+func test_a_refused_setting_value_leaves_each_panes_property_alone():
+	var scripts := TerminalManager._PaneScripts
+
+	var term: Control = scripts["terminal"].new()
+	term.shell_args = ["-lc", "true"]
+	term.apply_settings({"shell_args": "not-an-array"})
+	assert_eq(term.shell_args, ["-lc", "true"], "a refused argv changes nothing")
+	term.free()
+
+	var cli: Control = scripts["cli_view"].new()
+	cli.command = "/bin/echo"
+	cli.shell_args = ["-n"]
+	cli.apply_settings({"command": "x".repeat(2048), "shell_args": "not-an-array"})
+	assert_eq(cli.command, "/bin/echo", "an oversized program changes nothing")
+	assert_eq(cli.shell_args, ["-n"], "a refused argv changes nothing")
+	cli.free()
+
+	var insp: Control = scripts["inspector"].new()
+	insp.model = "current"
+	insp.auto_run = false
+	insp.command = ["-x"]
+	insp.apply_settings({"model": "m".repeat(200), "auto_run": "yes", "command": "not-an-array"})
+	assert_eq(insp.model, "current", "an oversized model changes nothing")
+	assert_false(insp.auto_run, "a non-boolean switch changes nothing")
+	assert_eq(insp.command, ["-x"], "a refused argv changes nothing")
+	insp.free()
+
+	# Added to the tree: `apply_settings` returns early until `_ready` built
+	# `_video_surface`, and only the audio lane is under test here.
+	var media: Control = MediaPane.new()
+	_scene.add_child(media)
+	await get_tree().process_frame
+	media.volume_db = -6.0
+	media.apply_settings({"volume_db": INF})
+	assert_eq(media.volume_db, -6.0, "a non-finite volume changes nothing")
+
+	var reason: Control = scripts["reasoning"].new()
+	reason.source_attachment_id = "agent-terminal"
+	reason.apply_settings({"source_attachment_id": "OMP"})
+	assert_eq(reason.source_attachment_id, "agent-terminal", "a malformed id changes nothing")
+	reason.free()
+
 ## A terminal's launch line is the spawn plan a user can name: the panel
 ## gathers it, `apply_settings` accepts it through the closed table, and the
 ## saved tile carries the line instead of a program and argv.

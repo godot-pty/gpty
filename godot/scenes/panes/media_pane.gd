@@ -653,11 +653,11 @@ func apply_settings(settings: Dictionary):
 	super.apply_settings(settings)
 	if _video_surface == null:
 		return
-	if settings.get("volume_db") != null and (settings["volume_db"] is float or settings["volume_db"] is int):
-		volume_db = clampf(float(settings["volume_db"]), -40.0, 6.0)
+	# `volume_db` and `muted` were assigned by the closed table (a refused
+	# value leaves the property alone); the player still follows either key.
+	if settings.has("volume_db"):
 		_apply_audio_volume()
-	if settings.get("muted") is bool:
-		muted = settings["muted"]
+	if settings.has("muted"):
 		_apply_audio_volume()
 	if settings.get("loop") is bool:
 		loop_enabled = settings["loop"]

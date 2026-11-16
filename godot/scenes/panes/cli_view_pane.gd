@@ -266,21 +266,14 @@ func _get_layout_state() -> Dictionary:
 	return state
 
 func apply_settings(settings: Dictionary):
-	# The previous plan is captured before `super`, not after: `super` assigns
-	# `command` directly whenever the incoming value is a String, and that
-	# assignment skips the length and U+FFFD checks — so a sanitiser whose
-	# fallback read the *current* value would return the very value it is
-	# supposed to reject.
+	# The closed table (PaneTypes) owns every value; this override keeps the
+	# live side effects. The previous plan is captured before `super` so the
+	# status row can tell whether the running child's plan moved - the table
+	# refuses a value it does not accept, and the property then stays as it was.
 	var prev_command := command
 	var prev_args := shell_args.duplicate()
 	var prev_cwd := pane_cwd
 	super.apply_settings(settings)
-	if settings.has("command"):
-		command = PaneTypes.sanitize_shell(settings.get("command"), prev_command)
-	if settings.has("shell_args"):
-		# `super` never sets array properties (they have no TYPE_ match in
-		# `_set_typed`), so the argv is applied here or nowhere.
-		shell_args = PaneTypes.sanitize_shell_args(settings.get("shell_args"))
 	if _restart_btn == null:
 		return  # not in the tree yet: `_ready` starts with whatever landed here
 	_sync_buttons()

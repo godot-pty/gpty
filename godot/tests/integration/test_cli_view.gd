@@ -1,6 +1,6 @@
 extends GutTest
 # CLI View pane: a real child process whose stdout reaches the pane body,
-# plus the settings sanitization the pane owes its inputs.
+# plus the closed settings table every value passes before it becomes one.
 #
 # The child is a real program with real argv — never a shell command line the
 # pane might evaluate, because it does not: `ShellFixtures.print_text_argv`
@@ -205,9 +205,8 @@ func test_apply_settings_sanitizes_the_spawn_plan():
 	assert_eq(pane.command, "/bin/echo")
 	assert_eq(pane.shell_args, ["-n", "hi"])
 
-	# The fallback must be the pre-call value: `super.apply_settings` assigns a
-	# String `command` unchecked, so a sanitiser reading the current value
-	# would hand back the oversized value it is supposed to reject.
+	# The table refuses the oversized command before any assignment, so the
+	# pane keeps the plan it already had (and the child it already runs).
 	pane.apply_settings({"command": "x".repeat(2048)})
 	assert_eq(pane.command, "/bin/echo", "an oversized command must not persist")
 

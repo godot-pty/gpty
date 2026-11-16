@@ -305,10 +305,8 @@ func _default_title() -> String:
 func apply_settings(settings: Dictionary):
 	var previous_source := source_attachment_id
 	super.apply_settings(settings)
-	if settings.get("source_attachment_id") is String:
-		source_attachment_id = PaneTypes.sanitize_attachment_id(settings["source_attachment_id"])
-	else:
-		source_attachment_id = PaneTypes.sanitize_attachment_id(source_attachment_id)
+	# The closed table assigned `source_attachment_id` (a malformed id never
+	# reaches the property); a changed source is a different terminal.
 	if source_attachment_id != previous_source:
 		_clear_turns()
 		_omp_session_id = ""

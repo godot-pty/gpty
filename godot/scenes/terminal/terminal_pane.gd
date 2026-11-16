@@ -735,11 +735,9 @@ func apply_settings(settings: Dictionary):
 	# Layout JSON stores Colors as "(r, g, b, a)" strings.
 	_restore_color_strings(settings)
 	super.apply_settings(settings)
-	if settings.has("shell_args"):
-		# Untrusted layout data: sanitize before it reaches a spawn.
-		shell_args = PaneTypes.sanitize_shell_args(settings.get("shell_args"))
-	# Colors, cursor shape and metrics are all read by the draw passes; the grid
-	# generation does not move for them, so repaint the layers once here.
+	# The closed table sanitized every value before assignment, `shell_args`
+	# included. Colors, cursor shape and metrics are all read by the draw
+	# passes; the grid generation does not move for them, so repaint once here.
 	_repaint_all()
 
 func _restore_color_strings(dict: Dictionary):
