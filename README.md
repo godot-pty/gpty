@@ -63,7 +63,7 @@ The chosen stack also brings with it more costs, much more than terminal emulato
 <details>
 <summary>Watch: a command streamed into its own pane</summary>
 
-![Two cli_view panes streaming git log and git status](docs/static/images/demo-cli-view.gif)
+![Two cli_view panes streaming git log and git show --stat](docs/static/images/demo-cli-view.gif)
 
 </details>
 

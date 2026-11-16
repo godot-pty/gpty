@@ -88,6 +88,11 @@ export HOME="$TMP/home"
 export XDG_DATA_HOME="$TMP/data"
 export XDG_CONFIG_HOME="$TMP/config"
 export GPTY_SOCKET="$TMP/gpty.sock"
+# A GPTY_SECRET inherited from the developer's own session (an agent pane, a
+# scripted run) would make this GUI demand it while a pane's shell has it
+# stripped, so every typed `gpty` call answers "GUI requires GPTY_SECRET
+# authentication" and the clip still encodes with the error on screen.
+unset GPTY_SECRET
 export SHELL=/bin/bash
 export PATH="$ROOT/target/debug:$PATH"
 mkdir -p "$HOME" "$XDG_DATA_HOME" "$XDG_CONFIG_HOME"
@@ -177,8 +182,13 @@ LAYOUTS = {
     ],
 }
 layout = LAYOUTS[scenario]
+# The workspace names the sandbox repo as its directory: a terminal's backend
+# and a `cli_view` child resolve the same value, so an unqualified `git status`
+# or `git log` typed anywhere reports the sandbox repo instead of wherever the
+# GUI process happens to have been started from.
 print(json.dumps({"version": 1, "active": 0,
-                  "workspaces": [{"name": "demo", "layout": layout, "grid_unit": 60}]}))
+                  "workspaces": [{"name": "demo", "cwd": home,
+                                  "layout": layout, "grid_unit": 60}]}))
 PY
 
 # The terminal font comes from the global setting at spawn, not from the tile.
@@ -287,8 +297,9 @@ showcase)
     caption "A concept routes output into the pane beside it"
     type_line "cat <(git diff)"
     sleep 4
-    # A cli_view child starts where its pane does (the app's own directory
-    # here), so an unqualified `git status` reports the sandbox repo.
+    # The seeded workspace names $HOME as its directory, so this cli_view
+    # child starts in the sandbox repo and an unqualified `git status`
+    # reports it.
     caption "Any command can own a pane"
     type_line "gpty new-pane -t cli_view -c git --arg=status --title status --split bottom >/dev/null"
     sleep 4
@@ -384,6 +395,13 @@ profiles)
     # program-free, so neither needs a running agent: the panes open on their
     # own idle state and `profileLoad` answers with the toast that names the
     # profile. Recorded at 1200 px because the Agent Workspace is three panes.
+    #
+    # `profile load` replaces the whole workspace in the same frame, so the
+    # typed line is never painted - the list beat is what puts the profile
+    # vocabulary on screen, and the toast names the load.
+    caption "The two profiles this build ships"
+    type_line "gpty profile list"
+    sleep 3.5
     caption "Agent Workspace"
     type_line "gpty profile load 'Agent Workspace'"
     sleep 3.5
@@ -399,10 +417,12 @@ profiles)
 cli-view)
     caption "Stream any command's output into its own pane"
     sleep 2.5
-    type_line "gpty new-pane -t cli_view -c git --arg log --arg=--oneline --arg=-5 --title history"
+    # Same rule as the showcase: a spawn prints a JSON document, and the pane
+    # appearing is the confirmation, so its stdout goes to /dev/null.
+    type_line "gpty new-pane -t cli_view -c git --arg log --arg=--oneline --arg=-5 --title history >/dev/null"
     sleep 4
     caption "argv, not a shell string: the pane runs the program directly"
-    type_line "gpty new-pane -t cli_view -c git --arg show --arg=--stat --arg=--oneline --arg=HEAD~3 --title last-commit --split right"
+    type_line "gpty new-pane -t cli_view -c git --arg show --arg=--stat --arg=--oneline --arg=HEAD~3 --title last-commit --split right >/dev/null"
     sleep 4
     caption "gPTY - github.com/godot-pty/gpty"
     sleep 2
