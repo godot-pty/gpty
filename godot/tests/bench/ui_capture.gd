@@ -948,7 +948,14 @@ func _apply_agent_states(states: Array) -> bool:
 		await process_frame
 		painted = true
 		for i in states.size():
-			var badge: AgentBadge = tiles[i].wrapper.get_node_or_null("BodyVBox/TitleBar/StateBadge")
+			# Untyped on purpose: naming `AgentBadge` compiles `agent_badge.gd`
+			# into this `-s` entry point, which pulls `A11y` ->
+			# `accessibility.gd` -> `PaneBody` -> the `PaneCwdStore` autoload -
+			# and an autoload is not an identifier when the entry point itself
+			# compiles (measured: `Identifier not found: PaneCwdStore`, and
+			# every pane body then loaded as a bare `Control`). See
+			# `_is_terminal`.
+			var badge = tiles[i].wrapper.get_node_or_null("BodyVBox/TitleBar/StateBadge")
 			# The state is what is painted; the tooltip alone would not prove
 			# which silhouette is on the tile.
 			if badge == null or not badge.visible or badge.state() != str(states[i]):
@@ -961,7 +968,7 @@ func _apply_agent_states(states: Array) -> bool:
 		# the polled one. `_apply_badge` pins the badge's phase to 0; the badge
 		# also stops its own frame work, because it animates on its own clock
 		# and stopping the pane no longer stops it.
-		var badge: AgentBadge = tiles[i].wrapper.get_node_or_null("BodyVBox/TitleBar/StateBadge")
+		var badge = tiles[i].wrapper.get_node_or_null("BodyVBox/TitleBar/StateBadge")
 		bodies[i]._apply_badge(str(states[i]))
 		if badge != null:
 			badge.set_process(false)
@@ -1208,6 +1215,13 @@ func _plugin_review_params() -> Dictionary:
 		],
 	}
 
+## A class the harness needs only as data, loaded at runtime. A static `A11y`
+## reference would compile `accessibility.gd`, which names the `PaneBody`
+## class whose scripts read autoloads - and an autoload is not an identifier
+## when a `-s` entry point compiles (see `_is_terminal`).
+func _a11y_script() -> GDScript:
+	return load("res://scenes/ui/accessibility.gd")
+
 ## Find a node by its script path. `is <Class>` would compile the script (and
 ## its autoload identifiers) into this one; see `_is_terminal`.
 func _find_script(node: Node, path: String) -> Node:
@@ -1354,7 +1368,7 @@ func _audit_accessibility(state_name: String) -> void:
 		var name_text: String = c.accessibility_name
 		var desc: String = c.accessibility_description
 		var live: int = c.accessibility_live
-		var value := str(c.get_meta(A11y.VALUE_META, ""))
+		var value := str(c.get_meta(_a11y_script().VALUE_META, ""))
 		if name_text != "" or desc != "" or live != 0 or value != "":
 			var line := "a11y-audit: %s name=%s desc=%s live=%d" % [
 				c.get_class(), name_text, desc, live]

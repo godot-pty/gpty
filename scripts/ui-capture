@@ -13,7 +13,10 @@
 #
 # The staging procedure is committed at godot/tests/bench/ui_capture.gd; this
 # script only provides the environment it needs (see scripts/ui-sandbox) and
-# the Godot command line. A real display driver is required for a capture —
+# the Godot command line. A capture whose engine log carries a SCRIPT ERROR or
+# "Failed to load script" fails: a `-s` entry point that did not compile still
+# writes a PNG, and that image is not a capture of the app (the v0.8.4 harness
+# fix). A real display driver is required for a capture —
 # under `--headless` there is no redraw pass. `--list` and `--compare` are
 # headless and need no display.
 #
@@ -154,8 +157,25 @@ case "$MODE" in
         "$GODOT_BIN" --headless --path "$ROOT/godot" -s "$HARNESS" -- --compare "$LEFT" "$RIGHT"
         ;;
     capture)
+        # Engine output is kept, not only the PNG: a `-s` entry point that
+        # fails to compile still writes an image, and the app can stage that
+        # image with pane bodies that never loaded (measured 2026-11-16: every
+        # tile was a bare `Control` while the capture looked plausible). A
+        # script error means the image is not a capture of the app.
+        CAPTURE_LOG="$(mktemp)"
+        set +e
         run_bounded "$STATE" "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync \
-            -s "$HARNESS" -- --state "$STATE" --out "$OUT" "${EXTRA[@]}"
+            -s "$HARNESS" -- --state "$STATE" --out "$OUT" "${EXTRA[@]}" 2>&1 \
+            | tee "$CAPTURE_LOG"
+        CAPTURE_STATUS=${PIPESTATUS[0]}
+        set -e
+        if grep -qE 'SCRIPT ERROR|Failed to load script' "$CAPTURE_LOG"; then
+            echo "ui-capture: $STATE printed a script error — the capture is not trustworthy" >&2
+            rm -f "$CAPTURE_LOG"
+            exit 1
+        fi
+        rm -f "$CAPTURE_LOG"
+        exit "$CAPTURE_STATUS"
         ;;
     audit)
         run_bounded "$STATE" "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync \
