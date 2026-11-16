@@ -218,6 +218,63 @@ func test_a_real_terminal_child_starts_in_the_pane_directory():
 	assert_true(text.contains(own),
 		"the child must start in the pane's own directory, not the workspace's: %s" % text)
 
+## Both spawn paths, one workspace, no configured directory: each child prints
+## its own cwd, and they must agree. Before the fix a terminal started in the
+## user's home while a `cli_view` inherited the GUI process's directory.
+func test_a_terminal_and_a_cli_view_start_in_the_same_place():
+	if OS.get_name() == "Windows":
+		# The hold idiom is POSIX (`sh -c "pwd; sleep"`); the cli_view half is
+		# covered on Windows by test_cli_view.gd.
+		pending("a PTY child's cwd read needs the POSIX hold idiom here")
+		return
+	var home := PaneCwdStore.home_dir()
+	if home == "" or not DirAccess.dir_exists_absolute(home):
+		pending("this environment names no existing home directory")
+		return
+	var ws = await _make_workspace()
+	var container: Dictionary = ws._workspaces[0]
+	ws._workspaces[0]["cwd"] = ""
+	assert_eq(str(container.get("cwd", "")), "", "the fixture needs no workspace directory")
+
+	var term = ws._tm.create_body("terminal")
+	term.apply_settings({"attachment_id": "probe-cwd-terminal"})
+	term.shell_command = "/bin/sh"
+	term.shell_args = ["-c", "pwd; sleep 4"]
+	var view = ws._tm.create_body("cli_view")
+	view.apply_settings({"attachment_id": "probe-cwd-view"})
+	view.command = "/bin/pwd"
+	view.shell_args = []
+
+	var placed: Array[Dictionary] = []
+	for pair in [[term, 0], [view, 1]]:
+		var body: Control = pair[0]
+		var w = ws._tm._build_wrapper_body(body, "Probe")
+		ws._attach_pane_into(container, w, body)
+		placed.append({
+			"wrapper": w,
+			"col": int(pair[1]) * PaneTypes.GRID / 2,
+			"row": 0,
+			"cspan": PaneTypes.GRID / 2,
+			"rspan": PaneTypes.GRID,
+		})
+	ws._tm.tiles.append_array(placed)
+	ws._apply_layout()
+
+	var term_text := ""
+	var view_text := ""
+	var deadline := Time.get_ticks_msec() + 20000
+	while Time.get_ticks_msec() < deadline:
+		if term._terminal != null:
+			term_text = str(term._terminal.get_plain_text(50))
+		view_text = view.get_text()
+		if term_text.contains(home) and view_text.contains(home):
+			break
+		await get_tree().create_timer(0.1).timeout
+	assert_true(term_text.contains(home),
+		"the terminal must start in the home directory %s: %s" % [home, term_text])
+	assert_true(view_text.contains(home),
+		"the cli_view must start in the same directory %s: %s" % [home, view_text])
+
 func test_a_usable_override_wins_over_the_workspace_directory():
 	var ws = await _make_workspace()
 	var container: Dictionary = ws._workspaces[0]

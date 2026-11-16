@@ -120,7 +120,7 @@ func test_retain_workspaces_drops_the_rest():
 	assert_eq(PaneCwdStore.dir_for(WS, "pane-a"), a)
 	assert_eq(PaneCwdStore.dir_for(WS2, "pane-b"), "")
 
-func test_resolve_prefers_the_pane_then_the_workspace():
+func test_resolve_prefers_the_pane_then_the_workspace_then_home():
 	var own := _temp_dir("resolve-own")
 	var ws_dir := _temp_dir("resolve-ws")
 	assert_eq(
@@ -129,9 +129,13 @@ func test_resolve_prefers_the_pane_then_the_workspace():
 	assert_eq(
 		PaneCwdStore.resolve(WS, "pane-a", "", ws_dir), ws_dir,
 		"no override means the workspace's directory")
+	var home := PaneCwdStore.home_dir()
+	if home == "" or not DirAccess.dir_exists_absolute(home):
+		pending("this environment names no existing home directory")
+		return
 	assert_eq(
-		PaneCwdStore.resolve(WS, "pane-a", "", ""), "",
-		"neither means the child inherits gpty's own directory")
+		PaneCwdStore.resolve(WS, "pane-a", "", ""), home,
+		"neither layer means the user's home, which both spawn paths receive")
 
 func test_resolve_falls_back_when_a_directory_is_missing():
 	var ws_dir := _temp_dir("stale-ws")
@@ -139,6 +143,10 @@ func test_resolve_falls_back_when_a_directory_is_missing():
 	assert_eq(
 		PaneCwdStore.resolve(WS, "pane-a", gone, ws_dir), ws_dir,
 		"a stale override falls back to the workspace's directory")
+	var home := PaneCwdStore.home_dir()
+	if home == "" or not DirAccess.dir_exists_absolute(home):
+		pending("this environment names no existing home directory")
+		return
 	assert_eq(
-		PaneCwdStore.resolve(WS, "pane-b", gone, ""), "",
-		"both unusable means gpty's own directory, never the stale path")
+		PaneCwdStore.resolve(WS, "pane-b", gone, ""), home,
+		"both unusable means the home directory, never the stale path")

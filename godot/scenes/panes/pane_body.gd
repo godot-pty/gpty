@@ -201,10 +201,13 @@ func apply_user_state():
 	pane_cwd = PaneCwdStore.dir_for(workspace_id, attachment_id)
 
 ## The directory this pane's child starts in: its own override when usable,
-## else the workspace's, else "" (the child inherits gpty's own directory).
+## else the workspace's, else the user's home (else "" when no home is known,
+## and the child inherits gpty's own directory).
 ##
-## Resolved at the moment of the spawn rather than cached, so a `cli_view`
-## Restart re-checks a path that may have been unmounted since.
+## Both spawn paths - a terminal's PTY and a `cli_view`'s child - read this one
+## answer, so they cannot start in different places when no directory is
+## configured. Resolved at the moment of the spawn rather than cached, so a
+## `cli_view` Restart re-checks a path that may have been unmounted since.
 func spawn_cwd() -> String:
 	return PaneCwdStore.resolve(workspace_id, attachment_id, pane_cwd, workspace_cwd)
 
@@ -230,7 +233,11 @@ func _build_pane_dir_row(panel: Control) -> VBoxContainer:
 	row.add_theme_constant_override("separation", UiTokens.SPACE_SM)
 	box.add_child(row)
 
-	var inherited := workspace_cwd if workspace_cwd != "" else "gpty's own directory"
+	var inherited := workspace_cwd
+	if inherited == "":
+		inherited = PaneCwdStore.home_dir()
+	if inherited == "":
+		inherited = "gpty's own directory"
 	var value_btn := Button.new()
 	value_btn.name = "PaneDirectory"
 	value_btn.clip_text = true

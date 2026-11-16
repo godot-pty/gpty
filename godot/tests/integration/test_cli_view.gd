@@ -148,6 +148,31 @@ func test_the_child_starts_in_the_panes_directory():
 		% [_slashed(own), JSON.stringify(_slashed(pane.get_text())),
 		pane.start_error()])
 
+## With no directory anywhere, the child starts where a terminal already
+## started by default: the user's home. Before the fix this pane inherited the
+## GUI process's directory (the project directory under `godot --path`), so a
+## third-party command ran inside gpty's own checkout.
+func test_with_no_directory_the_child_starts_in_the_users_home():
+	if not _ffi_ready():
+		return
+	var home := PaneCwdStore.home_dir()
+	if home == "" or not DirAccess.dir_exists_absolute(home):
+		pending("this environment names no existing home directory")
+		return
+	var plan := _pwd_plan()
+	var pane := _make_pane("", [])
+	pane.workspace_cwd = ""
+	pane.pane_cwd = ""
+	pane.command = plan[0]
+	pane.shell_args = plan[1]
+	pane._start()
+	var ok := await _wait_until(
+		func(): return _slashed(pane.get_text()).contains(_slashed(home)),
+		PROCESS_BUDGET_MS)
+	assert_true(ok, "the child must start in the home directory %s: %s (%s)"
+		% [_slashed(home), JSON.stringify(_slashed(pane.get_text())),
+		pane.start_error()])
+
 func test_stop_kills_a_running_child():
 	if not _ffi_ready():
 		return

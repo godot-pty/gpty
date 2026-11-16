@@ -49,7 +49,8 @@ func load() -> Dictionary:
 			"id": ws_id,
 			"name": sanitize_name(str(_as_string(item, "name", ""))),
 			# The directory is a workspace instance's own setting. Empty
-			# means "inherit gpty's directory", which is also what every
+			# means the workspace names none: a spawn falls back to the
+			# user's home (PaneCwdStore.resolve), which is also what every
 			# workspace did before this field existed.
 			"cwd": sanitize_cwd(str(_as_string(item, "cwd", ""))),
 			# The unit the geometry was written in. An absent field is a store

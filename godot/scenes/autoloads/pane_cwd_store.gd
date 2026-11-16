@@ -124,15 +124,21 @@ func retain_workspaces(ids: PackedStringArray):
 	_write_file(DIR_FILE, _dirs)
 
 ## The directory a child of this pane starts in: the pane's own directory when
-## it is a usable one, else the workspace's, else "" (the child inherits
-## gpty's own directory).
+## it is a usable one, else the workspace's, else the user's home directory,
+## else "" (the child inherits gpty's own directory).
 ##
-## Resolved at the moment of the spawn, not stored in the pane, so a `cli_view`
-## Restart re-checks it. A path that has gone missing — a moved repository, an
-## unmounted disk — warns once per key and falls through to the next layer
-## rather than reaching the PTY layer, which would drop it silently and leave
-## the child in gpty's directory with no explanation.
+## The home fallback is the point: a terminal child already defaulted there
+## (portable-pty's own choice) while a `cli_view` inherited the GUI process's
+## directory - gpty's installation or project directory. Both backends now
+## receive the same explicit directory. Resolved at the moment of the spawn,
+## not stored in the pane, so a `cli_view` Restart re-checks it. A path that
+## has gone missing — a moved repository, an unmounted disk — warns once per
+## key and falls through to the next layer rather than reaching the PTY layer,
+## which would drop it silently and leave the child somewhere else with no
+## explanation.
 func resolve(ws_id: String, pane_id: String, override: String, workspace_cwd: String) -> String:
+	var home := home_dir()
+	var home_usable := home != "" and DirAccess.dir_exists_absolute(home)
 	var own := BasePersistenceManager.sanitize_absolute_dir(override, MAX_DIR_CHARS)
 	if own != "":
 		if DirAccess.dir_exists_absolute(own):
@@ -145,9 +151,28 @@ func resolve(ws_id: String, pane_id: String, override: String, workspace_cwd: St
 		if DirAccess.dir_exists_absolute(inherited):
 			return inherited
 		_warn_once("workspace:" + ws_id,
-			"Workspace directory no longer exists (%s); its panes start in gpty's own directory"
-			% inherited)
+			"Workspace directory no longer exists (%s); its panes start in %s"
+			% [inherited, home if home_usable else "gpty's own directory"])
+	if home_usable:
+		return home
 	return ""
+
+## The user's home directory, or "" when the environment names none.
+##
+## Godot has no home-directory query of its own, so this is the same pair the
+## workspace picker opens on (`HOME`, then `USERPROFILE`) plus the older
+## Windows split. Sanitized like every other directory value: a relative or
+## virtual path is not a spawn directory.
+func home_dir() -> String:
+	var raw := OS.get_environment("HOME")
+	if raw == "":
+		raw = OS.get_environment("USERPROFILE")
+	if raw == "":
+		var drive := OS.get_environment("HOMEDRIVE")
+		var path := OS.get_environment("HOMEPATH")
+		if drive != "" and path != "":
+			raw = drive + path
+	return BasePersistenceManager.sanitize_absolute_dir(raw, MAX_DIR_CHARS)
 
 static func _warn_once(key: String, message: String) -> void:
 	if _warned.has(key):

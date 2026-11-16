@@ -45,8 +45,10 @@ impl INode for GptyCliView {
 #[godot_api]
 impl GptyCliView {
     /// Input: `{"command":"prog","args":["-x"],"cwd":"/abs/dir"}` — argv, never
-    /// a shell; `cwd` is optional and the child inherits gpty's directory
-    /// without it. Output: `{"ok":true,"pid":N}` or `{"ok":false,"error":"..."}`.
+    /// a shell; `cwd` is the directory the pane resolved (`PaneCwdStore`:
+    /// its own, its workspace's, or the user's home), and an absent value
+    /// leaves the child in gpty's own directory. Output:
+    /// `{"ok":true,"pid":N}` or `{"ok":false,"error":"..."}`.
     #[func]
     fn start(&mut self, config_json: GString) -> GString {
         let raw = config_json.to_string();
@@ -154,9 +156,8 @@ fn parse_args(value: &Value) -> Result<Vec<String>, String> {
 }
 
 /// Read the optional `cwd` the pane resolved (its own directory, then its
-/// workspace's, then none). A missing, `null` or empty value means "inherit
-/// gpty's own directory", which is what every pane did before workspace
-/// directories.
+/// workspace's, then the user's home). A missing, `null` or empty value means
+/// the pane resolved none, so the child inherits gpty's own directory.
 ///
 /// The core owns the path semantics (absolute, a real directory) so a
 /// GDScript caller and a test see one rule; this edge holds the size cap and

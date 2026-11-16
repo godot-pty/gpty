@@ -861,7 +861,7 @@ func _make_workspace_row(idx: int, ws_name: String, is_active: bool, cwd := "") 
 	row.add_theme_constant_override("separation", UiTokens.SPACE_XS)
 	row.set_meta("workspace_index", idx)
 
-	var dir_hint := cwd if cwd != "" else "default (gpty's own directory)"
+	var dir_hint := cwd if cwd != "" else "default (the user's home directory)"
 	var btn = _make_sidebar_button(ws_name)
 	btn.tooltip_text = "Switch workspace (double-click to rename)\nWorking directory: %s" % dir_hint
 	_apply_row_accent(btn, is_active)

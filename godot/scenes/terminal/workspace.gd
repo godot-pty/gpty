@@ -1660,7 +1660,7 @@ func _on_workspace_menu(idx: int, source_btn: Button):
 	menu.name = "WorkspaceActionsMenu"
 	var dir := str(ws.get("cwd", ""))
 	var dir_tip := "Working directory: %s" % (
-		dir if dir != "" else "default (gpty's own directory)")
+		dir if dir != "" else "default (the user's home directory)")
 	MenuItems.add(menu, Icons.PENCIL, "Rename Workspace",
 		"Rename '%s'" % str(ws.get("name", "")),
 		{"kind": "rename", "index": idx})
@@ -1710,9 +1710,7 @@ func _open_workspace_cwd_dialog(idx: int):
 		FileDialog.FILE_MODE_OPEN_DIR)
 	var start := str(ws.get("cwd", ""))
 	if start == "":
-		start = OS.get_environment("HOME")
-	if start == "":
-		start = OS.get_environment("USERPROFILE")
+		start = PaneCwdStore.home_dir()
 	if start != "" and DirAccess.dir_exists_absolute(start):
 		dialog.current_dir = start
 	dialog.add_button("Use default", true, "default")
@@ -2059,10 +2057,10 @@ func _tiles_untrusted(tiles: Array[Dictionary]) -> bool:
 			return true
 	return false
 
-## The directory a spawn in `ws` actually starts in, as the trust key names
-## it: the workspace's sanitized directory when it is usable, otherwise ""
-## (the PTY's inherited directory — what the backend itself falls back to for
-## an unusable path, so a relative or stale store value cannot alias an
+## The workspace's configured directory, as the trust key names it: the
+## sanitized directory when it is usable, otherwise "" (no configured
+## directory — both child backends then start in the user's home through
+## `PaneCwdStore.resolve`, so a relative or stale store value cannot alias an
 ## approval for a directory the spawn never used).
 func _spawn_cwd(ws: Dictionary) -> String:
 	var cwd := WorkspaceStore.sanitize_cwd(str(ws.get("cwd", "")))

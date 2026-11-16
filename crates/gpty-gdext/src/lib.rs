@@ -146,11 +146,13 @@ impl GptyTerminal {
     /// arguments (e.g. `["-c", "echo hi && exit 7"]` for shell wrapping).
     /// Capped at 32 args of ≤4096 chars each.
     ///
-    /// `cwd` is the workspace's working directory. Empty inherits gpty's
-    /// own directory; a non-absolute path, one that is not an existing
-    /// directory, or one carrying a NUL is ignored with a warning rather
-    /// than failing the pane, so a workspace restored after its directory
-    /// moved still opens a shell.
+    /// `cwd` is the directory the pane resolved (`PaneCwdStore.resolve`:
+    /// its own, its workspace's, or the user's home). Empty means the caller
+    /// resolved none, so the child inherits gpty's own directory; a
+    /// non-absolute path, one that is not an existing directory, or one
+    /// carrying a NUL is ignored with a warning rather than failing the
+    /// pane, so a workspace restored after its directory moved still opens
+    /// a shell.
     ///
     /// Returns `""` when the child started, otherwise one sentence naming what
     /// could not be started and why. GDScript shows that sentence to the user
