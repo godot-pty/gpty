@@ -27,4 +27,4 @@ A second maintainer is added by the organization owner after sustained contribut
 
 ## Succession
 
-The maintainer names a successor in this file before granting them write access. If the maintainer is unavailable for more than 90 days and no successor is named, the project is archived rather than left drifting; the last release remains available and the repository history is the handover record. [AGENTS.md](AGENTS.md), [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md) and the release runbook at `.omp/skills/release/SKILL.md` are the operating record.
+The maintainer names a successor in this file before granting them write access. If the maintainer is unavailable for more than 90 days and no successor is named, the project is archived rather than left drifting; the last release remains available and the repository history is the handover record. [AGENTS.md](AGENTS.md), [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md), [RELEASING.md](RELEASING.md) and the agent execution checklist at `.omp/skills/release/SKILL.md` are the operating record.

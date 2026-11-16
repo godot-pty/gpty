@@ -13,6 +13,7 @@ cp ../README.md assets/repo/
 cp ../CHANGELOG.md assets/repo/
 cp ../ROADMAP.md assets/repo/
 cp ../CONTRIBUTING.md assets/repo/
+cp ../RELEASING.md assets/repo/
 cp ../LICENSE assets/repo/
 cp ../LICENSE-EXCEPTIONS.md assets/repo/
 cp ../AGENTS.md assets/repo/

@@ -18,7 +18,8 @@ This file holds the rules every change needs. The detailed rules live in one pag
 | [Plugin manifest](docs/content/docs/agents/plugins.md) | Plugin manifests, catalog, install and trust |
 | [Security rules](docs/content/docs/agents/security.md) | Any change near IPC, PTY, the filesystem, plugins, networking, or secrets (read before editing) |
 |[Pitfalls and tool notes](docs/content/docs/agents/pitfalls.md)|Before debugging, and before touching an FFI or CLI boundary: the known traps|
-|[Repository map](docs/content/docs/agents/repo-map.md)|Finding which module or file owns a behaviour, or where a new file belongs|
+| [Repository map](docs/content/docs/agents/repo-map.md)|Finding which module or file owns a behaviour, or where a new file belongs|
+| [Releasing](RELEASING.md)|Preparing or cutting a release, or changing the release workflow|
 |Agent skills (`skill://<name>`)|Any task: load the matching skill before the first edit - the bodies live in `.omp/skills/<name>/SKILL.md`|
 
 ## Project Structure

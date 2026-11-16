@@ -13,6 +13,7 @@ gpty/
 ├── AGENTS.md                   # Agent guide core; topic pages live in docs/content/docs/agents/
 ├── ROADMAP.md                  # Opening text + links to the release-chain pages
 ├── CHANGELOG.md                # Opening text + links to the per-release pages
+├── RELEASING.md                # Canonical release process; the agent checklist is .omp/skills/release/SKILL.md
 ├── docs/
 │   ├── content/docs/agents/    # Agent guide topic pages (Rust, GDScript, security, ...)
 │   ├── content/docs/roadmap/   # One page per release chain (v0.N.md, future.md)
