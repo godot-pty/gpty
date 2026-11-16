@@ -13,7 +13,7 @@ on:
   # godot/, the smoke) still runs the full suite: a script that builds the
   # app, drives Godot or runs a gate needs the code gates to validate it.
   push:
-    branches: [main, master]
+    branches: [main, master, "0.*"]
     paths-ignore:
       - "docs/**"
       - "assets/site-icons/**"

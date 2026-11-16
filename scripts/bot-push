@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Push the current branch with the gpty-bot installation token.
+#
+# Usage: scripts/bot-push [<remote-branch>]
+# The token is passed through GIT_ASKPASS, so it never appears in argv.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+repo=${GPTY_BOT_REPO:-godot-pty/gpty}
+branch=${1:-$(git branch --show-current)}
+if [ -z "$branch" ]; then
+    echo "bot-push: no current branch" >&2
+    exit 2
+fi
+
+token=$(./scripts/bot-token)
+export GPTY_BOT_TOKEN="$token"
+export GIT_ASKPASS="$PWD/scripts/git-askpass-token"
+
+git push "https://x-access-token@github.com/$repo.git" "HEAD:refs/heads/$branch"
