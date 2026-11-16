@@ -304,6 +304,7 @@ These are load-bearing guards. Reports that require removing one of them should 
 - **Commits are scanned locally and in CI.** `scripts/check-secrets` refuses high-confidence credential formats in the git index and runs in `ci-check --fast`, so the `pre-commit` hook runs it when `scripts/install-hooks` has been run. `.github/workflows/secret-scan.yml` runs gitleaks over the full history on every push, every pull request and weekly. GitHub's native secret scanning and push protection are also enabled.
 - **A committed secret is rotated, not just deleted.** Revoke or rotate the credential first, then remove it from the current tree; a secret that was live is treated as disclosed even if history is rewritten. Open a private advisory when the exposure reaches a release artifact.
 - **Release and CI credentials are short-lived or repository-scoped.** GitHub Actions uses its own token and OIDC attestations. A publishing token that predates this policy is tracked by the crates.io trusted-publishing row in the v0.9.3 roadmap and is rotated until that migration lands.
+- **The `gpty-bot` app private key is a local credential.** It is stored outside the repository (mode 0600) and rotated from the app settings; it is never committed.
 
 ## Known limitations
 
