@@ -28,6 +28,7 @@ gpty/
 │   ├── ci-check                # Run all CI checks locally (--fast for quick)
 │   ├── check-secrets           # Refuse credential formats in the git index (ci-check --fast)
 │   ├── check-macos-minos       # Fail a Mach-O slice built for a newer macOS than the app
+│   ├── check-github-settings   # Read back rulesets, release environment and Actions policy
 │   ├── bot-token               # Mint the gpty-bot app installation token (--check for setup)
 │   ├── bot-push                # Push a branch as gpty-bot
 │   ├── bot-pr                  # Open a pull request as gpty-bot

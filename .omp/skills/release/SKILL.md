@@ -26,6 +26,8 @@ records the checkpoints an agent must not skip, not a second runbook.
   and the previous release's changelog page.
 - Confirm the target version, previous tag, active integration branch, clean
   tree, signing key, `gpty-bot` token and a graphical session for screenshots.
+- Run `./scripts/check-github-settings` (read-only; maintainer `gh`) before the
+  release and after any ruleset or environment change.
 - Run `./scripts/ci-check`; a green local run is the baseline, not proof of the
   Windows runtime legs.
 

@@ -23,6 +23,10 @@ land on the integration branch.
 - A clean tree, the current integration branch, and the release's roadmap rows
   closed. Anything unshipped moves to the next chain in priority position with
   `(Deferred from vX.Y.Z.)`.
+- `./scripts/check-github-settings` passes. It is read-only and needs a
+  maintainer-authenticated `gh`: it reads back the rulesets, classic protection,
+  `release` environment, SHA-pinning and sign-off flags instead of trusting the
+  settings to stay put.
 - `./scripts/ci-check` passes. Its Windows step cross-compiles only; the
   runtime legs (`windows-smoke`, GUT on Windows) exist only in CI and must be
   green on the release PR's head. Also run the
