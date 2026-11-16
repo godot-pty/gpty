@@ -19,7 +19,7 @@ The maintainer roster and access rules are in [MAINTAINERS.md](MAINTAINERS.md).
 ## Access
 
 - The organization requires two-factor authentication.
-- The maintainer holds organization-owner and repository-admin access. The `gpty-bot` GitHub App is installed on the organization (currently all repositories; restrict it to `godot-pty/gpty`) and the release flow needs only contents write, pull-request write and metadata read. It has no administration permission and no bypass on `main`; `scripts/bot-token --check` warns about extra permissions or an organization-wide installation.
+- The maintainer holds organization-owner and repository-admin access. The `gpty-bot` GitHub App is installed on `godot-pty/gpty` (selected repositories) and the release flow needs only contents write, pull-request write and metadata read. One extra permission (`repository_license_policy: read`) remains; `scripts/bot-token --check` warns about it and it should be removed. The app has no administration permission and no bypass on `main`.
 - Access is granted by the organization owner after a period of sustained contribution and review, recorded in [MAINTAINERS.md](MAINTAINERS.md), and revoked when the person steps down or is inactive for 90 days. The app's private key is stored outside the repository and rotated from the app's settings; the app is not a collaborator and has no organization-owner access.
 - The `v*` tag ruleset, the `main` branch ruleset and classic branch protection are the release and review gates. The repository settings are the source of truth when this page and the settings disagree.
 
