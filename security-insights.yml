@@ -1,14 +1,12 @@
 header:
-  schema-version: 2.0.0
-  last-updated: '2026-11-04'
-  last-reviewed: '2026-11-04'
-  url: https://github.com/godot-pty/gpty
+  schema-version: 2.2.0
+  last-updated: '2026-11-16'
+  last-reviewed: '2026-11-16'
+  url: https://github.com/godot-pty/gpty/blob/main/security-insights.yml
   comment: >-
-    This file contains all possible information for both project and repository,
-    though it is not required to include all of this information every time. Nor
-    is it required to include both a project and repository section if the
-    project section is intended to be inherited by repositories via
-    header.project-si-source
+    Security Insights for gPTY, a desktop PTY workspace built on Rust and
+    Godot. The project section lists every public codebase that is part of the
+    project; SUBPROJECTS.md carries the same list with its status and intent.
 project:
   name: gPTY
   homepage: https://gpty.dev/
@@ -31,12 +29,55 @@ project:
     support-policy: https://github.com/godot-pty/gpty/blob/main/SECURITY.md#supported-versions
     signature-verification: https://github.com/godot-pty/gpty/blob/main/README.md#verifying-releases
   repositories:
-    - name: gPTY
+    - name: gpty
       url: https://github.com/godot-pty/gpty
       comment: >-
-        A desktop workspace built on Rust and Godot. It provides a tiling grid
-        for panes (terminals, code viewers, file trees, wikis, media, and more),
-        a concept capture engine, and a JSON-RPC/MCP control surface
+        The core application: the Rust crates, the Godot frontend and the
+        in-tree `@gpty/omp-events` extension. Every release archive is built
+        from this repository.
+    - name: gpty-omp
+      url: https://github.com/godot-pty/gpty-omp
+      comment: >-
+        A plugin profile that launches OMP in a terminal pane. Installed by
+        users through the plugin catalog; not compiled into the core release.
+    - name: gpty-herdr
+      url: https://github.com/godot-pty/gpty-herdr
+      comment: >-
+        A plugin profile that launches Herdr in a terminal pane. Installed
+        through the plugin catalog; not compiled into the core release.
+    - name: gpty-lazygit
+      url: https://github.com/godot-pty/gpty-lazygit
+      comment: >-
+        A plugin profile that launches lazygit in a terminal pane. Installed
+        through the plugin catalog; not compiled into the core release.
+    - name: gpty-neovim
+      url: https://github.com/godot-pty/gpty-neovim
+      comment: >-
+        A plugin profile that launches Neovim in a terminal pane. Installed
+        through the plugin catalog; not compiled into the core release.
+    - name: gpty-claude
+      url: https://github.com/godot-pty/gpty-claude
+      comment: >-
+        A plugin profile that launches Claude in a terminal pane. Installed
+        through the plugin catalog; not compiled into the core release.
+    - name: gpty-agent-workspace
+      url: https://github.com/godot-pty/gpty-agent-workspace
+      comment: >-
+        The published twin of the built-in Agent Workspace profile. Data-only
+        plugin; installed through the plugin catalog, not compiled into the
+        core release.
+    - name: gpty-knowledge-base
+      url: https://github.com/godot-pty/gpty-knowledge-base
+      comment: >-
+        A plugin profile that opens the shipped wiki vault in a Wiki pane.
+        Data-only plugin; installed through the plugin catalog, not compiled
+        into the core release.
+    - name: gpty-plugins
+      url: https://github.com/godot-pty/gpty-plugins
+      comment: >-
+        The plugin inventory (`registry.json`) and its validator
+        (`validate.py`), read by the docs site and the plugin catalog. Not
+        compiled into the core release.
   vulnerability-reporting:
     reports-accepted: true
     bug-bounty-available: false
@@ -134,27 +175,46 @@ repository:
         email: ''
         primary: true
     tools:
-      - name: CodeQL
-        type: SAST
-        version: ''
+      - name: GitHub Secret Scanning
+        type: secret
         rulesets:
           - default
         results:
-          adhoc:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
-          ci:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
-          release:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
+          adhoc: {name: '', predicate-uri: '', location: '', comment: ''}
+          ci: {name: '', predicate-uri: '', location: '', comment: ''}
+          release: {name: '', predicate-uri: '', location: '', comment: ''}
+        integration:
+          adhoc: true
+          ci: true
+          release: false
+        comment: >-
+          Native secret scanning with push protection is enabled on the
+          repository; push protection blocks provider token patterns before
+          they reach the default branch.
+      - name: gitleaks
+        type: secret
+        rulesets:
+          - default
+        results:
+          adhoc: {name: '', predicate-uri: '', location: '', comment: ''}
+          ci: {name: '', predicate-uri: '', location: '', comment: ''}
+          release: {name: '', predicate-uri: '', location: '', comment: ''}
+        integration:
+          adhoc: true
+          ci: true
+          release: false
+        comment: >-
+          Full-history scan in .github/workflows/secret-scan.yml (pinned
+          v8.30.1); scripts/check-secrets runs the high-confidence subset in
+          ci-check --fast and the pre-commit hook.
+      - name: CodeQL
+        type: SAST
+        rulesets:
+          - default
+        results:
+          adhoc: {name: '', predicate-uri: '', location: '', comment: ''}
+          ci: {name: '', predicate-uri: '', location: '', comment: ''}
+          release: {name: '', predicate-uri: '', location: '', comment: ''}
         integration:
           adhoc: true
           ci: true
@@ -168,21 +228,9 @@ repository:
         rulesets:
           - default
         results:
-          adhoc:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
-          ci:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
-          release:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
+          adhoc: {name: '', predicate-uri: '', location: '', comment: ''}
+          ci: {name: '', predicate-uri: '', location: '', comment: ''}
+          release: {name: '', predicate-uri: '', location: '', comment: ''}
         integration:
           adhoc: true
           ci: true
@@ -196,21 +244,9 @@ repository:
         rulesets:
           - RustSec advisory database
         results:
-          adhoc:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
-          ci:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
-          release:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
+          adhoc: {name: '', predicate-uri: '', location: '', comment: ''}
+          ci: {name: '', predicate-uri: '', location: '', comment: ''}
+          release: {name: '', predicate-uri: '', location: '', comment: ''}
         integration:
           adhoc: false
           ci: true
@@ -222,21 +258,9 @@ repository:
         rulesets:
           - deny.toml
         results:
-          adhoc:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
-          ci:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
-          release:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
+          adhoc: {name: '', predicate-uri: '', location: '', comment: ''}
+          ci: {name: '', predicate-uri: '', location: '', comment: ''}
+          release: {name: '', predicate-uri: '', location: '', comment: ''}
         integration:
           adhoc: false
           ci: true
@@ -250,21 +274,9 @@ repository:
         rulesets:
           - default
         results:
-          adhoc:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
-          ci:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
-          release:
-            name: ''
-            predicate-uri: ''
-            location: ''
-            comment: ''
+          adhoc: {name: '', predicate-uri: '', location: '', comment: ''}
+          ci: {name: '', predicate-uri: '', location: '', comment: ''}
+          release: {name: '', predicate-uri: '', location: '', comment: ''}
         integration:
           adhoc: true
           ci: true
