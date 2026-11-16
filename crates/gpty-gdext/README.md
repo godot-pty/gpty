@@ -116,7 +116,7 @@ and compiles no network protocol.
 | `send_text(text: String)` | `bool` | Send raw text to PTY (no newline). `false` = the pane's bounded input queue is full (the child is not reading) or the task is gone; nothing was sent |
 | `send_line(text: String)` | `bool` | Send a line to PTY (appends `\r`, the Enter key). Same refusal as `send_text` |
 | `resize_grid(rows: int, cols: int)` | `bool` | Resize grid + send SIGWINCH. `false` = refused (grid lock poisoned) and nothing moved, PTY included; a pane with no shell answers `true` |
-| `set_palette(hex_csv: String)` | void | Load color scheme (16 hex colors, CSV) |
+| `set_palette(hex_csv: String)` | void | Load a color scheme (16 hex colors, CSV); slots the file omits or malforms reset to the system palette |
 | `get_terminal_session_id()` | `String` | Opaque id for the current PTY lifetime |
 
 #### App metadata

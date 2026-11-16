@@ -32,7 +32,7 @@ The directory applies to terminals spawned **after** the change — including te
 
 Because a profile is a layout template rather than a workspace, the directory is stored on the workspace instance, not on the profile. Activating the same profile in two workspaces can therefore produce terminals in two different directories.
 
-A single pane may point somewhere else: **Directory** in its Pane Settings sets that pane's own directory, and **Use workspace directory** clears it back to inheriting this one. The resolution is the pane's own directory, then the workspace's, then gPTY's own start directory, and it applies at the pane's next start; a stored path that no longer exists warns once and falls back a layer. The override belongs to you, not to a file — it lives in `user://pane_cwd.json`, keyed by this workspace's generated id and the pane's attachment id — so a profile copied from elsewhere can never carry one. See [[terminal-pane]] and [[workspace-trust]].
+A single pane may point somewhere else: **Directory** in its Pane Settings sets that pane's own directory, and **Use workspace directory** clears it back to inheriting this one. The resolution is the pane's own directory, then the workspace's, then your home directory (gPTY's own start directory only when no home is known), and it applies at the pane's next start; a stored path that no longer exists warns once and falls back a layer. The override belongs to you, not to a file — it lives in `user://pane_cwd.json`, keyed by this workspace's generated id and the pane's attachment id — so a profile copied from elsewhere can never carry one. See [[terminal-pane]] and [[workspace-trust]].
 
 ## Persistence
 

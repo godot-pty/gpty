@@ -208,7 +208,8 @@ These are load-bearing guards. Reports that require removing one of them should 
   *and* a workspace id this build generates (`ws-` plus 12 hex, minted on the first load of a store
   that predates it), written only by the pane settings UI, and deliberately outside the trust plan
   key - like the pane's own environment - because no file can name an entry and a path that has gone
-  missing falls back to the workspace's directory at spawn with one warning. The Inspector's
+  missing falls back to the workspace's directory, then the user's home, at spawn with one
+  warning. The Inspector's
   prompt and its two switches are the same kind of user-owned state, in `user://pane_inspector.json`:
   the settings table refuses them from files, the pane settings UI is the only writer, and the pane
   reads its own record at attach - so a profile cannot aim an Inspector, while a prompt and switches
@@ -218,7 +219,9 @@ These are load-bearing guards. Reports that require removing one of them should 
   `run` flag is set), no IPC method, CLI verb or plugin can add one, and nothing in a saved command
   is expanded - it is the user's own words for the shell they are looking at.
 - **Workspace directories (v0.7.1)**: a workspace's working directory comes from
-  `workspaces.json` and is handed to every terminal that workspace starts. A directory is not
+  `workspaces.json` and is handed to every terminal that workspace starts; an empty or unusable
+  value resolves to the user's home (`PaneCwdStore.resolve`), the same directory a pane with no
+  override gets. A directory is not
   executable on its own, so a plain shell in a file-supplied directory restores without a prompt
   (asking at every launch would train the user to dismiss the one dialog that matters), and a
   tile, profile or plugin cannot carry a directory of its own - the workspace owns it. A pane may

@@ -27,7 +27,7 @@ The engine stores the sixteen system colors as an array of RGB triplets in `crat
 
 Resolution happens in one place. `color_to_rgb` maps a named color through the palette, expands indexed colors using the ANSI table for 0–15, the 6×6×6 cube for 16–231, and the grayscale ramp for 232–255, and passes truecolor components through unchanged. The grid asks that function for every cell it exports, so the UI never interprets SGR itself.
 
-Each pane can replace the base sixteen colors with a scheme file. The pane's settings popup has a "Color scheme:" picker; the file is read as text, newlines become separators, spaces are removed, and up to sixteen `#rrggbb` values are applied in order. An empty scheme resets to the built-in palette. This is a palette substitution, not a filter: truecolor output is unaffected, while ANSI colors change everywhere at once.
+Each pane can replace the base sixteen colors with a scheme file. The pane's settings popup has a "Color scheme:" picker; the file is read as text, newlines become separators, spaces are removed, and up to sixteen `#rrggbb` values are applied in order. Every slot the file does not supply takes the built-in palette's value, so a scheme replaces the palette rather than patching the previous one; an empty scheme resets to the built-in palette. This is a palette substitution, not a filter: truecolor output is unaffected, while ANSI colors change everywhere at once.
 
 ## Paint-ready cells
 
@@ -39,7 +39,7 @@ Default colors are part of the theme too: cells that never received an SGR use a
 
 ## Limits and edge cases
 
-Indexed colors 0–15 are only as accurate as the palette in effect; a scheme that omits entries leaves the existing values in place, and a value that is not a valid `#rrggbb` string is ignored rather than guessed. The 6×6×6 cube is a standard approximation, so a 256-color program and a truecolor program asking for the same visual color may end up slightly different.
+Indexed colors 0–15 are only as accurate as the palette in effect; a scheme that omits an entry, or carries a malformed one, fills that slot from the built-in palette rather than from the scheme before it, and a value that is not a valid `#rrggbb` string is ignored rather than guessed. The 6×6×6 cube is a standard approximation, so a 256-color program and a truecolor program asking for the same visual color may end up slightly different.
 
 Bold is an attribute, not a color—gPTY does not automatically brighten bold text—so programs that relied on that old terminal behavior may look flatter. And because color is per cell, changing the scheme affects what is already on screen as well as new output: the palette is the interpretation of the stored indices, not a property of the text.
 
