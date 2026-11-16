@@ -21,7 +21,9 @@
 //! Reads refuse what they depend on and ignore what they do not. A store that
 //! does not parse, holds an entry outside the caps, or fails a required-field,
 //! type or shape check is an error that names the file, never a silent drop —
-//! dropping an entry would write the reduced state back on the next save. An
+//! dropping an entry would write the reduced state back on the next save. The
+//! file is read bounded: a store above `MAX_STORE_BYTES` is refused before its
+//! contents are parsed, so a planted tile array is never loaded. An
 //! unknown *sibling* key is ignored at every level (the file root, a record, a
 //! profile entry, a concept entry): an additive key from another release is
 //! not a reason to refuse an intact store, and nothing reads it — a tile goes
@@ -36,8 +38,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::schema::{
-    CONCEPT_KEYS, MAX_CONCEPT_NAME_LEN, MAX_CONCEPT_TRIGGER_LEN, MAX_CONCEPTS, MAX_NAME_LEN,
-    valid_plugin_id,
+    CONCEPT_KEYS, MAX_CONCEPT_NAME_LEN, MAX_CONCEPT_TRIGGER_LEN, MAX_CONCEPTS, MAX_MANIFEST_BYTES,
+    MAX_NAME_LEN, valid_plugin_id,
 };
 use gpty_ipc::transport;
 
@@ -45,6 +47,14 @@ use gpty_ipc::transport;
 /// concept/profile caps in spirit: the file is user-owned state, not content,
 /// so this only bounds the accidental/untrusted-file case.
 pub const MAX_PLUGINS: usize = 256;
+/// The largest `plugins.json` any reader will load.
+///
+/// Every record's content came from a manifest capped at
+/// `MAX_MANIFEST_BYTES`, so this build's writer cannot produce a store above
+/// `MAX_PLUGINS` × that cap — a larger file did not come from here. The cap
+/// is the only bound on the bytes, because the count caps cannot bound a
+/// single pass-through tile or concept value.
+pub const MAX_STORE_BYTES: usize = MAX_PLUGINS * MAX_MANIFEST_BYTES;
 /// Revisions are git commit ids — 40 hex (sha1) today, 64 for sha256 repos.
 pub const MIN_REVISION_LEN: usize = 7;
 pub const MAX_REVISION_LEN: usize = 64;
@@ -132,6 +142,37 @@ impl std::error::Error for StoreError {}
 
 pub type StoreResult<T> = Result<T, StoreError>;
 
+/// The store's text, refusing a file over `MAX_STORE_BYTES` without reading
+/// it whole. `Ok(None)` means the store does not exist.
+///
+/// This is the one reader: `PluginStore::records` and the GUI's start-up
+/// profile and concept readers all go through it, so a planted file cannot
+/// make any of them allocate its length. The bounded `take` is what bounds
+/// the allocation — a size from `metadata()` would race the read.
+pub fn read_store_text(path: &Path) -> StoreResult<Option<String>> {
+    use std::io::Read;
+
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(StoreError(format!("{}: {e}", path.display()))),
+    };
+    let mut bytes = Vec::new();
+    let mut reader = file.take(MAX_STORE_BYTES as u64 + 1);
+    reader
+        .read_to_end(&mut bytes)
+        .map_err(|e| StoreError(format!("{}: {e}", path.display())))?;
+    if bytes.len() > MAX_STORE_BYTES {
+        return Err(StoreError::corrupt(
+            path,
+            &format!("more than {MAX_STORE_BYTES} bytes"),
+        ));
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|e| StoreError(format!("{}: {e}", path.display())))
+}
+
 /// The on-disk record store.
 pub struct PluginStore {
     path: PathBuf,
@@ -153,15 +194,14 @@ impl PluginStore {
         Self { path }
     }
 
-    /// All records. A missing file is an empty store; a file that does not
-    /// parse, or an entry outside the caps, is an error naming the file.
+    /// All records. A missing file is an empty store; a file over
+    /// `MAX_STORE_BYTES`, one that does not parse, or an entry outside the
+    /// caps is an error naming the file.
     pub fn records(&self) -> StoreResult<Vec<PluginRecord>> {
-        let bytes = match std::fs::read(&self.path) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(StoreError(format!("{}: {e}", self.path.display()))),
+        let Some(text) = read_store_text(&self.path)? else {
+            return Ok(Vec::new());
         };
-        let root: serde_json::Value = serde_json::from_slice(&bytes)
+        let root: serde_json::Value = serde_json::from_str(&text)
             .map_err(|e| StoreError::corrupt(&self.path, &e.to_string()))?;
         let entries = root
             .get("plugins")
@@ -684,6 +724,49 @@ mod tests {
         let (_tmp, store) = make_store("missing");
         assert_eq!(store.records().unwrap(), Vec::new());
         assert_eq!(store.record("owner/name").unwrap(), None);
+    }
+
+    /// A store of exactly `total` bytes: one valid record plus a root-level
+    /// `pad` string (an unknown sibling key, which the reader ignores).
+    fn write_padded_store(store: &PluginStore, total: usize) {
+        let head = r#"{"plugins": [{"id": "owner/x", "revision": "aaaaaaa", "enabled": true, "installed_at": 1}], "pad": ""#;
+        let tail = r#""}"#;
+        assert!(total > head.len() + tail.len());
+        let json = format!(
+            "{head}{}{tail}",
+            "x".repeat(total - head.len() - tail.len())
+        );
+        std::fs::write(&store.path, &json).unwrap();
+        assert_eq!(
+            std::fs::metadata(&store.path).unwrap().len() as usize,
+            total
+        );
+    }
+
+    /// The refusal must be the length, not a parse error: this JSON parses,
+    /// and the file is over the cap by one byte.
+    #[test]
+    fn a_store_over_the_byte_cap_is_refused_without_being_parsed() {
+        let (_tmp, store) = make_store("byte-cap");
+        write_padded_store(&store, MAX_STORE_BYTES + 1);
+        let err = store.records().unwrap_err().0;
+        assert!(
+            err.contains(&store.path.display().to_string()),
+            "the error names the file: {err}"
+        );
+        assert!(
+            err.contains(&format!("more than {MAX_STORE_BYTES} bytes")),
+            "the error names the cap: {err}"
+        );
+    }
+
+    #[test]
+    fn a_store_just_under_the_byte_cap_reads() {
+        let (_tmp, store) = make_store("byte-cap-under");
+        write_padded_store(&store, MAX_STORE_BYTES - 1);
+        let records = store.records().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, "owner/x");
     }
 
     #[test]

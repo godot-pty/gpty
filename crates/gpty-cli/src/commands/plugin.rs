@@ -25,14 +25,12 @@ use crate::plugin_manifest::{
     self, ActionSpec, MAX_CONCEPT_NAME_LEN, Manifest, Platform, ProfileSpec, current_version,
     parse_manifest, valid_plugin_id,
 };
+use gpty_plugin::schema::MAX_MANIFEST_BYTES;
 use gpty_plugin::store::{self as plugin_store, PluginProfileRecord, PluginStore};
 
 /// The review dialog waits on a human; the request deadline (and this
 /// client's timeout) are minutes, not the default 5 s.
 const REVIEW_TIMEOUT: Duration = Duration::from_secs(300);
-/// A manifest is a small declaration file; anything larger is not a manifest
-/// but something being smuggled in.
-const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 
 pub async fn run(
     action: &PluginAction,

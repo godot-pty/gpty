@@ -14,6 +14,12 @@ pub const MAX_CONCEPTS: usize = 128;
 pub const MAX_CONCEPT_NAME_LEN: usize = 256;
 pub const MAX_CONCEPT_TRIGGER_LEN: usize = 1024;
 
+/// The largest `gpty-plugin.toml` the CLI will read. A manifest is a
+/// declaration, not content, and a store record's profiles and concepts came
+/// from one — so `gpty_plugin::store::MAX_STORE_BYTES` derives from this
+/// number instead of repeating it.
+pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
+
 /// Identifier shapes.
 pub const MAX_NAME_LEN: usize = 64;
 pub const MAX_ID_PART_LEN: usize = 63;

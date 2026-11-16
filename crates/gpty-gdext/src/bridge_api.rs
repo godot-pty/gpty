@@ -80,11 +80,11 @@ impl GptyTerminal {
             return GString::from("[]");
         };
         let path = dir.join("plugins.json");
-        let text = match std::fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return GString::from("[]"),
+        let text = match gpty_plugin::store::read_store_text(&path) {
+            Ok(Some(text)) => text,
+            Ok(None) => return GString::from("[]"),
             Err(e) => {
-                log::warn!("installed_plugin_profiles: {}: {e}", path.display());
+                log::warn!("installed_plugin_profiles: {e}");
                 return GString::from("[]");
             }
         };
@@ -113,11 +113,11 @@ impl GptyTerminal {
             return GString::from("[]");
         };
         let path = dir.join("plugins.json");
-        let text = match std::fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return GString::from("[]"),
+        let text = match gpty_plugin::store::read_store_text(&path) {
+            Ok(Some(text)) => text,
+            Ok(None) => return GString::from("[]"),
             Err(e) => {
-                log::warn!("installed_plugin_concepts: {}: {e}", path.display());
+                log::warn!("installed_plugin_concepts: {e}");
                 return GString::from("[]");
             }
         };
