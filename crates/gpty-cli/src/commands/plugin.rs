@@ -49,8 +49,12 @@ pub async fn run(
     // commands read and write is the GUI's too, and a pair from different
     // releases makes the older side call the newer side's records corrupt
     // (`plugins.json is corrupt: record 0: unknown key 'concepts'`, v0.7.1
-    // report). The offline validator probes too: the rule is the surface, not
-    // each action, and no GUI means one failed connect and no output.
+    // report). A reader from this release ignores additive keys and names a
+    // shape mismatch as a version skew (`StoreError::mismatched`), but a
+    // binary older than that change still calls the file corrupt - which is
+    // why the probe stays on every action of this surface. The offline
+    // validator probes too: the rule is the surface, not each action, and no
+    // GUI means one failed connect and no output.
     crate::commands::daemon::warn_on_version_mismatch(
         socket_path,
         crate::commands::daemon::VERSION_CHECK_BUDGET,

@@ -16,10 +16,21 @@
 //! the target — mirroring `BasePersistenceManager._write_file`: an in-place
 //! write truncates the target as soon as it opens, so a failure would cost
 //! the entire store, and a fixed temp name would let another local writer
-//! point the rename at a file of its choosing. Reads are strict: a store
-//! that does not parse (or holds an entry outside the caps) is an error that
-//! names the file, never a silent drop — dropping an entry would write the
-//! reduced state back on the next save.
+//! point the rename at a file of its choosing.
+//!
+//! Reads refuse what they depend on and ignore what they do not. A store that
+//! does not parse, holds an entry outside the caps, or fails a required-field,
+//! type or shape check is an error that names the file, never a silent drop —
+//! dropping an entry would write the reduced state back on the next save. An
+//! unknown *sibling* key is ignored at every level (the file root, a record, a
+//! profile entry, a concept entry): an additive key from another release is
+//! not a reason to refuse an intact store, and nothing reads it — a tile goes
+//! through `PaneTypes.sanitize_settings` in the GUI, and
+//! `gpty_core::concept::concepts_from_json` reads the keys it knows. A record
+//! whose shape fails is `StoreError::mismatched`, which names the version skew
+//! instead of calling the file corrupt. What an older reader loses is only the
+//! newer field: a profile entry is re-serialized from `PluginProfileRecord` on
+//! the next write, while a concept entry travels as raw JSON and keeps it.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -96,6 +107,19 @@ impl StoreError {
     fn corrupt(path: &Path, what: &str) -> Self {
         Self(format!("{} is corrupt: {what}", path.display()))
     }
+
+    /// A store that parses but whose record does not match this build.
+    ///
+    /// Unlike `corrupt`, this is not evidence of a broken file: the record
+    /// shape is the one thing two releases can disagree about, and naming the
+    /// skew is what sends a user to the fix. A hand-edited file gets the same
+    /// sentence, which is why it says "may".
+    fn mismatched(path: &Path, what: &str) -> Self {
+        Self(format!(
+            "{}: {what} — this store may have been written by a different gpty release; run the CLI and the GUI from the same release",
+            path.display()
+        ))
+    }
 }
 
 impl fmt::Display for StoreError {
@@ -151,11 +175,9 @@ impl PluginStore {
         }
         let mut out = Vec::with_capacity(entries.len());
         for (i, entry) in entries.iter().enumerate() {
-            out.push(
-                parse_record(entry).map_err(|what| {
-                    StoreError::corrupt(&self.path, &format!("record {i}: {what}"))
-                })?,
-            );
+            out.push(parse_record(entry).map_err(|what| {
+                StoreError::mismatched(&self.path, &format!("record {i}: {what}"))
+            })?);
         }
         Ok(out)
     }
@@ -267,19 +289,6 @@ fn parse_record(entry: &serde_json::Value) -> Result<PluginRecord, String> {
     let Some(table) = entry.as_object() else {
         return Err("not an object".into());
     };
-    let known = [
-        "id",
-        "revision",
-        "enabled",
-        "installed_at",
-        "profiles",
-        "concepts",
-    ];
-    for key in table.keys() {
-        if !known.contains(&key.as_str()) {
-            return Err(format!("unknown key `{key}`"));
-        }
-    }
     let id = table
         .get("id")
         .and_then(|v| v.as_str())
@@ -320,8 +329,10 @@ fn parse_record(entry: &serde_json::Value) -> Result<PluginRecord, String> {
 }
 
 /// The `profiles` array of a record: the shape `upsert` writes, checked
-/// strictly because the file is user-owned state a hostile local writer can
-/// plant.
+/// because the file is user-owned state a hostile local writer can plant.
+/// Unknown sibling keys are ignored — the GUI re-sanitizes every tile field
+/// it turns into a pane, so an additive key from another release carries
+/// nothing this reader has to judge.
 fn parse_profiles(value: &serde_json::Value) -> Result<Vec<PluginProfileRecord>, String> {
     let Some(entries) = value.as_array() else {
         return Err("`profiles` is not an array".into());
@@ -334,11 +345,6 @@ fn parse_profiles(value: &serde_json::Value) -> Result<Vec<PluginProfileRecord>,
         let Some(table) = entry.as_object() else {
             return Err(format!("profile {i} is not an object"));
         };
-        for key in table.keys() {
-            if !["name", "grid_unit", "tiles"].contains(&key.as_str()) {
-                return Err(format!("profile {i}: unknown key `{key}`"));
-            }
-        }
         let name = table
             .get("name")
             .and_then(|v| v.as_str())
@@ -416,22 +422,19 @@ fn parse_concepts(value: &serde_json::Value) -> Result<Vec<serde_json::Value>, S
 }
 
 /// The shape a concept entry has to satisfy, shared by the reader and the
-/// write path: a record the reader would refuse must never be written.
+/// write path: the part every consumer depends on.
 ///
 /// The entry travels as JSON — `parse_manifest` held it to the engine's
 /// vocabulary and the engine parser runs again on push — so this checks what
-/// the *store* and the GUI must be able to trust: the object shape, the
-/// closed key set (`CONCEPT_KEYS`, the same set the manifest enforces), and
-/// the identity fields the GUI keys by and the engine matches on.
+/// the *store* and the GUI must be able to trust: the object shape and the
+/// identity fields the GUI keys by and the engine matches on. The closed key
+/// set (`CONCEPT_KEYS`, the same set the manifest enforces) is the *writer's*
+/// rule and lives in `validate_concepts`: the reader tolerates an additive key
+/// from another release, and the engine ignores the keys it does not know.
 fn check_concept_shape(entry: &serde_json::Value) -> Result<(), String> {
     let Some(table) = entry.as_object() else {
         return Err("is not an object".into());
     };
-    for key in table.keys() {
-        if !CONCEPT_KEYS.contains(&key.as_str()) {
-            return Err(format!("unknown key `{key}`"));
-        }
-    }
     let name = table
         .get("name")
         .and_then(|v| v.as_str())
@@ -455,8 +458,9 @@ fn check_concept_shape(entry: &serde_json::Value) -> Result<(), String> {
     Ok(())
 }
 
-/// The write-path mirror of [`parse_concepts`]: what the reader would refuse
-/// is never written.
+/// The write-path mirror of [`parse_concepts`], plus the manifest's closed key
+/// set: what the reader refuses is never written, and a vocabulary the
+/// validator would not admit never reaches the file.
 fn validate_concepts(concepts: &[serde_json::Value]) -> StoreResult<()> {
     if concepts.len() > MAX_CONCEPT_RECORDS {
         return Err(StoreError(format!(
@@ -465,6 +469,16 @@ fn validate_concepts(concepts: &[serde_json::Value]) -> StoreResult<()> {
     }
     for (i, entry) in concepts.iter().enumerate() {
         check_concept_shape(entry).map_err(|what| StoreError(format!("concept {i}: {what}")))?;
+        // The write side keeps the manifest's closed key set: what lands in
+        // the store is what the validator admitted, and the reader tolerates
+        // additive keys precisely because a newer release may write them.
+        if let Some(table) = entry.as_object() {
+            for key in table.keys() {
+                if !CONCEPT_KEYS.contains(&key.as_str()) {
+                    return Err(StoreError(format!("concept {i}: unknown key `{key}`")));
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -1006,17 +1020,12 @@ mod tests {
     /// the store never silently drops a record's profiles.
     #[test]
     fn malformed_profile_shapes_are_rejected() {
-        let cases: [(&str, serde_json::Value, &str); 7] = [
+        let cases: [(&str, serde_json::Value, &str); 6] = [
             ("not-array", serde_json::json!("OMP"), "not an array"),
             (
                 "entry-not-object",
                 serde_json::json!(["OMP"]),
                 "is not an object",
-            ),
-            (
-                "unknown-key",
-                serde_json::json!([{"name": "P", "tiles": [], "color": "red"}]),
-                "unknown key `color`",
             ),
             (
                 "name-empty",
@@ -1163,20 +1172,16 @@ mod tests {
 
     /// Every malformed `concepts` shape the reader can meet is a named error —
     /// the store never silently drops a record's concepts — and the write
-    /// path refuses what the reader would refuse.
+    /// path refuses what the reader would refuse plus an unknown concept key
+    /// (the manifest's closed vocabulary; the reader keeps an additive one).
     #[test]
     fn malformed_concept_shapes_are_rejected() {
-        let cases: [(&str, serde_json::Value, &str); 6] = [
+        let cases: [(&str, serde_json::Value, &str); 5] = [
             ("not-array", serde_json::json!("cat"), "not an array"),
             (
                 "entry-not-object",
                 serde_json::json!(["cat"]),
                 "is not an object",
-            ),
-            (
-                "unknown-key",
-                serde_json::json!([{"name": "cat", "trigger": "x", "cmd": "rm -rf /"}]),
-                "unknown key `cmd`",
             ),
             (
                 "name-empty",
@@ -1227,6 +1232,125 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A concept key the store does not know is data, not a schema break: the
+    /// engine reads the keys it knows and ignores the rest, so the reader
+    /// keeps the entry. The writer still refuses it — what lands in the store
+    /// is what the manifest validator admitted.
+    #[test]
+    fn an_unknown_concept_key_reads_but_is_never_written() {
+        let (_tmp, store) = make_store("concepts-additive-read");
+        let concepts = vec![serde_json::json!({
+            "name": "cat",
+            "trigger": "x",
+            "cmd": "rm -rf /",
+        })];
+        std::fs::write(
+            &store.path,
+            serde_json::to_vec(&serde_json::json!({"plugins": [{
+                "id": "owner/x",
+                "revision": "aaaaaaa",
+                "enabled": true,
+                "installed_at": 1,
+                "concepts": concepts,
+            }]}))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(store.records().unwrap()[0].concepts, concepts);
+        let error = store
+            .upsert("owner/x", "aaaaaaa", &[], &concepts)
+            .unwrap_err();
+        assert!(error.0.contains("unknown key `cmd`"), "{error}");
+    }
+
+    /// The forward-compatibility rule, end to end: a key this build does not
+    /// know is ignored at every level, and a rewrite keeps only the keys the
+    /// typed record holds (profile entries) or the raw JSON carries on
+    /// (concept entries).
+    #[test]
+    fn additive_keys_read_and_a_rewrite_keeps_only_this_builds_keys() {
+        fn keys(value: &serde_json::Value) -> Vec<String> {
+            let mut keys: Vec<String> =
+                value.as_object().expect("object").keys().cloned().collect();
+            keys.sort();
+            keys
+        }
+
+        let (_tmp, store) = make_store("additive-keys");
+        std::fs::write(
+            &store.path,
+            serde_json::to_vec(&serde_json::json!({"plugins": [{
+                "id": "owner/x",
+                "revision": "aaaaaaa",
+                "enabled": true,
+                "installed_at": 1,
+                "future_record_key": {"anything": [1, 2]},
+                "profiles": [{
+                    "name": "OMP",
+                    "grid_unit": 12,
+                    "tiles": [{"type": "terminal"}],
+                    "color": "red",
+                }],
+                "concepts": [{"name": "cat", "trigger": "x", "future": true}],
+            }]}))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let records = store.records().unwrap();
+        assert_eq!(records.len(), 1);
+        let profile = &records[0].profiles[0];
+        assert_eq!(profile.name, "OMP");
+        assert_eq!(profile.grid_unit, Some(12));
+        assert_eq!(profile.tiles, vec![serde_json::json!({"type": "terminal"})]);
+        assert_eq!(records[0].concepts[0]["future"], true);
+
+        store.set_enabled("owner/x", false).unwrap();
+        let rewritten: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
+        let record = &rewritten["plugins"][0];
+        assert_eq!(
+            keys(record),
+            vec![
+                "concepts",
+                "enabled",
+                "id",
+                "installed_at",
+                "profiles",
+                "revision"
+            ]
+        );
+        assert_eq!(record["enabled"], false);
+        assert_eq!(
+            keys(&record["profiles"][0]),
+            vec!["grid_unit", "name", "tiles"]
+        );
+        assert_eq!(record["concepts"][0]["future"], true);
+    }
+
+    /// A record whose shape this build cannot use gets the version-skew
+    /// sentence, not "corrupt": the two binaries disagree, and the fix is to
+    /// run them from the same release.
+    #[test]
+    fn a_record_that_does_not_match_names_the_version_skew() {
+        let (_tmp, store) = make_store("skew-message");
+        std::fs::write(
+            &store.path,
+            r#"{"plugins": [{"id": "owner/x", "revision": "aaaaaaa", "installed_at": 1}]}"#,
+        )
+        .unwrap();
+        let error = store.records().unwrap_err();
+        for expected in [
+            "record 0",
+            "missing boolean `enabled`",
+            "different gpty release",
+            "same release",
+        ] {
+            assert!(error.0.contains(expected), "`{expected}`: {error}");
+        }
+        assert!(!error.0.contains("is corrupt"), "{error}");
     }
 
     #[test]

@@ -109,7 +109,7 @@ gpty/
 │   │   └── src/
 │   │       ├── lib.rs          # Module map: schema (caps) + store (plugins.json, content/runtime dirs)
 │   │       ├── schema.rs       # Caps the manifest validator and the store both enforce
-│   │       └── store.rs        # plugins.json + per-plugin content/runtime dirs; atomic writes, strict reader
+│   │       └── store.rs        # plugins.json + per-plugin content/runtime dirs; atomic writes, additive keys ignored, a shape mismatch names the version skew
 │   └── gpty-gdext/             # GDExtension cdylib: GptyTerminal + GptyAi + GptyCliView + GptyMarkdown
 │       └── src/
 │           ├── lib.rs          # GptyTerminal GodotClass: session lifecycle, input, grid access helpers
