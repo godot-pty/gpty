@@ -24,6 +24,9 @@ func after_each():
 	# The palette is process-global; a picker test that left it light would
 	# re-theme every later suite.
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	SettingsManager.cfg_pane_animation = {}
+	SettingsManager.cfg_pane_animation_params = {}
 	SettingsManager.apply_appearance()
 	# A failed assertion must not leave a small window for the rest of the
 	# process; the layout assertions in this file are the card's own minimums.
@@ -767,3 +770,85 @@ func test_every_group_caption_precedes_its_rows_and_no_heading_is_empty():
 				"an unbound group contributes no heading, so no grid is ever empty")
 		expect_caption = not expect_caption
 	assert_true(expect_caption, "the list ends on a grid, never a dangling heading")
+
+# ── Motion ─────────────────────────────────────────────────────────────
+
+func _find_option(node_name: String) -> OptionButton:
+	return _panel.find_child(node_name, true, false) as OptionButton
+
+## Select an animation by its registry id, through the picker's own signal so
+## the panel runs the same handler a click does.
+func _select_animation(picker: OptionButton, id: String) -> void:
+	var idx := -1
+	for i in picker.item_count:
+		if str(picker.get_item_metadata(i)) == id:
+			idx = i
+			break
+	assert_ne(idx, -1, "%s must offer %s" % [picker.name, id])
+	if idx == -1:
+		return
+	picker.item_selected.emit(idx)
+
+func _spin_in(host: Node, spin_name: String) -> SpinBox:
+	for row in host.get_children():
+		for c in row.get_children():
+			if c is SpinBox and c.name == spin_name:
+				return c
+	return null
+
+func test_the_motion_section_lists_every_kind_and_its_animations():
+	var master := _find_option("MotionOpt")
+	assert_not_null(master, "the Appearance tab carries the Motion switch")
+	assert_eq(master.item_count, 3, "Off, Subtle, Full")
+	for kind in PaneTransitions.KINDS:
+		var k := str(kind)
+		var picker := _find_option("%sAnimOpt" % k.capitalize())
+		assert_not_null(picker, "%s has a picker" % k)
+		assert_eq(picker.item_count, PaneTransitions.animations_for(k).size(),
+			"%s lists exactly the animations that serve it" % k)
+
+func test_selecting_an_animation_rebuilds_its_property_rows():
+	var picker := _find_option("CreateAnimOpt")
+	var host := _panel.find_child("CreateParams", true, false)
+	assert_not_null(host)
+
+	_select_animation(picker, "fade")
+	assert_not_null(_spin_in(host, "Create_duration_ms"), "fade exposes its duration")
+	assert_null(_spin_in(host, "Create_scale_from"), "fade has no scale property")
+
+	_select_animation(picker, "fade_scale")
+	assert_not_null(_spin_in(host, "Create_scale_from"), "fade_scale exposes its scale")
+
+	_select_animation(picker, "none")
+	assert_eq(host.get_child_count(), 0, "none declares no properties")
+
+func test_a_property_edit_reaches_the_store_after_the_debounce():
+	var picker := _find_option("CreateAnimOpt")
+	_select_animation(picker, "fade_scale")
+	var host := _panel.find_child("CreateParams", true, false)
+	var spin := _spin_in(host, "Create_scale_from")
+	assert_not_null(spin)
+
+	spin.value = 0.85
+	assert_almost_eq(
+		float(SettingsManager.cfg_pane_animation_params["create:fade_scale"]["scale_from"]),
+		0.85, 0.001, "the edit is in memory at once")
+	var writes := MockAutoloads.write_count(SettingsManager.SETTINGS_FILE)
+	await wait_seconds(0.2)
+	assert_gt(MockAutoloads.write_count(SettingsManager.SETTINGS_FILE), writes,
+		"the shared debounce timer writes the file")
+
+func test_the_appearance_reset_restores_motion_defaults():
+	SettingsManager.cfg_motion = UiMotion.FULL
+	SettingsManager.cfg_pane_animation = {"create": "fade", "close": "fade", "swap": "move"}
+	SettingsManager.cfg_pane_animation_params = {"create:fade": {"duration_ms": 300.0}}
+	_panel._sync_motion_rows()
+
+	var reset := _tab_reset_button("Appearance")
+	assert_not_null(reset)
+	reset.pressed.emit()
+
+	assert_eq(SettingsManager.cfg_motion, UiMotion.SUBTLE)
+	assert_eq(PaneTransitions.choice("create"), "fade_scale")
+	assert_true(SettingsManager.cfg_pane_animation_params.is_empty())
+	assert_eq(_find_option("MotionOpt").selected, UiMotion.SUBTLE)

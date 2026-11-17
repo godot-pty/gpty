@@ -143,6 +143,12 @@ const STATES := {
 	"settings-terminal": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Terminal"},
 	"settings-terminal-150": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Terminal",
 		"ui_scale": 150},
+	# The Motion section at the bottom of Appearance: the master switch, the
+	# create/close/swap pickers and the selected animation's generated property
+	# rows (rows *Panes animate when they are created, destroyed or swapped* and
+	# *The transition library grows past fade and move*).
+	"settings-motion": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings",
+		"tab": "Appearance", "scroll_to": "MotionTitle"},
 	# The UI scale setting at its 125 % step, on the app's own first-launch
 	# workspace. The only visual proof that the setting scales the chrome and
 	# the terminal text together; a later release recaptures it.
@@ -649,6 +655,19 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 					return false
 				tab_container.current_tab = tab_container.get_tab_idx_from_control(tab_body as Control)
 				await _wait_frames(2)
+				# `"scroll_to": "<node name>"` puts a section below the card's
+				# fold at the top of the tab: a control scrolled out of the
+				# card is still real, and a capture that cannot reach it
+				# proves nothing about it.
+				if state.has("scroll_to") and tab_body is ScrollContainer:
+					var target := _workspace._settings_panel.find_child(
+						str(state["scroll_to"]), true, false) as Control
+					if target == null:
+						_fail("the Settings panel has no '%s' control" % str(state["scroll_to"]))
+						return false
+					var sc := tab_body as ScrollContainer
+					sc.scroll_vertical = int(target.position.y)
+					await _wait_frames(2)
 		"file-dialog":
 			var more_button := _button_with_accessible_name(_workspace._sidebar,
 				"More workspace actions")

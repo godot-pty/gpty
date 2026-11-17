@@ -15,6 +15,9 @@ func after_each():
 	# is the same kind of leak through `SettingsManager`'s own field.
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
 	SettingsManager.cfg_sidebar_folded.clear()
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	SettingsManager.cfg_pane_animation = {}
+	SettingsManager.cfg_pane_animation_params = {}
 	SettingsManager.system_is_dark = func() -> bool:
 		return DisplayServer.is_dark_mode() if DisplayServer.is_dark_mode_supported() else true
 	SettingsManager.apply_appearance()
@@ -190,3 +193,48 @@ func test_a_fold_does_not_broadcast_settings_changed():
 	watch_signals(SettingsManager)
 	SettingsManager.set_sidebar_folded("profiles", true)
 	assert_signal_not_emitted(SettingsManager, "settings_changed")
+
+# ── Pane motion ────────────────────────────────────────────────────────
+
+func test_motion_settings_roundtrip():
+	SettingsManager.cfg_motion = UiMotion.FULL
+	SettingsManager.cfg_pane_animation = {"create": "fade", "close": "fade", "swap": "move"}
+	SettingsManager.cfg_pane_animation_params = {"create:fade": {"duration_ms": 300.0}}
+	SettingsManager.save_settings()
+
+	SettingsManager.cfg_motion = UiMotion.OFF
+	SettingsManager.cfg_pane_animation = {}
+	SettingsManager.cfg_pane_animation_params = {}
+	SettingsManager.load_settings()
+
+	assert_eq(SettingsManager.cfg_motion, UiMotion.FULL)
+	assert_eq(str(SettingsManager.cfg_pane_animation["create"]), "fade")
+	assert_eq(str(SettingsManager.cfg_pane_animation["close"]), "fade")
+	assert_eq(str(SettingsManager.cfg_pane_animation["swap"]), "move")
+	assert_almost_eq(
+		float(SettingsManager.cfg_pane_animation_params["create:fade"]["duration_ms"]),
+		300.0, 0.001)
+
+func test_damaged_motion_settings_fall_back_to_defaults():
+	# Values a hand-edited file or another build can carry: an out-of-range
+	# level, ids that do not serve their transition, and parameter keys the
+	# registry never declared.
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE, {
+		"motion": 99,
+		"pane_animations": {"create": "move", "swap": "fade_scale"},
+		"pane_animation_params": {
+			"create:nope": {"x": 1},
+			"create:move": {"duration_ms": 99999},
+		},
+	})
+	SettingsManager.load_settings()
+
+	assert_eq(SettingsManager.cfg_motion, UiMotion.FULL, "the level clamps")
+	assert_eq(str(SettingsManager.cfg_pane_animation["create"]), "fade_scale",
+		"a swap animation cannot serve a create")
+	assert_eq(str(SettingsManager.cfg_pane_animation["swap"]), "move",
+		"a create animation cannot serve a swap")
+	assert_eq(str(SettingsManager.cfg_pane_animation["close"]), "fade_scale",
+		"a missing kind takes its default")
+	assert_true(SettingsManager.cfg_pane_animation_params.is_empty(),
+		"no parameter pair survives: one names an unknown id, one the wrong kind")

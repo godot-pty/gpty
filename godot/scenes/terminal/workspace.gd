@@ -85,6 +85,9 @@ var _shortcut_guide: ShortcutGuide = null
 var _settings_panel: SettingsPanel
 var _concept_graph: ConceptGraphEditor = null
 var _tm: TerminalManager = TerminalManager.new()
+## The pane transition runner. One instance per workspace, so a ghost or a
+## tween dies with the grid it came from.
+var _transitions := PaneTransitions.new()
 ## The permanent empty host. `_tm`/`_grid` point at the active workspace, and
 ## at this pair when there is none; it is never freed.
 var _home_grid: Control
@@ -284,6 +287,9 @@ func _on_settings_changed():
 	_sync_pane_titlebars()
 	_apply_fps_setting()
 	_apply_window_mode()
+	# Motion off (or a transition edit) applies without a restart: whatever is
+	# mid-flight snaps to its final state under the new setting.
+	_transitions.finish_all()
 
 ## A palette switch, wherever it came from: the Theme is rebuilt (every widget's
 ## colours and the role variations), the clear colour and the user-coloured
@@ -361,6 +367,7 @@ func _exit_tree():
 	# test's tree, or a second workspace instance), so the slot goes back to the
 	# neutral answer before anything else here runs.
 	ShortcutManager.overlay_owns_keyboard = func() -> bool: return false
+	_transitions.finish_all()
 	_chrome.save_position()
 	_save()
 	SettingsManager.save_settings()
@@ -426,6 +433,10 @@ func _build_empty_state():
 ## is O(grid x tiles), the largest remaining create step at a full grid.
 func _apply_layout(refresh_dividers := true):
 	if _grid == null: return
+	# A layout pass re-derives every tile rect, so a create or swap tween that
+	# is still moving must snap to the rects this pass is about to write. A
+	# close ghost is not in the tile list and its rect is already final.
+	_transitions.finish_layout_sensitive()
 	var top_offset = TITLEBAR_HEIGHT if (_titlebar and _titlebar.visible) else 0.0
 	var bottom_offset = StatusBar.HEIGHT if _status_bar else 0.0
 	var m = _sidebar_bg.size.x if (_sidebar_bg and _sidebar_bg.visible) else 0.0
@@ -595,6 +606,7 @@ func _spawn_pane_into(ws: Dictionary, type_name: String, opts := {}, activate :=
 		return null
 	var w = tm.tiles[-1].wrapper
 	_add_body_to_grid_into(ws, w, body)
+	_transitions.create(w, _motion_allowed(ws.tm))
 	# A pane the user asked for is the pane they are working in: record it and
 	# hand it the keyboard. Only the active workspace can take focus (a hidden
 	# terminal's `grab_focus` is dropped by the engine), and a restore passes
@@ -936,7 +948,10 @@ func _kill_now(body: Control):
 	# manager directly (`tm.reset()`), so the aim still survives those.
 	if body is InspectorPane:
 		PaneInspectorStore.remove_state(str(body.attachment_id))
-	ws.tm.kill(body)
+	# Decided before the pane leaves the tile list: the flood scan and the
+	# divider-drag check both read the grid as it was while this pane lived.
+	var animate := _motion_allowed(ws.tm)
+	ws.tm.kill(body, _close_transition.bind(animate))
 	_close_pane_settings_for(body)
 	_apply_layout()
 	if held_focus:
@@ -951,6 +966,30 @@ func _kill_now(body: Control):
 		if survivor != null:
 			activate_pane(survivor)
 	_list()
+
+## Draw a dying pane above the sibling that is growing into its rect (or the
+## fade would play underneath it) and below the divider bands, then play its
+## exit. `animate` is `_motion_allowed` read before the tile left the list.
+func _close_transition(w: Control, animate: bool) -> void:
+	var grid := w.get_parent()
+	if grid != null:
+		var dividers := grid.get_node_or_null("DividerHandles")
+		grid.move_child(w, dividers.get_index() if dividers != null else -1)
+	_transitions.close(w, animate)
+
+## Motion is on, the manager is the visible workspace's, no divider drag owns
+## the grid, and no terminal in it is in its flood cadence (a swap resizes,
+## and that pane's grid work is already being stretched).
+func _motion_allowed(tm: TerminalManager) -> bool:
+	if not UiMotion.enabled() or tm == null or tm != _tm:
+		return false
+	if tm.drag_active():
+		return false
+	for t in tm.tiles:
+		var body = tm._find_body(t.wrapper)
+		if body is TerminalPane and body.under_flood_load():
+			return false
+	return true
 
 ## The last pane of `ws` in tile order — the survivor when the active pane
 ## closes (the tiling logic grows that tile into the freed space). Any type
@@ -1019,6 +1058,9 @@ func _swap_pane_now(body: Control, new_type_name: String):
 		_attach_pane_into(ws, new_wrapper, new_body)
 
 	_apply_layout()
+	# A type switch destroys the old body and builds the new one in the same
+	# rect; the new pane arrives with the configured create transition.
+	_transitions.create(new_wrapper, _motion_allowed(tm))
 	_list()
 	# The swapped-in body is the pane the user just acted on: record it and
 	# apply the one focus rule (a terminal takes the keyboard, a read-only
@@ -1323,11 +1365,17 @@ func _wire_tm(tm: TerminalManager):
 	# creates is no longer workspace 0, so a manager without this connection
 	# would stop relayouting after a divider drag.
 	tm.tiles_resized.connect(_apply_layout)
+	tm.tiles_swapped.connect(_on_tiles_swapped.bind(tm))
 	# The panes must know a divider drag is in flight: that is what turns their
 	# quiet-period resize debounce into a throttle, and what puts the axis's
 	# pointer shape on the window while the divider moves.
 	tm.divider_drag_started.connect(_on_divider_drag_started.bind(tm))
 	tm.divider_drag_finished.connect(_on_divider_drag_finished.bind(tm))
+
+## A position swap committed. `tiles_resized` has already laid both wrappers
+## out at their new rects; the motion layer eases them there from `before`.
+func _on_tiles_swapped(before: Dictionary, tm: TerminalManager) -> void:
+	_transitions.swap(before, _motion_allowed(tm))
 
 ## Build a workspace grid's divider grab bands: one transparent layer over the
 ## tiles, kept topmost by `_attach_pane_into`, refreshed by `_apply_layout`.

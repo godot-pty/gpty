@@ -322,6 +322,12 @@ func _note_view_input():
 func _relax_sync_backoff() -> void:
 	_sync_backoff = maxf(_sync_backoff * 0.5 - _sync_interval, 0.0)
 
+## Whether this pane's repaint is in its flood back-off right now. Read by the
+## pane transition layer: a swap resizes this grid, and its work is already
+## stretched to the flood cadence.
+func under_flood_load() -> bool:
+	return _sync_backoff > 0.0
+
 ## Mouse reporting the child process has enabled, read from the grid
 ## (`GptyTerminal.get_mouse_mode`). The bit values are the FFI contract with
 ## `gpty_core::term::MOUSE_MODE_*`: click = DECSET 1000, drag = 1002,

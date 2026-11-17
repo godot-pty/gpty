@@ -69,6 +69,13 @@ var cfg_ui_scale := 100
 ## Which chrome colour set is active: `APPEARANCE_DARK`, `APPEARANCE_LIGHT`, or
 ## `APPEARANCE_SYSTEM` (the desktop's own preference).
 var cfg_appearance_mode := APPEARANCE_DARK
+## Which pane animations play (Off/Subtle/Full) and which animation each
+## transition uses. `PaneTransitions` resolves the stored ids and clamps the
+## per-animation properties; the empty dictionaries here resolve to the
+## registry defaults, which is also what a store without the keys means.
+var cfg_motion := UiMotion.SUBTLE
+var cfg_pane_animation := {}
+var cfg_pane_animation_params := {}
 
 ## The foldable sidebar sections, in the order the sidebar stacks them. These ids
 ## are the `sidebar_folded` vocabulary: a stored value that is not in this list is
@@ -230,6 +237,13 @@ func load_settings():
 	cfg_ui_scale = clampi(_as_int(d, "ui_scale", 100), 100, UI_SCALE_PRESETS.max())
 	cfg_appearance_mode = clampi(_as_int(d, "appearance_mode", APPEARANCE_DARK), APPEARANCE_DARK, APPEARANCE_SYSTEM)
 	cfg_sidebar_folded = _sidebar_folded_from(_as_array(d, "sidebar_folded", []))
+	# Motion is a closed vocabulary: an id this build does not know, or one that
+	# serves another transition, falls back to the kind's default, and a
+	# property outside its schema range is clamped. A store from another build
+	# never reaches a tween.
+	cfg_motion = clampi(_as_int(d, "motion", UiMotion.SUBTLE), UiMotion.OFF, UiMotion.FULL)
+	cfg_pane_animation = PaneTransitions.sanitize_choices(_as_dict(d, "pane_animations", {}))
+	cfg_pane_animation_params = PaneTransitions.sanitize_params_store(_as_dict(d, "pane_animation_params", {}))
 
 func save_settings():
 	_save_settings_file()
@@ -251,6 +265,9 @@ func _save_settings_file():
 	d["appearance_mode"] = cfg_appearance_mode
 	d["history_lines"] = cfg_history_lines
 	d["sidebar_folded"] = cfg_sidebar_folded.duplicate()
+	d["motion"] = cfg_motion
+	d["pane_animations"] = cfg_pane_animation.duplicate(true)
+	d["pane_animation_params"] = cfg_pane_animation_params.duplicate(true)
 	_write_file(SETTINGS_FILE, d)
 
 func apply_to_terminal(body: Control):

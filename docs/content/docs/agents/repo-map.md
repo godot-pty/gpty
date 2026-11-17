@@ -179,6 +179,7 @@ gpty/
         │   ├── terminal_pane.gd    # Control-based renderer, keyboard, mouse, selection, history search
         │   ├── terminal_fonts.gd   # Byte-only font loader (a data path never reaches load())
         │   ├── terminal_manager.gd # Tile lifecycle, split/kill/swap/spawn
+        │   ├── pane_transitions.gd # Pane-transition registry, settings resolution and tween runner
         │   ├── tile_drag.gd        # Divider-drag state machine (extracted)
         │   └── divider_handles.gd  # Divider grab bands: one handle per divider segment
         ├── ui/
@@ -205,6 +206,7 @@ gpty/
         │   ├── ui_palette.gd       # The chrome colours in two complete sets (dark/light) and the active one
         │   ├── color_swatch.gd     # The words a colour swatch carries: opacity reading, "unset", tooltip
         │   ├── ui_tokens.gd        # The type scale, spacing, radius and the WCAG contrast maths
+        │   ├── ui_motion.gd        # The motion policy (Off/Subtle/Full) every animation reads
         │   ├── ui_theme.gd         # The one Theme, built from the palette and applied at the root
         │   ├── app_dialog.gd       # The one modal builder (theme, grouped buttons, selectable body)
         │   ├── section_help.gd      # The shared "Help" affordance a section header carries (glyph → action → chord table)

@@ -45,6 +45,11 @@ var _command_empty: Label = null
 ## The Commands tab's row buttons by role ("add", "edit", "delete", "up",
 ## "down"), so `_sync_command_buttons` enables them by what the selection is.
 var _command_actions := {}
+## The Motion section: the master picker, one picker per transition kind, and
+## the per-kind hosts the property rows are generated into.
+var _motion_opt: OptionButton = null
+var _motion_pickers := {}
+var _motion_params := {}
 
 func _init(workspace: Control):
 	_workspace = workspace
@@ -111,6 +116,9 @@ func _notification(what: int):
 		# workspace fills after this panel may already exist: re-read on every
 		# show so the table cannot print a binding from before that happened.
 		_refresh_shortcut_list()
+		# The Motion pickers and generated property rows read the settings on
+		# every show for the same reason: the panel outlives a visit.
+		_sync_motion_rows()
 	elif what == NOTIFICATION_RESIZED:
 		# The window (and with it the layout space) changed, so the scale it can
 		# show may have moved while the panel is open - and the card that fitted
@@ -224,6 +232,8 @@ func _build_ui():
 	# setting, so it is not in the per-pane settings popup.
 	var show_tb_cb = _add_show_titlebar_control(t_app)
 	var color_btns = _add_color_section(t_app)
+	t_app.add_child(HSeparator.new())
+	var motion_reset = _add_motion_section(t_app)
 	_add_tab_reset(t_app, func():
 		SettingsManager.cfg_font_path = "res://fonts/DejaVuSansMono.ttf"
 		SettingsManager.cfg_font_size = 14
@@ -244,6 +254,7 @@ func _build_ui():
 		appearance_opt.selected = SettingsManager.APPEARANCE_DARK
 		show_tb_cb.button_pressed = true
 		_reset_colors(color_btns)
+		motion_reset.call()
 		SettingsManager.save_settings()
 	)
 
@@ -594,6 +605,127 @@ func _add_appearance_control(v: VBoxContainer) -> OptionButton:
 	hb.add_child(opt)
 	v.add_child(hb)
 	return opt
+
+## The Motion section: the master switch, one picker per transition, and the
+## property rows of whichever animation each picker selected. The rows come
+## from `PaneTransitions`' schema, so adding an animation needs no code here.
+## Returns the tab reset's motion half (the caller saves the file).
+func _add_motion_section(v: VBoxContainer) -> Callable:
+	var title := Label.new()
+	title.name = "MotionTitle"
+	title.text = "Motion"
+	title.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
+	v.add_child(title)
+	var hint := Label.new()
+	hint.text = UiMotion.HINT
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.theme_type_variation = UiTheme.MUTED_LABEL
+	v.add_child(hint)
+
+	var hb := HBoxContainer.new()
+	hb.add_child(_lbl("Pane transitions:"))
+	var opt := OptionButton.new(); opt.name = "MotionOpt"
+	for label in UiMotion.LABELS:
+		opt.add_item(label)
+	opt.selected = UiMotion.level()
+	opt.tooltip_text = "How much a pane change moves; Off draws it in one frame"
+	opt.item_selected.connect(func(idx: int):
+		SettingsManager.cfg_motion = idx
+		SettingsManager.save_settings()
+		_sync_motion_rows()
+	)
+	hb.add_child(opt)
+	v.add_child(hb)
+	_motion_opt = opt
+
+	for kind in PaneTransitions.KINDS:
+		var k := str(kind)
+		var row := HBoxContainer.new()
+		row.add_child(_lbl(k.capitalize() + ":"))
+		var kind_opt := OptionButton.new()
+		kind_opt.name = "%sAnimOpt" % k.capitalize()
+		row.add_child(kind_opt)
+		v.add_child(row)
+		var host := VBoxContainer.new()
+		host.name = "%sParams" % k.capitalize()
+		v.add_child(host)
+		_motion_pickers[k] = kind_opt
+		_motion_params[k] = host
+		kind_opt.item_selected.connect(func(idx: int):
+			_on_motion_animation_selected(k, kind_opt, idx))
+
+	_sync_motion_rows()
+	return func():
+		SettingsManager.cfg_motion = UiMotion.SUBTLE
+		SettingsManager.cfg_pane_animation = PaneTransitions.sanitize_choices({})
+		SettingsManager.cfg_pane_animation_params = {}
+		_sync_motion_rows()
+
+## Read the stored choices into the pickers and rebuild every property block.
+## Called on build, on a picker change and whenever the panel is shown: the
+## panel outlives a visit, and a test or a reset may have moved the settings.
+func _sync_motion_rows() -> void:
+	if _motion_opt == null:
+		return
+	SettingsManager.cfg_pane_animation = PaneTransitions.sanitize_choices(
+		SettingsManager.cfg_pane_animation)
+	_motion_opt.selected = UiMotion.level()
+	for kind in PaneTransitions.KINDS:
+		var k := str(kind)
+		var opt: OptionButton = _motion_pickers[k]
+		opt.clear()
+		var ids := PaneTransitions.animations_for(k)
+		for id in ids:
+			opt.add_item(PaneTransitions.animation_label(id))
+			opt.set_item_metadata(opt.item_count - 1, id)
+		opt.selected = maxi(ids.find(PaneTransitions.choice(k)), 0)
+		_rebuild_motion_params(k)
+
+func _on_motion_animation_selected(kind: String, opt: OptionButton, idx: int) -> void:
+	SettingsManager.cfg_pane_animation[kind] = str(opt.get_item_metadata(idx))
+	SettingsManager.save_settings()
+	_rebuild_motion_params(kind)
+
+## Regenerate one kind's property rows from the selected animation's schema:
+## a label and a bounded SpinBox per declared property.
+func _rebuild_motion_params(kind: String) -> void:
+	var host: VBoxContainer = _motion_params.get(kind)
+	if host == null:
+		return
+	for child in host.get_children():
+		host.remove_child(child)
+		# Immediate: the rows are rebuilt inside the picker's own signal, and a
+		# queued free would leave the old rows as orphans for a frame.
+		child.free()
+	var id := PaneTransitions.choice(kind)
+	var values := PaneTransitions.param_values(kind, id)
+	for p in PaneTransitions.param_schema(kind, id):
+		var row := HBoxContainer.new()
+		row.add_child(_lbl(str(p["label"]) + ":"))
+		var spin := SpinBox.new()
+		var param_key := str(p["key"])
+		spin.name = "%s_%s" % [kind.capitalize(), param_key]
+		spin.min_value = float(p["min"])
+		spin.max_value = float(p["max"])
+		spin.step = float(p["step"])
+		spin.value = float(values[param_key])
+		spin.value_changed.connect(func(value: float):
+			_store_motion_param(kind, id, param_key, value))
+		row.add_child(spin)
+		host.add_child(row)
+
+## Store one property edit in memory and let the shared debounce timer write
+## the file; a SpinBox drag must not rewrite settings.json on every tick.
+func _store_motion_param(kind: String, id: String, param: String, value: float) -> void:
+	var key := kind + ":" + id
+	var stored := {}
+	var existing = SettingsManager.cfg_pane_animation_params.get(key, {})
+	if existing is Dictionary:
+		stored = existing
+	stored[param] = value
+	SettingsManager.cfg_pane_animation_params[key] = stored
+	if _debounce_timer != null:
+		_debounce_timer.start()
 
 func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: Callable, default_color: Callable) -> Array:
 	var h = HBoxContainer.new()

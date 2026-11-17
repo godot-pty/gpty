@@ -55,6 +55,7 @@ godot/
         │   ├── terminal_fonts.gd # Byte-only font loader (a data path never reaches load())
         │   ├── concept_router.gd # Pure concept-event routing (extracted, testable)
         │   ├── plugin_review_text.gd # Pure plugin-review dialog text (extracted, testable)
+        │   ├── pane_transitions.gd # Pane-transition registry, settings resolution and tween runner
         │   └── terminal_manager.gd
         ├── ui/                  # UI components
         │   ├── sidebar.gd       # Vertical stack: window mode, workspaces, panes, profiles
@@ -73,6 +74,7 @@ godot/
         │   ├── ui_palette.gd   # The chrome colours in two complete sets (dark/light) and the active one
         │   ├── color_swatch.gd # The words a colour swatch carries: opacity reading, "unset", tooltip
         │   ├── ui_tokens.gd    # Type scale, spacing, radius and the WCAG contrast maths
+        │   ├── ui_motion.gd    # The motion policy (Off/Subtle/Full) every animation reads
         │   ├── ui_theme.gd     # The one Theme, built from the palette and applied at the root
         │   ├── app_dialog.gd   # The one modal builder (theme, grouped buttons, selectable body)
         │   ├── menu_items.gd   # The one native PopupMenu item builder (icon + text + tooltip + metadata)
