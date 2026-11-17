@@ -147,20 +147,31 @@ if [ -f "$PREFIX/.stamp" ] && [ "$(cat "$PREFIX/.stamp")" = "$(stamp)" ]; then
     if [ "$PLATFORM" = "windows" ] && [ -n "${VCPKG_ROOT:-}" ] \
         && [ -d "$VCPKG_ROOT/installed/x64-windows" ]; then
         # The cached repo prefix supplies the DLLs; vcpkg's tree must still be
-        # there for headers and import libraries. When it is not (a cache
-        # eviction), fall through and reinstall rather than failing at compile.
+        # there for headers and import libraries.
         write_env_vcpkg "$VCPKG_ROOT/installed/x64-windows"
-    else
+        exit 0
+    elif [ "$PLATFORM" != "windows" ]; then
         write_env
+        exit 0
     fi
-    exit 0
+    # Windows with a missing vcpkg tree falls through to the vcpkg install:
+    # the repo prefix only carries the DLLs, not headers or import libraries.
 fi
 
 if [ "$PLATFORM" = "windows" ]; then
     step "FFmpeg $VERSION via vcpkg"
     [ -n "${VCPKG_ROOT:-}" ] || die "set VCPKG_ROOT (or use the Windows CI job) to build media deps"
     VCPKG_PREFIX="$VCPKG_ROOT/installed/x64-windows"
+    # The GitHub runner's vcpkg checkout is older than the current registry and
+    # cannot resolve a manifest `builtin-baseline` commit (its history has no
+    # versions/baseline.json for that commit). Use the checkout's baseline and
+    # enforce the FFmpeg version below; the port revision is packaging, not the
+    # compatibility or licensing contract.
     "$VCPKG_ROOT/vcpkg" install ffmpeg:x64-windows
+    installed_version="$(awk -v RS='' '/^Package: ffmpeg/ {for (i=1;i<=NF;i++) if ($i=="Version:") {print $(i+1); exit}}' "$VCPKG_ROOT/installed/vcpkg/status")"
+    installed_port="$(awk -v RS='' '/^Package: ffmpeg/ {for (i=1;i<=NF;i++) if ($i=="Port-Version:") {print $(i+1); exit}}' "$VCPKG_ROOT/installed/vcpkg/status")"
+    [ "$installed_version" = "$VERSION" ] \
+        || die "vcpkg installed ffmpeg $installed_version, expected $VERSION"
     # Compilation uses the vcpkg prefix (headers, import libs); the stable
     # repo prefix carries the runtime DLLs and licenses that bundle-media
     # copies beside the exported app.
@@ -173,7 +184,10 @@ if [ "$PLATFORM" = "windows" ]; then
             cp "$license" "$PREFIX/licenses/"
         fi
     done
-    cp "$COMPONENTS" "$PREFIX/components.txt"
+    {
+        printf 'source = vcpkg ffmpeg %s#%s (runner baseline)\n' "$VERSION" "${installed_port:-0}"
+        printf 'features = avcodec,avdevice,avfilter,avformat,swresample,swscale\n'
+    } > "$PREFIX/components.txt"
     write_env_vcpkg "$VCPKG_PREFIX"
     stamp > "$PREFIX/.stamp"
     step "FFmpeg $VERSION ready"
@@ -205,7 +219,19 @@ EXTRA=()
 if [ "$PLATFORM" = "macos" ]; then
     # Dylibs must be relocatable into the app bundle: ids and dependencies use
     # @rpath, and each library carries @loader_path so its siblings resolve.
-    EXTRA+=(--install-name-dir=@rpath --extra-ldflags=-Wl,-rpath,@loader_path)
+    # The deployment target is the app's declared floor (Godot's macOS template
+    # itself is 10.13 on x86_64 and 11.0 on arm64). Without it the compiler's
+    # default follows the runner's macOS (26 on macos-latest), which makes the
+    # release unloadable on older hosts.
+    if [ "$ARCH" = "arm64" ]; then
+        MACOS_MIN=11.0
+    else
+        MACOS_MIN=10.13
+    fi
+    export MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN"
+    EXTRA+=(--install-name-dir=@rpath
+            --extra-cflags="-mmacosx-version-min=$MACOS_MIN"
+            --extra-ldflags="-Wl,-rpath,@loader_path -mmacosx-version-min=$MACOS_MIN")
 fi
 if [ "$ARCH" = "x86_64" ]; then
     if ! command -v nasm >/dev/null; then

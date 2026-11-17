@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Mint a short-lived installation token for the gpty-bot GitHub App.
+#
+# Usage: scripts/bot-token [--check]
+#   --check  print the app, installation and granted permissions; no token
+#
+# Environment:
+#   GPTY_BOT_APP_ID       app id (default 5789319)
+#   GPTY_BOT_PRIVATE_KEY  path to the app's PEM, or the PEM itself
+#   GPTY_BOT_REPO         owner/repo (default godot-pty/gpty)
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+app_id=${GPTY_BOT_APP_ID:-5789319}
+repo=${GPTY_BOT_REPO:-godot-pty/gpty}
+key=${GPTY_BOT_PRIVATE_KEY:-}
+check=0
+
+case "${1:-}" in
+    --check) check=1 ;;
+    "") ;;
+    *) echo "usage: scripts/bot-token [--check]" >&2; exit 2 ;;
+esac
+
+if [ -z "$key" ]; then
+    printf '%s\n' "GPTY_BOT_PRIVATE_KEY is not set. Point it at the gpty-bot private key (mode 0600), or pass the PEM itself." >&2
+    exit 2
+fi
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/gpty-bot.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+umask 077
+
+if [[ "$key" == -----BEGIN* ]]; then
+    printf '%s\n' "$key" > "$tmp/key.pem"
+    key="$tmp/key.pem"
+fi
+if [ ! -f "$key" ]; then
+    printf 'GPTY_BOT_PRIVATE_KEY does not name a file: %s\n' "$key" >&2
+    exit 2
+fi
+mode=$(stat -c %a "$key" 2>/dev/null || stat -f %Lp "$key" 2>/dev/null || true)
+case "$mode" in
+    400|600|"") ;;
+    *) printf 'warning: %s is mode %s; chmod 600 it\n' "$key" "$mode" >&2 ;;
+esac
+
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+header=$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | b64url)
+now=$(date +%s)
+payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$app_id" | b64url)
+sig=$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -sign "$key" | b64url)
+jwt="$header.$payload.$sig"
+
+api=https://api.github.com
+json() {
+    if [ "$#" -ge 2 ]; then
+        jq -r "$1" <<< "$2"
+    else
+        jq -r "$1"
+    fi
+}
+
+app=$(curl -fsS -H "Authorization: Bearer $jwt" -H "Accept: application/vnd.github+json" "$api/app") || {
+    printf 'gpty-bot authentication failed: the app id or private key is wrong (see curl above).\n' >&2
+    exit 1
+}
+
+installation=$(curl -fsS -H "Authorization: Bearer $jwt" -H "Accept: application/vnd.github+json" \
+    "$api/repos/$repo/installation" 2>/dev/null) || {
+    slug=$(json '.slug' "$app")
+    printf 'gpty-bot (%s) is not installed on %s. Install it at https://github.com/apps/%s/installations/new and grant contents, pull-request and metadata access.\n' \
+        "$slug" "$repo" "$slug" >&2
+    exit 1
+}
+
+installation_id=$(json '.id' "$installation")
+if [ "$check" -eq 1 ]; then
+    printf 'app: %s (%s), installation: %s on %s\n' \
+        "$(json '.name' "$app")" "$(json '.slug' "$app")" "$installation_id" "$repo"
+    printf 'permissions:\n'
+    jq -r '.permissions | to_entries[] | "  \(.key): \(.value)"' <<< "$installation"
+    missing=0
+    for need in contents:write pull_requests:write metadata:read; do
+        scope=${need%%:*}
+        want=${need##*:}
+        got=$(json ".permissions.${scope} // \"none\"" "$installation")
+        if [ "$got" != "$want" ]; then
+            printf 'missing: %s is %s, needs %s\n' "$scope" "$got" "$want" >&2
+            missing=1
+        fi
+    done
+    extra=$(jq -r '.permissions | to_entries[]
+        | select(.key != "contents" and .key != "pull_requests" and .key != "metadata")
+        | "  \(.key): \(.value)"' <<< "$installation")
+    if [ -n "$extra" ]; then
+        printf 'warning: extra permissions granted; reduce them in the app settings:\n%s\n' "$extra" >&2
+    fi
+    selection=$(json '.repository_selection // "selected"' "$installation")
+    if [ "$selection" = "all" ]; then
+        printf 'warning: the installation covers all repositories; restrict it to %s in the app installation settings.\n' "$repo" >&2
+    fi
+    exit "$missing"
+fi
+
+token=$(curl -fsS -X POST -H "Authorization: Bearer $jwt" -H "Accept: application/vnd.github+json" \
+    "$api/app/installations/$installation_id/access_tokens" | json '.token')
+if [ -z "$token" ] || [ "$token" = "null" ]; then
+    printf 'gpty-bot could not mint an installation token.\n' >&2
+    exit 1
+fi
+printf '%s\n' "$token"

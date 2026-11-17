@@ -304,6 +304,7 @@ These are load-bearing guards. Reports that require removing one of them should 
 - **Commits are scanned locally and in CI.** `scripts/check-secrets` refuses high-confidence credential formats in the git index and runs in `ci-check --fast`, so the `pre-commit` hook runs it when `scripts/install-hooks` has been run. `.github/workflows/secret-scan.yml` runs gitleaks over the full history on every push, every pull request and weekly. GitHub's native secret scanning and push protection are also enabled.
 - **A committed secret is rotated, not just deleted.** Revoke or rotate the credential first, then remove it from the current tree; a secret that was live is treated as disclosed even if history is rewritten. Open a private advisory when the exposure reaches a release artifact.
 - **Release and CI credentials are short-lived or repository-scoped.** GitHub Actions uses its own token and OIDC attestations. A publishing token that predates this policy is tracked by the crates.io trusted-publishing row in the v0.9.3 roadmap and is rotated until that migration lands.
+- **The `gpty-bot` app private key is a local credential.** It is stored outside the repository (mode 0600) and rotated from the app settings; it is never committed.
 
 ## Known limitations
 
@@ -407,7 +408,7 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   with GitHub's build-provenance attestation (SLSA v1), signed by the release workflow's OIDC identity -
   verify with `gh attestation verify <asset> --repo godot-pty/gpty`. That binds a download to the
   workflow, commit and runner that produced it; checksums without the attestation only catch corruption
-  in transit. Verify the source or build locally if provenance is not enough for you.
+  in transit. Verify the source or build locally if provenance is not enough for you. The release workflow also requires a signed annotated tag reachable from `main`, checks the crate and `server.json` versions against the tag, and runs its write/OIDC `publish` job only on staged artifacts after the `release` environment's required reviewer approves; no project code runs in that job.
 - **Resource bounds are per-path, not global.** A program that floods a pane can still make that
   pane expensive: the output queue is bounded per pane (256 × 4 KiB, enforced by blocking the
   reader, so the child waits on the PTY buffer rather than the process growing - v0.5.4), and the

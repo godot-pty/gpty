@@ -21,16 +21,18 @@ concurrency:
 
 jobs:
   fuzz:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-11-01
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -68,6 +70,10 @@ jobs:
       # aborts and writes the input), and `-max_len` keeps a run from spending
       # its budget growing one input past what the socket or pane can pass.
       - name: Fuzz every target
+        env:
+          # rust-toolchain.toml pins the workspace to stable; cargo fuzz needs
+          # the nightly this job installs, so override it for the step.
+          RUSTUP_TOOLCHAIN: nightly-2026-11-01
         run: |
           source dist/ffmpeg/linux-x86_64/env.sh
           for target in $(ls fuzz/fuzz_targets | sed 's/\.rs$//'); do

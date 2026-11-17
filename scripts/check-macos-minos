@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Fail when a Mach-O slice requires a newer macOS than the bundle declares.
+
+Usage: check-macos-minos --x86_64 10.13 --arm64 11.0 <file>...
+
+Reads every slice of a fat or thin 64-bit Mach-O and takes its minimum from
+LC_BUILD_VERSION or LC_VERSION_MIN_MACOSX. A dylib built on a newer SDK with
+the compiler default inherits that SDK's minimum; the GDExtension then fails
+to load on the macOS versions the app still supports. This is the release's
+guard against that silent raise.
+"""
+import struct
+import sys
+
+CPU_NAMES = {0x01000007: "x86_64", 0x0100000C: "arm64"}
+
+
+def parse_version(text):
+    parts = text.split(".")
+    if not 1 <= len(parts) <= 3 or any(not part.isdigit() for part in parts):
+        raise ValueError("not a version: %r" % text)
+    values = [int(part) for part in parts]
+    while len(values) < 3:
+        values.append(0)
+    return tuple(values)
+
+
+def version_from_u32(value):
+    return (value >> 16, (value >> 8) & 0xFF, value & 0xFF)
+
+
+def show(version):
+    return "%d.%d.%d" % version
+
+
+def slice_min(data, offset):
+    if offset + 32 > len(data):
+        raise ValueError("truncated Mach-O header")
+    if struct.unpack_from("<I", data, offset)[0] != 0xFEEDFACF:
+        raise ValueError("not a 64-bit little-endian Mach-O")
+    cpu = struct.unpack_from("<I", data, offset + 4)[0]
+    ncmds, sizeofcmds = struct.unpack_from("<II", data, offset + 16)
+    if offset + 32 + sizeofcmds > len(data):
+        raise ValueError("truncated load commands")
+    pos = offset + 32
+    for _ in range(ncmds):
+        if pos + 8 > len(data):
+            raise ValueError("truncated load command")
+        cmd, size = struct.unpack_from("<II", data, pos)
+        if size < 8:
+            raise ValueError("invalid load command size %d" % size)
+        if cmd == 0x32:  # LC_BUILD_VERSION: platform, minos, sdk
+            if size < 20:
+                raise ValueError("truncated LC_BUILD_VERSION")
+            return cpu, version_from_u32(struct.unpack_from("<I", data, pos + 12)[0])
+        if cmd == 0x24:  # LC_VERSION_MIN_MACOSX: version, sdk
+            if size < 16:
+                raise ValueError("truncated LC_VERSION_MIN_MACOSX")
+            return cpu, version_from_u32(struct.unpack_from("<I", data, pos + 8)[0])
+        pos += size
+    return cpu, None
+
+
+def slices(data):
+    big = struct.unpack_from(">I", data, 0)[0]
+    if big in (0xCAFEBABE, 0xCAFEBABF):
+        count = struct.unpack_from(">I", data, 4)[0]
+        width = 20 if big == 0xCAFEBABE else 32
+        result = []
+        for index in range(count):
+            pos = 8 + index * width
+            if big == 0xCAFEBABE:
+                _cpu, _sub, offset, size, _align = struct.unpack_from(">iiIII", data, pos)
+            else:
+                _cpu, _sub, offset, size, _align, _reserved = struct.unpack_from(
+                    ">iiQQII", data, pos
+                )
+            result.append((offset, size))
+        return result
+    if struct.unpack_from("<I", data, 0)[0] == 0xFEEDFACF:
+        return [(0, len(data))]
+    raise ValueError("not a fat or 64-bit Mach-O")
+
+
+def main(argv):
+    maxes = {}
+    files = []
+    index = 1
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--x86_64" and index + 1 < len(argv):
+            maxes["x86_64"] = parse_version(argv[index + 1])
+            index += 2
+        elif arg == "--arm64" and index + 1 < len(argv):
+            maxes["arm64"] = parse_version(argv[index + 1])
+            index += 2
+        elif arg.startswith("-") or not arg:
+            return usage()
+        else:
+            files.append(arg)
+            index += 1
+    if not files or set(maxes) != {"x86_64", "arm64"}:
+        return usage()
+
+    errors = []
+    for path in files:
+        try:
+            with open(path, "rb") as handle:
+                data = handle.read()
+            found = slices(data)
+            if not found:
+                raise ValueError("no slices")
+            for offset, size in found:
+                if offset + size > len(data):
+                    raise ValueError("slice out of bounds")
+                cpu, minimum = slice_min(data, offset)
+                arch = CPU_NAMES.get(cpu)
+                if arch is None:
+                    raise ValueError("unknown CPU type 0x%08x" % cpu)
+                if minimum is None:
+                    raise ValueError("%s slice has no LC_BUILD_VERSION/LC_VERSION_MIN_MACOSX" % arch)
+                print("%s: %s min %s" % (path, arch, show(minimum)))
+                if minimum > maxes[arch]:
+                    errors.append(
+                        "%s: %s requires macOS %s (max %s)"
+                        % (path, arch, show(minimum), show(maxes[arch]))
+                    )
+        except Exception as exc:  # report every file, not just the first
+            errors.append("%s: %s" % (path, exc))
+
+    for error in errors:
+        print(error, file=sys.stderr)
+    return 1 if errors else 0
+
+
+def usage():
+    print(
+        "usage: check-macos-minos --x86_64 <version> --arm64 <version> <file>...",
+        file=sys.stderr,
+    )
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

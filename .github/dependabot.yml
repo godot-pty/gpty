@@ -7,6 +7,7 @@ version: 2
 updates:
   - package-ecosystem: "cargo"
     directory: "/"
+    target-branch: "0.8.x"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
@@ -16,6 +17,7 @@ updates:
 
   - package-ecosystem: "cargo"
     directory: "/fuzz"
+    target-branch: "0.8.x"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
@@ -25,6 +27,7 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "0.8.x"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5

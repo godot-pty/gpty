@@ -84,6 +84,8 @@ def check_header(server):
     name = server.get("name", "")
     if not NAME.match(name):
         bad(f"name {name!r} is not an io.github.<owner>/<server> identifier")
+    if name != "io.github.godot-pty/gpty":
+        bad(f"name must be io.github.godot-pty/gpty (got {name!r})")
     description = server.get("description", "")
     if not description:
         bad("description is required")

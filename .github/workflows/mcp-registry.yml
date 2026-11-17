@@ -44,8 +44,11 @@ concurrency:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
+    environment:
+      name: release
     permissions:
       contents: read
       id-token: write # `mcp-publisher login github-oidc`

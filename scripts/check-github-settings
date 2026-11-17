@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""Read back the repository policy that is not stored in git.
+
+Usage: scripts/check-github-settings [--repo OWNER/REPO] [--reviewer LOGIN]
+
+Rulesets, classic branch protection, the `release` environment and the
+repository's Actions/sign-off flags live in the GitHub API, not in a file a
+review can diff. This check reads them through `gh api` and fails when the
+expected policy has drifted. It is deliberately read-only: it never creates,
+updates or deletes anything.
+
+Run it before a release and after changing a ruleset or the release
+environment. It needs a maintainer-authenticated `gh` with admin read access;
+it is not part of CI because the normal Actions token cannot read rulesets.
+
+The expected required-check lists mirror `.github/workflows/ci.yml` and the
+`main protection` ruleset. When a job is added or renamed, update both the
+workflow's required contexts and this file in the same change.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+
+MAIN_CHECKS = [
+    "CodeQL",
+    "cargo-audit",
+    "cargo-deny",
+    "commit-lint",
+    "docs",
+    "fuzz-build",
+    "gut-tests",
+    "lint-workflows",
+    "omp-events-tests",
+    "rust-fmt",
+    "rust-tests",
+    "rust-windows",
+    "secret-scan",
+    "windows-smoke",
+]
+# Classic protection predates the ruleset and does not carry secret-scan.
+CLASSIC_CHECKS = [name for name in MAIN_CHECKS if name != "secret-scan"]
+
+MAIN_RULES = {"deletion", "non_fast_forward", "pull_request", "required_status_checks"}
+INTEGRATION_RULES = {"deletion", "non_fast_forward", "required_signatures"}
+TAG_RULES = {"creation", "update", "deletion", "non_fast_forward", "required_signatures"}
+
+
+class ApiError(RuntimeError):
+    pass
+
+
+def gh(*args: str) -> str:
+    try:
+        proc = subprocess.run(
+            ["gh", *args],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise ApiError("the `gh` CLI is not installed") from exc
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip()
+        raise ApiError(f"gh {' '.join(args)} failed: {detail}")
+    return proc.stdout
+
+
+def api(repo: str, path: str = ""):
+    """GET an API path; `gh api` uses GET unless told otherwise."""
+    endpoint = f"repos/{repo}" if not path else f"repos/{repo}/{path}"
+    raw = gh("api", endpoint)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ApiError(f"repos/{repo}/{path} did not return JSON") from exc
+
+
+def default_repo() -> str:
+    if env := os.environ.get("GH_REPO"):
+        return env
+    try:
+        return gh("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip()
+    except ApiError as exc:
+        raise ApiError(
+            "cannot determine the repository; pass --repo OWNER/REPO or set GH_REPO"
+        ) from exc
+
+
+def params(rule: dict | None) -> dict:
+    return (rule or {}).get("parameters") or {}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Check the repository rulesets, release environment and Actions policy.",
+    )
+    parser.add_argument(
+        "--repo",
+        default=None,
+        help="owner/repo (default: gh repo view's nameWithOwner, or GH_REPO)",
+    )
+    parser.add_argument(
+        "--reviewer",
+        default=os.environ.get("GPTY_RELEASE_REVIEWER", "1nv1n"),
+        help="expected required reviewer for the release environment (default: 1nv1n)",
+    )
+    args = parser.parse_args()
+
+    try:
+        repo = args.repo or default_repo()
+        rulesets = api(repo, "rulesets")
+        by_name = {item["name"]: item["id"] for item in rulesets}
+        missing = {"main protection", "integration protection", "tag"} - set(by_name)
+        if missing:
+            raise ApiError(f"missing ruleset(s): {', '.join(sorted(missing))}")
+
+        main = api(repo, f"rulesets/{by_name['main protection']}")
+        integration = api(repo, f"rulesets/{by_name['integration protection']}")
+        tag = api(repo, f"rulesets/{by_name['tag']}")
+        classic = api(repo, "branches/main/protection")
+        environment = api(repo, "environments/release")
+        actions = api(repo, "actions/permissions")
+        repo_info = api(repo, "")
+    except ApiError as exc:
+        print(f"check-github-settings: {exc}", file=sys.stderr)
+        return 2
+
+    failures: list[str] = []
+
+    def check(label: str, ok: bool, detail: str = "") -> None:
+        if ok:
+            print(f"ok   {label}")
+            return
+        print(f"FAIL {label}" + (f" ({detail})" if detail else ""))
+        failures.append(label)
+
+    def equal(label: str, actual, expected) -> None:
+        check(label, actual == expected, f"expected {expected!r}, got {actual!r}")
+
+    def rules(rs: dict) -> dict[str, dict]:
+        return {rule["type"]: rule for rule in rs.get("rules", [])}
+
+    # ── main protection ────────────────────────────────────────────────
+    check("main: target is branch", main.get("target") == "branch", repr(main.get("target")))
+    check("main: enforcement active", main.get("enforcement") == "active", repr(main.get("enforcement")))
+    equal("main: no bypass actors", main.get("bypass_actors"), [])
+    equal(
+        "main: covers the default branch",
+        main.get("conditions", {}).get("ref_name", {}),
+        {"include": ["~DEFAULT_BRANCH"], "exclude": []},
+    )
+    main_rules = rules(main)
+    equal("main: rule types", set(main_rules), MAIN_RULES)
+    pr = params(main_rules.get("pull_request"))
+    equal("main: merge commits only", pr.get("allowed_merge_methods"), ["merge"])
+    equal("main: one approving review", pr.get("required_approving_review_count"), 1)
+    check("main: code-owner review", pr.get("require_code_owner_review") is True)
+    check("main: last-push approval", pr.get("require_last_push_approval") is True)
+    check("main: stale reviews dismissed", pr.get("dismiss_stale_reviews_on_push") is True)
+    check(
+        "main: review threads resolved",
+        pr.get("required_review_thread_resolution") is True,
+    )
+    checks = params(main_rules.get("required_status_checks"))
+    contexts = sorted(item["context"] for item in checks.get("required_status_checks", []))
+    equal("main: required checks", contexts, sorted(MAIN_CHECKS))
+    check(
+        "main: strict required checks",
+        checks.get("strict_required_status_checks_policy") is True,
+    )
+
+    # ── integration branch protection ──────────────────────────────────
+    check(
+        "integration: target is branch",
+        integration.get("target") == "branch",
+        repr(integration.get("target")),
+    )
+    check(
+        "integration: enforcement active",
+        integration.get("enforcement") == "active",
+        repr(integration.get("enforcement")),
+    )
+    equal("integration: no bypass actors", integration.get("bypass_actors"), [])
+    equal(
+        "integration: covers 0.* branches",
+        integration.get("conditions", {}).get("ref_name", {}),
+        {"include": ["refs/heads/0.*"], "exclude": []},
+    )
+    equal("integration: rule types", set(rules(integration)), INTEGRATION_RULES)
+
+    # ── tag protection ─────────────────────────────────────────────────
+    check("tag: target is tag", tag.get("target") == "tag", repr(tag.get("target")))
+    check("tag: enforcement active", tag.get("enforcement") == "active", repr(tag.get("enforcement")))
+    equal("tag: no bypass actors", tag.get("bypass_actors"), [])
+    equal(
+        "tag: covers all tags",
+        tag.get("conditions", {}).get("ref_name", {}),
+        {"include": ["~ALL"], "exclude": []},
+    )
+    equal("tag: rule types", set(rules(tag)), TAG_RULES)
+
+    # ── classic protection (required signatures, admins, contexts) ─────
+    check("main classic: admins enforced", classic.get("enforce_admins", {}).get("enabled") is True)
+    check(
+        "main classic: signed commits",
+        classic.get("required_signatures", {}).get("enabled") is True,
+    )
+    check(
+        "main classic: force pushes denied",
+        classic.get("allow_force_pushes", {}).get("enabled") is False,
+    )
+    check(
+        "main classic: deletions denied",
+        classic.get("allow_deletions", {}).get("enabled") is False,
+    )
+    reviews = classic.get("required_pull_request_reviews") or {}
+    check("main classic: one approving review", reviews.get("required_approving_review_count") == 1)
+    check("main classic: code-owner review", reviews.get("require_code_owner_reviews") is True)
+    check("main classic: last-push approval", reviews.get("require_last_push_approval") is True)
+    check("main classic: stale reviews dismissed", reviews.get("dismiss_stale_reviews") is True)
+    status = classic.get("required_status_checks") or {}
+    equal("main classic: required checks", sorted(status.get("contexts", [])), sorted(CLASSIC_CHECKS))
+    check("main classic: strict required checks", status.get("strict") is True)
+
+    # ── release environment ───────────────────────────────────────────
+    review_rules = [
+        rule
+        for rule in environment.get("protection_rules", [])
+        if rule.get("type") == "required_reviewers"
+    ]
+    reviewers = {
+        reviewer.get("reviewer", {}).get("login")
+        for rule in review_rules
+        for reviewer in rule.get("reviewers", [])
+    }
+    check(
+        "release: required reviewer",
+        args.reviewer in reviewers,
+        f"expected {args.reviewer!r}, got {sorted(reviewers)}",
+    )
+    check(
+        "release: self-review allowed (the reviewer is the maintainer)",
+        all(rule.get("prevent_self_review") is False for rule in review_rules),
+    )
+    equal("release: no deployment branch policy", environment.get("deployment_branch_policy"), None)
+
+    # ── repository and Actions policy ─────────────────────────────────
+    check("actions: enabled", actions.get("enabled") is True)
+    check("actions: all actions allowed", actions.get("allowed_actions") == "all")
+    check("actions: SHA pinning required", actions.get("sha_pinning_required") is True)
+    check("repository: web sign-off required", repo_info.get("web_commit_signoff_required") is True)
+    check("repository: default branch is main", repo_info.get("default_branch") == "main")
+
+    if failures:
+        print(f"check-github-settings: {len(failures)} check(s) failed", file=sys.stderr)
+        return 1
+    print("check-github-settings: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

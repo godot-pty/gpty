@@ -82,18 +82,20 @@ Summarize what was committed, in which groups, and why. Note any files deliberat
 
 ## Validate end to end
 
-Commit is the half you can check locally. When the project validates on a remote (CI runs on push or PR), a local pass is necessary, not sufficient — the run is the evidence the change works on the platforms and toolchains the project actually ships. This repo is main-only with CI on push, no PR review flow.
+Commit is the half you can check locally. When the project validates on a remote (CI runs on push or PR), a local pass is necessary, not sufficient — the run is the evidence the change works on the platforms and toolchains the project actually ships. This repo is a release train: day-to-day work lands on the active `0.<minor>.x` integration branch; `main` is release-only and protected by a ruleset that requires a pull request, an approval, last-push approval and the required checks. The `gpty-bot` app pushes the integration branch (`scripts/bot-push`) and opens the release PR (`scripts/bot-pr`); the maintainer approves it.
 
 1. **Local gate first.** `./scripts/ci-check` (full, not `--fast`) and the pre-push hook are the local half. Do not push on a red local gate.
-2. **Push once per batch**, not once per commit: each push starts a full validation run (~4-5 minutes here). If the changes are not meant to land yet, hold the commits and say so; do not push for review you were not asked to do.
+2. **Push once per batch**, not once per commit: each code push starts a full validation run (~4-5 minutes here). A docs-only or skill-only push is ignored by `ci.yml`; report the workflow that actually fired (the `Docs` workflow only runs on `main`) or say none did. If the changes are not meant to land yet, hold the commits and say so; do not push for review you were not asked to do.
 3. **Identify the run for the pushed SHA and watch it**:
 
 ```bash
-git push origin HEAD
+./scripts/bot-push 0.8.x          # integration branch; or git push origin HEAD with your key
 gh run list --workflow=CI --limit 1 --json databaseId,headSha   # confirm headSha matches
 gh run watch <id> --interval 20 --exit-status
 gh run view <id> --json conclusion,jobs --jq '"run=" + .conclusion, (.jobs[] | "  \(.name): \(.conclusion)")'
 ```
+
+A release PR from the integration branch runs `CI`, `CodeQL` and `Secret scan` on the PR; watch those checks before the maintainer approves and merges it. A release's own runbook is `skill://release`.
 
 4. **Report the run's conclusion and the SHA** with the work. Green on CI is part of the deliverable; "pushed" is not.
 

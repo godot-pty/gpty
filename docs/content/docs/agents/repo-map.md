@@ -9,9 +9,11 @@ owns a behaviour; it is a map, not an inventory - `rg --files <dir>` enumerates.
 ```
 gpty/
 ├── Cargo.toml                  # Workspace root
+├── rust-toolchain.toml         # Pinned Rust 1.96.0 for local and CI builds
 ├── AGENTS.md                   # Agent guide core; topic pages live in docs/content/docs/agents/
 ├── ROADMAP.md                  # Opening text + links to the release-chain pages
 ├── CHANGELOG.md                # Opening text + links to the per-release pages
+├── RELEASING.md                # Canonical release process; the agent checklist is .omp/skills/release/SKILL.md
 ├── docs/
 │   ├── content/docs/agents/    # Agent guide topic pages (Rust, GDScript, security, ...)
 │   ├── content/docs/roadmap/   # One page per release chain (v0.N.md, future.md)
@@ -25,6 +27,12 @@ gpty/
 ├── scripts/                    # CI runner and setup scripts
 │   ├── ci-check                # Run all CI checks locally (--fast for quick)
 │   ├── check-secrets           # Refuse credential formats in the git index (ci-check --fast)
+│   ├── check-macos-minos       # Fail a Mach-O slice built for a newer macOS than the app
+│   ├── check-github-settings   # Read back rulesets, release environment and Actions policy
+│   ├── bot-token               # Mint the gpty-bot app installation token (--check for setup)
+│   ├── bot-push                # Push a branch as gpty-bot
+│   ├── bot-pr                  # Open a pull request as gpty-bot
+│   ├── git-askpass-token       # GIT_ASKPASS helper used by bot-push
 │   ├── build-wiki              # Pack docs/content/wiki into godot/knowledge.json
 │   ├── install-hooks           # Symlink githooks into .git/hooks/
 │   ├── install-cli             # Install a release bundle behind a stable PATH link

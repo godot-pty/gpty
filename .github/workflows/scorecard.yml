@@ -17,9 +17,14 @@ on:
 
 permissions: read-all
 
+concurrency:
+  group: scorecard
+  cancel-in-progress: false
+
 jobs:
   analysis:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       security-events: write # upload the SARIF to code scanning
       id-token: write        # publish_results signs with the run's identity

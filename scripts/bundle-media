@@ -85,6 +85,10 @@ macos_libs() {
     local arm_lib base
     for arm_lib in "$arm"/lib/libav*.dylib "$arm"/lib/libsw*.dylib; do
         [ -f "$arm_lib" ] || continue
+        # `lipo -create` writes a real file; a symlink alias would become a
+        # second full copy in the bundle. Lipo the canonical file and recreate
+        # the alias below.
+        [ -L "$arm_lib" ] && continue
         base="$(basename "$arm_lib")"
         [ -f "$x86/lib/$base" ] || die "x86_64 build lacks $base"
         lipo -create "$arm_lib" "$x86/lib/$base" -output "$out/lib/$base"
@@ -100,8 +104,15 @@ macos_libs() {
         done
         # install_name_tool invalidates the ad-hoc signature; re-sign so an
         # arm64 loader accepts it.
-        codesign --force --sign - "$out/lib/$base" >/dev/null 2>&1 || true
+        codesign --force --sign - "$out/lib/$base" >/dev/null
     done
+    # Recreate the unversioned/`.63` names as symlinks to the canonical files.
+    for arm_lib in "$arm"/lib/libav*.dylib "$arm"/lib/libsw*.dylib; do
+        [ -L "$arm_lib" ] || continue
+        base="$(basename "$arm_lib")"
+        ln -sfn "$(basename "$(readlink "$arm_lib")")" "$out/lib/$base"
+    done
+    "$REPO_ROOT/scripts/check-macos-minos" --x86_64 10.13 --arm64 11.0 "$out"/lib/*.dylib
     # The extension itself must reference @rpath, not the build prefix, or the
     # pre-signed libraries above cannot satisfy it after the move.
     local ext
@@ -111,6 +122,7 @@ macos_libs() {
             | grep -E '^/.*lib(av|sw)[a-z]+[^/]*\.dylib$' >/dev/null; then
             die "$(basename "$ext") links FFmpeg by absolute path; rebuild with --install-name-dir=@rpath"
         fi
+        "$REPO_ROOT/scripts/check-macos-minos" --x86_64 10.13 --arm64 11.0 "$ext"
     done
     copy_licenses "$arm" "$out/licenses"
     step "Universal FFmpeg libraries in $out"
@@ -137,7 +149,7 @@ macos_zip() {
     if compgen -G "$app/Contents/Frameworks/libgpty_gdext*.dylib" >/dev/null; then
         target="$app/Contents/Frameworks"
     fi
-    cp "$universal"/lib/*.dylib "$target"/
+    cp -a "$universal"/lib/. "$target"/
     mkdir -p "$app/Contents/Resources/licenses"
     if [ -d "$universal/licenses" ]; then
         cp -a "$universal/licenses/." "$app/Contents/Resources/licenses/"

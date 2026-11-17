@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# GIT_ASKPASS helper: return the short-lived token bot-push exported.
+set -euo pipefail
+if [ -n "${GPTY_BOT_TOKEN_FILE:-}" ] && [ -f "$GPTY_BOT_TOKEN_FILE" ]; then
+    cat "$GPTY_BOT_TOKEN_FILE"
+else
+    printf '%s\n' "${GPTY_BOT_TOKEN:?GPTY_BOT_TOKEN or GPTY_BOT_TOKEN_FILE is not set}"
+fi
