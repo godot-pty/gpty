@@ -89,7 +89,7 @@ Commit is the half you can check locally. When the project validates on a remote
 3. **Identify the run for the pushed SHA and watch it**:
 
 ```bash
-./scripts/bot-push 0.8.x          # integration branch; or git push origin HEAD with your key
+./scripts/bot-push               # the current (integration) branch; or git push origin HEAD with your key
 gh run list --workflow=CI --limit 1 --json databaseId,headSha   # confirm headSha matches
 gh run watch <id> --interval 20 --exit-status
 gh run view <id> --json conclusion,jobs --jq '"run=" + .conclusion, (.jobs[] | "  \(.name): \(.conclusion)")'
