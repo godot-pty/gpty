@@ -288,7 +288,10 @@ privilege is present while project code runs:
   `workflow_dispatch` on `main` runs. It carries the platform jobs
   (`build-linux`, both `build-macos` arches, `build-windows`, `bundle-macos`,
   `export`) and restores the caches a run on `main` wrote: the FFmpeg prefix
-  under `ci.yml`'s own key, the Windows vcpkg tree only when that prefix
+  (Windows under `ci.yml`'s key; Linux under an image-scoped
+  `Linux-ubuntu22-ffmpeg-*` key, because the release builds on 22.04 for the
+  bundle's glibc floor while `ci.yml` builds on 24.04 and a 24.04-built
+  `libav*.so` needs GLIBC_2.38), the Windows vcpkg tree only when that prefix
   missed, and the release-profile `target` under a
   `cargo-release-<os>-<arch>-<lock>` key kept apart from the debug caches. A
   tag run only restores: an entry it saves is tag-scoped, unreadable by the

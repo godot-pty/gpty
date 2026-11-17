@@ -14,9 +14,16 @@ name: Release Build
 # dispatch here (or the nightly path when it lands) is the writer.
 #
 # Three caches, each invalidated by what produced it:
-# - `dist/ffmpeg/<platform>` under ci.yml's exact key, so the prefix a push to
-#   main built is the prefix a release links. The path is part of the cache
-#   version, so the two macOS arches cannot restore each other.
+# - `dist/ffmpeg/<platform>`. Windows shares ci.yml's exact key: both build on
+#   windows-2025, so the prefix a push to main built is the prefix a release
+#   links. Linux's key carries the image (`Linux-ubuntu22-ffmpeg-*`) because
+#   the release builds on ubuntu-22.04 for the older glibc floor while ci.yml
+#   builds on ubuntu-24.04 - the prefix is a set of glibc-linked shared
+#   libraries that ships in the bundle, and a 24.04-built one needs
+#   GLIBC_2.38 (`__isoc23_*`), which a 22.04 link cannot take. This workflow
+#   on main is that key's only writer; until a dispatch (or the nightly) runs
+#   there, the release builds the Linux prefix from source. The path is part
+#   of the cache version, so the two macOS arches cannot restore each other.
 # - the Windows vcpkg tree, restored only when that prefix missed: the fallback
 #   that keeps a media-deps or components edit from rebuilding FFmpeg for 26
 #   minutes.
@@ -91,10 +98,13 @@ jobs:
         id: ffmpeg-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
+          # Image-scoped, unlike the Windows key (see the header): ci.yml's
+          # 24.04-built libav*.so need GLIBC_2.38, and this runner is 22.04
+          # because the bundle's glibc floor is. Only this workflow writes it.
           path: dist/ffmpeg/linux-x86_64
-          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
+          key: Linux-ubuntu22-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
           restore-keys: |
-            ${{ runner.os }}-ffmpeg-
+            Linux-ubuntu22-ffmpeg-
 
       - name: Build media dependencies
         run: ./scripts/media-deps
