@@ -47,7 +47,10 @@ CLASSIC_CHECKS = [name for name in MAIN_CHECKS if name != "secret-scan"]
 
 MAIN_RULES = {"deletion", "non_fast_forward", "pull_request", "required_status_checks"}
 INTEGRATION_RULES = {"deletion", "non_fast_forward", "required_signatures"}
-TAG_RULES = {"creation", "update", "deletion", "non_fast_forward", "required_signatures"}
+# `creation` is deliberately absent: it restricts ref creation to bypass actors, and this
+# ruleset has none, so a tag could never be pushed at all. Signatures protect a tag; the
+# update/deletion rules keep a bad one from being repaired or removed.
+TAG_RULES = {"update", "deletion", "non_fast_forward", "required_signatures"}
 
 
 class ApiError(RuntimeError):
