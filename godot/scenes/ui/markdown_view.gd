@@ -90,9 +90,9 @@ func _ready():
 
 func configure_for_accordion():
 	scroll_active = false
-	# fit_content would force min width to the widest unwrapped line,
-	# defeating word wrap at narrow pane widths. The accordion assigns
-	# width; the owner syncs height from get_content_height().
+	# The accordion's container owns the width and its owner measures the
+	# height from get_content_height(); `fit_content` would make the label
+	# derive a second minimum height of its own.
 	fit_content = false
 	scroll_following = false
 
