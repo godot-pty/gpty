@@ -14,7 +14,7 @@
 
 It is a side project in active development and a vast majority of this codebase, including most of the Godot UI layout and the Rust (`gpty-core`) GDExtension bridge, was generated using various LLMs under human review; and as such, the underlying code may contain unidiomatic patterns and/or bugs. It *does not* follow the core UNIX philosophy very well, as in, it does aim to do several things; though it does also intend to do them all well.
 
-The chosen stack also brings with it more costs, much more than terminal emulators. A TUI can just draw into cells the terminal already owns, while gPTY runs a Godot renderer - an idle window can hold around 662 MB of resident memory, all of it owned by the renderer (multiple panes/terminals themselves are cheap in the GUI's own memory ([RSS](https://en.wikipedia.org/wiki/Resident_set_size)), under 1 MB each, but each one runs a shell in its own process at about 6 MB, up to the 96-pane ceiling). A first Forward+ launch (the implicit default, since `project.godot` names no renderer) holds about 1 GB because the graphics driver compiles its pipelines into that process; about 420 MB of it stays resident for the run, and later launches drop the number back to ~662 MB. Another drawback of a game engine is that it draws a frame every frame whether or not anything changed, whereas a terminal emulator composites only when its cells change (output, a blinking cursor, a resize). A GPU window that repaints even while idle draws power that a standard PTY simply would not. Memory usage and power draw remain areas that the project aims to continually refine and reduce, rather than have them be fixed prices to pay. Refer to the [Trade-offs](#trade-offs) section for up-to-date statistics.
+The chosen stack also brings with it more costs, much more than terminal emulators. A TUI can just draw into cells the terminal already owns, while gPTY runs a Godot renderer - an idle window can hold around 669 MB of resident memory, all of it owned by the renderer (multiple panes/terminals themselves are cheap in the GUI's own memory ([RSS](https://en.wikipedia.org/wiki/Resident_set_size)), under 1 MB each, but each one runs a shell in its own process at about 6 MB, up to the 96-pane ceiling). A first Forward+ launch (the implicit default, since `project.godot` names no renderer) holds about 1 GB because the graphics driver compiles its pipelines into that process; about 440 MB of it stays resident for the run, and later launches drop the number back to ~669 MB. Another drawback of a game engine is that it draws a frame every frame whether or not anything changed, whereas a terminal emulator composites only when its cells change (output, a blinking cursor, a resize). A GPU window that repaints even while idle draws power that a standard PTY simply would not. Memory usage and power draw remain areas that the project aims to continually refine and reduce, rather than have them be fixed prices to pay. Refer to the [Trade-offs](#trade-offs) section for up-to-date statistics.
 
 ![A script runs the tests, a concept routes the diff into the viewer, a cli_view runs git status, and pane-view opens the bundled knowledge base's link graph](docs/static/images/demo-showcase.gif)
 
@@ -114,15 +114,15 @@ The chosen stack also brings with it more costs, much more than terminal emulato
 
 ### Trade-offs
 
-Hosting a terminal inside a game engine is expensive, in terms of RAM & power usage. The following are measured on the shipped v0.8.4 Linux build (captured on CachyOS with Godot 4.7.2, the NVIDIA 620.70.06 driver and Vulkan 1.4.363 loader, `VmRSS` from `/proc` in a private sandbox, five readings per row after the app answers on its control socket):
+Hosting a terminal inside a game engine is expensive, in terms of RAM & power usage. The following are measured on the shipped v0.8.5 Linux build (captured on CachyOS with Godot 4.7.2, the NVIDIA 620.70.06 driver and Vulkan 1.4.363 loader, `VmRSS` from `/proc` in a private sandbox, five readings per row after the app answers on its control socket):
 
 | Configuration | Resident Memory |
 |---|---|
-| One pane, idle (Forward+, the default) | 662 MB |
-| Zero panes, renderer still up | 662 MB - the cost is the renderer, not the terminals |
-| First launch, cold pipeline cache | 1083 MB, back to ~662 MB on every later run |
+| One pane, idle (Forward+, the default) | 669 MB |
+| Zero panes, renderer still up | 669 MB - the cost is the renderer, not the terminals |
+| First launch, cold pipeline cache | 1108 MB, back to ~669 MB on every later run |
 | Same build, `--rendering-driver opengl3`, warm | 366 MB |
-| 30,000 lines through one pane, past the 10,000-row scrollback cap | +51 MB, then flat |
+| 30,000 lines through one pane, past the 10,000-row scrollback cap | +50 MB, then flat |
 
 ![Memory cost by release: an idle one-pane window on Forward+ and on OpenGL3, and the first launch of a release with a cold pipeline cache](docs/static/images/cost-history.svg)
 
