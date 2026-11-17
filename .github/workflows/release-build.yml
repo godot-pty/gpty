@@ -1,0 +1,506 @@
+name: Release Build
+
+# The release build definition, shared by both entry points: release.yml calls
+# it from a tag (workflow_call), and a run on main dispatches it with
+# workflow_dispatch to fill the caches the next tag restores. One definition,
+# so a cache key, a pinned action or a build flag cannot drift between what
+# ships and what warmed the cache.
+#
+# The cache shape follows GitHub's scope rules (a run restores its own ref's
+# and the default branch's caches; it cannot restore another tag's). A tag run
+# therefore restores main's caches and never saves - an entry it writes is
+# tag-scoped, unreadable by the next tag, and would only evict CI's caches from
+# the 10 GB budget. Every save below is gated on the default branch, so a
+# dispatch here (or the nightly path when it lands) is the writer.
+#
+# Three caches, each invalidated by what produced it:
+# - `dist/ffmpeg/<platform>` under ci.yml's exact key, so the prefix a push to
+#   main built is the prefix a release links. The path is part of the cache
+#   version, so the two macOS arches cannot restore each other.
+# - the Windows vcpkg tree, restored only when that prefix missed: the fallback
+#   that keeps a media-deps or components edit from rebuilding FFmpeg for 26
+#   minutes.
+# - `target` and `~/.cargo/registry` under `cargo-release-<os>-<arch>-<lock>`,
+#   deliberately not ci.yml's debug key: this workflow builds the release
+#   profile, and its save must not overwrite the debug cache (nor the two
+#   macOS arches each other's artifacts). Cargo's fingerprints decide what is
+#   rebuilt, so a stale entry costs time, never correctness - `media-deps`'s
+#   `.stamp` does the same for FFmpeg.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version (vX.Y.Z) stamped into the bundles and asset names
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version (vX.Y.Z) stamped into the bundles and asset names
+        required: true
+        type: string
+
+# Read-only: no write token and no OIDC identity is present while project code
+# runs. `actions: read` is the export job's same-run artifact download; a
+# called workflow can only narrow its caller's grant, so release.yml's top
+# level carries it too.
+permissions:
+  contents: read
+  actions: read
+
+# One build per ref at a time. A dispatch on main queues behind the previous
+# one instead of sharing a half-written target directory; a tag run is its own
+# group, and nothing here cancels a release build in flight.
+concurrency:
+  group: release-build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  # ── Build GDExtension per platform ───────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.96.0"
+
+      - name: Restore cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-release-
+
+      - name: Restore FFmpeg prefix
+        id: ffmpeg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg/linux-x86_64
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-ffmpeg-
+
+      - name: Build media dependencies
+        run: ./scripts/media-deps
+
+      - name: Build GDExtension (release)
+        run: cargo build --locked -p gpty-gdext --release
+
+      - name: Build CLI (release)
+        run: cargo build --locked -p gpty --release
+
+      - name: Package
+        run: |
+          mkdir -p release/ffmpeg/lib release/ffmpeg/licenses
+          cp target/release/libgpty_gdext.so release/libgpty_gdext.linux.x86_64.so
+          cp target/release/gpty release/gpty
+          cp -a dist/ffmpeg/linux-x86_64/lib/libav*.so* release/ffmpeg/lib/
+          cp -a dist/ffmpeg/linux-x86_64/lib/libsw*.so* release/ffmpeg/lib/
+          cp -a dist/ffmpeg/linux-x86_64/licenses/. release/ffmpeg/licenses/
+          cp dist/ffmpeg/linux-x86_64/components.txt release/ffmpeg/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gpty-linux-x86_64
+          path: release/
+
+      # Only the default branch writes (see the header): a save after a failed
+      # build still leaves the next run with the prefix and the dependencies.
+      - name: Save cargo cache
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+      - name: Save FFmpeg prefix
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.ffmpeg-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg/linux-x86_64
+          key: ${{ steps.ffmpeg-cache.outputs.cache-primary-key }}
+
+  build-macos:
+    strategy:
+      matrix:
+        target:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.target.runner }}
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.96.0"
+
+      # `runner.os` is macOS for both arches, so the arch has to be in the
+      # cargo key (a target directory is host-specific). The FFmpeg key does
+      # not need it: the prefix path is part of the cache version.
+      - name: Restore cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-release-
+
+      - name: Restore FFmpeg prefix
+        id: ffmpeg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg/macos-${{ matrix.target.arch }}
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-ffmpeg-
+
+      - name: Build media dependencies
+        run: ./scripts/media-deps
+
+      - name: Build GDExtension (release)
+        run: cargo build --locked -p gpty-gdext --release
+
+      - name: Build CLI (release)
+        run: cargo build --locked -p gpty --release
+
+      - name: Package
+        run: |
+          mkdir -p release/ffmpeg/lib release/ffmpeg/licenses
+          cp target/release/libgpty_gdext.dylib release/libgpty_gdext.macos.${{ matrix.target.arch }}.dylib
+          cp dist/ffmpeg/macos-${{ matrix.target.arch }}/lib/libav*.dylib release/ffmpeg/lib/
+          cp dist/ffmpeg/macos-${{ matrix.target.arch }}/lib/libsw*.dylib release/ffmpeg/lib/
+          cp -a dist/ffmpeg/macos-${{ matrix.target.arch }}/licenses/. release/ffmpeg/licenses/
+          cp dist/ffmpeg/macos-${{ matrix.target.arch }}/components.txt release/ffmpeg/
+          if [ "${{ matrix.target.arch }}" = "arm64" ]; then
+            # The app export is universal, so the CLI that ships inside it must be too.
+            rustup target add x86_64-apple-darwin
+            cargo build --locked -p gpty --release --target x86_64-apple-darwin
+            lipo -create -output release/gpty target/release/gpty target/x86_64-apple-darwin/release/gpty
+          else
+            cp target/release/gpty release/gpty
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gpty-macos-${{ matrix.target.arch }}
+          path: release/
+
+      - name: Save cargo cache
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+      - name: Save FFmpeg prefix
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.ffmpeg-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg/macos-${{ matrix.target.arch }}
+          key: ${{ steps.ffmpeg-cache.outputs.cache-primary-key }}
+
+  # The macOS app is universal while each build runner has one arch's FFmpeg.
+  # Combine them here (lipo needs macOS) and ad-hoc sign the results so the
+  # export job can inject pre-signed libraries without touching a signature.
+  bundle-macos:
+    needs: build-macos
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+
+      - name: Build universal FFmpeg libraries
+        run: |
+          ./scripts/bundle-media macos-libs release/ffmpeg \
+            artifacts/gpty-macos-arm64/ffmpeg \
+            artifacts/gpty-macos-x86_64/ffmpeg
+
+      - name: Upload universal FFmpeg
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gpty-macos-ffmpeg
+          path: release/ffmpeg
+
+  build-windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.96.0"
+
+      - name: Restore cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-release-
+
+      - name: Restore FFmpeg prefix
+        id: ffmpeg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg/windows-x86_64
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-ffmpeg-
+
+      # The fallback for a prefix miss (a media-deps or components edit). With
+      # the prefix present, media-deps writes the vcpkg environment and never
+      # consults vcpkg; without it, a cold `vcpkg install ffmpeg` rebuilt
+      # FFmpeg from source for 26.5 minutes on 2026-10-30 and a job cap
+      # cancelled the run. Restoring only on a miss keeps a warm run from
+      # spending a minute unpacking a tree it will not read.
+      - name: Restore vcpkg FFmpeg tree
+        if: ${{ steps.ffmpeg-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\packages
+            C:\vcpkg\downloads
+          key: vcpkg-ffmpeg-${{ runner.os }}-9.0.2
+          restore-keys: |
+            vcpkg-ffmpeg-${{ runner.os }}-
+
+      - name: Build media dependencies
+        shell: bash
+        env:
+          VCPKG_ROOT: ${{ env.VCPKG_INSTALLATION_ROOT || 'C:/vcpkg' }}
+        run: ./scripts/media-deps
+
+      - name: Build GDExtension (release)
+        run: cargo build --locked -p gpty-gdext --release
+
+      - name: Build CLI (release)
+        run: cargo build --locked -p gpty --release
+
+      - name: Package
+        run: |
+          mkdir release
+          mkdir release\ffmpeg
+          mkdir release\ffmpeg\bin
+          mkdir release\ffmpeg\licenses
+          copy target\release\gpty_gdext.dll release\gpty_gdext.windows.x86_64.dll
+          copy target\release\gpty.exe release\gpty.exe
+          copy "$env:FFMPEG_DIR\bin\*.dll" release\ffmpeg\bin\
+          xcopy /y /q "dist\ffmpeg\windows-x86_64\licenses\*" release\ffmpeg\licenses\
+          copy "dist\ffmpeg\windows-x86_64\components.txt" release\ffmpeg\
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gpty-windows-x86_64
+          path: release/
+
+      - name: Save cargo cache
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+      - name: Save FFmpeg prefix
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.ffmpeg-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg/windows-x86_64
+          key: ${{ steps.ffmpeg-cache.outputs.cache-primary-key }}
+
+  # ── Export standalone apps (read-only) ───────────────────────────────
+  export:
+    needs: [build-linux, build-macos, build-windows, bundle-macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      # project.godot carries the last released version; bundles must report the
+      # version input (macOS reads CFBundleShortVersionString from it).
+      - name: Stamp the release version into the Godot project
+        run: |
+          # A tag run is guarded by release-gate; a dispatch is not, and a
+          # typo there would name the artifacts for a version the tree is not.
+          crate_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/gpty-cli/Cargo.toml | head -1)"
+          test "v$crate_version" = "$VERSION" \
+            || { echo "version input $VERSION does not match crate v$crate_version" >&2; exit 1; }
+          sed -i "s|^config/version=.*|config/version=\"${VERSION#v}\"|" godot/project.godot
+          grep -n '^config/version=' godot/project.godot
+
+      - name: Install Godot headless
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y wget unzip
+          wget -q https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          # The release tag is mutable; the hash is the pin (from the release's
+          # SHA512-SUMS.txt, verified against the downloaded archive).
+          echo "9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65  Godot_v4.7.2-stable_linux.x86_64.zip" | sha512sum -c -
+          unzip Godot_v4.7.2-stable_linux.x86_64.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          sudo mv Godot_v4.7.2-stable_linux.x86_64 /usr/local/bin/godot
+
+      - name: Install Godot export templates
+        run: |
+          wget -q https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz
+          # Same pin as the editor build; from the release's SHA512-SUMS.txt.
+          echo "ca4d71c4d7b81dfc15d1a98baa07534aa95b03fdda78a0075b06672e1648d2e5f40980c9adc28d23e1b92e732ee7bf3461997aa804af74ec2fcd7a93ccb84079  Godot_v4.7.2-stable_export_templates.tpz" | sha512sum -c -
+          mkdir -p ~/.local/share/godot/export_templates/4.7.2.stable
+          mkdir -p /tmp/godot-templates
+          unzip -qo Godot_v4.7.2-stable_export_templates.tpz -d /tmp/godot-templates
+          if [ -d /tmp/godot-templates/templates ]; then
+            mv /tmp/godot-templates/templates/* ~/.local/share/godot/export_templates/4.7.2.stable/
+          else
+            mv /tmp/godot-templates/* ~/.local/share/godot/export_templates/4.7.2.stable/
+          fi
+          cd ~/.local/share/godot/export_templates/4.7.2.stable
+          if [ -f macos.zip ]; then
+            unzip -qo macos.zip "macos_template.app/Contents/MacOS/*" -d .
+          fi
+          ls -la ~/.local/share/godot/export_templates/4.7.2.stable/
+
+      - name: Download GDExtension artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: gdext-artifacts
+
+      - name: Stage GDExtension binaries into godot/bin/
+        run: |
+          mkdir -p godot/bin
+          find gdext-artifacts -type f \( -name 'libgpty_gdext*' -o -name 'gpty_gdext*' \) | while read -r f; do
+            cp "$f" godot/bin/
+          done
+          for f in libgpty_gdext.linux.x86_64.so libgpty_gdext.macos.arm64.dylib \
+            libgpty_gdext.macos.x86_64.dylib gpty_gdext.windows.x86_64.dll; do
+            test -s "godot/bin/$f" || { echo "missing godot/bin/$f" >&2; exit 1; }
+          done
+          ls -la godot/bin/
+
+      - name: Import project
+        run: godot --headless --path godot --import
+
+      - name: Export Linux
+        run: |
+          B="$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64"
+          mkdir -p "$B"
+          # The CLI owns the name `gpty`; the export ships beside it as `gpty-gui`
+          # so `gpty <command>` can auto-spawn it (see the CLI's GUI discovery).
+          godot --headless --path godot --export-release "Linux/X11" "$B/gpty-gui"
+          cp gdext-artifacts/gpty-linux-x86_64/gpty "$B/"
+          # actions/download-artifact does not preserve file modes, so the CLI
+          # arrives 0644 (`Permission denied` when run). The GUI is exported in
+          # this job and keeps +x; restore the CLI's mode before tarring.
+          chmod 0755 "$B/gpty"
+          cp LICENSE LICENSE-EXCEPTIONS.md "$B/"
+          ./scripts/bundle-media linux "$B" gdext-artifacts/gpty-linux-x86_64/ffmpeg
+          tar -czf "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-linux-x86_64.tar.gz" -C "$GITHUB_WORKSPACE/dist" "gpty-${VERSION}-linux-x86_64"
+
+      - name: Export Windows
+        run: |
+          B="$GITHUB_WORKSPACE/dist/gpty-${VERSION}-windows-x86_64"
+          mkdir -p "$B"
+          godot --headless --path godot --export-release "Windows Desktop" "$B/gpty-gui.exe"
+          cp godot/bin/gpty_gdext.windows.x86_64.dll "$B/"
+          cp gdext-artifacts/gpty-windows-x86_64/gpty.exe "$B/"
+          cp LICENSE LICENSE-EXCEPTIONS.md "$B/"
+          ./scripts/bundle-media windows "$B" gdext-artifacts/gpty-windows-x86_64/ffmpeg
+          cd "$GITHUB_WORKSPACE/dist" && zip -r "gpty-${VERSION}-windows-x86_64.zip" "gpty-${VERSION}-windows-x86_64"
+
+      - name: Export macOS
+        run: |
+          godot --headless --path godot --export-release "macOS" "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip"
+          # zip would happily create the archive itself, which would ship a
+          # licenses-only download if the export above produced nothing.
+          test -s "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" || { echo "macOS export produced no archive"; exit 1; }
+          # The bundle keeps its own name (the preset decides it); the CLI lands
+          # next to it, and the CLI discovers the app under /Applications too.
+          zip -j "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" LICENSE LICENSE-EXCEPTIONS.md \
+            gdext-artifacts/gpty-macos-arm64/gpty
+          ./scripts/bundle-media macos-zip \
+            "$GITHUB_WORKSPACE/dist/gpty-${VERSION}-macos.zip" \
+            "gdext-artifacts/gpty-macos-ffmpeg"
+
+      # Three archives and one checksum file, nothing else. The per-library
+      # assets (the GDExtension and its pinned FFmpeg) are already inside each
+      # archive; publishing them a second time made a 36-file release page that
+      # nobody could choose from, and inflated the download counts that are the
+      # project's only install signal. Entry names match the published asset
+      # names (flat basenames), so a downloaded file can be checked against its
+      # own line, and a missing artifact fails the job instead of shipping a
+      # short list.
+      - name: Generate SHA256 checksums
+        run: |
+          cd "$GITHUB_WORKSPACE/dist"
+          sha256sum "gpty-${VERSION}-linux-x86_64.tar.gz" \
+                    "gpty-${VERSION}-windows-x86_64.zip" \
+                    "gpty-${VERSION}-macos.zip" > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gpty-release-dist
+          path: |
+            dist/gpty-${{ inputs.version }}-linux-x86_64.tar.gz
+            dist/gpty-${{ inputs.version }}-windows-x86_64.zip
+            dist/gpty-${{ inputs.version }}-macos.zip
+            dist/SHA256SUMS
+          retention-days: 3
+

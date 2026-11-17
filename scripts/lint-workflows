@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Lint the GitHub workflows: valid YAML, an explicit least-privilege
 # `permissions:` block, SHA-pinned actions, no persisted checkout credentials,
-# no dangerous triggers, a timeout on every job and a concurrency group on
-# every workflow.
+# no dangerous triggers, a timeout on every job (except a job that calls a
+# reusable workflow, where GitHub does not accept the keyword) and a
+# concurrency group on every workflow.
 #
 # Why the permission rule: a workflow without one hands every job whatever the
 # repository default grants, which is read-write on repositories created before
@@ -91,11 +92,16 @@ for path in WORKFLOWS:
             if not isinstance(job, dict):
                 bad(where, "job is not a mapping")
                 continue
-            timeout = job.get("timeout-minutes")
-            if type(timeout) is not int or timeout <= 0:
-                bad(where, "job has no positive integer timeout-minutes")
-
             job_uses = job.get("uses")
+            # A job that calls a reusable workflow cannot declare
+            # `timeout-minutes` - GitHub's call-job keyword set excludes it, so
+            # the timeout is the called workflow's own, per job (release.yml's
+            # `build` calls release-build.yml, whose jobs each carry one).
+            if job_uses is None:
+                timeout = job.get("timeout-minutes")
+                if type(timeout) is not int or timeout <= 0:
+                    bad(where, "job has no positive integer timeout-minutes")
+
             if job_uses is not None:
                 steps = []
                 check_uses = (where, job_uses)
