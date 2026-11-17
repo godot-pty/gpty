@@ -135,9 +135,9 @@ const STATES := {
 			"settings": {"type": "terminal", "attachment_id": "capture-scrollback",
 				"shell_args": ["-c", "seq 1 300; sleep 600"]}},
 	]},
-	# The scrollbar column: the Terminal tab overflows its 540x560 card by
-	# 62 px, so its ScrollContainer must show a real bar with a thumb inside a
-	# track (row *Every scrollable surface has a 0 px scrollbar*). The 150 %
+	# The scrollbar column: the Terminal tab's content is taller than the card,
+	# so its ScrollContainer must show a real bar with a thumb inside a track
+	# (row *Every scrollable surface has a 0 px scrollbar*). The 150 %
 	# twin proves the same geometry under the window's content scale - the
 	# column is layout pixels, so it scales with the rest of the chrome.
 	"settings-terminal": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Terminal"},

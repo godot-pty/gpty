@@ -1,6 +1,6 @@
 # Settings
 
-Settings is the global panel for how gPTY looks and behaves. It has seven tabs — System, Terminal, Appearance, Reasoning, Concepts, Commands, and About — and writes to `user://settings.json`.
+Settings is the global panel for how gPTY looks and behaves. It has eight tabs — System, Terminal, Appearance, Reasoning, Concepts, Commands, Shortcuts, and About — and writes to `user://settings.json`.
 
 ## Opening, applying, resetting
 
@@ -79,11 +79,15 @@ Your own saved commands: a name, one line of shell text, and whether choosing it
 
 Choosing a saved command types it into the **active terminal pane** and nothing else. When the active pane is not a terminal (a code viewer, a note, a wiki page) the palette lists the commands greyed out with the reason as their tooltip, and refuses to send rather than picking another pane. Nothing expands: the text goes to the shell exactly as written, so `$HOME` and `$(…)` are the shell's business, not gPTY's. Saved commands are GUI-local — there is no IPC method, CLI verb or MCP tool for them, a plugin cannot supply them, and they never run at spawn (a pane's startup command is the layout/profile `launch` key, covered in [[layout]]).
 
+## Shortcuts
+
+Every binding the app knows, grouped as Workspace, New Panes, Panes, Keyboard Focus, and Terminal. Each row is the chord and what it does, and the chords are read from the binding registry rather than typed in, so the list cannot name a key that does nothing. The list is the in-app copy of [[keyboard-shortcuts]]; the palette's `Keyboard Shortcuts` row opens this tab directly.
+
 ## About
 
-Version, the IPC protocol version gPTY speaks, and the repository address. The protocol number is useful when a CLI and a GUI from different builds disagree about the wire format.
+The app version and the IPC protocol version gPTY speaks, on one line. The protocol number is useful when a CLI and a GUI from different builds disagree about the wire format.
 
-Below those, **Keyboard Shortcuts** lists every binding the app knows, grouped as Workspace, New Panes, Panes, Keyboard Focus, and Terminal. Each row is the chord and what it does, and the chords are read from the binding registry rather than typed in, so the list cannot name a key that does nothing. The list is the in-app copy of [[keyboard-shortcuts]]; the palette's `Keyboard Shortcuts` row opens this tab directly.
+Below it is the README — generated from the repository's `README.md` — rendered in the panel. Every Markdown document it links (the guides, the roadmap and changelog pages, the agent rules) also ships inside the app, so a link opens that document in place instead of a browser. The two arrow buttons beside the document's path walk back and forward through what you opened; the oldest step is always the README, so pressing Back returns to the front page. A link the build does not carry is refused with a toast and the page you are reading stays. Images show as their alt text — the panel renders text, not media — and the badge header the repository's front page carries is left out.
 
 ## Global settings versus per-pane settings
 
