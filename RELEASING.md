@@ -284,10 +284,31 @@ privilege is present while project code runs:
   `server.json` versions with the tag, runs `mcp-registry check`, checks both
   lockfiles with `cargo metadata --locked`, checks the defect-class trailers,
   and runs the docs, capability and knowledge-bundle gates.
-- **`export`** is read-only. It stamps `godot/project.godot`, installs Godot and
-  the export templates, asserts the four GDExtension files exist, exports
-  Linux, Windows and macOS, writes `SHA256SUMS`, and uploads the three archives
-  plus the sums as `gpty-release-dist`.
+- **`build`** calls `.github/workflows/release-build.yml`, the same definition a
+  `workflow_dispatch` on `main` runs. It carries the platform jobs
+  (`build-linux`, both `build-macos` arches, `build-windows`, `bundle-macos`,
+  `export`) and restores the caches a run on `main` wrote: the FFmpeg prefix
+  under `ci.yml`'s own key, the Windows vcpkg tree only when that prefix
+  missed, and the release-profile `target` under a
+  `cargo-release-<os>-<arch>-<lock>` key kept apart from the debug caches. A
+  tag run only restores: an entry it saves is tag-scoped, unreadable by the
+  next tag, and would evict CI's caches from the 10 GB budget. `export` stamps
+  `godot/project.godot` with the version input, installs Godot and the export
+  templates, asserts the four GDExtension files exist, exports Linux, Windows
+  and macOS, writes `SHA256SUMS`, and uploads the three archives plus the sums
+  as `gpty-release-dist`.
+
+  `workflow_dispatch` on that file is how the caches are filled and how the
+  build definition is proved before it is used by a tag:
+
+  ```bash
+  gh workflow run release-build.yml --ref main -f version=vX.Y.Z
+  ```
+
+  Run it once on the release commit; it publishes nothing and writes
+  `gpty-release-dist` as a run artifact. A dispatch on a cold key is the cold
+  measurement; the next one (or the tag run after it) is the warm one. Read the
+  step timings with `gh run view <id> --json jobs`.
 - **`publish`** is the only write/OIDC job. It downloads the staged artifact,
   attests the four assets, and creates the GitHub release. It does not check
   out the repository and runs no project code. It waits on the `release`
