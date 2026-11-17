@@ -95,6 +95,8 @@ gh run watch <id> --interval 20 --exit-status
 gh run view <id> --json conclusion,jobs --jq '"run=" + .conclusion, (.jobs[] | "  \(.name): \(.conclusion)")'
 ```
 
+A range that edits `.github/workflows/**` cannot go through `bot-push`: the installation grants only `contents`, `metadata` and `pull_requests`, and GitHub refuses an App push that creates or updates a workflow ("refusing to allow a GitHub App to create or update workflow … without `workflows` permission") — measured 2026-11-17, after the whole pre-push gate had already run. The maintainer's own `gh` token carries the `workflow` scope, so that range is pushed with it (never echo the token into argv — write it to a 0600 file and reuse the `GPTY_BOT_TOKEN_FILE` + `scripts/git-askpass-token` pair `bot-push` uses, with `https://x-access-token@github.com/…`), or the App is granted Workflows write first.
+
 A release PR from the integration branch runs `CI`, `CodeQL` and `Secret scan` on the PR; watch those checks before the maintainer approves and merges it. A release's own runbook is `skill://release`.
 
 4. **Report the run's conclusion and the SHA** with the work. Green on CI is part of the deliverable; "pushed" is not.
