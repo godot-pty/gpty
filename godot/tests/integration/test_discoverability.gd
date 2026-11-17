@@ -2,7 +2,7 @@ extends GutTest
 # Integration tests: the v0.8.1 discoverability surfaces, end to end.
 #
 # Defends: every user-facing chord is read from the binding registry (so the
-# sidebar's tooltips and the About table cannot spell a key that does nothing),
+# sidebar's tooltips and the Shortcuts table cannot spell a key that does nothing),
 # the Add Pane header names the tile under the pointer and offers the shared
 # Help table, and the window-mode control says what each mode draws.
 #
@@ -46,9 +46,9 @@ func _tooltip_button(prefix: String) -> Button:
 			return btn
 	return null
 
-## The chord the About tab prints for one description: each row is
+## The chord the Shortcuts tab prints for one description: each row is
 ## `[chord, description]` inside a per-group GridContainer.
-func _about_chord(list: VBoxContainer, description: String) -> String:
+func _chord(list: VBoxContainer, description: String) -> String:
 	for grid in list.find_children("*", "GridContainer", true, false):
 		var kids := grid.get_children()
 		for i in range(0, kids.size() - 1, 2):
@@ -127,20 +127,20 @@ func test_the_settings_panel_mode_dropdown_carries_the_same_name_and_hint():
 		"the panel's mode dropdown is named like the sidebar's, once")
 	assert_eq((named[0] as OptionButton).tooltip_text, SettingsManager.WINDOW_MODE_HINT)
 
-# ── Settings > About: the list, and the palette row that reaches it ────
+# ── Settings > Shortcuts: the list, and the palette row that reaches it ─
 
-func test_the_shortcuts_command_opens_the_about_list_from_the_registry():
+func test_the_shortcuts_command_opens_the_list_from_the_registry():
 	_ws._execute_command("shortcuts")
 	await get_tree().process_frame
 	var panel: SettingsPanel = _ws._settings_panel
 	assert_not_null(panel, "the palette's Keyboard Shortcuts row builds the panel")
 	assert_true(panel.visible, "opening, never toggling")
-	assert_eq(panel._tabs.get_tab_title(panel._tabs.current_tab), "About")
+	assert_eq(panel._tabs.get_tab_title(panel._tabs.current_tab), "Shortcuts")
 	var list := panel.find_child("ShortcutList", true, false) as VBoxContainer
 	assert_not_null(list)
 	# The row that led here, the terminal's own keys, and a spawn chord: three
 	# different registration paths, all spelled by the registry.
-	assert_eq(_about_chord(list, "Command palette"), "Ctrl+Shift+P")
-	assert_eq(_about_chord(list, "Copy the selection"), "Ctrl+Shift+C")
-	assert_eq(_about_chord(list, "New Terminal pane"), "Ctrl+Shift+N")
-	assert_eq(_about_chord(list, "Toggle fullscreen"), "F11")
+	assert_eq(_chord(list, "Command palette"), "Ctrl+Shift+P")
+	assert_eq(_chord(list, "Copy the selection"), "Ctrl+Shift+C")
+	assert_eq(_chord(list, "New Terminal pane"), "Ctrl+Shift+N")
+	assert_eq(_chord(list, "Toggle fullscreen"), "F11")

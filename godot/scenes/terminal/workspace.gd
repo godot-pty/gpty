@@ -3366,13 +3366,13 @@ func _open_commands_settings() -> void:
 	_raise_settings_panel(settings)
 	settings.open_commands(true)
 
-## The palette's "Keyboard Shortcuts": the About tab, where the list lives.
+## The palette's "Keyboard Shortcuts": the Shortcuts tab, where the list lives.
 ## The panel reads the registry when it opens, so a chord rebound since the last
 ## look is spelled as it is now.
 func _open_shortcuts_settings() -> void:
 	var settings := _ensure_settings_panel()
 	_raise_settings_panel(settings)
-	settings.open_about()
+	settings.open_shortcuts()
 
 ## Put the settings panel in front and close the pane settings overlay, so the
 ## two overlays never stack. Input picking uses reverse tree order (z_index is

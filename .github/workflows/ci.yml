@@ -19,10 +19,12 @@ on:
       - "assets/site-icons/**"
       - "**/*.md"
       - "godot/knowledge.json"
+      - "godot/docs.json"
       - "LICENSE"
       - "scripts/docs-check"
       - "scripts/check-capabilities"
       - "scripts/build-wiki"
+      - "scripts/build-docs"
   pull_request:
     branches: [main, master, "0.*"]
     # Kept as a literal copy rather than a YAML anchor: the anchor would be
@@ -34,10 +36,12 @@ on:
       - "assets/site-icons/**"
       - "**/*.md"
       - "godot/knowledge.json"
+      - "godot/docs.json"
       - "LICENSE"
       - "scripts/docs-check"
       - "scripts/check-capabilities"
       - "scripts/build-wiki"
+      - "scripts/build-docs"
 
 # Least privilege: every job here only reads the repository. Without this
 # block each job inherits the repository default token scope, which is handed

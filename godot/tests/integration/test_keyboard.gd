@@ -244,7 +244,7 @@ func test_keys_that_send_input_still_snap_to_bottom():
 # ── The declared chords are the handler's source of truth ──────────────
 #
 # `term:copy`/`term:paste`/`term:search` are declared in ShortcutManager so a
-# surface can print them (Settings > About, a sidebar tooltip). The handler must
+# surface can print them (Settings > Shortcuts, a sidebar tooltip). The handler must
 # follow the same declaration: these derive the event from the binding, so a
 # chord rebound in the registry without the handler is caught here.
 

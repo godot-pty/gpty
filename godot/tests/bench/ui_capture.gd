@@ -239,7 +239,7 @@ const STATES := {
 	"resize-drag": {"size": DEFAULT_SIZE, "tiles": RESIZE_TILES,
 		"open": "resize-drag", "keep_pointer": true},
 	# The Commands tab with two seeded commands: the list, the Insert/Run hint
-	# each row carries, and the seven-tab bar that has to hold it. The entries
+	# each row carries, and the eight-tab bar that has to hold it. The entries
 	# are written through the store's own API, so the image cannot show a state
 	# the app cannot reach.
 	"commands": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Commands",
@@ -250,9 +250,14 @@ const STATES := {
 	# them below the fold.
 	"palette-commands": {"size": DEFAULT_SIZE, "panes": 1, "open": "palette",
 		"query": "saved", "commands": COMMAND_FIXTURE},
-	# The Settings > About keyboard-shortcut table (row *Discoverability: pane
-	# names, shortcuts and the window-mode control*).
-	"shortcuts": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "About"},
+	# The Settings > Shortcuts table (row *Discoverability: pane names,
+	# shortcuts and the window-mode control*).
+	"shortcuts": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Shortcuts"},
+	# The About tab's documentation viewer on its home page: both versions on
+	# one row, the Back/Forward pair disabled at the root, and the bundled
+	# README rendered by the shared Markdown view (row *The README and every
+	# document it links are readable inside Settings*).
+	"settings-about": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "About"},
 	# The sidebar's section Help popup: the Add Pane glyph table, opened through
 	# the section's own Help button (same row).
 	"pane-help": {"size": DEFAULT_SIZE, "panes": 1, "open": "help"},

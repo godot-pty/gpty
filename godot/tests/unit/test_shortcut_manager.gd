@@ -28,7 +28,7 @@ func test_a_declared_chord_is_spelled_but_is_not_a_workspace_shortcut():
 	# the workspace's gate, and answering true would consume the key before the
 	# pane sees it.
 	assert_eq(ShortcutManager.chord("term:copy"), "Ctrl+Shift+C",
-		"the declared chord is what Settings > About prints")
+		"the declared chord is what Settings > Shortcuts prints")
 	var ev := ShortcutManager._parse_bind(ShortcutManager.chord("term:copy"))
 	ev.pressed = true
 	assert_false(ShortcutManager.is_shortcut(ev),

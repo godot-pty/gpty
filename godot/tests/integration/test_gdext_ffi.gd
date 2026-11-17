@@ -70,7 +70,9 @@ func test_unstarted_grid_functions_are_safe():
 func test_markdown_renderer_formats_and_sanitizes():
 	var renderer = ClassDB.instantiate("GptyMarkdown")
 	assert_not_null(renderer, "GptyMarkdown must be registered")
-	var answer = JSON.parse_string(str(renderer.render("# Title\n\n**bold** [raw]\n\n[x](javascript:bad)", false)))
+	var answer = JSON.parse_string(str(
+		renderer.render("# Title\n\n**bold** [raw]\n\n[x](javascript:bad)", false, false)
+	))
 	assert_true(answer is Dictionary, "render must answer JSON")
 	var rendered := str(answer.get("text", ""))
 	assert_string_contains(rendered, "[font_size=26][b]Title")
@@ -84,7 +86,7 @@ func test_markdown_renderer_formats_and_sanitizes():
 	assert_eq(int(answer.get("shown", 0)), int(answer.get("size", -1)))
 	var cap: int = TextRead.DEFAULT_MAX_BYTES
 	var over = "a".repeat(cap + 1)
-	var cut = JSON.parse_string(str(renderer.render(over, false)))
+	var cut = JSON.parse_string(str(renderer.render(over, false, false)))
 	assert_true(cut.get("truncated", false), "past the cap the render must say so")
 	assert_eq(int(cut.get("shown", 0)), cap, "the answer names how much it rendered")
 	assert_eq(int(cut.get("size", 0)), cap + 1, "and how much it was given")
@@ -92,10 +94,22 @@ func test_markdown_renderer_formats_and_sanitizes():
 	# `wikilinks` is an input parameter, so this also proves the bool marshals:
 	# the wiki pane renders mentions as internal links, every other caller
 	# keeps the literal text.
-	var mentions = JSON.parse_string(str(renderer.render("see [[Note|the note]]", true)))
+	var mentions = JSON.parse_string(str(renderer.render("see [[Note|the note]]", true, false)))
 	assert_string_contains(str(mentions.get("text", "")), "[url=gpty-note:Note]the note[/url]")
-	var plain = JSON.parse_string(str(renderer.render("see [[Note]]", false)))
+	var plain = JSON.parse_string(str(renderer.render("see [[Note]]", false, false)))
 	assert_false("gpty-note:" in str(plain.get("text", "")))
+
+	# `docs` is the second opt-in scheme: the About tab's viewer sets it, every
+	# other caller keeps a `gpty-doc:` destination as plain text.
+	var doc = JSON.parse_string(str(renderer.render(
+		"[Security](gpty-doc:SECURITY.md#Reporting)", false, true
+	)))
+	assert_string_contains(str(doc.get("text", "")),
+		"[url=gpty-doc:SECURITY.md#Reporting]Security[/url]")
+	var refused = JSON.parse_string(str(renderer.render(
+		"[Security](gpty-doc:SECURITY.md)", false, false
+	)))
+	assert_false("gpty-doc:" in str(refused.get("text", "")))
 
 func test_vault_index_and_search_answer_shaped_json():
 	# The vault facet's wire contract (consumed by wiki_pane.gd): an index

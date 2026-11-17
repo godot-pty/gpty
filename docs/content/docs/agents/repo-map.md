@@ -34,6 +34,7 @@ gpty/
 │   ├── bot-pr                  # Open a pull request as gpty-bot
 │   ├── git-askpass-token       # GIT_ASKPASS helper used by bot-push
 │   ├── build-wiki              # Pack docs/content/wiki into godot/knowledge.json
+│   ├── build-docs              # Pack the README's Markdown closure into godot/docs.json
 │   ├── install-hooks           # Symlink githooks into .git/hooks/
 │   ├── install-cli             # Install a release bundle behind a stable PATH link
 │   └── build                   # Build standalone app for the host platform
@@ -148,6 +149,7 @@ gpty/
     ├── concepts.default.json   # Shipped default concepts
     ├── profiles.default.json   # Shipped recommended layouts (Agent Workspace, Knowledge Base)
     ├── knowledge.json          # Generated wiki bundle (scripts/build-wiki)
+    ├── docs.json               # Generated documentation bundle (scripts/build-docs)
     ├── fonts/                  # DejaVu Sans Mono + Phosphor icons
     └── scenes/
         ├── main.tscn
@@ -185,7 +187,7 @@ gpty/
         │   ├── overlay_panel.gd     # Overlay keyboard contract (focus, Escape, focus return)
         │   ├── command_palette.gd   # Ctrl+Shift+P command list (OverlayPanel)
         │   ├── palette_model.gd     # Palette entries, matching and ranking (pure)
-        │   ├── shortcut_catalog.gd  # The About tab's keyboard-shortcut list as data (chords from the binding registry)
+        │   ├── shortcut_catalog.gd  # The Shortcuts tab's keyboard list as data (chords from the binding registry)
         │   ├── shortcut_guide.gd    # The empty workspace guide: clickable live keycap + every binding (data-driven)
         │   ├── keyboard_focus.gd   # The keyboard-entry walk + the toolbar-ring pair
         │   ├── status_bar.gd
@@ -194,6 +196,9 @@ gpty/
         │   ├── window_chrome.gd    # Titlebar + window-mode/fullscreen handling (extracted)
         │   ├── markdown_view.gd     # Safe, debounced Markdown RichTextLabel
         │   ├── markdown_anchors.gd  # Pure ATX heading scan for fragment/line navigation
+        │   ├── docs_bundle.gd       # Validated, lazily loaded view of godot/docs.json
+        │   ├── docs_viewer.gd       # Settings > About: README + linked docs, Back/Forward
+        │   ├── nav_history.gd       # Bounded back/forward trail with a pinned root (pure)
         │   ├── vault_graph_model.gd # Pure vault link-graph normalize/layout/hit-test
         │   ├── link_weights.gd      # Pure declared-weight vocabulary (paths, range, lookup)
         │   ├── vault_graph_view.gd  # Custom-drawn vault link-graph canvas

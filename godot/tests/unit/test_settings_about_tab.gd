@@ -1,6 +1,7 @@
 extends GutTest
-# Settings About tab — version label must show the live app version and
-# the tab itself must be present in the panel's TabContainer.
+# Settings About tab — the versions row, the bundled documentation viewer, and
+# the Shortcuts split. The About page is the README now; the chord table moved
+# to its own tab.
 
 class MockWorkspace extends Control:
 	func get_terminal_for_ffi() -> Node:
@@ -60,6 +61,53 @@ func test_protocol_label_comes_from_the_ffi_source():
 		"the About tab must show the protocol the wire actually carries"
 	)
 	assert_false(_panel._protocol_label.text.is_empty())
+
+func test_version_and_protocol_share_one_top_level_row():
+	var row := _panel._version_label.get_parent()
+	assert_not_null(row, "the version label has a row")
+	assert_true(row is HBoxContainer, "the two versions sit on one line")
+	assert_eq(_panel._protocol_label.get_parent(), row,
+		"the IPC protocol label is on the same row, not below it")
+
+func test_the_repository_url_row_is_gone():
+	assert_null(_panel.find_child("RepoUrl", true, false),
+		"the README links the repository itself; the standalone URL row is removed")
+
+func test_the_about_tab_holds_the_documentation_viewer():
+	assert_not_null(_panel._docs_viewer, "About builds a DocsViewer")
+	assert_true(_panel._docs_viewer.is_inside_tree())
+	var tabs := _find_tab_container(_panel)
+	var body := _panel.find_child("About", true, false) as Control
+	assert_not_null(body)
+	tabs.current_tab = tabs.get_tab_idx_from_control(body)
+	await wait_frames(2)
+	assert_eq(_panel._docs_viewer._current, DocsBundle.ROOT_DOC,
+		"the About page opens on the bundled README")
+	assert_string_contains(_panel._docs_viewer._view.get_parsed_text(), "desktop workspace")
+
+func test_the_about_tab_is_a_fill_tab():
+	var tabs := _find_tab_container(_panel)
+	var body := _panel.find_child("About", true, false) as Control
+	assert_not_null(body)
+	assert_eq(body.get_parent(), tabs, "the tab body is a direct child of the tab container")
+	assert_false(body is ScrollContainer,
+		"the document body owns its scrollbar; a ScrollContainer would clip it to one line")
+
+func test_shortcuts_have_their_own_tab():
+	var tabs := _find_tab_container(_panel)
+	var titles: Array[String] = []
+	for i in tabs.get_tab_count():
+		titles.append(tabs.get_tab_title(i))
+	assert_true(titles.has("Shortcuts"), "the chord table moved to its own tab")
+	assert_eq(titles[titles.size() - 1], "About", "About stays the last tab")
+	var list := _panel.find_child("ShortcutList", true, false) as VBoxContainer
+	assert_not_null(list)
+	var owner: Node = list
+	while owner != null and owner.get_parent() != tabs:
+		owner = owner.get_parent()
+	assert_not_null(owner)
+	assert_eq(owner.name, "Shortcuts",
+		"the table lives under the Shortcuts tab, not under About")
 
 # ── helpers ────────────────────────────────────────────────────────────
 

@@ -62,7 +62,7 @@ godot/
         │   ├── overlay_panel.gd  # Shared keyboard contract for the four overlays + the card clamp (fit_card)
         │   ├── command_palette.gd # Ctrl+Shift+P command list (OverlayPanel)
         │   ├── palette_model.gd # Palette entries, matching and ranking (pure)
-        │   ├── shortcut_catalog.gd # The About tab's keyboard-shortcut list as data (chords from the binding registry)
+        │   ├── shortcut_catalog.gd # The Shortcuts tab's keyboard list as data (chords from the binding registry)
         │   ├── shortcut_guide.gd # The empty workspace guide: clickable live keycap + every binding (data-driven)
         │   ├── keyboard_focus.gd # Keyboard-entry walk + the toolbar-ring pair (overlay focus, pane content, chrome/note toolbars)
         │   ├── concept_graph_editor.gd # Visual rule editor overlay (GraphEdit)
@@ -86,6 +86,9 @@ godot/
         │   ├── window_chrome.gd # Titlebar + window-mode/fullscreen handling
         │   ├── markdown_view.gd # Safe shared Markdown renderer
         │   ├── markdown_anchors.gd # Pure ATX heading scan for fragment/line navigation
+        │   ├── docs_bundle.gd  # Validated, lazily loaded view of godot/docs.json
+        │   ├── docs_viewer.gd  # Settings > About: the README and the documents it links (Back/Forward)
+        │   ├── nav_history.gd  # Bounded back/forward trail with a pinned root (pure)
         │   └── icons.gd         # Phosphor icon constants
         └── panes/               # Specialty pane types
             ├── pane_body.gd

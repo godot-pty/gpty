@@ -1,0 +1,356 @@
+#!/usr/bin/env python3
+"""Build the documentation bundle that ships inside the app.
+
+`README.md` is the repository's front page and links the project's guides and
+the site's roadmap, changelog and agent pages. A release has no `docs/`
+directory and no repository, so the Markdown reachable from the README is
+packed into `godot/docs.json`, which the exporter includes and `DocsBundle`
+(godot/scenes/ui/docs_bundle.gd) reads lazily when the Settings > About tab is
+first shown. The bundle is looked up by path and never written to disk.
+
+The shipped text is not byte-identical to the source. Each difference is a
+display decision taken here so the renderer stays a plain Markdown -> BBCode
+converter: YAML front matter and the README's centered badge header are
+dropped (images render as alt text, so the badge wall would be eight
+`Image: ...` lines), the `<details>`/`<summary>` wrappers are unwrapped, and
+every internal `.md` link - relative, through a GitHub blob URL, or a same-page
+`#anchor` - becomes `gpty-doc:<repo path>` with the fragment translated from
+the site's slug to the target heading's text, which is what
+`MarkdownView.scroll_to_heading` matches.
+
+The hash is over the documents' paths and text, so the bundle is deterministic
+and `--check` fails a stale one instead of shipping documents the README no
+longer says. Usage:
+  ./scripts/build-docs           write godot/docs.json
+  ./scripts/build-docs --check   fail if it is missing or stale
+"""
+import hashlib
+import json
+import os
+import posixpath
+import re
+import sys
+import tempfile
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.path.join(ROOT, "godot", "docs.json")
+ROOT_DOC = "README.md"
+SCHEME = "gpty-doc:"
+BLOB_PREFIX = "https://github.com/godot-pty/gpty/blob/"
+
+MAX_DOCS = 2000
+MAX_DOC_BYTES = 1 << 20
+MAX_BUNDLE_BYTES = 32 << 20
+MAX_PATH_BYTES = 1024
+
+# `[label](dest "title")`, and never an image (`![alt](src)`). Labels with a
+# nested image (`[![Badge](src)](url)`) are not rewritten - their destination is
+# the badge's link, never a document - and the image's own source is matched by
+# the separate image rule the site's link checker owns.
+LINK = re.compile(r'(?<!!)\[([^\]]*)\]\(([^)\s]+)(\s+"[^"]*")?\)')
+INLINE_CODE = re.compile(r'`[^`\n]*`')
+FENCE = re.compile(r'^\s{0,3}(`{3,}|~{3,})')
+ATX = re.compile(r'^#{1,6} (.+)$')
+SUMMARY = re.compile(r'^\s*<summary>(.*)</summary>\s*$')
+
+
+def fail(message):
+    print(f"build-docs: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def read(path):
+    full = os.path.join(ROOT, *path.split("/"))
+    with open(full, "rb") as handle:
+        data = handle.read()
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        fail(f"{path}: not UTF-8: {error}")
+
+
+def exists(path):
+    return os.path.isfile(os.path.join(ROOT, *path.split("/")))
+
+
+def slug(heading):
+    # Keep in step with `scripts/docs-check`'s `slug`: it is the site's anchor
+    # rule, and a fragment it accepted is the one this script must translate.
+    h = re.sub(r'`', '', heading.strip().lower())
+    h = re.sub(r'[^\w\- ]', '', h)
+    return h.replace(' ', '-')
+
+
+def code_spans(line):
+    return [(m.start(), m.end()) for m in INLINE_CODE.finditer(line)]
+
+
+def fence_open(line):
+    """The `(char, length)` of a fence this line opens, or None."""
+    match = FENCE.match(line)
+    if not match:
+        return None
+    run = match.group(1)
+    # A backtick run's info string must not contain a backtick (CommonMark).
+    if run[0] == '`' and '`' in line[match.end():]:
+        return None
+    return (run[0], len(run))
+
+
+def lines_of(text):
+    """`(line, in_code)` pairs, code meaning a fence or an inline span.
+
+    Mirrors `MarkdownAnchors`: a closing fence run is at least as long as its
+    opener, and a line inside a fence is literal text. Inline spans are the
+    single-backtick pairs `scripts/docs-check` strips; a document that quotes
+    `[text](path.md)` as an example must not grow a link from it.
+    """
+    fence = None
+    for line in text.split("\n"):
+        if fence is not None:
+            trimmed = line.strip()
+            if len(trimmed) >= fence[1] and trimmed == fence[0] * len(trimmed):
+                fence = None
+            yield line, True
+            continue
+        opened = fence_open(line)
+        if opened is not None:
+            fence = opened
+            yield line, True
+            continue
+        yield line, code_spans(line)
+
+
+def transform(text):
+    """The display form of one document, before link rewriting."""
+    lines = text.split("\n")
+    start = 0
+    if lines and lines[0].strip() == "---":
+        end = 1
+        while end < len(lines) and lines[end].strip() not in ("---", "..."):
+            end += 1
+        if end < len(lines):
+            start = end + 1
+    # The README opens with a centered block of badge images. The renderer has
+    # no image path, so the block would read as a wall of `Image: ...` lines;
+    # it is GitHub chrome, not the document's prose.
+    index = start
+    while index < len(lines) and lines[index].strip() == "":
+        index += 1
+    if index < len(lines) and lines[index].strip() == '<div align="center">':
+        close = index
+        while close < len(lines) and lines[close].strip() != "</div>":
+            close += 1
+        if close < len(lines):
+            lines = lines[:index] + lines[close + 1:]
+    out = []
+    for line in lines[start:]:
+        stripped = line.strip()
+        if stripped in ("<details>", "</details>"):
+            continue
+        summary = SUMMARY.match(line)
+        if summary:
+            # The tag itself is inert Markdown text; its words are the caption.
+            out.append(f"**{summary.group(1)}**")
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def resolve(dest, doc):
+    """The repo path a link names, `(path, fragment)`, or None.
+
+    `fragment` keeps its `#` off; `""` means the link had none. A destination
+    that is not a repo Markdown path - http, mailto, `/`-absolute, an image, a
+    non-`.md` file - answers None and is left byte-identical.
+    """
+    path, sep, fragment = dest.partition("#")
+    if dest.startswith(BLOB_PREFIX):
+        rest = path[len(BLOB_PREFIX):]
+        _, _, repo_path = rest.partition("/")
+        if not repo_path.endswith(".md"):
+            return None
+        target = posixpath.normpath(repo_path)
+        fragment = fragment if sep else ""
+    elif dest.startswith("#"):
+        target = doc
+    elif path.endswith(".md") and not re.match(r'^[a-zA-Z][a-zA-Z0-9+.-]*:', dest) \
+            and not dest.startswith("/"):
+        target = posixpath.normpath(posixpath.join(posixpath.dirname(doc), path))
+    else:
+        return None
+    if target.startswith("../") or target.startswith("/") or target in (".", ".."):
+        fail(f"{doc}: link '{dest}' points outside the repository")
+    return target, fragment
+
+
+def links_of(path, text):
+    """Every repo Markdown path this document links to, in reading order."""
+    found = []
+    for line, coded in lines_of(text):
+        if coded is True:
+            continue
+        spans = coded
+        for match in LINK.finditer(line):
+            if any(start <= match.start() < end for start, end in spans):
+                continue
+            resolved = resolve(match.group(2), path)
+            if resolved is not None:
+                found.append(resolved[0])
+    return found
+
+
+def anchors_of(text):
+    """`slug -> heading text` for a document's ATX headings outside code."""
+    out = {}
+    for line, coded in lines_of(text):
+        if coded is True:
+            continue
+        match = ATX.match(line)
+        if not match:
+            continue
+        heading = match.group(1).strip()
+        out.setdefault(slug(heading), heading)
+    return out
+
+
+def rewrite(text, doc, docs, anchors):
+    """Point every internal Markdown link at the bundle's own scheme."""
+    out = []
+    for line, coded in lines_of(text):
+        if coded is True:
+            out.append(line)
+            continue
+        spans = coded
+        result = []
+        last = 0
+        for match in LINK.finditer(line):
+            if any(start <= match.start() < end for start, end in spans):
+                continue
+            dest = match.group(2)
+            resolved = resolve(dest, doc)
+            if resolved is None:
+                continue
+            target, fragment = resolved
+            if target not in docs:
+                continue
+            new = SCHEME + target
+            if fragment:
+                heading = anchors[target].get(fragment)
+                if heading is None:
+                    fail(f"{doc}: link '{dest}' names a missing anchor in {target}")
+                new += "#" + heading
+            result.append(line[last:match.start()])
+            result.append(f"[{match.group(1)}]({new}{match.group(3) or ''})")
+            last = match.end()
+        result.append(line[last:])
+        out.append("".join(result))
+    return "\n".join(out)
+
+
+def path_problem(path):
+    if not path:
+        return "empty path"
+    if len(path.encode("utf-8")) > MAX_PATH_BYTES:
+        return f"path longer than {MAX_PATH_BYTES} bytes"
+    if path.startswith("/") or "\\" in path or ":" in path:
+        return "path is not repository-relative"
+    parts = path.split("/")
+    if not parts[-1].endswith(".md"):
+        return "not a Markdown document"
+    for part in parts:
+        if part in ("", ".", ".."):
+            return "path has an empty, current or parent component"
+        if part.startswith("."):
+            return "path names a hidden entry"
+    return ""
+
+
+def payload():
+    texts = {}
+    for path in (ROOT_DOC,):
+        if not exists(path):
+            fail(f"{path} is missing")
+        texts[path] = transform(read(path))
+    # Breadth-first over the links the shipped text actually carries, so a
+    # document reachable only through a dropped block (the badge header) does
+    # not ship and a document the README links does.
+    queue = [ROOT_DOC]
+    while queue:
+        path = queue.pop(0)
+        for target in links_of(path, texts[path]):
+            if not exists(target):
+                fail(f"{path}: link names a missing file: {target}")
+            if target in texts:
+                continue
+            problem = path_problem(target)
+            if problem:
+                fail(f"{target}: {problem}")
+            texts[target] = transform(read(target))
+            if len(texts) > MAX_DOCS:
+                fail(f"more than {MAX_DOCS} documents")
+            queue.append(target)
+    anchors = {path: anchors_of(text) for path, text in texts.items()}
+    docs = []
+    total = 0
+    for path in sorted(texts):
+        body = rewrite(texts[path], path, texts, anchors)
+        size = len(body.encode("utf-8"))
+        if size > MAX_DOC_BYTES:
+            fail(f"{path}: larger than the {MAX_DOC_BYTES // 1024} KiB document cap")
+        total += size
+        docs.append({"path": path, "text": body})
+    if total > MAX_BUNDLE_BYTES:
+        fail(f"documents total {total} bytes, over the {MAX_BUNDLE_BYTES} byte bundle cap")
+    hasher = hashlib.sha256()
+    for doc in docs:
+        hasher.update(doc["path"].encode("utf-8"))
+        hasher.update(b"\0")
+        hasher.update(doc["text"].encode("utf-8"))
+        hasher.update(b"\0")
+    version = hasher.hexdigest()[:16]
+    data = {"version": version, "docs": docs}
+    encoded = json.dumps(
+        data, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8") + b"\n"
+    return docs, version, encoded
+
+
+def main():
+    check = "--check" in sys.argv[1:]
+    docs, version, encoded = payload()
+    if check:
+        if not os.path.exists(OUT):
+            fail(f"{os.path.relpath(OUT, ROOT)} is missing; run ./scripts/build-docs")
+        with open(OUT, "rb") as handle:
+            current = handle.read()
+        if current != encoded:
+            fail(
+                f"{os.path.relpath(OUT, ROOT)} is stale ({len(docs)} documents, "
+                f"version {version}); run ./scripts/build-docs"
+            )
+        print(f"build-docs: OK ({len(docs)} documents, version {version})")
+        return
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    handle, temporary = tempfile.mkstemp(
+        prefix=".docs-", suffix=".json", dir=os.path.dirname(OUT)
+    )
+    try:
+        with os.fdopen(handle, "wb") as out:
+            out.write(encoded)
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, OUT)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+    print(
+        f"build-docs: wrote {os.path.relpath(OUT, ROOT)} "
+        f"({len(docs)} documents, {len(encoded)} bytes, version {version})"
+    )
+
+
+if __name__ == "__main__":
+    main()

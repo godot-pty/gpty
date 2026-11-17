@@ -14,6 +14,7 @@ on:
       - "docs/**"
       - "**/*.md"
       - "godot/knowledge.json"
+      - "godot/docs.json"
       - "LICENSE"
   schedule:
     # Thursdays, 23:30 UTC (the slot GitHub's generator picked). An odd minute

@@ -207,9 +207,9 @@ func test_reset_buttons_are_tab_wide_and_centered():
 		assert_eq(btn.alignment, HORIZONTAL_ALIGNMENT_CENTER,
 			"%s reset text must be centered" % tab_name)
 
-## The Terminal tab overflows the 540x560 card by 62 px, so the row *Every
-## scrollable surface has a 0 px scrollbar* needs that overflow to have a real
-## bar. The card keeps its design size here, so the column must not widen it.
+## The Terminal tab overflows the card, so the row *Every scrollable surface
+## has a 0 px scrollbar* needs that overflow to have a real bar. The card keeps
+## its design size here, so the column must not widen it.
 func test_the_terminal_tab_shows_a_scrollbar_column():
 	SettingsManager.cfg_ui_scale = 100
 	_pin_window(Vector2i(1920, 1080))
@@ -566,7 +566,7 @@ func test_the_commands_tab_sits_before_about():
 	for i in _panel._tabs.get_tab_count():
 		titles.append(_panel._tabs.get_tab_title(i))
 	assert_eq(titles, ["System", "Terminal", "Appearance", "Reasoning", "Concepts",
-		"Commands", "About"], "the shipped tabs keep their positions")
+		"Commands", "Shortcuts", "About"], "the shipped tabs keep their positions")
 
 func test_the_commands_tab_lists_the_store_in_order():
 	_seed_commands()
@@ -669,10 +669,11 @@ func test_open_commands_lands_on_the_tab_and_can_open_the_form():
 	_panel.open_commands(true)
 	assert_not_null(_find_accept_dialog(_panel), "add_now opens the form")
 
-## A seventh tab must stay on the bar. The engine does not widen the bar for
-## an overflow: it hides trailing tabs behind a dropdown, and then re-lays the
-## bar out on the first click, which mangles the card's measured 540 x 560.
-func test_all_seven_tabs_fit_the_card():
+## Every tab must stay on the bar at the card's design width. The engine does
+## not widen the bar for an overflow: it hides trailing tabs behind a dropdown,
+## and then re-lays the bar out on the first click, which changes the card's
+## measured size under the pointer.
+func test_all_eight_tabs_fit_the_card():
 	_pin_window(Vector2i(1920, 1080))
 	SettingsManager.cfg_ui_scale = 100
 	SettingsManager.apply_ui_scale()
@@ -680,7 +681,7 @@ func test_all_seven_tabs_fit_the_card():
 	_panel.open()
 	await wait_frames(2)
 	var tabs := _panel._tabs
-	assert_eq(tabs.get_tab_count(), 7)
+	assert_eq(tabs.get_tab_count(), 8)
 	var bar := tabs.get_tab_bar()
 	assert_gt(bar.size.x, 0.0, "the bar has been laid out")
 	# The rects are read as a running row: a tab the engine has hidden comes
@@ -697,13 +698,13 @@ func test_all_seven_tabs_fit_the_card():
 		edge = rect.end.x
 		total += rect.size.x
 	assert_true(total <= bar.size.x,
-		"the seven tabs need %.1f px of a %.1f px bar: the overflow would be hidden behind a dropdown"
+		"the eight tabs need %.1f px of a %.1f px bar: the overflow would be hidden behind a dropdown"
 		% [total, bar.size.x])
 
-# ── About: the keyboard-shortcut table ─────────────────────────────────
+# ── Shortcuts: the keyboard-shortcut table ─────────────────────────────
 
-## The chord the list prints for one description, read out of the About tab's
-## grids: each row is `[chord, description]`.
+## The chord the list prints for one description, read out of the Shortcuts
+## tab's grids: each row is `[chord, description]`.
 func _row_chord(description: String) -> String:
 	var list := _panel.find_child("ShortcutList", true, false) as VBoxContainer
 	if list == null:
@@ -715,15 +716,15 @@ func _row_chord(description: String) -> String:
 				return (kids[i] as Label).text
 	return ""
 
-func test_open_about_lands_on_the_about_tab():
-	_panel.open_about()
+func test_open_shortcuts_lands_on_the_shortcuts_tab():
+	_panel.open_shortcuts()
 	await wait_frames(2)
 	assert_true(_panel.visible, "opening, never toggling")
-	assert_eq(_panel._tabs.get_tab_title(_panel._tabs.current_tab), "About",
+	assert_eq(_panel._tabs.get_tab_title(_panel._tabs.current_tab), "Shortcuts",
 		"the palette's Keyboard Shortcuts row asks for this tab")
 
 func test_the_shortcut_list_prints_the_registry_spelling():
-	_panel.open_about()
+	_panel.open_shortcuts()
 	await wait_frames(2)
 	# `term:*` is declared by the autoload, so it is bound in a bare panel; the
 	# workspace's own app:* rows need a workspace and are covered by
@@ -735,19 +736,19 @@ func test_the_shortcut_list_prints_the_registry_spelling():
 	assert_eq(_row_chord("Paste the clipboard"), "Ctrl+Shift+V")
 
 func test_a_second_open_rebuilds_the_list_instead_of_appending():
-	_panel.open_about()
+	_panel.open_shortcuts()
 	await wait_frames(2)
 	var list := _panel.find_child("ShortcutList", true, false) as VBoxContainer
 	assert_not_null(list)
 	var first := list.get_child_count()
 	assert_gt(first, 0, "the declared chords give the list at least one row")
-	_panel.open_about()
+	_panel.open_shortcuts()
 	await wait_frames(2)
 	assert_eq(list.get_child_count(), first,
 		"the previous table is freed, not stacked under the new one")
 
 func test_every_group_caption_precedes_its_rows_and_no_heading_is_empty():
-	_panel.open_about()
+	_panel.open_shortcuts()
 	await wait_frames(2)
 	var list := _panel.find_child("ShortcutList", true, false) as VBoxContainer
 	# Read as pairs, not against a fixed count: another suite in this process

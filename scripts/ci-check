@@ -8,14 +8,15 @@ set -euo pipefail
 #                selects; run nothing (answers "why did the gate skip that?")
 #   (no flag)    Full suite: fmt + lint + clippy + tests + GUT + audit
 #
-# A docs-class change runs the docs gates only (docs-check + knowledge bundle)
+# A docs-class change runs the docs gates only (docs-check + the two bundles)
 # in either mode, because nothing it touches can change what the Rust,
 # GDScript or smoke gates test - and CI skips its code workflow for one too
 # (`paths-ignore` in .github/workflows/ci.yml). A path is docs-class when the
 # only gate it can influence is one the Docs workflow already runs: `docs/`,
-# Markdown, the generated bundle, the capability catalogue, the licenses, and
-# the three scripts that are nothing but that workflow's gates
-# (`scripts/docs-check`, `scripts/build-wiki`, `scripts/check-capabilities`).
+# Markdown, the generated bundles, the capability catalogue, the licenses, and
+# the four scripts that are nothing but that workflow's gates
+# (`scripts/docs-check`, `scripts/build-wiki`, `scripts/build-docs`,
+# `scripts/check-capabilities`).
 #
 # A tooling-class change runs the docs gates, the cost gates and a syntax/plan
 # check of the tooling scripts themselves, and stops there. It is an
@@ -132,8 +133,8 @@ changed_paths() {
 # executed by a gate.
 docs_class_path() {
     case "$1" in
-        docs/*|assets/site-icons/*|*.md|godot/knowledge.json|LICENSE) return 0 ;;
-        scripts/docs-check|scripts/build-wiki|scripts/check-capabilities) return 0 ;;
+        docs/*|assets/site-icons/*|*.md|godot/knowledge.json|godot/docs.json|LICENSE) return 0 ;;
+        scripts/docs-check|scripts/build-wiki|scripts/build-docs|scripts/check-capabilities) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -205,7 +206,7 @@ report_class() {
 $paths
 EOF
     if docs_class_change; then
-        printf "\n  %b→ docs gates only (docs-check + knowledge bundle + cost figures)%b\n" "$BOLD" "$NC"
+        printf "\n  %b→ docs gates only (docs-check + knowledge/docs bundles + cost figures)%b\n" "$BOLD" "$NC"
     elif tooling_class_change; then
         printf "\n  %b→ tooling gates (docs + cost + script syntax/plan); CI_CHECK_FULL=1 runs everything%b\n" "$BOLD" "$NC"
     else
@@ -255,6 +256,14 @@ run_bundle_check() {
     else
         fail "knowledge bundle"
         detail "$WIKI_OUT"
+        check_failed
+    fi
+    header "docs bundle"
+    if DOCS_OUT="$(python3 scripts/build-docs --check 2>&1)"; then
+        pass "docs bundle"
+    else
+        fail "docs bundle"
+        detail "$DOCS_OUT"
         check_failed
     fi
 }
@@ -448,9 +457,10 @@ else
     check_failed
 fi
 
-# ── Knowledge bundle: generated from the wiki vault ────────────────────
-# The vault is the source; godot/knowledge.json is what release builds read.
-# A stale bundle ships old notes, so it fails here rather than at export.
+# ── Knowledge and documentation bundles ────────────────────────────────
+# The vault and the Markdown reachable from README are the sources;
+# godot/knowledge.json and godot/docs.json are what release builds read. A
+# stale bundle ships old text, so it fails here rather than at export.
 run_bundle_check
 
 # ── Step 2.9: workspace lockfile drift ─────────────────────────────────

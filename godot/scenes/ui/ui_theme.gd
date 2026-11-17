@@ -167,10 +167,11 @@ static func build() -> Theme:
 	# seven tabs (System … About) have to fit the settings card's bar without
 	# the engine hiding the overflow behind a dropdown, and a hidden tab is
 	# invisible until clicked - then the bar re-lays itself out and the card's
-	# measured 540 x 560 is mangled. Measured on this tree, the seven tabs need
-	# 520 px of the card's 500 px bar at the theme's default size (12 px text,
-	# 8 px tab padding) and 490 px here - 11 px text with 6 px of padding - so
-	# this is what makes the seventh tab fit at all.
+	# measured size is mangled. Measured on this tree, the tabs need 520 px of
+	# the card's bar at the theme's default size (12 px text, 8 px tab padding)
+	# and 490 px here - 11 px text with 6 px of padding. The reduced font is
+	# what keeps every tab on the row; the card's width (`SettingsPanel.
+	# CARD_SIZE`) is what the eight tabs of the Shortcuts/About split fit at.
 	t.set_font_size("font_size", "TabBar", UiTokens.FS_CAPTION)
 	# The container's own item is what reaches the bar it draws: the engine
 	# creates the internal `TabBar` with a `font_size` *override* taken from the

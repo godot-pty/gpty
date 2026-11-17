@@ -52,13 +52,16 @@ func _open_settings(ws: Control) -> SettingsPanel:
 	await get_tree().process_frame
 	return panel
 
-## Make a tall tab current: the card is content-sized now, so a clamp test
-## needs content that actually reaches the clamp.
+## Make a tab current: the card is content-sized now, so a clamp test needs
+## content that actually reaches the clamp. The tab body is a direct child of
+## the TabContainer - a ScrollContainer for a form tab, the fill tab's
+## MarginContainer for About - which is the only shape
+## `get_tab_idx_from_control` answers for.
 func _select_settings_tab(panel: SettingsPanel, title: String) -> void:
-	var sc := panel.find_child(title, true, false) as ScrollContainer
-	if sc == null:
+	var body := panel.find_child(title, true, false) as Control
+	if body == null:
 		return
-	panel._tabs.current_tab = panel._tabs.get_tab_idx_from_control(sc)
+	panel._tabs.current_tab = panel._tabs.get_tab_idx_from_control(body)
 	await get_tree().process_frame
 
 # ── The Settings card ──────────────────────────────────────────────────
@@ -77,7 +80,7 @@ func test_the_settings_card_fits_an_800x500_window():
 	var panel := await _open_settings(ws)
 	await _select_settings_tab(panel, "Terminal")
 	var card := panel._card
-	assert_eq(card.size, Vector2(540, 484),
+	assert_eq(card.size, Vector2(SettingsPanel.CARD_SIZE.x, 484),
 		"the design width, and the window's height less the card edge on each side")
 	_assert_inside(card.get_global_rect(), ws.get_global_rect(), "the Settings card")
 
@@ -86,8 +89,8 @@ func test_the_settings_card_fits_a_560x340_window():
 	var panel := await _open_settings(ws)
 	await _select_settings_tab(panel, "Terminal")
 	var card := panel._card
-	assert_eq(card.size, Vector2(540, 324),
-		"the design width still fits (560 less the card edge on each side is 544); the height clamps")
+	assert_eq(card.size, Vector2(544, 324),
+		"the window clamps both axes now: 560 less the card edge on each side is 544, and the height is the window's 324")
 	_assert_inside(card.get_global_rect(), ws.get_global_rect(), "the Settings card")
 
 func test_the_card_reclamps_while_it_is_open():
@@ -98,7 +101,22 @@ func test_the_card_reclamps_while_it_is_open():
 	ws.size = Vector2(560, 340)
 	await get_tree().process_frame
 	await get_tree().process_frame
-	assert_eq(panel._card.size, Vector2(540, 324), "a resize while open re-clamps the card")
+	assert_eq(panel._card.size, Vector2(544, 324), "a resize while open re-clamps the card")
+
+## The About tab is the one fill tab: the document body owns its scrollbar, so
+## the card asks for the page size instead of measuring a column - and switches
+## back to the shared design height with any scrolling tab.
+func test_the_about_tab_asks_for_the_taller_card():
+	var ws = await _make_workspace(Vector2(1200, 800))
+	var panel := await _open_settings(ws)
+	await _select_settings_tab(panel, "About")
+	await get_tree().process_frame
+	assert_eq(panel._card.size, SettingsPanel.FILL_TAB_SIZE,
+		"the document viewer gets the page height")
+	await _select_settings_tab(panel, "Terminal")
+	await get_tree().process_frame
+	assert_eq(panel._card.size, SettingsPanel.CARD_SIZE,
+		"and a scrolling tab returns to the shared design size")
 
 # ── The Pane Settings card ────────────────────────────────────────────
 

@@ -30,13 +30,14 @@ helpers), `grid_api.rs`, `history_api.rs`, `vault_api.rs`, `store_api.rs`, `capt
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `render(markdown: String, wikilinks: bool)` | `String` | Convert untrusted CommonMark/GFM to sanitized `RichTextLabel` BBCode. `wikilinks` renders `[[target]]` / `[[target|alias]]` / `[[target#heading]]` as internal `gpty-note:` links (percent-encoded target, escaped label) - only the wiki pane sets it, and the renderer is the only producer of that scheme; every other caller keeps the literal text. Occurrences are the `gpty_core::links` parser's (fences, inline code and escaped openers stay literal) and are spliced in through a sentinel before parsing, so surrounding Markdown is untouched. JSON: `{text, truncated, shown, size}` - the cut travels with the text (`shown`/`size` are bytes of the source, the shape a pane read answers) because the input is capped and a prefix must not be rendered in silence |
+| `render(markdown: String, wikilinks: bool, docs: bool)` | `String` | Convert untrusted CommonMark/GFM to sanitized `RichTextLabel` BBCode. `wikilinks` renders `[[target]]` / `[[target|alias]]` / `[[target#heading]]` as internal `gpty-note:` links (percent-encoded target, escaped label) - only the wiki pane sets it, and the renderer is the only producer of that scheme; every other caller keeps the literal text. `docs` accepts the documentation bundle's `gpty-doc:<repo path>#<heading>` destinations, percent-encoding both halves and refusing a payload over 1024 bytes - only the Settings > About viewer sets it, and the view resolves the path against `DocsBundle` (never the filesystem); with it off a document's `gpty-doc:` link stays plain text. Occurrences are the `gpty_core::links` parser's (fences, inline code and escaped openers stay literal) and are spliced in through a sentinel before parsing, so surrounding Markdown is untouched. JSON: `{text, truncated, shown, size}` - the cut travels with the text (`shown`/`size` are bytes of the source, the shape a pane read answers) because the input is capped and a prefix must not be rendered in silence |
 
 Raw BBCode and HTML are escaped, images render as alt text, and only
 `http`, `https`, and `mailto` links become metadata. Godot asks for
 confirmation before `MarkdownView` opens an external link; a `gpty-note:`
-mention is emitted by this renderer alone under `wikilinks`, and the view
-hands it to its owning pane (never to `OS.shell_open`).
+mention is emitted by this renderer alone under `wikilinks`, and a
+`gpty-doc:` link under `docs`, and the view hands each to its owner (never to
+`OS.shell_open`).
 
 The output never uses Godot's list tags: `[ul]`/`[ol]` lay a document out
 superlinearly in the item count (measured: 38915 ms to shape 1.7 MiB of

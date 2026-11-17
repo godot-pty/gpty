@@ -6,12 +6,21 @@ signal request_graph_editor
 
 var _debounce_timer: Timer = null
 var _workspace: Control
-## The card's design size: the width all seven tabs fit the bar at and the
-## height no tab may exceed. A short tab sizes the card to its content; a
-## smaller window clamps it (`fit_card_content`).
-const CARD_SIZE := Vector2(540, 560)
+## The card's design size: the width all eight tabs fit the bar at and the
+## height a scrolling tab may reach. A short tab sizes the card to its content;
+## a smaller window clamps it (`fit_card_content`).
+##
+## The height is deliberately not raised for the document viewer: the Terminal
+## tab's content sits only a couple of pixels past 560, so a taller shared
+## height would stop that tab reaching the design size (`test_the_card_reclamps_
+## while_it_is_open`). The About tab asks for `FILL_TAB_SIZE` instead.
+const CARD_SIZE := Vector2(720, 560)
+## The About tab's design size. It is the one fill tab (its Markdown body owns
+## the scrollbar), so there is no content height to measure and it asks for the
+## page height a document wants. Clamped to the window like CARD_SIZE.
+const FILL_TAB_SIZE := Vector2(720, 640)
 ## The card itself, so a resize and every dialog can read its real width - below
-## a 556 px window the clamp makes it narrower than the design size.
+## the design width plus the card edge the clamp makes it narrower.
 var _card: Panel = null
 ## The card's own column, so its natural height can size the card.
 var _card_body: VBoxContainer = null
@@ -52,17 +61,25 @@ func _before_open() -> void:
 
 ## Size the card to the active tab's content, up to the design height and the
 ## window. A short tab no longer paints a dead band below its last row; a tall
-## one keeps the design height and scrolls inside its own tab.
+## one keeps the design height and scrolls inside its own tab; a fill tab (the
+## About document viewer) asks for its whole page size instead.
 ##
-## The tab's content lives in a `ScrollContainer`, whose minimum size is zero
-## by default. Setting that scroll's minimum to the content's own height (less
-## whatever the card cannot give it) is what lets the height propagate to the
-## card; it is lowered again on a smaller window so the clamp still wins.
+## A form tab's content lives in a `ScrollContainer`, whose minimum size is
+## zero by default. Setting that scroll's minimum to the content's own height
+## (less whatever the card cannot give it) is what lets the height propagate to
+## the card; it is lowered again on a smaller window so the clamp still wins.
 func _fit_settings_card() -> void:
 	if _card == null or _card_body == null or _tabs == null:
 		return
-	var sc := _tabs.get_current_tab_control() as ScrollContainer
-	var current_min := sc.custom_minimum_size.y if sc != null else 0.0
+	var current := _tabs.get_current_tab_control()
+	if not (current is ScrollContainer):
+		# A fill tab (the About document viewer) scrolls inside itself, so
+		# there is no inner content height to measure: it asks for the whole
+		# page size, and the window clamp still wins.
+		fit_card_content(_card, FILL_TAB_SIZE, FILL_TAB_SIZE)
+		return
+	var sc := current as ScrollContainer
+	var current_min := sc.custom_minimum_size.y
 	# Everything the card needs besides the tab's content: margins, header,
 	# separator, tab bar and the column's separations.
 	var base := _card_body.get_combined_minimum_size().y - current_min
@@ -72,14 +89,13 @@ func _fit_settings_card() -> void:
 	if room > 0.0:
 		max_total = minf(CARD_SIZE.y, room)
 	var max_list := maxf(0.0, max_total - margin * 2.0 - base)
-	if sc != null:
-		# `tab_changed` also fires while the tab is being built: the
-		# ScrollContainer is added to the TabContainer before its own content,
-		# so a zero-child tab is a normal intermediate state here.
-		var inner := sc.get_child(0) as Control if sc.get_child_count() > 0 else null
-		var want := inner.get_combined_minimum_size().y if inner != null else 0.0
-		sc.custom_minimum_size.y = minf(want, max_list)
-	var content_h := margin * 2.0 + base + (sc.custom_minimum_size.y if sc != null else 0.0)
+	# `tab_changed` also fires while the tab is being built: the ScrollContainer
+	# is added to the TabContainer before its own content, so a zero-child tab
+	# is a normal intermediate state here.
+	var inner := sc.get_child(0) as Control if sc.get_child_count() > 0 else null
+	var want := inner.get_combined_minimum_size().y if inner != null else 0.0
+	sc.custom_minimum_size.y = minf(want, max_list)
+	var content_h := margin * 2.0 + base + sc.custom_minimum_size.y
 	fit_card_content(_card, CARD_SIZE, Vector2(CARD_SIZE.x, content_h))
 
 func _notification(what: int):
@@ -91,9 +107,9 @@ func _notification(what: int):
 		# The list outlives a visit: a command saved from the palette while the
 		# panel was closed must be there on the next open.
 		_refresh_command_list()
-		# The About tab's chords are read from the registry, which a workspace
-		# fills after this panel may already exist: re-read on every show so the
-		# table cannot print a binding from before that happened.
+		# The Shortcuts tab's chords are read from the registry, which a
+		# workspace fills after this panel may already exist: re-read on every
+		# show so the table cannot print a binding from before that happened.
 		_refresh_shortcut_list()
 	elif what == NOTIFICATION_RESIZED:
 		# The window (and with it the layout space) changed, so the scale it can
@@ -251,8 +267,18 @@ func _build_ui():
 	_command_tab = t_cmd
 	_add_command_section(t_cmd)
 
-	# Tab 7: About
-	var t_about = _create_tab(tabs, "About")
+	# Tab 7: Shortcuts — the registry table lives on its own tab now
+	var t_keys = _create_tab(tabs, "Shortcuts")
+	_shortcuts_tab = t_keys
+	_add_shortcut_section(t_keys)
+
+	# Tab 8: About — the bundled README and the documents it links. A fill tab:
+	# the Markdown body owns its scrollbar and asks for FILL_TAB_SIZE.
+	#
+	# At a window narrow enough to clamp the card below ~600 px (the 560x340
+	# floor) the eight-tab bar overflows behind the engine's dropdown; the card
+	# re-measures on every `tab_changed`, so picking a hidden tab is still safe.
+	var t_about = _create_fill_tab(tabs, "About")
 	_add_about_section(t_about)
 
 	v.add_child(HSeparator.new())
@@ -308,6 +334,24 @@ func _create_tab(tabs: TabContainer, title: String) -> VBoxContainer:
 	var v = VBoxContainer.new()
 	v.add_theme_constant_override("separation", UiTokens.SPACE_LG)
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mc.add_child(v)
+	return v
+
+## A tab whose content fills the card instead of scrolling as a column. The
+## About tab's document viewer owns its own scrollbar; a ScrollContainer here
+## would give the label one line of height and scroll the whole page.
+func _create_fill_tab(tabs: TabContainer, title: String) -> VBoxContainer:
+	var mc = MarginContainer.new()
+	mc.name = title
+	UiTheme.margins(mc, UiTokens.SPACE_LG)
+	mc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tabs.add_child(mc)
+
+	var v = VBoxContainer.new()
+	v.add_theme_constant_override("separation", UiTokens.SPACE_LG)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	mc.add_child(v)
 	return v
 
@@ -824,47 +868,51 @@ var _version_label: Label
 var _protocol_label: Label
 var _concept_list: VBoxContainer
 var _concept_terminal: GptyTerminal  # any terminal for global concept FFI
-## The About tab and its shortcut table, kept so `open_about()` can land on the
-## right tab and `_refresh_shortcut_list()` can rebuild the table on each open.
-var _about_tab: VBoxContainer = null
+## The Shortcuts tab, kept so `open_shortcuts()` can land on it; and its table,
+## which `_refresh_shortcut_list()` rebuilds on each open.
+var _shortcuts_tab: VBoxContainer = null
 var _shortcut_list: VBoxContainer = null
+## The About tab's document viewer; its README loads on the first visit.
+var _docs_viewer: DocsViewer = null
 ## The aligned chord column's floor: the widest chord in the list is
 ## "Ctrl+PageDown".
 const SHORTCUT_CHORD_WIDTH := 108.0
-## The About tab's one outbound link.
-const REPO_URL := "https://github.com/godot-pty/gpty"
 
+## The About tab: one top-level row with both versions, then the bundled
+## documentation. The repository URL row is gone - the README itself links the
+## repository, and its links open the documents beside it.
 func _add_about_section(v: VBoxContainer):
+	var row := HBoxContainer.new()
+	row.name = "VersionRow"
+	row.add_theme_constant_override("separation", UiTokens.SPACE_XL)
 	_version_label = Label.new()
 	_version_label.name = "VersionLabel"
 	_version_label.text = "gpty v" + GptyTerminal.get_app_version()
 	_version_label.add_theme_font_size_override("font_size", UiTokens.FS_BODY)
-	v.add_child(_version_label)
-
-	v.add_child(HSeparator.new())
-
-	var ipc_row = HBoxContainer.new()
-	ipc_row.add_child(_lbl("IPC protocol:"))
+	row.add_child(_version_label)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spacer)
+	row.add_child(_lbl("IPC protocol:"))
 	# From the one definition (`gpty_ipc::protocol::PROTOCOL_VERSION`), not a
 	# literal: the same value the wire carries and the CLI prints.
 	_protocol_label = Label.new()
 	_protocol_label.name = "ProtocolLabel"
 	_protocol_label.text = GptyTerminal.get_ipc_protocol_version()
-	ipc_row.add_child(_protocol_label)
-	v.add_child(ipc_row)
+	row.add_child(_protocol_label)
+	v.add_child(row)
 
-	var url_btn := Button.new()
-	url_btn.name = "RepoUrl"
-	url_btn.text = "github.com/godot-pty/gpty"
-	url_btn.flat = true
-	url_btn.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	url_btn.theme_type_variation = UiTheme.ACCENT_BUTTON
-	url_btn.tooltip_text = "Open the gPTY repository in your browser"
-	url_btn.pressed.connect(func(): ExternalLink.open(REPO_URL))
-	v.add_child(url_btn)
-
-	_about_tab = v
 	v.add_child(HSeparator.new())
+
+	_docs_viewer = DocsViewer.new()
+	_docs_viewer.name = "DocsViewer"
+	_docs_viewer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_docs_viewer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(_docs_viewer)
+
+## The Shortcuts tab: every registered binding, grouped, with the chords read
+## from the registry.
+func _add_shortcut_section(v: VBoxContainer):
 	var shortcut_heading := Label.new()
 	shortcut_heading.name = "ShortcutHeading"
 	shortcut_heading.text = "Keyboard Shortcuts"
@@ -876,9 +924,9 @@ func _add_about_section(v: VBoxContainer):
 	v.add_child(_shortcut_list)
 	_refresh_shortcut_list()
 
-## Rebuild the shortcut table from the registry. Called on construction, on
-## `open_about()` and whenever the panel is shown: a chord is only known once
-## the workspace has registered it, so the list is re-read rather than
+## Rebuild the shortcut table from the registry. Called when the tab is built,
+## on `open_shortcuts()` and whenever the panel is shown: a chord is only known
+## once the workspace has registered it, so the list is re-read rather than
 ## snapshotted here.
 func _refresh_shortcut_list() -> void:
 	if _shortcut_list == null:
@@ -1160,12 +1208,13 @@ func open_commands(add_now := false) -> void:
 	if add_now:
 		_show_command_dialog(-1)
 
-## The palette's "Keyboard Shortcuts": the About tab, where the list lives.
-## Opening, never toggling, so a second run cannot close what it just opened.
-func open_about() -> void:
+## The palette's "Keyboard Shortcuts": the Shortcuts tab, where the list now
+## lives. Opening, never toggling, so a second run cannot close what it just
+## opened.
+func open_shortcuts() -> void:
 	open()
-	if _tabs != null and _about_tab != null:
-		_tabs.current_tab = _tabs.get_tab_idx_from_control(_tab_control(_about_tab))
+	if _tabs != null and _shortcuts_tab != null:
+		_tabs.current_tab = _tabs.get_tab_idx_from_control(_tab_control(_shortcuts_tab))
 	# Read after the tab is up: the workspace registers its bindings once, and a
 	# panel built before that would otherwise show the previous set.
 	_refresh_shortcut_list()
