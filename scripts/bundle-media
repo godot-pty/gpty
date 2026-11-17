@@ -75,6 +75,36 @@ bundle_windows() {
     step "FFmpeg DLLs placed in $dest"
 }
 
+# One real file per library (`libfoo.M.m.p.dylib`) plus the `libfoo.M.dylib` and
+# `libfoo.dylib` aliases as symlinks. Derived from the canonical files rather than
+# from what the source tree named: FFmpeg's build ships the unversioned name as a
+# real file, and an artifact upload dereferences symlinks, so an alias can arrive
+# as a second ~9 MB copy. Called by the bundler and again by `macos_zip`, which is
+# where the transported tree is unpacked.
+normalize_aliases() {
+    local dir="$1" canon base stem major plain
+    for canon in "$dir"/libav*.dylib "$dir"/libsw*.dylib; do
+        [ -f "$canon" ] || continue
+        [ -L "$canon" ] && continue
+        base="$(basename "$canon")"
+        stem="${base%.dylib}"
+        # A canonical name carries its version; an unversioned or major-only
+        # name is an alias and is (re)created below.
+        case "$stem" in
+            *.*) ;;
+            *) continue ;;
+        esac
+        major="${stem#*.}"
+        major="${major%%.*}"
+        # libgpty_gdext.macos.arm64.dylib is not an FFmpeg library.
+        [[ "$major" =~ ^[0-9]+$ ]] || continue
+        plain="${stem%%.*}"
+        rm -f "$dir/$plain.$major.dylib" "$dir/$plain.dylib"
+        ln -sfn "$base" "$dir/$plain.$major.dylib"
+        ln -sfn "$base" "$dir/$plain.dylib"
+    done
+}
+
 macos_libs() {
     local out="$1" arm="$2" x86="$3"
     [ -d "$arm/lib" ] || die "no arm64 FFmpeg build at $arm"
@@ -90,6 +120,12 @@ macos_libs() {
         # the alias below.
         [ -L "$arm_lib" ] && continue
         base="$(basename "$arm_lib")"
+        # The unversioned name is an alias of the versioned file even when the
+        # FFmpeg build ships it as a real one; `normalize_aliases` derives it.
+        case "${base%.dylib}" in
+            *.*) ;;
+            *) continue ;;
+        esac
         [ -f "$x86/lib/$base" ] || die "x86_64 build lacks $base"
         lipo -create "$arm_lib" "$x86/lib/$base" -output "$out/lib/$base"
         install_name_tool -id "@rpath/$base" "$out/lib/$base"
@@ -106,12 +142,7 @@ macos_libs() {
         # arm64 loader accepts it.
         codesign --force --sign - "$out/lib/$base" >/dev/null
     done
-    # Recreate the unversioned/`.63` names as symlinks to the canonical files.
-    for arm_lib in "$arm"/lib/libav*.dylib "$arm"/lib/libsw*.dylib; do
-        [ -L "$arm_lib" ] || continue
-        base="$(basename "$arm_lib")"
-        ln -sfn "$(basename "$(readlink "$arm_lib")")" "$out/lib/$base"
-    done
+    normalize_aliases "$out/lib"
     "$REPO_ROOT/scripts/check-macos-minos" --x86_64 10.13 --arm64 11.0 "$out"/lib/*.dylib
     # The extension itself must reference @rpath, not the build prefix, or the
     # pre-signed libraries above cannot satisfy it after the move.
@@ -150,6 +181,9 @@ macos_zip() {
         target="$app/Contents/Frameworks"
     fi
     cp -a "$universal"/lib/. "$target"/
+    # The transport that carried these here dereferences symlinks, so an alias
+    # may have arrived as a full copy; restore it before zipping.
+    normalize_aliases "$target"
     mkdir -p "$app/Contents/Resources/licenses"
     if [ -d "$universal/licenses" ]; then
         cp -a "$universal/licenses/." "$app/Contents/Resources/licenses/"
