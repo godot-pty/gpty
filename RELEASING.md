@@ -6,10 +6,48 @@ is `.omp/skills/release/SKILL.md`; it follows this page and records only the
 agent-specific checkpoints, not a second runbook. Release authority is in
 [MAINTAINERS.md](https://github.com/godot-pty/gpty/blob/main/MAINTAINERS.md).
 
-A release is a pull request from the active integration branch (`0.8.x` for the
-0.8 line) to `main`, the maintainer's approval, a merge commit, and a signed
-annotated `vX.Y.Z` tag on `main`. `main` is release-only: feature pull requests
-land on the integration branch.
+A release is a pull request from the active integration branch (`X.Y.x` for the
+line under development) to `main`, the maintainer's approval, a merge commit,
+and a signed annotated `vX.Y.Z` tag on `main`. `main` is release-only: feature
+pull requests land on the integration branch.
+
+## Branches
+
+Every release line `X.Y` has a long-lived integration branch named `X.Y.x`.
+Exactly one is active - the line under development receives the feature pull
+requests - and the others stay on `origin` at the last release their line
+shipped. A closed line's branch is the tree that shipped: it is kept, the
+`integration protection` ruleset covers every `0.*` branch, and it is where a
+defect is reproduced against the release the user reported it on before the fix
+is prepared as a pull request against the active line. Releases are cut from
+`main`, never from an archive branch.
+
+The remote is the inventory; nothing needs to list the branches by hand:
+
+```bash
+git branch -r --list 'origin/*.x'
+git describe --tags --abbrev=0 origin/0.7.x   # the line's last release
+```
+
+A branch for a line that closed before the branch existed is created at that
+line's last release tag, so it contains the release's changelog page, version
+bump and blog entry - not the commit before them:
+
+```bash
+git branch 0.7.x v0.7.2
+git push origin 0.7.x
+```
+
+Do not type the branch into a command; derive it from the tag being cut. The
+rest of this page uses `$BRANCH`:
+
+```bash
+RELEASE=vX.Y.Z
+BRANCH="${RELEASE#v}"; BRANCH="${BRANCH%.*}.x"   # vX.Y.Z -> X.Y.x
+```
+
+The first release of a new line creates its branch before step 1 - from the
+previous line's last release commit - and pushes it.
 
 ## Preconditions
 
@@ -38,10 +76,12 @@ land on the integration branch.
 
 ## 1. Analyze the commit range
 
-Release notes come from the commit history, never from memory. Set the previous
-release tag and inspect the range:
+Release notes come from the commit history, never from memory. Set the tag
+being cut, derive its branch, and inspect the range:
 
 ```bash
+RELEASE=vX.Y.Z
+BRANCH="${RELEASE#v}"; BRANCH="${BRANCH%.*}.x"   # vX.Y.Z -> X.Y.x
 PREV=$(git describe --tags --abbrev=0 --match 'v*' HEAD^)
 git log "$PREV"..HEAD --oneline
 ./scripts/fix-forensics --check --since "$PREV"
@@ -218,7 +258,7 @@ Run the full local gate once more:
 
 ```bash
 ./scripts/ci-check
-git switch 0.8.x
+git switch "$BRANCH"
 git pull --ff-only
 ```
 
@@ -236,7 +276,7 @@ git commit -s -m "docs: finalize vX.Y.Z release"
 Push the integration branch and open the release PR as `gpty-bot`:
 
 ```bash
-./scripts/bot-push 0.8.x
+./scripts/bot-push "$BRANCH"
 ./scripts/bot-pr --base main --title "vX.Y.Z" --body-file /tmp/gpty-release-body.md
 ```
 
@@ -268,9 +308,9 @@ do not force-move one to include a late fix.
 After the merge, bring the integration branch to the release commit:
 
 ```bash
-git switch 0.8.x
+git switch "$BRANCH"
 git merge --ff-only main
-git push origin 0.8.x
+git push origin "$BRANCH"
 ```
 
 ## 9. Understand the release workflow
@@ -416,4 +456,6 @@ not meet this floor; the first release after the fix is the proof.
   going. Confirm with `gh run view <id> --json status,conclusion` before
   calling a run failed.
 - **No `dev/v*` branches.** The integration branch is long-lived; feature
-  branches are short-lived and PR back to it, not to `main`.
+  branches are short-lived and PR back to it, not to `main`. A line's branch
+  outlives the line: the archive branch is not deleted, and it is not a second
+  place to release from.
