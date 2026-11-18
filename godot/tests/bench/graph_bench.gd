@@ -12,6 +12,9 @@ extends SceneTree
 #   old_stall_us                    their sum - what one frame used to pay
 #   request_us                      what `request_graph()` costs the frame now
 #   landed_ms                       request -> canvas, the build's real latency
+#   three_d                         the physical map: body build, settle ticks,
+#                                   force/visual/link medians (a small push runs
+#                                   first, because a fresh map starts at rest)
 #
 #   godot --headless --path godot -s res://tests/bench/graph_bench.gd
 #

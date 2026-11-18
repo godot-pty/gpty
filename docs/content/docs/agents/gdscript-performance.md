@@ -103,9 +103,10 @@ UI-bound), and per-frame `Image` reuse for video (copy-on-write; the upload is t
   driver and `--disable-vsync`; under `--headless` every draw timing reads zero. Pure compute (the
   probe, a parser, a sort) may be headless.
 - Use the committed end-to-end harnesses: `draw_bench.gd` (full/row/overlay repaint and the stream
-  cadence), `graph_bench.gd` (query/parse/layout and request-to-canvas latency), `reasoning_bench.gd`
-  (burst/catchup), `switch_bench.gd` (workspace switch, cold/warm), `spawn_bench.gd` (pane
-  creation). The probe is the micro-number; the harness is the user-visible one.
+  cadence), `graph_bench.gd` (query/parse/layout, request-to-canvas, and the 3D
+  build/step/link cost), `reasoning_bench.gd` (burst/catchup), `switch_bench.gd`
+  (workspace switch, cold/warm), `spawn_bench.gd` (pane creation). The probe is the
+  micro-number; the harness is the user-visible one.
 - Record **measured** (with the build/source) and **expected** (with the probe that will confirm
   it) separately in the roadmap row. A row lands only with a number and a test; if its gate
   misses, revert the code and close the row with the number. A micro-number is never presented as

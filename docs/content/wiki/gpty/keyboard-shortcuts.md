@@ -85,13 +85,15 @@ The note toolbar — Edit / Split / Preview, Rename, Delete and Save — is a ke
 
 | Input | Action |
 |---|---|
-| `Tab` / `Shift+Tab` | Move through the canvas, **Arrows**, **Relayout** and **Fit** — one ring |
+| `Tab` / `Shift+Tab` | Move through the canvas, **Planar** / **Physical**, **Orbit** (3D map), **Arrows**, **Relayout** and **Fit** — one ring |
 | `←` `→` `↑` `↓` | Pan the map; hold `Shift` to pan four times further |
 | `+` / `-` | Zoom about the crosshair at the canvas centre |
 | `Enter` | Act on what the crosshair covers: open the note, create the note a ghost stands for, or open an edge's weight actions |
 | `Escape` | Back to the note list |
 
-Opening the graph hands the keyboard to the canvas, and the canvas draws a focus frame and the crosshair while it holds the keyboard; Escape leaves for the list the way it does from a note. The crosshair is the canvas centre, so panning is how the keyboard walks the map. `Enter` resolves through the same hit test the pointer uses, so the node that is highlighted is the node that opens; on an edge (nothing under the crosshair) it offers the declared-weight actions instead. Dragging one node to rearrange the map stays a pointer gesture — **Relayout** resets the arrangement from the keyboard.
+The map has two presentations. The **physical 3D map** is the default on a forward renderer; the **planar canvas** is the fallback, and it is the automatic choice on the Compatibility (OpenGL3) renderer. **Planar** / **Physical** switches between them without losing the arrangement, and the pane's **Link map** setting chooses the default (`Auto`, `3D (physical)`, `2D (flat)`). On the 3D map **Orbit** turns a background drag into a camera orbit, so the deterministic depth layers show as parallax; middle-drag always pans, and the wheel or `+`/`-` zooms. On the planar map a background drag pans. Dragging a note pushes its neighbours through the springs and the map settles when the drag is released; **Relayout** resets the arrangement in either view. The saved positions ride the pane's layout state, so reopening the graph returns to the arrangement you left.
+
+Opening the graph hands the keyboard to the canvas, and the canvas draws a focus frame and the crosshair while it holds the keyboard; Escape leaves for the list the way it does from a note. The crosshair is the canvas centre, so panning is how the keyboard walks the map. `Enter` resolves through the same hit test the pointer uses, so the node that is highlighted is the node that opens; on an edge (nothing under the crosshair) it offers the declared-weight actions instead. Dragging one node to rearrange the map stays a pointer gesture.
 
 ## Where shortcuts come from
 

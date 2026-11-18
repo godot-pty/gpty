@@ -28,12 +28,13 @@ The sidebar's swap-position action exchanges two tiles' stored geometry without 
 
 ## What a layout stores
 
-Each tile saves its geometry plus the pane's layout state: type, pane name, attachment id, tags, font size, and whatever that pane type adds — a terminal's command, shell arguments, grid dimensions and cursor look; a wiki pane's vault path, view mode, open note and whether the graph was showing; a media pane's file; and so on.
+Each tile saves its geometry plus the pane's layout state: type, pane name, attachment id, tags, font size, and whatever that pane type adds — a terminal's command, shell arguments, grid dimensions and cursor look; a wiki pane's vault path, view mode, open note, whether the graph was showing, its link-map style and the map's saved note positions (bounded; a note that has left the vault is ignored); a media pane's file; and so on.
 
 A layout deliberately does **not** store:
 
 - Running processes, exit state, or scrollback — history lives in a separate database and survives panes.
 - Unsaved editor text. A dirty wiki buffer is not part of the layout; a recovery copy outside the vault covers a crash.
+- Physics state. The 3D link map's bodies, velocities and springs are rebuilt from the saved note positions; no run-time simulation state is persisted.
 - Per-pane environment. That is user-owned, keyed by attachment id, and lives in its own store (see [[settings]]).
 - Window size, position, sidebar width, or focus. Those belong to the application, not the arrangement.
 
