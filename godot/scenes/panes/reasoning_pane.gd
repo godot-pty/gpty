@@ -298,7 +298,6 @@ func _default_title() -> String:
 
 func apply_settings(settings: Dictionary):
 	var previous_source := source_attachment_id
-	var previous_font := font_size
 	super.apply_settings(settings)
 	# The closed table assigned `source_attachment_id` (a malformed id never
 	# reaches the property); a changed source is a different terminal.
@@ -307,10 +306,6 @@ func apply_settings(settings: Dictionary):
 		_omp_session_id = ""
 		_last_bound_at_ms = 0
 		_session_ended = false
-	# `PaneBody`'s font setter only recomputes when a type assigned `_font`
-	# (a terminal); this pane's views carry the override themselves.
-	if is_inside_tree() and font_size != previous_font:
-		_recompute_cell_metrics()
 	if is_inside_tree() and _omp_session_id == "" and _status:
 		_status.text = _idle_status()
 

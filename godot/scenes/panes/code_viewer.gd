@@ -13,8 +13,10 @@ var _view_toggle: Button
 var _reload_button: Button
 var _toolbar: HBoxContainer
 ## The "nothing to show" surface the pane shows while it has neither a file nor
-## routed content.
+## routed content, and its two text lines (kept so a font change reaches them).
 var _empty: Control
+var _empty_title: Label
+var _empty_hint: Label
 ## The editor's text: the read plus its notice when the read hit the cap.
 var _content := ""
 ## What the rendered view gets: the read itself, with no notice in it — a
@@ -65,7 +67,6 @@ func _ready():
 	_editor.editable = false
 	_editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_editor.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_editor.add_theme_font_size_override("font_size", font_size)
 	content_root.add_child(_editor)
 	_editor.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
@@ -73,8 +74,6 @@ func _ready():
 	_markdown.name = "MarkdownView"
 	_markdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_markdown.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_markdown.add_theme_font_size_override("normal_font_size", font_size)
-	_markdown.add_theme_font_size_override("mono_font_size", font_size)
 	content_root.add_child(_markdown)
 	_markdown.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
@@ -87,13 +86,19 @@ func _ready():
 	# text, no explanation, no route to a file. It now says what it is and the
 	# two ways out (the File Tree, or the pane's own settings), on the same
 	# surface the media pane shows.
-	_empty = PaneBody.empty_state(
+	var empty := PaneBody.empty_state(
 		content_root,
 		str(PaneTypes.ALL.get("code_viewer", {}).get("icon", "{}")),
 		"No file open",
 		"Open a file from the File Tree, or set a path in pane settings.",
-		font_size)["host"] as Control
+		font_size)
+	_empty = empty["host"] as Control
 	_empty.name = "EmptyState"
+	_empty_title = empty["title"] as Label
+	_empty_hint = empty["hint"] as Label
+	# One owner for every text view's size: this call sizes the editor, the
+	# rendered view and the empty surface from the same `font_size`.
+	_recompute_cell_metrics()
 
 	if file_path != "":
 		load_file(file_path)
@@ -226,6 +231,14 @@ func receive_content(text: String, _event: Dictionary = {}) -> bool:
 	_editor.set_caret_line(0)
 	_refresh_view()
 	return true
+
+func _recompute_cell_metrics():
+	if _editor:
+		_editor.add_theme_font_size_override("font_size", font_size)
+	if _markdown:
+		_markdown.add_theme_font_size_override("normal_font_size", font_size)
+		_markdown.add_theme_font_size_override("mono_font_size", font_size)
+	PaneBody.empty_state_font(_empty_title, _empty_hint, font_size)
 
 func _pane_type() -> String:
 	return "code_viewer"

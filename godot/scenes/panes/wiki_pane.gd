@@ -434,13 +434,18 @@ func _restore_view() -> void:
 		request_graph()
 
 ## The editor and the preview share the pane's font size, which the settings
-## panel can change after `_ready`.
+## panel can change after `_ready`; the base setter calls this through
+## `_recompute_cell_metrics`. The note list and the graph's labels are the
+## vault's index and diagram, not the note text, so they keep the chrome size.
+func _recompute_cell_metrics():
+	_apply_font_size()
+
 func _apply_font_size() -> void:
-	if _editor == null:
-		return
-	_editor.add_theme_font_size_override("font_size", font_size)
-	_reader.add_theme_font_size_override("normal_font_size", font_size)
-	_reader.add_theme_font_size_override("mono_font_size", font_size)
+	if _editor:
+		_editor.add_theme_font_size_override("font_size", font_size)
+	if _reader:
+		_reader.add_theme_font_size_override("normal_font_size", font_size)
+		_reader.add_theme_font_size_override("mono_font_size", font_size)
 
 ## The view state machine: exactly one of {note list, note editor,
 ## placeholder} is visible, and the back button only while a note is open.
@@ -1963,12 +1968,10 @@ func apply_settings(settings: Dictionary):
 		_drop_scratch(previous_root, _current_rel)
 		# A different vault makes the old query meaningless.
 		_search.text = ""
-		_apply_font_size()
 		_refresh()
 		return
 	# Everything else is a property of this pane, not of the vault: applying
 	# it must not close the note the user is editing.
-	_apply_font_size()
 	_apply_view_mode()
 
 func _get_layout_state() -> Dictionary:

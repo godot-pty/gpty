@@ -150,6 +150,7 @@ var launch: String = ""
 		_sync_interval = 1.0 / target
 
 var _terminal: GptyTerminal
+var _font: Font
 var _font_bold: Font
 var _font_italic: Font
 var _cell_cache: Dictionary = {}
@@ -811,6 +812,8 @@ func _load_font(path: String, fallback: String) -> Font:
 	return f
 
 func _recompute_cell_metrics():
+	if _font == null:
+		return  # the setter runs at spawn, before _ready loads the faces
 	_font.fixed_size = font_size
 	_font_bold.fixed_size = font_size
 	_font_italic.fixed_size = font_size

@@ -47,6 +47,9 @@ func _ready():
 	_empty_host.name = "EmptyState"
 	_empty_title = empty["title"] as Label
 	_empty_hint = empty["hint"] as Label
+	# The tree is this pane's text surface: one call sizes its rows and the
+	# empty-state lines from the same `font_size`.
+	_recompute_cell_metrics()
 
 	# The two scroll chevrons over the tree. `Tree` has no content-change
 	# signal, so the pane reports its own rebuilds to them.
@@ -226,6 +229,11 @@ func _refresh_root() -> void:
 		_empty_hint.text = problem["hint"]
 	if _scroll_hints != null:
 		_scroll_hints.sync()
+
+func _recompute_cell_metrics():
+	if _tree:
+		_tree.add_theme_font_size_override("font_size", font_size)
+	PaneBody.empty_state_font(_empty_title, _empty_hint, font_size)
 
 func _pane_type() -> String:
 	return "file_tree"

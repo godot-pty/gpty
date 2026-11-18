@@ -68,6 +68,23 @@ func test_apply_settings_font_size():
 	body.apply_settings({"font_size": 20})
 	assert_eq(body.font_size, 20)
 
+## Records how often the base setter asks it to re-apply the text size.
+class FontProbe extends PaneBody:
+	var recomputes := 0
+	func _recompute_cell_metrics():
+		recomputes += 1
+
+func test_a_font_size_change_recomputes_and_a_repeated_value_does_not():
+	var body := FontProbe.new()
+	_scene.add_child(body)
+	body.apply_settings({"font_size": 20})
+	assert_eq(body.recomputes, 1, "the setter must reach a pane that has no `_font`")
+	body.font_size = 20
+	assert_eq(body.recomputes, 1, "assigning the current size must not re-measure")
+	body.apply_settings({"pane_name": "Renamed", "font_size": 20})
+	assert_eq(body.recomputes, 1,
+		"the debounced panel re-sends the size on every edit; only a change may repaint")
+
 func test_apply_settings_unknown_key():
 	var body = PaneBody.new()
 	_scene.add_child(body)
