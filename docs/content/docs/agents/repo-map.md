@@ -200,9 +200,11 @@ gpty/
         │   ├── docs_bundle.gd       # Validated, lazily loaded view of godot/docs.json
         │   ├── docs_viewer.gd       # Settings > About: README + linked docs, Back/Forward
         │   ├── nav_history.gd       # Bounded back/forward trail with a pinned root (pure)
+        │   ├── vault_graph_canvas.gd # Shared contract for the two vault link-graph presentations
         │   ├── vault_graph_model.gd # Pure vault link-graph normalize/layout/hit-test
         │   ├── link_weights.gd      # Pure declared-weight vocabulary (paths, range, lookup)
-        │   ├── vault_graph_view.gd  # Custom-drawn vault link-graph canvas
+        │   ├── vault_graph_view.gd  # Planar, custom-drawn vault link-graph canvas
+        │   ├── vault_graph_3d.gd    # Physical 3D vault map: SubViewport, RigidBody3D nodes, spring edges
         │   ├── ui_palette.gd       # The chrome colours in two complete sets (dark/light) and the active one
         │   ├── color_swatch.gd     # The words a colour swatch carries: opacity reading, "unset", tooltip
         │   ├── ui_tokens.gd        # The type scale, spacing, radius and the WCAG contrast maths

@@ -480,7 +480,7 @@ func test_apply_settings_refuses_an_unlisted_property():
 func test_every_pane_type_accepts_the_settings_it_saves():
 	# Drift guard for the closed table: a key added to `_get_layout_state`
 	# without a rule would silently stop surviving a save/restore cycle.
-	var applied_by_the_pane := ["graph", "open_note", "loop"]
+	var applied_by_the_pane := ["graph", "open_note", "loop", "graph_positions"]
 	for type_name in PaneTypes.ALL:
 		var script = TerminalManager._PaneScripts.get(type_name)
 		assert_not_null(script, "%s must have a pane script" % type_name)

@@ -113,6 +113,14 @@
       "evidence": "godot/scenes/ui/vault_graph_model.gd"
     },
     {
+      "id": "vault.graph.physical",
+      "statement": "the link graph can be shown as a physical 3D map whose nodes push their neighbours and whose arrangement survives a restart",
+      "status": "done",
+      "mechanism": "`VaultGraph3D` runs one `RigidBody3D` per node and one spring per drawn edge in an own-world `SubViewport`; depth is a deterministic per-id layer; a drag holds one body and rewrites its incident rest lengths on release; the simulation freezes when settled or hidden; the canonical `{id: [x, y]}` block rides the pane's layout state capped at 4000 entries, and a deleted note is ignored",
+      "evidence": "godot/scenes/ui/vault_graph_3d.gd",
+      "row": "The vault graph is a physical 3D map you can push around"
+    },
+    {
       "id": "vault.graph.build-offscreen",
       "statement": "opening the link graph does not stall the frame, whatever the vault's size",
       "status": "done",

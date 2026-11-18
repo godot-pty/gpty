@@ -53,6 +53,17 @@ const MAX_LAYOUT_ITERATIONS := 240
 ## Spring strength is clamped so a note with a thousand mentions is heavier
 ## than a note with ten, but not a thousand times heavier.
 const MAX_SPRING := 4.0
+## Saved geometry: one pair per graph node, at most the walk's note and ghost
+## caps together. The id bound matches the wiki pane's open-note restore cap;
+## a vault-relative path longer than that is not a note the pane can open.
+const MAX_POSITION_ENTRIES := 4000
+const MAX_POSITION_ID := 512
+## World box a saved position is clamped into (the planar drag bound plus a
+## margin). A hand-edited layout cannot put the map at infinity.
+const POSITION_BOUND := 4096.0
+## Saved coordinates are rounded to this step: sub-pixel at every zoom, and it
+## keeps a 4000-entry block small in the layout file.
+const POSITION_STEP := 0.1
 
 # ═══════════════════════════════════════════════════════════════════════
 # The FFI answer
@@ -275,6 +286,93 @@ static func node_radius(degree: int, max_degree: int) -> float:
 	return NODE_MIN_RADIUS + (NODE_MAX_RADIUS - NODE_MIN_RADIUS) * sqrt(t)
 
 # ═══════════════════════════════════════════════════════════════════════
+# Saved positions
+# ═══════════════════════════════════════════════════════════════════════
+
+## The canonical, bounded pair for one saved value, or `null`.
+##
+## A layout file is untrusted input, so this accepts only a `Vector2` or a
+## two-number `Array`, and rejects every non-finite value instead of letting
+## one reach the canvas (a NaN position poisons every later comparison).
+static func _canonical_position(value: Variant) -> Variant:
+	if value is Vector2:
+		if not (is_finite(value.x) and is_finite(value.y)):
+			return null
+		return [
+			clampf(value.x, -POSITION_BOUND, POSITION_BOUND),
+			clampf(value.y, -POSITION_BOUND, POSITION_BOUND),
+		]
+	if value is Array and value.size() == 2:
+		var x = value[0]
+		var y = value[1]
+		if not ((x is int or x is float) and (y is int or y is float)):
+			return null
+		var fx := float(x)
+		var fy := float(y)
+		if not (is_finite(fx) and is_finite(fy)):
+			return null
+		return [
+			clampf(fx, -POSITION_BOUND, POSITION_BOUND),
+			clampf(fy, -POSITION_BOUND, POSITION_BOUND),
+		]
+	return null
+
+## Normalize an untrusted position map into `{id: [x, y]}`.
+##
+## Entries whose key is not a bounded note id, or whose value is not a finite
+## pair, are skipped rather than failing the whole map: one damaged note must
+## not erase the arrangement of the rest. The cap is the graph's own node cap,
+## and the first `MAX_POSITION_ENTRIES` valid entries win.
+static func sanitize_positions(raw: Variant) -> Dictionary:
+	var out := {}
+	if not (raw is Dictionary):
+		return out
+	for key in raw:
+		if out.size() >= MAX_POSITION_ENTRIES:
+			break
+		if not (key is String):
+			continue
+		var id: String = key
+		if id == "" or id.length() > MAX_POSITION_ID or id.contains("\uFFFD"):
+			continue
+		var pair = _canonical_position(raw[key])
+		if pair == null:
+			continue
+		out[id] = pair
+	return out
+
+## Serialize a view's geometry, in the graph's node order, for the layout.
+##
+## Iterating `nodes` instead of `positions` is what makes a deleted note
+## disappear from the save: only ids the current graph holds are written, and
+## the order is deterministic (the index's own). Values are rounded here, not
+## in the physics, so the live map keeps full precision.
+static func serialize_positions(positions: Dictionary, nodes: Array) -> Dictionary:
+	var out := {}
+	for node in nodes:
+		if out.size() >= MAX_POSITION_ENTRIES:
+			break
+		if not (node is Dictionary):
+			continue
+		var id := str(node.get("id", ""))
+		if id == "" or out.has(id):
+			continue
+		var pair = _canonical_position(positions.get(id))
+		if pair == null:
+			continue
+		out[id] = [
+			roundf(float(pair[0]) / POSITION_STEP) * POSITION_STEP,
+			roundf(float(pair[1]) / POSITION_STEP) * POSITION_STEP,
+		]
+	return out
+
+## A note's fixed depth, in the [-spread, spread] band: the same id always
+## answers the same value, so a restore and a re-query agree. The 3D view
+## locks bodies to this axis; it is presentation, not graph data.
+static func depth_for(id: String, spread: float) -> float:
+	return (_hash_unit(id) * 2.0 - 1.0) * spread
+
+# ═══════════════════════════════════════════════════════════════════════
 # Layout
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -282,8 +380,11 @@ static func node_radius(degree: int, max_degree: int) -> float:
 ##
 ## `previous` is the canvas's session geometry: an id it holds keeps exactly
 ## that position (a drag survives a re-query), and only ids it does not hold
-## are placed. With no previous geometry the whole graph is laid out
-## deterministically — same nodes and edges in, same positions out.
+## are placed. A stored value may be a `Vector2` (live geometry) or the
+## `[x, y]` pair a layout file carries; both are finite-checked and clamped,
+## and anything else is treated as unseen. With no previous geometry the whole
+## graph is laid out deterministically — same nodes and edges in, same
+## positions out.
 static func layout(nodes: Array, edges: Array, previous := {}) -> Dictionary:
 	var positions := {}
 	var missing: Array = []
@@ -294,8 +395,9 @@ static func layout(nodes: Array, edges: Array, previous := {}) -> Dictionary:
 		if id == "":
 			continue
 		var stored: Variant = previous.get(id) if previous is Dictionary else null
-		if stored is Vector2:
-			positions[id] = stored
+		var pair = _canonical_position(stored)
+		if pair != null:
+			positions[id] = Vector2(float(pair[0]), float(pair[1]))
 		else:
 			missing.append(id)
 	if missing.is_empty():

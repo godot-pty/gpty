@@ -563,6 +563,17 @@ const FILE_TREE_DEFAULT_OPEN_MODE := "viewer"
 ## The wiki pane's note-view modes, shared with `paneView`'s `mode` parameter.
 const WIKI_VIEW_MODES := ["edit", "split", "preview"]
 
+## The wiki pane's link-map presentations. `auto` resolves from the renderer
+## (`VaultGraph3D` on Forward+/Mobile, the planar canvas on Compatibility);
+## an explicit value is the user's choice. Labels live beside the list so the
+## Pane Settings picker and the graph's own mode button cannot drift.
+const WIKI_GRAPH_MODES := ["auto", "3d", "2d"]
+const WIKI_GRAPH_MODE_LABELS := {
+	"auto": "Auto",
+	"3d": "3D (physical)",
+	"2d": "2D (flat)",
+}
+
 const CODE_VIEWER_SETTINGS := {
 	"file_path": {"kind": "text", "max": 4096},
 	"language": {"kind": "text", "max": 64, "values": CODE_VIEWER_LANGUAGES},
@@ -610,11 +621,20 @@ const CLI_VIEW_SETTINGS := {
 const WIKI_SETTINGS := {
 	"vault_path": {"kind": "text", "max": 4096},
 	"view_mode": {"kind": "text", "max": 32, "values": WIKI_VIEW_MODES},
+	"graph_mode": {"kind": "text", "max": 8, "values": WIKI_GRAPH_MODES},
 	# Restore-only state: both are replayed at attach and ignored on a live pane
 	# (`WikiPane.apply_settings` clears them once it is in the tree), and the
 	# gestures themselves belong to `pane-view --note` / `--graph`.
 	"open_note": {"kind": "text", "max": 512, "ipc": false},
 	"graph": {"kind": "bool", "ipc": false},
+	# Saved link-map geometry: a bounded `{id: [x, y]}` block. `max` is its
+	# entry cap here, not a string length; `positions` owns the value rules.
+	# It is display state only, so a file may carry it and an IPC caller may
+	# not (the same rule as `open_note`/`graph`).
+	"graph_positions": {
+		"kind": "positions", "ipc": false,
+		"max": VaultGraphModel.MAX_POSITION_ENTRIES,
+	},
 }
 
 const MEDIA_SETTINGS := {
@@ -724,6 +744,13 @@ static func _value_for_rule(rule: Dictionary, v) -> Variant:
 			return clean if clean != "" else null
 		"tags":
 			return sanitize_tags(v) if v is Array else null
+		"positions":
+			# Saved canvas geometry: the model owns the id/entry caps, the
+			# finite-pair check and the clamp, so `graph_positions` cannot
+			# carry a value the canvas would have to defend against later.
+			if not (v is Dictionary):
+				return null
+			return VaultGraphModel.sanitize_positions(v)
 		"argv":
 			return sanitize_shell_args(v) if v is Array else null
 		"launch":

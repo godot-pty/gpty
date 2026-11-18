@@ -233,7 +233,26 @@ const STATES := {
 	# content the surface needs (the bundled vault, a wiki tile, an untrusted
 	# spawn plan) instead of a mock, so the capture shows the shipped UI.
 	"wiki-vault": {"size": DEFAULT_SIZE, "tiles": [WIKI_TILE]},
-	"wiki-graph": {"size": DEFAULT_SIZE, "tiles": [WIKI_TILE], "open": "wiki-graph"},
+	"wiki-graph": {
+		"size": DEFAULT_SIZE, "tiles": [WIKI_TILE], "open": "wiki-graph",
+		"orbit": true,
+	},
+	# The same surface in the planar fallback: proves the picker reaches the 2D
+	# canvas and that the arrangement is presentable in both models.
+	"wiki-graph-planar": {
+		"size": DEFAULT_SIZE, "tiles": [WIKI_TILE], "open": "wiki-graph",
+		"graph_mode": "2d",
+	},
+	# The physical map on the light chrome: the halos switch to alpha blending
+	# and the world glow is off (a white ground cannot bloom).
+	"light-wiki-graph": {
+		"size": DEFAULT_SIZE, "tiles": [WIKI_TILE], "open": "wiki-graph",
+		"orbit": true, "settings": {"cfg_appearance_mode": 1},
+	},
+	"light-wiki-graph-planar": {
+		"size": DEFAULT_SIZE, "tiles": [WIKI_TILE], "open": "wiki-graph",
+		"graph_mode": "2d", "settings": {"cfg_appearance_mode": 1},
+	},
 	"concept-editor": {"size": DEFAULT_SIZE, "panes": 1, "open": "concept-editor"},
 	# The divider grab band: a 12 px handle centred on the line between two
 	# panes, highlighted on hover (row *Resizing a pane is smooth*). The pointer
@@ -746,6 +765,10 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			if list == null or list.item_count == 0:
 				_fail("the bundled vault produced no notes for the wiki pane")
 				return false
+			var body = _workspace._tm._find_body(_workspace._tm.tiles[0].wrapper)
+			var wanted_mode := str(state.get("graph_mode", ""))
+			if wanted_mode != "" and body != null:
+				body.apply_settings({"graph_mode": wanted_mode})
 			var graph_button := _button_with_label(wiki, "Graph")
 			if graph_button == null:
 				_fail("the wiki pane has no Graph button")
@@ -755,16 +778,26 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			# the canvas arrives when the pane's poll sees the task done, which
 			# under `--disable-vsync` can be many cheap frames later. Wait on
 			# the task with a wall-clock budget rather than a frame count.
-			var graph: Node = _find_script(wiki, "res://scenes/ui/vault_graph_view.gd")
-			var body = _workspace._tm._find_body(_workspace._tm.tiles[0].wrapper)
 			var deadline := Time.get_ticks_msec() + 10000
 			while body._graph_task != -1 and Time.get_ticks_msec() < deadline:
 				await _wait_frames(1)
 			await _wait_frames(1)
-			graph = _find_script(wiki, "res://scenes/ui/vault_graph_view.gd")
-			if graph == null or not (graph as Control).visible:
+			var graph: Control = body._graph_view if body != null else null
+			if graph == null or not graph.visible:
 				_fail("clicking Graph did not show the link graph")
 				return false
+			if bool(state.get("orbit", false)) and graph.has_method("_set_orbit"):
+				# A front view reads as a flat network; a small, synthetic
+				# orbit shows the depth layers without moving any body.
+				graph._orbit_button.button_pressed = true
+				graph._begin_left(Vector2(2.0, 2.0))
+				var orbit := InputEventMouseMotion.new()
+				orbit.position = Vector2(72.0, 22.0)
+				orbit.relative = Vector2(70.0, 20.0)
+				graph._gui_input(orbit)
+				graph._end_left(orbit.position)
+				graph._rebuild_links()
+				await _wait_frames(2)
 		"concept-editor":
 			await _click(_button_with_label(_workspace._sidebar, "Settings"))
 			await _wait_frames(3)
@@ -1315,7 +1348,10 @@ func _audit_focus(state_name: String) -> void:
 			continue
 		if c is BaseButton:
 			continue
-		elif c.get_script() != null and (c.get_script() as Script).resource_path == "res://scenes/ui/vault_graph_view.gd":
+		elif c.get_script() != null and (c.get_script() as Script).resource_path in [
+			"res://scenes/ui/vault_graph_view.gd",
+			"res://scenes/ui/vault_graph_3d.gd",
+		]:
 			canvases.append(c)
 	# The workspace's own mouse-only buttons, after the escape. A control that is
 	# still visible was already snapshotted from the overlay walk.

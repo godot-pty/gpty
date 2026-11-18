@@ -61,6 +61,9 @@ func _measure(notes: int, links: int):
 	await process_frame
 	_pane = load("res://scenes/panes/wiki_pane.gd").new()
 	_pane.vault_path = _vault
+	# Force the physical map: the bench is about the 3D view even when this
+	# machine's headless renderer would resolve `auto` to the planar canvas.
+	_pane.graph_mode = "3d"
 	root.add_child(_pane)
 	_pane.size = Vector2(1200, 800)
 	# `_ready` indexes the vault; the graph reads that index, so wait for the
@@ -92,6 +95,8 @@ func _measure(notes: int, links: int):
 	print("request_us=%.1f landed_ms=%d canvas=%s" % [
 		request_us, _landed_ms, str(_pane._graph_view.visible)])
 
+	await _measure_3d(_pane._graph_view)
+
 	# Warm: the geometry the canvas now holds is what the next build starts
 	# from, so the layout only places what moved or appeared.
 	var warm := _time_steps(_pane._graph_view.positions)
@@ -99,6 +104,65 @@ func _measure(notes: int, links: int):
 		warm["query_us"], warm["parse_us"], warm["layout_us"], warm["stall_us"]])
 
 	_cleanup()
+
+
+## The physical map's own cost: one body build, the settling ticks, the spring
+## step and the link mesh rebuild. A windowed run also prints the frame time;
+## a headless run has no renderer, so its frame number is the harness's loop.
+func _measure_3d(view) -> void:
+	# Duck-typed on purpose: a typed `VaultGraph3D` reference would compile the
+	# view (and the autoloads it names) while this `-s` entry point loads,
+	# before the project's autoloads exist.
+	if view == null or not view.has_method("simulation_ticks") or not view.has_method("is_settled"):
+		print("three_d=absent")
+		return
+	# A fresh map is at rest by construction; push one node so the measured
+	# tick/link numbers are the cost of a real interaction, not an empty settle.
+	if view.is_settled() and not view._bodies.is_empty():
+		var id = view._bodies.keys()[0]
+		var before: Vector2 = view.positions[id]
+		view._begin_drag(id)
+		view._drag_to(id, before + Vector2(60.0, 40.0))
+		view._finish_drag(true)
+	var steps: Array[float] = []
+	var visuals: Array[float] = []
+	var links: Array[float] = []
+	var frames: Array[float] = []
+	var deadline := Time.get_ticks_msec() + 10000
+	while not view.is_settled() and Time.get_ticks_msec() < deadline:
+		var frame_start := Time.get_ticks_usec()
+		await process_frame
+		frames.append(float(Time.get_ticks_usec() - frame_start))
+		if view.last_step_us > 0:
+			steps.append(float(view.last_step_us))
+		if view.last_visual_us > 0:
+			visuals.append(float(view.last_visual_us))
+		if view.last_link_build_us > 0:
+			links.append(float(view.last_link_build_us))
+	print(
+		"three_d bodies=%d build_ms=%.1f settle_ticks=%d settled=%s step_us_median=%.1f step_us_max=%.1f visual_us_median=%.1f visual_us_max=%.1f link_us_median=%.1f link_us_max=%.1f frames=%d frame_ms_median=%.2f"
+		% [
+			view._bodies.size(), float(view.last_build_us) / 1000.0,
+			view.simulation_ticks(), str(view.is_settled()),
+			_median(steps), _max(steps), _median(visuals), _max(visuals),
+			_median(links), _max(links), frames.size(), _median(frames) / 1000.0,
+		]
+	)
+
+
+func _median(values: Array[float]) -> float:
+	if values.is_empty():
+		return 0.0
+	var sorted := values.duplicate()
+	sorted.sort()
+	return float(sorted[sorted.size() / 2])
+
+
+func _max(values: Array[float]) -> float:
+	var top := 0.0
+	for value in values:
+		top = maxf(top, value)
+	return top
 
 
 ## The three steps the pane used to run on the frame, timed together.

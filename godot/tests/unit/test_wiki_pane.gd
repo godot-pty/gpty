@@ -764,6 +764,80 @@ func test_restore_is_spawn_time_only_and_tolerates_a_missing_note():
 	assert_false(junk._note_box.visible)
 	assert_false(junk._graph_view.visible)
 
+
+func test_layout_state_carries_the_graph_mode_and_positions():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	pane.graph_mode = "3d"
+	pane._apply_graph_mode()
+	await _open_graph(pane)
+	assert_true(pane._graph_view is VaultGraph3D, "the explicit mode is the physical map")
+	var view := pane._graph_view as VaultGraph3D
+	var start: Vector2 = view.positions["a.md"]
+	view._begin_drag("a.md")
+	view._drag_to("a.md", start + Vector2(120.0, 80.0))
+	view._finish_drag(false)
+
+	var state: Dictionary = pane._get_layout_state()
+	assert_eq(str(state.get("graph_mode", "")), "3d")
+	var saved: Dictionary = state.get("graph_positions", {})
+	assert_true(saved.has("a.md"), "the dragged note's place rides the state")
+	assert_almost_eq(float(saved["a.md"][0]), start.x + 120.0, 0.2)
+	var tile := PaneTypes.sanitize_tile({
+		"settings": state, "col": 0, "row": 0,
+		"cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID,
+	})
+	assert_eq(tile.get("dropped", PackedStringArray()).size(), 0,
+		"the saved block survives the closed table")
+	assert_eq(str(tile["settings"].get("graph_mode", "")), "3d")
+
+
+func test_a_layout_restores_graph_positions_and_ignores_missing_notes():
+	_write(_tmp.path_join("a.md"), "# A\n\n[[b]]\n")
+	_write(_tmp.path_join("b.md"), "# B\n\n[[a]]\n")
+	var pane := WikiPane.new()
+	pane.apply_settings({
+		"vault_path": _tmp, "graph": true, "graph_mode": "3d",
+		"graph_positions": {"a.md": [300.0, 400.0], "gone.md": [10.0, 10.0]},
+	})
+	add_child_autofree(pane)
+	await _settle_graph(pane)
+	assert_true(pane._graph_view.visible, "the saved graph view is showing")
+	assert_true(pane._graph_view is VaultGraph3D)
+	var positions: Dictionary = pane._graph_view.positions
+	assert_true(positions.has("a.md"))
+	assert_false(positions.has("gone.md"), "a note the vault no longer has is ignored")
+	var point: Vector2 = positions["a.md"]
+	assert_almost_eq(point.x, 300.0, 0.11)
+	assert_almost_eq(point.y, 400.0, 0.11)
+
+
+func test_switching_the_graph_mode_keeps_the_arrangement():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	pane.graph_mode = "3d"
+	pane._apply_graph_mode()
+	await _open_graph(pane)
+	var view := pane._graph_view as VaultGraph3D
+	var start: Vector2 = view.positions["a.md"]
+	view._begin_drag("a.md")
+	view._drag_to("a.md", start + Vector2(90.0, 40.0))
+	view._finish_drag(false)
+	var dropped: Vector2 = view.positions["a.md"]
+
+	pane.graph_mode = "2d"
+	pane._apply_graph_mode()
+	assert_true(pane._graph_view is VaultGraphView, "the planar canvas takes over")
+	assert_true(pane._graph_view.visible, "and stays on screen")
+	assert_lt((pane._graph_view.positions["a.md"] - dropped).length(), 0.2,
+		"the arrangement crosses the presentation switch")
+
+	pane.graph_mode = "3d"
+	pane._apply_graph_mode()
+	assert_true(pane._graph_view is VaultGraph3D, "and back")
+	assert_lt((pane._graph_view.positions["a.md"] - dropped).length(), 0.2)
+	await get_tree().process_frame
+
 # ── The link panel: mentions and backlinks of the open note ────────────
 #
 # The data half (the index pass, the resolver, `vault_links`) is pinned by
@@ -1738,10 +1812,14 @@ func test_a_dragged_node_keeps_its_place_across_a_build():
 	var pane := _make_pane(_tmp)
 	await _open_graph(pane)
 
-	pane._graph_view.positions["a.md"] = Vector2(11, 22)
+	if pane._graph_view is VaultGraph3D:
+		(pane._graph_view as VaultGraph3D)._place_body("a.md", Vector2(11, 22))
+	else:
+		pane._graph_view.positions["a.md"] = Vector2(11, 22)
 	await _open_graph(pane)
 
-	assert_eq(pane._graph_view.positions.get("a.md"), Vector2(11, 22),
+	var got: Vector2 = pane._graph_view.positions.get("a.md", Vector2.ZERO)
+	assert_lt((got - Vector2(11, 22)).length(), 1.0,
 		"the pane hands the view's geometry to the build, so a drag survives")
 
 
