@@ -82,7 +82,11 @@ const STATES := {
 	# reader reaches them.
 	"sidebar-folded": {"size": DEFAULT_SIZE, "panes": 4, "fold": ["workspaces", "profiles"]},
 	"settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings"},
-	"pane-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "pane-settings"},
+	# `/`, not the sandbox home: the Pane Settings card prints the inherited
+	# workspace directory, and a per-run `/tmp/gpty-ui.<random>` path would make
+	# the capture differ between runs (the check's file-dialog state does the
+	# same with its picker).
+	"pane-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "pane-settings", "cwd": "/"},
 	# The workspace-directory picker: the app's own header over the engine's
 	# picker column (row *A FileDialog still wears Godot's stock grey frame*).
 	"file-dialog": {"size": DEFAULT_SIZE, "panes": 1, "open": "file-dialog"},
@@ -140,9 +144,10 @@ const STATES := {
 	# (row *Every scrollable surface has a 0 px scrollbar*). The 150 %
 	# twin proves the same geometry under the window's content scale - the
 	# column is layout pixels, so it scales with the rest of the chrome.
-	"settings-terminal": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Terminal"},
+	"settings-terminal": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Terminal",
+		"cwd": "/", "settings": {"cfg_shell_env": "DEMO=1"}},
 	"settings-terminal-150": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Terminal",
-		"ui_scale": 150},
+		"ui_scale": 150, "cwd": "/", "settings": {"cfg_shell_env": "DEMO=1"}},
 	# The Motion section at the bottom of Appearance: the master switch, the
 	# create/close/swap pickers and the selected animation's generated property
 	# rows (rows *Panes animate when they are created, destroyed or swapped* and
@@ -232,25 +237,26 @@ const STATES := {
 	# The surfaces the October 2026 audit did not reach. Each seeds the real
 	# content the surface needs (the bundled vault, a wiki tile, an untrusted
 	# spawn plan) instead of a mock, so the capture shows the shipped UI.
+	"wiki-list": {"size": DEFAULT_SIZE, "tiles": [WIKI_LIST_TILE]},
 	"wiki-vault": {"size": DEFAULT_SIZE, "tiles": [WIKI_TILE]},
 	"wiki-graph": {
-		"size": DEFAULT_SIZE, "tiles": [WIKI_TILE], "open": "wiki-graph",
+		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
 		"orbit": true,
 	},
 	# The same surface in the planar fallback: proves the picker reaches the 2D
 	# canvas and that the arrangement is presentable in both models.
 	"wiki-graph-planar": {
-		"size": DEFAULT_SIZE, "tiles": [WIKI_TILE], "open": "wiki-graph",
+		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
 		"graph_mode": "2d",
 	},
-	# The physical map on the light chrome: the halos switch to alpha blending
+	# The orbital map on the light chrome: the halos switch to alpha blending
 	# and the world glow is off (a white ground cannot bloom).
 	"light-wiki-graph": {
-		"size": DEFAULT_SIZE, "tiles": [WIKI_TILE], "open": "wiki-graph",
+		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
 		"orbit": true, "settings": {"cfg_appearance_mode": 1},
 	},
 	"light-wiki-graph-planar": {
-		"size": DEFAULT_SIZE, "tiles": [WIKI_TILE], "open": "wiki-graph",
+		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
 		"graph_mode": "2d", "settings": {"cfg_appearance_mode": 1},
 	},
 	"concept-editor": {"size": DEFAULT_SIZE, "panes": 1, "open": "concept-editor"},
@@ -345,12 +351,31 @@ const RESIZE_TILES := [
 ]
 ## The bundled wiki is a real vault (notes on disk, indexed by the Rust side),
 ## so the Wiki and link-graph states need no fixture of their own.
+## A saved note: the note-editor surface (Notes + Graph).
 const WIKI_TILE := {
 	"col": 0, "row": 0, "cspan": 60, "rspan": 60,
 	"settings": {
 		"type": "wiki", "attachment_id": "capture-wiki",
 		"vault_path": "@knowledge", "view_mode": "split",
 		"open_note": "index.md",
+	},
+}
+## A saved list view: the note-list surface (Graph + New + Search).
+const WIKI_LIST_TILE := {
+	"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+	"settings": {
+		"type": "wiki", "attachment_id": "capture-wiki-list",
+		"vault_path": "@knowledge", "view_mode": "split",
+		"graph": false,
+	},
+}
+## No saved view: the new-pane default, the orbital/planar graph surface
+## (Notes + Planar/Orbital + Arrows + Relayout, or Orbit on the orbital map).
+const WIKI_GRAPH_TILE := {
+	"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+	"settings": {
+		"type": "wiki", "attachment_id": "capture-wiki-graph",
+		"vault_path": "@knowledge", "view_mode": "split",
 	},
 }
 ## A saved tile whose program differs from the configured default: the restore
@@ -557,7 +582,7 @@ func _seed_workspace(state: Dictionary) -> void:
 	# A saved layout carries its panes' public ids; naming them here keeps the
 	# Pane Settings capture free of a random `pane-…` handle.
 	var workspaces: Array[Dictionary] = [
-		{"name": "Workspace 1", "cwd": "", "layout": resolved},
+		{"name": "Workspace 1", "cwd": str(state.get("cwd", "")), "layout": resolved},
 	]
 	_store.save(0, workspaces)
 	# A state may seed a tile that starts something other than the default
@@ -766,14 +791,19 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 				_fail("the bundled vault produced no notes for the wiki pane")
 				return false
 			var body = _workspace._tm._find_body(_workspace._tm.tiles[0].wrapper)
-			var wanted_mode := str(state.get("graph_mode", ""))
-			if wanted_mode != "" and body != null:
-				body.apply_settings({"graph_mode": wanted_mode})
-			var graph_button := _button_with_label(wiki, "Graph")
-			if graph_button == null:
-				_fail("the wiki pane has no Graph button")
+			if body == null:
+				_fail("the wiki tile has no body")
 				return false
-			await _click(graph_button)
+			var wanted_mode := str(state.get("graph_mode", ""))
+			if wanted_mode != "":
+				body.apply_settings({"graph_mode": wanted_mode})
+			# WIKI_GRAPH_TILE has no saved view, so the pane opens the graph by
+			# default. The click path remains for a state staged on a notes
+			# surface; once the graph is up its Graph button is hidden.
+			if body._graph_view == null or not body._graph_view.visible:
+				var graph_button := _button_with_label(wiki, "Graph")
+				if graph_button != null:
+					await _click(graph_button)
 			# The graph is queried, modelled and laid out on a worker thread:
 			# the canvas arrives when the pane's poll sees the task done, which
 			# under `--disable-vsync` can be many cheap frames later. Wait on
@@ -784,7 +814,7 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			await _wait_frames(1)
 			var graph: Control = body._graph_view if body != null else null
 			if graph == null or not graph.visible:
-				_fail("clicking Graph did not show the link graph")
+				_fail("the wiki pane did not open its default graph")
 				return false
 			if bool(state.get("orbit", false)) and graph.has_method("_set_orbit"):
 				# A front view reads as a flat network; a small, synthetic

@@ -303,8 +303,9 @@ func _centred_view() -> VaultGraphView:
 
 func test_the_graph_is_one_keyboard_ring():
 	var view := _make_view()
+	assert_eq(view._mode_button.text, "Orbital", "the planar map offers the orbital switch")
 	var ring: Array[Control] = [
-		view, view._mode_button, view._arrows_button, view._relayout_button, view._fit_button,
+		view, view._mode_button, view._arrows_button, view._relayout_button,
 	]
 	for i in ring.size():
 		var c: Control = ring[i]
@@ -518,7 +519,7 @@ func test_live_geometry_beats_a_prepared_snapshot():
 		"a drag made while a build ran must survive its result")
 
 
-func test_the_physical_button_asks_for_the_3d_view():
+func test_the_orbital_button_asks_for_the_3d_view():
 	var view := _make_view()
 	watch_signals(view)
 	view._mode_button.pressed.emit()

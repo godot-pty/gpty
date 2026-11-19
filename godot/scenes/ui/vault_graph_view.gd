@@ -14,7 +14,7 @@ extends VaultGraphCanvas
 ## state: the session's node geometry (so a drag survives a re-query), the
 ## pan/zoom transform, hover/selection, and the input gestures. The signals,
 ## the shared geometry and the public verbs come from [VaultGraphCanvas], the
-## same contract [VaultGraph3D] implements for the physical map.
+## same contract [VaultGraph3D] implements for the orbital map.
 ##
 ## The graph is generated, never stored: [method show_graph] takes one
 ## normalized answer from the index and a mutation simply re-queries and calls
@@ -72,7 +72,6 @@ var _a11y_host: Control
 var _a11y_cursor := ""
 var _mode_button: Button
 var _relayout_button: Button
-var _fit_button: Button
 var _arrows_button: Button
 var _edge_menu: PopupMenu
 ## The edge the open menu acts on. Geometry can move while a popup is up (a
@@ -110,7 +109,7 @@ func show_graph(data: Dictionary, current_id := "", prepared_positions := {}) ->
 	# A canvas has no text element: the shape and the gesture legend are its
 	# description, and the crosshair sentence below is its live cursor.
 	accessibility_description = (
-		"%d notes, %d links. Arrows pan, plus and minus zoom, "
+		"%d notes, %d links. Planar map. Arrows pan, plus and minus zoom, "
 		+ "Enter opens what the crosshair covers."
 	) % [nodes.size(), edges.size()]
 	if _truncated:
@@ -247,7 +246,7 @@ func _build_chrome() -> void:
 	controls.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(controls)
 
-	_mode_button = _make_button("Physical", "Switch to the physical 3D map")
+	_mode_button = _make_button("Orbital", "Switch to the orbital (3D) map")
 	_mode_button.pressed.connect(func(): mode_requested.emit("3d"))
 	controls.add_child(_mode_button)
 
@@ -259,20 +258,16 @@ func _build_chrome() -> void:
 	)
 	controls.add_child(_arrows_button)
 
-	_relayout_button = _make_button("Relayout", "Run the deterministic layout again")
+	_relayout_button = _make_button("Relayout", "Reset the deterministic layout and fit")
 	_relayout_button.pressed.connect(relayout)
 	controls.add_child(_relayout_button)
-
-	_fit_button = _make_button("Fit", "Fit the whole graph in the view")
-	_fit_button.pressed.connect(fit_to_view)
-	controls.add_child(_fit_button)
 
 	# The graph is one keyboard ring: the canvas first, then its actions
 	# (the mode switch included), wrapping back to the canvas. The ring is what
 	# makes any of them tab stops (`KeyboardFocus.ring` sets `focus_mode`), so
 	# Tab stays on the surface the user is looking at instead of walking into
-	# the sidebar, and Escape (the pane's Back) leaves the graph.
-	KeyboardFocus.ring([self, _mode_button, _arrows_button, _relayout_button, _fit_button])
+	# the sidebar, and Escape (Notes) leaves the graph.
+	KeyboardFocus.ring([self, _mode_button, _arrows_button, _relayout_button])
 
 	# The edge menu is the authored layer's only human control: right-click an
 	# edge to set or clear its declared weight. Ghost edges are not offered —
@@ -442,6 +437,7 @@ func _update_status() -> void:
 		text += " · %d declared" % declared
 	if _truncated:
 		text += " · truncated"
+	text += " · Planar"
 	if selected_id != "":
 		for node in nodes:
 			if node is Dictionary and str(node.get("id", "")) == selected_id:

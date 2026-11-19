@@ -1,5 +1,5 @@
 extends GutTest
-# Integration tests for VaultGraph3D — the physical map's bodies, springs,
+# Integration tests for VaultGraph3D — the orbital map's bodies, springs,
 # persistence and pause rules. Headless has a real physics server but no
 # renderer, so these assert state and geometry, never pixels; the visible half
 # is proven by `scripts/ui-capture wiki-graph`.
@@ -228,3 +228,36 @@ func test_orbiting_rotates_the_camera_not_the_graph():
 			(view._bodies[id].global_position - before[id]).length() < 0.01,
 			"%s must not move for a camera gesture" % id
 		)
+
+
+## A workspace switch hides the wiki pane's whole grid. A settled map that is
+## shown again must clear the pause flag and ask for a frame; leaving the flag
+## set kept UPDATE_DISABLED, so the SubViewportContainer showed the pre-switch
+## map as a static background (reported 2026-11-18).
+func test_a_settled_view_repaints_after_hiding():
+	var host := Control.new()
+	add_child_autofree(host)
+	var view := VaultGraph3D.new()
+	host.add_child(view)
+	view.size = Vector2(800.0, 600.0)
+	view.show_graph(_two_node_graph())
+	await _prepare(view)
+	await _await_settled(view)
+
+	host.visible = false
+	await get_tree().process_frame
+	assert_true(view._hidden_paused, "hiding must pause the view")
+	assert_eq(
+		view._viewport.render_target_update_mode,
+		SubViewport.UPDATE_DISABLED,
+		"hiding must stop rendering"
+	)
+
+	host.visible = true
+	assert_false(view._hidden_paused, "showing must clear the pause flag")
+	assert_ne(
+		view._viewport.render_target_update_mode,
+		SubViewport.UPDATE_DISABLED,
+		"showing must request a frame, not keep the old texture"
+	)
+	await get_tree().process_frame

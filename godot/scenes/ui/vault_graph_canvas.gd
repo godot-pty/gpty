@@ -2,7 +2,7 @@ class_name VaultGraphCanvas
 extends Control
 ## The contract shared by the wiki pane's two link-map presentations.
 ##
-## [VaultGraphView] draws the planar canvas; [VaultGraph3D] runs the physical
+## [VaultGraphView] draws the planar canvas; [VaultGraph3D] runs the orbital
 ## map in a `SubViewport`. The pane types its view as this base and swaps the
 ## two at runtime, so the signals, the session geometry and the public verbs
 ## live here and neither presentation invents its own.

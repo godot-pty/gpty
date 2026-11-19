@@ -570,8 +570,8 @@ const WIKI_VIEW_MODES := ["edit", "split", "preview"]
 const WIKI_GRAPH_MODES := ["auto", "3d", "2d"]
 const WIKI_GRAPH_MODE_LABELS := {
 	"auto": "Auto",
-	"3d": "3D (physical)",
-	"2d": "2D (flat)",
+	"3d": "Orbital",
+	"2d": "Planar",
 }
 
 const CODE_VIEWER_SETTINGS := {

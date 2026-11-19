@@ -151,7 +151,7 @@ func test_escape_from_a_read_only_panes_chrome_focuses_its_content():
 	note.close()
 
 	var ws = await _make_workspace()
-	var wiki = ws._spawn_pane("wiki", {"vault_path": _vault})
+	var wiki = ws._spawn_pane("wiki", {"vault_path": _vault, "graph": false})
 	assert_true(wiki is WikiPane, "the workspace holds a wiki pane")
 	ws.activate_pane(wiki)
 	assert_true(ws._tm.focus_title_bar(wiki), "the wiki pane's bar takes the keyboard")

@@ -66,9 +66,15 @@ func _read(path: String) -> String:
 	return text
 
 
-func _make_pane(vault: String) -> WikiPane:
+func _make_pane(vault: String, saved_view := true) -> WikiPane:
 	var pane := WikiPane.new()
-	pane.vault_path = vault
+	# A saved notes view keeps this suite's list/note subject. Pass false for a
+	# pane whose spawn settings name no view: that pane opens the graph by
+	# default, the behaviour the default-view test owns.
+	if saved_view:
+		pane.apply_settings({"vault_path": vault, "graph": false})
+	else:
+		pane.vault_path = vault
 	# vault_path is set before add_child so _ready performs the index pass.
 	add_child_autofree(pane)
 	return pane
@@ -196,16 +202,16 @@ func test_activating_a_note_renders_it_and_back_returns():
 
 	pane._list.item_activated.emit(0)
 	assert_true(pane._reader.visible)
-	assert_true(pane._back.visible)
+	assert_true(pane._notes_button.visible)
 	assert_false(pane._list.visible)
 	assert_eq(pane._editor.text, "# Heading\n\nbody", "the editor holds the note")
 	assert_false(pane._search.visible, "the note view owns the pane's top row")
 	assert_string_contains(pane._reader.get_parsed_text(), "Heading")
 
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	assert_true(pane._list.visible)
 	assert_false(pane._reader.visible)
-	assert_false(pane._back.visible)
+	assert_false(pane._notes_button.visible)
 	assert_true(pane._search.visible, "the search box comes back with the list")
 
 
@@ -479,7 +485,7 @@ func test_back_with_unsaved_changes_asks_before_discarding():
 	pane._list.item_activated.emit(0)
 	await _type_into(pane, "# Edited\n")
 
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	assert_true(pane._note_box.visible, "the note stays open until the user answers")
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "leaving a dirty note must ask first")
@@ -490,7 +496,7 @@ func test_back_with_unsaved_changes_asks_before_discarding():
 	assert_true(pane._note_box.visible, "canceling keeps the note")
 	assert_eq(_dialogs_of(pane).size(), 0, "the question closes with the answer")
 
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	dialogs = _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1)
 	dialogs[0].custom_action.emit("discard")
@@ -506,7 +512,7 @@ func test_back_can_save_the_note_and_leave():
 	pane._list.item_activated.emit(0)
 	await _type_into(pane, "# Edited\n")
 
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs[0].ok_button_text, "Save", "the first answer is Save")
 	dialogs[0].confirmed.emit()
@@ -628,7 +634,7 @@ func test_saving_reindexes_so_the_new_text_is_searchable():
 	await _type_into(pane, "# Note\n\nzebra crossing\n")
 	pane._save()
 
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	pane._search.text = "zebra"
 	pane._run_search()
 	assert_eq(pane._list.item_count, 1, "a saved note must be searchable without a restart")
@@ -771,7 +777,7 @@ func test_layout_state_carries_the_graph_mode_and_positions():
 	pane.graph_mode = "3d"
 	pane._apply_graph_mode()
 	await _open_graph(pane)
-	assert_true(pane._graph_view is VaultGraph3D, "the explicit mode is the physical map")
+	assert_true(pane._graph_view is VaultGraph3D, "the explicit mode is the orbital map")
 	var view := pane._graph_view as VaultGraph3D
 	var start: Vector2 = view.positions["a.md"]
 	view._begin_drag("a.md")
@@ -1496,7 +1502,7 @@ func test_a_discard_drops_the_recovery_copy():
 	await _type_into(pane, "# Two\n")
 	await wait_seconds(0.1)
 
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	_dialogs_of(pane)[0].custom_action.emit("discard")
 	assert_false(_has_copy(_scratch_tmp, "note.md"),
 		"a deliberately discarded buffer must not come back as a question")
@@ -1555,7 +1561,7 @@ func test_reopening_a_note_offers_the_buffer_a_crash_left_behind():
 	# the end of the frame, so the dialog above is still a child until one
 	# passes.)
 	await wait_process_frames(1)
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	pane._list.item_activated.emit(0)
 	assert_eq(_dialogs_of(pane).size(), 0)
 
@@ -1573,7 +1579,7 @@ func test_a_recovered_buffer_can_be_discarded():
 
 	# The dialog is a child until the frame that frees it ends.
 	await wait_process_frames(1)
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	pane._list.item_activated.emit(0)
 	assert_eq(_dialogs_of(pane).size(), 0, "a decided copy must not come back")
 
@@ -1709,14 +1715,124 @@ func test_the_graph_is_requeried_after_a_save():
 		"the save re-indexed, so the graph reads the new edge")
 
 
-func test_graph_back_returns_to_the_list():
+func test_graph_notes_returns_to_the_list():
 	_seed_linked_vault()
 	var pane := _make_pane(_tmp)
 
 	await _open_graph(pane)
-	pane._back.pressed.emit()
+	assert_true(pane._notes_button.visible)
+	assert_false(pane._graph_button.visible, "the graph shows only Notes")
+	pane._notes_button.pressed.emit()
 	assert_true(pane._list.visible)
 	assert_false(pane._graph_view.visible)
+	assert_false(pane._notes_button.visible)
+	assert_true(pane._graph_button.visible)
+
+
+func test_a_fresh_pane_opens_the_graph():
+	var pane := _make_pane(_tmp, false)
+	await _settle_graph(pane)
+	assert_true(pane._graph_view.visible, "a pane with no saved view opens the graph")
+	assert_false(pane._list.visible)
+	assert_true(pane._notes_button.visible)
+	assert_false(pane._graph_button.visible, "the graph surface shows only Notes")
+
+
+func test_a_saved_notes_view_is_not_overridden():
+	_write(_tmp.path_join("note.md"), "# N\n")
+	var pane := _make_pane(_tmp)
+	await get_tree().process_frame
+	assert_true(pane._list.visible, "a saved notes view stays on the list")
+	assert_false(pane._graph_wanted, "no default graph build was requested")
+	assert_false(pane._graph_view.visible)
+
+
+func test_the_view_buttons_follow_the_surface():
+	_write(_tmp.path_join("note.md"), "# N\n")
+	var pane := _make_pane(_tmp)
+	assert_false(pane._notes_button.visible)
+	assert_true(pane._graph_button.visible)
+	assert_eq(pane._graph_button.text, "Graph")
+	assert_eq(pane._new_button.text, "New")
+
+	pane._list.item_activated.emit(0)
+	assert_true(pane._note_box.visible)
+	assert_true(pane._notes_button.visible, "the note editor shows Notes")
+	assert_true(pane._graph_button.visible, "the note editor shows Graph")
+	assert_false(pane._new_button.visible)
+	var top := pane.find_child("TopRow", true, false) as HBoxContainer
+	assert_eq(top.get_child(0), pane._notes_button, "Notes is the first view button")
+	assert_eq(top.get_child(1), pane._graph_button, "Graph is the second")
+
+	pane._graph_button.pressed.emit()
+	await _settle_graph(pane)
+	assert_true(pane._graph_view.visible)
+	assert_true(pane._notes_button.visible)
+	assert_false(pane._graph_button.visible, "the graph surface hides Graph")
+
+	pane._notes_button.pressed.emit()
+	assert_true(pane._list.visible)
+	assert_false(pane._notes_button.visible)
+	assert_true(pane._graph_button.visible)
+
+
+func test_the_mode_button_names_the_other_presentation():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	pane.graph_mode = "3d"
+	pane._apply_graph_mode()
+	await _open_graph(pane)
+	assert_true(pane._graph_view is VaultGraph3D)
+	var view := pane._graph_view as VaultGraph3D
+	if view == null:
+		return
+	assert_eq(view._mode_button.text, "Planar")
+
+	view._mode_button.pressed.emit()
+	assert_true(pane._graph_view is VaultGraphView)
+	var planar := pane._graph_view as VaultGraphView
+	if planar == null:
+		return
+	assert_eq(planar._mode_button.text, "Orbital")
+	planar._mode_button.pressed.emit()
+	assert_true(pane._graph_view is VaultGraph3D)
+	var orbital := pane._graph_view as VaultGraph3D
+	if orbital == null:
+		return
+	assert_eq(orbital._mode_button.text, "Planar")
+
+	assert_eq(PaneTypes.WIKI_GRAPH_MODE_LABELS["3d"], "Orbital")
+	assert_eq(PaneTypes.WIKI_GRAPH_MODE_LABELS["2d"], "Planar")
+	for node in pane.find_children("*", "Button", true, false):
+		assert_ne((node as Button).text, "Physical", "no button says Physical")
+
+
+func test_relayout_is_the_only_layout_action():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	pane.graph_mode = "3d"
+	pane._apply_graph_mode()
+	await _open_graph(pane)
+	var view := pane._graph_view as VaultGraph3D
+	if view == null:
+		return
+	assert_not_null(view._relayout_button)
+	assert_eq(view._relayout_button.text, "Relayout")
+	assert_null(view.get("_fit_button"), "the Fit button is gone")
+
+	pane.graph_mode = "2d"
+	pane._apply_graph_mode()
+	assert_true(pane._graph_view is VaultGraphView)
+	var planar := pane._graph_view as VaultGraphView
+	if planar == null:
+		return
+	assert_not_null(planar._relayout_button)
+	assert_null(planar.get("_fit_button"))
+
+
+func test_the_new_button_says_new():
+	var pane := _make_pane(_tmp)
+	assert_eq(pane._new_button.text, "New")
 
 
 func test_graph_ghost_click_offers_to_create_the_missing_note():

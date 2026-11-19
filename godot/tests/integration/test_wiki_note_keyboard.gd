@@ -70,7 +70,8 @@ func _open_wiki_note(ws: Control) -> WikiPane:
 	# `activate := false` is the restore route: the pane is built without a user
 	# gesture, exactly like a saved layout, so the startup terminal stays the
 	# active pane while the note's editor takes the keyboard.
-	var wiki = ws._spawn_pane_into(ws._active_workspace(), "wiki", {"vault_path": _vault}, false)
+	var wiki = ws._spawn_pane_into(ws._active_workspace(), "wiki",
+		{"vault_path": _vault, "graph": false}, false)
 	assert_true(wiki is WikiPane, "the workspace holds a wiki pane")
 	wiki._open_note("note.md")
 	assert_true(wiki._note_box.visible, "precondition: the note view is shown")
@@ -156,7 +157,7 @@ func test_the_note_toolbar_is_one_explicit_ring_in_both_directions():
 
 func test_the_chord_is_inert_without_a_buffer_on_screen():
 	var ws = await _make_workspace()
-	var wiki: WikiPane = ws._spawn_pane("wiki", {"vault_path": _vault})
+	var wiki: WikiPane = ws._spawn_pane("wiki", {"vault_path": _vault, "graph": false})
 	ws.activate_pane(wiki)
 
 	# The list view: no note open, so there is no buffer to come back from.
@@ -170,9 +171,9 @@ func test_the_chord_is_inert_without_a_buffer_on_screen():
 	wiki._open_note("note.md")
 	wiki._set_view_mode("preview")
 	assert_false(wiki._editor.visible, "precondition: the buffer is hidden")
-	wiki._back.grab_focus()
+	wiki._notes_button.grab_focus()
 	await _press_key(KEY_K, true, true)
-	assert_eq(ws.get_viewport().gui_get_focus_owner(), wiki._back,
+	assert_eq(ws.get_viewport().gui_get_focus_owner(), wiki._notes_button,
 		"in preview mode the chord must not move the keyboard")
 
 

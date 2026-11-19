@@ -12,7 +12,7 @@ extends SceneTree
 #   old_stall_us                    their sum - what one frame used to pay
 #   request_us                      what `request_graph()` costs the frame now
 #   landed_ms                       request -> canvas, the build's real latency
-#   three_d                         the physical map: body build, settle ticks,
+#   three_d                         the orbital map: body build, settle ticks,
 #                                   force/visual/link medians (a small push runs
 #                                   first, because a fresh map starts at rest)
 #
@@ -64,7 +64,7 @@ func _measure(notes: int, links: int):
 	await process_frame
 	_pane = load("res://scenes/panes/wiki_pane.gd").new()
 	_pane.vault_path = _vault
-	# Force the physical map: the bench is about the 3D view even when this
+	# Force the orbital map: the bench is about the 3D view even when this
 	# machine's headless renderer would resolve `auto` to the planar canvas.
 	_pane.graph_mode = "3d"
 	root.add_child(_pane)
@@ -109,7 +109,7 @@ func _measure(notes: int, links: int):
 	_cleanup()
 
 
-## The physical map's own cost: one body build, the settling ticks, the spring
+## The orbital map's own cost: one body build, the settling ticks, the spring
 ## step and the link mesh rebuild. A windowed run also prints the frame time;
 ## a headless run has no renderer, so its frame number is the harness's loop.
 func _measure_3d(view) -> void:

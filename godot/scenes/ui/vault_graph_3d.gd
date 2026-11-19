@@ -1,6 +1,6 @@
 class_name VaultGraph3D
 extends VaultGraphCanvas
-## The wiki pane's **physical** link map.
+## The wiki pane's **orbital** link map.
 ##
 ## A `SubViewport` renders a 3D scene: one `RigidBody3D` per note, one spring
 ## per link, a billboarded disc and halo per note, an `ImmediateMesh` for the
@@ -116,7 +116,6 @@ var _mode_button: Button
 var _orbit_button: Button
 var _arrows_button: Button
 var _relayout_button: Button
-var _fit_button: Button
 var _edge_menu: PopupMenu
 var _pending_edge: Dictionary = {}
 
@@ -549,7 +548,7 @@ func _build_chrome() -> void:
 	controls.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(controls)
 
-	_mode_button = _make_button("Planar", "Switch to the flat link map")
+	_mode_button = _make_button("Planar", "Switch to the planar map")
 	_mode_button.pressed.connect(func(): mode_requested.emit("2d"))
 	controls.add_child(_mode_button)
 
@@ -566,16 +565,12 @@ func _build_chrome() -> void:
 	)
 	controls.add_child(_arrows_button)
 
-	_relayout_button = _make_button("Relayout", "Run the deterministic layout again")
+	_relayout_button = _make_button("Relayout", "Reset the deterministic layout and fit")
 	_relayout_button.pressed.connect(relayout)
 	controls.add_child(_relayout_button)
 
-	_fit_button = _make_button("Fit", "Fit the whole graph in the view (front view)")
-	_fit_button.pressed.connect(fit_to_view)
-	controls.add_child(_fit_button)
-
 	KeyboardFocus.ring([self, _mode_button, _orbit_button, _arrows_button,
-		_relayout_button, _fit_button])
+		_relayout_button])
 
 	_edge_menu = PopupMenu.new()
 	_edge_menu.name = "EdgeMenu"
@@ -610,7 +605,7 @@ func _describe() -> String:
 			ghosts += 1
 		else:
 			notes += 1
-	var text := "%d notes, %d links. 3D map. Arrows pan, plus and minus zoom, Enter opens what the crosshair covers." % [notes, edges.size()]
+	var text := "%d notes, %d links. Orbital map. Arrows pan, plus and minus zoom, Enter opens what the crosshair covers." % [notes, edges.size()]
 	if _truncated:
 		text += " (map truncated)"
 	return text
@@ -1763,7 +1758,7 @@ func _update_status() -> void:
 		text += " · %d declared" % declared
 	if _truncated:
 		text += " · truncated"
-	text += " · 3D"
+	text += " · Orbital"
 	if selected_id != "":
 		text += " · %s" % _label_for(selected_id)
 	_status.text = text
@@ -1813,7 +1808,9 @@ func _notification(what: int) -> void:
 			if _viewport == null:
 				return
 			if is_visible_in_tree():
-				if _settled:
+				if _hidden_paused:
+					_resume_from_hidden()
+				elif _settled:
 					_request_render()
 				else:
 					_begin_motion()

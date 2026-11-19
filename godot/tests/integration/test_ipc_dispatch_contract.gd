@@ -921,7 +921,7 @@ func _write_note(rel: String, text: String) -> void:
 	file.close()
 
 func _wiki_pane() -> Control:
-	var body = _ws._spawn_pane("wiki", {"vault_path": _view_vault()})
+	var body = _ws._spawn_pane("wiki", {"vault_path": _view_vault(), "graph": false})
 	assert_not_null(body, "a wiki pane must spawn on a real vault")
 	return body
 
