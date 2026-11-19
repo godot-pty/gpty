@@ -29,20 +29,10 @@ func after_each():
 	# vault they are keyed to still exists.
 	for rel in ["note.md", "big.md", "moved.md"]:
 		GptyTerminal.vault_scratch_clear(_scratch_tmp, rel)
-	_remove_tree(_scratch_tmp)
-	_remove_tree(TestPaths.user_path("wiki_probe_outside"))
-	_remove_tree(_tmp)
+	TestPaths.remove_tree(_scratch_tmp)
+	TestPaths.remove_tree(TestPaths.user_path("wiki_probe_outside"))
+	TestPaths.remove_tree(_tmp)
 	MockAutoloads.teardown()
-
-
-func _remove_tree(path: String):
-	var dir := DirAccess.open(path)
-	if dir:
-		for f in dir.get_files():
-			DirAccess.remove_absolute(path.path_join(f))
-		for d in dir.get_directories():
-			_remove_tree(path.path_join(d))
-	DirAccess.remove_absolute(path)
 
 
 func _write(path: String, text: String) -> String:
@@ -690,7 +680,7 @@ func test_a_vault_change_drops_the_open_note():
 	assert_eq(pane._current_rel, "", "a different vault must not keep the old note")
 	assert_false(pane._editor.editable)
 	assert_true(pane._placeholder.visible, "the new vault is empty")
-	_remove_tree(other)
+	TestPaths.remove_tree(other)
 
 
 func test_layout_state_carries_the_note_view_mode():
@@ -1524,7 +1514,7 @@ func test_a_vault_change_drops_the_recovery_copy():
 	pane.apply_settings({"vault_path": other})
 	assert_false(_has_copy(_scratch_tmp, "note.md"),
 		"the copy is keyed to the vault the buffer belonged to, and the discard drops it")
-	_remove_tree(other)
+	TestPaths.remove_tree(other)
 
 
 func test_reopening_a_note_offers_the_buffer_a_crash_left_behind():
@@ -1920,7 +1910,7 @@ func test_a_build_that_lands_after_a_vault_change_is_rebuilt_for_the_new_vault()
 	var ids := _graph_ids(pane)
 	assert_has(ids, "other.md", "the canvas is the new vault's graph")
 	assert_false(ids.has("a.md"), "the old vault's build must be dropped")
-	_remove_tree(other)
+	TestPaths.remove_tree(other)
 
 
 func test_a_dragged_node_keeps_its_place_across_a_build():

@@ -30,18 +30,8 @@ func before_each():
 
 
 func after_each():
-	_remove_tree(_tmp)
+	TestPaths.remove_tree(_tmp)
 	MockAutoloads.teardown()
-
-
-func _remove_tree(path: String):
-	var dir := DirAccess.open(path)
-	if dir:
-		for f in dir.get_files():
-			DirAccess.remove_absolute(path.path_join(f))
-		for d in dir.get_directories():
-			_remove_tree(path.path_join(d))
-	DirAccess.remove_absolute(path)
 
 
 func _make_pane() -> MediaPane:

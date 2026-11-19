@@ -42,7 +42,7 @@ func after_all():
 	remove_child(_ws)
 	_ws.free()
 	_ws = null
-	_remove_tree(_tmp)
+	TestPaths.remove_tree(_tmp)
 	ConceptManager.plugin_concepts_source = Callable()
 	ConceptManager._plugin_concept_entries = []
 	MockAutoloads.teardown()
@@ -58,16 +58,6 @@ func _write(path: String, text: String) -> String:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	f.store_string(text)
 	return path
-
-
-func _remove_tree(path: String):
-	var dir := DirAccess.open(path)
-	if dir:
-		for f in dir.get_files():
-			DirAccess.remove_absolute(path.path_join(f))
-		for d in dir.get_directories():
-			_remove_tree(path.path_join(d))
-	DirAccess.remove_absolute(path)
 
 
 func _file_tree() -> Control:

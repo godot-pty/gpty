@@ -28,7 +28,7 @@ func before_each():
 func after_each():
 	ExternalLink.open_external = _saved_open
 	ExternalLink.copy_text = _saved_copy
-	_remove_tree(_tmp)
+	TestPaths.remove_tree(_tmp)
 	MockAutoloads.teardown()
 
 
@@ -39,16 +39,6 @@ func _record_open(uri: String) -> Error:
 
 func _record_copy(text: String) -> void:
 	_copied.append(text)
-
-
-func _remove_tree(path: String):
-	var dir := DirAccess.open(path)
-	if dir:
-		for f in dir.get_files():
-			DirAccess.remove_absolute(path.path_join(f))
-		for d in dir.get_directories():
-			_remove_tree(path.path_join(d))
-	DirAccess.remove_absolute(path)
 
 
 func _write(path: String, text: String) -> String:
