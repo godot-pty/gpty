@@ -390,7 +390,7 @@ dependencies = [
 name = "gpty-ai"
 version = "0.8.5"
 dependencies = [
- "libc",
+ "gpty-core",
  "log",
  "serde",
  "serde_json",
