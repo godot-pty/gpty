@@ -4,7 +4,7 @@
 
 - Rust >= 1.85 (tested with 1.96)
 - Godot 4.4+ (tested with 4.7.2) with GDExtension support
-- Linux (primary target), macOS (untested) or Windows 11 (untested).
+- Linux (primary target), macOS, or Windows 11 (all continuously verified in CI; native Windows ConPTY, process DACL security tests, and macOS multi-arch release builds).
 - FFmpeg build dependencies for `./scripts/media-deps`: `curl`, a C toolchain, `make`, and
   `nasm` on x86 Linux (without nasm the script warns and disables hand-written SIMD). Windows
   uses vcpkg (`VCPKG_ROOT`). The script builds the pinned FFmpeg the GDExtension links.

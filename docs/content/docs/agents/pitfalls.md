@@ -5,6 +5,17 @@ weight: 80
 
 A defect class is the mechanism that keeps producing a defect; a bullet below is one instance of it, written down at the cost of the fix. Read the class first, then the bullet that matches the code in front of you.
 
+## Domain-specific pitfall guides
+
+For focused troubleshooting and subsystem-specific constraints, consult the dedicated domain guides:
+
+| Domain | Guide | Key topics covered |
+|---|---|---|
+| GDScript & UI | [Pitfalls: GDScript & UI](pitfalls-gdscript.md) | Theming, buttons, styleboxes, scrollbars, viewports, focus, signals, AccessKit |
+| Rust & FFI | [Pitfalls: Rust & FFI](pitfalls-rust.md) | GDExtension boundary, type marshaling, threads, locks, storage, library pinning |
+| Terminal & PTY | [Pitfalls: Terminal & PTY](pitfalls-terminal.md) | PTY lifecycles, VTE parsing, SGR colors, grid sizing, SIGWINCH, mouse reporting |
+| Platform & CI | [Pitfalls: Platform & CI](pitfalls-platform-ci.md) | Linux namespaces, Windows DACL, macOS Mach-O, CI caching, headless execution |
+
 ## By defect class
 
 ### one-fact-two-copies
