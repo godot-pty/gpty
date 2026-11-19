@@ -34,7 +34,7 @@ A layout deliberately does **not** store:
 
 - Running processes, exit state, or scrollback — history lives in a separate database and survives panes.
 - Unsaved editor text. A dirty wiki buffer is not part of the layout; a recovery copy outside the vault covers a crash.
-- Physics state. The 3D link map's bodies, velocities and springs are rebuilt from the saved note positions; no run-time simulation state is persisted.
+- Physics state. The orbital link map's bodies, velocities and springs are rebuilt from the saved note positions; no run-time simulation state is persisted.
 - Per-pane environment. That is user-owned, keyed by attachment id, and lives in its own store (see [[settings]]).
 - Window size, position, sidebar width, or focus. Those belong to the application, not the arrangement.
 

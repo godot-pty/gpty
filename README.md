@@ -34,7 +34,7 @@ The chosen stack also brings with it more costs, much more than terminal emulato
 - **Memory** - scrollback, settings, and workspaces restore on restart, with full-text search across each pane's history.
 - **File Tree** - Native Godot OS file tree browser.
 - **Code Viewer** - Text and Markdown rendered in a pane.
-- **Wiki** - a vault of plain Markdown notes with full-text search, a live-preview editor, `[[wikilinks]]`, backlinks, and a physical 3D link map with a planar fallback, reopened where you left off. The shipped **Knowledge Base** profile opens the bundled wiki inside a release.
+- **Wiki** - a vault of plain Markdown notes with full-text search, a live-preview editor, `[[wikilinks]]`, backlinks, and an orbital 3D link map with a planar fallback, opening on the graph and reopened where you left off. The shipped **Knowledge Base** profile opens the bundled wiki inside a release.
 - **Media** - play local audio and video in a pane through a pinned, minimal FFmpeg backend (v0.7).
 - **`cli_view`** - stream any command's output into a pane, so a plugin can add UI without a Godot SDK.
 - **Interface** - one design system across every pane, overlay and dialog: a dark theme and a light theme that follows the desktop, a UI scale, keyboard rings on the pane chrome, the Wiki pane and the vault graph, a command palette with saved commands, and accessible names for screen readers (v0.8).

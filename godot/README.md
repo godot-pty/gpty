@@ -91,10 +91,10 @@ godot/
         │   ├── docs_bundle.gd  # Validated, lazily loaded view of godot/docs.json
         │   ├── docs_viewer.gd  # Settings > About: the README and the documents it links (Back/Forward)
         │   ├── nav_history.gd   # Bounded back/forward trail with a pinned root (pure)
-        │   ├── vault_graph_canvas.gd # Shared contract: the planar and 3D vault link maps
+        │   ├── vault_graph_canvas.gd # Shared contract: the planar and orbital vault link maps
         │   ├── vault_graph_model.gd  # Pure vault link-map normalize/layout/hit-test
         │   ├── vault_graph_view.gd   # Planar, custom-drawn vault link map
-        │   ├── vault_graph_3d.gd     # Physical 3D vault link map (SubViewport, bodies, springs)
+        │   ├── vault_graph_3d.gd     # Orbital (3D) vault link map (SubViewport, bodies, springs)
         │   └── icons.gd         # Phosphor icon constants
         └── panes/               # Specialty pane types
             ├── pane_body.gd

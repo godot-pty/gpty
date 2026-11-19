@@ -6,7 +6,7 @@ A wiki pane browses a directory of Markdown notes as a vault: it lists the notes
 
 The body is `WikiPane` (`godot/scenes/panes/wiki_pane.gd`); the registered type key is `wiki` and its label prefix is `W`. A vault is just a directory of `.md` files — the pane does not own a database format. The search index lives elsewhere, in gPTY's state directory, so a vault stays plain and portable.
 
-The pane has two faces. The **list** shows the vault's notes, a search box and a **Graph** button. Opening a note switches to the **note view**: a source editor, a live rendered preview, a small toolbar with the view modes, and a links panel for what the note points at and what points back at it.
+The pane has two faces. **Notes** is the list and the note editor; **Graph** is the vault's link map. A new pane opens on the graph. The list shows **Graph**; opening a note switches to the **note view** and shows both **Notes** and **Graph** (a source editor, a live rendered preview, a small toolbar with the view modes, and a links panel for what the note points at and what points back at it); the graph shows only **Notes**, which returns to the list. A saved layout reopens the face it recorded.
 
 ## When to use it
 
@@ -43,11 +43,11 @@ The note view has three modes, remembered per pane as `view_mode`:
 
 Editing is explicit. A dirty marker appears while the buffer differs from disk; **Save** or `Ctrl+S` writes; there is no autosave. Closing or leaving a note with unsaved changes raises a Save / Discard / Cancel guard, and every path that can destroy the buffer runs through it. Saves are atomic and carry a stamp of the file's `mtime` and `size`, so a note changed by something else since it was loaded is not silently overwritten. An unsaved buffer also gets a recovery copy outside the vault, offered back the next time the note is opened — never applied on its own.
 
-The note verbs are **New note** (default name `Untitled.md`; a bare name gains the extension inside the vault), **Rename** (which offers to rewrite references), and **Delete**. Paths follow the same vocabulary as the walk, and the Rust side refuses any path that would leave the vault.
+The note verbs are **New** (default name `Untitled.md`; a bare name gains the extension inside the vault), **Rename** (which offers to rewrite references), and **Delete**. Paths follow the same vocabulary as the walk, and the Rust side refuses any path that would leave the vault.
 
 In the preview, `[[wikilinks]]` render as internal links and are followed in place, through the same leave guard. Below the note, the links panel lists **Links to** (this note's outgoing mentions) and **Linked from** (backlinks), ordered with any declared weights taken into account.
 
-**Graph** replaces the list with the vault's link structure: one node per indexed note plus one ghost per unresolved target, edges aggregated per ordered pair. The layout is deterministic; you can pan, zoom and drag nodes, and clicking a note opens it through the leave guard while clicking a ghost runs the same resolution a preview mention does. A right-click on an edge sets or clears a declared weight between 1 and 100. The map is operable from the keyboard too: opening it hands the keyboard to the canvas, `Tab` cycles the canvas and its three controls (one ring), arrows pan (hold `Shift` for four times the step), `+`/`-` zoom about the crosshair at the canvas centre, and `Enter` acts on what the crosshair covers — open the note, create the note a ghost stands for, or open an edge's weight actions — through the same hit test the pointer uses. `Escape` goes back to the list. See [[keyboard-shortcuts]]. Labels follow the zoom: every node is named while the map is zoomed in enough to read it, and on a dense map only the labels that fit are drawn — the node under the pointer, under the crosshair, or the note you have open always keeps its name, and two titles never print on top of each other. Weights are display-only and live in `user://link_weights.json`: they change thickness, layout stiffness and link order, never which edges exist or what a click can reach.
+The graph (a new pane's default view) replaces the list with the vault's link structure: one node per indexed note plus one ghost per unresolved target, edges aggregated per ordered pair. The layout is deterministic; you can pan, zoom and drag nodes, and clicking a note opens it through the leave guard while clicking a ghost runs the same resolution a preview mention does. A right-click on an edge sets or clears a declared weight between 1 and 100. The map is one keyboard ring: opening it hands the keyboard to the canvas; `Tab` cycles the canvas, **Planar** / **Orbital**, **Orbit** (orbital map), **Arrows** and **Relayout**; arrows pan (hold `Shift` for four times the step), `+`/`-` zoom about the crosshair at the canvas centre, and `Enter` acts on what the crosshair covers — open the note, create the note a ghost stands for, or open an edge's weight actions — through the same hit test the pointer uses. `Escape` and the **Notes** button go back to the list; **Relayout** resets the deterministic arrangement and fits it. See [[keyboard-shortcuts]]. Labels follow the zoom: every node is named while the map is zoomed in enough to read it, and on a dense map only the labels that fit are drawn — the node under the pointer, under the crosshair, or the note you have open always keeps its name, and two titles never print on top of each other. Weights are display-only and live in `user://link_weights.json`: they change thickness, layout stiffness and link order, never which edges exist or what a click can reach.
 
 ## Settings that matter
 
@@ -57,10 +57,11 @@ In the preview, `[[wikilinks]]` render as internal links and are followed in pla
 | Font size | 8–32 px in the editor and preview |
 | Vault path | absolute directory to index and edit |
 | Note view | `Edit`, `Split` or `Preview` |
+| Link map | `Auto`, `Orbital` or `Planar` |
 
 ## From the CLI and MCP
 
-The pane's three view gestures are one verb, so a script can drive what a person clicks: `gpty pane-view <pane> --graph` opens the link graph, `--note <path>` opens a note by vault-relative path, and `--mode edit|split|preview` sets the note view. They apply in that order - note, mode, graph - which is why `--note index.md --graph` selects the note the graph's Back returns to.
+The pane's three view gestures are one verb, so a script can drive what a person clicks: `gpty pane-view <pane> --graph` opens the link graph, `--note <path>` opens a note by vault-relative path, and `--mode edit|split|preview` sets the note view. They apply in that order - note, mode, graph - which is why `--note index.md --graph` opens the note first and the graph last; the graph's **Notes** then returns to the list.
 
 The call is display-only. It does not activate the pane and does not take the keyboard, so an agent can open a graph while someone types in another pane, and the answer is what the pane is showing afterwards (`graph`, `note`, `view_mode`), read back rather than echoed: `--graph` fails instead of reporting success if the canvas did not come up, and the answer arrives when the canvas does - the graph is built off the frame, so a large vault neither stalls the GUI nor outlives the call. It refuses rather than asks when the open note has unsaved changes, when the pane has no vault, and when the graph cannot be built - the same rule `profile load` applies to a profile and `kill-pane` to a pane, because a caller cannot answer the save/discard question.
 
@@ -70,7 +71,7 @@ It does not index anything but `.md` files, and it does not show hidden files. I
 
 ## Limits and edge cases
 
-A note body is capped at 1 MiB. A note that hits the cap while loading is shown read-only, because saving would replace the file with its visible prefix. The walk's 2,000-note and 16-level limits bound both the list and the index. The graph caps answers at 10,000 edges per class and 2,000 ghosts, and reports when a cap cut the answer. Graph geometry is session state — node positions are not saved — while declared weights and the open note are.
+A note body is capped at 1 MiB. A note that hits the cap while loading is shown read-only, because saving would replace the file with its visible prefix. The walk's 2,000-note and 16-level limits bound both the list and the index. The graph caps answers at 10,000 edges per class and 2,000 ghosts, and reports when a cap cut the answer. Graph geometry rides the pane's layout state as a bounded `graph_positions` block (a note that has left the vault is ignored); declared weights and the open note are persisted too, and none of it is stored in the vault.
 
 ## Related
 
