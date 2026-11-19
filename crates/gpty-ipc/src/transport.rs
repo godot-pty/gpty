@@ -349,26 +349,19 @@ pub fn validate_socket_path(path: &str) -> io::Result<()> {
 
 /// Validate a GUI binary path before spawning it (GPTY_GUI override).
 ///
-/// True when the path is an absolute, regular, user-owned file that is
-/// not writable by group or others. On non-Unix platforms only absolute
-/// path and file type are checked (no ownership metadata).
+/// True when the path is an absolute, regular file that is not writable by
+/// group or others and whose owner the shared rule trusts
+/// (`gpty_core::pty::validate_executable_file`): this user, root, or the
+/// overflow UID of a namespace that leaves host root unmapped. A package
+/// manager's copy under `/usr/bin`, `/opt` or `/Applications` is root-owned,
+/// and a keep-id container's is nobody — both used to be refused.
+///
+/// The ancestor walk is deliberately not part of it: `GPTY_GUI` is the user's
+/// own choice, and `/Applications` is group-writable on macOS, so the walk
+/// would refuse a normal bundle. Untrusted saved data never reaches this
+/// function.
 pub fn validate_gui_binary(path: &std::path::Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        if !path.is_absolute() {
-            return false;
-        }
-        let Ok(meta) = std::fs::metadata(path) else {
-            return false;
-        };
-        // SAFETY: `geteuid` has no preconditions, cannot fail, and touches no memory.
-        meta.is_file() && meta.uid() == unsafe { libc::geteuid() } && meta.mode() & 0o022 == 0
-    }
-    #[cfg(not(unix))]
-    {
-        path.is_absolute() && std::fs::metadata(path).is_ok_and(|m| m.is_file())
-    }
+    gpty_core::pty::validate_executable_file(path).is_ok()
 }
 
 // ── Tests ────────────────────────────────────────────────
@@ -481,6 +474,26 @@ mod tests {
             std::fs::write(&path, b"#!/bin/sh\n").unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
             assert!(validate_gui_binary(&path));
+        }
+
+        /// `GPTY_GUI` is the user's own path, so it keeps the file rule only: a
+        /// 0755 binary in a group-writable directory is accepted. `/Applications`
+        /// is group-writable on macOS, and refusing it would refuse a normal
+        /// bundle. Paths that saved data chose take the ancestor walk instead.
+        #[test]
+        fn gui_binary_in_a_group_writable_directory_is_the_users_choice() {
+            let tmp = tempfile::TempDir::new().expect("temp dir");
+            let shared = tmp.path().join("Applications");
+            std::fs::create_dir(&shared).unwrap();
+            std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o775)).unwrap();
+            let path = shared.join("gpty-gui");
+            std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            assert!(validate_gui_binary(&path));
+            assert!(
+                gpty_core::pty::validate_untrusted_executable(&path).is_err(),
+                "the same path is refused where untrusted saved data named it"
+            );
         }
     }
 

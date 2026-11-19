@@ -6,14 +6,14 @@ description = "Pluggable AI backends for gpty Inspector panes (mock, Oh-My-Pi RP
 license = "GPL-3.0-or-later"
 
 [dependencies]
+# The executable-trust rule is one primitive (pty::validate_executable_file);
+# this crate must not carry a second copy of it.
+gpty-core = { path = "../gpty-core", version = "0.8.5" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "process", "io-util", "macros", "time"] }
 log = "0.4"
 thiserror = "2"
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

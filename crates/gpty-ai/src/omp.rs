@@ -760,9 +760,10 @@ mod tests {
         );
         std::fs::set_permissions(script.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        // resolve_omp_binary accepts GPTY_OMP when it is absolute, owned by
-        // this user, and not group/other writable — the helper satisfies all
-        // three, and no other test in this crate reads the override.
+        // resolve_omp_binary accepts GPTY_OMP when it is absolute and passes
+        // the shared executable file rule (not group/other-writable, owner
+        // trusted) — the helper satisfies it, and no other test in this crate
+        // reads the override.
         // SAFETY: edition 2024 makes environment mutation unsafe because it can
         // race another thread; this test holds OMP_ENV_LOCK, which every test
         // that reads GPTY_OMP takes, so nothing else observes the change.

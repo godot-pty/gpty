@@ -147,53 +147,93 @@ pub fn sanitize_envs(envs: &[String]) -> Vec<(String, String)> {
     out
 }
 const READ_BUF_SIZE: usize = 4096;
-/// Reject a program path that the untrusted layout/profile data could have
-/// aimed at a file another user controls.
+/// Judge a program string a tile, profile or pane setting named.
 ///
-/// Saved tiles choose the program a terminal spawns, and that value is
-/// executed verbatim. Bare names are left alone — the shipped profiles launch
-/// tools by name through `PATH` (`omp`, `lazygit`, `nvim`) — but an absolute
-/// path must be a regular file that is neither group- nor other-writable and
-/// is owned either by this user or by root. The whole parent chain is held to
-/// the same rule: a safe file can still be swapped for a hostile one when a
-/// directory above it is group/other-writable without the sticky bit, so every
-/// ancestor up to the filesystem root must be non-writable by others (a sticky
-/// directory such as `/tmp` is allowed — only its owner may unlink entries).
-/// That is the same standard `validate_gui_binary` and `resolve_omp_binary`
-/// hold their binaries to, and it rejects the shared-`/tmp` payload a hostile
-/// layout would point at.
+/// A bare name is resolved by the caller through the child's `PATH` (see
+/// [`validate_program`]) and an empty value names nothing, so both are left
+/// alone — the shipped profiles launch tools by name. Anything path-like must
+/// pass [`validate_untrusted_executable`], including a Windows path: it carries
+/// no `/` but is just as much a file a hostile layout can name.
 pub fn validate_executable(program: &str) -> Result<(), String> {
-    if program.is_empty() || !program.contains('/') {
-        // PATH-resolved, as the shipped profiles do.
+    validate_executable_for(program, cfg!(windows))
+}
+
+/// [`validate_executable`] with the platform's separator rule as an argument,
+/// so the Windows spelling is testable on every platform.
+fn validate_executable_for(program: &str, windows: bool) -> Result<(), String> {
+    if program.is_empty() || !path_like(program, windows) {
         return Ok(());
     }
-    let path = std::path::Path::new(program);
+    validate_untrusted_executable(Path::new(program))
+}
+
+/// The file rule a spawned executable must satisfy: an absolute, regular file
+/// that is neither group- nor other-writable and is owned by this user, by
+/// root, or by the UID the kernel substitutes for an owner outside this
+/// process's UID map.
+///
+/// This is the whole rule for a path the *user* chose — `GPTY_GUI` through
+/// `validate_gui_binary`, `GPTY_OMP` or a `PATH` lookup through
+/// `validate_omp_binary`. It says nothing about who could have replaced the
+/// file, so it is not enough on its own for a path saved data chose: that is
+/// [`validate_untrusted_executable`].
+pub fn validate_executable_file(path: &Path) -> Result<(), String> {
     if !path.is_absolute() {
-        return Err(format!("relative executable path: {program}"));
+        return Err(format!("relative executable path: {}", path.display()));
     }
     // Follow symlinks: on Arch and Fedora /bin is a symlink to /usr/bin, so
     // an lstat would reject the default shell outright. The checks below then
     // apply to the file that will actually be executed.
-    let meta =
-        std::fs::metadata(path).map_err(|e| format!("cannot stat executable {program}: {e}"))?;
+    let meta = std::fs::metadata(path)
+        .map_err(|e| format!("cannot stat executable {}: {e}", path.display()))?;
     if !meta.is_file() {
-        return Err(format!("executable is not a regular file: {program}"));
+        return Err(format!(
+            "executable is not a regular file: {}",
+            path.display()
+        ));
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         if meta.mode() & 0o022 != 0 {
-            return Err(format!("group/other-writable executable: {program}"));
+            return Err(format!(
+                "group/other-writable executable: {}",
+                path.display()
+            ));
         }
         let owner = meta.uid();
         // SAFETY: `geteuid` takes no arguments, cannot fail, and touches no
         // memory; the call is unsafe only because every libc extern is.
         let me = unsafe { libc::geteuid() };
-        if owner != me && owner != 0 {
+        if !trusted_owner(owner, me, unmapped_owner_uid()) {
             return Err(format!(
-                "executable belongs to another user (uid {owner}): {program}"
+                "executable belongs to another user (uid {owner}): {}",
+                path.display()
             ));
         }
+    }
+    Ok(())
+}
+
+/// [`validate_executable_file`] plus the no-writable-ancestor walk: a safe file
+/// can still be swapped for a hostile one when a directory above it is group or
+/// other-writable without the sticky bit, so every ancestor up to the
+/// filesystem root must be non-writable by others (a sticky directory such as
+/// `/tmp` is allowed — only its owner may unlink entries).
+///
+/// Saved tiles choose the program a terminal spawns and that value is executed
+/// verbatim, so this — not the file rule alone — is the standard for anything
+/// untrusted saved data named, including the `cli_view` adapter command. It is
+/// also the standard `validate_gui_binary` and `resolve_omp_binary` were
+/// documented as holding their binaries to; those two keep only
+/// [`validate_executable_file`] deliberately, because their input is the user's
+/// own `GPTY_GUI`/`GPTY_OMP` and `/Applications` — a normal home for the macOS
+/// bundle — is group-writable.
+pub fn validate_untrusted_executable(path: &Path) -> Result<(), String> {
+    validate_executable_file(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
         // The file can be replaced rather than written to: a directory above
         // it that group or others may write to lets another user swap the
         // binary, even though the binary itself is 0755. /tmp is spared only
@@ -209,8 +249,9 @@ pub fn validate_executable(program: &str) -> Result<(), String> {
             let dir_mode = dir_meta.mode();
             if dir_mode & 0o022 != 0 && dir_mode & 0o1000 == 0 {
                 return Err(format!(
-                    "executable lives in a group/other-writable directory ({}): {program}",
-                    current.display()
+                    "executable lives in a group/other-writable directory ({}): {}",
+                    current.display(),
+                    path.display()
                 ));
             }
             dir = current.parent();
@@ -219,9 +260,82 @@ pub fn validate_executable(program: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Owners an executable may have and still be spawned: this user, root, or the
+/// UID the kernel substitutes for an owner outside this process's UID map.
+///
+/// `unmapped_owner` is `Some` only where that is proven (see
+/// [`unmapped_owner_uid`]); on a normal host it is `None`, so the accepted set
+/// is exactly the one the check had before the namespace arm.
+#[cfg(unix)]
+fn trusted_owner(owner: u32, me: u32, unmapped_owner: Option<u32>) -> bool {
+    owner == me || owner == 0 || unmapped_owner == Some(owner)
+}
+
+/// The UID `/proc/sys/fs/overflowuid` names, when this process's UID map does
+/// not contain it.
+///
+/// In a rootless container, `--userns=keep-id` or any namespace that leaves the
+/// host's root unmapped, the kernel reports every unmapped owner as that UID —
+/// so `/bin/bash`, owned by root on the host, reads as `nobody` while
+/// `geteuid()` is the user. When the UID *is* inside the map (every UID is, on
+/// a host with the identity map `0 0 4294967295`), a file showing it really
+/// belongs to that UID and stays untrusted: the relaxation is confined to the
+/// case it exists for. An unreadable `/proc` yields `None`, which fails closed.
+#[cfg(target_os = "linux")]
+fn unmapped_owner_uid() -> Option<u32> {
+    let overflow: u32 = std::fs::read_to_string("/proc/sys/fs/overflowuid")
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    let map = std::fs::read_to_string("/proc/self/uid_map").ok()?;
+    match uid_is_mapped(overflow, &map) {
+        Some(false) => Some(overflow),
+        Some(true) | None => None,
+    }
+}
+
+/// No UID map and no overflow UID: the concept is Linux-only.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn unmapped_owner_uid() -> Option<u32> {
+    None
+}
+
+/// Whether `uid` falls inside one of the `[inside, inside + length)` ranges a
+/// `/proc/<pid>/uid_map` listing declares.
+///
+/// `None` when the listing has no lines or a line is not three decimal fields:
+/// a map that cannot be read is not evidence that the UID is unmapped, so the
+/// caller must not relax the owner rule on it.
+#[cfg(target_os = "linux")]
+fn uid_is_mapped(uid: u32, map: &str) -> Option<bool> {
+    let mut mapped = false;
+    let mut lines = 0usize;
+    for line in map.lines().filter(|line| !line.trim().is_empty()) {
+        let mut fields = line.split_whitespace();
+        let inside: u64 = fields.next()?.parse().ok()?;
+        let _outside: u64 = fields.next()?.parse().ok()?;
+        let length: u64 = fields.next()?.parse().ok()?;
+        if fields.next().is_some() {
+            return None;
+        }
+        lines += 1;
+        let end = inside.checked_add(length)?;
+        if inside <= u64::from(uid) && u64::from(uid) < end {
+            mapped = true;
+        }
+    }
+    (lines > 0).then_some(mapped)
+}
+
 /// Whether `program` names a file rather than something to look up in `PATH`.
-fn has_separator(program: &str) -> bool {
-    program.contains('/') || (cfg!(windows) && program.contains('\\'))
+///
+/// Windows treats `\` as a separator too, and a `C:\`-rooted program carries
+/// no `/`: reading only `/` let an absolute Windows path skip every check. The
+/// flag is a parameter rather than `cfg!(windows)` so both spellings stay
+/// testable on either platform.
+fn path_like(program: &str, windows: bool) -> bool {
+    program.contains('/') || (windows && program.contains('\\'))
 }
 
 /// Resolve a bare name against `path_value` the way the child's shell will.
@@ -276,16 +390,14 @@ fn resolve_in_path(program: &str, path_value: &str) -> Option<std::path::PathBuf
 /// (the pane opens empty and the reason is logged), so a preset naming a tool
 /// the user has not installed is not refused for a second, different reason.
 pub fn validate_program(program: &str, path_value: Option<&str>) -> Result<(), String> {
-    if program.is_empty() || has_separator(program) {
+    if program.is_empty() || path_like(program, cfg!(windows)) {
         return validate_executable(program);
     }
     let Some(path_value) = path_value else {
         return Ok(());
     };
     match resolve_in_path(program, path_value) {
-        Some(resolved) if resolved.is_absolute() => {
-            validate_executable(&resolved.to_string_lossy())
-        }
+        Some(resolved) if resolved.is_absolute() => validate_untrusted_executable(&resolved),
         // Only an empty PATH entry resolves to a relative path, and `execvp`
         // would run it out of the working directory. `validate_executable`
         // cannot judge it — a name with no separator is what it treats as
@@ -741,6 +853,76 @@ mod tests {
             "GPTY_PANE_ID must be blocked from untrusted env"
         );
         assert!(out.iter().any(|(k, _)| k == "HOME"));
+    }
+
+    /// The accepted owners: this user, root, and — only where the caller proved
+    /// the UID is outside the namespace's map — the overflow UID.
+    #[cfg(unix)]
+    #[test]
+    fn executable_owner_rule_admits_this_user_root_and_only_the_unmapped_overflow_uid() {
+        assert!(trusted_owner(1000, 1000, None));
+        assert!(trusted_owner(0, 1000, None));
+        assert!(
+            !trusted_owner(65534, 1000, None),
+            "a plain other user stays refused"
+        );
+        assert!(
+            trusted_owner(65534, 1000, Some(65534)),
+            "an unmapped host root is the case this arm exists for"
+        );
+        assert!(
+            !trusted_owner(65534, 1000, Some(5000)),
+            "only the UID the kernel actually substitutes"
+        );
+        assert!(trusted_owner(0, 1000, Some(65534)));
+    }
+
+    /// `/proc/self/uid_map` decides whether the overflow UID is a real owner;
+    /// a listing that cannot be read must not relax the rule.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_uid_map_is_read_as_ranges_and_an_unreadable_one_is_not_evidence() {
+        // A host maps every UID: 65534 is a real owner there.
+        assert_eq!(
+            uid_is_mapped(65534, "         0          0 4294967295\n"),
+            Some(true)
+        );
+        // rootless container, `unshare -Ur`, `--userns=keep-id`
+        assert_eq!(
+            uid_is_mapped(65534, "         0       1000          1\n"),
+            Some(false)
+        );
+        assert_eq!(
+            uid_is_mapped(0, "      1000       1000          1\n"),
+            Some(false)
+        );
+        assert_eq!(
+            uid_is_mapped(1000, "      1000       1000          1\n"),
+            Some(true)
+        );
+        // A second range names the overflow UID, so it is mapped.
+        assert_eq!(
+            uid_is_mapped(65534, "0 1000 1\n65534 65534 1\n"),
+            Some(true)
+        );
+        // Malformed or empty: never evidence that the UID is unmapped.
+        assert_eq!(uid_is_mapped(65534, ""), None);
+        assert_eq!(uid_is_mapped(65534, "garbage\n"), None);
+        assert_eq!(uid_is_mapped(65534, "0 1000\n"), None);
+    }
+
+    /// A `C:\`-rooted program carries no `/`: it must reach the path rule like
+    /// any other path instead of being waved through as a bare name.
+    #[test]
+    fn a_windows_absolute_program_is_not_treated_as_a_bare_name() {
+        assert!(path_like(r"C:\Tools\evil.exe", true));
+        assert!(
+            !path_like(r"C:\Tools\evil.exe", false),
+            "a backslash is an ordinary name byte on Unix"
+        );
+        assert!(validate_executable_for(r"C:\gpty-nonexistent\x.exe", true).is_err());
+        assert!(validate_executable_for("omp", true).is_ok());
+        assert!(validate_executable_for("", true).is_ok());
     }
 
     #[cfg(unix)]
