@@ -89,7 +89,7 @@ The note toolbar — Edit / Split / Preview, Rename, Delete and Save — is a ke
 | `←` `→` `↑` `↓` | Pan the map; hold `Shift` to pan four times further |
 | `+` / `-` | Zoom about the crosshair at the canvas centre |
 | `Enter` | Act on what the crosshair covers: open the note, create the note a ghost stands for, or open an edge's weight actions |
-| `Escape` | Back to the note list |
+| `Escape` | Leave for the note list |
 
 A new pane opens the graph; the list shows **Graph**, the note editor **Notes** and **Graph**, and the graph **Notes**. The map has two presentations. The **orbital map** is the default on a forward renderer; the **planar canvas** is the fallback, and it is the automatic choice on the Compatibility (OpenGL3) renderer. **Planar** / **Orbital** is one button that switches between them without losing the arrangement, and the pane's **Link map** setting chooses the default (`Auto`, `Orbital`, `Planar`). On the orbital map **Orbit** turns a background drag into a camera orbit, so the deterministic depth layers show as parallax; middle-drag always pans, and the wheel or `+`/`-` zooms. On the planar map a background drag pans. Dragging a note pushes its neighbours through the springs and the map settles when the drag is released; **Relayout** resets the arrangement in either view. The saved positions ride the pane's layout state, so reopening the graph returns to the arrangement you left.
 
