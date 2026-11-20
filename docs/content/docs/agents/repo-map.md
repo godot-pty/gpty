@@ -150,7 +150,10 @@ gpty/
     ├── profiles.default.json   # Shipped recommended layouts (Agent Workspace, Knowledge Base)
     ├── knowledge.json          # Generated wiki bundle (scripts/build-wiki)
     ├── docs.json               # Generated documentation bundle (scripts/build-docs)
-    ├── fonts/                  # DejaVu Sans Mono + Phosphor icons
+    ├── assets/                 # Brand assets
+    │   ├── boot_splash.png     # Committed launch frame (application/boot_splash/image)
+    │   └── fonts/Phosphor-Regular.ttf # UI icon font
+    ├── fonts/                  # DejaVu Sans Mono (the terminal's font)
     ├── shaders/                # Bundled shaders (referenced by code, not a scene)
     │   └── window_opacity.gdshader # Whole-window alpha veil (Workspace.apply_window_alpha)
     └── scenes/
