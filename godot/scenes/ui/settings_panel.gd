@@ -166,13 +166,18 @@ func _build_ui():
 	var t_sys = _create_tab(tabs, "System")
 	var fps_opt = _add_fps_control(t_sys)
 	var win_mode_opt = _add_window_mode_control(t_sys)
+	var opacity_opt = _add_window_opacity_control(t_sys)
 	var check_updates_cb = _add_check_updates_control(t_sys)
 	_add_tab_reset(t_sys, func():
 		SettingsManager.cfg_max_fps = 0
 		SettingsManager.cfg_window_mode = 0
+		SettingsManager.cfg_window_opacity = SettingsManager.OPACITY_DEFAULT
 		SettingsManager.cfg_check_updates = true
 		fps_opt.selected = 6  # "Unlimited" (0)
 		win_mode_opt.selected = 0
+		if opacity_opt != null:
+			opacity_opt.selected = SettingsManager.OPACITY_PRESETS.find(
+				SettingsManager.OPACITY_DEFAULT)
 		check_updates_cb.button_pressed = true
 		SettingsManager.save_settings()
 	)
@@ -222,6 +227,7 @@ func _build_ui():
 	var appearance_opt = _add_appearance_control(t_app)
 	var font_btn = _add_font_picker(t_app)
 	var fs_spin = _add_font_control(t_app)
+	var pad_spin = _add_terminal_padding_control(t_app)
 	var scale_opt = _add_ui_scale_control(t_app)
 	t_app.add_child(HSeparator.new())
 	var scheme_btn = _add_scheme_picker(t_app)
@@ -237,6 +243,7 @@ func _build_ui():
 	_add_tab_reset(t_app, func():
 		SettingsManager.cfg_font_path = "res://fonts/DejaVuSansMono.ttf"
 		SettingsManager.cfg_font_size = 14
+		SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
 		SettingsManager.cfg_ui_scale = 100
 		SettingsManager.cfg_color_scheme_path = ""
 		SettingsManager.cfg_show_titlebar = true
@@ -250,6 +257,7 @@ func _build_ui():
 		font_btn.text = "DejaVuSansMono.ttf"
 		scheme_btn.text = "(none)"
 		fs_spin.value = 14
+		pad_spin.value = PaneTypes.TERMINAL_PADDING_DEFAULT
 		scale_opt.selected = 0
 		appearance_opt.selected = SettingsManager.APPEARANCE_DARK
 		show_tb_cb.button_pressed = true
@@ -302,6 +310,7 @@ func _build_ui():
 		SettingsManager.cfg_cursor_shape = shape_opt.selected
 		SettingsManager.cfg_cursor_blink = blink_cb.button_pressed
 		SettingsManager.cfg_font_size = int(fs_spin.value)
+		SettingsManager.cfg_terminal_padding = int(pad_spin.value)
 		SettingsManager.cfg_cursor_blink_speed = blink_spin.value
 		SettingsManager.cfg_scroll_lines = int(scroll_spin.value)
 		SettingsManager.cfg_history_lines = int(history_spin.value)
@@ -322,6 +331,7 @@ func _build_ui():
 	blink_cb.toggled.connect(func(_pressed): _debounce_timer.start())
 	blink_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	fs_spin.value_changed.connect(func(_v): _debounce_timer.start())
+	pad_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	scroll_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	history_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	reason_spins[0].value_changed.connect(func(_v): _debounce_timer.start())
@@ -902,6 +912,55 @@ func _add_window_mode_control(v: VBoxContainer) -> OptionButton:
 	hb.add_child(opt)
 	v.add_child(hb)
 	return opt
+
+## The window's own opacity. The row is absent where the display server cannot
+## make the window transparent: a control that changes nothing is worse than no
+## control.
+func _add_window_opacity_control(v: VBoxContainer) -> OptionButton:
+	if not WindowChrome.transparency_supported():
+		return null
+	var hb = HBoxContainer.new()
+	hb.add_child(_lbl("Window opacity:"))
+	var opt = OptionButton.new(); opt.name = "WindowOpacityOpt"
+	var presets: Array = SettingsManager.OPACITY_PRESETS.duplicate()
+	var idx := presets.find(SettingsManager.cfg_window_opacity)
+	var custom := idx < 0
+	if custom:
+		presets.append(SettingsManager.cfg_window_opacity)
+	for p in presets:
+		opt.add_item("%d%%" % p)
+	if custom:
+		# The FPS picker's documented trap: find() returns -1 for a stored
+		# value that is not a step, and `selected = -1` would leave the
+		# dropdown blank with no way to see the current value.
+		opt.set_item_text(opt.item_count - 1, "%d%% (custom)" % SettingsManager.cfg_window_opacity)
+		idx = presets.size() - 1
+	opt.selected = idx
+	opt.accessibility_name = "Window opacity"
+	opt.tooltip_text = "Applies to the whole window where the display server supports a transparent window; menus and dialogs stay opaque."
+	opt.item_selected.connect(func(i: int):
+		SettingsManager.cfg_window_opacity = int(presets[i])
+		SettingsManager.save_settings()
+	)
+	hb.add_child(opt)
+	v.add_child(hb)
+	return opt
+
+## The terminal grid's inset, per side. The value is a preference, not pane
+## content: the fit spends it before it divides by the cell, so a change
+## refits the live grid and the row/column count stays the count drawn.
+func _add_terminal_padding_control(v: VBoxContainer) -> SpinBox:
+	var hb = HBoxContainer.new()
+	hb.add_child(_lbl("Terminal padding:"))
+	var spin = SpinBox.new(); spin.name = "TerminalPaddingSpin"
+	spin.min_value = 0; spin.max_value = PaneTypes.TERMINAL_PADDING_MAX; spin.step = 1
+	spin.suffix = " px"
+	spin.value = SettingsManager.cfg_terminal_padding
+	spin.accessibility_name = "Terminal padding in pixels"
+	spin.tooltip_text = "Space between the pane edge and the terminal grid, on every side. The grid shrinks to keep the row and column count truthful."
+	hb.add_child(spin)
+	v.add_child(hb)
+	return spin
 
 func _add_check_updates_control(v: VBoxContainer) -> CheckBox:
 	var cb = CheckBox.new(); cb.name = "CheckUpdatesCb"; cb.text = "Check for updates on startup"

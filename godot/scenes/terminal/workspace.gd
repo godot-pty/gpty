@@ -5,6 +5,11 @@ class_name Workspace
 
 const TITLEBAR_HEIGHT = WindowChrome.HEIGHT
 
+## The whole-window opacity pass (see `shaders/window_opacity.gdshader`). A
+## `preload` keeps it a compile-time dependency, so an export carries it even
+## though no scene names it.
+const WINDOW_OPACITY_SHADER := preload("res://shaders/window_opacity.gdshader")
+
 ## Panes named in the running-work confirmation before the rest are counted;
 ## a bulk close of sixteen panes must still be readable in one dialog.
 const RUNNING_ASK_MAX_NAMES = 8
@@ -72,6 +77,15 @@ const SAVED_MINIMIZED := "Saved commands go to the active terminal pane, and it 
 
 var _sidebar: Sidebar
 var _sidebar_bg: ColorRect
+## The window's own painted ground. With window opacity below 100 % the
+## engine's clear colour is transparent, so every pixel must be covered by the
+## app before the opacity veil samples the canvas; an uncovered seam would
+## become black at the setting's alpha instead of the app's background.
+var _window_bg: ColorRect
+## The whole-window opacity pass: the backbuffer copy the veil samples and the
+## veil itself. Both are hidden at 100 %, so an opaque window pays nothing.
+var _opacity_copy: BackBufferCopy
+var _opacity_veil: ColorRect
 var _palette: CommandPalette
 var _grid: Control
 ## The scrollable "no panes" guide; one node over the active grid, synced by
@@ -118,6 +132,36 @@ func _ready():
 	# Where nothing is drawn the viewport's clear colour shows: an empty
 	# workspace used to be Godot's default grey.
 	RenderingServer.set_default_clear_color(UiPalette.active().BG)
+	# The window's own ground, before every other child. With window opacity
+	# below 100 % the clear colour is transparent; this rect is the opaque base
+	# the veil samples, so a seam or the empty workspace cannot become black at
+	# the setting's alpha.
+	_window_bg = ColorRect.new()
+	_window_bg.name = "WindowBg"
+	_window_bg.color = UiPalette.active().BG
+	_window_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_window_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_window_bg)
+	# The whole-window opacity pass. Above every app surface (the toast and the
+	# overlays sit at z 100), and off at 100 %: the copy is this frame's canvas
+	# and the veil rewrites its alpha once, so the compositor blends the app
+	# once instead of each stacked surface blending again.
+	_opacity_copy = BackBufferCopy.new()
+	_opacity_copy.name = "WindowOpacityCopy"
+	_opacity_copy.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT
+	_opacity_copy.z_index = 4095
+	_opacity_copy.visible = false
+	add_child(_opacity_copy)
+	_opacity_veil = ColorRect.new()
+	_opacity_veil.name = "WindowOpacityVeil"
+	_opacity_veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_opacity_veil.z_index = 4096
+	_opacity_veil.visible = false
+	_opacity_veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var veil_material := ShaderMaterial.new()
+	veil_material.shader = WINDOW_OPACITY_SHADER
+	_opacity_veil.material = veil_material
+	add_child(_opacity_veil)
 	_chrome = WindowChrome.new()
 	_titlebar = _chrome.build(self)
 
@@ -266,6 +310,7 @@ func _ready():
 	# Forced: the call above ran while the scene was still building, so this is
 	# the one that lands on a realized window.
 	_apply_window_mode.call_deferred(true)
+	_chrome.apply_opacity.call_deferred()
 	if SettingsManager.cfg_window_mode == 0: _chrome.restore_position()
 
 func _on_settings_changed():
@@ -287,6 +332,7 @@ func _on_settings_changed():
 	_sync_pane_titlebars()
 	_apply_fps_setting()
 	_apply_window_mode()
+	_chrome.apply_opacity()
 	# Motion off (or a transition edit) applies without a restart: whatever is
 	# mid-flight snaps to its final state under the new setting.
 	_transitions.finish_all()
@@ -310,6 +356,8 @@ func _on_appearance_changed(_is_dark: bool) -> void:
 ## take effect for panes spawned after the change. Update every wrapper
 ## in every workspace (hidden workspaces keep their panes alive).
 func _apply_ui_colors():
+	if _window_bg:
+		_window_bg.color = UiPalette.active().BG
 	if _sidebar_bg:
 		_sidebar_bg.color = SettingsManager.cfg_sidebar_bg
 	if _titlebar:
@@ -330,6 +378,19 @@ func _apply_ui_colors():
 					tbg.color = SettingsManager.cfg_title_bar_bg
 	if _status_bar:
 		_status_bar.apply_chrome_colors()
+
+## The window's alpha, applied by the one veil. `WindowChrome.apply_opacity`
+## owns the window flag and calls this; 1.0 hides the pass entirely, so an
+## opaque window does no full-screen copy or draw.
+func apply_window_alpha(alpha: float) -> void:
+	if _opacity_veil == null:
+		return
+	var on := alpha < 1.0
+	_opacity_veil.visible = on
+	_opacity_copy.visible = on
+	if on:
+		(_opacity_veil.material as ShaderMaterial).set_shader_parameter(
+			"window_alpha", clampf(alpha, 0.01, 1.0))
 
 ## Every workspace's panes, not just the visible one: a title bar belongs to a
 ## live pane while its workspace is hidden, so the setting must reach it there

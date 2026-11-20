@@ -16,6 +16,8 @@ func after_each():
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
 	SettingsManager.cfg_sidebar_folded.clear()
 	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	SettingsManager.cfg_window_opacity = SettingsManager.OPACITY_DEFAULT
+	SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
 	SettingsManager.cfg_pane_animation = {}
 	SettingsManager.cfg_pane_animation_params = {}
 	SettingsManager.system_is_dark = func() -> bool:
@@ -49,6 +51,16 @@ func test_apply_pane_settings_delegates():
 
 	SettingsManager.apply_pane_settings(body, {"pane_name": "x"})
 	assert_eq(body.pane_name, "x")
+
+func test_apply_to_terminal_passes_the_padding():
+	var body = TerminalPane.new()
+	_scene.add_child(body)
+
+	SettingsManager.cfg_terminal_padding = 12
+	SettingsManager.apply_to_terminal(body)
+
+	assert_eq(body.terminal_padding, 12,
+		"the global padding must reach a live terminal's fit")
 
 # ── Settings changed signal ────────────────────────────────────────────
 
@@ -90,6 +102,35 @@ func test_save_load_show_titlebar():
 	SettingsManager.cfg_show_titlebar = true
 	SettingsManager.load_settings()
 	assert_eq(SettingsManager.cfg_show_titlebar, false)
+
+func test_window_fit_settings_roundtrip():
+	SettingsManager.cfg_window_opacity = 75
+	SettingsManager.cfg_terminal_padding = 12
+	SettingsManager.save_settings()
+
+	SettingsManager.cfg_window_opacity = SettingsManager.OPACITY_DEFAULT
+	SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
+	SettingsManager.load_settings()
+
+	assert_eq(SettingsManager.cfg_window_opacity, 75, "opacity must survive a restart")
+	assert_eq(SettingsManager.cfg_terminal_padding, 12, "padding must survive a restart")
+
+func test_hand_edited_window_fit_values_clamp():
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE,
+		{"window_opacity": 5, "terminal_padding": 999})
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_window_opacity, SettingsManager.OPACITY_MIN,
+		"an opacity below the floor clamps to it")
+	assert_eq(SettingsManager.cfg_terminal_padding, PaneTypes.TERMINAL_PADDING_MAX,
+		"padding past the ceiling clamps to it")
+
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE,
+		{"window_opacity": 500, "terminal_padding": -3})
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_window_opacity, SettingsManager.OPACITY_MAX,
+		"an opacity past the ceiling clamps to it")
+	assert_eq(SettingsManager.cfg_terminal_padding, 0,
+		"negative padding clamps to zero")
 
 func test_load_settings_uses_defaults_when_empty():
 	# Clear store and load — should keep compiled defaults

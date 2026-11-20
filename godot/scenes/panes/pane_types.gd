@@ -481,6 +481,13 @@ const SOURCE_IPC := 2
 const FONT_SIZE_MIN := 8
 const FONT_SIZE_MAX := 32
 
+## The terminal grid's inner padding, per side in logical pixels: the global
+## appearance default, and the ceiling a hand-edited store or a caller may
+## reach. The fit spends `2 x padding` before it divides by the cell, so the
+## row and column count stay the count the pane actually shows.
+const TERMINAL_PADDING_DEFAULT := 4
+const TERMINAL_PADDING_MAX := 24
+
 ## Shared by every pane type.
 ##
 ## `type` and `attachment_id` are `ipc: false`: the discriminator is read, never
@@ -530,6 +537,10 @@ const TERMINAL_SETTINGS := {
 	# spawn, and written only by the pane settings UI.
 	"pane_cwd": PANE_DIR_RULE,
 	"font_path": {"kind": "font_path"},
+	# The inset between the tile edge and the grid. This is the user's window
+	# fit, not pane content: the global appearance setting broadcasts it, and
+	# a shared layout cannot carry it.
+	"terminal_padding": {"kind": "int", "min": 0, "max": TERMINAL_PADDING_MAX, "file": false},
 	# A file must not name a scheme: the read itself is capped and harmless,
 	# but appearance paths are the user's, not a shared layout's. The pane
 	# panel and the global setting (runtime) still set it.

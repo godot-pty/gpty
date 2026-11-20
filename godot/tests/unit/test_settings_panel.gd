@@ -25,6 +25,9 @@ func after_each():
 	# re-theme every later suite.
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
 	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	SettingsManager.cfg_window_opacity = SettingsManager.OPACITY_DEFAULT
+	SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
+	WindowChrome.force_transparency = -1
 	SettingsManager.cfg_pane_animation = {}
 	SettingsManager.cfg_pane_animation_params = {}
 	SettingsManager.apply_appearance()
@@ -71,6 +74,7 @@ func _pin_window(size: Vector2i) -> void:
 
 func test_appearance_reset_restores_only_appearance_settings():
 	SettingsManager.cfg_font_size = 22
+	SettingsManager.cfg_terminal_padding = 20
 	SettingsManager.cfg_wrapper_bg = Color(1.0, 0.0, 0.0)
 	SettingsManager.cfg_color_scheme_path = "/tmp/scheme.csv"
 	SettingsManager.cfg_ui_scale = 175
@@ -81,6 +85,8 @@ func test_appearance_reset_restores_only_appearance_settings():
 	btn.pressed.emit()
 
 	assert_eq(SettingsManager.cfg_font_size, 14, "font size must reset to default")
+	assert_eq(SettingsManager.cfg_terminal_padding, PaneTypes.TERMINAL_PADDING_DEFAULT,
+		"terminal padding must reset to default")
 	assert_eq(SettingsManager.cfg_wrapper_bg, UiPalette.active().BG,
 		"wrapper bg must reset to the active palette's background")
 	assert_eq(SettingsManager.cfg_ui_scale, 100, "the UI scale must reset to 100 %")
@@ -111,6 +117,7 @@ func test_terminal_reset_restores_only_terminal_settings():
 
 func test_system_reset_restores_system_settings():
 	SettingsManager.cfg_window_mode = 2
+	SettingsManager.cfg_window_opacity = 70
 	SettingsManager.cfg_max_fps = 60
 
 	var btn := _tab_reset_button("System")
@@ -118,6 +125,8 @@ func test_system_reset_restores_system_settings():
 	btn.pressed.emit()
 
 	assert_eq(SettingsManager.cfg_window_mode, 0, "window mode must reset to OS")
+	assert_eq(SettingsManager.cfg_window_opacity, SettingsManager.OPACITY_DEFAULT,
+		"window opacity must reset to opaque")
 	assert_eq(SettingsManager.cfg_max_fps, 0, "max fps must reset to unlimited")
 
 func test_reasoning_reset_restores_reasoning_settings():
@@ -245,6 +254,51 @@ func test_the_terminal_tab_shows_a_scrollbar_column():
 	var card := (_panel.get_child(0) as Control).get_child(0) as Control
 	assert_eq(card.size, SettingsPanel.CARD_SIZE,
 		"a tall tab keeps the design height in a window that fits it")
+
+# ── Window fit ─────────────────────────────────────────────────────────
+
+## The row exists only where the display server can make the window
+## transparent: a control that changes nothing is worse than no control.
+func test_the_window_opacity_row_is_absent_when_the_window_cannot_be_transparent():
+	WindowChrome.force_transparency = 0
+	var panel := SettingsPanel.new(_ws)
+	add_child_autofree(panel)
+	await get_tree().process_frame
+	assert_null(panel.find_child("WindowOpacityOpt", true, false),
+		"an unsupported window must not offer an opacity picker")
+
+func test_the_window_opacity_row_offers_the_presets_and_saves_a_pick():
+	WindowChrome.force_transparency = 1
+	var panel := SettingsPanel.new(_ws)
+	add_child_autofree(panel)
+	await get_tree().process_frame
+	var opt := panel.find_child("WindowOpacityOpt", true, false) as OptionButton
+	assert_not_null(opt, "a supported window must show the opacity picker")
+	if opt == null:
+		return
+	assert_eq(opt.item_count, SettingsManager.OPACITY_PRESETS.size(),
+		"the picker offers exactly the stored vocabulary")
+	assert_eq(opt.get_item_text(0), "100%", "an opaque window is the first step")
+	var idx := SettingsManager.OPACITY_PRESETS.find(80)
+	opt.selected = idx
+	opt.item_selected.emit(idx)
+	assert_eq(SettingsManager.cfg_window_opacity, 80, "the pick must reach the setting")
+	assert_eq(MockAutoloads.get_store(SettingsManager.SETTINGS_FILE).get("window_opacity"), 80,
+		"the pick saves, so the choice survives a restart")
+
+func test_the_terminal_padding_row_writes_and_saves():
+	var spin := _panel.find_child("TerminalPaddingSpin", true, false) as SpinBox
+	assert_not_null(spin, "the Appearance tab carries the terminal padding row")
+	if spin == null:
+		return
+	assert_eq(spin.value, PaneTypes.TERMINAL_PADDING_DEFAULT,
+		"a fresh install offers the default inset")
+	spin.value = 12
+	_panel._debounce_timer.timeout.emit()
+	assert_eq(SettingsManager.cfg_terminal_padding, 12,
+		"the spin must reach the setting")
+	assert_eq(MockAutoloads.get_store(SettingsManager.SETTINGS_FILE).get("terminal_padding"), 12,
+		"the debounced save must reach the store")
 
 # ── Color picker OK/Cancel ─────────────────────────────────────────────
 

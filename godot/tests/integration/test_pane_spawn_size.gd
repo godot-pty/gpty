@@ -31,6 +31,8 @@ func before_each():
 	_tm = TerminalManager.new()
 
 func after_each():
+	SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
+	SettingsManager.cfg_font_size = 14
 	if _ws:
 		if _ws.get_parent():
 			remove_child(_ws)
@@ -55,13 +57,25 @@ func _workspace() -> Control:
 	await get_tree().process_frame
 	return _ws
 
-## The grid the pane's own pixels can show, by the same formula the pane uses
+## The grid the pane's own pixels can show, by the formula the pane uses
 ## (`TerminalPane._grid_for_size`). Never a literal: the cell size depends on
-## the font this machine has.
+## the font this machine has, and the inset on the padding setting.
 func _fitted_grid(body: Control) -> Vector2i:
-	var cols := int((body.size.x - TerminalPane.PADDING) / body._cell_w)
-	var rows := int((body.size.y - TerminalPane.PADDING) / body._cell_h)
-	return Vector2i(cols, rows)
+	return body._grid_for_size(body.size)
+
+## The backend's grid once it holds `expected` (the pane refits synchronously;
+## the poll only proves the PTY-side grid agrees), or the last read at the
+## deadline.
+func _wait_for_grid(body: Control, expected: Vector2i, timeout_ms := 2000) -> Vector2i:
+	var deadline := Time.get_ticks_msec() + timeout_ms
+	var last := Vector2i.ZERO
+	while Time.get_ticks_msec() < deadline:
+		if body._terminal != null:
+			last = Vector2i(body._terminal.get_cols(), body._terminal.get_rows())
+			if last == expected:
+				return last
+		await get_tree().process_frame
+	return last
 
 ## The first screen line matching `pattern`, or "" at the deadline. Polls the
 ## pane's drained grid (the child writes through the PTY thread, so the text
@@ -127,3 +141,74 @@ func test_a_sized_pane_starts_at_its_own_size():
 		"a pane that is given a size starts without waiting for the grid")
 	assert_eq([body.rows, body.cols], [fitted.y, fitted.x],
 		"the child must start at the size the pane was given")
+
+# ── Inner padding ──────────────────────────────────────────────────────
+
+## The inset is spent on the cell count, not on an offset: the fitted grid is
+## `2 * padding` narrower and shorter than the tile, and the draw is centred
+## inside that box. A pane whose rows/cols disagreed with this would be
+## drawing cells the tile never gave it.
+func test_the_fit_spends_the_padding_on_every_side():
+	var body: Control = _tm.create_body("terminal")
+	_scene.add_child(body)
+	body.size = Vector2(900, 600)
+	assert_true(body._started, "the pane must own a live grid for this test")
+
+	SettingsManager.cfg_terminal_padding = 0
+	SettingsManager.apply_to_terminal(body)
+	var full_cols: int = body.cols
+	var full_rows: int = body.rows
+
+	SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_MAX
+	SettingsManager.apply_to_terminal(body)
+	var expected: Vector2i = body._grid_for_size(body.size)
+	var got := await _wait_for_grid(body, expected)
+	assert_eq(got, expected, "the backend must hold the padded fit")
+	assert_eq([body.rows, body.cols], [expected.y, expected.x],
+		"the pane's own counts must be the padded fit")
+	assert_lt(body.cols, full_cols, "24 px per side must cost columns")
+	assert_lt(body.rows, full_rows, "24 px per side must cost rows")
+	var inset := float(PaneTypes.TERMINAL_PADDING_MAX) * 2.0
+	assert_lte(body.cols * body._cell_w, body.size.x - inset,
+		"the grid may not use the inset's pixels")
+	assert_lte(body.rows * body._cell_h, body.size.y - inset,
+		"the grid may not use the inset's pixels")
+	assert_gte(body._grid_offset().x, float(PaneTypes.TERMINAL_PADDING_MAX),
+		"the draw starts at least one pad in")
+	assert_gte(body._grid_offset().y, float(PaneTypes.TERMINAL_PADDING_MAX),
+		"the draw starts at least one pad in")
+
+## A settings broadcast reaches every live terminal; the pane must reflow then,
+## not wait for the next tile resize.
+func test_a_padding_change_refits_the_live_grid():
+	var body: Control = _tm.create_body("terminal")
+	_scene.add_child(body)
+	body.size = Vector2(900, 600)
+	var before := Vector2i(body.cols, body.rows)
+
+	SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_MAX
+	SettingsManager.apply_to_terminal(body)
+
+	var expected: Vector2i = body._grid_for_size(body.size)
+	var got := await _wait_for_grid(body, expected)
+	assert_eq(got, expected, "the backend must take the refitted grid")
+	assert_eq([body.rows, body.cols], [expected.y, expected.x],
+		"the pane's counts must follow the new padding")
+	assert_lt(body.cols, before.x, "more padding means fewer columns")
+
+## The same metrics hook carries a font-size change: growing the font changes
+## how many cells fit, so the live grid must refit instead of overflowing.
+func test_a_font_size_change_refits_the_live_grid():
+	var body: Control = _tm.create_body("terminal")
+	_scene.add_child(body)
+	body.size = Vector2(900, 600)
+	var before_cols: int = body.cols
+
+	body.apply_settings({"font_size": 22})
+
+	var expected: Vector2i = body._grid_for_size(body.size)
+	var got := await _wait_for_grid(body, expected)
+	assert_eq(got, expected, "the backend must take the refitted grid")
+	assert_eq(body.cols, expected.x,
+		"a font-size change must not leave a grid wider than the tile")
+	assert_lt(body.cols, before_cols, "a larger font fits fewer columns")

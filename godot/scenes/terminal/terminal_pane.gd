@@ -22,7 +22,21 @@ signal child_start_failed(reason: String)
 const CURSOR_BLINK_INTERVAL = 0.5
 const SCROLL_LINES = 3
 @export var scroll_lines: int = SCROLL_LINES
-const PADDING = 4
+## Inset between the tile edge and the grid, per side, in logical pixels. A
+## settings broadcast (`SettingsManager.cfg_terminal_padding`) applies it; the
+## fit spends `2 x` it on the cell count, so rows/cols stay the count drawn.
+var terminal_padding: int = PaneTypes.TERMINAL_PADDING_DEFAULT:
+	set(value):
+		var v := clampi(value, 0, PaneTypes.TERMINAL_PADDING_MAX)
+		if v == terminal_padding:
+			return
+		terminal_padding = v
+		_recompute_cell_metrics()
+## The smallest pane the grid asks a container for: `MIN_SIZE_COLS` cells wide
+## and two rows tall, plus the padded inset. This is not the fit's floor (that
+## is `MIN_COLS`/`MIN_ROWS`): it is what `custom_minimum_size` guarantees while
+## a tile is being laid out.
+const MIN_SIZE_COLS := 4
 const FOCUS_BORDER_WIDTH = 2.0
 const BEAM_CURSOR_WIDTH = 2
 const UNDERLINE_CURSOR_HEIGHT = 3
@@ -593,8 +607,9 @@ func _ready():
 func _grid_for_size(px: Vector2) -> Vector2i:
 	if _cell_w <= 0.0 or _cell_h <= 0.0:
 		return Vector2i.ZERO
-	var fitted_cols := int((px.x - PADDING) / _cell_w)
-	var fitted_rows := int((px.y - PADDING) / _cell_h)
+	var inset := float(terminal_padding) * 2.0
+	var fitted_cols := int((px.x - inset) / _cell_w)
+	var fitted_rows := int((px.y - inset) / _cell_h)
 	if fitted_cols < MIN_COLS or fitted_rows < MIN_ROWS:
 		return Vector2i.ZERO
 	return Vector2i(fitted_cols, fitted_rows)
@@ -819,10 +834,37 @@ func _recompute_cell_metrics():
 	_font_italic.fixed_size = font_size
 	_cell_w = _font.get_char_size('W'.unicode_at(0), font_size).x
 	_cell_h = _font.get_height(font_size)
-	custom_minimum_size = Vector2(PADDING * _cell_w + PADDING, _cell_h * 2 + PADDING)
+	custom_minimum_size = Vector2(MIN_SIZE_COLS * _cell_w + terminal_padding * 2.0,
+		_cell_h * 2.0 + terminal_padding * 2.0)
 	# Glyph metrics changed: existing cells must be redrawn even when the
 	# derived rows/cols happen to be unchanged, and every band moves.
 	_repaint_all()
+	# A metric change can change how many cells fit (a padding or font-size
+	# change). Re-ask the backend now instead of waiting for a tile resize:
+	# rows/cols must stay the count the pane draws. A refusal is retried by
+	# the resize debounce, like any other refused resize.
+	if _started and _terminal != null:
+		if not _resize_to_fit() and _grid_for_size(size) != Vector2i.ZERO:
+			_resize_pending = true
+			_resize_timer = 0.0
+
+## Ask the backend for the grid the pane's current size fits. True when the
+## grid already holds it (or now does); false when the tile cannot hold the
+## minimum grid or the backend refused (poisoned lock) — the caller keeps
+## `_resize_pending` armed so the debounce retries.
+func _resize_to_fit() -> bool:
+	if _terminal == null:
+		return false
+	var fitted := _grid_for_size(size)
+	if fitted == Vector2i.ZERO:
+		return false
+	if fitted.x == cols and fitted.y == rows:
+		return true
+	if not _terminal.resize_grid(fitted.y, fitted.x):
+		return false
+	cols = fitted.x
+	rows = fitted.y
+	return true
 
 func _process(delta):
 	if not _started and _laid_out and Engine.get_process_frames() > _laid_out_frame:
@@ -847,29 +889,23 @@ func _process(delta):
 		_resize_timer += delta
 		var resize_threshold := RESIZE_DRAG_INTERVAL if _drag_resizing else RESIZE_DEBOUNCE
 		if _resize_timer >= resize_threshold:
-			var fitted := _grid_for_size(size)
-			if fitted == Vector2i.ZERO:
+			if _grid_for_size(size) == Vector2i.ZERO:
 				# Size collapsed between event and apply — keep waiting for
 				# the stable geometry instead of applying a tiny grid.
 				_resize_timer = 0.0
 			else:
-				_resize_pending = false
 				# Recompute from the CURRENT size so the grid applies the
 				# final stable geometry, never an intermediate cascade size.
-				if fitted.x != cols or fitted.y != rows:
-					# Keep the debounce armed until the backend reports it took
-					# the size. A refused resize answers false (poisoned grid
-					# lock) and a panic in the call never returns at all — the
-					# GDScript VM aborts this function at the FFI boundary — so
-					# in both cases cols/rows must keep the size the grid really
-					# holds, or the pane renders at dimensions the backend never
-					# applied and the comparison above never asks again.
+				# `_resize_to_fit` writes cols/rows only when the backend took
+				# the size; a refusal (poisoned grid lock) leaves the debounce
+				# armed so the pane keeps asking, and a panic in the call never
+				# returns at all — the GDScript VM aborts this function at the
+				# FFI boundary — so cols/rows can never claim a size the grid
+				# does not hold.
+				_resize_pending = false
+				if not _resize_to_fit():
 					_resize_pending = true
 					_resize_timer = 0.0
-					if _terminal.resize_grid(fitted.y, fitted.x):
-						cols = fitted.x
-						rows = fitted.y
-						_resize_pending = false
 
 	_time_since_sync += delta
 	if _time_since_sync >= _sync_interval + _sync_backoff:
@@ -1093,12 +1129,14 @@ func _request_cursor_redraw() -> void:
 func _grid_offset() -> Vector2:
 	# Before the first grid sync the cache is empty; return a neutral
 	# offset so mouse handling and hit-testing stay safe.
+	var pad := float(terminal_padding)
 	if _cell_cache.is_empty():
-		return Vector2(2, 2)
+		return Vector2(pad, pad)
 	var gc: int = _cell_cache["cols"]
 	var gr: int = _cell_cache["rows"]
 	var tw = gc * _cell_w; var th = gr * _cell_h
-	return Vector2(2 + maxf((size.x - PADDING - tw) / 2.0, 0), 2 + maxf((size.y - PADDING - th) / 2.0, 0))
+	return Vector2(pad + maxf((size.x - pad * 2.0 - tw) / 2.0, 0),
+		pad + maxf((size.y - pad * 2.0 - th) / 2.0, 0))
 
 ## Create, free and order the paint layers for the grid the cache holds.
 ## Runs from a full repaint only: a partial update can never change the row

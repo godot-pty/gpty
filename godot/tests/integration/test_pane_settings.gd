@@ -165,7 +165,7 @@ func test_apply_settings_rows_cols_never_resizes_a_live_grid():
 	_scene.add_child(body)
 	assert_not_null(body._terminal, "the pane must own a grid for this test")
 	body.size = Vector2(900, 600)
-	var fitted_rows := int((body.size.y - TerminalPane.PADDING) / body._cell_h)
+	var fitted_rows: int = body._grid_for_size(body.size).y
 	assert_eq(body._terminal.get_rows(), fitted_rows,
 		"the pane started its child at the size it is drawn at")
 

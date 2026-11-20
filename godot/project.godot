@@ -39,6 +39,10 @@ VaultRegistry="*res://scenes/autoloads/vault_registry.gd"
 
 window/size/viewport_width=1920
 window/size/viewport_height=1080
+; Window opacity (Settings -> System) needs this: the engine answers
+; `is_window_transparency_available()` false without it, even on a renderer
+; that supports it. The window stays opaque until the setting asks otherwise.
+window/per_pixel_transparency/allowed=true
 
 [rendering]
 

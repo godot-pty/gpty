@@ -31,6 +31,15 @@ const CHROME_COLOR_TOKENS := {
 ## layout every measurement and screenshot was taken at; the ceiling matches the
 ## loader's clamp so a stored value cannot exceed what the picker can show.
 const UI_SCALE_PRESETS := [100, 110, 125, 150, 175, 200]
+## Window opacity, in percent: 100 is an opaque window, and below it the app is
+## drawn at that alpha so the desktop shows through, where the display server
+## can make the window per-pixel transparent
+## (`WindowChrome.transparency_supported`). The picker, the loader clamp and
+## `WindowChrome.opacity_alpha` read these.
+const OPACITY_MIN := 40
+const OPACITY_MAX := 100
+const OPACITY_DEFAULT := 100
+const OPACITY_PRESETS := [100, 95, 90, 85, 80, 75, 70, 60, 50, 40]
 
 var cfg_cursor_shape := 0
 var cfg_cursor_blink := true
@@ -55,8 +64,15 @@ var cfg_color_scheme_path := ""
 var cfg_max_fps := 0
 var cfg_font_path := "res://fonts/DejaVuSansMono.ttf"
 var cfg_font_size := 14
+## Inset between a terminal pane's tile edge and its grid, per side, logical
+## px. Applied by shrinking the fitted grid, never by offsetting the draw.
+var cfg_terminal_padding := PaneTypes.TERMINAL_PADDING_DEFAULT
 var cfg_shell_command := default_shell_command()
 var cfg_window_mode := 0
+## The window's own opacity, in percent. Applied by `WindowChrome.apply_opacity`
+## where the display server can make the window transparent; the System row is
+## hidden where it cannot.
+var cfg_window_opacity := OPACITY_DEFAULT
 var cfg_show_titlebar := true
 var cfg_window_position := Vector2i(100, 100)
 var cfg_window_size := Vector2i(1920, 1080)
@@ -221,11 +237,14 @@ func load_settings():
 	cfg_color_scheme_path = _as_string(d, "color_scheme", "")
 	cfg_max_fps = _as_int(d, "max_fps", 0)
 	cfg_window_mode = _as_int(d, "window_mode", 0)
+	cfg_window_opacity = clampi(_as_int(d, "window_opacity", OPACITY_DEFAULT), OPACITY_MIN, OPACITY_MAX)
 	cfg_show_titlebar = _as_bool(d, "show_titlebar", true)
 	cfg_window_position = _window_vec(d, "window_position", Vector2i(100, 100))
 	cfg_window_size = _window_vec(d, "window_size", Vector2i(1920, 1080))
 	cfg_font_path = _as_string(d, "font_path", "res://fonts/DejaVuSansMono.ttf")
 	cfg_font_size = _as_int(d, "font_size", 14)
+	cfg_terminal_padding = clampi(_as_int(d, "terminal_padding", PaneTypes.TERMINAL_PADDING_DEFAULT),
+		0, PaneTypes.TERMINAL_PADDING_MAX)
 	cfg_shell_command = _as_string(d, "shell_command", default_shell_command())
 	cfg_shell_env = _as_string(d, "shell_env", "")
 	cfg_reasoning_max_turns = clampi(_as_int(d, "reasoning_max_turns", 16), 1, 64)
@@ -257,7 +276,7 @@ func save_settings():
 ## to every pane in every workspace and re-applies the window mode, which a
 ## sidebar fold has no part in.
 func _save_settings_file():
-	var d = {"cursor_shape": cfg_cursor_shape, "cursor_blink": cfg_cursor_blink, "cursor_blink_speed": cfg_cursor_blink_speed, "scroll_lines": cfg_scroll_lines, "default_rows": cfg_default_rows, "default_cols": cfg_default_cols, "beam_width": cfg_beam_width, "underline_height": cfg_underline_height, "wrapper_bg": cfg_wrapper_bg.to_html(), "title_bar_bg": cfg_title_bar_bg.to_html(), "wrapper_border": cfg_wrapper_border.to_html(), "sidebar_bg": cfg_sidebar_bg.to_html(), "focus_border": cfg_focus_border.to_html(), "selection": cfg_selection.to_html(), "scrollback_indicator": cfg_scrollback_indicator.to_html(), "color_scheme": cfg_color_scheme_path, "max_fps": cfg_max_fps, "font_path": cfg_font_path, "font_size": cfg_font_size, "shell_command": cfg_shell_command, "shell_env": cfg_shell_env, "show_titlebar": cfg_show_titlebar, "window_mode": cfg_window_mode, "window_position": {"x": cfg_window_position.x, "y": cfg_window_position.y}, "window_size": {"x": cfg_window_size.x, "y": cfg_window_size.y}}
+	var d = {"cursor_shape": cfg_cursor_shape, "cursor_blink": cfg_cursor_blink, "cursor_blink_speed": cfg_cursor_blink_speed, "scroll_lines": cfg_scroll_lines, "default_rows": cfg_default_rows, "default_cols": cfg_default_cols, "beam_width": cfg_beam_width, "underline_height": cfg_underline_height, "wrapper_bg": cfg_wrapper_bg.to_html(), "title_bar_bg": cfg_title_bar_bg.to_html(), "wrapper_border": cfg_wrapper_border.to_html(), "sidebar_bg": cfg_sidebar_bg.to_html(), "focus_border": cfg_focus_border.to_html(), "selection": cfg_selection.to_html(), "scrollback_indicator": cfg_scrollback_indicator.to_html(), "color_scheme": cfg_color_scheme_path, "max_fps": cfg_max_fps, "font_path": cfg_font_path, "font_size": cfg_font_size, "window_opacity": cfg_window_opacity, "terminal_padding": cfg_terminal_padding, "shell_command": cfg_shell_command, "shell_env": cfg_shell_env, "show_titlebar": cfg_show_titlebar, "window_mode": cfg_window_mode, "window_position": {"x": cfg_window_position.x, "y": cfg_window_position.y}, "window_size": {"x": cfg_window_size.x, "y": cfg_window_size.y}}
 	d["reasoning_max_turns"] = cfg_reasoning_max_turns
 	d["reasoning_max_turn_bytes"] = cfg_reasoning_max_turn_bytes
 	d["check_updates"] = cfg_check_updates
@@ -284,6 +303,7 @@ func apply_to_terminal(body: Control):
 		"color_scheme_path": cfg_color_scheme_path,
 		"font_path": cfg_font_path,
 		"font_size": cfg_font_size,
+		"terminal_padding": cfg_terminal_padding,
 		"max_fps": cfg_max_fps,
 		"shell_command": cfg_shell_command,
 		"shell_env": cfg_shell_env,
