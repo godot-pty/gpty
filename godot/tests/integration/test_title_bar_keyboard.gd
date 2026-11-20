@@ -144,8 +144,7 @@ func test_escape_from_a_read_only_panes_chrome_focuses_its_content():
 	# A wiki pane cannot hold focus itself (`activate_pane` releases it), so
 	# without a content fallback Escape would leave the keyboard on a chrome
 	# button with nothing to type into - a trap of the fix's own making.
-	_vault = TestPaths.user_path("title_bar_probe_vault")
-	DirAccess.make_dir_recursive_absolute(_vault)
+	_vault = TestPaths.fresh_dir("title_bar_probe_vault")
 	var note := FileAccess.open(_vault.path_join("note.md"), FileAccess.WRITE)
 	note.store_string("# Note\n")
 	note.close()

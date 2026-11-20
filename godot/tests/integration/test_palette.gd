@@ -455,4 +455,6 @@ func test_the_save_command_entry_opens_the_commands_tab_with_the_form():
 		if child is AcceptDialog:
 			dialogs.append(child)
 	assert_eq(dialogs.size(), 1, "the add form is already open")
+	if dialogs.is_empty():
+		return
 	assert_true((dialogs[0] as AcceptDialog).visible)

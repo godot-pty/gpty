@@ -25,8 +25,7 @@ func before_all():
 	SettingsManager.cfg_default_cols = 80
 	ConceptManager.plugin_concepts_source = func(): return "[]"
 	ConceptManager.refresh_plugin_concepts()
-	_tmp = TestPaths.user_path("pane_open_request")
-	DirAccess.make_dir_recursive_absolute(_tmp)
+	_tmp = TestPaths.fresh_dir("pane_open_request")
 	_file_a = _write(_tmp.path_join("a.md"), "# A\n")
 	_file_b = _write(_tmp.path_join("b.md"), "# B\n")
 	_ws = WorkspaceScript.new()

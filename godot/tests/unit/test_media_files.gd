@@ -7,8 +7,7 @@ var _tmp: String
 
 
 func before_each():
-	_tmp = TestPaths.user_path("media_files_probe")
-	DirAccess.make_dir_recursive_absolute(_tmp)
+	_tmp = TestPaths.fresh_dir("media_files_probe")
 
 
 func after_each():

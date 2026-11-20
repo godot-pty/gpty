@@ -25,20 +25,52 @@ static func user_dir() -> String:
 static func user_path(rel: String) -> String:
 	return user_dir().path_join(rel.trim_prefix("/"))
 
-## Whether `path` is an absolute real path safely inside [`method user_dir`].
-## Rejects empty paths, relative paths, '.', '..', '/', drive roots, and the
-## [`method user_dir`] root itself.
-static func is_safe_user_path(path: String) -> bool:
+## A fresh, empty fixture directory under the run's user root. Any tree left
+## at `rel` by an interrupted run, or by a teardown whose removal was refused,
+## is removed first: a fixed fixture name that is never emptied makes one
+## failed test poison every later test that reuses the name (measured on
+## `windows-smoke`: a refused removal turned four `test_file_tree` tests and
+## five `test_wiki_pane` tests red, none of them about their own subject).
+static func fresh_dir(rel: String) -> String:
+	var path := user_path(rel)
+	if not remove_tree(path):
+		push_warning("TestPaths.fresh_dir: could not clear %s; the fixture may inherit files" % path)
+	DirAccess.make_dir_recursive_absolute(path)
+	return path
+
+## `p` in one spelling, for comparing two paths on one platform. On Windows
+## `\` and `/` are unified first - both separate there, and
+## `String.simplify_path()` keeps a drive prefix exactly as it was written, so
+## the environment's "C:\...\user" and a `path_join`ed "C:\...\user/probe"
+## normalised to "C:/..." and "C:\..." and never shared a prefix. The bytes are
+## otherwise left alone: a real path may legitimately end in a space, and
+## trimming it here compared a different string from the one on disk.
+static func normalize_path(p: String, windows := OS.get_name() == "Windows") -> String:
+	var path := p.replace("\\", "/") if windows else p
+	path = path.simplify_path()
+	if path.length() > 1 and path.ends_with("/") and not path.ends_with(":/"):
+		path = path.trim_suffix("/")
+	return path
+
+## Whether `path` is an absolute real path strictly under `root`: never `root`
+## itself, never a sibling that merely shares its name as a string prefix.
+## `windows` selects the separator and case rules (default: this platform), so a
+## test can pin the Windows spelling on any platform.
+static func is_safe_path_under(path: String, root: String, windows := OS.get_name() == "Windows") -> bool:
 	if not BasePersistenceManager.is_real_absolute_path(path):
 		return false
-	var norm_path := _normalize_path(path)
-	var norm_root := _normalize_path(user_dir())
+	var norm_path := normalize_path(path, windows)
+	var norm_root := normalize_path(root, windows)
 	if norm_root == "" or norm_root == "/" or norm_root.ends_with(":/"):
 		return false
 	var prefix := norm_root + "/"
-	if OS.get_name() == "Windows":
+	if windows:
 		return norm_path.to_lower().begins_with(prefix.to_lower())
 	return norm_path.begins_with(prefix)
+
+## Whether `path` is an absolute real path safely inside [`method user_dir`].
+static func is_safe_user_path(path: String) -> bool:
+	return is_safe_path_under(path, user_dir())
 
 ## Recursively removes `path` if it is a directory or file safely inside
 ## [`method user_dir`]. Refuses empty paths, relative paths, '.', '..', '/',
@@ -48,19 +80,13 @@ static func is_safe_user_path(path: String) -> bool:
 static func remove_tree(path: String) -> bool:
 	if not is_safe_user_path(path):
 		return false
-	var target := _normalize_path(path)
+	var target := normalize_path(path)
 	if not DirAccess.dir_exists_absolute(target):
 		if FileAccess.file_exists(target):
 			return DirAccess.remove_absolute(target) == OK
 		return true
 	_delete_dir_recursive(target)
 	return not DirAccess.dir_exists_absolute(target)
-
-static func _normalize_path(p: String) -> String:
-	var path := p.strip_edges().simplify_path()
-	if path.length() > 1 and path.ends_with("/") and not path.ends_with(":/"):
-		path = path.trim_suffix("/")
-	return path
 
 static func _delete_dir_recursive(dir_path: String) -> void:
 	var dir := DirAccess.open(dir_path)

@@ -356,9 +356,12 @@ elif [[ "$STATUS" -ne 0 ]] && (( ! STALL_HIT && ! TIMEOUT_HIT )); then
     PROBLEMS+=("godot exited $STATUS")
 fi
 
-ERROR_LINES="$(grep -Em5 'SCRIPT ERROR|Parse Error|Failed to load script' "$PLAIN" || true)"
+# `-A2` carries Godot's location lines (`at: res://.../<script>.gd:<line>` and
+# the GDScript backtrace); without them the gate can say an error happened but
+# not where, which is what `windows-smoke` 44648884305 printed.
+ERROR_LINES="$(grep -Em5 -A2 'SCRIPT ERROR|Parse Error|Failed to load script' "$PLAIN" | sed '/^--$/d' || true)"
 if [[ -n "$ERROR_LINES" ]]; then
-    PROBLEMS+=("Godot reported a script/parse error — the suite did not run:")
+    PROBLEMS+=("Godot reported a script/parse error (location and backtrace follow):")
     while IFS= read -r line; do
         PROBLEMS+=("    $line")
     done <<<"$ERROR_LINES"

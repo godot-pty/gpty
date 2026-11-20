@@ -103,6 +103,8 @@ func test_a_crafted_directory_is_shown_when_a_tile_names_a_program():
 	assert_eq(ws._workspaces.size(), 0, "an untrusted plan must stop the restore")
 	var dialogs := _dialogs()
 	assert_eq(dialogs.size(), 1, "the Workspace Trust dialog gates the restore")
+	if dialogs.is_empty():
+		return
 	var text: String = AppDialog.body_of(dialogs[0])
 	assert_string_contains(text, dir, "the dialog names the directory the plan would start in")
 	assert_string_contains(text, _other_shell(), "the dialog names the program")
@@ -149,6 +151,8 @@ func test_an_approved_plan_does_not_cover_another_directory():
 	ws = await _make_workspace()
 	var dialogs := _dialogs()
 	assert_eq(dialogs.size(), 1, "another directory re-prompts")
+	if dialogs.is_empty():
+		return
 	assert_string_contains(AppDialog.body_of(dialogs[0]), crafted_dir)
 
 # ── Picker: a live workspace's directory change ────────────────────────
@@ -174,6 +178,8 @@ func test_the_picker_asks_only_for_a_workspace_with_untrusted_tiles():
 	ws._set_workspace_cwd(0, dir_b)
 	var dialogs := _dialogs()
 	assert_eq(dialogs.size(), 1, "an untrusted tile turns the change into a decision")
+	if dialogs.is_empty():
+		return
 	assert_string_contains(AppDialog.body_of(dialogs[0]), dir_b, "the dialog names the new directory")
 	assert_string_contains(AppDialog.body_of(dialogs[0]), _other_shell())
 

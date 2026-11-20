@@ -15,8 +15,7 @@ var _ipc_vault := ""
 
 func before_each():
 	MockAutoloads.setup()
-	_ipc_vault = TestPaths.user_path("link_weights_probe")
-	DirAccess.make_dir_recursive_absolute(_ipc_vault)
+	_ipc_vault = TestPaths.fresh_dir("link_weights_probe")
 	# The agent verb answers only inside a root the user registered. This is
 	# the effect of the pane settings UI's write, reduced to the store call:
 	# `VaultRegistry` is that UI's single writer.
@@ -331,8 +330,7 @@ func test_the_ipc_verb_refuses_a_vault_the_user_never_registered():
 	# keyed by that root. An unregistered root would let any client add entries
 	# for a directory the user never opened (and, at the store's vault cap,
 	# evict the user's own), so the registry is consulted before any write.
-	var foreign := TestPaths.user_path("link_weights_foreign")
-	DirAccess.make_dir_recursive_absolute(foreign)
+	var foreign := TestPaths.fresh_dir("link_weights_foreign")
 	var answer: Dictionary = WorkspaceIpcHandlers.handle(null, "vaultWeight", {
 		"vault_path": foreign,
 		"src": "a.md",

@@ -13,8 +13,7 @@ var _tmp := ""
 
 func before_each():
 	MockAutoloads.setup()
-	_tmp = TestPaths.user_path("file_tree_probe")
-	DirAccess.make_dir_recursive_absolute(_tmp)
+	_tmp = TestPaths.fresh_dir("file_tree_probe")
 
 
 func after_each():
