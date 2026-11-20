@@ -136,9 +136,8 @@ func _build_ui():
 		SettingsManager.cfg_check_updates = true
 		fps_opt.selected = 6  # "Unlimited" (0)
 		win_mode_opt.selected = 0
-		if opacity_opt != null:
-			opacity_opt.selected = SettingsManager.OPACITY_PRESETS.find(
-				SettingsManager.OPACITY_DEFAULT)
+		opacity_opt.selected = SettingsManager.OPACITY_PRESETS.find(
+			SettingsManager.OPACITY_DEFAULT)
 		check_updates_cb.button_pressed = true
 		SettingsManager.save_settings()
 	)
@@ -449,6 +448,16 @@ static func ui_scale_hint_tooltip(requested: int, applied: int) -> String:
 		+ "scale the layout would be smaller than %d x %d px, the smallest the "
 		+ "interface is laid out for. Make the window bigger to use the full scale."
 	) % [applied, requested, int(UiTokens.MIN_LAYOUT.x), int(UiTokens.MIN_LAYOUT.y)]
+
+## Why the opacity picker cannot act in this session. Pure, like the scale
+## hint, so the wording is pinned without a window.
+static func opacity_hint(driver: String) -> String:
+	return "unavailable on the %s display server" % driver
+
+static func opacity_hint_tooltip(driver: String) -> String:
+	return ("This session's display server (%s) cannot make the window "
+		+ "per-pixel transparent, so the window is drawn opaque. The Wayland "
+		+ "driver can: start gPTY with --display-driver wayland.") % driver
 
 func _add_reasoning_control(v: VBoxContainer) -> Array:
 	var h1 = HBoxContainer.new()
@@ -874,12 +883,10 @@ func _add_window_mode_control(v: VBoxContainer) -> OptionButton:
 	v.add_child(hb)
 	return opt
 
-## The window's own opacity. The row is absent where the display server cannot
-## make the window transparent: a control that changes nothing is worse than no
-## control.
+## The window's own opacity. The row is always present: where the display server
+## cannot make the window transparent the picker is disabled and the row says
+## why, because a hidden row made a shipped feature look unshipped.
 func _add_window_opacity_control(v: VBoxContainer) -> OptionButton:
-	if not WindowChrome.transparency_supported():
-		return null
 	var hb = HBoxContainer.new()
 	hb.add_child(_lbl("Window opacity:"))
 	var opt = OptionButton.new(); opt.name = "WindowOpacityOpt"
@@ -898,12 +905,29 @@ func _add_window_opacity_control(v: VBoxContainer) -> OptionButton:
 		idx = presets.size() - 1
 	opt.selected = idx
 	opt.accessibility_name = "Window opacity"
-	opt.tooltip_text = "Applies to the whole window where the display server supports a transparent window; menus and dialogs stay opaque."
 	opt.item_selected.connect(func(i: int):
 		SettingsManager.cfg_window_opacity = int(presets[i])
 		SettingsManager.save_settings()
 	)
-	hb.add_child(opt)
+	if WindowChrome.transparency_supported():
+		opt.tooltip_text = "Applies to the whole window where the display server supports a transparent window; menus and dialogs stay opaque."
+		hb.add_child(opt)
+	else:
+		# A pick that cannot reach the window would be a lie: disable it and
+		# say what the session is missing, in the same row so the card does not
+		# grow a second line for it.
+		opt.disabled = true
+		var driver := DisplayServer.get_name()
+		opt.tooltip_text = opacity_hint_tooltip(driver)
+		hb.add_child(opt)
+		var hint := Label.new()
+		hint.name = "WindowOpacityHint"
+		hint.theme_type_variation = UiTheme.MUTED_LABEL
+		hint.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		hint.mouse_filter = Control.MOUSE_FILTER_STOP  # a tooltip needs a hover target
+		hint.text = opacity_hint(driver)
+		hint.tooltip_text = opacity_hint_tooltip(driver)
+		hb.add_child(hint)
 	v.add_child(hb)
 	return opt
 

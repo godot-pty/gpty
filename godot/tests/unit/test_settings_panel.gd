@@ -258,15 +258,33 @@ func test_a_scrolling_settings_tab_shows_a_scrollbar_column():
 
 # ── Window fit ─────────────────────────────────────────────────────────
 
-## The row exists only where the display server can make the window
-## transparent: a control that changes nothing is worse than no control.
-func test_the_window_opacity_row_is_absent_when_the_window_cannot_be_transparent():
+## The row is always present: where the display server cannot make the window
+## transparent the picker is disabled and the row says why. Hiding it made a
+## shipped feature look unshipped (a Wayland session under XWayland).
+func test_the_window_opacity_row_is_disabled_with_a_reason_when_unsupported():
 	WindowChrome.force_transparency = 0
 	var panel := SettingsPanel.new(_ws)
 	add_child_autofree(panel)
 	await get_tree().process_frame
-	assert_null(panel.find_child("WindowOpacityOpt", true, false),
-		"an unsupported window must not offer an opacity picker")
+	var opt := panel.find_child("WindowOpacityOpt", true, false) as OptionButton
+	assert_not_null(opt, "an unsupported window must still show the row")
+	if opt == null:
+		return
+	assert_true(opt.disabled, "a pick that cannot reach the window is refused")
+	var hint := panel.find_child("WindowOpacityHint", true, false) as Label
+	assert_not_null(hint, "the row says why it is unavailable")
+	if hint == null:
+		return
+	assert_string_contains(hint.text, "unavailable")
+	assert_string_contains(hint.text, DisplayServer.get_name(),
+		"the hint names the display server the session actually runs")
+
+## The hint's wording is pure, so it is pinned without a window.
+func test_the_opacity_hint_names_the_driver_and_the_way_out():
+	assert_string_contains(SettingsPanel.opacity_hint("X11"), "unavailable")
+	assert_string_contains(SettingsPanel.opacity_hint("X11"), "X11")
+	assert_string_contains(SettingsPanel.opacity_hint_tooltip("X11"),
+		"--display-driver wayland")
 
 func test_the_window_opacity_row_offers_the_presets_and_saves_a_pick():
 	WindowChrome.force_transparency = 1
@@ -277,6 +295,9 @@ func test_the_window_opacity_row_offers_the_presets_and_saves_a_pick():
 	assert_not_null(opt, "a supported window must show the opacity picker")
 	if opt == null:
 		return
+	assert_false(opt.disabled, "a supported window offers the pick")
+	assert_null(panel.find_child("WindowOpacityHint", true, false),
+		"and says nothing about being unavailable")
 	assert_eq(opt.item_count, SettingsManager.OPACITY_PRESETS.size(),
 		"the picker offers exactly the stored vocabulary")
 	assert_eq(opt.get_item_text(0), "100%", "an opaque window is the first step")
