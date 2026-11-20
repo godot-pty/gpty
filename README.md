@@ -96,9 +96,11 @@ The chosen stack also brings with it more costs, much more than terminal emulato
 
 - Documentation & Blogs: https://gpty.dev
 - Releases ship `SHA256SUMS` and build-provenance attestations; the control socket is owner-only.
-- The repository tracks OpenSSF recommendations; registered as [OpenSSF Project 16201](https://www.bestpractices.dev/projects/16201), scorecard: [securityscorecards.dev](https://securityscorecards.dev/viewer/?uri=github.com/godot-pty/gpty).
+- Repository tracks [OpenSSF](https://openssf.org/) recommendations; registered as [project 16201](https://www.bestpractices.dev/projects/16201) with [scorecard](https://securityscorecards.dev/viewer/?uri=github.com/godot-pty/gpty).
 - Release assets carry [SLSA Build Level 2](https://slsa.dev/spec/v1.0/levels) provenance.
-- The project has been added to the [Linux Foundation](https://insights.linuxfoundation.org/project/godot-pty-gpty) & health will be tracked via LFX Insights.
+- gPTY has been added to the [Linux Foundation](https://insights.linuxfoundation.org/project/godot-pty-gpty) & health will be tracked via LFX Insights.
+- gPTY has been requested as an addition to Anthropic's [oss-scanner](https://github.com/anthropics/oss-scanner) ([PR 1561](https://github.com/anthropics/oss-scanner/pull/1561)).
+- gPTY has been requested as an addition to Google's [oss-fuzz](https://github.com/google/oss-fuzz) ([PR 16597](https://github.com/google/oss-fuzz/pull/16597)).
 - Subprojects: the core app, the plugin profiles and the plugin inventory live in the [godot-pty organization](https://github.com/godot-pty); [SUBPROJECTS.md](https://github.com/godot-pty/gpty/blob/main/SUBPROJECTS.md) records each repository's status and intent.
 
 | Component | Choice | Rationale |
