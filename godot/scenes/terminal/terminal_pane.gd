@@ -200,6 +200,11 @@ var _overlay: Node2D = null
 ## a partial update only the rows its damage covers. Read by `draw_bench` and
 ## asserted by `test_terminal_repaint.gd`.
 var _painted_rows: PackedInt32Array = PackedInt32Array()
+## How many full repaints this pane has queued. `_painted_rows` says which rows
+## the last one covered, not how many times the grid was asked for one; a
+## settings broadcast must queue none, and exactly one when a draw-read value
+## moved, so the tests count this.
+var _full_repaints := 0
 ## The row count the child order was last built for, so a full repaint only
 ## reorders the tree when that count actually changed.
 var _layers_ordered := -1
@@ -752,15 +757,37 @@ func _get_layout_state() -> Dictionary:
 		state["font_path"] = font_path
 	return state
 
+## The `apply_settings` keys that only the draw passes read, and whose own
+## setters do not already repaint. `font_path`, `font_size`, `default_bg`,
+## `color_scheme_path` and `terminal_padding` are deliberately absent: each
+## setter repacks the grid when the value moves, and listing it here would paint
+## the same grid twice. `default_fg` is absent because no draw pass reads it -
+## the cell cache carries its own `fg` - so a change to it cannot alter a pixel.
+const DRAW_READ_SETTINGS := [
+	"cursor_shape", "cursor_blink", "cursor_blink_speed",
+	"beam_cursor_width", "underline_cursor_height",
+	"focus_border_color", "selection_color", "scrollback_indicator_color",
+]
+
+func _draw_read_values() -> Array:
+	var out := []
+	for key in DRAW_READ_SETTINGS:
+		out.append(get(key))
+	return out
+
 func apply_settings(settings: Dictionary):
 	# Restore serialized Color values from JSON round-trips.
 	# Layout JSON stores Colors as "(r, g, b, a)" strings.
 	_restore_color_strings(settings)
+	# A broadcast re-sends all fifteen keys on every save. Only a value the draw
+	# passes read may cost a repaint, and one that did not move costs nothing:
+	# the comparison is what makes `history_lines` or `shell_env` free, and what
+	# makes the second broadcast of an appearance change (the appearance
+	# listener's loop, then `_on_settings_changed`'s) a no-op.
+	var before := _draw_read_values()
 	super.apply_settings(settings)
-	# The closed table sanitized every value before assignment, `shell_args`
-	# included. Colors, cursor shape and metrics are all read by the draw
-	# passes; the grid generation does not move for them, so repaint once here.
-	_repaint_all()
+	if _draw_read_values() != before:
+		_repaint_all()
 
 func _restore_color_strings(dict: Dictionary):
 	for key in ["default_fg", "default_bg", "cursor_color", "focus_border_color", "selection_color", "scrollback_indicator_color"]:
@@ -1188,6 +1215,7 @@ func _new_layer(kind: int, row: int) -> Node2D:
 ## Repaint the whole grid: the ground rect, both bands of every row and the
 ## overlay. Anything that moves or recolours the grid calls this.
 func _repaint_all():
+	_full_repaints += 1
 	_sync_layers()
 	_painted_rows.resize(_row_texts.size())
 	for r in _row_texts.size():
