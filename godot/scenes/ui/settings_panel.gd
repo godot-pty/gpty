@@ -133,9 +133,10 @@ func _build_ui():
 
 	var bg = Panel.new()
 	bg.name = "Card"
-	# The design size: wide enough that all seven tabs fit the TabContainer
-	# without clipping (the bar needs ~490 px and the card's margins take 32).
-	# It is clamped to the window on every open and on a resize while open
+	# The design size: wide enough that all eight tabs fit the TabContainer
+	# without clipping (the tab row needs 497 px and the card's margins take
+	# 32, so the design bar's 688 px has ample room). It is clamped to the
+	# window on every open and on a resize while open
 	# (`fit_card`), never here - at construction the overlay's own rect may not
 	# be laid out yet, and a transient size would pin a card far smaller than the
 	# design for the rest of the panel's life.
@@ -294,9 +295,9 @@ func _build_ui():
 	# Tab 8: About — the bundled README and the documents it links. A fill tab:
 	# the Markdown body owns its scrollbar and asks for FILL_TAB_SIZE.
 	#
-	# At a window narrow enough to clamp the card below ~600 px (the 560x340
-	# floor) the eight-tab bar overflows behind the engine's dropdown; the card
-	# re-measures on every `tab_changed`, so picking a hidden tab is still safe.
+	# The bar keeps all eight tabs on one row at the 560x340 floor: the card
+	# clamps to 544 px, the bar to 512, and the tabs need 497
+	# (`test_all_eight_tabs_fit_the_560x340_floor`).
 	var t_about = _create_fill_tab(tabs, "About")
 	_add_about_section(t_about)
 

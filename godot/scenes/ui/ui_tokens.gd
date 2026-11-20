@@ -63,8 +63,8 @@ const SCROLLBAR_MIN_THUMB := 24
 ##
 ## 560 x 340 is the size the v0.8.3 small-window work asserts
 ## (`godot/tests/integration/test_small_window.gd`) and the smallest at which the
-## Settings card keeps all seven tabs on its bar (a 540 px card against the tab
-## bar's 490 plus the card's margins). The app's own minimum window stays
+## Settings card keeps all eight tabs on its bar (the card clamps to 544 px, the
+## bar to 512, and the tabs need 497). The app's own minimum window stays
 ## `WindowChrome.MIN_WINDOW_W/H` (500 x 300): a window that small still adapts -
 ## the card clamps to 484, the sidebar scrolls as one column, a title ellipsizes -
 ## but it is not the floor a scale is measured against, and the cap never takes a

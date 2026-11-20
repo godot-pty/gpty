@@ -730,25 +730,41 @@ func test_open_commands_lands_on_the_tab_and_can_open_the_form():
 	_panel.open_commands(true)
 	assert_not_null(_find_accept_dialog(_panel), "add_now opens the form")
 
-## Every tab must stay on the bar at the card's design width. The engine does
-## not widen the bar for an overflow: it hides trailing tabs behind a dropdown,
-## and then re-lays the bar out on the first click, which changes the card's
-## measured size under the pointer.
-func test_all_eight_tabs_fit_the_card():
+## The live bar must resolve the theme's tab box, not the engine's default: a
+## `TabContainer`'s internal `TabBar` reads the *container's* `tab_*` styleboxes
+## and font colours, and only the font size used to be mirrored. The default box
+## (10 px a side plus 1 px borders) made the eight tabs 561 px wide, so the last
+## two sat behind the overflow arrows at the 560x340 floor.
+func test_the_live_tab_bar_uses_the_theme_box():
 	_pin_window(Vector2i(1920, 1080))
 	SettingsManager.cfg_ui_scale = 100
 	SettingsManager.apply_ui_scale()
 	_panel.theme = UiTheme.build()
 	_panel.open()
 	await wait_frames(2)
-	var tabs := _panel._tabs
-	assert_eq(tabs.get_tab_count(), 8)
+	var bar := _panel._tabs.get_tab_bar()
+	assert_eq(bar.get_theme_font_size("font_size", "TabBar"), UiTokens.FS_CAPTION,
+		"the container forwards the caption size to its internal bar")
+	assert_eq(bar.get_theme_color("font_unselected_color", "TabBar"),
+		UiPalette.active().TEXT_MUTED, "the container forwards the tab colours")
+	var box := bar.get_theme_stylebox("tab_unselected") as StyleBoxFlat
+	assert_not_null(box, "the live bar resolves the theme's tab box")
+	assert_eq(box.content_margin_left, float(UiTokens.SPACE_MD),
+		"the live bar uses the 6 px theme box, not the engine's 10 px default")
+	assert_eq(box.bg_color, UiPalette.active().SURFACE_RAISED,
+		"the live bar uses the app's raised tab surface")
+
+## Assert the bar is the expected width and one contiguous row of eight tabs.
+## The rects are read as a running row: a tab the engine has hidden comes back
+## with a zero-based rect (measured: tab 6 read 0..56 on a bar whose tabs ended
+## at 464), so neither a per-tab end check nor a width sum alone proves the row
+## fits - the positions have to be contiguous as well.
+func _assert_all_eight_tabs_on_one_row(tabs: TabContainer, expected_bar_width: float) -> void:
 	var bar := tabs.get_tab_bar()
+	assert_eq(tabs.get_tab_count(), 8)
 	assert_gt(bar.size.x, 0.0, "the bar has been laid out")
-	# The rects are read as a running row: a tab the engine has hidden comes
-	# back with a zero-based rect (measured: tab 6 read 0..56 on a bar whose
-	# tabs ended at 464), so neither a per-tab end check nor a width sum alone
-	# proves the row fits - the positions have to be contiguous as well.
+	assert_almost_eq(bar.size.x, expected_bar_width, 0.5,
+		"the bar is the card less its 16 px inner margin on each side")
 	var edge := 0.0
 	var total := 0.0
 	for i in tabs.get_tab_count():
@@ -761,6 +777,41 @@ func test_all_eight_tabs_fit_the_card():
 	assert_true(total <= bar.size.x,
 		"the eight tabs need %.1f px of a %.1f px bar: the overflow would be hidden behind a dropdown"
 		% [total, bar.size.x])
+
+## Every tab must stay on the bar at the card's design width. The engine does
+## not widen the bar for an overflow: it hides trailing tabs behind a dropdown,
+## and then re-lays the bar out on the first click, which changes the card's
+## measured size under the pointer.
+func test_all_eight_tabs_fit_the_card():
+	_pin_window(Vector2i(1920, 1080))
+	SettingsManager.cfg_ui_scale = 100
+	SettingsManager.apply_ui_scale()
+	_panel.theme = UiTheme.build()
+	_panel.open()
+	await wait_frames(2)
+	_assert_all_eight_tabs_on_one_row(_panel._tabs,
+		SettingsPanel.CARD_SIZE.x - 2.0 * UiTokens.SPACE_XXL)
+
+## The smallest supported window: the card clamps to 544 px, the bar to 512,
+## and the eight tabs need 497 - the last tab stays on the row instead of
+## behind the engine's arrows.
+func test_all_eight_tabs_fit_the_560x340_floor():
+	_pin_window(Vector2i(560, 340))
+	SettingsManager.cfg_ui_scale = 100
+	SettingsManager.apply_ui_scale()
+	_panel.theme = UiTheme.build()
+	await get_tree().process_frame
+	_panel.open()
+	await wait_frames(2)
+	if not is_equal_approx(_panel._card.size.x, 544.0):
+		# A headless/runner window that did not take the pinned size still has
+		# to measure the card at the floor; give the overlay that rect directly.
+		_panel.size = Vector2(560, 340)
+		_panel._fit_settings_card()
+		await wait_frames(1)
+	assert_almost_eq(_panel._card.size.x, 544.0, 0.5,
+		"the card clamps to 560 less the 8 px card edge on each side")
+	_assert_all_eight_tabs_on_one_row(_panel._tabs, 512.0)
 
 # ── Shortcuts: the keyboard-shortcut table ─────────────────────────────
 

@@ -163,27 +163,39 @@ static func build() -> Theme:
 		t.set_stylebox("panel", type, _padded(_flat(p.BG, p.BORDER, 1), UiTokens.SPACE_SM))
 
 	# --- Tabs -----------------------------------------------------------------
-	# The tab bar is the one chrome surface below the theme's default size:
-	# seven tabs (System … About) have to fit the settings card's bar without
-	# the engine hiding the overflow behind a dropdown, and a hidden tab is
-	# invisible until clicked - then the bar re-lays itself out and the card's
-	# measured size is mangled. Measured on this tree, the tabs need 520 px of
-	# the card's bar at the theme's default size (12 px text, 8 px tab padding)
-	# and 490 px here - 11 px text with 6 px of padding. The reduced font is
-	# what keeps every tab on the row; the card's width (`SettingsPanel.
-	# CARD_SIZE`) is what the eight tabs of the Shortcuts/About split fit at.
+	# Eight tabs (System … About) must stay on the Settings card's bar: the
+	# engine hides an overflow behind a dropdown, and a hidden tab is invisible
+	# until clicked - then the bar re-lays itself out and the card's measured
+	# size is mangled. The type is one step below the theme's default (11 px,
+	# not 12) and the box carries 6 px of horizontal padding.
+	#
+	# A `TabContainer`'s internal `TabBar` resolves the tab styleboxes and font
+	# colours from the **TabContainer** theme item, not the `TabBar` item (only
+	# `font_size` is forwarded as an override). Registering them on `TabBar`
+	# alone left the live bar on the engine's default box - 10 px a side plus 1
+	# px borders, 20 px per tab, so the eight labels needed 561 px of the 512 px
+	# inner width (504 px of bar after the default 8 px indent) a 560x340
+	# window clamps the card to. The same StyleBox objects are
+	# registered on both types, so a standalone `TabBar` and the container
+	# cannot drift; the app's 6 px box puts the eight at 401 px of ink + 8*12 =
+	# 497 px, 15 px inside the floor bar.
+	#
+	# The engine indents the bar by `side_margin` (8 px) on the left; the card
+	# already carries a 16 px inner margin, so zero it and let the tab row align
+	# with the header and rows above it.
+	t.set_constant("side_margin", "TabContainer", 0)
 	t.set_font_size("font_size", "TabBar", UiTokens.FS_CAPTION)
-	# The container's own item is what reaches the bar it draws: the engine
-	# creates the internal `TabBar` with a `font_size` *override* taken from the
-	# `TabContainer`, so the `TabBar` entry above alone leaves the live bar at
-	# the theme's default size (measured: 12 px, 520 px of tabs in a 500 px bar).
 	t.set_font_size("font_size", "TabContainer", UiTokens.FS_CAPTION)
-	t.set_color("font_selected_color", "TabBar", p.TEXT)
-	t.set_color("font_unselected_color", "TabBar", p.TEXT_MUTED)
-	t.set_color("font_hovered_color", "TabBar", p.ACCENT_HOVER)
-	t.set_stylebox("tab_selected", "TabBar", _tab_box(true))
-	t.set_stylebox("tab_unselected", "TabBar", _tab_box(false))
-	t.set_stylebox("tab_hovered", "TabBar", _tab_box(false))
+	var tab_selected := _tab_box(true)
+	var tab_unselected := _tab_box(false)
+	var tab_hovered := _tab_box(false)
+	for type in ["TabBar", "TabContainer"]:
+		t.set_stylebox("tab_selected", type, tab_selected)
+		t.set_stylebox("tab_unselected", type, tab_unselected)
+		t.set_stylebox("tab_hovered", type, tab_hovered)
+		t.set_color("font_selected_color", type, p.TEXT)
+		t.set_color("font_unselected_color", type, p.TEXT_MUTED)
+		t.set_color("font_hovered_color", type, p.ACCENT_HOVER)
 	t.set_stylebox("panel", "TabContainer", _flat(p.SURFACE, p.BORDER, 1))
 
 	# --- Separators and scrolling ---------------------------------------------

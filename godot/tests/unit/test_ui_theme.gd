@@ -68,11 +68,33 @@ func test_the_type_scale_comes_from_the_tokens():
 		"the container's font_size is the one the internal TabBar reads")
 	assert_eq(_theme.get_font_size("title_font_size", "Window"), UiTokens.FS_CONTROL)
 
+## A `TabContainer`'s internal `TabBar` resolves the tab styleboxes and font
+## colours from the *container's* theme item, while a standalone `TabBar` reads
+## the `TabBar` entry. Both carry the same box objects, so the live Settings bar
+## cannot fall back to the engine's 20 px default box (the bug that hid
+## `Shortcuts` and `About` at the 560x340 floor).
+func test_the_tab_box_is_on_both_types():
+	for type in ["TabBar", "TabContainer"]:
+		for state in ["tab_selected", "tab_unselected", "tab_hovered"]:
+			var box := _theme.get_stylebox(state, type) as StyleBoxFlat
+			assert_not_null(box, "%s/%s is a StyleBoxFlat" % [type, state])
+			assert_eq(box.content_margin_left, float(UiTokens.SPACE_MD),
+				"%s/%s keeps the compact horizontal padding" % [type, state])
+			assert_eq(box.content_margin_top, float(UiTokens.SPACE_SM),
+				"%s/%s keeps the compact vertical padding" % [type, state])
+			var expected := UiPalette.active().SURFACE if state == "tab_selected" \
+				else UiPalette.active().SURFACE_RAISED
+			assert_eq(box.bg_color, expected, "%s/%s is the tab surface" % [type, state])
+
 func test_text_colours_come_from_the_tokens():
 	assert_eq(_theme.get_color("font_color", "Label"), UiPalette.active().TEXT)
 	assert_eq(_theme.get_color("font_color", "Button"), UiPalette.active().TEXT)
 	assert_eq(_theme.get_color("font_placeholder_color", "LineEdit"), UiPalette.active().TEXT_MUTED)
-	assert_eq(_theme.get_color("font_unselected_color", "TabBar"), UiPalette.active().TEXT_MUTED)
+	for type in ["TabBar", "TabContainer"]:
+		assert_eq(_theme.get_color("font_unselected_color", type), UiPalette.active().TEXT_MUTED,
+			"%s's unselected tab reads the muted token" % type)
+		assert_eq(_theme.get_color("font_selected_color", type), UiPalette.active().TEXT,
+			"%s's selected tab reads the text token" % type)
 
 func test_a_confirmation_dialog_resolves_the_accept_dialog_panel():
 	# ConfirmationDialog defines no panel of its own; the class-chain fallback is
