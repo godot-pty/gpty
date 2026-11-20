@@ -16,9 +16,14 @@ Per-pane settings are a separate popup reached from a sidebar pane row or a pane
 |---|---|---|
 | Max FPS | Unlimited (`0`) | 60, 120, 144, 165, 240, Native (`-1`, follows the monitor), Unlimited |
 | Window Mode | System Frame | System Frame, Borderless, Fullscreen |
+| Window opacity | 100 % | 100, 95, 90, 85, 80, 75, 70, 60, 50, 40 % |
 | Check for updates on startup | On | On / Off |
 
-`Native` asks the display server for its refresh rate and caps there; `Unlimited` removes the cap entirely. Window Mode is the same value as the sidebar's window-mode dropdown, and the control's tooltip says what each value draws: `System Frame` keeps the operating system's window frame and its controls and hides gPTY's own titlebar, `Borderless` is a window with no desktop frame that draws gPTY's titlebar, and `Fullscreen` fills the screen and keeps that titlebar. The update check is a startup query only; it installs nothing on its own.
+`Native` asks the display server for its refresh rate and caps there; `Unlimited` removes the cap entirely. Window Mode is the same value as the sidebar's window-mode dropdown, and the control's tooltip says what each value draws: `System Frame` keeps the operating system's window frame and its controls and hides gPTY's own titlebar, `Borderless` is a window with no desktop frame that draws gPTY's titlebar, and `Fullscreen` fills the screen and keeps that titlebar.
+
+**Window opacity** draws the whole window at the chosen alpha. The row exists only where the display server can make the window transparent; on a platform, renderer or compositor that cannot, it is absent rather than a control that does nothing. The app fades as one surface — the terminal, the chrome, the empty workspace and the overlays all take the same alpha — while engine dialogs, file pickers and popup menus are separate surfaces and stay opaque.
+
+The update check is a startup query only; it installs nothing on its own.
 
 ## Terminal
 
@@ -48,13 +53,16 @@ The shell field is the program a new terminal runs. On Linux and macOS it defaul
 | Appearance | Dark | Dark / Light / Follow system - Follow system uses the desktop's own dark-mode preference |
 | Font | `DejaVuSansMono.ttf` | Any `.ttf` |
 | Font size | 14 px | 8–32 px — the terminal's text, independent of the UI scale |
+| Terminal padding | 4 px | 0–24 px per side — the space between a pane's edge and its grid |
 | UI scale | 100 % | 100 / 110 / 125 / 150 / 175 / 200 %. Scales the whole interface, terminals included: every panel, dialog and control grows together, so a dense display does not need a magnifier. Capped by the window — see below |
 | Color scheme | None | Optional `.txt`, `.json`, or `.csv` scheme file |
 | Show titlebar | On | Per-pane title bars |
 
 The UI scale is the window's content scale: text and every fixed size scale together, and the layout shrinks by the same factor, so no control is clipped. Font size is separate and only touches the terminal grid — use it when the terminal text should differ from the chrome. At 125 % on a 1920x1080 window the interface behaves like a 1536x864 one.
 
-The applied scale is capped so the layout never falls under 560x340 layout pixels — the smallest layout the chrome is asserted at, and a size at which the Settings card still shows all seven of its tabs. A window that cannot hold the requested scale gets the largest whole percentage it can show, never less than 100 %: the Appearance row then reads `shown at N %`, with the reason in its tooltip, while the picker keeps the request, and growing the window restores the full scale without a restart. The cap only refuses a scale, never the window: an 800x500 window holds 125 % (a 640x400 layout) since the small-window work, where it used to be forced to 100 %. Below the floor — a window near the app's own 500x300 minimum — the chrome adapts instead of clipping: the Settings and Pane Settings cards clamp to the window and scroll their content, the sidebar's sections scroll as one column, and a pane title ellipsizes. See *Small windows adapt instead of clipping*.
+Terminal padding is the distance from a pane's edge to its text grid, on all four sides. It is spent on the fit, not painted as a nudge: the grid loses twice the padding before the cell count is divided, so the terminal's rows and columns are exactly what the pane shows, and every open terminal reflows when the value changes. A font-size change reflows the same way.
+
+The applied scale is capped so the layout never falls under 560x340 layout pixels — the smallest layout the chrome is asserted at, and a size at which the Settings card still opens and scrolls its content (at that width the eight-tab bar itself overflows behind the engine's arrows until scrolled). A window that cannot hold the requested scale gets the largest whole percentage it can show, never less than 100 %: the Appearance row then reads `shown at N %`, with the reason in its tooltip, while the picker keeps the request, and growing the window restores the full scale without a restart. The cap only refuses a scale, never the window: an 800x500 window holds 125 % (a 640x400 layout) since the small-window work, where it used to be forced to 100 %. Below the floor — a window near the app's own 500x300 minimum — the chrome adapts instead of clipping: the Settings and Pane Settings cards clamp to the window and scroll their content, the sidebar's sections scroll as one column, and a pane title ellipsizes. See *Small windows adapt instead of clipping*.
 
 The chrome ships a complete dark and a complete light colour set (`godot/scenes/ui/ui_palette.gd`), so **Appearance** decides the whole interface at once: the sidebar, pane title bars, panels, dialogs, toasts and the status bar switch together, and the window's background with them. `Follow system` reads the desktop's dark-mode preference and re-themes live when it changes; a platform or session that cannot answer is treated as dark. Nothing restarts and nothing reopens.
 
@@ -95,7 +103,7 @@ Below it is the README — generated from the repository's `README.md` — rende
 
 | Scope | Where | What it covers |
 |---|---|---|
-| Global | Settings panel, `user://settings.json` | Fonts, colors, terminal defaults, shell program, global environment, FPS, window mode |
+| Global | Settings panel, `user://settings.json` | Fonts, colors, terminal defaults, shell program, global environment, FPS, window mode, window opacity, terminal padding |
 | Per pane | Pane Settings popup; the Inspector's aim in `user://pane_inspector.json` | Name, attachment id, font size, environment override, type-specific view options, and the Inspector's prompt and switches |
 | Workspace | More → Set Directory on the workspace row, `user://workspaces.json` | Default directory inherited by new terminals; changing it asks when the workspace holds a pane that names its own program |
 | File-supplied | Layout or profile tile | Pane type, geometry, and a spawn plan (program and arguments) |

@@ -151,6 +151,8 @@ gpty/
     ├── knowledge.json          # Generated wiki bundle (scripts/build-wiki)
     ├── docs.json               # Generated documentation bundle (scripts/build-docs)
     ├── fonts/                  # DejaVu Sans Mono + Phosphor icons
+    ├── shaders/                # Bundled shaders (referenced by code, not a scene)
+    │   └── window_opacity.gdshader # Whole-window alpha veil (Workspace.apply_window_alpha)
     └── scenes/
         ├── main.tscn
         ├── autoloads/          # Singleton managers
@@ -194,7 +196,7 @@ gpty/
         │   ├── status_bar.gd
         │   ├── toast_overlay.gd
         │   ├── scroll_hints.gd     # The two scroll chevrons a pane overlays on a scrolling body
-        │   ├── window_chrome.gd    # Titlebar + window-mode/fullscreen handling (extracted)
+        │   ├── window_chrome.gd    # Titlebar + window-mode/fullscreen and opacity-flag handling (extracted)
         │   ├── markdown_view.gd     # Safe, debounced Markdown RichTextLabel
         │   ├── markdown_anchors.gd  # Pure ATX heading scan for fragment/line navigation
         │   ├── docs_bundle.gd       # Validated, lazily loaded view of godot/docs.json
