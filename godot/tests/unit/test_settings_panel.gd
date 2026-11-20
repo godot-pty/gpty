@@ -632,9 +632,13 @@ func test_edit_rewrites_the_selected_entry_in_place():
 	(dlg.find_child("CommandText", true, false) as LineEdit).text = "make deploy PROD=1"
 	(dlg.find_child("CommandRun", true, false) as CheckBox).button_pressed = false
 	dlg.confirmed.emit()
-	assert_eq(SavedCommandStore.all()[1],
+	var entries := SavedCommandStore.all()
+	assert_eq(entries.size(), 2, "the seeded pair is the store")
+	if entries.size() < 2:
+		return
+	assert_eq(entries[1],
 		{"name": "Deploy", "command": "make deploy PROD=1", "run": false})
-	assert_eq(SavedCommandStore.all()[0]["name"], "Build", "the other entry is untouched")
+	assert_eq(entries[0]["name"], "Build", "the other entry is untouched")
 
 func test_delete_and_reorder_follow_the_store():
 	_seed_commands()

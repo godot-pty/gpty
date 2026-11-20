@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Keep a test from indexing a call's list before anything guarded it.
+
+A test whose fixture did not do what it expected, and which then indexes the
+list that fixture never filled, raises `Out of bounds get index '0'` inside the
+engine instead of failing its own assertion. GUT attributes that to the test
+and the suite goes red either way, but the guarded form names the precondition
+that broke, and the unguarded form used to end the whole run: three `dialogs[0]`
+reads did, on `windows-smoke` run 44648884305. The shape cannot be guarded in
+place - by the time an `is_empty()` check could run, the index has already
+raised - so the fix is always to hoist the call's list into a local, assert its
+size, return when it is short, and index the local:
+
+    assert_eq(_list_meta(pane)[0], "note.md")      # fails this check
+    var meta := _list_meta(pane)                   # fine
+    assert_eq(meta.size(), 2, "both notes are listed")
+    if meta.is_empty():
+        return
+    assert_eq(meta[0], "note.md")
+
+This is the tripwire. It reads every GDScript under `godot/tests/`, skipping
+`bench/` (measurement scripts, not GUT tests), and fails a line that applies an
+integer index directly to a call's result. A line that is genuinely fine says
+so:
+
+    var first = _rows(ws)[0]  # guard-ok: the helper builds its list here
+
+The marker is a claim a reviewer checks; it is deliberately not a path list,
+because a path list goes stale the moment the file moves and then the check
+quietly stops covering it.
+
+Exit codes: 0 clean, 1 violations found. Reads only; never writes.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+TESTS = ROOT / "godot" / "tests"
+
+ALLOW = "guard-ok:"
+# An integer index applied to the closing paren of a call: `foo(args)[0]`,
+# `x.keys()[2]`, `(d.get("k", []) as Array)[-1]`.
+INDEX_ON_CALL = re.compile(r"\)\s*\[\s*-?\d+\s*\]")
+FUNC = re.compile(r"^func\s+(\w+)")
+
+
+def main() -> int:
+    files = sorted(TESTS.rglob("*.gd"))
+    reports: list[str] = []
+    checked = 0
+    for path in files:
+        rel = path.relative_to(TESTS)
+        if rel.parts and rel.parts[0] == "bench":
+            continue
+        checked += 1
+        function = "?"
+        for line_no, raw in enumerate(path.read_text().splitlines(), 1):
+            match = FUNC.match(raw)
+            if match:
+                function = match.group(1)
+            stripped = raw.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if not INDEX_ON_CALL.search(raw):
+                continue
+            if ALLOW in raw:
+                continue
+            reports.append(f"check-test-guards: {path.relative_to(ROOT)}:{line_no}: {function}")
+            reports.append(f"    {stripped}")
+    if reports:
+        print("check-test-guards: index a call's list only after hoisting it and guarding the index")
+        for report in reports:
+            print(report)
+        print(
+            f"  {len(reports) // 2} violation(s): hoist the call's list into a local, "
+            f"assert its size, return when it is short, then index the local - or mark "
+            f"the line `# {ALLOW} <why it is safe>`"
+        )
+        return 1
+    print(f"check-test-guards: no unguarded indexes in {checked} test files")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

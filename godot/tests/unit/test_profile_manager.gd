@@ -215,7 +215,13 @@ func test_seeding_keeps_an_existing_same_named_profile():
 	ProfileManager.load_profiles()
 	ProfileManager._seed_defaults_once()
 	assert_eq(ProfileManager.profiles.size(), 1, "first-wins, never a duplicate")
-	assert_eq((ProfileManager.profiles[0].get("tiles") as Array)[0].get("col"), 1,
+	if ProfileManager.profiles.is_empty():
+		return
+	var tiles: Array = ProfileManager.profiles[0].get("tiles") as Array
+	assert_gt(tiles.size(), 0, "the user's profile keeps its tile")
+	if tiles.is_empty():
+		return
+	assert_eq(tiles[0].get("col"), 1,
 		"the user's existing entry is untouched")
 
 # ── Installed-plugin profiles ──────────────────────────────────────────
@@ -300,7 +306,11 @@ func test_plugin_profiles_dedupe_among_themselves():
 
 func test_a_plugin_profile_yields_a_name_the_user_takes_later():
 	_set_plugin_json(JSON.stringify([_installed("OMP")]))
-	assert_eq(ProfileManager.get_all_profiles()[0].get("name"), "OMP")
+	var profiles := ProfileManager.get_all_profiles()
+	assert_gt(profiles.size(), 0, "the plugin's profile is listed")
+	if profiles.is_empty():
+		return
+	assert_eq(profiles[0].get("name"), "OMP")
 
 	# The user saves their own "OMP" while the plugin is installed. The name is
 	# theirs, so the plugin yields it now — not at the next launch, where
@@ -318,10 +328,18 @@ func test_a_plugin_profile_yields_a_name_the_user_takes_later():
 func test_deleting_a_user_profile_gives_the_name_back_to_the_plugin():
 	_set_plugin_json(JSON.stringify([_installed("OMP")]))
 	ProfileManager.add_profile("OMP", [])
-	assert_eq(ProfileManager.get_all_profiles()[1].get("name"), "OMP (2)")
+	var profiles := ProfileManager.get_all_profiles()
+	assert_eq(profiles.size(), 2, "the user's and the plugin's profiles")
+	if profiles.size() < 2:
+		return
+	assert_eq(profiles[1].get("name"), "OMP (2)")
 
 	ProfileManager.delete_profile(0)
-	assert_eq(ProfileManager.get_all_profiles()[0].get("name"), "OMP",
+	var after := ProfileManager.get_all_profiles()
+	assert_gt(after.size(), 0, "the plugin's profile remains")
+	if after.is_empty():
+		return
+	assert_eq(after[0].get("name"), "OMP",
 		"with the user profile gone the plugin holds the bare name again")
 
 func test_garbage_plugin_json_yields_no_profiles():
@@ -371,10 +389,17 @@ func test_add_profile_answers_the_name_the_store_kept():
 func test_profile_grid_unit_round_trips_and_unknown_units_are_dropped():
 	# The save path stamps the unit its gathered tiles are in.
 	ProfileManager.add_profile("Saved", [])
+	assert_eq(ProfileManager.profiles.size(), 1, "the save stores one profile")
+	if ProfileManager.profiles.is_empty():
+		return
 	assert_eq(ProfileManager.profiles[0].get("grid_unit"), PaneTypes.GRID,
 		"a saved profile records the live grid unit")
 	var stored: Dictionary = MockAutoloads.get_store(ProfileManager.PROFILES_FILE)
-	assert_eq((stored.get("profiles", []) as Array)[0].get("grid_unit"), PaneTypes.GRID,
+	var stored_profiles: Array = stored.get("profiles", []) as Array
+	assert_gt(stored_profiles.size(), 0, "the save wrote a profile")
+	if stored_profiles.is_empty():
+		return
+	assert_eq(stored_profiles[0].get("grid_unit"), PaneTypes.GRID,
 		"the unit reaches the store file")
 
 	# A hand-edited store is data: the two units this build scales survive,

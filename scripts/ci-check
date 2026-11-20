@@ -523,6 +523,20 @@ else
     check_failed
 fi
 
+# ── Step 3.3b: Test guards ─────────────────────────────────────────────
+# A test that indexes a call's result (`_list_meta(pane)[0]`) cannot guard the
+# index in place: the `Out of bounds` raises before any `is_empty()` runs, and
+# three such reads turned a windows-smoke run into "not trustworthy" with the
+# rest of the suite unrun. `gut-check` now judges such a run instead of killing
+# it, and this gate keeps the shape from coming back. Static, no build.
+header "test guards"
+if ./scripts/check-test-guards 2>&1; then
+    pass "test guards"
+else
+    fail "test guards — a test indexes a call's list without a guard"
+    check_failed
+fi
+
 # ── Step 3.4: Secret scan ──────────────────────────────────────────────
 # The values that must never be committed are the ones a pattern can name:
 # private keys, cloud access key ids and provider token prefixes. The full

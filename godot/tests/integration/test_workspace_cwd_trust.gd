@@ -189,7 +189,11 @@ func test_the_picker_asks_only_for_a_workspace_with_untrusted_tiles():
 	assert_eq(_stored_cwd(), dir_a, "canceling writes nothing")
 
 	ws._set_workspace_cwd(0, dir_b)
-	_dialogs()[0].confirmed.emit()
+	var second := _dialogs()
+	assert_eq(second.size(), 1, "the directory change asks again")
+	if second.is_empty():
+		return
+	second[0].confirmed.emit()
 	await get_tree().process_frame
 	assert_eq(str(ws._workspaces[0].get("cwd")), dir_b, "confirming applies the directory")
 	assert_eq(_stored_cwd(), dir_b, "confirming persists it")

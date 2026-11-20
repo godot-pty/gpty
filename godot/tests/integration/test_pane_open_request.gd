@@ -89,7 +89,11 @@ func test_a_request_spawns_and_activates_a_code_viewer():
 func test_a_second_request_for_the_same_file_focuses_the_existing_viewer():
 	var tree := _file_tree()
 	tree.request_pane.emit("code_viewer", {"file_path": _file_a})
-	var viewer = _viewers()[0]
+	var viewers := _viewers()
+	assert_eq(viewers.size(), 1, "precondition: the first request opened one viewer")
+	if viewers.is_empty():
+		return
+	var viewer = viewers[0]
 	var tile_count: int = _ws._tm.tiles.size()
 	_ws.activate_pane(tree)
 	assert_ne(_ws._tm.last_body, viewer, "the test must start with another pane active")

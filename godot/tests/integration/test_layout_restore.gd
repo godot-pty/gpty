@@ -543,10 +543,13 @@ func test_the_agent_workspace_reasoning_tile_follows_its_terminal():
 					"the Inspector must inherit the pane's default backend")
 	assert_eq(terminal_ids.size(), 1, "exactly one terminal")
 	assert_eq(follower_ids.size(), 1, "exactly one Reasoning pane")
+	var ids := terminal_ids.keys()
+	if ids.is_empty() or follower_ids.is_empty():
+		return
 	for follower in follower_ids:
 		assert_true(terminal_ids.has(follower),
 			"the Reasoning pane must follow the profile's own terminal, got \"%s\"" % follower)
-	assert_eq(terminal_ids.keys()[0], "agent-terminal",
+	assert_eq(ids[0], "agent-terminal",
 		"the shipped terminal id is the generic one")
 	assert_eq(follower_ids[0], "agent-terminal",
 		"the shipped Reasoning pane follows it")

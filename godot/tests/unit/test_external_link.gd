@@ -35,7 +35,11 @@ func _record_copy(text: String) -> void:
 	_copied.append(text)
 
 func _toast() -> Dictionary:
-	return get_signal_parameters(ToastManager, "toast_requested")[0]
+	var params: Array = get_signal_parameters(ToastManager, "toast_requested")
+	assert_eq(params.size(), 1, "the action raises one toast")
+	if params.is_empty():
+		return {}
+	return params[0]
 
 func test_a_reachable_link_opens_once_and_touches_nothing_else():
 	watch_signals(ToastManager)
