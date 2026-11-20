@@ -52,10 +52,10 @@ func _open_settings(ws: Control) -> SettingsPanel:
 	await get_tree().process_frame
 	return panel
 
-## Make a tab current: the card is content-sized now, so a clamp test needs
-## content that actually reaches the clamp. The tab body is a direct child of
-## the TabContainer - a ScrollContainer for a form tab, the fill tab's
-## MarginContainer for About - which is the only shape
+## Make a tab current. The card has one size, so this is what a walk test needs
+## to visit every tab (a `TabContainer` only lays out the current child). The
+## tab body is a direct child of the TabContainer - a ScrollContainer for a form
+## tab, the fill tab's MarginContainer for About - which is the only shape
 ## `get_tab_idx_from_control` answers for.
 func _select_settings_tab(panel: SettingsPanel, title: String) -> void:
 	var body := panel.find_child(title, true, false) as Control
@@ -66,14 +66,25 @@ func _select_settings_tab(panel: SettingsPanel, title: String) -> void:
 
 # ── The Settings card ──────────────────────────────────────────────────
 
-func test_a_short_settings_tab_sizes_the_card_to_its_content():
+## One rect for all eight tabs: paging through the bar must not move the
+## header, the tab bar or the rows under the pointer, and the centred overlay
+## must not re-lay itself out per switch.
+func test_every_settings_tab_keeps_one_card_size():
 	var ws = await _make_workspace(Vector2(1200, 800))
 	var panel := await _open_settings(ws)
 	var card := panel._card
-	assert_eq(card.size.x, SettingsPanel.CARD_SIZE.x, "the design width is fixed")
-	assert_lt(card.size.y, SettingsPanel.CARD_SIZE.y,
-		"a short tab must not paint a dead band below its last row")
+	var first: Vector2 = card.size
+	assert_eq(first, SettingsPanel.CARD_SIZE, "the design size fits this window")
+	assert_gte(first.x, 560.0, "the card keeps its width floor where the window has room")
+	assert_gte(first.y, 400.0, "the card keeps its height floor where the window has room")
 	_assert_inside(card.get_global_rect(), ws.get_global_rect(), "the Settings card")
+	# System is current on open; walking the other seven returns to it last.
+	for title in ["Terminal", "Appearance", "Reasoning", "Concepts", "Commands",
+			"Shortcuts", "About", "System"]:
+		await _select_settings_tab(panel, title)
+		assert_eq(card.size, first, "%s must not move the card" % title)
+		_assert_inside(card.get_global_rect(), ws.get_global_rect(),
+			"the Settings card on %s" % title)
 
 func test_the_settings_card_fits_an_800x500_window():
 	var ws = await _make_workspace(Vector2(800, 500))
@@ -102,21 +113,6 @@ func test_the_card_reclamps_while_it_is_open():
 	await get_tree().process_frame
 	await get_tree().process_frame
 	assert_eq(panel._card.size, Vector2(544, 324), "a resize while open re-clamps the card")
-
-## The About tab is the one fill tab: the document body owns its scrollbar, so
-## the card asks for the page size instead of measuring a column - and switches
-## back to the shared design height with any scrolling tab.
-func test_the_about_tab_asks_for_the_taller_card():
-	var ws = await _make_workspace(Vector2(1200, 800))
-	var panel := await _open_settings(ws)
-	await _select_settings_tab(panel, "About")
-	await get_tree().process_frame
-	assert_eq(panel._card.size, SettingsPanel.FILL_TAB_SIZE,
-		"the document viewer gets the page height")
-	await _select_settings_tab(panel, "Terminal")
-	await get_tree().process_frame
-	assert_eq(panel._card.size, SettingsPanel.CARD_SIZE,
-		"and a scrolling tab returns to the shared design size")
 
 # ── The Pane Settings card ────────────────────────────────────────────
 

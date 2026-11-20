@@ -6,24 +6,16 @@ signal request_graph_editor
 
 var _debounce_timer: Timer = null
 var _workspace: Control
-## The card's design size: the width all eight tabs fit the bar at and the
-## height a scrolling tab may reach. A short tab sizes the card to its content;
-## a smaller window clamps it (`fit_card_content`).
-##
-## The height is deliberately not raised for the document viewer: the Terminal
-## tab's content sits only a couple of pixels past 560, so a taller shared
-## height would stop that tab reaching the design size (`test_the_card_reclamps_
-## while_it_is_open`). The About tab asks for `FILL_TAB_SIZE` instead.
-const CARD_SIZE := Vector2(720, 560)
-## The About tab's design size. It is the one fill tab (its Markdown body owns
-## the scrollbar), so there is no content height to measure and it asks for the
-## page height a document wants. Clamped to the window like CARD_SIZE.
-const FILL_TAB_SIZE := Vector2(720, 640)
+## The card's one size: wide enough that all eight tabs fit the bar (the row
+## needs 497 px and the card's margins take 32), and tall enough that the
+## Terminal tab's form is fully visible. Every tab gets this size, so a tab
+## switch never re-lays the card out; only a smaller window shrinks it
+## (`fit_card`), down to the window less `CARD_EDGE` per side. Where the window
+## has room the card therefore never drops below 560x400 px.
+const CARD_SIZE := Vector2(720, 640)
 ## The card itself, so a resize and every dialog can read its real width - below
 ## the design width plus the card edge the clamp makes it narrower.
 var _card: Panel = null
-## The card's own column, so its natural height can size the card.
-var _card_body: VBoxContainer = null
 ## The disk-usage row in the Terminal tab; refreshed whenever the panel opens,
 ## because the panel outlives a single visit and scrollback keeps growing.
 var _history_size_label: Label = null
@@ -64,44 +56,14 @@ func _ready():
 func _before_open() -> void:
 	_fit_settings_card()
 
-## Size the card to the active tab's content, up to the design height and the
-## window. A short tab no longer paints a dead band below its last row; a tall
-## one keeps the design height and scrolls inside its own tab; a fill tab (the
-## About document viewer) asks for its whole page size instead.
-##
-## A form tab's content lives in a `ScrollContainer`, whose minimum size is
-## zero by default. Setting that scroll's minimum to the content's own height
-## (less whatever the card cannot give it) is what lets the height propagate to
-## the card; it is lowered again on a smaller window so the clamp still wins.
+## Give the card its one size, clamped to the window. There is no per-tab
+## measurement any more: the card is the same on all eight tabs, so a tab
+## switch performs no layout at all and the header and tab bar stay put.
+## Called on open and on a resize while open.
 func _fit_settings_card() -> void:
-	if _card == null or _card_body == null or _tabs == null:
+	if _card == null:
 		return
-	var current := _tabs.get_current_tab_control()
-	if not (current is ScrollContainer):
-		# A fill tab (the About document viewer) scrolls inside itself, so
-		# there is no inner content height to measure: it asks for the whole
-		# page size, and the window clamp still wins.
-		fit_card_content(_card, FILL_TAB_SIZE, FILL_TAB_SIZE)
-		return
-	var sc := current as ScrollContainer
-	var current_min := sc.custom_minimum_size.y
-	# Everything the card needs besides the tab's content: margins, header,
-	# separator, tab bar and the column's separations.
-	var base := _card_body.get_combined_minimum_size().y - current_min
-	var margin := float(UiTokens.SPACE_XXL)
-	var room := size.y - float(CARD_EDGE) * 2.0
-	var max_total := CARD_SIZE.y
-	if room > 0.0:
-		max_total = minf(CARD_SIZE.y, room)
-	var max_list := maxf(0.0, max_total - margin * 2.0 - base)
-	# `tab_changed` also fires while the tab is being built: the ScrollContainer
-	# is added to the TabContainer before its own content, so a zero-child tab
-	# is a normal intermediate state here.
-	var inner := sc.get_child(0) as Control if sc.get_child_count() > 0 else null
-	var want := inner.get_combined_minimum_size().y if inner != null else 0.0
-	sc.custom_minimum_size.y = minf(want, max_list)
-	var content_h := margin * 2.0 + base + sc.custom_minimum_size.y
-	fit_card_content(_card, CARD_SIZE, Vector2(CARD_SIZE.x, content_h))
+	fit_card(_card, CARD_SIZE)
 
 func _notification(what: int):
 	if not visible:
@@ -152,7 +114,6 @@ func _build_ui():
 	var v = VBoxContainer.new(); v.name = "VBox"
 	v.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	mc.add_child(v)
-	_card_body = v
 
 	_add_settings_header(v)
 	v.add_child(HSeparator.new())
@@ -161,7 +122,6 @@ func _build_ui():
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(tabs)
 	_tabs = tabs
-	tabs.tab_changed.connect(func(_tab: int): _fit_settings_card())
 
 	# Tab 1: System
 	var t_sys = _create_tab(tabs, "System")
@@ -293,7 +253,7 @@ func _build_ui():
 	_add_shortcut_section(t_keys)
 
 	# Tab 8: About — the bundled README and the documents it links. A fill tab:
-	# the Markdown body owns its scrollbar and asks for FILL_TAB_SIZE.
+	# the Markdown body owns its scrollbar, inside the one card size.
 	#
 	# The bar keeps all eight tabs on one row at the 560x340 floor: the card
 	# clamps to 544 px, the bar to 512, and the tabs need 497

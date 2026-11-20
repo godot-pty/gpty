@@ -219,10 +219,11 @@ func test_reset_buttons_are_tab_wide_and_centered():
 		assert_eq(btn.alignment, HORIZONTAL_ALIGNMENT_CENTER,
 			"%s reset text must be centered" % tab_name)
 
-## The Terminal tab overflows the card, so the row *Every scrollable surface
-## has a 0 px scrollbar* needs that overflow to have a real bar. The card keeps
-## its design size here, so the column must not widen it.
-func test_the_terminal_tab_shows_a_scrollbar_column():
+## The Appearance tab (eight chrome-colour rows plus the Motion section)
+## overflows the one card size, so the row *Every scrollable surface has a 0 px
+## scrollbar* needs that overflow to have a real bar. The card keeps its design
+## size here, so the column must not widen it.
+func test_a_scrolling_settings_tab_shows_a_scrollbar_column():
 	SettingsManager.cfg_ui_scale = 100
 	_pin_window(Vector2i(1920, 1080))
 	SettingsManager.apply_ui_scale()
@@ -233,22 +234,22 @@ func test_the_terminal_tab_shows_a_scrollbar_column():
 	await wait_frames(2)
 	var tab: ScrollContainer = null
 	for node in _panel.find_children("*", "ScrollContainer", true, false):
-		if node.name == "Terminal":
+		if node.name == "Appearance":
 			tab = node as ScrollContainer
 			break
-	assert_not_null(tab, "the Terminal tab is a ScrollContainer")
+	assert_not_null(tab, "the Appearance tab is a ScrollContainer")
 	if tab == null:
 		return
 	# A tab is only laid out once it is current (`TabContainer` sizes the
 	# current child), so the System tab would report a zero-sized viewport.
 	var tabs := tab.get_parent() as TabContainer
-	assert_not_null(tabs, "the Terminal tab belongs to the settings TabContainer")
+	assert_not_null(tabs, "the Appearance tab belongs to the settings TabContainer")
 	if tabs == null:
 		return
 	tabs.current_tab = tabs.get_tab_idx_from_control(tab)
 	await wait_frames(2)
 	var bar := tab.get_v_scroll_bar()
-	assert_gt(bar.max_value, bar.page, "the Terminal tab's content overflows the card")
+	assert_gt(bar.max_value, bar.page, "the Appearance tab's content overflows the card")
 	assert_true(bar.visible, "the overflow shows a bar")
 	assert_eq(bar.size.x, UiTokens.SCROLLBAR_THICKNESS, "the bar reserves the column it draws in")
 	var card := (_panel.get_child(0) as Control).get_child(0) as Control
