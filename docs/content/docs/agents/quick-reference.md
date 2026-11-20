@@ -38,7 +38,7 @@ Top invariable rules and invariants across the project. Read this card for fast 
 
 ## Testing & CI Gates
 
-- **Safe Fixture Paths:** Cleanup routines (`_remove_tree`) must validate that paths are non-empty and reside inside `TestPaths.user_dir()`. Never call `DirAccess.open("")` (which opens the project root).
+- **Safe Fixture Paths:** Fixtures go through `TestPaths` only - `fresh_dir("name")` for a fixed-name directory (it clears the previous run's leftover first), `remove_tree(path)` for cleanup, and `is_safe_path_under(path, root, windows)` when a comparison is needed, because a raw prefix compare cannot agree on `C:\` from the environment and `C:/` after `path_join`. Never call `DirAccess.open("")` (which opens the project root).
 - **Fast Local Gate:** Run `./scripts/ci-check --fast` before staging. It checks formatting (`cargo fmt`), workflow lint, docs validity (`scripts/docs-check`), clippy, GDExtension surface, log hygiene, and theme tokens.
 - **Windowed vs. Headless:** Headless Godot runs have a 0×0 or 64×64 root viewport, no display driver, no hover states, and no tooltips. Layout, pixel-diff, and pointer tests must run headed or set viewport sizes explicitly.
 - **No `--no-verify`:** Never bypass commit hooks (`git commit -n`) or push hooks without documenting an emergency justification in the commit body.

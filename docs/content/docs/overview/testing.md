@@ -43,7 +43,10 @@ the interactive debugger instead of being reported); the live smoke uses
 effect is that a suite run cannot read a developer's saved layout, write probe
 vaults or recovery copies into their state directory, or append to their real
 scrollback. A test that needs a filesystem path must use
-`TestPaths.user_path("name")` rather than `ProjectSettings.globalize_path("user://name")`;
+`TestPaths.user_path("name")` rather than `ProjectSettings.globalize_path("user://name")`,
+and a fixture directory whose name is the same on two runs comes from
+`TestPaths.fresh_dir("name")`, which clears the previous run's leftover first
+(and whose bounds rule unifies the Windows drive separator before comparing);
 the live smoke uses the same seam and needs no store backup/restore.
 
 **Rust coverage:** core engine (parser, keymap, grid, concept routing, capture state machine, history, the vault index and its walk), the vault's native IPC handlers (search re-indexing, read containment, parameter validation), IPC types + protocol, CLI schema generation and response formatting (both output modes fail on an RPC error, and the JSON envelope is printed first), GDExtension FFI functions. The tile layout algorithm (split, kill, expand) lives only in `godot/scenes/terminal/terminal_manager.gd` and is tested there, in `godot/tests/unit/test_terminal_manager.gd`, against the real `spawn_pane`/`kill` - including every close order of five panes. A Rust copy of it once stood in for those tests and could not fail when the real code broke; do not reintroduce one. The IPC vocabulary is pinned across languages: a test in `crates/gpty-cli/src/commands/mcp.rs` reads the real registrations (`crates/gpty-gdext/src/ipc.rs`), the real dispatch (`ipc_handlers.gd`, plus the requests `workspace.gd` intercepts), and every `client.call` literal in `src/commands/*.rs`, and asserts they name the same methods as the advertised MCP tools.
