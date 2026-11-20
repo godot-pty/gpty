@@ -60,9 +60,6 @@ var _graph_task := -1
 ## build lands (`_apply_graph_build`) or the pane leaves the graph
 ## (`_hide_graph`); a result that lands with this false is dropped.
 var _graph_wanted := false
-## The keyboard follows the canvas when it lands — a Graph press, never a
-## restore or an IPC request.
-var _graph_focus_pending := false
 ## The worker's one output slot: `[{root, graph, positions}]`, written once by
 ## the task before it reports complete, cleared here when the result is read.
 var _graph_build_out: Array = []
@@ -217,10 +214,10 @@ func _ready():
 	_graph_button.tooltip_text = "Map this vault's links (re-reads the index)"
 	_graph_button.pressed.connect(func():
 		# The keyboard follows the map, the same rule the note view follows for
-		# its buffer: the button that opened it is no longer the surface the
-		# user is looking at. The canvas is built on a worker, so the focus
-		# moves when it lands.
-		request_graph(true)
+		# its buffer: the button that opened it is one of the surfaces the
+		# canvas replaces, so `_show_graph_canvas` carries the focus when the
+		# worker's build lands.
+		request_graph()
 	)
 	top.add_child(_graph_button)
 
@@ -858,7 +855,7 @@ func _on_graph_mode_requested(mode: String) -> void:
 ## result answers this request too — the answer is the index's, not this
 ## caller's), otherwise the reason the vault cannot be drawn, which is also on
 ## the pane's placeholder.
-func request_graph(take_focus := false) -> String:
+func request_graph() -> String:
 	var problem := _vault_problem()
 	if problem != "":
 		_show_placeholder(problem, false)
@@ -867,8 +864,6 @@ func request_graph(take_focus := false) -> String:
 	# the list after the graph has been opened.
 	_search_timer.stop()
 	_graph_wanted = true
-	if take_focus:
-		_graph_focus_pending = true
 	if _graph_task == -1:
 		_start_graph_task()
 	return ""
@@ -944,8 +939,6 @@ func _poll_graph_build() -> void:
 ## authored weights would be unrecoverable.
 func _apply_graph_build(built: Dictionary) -> void:
 	_graph_wanted = false
-	var take_focus := _graph_focus_pending
-	_graph_focus_pending = false
 	var graph: Dictionary = built.get("graph", {})
 	if not bool(graph.get("ok", false)):
 		var why := "Vault graph failed: " + _shown_path(str(graph.get("error", "")))
@@ -961,13 +954,18 @@ func _apply_graph_build(built: Dictionary) -> void:
 	_graph_root = str(built.get("root", ""))
 	_show_graph_canvas(graph, built.get("positions", {}))
 	_saved_positions = {}
-	if take_focus:
-		_graph_view.grab_focus()
 	graph_built.emit(true, "")
 
 ## Replace the content area with the link canvas, switching presentation if
 ## the effective mode changed while the build ran.
 func _show_graph_canvas(graph: Dictionary, positions: Dictionary) -> void:
+	# The build lands asynchronously, so it can arrive while the user is on a
+	# surface it replaces (a pane with no saved view shows its note list while
+	# the worker runs, and a Graph press leaves the keyboard on that button).
+	# Godot releases the focus owner when it is hidden, so read it before the
+	# hides and hand it to the canvas - only when it was ours to begin with.
+	var focus_owner: Control = get_viewport().gui_get_focus_owner() if is_inside_tree() else null
+	var carry_focus := focus_owner != null and _is_graph_replaced_surface(focus_owner)
 	_list.visible = false
 	_footer.visible = false
 	_note_box.visible = false
@@ -982,7 +980,19 @@ func _show_graph_canvas(graph: Dictionary, positions: Dictionary) -> void:
 	else:
 		_graph_view.visible = true
 		_graph_view.show_graph(graph, _current_rel, positions)
+	if carry_focus:
+		_graph_view.grab_focus()
 	_saved_positions = {}
+
+## True when `control` is one of the surfaces the link canvas replaces (or a
+## child of one). The canvas takes the keyboard only from these, so a build
+## that lands while another pane - or another wiki surface - holds it never
+## steals it.
+func _is_graph_replaced_surface(control: Control) -> bool:
+	for surface in [_list, _footer, _note_box, _placeholder, _search, _new_button, _graph_button]:
+		if surface != null and (surface == control or surface.is_ancestor_of(control)):
+			return true
+	return false
 
 ## Every surface that takes the pane off the canvas goes through here, so a
 ## build that is still running cannot land on top of what the user chose
@@ -996,7 +1006,6 @@ func _hide_graph() -> void:
 	if not _graph_wanted:
 		return
 	_graph_wanted = false
-	_graph_focus_pending = false
 	graph_built.emit(false, "The pane left the link graph before it was built")
 
 ## The pane's `pane-view` surface, the two gestures that land in one frame:

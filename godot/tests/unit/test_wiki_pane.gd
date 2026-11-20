@@ -1865,6 +1865,36 @@ func test_a_fresh_pane_opens_the_graph():
 	assert_false(pane._graph_button.visible, "the graph surface shows only Notes")
 
 
+## The default build lands over the list the pane shows while it runs. Hiding
+## the list drops the focus owner, so without the carry the next keystroke goes
+## nowhere.
+func test_a_default_graph_build_carries_the_keyboard_off_the_list():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	var pane := _make_pane(_tmp, false)
+	assert_true(pane._list.visible, "precondition: the list shows while the graph builds")
+	pane._list.grab_focus()
+	assert_eq(pane.get_viewport().gui_get_focus_owner(), pane._list,
+		"precondition: the list holds the keyboard")
+	await _settle_graph(pane)
+	assert_true(pane._graph_view.visible, "a pane with no saved view opens the graph")
+	assert_eq(pane.get_viewport().gui_get_focus_owner(), pane._graph_view,
+		"the canvas takes the keyboard from the list it replaced")
+
+
+## The same build must not pull the keyboard away from a surface it does not
+## replace: another pane, or another control, keeps what the user gave it.
+func test_a_default_graph_build_does_not_steal_another_surfaces_keyboard():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	var other := Button.new()
+	add_child_autofree(other)
+	var pane := _make_pane(_tmp, false)
+	other.grab_focus()
+	await _settle_graph(pane)
+	assert_true(pane._graph_view.visible)
+	assert_eq(pane.get_viewport().gui_get_focus_owner(), other,
+		"a build landing in a pane the user is not on leaves the keyboard alone")
+
+
 func test_a_saved_notes_view_is_not_overridden():
 	_write(_tmp.path_join("note.md"), "# N\n")
 	var pane := _make_pane(_tmp)
@@ -2196,6 +2226,11 @@ func test_opening_the_graph_hands_the_keyboard_to_the_canvas():
 	_write(_tmp.path_join("b.md"), "# B\n")
 	var pane := _make_pane(_tmp)
 
+	# A real click focuses the button before it emits; `pressed.emit()` alone
+	# would test a gesture the engine never produces.
+	pane._graph_button.grab_focus()
+	assert_eq(pane.get_viewport().gui_get_focus_owner(), pane._graph_button,
+		"precondition: the press leaves the keyboard on the button")
 	pane._graph_button.pressed.emit()
 	await _settle_graph(pane)
 

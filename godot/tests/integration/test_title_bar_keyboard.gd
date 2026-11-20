@@ -150,8 +150,15 @@ func test_escape_from_a_read_only_panes_chrome_focuses_its_content():
 	note.close()
 
 	var ws = await _make_workspace()
-	var wiki = ws._spawn_pane("wiki", {"vault_path": _vault, "graph": false})
+	var wiki = ws._spawn_pane("wiki", {"vault_path": _vault})
 	assert_true(wiki is WikiPane, "the workspace holds a wiki pane")
+	# A pane with no saved view builds its graph by default; let it land so the
+	# Escape assertion is about the chrome hand-off, not the build's timing.
+	var deadline := Time.get_ticks_msec() + 10000
+	while wiki._graph_task != -1 and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	assert_eq(wiki._graph_task, -1, "the default graph build must land")
+	assert_true(wiki._graph_view.visible)
 	ws.activate_pane(wiki)
 	assert_true(ws._tm.focus_title_bar(wiki), "the wiki pane's bar takes the keyboard")
 
