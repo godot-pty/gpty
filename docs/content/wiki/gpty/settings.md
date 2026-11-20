@@ -21,7 +21,7 @@ Per-pane settings are a separate popup reached from a sidebar pane row or a pane
 
 `Native` asks the display server for its refresh rate and caps there; `Unlimited` removes the cap entirely. Window Mode is the same value as the sidebar's window-mode dropdown, and the control's tooltip says what each value draws: `System Frame` keeps the operating system's window frame and its controls and hides gPTY's own titlebar, `Borderless` is a window with no desktop frame that draws gPTY's titlebar, and `Fullscreen` fills the screen and keeps that titlebar.
 
-**Window opacity** draws the whole window at the chosen alpha. The row exists only where the display server can make the window transparent; on a platform, renderer or compositor that cannot, it is absent rather than a control that does nothing. The app fades as one surface — the terminal, the chrome, the empty workspace and the overlays all take the same alpha — while engine dialogs, file pickers and popup menus are separate surfaces and stay opaque.
+**Window opacity** draws the whole window at the chosen alpha. The row is always shown; where the display server cannot make the window transparent — the X11 driver on a Wayland desktop is the common case — the picker is disabled and says `unavailable on the <server> display server` beside it, with the Wayland way out in its tooltip. The app fades as one surface — the terminal, the chrome, the empty workspace and the overlays all take the same alpha — while engine dialogs, file pickers and popup menus are separate surfaces and stay opaque.
 
 The update check is a startup query only; it installs nothing on its own.
 
