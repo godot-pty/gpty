@@ -31,8 +31,136 @@ if [[ -z "$GODOT" ]]; then
     exit 1
 fi
 
-# The one definition of what the run covers.
-TEST_DIRS=(godot/tests/unit godot/tests/integration)
+usage() {
+    cat <<'EOF'
+Usage: scripts/gut-check [options] [script_filter]
+
+Run the GUT (GDScript) suite and judge the run, not just the exit code.
+
+Options:
+  -s, --select <pattern>    Run scripts whose filenames contain <pattern>
+  -t, --test <pattern>      Run individual test methods matching <pattern>
+  -d, --dir <dir>           Limit test discovery to <dir> (e.g. unit, integration)
+      --timeout <sec>       Override overall timeout in seconds (default: 600)
+      --stall-timeout <sec> Override stall detection timeout in seconds (default: 120)
+  -h, --help                Show this help message and exit
+
+Positional arguments:
+  script_filter             Shorthand for --select (e.g. 'scripts/gut-check test_test_paths.gd')
+EOF
+    exit 0
+}
+
+SELECT=""
+TEST_NAME=""
+CUSTOM_DIRS=()
+GUT_TIMEOUT="${GUT_TIMEOUT:-600}"
+GUT_STALL_TIMEOUT="${GUT_STALL_TIMEOUT:-120}"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            ;;
+        -s|--select)
+            if [[ $# -lt 2 ]]; then echo "gut-check: $1 requires an argument" >&2; exit 2; fi
+            SELECT="$(basename "$2")"
+            shift 2
+            ;;
+        --select=*)
+            SELECT="$(basename "${1#*=}")"
+            shift
+            ;;
+        -t|--test)
+            if [[ $# -lt 2 ]]; then echo "gut-check: $1 requires an argument" >&2; exit 2; fi
+            TEST_NAME="$2"
+            shift 2
+            ;;
+        --test=*)
+            TEST_NAME="${1#*=}"
+            shift
+            ;;
+        -d|--dir)
+            if [[ $# -lt 2 ]]; then echo "gut-check: $1 requires an argument" >&2; exit 2; fi
+            CUSTOM_DIRS+=("$2")
+            shift 2
+            ;;
+        --dir=*)
+            CUSTOM_DIRS+=("${1#*=}")
+            shift
+            ;;
+        --timeout)
+            if [[ $# -lt 2 ]]; then echo "gut-check: $1 requires an argument" >&2; exit 2; fi
+            GUT_TIMEOUT="$2"
+            shift 2
+            ;;
+        --timeout=*)
+            GUT_TIMEOUT="${1#*=}"
+            shift
+            ;;
+        --stall-timeout)
+            if [[ $# -lt 2 ]]; then echo "gut-check: $1 requires an argument" >&2; exit 2; fi
+            GUT_STALL_TIMEOUT="$2"
+            shift 2
+            ;;
+        --stall-timeout=*)
+            GUT_STALL_TIMEOUT="${1#*=}"
+            shift
+            ;;
+        -*)
+            echo "gut-check: unknown option '$1' (see --help)" >&2
+            exit 2
+            ;;
+        *)
+            if [[ -z "$SELECT" ]]; then
+                SELECT="$(basename "$1")"
+            else
+                echo "gut-check: unexpected argument '$1' (only one script filter is supported)" >&2
+                exit 2
+            fi
+            shift
+            ;;
+    esac
+done
+
+for var in GUT_TIMEOUT GUT_STALL_TIMEOUT; do
+    if [[ ! "${!var}" =~ ^[0-9]+$ ]]; then
+        echo "gut-check: $var must be a whole number of seconds" >&2
+        exit 1
+    fi
+done
+
+if (( ${#CUSTOM_DIRS[@]} > 0 )); then
+    TEST_DIRS=()
+    for d in "${CUSTOM_DIRS[@]}"; do
+        case "$d" in
+            unit|godot/tests/unit|tests/unit)
+                TEST_DIRS+=(godot/tests/unit)
+                ;;
+            integration|godot/tests/integration|tests/integration)
+                TEST_DIRS+=(godot/tests/integration)
+                ;;
+            *)
+                clean_d="${d#godot/}"
+                if [[ -d "godot/$clean_d" ]]; then
+                    TEST_DIRS+=("godot/$clean_d")
+                elif [[ -d "$d" ]]; then
+                    TEST_DIRS+=("$d")
+                else
+                    echo "gut-check: test directory '$d' does not exist" >&2
+                    exit 2
+                fi
+                ;;
+        esac
+    done
+else
+    TEST_DIRS=(godot/tests/unit godot/tests/integration)
+fi
+
+IS_FILTERED=0
+if [[ -n "$SELECT" || -n "$TEST_NAME" || ${#CUSTOM_DIRS[@]} -gt 0 ]]; then
+    IS_FILTERED=1
+fi
 
 LOG="$(mktemp)"
 PLAIN="$(mktemp)"
@@ -112,6 +240,12 @@ GUT_ARGS=(-s addons/gut/gut_cmdln.gd)
 for dir in "${TEST_DIRS[@]}"; do
     GUT_ARGS+=("-gdir=res://${dir#godot/}")
 done
+if [[ -n "$SELECT" ]]; then
+    GUT_ARGS+=("-gselect=$SELECT")
+fi
+if [[ -n "$TEST_NAME" ]]; then
+    GUT_ARGS+=("-gunit_test_name=$TEST_NAME")
+fi
 
 # A hung suite must fail the gate, not hold the runner until GitHub's six-hour
 # job cap. The suite is ~1.5 min here and ~3-5 min on Windows; 15 min is slack
@@ -130,14 +264,6 @@ done
 # turns the measured wedge (a pane-spawning test stopped the suite; the run
 # then burned the whole deadline) into a failure that names the test it stopped
 # in, instead of a timeout a reader cannot attribute. `0` disables the check.
-GUT_TIMEOUT="${GUT_TIMEOUT:-600}"
-GUT_STALL_TIMEOUT="${GUT_STALL_TIMEOUT:-120}"
-for var in GUT_TIMEOUT GUT_STALL_TIMEOUT; do
-    if [[ ! "${!var}" =~ ^[0-9]+$ ]]; then
-        echo "gut-check: $var must be a whole number of seconds" >&2
-        exit 1
-    fi
-done
 
 # `tail -f` streams the log to the terminal while the watchdog reads the same
 # file; both stop once the child is reaped.
@@ -217,7 +343,7 @@ if (( STALL_HIT || TIMEOUT_HIT )); then
     fi
     if [[ -n "$LAST_SCRIPT" ]]; then
         PROBLEMS+=("in $LAST_SCRIPT")
-        PROBLEMS+=("re-run it alone: ${GODOT} --headless --path godot -s addons/gut/gut_cmdln.gd -gdir=res://tests/unit -gdir=res://tests/integration -gselect=$(basename "$LAST_SCRIPT" .gd) -gexit")
+        PROBLEMS+=("re-run it alone: ./scripts/gut-check --select $(basename "$LAST_SCRIPT" .gd)")
     fi
     PROBLEMS+=("the last lines were:")
     while IFS= read -r line; do
@@ -297,11 +423,20 @@ while IFS= read -r file; do
     [[ -n "${DIRECT[$file]:-}" ]] || NESTED+=("$file")
 done < <(find "${TEST_DIRS[@]}" -name 'test_*.gd' | sort)
 
-if [[ -n "$SCRIPTS_RAN" && "$SCRIPTS_RAN" != "$EXPECTED" ]]; then
-    PROBLEMS+=("GUT ran $SCRIPTS_RAN scripts; ${TEST_DIRS[*]} hold $EXPECTED")
-fi
-if [[ -n "$SCRIPTS_RAN" && -n "$TESTS_RAN" && "$TESTS_RAN" -lt "$SCRIPTS_RAN" ]]; then
-    PROBLEMS+=("$SCRIPTS_RAN scripts ran only $TESTS_RAN tests — a script collected none")
+if (( ! IS_FILTERED )); then
+    if [[ -n "$SCRIPTS_RAN" && "$SCRIPTS_RAN" != "$EXPECTED" ]]; then
+        PROBLEMS+=("GUT ran $SCRIPTS_RAN scripts; ${TEST_DIRS[*]} hold $EXPECTED")
+    fi
+    if [[ -n "$SCRIPTS_RAN" && -n "$TESTS_RAN" && "$TESTS_RAN" -lt "$SCRIPTS_RAN" ]]; then
+        PROBLEMS+=("$SCRIPTS_RAN scripts ran only $TESTS_RAN tests — a script collected none")
+    fi
+else
+    if [[ -z "$SCRIPTS_RAN" || "$SCRIPTS_RAN" -lt 1 ]]; then
+        PROBLEMS+=("no test scripts ran matching the filter")
+    fi
+    if [[ -z "$TESTS_RAN" || "$TESTS_RAN" -lt 1 ]]; then
+        PROBLEMS+=("no tests ran matching the filter")
+    fi
 fi
 if (( ${#NESTED[@]} > 0 )); then
     PROBLEMS+=("GUT does not recurse into subdirectories; these never run:")
@@ -331,8 +466,12 @@ if [[ "$RISKY" != "0" ]]; then
 fi
 
 echo
+FILTER_LABEL=""
+if (( IS_FILTERED )); then
+    FILTER_LABEL=" (filtered)"
+fi
 if [[ "$PENDING" == "0" ]]; then
-    echo "gut-check: OK — $SCRIPTS_RAN scripts, $TESTS_RAN tests, all passed"
+    echo "gut-check: OK${FILTER_LABEL} — $SCRIPTS_RAN scripts, $TESTS_RAN tests, all passed"
 else
-    echo "gut-check: OK — $SCRIPTS_RAN scripts, $TESTS_RAN tests, $PENDING_TOTAL pending"
+    echo "gut-check: OK${FILTER_LABEL} — $SCRIPTS_RAN scripts, $TESTS_RAN tests, $PENDING_TOTAL pending"
 fi
