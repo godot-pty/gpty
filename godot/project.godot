@@ -15,6 +15,13 @@ config/version="0.8.5"
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.7")
 config/icon="res://icon.png"
+; The engine draws this frame before any script, so it cannot read the palette:
+; the surface and the art are fixed. Keep Width preserves the 16:9 frame; a 4:3
+; window letterboxes in the same SURFACE as the art's edge, and a wider window
+; crops only the flat edge, never the mark.
+boot_splash/image="res://assets/boot_splash.png"
+boot_splash/bg_color=Color(0.12549, 0.129412, 0.156863, 1)
+boot_splash/stretch_mode=2
 
 [autoload]
 
