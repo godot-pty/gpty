@@ -59,6 +59,24 @@ fn system_binary_owned_by_an_unmapped_root_is_accepted() {
     assert!(status.success(), "the in-namespace run must pass");
 }
 
+/// The namespace must leave the candidate's owner outside this process's UID
+/// map before the spawn gate is allowed to accept it. Kept in its own
+/// function so the uid comparison never shares a diagnostic sink with the
+/// spawn outcome.
+fn assert_owner_is_unmapped(path: &Path) {
+    use std::os::unix::fs::MetadataExt;
+
+    let meta = std::fs::metadata(path).expect("stat the candidate");
+    // SAFETY: `geteuid` takes no arguments, cannot fail, and touches no memory;
+    // the call is unsafe only because every libc extern is.
+    let me = unsafe { libc::geteuid() };
+    assert!(
+        meta.uid() != me,
+        "the namespace must leave the candidate's owner unmapped"
+    );
+    assert!(meta.uid() != 0, "an unmapped host root is not uid 0 here");
+}
+
 /// The inner half: prove the namespace really leaves the owner unmapped, then
 /// prove the spawn gate accepts it - directly and through `PATH`.
 fn verify_inside() {
@@ -72,25 +90,13 @@ fn verify_inside() {
                 .is_ok_and(|meta| meta.is_file() && meta.mode() & 0o022 == 0)
         })
         .expect("a private system binary must exist to judge");
-    let meta = std::fs::metadata(path).expect("stat the candidate");
-    // SAFETY: `geteuid` takes no arguments, cannot fail, and touches no memory;
-    // the call is unsafe only because every libc extern is.
-    let me = unsafe { libc::geteuid() };
-    assert!(
-        meta.uid() != me,
-        "the namespace must leave the candidate's owner unmapped"
-    );
-    assert!(meta.uid() != 0, "an unmapped host root is not uid 0 here");
+    assert_owner_is_unmapped(path);
     eprintln!(
         "user namespace: {} is owned by an unmapped uid (not the caller)",
         path.display()
     );
-    gpty_core::pty::validate_executable(&path.to_string_lossy()).unwrap_or_else(|error| {
-        panic!(
-            "{} must be accepted in an unmapped-root namespace: {error}",
-            path.display()
-        )
-    });
+    gpty_core::pty::validate_executable(&path.to_string_lossy())
+        .expect("a private system binary must be accepted in an unmapped-root namespace");
     gpty_core::pty::validate_program("sh", Some("/usr/bin:/bin"))
         .expect("a PATH-resolved system shell must be accepted");
 }
