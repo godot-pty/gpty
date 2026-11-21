@@ -414,7 +414,11 @@ func _sync_pane_titlebars():
 
 func _apply_fps_setting():
 	if SettingsManager.cfg_max_fps == -1:
-		var rr = DisplayServer.screen_get_refresh_rate()
+		# The window's screen, not the primary one: on a multi-monitor setup
+		# the two refresh rates can differ, and the window is the one being
+		# drawn.
+		var screen := DisplayServer.window_get_current_screen()
+		var rr := DisplayServer.screen_get_refresh_rate(screen)
 		Engine.max_fps = int(rr) if rr > 0 else 0
 	else:
 		Engine.max_fps = SettingsManager.cfg_max_fps

@@ -436,7 +436,8 @@ func _apply_theme() -> void:
 		# energy 0.6 it dimmed the whole background to a grey block in the
 		# light theme. The sky/background keeps the surface colour.
 		env.fog_sky_affect = 0.0
-		env.glow_enabled = dark and RenderingServer.get_current_rendering_method() != "gl_compatibility"
+		env.glow_enabled = dark and RendererInfo.supports_glow(
+			RenderingServer.get_current_rendering_method())
 		if env.glow_enabled:
 			env.glow_intensity = GLOW_INTENSITY
 			env.glow_strength = GLOW_STRENGTH

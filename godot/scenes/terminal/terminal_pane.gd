@@ -199,8 +199,18 @@ var launch: String = ""
 		if value == max_fps:
 			return
 		max_fps = value
-		var target = float(max_fps) if max_fps > 0 else (DisplayServer.screen_get_refresh_rate() if DisplayServer.screen_get_refresh_rate() > 0 else 60.0)
-		_sync_interval = 1.0 / target
+		refresh_sync_interval()
+
+## Re-derive the sync cadence from the setting and the window's current screen.
+## A pane's `max_fps` of 0 follows the display; the primary screen is not the
+## window's screen on a multi-monitor setup.
+func refresh_sync_interval() -> void:
+	var target := float(max_fps)
+	if max_fps <= 0:
+		var screen := DisplayServer.window_get_current_screen()
+		var rate := DisplayServer.screen_get_refresh_rate(screen)
+		target = rate if rate > 0.0 else 60.0
+	_sync_interval = 1.0 / target
 
 ## The ambient effect (a `UiEffects` id) and its intensity, pushed by
 ## `SettingsManager.apply_to_terminal`. The id is kept while the intensity is

@@ -44,18 +44,36 @@ func test_a_vendor_is_not_repeated_when_the_adapter_already_names_it():
 
 func test_the_startup_record_carries_every_fact_a_frame_report_needs():
 	var line := RendererInfo.describe("llvmpipe (LLVM 23.1.5, 256 bits)", "Mesa",
-		"gl_compatibility", "opengl3_es", Vector2i(1720, 1382), 164.87, "on",
-		165, "crt", 2)
+		"gl_compatibility", "opengl3_es", Vector2i(1720, 1382), 164.87, 2.0,
+		"on", 165, "crt", 2)
 	for part in ["opengl3_es", "gl_compatibility", "Mesa llvmpipe",
-			"1720x1382", "164.9 Hz", "vsync on", "max_fps 165", "effect crt@2"]:
+			"1720x1382", "scale 2.00", "164.9 Hz", "vsync on", "max_fps 165",
+			"effect crt@2"]:
 		assert_string_contains(line, part)
 
 func test_an_unknown_refresh_and_an_unlimited_cap_read_as_words():
 	var line := RendererInfo.describe("Adapter", "", "gl_compatibility", "opengl3_es",
-		Vector2i(800, 500), 0.0, "off", 0, "", 0)
+		Vector2i(800, 500), 0.0, 1.0, "off", 0, "", 0)
 	assert_string_contains(line, "refresh unknown")
 	assert_string_contains(line, "max_fps unlimited")
 	assert_string_contains(line, "effect none@0")
+
+func test_the_hint_is_gated_to_the_platform_that_has_the_trap():
+	var hint := RendererInfo.hint()
+	assert_string_contains(hint, "graphics driver")
+	if OS.get_name() == "Linux":
+		assert_string_contains(hint, "kernel module",
+			"the loaded-module trap is the Linux one")
+	else:
+		assert_false(hint.contains("kernel module"),
+			"a Windows/macOS warning cannot prescribe a Linux kernel module")
+
+func test_glow_is_a_forward_plus_feature():
+	assert_true(RendererInfo.supports_glow("forward_plus"))
+	assert_false(RendererInfo.supports_glow("mobile"),
+		"Mobile accepts the Environment but ignores glow")
+	assert_false(RendererInfo.supports_glow("gl_compatibility"),
+		"Compatibility has no post-processing glow")
 
 func test_the_vsync_modes_are_named_by_their_labels():
 	assert_eq(RendererInfo.vsync_label(DisplayServer.VSYNC_DISABLED), "off")
