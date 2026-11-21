@@ -23,7 +23,7 @@ on:
       - "scripts/docs-check"
       - "scripts/build-wiki"
   pull_request:
-    branches: [main, master]
+    branches: [main, "release/v*"]
     # Kept as a literal copy rather than a YAML anchor: the anchor would be
     # valid YAML, but this file is the thing that decides whether CI runs at
     # all, and an alias the server's parser rejected would fail closed with no

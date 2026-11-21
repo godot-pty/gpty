@@ -7,7 +7,7 @@ on:
   # dormant tree still picks up a new query pack every week.
   # `workflow_dispatch` exists so the file can be exercised after an edit.
   pull_request:
-    branches: [main, master]
+    branches: [main, "release/v*"]
     # The same documentation-only set the code workflow ignores: a note edit
     # cannot change what the scan analyses.
     paths-ignore:
