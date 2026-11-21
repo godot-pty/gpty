@@ -2,42 +2,32 @@ name: CI
 
 on:
   # A documentation-only push runs none of these jobs; the Docs workflow is
-  # its gate (it builds the site, runs docs-check and verifies the knowledge
-  # bundle). A roadmap or note edit cannot change what any job here tests -
-  # no Rust or GDScript test reads `docs/`, and the bundle is generated data
-  # the Docs job re-checks. The two script entries below are the docs gates
-  # themselves, and the Docs workflow runs both, so changing one is validated
-  # by the job it repairs. A full run is ~4 minutes warm and can reach ~30
-  # when the Windows vcpkg tree has to rebuild, which is a lot to spend on a
-  # Markdown edit. Anything else here (workflows, any other script, crates,
-  # godot/, the smoke) still runs the full suite: a script that builds the
-  # app, drives Godot or runs a gate needs the code gates to validate it.
+  # its gate. A pull request runs all of them: the ruleset's required checks
+  # must report on every PR to a protected branch, and a path-filtered
+  # workflow that never starts would leave a docs-only PR waiting forever.
+  # The push filter stays because a docs-only post-merge run cannot change
+  # what any job here tests - no Rust or GDScript test reads `docs/`, and the
+  # bundle is generated data the Docs job re-checks. Anything else (workflows,
+  # any other script, crates, godot/, the smoke) still runs the full suite: a
+  # script that builds the app, drives Godot or runs a gate needs the code
+  # gates to validate it.
   push:
-    branches: [main, master, "0.*"]
+    branches: [main, "release/v*"]
     paths-ignore:
       - "docs/**"
       - "assets/site-icons/**"
       - "**/*.md"
       - "godot/knowledge.json"
+      - "godot/docs.json"
       - "LICENSE"
       - "scripts/docs-check"
       - "scripts/check-capabilities"
       - "scripts/build-wiki"
+      - "scripts/build-docs"
   pull_request:
-    branches: [main, master, "0.*"]
-    # Kept as a literal copy rather than a YAML anchor: the anchor would be
-    # valid YAML, but this file is the thing that decides whether CI runs at
-    # all, and an alias the server's parser rejected would fail closed with no
-    # job to say so.
-    paths-ignore:
-      - "docs/**"
-      - "assets/site-icons/**"
-      - "**/*.md"
-      - "godot/knowledge.json"
-      - "LICENSE"
-      - "scripts/docs-check"
-      - "scripts/check-capabilities"
-      - "scripts/build-wiki"
+    branches: [main, "release/v*"]
+    # No paths filter: a required check that never starts blocks the merge,
+    # so every PR to a protected branch runs the full set.
 
 # Least privilege: every job here only reads the repository. Without this
 # block each job inherits the repository default token scope, which is handed
@@ -581,7 +571,7 @@ jobs:
           persist-credentials: false
 
       - name: Check the dependency policy
-        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2.1.2
 
   # ── Fuzz targets compile (nightly; runs are the scheduled Fuzz workflow) ──
   #

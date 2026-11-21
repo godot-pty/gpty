@@ -56,21 +56,54 @@ func test_unstarted_grid_functions_are_safe():
 	assert_eq(str(_t.get_selection_text()), "", "no grid means nothing is selected")
 	assert_eq(_t.get_selection_cells().size(), 0, "no grid means nothing to highlight")
 	_t.selection_clear()
-	# The background pair must answer before a child exists: a pane applies its
-	# saved `default_bg` through `set_background_color` on the restore path,
-	# which can run before `start_shell`, and `get_background_color` is what the
-	# pane's ground is read from.
+	# The default pair must answer before a child exists: a pane applies its
+	# foreground/background on the restore path, which can run before
+	# `start_shell`, and `get_background_color` is what the pane's ground is
+	# read from.
 	assert_eq(_t.get_background_color(), Color.BLACK,
-		"an unstarted grid answers the default background")
-	_t.set_background_color(Color8(10, 20, 30))
+		"an unstarted grid answers the system background")
+	_t.set_default_colors(Color8(10, 20, 30), Color8(40, 50, 60))
 	assert_eq(_t.get_background_color(), Color.BLACK,
-		"setting a background on an unstarted grid is a no-op, not a crash")
+		"setting the pair on an unstarted grid is a no-op, not a crash")
 	pass # no crash is the assertion
+
+func test_scheme_parse_answers_the_native_shape():
+	var palette := PackedStringArray()
+	for i in range(16):
+		palette.append("#%02x%02x%02x" % [i, i, i])
+	var body := JSON.stringify({
+		"name": "Probe",
+		"palette": palette,
+		"foreground": "#abcdef",
+		"background": "#123456",
+		"cursor": "#e0e0e0",
+		"selection": "#445566",
+	})
+	var answer = JSON.parse_string(str(GptyScheme.parse(body, "probe.json")))
+	assert_true(answer is Dictionary, "parse must answer JSON")
+	assert_eq(answer.get("ok"), true, "a native scheme parses")
+	assert_eq(answer.get("name"), "Probe")
+	assert_eq(answer.get("background"), "#123456")
+	assert_eq(answer.get("palette").size(), 16)
+	# The canonical file text rides along, so an import writes one shape.
+	var written = JSON.parse_string(str(answer.get("json", "")))
+	assert_true(written is Dictionary, "the native file text must be JSON")
+	assert_eq(written.get("foreground"), "#abcdef")
+	assert_eq(written.get("selection"), "#445566")
+
+func test_scheme_parse_refuses_an_unknown_key():
+	var answer = JSON.parse_string(str(GptyScheme.parse(
+		"{\"palette\":[],\"foreground\":\"#ffffff\",\"background\":\"#000000\",\"colour\":\"#ff0000\"}",
+		"probe.json")))
+	assert_eq(answer.get("ok"), false, "a closed key set refuses an unknown key")
+	assert_string_contains(str(answer.get("error", "")), "Unknown key")
 
 func test_markdown_renderer_formats_and_sanitizes():
 	var renderer = ClassDB.instantiate("GptyMarkdown")
 	assert_not_null(renderer, "GptyMarkdown must be registered")
-	var answer = JSON.parse_string(str(renderer.render("# Title\n\n**bold** [raw]\n\n[x](javascript:bad)", false)))
+	var answer = JSON.parse_string(str(
+		renderer.render("# Title\n\n**bold** [raw]\n\n[x](javascript:bad)", false, false)
+	))
 	assert_true(answer is Dictionary, "render must answer JSON")
 	var rendered := str(answer.get("text", ""))
 	assert_string_contains(rendered, "[font_size=26][b]Title")
@@ -84,7 +117,7 @@ func test_markdown_renderer_formats_and_sanitizes():
 	assert_eq(int(answer.get("shown", 0)), int(answer.get("size", -1)))
 	var cap: int = TextRead.DEFAULT_MAX_BYTES
 	var over = "a".repeat(cap + 1)
-	var cut = JSON.parse_string(str(renderer.render(over, false)))
+	var cut = JSON.parse_string(str(renderer.render(over, false, false)))
 	assert_true(cut.get("truncated", false), "past the cap the render must say so")
 	assert_eq(int(cut.get("shown", 0)), cap, "the answer names how much it rendered")
 	assert_eq(int(cut.get("size", 0)), cap + 1, "and how much it was given")
@@ -92,18 +125,29 @@ func test_markdown_renderer_formats_and_sanitizes():
 	# `wikilinks` is an input parameter, so this also proves the bool marshals:
 	# the wiki pane renders mentions as internal links, every other caller
 	# keeps the literal text.
-	var mentions = JSON.parse_string(str(renderer.render("see [[Note|the note]]", true)))
+	var mentions = JSON.parse_string(str(renderer.render("see [[Note|the note]]", true, false)))
 	assert_string_contains(str(mentions.get("text", "")), "[url=gpty-note:Note]the note[/url]")
-	var plain = JSON.parse_string(str(renderer.render("see [[Note]]", false)))
+	var plain = JSON.parse_string(str(renderer.render("see [[Note]]", false, false)))
 	assert_false("gpty-note:" in str(plain.get("text", "")))
+
+	# `docs` is the second opt-in scheme: the About tab's viewer sets it, every
+	# other caller keeps a `gpty-doc:` destination as plain text.
+	var doc = JSON.parse_string(str(renderer.render(
+		"[Security](gpty-doc:SECURITY.md#Reporting)", false, true
+	)))
+	assert_string_contains(str(doc.get("text", "")),
+		"[url=gpty-doc:SECURITY.md#Reporting]Security[/url]")
+	var refused = JSON.parse_string(str(renderer.render(
+		"[Security](gpty-doc:SECURITY.md)", false, false
+	)))
+	assert_false("gpty-doc:" in str(refused.get("text", "")))
 
 func test_vault_index_and_search_answer_shaped_json():
 	# The vault facet's wire contract (consumed by wiki_pane.gd): an index
 	# answer carries the note list and the pass' counts, a search answer
 	# carries hits with snippets, and a bad root is an `error` envelope rather
 	# than an empty result — the distinction the pane's placeholder relies on.
-	var vault := TestPaths.user_path("gdext_ffi_vault")
-	DirAccess.make_dir_recursive_absolute(vault)
+	var vault := TestPaths.fresh_dir("gdext_ffi_vault")
 	var note := FileAccess.open(vault.path_join("note.md"), FileAccess.WRITE)
 	note.store_string("# Heading\nzebra")
 	note.close()
@@ -124,8 +168,7 @@ func test_vault_index_and_search_answer_shaped_json():
 	var bad = JSON.parse_string(str(GptyTerminal.vault_index("/nonexistent/vault/root")))
 	assert_true(bad is Dictionary and bad.has("error"), "a bad root must answer an error")
 
-	DirAccess.remove_absolute(vault.path_join("note.md"))
-	DirAccess.remove_absolute(vault)
+	TestPaths.remove_tree(vault)
 
 
 func test_vault_links_answer_shaped_json():
@@ -133,8 +176,7 @@ func test_vault_links_answer_shaped_json():
 	# with their line and resolution, backlinks as the same edges in reverse,
 	# unresolved targets with the candidates an ambiguous stem could not choose
 	# between, and an `error` envelope for a root that cannot be used.
-	var vault := TestPaths.user_path("gdext_ffi_links")
-	DirAccess.make_dir_recursive_absolute(vault)
+	var vault := TestPaths.fresh_dir("gdext_ffi_links")
 	var target := FileAccess.open(vault.path_join("target.md"), FileAccess.WRITE)
 	target.store_string("# Target\n")
 	target.close()
@@ -174,9 +216,7 @@ func test_vault_links_answer_shaped_json():
 	assert_eq(missing.get("resolved"), null)
 	assert_eq(missing.get("candidates", []).size(), 0)
 
-	DirAccess.remove_absolute(vault.path_join("src.md"))
-	DirAccess.remove_absolute(vault.path_join("target.md"))
-	DirAccess.remove_absolute(vault)
+	TestPaths.remove_tree(vault)
 
 
 func test_vault_note_read_and_write_answer_shaped_json():
@@ -184,8 +224,7 @@ func test_vault_note_read_and_write_answer_shaped_json():
 	# text with the stamp and the file's shape, a write answers the fresh stamp
 	# plus whether the index caught up, and a refusal answers an `error` with
 	# the stable `code` the pane switches on.
-	var vault := TestPaths.user_path("gdext_ffi_notes")
-	DirAccess.make_dir_recursive_absolute(vault)
+	var vault := TestPaths.fresh_dir("gdext_ffi_notes")
 	var note := FileAccess.open(vault.path_join("note.md"), FileAccess.WRITE)
 	note.store_string("# One\n")
 	note.close()
@@ -221,16 +260,14 @@ func test_vault_note_read_and_write_answer_shaped_json():
 		vault, "../escape.md", "x", -1, 0, false)))
 	assert_eq(escape.get("code"), "bad_path", "a path outside the vault is refused by shape")
 
-	DirAccess.remove_absolute(vault.path_join("note.md"))
-	DirAccess.remove_absolute(vault)
+	TestPaths.remove_tree(vault)
 
 
 func test_vault_note_file_verbs_answer_shaped_json():
 	# Create / rename / delete, the editor's other write surface: each answers
 	# whether the index caught up, a collision answers `code: "exists"` instead
 	# of replacing anything, and the index follows the new name.
-	var vault := TestPaths.user_path("gdext_ffi_note_verbs")
-	DirAccess.make_dir_recursive_absolute(vault)
+	var vault := TestPaths.fresh_dir("gdext_ffi_note_verbs")
 
 	var created = JSON.parse_string(str(GptyTerminal.vault_note_create(
 		vault, "fresh.md", "# Fresh\n")))
@@ -274,8 +311,7 @@ func test_vault_note_file_verbs_answer_shaped_json():
 		vault, "../escape.md", "x")))
 	assert_eq(bad.get("code"), "bad_path", "the verbs hold the walk's vocabulary")
 
-	DirAccess.remove_absolute(vault.path_join("other.md"))
-	DirAccess.remove_absolute(vault)
+	TestPaths.remove_tree(vault)
 
 
 func test_vault_scratch_functions_answer_shaped_json():
@@ -328,8 +364,7 @@ func test_the_test_user_root_redirects_the_history_store():
 	# `GPTY_TEST_USER_DIR` exactly like `BasePersistenceManager`. Without this
 	# every spawned pane writes scrollback into the developer's real profile.
 	var previous := OS.get_environment("GPTY_TEST_USER_DIR")
-	var root := TestPaths.user_path("gdext_ffi_user_root")
-	DirAccess.make_dir_recursive_absolute(root)
+	var root := TestPaths.fresh_dir("gdext_ffi_user_root")
 	OS.set_environment("GPTY_TEST_USER_DIR", root)
 	var stats = JSON.parse_string(str(GptyTerminal.history_store_stats()))
 	OS.set_environment("GPTY_TEST_USER_DIR", previous)
@@ -341,7 +376,7 @@ func test_the_test_user_root_redirects_the_history_store():
 		str(stats.get("path", "")).replace("\\", "/"),
 		root.path_join("history.db").replace("\\", "/")
 	)
-	DirAccess.remove_absolute(root)
+	TestPaths.remove_tree(root)
 
 func test_uninstall_plugin_refuses_an_absent_id_with_an_error_envelope():
 	var answer = JSON.parse_string(str(GptyTerminal.uninstall_plugin("owner/not-installed")))

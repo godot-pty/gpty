@@ -165,6 +165,10 @@ step "Knowledge bundle"
 "$REPO_ROOT/scripts/build-wiki"
 ok "godot/knowledge.json"
 
+step "Documentation bundle"
+"$REPO_ROOT/scripts/build-docs"
+ok "godot/docs.json"
+
 step "Import Godot project"
 "$GODOT_BIN" --headless --path godot --import
 ok "project imported"

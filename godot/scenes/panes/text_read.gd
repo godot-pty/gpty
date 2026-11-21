@@ -23,7 +23,9 @@ const DEFAULT_MAX_BYTES := 1 << 20
 ## Returns `{"ok": bool, "text": String, "truncated": bool, "size": int}`.
 ## `ok` is false — with no read attempted — for a non-absolute path, a
 ## non-regular file, a bad size, or a failed open. `text` decodes a torn UTF-8
-## tail by hand when the cap landed inside a sequence.
+## tail by hand when the cap landed inside a sequence. The buffer read is always
+## bounded to `cap + 1` bytes, eliminating uncapped reads on dynamic files or
+## concurrent writes.
 static func read_prefix(path: String, cap: int = DEFAULT_MAX_BYTES) -> Dictionary:
 	if path == "" or not BasePersistenceManager.is_real_absolute_path(path):
 		return {"ok": false, "text": "", "truncated": false, "size": 0}
@@ -32,14 +34,17 @@ static func read_prefix(path: String, cap: int = DEFAULT_MAX_BYTES) -> Dictionar
 	var size := FileAccess.get_size(path)
 	if size < 0:
 		return {"ok": false, "text": "", "truncated": false, "size": 0}
-	var f = FileAccess.open(path, FileAccess.READ)
+	var f := FileAccess.open(path, FileAccess.READ)
 	if not f:
 		return {"ok": false, "text": "", "truncated": false, "size": 0}
-	var truncated := size > cap
-	var text := (
-		_decode_utf8_prefix(f.get_buffer(cap)) if truncated else f.get_as_text()
-	)
-	return {"ok": true, "text": text, "truncated": truncated, "size": size}
+	var safe_cap := maxi(0, cap)
+	var raw := f.get_buffer(safe_cap + 1)
+	f.close()
+	var truncated := raw.size() > safe_cap
+	var bytes := raw.slice(0, safe_cap) if truncated else raw
+	var text := _decode_utf8_prefix(bytes)
+	var reported_size := maxi(size, raw.size())
+	return {"ok": true, "text": text, "truncated": truncated, "size": reported_size}
 
 ## Decode at most `cap` bytes, cutting a UTF-8 sequence the cap landed inside
 ## so the text does not end on a replacement glyph.

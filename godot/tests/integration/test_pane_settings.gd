@@ -68,6 +68,94 @@ func test_apply_settings_font_size():
 	assert_gt(body._cell_h, cell_h, "a larger font must heighten the cell")
 	assert_eq(body._font.fixed_size, 28, "the font itself is resized, not just the property")
 
+## The v0.8.6 row **A pane's font-size setting does not reach text already on
+## screen**: an Inspector with an answer on screen must follow a Pane Settings
+## edit, height included.
+func test_a_font_size_change_reaches_an_inspector_answer():
+	var body = _tm.create_body("inspector")
+	_scene.add_child(body)
+	body.size = Vector2(420, 320)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	body._display.render_now("word ".repeat(200))
+	await get_tree().create_timer(0.15).timeout
+	var tall: float = body._display.get_content_height()
+	assert_gt(tall, 0.0, "the answer must have a measured height first")
+
+	body.apply_settings({"font_size": 24})
+	await get_tree().create_timer(0.15).timeout
+
+	assert_eq(body._display.get_theme_font_size("normal_font_size"), 24)
+	assert_eq(body._thinking_display.get_theme_font_size("normal_font_size"), 24)
+	assert_gt(body._display.get_content_height(), tall,
+		"the larger font must be re-measured, not just re-assigned")
+
+func test_a_font_size_change_reaches_a_rendered_file():
+	var body = _tm.create_body("code_viewer")
+	body.language = "md"
+	_scene.add_child(body)
+	body.size = Vector2(420, 320)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	body.receive_content("word ".repeat(200))
+	await get_tree().create_timer(0.15).timeout
+	var tall: float = body._markdown.get_content_height()
+	assert_gt(tall, 0.0)
+
+	body.apply_settings({"font_size": 24})
+	await get_tree().create_timer(0.15).timeout
+
+	assert_eq(body._editor.get_theme_font_size("font_size"), 24)
+	assert_eq(body._markdown.get_theme_font_size("normal_font_size"), 24)
+	assert_gt(body._markdown.get_content_height(), tall)
+	assert_eq(body._empty_title.get_theme_font_size("font_size"), 26,
+		"the empty-state title follows the body text, one step above it")
+	assert_eq(body._empty_hint.get_theme_font_size("font_size"), 24)
+
+func test_a_font_size_change_reaches_streamed_output():
+	var body = _tm.create_body("cli_view")
+	_scene.add_child(body)
+	body._editor.text = "prior output"
+	body.apply_settings({"font_size": 22})
+	assert_eq(body._editor.get_theme_font_size("font_size"), 22,
+		"the output view is where a read continues")
+
+func test_a_font_size_change_reaches_the_file_tree():
+	var body = _tm.create_body("file_tree")
+	_scene.add_child(body)
+	body.apply_settings({"font_size": 24})
+	assert_eq(body._tree.get_theme_font_size("font_size"), 24,
+		"the tree is this pane's only text surface")
+	assert_eq(body._empty_hint.get_theme_font_size("font_size"), 24)
+
+func test_a_font_size_change_reaches_the_media_placeholder():
+	var body = _tm.create_body("media")
+	_scene.add_child(body)
+	body.apply_settings({"font_size": 24})
+	assert_eq(body._status.get_theme_font_size("font_size"), 22,
+		"the status line keeps its caption-relative offset to the body size")
+	assert_eq(body._placeholder_title.get_theme_font_size("font_size"), 26)
+	assert_eq(body._placeholder_hint.get_theme_font_size("font_size"), 24)
+
+func test_a_font_size_change_reaches_an_open_note():
+	var body = _tm.create_body("wiki")
+	_scene.add_child(body)
+	body.apply_settings({"font_size": 24})
+	assert_eq(body._editor.get_theme_font_size("font_size"), 24)
+	assert_eq(body._reader.get_theme_font_size("normal_font_size"), 24)
+
+## The setter now runs for every pane type, so it can fire before `_ready`
+## loads the terminal's faces: that call must not touch them, and the size must
+## land once `_ready` has them.
+func test_a_font_size_applied_before_the_terminal_is_ready_lands_with_its_font():
+	var body = _tm.create_body("terminal")
+	body.apply_settings({"font_size": 22})
+	assert_null(body._font, "no face exists before the pane enters the tree")
+	_scene.add_child(body)
+	assert_eq(body._font.fixed_size, 22)
+	assert_eq(body._cell_h, body._font.get_height(22),
+		"the grid must be measured at the size the pane holds")
+
 ## A stored `rows`/`cols` no longer resizes a live grid: the pixel fit owns the
 ## size, because a grid larger than the tile draws cells the tile cannot show
 ## (the cursor lands off-screen behind `clip_contents`) and the next resize
@@ -77,7 +165,7 @@ func test_apply_settings_rows_cols_never_resizes_a_live_grid():
 	_scene.add_child(body)
 	assert_not_null(body._terminal, "the pane must own a grid for this test")
 	body.size = Vector2(900, 600)
-	var fitted_rows := int((body.size.y - TerminalPane.PADDING) / body._cell_h)
+	var fitted_rows: int = body._grid_for_size(body.size).y
 	assert_eq(body._terminal.get_rows(), fitted_rows,
 		"the pane started its child at the size it is drawn at")
 
@@ -392,7 +480,9 @@ func test_apply_settings_refuses_an_unlisted_property():
 func test_every_pane_type_accepts_the_settings_it_saves():
 	# Drift guard for the closed table: a key added to `_get_layout_state`
 	# without a rule would silently stop surviving a save/restore cycle.
-	var applied_by_the_pane := ["graph", "open_note", "loop"]
+	# `pane_scheme` is consumed by `Workspace`'s settings_applied handler (it
+	# writes `PaneSchemeStore`), so it addresses no pane property by design.
+	var applied_by_the_pane := ["graph", "open_note", "loop", "graph_positions", "pane_scheme"]
 	for type_name in PaneTypes.ALL:
 		var script = TerminalManager._PaneScripts.get(type_name)
 		assert_not_null(script, "%s must have a pane script" % type_name)

@@ -1,6 +1,6 @@
 //! The Markdown-to-BBCode renderer: the untrusted model/file text the pane
-//! displays. Both entry points, because the wikilink substitution is a second
-//! pass over the same source.
+//! displays. Every mode, because the wikilink substitution and the docs
+//! `gpty-doc:` acceptance are separate passes over the same source.
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 
@@ -9,5 +9,6 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let _ = gpty_gdext::markdown::render_markdown(source);
-    let _ = gpty_gdext::markdown::render_markdown_with(source, true);
+    let _ = gpty_gdext::markdown::render_markdown_with(source, true, false);
+    let _ = gpty_gdext::markdown::render_markdown_with(source, false, true);
 });

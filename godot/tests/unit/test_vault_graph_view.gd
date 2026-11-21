@@ -303,8 +303,9 @@ func _centred_view() -> VaultGraphView:
 
 func test_the_graph_is_one_keyboard_ring():
 	var view := _make_view()
+	assert_eq(view._mode_button.text, "Orbital", "the planar map offers the orbital switch")
 	var ring: Array[Control] = [
-		view, view._arrows_button, view._relayout_button, view._fit_button,
+		view, view._mode_button, view._arrows_button, view._relayout_button,
 	]
 	for i in ring.size():
 		var c: Control = ring[i]
@@ -486,3 +487,40 @@ func test_zooming_out_keeps_only_the_aimed_at_labels():
 	var narrow := view.label_placements()
 	assert_eq(narrow.size(), 1, "zoomed out, only the nodes the user is on keep a label")
 	assert_eq(String(narrow[0]["id"]), "a.md", "the open note keeps its name")
+
+
+# ── Saved geometry and presentation switch ─────────────────────────────
+
+func test_export_positions_filters_deleted_notes_and_rounds():
+	var view := _make_view()
+	view.positions["a.md"] = Vector2(1.234, 2.345)
+	view.positions["gone.md"] = Vector2(5.0, 6.0)
+	var saved := view.export_positions()
+	assert_true(saved.has("a.md"))
+	assert_false(saved.has("gone.md"), "a note the graph no longer holds is not saved")
+	assert_almost_eq(float(saved["a.md"][0]), 1.2, 0.0001)
+	assert_almost_eq(float(saved["a.md"][1]), 2.3, 0.0001)
+
+
+func test_show_graph_accepts_pair_form_positions():
+	var view := VaultGraphView.new()
+	add_child_autofree(view)
+	view.size = Vector2(800, 600)
+	view.show_graph(_graph(), "a.md", {"a.md": [100.0, 200.0]})
+	assert_eq(view.positions["a.md"], Vector2(100.0, 200.0))
+	assert_eq(view.positions.size(), 3, "the ids the save did not name are placed")
+
+
+func test_live_geometry_beats_a_prepared_snapshot():
+	var view := _make_view()
+	view.positions["a.md"] = Vector2(400.0, 400.0)
+	view.show_graph(_graph(), "a.md", {"a.md": [10.0, 10.0]})
+	assert_eq(view.positions["a.md"], Vector2(400.0, 400.0),
+		"a drag made while a build ran must survive its result")
+
+
+func test_the_orbital_button_asks_for_the_3d_view():
+	var view := _make_view()
+	watch_signals(view)
+	view._mode_button.pressed.emit()
+	assert_signal_emitted_with_parameters(view, "mode_requested", ["3d"])

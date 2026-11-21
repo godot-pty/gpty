@@ -921,7 +921,7 @@ func _write_note(rel: String, text: String) -> void:
 	file.close()
 
 func _wiki_pane() -> Control:
-	var body = _ws._spawn_pane("wiki", {"vault_path": _view_vault()})
+	var body = _ws._spawn_pane("wiki", {"vault_path": _view_vault(), "graph": false})
 	assert_not_null(body, "a wiki pane must spawn on a real vault")
 	return body
 
@@ -1360,6 +1360,35 @@ func test_pane_set_refuses_a_member_outside_a_closed_set():
 	_ws._kill_now(viewer)
 
 
+## The link map's style is a pane setting; its saved geometry is not. One
+## refusal and one acceptance through the same table, so the `ipc` marker is
+## proven on the pair that shares a prefix.
+func test_pane_set_owns_the_wiki_graph_mode_not_its_geometry():
+	var wiki := _wiki_pane()
+	var id := str(wiki.attachment_id)
+
+	var applied = WorkspaceIpcHandlers.handle(_ws, "paneSet", {
+		"pane_id": id, "settings": {"graph_mode": "2d"},
+	})
+	assert_false(applied.has("error"), "the map style is a caller's to set: %s" % applied)
+	assert_true(bool(applied.get("success", false)))
+	assert_true((applied.get("changed", []) as Array).has("graph_mode"),
+		"the switched key must be named: %s" % str(applied.get("changed")))
+	assert_eq(str(wiki.graph_mode), "2d")
+	assert_true(wiki._graph_view is VaultGraphView,
+		"the hidden presentation swaps with the setting")
+
+	var refused = WorkspaceIpcHandlers.handle(_ws, "paneSet", {
+		"pane_id": id,
+		"settings": {"graph_positions": {"note.md": [10.0, 20.0]}},
+	})
+	assert_true(refused.has("error"), "saved geometry is the pane's own state")
+	assert_eq(int(refused["error"]["code"]), -32602, "a reserved key is a bad parameter")
+	assert_string_contains(str(refused["error"]["message"]), "graph_positions")
+	await get_tree().process_frame
+	_ws._kill_now(wiki)
+
+
 ## The save/discard question a vault change asks belongs to the user: a caller
 ## that cannot answer it is refused, and the open note survives.
 func test_pane_set_refuses_to_discard_an_unsaved_note():
@@ -1437,6 +1466,13 @@ func test_pane_settings_reports_the_closed_table():
 	var wiki_modes: Array = types["wiki"]["view_mode"]["values"]
 	assert_eq(wiki_modes.size(), 3, "a closed set is published: %s" % str(types["wiki"]["view_mode"]))
 	assert_true(wiki_modes.has("preview"))
+	var graph_modes: Array = types["wiki"]["graph_mode"]["values"]
+	assert_eq(graph_modes, PaneTypes.WIKI_GRAPH_MODES,
+		"the link-map vocabulary is published as the table holds it")
+	assert_eq(str(types["wiki"]["graph_positions"]["kind"]), "positions")
+	assert_eq(int(types["wiki"]["graph_positions"]["max"]), 4000)
+	assert_eq(types["wiki"]["graph_positions"]["ipc"], false,
+		"saved geometry is the pane's own state, not a caller's to set")
 	assert_eq(str(types["inspector"]["backend"]["kind"]), "backend",
 		"the one canonicalizing rule says so")
 	var kinds: Array = types["inspector"]["backend"]["values"]

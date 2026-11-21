@@ -22,7 +22,21 @@ signal child_start_failed(reason: String)
 const CURSOR_BLINK_INTERVAL = 0.5
 const SCROLL_LINES = 3
 @export var scroll_lines: int = SCROLL_LINES
-const PADDING = 4
+## Inset between the tile edge and the grid, per side, in logical pixels. A
+## settings broadcast (`SettingsManager.cfg_terminal_padding`) applies it; the
+## fit spends `2 x` it on the cell count, so rows/cols stay the count drawn.
+var terminal_padding: int = PaneTypes.TERMINAL_PADDING_DEFAULT:
+	set(value):
+		var v := clampi(value, 0, PaneTypes.TERMINAL_PADDING_MAX)
+		if v == terminal_padding:
+			return
+		terminal_padding = v
+		_recompute_cell_metrics()
+## The smallest pane the grid asks a container for: `MIN_SIZE_COLS` cells wide
+## and two rows tall, plus the padded inset. This is not the fit's floor (that
+## is `MIN_COLS`/`MIN_ROWS`): it is what `custom_minimum_size` guarantees while
+## a tile is being laid out.
+const MIN_SIZE_COLS := 4
 const FOCUS_BORDER_WIDTH = 2.0
 const BEAM_CURSOR_WIDTH = 2
 const UNDERLINE_CURSOR_HEIGHT = 3
@@ -38,6 +52,15 @@ const ATTR_UNDERLINE := 4
 ## Set on the first cell of a wide character; the next cell is its spacer.
 const ATTR_WIDE := 16
 
+## The cursor colour a fresh pane carries. Compared against, not just seeded:
+## while the pane's own colour is this default, a scheme's cursor fills in.
+const CURSOR_COLOR_DEFAULT := Color(0.8, 0.8, 0.8, 0.7)
+## A scheme's cursor and selection are drawn as overlays over the grid, so they
+## keep an alpha that leaves the glyph or the cell readable. The scheme's hue
+## is honoured; its (usually opaque) alpha is gpty's rendering choice.
+const SCHEME_CURSOR_ALPHA := 0.75
+const SCHEME_SELECTION_ALPHA := 0.45
+
 ## One repaintable slice of the grid. Godot rebuilds a CanvasItem's whole
 ## command list on any `queue_redraw()`, and a control draws before its
 ## children, so a partial repaint needs child items: every row's `BG` band, then
@@ -48,6 +71,7 @@ class Layer extends Node2D:
 	const BG := 0
 	const TEXT := 1
 	const OVERLAY := 2
+	const EFFECT := 3
 	var pane = null
 	var kind := BG
 	var row := 0
@@ -57,6 +81,7 @@ class Layer extends Node2D:
 		match kind:
 			TEXT: pane._draw_row_text(self, row)
 			OVERLAY: pane._draw_overlay(self)
+			EFFECT: pane._draw_effect(self)
 			_: pane._draw_row_background(self, row)
 
 @export var beam_cursor_width: int = BEAM_CURSOR_WIDTH
@@ -72,6 +97,9 @@ func _init() -> void:
 	focus_border_color = UiPalette.active().TERMINAL_FOCUS
 	selection_color = UiPalette.active().SELECTION
 	scrollback_indicator_color = UiPalette.active().SCROLLBACK_INDICATOR
+## The global scheme the resolved appearance selected (pushed by
+## `SettingsManager.apply_to_terminal`). A pane's own scheme
+## (`PaneSchemeStore`, keyed by `attachment_id`) wins while it is set.
 var color_scheme_path: String = "":
 	set(value):
 		# A settings broadcast passes this on every save, and an unchanged value
@@ -79,11 +107,25 @@ var color_scheme_path: String = "":
 		# repack of a pane that had not changed.
 		if value == color_scheme_path:
 			return
+		var before := _scheme_path()
 		color_scheme_path = value
 		# Before the child exists there is no palette to set: the start path
 		# applies the stored scheme itself.
-		if _started:
+		if _started and _scheme_path() != before:
 			_apply_palette()
+
+## The scheme this pane draws with: its own choice when it has one, else the
+## global pair member.
+func _scheme_path() -> String:
+	var own := PaneSchemeStore.scheme_for(attachment_id)
+	return own if own != "" else color_scheme_path
+
+## The loaded scheme (`{}` for the built-in palette) and the path it came from,
+## so a settings broadcast does not re-read and re-parse the file.
+var _scheme: Dictionary = {}
+var _scheme_loaded_path := ""
+var _scheme_cursor := Color.TRANSPARENT
+var _scheme_selection := Color.TRANSPARENT
 
 
 
@@ -119,16 +161,27 @@ var launch: String = ""
 @export var font_italic_path: String = "res://fonts/DejaVuSansMono-Oblique.ttf"
 
 @export var cursor_shape: int = 0
-@export var cursor_color: Color = Color(0.8, 0.8, 0.8, 0.7)
+@export var cursor_color: Color = CURSOR_COLOR_DEFAULT
 @export var cursor_blink: bool = true
 @export var cursor_blink_speed: float = CURSOR_BLINK_INTERVAL
 
-@export var default_fg: Color = Color(0.8, 0.8, 0.8)
-## The pane's own background: pushed into the grid's `palette[0]`, which is
-## what every cell paints its background with, so the margin a resize exposes
-## is the same colour as the cells beside it. Black matches the engine's own
-## palette, so the default look is the one a terminal had before this setting
-## reached the grid.
+## The pane's own foreground. The default is the engine palette's white
+## (`SYSTEM_COLORS[7]`), so a pane with no scheme draws exactly what it drew
+## before this setting reached the grid.
+@export var default_fg: Color = Color8(229, 229, 229):
+	set(value):
+		# Its own setter repacks the grid, like `default_bg`; listing it in
+		# DRAW_READ_SETTINGS as well would paint the same grid twice.
+		if value == default_fg:
+			return
+		default_fg = value
+		_apply_palette()
+## The pane's own background: pushed as the grid's default background
+## (`Palette::background`), which is what every cell with the default
+## background paints with, so the margin a resize exposes is the same colour as
+## the cells beside it. Black matches the engine's own palette, so the default
+## look is the one a terminal had before this setting reached the grid. A
+## scheme's own background wins while one is set.
 @export var default_bg: Color = Color(0, 0, 0):
 	set(value):
 		# A settings broadcast passes every field on each save, and re-applying
@@ -146,10 +199,39 @@ var launch: String = ""
 		if value == max_fps:
 			return
 		max_fps = value
-		var target = float(max_fps) if max_fps > 0 else (DisplayServer.screen_get_refresh_rate() if DisplayServer.screen_get_refresh_rate() > 0 else 60.0)
-		_sync_interval = 1.0 / target
+		refresh_sync_interval()
+
+## Re-derive the sync cadence from the setting and the window's current screen.
+## A pane's `max_fps` of 0 follows the display; the primary screen is not the
+## window's screen on a multi-monitor setup.
+func refresh_sync_interval() -> void:
+	var target := float(max_fps)
+	if max_fps <= 0:
+		var screen := DisplayServer.window_get_current_screen()
+		var rate := DisplayServer.screen_get_refresh_rate(screen)
+		target = rate if rate > 0.0 else 60.0
+	_sync_interval = 1.0 / target
+
+## The ambient effect (a `UiEffects` id) and its intensity, pushed by
+## `SettingsManager.apply_to_terminal`. The id is kept while the intensity is
+## Off, so turning it up returns the last choice. No path is ever read here: the
+## only shaders are `UiEffects`' preloads.
+@export var effect: String = "":
+	set(value):
+		if value == effect:
+			return
+		effect = value
+		_sync_effects()
+
+@export var effect_intensity: int = 0:
+	set(value):
+		if value == effect_intensity:
+			return
+		effect_intensity = value
+		_sync_effects()
 
 var _terminal: GptyTerminal
+var _font: Font
 var _font_bold: Font
 var _font_italic: Font
 var _cell_cache: Dictionary = {}
@@ -181,10 +263,20 @@ var _draw_ms: float = 0.0
 var _row_backgrounds: Array[Node2D] = []
 var _row_texts: Array[Node2D] = []
 var _overlay: Node2D = null
+## The effect layer: one full-pane quad under every band, present only while an
+## ambient effect is active. `PaneEffects` owns its material and buffer; this
+## layer carries the draw command (see `_draw_effect`).
+var _effect_layer: Node2D = null
+var _effects: PaneEffects = null
 ## The rows the last repaint queued, ascending. A full repaint queues every row;
 ## a partial update only the rows its damage covers. Read by `draw_bench` and
 ## asserted by `test_terminal_repaint.gd`.
 var _painted_rows: PackedInt32Array = PackedInt32Array()
+## How many full repaints this pane has queued. `_painted_rows` says which rows
+## the last one covered, not how many times the grid was asked for one; a
+## settings broadcast must queue none, and exactly one when a draw-read value
+## moved, so the tests count this.
+var _full_repaints := 0
 ## The row count the child order was last built for, so a full repaint only
 ## reorders the tree when that count actually changed.
 var _layers_ordered := -1
@@ -321,6 +413,12 @@ func _note_view_input():
 ## at the current cadence, has budget to spare.
 func _relax_sync_backoff() -> void:
 	_sync_backoff = maxf(_sync_backoff * 0.5 - _sync_interval, 0.0)
+
+## Whether this pane's repaint is in its flood back-off right now. Read by the
+## pane transition layer: a swap resizes this grid, and its work is already
+## stretched to the flood cadence.
+func under_flood_load() -> bool:
+	return _sync_backoff > 0.0
 
 ## Mouse reporting the child process has enabled, read from the grid
 ## (`GptyTerminal.get_mouse_mode`). The bit values are the FFI contract with
@@ -577,6 +675,10 @@ func _ready():
 	_scroll_hints.bind_custom(_can_scroll_start, _can_scroll_live,
 		_jump_to_start, _jump_to_live)
 
+	# A restored pane or a test may have set the effect before `_ready`; the
+	# broadcast that follows normally does it, but this makes the pane correct
+	# on its own first frame either way.
+	_sync_effects()
 	_start_child_if_ready()
 
 ## The grid `size` can show, or `Vector2i.ZERO` when it cannot hold the minimum
@@ -586,8 +688,9 @@ func _ready():
 func _grid_for_size(px: Vector2) -> Vector2i:
 	if _cell_w <= 0.0 or _cell_h <= 0.0:
 		return Vector2i.ZERO
-	var fitted_cols := int((px.x - PADDING) / _cell_w)
-	var fitted_rows := int((px.y - PADDING) / _cell_h)
+	var inset := float(terminal_padding) * 2.0
+	var fitted_cols := int((px.x - inset) / _cell_w)
+	var fitted_rows := int((px.y - inset) / _cell_h)
 	if fitted_cols < MIN_COLS or fitted_rows < MIN_ROWS:
 		return Vector2i.ZERO
 	return Vector2i(fitted_cols, fitted_rows)
@@ -643,11 +746,20 @@ func _start_child_if_ready(size_hint := Vector2.ZERO) -> void:
 		# the tile: a tree mutation must not happen mid-sort.
 		child_start_failed.emit.call_deferred(_start_error)
 		return
-	if color_scheme_path != "":
-		_apply_palette()
+	# The grid exists now: push the palette and the default pair. This is the
+	# first point a scheme (or the pane's own fg/bg) can reach the cells.
+	_apply_palette()
 	_flush_pending_input()
 	# Deferred for the same reason, and so both outcomes arrive alike.
 	child_started.emit.call_deferred()
+
+## The pane's own scheme lives in `PaneSchemeStore` (keyed by attachment_id),
+## so it is read here - once the id is final, like env and the directory - and
+## applied to the grid. The global pair arrives separately through
+## `apply_to_terminal`.
+func apply_user_state():
+	super.apply_user_state()
+	_apply_palette()
 
 ## `Workspace._apply_layout` gave this pane's tile the rect it is drawn at. The
 ## container sorts at the end of that frame, so `_process` waits for the next
@@ -713,10 +825,9 @@ func _get_layout_state() -> Dictionary:
 		else {"shell": shell_command, "shell_args": shell_args.duplicate()})
 	state.merge({
 		"rows": rows, "cols": cols,
-		# `color_scheme_path` is deliberately absent: a file may not name a
-		# scheme (PaneTypes keeps it runtime-only), and on restore the global
-		# appearance is applied after the tile anyway, so a saved value never
-		# took effect. The pane panel and Settings → Appearance still set it.
+		# `color_scheme_path` is deliberately absent: it is the global pair's
+		# resolved member, pushed by `apply_to_terminal`. A pane's own scheme
+		# lives in `PaneSchemeStore` (user-owned, keyed by attachment_id).
 		"cursor_shape": cursor_shape, "cursor_blink": cursor_blink,
 		"cursor_blink_speed": cursor_blink_speed, "cursor_color": cursor_color,
 		"scroll_lines": scroll_lines, "max_fps": max_fps,
@@ -730,15 +841,38 @@ func _get_layout_state() -> Dictionary:
 		state["font_path"] = font_path
 	return state
 
+## The `apply_settings` keys that only the draw passes read, and whose own
+## setters do not already repaint. `font_path`, `font_size`, `default_bg`,
+## `color_scheme_path` and `terminal_padding` are deliberately absent: each
+## setter repacks the grid when the value moves, and listing it here would paint
+## the same grid twice. `default_fg` is absent because no draw pass reads it -
+## the cell cache carries its own `fg` - so a change to it cannot alter a pixel.
+const DRAW_READ_SETTINGS := [
+	"cursor_shape", "cursor_blink", "cursor_blink_speed",
+	"beam_cursor_width", "underline_cursor_height",
+	"focus_border_color", "selection_color", "scrollback_indicator_color",
+	"effect", "effect_intensity",
+]
+
+func _draw_read_values() -> Array:
+	var out := []
+	for key in DRAW_READ_SETTINGS:
+		out.append(get(key))
+	return out
+
 func apply_settings(settings: Dictionary):
 	# Restore serialized Color values from JSON round-trips.
 	# Layout JSON stores Colors as "(r, g, b, a)" strings.
 	_restore_color_strings(settings)
+	# A broadcast re-sends all fifteen keys on every save. Only a value the draw
+	# passes read may cost a repaint, and one that did not move costs nothing:
+	# the comparison is what makes `history_lines` or `shell_env` free, and what
+	# makes the second broadcast of an appearance change (the appearance
+	# listener's loop, then `_on_settings_changed`'s) a no-op.
+	var before := _draw_read_values()
 	super.apply_settings(settings)
-	# The closed table sanitized every value before assignment, `shell_args`
-	# included. Colors, cursor shape and metrics are all read by the draw
-	# passes; the grid generation does not move for them, so repaint once here.
-	_repaint_all()
+	if _draw_read_values() != before:
+		_repaint_all()
 
 func _restore_color_strings(dict: Dictionary):
 	for key in ["default_fg", "default_bg", "cursor_color", "focus_border_color", "selection_color", "scrollback_indicator_color"]:
@@ -756,40 +890,83 @@ func _reload_fonts():
 	_font_bold = _load_font(font_bold_path, "res://fonts/DejaVuSansMono-Bold.ttf")
 	_font_italic = _load_font(font_italic_path, "res://fonts/DejaVuSansMono-Oblique.ttf")
 
-## Largest scheme file read. A palette is 16 short hex colours; anything past
-## this is not a scheme, and the read happens on the GUI thread.
-const SCHEME_MAX_BYTES := 1 << 14
-
-## Apply the pane's colours to the grid: the ANSI palette from its scheme file,
-## and the terminal's background.
-##
-## `default_bg` is the pane's own background and is pushed into the grid's
-## `palette[0]` - the entry every cell paints its background with
-## (`NamedColor::Background`) - so the margin a resize exposes is the same
-## colour as the cells beside it. A scheme file names its own background as its
-## first colour, which wins while one is set. `_ground` is then read back from
-## the grid rather than assumed, which is what makes the two agree.
-##
-## The path is data: `TextRead` gates it to an absolute regular file and caps
-## the read, so a scheme entry cannot make the pane read a device, a FIFO, or a
-## huge file.
-func _apply_palette():
-	if _terminal == null:
-		_ground = default_bg
+## Read and cache the scheme this pane draws with. A path change is what
+## re-reads; a settings broadcast that passes the same global value does not.
+func _load_scheme() -> void:
+	var path := _scheme_path()
+	if path == _scheme_loaded_path:
 		return
-	var path = color_scheme_path
-	var applied := false
-	if path != "":
-		var r := TextRead.read_prefix(path, SCHEME_MAX_BYTES)
-		if r.ok:
-			var hex_csv: String = str(r.text).strip_edges().replace("\n", ",").replace("\r", ",").replace(" ", "")
-			_terminal.set_palette(hex_csv)
-			applied = true
-	if not applied:
+	_scheme_loaded_path = path
+	_scheme = SchemeLibrary.loaded(path)
+	_scheme_cursor = Color.TRANSPARENT
+	_scheme_selection = Color.TRANSPARENT
+	if _scheme.is_empty():
+		if path != "":
+			push_warning("[TerminalPane] colour scheme did not load: %s" % path)
+		return
+	var cursor := SchemeLibrary.color(_scheme, "cursor", Color.TRANSPARENT)
+	if cursor.a > 0.0:
+		_scheme_cursor = Color(cursor, SCHEME_CURSOR_ALPHA)
+	var selection := SchemeLibrary.color(_scheme, "selection", Color.TRANSPARENT)
+	if selection.a > 0.0:
+		_scheme_selection = Color(selection, SCHEME_SELECTION_ALPHA)
+
+## Apply the pane's colours to the grid: the ANSI palette and the default
+## foreground/background pair.
+##
+## With a scheme, the scheme's foreground and background are the grid's
+## defaults, so a cell written with the terminal's own colours follows the
+## scheme (`NamedColor::Foreground`/`Background` resolve to `Palette`'s
+## fields). With none, the pane's own pair is the default. `_ground` is then
+## read back from the grid rather than assumed, which is what makes the margin
+## a resize exposes agree with the cells beside it.
+##
+## A scheme is parsed once by `SchemeLibrary` (capped, closed keys); the pane
+## never reads the file itself. The grid does not exist before `start_shell`,
+## so the pre-start branch paints the ground directly and the start path
+## re-applies once the grid is there.
+func _apply_palette():
+	if _terminal == null or _terminal.get_rows() == 0:
+		_load_scheme()
+		_ground = SchemeLibrary.color(_scheme, "background", default_bg)
+		if _effects != null:
+			_effects.set_ground(_ground)
+		_repaint_all()
+		return
+	_load_scheme()
+	if _scheme.is_empty():
 		_terminal.set_palette("")
-		_terminal.set_background_color(default_bg)
+		_terminal.set_default_colors(default_fg, default_bg)
+	else:
+		# Built first so the FFI call takes one plain argument.
+		var palette_csv := ",".join(_scheme.get("palette", []))
+		_terminal.set_palette(palette_csv)
+		_terminal.set_default_colors(
+			SchemeLibrary.color(_scheme, "foreground", default_fg),
+			SchemeLibrary.color(_scheme, "background", default_bg))
 	_ground = _terminal.get_background_color()
+	if _effects != null:
+		_effects.set_ground(_ground)
 	_repaint_all()
+
+## Re-read the pane's own scheme from `PaneSchemeStore`. The workspace calls
+## this after the pane settings UI writes the store; an edit to another row
+## leaves the path unchanged and costs no repaint.
+func apply_scheme_override() -> void:
+	if _scheme_path() != _scheme_loaded_path:
+		_apply_palette()
+
+## The colours the draw pass uses for the cursor and the selection. A pane's
+## own cursor colour wins over a scheme; a scheme fills in while the colour is
+## the shipped default. Selection has no per-pane UI, so a scheme's selection
+## wins while one is active.
+func _cursor_draw_color() -> Color:
+	if cursor_color != CURSOR_COLOR_DEFAULT:
+		return cursor_color
+	return _scheme_cursor if _scheme_cursor.a > 0.0 else cursor_color
+
+func _selection_draw_color() -> Color:
+	return _scheme_selection if _scheme_selection.a > 0.0 else selection_color
 
 ## The colour the pane fills behind and around its grid. Always the grid's own
 ## background, so the draw pass and the cells agree by construction.
@@ -805,15 +982,46 @@ func _load_font(path: String, fallback: String) -> Font:
 	return f
 
 func _recompute_cell_metrics():
+	if _font == null:
+		return  # the setter runs at spawn, before _ready loads the faces
 	_font.fixed_size = font_size
 	_font_bold.fixed_size = font_size
 	_font_italic.fixed_size = font_size
 	_cell_w = _font.get_char_size('W'.unicode_at(0), font_size).x
 	_cell_h = _font.get_height(font_size)
-	custom_minimum_size = Vector2(PADDING * _cell_w + PADDING, _cell_h * 2 + PADDING)
+	if _effects != null:
+		_effects.set_cell_height(_cell_h)
+	custom_minimum_size = Vector2(MIN_SIZE_COLS * _cell_w + terminal_padding * 2.0,
+		_cell_h * 2.0 + terminal_padding * 2.0)
 	# Glyph metrics changed: existing cells must be redrawn even when the
 	# derived rows/cols happen to be unchanged, and every band moves.
 	_repaint_all()
+	# A metric change can change how many cells fit (a padding or font-size
+	# change). Re-ask the backend now instead of waiting for a tile resize:
+	# rows/cols must stay the count the pane draws. A refusal is retried by
+	# the resize debounce, like any other refused resize.
+	if _started and _terminal != null:
+		if not _resize_to_fit() and _grid_for_size(size) != Vector2i.ZERO:
+			_resize_pending = true
+			_resize_timer = 0.0
+
+## Ask the backend for the grid the pane's current size fits. True when the
+## grid already holds it (or now does); false when the tile cannot hold the
+## minimum grid or the backend refused (poisoned lock) — the caller keeps
+## `_resize_pending` armed so the debounce retries.
+func _resize_to_fit() -> bool:
+	if _terminal == null:
+		return false
+	var fitted := _grid_for_size(size)
+	if fitted == Vector2i.ZERO:
+		return false
+	if fitted.x == cols and fitted.y == rows:
+		return true
+	if not _terminal.resize_grid(fitted.y, fitted.x):
+		return false
+	cols = fitted.x
+	rows = fitted.y
+	return true
 
 func _process(delta):
 	if not _started and _laid_out and Engine.get_process_frames() > _laid_out_frame:
@@ -838,29 +1046,23 @@ func _process(delta):
 		_resize_timer += delta
 		var resize_threshold := RESIZE_DRAG_INTERVAL if _drag_resizing else RESIZE_DEBOUNCE
 		if _resize_timer >= resize_threshold:
-			var fitted := _grid_for_size(size)
-			if fitted == Vector2i.ZERO:
+			if _grid_for_size(size) == Vector2i.ZERO:
 				# Size collapsed between event and apply — keep waiting for
 				# the stable geometry instead of applying a tiny grid.
 				_resize_timer = 0.0
 			else:
-				_resize_pending = false
 				# Recompute from the CURRENT size so the grid applies the
 				# final stable geometry, never an intermediate cascade size.
-				if fitted.x != cols or fitted.y != rows:
-					# Keep the debounce armed until the backend reports it took
-					# the size. A refused resize answers false (poisoned grid
-					# lock) and a panic in the call never returns at all — the
-					# GDScript VM aborts this function at the FFI boundary — so
-					# in both cases cols/rows must keep the size the grid really
-					# holds, or the pane renders at dimensions the backend never
-					# applied and the comparison above never asks again.
+				# `_resize_to_fit` writes cols/rows only when the backend took
+				# the size; a refusal (poisoned grid lock) leaves the debounce
+				# armed so the pane keeps asking, and a panic in the call never
+				# returns at all — the GDScript VM aborts this function at the
+				# FFI boundary — so cols/rows can never claim a size the grid
+				# does not hold.
+				_resize_pending = false
+				if not _resize_to_fit():
 					_resize_pending = true
 					_resize_timer = 0.0
-					if _terminal.resize_grid(fitted.y, fitted.x):
-						cols = fitted.x
-						rows = fitted.y
-						_resize_pending = false
 
 	_time_since_sync += delta
 	if _time_since_sync >= _sync_interval + _sync_backoff:
@@ -1084,12 +1286,14 @@ func _request_cursor_redraw() -> void:
 func _grid_offset() -> Vector2:
 	# Before the first grid sync the cache is empty; return a neutral
 	# offset so mouse handling and hit-testing stay safe.
+	var pad := float(terminal_padding)
 	if _cell_cache.is_empty():
-		return Vector2(2, 2)
+		return Vector2(pad, pad)
 	var gc: int = _cell_cache["cols"]
 	var gr: int = _cell_cache["rows"]
 	var tw = gc * _cell_w; var th = gr * _cell_h
-	return Vector2(2 + maxf((size.x - PADDING - tw) / 2.0, 0), 2 + maxf((size.y - PADDING - th) / 2.0, 0))
+	return Vector2(pad + maxf((size.x - pad * 2.0 - tw) / 2.0, 0),
+		pad + maxf((size.y - pad * 2.0 - th) / 2.0, 0))
 
 ## Create, free and order the paint layers for the grid the cache holds.
 ## Runs from a full repaint only: a partial update can never change the row
@@ -1110,6 +1314,7 @@ func _sync_layers():
 		_row_backgrounds.append(_new_layer(Layer.BG, _row_backgrounds.size()))
 	while _row_texts.size() < n:
 		_row_texts.append(_new_layer(Layer.TEXT, _row_texts.size()))
+	_sync_effect_layer()
 	if _overlay == null:
 		_overlay = _new_layer(Layer.OVERLAY, 0)
 	# The bands stay at the origin and draw at the grid's absolute coordinates.
@@ -1122,13 +1327,106 @@ func _sync_layers():
 	# background band and then its text band interleaved leaves every text band
 	# after the strip whenever the strip sits between the two groups, because
 	# each `move_child` shifts the not-yet-placed siblings.
-	if _layers_ordered != n:
-		_layers_ordered = n
+	#
+	# The effect layer, when one is active, is first: it is the pane's ground,
+	# and every band (and the overlay) draws above it. The ordering key covers
+	# the layer's presence as well as the row count, because turning an effect
+	# off frees it without changing `n`.
+	var base := 1 if _effect_layer != null else 0
+	var order_key := n * 2 + base
+	if _layers_ordered != order_key:
+		_layers_ordered = order_key
+		if _effect_layer != null:
+			move_child(_effect_layer, 0)
 		for r in n:
-			move_child(_row_backgrounds[r], r)
+			move_child(_row_backgrounds[r], base + r)
 		for r in n:
-			move_child(_row_texts[r], n + r)
-		move_child(_overlay, 2 * n)
+			move_child(_row_texts[r], base + n + r)
+		move_child(_overlay, base + 2 * n)
+
+## Create, retire or re-parameterise the effect layer. Called from every layer
+## sync; the material belongs to the layer alone (one draw command), which is
+## why the effect cannot be a material on the grid's own canvas.
+func _sync_effect_layer():
+	var wanted := _effects != null and _effects.wants_backdrop()
+	if not wanted:
+		if _effect_layer != null:
+			remove_child(_effect_layer)
+			_effect_layer.free()
+			_effect_layer = null
+		return
+	if _effect_layer == null:
+		_effect_layer = _new_layer(Layer.EFFECT, 0)
+	_effect_layer.material = _effects.layer_material()
+	_effect_layer.texture_filter = (
+		CanvasItem.TEXTURE_FILTER_NEAREST if _effects.uses_buffer()
+		else CanvasItem.TEXTURE_FILTER_LINEAR)
+
+## One full-pane ground quad. The pane's own `_draw` skips its ground while this
+## is active, and the row bands skip the default-background runs, so the effect
+## is visible through the grid and every non-default cell stays opaque.
+func _draw_effect(item: CanvasItem) -> void:
+	if _effect_backdrop():
+		_effects.paint(item, size)
+
+## A buffer tick produced a frame; the layer's one draw must be re-issued to
+## reference it.
+func _repaint_effect() -> void:
+	if _effect_layer != null:
+		_effect_layer.queue_redraw()
+
+## Freeze the ambient clock for a capture: grain is wall-clock driven, so a live
+## buffer would never repeat between two runs of the same state.
+func pin_effects() -> void:
+	if _effects != null:
+		_effects.pin(true)
+
+## Fire a reactive cue on this pane. The host is created on demand: a pane with
+## no ambient effect still answers a concept event.
+func flash_effect(id: String) -> bool:
+	_ensure_effects()
+	return _effects.flash(id)
+
+## Draw one cue's final frame for a capture.
+func pin_effect_cue(id: String) -> void:
+	_ensure_effects()
+	_effects.pin_cue(id)
+
+## True while an ambient effect owns the ground. The empty-cache guard keeps a
+## pane that has not synced yet on today's behaviour (the wrapper's background).
+func _effect_backdrop() -> bool:
+	return (
+		_effects != null
+		and _effects.wants_backdrop()
+		and not _cell_cache.is_empty()
+		and int(_cell_cache.get("rows", 0)) > 0
+	)
+
+## True when the effect layer already paints this cell background, so the band
+## must leave it uncovered.
+func _effect_covers_background(bg: Color) -> bool:
+	return _effect_backdrop() and bg == _ground
+
+func _sync_effects() -> void:
+	if effect == "" or effect_intensity <= UiEffects.OFF:
+		if _effects != null:
+			_effects.configure("", UiEffects.OFF)
+		return
+	_ensure_effects()
+	_effects.configure(effect, effect_intensity)
+
+func _ensure_effects() -> void:
+	if _effects != null:
+		return
+	_effects = PaneEffects.new()
+	_effects.name = "PaneEffects"
+	add_child(_effects)
+	_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_effects.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_effects.focus_mode = Control.FOCUS_NONE
+	_effects.backdrop_frame.connect(_repaint_effect)
+	_effects.set_ground(_ground)
+	_effects.set_cell_height(_cell_h)
 
 func _new_layer(kind: int, row: int) -> Node2D:
 	var layer := Layer.new()
@@ -1141,12 +1439,15 @@ func _new_layer(kind: int, row: int) -> Node2D:
 ## Repaint the whole grid: the ground rect, both bands of every row and the
 ## overlay. Anything that moves or recolours the grid calls this.
 func _repaint_all():
+	_full_repaints += 1
 	_sync_layers()
 	_painted_rows.resize(_row_texts.size())
 	for r in _row_texts.size():
 		_painted_rows[r] = r
 		_row_backgrounds[r].queue_redraw()
 		_row_texts[r].queue_redraw()
+	if _effect_layer != null:
+		_effect_layer.queue_redraw()
 	queue_redraw()
 	if _overlay != null:
 		_overlay.queue_redraw()
@@ -1181,9 +1482,12 @@ func _draw():
 	var t0 = Time.get_ticks_usec()
 	# The pane's own canvas draws under every child, so it carries only the
 	# ground: one rect that changes with the pane's size or the palette, never
-	# with the grid's content.
+	# with the grid's content. While an ambient effect is active its layer
+	# paints the ground (with the effect in it), so this rect is skipped - two
+	# alpha-bearing grounds would compound instead of the scheme's own alpha.
 	if not _cell_cache.is_empty() and int(_cell_cache.get("rows", 0)) > 0:
-		draw_rect(Rect2(Vector2.ZERO, size), _ground)
+		if not _effect_backdrop():
+			draw_rect(Rect2(Vector2.ZERO, size), _ground)
 	_draw_ms += float(Time.get_ticks_usec() - t0) / 1000.0
 
 
@@ -1204,6 +1508,11 @@ func _draw_row_background(item: CanvasItem, r: int):
 			c += 1
 			while c < n_cols and bg_arr[r * n_cols + c] == bg:
 				c += 1
+			# While an effect paints the ground, a run at that same colour
+			# would cover it; every other run (ANSI backgrounds, inverse
+			# cells) still paints its own rect.
+			if _effect_covers_background(bg):
+				continue
 			# One rect for the entire run of same-background cells
 			item.draw_rect(Rect2(off.x + start_c * _cell_w, row_y, (c - start_c) * _cell_w, _cell_h), bg)
 	_draw_ms += float(Time.get_ticks_usec() - t0) / 1000.0
@@ -1316,18 +1625,19 @@ func _draw_cursor(item: CanvasItem, off: Vector2, baseline: float):
 	if cr < _cell_cache.get("rows", 0) and cc < _cell_cache.get("cols", 0):
 		var chars: Array = _cell_cache["chars"]
 		cursor_ch = chars[cr][cc]
+	var colour := _cursor_draw_color()
 
 	match cursor_shape:
 		0:
-			item.draw_rect(Rect2(cx, cy, _cell_w, _cell_h), cursor_color)
+			item.draw_rect(Rect2(cx, cy, _cell_w, _cell_h), colour)
 			if cursor_ch != " " and cursor_ch != "":
 				item.draw_string(_font, Vector2(cx, cy + baseline), cursor_ch, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.BLACK)
 		1:
-			item.draw_rect(Rect2(cx, cy + _cell_h - underline_cursor_height, _cell_w, underline_cursor_height), cursor_color)
+			item.draw_rect(Rect2(cx, cy + _cell_h - underline_cursor_height, _cell_w, underline_cursor_height), colour)
 		2:
-			item.draw_rect(Rect2(cx, cy, beam_cursor_width, _cell_h), cursor_color)
+			item.draw_rect(Rect2(cx, cy, beam_cursor_width, _cell_h), colour)
 		_:
-			item.draw_rect(Rect2(cx, cy, _cell_w, _cell_h), cursor_color)
+			item.draw_rect(Rect2(cx, cy, _cell_w, _cell_h), colour)
 			if cursor_ch != " " and cursor_ch != "":
 				item.draw_string(_font, Vector2(cx, cy + baseline), cursor_ch, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.BLACK)
 
@@ -1338,7 +1648,7 @@ func _draw_selection(item: CanvasItem, off: Vector2):
 		var c1: int = _sel_cells[i + 2]
 		item.draw_rect(Rect2(
 			off.x + c0 * _cell_w, off.y + row * _cell_h,
-			(c1 - c0 + 1) * _cell_w, _cell_h), selection_color)
+			(c1 - c0 + 1) * _cell_w, _cell_h), _selection_draw_color())
 
 
 ## Selected text, read from the grid rows: text scrolled out of the viewport
@@ -2173,24 +2483,15 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 		AppDialog.popup(dlg))
 	_make_row(v, "Font:", font_btn, panel)
 
-	# Color scheme picker — stored as metadata to avoid closure capture issues
-	var scheme_btn = Button.new()
-	scheme_btn.text = color_scheme_path.get_file() if color_scheme_path != "" else "(none)"
-	scheme_btn.set_meta("path", color_scheme_path)
-	scheme_btn.clip_text = true
-	scheme_btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	scheme_btn.pressed.connect(func():
-		var dlg := AppDialog.picker(panel, "Color scheme", FileDialog.FILE_MODE_OPEN_FILE)
-		dlg.current_path = scheme_btn.get_meta("path", "")
-		dlg.add_filter("*.txt; *.json; *.csv", "Scheme files")
-		dlg.file_selected.connect(func(path: String):
-			scheme_btn.set_meta("path", path)
-			scheme_btn.text = path.get_file()
-			panel._debounce_timer.start()
-			dlg.queue_free())
-		dlg.canceled.connect(dlg.queue_free)
-		AppDialog.popup(dlg))
-	_make_row(v, "Color scheme:", scheme_btn, panel)
+	# The pane's own scheme (PaneSchemeStore, keyed by attachment_id). The empty
+	# item follows the global dark/light pair, so this row is the exception and
+	# Settings -> Appearance is still the rule.
+	var scheme_picker := SchemePicker.new()
+	scheme_picker.name = "PaneSchemePicker"
+	scheme_picker.tooltip_text = "This pane's own scheme; empty follows Settings"
+	scheme_picker.setup(PaneSchemeStore.scheme_for(attachment_id), "(follow Settings)")
+	scheme_picker.scheme_chosen.connect(func(_path: String): panel._debounce_timer.start())
+	_make_row(v, "Color scheme:", scheme_picker, panel)
 
 	# ── Gather func ──
 	panel._gather_func = func():
@@ -2211,7 +2512,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"default_fg": fg_btn.color,
 			"default_bg": bg_btn.color,
 			"font_path": font_btn.get_meta("path", ""),
-			"color_scheme_path": scheme_btn.get_meta("path", ""),
+			"pane_scheme": scheme_picker.get_selected_path(),
 		}
 
 	return v

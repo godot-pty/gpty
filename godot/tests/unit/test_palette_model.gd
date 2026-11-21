@@ -74,8 +74,15 @@ func test_matching_is_case_insensitive_and_ranked():
 
 func test_mutating_a_returned_entry_does_not_touch_the_model():
 	var first := PaletteModel.entries()
+	assert_gt(first.size(), 0, "the catalog is never empty")
+	if first.is_empty():
+		return
 	first[0]["label"] = "Mutated"
-	assert_eq(str(PaletteModel.entries()[0]["label"]), "New Terminal",
+	var again := PaletteModel.entries()
+	assert_gt(again.size(), 0, "the catalog is never empty")
+	if again.is_empty():
+		return
+	assert_eq(str(again[0]["label"]), "New Terminal",
 		"a caller edits its own copy, never the const")
 
 # ── Saved commands ─────────────────────────────────────────────────────

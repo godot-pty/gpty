@@ -245,8 +245,7 @@ func test_closing_a_terminal_with_a_running_command_asks_first():
 
 	_ws._kill(body)
 	_expect_running_ask().confirmed.emit()
-	await get_tree().process_frame
-	assert_false(is_instance_valid(body), "confirming closes the pane")
+	assert_true(await _wait_for_close(body), "confirming closes the pane")
 
 func _wait_for_shell_output(body: Control, timeout_ms: int) -> bool:
 	var deadline := Time.get_ticks_msec() + timeout_ms
@@ -284,10 +283,19 @@ func test_closing_an_idle_shell_does_not_ask():
 		"a shell at its prompt runs nothing: %s" % _status_text(body))
 
 	_ws._kill(body)
-	await get_tree().process_frame
-	assert_false(is_instance_valid(body), "an idle shell closes without a question")
+	assert_true(await _wait_for_close(body), "an idle shell closes without a question")
 	assert_null(_ws.find_child("RunningWorkConfirm", false, false),
 		"nothing was running, so nothing was asked")
+
+## A close plays the configured pane transition before the body is freed (the
+## ghost owns the free), so wait for it instead of assuming one frame.
+func _wait_for_close(body: Control, timeout_ms := 2000) -> bool:
+	var deadline := Time.get_ticks_msec() + timeout_ms
+	while Time.get_ticks_msec() < deadline:
+		if not is_instance_valid(body):
+			return true
+		await get_tree().create_timer(0.02).timeout
+	return not is_instance_valid(body)
 
 func _status_text(body: Control) -> String:
 	return "status=%s" % str(body._terminal.get_status())
@@ -332,8 +340,7 @@ func test_closing_a_terminal_whose_task_died_asks_first():
 
 	_ws._kill(body)
 	_expect_running_ask().confirmed.emit()
-	await get_tree().process_frame
-	assert_false(is_instance_valid(body), "confirming closes the pane")
+	assert_true(await _wait_for_close(body), "confirming closes the pane")
 
 func _wait_for_task_end(body: Control, timeout_ms: int) -> bool:
 	var deadline := Time.get_ticks_msec() + timeout_ms
@@ -398,8 +405,7 @@ func test_killing_a_dirty_pane_asks_first_and_a_refusal_keeps_it():
 
 	_ws._kill(pane)
 	_expect_ask(pane).custom_action.emit("discard")
-	await get_tree().process_frame
-	assert_false(is_instance_valid(pane), "discarding closes it")
+	assert_true(await _wait_for_close(pane), "discarding closes it")
 	assert_eq(_ws._tm.tiles.size(), tiles_before - 1)
 
 func test_kill_last_asks_through_the_same_guard():

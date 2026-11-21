@@ -2,19 +2,14 @@ name: CodeQL
 
 on:
   # Committed as advanced setup; the repository's default setup is off. Scans
-  # run where the code is reviewed and on a schedule - never on a push, so a
-  # change to Markdown or to these workflows does not spend a scan, and a
-  # dormant tree still picks up a new query pack every week.
+  # run on every pull request to a protected branch and on a schedule - never
+  # on a push. The PR filter has no path exclusions because CodeQL is a
+  # required context on `main`: a docs-only PR must still report it, or the
+  # ruleset would wait on a check that never starts. A dormant tree still
+  # picks up a new query pack every week.
   # `workflow_dispatch` exists so the file can be exercised after an edit.
   pull_request:
-    branches: [main, master, "0.*"]
-    # The same documentation-only set the code workflow ignores: a note edit
-    # cannot change what the scan analyses.
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
-      - "godot/knowledge.json"
-      - "LICENSE"
+    branches: [main, "release/v*"]
   schedule:
     # Thursdays, 23:30 UTC (the slot GitHub's generator picked). An odd minute
     # on purpose: the top of the hour is the busiest for scheduled jobs.

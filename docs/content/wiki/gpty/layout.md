@@ -22,18 +22,19 @@ Each divider is one grab band centred on it (`DividerHandles`, 12 px), not a str
 
 The divider moves a whole grid unit at a time, and the release commits the same unit it showed, so the divider never jumps when the button comes up. The panes themselves reflow while the drag runs, at about ten reflows a second rather than on every motion event, which is what makes the text follow the divider without a window-size signal to the shell per pixel; the released geometry gets one final reflow. A tile never shrinks below `MIN_TILE`, and a line with no tile on its far side (or no travel left at all) shows no handle and starts no drag.
 
-A terminal fills its whole rectangle with the same colour its cells paint — the grid's background, `palette[0]`, which a colour scheme's first entry sets — so the margin a resize exposes is never a band of a different grey.
+A terminal fills its whole rectangle with the same colour its cells paint — the grid's background, `Palette::background`, which a colour scheme's background sets and which otherwise comes from the pane's own Background setting — so the margin a resize exposes is never a band of a different grey.
 
 The sidebar's swap-position action exchanges two tiles' stored geometry without touching what runs inside them.
 
 ## What a layout stores
 
-Each tile saves its geometry plus the pane's layout state: type, pane name, attachment id, tags, font size, and whatever that pane type adds — a terminal's command, shell arguments, grid dimensions and cursor look; a wiki pane's vault path, view mode, open note and whether the graph was showing; a media pane's file; and so on.
+Each tile saves its geometry plus the pane's layout state: type, pane name, attachment id, tags, font size, and whatever that pane type adds — a terminal's command, shell arguments, grid dimensions and cursor look; a wiki pane's vault path, view mode, open note, whether the graph was showing, its link-map style and the map's saved note positions (bounded; a note that has left the vault is ignored); a media pane's file; and so on.
 
 A layout deliberately does **not** store:
 
 - Running processes, exit state, or scrollback — history lives in a separate database and survives panes.
 - Unsaved editor text. A dirty wiki buffer is not part of the layout; a recovery copy outside the vault covers a crash.
+- Physics state. The orbital link map's bodies, velocities and springs are rebuilt from the saved note positions; no run-time simulation state is persisted.
 - Per-pane environment. That is user-owned, keyed by attachment id, and lives in its own store (see [[settings]]).
 - Window size, position, sidebar width, or focus. Those belong to the application, not the arrangement.
 

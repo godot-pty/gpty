@@ -40,6 +40,7 @@ mod ipc;
 pub mod markdown;
 mod media_api;
 mod omp_events;
+mod scheme_api;
 mod store_api;
 mod vault_api;
 mod vault_ipc;
@@ -524,8 +525,11 @@ impl GptyTerminal {
     ///
     /// A scheme replaces the whole palette: entries it does not carry (or
     /// carries malformed) take the system default instead of the colour the
-    /// previous scheme left in that slot. The generation moves only when the
-    /// result differs, so re-applying the current scheme costs no repaint.
+    /// previous scheme left in that slot. The default foreground and
+    /// background follow entries 7 and 0 (the legacy CSV meaning) until
+    /// `set_default_colors` names the scheme's own pair. The generation moves
+    /// only when the result differs, so re-applying the current scheme costs
+    /// no repaint.
     #[func]
     fn set_palette(&mut self, hex_csv: GString) {
         let spawned = match &self.spawned {
@@ -536,11 +540,12 @@ impl GptyTerminal {
             Ok(g) => g,
             Err(_) => return,
         };
-        let next = if hex_csv.is_empty() {
+        let ansi = if hex_csv.is_empty() {
             gpty_core::color::SYSTEM_COLORS
         } else {
             gpty_core::color::palette_from_csv(&hex_csv.to_string())
         };
+        let next = gpty_core::color::Palette::from_ansi(ansi);
         if grid.palette != next {
             grid.palette = next;
             grid.generation += 1;
@@ -548,16 +553,16 @@ impl GptyTerminal {
         }
     }
 
-    /// The grid's background colour: `palette[0]`, which is what every cell
-    /// paints its own background with (`NamedColor::Background` resolves to it
-    /// in `color_to_rgb`). A renderer reads it instead of guessing, so the
+    /// The grid's background colour, which every cell with the default
+    /// background paints with (`NamedColor::Background` resolves to
+    /// `Palette::background`). A renderer reads it instead of guessing, so the
     /// area a pane grows into during a resize is the same colour as the cells
     /// beside it.
     #[func]
     fn get_background_color(&self) -> Color {
         self.with_grid(
             |g| {
-                let bg = g.palette[0];
+                let bg = g.palette.background;
                 Color::from_rgb(
                     bg[0] as f32 * RGB_SCALE,
                     bg[1] as f32 * RGB_SCALE,
@@ -568,19 +573,33 @@ impl GptyTerminal {
         )
     }
 
-    /// Set the grid's background: writes `palette[0]` and forces a full
-    /// repaint, so every cell re-resolves through `CellInfo::from_cell`
-    /// against the new palette instead of keeping the colour it was written
-    /// under.
+    /// Set the grid's default foreground and background together: the colours
+    /// `NamedColor::Foreground`/`Background` resolve to, separate from ANSI
+    /// black and white. Forces a full repaint, so every cell re-resolves
+    /// through `CellInfo::from_cell` against the new palette instead of keeping
+    /// the colour it was written under.
+    ///
+    /// A no-op before a child exists - `start_shell` creates the grid - so a
+    /// pane applies this once its shell has started.
     #[func]
-    fn set_background_color(&mut self, color: Color) {
+    fn set_default_colors(&mut self, foreground: Color, background: Color) {
         let to_byte = |v: f32| (v * 255.0).round().clamp(0.0, 255.0) as u8;
-        let rgb = [to_byte(color.r), to_byte(color.g), to_byte(color.b)];
+        let fg = [
+            to_byte(foreground.r),
+            to_byte(foreground.g),
+            to_byte(foreground.b),
+        ];
+        let bg = [
+            to_byte(background.r),
+            to_byte(background.g),
+            to_byte(background.b),
+        ];
         self.with_grid_mut(|g| {
-            if g.palette[0] == rgb {
+            if g.palette.foreground == fg && g.palette.background == bg {
                 return;
             }
-            g.palette[0] = rgb;
+            g.palette.foreground = fg;
+            g.palette.background = bg;
             g.generation += 1;
             g.palette_changed = true;
         });

@@ -24,8 +24,9 @@ records the checkpoints an agent must not skip, not a second runbook.
 
 - Read `RELEASING.md`, the target `docs/content/docs/roadmap/vX.Y.md` section,
   and the previous release's changelog page.
-- Confirm the target version, previous tag, active integration branch, clean
-  tree, signing key, `gpty-bot` token and a graphical session for screenshots.
+- Confirm the target version, previous tag, whether the line is active (`main`)
+  or in maintenance (`release/vX.Y`), clean tree, signing key, `gpty-bot` token
+  and a graphical session for screenshots.
 - Run `./scripts/check-github-settings` (read-only; maintainer `gh`) before the
   release and after any ruleset or environment change.
 - Run `./scripts/ci-check`; a green local run is the baseline, not proof of the
@@ -43,17 +44,33 @@ records the checkpoints an agent must not skip, not a second runbook.
   and ask the user for the image.
 - **Review pause:** present the changelog, blog draft, screenshots and
   `/tmp/gpty-release-body.md`; wait for the user's explicit OK.
-- **Release execution:** follow `RELEASING.md` §8–§10. Push the integration
-  branch through `scripts/bot-push`, open the PR with `scripts/bot-pr`, wait for
-  all required checks, approve and merge with a merge commit, then create and
-  verify the signed tag.
-- **Environment approval:** review `gpty-release-dist` (three archives plus
-  `SHA256SUMS`) before approving the `release` environment. `mcp-registry` uses
-  the same environment.
+- **Release execution:** follow `RELEASING.md` §8–§10. Push the release-prep
+  branch through `scripts/bot-push`, open the PR with `scripts/bot-pr --base
+  main` (or the maintenance branch), wait for the active line's required checks
+  (on a maintenance branch, for its CI, CodeQL and secret-scan runs) to be
+  green, approve and merge with a merge commit, then create and verify the
+  signed tag on `main` (or on the maintenance branch).
+- **Environment approval:** download `gpty-release-dist` (three archives plus
+  `SHA256SUMS`) and measure the bytes before approving the `release`
+  environment - `sha256sum -c`, both license files in every archive, `--version`
+  from the linux binary, `scripts/check-macos-minos` on the macOS slices, and
+  `zipinfo -l` on the macOS archive for one real dylib per FFmpeg library with
+  the `<major>` and unversioned names as symlinks. Read the shipped archive,
+  never the bundler's intent: v0.8.4's bundler created those aliases correctly
+  and the artifact transport dereferenced them, so only the asset's own bytes
+  are proof. `mcp-registry` uses the same environment.
 - **Verification:** verify checksums, both license files in every archive, the
-  attestation's subject digest, and the macOS 10.13/11.0 dylib floor with
-  `scripts/check-macos-minos`. Run the release tail (AUR, crates.io in
-  dependency order, MCP registry dispatch, asset-set roadmap row).
+  attestation's subject digest by the asset's own SHA-256 (that command can
+  print nothing and exit 0), the macOS 10.13/11.0 dylib floor with
+  `scripts/check-macos-minos`, and the macOS alias shape from the previous
+  checkpoint. Run the release tail (AUR, crates.io in dependency order, MCP
+  registry dispatch, asset-set roadmap row); an AUR commit without the key on
+  the machine is validated with `makepkg` and reported, never claimed as
+  published.
+- **A row only a release can prove stays open until the asset is measured.**
+  Close it with the numbers from the shipped file (`zipinfo`, byte size,
+  `--version`), not with the fix's description, and put the measurement in the
+  row.
 
 ## Failure rules
 

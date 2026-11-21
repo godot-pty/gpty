@@ -211,7 +211,7 @@ func test_cli_backend_streams_from_fake_adapter():
 	assert_true(f != null, "must write the adapter script")
 	f.store_string(script)
 	f.close()
-	OS.execute("chmod", ["+x", abs])
+	OS.execute("chmod", ["0700", abs])
 	_pane.backend = "cli"
 	_pane.command = [abs]
 	_pane.auto_run = false

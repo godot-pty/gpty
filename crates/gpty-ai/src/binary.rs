@@ -17,25 +17,16 @@ pub fn resolve_omp_binary() -> Option<PathBuf> {
     which("omp").filter(|p| validate_omp_binary(p))
 }
 
-/// Absolute, regular, user-owned, not group/other-writable (Unix).
+/// Absolute, regular, and trusted by the one spawn-gate rule
+/// ([`gpty_core::pty::validate_executable_file`]): not group/other-writable and
+/// owned by this user, root, or a namespace's unmapped overflow UID. A
+/// system-wide install (`/usr/bin/omp`, `/opt/...`, a container's nobody-owned
+/// copy) is accepted - a user-owned copy only used to be.
+///
+/// The ancestor walk is deliberately not part of it: `GPTY_OMP` is the user's
+/// own choice, and saved data never names this binary.
 pub fn validate_omp_binary(path: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        if !path.is_absolute() {
-            return false;
-        }
-        let Ok(meta) = std::fs::metadata(path) else {
-            return false;
-        };
-        // SAFETY: `geteuid` takes no arguments, cannot fail, and touches no
-        // memory; the call is unsafe only because every libc extern is.
-        meta.is_file() && meta.uid() == unsafe { libc::geteuid() } && meta.mode() & 0o022 == 0
-    }
-    #[cfg(not(unix))]
-    {
-        path.is_absolute() && std::fs::metadata(path).is_ok_and(|m| m.is_file())
-    }
+    gpty_core::pty::validate_executable_file(path).is_ok()
 }
 
 fn which(name: &str) -> Option<PathBuf> {
@@ -62,5 +53,25 @@ mod tests {
     #[test]
     fn relative_path_rejected() {
         assert!(!validate_omp_binary(Path::new("omp")));
+    }
+
+    /// One rule, shared with the pane spawn gate: a private file passes, and a
+    /// group/other-writable one is refused however it was named.
+    #[cfg(unix)]
+    #[test]
+    fn the_file_rule_is_shared_with_the_pane_spawn_gate() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let path = tmp.path().join("omp");
+        std::fs::write(&path, b"#!/bin/sh\n").expect("write the probe");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(validate_omp_binary(&path));
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(
+            !validate_omp_binary(&path),
+            "a binary anyone can replace must not be spawned"
+        );
     }
 }

@@ -14,8 +14,11 @@ environment. It needs a maintainer-authenticated `gh` with admin read access;
 it is not part of CI because the normal Actions token cannot read rulesets.
 
 The expected required-check lists mirror `.github/workflows/ci.yml` and the
-`main protection` ruleset. When a job is added or renamed, update both the
-workflow's required contexts and this file in the same change.
+`main protection` ruleset. The `release branch protection` ruleset covers
+`refs/heads/release/v*` with a pull request, a review and signed commits, but
+no required-check list (the archived trees carry different job sets). When a
+job is added or renamed, update both the workflow's required contexts and this
+file in the same change.
 """
 
 from __future__ import annotations
@@ -45,8 +48,19 @@ MAIN_CHECKS = [
 # Classic protection predates the ruleset and does not carry secret-scan.
 CLASSIC_CHECKS = [name for name in MAIN_CHECKS if name != "secret-scan"]
 
-MAIN_RULES = {"deletion", "non_fast_forward", "pull_request", "required_status_checks"}
-INTEGRATION_RULES = {"deletion", "non_fast_forward", "required_signatures"}
+MAIN_RULES = {
+    "deletion",
+    "non_fast_forward",
+    "required_signatures",
+    "pull_request",
+    "required_status_checks",
+}
+# A release branch keeps a pull request, a review and signed commits. It does
+# not carry a required-check list: the archived lines run different job sets
+# (v0.3.2 had 6 CI jobs, v0.7.2 had 10, the trunk has 14), so one fixed list
+# would leave every old-line PR waiting on a context that tree cannot produce.
+# Their CI still runs on pull requests, and RELEASING.md requires it green.
+RELEASE_RULES = {"deletion", "non_fast_forward", "required_signatures", "pull_request"}
 # `creation` is deliberately absent: it restricts ref creation to bypass actors, and this
 # ruleset has none, so a tag could never be pushed at all. Signatures protect a tag; the
 # update/deletion rules keep a bad one from being repaired or removed.
@@ -118,12 +132,12 @@ def main() -> int:
         repo = args.repo or default_repo()
         rulesets = api(repo, "rulesets")
         by_name = {item["name"]: item["id"] for item in rulesets}
-        missing = {"main protection", "integration protection", "tag"} - set(by_name)
+        missing = {"main protection", "release branch protection", "tag"} - set(by_name)
         if missing:
             raise ApiError(f"missing ruleset(s): {', '.join(sorted(missing))}")
 
         main = api(repo, f"rulesets/{by_name['main protection']}")
-        integration = api(repo, f"rulesets/{by_name['integration protection']}")
+        release = api(repo, f"rulesets/{by_name['release branch protection']}")
         tag = api(repo, f"rulesets/{by_name['tag']}")
         classic = api(repo, "branches/main/protection")
         environment = api(repo, "environments/release")
@@ -159,6 +173,7 @@ def main() -> int:
     )
     main_rules = rules(main)
     equal("main: rule types", set(main_rules), MAIN_RULES)
+    check("main: signed commits", "required_signatures" in main_rules)
     pr = params(main_rules.get("pull_request"))
     equal("main: merge commits only", pr.get("allowed_merge_methods"), ["merge"])
     equal("main: one approving review", pr.get("required_approving_review_count"), 1)
@@ -177,24 +192,44 @@ def main() -> int:
         checks.get("strict_required_status_checks_policy") is True,
     )
 
-    # ── integration branch protection ──────────────────────────────────
+    # ── release branch protection ──────────────────────────────────────
     check(
-        "integration: target is branch",
-        integration.get("target") == "branch",
-        repr(integration.get("target")),
+        "release: target is branch",
+        release.get("target") == "branch",
+        repr(release.get("target")),
     )
     check(
-        "integration: enforcement active",
-        integration.get("enforcement") == "active",
-        repr(integration.get("enforcement")),
+        "release: enforcement active",
+        release.get("enforcement") == "active",
+        repr(release.get("enforcement")),
     )
-    equal("integration: no bypass actors", integration.get("bypass_actors"), [])
+    equal("release: no bypass actors", release.get("bypass_actors"), [])
     equal(
-        "integration: covers 0.* branches",
-        integration.get("conditions", {}).get("ref_name", {}),
-        {"include": ["refs/heads/0.*"], "exclude": []},
+        "release: covers release/v* branches",
+        release.get("conditions", {}).get("ref_name", {}),
+        {"include": ["refs/heads/release/v*"], "exclude": []},
     )
-    equal("integration: rule types", set(rules(integration)), INTEGRATION_RULES)
+    release_rules = rules(release)
+    equal("release: rule types", set(release_rules), RELEASE_RULES)
+    check("release: signed commits", "required_signatures" in release_rules)
+    release_pr = params(release_rules.get("pull_request"))
+    equal("release: merge commits only", release_pr.get("allowed_merge_methods"), ["merge"])
+    equal("release: one approving review", release_pr.get("required_approving_review_count"), 1)
+    check("release: code-owner review", release_pr.get("require_code_owner_review") is True)
+    check("release: last-push approval", release_pr.get("require_last_push_approval") is True)
+    check(
+        "release: stale reviews dismissed",
+        release_pr.get("dismiss_stale_reviews_on_push") is True,
+    )
+    check(
+        "release: review threads resolved",
+        release_pr.get("required_review_thread_resolution") is True,
+    )
+    check(
+        "release: extra approval for unattributed commits",
+        release_pr.get("require_extra_approval_for_unattributed_changes") is True,
+    )
+    check("release: no required status checks", "required_status_checks" not in release_rules)
 
     # ── tag protection ─────────────────────────────────────────────────
     check("tag: target is tag", tag.get("target") == "tag", repr(tag.get("target")))

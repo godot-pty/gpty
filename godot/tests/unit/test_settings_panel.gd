@@ -24,6 +24,15 @@ func after_each():
 	# The palette is process-global; a picker test that left it light would
 	# re-theme every later suite.
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	SettingsManager.cfg_window_opacity = SettingsManager.OPACITY_DEFAULT
+	SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
+	WindowChrome.force_transparency = -1
+	SettingsManager.cfg_pane_animation = {}
+	SettingsManager.cfg_pane_animation_params = {}
+	SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
+	SettingsManager.cfg_effect_intensity = UiEffects.OFF
+	SettingsManager.cfg_reactive_effects = {}
 	SettingsManager.apply_appearance()
 	# A failed assertion must not leave a small window for the rest of the
 	# process; the layout assertions in this file are the card's own minimums.
@@ -68,8 +77,10 @@ func _pin_window(size: Vector2i) -> void:
 
 func test_appearance_reset_restores_only_appearance_settings():
 	SettingsManager.cfg_font_size = 22
+	SettingsManager.cfg_terminal_padding = 20
 	SettingsManager.cfg_wrapper_bg = Color(1.0, 0.0, 0.0)
-	SettingsManager.cfg_color_scheme_path = "/tmp/scheme.csv"
+	SettingsManager.cfg_scheme_dark = "res://schemes/nord.json"
+	SettingsManager.cfg_scheme_light = "res://schemes/one-light.json"
 	SettingsManager.cfg_ui_scale = 175
 	SettingsManager.cfg_shell_command = "/bin/zsh"  # Terminal-tab setting, must survive
 
@@ -78,10 +89,13 @@ func test_appearance_reset_restores_only_appearance_settings():
 	btn.pressed.emit()
 
 	assert_eq(SettingsManager.cfg_font_size, 14, "font size must reset to default")
+	assert_eq(SettingsManager.cfg_terminal_padding, PaneTypes.TERMINAL_PADDING_DEFAULT,
+		"terminal padding must reset to default")
 	assert_eq(SettingsManager.cfg_wrapper_bg, UiPalette.active().BG,
 		"wrapper bg must reset to the active palette's background")
 	assert_eq(SettingsManager.cfg_ui_scale, 100, "the UI scale must reset to 100 %")
-	assert_eq(SettingsManager.cfg_color_scheme_path, "", "scheme path must reset to empty")
+	assert_eq(SettingsManager.cfg_scheme_dark, "", "the dark scheme must reset to empty")
+	assert_eq(SettingsManager.cfg_scheme_light, "", "the light scheme must reset to empty")
 	assert_eq(SettingsManager.cfg_shell_command, "/bin/zsh",
 		"other tabs' settings must not be touched")
 
@@ -108,6 +122,7 @@ func test_terminal_reset_restores_only_terminal_settings():
 
 func test_system_reset_restores_system_settings():
 	SettingsManager.cfg_window_mode = 2
+	SettingsManager.cfg_window_opacity = 70
 	SettingsManager.cfg_max_fps = 60
 
 	var btn := _tab_reset_button("System")
@@ -115,6 +130,8 @@ func test_system_reset_restores_system_settings():
 	btn.pressed.emit()
 
 	assert_eq(SettingsManager.cfg_window_mode, 0, "window mode must reset to OS")
+	assert_eq(SettingsManager.cfg_window_opacity, SettingsManager.OPACITY_DEFAULT,
+		"window opacity must reset to opaque")
 	assert_eq(SettingsManager.cfg_max_fps, 0, "max fps must reset to unlimited")
 
 func test_reasoning_reset_restores_reasoning_settings():
@@ -133,15 +150,40 @@ func test_no_global_reset_button_remains():
 		assert_ne(btn.text, "Reset to defaults",
 			"the all-tabs reset button must be gone (per-tab resets only)")
 
-# ── Scheme reset ───────────────────────────────────────────────────────
+# ── Scheme rows ────────────────────────────────────────────────────────
 
-func test_scheme_reset_button_clears_path():
-	SettingsManager.cfg_color_scheme_path = "/tmp/scheme.csv"
-	var reset := _row_reset("Color scheme:")
-	assert_not_null(reset, "Color scheme row must have a reset button")
-	reset.pressed.emit()
-	assert_eq(SettingsManager.cfg_color_scheme_path, "",
-		"scheme reset must clear the configured path")
+func _picker_named(fragment: String) -> SchemePicker:
+	for node in _panel.find_children("*", "OptionButton", true, false):
+		if node is SchemePicker and str(node.name).contains(fragment):
+			return node
+	return null
+
+func test_the_appearance_tab_offers_a_dark_and_a_light_scheme_row():
+	var dark := _picker_named("Dark")
+	var light := _picker_named("Light")
+	assert_not_null(dark, "the Appearance tab must offer a dark scheme picker")
+	assert_not_null(light, "the Appearance tab must offer a light scheme picker")
+	# The empty item is the reset, so the row needs no reset button of its own.
+	assert_eq(dark.get_selected_path(), "", "an unset dark slot starts empty")
+	assert_eq(light.get_selected_path(), "", "an unset light slot starts empty")
+
+func test_choosing_a_scheme_writes_its_slot_only():
+	var dark := _picker_named("Dark")
+	assert_not_null(dark, "dark picker must exist")
+	var wanted := -1
+	for index in dark.item_count:
+		if dark.get_item_metadata(index) == "res://schemes/nord.json":
+			wanted = index
+			break
+	assert_ne(wanted, -1, "nord must be listed in the library")
+	if wanted == -1:
+		return
+	# Select the library entry the way a user would: by index, then emit.
+	dark.selected = wanted
+	dark.item_selected.emit(wanted)
+	assert_eq(SettingsManager.cfg_scheme_dark, "res://schemes/nord.json",
+		"the dark slot takes the pick")
+	assert_eq(SettingsManager.cfg_scheme_light, "", "the light slot must not move")
 
 # ── Per-color resets ───────────────────────────────────────────────────
 
@@ -207,10 +249,11 @@ func test_reset_buttons_are_tab_wide_and_centered():
 		assert_eq(btn.alignment, HORIZONTAL_ALIGNMENT_CENTER,
 			"%s reset text must be centered" % tab_name)
 
-## The Terminal tab overflows the 540x560 card by 62 px, so the row *Every
-## scrollable surface has a 0 px scrollbar* needs that overflow to have a real
-## bar. The card keeps its design size here, so the column must not widen it.
-func test_the_terminal_tab_shows_a_scrollbar_column():
+## The Appearance tab (eight chrome-colour rows plus the Motion section)
+## overflows the one card size, so the row *Every scrollable surface has a 0 px
+## scrollbar* needs that overflow to have a real bar. The card keeps its design
+## size here, so the column must not widen it.
+func test_a_scrolling_settings_tab_shows_a_scrollbar_column():
 	SettingsManager.cfg_ui_scale = 100
 	_pin_window(Vector2i(1920, 1080))
 	SettingsManager.apply_ui_scale()
@@ -221,27 +264,93 @@ func test_the_terminal_tab_shows_a_scrollbar_column():
 	await wait_frames(2)
 	var tab: ScrollContainer = null
 	for node in _panel.find_children("*", "ScrollContainer", true, false):
-		if node.name == "Terminal":
+		if node.name == "Appearance":
 			tab = node as ScrollContainer
 			break
-	assert_not_null(tab, "the Terminal tab is a ScrollContainer")
+	assert_not_null(tab, "the Appearance tab is a ScrollContainer")
 	if tab == null:
 		return
 	# A tab is only laid out once it is current (`TabContainer` sizes the
 	# current child), so the System tab would report a zero-sized viewport.
 	var tabs := tab.get_parent() as TabContainer
-	assert_not_null(tabs, "the Terminal tab belongs to the settings TabContainer")
+	assert_not_null(tabs, "the Appearance tab belongs to the settings TabContainer")
 	if tabs == null:
 		return
 	tabs.current_tab = tabs.get_tab_idx_from_control(tab)
 	await wait_frames(2)
 	var bar := tab.get_v_scroll_bar()
-	assert_gt(bar.max_value, bar.page, "the Terminal tab's content overflows the card")
+	assert_gt(bar.max_value, bar.page, "the Appearance tab's content overflows the card")
 	assert_true(bar.visible, "the overflow shows a bar")
 	assert_eq(bar.size.x, UiTokens.SCROLLBAR_THICKNESS, "the bar reserves the column it draws in")
 	var card := (_panel.get_child(0) as Control).get_child(0) as Control
 	assert_eq(card.size, SettingsPanel.CARD_SIZE,
 		"a tall tab keeps the design height in a window that fits it")
+
+# ── Window fit ─────────────────────────────────────────────────────────
+
+## The row is always present: where the display server cannot make the window
+## transparent the picker is disabled and the row says why. Hiding it made a
+## shipped feature look unshipped (a Wayland session under XWayland).
+func test_the_window_opacity_row_is_disabled_with_a_reason_when_unsupported():
+	WindowChrome.force_transparency = 0
+	var panel := SettingsPanel.new(_ws)
+	add_child_autofree(panel)
+	await get_tree().process_frame
+	var opt := panel.find_child("WindowOpacityOpt", true, false) as OptionButton
+	assert_not_null(opt, "an unsupported window must still show the row")
+	if opt == null:
+		return
+	assert_true(opt.disabled, "a pick that cannot reach the window is refused")
+	var hint := panel.find_child("WindowOpacityHint", true, false) as Label
+	assert_not_null(hint, "the row says why it is unavailable")
+	if hint == null:
+		return
+	assert_string_contains(hint.text, "unavailable")
+	assert_string_contains(hint.text, DisplayServer.get_name(),
+		"the hint names the display server the session actually runs")
+
+## The hint's wording is pure, so it is pinned without a window.
+func test_the_opacity_hint_names_the_driver_and_the_way_out():
+	assert_string_contains(SettingsPanel.opacity_hint("X11"), "unavailable")
+	assert_string_contains(SettingsPanel.opacity_hint("X11"), "X11")
+	assert_string_contains(SettingsPanel.opacity_hint_tooltip("X11"),
+		"--display-driver wayland")
+
+func test_the_window_opacity_row_offers_the_presets_and_saves_a_pick():
+	WindowChrome.force_transparency = 1
+	var panel := SettingsPanel.new(_ws)
+	add_child_autofree(panel)
+	await get_tree().process_frame
+	var opt := panel.find_child("WindowOpacityOpt", true, false) as OptionButton
+	assert_not_null(opt, "a supported window must show the opacity picker")
+	if opt == null:
+		return
+	assert_false(opt.disabled, "a supported window offers the pick")
+	assert_null(panel.find_child("WindowOpacityHint", true, false),
+		"and says nothing about being unavailable")
+	assert_eq(opt.item_count, SettingsManager.OPACITY_PRESETS.size(),
+		"the picker offers exactly the stored vocabulary")
+	assert_eq(opt.get_item_text(0), "100%", "an opaque window is the first step")
+	var idx := SettingsManager.OPACITY_PRESETS.find(80)
+	opt.selected = idx
+	opt.item_selected.emit(idx)
+	assert_eq(SettingsManager.cfg_window_opacity, 80, "the pick must reach the setting")
+	assert_eq(MockAutoloads.get_store(SettingsManager.SETTINGS_FILE).get("window_opacity"), 80,
+		"the pick saves, so the choice survives a restart")
+
+func test_the_terminal_padding_row_writes_and_saves():
+	var spin := _panel.find_child("TerminalPaddingSpin", true, false) as SpinBox
+	assert_not_null(spin, "the Appearance tab carries the terminal padding row")
+	if spin == null:
+		return
+	assert_eq(spin.value, PaneTypes.TERMINAL_PADDING_DEFAULT,
+		"a fresh install offers the default inset")
+	spin.value = 12
+	_panel._debounce_timer.timeout.emit()
+	assert_eq(SettingsManager.cfg_terminal_padding, 12,
+		"the spin must reach the setting")
+	assert_eq(MockAutoloads.get_store(SettingsManager.SETTINGS_FILE).get("terminal_padding"), 12,
+		"the debounced save must reach the store")
 
 # ── Color picker OK/Cancel ─────────────────────────────────────────────
 
@@ -566,7 +675,16 @@ func test_the_commands_tab_sits_before_about():
 	for i in _panel._tabs.get_tab_count():
 		titles.append(_panel._tabs.get_tab_title(i))
 	assert_eq(titles, ["System", "Terminal", "Appearance", "Reasoning", "Concepts",
-		"Commands", "About"], "the shipped tabs keep their positions")
+		"Commands", "Shortcuts", "About"], "the shipped tabs keep their positions")
+
+func test_the_about_tab_names_the_renderer():
+	var label := _panel.find_child("RendererLabel", true, false) as Label
+	assert_not_null(label, "the About tab carries the renderer line")
+	if label == null:
+		return
+	assert_true(label.text.begins_with("Renderer: "), "the line is labelled")
+	assert_gt(label.text.length(), len("Renderer: "),
+		"and names the live renderer, not just the label")
 
 func test_the_commands_tab_lists_the_store_in_order():
 	_seed_commands()
@@ -629,9 +747,13 @@ func test_edit_rewrites_the_selected_entry_in_place():
 	(dlg.find_child("CommandText", true, false) as LineEdit).text = "make deploy PROD=1"
 	(dlg.find_child("CommandRun", true, false) as CheckBox).button_pressed = false
 	dlg.confirmed.emit()
-	assert_eq(SavedCommandStore.all()[1],
+	var entries := SavedCommandStore.all()
+	assert_eq(entries.size(), 2, "the seeded pair is the store")
+	if entries.size() < 2:
+		return
+	assert_eq(entries[1],
 		{"name": "Deploy", "command": "make deploy PROD=1", "run": false})
-	assert_eq(SavedCommandStore.all()[0]["name"], "Build", "the other entry is untouched")
+	assert_eq(entries[0]["name"], "Build", "the other entry is untouched")
 
 func test_delete_and_reorder_follow_the_store():
 	_seed_commands()
@@ -669,24 +791,41 @@ func test_open_commands_lands_on_the_tab_and_can_open_the_form():
 	_panel.open_commands(true)
 	assert_not_null(_find_accept_dialog(_panel), "add_now opens the form")
 
-## A seventh tab must stay on the bar. The engine does not widen the bar for
-## an overflow: it hides trailing tabs behind a dropdown, and then re-lays the
-## bar out on the first click, which mangles the card's measured 540 x 560.
-func test_all_seven_tabs_fit_the_card():
+## The live bar must resolve the theme's tab box, not the engine's default: a
+## `TabContainer`'s internal `TabBar` reads the *container's* `tab_*` styleboxes
+## and font colours, and only the font size used to be mirrored. The default box
+## (10 px a side plus 1 px borders) made the eight tabs 561 px wide, so the last
+## two sat behind the overflow arrows at the 560x340 floor.
+func test_the_live_tab_bar_uses_the_theme_box():
 	_pin_window(Vector2i(1920, 1080))
 	SettingsManager.cfg_ui_scale = 100
 	SettingsManager.apply_ui_scale()
 	_panel.theme = UiTheme.build()
 	_panel.open()
 	await wait_frames(2)
-	var tabs := _panel._tabs
-	assert_eq(tabs.get_tab_count(), 7)
+	var bar := _panel._tabs.get_tab_bar()
+	assert_eq(bar.get_theme_font_size("font_size", "TabBar"), UiTokens.FS_CAPTION,
+		"the container forwards the caption size to its internal bar")
+	assert_eq(bar.get_theme_color("font_unselected_color", "TabBar"),
+		UiPalette.active().TEXT_MUTED, "the container forwards the tab colours")
+	var box := bar.get_theme_stylebox("tab_unselected") as StyleBoxFlat
+	assert_not_null(box, "the live bar resolves the theme's tab box")
+	assert_eq(box.content_margin_left, float(UiTokens.SPACE_MD),
+		"the live bar uses the 6 px theme box, not the engine's 10 px default")
+	assert_eq(box.bg_color, UiPalette.active().SURFACE_RAISED,
+		"the live bar uses the app's raised tab surface")
+
+## Assert the bar is the expected width and one contiguous row of eight tabs.
+## The rects are read as a running row: a tab the engine has hidden comes back
+## with a zero-based rect (measured: tab 6 read 0..56 on a bar whose tabs ended
+## at 464), so neither a per-tab end check nor a width sum alone proves the row
+## fits - the positions have to be contiguous as well.
+func _assert_all_eight_tabs_on_one_row(tabs: TabContainer, expected_bar_width: float) -> void:
 	var bar := tabs.get_tab_bar()
+	assert_eq(tabs.get_tab_count(), 8)
 	assert_gt(bar.size.x, 0.0, "the bar has been laid out")
-	# The rects are read as a running row: a tab the engine has hidden comes
-	# back with a zero-based rect (measured: tab 6 read 0..56 on a bar whose
-	# tabs ended at 464), so neither a per-tab end check nor a width sum alone
-	# proves the row fits - the positions have to be contiguous as well.
+	assert_almost_eq(bar.size.x, expected_bar_width, 0.5,
+		"the bar is the card less its 16 px inner margin on each side")
 	var edge := 0.0
 	var total := 0.0
 	for i in tabs.get_tab_count():
@@ -697,13 +836,48 @@ func test_all_seven_tabs_fit_the_card():
 		edge = rect.end.x
 		total += rect.size.x
 	assert_true(total <= bar.size.x,
-		"the seven tabs need %.1f px of a %.1f px bar: the overflow would be hidden behind a dropdown"
+		"the eight tabs need %.1f px of a %.1f px bar: the overflow would be hidden behind a dropdown"
 		% [total, bar.size.x])
 
-# ── About: the keyboard-shortcut table ─────────────────────────────────
+## Every tab must stay on the bar at the card's design width. The engine does
+## not widen the bar for an overflow: it hides trailing tabs behind a dropdown,
+## and then re-lays the bar out on the first click, which changes the card's
+## measured size under the pointer.
+func test_all_eight_tabs_fit_the_card():
+	_pin_window(Vector2i(1920, 1080))
+	SettingsManager.cfg_ui_scale = 100
+	SettingsManager.apply_ui_scale()
+	_panel.theme = UiTheme.build()
+	_panel.open()
+	await wait_frames(2)
+	_assert_all_eight_tabs_on_one_row(_panel._tabs,
+		SettingsPanel.CARD_SIZE.x - 2.0 * UiTokens.SPACE_XXL)
 
-## The chord the list prints for one description, read out of the About tab's
-## grids: each row is `[chord, description]`.
+## The smallest supported window: the card clamps to 544 px, the bar to 512,
+## and the eight tabs need 497 - the last tab stays on the row instead of
+## behind the engine's arrows.
+func test_all_eight_tabs_fit_the_560x340_floor():
+	_pin_window(Vector2i(560, 340))
+	SettingsManager.cfg_ui_scale = 100
+	SettingsManager.apply_ui_scale()
+	_panel.theme = UiTheme.build()
+	await get_tree().process_frame
+	_panel.open()
+	await wait_frames(2)
+	if not is_equal_approx(_panel._card.size.x, 544.0):
+		# A headless/runner window that did not take the pinned size still has
+		# to measure the card at the floor; give the overlay that rect directly.
+		_panel.size = Vector2(560, 340)
+		_panel._fit_settings_card()
+		await wait_frames(1)
+	assert_almost_eq(_panel._card.size.x, 544.0, 0.5,
+		"the card clamps to 560 less the 8 px card edge on each side")
+	_assert_all_eight_tabs_on_one_row(_panel._tabs, 512.0)
+
+# ── Shortcuts: the keyboard-shortcut table ─────────────────────────────
+
+## The chord the list prints for one description, read out of the Shortcuts
+## tab's grids: each row is `[chord, description]`.
 func _row_chord(description: String) -> String:
 	var list := _panel.find_child("ShortcutList", true, false) as VBoxContainer
 	if list == null:
@@ -715,15 +889,15 @@ func _row_chord(description: String) -> String:
 				return (kids[i] as Label).text
 	return ""
 
-func test_open_about_lands_on_the_about_tab():
-	_panel.open_about()
+func test_open_shortcuts_lands_on_the_shortcuts_tab():
+	_panel.open_shortcuts()
 	await wait_frames(2)
 	assert_true(_panel.visible, "opening, never toggling")
-	assert_eq(_panel._tabs.get_tab_title(_panel._tabs.current_tab), "About",
+	assert_eq(_panel._tabs.get_tab_title(_panel._tabs.current_tab), "Shortcuts",
 		"the palette's Keyboard Shortcuts row asks for this tab")
 
 func test_the_shortcut_list_prints_the_registry_spelling():
-	_panel.open_about()
+	_panel.open_shortcuts()
 	await wait_frames(2)
 	# `term:*` is declared by the autoload, so it is bound in a bare panel; the
 	# workspace's own app:* rows need a workspace and are covered by
@@ -735,19 +909,19 @@ func test_the_shortcut_list_prints_the_registry_spelling():
 	assert_eq(_row_chord("Paste the clipboard"), "Ctrl+Shift+V")
 
 func test_a_second_open_rebuilds_the_list_instead_of_appending():
-	_panel.open_about()
+	_panel.open_shortcuts()
 	await wait_frames(2)
 	var list := _panel.find_child("ShortcutList", true, false) as VBoxContainer
 	assert_not_null(list)
 	var first := list.get_child_count()
 	assert_gt(first, 0, "the declared chords give the list at least one row")
-	_panel.open_about()
+	_panel.open_shortcuts()
 	await wait_frames(2)
 	assert_eq(list.get_child_count(), first,
 		"the previous table is freed, not stacked under the new one")
 
 func test_every_group_caption_precedes_its_rows_and_no_heading_is_empty():
-	_panel.open_about()
+	_panel.open_shortcuts()
 	await wait_frames(2)
 	var list := _panel.find_child("ShortcutList", true, false) as VBoxContainer
 	# Read as pairs, not against a fixed count: another suite in this process
@@ -766,3 +940,187 @@ func test_every_group_caption_precedes_its_rows_and_no_heading_is_empty():
 				"an unbound group contributes no heading, so no grid is ever empty")
 		expect_caption = not expect_caption
 	assert_true(expect_caption, "the list ends on a grid, never a dangling heading")
+
+# ── Motion ─────────────────────────────────────────────────────────────
+
+func _find_option(node_name: String) -> OptionButton:
+	return _panel.find_child(node_name, true, false) as OptionButton
+
+## Select an animation by its registry id, through the picker's own signal so
+## the panel runs the same handler a click does.
+func _select_animation(picker: OptionButton, id: String) -> void:
+	var idx := -1
+	for i in picker.item_count:
+		if str(picker.get_item_metadata(i)) == id:
+			idx = i
+			break
+	assert_ne(idx, -1, "%s must offer %s" % [picker.name, id])
+	if idx == -1:
+		return
+	picker.item_selected.emit(idx)
+
+func _spin_in(host: Node, spin_name: String) -> SpinBox:
+	for row in host.get_children():
+		for c in row.get_children():
+			if c is SpinBox and c.name == spin_name:
+				return c
+	return null
+
+func test_the_motion_section_lists_every_kind_and_its_animations():
+	var master := _find_option("MotionOpt")
+	assert_not_null(master, "the Appearance tab carries the Motion switch")
+	assert_eq(master.item_count, 3, "Off, Subtle, Full")
+	for kind in PaneTransitions.KINDS:
+		var k := str(kind)
+		var picker := _find_option("%sAnimOpt" % k.capitalize())
+		assert_not_null(picker, "%s has a picker" % k)
+		assert_eq(picker.item_count, PaneTransitions.animations_for(k).size(),
+			"%s lists exactly the animations that serve it" % k)
+
+func test_selecting_an_animation_rebuilds_its_property_rows():
+	var picker := _find_option("CreateAnimOpt")
+	var host := _panel.find_child("CreateParams", true, false)
+	assert_not_null(host)
+
+	_select_animation(picker, "fade")
+	assert_not_null(_spin_in(host, "Create_duration_ms"), "fade exposes its duration")
+	assert_null(_spin_in(host, "Create_scale_from"), "fade has no scale property")
+
+	_select_animation(picker, "slide")
+	assert_not_null(_spin_in(host, "Create_distance_px"), "slide exposes its distance")
+	assert_null(_spin_in(host, "Create_scale_from"), "slide has no scale property")
+
+	_select_animation(picker, "fade_scale")
+	assert_not_null(_spin_in(host, "Create_scale_from"), "fade_scale exposes its scale")
+
+	_select_animation(picker, "none")
+	assert_eq(host.get_child_count(), 0, "none declares no properties")
+
+func test_a_property_edit_reaches_the_store_after_the_debounce():
+	var picker := _find_option("CreateAnimOpt")
+	_select_animation(picker, "fade_scale")
+	var host := _panel.find_child("CreateParams", true, false)
+	var spin := _spin_in(host, "Create_scale_from")
+	assert_not_null(spin)
+
+	spin.value = 0.85
+	assert_almost_eq(
+		float(SettingsManager.cfg_pane_animation_params["create:fade_scale"]["scale_from"]),
+		0.85, 0.001, "the edit is in memory at once")
+	var writes := MockAutoloads.write_count(SettingsManager.SETTINGS_FILE)
+	await wait_seconds(0.2)
+	assert_gt(MockAutoloads.write_count(SettingsManager.SETTINGS_FILE), writes,
+		"the shared debounce timer writes the file")
+
+func test_the_appearance_reset_restores_motion_defaults():
+	SettingsManager.cfg_motion = UiMotion.FULL
+	SettingsManager.cfg_pane_animation = {"create": "fade", "close": "fade", "swap": "move"}
+	SettingsManager.cfg_pane_animation_params = {"create:fade": {"duration_ms": 300.0}}
+	_panel._sync_motion_rows()
+
+	var reset := _tab_reset_button("Appearance")
+	assert_not_null(reset)
+	reset.pressed.emit()
+
+	assert_eq(SettingsManager.cfg_motion, UiMotion.SUBTLE)
+	assert_eq(PaneTransitions.choice("create"), "fade_scale")
+	assert_true(SettingsManager.cfg_pane_animation_params.is_empty())
+	assert_eq(_find_option("MotionOpt").selected, UiMotion.SUBTLE)
+
+func test_the_effects_section_lists_the_closed_table_and_intensity():
+	var effect_opt := _find_option("EffectOpt")
+	assert_not_null(effect_opt, "the Appearance tab carries the Terminal effect picker")
+	assert_eq(effect_opt.item_count, UiEffects.AMBIENT_IDS.size(),
+		"one item per effect in the closed table")
+	for i in UiEffects.AMBIENT_IDS.size():
+		assert_eq(str(effect_opt.get_item_metadata(i)), UiEffects.AMBIENT_IDS[i],
+			"the picker's value is the table id, not its label")
+	var intensity_opt := _find_option("EffectIntensityOpt")
+	assert_not_null(intensity_opt, "the intensity picker sits beside it")
+	assert_eq(intensity_opt.item_count, UiEffects.LABELS.size(), "Off, Subtle, Full")
+	assert_eq(intensity_opt.selected, UiEffects.OFF, "effects are off by default")
+
+func test_the_appearance_reset_restores_the_effect_defaults():
+	SettingsManager.cfg_effect = "grain"
+	SettingsManager.cfg_effect_intensity = UiEffects.FULL
+	SettingsManager.cfg_reactive_effects = {"cat_command": "tint"}
+	_panel._sync_effect_rows()
+
+	var reset := _tab_reset_button("Appearance")
+	assert_not_null(reset)
+	reset.pressed.emit()
+
+	assert_eq(SettingsManager.cfg_effect, UiEffects.DEFAULT_AMBIENT)
+	assert_eq(SettingsManager.cfg_effect_intensity, UiEffects.OFF)
+	assert_true(SettingsManager.cfg_reactive_effects.is_empty(),
+		"the reset clears the reactive mapping too")
+	var effect_opt := _find_option("EffectOpt")
+	assert_eq(str(effect_opt.get_item_metadata(effect_opt.selected)), UiEffects.DEFAULT_AMBIENT,
+		"the visible picker follows the store")
+	assert_eq(_find_option("EffectIntensityOpt").selected, UiEffects.OFF)
+
+## The row for one concept in the reactive table, or null.
+func _reactive_row(concept: String) -> HBoxContainer:
+	for node in _panel.find_children("*", "HBoxContainer", true, false):
+		var parent := node.get_parent()
+		if parent == null or str(parent.name) != "ReactiveRules":
+			continue
+		var label := node.get_child(0) as Label
+		if label != null and label.text == concept:
+			return node as HBoxContainer
+	return null
+
+func _concept_choice(concept: String) -> int:
+	var add := _find_option("AddReactiveOpt")
+	if add == null:
+		return -1
+	for i in add.item_count:
+		if str(add.get_item_metadata(i)) == concept:
+			return i
+	return -1
+
+func test_adding_a_reactive_rule_stores_and_renders_it():
+	var add := _find_option("AddReactiveOpt")
+	assert_not_null(add, "the empty table offers an Add picker")
+	var idx := _concept_choice("cat_command")
+	assert_true(idx > 0, "a shipped concept is offered")
+	add.item_selected.emit(idx)
+	assert_eq(str(SettingsManager.cfg_reactive_effects.get("cat_command", "")), "tint",
+		"a new rule starts on the warning cue")
+	var row := _reactive_row("cat_command")
+	assert_not_null(row, "the rule renders as a row")
+	var opt := row.get_child(1) as OptionButton
+	assert_eq(str(opt.get_item_metadata(opt.selected)), "tint")
+	assert_eq(_concept_choice("cat_command"), -1, "a mapped concept leaves the Add list")
+
+func test_removing_a_reactive_rule_clears_it():
+	SettingsManager.cfg_reactive_effects = {"cat_command": "tint"}
+	_panel._sync_reactive_rows()
+	var row := _reactive_row("cat_command")
+	assert_not_null(row)
+	(row.get_child(2) as Button).pressed.emit()
+	await get_tree().process_frame
+	assert_false(SettingsManager.cfg_reactive_effects.has("cat_command"),
+		"the remove button erases the rule")
+	assert_null(_reactive_row("cat_command"))
+
+func test_off_clears_a_reactive_rule():
+	SettingsManager.cfg_reactive_effects = {"cat_command": "tint"}
+	_panel._sync_reactive_rows()
+	var row := _reactive_row("cat_command")
+	assert_not_null(row)
+	var opt := row.get_child(1) as OptionButton
+	opt.item_selected.emit(0)
+	await get_tree().process_frame
+	assert_false(SettingsManager.cfg_reactive_effects.has("cat_command"),
+		"picking Off is the same as removing the rule")
+
+func test_the_reactive_table_hides_add_at_the_cap():
+	var rules := {}
+	for i in UiEffects.MAX_RULES:
+		rules["concept_%d" % i] = "tint"
+	SettingsManager.cfg_reactive_effects = rules
+	_panel._sync_reactive_rows()
+	assert_false(_find_option("AddReactiveOpt").visible, "no ninth rule can be added")
+	assert_eq(_panel.find_child("ReactiveRules", true, false).get_child_count(),
+		UiEffects.MAX_RULES, "one row per stored rule")

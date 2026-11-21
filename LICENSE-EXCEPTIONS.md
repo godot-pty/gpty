@@ -84,6 +84,29 @@ Beyond the disclaimer itself:
 
 ---
 
+## 4. Bundled colour schemes
+
+The terminal colour schemes under `godot/schemes/` are **data files**: section 2
+applies, so they carry no copyleft and you may copy or adapt them on any terms.
+Each palette is its upstream project's work and is included under that
+project's licence:
+
+| File | Upstream | Licence |
+|---|---|---|
+| `dracula.json` | [Dracula theme](https://draculatheme.com/) | MIT |
+| `gruvbox-dark.json`, `gruvbox-light.json` | [morhetz/gruvbox](https://github.com/morhetz/gruvbox) | MIT |
+| `nord.json` | [nordtheme/nord](https://github.com/nordtheme/nord) | MIT |
+| `tokyo-night.json` | [folke/tokyonight.nvim](https://github.com/folke/tokyonight.nvim) | MIT |
+| `catppuccin-mocha.json`, `catppuccin-latte.json` | [catppuccin/catppuccin](https://github.com/catppuccin/catppuccin) | MIT |
+| `one-light.json` | [atom/one-light-syntax](https://github.com/atom/one-light-syntax) | MIT |
+| `solarized-dark.json`, `solarized-light.json` | [Ethan Schoonover's Solarized](https://ethanschoonover.com/solarized/) | MIT |
+| `vivid.json` | gPTY's own palette (no upstream) | Apache-2.0 (section 2) |
+
+The files are plain JSON without licence headers, on purpose: a data file is the
+format, and the record of provenance is this table.
+
+---
+
 ## Notes
 
 - These are additional permissions: they relax the GPLv3, they do not add
@@ -97,8 +120,9 @@ Beyond the disclaimer itself:
 - Third-party components bundled in this repository keep their own licenses and
   are unaffected by this file — for example `godot/addons/gut` (MIT),
   `extensions/gpty-omp-events` (MIT, distributed under its own permissive
-  license as section 1 permits), and the DejaVu Sans Mono fonts (Bitstream
-  Vera–derived license). See each directory for its license text.
+  license as section 1 permits), the DejaVu Sans Mono fonts (Bitstream
+  Vera–derived license), and the bundled colour schemes (section 4). See each
+  directory for its license text.
 - Apache-2.0 files and GPLv3 files are compatible in the GPLv3 direction only:
   Apache-2.0 code may be combined into a GPLv3 work, not the reverse. Sections 1
   and 2 above are what make permissively licensed plugins and data files a

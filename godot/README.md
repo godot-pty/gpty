@@ -22,6 +22,7 @@ from the terminal:
 godot/
 ├── project.godot            # Godot 4.7 project config
 ├── gpty.gdextension      # GDExtension library config
+    ├── schemes/                     # Bundled terminal colour schemes (native JSON; licences in LICENSE-EXCEPTIONS.md)
     ├── concepts.default.json    # Shipped default concepts
     ├── profiles.default.json    # Shipped seed layouts (Agent Workspace, Knowledge Base)
     ├── fonts/                   # Bundled fonts (DejaVu Sans Mono + Phosphor icons)
@@ -31,7 +32,7 @@ godot/
     │   └── Phosphor-Regular.ttf
     ├── scenes/
         ├── main.tscn            # Root scene (Workspace)
-        ├── autoloads/           # 16 singleton managers
+        ├── autoloads/           # 17 singleton managers
         │   ├── base_persistence_manager.gd  # Shared JSON I/O base
         │   ├── settings_manager.gd
         │   ├── profile_manager.gd
@@ -39,6 +40,7 @@ godot/
         │   ├── workspace_store.gd  # Named workspace (tab set) persistence
         │   ├── pane_env_store.gd   # User-owned per-pane env, keyed by attachment_id
         │   ├── pane_cwd_store.gd   # User-owned per-pane directory, keyed by workspace id + attachment_id
+        │   ├── pane_scheme_store.gd # User-owned per-pane colour scheme, keyed by attachment_id
         │   ├── pane_inspector_store.gd # User-owned Inspector aim (prompt + switches), keyed by attachment_id
         │   ├── trusted_store.gd    # Workspace Trust consent memory (builtins + plugins)
         │   ├── link_weights_store.gd # User-owned declared link weights (display-only)
@@ -55,14 +57,18 @@ godot/
         │   ├── terminal_fonts.gd # Byte-only font loader (a data path never reaches load())
         │   ├── concept_router.gd # Pure concept-event routing (extracted, testable)
         │   ├── plugin_review_text.gd # Pure plugin-review dialog text (extracted, testable)
+        │   ├── pane_transitions.gd # Pane-transition registry, settings resolution and tween runner
+        │   ├── pane_effects.gd # Per-pane effect host: the ground material/buffer and the cue
         │   └── terminal_manager.gd
         ├── ui/                  # UI components
         │   ├── sidebar.gd       # Vertical stack: window mode, workspaces, panes, profiles
         │   ├── settings_panel.gd
+        │   ├── scheme_library.gd # Shipped + imported terminal colour schemes (listing, capped read, import id)
+        │   ├── scheme_picker.gd  # One colour-scheme OptionButton (library, reset item, Import...)
         │   ├── overlay_panel.gd  # Shared keyboard contract for the four overlays + the card clamp (fit_card)
         │   ├── command_palette.gd # Ctrl+Shift+P command list (OverlayPanel)
         │   ├── palette_model.gd # Palette entries, matching and ranking (pure)
-        │   ├── shortcut_catalog.gd # The About tab's keyboard-shortcut list as data (chords from the binding registry)
+        │   ├── shortcut_catalog.gd # The Shortcuts tab's keyboard list as data (chords from the binding registry)
         │   ├── shortcut_guide.gd # The empty workspace guide: clickable live keycap + every binding (data-driven)
         │   ├── keyboard_focus.gd # Keyboard-entry walk + the toolbar-ring pair (overlay focus, pane content, chrome/note toolbars)
         │   ├── concept_graph_editor.gd # Visual rule editor overlay (GraphEdit)
@@ -73,6 +79,7 @@ godot/
         │   ├── ui_palette.gd   # The chrome colours in two complete sets (dark/light) and the active one
         │   ├── color_swatch.gd # The words a colour swatch carries: opacity reading, "unset", tooltip
         │   ├── ui_tokens.gd    # Type scale, spacing, radius and the WCAG contrast maths
+        │   ├── ui_motion.gd    # The motion policy (Off/Subtle/Full) every animation reads
         │   ├── ui_theme.gd     # The one Theme, built from the palette and applied at the root
         │   ├── app_dialog.gd   # The one modal builder (theme, grouped buttons, selectable body)
         │   ├── menu_items.gd   # The one native PopupMenu item builder (icon + text + tooltip + metadata)
@@ -84,8 +91,16 @@ godot/
         │   ├── agent_badge.gd  # Title-bar agent-state badge: the four silhouettes, painted
         │   ├── toast_overlay.gd
         │   ├── window_chrome.gd # Titlebar + window-mode/fullscreen handling
+        │   ├── renderer_info.gd # The renderer/device record at startup, and the software-rasterizer warning
         │   ├── markdown_view.gd # Safe shared Markdown renderer
         │   ├── markdown_anchors.gd # Pure ATX heading scan for fragment/line navigation
+        │   ├── docs_bundle.gd  # Validated, lazily loaded view of godot/docs.json
+        │   ├── docs_viewer.gd  # Settings > About: the README and the documents it links (Back/Forward)
+        │   ├── nav_history.gd   # Bounded back/forward trail with a pinned root (pure)
+        │   ├── vault_graph_canvas.gd # Shared contract: the planar and orbital vault link maps
+        │   ├── vault_graph_model.gd  # Pure vault link-map normalize/layout/hit-test
+        │   ├── vault_graph_view.gd   # Planar, custom-drawn vault link map
+        │   ├── vault_graph_3d.gd     # Orbital (3D) vault link map (SubViewport, bodies, springs)
         │   └── icons.gd         # Phosphor icon constants
         └── panes/               # Specialty pane types
             ├── pane_body.gd
@@ -108,7 +123,7 @@ godot/
         ├── helpers/             # Shared fixtures (ShellFixtures, MockAutoloads)
         └── bench/               # Cost and capture drivers
             ├── draw_bench.gd    # Terminal renderer cost
-            ├── graph_bench.gd   # Wiki link-graph cost: on-frame stall vs worker build
+            ├── graph_bench.gd   # Wiki link-graph cost: worker build, 3D bodies/springs, link mesh
             ├── markdown_bench.gd
             ├── reasoning_bench.gd
             ├── spawn_bench.gd   # Pane-spawn cost: per-call latency as the grid fills

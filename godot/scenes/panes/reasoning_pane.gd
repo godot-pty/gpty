@@ -109,23 +109,6 @@ func _process(delta):
 		_last_vbar_visible = visible
 		_queue_layout_refresh()
 
-## Visible viewport width: the scroll container size minus the vertical
-## scrollbar when it is shown. Using the outer size would make content
-## clip at the right edge once the scrollbar appears late in a turn.
-func _viewport_width() -> int:
-	if _turn_scroll == null:
-		return 0
-	var vbar := _turn_scroll.get_v_scroll_bar()
-	var bar_w := int(vbar.size.x) if vbar != null and vbar.visible else 0
-	return maxi(int(_turn_scroll.size.x) - bar_w, 0)
-
-func _sync_turn_list_width():
-	if _turn_list == null or _turn_scroll == null:
-		return
-	var width := _viewport_width()
-	if width > 0:
-		_turn_list.custom_minimum_size.x = width
-
 ## One deferred refresh per frame, not per delta: a burst of 200 deltas used
 ## to enqueue 200 deferred calls, each walking every turn.
 var _layout_queued := false
@@ -144,13 +127,12 @@ func _queue_layout_refresh():
 	_layout_queued = true
 	call_deferred("_refresh_turn_layout")
 
-## Width, fold state and (cached) heights. Rendering is not this function's
-## job: a turn's view is rendered by the delta that changed it, by its initial
-## render, or by `_freeze_live`. Re-rendering every turn here is what used to
-## clear a selection and re-parse every completed turn on every token.
+## Fold state and (cached) heights. Rendering is not this function's job: a
+## turn's view is rendered by the delta that changed it, by its initial render,
+## or by `_freeze_live`. Re-rendering every turn here is what used to clear a
+## selection and re-parse every completed turn on every token.
 func _refresh_turn_layout():
 	_layout_queued = false
-	_sync_turn_list_width()
 	for rec in _turns:
 		_sync_fold_height(rec)
 	_queue_scroll_bottom()
@@ -168,6 +150,12 @@ func _on_view_rendered(rec: Dictionary):
 
 ## `synced_width` caches the width a view's height was measured at, so a
 ## static turn is not re-measured every frame; `force` follows a render.
+##
+## The container owns the width. A `custom_minimum_size.x` here is a floor that
+## the fold, the turn list and the ScrollContainer all propagate upward
+## (horizontal scrolling is disabled there), so a narrower pane kept the old
+## layout instead of re-wrapping. Only the height is assigned; the view's own
+## `resized` signal re-runs this at the new width.
 func _sync_fold_height(rec: Dictionary, force := false):
 	var fold := _fold_for(rec)
 	var view := _view_for(rec)
@@ -177,14 +165,16 @@ func _sync_fold_height(rec: Dictionary, force := false):
 		view.custom_minimum_size = Vector2(0, 0)
 		rec["synced_width"] = -1
 		return
-	var width := maxi(_viewport_width() - 8, 0)
+	var width := int(view.size.x)
 	if width <= 0:
 		return
 	if not force and int(rec.get("synced_width", -1)) == width:
 		return
 	rec["synced_width"] = width
 	var height := view.get_content_height()
-	view.custom_minimum_size = Vector2(width, height + 4 if height > 0 else 0)
+	var target := Vector2(0, height + 4 if height > 0 else 0)
+	if view.custom_minimum_size != target:
+		view.custom_minimum_size = target
 
 func _scroll_turn_list_to_bottom():
 	_queue_scroll_bottom()
@@ -237,6 +227,10 @@ func _recompute_cell_metrics():
 		if view:
 			view.add_theme_font_size_override("normal_font_size", font_size)
 			view.add_theme_font_size_override("mono_font_size", font_size)
+			# The height cache is keyed on width; a font change moves the
+			# content height at the same width, so it must re-measure.
+			rec["synced_width"] = -1
+	_queue_layout_refresh()
 
 func can_receive_content(_event: Dictionary = {}) -> bool:
 	return false
@@ -533,13 +527,16 @@ func _add_fold(rec: Dictionary):
 	# The coalesced render lands after a delay, so the height sync has to be
 	# driven by the render, not by the delta that scheduled it.
 	view.rendered.connect(func(): _on_view_rendered(rec))
+	# A width change (the pane resized, the outer scrollbar appeared, the fold
+	# expanded) re-wraps the label; this re-measures the height at the new
+	# width after the layout pass. Without it the fold keeps the old height.
+	view.resized.connect(_queue_layout_refresh)
 	view.add_theme_font_size_override("normal_font_size", font_size)
 	view.add_theme_font_size_override("mono_font_size", font_size)
 	fold.add_child(view)
 
 	_turn_list.add_child(fold)
 	_fold_by_id[str(rec["id"])] = fold
-	_sync_turn_list_width()
 
 	var text := str(rec.get("text", ""))
 	if text != "":

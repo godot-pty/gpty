@@ -31,9 +31,12 @@ var backend_preserved := false
 @export var tags: Array = []
 @export var font_size: int = 14:
 	set(value):
+		# The settings panel re-sends the whole gathered dict on every
+		# keystroke; a repeated size must not re-measure or repaint.
+		if value == font_size:
+			return
 		font_size = value
-		if _font != null:
-			_recompute_cell_metrics()
+		_recompute_cell_metrics()
 
 ## The workspace this pane was attached to (its `ws-<12 hex>` id), the pane's
 ## own directory override from `PaneCwdStore`, and the workspace's directory.
@@ -50,7 +53,6 @@ var pane_label: String = "":
 	set(value):
 		pane_label = value
 		refresh_accessibility_name()
-var _font: Font  # set by concrete types that render text
 
 func _ready():
 	add_to_group("panes")
@@ -132,7 +134,6 @@ static func empty_state(content: Control, glyph: String, title: String, hint: St
 	title_label.name = "EmptyTitle"
 	title_label.text = title
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_label.add_theme_font_size_override("font_size", font_px + 2)
 	title_label.clip_text = true
 	title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	title_label.custom_minimum_size.x = 200
@@ -143,14 +144,30 @@ static func empty_state(content: Control, glyph: String, title: String, hint: St
 	hint_label.text = hint
 	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint_label.add_theme_font_size_override("font_size", font_px)
 	hint_label.custom_minimum_size.x = 200
 	box.add_child(hint_label)
 
+	empty_state_font(title_label, hint_label, font_px)
+
 	return {"host": host, "title": title_label, "hint": hint_label}
 
+## Re-apply `font_px` to an empty-state surface's two text lines: the title is
+## one step above the body text, so both move together.
+static func empty_state_font(title: Label, hint: Label, font_px: int) -> void:
+	if title:
+		title.add_theme_font_size_override("font_size", font_px + 2)
+	if hint:
+		hint.add_theme_font_size_override("font_size", font_px)
+
+## Re-apply the pane's text size to the views this type owns.
+##
+## Called by the `font_size` setter for every pane type, and by a type at the
+## end of its own setup. An override must tolerate being called before its
+## widgets exist (a spawn applies the saved settings before `_ready` runs),
+## re-apply the size to every view the type owns, and invalidate any height it
+## measured at the old font.
 func _recompute_cell_metrics():
-	pass  # overridden by types that render text
+	pass  # overridden by every type that renders text
 
 ## Apply a settings dictionary to this pane.
 ##

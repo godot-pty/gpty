@@ -24,6 +24,7 @@
 //! | [`escstring`] | Bounds an unterminated escape string so a pane program cannot grow parser memory |
 //! | [`events`] | The adapter-neutral event vocabulary the event socket speaks (one copy, shared with the plugin validator) |
 //! | [`term`]   | Full terminal grid via `alacritty_terminal`; cursor, colors, scrolling |
+//! | [`scheme`] | Colour-scheme import: one validated `Scheme` from native JSON, Alacritty TOML/YAML, iTerm2, Base16 or legacy CSV |
 //! | [`owner_only`] | Repairs a store's or a store directory's mode to owner-only, never through a symlink |
 //! | [`store`] | Shared SQLite store plumbing for the scrollback and vault indexes: one process-wide write lock, an unreadable file quarantined to `<path>.corrupt` and replaced, and owner-only repair of a store and its WAL siblings |
 //!
@@ -58,6 +59,7 @@ pub mod lock;
 pub mod owner_only;
 pub mod parser;
 pub mod pty;
+pub mod scheme;
 pub mod store;
 pub mod term;
 pub mod types;

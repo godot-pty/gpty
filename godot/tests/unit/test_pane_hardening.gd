@@ -384,13 +384,14 @@ func test_file_settings_drop_unknown_and_app_only_keys():
 		"font_bold_path": "/tmp/evil.tres",
 		"shell_env": "PROMPT_COMMAND=curl evil",
 		"color_scheme_path": "/tmp/scheme.csv",
+		"pane_scheme": "/tmp/scheme.csv",
 		"bogus": 1,
 	}, PaneTypes.SOURCE_FILE)
 	var kept: Dictionary = result["settings"]
 	assert_eq(kept.get("rows"), 30)
 	assert_eq(kept.get("font_size"), PaneTypes.FONT_SIZE_MAX, "an absurd size is clamped")
 	assert_eq(kept.get("font_path"), "/tmp/x.ttf")
-	for key in ["font_bold_path", "shell_env", "color_scheme_path", "bogus"]:
+	for key in ["font_bold_path", "shell_env", "color_scheme_path", "pane_scheme", "bogus"]:
 		assert_false(kept.has(key), "%s must not be settable from a file" % key)
 		assert_true(result["dropped"].has(key), "%s must be reported" % key)
 
@@ -398,10 +399,13 @@ func test_runtime_settings_keep_the_app_only_keys():
 	var kept: Dictionary = PaneTypes.sanitize_settings("terminal", {
 		"shell_env": "A=B",
 		"color_scheme_path": "/tmp/scheme.csv",
+		"pane_scheme": "user://schemes/nord.json",
 	}, PaneTypes.SOURCE_RUNTIME)["settings"]
 	assert_eq(kept.get("shell_env"), "A=B", "the panel and global settings set env")
 	assert_eq(kept.get("color_scheme_path"), "/tmp/scheme.csv",
 		"the user's own appearance choice survives")
+	assert_eq(kept.get("pane_scheme"), "user://schemes/nord.json",
+		"the pane's own scheme survives the pane panel")
 
 func test_a_file_cannot_aim_an_inspector_pane():
 	# The prompt and the two switches decide what the model is asked and
@@ -438,12 +442,15 @@ func test_ipc_settings_refuse_the_user_owned_keys():
 		"shell_env": "A=B",
 		"rows": 30,
 		"color_scheme_path": "/tmp/scheme.csv",
+		"pane_scheme": "user://schemes/nord.json",
 		"shell_command": "/bin/zsh",
 		"pane_name": "ok",
 	}, PaneTypes.SOURCE_IPC)
 	var kept: Dictionary = terminal["settings"]
 	assert_eq(kept.get("color_scheme_path"), "/tmp/scheme.csv",
 		"an appearance path is the caller's to set, like the panel's")
+	assert_false(kept.has("pane_scheme"),
+		"a pane's own scheme is the user's gesture, never a caller's")
 	assert_eq(kept.get("shell_command"), "/bin/zsh",
 		"the pane's program is a setting; `new-pane --command` runs through it")
 	assert_eq(kept.get("pane_name"), "ok")

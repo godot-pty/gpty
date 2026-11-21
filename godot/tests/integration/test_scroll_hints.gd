@@ -23,25 +23,8 @@ func after_each():
 		remove_child(_root)
 		_root.free()
 		_root = null
-	_remove_tree(_temp)
+	TestPaths.remove_tree(_temp)
 	MockAutoloads.teardown()
-
-func _remove_tree(path: String) -> void:
-	var dir := DirAccess.open(path)
-	if dir == null:
-		return
-	dir.list_dir_begin()
-	var name := dir.get_next()
-	while name != "":
-		if name != "." and name != "..":
-			var child := path.path_join(name)
-			if dir.current_is_dir():
-				_remove_tree(child)
-			else:
-				DirAccess.remove_absolute(child)
-		name = dir.get_next()
-	dir.list_dir_end()
-	DirAccess.remove_absolute(path)
 
 ## A `ScrollContainer` of `height` px holding one body of `body_height` px.
 func _scroll_body(height: int, body_height: int) -> ScrollContainer:

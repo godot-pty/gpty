@@ -25,23 +25,12 @@ class CountingPane extends MediaPane:
 
 func before_each():
 	MockAutoloads.setup()
-	_tmp = TestPaths.user_path("media_pane_probe")
-	DirAccess.make_dir_recursive_absolute(_tmp)
+	_tmp = TestPaths.fresh_dir("media_pane_probe")
 
 
 func after_each():
-	_remove_tree(_tmp)
+	TestPaths.remove_tree(_tmp)
 	MockAutoloads.teardown()
-
-
-func _remove_tree(path: String):
-	var dir := DirAccess.open(path)
-	if dir:
-		for f in dir.get_files():
-			DirAccess.remove_absolute(path.path_join(f))
-		for d in dir.get_directories():
-			_remove_tree(path.path_join(d))
-	DirAccess.remove_absolute(path)
 
 
 func _make_pane() -> MediaPane:

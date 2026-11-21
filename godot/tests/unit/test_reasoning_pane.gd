@@ -296,3 +296,93 @@ func test_a_live_turn_follows_the_bottom_until_the_user_scrolls_up():
 			_event("thinking.delta", {"text": "tail %d\n" % i}), "agent-terminal")
 	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.35).timeout
 	assert_gte(bar.value + bar.page, bar.max_value - 2.0, "it follows again")
+
+
+## Shrinking the pane must re-wrap: the accordion used to pin every view's
+## minimum width to the width its height was last measured at, so a narrower
+## pane kept the old layout and clipped the right side.
+func test_narrowing_the_pane_rewraps_the_turn_text():
+	var host := Control.new()
+	host.size = Vector2(420, 320)
+	add_child_autofree(host)
+	var pane := ReasoningPane.new()
+	pane.source_attachment_id = "agent-terminal"
+	host.add_child(pane)
+	pane.size = host.size
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	pane.receive_agent_event(_event("agent.started"), "agent-terminal")
+	pane.receive_agent_event(
+		_event("thinking.delta", {"text": "word ".repeat(120)}), "agent-terminal")
+	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.2).timeout
+
+	var view := pane._view_at(0)
+	var fold := pane._fold_at(0)
+	var wide := view.size.x
+	var tall := fold.size.y
+	assert_gt(wide, 0.0, "the view must have been laid out")
+	assert_gt(tall, 0.0, "the fold must have measured its content")
+
+	pane.size = Vector2(220, 320)
+	await get_tree().create_timer(0.15).timeout
+
+	assert_lt(view.size.x, wide, "the view must follow the pane narrower")
+	assert_gt(fold.size.y, tall, "the taller wrapped text must grow the fold")
+
+
+## The status is a fit-content RichTextLabel with autowrap: it must keep
+## following the pane's width and growing its height, never hold the width it
+## was last laid out at.
+func test_narrowing_the_pane_rewraps_the_idle_status():
+	var host := Control.new()
+	host.size = Vector2(420, 320)
+	add_child_autofree(host)
+	var pane := ReasoningPane.new()
+	pane.source_attachment_id = "agent-terminal"
+	host.add_child(pane)
+	pane.size = host.size
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var status: RichTextLabel = pane._status
+	var wide := status.size.x
+	var tall := status.get_content_height()
+	assert_gt(wide, 0.0, "the status must have been laid out")
+
+	pane.size = Vector2(220, 320)
+	await get_tree().create_timer(0.15).timeout
+
+	assert_lt(status.size.x, wide, "the status must follow the pane narrower")
+	assert_lt(status.size.x, 220.0,
+		"the status must fit the narrower pane, not stop at its content width")
+	assert_gt(status.get_content_height(), tall, "the idle text must wrap onto more lines")
+
+
+## A pane font-size change must reach text already on screen: the height cache
+## is keyed on width only, and the base setter skips a pane with no `_font`.
+func test_a_font_size_change_re_measures_existing_turns():
+	var host := Control.new()
+	host.size = Vector2(420, 320)
+	add_child_autofree(host)
+	var pane := ReasoningPane.new()
+	pane.source_attachment_id = "agent-terminal"
+	host.add_child(pane)
+	pane.size = host.size
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	pane.receive_agent_event(_event("agent.started"), "agent-terminal")
+	pane.receive_agent_event(
+		_event("thinking.delta", {"text": "word ".repeat(120)}), "agent-terminal")
+	await get_tree().create_timer(MarkdownView.RENDER_DELAY + 0.2).timeout
+
+	var view := pane._view_at(0)
+	var tall := view.get_content_height()
+	assert_gt(tall, 0)
+
+	pane.apply_settings({"font_size": 24})
+	await get_tree().create_timer(0.15).timeout
+
+	assert_eq(view.get_theme_font_size("normal_font_size"), 24)
+	assert_gt(view.get_content_height(), tall, "the larger font must grow the measured height")

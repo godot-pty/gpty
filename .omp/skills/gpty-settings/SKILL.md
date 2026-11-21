@@ -45,12 +45,17 @@ When adding a new user-facing setting to the gpty terminal emulator, follow this
 ## 3. Workspace (`godot/scenes/terminal/workspace.gd`)
 
 - In `_on_settings_changed()`, add logic to apply the new setting
+- A setting a terminal consumes (font size, the inner padding) goes in
+  `SettingsManager.apply_to_terminal`'s dictionary instead: `_on_settings_changed` broadcasts it to every
+  terminal in every workspace, and the pane's property setter does the live work
 - A setting that switches a whole surface (the chrome palette) gets its own signal and listener
   rather than living in `_on_settings_changed`: `SettingsManager.apply_appearance()` resolves the
   mode and emits `appearance_changed`, and `Workspace._on_appearance_changed()` rebuilds the
   `Theme`, the clear colour and every pushed colour. `save_settings()` resolves the appearance
   *before* it emits `settings_changed`, so a listener never reads the previous palette
-- If the setting affects window state, use `DisplayServer` APIs (see window mode patterns)
+- If the setting affects window state, use `DisplayServer` APIs (see window mode patterns); a whole-window
+  visual goes through `WindowChrome.apply_opacity`, which owns the `Window.transparent`/`transparent_bg` pair
+  and the workspace's opacity veil - a per-surface modulate compounds (see `pitfalls-gdscript.md`)
 - For visual changes, call `_apply_layout()` if needed
 
 ## 4. Sidebar (`godot/scenes/ui/sidebar.gd`)

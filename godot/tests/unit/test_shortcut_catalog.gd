@@ -1,5 +1,5 @@
 extends GutTest
-# ShortcutCatalog — the Settings > About list's data.
+# ShortcutCatalog — the Settings > Shortcuts list's data.
 #
 # Defends: the catalog never spells a chord itself (`rows` takes the registry
 # reader), a group with no bound action contributes no heading, and the "New

@@ -41,9 +41,17 @@ var on_swap: Callable    # set by workspace to handle pane type swap
 var on_open_pane_settings: Callable  # (manager, body): workspace closes conflicting overlays first
 var on_move_panes: Callable  # (menu: PopupMenu, body: Control): workspace appends its move submenu
 
+## Each tile is `{wrapper, col, row, cspan, rspan}` plus `edge` ("left",
+## "right", "top" or "bottom"), the side of the split that carved it, read by
+## the slide transition. A restored tile and the full-grid first tile have no
+## `edge`; a position swap leaves each tile's own `edge` with its wrapper.
 var tiles: Array[Dictionary] = []
 var last_body: Control
 signal tiles_resized
+## A user-requested position swap committed and `tiles_resized` has run: each
+## wrapper holds its new rect, and `before` maps it to the rect it was drawn at
+## a moment ago, so the motion layer can play the move.
+signal tiles_swapped(before: Dictionary)
 ## A divider drag started on `axis` ("x" or "y"). The workspace forwards it to
 ## the panes, which reflow at a throttle while the drag runs, and sets the
 ## pointer's shape for the axis.
@@ -333,11 +341,17 @@ func detach(body: Control) -> Dictionary:
 		_expand_partial(rm)
 	return rm
 
-func kill(body: Control):
+## Remove the tile and reclaim its rectangle. `on_wrapper` receives the removed
+## wrapper instead of it being freed, so a caller can play its exit; without
+## one it is freed at once.
+func kill(body: Control, on_wrapper: Callable = Callable()):
 	var rm := detach(body)
 	if rm.is_empty():
 		return
-	rm.wrapper.queue_free()
+	if on_wrapper.is_valid():
+		on_wrapper.call(rm.wrapper)
+	else:
+		rm.wrapper.queue_free()
 
 func swap_pane(body: Control, new_type_name: String) -> Control:
 	# Find the tile owning this body.
@@ -393,7 +407,8 @@ func reset():
 ## when neither axis can. The target keeps the span the aspect split gives it
 ## (`floor(span / 2)`) in every direction - `left`/`top` move the target and
 ## put the new tile at the old edge, so `right`/`bottom` are exactly the
-## pre-direction geometry.
+## pre-direction geometry. The new tile records the side it took (`edge`) for
+## the slide transition.
 func _split_for(w: Control, side: String = "") -> bool:
 	if not PaneTypes.SPLIT_SIDES.has(side):
 		side = ""
@@ -423,9 +438,9 @@ func _split_horizontal(s: Dictionary, w: Control, new_on_left: bool) -> bool:
 	s.cspan = half
 	if new_on_left:
 		s.col = col + rest
-		tiles.append({wrapper = w, col = col, row = s.row, cspan = rest, rspan = s.rspan})
+		tiles.append({wrapper = w, col = col, row = s.row, cspan = rest, rspan = s.rspan, edge = "left"})
 	else:
-		tiles.append({wrapper = w, col = col + half, row = s.row, cspan = rest, rspan = s.rspan})
+		tiles.append({wrapper = w, col = col + half, row = s.row, cspan = rest, rspan = s.rspan, edge = "right"})
 	return true
 
 ## Halve the tile along its rows, the new wrapper on the top or the bottom.
@@ -439,9 +454,9 @@ func _split_vertical(s: Dictionary, w: Control, new_on_top: bool) -> bool:
 	s.rspan = half
 	if new_on_top:
 		s.row = row + rest
-		tiles.append({wrapper = w, col = s.col, row = row, cspan = s.cspan, rspan = rest})
+		tiles.append({wrapper = w, col = s.col, row = row, cspan = s.cspan, rspan = rest, edge = "top"})
 	else:
-		tiles.append({wrapper = w, col = s.col, row = row + half, cspan = s.cspan, rspan = rest})
+		tiles.append({wrapper = w, col = s.col, row = row + half, cspan = s.cspan, rspan = rest, edge = "bottom"})
 	return true
 
 ## The one empty-grid tile: the whole grid.
@@ -615,6 +630,23 @@ func _swap_tile_positions(a: int, b: int):
 	ta.col = tb.col; ta.row = tb.row; ta.cspan = tb.cspan; ta.rspan = tb.rspan
 	tb.col = tmp.col; tb.row = tmp.row; tb.cspan = tmp.cspan; tb.rspan = tmp.rspan
 
+## Commit a position swap: record the rects the two wrappers are drawn at, swap
+## the tile data, lay out, then hand the old rects to the motion layer through
+## `tiles_swapped`. False when either index is no longer a live tile.
+func swap_positions(a: int, b: int) -> bool:
+	if a == b or a < 0 or b < 0 or a >= tiles.size() or b >= tiles.size():
+		return false
+	var before := {}
+	for i in [a, b]:
+		var w: Control = tiles[i].wrapper
+		if w == null or not is_instance_valid(w):
+			return false
+		before[w] = Rect2(w.position, w.size)
+	_swap_tile_positions(a, b)
+	tiles_resized.emit()
+	tiles_swapped.emit(before)
+	return true
+
 ## Every type change goes through here: the workspace owns the transaction (the
 ## running-work/unsaved-work guard, the rebuild, the toast).
 func _handle_swap(body: Control, new_type_name: String) -> void:
@@ -757,14 +789,12 @@ func show_position_swap_popup(for_body: Control, menu_parent: Control, at_pos: V
 		var target = menu.get_item_metadata(idx)
 		var pair := resolve_swap_pair(for_body, target)
 		menu.queue_free()
-		if pair.x == -1 or pair.y == -1:
+		if pair.x == -1 or pair.y == -1 or not swap_positions(pair.x, pair.y):
 			# The pane set changed while the popup was open; swapping the
 			# current occupants of those indices would swap the wrong pair.
 			ToastManager.warn("Swap cancelled — that pane is no longer open")
 			return
-		_swap_tile_positions(pair.x, pair.y)
 		_return_focus_to_body(for_body)
-		tiles_resized.emit()
 	)
 	menu_parent.add_child(menu)
 	menu.position = at_pos

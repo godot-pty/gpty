@@ -9,6 +9,28 @@ const HEIGHT = 30.0
 const MIN_WINDOW_W = 500
 const MIN_WINDOW_H = 300
 
+## Test seam: -1 asks the display server, 0 and 1 answer for it. The GUT
+## runner is headless and this desktop's Forward+ window reports no
+## transparency, so a test that reaches the supported branch pins it.
+## App code never writes it.
+static var force_transparency := -1
+
+## Whether this display server can make the window per-pixel transparent.
+## The engine answers false when `display/window/per_pixel_transparency/allowed`
+## is off, when the renderer cannot, or when the OS compositor cannot — one
+## answer for the three, and the Settings row is hidden for all of them.
+static func transparency_supported() -> bool:
+	if force_transparency >= 0:
+		return force_transparency == 1
+	return DisplayServer.is_window_transparency_available()
+
+## The canvas alpha for `percent`, or 1.0 when the window cannot be
+## transparent. `percent` is clamped to the settings vocabulary.
+static func opacity_alpha(percent: int, supported: bool) -> float:
+	if not supported:
+		return 1.0
+	return float(clampi(percent, SettingsManager.OPACITY_MIN, SettingsManager.OPACITY_MAX)) / 100.0
+
 var titlebar: Control = null
 var _ws: Control = null
 ## The titlebar's maximize/restore control, which acts as what it says: the
@@ -115,6 +137,27 @@ func apply_mode(force := false):
 	_sync_max_button()
 	_ws._apply_layout()
 
+
+## Put the configured opacity on the window. The workspace owns the one veil
+## that rewrites the canvas alpha (a per-surface modulate compounds across the
+## terminal's stacked backgrounds and reads almost opaque); this owns the
+## window flag, which is what lets the compositor see that alpha at all.
+##
+## A 100 % choice (or a display server that cannot be transparent) leaves an
+## opaque window: the flag is off so the compositor does no alpha work.
+func apply_opacity() -> void:
+	if _ws == null:
+		return
+	var win := _ws.get_window()
+	if win == null:
+		return
+	var alpha := opacity_alpha(SettingsManager.cfg_window_opacity, transparency_supported())
+	var on := alpha < 1.0
+	if win.transparent != on:
+		win.transparent = on
+	if win.transparent_bg != on:
+		win.transparent_bg = on
+	_ws.apply_window_alpha(alpha)
 
 ## The maximize control swaps glyph and name with the mode, read from the
 ## setting rather than from the previous glyph: the glyph is a child Label, so

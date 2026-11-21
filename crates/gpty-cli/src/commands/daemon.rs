@@ -455,8 +455,12 @@ fn gui_candidates(exe_dir: &Path, home: Option<&Path>) -> Vec<PathBuf> {
 }
 
 /// A discovered GUI must be an absolute regular file that no one else can
-/// write. Unlike the `GPTY_GUI` override it need not be owned by this user:
-/// an app under `/Applications` is normally root-owned.
+/// write. Discovery is a fixed candidate list (beside the CLI, then the macOS
+/// bundle locations), so no saved tile/profile data can choose it, and there is
+/// no owner rule: the release archive is the user's own file while
+/// `/Applications` is root-owned. The `GPTY_GUI` override names an arbitrary
+/// path, so it is held to the executable file rule
+/// (`gpty_ipc::transport::validate_gui_binary`) instead.
 fn launchable(path: &Path) -> bool {
     if !path.is_absolute() {
         return false;

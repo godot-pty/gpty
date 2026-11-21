@@ -31,6 +31,15 @@ const CHROME_COLOR_TOKENS := {
 ## layout every measurement and screenshot was taken at; the ceiling matches the
 ## loader's clamp so a stored value cannot exceed what the picker can show.
 const UI_SCALE_PRESETS := [100, 110, 125, 150, 175, 200]
+## Window opacity, in percent: 100 is an opaque window, and below it the app is
+## drawn at that alpha so the desktop shows through, where the display server
+## can make the window per-pixel transparent
+## (`WindowChrome.transparency_supported`). The picker, the loader clamp and
+## `WindowChrome.opacity_alpha` read these.
+const OPACITY_MIN := 40
+const OPACITY_MAX := 100
+const OPACITY_DEFAULT := 100
+const OPACITY_PRESETS := [100, 95, 90, 85, 80, 75, 70, 60, 50, 40]
 
 var cfg_cursor_shape := 0
 var cfg_cursor_blink := true
@@ -51,12 +60,24 @@ var cfg_sidebar_bg: Color = _chrome_default("sidebar_bg")
 var cfg_focus_border: Color = _chrome_default("focus_border")
 var cfg_selection: Color = _chrome_default("selection")
 var cfg_scrollback_indicator: Color = _chrome_default("scrollback_indicator")
-var cfg_color_scheme_path := ""
+## The terminal colour scheme the resolved appearance selects. Two slots
+## rather than one: `Dark`/`Light`/`Follow system` already decides the chrome,
+## and the terminal joins that decision instead of carrying a second switch.
+## An empty light slot follows the dark one, so a single scheme still works.
+var cfg_scheme_dark := ""
+var cfg_scheme_light := ""
 var cfg_max_fps := 0
 var cfg_font_path := "res://fonts/DejaVuSansMono.ttf"
 var cfg_font_size := 14
+## Inset between a terminal pane's tile edge and its grid, per side, logical
+## px. Applied by shrinking the fitted grid, never by offsetting the draw.
+var cfg_terminal_padding := PaneTypes.TERMINAL_PADDING_DEFAULT
 var cfg_shell_command := default_shell_command()
 var cfg_window_mode := 0
+## The window's own opacity, in percent. Applied by `WindowChrome.apply_opacity`
+## where the display server can make the window transparent; the System row is
+## hidden where it cannot.
+var cfg_window_opacity := OPACITY_DEFAULT
 var cfg_show_titlebar := true
 var cfg_window_position := Vector2i(100, 100)
 var cfg_window_size := Vector2i(1920, 1080)
@@ -69,6 +90,21 @@ var cfg_ui_scale := 100
 ## Which chrome colour set is active: `APPEARANCE_DARK`, `APPEARANCE_LIGHT`, or
 ## `APPEARANCE_SYSTEM` (the desktop's own preference).
 var cfg_appearance_mode := APPEARANCE_DARK
+## Which pane animations play (Off/Subtle/Full) and which animation each
+## transition uses. `PaneTransitions` resolves the stored ids and clamps the
+## per-animation properties; the empty dictionaries here resolve to the
+## registry defaults, which is also what a store without the keys means.
+var cfg_motion := UiMotion.SUBTLE
+var cfg_pane_animation := {}
+var cfg_pane_animation_params := {}
+## The ambient effect behind terminal text (a closed `UiEffects` id) and its
+## intensity (Off/Subtle/Full). Off by default; the id is kept while the
+## intensity is Off, so turning the intensity up restores the last choice.
+var cfg_effect := UiEffects.DEFAULT_AMBIENT
+var cfg_effect_intensity := UiEffects.OFF
+## Concept name -> reactive cue id (`UiEffects.REACTIVE`), empty by default.
+## `UiEffects.sanitize_reactive` owns the cap and the closed effect values.
+var cfg_reactive_effects := {}
 
 ## The foldable sidebar sections, in the order the sidebar stacks them. These ids
 ## are the `sidebar_folded` vocabulary: a stored value that is not in this list is
@@ -156,6 +192,43 @@ func _on_system_theme_changed() -> void:
 	if cfg_appearance_mode == APPEARANCE_SYSTEM:
 		apply_appearance.call_deferred()
 
+## The scheme path the resolved appearance selects. An empty light slot follows
+## the dark one, so one chosen scheme styles both modes.
+func active_scheme_path() -> String:
+	if is_dark_appearance():
+		return cfg_scheme_dark
+	return cfg_scheme_light if cfg_scheme_light != "" else cfg_scheme_dark
+
+## Parse a scheme file and keep a validated native copy under `user://schemes/`.
+## Returns `{ok, path, error}`; the copy is what the picker lists and what a
+## pane reads, so the source file can move or be deleted afterwards.
+##
+## The source is untrusted input: `TextRead.read_prefix` is the one gate for a
+## real absolute path (regular file, capped read), and the parser owns the
+## closed-key and format checks. The copy is written through `_write_text`, the
+## same random-name + 0600 writer every store uses.
+func import_scheme(source_path: String) -> Dictionary:
+	if not BasePersistenceManager.is_real_absolute_path(source_path):
+		return {"ok": false, "path": "", "error": "Choose a scheme file on disk."}
+	var read := TextRead.read_prefix(source_path, SchemeLibrary.MAX_BYTES)
+	if not read.ok:
+		return {"ok": false, "path": "", "error": "The scheme file could not be read."}
+	if read.truncated:
+		return {"ok": false, "path": "", "error": "The file is larger than 16 KiB."}
+	var parsed := SchemeLibrary.parse_text(str(read.text), source_path.get_file())
+	if not parsed.get("ok", false):
+		return {"ok": false, "path": "", "error": str(parsed.get("error", "This file is not a colour scheme."))}
+	if not SchemeLibrary.ensure_user_dir():
+		return {"ok": false, "path": "", "error": "The colour-scheme folder could not be created."}
+	var id := SchemeLibrary.unique_user_id(str(parsed.get("name", "")))
+	if id == "":
+		return {"ok": false, "path": "", "error": "Too many imported schemes share that name."}
+	var target := SchemeLibrary.user_dir.path_join(id + ".json")
+	if not _write_text(target, str(parsed.get("json", ""))):
+		return {"ok": false, "path": "", "error": "Could not write %s." % target}
+	SchemeLibrary.reset()
+	return {"ok": true, "path": target, "error": ""}
+
 ## Whether the chrome should be dark right now.
 func is_dark_appearance() -> bool:
 	match cfg_appearance_mode:
@@ -211,14 +284,21 @@ func load_settings():
 	cfg_focus_border = _color_from_hex(_as_string(d, "focus_border", ""), _chrome_default("focus_border"))
 	cfg_selection = _color_from_hex(_as_string(d, "selection", ""), _chrome_default("selection"))
 	cfg_scrollback_indicator = _color_from_hex(_as_string(d, "scrollback_indicator", ""), _chrome_default("scrollback_indicator"))
-	cfg_color_scheme_path = _as_string(d, "color_scheme", "")
+	# `color_scheme` is the pre-0.8.6 single-path key: read it once as the dark
+	# slot, so an existing choice survives the upgrade; the next save writes the
+	# pair and drops the old key.
+	cfg_scheme_dark = _as_string(d, "scheme_dark", _as_string(d, "color_scheme", ""))
+	cfg_scheme_light = _as_string(d, "scheme_light", "")
 	cfg_max_fps = _as_int(d, "max_fps", 0)
 	cfg_window_mode = _as_int(d, "window_mode", 0)
+	cfg_window_opacity = clampi(_as_int(d, "window_opacity", OPACITY_DEFAULT), OPACITY_MIN, OPACITY_MAX)
 	cfg_show_titlebar = _as_bool(d, "show_titlebar", true)
 	cfg_window_position = _window_vec(d, "window_position", Vector2i(100, 100))
 	cfg_window_size = _window_vec(d, "window_size", Vector2i(1920, 1080))
 	cfg_font_path = _as_string(d, "font_path", "res://fonts/DejaVuSansMono.ttf")
 	cfg_font_size = _as_int(d, "font_size", 14)
+	cfg_terminal_padding = clampi(_as_int(d, "terminal_padding", PaneTypes.TERMINAL_PADDING_DEFAULT),
+		0, PaneTypes.TERMINAL_PADDING_MAX)
 	cfg_shell_command = _as_string(d, "shell_command", default_shell_command())
 	cfg_shell_env = _as_string(d, "shell_env", "")
 	cfg_reasoning_max_turns = clampi(_as_int(d, "reasoning_max_turns", 16), 1, 64)
@@ -230,6 +310,20 @@ func load_settings():
 	cfg_ui_scale = clampi(_as_int(d, "ui_scale", 100), 100, UI_SCALE_PRESETS.max())
 	cfg_appearance_mode = clampi(_as_int(d, "appearance_mode", APPEARANCE_DARK), APPEARANCE_DARK, APPEARANCE_SYSTEM)
 	cfg_sidebar_folded = _sidebar_folded_from(_as_array(d, "sidebar_folded", []))
+	# Motion is a closed vocabulary: an id this build does not know, or one that
+	# serves another transition, falls back to the kind's default, and a
+	# property outside its schema range is clamped. A store from another build
+	# never reaches a tween.
+	cfg_motion = clampi(_as_int(d, "motion", UiMotion.SUBTLE), UiMotion.OFF, UiMotion.FULL)
+	cfg_pane_animation = PaneTransitions.sanitize_choices(_as_dict(d, "pane_animations", {}))
+	cfg_pane_animation_params = PaneTransitions.sanitize_params_store(_as_dict(d, "pane_animation_params", {}))
+	# Ambient effects are the same closed-vocabulary shape: an unknown id falls
+	# back to the table's default, the intensity is clamped to the picker, and
+	# a reactive map keeps only ids the table carries.
+	cfg_effect = UiEffects.sanitize_ambient(_as_string(d, "effect", UiEffects.DEFAULT_AMBIENT))
+	cfg_effect_intensity = clampi(_as_int(d, "effect_intensity", UiEffects.OFF),
+		UiEffects.OFF, UiEffects.FULL)
+	cfg_reactive_effects = UiEffects.sanitize_reactive(_as_dict(d, "reactive_effects", {}))
 
 func save_settings():
 	_save_settings_file()
@@ -243,14 +337,22 @@ func save_settings():
 ## to every pane in every workspace and re-applies the window mode, which a
 ## sidebar fold has no part in.
 func _save_settings_file():
-	var d = {"cursor_shape": cfg_cursor_shape, "cursor_blink": cfg_cursor_blink, "cursor_blink_speed": cfg_cursor_blink_speed, "scroll_lines": cfg_scroll_lines, "default_rows": cfg_default_rows, "default_cols": cfg_default_cols, "beam_width": cfg_beam_width, "underline_height": cfg_underline_height, "wrapper_bg": cfg_wrapper_bg.to_html(), "title_bar_bg": cfg_title_bar_bg.to_html(), "wrapper_border": cfg_wrapper_border.to_html(), "sidebar_bg": cfg_sidebar_bg.to_html(), "focus_border": cfg_focus_border.to_html(), "selection": cfg_selection.to_html(), "scrollback_indicator": cfg_scrollback_indicator.to_html(), "color_scheme": cfg_color_scheme_path, "max_fps": cfg_max_fps, "font_path": cfg_font_path, "font_size": cfg_font_size, "shell_command": cfg_shell_command, "shell_env": cfg_shell_env, "show_titlebar": cfg_show_titlebar, "window_mode": cfg_window_mode, "window_position": {"x": cfg_window_position.x, "y": cfg_window_position.y}, "window_size": {"x": cfg_window_size.x, "y": cfg_window_size.y}}
+	var d = {"cursor_shape": cfg_cursor_shape, "cursor_blink": cfg_cursor_blink, "cursor_blink_speed": cfg_cursor_blink_speed, "scroll_lines": cfg_scroll_lines, "default_rows": cfg_default_rows, "default_cols": cfg_default_cols, "beam_width": cfg_beam_width, "underline_height": cfg_underline_height, "wrapper_bg": cfg_wrapper_bg.to_html(), "title_bar_bg": cfg_title_bar_bg.to_html(), "wrapper_border": cfg_wrapper_border.to_html(), "sidebar_bg": cfg_sidebar_bg.to_html(), "focus_border": cfg_focus_border.to_html(), "selection": cfg_selection.to_html(), "scrollback_indicator": cfg_scrollback_indicator.to_html(), "max_fps": cfg_max_fps, "font_path": cfg_font_path, "font_size": cfg_font_size, "window_opacity": cfg_window_opacity, "terminal_padding": cfg_terminal_padding, "shell_command": cfg_shell_command, "shell_env": cfg_shell_env, "show_titlebar": cfg_show_titlebar, "window_mode": cfg_window_mode, "window_position": {"x": cfg_window_position.x, "y": cfg_window_position.y}, "window_size": {"x": cfg_window_size.x, "y": cfg_window_size.y}}
 	d["reasoning_max_turns"] = cfg_reasoning_max_turns
 	d["reasoning_max_turn_bytes"] = cfg_reasoning_max_turn_bytes
 	d["check_updates"] = cfg_check_updates
 	d["ui_scale"] = cfg_ui_scale
 	d["appearance_mode"] = cfg_appearance_mode
+	d["scheme_dark"] = cfg_scheme_dark
+	d["scheme_light"] = cfg_scheme_light
 	d["history_lines"] = cfg_history_lines
 	d["sidebar_folded"] = cfg_sidebar_folded.duplicate()
+	d["motion"] = cfg_motion
+	d["pane_animations"] = cfg_pane_animation.duplicate(true)
+	d["pane_animation_params"] = cfg_pane_animation_params.duplicate(true)
+	d["effect"] = cfg_effect
+	d["effect_intensity"] = cfg_effect_intensity
+	d["reactive_effects"] = cfg_reactive_effects.duplicate()
 	_write_file(SETTINGS_FILE, d)
 
 func apply_to_terminal(body: Control):
@@ -264,9 +366,12 @@ func apply_to_terminal(body: Control):
 		"focus_border_color": cfg_focus_border,
 		"selection_color": cfg_selection,
 		"scrollback_indicator_color": cfg_scrollback_indicator,
-		"color_scheme_path": cfg_color_scheme_path,
+		"color_scheme_path": active_scheme_path(),
 		"font_path": cfg_font_path,
 		"font_size": cfg_font_size,
+		"terminal_padding": cfg_terminal_padding,
+		"effect": UiEffects.ambient_id(),
+		"effect_intensity": UiEffects.level(),
 		"max_fps": cfg_max_fps,
 		"shell_command": cfg_shell_command,
 		"shell_env": cfg_shell_env,

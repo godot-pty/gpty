@@ -54,6 +54,10 @@ extends SceneTree
 ##     per-frame work is stopped (`_apply_agent_states`): the spinner cycles and
 ##     the attention pulse are wall-clock driven, so a live badge would never
 ##     repeat from one run to the next.
+##   - An effect state pins the ambient clock (`pin_effects`) and, when the
+##     state names a cue, draws that cue's final frame (`pin_effect_cue`):
+##     grain advances on a Timer and a cue is a tween, so either would differ
+##     between two runs.
 ##   - The status bar's clock and FPS pinned (`StatusBar.freeze_readouts`);
 ##     they are the only readouts that move while nothing does.
 ##   - The capture waits for every terminal grid generation, every pane title
@@ -82,7 +86,11 @@ const STATES := {
 	# reader reaches them.
 	"sidebar-folded": {"size": DEFAULT_SIZE, "panes": 4, "fold": ["workspaces", "profiles"]},
 	"settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings"},
-	"pane-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "pane-settings"},
+	# `/`, not the sandbox home: the Pane Settings card prints the inherited
+	# workspace directory, and a per-run `/tmp/gpty-ui.<random>` path would make
+	# the capture differ between runs (the check's file-dialog state does the
+	# same with its picker).
+	"pane-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "pane-settings", "cwd": "/"},
 	# The workspace-directory picker: the app's own header over the engine's
 	# picker column (row *A FileDialog still wears Godot's stock grey frame*).
 	"file-dialog": {"size": DEFAULT_SIZE, "panes": 1, "open": "file-dialog"},
@@ -135,14 +143,57 @@ const STATES := {
 			"settings": {"type": "terminal", "attachment_id": "capture-scrollback",
 				"shell_args": ["-c", "seq 1 300; sleep 600"]}},
 	]},
-	# The scrollbar column: the Terminal tab overflows its 540x560 card by
-	# 62 px, so its ScrollContainer must show a real bar with a thumb inside a
-	# track (row *Every scrollable surface has a 0 px scrollbar*). The 150 %
+	# The scrollbar column: the Terminal tab's content is taller than the card,
+	# so its ScrollContainer must show a real bar with a thumb inside a track
+	# (row *Every scrollable surface has a 0 px scrollbar*). The 150 %
 	# twin proves the same geometry under the window's content scale - the
 	# column is layout pixels, so it scales with the rest of the chrome.
-	"settings-terminal": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Terminal"},
+	"settings-terminal": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Terminal",
+		"cwd": "/", "settings": {"cfg_shell_env": "DEMO=1"}},
 	"settings-terminal-150": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Terminal",
-		"ui_scale": 150},
+		"ui_scale": 150, "cwd": "/", "settings": {"cfg_shell_env": "DEMO=1"}},
+	# The Motion section at the bottom of Appearance: the master switch, the
+	# create/close/swap pickers and the selected animation's generated property
+	# rows (rows *Panes animate when they are created, destroyed or swapped* and
+	# *The transition library grows past fade and move*).
+	"settings-motion": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings",
+		"tab": "Appearance", "scroll_to": "MotionTitle"},
+	# The Effects section: the closed ambient table, the intensity picker and
+	# (after the reactive phase) the concept -> cue mapping. Row *Dynamic
+	# Shaders*.
+	"settings-effects": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings",
+		"tab": "Appearance", "scroll_to": "EffectsTitle"},
+	# The ambient effects over real grid content: red, inverse and underlined
+	# runs prove the text and non-default cells stay opaque while the ground
+	# carries the effect. The light twin uses the light scheme, not just the
+	# light chrome. Row *Dynamic Shaders*.
+	"effect-crt": {"size": Vector2i(1280, 760), "tiles": [
+		{"col": 0, "row": 0, "cspan": 60, "rspan": 60, "settings": {
+			"type": "terminal", "attachment_id": "capture-effect-crt",
+			"shell_args": ["-c",
+				"printf '\\033[1;31mFAIL\\033[0m scanlines behind text\\n\\033[7m INVERSE \\033[0m \\033[4;32mUNDERLINE\\033[0m\\n'; seq -f 'line %g' 1 12; sleep 600"]}},
+	], "settings": {"cfg_effect": "crt", "cfg_effect_intensity": 2}},
+	"effect-crt-light": {"size": Vector2i(1280, 760), "tiles": [
+		{"col": 0, "row": 0, "cspan": 60, "rspan": 60, "settings": {
+			"type": "terminal", "attachment_id": "capture-effect-crt-light",
+			"shell_args": ["-c",
+				"printf '\\033[1;31mFAIL\\033[0m scanlines behind text\\n\\033[7m INVERSE \\033[0m \\033[4;32mUNDERLINE\\033[0m\\n'; seq -f 'line %g' 1 12; sleep 600"]}},
+	], "settings": {"cfg_appearance_mode": 1,
+		"cfg_scheme_light": "res://schemes/solarized-light.json",
+		"cfg_effect": "crt", "cfg_effect_intensity": 1}},
+	"effect-grain": {"size": Vector2i(1280, 760), "tiles": [
+		{"col": 0, "row": 0, "cspan": 60, "rspan": 60, "settings": {
+			"type": "terminal", "attachment_id": "capture-effect-grain",
+			"shell_args": ["-c",
+				"printf '\\033[1;31mFAIL\\033[0m grain behind text\\n\\033[7m INVERSE \\033[0m \\033[4;32mUNDERLINE\\033[0m\\n'; seq -f 'line %g' 1 12; sleep 600"]}},
+	], "settings": {"cfg_effect": "grain", "cfg_effect_intensity": 2}},
+	# A pinned reactive cue on the source pane (the tint at its peak), with no
+	# ambient effect, so the screenshot isolates the cue. Row *Reactive
+	# Environments*.
+	"effect-cue": {"size": Vector2i(1280, 760), "panes": 1,
+		"settings": {"cfg_effect_intensity": 0,
+			"cfg_reactive_effects": {"cat_command": "tint"}},
+		"effects_cue": "tint"},
 	# The UI scale setting at its 125 % step, on the app's own first-launch
 	# workspace. The only visual proof that the setting scales the chrome and
 	# the terminal text together; a later release recaptures it.
@@ -160,6 +211,16 @@ const STATES := {
 		"settings": {"cfg_appearance_mode": 1}},
 	"light-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Appearance",
 		"settings": {"cfg_appearance_mode": 1}},
+	# The terminal's own colour scheme, dark and light. The chrome stays its
+	# own palette: the two are independent, and these two states prove the
+	# pairs land on the grid (gruvbox's `#282828` ground, solarized-light's
+	# `#fdf6e3`) without touching the chrome tokens.
+	"scheme-pair": {"size": Vector2i(1280, 760), "panes": 2,
+		"settings": {"cfg_scheme_dark": "res://schemes/gruvbox-dark.json",
+			"cfg_appearance_mode": 0}},
+	"scheme-pair-light": {"size": Vector2i(1280, 760), "panes": 2,
+		"settings": {"cfg_scheme_light": "res://schemes/solarized-light.json",
+			"cfg_appearance_mode": 1}},
 	# The search strip at the pane's top edge with a match count and the two
 	# step controls. Filler output comes first so the strip's two rows do not
 	# hide the matches themselves; three `alpha` lines then sit in view
@@ -226,8 +287,28 @@ const STATES := {
 	# The surfaces the October 2026 audit did not reach. Each seeds the real
 	# content the surface needs (the bundled vault, a wiki tile, an untrusted
 	# spawn plan) instead of a mock, so the capture shows the shipped UI.
+	"wiki-list": {"size": DEFAULT_SIZE, "tiles": [WIKI_LIST_TILE]},
 	"wiki-vault": {"size": DEFAULT_SIZE, "tiles": [WIKI_TILE]},
-	"wiki-graph": {"size": DEFAULT_SIZE, "tiles": [WIKI_TILE], "open": "wiki-graph"},
+	"wiki-graph": {
+		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
+		"orbit": true,
+	},
+	# The same surface in the planar fallback: proves the picker reaches the 2D
+	# canvas and that the arrangement is presentable in both models.
+	"wiki-graph-planar": {
+		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
+		"graph_mode": "2d",
+	},
+	# The orbital map on the light chrome: the halos switch to alpha blending
+	# and the world glow is off (a white ground cannot bloom).
+	"light-wiki-graph": {
+		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
+		"orbit": true, "settings": {"cfg_appearance_mode": 1},
+	},
+	"light-wiki-graph-planar": {
+		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
+		"graph_mode": "2d", "settings": {"cfg_appearance_mode": 1},
+	},
 	"concept-editor": {"size": DEFAULT_SIZE, "panes": 1, "open": "concept-editor"},
 	# The divider grab band: a 12 px handle centred on the line between two
 	# panes, highlighted on hover (row *Resizing a pane is smooth*). The pointer
@@ -239,7 +320,7 @@ const STATES := {
 	"resize-drag": {"size": DEFAULT_SIZE, "tiles": RESIZE_TILES,
 		"open": "resize-drag", "keep_pointer": true},
 	# The Commands tab with two seeded commands: the list, the Insert/Run hint
-	# each row carries, and the seven-tab bar that has to hold it. The entries
+	# each row carries, and the eight-tab bar that has to hold it. The entries
 	# are written through the store's own API, so the image cannot show a state
 	# the app cannot reach.
 	"commands": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Commands",
@@ -250,9 +331,14 @@ const STATES := {
 	# them below the fold.
 	"palette-commands": {"size": DEFAULT_SIZE, "panes": 1, "open": "palette",
 		"query": "saved", "commands": COMMAND_FIXTURE},
-	# The Settings > About keyboard-shortcut table (row *Discoverability: pane
-	# names, shortcuts and the window-mode control*).
-	"shortcuts": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "About"},
+	# The Settings > Shortcuts table (row *Discoverability: pane names,
+	# shortcuts and the window-mode control*).
+	"shortcuts": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Shortcuts"},
+	# The About tab's documentation viewer on its home page: both versions on
+	# one row, the Back/Forward pair disabled at the root, and the bundled
+	# README rendered by the shared Markdown view (row *The README and every
+	# document it links are readable inside Settings*).
+	"settings-about": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "About"},
 	# The sidebar's section Help popup: the Add Pane glyph table, opened through
 	# the section's own Help button (same row).
 	"pane-help": {"size": DEFAULT_SIZE, "panes": 1, "open": "help"},
@@ -315,12 +401,31 @@ const RESIZE_TILES := [
 ]
 ## The bundled wiki is a real vault (notes on disk, indexed by the Rust side),
 ## so the Wiki and link-graph states need no fixture of their own.
+## A saved note: the note-editor surface (Notes + Graph).
 const WIKI_TILE := {
 	"col": 0, "row": 0, "cspan": 60, "rspan": 60,
 	"settings": {
 		"type": "wiki", "attachment_id": "capture-wiki",
 		"vault_path": "@knowledge", "view_mode": "split",
 		"open_note": "index.md",
+	},
+}
+## A saved list view: the note-list surface (Graph + New + Search).
+const WIKI_LIST_TILE := {
+	"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+	"settings": {
+		"type": "wiki", "attachment_id": "capture-wiki-list",
+		"vault_path": "@knowledge", "view_mode": "split",
+		"graph": false,
+	},
+}
+## No saved view: the new-pane default, the orbital/planar graph surface
+## (Notes + Planar/Orbital + Arrows + Relayout, or Orbit on the orbital map).
+const WIKI_GRAPH_TILE := {
+	"col": 0, "row": 0, "cspan": 60, "rspan": 60,
+	"settings": {
+		"type": "wiki", "attachment_id": "capture-wiki-graph",
+		"vault_path": "@knowledge", "view_mode": "split",
 	},
 }
 ## A saved tile whose program differs from the configured default: the restore
@@ -431,6 +536,7 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	if not await _apply_state(state_name, state):
 		return
 	_pin_empty_guide()
+	_pin_effects(state)
 
 	if args.get("perturb", "") == state_name:
 		_perturb(state_name)
@@ -476,6 +582,21 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 func _pin_empty_guide() -> void:
 	if _workspace._shortcut_guide != null and _workspace._empty_state.visible:
 		_workspace._shortcut_guide.pin_animation()
+
+## Freeze the effect clocks and pin a cue. Grain advances on a Timer and a cue
+## is a tween, so either would differ between two runs. Untyped `has_method`
+## calls only: this `-s` entry point compiles before autoloads exist, and naming
+## `TerminalPane` pulls `PaneBody` -> `PaneCwdStore` in and the whole capture
+## loads as bare Controls (see `_is_terminal`).
+func _pin_effects(state: Dictionary) -> void:
+	var cue := str(state.get("effects_cue", ""))
+	for tile in _workspace._tm.tiles:
+		var body = _workspace._tm._find_body(tile.wrapper)
+		if body == null or not body.has_method("pin_effects"):
+			continue
+		body.pin_effects()
+		if cue != "" and body.has_method("pin_effect_cue"):
+			body.pin_effect_cue(cue)
 
 
 # ── Seeding ────────────────────────────────────────────────────────────
@@ -527,7 +648,7 @@ func _seed_workspace(state: Dictionary) -> void:
 	# A saved layout carries its panes' public ids; naming them here keeps the
 	# Pane Settings capture free of a random `pane-…` handle.
 	var workspaces: Array[Dictionary] = [
-		{"name": "Workspace 1", "cwd": "", "layout": resolved},
+		{"name": "Workspace 1", "cwd": str(state.get("cwd", "")), "layout": resolved},
 	]
 	_store.save(0, workspaces)
 	# A state may seed a tile that starts something other than the default
@@ -644,6 +765,19 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 					return false
 				tab_container.current_tab = tab_container.get_tab_idx_from_control(tab_body as Control)
 				await _wait_frames(2)
+				# `"scroll_to": "<node name>"` puts a section below the card's
+				# fold at the top of the tab: a control scrolled out of the
+				# card is still real, and a capture that cannot reach it
+				# proves nothing about it.
+				if state.has("scroll_to") and tab_body is ScrollContainer:
+					var target := _workspace._settings_panel.find_child(
+						str(state["scroll_to"]), true, false) as Control
+					if target == null:
+						_fail("the Settings panel has no '%s' control" % str(state["scroll_to"]))
+						return false
+					var sc := tab_body as ScrollContainer
+					sc.scroll_vertical = int(target.position.y)
+					await _wait_frames(2)
 		"file-dialog":
 			var more_button := _button_with_accessible_name(_workspace._sidebar,
 				"More workspace actions")
@@ -722,25 +856,44 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			if list == null or list.item_count == 0:
 				_fail("the bundled vault produced no notes for the wiki pane")
 				return false
-			var graph_button := _button_with_label(wiki, "Graph")
-			if graph_button == null:
-				_fail("the wiki pane has no Graph button")
+			var body = _workspace._tm._find_body(_workspace._tm.tiles[0].wrapper)
+			if body == null:
+				_fail("the wiki tile has no body")
 				return false
-			await _click(graph_button)
+			var wanted_mode := str(state.get("graph_mode", ""))
+			if wanted_mode != "":
+				body.apply_settings({"graph_mode": wanted_mode})
+			# WIKI_GRAPH_TILE has no saved view, so the pane opens the graph by
+			# default. The click path remains for a state staged on a notes
+			# surface; once the graph is up its Graph button is hidden.
+			if body._graph_view == null or not body._graph_view.visible:
+				var graph_button := _button_with_label(wiki, "Graph")
+				if graph_button != null:
+					await _click(graph_button)
 			# The graph is queried, modelled and laid out on a worker thread:
 			# the canvas arrives when the pane's poll sees the task done, which
 			# under `--disable-vsync` can be many cheap frames later. Wait on
 			# the task with a wall-clock budget rather than a frame count.
-			var graph: Node = _find_script(wiki, "res://scenes/ui/vault_graph_view.gd")
-			var body = _workspace._tm._find_body(_workspace._tm.tiles[0].wrapper)
 			var deadline := Time.get_ticks_msec() + 10000
 			while body._graph_task != -1 and Time.get_ticks_msec() < deadline:
 				await _wait_frames(1)
 			await _wait_frames(1)
-			graph = _find_script(wiki, "res://scenes/ui/vault_graph_view.gd")
-			if graph == null or not (graph as Control).visible:
-				_fail("clicking Graph did not show the link graph")
+			var graph: Control = body._graph_view if body != null else null
+			if graph == null or not graph.visible:
+				_fail("the wiki pane did not open its default graph")
 				return false
+			if bool(state.get("orbit", false)) and graph.has_method("_set_orbit"):
+				# A front view reads as a flat network; a small, synthetic
+				# orbit shows the depth layers without moving any body.
+				graph._orbit_button.button_pressed = true
+				graph._begin_left(Vector2(2.0, 2.0))
+				var orbit := InputEventMouseMotion.new()
+				orbit.position = Vector2(72.0, 22.0)
+				orbit.relative = Vector2(70.0, 20.0)
+				graph._gui_input(orbit)
+				graph._end_left(orbit.position)
+				graph._rebuild_links()
+				await _wait_frames(2)
 		"concept-editor":
 			await _click(_button_with_label(_workspace._sidebar, "Settings"))
 			await _wait_frames(3)
@@ -1291,7 +1444,10 @@ func _audit_focus(state_name: String) -> void:
 			continue
 		if c is BaseButton:
 			continue
-		elif c.get_script() != null and (c.get_script() as Script).resource_path == "res://scenes/ui/vault_graph_view.gd":
+		elif c.get_script() != null and (c.get_script() as Script).resource_path in [
+			"res://scenes/ui/vault_graph_view.gd",
+			"res://scenes/ui/vault_graph_3d.gd",
+		]:
 			canvases.append(c)
 	# The workspace's own mouse-only buttons, after the escape. A control that is
 	# still visible was already snapshotted from the overlay walk.

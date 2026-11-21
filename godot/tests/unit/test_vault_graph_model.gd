@@ -194,6 +194,108 @@ func test_a_single_node_layout_is_finite():
 	assert_true(is_finite(point.x) and is_finite(point.y))
 
 
+# ── Saved positions ────────────────────────────────────────────────────
+#
+# Geometry rides the pane's layout state, which is a user-editable file: every
+# value here is file input, capped and clamped before it can reach a canvas.
+
+func test_sanitize_positions_accepts_vectors_and_pairs():
+	var clean := VaultGraphModel.sanitize_positions({
+		"a.md": Vector2(12.5, -3.0),
+		"b.md": [40, 50],
+	})
+	assert_eq(clean.size(), 2)
+	assert_eq(clean["a.md"], [12.5, -3.0])
+	assert_eq(clean["b.md"], [40.0, 50.0])
+
+
+func test_sanitize_positions_drops_invalid_entries_without_failing_the_map():
+	var clean := VaultGraphModel.sanitize_positions({
+		"good.md": [1.0, 2.0],
+		"": [3.0, 4.0],
+		"x".repeat(VaultGraphModel.MAX_POSITION_ID + 1): [5.0, 6.0],
+		"bad\uFFFD.md": [7.0, 8.0],
+		"nan.md": [NAN, 0.0],
+		"inf.md": [0.0, INF],
+		"short.md": [1.0],
+		"text.md": ["3.0", 4.0],
+		"str.md": "1, 2",
+		42: [9.0, 10.0],
+	})
+	assert_eq(clean.size(), 1, "one damaged entry must not erase the others")
+	assert_eq(clean["good.md"], [1.0, 2.0])
+
+
+func test_sanitize_positions_refuses_a_non_dictionary():
+	assert_eq(VaultGraphModel.sanitize_positions(null), {})
+	assert_eq(VaultGraphModel.sanitize_positions([1, 2]), {})
+
+
+func test_sanitize_positions_clamps_and_caps():
+	var raw := {"a.md": [VaultGraphModel.POSITION_BOUND + 500.0, -VaultGraphModel.POSITION_BOUND - 500.0]}
+	var clean := VaultGraphModel.sanitize_positions(raw)
+	assert_eq(clean["a.md"], [VaultGraphModel.POSITION_BOUND, -VaultGraphModel.POSITION_BOUND])
+
+	var many := {}
+	for i in VaultGraphModel.MAX_POSITION_ENTRIES + 5:
+		many["n%d.md" % i] = [float(i), float(i)]
+	assert_eq(
+		VaultGraphModel.sanitize_positions(many).size(),
+		VaultGraphModel.MAX_POSITION_ENTRIES
+	)
+
+
+func test_serialize_positions_filters_deleted_notes_and_rounds():
+	var nodes := [_node("a.md"), _node("b.md")]
+	var saved := VaultGraphModel.serialize_positions({
+		"a.md": Vector2(1.234, 2.345),
+		"b.md": Vector2(3.0, 4.0),
+		"gone.md": Vector2(5.0, 6.0),
+	}, nodes)
+	assert_eq(saved.size(), 2)
+	assert_false(saved.has("gone.md"), "a deleted note leaves no stale position")
+	assert_almost_eq(float(saved["a.md"][0]), 1.2, 0.0001)
+	assert_almost_eq(float(saved["a.md"][1]), 2.3, 0.0001)
+	assert_eq(saved["b.md"], [3.0, 4.0])
+
+
+func test_serialize_positions_clamps_an_out_of_bounds_drag():
+	var saved := VaultGraphModel.serialize_positions({
+		"a.md": Vector2(VaultGraphModel.POSITION_BOUND * 2.0, -VaultGraphModel.POSITION_BOUND * 2.0),
+	}, [_node("a.md")])
+	assert_eq(saved["a.md"], [VaultGraphModel.POSITION_BOUND, -VaultGraphModel.POSITION_BOUND])
+
+
+func test_layout_keeps_pair_form_saved_positions_and_places_the_rest():
+	var graph := _chain_graph()
+	var positions := VaultGraphModel.layout(graph["nodes"], graph["edges"], {
+		"n0.md": [11.0, 22.0],
+		"n2.md": Vector2(33.0, 44.0),
+	})
+	assert_eq(positions["n0.md"], Vector2(11.0, 22.0))
+	assert_eq(positions["n2.md"], Vector2(33.0, 44.0))
+	assert_eq(positions.size(), 8, "the ids the save did not name are still placed")
+
+
+func test_layout_ignores_an_unusable_saved_position():
+	var positions := VaultGraphModel.layout([_node("a.md"), _node("b.md")], [], {
+		"a.md": [NAN, 0.0],
+		"b.md": "not a point",
+	})
+	assert_eq(positions.size(), 2)
+	for id in positions:
+		var point: Vector2 = positions[id]
+		assert_true(is_finite(point.x) and is_finite(point.y))
+
+
+func test_depth_is_deterministic_and_stays_in_the_band():
+	var first := VaultGraphModel.depth_for("a.md", 180.0)
+	assert_eq(first, VaultGraphModel.depth_for("a.md", 180.0))
+	assert_gte(first, -180.0)
+	assert_lte(first, 180.0)
+	assert_ne(first, VaultGraphModel.depth_for("b.md", 180.0))
+
+
 # ── Hit-testing ────────────────────────────────────────────────────────
 
 func test_hit_test_picks_the_nearest_node_inside_the_radius():

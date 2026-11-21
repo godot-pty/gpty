@@ -15,8 +15,7 @@ var _scratch_tmp: String
 
 func before_each():
 	MockAutoloads.setup()
-	_tmp = TestPaths.user_path("wiki_probe_vault")
-	DirAccess.make_dir_recursive_absolute(_tmp)
+	_tmp = TestPaths.fresh_dir("wiki_probe_vault")
 	_scratch_tmp = TestPaths.user_path(
 		"wiki_probe_scratch_%d" % Time.get_ticks_usec()
 	)
@@ -29,20 +28,10 @@ func after_each():
 	# vault they are keyed to still exists.
 	for rel in ["note.md", "big.md", "moved.md"]:
 		GptyTerminal.vault_scratch_clear(_scratch_tmp, rel)
-	_remove_tree(_scratch_tmp)
-	_remove_tree(TestPaths.user_path("wiki_probe_outside"))
-	_remove_tree(_tmp)
+	TestPaths.remove_tree(_scratch_tmp)
+	TestPaths.remove_tree(TestPaths.user_path("wiki_probe_outside"))
+	TestPaths.remove_tree(_tmp)
 	MockAutoloads.teardown()
-
-
-func _remove_tree(path: String):
-	var dir := DirAccess.open(path)
-	if dir:
-		for f in dir.get_files():
-			DirAccess.remove_absolute(path.path_join(f))
-		for d in dir.get_directories():
-			_remove_tree(path.path_join(d))
-	DirAccess.remove_absolute(path)
 
 
 func _write(path: String, text: String) -> String:
@@ -66,9 +55,15 @@ func _read(path: String) -> String:
 	return text
 
 
-func _make_pane(vault: String) -> WikiPane:
+func _make_pane(vault: String, saved_view := true) -> WikiPane:
 	var pane := WikiPane.new()
-	pane.vault_path = vault
+	# A saved notes view keeps this suite's list/note subject. Pass false for a
+	# pane whose spawn settings name no view: that pane opens the graph by
+	# default, the behaviour the default-view test owns.
+	if saved_view:
+		pane.apply_settings({"vault_path": vault, "graph": false})
+	else:
+		pane.vault_path = vault
 	# vault_path is set before add_child so _ready performs the index pass.
 	add_child_autofree(pane)
 	return pane
@@ -162,7 +157,11 @@ func test_lists_markdown_notes_recursively_and_skips_hidden():
 		["note.md", "sub".path_join("nested.md")],
 		"only .md notes, hidden dirs skipped, sorted",
 	)
-	assert_eq(_list_meta(pane)[0], "note.md", "a row carries the vault-relative path")
+	var meta := _list_meta(pane)
+	assert_eq(meta.size(), 2, "both notes are listed")
+	if meta.is_empty():
+		return
+	assert_eq(meta[0], "note.md", "a row carries the vault-relative path")
 
 
 ## A symlink that resolves outside the vault is not a note of the vault: the
@@ -196,16 +195,16 @@ func test_activating_a_note_renders_it_and_back_returns():
 
 	pane._list.item_activated.emit(0)
 	assert_true(pane._reader.visible)
-	assert_true(pane._back.visible)
+	assert_true(pane._notes_button.visible)
 	assert_false(pane._list.visible)
 	assert_eq(pane._editor.text, "# Heading\n\nbody", "the editor holds the note")
 	assert_false(pane._search.visible, "the note view owns the pane's top row")
 	assert_string_contains(pane._reader.get_parsed_text(), "Heading")
 
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	assert_true(pane._list.visible)
 	assert_false(pane._reader.visible)
-	assert_false(pane._back.visible)
+	assert_false(pane._notes_button.visible)
 	assert_true(pane._search.visible, "the search box comes back with the list")
 
 
@@ -218,9 +217,15 @@ func test_search_filters_the_list_to_matching_notes():
 	pane._search.text = "bananas"
 	pane._run_search()
 	assert_eq(pane._list.item_count, 1, "only the matching note is listed")
-	assert_eq(_list_meta(pane)[0], "beta.md")
-	assert_string_contains(_list_texts(pane)[0], "Beta", "the hit shows its title")
-	assert_string_contains(_list_texts(pane)[0], "banana", "the hit shows its snippet")
+	var meta := _list_meta(pane)
+	var hits := _list_texts(pane)
+	assert_eq(meta.size(), 1, "the one hit is the row under test")
+	assert_eq(hits.size(), 1, "the one hit is the row under test")
+	if meta.is_empty() or hits.is_empty():
+		return
+	assert_eq(meta[0], "beta.md")
+	assert_string_contains(hits[0], "Beta", "the hit shows its title")
+	assert_string_contains(hits[0], "banana", "the hit shows its snippet")
 
 	# Clearing the query restores the full list.
 	pane._search.text = ""
@@ -349,6 +354,8 @@ func test_escape_from_a_dirty_note_asks_first_and_cancel_keeps_it():
 	assert_true(pane._note_box.visible, "the note stays until the user answers")
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "Escape on a dirty note must ask first")
+	if dialogs.is_empty():
+		return
 	dialogs[0].canceled.emit()
 	await wait_process_frames(1)
 	assert_true(pane._note_box.visible, "canceling keeps the note")
@@ -479,10 +486,12 @@ func test_back_with_unsaved_changes_asks_before_discarding():
 	pane._list.item_activated.emit(0)
 	await _type_into(pane, "# Edited\n")
 
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	assert_true(pane._note_box.visible, "the note stays open until the user answers")
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "leaving a dirty note must ask first")
+	if dialogs.is_empty():
+		return
 	assert_string_contains(dialogs[0].dialog_text, "note.md")
 
 	dialogs[0].canceled.emit()
@@ -490,9 +499,11 @@ func test_back_with_unsaved_changes_asks_before_discarding():
 	assert_true(pane._note_box.visible, "canceling keeps the note")
 	assert_eq(_dialogs_of(pane).size(), 0, "the question closes with the answer")
 
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	dialogs = _dialogs_of(pane)
-	assert_eq(dialogs.size(), 1)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
 	dialogs[0].custom_action.emit("discard")
 	assert_false(pane._note_box.visible, "discarding returns to the list")
 	assert_true(pane._list.visible)
@@ -506,8 +517,11 @@ func test_back_can_save_the_note_and_leave():
 	pane._list.item_activated.emit(0)
 	await _type_into(pane, "# Edited\n")
 
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
 	assert_eq(dialogs[0].ok_button_text, "Save", "the first answer is Save")
 	dialogs[0].confirmed.emit()
 	await wait_process_frames(2)  # the save runs after the dialog is freed
@@ -529,6 +543,8 @@ func test_request_close_asks_a_dirty_pane_and_a_cancel_keeps_it():
 	assert_eq(answers, [], "the answer must not land before the user gives it")
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "a close over unsaved work must ask")
+	if dialogs.is_empty():
+		return
 
 	dialogs[0].canceled.emit()
 	assert_eq(answers, [false], "canceling reports that the pane may not go")
@@ -554,6 +570,9 @@ func test_request_close_saves_before_it_lets_the_pane_go():
 	var answers := []
 	pane.request_close(func(proceed: bool): answers.append(proceed))
 	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
 	dialogs[0].confirmed.emit()
 	await wait_process_frames(2)  # the save runs after the dialog is freed
 	assert_eq(answers, [true], "a successful save lets the pane go")
@@ -571,10 +590,16 @@ func test_request_close_asks_again_when_the_save_hits_a_conflict():
 
 	var answers := []
 	pane.request_close(func(proceed: bool): answers.append(proceed))
-	_dialogs_of(pane)[0].confirmed.emit()  # Save
+	var first := _dialogs_of(pane)
+	assert_eq(first.size(), 1, "the save question comes before the conflict")
+	if first.is_empty():
+		return
+	first[0].confirmed.emit()  # Save
 	await wait_process_frames(2)  # the save runs after the dialog is freed
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "the conflict must be asked about before closing")
+	if dialogs.is_empty():
+		return
 	assert_eq(dialogs[0].name, "OverwriteConfirm")
 	assert_eq(answers, [], "the pane may not go until the conflict is answered")
 
@@ -609,6 +634,8 @@ func test_a_save_that_would_overwrite_an_outside_edit_asks_first():
 	pane._save()
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "an outside edit must be confirmed before overwriting")
+	if dialogs.is_empty():
+		return
 	assert_string_contains(dialogs[0].dialog_text, "changed on disk")
 	assert_string_contains(_read(_tmp.path_join("note.md")), "Theirs",
 		"nothing is written before the answer")
@@ -628,11 +655,15 @@ func test_saving_reindexes_so_the_new_text_is_searchable():
 	await _type_into(pane, "# Note\n\nzebra crossing\n")
 	pane._save()
 
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	pane._search.text = "zebra"
 	pane._run_search()
 	assert_eq(pane._list.item_count, 1, "a saved note must be searchable without a restart")
-	assert_eq(_list_meta(pane)[0], "note.md")
+	var meta := _list_meta(pane)
+	assert_eq(meta.size(), 1, "the saved note is the one row")
+	if meta.is_empty():
+		return
+	assert_eq(meta[0], "note.md")
 
 
 func test_a_note_past_the_cap_is_read_only():
@@ -684,7 +715,7 @@ func test_a_vault_change_drops_the_open_note():
 	assert_eq(pane._current_rel, "", "a different vault must not keep the old note")
 	assert_false(pane._editor.editable)
 	assert_true(pane._placeholder.visible, "the new vault is empty")
-	_remove_tree(other)
+	TestPaths.remove_tree(other)
 
 
 func test_layout_state_carries_the_note_view_mode():
@@ -763,6 +794,80 @@ func test_restore_is_spawn_time_only_and_tolerates_a_missing_note():
 	add_child_autofree(junk)
 	assert_false(junk._note_box.visible)
 	assert_false(junk._graph_view.visible)
+
+
+func test_layout_state_carries_the_graph_mode_and_positions():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	pane.graph_mode = "3d"
+	pane._apply_graph_mode()
+	await _open_graph(pane)
+	assert_true(pane._graph_view is VaultGraph3D, "the explicit mode is the orbital map")
+	var view := pane._graph_view as VaultGraph3D
+	var start: Vector2 = view.positions["a.md"]
+	view._begin_drag("a.md")
+	view._drag_to("a.md", start + Vector2(120.0, 80.0))
+	view._finish_drag(false)
+
+	var state: Dictionary = pane._get_layout_state()
+	assert_eq(str(state.get("graph_mode", "")), "3d")
+	var saved: Dictionary = state.get("graph_positions", {})
+	assert_true(saved.has("a.md"), "the dragged note's place rides the state")
+	assert_almost_eq(float(saved["a.md"][0]), start.x + 120.0, 0.2)
+	var tile := PaneTypes.sanitize_tile({
+		"settings": state, "col": 0, "row": 0,
+		"cspan": PaneTypes.GRID, "rspan": PaneTypes.GRID,
+	})
+	assert_eq(tile.get("dropped", PackedStringArray()).size(), 0,
+		"the saved block survives the closed table")
+	assert_eq(str(tile["settings"].get("graph_mode", "")), "3d")
+
+
+func test_a_layout_restores_graph_positions_and_ignores_missing_notes():
+	_write(_tmp.path_join("a.md"), "# A\n\n[[b]]\n")
+	_write(_tmp.path_join("b.md"), "# B\n\n[[a]]\n")
+	var pane := WikiPane.new()
+	pane.apply_settings({
+		"vault_path": _tmp, "graph": true, "graph_mode": "3d",
+		"graph_positions": {"a.md": [300.0, 400.0], "gone.md": [10.0, 10.0]},
+	})
+	add_child_autofree(pane)
+	await _settle_graph(pane)
+	assert_true(pane._graph_view.visible, "the saved graph view is showing")
+	assert_true(pane._graph_view is VaultGraph3D)
+	var positions: Dictionary = pane._graph_view.positions
+	assert_true(positions.has("a.md"))
+	assert_false(positions.has("gone.md"), "a note the vault no longer has is ignored")
+	var point: Vector2 = positions["a.md"]
+	assert_almost_eq(point.x, 300.0, 0.11)
+	assert_almost_eq(point.y, 400.0, 0.11)
+
+
+func test_switching_the_graph_mode_keeps_the_arrangement():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	pane.graph_mode = "3d"
+	pane._apply_graph_mode()
+	await _open_graph(pane)
+	var view := pane._graph_view as VaultGraph3D
+	var start: Vector2 = view.positions["a.md"]
+	view._begin_drag("a.md")
+	view._drag_to("a.md", start + Vector2(90.0, 40.0))
+	view._finish_drag(false)
+	var dropped: Vector2 = view.positions["a.md"]
+
+	pane.graph_mode = "2d"
+	pane._apply_graph_mode()
+	assert_true(pane._graph_view is VaultGraphView, "the planar canvas takes over")
+	assert_true(pane._graph_view.visible, "and stays on screen")
+	assert_lt((pane._graph_view.positions["a.md"] - dropped).length(), 0.2,
+		"the arrangement crosses the presentation switch")
+
+	pane.graph_mode = "3d"
+	pane._apply_graph_mode()
+	assert_true(pane._graph_view is VaultGraph3D, "and back")
+	assert_lt((pane._graph_view.positions["a.md"] - dropped).length(), 0.2)
+	await get_tree().process_frame
 
 # ── The link panel: mentions and backlinks of the open note ────────────
 #
@@ -843,7 +948,11 @@ func test_clicking_a_link_follows_it_in_place():
 	(pane._outgoing_rows.get_child(0) as Button).pressed.emit()
 	assert_eq(pane._current_rel, "b.md", "the target replaces the open note")
 	assert_eq(pane._editor.text, "# B\n\nbody\n")
-	assert_string_contains(_row_texts(pane._backlinks_rows)[0], "a.md",
+	var backlinks := _row_texts(pane._backlinks_rows)
+	assert_eq(backlinks.size(), 1, "one backlink row")
+	if backlinks.is_empty():
+		return
+	assert_string_contains(backlinks[0], "a.md",
 		"the newly opened note's panel follows the move")
 
 
@@ -979,6 +1088,8 @@ func test_following_a_link_asks_before_discarding_an_unsaved_buffer():
 	(pane._outgoing_rows.get_child(0) as Button).pressed.emit()
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "following can lose a buffer, so it asks first")
+	if dialogs.is_empty():
+		return
 	assert_eq(pane._current_rel, "a.md", "the note stays until the answer")
 	dialogs[0].custom_action.emit("discard")
 	assert_eq(pane._current_rel, "b.md", "discarding lets the follow proceed")
@@ -994,6 +1105,8 @@ func test_a_missing_mention_offers_to_create_it():
 	pane._reader.note_link_clicked.emit("ghost", "")
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "a missing target offers the create action")
+	if dialogs.is_empty():
+		return
 	var field: LineEdit = dialogs[0].find_child("NoteName", true, false)
 	assert_not_null(field, "the question carries a name field")
 	assert_eq(field.text, "ghost.md", "the mention's own spelling is the default")
@@ -1010,7 +1123,11 @@ func test_creating_from_a_missing_mention_opens_the_new_note():
 	pane._open_note("a.md")
 
 	pane._reader.note_link_clicked.emit("ghost", "")
-	_dialogs_of(pane)[0].confirmed.emit()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	dialogs[0].confirmed.emit()
 	await wait_process_frames(2)
 	assert_true(FileAccess.file_exists(_tmp.path_join("ghost.md")),
 		"confirming creates the note the mention named")
@@ -1042,7 +1159,11 @@ func test_following_a_link_saves_when_the_user_chooses_save():
 	await _type_into(pane, "# A edited\n\nSee [[b]].\n")
 
 	(pane._outgoing_rows.get_child(0) as Button).pressed.emit()
-	_dialogs_of(pane)[0].confirmed.emit()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	dialogs[0].confirmed.emit()
 	await wait_process_frames(2)  # the save runs after the dialog is freed
 	assert_eq(pane._current_rel, "b.md", "the save lets the follow proceed")
 	assert_eq(_read(_tmp.path_join("a.md")), "# A edited\n\nSee [[b]].\n")
@@ -1066,6 +1187,8 @@ func test_new_note_creates_and_opens_it():
 	pane._new_button.pressed.emit()
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "the name is asked before anything is written")
+	if dialogs.is_empty():
+		return
 	var field := _name_field(dialogs[0])
 	assert_eq(field.text, WikiPane.NEW_NOTE_NAME)
 	field.text = "fresh"
@@ -1083,7 +1206,11 @@ func test_a_new_note_never_replaces_one_and_the_question_reopens():
 	_write(_tmp.path_join("taken.md"), "# Taken\n")
 	var pane := _make_pane(_tmp)
 	pane._new_button.pressed.emit()
-	var dialog: ConfirmationDialog = _dialogs_of(pane)[0]
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	var dialog: ConfirmationDialog = dialogs[0]
 	_name_field(dialog).text = "taken.md"
 	watch_signals(ToastManager)
 
@@ -1092,8 +1219,10 @@ func test_a_new_note_never_replaces_one_and_the_question_reopens():
 	assert_eq(_read(_tmp.path_join("taken.md")), "# Taken\n",
 		"an existing note is never overwritten")
 	assert_signal_emitted(ToastManager, "toast_requested", "the refusal is reported")
-	var dialogs := _dialogs_of(pane)
+	dialogs = _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "the name question is asked again")
+	if dialogs.is_empty():
+		return
 	assert_eq(_name_field(dialogs[0]).text, "taken.md",
 		"with the typed name, so the correction is one edit")
 	assert_eq(pane._current_rel, "", "nothing opened")
@@ -1105,7 +1234,11 @@ func test_rename_moves_the_open_note():
 	pane._open_note("note.md")
 
 	pane._rename_button.pressed.emit()
-	var dialog: ConfirmationDialog = _dialogs_of(pane)[0]
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	var dialog: ConfirmationDialog = dialogs[0]
 	assert_eq(_name_field(dialog).text, "note.md", "the current path is the default")
 	_name_field(dialog).text = "moved.md"
 	dialog.confirmed.emit()
@@ -1132,8 +1265,12 @@ func test_rename_rekeys_declared_link_weights():
 	pane._open_note("note.md")
 
 	pane._rename_button.pressed.emit()
-	_name_field(_dialogs_of(pane)[0]).text = "moved.md"
-	_dialogs_of(pane)[0].confirmed.emit()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	_name_field(dialogs[0]).text = "moved.md"
+	dialogs[0].confirmed.emit()
 	await wait_process_frames(2)
 
 	assert_eq(LinkWeightsStore.weight_of(_tmp, "moved.md", "other.md"), 25,
@@ -1151,7 +1288,11 @@ func test_a_cancelled_rename_leaves_declared_weights_alone():
 	pane._open_note("note.md")
 
 	pane._rename_button.pressed.emit()
-	_dialogs_of(pane)[0].canceled.emit()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	dialogs[0].canceled.emit()
 	await wait_process_frames(1)
 
 	assert_eq(pane._current_rel, "note.md")
@@ -1167,8 +1308,12 @@ func test_a_refused_rename_leaves_declared_weights_alone():
 	pane._open_note("note.md")
 
 	pane._rename_button.pressed.emit()
-	_name_field(_dialogs_of(pane)[0]).text = "taken.md"
-	_dialogs_of(pane)[0].confirmed.emit()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	_name_field(dialogs[0]).text = "taken.md"
+	dialogs[0].confirmed.emit()
 	await wait_process_frames(2)
 
 	assert_eq(pane._current_rel, "note.md", "the open note did not move")
@@ -1189,11 +1334,15 @@ func test_renaming_a_linked_note_offers_to_update_the_mentions():
 	pane._open_note("sub/old.md")
 
 	pane._rename_button.pressed.emit()
-	_name_field(_dialogs_of(pane)[0]).text = "moved/new.md"
-	_dialogs_of(pane)[0].confirmed.emit()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	_name_field(dialogs[0]).text = "moved/new.md"
+	dialogs[0].confirmed.emit()
 	await wait_process_frames(2)
 
-	var dialogs := _dialogs_of(pane)
+	dialogs = _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "the update is offered, not done silently")
 	var dialog: ConfirmationDialog = dialogs[0]
 	assert_string_contains(dialog.dialog_text, "5 mention(s) in 1 note(s)")
@@ -1218,11 +1367,19 @@ func test_renaming_a_clean_self_linked_note_updates_its_own_text():
 	pane._open_note("note.md")
 
 	pane._rename_button.pressed.emit()
-	_name_field(_dialogs_of(pane)[0]).text = "moved.md"
-	_dialogs_of(pane)[0].confirmed.emit()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	_name_field(dialogs[0]).text = "moved.md"
+	dialogs[0].confirmed.emit()
 	await wait_process_frames(2)
 
-	var dialog: ConfirmationDialog = _dialogs_of(pane)[0]
+	dialogs = _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	var dialog: ConfirmationDialog = dialogs[0]
 	assert_string_contains(dialog.dialog_text, "2 mention(s) in 1 note(s)",
 		"the open note's own mentions are offered too")
 	dialog.confirmed.emit()
@@ -1253,11 +1410,19 @@ func test_a_dirty_self_linked_note_is_never_rewritten_under_the_buffer():
 	assert_true(pane._is_dirty())
 
 	pane._rename_button.pressed.emit()
-	_name_field(_dialogs_of(pane)[0]).text = "moved.md"
-	_dialogs_of(pane)[0].confirmed.emit()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	_name_field(dialogs[0]).text = "moved.md"
+	dialogs[0].confirmed.emit()
 	await wait_process_frames(2)
 
-	var dialog: ConfirmationDialog = _dialogs_of(pane)[0]
+	dialogs = _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	var dialog: ConfirmationDialog = dialogs[0]
 	assert_string_contains(dialog.dialog_text, "1 mention(s) in 1 note(s)",
 		"only the note whose buffer is not open is offered")
 	dialog.confirmed.emit()
@@ -1279,11 +1444,19 @@ func test_declining_the_mention_update_leaves_the_other_notes_alone():
 	pane._open_note("note.md")
 
 	pane._rename_button.pressed.emit()
-	_name_field(_dialogs_of(pane)[0]).text = "moved.md"
-	_dialogs_of(pane)[0].confirmed.emit()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	_name_field(dialogs[0]).text = "moved.md"
+	dialogs[0].confirmed.emit()
 	await wait_process_frames(2)
 
-	var dialog: ConfirmationDialog = _dialogs_of(pane)[0]
+	dialogs = _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	var dialog: ConfirmationDialog = dialogs[0]
 	assert_string_contains(dialog.dialog_text, "1 mention(s) in 1 note(s)")
 	dialog.canceled.emit()
 	await wait_process_frames(2)
@@ -1303,8 +1476,12 @@ func test_rename_while_dirty_moves_the_recovery_copy():
 	assert_true(_has_copy(_scratch_tmp, "note.md"))
 
 	pane._rename_button.pressed.emit()
-	_name_field(_dialogs_of(pane)[0]).text = "moved.md"
-	_dialogs_of(pane)[0].confirmed.emit()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	_name_field(dialogs[0]).text = "moved.md"
+	dialogs[0].confirmed.emit()
 	await wait_process_frames(1)
 
 	assert_true(_has_copy(_scratch_tmp, "moved.md"),
@@ -1320,7 +1497,11 @@ func test_delete_asks_and_removes_the_note():
 	pane._open_note("note.md")
 
 	pane._delete_button.pressed.emit()
-	var dialog: ConfirmationDialog = _dialogs_of(pane)[0]
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	var dialog: ConfirmationDialog = dialogs[0]
 	assert_string_contains(dialog.dialog_text, "note.md")
 	dialog.canceled.emit()
 	await get_tree().process_frame
@@ -1329,7 +1510,11 @@ func test_delete_asks_and_removes_the_note():
 	assert_eq(pane._current_rel, "note.md")
 
 	pane._delete_button.pressed.emit()
-	_dialogs_of(pane)[0].confirmed.emit()
+	dialogs = _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the confirmation is asked again")
+	if dialogs.is_empty():
+		return
+	dialogs[0].confirmed.emit()
 	await wait_process_frames(1)
 	assert_false(FileAccess.file_exists(_tmp.path_join("note.md")))
 	assert_eq(pane._current_rel, "", "the pane returns to the list")
@@ -1344,7 +1529,11 @@ func test_delete_warns_about_an_unsaved_buffer():
 	await _type_into(pane, "# Edited\n")
 
 	pane._delete_button.pressed.emit()
-	assert_string_contains(_dialogs_of(pane)[0].dialog_text, "Unsaved changes")
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	assert_string_contains(dialogs[0].dialog_text, "Unsaved changes")
 
 
 # ── The recovery copy: what a crash cannot take ────────────────────────
@@ -1422,8 +1611,12 @@ func test_a_discard_drops_the_recovery_copy():
 	await _type_into(pane, "# Two\n")
 	await wait_seconds(0.1)
 
-	pane._back.pressed.emit()
-	_dialogs_of(pane)[0].custom_action.emit("discard")
+	pane._notes_button.pressed.emit()
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	dialogs[0].custom_action.emit("discard")
 	assert_false(_has_copy(_scratch_tmp, "note.md"),
 		"a deliberately discarded buffer must not come back as a question")
 
@@ -1444,7 +1637,7 @@ func test_a_vault_change_drops_the_recovery_copy():
 	pane.apply_settings({"vault_path": other})
 	assert_false(_has_copy(_scratch_tmp, "note.md"),
 		"the copy is keyed to the vault the buffer belonged to, and the discard drops it")
-	_remove_tree(other)
+	TestPaths.remove_tree(other)
 
 
 func test_reopening_a_note_offers_the_buffer_a_crash_left_behind():
@@ -1465,6 +1658,8 @@ func test_reopening_a_note_offers_the_buffer_a_crash_left_behind():
 		"the file is what the note says until the user answers")
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "the copy must be offered, never applied on its own")
+	if dialogs.is_empty():
+		return
 	assert_eq(dialogs[0].name, "RestoreConfirm")
 	assert_string_contains(dialogs[0].dialog_text, "note.md")
 
@@ -1481,7 +1676,7 @@ func test_reopening_a_note_offers_the_buffer_a_crash_left_behind():
 	# the end of the frame, so the dialog above is still a child until one
 	# passes.)
 	await wait_process_frames(1)
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	pane._list.item_activated.emit(0)
 	assert_eq(_dialogs_of(pane).size(), 0)
 
@@ -1492,14 +1687,18 @@ func test_a_recovered_buffer_can_be_discarded():
 	var pane := _make_pane(_scratch_tmp)
 	pane._list.item_activated.emit(0)
 
-	_dialogs_of(pane)[0].custom_action.emit("discard")
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	dialogs[0].custom_action.emit("discard")
 	assert_eq(pane._editor.text, "# One\n", "the file stays what the note says")
 	assert_false(pane._is_dirty())
 	assert_false(_has_copy(_scratch_tmp, "note.md"), "and the copy is gone")
 
 	# The dialog is a child until the frame that frees it ends.
 	await wait_process_frames(1)
-	pane._back.pressed.emit()
+	pane._notes_button.pressed.emit()
 	pane._list.item_activated.emit(0)
 	assert_eq(_dialogs_of(pane).size(), 0, "a decided copy must not come back")
 
@@ -1511,7 +1710,11 @@ func test_a_restore_after_the_file_moved_on_still_asks_before_overwriting():
 	GptyTerminal.vault_scratch_write(_scratch_tmp, "note.md", "# Recovered\n", 1, 1)
 	var pane := _make_pane(_scratch_tmp)
 	pane._list.item_activated.emit(0)
-	_dialogs_of(pane)[0].confirmed.emit()
+	var restore_dialogs := _dialogs_of(pane)
+	assert_eq(restore_dialogs.size(), 1, "the pane must offer the recovery copy")
+	if restore_dialogs.is_empty():
+		return
+	restore_dialogs[0].confirmed.emit()
 	assert_true(pane._is_dirty())
 	# The restore question is a child until the frame that frees it ends, and
 	# Godot refuses a second exclusive dialog while one is registered.
@@ -1520,6 +1723,8 @@ func test_a_restore_after_the_file_moved_on_still_asks_before_overwriting():
 	pane._save()
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "the save must ask before overwriting what it did not see")
+	if dialogs.is_empty():
+		return
 	assert_eq(dialogs[0].name, "OverwriteConfirm")
 	assert_string_contains(_read(_scratch_tmp.path_join("note.md")), "Mine",
 		"nothing is written before the answer")
@@ -1616,6 +1821,8 @@ func test_graph_click_asks_before_replacing_a_dirty_note():
 	pane._graph_view.node_activated.emit("b.md")
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "a click must not discard the buffer")
+	if dialogs.is_empty():
+		return
 	assert_eq(pane._current_rel, "a.md", "the note stays open while asked")
 
 	dialogs[0].canceled.emit()
@@ -1635,14 +1842,154 @@ func test_the_graph_is_requeried_after_a_save():
 		"the save re-indexed, so the graph reads the new edge")
 
 
-func test_graph_back_returns_to_the_list():
+func test_graph_notes_returns_to_the_list():
 	_seed_linked_vault()
 	var pane := _make_pane(_tmp)
 
 	await _open_graph(pane)
-	pane._back.pressed.emit()
+	assert_true(pane._notes_button.visible)
+	assert_false(pane._graph_button.visible, "the graph shows only Notes")
+	pane._notes_button.pressed.emit()
 	assert_true(pane._list.visible)
 	assert_false(pane._graph_view.visible)
+	assert_false(pane._notes_button.visible)
+	assert_true(pane._graph_button.visible)
+
+
+func test_a_fresh_pane_opens_the_graph():
+	var pane := _make_pane(_tmp, false)
+	await _settle_graph(pane)
+	assert_true(pane._graph_view.visible, "a pane with no saved view opens the graph")
+	assert_false(pane._list.visible)
+	assert_true(pane._notes_button.visible)
+	assert_false(pane._graph_button.visible, "the graph surface shows only Notes")
+
+
+## The default build lands over the list the pane shows while it runs. Hiding
+## the list drops the focus owner, so without the carry the next keystroke goes
+## nowhere.
+func test_a_default_graph_build_carries_the_keyboard_off_the_list():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	var pane := _make_pane(_tmp, false)
+	assert_true(pane._list.visible, "precondition: the list shows while the graph builds")
+	pane._list.grab_focus()
+	assert_eq(pane.get_viewport().gui_get_focus_owner(), pane._list,
+		"precondition: the list holds the keyboard")
+	await _settle_graph(pane)
+	assert_true(pane._graph_view.visible, "a pane with no saved view opens the graph")
+	assert_eq(pane.get_viewport().gui_get_focus_owner(), pane._graph_view,
+		"the canvas takes the keyboard from the list it replaced")
+
+
+## The same build must not pull the keyboard away from a surface it does not
+## replace: another pane, or another control, keeps what the user gave it.
+func test_a_default_graph_build_does_not_steal_another_surfaces_keyboard():
+	_write(_tmp.path_join("note.md"), "# Note\n")
+	var other := Button.new()
+	add_child_autofree(other)
+	var pane := _make_pane(_tmp, false)
+	other.grab_focus()
+	await _settle_graph(pane)
+	assert_true(pane._graph_view.visible)
+	assert_eq(pane.get_viewport().gui_get_focus_owner(), other,
+		"a build landing in a pane the user is not on leaves the keyboard alone")
+
+
+func test_a_saved_notes_view_is_not_overridden():
+	_write(_tmp.path_join("note.md"), "# N\n")
+	var pane := _make_pane(_tmp)
+	await get_tree().process_frame
+	assert_true(pane._list.visible, "a saved notes view stays on the list")
+	assert_false(pane._graph_wanted, "no default graph build was requested")
+	assert_false(pane._graph_view.visible)
+
+
+func test_the_view_buttons_follow_the_surface():
+	_write(_tmp.path_join("note.md"), "# N\n")
+	var pane := _make_pane(_tmp)
+	assert_false(pane._notes_button.visible)
+	assert_true(pane._graph_button.visible)
+	assert_eq(pane._graph_button.text, "Graph")
+	assert_eq(pane._new_button.text, "New")
+
+	pane._list.item_activated.emit(0)
+	assert_true(pane._note_box.visible)
+	assert_true(pane._notes_button.visible, "the note editor shows Notes")
+	assert_true(pane._graph_button.visible, "the note editor shows Graph")
+	assert_false(pane._new_button.visible)
+	var top := pane.find_child("TopRow", true, false) as HBoxContainer
+	assert_eq(top.get_child(0), pane._notes_button, "Notes is the first view button")
+	assert_eq(top.get_child(1), pane._graph_button, "Graph is the second")
+
+	pane._graph_button.pressed.emit()
+	await _settle_graph(pane)
+	assert_true(pane._graph_view.visible)
+	assert_true(pane._notes_button.visible)
+	assert_false(pane._graph_button.visible, "the graph surface hides Graph")
+
+	pane._notes_button.pressed.emit()
+	assert_true(pane._list.visible)
+	assert_false(pane._notes_button.visible)
+	assert_true(pane._graph_button.visible)
+
+
+func test_the_mode_button_names_the_other_presentation():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	pane.graph_mode = "3d"
+	pane._apply_graph_mode()
+	await _open_graph(pane)
+	assert_true(pane._graph_view is VaultGraph3D)
+	var view := pane._graph_view as VaultGraph3D
+	if view == null:
+		return
+	assert_eq(view._mode_button.text, "Planar")
+
+	view._mode_button.pressed.emit()
+	assert_true(pane._graph_view is VaultGraphView)
+	var planar := pane._graph_view as VaultGraphView
+	if planar == null:
+		return
+	assert_eq(planar._mode_button.text, "Orbital")
+	planar._mode_button.pressed.emit()
+	assert_true(pane._graph_view is VaultGraph3D)
+	var orbital := pane._graph_view as VaultGraph3D
+	if orbital == null:
+		return
+	assert_eq(orbital._mode_button.text, "Planar")
+
+	assert_eq(PaneTypes.WIKI_GRAPH_MODE_LABELS["3d"], "Orbital")
+	assert_eq(PaneTypes.WIKI_GRAPH_MODE_LABELS["2d"], "Planar")
+	for node in pane.find_children("*", "Button", true, false):
+		assert_ne((node as Button).text, "Physical", "no button says Physical")
+
+
+func test_relayout_is_the_only_layout_action():
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	pane.graph_mode = "3d"
+	pane._apply_graph_mode()
+	await _open_graph(pane)
+	var view := pane._graph_view as VaultGraph3D
+	if view == null:
+		return
+	assert_not_null(view._relayout_button)
+	assert_eq(view._relayout_button.text, "Relayout")
+	assert_null(view.get("_fit_button"), "the Fit button is gone")
+
+	pane.graph_mode = "2d"
+	pane._apply_graph_mode()
+	assert_true(pane._graph_view is VaultGraphView)
+	var planar := pane._graph_view as VaultGraphView
+	if planar == null:
+		return
+	assert_not_null(planar._relayout_button)
+	assert_null(planar.get("_fit_button"))
+
+
+func test_the_new_button_says_new():
+	var pane := _make_pane(_tmp)
+	assert_eq(pane._new_button.text, "New")
 
 
 func test_graph_ghost_click_offers_to_create_the_missing_note():
@@ -1653,6 +2000,8 @@ func test_graph_ghost_click_offers_to_create_the_missing_note():
 	pane._graph_view.ghost_activated.emit("Missing")
 	var dialogs := _dialogs_of(pane)
 	assert_eq(dialogs.size(), 1, "a missing target offers the create-from-link verb")
+	if dialogs.is_empty():
+		return
 	assert_eq(dialogs[0].name, "NoteNameConfirm")
 
 
@@ -1730,7 +2079,7 @@ func test_a_build_that_lands_after_a_vault_change_is_rebuilt_for_the_new_vault()
 	var ids := _graph_ids(pane)
 	assert_has(ids, "other.md", "the canvas is the new vault's graph")
 	assert_false(ids.has("a.md"), "the old vault's build must be dropped")
-	_remove_tree(other)
+	TestPaths.remove_tree(other)
 
 
 func test_a_dragged_node_keeps_its_place_across_a_build():
@@ -1738,10 +2087,14 @@ func test_a_dragged_node_keeps_its_place_across_a_build():
 	var pane := _make_pane(_tmp)
 	await _open_graph(pane)
 
-	pane._graph_view.positions["a.md"] = Vector2(11, 22)
+	if pane._graph_view is VaultGraph3D:
+		(pane._graph_view as VaultGraph3D)._place_body("a.md", Vector2(11, 22))
+	else:
+		pane._graph_view.positions["a.md"] = Vector2(11, 22)
 	await _open_graph(pane)
 
-	assert_eq(pane._graph_view.positions.get("a.md"), Vector2(11, 22),
+	var got: Vector2 = pane._graph_view.positions.get("a.md", Vector2.ZERO)
+	assert_lt((got - Vector2(11, 22)).length(), 1.0,
 		"the pane hands the view's geometry to the build, so a drag survives")
 
 
@@ -1853,8 +2206,11 @@ func test_the_weight_question_is_one_ask_at_a_time():
 	await _open_graph(pane)
 
 	pane._ask_declared_weight("a.md", "b.md", 0)
-	assert_eq(_dialogs_of(pane).size(), 1)
-	assert_eq(_dialogs_of(pane)[0].name, "WeightConfirm")
+	var dialogs := _dialogs_of(pane)
+	assert_eq(dialogs.size(), 1, "the pane must raise the dialog this test drives")
+	if dialogs.is_empty():
+		return
+	assert_eq(dialogs[0].name, "WeightConfirm")
 	pane._ask_declared_weight("a.md", "b.md", 0)
 	assert_eq(_dialogs_of(pane).size(), 1, "the second question does not stack")
 
@@ -1870,6 +2226,11 @@ func test_opening_the_graph_hands_the_keyboard_to_the_canvas():
 	_write(_tmp.path_join("b.md"), "# B\n")
 	var pane := _make_pane(_tmp)
 
+	# A real click focuses the button before it emits; `pressed.emit()` alone
+	# would test a gesture the engine never produces.
+	pane._graph_button.grab_focus()
+	assert_eq(pane.get_viewport().gui_get_focus_owner(), pane._graph_button,
+		"precondition: the press leaves the keyboard on the button")
 	pane._graph_button.pressed.emit()
 	await _settle_graph(pane)
 

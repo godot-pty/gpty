@@ -182,27 +182,39 @@ func test_no_row_is_the_developer_command():
 func test_arrow_keys_move_a_visible_cursor_and_enter_runs_it():
 	var ws = await _make_workspace()
 	ws._toggle_palette()
-	assert_true(_rows(ws)[0].button_pressed, "the first row starts selected")
+	var rows := _rows(ws)
+	assert_gt(rows.size(), 2, "the cursor test needs three rows")
+	if rows.size() <= 2:
+		return
+	assert_true(rows[0].button_pressed, "the first row starts selected")
 	_press(ws, KEY_DOWN)
 	_press(ws, KEY_DOWN)
-	assert_false(_rows(ws)[0].button_pressed, "the cursor left the first row")
-	assert_true(_rows(ws)[2].button_pressed, "Down moves the cursor one row at a time")
+	assert_false(rows[0].button_pressed, "the cursor left the first row")
+	assert_true(rows[2].button_pressed, "Down moves the cursor one row at a time")
 	var before: int = ws._tm.tiles.size()
 	ws._palette._field.text_submitted.emit("")
 	assert_eq(ws._tm.tiles.size(), before + 1, "Enter runs the cursor, not the first match")
 	assert_false(ws._palette.visible, "running a command dismisses the palette")
 	var body = ws._tm._find_body(ws._tm.tiles[ws._tm.tiles.size() - 1].wrapper)
-	assert_eq(body._pane_type(), PaneTypes.ALL.keys()[2],
+	var types := PaneTypes.ALL.keys()
+	assert_gt(types.size(), 2, "the registry holds the third type the palette row spawns")
+	if types.size() <= 2:
+		return
+	assert_eq(body._pane_type(), types[2],
 		"row 2 is the third registry type, so Enter spawned that type")
 
 func test_the_cursor_stops_at_the_ends():
 	var ws = await _make_workspace()
 	ws._toggle_palette()
+	var rows := _rows(ws)
+	assert_gt(rows.size(), 0, "the palette lists at least one row")
+	if rows.is_empty():
+		return
 	_press(ws, KEY_UP)
-	assert_true(_rows(ws)[0].button_pressed, "Up at the top stays on the first row")
+	assert_true(rows[0].button_pressed, "Up at the top stays on the first row")
 	for i in PaletteModel.commands().size() + 5:
 		_press(ws, KEY_DOWN)
-	assert_true(_rows(ws)[-1].button_pressed, "Down past the end stops on the last row")
+	assert_true(rows[-1].button_pressed, "Down past the end stops on the last row")
 
 func test_typing_in_the_palette_filters_its_commands():
 	var ws = await _make_workspace()
@@ -215,7 +227,11 @@ func test_typing_in_the_palette_filters_its_commands():
 
 	input.text_changed.emit("wiki")
 	assert_eq(_commands(ws), ["new wiki"], "the query narrows the list")
-	assert_true(_rows(ws)[0].button_pressed, "a filtered list starts with its first row selected")
+	var rows := _rows(ws)
+	assert_eq(rows.size(), 1, "the narrowed list is one row")
+	if rows.is_empty():
+		return
+	assert_true(rows[0].button_pressed, "a filtered list starts with its first row selected")
 
 	input.text_changed.emit("no such command")
 	assert_eq(_commands(ws), [], "a query matching nothing lists nothing")
@@ -455,4 +471,6 @@ func test_the_save_command_entry_opens_the_commands_tab_with_the_form():
 		if child is AcceptDialog:
 			dialogs.append(child)
 	assert_eq(dialogs.size(), 1, "the add form is already open")
+	if dialogs.is_empty():
+		return
 	assert_true((dialogs[0] as AcceptDialog).visible)

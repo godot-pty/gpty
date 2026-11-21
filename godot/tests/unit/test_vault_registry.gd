@@ -11,11 +11,10 @@ var _vault := ""
 func before_each():
 	MockAutoloads.setup()
 	VaultRegistry.reload()
-	_vault = TestPaths.user_path("vault_registry_probe")
-	DirAccess.make_dir_recursive_absolute(_vault)
+	_vault = TestPaths.fresh_dir("vault_registry_probe")
 
 func after_each():
-	DirAccess.remove_absolute(_vault)
+	TestPaths.remove_tree(_vault)
 	VaultRegistry.reload()
 	GptyTerminal.vault_clear_roots()
 	MockAutoloads.teardown()

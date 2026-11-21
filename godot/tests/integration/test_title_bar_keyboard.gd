@@ -144,8 +144,7 @@ func test_escape_from_a_read_only_panes_chrome_focuses_its_content():
 	# A wiki pane cannot hold focus itself (`activate_pane` releases it), so
 	# without a content fallback Escape would leave the keyboard on a chrome
 	# button with nothing to type into - a trap of the fix's own making.
-	_vault = TestPaths.user_path("title_bar_probe_vault")
-	DirAccess.make_dir_recursive_absolute(_vault)
+	_vault = TestPaths.fresh_dir("title_bar_probe_vault")
 	var note := FileAccess.open(_vault.path_join("note.md"), FileAccess.WRITE)
 	note.store_string("# Note\n")
 	note.close()
@@ -153,6 +152,13 @@ func test_escape_from_a_read_only_panes_chrome_focuses_its_content():
 	var ws = await _make_workspace()
 	var wiki = ws._spawn_pane("wiki", {"vault_path": _vault})
 	assert_true(wiki is WikiPane, "the workspace holds a wiki pane")
+	# A pane with no saved view builds its graph by default; let it land so the
+	# Escape assertion is about the chrome hand-off, not the build's timing.
+	var deadline := Time.get_ticks_msec() + 10000
+	while wiki._graph_task != -1 and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	assert_eq(wiki._graph_task, -1, "the default graph build must land")
+	assert_true(wiki._graph_view.visible)
 	ws.activate_pane(wiki)
 	assert_true(ws._tm.focus_title_bar(wiki), "the wiki pane's bar takes the keyboard")
 

@@ -1,6 +1,7 @@
 class_name MarkdownView
 extends RichTextLabel
-## Shared, read-only Markdown renderer for Inspector, Reasoning, and code-viewer panes.
+## Shared, read-only Markdown renderer for Inspector, Reasoning, code-viewer,
+## wiki and Settings > About surfaces.
 ##
 ## Parsing happens in Rust. Streaming callers use set_markdown(), which
 ## coalesces rapid deltas; completed documents use render_now().
@@ -19,10 +20,21 @@ const RENDER_DELAY := 0.075
 ## click, never handed to `OS.shell_open`.
 const INTERNAL_SCHEME := "gpty-note:"
 
+## The scheme the documentation bundle's generator gives a link between two
+## bundled documents (`scripts/build-docs`). Honoured only when
+## `doc_links_enabled` is on - the About tab's viewer is the one owner - and,
+## like a mention, only ever announced: the viewer resolves the path against
+## `DocsBundle`, never the filesystem.
+const DOC_SCHEME := "gpty-doc:"
+
 ## Render `[[target]]` / `[[target|alias]]` as internal links. Off by default —
 ## the vault vocabulary must not change how Inspector output, a reasoning turn
 ## or a code preview displays — and the wiki pane turns it on.
 var wikilinks_enabled := false
+
+## Accept `gpty-doc:` destinations as internal links. Off by default for the
+## same reason, and the Settings > About viewer turns it on.
+var doc_links_enabled := false
 
 ## A `[[wikilink]]` mention was clicked: its target decoded, and the heading
 ## fragment it named (`[[target#heading]]`) or "" when it had none. The owning
@@ -30,6 +42,11 @@ var wikilinks_enabled := false
 ## vault and scrolls to the fragment); the view never resolves or opens
 ## anything itself.
 signal note_link_clicked(target: String, fragment: String)
+
+## A bundled-document link was clicked: the repo-relative path decoded and the
+## heading fragment it named, or "". The About tab's viewer resolves the path
+## against `DocsBundle`; the view never resolves or opens anything itself.
+signal doc_link_clicked(path: String, fragment: String)
 
 ## How long an editor's buffer must be quiet before its preview renders — see
 ## `set_markdown_settled`. A var rather than a const so a test can shorten the
@@ -53,6 +70,7 @@ var _pending_markdown := ""
 ## scroll and reset it to the top.
 var _last_rendered := ""
 var _last_wikilinks := false
+var _last_docs := false
 var _last_notice := ""
 ## The caller's own truncation notice (see `set_source_notice`).
 var _source_notice := ""
@@ -90,9 +108,9 @@ func _ready():
 
 func configure_for_accordion():
 	scroll_active = false
-	# fit_content would force min width to the widest unwrapped line,
-	# defeating word wrap at narrow pane widths. The accordion assigns
-	# width; the owner syncs height from get_content_height().
+	# The accordion's container owns the width and its owner measures the
+	# height from get_content_height(); `fit_content` would make the label
+	# derive a second minimum height of its own.
 	fit_content = false
 	scroll_following = false
 
@@ -138,6 +156,7 @@ func clear_markdown():
 	clear()
 	_last_rendered = ""
 	_last_wikilinks = wikilinks_enabled
+	_last_docs = doc_links_enabled
 	_last_notice = ""
 	_scroll_offset = -1
 
@@ -240,6 +259,7 @@ func _apply_pending(from_timer := true):
 	# after a note opens used to undo a fragment scroll.
 	if _pending_markdown == _last_rendered \
 			and wikilinks_enabled == _last_wikilinks \
+			and doc_links_enabled == _last_docs \
 			and _source_notice == _last_notice:
 		return
 	# A render replaces the text a pending scroll was computed for.
@@ -250,7 +270,9 @@ func _apply_pending(from_timer := true):
 	var body := _pending_markdown.replace("[", "[lb]")
 	var notice := _source_notice
 	if _renderer != null and _renderer.has_method("render"):
-		var answer = JSON.parse_string(str(_renderer.render(_pending_markdown, wikilinks_enabled)))
+		var answer = JSON.parse_string(str(
+			_renderer.render(_pending_markdown, wikilinks_enabled, doc_links_enabled)
+		))
 		if answer is Dictionary and answer.has("text"):
 			body = str(answer["text"])
 			if bool(answer.get("truncated", false)):
@@ -268,23 +290,36 @@ func _apply_pending(from_timer := true):
 		text = body
 	_last_rendered = _pending_markdown
 	_last_wikilinks = wikilinks_enabled
+	_last_docs = doc_links_enabled
 	_last_notice = _source_notice
 	last_render_usec = Time.get_ticks_usec() - started
 	rendered.emit()
 
+## Split an internal-scheme URL into its decoded target and fragment.
+##
+## The scheme holds a percent-encoded target and, after one literal `#`, an
+## optional percent-encoded fragment (the renderer's encoding for both
+## `gpty-note:` and `gpty-doc:`). The literal separator is unambiguous because
+## the encoder escapes a `#` inside either part.
+static func _split_internal(url: String, scheme: String) -> PackedStringArray:
+	var payload := url.trim_prefix(scheme)
+	var hash := payload.find("#")
+	var target := payload if hash < 0 else payload.left(hash)
+	var fragment := "" if hash < 0 else payload.substr(hash + 1)
+	return PackedStringArray([target.uri_decode(), fragment.uri_decode()])
+
 func _confirm_link(meta):
 	var url := str(meta)
 	if url.begins_with(INTERNAL_SCHEME):
-		# A mention: the pane that owns the document resolves it. The scheme
-		# holds a percent-encoded vault target and, after one literal `#`, an
-		# optional percent-encoded heading (the renderer's encoding) — decode
-		# both before handing them over. The literal separator is unambiguous
-		# because the encoder escapes a `#` inside either part.
-		var payload := url.trim_prefix(INTERNAL_SCHEME)
-		var hash := payload.find("#")
-		var target := payload if hash < 0 else payload.left(hash)
-		var fragment := "" if hash < 0 else payload.substr(hash + 1)
-		note_link_clicked.emit(target.uri_decode(), fragment.uri_decode())
+		# A mention: the pane that owns the document resolves it.
+		var note := _split_internal(url, INTERNAL_SCHEME)
+		note_link_clicked.emit(note[0], note[1])
+		return
+	if url.begins_with(DOC_SCHEME):
+		# A bundled document: the viewer that owns this label resolves it
+		# against the bundle's own path map.
+		var doc := _split_internal(url, DOC_SCHEME)
+		doc_link_clicked.emit(doc[0], doc[1])
 		return
 	if not (url.begins_with("https://") or url.begins_with("http://") or url.begins_with("mailto:")):
 		return

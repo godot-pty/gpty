@@ -75,7 +75,10 @@ drive every other pane" under Known limitations).
   into code by naming a resource: pane settings go through a closed per-type allowlist
   (`PaneTypes.settings_schema`), and a data-supplied font path is read as bytes by `TerminalFonts`,
   never through `load()` - a `.tres` with an embedded script runs during `load()`, and Workspace
-  Trust does not examine a font.
+  Trust does not examine a font. A colour scheme is the same class of input: it is read as capped
+  text, parsed by `gpty_core::scheme` under a closed native key set (or a narrow Alacritty, iTerm2,
+  Base16 or CSV reader), copied to `user://schemes/` as data, and never loaded as a resource; a
+  layout or profile cannot name one.
 - **Remote responses.** Release metadata, documentation, anything fetched over the network.
 - **Other users** on a shared machine, and any file or socket they could have written.
 
@@ -162,8 +165,13 @@ These are load-bearing guards. Reports that require removing one of them should 
   are stripped from every child, and startup-evaluation variables (`PROMPT_COMMAND`, `BASH_ENV`,
   `ENV`, `SHELLOPTS`, `PS4`, `ZDOTDIR`, `PERL5OPT`, `PYTHONSTARTUP`, `NODE_OPTIONS`, `RUBYOPT`,
   `LESSOPEN`, `GIT_SSH_COMMAND`, `GIT_EXTERNAL_DIFF`, `GIT_PAGER`, `PAGER`) are refused from
-  configuration. Absolute programs restored from files must not be group/other-writable and must be
-  owned by you or root.
+  configuration. Absolute programs restored from files must be regular files that are not
+  group/other-writable, with no group/other-writable directory above them (a sticky directory such
+  as `/tmp` is allowed), and must be owned by you or by root - or, inside a user namespace that
+  leaves host root unmapped (rootless containers, `--userns=keep-id`, Flatpak), by the kernel's
+  overflow UID, which is accepted only while that UID is outside the process's own UID map. The same
+  owner rule gates the `GPTY_GUI` and `GPTY_OMP` overrides, which name your own paths and so skip the
+  parent-directory walk.
 - **The GUI's and the CLI's own environment**: both harden themselves at startup
   (`gpty_core::hardening::harden_process`, called from the GDExtension's init and the CLI's `main`).
   A pane's shell is a child of the GUI and runs as you, so without this it can recover `GPTY_SECRET`

@@ -9,7 +9,8 @@
 #
 # This script owns the GUT command — ci-check and ci.yml both call it, so the
 # command and its guard cannot drift apart — and then checks the output:
-#   1. no Godot parse/script error (how an aborted run announces itself);
+#   1. no Godot parse/script error before the first test starts (a collector or
+#      autoload failure, how an aborted run announces itself);
 #   2. a complete Run Summary, ending in "All tests passed!";
 #   3. the script count GUT reports equals the test_*.gd files the -gdirs hold
 #      (GUT does not recurse, so a test script nested below a -gdir would never
@@ -17,7 +18,15 @@
 #   4. at least one test per collected script;
 #   5. no `[Risky]` test (ran without asserting), and no `[Pending]` test
 #      outside Windows — pending is how a test records a platform gap, so on
-#      Linux/macOS it can only mean something was skipped by accident.
+#      Linux/macOS it can only mean something was skipped by accident;
+#   6. a runtime error GUT attributed to a test still fails the gate, but the
+#      run finishes: the verdict prints GUT's own failing-test list and Godot's
+#      `at:` location, because killing the run at the first error hid every
+#      later failure (windows-smoke 44648884305).
+#
+# A run it cannot judge (a killed run, no Run Summary, a collection-time error,
+# a count that does not add up) and a run it judged red are two verdicts, said
+# separately - "not trustworthy" is reserved for the first.
 #
 # Requires godot on PATH; GODOT=<path> overrides.
 set -euo pipefail
@@ -31,8 +40,136 @@ if [[ -z "$GODOT" ]]; then
     exit 1
 fi
 
-# The one definition of what the run covers.
-TEST_DIRS=(godot/tests/unit godot/tests/integration)
+usage() {
+    cat <<'EOF'
+Usage: scripts/gut-check [options] [script_filter]
+
+Run the GUT (GDScript) suite and judge the run, not just the exit code.
+
+Options:
+  -s, --select <pattern>    Run scripts whose filenames contain <pattern>
+  -t, --test <pattern>      Run individual test methods matching <pattern>
+  -d, --dir <dir>           Limit test discovery to <dir> (e.g. unit, integration)
+      --timeout <sec>       Override overall timeout in seconds (default: 600)
+      --stall-timeout <sec> Override stall detection timeout in seconds (default: 120)
+  -h, --help                Show this help message and exit
+
+Positional arguments:
+  script_filter             Shorthand for --select (e.g. 'scripts/gut-check test_test_paths.gd')
+EOF
+    exit 0
+}
+
+SELECT=""
+TEST_NAME=""
+CUSTOM_DIRS=()
+GUT_TIMEOUT="${GUT_TIMEOUT:-600}"
+GUT_STALL_TIMEOUT="${GUT_STALL_TIMEOUT:-120}"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            ;;
+        -s|--select)
+            if [[ $# -lt 2 ]]; then echo "gut-check: $1 requires an argument" >&2; exit 2; fi
+            SELECT="$(basename "$2")"
+            shift 2
+            ;;
+        --select=*)
+            SELECT="$(basename "${1#*=}")"
+            shift
+            ;;
+        -t|--test)
+            if [[ $# -lt 2 ]]; then echo "gut-check: $1 requires an argument" >&2; exit 2; fi
+            TEST_NAME="$2"
+            shift 2
+            ;;
+        --test=*)
+            TEST_NAME="${1#*=}"
+            shift
+            ;;
+        -d|--dir)
+            if [[ $# -lt 2 ]]; then echo "gut-check: $1 requires an argument" >&2; exit 2; fi
+            CUSTOM_DIRS+=("$2")
+            shift 2
+            ;;
+        --dir=*)
+            CUSTOM_DIRS+=("${1#*=}")
+            shift
+            ;;
+        --timeout)
+            if [[ $# -lt 2 ]]; then echo "gut-check: $1 requires an argument" >&2; exit 2; fi
+            GUT_TIMEOUT="$2"
+            shift 2
+            ;;
+        --timeout=*)
+            GUT_TIMEOUT="${1#*=}"
+            shift
+            ;;
+        --stall-timeout)
+            if [[ $# -lt 2 ]]; then echo "gut-check: $1 requires an argument" >&2; exit 2; fi
+            GUT_STALL_TIMEOUT="$2"
+            shift 2
+            ;;
+        --stall-timeout=*)
+            GUT_STALL_TIMEOUT="${1#*=}"
+            shift
+            ;;
+        -*)
+            echo "gut-check: unknown option '$1' (see --help)" >&2
+            exit 2
+            ;;
+        *)
+            if [[ -z "$SELECT" ]]; then
+                SELECT="$(basename "$1")"
+            else
+                echo "gut-check: unexpected argument '$1' (only one script filter is supported)" >&2
+                exit 2
+            fi
+            shift
+            ;;
+    esac
+done
+
+for var in GUT_TIMEOUT GUT_STALL_TIMEOUT; do
+    if [[ ! "${!var}" =~ ^[0-9]+$ ]]; then
+        echo "gut-check: $var must be a whole number of seconds" >&2
+        exit 1
+    fi
+done
+
+if (( ${#CUSTOM_DIRS[@]} > 0 )); then
+    TEST_DIRS=()
+    for d in "${CUSTOM_DIRS[@]}"; do
+        case "$d" in
+            unit|godot/tests/unit|tests/unit)
+                TEST_DIRS+=(godot/tests/unit)
+                ;;
+            integration|godot/tests/integration|tests/integration)
+                TEST_DIRS+=(godot/tests/integration)
+                ;;
+            *)
+                clean_d="${d#godot/}"
+                if [[ -d "godot/$clean_d" ]]; then
+                    TEST_DIRS+=("godot/$clean_d")
+                elif [[ -d "$d" ]]; then
+                    TEST_DIRS+=("$d")
+                else
+                    echo "gut-check: test directory '$d' does not exist" >&2
+                    exit 2
+                fi
+                ;;
+        esac
+    done
+else
+    TEST_DIRS=(godot/tests/unit godot/tests/integration)
+fi
+
+IS_FILTERED=0
+if [[ -n "$SELECT" || -n "$TEST_NAME" || ${#CUSTOM_DIRS[@]} -gt 0 ]]; then
+    IS_FILTERED=1
+fi
 
 LOG="$(mktemp)"
 PLAIN="$(mktemp)"
@@ -112,6 +249,12 @@ GUT_ARGS=(-s addons/gut/gut_cmdln.gd)
 for dir in "${TEST_DIRS[@]}"; do
     GUT_ARGS+=("-gdir=res://${dir#godot/}")
 done
+if [[ -n "$SELECT" ]]; then
+    GUT_ARGS+=("-gselect=$SELECT")
+fi
+if [[ -n "$TEST_NAME" ]]; then
+    GUT_ARGS+=("-gunit_test_name=$TEST_NAME")
+fi
 
 # A hung suite must fail the gate, not hold the runner until GitHub's six-hour
 # job cap. The suite is ~1.5 min here and ~3-5 min on Windows; 15 min is slack
@@ -130,14 +273,6 @@ done
 # turns the measured wedge (a pane-spawning test stopped the suite; the run
 # then burned the whole deadline) into a failure that names the test it stopped
 # in, instead of a timeout a reader cannot attribute. `0` disables the check.
-GUT_TIMEOUT="${GUT_TIMEOUT:-600}"
-GUT_STALL_TIMEOUT="${GUT_STALL_TIMEOUT:-120}"
-for var in GUT_TIMEOUT GUT_STALL_TIMEOUT; do
-    if [[ ! "${!var}" =~ ^[0-9]+$ ]]; then
-        echo "gut-check: $var must be a whole number of seconds" >&2
-        exit 1
-    fi
-done
 
 # `tail -f` streams the log to the terminal while the watchdog reads the same
 # file; both stop once the child is reaped.
@@ -153,17 +288,36 @@ stop_tail() {
 set +e
 STATUS=0
 TIMEOUT_HIT=0
-PARSE_ABORT=0
+COLLECT_ABORT=0
 STALL_HIT=0
+LOG_BLOWN=0
+# A repeating runtime error prints without ever finishing a test, so the stall
+# detector sees progress forever. 64 MiB is far past this suite's ~1 MB log and
+# still bounds a runaway.
+LOG_LIMIT=$(( 64 * 1024 * 1024 ))
 LAST_SIZE=-1
 LAST_PROGRESS=$SECONDS
 DEADLINE=$(( SECONDS + GUT_TIMEOUT ))
 while kill -0 "$GUT_PID" 2>/dev/null; do
-    if grep -qE 'SCRIPT ERROR|Parse Error|Failed to load script' "$LOG" 2>/dev/null; then
-        PARSE_ABORT=1
+    # Godot's error text is not one event. Before the first test starts (GUT
+    # prints `* <test name>` at `_run_test`'s first line, log level 1) a
+    # script/parse error means the collector or an autoload failed: the run
+    # cannot be judged, and ending it here is what stops a deliberate parse
+    # error from spending the whole deadline. Once a test has started, a
+    # `SCRIPT ERROR` is GUT's to attribute - it fails that test with
+    # `Unexpected Errors:` and runs the next one - and killing the run there is
+    # what turned three out-of-bounds reads (windows-smoke 44648884305) into
+    # "not trustworthy" with every later failure unrun.
+    if ! grep -q '^\* ' "$LOG" 2>/dev/null \
+        && grep -qE 'SCRIPT ERROR|Parse Error|Failed to load script' "$LOG" 2>/dev/null; then
+        COLLECT_ABORT=1
         break
     fi
     SIZE="$(wc -c <"$LOG" 2>/dev/null || echo -1)"
+    if [[ "$SIZE" =~ ^[0-9]+$ ]] && (( SIZE > LOG_LIMIT )); then
+        LOG_BLOWN=1
+        break
+    fi
     if [[ "$SIZE" != "$LAST_SIZE" ]]; then
         LAST_SIZE="$SIZE"
         LAST_PROGRESS=$SECONDS
@@ -177,7 +331,7 @@ while kill -0 "$GUT_PID" 2>/dev/null; do
     fi
     sleep 0.2
 done
-if (( PARSE_ABORT || TIMEOUT_HIT || STALL_HIT )); then
+if (( COLLECT_ABORT || TIMEOUT_HIT || STALL_HIT || LOG_BLOWN )); then
     kill -TERM "$GUT_PID" 2>/dev/null || true
     for _ in 1 2 3 4 5; do
         kill -0 "$GUT_PID" 2>/dev/null || break
@@ -204,47 +358,103 @@ LAST_SCRIPT="$(awk '{
     }
     END { print last }' "$PLAIN")"
 
-PROBLEMS=()
-
-if (( STALL_HIT )); then
-    PROBLEMS+=("the run produced no output for ${GUT_STALL_TIMEOUT}s and was killed (a hung test or process)")
-elif (( TIMEOUT_HIT )); then
-    PROBLEMS+=("the suite exceeded ${GUT_TIMEOUT}s and was killed (a hung test or process)")
-fi
-if (( STALL_HIT || TIMEOUT_HIT )); then
-    if [[ -n "$LAST_TEST" ]]; then
-        PROBLEMS+=("the last test started was: $LAST_TEST")
-    fi
-    if [[ -n "$LAST_SCRIPT" ]]; then
-        PROBLEMS+=("in $LAST_SCRIPT")
-        PROBLEMS+=("re-run it alone: ${GODOT} --headless --path godot -s addons/gut/gut_cmdln.gd -gdir=res://tests/unit -gdir=res://tests/integration -gselect=$(basename "$LAST_SCRIPT" .gd) -gexit")
-    fi
-    PROBLEMS+=("the last lines were:")
-    while IFS= read -r line; do
-        PROBLEMS+=("    $line")
-    done < <(tail -n 8 "$PLAIN")
-fi
-if (( PARSE_ABORT )); then
-    PROBLEMS+=("the run was aborted as soon as Godot reported a script/parse error — it cannot be judged")
-elif [[ "$STATUS" -ne 0 ]] && (( ! STALL_HIT && ! TIMEOUT_HIT )); then
-    PROBLEMS+=("godot exited $STATUS")
-fi
-
-ERROR_LINES="$(grep -Em5 'SCRIPT ERROR|Parse Error|Failed to load script' "$PLAIN" || true)"
-if [[ -n "$ERROR_LINES" ]]; then
-    PROBLEMS+=("Godot reported a script/parse error — the suite did not run:")
-    while IFS= read -r line; do
-        PROBLEMS+=("    $line")
-    done <<<"$ERROR_LINES"
-fi
-
-# Totals block reads "Scripts              40" / "Tests               406".
+# Totals block reads "Scripts              40" / "Tests               406". Read
+# before the verdicts: a complete summary is what makes a red run judgeable, so
+# it decides whether a Godot error is "the run is red" or "the gate cannot
+# judge it".
 SCRIPTS_RAN="$(awk '$1 == "Scripts" && $2 ~ /^[0-9]+$/ { print $2; exit }' "$PLAIN")"
 TESTS_RAN="$(awk '$1 == "Tests" && $2 ~ /^[0-9]+$/ { print $2; exit }' "$PLAIN")"
+if [[ -n "$SCRIPTS_RAN" && -n "$TESTS_RAN" ]]; then
+    JUDGED=1
+else
+    JUDGED=0
+fi
+
+# Two verdicts, because they are two different claims. UNTRUSTED says the gate
+# could not judge the run (killed, no summary, a collection failure, a count
+# that does not add up): green off this run would be a lie. FAILURES says the
+# run finished and is red: GUT's own summary and per-test list are the report.
+UNTRUSTED=()
+FAILURES=()
+
+if (( STALL_HIT )); then
+    UNTRUSTED+=("the run produced no output for ${GUT_STALL_TIMEOUT}s and was killed (a hung test or process)")
+elif (( TIMEOUT_HIT )); then
+    UNTRUSTED+=("the suite exceeded ${GUT_TIMEOUT}s and was killed (a hung test or process)")
+elif (( LOG_BLOWN )); then
+    UNTRUSTED+=("the run wrote more than $(( LOG_LIMIT / 1024 / 1024 )) MiB of output and was killed (a repeating error)")
+fi
+if (( STALL_HIT || TIMEOUT_HIT || LOG_BLOWN )); then
+    if [[ -n "$LAST_TEST" ]]; then
+        UNTRUSTED+=("the last test started was: $LAST_TEST")
+    fi
+    if [[ -n "$LAST_SCRIPT" ]]; then
+        UNTRUSTED+=("in $LAST_SCRIPT")
+        UNTRUSTED+=("re-run it alone: ./scripts/gut-check --select $(basename "$LAST_SCRIPT" .gd)")
+    fi
+    UNTRUSTED+=("the last lines were:")
+    while IFS= read -r line; do
+        UNTRUSTED+=("    $line")
+    done < <(tail -n 8 "$PLAIN")
+fi
+if (( COLLECT_ABORT )); then
+    UNTRUSTED+=("the run was aborted as soon as Godot reported a script/parse error before any test started — it cannot be judged")
+elif [[ "$STATUS" -ne 0 ]] && (( ! STALL_HIT && ! TIMEOUT_HIT && ! LOG_BLOWN )); then
+    if (( JUDGED )); then
+        FAILURES+=("godot exited $STATUS")
+    else
+        UNTRUSTED+=("godot exited $STATUS")
+    fi
+fi
+
+# `-A2` carries Godot's location lines (`at: res://.../<script>.gd:<line>` and
+# the GDScript backtrace); without them the gate can say an error happened but
+# not where, which is what `windows-smoke` 44648884305 printed. The count leads
+# because a runtime error now finishes the run: there may be more than five.
+ERROR_COUNT="$(grep -cE 'SCRIPT ERROR|Parse Error|Failed to load script' "$PLAIN" || true)"
+ERROR_LINES="$(grep -Em5 -A2 'SCRIPT ERROR|Parse Error|Failed to load script' "$PLAIN" | sed '/^--$/d' || true)"
+if [[ -n "$ERROR_LINES" ]]; then
+    if (( JUDGED )); then
+        FAILURES+=("Godot reported ${ERROR_COUNT} script/parse error(s) (the first five with location and backtrace):")
+        while IFS= read -r line; do
+            FAILURES+=("    $line")
+        done <<<"$ERROR_LINES"
+    else
+        UNTRUSTED+=("Godot reported ${ERROR_COUNT} script/parse error(s), with no summary to judge (the first five with location and backtrace):")
+        while IFS= read -r line; do
+            UNTRUSTED+=("    $line")
+        done <<<"$ERROR_LINES"
+    fi
+fi
+
+# GUT's own failing-test report. `log_end_run` prints the header, every failing
+# script with `- <test>` and its `[Failed]` lines, then `Totals` (summary.gd's
+# log_end_run order), so the region between the two markers is exactly the list
+# a reader needs instead of a log to grep.
+FAIL_COUNT="$(awk '$1 == "Failing" && $2 == "Tests" && $3 ~ /^[0-9]+$/ { print $3; exit }' "$PLAIN")"
+FAIL_COUNT="${FAIL_COUNT:-0}"
+FAILED_BLOCK=""
+if [[ "$FAIL_COUNT" != "0" ]]; then
+    FAILED_BLOCK="$(awk '
+        /^= Run Summary$/ { on = 1; next }
+        on && /^Totals$/ { exit }
+        on { print }
+    ' "$PLAIN" | sed -e '/^=\+$/d' -e '/^$/d')"
+fi
+if [[ -n "$FAILED_BLOCK" ]]; then
+    FAILURES+=("GUT reported $FAIL_COUNT failing test(s), with its own failure text:")
+    while IFS= read -r line; do
+        FAILURES+=("    $line")
+    done < <(printf '%s\n' "$FAILED_BLOCK" | head -n 80)
+    BLOCK_LINES="$(printf '%s\n' "$FAILED_BLOCK" | wc -l)"
+    if (( BLOCK_LINES > 80 )); then
+        FAILURES+=("    … $(( BLOCK_LINES - 80 )) more line(s); the full log is above")
+    fi
+fi
 
 if [[ -z "$SCRIPTS_RAN" || -z "$TESTS_RAN" ]] \
-    && (( ! STALL_HIT && ! TIMEOUT_HIT && ! PARSE_ABORT )); then
-    PROBLEMS+=("no Run Summary in the output — the run stopped before it finished")
+    && (( ! STALL_HIT && ! TIMEOUT_HIT && ! COLLECT_ABORT && ! LOG_BLOWN )); then
+    UNTRUSTED+=("no Run Summary in the output — the run stopped before it finished")
 fi
 
 # Pending tests are allowed on Windows only, and printed: a fixture that needs a
@@ -257,12 +467,12 @@ RISKY="$(grep -c '\[Risky\]' "$PLAIN" || true)"
 PENDING="$(grep -c '\[Pending\]' "$PLAIN" || true)"
 PENDING_TOTAL="0"
 if [[ "$RISKY" != "0" ]]; then
-    PROBLEMS+=("a test ran without asserting ([Risky])")
+    FAILURES+=("a test ran without asserting ([Risky])")
 fi
 if [[ "$PENDING" != "0" && "$IS_WINDOWS" != "1" ]]; then
-    PROBLEMS+=("pending tests are a Windows-only allowance, but these skipped on $(uname -s):")
+    FAILURES+=("pending tests are a Windows-only allowance, but these skipped on $(uname -s):")
     while IFS= read -r line; do
-        PROBLEMS+=("    $line")
+        FAILURES+=("    $line")
     done < <(grep -E '^ *\[Pending\]' "$PLAIN" | sort -u)
 fi
 if grep -q -- '---- All tests passed! ----' "$PLAIN"; then
@@ -276,11 +486,14 @@ elif [[ "$PENDING" != "0" ]] && grep -qE -- '---- [0-9]+ pending/risky tests\. -
     # is that the only non-passing category is `pending` — `risky` already
     # failed above — and that every pending test is listed for review below.
     :
-elif (( STALL_HIT || TIMEOUT_HIT || PARSE_ABORT )); then
+elif [[ "$FAIL_COUNT" != "0" ]]; then
+    : # the count and the failing-test list above already say it
+elif (( STALL_HIT || TIMEOUT_HIT || COLLECT_ABORT || LOG_BLOWN )); then
     # The failure above already says why there is no summary.
     :
-else
-    PROBLEMS+=("the run did not end with 'All tests passed!'")
+elif (( JUDGED )); then
+    FINAL_LINE="$(grep -oE -- '---- .* ----' "$PLAIN" | tail -n 1 || true)"
+    FAILURES+=("the run did not end with 'All tests passed!'${FINAL_LINE:+ (it ended: $FINAL_LINE)}")
 fi
 
 shopt -s nullglob
@@ -297,25 +510,43 @@ while IFS= read -r file; do
     [[ -n "${DIRECT[$file]:-}" ]] || NESTED+=("$file")
 done < <(find "${TEST_DIRS[@]}" -name 'test_*.gd' | sort)
 
-if [[ -n "$SCRIPTS_RAN" && "$SCRIPTS_RAN" != "$EXPECTED" ]]; then
-    PROBLEMS+=("GUT ran $SCRIPTS_RAN scripts; ${TEST_DIRS[*]} hold $EXPECTED")
-fi
-if [[ -n "$SCRIPTS_RAN" && -n "$TESTS_RAN" && "$TESTS_RAN" -lt "$SCRIPTS_RAN" ]]; then
-    PROBLEMS+=("$SCRIPTS_RAN scripts ran only $TESTS_RAN tests — a script collected none")
+if (( ! IS_FILTERED )); then
+    if [[ -n "$SCRIPTS_RAN" && "$SCRIPTS_RAN" != "$EXPECTED" ]]; then
+        UNTRUSTED+=("GUT ran $SCRIPTS_RAN scripts; ${TEST_DIRS[*]} hold $EXPECTED")
+    fi
+    if [[ -n "$SCRIPTS_RAN" && -n "$TESTS_RAN" && "$TESTS_RAN" -lt "$SCRIPTS_RAN" ]]; then
+        UNTRUSTED+=("$SCRIPTS_RAN scripts ran only $TESTS_RAN tests — a script collected none")
+    fi
+else
+    if [[ -z "$SCRIPTS_RAN" || "$SCRIPTS_RAN" -lt 1 ]]; then
+        UNTRUSTED+=("no test scripts ran matching the filter")
+    fi
+    if [[ -z "$TESTS_RAN" || "$TESTS_RAN" -lt 1 ]]; then
+        UNTRUSTED+=("no tests ran matching the filter")
+    fi
 fi
 if (( ${#NESTED[@]} > 0 )); then
-    PROBLEMS+=("GUT does not recurse into subdirectories; these never run:")
+    UNTRUSTED+=("GUT does not recurse into subdirectories; these never run:")
     for file in "${NESTED[@]}"; do
-        PROBLEMS+=("    $file")
+        UNTRUSTED+=("    $file")
     done
 fi
 
-if (( ${#PROBLEMS[@]} > 0 )); then
+if (( ${#UNTRUSTED[@]} > 0 )); then
     echo
     echo "gut-check: FAIL — this GUT run is not trustworthy" >&2
-    for problem in "${PROBLEMS[@]}"; do
+    for problem in "${UNTRUSTED[@]}"; do
         echo "  $problem" >&2
     done
+fi
+if (( ${#FAILURES[@]} > 0 )); then
+    echo
+    echo "gut-check: FAIL — the suite ran and reported failures" >&2
+    for failure in "${FAILURES[@]}"; do
+        echo "  $failure" >&2
+    done
+fi
+if (( ${#UNTRUSTED[@]} > 0 || ${#FAILURES[@]} > 0 )); then
     exit 1
 fi
 
@@ -331,8 +562,12 @@ if [[ "$RISKY" != "0" ]]; then
 fi
 
 echo
+FILTER_LABEL=""
+if (( IS_FILTERED )); then
+    FILTER_LABEL=" (filtered)"
+fi
 if [[ "$PENDING" == "0" ]]; then
-    echo "gut-check: OK — $SCRIPTS_RAN scripts, $TESTS_RAN tests, all passed"
+    echo "gut-check: OK${FILTER_LABEL} — $SCRIPTS_RAN scripts, $TESTS_RAN tests, all passed"
 else
-    echo "gut-check: OK — $SCRIPTS_RAN scripts, $TESTS_RAN tests, $PENDING_TOTAL pending"
+    echo "gut-check: OK${FILTER_LABEL} — $SCRIPTS_RAN scripts, $TESTS_RAN tests, $PENDING_TOTAL pending"
 fi

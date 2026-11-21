@@ -6,10 +6,62 @@ is `.omp/skills/release/SKILL.md`; it follows this page and records only the
 agent-specific checkpoints, not a second runbook. Release authority is in
 [MAINTAINERS.md](https://github.com/godot-pty/gpty/blob/main/MAINTAINERS.md).
 
-A release is a pull request from the active integration branch (`0.8.x` for the
-0.8 line) to `main`, the maintainer's approval, a merge commit, and a signed
-annotated `vX.Y.Z` tag on `main`. `main` is release-only: feature pull requests
-land on the integration branch.
+A release is a short-lived release-prep pull request against `main` for the
+active line, or against `release/vX.Y` for a line in maintenance, the
+maintainer's approval, a merge commit, and a signed annotated `vX.Y.Z` tag on
+the merge result. `main` is the trunk: feature pull requests land there.
+
+## Branches
+
+`main` is the trunk. Every change lands through a pull request against it;
+feature branches are short-lived.
+
+A line that has stopped receiving features has a long-lived maintenance branch
+`release/vX.Y`, created from `main` at the line's last release commit (the
+`vX.Y.Z` tag) when development moves to the next minor. It receives only
+cherry-picked fixes. It is never a development branch, and the active line's
+tags come from `main`.
+
+The remote is the inventory; nothing needs to list the branches by hand:
+
+```bash
+git branch -r --list 'origin/release/v*'
+git describe --tags --abbrev=0 origin/release/v0.7   # the line's last release
+```
+
+A line that closed before its branch existed is created at that line's last
+release tag, so it contains the release's changelog page, version bump and blog
+entry - not the commit before them:
+
+```bash
+git switch -c release/v0.7 v0.7.2
+git push origin release/v0.7
+```
+
+An archived branch may carry one later policy-only commit
+(`chore(ci): trigger on release branches`, which makes a backport PR run the CI
+that shipped with that tree). The tag, not the branch tip, is the shipped tree.
+
+Do not type the branch into a command; derive it from the tag being cut. The
+rest of this page uses `$BRANCH`:
+
+```bash
+RELEASE=vX.Y.Z
+BRANCH="release/${RELEASE%.*}"   # v0.8.6 -> release/v0.8
+```
+
+Tags:
+
+- The active line: tag `main` after the release PR merges.
+- A line in maintenance: tag `release/vX.Y` after the backport PR merges.
+- Never tag a release-prep or feature branch.
+
+The tag gate accepts a tag reachable from `main` or from the `release/vX.Y`
+derived from the tag. `release/v0.1` through `release/v0.7` are the closed
+lines. `release/v0.8` does not exist yet: the 0.8 line is still active through
+0.8.7, and the branch is cut from the last 0.8 tag when 0.9 development starts.
+Creating it now would freeze it behind 0.8.6/0.8.7 and force a branch-sync PR
+per release.
 
 ## Preconditions
 
@@ -18,10 +70,11 @@ land on the integration branch.
   tag, and a bad tag cannot be moved or deleted. Cut the next patch instead.
 - The `gpty-bot` app installed on `godot-pty/gpty` and
   `GPTY_BOT_PRIVATE_KEY` set; `./scripts/bot-token --check` passes. The bot
-  pushes the integration branch and opens the release PR; it never approves or
+  pushes the release-prep branch and opens the release PR; it never approves or
   merges.
-- A clean tree, the current integration branch, and the release's roadmap rows
-  closed. Anything unshipped moves to the next chain in priority position with
+- A clean tree, `main` for the active line (the maintenance branch for a
+  maintenance release), and the release's roadmap rows closed. Anything
+  unshipped moves to the next chain in priority position with
   `(Deferred from vX.Y.Z.)`.
 - `./scripts/check-github-settings` passes. It is read-only and needs a
   maintainer-authenticated `gh`: it reads back the rulesets, classic protection,
@@ -33,15 +86,20 @@ land on the integration branch.
   [manual pre-release checklist](docs/content/docs/overview/testing.md#manual-pre-release-checklist)
   against a real GUI; it covers the renderer, input and live-session paths that
   headless tests cannot.
-- A graphical session for the home screenshot and, on Linux with a GPU, the
+- A graphical session for the release screenshot and, on Linux with a GPU, the
   cost-table measurement. Both have documented fallbacks.
 
 ## 1. Analyze the commit range
 
-Release notes come from the commit history, never from memory. Set the previous
-release tag and inspect the range:
+Release notes come from the commit history, never from memory. Set the tag and
+derive its branch; start on `main` for the active line or on the derived
+`$BRANCH` for a maintenance release, then inspect the range:
 
 ```bash
+RELEASE=vX.Y.Z
+BRANCH="release/${RELEASE%.*}"   # vX.Y.Z -> release/vX.Y
+git switch main                  # or: git switch "$BRANCH"
+git pull --ff-only
 PREV=$(git describe --tags --abbrev=0 --match 'v*' HEAD^)
 git log "$PREV"..HEAD --oneline
 ./scripts/fix-forensics --check --since "$PREV"
@@ -89,6 +147,10 @@ grep -H '^weight' docs/content/docs/changelog/v0.*.md \
 It must print nothing. `scripts/docs-check` holds the index and the page
 directory in bijection: an unlinked page and a link with no page both fail.
 
+On a maintenance release, author this page on `release/vX.Y`; after the tag,
+port the page, its `CHANGELOG.md` link, the blog entry and its images to `main`
+(step 8) so the site publishes them.
+
 ## 3. Update the README and docs
 
 The install table uses a `<version>` placeholder, so it needs no version edit.
@@ -113,8 +175,10 @@ version. `--record` appends or replaces the release in
 `--check` needs Linux with a GPU; `scripts/ci-check` runs `--stamp` (no GPU) and
 fails when the crate version moves and the table still names the old build.
 
-The site's home page carries exactly one image: the current release's
-`vX.Y.Z_1.png`. Feature screenshots belong only in the blog entry.
+The home page carries the demo clips, not a release screenshot. The release's
+`vX.Y.Z_1.png` belongs to its blog entry (`docs/content/blog/vX.Y.Z/index.md`);
+feature screenshots sit beside their features there. Do not add a release
+screenshot to `docs/content/_index.md`.
 
 Check the docs mirrors and links before committing:
 
@@ -123,6 +187,11 @@ python3 scripts/docs-check
 ./scripts/check-capabilities
 python3 scripts/build-wiki --check
 ```
+
+These three are the active line's list. On a maintenance branch run the subset
+that tree carries (v0.7.2 has `docs-check` and `build-wiki --check` but no
+`check-capabilities`) and say which gates were unavailable rather than skipping
+them silently.
 
 ## 4. Close the roadmap
 
@@ -169,9 +238,13 @@ directory. The other crates cannot verify locally before their path dependency
 is on the index; check their tarball file lists with
 `cargo package -p <crate> --no-verify --list`.
 
+The bump is on the branch being released: `main` for the active line,
+`release/vX.Y` for a maintenance release. `main` keeps the active line's
+version; do not port a maintenance bump to it.
+
 ## 6. Screenshots and blog entry
 
-Capture the home screen:
+Capture the app's main screen:
 
 ```bash
 scripts/screenshot-gpty docs/static/images/vX.Y.Z_1.png godot --path godot
@@ -194,9 +267,9 @@ size can produce a clipped off-screen window. Check every referenced image
 exists under `docs/static/images/` before committing.
 
 Create `docs/content/blog/vX.Y.Z/index.md` using the established front matter
-and body shape (see an earlier `vX.Y.Z/index.md`), with the home screenshot
+and body shape (see an earlier `vX.Y.Z/index.md`), with the release screenshot
 first and feature screenshots next to the features they show. A patch release
-with no visual changes may reuse the previous home screenshot, but a fresh
+with no visual changes may reuse the previous release screenshot, but a fresh
 capture is preferred.
 
 ## 7. Final review pause
@@ -218,60 +291,98 @@ Run the full local gate once more:
 
 ```bash
 ./scripts/ci-check
-git switch 0.8.x
-git pull --ff-only
 ```
 
-Stage the release commit and sign it:
+A release-prep branch never edits `.github/workflows/**`: the `gpty-bot` app
+cannot create or update a workflow file. Land a workflow change in its own PR
+before the release.
+
+For the active line, create the prep branch from `main`, push it through the
+bot, and open the PR against `main`:
+
+```bash
+git switch main
+git pull --ff-only
+git switch -c "release-prep/$RELEASE"
+```
+
+For a maintenance line, start from the line's branch and target it instead:
+
+```bash
+git switch "$BRANCH"
+git pull --ff-only
+git switch -c "release-prep/$RELEASE"
+```
+
+Stage the release commit and sign it. The list includes the cost ledger and
+chart that `measure-cost --record` wrote; without them the README names the new
+build while the published chart stops at the previous release:
 
 ```bash
 git add CHANGELOG.md README.md ROADMAP.md server.json godot/project.godot \
   crates/*/Cargo.toml Cargo.lock fuzz/Cargo.lock \
   docs/content/docs/changelog/vX.Y.Z.md \
   docs/content/blog/vX.Y.Z \
-  docs/static/images/vX.Y.Z_*.png
-git commit -s -m "docs: finalize vX.Y.Z release"
+  docs/static/images/vX.Y.Z_*.png \
+  docs/data/cost-history.json docs/static/images/cost-history.svg
+git commit -s -m "docs: finalize $RELEASE release"
 ```
 
-Push the integration branch and open the release PR as `gpty-bot`:
+Push it and open the release PR as `gpty-bot`. The base is `main` for the
+active line and `$BRANCH` for a maintenance release:
 
 ```bash
-./scripts/bot-push 0.8.x
-./scripts/bot-pr --base main --title "vX.Y.Z" --body-file /tmp/gpty-release-body.md
+./scripts/bot-push "release-prep/$RELEASE"
+./scripts/bot-pr --base main --title "$RELEASE" --body-file /tmp/gpty-release-body.md
+# maintenance: --base "$BRANCH"
 ```
 
-Wait until all required checks on the release PR are green: the CI jobs
-(including both Windows legs), `docs`, `commit-lint`, CodeQL and secret-scan.
-Do not merge a partially green PR. Approve it as the maintainer, then merge with
-a merge commit so the integration branch remains ancestral to `main`:
+Wait until the PR's checks are green: on the active line all required checks
+(including both Windows legs, `docs`, `commit-lint`, CodeQL and secret-scan); on
+a maintenance branch its CI, CodeQL and secret-scan runs. The branch's suite is
+the suite that shipped with it; if a pinned action or runner has retired so the
+suite cannot start, record the failing job and the equivalent local gate in the
+PR, and do not merge a real failure. Do not merge a partially green PR. Approve
+it as the maintainer, then merge with a merge commit:
 
 ```bash
 gh pr review --approve <number>
 gh pr merge --merge <number>
-git switch main
-git pull --ff-only
 ```
 
-Tag from `main` and verify the signature before pushing:
+Tag the result and verify the signature before pushing. The active line tags
+`main`; a maintenance release tags `$BRANCH`:
 
 ```bash
-git tag -s vX.Y.Z -m "vX.Y.Z"
-git tag -v vX.Y.Z
-git push origin vX.Y.Z
+git switch main                  # or: git switch "$BRANCH"
+git pull --ff-only
+git tag -s "$RELEASE" -m "$RELEASE"
+git tag -v "$RELEASE"
+git push origin "$RELEASE"
 ```
 
 The tag push runs the `pre-push` hook's full `ci-check`, so it can take a couple
 of minutes. Confirm the tag reached the remote with
-`git ls-remote --tags origin vX.Y.Z` rather than assuming. Tags are immutable:
-do not force-move one to include a late fix.
+`git ls-remote --tags origin "$RELEASE"` rather than assuming. Tags are
+immutable: do not force-move one to include a late fix.
 
-After the merge, bring the integration branch to the release commit:
+After a maintenance tag, port only the user-facing docs to `main` so the site
+(which deploys from `main`) publishes them:
 
 ```bash
-git switch 0.8.x
-git merge --ff-only main
-git push origin 0.8.x
+git switch main
+git pull --ff-only
+git switch -c "docs/$RELEASE"
+git checkout "$RELEASE" -- docs/content/docs/changelog/vX.Y.Z.md \
+  docs/content/blog/vX.Y.Z 'docs/static/images/vX.Y.Z_*.png'
+# add the CHANGELOG.md link by hand
+git commit -s -m "docs: publish the $RELEASE notes"
+./scripts/bot-push "docs/$RELEASE"
+./scripts/bot-pr --base main --title "docs: publish $RELEASE" --body-file /tmp/gpty-release-docs-body.md
 ```
+
+Do not port the version bump, `Cargo.lock`, `server.json`,
+`godot/project.godot`, or the old line's roadmap edits to `main`.
 
 ## 9. Understand the release workflow
 
@@ -280,14 +391,39 @@ privilege is present while project code runs:
 
 - **`release-gate`** is read-only. It validates the tag format (`vX.Y.Z`, no
   pre-release suffix), verifies the tag is a signed annotated tag through the
-  GitHub API, checks it is an ancestor of `main`, compares the crate and
-  `server.json` versions with the tag, runs `mcp-registry check`, checks both
-  lockfiles with `cargo metadata --locked`, checks the defect-class trailers,
-  and runs the docs, capability and knowledge-bundle gates.
-- **`export`** is read-only. It stamps `godot/project.godot`, installs Godot and
-  the export templates, asserts the four GDExtension files exist, exports
-  Linux, Windows and macOS, writes `SHA256SUMS`, and uploads the three archives
-  plus the sums as `gpty-release-dist`.
+  GitHub API, checks it is reachable from `main` or from the `release/vX.Y`
+  derived from the tag, compares the crate and `server.json` versions with the
+  tag, runs `mcp-registry check`, checks both lockfiles with
+  `cargo metadata --locked`, checks the defect-class trailers, and runs the
+  docs, capability and knowledge-bundle gates.
+- **`build`** calls `.github/workflows/release-build.yml`, the same definition a
+  `workflow_dispatch` on `main` runs. It carries the platform jobs
+  (`build-linux`, both `build-macos` arches, `build-windows`, `bundle-macos`,
+  `export`) and restores the caches a run on `main` wrote: the FFmpeg prefix
+  (Windows under `ci.yml`'s key; Linux under an image-scoped
+  `Linux-ubuntu22-ffmpeg-*` key, because the release builds on 22.04 for the
+  bundle's glibc floor while `ci.yml` builds on 24.04 and a 24.04-built
+  `libav*.so` needs GLIBC_2.38), the Windows vcpkg tree only when that prefix
+  missed, and the release-profile `target` under a
+  `cargo-release-<os>-<arch>-<lock>` key kept apart from the debug caches. A
+  tag run only restores: an entry it saves is tag-scoped, unreadable by the
+  next tag, and would evict CI's caches from the 10 GB budget. `export` stamps
+  `godot/project.godot` with the version input, installs Godot and the export
+  templates, asserts the four GDExtension files exist, exports Linux, Windows
+  and macOS, writes `SHA256SUMS`, and uploads the three archives plus the sums
+  as `gpty-release-dist`.
+
+  `workflow_dispatch` on that file is how the caches are filled and how the
+  build definition is proved before it is used by a tag:
+
+  ```bash
+  gh workflow run release-build.yml --ref main -f version=vX.Y.Z
+  ```
+
+  Run it once on the release commit; it publishes nothing and writes
+  `gpty-release-dist` as a run artifact. A dispatch on a cold key is the cold
+  measurement; the next one (or the tag run after it) is the warm one. Read the
+  step timings with `gh run view <id> --json jobs`.
 - **`publish`** is the only write/OIDC job. It downloads the staged artifact,
   attests the four assets, and creates the GitHub release. It does not check
   out the repository and runs no project code. It waits on the `release`
@@ -391,5 +527,15 @@ not meet this floor; the first release after the fix is the proof.
 - **`gh run watch` can fail on a transient API error** while the run is still
   going. Confirm with `gh run view <id> --json status,conclusion` before
   calling a run failed.
-- **No `dev/v*` branches.** The integration branch is long-lived; feature
-  branches are short-lived and PR back to it, not to `main`.
+- **No long-lived development branches.** `main` is the trunk; feature branches
+  are short-lived and PR to `main`. `release/vX.Y` is maintenance-only, created
+  at stabilization; it receives cherry-picked fixes, never feature work. An
+  archived line's tag is the shipped tree; its branch may carry a later
+  CI-trigger commit.
+- **A release-prep branch never edits a workflow.** `scripts/bot-push` uses the
+  `gpty-bot` app, which cannot create or update `.github/workflows/**`; land a
+  workflow change in its own PR first.
+- **An archived line runs the workflow that shipped with it.** A maintenance
+  tag's tree starts the release workflow in that tree, not the current one;
+  review it before the tag. The tag ruleset still requires a signed annotated
+  tag and has no bypass.

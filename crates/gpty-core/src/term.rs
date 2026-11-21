@@ -42,7 +42,6 @@ pub const MOUSE_MODE_DRAG: u8 = 2;
 pub const MOUSE_MODE_MOTION: u8 = 4;
 pub const MOUSE_MODE_SGR: u8 = 8;
 
-use crate::color::color_to_rgb;
 use crate::lock::lock_or_warn;
 
 /// A character cell ready for rendering.
@@ -172,7 +171,7 @@ pub struct TermGrid {
     pub palette_changed: bool,
     /// Tracks the display_offset last used for a Full grid render; forces Full when it changes.
     last_full_offset: usize,
-    pub palette: [[u8; 3]; 16],
+    pub palette: crate::color::Palette,
     /// Line counter for history storage (monotonically increasing).
     line_count: u64,
     /// Which end of the live selection the mouse-down cell is. The pane
@@ -242,7 +241,7 @@ impl TermGrid {
             generation: 0,
             palette_changed: false,
             last_full_offset: 0,
-            palette: crate::color::SYSTEM_COLORS,
+            palette: crate::color::Palette::system(),
             line_count: 0,
             selection_anchor_at_start: true,
             history: None,
@@ -858,12 +857,12 @@ impl CellInfo {
     /// Named colors (like "Background", "Foreground", "Red") are resolved
     /// to their approximate RGB values. True-color ANSI sequences
     /// (`\x1b[38;2;R;G;Bm`) are handled natively by `vte::ansi::Rgb`.
-    pub fn from_cell(cell: &Cell, palette: &[[u8; 3]; 16]) -> Self {
+    pub fn from_cell(cell: &Cell, palette: &crate::color::Palette) -> Self {
         let flags = cell.flags;
         Self {
             ch: cell.c,
-            fg: color_to_rgb(&cell.fg, palette),
-            bg: color_to_rgb(&cell.bg, palette),
+            fg: palette.resolve(&cell.fg),
+            bg: palette.resolve(&cell.bg),
             bold: flags.contains(Flags::BOLD),
             italic: flags.contains(Flags::ITALIC),
             underline: flags.contains(Flags::UNDERLINE),
@@ -916,6 +915,28 @@ mod tests {
         let g = TermGrid::new(24, 80);
         assert_eq!(g.num_rows(), 24);
         assert_eq!(g.num_cols(), 80);
+    }
+
+    #[test]
+    fn a_cell_with_the_default_foreground_uses_the_palette_foreground() {
+        let mut g = TermGrid::new(4, 20);
+        let mut palette = crate::color::Palette::system();
+        palette.foreground = [1, 2, 3];
+        palette.background = [4, 5, 6];
+        palette.ansi[7] = [250, 250, 250];
+        g.palette = palette;
+        g.feed(b"hi");
+        let rows = g.renderable_rows();
+        assert_eq!(
+            rows[0][0].fg,
+            [1, 2, 3],
+            "default fg is the palette foreground"
+        );
+        assert_eq!(
+            rows[0][0].bg,
+            [4, 5, 6],
+            "default bg is the palette background"
+        );
     }
 
     /// DECSET 1000/1002/1003 pick one tracking mode (the newest wins) and

@@ -283,3 +283,32 @@ func test_the_ground_is_the_grid_background():
 		"the ground must follow the scheme, or a resize would expose the old colour")
 	assert_ne(body.ground_color(), Color8(128, 26, 26),
 		"the scheme must override the pane's own background while it is set")
+
+	# A native scheme names its foreground, background, cursor and selection
+	# explicitly; the pane's cursor is still the shipped default, so the
+	# scheme's cursor fills in and the ground follows the scheme's background.
+	var native_palette := PackedStringArray()
+	for i in range(16):
+		native_palette.append("#%02x%02x%02x" % [i, i, i])
+	var native_path := OS.get_temp_dir().path_join("gpty-scheme-probe.json")
+	var native_file := FileAccess.open(native_path, FileAccess.WRITE)
+	assert_not_null(native_file, "the native scheme fixture must be writable")
+	if native_file == null:
+		return
+	native_file.store_string(JSON.stringify({
+		"name": "Probe",
+		"palette": native_palette,
+		"foreground": "#abcdef",
+		"background": "#123456",
+		"cursor": "#e0e0e0",
+		"selection": "#445566",
+	}))
+	native_file.close()
+	_scheme_path = native_path
+	body.color_scheme_path = native_path
+	assert_eq(body._terminal.get_background_color().to_html(false), "123456",
+		"a native scheme's background reaches the grid")
+	assert_eq(body.ground_color().to_html(false), "123456",
+		"the ground follows the native scheme")
+	assert_eq(body._cursor_draw_color().to_html(false), "e0e0e0",
+		"an un-customised pane cursor takes the scheme's cursor")

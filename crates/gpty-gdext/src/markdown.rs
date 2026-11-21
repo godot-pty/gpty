@@ -89,8 +89,8 @@ impl GptyMarkdown {
     ///
     /// Markdown is model/file content: raw HTML and BBCode are escaped, images
     /// are reduced to alt text, and only conservative `http`/`https`/`mailto`
-    /// links become metadata, so `RichTextLabel` never receives
-    /// source-controlled tags.
+    /// links — plus the two internal schemes a caller opts into below — become
+    /// metadata, so `RichTextLabel` never receives source-controlled tags.
     ///
     /// `wikilinks` turns `[[target]]` / `[[target|alias]]` occurrences into
     /// internal `gpty-note:` links (the wiki pane's mention syntax). It is off
@@ -98,18 +98,23 @@ impl GptyMarkdown {
     /// inspector answer or a reasoning turn displays, and the scheme is only
     /// ever emitted by this renderer — a Markdown link cannot name it.
     ///
+    /// `docs` accepts the `gpty-doc:` scheme the documentation bundle's
+    /// generator emits for a link between two bundled documents (the README
+    /// and the pages it links). Only `MarkdownView` interprets it, and only to
+    /// announce a click its owning viewer resolves against the bundle's own
+    /// path map — never the filesystem. Like the mention scheme it is only
+    /// emitted when the caller opts in, so inspector output keeps refusing a
+    /// document that names it. `docs` changes nothing else: text, HTML
+    /// escaping and image alt text render exactly as they do with it off.
+    ///
     /// Answers `{"text", "truncated", "shown", "size"}`: the BBCode, whether
     /// the source was cut at [`MAX_MARKDOWN_BYTES`], and how many bytes were
     /// rendered of how many were given. `truncated` is what lets a view say
     /// what it did not render instead of showing a prefix in silence.
     #[func]
-    fn render(&self, markdown: GString, wikilinks: bool) -> GString {
+    fn render(&self, markdown: GString, wikilinks: bool, docs: bool) -> GString {
         let source = markdown.to_string();
-        let rendered = if wikilinks {
-            render_markdown_with(&source, true)
-        } else {
-            render_markdown(&source)
-        };
+        let rendered = render_markdown_with(&source, wikilinks, docs);
         let document = serde_json::json!({
             "text": rendered.text,
             "truncated": rendered.truncated,
@@ -121,15 +126,18 @@ impl GptyMarkdown {
     }
 }
 
-/// Render without wikilink syntax — the callers that have no vault.
+/// Render without wikilink or document-link syntax — the callers that have
+/// neither a vault nor the bundled documentation.
 ///
 /// Public (with [`render_markdown_with`]) so the fuzz harness drives the real
 /// renderer; the GDScript callers still enter through `GptyMarkdown.render`.
 pub fn render_markdown(markdown: &str) -> Rendered {
-    render_markdown_with(markdown, false)
+    render_markdown_with(markdown, false, false)
 }
 
-/// Render `markdown`, optionally turning `[[…]]` mentions into internal links.
+/// Render `markdown`, optionally turning `[[…]]` mentions into internal links
+/// (`wikilinks`) and accepting the documentation bundle's `gpty-doc:` scheme
+/// (`docs`).
 ///
 /// Public so the fuzz harness drives the real renderer (see
 /// [`render_markdown`]).
@@ -152,7 +160,7 @@ pub fn render_markdown(markdown: &str) -> Rendered {
 /// it is inside a link or image, and to a `gpty-note:` link everywhere else.
 /// The alternative (an inner link that wins) would make a link's own label
 /// silently navigate somewhere other than the link's `href`.
-pub fn render_markdown_with(markdown: &str, wikilinks: bool) -> Rendered {
+pub fn render_markdown_with(markdown: &str, wikilinks: bool, docs: bool) -> Rendered {
     let source = truncate_utf8(markdown, MAX_MARKDOWN_BYTES);
     let shown = source.len();
     let (prepared, mentions) = if wikilinks && source.contains("[[") {
@@ -177,12 +185,15 @@ pub fn render_markdown_with(markdown: &str, wikilinks: bool) -> Rendered {
         match event {
             Event::Start(Tag::Link { dest_url, .. }) => {
                 let safe = safe_url(&dest_url);
-                safe_links.push(safe);
+                let internal = docs && doc_url(&dest_url);
+                safe_links.push(safe || internal);
                 nested += 1;
                 if safe {
                     out.push_str("[url=");
                     out.push_str(&dest_url);
                     out.push(']');
+                } else if internal {
+                    doc_bbcode(&mut out, &dest_url);
                 } else {
                     out.push_str("[u]");
                 }
@@ -398,6 +409,52 @@ fn mention_bbcode(mention: &Mention) -> String {
     out
 }
 
+/// Longest `gpty-doc:` destination honoured, in bytes.
+///
+/// The bundle's own path cap is 1024 (`scripts/build-docs`), so a longer
+/// payload cannot name a bundled document; refusing it also keeps a huge link
+/// from becoming a 3 GiB-per-MiB-style BBCode attribute once percent-encoded.
+const MAX_DOC_URL_BYTES: usize = 1024;
+
+/// Whether a Markdown destination names a bundled document.
+///
+/// The scheme is emitted by `scripts/build-docs` for a link between two
+/// documents in `godot/docs.json`; only `MarkdownView` interprets it, and only
+/// to announce a click the About viewer resolves against the bundle's key map
+/// — never the filesystem. A control character would corrupt the tag, and an
+/// empty path names nothing.
+fn doc_url(url: &str) -> bool {
+    let Some(payload) = url.strip_prefix("gpty-doc:") else {
+        return false;
+    };
+    let path = payload.split_once('#').map_or(payload, |(path, _)| path);
+    !path.is_empty()
+        && payload.len() <= MAX_DOC_URL_BYTES
+        && !payload.chars().any(|c| c.is_control())
+}
+
+/// The BBCode for one document link.
+///
+/// The path and the heading fragment are percent-encoded separately with one
+/// literal `#` between them — the same shape [`mention_bbcode`] uses, and for
+/// the same reason: a `]`, a `#` or a space in either half cannot end the tag
+/// early or be mistaken for the separator. `MarkdownView` decodes both halves
+/// and hands them to the view that owns the document.
+fn doc_bbcode(out: &mut String, url: &str) {
+    let payload = url.strip_prefix("gpty-doc:").unwrap_or(url);
+    let (path, fragment) = match payload.split_once('#') {
+        Some((path, fragment)) => (path, Some(fragment)),
+        None => (payload, None),
+    };
+    out.push_str("[url=gpty-doc:");
+    percent_encode_into(out, path);
+    if let Some(fragment) = fragment {
+        out.push('#');
+        percent_encode_into(out, fragment);
+    }
+    out.push(']');
+}
+
 fn percent_encode_into(out: &mut String, text: &str) {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     for &byte in text.as_bytes() {
@@ -571,7 +628,8 @@ mod tests {
 
     #[test]
     fn wikilinks_become_internal_links_only_when_asked() {
-        let rendered = render_markdown_with("see [[Note|the note]] and [[B#Part]]", true).text;
+        let rendered =
+            render_markdown_with("see [[Note|the note]] and [[B#Part]]", true, false).text;
         assert!(
             rendered.contains("[url=gpty-note:Note]the note[/url]"),
             "the alias is the label: {rendered}"
@@ -581,7 +639,7 @@ mod tests {
             "the heading rides the URL so a click can land on it: {rendered}"
         );
 
-        let plain = render_markdown_with("see [[Note]]", false).text;
+        let plain = render_markdown_with("see [[Note]]", false, false).text;
         assert!(!plain.contains("gpty-note:"), "{plain}");
         assert!(plain.contains("[lb][lb]Note]"), "literal text: {plain}");
     }
@@ -590,7 +648,7 @@ mod tests {
     fn a_mention_fragment_is_encoded_after_one_unescaped_separator() {
         // The target and the heading are each percent-encoded, so the single
         // literal `#` is the only separator the view has to split on.
-        let rendered = render_markdown_with("[[a b#Part One]]", true).text;
+        let rendered = render_markdown_with("[[a b#Part One]]", true, false).text;
         assert!(
             rendered.contains("[url=gpty-note:a%20b#Part%20One]a b#Part One[/url]"),
             "{rendered}"
@@ -601,7 +659,7 @@ mod tests {
     fn a_mention_inside_a_markdown_link_yields_to_it() {
         // Nested `[url]` tags leave the click target undefined, so the mention
         // renders as plain text inside the link the author wrote.
-        let rendered = render_markdown_with("[see [[B]]](https://example.com/x)", true).text;
+        let rendered = render_markdown_with("[see [[B]]](https://example.com/x)", true, false).text;
         assert!(
             rendered.contains("[url=https://example.com/x]see B[/url]"),
             "the outer link is the click target: {rendered}"
@@ -616,14 +674,14 @@ mod tests {
     fn a_mention_inside_an_image_alt_is_only_alt_text() {
         // An image is reduced to its alt text; a mention there has no click
         // target of its own either.
-        let rendered = render_markdown_with("![alt [[B]]](x.png)", true).text;
+        let rendered = render_markdown_with("![alt [[B]]](x.png)", true, false).text;
         assert!(rendered.contains("Image: alt B"), "{rendered}");
         assert!(!rendered.contains("gpty-note:"), "{rendered}");
     }
 
     #[test]
     fn a_mention_beside_a_markdown_link_still_links() {
-        let rendered = render_markdown_with("[x](https://example.com) and [[B]]", true).text;
+        let rendered = render_markdown_with("[x](https://example.com) and [[B]]", true, false).text;
         assert!(rendered.contains("[url=gpty-note:B]B[/url]"), "{rendered}");
         assert!(
             rendered.contains("[url=https://example.com]x[/url]"),
@@ -636,6 +694,7 @@ mod tests {
         let rendered = render_markdown_with(
             "`[[span]]`\n\n```\n[[fenced]]\n```\n\nescaped \\[[no]] and real [[yes]]",
             true,
+            false,
         )
         .text;
         assert!(!rendered.contains("gpty-note:span"), "{rendered}");
@@ -652,7 +711,7 @@ mod tests {
         // A target may contain a single `]` and a space; both would end or
         // corrupt the tag if emitted verbatim, so the target is encoded and
         // the label escaped as ordinary text.
-        let rendered = render_markdown_with("[[a b]x]]", true).text;
+        let rendered = render_markdown_with("[[a b]x]]", true, false).text;
         assert!(
             rendered.contains("[url=gpty-note:a%20b%5Dx]a b]x[/url]"),
             "{rendered}"
@@ -663,9 +722,72 @@ mod tests {
     fn a_markdown_link_cannot_impersonate_a_mention() {
         // Only this renderer's own emission may name the internal scheme;
         // `safe_url` keeps a document's link to http/https/mailto.
-        let rendered = render_markdown_with("[x](gpty-note:secret)", true).text;
+        let rendered = render_markdown_with("[x](gpty-note:secret)", true, false).text;
         assert!(!rendered.contains("gpty-note:"), "{rendered}");
         assert!(rendered.contains("[u]x[/u]"), "{rendered}");
+    }
+
+    #[test]
+    fn doc_mode_emits_internal_links() {
+        // The generator writes `gpty-doc:<repo path>#<heading text>` for a link
+        // between two bundled documents.
+        let rendered =
+            render_markdown_with("[Security](gpty-doc:SECURITY.md#Reporting)", false, true).text;
+        assert!(
+            rendered.contains("[url=gpty-doc:SECURITY.md#Reporting]Security[/url]"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn doc_links_stay_plain_without_doc_mode() {
+        // Like the mention scheme, only a caller that opted in gets a link:
+        // inspector output must not turn a document's `gpty-doc:` text into a
+        // click target.
+        let rendered = render_markdown_with("[Security](gpty-doc:SECURITY.md)", false, false).text;
+        assert!(!rendered.contains("gpty-doc:"), "{rendered}");
+        assert!(rendered.contains("[u]Security[/u]"), "{rendered}");
+    }
+
+    #[test]
+    fn doc_link_halves_are_percent_encoded() {
+        // A destination wrapped in `<>` may carry a space and a `]`; both would
+        // end or corrupt the tag if emitted verbatim, so each half is encoded
+        // and the `#` inside a heading stays data.
+        let rendered =
+            render_markdown_with("[x](<gpty-doc:a b]c.md#Part One#2>)", false, true).text;
+        assert!(
+            rendered.contains("[url=gpty-doc:a%20b%5Dc.md#Part%20One%232]x[/url]"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn a_doc_link_past_the_cap_is_plain_text() {
+        let long = "a".repeat(MAX_DOC_URL_BYTES + 1);
+        let source = format!("[x](<gpty-doc:{long}.md>)");
+        let rendered = render_markdown_with(&source, false, true).text;
+        assert!(
+            !rendered.contains("gpty-doc:"),
+            "over-cap payload is refused"
+        );
+        assert!(rendered.contains("[u]x[/u]"), "{rendered}");
+        let at_cap = "a".repeat(MAX_DOC_URL_BYTES - 3);
+        let source = format!("[x](<gpty-doc:{at_cap}.md>)");
+        let rendered = render_markdown_with(&source, false, true).text;
+        assert!(rendered.contains("[url=gpty-doc:"), "at-cap payload links");
+    }
+
+    #[test]
+    fn doc_mode_does_not_change_html_or_image_rendering() {
+        // Docs mode only decides whether the internal scheme becomes a link;
+        // everything else is the same sanitized conversion.
+        let source = "<div align=\"center\">\n\n![alt](pic.png) and [raw] text\n";
+        let plain = render_markdown_with(source, false, false).text;
+        let docs = render_markdown_with(source, false, true).text;
+        assert_eq!(plain, docs);
+        assert!(docs.contains("Image: alt"), "{docs}");
+        assert!(!docs.contains("pic.png"), "{docs}");
     }
 
     #[test]

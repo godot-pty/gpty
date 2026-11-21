@@ -34,6 +34,7 @@ gpty/
 │   ├── bot-pr                  # Open a pull request as gpty-bot
 │   ├── git-askpass-token       # GIT_ASKPASS helper used by bot-push
 │   ├── build-wiki              # Pack docs/content/wiki into godot/knowledge.json
+│   ├── build-docs              # Pack the README's Markdown closure into godot/docs.json
 │   ├── install-hooks           # Symlink githooks into .git/hooks/
 │   ├── install-cli             # Install a release bundle behind a stable PATH link
 │   └── build                   # Build standalone app for the host platform
@@ -56,6 +57,7 @@ gpty/
 │   │       ├── keymap.rs       # Key event → byte sequence
 │   │       ├── cli.rs          # CliProcess: piped argv child, line queue
 │   │       ├── history.rs      # SQLite scrollback store
+│   │       ├── scheme.rs       # Colour-scheme import: native JSON, Alacritty, iTerm2, Base16, legacy CSV
 │   │       ├── store.rs        # Shared SQLite store plumbing: write lock, damaged-file recovery
 │   │       ├── vault.rs        # SQLite + FTS5 vault index (wiki pane's notes and search)
 │   │       ├── agent_state.rs  # AgentState: the three-tier, display-only agent detection model
@@ -148,7 +150,16 @@ gpty/
     ├── concepts.default.json   # Shipped default concepts
     ├── profiles.default.json   # Shipped recommended layouts (Agent Workspace, Knowledge Base)
     ├── knowledge.json          # Generated wiki bundle (scripts/build-wiki)
-    ├── fonts/                  # DejaVu Sans Mono + Phosphor icons
+    ├── docs.json               # Generated documentation bundle (scripts/build-docs)
+    ├── assets/                 # Brand assets
+    │   ├── boot_splash.png     # Committed launch frame (application/boot_splash/image)
+    │   └── fonts/Phosphor-Regular.ttf # UI icon font
+    ├── fonts/                  # DejaVu Sans Mono (the terminal's font)
+    ├── shaders/                # Bundled shaders (referenced by code, not a scene)
+    │   ├── window_opacity.gdshader # Whole-window alpha veil (Workspace.apply_window_alpha)
+    │   └── effects/            # The closed terminal-effect table's shaders (UiEffects)
+    │       ├── crt.gdshader    # Static scanlines, a phosphor mask and a vignette
+    │       └── grain.gdshader  # Animated film grain, 30 Hz in a half-res buffer
     └── scenes/
         ├── main.tscn
         ├── autoloads/          # Singleton managers
@@ -159,6 +170,7 @@ gpty/
         │   ├── workspace_store.gd  # Named workspace (tab set) persistence
         │   ├── pane_env_store.gd   # User-owned per-pane env, keyed by attachment_id
         │   ├── pane_cwd_store.gd   # User-owned per-pane directory, keyed by workspace id + attachment_id
+        │   ├── pane_scheme_store.gd # User-owned per-pane colour scheme, keyed by attachment_id
         │   ├── saved_command_store.gd # User-owned saved commands (name / one line / run flag), in palette order
         │   ├── pane_inspector_store.gd # User-owned Inspector aim (prompt + switches), keyed by attachment_id
         │   ├── trusted_store.gd    # Workspace Trust consent memory (builtins + plugins)
@@ -177,6 +189,8 @@ gpty/
         │   ├── terminal_pane.gd    # Control-based renderer, keyboard, mouse, selection, history search
         │   ├── terminal_fonts.gd   # Byte-only font loader (a data path never reaches load())
         │   ├── terminal_manager.gd # Tile lifecycle, split/kill/swap/spawn
+        │   ├── pane_transitions.gd # Pane-transition registry, settings resolution and tween runner
+        │   ├── pane_effects.gd     # Per-pane effect host: the ground material/buffer and the cue
         │   ├── tile_drag.gd        # Divider-drag state machine (extracted)
         │   └── divider_handles.gd  # Divider grab bands: one handle per divider segment
         ├── ui/
@@ -185,21 +199,30 @@ gpty/
         │   ├── overlay_panel.gd     # Overlay keyboard contract (focus, Escape, focus return)
         │   ├── command_palette.gd   # Ctrl+Shift+P command list (OverlayPanel)
         │   ├── palette_model.gd     # Palette entries, matching and ranking (pure)
-        │   ├── shortcut_catalog.gd  # The About tab's keyboard-shortcut list as data (chords from the binding registry)
+        │   ├── shortcut_catalog.gd  # The Shortcuts tab's keyboard list as data (chords from the binding registry)
         │   ├── shortcut_guide.gd    # The empty workspace guide: clickable live keycap + every binding (data-driven)
         │   ├── keyboard_focus.gd   # The keyboard-entry walk + the toolbar-ring pair
         │   ├── status_bar.gd
         │   ├── toast_overlay.gd
         │   ├── scroll_hints.gd     # The two scroll chevrons a pane overlays on a scrolling body
-        │   ├── window_chrome.gd    # Titlebar + window-mode/fullscreen handling (extracted)
+        │   ├── window_chrome.gd    # Titlebar + window-mode/fullscreen and opacity-flag handling (extracted)
         │   ├── markdown_view.gd     # Safe, debounced Markdown RichTextLabel
         │   ├── markdown_anchors.gd  # Pure ATX heading scan for fragment/line navigation
+        │   ├── docs_bundle.gd       # Validated, lazily loaded view of godot/docs.json
+        │   ├── docs_viewer.gd       # Settings > About: README + linked docs, Back/Forward
+        │   ├── nav_history.gd       # Bounded back/forward trail with a pinned root (pure)
+        │   ├── vault_graph_canvas.gd # Shared contract for the two vault link-graph presentations
         │   ├── vault_graph_model.gd # Pure vault link-graph normalize/layout/hit-test
         │   ├── link_weights.gd      # Pure declared-weight vocabulary (paths, range, lookup)
-        │   ├── vault_graph_view.gd  # Custom-drawn vault link-graph canvas
+        │   ├── vault_graph_view.gd  # Planar, custom-drawn vault link-graph canvas
+        │   ├── vault_graph_3d.gd    # Orbital (3D) vault map: SubViewport, RigidBody3D nodes, spring edges
+        │   ├── scheme_library.gd   # Shipped + imported colour schemes: listing, capped read, import id
+        │   ├── scheme_picker.gd    # One colour-scheme OptionButton (library, reset item, Import…)
         │   ├── ui_palette.gd       # The chrome colours in two complete sets (dark/light) and the active one
         │   ├── color_swatch.gd     # The words a colour swatch carries: opacity reading, "unset", tooltip
         │   ├── ui_tokens.gd        # The type scale, spacing, radius and the WCAG contrast maths
+        │   ├── ui_motion.gd        # The motion policy (Off/Subtle/Full) every animation reads
+        │   ├── ui_effects.gd       # The closed effect table (ambient + cue) and intensity policy
         │   ├── ui_theme.gd         # The one Theme, built from the palette and applied at the root
         │   ├── app_dialog.gd       # The one modal builder (theme, grouped buttons, selectable body)
         │   ├── section_help.gd      # The shared "Help" affordance a section header carries (glyph → action → chord table)

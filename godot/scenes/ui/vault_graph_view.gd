@@ -1,6 +1,6 @@
 class_name VaultGraphView
-extends Control
-## The wiki pane's link graph canvas.
+extends VaultGraphCanvas
+## The wiki pane's **planar** link graph canvas.
 ##
 ## A custom-drawn `Control`, not a `GraphEdit` of node controls: the walk caps
 ## a vault at 2000 notes, and one Godot node (plus a connection, plus a label)
@@ -12,40 +12,19 @@ extends Control
 ## [VaultGraphModel] — parsing, pair aggregation, damped weights, the
 ## deterministic layout and hit-testing. This class owns only presentation
 ## state: the session's node geometry (so a drag survives a re-query), the
-## pan/zoom transform, hover/selection, and the input gestures.
+## pan/zoom transform, hover/selection, and the input gestures. The signals,
+## the shared geometry and the public verbs come from [VaultGraphCanvas], the
+## same contract [VaultGraph3D] implements for the orbital map.
 ##
 ## The graph is generated, never stored: [method show_graph] takes one
 ## normalized answer from the index and a mutation simply re-queries and calls
 ## it again. Nothing here writes to the vault.
-
-## A note node was clicked. `id` is the vault-relative path the index uses.
-signal node_activated(id: String)
-## An unresolved-target node was clicked. `target` is the `[[…]]` target with
-## its synthetic node prefix removed; the pane decides what an unresolved
-## mention means (it is the same rule the preview's mention click applies).
-signal ghost_activated(target: String)
-## The user asked to declare a weight for an edge. `current` is the pair's
-## existing declaration, 0 when it has none; the pane opens the number prompt
-## and writes the store (the canvas never writes anything).
-signal weight_set_requested(a: String, b: String, current: int)
-## The user asked to clear an edge's declared weight. The pane writes the
-## store and re-applies it.
-signal weight_cleared(a: String, b: String)
 
 const ZOOM_MIN := 0.06
 const ZOOM_MAX := 4.0
 const ZOOM_STEP := 1.15
 ## Fraction of the view kept as padding when fitting.
 const FIT_PADDING := 0.08
-## Screen pixels of pointer travel before a press counts as a drag rather than
-## a click. Godot delivers motion in small steps, so this is measured from the
-## press, not per event.
-const DRAG_THRESHOLD := 4.0
-## The click radius around a node, in screen pixels.
-const HIT_RADIUS := 11.0
-## How close a press must be to an edge's line, in screen pixels, to offer
-## its declared-weight menu.
-const EDGE_HIT_RADIUS := 6.0
 ## Labels are drawn for every node only while the graph is both zoomed in
 ## enough to read them and small enough that they do not become a wall of
 ## text; the hovered and selected nodes always get one.
@@ -53,7 +32,7 @@ const LABEL_ZOOM := 0.55
 const MAX_ALWAYS_LABELS := 120
 ## A dragged node may not be moved past this world box (roughly the layout box
 ## and a generous margin), so it cannot be lost off-canvas by accident.
-const DRAG_BOUND := 4000.0
+const DRAG_BOUND := VaultGraphModel.POSITION_BOUND
 ## Screen pixels one arrow-key press pans, and the multiplier while Shift is
 ## held. The keyboard's camera is the canvas centre (the crosshair), so panning
 ## is how the keyboard walks the map.
@@ -70,16 +49,6 @@ const LABEL_GAP := 4.0
 ## title must not shrink the map to nothing.
 const MAX_LABEL_BLOCK := 180.0
 
-var nodes: Array = []
-var edges: Array = []
-## Session geometry: id -> [Vector2] in the model's world space. Kept across
-## re-queries so dragging a node lasts as long as the pane does; the model
-## only places ids that are not here.
-var positions: Dictionary = {}
-var selected_id := ""
-var hovered_id := ""
-var show_arrows := false
-
 var _zoom := 1.0
 var _pan := Vector2.ZERO
 var _panning := false
@@ -88,7 +57,6 @@ var _drag_offset := Vector2.ZERO
 var _press_screen := Vector2.ZERO
 var _moved := false
 var _needs_fit := true
-var _truncated := false
 var _max_count := 1
 var _max_degree := 1
 ## Widest label this graph draws, in screen pixels — what `fit_to_view`
@@ -102,8 +70,8 @@ var _a11y_host: Control
 ## The node the crosshair last announced, so a pan that changes nothing is
 ## silent.
 var _a11y_cursor := ""
+var _mode_button: Button
 var _relayout_button: Button
-var _fit_button: Button
 var _arrows_button: Button
 var _edge_menu: PopupMenu
 ## The edge the open menu acts on. Geometry can move while a popup is up (a
@@ -141,7 +109,7 @@ func show_graph(data: Dictionary, current_id := "", prepared_positions := {}) ->
 	# A canvas has no text element: the shape and the gesture legend are its
 	# description, and the crosshair sentence below is its live cursor.
 	accessibility_description = (
-		"%d notes, %d links. Arrows pan, plus and minus zoom, "
+		"%d notes, %d links. Planar map. Arrows pan, plus and minus zoom, "
 		+ "Enter opens what the crosshair covers."
 	) % [nodes.size(), edges.size()]
 	if _truncated:
@@ -149,11 +117,8 @@ func show_graph(data: Dictionary, current_id := "", prepared_positions := {}) ->
 	_a11y_cursor = ""
 	var first_show := positions.is_empty()
 	var previous := positions
-	positions = (
-		prepared_positions
-		if prepared_positions is Dictionary and not prepared_positions.is_empty()
-		else VaultGraphModel.layout(nodes, edges, previous)
-	)
+	var source := _positions_source(prepared_positions, previous)
+	positions = VaultGraphModel.layout(nodes, edges, source)
 	_degrees = VaultGraphModel.degrees(edges)
 	_max_degree = 1
 	for id in _degrees:
@@ -200,6 +165,11 @@ func set_selected(id: String) -> void:
 	_a11y_cursor = ""
 	_update_status()
 	queue_redraw()
+
+
+## The arrangement as the canonical block the pane's layout state stores.
+func export_positions() -> Dictionary:
+	return VaultGraphModel.serialize_positions(positions, nodes)
 
 
 ## Recompute the deterministic layout, discarding every drag in this session.
@@ -266,7 +236,7 @@ func _build_chrome() -> void:
 	controls.name = "GraphControls"
 	controls.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	controls.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	controls.offset_left = -236
+	controls.offset_left = -320
 	controls.offset_right = -8
 	controls.offset_top = 4
 	controls.offset_bottom = 28
@@ -276,6 +246,10 @@ func _build_chrome() -> void:
 	controls.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(controls)
 
+	_mode_button = _make_button("Orbital", "Switch to the orbital (3D) map")
+	_mode_button.pressed.connect(func(): mode_requested.emit("3d"))
+	controls.add_child(_mode_button)
+
 	_arrows_button = _make_button("Arrows", "Draw edge direction (mutual pairs both ways)")
 	_arrows_button.toggle_mode = true
 	_arrows_button.toggled.connect(func(on: bool):
@@ -284,20 +258,16 @@ func _build_chrome() -> void:
 	)
 	controls.add_child(_arrows_button)
 
-	_relayout_button = _make_button("Relayout", "Run the deterministic layout again")
+	_relayout_button = _make_button("Relayout", "Reset the deterministic layout and fit")
 	_relayout_button.pressed.connect(relayout)
 	controls.add_child(_relayout_button)
 
-	_fit_button = _make_button("Fit", "Fit the whole graph in the view")
-	_fit_button.pressed.connect(fit_to_view)
-	controls.add_child(_fit_button)
-
-	# The graph is one keyboard ring: the canvas first, then its three actions,
-	# wrapping back to the canvas. The ring is what makes any of them tab stops
-	# (`KeyboardFocus.ring` sets `focus_mode`), so Tab stays on the surface the
-	# user is looking at instead of walking into the sidebar, and Escape (the
-	# pane's Back) leaves the graph.
-	KeyboardFocus.ring([self, _arrows_button, _relayout_button, _fit_button])
+	# The graph is one keyboard ring: the canvas first, then its actions
+	# (the mode switch included), wrapping back to the canvas. The ring is what
+	# makes any of them tab stops (`KeyboardFocus.ring` sets `focus_mode`), so
+	# Tab stays on the surface the user is looking at instead of walking into
+	# the sidebar, and Escape (Notes) leaves the graph.
+	KeyboardFocus.ring([self, _mode_button, _arrows_button, _relayout_button])
 
 	# The edge menu is the authored layer's only human control: right-click an
 	# edge to set or clear its declared weight. Ghost edges are not offered —
@@ -325,14 +295,6 @@ func _build_chrome() -> void:
 
 	accessibility_name = "Vault link graph"
 	_a11y_host = A11y.announce_host(self)
-
-
-func _make_button(text: String, tooltip: String) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.tooltip_text = tooltip
-	button.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
-	return button
 
 
 ## The widest label this graph draws, in screen pixels (capped): what the fit
@@ -435,21 +397,6 @@ func label_placements() -> Array:
 		out.append(candidates[i])
 	return out
 
-func _has_node(id: String) -> bool:
-	for node in nodes:
-		if node is Dictionary and str(node.get("id", "")) == id:
-			return true
-	return false
-
-
-## The text this graph draws for a node: its label, else its id — the same
-## fallback the label placements use.
-func _label_for(id: String) -> String:
-	for node in nodes:
-		if node is Dictionary and str(node.get("id", "")) == id:
-			return str(node.get("label", id))
-	return id
-
 
 ## Announce what the crosshair covers after a keyboard pan or zoom: the
 ## crosshair is the only thing a keyboard user aims, and one sentence is all a
@@ -490,6 +437,7 @@ func _update_status() -> void:
 		text += " · %d declared" % declared
 	if _truncated:
 		text += " · truncated"
+	text += " · Planar"
 	if selected_id != "":
 		for node in nodes:
 			if node is Dictionary and str(node.get("id", "")) == selected_id:

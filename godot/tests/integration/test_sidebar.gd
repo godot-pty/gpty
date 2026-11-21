@@ -180,7 +180,11 @@ func test_a_pane_rows_buttons_each_act_on_that_pane():
 		(row.get_child(i) as Button).pressed.emit()
 		assert_eq(get_signal_emit_count(_sidebar, actions[i]), 1,
 			"button %d must emit %s" % [i, actions[i]])
-		assert_eq(get_signal_parameters(_sidebar, actions[i])[0], body,
+		var params: Array = get_signal_parameters(_sidebar, actions[i])
+		assert_gt(params.size(), 0, "the action carries its pane")
+		if params.is_empty():
+			return
+		assert_eq(params[0], body,
 			"%s must carry this row's pane" % actions[i])
 		var total := 0
 		for a in actions:
@@ -957,7 +961,11 @@ func test_a_failed_open_copies_the_text_and_says_so():
 	assert_eq(str(_copied[0]), FeedbackText.body(_sidebar.feedback_about()),
 		"exactly the body the URL would have carried")
 	assert_signal_emit_count(ToastManager, "toast_requested", 1)
-	var toast: Dictionary = get_signal_parameters(ToastManager, "toast_requested")[0]
+	var toast_params: Array = get_signal_parameters(ToastManager, "toast_requested")
+	assert_eq(toast_params.size(), 1, "the refusal raises one toast")
+	if toast_params.is_empty():
+		return
+	var toast: Dictionary = toast_params[0]
 	assert_eq(toast["level"], ToastManager.WARN)
 	assert_string_contains(str(toast["text"]), "copied",
 		"the toast says where the text went")
@@ -974,7 +982,11 @@ func test_a_refused_catalog_open_copies_the_url_and_warns():
 	assert_eq(_copied, [Sidebar.PLUGINS_CATALOG_URL],
 		"the URL itself is the fallback text, not the row's label")
 	assert_signal_emit_count(ToastManager, "toast_requested", 1)
-	var toast: Dictionary = get_signal_parameters(ToastManager, "toast_requested")[0]
+	var toast_params: Array = get_signal_parameters(ToastManager, "toast_requested")
+	assert_eq(toast_params.size(), 1, "the refusal raises one toast")
+	if toast_params.is_empty():
+		return
+	var toast: Dictionary = toast_params[0]
 	assert_eq(toast["level"], ToastManager.WARN)
 	assert_string_contains(str(toast["text"]), "gpty.dev/plugins",
 		"the toast names the link that could not open")

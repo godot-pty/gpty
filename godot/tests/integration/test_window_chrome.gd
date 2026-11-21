@@ -20,6 +20,10 @@ func before_each():
 
 func after_each():
 	SettingsManager.cfg_window_mode = 0
+	SettingsManager.cfg_window_opacity = SettingsManager.OPACITY_DEFAULT
+	WindowChrome.force_transparency = -1
+	get_window().transparent = false
+	get_window().transparent_bg = false
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
 	SettingsManager.apply_appearance()
 	if _ws:
@@ -92,3 +96,89 @@ func test_the_window_controls_draw_their_glyph_as_a_label():
 			"nothing is composed into the exposed name for the %s control" % key)
 		assert_ne(Icons.glyph(btn), "", "the %s control draws a glyph" % key)
 		assert_eq(btn.custom_minimum_size.x, 36, "the bar's own target size wins")
+
+# ── Window opacity ─────────────────────────────────────────────────────
+
+## A stored value outside the picker's range is clamped before it reaches the
+## alpha; an unsupported display server is always opaque.
+func test_opacity_alpha_is_opaque_squarely():
+	assert_almost_eq(WindowChrome.opacity_alpha(80, true), 0.8, 0.001)
+	assert_eq(WindowChrome.opacity_alpha(80, false), 1.0,
+		"a window that cannot be transparent stays opaque")
+	assert_eq(WindowChrome.opacity_alpha(100, true), 1.0,
+		"100 % is an opaque window")
+	assert_almost_eq(WindowChrome.opacity_alpha(5, true), 0.4, 0.001,
+		"a hand-edited value clamps to the floor")
+
+func test_opacity_veils_the_whole_window():
+	var ws = await _make_workspace()
+	WindowChrome.force_transparency = 1
+	SettingsManager.cfg_window_opacity = 80
+	ws._chrome.apply_opacity()
+	# The headless display server refuses `Window.transparent` (measured: the
+	# property stays false even when set directly), so the viewport's
+	# transparent background and the workspace's veil are the observable half
+	# of the same branch, and the window flag is proven on a real display.
+	assert_true(get_window().transparent_bg,
+		"the viewport must clear to transparent for the desktop to show")
+	assert_true(ws._opacity_veil.visible, "the opacity pass must be on")
+	assert_eq((ws._opacity_veil.material as ShaderMaterial).get_shader_parameter("window_alpha"),
+		0.8, "the veil must carry the setting's alpha")
+
+func test_a_window_that_cannot_be_transparent_stays_opaque():
+	var ws = await _make_workspace()
+	WindowChrome.force_transparency = 0
+	SettingsManager.cfg_window_opacity = 80
+	ws._chrome.apply_opacity()
+	assert_false(get_window().transparent_bg,
+		"an unsupported display server must not even clear transparent")
+	assert_false(ws._opacity_veil.visible, "the opacity pass must be off")
+
+func test_100_percent_is_an_opaque_window():
+	var ws = await _make_workspace()
+	WindowChrome.force_transparency = 1
+	SettingsManager.cfg_window_opacity = 100
+	ws._chrome.apply_opacity()
+	assert_false(get_window().transparent_bg, "an opaque window needs no alpha flag")
+	assert_false(ws._opacity_veil.visible, "an opaque window pays for no opacity pass")
+	assert_false(ws._opacity_copy.visible, "and no backbuffer copy")
+
+func test_saving_the_opacity_reaches_the_window():
+	var ws = await _make_workspace()
+	WindowChrome.force_transparency = 1
+	SettingsManager.cfg_window_opacity = 90
+	SettingsManager.save_settings()
+	assert_true(ws._opacity_veil.visible,
+		"the settings_changed listener must turn the opacity pass on")
+	assert_eq((ws._opacity_veil.material as ShaderMaterial).get_shader_parameter("window_alpha"),
+		0.9, "the saved alpha must reach the veil")
+
+## The veil must copy and overwrite above everything the app draws, including
+## the toast overlay and the four workspace overlays (z 100), or a pane would
+## be left out of the alpha. It must never take a click.
+func test_the_opacity_veil_sits_above_every_surface():
+	var ws = await _make_workspace()
+	assert_not_null(ws._opacity_veil, "the workspace owns the opacity veil")
+	assert_not_null(ws._opacity_copy, "the workspace owns the veil's backbuffer copy")
+	assert_gt(ws._opacity_veil.z_index, 100, "above the toast and the overlays")
+	assert_gt(ws._opacity_veil.z_index, ws._opacity_copy.z_index,
+		"the copy must run before the veil samples it")
+	assert_eq(ws._opacity_veil.mouse_filter, Control.MOUSE_FILTER_IGNORE,
+		"the veil must never take a click from the pane grid")
+	assert_false(ws._opacity_veil.visible, "a fresh window is opaque")
+
+## With transparency on, the engine's clear colour is transparent: this rect
+## is what keeps seams and the empty workspace at the app's own alpha.
+func test_the_window_has_a_ground_rect_beneath_every_surface():
+	var ws = await _make_workspace()
+	var bg := ws.get_child(0) as ColorRect
+	assert_not_null(bg, "the workspace must paint a ground before anything else")
+	assert_eq(bg.name, "WindowBg")
+	assert_eq(bg.color, UiPalette.active().BG, "the ground is the app background")
+	assert_eq(bg.mouse_filter, Control.MOUSE_FILTER_IGNORE,
+		"it must never take a click from the pane grid")
+
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_LIGHT
+	SettingsManager.apply_appearance()
+	assert_eq(bg.color, UiPalette.light().BG,
+		"a palette switch must repaint the ground with the rest of the chrome")

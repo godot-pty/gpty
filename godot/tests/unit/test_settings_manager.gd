@@ -15,6 +15,14 @@ func after_each():
 	# is the same kind of leak through `SettingsManager`'s own field.
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
 	SettingsManager.cfg_sidebar_folded.clear()
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	SettingsManager.cfg_window_opacity = SettingsManager.OPACITY_DEFAULT
+	SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
+	SettingsManager.cfg_pane_animation = {}
+	SettingsManager.cfg_pane_animation_params = {}
+	SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
+	SettingsManager.cfg_effect_intensity = UiEffects.OFF
+	SettingsManager.cfg_reactive_effects = {}
 	SettingsManager.system_is_dark = func() -> bool:
 		return DisplayServer.is_dark_mode() if DisplayServer.is_dark_mode_supported() else true
 	SettingsManager.apply_appearance()
@@ -46,6 +54,16 @@ func test_apply_pane_settings_delegates():
 
 	SettingsManager.apply_pane_settings(body, {"pane_name": "x"})
 	assert_eq(body.pane_name, "x")
+
+func test_apply_to_terminal_passes_the_padding():
+	var body = TerminalPane.new()
+	_scene.add_child(body)
+
+	SettingsManager.cfg_terminal_padding = 12
+	SettingsManager.apply_to_terminal(body)
+
+	assert_eq(body.terminal_padding, 12,
+		"the global padding must reach a live terminal's fit")
 
 # ── Settings changed signal ────────────────────────────────────────────
 
@@ -87,6 +105,35 @@ func test_save_load_show_titlebar():
 	SettingsManager.cfg_show_titlebar = true
 	SettingsManager.load_settings()
 	assert_eq(SettingsManager.cfg_show_titlebar, false)
+
+func test_window_fit_settings_roundtrip():
+	SettingsManager.cfg_window_opacity = 75
+	SettingsManager.cfg_terminal_padding = 12
+	SettingsManager.save_settings()
+
+	SettingsManager.cfg_window_opacity = SettingsManager.OPACITY_DEFAULT
+	SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
+	SettingsManager.load_settings()
+
+	assert_eq(SettingsManager.cfg_window_opacity, 75, "opacity must survive a restart")
+	assert_eq(SettingsManager.cfg_terminal_padding, 12, "padding must survive a restart")
+
+func test_hand_edited_window_fit_values_clamp():
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE,
+		{"window_opacity": 5, "terminal_padding": 999})
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_window_opacity, SettingsManager.OPACITY_MIN,
+		"an opacity below the floor clamps to it")
+	assert_eq(SettingsManager.cfg_terminal_padding, PaneTypes.TERMINAL_PADDING_MAX,
+		"padding past the ceiling clamps to it")
+
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE,
+		{"window_opacity": 500, "terminal_padding": -3})
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_window_opacity, SettingsManager.OPACITY_MAX,
+		"an opacity past the ceiling clamps to it")
+	assert_eq(SettingsManager.cfg_terminal_padding, 0,
+		"negative padding clamps to zero")
 
 func test_load_settings_uses_defaults_when_empty():
 	# Clear store and load — should keep compiled defaults
@@ -190,3 +237,86 @@ func test_a_fold_does_not_broadcast_settings_changed():
 	watch_signals(SettingsManager)
 	SettingsManager.set_sidebar_folded("profiles", true)
 	assert_signal_not_emitted(SettingsManager, "settings_changed")
+
+# ── Pane motion ────────────────────────────────────────────────────────
+
+func test_motion_settings_roundtrip():
+	SettingsManager.cfg_motion = UiMotion.FULL
+	SettingsManager.cfg_pane_animation = {"create": "fade", "close": "fade", "swap": "move"}
+	SettingsManager.cfg_pane_animation_params = {"create:fade": {"duration_ms": 300.0}}
+	SettingsManager.save_settings()
+
+	SettingsManager.cfg_motion = UiMotion.OFF
+	SettingsManager.cfg_pane_animation = {}
+	SettingsManager.cfg_pane_animation_params = {}
+	SettingsManager.load_settings()
+
+	assert_eq(SettingsManager.cfg_motion, UiMotion.FULL)
+	assert_eq(str(SettingsManager.cfg_pane_animation["create"]), "fade")
+	assert_eq(str(SettingsManager.cfg_pane_animation["close"]), "fade")
+	assert_eq(str(SettingsManager.cfg_pane_animation["swap"]), "move")
+	assert_almost_eq(
+		float(SettingsManager.cfg_pane_animation_params["create:fade"]["duration_ms"]),
+		300.0, 0.001)
+
+func test_damaged_motion_settings_fall_back_to_defaults():
+	# Values a hand-edited file or another build can carry: an out-of-range
+	# level, ids that do not serve their transition, and parameter keys the
+	# registry never declared.
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE, {
+		"motion": 99,
+		"pane_animations": {"create": "move", "swap": "fade_scale"},
+		"pane_animation_params": {
+			"create:nope": {"x": 1},
+			"create:move": {"duration_ms": 99999},
+		},
+	})
+	SettingsManager.load_settings()
+
+	assert_eq(SettingsManager.cfg_motion, UiMotion.FULL, "the level clamps")
+	assert_eq(str(SettingsManager.cfg_pane_animation["create"]), "fade_scale",
+		"a swap animation cannot serve a create")
+	assert_eq(str(SettingsManager.cfg_pane_animation["swap"]), "move",
+		"a create animation cannot serve a swap")
+	assert_eq(str(SettingsManager.cfg_pane_animation["close"]), "fade_scale",
+		"a missing kind takes its default")
+	assert_true(SettingsManager.cfg_pane_animation_params.is_empty(),
+		"no parameter pair survives: one names an unknown id, one the wrong kind")
+
+func test_the_effect_and_its_intensity_survive_a_restart():
+	SettingsManager.cfg_effect = "grain"
+	SettingsManager.cfg_effect_intensity = UiEffects.FULL
+	SettingsManager.cfg_reactive_effects = {
+		"cat_command": "tint", "cargo_check": "particles"}
+	SettingsManager.save_settings()
+
+	SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
+	SettingsManager.cfg_effect_intensity = UiEffects.OFF
+	SettingsManager.cfg_reactive_effects = {}
+	SettingsManager.load_settings()
+
+	assert_eq(SettingsManager.cfg_effect, "grain", "the effect id must survive a restart")
+	assert_eq(SettingsManager.cfg_effect_intensity, UiEffects.FULL,
+		"the intensity must survive a restart")
+	assert_eq(str(SettingsManager.cfg_reactive_effects.get("cat_command", "")), "tint")
+	assert_eq(str(SettingsManager.cfg_reactive_effects.get("cargo_check", "")), "particles")
+
+func test_an_unknown_stored_effect_loads_as_the_default():
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE, {
+		"effect": "blur",
+		"effect_intensity": 99,
+	})
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_effect, UiEffects.DEFAULT_AMBIENT,
+		"an id outside the table falls back")
+	assert_eq(SettingsManager.cfg_effect_intensity, UiEffects.FULL,
+		"the intensity clamps to the picker's top")
+
+func test_reactive_rules_drop_unknown_effects_on_load():
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE, {
+		"reactive_effects": {"cat_command": "tint", "git_log": "blur", 7: "pulse"},
+	})
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_reactive_effects.size(), 1,
+		"only the rule with a known effect id survives")
+	assert_eq(str(SettingsManager.cfg_reactive_effects.get("cat_command", "")), "tint")

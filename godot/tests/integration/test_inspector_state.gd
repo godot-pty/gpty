@@ -137,7 +137,11 @@ func test_closing_the_pane_removes_the_record():
 	assert_true(PaneInspectorStore.has_state("closing"))
 
 	_ws._kill(body)
-	await get_tree().process_frame
+	# A close plays the configured pane transition before the body is freed,
+	# so wait for the ghost instead of assuming one frame.
+	var deadline := Time.get_ticks_msec() + 2000
+	while is_instance_valid(body) and Time.get_ticks_msec() < deadline:
+		await get_tree().create_timer(0.02).timeout
 	assert_false(is_instance_valid(body), "an idle Inspector closes without a dialog")
 	assert_false(PaneInspectorStore.has_state("closing"),
 		"closing the pane discards the aim it carried")

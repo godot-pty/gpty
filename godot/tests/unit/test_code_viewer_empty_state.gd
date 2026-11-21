@@ -13,17 +13,11 @@ var _tmp := ""
 
 func before_each():
 	MockAutoloads.setup()
-	_tmp = TestPaths.user_path("code_viewer_empty_probe")
-	DirAccess.make_dir_recursive_absolute(_tmp)
+	_tmp = TestPaths.fresh_dir("code_viewer_empty_probe")
 
 func after_each():
-	if _tmp != "":
-		var dir := DirAccess.open(_tmp)
-		if dir:
-			for f in dir.get_files():
-				DirAccess.remove_absolute(_tmp.path_join(f))
-		DirAccess.remove_absolute(_tmp)
-		_tmp = ""
+	TestPaths.remove_tree(_tmp)
+	_tmp = ""
 	MockAutoloads.teardown()
 
 func _make_viewer() -> CodeViewerPane:

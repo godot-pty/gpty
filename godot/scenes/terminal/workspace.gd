@@ -5,6 +5,11 @@ class_name Workspace
 
 const TITLEBAR_HEIGHT = WindowChrome.HEIGHT
 
+## The whole-window opacity pass (see `shaders/window_opacity.gdshader`). A
+## `preload` keeps it a compile-time dependency, so an export carries it even
+## though no scene names it.
+const WINDOW_OPACITY_SHADER := preload("res://shaders/window_opacity.gdshader")
+
 ## Panes named in the running-work confirmation before the rest are counted;
 ## a bulk close of sixteen panes must still be readable in one dialog.
 const RUNNING_ASK_MAX_NAMES = 8
@@ -72,6 +77,15 @@ const SAVED_MINIMIZED := "Saved commands go to the active terminal pane, and it 
 
 var _sidebar: Sidebar
 var _sidebar_bg: ColorRect
+## The window's own painted ground. With window opacity below 100 % the
+## engine's clear colour is transparent, so every pixel must be covered by the
+## app before the opacity veil samples the canvas; an uncovered seam would
+## become black at the setting's alpha instead of the app's background.
+var _window_bg: ColorRect
+## The whole-window opacity pass: the backbuffer copy the veil samples and the
+## veil itself. Both are hidden at 100 %, so an opaque window pays nothing.
+var _opacity_copy: BackBufferCopy
+var _opacity_veil: ColorRect
 var _palette: CommandPalette
 var _grid: Control
 ## The scrollable "no panes" guide; one node over the active grid, synced by
@@ -85,6 +99,9 @@ var _shortcut_guide: ShortcutGuide = null
 var _settings_panel: SettingsPanel
 var _concept_graph: ConceptGraphEditor = null
 var _tm: TerminalManager = TerminalManager.new()
+## The pane transition runner. One instance per workspace, so a ghost or a
+## tween dies with the grid it came from.
+var _transitions := PaneTransitions.new()
 ## The permanent empty host. `_tm`/`_grid` point at the active workspace, and
 ## at this pair when there is none; it is never freed.
 var _home_grid: Control
@@ -115,6 +132,36 @@ func _ready():
 	# Where nothing is drawn the viewport's clear colour shows: an empty
 	# workspace used to be Godot's default grey.
 	RenderingServer.set_default_clear_color(UiPalette.active().BG)
+	# The window's own ground, before every other child. With window opacity
+	# below 100 % the clear colour is transparent; this rect is the opaque base
+	# the veil samples, so a seam or the empty workspace cannot become black at
+	# the setting's alpha.
+	_window_bg = ColorRect.new()
+	_window_bg.name = "WindowBg"
+	_window_bg.color = UiPalette.active().BG
+	_window_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_window_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_window_bg)
+	# The whole-window opacity pass. Above every app surface (the toast and the
+	# overlays sit at z 100), and off at 100 %: the copy is this frame's canvas
+	# and the veil rewrites its alpha once, so the compositor blends the app
+	# once instead of each stacked surface blending again.
+	_opacity_copy = BackBufferCopy.new()
+	_opacity_copy.name = "WindowOpacityCopy"
+	_opacity_copy.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT
+	_opacity_copy.z_index = 4095
+	_opacity_copy.visible = false
+	add_child(_opacity_copy)
+	_opacity_veil = ColorRect.new()
+	_opacity_veil.name = "WindowOpacityVeil"
+	_opacity_veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_opacity_veil.z_index = 4096
+	_opacity_veil.visible = false
+	_opacity_veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var veil_material := ShaderMaterial.new()
+	veil_material.shader = WINDOW_OPACITY_SHADER
+	_opacity_veil.material = veil_material
+	add_child(_opacity_veil)
 	_chrome = WindowChrome.new()
 	_titlebar = _chrome.build(self)
 
@@ -142,8 +189,9 @@ func _ready():
 	# attached — the one path that used to skip the uniqueness check. The id
 	# is regenerated here, and the pane list redrawn because it shows it.
 	# This handler is also the ONLY writer of the user-owned per-pane stores:
-	# env (`PaneEnvStore`), the pane's own directory (`PaneCwdStore`) and the
-	# Inspector's aim (`PaneInspectorStore`). All are keyed by the pane's id
+	# env (`PaneEnvStore`), the pane's own directory (`PaneCwdStore`), the
+	# colour scheme (`PaneSchemeStore`) and the Inspector's aim
+	# (`PaneInspectorStore`). All are keyed by the pane's id
 	# (the directory also by workspace), so an entry follows a rename, and only
 	# what the user set in the pane settings UI ever lands in a trusted store.
 	pane_settings.settings_applied.connect(func(body: Control, settings: Dictionary, previous_id: String):
@@ -153,6 +201,7 @@ func _ready():
 		var body_ws := _workspace_for_body(body)
 		if previous_id != "" and body.attachment_id != previous_id:
 			_move_pane_env(previous_id, body.attachment_id)
+			_move_pane_scheme(previous_id, body.attachment_id)
 			PaneCwdStore.move_pane(str(body_ws.get("id", "")), previous_id, body.attachment_id)
 			PaneInspectorStore.move_state(previous_id, body.attachment_id)
 			# A companion follows its terminal by attachment id, so a rename
@@ -171,6 +220,11 @@ func _ready():
 			# and no IPC caller can: it applies at this pane's next start.
 			PaneCwdStore.set_dir(str(body_ws.get("id", "")), body.attachment_id,
 				str(settings.get("pane_cwd", "")))
+		if body is TerminalPane and settings.has("pane_scheme"):
+			# The pane's own scheme, user-owned like env: the table marks it
+			# `file: false` and `ipc: false`, so only this UI writes it.
+			PaneSchemeStore.set_scheme(body.attachment_id, str(settings.get("pane_scheme", "")))
+			body.apply_scheme_override()
 		if body is InspectorPane and settings.has("system_prompt"):
 			PaneInspectorStore.set_state(
 				body.attachment_id,
@@ -263,7 +317,11 @@ func _ready():
 	# Forced: the call above ran while the scene was still building, so this is
 	# the one that lands on a realized window.
 	_apply_window_mode.call_deferred(true)
+	_chrome.apply_opacity.call_deferred()
 	if SettingsManager.cfg_window_mode == 0: _chrome.restore_position()
+	# Deferred for the same reason: the report names the window the frame rate
+	# is measured in, and the restored size lands after this call.
+	_report_renderer.call_deferred()
 
 func _on_settings_changed():
 	# Before anything measured: the scale changes the layout space every later
@@ -284,6 +342,10 @@ func _on_settings_changed():
 	_sync_pane_titlebars()
 	_apply_fps_setting()
 	_apply_window_mode()
+	_chrome.apply_opacity()
+	# Motion off (or a transition edit) applies without a restart: whatever is
+	# mid-flight snaps to its final state under the new setting.
+	_transitions.finish_all()
 
 ## A palette switch, wherever it came from: the Theme is rebuilt (every widget's
 ## colours and the role variations), the clear colour and the user-coloured
@@ -304,6 +366,8 @@ func _on_appearance_changed(_is_dark: bool) -> void:
 ## take effect for panes spawned after the change. Update every wrapper
 ## in every workspace (hidden workspaces keep their panes alive).
 func _apply_ui_colors():
+	if _window_bg:
+		_window_bg.color = UiPalette.active().BG
 	if _sidebar_bg:
 		_sidebar_bg.color = SettingsManager.cfg_sidebar_bg
 	if _titlebar:
@@ -325,6 +389,19 @@ func _apply_ui_colors():
 	if _status_bar:
 		_status_bar.apply_chrome_colors()
 
+## The window's alpha, applied by the one veil. `WindowChrome.apply_opacity`
+## owns the window flag and calls this; 1.0 hides the pass entirely, so an
+## opaque window does no full-screen copy or draw.
+func apply_window_alpha(alpha: float) -> void:
+	if _opacity_veil == null:
+		return
+	var on := alpha < 1.0
+	_opacity_veil.visible = on
+	_opacity_copy.visible = on
+	if on:
+		(_opacity_veil.material as ShaderMaterial).set_shader_parameter(
+			"window_alpha", clampf(alpha, 0.01, 1.0))
+
 ## Every workspace's panes, not just the visible one: a title bar belongs to a
 ## live pane while its workspace is hidden, so the setting must reach it there
 ## (`_apply_ui_colors`'s pattern). The switch path no longer re-applies settings,
@@ -337,10 +414,21 @@ func _sync_pane_titlebars():
 
 func _apply_fps_setting():
 	if SettingsManager.cfg_max_fps == -1:
-		var rr = DisplayServer.screen_get_refresh_rate()
+		# The window's screen, not the primary one: on a multi-monitor setup
+		# the two refresh rates can differ, and the window is the one being
+		# drawn.
+		var screen := DisplayServer.window_get_current_screen()
+		var rr := DisplayServer.screen_get_refresh_rate(screen)
 		Engine.max_fps = int(rr) if rr > 0 else 0
 	else:
 		Engine.max_fps = SettingsManager.cfg_max_fps
+
+## One line names the renderer the frame rate is measured on; a software
+## fallback also marks the FPS readout, because on it the number is the CPU's.
+## Deferred from `_ready` so the window carries its restored size.
+func _report_renderer():
+	if RendererInfo.report(UiEffects.ambient_id(), UiEffects.level()):
+		_status_bar.set_render_note(RendererInfo.NOTE)
 
 func _notification(what):
 	if what == NOTIFICATION_RESIZED: _apply_layout()
@@ -361,6 +449,7 @@ func _exit_tree():
 	# test's tree, or a second workspace instance), so the slot goes back to the
 	# neutral answer before anything else here runs.
 	ShortcutManager.overlay_owns_keyboard = func() -> bool: return false
+	_transitions.finish_all()
 	_chrome.save_position()
 	_save()
 	SettingsManager.save_settings()
@@ -426,6 +515,10 @@ func _build_empty_state():
 ## is O(grid x tiles), the largest remaining create step at a full grid.
 func _apply_layout(refresh_dividers := true):
 	if _grid == null: return
+	# A layout pass re-derives every tile rect, so a create or swap tween that
+	# is still moving must snap to the rects this pass is about to write. A
+	# close ghost is not in the tile list and its rect is already final.
+	_transitions.finish_layout_sensitive()
 	var top_offset = TITLEBAR_HEIGHT if (_titlebar and _titlebar.visible) else 0.0
 	var bottom_offset = StatusBar.HEIGHT if _status_bar else 0.0
 	var m = _sidebar_bg.size.x if (_sidebar_bg and _sidebar_bg.visible) else 0.0
@@ -594,7 +687,9 @@ func _spawn_pane_into(ws: Dictionary, type_name: String, opts := {}, activate :=
 		ToastManager.warn("Cannot add pane — grid is full")
 		return null
 	var w = tm.tiles[-1].wrapper
+	var edge := str(tm.tiles[-1].get("edge", ""))
 	_add_body_to_grid_into(ws, w, body)
+	_transitions.create(w, _motion_allowed(ws.tm), edge)
 	# A pane the user asked for is the pane they are working in: record it and
 	# hand it the keyboard. Only the active workspace can take focus (a hidden
 	# terminal's `grab_focus` is dropped by the engine), and a restore passes
@@ -936,7 +1031,14 @@ func _kill_now(body: Control):
 	# manager directly (`tm.reset()`), so the aim still survives those.
 	if body is InspectorPane:
 		PaneInspectorStore.remove_state(str(body.attachment_id))
-	ws.tm.kill(body)
+	# Decided before the pane leaves the tile list: the flood scan and the
+	# divider-drag check both read the grid as it was while this pane lived.
+	var animate := _motion_allowed(ws.tm)
+	# Read the tile's split side before it leaves the model: a slide exit
+	# moves the ghost toward it.
+	var ti: int = ws.tm._tile_index_of(body)
+	var edge: String = (str(ws.tm.tiles[ti].get("edge", "")) if ti >= 0 else "")
+	ws.tm.kill(body, _close_transition.bind(edge, animate))
 	_close_pane_settings_for(body)
 	_apply_layout()
 	if held_focus:
@@ -951,6 +1053,31 @@ func _kill_now(body: Control):
 		if survivor != null:
 			activate_pane(survivor)
 	_list()
+
+## Draw a dying pane above the sibling that is growing into its rect (or the
+## fade would play underneath it) and below the divider bands, then play its
+## exit. `edge` is the closed tile's split side, which a slide exit moves
+## toward; `animate` is `_motion_allowed` read before the tile left the list.
+func _close_transition(w: Control, edge: String, animate: bool) -> void:
+	var grid := w.get_parent()
+	if grid != null:
+		var dividers := grid.get_node_or_null("DividerHandles")
+		grid.move_child(w, dividers.get_index() if dividers != null else -1)
+	_transitions.close(w, animate, edge)
+
+## Motion is on, the manager is the visible workspace's, no divider drag owns
+## the grid, and no terminal in it is in its flood cadence (a swap resizes,
+## and that pane's grid work is already being stretched).
+func _motion_allowed(tm: TerminalManager) -> bool:
+	if not UiMotion.enabled() or tm == null or tm != _tm:
+		return false
+	if tm.drag_active():
+		return false
+	for t in tm.tiles:
+		var body = tm._find_body(t.wrapper)
+		if body is TerminalPane and body.under_flood_load():
+			return false
+	return true
 
 ## The last pane of `ws` in tile order — the survivor when the active pane
 ## closes (the tiling logic grows that tile into the freed space). Any type
@@ -1007,9 +1134,11 @@ func _swap_pane_now(body: Control, new_type_name: String):
 
 	# Find the new wrapper (tile's wrapper was replaced in-place)
 	var new_wrapper = null
+	var new_edge := ""
 	for t in tm.tiles:
 		if tm._find_body(t.wrapper) == new_body:
 			new_wrapper = t.wrapper
+			new_edge = str(t.get("edge", ""))
 			break
 
 	# Remove old wrapper from grid, add new one.
@@ -1019,6 +1148,9 @@ func _swap_pane_now(body: Control, new_type_name: String):
 		_attach_pane_into(ws, new_wrapper, new_body)
 
 	_apply_layout()
+	# A type switch destroys the old body and builds the new one in the same
+	# rect; the new pane arrives with the configured create transition.
+	_transitions.create(new_wrapper, _motion_allowed(tm), new_edge)
 	_list()
 	# The swapped-in body is the pane the user just acted on: record it and
 	# apply the one focus rule (a terminal takes the keyboard, a read-only
@@ -1103,6 +1235,7 @@ func _ensure_unique_attachment_id(body: Control):
 ## attach-time check and the restore pre-pass so both paths behave the same.
 func _on_duplicate_rename(old_id: String, new_id: String):
 	_carry_pane_env(old_id, new_id)
+	_carry_pane_scheme(old_id, new_id)
 	PaneInspectorStore.copy_state(old_id, new_id)
 	ToastManager.warn("Duplicate pane id '%s' renamed to '%s'" % [old_id, new_id])
 
@@ -1186,6 +1319,25 @@ func _move_pane_env(old_id: String, new_id: String):
 	PaneEnvStore.remove_env(old_id)
 	if own_env != "":
 		PaneEnvStore.set_env(new_id, own_env)
+
+## A rename the user made in Pane Settings moves the scheme entry: the old id
+## is no longer the pane's, so it must not carry the look any more.
+func _move_pane_scheme(old_id: String, new_id: String):
+	if old_id == "" or new_id == "" or old_id == new_id:
+		return
+	var owned := PaneSchemeStore.scheme_for(old_id)
+	PaneSchemeStore.remove_scheme(old_id)
+	if owned != "":
+		PaneSchemeStore.set_scheme(new_id, owned)
+
+## A collision rename copies rather than moves, for env's reason: both instances
+## are the same logical pane, so the look the user gave it follows.
+func _carry_pane_scheme(old_id: String, new_id: String):
+	if old_id == "" or new_id == "" or old_id == new_id:
+		return
+	if not PaneSchemeStore.has_scheme(old_id) or PaneSchemeStore.has_scheme(new_id):
+		return
+	PaneSchemeStore.set_scheme(new_id, PaneSchemeStore.scheme_for(old_id))
 
 ## Re-point the companions that follow a pane renamed in Pane Settings.
 ##
@@ -1323,11 +1475,17 @@ func _wire_tm(tm: TerminalManager):
 	# creates is no longer workspace 0, so a manager without this connection
 	# would stop relayouting after a divider drag.
 	tm.tiles_resized.connect(_apply_layout)
+	tm.tiles_swapped.connect(_on_tiles_swapped.bind(tm))
 	# The panes must know a divider drag is in flight: that is what turns their
 	# quiet-period resize debounce into a throttle, and what puts the axis's
 	# pointer shape on the window while the divider moves.
 	tm.divider_drag_started.connect(_on_divider_drag_started.bind(tm))
 	tm.divider_drag_finished.connect(_on_divider_drag_finished.bind(tm))
+
+## A position swap committed. `tiles_resized` has already laid both wrappers
+## out at their new rects; the motion layer eases them there from `before`.
+func _on_tiles_swapped(before: Dictionary, tm: TerminalManager) -> void:
+	_transitions.swap(before, _motion_allowed(tm))
 
 ## Build a workspace grid's divider grab bands: one transparent layer over the
 ## tiles, kept topmost by `_attach_pane_into`, refreshed by `_apply_layout`.
@@ -2954,6 +3112,7 @@ func _poll_concept_events_for(ws: Dictionary):
 				"source": str(body.attachment_id),
 				"target": str(ev.get("target_pane_type", "")),
 			}))
+			_flash_concept(body, str(ev.get("concept_name", "")))
 		# Notify-only concepts (`capture_mode: single_line`): the trigger fired,
 		# nothing was captured and no pane received anything. Subscribers get the
 		# match; the output stays in the terminal. Metadata only — the matched
@@ -2968,6 +3127,22 @@ func _poll_concept_events_for(ws: Dictionary):
 				"name": str(notice.get("concept_name", "")),
 				"source": str(body.attachment_id),
 			}))
+			_flash_concept(body, str(notice.get("concept_name", "")))
+
+## Ambient feedback for a concept event: a mapped concept cues the pane it
+## fired in. Display only - nothing here acknowledges, flushes or publishes;
+## the rate limit lives in `PaneEffects`, and a hidden pane is skipped so an
+## off-screen workspace pays no GPU work. `has_method` is the receiver
+## contract `ConceptRouter` already uses for content delivery.
+func _flash_concept(body: Control, concept_name: String) -> void:
+	if concept_name == "" or body == null or not body.has_method("flash_effect"):
+		return
+	if not body.is_visible_in_tree():
+		return
+	var effect := UiEffects.reactive_for(concept_name)
+	if effect != "":
+		body.flash_effect(effect)
+
 # ═══════════════════════════════════════════════════════════════════════
 # IPC bridge — polls Rust IPC requests from _process
 # ═══════════════════════════════════════════════════════════════════════
@@ -3366,13 +3541,13 @@ func _open_commands_settings() -> void:
 	_raise_settings_panel(settings)
 	settings.open_commands(true)
 
-## The palette's "Keyboard Shortcuts": the About tab, where the list lives.
+## The palette's "Keyboard Shortcuts": the Shortcuts tab, where the list lives.
 ## The panel reads the registry when it opens, so a chord rebound since the last
 ## look is spelled as it is now.
 func _open_shortcuts_settings() -> void:
 	var settings := _ensure_settings_panel()
 	_raise_settings_panel(settings)
-	settings.open_about()
+	settings.open_shortcuts()
 
 ## Put the settings panel in front and close the pane settings overlay, so the
 ## two overlays never stack. Input picking uses reverse tree order (z_index is

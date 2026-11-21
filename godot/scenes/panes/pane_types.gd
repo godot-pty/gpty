@@ -481,6 +481,13 @@ const SOURCE_IPC := 2
 const FONT_SIZE_MIN := 8
 const FONT_SIZE_MAX := 32
 
+## The terminal grid's inner padding, per side in logical pixels: the global
+## appearance default, and the ceiling a hand-edited store or a caller may
+## reach. The fit spends `2 x padding` before it divides by the cell, so the
+## row and column count stay the count the pane actually shows.
+const TERMINAL_PADDING_DEFAULT := 4
+const TERMINAL_PADDING_MAX := 24
+
 ## Shared by every pane type.
 ##
 ## `type` and `attachment_id` are `ipc: false`: the discriminator is read, never
@@ -530,10 +537,25 @@ const TERMINAL_SETTINGS := {
 	# spawn, and written only by the pane settings UI.
 	"pane_cwd": PANE_DIR_RULE,
 	"font_path": {"kind": "font_path"},
-	# A file must not name a scheme: the read itself is capped and harmless,
-	# but appearance paths are the user's, not a shared layout's. The pane
-	# panel and the global setting (runtime) still set it.
+	# The inset between the tile edge and the grid. This is the user's window
+	# fit, not pane content: the global appearance setting broadcasts it, and
+	# a shared layout cannot carry it.
+	"terminal_padding": {"kind": "int", "min": 0, "max": TERMINAL_PADDING_MAX, "file": false},
+	# The global effect table's id and intensity, broadcast by
+	# `apply_to_terminal` like `terminal_padding`. A file cannot name one: the
+	# shaders are code (`UiEffects`), so only the closed ids can arrive. The
+	# literal list is the `-s` entry-point-safe copy; `test_ui_effects.gd`
+	# asserts it against `UiEffects.AMBIENT_IDS`.
+	"effect": {"kind": "text", "max": 16, "values": ["crt", "grain"], "file": false, "ipc": false},
+	"effect_intensity": {"kind": "int", "min": 0, "max": 2, "file": false, "ipc": false},
+	# The global dark/light pair's resolved member, pushed by
+	# `apply_to_terminal` on every save. A file must not name it: appearance
+	# paths are the user's, not a shared layout's.
 	"color_scheme_path": {"kind": "scheme_path", "file": false},
+	# The pane's own scheme (`PaneSchemeStore`, keyed by the pane's id and
+	# written only by the pane settings UI): a layout or an IPC caller cannot
+	# style a pane.
+	"pane_scheme": {"kind": "scheme_path", "file": false, "ipc": false},
 	"cursor_shape": {"kind": "int", "min": 0, "max": 2},
 	"cursor_blink": {"kind": "bool"},
 	"cursor_blink_speed": {"kind": "float", "min": 0.1, "max": 2.0},
@@ -562,6 +584,17 @@ const FILE_TREE_DEFAULT_OPEN_MODE := "viewer"
 
 ## The wiki pane's note-view modes, shared with `paneView`'s `mode` parameter.
 const WIKI_VIEW_MODES := ["edit", "split", "preview"]
+
+## The wiki pane's link-map presentations. `auto` resolves from the renderer
+## (`VaultGraph3D` on Forward+/Mobile, the planar canvas on Compatibility);
+## an explicit value is the user's choice. Labels live beside the list so the
+## Pane Settings picker and the graph's own mode button cannot drift.
+const WIKI_GRAPH_MODES := ["auto", "3d", "2d"]
+const WIKI_GRAPH_MODE_LABELS := {
+	"auto": "Auto",
+	"3d": "Orbital",
+	"2d": "Planar",
+}
 
 const CODE_VIEWER_SETTINGS := {
 	"file_path": {"kind": "text", "max": 4096},
@@ -610,11 +643,20 @@ const CLI_VIEW_SETTINGS := {
 const WIKI_SETTINGS := {
 	"vault_path": {"kind": "text", "max": 4096},
 	"view_mode": {"kind": "text", "max": 32, "values": WIKI_VIEW_MODES},
+	"graph_mode": {"kind": "text", "max": 8, "values": WIKI_GRAPH_MODES},
 	# Restore-only state: both are replayed at attach and ignored on a live pane
 	# (`WikiPane.apply_settings` clears them once it is in the tree), and the
 	# gestures themselves belong to `pane-view --note` / `--graph`.
 	"open_note": {"kind": "text", "max": 512, "ipc": false},
 	"graph": {"kind": "bool", "ipc": false},
+	# Saved link-map geometry: a bounded `{id: [x, y]}` block. `max` is its
+	# entry cap here, not a string length; `positions` owns the value rules.
+	# It is display state only, so a file may carry it and an IPC caller may
+	# not (the same rule as `open_note`/`graph`).
+	"graph_positions": {
+		"kind": "positions", "ipc": false,
+		"max": VaultGraphModel.MAX_POSITION_ENTRIES,
+	},
 }
 
 const MEDIA_SETTINGS := {
@@ -724,6 +766,13 @@ static func _value_for_rule(rule: Dictionary, v) -> Variant:
 			return clean if clean != "" else null
 		"tags":
 			return sanitize_tags(v) if v is Array else null
+		"positions":
+			# Saved canvas geometry: the model owns the id/entry caps, the
+			# finite-pair check and the clamp, so `graph_positions` cannot
+			# carry a value the canvas would have to defend against later.
+			if not (v is Dictionary):
+				return null
+			return VaultGraphModel.sanitize_positions(v)
 		"argv":
 			return sanitize_shell_args(v) if v is Array else null
 		"launch":

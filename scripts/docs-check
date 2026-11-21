@@ -20,9 +20,13 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# What ships is what this gate judges. `TEMP*` is the scratch convention
+# `.gitignore` already ignores (blog drafts, forensics baselines); the walk sees
+# the worktree, so without `TEMP/` here a draft's unfinished links fail a gate
+# the file never ships through.
 SKIP_PREFIXES = (
     '.git/', '.entire/', 'target/', 'node_modules/', 'godot/addons/', 'docs/public/',
-    'docs/assets/', 'docs/resources/', 'docs/.cache/', 'docs/data/',
+    'docs/assets/', 'docs/resources/', 'docs/.cache/', 'docs/data/', 'TEMP/',
 )
 problems = []
 

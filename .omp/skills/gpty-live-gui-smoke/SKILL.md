@@ -1,6 +1,6 @@
 ---
 name: gpty-live-gui-smoke
-description: "Verify a gpty change against the real app: launch the GUI headless in a sandbox, drive it with the gpty CLI, sample RSS, check shutdown/persistence, time an interaction in a windowed run, and get a backtrace if it crashes."
+description: "Verify a gpty change against the real app: launch the GUI headless in a sandbox, drive it with the gpty CLI, sample RSS, check shutdown/persistence, time an interaction in a windowed run, triage a low-FPS/renderer report, and get a backtrace if it crashes."
 ---
 
 # gPTY live GUI smoke
@@ -140,6 +140,19 @@ later one 63-75 ms).
    Print `_sync_backoff`, `_fetch_ms`, `_draw_ms` and `Engine.get_frames_per_second()` beside the
    count, and toggle the other pane (btop vs an idle shell) between phases to separate the two.
 8. **Quit explicitly** (`get_tree().quit()`), or `timeout` kills the run and you get exit 124.
+
+## A low-FPS report
+
+Read the `[renderer]` line first (`RendererInfo.report`, printed once after the window restores). If the adapter is a CPU rasterizer (llvmpipe, softpipe, SwiftShader, Microsoft Basic Render Driver, Apple Software Renderer) or the status bar reads `… FPS · software`, stop: the frame rate is the CPU's, and the fix is the driver, not gPTY. On Linux check `nvidia-smi` and `modinfo nvidia` against `uname -r`; a kernel/package upgrade with no reboot leaves the old module loaded with no tree and answers `Failed to initialize NVML: Driver/library version mismatch`.
+
+Then separate renderer cost from app cost with the engine's counter, not a stopwatch:
+
+1. Sandbox a fresh `user://` (Recipe above) and run `godot --path godot --print-fps --quit-after 900` at the reporter's window size, once with vsync and once with `--disable-vsync`. An empty first-run app that cannot reach the refresh is renderer-bound.
+2. Add the reporter's panes/effects through the CLI (`gpty new-pane`, per-pane `--setting effect=…`) and compare. A clean sandbox with the same shape tells you whether the live session's extra output is the difference.
+3. A desktop capture of the status bar OCRs the reporter's number; `--print-fps` is the engine's frame loop and can read higher than the presented rate.
+4. On a GPU, the platform monitor names the device; the `[renderer]` line's `scale` is the Retina/HiDPI factor the logical viewport is drawn against.
+
+Never attribute a software-renderer frame rate to gPTY paint or to an effect. The committed record is the `[renderer]` line, the status bar marker and the renderer row in `docs/content/docs/roadmap/v0.8.md`.
 
 ## Gotchas (each cost a debugging round)
 

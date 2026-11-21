@@ -25,7 +25,11 @@ func test_add_keeps_order_and_the_run_flag():
 
 func test_run_defaults_off():
 	SavedCommandStore.add("Quiet", "ls")
-	assert_false(SavedCommandStore.all()[0]["run"],
+	var commands := SavedCommandStore.all()
+	assert_eq(commands.size(), 1, "the add stores one command")
+	if commands.is_empty():
+		return
+	assert_false(commands[0]["run"],
 		"a new command inserts; pressing Enter is opt-in")
 
 func test_find_matches_the_exact_name():
@@ -36,9 +40,17 @@ func test_find_matches_the_exact_name():
 
 func test_all_and_find_hand_out_copies():
 	SavedCommandStore.add("Build", "cargo build")
-	SavedCommandStore.all()[0]["command"] = "rm -rf /"
+	var entries := SavedCommandStore.all()
+	assert_eq(entries.size(), 1, "the add stores one command")
+	if entries.is_empty():
+		return
+	entries[0]["command"] = "rm -rf /"
 	SavedCommandStore.find("Build")["command"] = "rm -rf /"
-	assert_eq(SavedCommandStore.all()[0]["command"], "cargo build")
+	var after := SavedCommandStore.all()
+	assert_eq(after.size(), 1, "the store still holds one command")
+	if after.is_empty():
+		return
+	assert_eq(after[0]["command"], "cargo build")
 
 func test_clean_command_makes_one_line():
 	# A Godot String cannot hold a NUL at all (measured: both a `\u0000`
@@ -57,7 +69,11 @@ func test_clean_name_drops_controls_and_is_not_a_line():
 func test_command_is_capped_at_the_cap():
 	var long := "x".repeat(SavedCommandStore.MAX_COMMAND_CHARS * 2)
 	assert_eq(SavedCommandStore.add("Long", long), "")
-	assert_eq(SavedCommandStore.all()[0]["command"].length(), SavedCommandStore.MAX_COMMAND_CHARS)
+	var capped := SavedCommandStore.all()
+	assert_eq(capped.size(), 1, "the capped add stores one command")
+	if capped.is_empty():
+		return
+	assert_eq(capped[0]["command"].length(), SavedCommandStore.MAX_COMMAND_CHARS)
 
 func test_a_duplicate_name_is_refused_and_changes_nothing():
 	SavedCommandStore.add("Build", "cargo build")
@@ -84,7 +100,11 @@ func test_update_replaces_in_place_and_keeps_its_own_name():
 	SavedCommandStore.add("Test", "cargo test", false)
 	assert_eq(SavedCommandStore.update(1, "Test", "cargo test --workspace", true), "",
 		"an edit may keep the name it already has")
-	assert_eq(SavedCommandStore.all()[1],
+	var updated := SavedCommandStore.all()
+	assert_eq(updated.size(), 2, "the two adds are the store")
+	if updated.size() < 2:
+		return
+	assert_eq(updated[1],
 		{"name": "Test", "command": "cargo test --workspace", "run": true})
 	assert_eq(SavedCommandStore.update(1, "Build", "ls"),
 		"A saved command named 'Build' already exists")
@@ -121,8 +141,12 @@ func test_load_drops_junk_duplicates_and_caps_the_oversize():
 	var names := SavedCommandStore.all().map(func(e): return e["name"])
 	assert_eq(names, ["Build", "Long", "Run"],
 		"a bad item costs itself; the first of two duplicate names wins")
-	assert_eq(SavedCommandStore.all()[1]["command"].length(), SavedCommandStore.MAX_COMMAND_CHARS)
-	assert_true(SavedCommandStore.all()[2]["run"], "a truthy 1 reads as run")
+	var kept := SavedCommandStore.all()
+	assert_eq(kept.size(), 3, "three entries survive the hand-edited file")
+	if kept.size() < 3:
+		return
+	assert_eq(kept[1]["command"].length(), SavedCommandStore.MAX_COMMAND_CHARS)
+	assert_true(kept[2]["run"], "a truthy 1 reads as run")
 
 func test_load_caps_the_entry_count():
 	var big := []

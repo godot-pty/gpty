@@ -20,6 +20,8 @@ func after_each():
 	# The palette is process-global: leave the suite on the dark set, whatever a
 	# switch test did.
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+	SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
+	SettingsManager.cfg_effect_intensity = UiEffects.OFF
 	SettingsManager.apply_appearance()
 	# Free synchronously while mocks are still active: _exit_tree() → _save()
 	# would otherwise write the real layout/settings after teardown restores
@@ -101,6 +103,139 @@ func test_a_settings_save_reaches_a_hidden_workspace():
 	var tb = ws._workspaces[1].tm.tiles[0].wrapper.get_node_or_null("BodyVBox/TitleBar")
 	assert_not_null(tb, "the hidden pane keeps its title bar node")
 	assert_true(tb.visible, "the hidden pane's title bar took the setting too")
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
+## The effect keys ride `apply_to_terminal` with every other global appearance
+## setting: a save reaches a terminal in a workspace the user is not looking at,
+## long before the next switch. The pane's own setter is not the path tested
+## here - the settings broadcast is.
+func test_a_settings_save_broadcasts_the_effect_to_every_terminal():
+	MockAutoloads.set_store(WorkspaceStore.FILE, {
+		"active": 0,
+		"workspaces": [{"name": "W", "layout": []}],
+	})
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var first = ws._spawn_pane("terminal")
+	ws._add_workspace()
+	var second = ws._spawn_pane("terminal")
+	assert_not_null(first, "precondition: the first workspace holds a terminal")
+	assert_not_null(second, "precondition: the second workspace holds a terminal")
+
+	SettingsManager.cfg_effect = "grain"
+	SettingsManager.cfg_effect_intensity = UiEffects.FULL
+	SettingsManager.save_settings()
+	await get_tree().process_frame
+
+	var bodies := _terminal_bodies(ws)
+	assert_eq(bodies.size(), 2, "the walk covers both workspaces")
+	for body in bodies:
+		assert_eq(body.effect, "grain", "the terminal took the effect id")
+		assert_eq(body.effect_intensity, UiEffects.FULL, "and its intensity")
+	await get_tree().create_timer(2.1).timeout
+
+## The concept -> cue glue: a mapped concept cues the pane it fired in, an
+## unmapped one draws nothing, and the cue is display-only (no store write).
+func test_a_mapped_concept_cues_its_source_pane():
+	MockAutoloads.set_store(WorkspaceStore.FILE, {
+		"active": 0,
+		"workspaces": [{"name": "W", "layout": []}],
+	})
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var body = ws._spawn_pane("terminal")
+	assert_not_null(body, "precondition: a terminal to cue")
+	SettingsManager.cfg_reactive_effects = {"cat_command": "tint"}
+
+	ws._flash_concept(body, "cat_command")
+	await get_tree().process_frame
+	assert_not_null(body._effects, "the cue created the effect host")
+	assert_true(body._effects._last_flash_ms >= 0,
+		"the mapped concept started a cue")
+
+	body._effects._last_flash_ms = -1
+	ws._flash_concept(body, "git_log")
+	assert_eq(body._effects._last_flash_ms, -1,
+		"an unmapped concept draws nothing")
+	assert_true(SettingsManager.cfg_reactive_effects.has("cat_command"),
+		"the cue never feeds back into the mapping store")
+	await get_tree().create_timer(2.1).timeout
+
+## The bodies of every terminal in every workspace, the same walk the settings
+## broadcast uses.
+func _terminal_bodies(ws: Control) -> Array:
+	var out := []
+	for w in ws._workspaces:
+		for t in w.tm.tiles:
+			var body = w.tm._find_body(t.wrapper)
+			if body is TerminalPane:
+				out.append(body)
+	return out
+
+## Four terminals in each of two workspaces, and the counters zeroed once the
+## fixture has settled. The spawns themselves repaint; only the save below is
+## being counted.
+func _two_workspaces_of_terminals() -> Array:
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	ws._add_workspace()
+	for _i in 4:
+		ws._spawn_pane("terminal")
+	ws._switch_workspace(0)
+	for _i in 4:
+		ws._spawn_pane("terminal")
+	var bodies := _terminal_bodies(ws)
+	assert_gte(bodies.size(), 8, "precondition: four terminals in each workspace")
+	for body in bodies:
+		body._full_repaints = 0
+	return bodies
+
+func test_a_non_visual_settings_save_repaints_no_terminal():
+	var bodies = await _two_workspaces_of_terminals()
+	SettingsManager.cfg_history_lines = 20000
+	SettingsManager.save_settings()
+	for body in bodies:
+		assert_eq(body._full_repaints, 0,
+			"a save that changes no draw-read value must not repaint")
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
+func test_a_font_size_change_repaints_each_terminal_once():
+	var bodies = await _two_workspaces_of_terminals()
+	SettingsManager.cfg_font_size += 1
+	# The broadcast is what this row fixes, so each pane is asked directly: a
+	# larger glyph really does grow the pane's minimum size, and the container
+	# resize that follows repaints for its own (legitimate) reason when the
+	# whole save runs. One `apply_to_terminal` must cost exactly one repaint.
+	for body in bodies:
+		SettingsManager.apply_to_terminal(body)
+		assert_eq(body._full_repaints, 1,
+			"the setter's metric repack is the one repaint, not a second from apply_settings")
+	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
+## `SELECTION`, `TERMINAL_FOCUS` and `SCROLLBACK_INDICATOR` are the same value
+## in both palette sets, so a mode switch changes nothing a terminal draws; the
+## two broadcasts (the appearance listener's loop, then the settings one) must
+## therefore repaint no terminal at all.
+func test_an_appearance_change_repaints_no_terminal():
+	var bodies = await _two_workspaces_of_terminals()
+	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_LIGHT
+	SettingsManager.save_settings()
+	for body in bodies:
+		assert_eq(body._full_repaints, 0,
+			"an appearance change moves no terminal colour, so it must repaint none")
 	# Wait out the deferred concept push timer so it doesn't resume after free.
 	await get_tree().create_timer(2.1).timeout
 

@@ -14,19 +14,23 @@ class_name WikiPane
 ## `vault_search`, `vault_note_read`, `vault_note_write`), so the pane and the
 ## index cannot disagree about which files are notes.
 ##
-## The pane also has a **link graph view** — the vault's own link structure
-## drawn as a canvas, not a second file format. `GptyTerminal.vault_graph`
-## answers every indexed note plus one ghost per unresolved target, with links
-## aggregated per pair; `VaultGraphModel` lays it out deterministically and
-## `VaultGraphView` draws it. Geometry is session state in the view (a drag
-## lasts as long as the pane), and nothing there writes to the vault: clicking
-## a note opens it through the same leave guard the list uses, and clicking a
-## ghost runs the same resolution a preview mention does. A right-click on an
-## edge sets or clears a **declared weight** — the authored layer over measured
-## mentions, kept in the user's `user://link_weights.json` (never `vaults.db`,
-## which a rebuild may replace) and display-only: it changes thickness, layout
-## stiffness and link-panel order, never which edges exist or what a click can
-## reach.
+## The pane also has a **link graph view** — the vault's own link structure,
+## not a second file format. `GptyTerminal.vault_graph` answers every indexed
+## note plus one ghost per unresolved target, with links aggregated per pair;
+## `VaultGraphModel` owns the data, the deterministic layout and the semantic
+## hit-test. Two presentations implement the `VaultGraphCanvas` contract:
+## `VaultGraph3D` (the default orbital map, with one body per note and one
+## spring per link) and `VaultGraphView` (the planar canvas, also the automatic
+## choice on the Compatibility renderer). Geometry is session state in the
+## active view and rides the pane's layout state as `graph_positions`; the map
+## style is the `graph_mode` setting (`auto`/`3d`/`2d`). Nothing there writes
+## to the vault: clicking a note opens it through the same leave guard the
+## list uses, and clicking a ghost runs the same resolution a preview mention
+## does. A right-click on an edge sets or clears a **declared weight** — the
+## authored layer over measured mentions, kept in the user's
+## `user://link_weights.json` (never `vaults.db`, which a rebuild may replace)
+## and display-only: it changes thickness, spring stiffness and link-panel
+## order, never which edges exist or what a click can reach.
 ##
 ## The close guards cover every deliberate way a buffer can end; a crash (or an
 ## outside kill) has no guard to run, so the pane also keeps a *recovery copy*
@@ -39,6 +43,9 @@ class_name WikiPane
 ## Note view: `edit` (source only) | `split` (source + live preview) |
 ## `preview` (rendered only). Split is what makes the preview live.
 @export var view_mode := "split"
+## Link map: `auto` (3D on Forward+/Mobile, planar on Compatibility) |
+## `3d` (the orbital map) | `2d` (the planar canvas).
+@export var graph_mode := "auto"
 
 ## The link graph's outcome: `true` once the canvas is up, `false` with the
 ## reason it is not (the vault failed, or the pane left the graph before the
@@ -53,12 +60,20 @@ var _graph_task := -1
 ## build lands (`_apply_graph_build`) or the pane leaves the graph
 ## (`_hide_graph`); a result that lands with this false is dropped.
 var _graph_wanted := false
-## The keyboard follows the canvas when it lands — a Graph press, never a
-## restore or an IPC request.
-var _graph_focus_pending := false
 ## The worker's one output slot: `[{root, graph, positions}]`, written once by
 ## the task before it reports complete, cleared here when the result is read.
 var _graph_build_out: Array = []
+## Saved geometry that no view has taken yet: the canonical `{id: [x, y]}`
+## block a restore carries. It survives until the graph is opened (or the
+## vault changes), so a Pane Settings pass between the two cannot lose the
+## arrangement.
+var _saved_positions: Dictionary = {}
+## The vault the current view's geometry belongs to; a re-query only reuses
+## positions when this is the live root.
+var _graph_root := ""
+## The last normalized graph answer, kept so a 2D/3D switch can re-present it
+## without querying the index again.
+var _graph_doc: Dictionary = {}
 
 ## What a saved layout asks the pane to reopen where the user left off: the
 ## open note (a vault-relative path, read through the same gate as every
@@ -67,6 +82,11 @@ var _graph_build_out: Array = []
 ## panel re-applies its whole dict) must never replay it.
 var _restore_note := ""
 var _restore_graph := false
+## Whether the spawn settings named a view at all. A pane spawned by `new-pane`
+## or a profile that names neither `open_note` nor `graph` opens the graph; a
+## saved layout names one (possibly `graph:false` with an empty note) and is
+## replayed exactly, so a restored notes view is never forced onto the map.
+var _restore_view_saved := false
 ## Longest note path a layout may name; the Rust gate validates the rest.
 const MAX_RESTORE_NOTE := 512
 
@@ -96,7 +116,7 @@ const LINK_PANEL_HEIGHT := 132
 ## What the New-note prompt starts with: one word to edit beats an empty field.
 const NEW_NOTE_NAME := "Untitled.md"
 
-var _back: Button
+var _notes_button: Button
 var _search: LineEdit
 var _list: ItemList
 var _note_box: VBoxContainer
@@ -124,9 +144,13 @@ var _rename_button: Button
 var _delete_button: Button
 ## The link graph: its entry in the top row and the canvas itself. The canvas
 ## keeps the session's node geometry, so hiding and reopening it never
-## reshuffles a graph the user arranged.
+## reshuffles a graph the user arranged. `_graph_view` is never null after
+## `_build_ui`; a mode switch replaces it in place.
 var _graph_button: Button
-var _graph_view: VaultGraphView
+var _graph_view: VaultGraphCanvas
+## The content box the view lives in (needed to add the replacement at the
+## same tree position when the presentation changes).
+var _content: VBoxContainer
 
 ## The link panel's parts: this note's outgoing mentions and its backlinks,
 ## both from the index (`GptyTerminal.vault_links`). Rows are rebuilt whenever
@@ -174,18 +198,32 @@ func _ready():
 	top.name = "TopRow"
 	root.add_child(top)
 
-	_back = Button.new()
-	_back.name = "BackToNotes"
-	_back.text = "Back to notes"
-	_back.pressed.connect(func(): _request_leave(func(proceed: bool):
+	_notes_button = Button.new()
+	_notes_button.name = "Notes"
+	_notes_button.text = "Notes"
+	_notes_button.tooltip_text = "Show the note list"
+	_notes_button.pressed.connect(func(): _request_leave(func(proceed: bool):
 		if proceed:
 			_show_list()
 	))
-	top.add_child(_back)
+	top.add_child(_notes_button)
+
+	_graph_button = Button.new()
+	_graph_button.name = "GraphView"
+	_graph_button.text = "Graph"
+	_graph_button.tooltip_text = "Map this vault's links (re-reads the index)"
+	_graph_button.pressed.connect(func():
+		# The keyboard follows the map, the same rule the note view follows for
+		# its buffer: the button that opened it is one of the surfaces the
+		# canvas replaces, so `_show_graph_canvas` carries the focus when the
+		# worker's build lands.
+		request_graph()
+	)
+	top.add_child(_graph_button)
 
 	_new_button = Button.new()
 	_new_button.name = "NewNote"
-	_new_button.text = "New note"
+	_new_button.text = "New"
 	_new_button.tooltip_text = "Create a Markdown note in this vault"
 	_new_button.visible = false
 	_new_button.pressed.connect(_ask_new_note)
@@ -200,23 +238,11 @@ func _ready():
 	_search.text_submitted.connect(func(_text): _run_search())
 	top.add_child(_search)
 
-	_graph_button = Button.new()
-	_graph_button.name = "GraphView"
-	_graph_button.text = "Graph"
-	_graph_button.tooltip_text = "Map this vault's links (re-reads the index)"
-	_graph_button.pressed.connect(func():
-		# The keyboard follows the map, the same rule the note view follows for
-		# its buffer: the button that opened it is no longer the surface the
-		# user is looking at. The canvas is built on a worker, so the focus
-		# moves when it lands.
-		request_graph(true)
-	)
-	top.add_child(_graph_button)
-
-	var content = VBoxContainer.new()
-	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_child(content)
+	_content = VBoxContainer.new()
+	_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(_content)
+	var content := _content
 
 	_list = ItemList.new()
 	_list.name = "NoteList"
@@ -371,15 +397,8 @@ func _ready():
 	links_rows.add_child(_links_footer)
 
 	# ── The link graph: the vault's structure, generated on demand ──
-	_graph_view = VaultGraphView.new()
-	_graph_view.name = "LinkGraph"
+	_graph_view = _make_graph_view(_effective_graph_mode())
 	_graph_view.visible = false
-	_graph_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_graph_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_graph_view.node_activated.connect(_on_graph_node_activated)
-	_graph_view.ghost_activated.connect(_on_graph_ghost_activated)
-	_graph_view.weight_set_requested.connect(_ask_declared_weight)
-	_graph_view.weight_cleared.connect(_clear_declared_weight)
 	content.add_child(_graph_view)
 
 	_placeholder = Label.new()
@@ -419,36 +438,45 @@ func _ready():
 func _process(_delta: float) -> void:
 	_poll_graph_build()
 
-## Reopen the note and graph a saved layout names. A path that no longer opens
-## says so (`_open_note` toasts); an invalid vault leaves the placeholder alone.
+## Reopen the note and graph a saved layout names. A pane whose spawn settings
+## named no view opens the graph by default. A path that no longer opens says so
+## (`_open_note` toasts); an invalid vault leaves the placeholder alone.
 func _restore_view() -> void:
 	var rel := _restore_note
 	var graph := _restore_graph
+	var saved := _restore_view_saved
 	_restore_note = ""
 	_restore_graph = false
+	_restore_view_saved = false
 	if _vault_problem() != "":
 		return
 	if rel != "":
 		_open_note(rel)
-	if graph:
+	if graph or not saved:
 		request_graph()
 
 ## The editor and the preview share the pane's font size, which the settings
-## panel can change after `_ready`.
-func _apply_font_size() -> void:
-	if _editor == null:
-		return
-	_editor.add_theme_font_size_override("font_size", font_size)
-	_reader.add_theme_font_size_override("normal_font_size", font_size)
-	_reader.add_theme_font_size_override("mono_font_size", font_size)
+## panel can change after `_ready`; the base setter calls this through
+## `_recompute_cell_metrics`. The note list and the graph's labels are the
+## vault's index and diagram, not the note text, so they keep the chrome size.
+func _recompute_cell_metrics():
+	_apply_font_size()
 
-## The view state machine: exactly one of {note list, note editor,
-## placeholder} is visible, and the back button only while a note is open.
+func _apply_font_size() -> void:
+	if _editor:
+		_editor.add_theme_font_size_override("font_size", font_size)
+	if _reader:
+		_reader.add_theme_font_size_override("normal_font_size", font_size)
+		_reader.add_theme_font_size_override("mono_font_size", font_size)
+
+## The view state machine: exactly one of {note list, note editor, graph,
+## placeholder} is visible. Notes is on the note-editor and graph surfaces;
+## Graph is on every surface but the graph.
 ## The list comes from the vault index — `vault_index` walks the vault, brings
 ## the index up to date and answers the list in one call.
 func _refresh():
 	_clear_note()
-	_back.visible = false
+	_notes_button.visible = false
 	_note_box.visible = false
 	_hide_graph()
 	_footer.visible = false
@@ -511,7 +539,9 @@ func _run_search() -> void:
 	_footer.visible = false
 	_note_box.visible = false
 	_hide_graph()
-	_back.visible = false
+	_notes_button.visible = false
+	_graph_button.visible = true
+	_new_button.visible = true
 	if not (answer is Dictionary):
 		_show_placeholder("Vault search unavailable.")
 		return
@@ -545,7 +575,7 @@ func _show_placeholder(text: String, searchable := true) -> void:
 	_list.visible = false
 	_note_box.visible = false
 	_hide_graph()
-	_back.visible = false
+	_notes_button.visible = false
 	_search.visible = searchable
 	# A working vault with no note open can always gain one, even when the
 	# placeholder is a zero-hit search or an empty vault.
@@ -554,7 +584,7 @@ func _show_placeholder(text: String, searchable := true) -> void:
 	# but a vault that cannot be opened has nothing to draw.
 	_graph_button.visible = searchable
 
-## Leave the note and show the list. The Back button routes through
+## Leave the note and show the list. The Notes button routes through
 ## `_request_leave`, so an unsaved note asks first; `_refresh` is the
 ## unguarded action that runs once the user has answered — it re-walks the
 ## vault, so the list also reflects an edit that just landed.
@@ -692,7 +722,7 @@ func _open_note(rel: String, fragment := "", line := 0, take_focus := true) -> b
 	_new_button.visible = false
 	_graph_button.visible = true
 	_note_box.visible = true
-	_back.visible = true
+	_notes_button.visible = true
 	_apply_view_mode()
 	_update_dirty()
 	_reader.scroll_to_line(0)
@@ -703,19 +733,104 @@ func _open_note(rel: String, fragment := "", line := 0, take_focus := true) -> b
 	_refresh_links()
 	# The keyboard follows the note: the list it replaced is hidden, so focus
 	# left there would be nowhere. The buffer is where a reader continues; a
-	# note past the cap is read-only, and Back (the only action left for it)
+	# note past the cap is read-only, and Notes (the only action left for it)
 	# takes the keyboard instead. Before `_offer_scratch`, whose question owns
 	# the keyboard itself.
 	if take_focus:
 		if _editor.editable:
 			_editor.grab_focus()
 		else:
-			_back.grab_focus()
+			_notes_button.grab_focus()
 		# Last, so the note is on screen when the question appears.
 		_offer_scratch(rel)
 	return true
 
 # ── The link graph: the vault's structure, generated on demand ──────────
+
+## The presentation the pane shows now. `auto` follows the renderer: the
+## orbital map on Forward+/Mobile, the planar canvas on Compatibility. An
+## explicit `3d`/`2d` is the user's choice and is honoured on either renderer.
+func _effective_graph_mode() -> String:
+	if graph_mode == "3d" or graph_mode == "2d":
+		return graph_mode
+	return "2d" if RenderingServer.get_current_rendering_method() == "gl_compatibility" else "3d"
+
+
+## One view instance for `mode`, with the shared signals wired to this pane.
+func _make_graph_view(mode: String) -> VaultGraphCanvas:
+	var view: VaultGraphCanvas = VaultGraph3D.new() if mode == "3d" else VaultGraphView.new()
+	view.name = "LinkGraph"
+	view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	view.node_activated.connect(_on_graph_node_activated)
+	view.ghost_activated.connect(_on_graph_ghost_activated)
+	view.weight_set_requested.connect(_ask_declared_weight)
+	view.weight_cleared.connect(_clear_declared_weight)
+	view.mode_requested.connect(_on_graph_mode_requested)
+	return view
+
+
+func _is_graph_view_for(view: VaultGraphCanvas, mode: String) -> bool:
+	if mode == "3d":
+		return view is VaultGraph3D
+	return view is VaultGraphView
+
+
+## Replace the presentation in place, keeping the arrangement and the keyboard
+## on the same surface. `carry` is the canonical geometry block the new view
+## starts from; `show` also re-presents `_graph_doc` immediately. A hidden
+## swap keeps `carry` in `_saved_positions` for the next Graph open.
+func _swap_graph_view(mode: String, carry: Dictionary, show: bool) -> void:
+	var focus_owner := get_viewport().gui_get_focus_owner() if is_inside_tree() else null
+	var old := _graph_view
+	var index := -1
+	var had_focus := false
+	if old != null and is_instance_valid(old):
+		index = old.get_index()
+		had_focus = focus_owner != null and (focus_owner == old or old.is_ancestor_of(focus_owner))
+		var parent := old.get_parent()
+		if parent != null:
+			parent.remove_child(old)
+		old.queue_free()
+	_graph_view = _make_graph_view(mode)
+	_graph_view.visible = false
+	_content.add_child(_graph_view)
+	if index >= 0 and index < _content.get_child_count():
+		_content.move_child(_graph_view, index)
+	if show:
+		_graph_view.visible = true
+		_graph_view.show_graph(_graph_doc, _current_rel, carry)
+		_saved_positions = {}
+		if had_focus:
+			_graph_view.grab_focus()
+	else:
+		_saved_positions = carry
+
+
+## Apply a `graph_mode` change. Geometry for a stale vault is never carried;
+## a restored arrangement not yet opened survives as `_saved_positions`.
+func _apply_graph_mode() -> void:
+	if _graph_view == null:
+		return
+	var effective := _effective_graph_mode()
+	if _is_graph_view_for(_graph_view, effective):
+		return
+	var carry: Dictionary = {}
+	if _graph_view.positions.is_empty():
+		carry = _saved_positions
+	elif _graph_root == _vault_root:
+		carry = _graph_view.export_positions()
+	_swap_graph_view(effective, carry, _graph_view.visible and _graph_root == _vault_root)
+
+
+func _on_graph_mode_requested(mode: String) -> void:
+	if mode != "2d" and mode != "3d":
+		return
+	if graph_mode == mode:
+		return
+	graph_mode = mode
+	_apply_graph_mode()
+
 
 ## Open the link graph: start building it, off the frame.
 ##
@@ -732,7 +847,7 @@ func _open_note(rel: String, fragment := "", line := 0, take_focus := true) -> b
 ## `graph_built` reports the outcome on the frame the canvas goes up.
 ##
 ## Opening the graph does not disturb the open note: the buffer stays alive
-## (and dirty) behind the canvas, so Back and a node click route through the
+## (and dirty) behind the canvas, so Notes and a node click route through the
 ## same leave guard every other navigation uses, and a dirty buffer can never
 ## be replaced without its answer.
 ##
@@ -740,7 +855,7 @@ func _open_note(rel: String, fragment := "", line := 0, take_focus := true) -> b
 ## result answers this request too — the answer is the index's, not this
 ## caller's), otherwise the reason the vault cannot be drawn, which is also on
 ## the pane's placeholder.
-func request_graph(take_focus := false) -> String:
+func request_graph() -> String:
 	var problem := _vault_problem()
 	if problem != "":
 		_show_placeholder(problem, false)
@@ -749,23 +864,27 @@ func request_graph(take_focus := false) -> String:
 	# the list after the graph has been opened.
 	_search_timer.stop()
 	_graph_wanted = true
-	if take_focus:
-		_graph_focus_pending = true
 	if _graph_task == -1:
 		_start_graph_task()
 	return ""
 
 ## Queue one build for the vault the pane shows now.
 ##
-## The view's positions and the authored weights are read here, on the main
-## thread: the geometry is the view's session state and `LinkWeightsStore` is
-## an autoload a worker must not touch. Both are copied in, so the task needs
-## no access to the scene tree.
+## The view's geometry and the authored weights are read here, on the main
+## thread: `LinkWeightsStore` is an autoload a worker must not touch, and the
+## 3D view mutates `positions` on every physics tick. The geometry is exported
+## as a canonical `{id: [x, y]}` copy, never handed over by reference, so the
+## worker can lay out against a stable snapshot while the live map moves.
 func _start_graph_task() -> void:
 	var out: Array = []
 	_graph_build_out = out
 	var weights: Dictionary = LinkWeightsStore.vault_weights(_vault_root)
-	var prepared: Dictionary = _graph_view.positions if _graph_view != null else {}
+	var prepared: Dictionary = {}
+	if _graph_view != null and _graph_root == _vault_root \
+			and not _graph_view.positions.is_empty():
+		prepared = _graph_view.export_positions()
+	else:
+		prepared = _saved_positions
 	_graph_task = WorkerThreadPool.add_task(
 		WikiPane._build_graph_document.bind(_vault_root, weights, prepared, out),
 		true, "gpty wiki graph")
@@ -820,8 +939,6 @@ func _poll_graph_build() -> void:
 ## authored weights would be unrecoverable.
 func _apply_graph_build(built: Dictionary) -> void:
 	_graph_wanted = false
-	var take_focus := _graph_focus_pending
-	_graph_focus_pending = false
 	var graph: Dictionary = built.get("graph", {})
 	if not bool(graph.get("ok", false)):
 		var why := "Vault graph failed: " + _shown_path(str(graph.get("error", "")))
@@ -834,23 +951,48 @@ func _apply_graph_build(built: Dictionary) -> void:
 			if node is Dictionary and not bool(node.get("ghost", false)):
 				known[str(node.get("id", ""))] = true
 		LinkWeightsStore.prune(_vault_root, known)
+	_graph_root = str(built.get("root", ""))
 	_show_graph_canvas(graph, built.get("positions", {}))
-	if take_focus:
-		_graph_view.grab_focus()
+	_saved_positions = {}
 	graph_built.emit(true, "")
 
-## Replace the content area with the link canvas.
+## Replace the content area with the link canvas, switching presentation if
+## the effective mode changed while the build ran.
 func _show_graph_canvas(graph: Dictionary, positions: Dictionary) -> void:
+	# The build lands asynchronously, so it can arrive while the user is on a
+	# surface it replaces (a pane with no saved view shows its note list while
+	# the worker runs, and a Graph press leaves the keyboard on that button).
+	# Godot releases the focus owner when it is hidden, so read it before the
+	# hides and hand it to the canvas - only when it was ours to begin with.
+	var focus_owner: Control = get_viewport().gui_get_focus_owner() if is_inside_tree() else null
+	var carry_focus := focus_owner != null and _is_graph_replaced_surface(focus_owner)
 	_list.visible = false
 	_footer.visible = false
 	_note_box.visible = false
 	_placeholder.visible = false
 	_search.visible = false
 	_new_button.visible = false
-	_graph_button.visible = true
-	_back.visible = true
-	_graph_view.visible = true
-	_graph_view.show_graph(graph, _current_rel, positions)
+	_graph_button.visible = false
+	_notes_button.visible = true
+	_graph_doc = graph
+	if _graph_view == null or not _is_graph_view_for(_graph_view, _effective_graph_mode()):
+		_swap_graph_view(_effective_graph_mode(), positions, true)
+	else:
+		_graph_view.visible = true
+		_graph_view.show_graph(graph, _current_rel, positions)
+	if carry_focus:
+		_graph_view.grab_focus()
+	_saved_positions = {}
+
+## True when `control` is one of the surfaces the link canvas replaces (or a
+## child of one). The canvas takes the keyboard only from these, so a build
+## that lands while another pane - or another wiki surface - holds it never
+## steals it.
+func _is_graph_replaced_surface(control: Control) -> bool:
+	for surface in [_list, _footer, _note_box, _placeholder, _search, _new_button, _graph_button]:
+		if surface != null and (surface == control or surface.is_ancestor_of(control)):
+			return true
+	return false
 
 ## Every surface that takes the pane off the canvas goes through here, so a
 ## build that is still running cannot land on top of what the user chose
@@ -864,7 +1006,6 @@ func _hide_graph() -> void:
 	if not _graph_wanted:
 		return
 	_graph_wanted = false
-	_graph_focus_pending = false
 	graph_built.emit(false, "The pane left the link graph before it was built")
 
 ## The pane's `pane-view` surface, the two gestures that land in one frame:
@@ -880,16 +1021,16 @@ func _hide_graph() -> void:
 ## after this returns and answers when the canvas is up.
 ##
 ## Order is note then mode: a note must be chosen before its mode matters, and
-## `--note a.md --graph` selects the note the graph's Back returns to because
-## the graph is applied last.
+## `--note a.md --graph` selects the note first and the graph last; the graph's
+## Notes button then returns to the list.
 func apply_view(request: Dictionary) -> String:
 	var note := str(request.get("note", ""))
 	if note != "":
 		var problem := _vault_problem()
 		if problem != "":
 			return problem
-		# The list's click path assumes the buffer is not dirty (Back asks
-		# first, and a click only happens from a list Back reached); a caller
+		# The list's click path assumes the buffer is not dirty (Notes asks
+		# first, and a click only happens from a list Notes reached); a caller
 		# cannot answer that ask, so the exchange is refused instead.
 		if _is_dirty():
 			return "Pane has unsaved changes to %s; save or discard them in the pane, then retry" % _current_rel
@@ -910,7 +1051,7 @@ func view_document() -> Dictionary:
 		"view_mode": view_mode,
 	}
 
-## A node opens its note, behind the same ask a Back makes: the click can
+## A node opens its note, behind the same ask Notes makes: the click can
 ## replace a buffer that is still unsaved, so the graph cannot open over it.
 func _on_graph_node_activated(id: String) -> void:
 	_request_leave(func(proceed: bool):
@@ -1001,7 +1142,7 @@ func _refresh_declared_weights() -> void:
 ## already wrote, never a scan of the vault. The panel is display plus
 ## navigation: a resolved outgoing row opens its note in place (and its heading
 ## fragment when it names one), a backlink row opens the linking note at the
-## line it names, all behind the same ask a Back makes; a missing target offers
+## line it names, all behind the same ask Notes makes; a missing target offers
 ## create-from-link, and an ambiguous one names its candidates and is not
 ## clickable because either choice would be a guess.
 func _refresh_links() -> void:
@@ -1125,7 +1266,7 @@ func _add_link_row(parent: VBoxContainer, text: String, action: Callable, toolti
 	return row
 
 ## Follow a link in place: the destination replaces the open note. The same
-## Save/Discard/Cancel ask a Back makes runs first — following can be the way
+## Save/Discard/Cancel ask Notes makes runs first — following can be the way
 ## an unsaved buffer is lost. There is no history stack in v1: the notes list
 ## is the way back.
 ##
@@ -1818,7 +1959,7 @@ func _wire_note_toolbar() -> void:
 
 ## Focus the toolbar's first action. False when no note is on screen or the
 ## buffer is not (`preview` mode): the chord exists for the buffer's Tab trap,
-## and a toolbar with no buffer to return to is already one Tab away from Back.
+## and a toolbar with no buffer to return to is already one Tab away from Notes.
 func focus_note_toolbar() -> bool:
 	if _toolbar == null or not _note_box.visible or not _editor.visible:
 		return false
@@ -1828,9 +1969,9 @@ func focus_note_toolbar() -> bool:
 	first.grab_focus()
 	return true
 
-## Escape is Back. The note view (and the graph over it) hides the list and the
-## search, so without this a note is a keyboard trap: the editor consumes Tab
-## for indentation and nothing else returns to the list.
+## Escape leaves the note (or the graph over it) for the list. The note view
+## hides the list and the search, so without this a note is a keyboard trap:
+## the editor consumes Tab for indentation and nothing else returns to the list.
 ##
 ## Read at the raw input stage, before GUI: `_gui_input` is delivered to the
 ## focused control only (measured on 4.7.2 - it does not bubble to ancestors),
@@ -1855,7 +1996,7 @@ func _input(event: InputEvent) -> void:
 	if toolbar_has_focus(owner):
 		return
 	get_viewport().set_input_as_handled()
-	# The same guarded leave the Back button uses: a dirty buffer asks
+	# The same guarded leave the Notes button uses: a dirty buffer asks
 	# Save/Discard/Cancel, and Cancel keeps the note open.
 	_request_leave(func(proceed: bool):
 		if proceed:
@@ -1935,17 +2076,23 @@ func would_discard_unsaved(settings: Dictionary) -> bool:
 func apply_settings(settings: Dictionary):
 	var previous_vault := vault_path
 	var previous_root := _vault_root
+	var previous_mode := graph_mode
 	super.apply_settings(settings)
 	# Remember what a restore asked for; only the spawn-time call (before the
 	# node is in the tree) is ever replayed, by `_restore_view`.
+	if settings.has("open_note") or settings.has("graph"):
+		_restore_view_saved = true
 	if settings.get("open_note") is String and settings["open_note"].length() <= MAX_RESTORE_NOTE:
 		_restore_note = settings["open_note"]
 	if settings.get("graph") is bool:
 		_restore_graph = settings["graph"]
+	if not is_inside_tree() and settings.get("graph_positions") is Dictionary:
+		_saved_positions = VaultGraphModel.sanitize_positions(settings["graph_positions"])
 	if not is_inside_tree():
 		return
 	_restore_note = ""
 	_restore_graph = false
+	_restore_view_saved = false
 	# The base assigned `vault_path` (its name is the settings key); re-scan
 	# rather than reassign, so a half-typed path stays in the settings field.
 	if vault_path != previous_vault:
@@ -1961,26 +2108,43 @@ func apply_settings(settings: Dictionary):
 		# That discard is the user's answer by another route: the copy goes too,
 		# and it is keyed by the vault the buffer belonged to.
 		_drop_scratch(previous_root, _current_rel)
+		# A different vault makes the old query and the old arrangement
+		# meaningless. Clear the view's geometry too: a same-named note in the
+		# new vault must not inherit the old vault's position.
+		_saved_positions = {}
+		_graph_root = ""
+		_graph_doc = {}
+		if _graph_view != null:
+			_graph_view.show_graph({"nodes": [], "edges": [], "truncated": false})
+		_apply_graph_mode()
 		# A different vault makes the old query meaningless.
 		_search.text = ""
-		_apply_font_size()
 		_refresh()
 		return
 	# Everything else is a property of this pane, not of the vault: applying
 	# it must not close the note the user is editing.
-	_apply_font_size()
 	_apply_view_mode()
+	if graph_mode != previous_mode:
+		_apply_graph_mode()
 
 func _get_layout_state() -> Dictionary:
 	var state = super._get_layout_state()
+	var saved := {}
+	if _graph_view != null and _graph_root == _vault_root \
+			and not _graph_view.positions.is_empty():
+		saved = _graph_view.export_positions()
+	else:
+		saved = VaultGraphModel.sanitize_positions(_saved_positions)
 	state.merge({
-		"vault_path": vault_path, "view_mode": view_mode,
-		# Where the user left off: the open note and the graph. Unsaved text is
-		# not part of this (the recovery copy covers a crash). A graph that is
-		# still building counts as asked-for: a save in the frame after a
-		# restore must not record the canvas as closed.
+		"vault_path": vault_path, "view_mode": view_mode, "graph_mode": graph_mode,
+		# Where the user left off: the open note, the graph, and the map's
+		# arrangement. Unsaved text is not part of this (the recovery copy
+		# covers a crash). A graph that is still building counts as
+		# asked-for: a save in the frame after a restore must not record the
+		# canvas as closed.
 		"open_note": _current_rel,
 		"graph": _graph_wanted or (_graph_view != null and _graph_view.visible),
+		"graph_positions": saved,
 	})
 	return state
 
@@ -1989,18 +2153,22 @@ func _pane_type() -> String:
 
 ## Entering the pane from outside (chrome Escape, a chrome action that leaves
 ## the pane on screen) aims at the surface the pane is showing: the graph's
-## canvas when the link map is up, otherwise the note buffer. Both are the
-## place a keyboard user continues; the pane's first tab stop would be Back, a
-## top-row action the note view does not need as an entry. A note with no buffer
-## on screen (preview mode, or read-only over the read cap) ends at Back, which
-## is also where the note toolbar's Escape goes.
+## canvas when the link map is up, otherwise the note buffer, the note list or
+## the search field. A note with no buffer on screen (preview mode, or read-only
+## over the read cap) ends at its Notes button, which is also where the note
+## toolbar's Escape goes; the list and search surfaces return their own control
+## so a read-only pane never strands the keyboard on chrome.
 func keyboard_entry() -> Control:
 	if _graph_view != null and _graph_view.visible:
 		return _graph_view
 	if _note_box.visible and _editor.visible and _editor.editable:
 		return _editor
-	if _note_box.visible and _back != null and _back.is_visible_in_tree():
-		return _back
+	if _note_box.visible and _notes_button != null and _notes_button.is_visible_in_tree():
+		return _notes_button
+	if _list != null and _list.visible:
+		return _list
+	if _search != null and _search.visible:
+		return _search
 	return null
 
 func _build_pane_settings_ui(panel: Control) -> Control:
@@ -2047,12 +2215,20 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	mode_opt.item_selected.connect(func(_idx): panel._debounce_timer.start())
 	_add_setting_row(v, "Note view:", mode_opt)
 
+	var graph_opt = OptionButton.new()
+	for graph_kind in PaneTypes.WIKI_GRAPH_MODES:
+		graph_opt.add_item(PaneTypes.WIKI_GRAPH_MODE_LABELS.get(graph_kind, graph_kind))
+	graph_opt.selected = maxi(0, PaneTypes.WIKI_GRAPH_MODES.find(graph_mode))
+	graph_opt.item_selected.connect(func(_idx): panel._debounce_timer.start())
+	_add_setting_row(v, "Link map:", graph_opt)
+
 	panel._gather_func = func():
 		return {
 			"pane_name": name_le.text.strip_edges(),
 			"font_size": int(font_spin.value),
 			"vault_path": vault_le.text.strip_edges(),
 			"view_mode": PaneTypes.WIKI_VIEW_MODES[mode_opt.selected] if mode_opt.selected >= 0 else "split",
+			"graph_mode": PaneTypes.WIKI_GRAPH_MODES[graph_opt.selected] if graph_opt.selected >= 0 else "auto",
 		}
 
 	return v

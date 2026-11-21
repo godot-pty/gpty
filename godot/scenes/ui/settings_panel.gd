@@ -6,15 +6,16 @@ signal request_graph_editor
 
 var _debounce_timer: Timer = null
 var _workspace: Control
-## The card's design size: the width all seven tabs fit the bar at and the
-## height no tab may exceed. A short tab sizes the card to its content; a
-## smaller window clamps it (`fit_card_content`).
-const CARD_SIZE := Vector2(540, 560)
+## The card's one size: wide enough that all eight tabs fit the bar (the row
+## needs 497 px and the card's margins take 32), and tall enough that the
+## Terminal tab's form is fully visible. Every tab gets this size, so a tab
+## switch never re-lays the card out; only a smaller window shrinks it
+## (`fit_card`), down to the window less `CARD_EDGE` per side. Where the window
+## has room the card therefore never drops below 560x400 px.
+const CARD_SIZE := Vector2(720, 640)
 ## The card itself, so a resize and every dialog can read its real width - below
-## a 556 px window the clamp makes it narrower than the design size.
+## the design width plus the card edge the clamp makes it narrower.
 var _card: Panel = null
-## The card's own column, so its natural height can size the card.
-var _card_body: VBoxContainer = null
 ## The disk-usage row in the Terminal tab; refreshed whenever the panel opens,
 ## because the panel outlives a single visit and scrollback keeps growing.
 var _history_size_label: Label = null
@@ -36,6 +37,15 @@ var _command_empty: Label = null
 ## The Commands tab's row buttons by role ("add", "edit", "delete", "up",
 ## "down"), so `_sync_command_buttons` enables them by what the selection is.
 var _command_actions := {}
+## The Motion section: the master picker, one picker per transition kind, and
+## the per-kind hosts the property rows are generated into.
+var _motion_opt: OptionButton = null
+var _motion_pickers := {}
+var _motion_params := {}
+var _effect_opt: OptionButton = null
+var _effect_intensity_opt: OptionButton = null
+var _reactive_rules_host: VBoxContainer = null
+var _add_reactive_opt: OptionButton = null
 
 func _init(workspace: Control):
 	_workspace = workspace
@@ -50,37 +60,14 @@ func _ready():
 func _before_open() -> void:
 	_fit_settings_card()
 
-## Size the card to the active tab's content, up to the design height and the
-## window. A short tab no longer paints a dead band below its last row; a tall
-## one keeps the design height and scrolls inside its own tab.
-##
-## The tab's content lives in a `ScrollContainer`, whose minimum size is zero
-## by default. Setting that scroll's minimum to the content's own height (less
-## whatever the card cannot give it) is what lets the height propagate to the
-## card; it is lowered again on a smaller window so the clamp still wins.
+## Give the card its one size, clamped to the window. There is no per-tab
+## measurement any more: the card is the same on all eight tabs, so a tab
+## switch performs no layout at all and the header and tab bar stay put.
+## Called on open and on a resize while open.
 func _fit_settings_card() -> void:
-	if _card == null or _card_body == null or _tabs == null:
+	if _card == null:
 		return
-	var sc := _tabs.get_current_tab_control() as ScrollContainer
-	var current_min := sc.custom_minimum_size.y if sc != null else 0.0
-	# Everything the card needs besides the tab's content: margins, header,
-	# separator, tab bar and the column's separations.
-	var base := _card_body.get_combined_minimum_size().y - current_min
-	var margin := float(UiTokens.SPACE_XXL)
-	var room := size.y - float(CARD_EDGE) * 2.0
-	var max_total := CARD_SIZE.y
-	if room > 0.0:
-		max_total = minf(CARD_SIZE.y, room)
-	var max_list := maxf(0.0, max_total - margin * 2.0 - base)
-	if sc != null:
-		# `tab_changed` also fires while the tab is being built: the
-		# ScrollContainer is added to the TabContainer before its own content,
-		# so a zero-child tab is a normal intermediate state here.
-		var inner := sc.get_child(0) as Control if sc.get_child_count() > 0 else null
-		var want := inner.get_combined_minimum_size().y if inner != null else 0.0
-		sc.custom_minimum_size.y = minf(want, max_list)
-	var content_h := margin * 2.0 + base + (sc.custom_minimum_size.y if sc != null else 0.0)
-	fit_card_content(_card, CARD_SIZE, Vector2(CARD_SIZE.x, content_h))
+	fit_card(_card, CARD_SIZE)
 
 func _notification(what: int):
 	if not visible:
@@ -91,10 +78,15 @@ func _notification(what: int):
 		# The list outlives a visit: a command saved from the palette while the
 		# panel was closed must be there on the next open.
 		_refresh_command_list()
-		# The About tab's chords are read from the registry, which a workspace
-		# fills after this panel may already exist: re-read on every show so the
-		# table cannot print a binding from before that happened.
+		# The Shortcuts tab's chords are read from the registry, which a
+		# workspace fills after this panel may already exist: re-read on every
+		# show so the table cannot print a binding from before that happened.
 		_refresh_shortcut_list()
+		# The Motion pickers and generated property rows read the settings on
+		# every show for the same reason: the panel outlives a visit.
+		_sync_motion_rows()
+		_sync_effect_rows()
+		_sync_reactive_rows()
 	elif what == NOTIFICATION_RESIZED:
 		# The window (and with it the layout space) changed, so the scale it can
 		# show may have moved while the panel is open - and the card that fitted
@@ -109,9 +101,10 @@ func _build_ui():
 
 	var bg = Panel.new()
 	bg.name = "Card"
-	# The design size: wide enough that all seven tabs fit the TabContainer
-	# without clipping (the bar needs ~490 px and the card's margins take 32).
-	# It is clamped to the window on every open and on a resize while open
+	# The design size: wide enough that all eight tabs fit the TabContainer
+	# without clipping (the tab row needs 497 px and the card's margins take
+	# 32, so the design bar's 688 px has ample room). It is clamped to the
+	# window on every open and on a resize while open
 	# (`fit_card`), never here - at construction the overlay's own rect may not
 	# be laid out yet, and a transient size would pin a card far smaller than the
 	# design for the rest of the panel's life.
@@ -127,7 +120,6 @@ func _build_ui():
 	var v = VBoxContainer.new(); v.name = "VBox"
 	v.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	mc.add_child(v)
-	_card_body = v
 
 	_add_settings_header(v)
 	v.add_child(HSeparator.new())
@@ -136,19 +128,22 @@ func _build_ui():
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(tabs)
 	_tabs = tabs
-	tabs.tab_changed.connect(func(_tab: int): _fit_settings_card())
 
 	# Tab 1: System
 	var t_sys = _create_tab(tabs, "System")
 	var fps_opt = _add_fps_control(t_sys)
 	var win_mode_opt = _add_window_mode_control(t_sys)
+	var opacity_opt = _add_window_opacity_control(t_sys)
 	var check_updates_cb = _add_check_updates_control(t_sys)
 	_add_tab_reset(t_sys, func():
 		SettingsManager.cfg_max_fps = 0
 		SettingsManager.cfg_window_mode = 0
+		SettingsManager.cfg_window_opacity = SettingsManager.OPACITY_DEFAULT
 		SettingsManager.cfg_check_updates = true
 		fps_opt.selected = 6  # "Unlimited" (0)
 		win_mode_opt.selected = 0
+		opacity_opt.selected = SettingsManager.OPACITY_PRESETS.find(
+			SettingsManager.OPACITY_DEFAULT)
 		check_updates_cb.button_pressed = true
 		SettingsManager.save_settings()
 	)
@@ -198,9 +193,18 @@ func _build_ui():
 	var appearance_opt = _add_appearance_control(t_app)
 	var font_btn = _add_font_picker(t_app)
 	var fs_spin = _add_font_control(t_app)
+	var pad_spin = _add_terminal_padding_control(t_app)
 	var scale_opt = _add_ui_scale_control(t_app)
 	t_app.add_child(HSeparator.new())
-	var scheme_btn = _add_scheme_picker(t_app)
+	var scheme_dark = _add_scheme_row(t_app, "Dark scheme:",
+		SettingsManager.cfg_scheme_dark, "(built-in palette)", func(path: String):
+			SettingsManager.cfg_scheme_dark = path
+			SettingsManager.save_settings())
+	var scheme_light = _add_scheme_row(t_app, "Light scheme:",
+		SettingsManager.cfg_scheme_light, "(same as dark)", func(path: String):
+			SettingsManager.cfg_scheme_light = path
+			SettingsManager.save_settings())
+	scheme_light.tooltip_text = "Used when the appearance resolves to light; empty follows the dark scheme."
 	t_app.add_child(HSeparator.new())
 	# The pane titlebar on/off sits with the chrome it controls — next to the
 	# "Title bar" colour and the border — instead of hiding in the System tab,
@@ -208,11 +212,16 @@ func _build_ui():
 	# setting, so it is not in the per-pane settings popup.
 	var show_tb_cb = _add_show_titlebar_control(t_app)
 	var color_btns = _add_color_section(t_app)
+	t_app.add_child(HSeparator.new())
+	var motion_reset = _add_motion_section(t_app)
+	var effects_reset = _add_effects_section(t_app)
 	_add_tab_reset(t_app, func():
 		SettingsManager.cfg_font_path = "res://fonts/DejaVuSansMono.ttf"
 		SettingsManager.cfg_font_size = 14
+		SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
 		SettingsManager.cfg_ui_scale = 100
-		SettingsManager.cfg_color_scheme_path = ""
+		SettingsManager.cfg_scheme_dark = ""
+		SettingsManager.cfg_scheme_light = ""
 		SettingsManager.cfg_show_titlebar = true
 		SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
 		# Resolve first: the rows below reset to the palette's own values, and
@@ -222,12 +231,19 @@ func _build_ui():
 			SettingsManager.set("cfg_" + key,
 				UiPalette.active().color(SettingsManager.CHROME_COLOR_TOKENS[key]))
 		font_btn.text = "DejaVuSansMono.ttf"
-		scheme_btn.text = "(none)"
+		scheme_dark.select_path("")
+		scheme_light.select_path("")
 		fs_spin.value = 14
+		pad_spin.value = PaneTypes.TERMINAL_PADDING_DEFAULT
 		scale_opt.selected = 0
 		appearance_opt.selected = SettingsManager.APPEARANCE_DARK
 		show_tb_cb.button_pressed = true
 		_reset_colors(color_btns)
+		motion_reset.call()
+		SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
+		SettingsManager.cfg_effect_intensity = UiEffects.OFF
+		SettingsManager.cfg_reactive_effects = {}
+		effects_reset.call()
 		SettingsManager.save_settings()
 	)
 
@@ -251,8 +267,18 @@ func _build_ui():
 	_command_tab = t_cmd
 	_add_command_section(t_cmd)
 
-	# Tab 7: About
-	var t_about = _create_tab(tabs, "About")
+	# Tab 7: Shortcuts — the registry table lives on its own tab now
+	var t_keys = _create_tab(tabs, "Shortcuts")
+	_shortcuts_tab = t_keys
+	_add_shortcut_section(t_keys)
+
+	# Tab 8: About — the bundled README and the documents it links. A fill tab:
+	# the Markdown body owns its scrollbar, inside the one card size.
+	#
+	# The bar keeps all eight tabs on one row at the 560x340 floor: the card
+	# clamps to 544 px, the bar to 512, and the tabs need 497
+	# (`test_all_eight_tabs_fit_the_560x340_floor`).
+	var t_about = _create_fill_tab(tabs, "About")
 	_add_about_section(t_about)
 
 	v.add_child(HSeparator.new())
@@ -265,6 +291,7 @@ func _build_ui():
 		SettingsManager.cfg_cursor_shape = shape_opt.selected
 		SettingsManager.cfg_cursor_blink = blink_cb.button_pressed
 		SettingsManager.cfg_font_size = int(fs_spin.value)
+		SettingsManager.cfg_terminal_padding = int(pad_spin.value)
 		SettingsManager.cfg_cursor_blink_speed = blink_spin.value
 		SettingsManager.cfg_scroll_lines = int(scroll_spin.value)
 		SettingsManager.cfg_history_lines = int(history_spin.value)
@@ -285,6 +312,7 @@ func _build_ui():
 	blink_cb.toggled.connect(func(_pressed): _debounce_timer.start())
 	blink_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	fs_spin.value_changed.connect(func(_v): _debounce_timer.start())
+	pad_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	scroll_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	history_spin.value_changed.connect(func(_v): _debounce_timer.start())
 	reason_spins[0].value_changed.connect(func(_v): _debounce_timer.start())
@@ -308,6 +336,24 @@ func _create_tab(tabs: TabContainer, title: String) -> VBoxContainer:
 	var v = VBoxContainer.new()
 	v.add_theme_constant_override("separation", UiTokens.SPACE_LG)
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mc.add_child(v)
+	return v
+
+## A tab whose content fills the card instead of scrolling as a column. The
+## About tab's document viewer owns its own scrollbar; a ScrollContainer here
+## would give the label one line of height and scroll the whole page.
+func _create_fill_tab(tabs: TabContainer, title: String) -> VBoxContainer:
+	var mc = MarginContainer.new()
+	mc.name = title
+	UiTheme.margins(mc, UiTokens.SPACE_LG)
+	mc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tabs.add_child(mc)
+
+	var v = VBoxContainer.new()
+	v.add_theme_constant_override("separation", UiTokens.SPACE_LG)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	mc.add_child(v)
 	return v
 
@@ -423,6 +469,16 @@ static func ui_scale_hint_tooltip(requested: int, applied: int) -> String:
 		+ "scale the layout would be smaller than %d x %d px, the smallest the "
 		+ "interface is laid out for. Make the window bigger to use the full scale."
 	) % [applied, requested, int(UiTokens.MIN_LAYOUT.x), int(UiTokens.MIN_LAYOUT.y)]
+
+## Why the opacity picker cannot act in this session. Pure, like the scale
+## hint, so the wording is pinned without a window.
+static func opacity_hint(driver: String) -> String:
+	return "unavailable on the %s display server" % driver
+
+static func opacity_hint_tooltip(driver: String) -> String:
+	return ("This session's display server (%s) cannot make the window "
+		+ "per-pixel transparent, so the window is drawn opaque. The Wayland "
+		+ "driver can: start gPTY with --display-driver wayland.") % driver
 
 func _add_reasoning_control(v: VBoxContainer) -> Array:
 	var h1 = HBoxContainer.new()
@@ -550,6 +606,318 @@ func _add_appearance_control(v: VBoxContainer) -> OptionButton:
 	hb.add_child(opt)
 	v.add_child(hb)
 	return opt
+
+## The Motion section: the master switch, one picker per transition, and the
+## property rows of whichever animation each picker selected. The rows come
+## from `PaneTransitions`' schema, so adding an animation needs no code here.
+## Returns the tab reset's motion half (the caller saves the file).
+func _add_motion_section(v: VBoxContainer) -> Callable:
+	var title := Label.new()
+	title.name = "MotionTitle"
+	title.text = "Motion"
+	title.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
+	v.add_child(title)
+	var hint := Label.new()
+	hint.text = UiMotion.HINT
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.theme_type_variation = UiTheme.MUTED_LABEL
+	v.add_child(hint)
+
+	var hb := HBoxContainer.new()
+	hb.add_child(_lbl("Pane transitions:"))
+	var opt := OptionButton.new(); opt.name = "MotionOpt"
+	for label in UiMotion.LABELS:
+		opt.add_item(label)
+	opt.selected = UiMotion.level()
+	opt.tooltip_text = "How much a pane change moves; Off draws it in one frame"
+	opt.item_selected.connect(func(idx: int):
+		SettingsManager.cfg_motion = idx
+		SettingsManager.save_settings()
+		_sync_motion_rows()
+	)
+	hb.add_child(opt)
+	v.add_child(hb)
+	_motion_opt = opt
+
+	for kind in PaneTransitions.KINDS:
+		var k := str(kind)
+		var row := HBoxContainer.new()
+		row.add_child(_lbl(k.capitalize() + ":"))
+		var kind_opt := OptionButton.new()
+		kind_opt.name = "%sAnimOpt" % k.capitalize()
+		row.add_child(kind_opt)
+		v.add_child(row)
+		var host := VBoxContainer.new()
+		host.name = "%sParams" % k.capitalize()
+		v.add_child(host)
+		_motion_pickers[k] = kind_opt
+		_motion_params[k] = host
+		kind_opt.item_selected.connect(func(idx: int):
+			_on_motion_animation_selected(k, kind_opt, idx))
+
+	_sync_motion_rows()
+	return func():
+		SettingsManager.cfg_motion = UiMotion.SUBTLE
+		SettingsManager.cfg_pane_animation = PaneTransitions.sanitize_choices({})
+		SettingsManager.cfg_pane_animation_params = {}
+		_sync_motion_rows()
+
+## The ambient half of `Settings -> Appearance -> Effects`: the closed
+## `UiEffects` table and its intensity. Both pickers are immediate settings -
+## the user judges them by looking at the window - so a selection saves and
+## applies to every terminal in every workspace through the normal broadcast.
+## The reactive mapping rows join this same section in the reactive phase.
+func _add_effects_section(v: VBoxContainer) -> Callable:
+	var title := Label.new()
+	title.name = "EffectsTitle"
+	title.text = "Effects"
+	title.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
+	v.add_child(title)
+	var hint := Label.new()
+	hint.text = UiEffects.HINT
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.theme_type_variation = UiTheme.MUTED_LABEL
+	v.add_child(hint)
+
+	var effect_row := HBoxContainer.new()
+	effect_row.add_child(_lbl("Terminal effect:"))
+	var opt := OptionButton.new()
+	opt.name = "EffectOpt"
+	for id in UiEffects.AMBIENT_IDS:
+		opt.add_item(UiEffects.ambient_label(id))
+		opt.set_item_metadata(opt.item_count - 1, id)
+	opt.tooltip_text = "The GPU effect behind terminal text; the intensity below draws none while it is Off"
+	opt.item_selected.connect(func(idx: int):
+		SettingsManager.cfg_effect = str(opt.get_item_metadata(idx))
+		SettingsManager.save_settings()
+		_sync_effect_rows())
+	effect_row.add_child(opt)
+	v.add_child(effect_row)
+	_effect_opt = opt
+
+	var intensity_row := HBoxContainer.new()
+	intensity_row.add_child(_lbl("Intensity:"))
+	var intensity_opt := OptionButton.new()
+	intensity_opt.name = "EffectIntensityOpt"
+	for label in UiEffects.LABELS:
+		intensity_opt.add_item(label)
+	intensity_opt.tooltip_text = "Off draws no effect; Subtle halves the shader's declared amplitude"
+	intensity_opt.item_selected.connect(func(idx: int):
+		SettingsManager.cfg_effect_intensity = idx
+		SettingsManager.save_settings()
+		_sync_effect_rows())
+	intensity_row.add_child(intensity_opt)
+	v.add_child(intensity_row)
+	_effect_intensity_opt = intensity_opt
+
+	v.add_child(HSeparator.new())
+	var reactive_title := Label.new()
+	reactive_title.name = "ReactiveTitle"
+	reactive_title.text = "Reactive effects"
+	reactive_title.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
+	v.add_child(reactive_title)
+	var reactive_hint := Label.new()
+	reactive_hint.text = UiEffects.REACTIVE_HINT
+	reactive_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	reactive_hint.theme_type_variation = UiTheme.MUTED_LABEL
+	v.add_child(reactive_hint)
+	_reactive_rules_host = VBoxContainer.new()
+	_reactive_rules_host.name = "ReactiveRules"
+	v.add_child(_reactive_rules_host)
+	_add_reactive_opt = OptionButton.new()
+	_add_reactive_opt.name = "AddReactiveOpt"
+	_add_reactive_opt.item_selected.connect(_on_add_reactive_selected)
+	v.add_child(_add_reactive_opt)
+	if not ConceptManager.concepts_changed.is_connected(_sync_reactive_rows):
+		ConceptManager.concepts_changed.connect(_sync_reactive_rows)
+
+	_sync_effect_rows()
+	_sync_reactive_rows()
+	return func():
+		_sync_effect_rows()
+		_sync_reactive_rows()
+
+## Read the stored effect and intensity into their pickers. Called on build, on
+## a picker change and whenever the panel is shown: the panel outlives a visit,
+## and a reset or a test may have moved the settings.
+func _sync_effect_rows() -> void:
+	if _effect_opt == null or _effect_intensity_opt == null:
+		return
+	SettingsManager.cfg_effect = UiEffects.sanitize_ambient(str(SettingsManager.cfg_effect))
+	_effect_opt.select(UiEffects.AMBIENT_IDS.find(SettingsManager.cfg_effect))
+	_effect_intensity_opt.selected = UiEffects.level()
+
+## Rebuild the concept -> cue rows from the store. One row per rule: the concept
+## name, the cue picker (Off included) and a remove button. A rule whose concept
+## is not in the current list still renders, because a disabled concept or an
+## uninstalled plugin can come back; the rule is inert until then.
+func _sync_reactive_rows() -> void:
+	if _reactive_rules_host == null:
+		return
+	SettingsManager.cfg_reactive_effects = UiEffects.sanitize_reactive(
+		SettingsManager.cfg_reactive_effects)
+	var rules: Dictionary = SettingsManager.cfg_reactive_effects
+	for child in _reactive_rules_host.get_children():
+		_reactive_rules_host.remove_child(child)
+		# Immediate: the rows are rebuilt inside a picker's own signal, and a
+		# queued free would leave the old rows as orphans for a frame.
+		child.free()
+	if rules.is_empty():
+		var empty := Label.new()
+		empty.text = "No reactive effects. Add a rule to cue a pane when a concept matches."
+		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		empty.theme_type_variation = UiTheme.MUTED_LABEL
+		_reactive_rules_host.add_child(empty)
+	for concept in rules:
+		_build_reactive_row(str(concept), str(rules[concept]))
+	_sync_add_reactive(rules)
+
+func _build_reactive_row(concept: String, effect: String) -> void:
+	var row := HBoxContainer.new()
+	var label := Label.new()
+	label.text = concept
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.tooltip_text = concept
+	row.add_child(label)
+	var opt := OptionButton.new()
+	opt.add_item("Off")
+	opt.set_item_metadata(0, "")
+	for id in UiEffects.REACTIVE_IDS:
+		opt.add_item(UiEffects.reactive_label(id))
+		opt.set_item_metadata(opt.item_count - 1, id)
+	opt.selected = maxi(UiEffects.REACTIVE_IDS.find(effect) + 1, 0)
+	opt.tooltip_text = "The cue this concept fires when it matches"
+	opt.item_selected.connect(func(idx: int):
+		_on_reactive_effect_selected(concept, str(opt.get_item_metadata(idx))))
+	row.add_child(opt)
+	var remove := Button.new()
+	Icons.icon_button(remove, Icons.DELETE, "Remove rule")
+	remove.pressed.connect(func(): _remove_reactive_rule(concept))
+	row.add_child(remove)
+	_reactive_rules_host.add_child(row)
+
+## The "Add rule…" picker: enabled concepts first, registry order kept, names
+## already mapped skipped. Hidden when the table is full or nothing is left.
+func _sync_add_reactive(rules: Dictionary) -> void:
+	if _add_reactive_opt == null:
+		return
+	_add_reactive_opt.clear()
+	var enabled: Array[String] = []
+	var disabled: Array[String] = []
+	for entry in ConceptManager.get_concepts():
+		if not (entry is Dictionary):
+			continue
+		var concept := str(entry.get("name", ""))
+		if concept == "" or rules.has(concept):
+			continue
+		if enabled.has(concept) or disabled.has(concept):
+			continue
+		if entry.get("enabled", false) == true:
+			enabled.append(concept)
+		else:
+			disabled.append(concept)
+	var candidates := enabled + disabled
+	if rules.size() >= UiEffects.MAX_RULES or candidates.is_empty():
+		_add_reactive_opt.visible = false
+		return
+	_add_reactive_opt.visible = true
+	_add_reactive_opt.add_item("Add rule…")
+	_add_reactive_opt.set_item_metadata(0, "")
+	for concept in candidates:
+		_add_reactive_opt.add_item(concept)
+		_add_reactive_opt.set_item_metadata(_add_reactive_opt.item_count - 1, concept)
+	_add_reactive_opt.select(0)
+
+func _on_add_reactive_selected(idx: int) -> void:
+	var concept := str(_add_reactive_opt.get_item_metadata(idx))
+	if concept == "":
+		return
+	SettingsManager.cfg_reactive_effects[concept] = "tint"
+	SettingsManager.save_settings()
+	_sync_reactive_rows()
+
+func _on_reactive_effect_selected(concept: String, effect: String) -> void:
+	if effect == "":
+		SettingsManager.cfg_reactive_effects.erase(concept)
+	else:
+		SettingsManager.cfg_reactive_effects[concept] = effect
+	SettingsManager.save_settings()
+	# The picker that emitted this lives in the row the rebuild frees; freeing
+	# it inside its own signal is an engine error, so rebuild next frame.
+	_sync_reactive_rows.call_deferred()
+
+func _remove_reactive_rule(concept: String) -> void:
+	SettingsManager.cfg_reactive_effects.erase(concept)
+	SettingsManager.save_settings()
+	# Same reason as the cue picker: the button's own row is freed.
+	_sync_reactive_rows.call_deferred()
+
+## Read the stored choices into the pickers and rebuild every property block.
+## Called on build, on a picker change and whenever the panel is shown: the
+## panel outlives a visit, and a test or a reset may have moved the settings.
+func _sync_motion_rows() -> void:
+	if _motion_opt == null:
+		return
+	SettingsManager.cfg_pane_animation = PaneTransitions.sanitize_choices(
+		SettingsManager.cfg_pane_animation)
+	_motion_opt.selected = UiMotion.level()
+	for kind in PaneTransitions.KINDS:
+		var k := str(kind)
+		var opt: OptionButton = _motion_pickers[k]
+		opt.clear()
+		var ids := PaneTransitions.animations_for(k)
+		for id in ids:
+			opt.add_item(PaneTransitions.animation_label(id))
+			opt.set_item_metadata(opt.item_count - 1, id)
+		opt.selected = maxi(ids.find(PaneTransitions.choice(k)), 0)
+		_rebuild_motion_params(k)
+
+func _on_motion_animation_selected(kind: String, opt: OptionButton, idx: int) -> void:
+	SettingsManager.cfg_pane_animation[kind] = str(opt.get_item_metadata(idx))
+	SettingsManager.save_settings()
+	_rebuild_motion_params(kind)
+
+## Regenerate one kind's property rows from the selected animation's schema:
+## a label and a bounded SpinBox per declared property.
+func _rebuild_motion_params(kind: String) -> void:
+	var host: VBoxContainer = _motion_params.get(kind)
+	if host == null:
+		return
+	for child in host.get_children():
+		host.remove_child(child)
+		# Immediate: the rows are rebuilt inside the picker's own signal, and a
+		# queued free would leave the old rows as orphans for a frame.
+		child.free()
+	var id := PaneTransitions.choice(kind)
+	var values := PaneTransitions.param_values(kind, id)
+	for p in PaneTransitions.param_schema(kind, id):
+		var row := HBoxContainer.new()
+		row.add_child(_lbl(str(p["label"]) + ":"))
+		var spin := SpinBox.new()
+		var param_key := str(p["key"])
+		spin.name = "%s_%s" % [kind.capitalize(), param_key]
+		spin.min_value = float(p["min"])
+		spin.max_value = float(p["max"])
+		spin.step = float(p["step"])
+		spin.value = float(values[param_key])
+		spin.value_changed.connect(func(value: float):
+			_store_motion_param(kind, id, param_key, value))
+		row.add_child(spin)
+		host.add_child(row)
+
+## Store one property edit in memory and let the shared debounce timer write
+## the file; a SpinBox drag must not rewrite settings.json on every tick.
+func _store_motion_param(kind: String, id: String, param: String, value: float) -> void:
+	var key := kind + ":" + id
+	var stored := {}
+	var existing = SettingsManager.cfg_pane_animation_params.get(key, {})
+	if existing is Dictionary:
+		stored = existing
+	stored[param] = value
+	SettingsManager.cfg_pane_animation_params[key] = stored
+	if _debounce_timer != null:
+		_debounce_timer.start()
 
 func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: Callable, default_color: Callable) -> Array:
 	var h = HBoxContainer.new()
@@ -727,21 +1095,91 @@ func _add_window_mode_control(v: VBoxContainer) -> OptionButton:
 	v.add_child(hb)
 	return opt
 
+## The window's own opacity. The row is always present: where the display server
+## cannot make the window transparent the picker is disabled and the row says
+## why, because a hidden row made a shipped feature look unshipped.
+func _add_window_opacity_control(v: VBoxContainer) -> OptionButton:
+	var hb = HBoxContainer.new()
+	hb.add_child(_lbl("Window opacity:"))
+	var opt = OptionButton.new(); opt.name = "WindowOpacityOpt"
+	var presets: Array = SettingsManager.OPACITY_PRESETS.duplicate()
+	var idx := presets.find(SettingsManager.cfg_window_opacity)
+	var custom := idx < 0
+	if custom:
+		presets.append(SettingsManager.cfg_window_opacity)
+	for p in presets:
+		opt.add_item("%d%%" % p)
+	if custom:
+		# The FPS picker's documented trap: find() returns -1 for a stored
+		# value that is not a step, and `selected = -1` would leave the
+		# dropdown blank with no way to see the current value.
+		opt.set_item_text(opt.item_count - 1, "%d%% (custom)" % SettingsManager.cfg_window_opacity)
+		idx = presets.size() - 1
+	opt.selected = idx
+	opt.accessibility_name = "Window opacity"
+	opt.item_selected.connect(func(i: int):
+		SettingsManager.cfg_window_opacity = int(presets[i])
+		SettingsManager.save_settings()
+	)
+	if WindowChrome.transparency_supported():
+		opt.tooltip_text = "Applies to the whole window where the display server supports a transparent window; menus and dialogs stay opaque."
+		hb.add_child(opt)
+	else:
+		# A pick that cannot reach the window would be a lie: disable it and
+		# say what the session is missing, in the same row so the card does not
+		# grow a second line for it.
+		opt.disabled = true
+		var driver := DisplayServer.get_name()
+		opt.tooltip_text = opacity_hint_tooltip(driver)
+		hb.add_child(opt)
+		var hint := Label.new()
+		hint.name = "WindowOpacityHint"
+		hint.theme_type_variation = UiTheme.MUTED_LABEL
+		hint.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		hint.mouse_filter = Control.MOUSE_FILTER_STOP  # a tooltip needs a hover target
+		hint.text = opacity_hint(driver)
+		hint.tooltip_text = opacity_hint_tooltip(driver)
+		hb.add_child(hint)
+	v.add_child(hb)
+	return opt
+
+## The terminal grid's inset, per side. The value is a preference, not pane
+## content: the fit spends it before it divides by the cell, so a change
+## refits the live grid and the row/column count stays the count drawn.
+func _add_terminal_padding_control(v: VBoxContainer) -> SpinBox:
+	var hb = HBoxContainer.new()
+	hb.add_child(_lbl("Terminal padding:"))
+	var spin = SpinBox.new(); spin.name = "TerminalPaddingSpin"
+	spin.min_value = 0; spin.max_value = PaneTypes.TERMINAL_PADDING_MAX; spin.step = 1
+	spin.suffix = " px"
+	spin.value = SettingsManager.cfg_terminal_padding
+	spin.accessibility_name = "Terminal padding in pixels"
+	spin.tooltip_text = "Space between the pane edge and the terminal grid, on every side. The grid shrinks to keep the row and column count truthful."
+	hb.add_child(spin)
+	v.add_child(hb)
+	return spin
+
 func _add_check_updates_control(v: VBoxContainer) -> CheckBox:
 	var cb = CheckBox.new(); cb.name = "CheckUpdatesCb"; cb.text = "Check for updates on startup"
 	cb.button_pressed = SettingsManager.cfg_check_updates
 	v.add_child(cb)
 	return cb
 
-func _add_scheme_picker(v: VBoxContainer) -> Button:
-	return _add_file_picker(v, "Color scheme:", SettingsManager.cfg_color_scheme_path, [["*.txt; *.json; *.csv", "Scheme files"]], func(path: String):
-		SettingsManager.cfg_color_scheme_path = path
-		SettingsManager.save_settings()
-	, func():
-		# Empty path = the built-in default palette (terminals revert live).
-		SettingsManager.cfg_color_scheme_path = ""
-		SettingsManager.save_settings()
-	)
+## One colour-scheme row. `empty_label` names what the first item means: the
+## built-in palette for a global slot, "follow Settings" for a pane.
+func _add_scheme_row(v: VBoxContainer, label: String, current: String,
+		empty_label: String, on_chosen: Callable) -> SchemePicker:
+	var hb = HBoxContainer.new()
+	hb.add_child(_lbl(label))
+	var picker := SchemePicker.new()
+	picker.name = label.trim_suffix(":").replace(" ", "") + "Picker"
+	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	picker.accessibility_name = label.trim_suffix(":")
+	picker.setup(current, empty_label)
+	picker.scheme_chosen.connect(on_chosen)
+	hb.add_child(picker)
+	v.add_child(hb)
+	return picker
 
 func _add_font_picker(v: VBoxContainer) -> Button:
 	return _add_file_picker(v, "Font:", SettingsManager.cfg_font_path, [[PaneTypes.font_filter(), "Fonts"]], func(path: String):
@@ -824,47 +1262,61 @@ var _version_label: Label
 var _protocol_label: Label
 var _concept_list: VBoxContainer
 var _concept_terminal: GptyTerminal  # any terminal for global concept FFI
-## The About tab and its shortcut table, kept so `open_about()` can land on the
-## right tab and `_refresh_shortcut_list()` can rebuild the table on each open.
-var _about_tab: VBoxContainer = null
+## The Shortcuts tab, kept so `open_shortcuts()` can land on it; and its table,
+## which `_refresh_shortcut_list()` rebuilds on each open.
+var _shortcuts_tab: VBoxContainer = null
 var _shortcut_list: VBoxContainer = null
+## The About tab's document viewer; its README loads on the first visit.
+var _docs_viewer: DocsViewer = null
 ## The aligned chord column's floor: the widest chord in the list is
 ## "Ctrl+PageDown".
 const SHORTCUT_CHORD_WIDTH := 108.0
-## The About tab's one outbound link.
-const REPO_URL := "https://github.com/godot-pty/gpty"
 
+## The About tab: one top-level row with both versions, then the bundled
+## documentation. The repository URL row is gone - the README itself links the
+## repository, and its links open the documents beside it.
 func _add_about_section(v: VBoxContainer):
+	var row := HBoxContainer.new()
+	row.name = "VersionRow"
+	row.add_theme_constant_override("separation", UiTokens.SPACE_XL)
 	_version_label = Label.new()
 	_version_label.name = "VersionLabel"
 	_version_label.text = "gpty v" + GptyTerminal.get_app_version()
 	_version_label.add_theme_font_size_override("font_size", UiTokens.FS_BODY)
-	v.add_child(_version_label)
-
-	v.add_child(HSeparator.new())
-
-	var ipc_row = HBoxContainer.new()
-	ipc_row.add_child(_lbl("IPC protocol:"))
+	row.add_child(_version_label)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spacer)
+	row.add_child(_lbl("IPC protocol:"))
 	# From the one definition (`gpty_ipc::protocol::PROTOCOL_VERSION`), not a
 	# literal: the same value the wire carries and the CLI prints.
 	_protocol_label = Label.new()
 	_protocol_label.name = "ProtocolLabel"
 	_protocol_label.text = GptyTerminal.get_ipc_protocol_version()
-	ipc_row.add_child(_protocol_label)
-	v.add_child(ipc_row)
+	row.add_child(_protocol_label)
+	v.add_child(row)
 
-	var url_btn := Button.new()
-	url_btn.name = "RepoUrl"
-	url_btn.text = "github.com/godot-pty/gpty"
-	url_btn.flat = true
-	url_btn.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	url_btn.theme_type_variation = UiTheme.ACCENT_BUTTON
-	url_btn.tooltip_text = "Open the gPTY repository in your browser"
-	url_btn.pressed.connect(func(): ExternalLink.open(REPO_URL))
-	v.add_child(url_btn)
+	# The renderer is a support fact (which driver, and whether the GPU is
+	# missing), so it sits under the versions rather than in a tab of its own.
+	var renderer_label := Label.new()
+	renderer_label.name = "RendererLabel"
+	renderer_label.text = "Renderer: " + RendererInfo.about_text()
+	renderer_label.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
+	renderer_label.theme_type_variation = UiTheme.MUTED_LABEL
+	renderer_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(renderer_label)
 
-	_about_tab = v
 	v.add_child(HSeparator.new())
+
+	_docs_viewer = DocsViewer.new()
+	_docs_viewer.name = "DocsViewer"
+	_docs_viewer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_docs_viewer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(_docs_viewer)
+
+## The Shortcuts tab: every registered binding, grouped, with the chords read
+## from the registry.
+func _add_shortcut_section(v: VBoxContainer):
 	var shortcut_heading := Label.new()
 	shortcut_heading.name = "ShortcutHeading"
 	shortcut_heading.text = "Keyboard Shortcuts"
@@ -876,9 +1328,9 @@ func _add_about_section(v: VBoxContainer):
 	v.add_child(_shortcut_list)
 	_refresh_shortcut_list()
 
-## Rebuild the shortcut table from the registry. Called on construction, on
-## `open_about()` and whenever the panel is shown: a chord is only known once
-## the workspace has registered it, so the list is re-read rather than
+## Rebuild the shortcut table from the registry. Called when the tab is built,
+## on `open_shortcuts()` and whenever the panel is shown: a chord is only known
+## once the workspace has registered it, so the list is re-read rather than
 ## snapshotted here.
 func _refresh_shortcut_list() -> void:
 	if _shortcut_list == null:
@@ -1160,12 +1612,13 @@ func open_commands(add_now := false) -> void:
 	if add_now:
 		_show_command_dialog(-1)
 
-## The palette's "Keyboard Shortcuts": the About tab, where the list lives.
-## Opening, never toggling, so a second run cannot close what it just opened.
-func open_about() -> void:
+## The palette's "Keyboard Shortcuts": the Shortcuts tab, where the list now
+## lives. Opening, never toggling, so a second run cannot close what it just
+## opened.
+func open_shortcuts() -> void:
 	open()
-	if _tabs != null and _about_tab != null:
-		_tabs.current_tab = _tabs.get_tab_idx_from_control(_tab_control(_about_tab))
+	if _tabs != null and _shortcuts_tab != null:
+		_tabs.current_tab = _tabs.get_tab_idx_from_control(_tab_control(_shortcuts_tab))
 	# Read after the tab is up: the workspace registers its bindings once, and a
 	# panel built before that would otherwise show the previous set.
 	_refresh_shortcut_list()

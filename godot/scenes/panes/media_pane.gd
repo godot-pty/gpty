@@ -173,8 +173,8 @@ func _build_ui():
 	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_status.clip_text = true
 	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_status.add_theme_font_size_override("font_size", maxi(UiTokens.FS_CAPTION, font_size - 2))
 	root.add_child(_status)
+	_recompute_cell_metrics()
 
 	# Audible output is the player's own child node: it has no visual, so it
 	# must not sit in the layout where it would claim height from the video.
@@ -643,6 +643,11 @@ func _get_layout_state() -> Dictionary:
 		"loop": loop_enabled,
 	})
 	return state
+
+func _recompute_cell_metrics():
+	if _status:
+		_status.add_theme_font_size_override("font_size", maxi(UiTokens.FS_CAPTION, font_size - 2))
+	PaneBody.empty_state_font(_placeholder_title, _placeholder_hint, font_size)
 
 func apply_settings(settings: Dictionary):
 	# The panel re-applies the whole gathered dict on every debounced edit, so

@@ -16,7 +16,7 @@ The index lives in gPTY's own state directory, never inside your vault, so point
 
 ## Write a note and link it
 
-1. Press **New note**. The pane creates `Untitled.md` at the vault root; a bare name you type instead gains the `.md` suffix. The directory must already exist inside the vault.
+1. Press **New**. The pane creates `Untitled.md` at the vault root; a bare name you type instead gains the `.md` suffix. The directory must already exist inside the vault. (A new wiki pane opens the link graph; press **Notes** to reach the list and its New button.)
 2. Write in the editor. The toolbar switches between **Edit** (source only), **Split** (source and live preview) and **Preview** (rendered only); Split is what makes the preview update as you type.
 3. Link another note with a wikilink target such as `[[getting-started]]`, a labelled one such as `[[pane|the pane note]]`, or a heading one such as `[[vault#Titles and search]]`.
 4. Save with **Save** or `Ctrl+S`. The dirty marker (`● Unsaved changes`) clears.
