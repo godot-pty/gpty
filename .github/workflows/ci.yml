@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, master]
   pull_request:
-    branches: [main, master]
+    branches: [main, "release/v*"]
 
 # Least privilege: every job here only reads the repository. Without this
 # block each job inherits the repository default token scope, which is handed
