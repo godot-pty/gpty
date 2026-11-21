@@ -20,7 +20,7 @@ log = "0.4"
 alacritty_terminal = "0.26.0"
 # Colour-scheme import parses Alacritty TOML without a second format reader.
 toml = "1.1"
-rusqlite = { version = "0.41", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 
 [dev-dependencies]
 # Test-only: `TempDir` removes a test's files and directories when the guard
