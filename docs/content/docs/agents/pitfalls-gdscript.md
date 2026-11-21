@@ -18,6 +18,12 @@ Curated traps, subtle engine behaviors, and invariants for Godot 4.7+ and GDScri
 - **Ancestor theme resolves only after entering the tree:** A script probe setting `host.theme = UiTheme.build()` and checking `get_theme_stylebox("panel")` in the same frame gets Godot's default theme. Await one `process_frame` first for variation lookup to resolve.
 - **Phosphor glyph `Label` instantiation cost:** In Godot 4.7.2, `add_child` of a `Label` carrying a Phosphor PUA codepoint costs 3.3–3.5 ms (vs. 0.09 ms for ASCII), and re-assigning `text` on an attached label costs ~0.00 ms. Update labels and glyphs in place; avoid recreation during workspace or tab switching.
 
+## Rendering & Display
+
+- **The adapter-type enum is not exposed, and its value is not a software test:** `RenderingServer.get_video_adapter_type()` exists, but `RenderingServer.VIDEO_ADAPTER_TYPE_*` is not in GDScript 4.7 (naming one is a parse error), and the value is not a hardware/software flag: on the same desktop the RTX 5070 Ti returned `2` and llvmpipe `0` (2026-11-21). Detect a CPU rasterizer by adapter name (`RendererInfo.is_software`: llvmpipe, softpipe, SwiftShader, Microsoft Basic Render Driver, Apple Software Renderer); the startup `[renderer]` line and the status bar's `· software` marker are the user-visible record.
+- **The primary screen is not the window's screen:** `DisplayServer.screen_get_refresh_rate()` with no argument answers the primary display, so a window on a 60 Hz secondary display is capped at the primary's 165 Hz in one direction and at the wrong rate in the other. Use `DisplayServer.window_get_current_screen()` and pass it to `screen_get_refresh_rate(screen)`; `screen_get_scale(screen)` is the Retina/HiDPI factor the logical viewport is drawn against. `RendererInfo.report` and `Workspace._apply_fps_setting` are the call sites; a screen change after launch still needs the queued re-apply row.
+- **Glow is a Forward+ feature:** `Environment.glow_enabled` is accepted and ignored on the Mobile and Compatibility renderers, so `get_current_rendering_method() != "gl_compatibility"` enables it wrongly on Mobile. Use `RendererInfo.supports_glow(method)`, true only for `forward_plus`.
+
 ## Node Hierarchy, Sizing & Viewports
 
 - **`extends Node` cannot render `Control` children:** Only `Control` nodes render child `Control`s (`Label`, `Button`, etc.). A `Label` parented to a plain `Node` is completely invisible. Containers must extend `Control`.

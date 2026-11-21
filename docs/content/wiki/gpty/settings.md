@@ -14,12 +14,12 @@ Per-pane settings are a separate popup reached from a sidebar pane row or a pane
 
 | Setting | Default | Values |
 |---|---|---|
-| Max FPS | Unlimited (`0`) | 60, 120, 144, 165, 240, Native (`-1`, follows the monitor), Unlimited |
+| Max FPS | Unlimited (`0`) | 60, 120, 144, 165, 240, Native (`-1`, follows the window's current monitor), Unlimited |
 | Window Mode | System Frame | System Frame, Borderless, Fullscreen |
 | Window opacity | 100 % | 100, 95, 90, 85, 80, 75, 70, 60, 50, 40 % |
 | Check for updates on startup | On | On / Off |
 
-`Native` asks the display server for its refresh rate and caps there; `Unlimited` removes the cap entirely. Window Mode is the same value as the sidebar's window-mode dropdown, and the control's tooltip says what each value draws: `System Frame` keeps the operating system's window frame and its controls and hides gPTY's own titlebar, `Borderless` is a window with no desktop frame that draws gPTY's titlebar, and `Fullscreen` fills the screen and keeps that titlebar.
+`Native` asks the display server for the window's current screen's refresh rate and caps there; on a multi-monitor setup that is the screen the window is on, not the primary one. `Unlimited` removes the cap entirely. Window Mode is the same value as the sidebar's window-mode dropdown, and the control's tooltip says what each value draws: `System Frame` keeps the operating system's window frame and its controls and hides gPTY's own titlebar, `Borderless` is a window with no desktop frame that draws gPTY's titlebar, and `Fullscreen` fills the screen and keeps that titlebar.
 
 **Window opacity** draws the whole window at the chosen alpha. The row is always shown; where the display server cannot make the window transparent — the X11 driver on a Wayland desktop is the common case — the picker is disabled and says `unavailable on the <server> display server` beside it, with the Wayland way out in its tooltip. The app fades as one surface — the terminal, the chrome, the empty workspace and the overlays all take the same alpha — while engine dialogs, file pickers and popup menus are separate surfaces and stay opaque.
 
@@ -99,7 +99,7 @@ Every binding the app knows, grouped as Workspace, New Panes, Panes, Keyboard Fo
 
 ## About
 
-The app version and the IPC protocol version gPTY speaks, on one line. The protocol number is useful when a CLI and a GUI from different builds disagree about the wire format.
+The app version and the IPC protocol version gPTY speaks, on one line. The protocol number is useful when a CLI and a GUI from different builds disagree about the wire format. The line under it names the renderer the engine actually uses — the driver, the device, and when Godot had to fall back to a CPU rasterizer, that state. On a software rasterizer the status bar's FPS reads `… FPS · software`, because the number then measures the CPU rather than gPTY.
 
 Below it is the README — generated from the repository's `README.md` — rendered in the panel. Every Markdown document it links (the guides, the roadmap and changelog pages, the agent rules) also ships inside the app, so a link opens that document in place instead of a browser. The two arrow buttons beside the document's path walk back and forward through what you opened; the oldest step is always the README, so pressing Back returns to the front page. A link the build does not carry is refused with a toast and the page you are reading stays. Images show as their alt text — the panel renders text, not media — and the badge header the repository's front page carries is left out.
 
