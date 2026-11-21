@@ -974,6 +974,10 @@ func test_selecting_an_animation_rebuilds_its_property_rows():
 	assert_not_null(_spin_in(host, "Create_duration_ms"), "fade exposes its duration")
 	assert_null(_spin_in(host, "Create_scale_from"), "fade has no scale property")
 
+	_select_animation(picker, "slide")
+	assert_not_null(_spin_in(host, "Create_distance_px"), "slide exposes its distance")
+	assert_null(_spin_in(host, "Create_scale_from"), "slide has no scale property")
+
 	_select_animation(picker, "fade_scale")
 	assert_not_null(_spin_in(host, "Create_scale_from"), "fade_scale exposes its scale")
 

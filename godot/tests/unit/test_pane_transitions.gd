@@ -45,10 +45,44 @@ func test_the_pickers_are_filtered_by_kind():
 	assert_true(create_ids.has("none"))
 	assert_true(create_ids.has("fade"))
 	assert_true(create_ids.has("fade_scale"))
+	assert_true(create_ids.has("slide"))
+	assert_true(create_ids.has("pop"))
 	assert_false(create_ids.has("move"), "a rect move cannot serve a create")
+	assert_false(create_ids.has("crossfade"), "a dissolve cannot serve a create")
 	var swap_ids := PaneTransitions.animations_for("swap")
 	assert_true(swap_ids.has("move"))
+	assert_true(swap_ids.has("crossfade"))
 	assert_false(swap_ids.has("fade_scale"))
+	assert_false(swap_ids.has("slide"), "a position slide cannot serve a swap")
+	assert_false(swap_ids.has("pop"))
+
+func test_every_create_and_close_animation_declares_a_channel():
+	for kind in ["create", "close"]:
+		for id in PaneTransitions.animations_for(kind):
+			if str(id) == "none":
+				continue
+			assert_false((PaneTransitions.ANIMATIONS[id]["channels"] as Array).is_empty(),
+				"%s serves %s but declares no channel" % [id, kind])
+
+func test_a_slide_offset_points_at_the_split_edge_and_stays_in_the_grid():
+	var grid := Control.new()
+	grid.size = Vector2(400, 300)
+	add_child_autofree(grid)
+	var w := Control.new()
+	w.size = Vector2(100, 100)
+	w.position = Vector2(100, 100)
+	grid.add_child(w)
+	assert_eq(PaneTransitions._slide_offset(w, "right", 40.0), Vector2(-40, 0),
+		"a tile on the split's right enters from its left seam")
+	assert_eq(PaneTransitions._slide_offset(w, "left", 40.0), Vector2(40, 0))
+	assert_eq(PaneTransitions._slide_offset(w, "bottom", 40.0), Vector2(0, -40))
+	assert_eq(PaneTransitions._slide_offset(w, "top", 40.0), Vector2(0, 40))
+	assert_eq(PaneTransitions._slide_offset(w, "sideways", 40.0), Vector2.ZERO)
+	assert_eq(PaneTransitions._slide_offset(w, "", 40.0), Vector2.ZERO,
+		"a restored tile has no direction")
+	w.position = Vector2(0, 100)
+	assert_eq(PaneTransitions._slide_offset(w, "right", 40.0), Vector2.ZERO,
+		"a tile at the grid's left edge has no room to slide out of it")
 
 func test_every_param_schema_entry_is_complete_and_in_range():
 	for id in PaneTransitions.ANIMATIONS:

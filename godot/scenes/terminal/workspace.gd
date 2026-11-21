@@ -673,8 +673,9 @@ func _spawn_pane_into(ws: Dictionary, type_name: String, opts := {}, activate :=
 		ToastManager.warn("Cannot add pane — grid is full")
 		return null
 	var w = tm.tiles[-1].wrapper
+	var edge := str(tm.tiles[-1].get("edge", ""))
 	_add_body_to_grid_into(ws, w, body)
-	_transitions.create(w, _motion_allowed(ws.tm))
+	_transitions.create(w, _motion_allowed(ws.tm), edge)
 	# A pane the user asked for is the pane they are working in: record it and
 	# hand it the keyboard. Only the active workspace can take focus (a hidden
 	# terminal's `grab_focus` is dropped by the engine), and a restore passes
@@ -1019,7 +1020,11 @@ func _kill_now(body: Control):
 	# Decided before the pane leaves the tile list: the flood scan and the
 	# divider-drag check both read the grid as it was while this pane lived.
 	var animate := _motion_allowed(ws.tm)
-	ws.tm.kill(body, _close_transition.bind(animate))
+	# Read the tile's split side before it leaves the model: a slide exit
+	# moves the ghost toward it.
+	var ti: int = ws.tm._tile_index_of(body)
+	var edge: String = (str(ws.tm.tiles[ti].get("edge", "")) if ti >= 0 else "")
+	ws.tm.kill(body, _close_transition.bind(edge, animate))
 	_close_pane_settings_for(body)
 	_apply_layout()
 	if held_focus:
@@ -1037,13 +1042,14 @@ func _kill_now(body: Control):
 
 ## Draw a dying pane above the sibling that is growing into its rect (or the
 ## fade would play underneath it) and below the divider bands, then play its
-## exit. `animate` is `_motion_allowed` read before the tile left the list.
-func _close_transition(w: Control, animate: bool) -> void:
+## exit. `edge` is the closed tile's split side, which a slide exit moves
+## toward; `animate` is `_motion_allowed` read before the tile left the list.
+func _close_transition(w: Control, edge: String, animate: bool) -> void:
 	var grid := w.get_parent()
 	if grid != null:
 		var dividers := grid.get_node_or_null("DividerHandles")
 		grid.move_child(w, dividers.get_index() if dividers != null else -1)
-	_transitions.close(w, animate)
+	_transitions.close(w, animate, edge)
 
 ## Motion is on, the manager is the visible workspace's, no divider drag owns
 ## the grid, and no terminal in it is in its flood cadence (a swap resizes,
@@ -1114,9 +1120,11 @@ func _swap_pane_now(body: Control, new_type_name: String):
 
 	# Find the new wrapper (tile's wrapper was replaced in-place)
 	var new_wrapper = null
+	var new_edge := ""
 	for t in tm.tiles:
 		if tm._find_body(t.wrapper) == new_body:
 			new_wrapper = t.wrapper
+			new_edge = str(t.get("edge", ""))
 			break
 
 	# Remove old wrapper from grid, add new one.
@@ -1128,7 +1136,7 @@ func _swap_pane_now(body: Control, new_type_name: String):
 	_apply_layout()
 	# A type switch destroys the old body and builds the new one in the same
 	# rect; the new pane arrives with the configured create transition.
-	_transitions.create(new_wrapper, _motion_allowed(tm))
+	_transitions.create(new_wrapper, _motion_allowed(tm), new_edge)
 	_list()
 	# The swapped-in body is the pane the user just acted on: record it and
 	# apply the one focus rule (a terminal takes the keyboard, a read-only

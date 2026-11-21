@@ -190,3 +190,90 @@ func test_a_flooding_terminal_suppresses_the_transition():
 	assert_true(_rect(term_w).is_equal_approx(viewer_was),
 		"the swap lands without a tween")
 	assert_eq(ws._transitions.playing(), 0)
+
+# ── Slide, pop and crossfade ───────────────────────────────────────────
+
+func test_a_slide_create_enters_from_the_split_edge_and_lands_on_its_rect():
+	var ws = await _make_workspace()
+	await _empty_grid(ws)
+	ws._spawn_pane("code_viewer", {}, false)
+	await wait_seconds(0.25)
+
+	SettingsManager.cfg_pane_animation = {"create": "slide"}
+	SettingsManager.cfg_pane_animation_params = {"create:slide": {"duration_ms": 200.0, "distance_px": 40.0}}
+	var second = ws._spawn_pane("code_viewer", {}, false)
+	var w := _wrapper_of(ws._tm, second)
+	assert_eq(str(ws._tm.tiles[-1].get("edge", "")), "right",
+		"the wider grid splits horizontally, the new tile on the right")
+	assert_eq(ws._transitions.playing(), 1, "only the new pane animates")
+	var start := _rect(w)
+	await wait_seconds(0.3)
+	var landed := _rect(w)
+	assert_almost_eq(start.position.x, landed.position.x - 40.0, 0.5,
+		"the pane starts 40 px toward its left seam and slides right")
+	assert_almost_eq(start.position.y, landed.position.y, 0.5)
+	assert_true(start.size.is_equal_approx(landed.size), "a slide never writes the tile's size")
+	ws._apply_layout()
+	assert_true(_rect(w).is_equal_approx(landed), "the tile and the drawn rect agree")
+	assert_eq(ws._transitions.playing(), 0)
+
+func test_a_slide_close_exits_toward_the_split_edge():
+	SettingsManager.cfg_pane_animation = {"create": "none", "close": "slide"}
+	SettingsManager.cfg_pane_animation_params = {"close:slide": {"duration_ms": 200.0, "distance_px": 40.0}}
+	var ws = await _make_workspace()
+	await _empty_grid(ws)
+	ws._spawn_pane("code_viewer", {}, false)
+	var second = ws._spawn_pane("code_viewer", {}, false)
+	var w := _wrapper_of(ws._tm, second)
+	var landed := _rect(w)
+	ws._kill_now(second)
+	assert_true(is_instance_valid(w), "the ghost is drawn while it slides out")
+	assert_eq(ws._transitions.playing(), 1)
+	await wait_seconds(0.15)
+	assert_lt(w.position.x, landed.position.x - 5.0, "the ghost moved toward its left seam")
+	await wait_seconds(0.2)
+	assert_false(is_instance_valid(w))
+	assert_eq(ws._transitions.playing(), 0)
+
+func test_a_pop_create_grows_from_its_scale():
+	SettingsManager.cfg_pane_animation = {"create": "pop"}
+	SettingsManager.cfg_pane_animation_params = {"create:pop": {"duration_ms": 200.0, "scale_from": 0.5, "overshoot_pct": 0.0}}
+	var ws = await _make_workspace()
+	await _empty_grid(ws)
+	var body = ws._spawn_pane("code_viewer", {}, false)
+	var w := _wrapper_of(ws._tm, body)
+	assert_almost_eq(w.scale.x, 0.5, 0.02, "the pane starts at the pop's scale")
+	assert_lt(w.modulate.a, 1.0)
+	await wait_seconds(0.3)
+	assert_eq(w.scale, Vector2.ONE)
+	assert_eq(w.modulate, Color.WHITE)
+	assert_eq(ws._transitions.playing(), 0)
+
+func test_a_crossfade_swap_dissolves_through_the_midpoint():
+	SettingsManager.cfg_pane_animation = {"create": "none", "swap": "crossfade"}
+	SettingsManager.cfg_pane_animation_params = {"swap:crossfade": {"duration_ms": 240.0}}
+	var ws = await _make_workspace()
+	await _empty_grid(ws)
+	var a = ws._spawn_pane("code_viewer", {}, false)
+	var b = ws._spawn_pane("code_viewer", {}, false)
+	await wait_process_frames(1)
+	var wa := _wrapper_of(ws._tm, a)
+	var wb := _wrapper_of(ws._tm, b)
+	var ra := _rect(wa)
+	var rb := _rect(wb)
+
+	assert_true(ws._tm.swap_positions(0, 1))
+	assert_true(_rect(wa).is_equal_approx(ra), "the dissolve starts where each pane was drawn")
+	assert_true(_rect(wb).is_equal_approx(rb))
+	assert_eq(ws._transitions.playing(), 2)
+
+	await wait_seconds(0.08)
+	assert_lt(wa.modulate.a, 0.9, "both panes dissolve out before the midpoint")
+	assert_lt(wb.modulate.a, 0.9)
+
+	await wait_seconds(0.3)
+	assert_true(_rect(wa).is_equal_approx(rb), "each pane ends in the other's rect")
+	assert_true(_rect(wb).is_equal_approx(ra))
+	assert_eq(wa.modulate, Color.WHITE, "the dissolve restores full opacity")
+	assert_eq(wb.modulate, Color.WHITE)
+	assert_eq(ws._transitions.playing(), 0)

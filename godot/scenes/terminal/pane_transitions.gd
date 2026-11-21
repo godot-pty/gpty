@@ -19,8 +19,9 @@ const KINDS := ["create", "close", "swap"]
 const DEFAULTS := {"create": "fade_scale", "close": "fade_scale", "swap": "move"}
 
 ## Registry order is the picker order, `none` first. `channels` is the closed
-## vocabulary the runner draws: "alpha" and "scale" for create/close; a swap
-## always moves the wrapper between rects and declares none.
+## vocabulary the runner draws: "alpha", "scale" and "slide" for create/close;
+## a swap always moves the wrapper between rects, and declares "fade" when it
+## dissolves through the midpoint instead of sliding between them.
 const ANIMATIONS := {
 	"none": {
 		"label": "None",
@@ -46,12 +47,39 @@ const ANIMATIONS := {
 			{"key": "overshoot_pct", "label": "Overshoot (%)", "default": 2.0, "min": 0.0, "max": 3.0, "step": 0.5},
 		],
 	},
+	"slide": {
+		"label": "Slide",
+		"kinds": ["create", "close"],
+		"channels": ["alpha", "slide"],
+		"params": [
+			{"key": "duration_ms", "label": "Duration (ms)", "default": 200.0, "min": 40.0, "max": 600.0, "step": 10.0},
+			{"key": "distance_px", "label": "Distance (px)", "default": 48.0, "min": 8.0, "max": 240.0, "step": 4.0},
+		],
+	},
+	"pop": {
+		"label": "Pop",
+		"kinds": ["create", "close"],
+		"channels": ["alpha", "scale"],
+		"params": [
+			{"key": "duration_ms", "label": "Duration (ms)", "default": 120.0, "min": 40.0, "max": 600.0, "step": 10.0},
+			{"key": "scale_from", "label": "Scale from", "default": 0.55, "min": 0.2, "max": 1.0, "step": 0.01},
+			{"key": "overshoot_pct", "label": "Overshoot (%)", "default": 3.0, "min": 0.0, "max": 3.0, "step": 0.5},
+		],
+	},
 	"move": {
 		"label": "Move",
 		"kinds": ["swap"],
 		"channels": [],
 		"params": [
 			{"key": "duration_ms", "label": "Duration (ms)", "default": 180.0, "min": 40.0, "max": 600.0, "step": 10.0},
+		],
+	},
+	"crossfade": {
+		"label": "Crossfade",
+		"kinds": ["swap"],
+		"channels": ["fade"],
+		"params": [
+			{"key": "duration_ms", "label": "Duration (ms)", "default": 220.0, "min": 40.0, "max": 600.0, "step": 10.0},
 		],
 	},
 }
@@ -148,6 +176,32 @@ static func _param_value(p: Dictionary, v) -> float:
 		return float(p["default"])
 	return clampf(f, float(p["min"]), float(p["max"]))
 
+## The displacement a slide starts at, in the wrapper's parent space:
+## `distance` px toward the tile's split edge, so the pane enters from the seam
+## it was carved along. Clamped to the parent, so a ghost whose tile has since
+## moved never slides outside its grid. An unknown or absent edge (a restored
+## tile) returns zero and the slide channel draws nothing.
+static func _slide_offset(w: Control, edge: String, distance: float) -> Vector2:
+	var off := Vector2.ZERO
+	match edge:
+		"right": off = Vector2(-distance, 0.0)
+		"left": off = Vector2(distance, 0.0)
+		"bottom": off = Vector2(0.0, -distance)
+		"top": off = Vector2(0.0, distance)
+	if off == Vector2.ZERO:
+		return off
+	var parent := w.get_parent()
+	if not (parent is Control):
+		return off
+	var area := (parent as Control).size
+	var room_left := maxf(w.position.x, 0.0)
+	var room_right := maxf(area.x - w.position.x - w.size.x, 0.0)
+	var room_top := maxf(w.position.y, 0.0)
+	var room_bottom := maxf(area.y - w.position.y - w.size.y, 0.0)
+	off.x = clampf(off.x, -room_left, room_right)
+	off.y = clampf(off.y, -room_top, room_bottom)
+	return off
+
 # ── Runner (instance: the live tweens and ghosts) ───────────────────────
 
 ## wrapper -> {tween, kind, to: Rect2, base_modulate: Color}.
@@ -159,9 +213,11 @@ func playing() -> int:
 	_prune()
 	return _entries.size()
 
-## Fade/scale a newly spawned wrapper into its final rect. False means the
-## final frame is already drawn (motion off, `none`, or nothing to animate).
-func create(w: Control, allowed: bool) -> bool:
+## Draw a newly spawned wrapper with the selected create animation. `edge` is
+## the tile's split side (`left`/`right`/`top`/`bottom`), which a slide enters
+## from; `""` for a tile no split carved. False means the final frame is
+## already drawn (motion off, `none`, or nothing to animate).
+func create(w: Control, allowed: bool, edge: String = "") -> bool:
 	if not _animatable(w, allowed, "create") or _dying(w):
 		return false
 	var id := choice("create")
@@ -172,12 +228,19 @@ func create(w: Control, allowed: bool) -> bool:
 	var d := float(p.get("duration_ms", 160.0)) / 1000.0
 
 	_claim(w, true)
+	var to := Rect2(w.position, w.size)
 	w.pivot_offset = w.size * 0.5
 	var tw := w.create_tween()
 	tw.set_parallel(true)
 	if channels.has("alpha"):
 		w.modulate = Color(base.r, base.g, base.b, 0.0)
 		tw.tween_property(w, "modulate:a", base.a, d)
+	if channels.has("slide"):
+		var off := _slide_offset(w, edge, float(p.get("distance_px", 48.0)))
+		if off != Vector2.ZERO:
+			w.position = to.position + off
+			tw.tween_property(w, "position", to.position, d) \
+				.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	if channels.has("scale"):
 		var from := float(p.get("scale_from", 1.0))
 		w.scale = Vector2(from, from)
@@ -192,13 +255,14 @@ func create(w: Control, allowed: bool) -> bool:
 			tw.tween_property(w, "scale", Vector2.ONE, d) \
 				.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw.finished.connect(_finish.bind(w))
-	_entries[w] = {"tween": tw, "kind": "create", "to": Rect2(w.position, w.size), "base_modulate": base}
+	_entries[w] = {"tween": tw, "kind": "create", "to": to, "base_modulate": base}
 	return true
 
 ## Play a closing wrapper's exit and free it when the transition ends. This
 ## owns the free on every path: when the animation is off, `none`, or the
-## wrapper cannot animate, it is freed at once and this answers false.
-func close(w: Control, allowed: bool) -> bool:
+## wrapper cannot animate, it is freed at once and this answers false. `edge`
+## is the closed tile's split side, which a slide exit moves toward.
+func close(w: Control, allowed: bool, edge: String = "") -> bool:
 	if not is_instance_valid(w):
 		return false
 	if not _animatable(w, allowed, "close"):
@@ -224,16 +288,25 @@ func close(w: Control, allowed: bool) -> bool:
 		var to := float(p.get("scale_from", 1.0))
 		tw.tween_property(w, "scale", Vector2(to, to), d) \
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	if channels.has("slide"):
+		var off := _slide_offset(w, edge, float(p.get("distance_px", 48.0)))
+		if off != Vector2.ZERO:
+			tw.tween_property(w, "position", w.position + off, d) \
+				.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 	tw.finished.connect(_finish.bind(w))
 	_entries[w] = {"tween": tw, "kind": "close", "to": Rect2(w.position, w.size), "base_modulate": base}
 	return true
 
 ## Ease two wrappers between the rects they were drawn at (`before`) and the
-## rects the layout just gave them.
+## rects the layout just gave them; a `fade` animation dissolves them through
+## the midpoint instead.
 func swap(before: Dictionary, allowed: bool) -> bool:
-	if not allowed or not UiMotion.enabled() or choice("swap") == "none":
+	var id := choice("swap")
+	if not allowed or not UiMotion.enabled() or id == "none":
 		return false
-	var d := float(param_values("swap", choice("swap")).get("duration_ms", 180.0)) / 1000.0
+	var def: Dictionary = ANIMATIONS[id]
+	var fade: bool = (def["channels"] as Array).has("fade")
+	var d := float(param_values("swap", id).get("duration_ms", 180.0)) / 1000.0
 	var started := false
 	for w in before:
 		if not (w is Control) or not is_instance_valid(w):
@@ -248,16 +321,26 @@ func swap(before: Dictionary, allowed: bool) -> bool:
 		if from.is_equal_approx(to):
 			continue
 		_claim(wrapper, true)
+		var base: Color = wrapper.modulate
 		wrapper.position = from.position
 		wrapper.size = from.size
 		var tw := wrapper.create_tween()
-		tw.set_parallel(true)
-		tw.tween_property(wrapper, "position", to.position, d) \
-			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
-		tw.tween_property(wrapper, "size", to.size, d) \
-			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+		if fade:
+			# Crossfade: both panes dissolve out where they were drawn, trade
+			# rects at the midpoint (invisible), and dissolve back in.
+			tw.tween_property(wrapper, "modulate:a", 0.0, d * 0.5) \
+				.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+			tw.tween_callback(_set_rect.bind(wrapper, to))
+			tw.tween_property(wrapper, "modulate:a", base.a, d * 0.5) \
+				.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		else:
+			tw.set_parallel(true)
+			tw.tween_property(wrapper, "position", to.position, d) \
+				.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+			tw.tween_property(wrapper, "size", to.size, d) \
+				.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 		tw.finished.connect(_finish.bind(wrapper))
-		_entries[wrapper] = {"tween": tw, "kind": "swap", "to": to, "base_modulate": wrapper.modulate}
+		_entries[wrapper] = {"tween": tw, "kind": "swap", "to": to, "base_modulate": base}
 		started = true
 	return started
 
@@ -328,20 +411,26 @@ func _finish_matching(kinds: Array) -> void:
 			(tw as Tween).kill()
 		_snap(w, e)
 
+func _set_rect(w: Control, to: Rect2) -> void:
+	w.position = to.position
+	w.size = to.size
+
 ## The exact final state of an entry. A close entry is its own free.
 func _snap(w, e: Dictionary) -> void:
 	if not is_instance_valid(w):
 		return
 	var c := w as Control
+	var to: Rect2 = e.get("to", Rect2(c.position, c.size))
 	match str(e.get("kind", "")):
 		"create":
+			c.position = to.position
 			c.scale = Vector2.ONE
 			c.modulate = e.get("base_modulate", Color.WHITE)
 			c.pivot_offset = Vector2.ZERO
 		"swap":
-			var to: Rect2 = e.get("to", Rect2(c.position, c.size))
 			c.position = to.position
 			c.size = to.size
+			c.modulate = e.get("base_modulate", Color.WHITE)
 		"close":
 			c.queue_free()
 

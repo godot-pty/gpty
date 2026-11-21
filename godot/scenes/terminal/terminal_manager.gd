@@ -41,6 +41,10 @@ var on_swap: Callable    # set by workspace to handle pane type swap
 var on_open_pane_settings: Callable  # (manager, body): workspace closes conflicting overlays first
 var on_move_panes: Callable  # (menu: PopupMenu, body: Control): workspace appends its move submenu
 
+## Each tile is `{wrapper, col, row, cspan, rspan}` plus `edge` ("left",
+## "right", "top" or "bottom"), the side of the split that carved it, read by
+## the slide transition. A restored tile and the full-grid first tile have no
+## `edge`; a position swap leaves each tile's own `edge` with its wrapper.
 var tiles: Array[Dictionary] = []
 var last_body: Control
 signal tiles_resized
@@ -403,7 +407,8 @@ func reset():
 ## when neither axis can. The target keeps the span the aspect split gives it
 ## (`floor(span / 2)`) in every direction - `left`/`top` move the target and
 ## put the new tile at the old edge, so `right`/`bottom` are exactly the
-## pre-direction geometry.
+## pre-direction geometry. The new tile records the side it took (`edge`) for
+## the slide transition.
 func _split_for(w: Control, side: String = "") -> bool:
 	if not PaneTypes.SPLIT_SIDES.has(side):
 		side = ""
@@ -433,9 +438,9 @@ func _split_horizontal(s: Dictionary, w: Control, new_on_left: bool) -> bool:
 	s.cspan = half
 	if new_on_left:
 		s.col = col + rest
-		tiles.append({wrapper = w, col = col, row = s.row, cspan = rest, rspan = s.rspan})
+		tiles.append({wrapper = w, col = col, row = s.row, cspan = rest, rspan = s.rspan, edge = "left"})
 	else:
-		tiles.append({wrapper = w, col = col + half, row = s.row, cspan = rest, rspan = s.rspan})
+		tiles.append({wrapper = w, col = col + half, row = s.row, cspan = rest, rspan = s.rspan, edge = "right"})
 	return true
 
 ## Halve the tile along its rows, the new wrapper on the top or the bottom.
@@ -449,9 +454,9 @@ func _split_vertical(s: Dictionary, w: Control, new_on_top: bool) -> bool:
 	s.rspan = half
 	if new_on_top:
 		s.row = row + rest
-		tiles.append({wrapper = w, col = s.col, row = row, cspan = s.cspan, rspan = rest})
+		tiles.append({wrapper = w, col = s.col, row = row, cspan = s.cspan, rspan = rest, edge = "top"})
 	else:
-		tiles.append({wrapper = w, col = s.col, row = row + half, cspan = s.cspan, rspan = rest})
+		tiles.append({wrapper = w, col = s.col, row = row + half, cspan = s.cspan, rspan = rest, edge = "bottom"})
 	return true
 
 ## The one empty-grid tile: the whole grid.
