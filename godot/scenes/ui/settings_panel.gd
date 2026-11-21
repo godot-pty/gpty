@@ -190,7 +190,15 @@ func _build_ui():
 	var pad_spin = _add_terminal_padding_control(t_app)
 	var scale_opt = _add_ui_scale_control(t_app)
 	t_app.add_child(HSeparator.new())
-	var scheme_btn = _add_scheme_picker(t_app)
+	var scheme_dark = _add_scheme_row(t_app, "Dark scheme:",
+		SettingsManager.cfg_scheme_dark, "(built-in palette)", func(path: String):
+			SettingsManager.cfg_scheme_dark = path
+			SettingsManager.save_settings())
+	var scheme_light = _add_scheme_row(t_app, "Light scheme:",
+		SettingsManager.cfg_scheme_light, "(same as dark)", func(path: String):
+			SettingsManager.cfg_scheme_light = path
+			SettingsManager.save_settings())
+	scheme_light.tooltip_text = "Used when the appearance resolves to light; empty follows the dark scheme."
 	t_app.add_child(HSeparator.new())
 	# The pane titlebar on/off sits with the chrome it controls — next to the
 	# "Title bar" colour and the border — instead of hiding in the System tab,
@@ -205,7 +213,8 @@ func _build_ui():
 		SettingsManager.cfg_font_size = 14
 		SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
 		SettingsManager.cfg_ui_scale = 100
-		SettingsManager.cfg_color_scheme_path = ""
+		SettingsManager.cfg_scheme_dark = ""
+		SettingsManager.cfg_scheme_light = ""
 		SettingsManager.cfg_show_titlebar = true
 		SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
 		# Resolve first: the rows below reset to the palette's own values, and
@@ -215,7 +224,8 @@ func _build_ui():
 			SettingsManager.set("cfg_" + key,
 				UiPalette.active().color(SettingsManager.CHROME_COLOR_TOKENS[key]))
 		font_btn.text = "DejaVuSansMono.ttf"
-		scheme_btn.text = "(none)"
+		scheme_dark.select_path("")
+		scheme_light.select_path("")
 		fs_spin.value = 14
 		pad_spin.value = PaneTypes.TERMINAL_PADDING_DEFAULT
 		scale_opt.selected = 0
@@ -953,15 +963,21 @@ func _add_check_updates_control(v: VBoxContainer) -> CheckBox:
 	v.add_child(cb)
 	return cb
 
-func _add_scheme_picker(v: VBoxContainer) -> Button:
-	return _add_file_picker(v, "Color scheme:", SettingsManager.cfg_color_scheme_path, [["*.txt; *.json; *.csv", "Scheme files"]], func(path: String):
-		SettingsManager.cfg_color_scheme_path = path
-		SettingsManager.save_settings()
-	, func():
-		# Empty path = the built-in default palette (terminals revert live).
-		SettingsManager.cfg_color_scheme_path = ""
-		SettingsManager.save_settings()
-	)
+## One colour-scheme row. `empty_label` names what the first item means: the
+## built-in palette for a global slot, "follow Settings" for a pane.
+func _add_scheme_row(v: VBoxContainer, label: String, current: String,
+		empty_label: String, on_chosen: Callable) -> SchemePicker:
+	var hb = HBoxContainer.new()
+	hb.add_child(_lbl(label))
+	var picker := SchemePicker.new()
+	picker.name = label.trim_suffix(":").replace(" ", "") + "Picker"
+	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	picker.accessibility_name = label.trim_suffix(":")
+	picker.setup(current, empty_label)
+	picker.scheme_chosen.connect(on_chosen)
+	hb.add_child(picker)
+	v.add_child(hb)
+	return picker
 
 func _add_font_picker(v: VBoxContainer) -> Button:
 	return _add_file_picker(v, "Font:", SettingsManager.cfg_font_path, [[PaneTypes.font_filter(), "Fonts"]], func(path: String):

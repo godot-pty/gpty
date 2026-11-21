@@ -171,6 +171,16 @@ const STATES := {
 		"settings": {"cfg_appearance_mode": 1}},
 	"light-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Appearance",
 		"settings": {"cfg_appearance_mode": 1}},
+	# The terminal's own colour scheme, dark and light. The chrome stays its
+	# own palette: the two are independent, and these two states prove the
+	# pairs land on the grid (gruvbox's `#282828` ground, solarized-light's
+	# `#fdf6e3`) without touching the chrome tokens.
+	"scheme-pair": {"size": Vector2i(1280, 760), "panes": 2,
+		"settings": {"cfg_scheme_dark": "res://schemes/gruvbox-dark.json",
+			"cfg_appearance_mode": 0}},
+	"scheme-pair-light": {"size": Vector2i(1280, 760), "panes": 2,
+		"settings": {"cfg_scheme_light": "res://schemes/solarized-light.json",
+			"cfg_appearance_mode": 1}},
 	# The search strip at the pane's top edge with a match count and the two
 	# step controls. Filler output comes first so the strip's two rows do not
 	# hide the matches themselves; three `alpha` lines then sit in view

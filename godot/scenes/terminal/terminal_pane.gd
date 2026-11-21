@@ -52,6 +52,15 @@ const ATTR_UNDERLINE := 4
 ## Set on the first cell of a wide character; the next cell is its spacer.
 const ATTR_WIDE := 16
 
+## The cursor colour a fresh pane carries. Compared against, not just seeded:
+## while the pane's own colour is this default, a scheme's cursor fills in.
+const CURSOR_COLOR_DEFAULT := Color(0.8, 0.8, 0.8, 0.7)
+## A scheme's cursor and selection are drawn as overlays over the grid, so they
+## keep an alpha that leaves the glyph or the cell readable. The scheme's hue
+## is honoured; its (usually opaque) alpha is gpty's rendering choice.
+const SCHEME_CURSOR_ALPHA := 0.75
+const SCHEME_SELECTION_ALPHA := 0.45
+
 ## One repaintable slice of the grid. Godot rebuilds a CanvasItem's whole
 ## command list on any `queue_redraw()`, and a control draws before its
 ## children, so a partial repaint needs child items: every row's `BG` band, then
@@ -86,6 +95,9 @@ func _init() -> void:
 	focus_border_color = UiPalette.active().TERMINAL_FOCUS
 	selection_color = UiPalette.active().SELECTION
 	scrollback_indicator_color = UiPalette.active().SCROLLBACK_INDICATOR
+## The global scheme the resolved appearance selected (pushed by
+## `SettingsManager.apply_to_terminal`). A pane's own scheme
+## (`PaneSchemeStore`, keyed by `attachment_id`) wins while it is set.
 var color_scheme_path: String = "":
 	set(value):
 		# A settings broadcast passes this on every save, and an unchanged value
@@ -93,11 +105,25 @@ var color_scheme_path: String = "":
 		# repack of a pane that had not changed.
 		if value == color_scheme_path:
 			return
+		var before := _scheme_path()
 		color_scheme_path = value
 		# Before the child exists there is no palette to set: the start path
 		# applies the stored scheme itself.
-		if _started:
+		if _started and _scheme_path() != before:
 			_apply_palette()
+
+## The scheme this pane draws with: its own choice when it has one, else the
+## global pair member.
+func _scheme_path() -> String:
+	var own := PaneSchemeStore.scheme_for(attachment_id)
+	return own if own != "" else color_scheme_path
+
+## The loaded scheme (`{}` for the built-in palette) and the path it came from,
+## so a settings broadcast does not re-read and re-parse the file.
+var _scheme: Dictionary = {}
+var _scheme_loaded_path := ""
+var _scheme_cursor := Color.TRANSPARENT
+var _scheme_selection := Color.TRANSPARENT
 
 
 
@@ -133,16 +159,27 @@ var launch: String = ""
 @export var font_italic_path: String = "res://fonts/DejaVuSansMono-Oblique.ttf"
 
 @export var cursor_shape: int = 0
-@export var cursor_color: Color = Color(0.8, 0.8, 0.8, 0.7)
+@export var cursor_color: Color = CURSOR_COLOR_DEFAULT
 @export var cursor_blink: bool = true
 @export var cursor_blink_speed: float = CURSOR_BLINK_INTERVAL
 
-@export var default_fg: Color = Color(0.8, 0.8, 0.8)
-## The pane's own background: pushed into the grid's `palette[0]`, which is
-## what every cell paints its background with, so the margin a resize exposes
-## is the same colour as the cells beside it. Black matches the engine's own
-## palette, so the default look is the one a terminal had before this setting
-## reached the grid.
+## The pane's own foreground. The default is the engine palette's white
+## (`SYSTEM_COLORS[7]`), so a pane with no scheme draws exactly what it drew
+## before this setting reached the grid.
+@export var default_fg: Color = Color8(229, 229, 229):
+	set(value):
+		# Its own setter repacks the grid, like `default_bg`; listing it in
+		# DRAW_READ_SETTINGS as well would paint the same grid twice.
+		if value == default_fg:
+			return
+		default_fg = value
+		_apply_palette()
+## The pane's own background: pushed as the grid's default background
+## (`Palette::background`), which is what every cell with the default
+## background paints with, so the margin a resize exposes is the same colour as
+## the cells beside it. Black matches the engine's own palette, so the default
+## look is the one a terminal had before this setting reached the grid. A
+## scheme's own background wins while one is set.
 @export var default_bg: Color = Color(0, 0, 0):
 	set(value):
 		# A settings broadcast passes every field on each save, and re-applying
@@ -670,11 +707,20 @@ func _start_child_if_ready(size_hint := Vector2.ZERO) -> void:
 		# the tile: a tree mutation must not happen mid-sort.
 		child_start_failed.emit.call_deferred(_start_error)
 		return
-	if color_scheme_path != "":
-		_apply_palette()
+	# The grid exists now: push the palette and the default pair. This is the
+	# first point a scheme (or the pane's own fg/bg) can reach the cells.
+	_apply_palette()
 	_flush_pending_input()
 	# Deferred for the same reason, and so both outcomes arrive alike.
 	child_started.emit.call_deferred()
+
+## The pane's own scheme lives in `PaneSchemeStore` (keyed by attachment_id),
+## so it is read here - once the id is final, like env and the directory - and
+## applied to the grid. The global pair arrives separately through
+## `apply_to_terminal`.
+func apply_user_state():
+	super.apply_user_state()
+	_apply_palette()
 
 ## `Workspace._apply_layout` gave this pane's tile the rect it is drawn at. The
 ## container sorts at the end of that frame, so `_process` waits for the next
@@ -740,10 +786,9 @@ func _get_layout_state() -> Dictionary:
 		else {"shell": shell_command, "shell_args": shell_args.duplicate()})
 	state.merge({
 		"rows": rows, "cols": cols,
-		# `color_scheme_path` is deliberately absent: a file may not name a
-		# scheme (PaneTypes keeps it runtime-only), and on restore the global
-		# appearance is applied after the tile anyway, so a saved value never
-		# took effect. The pane panel and Settings → Appearance still set it.
+		# `color_scheme_path` is deliberately absent: it is the global pair's
+		# resolved member, pushed by `apply_to_terminal`. A pane's own scheme
+		# lives in `PaneSchemeStore` (user-owned, keyed by attachment_id).
 		"cursor_shape": cursor_shape, "cursor_blink": cursor_blink,
 		"cursor_blink_speed": cursor_blink_speed, "cursor_color": cursor_color,
 		"scroll_lines": scroll_lines, "max_fps": max_fps,
@@ -805,40 +850,79 @@ func _reload_fonts():
 	_font_bold = _load_font(font_bold_path, "res://fonts/DejaVuSansMono-Bold.ttf")
 	_font_italic = _load_font(font_italic_path, "res://fonts/DejaVuSansMono-Oblique.ttf")
 
-## Largest scheme file read. A palette is 16 short hex colours; anything past
-## this is not a scheme, and the read happens on the GUI thread.
-const SCHEME_MAX_BYTES := 1 << 14
-
-## Apply the pane's colours to the grid: the ANSI palette from its scheme file,
-## and the terminal's background.
-##
-## `default_bg` is the pane's own background and is pushed into the grid's
-## `palette[0]` - the entry every cell paints its background with
-## (`NamedColor::Background`) - so the margin a resize exposes is the same
-## colour as the cells beside it. A scheme file names its own background as its
-## first colour, which wins while one is set. `_ground` is then read back from
-## the grid rather than assumed, which is what makes the two agree.
-##
-## The path is data: `TextRead` gates it to an absolute regular file and caps
-## the read, so a scheme entry cannot make the pane read a device, a FIFO, or a
-## huge file.
-func _apply_palette():
-	if _terminal == null:
-		_ground = default_bg
+## Read and cache the scheme this pane draws with. A path change is what
+## re-reads; a settings broadcast that passes the same global value does not.
+func _load_scheme() -> void:
+	var path := _scheme_path()
+	if path == _scheme_loaded_path:
 		return
-	var path = color_scheme_path
-	var applied := false
-	if path != "":
-		var r := TextRead.read_prefix(path, SCHEME_MAX_BYTES)
-		if r.ok:
-			var hex_csv: String = str(r.text).strip_edges().replace("\n", ",").replace("\r", ",").replace(" ", "")
-			_terminal.set_palette(hex_csv)
-			applied = true
-	if not applied:
+	_scheme_loaded_path = path
+	_scheme = SchemeLibrary.loaded(path)
+	_scheme_cursor = Color.TRANSPARENT
+	_scheme_selection = Color.TRANSPARENT
+	if _scheme.is_empty():
+		if path != "":
+			push_warning("[TerminalPane] colour scheme did not load: %s" % path)
+		return
+	var cursor := SchemeLibrary.color(_scheme, "cursor", Color.TRANSPARENT)
+	if cursor.a > 0.0:
+		_scheme_cursor = Color(cursor, SCHEME_CURSOR_ALPHA)
+	var selection := SchemeLibrary.color(_scheme, "selection", Color.TRANSPARENT)
+	if selection.a > 0.0:
+		_scheme_selection = Color(selection, SCHEME_SELECTION_ALPHA)
+
+## Apply the pane's colours to the grid: the ANSI palette and the default
+## foreground/background pair.
+##
+## With a scheme, the scheme's foreground and background are the grid's
+## defaults, so a cell written with the terminal's own colours follows the
+## scheme (`NamedColor::Foreground`/`Background` resolve to `Palette`'s
+## fields). With none, the pane's own pair is the default. `_ground` is then
+## read back from the grid rather than assumed, which is what makes the margin
+## a resize exposes agree with the cells beside it.
+##
+## A scheme is parsed once by `SchemeLibrary` (capped, closed keys); the pane
+## never reads the file itself. The grid does not exist before `start_shell`,
+## so the pre-start branch paints the ground directly and the start path
+## re-applies once the grid is there.
+func _apply_palette():
+	if _terminal == null or _terminal.get_rows() == 0:
+		_load_scheme()
+		_ground = SchemeLibrary.color(_scheme, "background", default_bg)
+		_repaint_all()
+		return
+	_load_scheme()
+	if _scheme.is_empty():
 		_terminal.set_palette("")
-		_terminal.set_background_color(default_bg)
+		_terminal.set_default_colors(default_fg, default_bg)
+	else:
+		# Built first so the FFI call takes one plain argument.
+		var palette_csv := ",".join(_scheme.get("palette", []))
+		_terminal.set_palette(palette_csv)
+		_terminal.set_default_colors(
+			SchemeLibrary.color(_scheme, "foreground", default_fg),
+			SchemeLibrary.color(_scheme, "background", default_bg))
 	_ground = _terminal.get_background_color()
 	_repaint_all()
+
+## Re-read the pane's own scheme from `PaneSchemeStore`. The workspace calls
+## this after the pane settings UI writes the store; an edit to another row
+## leaves the path unchanged and costs no repaint.
+func apply_scheme_override() -> void:
+	if _scheme_path() != _scheme_loaded_path:
+		_apply_palette()
+
+## The colours the draw pass uses for the cursor and the selection. A pane's
+## own cursor colour wins over a scheme; a scheme fills in while the colour is
+## the shipped default. Selection has no per-pane UI, so a scheme's selection
+## wins while one is active.
+func _cursor_draw_color() -> Color:
+	if cursor_color != CURSOR_COLOR_DEFAULT:
+		return cursor_color
+	return _scheme_cursor if _scheme_cursor.a > 0.0 else cursor_color
+
+func _selection_draw_color() -> Color:
+	return _scheme_selection if _scheme_selection.a > 0.0 else selection_color
 
 ## The colour the pane fills behind and around its grid. Always the grid's own
 ## background, so the draw pass and the cells agree by construction.
@@ -1391,18 +1475,19 @@ func _draw_cursor(item: CanvasItem, off: Vector2, baseline: float):
 	if cr < _cell_cache.get("rows", 0) and cc < _cell_cache.get("cols", 0):
 		var chars: Array = _cell_cache["chars"]
 		cursor_ch = chars[cr][cc]
+	var colour := _cursor_draw_color()
 
 	match cursor_shape:
 		0:
-			item.draw_rect(Rect2(cx, cy, _cell_w, _cell_h), cursor_color)
+			item.draw_rect(Rect2(cx, cy, _cell_w, _cell_h), colour)
 			if cursor_ch != " " and cursor_ch != "":
 				item.draw_string(_font, Vector2(cx, cy + baseline), cursor_ch, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.BLACK)
 		1:
-			item.draw_rect(Rect2(cx, cy + _cell_h - underline_cursor_height, _cell_w, underline_cursor_height), cursor_color)
+			item.draw_rect(Rect2(cx, cy + _cell_h - underline_cursor_height, _cell_w, underline_cursor_height), colour)
 		2:
-			item.draw_rect(Rect2(cx, cy, beam_cursor_width, _cell_h), cursor_color)
+			item.draw_rect(Rect2(cx, cy, beam_cursor_width, _cell_h), colour)
 		_:
-			item.draw_rect(Rect2(cx, cy, _cell_w, _cell_h), cursor_color)
+			item.draw_rect(Rect2(cx, cy, _cell_w, _cell_h), colour)
 			if cursor_ch != " " and cursor_ch != "":
 				item.draw_string(_font, Vector2(cx, cy + baseline), cursor_ch, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.BLACK)
 
@@ -1413,7 +1498,7 @@ func _draw_selection(item: CanvasItem, off: Vector2):
 		var c1: int = _sel_cells[i + 2]
 		item.draw_rect(Rect2(
 			off.x + c0 * _cell_w, off.y + row * _cell_h,
-			(c1 - c0 + 1) * _cell_w, _cell_h), selection_color)
+			(c1 - c0 + 1) * _cell_w, _cell_h), _selection_draw_color())
 
 
 ## Selected text, read from the grid rows: text scrolled out of the viewport
@@ -2248,24 +2333,15 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 		AppDialog.popup(dlg))
 	_make_row(v, "Font:", font_btn, panel)
 
-	# Color scheme picker — stored as metadata to avoid closure capture issues
-	var scheme_btn = Button.new()
-	scheme_btn.text = color_scheme_path.get_file() if color_scheme_path != "" else "(none)"
-	scheme_btn.set_meta("path", color_scheme_path)
-	scheme_btn.clip_text = true
-	scheme_btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	scheme_btn.pressed.connect(func():
-		var dlg := AppDialog.picker(panel, "Color scheme", FileDialog.FILE_MODE_OPEN_FILE)
-		dlg.current_path = scheme_btn.get_meta("path", "")
-		dlg.add_filter("*.txt; *.json; *.csv", "Scheme files")
-		dlg.file_selected.connect(func(path: String):
-			scheme_btn.set_meta("path", path)
-			scheme_btn.text = path.get_file()
-			panel._debounce_timer.start()
-			dlg.queue_free())
-		dlg.canceled.connect(dlg.queue_free)
-		AppDialog.popup(dlg))
-	_make_row(v, "Color scheme:", scheme_btn, panel)
+	# The pane's own scheme (PaneSchemeStore, keyed by attachment_id). The empty
+	# item follows the global dark/light pair, so this row is the exception and
+	# Settings -> Appearance is still the rule.
+	var scheme_picker := SchemePicker.new()
+	scheme_picker.name = "PaneSchemePicker"
+	scheme_picker.tooltip_text = "This pane's own scheme; empty follows Settings"
+	scheme_picker.setup(PaneSchemeStore.scheme_for(attachment_id), "(follow Settings)")
+	scheme_picker.scheme_chosen.connect(func(_path: String): panel._debounce_timer.start())
+	_make_row(v, "Color scheme:", scheme_picker, panel)
 
 	# ── Gather func ──
 	panel._gather_func = func():
@@ -2286,7 +2362,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"default_fg": fg_btn.color,
 			"default_bg": bg_btn.color,
 			"font_path": font_btn.get_meta("path", ""),
-			"color_scheme_path": scheme_btn.get_meta("path", ""),
+			"pane_scheme": scheme_picker.get_selected_path(),
 		}
 
 	return v

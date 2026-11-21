@@ -28,6 +28,55 @@ pub const SYSTEM_COLORS: [[u8; 3]; 16] = [
     [255, 255, 255], // 15 Bright White
 ];
 
+/// The terminal's resolved colours: the 16 ANSI entries plus the two a cell
+/// uses when its SGR colour is the default (`NamedColor::Foreground` /
+/// `Background`). A scheme's black is not its background (Nord's black is
+/// `#3b4252`, its background `#2e3440`), so those two live beside the array
+/// rather than being read out of slots 0 and 7.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Palette {
+    pub ansi: [[u8; 3]; 16],
+    pub foreground: [u8; 3],
+    pub background: [u8; 3],
+}
+
+impl Palette {
+    /// The engine's own colours: the ANSI set, white text on black.
+    pub const fn system() -> Self {
+        Self {
+            ansi: SYSTEM_COLORS,
+            foreground: SYSTEM_COLORS[7],
+            background: SYSTEM_COLORS[0],
+        }
+    }
+
+    /// A palette from a 16-colour CSV, with the legacy meaning of slots 0 and
+    /// 7 as the background and foreground. A later explicit scheme overrides
+    /// them through the fields.
+    pub fn from_ansi(ansi: [[u8; 3]; 16]) -> Self {
+        Self {
+            ansi,
+            foreground: ansi[7],
+            background: ansi[0],
+        }
+    }
+
+    /// The colour a cell paints, with the grid's default pair resolved.
+    pub fn resolve(&self, color: &Color) -> [u8; 3] {
+        match color {
+            Color::Named(NamedColor::Foreground) => self.foreground,
+            Color::Named(NamedColor::Background) => self.background,
+            _ => color_to_rgb(color, &self.ansi),
+        }
+    }
+}
+
+impl Default for Palette {
+    fn default() -> Self {
+        Self::system()
+    }
+}
+
 /// Build the 16-colour palette a scheme CSV describes.
 ///
 /// A scheme may carry fewer than 16 entries, or a malformed one; those slots
@@ -189,6 +238,32 @@ mod tests {
         assert_eq!(palette[0], [0, 0, 0]);
         assert_eq!(palette[15], [15, 15, 15]);
         assert_eq!(palette.len(), 16);
+    }
+
+    #[test]
+    fn palette_resolve_separates_foreground_from_white() {
+        let mut palette = Palette::system();
+        palette.foreground = [1, 2, 3];
+        palette.background = [4, 5, 6];
+        palette.ansi[7] = [200, 200, 200];
+        assert_eq!(
+            palette.resolve(&Color::Named(NamedColor::Foreground)),
+            [1, 2, 3]
+        );
+        assert_eq!(
+            palette.resolve(&Color::Named(NamedColor::Background)),
+            [4, 5, 6]
+        );
+        assert_eq!(
+            palette.resolve(&Color::Named(NamedColor::White)),
+            [200, 200, 200],
+            "the ANSI white and the default foreground are different colours"
+        );
+        assert_eq!(
+            palette.resolve(&Color::Indexed(1)),
+            palette.ansi[1],
+            "an indexed colour still reads the ANSI array"
+        );
     }
 
     #[test]

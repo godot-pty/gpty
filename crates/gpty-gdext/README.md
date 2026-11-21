@@ -85,6 +85,15 @@ on drop.
 | `status_json()` | `String` | JSON: `{program, args, pid, running, exit_code, exit_reason}`. `pid` is null once the child is gone; `exit_reason` is `exited`, `killed` (stopped by us) or null while it runs. A pane that never started reports the same fields idle |
 | `stop()` | void | Kill the child and its process group. Safe with nothing running |
 
+### GptyScheme (extends RefCounted)
+
+Static colour-scheme import over the FFI. The parsers and their caps live in
+`gpty_core::scheme`; this class only answers JSON.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `parse(text: String, file_name: String)` | `String` | Parse one scheme file's text. `file_name` is a label fallback only - the format is sniffed from the content, so a misnamed file still imports. Answers `{"ok":true,"name","palette":[16 "#rrggbb"],"foreground","background","cursor","selection","json"}` (the last is the canonical native file text an import writes) or `{"ok":false,"error"}` with one user-facing sentence. Text over 16 KiB is refused before any parse; the native key set is closed, an iTerm2 DOCTYPE internal subset and any unknown entity are refused |
+
 ### GptyMedia (extends Node)
 
 One media pane's decode session, backed by `gpty-media` and a pinned FFmpeg
@@ -117,7 +126,8 @@ and compiles no network protocol.
 | `send_text(text: String)` | `bool` | Send raw text to PTY (no newline). `false` = the pane's bounded input queue is full (the child is not reading) or the task is gone; nothing was sent |
 | `send_line(text: String)` | `bool` | Send a line to PTY (appends `\r`, the Enter key). Same refusal as `send_text` |
 | `resize_grid(rows: int, cols: int)` | `bool` | Resize grid + send SIGWINCH. `false` = refused (grid lock poisoned) and nothing moved, PTY included; a pane with no shell answers `true` |
-| `set_palette(hex_csv: String)` | void | Load a color scheme (16 hex colors, CSV); slots the file omits or malforms reset to the system palette |
+| `set_palette(hex_csv: String)` | void | Load a color scheme (16 hex colors, CSV); slots the file omits or malforms reset to the system palette, and the default foreground/background follow entries 7/0 until `set_default_colors` names the scheme's pair |
+| `set_default_colors(foreground: Color, background: Color)` | void | The colours `NamedColor::Foreground`/`Background` resolve to, separate from ANSI black/white. No-op before `start_shell` creates the grid; forces a full repaint when either moves |
 | `get_terminal_session_id()` | `String` | Opaque id for the current PTY lifetime |
 
 #### App metadata

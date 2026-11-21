@@ -75,7 +75,10 @@ drive every other pane" under Known limitations).
   into code by naming a resource: pane settings go through a closed per-type allowlist
   (`PaneTypes.settings_schema`), and a data-supplied font path is read as bytes by `TerminalFonts`,
   never through `load()` - a `.tres` with an embedded script runs during `load()`, and Workspace
-  Trust does not examine a font.
+  Trust does not examine a font. A colour scheme is the same class of input: it is read as capped
+  text, parsed by `gpty_core::scheme` under a closed native key set (or a narrow Alacritty, iTerm2,
+  Base16 or CSV reader), copied to `user://schemes/` as data, and never loaded as a resource; a
+  layout or profile cannot name one.
 - **Remote responses.** Release metadata, documentation, anything fetched over the network.
 - **Other users** on a shared machine, and any file or socket they could have written.
 

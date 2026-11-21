@@ -22,6 +22,7 @@ from the terminal:
 godot/
 ├── project.godot            # Godot 4.7 project config
 ├── gpty.gdextension      # GDExtension library config
+    ├── schemes/                     # Bundled terminal colour schemes (native JSON; licences in LICENSE-EXCEPTIONS.md)
     ├── concepts.default.json    # Shipped default concepts
     ├── profiles.default.json    # Shipped seed layouts (Agent Workspace, Knowledge Base)
     ├── fonts/                   # Bundled fonts (DejaVu Sans Mono + Phosphor icons)
@@ -31,7 +32,7 @@ godot/
     │   └── Phosphor-Regular.ttf
     ├── scenes/
         ├── main.tscn            # Root scene (Workspace)
-        ├── autoloads/           # 16 singleton managers
+        ├── autoloads/           # 17 singleton managers
         │   ├── base_persistence_manager.gd  # Shared JSON I/O base
         │   ├── settings_manager.gd
         │   ├── profile_manager.gd
@@ -39,6 +40,7 @@ godot/
         │   ├── workspace_store.gd  # Named workspace (tab set) persistence
         │   ├── pane_env_store.gd   # User-owned per-pane env, keyed by attachment_id
         │   ├── pane_cwd_store.gd   # User-owned per-pane directory, keyed by workspace id + attachment_id
+        │   ├── pane_scheme_store.gd # User-owned per-pane colour scheme, keyed by attachment_id
         │   ├── pane_inspector_store.gd # User-owned Inspector aim (prompt + switches), keyed by attachment_id
         │   ├── trusted_store.gd    # Workspace Trust consent memory (builtins + plugins)
         │   ├── link_weights_store.gd # User-owned declared link weights (display-only)
@@ -60,6 +62,8 @@ godot/
         ├── ui/                  # UI components
         │   ├── sidebar.gd       # Vertical stack: window mode, workspaces, panes, profiles
         │   ├── settings_panel.gd
+        │   ├── scheme_library.gd # Shipped + imported terminal colour schemes (listing, capped read, import id)
+        │   ├── scheme_picker.gd  # One colour-scheme OptionButton (library, reset item, Import...)
         │   ├── overlay_panel.gd  # Shared keyboard contract for the four overlays + the card clamp (fit_card)
         │   ├── command_palette.gd # Ctrl+Shift+P command list (OverlayPanel)
         │   ├── palette_model.gd # Palette entries, matching and ranking (pure)

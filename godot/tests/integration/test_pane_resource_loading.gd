@@ -28,7 +28,7 @@ func before_each():
 	SettingsManager.cfg_default_rows = 24
 	SettingsManager.cfg_default_cols = 80
 	_saved_font_path = SettingsManager.cfg_font_path
-	_saved_scheme_path = SettingsManager.cfg_color_scheme_path
+	_saved_scheme_path = SettingsManager.cfg_scheme_dark
 	_previous_env = OS.get_environment("GPTY_EXPLOIT_SENTINEL")
 	_sentinel = ProjectSettings.globalize_path("user://gpty_exploit_sentinel.txt")
 	OS.set_environment("GPTY_EXPLOIT_SENTINEL", _sentinel)
@@ -41,7 +41,7 @@ func after_each():
 	else:
 		OS.set_environment("GPTY_EXPLOIT_SENTINEL", _previous_env)
 	SettingsManager.cfg_font_path = _saved_font_path
-	SettingsManager.cfg_color_scheme_path = _saved_scheme_path
+	SettingsManager.cfg_scheme_dark = _saved_scheme_path
 	if _ws:
 		if _ws.get_parent():
 			_ws.get_parent().remove_child(_ws)
@@ -129,7 +129,7 @@ func test_settings_json_cannot_choose_a_font_to_load():
 	_assert_bundled(spawned)
 
 func test_settings_json_scheme_is_read_not_loaded():
-	SettingsManager.cfg_color_scheme_path = _evil_path()
+	SettingsManager.cfg_scheme_dark = _evil_path()
 	var _ws_unused := await _make_workspace()
 	assert_false(FileAccess.file_exists(_sentinel),
 		"a scheme path is a capped text read, never a resource load")

@@ -18,6 +18,7 @@ Library crate for the gpty multi-PTY emulator. This is the engine - all terminal
 | [`events`](src/events.rs) | The adapter-neutral event vocabulary the event socket speaks; the CLI's plugin validator and the extension's translator both read this one list | `GENERIC_EVENT_NAMES` |
 | [`term`](src/term.rs) | Full terminal grid + damage tracking via `alacritty_terminal` | `TermGrid`, `CellInfo`, `GridUpdate` |
 | [`color`](src/color.rs) | ANSI color mapping - named, indexed, true-color → RGB | `color_to_rgb()` |
+| [`scheme`](src/scheme.rs) | Colour-scheme import: native JSON, Alacritty TOML/YAML, iTerm2 plist, Base16 and legacy CSV → one validated `Scheme` (closed keys, 16 entries plus foreground/background/cursor/selection, a capped untrusted read) | `parse_scheme()`, `Scheme`, `to_native_json()` |
 | [`keymap`](src/keymap.rs) | Keyboard event → byte sequence translation | `key_event_to_bytes()` |
 | [`lock`](src/lock.rs) | Poison-tolerant locking: skip the work, report the first occurrence | `lock_or_warn()`, `read_or_warn()`, `write_or_warn()` |
 | [`history`](src/history.rs) | SQLite-backed scrollback history store and its write-behind thread | `HistoryStore`, `PaneHistory` |

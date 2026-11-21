@@ -17,8 +17,8 @@ const MODE_LIGHT := 1
 
 ## `token -> Color`. Both tables carry the same keys. The five terminal-facing
 ## entries are equal in both on purpose: they are drawn over the terminal's own
-## scheme, which is chosen independently of the chrome, and the scheme pair
-## lands with the colour-scheme row.
+## scheme, which is chosen independently of the chrome and ships as its own
+## dark/light pair under `godot/schemes/`.
 const DARK := {
 	"BG": Color("1a1a1a"),
 	"SURFACE": Color("202128"),

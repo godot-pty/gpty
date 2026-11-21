@@ -76,7 +76,8 @@ func test_appearance_reset_restores_only_appearance_settings():
 	SettingsManager.cfg_font_size = 22
 	SettingsManager.cfg_terminal_padding = 20
 	SettingsManager.cfg_wrapper_bg = Color(1.0, 0.0, 0.0)
-	SettingsManager.cfg_color_scheme_path = "/tmp/scheme.csv"
+	SettingsManager.cfg_scheme_dark = "res://schemes/nord.json"
+	SettingsManager.cfg_scheme_light = "res://schemes/one-light.json"
 	SettingsManager.cfg_ui_scale = 175
 	SettingsManager.cfg_shell_command = "/bin/zsh"  # Terminal-tab setting, must survive
 
@@ -90,7 +91,8 @@ func test_appearance_reset_restores_only_appearance_settings():
 	assert_eq(SettingsManager.cfg_wrapper_bg, UiPalette.active().BG,
 		"wrapper bg must reset to the active palette's background")
 	assert_eq(SettingsManager.cfg_ui_scale, 100, "the UI scale must reset to 100 %")
-	assert_eq(SettingsManager.cfg_color_scheme_path, "", "scheme path must reset to empty")
+	assert_eq(SettingsManager.cfg_scheme_dark, "", "the dark scheme must reset to empty")
+	assert_eq(SettingsManager.cfg_scheme_light, "", "the light scheme must reset to empty")
 	assert_eq(SettingsManager.cfg_shell_command, "/bin/zsh",
 		"other tabs' settings must not be touched")
 
@@ -145,15 +147,40 @@ func test_no_global_reset_button_remains():
 		assert_ne(btn.text, "Reset to defaults",
 			"the all-tabs reset button must be gone (per-tab resets only)")
 
-# ── Scheme reset ───────────────────────────────────────────────────────
+# ── Scheme rows ────────────────────────────────────────────────────────
 
-func test_scheme_reset_button_clears_path():
-	SettingsManager.cfg_color_scheme_path = "/tmp/scheme.csv"
-	var reset := _row_reset("Color scheme:")
-	assert_not_null(reset, "Color scheme row must have a reset button")
-	reset.pressed.emit()
-	assert_eq(SettingsManager.cfg_color_scheme_path, "",
-		"scheme reset must clear the configured path")
+func _picker_named(fragment: String) -> SchemePicker:
+	for node in _panel.find_children("*", "OptionButton", true, false):
+		if node is SchemePicker and str(node.name).contains(fragment):
+			return node
+	return null
+
+func test_the_appearance_tab_offers_a_dark_and_a_light_scheme_row():
+	var dark := _picker_named("Dark")
+	var light := _picker_named("Light")
+	assert_not_null(dark, "the Appearance tab must offer a dark scheme picker")
+	assert_not_null(light, "the Appearance tab must offer a light scheme picker")
+	# The empty item is the reset, so the row needs no reset button of its own.
+	assert_eq(dark.get_selected_path(), "", "an unset dark slot starts empty")
+	assert_eq(light.get_selected_path(), "", "an unset light slot starts empty")
+
+func test_choosing_a_scheme_writes_its_slot_only():
+	var dark := _picker_named("Dark")
+	assert_not_null(dark, "dark picker must exist")
+	var wanted := -1
+	for index in dark.item_count:
+		if dark.get_item_metadata(index) == "res://schemes/nord.json":
+			wanted = index
+			break
+	assert_ne(wanted, -1, "nord must be listed in the library")
+	if wanted == -1:
+		return
+	# Select the library entry the way a user would: by index, then emit.
+	dark.selected = wanted
+	dark.item_selected.emit(wanted)
+	assert_eq(SettingsManager.cfg_scheme_dark, "res://schemes/nord.json",
+		"the dark slot takes the pick")
+	assert_eq(SettingsManager.cfg_scheme_light, "", "the light slot must not move")
 
 # ── Per-color resets ───────────────────────────────────────────────────
 

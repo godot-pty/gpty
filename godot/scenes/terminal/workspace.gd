@@ -189,8 +189,9 @@ func _ready():
 	# attached — the one path that used to skip the uniqueness check. The id
 	# is regenerated here, and the pane list redrawn because it shows it.
 	# This handler is also the ONLY writer of the user-owned per-pane stores:
-	# env (`PaneEnvStore`), the pane's own directory (`PaneCwdStore`) and the
-	# Inspector's aim (`PaneInspectorStore`). All are keyed by the pane's id
+	# env (`PaneEnvStore`), the pane's own directory (`PaneCwdStore`), the
+	# colour scheme (`PaneSchemeStore`) and the Inspector's aim
+	# (`PaneInspectorStore`). All are keyed by the pane's id
 	# (the directory also by workspace), so an entry follows a rename, and only
 	# what the user set in the pane settings UI ever lands in a trusted store.
 	pane_settings.settings_applied.connect(func(body: Control, settings: Dictionary, previous_id: String):
@@ -200,6 +201,7 @@ func _ready():
 		var body_ws := _workspace_for_body(body)
 		if previous_id != "" and body.attachment_id != previous_id:
 			_move_pane_env(previous_id, body.attachment_id)
+			_move_pane_scheme(previous_id, body.attachment_id)
 			PaneCwdStore.move_pane(str(body_ws.get("id", "")), previous_id, body.attachment_id)
 			PaneInspectorStore.move_state(previous_id, body.attachment_id)
 			# A companion follows its terminal by attachment id, so a rename
@@ -218,6 +220,11 @@ func _ready():
 			# and no IPC caller can: it applies at this pane's next start.
 			PaneCwdStore.set_dir(str(body_ws.get("id", "")), body.attachment_id,
 				str(settings.get("pane_cwd", "")))
+		if body is TerminalPane and settings.has("pane_scheme"):
+			# The pane's own scheme, user-owned like env: the table marks it
+			# `file: false` and `ipc: false`, so only this UI writes it.
+			PaneSchemeStore.set_scheme(body.attachment_id, str(settings.get("pane_scheme", "")))
+			body.apply_scheme_override()
 		if body is InspectorPane and settings.has("system_prompt"):
 			PaneInspectorStore.set_state(
 				body.attachment_id,
@@ -1206,6 +1213,7 @@ func _ensure_unique_attachment_id(body: Control):
 ## attach-time check and the restore pre-pass so both paths behave the same.
 func _on_duplicate_rename(old_id: String, new_id: String):
 	_carry_pane_env(old_id, new_id)
+	_carry_pane_scheme(old_id, new_id)
 	PaneInspectorStore.copy_state(old_id, new_id)
 	ToastManager.warn("Duplicate pane id '%s' renamed to '%s'" % [old_id, new_id])
 
@@ -1289,6 +1297,25 @@ func _move_pane_env(old_id: String, new_id: String):
 	PaneEnvStore.remove_env(old_id)
 	if own_env != "":
 		PaneEnvStore.set_env(new_id, own_env)
+
+## A rename the user made in Pane Settings moves the scheme entry: the old id
+## is no longer the pane's, so it must not carry the look any more.
+func _move_pane_scheme(old_id: String, new_id: String):
+	if old_id == "" or new_id == "" or old_id == new_id:
+		return
+	var owned := PaneSchemeStore.scheme_for(old_id)
+	PaneSchemeStore.remove_scheme(old_id)
+	if owned != "":
+		PaneSchemeStore.set_scheme(new_id, owned)
+
+## A collision rename copies rather than moves, for env's reason: both instances
+## are the same logical pane, so the look the user gave it follows.
+func _carry_pane_scheme(old_id: String, new_id: String):
+	if old_id == "" or new_id == "" or old_id == new_id:
+		return
+	if not PaneSchemeStore.has_scheme(old_id) or PaneSchemeStore.has_scheme(new_id):
+		return
+	PaneSchemeStore.set_scheme(new_id, PaneSchemeStore.scheme_for(old_id))
 
 ## Re-point the companions that follow a pane renamed in Pane Settings.
 ##

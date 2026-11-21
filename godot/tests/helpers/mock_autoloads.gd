@@ -54,6 +54,7 @@ static func setup():
 	_override_script("ConceptManager", _MockConceptManager)
 	_override_script("PaneEnvStore", _MockPaneEnvStore)
 	_override_script("PaneCwdStore", _MockPaneCwdStore)
+	_override_script("PaneSchemeStore", _MockPaneSchemeStore)
 	_override_script("PaneInspectorStore", _MockPaneInspectorStore)
 	_override_script("TrustedStore", _MockTrustedStore)
 	_override_script("LinkWeightsStore", _MockLinkWeightsStore)
@@ -88,6 +89,7 @@ static func teardown():
 	_restore_script("WorkspaceStore")
 	_restore_script("PaneEnvStore")
 	_restore_script("PaneCwdStore")
+	_restore_script("PaneSchemeStore")
 	_restore_script("PaneInspectorStore")
 	_restore_script("TrustedStore")
 	_restore_script("LinkWeightsStore")
@@ -117,6 +119,9 @@ class _MockSettingsManager extends "res://scenes/autoloads/settings_manager.gd":
 	func _write_file(path: String, data: Dictionary):
 		MockAutoloads.note_write(path)
 		MockAutoloads.set_store(path, data)
+	func _write_text(path: String, text: String) -> bool:
+		MockAutoloads.set_store("text:" + path, text)
+		return true
 	func _on_init():
 		# Skip loading from disk during _ready
 		pass
@@ -155,6 +160,15 @@ class _MockConceptManager extends "res://scenes/autoloads/concept_manager.gd":
 ## The env store loads through the mocked backend, so a test can seed
 ## `MockAutoloads.set_store(PaneEnvStore.ENV_FILE, ...)` and then call
 ## `PaneEnvStore.reload()` to see the seeded file.
+class _MockPaneSchemeStore extends "res://scenes/autoloads/pane_scheme_store.gd":
+	func _read_file(path: String) -> Dictionary:
+		return MockAutoloads.get_store(path)
+	func _write_file(path: String, data: Dictionary):
+		MockAutoloads.note_write(path)
+		MockAutoloads.set_store(path, data)
+	func _on_init():
+		reload()
+
 class _MockPaneEnvStore extends "res://scenes/autoloads/pane_env_store.gd":
 	func _read_file(path: String) -> Dictionary:
 		return MockAutoloads.get_store(path)

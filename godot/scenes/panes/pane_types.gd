@@ -541,10 +541,14 @@ const TERMINAL_SETTINGS := {
 	# fit, not pane content: the global appearance setting broadcasts it, and
 	# a shared layout cannot carry it.
 	"terminal_padding": {"kind": "int", "min": 0, "max": TERMINAL_PADDING_MAX, "file": false},
-	# A file must not name a scheme: the read itself is capped and harmless,
-	# but appearance paths are the user's, not a shared layout's. The pane
-	# panel and the global setting (runtime) still set it.
+	# The global dark/light pair's resolved member, pushed by
+	# `apply_to_terminal` on every save. A file must not name it: appearance
+	# paths are the user's, not a shared layout's.
 	"color_scheme_path": {"kind": "scheme_path", "file": false},
+	# The pane's own scheme (`PaneSchemeStore`, keyed by the pane's id and
+	# written only by the pane settings UI): a layout or an IPC caller cannot
+	# style a pane.
+	"pane_scheme": {"kind": "scheme_path", "file": false, "ipc": false},
 	"cursor_shape": {"kind": "int", "min": 0, "max": 2},
 	"cursor_blink": {"kind": "bool"},
 	"cursor_blink_speed": {"kind": "float", "min": 0.1, "max": 2.0},

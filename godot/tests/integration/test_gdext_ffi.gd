@@ -56,16 +56,47 @@ func test_unstarted_grid_functions_are_safe():
 	assert_eq(str(_t.get_selection_text()), "", "no grid means nothing is selected")
 	assert_eq(_t.get_selection_cells().size(), 0, "no grid means nothing to highlight")
 	_t.selection_clear()
-	# The background pair must answer before a child exists: a pane applies its
-	# saved `default_bg` through `set_background_color` on the restore path,
-	# which can run before `start_shell`, and `get_background_color` is what the
-	# pane's ground is read from.
+	# The default pair must answer before a child exists: a pane applies its
+	# foreground/background on the restore path, which can run before
+	# `start_shell`, and `get_background_color` is what the pane's ground is
+	# read from.
 	assert_eq(_t.get_background_color(), Color.BLACK,
-		"an unstarted grid answers the default background")
-	_t.set_background_color(Color8(10, 20, 30))
+		"an unstarted grid answers the system background")
+	_t.set_default_colors(Color8(10, 20, 30), Color8(40, 50, 60))
 	assert_eq(_t.get_background_color(), Color.BLACK,
-		"setting a background on an unstarted grid is a no-op, not a crash")
+		"setting the pair on an unstarted grid is a no-op, not a crash")
 	pass # no crash is the assertion
+
+func test_scheme_parse_answers_the_native_shape():
+	var palette := PackedStringArray()
+	for i in range(16):
+		palette.append("#%02x%02x%02x" % [i, i, i])
+	var body := JSON.stringify({
+		"name": "Probe",
+		"palette": palette,
+		"foreground": "#abcdef",
+		"background": "#123456",
+		"cursor": "#e0e0e0",
+		"selection": "#445566",
+	})
+	var answer = JSON.parse_string(str(GptyScheme.parse(body, "probe.json")))
+	assert_true(answer is Dictionary, "parse must answer JSON")
+	assert_eq(answer.get("ok"), true, "a native scheme parses")
+	assert_eq(answer.get("name"), "Probe")
+	assert_eq(answer.get("background"), "#123456")
+	assert_eq(answer.get("palette").size(), 16)
+	# The canonical file text rides along, so an import writes one shape.
+	var written = JSON.parse_string(str(answer.get("json", "")))
+	assert_true(written is Dictionary, "the native file text must be JSON")
+	assert_eq(written.get("foreground"), "#abcdef")
+	assert_eq(written.get("selection"), "#445566")
+
+func test_scheme_parse_refuses_an_unknown_key():
+	var answer = JSON.parse_string(str(GptyScheme.parse(
+		"{\"palette\":[],\"foreground\":\"#ffffff\",\"background\":\"#000000\",\"colour\":\"#ff0000\"}",
+		"probe.json")))
+	assert_eq(answer.get("ok"), false, "a closed key set refuses an unknown key")
+	assert_string_contains(str(answer.get("error", "")), "Unknown key")
 
 func test_markdown_renderer_formats_and_sanitizes():
 	var renderer = ClassDB.instantiate("GptyMarkdown")

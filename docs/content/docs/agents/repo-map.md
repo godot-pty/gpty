@@ -57,6 +57,7 @@ gpty/
 │   │       ├── keymap.rs       # Key event → byte sequence
 │   │       ├── cli.rs          # CliProcess: piped argv child, line queue
 │   │       ├── history.rs      # SQLite scrollback store
+│   │       ├── scheme.rs       # Colour-scheme import: native JSON, Alacritty, iTerm2, Base16, legacy CSV
 │   │       ├── store.rs        # Shared SQLite store plumbing: write lock, damaged-file recovery
 │   │       ├── vault.rs        # SQLite + FTS5 vault index (wiki pane's notes and search)
 │   │       ├── agent_state.rs  # AgentState: the three-tier, display-only agent detection model
@@ -166,6 +167,7 @@ gpty/
         │   ├── workspace_store.gd  # Named workspace (tab set) persistence
         │   ├── pane_env_store.gd   # User-owned per-pane env, keyed by attachment_id
         │   ├── pane_cwd_store.gd   # User-owned per-pane directory, keyed by workspace id + attachment_id
+        │   ├── pane_scheme_store.gd # User-owned per-pane colour scheme, keyed by attachment_id
         │   ├── saved_command_store.gd # User-owned saved commands (name / one line / run flag), in palette order
         │   ├── pane_inspector_store.gd # User-owned Inspector aim (prompt + switches), keyed by attachment_id
         │   ├── trusted_store.gd    # Workspace Trust consent memory (builtins + plugins)
@@ -210,6 +212,8 @@ gpty/
         │   ├── link_weights.gd      # Pure declared-weight vocabulary (paths, range, lookup)
         │   ├── vault_graph_view.gd  # Planar, custom-drawn vault link-graph canvas
         │   ├── vault_graph_3d.gd    # Orbital (3D) vault map: SubViewport, RigidBody3D nodes, spring edges
+        │   ├── scheme_library.gd   # Shipped + imported colour schemes: listing, capped read, import id
+        │   ├── scheme_picker.gd    # One colour-scheme OptionButton (library, reset item, Import…)
         │   ├── ui_palette.gd       # The chrome colours in two complete sets (dark/light) and the active one
         │   ├── color_swatch.gd     # The words a colour swatch carries: opacity reading, "unset", tooltip
         │   ├── ui_tokens.gd        # The type scale, spacing, radius and the WCAG contrast maths

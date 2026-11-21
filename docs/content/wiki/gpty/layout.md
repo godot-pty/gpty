@@ -22,7 +22,7 @@ Each divider is one grab band centred on it (`DividerHandles`, 12 px), not a str
 
 The divider moves a whole grid unit at a time, and the release commits the same unit it showed, so the divider never jumps when the button comes up. The panes themselves reflow while the drag runs, at about ten reflows a second rather than on every motion event, which is what makes the text follow the divider without a window-size signal to the shell per pixel; the released geometry gets one final reflow. A tile never shrinks below `MIN_TILE`, and a line with no tile on its far side (or no travel left at all) shows no handle and starts no drag.
 
-A terminal fills its whole rectangle with the same colour its cells paint — the grid's background, `palette[0]`, which a colour scheme's first entry sets — so the margin a resize exposes is never a band of a different grey.
+A terminal fills its whole rectangle with the same colour its cells paint — the grid's background, `Palette::background`, which a colour scheme's background sets and which otherwise comes from the pane's own Background setting — so the margin a resize exposes is never a band of a different grey.
 
 The sidebar's swap-position action exchanges two tiles' stored geometry without touching what runs inside them.
 
