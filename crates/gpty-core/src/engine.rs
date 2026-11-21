@@ -1824,9 +1824,9 @@ mod tests {
     }
 
     /// A child that never reads its stdin must not grow the process: the
-    /// bounded queue refuses the input that would have queued, and the handle
-    /// reports it so `inject`/`broadcast` can answer the caller. `sleep` holds
-    /// the PTY open without reading a byte.
+    /// bounded ingress queue refuses the input that would have queued, and the
+    /// handle reports it so `inject`/`broadcast` can answer the caller.
+    /// `sleep` holds the PTY open without reading a byte.
     #[cfg(unix)]
     #[tokio::test]
     async fn a_child_that_stops_reading_refuses_input_instead_of_growing_the_queue() {
@@ -1860,9 +1860,14 @@ mod tests {
             "the child must switch the PTY to raw mode before the sends"
         );
 
-        // 64 KiB per call is the inject API's own per-call cap. The PTY kernel
-        // buffer absorbs one or two writes before the task blocks in
-        // `write_bytes`; the queue's own cap is what must refuse the rest.
+        // The burst is sent without yielding, so nothing drains the ingress
+        // between calls and its fixed cap is what refuses. A yield let the
+        // terminal task hand chunks to the writer thread, and a raw-mode
+        // Linux master write absorbs megabytes into the tty flip buffers
+        // before it blocks - measured 2026-11-21, 288 x 64 KiB accepted with
+        // no write error - so a cumulative accepted count measured the
+        // kernel's appetite, not the queue's growth.
+        // 64 KiB per call is the inject API's own per-call cap.
         let payload = "x".repeat(64 * 1024);
         let mut accepted = 0;
         let mut refused = false;
@@ -1873,20 +1878,22 @@ mod tests {
                 refused = true;
                 break;
             }
-            tokio::task::yield_now().await;
         }
         assert!(
             refused,
             "a child that never reads must eventually refuse input \
              (accepted {accepted} calls)"
         );
-        let bound = super::STDIN_QUEUE_CAP + crate::pty::WRITER_QUEUE_CHUNKS + 2;
         assert!(
-            accepted <= bound,
-            "the queues must stay bounded: accepted {accepted} > {bound} \
-             (engine {} + writer {} + in-flight)",
-            super::STDIN_QUEUE_CAP,
-            crate::pty::WRITER_QUEUE_CHUNKS
+            accepted <= super::STDIN_QUEUE_CAP,
+            "the ingress queue must stay within its cap: accepted {accepted} \
+             > {}",
+            super::STDIN_QUEUE_CAP
+        );
+        assert!(
+            accepted >= super::STDIN_QUEUE_CAP - 2,
+            "the ingress must accept up to its cap (a closed channel would \
+             pass vacuously): accepted {accepted}"
         );
     }
 

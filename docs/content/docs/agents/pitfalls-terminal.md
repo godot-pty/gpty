@@ -12,6 +12,7 @@ Traps and invariants across PTY emulation, ANSI parsing, VTE escape processing, 
 - **PTY child working directory:** A child process spawned from the GDExtension without an explicit `cwd` inherits the Godot project directory, not the user's terminal launch directory. Always resolve and supply the active workspace directory explicitly.
 - **Exit detection on Windows (ConPTY):** ConPTY keeps the PTY pipe open after the child process exits. Relying solely on pipe EOF causes panes to report `running: true` indefinitely. Exit detection requires polling `try_wait` alongside pipe reads.
 - **Non-blocking input writes:** PTY input is backpressured through bounded channels (`STDIN_QUEUE_CAP` to `WRITER_QUEUE_CHUNKS`). Writing to the PTY must be non-blocking; blocking in the write path leaves raw-mode children unkillable when they cease reading stdin.
+- **A pty write's success is not delivery:** a raw-mode Linux master write absorbs megabytes into the tty flip buffers before it blocks, and the line discipline discards what a non-reading child never consumes while `write` still returns the full count. So a test cannot infer "the input queue filled" from counted `send_text` successes - an 18 MiB burst was swallowed with no error and only `READY` on the grid, while a fresh probe blocked after ~11 KiB; saturation depends on the flip-buffer state earlier output left behind (measured 2026-11-21). Test a queue cap at its ingress instead: send the burst without yielding, so nothing drains and the cap is what refuses.
 
 ## Grid Synchronization, Rendering & Sizing
 
