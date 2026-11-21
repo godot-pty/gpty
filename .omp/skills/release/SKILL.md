@@ -24,8 +24,9 @@ records the checkpoints an agent must not skip, not a second runbook.
 
 - Read `RELEASING.md`, the target `docs/content/docs/roadmap/vX.Y.md` section,
   and the previous release's changelog page.
-- Confirm the target version, previous tag, active integration branch, clean
-  tree, signing key, `gpty-bot` token and a graphical session for screenshots.
+- Confirm the target version, previous tag, whether the line is active (`main`)
+  or in maintenance (`release/vX.Y`), clean tree, signing key, `gpty-bot` token
+  and a graphical session for screenshots.
 - Run `./scripts/check-github-settings` (read-only; maintainer `gh`) before the
   release and after any ruleset or environment change.
 - Run `./scripts/ci-check`; a green local run is the baseline, not proof of the
@@ -43,10 +44,12 @@ records the checkpoints an agent must not skip, not a second runbook.
   and ask the user for the image.
 - **Review pause:** present the changelog, blog draft, screenshots and
   `/tmp/gpty-release-body.md`; wait for the user's explicit OK.
-- **Release execution:** follow `RELEASING.md` §8–§10. Push the integration
-  branch through `scripts/bot-push`, open the PR with `scripts/bot-pr`, wait for
-  all required checks, approve and merge with a merge commit, then create and
-  verify the signed tag.
+- **Release execution:** follow `RELEASING.md` §8–§10. Push the release-prep
+  branch through `scripts/bot-push`, open the PR with `scripts/bot-pr --base
+  main` (or the maintenance branch), wait for the active line's required checks
+  (on a maintenance branch, for its CI, CodeQL and secret-scan runs) to be
+  green, approve and merge with a merge commit, then create and verify the
+  signed tag on `main` (or on the maintenance branch).
 - **Environment approval:** download `gpty-release-dist` (three archives plus
   `SHA256SUMS`) and measure the bytes before approving the `release`
   environment - `sha256sum -c`, both license files in every archive, `--version`

@@ -155,7 +155,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | cargo run --bin gpty -- 
 
 ### Test
 
-- **Automated**: `./scripts/ci-check` runs the full suite (Rust + GUT + audit). CI runs on pushes to `main` and `0.*` and on pull requests targeting either; a release PR to `main` also runs CodeQL and Secret scan. The `docs` and `commit-lint` jobs are required checks on `main`.
+- **Automated**: `./scripts/ci-check` runs the full suite (Rust + GUT + audit). CI runs on pushes to `main` and `release/v*` and on every pull request targeting either; CodeQL and Secret scan run on those paths too. The `docs` and `commit-lint` jobs are required checks on `main`.
 - **Manual pre-release**: [docs/content/docs/overview/testing.md](docs/content/docs/overview/testing.md) - smoke tests for CLI bridge, daemon lifecycle, UI shortcuts, and error paths that require a running GUI.
 - Test format: `Given / When / Then` with expected output. See the manual checklist for examples.
 
@@ -243,13 +243,13 @@ See the agent guide for the complete conventions and patterns: [Rust](docs/conte
 - The licence allow-list lives in `deny.toml`: MIT, Apache-2.0 (and its LLVM exception), BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, Unicode-3.0, Unlicense, Zlib and GPL-3.0-or-later, with named WTFPL exceptions for the two FFmpeg binding crates. A dependency outside the policy fails `cargo deny check` with the crate named; the fix is a decision - allow the licence, add a named exception with its reason, or drop the dependency - not a config edit.
 - Dependabot opens one grouped pull request per ecosystem per week: Cargo, the fuzz workspace's own lockfile, and GitHub Actions. Every third-party action is pinned to a full commit SHA.
 - `./scripts/ci-check` runs `cargo audit --deny warnings` for advisories over both committed lockfiles, the workspace's `Cargo.lock` and the fuzz workspace's `fuzz/Cargo.lock`, each behind a `cargo metadata --locked` drift check because GitHub's dependency graph reads both - and `cargo deny check` for licences, sources, yanked crates and duplicate versions; CI runs the same gates.
-- A release publishes the three archives, `SHA256SUMS` and build-provenance attestations. The tag must be a signed annotated tag reachable from `main`; the read-only gate verifies the tag, version, defect-class and docs checks before building, and the write/OIDC `publish` job waits on the `release` environment's required reviewer. The release process is [RELEASING.md](RELEASING.md); the agent execution checklist is `.omp/skills/release/SKILL.md`; the tag path is `.github/workflows/release.yml` (gate, shared build, publish) and the platform builds and export live in `.github/workflows/release-build.yml`, which a `workflow_dispatch` on `main` also runs to fill the caches a tag restores. The read-only `scripts/check-github-settings` reads the rulesets, `release` environment and Actions flags back from the API.
+- A release publishes the three archives, `SHA256SUMS` and build-provenance attestations. The tag must be a signed annotated tag reachable from `main` (the active line) or from the line's `release/vX.Y` (maintenance); the read-only gate verifies the tag, version, defect-class and docs checks before building, and the write/OIDC `publish` job waits on the `release` environment's required reviewer. The release process is [RELEASING.md](RELEASING.md); the agent execution checklist is `.omp/skills/release/SKILL.md`; the tag path is `.github/workflows/release.yml` (gate, shared build, publish) and the platform builds and export live in `.github/workflows/release-build.yml`, which a `workflow_dispatch` on `main` also runs to fill the caches a tag restores. The read-only `scripts/check-github-settings` reads the rulesets, `release` environment and Actions flags back from the API.
 
 ## Branches
 
-`main` is the release branch. Every commit on it arrives through a release pull request from the active integration branch: `0.8.x` for the 0.8 line, `0.9.x` for 0.9. The maintainer approves the release PR and tags the release from `main`.
+`main` is the trunk. Branch from it and open pull requests against it; feature branches are short-lived. A line that has stopped receiving features has a long-lived maintenance branch `release/vX.Y`, created from `main` at the line's last release commit when development moves to the next minor. Fixes are cherry-picked onto it, its patches are tagged there, and it never receives feature work. An archived line's tag is the shipped tree; its branch may carry one later CI-trigger commit.
 
-Day-to-day changes land on the integration branch. Branch from it, open pull requests against it, and do not open feature pull requests against `main`. The `gpty-bot` GitHub App pushes the integration branch and opens the release PR; the bot never approves or merges. Dependency updates target the active integration branch; bump `.github/dependabot.yml`'s three `target-branch` entries when the line rolls (`0.8.x` → `0.9.x`). A push does not change commit authorship: the application token is only the push credential, so the branch history remains the maintainer's signed commits while the pull request is authored by `app/gpty-bot`.
+`gpty-bot` pushes work branches, opens pull requests, and never approves or merges. A branch that edits `.github/workflows/**` is pushed with the maintainer's credential because the app cannot create or update workflow files; the final non-workflow commit is pushed with `scripts/bot-push`, making the app the last pusher so the maintainer's approval satisfies the last-push rule. Dependency updates target `main`.
 
 ## Pull Request Process
 
@@ -261,7 +261,7 @@ Day-to-day changes land on the integration branch. Branch from it, open pull req
 6. Add or update test cases as applicable.
 7. Sign off every commit with `git commit -s` (DCO); the `commit-msg` hook refuses a commit without the trailer, and the `commit-lint` CI job runs the same check over human commits on a pull request (it exempts `[bot]`-authored commits).
 8. See [AGENTS.md](AGENTS.md) for commit information.
-9. Submit a pull request against the active integration branch (`0.8.x` for the 0.8 line), not `main`.
+9. Submit a pull request against `main` (or the line's `release/vX.Y` for a maintenance fix), not an integration branch.
 
 ## Governance
 

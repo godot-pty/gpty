@@ -82,22 +82,22 @@ Summarize what was committed, in which groups, and why. Note any files deliberat
 
 ## Validate end to end
 
-Commit is the half you can check locally. When the project validates on a remote (CI runs on push or PR), a local pass is necessary, not sufficient — the run is the evidence the change works on the platforms and toolchains the project actually ships. This repo is a release train: day-to-day work lands on the active `0.<minor>.x` integration branch; `main` is release-only and protected by a ruleset that requires a pull request, an approval, last-push approval and the required checks. The `gpty-bot` app pushes the integration branch (`scripts/bot-push`) and opens the release PR (`scripts/bot-pr`); the maintainer approves it.
+Commit is the half you can check locally. When the project validates on a remote (CI runs on push or PR), a local pass is necessary, not sufficient — the run is the evidence the change works on the platforms and toolchains the project actually ships. This repo is trunk-based: day-to-day work branches from `main` and lands there through a pull request protected by a ruleset that requires an approval, last-push approval and the required checks. `release/vX.Y` branches are maintenance bases, not development branches. The `gpty-bot` app pushes work branches (`scripts/bot-push`) and opens the PR (`scripts/bot-pr`); the maintainer approves it.
 
 1. **Local gate first.** `./scripts/ci-check` (full, not `--fast`) and the pre-push hook are the local half. Do not push on a red local gate.
-2. **Push once per batch**, not once per commit: each code push starts a full validation run (~4-5 minutes here). A docs-only or skill-only push is ignored by `ci.yml`; report the workflow that actually fired (the `Docs` workflow only runs on `main`) or say none did. If the changes are not meant to land yet, hold the commits and say so; do not push for review you were not asked to do.
+2. **Push once per batch**, not once per commit: each code push starts a full validation run (~4-5 minutes here). A docs-only or skill-only push is ignored by `ci.yml`; report the workflow that actually fired (the `Docs` workflow runs on docs changes to `main` and `release/v*`, and deploys only from `main`) or say none did. If the changes are not meant to land yet, hold the commits and say so; do not push for review you were not asked to do.
 3. **Identify the run for the pushed SHA and watch it**:
 
 ```bash
-./scripts/bot-push               # the current (integration) branch; or git push origin HEAD with your key
+./scripts/bot-push               # the current work branch; or git push origin HEAD with your key
 gh run list --workflow=CI --limit 1 --json databaseId,headSha   # confirm headSha matches
 gh run watch <id> --interval 20 --exit-status
 gh run view <id> --json conclusion,jobs --jq '"run=" + .conclusion, (.jobs[] | "  \(.name): \(.conclusion)")'
 ```
 
-A range that edits `.github/workflows/**` cannot go through `bot-push`: the installation grants only `contents`, `metadata` and `pull_requests`, and GitHub refuses an App push that creates or updates a workflow ("refusing to allow a GitHub App to create or update workflow … without `workflows` permission") — measured 2026-11-17, after the whole pre-push gate had already run. The maintainer's own `gh` token carries the `workflow` scope, so that range is pushed with it (never echo the token into argv — write it to a 0600 file and reuse the `GPTY_BOT_TOKEN_FILE` + `scripts/git-askpass-token` pair `bot-push` uses, with `https://x-access-token@github.com/…`), or the App is granted Workflows write first.
+A range that edits `.github/workflows/**` cannot go through `bot-push`: the installation grants only `contents`, `metadata` and `pull_requests`, and GitHub refuses an App push that creates or updates a workflow ("refusing to allow a GitHub App to create or update workflow … without `workflows` permission") — measured 2026-11-17, after the whole pre-push gate had already run. The maintainer's own credential carries the `workflow` scope, so push the workflow commit with SSH or a `workflow`-scoped token supplied through `GIT_ASKPASS` (never echo the token into argv), then land a final non-workflow commit through `scripts/bot-push`. The app is the last pusher, so the maintainer's approval satisfies `main`'s last-push rule; open the PR with `scripts/bot-pr`. Do not grant the App Workflows write: a same-repository PR workflow runs with repository secrets before any human merges it.
 
-A release PR from the integration branch runs `CI`, `CodeQL` and `Secret scan` on the PR; watch those checks before the maintainer approves and merges it. A release's own runbook is `skill://release`.
+A release PR from the `release-prep/vX.Y.Z` branch runs `CI`, `CodeQL` and `Secret scan` on the PR; watch those checks before the maintainer approves and merges it. A release's own runbook is `skill://release`.
 
 4. **Report the run's conclusion and the SHA** with the work. Green on CI is part of the deliverable; "pushed" is not.
 
