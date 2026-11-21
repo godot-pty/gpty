@@ -44,6 +44,8 @@ var _motion_pickers := {}
 var _motion_params := {}
 var _effect_opt: OptionButton = null
 var _effect_intensity_opt: OptionButton = null
+var _reactive_rules_host: VBoxContainer = null
+var _add_reactive_opt: OptionButton = null
 
 func _init(workspace: Control):
 	_workspace = workspace
@@ -84,6 +86,7 @@ func _notification(what: int):
 		# every show for the same reason: the panel outlives a visit.
 		_sync_motion_rows()
 		_sync_effect_rows()
+		_sync_reactive_rows()
 	elif what == NOTIFICATION_RESIZED:
 		# The window (and with it the layout space) changed, so the scale it can
 		# show may have moved while the panel is open - and the card that fitted
@@ -707,9 +710,32 @@ func _add_effects_section(v: VBoxContainer) -> Callable:
 	v.add_child(intensity_row)
 	_effect_intensity_opt = intensity_opt
 
+	v.add_child(HSeparator.new())
+	var reactive_title := Label.new()
+	reactive_title.name = "ReactiveTitle"
+	reactive_title.text = "Reactive effects"
+	reactive_title.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
+	v.add_child(reactive_title)
+	var reactive_hint := Label.new()
+	reactive_hint.text = UiEffects.REACTIVE_HINT
+	reactive_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	reactive_hint.theme_type_variation = UiTheme.MUTED_LABEL
+	v.add_child(reactive_hint)
+	_reactive_rules_host = VBoxContainer.new()
+	_reactive_rules_host.name = "ReactiveRules"
+	v.add_child(_reactive_rules_host)
+	_add_reactive_opt = OptionButton.new()
+	_add_reactive_opt.name = "AddReactiveOpt"
+	_add_reactive_opt.item_selected.connect(_on_add_reactive_selected)
+	v.add_child(_add_reactive_opt)
+	if not ConceptManager.concepts_changed.is_connected(_sync_reactive_rows):
+		ConceptManager.concepts_changed.connect(_sync_reactive_rows)
+
 	_sync_effect_rows()
+	_sync_reactive_rows()
 	return func():
 		_sync_effect_rows()
+		_sync_reactive_rows()
 
 ## Read the stored effect and intensity into their pickers. Called on build, on
 ## a picker change and whenever the panel is shown: the panel outlives a visit,
@@ -720,6 +746,112 @@ func _sync_effect_rows() -> void:
 	SettingsManager.cfg_effect = UiEffects.sanitize_ambient(str(SettingsManager.cfg_effect))
 	_effect_opt.select(UiEffects.AMBIENT_IDS.find(SettingsManager.cfg_effect))
 	_effect_intensity_opt.selected = UiEffects.level()
+
+## Rebuild the concept -> cue rows from the store. One row per rule: the concept
+## name, the cue picker (Off included) and a remove button. A rule whose concept
+## is not in the current list still renders, because a disabled concept or an
+## uninstalled plugin can come back; the rule is inert until then.
+func _sync_reactive_rows() -> void:
+	if _reactive_rules_host == null:
+		return
+	SettingsManager.cfg_reactive_effects = UiEffects.sanitize_reactive(
+		SettingsManager.cfg_reactive_effects)
+	var rules: Dictionary = SettingsManager.cfg_reactive_effects
+	for child in _reactive_rules_host.get_children():
+		_reactive_rules_host.remove_child(child)
+		# Immediate: the rows are rebuilt inside a picker's own signal, and a
+		# queued free would leave the old rows as orphans for a frame.
+		child.free()
+	if rules.is_empty():
+		var empty := Label.new()
+		empty.text = "No reactive effects. Add a rule to cue a pane when a concept matches."
+		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		empty.theme_type_variation = UiTheme.MUTED_LABEL
+		_reactive_rules_host.add_child(empty)
+	for concept in rules:
+		_build_reactive_row(str(concept), str(rules[concept]))
+	_sync_add_reactive(rules)
+
+func _build_reactive_row(concept: String, effect: String) -> void:
+	var row := HBoxContainer.new()
+	var label := Label.new()
+	label.text = concept
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.tooltip_text = concept
+	row.add_child(label)
+	var opt := OptionButton.new()
+	opt.add_item("Off")
+	opt.set_item_metadata(0, "")
+	for id in UiEffects.REACTIVE_IDS:
+		opt.add_item(UiEffects.reactive_label(id))
+		opt.set_item_metadata(opt.item_count - 1, id)
+	opt.selected = maxi(UiEffects.REACTIVE_IDS.find(effect) + 1, 0)
+	opt.tooltip_text = "The cue this concept fires when it matches"
+	opt.item_selected.connect(func(idx: int):
+		_on_reactive_effect_selected(concept, str(opt.get_item_metadata(idx))))
+	row.add_child(opt)
+	var remove := Button.new()
+	Icons.icon_button(remove, Icons.DELETE, "Remove rule")
+	remove.pressed.connect(func(): _remove_reactive_rule(concept))
+	row.add_child(remove)
+	_reactive_rules_host.add_child(row)
+
+## The "Add rule…" picker: enabled concepts first, registry order kept, names
+## already mapped skipped. Hidden when the table is full or nothing is left.
+func _sync_add_reactive(rules: Dictionary) -> void:
+	if _add_reactive_opt == null:
+		return
+	_add_reactive_opt.clear()
+	var enabled: Array[String] = []
+	var disabled: Array[String] = []
+	for entry in ConceptManager.get_concepts():
+		if not (entry is Dictionary):
+			continue
+		var concept := str(entry.get("name", ""))
+		if concept == "" or rules.has(concept):
+			continue
+		if enabled.has(concept) or disabled.has(concept):
+			continue
+		if entry.get("enabled", false) == true:
+			enabled.append(concept)
+		else:
+			disabled.append(concept)
+	var candidates := enabled + disabled
+	if rules.size() >= UiEffects.MAX_RULES or candidates.is_empty():
+		_add_reactive_opt.visible = false
+		return
+	_add_reactive_opt.visible = true
+	_add_reactive_opt.add_item("Add rule…")
+	_add_reactive_opt.set_item_metadata(0, "")
+	for concept in candidates:
+		_add_reactive_opt.add_item(concept)
+		_add_reactive_opt.set_item_metadata(_add_reactive_opt.item_count - 1, concept)
+	_add_reactive_opt.select(0)
+
+func _on_add_reactive_selected(idx: int) -> void:
+	var concept := str(_add_reactive_opt.get_item_metadata(idx))
+	if concept == "":
+		return
+	SettingsManager.cfg_reactive_effects[concept] = "tint"
+	SettingsManager.save_settings()
+	_sync_reactive_rows()
+
+func _on_reactive_effect_selected(concept: String, effect: String) -> void:
+	if effect == "":
+		SettingsManager.cfg_reactive_effects.erase(concept)
+	else:
+		SettingsManager.cfg_reactive_effects[concept] = effect
+	SettingsManager.save_settings()
+	# The picker that emitted this lives in the row the rebuild frees; freeing
+	# it inside its own signal is an engine error, so rebuild next frame.
+	_sync_reactive_rows.call_deferred()
+
+func _remove_reactive_rule(concept: String) -> void:
+	SettingsManager.cfg_reactive_effects.erase(concept)
+	SettingsManager.save_settings()
+	# Same reason as the cue picker: the button's own row is freed.
+	_sync_reactive_rows.call_deferred()
 
 ## Read the stored choices into the pickers and rebuild every property block.
 ## Called on build, on a picker change and whenever the panel is shown: the

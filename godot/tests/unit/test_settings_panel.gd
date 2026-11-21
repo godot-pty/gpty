@@ -1049,3 +1049,69 @@ func test_the_appearance_reset_restores_the_effect_defaults():
 	assert_eq(str(effect_opt.get_item_metadata(effect_opt.selected)), UiEffects.DEFAULT_AMBIENT,
 		"the visible picker follows the store")
 	assert_eq(_find_option("EffectIntensityOpt").selected, UiEffects.OFF)
+
+## The row for one concept in the reactive table, or null.
+func _reactive_row(concept: String) -> HBoxContainer:
+	for node in _panel.find_children("*", "HBoxContainer", true, false):
+		var parent := node.get_parent()
+		if parent == null or str(parent.name) != "ReactiveRules":
+			continue
+		var label := node.get_child(0) as Label
+		if label != null and label.text == concept:
+			return node as HBoxContainer
+	return null
+
+func _concept_choice(concept: String) -> int:
+	var add := _find_option("AddReactiveOpt")
+	if add == null:
+		return -1
+	for i in add.item_count:
+		if str(add.get_item_metadata(i)) == concept:
+			return i
+	return -1
+
+func test_adding_a_reactive_rule_stores_and_renders_it():
+	var add := _find_option("AddReactiveOpt")
+	assert_not_null(add, "the empty table offers an Add picker")
+	var idx := _concept_choice("cat_command")
+	assert_true(idx > 0, "a shipped concept is offered")
+	add.item_selected.emit(idx)
+	assert_eq(str(SettingsManager.cfg_reactive_effects.get("cat_command", "")), "tint",
+		"a new rule starts on the warning cue")
+	var row := _reactive_row("cat_command")
+	assert_not_null(row, "the rule renders as a row")
+	var opt := row.get_child(1) as OptionButton
+	assert_eq(str(opt.get_item_metadata(opt.selected)), "tint")
+	assert_eq(_concept_choice("cat_command"), -1, "a mapped concept leaves the Add list")
+
+func test_removing_a_reactive_rule_clears_it():
+	SettingsManager.cfg_reactive_effects = {"cat_command": "tint"}
+	_panel._sync_reactive_rows()
+	var row := _reactive_row("cat_command")
+	assert_not_null(row)
+	(row.get_child(2) as Button).pressed.emit()
+	await get_tree().process_frame
+	assert_false(SettingsManager.cfg_reactive_effects.has("cat_command"),
+		"the remove button erases the rule")
+	assert_null(_reactive_row("cat_command"))
+
+func test_off_clears_a_reactive_rule():
+	SettingsManager.cfg_reactive_effects = {"cat_command": "tint"}
+	_panel._sync_reactive_rows()
+	var row := _reactive_row("cat_command")
+	assert_not_null(row)
+	var opt := row.get_child(1) as OptionButton
+	opt.item_selected.emit(0)
+	await get_tree().process_frame
+	assert_false(SettingsManager.cfg_reactive_effects.has("cat_command"),
+		"picking Off is the same as removing the rule")
+
+func test_the_reactive_table_hides_add_at_the_cap():
+	var rules := {}
+	for i in UiEffects.MAX_RULES:
+		rules["concept_%d" % i] = "tint"
+	SettingsManager.cfg_reactive_effects = rules
+	_panel._sync_reactive_rows()
+	assert_false(_find_option("AddReactiveOpt").visible, "no ninth rule can be added")
+	assert_eq(_panel.find_child("ReactiveRules", true, false).get_child_count(),
+		UiEffects.MAX_RULES, "one row per stored rule")

@@ -55,6 +55,7 @@ const AMBIENT := {
 const REACTIVE_IDS := ["tint", "pulse", "particles"]
 const MAX_RULES := 8
 const MAX_CONCEPT_NAME := 64
+const REACTIVE_HINT := "Cue a pane when one of its concepts matches. A pane cues at most three times a second; the effect is display-only."
 const REACTIVE := {
 	"tint": {
 		"label": "Tint (red)",

@@ -245,6 +245,14 @@
       "mechanism": "`UiEffects` holds the two ambient `preload` shader paths and the Off/Subtle/Full intensity; `PaneEffects` paints the ground through one dedicated effect layer and the row runs at the default background are skipped under it, so text, selection and coloured cells stay opaque",
       "evidence": "godot/scenes/ui/ui_effects.gd",
       "row": "Dynamic Shaders"
+    },
+    {
+      "id": "gui.effects.reactive",
+      "statement": "a concept event can cue the pane that fired it, rate-limited and display-only",
+      "status": "done",
+      "mechanism": "`UiEffects.REACTIVE` is the closed cue table with one fixed palette tone per cue; the concept drain calls `_flash_concept`, and `PaneEffects` enforces 334 ms per pane, skips hidden panes and draws a tint, a border pulse or a fixed 48-particle burst from a pool allocated once",
+      "evidence": "godot/scenes/terminal/pane_effects.gd",
+      "row": "Reactive Environments"
     }
   ]
 }

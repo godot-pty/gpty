@@ -1371,6 +1371,17 @@ func pin_effects() -> void:
 	if _effects != null:
 		_effects.pin(true)
 
+## Fire a reactive cue on this pane. The host is created on demand: a pane with
+## no ambient effect still answers a concept event.
+func flash_effect(id: String) -> bool:
+	_ensure_effects()
+	return _effects.flash(id)
+
+## Draw one cue's final frame for a capture.
+func pin_effect_cue(id: String) -> void:
+	_ensure_effects()
+	_effects.pin_cue(id)
+
 ## True while an ambient effect owns the ground. The empty-cache guard keeps a
 ## pane that has not synced yet on today's behaviour (the wrapper's background).
 func _effect_backdrop() -> bool:

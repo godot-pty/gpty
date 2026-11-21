@@ -139,6 +139,36 @@ func test_a_settings_save_broadcasts_the_effect_to_every_terminal():
 		assert_eq(body.effect_intensity, UiEffects.FULL, "and its intensity")
 	await get_tree().create_timer(2.1).timeout
 
+## The concept -> cue glue: a mapped concept cues the pane it fired in, an
+## unmapped one draws nothing, and the cue is display-only (no store write).
+func test_a_mapped_concept_cues_its_source_pane():
+	MockAutoloads.set_store(WorkspaceStore.FILE, {
+		"active": 0,
+		"workspaces": [{"name": "W", "layout": []}],
+	})
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var body = ws._spawn_pane("terminal")
+	assert_not_null(body, "precondition: a terminal to cue")
+	SettingsManager.cfg_reactive_effects = {"cat_command": "tint"}
+
+	ws._flash_concept(body, "cat_command")
+	await get_tree().process_frame
+	assert_not_null(body._effects, "the cue created the effect host")
+	assert_true(body._effects._last_flash_ms >= 0,
+		"the mapped concept started a cue")
+
+	body._effects._last_flash_ms = -1
+	ws._flash_concept(body, "git_log")
+	assert_eq(body._effects._last_flash_ms, -1,
+		"an unmapped concept draws nothing")
+	assert_true(SettingsManager.cfg_reactive_effects.has("cat_command"),
+		"the cue never feeds back into the mapping store")
+	await get_tree().create_timer(2.1).timeout
+
 ## The bodies of every terminal in every workspace, the same walk the settings
 ## broadcast uses.
 func _terminal_bodies(ws: Control) -> Array:

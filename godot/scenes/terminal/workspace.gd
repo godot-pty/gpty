@@ -3098,6 +3098,7 @@ func _poll_concept_events_for(ws: Dictionary):
 				"source": str(body.attachment_id),
 				"target": str(ev.get("target_pane_type", "")),
 			}))
+			_flash_concept(body, str(ev.get("concept_name", "")))
 		# Notify-only concepts (`capture_mode: single_line`): the trigger fired,
 		# nothing was captured and no pane received anything. Subscribers get the
 		# match; the output stays in the terminal. Metadata only — the matched
@@ -3112,6 +3113,22 @@ func _poll_concept_events_for(ws: Dictionary):
 				"name": str(notice.get("concept_name", "")),
 				"source": str(body.attachment_id),
 			}))
+			_flash_concept(body, str(notice.get("concept_name", "")))
+
+## Ambient feedback for a concept event: a mapped concept cues the pane it
+## fired in. Display only - nothing here acknowledges, flushes or publishes;
+## the rate limit lives in `PaneEffects`, and a hidden pane is skipped so an
+## off-screen workspace pays no GPU work. `has_method` is the receiver
+## contract `ConceptRouter` already uses for content delivery.
+func _flash_concept(body: Control, concept_name: String) -> void:
+	if concept_name == "" or body == null or not body.has_method("flash_effect"):
+		return
+	if not body.is_visible_in_tree():
+		return
+	var effect := UiEffects.reactive_for(concept_name)
+	if effect != "":
+		body.flash_effect(effect)
+
 # ═══════════════════════════════════════════════════════════════════════
 # IPC bridge — polls Rust IPC requests from _process
 # ═══════════════════════════════════════════════════════════════════════

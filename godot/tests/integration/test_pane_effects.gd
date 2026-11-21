@@ -139,3 +139,54 @@ func test_turning_the_effect_off_frees_the_layer_and_the_buffer():
 	assert_null(_probe._effect_layer, "the layer is gone")
 	assert_false(_probe._effects.wants_backdrop(), "no ground is claimed")
 	assert_null(_probe._effects._buffer, "the buffer is freed")
+
+## Mount the probe so `is_visible_in_tree()` is true. Its size stays zero, so
+## no shell is spawned for a cue test; the effect host anchors itself to it.
+func _mount_probe() -> void:
+	add_child(_probe)
+	await get_tree().process_frame
+
+func test_a_cue_is_rate_limited_to_three_a_second():
+	await _mount_probe()
+	_probe._ensure_effects()
+	var effects = _probe._effects
+	assert_true(effects.flash_at("tint", 0), "the first start is accepted")
+	assert_false(effects.flash_at("tint", 100), "inside the 334 ms window")
+	assert_false(effects.flash_at("tint", 200), "still inside it")
+	assert_true(effects.flash_at("tint", 400), "the window has passed")
+
+func test_a_hidden_pane_never_cues():
+	await _mount_probe()
+	_probe._ensure_effects()
+	_probe.hide()
+	assert_false(_probe._effects.flash_at("tint", 0), "a hidden pane draws nothing")
+	assert_eq(_probe._effects._last_flash_ms, -1,
+		"and consumes no part of the rate window")
+	_probe.show()
+
+func test_a_tint_cue_uses_the_danger_tone():
+	assert_eq(UiEffects.tone_color("tint"), UiPalette.active().DANGER)
+	assert_eq(UiEffects.tone_color("pulse"), UiPalette.active().ACCENT)
+	assert_eq(UiEffects.tone_color("particles"), UiPalette.active().SUCCESS)
+
+func test_pinning_a_cue_draws_its_final_frame():
+	await _mount_probe()
+	_probe._ensure_effects()
+	_probe._effects.pin_cue("tint")
+	assert_eq(_probe._effects._cue_alpha, PaneEffects.TINT_PEAK_ALPHA)
+	assert_eq(_probe._effects._pulse_alpha, 0.0)
+	_probe._effects.pin_cue("pulse")
+	assert_eq(_probe._effects._pulse_alpha, PaneEffects.PULSE_PEAK_ALPHA)
+	assert_eq(_probe._effects._cue_alpha, 0.0)
+
+func test_particles_are_a_fixed_preallocated_burst():
+	await _mount_probe()
+	_probe._ensure_effects()
+	assert_null(_probe._effects._particles, "the pool is created on first use")
+	assert_true(_probe._effects.flash_at("particles", 1000))
+	var pool: CPUParticles2D = _probe._effects._particles
+	assert_not_null(pool)
+	assert_eq(pool.amount, PaneEffects.PARTICLES_AMOUNT, "the cap is the amount")
+	assert_true(pool.one_shot, "a burst, not a stream")
+	assert_true(pool.emitting, "the burst started")
+	assert_null(pool.material, "the default material is normal blend; nothing adds")
