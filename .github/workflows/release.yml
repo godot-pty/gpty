@@ -63,11 +63,27 @@ jobs:
           verified="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${sha}" --jq '.verification.verified')"
           [ "$verified" = "true" ] || { echo "tag $VERSION is not signed/verified" >&2; exit 1; }
 
-      - name: Check the tag is on main
+      # The active line tags `main`; a line in maintenance tags its release
+      # branch. Derive the branch from the tag, never from a stored name.
+      - name: Check the tag is on main or its release branch
         run: |
           set -euo pipefail
+          line="release/v${VERSION#v}"
+          line="${line%.*}"
           git fetch --no-tags origin main
-          git merge-base --is-ancestor HEAD FETCH_HEAD
+          if git merge-base --is-ancestor HEAD FETCH_HEAD; then
+            echo "tag $VERSION is on main"
+            exit 0
+          fi
+          if git ls-remote --exit-code --heads origin "$line" >/dev/null; then
+            git fetch --no-tags origin "$line"
+            if git merge-base --is-ancestor HEAD FETCH_HEAD; then
+              echo "tag $VERSION is on $line"
+              exit 0
+            fi
+          fi
+          echo "tag $VERSION is not an ancestor of main or $line" >&2
+          exit 1
 
       - name: Check the version
         run: |
