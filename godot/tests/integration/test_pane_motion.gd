@@ -50,6 +50,15 @@ func _wrapper_of(tm: TerminalManager, body: Control) -> Control:
 func _rect(w: Control) -> Rect2:
 	return Rect2(w.position, w.size)
 
+## Poll until every live transition has finished. Tween tests must not await a
+## fixed delay: a slow frame can outlast a short transition (Windows CI freed a
+## 200 ms slide ghost before a 150 ms timer fired). Callers assert the end
+## state themselves.
+func _wait_for_transitions(ws, timeout_ms: int = 3000) -> void:
+	var deadline := Time.get_ticks_msec() + timeout_ms
+	while ws._transitions.playing() > 0 and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+
 # ── Create / close ─────────────────────────────────────────────────────
 
 func test_a_created_pane_fades_and_scales_into_its_final_rect():
@@ -207,7 +216,7 @@ func test_a_slide_create_enters_from_the_split_edge_and_lands_on_its_rect():
 		"the wider grid splits horizontally, the new tile on the right")
 	assert_eq(ws._transitions.playing(), 1, "only the new pane animates")
 	var start := _rect(w)
-	await wait_seconds(0.3)
+	await _wait_for_transitions(ws)
 	var landed := _rect(w)
 	assert_almost_eq(start.position.x, landed.position.x - 40.0, 0.5,
 		"the pane starts 40 px toward its left seam and slides right")
@@ -219,7 +228,7 @@ func test_a_slide_create_enters_from_the_split_edge_and_lands_on_its_rect():
 
 func test_a_slide_close_exits_toward_the_split_edge():
 	SettingsManager.cfg_pane_animation = {"create": "none", "close": "slide"}
-	SettingsManager.cfg_pane_animation_params = {"close:slide": {"duration_ms": 200.0, "distance_px": 40.0}}
+	SettingsManager.cfg_pane_animation_params = {"close:slide": {"duration_ms": 600.0, "distance_px": 40.0}}
 	var ws = await _make_workspace()
 	await _empty_grid(ws)
 	ws._spawn_pane("code_viewer", {}, false)
@@ -229,10 +238,27 @@ func test_a_slide_close_exits_toward_the_split_edge():
 	ws._kill_now(second)
 	assert_true(is_instance_valid(w), "the ghost is drawn while it slides out")
 	assert_eq(ws._transitions.playing(), 1)
-	await wait_seconds(0.15)
-	assert_lt(w.position.x, landed.position.x - 5.0, "the ghost moved toward its left seam")
-	await wait_seconds(0.2)
-	assert_false(is_instance_valid(w))
+	# A fixed delay can outlast the tween on a slow frame - Windows CI freed
+	# the ghost before a 150 ms timer fired - so sample frame by frame and
+	# stop before the wrapper goes away.
+	var moved_toward_seam := false
+	var deadline := Time.get_ticks_msec() + 2000
+	while is_instance_valid(w) and Time.get_ticks_msec() < deadline:
+		if w.position.x < landed.position.x - 5.0:
+			moved_toward_seam = true
+			break
+		await get_tree().process_frame
+	assert_true(moved_toward_seam, "the ghost moved toward its left seam")
+	# `_finish` erases the entry before it calls `queue_free`, so wait for the
+	# instance itself; the counter is already zero a frame earlier.
+	var freed := false
+	var free_deadline := Time.get_ticks_msec() + 3000
+	while Time.get_ticks_msec() < free_deadline:
+		if not is_instance_valid(w):
+			freed = true
+			break
+		await get_tree().process_frame
+	assert_true(freed, "the exit frees the ghost")
 	assert_eq(ws._transitions.playing(), 0)
 
 func test_a_pop_create_grows_from_its_scale():
@@ -244,7 +270,7 @@ func test_a_pop_create_grows_from_its_scale():
 	var w := _wrapper_of(ws._tm, body)
 	assert_almost_eq(w.scale.x, 0.5, 0.02, "the pane starts at the pop's scale")
 	assert_lt(w.modulate.a, 1.0)
-	await wait_seconds(0.3)
+	await _wait_for_transitions(ws)
 	assert_eq(w.scale, Vector2.ONE)
 	assert_eq(w.modulate, Color.WHITE)
 	assert_eq(ws._transitions.playing(), 0)
@@ -267,11 +293,19 @@ func test_a_crossfade_swap_dissolves_through_the_midpoint():
 	assert_true(_rect(wb).is_equal_approx(rb))
 	assert_eq(ws._transitions.playing(), 2)
 
-	await wait_seconds(0.08)
-	assert_lt(wa.modulate.a, 0.9, "both panes dissolve out before the midpoint")
-	assert_lt(wb.modulate.a, 0.9)
+	# Sample the outbound half frame by frame: the rects have not traded yet,
+	# so a below-0.9 alpha is the dissolve going out, not coming back. A fixed
+	# delay can land after the midpoint on a slow frame.
+	var fading_out := false
+	var deadline := Time.get_ticks_msec() + 2000
+	while Time.get_ticks_msec() < deadline:
+		if _rect(wa).is_equal_approx(ra) and wa.modulate.a < 0.9 and wb.modulate.a < 0.9:
+			fading_out = true
+			break
+		await get_tree().process_frame
+	assert_true(fading_out, "both panes dissolve out before the midpoint")
 
-	await wait_seconds(0.3)
+	await _wait_for_transitions(ws)
 	assert_true(_rect(wa).is_equal_approx(rb), "each pane ends in the other's rect")
 	assert_true(_rect(wb).is_equal_approx(ra))
 	assert_eq(wa.modulate, Color.WHITE, "the dissolve restores full opacity")
