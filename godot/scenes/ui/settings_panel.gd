@@ -42,6 +42,8 @@ var _command_actions := {}
 var _motion_opt: OptionButton = null
 var _motion_pickers := {}
 var _motion_params := {}
+var _effect_opt: OptionButton = null
+var _effect_intensity_opt: OptionButton = null
 
 func _init(workspace: Control):
 	_workspace = workspace
@@ -81,6 +83,7 @@ func _notification(what: int):
 		# The Motion pickers and generated property rows read the settings on
 		# every show for the same reason: the panel outlives a visit.
 		_sync_motion_rows()
+		_sync_effect_rows()
 	elif what == NOTIFICATION_RESIZED:
 		# The window (and with it the layout space) changed, so the scale it can
 		# show may have moved while the panel is open - and the card that fitted
@@ -208,6 +211,7 @@ func _build_ui():
 	var color_btns = _add_color_section(t_app)
 	t_app.add_child(HSeparator.new())
 	var motion_reset = _add_motion_section(t_app)
+	var effects_reset = _add_effects_section(t_app)
 	_add_tab_reset(t_app, func():
 		SettingsManager.cfg_font_path = "res://fonts/DejaVuSansMono.ttf"
 		SettingsManager.cfg_font_size = 14
@@ -233,6 +237,10 @@ func _build_ui():
 		show_tb_cb.button_pressed = true
 		_reset_colors(color_btns)
 		motion_reset.call()
+		SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
+		SettingsManager.cfg_effect_intensity = UiEffects.OFF
+		SettingsManager.cfg_reactive_effects = {}
+		effects_reset.call()
 		SettingsManager.save_settings()
 	)
 
@@ -650,6 +658,68 @@ func _add_motion_section(v: VBoxContainer) -> Callable:
 		SettingsManager.cfg_pane_animation = PaneTransitions.sanitize_choices({})
 		SettingsManager.cfg_pane_animation_params = {}
 		_sync_motion_rows()
+
+## The ambient half of `Settings -> Appearance -> Effects`: the closed
+## `UiEffects` table and its intensity. Both pickers are immediate settings -
+## the user judges them by looking at the window - so a selection saves and
+## applies to every terminal in every workspace through the normal broadcast.
+## The reactive mapping rows join this same section in the reactive phase.
+func _add_effects_section(v: VBoxContainer) -> Callable:
+	var title := Label.new()
+	title.name = "EffectsTitle"
+	title.text = "Effects"
+	title.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
+	v.add_child(title)
+	var hint := Label.new()
+	hint.text = UiEffects.HINT
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.theme_type_variation = UiTheme.MUTED_LABEL
+	v.add_child(hint)
+
+	var effect_row := HBoxContainer.new()
+	effect_row.add_child(_lbl("Terminal effect:"))
+	var opt := OptionButton.new()
+	opt.name = "EffectOpt"
+	for id in UiEffects.AMBIENT_IDS:
+		opt.add_item(UiEffects.ambient_label(id))
+		opt.set_item_metadata(opt.item_count - 1, id)
+	opt.tooltip_text = "The GPU effect behind terminal text; the intensity below draws none while it is Off"
+	opt.item_selected.connect(func(idx: int):
+		SettingsManager.cfg_effect = str(opt.get_item_metadata(idx))
+		SettingsManager.save_settings()
+		_sync_effect_rows())
+	effect_row.add_child(opt)
+	v.add_child(effect_row)
+	_effect_opt = opt
+
+	var intensity_row := HBoxContainer.new()
+	intensity_row.add_child(_lbl("Intensity:"))
+	var intensity_opt := OptionButton.new()
+	intensity_opt.name = "EffectIntensityOpt"
+	for label in UiEffects.LABELS:
+		intensity_opt.add_item(label)
+	intensity_opt.tooltip_text = "Off draws no effect; Subtle halves the shader's declared amplitude"
+	intensity_opt.item_selected.connect(func(idx: int):
+		SettingsManager.cfg_effect_intensity = idx
+		SettingsManager.save_settings()
+		_sync_effect_rows())
+	intensity_row.add_child(intensity_opt)
+	v.add_child(intensity_row)
+	_effect_intensity_opt = intensity_opt
+
+	_sync_effect_rows()
+	return func():
+		_sync_effect_rows()
+
+## Read the stored effect and intensity into their pickers. Called on build, on
+## a picker change and whenever the panel is shown: the panel outlives a visit,
+## and a reset or a test may have moved the settings.
+func _sync_effect_rows() -> void:
+	if _effect_opt == null or _effect_intensity_opt == null:
+		return
+	SettingsManager.cfg_effect = UiEffects.sanitize_ambient(str(SettingsManager.cfg_effect))
+	_effect_opt.select(UiEffects.AMBIENT_IDS.find(SettingsManager.cfg_effect))
+	_effect_intensity_opt.selected = UiEffects.level()
 
 ## Read the stored choices into the pickers and rebuild every property block.
 ## Called on build, on a picker change and whenever the panel is shown: the

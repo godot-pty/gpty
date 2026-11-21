@@ -71,6 +71,7 @@ class Layer extends Node2D:
 	const BG := 0
 	const TEXT := 1
 	const OVERLAY := 2
+	const EFFECT := 3
 	var pane = null
 	var kind := BG
 	var row := 0
@@ -80,6 +81,7 @@ class Layer extends Node2D:
 		match kind:
 			TEXT: pane._draw_row_text(self, row)
 			OVERLAY: pane._draw_overlay(self)
+			EFFECT: pane._draw_effect(self)
 			_: pane._draw_row_background(self, row)
 
 @export var beam_cursor_width: int = BEAM_CURSOR_WIDTH
@@ -200,6 +202,24 @@ var launch: String = ""
 		var target = float(max_fps) if max_fps > 0 else (DisplayServer.screen_get_refresh_rate() if DisplayServer.screen_get_refresh_rate() > 0 else 60.0)
 		_sync_interval = 1.0 / target
 
+## The ambient effect (a `UiEffects` id) and its intensity, pushed by
+## `SettingsManager.apply_to_terminal`. The id is kept while the intensity is
+## Off, so turning it up returns the last choice. No path is ever read here: the
+## only shaders are `UiEffects`' preloads.
+@export var effect: String = "":
+	set(value):
+		if value == effect:
+			return
+		effect = value
+		_sync_effects()
+
+@export var effect_intensity: int = 0:
+	set(value):
+		if value == effect_intensity:
+			return
+		effect_intensity = value
+		_sync_effects()
+
 var _terminal: GptyTerminal
 var _font: Font
 var _font_bold: Font
@@ -233,6 +253,11 @@ var _draw_ms: float = 0.0
 var _row_backgrounds: Array[Node2D] = []
 var _row_texts: Array[Node2D] = []
 var _overlay: Node2D = null
+## The effect layer: one full-pane quad under every band, present only while an
+## ambient effect is active. `PaneEffects` owns its material and buffer; this
+## layer carries the draw command (see `_draw_effect`).
+var _effect_layer: Node2D = null
+var _effects: PaneEffects = null
 ## The rows the last repaint queued, ascending. A full repaint queues every row;
 ## a partial update only the rows its damage covers. Read by `draw_bench` and
 ## asserted by `test_terminal_repaint.gd`.
@@ -640,6 +665,10 @@ func _ready():
 	_scroll_hints.bind_custom(_can_scroll_start, _can_scroll_live,
 		_jump_to_start, _jump_to_live)
 
+	# A restored pane or a test may have set the effect before `_ready`; the
+	# broadcast that follows normally does it, but this makes the pane correct
+	# on its own first frame either way.
+	_sync_effects()
 	_start_child_if_ready()
 
 ## The grid `size` can show, or `Vector2i.ZERO` when it cannot hold the minimum
@@ -812,6 +841,7 @@ const DRAW_READ_SETTINGS := [
 	"cursor_shape", "cursor_blink", "cursor_blink_speed",
 	"beam_cursor_width", "underline_cursor_height",
 	"focus_border_color", "selection_color", "scrollback_indicator_color",
+	"effect", "effect_intensity",
 ]
 
 func _draw_read_values() -> Array:
@@ -889,6 +919,8 @@ func _apply_palette():
 	if _terminal == null or _terminal.get_rows() == 0:
 		_load_scheme()
 		_ground = SchemeLibrary.color(_scheme, "background", default_bg)
+		if _effects != null:
+			_effects.set_ground(_ground)
 		_repaint_all()
 		return
 	_load_scheme()
@@ -903,6 +935,8 @@ func _apply_palette():
 			SchemeLibrary.color(_scheme, "foreground", default_fg),
 			SchemeLibrary.color(_scheme, "background", default_bg))
 	_ground = _terminal.get_background_color()
+	if _effects != null:
+		_effects.set_ground(_ground)
 	_repaint_all()
 
 ## Re-read the pane's own scheme from `PaneSchemeStore`. The workspace calls
@@ -945,6 +979,8 @@ func _recompute_cell_metrics():
 	_font_italic.fixed_size = font_size
 	_cell_w = _font.get_char_size('W'.unicode_at(0), font_size).x
 	_cell_h = _font.get_height(font_size)
+	if _effects != null:
+		_effects.set_cell_height(_cell_h)
 	custom_minimum_size = Vector2(MIN_SIZE_COLS * _cell_w + terminal_padding * 2.0,
 		_cell_h * 2.0 + terminal_padding * 2.0)
 	# Glyph metrics changed: existing cells must be redrawn even when the
@@ -1268,6 +1304,7 @@ func _sync_layers():
 		_row_backgrounds.append(_new_layer(Layer.BG, _row_backgrounds.size()))
 	while _row_texts.size() < n:
 		_row_texts.append(_new_layer(Layer.TEXT, _row_texts.size()))
+	_sync_effect_layer()
 	if _overlay == null:
 		_overlay = _new_layer(Layer.OVERLAY, 0)
 	# The bands stay at the origin and draw at the grid's absolute coordinates.
@@ -1280,13 +1317,95 @@ func _sync_layers():
 	# background band and then its text band interleaved leaves every text band
 	# after the strip whenever the strip sits between the two groups, because
 	# each `move_child` shifts the not-yet-placed siblings.
-	if _layers_ordered != n:
-		_layers_ordered = n
+	#
+	# The effect layer, when one is active, is first: it is the pane's ground,
+	# and every band (and the overlay) draws above it. The ordering key covers
+	# the layer's presence as well as the row count, because turning an effect
+	# off frees it without changing `n`.
+	var base := 1 if _effect_layer != null else 0
+	var order_key := n * 2 + base
+	if _layers_ordered != order_key:
+		_layers_ordered = order_key
+		if _effect_layer != null:
+			move_child(_effect_layer, 0)
 		for r in n:
-			move_child(_row_backgrounds[r], r)
+			move_child(_row_backgrounds[r], base + r)
 		for r in n:
-			move_child(_row_texts[r], n + r)
-		move_child(_overlay, 2 * n)
+			move_child(_row_texts[r], base + n + r)
+		move_child(_overlay, base + 2 * n)
+
+## Create, retire or re-parameterise the effect layer. Called from every layer
+## sync; the material belongs to the layer alone (one draw command), which is
+## why the effect cannot be a material on the grid's own canvas.
+func _sync_effect_layer():
+	var wanted := _effects != null and _effects.wants_backdrop()
+	if not wanted:
+		if _effect_layer != null:
+			remove_child(_effect_layer)
+			_effect_layer.free()
+			_effect_layer = null
+		return
+	if _effect_layer == null:
+		_effect_layer = _new_layer(Layer.EFFECT, 0)
+	_effect_layer.material = _effects.layer_material()
+	_effect_layer.texture_filter = (
+		CanvasItem.TEXTURE_FILTER_NEAREST if _effects.uses_buffer()
+		else CanvasItem.TEXTURE_FILTER_LINEAR)
+
+## One full-pane ground quad. The pane's own `_draw` skips its ground while this
+## is active, and the row bands skip the default-background runs, so the effect
+## is visible through the grid and every non-default cell stays opaque.
+func _draw_effect(item: CanvasItem) -> void:
+	if _effect_backdrop():
+		_effects.paint(item, size)
+
+## A buffer tick produced a frame; the layer's one draw must be re-issued to
+## reference it.
+func _repaint_effect() -> void:
+	if _effect_layer != null:
+		_effect_layer.queue_redraw()
+
+## Freeze the ambient clock for a capture: grain is wall-clock driven, so a live
+## buffer would never repeat between two runs of the same state.
+func pin_effects() -> void:
+	if _effects != null:
+		_effects.pin(true)
+
+## True while an ambient effect owns the ground. The empty-cache guard keeps a
+## pane that has not synced yet on today's behaviour (the wrapper's background).
+func _effect_backdrop() -> bool:
+	return (
+		_effects != null
+		and _effects.wants_backdrop()
+		and not _cell_cache.is_empty()
+		and int(_cell_cache.get("rows", 0)) > 0
+	)
+
+## True when the effect layer already paints this cell background, so the band
+## must leave it uncovered.
+func _effect_covers_background(bg: Color) -> bool:
+	return _effect_backdrop() and bg == _ground
+
+func _sync_effects() -> void:
+	if effect == "" or effect_intensity <= UiEffects.OFF:
+		if _effects != null:
+			_effects.configure("", UiEffects.OFF)
+		return
+	_ensure_effects()
+	_effects.configure(effect, effect_intensity)
+
+func _ensure_effects() -> void:
+	if _effects != null:
+		return
+	_effects = PaneEffects.new()
+	_effects.name = "PaneEffects"
+	add_child(_effects)
+	_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_effects.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_effects.focus_mode = Control.FOCUS_NONE
+	_effects.backdrop_frame.connect(_repaint_effect)
+	_effects.set_ground(_ground)
+	_effects.set_cell_height(_cell_h)
 
 func _new_layer(kind: int, row: int) -> Node2D:
 	var layer := Layer.new()
@@ -1306,6 +1425,8 @@ func _repaint_all():
 		_painted_rows[r] = r
 		_row_backgrounds[r].queue_redraw()
 		_row_texts[r].queue_redraw()
+	if _effect_layer != null:
+		_effect_layer.queue_redraw()
 	queue_redraw()
 	if _overlay != null:
 		_overlay.queue_redraw()
@@ -1340,9 +1461,12 @@ func _draw():
 	var t0 = Time.get_ticks_usec()
 	# The pane's own canvas draws under every child, so it carries only the
 	# ground: one rect that changes with the pane's size or the palette, never
-	# with the grid's content.
+	# with the grid's content. While an ambient effect is active its layer
+	# paints the ground (with the effect in it), so this rect is skipped - two
+	# alpha-bearing grounds would compound instead of the scheme's own alpha.
 	if not _cell_cache.is_empty() and int(_cell_cache.get("rows", 0)) > 0:
-		draw_rect(Rect2(Vector2.ZERO, size), _ground)
+		if not _effect_backdrop():
+			draw_rect(Rect2(Vector2.ZERO, size), _ground)
 	_draw_ms += float(Time.get_ticks_usec() - t0) / 1000.0
 
 
@@ -1363,6 +1487,11 @@ func _draw_row_background(item: CanvasItem, r: int):
 			c += 1
 			while c < n_cols and bg_arr[r * n_cols + c] == bg:
 				c += 1
+			# While an effect paints the ground, a run at that same colour
+			# would cover it; every other run (ANSI backgrounds, inverse
+			# cells) still paints its own rect.
+			if _effect_covers_background(bg):
+				continue
 			# One rect for the entire run of same-background cells
 			item.draw_rect(Rect2(off.x + start_c * _cell_w, row_y, (c - start_c) * _cell_w, _cell_h), bg)
 	_draw_ms += float(Time.get_ticks_usec() - t0) / 1000.0

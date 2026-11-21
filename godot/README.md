@@ -58,6 +58,7 @@ godot/
         │   ├── concept_router.gd # Pure concept-event routing (extracted, testable)
         │   ├── plugin_review_text.gd # Pure plugin-review dialog text (extracted, testable)
         │   ├── pane_transitions.gd # Pane-transition registry, settings resolution and tween runner
+        │   ├── pane_effects.gd # Per-pane effect host: the ground material/buffer and the cue
         │   └── terminal_manager.gd
         ├── ui/                  # UI components
         │   ├── sidebar.gd       # Vertical stack: window mode, workspaces, panes, profiles

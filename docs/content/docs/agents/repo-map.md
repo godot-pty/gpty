@@ -156,7 +156,10 @@ gpty/
     │   └── fonts/Phosphor-Regular.ttf # UI icon font
     ├── fonts/                  # DejaVu Sans Mono (the terminal's font)
     ├── shaders/                # Bundled shaders (referenced by code, not a scene)
-    │   └── window_opacity.gdshader # Whole-window alpha veil (Workspace.apply_window_alpha)
+    │   ├── window_opacity.gdshader # Whole-window alpha veil (Workspace.apply_window_alpha)
+    │   └── effects/            # The closed terminal-effect table's shaders (UiEffects)
+    │       ├── crt.gdshader    # Static scanlines, a phosphor mask and a vignette
+    │       └── grain.gdshader  # Animated film grain, 30 Hz in a half-res buffer
     └── scenes/
         ├── main.tscn
         ├── autoloads/          # Singleton managers
@@ -187,6 +190,7 @@ gpty/
         │   ├── terminal_fonts.gd   # Byte-only font loader (a data path never reaches load())
         │   ├── terminal_manager.gd # Tile lifecycle, split/kill/swap/spawn
         │   ├── pane_transitions.gd # Pane-transition registry, settings resolution and tween runner
+        │   ├── pane_effects.gd     # Per-pane effect host: the ground material/buffer and the cue
         │   ├── tile_drag.gd        # Divider-drag state machine (extracted)
         │   └── divider_handles.gd  # Divider grab bands: one handle per divider segment
         ├── ui/
@@ -218,6 +222,7 @@ gpty/
         │   ├── color_swatch.gd     # The words a colour swatch carries: opacity reading, "unset", tooltip
         │   ├── ui_tokens.gd        # The type scale, spacing, radius and the WCAG contrast maths
         │   ├── ui_motion.gd        # The motion policy (Off/Subtle/Full) every animation reads
+        │   ├── ui_effects.gd       # The closed effect table (ambient + cue) and intensity policy
         │   ├── ui_theme.gd         # The one Theme, built from the palette and applied at the root
         │   ├── app_dialog.gd       # The one modal builder (theme, grouped buttons, selectable body)
         │   ├── section_help.gd      # The shared "Help" affordance a section header carries (glyph → action → chord table)

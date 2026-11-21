@@ -97,6 +97,14 @@ var cfg_appearance_mode := APPEARANCE_DARK
 var cfg_motion := UiMotion.SUBTLE
 var cfg_pane_animation := {}
 var cfg_pane_animation_params := {}
+## The ambient effect behind terminal text (a closed `UiEffects` id) and its
+## intensity (Off/Subtle/Full). Off by default; the id is kept while the
+## intensity is Off, so turning the intensity up restores the last choice.
+var cfg_effect := UiEffects.DEFAULT_AMBIENT
+var cfg_effect_intensity := UiEffects.OFF
+## Concept name -> reactive cue id (`UiEffects.REACTIVE`), empty by default.
+## `UiEffects.sanitize_reactive` owns the cap and the closed effect values.
+var cfg_reactive_effects := {}
 
 ## The foldable sidebar sections, in the order the sidebar stacks them. These ids
 ## are the `sidebar_folded` vocabulary: a stored value that is not in this list is
@@ -309,6 +317,13 @@ func load_settings():
 	cfg_motion = clampi(_as_int(d, "motion", UiMotion.SUBTLE), UiMotion.OFF, UiMotion.FULL)
 	cfg_pane_animation = PaneTransitions.sanitize_choices(_as_dict(d, "pane_animations", {}))
 	cfg_pane_animation_params = PaneTransitions.sanitize_params_store(_as_dict(d, "pane_animation_params", {}))
+	# Ambient effects are the same closed-vocabulary shape: an unknown id falls
+	# back to the table's default, the intensity is clamped to the picker, and
+	# a reactive map keeps only ids the table carries.
+	cfg_effect = UiEffects.sanitize_ambient(_as_string(d, "effect", UiEffects.DEFAULT_AMBIENT))
+	cfg_effect_intensity = clampi(_as_int(d, "effect_intensity", UiEffects.OFF),
+		UiEffects.OFF, UiEffects.FULL)
+	cfg_reactive_effects = UiEffects.sanitize_reactive(_as_dict(d, "reactive_effects", {}))
 
 func save_settings():
 	_save_settings_file()
@@ -335,6 +350,9 @@ func _save_settings_file():
 	d["motion"] = cfg_motion
 	d["pane_animations"] = cfg_pane_animation.duplicate(true)
 	d["pane_animation_params"] = cfg_pane_animation_params.duplicate(true)
+	d["effect"] = cfg_effect
+	d["effect_intensity"] = cfg_effect_intensity
+	d["reactive_effects"] = cfg_reactive_effects.duplicate()
 	_write_file(SETTINGS_FILE, d)
 
 func apply_to_terminal(body: Control):
@@ -352,6 +370,8 @@ func apply_to_terminal(body: Control):
 		"font_path": cfg_font_path,
 		"font_size": cfg_font_size,
 		"terminal_padding": cfg_terminal_padding,
+		"effect": UiEffects.ambient_id(),
+		"effect_intensity": UiEffects.level(),
 		"max_fps": cfg_max_fps,
 		"shell_command": cfg_shell_command,
 		"shell_env": cfg_shell_env,

@@ -5,7 +5,7 @@
       "id": "gui.pane.registry",
       "statement": "a pane is only ever created from a type the registry declares",
       "status": "done",
-      "mechanism": "`PaneTypes.ALL` is the closed table every surface reads — menu, palette, sidebar, restore and the control socket — and `sanitize_tile` drops a saved tile whose type it does not carry",
+      "mechanism": "`PaneTypes.ALL` is the closed table every surface reads \u2014 menu, palette, sidebar, restore and the control socket \u2014 and `sanitize_tile` drops a saved tile whose type it does not carry",
       "evidence": "godot/scenes/panes/pane_types.gd",
       "row": "Tiling grid layout"
     },
@@ -69,7 +69,7 @@
       "id": "gui.layout.restore-notice",
       "statement": "a restore names the settings, environment and panes it refused instead of dropping them silently",
       "status": "done",
-      "mechanism": "`sanitize_tile` reports each dropped key and `_restore_into` raises one toast per class — unsupported setting, file-supplied environment, pane ceiling — naming the panes and where to fix it",
+      "mechanism": "`sanitize_tile` reports each dropped key and `_restore_into` raises one toast per class \u2014 unsupported setting, file-supplied environment, pane ceiling \u2014 naming the panes and where to fix it",
       "evidence": "godot/scenes/terminal/workspace.gd"
     },
     {
@@ -237,6 +237,14 @@
       "mechanism": "only three schemes ship and no importer exists; the chrome's dark and light pair is a user choice rather than a reading of the system state",
       "evidence": "godot/scenes/ui/ui_palette.gd",
       "row": "Colour schemes: import, and light mode that follows the system"
+    },
+    {
+      "id": "gui.effects.closed-table",
+      "statement": "terminal visual effects come only from a closed built-in table and are off by default",
+      "status": "done",
+      "mechanism": "`UiEffects` holds the two ambient `preload` shader paths and the Off/Subtle/Full intensity; `PaneEffects` paints the ground through one dedicated effect layer and the row runs at the default background are skipped under it, so text, selection and coloured cells stay opaque",
+      "evidence": "godot/scenes/ui/ui_effects.gd",
+      "row": "Dynamic Shaders"
     }
   ]
 }

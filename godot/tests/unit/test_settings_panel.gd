@@ -30,6 +30,9 @@ func after_each():
 	WindowChrome.force_transparency = -1
 	SettingsManager.cfg_pane_animation = {}
 	SettingsManager.cfg_pane_animation_params = {}
+	SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
+	SettingsManager.cfg_effect_intensity = UiEffects.OFF
+	SettingsManager.cfg_reactive_effects = {}
 	SettingsManager.apply_appearance()
 	# A failed assertion must not leave a small window for the rest of the
 	# process; the layout assertions in this file are the card's own minimums.
@@ -1014,3 +1017,35 @@ func test_the_appearance_reset_restores_motion_defaults():
 	assert_eq(PaneTransitions.choice("create"), "fade_scale")
 	assert_true(SettingsManager.cfg_pane_animation_params.is_empty())
 	assert_eq(_find_option("MotionOpt").selected, UiMotion.SUBTLE)
+
+func test_the_effects_section_lists_the_closed_table_and_intensity():
+	var effect_opt := _find_option("EffectOpt")
+	assert_not_null(effect_opt, "the Appearance tab carries the Terminal effect picker")
+	assert_eq(effect_opt.item_count, UiEffects.AMBIENT_IDS.size(),
+		"one item per effect in the closed table")
+	for i in UiEffects.AMBIENT_IDS.size():
+		assert_eq(str(effect_opt.get_item_metadata(i)), UiEffects.AMBIENT_IDS[i],
+			"the picker's value is the table id, not its label")
+	var intensity_opt := _find_option("EffectIntensityOpt")
+	assert_not_null(intensity_opt, "the intensity picker sits beside it")
+	assert_eq(intensity_opt.item_count, UiEffects.LABELS.size(), "Off, Subtle, Full")
+	assert_eq(intensity_opt.selected, UiEffects.OFF, "effects are off by default")
+
+func test_the_appearance_reset_restores_the_effect_defaults():
+	SettingsManager.cfg_effect = "grain"
+	SettingsManager.cfg_effect_intensity = UiEffects.FULL
+	SettingsManager.cfg_reactive_effects = {"cat_command": "tint"}
+	_panel._sync_effect_rows()
+
+	var reset := _tab_reset_button("Appearance")
+	assert_not_null(reset)
+	reset.pressed.emit()
+
+	assert_eq(SettingsManager.cfg_effect, UiEffects.DEFAULT_AMBIENT)
+	assert_eq(SettingsManager.cfg_effect_intensity, UiEffects.OFF)
+	assert_true(SettingsManager.cfg_reactive_effects.is_empty(),
+		"the reset clears the reactive mapping too")
+	var effect_opt := _find_option("EffectOpt")
+	assert_eq(str(effect_opt.get_item_metadata(effect_opt.selected)), UiEffects.DEFAULT_AMBIENT,
+		"the visible picker follows the store")
+	assert_eq(_find_option("EffectIntensityOpt").selected, UiEffects.OFF)

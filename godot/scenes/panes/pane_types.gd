@@ -541,6 +541,13 @@ const TERMINAL_SETTINGS := {
 	# fit, not pane content: the global appearance setting broadcasts it, and
 	# a shared layout cannot carry it.
 	"terminal_padding": {"kind": "int", "min": 0, "max": TERMINAL_PADDING_MAX, "file": false},
+	# The global effect table's id and intensity, broadcast by
+	# `apply_to_terminal` like `terminal_padding`. A file cannot name one: the
+	# shaders are code (`UiEffects`), so only the closed ids can arrive. The
+	# literal list is the `-s` entry-point-safe copy; `test_ui_effects.gd`
+	# asserts it against `UiEffects.AMBIENT_IDS`.
+	"effect": {"kind": "text", "max": 16, "values": ["crt", "grain"], "file": false, "ipc": false},
+	"effect_intensity": {"kind": "int", "min": 0, "max": 2, "file": false, "ipc": false},
 	# The global dark/light pair's resolved member, pushed by
 	# `apply_to_terminal` on every save. A file must not name it: appearance
 	# paths are the user's, not a shared layout's.

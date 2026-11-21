@@ -54,6 +54,10 @@ extends SceneTree
 ##     per-frame work is stopped (`_apply_agent_states`): the spinner cycles and
 ##     the attention pulse are wall-clock driven, so a live badge would never
 ##     repeat from one run to the next.
+##   - An effect state pins the ambient clock (`pin_effects`) and, when the
+##     state names a cue, draws that cue's final frame (`pin_effect_cue`):
+##     grain advances on a Timer and a cue is a tween, so either would differ
+##     between two runs.
 ##   - The status bar's clock and FPS pinned (`StatusBar.freeze_readouts`);
 ##     they are the only readouts that move while nothing does.
 ##   - The capture waits for every terminal grid generation, every pane title
@@ -154,6 +158,42 @@ const STATES := {
 	# *The transition library grows past fade and move*).
 	"settings-motion": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings",
 		"tab": "Appearance", "scroll_to": "MotionTitle"},
+	# The Effects section: the closed ambient table, the intensity picker and
+	# (after the reactive phase) the concept -> cue mapping. Row *Dynamic
+	# Shaders*.
+	"settings-effects": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings",
+		"tab": "Appearance", "scroll_to": "EffectsTitle"},
+	# The ambient effects over real grid content: red, inverse and underlined
+	# runs prove the text and non-default cells stay opaque while the ground
+	# carries the effect. The light twin uses the light scheme, not just the
+	# light chrome. Row *Dynamic Shaders*.
+	"effect-crt": {"size": Vector2i(1280, 760), "tiles": [
+		{"col": 0, "row": 0, "cspan": 60, "rspan": 60, "settings": {
+			"type": "terminal", "attachment_id": "capture-effect-crt",
+			"shell_args": ["-c",
+				"printf '\\033[1;31mFAIL\\033[0m scanlines behind text\\n\\033[7m INVERSE \\033[0m \\033[4;32mUNDERLINE\\033[0m\\n'; seq -f 'line %g' 1 12; sleep 600"]}},
+	], "settings": {"cfg_effect": "crt", "cfg_effect_intensity": 2}},
+	"effect-crt-light": {"size": Vector2i(1280, 760), "tiles": [
+		{"col": 0, "row": 0, "cspan": 60, "rspan": 60, "settings": {
+			"type": "terminal", "attachment_id": "capture-effect-crt-light",
+			"shell_args": ["-c",
+				"printf '\\033[1;31mFAIL\\033[0m scanlines behind text\\n\\033[7m INVERSE \\033[0m \\033[4;32mUNDERLINE\\033[0m\\n'; seq -f 'line %g' 1 12; sleep 600"]}},
+	], "settings": {"cfg_appearance_mode": 1,
+		"cfg_scheme_light": "res://schemes/solarized-light.json",
+		"cfg_effect": "crt", "cfg_effect_intensity": 1}},
+	"effect-grain": {"size": Vector2i(1280, 760), "tiles": [
+		{"col": 0, "row": 0, "cspan": 60, "rspan": 60, "settings": {
+			"type": "terminal", "attachment_id": "capture-effect-grain",
+			"shell_args": ["-c",
+				"printf '\\033[1;31mFAIL\\033[0m grain behind text\\n\\033[7m INVERSE \\033[0m \\033[4;32mUNDERLINE\\033[0m\\n'; seq -f 'line %g' 1 12; sleep 600"]}},
+	], "settings": {"cfg_effect": "grain", "cfg_effect_intensity": 2}},
+	# A pinned reactive cue on the source pane (the tint at its peak), with no
+	# ambient effect, so the screenshot isolates the cue. Row *Reactive
+	# Environments*.
+	"effect-cue": {"size": Vector2i(1280, 760), "panes": 1,
+		"settings": {"cfg_effect_intensity": 0,
+			"cfg_reactive_effects": {"cat_command": "tint"}},
+		"effects_cue": "tint"},
 	# The UI scale setting at its 125 % step, on the app's own first-launch
 	# workspace. The only visual proof that the setting scales the chrome and
 	# the terminal text together; a later release recaptures it.
@@ -496,6 +536,7 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	if not await _apply_state(state_name, state):
 		return
 	_pin_empty_guide()
+	_pin_effects(state)
 
 	if args.get("perturb", "") == state_name:
 		_perturb(state_name)
@@ -541,6 +582,21 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 func _pin_empty_guide() -> void:
 	if _workspace._shortcut_guide != null and _workspace._empty_state.visible:
 		_workspace._shortcut_guide.pin_animation()
+
+## Freeze the effect clocks and pin a cue. Grain advances on a Timer and a cue
+## is a tween, so either would differ between two runs. Untyped `has_method`
+## calls only: this `-s` entry point compiles before autoloads exist, and naming
+## `TerminalPane` pulls `PaneBody` -> `PaneCwdStore` in and the whole capture
+## loads as bare Controls (see `_is_terminal`).
+func _pin_effects(state: Dictionary) -> void:
+	var cue := str(state.get("effects_cue", ""))
+	for tile in _workspace._tm.tiles:
+		var body = _workspace._tm._find_body(tile.wrapper)
+		if body == null or not body.has_method("pin_effects"):
+			continue
+		body.pin_effects()
+		if cue != "" and body.has_method("pin_effect_cue"):
+			body.pin_effect_cue(cue)
 
 
 # ── Seeding ────────────────────────────────────────────────────────────

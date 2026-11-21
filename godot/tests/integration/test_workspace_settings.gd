@@ -20,6 +20,8 @@ func after_each():
 	# The palette is process-global: leave the suite on the dark set, whatever a
 	# switch test did.
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
+	SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
+	SettingsManager.cfg_effect_intensity = UiEffects.OFF
 	SettingsManager.apply_appearance()
 	# Free synchronously while mocks are still active: _exit_tree() → _save()
 	# would otherwise write the real layout/settings after teardown restores
@@ -102,6 +104,39 @@ func test_a_settings_save_reaches_a_hidden_workspace():
 	assert_not_null(tb, "the hidden pane keeps its title bar node")
 	assert_true(tb.visible, "the hidden pane's title bar took the setting too")
 	# Wait out the deferred concept push timer so it doesn't resume after free.
+	await get_tree().create_timer(2.1).timeout
+
+## The effect keys ride `apply_to_terminal` with every other global appearance
+## setting: a save reaches a terminal in a workspace the user is not looking at,
+## long before the next switch. The pane's own setter is not the path tested
+## here - the settings broadcast is.
+func test_a_settings_save_broadcasts_the_effect_to_every_terminal():
+	MockAutoloads.set_store(WorkspaceStore.FILE, {
+		"active": 0,
+		"workspaces": [{"name": "W", "layout": []}],
+	})
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var first = ws._spawn_pane("terminal")
+	ws._add_workspace()
+	var second = ws._spawn_pane("terminal")
+	assert_not_null(first, "precondition: the first workspace holds a terminal")
+	assert_not_null(second, "precondition: the second workspace holds a terminal")
+
+	SettingsManager.cfg_effect = "grain"
+	SettingsManager.cfg_effect_intensity = UiEffects.FULL
+	SettingsManager.save_settings()
+	await get_tree().process_frame
+
+	var bodies := _terminal_bodies(ws)
+	assert_eq(bodies.size(), 2, "the walk covers both workspaces")
+	for body in bodies:
+		assert_eq(body.effect, "grain", "the terminal took the effect id")
+		assert_eq(body.effect_intensity, UiEffects.FULL, "and its intensity")
 	await get_tree().create_timer(2.1).timeout
 
 ## The bodies of every terminal in every workspace, the same walk the settings

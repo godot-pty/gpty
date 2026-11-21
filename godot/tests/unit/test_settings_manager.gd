@@ -20,6 +20,9 @@ func after_each():
 	SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
 	SettingsManager.cfg_pane_animation = {}
 	SettingsManager.cfg_pane_animation_params = {}
+	SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
+	SettingsManager.cfg_effect_intensity = UiEffects.OFF
+	SettingsManager.cfg_reactive_effects = {}
 	SettingsManager.system_is_dark = func() -> bool:
 		return DisplayServer.is_dark_mode() if DisplayServer.is_dark_mode_supported() else true
 	SettingsManager.apply_appearance()
@@ -279,3 +282,41 @@ func test_damaged_motion_settings_fall_back_to_defaults():
 		"a missing kind takes its default")
 	assert_true(SettingsManager.cfg_pane_animation_params.is_empty(),
 		"no parameter pair survives: one names an unknown id, one the wrong kind")
+
+func test_the_effect_and_its_intensity_survive_a_restart():
+	SettingsManager.cfg_effect = "grain"
+	SettingsManager.cfg_effect_intensity = UiEffects.FULL
+	SettingsManager.cfg_reactive_effects = {
+		"cat_command": "tint", "cargo_check": "particles"}
+	SettingsManager.save_settings()
+
+	SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
+	SettingsManager.cfg_effect_intensity = UiEffects.OFF
+	SettingsManager.cfg_reactive_effects = {}
+	SettingsManager.load_settings()
+
+	assert_eq(SettingsManager.cfg_effect, "grain", "the effect id must survive a restart")
+	assert_eq(SettingsManager.cfg_effect_intensity, UiEffects.FULL,
+		"the intensity must survive a restart")
+	assert_eq(str(SettingsManager.cfg_reactive_effects.get("cat_command", "")), "tint")
+	assert_eq(str(SettingsManager.cfg_reactive_effects.get("cargo_check", "")), "particles")
+
+func test_an_unknown_stored_effect_loads_as_the_default():
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE, {
+		"effect": "blur",
+		"effect_intensity": 99,
+	})
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_effect, UiEffects.DEFAULT_AMBIENT,
+		"an id outside the table falls back")
+	assert_eq(SettingsManager.cfg_effect_intensity, UiEffects.FULL,
+		"the intensity clamps to the picker's top")
+
+func test_reactive_rules_drop_unknown_effects_on_load():
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE, {
+		"reactive_effects": {"cat_command": "tint", "git_log": "blur", 7: "pulse"},
+	})
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_reactive_effects.size(), 1,
+		"only the rule with a known effect id survives")
+	assert_eq(str(SettingsManager.cfg_reactive_effects.get("cat_command", "")), "tint")
