@@ -83,9 +83,8 @@ fn verify_inside() {
     );
     assert_ne!(meta.uid(), 0, "an unmapped host root is not uid 0 here");
     eprintln!(
-        "user namespace: euid {me}, {} owned by uid {}",
-        path.display(),
-        meta.uid()
+        "user namespace: {} is owned by an unmapped uid (not the caller)",
+        path.display()
     );
     gpty_core::pty::validate_executable(&path.to_string_lossy()).unwrap_or_else(|error| {
         panic!(
