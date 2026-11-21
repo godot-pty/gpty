@@ -76,12 +76,11 @@ fn verify_inside() {
     // SAFETY: `geteuid` takes no arguments, cannot fail, and touches no memory;
     // the call is unsafe only because every libc extern is.
     let me = unsafe { libc::geteuid() };
-    assert_ne!(
-        meta.uid(),
-        me,
+    assert!(
+        meta.uid() != me,
         "the namespace must leave the candidate's owner unmapped"
     );
-    assert_ne!(meta.uid(), 0, "an unmapped host root is not uid 0 here");
+    assert!(meta.uid() != 0, "an unmapped host root is not uid 0 here");
     eprintln!(
         "user namespace: {} is owned by an unmapped uid (not the caller)",
         path.display()
