@@ -61,3 +61,19 @@ func test_right_label_carries_no_ms_readout():
 func test_pane_label_starts_at_left_edge():
 	# Restoring the original offset — pane info should not be displaced.
 	assert_eq(_bar._pane_label.offset_left, 8.0)
+
+func test_a_renderer_note_rides_with_the_fps_segment():
+	_bar.set_render_note("software")
+	_bar.set_fps(80)
+	var parts := _bar._right_label.text.split("  |  ")
+	assert_eq(parts.size(), 3, "the note must not add a segment")
+	assert_eq(parts[0], "80 FPS · software")
+	assert_true(parts[2].begins_with("v"), "the version stays rightmost")
+
+func test_a_renderer_note_set_after_the_fps_updates_it():
+	_bar.set_fps(80)
+	_bar.set_render_note("software")
+	assert_string_contains(_bar._right_label.text, "80 FPS · software")
+	_bar.set_render_note("")
+	assert_false(_bar._right_label.text.contains("software"),
+		"an empty note clears the marker")

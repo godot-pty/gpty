@@ -677,6 +677,15 @@ func test_the_commands_tab_sits_before_about():
 	assert_eq(titles, ["System", "Terminal", "Appearance", "Reasoning", "Concepts",
 		"Commands", "Shortcuts", "About"], "the shipped tabs keep their positions")
 
+func test_the_about_tab_names_the_renderer():
+	var label := _panel.find_child("RendererLabel", true, false) as Label
+	assert_not_null(label, "the About tab carries the renderer line")
+	if label == null:
+		return
+	assert_true(label.text.begins_with("Renderer: "), "the line is labelled")
+	assert_gt(label.text.length(), len("Renderer: "),
+		"and names the live renderer, not just the label")
+
 func test_the_commands_tab_lists_the_store_in_order():
 	_seed_commands()
 	var list := _command_list()

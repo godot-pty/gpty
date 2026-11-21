@@ -1296,6 +1296,16 @@ func _add_about_section(v: VBoxContainer):
 	row.add_child(_protocol_label)
 	v.add_child(row)
 
+	# The renderer is a support fact (which driver, and whether the GPU is
+	# missing), so it sits under the versions rather than in a tab of its own.
+	var renderer_label := Label.new()
+	renderer_label.name = "RendererLabel"
+	renderer_label.text = "Renderer: " + RendererInfo.about_text()
+	renderer_label.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
+	renderer_label.theme_type_variation = UiTheme.MUTED_LABEL
+	renderer_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(renderer_label)
+
 	v.add_child(HSeparator.new())
 
 	_docs_viewer = DocsViewer.new()

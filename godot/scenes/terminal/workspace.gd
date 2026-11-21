@@ -319,6 +319,9 @@ func _ready():
 	_apply_window_mode.call_deferred(true)
 	_chrome.apply_opacity.call_deferred()
 	if SettingsManager.cfg_window_mode == 0: _chrome.restore_position()
+	# Deferred for the same reason: the report names the window the frame rate
+	# is measured in, and the restored size lands after this call.
+	_report_renderer.call_deferred()
 
 func _on_settings_changed():
 	# Before anything measured: the scale changes the layout space every later
@@ -415,6 +418,13 @@ func _apply_fps_setting():
 		Engine.max_fps = int(rr) if rr > 0 else 0
 	else:
 		Engine.max_fps = SettingsManager.cfg_max_fps
+
+## One line names the renderer the frame rate is measured on; a software
+## fallback also marks the FPS readout, because on it the number is the CPU's.
+## Deferred from `_ready` so the window carries its restored size.
+func _report_renderer():
+	if RendererInfo.report(UiEffects.ambient_id(), UiEffects.level()):
+		_status_bar.set_render_note(RendererInfo.NOTE)
 
 func _notification(what):
 	if what == NOTIFICATION_RESIZED: _apply_layout()

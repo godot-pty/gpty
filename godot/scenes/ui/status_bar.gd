@@ -77,6 +77,11 @@ func _right_update():
 	_right_label.text = "  |  ".join(parts)
 
 var _fps_text: String = ""
+var _fps: int = 0
+## The renderer note that rides beside the FPS (empty on a GPU): on a software
+## rasterizer the frame rate measures the CPU, and the number alone would be
+## read as the app's paint cost.
+var _render_note: String = ""
 var _clock_text: String = ""
 var _version_text: String = ""
 
@@ -87,7 +92,23 @@ func set_pane_info(label: String, type_name: String):
 func set_fps(fps: int):
 	if _readouts_frozen:
 		return
-	_fps_text = "%d FPS" % fps
+	_fps = fps
+	_refresh_fps_text()
+
+## Name the renderer the FPS was measured on. Called once at startup when the
+## engine had to fall back to a software rasterizer; an empty note clears it.
+func set_render_note(note: String):
+	if note == _render_note:
+		return
+	_render_note = note
+	if not _readouts_frozen:
+		_refresh_fps_text()
+
+func _refresh_fps_text():
+	var text := "%d FPS" % _fps
+	if _render_note != "":
+		text += " · " + _render_note
+	_fps_text = text
 	_right_update()
 
 ## Pin the two live readouts so a viewport capture is repeatable.
