@@ -472,6 +472,10 @@ func _build_empty_state():
 	_empty_state.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_empty_state.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_empty_state.follow_focus = true
+	# The first `_apply_layout` decides whether it is shown: a restored
+	# workspace with panes must not flash the guide, and a first run gets the
+	# visibility transition that hands the keyboard to its one action.
+	_empty_state.visible = false
 	add_child(_empty_state)
 
 	var margin := MarginContainer.new()
@@ -539,6 +543,13 @@ func _apply_layout(refresh_dividers := true):
 		# the previous empty workspace left it.
 		if _empty_state.visible and not was_visible:
 			_empty_state.scroll_vertical = 0
+			# A first run has no terminal to inherit the keyboard, and closing
+			# the last pane frees the focused one: the guide's keycap is the
+			# surface's one action, so it is the empty state's first stop. Only
+			# the visibility transition does this; a click elsewhere while the
+			# guide stays up keeps the keyboard where the user put it.
+			if _shortcut_guide:
+				_shortcut_guide.focus_hero()
 		# The centre's floor is the viewport height, so a guide shorter than the
 		# window is centred; a taller one keeps its own minimum and scrolls.
 		if _empty_center:

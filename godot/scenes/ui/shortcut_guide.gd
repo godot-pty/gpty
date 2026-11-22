@@ -129,6 +129,14 @@ func set_columns(count: int) -> void:
 	_columns = next
 	_rebuild_atlas()
 
+## The empty state's first keyboard stop: the hero keycap is the surface's one
+## action. Returns whether focus landed; a hidden guide refuses.
+func focus_hero() -> bool:
+	if _hero_keycap == null or not _hero_keycap.is_visible_in_tree():
+		return false
+	_hero_keycap.grab_focus()
+	return _hero_keycap.has_focus()
+
 ## Capture only: set the frame a user sees when the guide appears and stop the
 ## wall clock, so two runs of one state are pixel-identical.
 func pin_animation() -> void:
