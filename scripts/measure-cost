@@ -27,7 +27,9 @@
 #   - a private sandbox per run (`scripts/ui-sandbox`), so the store, the
 #     control socket and - decisively - `XDG_CACHE_HOME` are empty. An empty
 #     shader/pipeline cache is what the "first launch" row measures; a second
-#     launch in the same sandbox is the warm one.
+#     launch in the same sandbox is the warm one. The OpenGL3 arm gets its own
+#     discarded launch: the Forward+ launches fill only the Vulkan cache, so
+#     measuring GL after them without a GL warm-up is a cold reading.
 #   - the GUI is launched directly (default `dist/gpty`, the `./scripts/build`
 #     output), never through the CLI, so `$!` is the app's own pid and `VmRSS`
 #     is read from its `/proc/<pid>/status`. A `setsid` launch makes it a
@@ -38,7 +40,9 @@
 #     run-to-run noise. A drift inside the spread is not a regression.
 #   - every row prints the pane count it was taken at, because the zero-pane
 #     row is the one that proves the renderer owns the memory: it is the same
-#     process with every pane killed.
+#     process with every pane killed. The eight-pane row is a separate warm
+#     launch for the same reason in the other direction: it must stay within
+#     noise of one pane.
 #
 # `--stamp` is the half CI can run (no display, no GPU): the table names the
 # build it was measured on, a release bumps the crate version, and a table
@@ -50,7 +54,8 @@
 # is off by more than `MEASURE_TOLERANCE` percent (default 10, the tolerance
 # the v0.9.0 performance budget uses), when the scrollback delta moves, or when
 # a qualitative claim the prose makes stops holding (Compatibility must stay
-# materially lighter than Forward+; killing the panes must not move the figure).
+# materially lighter than Forward+; killing the panes and adding seven more
+# must not move the figure).
 #
 # Requires: Linux (the published figures are a Linux/Vulkan claim), a graphical
 # session, a built app (`./scripts/build` writes `dist/`), and a Rust CLI
@@ -325,6 +330,11 @@ measure_release() {
     record "Idle, one pane (Forward+, the default)" "$one" "$RELEASE_PANES"
     stop_app
 
+    # The Forward+ launches above fill only the Vulkan pipeline cache; a
+    # discarded GL launch is what makes the measured row warm.
+    launch gl-warm "$BIN" --rendering-driver opengl3
+    stop_app
+
     launch gl "$BIN" --rendering-driver opengl3
     normalize_one_pane
     record "Same build, --rendering-driver opengl3, warm" "$(sample_rss)" "$(panes_json)"
@@ -377,9 +387,25 @@ delta=$(( ${flood% *} - ${one% *} ))
 record "30,000 lines through one pane, past the 10,000-row scrollback cap" "$flood" "1" "+${delta} MB"
 stop_app
 
+# ── Eight panes idle, in a fresh warm launch ───────────────────────────
+# A separate process keeps the flood delta above measured against its own
+# one-pane row. Eight sleeping terminals prove the panes are not the cost: the
+# figure must stay within noise of the one-pane row.
+launch eight "$BIN"
+kill_all_panes
+for n in $(seq 1 8); do
+    new_pane "sleep 3600" "cost-eight-$n"
+done
+[[ "$(pane_count)" == 8 ]] || die "expected eight idle panes, found $(pane_count)" 5
+record "Eight panes, idle (Forward+, the default)" "$(sample_rss)" "8"
+stop_app
+
 # ── Compatibility (OpenGL3), warm ───────────────────────────────────────
-# A second launch with the same warm cache and one live pane, so the row
-# differs from the Forward+ one by the driver alone.
+# The Forward+ launches fill only the Vulkan pipeline cache. A discarded GL
+# launch fills the OpenGL cache, so the measured launch differs from the
+# Forward+ row by the renderer alone; without it the row is a cold GL reading.
+launch gl-warm "$BIN" --rendering-driver opengl3
+stop_app
 launch gl "$BIN" --rendering-driver opengl3
 kill_all_panes
 new_pane "sleep 3600" "cost-idle"
@@ -423,7 +449,7 @@ emit_json() {
     printf '  "driver": "%s",\n' "$(driver_note)"
     printf '  "values": {\n'
     printf '    "idle_forward": %s,\n' "$(row_med 1)"
-    printf '    "idle_opengl3": %s,\n' "$(row_med 4)"
+    printf '    "idle_opengl3": %s,\n' "$(row_med 5)"
     printf '    "cold": %s\n' "$(row_med 0)"
     printf '  }\n'
     printf '}\n'
@@ -491,21 +517,26 @@ compare() {
 compare "$(row_med 0)" "first-launch-cold" "First launch, cold pipeline cache"
 compare "$(row_med 1)" "one-pane" "One pane, idle"
 compare "$(row_med 2)" "zero-pane" "Zero panes, renderer still up"
+compare "$(row_med 4)" "eight-panes" "Eight panes, idle"
 compare "${delta}" "scrollback-delta" "30,000 lines"
-compare "$(row_med 4)" "opengl3" "Same build,"
+compare "$(row_med 5)" "opengl3" "Same build,"
 
 # The claims an absolute tolerance cannot see.
 if (( $(row_med 2) > $(row_med 1) * 115 / 100 )); then
     echo "measure-cost: CLAIM BROKEN: killing every pane grew the figure ($(row_med 2) MB > $(row_med 1) MB) - the prose says the renderer, not the terminals, owns the memory" >&2
     fail=1
 fi
+if (( $(row_med 4) > $(row_med 1) * 115 / 100 )); then
+    echo "measure-cost: CLAIM BROKEN: eight panes grew the figure ($(row_med 4) MB > $(row_med 1) MB) - the prose says the panes are cheap and the renderer owns the memory" >&2
+    fail=1
+fi
 claimed_ratio="$(sed -n 's/.*Compatibility (OpenGL3) is \([0-9][0-9.]*\)x lighter.*/\1/p' README.md | head -1)"
 if [[ -n "$claimed_ratio" ]]; then
     # measured ratio in hundredths, compared against the claim less the tolerance
-    measured_hundredths=$(( $(row_med 1) * 100 / ($(row_med 4) == 0 ? 1 : $(row_med 4)) ))
+    measured_hundredths=$(( $(row_med 1) * 100 / ($(row_med 5) == 0 ? 1 : $(row_med 5)) ))
     claimed_hundredths="$(awk -v r="$claimed_ratio" -v t="$TOLERANCE" 'BEGIN { printf "%d", r * 100 * (100 - t) / 100 }')"
     if (( measured_hundredths < claimed_hundredths )); then
-        echo "measure-cost: CLAIM BROKEN: Forward+ $(row_med 1) MB against opengl3 $(row_med 4) MB is $(awk -v m="$measured_hundredths" 'BEGIN { printf "%.2f", m / 100 }')x, below the README's ${claimed_ratio}x less ${TOLERANCE}%" >&2
+        echo "measure-cost: CLAIM BROKEN: Forward+ $(row_med 1) MB against opengl3 $(row_med 5) MB is $(awk -v m="$measured_hundredths" 'BEGIN { printf "%.2f", m / 100 }')x, below the README's ${claimed_ratio}x less ${TOLERANCE}%" >&2
         fail=1
     fi
 fi
