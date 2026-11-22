@@ -836,10 +836,15 @@ class Smoke:
                 "a software adapter must earn the software-rasterizer warning",
                 text[-2000:],
             )
+            # Godot wraps a long adapter name (the ANGLE string on WARP spills
+            # onto a second line), so compare the detector's marker rather than
+            # the whole `[renderer]` adapter: the warning's quoted name always
+            # carries the marker that classified it.
+            matched = [marker for marker in software_markers() if marker in adapter.lower()]
             self.require(
-                any(adapter.lower() in candidate.lower() for candidate in warnings),
+                any(marker in candidate.lower() for candidate in warnings for marker in matched),
                 "the software-rasterizer warning must name the adapter",
-                warnings,
+                text[-2000:],
             )
         print(f"[renderer] {label}: {line}", flush=True)
 
