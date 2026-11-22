@@ -61,6 +61,13 @@ def strip_ansi(text: str) -> str:
     return _ANSI.sub("", text)
 SECRET = "smoke-secret"
 READY_TIMEOUT_S = 60.0
+# One real-display launch may sit on a slow software rasterizer; 120 s is the
+# per-launch bound, not the whole step's.
+RENDERER_TIMEOUT_S = 120.0
+# The drivers the engine can report from its startup `[renderer]` line. `dummy`
+# is deliberately absent: a headless launch reporting it is a failed check, not
+# a pass.
+KNOWN_RENDERER_DRIVERS = ("vulkan", "d3d12", "opengl3", "opengl3_angle", "opengl3_es")
 
 # Written into the sandbox and run inside a pane for the Windows process-hardening
 # check. It drops SeDebugPrivilege first: a normal pane process does not have it
@@ -208,6 +215,24 @@ print(label + "_TERMINATE=" + ("YES" if try_open(pid, 0x0001) else "NO"), flush=
 
 class SmokeFailure(Exception):
     """A step failed; the message is the report."""
+
+
+def software_markers() -> list[str]:
+    """`RendererInfo.SOFTWARE_MARKERS`, read from its owner.
+
+    A Python copy would pass while the shipped detector drifted. A missing or
+    empty array raises instead of yielding `[]` (which would make every adapter
+    hardware and quietly pass the software half).
+    """
+    path = ROOT / "godot" / "scenes" / "ui" / "renderer_info.gd"
+    text = path.read_text(encoding="utf-8")
+    match = re.search(r"const SOFTWARE_MARKERS := \[(.*?)\]", text, re.S)
+    if not match:
+        raise SmokeFailure(f"{path} has no SOFTWARE_MARKERS array")
+    markers = [m.lower() for m in re.findall(r'"([^"]+)"', match.group(1))]
+    if not markers:
+        raise SmokeFailure(f"{path} has an empty SOFTWARE_MARKERS array")
+    return markers
 
 
 class Smoke:
@@ -746,6 +771,91 @@ class Smoke:
             time.sleep(0.5)
         self.fail(f"the GUI did not become reachable within {READY_TIMEOUT_S:.0f}s")
 
+    def renderer_launch(self, driver: str) -> None:
+        """Boot on a real display and assert the startup `[renderer]` line.
+
+        `--headless` selects the dummy renderer, so the fallback chain cannot be
+        observed there; this launch is the check. An empty `driver` runs the
+        project's own default (Vulkan -> D3D12 -> native OpenGL 3 -> ANGLE).
+        """
+        label = driver or "default"
+        self.enter(f"renderer ({label})")
+        engine_log = self.tmp / f"renderer-{label}-engine.log"
+        argv = [
+            self.godot,
+            "--path",
+            "godot",
+            "--quit-after",
+            "180",
+            "--log-file",
+            str(engine_log),
+        ]
+        if driver:
+            argv += ["--rendering-driver", driver]
+        try:
+            proc = subprocess.run(
+                argv,
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                env=self.env,
+                timeout=RENDERER_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail(f"the {label} launch did not exit within {RENDERER_TIMEOUT_S:.0f}s")
+            raise  # unreachable
+        text = strip_ansi((proc.stdout or "") + (proc.stderr or ""))
+        if engine_log.exists():
+            text += "\n" + strip_ansi(engine_log.read_text(errors="replace"))
+        if proc.returncode != 0:
+            self.fail(f"the {label} launch exited {proc.returncode}", text[-2000:])
+        line = self._renderer_line(text)
+        self.require(line, f"the {label} launch printed no [renderer] line", text[-2000:])
+        driver_name, rest = line.split(" (", 1)
+        method, rest = rest.split(") on ", 1)
+        adapter = rest.split(" | ", 1)[0]
+        self.require(
+            bool(driver_name and method and adapter),
+            f"the {label} [renderer] line is incomplete",
+            line,
+        )
+        expected = (driver,) if driver else KNOWN_RENDERER_DRIVERS
+        self.require(
+            driver_name in expected,
+            f"the {label} launch initialized {driver_name}, expected {list(expected)}",
+            line,
+        )
+        if any(marker in adapter.lower() for marker in software_markers()):
+            warnings = [
+                candidate
+                for candidate in text.splitlines()
+                if "software rasterizer" in candidate.lower()
+            ]
+            self.require(
+                bool(warnings),
+                "a software adapter must earn the software-rasterizer warning",
+                text[-2000:],
+            )
+            self.require(
+                any(adapter.lower() in candidate.lower() for candidate in warnings),
+                "the software-rasterizer warning must name the adapter",
+                warnings,
+            )
+        print(f"[renderer] {label}: {line}", flush=True)
+
+    @staticmethod
+    def _renderer_line(text: str) -> str:
+        """The startup record, not the warning: it carries ` (method) on `."""
+        marker = "[renderer] "
+        for line in text.splitlines():
+            at = line.find(marker)
+            if at < 0:
+                continue
+            payload = line[at + len(marker):].strip()
+            if " (" in payload and ") on " in payload:
+                return payload
+        return ""
+
     def second_instance_is_refused(self) -> None:
         """A second GUI must refuse the control endpoint and exit, leaving the first reachable.
 
@@ -1236,6 +1346,25 @@ def main() -> int:
     smoke = Smoke()
     subscription = None
     try:
+        if sys.argv[1:2] == ["--renderer-smoke"]:
+            drivers = sys.argv[2:]
+            unknown = [
+                driver for driver in drivers if driver not in KNOWN_RENDERER_DRIVERS
+            ]
+            if unknown:
+                print(
+                    f"FAIL [renderer-smoke]: unknown driver(s) {unknown}; "
+                    f"known: {list(KNOWN_RENDERER_DRIVERS)}",
+                    file=sys.stderr,
+                )
+                return 2
+            smoke.build()
+            smoke.import_project()
+            smoke.renderer_launch("")
+            for driver in drivers:
+                smoke.renderer_launch(driver)
+            print("PASS renderer-smoke")
+            return 0
         smoke.build()
         smoke.import_project()
         # The concept store is read at GUI startup, so the seed must land
