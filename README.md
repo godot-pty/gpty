@@ -2,7 +2,7 @@
 
 <div align="center">
 
-  [![Build](https://img.shields.io/github/actions/workflow/status/godot-pty/gpty/ci.yml?branch=main)](https://github.com/godot-pty/gpty/actions/workflows/ci.yml) [![LFX Health Score](https://insights.linuxfoundation.org/api/badge/health-score?project=godot-pty-gpty)](https://insights.linuxfoundation.org/project/godot-pty-gpty) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16201/badge)](https://www.bestpractices.dev/projects/16201)
+  [![Build](https://img.shields.io/badge/build-PR-blue)](https://github.com/godot-pty/gpty/actions/workflows/ci.yml) [![LFX Health Score](https://insights.linuxfoundation.org/api/badge/health-score?project=godot-pty-gpty)](https://insights.linuxfoundation.org/project/godot-pty-gpty) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16201/badge)](https://www.bestpractices.dev/projects/16201)
 
   ![GitHub Downloads](https://img.shields.io/github/downloads/godot-pty/gpty/total) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/godot-pty/gpty/badge)](https://securityscorecards.dev/viewer/?uri=github.com/godot-pty/gpty) [![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/godot-pty/gpty#verifying-releases)
 
