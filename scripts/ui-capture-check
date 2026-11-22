@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Prove the UI capture harness is deterministic and its diffs are local.
 #
-# Usage: scripts/ui-capture-check [--keep <dir>] [--perturb <state>] [state...]
+# Usage: scripts/ui-capture-check [--keep <dir>] [--perturb <state>]
+#        [--renderer <method>] [state...]
+#
+# `--renderer forward_plus|mobile|gl_compatibility` forces every capture's
+# rendering method (see scripts/ui-capture); without it the project's pinned
+# Forward+ is used.
 #
 # For every state: capture it twice in separate sandboxes and require the two
 # PNGs to be pixel-identical. Then capture every state once more with one
@@ -27,6 +32,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CAPTURE="$ROOT/scripts/ui-capture"
 PERTURB=""
 KEEP=""
+RENDER_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -38,6 +44,11 @@ while [[ $# -gt 0 ]]; do
         --perturb)
             [[ $# -ge 2 ]] || { echo "ui-capture-check: --perturb needs a state" >&2; exit 2; }
             PERTURB="$2"
+            shift 2
+            ;;
+        --renderer)
+            [[ $# -ge 2 ]] || { echo "ui-capture-check: --renderer needs a method" >&2; exit 2; }
+            RENDER_ARGS=(--renderer "$2")
             shift 2
             ;;
         -*)
@@ -101,7 +112,7 @@ fail() {
 capture() {
     local state="$1" out="$2"
     shift 2
-    if ! "$CAPTURE" "$state" "$out" "$@" >"$WORK/$state-$(basename "$out").log" 2>&1; then
+    if ! "$CAPTURE" "${RENDER_ARGS[@]}" "$state" "$out" "$@" >"$WORK/$state-$(basename "$out").log" 2>&1; then
         echo "  log: $WORK/$state-$(basename "$out").log"
         tail -20 "$WORK/$state-$(basename "$out").log" | sed 's/^/    /'
         return 1

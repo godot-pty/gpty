@@ -76,7 +76,9 @@ const COMMAND_FIXTURE := [
 ]
 ## Pane count before the state's interaction runs. 0 leaves the workspace
 ## store empty: a first launch now has no workspace and no pane, and the guide
-## is the whole view (the first pane creates the "Default" workspace).
+## is the whole view (the first pane creates the "Default" workspace). A
+## multi-pane state may name `grid_cols`/`grid_rows` (default 2x2, the grid the
+## terminal cells divide into) when its count is not one or four.
 const STATES := {
 	"first-launch": {"size": DEFAULT_SIZE, "panes": 0},
 	"sidebar": {"size": DEFAULT_SIZE, "panes": 4},
@@ -245,11 +247,21 @@ const STATES := {
 					+ 'printf "alpha one\\nalpha two\\nbeta three\\nalpha four\\n"; sleep 600']}},
 	], "open": "search-history", "query": "alpha"},
 	"workspace-1280x760": {"size": Vector2i(1280, 760), "panes": 4},
+	# Eight tiles is the memory/repaint budget's many-pane case; 4x2 keeps each
+	# terminal wide enough to settle with a prompt.
+	"eight-panes": {"size": DEFAULT_SIZE, "panes": 8,
+		"grid_cols": 4, "grid_rows": 2},
 	# The window's own title bar: `apply_mode` hides it in the default decorated
 	# mode, so without this state neither the focus audit nor an image can see
 	# the three controls at all.
 	"window-chrome-borderless": {"size": DEFAULT_SIZE, "panes": 1,
 		"settings": {"cfg_window_mode": 1}},
+	# The whole-canvas opacity veil. The viewport PNG carries the veil's alpha on
+	# Compatibility; Forward+ captures the viewport as RGB, so the desktop grab
+	# (scripts/screenshot-gpty) is the visual check there while the GL alpha and
+	# test_window_chrome's veil assertions own the feature.
+	"window-opacity": {"size": Vector2i(1280, 760), "panes": 1,
+		"settings": {"cfg_window_opacity": 60}},
 	# The two view panes' own toolbars. `pane-empty-states` seeds both empty,
 	# where the toolbars are hidden, so these two states carry real content -
 	# the audit cannot see a control that is not on screen.
@@ -298,6 +310,13 @@ const STATES := {
 	"wiki-graph-planar": {
 		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
 		"graph_mode": "2d",
+	},
+	# The explicit orbital map: auto also picks it on a hardware adapter, so this
+	# state is the explicit-mode proof (and the one a software rasterizer can still
+	# reach through the picker).
+	"wiki-graph-orbital": {
+		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
+		"graph_mode": "3d", "orbit": true,
 	},
 	# The orbital map on the light chrome: the halos switch to alpha blending
 	# and the world glow is off (a white ground cannot bloom).
@@ -626,11 +645,16 @@ func _seed_workspace(state: Dictionary) -> void:
 		if panes == 1:
 			tiles.append(_tile(1, 0, 0, grid, grid))
 		else:
-			var half := grid / 2
+			# The default 2x2 keeps every existing multi-pane state's image
+			# unchanged; a state with another count names its grid.
+			var cols := maxi(1, int(state.get("grid_cols", 2)))
+			var rows := maxi(1, int(state.get("grid_rows", 2)))
+			var cspan := maxi(1, grid / cols)
+			var rspan := maxi(1, grid / rows)
 			var index := 1
-			for row in 2:
-				for col in 2:
-					tiles.append(_tile(index, col * half, row * half, half, half))
+			for row in rows:
+				for col in cols:
+					tiles.append(_tile(index, col * cspan, row * rspan, cspan, rspan))
 					index += 1
 	if tiles.is_empty():
 		return

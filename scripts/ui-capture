@@ -7,6 +7,11 @@
 #        scripts/ui-capture --list                # the state names
 #        scripts/ui-capture --compare <a> <b>     # pixel comparison, exit 0/1
 #
+# `--renderer forward_plus|mobile|gl_compatibility` may lead any capture or
+# audit: it forces the engine's rendering method for that launch (the renderer
+# bake-off, or checking the Compatibility fallback). Without it the project's
+# pinned Forward+ setting is used; `--list` and `--compare` ignore it.
+#
 # `--perturb <state>` may follow a capture: it is the harness's locality
 # self-test (one control shifted in that state only), and the only caller is
 # scripts/ui-capture-check.
@@ -33,9 +38,35 @@ if [[ -z "$GODOT_BIN" ]]; then
 fi
 
 usage() {
-    echo "usage: ui-capture <state> <out-dir> [--perturb <state>] | --audit-focus <state> | --audit-accessibility <state> | --list | --compare <a.png> <b.png>" >&2
+    echo "usage: ui-capture [--renderer <method>] <state> <out-dir> [--perturb <state>] | --audit-focus <state> | --audit-accessibility <state> | --list | --compare <a.png> <b.png>" >&2
     exit 2
 }
+
+RENDERER=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --renderer)
+            [[ $# -ge 2 ]] || usage
+            RENDERER="$2"
+            shift 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+RENDER_FLAGS=()
+case "$RENDERER" in
+    "")
+        ;;
+    forward_plus | mobile | gl_compatibility)
+        RENDER_FLAGS=(--rendering-method "$RENDERER")
+        ;;
+    *)
+        echo "ui-capture: unknown renderer '$RENDERER' (forward_plus|mobile|gl_compatibility)" >&2
+        exit 2
+        ;;
+esac
 
 MODE=""
 STATE=""
@@ -164,7 +195,7 @@ case "$MODE" in
         # script error means the image is not a capture of the app.
         CAPTURE_LOG="$(mktemp)"
         set +e
-        run_bounded "$STATE" "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync \
+        run_bounded "$STATE" "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync "${RENDER_FLAGS[@]}" \
             -s "$HARNESS" -- --state "$STATE" --out "$OUT" "${EXTRA[@]}" 2>&1 \
             | tee "$CAPTURE_LOG"
         CAPTURE_STATUS=${PIPESTATUS[0]}
@@ -178,11 +209,11 @@ case "$MODE" in
         exit "$CAPTURE_STATUS"
         ;;
     audit)
-        run_bounded "$STATE" "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync \
+        run_bounded "$STATE" "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync "${RENDER_FLAGS[@]}" \
             -s "$HARNESS" -- --state "$STATE" --audit-focus
         ;;
     audit_a11y)
-        run_bounded "$STATE" "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync \
+        run_bounded "$STATE" "$GODOT_BIN" --path "$ROOT/godot" --disable-vsync "${RENDER_FLAGS[@]}" \
             -s "$HARNESS" -- --state "$STATE" --audit-accessibility
         ;;
 esac

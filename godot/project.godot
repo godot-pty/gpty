@@ -54,4 +54,10 @@ window/per_pixel_transparency/allowed=true
 
 [rendering]
 
+; The renderer decision (2026-11-22 bake-off): Forward+ is the default on every
+; platform because the orbital vault graph's bloom is the v0.8.6 identity.
+; Compatibility (OpenGL3) is 2.2x lighter and the documented opt-in
+; (--rendering-driver opengl3). A future per-platform flip is one project-setting
+; override (renderer/rendering_method.<linuxbsd|windows|macos>), not a preset key.
+renderer/rendering_method="forward_plus"
 textures/vram_compression/import_etc2_astc=true
