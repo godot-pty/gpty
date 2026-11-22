@@ -1,18 +1,17 @@
 name: CI
 
 on:
-  # A documentation-only push runs none of these jobs; the Docs workflow is
-  # its gate. A pull request runs all of them: the ruleset's required checks
-  # must report on every PR to a protected branch, and a path-filtered
-  # workflow that never starts would leave a docs-only PR waiting forever.
-  # The push filter stays because a docs-only post-merge run cannot change
-  # what any job here tests - no Rust or GDScript test reads `docs/`, and the
-  # bundle is generated data the Docs job re-checks. Anything else (workflows,
-  # any other script, crates, godot/, the smoke) still runs the full suite: a
-  # script that builds the app, drives Godot or runs a gate needs the code
-  # gates to validate it.
+  # Pull requests are the code gate: every PR to main or a release branch runs
+  # the full suite (no paths filter - a required check that never starts would
+  # leave the PR waiting forever). A push to main does not re-run CI: the repo
+  # merges one PR at a time, the ruleset requires up-to-date checks, and the
+  # merge tree is the PR head the suite already tested. Release-branch pushes
+  # still run it. A docs-only push runs none of these jobs; the Docs workflow
+  # is its gate - no Rust or GDScript test reads `docs/`, and the bundle is
+  # generated data the Docs job re-checks. Anything else (workflows, any other
+  # script, crates, godot/, the smoke) still runs the full suite on the PR.
   push:
-    branches: [main, "release/v*"]
+    branches: ["release/v*"]
     paths-ignore:
       - "docs/**"
       - "assets/site-icons/**"
