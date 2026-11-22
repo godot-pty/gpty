@@ -154,6 +154,13 @@ const STATES := {
 		"cwd": "/", "settings": {"cfg_shell_env": "DEMO=1"}},
 	"settings-terminal-150": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Terminal",
 		"ui_scale": 150, "cwd": "/", "settings": {"cfg_shell_env": "DEMO=1"}},
+	# The two settings surfaces v0.8.6 added beyond the original eight: the
+	# Reasoning turn caps and the Concepts table. Row *Close the loop:
+	# recapture the assessment on the 0.8.5 build*.
+	"settings-reasoning": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings",
+		"tab": "Reasoning"},
+	"settings-concepts": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings",
+		"tab": "Concepts"},
 	# The Motion section at the bottom of Appearance: the master switch, the
 	# create/close/swap pickers and the selected animation's generated property
 	# rows (rows *Panes animate when they are created, destroyed or swapped* and
@@ -196,6 +203,11 @@ const STATES := {
 		"settings": {"cfg_effect_intensity": 0,
 			"cfg_reactive_effects": {"cat_command": "tint"}},
 		"effects_cue": "tint"},
+	# Pulse and particles are not still-capturable here: `PaneEffects.pin_cue`
+	# pins the tint wash and the pulse border, but a particle burst has no
+	# static frame, and the pulse border shares the accent with the focused
+	# pane's border. The v0.8.7 row *The Effects and Reactive rows never show
+	# what they play* owns a preview surface for both.
 	# The UI scale setting at its 125 % step, on the app's own first-launch
 	# workspace. The only visual proof that the setting scales the chrome and
 	# the terminal text together; a later release recaptures it.
@@ -211,8 +223,10 @@ const STATES := {
 	# recapture can use them instead of a scratch driver.
 	"light-workspace": {"size": Vector2i(1280, 760), "panes": 4,
 		"settings": {"cfg_appearance_mode": 1}},
+	# The light chrome on Appearance, scrolled to the scheme rows the caption
+	# names; at the default size they used to sit below the card's fold.
 	"light-settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings", "tab": "Appearance",
-		"settings": {"cfg_appearance_mode": 1}},
+		"scroll_to": "DarkschemePicker", "settings": {"cfg_appearance_mode": 1}},
 	# The terminal's own colour scheme, dark and light. The chrome stays its
 	# own palette: the two are independent, and these two states prove the
 	# pairs land on the grid (gruvbox's `#282828` ground, solarized-light's
@@ -296,6 +310,11 @@ const STATES := {
 	# with a pane behind it so the card, a title and the sidebar share a frame.
 	"settings-800x500": {"size": Vector2i(800, 500), "panes": 1, "open": "settings"},
 	"settings-560x340": {"size": Vector2i(560, 340), "panes": 1, "open": "settings"},
+	# Window opacity at the layout floor: System is the default tab, and the
+	# Window opacity row sits below the fold at 560x340. Row *Close the loop:
+	# recapture the assessment on the 0.8.5 build*.
+	"settings-opacity-560x340": {"size": Vector2i(560, 340), "panes": 1,
+		"open": "settings", "scroll_to": "WindowOpacityOpt"},
 	# The surfaces the October 2026 audit did not reach. Each seeds the real
 	# content the surface needs (the bundled vault, a wiki tile, an untrusted
 	# spawn plan) instead of a mock, so the capture shows the shipped UI.
@@ -313,16 +332,18 @@ const STATES := {
 	},
 	# The explicit orbital map: auto also picks it on a hardware adapter, so this
 	# state is the explicit-mode proof (and the one a software rasterizer can still
-	# reach through the picker).
+	# reach through the picker). Motion is off so the dust field is frozen and the
+	# capture repeats; the map, labels and links stay as drawn.
 	"wiki-graph-orbital": {
 		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
-		"graph_mode": "3d", "orbit": true,
+		"graph_mode": "3d", "orbit": true, "settings": {"cfg_motion": 0},
 	},
 	# The orbital map on the light chrome: the halos switch to alpha blending
-	# and the world glow is off (a white ground cannot bloom).
+	# and the world glow is off (a white ground cannot bloom); motion is off for
+	# the same deterministic dust.
 	"light-wiki-graph": {
 		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
-		"orbit": true, "settings": {"cfg_appearance_mode": 1},
+		"orbit": true, "settings": {"cfg_appearance_mode": 1, "cfg_motion": 0},
 	},
 	"light-wiki-graph-planar": {
 		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
@@ -800,7 +821,14 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 						_fail("the Settings panel has no '%s' control" % str(state["scroll_to"]))
 						return false
 					var sc := tab_body as ScrollContainer
-					sc.scroll_vertical = int(target.position.y)
+					# The target's own `position` is relative to its parent row
+					# (a picker inside an HBox is at y=0), so scroll by its
+					# global offset inside the scroller plus the current scroll:
+					# that reaches a nested control and leaves a direct child
+					# where the old `position.y` put it.
+					var top := int(target.get_global_rect().position.y
+						- sc.get_global_rect().position.y) + sc.scroll_vertical
+					sc.scroll_vertical = max(top, 0)
 					await _wait_frames(2)
 		"file-dialog":
 			var more_button := _button_with_accessible_name(_workspace._sidebar,
