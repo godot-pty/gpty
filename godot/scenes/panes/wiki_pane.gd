@@ -20,8 +20,8 @@ class_name WikiPane
 ## `VaultGraphModel` owns the data, the deterministic layout and the semantic
 ## hit-test. Two presentations implement the `VaultGraphCanvas` contract:
 ## `VaultGraph3D` (the default orbital map, with one body per note and one
-## spring per link) and `VaultGraphView` (the planar canvas, also the automatic
-## choice on the Compatibility renderer). Geometry is session state in the
+## spring per link) and `VaultGraphView` (the planar canvas, the automatic
+## choice on a software rasterizer). Geometry is session state in the
 ## active view and rides the pane's layout state as `graph_positions`; the map
 ## style is the `graph_mode` setting (`auto`/`3d`/`2d`). Nothing there writes
 ## to the vault: clicking a note opens it through the same leave guard the
@@ -43,8 +43,8 @@ class_name WikiPane
 ## Note view: `edit` (source only) | `split` (source + live preview) |
 ## `preview` (rendered only). Split is what makes the preview live.
 @export var view_mode := "split"
-## Link map: `auto` (3D on Forward+/Mobile, planar on Compatibility) |
-## `3d` (the orbital map) | `2d` (the planar canvas).
+## Link map: `auto` (the orbital map on a hardware adapter, the planar canvas
+## on a software rasterizer) | `3d` (the orbital map) | `2d` (the planar canvas).
 @export var graph_mode := "auto"
 
 ## The link graph's outcome: `true` once the canvas is up, `false` with the
@@ -747,13 +747,21 @@ func _open_note(rel: String, fragment := "", line := 0, take_focus := true) -> b
 
 # ── The link graph: the vault's structure, generated on demand ──────────
 
-## The presentation the pane shows now. `auto` follows the renderer: the
-## orbital map on Forward+/Mobile, the planar canvas on Compatibility. An
-## explicit `3d`/`2d` is the user's choice and is honoured on either renderer.
+## The presentation `auto` resolves to. The orbital map is a core-3D scene
+## (RigidBody3D, MeshInstance3D, a SubViewport) and runs on every hardware
+## renderer, Compatibility included; only the bloom pass is inert there. A
+## software rasterizer keeps the planar canvas: the 3D scene's CPU physics and
+## per-frame transforms are the cost that matters on llvmpipe/WARP.
+static func auto_graph_mode(adapter_name: String) -> String:
+	return "2d" if RendererInfo.is_software(adapter_name) else "3d"
+
+## The presentation the pane shows now. `auto` follows the adapter: the
+## orbital map on hardware, the planar canvas on a software rasterizer. An
+## explicit `3d`/`2d` is the user's choice and is honoured on either.
 func _effective_graph_mode() -> String:
 	if graph_mode == "3d" or graph_mode == "2d":
 		return graph_mode
-	return "2d" if RenderingServer.get_current_rendering_method() == "gl_compatibility" else "3d"
+	return auto_graph_mode(RenderingServer.get_video_adapter_name())
 
 
 ## One view instance for `mode`, with the shared signals wired to this pane.

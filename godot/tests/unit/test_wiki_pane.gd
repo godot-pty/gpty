@@ -796,6 +796,15 @@ func test_restore_is_spawn_time_only_and_tolerates_a_missing_note():
 	assert_false(junk._graph_view.visible)
 
 
+func test_graph_mode_auto_follows_the_adapter_not_the_renderer():
+	assert_eq(WikiPane.auto_graph_mode("NVIDIA GeForce RTX 5070 Ti"), "3d",
+		"a hardware GL adapter gets the orbital map")
+	assert_eq(WikiPane.auto_graph_mode("Mesa llvmpipe (LLVM 23.1.5, 256 bits)"), "2d",
+		"llvmpipe keeps the planar canvas")
+	assert_eq(WikiPane.auto_graph_mode("Microsoft Basic Render Driver"), "2d",
+		"WARP keeps the planar canvas")
+
+
 func test_layout_state_carries_the_graph_mode_and_positions():
 	_seed_linked_vault()
 	var pane := _make_pane(_tmp)

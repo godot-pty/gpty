@@ -585,8 +585,8 @@ const FILE_TREE_DEFAULT_OPEN_MODE := "viewer"
 ## The wiki pane's note-view modes, shared with `paneView`'s `mode` parameter.
 const WIKI_VIEW_MODES := ["edit", "split", "preview"]
 
-## The wiki pane's link-map presentations. `auto` resolves from the renderer
-## (`VaultGraph3D` on Forward+/Mobile, the planar canvas on Compatibility);
+## The wiki pane's link-map presentations. `auto` resolves from the adapter
+## (`VaultGraph3D` on hardware, the planar canvas on a software rasterizer);
 ## an explicit value is the user's choice. Labels live beside the list so the
 ## Pane Settings picker and the graph's own mode button cannot drift.
 const WIKI_GRAPH_MODES := ["auto", "3d", "2d"]
