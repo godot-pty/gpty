@@ -1,13 +1,21 @@
 # Dependency updates are a security control, not a convenience: the actions are
 # pinned to commit SHAs, so without this nothing moves them, and a pinned action
-# with a known CVE stays pinned. One grouped pull request per ecosystem per
-# week against the trunk (`main`), and one for the fuzz workspace's own
-# lockfile (it is not a member of the repository workspace, so the root cargo
-# entry does not see it).
+# with a known CVE stays pinned. Version updates land as one pull request per
+# dependency per week against the trunk (`main`).
+#
+# The cargo entry covers both workspaces in one block on purpose. `fuzz/` is its
+# own workspace with its own lockfile, but its path dependencies reach the
+# `crates/*` manifests, so a bump there edits a manifest that both lockfiles
+# resolve. A per-directory entry regenerates only its own lockfile and leaves the
+# other workspace's `--locked` gate red (dependabot PRs #18 and #19, 2026-11-22).
+# `group-by: dependency-name` keeps one dependency's manifest and lockfile edits
+# in a single pull request across both directories.
 version: 2
 updates:
   - package-ecosystem: "cargo"
-    directory: "/"
+    directories:
+      - "/"
+      - "/fuzz"
     target-branch: "main"
     schedule:
       interval: "weekly"
@@ -15,16 +23,7 @@ updates:
     groups:
       rust-dependencies:
         patterns: ["*"]
-
-  - package-ecosystem: "cargo"
-    directory: "/fuzz"
-    target-branch: "main"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 3
-    groups:
-      fuzz-dependencies:
-        patterns: ["*"]
+        group-by: "dependency-name"
 
   - package-ecosystem: "github-actions"
     directory: "/"
