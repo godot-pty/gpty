@@ -13,8 +13,10 @@ Run it before a release and after changing a ruleset or the release
 environment. It needs a maintainer-authenticated `gh` with admin read access;
 it is not part of CI because the normal Actions token cannot read rulesets.
 
-The required contexts are the aggregate `ci-gate` plus the two separate
-security workflows (`CodeQL`, Secret scan), not one context per CI job; the
+The required contexts are the aggregate `ci-gate`, the four CodeQL analysis
+jobs (`Analyze (…)`) and Secret scan, not one context per CI job; the code
+scanning summary `CodeQL` check is emitted on pull requests but not on
+merge-group heads, so requiring it would leave the queue waiting forever. The
 merge queue is the up-to-date guarantee that replaced the strict
 "branches must be up to date" setting. The `release branch protection` ruleset
 covers `refs/heads/release/v*` with a pull request, a review and signed
@@ -32,8 +34,14 @@ import os
 import subprocess
 import sys
 
+# Code scanning's summary `CodeQL` check reports on pull_request, not on
+# merge_group, so requiring it would hang the queue. The four analysis jobs
+# report on both events and are the checks to require.
 MAIN_CHECKS = [
-    "CodeQL",
+    "Analyze (actions)",
+    "Analyze (javascript-typescript)",
+    "Analyze (python)",
+    "Analyze (rust)",
     "ci-gate",
     "secret-scan",
 ]
