@@ -275,6 +275,17 @@
         "idle_opengl3": 366,
         "cold": 1108
       }
+    },
+    {
+      "version": "0.8.6",
+      "date": "2026-11-23",
+      "source": "scripts/measure-cost on the v0.8.6 build",
+      "driver": "NVIDIA 620.73.04 (Vulkan 1.4.363)",
+      "values": {
+        "idle_forward": 798,
+        "idle_opengl3": 321,
+        "cold": 1226
+      }
     }
   ]
 }
