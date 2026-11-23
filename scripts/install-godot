@@ -87,6 +87,22 @@ def download(url: str, expected: str, destination: Path) -> None:
         fail(f"{url}: sha512 mismatch (expected {expected}, got {actual})")
 
 
+def ensure_alias(destination: Path, executable: Path) -> None:
+    """Expose the versioned archive as `godot` / `godot.exe` on PATH."""
+    alias = destination / ("godot.exe" if os.name == "nt" else "godot")
+    if alias.exists() and not alias.is_symlink():
+        return
+    if alias.is_symlink():
+        alias.unlink()
+    if os.name == "nt":
+        try:
+            os.link(executable, alias)
+        except OSError:
+            shutil.copy2(executable, alias)
+    else:
+        alias.symlink_to(executable.name)
+
+
 def install_editor(dest_arg: str) -> Path:
     data = config()
     entry = data["archives"][platform_key()]
@@ -94,6 +110,7 @@ def install_editor(dest_arg: str) -> Path:
     destination.mkdir(parents=True, exist_ok=True)
     executable = destination / entry["executable"]
     if executable.is_file():
+        ensure_alias(destination, executable)
         print(executable)
         append_path(str(destination))
         append_env("GODOT", str(executable))
@@ -109,6 +126,7 @@ def install_editor(dest_arg: str) -> Path:
         fail(f"{entry['url']} did not contain {entry['executable']}")
     if os.name != "nt":
         executable.chmod(0o755)
+    ensure_alias(destination, executable)
     print(executable)
     append_path(str(destination))
     append_env("GODOT", str(executable))
