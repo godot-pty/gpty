@@ -65,9 +65,11 @@ for component in $components; do
 done
 
 rustup toolchain install "$channel" "${args[@]}"
-for target in "${targets[@]}"; do
-    rustup target add --toolchain "$channel" "$target"
-done
+if (( ${#targets[@]} > 0 )); then
+    for target in "${targets[@]}"; do
+        rustup target add --toolchain "$channel" "$target"
+    done
+fi
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
     {
