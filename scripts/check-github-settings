@@ -25,9 +25,9 @@ sets). When a job is added or renamed, update `ci-gate`'s needs list; when the
 gate context or the queue parameters change, update this file in the same
 change. `ci-gate` fails every result other than success/skipped, including an
 abandoned queued job: a platform proof that never ran is not a pass. The one
-exception is macOS in a merge group, where GitHub abandons a queued runner:
-it is a warning because the pull-request head's macOS job is the platform
-proof; a real macOS failure still fails.
+exception is macOS, where GitHub abandons a queued runner without running a
+step: that is a warning because the job still runs whenever a runner is
+available, while a real macOS failure (or a timeout) still fails.
 """
 
 from __future__ import annotations

@@ -667,11 +667,12 @@ jobs:
   # run even when an upstream job failed; `skipped` is a pass (the docs-only
   # fast path). Anything else - failure, cancelled, abandoned, timed_out -
   # fails: GitHub can abandon a queued job without running a step, and that
-  # is a missing platform proof, not a pass. The one exception is macOS in a
-  # merge group: GitHub repeatedly abandons a queued macOS runner there (the
-  # PR head's macOS job is the platform proof), so an abandoned/cancelled
-  # macOS group job is a warning; a real macOS failure still fails. Keep this
-  # `needs` list complete when a job is added.
+  # is a missing platform proof, not a pass. The one exception is macOS:
+  # GitHub repeatedly abandons a queued macOS runner without running a step,
+  # and the job still runs whenever a runner is available, so an
+  # abandoned/cancelled macOS job is a warning. A real macOS failure (or a
+  # timeout) still fails. Keep this `needs` list complete when a job is
+  # added.
   ci-gate:
     if: always()
     needs: [changes, lint-workflows, docs, commit-lint, rust-tests, omp-events-tests, windows, macos, gut-tests, rust-fmt, cargo-audit, cargo-deny, fuzz-build]
@@ -684,15 +685,13 @@ jobs:
         run: |
           set -euo pipefail
           failures="$(jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key): \(.value.result)"' <<<"$RESULTS")"
-          if [ "${GITHUB_EVENT_NAME}" = "merge_group" ]; then
-            macos="$(jq -r '.macos.result // "missing"' <<<"$RESULTS")"
-            case "$macos" in
-              abandoned|cancelled)
-                echo "::warning::macOS was $macos in the merge group; the PR head's macOS job is the platform proof"
-                failures="$(printf '%s\n' "$failures" | grep -v '^macos: ' || true)"
-                ;;
-            esac
-          fi
+          macos="$(jq -r '.macos.result // "missing"' <<<"$RESULTS")"
+          case "$macos" in
+            abandoned|cancelled)
+              echo "::warning::macOS was $macos before a runner ran it; the job remains in the matrix when a runner is available, and a real macOS failure still fails"
+              failures="$(printf '%s\n' "$failures" | grep -v '^macos: ' || true)"
+              ;;
+          esac
           if [ -n "$failures" ]; then
             echo "::error::CI gate failed"
             printf '%s\n' "$failures"
