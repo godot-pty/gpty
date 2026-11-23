@@ -42,7 +42,7 @@ class in the right-hand column is caught by whoever remembers the earlier fix.
 | `unbounded` | the escape-string bound test in `crates/gpty-core/tests/escape_string_bound.rs`; the `MAX_REQUEST_LEN` frame cap in `crates/gpty-ipc/src/server.rs`; `a_child_that_stops_reading_refuses_input_instead_of_growing_the_queue` in `crates/gpty-core/src/engine.rs` | |
 | `gate-lies` | `scripts/ci-check`'s fail-closed SKIP, `scripts/gut-check`'s output gate, and `scripts/check-test-guards` for an index on a call's result | |
 | `doc-drift` | `scripts/docs-check` | |
-| `platform-parity` | the `windows-smoke` and `rust-windows` jobs in `.github/workflows/ci.yml`; the BSD cross-check in `scripts/ci-check` | |
+| `platform-parity` | the `windows` and `macos` jobs in `.github/workflows/ci.yml`; the BSD cross-check in `scripts/ci-check` | |
 | `input-ownership` | `scripts/ui-capture --audit-focus`; `KeyboardFocus.declare_mouse_only` in `godot/scenes/ui/keyboard_focus.gd` | |
 | `untrusted-input` | | review tool only: `scripts/audit-probes.py` |
 | `missed-call-site` | | [pitfalls.md](pitfalls.md#missed-call-site) |

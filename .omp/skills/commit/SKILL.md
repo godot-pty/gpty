@@ -85,7 +85,7 @@ Summarize what was committed, in which groups, and why. Note any files deliberat
 Commit is the half you can check locally. When the project validates on a remote (CI runs on push or PR), a local pass is necessary, not sufficient — the run is the evidence the change works on the platforms and toolchains the project actually ships. This repo is trunk-based: day-to-day work branches from `main` and lands there through a pull request protected by a ruleset that requires an approval, last-push approval and the required checks. `release/vX.Y` branches are maintenance bases, not development branches. The `gpty-bot` app pushes work branches (`scripts/bot-push`) and opens the PR (`scripts/bot-pr`); the maintainer approves it.
 
 1. **Local gate first.** `./scripts/ci-check` (full, not `--fast`) and the pre-push hook are the local half. Do not push on a red local gate.
-2. **Push once per batch**, not once per commit: a code **pull request** starts the full validation run (~4-5 minutes here), and that is the remote gate; a post-merge push to `main` does not re-run CI (the merge tree is the PR head), and a feature-branch push alone starts nothing. Release-branch pushes still run it. A docs-only PR still runs the full suite (`pull_request` has no paths filter); a docs-only `main` push runs only the lightweight workflows that fire (`Docs` when its paths match, `Scorecard`, `Secret scan`). Report the workflow that actually fired or say none did. If the changes are not meant to land yet, hold the commits and say so; do not push for review you were not asked for.
+2. **Push once per batch**, not once per commit: a **code PR** runs the full matrix (Rust, GUT, Windows, macOS, smoke) and is the remote gate. A **docs-only PR** (`docs/**`, `*.md`, `LICENSE`, the four docs scripts, the generated knowledge/docs bundles) runs only `changes`, `lint-workflows`, `docs`, `commit-lint` and `ci-gate`; the heavy jobs are skipped and report success. CodeQL and Secret scan still run on every PR. A post-merge push to `main` runs no `ci.yml`; only `Docs` (matching paths), `Scorecard` and Secret scan fire, and release-branch pushes still run it. Report the workflows that actually fired or say none did. If the changes are not meant to land yet, hold the commits and say so; do not push for review you were not asked for.
 3. **Identify the run for the pushed SHA and watch it**:
 
 ```bash
@@ -101,7 +101,9 @@ A range that edits `.github/workflows/**` cannot go through `bot-push`: the inst
 
 A release PR from the `release-prep/vX.Y.Z` branch runs `CI`, `CodeQL` and `Secret scan` on the PR; watch those checks before the maintainer approves and merges it. A release's own runbook is `skill://release`.
 
-4. **Report the run's conclusion and the SHA** with the work. Green on CI is part of the deliverable; "pushed" is not.
+4. **Land it.** Never click **Update branch** and never run `gh pr update-branch`. `main` uses a merge queue: after the maintainer approves, `gh pr merge --auto --merge` (or `gh pr merge --merge`) enqueues the PR, and the queue rebuilds it on the latest `main` and runs the required checks there. An approved PR that is `BEHIND` is not a problem — enqueue it. If the queue is unavailable (release branches), sync locally with a signed `git merge origin/main`, push through `scripts/bot-push`, and re-approve; do not let GitHub create the merge commit. After merge, the remote branch is deleted automatically; run `scripts/branch-prune` for the local one and for any other branch already contained in `origin/main`.
+
+5. **Report the run's conclusion and the SHA** with the work. Green on CI is part of the deliverable; "pushed" is not.
 
 ## When CI is red
 
@@ -110,7 +112,7 @@ Do not guess, and do not re-run until it passes by luck.
 1. Read the failing **step** of the failing **job**, not the last line of the job:
    `gh run view <run> --job <job> --log-failed` (or `--log` for the whole job).
 2. **Triage with the project's own procedure if one exists** — read the matching skill or doc before forming a hypothesis:
-   - Windows jobs (`windows-smoke`, `rust-windows`): `skill://gpty-windows-ci-triage` — it classifies ConPTY silence, cargo build failures, the `ETXTBSY` race, and cache regressions.
+   - The Windows job (`windows`) and the macOS job (`macos`): `skill://gpty-windows-ci-triage` — it classifies ConPTY silence, cargo build failures, the `ETXTBSY` race, and cache regressions.
    - The gate itself (what runs, what a pass means): `docs/content/docs/agents/testing.md`.
 3. **A green-but-slow run is usually a cache miss, not a code change.** Compare the step time to its warm value (this repo: Windows build 28 s warm / 150 s cold, media deps 0 s / ~105 s) and read the `Cache …` step for `Cache not found`. A miss right after a lockfile or build-script change is expected.
 4. **Rerun only known transients**: `gh run rerun <run> --failed`. Never add retries to mask a deterministic failure — fix the cause.
