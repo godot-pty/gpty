@@ -462,6 +462,18 @@ jobs:
         # the run its second, independent signal.
         run: godot --headless --path godot --import
 
+      - name: Renderer smoke (real display)
+        if: ${{ !cancelled() && steps.godot.outcome == 'success' }}
+        # `--headless` selects the dummy renderer, so the startup `[renderer]`
+        # line is the only way to see which backend initialized. The runner has
+        # no GPU: the default launch falls back to D3D12/WARP or ANGLE, and the
+        # two forced launches prove both compiled paths start. 120 s per launch,
+        # owned by the script.
+        shell: pwsh
+        run: python ./scripts/smoke_pane_api.py --renderer-smoke d3d12 opengl3_angle
+        env:
+          GODOT: ${{ github.workspace }}\godot-editor\godot.exe
+
       - name: GUT tests (Windows)
         if: ${{ !cancelled() && steps.godot.outcome == 'success' }}
         # The same gate as Linux, under the runner's Git Bash: `gut-check` owns

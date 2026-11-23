@@ -1217,6 +1217,8 @@ func test_an_emptied_workspace_shows_the_guide():
 		"the hero keycap is the only action")
 	var hero := guide.find_child("HeroKeycap", true, false) as Button
 	assert_not_null(hero, "the animated keycap is clickable")
+	assert_eq(get_viewport().gui_get_focus_owner(), hero,
+		"the empty guide gives the keyboard to its one action")
 	assert_eq(hero.tooltip_text, "New Terminal (Ctrl+Shift+N)")
 	assert_almost_eq(guide.get_global_rect().get_center().y,
 		empty.get_global_rect().get_center().y, 2.0,
