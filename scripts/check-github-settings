@@ -38,9 +38,11 @@ import os
 import subprocess
 import sys
 
-# Code scanning's summary `CodeQL` check reports on pull_request, not on
-# merge_group, so requiring it would hang the queue. The four analysis jobs
-# report on both events and are the checks to require.
+# The live rulesets are the source of truth; run ./scripts/check-github-settings
+# after editing this list or a ruleset. Code scanning's summary `CodeQL` check
+# reports on pull_request, not on merge_group, so requiring it would hang the
+# queue. The four analysis jobs report on both events and are the checks to
+# require.
 MAIN_CHECKS = [
     "Analyze (actions)",
     "Analyze (javascript-typescript)",
