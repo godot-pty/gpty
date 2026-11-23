@@ -352,8 +352,9 @@ active line and `$BRANCH` for a maintenance release:
 ```
 
 Wait until the PR's checks are green: on the active line the required checks are
-`ci-gate`, `CodeQL` and secret-scan; on a maintenance branch its CI, CodeQL and
-secret-scan runs. The branch's suite is the suite that shipped with it; if a
+`ci-gate`, secret-scan and the four CodeQL analysis jobs (`Analyze (actions)`,
+`Analyze (javascript-typescript)`, `Analyze (python)`, `Analyze (rust)`); on a
+maintenance branch its CI, CodeQL and secret-scan runs. The branch's suite is the suite that shipped with it; if a
 pinned action or runner has retired so the suite cannot start, record the
 failing job and the equivalent local gate in the PR, and do not merge a real
 failure. Do not merge a partially green PR. Approve it as the maintainer, then

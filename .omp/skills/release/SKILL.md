@@ -14,8 +14,8 @@ records the checkpoints an agent must not skip, not a second runbook.
 - Do not commit or tag before the final review pause in `RELEASING.md` §7, and
   do not proceed without an explicit user OK.
 - Do not merge the release PR until every required check is green: `ci-gate`,
-  `CodeQL` and Secret scan on `main`; on a maintenance branch, its CI,
-  `CodeQL` and Secret-scan runs.
+  Secret scan and the four CodeQL analysis jobs on `main`; on a maintenance
+  branch, its CI, CodeQL and Secret-scan runs.
 - Do not force-move or delete a tag. The ruleset has no bypass; a bad tag means
   a new patch release, not a repaired history.
 - Do not publish figures, screenshots or verification results you did not

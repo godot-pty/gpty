@@ -44,7 +44,7 @@ socket must exist, be a socket, and be owned and mode-restricted by this user.
 
 `scripts/smoke_pane_api.py` runs the shipped extension inside a gpty pane and
 asserts the pane reports Tier 1 `working`, so this chain is observed live on
-both platforms (the `windows-smoke` CI job is the Windows leg).
+both platforms (the `windows` CI job is the Windows leg).
 
 ## Forwarded data
 
