@@ -320,8 +320,9 @@ jobs:
         # --renderer-smoke runs the project default first and then opengl3, so
         # lavapipe supplies Vulkan and llvmpipe the GL path. --headless would
         # select the dummy renderer and prove nothing.
-        run: xvfb-run -a -s "-screen 0 1280x800x24" env LIBGL_ALWAYS_SOFTWARE=1 \
-          python3 ./scripts/smoke_pane_api.py --renderer-smoke opengl3
+        run: |
+          xvfb-run -a -s "-screen 0 1280x800x24" env LIBGL_ALWAYS_SOFTWARE=1 \
+            python3 ./scripts/smoke_pane_api.py --renderer-smoke opengl3
 
   # ── Windows compile, tests and runtime smoke ──────────────────────────
   # One windows-2025 job: compile parity, the Windows-only unit tests, the
