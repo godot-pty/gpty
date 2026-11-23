@@ -172,11 +172,17 @@ def check() -> int:
                 f"godot/project.godot config/version is {project!r}, workspace is {uniform!r}"
             )
 
-        for field, value in zip(("version", "packages[0].version"), server_versions()):
-            if value != uniform:
-                offenders.append(
-                    f"server.json {field} is {value!r}, workspace is {uniform!r}"
-                )
+        server = server_versions()
+        if len(server) != 2:
+            offenders.append(
+                "server.json needs both the top-level version and packages[0].version"
+            )
+        else:
+            for field, value in zip(("version", "packages[0].version"), server):
+                if value != uniform:
+                    offenders.append(
+                        f"server.json {field} is {value!r}, workspace is {uniform!r}"
+                    )
 
         for relative in ("Cargo.lock", "fuzz/Cargo.lock"):
             path = ROOT / relative
