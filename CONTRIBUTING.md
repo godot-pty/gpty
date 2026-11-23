@@ -155,7 +155,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | cargo run --bin gpty -- 
 
 ### Test
 
-- **Automated**: `./scripts/ci-check` runs the full suite (Rust + GUT + audit). Pull requests run the path-aware CI: a code diff gets `rust-tests`, `gut-tests`, `windows`, `macos`, the audits and `fuzz-build`; a docs-only diff (including `*.md`, `docs/**`, the generated bundles and the docs scripts) gets the cheap `changes`, `lint-workflows`, `docs`, `commit-lint` and `ci-gate` jobs. CodeQL and Secret scan run on every PR. `main` requires `ci-gate`, `CodeQL` and Secret scan, and uses a merge queue, so an approved PR does not need an **Update branch** click. Release-branch pushes also run CI.
+- **Automated**: `./scripts/ci-check` runs the full suite (Rust + GUT + audit). Pull requests run the path-aware CI: a code diff gets `rust-tests`, `gut-tests`, `windows`, `macos`, the audits and `fuzz-build`; a docs-only diff (including `*.md`, `docs/**`, the generated bundles and the docs scripts) gets the cheap `changes`, `lint-workflows`, `docs`, `commit-lint` and `ci-gate` jobs. CodeQL and Secret scan run on every PR. `main` requires `ci-gate`, Secret scan and the four CodeQL analysis jobs, and uses a merge queue, so an approved PR does not need an **Update branch** click. Release-branch pushes also run CI.
 - **Manual pre-release**: [docs/content/docs/overview/testing.md](docs/content/docs/overview/testing.md) - smoke tests for CLI bridge, daemon lifecycle, UI shortcuts, and error paths that require a running GUI.
 - Test format: `Given / When / Then` with expected output. See the manual checklist for examples.
 
