@@ -144,7 +144,7 @@ docs_class_path() {
 # exercises it, so a break is caught in seconds instead of skipping the suite.
 tooling_class_path() {
     case "$1" in
-        scripts/measure-cost | scripts/render-cost-chart | scripts/backfill-cost-history | scripts/fix-forensics | scripts/install-cli | scripts/check-secrets | scripts/bot-token | scripts/bot-push | scripts/bot-pr | scripts/git-askpass-token | scripts/check-github-settings) return 0 ;;
+        scripts/measure-cost | scripts/render-cost-chart | scripts/backfill-cost-history | scripts/fix-forensics | scripts/install-cli | scripts/check-secrets | scripts/bot-token | scripts/bot-push | scripts/bot-pr | scripts/git-askpass-token | scripts/check-github-settings | scripts/install-rust | scripts/install-godot | scripts/release-prepare | scripts/branch-prune) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -295,7 +295,7 @@ run_cost_stamp() {
 run_tooling_scripts() {
     header "tooling scripts"
     local TOOL_OUT f
-    for f in scripts/measure-cost scripts/backfill-cost-history scripts/install-cli scripts/check-secrets scripts/bot-token scripts/bot-push scripts/bot-pr scripts/git-askpass-token; do
+    for f in scripts/measure-cost scripts/backfill-cost-history scripts/install-cli scripts/check-secrets scripts/bot-token scripts/bot-push scripts/bot-pr scripts/git-askpass-token scripts/install-rust scripts/branch-prune; do
         if TOOL_OUT="$(bash -n "$f" 2>&1)"; then
             pass "bash -n $f"
         else
@@ -304,7 +304,7 @@ run_tooling_scripts() {
             check_failed
         fi
     done
-    for f in scripts/render-cost-chart scripts/fix-forensics scripts/check-github-settings; do
+    for f in scripts/render-cost-chart scripts/fix-forensics scripts/check-github-settings scripts/install-godot scripts/release-prepare; do
         if TOOL_OUT="$(python3 -c 'import py_compile, sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)' \
             "$f" "${TMPDIR:-/tmp}/$(basename "$f").pyc" 2>&1)"; then
             pass "compile $f"
@@ -651,35 +651,12 @@ fi
 # Release convention: every workspace crate ships the same version
 # (release skill step 5). One stale manifest = forgotten bump.
 header "crate versions"
-if python3 -c 'import tomllib' 2>/dev/null; then
-    if python3 - <<'EOF' 2>&1
-import glob, re, tomllib
-versions = {}
-for path in sorted(glob.glob("crates/*/Cargo.toml")):
-    with open(path, "rb") as fh:
-        data = tomllib.load(fh)
-    versions[data["package"]["name"]] = data["package"]["version"]
-distinct = sorted(set(versions.values()))
-print("  " + ", ".join(f"{name}={ver}" for name, ver in versions.items()))
-if len(distinct) == 1:
-    with open("godot/project.godot", encoding="utf-8") as fh:
-        match = re.search(r'^config/version="([^"]+)"', fh.read(), re.M)
-    if not match:
-        print("godot/project.godot has no config/version")
-        raise SystemExit(1)
-    if match.group(1) != distinct[0]:
-        print(f"godot/project.godot is {match.group(1)}, crates are {distinct[0]}")
-        raise SystemExit(1)
-raise SystemExit(0 if len(distinct) == 1 else 1)
-EOF
-    then
-        pass "crate versions uniform"
-    else
-        fail "crate versions differ (or godot/project.godot is stale) — bump every crates/*/Cargo.toml and godot/project.godot together"
-        check_failed
-    fi
+if CRATE_OUT="$(./scripts/release-prepare --check 2>&1)"; then
+    pass "crate versions uniform"
 else
-    skip_gate "crate version check needs python3 >= 3.11 (tomllib) — skipped"
+    fail "crate versions differ — './scripts/release-prepare --check' names every offender"
+    detail "$CRATE_OUT"
+    check_failed
 fi
 
 # ── Step 4: cargo test ─────────────────────────────────────────────────

@@ -44,9 +44,11 @@
 #     launch for the same reason in the other direction: it must stay within
 #     noise of one pane.
 #
-# `--stamp` is the half CI can run (no display, no GPU): the table names the
-# build it was measured on, a release bumps the crate version, and a table
-# still naming the previous release fails. It is the reminder, not the
+# `--stamp` is the half CI can run (no display, no GPU): the table must name
+# the newest build in the cost ledger, so the published figures stay tied to a
+# recorded measurement. It deliberately does not require the current workspace
+# version: a release without GPU access reuses the last measured build, and
+# `--record` is what moves the stamp forward. It is the reminder, not the
 # measurement.
 #
 # `--check` needs a real GPU session, because the numbers do: under
@@ -138,10 +140,16 @@ if [[ "$MODE" == stamp ]]; then
     stamp="$(readme_stamp)"
     [[ -n "$version" ]] || die "could not read crates/gpty-cli/Cargo.toml's version"
     [[ -n "$stamp" ]] || die "README.md has no 'measured on the shipped vX.Y.Z Linux build' stamp - the Trade-offs table lost its provenance"
-    if [[ "$stamp" != "$version" ]]; then
-        die "README.md's cost table is stamped v$stamp but the workspace is at $version: re-measure with './scripts/measure-cost --check' and move the table and every figure the paragraph repeats to this build"
+    newest="$(sed -n 's/.*"version": "\([0-9][0-9.]*\)".*/\1/p' docs/data/cost-history.json | sort -V | tail -1)"
+    [[ -n "$newest" ]] || die "docs/data/cost-history.json has no release versions - the cost ledger lost its records"
+    if [[ "$stamp" != "$newest" ]]; then
+        die "README.md's cost table is stamped v$stamp but the newest ledger build is v$newest: run './scripts/measure-cost --record' (or move the stamp to the newest recorded build) and update every figure the paragraph repeats"
     fi
-    echo "measure-cost: README cost table stamped v$stamp, workspace $version - OK"
+    if [[ "$stamp" == "$version" ]]; then
+        echo "measure-cost: README cost table stamped v$stamp (current workspace build) - OK"
+    else
+        echo "measure-cost: README cost table stamped v$stamp (last measured build), workspace is $version - OK"
+    fi
     exit 0
 fi
 

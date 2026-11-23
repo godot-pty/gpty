@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""Install the pinned Godot editor or export templates.
+
+Usage:
+    scripts/install-godot --print-version
+    scripts/install-godot editor --dest DIR
+    scripts/install-godot templates
+
+The version and every SHA512 live in scripts/godot-version.json, so a workflow
+never repeats a URL, a hash or an executable name. The editor is extracted into
+--dest; in GitHub Actions the directory is appended to GITHUB_PATH and the
+executable to GODOT. Export templates go to ~/.local/share/godot's 4.x layout.
+
+The archive tag is mutable; the SHA512 is the pin.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import platform
+import shutil
+import sys
+import tempfile
+import urllib.request
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+CONFIG = ROOT / "scripts" / "godot-version.json"
+USER_AGENT = "gpty-godot-install (github.com/godot-pty/gpty)"
+
+
+def fail(message: str, code: int = 1) -> "NoReturn":
+    print(f"install-godot: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def config() -> dict:
+    try:
+        return json.loads(CONFIG.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        fail(f"{CONFIG} is missing")
+    except json.JSONDecodeError as exc:
+        fail(f"{CONFIG} is not valid JSON: {exc}")
+
+
+def platform_key() -> str:
+    system = platform.system()
+    machine = platform.machine().lower()
+    if system == "Linux" and machine in ("x86_64", "amd64"):
+        return "linux-x86_64"
+    if system == "Windows" and machine in ("amd64", "x86_64"):
+        return "windows-x86_64"
+    fail(f"unsupported editor platform {system}/{machine}", 2)
+
+
+def append_env(name: str, value: str) -> None:
+    path = os.environ.get("GITHUB_ENV")
+    if path:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{name}={value}\n")
+
+
+def append_path(value: str) -> None:
+    path = os.environ.get("GITHUB_PATH")
+    if path:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{value}\n")
+
+
+def download(url: str, expected: str, destination: Path) -> None:
+    digest = hashlib.sha512()
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=120) as response, destination.open("wb") as fh:
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            fh.write(chunk)
+    actual = digest.hexdigest()
+    if actual != expected:
+        destination.unlink(missing_ok=True)
+        fail(f"{url}: sha512 mismatch (expected {expected}, got {actual})")
+
+
+def install_editor(dest_arg: str) -> Path:
+    data = config()
+    entry = data["archives"][platform_key()]
+    destination = Path(dest_arg).expanduser().resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    executable = destination / entry["executable"]
+    if executable.is_file():
+        print(executable)
+        append_path(str(destination))
+        append_env("GODOT", str(executable))
+        return executable
+
+    with tempfile.TemporaryDirectory(prefix="gpty-godot-") as tmp:
+        archive = Path(tmp) / "godot.zip"
+        download(entry["url"], entry["sha512"], archive)
+        with zipfile.ZipFile(archive) as zip_file:
+            zip_file.extractall(destination)
+
+    if not executable.is_file():
+        fail(f"{entry['url']} did not contain {entry['executable']}")
+    if os.name != "nt":
+        executable.chmod(0o755)
+    print(executable)
+    append_path(str(destination))
+    append_env("GODOT", str(executable))
+    return executable
+
+
+def install_templates() -> Path:
+    data = config()
+    entry = data["archives"]["export-templates"]
+    version = data["version"]
+    release = data["release"]
+    destination = (
+        Path.home()
+        / ".local"
+        / "share"
+        / "godot"
+        / "export_templates"
+        / f"{version}.{release}"
+    )
+    if destination.is_dir() and any(destination.iterdir()):
+        print(destination)
+        return destination
+
+    with tempfile.TemporaryDirectory(prefix="gpty-godot-templates-") as tmp:
+        archive = Path(tmp) / "templates.tpz"
+        download(entry["url"], entry["sha512"], archive)
+        extracted = Path(tmp) / "extracted"
+        with zipfile.ZipFile(archive) as zip_file:
+            zip_file.extractall(extracted)
+        source = extracted / "templates"
+        if not source.is_dir():
+            source = extracted
+        destination.mkdir(parents=True, exist_ok=True)
+        for item in source.iterdir():
+            target = destination / item.name
+            if item.is_dir():
+                shutil.copytree(item, target, dirs_exist_ok=True)
+            else:
+                shutil.copy2(item, target)
+
+    # The release export needs the macOS app template unpacked beside
+    # macos.zip; the old workflow did this inline.
+    macos_zip = destination / "macos.zip"
+    if macos_zip.is_file():
+        with zipfile.ZipFile(macos_zip) as zip_file:
+            for member in zip_file.namelist():
+                if member.startswith("macos_template.app/Contents/MacOS/"):
+                    zip_file.extract(member, destination)
+
+    print(destination)
+    return destination
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("mode", nargs="?", choices=("editor", "templates"))
+    parser.add_argument("--dest", help="editor extraction directory")
+    parser.add_argument("--print-version", action="store_true")
+    args = parser.parse_args()
+
+    if args.print_version:
+        print(config()["version"])
+        return 0
+
+    if args.mode == "editor":
+        if not args.dest:
+            parser.error("editor needs --dest DIR")
+        install_editor(args.dest)
+    elif args.mode == "templates":
+        install_templates()
+    else:
+        parser.error("choose 'editor' or 'templates' (or use --print-version)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

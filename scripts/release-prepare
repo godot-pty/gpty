@@ -1,0 +1,406 @@
+#!/usr/bin/env python3
+"""Validate and bump the release version.
+
+Usage:
+    scripts/release-prepare --check
+    scripts/release-prepare --print-version
+    scripts/release-prepare --dry-run X.Y.Z
+    scripts/release-prepare X.Y.Z
+
+The mechanical bump covers every workspace crate, both lockfiles, server.json
+and godot/project.godot. Changelog prose, the blog, screenshots and the cost
+table stay authored work.
+
+`--check` parses the manifests and both lockfiles; `--print-version` prints the
+uniform version for release-gate; a real bump refuses a dirty target or a
+branch that is not main, release/vX.Y or release-prep/*.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+WORKSPACE_CRATES = {
+    "gpty-core",
+    "gpty-ipc",
+    "gpty-plugin",
+    "gpty",
+    "gpty-ai",
+    "gpty-gdext",
+    "gpty-media",
+}
+TARGETS = [
+    "crates/*/Cargo.toml",
+    "server.json",
+    "godot/project.godot",
+    "Cargo.lock",
+    "fuzz/Cargo.lock",
+]
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+
+
+def fail(message: str, code: int = 1) -> "NoReturn":
+    print(f"release-prepare: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=check,
+    )
+
+
+def manifests() -> list[Path]:
+    return sorted((ROOT / "crates").glob("*/Cargo.toml"))
+
+
+def load_toml(path: Path) -> dict:
+    import tomllib
+
+    with path.open("rb") as fh:
+        return tomllib.load(fh)
+
+
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def package_versions() -> dict[str, str]:
+    versions: dict[str, str] = {}
+    for path in manifests():
+        data = load_toml(path)
+        versions[data["package"]["name"]] = data["package"]["version"]
+    return versions
+
+
+def uniform_version() -> str | None:
+    versions = package_versions()
+    distinct = sorted(set(versions.values()))
+    return distinct[0] if len(distinct) == 1 else None
+
+
+def dependency_offenders(uniform: str) -> list[str]:
+    offenders: list[str] = []
+    dependency_keys = {"dependencies", "dev-dependencies", "build-dependencies"}
+
+    def walk(value, path: Path) -> None:
+        if not isinstance(value, dict):
+            return
+        for key, child in value.items():
+            if key in dependency_keys and isinstance(child, dict):
+                for name, spec in child.items():
+                    if not name.startswith("gpty-") or not isinstance(spec, dict):
+                        continue
+                    if "path" not in spec or "version" not in spec:
+                        continue
+                    version = spec.get("version")
+                    if version != uniform:
+                        offenders.append(
+                            f"{path.relative_to(ROOT)}: {name} pin is {version!r}, "
+                            f"workspace is {uniform!r}"
+                        )
+            elif isinstance(child, dict):
+                walk(child, path)
+
+    for path in manifests():
+        walk(load_toml(path), path)
+    return offenders
+
+
+def project_version() -> str | None:
+    match = re.search(
+        r'^config/version="([^"]+)"', read_text(ROOT / "godot" / "project.godot"), re.M
+    )
+    return match.group(1) if match else None
+
+
+def server_versions() -> list[str]:
+    data = json.loads(read_text(ROOT / "server.json"))
+    versions = [str(data.get("version"))]
+    packages = data.get("packages") or []
+    if packages and isinstance(packages[0], dict):
+        versions.append(str(packages[0].get("version")))
+    return versions
+
+
+def lock_versions(path: Path) -> dict[str, str]:
+    data = load_toml(path)
+    found: dict[str, str] = {}
+    for package in data.get("package", []):
+        name = package.get("name")
+        if name in WORKSPACE_CRATES:
+            found[name] = package.get("version")
+    return found
+
+
+def lock_signature(path: Path) -> dict[str, tuple[str | None, str | None]]:
+    data = load_toml(path)
+    signature: dict[str, tuple[str | None, str | None]] = {}
+    for package in data.get("package", []):
+        signature[package["name"]] = (
+            package.get("version"),
+            package.get("checksum"),
+        )
+    return signature
+
+
+def check() -> int:
+    offenders: list[str] = []
+    versions = package_versions()
+    distinct = sorted(set(versions.values()))
+    print("  " + ", ".join(f"{name}={version}" for name, version in versions.items()))
+    if len(distinct) != 1:
+        offenders.append(f"crate versions differ: {versions}")
+        uniform = None
+    else:
+        uniform = distinct[0]
+        offenders.extend(dependency_offenders(uniform))
+
+        project = project_version()
+        if project != uniform:
+            offenders.append(
+                f"godot/project.godot config/version is {project!r}, workspace is {uniform!r}"
+            )
+
+        for field, value in zip(("version", "packages[0].version"), server_versions()):
+            if value != uniform:
+                offenders.append(
+                    f"server.json {field} is {value!r}, workspace is {uniform!r}"
+                )
+
+        for relative in ("Cargo.lock", "fuzz/Cargo.lock"):
+            path = ROOT / relative
+            found = lock_versions(path)
+            # The fuzz workspace does not depend on the CLI crate.
+            required = WORKSPACE_CRATES if relative == "Cargo.lock" else WORKSPACE_CRATES - {"gpty"}
+            missing = sorted(required - set(found))
+            if missing:
+                offenders.append(f"{relative}: missing workspace package(s) {missing}")
+            for name, version in sorted(found.items()):
+                if version != uniform:
+                    offenders.append(
+                        f"{relative}: {name} is {version!r}, workspace is {uniform!r}"
+                    )
+
+    for offender in offenders:
+        print(f"release-prepare: {offender}", file=sys.stderr)
+    return 1 if offenders else 0
+
+
+def print_version() -> int:
+    version = uniform_version()
+    if version is None:
+        print(
+            f"release-prepare: crate versions differ: {package_versions()}",
+            file=sys.stderr,
+        )
+        return 1
+    print(version)
+    return 0
+
+
+def require_branch() -> None:
+    result = git("rev-parse", "--abbrev-ref", "HEAD")
+    branch = result.stdout.strip()
+    if branch == "main" or re.fullmatch(r"release/v\d+\.\d+", branch):
+        return
+    if branch.startswith("release-prep/"):
+        return
+    fail(f"refusing to bump on branch {branch!r}; use main, release/vX.Y or release-prep/*")
+
+
+def require_clean_targets() -> None:
+    result = git("status", "--porcelain", "--", *TARGETS)
+    if result.stdout.strip():
+        fail("release bump targets have uncommitted changes:\n" + result.stdout)
+
+
+def bump_manifests(version: str) -> list[Path]:
+    changed: list[Path] = []
+    for path in manifests():
+        text = read_text(path)
+        new_text, count = re.subn(
+            r'(?m)^version = "[^"]*"$', f'version = "{version}"', text, count=1
+        )
+        if count != 1:
+            fail(f"{path.relative_to(ROOT)} has no package version line")
+        new_text = re.sub(
+            r'(gpty-(?:core|ipc|plugin) = \{[^}]*?path = "\.\./gpty-[^"]*"[^}]*?version = ")[^"]*(")',
+            rf"\g<1>{version}\g<2>",
+            new_text,
+        )
+        if new_text != text:
+            path.write_text(new_text, encoding="utf-8")
+            changed.append(path)
+    return changed
+
+
+def bump_internal_tables(version: str) -> list[Path]:
+    """Bump [dependencies.gpty-*] table form, if a manifest ever uses it."""
+    changed: list[Path] = []
+    for path in manifests():
+        lines = read_text(path).splitlines(keepends=True)
+        section = None
+        touched = False
+        for index, line in enumerate(lines):
+            header = re.match(r"^\[([^\]]+)\]\s*$", line)
+            if header:
+                section = header.group(1)
+                continue
+            if section and re.fullmatch(
+                r"(target\.[^.]+\.)?(dev-|build-)?dependencies\.gpty-(core|ipc|plugin)",
+                section,
+            ):
+                new_line, count = re.subn(
+                    r'(?m)^version = "[^"]*"$', f'version = "{version}"', line
+                )
+                if count:
+                    lines[index] = new_line
+                    touched = True
+        if touched:
+            path.write_text("".join(lines), encoding="utf-8")
+            changed.append(path)
+    return changed
+
+
+def bump_json(version: str) -> None:
+    path = ROOT / "server.json"
+    text = read_text(path)
+    new_text, count = re.subn(
+        r'("version"\s*:\s*")[^"]*(")', rf"\g<1>{version}\g<2>", text
+    )
+    if count != 2:
+        fail(f"server.json has {count} version fields, expected 2")
+    path.write_text(new_text, encoding="utf-8")
+
+    project = ROOT / "godot" / "project.godot"
+    text = read_text(project)
+    new_text, count = re.subn(
+        r'(?m)^config/version="[^"]*"$', f'config/version="{version}"', text
+    )
+    if count != 1:
+        fail(f"godot/project.godot has {count} config/version lines, expected 1")
+    project.write_text(new_text, encoding="utf-8")
+
+
+def refresh_lockfiles() -> None:
+    for args in (
+        ["cargo", "metadata", "--format-version", "1"],
+        ["cargo", "metadata", "--format-version", "1", "--manifest-path", "fuzz/Cargo.toml"],
+    ):
+        result = subprocess.run(
+            args, cwd=ROOT, capture_output=True, text=True, check=False
+        )
+        if result.returncode != 0:
+            fail(f"{' '.join(args)} failed:\n{result.stderr.strip()}")
+
+
+def guard_lockfile_diff(version: str) -> None:
+    for relative in ("Cargo.lock", "fuzz/Cargo.lock"):
+        path = ROOT / relative
+        original = git("show", f"HEAD:{relative}", check=False)
+        if original.returncode != 0:
+            continue
+        import tomllib
+
+        before = tomllib.loads(original.stdout)
+        after = load_toml(path)
+        before_sig = {
+            p["name"]: (p.get("version"), p.get("checksum"))
+            for p in before.get("package", [])
+        }
+        after_sig = {
+            p["name"]: (p.get("version"), p.get("checksum"))
+            for p in after.get("package", [])
+        }
+        for name, (old_version, old_checksum) in before_sig.items():
+            if name not in after_sig:
+                fail(f"{relative}: {name} disappeared during the bump")
+            new_version, new_checksum = after_sig[name]
+            if name in WORKSPACE_CRATES:
+                if new_version != version:
+                    fail(
+                        f"{relative}: {name} is {new_version!r}, expected {version!r}"
+                    )
+                continue
+            if (old_version, old_checksum) != (new_version, new_checksum):
+                fail(
+                    f"{relative}: unrelated dependency {name} changed "
+                    f"({old_version} -> {new_version}); nothing was committed"
+                )
+        extra = set(after_sig) - set(before_sig)
+        if extra:
+            fail(f"{relative}: new package(s) appeared during the bump: {sorted(extra)}")
+
+
+def bump(raw_version: str, dry_run: bool) -> int:
+    version = raw_version[1:] if raw_version.startswith("v") else raw_version
+    if not VERSION_RE.fullmatch(version):
+        fail(f"{raw_version!r} is not X.Y.Z", 2)
+
+    current = uniform_version()
+    if current is None:
+        fail(f"crate versions already differ: {package_versions()}")
+
+    planned = [
+        *(str(p.relative_to(ROOT)) for p in manifests()),
+        "server.json",
+        "godot/project.godot",
+        "Cargo.lock",
+        "fuzz/Cargo.lock",
+    ]
+    if dry_run:
+        print(f"release-prepare: {current} -> {version}")
+        for path in planned:
+            print(f"  would edit {path}")
+        return 0
+
+    require_branch()
+    require_clean_targets()
+
+    changed = bump_manifests(version)
+    changed.extend(bump_internal_tables(version))
+    bump_json(version)
+    refresh_lockfiles()
+    guard_lockfile_diff(version)
+
+    result = check()
+    if result != 0:
+        return result
+    stat = git("diff", "--stat", "--", *TARGETS)
+    print(stat.stdout, end="")
+    print(f"release-prepare: bumped {current} -> {version}")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("version", nargs="?", help="X.Y.Z (a leading v is accepted)")
+    parser.add_argument("--check", action="store_true", help="validate and exit")
+    parser.add_argument("--print-version", action="store_true", help="print the uniform version")
+    parser.add_argument("--dry-run", metavar="X.Y.Z", help="show the planned edits")
+    args = parser.parse_args()
+
+    if args.check:
+        return check()
+    if args.print_version:
+        return print_version()
+    if args.dry_run:
+        return bump(args.dry_run, dry_run=True)
+    if not args.version:
+        parser.error("give X.Y.Z, or one of --check/--print-version/--dry-run")
+    return bump(args.version, dry_run=False)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

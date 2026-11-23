@@ -2,22 +2,21 @@ name: MCP Registry
 
 # Publishes server.json to the official MCP registry.
 #
-# Dispatch-only, because the registry refuses a package that is not on
-# crates.io yet and publishing the crates is a maintainer step (their token
-# must never live in CI while any repository writer can push a v* tag - see the
-# v0.7.1 tag-ruleset row). The release's own completion is therefore too early:
-# a `workflow_run` trigger fired while the crates were still unpublished and
-# failed its crates.io pre-check every release (v0.8.0, v0.8.3). The order is
-# release -> publish the crates by hand -> dispatch this workflow.
+# Chained from release.yml after `publish-crates` (workflow_call); manual
+# dispatch remains for a descriptor repair, a first publication, or a release
+# created outside the Release workflow. The registry refuses a crate version
+# that is not on crates.io, so the pre-check retries while the index catches up
+# instead of racing the publish. `workflow_run` is not used: it cannot pass the
+# tag ref and scripts/lint-workflows rejects it.
 #
 # Separate from release.yml on purpose. The release artifacts are the primary
 # artifact and must not be blocked by a registry outage, but a failed publish
 # has to stay visible: a green release with no registry entry is exactly the
 # silent failure this job exists to prevent.
 #
-# The descriptor is read through the contents API at the dispatched ref, and
-# the validator always comes from `main`: this job holds `id-token: write`, so
-# a tree fetched by an event-derived ref must not be executed (code scanning
+# The descriptor is read through the contents API at the caller's ref, and the
+# validator always comes from `main`: this job holds `id-token: write`, so a
+# tree fetched by an event-derived ref must not be executed (code scanning
 # alert 13). A consequence is that publishing an old tag uses the current
 # validator - which is the point: the checks are the ones this repository
 # enforces now, not the ones the tag shipped.
@@ -25,6 +24,7 @@ name: MCP Registry
 # No secret is involved. Authentication is this workflow's OIDC identity, which
 # the registry maps to the `io.github.godot-pty` namespace.
 on:
+  workflow_call:
   # First publication, a descriptor fix for a version whose release already
   # ran, or a release created outside the Release workflow. Publishes whatever
   # server.json says on the selected ref, after the crates are live.
@@ -91,13 +91,21 @@ jobs:
       # on the tree apply to the descriptor this run would publish.
       - name: Check the descriptor
         run: |
+          set -euo pipefail
           python3 scripts/mcp-registry check "$DESCRIPTOR_ROOT"
           VERSION=$(jq -r .version "$DESCRIPTOR_ROOT/server.json")
           # The registry verifies package existence at publish; ask crates.io
           # first so a missing publish reads as one, not as a registry error.
-          code=$(curl -sS -o /dev/null -w '%{http_code}' \
-            -H "User-Agent: gpty-release-check (github.com/godot-pty/gpty)" \
-            "https://crates.io/api/v1/crates/gpty/${VERSION}")
+          # Chained runs arrive seconds after `cargo publish`, so poll the
+          # index instead of racing it.
+          code=""
+          for _ in $(seq 1 60); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "User-Agent: gpty-release-check (github.com/godot-pty/gpty)" \
+              "https://crates.io/api/v1/crates/gpty/${VERSION}")
+            [ "${code}" = "200" ] && break
+            sleep 5
+          done
           if [ "${code}" != "200" ]; then
             echo "gpty ${VERSION} is not on crates.io (HTTP ${code}); publish the crates first" >&2
             exit 1

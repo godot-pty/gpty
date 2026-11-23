@@ -1,32 +1,17 @@
 name: CI
 
 on:
-  # Pull requests are the code gate: every PR to main or a release branch runs
-  # the full suite (no paths filter - a required check that never starts would
-  # leave the PR waiting forever). A push to main does not re-run CI: the repo
-  # merges one PR at a time, the ruleset requires up-to-date checks, and the
-  # merge tree is the PR head the suite already tested. Release-branch pushes
-  # still run it. A docs-only push runs none of these jobs; the Docs workflow
-  # is its gate - no Rust or GDScript test reads `docs/`, and the bundle is
-  # generated data the Docs job re-checks. Anything else (workflows, any other
-  # script, crates, godot/, the smoke) still runs the full suite on the PR.
+  # A workflow-level paths filter leaves a required check pending forever, so
+  # the `changes` job classifies the diff inside the workflow and every job
+  # below either runs or is reported as skipped (skipped satisfies a required
+  # check). Pull requests and merge-queue groups are the code gate; a push to
+  # main runs no CI because the merge group was just tested. Release-branch
+  # pushes still run it.
   push:
     branches: ["release/v*"]
-    paths-ignore:
-      - "docs/**"
-      - "assets/site-icons/**"
-      - "**/*.md"
-      - "godot/knowledge.json"
-      - "godot/docs.json"
-      - "LICENSE"
-      - "scripts/docs-check"
-      - "scripts/check-capabilities"
-      - "scripts/build-wiki"
-      - "scripts/build-docs"
   pull_request:
     branches: [main, "release/v*"]
-    # No paths filter: a required check that never starts blocks the merge,
-    # so every PR to a protected branch runs the full set.
+  merge_group:
 
 # Least privilege: every job here only reads the repository. Without this
 # block each job inherits the repository default token scope, which is handed
@@ -45,6 +30,51 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # ── Changed-path classifier ───────────────────────────────────────────
+  # Docs-only diffs skip the Rust/Godot/Windows jobs. A workflow-level path
+  # filter cannot do this (the required context would never be reported); a
+  # skipped job reports success, so a full-suite job gated on `code` keeps
+  # the required check satisfied.
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify changed paths
+        id: filter
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD: ${{ github.event.merge_group.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE:-}" ] || [[ "$BASE" =~ ^0+$ ]]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "no base commit; running the full suite"
+            exit 0
+          fi
+          if ! git diff --name-only "$BASE" "$HEAD" > /tmp/changed; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "cannot diff $BASE..$HEAD; running the full suite"
+            exit 0
+          fi
+          code=false
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            case "$path" in
+              docs/*|assets/site-icons/*|*.md|godot/knowledge.json|godot/docs.json|LICENSE|LICENSE-EXCEPTIONS.md|scripts/docs-check|scripts/check-capabilities|scripts/build-wiki|scripts/build-docs) ;;
+              *) code=true ;;
+            esac
+          done < /tmp/changed
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          printf 'changed files: %s; code=%s\n' "$(wc -l < /tmp/changed)" "$code"
+
   # ── Workflow linting (YAML syntax) ────────────────────────────────────
   lint-workflows:
     runs-on: ubuntu-24.04
@@ -73,6 +103,33 @@ jobs:
           python3 scripts/docs-check
           ./scripts/check-capabilities
           python3 scripts/build-wiki --check
+          python3 scripts/build-docs --check
+
+      # The cheap half of scripts/ci-check that CI did not mirror. These read
+      # source or generated data and finish in seconds; they belong in the
+      # gate, not only in a contributor's local run.
+      - name: Check release versions
+        run: ./scripts/release-prepare --check
+
+      - name: Check the MCP descriptor
+        run: python3 scripts/mcp-registry check
+
+      - name: Check the GDExtension surface
+        run: ./scripts/check-ffi-surface
+
+      - name: Check log hygiene
+        run: ./scripts/check-log-hygiene
+
+      - name: Check theme tokens
+        run: ./scripts/check-theme-tokens
+
+      - name: Check test guards
+        run: ./scripts/check-test-guards
+
+      - name: Check the cost stamp and chart
+        run: |
+          ./scripts/measure-cost --stamp
+          ./scripts/render-cost-chart --check --require-current
 
   # ── Commit policy (DCO + Conventional Commits) ───────────────────────
   commit-lint:
@@ -110,6 +167,8 @@ jobs:
 
   # ── Rust tests (core + gdext + cli) ──────────────────────────────────
   rust-tests:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -119,9 +178,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: "1.96.0"
+        run: ./scripts/install-rust --target x86_64-unknown-freebsd
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -171,12 +228,12 @@ jobs:
       # illumos and NetBSD cannot be checked the same way (their bundled SQLite
       # does not build there); those two arms are probe-verified in the ROADMAP.
       - name: Cross-check the BSD peer-credential arm
-        run: |
-          rustup target add x86_64-unknown-freebsd
-          cargo check --locked -p gpty-ipc --target x86_64-unknown-freebsd
+        run: cargo check --locked -p gpty-ipc --target x86_64-unknown-freebsd
 
   # ── OMP extension tests (Node, no omp install) ────────────────────────
   omp-events-tests:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -189,25 +246,27 @@ jobs:
         run: node --test
         working-directory: extensions/gpty-omp-events
 
-  # ── Rust Windows compile check (release parity) ───────────────────────
-  # The release workflow builds gpty-gdext on windows-latest; without this
-  # job, Windows-only compile errors only surface at tag time.
-  rust-windows:
-    runs-on: windows-2025
-    # Same cap as windows-smoke: it runs the same `Build media dependencies`,
-    # so a cold vcpkg rebuild has to fit here too, and a stuck rustc must not
-    # hold the runner.
-    timeout-minutes: 45
+  # ── GDScript tests (GUT headless) ────────────────────────────────────
+  gut-tests:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    # The same guard as the Windows jobs: this one boots Godot and the GUI, so
+    # a hang must fail in minutes rather than at GitHub's six-hour cap.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      - name: Install Godot
+        # The version and SHA512 live in scripts/godot-version.json. The step
+        # adds the directory to PATH and sets GODOT for the backend steps.
+        run: python3 scripts/install-godot editor --dest "$HOME/godot"
+
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: "1.96.0"
+        run: ./scripts/install-rust
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -215,9 +274,86 @@ jobs:
           path: |
             ~/.cargo/registry
             target
-          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-check-
+            ${{ runner.os }}-cargo-
+
+      - name: Cache FFmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # The built prefix, not the source or build trees: `media-deps` skips
+          # when its `.stamp` (version + components checksum + platform +
+          # assembler) matches and still writes the job env, so a restored
+          # prefix turns a ~105 s build into a 2 s check. A stale cache costs
+          # time - the stamp forces the rebuild - never correctness.
+          path: dist/ffmpeg/linux-x86_64
+          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-ffmpeg-
+
+      - name: Build media dependencies
+        run: ./scripts/media-deps
+
+      - name: Build GDExtension
+        run: cargo build --locked -p gpty-gdext
+
+      - name: Install GDExtension library
+        run: cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
+
+      - name: Import project
+        run: godot --headless --path godot --import
+
+      - name: Run GUT tests
+        # gut-check owns the command and validates the run: GUT exits 0 after
+        # a parse error aborts it with most of the suite unexecuted.
+        run: ./scripts/gut-check
+
+      - name: Live pane-API smoke
+        # One harness for every platform (Unix socket here, named pipe in the
+        # windows job); it builds the CLI and the extension itself.
+        run: python3 ./scripts/smoke_pane_api.py
+
+      - name: Install Xvfb and a software renderer
+        run: sudo apt-get update -y && sudo apt-get install -y xvfb xauth libgl1-mesa-dri mesa-utils mesa-vulkan-drivers
+
+      - name: Renderer smoke (real display)
+        # --renderer-smoke runs the project default first and then opengl3, so
+        # lavapipe supplies Vulkan and llvmpipe the GL path. --headless would
+        # select the dummy renderer and prove nothing.
+        run: xvfb-run -a -s "-screen 0 1280x800x24" env LIBGL_ALWAYS_SOFTWARE=1 \
+          python3 ./scripts/smoke_pane_api.py --renderer-smoke opengl3
+
+  # ── Windows compile, tests and runtime smoke ──────────────────────────
+  # One windows-2025 job: compile parity, the Windows-only unit tests, the
+  # headless pane-API smoke, the renderer fallback and GUT. The old split ran
+  # `rust-windows` and `windows-smoke` side by side, each installing a
+  # toolchain, restoring vcpkg and running `media-deps` for the same tree.
+  windows:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: windows-2025
+    # The old smoke cap was 45 with a 26.5-min cold vcpkg rebuild recorded;
+    # the merged job adds the compile and test steps on top.
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: ./scripts/install-rust
+
+      - name: Cache cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Cache vcpkg FFmpeg
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -277,186 +413,30 @@ jobs:
           RUSTFLAGS: -Dwarnings
         run: cargo test --locked -p gpty-core --test windows_hardening -- --nocapture
 
-  # ── GDScript tests (GUT headless) ────────────────────────────────────
-  gut-tests:
-    runs-on: ubuntu-24.04
-    # The same guard as the Windows jobs: this one boots Godot and the GUI, so
-    # a hang must fail in minutes rather than at GitHub's six-hour cap.
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Godot headless
-        run: |
-          sudo apt-get update -y && sudo apt-get install -y wget unzip
-          wget -q https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
-          # The release tag is mutable; the hash is the pin (from the release's
-          # SHA512-SUMS.txt, verified against the downloaded archive).
-          echo "9aa00f7a605200940bce3027a567b782f49bd8e940dd06ae9e987bd65aee1b1467edd56ed84fcdcbdd44354bf613bdbb4e5d2913e925850368e150c59ed54c65  Godot_v4.7.2-stable_linux.x86_64.zip" | sha512sum -c -
-          unzip Godot_v4.7.2-stable_linux.x86_64.zip
-          chmod +x Godot_v4.7.2-stable_linux.x86_64
-          sudo mv Godot_v4.7.2-stable_linux.x86_64 /usr/local/bin/godot
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: "1.96.0"
-
-      - name: Cache cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Cache FFmpeg
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          # The built prefix, not the source or build trees: `media-deps` skips
-          # when its `.stamp` (version + components checksum + platform +
-          # assembler) matches and still writes the job env, so a restored
-          # prefix turns a ~105 s build into a 2 s check. A stale cache costs
-          # time - the stamp forces the rebuild - never correctness.
-          path: dist/ffmpeg/linux-x86_64
-          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-ffmpeg-
-
-      - name: Build media dependencies
-        run: ./scripts/media-deps
-
-      - name: Build GDExtension
-        run: cargo build --locked -p gpty-gdext
-
-      - name: Install GDExtension library
-        run: cp target/debug/libgpty_gdext.so godot/bin/libgpty_gdext.linux.x86_64.so
-
-      - name: Import project
-        run: godot --headless --path godot --import
-
-      - name: Run GUT tests
-        # gut-check owns the command and validates the run: GUT exits 0 after
-        # a parse error aborts it with most of the suite unexecuted.
-        run: ./scripts/gut-check
-
-      - name: Live pane-API smoke
-        # One harness for every platform (Unix socket here, named pipe in the
-        # windows-smoke job); it builds the CLI and the extension itself.
-        run: python3 ./scripts/smoke_pane_api.py
-
-  # ── Windows runtime smoke (pane API over named pipes) ─────────────────
-  # rust-windows only compiles the Windows target — nothing ever ran Godot on
-  # Windows, so the named-pipe control and event listeners and the pane API
-  # were inferred from source. This job boots the GUI headless on
-  # windows-latest and drives the CLI against it: the same smoke harness as
-  # Linux, whose only platform difference is the transport.
-  windows-smoke:
-    runs-on: windows-2025
-    # A hung Godot or cargo would otherwise hold the runner to GitHub's
-    # six-hour cap (gut-check's notes record one such hang on Windows). Green
-    # is ~4.5 minutes here, but a cold vcpkg FFmpeg rebuild inside `Build
-    # media dependencies` took 26.5 minutes once, so the cap has to clear that
-    # plus the rest of the job under runner load.
-    timeout-minutes: 45
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: "1.96.0"
-
-      - name: Cache cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            target
-          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-build-
-
-      - name: Cache vcpkg FFmpeg
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            C:\vcpkg\installed
-            C:\vcpkg\packages
-            C:\vcpkg\downloads
-          key: vcpkg-ffmpeg-${{ runner.os }}-9.0.2
-          restore-keys: |
-            vcpkg-ffmpeg-${{ runner.os }}-
-
-      - name: Cache FFmpeg
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          # The repo prefix (DLLs + licenses + the `.stamp`), keyed like the
-          # Linux one. Without it a Windows run always reached
-          # `vcpkg install ffmpeg`, and when the runner image's vcpkg moved
-          # past the cached packages that call rebuilt FFmpeg from source:
-          # measured at 26.5 minutes on 2026-10-30, which a job cap turned
-          # into a cancelled run. With the prefix cached, the skip path
-          # writes the vcpkg environment (media-deps `write_env_vcpkg`) and
-          # vcpkg is never consulted on a warm run; when vcpkg's tree is
-          # missing the script reinstalls it, so the cache can only save time.
-          path: dist/ffmpeg/windows-x86_64
-          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-ffmpeg-
-
-      - name: Build media dependencies
+      - name: Install Godot
+        id: godot
         shell: bash
-        env:
-          VCPKG_ROOT: ${{ env.VCPKG_INSTALLATION_ROOT || 'C:/vcpkg' }}
-        run: ./scripts/media-deps
+        # The version and SHA512 live in scripts/godot-version.json; the script
+        # adds the directory to PATH and sets GODOT.
+        run: python scripts/install-godot editor --dest "$GITHUB_WORKSPACE/godot-editor"
 
       - name: Build CLI and extension
         shell: bash
         # The smoke builds both itself, but it reports a failure as a summary
-        # line. Two windows-smoke runs failed with `cargo build ... exited 101`
-        # and the only visible detail was build-script metadata, which named
-        # nothing: a cargo error belongs in a step of its own. The smoke's own
+        # line; a cargo error belongs in a step of its own. The smoke's own
         # build then finds the artifacts current and costs seconds.
         run: cargo build --locked -p gpty-gdext -p gpty
 
-      - name: Install Godot (Windows, headless)
-        id: godot
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri "https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_win64.exe.zip" -OutFile godot.zip
-          # The release tag is mutable; the hash is the pin (from the release's
-          # SHA512-SUMS.txt, verified against the downloaded archive).
-          $expected = '83decd58fdf67b9d657958a1ae6bf1929c20785315a81effe245874cdc57acb709bf868e00778a96984338c1b29dafdb453c6847747694621c6ecf5da2259993'
-          $actual = (Get-FileHash godot.zip -Algorithm SHA512).Hash.ToLower()
-          if ($actual -ne $expected) { throw "Godot archive checksum mismatch: $actual" }
-          Expand-Archive godot.zip -DestinationPath godot-editor
-          $exe = Get-ChildItem godot-editor -Filter 'Godot_v4.7.2-stable_win64.exe' | Select-Object -First 1
-          Rename-Item -Path $exe.FullName -NewName godot.exe
-          Add-Content -Path $env:GITHUB_PATH -Value $exe.DirectoryName
-
       - name: Live pane-API smoke (Windows)
         shell: pwsh
-        # GODOT is explicit: the step above adds the editor to PATH for later
-        # steps, and which() is not worth relying on for a download.
         run: |
           python --version
           python ./scripts/smoke_pane_api.py
-        env:
-          GODOT: ${{ github.workspace }}\godot-editor\godot.exe
 
       - name: Import project
         if: ${{ !cancelled() && steps.godot.outcome == 'success' }}
         shell: bash
-        # `godot` is on PATH from the download step; the smoke imported the
+        # `godot` is on PATH from the install step; the smoke imported the
         # project already, and GUT resolves `class_name` globals from that cache.
         # Runs whether or not the smoke passed: a failing smoke must not cost
         # the run its second, independent signal.
@@ -471,8 +451,6 @@ jobs:
         # owned by the script.
         shell: pwsh
         run: python ./scripts/smoke_pane_api.py --renderer-smoke d3d12 opengl3_angle
-        env:
-          GODOT: ${{ github.workspace }}\godot-editor\godot.exe
 
       - name: GUT tests (Windows)
         if: ${{ !cancelled() && steps.godot.outcome == 'success' }}
@@ -483,11 +461,52 @@ jobs:
         # — cmd.exe — since the suite reads `default_shell_command()`.
         shell: bash
         run: ./scripts/gut-check
+
+  # ── macOS compile parity ──────────────────────────────────────────────
+  macos:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: ./scripts/install-rust
+
+      - name: Cache cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Cache FFmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg/macos-arm64
+          key: ${{ runner.os }}-${{ runner.arch }}-ffmpeg-${{ hashFiles('scripts/media-deps', 'crates/gpty-media/components.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-ffmpeg-
+
+      - name: Build media dependencies
+        run: ./scripts/media-deps
+
+      - name: Check the macOS build
         env:
-          GODOT: ${{ github.workspace }}\godot-editor\godot.exe
+          RUSTFLAGS: -Dwarnings
+        run: cargo check --workspace --tests --locked
 
   # ── Rust formatting ───────────────────────────────────────────────────
   rust-fmt:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -497,16 +516,15 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: "1.96.0"
-          components: rustfmt
+        run: ./scripts/install-rust
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
   # ── Dependency audit ──────────────────────────────────────────────────
   cargo-audit:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -516,9 +534,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: "1.96.0"
+        run: ./scripts/install-rust
 
       # Audit the committed Cargo.lock. Never regenerate here:
       # generate-lockfile re-resolves to latest-compatible versions and
@@ -573,6 +589,8 @@ jobs:
   # so the policy cannot drift under a green build, and `[graph] all-features`
   # keeps the checked graph identical to the local gate's.
   cargo-deny:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -591,6 +609,8 @@ jobs:
   # from rotting — a target that stops compiling (an API moves, a helper is
   # made private again) fails on the change that did it instead of weeks later.
   fuzz-build:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -600,9 +620,7 @@ jobs:
           persist-credentials: false
 
       - name: Install nightly toolchain
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: nightly-2026-11-01
+        run: ./scripts/install-rust --manifest-path fuzz
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -637,10 +655,32 @@ jobs:
         run: command -v cargo-fuzz >/dev/null || cargo install cargo-fuzz --locked --version 0.13.2
 
       - name: Build the fuzz targets
-        env:
-          # rust-toolchain.toml pins the workspace to stable; cargo fuzz needs
-          # the nightly this job installs, so override it for the step.
-          RUSTUP_TOOLCHAIN: nightly-2026-11-01
+        # install-rust --manifest-path fuzz exported RUSTUP_TOOLCHAIN for the
+        # rest of the job; the root rust-toolchain.toml still pins local work.
         run: |
           source dist/ffmpeg/linux-x86_64/env.sh
           cargo fuzz build
+
+  # ── Aggregate gate ────────────────────────────────────────────────────
+  # One required context instead of a list of job names. `always()` makes it
+  # run even when an upstream job failed; `skipped` is a pass (the docs-only
+  # fast path), failure/cancelled is not. Keep this `needs` list complete when
+  # a job is added.
+  ci-gate:
+    if: always()
+    needs: [changes, lint-workflows, docs, commit-lint, rust-tests, omp-events-tests, windows, macos, gut-tests, rust-fmt, cargo-audit, cargo-deny, fuzz-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every needed job to pass or be skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          failures="$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | "\(.key): \(.value.result)"' <<<"$RESULTS")"
+          if [ -n "$failures" ]; then
+            echo "::error::CI gate failed"
+            printf '%s\n' "$failures"
+            exit 1
+          fi
+          echo "CI gate passed (skipped jobs are the docs-only fast path)"

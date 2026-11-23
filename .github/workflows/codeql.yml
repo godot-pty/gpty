@@ -2,14 +2,15 @@ name: CodeQL
 
 on:
   # Committed as advanced setup; the repository's default setup is off. Scans
-  # run on every pull request to a protected branch and on a schedule - never
-  # on a push. The PR filter has no path exclusions because CodeQL is a
-  # required context on `main`: a docs-only PR must still report it, or the
-  # ruleset would wait on a check that never starts. A dormant tree still
-  # picks up a new query pack every week.
+  # run on every pull request to a protected branch, on every merge-queue
+  # group, and on a schedule - never on a push. The PR filter has no path
+  # exclusions because CodeQL is a required context on `main`: a docs-only PR
+  # must still report it, or the ruleset would wait on a check that never
+  # starts. A dormant tree still picks up a new query pack every week.
   # `workflow_dispatch` exists so the file can be exercised after an edit.
   pull_request:
     branches: [main, "release/v*"]
+  merge_group:
   schedule:
     # Thursdays, 23:30 UTC (the slot GitHub's generator picked). An odd minute
     # on purpose: the top of the hour is the busiest for scheduled jobs.
