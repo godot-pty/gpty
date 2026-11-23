@@ -23,7 +23,8 @@ covers `refs/heads/release/v*` with a pull request, a review and signed
 commits, but no required-check list (the archived trees carry different job
 sets). When a job is added or renamed, update `ci-gate`'s needs list; when the
 gate context or the queue parameters change, update this file in the same
-change.
+change. `ci-gate` fails every result other than success/skipped, including an
+abandoned queued job: a platform proof that never ran is not a pass.
 """
 
 from __future__ import annotations
