@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Delete local work branches already contained in origin/main and with no open PR.
+#
+# Usage: scripts/branch-prune [--dry-run]
+#
+# `git branch -d` (never -D) refuses a branch with unmerged commits, so the
+# script cannot lose work. main and release/* are never touched; a branch with
+# an open pull request is kept even when its commits are already on main (the
+# PR may still need to close through the queue).
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+dry=false
+case "${1:-}" in
+    "") ;;
+    --dry-run) dry=true ;;
+    *) echo "branch-prune: unknown argument '$1'" >&2; exit 2 ;;
+esac
+
+git fetch --prune origin
+open_prs="$(gh pr list --state open --json headRefName --jq '.[].headRefName' 2>/dev/null || true)"
+current="$(git branch --show-current)"
+
+git for-each-ref --format='%(refname:short)' refs/heads/ | while IFS= read -r branch; do
+    case "$branch" in
+        main|release/*) continue ;;
+    esac
+    if [[ "$branch" == "$current" ]]; then
+        echo "keep   $branch (checked out)"
+        continue
+    fi
+    if printf '%s\n' "$open_prs" | grep -Fxq "$branch"; then
+        echo "keep   $branch (open PR)"
+        continue
+    fi
+    if git merge-base --is-ancestor "$branch" origin/main; then
+        if $dry; then
+            echo "delete $branch (merged into origin/main)"
+        else
+            git branch -d "$branch"
+        fi
+    else
+        echo "keep   $branch (unmerged)"
+    fi
+done
+git remote prune origin

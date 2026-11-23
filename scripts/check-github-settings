@@ -13,12 +13,15 @@ Run it before a release and after changing a ruleset or the release
 environment. It needs a maintainer-authenticated `gh` with admin read access;
 it is not part of CI because the normal Actions token cannot read rulesets.
 
-The expected required-check lists mirror `.github/workflows/ci.yml` and the
-`main protection` ruleset. The `release branch protection` ruleset covers
-`refs/heads/release/v*` with a pull request, a review and signed commits, but
-no required-check list (the archived trees carry different job sets). When a
-job is added or renamed, update both the workflow's required contexts and this
-file in the same change.
+The required contexts are the aggregate `ci-gate` plus the two separate
+security workflows (`CodeQL`, Secret scan), not one context per CI job; the
+merge queue is the up-to-date guarantee that replaced the strict
+"branches must be up to date" setting. The `release branch protection` ruleset
+covers `refs/heads/release/v*` with a pull request, a review and signed
+commits, but no required-check list (the archived trees carry different job
+sets). When a job is added or renamed, update `ci-gate`'s needs list; when the
+gate context or the queue parameters change, update this file in the same
+change.
 """
 
 from __future__ import annotations
@@ -31,19 +34,8 @@ import sys
 
 MAIN_CHECKS = [
     "CodeQL",
-    "cargo-audit",
-    "cargo-deny",
-    "commit-lint",
-    "docs",
-    "fuzz-build",
-    "gut-tests",
-    "lint-workflows",
-    "omp-events-tests",
-    "rust-fmt",
-    "rust-tests",
-    "rust-windows",
+    "ci-gate",
     "secret-scan",
-    "windows-smoke",
 ]
 # Classic protection predates the ruleset and does not carry secret-scan.
 CLASSIC_CHECKS = [name for name in MAIN_CHECKS if name != "secret-scan"]
@@ -54,6 +46,7 @@ MAIN_RULES = {
     "required_signatures",
     "pull_request",
     "required_status_checks",
+    "merge_queue",
 }
 # A release branch keeps a pull request, a review and signed commits. It does
 # not carry a required-check list: the archived lines run different job sets
@@ -189,8 +182,15 @@ def main() -> int:
     equal("main: required checks", contexts, sorted(MAIN_CHECKS))
     check(
         "main: strict required checks",
-        checks.get("strict_required_status_checks_policy") is True,
+        checks.get("strict_required_status_checks_policy") is False,
     )
+    queue = params(main_rules.get("merge_queue"))
+    equal("main: merge queue method", queue.get("merge_method"), "MERGE")
+    equal("main: merge queue grouping", queue.get("grouping_strategy"), "ALLGREEN")
+    equal("main: merge queue build cap", queue.get("max_entries_to_build"), 5)
+    equal("main: merge queue merge cap", queue.get("max_entries_to_merge"), 5)
+    equal("main: merge queue minimum", queue.get("min_entries_to_merge"), 1)
+    equal("main: merge queue wait", queue.get("min_entries_to_merge_wait_minutes"), 5)
 
     # ── release branch protection ──────────────────────────────────────
     check(
@@ -263,7 +263,7 @@ def main() -> int:
     check("main classic: stale reviews dismissed", reviews.get("dismiss_stale_reviews") is True)
     status = classic.get("required_status_checks") or {}
     equal("main classic: required checks", sorted(status.get("contexts", [])), sorted(CLASSIC_CHECKS))
-    check("main classic: strict required checks", status.get("strict") is True)
+    check("main classic: strict required checks", status.get("strict") is False)
 
     # ── release environment ───────────────────────────────────────────
     review_rules = [
@@ -293,6 +293,9 @@ def main() -> int:
     check("actions: SHA pinning required", actions.get("sha_pinning_required") is True)
     check("repository: web sign-off required", repo_info.get("web_commit_signoff_required") is True)
     check("repository: default branch is main", repo_info.get("default_branch") == "main")
+    check("repository: auto-merge enabled", repo_info.get("allow_auto_merge") is True)
+    check("repository: head branches deleted on merge", repo_info.get("delete_branch_on_merge") is True)
+    check("repository: merge commits allowed", repo_info.get("allow_merge_commit") is True)
 
     if failures:
         print(f"check-github-settings: {len(failures)} check(s) failed", file=sys.stderr)

@@ -14,6 +14,7 @@ Standard library only; run from anywhere. Exits 1 and lists every problem found.
     does not exist
   * README.md carries no hard-coded release version in the download file names
 """
+import datetime
 import os
 import re
 import subprocess
@@ -105,7 +106,11 @@ for f in FILES:
             bad(f, f'image not found under docs/static/: {url}')
 
 # ── split-page indexes: root file <-> pages ──────────────────────────────
-for root_md, folder in (('ROADMAP.md', 'roadmap'), ('CHANGELOG.md', 'changelog'), ('AGENTS.md', 'agents')):
+for root_md, folder, fields in (
+    ('ROADMAP.md', 'roadmap', ('title', 'weight')),
+    ('CHANGELOG.md', 'changelog', ('title', 'date')),
+    ('AGENTS.md', 'agents', ('title', 'weight')),
+):
     d = f'docs/content/docs/{folder}'
     pages = sorted(p for p in os.listdir(os.path.join(ROOT, d)) if p.endswith('.md') and p != '_index.md')
     linked = set(re.findall(r'\]\(' + re.escape(d) + r'/([^)#]+\.md)', read(root_md)))
@@ -113,8 +118,15 @@ for root_md, folder in (('ROADMAP.md', 'roadmap'), ('CHANGELOG.md', 'changelog')
         if p not in linked:
             bad(root_md, f'does not link {d}/{p}')
         fm = front_matter(read(f'{d}/{p}'))
-        if not fm or 'title' not in fm or 'weight' not in fm:
-            bad(f'{d}/{p}', 'front matter needs title and weight')
+        missing = [field for field in fields if not fm or field not in fm]
+        if missing:
+            bad(f'{d}/{p}', f'front matter needs {", ".join(fields)}')
+            continue
+        if folder == 'changelog':
+            try:
+                datetime.date.fromisoformat(fm['date'])
+            except ValueError:
+                bad(f'{d}/{p}', f"date is not YYYY-MM-DD: {fm['date']!r}")
     for p in sorted(linked - set(pages)):
         bad(root_md, f'links missing page {d}/{p}')
     if not os.path.exists(os.path.join(ROOT, d, '_index.md')):

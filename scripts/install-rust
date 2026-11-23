@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Install the Rust toolchain pinned by a rust-toolchain.toml.
+#
+# Usage: scripts/install-rust [--manifest-path DIR] [--target TRIPLE]... [--print-channel]
+#
+# The file is the source of truth: channel, components and profile are read
+# from it, so no workflow repeats the version. In GitHub Actions the channel is
+# exported through GITHUB_ENV as RUSTUP_TOOLCHAIN, which overrides the
+# repository's rust-toolchain.toml for later steps (the fuzz workspace needs
+# its own nightly even though the command runs from the repository root).
+#
+# `--manifest-path fuzz` reads fuzz/rust-toolchain.toml. `--print-channel`
+# resolves nothing and must stay network-free.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+dir="$ROOT"
+targets=()
+print_only=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --manifest-path)
+            [[ $# -ge 2 ]] || { echo "install-rust: --manifest-path needs a directory" >&2; exit 2; }
+            case "$2" in
+                /*) dir="$2" ;;
+                *) dir="$ROOT/${2#./}" ;;
+            esac
+            shift 2
+            ;;
+        --target)
+            [[ $# -ge 2 ]] || { echo "install-rust: --target needs a triple" >&2; exit 2; }
+            targets+=("$2")
+            shift 2
+            ;;
+        --print-channel)
+            print_only=true
+            shift
+            ;;
+        *)
+            echo "install-rust: unknown argument '$1'" >&2
+            exit 2
+            ;;
+    esac
+done
+
+toml="$dir/rust-toolchain.toml"
+[[ -f "$toml" ]] || { echo "install-rust: $toml is missing" >&2; exit 1; }
+
+channel="$(sed -n 's/^channel *= *"\([^"]*\)"/\1/p' "$toml" | head -1)"
+[[ -n "$channel" ]] || { echo "install-rust: $toml has no channel" >&2; exit 1; }
+
+if $print_only; then
+    printf '%s\n' "$channel"
+    exit 0
+fi
+
+components="$(sed -n 's/^components *= *\[\(.*\)\]/\1/p' "$toml" | head -1 | tr ',' '\n' | tr -d ' "')"
+profile="$(sed -n 's/^profile *= *"\([^"]*\)"/\1/p' "$toml" | head -1)"
+[[ -n "$profile" ]] || profile=minimal
+
+args=(--profile "$profile")
+for component in $components; do
+    args+=(--component "$component")
+done
+
+rustup toolchain install "$channel" "${args[@]}"
+if (( ${#targets[@]} > 0 )); then
+    for target in "${targets[@]}"; do
+        rustup target add --toolchain "$channel" "$target"
+    done
+fi
+
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+    {
+        echo "RUSTUP_TOOLCHAIN=$channel"
+        echo "CARGO_INCREMENTAL=0"
+    } >> "$GITHUB_ENV"
+fi
+
+rustc "+$channel" --version

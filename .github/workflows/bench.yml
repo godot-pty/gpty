@@ -1,0 +1,76 @@
+name: Bench
+
+# Weekly cost telemetry. `scripts/measure-cost --check` needs a release build
+# and a renderer, so it runs here under Xvfb with llvmpipe/lavapipe - a software
+# renderer whose absolute MiB are not the published GPU claim, but whose trend
+# is still useful. The step is `continue-on-error`: a regression, a missing
+# driver or a stale stamp is a report, never a merge or release gate.
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-cost
+  cancel-in-progress: false
+
+jobs:
+  cost:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: ./scripts/install-rust
+
+      - name: Install Godot
+        run: python3 scripts/install-godot editor --dest "$HOME/godot"
+
+      - name: Install Godot export templates
+        run: python3 scripts/install-godot templates
+
+      - name: Install Xvfb and software renderers
+        run: sudo apt-get update -y && sudo apt-get install -y xvfb xauth mesa-vulkan-drivers libgl1-mesa-dri vulkan-tools
+
+      - name: Build media dependencies
+        run: ./scripts/media-deps
+
+      - name: Build the app
+        run: ./scripts/build
+
+      - name: Build the CLI
+        run: cargo build --locked -p gpty
+
+      - name: Measure (informative)
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            ./scripts/measure-cost --check 2>&1 | tee cost-report.txt
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cost-report
+          path: cost-report.txt
+          retention-days: 14
+
+      - name: Summarize
+        if: always()
+        run: |
+          if [ -f cost-report.txt ]; then
+            {
+              echo "## Cost telemetry"
+              echo '```'
+              tail -80 cost-report.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

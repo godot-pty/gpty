@@ -9,6 +9,9 @@ on:
 # contents, plus the OIDC identity the build-provenance attestation signs with.
 # The publish job downloads the staged files and runs only pinned actions - no
 # project code runs in the job that holds the write token or the OIDC identity.
+# `publish-crates` and `mcp-registry` request only `id-token: write` for their
+# own OIDC exchanges; the former checks out the signed tag because
+# `cargo publish` must run each packaged verify build.
 #
 # `actions: read` is what release-build.yml's export job uses to download the
 # GDExtension artifacts; a called workflow can only narrow its caller's grant,
@@ -41,9 +44,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: "1.96.0"
+        run: ./scripts/install-rust
 
       - name: Check the tag format
         run: |
@@ -88,8 +89,8 @@ jobs:
       - name: Check the version
         run: |
           set -euo pipefail
-          crate_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/gpty-cli/Cargo.toml | head -1)"
-          test "v$crate_version" = "$VERSION"
+          test "v$(./scripts/release-prepare --print-version)" = "$VERSION"
+          ./scripts/release-prepare --check
           python3 scripts/mcp-registry check
           cargo metadata --locked --format-version 1 > /dev/null
           cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
@@ -111,6 +112,7 @@ jobs:
           python3 scripts/docs-check
           ./scripts/check-capabilities
           python3 scripts/build-wiki --check
+          python3 scripts/build-docs --check
 
   # ── Build and export, from the definition the dispatch path shares ───
   build:
@@ -128,6 +130,84 @@ jobs:
     uses: ./.github/workflows/release-build.yml
     with:
       version: ${{ github.ref_name }}
+
+  # ── Publish the crates (crates.io trusted publishing) ────────────────
+  # `cargo publish` runs each packaged verify build, so this job does run
+  # project code - but it checks out the signed, gate-verified tag and holds
+  # only `contents: read` plus the OIDC identity crates.io maps to this
+  # repository, workflow and environment. No long-lived token exists.
+  publish-crates:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: release
+    steps:
+      - name: Checkout the tagged tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: ./scripts/install-rust
+
+      - name: Cache the publish verify builds
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-cargo-publish-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-publish-
+
+      - name: Authenticate with crates.io (OIDC)
+        id: auth
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+
+      - name: Publish in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          publish() {
+            crate="$1"
+            version="$(cargo metadata --locked --no-deps --format-version 1 \
+              | jq -r --arg n "$crate" '.packages[] | select(.name == $n) | .version')"
+            code="$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H 'User-Agent: gpty-release (github.com/godot-pty/gpty)' \
+              "https://crates.io/api/v1/crates/${crate}/${version}")"
+            if [ "$code" = "200" ]; then
+              echo "$crate $version is already published; skipping"
+              return
+            fi
+            cargo publish --locked -p "$crate"
+            for _ in $(seq 1 60); do
+              code="$(curl -sS -o /dev/null -w '%{http_code}' \
+                -H 'User-Agent: gpty-release (github.com/godot-pty/gpty)' \
+                "https://crates.io/api/v1/crates/${crate}/${version}")"
+              [ "$code" = "200" ] && return
+              sleep 5
+            done
+            echo "timed out waiting for $crate $version on crates.io" >&2
+            exit 1
+          }
+          publish gpty-core
+          publish gpty-ipc
+          publish gpty-plugin
+          publish gpty
+
+  # ── Registry entry, chained after the crates are live ────────────────
+  mcp-registry:
+    needs: [publish, publish-crates]
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/mcp-registry.yml
 
   # ── Attest and publish (write token + OIDC; no project code) ─────────
   publish:
