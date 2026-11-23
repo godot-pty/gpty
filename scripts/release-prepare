@@ -14,6 +14,10 @@ table stay authored work.
 `--check` parses the manifests and both lockfiles; `--print-version` prints the
 uniform version for release-gate; a real bump refuses a dirty target or a
 branch that is not main, release/vX.Y or release-prep/*.
+
+The check runs in CI's `docs` job, in the release gate, and in `scripts/ci-check`
+(the replacement for the old inline version heredoc); the bump runs by hand
+from a release-prep branch.
 """
 
 from __future__ import annotations
