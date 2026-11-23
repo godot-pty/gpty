@@ -332,7 +332,7 @@ Each is either accepted for the current scope or tracked as a roadmap item.
   *open*, so file permissions are the only gate there. Windows environment keys are
   case-insensitive (and the PTY layer normalises them), so the `GPTY_*` credential and marker
   namespace is not case-sensitive there. On Windows the check is compile-verified locally and
-  exercised by the `windows-smoke` CI job (a same-user client must be accepted); the rejection case
+  exercised by the `windows` CI job (a same-user client must be accepted); the rejection case
   needs a second user account and is not covered.
 - **Shared-`/tmp` fallback.** The control socket's directory is chosen in order: `$XDG_RUNTIME_DIR`,
   `/run/user/<uid>` (Linux) or `$TMPDIR` (macOS), then a private state directory of your own

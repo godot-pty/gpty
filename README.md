@@ -116,7 +116,7 @@ The chosen stack also brings with it more costs, much more than terminal emulato
 
 ### Trade-offs
 
-Hosting a terminal inside a game engine is expensive, in terms of RAM & power usage. The following are measured on the shipped v0.8.5 Linux build (captured on CachyOS with Godot 4.7.2, the NVIDIA 620.73.04 driver and Vulkan 1.4.363 loader, `VmRSS` from `/proc` in a private sandbox, five readings per row after the app answers on its control socket; the OpenGL3 row is warmed by a discarded launch, because the earlier 366 MB figure was a cold-cache reading):
+Hosting a terminal inside a game engine is expensive, in terms of RAM & power usage. The following are measured on the shipped v0.8.5 Linux build (captured on CachyOS with Godot 4.7.2, the NVIDIA 620.73.04 driver and Vulkan 1.4.363 loader, `VmRSS` from `/proc` in a private sandbox, five readings per row after the app answers on its control socket; the OpenGL3 row is warmed by a discarded launch, because the earlier 366 MB figure was a cold-cache reading). The newest measured build in `docs/data/cost-history.json` owns these figures; a release without a GPU session keeps them, and `scripts/measure-cost --stamp` requires the stamp to name that newest entry:
 
 | Configuration | Resident Memory |
 |---|---|

@@ -13,8 +13,9 @@ records the checkpoints an agent must not skip, not a second runbook.
 
 - Do not commit or tag before the final review pause in `RELEASING.md` §7, and
   do not proceed without an explicit user OK.
-- Do not merge the release PR until every required check is green, including
-  both Windows legs, CodeQL and secret-scan.
+- Do not merge the release PR until every required check is green: `ci-gate`,
+  `CodeQL` and Secret scan on `main`; on a maintenance branch, its CI,
+  `CodeQL` and Secret-scan runs.
 - Do not force-move or delete a tag. The ruleset has no bypass; a bad tag means
   a new patch release, not a repaired history.
 - Do not publish figures, screenshots or verification results you did not
@@ -36,8 +37,12 @@ records the checkpoints an agent must not skip, not a second runbook.
 
 - **Commit analysis:** run the range and `fix-forensics` once; classify each
   commit into the changelog/roadmap/blog table. Do not run a second analysis.
-- **Cost table:** use `./scripts/build` and `./scripts/measure-cost --check`
-  from a Linux GPU session; update the prose, ratio and stamp, then `--record`.
+- **Cost table:** `./scripts/measure-cost --check` and `--record` need a Linux
+  GPU session and a `./scripts/build` app. Run them when that hardware is
+  available; the CI gate is `./scripts/measure-cost --stamp`, which requires the
+  README to name the newest build in `docs/data/cost-history.json`, not the
+  current crate version. The weekly `Bench` workflow reports the llvmpipe
+  trend; it is telemetry, never a release gate.
 - **Screenshots:** use `scripts/screenshot-gpty` and the private sandbox. Run a
   vision sanity pass and fix real defects. Feature screenshots come from
   `--state` states, never from a GUT run. If capture is impossible, report it
@@ -48,8 +53,10 @@ records the checkpoints an agent must not skip, not a second runbook.
   branch through `scripts/bot-push`, open the PR with `scripts/bot-pr --base
   main` (or the maintenance branch), wait for the active line's required checks
   (on a maintenance branch, for its CI, CodeQL and secret-scan runs) to be
-  green, approve and merge with a merge commit, then create and verify the
-  signed tag on `main` (or on the maintenance branch).
+  green, approve, then `gh pr merge --auto --merge` (the merge queue) or
+  `gh pr merge --merge` before the queue exists. Never click **Update branch**
+  and never run `gh pr update-branch`. Then create and verify the signed tag on
+  `main` (or on the maintenance branch).
 - **Environment approval:** download `gpty-release-dist` (three archives plus
   `SHA256SUMS`) and measure the bytes before approving the `release`
   environment - `sha256sum -c`, both license files in every archive, `--version`
@@ -58,15 +65,19 @@ records the checkpoints an agent must not skip, not a second runbook.
   the `<major>` and unversioned names as symlinks. Read the shipped archive,
   never the bundler's intent: v0.8.4's bundler created those aliases correctly
   and the artifact transport dereferenced them, so only the asset's own bytes
-  are proof. `mcp-registry` uses the same environment.
+  are proof. Three jobs use the `release` environment now: `publish`,
+  `publish-crates` and the chained `mcp-registry`; review the staged artifact
+  before the first approval.
 - **Verification:** verify checksums, both license files in every archive, the
   attestation's subject digest by the asset's own SHA-256 (that command can
   print nothing and exit 0), the macOS 10.13/11.0 dylib floor with
   `scripts/check-macos-minos`, and the macOS alias shape from the previous
-  checkpoint. Run the release tail (AUR, crates.io in dependency order, MCP
-  registry dispatch, asset-set roadmap row); an AUR commit without the key on
-  the machine is validated with `makepkg` and reported, never claimed as
-  published.
+  checkpoint. The tag now publishes the four crates through crates.io trusted
+  publishing and chains the MCP registry; verify the four versions on crates.io
+  and the registry entry instead of running `cargo publish` or
+  `gh workflow run mcp-registry.yml` by hand. The AUR tail stays manual: an AUR
+  commit without the key on the machine is validated with `makepkg` and
+  reported, never claimed as published. Close the asset-set roadmap row.
 - **A row only a release can prove stays open until the asset is measured.**
   Close it with the numbers from the shipped file (`zipinfo`, byte size,
   `--version`), not with the fix's description, and put the measurement in the

@@ -296,7 +296,7 @@ PTY spawn calls `ensure_server_started()` and `register_terminal()` - no
 when registration succeeds. `@gpty/omp-events` then forwards semantic events
 and `workspace.gd` polls `drain_agent_events()` into the Reasoning pane, so
 Terminal, Inspector and Reasoning behave the same way on Windows. The
-`windows-smoke` job runs the extension inside a real pane there and asserts the
+`windows` job runs the extension inside a real pane there and asserts the
 pane reports Tier 1 `working`, which observes the whole chain - env injection,
 transport, capability check, translation, drain - on the platform.
 
@@ -308,7 +308,7 @@ a pipe path. The only branch is validation - a Windows path must be a
 to group/other.
 
 The event code carries no `#[cfg(unix)]` gates at all: `omp_events.rs` is
-platform-neutral, which is what lets the `rust-windows` job compile this crate
+platform-neutral, which is what lets the `windows` job compile this crate
 under `RUSTFLAGS: -Dwarnings`.
 
 ### Tips

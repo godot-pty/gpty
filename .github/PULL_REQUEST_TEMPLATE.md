@@ -5,6 +5,7 @@
 ## Checks
 
 - [ ] `./scripts/ci-check` passes.
+- [ ] If the branch is behind `main`, it is enqueued through the merge queue; no **Update branch** click.
 - [ ] The change is covered by a test, or this PR says why a test is impractical.
 - [ ] Docs and the roadmap are updated when behavior changes.
 - [ ] No secrets, credentials, private paths, or captured program output are added.

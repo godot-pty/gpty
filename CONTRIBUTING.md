@@ -155,7 +155,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | cargo run --bin gpty -- 
 
 ### Test
 
-- **Automated**: `./scripts/ci-check` runs the full suite (Rust + GUT + audit). CI runs on pushes to `main` and `release/v*` and on every pull request targeting either; CodeQL and Secret scan run on those paths too. The `docs` and `commit-lint` jobs are required checks on `main`.
+- **Automated**: `./scripts/ci-check` runs the full suite (Rust + GUT + audit). Pull requests run the path-aware CI: a code diff gets `rust-tests`, `gut-tests`, `windows`, `macos`, the audits and `fuzz-build`; a docs-only diff (including `*.md`, `docs/**`, the generated bundles and the docs scripts) gets the cheap `changes`, `lint-workflows`, `docs`, `commit-lint` and `ci-gate` jobs. CodeQL and Secret scan run on every PR. `main` requires `ci-gate`, `CodeQL` and Secret scan, and uses a merge queue, so an approved PR does not need an **Update branch** click. Release-branch pushes also run CI.
 - **Manual pre-release**: [docs/content/docs/overview/testing.md](docs/content/docs/overview/testing.md) - smoke tests for CLI bridge, daemon lifecycle, UI shortcuts, and error paths that require a running GUI.
 - Test format: `Given / When / Then` with expected output. See the manual checklist for examples.
 
@@ -249,7 +249,7 @@ See the agent guide for the complete conventions and patterns: [Rust](docs/conte
 
 `main` is the trunk. Branch from it and open pull requests against it; feature branches are short-lived. A line that has stopped receiving features has a long-lived maintenance branch `release/vX.Y`, created from `main` at the line's last release commit when development moves to the next minor. Fixes are cherry-picked onto it, its patches are tagged there, and it never receives feature work. An archived line's tag is the shipped tree; its branch may carry one later CI-trigger commit.
 
-`gpty-bot` pushes work branches, opens pull requests, and never approves or merges. A branch that edits `.github/workflows/**` is pushed with the maintainer's credential because the app cannot create or update workflow files; the final non-workflow commit is pushed with `scripts/bot-push`, making the app the last pusher so the maintainer's approval satisfies the last-push rule. Dependency updates target `main`.
+`gpty-bot` pushes work branches, opens pull requests, and never approves or merges. A branch that edits `.github/workflows/**` is pushed with the maintainer's credential because the app cannot create or update workflow files; the final non-workflow commit is pushed with `scripts/bot-push`, making the app the last pusher so the maintainer's approval satisfies the last-push rule. An approved PR is enqueued through the merge queue (`gh pr merge --auto --merge`); the remote branch is deleted on merge, and `scripts/branch-prune` removes local branches already in `origin/main`. Dependency updates target `main`.
 
 ## Pull Request Process
 

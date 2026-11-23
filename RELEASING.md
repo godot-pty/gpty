@@ -78,11 +78,12 @@ per release.
   `(Deferred from vX.Y.Z.)`.
 - `./scripts/check-github-settings` passes. It is read-only and needs a
   maintainer-authenticated `gh`: it reads back the rulesets, classic protection,
-  `release` environment, SHA-pinning and sign-off flags instead of trusting the
-  settings to stay put.
+  the merge-queue parameters, auto-merge/head-branch deletion, the `release`
+  environment, SHA-pinning and sign-off flags instead of trusting the settings
+  to stay put.
 - `./scripts/ci-check` passes. Its Windows step cross-compiles only; the
-  runtime legs (`windows-smoke`, GUT on Windows) exist only in CI and must be
-  green on the release PR's head. Also run the
+  runtime legs (`windows`, GUT on Windows) exist only in CI and must be green
+  on the release PR's head. Also run the
   [manual pre-release checklist](docs/content/docs/overview/testing.md#manual-pre-release-checklist)
   against a real GUI; it covers the renderer, input and live-session paths that
   headless tests cannot.
@@ -123,8 +124,8 @@ previous tag.
 ## 2. Write the changelog
 
 The release notes live on one page, `docs/content/docs/changelog/vX.Y.Z.md`,
-with front matter (`title: "vX.Y.Z - YYYY-MM-DD"`, `weight`) and the compare
-link `[Release on GitHub](https://github.com/godot-pty/gpty/compare/vPREV...vX.Y.Z)`.
+with front matter (`title: "vX.Y.Z - YYYY-MM-DD"`, `date: YYYY-MM-DD`) and the
+compare link `[Release on GitHub](https://github.com/godot-pty/gpty/compare/vPREV...vX.Y.Z)`.
 `CHANGELOG.md` is an index only; prepend the link
 `- [X.Y.Z - YYYY-MM-DD](docs/content/docs/changelog/vX.Y.Z.md)` in the same
 commit.
@@ -134,18 +135,12 @@ release's roadmap DOCS row names the user-facing summary, use it as a
 checklist: every item it names must appear, and the commit range catches the
 ones it forgot.
 
-`weight` is a ladder with one slot per release, newest smallest, in steps of
-10. The smallest slot is 10; `weight: 0` is unset to Hugo. If the next page
-would land on 10, or the ladder already holds a duplicate, shift every existing
-page up one step (`10` → `20`, …) in one descending `sed -si` pass. Check:
-
-```bash
-grep -H '^weight' docs/content/docs/changelog/v0.*.md \
-  | sed 's/.*weight: //' | sort -n | uniq -d
-```
-
-It must print nothing. `scripts/docs-check` holds the index and the page
-directory in bijection: an unlinked page and a link with no page both fail.
+The page carries `date: YYYY-MM-DD` matching the title; do **not** add a
+`weight`. Hextra's sidebar sorts the section by date, newest first, so a
+maintenance release authored later appears above the newer minor - which is
+correct. `scripts/docs-check` requires the date on every changelog page and
+holds the index and the page directory in bijection: an unlinked page and a
+link with no page both fail.
 
 On a maintenance release, author this page on `release/vX.Y`; after the tag,
 port the page, its `CHANGELOG.md` link, the blog entry and its images to `main`
@@ -158,7 +153,7 @@ Update any count, name or implementation-phase checklist item the release
 changed; grep rather than assuming.
 
 The cost paragraph, the Trade-offs table and the chart are a published claim
-stamped with a build:
+stamped with a build. When a Linux GPU session is available:
 
 ```bash
 ./scripts/build
@@ -166,14 +161,19 @@ stamped with a build:
 ./scripts/measure-cost --record
 ```
 
-`--check` re-measures the five published rows from a release build and fails
-past 10% on a row, past the run-to-run noise on the scrollback delta, or when
-the Forward+/OpenGL3 ratio falls below the prose's claim. Update the table, every
-figure the paragraph repeats, the "Nx lighter" ratio, and the stamp line's
-version. `--record` appends or replaces the release in
-`docs/data/cost-history.json` and redraws `docs/static/images/cost-history.svg`.
-`--check` needs Linux with a GPU; `scripts/ci-check` runs `--stamp` (no GPU) and
-fails when the crate version moves and the table still names the old build.
+`--check` re-measures the published rows from a release build and fails past 10%
+on a row, past the run-to-run noise on the scrollback delta, or when the
+Forward+/OpenGL3 ratio falls below the prose's claim. `--record` appends or
+replaces the release in `docs/data/cost-history.json` and redraws
+`docs/static/images/cost-history.svg`; then update the table, every figure the
+paragraph repeats, the "Nx lighter" ratio, and the stamp line's version.
+
+Hardware is no longer a release gate. `scripts/measure-cost --stamp` is the
+GPU-free check: it requires the README stamp to name the newest release in
+`docs/data/cost-history.json`, not the current crate version. So a release
+without a GPU session reuses the last measured build and leaves the ledger and
+SVG untouched. The weekly `Bench` workflow reports the llvmpipe trend as
+telemetry; it never blocks a release.
 
 The home page carries the demo clips, not a release screenshot. The release's
 `vX.Y.Z_1.png` belongs to its blog entry (`docs/content/blog/vX.Y.Z/index.md`);
@@ -223,8 +223,19 @@ the GUI's project version must match the tag:
   `cargo metadata --format-version 1 --manifest-path fuzz/Cargo.toml` rewrites
   its version lines.
 
-The bump is a per-file edit. `sed -i` with multiple files treats them as one
-stream without GNU sed's `-s`; use `sed -si` or loop per file. Then:
+The bump is one command:
+
+```bash
+./scripts/release-prepare X.Y.Z
+```
+
+It edits every `crates/*/Cargo.toml` (package version and internal pins), both
+lockfiles, `server.json` and `godot/project.godot`, then refuses a lockfile diff
+wider than the workspace-crate version lines. `--check` is the CI gate that
+validates the same files, and `--print-version` prints the uniform version.
+Pending docs/blog work does not block the bump, but the bump targets themselves
+must be clean, and the branch must be `main`, `release/vX.Y` or
+`release-prep/*`. Then:
 
 ```bash
 cargo check --workspace
@@ -314,9 +325,12 @@ git pull --ff-only
 git switch -c "release-prep/$RELEASE"
 ```
 
-Stage the release commit and sign it. The list includes the cost ledger and
-chart that `measure-cost --record` wrote; without them the README names the new
-build while the published chart stops at the previous release:
+Stage the release commit and sign it. When a GPU session was available, the list
+includes the cost ledger and chart that `measure-cost --record` wrote; without
+them the README names the new build while the published chart stops at the
+previous release. If no GPU session was available, leave the ledger, chart and
+README cost figures at the last measured build and omit those paths - the
+`--stamp` check accepts the newest recorded build.
 
 ```bash
 git add CHANGELOG.md README.md ROADMAP.md server.json godot/project.godot \
@@ -337,17 +351,19 @@ active line and `$BRANCH` for a maintenance release:
 # maintenance: --base "$BRANCH"
 ```
 
-Wait until the PR's checks are green: on the active line all required checks
-(including both Windows legs, `docs`, `commit-lint`, CodeQL and secret-scan); on
-a maintenance branch its CI, CodeQL and secret-scan runs. The branch's suite is
-the suite that shipped with it; if a pinned action or runner has retired so the
-suite cannot start, record the failing job and the equivalent local gate in the
-PR, and do not merge a real failure. Do not merge a partially green PR. Approve
-it as the maintainer, then merge with a merge commit:
+Wait until the PR's checks are green: on the active line the required checks are
+`ci-gate`, `CodeQL` and secret-scan; on a maintenance branch its CI, CodeQL and
+secret-scan runs. The branch's suite is the suite that shipped with it; if a
+pinned action or runner has retired so the suite cannot start, record the
+failing job and the equivalent local gate in the PR, and do not merge a real
+failure. Do not merge a partially green PR. Approve it as the maintainer, then
+enqueue it; the merge queue tests the group on the latest `main` and merges it
+without an **Update branch** click:
 
 ```bash
 gh pr review --approve <number>
-gh pr merge --merge <number>
+gh pr merge --auto --merge <number>
+# before the merge queue exists: gh pr merge --merge <number>
 ```
 
 Tag the result and verify the signature before pushing. The active line tags
@@ -392,10 +408,12 @@ privilege is present while project code runs:
 - **`release-gate`** is read-only. It validates the tag format (`vX.Y.Z`, no
   pre-release suffix), verifies the tag is a signed annotated tag through the
   GitHub API, checks it is reachable from `main` or from the `release/vX.Y`
-  derived from the tag, compares the crate and `server.json` versions with the
-  tag, runs `mcp-registry check`, checks both lockfiles with
+  derived from the tag, checks the tag equals
+  `./scripts/release-prepare --print-version` and runs
+  `./scripts/release-prepare --check` (manifests, both lockfiles, `server.json`,
+  `godot/project.godot`), runs `mcp-registry check`, checks both lockfiles with
   `cargo metadata --locked`, checks the defect-class trailers, and runs the
-  docs, capability and knowledge-bundle gates.
+  docs, capability, knowledge-bundle and docs-bundle gates.
 - **`build`** calls `.github/workflows/release-build.yml`, the same definition a
   `workflow_dispatch` on `main` runs. It carries the platform jobs
   (`build-linux`, both `build-macos` arches, `build-windows`, `bundle-macos`,
@@ -409,7 +427,8 @@ privilege is present while project code runs:
   tag run only restores: an entry it saves is tag-scoped, unreadable by the
   next tag, and would evict CI's caches from the 10 GB budget. `export` stamps
   `godot/project.godot` with the version input, installs Godot and the export
-  templates, asserts the four GDExtension files exist, exports Linux, Windows
+  templates through `scripts/install-godot` from `scripts/godot-version.json`,
+  asserts the four GDExtension files exist, exports Linux, Windows
   and macOS, writes `SHA256SUMS`, and uploads the three archives plus the sums
   as `gpty-release-dist`.
 
@@ -424,18 +443,41 @@ privilege is present while project code runs:
   `gpty-release-dist` as a run artifact. A dispatch on a cold key is the cold
   measurement; the next one (or the tag run after it) is the warm one. Read the
   step timings with `gh run view <id> --json jobs`.
-- **`publish`** is the only write/OIDC job. It downloads the staged artifact,
-  attests the four assets, and creates the GitHub release. It does not check
-  out the repository and runs no project code. It waits on the `release`
-  environment's required reviewer.
+- **`publish`** writes the GitHub release. It downloads the staged artifact,
+  attests the four assets, and creates the release. It does not check out the
+  repository and runs no project code. It waits on the `release` environment's
+  required reviewer.
+- **`publish-crates`** checks out the signed tag and publishes `gpty-core`,
+  `gpty-ipc`, `gpty-plugin` then `gpty` with crates.io trusted publishing:
+  OIDC only, no stored token. It runs `cargo publish`'s packaged verify build,
+  so it does run project code, but holds only `contents: read` plus
+  `id-token: write`. A version already on crates.io is skipped, so a partial
+  failure is rerunnable.
+- **`mcp-registry`** is called after both `publish` and `publish-crates`. It
+  validates the descriptor at the tag against `main`'s validator and publishes
+  over OIDC. It also uses the `release` environment.
 
 Review the `gpty-release-dist` artifact (three archives plus `SHA256SUMS`)
-before approving the environment. The same environment protects the
-`mcp-registry` publish job.
+before approving the first environment; the same environment protects
+`publish-crates` and the chained `mcp-registry`, so expect three approvals.
 
 ## 10. Verify the published release
 
-A tag is not a finished release. Download and verify the assets:
+A tag is not a finished release. The tag's `publish-crates` job publishes the
+four crates and the chained `mcp-registry` job publishes the descriptor; check
+that they did, rather than publishing by hand:
+
+```bash
+for crate in gpty-core gpty-ipc gpty-plugin gpty; do
+  curl -fsS -o /dev/null "https://crates.io/api/v1/crates/${crate}/${RELEASE#v}" \
+    && echo "${crate}: ${RELEASE#v} live" \
+    || echo "${crate}: MISSING"
+done
+```
+
+A missing version means the job failed: re-run the failed job, not `cargo
+publish`; the pre-check skips crates already on the index. Then download and
+verify the assets:
 
 ```bash
 mkdir -p /tmp/gpty-release
@@ -474,16 +516,10 @@ not meet this floor; the first release after the fix is the proof.
   Validate in a temp directory with `makepkg --noconfirm` (building in the tree
   leaves untracked `src/`, `pkg/` and package files), then publish to the AUR
   when the account can.
-- **crates.io.** From the release commit with a clean tree, publish in
-  dependency order: `gpty-core`, wait for the index, then `gpty-ipc`,
-  `gpty-plugin`, `gpty`. `cargo publish` runs the packaged verify build; the
-  later crates cannot verify locally because their path dependency is not on
-  the index until the earlier one publishes.
-- **MCP registry.** After the four crates are live, dispatch
-  `gh workflow run mcp-registry.yml` on `main`. It validates `server.json`
-  against the CLI crate, refuses a version crates.io does not have, verifies
-  the publisher tarball, and publishes over OIDC. It uses the same `release`
-  environment.
+- **Crates and registry.** The tag's `publish-crates` and chained
+  `mcp-registry` jobs publish them; verify the four crate versions and the
+  registry entry in §10. If a job failed, re-run it: the publish pre-check
+  skips versions already on crates.io.
 - **Record.** Close the release's asset-set roadmap row in a post-release
   commit with the published list measured. The changelog page and the release
   assets are the release record; do not rewrite a released page.
@@ -509,7 +545,7 @@ not meet this floor; the first release after the fix is the proof.
   reaching above it compiles in the workspace and fails at publish. This is why
   the agent skill lives at `crates/gpty-cli/skills/gpty/SKILL.md`.
 - **Windows behavior is only proven in CI.** `ci-check`'s Windows step is a
-  cross-compile; `windows-smoke` and the Windows GUT run are the runtime proof.
+  cross-compile; the `windows` job and the Windows GUT run are the runtime proof.
 - **Screenshots need XWayland.** `scripts/screenshot-gpty` finds Godot's window
   through the X tree; on pure Wayland, report the failure and ask for the
   image. Its capture backend falls back from ffmpeg to ImageMagick;
