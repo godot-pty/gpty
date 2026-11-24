@@ -28,6 +28,10 @@ records the checkpoints an agent must not skip, not a second runbook.
 - Confirm the target version, previous tag, whether the line is active (`main`)
   or in maintenance (`release/vX.Y`), clean tree, signing key, `gpty-bot` token
   and a graphical session for screenshots.
+- Confirm each of the four crates (`gpty-core`, `gpty-ipc`, `gpty-plugin`,
+  `gpty`) carries a crates.io Trusted Publisher config for `godot-pty/gpty`,
+  workflow `release.yml` and environment `release`; without it
+  `publish-crates` fails before publishing anything.
 - Run `./scripts/check-github-settings` (read-only; maintainer `gh`) before the
   release and after any ruleset or environment change.
 - Run `./scripts/ci-check`; a green local run is the baseline, not proof of the
@@ -56,7 +60,11 @@ records the checkpoints an agent must not skip, not a second runbook.
   green, approve, then `gh pr merge --auto --merge` (the merge queue) or
   `gh pr merge --merge` before the queue exists. Never click **Update branch**
   and never run `gh pr update-branch`. Then create and verify the signed tag on
-  `main` (or on the maintenance branch).
+  `main` (or on the maintenance branch), and push it over **HTTPS with the bot
+  token**, not the SSH origin: git opens the remote connection before the
+  pre-push hook, and the ~6-minute gate outlives GitHub's SSH idle timeout, so
+  the SSH push dies with SIGPIPE (exit 141) after the hook passes. Confirm the
+  tag with `git ls-remote --tags origin $RELEASE`.
 - **Environment approval:** download `gpty-release-dist` (three archives plus
   `SHA256SUMS`) and measure the bytes before approving the `release`
   environment - `sha256sum -c`, both license files in every archive, `--version`
@@ -87,6 +95,9 @@ records the checkpoints an agent must not skip, not a second runbook.
 
 - A red required check blocks the release; fix the source or prep and push
   again.
+- A `publish-crates` failure with `400 ... No Trusted Publishing config found
+  for repository` means a per-crate crates.io config is missing. Add it for all
+  four crates, then re-run the failed job; do not `cargo publish` by hand.
 - `gh run watch` can exit non-zero on a transient API error. Confirm with
   `gh run view <id> --json status,conclusion` before calling a run failed.
 - A workflow bug in the tagged tree is fixed by the next patch tag. Do not

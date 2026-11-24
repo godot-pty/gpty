@@ -72,6 +72,12 @@ per release.
   `GPTY_BOT_PRIVATE_KEY` set; `./scripts/bot-token --check` passes. The bot
   pushes the release-prep branch and opens the release PR; it never approves or
   merges.
+- A crates.io Trusted Publisher config for each of `gpty-core`, `gpty-ipc`,
+  `gpty-plugin` and `gpty` when the tagged workflow runs `publish-crates`:
+  repository owner `godot-pty`, repository `gpty`, workflow filename
+  `release.yml`, environment `release`. The crates must already exist, and the
+  account adding the config must be an owner. Without them the OIDC exchange
+  fails before any crate is published.
 - A clean tree, `main` for the active line (the maintenance branch for a
   maintenance release), and the release's roadmap rows closed. Anything
   unshipped moves to the next chain in priority position with
@@ -375,11 +381,21 @@ git switch main                  # or: git switch "$BRANCH"
 git pull --ff-only
 git tag -s "$RELEASE" -m "$RELEASE"
 git tag -v "$RELEASE"
-git push origin "$RELEASE"
+# Push over HTTPS with the bot token, not the SSH origin (see below).
+tmp=$(mktemp); chmod 600 "$tmp"
+./scripts/bot-token > "$tmp"
+GPTY_BOT_TOKEN_FILE="$tmp" GIT_ASKPASS="$PWD/scripts/git-askpass-token" \
+  GIT_TERMINAL_PROMPT=0 git push \
+  https://x-access-token@github.com/godot-pty/gpty.git \
+  "refs/tags/$RELEASE:refs/tags/$RELEASE"
+rm -f "$tmp"
 ```
 
-The tag push runs the `pre-push` hook's full `ci-check`, so it can take a couple
-of minutes. Confirm the tag reached the remote with
+The tag push runs the `pre-push` hook's full `ci-check` (about six minutes;
+measured 2026-11-23). Push it over HTTPS as above: git opens the remote
+connection before the hook, and the SSH origin's connection does not survive
+the gate - the push dies with SIGPIPE (exit 141) after the hook has passed.
+Confirm the tag reached the remote with
 `git ls-remote --tags origin "$RELEASE"` rather than assuming. Tags are
 immutable: do not force-move one to include a late fix.
 
@@ -453,7 +469,12 @@ privilege is present while project code runs:
   OIDC only, no stored token. It runs `cargo publish`'s packaged verify build,
   so it does run project code, but holds only `contents: read` plus
   `id-token: write`. A version already on crates.io is skipped, so a partial
-  failure is rerunnable.
+  failure is rerunnable. Trusted publishing needs a per-crate config on
+  crates.io (repository owner `godot-pty`, repository `gpty`, workflow filename
+  `release.yml`, environment `release`). Without one the OIDC exchange fails
+  with `400 ... No Trusted Publishing config found for repository
+  'godot-pty/gpty'` before any crate is published; add the four configs, then
+  re-run the failed job.
 - **`mcp-registry`** is called after both `publish` and `publish-crates`. It
   validates the descriptor at the tag against `main`'s validator and publishes
   over OIDC. It also uses the `release` environment.
