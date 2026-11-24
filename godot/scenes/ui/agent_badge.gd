@@ -69,6 +69,20 @@ func _init() -> void:
 func state() -> String:
 	return _state
 
+## A Motion change applies to the next frame, not the next restart: the badge
+## is the one animated surface with no host telling it the setting moved.
+func _ready() -> void:
+	SettingsManager.settings_changed.connect(_refresh_animation)
+	_refresh_animation()
+
+## An animated state earns frames only while the Motion setting allows it. Off
+## keeps the phase-0 silhouette (the frame a capture pins) and stops the clock.
+func _refresh_animation() -> void:
+	if not UiMotion.enabled():
+		_phase = 0.0
+	set_process(visible and animated(_state) and UiMotion.enabled())
+	queue_redraw()
+
 ## A state animates itself: `working` turns its notch, `needs-attention`
 ## pulses. The other three are static, so they cost no frames.
 static func animated(state: String) -> bool:
@@ -95,7 +109,7 @@ func show_state(state: String) -> void:
 	visible = true
 	tooltip_text = str(spec["label"])
 	accessibility_name = str(spec["label"])
-	set_process(animated(_state))
+	_refresh_animation()
 	queue_redraw()
 
 func _process(delta: float) -> void:

@@ -320,6 +320,17 @@ func _build_ui():
 	show_tb_cb.toggled.connect(func(_pressed): _debounce_timer.start())
 	check_updates_cb.toggled.connect(func(_pressed): _debounce_timer.start())
 	SettingsManager.appearance_changed.connect(func(_dark: bool): _sync_color_rows())
+	# Connected after the tabs exist: the initial current tab emits nothing, and
+	# every later switch (a click, `open_commands`, `open_shortcuts`) is one
+	# arrival on the incoming section.
+	tabs.tab_changed.connect(_on_tab_changed)
+
+## An arrival, not a slide: the card is already on screen, so only the section
+## that replaced the old one fades in (80 ms; one frame at Off).
+func _on_tab_changed(_tab: int) -> void:
+	var control := _tabs.get_current_tab_control()
+	if control != null:
+		UiMotion.arrive(control, UiMotion.TAB_ARRIVAL_MS)
 
 func _create_tab(tabs: TabContainer, title: String) -> VBoxContainer:
 	var sc = ScrollContainer.new()

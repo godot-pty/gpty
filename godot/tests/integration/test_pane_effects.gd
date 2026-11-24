@@ -190,3 +190,51 @@ func test_particles_are_a_fixed_preallocated_burst():
 	assert_true(pool.one_shot, "a burst, not a stream")
 	assert_true(pool.emitting, "the burst started")
 	assert_null(pool.material, "the default material is normal blend; nothing adds")
+
+
+# ── The Motion setting ─────────────────────────────────────────────────
+
+## Motion Off is a promise about the screen, not the next restart: the animated
+## field stops at the frame a capture pins, and the next save starts it again.
+func test_motion_off_stops_the_animated_clock():
+	_seed_cache(2, 4)
+	_apply("grain", UiEffects.FULL)
+	await _mount_probe()
+	_probe._effects._sync_clock()
+	assert_false(_probe._effects._timer.is_stopped(), "grain advances while motion is on")
+
+	SettingsManager.cfg_motion = UiMotion.OFF
+	SettingsManager.settings_changed.emit()
+	assert_true(_probe._effects._timer.is_stopped(), "Off stops the clock")
+	assert_eq(_probe._effects._phase, 0.0, "at the pinned phase")
+	assert_eq(_probe._effects._buffer.render_target_update_mode, SubViewport.UPDATE_ONCE,
+		"and renders that one frame")
+
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	SettingsManager.settings_changed.emit()
+	assert_false(_probe._effects._timer.is_stopped(), "turning it back on restarts it")
+
+## A cue at Off keeps its state perceivable without motion: one still border in
+## the cue's own tone for its hold, no fade and no particle burst.
+func test_a_cue_at_motion_off_is_a_still_border():
+	await _mount_probe()
+	_probe._ensure_effects()
+	SettingsManager.cfg_motion = UiMotion.OFF
+	assert_true(_probe._effects.flash_at("tint", 1000))
+	assert_almost_eq(_probe._effects._still_alpha, PaneEffects.PULSE_PEAK_ALPHA, 0.001)
+	assert_eq(_probe._effects._cue_alpha, 0.0, "no tint fade")
+	assert_eq(_probe._effects._cue_effect, "tint", "the border wears the cue's tone")
+	assert_true(_probe._effects.flash_at("particles", 2000), "the rate window has passed")
+	assert_null(_probe._effects._particles, "no burst at Off")
+	await wait_seconds(0.55)
+	assert_eq(_probe._effects._still_alpha, 0.0, "the still border clears after its hold")
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+
+func test_a_cue_at_motion_off_keeps_the_rate_limit():
+	await _mount_probe()
+	_probe._ensure_effects()
+	SettingsManager.cfg_motion = UiMotion.OFF
+	assert_true(_probe._effects.flash_at("pulse", 0))
+	assert_false(_probe._effects.flash_at("pulse", 100), "inside the 334 ms window")
+	assert_true(_probe._effects.flash_at("pulse", 400), "the window has passed")
+	SettingsManager.cfg_motion = UiMotion.SUBTLE

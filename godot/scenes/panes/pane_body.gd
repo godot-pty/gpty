@@ -108,7 +108,10 @@ func _fill_content(node: Control) -> void:
 ## is a one-line diagnostic, not a state.
 ##
 ## Returns `{host, title, hint}` so the pane keeps the refs it needs to rewrite
-## the text without rebuilding the surface.
+## the text without rebuilding the surface. The host is an arrival: it fades in
+## through `UiMotion.arrive` (a 4 px rise at Full), once, when the pane builds
+## it. A caller that builds before the content is in the tree gets the final
+## frame, never a surface frozen at alpha 0.
 static func empty_state(content: Control, glyph: String, title: String, hint: String, font_px: int) -> Dictionary:
 	var host := CenterContainer.new()
 	content.add_child(host)
@@ -148,8 +151,15 @@ static func empty_state(content: Control, glyph: String, title: String, hint: St
 	box.add_child(hint_label)
 
 	empty_state_font(title_label, hint_label, font_px)
+	UiMotion.arrive(host, UiMotion.ARRIVAL_MS, UiMotion.ARRIVAL_RISE_PX)
 
 	return {"host": host, "title": title_label, "hint": hint_label}
+
+## Capture only: freeze `surface`'s arrival at `progress` (0-1). The `-s`
+## harness cannot name `UiMotion` (it names the SettingsManager autoload), so it
+## calls this on the body, the way it calls `pin_effects`.
+func pin_arrival_at(surface: Control, progress: float) -> void:
+	UiMotion.pin_arrival(surface, progress)
 
 ## Re-apply `font_px` to an empty-state surface's two text lines: the title is
 ## one step above the body text, so both move together.

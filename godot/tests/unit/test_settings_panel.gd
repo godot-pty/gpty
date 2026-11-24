@@ -796,6 +796,39 @@ func test_open_commands_lands_on_the_tab_and_can_open_the_form():
 ## and font colours, and only the font size used to be mirrored. The default box
 ## (10 px a side plus 1 px borders) made the eight tabs 561 px wide, so the last
 ## two sat behind the overflow arrows at the 560x340 floor.
+# ── Section arrivals ───────────────────────────────────────────────────
+
+func test_a_tab_switch_fades_the_incoming_tab_only():
+	_panel.open()
+	await wait_frames(2)
+	var outgoing := _panel._tabs.get_tab_control(0)
+	_panel._tabs.current_tab = 1
+	var incoming := _panel._tabs.get_current_tab_control()
+	assert_not_null(incoming)
+	assert_lt(incoming.modulate.a, 0.5, "the incoming section fades in")
+	assert_eq(outgoing.modulate.a, 1.0, "the section it replaced is not re-faded")
+	await get_tree().process_frame
+	var size := incoming.size
+	await wait_seconds(0.15)
+	assert_almost_eq(incoming.modulate.a, 1.0, 0.001)
+	assert_true(incoming.size.is_equal_approx(size), "an arrival never reflows the card")
+
+func test_motion_off_switches_tabs_in_one_frame():
+	SettingsManager.cfg_motion = UiMotion.OFF
+	_panel.open()
+	await wait_frames(2)
+	_panel._tabs.current_tab = 1
+	assert_eq(_panel._tabs.get_current_tab_control().modulate.a, 1.0)
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+
+func test_open_commands_fades_the_commands_tab():
+	_panel.open()
+	await wait_frames(2)
+	_panel.open_commands()
+	var commands := _panel._tabs.get_current_tab_control()
+	assert_not_null(commands)
+	assert_lt(commands.modulate.a, 0.5, "a deep link is the same arrival")
+
 func test_the_live_tab_bar_uses_the_theme_box():
 	_pin_window(Vector2i(1920, 1080))
 	SettingsManager.cfg_ui_scale = 100

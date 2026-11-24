@@ -60,6 +60,40 @@ func test_opening_a_file_replaces_the_empty_state():
 	assert_string_contains(pane._editor.text, "extends Node")
 
 
+# ── The arrival ────────────────────────────────────────────────────────
+
+## The empty surface is an arrival: it fades in once, at the rect it will keep.
+func test_the_empty_state_fades_in_at_its_final_rect():
+	var pane := _make_viewer()
+	var host := pane._empty as Control
+	assert_true(host.has_meta(UiMotion.ARRIVAL_META), "the host is an arrival")
+	assert_lt(host.modulate.a, 0.5, "it starts transparent")
+	await get_tree().process_frame
+	var laid_out := host.size
+	await wait_seconds(0.2)
+	assert_almost_eq(host.modulate.a, 1.0, 0.001)
+	assert_true(host.size.is_equal_approx(laid_out),
+		"the fade never resizes the surface")
+
+func test_motion_off_draws_the_empty_state_final():
+	SettingsManager.cfg_motion = UiMotion.OFF
+	var pane := _make_viewer()
+	var host := pane._empty as Control
+	assert_eq(host.modulate, Color.WHITE, "no fade is recorded at Off")
+	assert_false(host.has_meta(UiMotion.ARRIVAL_META), "and nothing is pending")
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+
+func test_full_records_the_four_pixel_rise():
+	SettingsManager.cfg_motion = UiMotion.FULL
+	var pane := _make_viewer()
+	var host := pane._empty as Control
+	assert_true(host.has_meta(UiMotion.ARRIVAL_META))
+	var record: Dictionary = host.get_meta(UiMotion.ARRIVAL_META)
+	assert_almost_eq(float(record["rise"]), UiMotion.ARRIVAL_RISE_PX, 0.001,
+		"only Full asks the helper for the rise")
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+
+
 func test_a_routed_capture_is_content_without_a_file():
 	# `receive_content` clears `file_path` on purpose, so "empty" cannot be
 	# `file_path == ""` alone: that would hide a capture the pane is showing.

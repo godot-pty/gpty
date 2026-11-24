@@ -32,6 +32,9 @@ const CUE_TINT_IN_MS := 80
 const CUE_TINT_HOLD_MS := 240
 const CUE_TINT_OUT_MS := 400
 const CUE_PULSE_MS := 500
+## Motion Off draws a cue as a still border in its own tone for this long: the
+## state stays perceivable without a fade or a particle burst.
+const CUE_STILL_MS := 400
 const PARTICLES_AMOUNT := 48
 
 ## A new buffer frame is ready; the pane queues its effect layer.
@@ -52,6 +55,7 @@ var _configured_key := ""
 var _cue_effect := ""
 var _cue_alpha := 0.0
 var _pulse_alpha := 0.0
+var _still_alpha := 0.0
 var _last_flash_ms := -1
 var _cue_tween: Tween = null
 var _particles: CPUParticles2D = null
@@ -60,6 +64,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	focus_mode = Control.FOCUS_NONE
 	visibility_changed.connect(_sync_clock)
+	SettingsManager.settings_changed.connect(_on_settings_changed)
 	_sync_clock()
 
 ## Apply the ambient effect the pane's settings name. A repeated call is free:
@@ -134,6 +139,10 @@ func _draw() -> void:
 	if _pulse_alpha > 0.0:
 		draw_rect(Rect2(Vector2(1, 1), size - Vector2(2, 2)),
 			Color(UiEffects.tone_color("pulse"), _pulse_alpha), false, 2.0)
+	# The Motion-off cue: one still border in the cue's own tone.
+	if _still_alpha > 0.0:
+		draw_rect(Rect2(Vector2(1, 1), size - Vector2(2, 2)),
+			Color(UiEffects.tone_color(_cue_effect), _still_alpha), false, 2.0)
 
 ## Freeze (or resume) the animated clock for a capture: a pinned grain renders
 ## one deterministic frame and stops, so two runs of a state are identical.
@@ -166,14 +175,31 @@ func _sync_buffer_size(pane_size: Vector2) -> void:
 		if _buffer_rect != null:
 			_buffer_rect.size = Vector2(wanted)
 
+## Whether the animated clock is wanted at all: Motion Off freezes the field at
+## phase 0 (the frame a capture pins), so the pane keeps a static texture.
+func _clock_wanted() -> bool:
+	return _animated_material != null and not _pinned and UiMotion.enabled()
+
 func _sync_clock() -> void:
 	if _timer == null:
 		return
-	var run := _animated_material != null and not _pinned and is_visible_in_tree()
+	var run := _clock_wanted() and is_visible_in_tree()
 	if run and _timer.is_stopped():
 		_timer.start()
 	elif not run and not _timer.is_stopped():
 		_timer.stop()
+
+## A Motion change reaches the clock without a restart: Off stops it, resets
+## the field to phase 0 and renders that one frame, exactly as `pin` does.
+func _on_settings_changed() -> void:
+	if not UiMotion.enabled() and not _pinned:
+		_phase = 0.0
+		if _animated_material != null:
+			_animated_material.set_shader_parameter("phase", 0.0)
+		if _buffer != null:
+			_buffer.render_target_update_mode = SubViewport.UPDATE_ONCE
+		backdrop_frame.emit()
+	_sync_clock()
 
 func _tick() -> void:
 	_phase = fmod(Time.get_ticks_msec() / 1000.0 * GRAIN_RATE, 1000.0)
@@ -250,6 +276,7 @@ func pin_cue(effect_id: String) -> void:
 	_cue_effect = effect_id
 	_cue_alpha = TINT_PEAK_ALPHA if effect_id == "tint" else 0.0
 	_pulse_alpha = PULSE_PEAK_ALPHA if effect_id == "pulse" else 0.0
+	_still_alpha = 0.0
 	queue_redraw()
 
 func _start_cue(effect_id: String) -> void:
@@ -259,6 +286,17 @@ func _start_cue(effect_id: String) -> void:
 	_cue_effect = effect_id
 	_cue_alpha = 0.0
 	_pulse_alpha = 0.0
+	# Motion Off keeps the cue perceivable as one still border in the cue's own
+	# tone for its hold: no fade, no burst, and the rate limit above still
+	# applies. The border is chrome, never ink, so text stays opaque.
+	if not UiMotion.enabled():
+		_still_alpha = PULSE_PEAK_ALPHA
+		_cue_tween = create_tween()
+		_cue_tween.tween_interval(float(CUE_STILL_MS) / 1000.0)
+		_cue_tween.tween_callback(_clear_still)
+		queue_redraw()
+		return
+	_still_alpha = 0.0
 	if effect_id == "particles":
 		_ensure_particles()
 		if _particles != null:
@@ -275,6 +313,11 @@ func _start_cue(effect_id: String) -> void:
 	else:
 		_cue_tween.tween_method(_set_pulse_alpha, PULSE_PEAK_ALPHA, 0.0,
 			float(CUE_PULSE_MS) / 1000.0)
+	queue_redraw()
+
+func _clear_still() -> void:
+	_still_alpha = 0.0
+	_cue_tween = null
 	queue_redraw()
 
 func _set_cue_alpha(value: float) -> void:
