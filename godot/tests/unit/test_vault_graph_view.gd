@@ -524,3 +524,30 @@ func test_the_orbital_button_asks_for_the_3d_view():
 	watch_signals(view)
 	view._mode_button.pressed.emit()
 	assert_signal_emitted_with_parameters(view, "mode_requested", ["3d"])
+
+
+# ── Graph themes ───────────────────────────────────────────────────────
+
+func test_a_theme_change_repaints_without_moving_the_arrangement():
+	var view := _make_view()
+	var before := view.positions.duplicate(true)
+	var default_background: Color = view._theme_style()["background"]
+	assert_eq(view._ringed.size(), 0, "the default theme paints no planet rings")
+
+	view.apply_graph_theme("planetary")
+	assert_eq(view.graph_theme, "planetary")
+	assert_eq(str(view._style["node_shape"]), "sphere")
+	assert_ne(Color(view._style["background"]), default_background)
+	assert_eq(view.positions.size(), before.size(), "a theme never adds or drops a node")
+	for id in before:
+		assert_eq(view.positions[id], before[id], "%s must not move for a theme" % id)
+	assert_true(view._ringed.has("a.md"), "the busiest note carries a ring")
+	assert_string_contains(view._status.text, "Planetary")
+
+
+func test_an_unknown_theme_falls_back_to_default():
+	var view := _make_view()
+	view.apply_graph_theme("nope")
+	assert_eq(view.graph_theme, "default")
+	assert_eq(Color(view._style["background"]), UiPalette.active().BG)
+	assert_eq(view._ringed.size(), 0)

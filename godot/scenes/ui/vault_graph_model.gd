@@ -372,6 +372,13 @@ static func serialize_positions(positions: Dictionary, nodes: Array) -> Dictiona
 static func depth_for(id: String, spread: float) -> float:
 	return (_hash_unit(id) * 2.0 - 1.0) * spread
 
+
+## A stable hue for a note id, in [0, 1): the planetary theme paints each note
+## as its own world. Presentation only; the id is the seed, so a restored map
+## and a re-query agree and a theme switch never recolours a note differently.
+static func hue_for(id: String) -> float:
+	return _hash_unit(id)
+
 # ═══════════════════════════════════════════════════════════════════════
 # Layout
 # ═══════════════════════════════════════════════════════════════════════

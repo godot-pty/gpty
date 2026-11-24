@@ -98,6 +98,7 @@ godot/
         │   ├── docs_viewer.gd  # Settings > About: the README and the documents it links (Back/Forward)
         │   ├── nav_history.gd   # Bounded back/forward trail with a pinned root (pure)
         │   ├── vault_graph_canvas.gd # Shared contract: the planar and orbital vault link maps
+        │   ├── graph_theme.gd       # The graph's own closed theme table (default, planetary)
         │   ├── vault_graph_model.gd  # Pure vault link-map normalize/layout/hit-test
         │   ├── vault_graph_view.gd   # Planar, custom-drawn vault link map
         │   ├── vault_graph_3d.gd     # Orbital (3D) vault link map (SubViewport, bodies, springs)

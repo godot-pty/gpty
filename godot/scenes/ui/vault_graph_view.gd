@@ -48,6 +48,16 @@ const LABEL_GAP := 4.0
 ## Most of the view's width `fit_to_view` will reserve for labels: a long note
 ## title must not shrink the map to nothing.
 const MAX_LABEL_BLOCK := 180.0
+## The flat canvas owns its stroke alphas (the 3D link quads have their own
+## feathered gradient); a theme supplies the hues, not the presentation's
+## alpha. These reproduce the shipped planar look under the default theme.
+const PLANAR_EDGE_ALPHA := 0.28
+const PLANAR_RELATED_ALPHA := 0.85
+const PLANAR_DECLARED_ALPHA := 0.5
+## Planet rings on the flat canvas: a tilted ellipse, not a circle, so the
+## planetary theme reads the same as the orbital map's tilted ring quads.
+const PLANET_RING_SQUASH := 0.38
+const PLANET_RING_TILT_DEG := -18.0
 
 var _zoom := 1.0
 var _pan := Vector2.ZERO
@@ -63,6 +73,10 @@ var _max_degree := 1
 ## reserves on the right so the fitted map's labels stay inside the view.
 var _label_block_w := 0.0
 var _degrees: Dictionary = {}
+## The deterministic backdrop stars for the current style (empty for themes
+## that paint none), and the notes carrying a planet ring.
+var _backdrop_stars: Array = []
+var _ringed: Dictionary = {}
 var _status: Label
 var _hint: Label
 ## Where the cursor sentence is published (see `A11y.announce_host`).
@@ -83,6 +97,7 @@ func _ready() -> void:
 	clip_contents = true
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_build_chrome()
+	apply_graph_theme(graph_theme)
 	# The focus ring and the crosshair are drawn by this canvas, so a focus
 	# change is a repaint. `KeyboardFocus.ring` in `_build_chrome` is what makes
 	# the canvas a tab stop in the first place.
@@ -108,12 +123,7 @@ func show_graph(data: Dictionary, current_id := "", prepared_positions := {}) ->
 	_truncated = bool(data.get("truncated", false))
 	# A canvas has no text element: the shape and the gesture legend are its
 	# description, and the crosshair sentence below is its live cursor.
-	accessibility_description = (
-		"%d notes, %d links. Planar map. Arrows pan, plus and minus zoom, "
-		+ "Enter opens what the crosshair covers."
-	) % [nodes.size(), edges.size()]
-	if _truncated:
-		accessibility_description += " (map truncated)"
+	accessibility_description = _describe()
 	_a11y_cursor = ""
 	var first_show := positions.is_empty()
 	var previous := positions
@@ -123,6 +133,7 @@ func show_graph(data: Dictionary, current_id := "", prepared_positions := {}) ->
 	_max_degree = 1
 	for id in _degrees:
 		_max_degree = maxi(_max_degree, int(_degrees[id]["in"]) + int(_degrees[id]["out"]))
+	_rebuild_rings(_theme_style())
 	_label_block_w = _measure_label_block()
 	_recompute_weight_scale()
 	if current_id != "" and _has_node(current_id):
@@ -134,6 +145,54 @@ func show_graph(data: Dictionary, current_id := "", prepared_positions := {}) ->
 	queue_redraw()
 	if first_show:
 		call_deferred("_fit_if_needed")
+
+
+## Apply one [GraphTheme] snapshot: the backdrop, the chrome ink and the ring
+## set. Called by `apply_graph_theme` on a fresh view (possibly before it enters
+## the tree, so both labels are nullable) and on every appearance change.
+func _apply_style() -> void:
+	var style := _theme_style()
+	_backdrop_stars = GraphTheme.stars(int(style["stars"]))
+	var status_ink: Color = style["text"]
+	var hint_ink: Color = style["hint"]
+	if _status != null:
+		# theme-ok: the graph theme owns the canvas ground; reapplied on change
+		_status.add_theme_color_override("font_color", status_ink)
+	if _hint != null:
+		# theme-ok: the graph theme owns the canvas ground; reapplied on change
+		_hint.add_theme_color_override("font_color", hint_ink)
+	_rebuild_rings(style)
+	accessibility_description = _describe()
+	_update_status()
+	queue_redraw()
+
+
+## The notes the ring selection may consider: ghosts are targets, not worlds.
+func _note_ids() -> Array:
+	var out: Array = []
+	for node in nodes:
+		if node is Dictionary and not bool(node.get("ghost", false)):
+			var id := str(node.get("id", ""))
+			if id != "":
+				out.append(id)
+	return out
+
+
+func _rebuild_rings(style: Dictionary) -> void:
+	_ringed = GraphTheme.ringed(_note_ids(), _degrees, _max_degree, style)
+
+
+func _describe() -> String:
+	var text := (
+		"%d notes, %d links. Planar map. Theme %s. Arrows pan, plus and minus "
+		+ "zoom, Enter opens what the crosshair covers."
+	) % [
+		nodes.size(), edges.size(),
+		str(GraphTheme.LABELS.get(graph_theme, graph_theme)),
+	]
+	if _truncated:
+		text += " (map truncated)"
+	return text
 
 
 ## Re-apply the authored layer without re-querying the index: the graph's
@@ -283,7 +342,6 @@ func _build_chrome() -> void:
 	_hint.name = "GraphHint"
 	_hint.text = "Drag to pan · Wheel to zoom · Drag a node to move it · Click a note to open it · Right-click an edge to declare its weight · Arrows pan · +/− zoom · Enter opens what the crosshair covers"
 	_hint.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
-	_hint.modulate = Color(1, 1, 1, 0.55)
 	_hint.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	_hint.offset_left = 8
 	_hint.offset_top = -20
@@ -332,8 +390,10 @@ func label_placements() -> Array:
 		return []
 	var labels_all := _zoom >= LABEL_ZOOM and nodes.size() <= MAX_ALWAYS_LABELS
 	var view := Rect2(Vector2.ZERO, size)
-	var text_color := UiPalette.active().TEXT
-	var accent := UiPalette.active().ACCENT
+	var style := _theme_style()
+	var text_color: Color = style["text"]
+	var accent: Color = style["accent"]
+	var ghost_color: Color = style["ghost"]
 	var cursor := cursor_hit() if has_focus() else ""
 	var candidates: Array = []
 	for node in nodes:
@@ -364,7 +424,7 @@ func label_placements() -> Array:
 		var text := str(node.get("label", id))
 		var color := text_color
 		if ghost:
-			color = Color(text_color, 0.75)
+			color = Color(ghost_color, 0.9)
 		elif id == selected_id:
 			color = accent
 		var width := font.get_string_size(
@@ -438,6 +498,8 @@ func _update_status() -> void:
 	if _truncated:
 		text += " · truncated"
 	text += " · Planar"
+	if graph_theme != "default":
+		text += " · %s" % str(GraphTheme.LABELS.get(graph_theme, graph_theme))
 	if selected_id != "":
 		for node in nodes:
 			if node is Dictionary and str(node.get("id", "")) == selected_id:
@@ -453,8 +515,9 @@ func _notification(what: int) -> void:
 	elif what == NOTIFICATION_VISIBILITY_CHANGED and is_visible_in_tree():
 		_fit_if_needed()
 	elif what == NOTIFICATION_THEME_CHANGED:
-		# `_draw()` reads the palette itself, so a switch only needs a repaint.
-		queue_redraw()
+		# The palette changed: re-resolve the graph style (its default theme
+		# derives from the palette, and a fixed theme still has a light set).
+		apply_graph_theme(graph_theme)
 
 
 func _fit_if_needed() -> void:
@@ -657,21 +720,35 @@ func _on_edge_menu_pressed(id: int) -> void:
 # ── Drawing ────────────────────────────────────────────────────────────
 
 func _draw() -> void:
-	# The focus ring is the only visible sign that the canvas holds the
-	# keyboard: a custom-drawn control has no theme stylebox to draw it.
-	if has_focus():
-		draw_rect(
-			Rect2(Vector2(1, 1), size - Vector2(2, 2)),
-			UiPalette.active().ACCENT, false, 2.0
+	var style := _theme_style()
+	var background: Color = style["background"]
+	draw_rect(Rect2(Vector2.ZERO, size), background)
+	if _backdrop_stars.is_empty() and int(style["stars"]) > 0:
+		_backdrop_stars = GraphTheme.stars(int(style["stars"]))
+	var dust: Color = style["dust"]
+	for star in _backdrop_stars:
+		var at: Vector2 = star["at"]
+		draw_circle(
+			Vector2(at.x * size.x, at.y * size.y),
+			float(star["r"]),
+			Color(dust, float(star["a"]) * float(style["star_alpha"]))
 		)
 	if nodes.is_empty():
-		_draw_empty()
+		_draw_empty(style)
+		_draw_focus_frame()
 		return
 	var view := Rect2(Vector2.ZERO, size)
-	var text_color := UiPalette.active().TEXT
-	var accent := UiPalette.active().ACCENT
-	var edge_color := Color(text_color, 0.28)
-	var selected_edge := Color(accent, 0.85)
+	var text_color: Color = style["text"]
+	var accent: Color = style["accent"]
+	var base_edge: Color = style["edge"]
+	var base_related: Color = style["edge_related"]
+	var base_declared: Color = style["edge_declared"]
+	var edge_color := Color(base_edge, PLANAR_EDGE_ALPHA)
+	var related_edge := Color(base_related, PLANAR_RELATED_ALPHA)
+	var declared_edge := Color(base_declared, PLANAR_DECLARED_ALPHA)
+	var ghost_color: Color = style["ghost"]
+	var hover_fill: Color = style["node_hover"]
+	var ring_color: Color = style["ring"]
 	var cursor := cursor_hit() if has_focus() else ""
 	var font := get_theme_default_font()
 	if font == null:
@@ -689,11 +766,11 @@ func _draw() -> void:
 			continue
 		var related := selected_id != "" and (a == selected_id or b == selected_id)
 		var declared := int(edge.get("declared", 0))
-		var color := selected_edge if related else edge_color
+		var color := related_edge if related else edge_color
 		# An authored edge reads as authored even when nothing is selected: the
 		# accent tints it while the measured edges stay neutral.
 		if not related and declared > 0:
-			color = Color(accent, 0.5)
+			color = declared_edge
 		var width := VaultGraphModel.edge_width(
 			int(edge.get("weight", edge.get("count", 1))), _max_count
 		)
@@ -718,12 +795,16 @@ func _draw() -> void:
 		var radius := VaultGraphModel.node_radius(degree, _max_degree) * _zoom
 		radius = clampf(radius, 2.0, 22.0)
 		if ghost:
-			draw_arc(point, radius, 0.0, TAU, 20, Color(text_color, 0.6), 1.5, true)
-			draw_arc(point, radius + 2.0, 0.0, TAU, 20, Color(text_color, 0.18), 1.0, true)
+			draw_arc(point, radius, 0.0, TAU, 20, ghost_color, 1.5, true)
+			draw_arc(point, radius + 2.0, 0.0, TAU, 20, Color(ghost_color, 0.18), 1.0, true)
 		else:
-			var fill := Color(text_color, 0.75)
+			# The ring sits behind the disc, so the near half can show outside
+			# the note and the far half is covered — the flat Saturn cue.
+			if _ringed.has(id):
+				_draw_planet_ring(point, radius, ring_color)
+			var fill := GraphTheme.note_color(id, style)
 			if id == hovered_id:
-				fill = Color(text_color, 0.95)
+				fill = hover_fill
 			draw_circle(point, radius, fill)
 		if id == hovered_id:
 			draw_arc(point, radius + 2.0, 0.0, TAU, 24, Color(text_color, 0.5), 1.0, true)
@@ -755,9 +836,38 @@ func _draw() -> void:
 		var ink := Color(accent, 0.9)
 		draw_line(mid - Vector2(CURSOR_ARM, 0), mid + Vector2(CURSOR_ARM, 0), ink, 1.5, true)
 		draw_line(mid - Vector2(0, CURSOR_ARM), mid + Vector2(0, CURSOR_ARM), ink, 1.5, true)
+	_draw_focus_frame()
 
 
-func _draw_empty() -> void:
+## A tilted ellipse behind a planet note: the flat counterpart of the orbital
+## map's ring quads. The colour carries the theme's ring alpha.
+func _draw_planet_ring(point: Vector2, radius: float, color: Color) -> void:
+	var ring_radius := radius * float(_theme_style()["ring_scale"]) * 0.78
+	if ring_radius <= radius:
+		return
+	var points := PackedVector2Array()
+	var tilt := deg_to_rad(PLANET_RING_TILT_DEG)
+	for i in 25:
+		var angle := TAU * float(i) / 24.0
+		var offset := Vector2(
+			cos(angle) * ring_radius,
+			sin(angle) * ring_radius * PLANET_RING_SQUASH
+		)
+		points.append(point + offset.rotated(tilt))
+	draw_polyline(points, color, 1.2, true)
+
+
+## The focus ring is the only visible sign that the canvas holds the keyboard:
+## a custom-drawn control has no theme stylebox to draw it. Drawn after the
+## themed ground and graph so neither can cover it.
+func _draw_focus_frame() -> void:
+	if not has_focus():
+		return
+	var accent: Color = _theme_style()["accent"]
+	draw_rect(Rect2(Vector2(1, 1), size - Vector2(2, 2)), accent, false, 2.0)
+
+
+func _draw_empty(style: Dictionary) -> void:
 	var text := "No notes to graph."
 	if _status != null:
 		_status.text = text
@@ -766,6 +876,7 @@ func _draw_empty() -> void:
 		return
 	var font_size := 11
 	var width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+	var text_color: Color = style["muted"]
 	draw_string(
 		font,
 		(size - Vector2(width, 0.0)) * 0.5,
@@ -773,7 +884,7 @@ func _draw_empty() -> void:
 		HORIZONTAL_ALIGNMENT_LEFT,
 		-1,
 		font_size,
-		Color(UiPalette.active().TEXT, 0.6)
+		text_color
 	)
 
 

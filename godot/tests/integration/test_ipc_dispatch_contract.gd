@@ -1389,6 +1389,35 @@ func test_pane_set_owns_the_wiki_graph_mode_not_its_geometry():
 	_ws._kill_now(wiki)
 
 
+## The graph theme is a closed pane setting like the presentation: a known id
+## applies to the live view and is named in `changed`; an id outside the table
+## is refused with the key named rather than silently ignored.
+func test_pane_set_owns_the_wiki_graph_theme():
+	var wiki := _wiki_pane()
+	var id := str(wiki.attachment_id)
+
+	var applied = WorkspaceIpcHandlers.handle(_ws, "paneSet", {
+		"pane_id": id, "settings": {"graph_theme": "planetary"},
+	})
+	assert_false(applied.has("error"), "a known theme is a caller's to set: %s" % applied)
+	assert_true(bool(applied.get("success", false)))
+	assert_true((applied.get("changed", []) as Array).has("graph_theme"),
+		"the changed key must be named: %s" % str(applied.get("changed")))
+	assert_eq(str(wiki.graph_theme), "planetary")
+	assert_eq(wiki._graph_view.graph_theme, "planetary",
+		"the live canvas repaints with the new style")
+
+	var refused = WorkspaceIpcHandlers.handle(_ws, "paneSet", {
+		"pane_id": id, "settings": {"graph_theme": "bogus"},
+	})
+	assert_true(refused.has("error"), "a theme outside the table must be refused")
+	assert_eq(int(refused["error"]["code"]), -32602, "a bad parameter is -32602")
+	assert_string_contains(str(refused["error"]["message"]), "graph_theme")
+	assert_eq(str(wiki.graph_theme), "planetary", "a refused call applies nothing")
+	await get_tree().process_frame
+	_ws._kill_now(wiki)
+
+
 ## The save/discard question a vault change asks belongs to the user: a caller
 ## that cannot answer it is refused, and the open note survives.
 func test_pane_set_refuses_to_discard_an_unsaved_note():

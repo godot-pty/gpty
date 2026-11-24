@@ -356,6 +356,30 @@ const STATES := {
 		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
 		"graph_mode": "3d", "orbit": true, "settings": {"cfg_motion": 0},
 	},
+	# The perspective dolly: an orbit plus two depth steps so the near layers are
+	# visibly larger than the far ones. Motion off repeats the dust.
+	"wiki-graph-depth": {
+		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
+		"graph_mode": "3d", "orbit": true, "depth": 2.5,
+		"settings": {"cfg_motion": 0},
+	},
+	# The Planetary theme on both presentations, and its light set. The orbital
+	# capture is the row's evidence; the flat and light states prove the table
+	# reaches every presentation without a second implementation.
+	"wiki-graph-planetary": {
+		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
+		"graph_mode": "3d", "graph_theme": "planetary", "orbit": true,
+		"settings": {"cfg_motion": 0},
+	},
+	"wiki-graph-planetary-planar": {
+		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
+		"graph_mode": "2d", "graph_theme": "planetary",
+	},
+	"light-wiki-graph-planetary": {
+		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
+		"graph_mode": "3d", "graph_theme": "planetary", "orbit": true,
+		"settings": {"cfg_appearance_mode": 1, "cfg_motion": 0},
+	},
 	# The orbital map on the light chrome: the halos switch to alpha blending
 	# and the world glow is off (a white ground cannot bloom); motion is off for
 	# the same deterministic dust.
@@ -956,6 +980,9 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			var wanted_mode := str(state.get("graph_mode", ""))
 			if wanted_mode != "":
 				body.apply_settings({"graph_mode": wanted_mode})
+			var wanted_theme := str(state.get("graph_theme", ""))
+			if wanted_theme != "":
+				body.apply_settings({"graph_theme": wanted_theme})
 			# WIKI_GRAPH_TILE has no saved view, so the pane opens the graph by
 			# default. The click path remains for a state staged on a notes
 			# surface; once the graph is up its Graph button is hidden.
@@ -975,16 +1002,13 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			if graph == null or not graph.visible:
 				_fail("the wiki pane did not open its default graph")
 				return false
-			if bool(state.get("orbit", false)) and graph.has_method("_set_orbit"):
+			if bool(state.get("orbit", false)) and graph.has_method("_orbit_by"):
 				# A front view reads as a flat network; a small, synthetic
-				# orbit shows the depth layers without moving any body.
-				graph._orbit_button.button_pressed = true
-				graph._begin_left(Vector2(2.0, 2.0))
-				var orbit := InputEventMouseMotion.new()
-				orbit.position = Vector2(72.0, 22.0)
-				orbit.relative = Vector2(70.0, 20.0)
-				graph._gui_input(orbit)
-				graph._end_left(orbit.position)
+				# orbit shows the depth layers without moving any body. Depth
+				# states then travel the target along that orbit's forward axis.
+				graph._orbit_by(Vector2(70.0, 20.0))
+				if state.has("depth"):
+					graph._travel_depth(float(state["depth"]))
 				graph._rebuild_links()
 				await _wait_frames(2)
 		"concept-editor":

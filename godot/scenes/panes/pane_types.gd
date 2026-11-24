@@ -596,6 +596,11 @@ const WIKI_GRAPH_MODE_LABELS := {
 	"2d": "Planar",
 }
 
+## The wiki link-map themes. The registry owns the ids and labels so the Pane
+## Settings picker and the layout schema cannot drift.
+const WIKI_GRAPH_THEMES := GraphTheme.IDS
+const WIKI_GRAPH_THEME_LABELS := GraphTheme.LABELS
+
 const CODE_VIEWER_SETTINGS := {
 	"file_path": {"kind": "text", "max": 4096},
 	"language": {"kind": "text", "max": 64, "values": CODE_VIEWER_LANGUAGES},
@@ -644,6 +649,7 @@ const WIKI_SETTINGS := {
 	"vault_path": {"kind": "text", "max": 4096},
 	"view_mode": {"kind": "text", "max": 32, "values": WIKI_VIEW_MODES},
 	"graph_mode": {"kind": "text", "max": 8, "values": WIKI_GRAPH_MODES},
+	"graph_theme": {"kind": "text", "max": 16, "values": WIKI_GRAPH_THEMES},
 	# Restore-only state: both are replayed at attach and ignored on a live pane
 	# (`WikiPane.apply_settings` clears them once it is in the tree), and the
 	# gestures themselves belong to `pane-view --note` / `--graph`.

@@ -4,12 +4,15 @@ extends Control
 ##
 ## [VaultGraphView] draws the planar canvas; [VaultGraph3D] runs the orbital
 ## map in a `SubViewport`. The pane types its view as this base and swaps the
-## two at runtime, so the signals, the session geometry and the public verbs
-## live here and neither presentation invents its own.
+## two at runtime, so the signals, the session geometry, the graph theme and
+## the public verbs live here and neither presentation invents its own.
 ##
 ## `positions` is model-space geometry (`id -> Vector2`), owned per view. The
 ## model remains the data, layout and hit-test owner; this base only carries
-## what the pane and the drawing code share.
+## what the pane and the drawing code share. `graph_theme` selects one of
+## [GraphTheme]'s closed tables; `_style` is the resolved snapshot both draw
+## code reads, rebuilt by [method apply_graph_theme] and never cached from the
+## palette in a class-body initializer.
 ##
 ## The verbs below are the contract. GDScript has no abstract methods, so each
 ## is declared with an empty body (a base body is never reached): subclasses
@@ -46,10 +49,40 @@ var positions: Dictionary = {}
 var selected_id := ""
 var hovered_id := ""
 var show_arrows := false
+## The graph's own theme id ([GraphTheme.IDS]); the pane owns the setting and
+## calls [method apply_graph_theme] on a fresh or live view.
+var graph_theme := "default"
+## The resolved [GraphTheme.style] snapshot the draw code reads.
+var _style: Dictionary = {}
 
 ## The store capped the graph; the status says so instead of presenting a cut
 ## graph as whole.
 var _truncated := false
+
+
+## Re-resolve the graph style for `id` under the active appearance and apply it.
+## Safe before the view enters the tree: subclasses store the style and guard
+## their widgets, and `_ready` calls this again.
+func apply_graph_theme(id: String) -> void:
+	graph_theme = GraphTheme.normalize(id)
+	_style = GraphTheme.style(graph_theme, SettingsManager.is_dark_appearance())
+	_apply_style()
+	queue_redraw()
+
+
+## Subclass hook: re-derive materials, chrome colours, the status line and the
+## backdrop from `_style`. Called after `_style` changes; never reads the
+## palette directly.
+func _apply_style() -> void:
+	pass
+
+
+## The style for the current theme, resolved lazily for a view shown before
+## `_ready` ran.
+func _theme_style() -> Dictionary:
+	if _style.is_empty():
+		_style = GraphTheme.style(graph_theme, SettingsManager.is_dark_appearance())
+	return _style
 
 
 ## Replace the canvas with one normalized graph answer (the parse's result).
