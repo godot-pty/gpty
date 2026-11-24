@@ -7,6 +7,14 @@ extends GutTest
 # The state table's own contents (four shapes, three glyphs, roles, labels) are
 # asserted once, in the integration test, so nothing is pinned twice.
 
+func before_each():
+	# The badge reads the live Motion setting; a developer's own store must not
+	# decide whether these assertions see frames.
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+
+func after_each():
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+
 
 # ── Silhouette ─────────────────────────────────────────────────────────
 
@@ -57,3 +65,27 @@ func test_a_state_names_itself_for_the_pointer_and_the_reader():
 	assert_eq(badge.tooltip_text, "", "a hidden badge keeps no tooltip")
 	assert_eq(badge.accessibility_name, "", "a hidden badge announces nothing")
 	assert_false(badge.is_processing(), "a hidden badge costs no frames")
+
+
+# ── The Motion setting ─────────────────────────────────────────────────
+
+## Motion Off is a promise about the screen, not about the next restart: the
+## badge keeps the silhouette a capture pins (phase 0) and gives up its frames
+## the moment the setting moves.
+func test_motion_off_stops_the_clock_at_the_pinned_frame():
+	SettingsManager.cfg_motion = UiMotion.OFF
+	var badge := AgentBadge.new()
+	add_child_autofree(badge)
+	badge.show_state("working")
+	assert_false(badge.is_processing(), "Off draws a still notch")
+	assert_eq(badge._phase, 0.0, "the frame a capture pins")
+	assert_true(badge.visible)
+
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	SettingsManager.settings_changed.emit()
+	assert_true(badge.is_processing(), "turning Motion back on restarts the turn")
+
+	SettingsManager.cfg_motion = UiMotion.OFF
+	SettingsManager.settings_changed.emit()
+	assert_false(badge.is_processing())
+	assert_eq(badge._phase, 0.0)

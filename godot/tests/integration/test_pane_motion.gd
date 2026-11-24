@@ -311,3 +311,66 @@ func test_a_crossfade_swap_dissolves_through_the_midpoint():
 	assert_eq(wa.modulate, Color.WHITE, "the dissolve restores full opacity")
 	assert_eq(wb.modulate, Color.WHITE)
 	assert_eq(ws._transitions.playing(), 0)
+
+
+# ── Focus sweep ────────────────────────────────────────────────────────
+
+## The restored first terminal: these tests need a real body with a real
+## overlay, and the create path is covered above.
+func _terminal_body(ws: Control) -> Control:
+	return ws._tm._find_body(ws._tm.tiles[0].wrapper)
+
+func test_a_focus_gain_sweeps_from_transparent_to_the_steady_border():
+	var ws = await _make_workspace()
+	var body = _terminal_body(ws)
+	body.release_focus()
+	await wait_seconds(0.25)
+	var rect_before := _rect(ws._tm.tiles[0].wrapper)
+	var size_before: Vector2 = body.size
+	body.grab_focus()
+	assert_true(body.has_focus(), "the pane owns the keyboard")
+	assert_almost_eq(body._focus_alpha, 0.0, 0.001, "the sweep starts transparent")
+	assert_true(body._focus_tween != null and body._focus_tween.is_valid())
+	await wait_seconds(0.25)
+	assert_almost_eq(body._focus_alpha, 1.0, 0.001)
+	assert_true(_rect(ws._tm.tiles[0].wrapper).is_equal_approx(rect_before),
+		"a sweep never moves a tile")
+	assert_true(body.size.is_equal_approx(size_before), "or resizes the body")
+
+func test_motion_off_draws_the_focus_border_in_one_frame():
+	SettingsManager.cfg_motion = UiMotion.OFF
+	var ws = await _make_workspace()
+	var body = _terminal_body(ws)
+	body.release_focus()
+	assert_almost_eq(body._focus_alpha, 0.0, 0.001)
+	body.grab_focus()
+	assert_almost_eq(body._focus_alpha, 1.0, 0.001, "Off draws the final border")
+	assert_null(body._focus_tween, "and leaves no tween behind")
+
+func test_an_interrupted_sweep_leaves_one_tween():
+	var ws = await _make_workspace()
+	var body = _terminal_body(ws)
+	body.release_focus()
+	await wait_seconds(0.25)
+	body.grab_focus()
+	await wait_seconds(0.05)
+	var first = body._focus_tween
+	assert_true(first != null and first.is_valid(), "a sweep is running")
+	body.release_focus()
+	assert_false(first.is_valid(), "the new direction killed the old tween")
+	assert_true(body._focus_tween != null and body._focus_tween.is_valid(),
+		"exactly one tween is left")
+	await wait_seconds(0.25)
+	assert_almost_eq(body._focus_alpha, 0.0, 0.001)
+
+func test_a_pinned_sweep_is_stable():
+	var ws = await _make_workspace()
+	var body = _terminal_body(ws)
+	body.release_focus()
+	await wait_seconds(0.25)
+	body.pin_focus_sweep(0.5)
+	assert_almost_eq(body._focus_alpha, 0.5, 0.001)
+	body.grab_focus()
+	await wait_process_frames(2)
+	assert_almost_eq(body._focus_alpha, 0.5, 0.001,
+		"a pinned sweep ignores later focus changes")

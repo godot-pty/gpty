@@ -38,6 +38,9 @@ var terminal_padding: int = PaneTypes.TERMINAL_PADDING_DEFAULT:
 ## a tile is being laid out.
 const MIN_SIZE_COLS := 4
 const FOCUS_BORDER_WIDTH = 2.0
+## How long a focus gain fades the border in (and a loss fades it out). The
+## border is drawn in the overlay layer, so a sweep never repaints a row.
+const FOCUS_SWEEP_S := 0.14
 const BEAM_CURSOR_WIDTH = 2
 const UNDERLINE_CURSOR_HEIGHT = 3
 const PRINTABLE_ASCII_MIN = 32
@@ -242,6 +245,11 @@ var _ground: Color = Color(0, 0, 0)
 var _cell_w: float = 0.0
 var _cell_h: float = 0.0
 var _cursor_blink_timer: float = 0.0
+## The focus border's own alpha: 1 while focused, faded on loss, swept on gain.
+## `_focus_pinned` is the capture seam (`pin_focus_sweep`).
+var _focus_alpha := 0.0
+var _focus_tween: Tween = null
+var _focus_pinned := false
 var _cursor_visible: bool = true
 var _last_title: String = ""
 var _selecting: bool = false
@@ -556,6 +564,12 @@ func _ready():
 	# Entering the pane reads the screen that is on it; the tick announces
 	# output only while the pane is not focused.
 	focus_entered.connect(_on_a11y_focus_entered)
+	# A focus change is drawn, not laid out: the border fades in on gain and out
+	# on loss, and a second change takes over from the current alpha.
+	focus_entered.connect(_animate_focus.bind(true))
+	focus_exited.connect(_animate_focus.bind(false))
+	if has_focus():
+		_focus_alpha = 1.0
 	_terminal = GptyTerminal.new()
 	_terminal.name = "GptyTerminal"
 	add_child(_terminal)
@@ -1478,6 +1492,41 @@ func _repaint_overlay():
 	if _overlay != null:
 		_overlay.queue_redraw()
 
+## Fade the border toward `gain`'s target. A second change kills the running
+## tween and starts from the alpha on screen, so an interrupted sweep leaves
+## exactly one border; Off writes the target and repaints once.
+func _animate_focus(gain: bool) -> void:
+	if _focus_pinned:
+		return
+	if _focus_tween != null and _focus_tween.is_valid():
+		_focus_tween.kill()
+	_focus_tween = null
+	var target := 1.0 if gain else 0.0
+	if not UiMotion.enabled():
+		_focus_alpha = target
+		_repaint_overlay()
+		return
+	var from := _focus_alpha
+	var duration := UiMotion.duration_s(FOCUS_SWEEP_S)
+	if duration <= 0.0:
+		_focus_alpha = target
+		_repaint_overlay()
+		return
+	_focus_tween = create_tween()
+	_focus_tween.tween_method(func(value: float):
+		_focus_alpha = value
+		_repaint_overlay(), from, target, duration)
+
+## Capture only: hold the border at `alpha` (0-1) and ignore later focus
+## changes, so a staged `focus-sweep` state is pixel-identical between runs.
+func pin_focus_sweep(alpha: float) -> void:
+	_focus_pinned = true
+	if _focus_tween != null and _focus_tween.is_valid():
+		_focus_tween.kill()
+	_focus_tween = null
+	_focus_alpha = clampf(alpha, 0.0, 1.0)
+	_repaint_overlay()
+
 func _draw():
 	var t0 = Time.get_ticks_usec()
 	# The pane's own canvas draws under every child, so it carries only the
@@ -1595,9 +1644,12 @@ func _draw_overlay(item: CanvasItem):
 	if _terminal != null and not _cell_cache.is_empty() and int(_cell_cache.get("rows", 0)) > 0:
 		var off: Vector2 = _grid_offset()
 		var baseline: float = _font.get_ascent(font_size)
-		# Focus border
-		if has_focus():
-			item.draw_rect(Rect2(0, 0, size.x, size.y), focus_border_color, false, FOCUS_BORDER_WIDTH)
+		# Focus border: an arrival, so it is drawn from its own alpha rather
+		# than from `has_focus()` (a lost focus keeps fading out).
+		if _focus_alpha > 0.0:
+			item.draw_rect(Rect2(0, 0, size.x, size.y),
+				Color(focus_border_color, focus_border_color.a * _focus_alpha),
+				false, FOCUS_BORDER_WIDTH)
 		# Cursor
 		if _cursor_visible:
 			_draw_cursor(item, off, baseline)

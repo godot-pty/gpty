@@ -19,6 +19,12 @@ var _steps := [
 	{"type": "code_viewer", "chord": "Ctrl+Shift+D", "label": "New Code Viewer"},
 ]
 
+func before_each():
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+
+func after_each():
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+
 func _make(rows: Array, steps: Array) -> ShortcutGuide:
 	var guide := ShortcutGuide.new()
 	guide.theme = UiTheme.build()
@@ -112,6 +118,138 @@ func test_the_clock_stops_when_hidden():
 	await get_tree().process_frame
 	assert_true(guide.is_processing(), "showing it restarts the clock")
 	guide.pin_animation()
+
+
+# ── The Motion setting ─────────────────────────────────────────────────
+
+## Off is the frame a capture pins: the first step at phase 0, no press, no
+## ripple, no frames. A second guide pinned by hand must be identical.
+func test_motion_off_is_the_pinned_frame():
+	SettingsManager.cfg_motion = UiMotion.OFF
+	var off := _make(_rows, _steps)
+	await get_tree().process_frame
+	assert_false(off.is_processing(), "a static guide costs no frames")
+	assert_eq(off._step, 0)
+	assert_eq(off._phase, 0.0)
+	assert_eq(off._hero_keycap.scale, Vector2.ONE, "the keycap is at rest")
+	assert_eq(off._ripple.phase, 0.0, "the ripple is on its first frame")
+
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	var pinned := _make(_rows, _steps)
+	await get_tree().process_frame
+	pinned.pin_animation()
+	assert_eq(pinned._step, off._step)
+	assert_eq(pinned._hero_keycap.scale, off._hero_keycap.scale)
+	assert_eq(pinned._ripple.phase, off._ripple.phase)
+
+## A settings save reaches the guide without a restart, in both directions.
+func test_a_motion_change_starts_or_stops_the_clock():
+	SettingsManager.cfg_motion = UiMotion.OFF
+	var guide := _make(_rows, _steps)
+	await get_tree().process_frame
+	assert_false(guide.is_processing())
+
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	SettingsManager.settings_changed.emit()
+	assert_true(guide.is_processing(), "turning Motion on restarts the clock")
+	assert_eq(guide._step, 0, "the demonstration restarts from its first step")
+
+	SettingsManager.cfg_motion = UiMotion.OFF
+	SettingsManager.settings_changed.emit()
+	assert_false(guide.is_processing(), "and Off stops it again")
+	assert_eq(guide._phase, 0.0, "frozen at the pinned frame")
+
+
+# ── The typewriter ─────────────────────────────────────────────────────
+
+func test_each_step_types_in_and_completes():
+	var guide := _make(_rows, _steps)
+	await get_tree().process_frame
+	var chord := guide.find_child("HeroChord", true, false) as Label
+	var caption := guide.find_child("HeroCaption", true, false) as Label
+	assert_lt(chord.visible_characters, chord.text.length(),
+		"a step does not appear all at once")
+	assert_ne(chord.visible_characters, -1)
+	assert_eq(chord.text, "Ctrl+Shift+N", "the text is set in full, so nothing reflows")
+	var rect := chord.get_rect()
+	guide._process(ShortcutGuide.REVEAL_CEIL_S)
+	assert_eq(chord.visible_characters, -1, "the deadline shows every character")
+	assert_eq(caption.visible_characters, -1)
+	assert_eq(chord.get_rect(), rect, "typing never moves the label")
+	assert_eq(chord.text, "Ctrl+Shift+N")
+
+func test_the_reveal_finishes_by_its_deadline():
+	var guide := _make(_rows, _steps)
+	await get_tree().process_frame
+	var chord := guide.find_child("HeroChord", true, false) as Label
+	var caption := guide.find_child("HeroCaption", true, false) as Label
+	# Twelve characters at the shipped rate, under the 0.6 s ceiling.
+	var span := minf(ShortcutGuide.REVEAL_CEIL_S, 12.0 / ShortcutGuide.REVEAL_CPS)
+	assert_lt(span, ShortcutGuide.HERO_CYCLE, "legible before the cycle turns")
+	guide._process(span)
+	assert_eq(chord.visible_characters, -1)
+	assert_eq(caption.visible_characters, -1)
+
+func test_a_click_mid_reveal_spawns_exactly_once():
+	var guide := _make(_rows, _steps)
+	await get_tree().process_frame
+	watch_signals(guide)
+	var hero := guide.find_child("HeroKeycap", true, false) as Button
+	var chord := guide.find_child("HeroChord", true, false) as Label
+	guide._process(0.1)
+	assert_ne(chord.visible_characters, -1, "the reveal is still running")
+	hero.pressed.emit()
+	assert_signal_emit_count(guide, "new_pane_requested", 1,
+		"skipping the text must not swallow or double the spawn")
+	assert_signal_emitted_with_parameters(guide, "new_pane_requested", ["terminal"])
+	assert_eq(chord.visible_characters, -1, "the click completed the reveal")
+
+func test_motion_off_shows_every_character_at_frame_zero():
+	SettingsManager.cfg_motion = UiMotion.OFF
+	var guide := _make(_rows, _steps)
+	await get_tree().process_frame
+	var title := guide.find_child("Title", true, false) as Label
+	var chord := guide.find_child("HeroChord", true, false) as Label
+	var caption := guide.find_child("HeroCaption", true, false) as Label
+	assert_eq(title.visible_characters, -1, "no typewriter without motion")
+	assert_eq(chord.visible_characters, -1)
+	assert_eq(caption.visible_characters, -1)
+
+## The title has its own group: a step reveal must not replace it, a hide must
+## complete it, and a second show must not type it again.
+func test_the_title_types_once_and_is_not_frozen():
+	var guide := _make(_rows, _steps)
+	await get_tree().process_frame
+	var title := guide.find_child("Title", true, false) as Label
+	var chord := guide.find_child("HeroChord", true, false) as Label
+	guide._process(0.1)
+	assert_gt(title.visible_characters, 0, "the title types in")
+	assert_lt(title.visible_characters, title.text.length())
+	guide.visible = false
+	await get_tree().process_frame
+	assert_eq(title.visible_characters, -1, "hiding completes the line")
+	guide.visible = true
+	await get_tree().process_frame
+	assert_eq(title.visible_characters, -1, "and it never types twice")
+	assert_lt(chord.visible_characters, chord.text.length(),
+		"while the hero step starts its own reveal")
+
+func test_pin_animation_completes_the_reveal():
+	var guide := _make(_rows, _steps)
+	await get_tree().process_frame
+	var chord := guide.find_child("HeroChord", true, false) as Label
+	var caption := guide.find_child("HeroCaption", true, false) as Label
+	guide.pin_animation()
+	assert_eq(chord.visible_characters, -1)
+	assert_eq(caption.visible_characters, -1)
+
+	guide.pin_animation(0.5)
+	var half := chord.visible_characters
+	assert_gt(half, 0, "the pinned frame is mid-word")
+	assert_lt(half, chord.text.length())
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_eq(chord.visible_characters, half, "a pinned reveal does not advance")
 
 # ── Responsive columns ────────────────────────────────────────────────
 

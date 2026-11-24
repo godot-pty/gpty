@@ -75,13 +75,23 @@ func _show_next():
 
 	_current_panel = panel
 	var duration: float = data.get("duration", 3.0)
+	# Motion Off reduces a toast to its hold time: no fade in, no fade out, and
+	# the same queue behind it. The durations are the policy's, not this file's.
+	var fade_in := UiMotion.duration_s(0.2)
+	var fade_out := UiMotion.duration_s(0.5)
 	var t = create_tween()
 	_current_tween = t
 	# One fade-in: the old pair set alpha to 1 instantly and then restarted
 	# from 0, so every toast flashed fully opaque for a frame.
-	t.tween_property(panel, "modulate:a", 1.0, 0.2).from(0.0)
+	if fade_in > 0.0:
+		t.tween_property(panel, "modulate:a", 1.0, fade_in).from(0.0)
+	else:
+		panel.modulate.a = 1.0
 	t.tween_interval(duration)
-	t.tween_property(panel, "modulate:a", 0.0, 0.5)
+	if fade_out > 0.0:
+		t.tween_property(panel, "modulate:a", 0.0, fade_out)
+	else:
+		t.tween_callback(func(): panel.modulate.a = 0.0)
 	t.tween_callback(func():
 		_current_panel = null
 		_current_tween = null)

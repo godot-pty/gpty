@@ -236,6 +236,18 @@ func test_typing_in_the_palette_filters_its_commands():
 	input.text_changed.emit("no such command")
 	assert_eq(_commands(ws), [], "a query matching nothing lists nothing")
 
+## A filtered list is an update, not an arrival: rows are created final and no
+## arrival is recorded, so a keystroke never animates the list.
+func test_a_filter_keystroke_creates_no_arrival():
+	var ws = await _make_workspace()
+	ws._toggle_palette()
+	var input: LineEdit = ws._palette._field
+	input.text_changed.emit("wiki")
+	assert_gt(_rows(ws).size(), 0)
+	for row in _rows(ws):
+		assert_eq(row.modulate.a, 1.0, "a filtered row is already final")
+		assert_false(row.has_meta(UiMotion.ARRIVAL_META), "no arrival was recorded")
+
 func test_a_query_with_no_match_shows_its_empty_state():
 	var ws = await _make_workspace()
 	ws._toggle_palette()

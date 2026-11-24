@@ -145,9 +145,22 @@ func build(bg_rect: ColorRect):
 
 func update_pane_list(panes: Array, active_body: Control = null):
 	if not _pane_list: return
+	# Only an appended row is an arrival: the previous list must still be a
+	# prefix, so a workspace switch or a restore (different identities) and the
+	# first render of a list are not a cascade of fades.
+	var created: Array = []
+	if not _pane_items.is_empty() and panes.size() > _pane_items.size() \
+			and panes.size() <= _pane_items.size() + UiMotion.ARRIVAL_MAX_STAGGERED:
+		var prefix := true
+		for i in _pane_items.size():
+			if panes[i] != _pane_items[i]:
+				prefix = false
+				break
+		if prefix:
+			created = panes.slice(_pane_items.size())
 	_pane_items.assign(panes)
 	_pane_active = active_body
-	_sync_pane_rows()
+	_sync_pane_rows(created)
 
 ## Move the list's state without touching its rows: the active accent and the
 ## section's header. Everything else a row shows is updated by
@@ -657,8 +670,9 @@ func _sync_workspace_header():
 ## Bring the pane list to the model by touching only the rows that differ: a
 ## spawn adds one row, a close detaches one, a renumber rewrites one label. The
 ## old clear-and-rebuild ran five glyph Labels per live pane on every change,
-## which is what made a spawn cost grow with the grid's fill.
-func _sync_pane_rows():
+## which is what made a spawn cost grow with the grid's fill. `created` names
+## the bodies whose row is new in this call; only those fade in.
+func _sync_pane_rows(created: Array = []):
 	if not _pane_list: return
 	_validate_pane_pending()
 	var live := {}
@@ -684,6 +698,12 @@ func _sync_pane_rows():
 			row = _make_pane_row(body, body == _pane_active)
 			_pane_list.add_child(row)
 			_pane_rows[key] = {"body": body, "row": row}
+			if created.has(body):
+				var slot := created.find(body)
+				var delay := 0.0
+				if UiMotion.allows_overshoot() and slot < UiMotion.ARRIVAL_MAX_STAGGERED:
+					delay = float(slot) * UiMotion.ARRIVAL_STAGGER_MS
+				UiMotion.arrive(row, UiMotion.ARRIVAL_MS, 0.0, delay)
 		else:
 			_update_pane_row(row, body)
 		if row.get_index() != i:

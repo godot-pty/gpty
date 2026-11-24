@@ -15,6 +15,7 @@ func before_each():
 	add_child(_overlay)
 
 func after_each():
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
 	_overlay.free()
 	MockAutoloads.teardown()
 
@@ -83,3 +84,25 @@ func test_the_queue_is_bounded_and_keeps_the_newest():
 	assert_eq(str(_overlay._queue[0]["text"]), "m92", "the oldest queued message is dropped")
 	assert_eq((_panel_of().get_child(0) as Label).text, "first",
 		"the visible message was not replaced")
+
+## Motion Off reduces a toast to its hold time: it is opaque on the frame it is
+## enqueued (no fade in), keeps its message legible for the whole hold, and the
+## queue still serializes.
+func test_motion_off_is_a_hold_without_fades():
+	SettingsManager.cfg_motion = UiMotion.OFF
+	ToastManager.info("hold only", 0.15)
+	var panel := _panel_of()
+	assert_not_null(panel)
+	assert_almost_eq(panel.modulate.a, 1.0, 0.001, "no fade in")
+	assert_eq((panel.get_child(0) as Label).text, "hold only")
+	ToastManager.info("second", 0.15)
+	var started := false
+	var deadline := Time.get_ticks_msec() + 1000
+	while Time.get_ticks_msec() < deadline:
+		if _overlay._toast_count == 2:
+			started = true
+			break
+		await get_tree().process_frame
+	assert_true(started, "the queued message starts once the hold ends")
+	assert_false(_overlay._queue.has({"text": "second"}),
+		"the message left the queue when its hold started")

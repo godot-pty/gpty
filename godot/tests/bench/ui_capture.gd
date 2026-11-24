@@ -54,6 +54,9 @@ extends SceneTree
 ##     per-frame work is stopped (`_apply_agent_states`): the spinner cycles and
 ##     the attention pulse are wall-clock driven, so a live badge would never
 ##     repeat from one run to the next.
+##   - A state that names a mid-motion fraction (`focus_sweep`, `guide_reveal`,
+##     `empty_arrival`) is pinned there, never waited for: the pin rebuilds the
+##     shipped curve and stops it at that fraction.
 ##   - An effect state pins the ambient clock (`pin_effects`) and, when the
 ##     state names a cue, draws that cue's final frame (`pin_effect_cue`):
 ##     grain advances on a Timer and a cue is a tween, so either would differ
@@ -103,6 +106,21 @@ const STATES := {
 	# here; the close-all path is covered by `empty-workspace` at 1920x1080,
 	# where the sidebar's trash is inside the synthetic click's reach.
 	"empty-workspace-560x340": {"size": Vector2i(560, 340), "panes": 0},
+	# The v0.8.7 motion rows: each holds a mid-motion frame, so the image is the
+	# fade or sweep itself rather than only its final state.
+	"focus-sweep": {"size": Vector2i(1280, 760), "panes": 2,
+		"grid_cols": 2, "grid_rows": 1, "focus_sweep": 0.55},
+	"guide-typewriter": {"size": DEFAULT_SIZE, "panes": 0, "guide_reveal": 0.5},
+	# Full, so the empty state's arrival carries its 4 px rise; the first pane's
+	# arrival is pinned at 30 % (a fade half-way is too faint to read in a still),
+	# the second is the settled comparator.
+	"chrome-arrival": {"size": Vector2i(1280, 760), "settings": {"cfg_motion": 2},
+		"tiles": [
+			{"col": 0, "row": 0, "cspan": 30, "rspan": 60,
+				"settings": {"type": "code_viewer", "attachment_id": "capture-arrival"}},
+			{"col": 30, "row": 0, "cspan": 30, "rspan": 60,
+				"settings": {"type": "code_viewer", "attachment_id": "capture-arrival-settled"}}],
+		"empty_arrival": 0.3},
 	# The pane inset and the code viewer's empty state, side by side: four panes
 	# that each have nothing to show (row *Pane chrome: distinct icons, a compact
 	# action menu, padding and consistent empty states*). The measurement is the
@@ -575,7 +593,9 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	await _settle()
 	if not await _apply_state(state_name, state):
 		return
-	_pin_empty_guide()
+	_pin_empty_guide(state)
+	_pin_arrivals(state)
+	_pin_focus_sweep(state)
 	_pin_effects(state)
 
 	if args.get("perturb", "") == state_name:
@@ -616,12 +636,33 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	await _capture(state_name, str(args.get("out", "")))
 	quit(0)
 
-## The empty guide animates on a wall clock (the keycap press and ripple); pin
-## it to the first frame and stop its clock so two runs of the same state are
-## pixel-identical. The same rule `_apply_agent_states` applies to AgentBadge.
-func _pin_empty_guide() -> void:
+## The three motion pins. The guide's typewriter is pinned at the state's
+## fraction (1.0 completes it); an arrival is pinned on the first staged body,
+## which leaves its neighbour as the settled comparator; the focus sweep is
+## pinned on the active body. Untyped calls for the same reason as
+## `_pin_effects` below.
+func _pin_empty_guide(state: Dictionary) -> void:
 	if _workspace._shortcut_guide != null and _workspace._empty_state.visible:
-		_workspace._shortcut_guide.pin_animation()
+		_workspace._shortcut_guide.pin_animation(float(state.get("guide_reveal", 1.0)))
+
+func _pin_arrivals(state: Dictionary) -> void:
+	var progress := float(state.get("empty_arrival", -1.0))
+	if progress < 0.0 or _workspace._tm.tiles.is_empty():
+		return
+	var body = _workspace._tm._find_body(_workspace._tm.tiles[0].wrapper)
+	if body == null or not body.has_method("pin_arrival_at"):
+		return
+	var host = body.find_child("EmptyState", true, false)
+	if host != null:
+		body.pin_arrival_at(host, progress)
+
+func _pin_focus_sweep(state: Dictionary) -> void:
+	var alpha := float(state.get("focus_sweep", -1.0))
+	if alpha < 0.0:
+		return
+	var body = _workspace._tm.last_body
+	if body != null and body.has_method("pin_focus_sweep"):
+		body.pin_focus_sweep(alpha)
 
 ## Freeze the effect clocks and pin a cue. Grain advances on a Timer and a cue
 ## is a tween, so either would differ between two runs. Untyped `has_method`

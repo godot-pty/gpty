@@ -873,6 +873,68 @@ func test_a_renumbered_pane_rewrites_its_row_label():
 	assert_eq((row.get_child(0) as Button).text, "T7",
 		"the row wears the label the pane now has")
 
+
+# ── The arrival ────────────────────────────────────────────────────────
+
+## Only a row appended to an existing list arrives. The first render, a
+## renumber, a switch and a restore are not fades.
+func test_a_spawn_fades_only_the_created_row():
+	var a := PaneBody.new()
+	a.pane_label = "T1"
+	add_child_autofree(a)
+	var b := PaneBody.new()
+	b.pane_label = "T2"
+	add_child_autofree(b)
+	_sidebar.update_pane_list([a])
+	var row_a := _sidebar._pane_list.get_child(0)
+	assert_eq(row_a.modulate.a, 1.0, "the first render is not an arrival")
+	_sidebar.update_pane_list([a, b])
+	assert_eq(row_a.modulate.a, 1.0, "an attached row keeps its alpha")
+	var row_b := _sidebar._pane_list.get_child(1)
+	assert_lt(row_b.modulate.a, 0.5, "the created row fades in")
+	await wait_seconds(0.2)
+	assert_almost_eq(row_b.modulate.a, 1.0, 0.001)
+
+func test_a_renumber_creates_no_arrival():
+	var a := PaneBody.new()
+	a.pane_label = "T1"
+	add_child_autofree(a)
+	var b := PaneBody.new()
+	b.pane_label = "T2"
+	add_child_autofree(b)
+	_sidebar.update_pane_list([a, b])
+	var row := _sidebar._pane_list.get_child(1)
+	b.pane_label = "T7"
+	_sidebar.update_pane_list([a, b])
+	assert_eq(row.modulate.a, 1.0, "a renumber is an update, not an arrival")
+
+func test_a_list_replacement_fades_no_rows():
+	var a := PaneBody.new()
+	a.pane_label = "T1"
+	add_child_autofree(a)
+	var c := PaneBody.new()
+	c.pane_label = "T9"
+	add_child_autofree(c)
+	_sidebar.update_pane_list([a])
+	_sidebar.update_pane_list([c])
+	var row := _sidebar._pane_list.get_child(0)
+	assert_eq((row.get_child(0) as Button).text, "T9")
+	assert_eq(row.modulate.a, 1.0, "a switch or restore never cascades fades")
+
+func test_motion_off_inserts_the_row_final():
+	SettingsManager.cfg_motion = UiMotion.OFF
+	var a := PaneBody.new()
+	a.pane_label = "T1"
+	add_child_autofree(a)
+	var b := PaneBody.new()
+	b.pane_label = "T2"
+	add_child_autofree(b)
+	_sidebar.update_pane_list([a])
+	_sidebar.update_pane_list([a, b])
+	assert_eq(_sidebar._pane_list.get_child(1).modulate.a, 1.0,
+		"Off draws the row final in one frame")
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+
 func test_a_close_confirm_swaps_only_its_rows_actions():
 	var a := PaneBody.new()
 	a.pane_label = "T1"

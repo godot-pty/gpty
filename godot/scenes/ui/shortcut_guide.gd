@@ -34,6 +34,11 @@ const HERO_CYCLE := 3.0
 const PRESS_TIME := 0.22
 const RIPPLE_TIME := 0.9
 const PULSE_SCALE := 0.05
+## The per-step typewriter: `Label.visible_characters` reveals characters at
+## this rate, with a ceiling so a long caption is legible before the 3 s cycle
+## turns. The text is set in full first, so nothing reflows while it types.
+const REVEAL_CPS := 36.0
+const REVEAL_CEIL_S := 0.6
 
 ## The pulse behind the keycap. A private Control because a ring is geometry, not
 ## text: there is nothing for an assistive technology to read here, and the same
@@ -61,6 +66,12 @@ var _step := 0
 var _phase := 0.0
 var _columns := 1
 var _pinned := false
+## One entry per independent reveal group - `{labels, elapsed, span}`. The title
+## types once and the hero caption/chord restart on every step, so they cannot
+## share one group: a step change would drop the title's and freeze it at zero
+## characters.
+var _reveals: Array = []
+var _title_revealed := false
 
 var _title: Label
 var _hero: Control
@@ -78,11 +89,31 @@ func _init() -> void:
 	_build_ui()
 
 func _ready() -> void:
-	set_process(is_visible_in_tree() and not _pinned)
+	SettingsManager.settings_changed.connect(_on_motion_changed)
+	_refresh_clock()
 	refresh()
 
+## The clock runs only while the guide is on screen and Motion is on: Off is
+## the pinned frame (step 0, phase 0) and costs no frames.
+func _refresh_clock() -> void:
+	set_process(is_visible_in_tree() and not _pinned and UiMotion.enabled())
+
+## A Motion change is live, not a restart: Off freezes the guide at the frame a
+## capture pins; Subtle/Full restart the demonstration from its first step.
+func _on_motion_changed() -> void:
+	if not UiMotion.enabled() and not _pinned:
+		_phase = 0.0
+		_step = 0
+		_apply_step()
+		_complete_reveals()
+		_animate()
+	_refresh_clock()
+
 func _process(delta: float) -> void:
+	if not UiMotion.enabled():
+		return
 	_phase += delta
+	_advance_reveals(delta)
 	if _phase >= HERO_CYCLE:
 		_phase = fmod(_phase, HERO_CYCLE)
 		if not _steps.is_empty():
@@ -138,12 +169,23 @@ func focus_hero() -> bool:
 	return _hero_keycap.has_focus()
 
 ## Capture only: set the frame a user sees when the guide appears and stop the
-## wall clock, so two runs of one state are pixel-identical.
-func pin_animation() -> void:
-	_pinned = true
+## wall clock, so two runs of one state are pixel-identical. `reveal` pins the
+## hero step mid-type (0-1); the title is always complete, so a capture never
+## catches half a word in a type-once line.
+func pin_animation(reveal := 1.0) -> void:
 	_phase = 0.0
 	_step = 0
+	_complete_reveals()
+	# The rebuild below must create the hero group, so the pin flag lands after
+	# it: a second call on the same guide would otherwise pin nothing.
+	_pinned = false
+	_title_revealed = true
+	_title.visible_characters = -1
 	_apply_step()
+	_pinned = true
+	for entry in _reveals:
+		entry["elapsed"] = float(entry["span"]) * clampf(float(reveal), 0.0, 1.0)
+		_apply_reveal(entry)
 	_animate()
 	set_process(false)
 
@@ -196,12 +238,17 @@ func _notification(what: int) -> void:
 		if is_visible_in_tree():
 			refresh()
 			if not _pinned:
+				if not _title_revealed:
+					_title_revealed = true
+					_start_reveal([_title])
 				_phase = 0.0
 				_step = 0
 				_apply_step()
 				_animate()
-				set_process(true)
+			_refresh_clock()
 		else:
+			# A surface hidden mid-word must not come back part-typed.
+			_complete_reveals()
 			set_process(false)
 	elif what == NOTIFICATION_THEME_CHANGED:
 		if _ripple != null:
@@ -223,6 +270,7 @@ func _apply_step() -> void:
 	_hero_keycap.tooltip_text = label if chord == "" else "%s (%s)" % [label, chord]
 	_hero_keycap.accessibility_name = label
 	_hero_keycap.disabled = false
+	_start_reveal([_hero_caption, _hero_chord])
 
 ## The keycap is the action, not only a demonstration: the step on screen names
 ## the pane it would spawn, and pressing the keycap (pointer or Enter/Space)
@@ -230,9 +278,61 @@ func _apply_step() -> void:
 func _activate_step() -> void:
 	if _steps.is_empty() or not (_steps[_step] is Dictionary):
 		return
+	# Skipping the text must never cost the spawn: a click completes the reveal
+	# and still starts the pane the step names.
+	_complete_reveals()
 	var type_name := str((_steps[_step] as Dictionary).get("type", ""))
 	if type_name != "":
 		new_pane_requested.emit(type_name)
+
+## Start (or restart) a reveal for `labels` at the shared rate. Off, a capture
+## pin, or an empty string shows every character at once: there is no clock to
+## run, and a half-revealed surface must never be the final frame.
+func _start_reveal(labels: Array[Label]) -> void:
+	# One label is driven by one group; a step change replaces its own.
+	for i in range(_reveals.size() - 1, -1, -1):
+		var existing: Dictionary = _reveals[i]
+		var shared := false
+		for label in labels:
+			if (existing["labels"] as Array).has(label):
+				shared = true
+				break
+		if shared:
+			_reveals.remove_at(i)
+	var longest := 0
+	for label in labels:
+		longest = maxi(longest, label.text.length())
+	var span := minf(REVEAL_CEIL_S, float(longest) / REVEAL_CPS)
+	if not UiMotion.enabled() or _pinned or span <= 0.0:
+		for label in labels:
+			label.visible_characters = -1
+		return
+	var entry := {"labels": labels, "elapsed": 0.0, "span": span}
+	_reveals.append(entry)
+	_apply_reveal(entry)
+
+func _apply_reveal(entry: Dictionary) -> void:
+	var done: bool = float(entry["elapsed"]) >= float(entry["span"])
+	for label in entry["labels"]:
+		if done:
+			label.visible_characters = -1
+		else:
+			label.visible_characters = mini(
+				int(float(entry["elapsed"]) * REVEAL_CPS), label.text.length())
+
+func _advance_reveals(delta: float) -> void:
+	for i in range(_reveals.size() - 1, -1, -1):
+		var entry: Dictionary = _reveals[i]
+		entry["elapsed"] = minf(float(entry["elapsed"]) + delta, float(entry["span"]))
+		_apply_reveal(entry)
+		if float(entry["elapsed"]) >= float(entry["span"]):
+			_reveals.remove_at(i)
+
+func _complete_reveals() -> void:
+	for entry in _reveals:
+		for label in entry["labels"]:
+			label.visible_characters = -1
+	_reveals.clear()
 
 ## One clock drives both halves of the flare: the keycap dips and returns over
 ## PRESS_TIME, and the ripple expands over RIPPLE_TIME. Between them nothing is
