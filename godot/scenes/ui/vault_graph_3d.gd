@@ -3,26 +3,28 @@ extends VaultGraphCanvas
 ## The wiki pane's **orbital** link map.
 ##
 ## A `SubViewport` renders a 3D scene: one `RigidBody3D` per note, one spring
-## per link, a billboarded disc and halo per note, an `ImmediateMesh` for the
-## links, and drifting dust. Motion is physical in x/y; every note's z is a
-## deterministic depth layer (`VaultGraphModel.depth_for`) that bodies are
-## locked to, so a saved x/y position restores the exact arrangement and the
-## free-orbit camera still shows real parallax.
+## per link, a billboarded disc and halo per note (a lit sphere under the
+## planetary theme), an `ImmediateMesh` for the links, and drifting dust.
+## Motion is physical in x/y; every note's z is a deterministic depth layer
+## (`VaultGraphModel.depth_for`) that bodies are locked to, so a saved x/y
+## position restores the exact arrangement. The camera is perspective: a
+## background drag orbits it, the wheel zooms the view height at the orbit
+## target, and Shift+wheel (or Page Up/Page Down) travels the target along the
+## view axis, so the depth layers can be reached rather than only looked at.
 ##
 ## [VaultGraphModel] remains the only owner of graph data, link resolution and
 ## the semantic hit-test. This class owns presentation and simulation state:
 ## bodies, rests, the camera, the meshes, the overlay and the gestures. The
 ## pane types the view as [VaultGraphCanvas] and swaps this with the planar
-## [VaultGraphView].
+## [VaultGraphView]. [GraphTheme] owns the ground, glyphs, links, glow and
+## backdrop; this class only applies the resolved style to its materials and
+## meshes.
 ##
 ## Nothing here writes to the vault. The authored weight layer still only
 ## changes thickness and spring stiffness; it never changes which edges exist.
 
 const DEPTH_SPREAD := 180.0
 const NODE_WORLD_SCALE := 1.8
-const HALO_SCALE := 2.3
-const HALO_ALPHA_DARK := 0.13
-const HALO_ALPHA_LIGHT := 0.09
 
 const SPRING_K := 50.0
 const SPRING_DAMP := 6.0
@@ -32,11 +34,22 @@ const SETTLE_SPEED := 2.0
 const SETTLE_TICKS := 10
 const MIN_REST_LENGTH := 1.0
 
-const CAMERA_DISTANCE := 2000.0
+## The orbital map is perspective: an orthographic view made depth travel
+## invisible (moving along the view axis changed no pixel). Zoom is expressed
+## as the world height visible at the orbit target's plane, so the fit maths and
+## the planar canvas agree; the camera distance is derived from it.
+const CAMERA_FOV_DEG := 55.0
+const VIEW_HEIGHT_DEFAULT := 1000.0
+const VIEW_HEIGHT_MIN := 60.0
+const VIEW_HEIGHT_MAX := 6000.0
+## One depth step moves the target this fraction of the visible height along
+## the camera's forward axis, so the feel is constant at every zoom.
+const DEPTH_STEP_FRACTION := 0.12
+## The fitted view height gets this much extra room so a near depth layer at
+## the graph's edge is not clipped by perspective scaling.
+const PERSPECTIVE_FIT_MARGIN := 220.0
 const PITCH_LIMIT_DEG := 75.0
 const ORBIT_SENSITIVITY := 0.4
-const ZOOM_MIN_SIZE := 60.0
-const ZOOM_MAX_SIZE := 6000.0
 const ZOOM_STEP := 1.15
 const FIT_PADDING := 0.08
 
@@ -50,7 +63,6 @@ const LABEL_FONT_SIZE := 11
 const LABEL_GAP := 4.0
 const MAX_LABEL_BLOCK := 180.0
 
-const LINK_ALPHA := 0.42
 const LINK_END_ALPHA := 0.12
 ## The worst-case bench (4000 bodies, 10 000 edges) made one rebuilt link mesh
 ## cost ~20 ms, so the fallback the plan pre-decided is in from the start: at
@@ -60,21 +72,7 @@ const LINK_END_ALPHA := 0.12
 const LINK_REBUILD_HZ := 15.0
 const MAX_FEATHERED_EDGES := 2000
 
-const GLOW_INTENSITY := 0.35
-const GLOW_STRENGTH := 0.9
-const GLOW_BLOOM := 0.05
-const GLOW_THRESHOLD := 0.45
-## The camera sits 2 000 units out; exponential fog is measured from it, so
-## 0.02 erased the whole graph into the background. At 0.00012 the far depth
-## layer is about 20 % faded — a cue, not a veil.
-const FOG_DENSITY := 0.00012
-const FOG_ENERGY := 1.0
-const VIGNETTE_DARK := 0.10
-const VIGNETTE_LIGHT := 0.05
-
-const DUST_COUNT := 64
 const DUST_HZ := 20.0
-const DUST_ALPHA := 0.05
 const DUST_BOX_X := 1200.0
 const DUST_BOX_Y := 700.0
 const DUST_SEED := 0x67707479
@@ -95,25 +93,29 @@ var _notes_mesh: MultiMeshInstance3D
 var _ghosts_mesh: MultiMeshInstance3D
 var _halos_mesh: MultiMeshInstance3D
 var _dust_mesh: MultiMeshInstance3D
+var _rings_mesh: MultiMeshInstance3D
 var _links_mi: MeshInstance3D
 var _link_mesh: ImmediateMesh
 var _overlay: Control
+var _sun: DirectionalLight3D
 
 var _note_material: StandardMaterial3D
 var _ghost_material: StandardMaterial3D
 var _halo_material: StandardMaterial3D
 var _dust_material: StandardMaterial3D
 var _link_material: StandardMaterial3D
+var _ring_material: StandardMaterial3D
+var _lit_material: StandardMaterial3D
 var _disc_texture: Texture2D
 var _ring_texture: Texture2D
 var _halo_texture: Texture2D
 var _vignette: GradientTexture2D
 var _quad: QuadMesh
+var _sphere_mesh: SphereMesh
 
 var _status: Label
 var _hint: Label
 var _mode_button: Button
-var _orbit_button: Button
 var _arrows_button: Button
 var _relayout_button: Button
 var _edge_menu: PopupMenu
@@ -133,13 +135,20 @@ var _spring_k: PackedFloat32Array = PackedFloat32Array()
 var _note_index: Dictionary = {}
 var _ghost_index: Dictionary = {}
 var _halo_index: Dictionary = {}
+var _ring_index: Dictionary = {}
+## The notes carrying a planet ring under the current style.
+var _ringed: Dictionary = {}
+## The deterministic backdrop stars for the current style.
+var _backdrop_stars: Array = []
 var _screen_cache: Dictionary = {}
 var _screen_dirty := true
 
 var _target := Vector3.ZERO
 var _yaw := 0.0
 var _pitch := 0.0
-var _orbit_mode := false
+## The world height visible at the orbit target's plane; the camera distance is
+## derived from it every frame, so zoom, pan and drag all speak one unit.
+var _view_height := VIEW_HEIGHT_DEFAULT
 var _dragging_camera := false
 var _panning := false
 var _drag_id := ""
@@ -182,6 +191,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_ensure_scene()
 	_build_chrome()
+	apply_graph_theme(graph_theme)
 	focus_entered.connect(func(): _overlay.queue_redraw())
 	focus_exited.connect(func(): _overlay.queue_redraw())
 	set_process_unhandled_key_input(false)
@@ -298,8 +308,8 @@ func fit_to_view() -> void:
 		box.size.y * size.y / usable_h,
 		box.size.x * size.y / usable_w
 	)
-	_camera.size = clampf(vertical, ZOOM_MIN_SIZE, ZOOM_MAX_SIZE)
-	var upp := float(_camera.size) / maxf(1.0, size.y)
+	_view_height = clampf(vertical + PERSPECTIVE_FIT_MARGIN, VIEW_HEIGHT_MIN, VIEW_HEIGHT_MAX)
+	var upp := _view_height / maxf(1.0, size.y)
 	_target = _world_from_model(box.get_center(), 0.0) \
 		+ _camera.global_basis.x * (_label_block_w * 0.5 * upp)
 	_update_camera()
@@ -347,10 +357,10 @@ func _ensure_scene() -> void:
 	_camera = Camera3D.new()
 	_camera.name = "Camera"
 	_camera.current = true
-	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	_camera.projection = Camera3D.PROJECTION_PERSPECTIVE
+	_camera.fov = CAMERA_FOV_DEG
 	_camera.near = 1.0
 	_camera.far = 10000.0
-	_camera.size = 1000.0
 	_world.add_child(_camera)
 
 	_env = WorldEnvironment.new()
@@ -364,6 +374,11 @@ func _ensure_scene() -> void:
 
 	_quad = QuadMesh.new()
 	_quad.size = Vector2(2.0, 2.0)
+	_sphere_mesh = SphereMesh.new()
+	_sphere_mesh.radius = 0.5
+	_sphere_mesh.height = 1.0
+	_sphere_mesh.radial_segments = 12
+	_sphere_mesh.rings = 6
 	_disc_texture = _make_radial_texture(KIND_DISC)
 	_ring_texture = _make_radial_texture(KIND_RING)
 	_halo_texture = _make_radial_texture(KIND_HALO)
@@ -371,6 +386,14 @@ func _ensure_scene() -> void:
 	_ghost_material = _make_billboard_material(_ring_texture, false)
 	_halo_material = _make_billboard_material(_halo_texture, true)
 	_dust_material = _make_billboard_material(_halo_texture, true)
+	_ring_material = _make_billboard_material(_ring_texture, true)
+	# Rings lie in a fixed tilted plane, not a billboard: the camera orbit is
+	# what turns them into the ellipse a planet's rings read as.
+	_ring_material.billboard_mode = BaseMaterial3D.BILLBOARD_DISABLED
+	_lit_material = StandardMaterial3D.new()
+	_lit_material.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	_lit_material.vertex_color_use_as_albedo = true
+	_lit_material.roughness = 0.85
 	_link_material = StandardMaterial3D.new()
 	_link_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_link_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -378,10 +401,18 @@ func _ensure_scene() -> void:
 	_link_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_link_material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 
+	_sun = DirectionalLight3D.new()
+	_sun.name = "Sun"
+	_sun.shadow_enabled = false
+	_sun.rotation_degrees = Vector3(-35, -35, 0)
+	_sun.visible = false
+	_world.add_child(_sun)
+
 	_notes_mesh = _make_multimesh("Notes", _note_material)
 	_ghosts_mesh = _make_multimesh("Ghosts", _ghost_material)
 	_halos_mesh = _make_multimesh("Halos", _halo_material)
 	_dust_mesh = _make_multimesh("Dust", _dust_material)
+	_rings_mesh = _make_multimesh("PlanetRings", _ring_material)
 
 	_link_mesh = ImmediateMesh.new()
 	_links_mi = MeshInstance3D.new()
@@ -398,52 +429,77 @@ func _ensure_scene() -> void:
 	add_child(_overlay)
 
 	_vignette = _make_vignette()
-	_build_dust()
-	_apply_theme()
 	_update_camera()
 	_request_render()
 
 
 func _make_environment() -> Environment:
 	var env := Environment.new()
-	# The ground is painted by this Control in 2D (the palette's own sRGB
-	# background); the viewport is transparent so the 3D scene composites over
-	# it. A 3D background colour went through a different colour path and
-	# crushed the dark surface to near-black.
+	# The ground is painted by this Control in 2D (the theme's background); the
+	# viewport is transparent so the 3D scene composites over it. A 3D
+	# background colour went through a different colour path and crushed the
+	# dark surface to near-black. The style application writes fog, glow and
+	# ambient; this function only builds the shell.
 	env.background_mode = Environment.BG_CLEAR_COLOR
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	env.fog_enabled = true
-	env.fog_light_color = UiPalette.active().BG
-	env.fog_light_energy = FOG_ENERGY
-	env.fog_density = FOG_DENSITY
+	env.fog_light_color = Color.BLACK
+	env.fog_light_energy = 1.0
+	env.fog_density = 0.0
 	env.fog_sky_affect = 0.0
 	return env
 
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), UiPalette.active().BG)
+	var style := _theme_style()
+	var background: Color = style["background"]
+	draw_rect(Rect2(Vector2.ZERO, size), background)
+	if _backdrop_stars.is_empty() and int(style["stars"]) > 0:
+		_backdrop_stars = GraphTheme.stars(int(style["stars"]))
+	var dust: Color = style["dust"]
+	for star in _backdrop_stars:
+		var at: Vector2 = star["at"]
+		draw_circle(
+			Vector2(at.x * size.x, at.y * size.y),
+			float(star["r"]),
+			Color(dust, float(star["a"]) * float(style["star_alpha"]))
+		)
 
 
-func _apply_theme() -> void:
+## Apply one [GraphTheme] snapshot. Called by `apply_graph_theme` from the
+## base; safe before the scene exists (only the style is stored then).
+func _apply_style() -> void:
+	var style := _theme_style()
 	var dark := SettingsManager.is_dark_appearance()
 	if _env != null and _env.environment != null:
 		var env := _env.environment
-		env.fog_light_color = UiPalette.active().BG
-		env.fog_light_energy = FOG_ENERGY
-		env.fog_density = FOG_DENSITY
-		# Fog is a depth cue for the graph, never a repaint of the ground: at
-		# energy 0.6 it dimmed the whole background to a grey block in the
-		# light theme. The sky/background keeps the surface colour.
+		var background: Color = style["background"]
+		env.fog_light_color = background
+		env.fog_light_energy = 1.0
+		env.fog_density = float(style["fog_density"])
+		# Fog is a depth cue for the graph, never a repaint of the ground.
 		env.fog_sky_affect = 0.0
 		env.glow_enabled = dark and RendererInfo.supports_glow(
 			RenderingServer.get_current_rendering_method())
 		if env.glow_enabled:
-			env.glow_intensity = GLOW_INTENSITY
-			env.glow_strength = GLOW_STRENGTH
-			env.glow_bloom = GLOW_BLOOM
-			env.glow_hdr_threshold = GLOW_THRESHOLD
+			env.glow_intensity = float(style["glow_intensity"])
+			env.glow_strength = float(style["glow_strength"])
+			env.glow_bloom = float(style["glow_bloom"])
+			env.glow_hdr_threshold = float(style["glow_threshold"])
 			env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
+		var ambient := float(style["ambient_energy"])
+		if ambient > 0.0:
+			env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+			env.ambient_light_color = style["ambient_color"]
+			env.ambient_light_energy = ambient
+		else:
+			env.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	if _sun != null:
+		var sun_energy := float(style["sun_energy"])
+		_sun.visible = sun_energy > 0.0
+		_sun.light_color = style["sun_color"]
+		_sun.light_energy = sun_energy
 	if _halo_material != null:
 		_halo_material.blend_mode = (
 			BaseMaterial3D.BLEND_MODE_ADD if dark else BaseMaterial3D.BLEND_MODE_MIX
@@ -452,8 +508,27 @@ func _apply_theme() -> void:
 		_dust_material.blend_mode = (
 			BaseMaterial3D.BLEND_MODE_ADD if dark else BaseMaterial3D.BLEND_MODE_MIX
 		)
-	_update_node_colors()
-	_update_dust_colors()
+	if _notes_mesh != null:
+		var sphere := str(style["node_shape"]) == "sphere"
+		_notes_mesh.multimesh.mesh = _sphere_mesh if sphere else _quad
+		_notes_mesh.material_override = _lit_material if sphere else _note_material
+		if _dust_mesh != null and _dust_mesh.multimesh.instance_count != int(style["dust_count"]):
+			_build_dust()
+		_sync_ring_set(style)
+		_update_node_transforms()
+		_update_node_colors()
+		_update_dust_colors()
+	_backdrop_stars = GraphTheme.stars(int(style["stars"]))
+	var status_ink: Color = style["text"]
+	var hint_ink: Color = style["hint"]
+	if _status != null:
+		# theme-ok: the graph theme owns the canvas ground; reapplied on change
+		_status.add_theme_color_override("font_color", status_ink)
+	if _hint != null:
+		# theme-ok: the graph theme owns the canvas ground; reapplied on change
+		_hint.add_theme_color_override("font_color", hint_ink)
+	accessibility_description = _describe()
+	_update_status()
 	queue_redraw()
 	if _overlay != null:
 		_overlay.queue_redraw()
@@ -553,11 +628,6 @@ func _build_chrome() -> void:
 	_mode_button.pressed.connect(func(): mode_requested.emit("2d"))
 	controls.add_child(_mode_button)
 
-	_orbit_button = _make_button("Orbit", "Rotate the map with a background drag")
-	_orbit_button.toggle_mode = true
-	_orbit_button.toggled.connect(func(on: bool): _set_orbit(on))
-	controls.add_child(_orbit_button)
-
 	_arrows_button = _make_button("Arrows", "Draw edge direction (mutual pairs both ways)")
 	_arrows_button.toggle_mode = true
 	_arrows_button.toggled.connect(func(on: bool):
@@ -570,8 +640,7 @@ func _build_chrome() -> void:
 	_relayout_button.pressed.connect(relayout)
 	controls.add_child(_relayout_button)
 
-	KeyboardFocus.ring([self, _mode_button, _orbit_button, _arrows_button,
-		_relayout_button])
+	KeyboardFocus.ring([self, _mode_button, _arrows_button, _relayout_button])
 
 	_edge_menu = PopupMenu.new()
 	_edge_menu.name = "EdgeMenu"
@@ -582,13 +651,12 @@ func _build_chrome() -> void:
 
 	_hint = Label.new()
 	_hint.name = "GraphHint"
-	_hint.text = "Drag to pan · Middle-drag pans · Orbit makes left-drag rotate · Wheel to zoom · Drag a node to push it · Click a note to open it · Right-click an edge to declare its weight · Arrows pan · +/− zoom · Enter opens what the crosshair covers"
+	_hint.text = "Drag orbits · Shift-drag or middle-drag pans · Wheel zooms · Shift+wheel travels depth · Drag a node to push it · Click opens · Right-click an edge to weight it · Arrows pan · +/− zoom · PgUp/PgDn depth · Relayout resets"
 	_hint.add_theme_font_size_override("font_size", UiTokens.FS_CAPTION)
-	_hint.modulate = Color(1, 1, 1, 0.55)
 	_hint.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	_hint.offset_left = 8
 	_hint.offset_top = -20
-	_hint.offset_right = 900
+	_hint.offset_right = 1000
 	_hint.offset_bottom = -4
 	_hint.grow_horizontal = Control.GROW_DIRECTION_END
 	_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -606,7 +674,15 @@ func _describe() -> String:
 			ghosts += 1
 		else:
 			notes += 1
-	var text := "%d notes, %d links. Orbital map. Arrows pan, plus and minus zoom, Enter opens what the crosshair covers." % [notes, edges.size()]
+	var text := (
+		"%d notes, %d links. Orbital map. Theme %s. Drag orbits, "
+		+ "Shift-drag or middle-drag pans, wheel zooms, Shift-wheel and Page Up/"
+		+ "Page Down travel depth. Arrows pan, plus and minus zoom, Enter opens "
+		+ "what the crosshair covers."
+	) % [
+		notes, edges.size(),
+		str(GraphTheme.LABELS.get(graph_theme, graph_theme)),
+	]
 	if _truncated:
 		text += " (map truncated)"
 	return text
@@ -914,31 +990,56 @@ func _resume_from_hidden() -> void:
 func _update_camera() -> void:
 	if _camera == null:
 		return
+	_view_height = clampf(_view_height, VIEW_HEIGHT_MIN, VIEW_HEIGHT_MAX)
 	var yaw := deg_to_rad(_yaw)
 	var pitch := deg_to_rad(_pitch)
 	var direction := Vector3(
 		sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch)
 	)
-	_camera.global_position = _target + direction * CAMERA_DISTANCE
+	# The camera sits at the distance that makes `_view_height` exactly the
+	# world height visible at the target's plane.
+	var distance := _view_height * 0.5 / tan(deg_to_rad(_camera.fov) * 0.5)
+	_camera.global_position = _target + direction * distance
 	_camera.look_at(_target, Vector3.UP)
-	_camera.size = clampf(_camera.size, ZOOM_MIN_SIZE, ZOOM_MAX_SIZE)
+	_camera.near = maxf(0.5, distance * 0.01)
+	_camera.far = distance + 12000.0
 	_screen_dirty = true
 
 
-func _units_per_pixel() -> float:
-	# The SubViewport's size lags the first show_graph by a frame: its height
-	# can still be 0 when the first link mesh is built. Falling back to 1 px
-	# there produced thousand-unit-wide quads that covered the whole pane, so
-	# the Control's own size is the second source and a sane default is last.
+## The SubViewport's size lags the first show_graph by a frame: its height can
+## still be 0 when the first link mesh is built. Falling back to 1 px there
+## produced thousand-unit-wide quads that covered the whole pane, so the
+## Control's own size is the second source and a sane default is last.
+func _viewport_height() -> float:
 	var height := float(_viewport.size.y) if _viewport != null else 0.0
 	if height < 2.0:
 		height = size.y
-	height = maxf(1.0, height)
-	return float(_camera.size) / height if _camera != null else 1.0
+	return maxf(1.0, height)
+
+
+## World units per screen pixel at the orbit target's plane.
+func _units_per_pixel() -> float:
+	return _view_height / _viewport_height() if _camera != null else 1.0
+
+
+## World units per screen pixel at `point`'s depth. Perspective scales a near
+## node differently from a far one, so a drag or a label radius must use the
+## point's own depth, not the target plane's.
+func _units_per_pixel_at(point: Vector3) -> float:
+	if _camera == null:
+		return 1.0
+	var depth := (point - _camera.global_position).dot(-_camera.global_basis.z)
+	depth = maxf(0.001, depth)
+	return 2.0 * depth * tan(deg_to_rad(_camera.fov) * 0.5) / _viewport_height()
 
 
 func _pixels_per_unit() -> float:
 	var upp := _units_per_pixel()
+	return 0.0 if upp <= 0.0 else 1.0 / upp
+
+
+func _pixels_per_unit_at(point: Vector3) -> float:
+	var upp := _units_per_pixel_at(point)
 	return 0.0 if upp <= 0.0 else 1.0 / upp
 
 
@@ -990,7 +1091,7 @@ func _orbit_by(screen_delta: Vector2) -> void:
 
 func _zoom_at(screen_point: Vector2, factor: float) -> void:
 	var before := _world_under(screen_point)
-	_camera.size = clampf(_camera.size / factor, ZOOM_MIN_SIZE, ZOOM_MAX_SIZE)
+	_view_height = clampf(_view_height / factor, VIEW_HEIGHT_MIN, VIEW_HEIGHT_MAX)
 	var after := _world_under(screen_point)
 	_target += before - after
 	_update_camera()
@@ -998,11 +1099,18 @@ func _zoom_at(screen_point: Vector2, factor: float) -> void:
 	_request_render()
 
 
-func _set_orbit(on: bool) -> void:
-	_orbit_mode = on
-	if not on:
-		_dragging_camera = false
-
+## Travel the orbit target along the camera's forward axis. The camera follows
+## at the same distance, so the target-plane framing is stable while the near
+## and far depth layers grow apart — the perspective dolly that makes z
+## navigable. Wheel/Page Up moves forward; an orbit changes what "forward" is,
+## so the same gesture walks the volume from any angle.
+func _travel_depth(steps: float) -> void:
+	if _camera == null:
+		return
+	_target += (-_camera.global_basis.z) * (steps * _view_height * DEPTH_STEP_FRACTION)
+	_update_camera()
+	_overlay.queue_redraw()
+	_request_render()
 
 func _screen_positions() -> Dictionary:
 	if not _screen_dirty:
@@ -1011,8 +1119,16 @@ func _screen_positions() -> Dictionary:
 	if _camera != null:
 		for id in _bodies:
 			var body: RigidBody3D = _bodies[id]
-			if is_instance_valid(body):
-				out[id] = _camera.unproject_position(body.global_position)
+			if not is_instance_valid(body):
+				continue
+			# A body behind the camera still has an `unproject_position` answer;
+			# it is a mirrored point that would steal clicks on the visible map.
+			var depth := (body.global_position - _camera.global_position).dot(
+				-_camera.global_basis.z
+			)
+			if depth <= _camera.near:
+				continue
+			out[id] = _camera.unproject_position(body.global_position)
 	_screen_cache = out
 	_screen_dirty = false
 	return out
@@ -1039,8 +1155,12 @@ func cursor_hit() -> String:
 func _node_screen_radius(id: String) -> float:
 	var degrees: Dictionary = _degrees.get(id, {})
 	var degree := int(degrees.get("in", 0)) + int(degrees.get("out", 0))
+	var ppu := _pixels_per_unit()
+	var body = _bodies.get(id)
+	if body != null and is_instance_valid(body):
+		ppu = _pixels_per_unit_at(body.global_position)
 	return clampf(
-		VaultGraphModel.node_radius(degree, _max_degree) * NODE_WORLD_SCALE * _pixels_per_unit(),
+		VaultGraphModel.node_radius(degree, _max_degree) * NODE_WORLD_SCALE * ppu,
 		2.0, 22.0
 	)
 
@@ -1052,14 +1172,20 @@ func _node_screen_radius(id: String) -> float:
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
-			_zoom_at(event.position, ZOOM_STEP)
+			if event.shift_pressed:
+				_travel_depth(1.0)
+			else:
+				_zoom_at(event.position, ZOOM_STEP)
 			accept_event()
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
-			_zoom_at(event.position, 1.0 / ZOOM_STEP)
+			if event.shift_pressed:
+				_travel_depth(-1.0)
+			else:
+				_zoom_at(event.position, 1.0 / ZOOM_STEP)
 			accept_event()
 		elif event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
-				_begin_left(event.position)
+				_begin_left(event.position, event.shift_pressed)
 			else:
 				_end_left(event.position)
 			accept_event()
@@ -1095,16 +1221,16 @@ func _gui_input(event: InputEvent) -> void:
 			accept_event()
 
 
-func _begin_left(screen_point: Vector2) -> void:
+func _begin_left(screen_point: Vector2, pan := false) -> void:
 	_press_screen = screen_point
 	_moved = false
 	var hit := _node_at(screen_point)
 	if hit != "":
 		_begin_drag(hit)
-	elif _orbit_mode:
-		_dragging_camera = true
-	else:
+	elif pan:
 		_panning = true
+	else:
+		_dragging_camera = true
 
 
 func _end_left(screen_point: Vector2) -> void:
@@ -1142,6 +1268,9 @@ func _drag_by(screen_delta: Vector2) -> void:
 	if _drag_id == "":
 		return
 	var upp := _units_per_pixel()
+	var body = _bodies.get(_drag_id)
+	if body != null and is_instance_valid(body):
+		upp = _units_per_pixel_at(body.global_position)
 	var right := _camera.global_basis.x
 	var up := _camera.global_basis.y
 	var world := right * (screen_delta.x * upp) - up * (screen_delta.y * upp)
@@ -1225,6 +1354,7 @@ func _hover(screen_point: Vector2) -> void:
 
 func _handle_key(event: InputEventKey) -> bool:
 	var step := PAN_STEP * (PAN_FAST if event.shift_pressed else 1.0)
+	var depth_step := PAN_FAST if event.shift_pressed else 1.0
 	var upp := _units_per_pixel()
 	var right := _camera.global_basis.x
 	var up := _camera.global_basis.y
@@ -1237,6 +1367,10 @@ func _handle_key(event: InputEventKey) -> bool:
 			_target -= up * (step * upp)
 		KEY_DOWN:
 			_target += up * (step * upp)
+		KEY_PAGEUP:
+			_travel_depth(depth_step)
+		KEY_PAGEDOWN:
+			_travel_depth(-depth_step)
 		KEY_PLUS, KEY_EQUAL, KEY_KP_ADD:
 			_zoom_at(_cursor_screen(), ZOOM_STEP)
 		KEY_MINUS, KEY_KP_SUBTRACT:
@@ -1331,6 +1465,30 @@ func _sync_mesh_layout() -> void:
 	for id in ghosts:
 		_halo_index[id] = halo
 		halo += 1
+	_sync_ring_set(_theme_style())
+
+
+## Recompute the ringed notes and their MultiMesh instances. One writer for
+## `_ringed`, `_ring_index` and the transforms, called when the node list, the
+## degree scale or the theme changes. Ghosts are never ringed.
+func _sync_ring_set(style: Dictionary) -> void:
+	if _rings_mesh == null:
+		return
+	var note_ids: Array = []
+	for id in _note_index:
+		note_ids.append(id)
+	_ringed = GraphTheme.ringed(note_ids, _degrees, _max_degree, style)
+	_ring_index.clear()
+	_rings_mesh.multimesh.instance_count = _ringed.size()
+	var ring_color: Color = style["ring"]
+	var index := 0
+	for id in _note_index:
+		if not _ringed.has(id):
+			continue
+		_ring_index[id] = index
+		_set_ring_transform(id)
+		_rings_mesh.multimesh.set_instance_color(index, ring_color)
+		index += 1
 
 
 func _update_node_transforms(only: Dictionary = {}) -> void:
@@ -1343,6 +1501,8 @@ func _update_node_transforms(only: Dictionary = {}) -> void:
 			_set_ghost_transform(id)
 		for id in _halo_index:
 			_set_halo_transform(id)
+		for id in _ring_index:
+			_set_ring_transform(id)
 		_moved_ids.clear()
 		return
 	for id in only:
@@ -1352,6 +1512,8 @@ func _update_node_transforms(only: Dictionary = {}) -> void:
 			_set_ghost_transform(id)
 		if _halo_index.has(id):
 			_set_halo_transform(id)
+		if _ring_index.has(id):
+			_set_ring_transform(id)
 
 
 func _set_note_transform(id: String) -> void:
@@ -1359,9 +1521,16 @@ func _set_note_transform(id: String) -> void:
 	if body == null or not is_instance_valid(body):
 		return
 	var radius := _node_radius_world(id)
+	# The sphere mesh's radius is 0.5, so a 2r scale yields the same world
+	# radius the billboard quad's r scale does.
+	var sphere := str(_theme_style()["node_shape"]) == "sphere"
+	var scale := radius * (2.0 if sphere else 1.0)
 	_notes_mesh.multimesh.set_instance_transform(
 		int(_note_index[id]),
-		Transform3D(Basis.from_scale(Vector3(radius, radius, 1.0)), body.global_position)
+		Transform3D(
+			Basis.from_scale(Vector3(scale, scale, scale if sphere else 1.0)),
+			body.global_position
+		)
 	)
 
 
@@ -1380,10 +1549,27 @@ func _set_halo_transform(id: String) -> void:
 	var body = _bodies.get(id)
 	if body == null or not is_instance_valid(body):
 		return
-	var radius := _node_radius_world(id) * HALO_SCALE
+	var radius := _node_radius_world(id) * float(_theme_style()["halo_scale"])
 	_halos_mesh.multimesh.set_instance_transform(
 		int(_halo_index[id]),
 		Transform3D(Basis.from_scale(Vector3(radius, radius, 1.0)), body.global_position)
+	)
+
+
+## A ring is a quad in a fixed tilted plane, not a billboard; the orbit turns
+## it into the ellipse that reads as a planet's rings.
+func _set_ring_transform(id: String) -> void:
+	var body = _bodies.get(id)
+	if body == null or not is_instance_valid(body) or not _ring_index.has(id):
+		return
+	var radius := _node_radius_world(id) * float(_theme_style()["ring_scale"])
+	var basis := (
+		Basis(Vector3.RIGHT, deg_to_rad(72.0))
+		* Basis(Vector3.UP, deg_to_rad(18.0))
+		* Basis.from_scale(Vector3.ONE * radius)
+	)
+	_rings_mesh.multimesh.set_instance_transform(
+		int(_ring_index[id]), Transform3D(basis, body.global_position)
 	)
 
 
@@ -1396,30 +1582,41 @@ func _node_radius_world(id: String) -> float:
 func _update_node_colors() -> void:
 	if _notes_mesh == null:
 		return
-	var palette := UiPalette.active()
-	var dark := SettingsManager.is_dark_appearance()
-	var halo_alpha := HALO_ALPHA_DARK if dark else HALO_ALPHA_LIGHT
+	var style := _theme_style()
+	var halo: Color = style["halo"]
+	var halo_alpha := float(style["halo_alpha"])
+	var selected: Color = style["node_selected"]
+	var hovered: Color = style["node_hover"]
+	var ghost: Color = style["ghost"]
+	var accent: Color = style["accent"]
 	for id in _note_index:
-		var color := Color(palette.TEXT, 0.8)
+		var color := GraphTheme.note_color(id, style)
 		if id == selected_id:
-			color = palette.ACCENT
+			color = selected
 		elif id == hovered_id:
-			color = Color(palette.TEXT, 1.0)
+			color = hovered
 		_notes_mesh.multimesh.set_instance_color(int(_note_index[id]), color)
 	for id in _ghost_index:
-		var color := Color(palette.TEXT, 0.6)
+		var color := ghost
 		if id == hovered_id:
-			color = Color(palette.TEXT, 0.95)
+			color = hovered
 		_ghosts_mesh.multimesh.set_instance_color(int(_ghost_index[id]), color)
 	for id in _halo_index:
-		var color := Color(palette.TEXT, halo_alpha)
+		var color := Color(halo, halo_alpha)
 		if id == selected_id:
-			color = Color(palette.ACCENT, halo_alpha * 1.6)
+			color = Color(accent, halo_alpha * 1.6)
 		elif id == hovered_id:
-			color = Color(palette.TEXT, halo_alpha * 1.4)
+			color = Color(halo, halo_alpha * 1.4)
 		if not _note_index.has(id):
 			color.a *= 0.5
 		_halos_mesh.multimesh.set_instance_color(int(_halo_index[id]), color)
+	if _rings_mesh != null:
+		var ring_color: Color = style["ring"]
+		for id in _ring_index:
+			var color := ring_color
+			if id == selected_id:
+				color = accent
+			_rings_mesh.multimesh.set_instance_color(int(_ring_index[id]), color)
 
 
 func _rebuild_links() -> void:
@@ -1431,13 +1628,13 @@ func _rebuild_links() -> void:
 	if edges.is_empty():
 		last_link_build_us = Time.get_ticks_usec() - started
 		return
-	var palette := UiPalette.active()
+	var style := _theme_style()
 	var upp := _units_per_pixel()
 	var right := _camera.global_basis.x
 	var feathered := edges.size() <= MAX_FEATHERED_EDGES
-	var default_color := Color(palette.TEXT, LINK_ALPHA)
-	var related_color := Color(palette.ACCENT, 0.85)
-	var declared_color := Color(palette.ACCENT, 0.5)
+	var default_color: Color = style["edge"]
+	var related_color: Color = style["edge_related"]
+	var declared_color: Color = style["edge_declared"]
 	var added := false
 	_link_mesh.surface_begin(
 		Mesh.PRIMITIVE_TRIANGLES if feathered else Mesh.PRIMITIVE_LINES,
@@ -1549,7 +1746,10 @@ func label_placements() -> Array:
 	var ppu := _pixels_per_unit()
 	var labels_all := ppu >= LABEL_MIN_PPU and nodes.size() <= MAX_ALWAYS_LABELS
 	var view := Rect2(Vector2.ZERO, size)
-	var palette := UiPalette.active()
+	var style := _theme_style()
+	var text_color: Color = style["text"]
+	var accent: Color = style["accent"]
+	var ghost_color: Color = style["ghost"]
 	var cursor := cursor_hit() if has_focus() else ""
 	var candidates: Array = []
 	for node in nodes:
@@ -1575,11 +1775,11 @@ func label_placements() -> Array:
 		if not labels_all and rank == 3:
 			continue
 		var text := str(node.get("label", id))
-		var color := palette.TEXT
+		var color := text_color
 		if ghost:
-			color = Color(palette.TEXT, 0.75)
+			color = Color(ghost_color, 0.9)
 		elif id == selected_id:
-			color = palette.ACCENT
+			color = accent
 		var width := font.get_string_size(
 			text, HORIZONTAL_ALIGNMENT_LEFT, -1, LABEL_FONT_SIZE).x
 		var baseline := point.y + LABEL_FONT_SIZE * 0.35
@@ -1617,12 +1817,17 @@ func label_placements() -> Array:
 
 func _draw_overlay(canvas: Control) -> void:
 	var view_size := canvas.size
-	if _vignette != null:
-		var alpha := VIGNETTE_DARK if SettingsManager.is_dark_appearance() else VIGNETTE_LIGHT
+	var style := _theme_style()
+	var vignette_alpha := float(style["vignette_alpha"])
+	if _vignette != null and vignette_alpha > 0.0:
 		canvas.draw_texture_rect(
-			_vignette, Rect2(Vector2.ZERO, view_size), false, Color(1, 1, 1, alpha)
+			_vignette, Rect2(Vector2.ZERO, view_size), false,
+			Color(1, 1, 1, vignette_alpha)
 		)
 	var font := get_theme_default_font()
+	var text_color: Color = style["text"]
+	var accent: Color = style["accent"]
+	var muted: Color = style["muted"]
 	if nodes.is_empty():
 		if font != null:
 			var text := "No notes to graph."
@@ -1635,14 +1840,15 @@ func _draw_overlay(canvas: Control) -> void:
 				HORIZONTAL_ALIGNMENT_LEFT,
 				-1,
 				LABEL_FONT_SIZE,
-				Color(UiPalette.active().TEXT, 0.6)
+				muted
 			)
 		_draw_focus_frame(canvas)
 		return
 	if font == null:
 		return
 	var screens := _screen_positions()
-	var palette := UiPalette.active()
+	var base_edge: Color = style["edge"]
+	var related_edge: Color = style["edge_related"]
 	var cursor := cursor_hit() if has_focus() else ""
 	for node in nodes:
 		if not (node is Dictionary):
@@ -1653,11 +1859,11 @@ func _draw_overlay(canvas: Control) -> void:
 		var point: Vector2 = screens[id]
 		var radius := _node_screen_radius(id)
 		if id == hovered_id:
-			canvas.draw_arc(point, radius + 2.0, 0.0, TAU, 24, Color(palette.TEXT, 0.5), 1.0, true)
+			canvas.draw_arc(point, radius + 2.0, 0.0, TAU, 24, Color(text_color, 0.5), 1.0, true)
 		if id == selected_id:
-			canvas.draw_arc(point, radius + 3.5, 0.0, TAU, 28, palette.ACCENT, 2.0, true)
+			canvas.draw_arc(point, radius + 3.5, 0.0, TAU, 28, accent, 2.0, true)
 		if id == cursor:
-			canvas.draw_arc(point, radius + 5.5, 0.0, TAU, 32, Color(palette.ACCENT, 0.9), 1.5, true)
+			canvas.draw_arc(point, radius + 5.5, 0.0, TAU, 32, Color(accent, 0.9), 1.5, true)
 	if show_arrows:
 		var view := Rect2(Vector2.ZERO, view_size)
 		for edge in edges:
@@ -1672,7 +1878,7 @@ func _draw_overlay(canvas: Control) -> void:
 			if not _segment_visible(pa, pb, view):
 				continue
 			var related := selected_id != "" and (a == selected_id or b == selected_id)
-			var color := Color(palette.ACCENT, 0.85) if related else Color(palette.TEXT, 0.28)
+			var color := related_edge if related else Color(base_edge, 0.28)
 			if int(edge.get("ab", 0)) > 0:
 				_arrowhead(canvas, pa, pb, color, 1.0)
 			if int(edge.get("ba", 0)) > 0:
@@ -1690,18 +1896,20 @@ func _draw_overlay(canvas: Control) -> void:
 		)
 	if has_focus():
 		var mid := view_size * 0.5
-		var ink := Color(palette.ACCENT, 0.9)
+		var ink := Color(accent, 0.9)
 		canvas.draw_line(mid - Vector2(CURSOR_ARM, 0.0), mid + Vector2(CURSOR_ARM, 0.0), ink, 1.5, true)
 		canvas.draw_line(mid - Vector2(0.0, CURSOR_ARM), mid + Vector2(0.0, CURSOR_ARM), ink, 1.5, true)
 	_draw_focus_frame(canvas)
 
 
 func _draw_focus_frame(canvas: Control) -> void:
-	if has_focus():
-		canvas.draw_rect(
-			Rect2(Vector2(1, 1), canvas.size - Vector2(2, 2)),
-			UiPalette.active().ACCENT, false, 2.0
-		)
+	if not has_focus():
+		return
+	var accent: Color = _theme_style()["accent"]
+	canvas.draw_rect(
+		Rect2(Vector2(1, 1), canvas.size - Vector2(2, 2)),
+		accent, false, 2.0
+	)
 
 
 func _segment_visible(a: Vector2, b: Vector2, view: Rect2) -> bool:
@@ -1760,6 +1968,8 @@ func _update_status() -> void:
 	if _truncated:
 		text += " · truncated"
 	text += " · Orbital"
+	if graph_theme != "default":
+		text += " · %s" % str(GraphTheme.LABELS.get(graph_theme, graph_theme))
 	if selected_id != "":
 		text += " · %s" % _label_for(selected_id)
 	_status.text = text
@@ -1818,16 +2028,19 @@ func _notification(what: int) -> void:
 			else:
 				_pause_for_hidden()
 		NOTIFICATION_THEME_CHANGED:
-			_apply_theme()
+			apply_graph_theme(graph_theme)
 
 
 func _build_dust() -> void:
+	if _dust_mesh == null:
+		return
+	var count := maxi(0, int(_theme_style()["dust_count"]))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = DUST_SEED
 	_dust_positions.clear()
 	_dust_speeds.clear()
 	_dust_scales.clear()
-	for i in DUST_COUNT:
+	for i in count:
 		_dust_positions.append(Vector3(
 			rng.randf_range(-DUST_BOX_X, DUST_BOX_X),
 			rng.randf_range(-DUST_BOX_Y, DUST_BOX_Y),
@@ -1835,8 +2048,8 @@ func _build_dust() -> void:
 		))
 		_dust_speeds.append(rng.randf_range(6.0, 18.0))
 		_dust_scales.append(rng.randf_range(1.2, 3.0))
-	_dust_mesh.multimesh.instance_count = DUST_COUNT
-	for i in DUST_COUNT:
+	_dust_mesh.multimesh.instance_count = count
+	for i in count:
 		_dust_mesh.multimesh.set_instance_transform(
 			i, Transform3D(Basis.from_scale(Vector3.ONE * _dust_scales[i]), _dust_positions[i])
 		)
@@ -1846,7 +2059,9 @@ func _build_dust() -> void:
 func _update_dust_colors() -> void:
 	if _dust_mesh == null:
 		return
-	var color := Color(UiPalette.active().TEXT, DUST_ALPHA)
+	var style := _theme_style()
+	var dust: Color = style["dust"]
+	var color := Color(dust, float(style["dust_alpha"]))
 	for i in _dust_mesh.multimesh.instance_count:
 		_dust_mesh.multimesh.set_instance_color(i, color)
 
@@ -1872,6 +2087,14 @@ func max_speed() -> float:
 
 func camera_angles() -> Vector2:
 	return Vector2(_yaw, _pitch)
+
+
+func camera_view_height() -> float:
+	return _view_height
+
+
+func camera_distance() -> float:
+	return _camera.global_position.distance_to(_target) if _camera != null else 0.0
 
 
 class _GraphOverlay extends Control:

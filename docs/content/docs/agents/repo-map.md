@@ -212,6 +212,7 @@ gpty/
         │   ├── docs_viewer.gd       # Settings > About: README + linked docs, Back/Forward
         │   ├── nav_history.gd       # Bounded back/forward trail with a pinned root (pure)
         │   ├── vault_graph_canvas.gd # Shared contract for the two vault link-graph presentations
+        │   ├── graph_theme.gd # The graph's own closed theme table (default, planetary)
         │   ├── vault_graph_model.gd # Pure vault link-graph normalize/layout/hit-test
         │   ├── link_weights.gd      # Pure declared-weight vocabulary (paths, range, lookup)
         │   ├── vault_graph_view.gd  # Planar, custom-drawn vault link-graph canvas

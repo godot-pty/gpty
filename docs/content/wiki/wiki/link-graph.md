@@ -33,15 +33,22 @@ Relayout runs the deterministic pass again. It is also the moment a newly declar
 
 A new wiki pane opens on the graph, and opening it re-reads the index. The list shows **Graph**, the note editor shows both **Notes** and **Graph**, and the graph shows **Notes**, which returns to the list. The query, the model and the layout run on a worker thread, so opening a large vault's graph does not freeze the window: the canvas appears on the frame the build lands. The interface is small and stated on screen:
 
-- drag the background to pan, wheel to zoom, drag a node to move it
+- drag the background to orbit the orbital map; **Shift**-drag or middle-drag pans, and dragging a node moves it
+- the wheel (or `+`/`-`) zooms at the pointer; **Shift**+wheel, **Page Up** and **Page Down** travel through depth — the perspective dolly that moves the map's near and far layers apart, so the z layers are reachable from any orbit angle
 - **Planar** / **Orbital** switches the presentation: the orbital map is the 3D physics view, the planar canvas is the flat fallback; one button, and its text names the other presentation
-- **Orbit** turns a background drag into a camera orbit on the orbital map
-- **Relayout** resets the deterministic arrangement and fits it in the view
+- **Relayout** resets the deterministic arrangement and fits it in the view, so it is also how a lost camera comes home
 - Arrows toggles direction drawing; a mutual pair is drawn double-headed
+- the pane's **Link map theme** setting (Pane Settings) paints the map with the **Default** or **Planetary** theme; a non-default theme is named in the status line
 
 Clicking a note node opens it, behind the same Save / Discard / Cancel ask that leaving a note always makes — the graph can sit over a dirty buffer, and a click is what would replace it. Clicking a ghost runs the same resolution a mention does: a missing target offers create-from-link, while an ambiguous stem reports its candidates and does nothing, because either choice would be a guess.
 
 Right-clicking an edge offers to set or clear a declared weight. That control is described in [[declared-link-weights|Declared Link Weights]]; the graph itself only draws what the store answers.
+
+## Themes
+
+The graph's painting is a closed table of its own, separate from the chrome's palette: `GraphTheme` owns every colour and effect the two presentations draw, and a theme carries a complete dark and light set. **Default** derives from the app palette and reproduces the shipped look. **Planetary** is the first authored theme: notes become lit worlds with a deterministic hue each, the busiest notes carry tilted rings, a starfield and drifting dust sit behind them, and selection and related edges turn gold; in the light appearance it becomes a daylight-orbit palette instead. Glow, fog, the halo and the vignette are theme values too.
+
+The theme is per pane, like **Link map**: set **Link map theme** in Pane Settings and both presentations repaint immediately without moving a node. A theme never changes the graph's data, the layout's determinism, which edges exist, or what a click can reach.
 
 ## What it is not
 

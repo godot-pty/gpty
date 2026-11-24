@@ -215,7 +215,6 @@ func test_orbiting_rotates_the_camera_not_the_graph():
 		before[id] = view._bodies[id].global_position
 	var yaw := view.camera_angles().x
 	assert_eq(view._node_at(Vector2(2.0, 2.0)), "", "precondition: the corner is empty")
-	view._set_orbit(true)
 	view._begin_left(Vector2(2.0, 2.0))
 	var motion := InputEventMouseMotion.new()
 	motion.position = Vector2(42.0, 2.0)
@@ -261,3 +260,135 @@ func test_a_settled_view_repaints_after_hiding():
 		"showing must request a frame, not keep the old texture"
 	)
 	await get_tree().process_frame
+
+
+# ── Perspective camera and depth travel ────────────────────────────────
+
+func test_the_orbital_camera_is_perspective_and_fits_by_view_height():
+	var view := _make_view()
+	await _prepare(view)
+	assert_eq(view._camera.projection, Camera3D.PROJECTION_PERSPECTIVE)
+	var height := view.camera_view_height()
+	assert_true(height >= VaultGraph3D.VIEW_HEIGHT_MIN, "the fit keeps a usable height")
+	assert_true(height <= VaultGraph3D.VIEW_HEIGHT_MAX)
+	var expected := height / (2.0 * tan(deg_to_rad(view._camera.fov) * 0.5))
+	assert_almost_eq(view.camera_distance(), expected, 0.01,
+		"the camera distance is derived from the view height")
+
+
+func test_depth_travel_moves_the_target_along_the_view_without_zooming():
+	var view := _make_view()
+	await _prepare(view)
+	var height := view.camera_view_height()
+	var target := view._target
+	var forward := -view._camera.global_basis.z
+	view._travel_depth(2.0)
+	assert_almost_eq(view.camera_view_height(), height, 0.001, "depth travel is not zoom")
+	var moved := view._target - target
+	assert_almost_eq(moved.length(), 2.0 * height * VaultGraph3D.DEPTH_STEP_FRACTION, 0.01)
+	assert_true(moved.normalized().is_equal_approx(forward), "depth follows the view axis")
+
+
+func test_shift_wheel_travels_and_plain_wheel_zooms():
+	var view := _make_view()
+	await _prepare(view)
+	var height := view.camera_view_height()
+	var target := view._target
+	var wheel := InputEventMouseButton.new()
+	wheel.position = view.size * 0.5
+	wheel.button_index = MOUSE_BUTTON_WHEEL_UP
+	wheel.pressed = true
+	wheel.shift_pressed = true
+	view._gui_input(wheel)
+	assert_almost_eq(view.camera_view_height(), height, 0.001, "shift-wheel must not zoom")
+	assert_gt((view._target - target).length(), 0.01, "shift-wheel travels depth")
+
+	target = view._target
+	height = view.camera_view_height()
+	wheel.shift_pressed = false
+	view._gui_input(wheel)
+	assert_lt(view.camera_view_height(), height, "plain wheel keeps its zoom meaning")
+	assert_almost_eq(
+		(view._target - target).length(), 0.0, 0.01,
+		"a centred zoom keeps the target"
+	)
+
+
+func test_depth_changes_the_projected_scale():
+	var view := _make_view()
+	await _prepare(view)
+	await _await_settled(view)
+	var near := ""
+	var far := ""
+	for id in view._depths:
+		if near == "" or float(view._depths[id]) > float(view._depths[near]):
+			near = id
+		if far == "" or float(view._depths[id]) < float(view._depths[far]):
+			far = id
+	assert_ne(near, "", "precondition: the graph has bodies at depth")
+	var near_upp := view._units_per_pixel_at(view._bodies[near].global_position)
+	var far_upp := view._units_per_pixel_at(view._bodies[far].global_position)
+	assert_lt(near_upp, far_upp, "a nearer body has fewer world units per pixel")
+	var before_ratio := far_upp / near_upp
+	view._travel_depth(2.0)
+	var near_after := view._units_per_pixel_at(view._bodies[near].global_position)
+	var far_after := view._units_per_pixel_at(view._bodies[far].global_position)
+	assert_gt(far_after / near_after, before_ratio, "travelling forward spreads the depth scale")
+
+
+func test_a_background_drag_orbits_by_default_and_shift_drag_pans():
+	var view := _make_view()
+	await _prepare(view)
+	await _await_settled(view)
+	var yaw := view.camera_angles().x
+	view._begin_left(Vector2(2.0, 2.0))
+	var motion := InputEventMouseMotion.new()
+	motion.position = Vector2(42.0, 2.0)
+	motion.relative = Vector2(40.0, 0.0)
+	view._gui_input(motion)
+	view._end_left(motion.position)
+	assert_ne(view.camera_angles().x, yaw, "a plain background drag orbits")
+	var orbited_yaw := view.camera_angles().x
+
+	var target := view._target
+	view._begin_left(Vector2(2.0, 2.0), true)
+	motion.position = Vector2(42.0, 2.0)
+	motion.relative = Vector2(40.0, 0.0)
+	view._gui_input(motion)
+	view._end_left(motion.position)
+	assert_ne(view._target, target, "shift-drag pans")
+	assert_almost_eq(view.camera_angles().x, orbited_yaw, 0.001, "shift-drag does not orbit")
+
+
+func test_the_graph_toolbar_has_one_presentation_switch_and_no_orbit_toggle():
+	var view := _make_view()
+	await _prepare(view)
+	assert_eq(view._mode_button.text, "Planar")
+	assert_null(view.get("_orbit_button"), "the dead Orbit toggle is gone")
+
+
+func test_the_planetary_theme_swaps_glyphs_without_moving_bodies():
+	var view := _make_view()
+	await _prepare(view)
+	await _await_settled(view)
+	var before := {}
+	for id in view._bodies:
+		before[id] = view._bodies[id].global_position
+	view.apply_graph_theme("planetary")
+	assert_eq(view.graph_theme, "planetary")
+	assert_eq(view._notes_mesh.multimesh.mesh, view._sphere_mesh,
+		"planetary notes are lit spheres")
+	assert_true(view._sun.visible, "the planetary scene has a sun")
+	assert_gt(view._rings_mesh.multimesh.instance_count, 0,
+		"the busiest note carries a planet ring")
+	for id in before:
+		assert_true(
+			(view._bodies[id].global_position - before[id]).length() < 0.01,
+			"%s must not move for a theme" % id
+		)
+	assert_string_contains(view._status.text, "Planetary")
+
+	view.apply_graph_theme("default")
+	assert_eq(view._notes_mesh.multimesh.mesh, view._quad, "the default is back to billboards")
+	assert_false(view._sun.visible)
+	assert_eq(view._rings_mesh.multimesh.instance_count, 0)

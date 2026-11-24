@@ -811,7 +811,10 @@ func test_layout_state_carries_the_graph_mode_and_positions():
 	pane.graph_mode = "3d"
 	pane._apply_graph_mode()
 	await _open_graph(pane)
+	pane.apply_settings({"graph_theme": "planetary"})
 	assert_true(pane._graph_view is VaultGraph3D, "the explicit mode is the orbital map")
+	assert_eq(pane._graph_view.graph_theme, "planetary")
+	assert_eq(str(pane._graph_view._style["node_shape"]), "sphere")
 	var view := pane._graph_view as VaultGraph3D
 	var start: Vector2 = view.positions["a.md"]
 	view._begin_drag("a.md")
@@ -820,6 +823,7 @@ func test_layout_state_carries_the_graph_mode_and_positions():
 
 	var state: Dictionary = pane._get_layout_state()
 	assert_eq(str(state.get("graph_mode", "")), "3d")
+	assert_eq(str(state.get("graph_theme", "")), "planetary")
 	var saved: Dictionary = state.get("graph_positions", {})
 	assert_true(saved.has("a.md"), "the dragged note's place rides the state")
 	assert_almost_eq(float(saved["a.md"][0]), start.x + 120.0, 0.2)
@@ -830,6 +834,26 @@ func test_layout_state_carries_the_graph_mode_and_positions():
 	assert_eq(tile.get("dropped", PackedStringArray()).size(), 0,
 		"the saved block survives the closed table")
 	assert_eq(str(tile["settings"].get("graph_mode", "")), "3d")
+	assert_eq(str(tile["settings"].get("graph_theme", "")), "planetary")
+
+
+func test_the_graph_theme_is_a_closed_published_vocabulary():
+	assert_eq(
+		PaneTypes.settings_schema("wiki")["graph_theme"]["values"],
+		GraphTheme.IDS,
+		"the Pane Settings picker and the layout gate read the registry"
+	)
+	_seed_linked_vault()
+	var pane := _make_pane(_tmp)
+	pane.graph_mode = "3d"
+	pane._apply_graph_mode()
+	await _open_graph(pane)
+	pane.apply_settings({"graph_theme": "planetary"})
+	assert_eq(pane.graph_theme, "planetary")
+	assert_eq(pane._graph_view.graph_theme, "planetary")
+	pane.apply_settings({"graph_theme": "nope"})
+	assert_eq(pane.graph_theme, "planetary", "a value outside the table is dropped")
+	assert_eq(pane._graph_view.graph_theme, "planetary")
 
 
 func test_a_layout_restores_graph_positions_and_ignores_missing_notes():
@@ -1953,6 +1977,7 @@ func test_the_mode_button_names_the_other_presentation():
 	if view == null:
 		return
 	assert_eq(view._mode_button.text, "Planar")
+	assert_null(view.get("_orbit_button"), "the dead Orbit toggle is gone")
 
 	view._mode_button.pressed.emit()
 	assert_true(pane._graph_view is VaultGraphView)

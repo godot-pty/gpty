@@ -23,11 +23,12 @@ class_name WikiPane
 ## spring per link) and `VaultGraphView` (the planar canvas, the automatic
 ## choice on a software rasterizer). Geometry is session state in the
 ## active view and rides the pane's layout state as `graph_positions`; the map
-## style is the `graph_mode` setting (`auto`/`3d`/`2d`). Nothing there writes
-## to the vault: clicking a note opens it through the same leave guard the
-## list uses, and clicking a ghost runs the same resolution a preview mention
-## does. A right-click on an edge sets or clears a **declared weight** — the
-## authored layer over measured mentions, kept in the user's
+## style is the `graph_mode` setting (`auto`/`3d`/`2d`) plus the `graph_theme`
+## setting (`default`/`planetary`, [GraphTheme]'s closed table). Nothing there
+## writes to the vault: clicking a note opens it through the same leave guard
+## the list uses, and clicking a ghost runs the same resolution a preview
+## mention does. A right-click on an edge sets or clears a **declared weight**
+## — the authored layer over measured mentions, kept in the user's
 ## `user://link_weights.json` (never `vaults.db`, which a rebuild may replace)
 ## and display-only: it changes thickness, spring stiffness and link-panel
 ## order, never which edges exist or what a click can reach.
@@ -46,6 +47,11 @@ class_name WikiPane
 ## Link map: `auto` (the orbital map on a hardware adapter, the planar canvas
 ## on a software rasterizer) | `3d` (the orbital map) | `2d` (the planar canvas).
 @export var graph_mode := "auto"
+## The link map's own theme id ([GraphTheme.IDS]; `default` or `planetary`).
+## Display state like `graph_mode`, not vault content: both presentations read
+## it, the pane's Pane Settings sets it, and a bad saved value never reaches it
+## (the closed schema drops it).
+@export var graph_theme := "default"
 
 ## The link graph's outcome: `true` once the canvas is up, `false` with the
 ## reason it is not (the vault failed, or the pane left the graph before the
@@ -775,6 +781,7 @@ func _make_graph_view(mode: String) -> VaultGraphCanvas:
 	view.weight_set_requested.connect(_ask_declared_weight)
 	view.weight_cleared.connect(_clear_declared_weight)
 	view.mode_requested.connect(_on_graph_mode_requested)
+	view.apply_graph_theme(graph_theme)
 	return view
 
 
@@ -2085,7 +2092,12 @@ func apply_settings(settings: Dictionary):
 	var previous_vault := vault_path
 	var previous_root := _vault_root
 	var previous_mode := graph_mode
+	var previous_theme := graph_theme
 	super.apply_settings(settings)
+	# A theme is display-only and must reach the live view before the vault
+	# branch below can return (a vault switch must not leave the old palette).
+	if graph_theme != previous_theme and _graph_view != null:
+		_graph_view.apply_graph_theme(graph_theme)
 	# Remember what a restore asked for; only the spawn-time call (before the
 	# node is in the tree) is ever replayed, by `_restore_view`.
 	if settings.has("open_note") or settings.has("graph"):
@@ -2145,6 +2157,7 @@ func _get_layout_state() -> Dictionary:
 		saved = VaultGraphModel.sanitize_positions(_saved_positions)
 	state.merge({
 		"vault_path": vault_path, "view_mode": view_mode, "graph_mode": graph_mode,
+		"graph_theme": graph_theme,
 		# Where the user left off: the open note, the graph, and the map's
 		# arrangement. Unsaved text is not part of this (the recovery copy
 		# covers a crash). A graph that is still building counts as
@@ -2230,6 +2243,13 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 	graph_opt.item_selected.connect(func(_idx): panel._debounce_timer.start())
 	_add_setting_row(v, "Link map:", graph_opt)
 
+	var theme_opt = OptionButton.new()
+	for theme_id in PaneTypes.WIKI_GRAPH_THEMES:
+		theme_opt.add_item(PaneTypes.WIKI_GRAPH_THEME_LABELS.get(theme_id, theme_id))
+	theme_opt.selected = maxi(0, PaneTypes.WIKI_GRAPH_THEMES.find(graph_theme))
+	theme_opt.item_selected.connect(func(_idx): panel._debounce_timer.start())
+	_add_setting_row(v, "Link map theme:", theme_opt)
+
 	panel._gather_func = func():
 		return {
 			"pane_name": name_le.text.strip_edges(),
@@ -2237,6 +2257,7 @@ func _build_pane_settings_ui(panel: Control) -> Control:
 			"vault_path": vault_le.text.strip_edges(),
 			"view_mode": PaneTypes.WIKI_VIEW_MODES[mode_opt.selected] if mode_opt.selected >= 0 else "split",
 			"graph_mode": PaneTypes.WIKI_GRAPH_MODES[graph_opt.selected] if graph_opt.selected >= 0 else "auto",
+			"graph_theme": PaneTypes.WIKI_GRAPH_THEMES[theme_opt.selected] if theme_opt.selected >= 0 else "default",
 		}
 
 	return v
