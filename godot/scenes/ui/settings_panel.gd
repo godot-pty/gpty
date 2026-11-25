@@ -80,6 +80,8 @@ var _motion_pickers := {}
 var _motion_params := {}
 var _effect_opt: OptionButton = null
 var _effect_intensity_opt: OptionButton = null
+var _effect_scope_opt: OptionButton = null
+var _scope_panes_hint: Label = null
 var _backdrop_opt: OptionButton = null
 var _reactive_rules_host: VBoxContainer = null
 var _add_reactive_opt: OptionButton = null
@@ -957,6 +959,7 @@ func _add_motion_section(v: VBoxContainer) -> Callable:
 	v.add_child(hint)
 
 	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	hb.add_child(_lbl("Pane transitions:"))
 	var opt := OptionButton.new(); opt.name = "MotionOpt"
 	for label in UiMotion.LABELS:
@@ -967,6 +970,9 @@ func _add_motion_section(v: VBoxContainer) -> Callable:
 		SettingsManager.cfg_motion = idx
 		SettingsManager.save_settings()
 		_sync_motion_rows()
+		# The level is live: replay the create transition at the new level so
+		# the picker's effect is visible without waiting for a spawn.
+		_preview.play_motion("create")
 	)
 	hb.add_child(opt)
 	v.add_child(hb)
@@ -975,10 +981,18 @@ func _add_motion_section(v: VBoxContainer) -> Callable:
 	for kind in PaneTransitions.KINDS:
 		var k := str(kind)
 		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 		row.add_child(_lbl(k.capitalize() + ":"))
 		var kind_opt := OptionButton.new()
 		kind_opt.name = "%sAnimOpt" % k.capitalize()
 		row.add_child(kind_opt)
+		var play := Button.new()
+		play.name = "%sPlayBtn" % k.capitalize()
+		play.text = "Play"
+		play.tooltip_text = "Play %s on the preview" % k
+		play.pressed.connect(func(): _preview.play_motion(k))
+		row.add_child(play)
+		_register_preview_action(play)
 		v.add_child(row)
 		var host := VBoxContainer.new()
 		host.name = "%sParams" % k.capitalize()
@@ -1047,6 +1061,7 @@ func _add_effects_section(v: VBoxContainer) -> Callable:
 	v.add_child(hint)
 
 	var effect_row := HBoxContainer.new()
+	effect_row.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	effect_row.add_child(_lbl("Terminal effect:"))
 	var opt := OptionButton.new()
 	opt.name = "EffectOpt"
@@ -1057,12 +1072,22 @@ func _add_effects_section(v: VBoxContainer) -> Callable:
 	opt.item_selected.connect(func(idx: int):
 		SettingsManager.cfg_effect = str(opt.get_item_metadata(idx))
 		SettingsManager.save_settings()
-		_sync_effect_rows())
+		_sync_effect_rows()
+		_preview.refresh()
+		_preview.play_effect())
 	effect_row.add_child(opt)
+	var effect_play := Button.new()
+	effect_play.name = "EffectPlayBtn"
+	effect_play.text = "Play"
+	effect_play.tooltip_text = "Replay the selected effect on the preview"
+	effect_play.pressed.connect(func(): _preview.play_effect())
+	effect_row.add_child(effect_play)
+	_register_preview_action(effect_play)
 	v.add_child(effect_row)
 	_effect_opt = opt
 
 	var intensity_row := HBoxContainer.new()
+	intensity_row.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	intensity_row.add_child(_lbl("Intensity:"))
 	var intensity_opt := OptionButton.new()
 	intensity_opt.name = "EffectIntensityOpt"
@@ -1072,10 +1097,46 @@ func _add_effects_section(v: VBoxContainer) -> Callable:
 	intensity_opt.item_selected.connect(func(idx: int):
 		SettingsManager.cfg_effect_intensity = idx
 		SettingsManager.save_settings()
-		_sync_effect_rows())
+		_sync_effect_rows()
+		_preview.refresh()
+		_preview.play_effect())
 	intensity_row.add_child(intensity_opt)
 	v.add_child(intensity_row)
 	_effect_intensity_opt = intensity_opt
+
+	# The scope decides which ground carries the effect. It is a closed
+	# vocabulary and the pane broadcast is gated by it (`pane_ambient_id`),
+	# so the panes-only/excluded sentence here is the one a user needs.
+	var scope_row := HBoxContainer.new()
+	scope_row.add_theme_constant_override("separation", UiTokens.SPACE_MD)
+	scope_row.add_child(_lbl("Scope:"))
+	var scope_opt := OptionButton.new()
+	scope_opt.name = "ScopeOpt"
+	for label in UiEffects.SCOPE_LABELS:
+		scope_opt.add_item(label)
+	scope_opt.tooltip_text = "The ground that carries the ambient effect; reactive cues always fire on panes"
+	scope_opt.item_selected.connect(func(idx: int):
+		SettingsManager.cfg_effect_scope = idx
+		SettingsManager.save_settings()
+		_sync_effect_rows()
+		_preview.refresh()
+		_preview.play_effect())
+	scope_row.add_child(scope_opt)
+	v.add_child(scope_row)
+	_effect_scope_opt = scope_opt
+
+	var scope_hint := Label.new()
+	scope_hint.name = "ScopeHint"
+	scope_hint.text = UiEffects.SCOPE_HINT
+	scope_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	scope_hint.theme_type_variation = UiTheme.MUTED_LABEL
+	v.add_child(scope_hint)
+	_scope_panes_hint = Label.new()
+	_scope_panes_hint.name = "ScopePanesHint"
+	_scope_panes_hint.text = UiEffects.SCOPE_PANES_EXCLUDED_HINT
+	_scope_panes_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_scope_panes_hint.theme_type_variation = UiTheme.MUTED_LABEL
+	v.add_child(_scope_panes_hint)
 
 	v.add_child(HSeparator.new())
 	var reactive_title := Label.new()
@@ -1113,6 +1174,10 @@ func _sync_effect_rows() -> void:
 	SettingsManager.cfg_effect = UiEffects.sanitize_ambient(str(SettingsManager.cfg_effect))
 	_effect_opt.select(UiEffects.AMBIENT_IDS.find(SettingsManager.cfg_effect))
 	_effect_intensity_opt.selected = UiEffects.level()
+	if _effect_scope_opt != null:
+		_effect_scope_opt.selected = UiEffects.scope()
+	if _scope_panes_hint != null:
+		_scope_panes_hint.visible = UiEffects.scope() == UiEffects.SCOPE_SIDEBAR
 
 ## Rebuild the concept -> cue rows from the store. One row per rule: the concept
 ## name, the cue picker (Off included) and a remove button. A rule whose concept
@@ -1141,6 +1206,7 @@ func _sync_reactive_rows() -> void:
 
 func _build_reactive_row(concept: String, effect: String) -> void:
 	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", UiTokens.SPACE_MD)
 	var label := Label.new()
 	label.text = concept
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1158,6 +1224,13 @@ func _build_reactive_row(concept: String, effect: String) -> void:
 	opt.item_selected.connect(func(idx: int):
 		_on_reactive_effect_selected(concept, str(opt.get_item_metadata(idx))))
 	row.add_child(opt)
+	var test := Button.new()
+	test.name = "CueTestBtn"
+	test.text = "Test"
+	test.tooltip_text = "Play this cue on the preview"
+	test.pressed.connect(func(): _preview.play_cue(effect))
+	row.add_child(test)
+	_register_preview_action(test)
 	var remove := Button.new()
 	Icons.icon_button(remove, Icons.DELETE, "Remove rule")
 	remove.pressed.connect(func(): _remove_reactive_rule(concept))
@@ -1244,6 +1317,7 @@ func _on_motion_animation_selected(kind: String, opt: OptionButton, idx: int) ->
 	SettingsManager.cfg_pane_animation[kind] = str(opt.get_item_metadata(idx))
 	SettingsManager.save_settings()
 	_rebuild_motion_params(kind)
+	_preview.play_motion(kind)
 
 ## Regenerate one kind's property rows from the selected animation's schema:
 ## a label and a bounded SpinBox per declared property.
@@ -1285,6 +1359,9 @@ func _store_motion_param(kind: String, id: String, param: String, value: float) 
 	SettingsManager.cfg_pane_animation_params[key] = stored
 	if _debounce_timer != null:
 		_debounce_timer.start()
+	# The preview reads the in-memory params, so a property edit replays
+	# immediately without waiting for the debounced save.
+	_preview.play_motion(kind)
 
 func _add_color_control(v: VBoxContainer, label: String, value: Color, setter: Callable, default_color: Callable) -> Array:
 	var h = HBoxContainer.new()

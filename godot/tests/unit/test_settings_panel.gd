@@ -1211,7 +1211,16 @@ func test_removing_a_reactive_rule_clears_it():
 	_panel._sync_reactive_rows()
 	var row := _reactive_row("cat_command")
 	assert_not_null(row)
-	(row.get_child(2) as Button).pressed.emit()
+	var remove: Button = null
+	if row != null:
+		for child in row.get_children():
+			if child is Button and Icons.glyph(child) == Icons.DELETE:
+				remove = child
+				break
+	assert_not_null(remove, "the row carries its remove button")
+	if remove == null:
+		return
+	remove.pressed.emit()
 	await get_tree().process_frame
 	assert_false(SettingsManager.cfg_reactive_effects.has("cat_command"),
 		"the remove button erases the rule")
@@ -1251,3 +1260,58 @@ func test_the_backdrop_picker_writes_the_setting():
 	_panel._sync_backdrop_row()
 	assert_eq(opt.selected, SettingsManager.BACKDROP_GRADIENT,
 		"the picker reads the stored value back")
+
+## The effect scope: a closed vocabulary, an immediate save, the panes-excluded
+## hint only at Sidebar only, and the Appearance reset returns it to panes.
+func test_the_scope_picker_offers_the_closed_vocabulary():
+	var opt := _panel.find_child("ScopeOpt", true, false) as OptionButton
+	assert_not_null(opt, "the Effects section must offer a scope")
+	if opt == null:
+		return
+	assert_eq(opt.item_count, UiEffects.SCOPE_LABELS.size())
+	for i in opt.item_count:
+		assert_eq(opt.get_item_text(i), UiEffects.SCOPE_LABELS[i])
+	assert_eq(opt.selected, UiEffects.SCOPE_PANES, "panes is the default")
+	var hint := _panel.find_child("ScopePanesHint", true, false) as Label
+	assert_not_null(hint, "the panes-excluded sentence has a place")
+	if hint == null:
+		return
+	assert_false(hint.visible, "panes-only needs no exclusion sentence")
+	opt.selected = UiEffects.SCOPE_SIDEBAR
+	opt.item_selected.emit(UiEffects.SCOPE_SIDEBAR)
+	assert_eq(SettingsManager.cfg_effect_scope, UiEffects.SCOPE_SIDEBAR,
+		"the picker writes the setting")
+	assert_true(hint.visible, "sidebar-only says panes draw no effect")
+	var reset := _tab_reset_button("Appearance")
+	assert_not_null(reset, "the Appearance reset exists")
+	if reset != null:
+		reset.pressed.emit()
+	assert_eq(SettingsManager.cfg_effect_scope, UiEffects.SCOPE_PANES,
+		"the Appearance reset returns the scope to panes")
+	assert_false(hint.visible)
+
+## The Play buttons in the sections are the preview's entry points: the create
+## picker's button plays the transition, the effect row's button replays the
+## effect, and both update the caption the card shows.
+func test_the_play_buttons_drive_the_preview():
+	_pin_window(Vector2i(1920, 1080))
+	SettingsManager.cfg_ui_scale = 100
+	SettingsManager.apply_ui_scale()
+	_panel.theme = UiTheme.build()
+	_panel.open()
+	_panel.show_section("appearance")
+	await wait_frames(2)
+	assert_true(_panel._preview.visible, "the design width shows the preview")
+	var create_play := _panel.find_child("CreatePlayBtn", true, false) as Button
+	assert_not_null(create_play, "each transition row carries a Play button")
+	if create_play != null:
+		assert_false(create_play.disabled)
+		create_play.pressed.emit()
+		assert_string_contains(_panel._preview.caption_text(), "Create")
+	SettingsManager.cfg_effect = "grain"
+	SettingsManager.cfg_effect_intensity = UiEffects.FULL
+	var effect_play := _panel.find_child("EffectPlayBtn", true, false) as Button
+	assert_not_null(effect_play, "the effect row carries a Play button")
+	if effect_play != null:
+		effect_play.pressed.emit()
+		assert_string_contains(_panel._preview.caption_text(), "Film grain")

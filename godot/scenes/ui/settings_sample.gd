@@ -97,7 +97,7 @@ func _draw() -> void:
 	draw_string(_font, Vector2(x + 2.0, y), inverse,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, _font_px, ground)
 
-	var link_x := x + inverse_w + 14.0
+	var link_x := x + inverse_w + 20.0
 	var link := "link"
 	draw_string(_font, Vector2(link_x, y), link,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, _font_px, p.ACCENT)
