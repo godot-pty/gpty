@@ -84,6 +84,7 @@ func _build_ui():
 	# (`fit_card`), because `open_for` builds this card while the panel is still
 	# hidden.
 	_card = bg
+	_card.theme_type_variation = UiTheme.FLOATING_PANEL
 	_card.custom_minimum_size = CARD_SIZE
 	cc.add_child(bg)
 

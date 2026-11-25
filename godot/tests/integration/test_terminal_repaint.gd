@@ -312,3 +312,72 @@ func test_the_ground_is_the_grid_background():
 		"the ground follows the native scheme")
 	assert_eq(body._cursor_draw_color().to_html(false), "e0e0e0",
 		"an un-customised pane cursor takes the scheme's cursor")
+
+## The v0.8.7 backdrop: a gradient is the pane's ground, so a run of cells at
+## the default background must leave its band uncovered exactly as an ambient
+## effect's ground does, while an ANSI or inverse run still paints its own rect.
+func test_a_gradient_backdrop_skips_only_the_default_background_runs():
+	_seed_cache(2, 4)
+	_probe._ground = Color.BLACK
+
+	assert_false(_probe._backdrop_covers_background(Color.BLACK),
+		"a flat backdrop still paints the default run in the row band")
+	assert_false(_probe._backdrop_covers_background(Color.RED))
+
+	_probe.backdrop = SettingsManager.BACKDROP_GRADIENT
+	assert_true(_probe._backdrop_covers_background(Color.BLACK),
+		"the gradient is the ground, so the default run must stay uncovered")
+	assert_false(_probe._backdrop_covers_background(Color.RED),
+		"a coloured cell still paints its own rect over the gradient")
+
+	_probe.backdrop = SettingsManager.BACKDROP_FLAT
+	assert_false(_probe._backdrop_covers_background(Color.BLACK))
+
+	# The effect is the other ground owner: the predicate covers both, so the
+	# band's decision does not depend on which one is active.
+	_probe.apply_settings({"effect": "crt", "effect_intensity": UiEffects.FULL})
+	assert_true(_probe._backdrop_covers_background(Color.BLACK))
+	assert_false(_probe._backdrop_covers_background(Color.RED))
+	_probe.apply_settings({"effect_intensity": UiEffects.OFF})
+
+## The stop is a fixed step away from the ground: 6 % toward white for a dark
+## ground and toward black for a light one, so neither extreme is a no-op and
+## the alpha stays opaque.
+func test_the_backdrop_top_stop_is_the_ground_six_percent_toward_the_far_end():
+	var black := UiTokens.backdrop_stop(Color.BLACK)
+	for c in [black.r, black.g, black.b]:
+		assert_almost_eq(c, 0.06, 0.0001, "black moves 6 % toward white")
+	assert_eq(black.a, 1.0, "the ground stop is opaque")
+
+	var white := UiTokens.backdrop_stop(Color.WHITE)
+	for c in [white.r, white.g, white.b]:
+		assert_almost_eq(c, 0.94, 0.0001, "white moves 6 % toward black")
+
+	var mid := Color(0.2, 0.4, 0.6)
+	assert_eq(UiTokens.backdrop_stop(mid), mid.lerp(Color.WHITE, 0.06),
+		"a mid ground moves toward white, the far end")
+	assert_eq(UiTokens.backdrop_stop(Color(0.2, 0.4, 0.6, 0.0)).a, 1.0,
+		"a transparent ground still yields an opaque stop")
+
+## The row's contrast contract: the shipped default foreground clears 4.5:1
+## against the flat ground and against the shifted stop.
+func test_the_default_foreground_clears_45_to_1_against_both_stops():
+	var fg := Color8(229, 229, 229)
+	var ground := Color.BLACK
+	assert_gte(UiTokens.contrast_ratio(fg, ground), 4.5,
+		"the flat ground clears 4.5:1")
+	assert_gte(UiTokens.contrast_ratio(fg, UiTokens.backdrop_stop(ground)), 4.5,
+		"the shifted stop clears 4.5:1")
+
+## A backdrop is a draw-read setting: a value change repaints the whole grid
+## once, and a broadcast that repeats the value costs nothing.
+func test_a_backdrop_change_repaints_the_grid_once():
+	_seed_cache(2, 4)
+	_probe._repaint_all()
+	var before := _probe._full_repaints
+	_probe.apply_settings({"backdrop": SettingsManager.BACKDROP_GRADIENT})
+	assert_eq(_probe._full_repaints, before + 1,
+		"one backdrop change is one full repaint")
+	_probe.apply_settings({"backdrop": SettingsManager.BACKDROP_GRADIENT})
+	assert_eq(_probe._full_repaints, before + 1,
+		"an unchanged broadcast costs none")

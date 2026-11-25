@@ -548,6 +548,10 @@ const TERMINAL_SETTINGS := {
 	# asserts it against `UiEffects.AMBIENT_IDS`.
 	"effect": {"kind": "text", "max": 16, "values": ["crt", "grain"], "file": false, "ipc": false},
 	"effect_intensity": {"kind": "int", "min": 0, "max": 2, "file": false, "ipc": false},
+	# The Appearance tab's terminal backdrop (Flat/Gradient), broadcast by
+	# `apply_to_terminal` like the effect: a shared layout must not restyle a
+	# pane, and no IPC caller may reach it.
+	"backdrop": {"kind": "int", "min": 0, "max": 1, "file": false, "ipc": false},
 	# The global dark/light pair's resolved member, pushed by
 	# `apply_to_terminal` on every save. A file must not name it: appearance
 	# paths are the user's, not a shared layout's.

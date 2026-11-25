@@ -233,6 +233,12 @@ func refresh_sync_interval() -> void:
 		effect_intensity = value
 		_sync_effects()
 
+## The Appearance tab's terminal ground: `SettingsManager.BACKDROP_FLAT` or
+## `BACKDROP_GRADIENT`, pushed by `apply_to_terminal`. The draw reads it per
+## paint; `DRAW_READ_SETTINGS` turns a value change into one full repaint. Like
+## `color_scheme_path` it is pushed state, never scene data.
+var backdrop: int = SettingsManager.BACKDROP_FLAT
+
 var _terminal: GptyTerminal
 var _font: Font
 var _font_bold: Font
@@ -865,7 +871,7 @@ const DRAW_READ_SETTINGS := [
 	"cursor_shape", "cursor_blink", "cursor_blink_speed",
 	"beam_cursor_width", "underline_cursor_height",
 	"focus_border_color", "selection_color", "scrollback_indicator_color",
-	"effect", "effect_intensity",
+	"effect", "effect_intensity", "backdrop",
 ]
 
 func _draw_read_values() -> Array:
@@ -1416,10 +1422,16 @@ func _effect_backdrop() -> bool:
 		and int(_cell_cache.get("rows", 0)) > 0
 	)
 
-## True when the effect layer already paints this cell background, so the band
-## must leave it uncovered.
-func _effect_covers_background(bg: Color) -> bool:
-	return _effect_backdrop() and bg == _ground
+## True when the ground already paints this default-background cell - the
+## ambient effect's quad or the gradient backdrop - so the row band must leave
+## it uncovered.
+func _backdrop_covers_background(bg: Color) -> bool:
+	if bg != _ground:
+		return false
+	return _effect_backdrop() or _gradient_backdrop()
+
+func _gradient_backdrop() -> bool:
+	return backdrop == SettingsManager.BACKDROP_GRADIENT
 
 func _sync_effects() -> void:
 	if effect == "" or effect_intensity <= UiEffects.OFF:
@@ -1530,14 +1542,31 @@ func pin_focus_sweep(alpha: float) -> void:
 func _draw():
 	var t0 = Time.get_ticks_usec()
 	# The pane's own canvas draws under every child, so it carries only the
-	# ground: one rect that changes with the pane's size or the palette, never
+	# ground: one fill that changes with the pane's size or the palette, never
 	# with the grid's content. While an ambient effect is active its layer
-	# paints the ground (with the effect in it), so this rect is skipped - two
+	# paints the ground (with the effect in it), so this fill is skipped - two
 	# alpha-bearing grounds would compound instead of the scheme's own alpha.
 	if not _cell_cache.is_empty() and int(_cell_cache.get("rows", 0)) > 0:
 		if not _effect_backdrop():
-			draw_rect(Rect2(Vector2.ZERO, size), _ground)
+			_draw_ground(self)
 	_draw_ms += float(Time.get_ticks_usec() - t0) / 1000.0
+
+
+## The pane's ground: one flat rect, or the two-stop gradient as one
+## per-vertex-coloured quad (the GPU interpolates it; no shader, no texture).
+## The stop is at the top and the exact background at the bottom. An ambient
+## effect paints the ground itself, so the gradient is drawn only while no
+## effect owns it.
+func _draw_ground(item: CanvasItem) -> void:
+	if _gradient_backdrop():
+		var top := UiTokens.backdrop_stop(_ground)
+		item.draw_polygon(
+			PackedVector2Array([
+				Vector2(0.0, 0.0), Vector2(size.x, 0.0),
+				Vector2(size.x, size.y), Vector2(0.0, size.y)]),
+			PackedColorArray([top, top, _ground, _ground]))
+		return
+	item.draw_rect(Rect2(Vector2.ZERO, size), _ground)
 
 
 ## One row's background band. Consecutive cells of one colour merge into one
@@ -1557,10 +1586,11 @@ func _draw_row_background(item: CanvasItem, r: int):
 			c += 1
 			while c < n_cols and bg_arr[r * n_cols + c] == bg:
 				c += 1
-			# While an effect paints the ground, a run at that same colour
+			# While a backdrop paints the default background - an ambient
+			# effect's quad or the gradient ground - a run at that same colour
 			# would cover it; every other run (ANSI backgrounds, inverse
 			# cells) still paints its own rect.
-			if _effect_covers_background(bg):
+			if _backdrop_covers_background(bg):
 				continue
 			# One rect for the entire run of same-background cells
 			item.draw_rect(Rect2(off.x + start_c * _cell_w, row_y, (c - start_c) * _cell_w, _cell_h), bg)

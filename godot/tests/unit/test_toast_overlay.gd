@@ -36,6 +36,9 @@ func test_a_toast_is_an_opaque_padded_panel():
 	assert_not_null(box)
 	assert_eq(box.bg_color.a, 1.0, "the message must not read over the terminal's text")
 	assert_gt(box.content_margin_top, 0.0, "the card has padding")
+	assert_eq(box.shadow_color, UiPalette.active().SHADOW,
+		"a toast carries the floating-surface shadow token")
+	assert_eq(box.shadow_size, UiTheme.ELEVATION_SHADOW_SIZE)
 	var lbl := panel.get_child(0) as Label
 	assert_eq(lbl.text, "Copied line 3")
 	assert_eq(lbl.accessibility_name, "Copied line 3", "a screen reader gets the message")

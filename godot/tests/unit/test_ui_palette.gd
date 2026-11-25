@@ -98,3 +98,12 @@ func test_an_unknown_mode_falls_back_to_dark():
 	UiPalette.use(99)
 	assert_eq(UiPalette.mode(), UiPalette.MODE_DARK)
 	assert_eq(UiPalette.active().SURFACE, UiPalette.dark().SURFACE)
+
+## Light mode's shadow is a neutral slate, not black at low alpha, so a card's
+## elevation does not read as dirt on the light chrome.
+func test_the_light_shadow_is_neutral_not_black():
+	var shadow := UiPalette.light().SHADOW
+	assert_gt(shadow.r, 0.0, "the light shadow has a hue rather than being black")
+	assert_lt(shadow.a, 1.0, "and it is translucent")
+	assert_lt(shadow.a, 0.5, "soft enough to read as a shadow")
+	assert_gt(UiPalette.dark().SHADOW.a, 0.0, "the dark set carries one too")

@@ -96,6 +96,18 @@ static func contrast_ratio(fg: Color, bg: Color) -> float:
 		b = swap
 	return (a + 0.05) / (b + 0.05)
 
+## The gradient backdrop's second stop: `ground` moved `BACKDROP_STEP` of the
+## way toward white for a dark ground, or toward black for a light one, so a
+## near-black and a near-white ground both show a stop. The first stop is the
+## ground itself; the terminal draws them as one per-vertex-coloured quad.
+const BACKDROP_STEP := 0.06
+
+static func backdrop_stop(ground: Color) -> Color:
+	var toward := Color.WHITE if _luminance(ground) < 0.5 else Color.BLACK
+	var stop := ground.lerp(toward, BACKDROP_STEP)
+	stop.a = 1.0
+	return stop
+
 ## Relative luminance per WCAG 2.1, in linearised sRGB.
 static func _luminance(c: Color) -> float:
 	return 0.2126 * _channel(c.r) + 0.7152 * _channel(c.g) + 0.0722 * _channel(c.b)

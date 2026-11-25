@@ -57,6 +57,9 @@ extends SceneTree
 ##   - A state that names a mid-motion fraction (`focus_sweep`, `guide_reveal`,
 ##     `empty_arrival`) is pinned there, never waited for: the pin rebuilds the
 ##     shipped curve and stops it at that fraction.
+##   - A state that names `backdrops` overrides the global backdrop setting per
+##     terminal, in tile order, so one image can compare flat against gradient
+##     over identical output.
 ##   - An effect state pins the ambient clock (`pin_effects`) and, when the
 ##     state names a cue, draws that cue's final frame (`pin_effect_cue`):
 ##     grain advances on a Timer and a cue is a tween, so either would differ
@@ -121,6 +124,26 @@ const STATES := {
 			{"col": 30, "row": 0, "cspan": 30, "rspan": 60,
 				"settings": {"type": "code_viewer", "attachment_id": "capture-arrival-settled"}}],
 		"empty_arrival": 0.3},
+	# The scheme backdrop, flat against gradient over the same output. The
+	# global setting is Gradient and `backdrops` makes the left comparator
+	# flat; gruvbox-dark's #282828 ground gives the ramp something to show.
+	"backdrop-gradient": {"size": Vector2i(1280, 760), "settings": {
+		"cfg_scheme_dark": "res://schemes/gruvbox-dark.json",
+		"cfg_backdrop": 1},
+		"tiles": [
+			{"col": 0, "row": 0, "cspan": 30, "rspan": 60, "settings": {
+				"type": "terminal", "attachment_id": "capture-backdrop-flat",
+				"shell_args": ["-c", "printf '\\033[1;31mFAIL\\033[0m on the ground\\n\\033[7m INVERSE \\033[0m \\033[4;32mUNDERLINE\\033[0m\\n'; seq -f 'line %g' 1 10; sleep 600"]}},
+			{"col": 30, "row": 0, "cspan": 30, "rspan": 60, "settings": {
+				"type": "terminal", "attachment_id": "capture-backdrop-gradient",
+				"shell_args": ["-c", "printf '\\033[1;31mFAIL\\033[0m on the ground\\n\\033[7m INVERSE \\033[0m \\033[4;32mUNDERLINE\\033[0m\\n'; seq -f 'line %g' 1 10; sleep 600"]}}],
+		"backdrops": [0, 1]},
+	# The palette card over a terminal: its contact shadow and top rim are the
+	# subject. gruvbox-dark's #282828 ground is not black, so the shadow is
+	# visible beside the card. Row *Floating surfaces sit above the page*.
+	"elevation": {"size": Vector2i(1280, 760), "panes": 1, "open": "palette",
+		"query": "new", "settings": {
+			"cfg_scheme_dark": "res://schemes/gruvbox-dark.json"}},
 	# The pane inset and the code viewer's empty state, side by side: four panes
 	# that each have nothing to show (row *Pane chrome: distinct icons, a compact
 	# action menu, padding and consistent empty states*). The measurement is the
@@ -620,6 +643,7 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	_pin_empty_guide(state)
 	_pin_arrivals(state)
 	_pin_focus_sweep(state)
+	_pin_backdrops(state)
 	_pin_effects(state)
 
 	if args.get("perturb", "") == state_name:
@@ -687,6 +711,21 @@ func _pin_focus_sweep(state: Dictionary) -> void:
 	var body = _workspace._tm.last_body
 	if body != null and body.has_method("pin_focus_sweep"):
 		body.pin_focus_sweep(alpha)
+
+## Override the global backdrop per terminal, in tile order, for a comparison
+## image. Untyped property checks for the same reason as `_pin_effects`.
+func _pin_backdrops(state: Dictionary) -> void:
+	var wanted: Array = state.get("backdrops", [])
+	if wanted.is_empty():
+		return
+	var i := 0
+	for tile in _workspace._tm.tiles:
+		var body = _workspace._tm._find_body(tile.wrapper)
+		if body == null or not ("backdrop" in body):
+			continue
+		body.backdrop = int(wanted[mini(i, wanted.size() - 1)])
+		body._repaint_all()
+		i += 1
 
 ## Freeze the effect clocks and pin a cue. Grain advances on a Timer and a cue
 ## is a tween, so either would differ between two runs. Untyped `has_method`

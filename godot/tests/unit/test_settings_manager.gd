@@ -23,6 +23,7 @@ func after_each():
 	SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
 	SettingsManager.cfg_effect_intensity = UiEffects.OFF
 	SettingsManager.cfg_reactive_effects = {}
+	SettingsManager.cfg_backdrop = SettingsManager.BACKDROP_FLAT
 	SettingsManager.system_is_dark = func() -> bool:
 		return DisplayServer.is_dark_mode() if DisplayServer.is_dark_mode_supported() else true
 	SettingsManager.apply_appearance()
@@ -320,3 +321,24 @@ func test_reactive_rules_drop_unknown_effects_on_load():
 	assert_eq(SettingsManager.cfg_reactive_effects.size(), 1,
 		"only the rule with a known effect id survives")
 	assert_eq(str(SettingsManager.cfg_reactive_effects.get("cat_command", "")), "tint")
+
+## The v0.8.7 backdrop is a closed two-value vocabulary: it survives a restart
+## and a hand-edited file can only clamp into it.
+func test_the_backdrop_survives_a_restart_and_clamps():
+	SettingsManager.cfg_backdrop = SettingsManager.BACKDROP_GRADIENT
+	SettingsManager.save_settings()
+
+	SettingsManager.cfg_backdrop = SettingsManager.BACKDROP_FLAT
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_backdrop, SettingsManager.BACKDROP_GRADIENT,
+		"the backdrop must survive a restart")
+
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE, {"backdrop": 9})
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_backdrop, SettingsManager.BACKDROP_GRADIENT,
+		"a value above the table clamps to the top")
+
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE, {"backdrop": -1})
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_backdrop, SettingsManager.BACKDROP_FLAT,
+		"a negative value clamps to flat")

@@ -189,3 +189,23 @@ func test_pane_settings_close_global_settings_popup():
 	ws._tm._open_pane_settings(body)
 	assert_false(ws._settings_panel.visible, "opening pane settings must close global settings")
 	assert_true(_panel(ws).visible, "pane popup must open")
+
+## The v0.8.7 elevation rule is one Theme type variation, so every full-page
+## floating card asks for it rather than carrying styleboxes of its own.
+func test_the_floating_cards_wear_the_elevation_variation():
+	var ws = await _make_workspace()
+	ws._toggle_settings()
+	assert_eq(ws._settings_panel._card.theme_type_variation,
+		UiTheme.FLOATING_PANEL, "the Settings card floats")
+	ws._toggle_settings()
+
+	var body = _first_body(ws)
+	ws._tm._open_pane_settings(body)
+	assert_eq(_panel(ws)._card.theme_type_variation,
+		UiTheme.FLOATING_PANEL, "the Pane Settings card floats")
+	ws._tm._pane_settings_panel.close()
+
+	ws._toggle_palette()
+	assert_eq(ws._palette._card.theme_type_variation,
+		UiTheme.FLOATING_PANEL, "the command palette floats")
+	ws._toggle_palette()
