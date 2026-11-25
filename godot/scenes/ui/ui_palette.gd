@@ -38,6 +38,7 @@ const DARK := {
 	"SEARCH_HIGHLIGHT": Color(1.0, 0.8, 0.0, 0.35),
 	"SEARCH_ACTIVE": Color(1.0, 0.5, 0.0, 0.5),
 	"SCROLLBACK_INDICATOR": Color(1.0, 1.0, 0.0),
+	"SHADOW": Color(0, 0, 0, 0.30),
 }
 
 const LIGHT := {
@@ -59,6 +60,7 @@ const LIGHT := {
 	"SEARCH_HIGHLIGHT": Color(1.0, 0.8, 0.0, 0.35),
 	"SEARCH_ACTIVE": Color(1.0, 0.5, 0.0, 0.5),
 	"SCROLLBACK_INDICATOR": Color(1.0, 1.0, 0.0),
+	"SHADOW": Color(Color("2a2e38"), 0.16),
 }
 
 ## `[foreground token, background token, minimum WCAG ratio, label]`, graded
@@ -95,6 +97,7 @@ var SURFACE: Color
 var SURFACE_RAISED: Color
 var SIDEBAR: Color
 var BORDER: Color
+var SHADOW: Color
 var SELECTION: Color
 var TEXT: Color
 var TEXT_MUTED: Color

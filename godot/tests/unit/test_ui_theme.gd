@@ -107,6 +107,10 @@ func test_a_confirmation_dialog_resolves_the_accept_dialog_panel():
 	assert_not_null(box)
 	assert_eq(box.bg_color, UiPalette.active().SURFACE)
 	assert_eq(box.bg_color.a, 1.0)
+	assert_eq(box.shadow_color, UiPalette.active().SHADOW,
+		"a dialog carries the floating-surface shadow token")
+	assert_eq(box.shadow_size, UiTheme.ELEVATION_SHADOW_SIZE)
+	assert_eq(box.border_width_top, 1, "the dialog keeps the light top edge")
 
 func test_the_dialog_panel_carries_its_own_padding():
 	# `AppDialog` makes its modals borderless (the engine's embedded frame is
@@ -275,3 +279,34 @@ func test_the_selected_row_variation_is_a_cursor_not_a_button():
 	assert_gt(cursor.bg_color.a, 0.0, "the cursor is visible")
 	assert_eq(cursor.border_width_left, 2, "the cursor has a second, non-colour channel")
 	assert_eq(cursor.border_color, UiPalette.active().ACCENT)
+
+## The v0.8.7 elevation rule: one floating-surface variation, so a card's
+## shadow and its light top edge come from the theme rather than a per-widget
+## stylebox that would pin the palette mode it was built under.
+func test_a_floating_panel_gets_the_elevation_box():
+	var p := UiPalette.active()
+	var panel := Panel.new()
+	panel.theme = _theme
+	panel.theme_type_variation = UiTheme.FLOATING_PANEL
+	add_child_autofree(panel)
+	var box := panel.get_theme_stylebox("panel") as StyleBoxFlat
+	assert_not_null(box, "the variation resolves a panel box")
+	assert_eq(box.bg_color, p.SURFACE, "a floating card is the panel surface")
+	assert_eq(box.shadow_color, p.SHADOW, "the contact shadow is the palette token")
+	assert_between(box.shadow_size, 6, 10, "a soft 6-10 px shadow")
+	assert_eq(box.shadow_size, UiTheme.ELEVATION_SHADOW_SIZE)
+	assert_eq(box.shadow_offset, Vector2(2, 4), "one light direction: down-right")
+	assert_eq(box.border_width_top, 1, "a 1 px inner top rim")
+	assert_eq(box.border_color, p.SURFACE_RAISED, "the rim is the lit surface")
+	assert_eq(box.border_width_left, 0, "the rim is the top edge only")
+	assert_eq(box.border_width_bottom, 0)
+
+## A toast keeps its severity border and gains the same contact shadow.
+func test_the_toast_variations_carry_the_shadow_token():
+	var p := UiPalette.active()
+	for variation in [UiTheme.TOAST_PANEL, UiTheme.TOAST_WARN_PANEL, UiTheme.TOAST_ERROR_PANEL]:
+		var box := _theme.get_stylebox("panel", variation) as StyleBoxFlat
+		assert_not_null(box, "%s resolves" % variation)
+		assert_eq(box.shadow_color, p.SHADOW, "%s carries the shadow token" % variation)
+		assert_eq(box.shadow_size, UiTheme.ELEVATION_SHADOW_SIZE)
+		assert_eq(box.shadow_offset, UiTheme.ELEVATION_SHADOW_OFFSET)

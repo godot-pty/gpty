@@ -15,6 +15,12 @@ const APPEARANCE_DARK := 0
 const APPEARANCE_LIGHT := 1
 const APPEARANCE_SYSTEM := 2
 const APPEARANCE_LABELS := ["Dark", "Light", "Follow system"]
+## The terminal's own ground: the scheme background exactly, or a two-stop
+## gradient from `UiTokens.backdrop_stop`. The stored value is the index.
+const BACKDROP_FLAT := 0
+const BACKDROP_GRADIENT := 1
+const BACKDROP_LABELS := ["Flat", "Gradient"]
+const BACKDROP_HINT := "Flat paints the scheme's background behind the grid. Gradient moves the top stop 6 % toward white (dark ground) or black (light ground) and falls back to the exact background at the bottom; an ambient effect paints its own ground instead. Text, selection and coloured cells keep their exact colours."
 ## The chrome colour settings that default to a token, keyed by settings key.
 ## A stored value equal to either set's default has never been customised, so a
 ## palette switch carries it instead of pinning the surface it was saved from.
@@ -102,6 +108,9 @@ var cfg_pane_animation_params := {}
 ## intensity is Off, so turning the intensity up restores the last choice.
 var cfg_effect := UiEffects.DEFAULT_AMBIENT
 var cfg_effect_intensity := UiEffects.OFF
+## The terminal's ground: `BACKDROP_FLAT` (the scheme background exactly) or
+## `BACKDROP_GRADIENT` (its two-stop backdrop). Pushed by `apply_to_terminal`.
+var cfg_backdrop := BACKDROP_FLAT
 ## Concept name -> reactive cue id (`UiEffects.REACTIVE`), empty by default.
 ## `UiEffects.sanitize_reactive` owns the cap and the closed effect values.
 var cfg_reactive_effects := {}
@@ -324,6 +333,8 @@ func load_settings():
 	cfg_effect_intensity = clampi(_as_int(d, "effect_intensity", UiEffects.OFF),
 		UiEffects.OFF, UiEffects.FULL)
 	cfg_reactive_effects = UiEffects.sanitize_reactive(_as_dict(d, "reactive_effects", {}))
+	cfg_backdrop = clampi(_as_int(d, "backdrop", BACKDROP_FLAT),
+		BACKDROP_FLAT, BACKDROP_GRADIENT)
 
 func save_settings():
 	_save_settings_file()
@@ -353,6 +364,7 @@ func _save_settings_file():
 	d["effect"] = cfg_effect
 	d["effect_intensity"] = cfg_effect_intensity
 	d["reactive_effects"] = cfg_reactive_effects.duplicate()
+	d["backdrop"] = cfg_backdrop
 	_write_file(SETTINGS_FILE, d)
 
 func apply_to_terminal(body: Control):
@@ -372,6 +384,7 @@ func apply_to_terminal(body: Control):
 		"terminal_padding": cfg_terminal_padding,
 		"effect": UiEffects.ambient_id(),
 		"effect_intensity": UiEffects.level(),
+		"backdrop": cfg_backdrop,
 		"max_fps": cfg_max_fps,
 		"shell_command": cfg_shell_command,
 		"shell_env": cfg_shell_env,

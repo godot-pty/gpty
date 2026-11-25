@@ -18,6 +18,8 @@ extends SceneTree
 #
 #   BENCH_COLS, BENCH_ROWS  grid size (default 90×30)
 #   BENCH_TAG               suffix of the saved PNG (default "run")
+#   BENCH_BACKDROP=gradient the scheme gradient ground instead of the flat rect
+#                           (the extra fill the v0.8.7 backdrop row measures)
 #   BENCH_FLOOD=1           a full-screen repaint loop instead of the static
 #                           screen: every sync sees full-grid damage
 #   BENCH_SPARSE=1          one line every 0.2 s instead: the case the row
@@ -140,6 +142,8 @@ func _new_pane(cols: int, rows: int, cmd: String):
 	_pane._terminal.resize_grid(rows, cols)
 	_pane.rows = rows
 	_pane.cols = cols
+	if OS.get_environment("BENCH_BACKDROP") == "gradient":
+		_pane.backdrop = 1
 
 func _measure(cols: int, rows: int):
 	await _new_pane(cols, rows, CONTENT)

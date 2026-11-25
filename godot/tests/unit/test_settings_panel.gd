@@ -33,6 +33,7 @@ func after_each():
 	SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
 	SettingsManager.cfg_effect_intensity = UiEffects.OFF
 	SettingsManager.cfg_reactive_effects = {}
+	SettingsManager.cfg_backdrop = SettingsManager.BACKDROP_FLAT
 	SettingsManager.apply_appearance()
 	# A failed assertion must not leave a small window for the rest of the
 	# process; the layout assertions in this file are the card's own minimums.
@@ -82,6 +83,7 @@ func test_appearance_reset_restores_only_appearance_settings():
 	SettingsManager.cfg_scheme_dark = "res://schemes/nord.json"
 	SettingsManager.cfg_scheme_light = "res://schemes/one-light.json"
 	SettingsManager.cfg_ui_scale = 175
+	SettingsManager.cfg_backdrop = SettingsManager.BACKDROP_GRADIENT
 	SettingsManager.cfg_shell_command = "/bin/zsh"  # Terminal-tab setting, must survive
 
 	var btn := _tab_reset_button("Appearance")
@@ -96,6 +98,10 @@ func test_appearance_reset_restores_only_appearance_settings():
 	assert_eq(SettingsManager.cfg_ui_scale, 100, "the UI scale must reset to 100 %")
 	assert_eq(SettingsManager.cfg_scheme_dark, "", "the dark scheme must reset to empty")
 	assert_eq(SettingsManager.cfg_scheme_light, "", "the light scheme must reset to empty")
+	assert_eq(SettingsManager.cfg_backdrop, SettingsManager.BACKDROP_FLAT,
+		"the terminal backdrop must reset to flat")
+	assert_eq((_panel.find_child("BackdropOpt", true, false) as OptionButton).selected,
+		SettingsManager.BACKDROP_FLAT, "and the picker must show it")
 	assert_eq(SettingsManager.cfg_shell_command, "/bin/zsh",
 		"other tabs' settings must not be touched")
 
@@ -1157,3 +1163,17 @@ func test_the_reactive_table_hides_add_at_the_cap():
 	assert_false(_find_option("AddReactiveOpt").visible, "no ninth rule can be added")
 	assert_eq(_panel.find_child("ReactiveRules", true, false).get_child_count(),
 		UiEffects.MAX_RULES, "one row per stored rule")
+
+## The v0.8.7 backdrop row: an immediate setting, like the Effects pickers -
+## the selection writes the store and the broadcast repaints every pane.
+func test_the_backdrop_picker_writes_the_setting():
+	var opt := _panel.find_child("BackdropOpt", true, false) as OptionButton
+	assert_not_null(opt, "the Appearance tab must offer the terminal backdrop")
+	assert_eq(opt.item_count, SettingsManager.BACKDROP_LABELS.size(),
+		"Flat and Gradient, no third value")
+	opt.item_selected.emit(SettingsManager.BACKDROP_GRADIENT)
+	assert_eq(SettingsManager.cfg_backdrop, SettingsManager.BACKDROP_GRADIENT,
+		"the picker writes the setting")
+	_panel._sync_backdrop_row()
+	assert_eq(opt.selected, SettingsManager.BACKDROP_GRADIENT,
+		"the picker reads the stored value back")

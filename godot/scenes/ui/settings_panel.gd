@@ -44,6 +44,7 @@ var _motion_pickers := {}
 var _motion_params := {}
 var _effect_opt: OptionButton = null
 var _effect_intensity_opt: OptionButton = null
+var _backdrop_opt: OptionButton = null
 var _reactive_rules_host: VBoxContainer = null
 var _add_reactive_opt: OptionButton = null
 
@@ -87,6 +88,7 @@ func _notification(what: int):
 		_sync_motion_rows()
 		_sync_effect_rows()
 		_sync_reactive_rows()
+		_sync_backdrop_row()
 	elif what == NOTIFICATION_RESIZED:
 		# The window (and with it the layout space) changed, so the scale it can
 		# show may have moved while the panel is open - and the card that fitted
@@ -109,6 +111,7 @@ func _build_ui():
 	# be laid out yet, and a transient size would pin a card far smaller than the
 	# design for the rest of the panel's life.
 	_card = bg
+	_card.theme_type_variation = UiTheme.FLOATING_PANEL
 	_card.custom_minimum_size = CARD_SIZE
 	cc.add_child(bg)
 
@@ -205,6 +208,7 @@ func _build_ui():
 			SettingsManager.cfg_scheme_light = path
 			SettingsManager.save_settings())
 	scheme_light.tooltip_text = "Used when the appearance resolves to light; empty follows the dark scheme."
+	_add_backdrop_control(t_app)
 	t_app.add_child(HSeparator.new())
 	# The pane titlebar on/off sits with the chrome it controls — next to the
 	# "Title bar" colour and the border — instead of hiding in the System tab,
@@ -240,6 +244,8 @@ func _build_ui():
 		show_tb_cb.button_pressed = true
 		_reset_colors(color_btns)
 		motion_reset.call()
+		SettingsManager.cfg_backdrop = SettingsManager.BACKDROP_FLAT
+		_sync_backdrop_row()
 		SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
 		SettingsManager.cfg_effect_intensity = UiEffects.OFF
 		SettingsManager.cfg_reactive_effects = {}
@@ -672,6 +678,40 @@ func _add_motion_section(v: VBoxContainer) -> Callable:
 		SettingsManager.cfg_pane_animation = PaneTransitions.sanitize_choices({})
 		SettingsManager.cfg_pane_animation_params = {}
 		_sync_motion_rows()
+
+## The terminal's ground: the scheme background exactly, or the two-stop
+## gradient. Immediate like the effects pickers - the user judges it by
+## looking - so a selection saves and the broadcast repaints every pane.
+func _add_backdrop_control(v: VBoxContainer) -> void:
+	var row := HBoxContainer.new()
+	row.add_child(_lbl("Terminal backdrop:"))
+	var opt := OptionButton.new()
+	opt.name = "BackdropOpt"
+	for label in SettingsManager.BACKDROP_LABELS:
+		opt.add_item(label)
+	opt.selected = clampi(SettingsManager.cfg_backdrop,
+		SettingsManager.BACKDROP_FLAT, SettingsManager.BACKDROP_GRADIENT)
+	opt.tooltip_text = "Flat paints the scheme's background; Gradient shifts the top stop 6 % and falls back to the exact background at the bottom"
+	opt.item_selected.connect(func(idx: int):
+		SettingsManager.cfg_backdrop = idx
+		SettingsManager.save_settings())
+	row.add_child(opt)
+	v.add_child(row)
+	var hint := Label.new()
+	hint.text = SettingsManager.BACKDROP_HINT
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.theme_type_variation = UiTheme.MUTED_LABEL
+	v.add_child(hint)
+	_backdrop_opt = opt
+
+## Read the stored value into the picker. Called on build, on a reset and on
+## every show: the panel outlives a visit.
+func _sync_backdrop_row() -> void:
+	if _backdrop_opt == null:
+		return
+	SettingsManager.cfg_backdrop = clampi(SettingsManager.cfg_backdrop,
+		SettingsManager.BACKDROP_FLAT, SettingsManager.BACKDROP_GRADIENT)
+	_backdrop_opt.selected = SettingsManager.cfg_backdrop
 
 ## The ambient half of `Settings -> Appearance -> Effects`: the closed
 ## `UiEffects` table and its intensity. Both pickers are immediate settings -

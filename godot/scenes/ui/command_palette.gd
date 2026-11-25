@@ -73,6 +73,7 @@ func _init() -> void:
 
 	_card = Panel.new()
 	_card.name = "Card"
+	_card.theme_type_variation = UiTheme.FLOATING_PANEL
 	host.add_child(_card)
 
 	var mc := MarginContainer.new()

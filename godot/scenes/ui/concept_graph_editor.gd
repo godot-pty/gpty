@@ -68,6 +68,7 @@ func _build_ui():
 
 	var bg := Panel.new()
 	bg.name = "GraphBg"
+	bg.theme_type_variation = UiTheme.FLOATING_PANEL
 	margin.add_child(bg)
 
 	var inner := MarginContainer.new()

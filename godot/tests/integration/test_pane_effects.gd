@@ -79,21 +79,21 @@ func test_no_effect_layer_exists_while_the_intensity_is_off():
 		assert_eq(_probe._row_texts[i].get_index(), 4 + i)
 	assert_eq(_probe._overlay.get_index(), 8, "the unshifted order the repaint tests pin")
 
-func test_a_default_background_run_is_skipped_only_while_an_effect_is_active():
+func test_a_default_background_run_is_skipped_only_while_a_backdrop_owns_the_ground():
 	_seed_cache(2, 4)
 	_probe._repaint_all()
-	assert_false(_probe._effect_covers_background(_probe._ground),
+	assert_false(_probe._backdrop_covers_background(_probe._ground),
 		"with no effect the ground run is still painted by the band")
-	assert_false(_probe._effect_covers_background(Color.RED))
+	assert_false(_probe._backdrop_covers_background(Color.RED))
 
 	_apply("crt", UiEffects.SUBTLE)
-	assert_true(_probe._effect_covers_background(_probe._ground),
+	assert_true(_probe._backdrop_covers_background(_probe._ground),
 		"the effect layer is the ground, so its run must stay uncovered")
-	assert_false(_probe._effect_covers_background(Color.RED),
+	assert_false(_probe._backdrop_covers_background(Color.RED),
 		"a coloured cell still paints its own rect over the effect")
 
 	_apply("crt", UiEffects.OFF)
-	assert_false(_probe._effect_covers_background(_probe._ground),
+	assert_false(_probe._backdrop_covers_background(_probe._ground),
 		"turning it off returns the run to the band")
 
 func test_the_static_effect_carries_its_shader_on_the_layer():

@@ -22,6 +22,7 @@ func after_each():
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
 	SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
 	SettingsManager.cfg_effect_intensity = UiEffects.OFF
+	SettingsManager.cfg_backdrop = SettingsManager.BACKDROP_FLAT
 	SettingsManager.apply_appearance()
 	# Free synchronously while mocks are still active: _exit_tree() → _save()
 	# would otherwise write the real layout/settings after teardown restores
@@ -1396,4 +1397,32 @@ func test_saving_over_an_existing_profile_asks_before_replacing_tiles():
 	assert_eq(ProfileManager.profiles.size(), 1, "the save replaces, not duplicates")
 	assert_gt((ProfileManager.profiles[0].get("tiles") as Array).size(), before,
 		"confirming writes the current workspace's tiles")
+	await get_tree().create_timer(2.1).timeout
+
+## The backdrop is a global appearance setting too: a save reaches the terminal
+## in every workspace, not only the visible one.
+func test_a_settings_save_broadcasts_the_backdrop_to_every_terminal():
+	MockAutoloads.set_store(WorkspaceStore.FILE, {
+		"active": 0,
+		"workspaces": [{"name": "W", "layout": []}],
+	})
+	var ws = WorkspaceScript.new()
+	_ws = ws
+	add_child(ws)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	assert_not_null(ws._spawn_pane("terminal"), "precondition: the first workspace holds a terminal")
+	ws._add_workspace()
+	assert_not_null(ws._spawn_pane("terminal"), "precondition: the second holds one")
+
+	SettingsManager.cfg_backdrop = SettingsManager.BACKDROP_GRADIENT
+	SettingsManager.save_settings()
+	await get_tree().process_frame
+
+	var bodies := _terminal_bodies(ws)
+	assert_eq(bodies.size(), 2, "the walk covers both workspaces")
+	for body in bodies:
+		assert_eq(body.backdrop, SettingsManager.BACKDROP_GRADIENT,
+			"the terminal took the gradient backdrop")
 	await get_tree().create_timer(2.1).timeout

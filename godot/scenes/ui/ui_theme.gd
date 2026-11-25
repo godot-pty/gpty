@@ -47,6 +47,12 @@ const RAISED_PANEL := &"RaisedPanel"
 const TOAST_PANEL := &"ToastPanel"
 const TOAST_WARN_PANEL := &"ToastWarnPanel"
 const TOAST_ERROR_PANEL := &"ToastErrorPanel"
+## A floating surface's contact shadow. One light direction for every card:
+## down-right, 8 px, from the palette's SHADOW token. A `StyleBoxFlat` shadow
+## is one draw item; no blur shader.
+const FLOATING_PANEL := &"FloatingPanel"
+const ELEVATION_SHADOW_SIZE := 8
+const ELEVATION_SHADOW_OFFSET := Vector2(2, 4)
 
 static func build() -> Theme:
 	var p := UiPalette.active()
@@ -145,13 +151,20 @@ static func build() -> Theme:
 	t.set_stylebox("panel", RAISED_PANEL,
 		_padded(_flat(p.SURFACE_RAISED, p.BORDER, 1), UiTokens.SPACE_SM))
 
+	# Floating cards: one elevation rule, a type variation rather than a
+	# per-widget stylebox. A soft contact shadow down-right plus a 1 px inner
+	# top rim in SURFACE_RAISED (the lit edge); the stock `Panel` box stays flat
+	# for inline panels.
+	t.set_type_variation(FLOATING_PANEL, "Panel")
+	t.set_stylebox("panel", FLOATING_PANEL, _elevated(p.SURFACE))
+
 	# A toast is a message over whatever is running, so it needs a surface of its
 	# own. The level is a 3 px leading edge plus the border: severity does not
 	# rest on the label's ink alone.
 	for role in [[TOAST_PANEL, p.BORDER], [TOAST_WARN_PANEL, p.WARNING],
 			[TOAST_ERROR_PANEL, p.DANGER]]:
 		t.set_type_variation(role[0], "PanelContainer")
-		var box := _padded(_flat(p.SURFACE_RAISED, role[1], 1), UiTokens.SPACE_MD)
+		var box := _padded(_add_shadow(_flat(p.SURFACE_RAISED, role[1], 1)), UiTokens.SPACE_MD)
 		box.border_width_left = 3
 		box.content_margin_left = UiTokens.SPACE_MD + 3
 		t.set_stylebox("panel", role[0], box)
@@ -239,7 +252,7 @@ static func build() -> Theme:
 	# engine-built column, so the picker's own controls stay where they are).
 	t.set_font_size("title_font_size", "Window", UiTokens.FS_CONTROL)
 	t.set_color("title_color", "Window", p.TEXT)
-	t.set_stylebox("panel", "AcceptDialog", _padded(_flat(p.SURFACE, p.BORDER, 1), UiTokens.SPACE_XXL))
+	t.set_stylebox("panel", "AcceptDialog", _padded(_elevated(p.SURFACE), UiTokens.SPACE_XXL))
 	t.set_constant("buttons_separation", "AcceptDialog", UiTokens.SPACE_LG)
 
 	# --- The concept graph -----------------------------------------------------
@@ -347,6 +360,22 @@ static func _graph_node_box(bg: Color) -> StyleBoxFlat:
 static func _padded(sb: StyleBoxFlat, px: int) -> StyleBoxFlat:
 	sb.set_content_margin_all(px)
 	return sb
+
+## The shared contact shadow: one light direction for every floating surface.
+static func _add_shadow(box: StyleBoxFlat) -> StyleBoxFlat:
+	box.shadow_color = UiPalette.active().SHADOW
+	box.shadow_size = ELEVATION_SHADOW_SIZE
+	box.shadow_offset = ELEVATION_SHADOW_OFFSET
+	return box
+
+## A floating card: the surface, a 1 px inner top rim in SURFACE_RAISED and the
+## shared contact shadow.
+static func _elevated(bg: Color) -> StyleBoxFlat:
+	var p := UiPalette.active()
+	var box := _flat(bg)
+	box.border_width_top = 1
+	box.border_color = p.SURFACE_RAISED
+	return _add_shadow(box)
 
 static func _flat(bg: Color, border := Color.TRANSPARENT, width := 0) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
