@@ -32,6 +32,7 @@ gpty/
 │   ├── bot-token               # Mint the gpty-bot app installation token (--check for setup)
 │   ├── bot-push                # Push a branch as gpty-bot
 │   ├── bot-pr                  # Open a pull request as gpty-bot
+│   ├── pr-wait                 # Wait for a PR through main's merge queue; prints the merge commit
 │   ├── git-askpass-token       # GIT_ASKPASS helper used by bot-push
 │   ├── build-wiki              # Pack docs/content/wiki into godot/knowledge.json
 │   ├── build-docs              # Pack the README's Markdown closure into godot/docs.json

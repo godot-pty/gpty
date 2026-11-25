@@ -144,7 +144,7 @@ docs_class_path() {
 # exercises it, so a break is caught in seconds instead of skipping the suite.
 tooling_class_path() {
     case "$1" in
-        scripts/measure-cost | scripts/render-cost-chart | scripts/backfill-cost-history | scripts/fix-forensics | scripts/install-cli | scripts/check-secrets | scripts/bot-token | scripts/bot-push | scripts/bot-pr | scripts/git-askpass-token | scripts/check-github-settings | scripts/install-rust | scripts/install-godot | scripts/release-prepare | scripts/branch-prune) return 0 ;;
+        scripts/measure-cost | scripts/render-cost-chart | scripts/backfill-cost-history | scripts/fix-forensics | scripts/install-cli | scripts/check-secrets | scripts/bot-token | scripts/bot-push | scripts/bot-pr | scripts/pr-wait | scripts/git-askpass-token | scripts/check-github-settings | scripts/install-rust | scripts/install-godot | scripts/release-prepare | scripts/branch-prune) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -295,7 +295,7 @@ run_cost_stamp() {
 run_tooling_scripts() {
     header "tooling scripts"
     local TOOL_OUT f
-    for f in scripts/measure-cost scripts/backfill-cost-history scripts/install-cli scripts/check-secrets scripts/bot-token scripts/bot-push scripts/bot-pr scripts/git-askpass-token scripts/install-rust scripts/branch-prune; do
+    for f in scripts/measure-cost scripts/backfill-cost-history scripts/install-cli scripts/check-secrets scripts/bot-token scripts/bot-push scripts/bot-pr scripts/pr-wait scripts/git-askpass-token scripts/install-rust scripts/branch-prune; do
         if TOOL_OUT="$(bash -n "$f" 2>&1)"; then
             pass "bash -n $f"
         else

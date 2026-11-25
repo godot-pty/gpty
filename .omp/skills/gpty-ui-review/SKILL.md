@@ -20,6 +20,7 @@ A router plus the operational recipe. The method is normative in `docs/content/d
 ## Capture
 
 - **Evidence is the app's own viewport**, never a desktop grab: the driver (`godot/tests/bench/ui_capture.gd`) saves `root.get_texture()` after `await RenderingServer.frame_post_draw`. A real display driver is required (`--headless` has no redraw pass: `frame_post_draw` never fires and a script awaiting it hangs); `--disable-vsync` keeps a vsync-locked present from blocking on a window the compositor never shows.
+- **`--save <file>` writes the evidence path directly**: `scripts/ui-capture <state> --save docs/static/images/issue-<build>-<slug>.png` captures to a scratch dir and moves the PNG there (with an out-dir it copies and keeps both), so a row's image needs no second `cp`.
 - This path is the portable one — it does not need XWayland. `scripts/screenshot-gpty` (a desktop grab) and `scripts/record-demo` are X11/XWayland-only and fail on a pure Wayland session.
 - Desktop grabs are only for release/blog images, where the OS window itself is the point.
 - Small windows (800×500, 560×340) resize the root viewport, so the image is the layout at that size, **not** OS window behaviour. Say so when the finding is about window managers.

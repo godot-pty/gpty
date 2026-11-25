@@ -23,7 +23,7 @@ case "${1:-}" in
 esac
 
 if [ -z "$key" ]; then
-    printf '%s\n' "GPTY_BOT_PRIVATE_KEY is not set. Point it at the gpty-bot private key (mode 0600), or pass the PEM itself." >&2
+    printf '%s\n' "GPTY_BOT_PRIVATE_KEY is not set. Point it at the gpty-bot private key (the conventional path is ~/.config/gpty/gpty-bot.pem, mode 0600), pass the PEM itself, or pass --key <path> to scripts/bot-push / scripts/bot-pr." >&2
     exit 2
 fi
 
