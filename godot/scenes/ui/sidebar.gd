@@ -8,7 +8,6 @@ signal request_reset
 signal request_focus(body: Control)
 signal request_pane_menu(body: Control, source_btn: Button)
 signal request_pane_settings(body: Control)
-signal toggled
 signal request_profile(name: String)
 signal request_profile_in_new_workspace(name: String)
 signal request_profile_rename(index: int, name: String)
@@ -23,11 +22,17 @@ signal request_workspace_close(index: int)
 signal request_workspace_rename(index: int, name: String)
 signal request_workspace_menu(index: int, source_btn: Button)
 signal request_workspaces_close_all
+## A section icon in the icons rail asks the workspace to open that section's
+## flyout (`workspaces`, `profiles`, `panes` or `add_pane`).
+signal request_flyout(section_id: String)
+## The sidebar moved between its three positions (`SettingsManager.SIDEBAR_*`).
+signal mode_changed(mode: int)
 
-## The sidebar's width open and collapsed. One owner: `Workspace._build_sidebar`
-## and `_toggle_sidebar` both read these, so the fold's own state test cannot
-## drift from the width it sets.
+## The sidebar's width expanded, icons-only and collapsed. One owner: this
+## class sets all three from `width_for`, and `Workspace._build_sidebar` reads
+## the result rather than repeating the numbers.
 const WIDTH := 180
+const ICONS_WIDTH := 48
 const COLLAPSED_WIDTH := 20
 
 
@@ -36,9 +41,25 @@ var bg: ColorRect
 ## shorter than the sections' minimum heights (a 340 px window holds ~530 px of
 ## chrome), so the whole column scrolls instead of its tail being clipped.
 var _content_scroll: ScrollContainer = null
-## The header's title and collapse glyph, toggled with the fold (the fold used
-## to find them by node path, which an added container would have broken).
-var _title_label: Label = null
+## The margin that holds the expanded column, hidden in icons/collapsed mode.
+var _content_margin: MarginContainer = null
+## The icons rail and the collapsed handle, both direct children so hiding the
+## content margin cannot hide them.
+var _icon_rail: ScrollContainer = null
+var _rail_list: VBoxContainer = null
+var _rail_mode_btn: Button = null
+var _collapsed_btn: Button = null
+## The current position (`SettingsManager.SIDEBAR_*`).
+var _mode := SettingsManager.SIDEBAR_EXPANDED
+## The four flyout targets by id and their original parent/index, so taking a
+## section for the flyout and releasing it restores the column's order.
+var _section_nodes := {}
+var _section_home := {}
+## Section id -> the icon rail's button for that section (focus return).
+var _rail_buttons := {}
+var _window_menu: PopupMenu = null
+## The header's collapse glyph, which is the expanded mode's three-state control
+## (the content margin hides it with the rest of the column in the other modes).
 var _collapse_arrow: Button = null
 var _wm_dropdown: OptionButton
 var _pane_list: VBoxContainer
@@ -115,6 +136,7 @@ func build(bg_rect: ColorRect):
 	margin.add_theme_constant_override("margin_bottom", UiTokens.SPACE_MD)
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(margin)
+	_content_margin = margin
 
 	# The whole column scrolls, so a short window reaches every section instead
 	# of clipping the last one. `SIZE_EXPAND_FILL` on the content keeps today's
@@ -139,7 +161,10 @@ func build(bg_rect: ColorRect):
 	_add_workspace_section(v)
 	_add_profile_section(v)
 	_add_pane_list_ui(v)
+	_add_icon_rail()
 	_add_collapsed_button()
+	_record_section_homes()
+	_sync_mode_controls()
 
 	SettingsManager.settings_changed.connect(_sync_window_mode)
 
@@ -311,18 +336,24 @@ func _add_header(v: VBoxContainer):
 	var title = Label.new(); title.text = " gPTY"; title.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
 	title.name = "SidebarTitle"; title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(title)
-	_title_label = title
 	var arrow = Button.new()
-	arrow.name = "SidebarArrow"
+	arrow.name = "SidebarHeaderModeBtn"
 	arrow.custom_minimum_size = Vector2(UiTokens.BUTTON_MIN_WIDTH, UiTokens.BUTTON_MIN_HEIGHT)
-	Icons.icon_button(arrow, Icons.COLLAPSE, "Hide sidebar")
-	arrow.pressed.connect(_toggle_sidebar)
+	Icons.icon_button(arrow, Icons.COLLAPSE, "Sidebar mode")
+	arrow.pressed.connect(cycle_mode)
 	h.add_child(arrow)
 	_collapse_arrow = arrow
 	v.add_child(h)
 
 func _add_buttons(v: VBoxContainer):
-	_add_pane_buttons(v)
+	# The grid and its header are one node so the icons rail can hand the whole
+	# Add Pane section to a flyout without a second copy.
+	var add_section := VBoxContainer.new()
+	add_section.name = "AddPaneSection"
+	add_section.add_theme_constant_override("separation", UiTokens.SPACE_SM)
+	v.add_child(add_section)
+	_section_nodes["add_pane"] = add_section
+	_add_pane_buttons(add_section)
 
 	var search_btn = _make_sidebar_button("Search", Icons.SEARCH)
 	search_btn.tooltip_text = _with_chord("Search the active terminal", "term:search")
@@ -595,6 +626,7 @@ func _add_workspace_section(parent: VBoxContainer):
 		[add_btn, all_btn, confirm], sc)
 	section.add_child(sc)
 	parent.add_child(section)
+	_section_nodes["workspaces"] = section
 
 func update_workspace_list(names: Array[String], active: int, cwds: Array[String] = []):
 	if not _workspace_list: return
@@ -1030,33 +1062,219 @@ func _add_pane_list_ui(v: VBoxContainer):
 	# `update_pane_list` is the one switch.
 	_pane_heading.visible = false
 	v.add_child(section)
+	_section_nodes["panes"] = section
 
 func _add_collapsed_button():
 	var btn = Button.new()
 	btn.name = "SidebarCollapsedBtn"
 	btn.custom_minimum_size = Vector2(18, 22)
-	Icons.icon_button(btn, Icons.EXPAND, "Show sidebar")
+	Icons.icon_button(btn, Icons.EXPAND, "Sidebar: collapsed. Press for expanded.")
 	btn.offset_left = 1; btn.offset_top = 2
 	btn.offset_right = 19; btn.visible = false
-	btn.pressed.connect(_toggle_sidebar)
+	btn.pressed.connect(_on_collapsed_pressed)
 	add_child(btn)
+	_collapsed_btn = btn
 
-func _toggle_sidebar():
-	var on = (offset_right != WIDTH)
-	var coll = get_node_or_null("SidebarCollapsedBtn")
-	if on:
-		offset_right = WIDTH; bg.size.x = WIDTH
-		if _content_scroll: _content_scroll.show()
-		if _title_label: _title_label.visible = true
-		if _collapse_arrow: _collapse_arrow.visible = true
-		if coll: coll.visible = false
-	else:
-		offset_right = COLLAPSED_WIDTH; bg.size.x = COLLAPSED_WIDTH
-		if _content_scroll: _content_scroll.hide()
-		if _title_label: _title_label.visible = false
-		if _collapse_arrow: _collapse_arrow.visible = false
-		if coll: coll.visible = true
-	toggled.emit()
+func _on_collapsed_pressed():
+	SettingsManager.set_sidebar_mode(SettingsManager.SIDEBAR_EXPANDED)
+	set_mode(SettingsManager.SIDEBAR_EXPANDED)
+
+func mode() -> int:
+	return _mode
+
+func width_for(m: int) -> float:
+	match clampi(m, SettingsManager.SIDEBAR_EXPANDED, SettingsManager.SIDEBAR_COLLAPSED):
+		SettingsManager.SIDEBAR_ICONS:
+			return ICONS_WIDTH
+		SettingsManager.SIDEBAR_COLLAPSED:
+			return COLLAPSED_WIDTH
+		_:
+			return WIDTH
+
+## Switch the sidebar's position. No-op when unchanged, so a settings save
+## cannot close an open flyout; otherwise the content margin, the icon rail and
+## the collapsed handle swap and `mode_changed` lets the workspace re-lay out.
+func set_mode(m: int) -> void:
+	var clamped := clampi(m, SettingsManager.SIDEBAR_EXPANDED, SettingsManager.SIDEBAR_COLLAPSED)
+	if clamped == _mode:
+		return
+	_mode = clamped
+	_apply_mode()
+	mode_changed.emit(_mode)
+
+func cycle_mode() -> int:
+	var next := (_mode + 1) % 3
+	SettingsManager.set_sidebar_mode(next)
+	set_mode(next)
+	return _mode
+
+func _apply_mode() -> void:
+	if _content_margin != null:
+		_content_margin.visible = _mode == SettingsManager.SIDEBAR_EXPANDED
+	if _icon_rail != null:
+		_icon_rail.visible = _mode == SettingsManager.SIDEBAR_ICONS
+	if _collapsed_btn != null:
+		_collapsed_btn.visible = _mode == SettingsManager.SIDEBAR_COLLAPSED
+	var width := width_for(_mode)
+	offset_right = width
+	if bg != null:
+		# The ground is anchored top/bottom, so its width is the right offset;
+		# assigning `size` on a non-equal opposite-anchor node is overridden.
+		bg.offset_right = width
+	_sync_mode_controls()
+
+func _sync_mode_controls() -> void:
+	var current: String = SettingsManager.SIDEBAR_MODE_LABELS[_mode]
+	var next: String = SettingsManager.SIDEBAR_MODE_LABELS[(_mode + 1) % 3]
+	var text := "Sidebar: %s. Press for %s (Ctrl+Shift+B)." % [current, next.to_lower()]
+	if _collapse_arrow != null:
+		_collapse_arrow.accessibility_name = text
+		_collapse_arrow.tooltip_text = text
+		Icons.set_glyph(_collapse_arrow, Icons.COLLAPSE)
+	if _rail_mode_btn != null:
+		_rail_mode_btn.accessibility_name = text
+		_rail_mode_btn.tooltip_text = text
+		Icons.set_glyph(_rail_mode_btn, Icons.COLLAPSE)
+	if _collapsed_btn != null:
+		var collapsed_text := "Sidebar: collapsed. Press for expanded."
+		_collapsed_btn.accessibility_name = collapsed_text
+		_collapsed_btn.tooltip_text = collapsed_text
+
+## The icons mode's one column: every direct action plus one icon per flyout
+## section. The buttons are 40x30 in a 48 px rail, so the glyph targets stay
+## pointer-sized and the rail scrolls when the window is shorter than the list.
+func _add_icon_rail():
+	var sc := ScrollContainer.new()
+	sc.name = "IconRail"
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	sc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	sc.visible = false
+	add_child(sc)
+	_icon_rail = sc
+
+	var list := VBoxContainer.new()
+	list.name = "IconRailList"
+	list.add_theme_constant_override("separation", UiTokens.SPACE_XS)
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sc.add_child(list)
+	_rail_list = list
+
+	_rail_mode_btn = _make_rail_button(Icons.COLLAPSE, "Sidebar mode")
+	_rail_mode_btn.name = "SidebarRailModeBtn"
+	_rail_mode_btn.pressed.connect(cycle_mode)
+	_rail_list.add_child(_rail_mode_btn)
+
+	var wm := _make_rail_button(Icons.WINDOW_MODE, "Window mode")
+	wm.name = "WindowModeBtn"
+	wm.tooltip_text = SettingsManager.WINDOW_MODE_HINT
+	wm.pressed.connect(_show_window_mode_menu)
+	_rail_list.add_child(wm)
+
+	var add := _make_rail_button(Icons.ADD, "Add a pane")
+	add.name = "AddPaneBtn"
+	add.pressed.connect(func(): request_flyout.emit("add_pane"))
+	_rail_list.add_child(add)
+	_rail_buttons["add_pane"] = add
+
+	var search := _make_rail_button(Icons.SEARCH, "Search")
+	search.name = "SearchBtn"
+	search.pressed.connect(func(): request_search.emit())
+	_rail_list.add_child(search)
+
+	var settings := _make_rail_button(Icons.SETTINGS, "Settings")
+	settings.name = "SettingsBtn"
+	settings.pressed.connect(func(): request_settings.emit())
+	_rail_list.add_child(settings)
+
+	var feedback := _make_rail_button(Icons.FEEDBACK, "Feedback")
+	feedback.name = "FeedbackBtn"
+	feedback.pressed.connect(_on_feedback_pressed)
+	_rail_list.add_child(feedback)
+
+	_rail_list.add_child(HSeparator.new())
+
+	var workspaces := _make_rail_button(Icons.NEW_WORKSPACE, "Workspaces")
+	workspaces.name = "WorkspacesBtn"
+	workspaces.pressed.connect(func(): request_flyout.emit("workspaces"))
+	_rail_list.add_child(workspaces)
+	_rail_buttons["workspaces"] = workspaces
+
+	var profiles := _make_rail_button(Icons.FOLDER, "Profiles")
+	profiles.name = "ProfilesBtn"
+	profiles.pressed.connect(func(): request_flyout.emit("profiles"))
+	_rail_list.add_child(profiles)
+	_rail_buttons["profiles"] = profiles
+
+	var panes := _make_rail_button(Icons.SWITCH_PANE, "Panes")
+	panes.name = "PanesBtn"
+	panes.pressed.connect(func(): request_flyout.emit("panes"))
+	_rail_list.add_child(panes)
+	_rail_buttons["panes"] = panes
+
+	# The glyph button opens the same three labels the expanded dropdown shows.
+	_window_menu = PopupMenu.new()
+	_window_menu.name = "WindowModeMenu"
+	for label in SettingsManager.WINDOW_MODE_LABELS:
+		_window_menu.add_radio_check_item(label)
+	_window_menu.about_to_popup.connect(_sync_window_menu)
+	_window_menu.index_pressed.connect(func(idx: int): request_window_mode.emit(idx))
+	add_child(_window_menu)
+
+func _make_rail_button(glyph: String, accessible_name: String) -> Button:
+	var btn := Button.new()
+	btn.custom_minimum_size = Vector2(40, 30)
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	Icons.icon_button(btn, glyph, accessible_name)
+	btn.tooltip_text = accessible_name
+	return btn
+
+func _show_window_mode_menu() -> void:
+	if _window_menu == null:
+		return
+	var pos := get_screen_position() + Vector2(ICONS_WIDTH, 0)
+	_window_menu.position = Vector2i(pos)
+	_window_menu.popup()
+
+func _sync_window_menu() -> void:
+	if _window_menu == null:
+		return
+	for i in SettingsManager.WINDOW_MODE_LABELS.size():
+		_window_menu.set_item_checked(i, i == SettingsManager.cfg_window_mode)
+
+func _record_section_homes() -> void:
+	for id in ["workspaces", "profiles", "panes", "add_pane"]:
+		var node: Control = _section_nodes.get(id) as Control
+		if node == null or node.get_parent() == null:
+			continue
+		_section_home[id] = {"parent": node.get_parent(), "index": node.get_index()}
+
+func section_node(id: String) -> Control:
+	return _section_nodes.get(id) as Control
+
+## Detach a section for the flyout. The node keeps its signals and live rows;
+## `release_section` restores its place in the column's VBox.
+func take_section(id: String) -> Control:
+	var node: Control = _section_nodes.get(id) as Control
+	if node == null:
+		return null
+	if node.get_parent() != null:
+		node.get_parent().remove_child(node)
+	return node
+
+func release_section(id: String) -> void:
+	var node: Control = _section_nodes.get(id) as Control
+	var home: Dictionary = _section_home.get(id, {})
+	if node == null or home.is_empty():
+		return
+	if node.get_parent() != null:
+		node.get_parent().remove_child(node)
+	var parent: Node = home["parent"]
+	var index := clampi(int(home["index"]), 0, parent.get_child_count())
+	parent.add_child(node)
+	parent.move_child(node, index)
+
+func rail_button(id: String) -> Button:
+	return _rail_buttons.get(id) as Button
 
 func _add_profile_section(parent: VBoxContainer):
 	var section = VBoxContainer.new(); section.name = "ProfileSection"
@@ -1075,6 +1293,7 @@ func _add_profile_section(parent: VBoxContainer):
 	_add_section_header(section, "profiles", "ProfileHeader", [save_btn], sc)
 	section.add_child(sc)
 	parent.add_child(section)
+	_section_nodes["profiles"] = section
 
 func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 	if not _profile_list: return

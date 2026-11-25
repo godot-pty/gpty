@@ -25,6 +25,7 @@ func after_each():
 	# re-theme every later suite.
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
 	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	SettingsManager.cfg_sidebar_mode = SettingsManager.SIDEBAR_EXPANDED
 	SettingsManager.cfg_window_opacity = SettingsManager.OPACITY_DEFAULT
 	SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
 	WindowChrome.force_transparency = -1
@@ -43,16 +44,9 @@ func after_each():
 # ── Helpers ────────────────────────────────────────────────────────────
 
 func _tab_reset_button(tab_name: String) -> Button:
-	for btn in _panel.find_children("*", "Button", true, false):
-		if btn.text != "Reset tab to defaults":
-			continue
-		# The tab's ScrollContainer carries the tab title as its name.
-		var node: Node = btn
-		while node != null and not (node is ScrollContainer):
-			node = node.get_parent()
-		if node is ScrollContainer and node.name == tab_name:
-			return btn
-	return null
+	# The Reset button lives in the section's sticky header, not at the end of
+	# the scroll, so it stays reachable while the form scrolls.
+	return _panel.find_child("%sResetBtn" % tab_name, true, false) as Button
 
 func _row_reset(label_text: String) -> Button:
 	for lbl in _panel.find_children("*", "Label", true, false):
@@ -152,9 +146,18 @@ func test_reasoning_reset_restores_reasoning_settings():
 	assert_eq(SettingsManager.cfg_reasoning_max_turn_bytes, 65536, "max bytes must reset")
 
 func test_no_global_reset_button_remains():
+	# The per-section buttons are the only resets: each is named "<Title>ResetBtn"
+	# and lives in that section's sticky header, so no single button resets the
+	# whole card.
+	var found: Array[String] = []
 	for btn in _panel.find_children("*", "Button", true, false):
-		assert_ne(btn.text, "Reset to defaults",
-			"the all-tabs reset button must be gone (per-tab resets only)")
+		if btn.text == "Reset to defaults":
+			found.append(str(btn.name))
+	assert_eq(found.size(), 4,
+		"System, Terminal, Appearance and Reasoning own the per-section resets")
+	for name in found:
+		assert_true(name.ends_with("ResetBtn"),
+			"the only reset buttons are the section-header ones, not a global: %s" % name)
 
 # ── Scheme rows ────────────────────────────────────────────────────────
 
@@ -246,20 +249,25 @@ func test_swatch_label_follows_a_pick_and_the_reset():
 
 # ── Reset button layout ────────────────────────────────────────────────
 
-func test_reset_buttons_are_tab_wide_and_centered():
+func test_reset_buttons_sit_in_their_section_headers():
 	for tab_name in ["System", "Terminal", "Appearance", "Reasoning"]:
 		var btn := _tab_reset_button(tab_name)
-		assert_not_null(btn, "%s tab must have a reset button" % tab_name)
+		assert_not_null(btn, "%s section must have a reset button" % tab_name)
 		assert_eq(btn.size_flags_horizontal, Control.SIZE_EXPAND_FILL,
-			"%s reset must span the tab width" % tab_name)
+			"%s reset keeps the shared expand flag" % tab_name)
 		assert_eq(btn.alignment, HORIZONTAL_ALIGNMENT_CENTER,
 			"%s reset text must be centered" % tab_name)
+		var header := btn.get_parent()
+		assert_not_null(header, "%s reset has a parent" % tab_name)
+		if header != null:
+			assert_eq(header.name, "%sResetHost" % tab_name,
+				"the reset lives in the section's sticky header, not the scroll")
 
-## The Appearance tab (eight chrome-colour rows plus the Motion section)
+## The Appearance section (eight chrome-colour rows plus Motion and Effects)
 ## overflows the one card size, so the row *Every scrollable surface has a 0 px
 ## scrollbar* needs that overflow to have a real bar. The card keeps its design
 ## size here, so the column must not widen it.
-func test_a_scrolling_settings_tab_shows_a_scrollbar_column():
+func test_a_scrolling_settings_section_shows_a_scrollbar_column():
 	SettingsManager.cfg_ui_scale = 100
 	_pin_window(Vector2i(1920, 1080))
 	SettingsManager.apply_ui_scale()
@@ -268,29 +276,19 @@ func test_a_scrolling_settings_tab_shows_a_scrollbar_column():
 	_panel.theme = UiTheme.build()
 	_panel.open()
 	await wait_frames(2)
-	var tab: ScrollContainer = null
-	for node in _panel.find_children("*", "ScrollContainer", true, false):
-		if node.name == "Appearance":
-			tab = node as ScrollContainer
-			break
-	assert_not_null(tab, "the Appearance tab is a ScrollContainer")
+	_panel.show_section("appearance")
+	await wait_frames(2)
+	var tab := _panel.section_scroll("appearance")
+	assert_not_null(tab, "the Appearance section is a ScrollContainer")
 	if tab == null:
 		return
-	# A tab is only laid out once it is current (`TabContainer` sizes the
-	# current child), so the System tab would report a zero-sized viewport.
-	var tabs := tab.get_parent() as TabContainer
-	assert_not_null(tabs, "the Appearance tab belongs to the settings TabContainer")
-	if tabs == null:
-		return
-	tabs.current_tab = tabs.get_tab_idx_from_control(tab)
-	await wait_frames(2)
 	var bar := tab.get_v_scroll_bar()
-	assert_gt(bar.max_value, bar.page, "the Appearance tab's content overflows the card")
+	assert_gt(bar.max_value, bar.page, "the Appearance section's content overflows the card")
 	assert_true(bar.visible, "the overflow shows a bar")
 	assert_eq(bar.size.x, UiTokens.SCROLLBAR_THICKNESS, "the bar reserves the column it draws in")
 	var card := (_panel.get_child(0) as Control).get_child(0) as Control
 	assert_eq(card.size, SettingsPanel.CARD_SIZE,
-		"a tall tab keeps the design height in a window that fits it")
+		"a tall section keeps the design height in a window that fits it")
 
 # ── Window fit ─────────────────────────────────────────────────────────
 
@@ -479,13 +477,13 @@ func test_appearance_reset_restores_the_titlebar():
 	assert_true(SettingsManager.cfg_show_titlebar,
 		"resetting Appearance must bring the titlebars back")
 
-## The ScrollContainer that holds a control carries its tab's title as its name.
+## The section whose content column holds `node`.
 func _tab_of(node: Node) -> String:
-	var cur := node
-	while cur != null:
-		if cur is ScrollContainer:
-			return cur.name
-		cur = cur.get_parent()
+	for id in SettingsPanel.SETTINGS_SECTIONS:
+		var title: String = SettingsPanel.SECTION_TITLES[id]
+		var content := _panel.section_content(title)
+		if content != null and (content == node or content.is_ancestor_of(node)):
+			return title
 	return ""
 
 # ── Scrollback on disk ─────────────────────────────────────────────────
@@ -633,8 +631,12 @@ func test_the_appearance_picker_is_in_the_appearance_tab():
 	add_child_autofree(panel)
 	await get_tree().process_frame
 	var opt: OptionButton = panel.find_child("AppearanceOpt", true, false)
-	assert_not_null(opt, "the Appearance tab must expose the colour mode")
-	assert_eq(_tab_of(opt), "Appearance", "the picker lives in the Appearance tab")
+	assert_not_null(opt, "the Appearance section must expose the colour mode")
+	var content := panel.section_content("appearance")
+	assert_not_null(content)
+	if opt != null and content != null:
+		assert_true(content == opt or content.is_ancestor_of(opt),
+			"the picker lives in the Appearance section")
 	assert_eq(opt.item_count, 3, "Dark, Light, Follow system")
 	assert_eq(opt.selected, SettingsManager.APPEARANCE_LIGHT,
 		"the picker reflects the stored mode")
@@ -675,13 +677,6 @@ func _seed_commands() -> void:
 	SavedCommandStore.add("Build", "cargo build", false)
 	SavedCommandStore.add("Deploy", "make deploy", true)
 	_panel._refresh_command_list()
-
-func test_the_commands_tab_sits_before_about():
-	var titles := []
-	for i in _panel._tabs.get_tab_count():
-		titles.append(_panel._tabs.get_tab_title(i))
-	assert_eq(titles, ["System", "Terminal", "Appearance", "Reasoning", "Concepts",
-		"Commands", "Shortcuts", "About"], "the shipped tabs keep their positions")
 
 func test_the_about_tab_names_the_renderer():
 	var label := _panel.find_child("RendererLabel", true, false) as Label
@@ -789,113 +784,172 @@ func test_the_row_buttons_follow_the_selection():
 	assert_false(_command_button("up").disabled)
 	assert_true(_command_button("down").disabled, "the last row cannot move down")
 
-func test_open_commands_lands_on_the_tab_and_can_open_the_form():
+func test_open_commands_lands_on_the_commands_section_and_can_open_the_form():
 	_panel.open_commands()
 	assert_true(_panel.visible)
-	assert_eq(_panel._tabs.get_tab_title(_panel._tabs.current_tab), "Commands")
+	assert_eq(_panel.current_section(), "Commands")
+	var rail_btn: Button = _panel._rail_buttons.get("commands")
+	assert_not_null(rail_btn)
+	if rail_btn != null:
+		assert_true(rail_btn.has_focus(),
+			"a deep link lands the keyboard on the rail row it selected")
 	assert_null(_find_accept_dialog(_panel), "no form unless asked for")
 	_panel.open_commands(true)
 	assert_not_null(_find_accept_dialog(_panel), "add_now opens the form")
 
-## The live bar must resolve the theme's tab box, not the engine's default: a
-## `TabContainer`'s internal `TabBar` reads the *container's* `tab_*` styleboxes
-## and font colours, and only the font size used to be mirrored. The default box
-## (10 px a side plus 1 px borders) made the eight tabs 561 px wide, so the last
-## two sat behind the overflow arrows at the 560x340 floor.
-# ── Section arrivals ───────────────────────────────────────────────────
+# ── Rail and sections ─────────────────────────────────────────────────
 
-func test_a_tab_switch_fades_the_incoming_tab_only():
+func test_every_section_is_a_rail_row():
+	for id in SettingsPanel.SETTINGS_SECTIONS:
+		var btn: Button = _panel._rail_buttons.get(id)
+		assert_not_null(btn, "%s has a rail row" % id)
+		if btn == null:
+			continue
+		assert_eq(btn.text, SettingsPanel.SECTION_TITLES[id])
+		assert_true(btn.toggle_mode, "%s is a selection row" % id)
+		assert_eq(btn.accessibility_name, SettingsPanel.SECTION_TITLES[id])
+		assert_eq(btn.theme_type_variation, UiTheme.RAIL_ROW)
+	assert_eq(_panel.current_section(), "System", "the first section is current on build")
+	assert_true((_panel._rail_buttons["system"] as Button).button_pressed)
+
+func test_the_rail_lists_the_sections_in_registry_order():
+	var titles: Array[String] = []
+	for i in _panel._rail.get_child_count():
+		titles.append((_panel._rail.get_child(i) as Button).text)
+	assert_eq(titles, ["System", "Terminal", "Appearance", "Reasoning", "Concepts",
+		"Commands", "Shortcuts", "About"], "the shipped sections keep their order")
+
+func test_the_rail_uses_the_theme_row():
+	_panel.theme = UiTheme.build()
+	var btn: Button = _panel._rail_buttons["system"]
+	assert_eq(btn.theme_type_variation, UiTheme.RAIL_ROW)
+	var box := btn.get_theme_stylebox("pressed") as StyleBoxFlat
+	assert_not_null(box, "the rail resolves the theme's selected row box")
+	if box == null:
+		return
+	assert_eq(box.border_width_left, 2, "the current row keeps the accent leading edge")
+	assert_eq(box.border_color, UiPalette.active().ACCENT)
+
+func test_a_section_switch_is_instant():
 	_panel.open()
 	await wait_frames(2)
-	var outgoing := _panel._tabs.get_tab_control(0)
-	_panel._tabs.current_tab = 1
-	var incoming := _panel._tabs.get_current_tab_control()
-	assert_not_null(incoming)
-	assert_lt(incoming.modulate.a, 0.5, "the incoming section fades in")
-	assert_eq(outgoing.modulate.a, 1.0, "the section it replaced is not re-faded")
-	await get_tree().process_frame
-	var size := incoming.size
-	await wait_seconds(0.15)
-	assert_almost_eq(incoming.modulate.a, 1.0, 0.001)
-	assert_true(incoming.size.is_equal_approx(size), "an arrival never reflows the card")
+	var first_size := _panel._card.size
+	_panel.show_section("appearance")
+	assert_eq(_panel._card.size, first_size, "a section switch never reflows the card")
+	var app: Control = _panel._sections["appearance"]["host"]
+	assert_eq(app.modulate.a, 1.0, "the incoming section is already on screen")
+	assert_false(app.has_meta(UiMotion.ARRIVAL_META), "no arrival tween is recorded")
+	assert_false((_panel._sections["system"]["host"] as Control).visible)
+	_panel.show_section("concepts")
+	var con: Control = _panel._sections["concepts"]["host"]
+	assert_eq(con.modulate.a, 1.0)
+	assert_false(con.has_meta(UiMotion.ARRIVAL_META))
 
-func test_motion_off_switches_tabs_in_one_frame():
-	SettingsManager.cfg_motion = UiMotion.OFF
+func test_back_and_forward_walk_visited_sections():
 	_panel.open()
 	await wait_frames(2)
-	_panel._tabs.current_tab = 1
-	assert_eq(_panel._tabs.get_current_tab_control().modulate.a, 1.0)
-	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	_panel.show_section("appearance")
+	_panel.show_section("concepts")
+	assert_eq(_panel.current_section(), "Concepts")
+	_panel._go_back()
+	assert_eq(_panel.current_section(), "Appearance")
+	_panel._go_back()
+	assert_eq(_panel.current_section(), "System")
+	assert_true(_panel._back_btn.disabled, "Back is disabled at the trail's root")
+	assert_false(_panel._forward_btn.disabled)
+	_panel._go_forward()
+	assert_eq(_panel.current_section(), "Appearance")
 
-func test_open_commands_fades_the_commands_tab():
+func test_the_rail_remembers_the_last_section():
 	_panel.open()
 	await wait_frames(2)
-	_panel.open_commands()
-	var commands := _panel._tabs.get_current_tab_control()
-	assert_not_null(commands)
-	assert_lt(commands.modulate.a, 0.5, "a deep link is the same arrival")
+	_panel.show_section("concepts")
+	_panel.close()
+	await wait_frames(1)
+	_panel.open()
+	await wait_frames(2)
+	assert_eq(_panel.current_section(), "Concepts")
+	assert_true(_panel.section_content("concepts").is_visible_in_tree())
 
-func test_the_live_tab_bar_uses_the_theme_box():
+func test_each_section_keeps_its_scroll_offset():
+	_pin_window(Vector2i(1920, 1080))
+	SettingsManager.cfg_ui_scale = 100
+	SettingsManager.apply_ui_scale()
+	_panel.open()
+	await wait_frames(2)
+	_panel.show_section("appearance")
+	await wait_frames(2)
+	var sc := _panel.section_scroll("appearance")
+	assert_not_null(sc, "the Appearance section is scrollable")
+	if sc == null:
+		return
+	sc.scroll_vertical = 30
+	await wait_frames(1)
+	var held := sc.scroll_vertical
+	assert_gt(held, 0, "the Appearance column can scroll")
+	_panel.show_section("system")
+	await wait_frames(1)
+	_panel.show_section("appearance")
+	await wait_frames(1)
+	assert_eq(sc.scroll_vertical, held, "a hidden section keeps its own offset")
+
+func test_up_down_move_the_rail_and_enter_enters_the_content():
+	_panel.open()
+	await wait_frames(2)
+	var system_btn: Button = _panel._rail_buttons["system"]
+	system_btn.grab_focus()
+	_panel._rail_step(1)
+	assert_eq(_panel.current_section(), "Terminal")
+	assert_true((_panel._rail_buttons["terminal"] as Button).has_focus(),
+		"the rail cursor follows the section")
+	var ev := InputEventKey.new()
+	ev.pressed = true
+	ev.keycode = KEY_ENTER
+	ev.physical_keycode = KEY_ENTER
+	_panel._on_rail_gui_input(ev, "terminal")
+	assert_true(_panel._rail_press_by_key, "Enter is remembered as a keyboard activation")
+	_panel._on_rail_pressed("terminal")
+	var content := _panel.section_content("terminal")
+	var first := KeyboardFocus.first_reachable(content)
+	assert_not_null(first)
+	if first != null:
+		assert_true(first.has_focus(), "Enter enters the section's first control")
+
+func test_the_rail_and_preview_use_the_design_widths():
 	_pin_window(Vector2i(1920, 1080))
 	SettingsManager.cfg_ui_scale = 100
 	SettingsManager.apply_ui_scale()
 	_panel.theme = UiTheme.build()
 	_panel.open()
 	await wait_frames(2)
-	var bar := _panel._tabs.get_tab_bar()
-	assert_eq(bar.get_theme_font_size("font_size", "TabBar"), UiTokens.FS_CAPTION,
-		"the container forwards the caption size to its internal bar")
-	assert_eq(bar.get_theme_color("font_unselected_color", "TabBar"),
-		UiPalette.active().TEXT_MUTED, "the container forwards the tab colours")
-	var box := bar.get_theme_stylebox("tab_unselected") as StyleBoxFlat
-	assert_not_null(box, "the live bar resolves the theme's tab box")
-	assert_eq(box.content_margin_left, float(UiTokens.SPACE_MD),
-		"the live bar uses the 6 px theme box, not the engine's 10 px default")
-	assert_eq(box.bg_color, UiPalette.active().SURFACE_RAISED,
-		"the live bar uses the app's raised tab surface")
+	_panel.show_section("appearance")
+	await wait_frames(2)
+	assert_eq(_panel._card.size, SettingsPanel.CARD_SIZE)
+	assert_almost_eq(_panel._rail_scroll.size.x, SettingsPanel.RAIL_WIDTH, 0.5)
+	assert_true(_panel._preview.visible)
+	assert_almost_eq(_panel._preview.size.x, SettingsPanel.PREVIEW_WIDTH, 0.5)
+	var content := _panel.section_content("appearance")
+	var sc := _panel.section_scroll("appearance")
+	assert_not_null(content)
+	assert_not_null(sc)
+	if content != null and sc != null:
+		assert_lte(content.get_combined_minimum_size().x, sc.size.x + 0.5,
+			"the Appearance form fits beside the preview")
 
-## Assert the bar is the expected width and one contiguous row of eight tabs.
-## The rects are read as a running row: a tab the engine has hidden comes back
-## with a zero-based rect (measured: tab 6 read 0..56 on a bar whose tabs ended
-## at 464), so neither a per-tab end check nor a width sum alone proves the row
-## fits - the positions have to be contiguous as well.
-func _assert_all_eight_tabs_on_one_row(tabs: TabContainer, expected_bar_width: float) -> void:
-	var bar := tabs.get_tab_bar()
-	assert_eq(tabs.get_tab_count(), 8)
-	assert_gt(bar.size.x, 0.0, "the bar has been laid out")
-	assert_almost_eq(bar.size.x, expected_bar_width, 0.5,
-		"the bar is the card less its 16 px inner margin on each side")
-	var edge := 0.0
-	var total := 0.0
-	for i in tabs.get_tab_count():
-		var rect := bar.get_tab_rect(i)
-		assert_almost_eq(rect.position.x, edge, 0.5,
-			"tab %d (%s) starts at %.1f px after the tabs before it end at %.1f: the engine has hidden it or started a new row"
-			% [i, tabs.get_tab_title(i), rect.position.x, edge])
-		edge = rect.end.x
-		total += rect.size.x
-	assert_true(total <= bar.size.x,
-		"the eight tabs need %.1f px of a %.1f px bar: the overflow would be hidden behind a dropdown"
-		% [total, bar.size.x])
-
-## Every tab must stay on the bar at the card's design width. The engine does
-## not widen the bar for an overflow: it hides trailing tabs behind a dropdown,
-## and then re-lays the bar out on the first click, which changes the card's
-## measured size under the pointer.
-func test_all_eight_tabs_fit_the_card():
-	_pin_window(Vector2i(1920, 1080))
+func test_the_preview_hides_below_the_wide_layout():
+	_pin_window(Vector2i(800, 500))
 	SettingsManager.cfg_ui_scale = 100
 	SettingsManager.apply_ui_scale()
 	_panel.theme = UiTheme.build()
 	_panel.open()
 	await wait_frames(2)
-	_assert_all_eight_tabs_on_one_row(_panel._tabs,
-		SettingsPanel.CARD_SIZE.x - 2.0 * UiTokens.SPACE_XXL)
+	_panel.show_section("appearance")
+	await wait_frames(2)
+	assert_false(_panel._preview.visible,
+		"the 784 px card cannot hold the preview column")
+	assert_almost_eq(_panel._card.size.x, 784.0, 0.5)
 
-## The smallest supported window: the card clamps to 544 px, the bar to 512,
-## and the eight tabs need 497 - the last tab stays on the row instead of
-## behind the engine's arrows.
-func test_all_eight_tabs_fit_the_560x340_floor():
+func test_the_rail_narrows_at_the_560x340_floor():
 	_pin_window(Vector2i(560, 340))
 	SettingsManager.cfg_ui_scale = 100
 	SettingsManager.apply_ui_scale()
@@ -911,7 +965,24 @@ func test_all_eight_tabs_fit_the_560x340_floor():
 		await wait_frames(1)
 	assert_almost_eq(_panel._card.size.x, 544.0, 0.5,
 		"the card clamps to 560 less the 8 px card edge on each side")
-	_assert_all_eight_tabs_on_one_row(_panel._tabs, 512.0)
+	assert_almost_eq(_panel._rail_scroll.size.x, SettingsPanel.RAIL_NARROW_WIDTH, 0.5,
+		"the rail narrows at the floor")
+	for id in SettingsPanel.SETTINGS_SECTIONS:
+		_panel.show_section(id)
+		await wait_frames(1)
+		var content := _panel.section_content(id)
+		if content == null:
+			continue
+		var body: Control = _panel.section_scroll(id)
+		if body == null:
+			var title: String = SettingsPanel.SECTION_TITLES[id]
+			body = _panel.find_child("%sBody" % title, true, false) as Control
+		assert_not_null(body, "%s has a visible body" % id)
+		if body == null:
+			continue
+		assert_lte(content.get_combined_minimum_size().x, body.size.x + 0.5,
+			"%s must not clip horizontally at the floor" % id)
+	assert_false(_panel._preview.visible, "the preview hides at the floor")
 
 # ── Shortcuts: the keyboard-shortcut table ─────────────────────────────
 
@@ -928,12 +999,16 @@ func _row_chord(description: String) -> String:
 				return (kids[i] as Label).text
 	return ""
 
-func test_open_shortcuts_lands_on_the_shortcuts_tab():
+func test_open_shortcuts_lands_on_the_shortcuts_section():
 	_panel.open_shortcuts()
 	await wait_frames(2)
 	assert_true(_panel.visible, "opening, never toggling")
-	assert_eq(_panel._tabs.get_tab_title(_panel._tabs.current_tab), "Shortcuts",
-		"the palette's Keyboard Shortcuts row asks for this tab")
+	assert_eq(_panel.current_section(), "Shortcuts",
+		"the palette's Keyboard Shortcuts row asks for this section")
+	var rail_btn: Button = _panel._rail_buttons.get("shortcuts")
+	assert_not_null(rail_btn)
+	if rail_btn != null:
+		assert_true(rail_btn.has_focus(), "and the rail row carries the keyboard")
 
 func test_the_shortcut_list_prints_the_registry_spelling():
 	_panel.open_shortcuts()
@@ -1137,7 +1212,16 @@ func test_removing_a_reactive_rule_clears_it():
 	_panel._sync_reactive_rows()
 	var row := _reactive_row("cat_command")
 	assert_not_null(row)
-	(row.get_child(2) as Button).pressed.emit()
+	var remove: Button = null
+	if row != null:
+		for child in row.get_children():
+			if child is Button and Icons.glyph(child) == Icons.DELETE:
+				remove = child
+				break
+	assert_not_null(remove, "the row carries its remove button")
+	if remove == null:
+		return
+	remove.pressed.emit()
 	await get_tree().process_frame
 	assert_false(SettingsManager.cfg_reactive_effects.has("cat_command"),
 		"the remove button erases the rule")
@@ -1164,6 +1248,34 @@ func test_the_reactive_table_hides_add_at_the_cap():
 	assert_eq(_panel.find_child("ReactiveRules", true, false).get_child_count(),
 		UiEffects.MAX_RULES, "one row per stored rule")
 
+## The System section's sidebar row: the three positions, an immediate save, and
+## the System reset returning to Expanded. The header control and the chord
+## write the same field.
+func test_the_sidebar_mode_row_offers_the_three_positions_and_resets():
+	var opt := _panel.find_child("SidebarModeOpt", true, false) as OptionButton
+	assert_not_null(opt, "the System section must offer the sidebar mode")
+	if opt == null:
+		return
+	assert_eq(opt.item_count, SettingsManager.SIDEBAR_MODE_LABELS.size())
+	for i in opt.item_count:
+		assert_eq(opt.get_item_text(i), SettingsManager.SIDEBAR_MODE_LABELS[i])
+	assert_eq(opt.selected, SettingsManager.SIDEBAR_EXPANDED)
+	opt.selected = SettingsManager.SIDEBAR_ICONS
+	opt.item_selected.emit(SettingsManager.SIDEBAR_ICONS)
+	assert_eq(SettingsManager.cfg_sidebar_mode, SettingsManager.SIDEBAR_ICONS,
+		"the picker writes the setting")
+	SettingsManager.cfg_sidebar_mode = SettingsManager.SIDEBAR_COLLAPSED
+	_panel._sync_sidebar_mode_row()
+	assert_eq(opt.selected, SettingsManager.SIDEBAR_COLLAPSED,
+		"the row reads the stored mode back (the chord can move it)")
+	var reset := _tab_reset_button("System")
+	assert_not_null(reset)
+	if reset != null:
+		reset.pressed.emit()
+	assert_eq(SettingsManager.cfg_sidebar_mode, SettingsManager.SIDEBAR_EXPANDED,
+		"the System reset returns the sidebar to Expanded")
+	assert_eq(opt.selected, SettingsManager.SIDEBAR_EXPANDED)
+
 ## The v0.8.7 backdrop row: an immediate setting, like the Effects pickers -
 ## the selection writes the store and the broadcast repaints every pane.
 func test_the_backdrop_picker_writes_the_setting():
@@ -1177,3 +1289,58 @@ func test_the_backdrop_picker_writes_the_setting():
 	_panel._sync_backdrop_row()
 	assert_eq(opt.selected, SettingsManager.BACKDROP_GRADIENT,
 		"the picker reads the stored value back")
+
+## The effect scope: a closed vocabulary, an immediate save, the panes-excluded
+## hint only at Sidebar only, and the Appearance reset returns it to panes.
+func test_the_scope_picker_offers_the_closed_vocabulary():
+	var opt := _panel.find_child("ScopeOpt", true, false) as OptionButton
+	assert_not_null(opt, "the Effects section must offer a scope")
+	if opt == null:
+		return
+	assert_eq(opt.item_count, UiEffects.SCOPE_LABELS.size())
+	for i in opt.item_count:
+		assert_eq(opt.get_item_text(i), UiEffects.SCOPE_LABELS[i])
+	assert_eq(opt.selected, UiEffects.SCOPE_PANES, "panes is the default")
+	var hint := _panel.find_child("ScopePanesHint", true, false) as Label
+	assert_not_null(hint, "the panes-excluded sentence has a place")
+	if hint == null:
+		return
+	assert_false(hint.visible, "panes-only needs no exclusion sentence")
+	opt.selected = UiEffects.SCOPE_SIDEBAR
+	opt.item_selected.emit(UiEffects.SCOPE_SIDEBAR)
+	assert_eq(SettingsManager.cfg_effect_scope, UiEffects.SCOPE_SIDEBAR,
+		"the picker writes the setting")
+	assert_true(hint.visible, "sidebar-only says panes draw no effect")
+	var reset := _tab_reset_button("Appearance")
+	assert_not_null(reset, "the Appearance reset exists")
+	if reset != null:
+		reset.pressed.emit()
+	assert_eq(SettingsManager.cfg_effect_scope, UiEffects.SCOPE_PANES,
+		"the Appearance reset returns the scope to panes")
+	assert_false(hint.visible)
+
+## The Play buttons in the sections are the preview's entry points: the create
+## picker's button plays the transition, the effect row's button replays the
+## effect, and both update the caption the card shows.
+func test_the_play_buttons_drive_the_preview():
+	_pin_window(Vector2i(1920, 1080))
+	SettingsManager.cfg_ui_scale = 100
+	SettingsManager.apply_ui_scale()
+	_panel.theme = UiTheme.build()
+	_panel.open()
+	_panel.show_section("appearance")
+	await wait_frames(2)
+	assert_true(_panel._preview.visible, "the design width shows the preview")
+	var create_play := _panel.find_child("CreatePlayBtn", true, false) as Button
+	assert_not_null(create_play, "each transition row carries a Play button")
+	if create_play != null:
+		assert_false(create_play.disabled)
+		create_play.pressed.emit()
+		assert_string_contains(_panel._preview.caption_text(), "Create")
+	SettingsManager.cfg_effect = "grain"
+	SettingsManager.cfg_effect_intensity = UiEffects.FULL
+	var effect_play := _panel.find_child("EffectPlayBtn", true, false) as Button
+	assert_not_null(effect_play, "the effect row carries a Play button")
+	if effect_play != null:
+		effect_play.pressed.emit()
+		assert_string_contains(_panel._preview.caption_text(), "Film grain")

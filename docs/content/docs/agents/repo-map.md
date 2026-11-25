@@ -194,8 +194,12 @@ gpty/
         │   ├── tile_drag.gd        # Divider-drag state machine (extracted)
         │   └── divider_handles.gd  # Divider grab bands: one handle per divider segment
         ├── ui/
-        │   ├── sidebar.gd
-        │   ├── settings_panel.gd
+        │   ├── sidebar.gd           # Three modes: the column, a 48 px icon rail, a 20 px handle; one flyout
+        │   ├── sidebar_flyout.gd    # The section flyout beside the rail (lazy rows, one card)
+        │   ├── settings_panel.gd    # The rail/content/preview Settings card (sticky Resets, Back/Forward)
+        │   ├── settings_preview.gd  # The Motion/Effects preview column and its sample playback
+        │   ├── settings_sample.gd   # The scratch Control the previews animate (pane chrome + ground)
+        │   ├── effect_surface.gd    # The effect layer the pane, the preview and the sidebar share
         │   ├── overlay_panel.gd     # Overlay keyboard contract (focus, Escape, focus return)
         │   ├── command_palette.gd   # Ctrl+Shift+P command list (OverlayPanel)
         │   ├── palette_model.gd     # Palette entries, matching and ranking (pure)

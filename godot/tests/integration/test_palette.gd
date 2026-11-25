@@ -476,8 +476,8 @@ func test_the_save_command_entry_opens_the_commands_tab_with_the_form():
 	var panel: SettingsPanel = ws._settings_panel
 	assert_not_null(panel, "the palette command builds the settings panel")
 	assert_true(panel.visible, "and shows it")
-	assert_eq(panel._tabs.get_tab_title(panel._tabs.current_tab), "Commands",
-		"it lands on the Commands tab, not the first one")
+	assert_eq(panel.current_section(), "Commands",
+		"it lands on the Commands section, not the first one")
 	var dialogs := []
 	for child in panel.get_children():
 		if child is AcceptDialog:

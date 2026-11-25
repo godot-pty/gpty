@@ -52,24 +52,19 @@ func _open_settings(ws: Control) -> SettingsPanel:
 	await get_tree().process_frame
 	return panel
 
-## Make a tab current. The card has one size, so this is what a walk test needs
-## to visit every tab (a `TabContainer` only lays out the current child). The
-## tab body is a direct child of the TabContainer - a ScrollContainer for a form
-## tab, the fill tab's MarginContainer for About - which is the only shape
-## `get_tab_idx_from_control` answers for.
-func _select_settings_tab(panel: SettingsPanel, title: String) -> void:
-	var body := panel.find_child(title, true, false) as Control
-	if body == null:
-		return
-	panel._tabs.current_tab = panel._tabs.get_tab_idx_from_control(body)
+## Make a section current. The card has one size, so this is what a walk test
+## needs to visit every section (a hidden section is not laid out).
+func _select_settings_section(panel: SettingsPanel, title: String) -> void:
+	panel.show_section(title)
+	await get_tree().process_frame
 	await get_tree().process_frame
 
 # ── The Settings card ──────────────────────────────────────────────────
 
-## One rect for all eight tabs: paging through the bar must not move the
-## header, the tab bar or the rows under the pointer, and the centred overlay
-## must not re-lay itself out per switch.
-func test_every_settings_tab_keeps_one_card_size():
+## One rect for all eight sections: switching must not move the header, the rail
+## or the rows under the pointer, and the centred overlay must not re-lay itself
+## out per switch.
+func test_every_settings_section_keeps_one_card_size():
 	var ws = await _make_workspace(Vector2(1200, 800))
 	var panel := await _open_settings(ws)
 	var card := panel._card
@@ -81,7 +76,7 @@ func test_every_settings_tab_keeps_one_card_size():
 	# System is current on open; walking the other seven returns to it last.
 	for title in ["Terminal", "Appearance", "Reasoning", "Concepts", "Commands",
 			"Shortcuts", "About", "System"]:
-		await _select_settings_tab(panel, title)
+		await _select_settings_section(panel, title)
 		assert_eq(card.size, first, "%s must not move the card" % title)
 		_assert_inside(card.get_global_rect(), ws.get_global_rect(),
 			"the Settings card on %s" % title)
@@ -89,16 +84,16 @@ func test_every_settings_tab_keeps_one_card_size():
 func test_the_settings_card_fits_an_800x500_window():
 	var ws = await _make_workspace(Vector2(800, 500))
 	var panel := await _open_settings(ws)
-	await _select_settings_tab(panel, "Terminal")
+	await _select_settings_section(panel, "Terminal")
 	var card := panel._card
-	assert_eq(card.size, Vector2(SettingsPanel.CARD_SIZE.x, 484),
-		"the design width, and the window's height less the card edge on each side")
+	assert_eq(card.size, Vector2(784, 484),
+		"the window clamps both axes: 800 less the card edge on each side is 784, and the height is 484")
 	_assert_inside(card.get_global_rect(), ws.get_global_rect(), "the Settings card")
 
 func test_the_settings_card_fits_a_560x340_window():
 	var ws = await _make_workspace(Vector2(560, 340))
 	var panel := await _open_settings(ws)
-	await _select_settings_tab(panel, "Terminal")
+	await _select_settings_section(panel, "Terminal")
 	var card := panel._card
 	assert_eq(card.size, Vector2(544, 324),
 		"the window clamps both axes now: 560 less the card edge on each side is 544, and the height is the window's 324")
@@ -107,7 +102,7 @@ func test_the_settings_card_fits_a_560x340_window():
 func test_the_card_reclamps_while_it_is_open():
 	var ws = await _make_workspace(Vector2(1200, 800))
 	var panel := await _open_settings(ws)
-	await _select_settings_tab(panel, "Terminal")
+	await _select_settings_section(panel, "Terminal")
 	assert_eq(panel._card.size, SettingsPanel.CARD_SIZE, "the design size fits")
 	ws.size = Vector2(560, 340)
 	await get_tree().process_frame

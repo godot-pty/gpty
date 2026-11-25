@@ -8,6 +8,7 @@ var _saved_copy: Callable
 
 func before_each():
 	MockAutoloads.setup()
+	SettingsManager.cfg_sidebar_mode = SettingsManager.SIDEBAR_EXPANDED
 	# The link seams are process-global statics: this suite replaces them, so
 	# it puts back what it found.
 	_saved_open = ExternalLink.open_external

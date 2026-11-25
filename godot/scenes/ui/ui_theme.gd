@@ -37,6 +37,11 @@ const ACCENT_LABEL := &"AccentLabel"
 ## `ACCENT_BUTTON`: that role means "this is the current item" (the sidebar's
 ## active row), and a cursor is not a state a row owns.
 const SELECTED_ROW := &"SelectedRow"
+## The Settings rail's section row: no chrome at rest, an accent wash under the
+## pointer and the selected-row box (2 px accent leading edge) for the current
+## section. A rail is a current-item list like a palette, but its rows are
+## labels rather than a cursor in one field, so it owns this variation.
+const RAIL_ROW := &"RailRow"
 ## An opaque raised surface for a control that floats over the terminal grid
 ## (the search strip, its results list): the theme's `PanelContainer` base is
 ## opaque but carries no padding, and a `ScrollContainer` has no panel of its
@@ -175,41 +180,21 @@ static func build() -> Theme:
 		t.set_color("font_color", type, p.TEXT)
 		t.set_stylebox("panel", type, _padded(_flat(p.BG, p.BORDER, 1), UiTokens.SPACE_SM))
 
-	# --- Tabs -----------------------------------------------------------------
-	# Eight tabs (System … About) must stay on the Settings card's bar: the
-	# engine hides an overflow behind a dropdown, and a hidden tab is invisible
-	# until clicked - then the bar re-lays itself out and the card's measured
-	# size is mangled. The type is one step below the theme's default (11 px,
-	# not 12) and the box carries 6 px of horizontal padding.
-	#
-	# A `TabContainer`'s internal `TabBar` resolves the tab styleboxes and font
-	# colours from the **TabContainer** theme item, not the `TabBar` item (only
-	# `font_size` is forwarded as an override). Registering them on `TabBar`
-	# alone left the live bar on the engine's default box - 10 px a side plus 1
-	# px borders, 20 px per tab, so the eight labels needed 561 px of the 512 px
-	# inner width (504 px of bar after the default 8 px indent) a 560x340
-	# window clamps the card to. The same StyleBox objects are
-	# registered on both types, so a standalone `TabBar` and the container
-	# cannot drift; the app's 6 px box puts the eight at 401 px of ink + 8*12 =
-	# 497 px, 15 px inside the floor bar.
-	#
-	# The engine indents the bar by `side_margin` (8 px) on the left; the card
-	# already carries a 16 px inner margin, so zero it and let the tab row align
-	# with the header and rows above it.
-	t.set_constant("side_margin", "TabContainer", 0)
-	t.set_font_size("font_size", "TabBar", UiTokens.FS_CAPTION)
-	t.set_font_size("font_size", "TabContainer", UiTokens.FS_CAPTION)
-	var tab_selected := _tab_box(true)
-	var tab_unselected := _tab_box(false)
-	var tab_hovered := _tab_box(false)
-	for type in ["TabBar", "TabContainer"]:
-		t.set_stylebox("tab_selected", type, tab_selected)
-		t.set_stylebox("tab_unselected", type, tab_unselected)
-		t.set_stylebox("tab_hovered", type, tab_hovered)
-		t.set_color("font_selected_color", type, p.TEXT)
-		t.set_color("font_unselected_color", type, p.TEXT_MUTED)
-		t.set_color("font_hovered_color", type, p.ACCENT_HOVER)
-	t.set_stylebox("panel", "TabContainer", _flat(p.SURFACE, p.BORDER, 1))
+	# --- Settings rail --------------------------------------------------------
+	# One row per section: no chrome at rest, the accent wash and 2 px leading
+	# edge for the current section, and the same focus ring the other rows use.
+	# The selected box is the palette's `_selected_row_box` with the rail's
+	# 8 px padding, so the rail cannot drift from the palette's cursor idiom.
+	t.set_type_variation(RAIL_ROW, "Button")
+	t.set_stylebox("normal", RAIL_ROW, StyleBoxEmpty.new())
+	t.set_stylebox("disabled", RAIL_ROW, StyleBoxEmpty.new())
+	t.set_stylebox("focus", RAIL_ROW,
+		_padded(_flat(Color.TRANSPARENT, p.ACCENT, 1), UiTokens.SPACE_SM))
+	t.set_stylebox("hover", RAIL_ROW,
+		_padded(_flat(Color(p.ACCENT, 0.10)), UiTokens.SPACE_LG))
+	var rail_selected := _selected_row_box()
+	rail_selected.set_content_margin_all(UiTokens.SPACE_LG)
+	t.set_stylebox("pressed", RAIL_ROW, rail_selected)
 
 	# --- Separators and scrolling ---------------------------------------------
 	for type in ["HSeparator", "VSeparator"]:
@@ -331,18 +316,6 @@ static func _selected_row_box() -> StyleBoxFlat:
 	box.border_width_left = 2
 	box.border_color = p.ACCENT
 	box.set_content_margin_all(UiTokens.SPACE_SM)
-	return box
-
-static func _tab_box(selected: bool) -> StyleBoxFlat:
-	var p := UiPalette.active()
-	var box := _flat(p.SURFACE if selected else p.SURFACE_RAISED)
-	if selected:
-		box.border_width_top = 2
-		box.border_color = p.ACCENT
-	box.content_margin_left = UiTokens.SPACE_MD
-	box.content_margin_right = UiTokens.SPACE_MD
-	box.content_margin_top = UiTokens.SPACE_SM
-	box.content_margin_bottom = UiTokens.SPACE_SM
 	return box
 
 ## GraphNode draws its body and its title bar with the same fat padding (the

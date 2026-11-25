@@ -11,11 +11,13 @@ func before_each():
 	MockAutoloads.setup()
 	SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
 	SettingsManager.cfg_effect_intensity = UiEffects.OFF
+	SettingsManager.cfg_effect_scope = UiEffects.SCOPE_PANES
 	SettingsManager.cfg_reactive_effects = {}
 
 func after_each():
 	SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
 	SettingsManager.cfg_effect_intensity = UiEffects.OFF
+	SettingsManager.cfg_effect_scope = UiEffects.SCOPE_PANES
 	SettingsManager.cfg_reactive_effects = {}
 	MockAutoloads.teardown()
 
@@ -47,6 +49,8 @@ func test_every_ambient_entry_declares_a_shader_a_budget_and_a_rate():
 	for id in UiEffects.AMBIENT_IDS:
 		var entry: Dictionary = UiEffects.AMBIENT[id]
 		assert_true(entry["shader"] is Shader, "%s must preload a Shader" % id)
+		assert_false(str(entry.get("label", "")).is_empty(), "%s must declare a label" % id)
+		assert_false(str(entry.get("hint", "")).is_empty(), "%s must declare a hint" % id)
 		if bool(entry["animated"]):
 			assert_gt(float(entry["budget_ms_1080p"]), 0.0,
 				"%s must declare a 1080p frame budget" % id)
@@ -59,6 +63,40 @@ func test_every_ambient_entry_declares_a_shader_a_budget_and_a_rate():
 				"%s is static: it is not evaluated per frame" % id)
 			assert_eq(float(entry["budget_ms_4k"]), 0.0)
 			assert_eq(int(entry["hz"]), 0, "%s is static and must not tick" % id)
+
+func test_the_table_carries_five_closed_entries():
+	assert_eq(UiEffects.AMBIENT_IDS,
+		["crt", "grain", "vignette", "aurora", "dither"],
+		"the picker order is the registry order")
+	assert_eq(UiEffects.AMBIENT_IDS.size(), UiEffects.AMBIENT.size(),
+		"every listed id has one entry and no unlisted entry exists")
+	for id in UiEffects.AMBIENT_IDS:
+		assert_true(UiEffects.AMBIENT.has(id), "%s is in the closed table" % id)
+
+func test_every_entry_preloads_a_shader_under_the_effects_directory():
+	for id in UiEffects.AMBIENT_IDS:
+		var shader: Shader = UiEffects.AMBIENT[id]["shader"]
+		assert_true(shader.resource_path.begins_with("res://shaders/effects/"),
+			"%s preloads an effect file, not a runtime string: %s" % [id, shader.resource_path])
+
+func test_the_pane_effect_is_gated_by_the_scope():
+	SettingsManager.cfg_effect = "aurora"
+	SettingsManager.cfg_effect_scope = UiEffects.SCOPE_PANES
+	assert_eq(UiEffects.pane_ambient_id(), "aurora", "panes-only paints the id")
+	assert_false(UiEffects.sidebar_in_scope())
+	SettingsManager.cfg_effect_scope = UiEffects.SCOPE_BOTH
+	assert_eq(UiEffects.pane_ambient_id(), "aurora")
+	assert_true(UiEffects.sidebar_in_scope())
+	SettingsManager.cfg_effect_scope = UiEffects.SCOPE_SIDEBAR
+	assert_eq(UiEffects.pane_ambient_id(), "", "sidebar-only draws no pane effect")
+	assert_true(UiEffects.sidebar_in_scope())
+	assert_false(UiEffects.panes_in_scope())
+
+func test_the_scope_is_clamped():
+	SettingsManager.cfg_effect_scope = 99
+	assert_eq(UiEffects.scope(), UiEffects.SCOPE_SIDEBAR)
+	SettingsManager.cfg_effect_scope = -4
+	assert_eq(UiEffects.scope(), UiEffects.SCOPE_PANES)
 
 func test_sanitize_reactive_keeps_known_effects_and_refuses_the_rest():
 	var clean := UiEffects.sanitize_reactive({

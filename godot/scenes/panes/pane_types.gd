@@ -546,7 +546,7 @@ const TERMINAL_SETTINGS := {
 	# shaders are code (`UiEffects`), so only the closed ids can arrive. The
 	# literal list is the `-s` entry-point-safe copy; `test_ui_effects.gd`
 	# asserts it against `UiEffects.AMBIENT_IDS`.
-	"effect": {"kind": "text", "max": 16, "values": ["crt", "grain"], "file": false, "ipc": false},
+	"effect": {"kind": "text", "max": 16, "values": ["crt", "grain", "vignette", "aurora", "dither"], "file": false, "ipc": false},
 	"effect_intensity": {"kind": "int", "min": 0, "max": 2, "file": false, "ipc": false},
 	# The Appearance tab's terminal backdrop (Flat/Gradient), broadcast by
 	# `apply_to_terminal` like the effect: a shared layout must not restyle a

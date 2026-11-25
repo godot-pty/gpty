@@ -203,3 +203,19 @@ func test_close_without_an_animation_frees_the_wrapper():
 	await wait_process_frames(1)
 	assert_false(is_instance_valid(w))
 	assert_eq(transitions.playing(), 0)
+
+func test_pin_holds_a_playing_transition_at_a_fraction():
+	SettingsManager.cfg_pane_animation = {"create": "fade"}
+	var w := Control.new()
+	w.size = Vector2(120, 90)
+	add_child_autofree(w)
+	var transitions := PaneTransitions.new()
+	assert_true(transitions.create(w, true), "the fade starts")
+	assert_eq(transitions.playing(), 1)
+	transitions.pin(0.5)
+	assert_gt(w.modulate.a, 0.05, "the pinned frame is past the start")
+	assert_lt(w.modulate.a, 0.95, "and before the end")
+	assert_eq(transitions.playing(), 1, "a pinned transition is still the playing entry")
+	transitions.finish_all()
+	assert_eq(w.modulate.a, 1.0, "finish_all snaps the final frame")
+	assert_eq(transitions.playing(), 0)

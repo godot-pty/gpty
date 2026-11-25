@@ -135,7 +135,7 @@ func test_the_shortcuts_command_opens_the_list_from_the_registry():
 	var panel: SettingsPanel = _ws._settings_panel
 	assert_not_null(panel, "the palette's Keyboard Shortcuts row builds the panel")
 	assert_true(panel.visible, "opening, never toggling")
-	assert_eq(panel._tabs.get_tab_title(panel._tabs.current_tab), "Shortcuts")
+	assert_eq(panel.current_section(), "Shortcuts")
 	var list := panel.find_child("ShortcutList", true, false) as VBoxContainer
 	assert_not_null(list)
 	# The row that led here, the terminal's own keys, and a spawn chord: three

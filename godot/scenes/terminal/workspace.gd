@@ -77,6 +77,15 @@ const SAVED_MINIMIZED := "Saved commands go to the active terminal pane, and it 
 
 var _sidebar: Sidebar
 var _sidebar_bg: ColorRect
+## The ambient effect under the sidebar's rows. It is a child of the background
+## rect before the Sidebar, so the effect is above the ground and below every
+## row; collapsed/panes-only/Off frees its layer.
+var _sidebar_effects: EffectSurface = null
+## The icons mode's section flyout and which section it currently holds. The
+## flyout is created lazily and lives above the grid/sidebar; `null` until the
+## first icons-mode section press.
+var _sidebar_flyout: SidebarFlyout = null
+var _flyout_section := ""
 ## The window's own painted ground. With window opacity below 100 % the
 ## engine's clear colour is transparent, so every pixel must be covered by the
 ## app before the opacity veil samples the canvas; an uncovered seam would
@@ -261,7 +270,7 @@ func _ready():
 		# keys go back to the window instead of raising an engine error.
 		ShortcutManager.register("app:new_" + key, shortcut, func(): _spawn_pane(key))
 	ShortcutManager.register("app:close_pane", "Ctrl+Shift+W", func(): _kill_last())
-	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _toggle_sidebar, true)
+	ShortcutManager.register("app:toggle_sidebar", "Ctrl+Shift+B", _cycle_sidebar_mode, true)
 	ShortcutManager.register("app:toggle_palette", "Ctrl+Shift+P", _toggle_palette, true)
 	ShortcutManager.register("app:focus_pane_chrome", "Ctrl+Shift+E", _focus_active_pane_chrome)
 	ShortcutManager.register("app:focus_window_chrome", "Ctrl+Shift+A", _focus_window_chrome)
@@ -340,6 +349,11 @@ func _on_settings_changed():
 				SettingsManager.apply_to_terminal(body)
 	_apply_ui_colors()
 	_sync_pane_titlebars()
+	# The System tab's Sidebar row and its reset reach the sidebar through the
+	# normal save; `set_mode` is idempotent, so an unrelated save costs nothing.
+	if _sidebar != null:
+		_sidebar.set_mode(SettingsManager.cfg_sidebar_mode)
+	_sync_sidebar_effect()
 	_apply_fps_setting()
 	_apply_window_mode()
 	_chrome.apply_opacity()
@@ -388,6 +402,8 @@ func _apply_ui_colors():
 					tbg.color = SettingsManager.cfg_title_bar_bg
 	if _status_bar:
 		_status_bar.apply_chrome_colors()
+	if _sidebar_effects != null:
+		_sync_sidebar_effect()
 
 ## The window's alpha, applied by the one veil. `WindowChrome.apply_opacity`
 ## owns the window flag and calls this; 1.0 hides the pass entirely, so an
@@ -677,6 +693,7 @@ func _spawn(shell := "") -> Control:
 	return _spawn_pane("terminal", {"shell_command": shell})
 
 func _spawn_pane(type_name: String, opts := {}, activate := true) -> Control:
+	_close_sidebar_flyout()
 	var ws := _active_workspace()
 	if ws.is_empty():
 		# Every pane belongs to a workspace: the first one the user creates
@@ -1021,6 +1038,7 @@ func request_quit() -> void:
 ## Close one pane the user asked to close. Stopping a running command and
 ## discarding unsaved work are both questions; a Cancel leaves the pane.
 func _kill(body: Control):
+	_close_sidebar_flyout()
 	var ws := _workspace_for_body(body)
 	if ws.is_empty():
 		return
@@ -1176,6 +1194,7 @@ func _kill_last():
 ## The sidebar row's one menu — the same builder the title bar's overflow button
 ## opens, so both surfaces list the same actions and mark the same current type.
 func _on_pane_menu(body: Control, source_btn: Button):
+	_close_sidebar_flyout()
 	_tm.show_pane_actions_popup(body, self, source_btn.get_screen_position() + Vector2(0, source_btn.size.y))
 
 ## The reset primitive: every pane of the active workspace goes, no asking.
@@ -1201,6 +1220,7 @@ func _reset():
 ## User-facing reset: clears the active workspace's panes AND the
 ## profile-accent state (a reset layout is no longer "that profile").
 func _do_reset():
+	_close_sidebar_flyout()
 	_ask_close_then(
 		_pane_bodies(_active_workspace()), _do_reset_now, Callable(), true,
 		_active_close_all_action(), false)
@@ -1694,6 +1714,7 @@ func _apply_empty_workspace_view():
 	_refresh_status_bar()
 
 func _switch_workspace(idx: int):
+	_close_sidebar_flyout()
 	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size() or idx == _active:
 		return
 	_save_workspaces_to_store()
@@ -1706,6 +1727,7 @@ func _switch_workspace(idx: int):
 	_apply_active_workspace_view()
 
 func _add_workspace():
+	_close_sidebar_flyout()
 	if _workspaces.size() >= MAX_WORKSPACES:
 		ToastManager.warn("Maximum %d workspaces" % MAX_WORKSPACES)
 		return
@@ -1739,6 +1761,7 @@ func _create_workspace_for_profile(profile: Dictionary) -> Dictionary:
 	return ws
 
 func _close_workspace(idx: int):
+	_close_sidebar_flyout()
 	if _workspaces.is_empty() or idx < 0 or idx >= _workspaces.size():
 		return
 	var ws: Dictionary = _workspaces[idx]
@@ -1778,6 +1801,7 @@ func _close_workspace_now(idx: int):
 ## The Workspaces title row's close-all. Every pane in every workspace is asked
 ## first, the same walk a workspace close uses; the entries name their workspace.
 func _close_all_workspaces():
+	_close_sidebar_flyout()
 	if _workspaces.is_empty():
 		return
 	_ask_close_then(
@@ -2580,6 +2604,10 @@ func _input(event):
 			overlay.close()
 			get_viewport().set_input_as_handled()
 			return
+		if _sidebar_flyout != null and _sidebar_flyout.visible:
+			_close_sidebar_flyout()
+			get_viewport().set_input_as_handled()
+			return
 		if _escape_pane_chrome():
 			get_viewport().set_input_as_handled()
 			return
@@ -2747,21 +2775,35 @@ func _saved_command_refusal() -> String:
 func _wire_sidebar_signals():
 	_sidebar.request_new_pane.connect(_spawn_pane)
 	_sidebar.request_close.connect(func(body: Control): _kill(body))
-	_sidebar.request_settings.connect(_toggle_settings)
+	# A direct rail action closes the flyout before the overlay opens, so the
+	# full-window catcher never sits over the card that just opened.
+	_sidebar.request_settings.connect(func():
+		_close_sidebar_flyout()
+		_toggle_settings())
 	_sidebar.request_reset.connect(func(): _do_reset())
 	_sidebar.request_focus.connect(func(body: Control):
 		# Same uniform semantics as clicking the pane itself (see
 		# `activate_pane`).
-		activate_pane(body)
-	)
+		_close_sidebar_flyout()
+		activate_pane(body))
 	_sidebar.request_pane_menu.connect(func(body: Control, btn: Button): _on_pane_menu(body, btn))
-	_sidebar.request_pane_settings.connect(func(body: Control): _tm._open_pane_settings(body))
-	_sidebar.toggled.connect(func(): _on_sidebar_toggled())
+	_sidebar.request_pane_settings.connect(func(body: Control):
+		_close_sidebar_flyout()
+		_tm._open_pane_settings(body))
+	_sidebar.mode_changed.connect(func(mode: int):
+		_on_sidebar_toggled()
+		if mode != SettingsManager.SIDEBAR_ICONS:
+			_close_sidebar_flyout(false)
+		if _settings_panel != null and _settings_panel.visible:
+			_settings_panel._sync_sidebar_mode_row())
+	_sidebar.request_flyout.connect(_open_sidebar_flyout)
 	_sidebar.request_profile.connect(_activate_profile)
 	_sidebar.request_profile_in_new_workspace.connect(_open_profile_in_new_workspace)
 	_sidebar.request_profile_rename.connect(_rename_profile)
 	_sidebar.request_window_mode.connect(_chrome.on_window_mode_selected)
-	_sidebar.request_search.connect(_open_active_search)
+	_sidebar.request_search.connect(func():
+		_close_sidebar_flyout()
+		_open_active_search())
 	_sidebar.request_workspace_switch.connect(_switch_workspace)
 	_sidebar.request_workspace_add.connect(_add_workspace)
 	_sidebar.request_workspace_close.connect(_close_workspace)
@@ -2782,17 +2824,76 @@ func _list():
 	var active_body: Control = _tm.last_body if (_tm.last_body and is_instance_valid(_tm.last_body)) else null
 	_sidebar.update_pane_list(panes, active_body)
 
-func _toggle_sidebar():
-	if _sidebar: _sidebar._toggle_sidebar()
+func _cycle_sidebar_mode():
+	if _sidebar:
+		_sidebar.cycle_mode()
 
 func _on_sidebar_toggled():
 	# Sync background rect to sidebar's new width
 	_sidebar_bg.offset_right = _sidebar.offset_right
-	# Show titlebar label only when sidebar is expanded
+	# Show titlebar label only when the column is the expanded one
 	if _titlebar:
 		var lbl = _titlebar.get_node_or_null("AppTitle")
-		if lbl: lbl.visible = _sidebar.offset_right > 50
+		if lbl: lbl.visible = _sidebar.offset_right > Sidebar.ICONS_WIDTH
+	_sync_sidebar_effect()
 	_apply_layout()
+
+func _ensure_sidebar_flyout() -> SidebarFlyout:
+	if _sidebar_flyout == null:
+		_sidebar_flyout = SidebarFlyout.new()
+		_sidebar_flyout.name = "SidebarFlyout"
+		add_child(_sidebar_flyout)
+		_sidebar_flyout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_sidebar_flyout.close_requested.connect(func(): _close_sidebar_flyout())
+	return _sidebar_flyout
+
+## Open the icons-mode flyout for one section. The section node is moved out of
+## the sidebar's column (the same live node, never a copy), and the card sits
+## beside the rail between the titlebar and the status bar; the grid is not
+## re-laid out.
+func _open_sidebar_flyout(section_id: String) -> void:
+	if _sidebar == null or section_id == "":
+		return
+	if _flyout_section == section_id and _sidebar_flyout != null and _sidebar_flyout.visible:
+		_close_sidebar_flyout()
+		return
+	_close_sidebar_flyout(false)
+	var node := _sidebar.take_section(section_id)
+	if node == null:
+		return
+	var flyout := _ensure_sidebar_flyout()
+	move_child(flyout, -1)
+	_flyout_section = section_id
+	var top := TITLEBAR_HEIGHT if (_titlebar != null and _titlebar.visible) else 0.0
+	var bottom := size.y - (StatusBar.HEIGHT if _status_bar != null else 0.0)
+	flyout.open_for(node, top, bottom, _sidebar.rail_button(section_id))
+
+func _close_sidebar_flyout(return_focus := true) -> void:
+	if _sidebar_flyout != null and _sidebar_flyout.visible:
+		_sidebar_flyout.close_flyout(return_focus)
+	if _flyout_section != "":
+		if _sidebar != null:
+			_sidebar.release_section(_flyout_section)
+		_flyout_section = ""
+
+## The sidebar's ambient layer: the selected effect when the scope includes the
+## sidebar and the column is not collapsed, otherwise freed. A repeat call is
+## cheap (`PaneEffects.configure` keys on id:intensity; the ground is a write).
+func _sync_sidebar_effect() -> void:
+	if _sidebar_effects == null:
+		return
+	var wanted := UiEffects.sidebar_in_scope() and _sidebar != null \
+		and _sidebar.mode() != SettingsManager.SIDEBAR_COLLAPSED
+	_sidebar_effects.visible = wanted
+	_sidebar_effects.configure(UiEffects.ambient_id() if wanted else "", UiEffects.level())
+	_sidebar_effects.set_ground(SettingsManager.cfg_sidebar_bg)
+	_sidebar_effects.set_cell_height(UiTokens.FS_SMALL * 2.0)
+
+## Freeze the sidebar effect's clock for a capture; the phase is already reset
+## by `EffectSurface.pin`.
+func pin_sidebar_effect() -> void:
+	if _sidebar_effects != null:
+		_sidebar_effects.pin(true)
 
 var _pending_waits: Dictionary = {}
 # pluginInstall reviews waiting on the dialog: id -> summary params
@@ -3596,11 +3697,25 @@ func _build_sidebar():
 	_sidebar_bg.offset_right = Sidebar.WIDTH
 	add_child(_sidebar_bg)
 
+	# The effect host is the background rect's first child: above the ColorRect's
+	# ground, below the Sidebar's rows. It owns the ambient layer for the sidebar
+	# exactly as PaneEffects owns a terminal pane's.
+	_sidebar_effects = EffectSurface.new()
+	_sidebar_effects.name = "SidebarEffects"
+	_sidebar_bg.add_child(_sidebar_effects)
+	_sidebar_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_sync_sidebar_effect()
+
 	_sidebar = Sidebar.new()
 	_sidebar.name = "Sidebar"
 	_sidebar_bg.add_child(_sidebar)
 	_sidebar.offset_right = Sidebar.WIDTH
 	_sidebar.build(_sidebar_bg)
+	# The stored mode decides the column, rail or handle; the background rect
+	# follows before the first layout pass.
+	_sidebar.set_mode(SettingsManager.cfg_sidebar_mode)
+	_sidebar_bg.offset_right = _sidebar.offset_right
+	_sync_sidebar_effect()
 
 # ═══════════════════════════════════════════════════════════════════════
 # Profiles
@@ -3844,6 +3959,7 @@ func _save_current_as_profile():
 	name_inp.text_changed.emit("")
 
 func _activate_profile(p_name: String):
+	_close_sidebar_flyout()
 	var profile := ProfileManager.find_profile(p_name)
 	if profile.is_empty():
 		return
@@ -3871,6 +3987,7 @@ func _activate_profile(p_name: String):
 ## Refused at the workspace cap before consent, so the user is not asked to
 ## approve a profile that then cannot open.
 func _open_profile_in_new_workspace(p_name: String):
+	_close_sidebar_flyout()
 	var profile := ProfileManager.find_profile(p_name)
 	if profile.is_empty():
 		return
