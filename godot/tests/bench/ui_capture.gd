@@ -493,7 +493,10 @@ const STATES := {
 		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
 		"graph_mode": "2d", "settings": {"cfg_appearance_mode": 1},
 	},
-	"concept-editor": {"size": DEFAULT_SIZE, "panes": 1, "open": "concept-editor"},
+	# The selected node's ring is the subject (`select_node`): the engine picks
+	# `panel_selected`/`titlebar_selected` from the node's own `selected`.
+	"concept-editor": {"size": DEFAULT_SIZE, "panes": 1, "open": "concept-editor",
+		"select_node": 0},
 	# The divider grab band: a 12 px handle centred on the line between two
 	# panes, highlighted on hover (row *Resizing a pane is smooth*). The pointer
 	# is left on the band, so this state must not be parked.
@@ -1226,6 +1229,18 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			if _workspace._concept_graph == null or not _workspace._concept_graph.visible:
 				_fail("Open Visual Editor did not open the concept graph")
 				return false
+			if state.has("select_node"):
+				var graph: GraphEdit = _workspace._concept_graph._graph
+				var nodes: Array[GraphNode] = []
+				for child in graph.get_children():
+					if child is GraphNode:
+						nodes.append(child)
+				var pick := int(state["select_node"])
+				if nodes.is_empty() or pick >= nodes.size():
+					_fail("the concept graph has no node %d to select" % pick)
+					return false
+				graph.set_selected(nodes[pick])
+				await _wait_frames(2)
 		"resize-hover":
 			var band: Control = _divider_band()
 			if band == null:

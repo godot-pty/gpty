@@ -2,7 +2,7 @@ extends GutTest
 # Integration test: rule priority in the visual concept editor.
 #
 # The canvas rows ARE the order rules are tried in. The trigger's title shows
-# the rank, dragging a rule rewrites it, "Fit" re-rows the canvas without
+# the rank, dragging a rule rewrites it, "Tidy" re-rows the canvas without
 # reshuffling that order, and saving stores the order the manager applies.
 #
 # Driven through the editor's real API (`open`, `_save`, `_arrange`, and
@@ -128,3 +128,152 @@ func test_the_error_line_is_a_hover_target():
 		"the tooltip carries the whole list")
 	assert_eq(lbl.mouse_filter, Control.MOUSE_FILTER_STOP,
 		"a MOUSE_FILTER_IGNORE label is never a hover target, so the list could never be read")
+
+func test_a_draft_node_lands_under_the_pointer():
+	_store_rules(["alpha"])
+	_editor.open()
+	await wait_frames(2)
+	await _size_scene()
+	_editor._graph.zoom = 0.5
+	await wait_frames(1)
+	# The engine clamps a scroll to its content, so use the one it accepted.
+	_editor._graph.scroll_offset = Vector2(200, 100)
+	await wait_frames(1)
+	var local := Vector2(300, 200)
+	var gn: GraphNode = _node("alpha#t")
+	gn.position_offset = _editor._graph_position_for(local)
+	await wait_frames(2)
+	assert_almost_eq(gn.position.x, local.x, 1.0, "x lands under the point")
+	assert_almost_eq(gn.position.y, local.y, 1.0, "y lands under the point")
+	# The toolbar spawns at the canvas centre.
+	_editor._graph.zoom = 1.0
+	await wait_frames(1)
+	_editor._graph.scroll_offset = Vector2.ZERO
+	await wait_frames(1)
+	_editor._add_node(ConceptGraphModel.KIND_TRIGGER, Vector2.ZERO, false)
+	await wait_frames(2)
+	var toolbar_id := str(_editor._nodes.back()["id"])
+	var toolbar_node: GraphNode = _node(toolbar_id)
+	# The error line may appear with the draft and shrink the canvas by a row,
+	# so the draft is near the centre, not exactly on it.
+	assert_lt(toolbar_node.position_offset.distance_to(_editor._graph.size * 0.5), 64.0,
+		"a toolbar draft lands at the canvas centre")
+
+func _visible_graph_nodes() -> Array[GraphNode]:
+	var out: Array[GraphNode] = []
+	for child in _editor._graph.get_children():
+		var gn := child as GraphNode
+		if gn != null and gn.visible:
+			out.append(gn)
+	return out
+
+func _nodes_fit() -> bool:
+	var canvas := Rect2(Vector2.ZERO, _editor._graph.size)
+	for gn in _visible_graph_nodes():
+		if not canvas.encloses(Rect2(gn.position, gn.size * gn.scale)):
+			return false
+	return true
+
+## Give the editor a laid-out canvas. `TestScene.create()` is full-rect, and
+## assigning `size` on a Control with opposite anchors is overridden (and warns
+## under GUT), so pin it top-left first.
+func _size_scene(size := Vector2(1200, 800)) -> void:
+	_scene.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	_scene.size = size
+	await wait_frames(2)
+
+func test_selecting_a_node_moves_nothing():
+	_store_rules(["alpha"])
+	_editor.open()
+	await wait_frames(2)
+	await _size_scene()
+	var gn: GraphNode = _node("alpha#t")
+	var offset := gn.position_offset
+	var screen := gn.position
+	var node_size := gn.size
+	_editor._graph.set_selected(gn)
+	await wait_frames(2)
+	assert_true(gn.selected)
+	assert_eq(gn.position_offset, offset, "selection never moves the model's layout")
+	assert_eq(gn.position, screen, "and never scrolls the canvas")
+	assert_eq(gn.size, node_size, "the ring's content margins are the panel's")
+
+func test_a_selected_node_resolves_the_accent_ring():
+	_store_rules(["alpha"])
+	_editor.open()
+	await wait_frames(2)
+	await _size_scene()
+	_scene.theme = UiTheme.build()
+	await wait_frames(1)
+	var gn: GraphNode = _node("alpha#t")
+	_editor._graph.set_selected(gn)
+	var box := gn.get_theme_stylebox("panel_selected") as StyleBoxFlat
+	assert_not_null(box, "the node resolves the selected box")
+	assert_eq(box.border_width_left, 2)
+	assert_eq(box.border_color, UiPalette.active().ACCENT)
+	var panel := gn.get_theme_stylebox("panel") as StyleBoxFlat
+	assert_eq(box.content_margin_left, panel.content_margin_left,
+		"the ring does not resize the node")
+
+func test_frame_all_fits_every_node():
+	_store_rules(["alpha"])
+	_editor.open()
+	await wait_frames(2)
+	await _size_scene()
+	_node("alpha#t").position_offset = Vector2(4000, 1200)
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	_editor._frame_all()
+	assert_not_null(_editor._canvas_tween, "the frame eases")
+	await wait_seconds(0.25)
+	assert_true(_nodes_fit(), "every node is inside the canvas after the ease")
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+
+func test_frame_all_eases_and_off_lands_on_the_same_transform():
+	_store_rules(["alpha"])
+	_editor.open()
+	await wait_frames(2)
+	await _size_scene()
+	_node("alpha#t").position_offset = Vector2(4000, 1200)
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	var start_zoom: float = _editor._graph.zoom
+	var start_scroll: Vector2 = _editor._graph.scroll_offset
+	_editor._frame_all()
+	await wait_frames(1)
+	assert_not_null(_editor._canvas_tween, "the frame eases")
+	var mid_zoom: float = _editor._graph.zoom
+	var mid_scroll: Vector2 = _editor._graph.scroll_offset
+	assert_true(not is_equal_approx(mid_zoom, start_zoom)
+		or not mid_scroll.is_equal_approx(start_scroll),
+		"the camera moved off its start")
+	await wait_seconds(0.25)
+	var end_zoom: float = _editor._graph.zoom
+	var end_scroll: Vector2 = _editor._graph.scroll_offset
+	assert_true(_nodes_fit())
+	_editor._graph.zoom = _editor._graph.zoom_min
+	await wait_frames(1)
+	SettingsManager.cfg_motion = UiMotion.OFF
+	_editor._frame_all()
+	assert_null(_editor._canvas_tween, "Off lands in one frame")
+	assert_almost_eq(_editor._graph.zoom, end_zoom, 0.001)
+	assert_true(_editor._graph.scroll_offset.is_equal_approx(end_scroll),
+		"both paths land on the same transform")
+	assert_true(_nodes_fit())
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+
+func test_an_interrupted_frame_all_leaves_one_tween():
+	_store_rules(["alpha"])
+	_editor.open()
+	await wait_frames(2)
+	await _size_scene()
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	_editor._frame_all()
+	await wait_frames(2)
+	var first: Tween = _editor._canvas_tween
+	assert_not_null(first)
+	_editor._frame_all()
+	assert_false(first.is_valid(), "the interrupted ease is killed")
+	assert_not_null(_editor._canvas_tween)
+	assert_ne(_editor._canvas_tween, first, "exactly one ease runs")
+	await wait_seconds(0.25)
+	assert_true(_nodes_fit())
+	SettingsManager.cfg_motion = UiMotion.SUBTLE

@@ -16,6 +16,12 @@ extends OverlayPanel
 
 const RULE_HINT := "Each rule: trigger → conditions → action. Connect output ports to input ports. Rules run top to bottom — drag a rule to change its priority (the number on its title)."
 
+## How much canvas the framed nodes leave free, and how long the camera takes to
+## reach them. The ease writes `scroll_offset`/`zoom` only; the model's node
+## positions never move.
+const FRAME_PAD_PX := 48.0
+const FRAME_S := 0.12
+
 var _graph: GraphEdit
 var _status_label: Label
 var _error_label: Label
@@ -41,6 +47,9 @@ var _opened_default_names: Array = []
 var _dirty := false
 var _draft_serial := 0
 var _node_serial := 0
+## The running Frame All ease, or null. One at a time: a second frame or a user
+## pan kills it before starting another.
+var _canvas_tween: Tween = null
 var _debounce: Timer
 
 
@@ -96,8 +105,8 @@ func _build_ui():
 	_graph.right_disconnects = true
 	# GraphEdit's floating chrome (zoom buttons, view menu, minimap toggle)
 	# sits at the canvas origin in viewport space and covers the first node's
-	# title at the default scroll offset; the toolbar's Fit button covers
-	# arranging, and zoom is on ctrl+wheel.
+	# title at the default scroll offset; the toolbar's Tidy and Frame All
+	# buttons cover arranging and framing, and zoom is on ctrl+wheel.
 	_graph.show_zoom_buttons = false
 	_graph.show_zoom_label = false
 	_graph.show_grid_buttons = false
@@ -109,6 +118,8 @@ func _build_ui():
 	_graph.disconnection_request.connect(_on_disconnection_request)
 	_graph.delete_nodes_request.connect(_on_delete_nodes_request)
 	_graph.popup_request.connect(_on_popup_request)
+	_graph.gui_input.connect(_on_graph_input)
+	_graph.begin_node_move.connect(_stop_canvas_tween)
 	# Panning scheme: middle-drag pans (Godot default); scroll pans too, so a
 	# wheel over the canvas does not zoom past the nodes while editing.
 	_graph.panning_scheme = GraphEdit.SCROLL_PANS
@@ -166,11 +177,16 @@ func _add_toolbar(v: VBoxContainer) -> void:
 	delete_btn.text = "Delete Selected"
 	delete_btn.pressed.connect(_delete_selected)
 	h.add_child(delete_btn)
-	var fit_btn := Button.new()
-	fit_btn.text = "Fit"
-	fit_btn.tooltip_text = "Re-arrange nodes"
-	fit_btn.pressed.connect(_arrange)
-	h.add_child(fit_btn)
+	var tidy_btn := Button.new()
+	tidy_btn.text = "Tidy"
+	tidy_btn.tooltip_text = "Re-arrange nodes in rule order"
+	tidy_btn.pressed.connect(_arrange)
+	h.add_child(tidy_btn)
+	var frame_btn := Button.new()
+	frame_btn.text = "Frame All"
+	frame_btn.tooltip_text = "Fit every node in the canvas"
+	frame_btn.pressed.connect(_frame_all)
+	h.add_child(frame_btn)
 	v.add_child(h)
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -193,6 +209,7 @@ func _initial_focus() -> Control:
 ## Save-on-close. A canvas with content errors would silently drop those
 ## rules to drafts, so it asks first; a clean canvas just saves.
 func _before_close() -> bool:
+	_stop_canvas_tween()
 	_sync_positions_from_nodes()
 	var result := _analyze()
 	if _dirty and result["errors"].size() > 0:
@@ -297,6 +314,7 @@ func _analyze_debounced() -> void:
 # ═══════════════════════════════════════════════════════════════════════
 
 func _rebuild_canvas_ui() -> void:
+	_stop_canvas_tween()
 	_sync_positions_from_nodes()
 	_analyze()
 	_refresh_ranks()
@@ -795,6 +813,7 @@ func _on_popup_request(at_position: Vector2) -> void:
 ## rules are tried in. Re-rowed in the order they already have, so this button
 ## is a tidy-up, never a reorder.
 func _arrange() -> void:
+	_stop_canvas_tween()
 	_sync_positions_from_nodes()
 	# The model speaks file coordinates (arrays); the canvas speaks Vector2.
 	var tidied := ConceptGraphModel.tidy_positions(_paths, _drafts, _positions)
@@ -807,9 +826,83 @@ func _arrange() -> void:
 	_dirty = true
 	_update_status()
 
-## GraphEdit space ← control-local point: graph positions are
-## `(point - size/2) / zoom + scroll_offset`.
+## A wheel, a press or a drag on the canvas is the user taking the camera; a
+## running Frame All yields instead of fighting the pointer.
+func _on_graph_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		_stop_canvas_tween()
+	elif event is InputEventMouseMotion and (event as InputEventMouseMotion).button_mask != 0:
+		_stop_canvas_tween()
+
+## The graph-space rect every visible node occupies; `Rect2()` when there is
+## none.
+func _content_bounds() -> Rect2:
+	var bounds := Rect2()
+	var first := true
+	for child in _graph.get_children():
+		var gn := child as GraphNode
+		if gn == null or not gn.visible:
+			continue
+		var rect := Rect2(gn.position_offset, gn.size)
+		bounds = rect if first else bounds.merge(rect)
+		first = false
+	return bounds
+
+## The zoom and scroll that put every node inside the canvas with
+## `FRAME_PAD_PX` of air. `{}` when there is nothing to frame or the canvas is
+## not laid out. GraphEdit lays a node out at `position_offset * zoom -
+## scroll_offset`, so centring the content wants
+## `scroll = center * zoom - size / 2`.
+func _frame_target() -> Dictionary:
+	var bounds := _content_bounds()
+	if bounds.size.x <= 0.0 or bounds.size.y <= 0.0:
+		return {}
+	if _graph.size.x < 1.0 or _graph.size.y < 1.0:
+		return {}
+	var room := (_graph.size - Vector2(FRAME_PAD_PX, FRAME_PAD_PX) * 2.0).max(Vector2.ONE)
+	var fit := minf(room.x / bounds.size.x, room.y / bounds.size.y)
+	var zoom := clampf(fit, _graph.zoom_min, minf(_graph.zoom_max, 1.0))
+	var scroll: Vector2 = bounds.get_center() * zoom - _graph.size * 0.5
+	return {"zoom": zoom, "scroll": scroll}
+
+## Write a frame target in one step: zoom first (its setter re-anchors the
+## scroll about the canvas centre), then the scroll that centres the content.
+func _apply_frame(target: Dictionary) -> void:
+	_graph.zoom = float(target["zoom"])
+	_graph.scroll_offset = target["scroll"] as Vector2
+
+func _stop_canvas_tween() -> void:
+	if _canvas_tween != null and _canvas_tween.is_valid():
+		_canvas_tween.kill()
+	_canvas_tween = null
+
+## Bring every node into the canvas. Off applies the target in one frame; with
+## motion the camera eases for `FRAME_S` and the last step writes exactly the
+## Off frame, so the two paths land on the same transform.
+func _frame_all() -> void:
+	var target := _frame_target()
+	if target.is_empty():
+		return
+	_stop_canvas_tween()
+	var duration := UiMotion.duration_s(FRAME_S)
+	if duration <= 0.0:
+		_apply_frame(target)
+		return
+	var from_zoom := _graph.zoom
+	var from_scroll := _graph.scroll_offset
+	var to_zoom := float(target["zoom"])
+	var to_scroll := target["scroll"] as Vector2
+	_canvas_tween = create_tween()
+	_canvas_tween.tween_method(func(t: float):
+		_graph.zoom = lerpf(from_zoom, to_zoom, t)
+		_graph.scroll_offset = from_scroll.lerp(to_scroll, t),
+		0.0, 1.0, duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	_canvas_tween.tween_callback(_apply_frame.bind(target))
+
+## GraphEdit space ← control-local point. The engine lays a node out at
+## `position_offset * zoom - scroll_offset`, so the inverse is
+## `(point + scroll_offset) / zoom`.
 func _graph_position_for(local: Vector2) -> Vector2:
 	if _graph.zoom <= 0.0:
 		return Vector2.ZERO
-	return (local - _graph.size * 0.5) / _graph.zoom + _graph.scroll_offset
+	return (local + _graph.scroll_offset) / _graph.zoom
