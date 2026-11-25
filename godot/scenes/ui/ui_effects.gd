@@ -16,17 +16,19 @@ const OFF := 0
 const SUBTLE := 1
 const FULL := 2
 const LABELS := ["Off", "Subtle", "Full"]
-const HINT := "Draws a GPU effect behind the terminal text. Off by default; text, selection and coloured cells stay opaque. A translucent window is the System tab's Window opacity, not an effect."
+const HINT := "Draws a GPU effect behind the terminal text, the sidebar ground, or both (Scope below). Off by default; text, selection and coloured cells stay opaque. A translucent window is the System tab's Window opacity, not an effect."
 ## The shader's own amplitudes are its constants; the setting scales them.
 const STRENGTH := {SUBTLE: 0.5, FULL: 1.0}
 
-## Registry order is the picker order. `budget_ms_*` are upper bounds borrowed
-## from the v0.8.6 Dynamic Shaders row's measured FBM tree (0.29 ms at 1080p,
-## 1.02 ms at 4K on an RTX 5070 Ti): this shader is strictly cheaper (one hash,
-## half resolution at 30 Hz), and `effect_bench.gd` is the harness that will
-## replace the borrowed figure when it runs on a real GPU. A static effect
-## declares 0: its layer is redrawn only when the pane changes, never per frame.
-const AMBIENT_IDS := ["crt", "grain"]
+## Registry order is the picker order. `budget_ms_*` are the declared frame
+## upper bounds: measured 2026-11-25 with `effect_bench.gd` on the RTX 5070 Ti
+## at 1920x1080 and 3840x2160 on both renderers, every delta was at or under the
+## harness's ~0.2 ms floor (raw deltas 0-26 us; the run is recorded in
+## docs/content/docs/agents/testing.md, "Effect frame cost"). 0.05 is therefore
+## the table's positive floor, not a claim the shader resolves below it. A
+## static effect declares 0: its layer is redrawn only when the pane changes,
+## never per frame.
+const AMBIENT_IDS := ["crt", "grain", "vignette", "aurora", "dither"]
 const DEFAULT_AMBIENT := "crt"
 const AMBIENT := {
 	"crt": {
@@ -43,9 +45,36 @@ const AMBIENT := {
 		"shader": preload("res://shaders/effects/grain.gdshader"),
 		"animated": true,
 		"hz": 30,
-		"budget_ms_1080p": 0.29,
-		"budget_ms_4k": 1.02,
+		"budget_ms_1080p": 0.05,
+		"budget_ms_4k": 0.05,
 		"hint": "Animated film grain in a half-resolution buffer at 30 Hz.",
+	},
+	"vignette": {
+		"label": "Vignette",
+		"shader": preload("res://shaders/effects/vignette.gdshader"),
+		"animated": false,
+		"hz": 0,
+		"budget_ms_1080p": 0.0,
+		"budget_ms_4k": 0.0,
+		"hint": "A soft edge falloff with a lifted centre, drawn once per pane change.",
+	},
+	"aurora": {
+		"label": "Aurora",
+		"shader": preload("res://shaders/effects/aurora.gdshader"),
+		"animated": true,
+		"hz": 30,
+		"budget_ms_1080p": 0.05,
+		"budget_ms_4k": 0.05,
+		"hint": "Two slow ribbons of light in a half-resolution buffer at 30 Hz.",
+	},
+	"dither": {
+		"label": "Ordered dither",
+		"shader": preload("res://shaders/effects/dither.gdshader"),
+		"animated": false,
+		"hz": 0,
+		"budget_ms_1080p": 0.0,
+		"budget_ms_4k": 0.0,
+		"hint": "A 4x4 ordered dither that breaks the ground into fine steps; drawn once per pane change.",
 	},
 }
 
@@ -95,6 +124,30 @@ static func ambient_label(id: String) -> String:
 	if not AMBIENT.has(id):
 		return id
 	return str(AMBIENT[id]["label"])
+
+## Which ground carries the ambient effect. Reactive cues are pane-local answers
+## to a concept event and are not affected by this scope.
+const SCOPE_PANES := 0
+const SCOPE_BOTH := 1
+const SCOPE_SIDEBAR := 2
+const SCOPE_LABELS := ["Panes", "Panes and sidebar", "Sidebar only"]
+const SCOPE_HINT := "Which ground carries the ambient effect. Reactive cues always fire on panes."
+const SCOPE_PANES_EXCLUDED_HINT := "Sidebar only: terminal panes draw no ambient effect until the scope includes them."
+
+static func scope() -> int:
+	return clampi(SettingsManager.cfg_effect_scope, SCOPE_PANES, SCOPE_SIDEBAR)
+
+static func panes_in_scope() -> bool:
+	return scope() != SCOPE_SIDEBAR
+
+static func sidebar_in_scope() -> bool:
+	return scope() != SCOPE_PANES
+
+## The id a pane's ground should paint: the stored effect only when panes are in
+## scope, so "sidebar only" draws no global effect in a pane even when the pane's
+## own settings name one.
+static func pane_ambient_id() -> String:
+	return ambient_id() if panes_in_scope() else ""
 
 static func reactive_label(id: String) -> String:
 	if not REACTIVE.has(id):

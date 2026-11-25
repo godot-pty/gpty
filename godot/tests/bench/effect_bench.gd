@@ -1,5 +1,5 @@
 extends SceneTree
-# Frame-cost harness for the two terminal effect shaders (`UiEffects.AMBIENT`).
+# Frame-cost harness for the terminal effect shaders (`UiEffects.AMBIENT`).
 #
 # One full-size ColorRect in an offscreen SubViewport, redrawn every measured
 # frame. The run measures a plain rect first (the baseline), then the selected
@@ -8,7 +8,8 @@ extends SceneTree
 #
 #   godot --path godot --disable-vsync -s res://tests/bench/effect_bench.gd
 #
-#   BENCH_EFFECT   crt|grain|none   (default crt; none prints the baseline only)
+#   BENCH_EFFECT   crt|grain|vignette|aurora|dither|none
+#                                  (default crt; none prints the baseline only)
 #   BENCH_SIZE     WxH              (default 3840x2160 - at 1080p the harness's
 #                                    own frame floor can hide a cheap shader;
 #                                    docs/content/docs/agents/testing.md, "A GPU
@@ -19,12 +20,15 @@ extends SceneTree
 # A real display driver is required; under `--headless` there is no redraw pass.
 # The shaders are preloaded by path because a `-s` entry point compiles before
 # the project's autoloads exist, and naming `UiEffects` would pull
-# `SettingsManager` in and fail to load. These are the same two files the table
+# `SettingsManager` in and fail to load. These are the same files the table
 # preloads; `test_ui_effects.gd` keeps the table and the pane schema aligned.
 
 const SHADERS := {
 	"crt": preload("res://shaders/effects/crt.gdshader"),
 	"grain": preload("res://shaders/effects/grain.gdshader"),
+	"vignette": preload("res://shaders/effects/vignette.gdshader"),
+	"aurora": preload("res://shaders/effects/aurora.gdshader"),
+	"dither": preload("res://shaders/effects/dither.gdshader"),
 }
 ## A terminal ground, so the measurement is the shader the UI runs.
 const GROUND := Color("#202128")
@@ -40,7 +44,7 @@ func _run():
 	if effect == "":
 		effect = "crt"
 	if effect != "none" and not SHADERS.has(effect):
-		push_error("effect_bench: unknown BENCH_EFFECT=%s (crt|grain|none)" % effect)
+		push_error("effect_bench: unknown BENCH_EFFECT=%s (crt|grain|vignette|aurora|dither|none)" % effect)
 		quit(2)
 		return
 	var size := _size_from_env()

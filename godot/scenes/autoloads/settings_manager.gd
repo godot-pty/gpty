@@ -108,6 +108,10 @@ var cfg_pane_animation_params := {}
 ## intensity is Off, so turning the intensity up restores the last choice.
 var cfg_effect := UiEffects.DEFAULT_AMBIENT
 var cfg_effect_intensity := UiEffects.OFF
+## Which ground carries the ambient effect: `UiEffects.SCOPE_PANES`,
+## `SCOPE_BOTH` or `SCOPE_SIDEBAR`. The pane broadcast is gated by it
+## (`pane_ambient_id()`); reactive cues are not.
+var cfg_effect_scope := UiEffects.SCOPE_PANES
 ## The terminal's ground: `BACKDROP_FLAT` (the scheme background exactly) or
 ## `BACKDROP_GRADIENT` (its two-stop backdrop). Pushed by `apply_to_terminal`.
 var cfg_backdrop := BACKDROP_FLAT
@@ -332,6 +336,8 @@ func load_settings():
 	cfg_effect = UiEffects.sanitize_ambient(_as_string(d, "effect", UiEffects.DEFAULT_AMBIENT))
 	cfg_effect_intensity = clampi(_as_int(d, "effect_intensity", UiEffects.OFF),
 		UiEffects.OFF, UiEffects.FULL)
+	cfg_effect_scope = clampi(_as_int(d, "effect_scope", UiEffects.SCOPE_PANES),
+		UiEffects.SCOPE_PANES, UiEffects.SCOPE_SIDEBAR)
 	cfg_reactive_effects = UiEffects.sanitize_reactive(_as_dict(d, "reactive_effects", {}))
 	cfg_backdrop = clampi(_as_int(d, "backdrop", BACKDROP_FLAT),
 		BACKDROP_FLAT, BACKDROP_GRADIENT)
@@ -363,6 +369,7 @@ func _save_settings_file():
 	d["pane_animation_params"] = cfg_pane_animation_params.duplicate(true)
 	d["effect"] = cfg_effect
 	d["effect_intensity"] = cfg_effect_intensity
+	d["effect_scope"] = cfg_effect_scope
 	d["reactive_effects"] = cfg_reactive_effects.duplicate()
 	d["backdrop"] = cfg_backdrop
 	_write_file(SETTINGS_FILE, d)
@@ -382,7 +389,7 @@ func apply_to_terminal(body: Control):
 		"font_path": cfg_font_path,
 		"font_size": cfg_font_size,
 		"terminal_padding": cfg_terminal_padding,
-		"effect": UiEffects.ambient_id(),
+		"effect": UiEffects.pane_ambient_id(),
 		"effect_intensity": UiEffects.level(),
 		"backdrop": cfg_backdrop,
 		"max_fps": cfg_max_fps,
