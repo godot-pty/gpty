@@ -58,43 +58,32 @@ func test_the_type_scale_comes_from_the_tokens():
 	assert_eq(_theme.get_font_size("font_size", "Button"), UiTokens.FS_SMALL)
 	assert_eq(_theme.get_font_size("font_size", "LineEdit"), UiTokens.FS_SMALL)
 	assert_eq(_theme.get_font_size("normal_font_size", "RichTextLabel"), UiTokens.FS_SMALL)
-	# The tab bar is one step below the theme's default: the eight Settings
-	# tabs (System … About) have to fit the card's bar at its design width, and
-	# the engine hides an overflow behind a dropdown rather than widening the
-	# bar. Both types are pinned because the engine draws the bar from the
-	# *container's* item.
-	assert_eq(_theme.get_font_size("font_size", "TabBar"), UiTokens.FS_CAPTION)
-	assert_eq(_theme.get_font_size("font_size", "TabContainer"), UiTokens.FS_CAPTION,
-		"the container's font_size is the one the internal TabBar reads")
 	assert_eq(_theme.get_font_size("title_font_size", "Window"), UiTokens.FS_CONTROL)
 
-## A `TabContainer`'s internal `TabBar` resolves the tab styleboxes and font
-## colours from the *container's* theme item, while a standalone `TabBar` reads
-## the `TabBar` entry. Both carry the same box objects, so the live Settings bar
-## cannot fall back to the engine's 20 px default box (the bug that hid
-## `Shortcuts` and `About` at the 560x340 floor).
-func test_the_tab_box_is_on_both_types():
-	for type in ["TabBar", "TabContainer"]:
-		for state in ["tab_selected", "tab_unselected", "tab_hovered"]:
-			var box := _theme.get_stylebox(state, type) as StyleBoxFlat
-			assert_not_null(box, "%s/%s is a StyleBoxFlat" % [type, state])
-			assert_eq(box.content_margin_left, float(UiTokens.SPACE_MD),
-				"%s/%s keeps the compact horizontal padding" % [type, state])
-			assert_eq(box.content_margin_top, float(UiTokens.SPACE_SM),
-				"%s/%s keeps the compact vertical padding" % [type, state])
-			var expected := UiPalette.active().SURFACE if state == "tab_selected" \
-				else UiPalette.active().SURFACE_RAISED
-			assert_eq(box.bg_color, expected, "%s/%s is the tab surface" % [type, state])
+## The Settings rail's row is a Button variation: no chrome at rest, an accent
+## wash under the pointer, and the selected-row box (2 px accent leading edge)
+## for the section the card is on.
+func test_the_rail_row_is_a_button_variation():
+	assert_eq(_theme.get_type_variation_base(UiTheme.RAIL_ROW), "Button")
+	assert_true(_theme.get_stylebox("normal", UiTheme.RAIL_ROW) is StyleBoxEmpty,
+		"a rail row has no chrome at rest")
+	var hover := _theme.get_stylebox("hover", UiTheme.RAIL_ROW) as StyleBoxFlat
+	assert_not_null(hover, "the rail row has a hover box")
+	if hover != null:
+		assert_almost_eq(hover.bg_color.a, 0.10, 0.001, "the hover is the accent wash")
+		assert_eq(hover.content_margin_left, float(UiTokens.SPACE_LG),
+			"the rail row keeps its 8 px padding")
+	var pressed := _theme.get_stylebox("pressed", UiTheme.RAIL_ROW) as StyleBoxFlat
+	assert_not_null(pressed, "the current row has the selected box")
+	if pressed != null:
+		assert_eq(pressed.border_width_left, 2, "the current row keeps the accent edge")
+		assert_eq(pressed.border_color, UiPalette.active().ACCENT)
+		assert_eq(pressed.content_margin_left, float(UiTokens.SPACE_LG))
 
 func test_text_colours_come_from_the_tokens():
 	assert_eq(_theme.get_color("font_color", "Label"), UiPalette.active().TEXT)
 	assert_eq(_theme.get_color("font_color", "Button"), UiPalette.active().TEXT)
 	assert_eq(_theme.get_color("font_placeholder_color", "LineEdit"), UiPalette.active().TEXT_MUTED)
-	for type in ["TabBar", "TabContainer"]:
-		assert_eq(_theme.get_color("font_unselected_color", type), UiPalette.active().TEXT_MUTED,
-			"%s's unselected tab reads the muted token" % type)
-		assert_eq(_theme.get_color("font_selected_color", type), UiPalette.active().TEXT,
-			"%s's selected tab reads the text token" % type)
 
 func test_a_confirmation_dialog_resolves_the_accept_dialog_panel():
 	# ConfirmationDialog defines no panel of its own; the class-chain fallback is
@@ -141,7 +130,11 @@ func test_the_light_set_builds_a_light_theme():
 	assert_eq(_theme.get_color("font_color", "Label"), UiPalette.light().TEXT)
 	var button := _theme.get_stylebox("normal", "Button") as StyleBoxFlat
 	assert_eq(button.bg_color, UiPalette.light().SURFACE_RAISED)
-	assert_eq(_theme.get_stylebox("panel", "TabContainer").bg_color, UiPalette.light().SURFACE)
+	var rail := _theme.get_stylebox("pressed", UiTheme.RAIL_ROW) as StyleBoxFlat
+	assert_not_null(rail)
+	if rail != null:
+		assert_eq(rail.border_color, UiPalette.light().ACCENT,
+			"the rail's selected edge follows the light accent")
 
 ## A role is how a widget asks for a colour it does not own: the theme answers,
 ## so a palette switch reaches it without the widget holding a token.

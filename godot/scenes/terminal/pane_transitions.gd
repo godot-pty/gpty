@@ -213,6 +213,19 @@ func playing() -> int:
 	_prune()
 	return _entries.size()
 
+## Freeze every playing transition at `progress` (0-1) for a capture. Each entry
+## carries the duration its tween was built with, so the pinned frame is the
+## shipped curve rather than a re-derived one.
+func pin(progress: float) -> void:
+	_prune()
+	var t := clampf(progress, 0.0, 1.0)
+	for w in _entries:
+		var entry: Dictionary = _entries[w]
+		var tw = entry.get("tween")
+		if tw is Tween and (tw as Tween).is_valid():
+			(tw as Tween).pause()
+			(tw as Tween).custom_step(float(entry.get("duration", 0.0)) * t)
+
 ## Draw a newly spawned wrapper with the selected create animation. `edge` is
 ## the tile's split side (`left`/`right`/`top`/`bottom`), which a slide enters
 ## from; `""` for a tile no split carved. False means the final frame is
@@ -255,7 +268,7 @@ func create(w: Control, allowed: bool, edge: String = "") -> bool:
 			tw.tween_property(w, "scale", Vector2.ONE, d) \
 				.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw.finished.connect(_finish.bind(w))
-	_entries[w] = {"tween": tw, "kind": "create", "to": to, "base_modulate": base}
+	_entries[w] = {"tween": tw, "kind": "create", "to": to, "base_modulate": base, "duration": d}
 	return true
 
 ## Play a closing wrapper's exit and free it when the transition ends. This
@@ -294,7 +307,7 @@ func close(w: Control, allowed: bool, edge: String = "") -> bool:
 			tw.tween_property(w, "position", w.position + off, d) \
 				.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 	tw.finished.connect(_finish.bind(w))
-	_entries[w] = {"tween": tw, "kind": "close", "to": Rect2(w.position, w.size), "base_modulate": base}
+	_entries[w] = {"tween": tw, "kind": "close", "to": Rect2(w.position, w.size), "base_modulate": base, "duration": d}
 	return true
 
 ## Ease two wrappers between the rects they were drawn at (`before`) and the
@@ -340,7 +353,7 @@ func swap(before: Dictionary, allowed: bool) -> bool:
 			tw.tween_property(wrapper, "size", to.size, d) \
 				.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 		tw.finished.connect(_finish.bind(wrapper))
-		_entries[wrapper] = {"tween": tw, "kind": "swap", "to": to, "base_modulate": base}
+		_entries[wrapper] = {"tween": tw, "kind": "swap", "to": to, "base_modulate": base, "duration": d}
 		started = true
 	return started
 

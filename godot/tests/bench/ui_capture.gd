@@ -898,33 +898,31 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			if _workspace._settings_panel == null or not _workspace._settings_panel.visible:
 				_fail("clicking Settings did not open the Settings panel")
 				return false
-			# `"tab": "<name>"` opens the panel on that tab instead of System.
-			# The Appearance tab is where the release's own controls live (the
+			# `"tab": "<name>"` opens the panel on that section instead of System.
+			# The Appearance section is where the release's own controls live (the
 			# appearance mode and the UI scale), so a capture of the theme that
-			# cannot show them would be a picture of a card.
+			# cannot show them would be a picture of a card. The `true` puts the
+			# focus ring on the selected rail row, matching the image.
 			if state.has("tab"):
-				var tab_title := str(state["tab"])
-				var tab_body: Node = _workspace._settings_panel.find_child(tab_title, true, false)
-				if tab_body == null:
-					_fail("the Settings panel has no '%s' tab" % tab_title)
+				var section_title := str(state["tab"])
+				if not _workspace._settings_panel.show_section(section_title, true):
+					_fail("the Settings panel has no '%s' section" % section_title)
 					return false
-				var tab_container := tab_body.get_parent() as TabContainer
-				if tab_container == null:
-					_fail("the '%s' tab is not inside a TabContainer" % tab_title)
-					return false
-				tab_container.current_tab = tab_container.get_tab_idx_from_control(tab_body as Control)
 				await _wait_frames(2)
 				# `"scroll_to": "<node name>"` puts a section below the card's
-				# fold at the top of the tab: a control scrolled out of the
+				# fold at the top of the section: a control scrolled out of the
 				# card is still real, and a capture that cannot reach it
 				# proves nothing about it.
-				if state.has("scroll_to") and tab_body is ScrollContainer:
+				if state.has("scroll_to"):
 					var target := _workspace._settings_panel.find_child(
 						str(state["scroll_to"]), true, false) as Control
 					if target == null:
 						_fail("the Settings panel has no '%s' control" % str(state["scroll_to"]))
 						return false
-					var sc := tab_body as ScrollContainer
+					var sc: ScrollContainer = _workspace._settings_panel.section_scroll(section_title)
+					if sc == null:
+						_fail("the '%s' section has no scroll container" % section_title)
+						return false
 					# The target's own `position` is relative to its parent row
 					# (a picker inside an HBox is at y=0), so scroll by its
 					# global offset inside the scroller plus the current scroll:
@@ -1057,15 +1055,9 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			if panel == null or not panel.visible:
 				_fail("clicking Settings did not open the Settings panel")
 				return false
-			var tab_scroll: Node = panel.find_child("Concepts", true, false)
-			if tab_scroll == null:
-				_fail("the Settings panel has no Concepts tab")
+			if not panel.show_section("Concepts", true):
+				_fail("the Settings panel has no Concepts section")
 				return false
-			var tabs := tab_scroll.get_parent() as TabContainer
-			if tabs == null:
-				_fail("the Concepts tab is not inside a TabContainer")
-				return false
-			tabs.current_tab = tabs.get_tab_idx_from_control(tab_scroll as Control)
 			await _wait_frames(2)
 			var editor_button := _button_with_label(panel, "Open Visual Editor")
 			if editor_button == null:

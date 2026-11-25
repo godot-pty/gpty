@@ -49,8 +49,6 @@ const ARRIVAL_RISE_PX := 4.0
 ## A created row's stagger. At most three rows stagger; a restore never does.
 const ARRIVAL_STAGGER_MS := 30.0
 const ARRIVAL_MAX_STAGGERED := 3
-## A Settings tab is an arrival too, but a shorter one: the card is already open.
-const TAB_ARRIVAL_MS := 80.0
 const ARRIVAL_META := "gpty_arrival"
 
 ## `declared_s` when any motion is on, zero at Off: the conversion for a

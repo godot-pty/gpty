@@ -6,18 +6,58 @@ signal request_graph_editor
 
 var _debounce_timer: Timer = null
 var _workspace: Control
-## The card's one size: wide enough that all eight tabs fit the bar (the row
-## needs 497 px and the card's margins take 32), and tall enough that the
-## Terminal tab's form is fully visible. Every tab gets this size, so a tab
+## The card's one size: the rail, the content column and the 232 px preview
+## column at their design widths. Every section gets this size, so a section
 ## switch never re-lays the card out; only a smaller window shrinks it
-## (`fit_card`), down to the window less `CARD_EDGE` per side. Where the window
-## has room the card therefore never drops below 560x400 px.
-const CARD_SIZE := Vector2(720, 640)
+## (`fit_card`), down to the window less `CARD_EDGE` per side.
+const CARD_SIZE := Vector2(960, 640)
+## The eight sections, in rail order. The ids are stable; `SECTION_TITLES` is
+## the one display-name map the rail, the header, the deep links and the
+## capture harness share.
+const SETTINGS_SECTIONS := ["system", "terminal", "appearance", "reasoning",
+	"concepts", "commands", "shortcuts", "about"]
+const SECTION_TITLES := {
+	"system": "System", "terminal": "Terminal", "appearance": "Appearance",
+	"reasoning": "Reasoning", "concepts": "Concepts", "commands": "Commands",
+	"shortcuts": "Shortcuts", "about": "About",
+}
+## The sections that show the live sample. The sample is hidden and paused on
+## every other section.
+const PREVIEW_SECTIONS := ["appearance"]
+const RAIL_WIDTH := 148.0
+const RAIL_NARROW_WIDTH := 96.0
+const RAIL_NARROW_BELOW := 760.0
+const PREVIEW_WIDTH := 232.0
+## Below this card width the preview column is hidden rather than squeezing the
+## form: the 800x500 window clamps the card to 784 and lands here.
+const PREVIEW_MIN_CARD_WIDTH := 800.0
 ## The card itself, so a resize and every dialog can read its real width - below
 ## the design width plus the card edge the clamp makes it narrower.
 var _card: Panel = null
-## The disk-usage row in the Terminal tab; refreshed whenever the panel opens,
-## because the panel outlives a single visit and scrollback keeps growing.
+## The rail's scroll/box and one button per section, by id.
+var _rail_scroll: ScrollContainer = null
+var _rail: VBoxContainer = null
+var _rail_buttons := {}
+## The content host and one record per section:
+## {host, header, reset_host, body, content, fill}.
+var _content_host: Control = null
+var _sections := {}
+## The live sample (Appearance only) and the buttons that drive it. The buttons
+## live in the sections, not the preview, so every one is registered here to be
+## disabled when the column is hidden.
+var _preview: SettingsPreview = null
+var _preview_actions: Array[Button] = []
+## Which section the rail shows and the back/forward trail over visited
+## sections. The panel outlives a visit, so both survive a close.
+var _current_section := "system"
+var _history := NavHistory.new("system")
+var _back_btn: Button = null
+var _forward_btn: Button = null
+## Set by `gui_input` when a rail row is activated from the keyboard, so Enter
+## also enters the content while a mouse press leaves the keyboard on the rail.
+var _rail_press_by_key := false
+## The disk-usage row in the Terminal section; refreshed whenever the panel
+## opens, because the panel outlives a single visit and scrollback keeps growing.
 var _history_size_label: Label = null
 ## The scale row's "shown at N %" hint; see `_refresh_ui_scale_hint`.
 var _ui_scale_hint: Label = null
@@ -28,13 +68,9 @@ var _color_rows: Array[Dictionary] = []
 ## How the row reads the store size. Overridable so a test can pin a number:
 ## the real store grows while the suite runs (every pane has a writer thread).
 var _history_stats_provider := Callable()
-## The tab bar and the Commands tab, kept so `open_commands()` can land on the
-## right one whatever order the tabs are built in.
-var _tabs: TabContainer = null
-var _command_tab: VBoxContainer = null
 var _command_list: ItemList = null
 var _command_empty: Label = null
-## The Commands tab's row buttons by role ("add", "edit", "delete", "up",
+## The Commands section's row buttons by role ("add", "edit", "delete", "up",
 ## "down"), so `_sync_command_buttons` enables them by what the selection is.
 var _command_actions := {}
 ## The Motion section: the master picker, one picker per transition kind, and
@@ -57,29 +93,79 @@ func _ready():
 	_build_ui()
 
 ## The window can have changed size while the panel was hidden, so the clamp is
-## recomputed on the way in as well as on a resize while it is open.
+## recomputed on the way in as well as on a resize while it is open, and the
+## rail/preview decide their narrow/visible forms from the fitted card.
 func _before_open() -> void:
 	_fit_settings_card()
+	_apply_rail_width()
+	_apply_preview_visibility()
 
-## Give the card its one size, clamped to the window. There is no per-tab
-## measurement any more: the card is the same on all eight tabs, so a tab
-## switch performs no layout at all and the header and tab bar stay put.
-## Called on open and on a resize while open.
+## Give the card its one size, clamped to the window. Every section gets this
+## size, so a section switch performs no layout and the header and rail stay
+## put. Called on open and on a resize while open.
 func _fit_settings_card() -> void:
 	if _card == null:
 		return
 	fit_card(_card, CARD_SIZE)
 
-func _notification(what: int):
-	if not visible:
+## What the rail's narrow mode compares: the clamped target, not the card's
+## last laid-out rect (a fit just called changes the target before the rect
+## follows).
+func _card_target_width() -> float:
+	if _card != null and _card.custom_minimum_size.x > 0.0:
+		return _card.custom_minimum_size.x
+	return CARD_SIZE.x
+
+func _apply_rail_width() -> void:
+	if _rail_scroll == null:
 		return
+	_rail_scroll.custom_minimum_size.x = (
+		RAIL_NARROW_WIDTH if _card_target_width() < RAIL_NARROW_BELOW else RAIL_WIDTH)
+
+## The preview column is a design-width surface: show it on Appearance when the
+## card is wide enough, hide and pause it otherwise. The buttons that drive it
+## live in the sections, so they are disabled rather than left dead.
+func _apply_preview_visibility() -> void:
+	var show := PREVIEW_SECTIONS.has(_current_section) \
+		and _card_target_width() >= PREVIEW_MIN_CARD_WIDTH
+	if _preview != null:
+		_preview.visible = show
+		_preview.set_available(show)
+		if not show:
+			_preview.pause()
+	for btn in _preview_actions:
+		if not is_instance_valid(btn):
+			continue
+		btn.disabled = not show
+		if not show:
+			btn.tooltip_text = "Widen the window to preview"
+		else:
+			btn.tooltip_text = str(btn.get_meta("preview_tooltip", btn.tooltip_text))
+	_preview_actions = _preview_actions.filter(func(b): return is_instance_valid(b))
+
+func _register_preview_action(btn: Button) -> void:
+	if btn == null or _preview_actions.has(btn):
+		return
+	btn.set_meta("preview_tooltip", btn.tooltip_text)
+	_preview_actions.append(btn)
+	var show := PREVIEW_SECTIONS.has(_current_section) \
+		and _card_target_width() >= PREVIEW_MIN_CARD_WIDTH
+	btn.disabled = not show
+	if not show:
+		btn.tooltip_text = "Widen the window to preview"
+
+func _notification(what: int):
 	if what == NOTIFICATION_VISIBILITY_CHANGED:
+		if not visible:
+			if _preview != null:
+				_preview.pause()
+			return
 		_refresh_history_size()
 		_refresh_ui_scale_hint()
 		# The list outlives a visit: a command saved from the palette while the
 		# panel was closed must be there on the next open.
 		_refresh_command_list()
-		# The Shortcuts tab's chords are read from the registry, which a
+		# The Shortcuts section's chords are read from the registry, which a
 		# workspace fills after this panel may already exist: re-read on every
 		# show so the table cannot print a binding from before that happened.
 		_refresh_shortcut_list()
@@ -89,12 +175,144 @@ func _notification(what: int):
 		_sync_effect_rows()
 		_sync_reactive_rows()
 		_sync_backdrop_row()
+		_render_section(_current_section)
 	elif what == NOTIFICATION_RESIZED:
 		# The window (and with it the layout space) changed, so the scale it can
 		# show may have moved while the panel is open - and the card that fitted
 		# the old window may not fit this one.
 		_refresh_ui_scale_hint()
 		_fit_settings_card()
+		_apply_rail_width()
+		_apply_preview_visibility()
+
+## Opening the card lands on the rail's current row, so Up/Down work
+## immediately; the title row's Back/Forward/Close are one Tab away.
+func _initial_focus() -> Control:
+	var btn: Button = _rail_buttons.get(_current_section)
+	if btn == null:
+		btn = _rail_buttons.get("system")
+	return btn
+
+## A section id from its stable id or its display title, case-insensitive; ""
+## for an unknown name (a deep link or a capture state that drifted).
+func _section_id(name: String) -> String:
+	var key := name.strip_edges().to_lower()
+	if SETTINGS_SECTIONS.has(key):
+		return key
+	for id in SECTION_TITLES:
+		if str(SECTION_TITLES[id]).to_lower() == key:
+			return id
+	return ""
+
+## The display title of the section the rail is on (what the tests and the
+## capture harness read; the ids stay machine-facing).
+func current_section() -> String:
+	return str(SECTION_TITLES.get(_current_section, ""))
+
+func section_content(name: String) -> Control:
+	var id := _section_id(name)
+	if id == "":
+		return null
+	return _sections[id]["content"] as Control
+
+## The section's own scroll, or null for the fill About section (its document
+## viewer owns the scrollbar).
+func section_scroll(name: String) -> ScrollContainer:
+	var id := _section_id(name)
+	if id == "":
+		return null
+	return _sections[id]["body"] as ScrollContainer
+
+## Show a section by id or title. Pushes one history step only when the
+## section changes; `focus_rail` is the palette-deep-link path (the keyboard
+## lands on the rail row it selected), while a manual pick and Back/Forward
+## leave the caller's focus alone.
+func show_section(name: String, focus_rail := false) -> bool:
+	var id := _section_id(name)
+	if id == "":
+		return false
+	if id != _current_section:
+		_history.push(id)
+	_render_section(id)
+	if focus_rail:
+		var btn: Button = _rail_buttons.get(id)
+		if btn != null:
+			btn.grab_focus()
+	return true
+
+func _render_section(id: String) -> void:
+	_current_section = id
+	for key in _sections:
+		(_sections[key]["host"] as Control).visible = key == id
+	for key in _rail_buttons:
+		var btn: Button = _rail_buttons[key]
+		btn.button_pressed = key == id
+	if _back_btn != null:
+		_back_btn.disabled = not _history.can_back()
+	if _forward_btn != null:
+		_forward_btn.disabled = not _history.can_forward()
+	_apply_rail_width()
+	_apply_preview_visibility()
+	if id == "appearance" and _preview != null:
+		_preview.refresh()
+
+func _go_back() -> void:
+	if not _history.can_back():
+		return
+	_render_section(_history.back())
+
+func _go_forward() -> void:
+	if not _history.can_forward():
+		return
+	_render_section(_history.forward())
+
+func _rail_index() -> int:
+	return maxi(SETTINGS_SECTIONS.find(_current_section), 0)
+
+func _rail_step(delta: int) -> void:
+	var next := clampi(_rail_index() + delta, 0, SETTINGS_SECTIONS.size() - 1)
+	if next == _rail_index():
+		return
+	var id := str(SETTINGS_SECTIONS[next])
+	show_section(id)
+	var btn: Button = _rail_buttons.get(id)
+	if btn != null:
+		btn.grab_focus()
+
+func _on_rail_pressed(id: String) -> void:
+	var by_key := _rail_press_by_key
+	_rail_press_by_key = false
+	show_section(id)
+	if by_key:
+		var content := section_content(id)
+		var first := KeyboardFocus.first_reachable(content) if content != null else null
+		if first != null:
+			first.grab_focus()
+
+func _on_rail_gui_input(event: InputEvent, _id: String) -> void:
+	if not (event is InputEventKey) or not event.pressed or event.echo:
+		return
+	if event.is_action_pressed("ui_up"):
+		_rail_step(-1)
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("ui_down"):
+		_rail_step(1)
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("ui_accept"):
+		# Do not consume it: the Button's own accept handling emits `pressed`,
+		# which runs `_on_rail_pressed` with this flag set.
+		_rail_press_by_key = true
+
+func _refresh_preview() -> void:
+	if _preview == null:
+		return
+	if not visible or _current_section != "appearance":
+		return
+	_preview.refresh()
+	_apply_preview_visibility()
+
+func _on_settings_changed() -> void:
+	_refresh_preview()
 
 func _build_ui():
 	var cc = CenterContainer.new()
@@ -103,13 +321,11 @@ func _build_ui():
 
 	var bg = Panel.new()
 	bg.name = "Card"
-	# The design size: wide enough that all eight tabs fit the TabContainer
-	# without clipping (the tab row needs 497 px and the card's margins take
-	# 32, so the design bar's 688 px has ample room). It is clamped to the
-	# window on every open and on a resize while open
-	# (`fit_card`), never here - at construction the overlay's own rect may not
-	# be laid out yet, and a transient size would pin a card far smaller than the
-	# design for the rest of the panel's life.
+	# The design size: the rail, content and preview columns at their measured
+	# widths. It is clamped to the window on every open and on a resize while
+	# open (`fit_card`), never here - at construction the overlay's own rect may
+	# not be laid out yet, and a transient size would pin a card far smaller than
+	# the design for the rest of the panel's life.
 	_card = bg
 	_card.theme_type_variation = UiTheme.FLOATING_PANEL
 	_card.custom_minimum_size = CARD_SIZE
@@ -127,18 +343,66 @@ func _build_ui():
 	_add_settings_header(v)
 	v.add_child(HSeparator.new())
 
-	var tabs = TabContainer.new()
-	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(tabs)
-	_tabs = tabs
+	var main = HBoxContainer.new()
+	main.name = "MainRow"
+	main.add_theme_constant_override("separation", UiTokens.SPACE_LG)
+	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(main)
 
-	# Tab 1: System
-	var t_sys = _create_tab(tabs, "System")
+	var rail_sc = ScrollContainer.new()
+	rail_sc.name = "RailScroll"
+	rail_sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	rail_sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	rail_sc.custom_minimum_size.x = RAIL_WIDTH
+	main.add_child(rail_sc)
+	_rail_scroll = rail_sc
+
+	_rail = VBoxContainer.new()
+	_rail.name = "RailList"
+	_rail.add_theme_constant_override("separation", UiTokens.SPACE_XS)
+	_rail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rail_sc.add_child(_rail)
+
+	var group := ButtonGroup.new()
+	group.allow_unpress = false
+	for id in SETTINGS_SECTIONS:
+		var title: String = SECTION_TITLES[id]
+		var btn := Button.new()
+		btn.name = "%sSectionBtn" % title
+		btn.text = title
+		btn.toggle_mode = true
+		btn.button_group = group
+		btn.theme_type_variation = UiTheme.RAIL_ROW
+		btn.custom_minimum_size.y = 30
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.clip_text = true
+		btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		btn.accessibility_name = title
+		btn.tooltip_text = title
+		btn.pressed.connect(_on_rail_pressed.bind(id))
+		btn.gui_input.connect(_on_rail_gui_input.bind(id))
+		_rail.add_child(btn)
+		_rail_buttons[id] = btn
+
+	_content_host = Control.new()
+	_content_host.name = "ContentHost"
+	_content_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main.add_child(_content_host)
+
+	_preview = SettingsPreview.new()
+	_preview.name = "Preview"
+	_preview.custom_minimum_size.x = PREVIEW_WIDTH
+	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main.add_child(_preview)
+
+	# Section 1: System
+	var t_sys = _create_section("system")
 	var fps_opt = _add_fps_control(t_sys)
 	var win_mode_opt = _add_window_mode_control(t_sys)
 	var opacity_opt = _add_window_opacity_control(t_sys)
 	var check_updates_cb = _add_check_updates_control(t_sys)
-	_add_tab_reset(t_sys, func():
+	_add_section_reset("system", func():
 		SettingsManager.cfg_max_fps = 0
 		SettingsManager.cfg_window_mode = 0
 		SettingsManager.cfg_window_opacity = SettingsManager.OPACITY_DEFAULT
@@ -151,8 +415,8 @@ func _build_ui():
 		SettingsManager.save_settings()
 	)
 
-	# Tab 2: Terminal
-	var t_term = _create_tab(tabs, "Terminal")
+	# Section 2: Terminal
+	var t_term = _create_section("terminal")
 	var shape_opt = _add_cursor_control(t_term)
 	var blink_cb = _add_blink_control(t_term)
 	var blink_spin = _add_blink_speed_control(t_term)
@@ -165,7 +429,7 @@ func _build_ui():
 	t_term.add_child(HSeparator.new())
 	var shell_le = _add_shell_control(t_term)
 	var env_te = _add_env_control(t_term)
-	_add_tab_reset(t_term, func():
+	_add_section_reset("terminal", func():
 		SettingsManager.cfg_cursor_shape = 0
 		SettingsManager.cfg_cursor_blink = true
 		SettingsManager.cfg_cursor_blink_speed = 0.5
@@ -191,8 +455,8 @@ func _build_ui():
 		SettingsManager.save_settings()
 	)
 
-	# Tab 3: Appearance
-	var t_app = _create_tab(tabs, "Appearance")
+	# Section 3: Appearance
+	var t_app = _create_section("appearance")
 	var appearance_opt = _add_appearance_control(t_app)
 	var font_btn = _add_font_picker(t_app)
 	var fs_spin = _add_font_control(t_app)
@@ -211,7 +475,7 @@ func _build_ui():
 	_add_backdrop_control(t_app)
 	t_app.add_child(HSeparator.new())
 	# The pane titlebar on/off sits with the chrome it controls — next to the
-	# "Title bar" colour and the border — instead of hiding in the System tab,
+	# "Title bar" colour and the border — instead of hiding in the System section,
 	# where nobody looking for a titlebar setting would find it. It is a global
 	# setting, so it is not in the per-pane settings popup.
 	var show_tb_cb = _add_show_titlebar_control(t_app)
@@ -219,7 +483,7 @@ func _build_ui():
 	t_app.add_child(HSeparator.new())
 	var motion_reset = _add_motion_section(t_app)
 	var effects_reset = _add_effects_section(t_app)
-	_add_tab_reset(t_app, func():
+	_add_section_reset("appearance", func():
 		SettingsManager.cfg_font_path = "res://fonts/DejaVuSansMono.ttf"
 		SettingsManager.cfg_font_size = 14
 		SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
@@ -248,15 +512,16 @@ func _build_ui():
 		_sync_backdrop_row()
 		SettingsManager.cfg_effect = UiEffects.DEFAULT_AMBIENT
 		SettingsManager.cfg_effect_intensity = UiEffects.OFF
+		SettingsManager.cfg_effect_scope = UiEffects.SCOPE_PANES
 		SettingsManager.cfg_reactive_effects = {}
 		effects_reset.call()
 		SettingsManager.save_settings()
 	)
 
-	# Tab 4: Reasoning
-	var t_reas = _create_tab(tabs, "Reasoning")
+	# Section 4: Reasoning
+	var t_reas = _create_section("reasoning")
 	var reason_spins = _add_reasoning_control(t_reas)
-	_add_tab_reset(t_reas, func():
+	_add_section_reset("reasoning", func():
 		SettingsManager.cfg_reasoning_max_turns = 16
 		SettingsManager.cfg_reasoning_max_turn_bytes = 65536
 		reason_spins[0].value = 16
@@ -264,27 +529,21 @@ func _build_ui():
 		SettingsManager.save_settings()
 	)
 
-	# Tab 5: Concepts
-	var t_con = _create_tab(tabs, "Concepts")
+	# Section 5: Concepts
+	var t_con = _create_section("concepts")
 	_add_concept_section(t_con)
 
-	# Tab 6: Commands — before About, so the shipped tabs keep their positions
-	var t_cmd = _create_tab(tabs, "Commands")
-	_command_tab = t_cmd
+	# Section 6: Commands — before About, so the shipped sections keep their order
+	var t_cmd = _create_section("commands")
 	_add_command_section(t_cmd)
 
-	# Tab 7: Shortcuts — the registry table lives on its own tab now
-	var t_keys = _create_tab(tabs, "Shortcuts")
-	_shortcuts_tab = t_keys
+	# Section 7: Shortcuts — the registry table lives on its own section now
+	var t_keys = _create_section("shortcuts")
 	_add_shortcut_section(t_keys)
 
-	# Tab 8: About — the bundled README and the documents it links. A fill tab:
-	# the Markdown body owns its scrollbar, inside the one card size.
-	#
-	# The bar keeps all eight tabs on one row at the 560x340 floor: the card
-	# clamps to 544 px, the bar to 512, and the tabs need 497
-	# (`test_all_eight_tabs_fit_the_560x340_floor`).
-	var t_about = _create_fill_tab(tabs, "About")
+	# Section 8: About — the bundled README and the documents it links. A fill
+	# section: the Markdown body owns its scrollbar inside the one card size.
+	var t_about = _create_section("about", true)
 	_add_about_section(t_about)
 
 	v.add_child(HSeparator.new())
@@ -325,59 +584,116 @@ func _build_ui():
 	reason_spins[1].value_changed.connect(func(_v): _debounce_timer.start())
 	show_tb_cb.toggled.connect(func(_pressed): _debounce_timer.start())
 	check_updates_cb.toggled.connect(func(_pressed): _debounce_timer.start())
-	SettingsManager.appearance_changed.connect(func(_dark: bool): _sync_color_rows())
-	# Connected after the tabs exist: the initial current tab emits nothing, and
-	# every later switch (a click, `open_commands`, `open_shortcuts`) is one
-	# arrival on the incoming section.
-	tabs.tab_changed.connect(_on_tab_changed)
+	SettingsManager.appearance_changed.connect(func(_dark: bool):
+		_sync_color_rows()
+		_refresh_preview())
+	SettingsManager.settings_changed.connect(_on_settings_changed)
+	# Build the rail's pressed state and the first section once every section
+	# exists; the initial selection is System and emits nothing.
+	_render_section("system")
 
-## An arrival, not a slide: the card is already on screen, so only the section
-## that replaced the old one fades in (80 ms; one frame at Off).
-func _on_tab_changed(_tab: int) -> void:
-	var control := _tabs.get_current_tab_control()
-	if control != null:
-		UiMotion.arrive(control, UiMotion.TAB_ARRIVAL_MS)
+## One section shell: a host named the display title, the sticky header (title
+## and reset slot), then either a scroll body with 16 px inner padding or the
+## About fill body whose document viewer owns the scrollbar. The returned VBox
+## is the content column the existing `_add_*` builders fill.
+func _create_section(id: String, fill := false) -> VBoxContainer:
+	var title: String = SECTION_TITLES[id]
+	var host := VBoxContainer.new()
+	host.name = title
+	host.add_theme_constant_override("separation", UiTokens.SPACE_SM)
+	host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	host.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_content_host.add_child(host)
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-func _create_tab(tabs: TabContainer, title: String) -> VBoxContainer:
-	var sc = ScrollContainer.new()
-	sc.name = title
-	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	tabs.add_child(sc)
+	var header := HBoxContainer.new()
+	header.name = "%sHeader" % title
+	var lbl := Label.new()
+	lbl.text = title
+	lbl.add_theme_font_size_override("font_size", UiTokens.FS_HEADING)
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(lbl)
+	var reset_host := HBoxContainer.new()
+	reset_host.name = "%sResetHost" % title
+	header.add_child(reset_host)
+	host.add_child(header)
 
-	var mc = MarginContainer.new()
-	UiTheme.margins(mc, UiTokens.SPACE_LG)
-	mc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mc.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	sc.add_child(mc)
+	var body: Control
+	var content: VBoxContainer
+	if fill:
+		var m := MarginContainer.new()
+		m.name = "%sBody" % title
+		UiTheme.margins(m, UiTokens.SPACE_XXL)
+		m.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		m.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		host.add_child(m)
+		content = VBoxContainer.new()
+		content.name = "%sContent" % title
+		content.add_theme_constant_override("separation", UiTokens.SPACE_LG)
+		content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		m.add_child(content)
+		body = m
+	else:
+		var sc := ScrollContainer.new()
+		sc.name = "%sScroll" % title
+		sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		sc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		host.add_child(sc)
+		var m := MarginContainer.new()
+		UiTheme.margins(m, UiTokens.SPACE_XXL)
+		m.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sc.add_child(m)
+		content = VBoxContainer.new()
+		content.name = "%sContent" % title
+		content.add_theme_constant_override("separation", UiTokens.SPACE_LG)
+		content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		m.add_child(content)
+		body = sc
 
-	var v = VBoxContainer.new()
-	v.add_theme_constant_override("separation", UiTokens.SPACE_LG)
-	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mc.add_child(v)
-	return v
+	_sections[id] = {
+		"host": host, "header": header, "reset_host": reset_host,
+		"body": body, "content": content, "fill": fill,
+	}
+	host.visible = false
+	return content
 
-## A tab whose content fills the card instead of scrolling as a column. The
-## About tab's document viewer owns its own scrollbar; a ScrollContainer here
-## would give the label one line of height and scroll the whole page.
-func _create_fill_tab(tabs: TabContainer, title: String) -> VBoxContainer:
-	var mc = MarginContainer.new()
-	mc.name = title
-	UiTheme.margins(mc, UiTokens.SPACE_LG)
-	mc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mc.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	tabs.add_child(mc)
-
-	var v = VBoxContainer.new()
-	v.add_theme_constant_override("separation", UiTokens.SPACE_LG)
-	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	mc.add_child(v)
-	return v
+## Put a section's per-section Reset in its sticky header. The button is not in
+## the scroll, so it stays reachable while the form is scrolled; sections with
+## no reset (Commands, Shortcuts, About) simply have none.
+func _add_section_reset(id: String, reset_func: Callable) -> void:
+	var sec: Dictionary = _sections.get(id, {})
+	if sec.is_empty():
+		return
+	var title: String = SECTION_TITLES[id]
+	var btn := Button.new()
+	btn.name = "%sResetBtn" % title
+	btn.text = "Reset to defaults"
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	btn.tooltip_text = "Reset the %s section to its defaults" % title
+	btn.pressed.connect(reset_func)
+	(sec["reset_host"] as HBoxContainer).add_child(btn)
 
 func _add_settings_header(v: VBoxContainer):
 	var h = HBoxContainer.new()
 	var t = Label.new(); t.text = "Settings"; t.add_theme_font_size_override("font_size", UiTokens.FS_TITLE)
 	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL; h.add_child(t)
+	_back_btn = Button.new()
+	_back_btn.name = "SettingsBackBtn"
+	Icons.icon_button(_back_btn, Icons.COLLAPSE, "Back to the previous settings section")
+	_back_btn.tooltip_text = "Back to the previous settings section"
+	_back_btn.disabled = true
+	_back_btn.pressed.connect(_go_back)
+	h.add_child(_back_btn)
+	_forward_btn = Button.new()
+	_forward_btn.name = "SettingsForwardBtn"
+	Icons.icon_button(_forward_btn, Icons.EXPAND, "Forward to the next settings section")
+	_forward_btn.tooltip_text = "Forward to the next settings section"
+	_forward_btn.disabled = true
+	_forward_btn.pressed.connect(_go_forward)
+	h.add_child(_forward_btn)
 	var x = Button.new()
 	Icons.icon_button(x, Icons.CLOSE, "Close settings")
 	x.pressed.connect(close); h.add_child(x)
@@ -1269,16 +1585,6 @@ func _reset_colors(rows: Array) -> void:
 		ColorSwatch.sync(row["label_node"] as Label, btn)
 		(row["set"] as Callable).call(c)
 
-## Per-tab reset: each tab's button restores ONLY that tab's settings.
-## The button spans the tab's full width with centered text.
-func _add_tab_reset(v: VBoxContainer, reset_func: Callable):
-	v.add_child(HSeparator.new())
-	var btn = Button.new(); btn.text = "Reset tab to defaults"
-	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn.alignment = HORIZONTAL_ALIGNMENT_CENTER
-	btn.pressed.connect(reset_func)
-	v.add_child(btn)
-
 func _add_shell_control(v: VBoxContainer) -> LineEdit:
 	var h = HBoxContainer.new()
 	h.add_child(_lbl("Shell:"))
@@ -1313,11 +1619,10 @@ var _version_label: Label
 var _protocol_label: Label
 var _concept_list: VBoxContainer
 var _concept_terminal: GptyTerminal  # any terminal for global concept FFI
-## The Shortcuts tab, kept so `open_shortcuts()` can land on it; and its table,
-## which `_refresh_shortcut_list()` rebuilds on each open.
-var _shortcuts_tab: VBoxContainer = null
+## The Shortcuts section's table, which `_refresh_shortcut_list()` rebuilds on
+## each open.
 var _shortcut_list: VBoxContainer = null
-## The About tab's document viewer; its README loads on the first visit.
+## The About section's document viewer; its README loads on the first visit.
 var _docs_viewer: DocsViewer = null
 ## The aligned chord column's floor: the widest chord in the list is
 ## "Ctrl+PageDown".
@@ -1653,36 +1958,24 @@ func _delete_concept(idx: int):
 
 # ── Commands ───────────────────────────────────────────────────────────
 
-## The palette's "Save Command…" lands here: the Commands tab, and, when asked,
-## the add form already open so the next thing typed is the command itself.
+## The palette's "Save Command…" lands here: the Commands section, and, when
+## asked, the add form already open so the next thing typed is the command.
 func open_commands(add_now := false) -> void:
 	open()
-	if _tabs != null and _command_tab != null:
-		_tabs.current_tab = _tabs.get_tab_idx_from_control(_tab_control(_command_tab))
+	show_section("commands", true)
 	_refresh_command_list()
 	if add_now:
 		_show_command_dialog(-1)
 
-## The palette's "Keyboard Shortcuts": the Shortcuts tab, where the list now
+## The palette's "Keyboard Shortcuts": the Shortcuts section, where the list
 ## lives. Opening, never toggling, so a second run cannot close what it just
 ## opened.
 func open_shortcuts() -> void:
 	open()
-	if _tabs != null and _shortcuts_tab != null:
-		_tabs.current_tab = _tabs.get_tab_idx_from_control(_tab_control(_shortcuts_tab))
-	# Read after the tab is up: the workspace registers its bindings once, and a
-	# panel built before that would otherwise show the previous set.
+	show_section("shortcuts", true)
+	# Read after the section is up: the workspace registers its bindings once,
+	# and a panel built before that would otherwise show the previous set.
 	_refresh_shortcut_list()
-
-## The direct child `TabContainer` indexes for a tab: `_create_tab` hands back
-## the VBox *inside* the tab's ScrollContainer, and `get_tab_idx_from_control`
-## answers only for a direct child (measured: it returns -1 and reports the
-## parent mismatch).
-func _tab_control(body: Control) -> Control:
-	var node := body
-	while node != null and node.get_parent() != _tabs:
-		node = node.get_parent()
-	return node
 
 ## Saved commands are the user's own list, so this tab is where they are
 ## authored and the palette only lists what is stored. There is deliberately no

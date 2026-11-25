@@ -23,15 +23,10 @@ func after_each():
 
 # ── About tab structure ────────────────────────────────────────────────
 
-func test_about_tab_exists():
-	var tabs := _find_tab_container(_panel)
-	assert_not_null(tabs, "TabContainer must exist inside SettingsPanel")
-	var found := false
-	for i in tabs.get_tab_count():
-		if tabs.get_tab_title(i) == "About":
-			found = true
-			break
-	assert_true(found, "Settings must contain an 'About' tab")
+func test_about_section_exists():
+	_panel.show_section("About")
+	assert_eq(_panel.current_section(), "About", "Settings must contain an 'About' section")
+	assert_not_null(_panel.section_content("About"), "the About section has content")
 
 func test_version_label_is_created():
 	assert_not_null(_panel._version_label, "About tab must expose _version_label")
@@ -73,57 +68,40 @@ func test_the_repository_url_row_is_gone():
 	assert_null(_panel.find_child("RepoUrl", true, false),
 		"the README links the repository itself; the standalone URL row is removed")
 
-func test_the_about_tab_holds_the_documentation_viewer():
+func test_the_about_section_holds_the_documentation_viewer():
 	assert_not_null(_panel._docs_viewer, "About builds a DocsViewer")
 	assert_true(_panel._docs_viewer.is_inside_tree())
-	var tabs := _find_tab_container(_panel)
-	var body := _panel.find_child("About", true, false) as Control
-	assert_not_null(body)
-	tabs.current_tab = tabs.get_tab_idx_from_control(body)
+	_panel.show_section("About")
 	await wait_frames(2)
 	assert_eq(_panel._docs_viewer._current, DocsBundle.ROOT_DOC,
 		"the About page opens on the bundled README")
 	assert_string_contains(_panel._docs_viewer._view.get_parsed_text(), "desktop workspace")
 
-func test_the_about_tab_is_a_fill_tab():
-	var tabs := _find_tab_container(_panel)
-	var body := _panel.find_child("About", true, false) as Control
-	assert_not_null(body)
-	assert_eq(body.get_parent(), tabs, "the tab body is a direct child of the tab container")
+func test_the_about_section_is_a_fill_section():
+	var content := _panel.section_content("About")
+	assert_not_null(content)
+	if content == null:
+		return
+	var body := content.get_parent() as Control
+	assert_not_null(body, "the About content has a body")
+	if body == null:
+		return
+	assert_eq(body.name, "AboutBody", "the fill body is the padded document host")
 	assert_false(body is ScrollContainer,
 		"the document body owns its scrollbar; a ScrollContainer would clip it to one line")
+	assert_null(_panel.section_scroll("About"),
+		"the fill section has no outer scroll")
 
-func test_shortcuts_have_their_own_tab():
-	var tabs := _find_tab_container(_panel)
+func test_shortcuts_have_their_own_section():
 	var titles: Array[String] = []
-	for i in tabs.get_tab_count():
-		titles.append(tabs.get_tab_title(i))
-	assert_true(titles.has("Shortcuts"), "the chord table moved to its own tab")
-	assert_eq(titles[titles.size() - 1], "About", "About stays the last tab")
+	for id in SettingsPanel.SETTINGS_SECTIONS:
+		titles.append(SettingsPanel.SECTION_TITLES[id])
+	assert_true(titles.has("Shortcuts"), "the chord table moved to its own section")
+	assert_eq(titles[titles.size() - 1], "About", "About stays the last section")
 	var list := _panel.find_child("ShortcutList", true, false) as VBoxContainer
 	assert_not_null(list)
-	var owner: Node = list
-	while owner != null and owner.get_parent() != tabs:
-		owner = owner.get_parent()
-	assert_not_null(owner)
-	assert_eq(owner.name, "Shortcuts",
-		"the table lives under the Shortcuts tab, not under About")
-
-# ── helpers ────────────────────────────────────────────────────────────
-
-## Walk the immediate children of the panel to find the TabContainer.
-func _find_tab_container(node: Control) -> TabContainer:
-	for child in node.get_children():
-		var tc := _find_tab_container_recursive(child)
-		if tc != null:
-			return tc
-	return null
-
-func _find_tab_container_recursive(node: Node) -> TabContainer:
-	if node is TabContainer:
-		return node as TabContainer
-	for child in node.get_children():
-		var tc := _find_tab_container_recursive(child)
-		if tc != null:
-			return tc
-	return null
+	var content := _panel.section_content("Shortcuts")
+	assert_not_null(content)
+	if list != null and content != null:
+		assert_true(content.is_ancestor_of(list),
+			"the table lives under the Shortcuts section, not under About")

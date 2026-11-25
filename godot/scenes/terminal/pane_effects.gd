@@ -102,6 +102,17 @@ func uses_buffer() -> bool:
 func layer_material() -> ShaderMaterial:
 	return _static_material
 
+## The shader the current effect runs: the static material's, else the buffer's,
+## else null at Off. A test/capture seam: the animated material lives on the
+## buffer's ground rect, not on this node, so `layer_material()` alone cannot
+## name it.
+func active_shader() -> Shader:
+	if _animated_material != null:
+		return _animated_material.shader
+	if _static_material != null:
+		return _static_material.shader
+	return null
+
 func set_ground(color: Color) -> void:
 	_ground = color
 	if _buffer_rect != null:

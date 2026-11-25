@@ -13,7 +13,7 @@ extends VBoxContainer
 ## does, and the history's own cap (64) bounds both lists.
 ##
 ## The bundle loads on the first visit - when this control becomes visible
-## (the TabContainer shows its current tab only), never at panel construction,
+## (the Settings rail shows one section at a time), never at panel construction,
 ## which happens at application startup. A missing or malformed bundle is a
 ## sentence above an empty body, not a crash: the rest of Settings still works.
 ##
@@ -46,7 +46,7 @@ func _ready() -> void:
 		ensure_loaded()
 
 func _notification(what: int):
-	# A TabContainer shows only its current tab, so "the About tab was opened"
+	# The Settings rail shows one section at a time, so "About was opened"
 	# arrives here as a visibility change. Guarded by `_view` because a control
 	# can become visible while it is being added, before `_ready` built it.
 	if what == NOTIFICATION_VISIBILITY_CHANGED and _view != null \
