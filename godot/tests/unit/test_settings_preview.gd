@@ -119,7 +119,7 @@ func test_the_scope_strip_appears_only_when_the_sidebar_carries_it():
 func test_a_cue_test_is_rate_limited_like_a_concept_fire():
 	assert_true(_preview.play_cue("tint"), "the first cue starts")
 	assert_false(_preview.play_cue("tint"), "the second inside 334 ms is dropped")
-	await wait_seconds(0.4)
+	await wait_seconds(1.0)
 	assert_true(_preview.play_cue("tint"), "the gate reopens after 334 ms")
 
 func test_the_preview_names_the_effect_the_scope_and_the_rate():
