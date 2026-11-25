@@ -177,6 +177,7 @@ func _notification(what: int):
 		_sync_effect_rows()
 		_sync_reactive_rows()
 		_sync_backdrop_row()
+		_sync_sidebar_mode_row()
 		_render_section(_current_section)
 	elif what == NOTIFICATION_RESIZED:
 		# The window (and with it the layout space) changed, so the scale it can
@@ -402,15 +403,18 @@ func _build_ui():
 	var t_sys = _create_section("system")
 	var fps_opt = _add_fps_control(t_sys)
 	var win_mode_opt = _add_window_mode_control(t_sys)
+	var sidebar_mode_opt = _add_sidebar_mode_control(t_sys)
 	var opacity_opt = _add_window_opacity_control(t_sys)
 	var check_updates_cb = _add_check_updates_control(t_sys)
 	_add_section_reset("system", func():
 		SettingsManager.cfg_max_fps = 0
 		SettingsManager.cfg_window_mode = 0
+		SettingsManager.cfg_sidebar_mode = SettingsManager.SIDEBAR_EXPANDED
 		SettingsManager.cfg_window_opacity = SettingsManager.OPACITY_DEFAULT
 		SettingsManager.cfg_check_updates = true
 		fps_opt.selected = 6  # "Unlimited" (0)
 		win_mode_opt.selected = 0
+		sidebar_mode_opt.selected = SettingsManager.SIDEBAR_EXPANDED
 		opacity_opt.selected = SettingsManager.OPACITY_PRESETS.find(
 			SettingsManager.OPACITY_DEFAULT)
 		check_updates_cb.button_pressed = true
@@ -1538,6 +1542,41 @@ func _add_window_mode_control(v: VBoxContainer) -> OptionButton:
 	hb.add_child(opt)
 	v.add_child(hb)
 	return opt
+
+## The sidebar's three positions, in the System section beside the window mode
+## it belongs with. The header's three-state control and Ctrl+Shift+B reach the
+## same setting; this row is how a user finds it, and the System reset restores
+## Expanded.
+func _add_sidebar_mode_control(v: VBoxContainer) -> OptionButton:
+	var hb = HBoxContainer.new()
+	hb.add_theme_constant_override("separation", UiTokens.SPACE_MD)
+	hb.add_child(_lbl("Sidebar:"))
+	var opt := OptionButton.new()
+	opt.name = "SidebarModeOpt"
+	for label in SettingsManager.SIDEBAR_MODE_LABELS:
+		opt.add_item(label)
+	opt.selected = clampi(SettingsManager.cfg_sidebar_mode, 0,
+		SettingsManager.SIDEBAR_MODE_LABELS.size() - 1)
+	opt.accessibility_name = "Sidebar mode"
+	opt.tooltip_text = "The sidebar's width: the full column, an icon rail with section flyouts, or the collapsed 20 px handle"
+	opt.item_selected.connect(func(idx: int):
+		SettingsManager.cfg_sidebar_mode = clampi(idx, 0,
+			SettingsManager.SIDEBAR_MODE_LABELS.size() - 1)
+		SettingsManager.save_settings()
+		_sync_sidebar_mode_row())
+	hb.add_child(opt)
+	v.add_child(hb)
+	return opt
+
+## Read the stored mode into the System row. Called on every show and from the
+## workspace's mode_changed, so the chord cannot leave the row stale.
+func _sync_sidebar_mode_row() -> void:
+	var opt := find_child("SidebarModeOpt", true, false) as OptionButton
+	if opt == null:
+		return
+	SettingsManager.cfg_sidebar_mode = clampi(SettingsManager.cfg_sidebar_mode, 0,
+		SettingsManager.SIDEBAR_MODE_LABELS.size() - 1)
+	opt.selected = SettingsManager.cfg_sidebar_mode
 
 ## The window's own opacity. The row is always present: where the display server
 ## cannot make the window transparent the picker is disabled and the row says

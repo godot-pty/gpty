@@ -69,4 +69,11 @@ The figures the UI/UX claim is measured against, recorded 2026-11-22 on this mac
 | `aurora` (animated) | 239 -> 208 (0) | 206 -> 217 (11) | 221 -> 213 (0) | 225 -> 228 (3) |
 | `dither` (static) | 202 -> 216 (14) | 198 -> 211 (13) | 191 -> 202 (11) | 228 -> 229 (1) |
 
+**Sidebar effect cost** - the same harness at the sidebar's own sizes (180x1080 expanded, 48x1080 icons), raw `baseline -> effect (delta)` us, measured with the effect host on 2026-11-25. Every delta is under the harness floor; the static `crt` redraws only on a sidebar change and `grain` is the only continuous (30 Hz) cost.
+
+| Effect | 180x1080 Forward+ | 48x1080 Forward+ | 180x1080 Compatibility | 48x1080 Compatibility |
+|---|---:|---:|---:|---:|
+| `crt` (static) | 263 -> 265 (2) | 254 -> 263 (9) | 245 -> 242 (0) | 244 -> 247 (3) |
+| `grain` (animated) | 270 -> 247 (0) | 257 -> 254 (0) | 242 -> 245 (3) | 240 -> 238 (0) |
+
 **The decision (2026-11-22):** Forward+ stays the default on every platform. Compatibility is 2.2x lighter warm (310 against 667 MB) and 3x lighter cold (363 against 1083 MB), the repaint cost is within noise either way, and both renderers captured the same chrome, effects and window-opacity veil; but the orbital vault graph's bloom is the v0.8.6 identity, so Compatibility remains the documented opt-in (`--rendering-driver opengl3`). A per-platform flip is one project-setting override (`rendering/renderer/rendering_method.<linuxbsd|windows|macos>`, verified on 4.7.2; no export preset carries a rendering-method key). The Windows renderer smoke (`scripts/smoke_pane_api.py --renderer-smoke`) proves the shipped Vulkan -> D3D12/WARP -> native OpenGL 3 -> ANGLE chain. `scripts/ui-capture --renderer <method>` captures one state on either renderer; `scripts/measure-cost --check` holds the README to the memory rows. The 10% gate is the v0.9 instrumentation row's; until it lands, this table is the baseline, not a gate.

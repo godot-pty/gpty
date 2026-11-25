@@ -16,7 +16,7 @@ class_name ShortcutCatalog
 const GROUPS: Array[Dictionary] = [
 	{"title": "Workspace", "entries": [
 		{"action": "app:toggle_palette", "label": "Command palette"},
-		{"action": "app:toggle_sidebar", "label": "Show or hide the sidebar"},
+		{"action": "app:toggle_sidebar", "label": "Cycle the sidebar (expanded, icons, collapsed)"},
 		{"action": "app:next_workspace", "label": "Next workspace"},
 		{"action": "app:prev_workspace", "label": "Previous workspace"},
 		{"action": "app:toggle_fullscreen", "label": "Toggle fullscreen"},

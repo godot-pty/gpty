@@ -61,7 +61,7 @@ godot/
         │   ├── pane_effects.gd # Per-pane effect host: the ground material/buffer and the cue
         │   └── terminal_manager.gd
         ├── ui/                  # UI components
-        │   ├── sidebar.gd       # Vertical stack: window mode, workspaces, panes, profiles
+        │   ├── sidebar.gd       # Three positions: the column, an icons rail with section flyouts, collapsed
         │   ├── settings_panel.gd
         │   ├── scheme_library.gd # Shipped + imported terminal colour schemes (listing, capped read, import id)
         │   ├── scheme_picker.gd  # One colour-scheme OptionButton (library, reset item, Import...)
@@ -158,7 +158,7 @@ godot/
 | `Ctrl+Shift+T` | Spawn file tree |
 | `Ctrl+Shift+O` | Spawn inspector |
 | `Ctrl+Shift+W` | Close focused pane |
-| `Ctrl+Shift+B` | Toggle sidebar |
+| `Ctrl+Shift+B` | Cycle sidebar (expanded / icons / collapsed) |
 | `Ctrl+Shift+P` | Command palette |
 | `Ctrl+Shift+R` | Close all panes |
 | `F11` / `Ctrl+Shift+M` | Toggle fullscreen |
@@ -170,6 +170,7 @@ godot/
 
 ## Sidebar
 
+- [Header arrow / `Ctrl+Shift+B`] - cycle the sidebar: **Expanded** (the full column), **Icons** (a 48 px rail whose icons open that section in a flyout beside it; the flyout closes on selection, click-outside, Escape or a workspace/pane action), and **Collapsed** (the 20 px handle). The System section's `Sidebar:` row picks the same mode
 - [+ Terminal] - spawn a new terminal
 - [Settings] - open global settings panel
 - [More (⋯) on a workspace row] - the workspace menu: **Set Directory** (that workspace's default directory; every terminal spawned there, including one activated from a profile, starts in it, and `Use default` clears it; changing it asks when the workspace holds a pane that names its own program) and **Clear Workspace** (close every pane in it, asking first; a hidden workspace is cleared without switching)

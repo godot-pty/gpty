@@ -15,6 +15,7 @@ func after_each():
 	# is the same kind of leak through `SettingsManager`'s own field.
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
 	SettingsManager.cfg_sidebar_folded.clear()
+	SettingsManager.cfg_sidebar_mode = SettingsManager.SIDEBAR_EXPANDED
 	SettingsManager.cfg_motion = UiMotion.SUBTLE
 	SettingsManager.cfg_window_opacity = SettingsManager.OPACITY_DEFAULT
 	SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
@@ -333,6 +334,22 @@ func test_a_stored_scope_outside_the_vocabulary_clamps():
 	SettingsManager.load_settings()
 	assert_eq(SettingsManager.cfg_effect_scope, UiEffects.SCOPE_PANES,
 		"a value below the picker clamps to panes")
+
+func test_the_sidebar_mode_round_trips_and_clamps():
+	SettingsManager.set_sidebar_mode(SettingsManager.SIDEBAR_ICONS)
+	assert_eq(SettingsManager.cfg_sidebar_mode, SettingsManager.SIDEBAR_ICONS)
+	SettingsManager.cfg_sidebar_mode = SettingsManager.SIDEBAR_EXPANDED
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_sidebar_mode, SettingsManager.SIDEBAR_ICONS,
+		"the mode must survive a restart")
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE, {"sidebar_mode": 99})
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_sidebar_mode, SettingsManager.SIDEBAR_COLLAPSED,
+		"a value above the picker clamps to collapsed")
+	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE, {"sidebar_mode": -5})
+	SettingsManager.load_settings()
+	assert_eq(SettingsManager.cfg_sidebar_mode, SettingsManager.SIDEBAR_EXPANDED,
+		"a value below the picker clamps to expanded")
 
 func test_reactive_rules_drop_unknown_effects_on_load():
 	MockAutoloads.set_store(SettingsManager.SETTINGS_FILE, {

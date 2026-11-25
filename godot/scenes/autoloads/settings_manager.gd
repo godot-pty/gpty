@@ -123,9 +123,20 @@ var cfg_reactive_effects := {}
 ## are the `sidebar_folded` vocabulary: a stored value that is not in this list is
 ## a store written by another build and is dropped on load.
 const SIDEBAR_SECTIONS := ["workspaces", "profiles", "panes"]
-## Which sections the user folded, by id (`SIDEBAR_SECTIONS`). The whole-sidebar
-## collapse stays chrome and is never saved; this is only the per-section fold.
+## The sidebar's three positions, persisted as the index: the full column, an
+## icon rail whose icons open one section flyout, and the collapsed 20 px
+## handle. `Sidebar.set_mode` and the System tab's Sidebar row both read these.
+const SIDEBAR_EXPANDED := 0
+const SIDEBAR_ICONS := 1
+const SIDEBAR_COLLAPSED := 2
+const SIDEBAR_MODE_LABELS := ["Expanded", "Icons", "Collapsed"]
+## Which sections the user folded, by id (`SIDEBAR_SECTIONS`). The sidebar's
+## own three positions live in `cfg_sidebar_mode` below; this is only the
+## per-section fold.
 var cfg_sidebar_folded: Array[String] = []
+## The sidebar's current position (`SIDEBAR_EXPANDED` by default). Chrome: no
+## pane draw reads it, so a change writes the file without `settings_changed`.
+var cfg_sidebar_mode := SIDEBAR_EXPANDED
 
 ## Emitted when the resolved mode moves — a settings save, or the desktop theme
 ## flipping while `Follow system` is selected. The workspace rebuilds its Theme
@@ -150,6 +161,15 @@ func set_sidebar_folded(section_id: String, folded: bool) -> void:
 		cfg_sidebar_folded.append(section_id)
 	else:
 		cfg_sidebar_folded.erase(section_id)
+	_save_settings_file()
+
+## Record the sidebar's position and write it. Like a fold, a mode is chrome:
+## no pane draw reads it, so the signature stays off `settings_changed`.
+func set_sidebar_mode(mode: int) -> void:
+	var clamped := clampi(mode, SIDEBAR_EXPANDED, SIDEBAR_COLLAPSED)
+	if cfg_sidebar_mode == clamped:
+		return
+	cfg_sidebar_mode = clamped
 	_save_settings_file()
 
 ## A stored `sidebar_folded` list, reduced to ids this build has a section for, in
@@ -323,6 +343,8 @@ func load_settings():
 	cfg_ui_scale = clampi(_as_int(d, "ui_scale", 100), 100, UI_SCALE_PRESETS.max())
 	cfg_appearance_mode = clampi(_as_int(d, "appearance_mode", APPEARANCE_DARK), APPEARANCE_DARK, APPEARANCE_SYSTEM)
 	cfg_sidebar_folded = _sidebar_folded_from(_as_array(d, "sidebar_folded", []))
+	cfg_sidebar_mode = clampi(_as_int(d, "sidebar_mode", SIDEBAR_EXPANDED),
+		SIDEBAR_EXPANDED, SIDEBAR_COLLAPSED)
 	# Motion is a closed vocabulary: an id this build does not know, or one that
 	# serves another transition, falls back to the kind's default, and a
 	# property outside its schema range is clamped. A store from another build
@@ -364,6 +386,7 @@ func _save_settings_file():
 	d["scheme_light"] = cfg_scheme_light
 	d["history_lines"] = cfg_history_lines
 	d["sidebar_folded"] = cfg_sidebar_folded.duplicate()
+	d["sidebar_mode"] = cfg_sidebar_mode
 	d["motion"] = cfg_motion
 	d["pane_animations"] = cfg_pane_animation.duplicate(true)
 	d["pane_animation_params"] = cfg_pane_animation_params.duplicate(true)
@@ -389,8 +412,12 @@ func apply_to_terminal(body: Control):
 		"font_path": cfg_font_path,
 		"font_size": cfg_font_size,
 		"terminal_padding": cfg_terminal_padding,
-		"effect": UiEffects.pane_ambient_id(),
-		"effect_intensity": UiEffects.level(),
+		"effect": UiEffects.ambient_id(),
+		# The pane schema's closed id list refuses "", so the scope gates the
+		# layer through the existing intensity gate instead: sidebar-only
+		# broadcasts Off and the pane frees its effect, while the id survives.
+		"effect_intensity": (UiEffects.level() if UiEffects.panes_in_scope()
+			else UiEffects.OFF),
 		"backdrop": cfg_backdrop,
 		"max_fps": cfg_max_fps,
 		"shell_command": cfg_shell_command,

@@ -25,6 +25,7 @@ func after_each():
 	# re-theme every later suite.
 	SettingsManager.cfg_appearance_mode = SettingsManager.APPEARANCE_DARK
 	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	SettingsManager.cfg_sidebar_mode = SettingsManager.SIDEBAR_EXPANDED
 	SettingsManager.cfg_window_opacity = SettingsManager.OPACITY_DEFAULT
 	SettingsManager.cfg_terminal_padding = PaneTypes.TERMINAL_PADDING_DEFAULT
 	WindowChrome.force_transparency = -1
@@ -1246,6 +1247,34 @@ func test_the_reactive_table_hides_add_at_the_cap():
 	assert_false(_find_option("AddReactiveOpt").visible, "no ninth rule can be added")
 	assert_eq(_panel.find_child("ReactiveRules", true, false).get_child_count(),
 		UiEffects.MAX_RULES, "one row per stored rule")
+
+## The System section's sidebar row: the three positions, an immediate save, and
+## the System reset returning to Expanded. The header control and the chord
+## write the same field.
+func test_the_sidebar_mode_row_offers_the_three_positions_and_resets():
+	var opt := _panel.find_child("SidebarModeOpt", true, false) as OptionButton
+	assert_not_null(opt, "the System section must offer the sidebar mode")
+	if opt == null:
+		return
+	assert_eq(opt.item_count, SettingsManager.SIDEBAR_MODE_LABELS.size())
+	for i in opt.item_count:
+		assert_eq(opt.get_item_text(i), SettingsManager.SIDEBAR_MODE_LABELS[i])
+	assert_eq(opt.selected, SettingsManager.SIDEBAR_EXPANDED)
+	opt.selected = SettingsManager.SIDEBAR_ICONS
+	opt.item_selected.emit(SettingsManager.SIDEBAR_ICONS)
+	assert_eq(SettingsManager.cfg_sidebar_mode, SettingsManager.SIDEBAR_ICONS,
+		"the picker writes the setting")
+	SettingsManager.cfg_sidebar_mode = SettingsManager.SIDEBAR_COLLAPSED
+	_panel._sync_sidebar_mode_row()
+	assert_eq(opt.selected, SettingsManager.SIDEBAR_COLLAPSED,
+		"the row reads the stored mode back (the chord can move it)")
+	var reset := _tab_reset_button("System")
+	assert_not_null(reset)
+	if reset != null:
+		reset.pressed.emit()
+	assert_eq(SettingsManager.cfg_sidebar_mode, SettingsManager.SIDEBAR_EXPANDED,
+		"the System reset returns the sidebar to Expanded")
+	assert_eq(opt.selected, SettingsManager.SIDEBAR_EXPANDED)
 
 ## The v0.8.7 backdrop row: an immediate setting, like the Effects pickers -
 ## the selection writes the store and the broadcast repaints every pane.
