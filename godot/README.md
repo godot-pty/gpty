@@ -62,7 +62,11 @@ godot/
         │   └── terminal_manager.gd
         ├── ui/                  # UI components
         │   ├── sidebar.gd       # Three positions: the column, an icons rail with section flyouts, collapsed
-        │   ├── settings_panel.gd
+        │   ├── sidebar_flyout.gd # The section flyout card beside the icon rail (lazy rows, one card)
+        │   ├── settings_panel.gd # The rail/content/preview Settings card (sticky Resets, Back/Forward)
+        │   ├── settings_preview.gd # The Motion/Effects preview column and its sample playback
+        │   ├── settings_sample.gd # The scratch Control the previews animate (pane chrome + ground)
+        │   ├── effect_surface.gd  # The effect layer the pane, the preview and the sidebar share
         │   ├── scheme_library.gd # Shipped + imported terminal colour schemes (listing, capped read, import id)
         │   ├── scheme_picker.gd  # One colour-scheme OptionButton (library, reset item, Import...)
         │   ├── overlay_panel.gd  # Shared keyboard contract for the four overlays + the card clamp (fit_card)
@@ -194,6 +198,12 @@ None of them install the OMP extension or launch `omp`; the user does that in
 the terminal. Inspector does not follow the terminal conversation. Reasoning
 requires the `@gpty/omp-events` extension and gpty's Unix event socket
 (`gpty-events.sock`); it is not available on Windows builds yet.
+
+## Settings
+
+- [Settings] - the card is a rail, a content column and, on Appearance, a preview column. The eight sections are the rail's rows (a click or Up/Down/Enter switches them; each keeps its own scroll and a sticky Reset, and Back/Forward walks one history). At 1920x1080 the card is 960x640; the 800x500 clamp wins below that, and the card fits inside the 560x340 floor
+- [Play beside a Motion or effect picker] - play the selected transition or effect on the shared sample, which is a scratch Control carrying the pane chrome, not a pane; a reactive row's Test plays its cue under the same 334 ms limit. `Off` draws the final frame or the plain ground
+- [Scope] - Panes, Panes and sidebar, or Sidebar only; the sidebar's ground carries the ambient effect in the two latter values, and `Reset to defaults` restores the section
 
 ## Command Palette (Ctrl+Shift+P)
 

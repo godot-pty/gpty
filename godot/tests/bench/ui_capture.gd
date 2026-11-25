@@ -93,6 +93,32 @@ const STATES := {
 	# The toggles are pressed through their own accessible names, the way a
 	# reader reaches them.
 	"sidebar-folded": {"size": DEFAULT_SIZE, "panes": 4, "fold": ["workspaces", "profiles"]},
+	# The three sidebar positions and the icons-mode flyout (row *The sidebar has
+	# two positions, not three*). `sidebar-expanded` is the default reference;
+	# `sidebar-icons` and `sidebar-icons-panes` hold the two flyout subjects.
+	"sidebar-expanded": {"size": DEFAULT_SIZE, "panes": 4},
+	"sidebar-icons": {"size": DEFAULT_SIZE, "panes": 4,
+		"settings": {"cfg_sidebar_mode": 1},
+		"open": "sidebar-flyout", "flyout": "workspaces"},
+	"sidebar-icons-panes": {"size": DEFAULT_SIZE, "panes": 4,
+		"settings": {"cfg_sidebar_mode": 1},
+		"open": "sidebar-flyout", "flyout": "panes"},
+	"sidebar-icons-560x340": {"size": Vector2i(560, 340), "panes": 1,
+		"settings": {"cfg_sidebar_mode": 1},
+		"open": "sidebar-flyout", "flyout": "panes"},
+	"sidebar-collapsed": {"size": DEFAULT_SIZE, "panes": 4,
+		"settings": {"cfg_sidebar_mode": 2}},
+	# The icons rail carrying the ambient effect (row *The ambient effects stop
+	# at the pane edge*): sidebar-only, so the rail is the subject and the panes
+	# stay plain. `sidebar_effect` pins the host's phase.
+	"sidebar-icons-effect": {"size": DEFAULT_SIZE, "panes": 4,
+		"settings": {"cfg_sidebar_mode": 1, "cfg_effect": "crt",
+			"cfg_effect_intensity": 2, "cfg_effect_scope": 2},
+		"sidebar_effect": true},
+	"effect-sidebar": {"size": DEFAULT_SIZE, "panes": 4,
+		"settings": {"cfg_effect": "grain", "cfg_effect_intensity": 2,
+			"cfg_effect_scope": 2},
+		"sidebar_effect": true},
 	"settings": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings"},
 	# `/`, not the sandbox home: the Pane Settings card prints the inherited
 	# workspace directory, and a per-run `/tmp/gpty-ui.<random>` path would make
@@ -213,6 +239,31 @@ const STATES := {
 	# Shaders*.
 	"settings-effects": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings",
 		"tab": "Appearance", "scroll_to": "EffectsTitle"},
+	# The Settings rail itself (row *The Settings card is a navigation rail*):
+	# the 960x640 card on System, with the rail, the Back/Forward pair and a
+	# sticky section Reset.
+	"settings-rail": {"size": DEFAULT_SIZE, "panes": 1, "open": "settings",
+		"tab": "System"},
+	# The shared sample mid-Pop at 45 % (row *The Motion pickers name their
+	# animations but never show them*).
+	"settings-preview-motion": {"size": DEFAULT_SIZE, "panes": 1,
+		"open": "settings", "tab": "Appearance", "scroll_to": "MotionTitle",
+		"settings": {"cfg_motion": 2, "cfg_pane_animation": {"create": "pop"}},
+		"preview_motion": ["create", 0.2]},
+	# Aurora at Full with scope both (row *The Effects and Reactive rows never
+	# show what they play*): the sample and the sidebar strip, pinned.
+	"settings-preview-effect": {"size": DEFAULT_SIZE, "panes": 1,
+		"open": "settings", "tab": "Appearance", "scroll_to": "EffectsTitle",
+		"settings": {"cfg_effect": "aurora", "cfg_effect_intensity": 2,
+			"cfg_effect_scope": 1},
+		"preview_effect": true, "sidebar_effect": true},
+	# The scope picker beside the sidebar carrying the same grain (row *The
+	# ambient effects stop at the pane edge*): canvas, Scope row and preview.
+	"settings-sidebar-effect": {"size": DEFAULT_SIZE, "panes": 4,
+		"open": "settings", "tab": "Appearance", "scroll_to": "EffectsTitle",
+		"settings": {"cfg_effect": "grain", "cfg_effect_intensity": 2,
+			"cfg_effect_scope": 1},
+		"preview_effect": true, "sidebar_effect": true},
 	# The ambient effects over real grid content: red, inverse and underlined
 	# runs prove the text and non-default cells stay opaque while the ground
 	# carries the effect. The light twin uses the light scheme, not just the
@@ -237,6 +288,20 @@ const STATES := {
 			"shell_args": ["-c",
 				"printf '\\033[1;31mFAIL\\033[0m grain behind text\\n\\033[7m INVERSE \\033[0m \\033[4;32mUNDERLINE\\033[0m\\n'; seq -f 'line %g' 1 12; sleep 600"]}},
 	], "settings": {"cfg_effect": "grain", "cfg_effect_intensity": 2}},
+	# The two new static entries (row *The ambient effect table is two entries*):
+	# the same grid shell as `effect-crt`, so only the ground differs.
+	"effect-vignette": {"size": Vector2i(1280, 760), "tiles": [
+		{"col": 0, "row": 0, "cspan": 60, "rspan": 60, "settings": {
+			"type": "terminal", "attachment_id": "capture-effect-vignette",
+			"shell_args": ["-c",
+				"printf '\\033[1;31mFAIL\\033[0m vignette behind text\\n\\033[7m INVERSE \\033[0m \\033[4;32mUNDERLINE\\033[0m\\n'; seq -f 'line %g' 1 12; sleep 600"]}},
+	], "settings": {"cfg_effect": "vignette", "cfg_effect_intensity": 2}},
+	"effect-dither": {"size": Vector2i(1280, 760), "tiles": [
+		{"col": 0, "row": 0, "cspan": 60, "rspan": 60, "settings": {
+			"type": "terminal", "attachment_id": "capture-effect-dither",
+			"shell_args": ["-c",
+				"printf '\\033[1;31mFAIL\\033[0m dither behind text\\n\\033[7m INVERSE \\033[0m \\033[4;32mUNDERLINE\\033[0m\\n'; seq -f 'line %g' 1 12; sleep 600"]}},
+	], "settings": {"cfg_effect": "dither", "cfg_effect_intensity": 2}},
 	# A pinned reactive cue on the source pane (the tint at its peak), with no
 	# ambient effect, so the screenshot isolates the cue. Row *Reactive
 	# Environments*.
@@ -645,6 +710,7 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	_pin_focus_sweep(state)
 	_pin_backdrops(state)
 	_pin_effects(state)
+	_pin_preview(state)
 
 	if args.get("perturb", "") == state_name:
 		_perturb(state_name)
@@ -741,6 +807,30 @@ func _pin_effects(state: Dictionary) -> void:
 		body.pin_effects()
 		if cue != "" and body.has_method("pin_effect_cue"):
 			body.pin_effect_cue(cue)
+
+
+## Freeze the Settings sample and/or the sidebar host for a reproducible state.
+## A preview pin without an open Settings card is a state-table mistake, not a
+## picture of anything, so it fails loudly.
+func _pin_preview(state: Dictionary) -> void:
+	var panel = _workspace._settings_panel
+	if state.has("preview_motion"):
+		var args: Array = state["preview_motion"]
+		if panel == null or panel._preview == null:
+			_fail("the preview_motion state did not open Settings")
+			return
+		var kind := str(args[0]) if not args.is_empty() else "create"
+		var progress := float(args[1]) if args.size() > 1 else 0.45
+		panel._preview.play_motion(kind)
+		panel._preview.pin_motion(progress)
+	if state.get("preview_effect", false):
+		if panel == null or panel._preview == null:
+			_fail("the preview_effect state did not open Settings")
+			return
+		panel._preview.play_effect()
+		panel._preview.pin_effect()
+	if state.get("sidebar_effect", false):
+		_workspace.pin_sidebar_effect()
 
 
 # ── Seeding ────────────────────────────────────────────────────────────
@@ -932,6 +1022,28 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 						- sc.get_global_rect().position.y) + sc.scroll_vertical
 					sc.scroll_vertical = max(top, 0)
 					await _wait_frames(2)
+		"sidebar-flyout":
+			var flyout_id := str(state.get("flyout", ""))
+			var flyout_names := {"workspaces": "Workspaces", "profiles": "Profiles",
+				"panes": "Panes", "add_pane": "Add a pane"}
+			if not flyout_names.has(flyout_id):
+				_fail("the sidebar-flyout state names no known flyout")
+				return false
+			var flyout_name := str(flyout_names[flyout_id])
+			var rail_btn := _button_with_accessible_name(_workspace._sidebar, flyout_name)
+			if rail_btn == null:
+				_fail("the icons rail has no '%s' button" % flyout_name)
+				return false
+			var rail: ScrollContainer = _workspace._sidebar._icon_rail
+			if rail != null:
+				rail.ensure_control_visible(rail_btn)
+				await _wait_frames(2)
+			await _click(rail_btn)
+			await _wait_frames(3)
+			var flyout: Control = _workspace._sidebar_flyout
+			if flyout == null or not flyout.visible:
+				_fail("clicking the %s icon did not open its flyout" % flyout_id)
+				return false
 		"file-dialog":
 			var more_button := _button_with_accessible_name(_workspace._sidebar,
 				"More workspace actions")
