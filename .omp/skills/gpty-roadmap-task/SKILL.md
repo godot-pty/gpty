@@ -55,7 +55,7 @@ A missing toolchain SKIPs locally but FAILS under `CI`/`GITHUB_ACTIONS`, so a lo
 
 ## 7. Commit, then stop
 
-`skill://commit`; conventional scope; a behavior change and its test land in the same commit; an intentional behavior change gets the reason in the body. Before the reply: every call site migrated, docs updated or a row queued for them, the changed path exercised for real (tests alone are not proof), scratch files gone, `git status` clean of strays. When the *session* is ending rather than just this row, run `skill://gpty-session-wrap-up` first: it owns the audit a single row does not (doc mirrors beyond the row, the wiki bundle, skills and memory, loose threads).
+Work on a branch, never on `main`: create it before the first commit (`git switch -c <type>/<slug>` from `main`), then `skill://commit`; conventional scope; a behavior change and its test land in the same commit; an intentional behavior change gets the reason in the body. Push with `scripts/bot-push`, open the PR with `scripts/bot-pr`, and after the maintainer's approval enqueue it with `gh pr merge --auto --merge`; `scripts/branch-prune` once it landed. A commit made on `main` by mistake moves to a branch with `git switch -c <branch>` and `git branch -f main origin/main` before the push - `main`'s ruleset rejects a direct push. Before the reply: every call site migrated, docs updated or a row queued for them, the changed path exercised for real (tests alone are not proof), scratch files gone, `git status` clean of strays. When the *session* is ending rather than just this row, run `skill://gpty-session-wrap-up` first: it owns the audit a single row does not (doc mirrors beyond the row, the wiki bundle, skills and memory, loose threads).
 
 ## Maintenance
 
