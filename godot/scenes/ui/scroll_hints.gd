@@ -5,9 +5,10 @@ extends Control
 ## end.
 ##
 ## Each chevron is visible only while its direction has somewhere to go, so a
-## body that fits its viewport shows neither. They are chrome, not input: no
-## focus, no tab stop, and a press never reaches the pane's child, because the
-## buttons take the click themselves.
+## body that fits its viewport shows neither, and the pair ramps in and out
+## through [UiMotion] (one frame at Off). They are chrome, not input: no focus,
+## no tab stop, and a press never reaches the pane's child, because the buttons
+## take the click themselves.
 ##
 ## One widget per scrolling surface. A pane binds it to its own scroller -
 ## `bind_bar` for a `ScrollBar` (a `ScrollContainer`, `TextEdit`, `CodeEdit` or
@@ -23,6 +24,8 @@ const SIZE := 24
 ## Why the chevrons never take the keyboard: the wheel moves the same view on
 ## every surface they are bound to.
 const MOUSE_ONLY_REASON := "the wheel moves the same view"
+## The in/out ramp; static at Off, like every other UiMotion consumer.
+const CHEVRON_MS := 100.0
 
 var top_button: Button
 var bottom_button: Button
@@ -37,6 +40,10 @@ var _tree: Tree = null
 ## A bound bar or tree draws its own column at the region's right edge; the
 ## chevrons step left of it so the bar stays draggable end to end.
 var _clears_scrollbar := false
+## The direction each chevron is meant to show. A repeated `sync()` with the
+## same target must not restart its ramp: the bars emit `changed` on every
+## scroll and content change.
+var _shown := {"top": false, "bottom": false}
 
 ## Build the pair over `region` and add it to `pane` as its topmost child.
 ##
@@ -131,14 +138,26 @@ func bind_custom(can_up: Callable, can_down: Callable,
 	sync()
 
 ## Re-read the bound scroller and show exactly the chevrons that have content
-## to reach. Cheap: two property reads plus the placement.
+## to reach. Cheap: two property reads plus the placement. A chevron appears and
+## goes away with the one UiMotion fade; its rect is laid out by `_place` either
+## way, so a ramp never moves it.
 func sync() -> void:
 	if top_button == null:
 		return
 	var live := _region != null and _region.is_visible_in_tree() and _region.size.y > 0.0
-	top_button.visible = live and _can_up.is_valid() and _can_up.call()
-	bottom_button.visible = live and _can_down.is_valid() and _can_down.call()
+	_set_chevron(top_button, "top", live and _can_up.is_valid() and _can_up.call())
+	_set_chevron(bottom_button, "bottom", live and _can_down.is_valid() and _can_down.call())
 	_place()
+
+func _set_chevron(button: Button, key: String, wanted: bool) -> void:
+	if wanted == _shown[key]:
+		return
+	_shown[key] = wanted
+	if wanted:
+		button.visible = true
+		UiMotion.arrive(button, CHEVRON_MS)
+	else:
+		UiMotion.dismiss(button, CHEVRON_MS, func(): button.visible = false)
 
 ## Position both buttons inside the region's rect. Canvas coordinates are the
 ## only transform involved: panes are not scaled or rotated.

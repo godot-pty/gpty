@@ -170,19 +170,13 @@ func build(bg_rect: ColorRect):
 
 func update_pane_list(panes: Array, active_body: Control = null):
 	if not _pane_list: return
-	# Only an appended row is an arrival: the previous list must still be a
-	# prefix, so a workspace switch or a restore (different identities) and the
-	# first render of a list are not a cascade of fades.
+	# Only an appended row is an arrival. The rule is UiMotion's, so the three
+	# sidebar lists cannot drift apart on what a created row is: a workspace
+	# switch or a restore (different identities) and the first render of a list
+	# are not cascades of fades.
 	var created: Array = []
-	if not _pane_items.is_empty() and panes.size() > _pane_items.size() \
-			and panes.size() <= _pane_items.size() + UiMotion.ARRIVAL_MAX_STAGGERED:
-		var prefix := true
-		for i in _pane_items.size():
-			if panes[i] != _pane_items[i]:
-				prefix = false
-				break
-		if prefix:
-			created = panes.slice(_pane_items.size())
+	for i in UiMotion.appended_indices(_pane_items, panes):
+		created.append(panes[i])
 	_pane_items.assign(panes)
 	_pane_active = active_body
 	_sync_pane_rows(created)
@@ -637,9 +631,10 @@ func update_workspace_list(names: Array[String], active: int, cwds: Array[String
 	if _ws_drawn and _pending_close.is_empty() and content == _ws_rendered:
 		_apply_workspace_state()
 		return
+	var created := UiMotion.appended_indices(_ws_rendered, content)
 	_ws_drawn = true
 	_ws_rendered = content
-	_render_workspaces()
+	_render_workspaces(created)
 
 ## One string per row, so equal models compare equal without a rebuild. The fields
 ## are joined with U+001F, which a name or a path cannot contain: a printable
@@ -664,7 +659,9 @@ func _apply_workspace_state() -> void:
 
 ## Rebuild the workspace rows from the stored lists, then sync the header. A
 ## pending row question survives a rebuild only while its target is still there.
-func _render_workspaces():
+## `created` names the rows that are new to this render (a pure append, per
+## `UiMotion.appended_indices`); only those fade in.
+func _render_workspaces(created: Array[int] = []):
 	if not _workspace_list: return
 	_validate_workspace_pending()
 	for c in _workspace_list.get_children(): c.queue_free()
@@ -673,6 +670,9 @@ func _render_workspaces():
 		var cwd := str(_ws_cwds[i]) if i < _ws_cwds.size() else ""
 		var row := _make_workspace_row(i, _ws_names[i], i == _ws_active, cwd)
 		_workspace_list.add_child(row)
+		if created.has(i):
+			UiMotion.arrive(row, UiMotion.ARRIVAL_MS, 0.0,
+				UiMotion.stagger_ms(created.find(i)))
 		rows.append(row)
 	var sc = _workspace_list.get_parent() as ScrollContainer
 	if sc:
@@ -731,11 +731,8 @@ func _sync_pane_rows(created: Array = []):
 			_pane_list.add_child(row)
 			_pane_rows[key] = {"body": body, "row": row}
 			if created.has(body):
-				var slot := created.find(body)
-				var delay := 0.0
-				if UiMotion.allows_overshoot() and slot < UiMotion.ARRIVAL_MAX_STAGGERED:
-					delay = float(slot) * UiMotion.ARRIVAL_STAGGER_MS
-				UiMotion.arrive(row, UiMotion.ARRIVAL_MS, 0.0, delay)
+				UiMotion.arrive(row, UiMotion.ARRIVAL_MS, 0.0,
+					UiMotion.stagger_ms(created.find(body)))
 		else:
 			_update_pane_row(row, body)
 		if row.get_index() != i:
@@ -1303,9 +1300,10 @@ func update_profile_list(profiles: Array[Dictionary], active_name := ""):
 	if _profile_drawn and _pending_close.is_empty() and content == _profile_rendered:
 		_apply_profile_state()
 		return
+	var created := UiMotion.appended_indices(_profile_rendered, content)
 	_profile_drawn = true
 	_profile_rendered = content
-	_render_profiles()
+	_render_profiles(created)
 
 ## Everything a profile row shows or binds, in order: the label, its tooltip, and
 ## what the trailing buttons do. The active name is the accent, not the content.
@@ -1329,7 +1327,10 @@ func _apply_profile_state() -> void:
 		if btn != null:
 			_apply_row_accent(btn, str(row.get_meta("profile_name")) == _profile_active_name)
 
-func _render_profiles():
+## `created` names the profile rows new to this render (a pure append, per
+## `UiMotion.appended_indices`); only those fade. The catalog hint is a row of
+## the section, never of the list, so it never arrives.
+func _render_profiles(created: Array[int] = []):
 	if not _profile_list: return
 	_validate_profile_pending()
 	for c in _profile_list.get_children(): c.queue_free()
@@ -1401,6 +1402,9 @@ func _render_profiles():
 			x.pressed.connect(func(): request_delete_profile.emit(user_index))
 			row.add_child(x)
 		_profile_list.add_child(row)
+		if created.has(i):
+			UiMotion.arrive(row, UiMotion.ARRIVAL_MS, 0.0,
+				UiMotion.stagger_ms(created.find(i)))
 		rows.append(row)
 
 	# The catalog hint is the section's last row, always: with installed

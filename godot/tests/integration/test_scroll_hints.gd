@@ -8,9 +8,14 @@ extends GutTest
 
 var _root: Control
 var _temp: String
+var _saved_motion := 0
 
 func before_each():
 	MockAutoloads.setup()
+	# This suite pins visibility semantics; the ramps have their own two tests
+	# below, so Off makes every existing hide immediate again.
+	_saved_motion = SettingsManager.cfg_motion
+	SettingsManager.cfg_motion = UiMotion.OFF
 	_root = TestScene.create()
 	_root.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	_root.size = Vector2(800, 600)
@@ -24,6 +29,7 @@ func after_each():
 		_root.free()
 		_root = null
 	TestPaths.remove_tree(_temp)
+	SettingsManager.cfg_motion = _saved_motion
 	MockAutoloads.teardown()
 
 ## A `ScrollContainer` of `height` px holding one body of `body_height` px.
@@ -192,3 +198,42 @@ func test_the_code_viewer_rebinds_on_a_view_toggle():
 		"rendered mode rebinds the reader's bar")
 	assert_true(pane._scroll_hints.bottom_button.visible,
 		"the rendered body runs past the viewport too")
+
+# ── The ramp ───────────────────────────────────────────────────────────
+
+func test_a_chevron_fades_in_and_out():
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	var scroll := _scroll_body(200, 4000)
+	await get_tree().process_frame
+	var bar := scroll.get_v_scroll_bar()
+	var hints := ScrollHints.attach(_root, scroll)
+	hints.bind_bar(bar)
+	await get_tree().process_frame
+	var button := hints.bottom_button
+	assert_true(button.visible, "the direction shows")
+	assert_lt(button.modulate.a, 1.0, "it arrives from transparent")
+	var settled: Vector2 = button.position
+	var settled_size: Vector2 = button.size
+	await wait_seconds(0.2)
+	assert_almost_eq(button.modulate.a, 1.0, 0.001, "the arrival lands on its alpha")
+
+	bar.value = bar.max_value
+	await wait_seconds(0.05)
+	assert_true(button.visible, "the chevron is still on screen while it fades")
+	assert_lt(button.modulate.a, 1.0, "the dismissal is under way")
+	assert_eq(button.position, settled, "the ramp never lays the button out")
+	assert_eq(button.size, settled_size)
+	await wait_seconds(0.2)
+	assert_false(button.visible, "hidden once the ramp ends")
+
+func test_off_flips_a_chevron_in_one_sync():
+	var scroll := _scroll_body(200, 4000)
+	await get_tree().process_frame
+	var bar := scroll.get_v_scroll_bar()
+	var hints := ScrollHints.attach(_root, scroll)
+	hints.bind_bar(bar)
+	await get_tree().process_frame
+	assert_true(hints.bottom_button.visible)
+	assert_eq(hints.bottom_button.modulate.a, 1.0, "Off draws the arrival final")
+	bar.value = bar.max_value
+	assert_false(hints.bottom_button.visible, "Off hides in the same sync")

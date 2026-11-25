@@ -41,6 +41,10 @@ const FOCUS_BORDER_WIDTH = 2.0
 ## How long a focus gain fades the border in (and a loss fades it out). The
 ## border is drawn in the overlay layer, so a sweep never repaints a row.
 const FOCUS_SWEEP_S := 0.14
+## The search strip's arrival/dismissal and the scrollback indicator's ramp.
+## Both are alpha only, drawn over the grid: no rect moves and no row repaints.
+const SEARCH_STRIP_MS := 100.0
+const INDICATOR_S := 0.1
 const BEAM_CURSOR_WIDTH = 2
 const UNDERLINE_CURSOR_HEIGHT = 3
 const PRINTABLE_ASCII_MIN = 32
@@ -256,6 +260,13 @@ var _cursor_blink_timer: float = 0.0
 var _focus_alpha := 0.0
 var _focus_tween: Tween = null
 var _focus_pinned := false
+## The scrollback indicator's own alpha and the target it is ramping toward.
+## `_indicator_text` keeps the last non-zero readout, so a fade-out never
+## flashes "0/N"; a capture pins `_indicator_alpha` directly.
+var _indicator_alpha := 0.0
+var _indicator_target := 0.0
+var _indicator_text := ""
+var _indicator_tween: Tween = null
 var _cursor_visible: bool = true
 var _last_title: String = ""
 var _selecting: bool = false
@@ -1539,6 +1550,26 @@ func pin_focus_sweep(alpha: float) -> void:
 	_focus_alpha = clampf(alpha, 0.0, 1.0)
 	_repaint_overlay()
 
+## Capture only: hold the search strip at `progress` of its arrival (0-1), so a
+## staged state shows the shipped fade rather than only its final frame. Returns
+## false when the strip has no arrival record to pin (a harness bug: an open
+## strip is always an arrival).
+func pin_search_reveal(progress: float) -> bool:
+	if not _search_strip.has_meta(UiMotion.ARRIVAL_META):
+		return false
+	_search_strip.visible = true
+	UiMotion.pin_arrival(_search_strip, progress)
+	return true
+
+## Capture only: hold the scrollback indicator's alpha (0-1). The indicator is
+## drawn text, so this is the only seam a capture needs.
+func pin_scroll_indicator(alpha: float) -> void:
+	if _indicator_tween != null and _indicator_tween.is_valid():
+		_indicator_tween.kill()
+	_indicator_tween = null
+	_indicator_alpha = clampf(alpha, 0.0, 1.0)
+	_repaint_overlay()
+
 func _draw():
 	var t0 = Time.get_ticks_usec()
 	# The pane's own canvas draws under every child, so it carries only the
@@ -1683,15 +1714,17 @@ func _draw_overlay(item: CanvasItem):
 		# Cursor
 		if _cursor_visible:
 			_draw_cursor(item, off, baseline)
-		# Scrollback indicator
-		var so := _terminal.get_scroll_offset()
-		if so > 0:
+		# Scrollback indicator: text cached by `_sync_scroll_indicator`, drawn
+		# from its own alpha so returning to live output fades it out instead of
+		# dropping it in one frame.
+		if _indicator_alpha > 0.0 and _indicator_text != "":
 			# The search strip covers the pane's first two rows, so the indicator
 			# moves below it while the strip is open instead of vanishing under it.
-			var indicator_row := 2.5 if _search_visible else 0.5
+			var indicator_row := 2.5 if _search_strip.visible else 0.5
 			item.draw_string(_font, Vector2(off.x + _cell_w * 0.5, off.y + _cell_h * indicator_row),
-				"[Scroll: %d/%d lines]" % [so, _terminal.get_history_size()],
-				HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, scrollback_indicator_color)
+				_indicator_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size,
+				Color(scrollback_indicator_color,
+					scrollback_indicator_color.a * _indicator_alpha))
 		# Selection
 		if not _sel_cells.is_empty():
 			_draw_selection(item, off)
@@ -1918,11 +1951,37 @@ func _snap_to_bottom():
 	_sync_scroll_hints()
 
 ## Re-read the grid offset. Which chevrons show (and where) is the widget's
-## rule; this is the terminal's one sync point for it.
+## rule; this is the terminal's one sync point for both chrome readouts - the
+## indicator fades on the same predicate, before the hints' own early return.
 func _sync_scroll_hints() -> void:
+	_sync_scroll_indicator()
 	if _scroll_hints == null or _terminal == null:
 		return
 	_scroll_hints.sync()
+
+## The scrollback indicator is drawn text, not a node, so it ramps its own
+## alpha. `_indicator_text` is refreshed only while the view is off live output,
+## so the last readable readout fades with the indicator instead of flipping to
+## "0/N" on the way out.
+func _sync_scroll_indicator() -> void:
+	var so := 0 if _terminal == null else _terminal.get_scroll_offset()
+	if so > 0:
+		_indicator_text = "[Scroll: %d/%d lines]" % [so, _terminal.get_history_size()]
+	var wanted := 1.0 if so > 0 else 0.0
+	if wanted == _indicator_target:
+		return
+	_indicator_target = wanted
+	if _indicator_tween != null and _indicator_tween.is_valid():
+		_indicator_tween.kill()
+	_indicator_tween = null
+	if not UiMotion.enabled():
+		_indicator_alpha = wanted
+		_repaint_overlay()
+		return
+	_indicator_tween = create_tween()
+	_indicator_tween.tween_method(func(v: float):
+		_indicator_alpha = v
+		_repaint_overlay(), _indicator_alpha, wanted, UiMotion.duration_s(INDICATOR_S))
 
 ## Up while any in-memory scrollback is above the viewport, and never while the
 ## search strip covers the pane's top edge (the strip owns that corner then).
@@ -2094,9 +2153,29 @@ func _on_search_bar_input(event):
 		_search_bar.accept_event()
 		return
 
+## The strip arrives with the one fade every appearing surface uses; closing it
+## fades it out and then hides it. The hide keeps `visible` true for the ramp
+## (the surface is still on screen), and its callback is what returns the up
+## chevron, because the strip owns the pane's top-right corner while visible.
+func _show_search_strip() -> void:
+	_search_strip.visible = true
+	UiMotion.arrive(_search_strip, SEARCH_STRIP_MS)
+
+func _hide_search_strip() -> void:
+	if not _search_strip.visible:
+		return
+	UiMotion.dismiss(_search_strip, SEARCH_STRIP_MS, _on_search_strip_hidden)
+
+func _on_search_strip_hidden() -> void:
+	_sync_scroll_hints()
+	_repaint_overlay()
+
 func _toggle_search():
 	_search_visible = not _search_visible
-	_search_strip.visible = _search_visible
+	if _search_visible:
+		_show_search_strip()
+	else:
+		_hide_search_strip()
 	_sync_scroll_hints()
 	# The panel is visible iff the History scope has something to say; a fresh
 	# open has no results in the list yet.
@@ -2113,7 +2192,7 @@ func _toggle_search():
 
 func _close_search():
 	_search_visible = false
-	_search_strip.visible = false
+	_hide_search_strip()
 	_sync_scroll_hints()
 	_search_results.clear()
 	_search_error = ""
