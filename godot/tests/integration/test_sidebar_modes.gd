@@ -61,6 +61,20 @@ func test_the_three_modes_set_the_widths():
 	assert_almost_eq(_ws._sidebar_bg.size.x, float(Sidebar.COLLAPSED_WIDTH), 0.5)
 	assert_almost_eq(_ws._grid.offset_left, float(Sidebar.COLLAPSED_WIDTH), 0.5)
 
+func test_a_mode_change_fades_the_shell():
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	_ws._cycle_sidebar_mode()
+	assert_eq(_sidebar().mode(), SettingsManager.SIDEBAR_ICONS)
+	assert_almost_eq(_ws._grid.offset_left, float(Sidebar.ICONS_WIDTH), 0.5,
+		"the width and the grid's reflow are written in the same call")
+	assert_lt(_ws._sidebar_bg.modulate.a, 1.0, "the shell fades in over the reflow")
+	await wait_seconds(0.2)
+	assert_almost_eq(_ws._sidebar_bg.modulate.a, 1.0, 0.001)
+	SettingsManager.cfg_motion = UiMotion.OFF
+	_ws._cycle_sidebar_mode()
+	assert_eq(_ws._sidebar_bg.modulate.a, 1.0, "Off draws the shell final")
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+
 func test_ctrl_shift_b_cycles_the_modes_and_persists():
 	assert_eq(ShortcutManager.chord("app:toggle_sidebar"), "Ctrl+Shift+B")
 	_ws._cycle_sidebar_mode()

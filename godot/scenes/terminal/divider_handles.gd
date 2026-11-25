@@ -16,7 +16,8 @@ extends Control
 ## single-pane grid and a divider pinned at `MIN_TILE` from advertising a resize
 ## they cannot honour. A hover paints `HIGHLIGHT` px of the accent colour down
 ## the middle of the band, so the divider is visible even where the platform's
-## cursor shape does not change.
+## cursor shape does not change; the band ramps in and out through [UiMotion]
+## (one frame at Off), and a press that starts a drag clears it at once.
 ##
 ## Geometry is pure and static (`segments`, `handle_rect`), so it is testable
 ## without a scene tree; the instance half owns a pool of `Control`s that is
@@ -28,6 +29,10 @@ extends Control
 const HIT := 12
 ## Thickness of the hover highlight, px.
 const HIGHLIGHT := 2
+## The hover ramp; the band is drawn, so this is an alpha per pool slot and Off
+## writes it and repaints once. A drag clears it at once (the moving line is
+## the feedback then).
+const HOVER_MS := 100.0
 
 ## The manager whose tiles the bands are drawn over, held weakly: the layer
 ## lives in a grid, the grid's workspace owns the manager, and a strong
@@ -52,6 +57,11 @@ var _pool: Array[Control] = []
 var _slot: Array[Dictionary] = []
 ## The pool slot the pointer is over, or -1.
 var _hovered := -1
+## One hover alpha and one ramp per pool slot. The band is drawn by the handle,
+## so modulate cannot carry it; a slot that changes segment starts at zero (an
+## alpha must not survive onto a different line).
+var _hover_alpha: Array[float] = []
+var _hover_tweens: Array[Tween] = []
 
 func _init(tm) -> void:
 	_tm_ref = weakref(tm)
@@ -157,12 +167,15 @@ func refresh() -> void:
 	for i in _pool.size():
 		var handle: Control = _pool[i]
 		if i >= _segments.size():
+			_clear_hover(i)
 			_slot[i] = {}
 			handle.visible = false
 			handle.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			handle.mouse_default_cursor_shape = Control.CURSOR_ARROW
 			continue
 		var seg: Dictionary = _segments[i]
+		if _slot[i] != seg:
+			_clear_hover(i)
 		_slot[i] = seg
 		var rect := handle_rect(seg, extent, PaneTypes.GRID)
 		handle.position = rect.position
@@ -192,6 +205,8 @@ func _ensure_pool(count: int) -> void:
 		handle.draw.connect(_draw_slot.bind(i))
 		_pool.append(handle)
 		_slot.append({})
+		_hover_alpha.append(0.0)
+		_hover_tweens.append(null)
 
 func _on_handle_input(event: InputEvent, slot: int) -> void:
 	if not (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT):
@@ -203,8 +218,11 @@ func _on_handle_input(event: InputEvent, slot: int) -> void:
 		return
 	if _tm.begin_line_drag(str(seg["axis"]), int(seg["line"]), event.global_position):
 		# The drag owns the divider from here; the hover affordance has served
-		# its purpose and the moving divider is the feedback now.
+		# its purpose and the moving divider is the feedback now. Cleared at
+		# once, not ramped: the committed drag capture must not depend on a
+		# frame clock.
 		_hovered = -1
+		_clear_hover(slot)
 		_pool[slot].queue_redraw()
 
 func _set_hover(slot: int, on: bool) -> void:
@@ -212,22 +230,68 @@ func _set_hover(slot: int, on: bool) -> void:
 		_hovered = slot
 	elif _hovered == slot:
 		_hovered = -1
-	if slot >= 0 and slot < _pool.size():
+	_ramp_hover(slot, 1.0 if on else 0.0)
+
+## Fade one slot's band toward `target`. The alpha is per slot because the band
+## is drawn, not modulated; a second hover change kills the running ramp, and
+## Off writes the target and repaints once.
+func _ramp_hover(slot: int, target: float) -> void:
+	if slot < 0 or slot >= _pool.size():
+		return
+	var tw := _hover_tweens[slot]
+	if tw is Tween and tw.is_valid():
+		tw.kill()
+	_hover_tweens[slot] = null
+	var duration := UiMotion.duration_s(HOVER_MS / 1000.0)
+	if duration <= 0.0:
+		_hover_alpha[slot] = target
 		_pool[slot].queue_redraw()
+		return
+	var from := _hover_alpha[slot]
+	_hover_tweens[slot] = create_tween()
+	_hover_tweens[slot].tween_method(func(v: float):
+		_hover_alpha[slot] = v
+		if slot < _pool.size():
+			_pool[slot].queue_redraw(), from, target, duration)
+
+## Kill a slot's ramp and drop its band to zero without a redraw (the caller
+## either hides the slot or repaints).
+func _clear_hover(slot: int) -> void:
+	if slot < 0 or slot >= _hover_alpha.size():
+		return
+	var tw := _hover_tweens[slot]
+	if tw is Tween and tw.is_valid():
+		tw.kill()
+	_hover_tweens[slot] = null
+	_hover_alpha[slot] = 0.0
+
+## Capture only: hold one band's alpha (0-1) for a staged hover.
+func pin_hover(slot: int, alpha: float) -> void:
+	if slot < 0 or slot >= _pool.size():
+		return
+	_clear_hover(slot)
+	_hover_alpha[slot] = clampf(alpha, 0.0, 1.0)
+	_pool[slot].queue_redraw()
 
 ## The hover highlight, drawn by the handle itself so it is clipped to the band.
+## Drawn from the slot's alpha: the pointer can leave while the band fades, and
+## the two must not disagree.
 func _draw_slot(slot: int) -> void:
-	if slot != _hovered or slot < 0 or slot >= _pool.size() or slot >= _slot.size():
+	if slot < 0 or slot >= _pool.size() or slot >= _slot.size():
 		return
 	if _slot[slot].is_empty():
 		return
+	var alpha := _hover_alpha[slot]
+	if alpha <= 0.0:
+		return
 	var handle: Control = _pool[slot]
 	var accent: Color = UiPalette.active().ACCENT
+	var colour := Color(accent, accent.a * alpha)
 	if str(_slot[slot]["axis"]) == "x":
 		handle.draw_rect(
 			Rect2(Vector2(handle.size.x * 0.5 - HIGHLIGHT * 0.5, 0.0),
-				Vector2(HIGHLIGHT, handle.size.y)), accent)
+				Vector2(HIGHLIGHT, handle.size.y)), colour)
 	else:
 		handle.draw_rect(
 			Rect2(Vector2(0.0, handle.size.y * 0.5 - HIGHLIGHT * 0.5),
-				Vector2(handle.size.x, HIGHLIGHT)), accent)
+				Vector2(handle.size.x, HIGHLIGHT)), colour)

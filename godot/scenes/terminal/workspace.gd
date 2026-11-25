@@ -67,6 +67,11 @@ const IMPLIED_WORKSPACE_NAME := "Default"
 ## spend a machine's processes and memory without end.
 const MAX_LIVE_PANES := 96
 
+## How long the sidebar shell fades on a mode change. The column's width and
+## the grid's reflow are written in the same frame (no width tween, no text
+## moving); only the shell's alpha ramps.
+const SIDEBAR_SHELL_MS := 80.0
+
 ## The three reasons a saved command has nowhere to go. One wording each: the
 ## palette shows the refused rows' tooltip from these same strings, so a hint
 ## and the toast that follows it cannot disagree.
@@ -2837,6 +2842,11 @@ func _on_sidebar_toggled():
 		if lbl: lbl.visible = _sidebar.offset_right > Sidebar.ICONS_WIDTH
 	_sync_sidebar_effect()
 	_apply_layout()
+	# The width and the grid's reflow are already final; the shell fades in
+	# instead of the column appearing whole in one frame. This runs only on a
+	# real mode change - the initial mode is applied before `mode_changed` is
+	# wired - so launch never fades.
+	UiMotion.arrive(_sidebar_bg, SIDEBAR_SHELL_MS)
 
 func _ensure_sidebar_flyout() -> SidebarFlyout:
 	if _sidebar_flyout == null:

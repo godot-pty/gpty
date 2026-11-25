@@ -96,3 +96,90 @@ func test_pin_arrival_freezes_the_shipped_curve():
 	UiMotion.pin_arrival(node, 1.0)
 	assert_almost_eq(node.modulate.a, 1.0, 0.01, "progress 1 is the completed frame")
 	assert_almost_eq(node.position.y, 20.0, 0.01, "including the rise's landing")
+
+# ── The dismissal and the shared list rules ────────────────────────────
+
+func test_a_dismiss_fades_out_then_hides():
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	var node := _target()
+	var calls := [0]
+	var tw := UiMotion.dismiss(node, 100.0, func(): calls[0] += 1)
+	assert_not_null(tw)
+	assert_true(node.visible, "the surface is still on screen while it fades")
+	assert_gt(node.modulate.a, 0.0, "the fade starts from the alpha on screen")
+	await wait_seconds(0.2)
+	assert_false(node.visible, "a dismissal hides when the ramp ends")
+	assert_almost_eq(node.modulate.a, 0.0, 0.001)
+	assert_eq(calls[0], 1, "the finish callback runs once")
+
+func test_off_dismisses_in_one_frame():
+	SettingsManager.cfg_motion = UiMotion.OFF
+	var node := _target()
+	var calls := [0]
+	var tw := UiMotion.dismiss(node, 100.0, func(): calls[0] += 1)
+	assert_null(tw, "there is nothing to run")
+	assert_false(node.visible)
+	assert_eq(calls[0], 1)
+	assert_almost_eq(node.modulate.a, 0.0, 0.001)
+
+func test_an_arrival_after_a_dismiss_is_visible_again():
+	var node := _target()
+	UiMotion.dismiss(node, 10.0)
+	await wait_seconds(0.1)
+	assert_false(node.visible)
+	node.visible = true
+	SettingsManager.cfg_motion = UiMotion.OFF
+	assert_null(UiMotion.arrive(node), "Off runs nothing")
+	assert_almost_eq(node.modulate.a, 1.0, 0.001,
+		"Off restores the settled alpha a dismissal left at zero")
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	UiMotion.arrive(node, 50.0)
+	assert_almost_eq(node.modulate.a, 0.0, 0.001,
+		"a repeat arrival on a settled surface fades again")
+	await wait_seconds(0.2)
+	assert_almost_eq(node.modulate.a, 1.0, 0.001)
+
+func test_an_interrupted_arrival_keeps_its_settled_target():
+	var node := _target()
+	var first := UiMotion.arrive(node, 200.0) as Tween
+	await wait_seconds(0.05)
+	var mid := node.modulate.a
+	assert_gt(mid, 0.0, "the first ramp is under way")
+	assert_lt(mid, 1.0)
+	var second := UiMotion.arrive(node, 200.0) as Tween
+	assert_not_null(second)
+	assert_false(first.is_valid(), "the interrupted ramp is killed")
+	assert_almost_eq(node.modulate.a, mid, 0.01,
+		"the new ramp starts where the screen was")
+	await wait_seconds(0.3)
+	assert_almost_eq(node.modulate.a, 1.0, 0.001,
+		"the settled alpha is still the target")
+	UiMotion.arrive(node, 50.0)
+	assert_almost_eq(node.modulate.a, 0.0, 0.001,
+		"a settled surface fades again instead of resuming")
+
+func test_only_a_prefix_append_is_an_arrival():
+	assert_eq(UiMotion.appended_indices([], ["a"]).size(), 0,
+		"a first render is not an arrival")
+	assert_eq(UiMotion.appended_indices(["a"], ["a", "b"]), [1])
+	assert_eq(UiMotion.appended_indices(["a"], ["a", "b", "c"]), [1, 2])
+	assert_eq(UiMotion.appended_indices(["a"], ["a", "b", "c", "d"]), [1, 2, 3])
+	assert_eq(UiMotion.appended_indices(["a"], ["a", "b", "c", "d", "e"]).size(), 0,
+		"more than three new rows is a content change, not a created row")
+	assert_eq(UiMotion.appended_indices(["a"], ["b"]).size(), 0,
+		"a replacement never cascades fades")
+	assert_eq(UiMotion.appended_indices(["a", "b"], ["a"]).size(), 0)
+	assert_eq(UiMotion.appended_indices(["a", "b"], ["a", "c", "d"]).size(), 0,
+		"a rename is not a prefix")
+
+func test_stagger_is_full_only():
+	SettingsManager.cfg_motion = UiMotion.OFF
+	assert_eq(UiMotion.stagger_ms(1), 0.0)
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	assert_eq(UiMotion.stagger_ms(1), 0.0, "Subtle has no stagger")
+	SettingsManager.cfg_motion = UiMotion.FULL
+	assert_eq(UiMotion.stagger_ms(0), 0.0, "the first row starts at once")
+	assert_eq(UiMotion.stagger_ms(1), UiMotion.ARRIVAL_STAGGER_MS)
+	assert_eq(UiMotion.stagger_ms(2), 2.0 * UiMotion.ARRIVAL_STAGGER_MS)
+	assert_eq(UiMotion.stagger_ms(3), 0.0, "the cap is three staggered rows")
+	assert_eq(UiMotion.stagger_ms(-1), 0.0)

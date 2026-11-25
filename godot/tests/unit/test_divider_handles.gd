@@ -6,7 +6,9 @@ extends GutTest
 # two 6 px targets with the two 1 px wrapper borders dead between them, and they
 # existed even where nothing could move. A band here must span exactly the
 # stretch where both sides exist (a pane that crosses the line must not have a
-# handle over its own content) and be centred on the line.
+# handle over its own content) and be centred on the line. The one scene-tree
+# test below covers the hover ramp, which is drawn (per-slot alpha), never laid
+# out.
 
 const GRID := PaneTypes.GRID
 
@@ -78,3 +80,31 @@ func test_a_short_segment_maps_to_its_own_stretch():
 		"the band is centred on the line")
 	assert_almost_eq(rect.size.x, (GRID - 35) * 1200.0 / GRID, 0.01,
 		"the band ends with the panes it separates")
+
+func test_the_hover_band_ramps_and_off_is_instant():
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+	var layer := DividerHandles.new(null)
+	add_child_autofree(layer)
+	layer._ensure_pool(1)
+	layer._slot[0] = {"axis": "x", "line": 1, "from": 0, "to": 1}
+	layer._pool[0].size = Vector2(DividerHandles.HIT, 100.0)
+	layer._set_hover(0, true)
+	assert_lt(layer._hover_alpha[0], 1.0, "the band fades in")
+	var band_position: Vector2 = layer._pool[0].position
+	var band_size: Vector2 = layer._pool[0].size
+	await wait_seconds(0.2)
+	assert_almost_eq(layer._hover_alpha[0], 1.0, 0.001)
+	layer._set_hover(0, false)
+	await wait_seconds(0.2)
+	assert_almost_eq(layer._hover_alpha[0], 0.0, 0.001, "and fades out")
+	assert_eq(layer._pool[0].position, band_position, "the band is drawn, never moved")
+	assert_eq(layer._pool[0].size, band_size)
+	layer.pin_hover(0, 0.5)
+	await wait_seconds(0.2)
+	assert_almost_eq(layer._hover_alpha[0], 0.5, 0.001, "a capture pin holds")
+	SettingsManager.cfg_motion = UiMotion.OFF
+	layer._set_hover(0, true)
+	assert_eq(layer._hover_alpha[0], 1.0, "Off writes the band final")
+	layer._set_hover(0, false)
+	assert_eq(layer._hover_alpha[0], 0.0, "and clears it in one call")
+	SettingsManager.cfg_motion = UiMotion.SUBTLE

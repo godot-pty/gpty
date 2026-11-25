@@ -936,6 +936,73 @@ func test_motion_off_inserts_the_row_final():
 		"Off draws the row final in one frame")
 	SettingsManager.cfg_motion = UiMotion.SUBTLE
 
+func test_an_appended_workspace_fades_only_the_created_row():
+	_sidebar.update_workspace_list(["A"], 0)
+	await get_tree().process_frame
+	for row in _sidebar._workspace_list.get_children():
+		assert_false(row.has_meta(UiMotion.ARRIVAL_META),
+			"the first render is not an arrival")
+	_sidebar.update_workspace_list(["A", "B"], 0)
+	var list := _sidebar._workspace_list
+	var created: Control = list.get_child(list.get_child_count() - 1)
+	assert_true(created.has_meta(UiMotion.ARRIVAL_META), "the appended row is an arrival")
+	assert_almost_eq(created.modulate.a, 0.0, 0.001,
+		"the created row starts transparent, before any frame")
+	await get_tree().process_frame
+	assert_same(list.get_child(list.get_child_count() - 1), created,
+		"the arrival row is the one the list keeps")
+	var position: Vector2 = created.position
+	var size: Vector2 = created.size
+	await wait_seconds(0.2)
+	assert_almost_eq(created.modulate.a, 1.0, 0.001)
+	assert_eq(created.position, position, "the arrival never moves the row")
+	assert_eq(created.size, size)
+	_sidebar.update_workspace_list(["C", "B"], 1)
+	await get_tree().process_frame
+	for row in _sidebar._workspace_list.get_children():
+		assert_false(row.has_meta(UiMotion.ARRIVAL_META), "a rename creates no arrival")
+	_sidebar.update_workspace_list(["C", "B", "D", "E", "F", "G"], 0)
+	await get_tree().process_frame
+	for row in _sidebar._workspace_list.get_children():
+		assert_false(row.has_meta(UiMotion.ARRIVAL_META),
+			"more than three new rows is a content change, not an arrival")
+
+func test_an_appended_profile_fades_only_the_created_row():
+	_sidebar.update_profile_list([{"name": "One", "description": ""}], "")
+	await get_tree().process_frame
+	_sidebar.update_profile_list([
+		{"name": "One", "description": ""},
+		{"name": "Two", "description": ""},
+	], "")
+	var created: Control = null
+	for row in _sidebar._profile_list.get_children():
+		if str(row.get_meta("profile_name", "")) == "Two":
+			created = row
+	assert_not_null(created, "the appended profile has a row")
+	assert_true(created.has_meta(UiMotion.ARRIVAL_META), "the appended profile is an arrival")
+	assert_almost_eq(created.modulate.a, 0.0, 0.001,
+		"the created profile starts transparent, before any frame")
+	await get_tree().process_frame
+	assert_true(is_instance_valid(created) and created.is_inside_tree(),
+		"the arrival row is the one the list keeps")
+	var hint: Control = _sidebar._profile_list.get_child(
+		_sidebar._profile_list.get_child_count() - 1)
+	assert_false(hint.has_meta(UiMotion.ARRIVAL_META),
+		"the catalog hint is a section row, not a created profile")
+	await wait_seconds(0.2)
+	assert_almost_eq(created.modulate.a, 1.0, 0.001)
+
+func test_motion_off_inserts_the_workspace_row_final():
+	SettingsManager.cfg_motion = UiMotion.OFF
+	_sidebar.update_workspace_list(["A"], 0)
+	await get_tree().process_frame
+	_sidebar.update_workspace_list(["A", "B"], 0)
+	var row: Control = _sidebar._workspace_list.get_child(
+		_sidebar._workspace_list.get_child_count() - 1)
+	assert_false(row.has_meta(UiMotion.ARRIVAL_META), "no ramp is recorded at Off")
+	assert_eq(row.modulate.a, 1.0, "Off draws the row final")
+	SettingsManager.cfg_motion = UiMotion.SUBTLE
+
 func test_a_close_confirm_swaps_only_its_rows_actions():
 	var a := PaneBody.new()
 	a.pane_label = "T1"

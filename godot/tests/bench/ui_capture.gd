@@ -366,6 +366,20 @@ const STATES := {
 					'for i in 1 2 3 4 5 6 7 8; do echo "output line $i"; done; '
 					+ 'printf "alpha one\\nalpha two\\nbeta three\\nalpha four\\n"; sleep 600']}},
 	], "open": "search-history", "query": "alpha"},
+	# Row *The small chrome state changes still snap*: two chrome ramps pinned
+	# mid-way, one pane's search strip and the divider's hover band. The left
+	# tile is the search tile; the two half-width tiles give the divider.
+	"small-chrome": {"size": Vector2i(1280, 760), "settings": {"cfg_motion": 1},
+		"tiles": [
+			{"col": 0, "row": 0, "cspan": 30, "rspan": 60, "settings": {
+				"type": "terminal", "attachment_id": "capture-small-chrome",
+				"shell_args": ["-c",
+					'printf "alpha one\\nalpha two\\nbeta three\\nalpha four\\n"; sleep 600']}},
+			{"col": 30, "row": 0, "cspan": 30, "rspan": 60, "settings": {
+				"type": "terminal", "attachment_id": "capture-small-chrome-right",
+				"shell_args": ["-c", "sleep 600"]}}],
+		"open": "search", "query": "alpha",
+		"search_reveal": 0.5, "divider_hover": 0.5},
 	"workspace-1280x760": {"size": Vector2i(1280, 760), "panes": 4},
 	# Eight tiles is the memory/repaint budget's many-pane case; 4x2 keeps each
 	# terminal wide enough to settle with a prompt.
@@ -479,7 +493,10 @@ const STATES := {
 		"size": DEFAULT_SIZE, "tiles": [WIKI_GRAPH_TILE], "open": "wiki-graph",
 		"graph_mode": "2d", "settings": {"cfg_appearance_mode": 1},
 	},
-	"concept-editor": {"size": DEFAULT_SIZE, "panes": 1, "open": "concept-editor"},
+	# The selected node's ring is the subject (`select_node`): the engine picks
+	# `panel_selected`/`titlebar_selected` from the node's own `selected`.
+	"concept-editor": {"size": DEFAULT_SIZE, "panes": 1, "open": "concept-editor",
+		"select_node": 0},
 	# The divider grab band: a 12 px handle centred on the line between two
 	# panes, highlighted on hover (row *Resizing a pane is smooth*). The pointer
 	# is left on the band, so this state must not be parked.
@@ -711,6 +728,7 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 	_pin_backdrops(state)
 	_pin_effects(state)
 	_pin_preview(state)
+	_pin_chrome(state)
 
 	if args.get("perturb", "") == state_name:
 		_perturb(state_name)
@@ -831,6 +849,37 @@ func _pin_preview(state: Dictionary) -> void:
 		panel._preview.pin_effect()
 	if state.get("sidebar_effect", false):
 		_workspace.pin_sidebar_effect()
+
+
+## Pin the chrome ramps that are meant to be visible at their final frame, so a
+## capture never depends on frame timing. A state that names a mid-ramp fraction
+## (`search_reveal`, `divider_hover`) gets that frame instead. Untyped property
+## reads and `has_method` calls only: this `-s` entry point compiles before
+## autoloads exist, so naming `UiMotion` or `DividerHandles` here would compile
+## them (and their `SettingsManager` reads) before the autoloads are registered.
+func _pin_chrome(state: Dictionary) -> void:
+	var reveal := float(state.get("search_reveal", 1.0))
+	for tile in _workspace._tm.tiles:
+		var body = _workspace._tm._find_body(tile.wrapper)
+		if body == null or not body.has_method("pin_search_reveal"):
+			continue
+		if bool(body.get("_search_visible")):
+			if not bool(body.pin_search_reveal(reveal)):
+				_fail("the search strip is open without an arrival record")
+				return
+		if body.has_method("pin_scroll_indicator") \
+				and float(body.get("_indicator_target")) > 0.0:
+			body.pin_scroll_indicator(1.0)
+	var layer = _workspace._grid.get_node_or_null("DividerHandles")
+	if layer == null:
+		return
+	if state.has("divider_hover"):
+		if layer._segments.is_empty():
+			_fail("the state names a divider hover but the grid has no divider")
+			return
+		layer.pin_hover(0, float(state["divider_hover"]))
+	elif layer._hovered >= 0:
+		layer.pin_hover(layer._hovered, 1.0)
 
 
 # ── Seeding ────────────────────────────────────────────────────────────
@@ -1180,13 +1229,25 @@ func _apply_state(state_name: String, state: Dictionary) -> bool:
 			if _workspace._concept_graph == null or not _workspace._concept_graph.visible:
 				_fail("Open Visual Editor did not open the concept graph")
 				return false
+			if state.has("select_node"):
+				var graph: GraphEdit = _workspace._concept_graph._graph
+				var nodes: Array[GraphNode] = []
+				for child in graph.get_children():
+					if child is GraphNode:
+						nodes.append(child)
+				var pick := int(state["select_node"])
+				if nodes.is_empty() or pick >= nodes.size():
+					_fail("the concept graph has no node %d to select" % pick)
+					return false
+				graph.set_selected(nodes[pick])
+				await _wait_frames(2)
 		"resize-hover":
 			var band: Control = _divider_band()
 			if band == null:
 				return false
 			await _send_motion(root.get_final_transform() * _band_center(band))
 			await _wait_frames(3)
-			var layer: DividerHandles = _workspace._grid.get_node("DividerHandles")
+			var layer = _workspace._grid.get_node("DividerHandles")
 			if layer._hovered != 0:
 				_fail("the pointer did not land on the divider handle")
 				return false
@@ -1480,8 +1541,10 @@ func _park_pointer() -> void:
 	await _wait_frames(2)
 
 ## The first divider band a resize state grabs, or null after failing the run.
+## Untyped: naming `DividerHandles` here would compile it (and `UiMotion`, and
+## `SettingsManager`) before the autoloads exist.
 func _divider_band() -> Control:
-	var layer: DividerHandles = _workspace._grid.get_node_or_null("DividerHandles")
+	var layer = _workspace._grid.get_node_or_null("DividerHandles")
 	if layer == null or layer._pool.is_empty():
 		_fail("the workspace grid has no divider handle")
 		return null

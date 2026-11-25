@@ -242,10 +242,13 @@ static func build() -> Theme:
 
 	# --- The concept graph -----------------------------------------------------
 	t.set_stylebox("panel", "GraphEdit", _padded(_flat(p.SURFACE, p.BORDER, 1), UiTokens.SPACE_SM))
+	# The canvas is focused while the editor is open; its own ring replaces the
+	# engine's stock focus box (a 2 px blue outline the theme never named).
+	t.set_stylebox("panel_focus", "GraphEdit", _flat(Color.TRANSPARENT, p.ACCENT, 1))
 	t.set_stylebox("panel", "GraphNode", _graph_node_box(p.SURFACE_RAISED))
-	t.set_stylebox("panel_selected", "GraphNode", _graph_node_box(p.SURFACE_RAISED))
+	t.set_stylebox("panel_selected", "GraphNode", _graph_node_selected_box(p.SURFACE_RAISED, false))
 	t.set_stylebox("titlebar", "GraphNode", _graph_node_box(p.SURFACE))
-	t.set_stylebox("titlebar_selected", "GraphNode", _graph_node_box(p.SURFACE))
+	t.set_stylebox("titlebar_selected", "GraphNode", _graph_node_selected_box(p.SURFACE, true))
 
 	# --- Roles ----------------------------------------------------------------
 	# One registration per colour role, so no widget has to hold a token itself.
@@ -328,6 +331,19 @@ static func _graph_node_box(bg: Color) -> StyleBoxFlat:
 	box.content_margin_right = UiTokens.SPACE_XXL
 	box.content_margin_top = UiTokens.SPACE_XL
 	box.content_margin_bottom = UiTokens.SPACE_XL
+	return box
+
+## The selected-node ring: 2 px of accent on the body, and top+left+right on the
+## title bar with no bottom, because the title bar paints over the body's top
+## edge - one continuous outline, not two adjacent lines. The content margins
+## are `_graph_node_box`'s, so selecting a node never resizes it.
+static func _graph_node_selected_box(bg: Color, titlebar: bool) -> StyleBoxFlat:
+	var box := _graph_node_box(bg)
+	box.border_width_left = 2
+	box.border_width_right = 2
+	box.border_width_top = 2
+	box.border_width_bottom = 0 if titlebar else 2
+	box.border_color = UiPalette.active().ACCENT
 	return box
 
 static func _padded(sb: StyleBoxFlat, px: int) -> StyleBoxFlat:

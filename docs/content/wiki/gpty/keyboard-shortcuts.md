@@ -33,7 +33,7 @@ These are handled by the focused terminal before the workspace sees them. `Ctrl+
 | `Ctrl+Shift+O` | New inspector pane |
 | `Ctrl+Shift+W` | Close the focused pane |
 | `Ctrl+Shift+R` | Close all panes in the workspace |
-| `Ctrl+Shift+B` | Toggle the sidebar |
+| `Ctrl+Shift+B` | Cycle the sidebar (expanded, icons, collapsed) |
 | `Ctrl+Shift+P` | Open the command palette |
 | `Ctrl+Shift+E` | Move the keyboard into the focused pane's title-bar buttons |
 | `Ctrl+Shift+A` | Move the keyboard into the window's own title bar (minimize / maximize / close) |
@@ -53,7 +53,7 @@ Closing a pane is guarded. If a command is still running, gPTY asks once before 
 
 `Alt` plus an arrow moves focus to the nearest pane in that direction, judged by pane centers. It only works while a pane holds keyboard focus, which is the normal state after clicking into a pane. The workspace claims the chord before the terminal's key handling, so the arrow does not become a shell escape sequence; every other `Alt` combination still reaches the program.
 
-Fullscreen is the same action on both bindings: `F11` and `Ctrl+Shift+M`. The sidebar's collapse state is independent of fullscreen, and `Ctrl+Shift+B` works in either mode.
+Fullscreen is the same action on both bindings: `F11` and `Ctrl+Shift+M`. The sidebar's position is independent of fullscreen, and `Ctrl+Shift+B` works in either mode.
 
 Each pane's title-bar buttons are keyboard stops, but a focused terminal sends `Tab` to its program, so `Ctrl+Shift+E` is the way in: it focuses the first control (pane settings), `Tab` moves through the three and wraps inside the bar, and `Escape` hands the keyboard back to the pane. A chrome action that leaves the pane on screen (a restore from the menu, a completed swap) also gives the keyboard back, so the next keystroke still reaches the shell.
 

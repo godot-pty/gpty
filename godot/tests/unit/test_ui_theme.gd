@@ -303,3 +303,35 @@ func test_the_toast_variations_carry_the_shadow_token():
 		assert_eq(box.shadow_color, p.SHADOW, "%s carries the shadow token" % variation)
 		assert_eq(box.shadow_size, UiTheme.ELEVATION_SHADOW_SIZE)
 		assert_eq(box.shadow_offset, UiTheme.ELEVATION_SHADOW_OFFSET)
+
+func test_the_selected_graph_node_carries_an_accent_ring():
+	var body := _theme.get_stylebox("panel_selected", "GraphNode") as StyleBoxFlat
+	var panel := _theme.get_stylebox("panel", "GraphNode") as StyleBoxFlat
+	assert_not_null(body)
+	assert_eq(body.border_width_left, 2)
+	assert_eq(body.border_width_top, 2)
+	assert_eq(body.border_width_right, 2)
+	assert_eq(body.border_width_bottom, 2)
+	assert_eq(body.border_color, UiPalette.active().ACCENT)
+	assert_eq(body.content_margin_left, panel.content_margin_left,
+		"selecting never resizes the node")
+	assert_eq(body.content_margin_top, panel.content_margin_top)
+	assert_eq(body.bg_color.a, 1.0, "the node stays opaque")
+	var titlebar := _theme.get_stylebox("titlebar_selected", "GraphNode") as StyleBoxFlat
+	assert_not_null(titlebar)
+	assert_eq(titlebar.border_width_left, 2)
+	assert_eq(titlebar.border_width_top, 2)
+	assert_eq(titlebar.border_width_right, 2)
+	assert_eq(titlebar.border_width_bottom, 0,
+		"no doubled line under the title bar")
+	assert_eq(titlebar.border_color, UiPalette.active().ACCENT)
+	var focus := _theme.get_stylebox("panel_focus", "GraphEdit") as StyleBoxFlat
+	assert_not_null(focus, "the canvas owns its focus box")
+	assert_eq(focus.bg_color, Color.TRANSPARENT)
+	assert_eq(focus.border_width_left, 1)
+	assert_eq(focus.border_color, UiPalette.active().ACCENT)
+	UiPalette.use(UiPalette.MODE_LIGHT)
+	var light := UiTheme.build()
+	var light_body := light.get_stylebox("panel_selected", "GraphNode") as StyleBoxFlat
+	assert_eq(light_body.border_color, UiPalette.active().ACCENT,
+		"the ring follows the active palette")
