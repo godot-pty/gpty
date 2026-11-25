@@ -73,7 +73,7 @@ Your definitions are `user://concepts.json`. The shipped defaults are read from 
 
 Settings has a **Concepts** tab. It shows each concept as a row with an enable toggle, the name and trigger, and buttons to edit or delete it; **Add Concept** opens the same form. The form covers the trigger, target, mode, stop timeout, stop-on-input, and conditions; its timeout field offers 50–5,000 ms, while a hand-edited definition may carry up to 600,000 ms.
 
-**Open Visual Editor** is the primary authoring surface: rules are built as a node graph of trigger → conditions → action. The graph's own block in `concepts.json` holds canvas positions, unfinished drafts, and the order rules are tried in. It never holds content, so the `concepts` array stays the single source of truth, and a hand-edited graph cannot invent a trigger or an action. Plugin-shipped rules appear in the list with their plugin and revision as provenance.
+**Open Visual Editor** is the primary authoring surface: rules are built as a node graph of trigger → conditions → action. The graph's own block in `concepts.json` holds canvas positions, unfinished drafts, and the order rules are tried in. It never holds content, so the `concepts` array stays the single source of truth, and a hand-edited graph cannot invent a trigger or an action. Plugin-shipped rules appear in the list with their plugin and revision as provenance. The canvas rings the selected node in the accent colour; **Tidy** re-rows the nodes in the order rules are tried, and **Frame All** fits every node into the canvas (eased under Motion).
 
 The same control surface exists over the API:
 
