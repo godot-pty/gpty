@@ -8,15 +8,17 @@ set -euo pipefail
 #                selects; run nothing (answers "why did the gate skip that?")
 #   (no flag)    Full suite: fmt + lint + clippy + tests + GUT + audit
 #
-# A docs-class change runs the docs gates only (docs-check + the two bundles)
-# in either mode, because nothing it touches can change what the Rust,
-# GDScript or smoke gates test - and CI skips its code workflow for one too
-# (`paths-ignore` in .github/workflows/ci.yml). A path is docs-class when the
-# only gate it can influence is one the Docs workflow already runs: `docs/`,
-# the generated bundles, the capability catalogue, the licenses, and
-# the five scripts that are nothing but that workflow's gates
-# (`scripts/docs-check`, `scripts/build-wiki`, `scripts/build-docs`,
-# `scripts/check-capabilities`, `scripts/roadmap`).
+# A docs-class change runs the docs gates only (workflow lint, docs-check, the
+# two bundles, the catalogue and the ledger) in either mode, because nothing it
+# touches can change what the Rust, GDScript or smoke gates test - and CI
+# skips its code workflow for one too (the `changes` job in
+# .github/workflows/ci.yml). A path is docs-class when the only local gate it
+# can influence is a docs/static one: `docs/`, Markdown, the generated
+# bundles, the capability catalogue, the licenses, workflow YAML (lint-only;
+# the app suites cannot exercise a workflow), and the five scripts that are
+# nothing but that workflow's gates (`scripts/docs-check`,
+# `scripts/build-wiki`, `scripts/build-docs`, `scripts/check-capabilities`,
+# `scripts/roadmap`).
 #
 # A tooling-class change runs the docs gates, the cost gates and a syntax/plan
 # check of the tooling scripts themselves, and stops there. It is an
@@ -127,13 +129,13 @@ changed_paths() {
     } | sed '/^$/d' | sort -u
 }
 
-# docs_class_path: can this path influence only a gate the Docs workflow runs?
+# docs_class_path: can this path influence only a docs/static gate?
 # The list is deliberate, not "anything small": a script moves into this class
-# only when its own gate is in the Docs workflow, so a change to it is still
-# executed by a gate.
+# only when its own gate is in this class. Workflow YAML is lint-only locally
+# (`lint-workflows`); the Rust/GDScript suites cannot exercise a workflow.
 docs_class_path() {
     case "$1" in
-        docs/*|assets/site-icons/*|*.md|godot/knowledge.json|godot/docs.json|LICENSE) return 0 ;;
+        docs/*|assets/site-icons/*|*.md|.github/workflows/*|godot/knowledge.json|godot/docs.json|LICENSE) return 0 ;;
         scripts/docs-check|scripts/build-wiki|scripts/build-docs|scripts/check-capabilities|scripts/roadmap) return 0 ;;
         *) return 1 ;;
     esac
@@ -221,6 +223,17 @@ run_docs_check() {
     else
         fail "docs-check"
         detail "$DOCS_OUT"
+        check_failed
+    fi
+}
+
+run_workflow_lint() {
+    header "workflow YAML lint"
+    if YAML_OUT="$(./scripts/lint-workflows 2>&1)"; then
+        pass "workflow lint"
+    else
+        fail "workflow lint"
+        detail "$YAML_OUT"
         check_failed
     fi
 }
@@ -370,8 +383,10 @@ if [ -z "${CI_CHECK_FULL:-}" ] \
     && { [ -n "${CI_CHECK_RANGE_FROM:-}" ] || ! $CI_MODE; } \
     && docs_class_change; then
     printf "  %bDocs-class change%b — docs gates only; CI_CHECK_FULL=1 runs everything\n" "$BOLD" "$NC"
+    run_workflow_lint
     run_docs_check
     run_capability_check
+    run_roadmap_check
     run_bundle_check
     run_cost_stamp
     printf "\n"
@@ -445,14 +460,7 @@ else
 fi
 
 # ── Step 2: Workflow YAML lint ─────────────────────────────────────────
-header "workflow YAML lint"
-if YAML_OUT="$(./scripts/lint-workflows 2>&1)"; then
-    pass "workflow lint"
-else
-    fail "workflow lint"
-    detail "$YAML_OUT"
-    check_failed
-fi
+run_workflow_lint
 
 # ── Docs: markdown links, roadmap tables, split pages ──────────────────
 run_docs_check
