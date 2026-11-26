@@ -4219,3 +4219,23 @@ still reading as pasted on. Fix direction: size the window with a transparent ma
 inner elevated card (a `PanelContainer` inset by 10 px, the window's own panel set to
 `StyleBoxEmpty`), or draw the shadow from an overlay behind the window's rect; both need a check
 that a transparent embedded window composites the page behind it.
+
+## GUI-188
+
+**A pane's own `max_fps` is overwritten by the next settings save** - found 2026-11-26 while
+closing GUI-135. The terminal schema advertises `max_fps` to layout files and IPC
+(`TERMINAL_SETTINGS` in `godot/scenes/panes/pane_types.gd`: `{"kind": "int", "min": 0, "max": 240}`
+with neither `file` nor `ipc` set false), so `paneSet` accepts it, the live read-back answers
+`changed: ["max_fps"]`, and `TerminalPane._get_layout_state` reports it, so a layout save carries
+it. A spawn applies the global defaults first and the tile's settings second, so a stored value
+wins at launch. But `SettingsManager.apply_to_terminal` broadcasts the global `cfg_max_fps` on every
+`settings_changed`, and `Workspace._on_settings_changed` walks every pane, so the next unrelated
+settings save resets the live pane to the global value; a layout save after that captures the
+reset value. The pane settings panel has no `max_fps` row (its gather dict omits the key), so the
+only writers are `paneSet` and a file - both promised a value that does not hold. Fix direction:
+either mark the key global-broadcast-only (`file: false, ipc: false`, the
+`effect_intensity`/`backdrop` precedent in the same table) and let `paneSettings` stop advertising
+it, or keep the per-pane override and re-apply the pane's own value after the broadcast. Tests:
+`paneSet` a pane's `max_fps` to 30, `SettingsManager.save_settings()`, and assert the pane still
+reads 30 (override) or that `paneSet` refused with a reason; `paneSettings` and the test agree on
+the flags.
