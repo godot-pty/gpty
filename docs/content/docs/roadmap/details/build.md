@@ -1658,7 +1658,11 @@ branch is pushed with the maintainer's credential and the approval is self-appro
 ~375 s, and both SSH pushes died with `SIGPIPE` (exit 141) right after the gate; pushing the
 workflow-bearing commit over HTTPS with the maintainer's `gh` token (0600 temp file,
 `GIT_ASKPASS=scripts/git-askpass-token`) and then pushing the final docs commit with
-`scripts/bot-push` worked, and PR #51 merged with the bot as the last pusher. Fix: create
+`scripts/bot-push` worked, and PR #51 merged with the bot as the last pusher. Measured again
+2026-11-26 on PR #58: an empty commit pushed by the bot is not a reviewable push, so the approval
+submitted after it still resolved to the last pusher's own and the merge box stayed "At least 1
+approving review is required"; the bot-pushed commit after the split must carry a non-workflow diff.
+Fix: create
 `scripts/pr` with `push` and `open`, delete `scripts/bot-push`/`scripts/bot-pr`, and split the push
 whenever `git diff --name-only origin/main...HEAD -- .github/workflows` is non-empty: push the
 newest workflow-touching commit `W` with the maintainer's HTTPS credential, refuse when `W == HEAD`
