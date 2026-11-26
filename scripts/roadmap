@@ -1,0 +1,546 @@
+#!/usr/bin/env python3
+"""Read and update the roadmap ledger.
+
+The ledger is the index row on a release chain page (`v*.md`, plus
+`future.md`) joined by ID to the detail section on `details/<area>.md`.
+$ROADMAP_ROOT overrides the read/write tree (default: repository root), so
+mutation commands can be tested on a copy; git history always comes from the
+real repository. Commands: next, show, next-id, close, rearea, stats,
+release-check, selftest.
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.environ.get('ROADMAP_ROOT') or REPO
+RM = os.path.join(ROOT, 'docs/content/docs/roadmap')
+DETAILS = os.path.join(RM, 'details')
+ROADMAP_MD = os.path.join(ROOT, 'ROADMAP.md')
+ROW = re.compile(
+    r'^\| (✅|⬜|🚫) \| \[([A-Z]+-\d+)\]\(details/([a-z]+)\.md#([a-z]+-\d+)\) '
+    r'\| \*\*(.+?)\*\* \|$')
+SECTION = re.compile(r'(?m)^## ([A-Z]+-\d+)$')
+COMMIT = re.compile(r'^Commits: (.*)$')
+STATUS = {'⬜': 'open', '✅': 'done', '🚫': 'dropped'}
+
+
+class UserError(Exception):
+    pass
+
+
+def die(message):
+    raise UserError(message)
+
+
+def read(path):
+    with open(path, encoding='utf-8') as f:
+        return f.read()
+
+
+def write(path, text):
+    """Write via a sibling temp file, so an interrupted tool never leaves a
+    truncated index row or detail section."""
+    tmp = f'{path}.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8', newline='') as f:
+            f.write(text)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def rel(path):
+    return os.path.relpath(path, ROOT).replace(os.sep, '/')
+
+
+def front_weight(text, where):
+    m = re.match(r'---\n(.*?)\n---\n', text, re.S)
+    w = re.search(r'(?m)^weight:\s*(\d+)\s*$', m.group(1)) if m else None
+    if not w:
+        die(f'{where}: front matter has no weight')
+    return int(w.group(1))
+
+
+class Section:
+    def __init__(self, rid, body):
+        self.id, self.body = rid, body
+
+    @property
+    def number(self):
+        return int(self.id.split('-', 1)[1])
+
+    def clean(self):
+        lines = [x for x in self.body.split('\n') if not COMMIT.match(x)]
+        while lines and not lines[-1].strip():
+            lines.pop()
+        return '\n'.join(lines)
+
+    def commits(self):
+        for line in self.body.split('\n'):
+            m = COMMIT.match(line)
+            if m:
+                return [h.strip() for h in m.group(1).split(',') if h.strip()]
+        return []
+
+
+class DetailPage:
+    def __init__(self, area, path, preamble, sections):
+        self.area, self.path, self.preamble = area, path, preamble
+        self.sections = sections
+
+    def text(self):
+        return self.preamble + ''.join(
+            f'## {s.id}\n\n{s.body}' + ('\n' if i == len(self.sections) - 1 else '\n\n')
+            for i, s in enumerate(self.sections))
+
+    def find(self, rid):
+        return next((s for s in self.sections if s.id == rid), None)
+
+    def insert(self, section):
+        at = next((i for i, s in enumerate(self.sections) if section.number < s.number),
+                  len(self.sections))
+        self.sections.insert(at, section)
+
+
+class Page:
+    def __init__(self, name, path, weight, lines):
+        self.name, self.path, self.weight, self.lines = name, path, weight, lines
+        self.rows = []
+
+
+class Row:
+    def __init__(self, rid, title, area, status, page, line, release):
+        self.id, self.title, self.area, self.status = rid, title, area, status
+        self.page, self.line, self.release = page, line, release
+
+    @property
+    def detail(self):
+        return f'details/{self.area.lower()}.md#{self.id.lower()}'
+
+
+class Ledger:
+    def __init__(self):
+        self.pages, self.rows, self.details = [], {}, {}
+        self._pages()
+        self._details()
+
+    def _pages(self):
+        names = [n for n in sorted(os.listdir(RM)) if re.match(r'^(v.*|future)\.md$', n)]
+        if not names:
+            die(f'{rel(RM)}: no release chain pages')
+        for name in names:
+            path = os.path.join(RM, name)
+            text = read(path)
+            page = Page(name, path, front_weight(text, rel(path)), text.split('\n'))
+            release = None
+            for n, line in enumerate(page.lines, 1):
+                if line.startswith('## '):
+                    release = line[3:].strip()
+                    continue
+                if not line.startswith('| ') or re.match(r'^\| (Done|:?-)', line):
+                    continue
+                m = ROW.match(line)
+                if not m:
+                    die(f'{rel(path)}:{n}: malformed index row: {line[:100]}')
+                status, rid, area, anchor, title = m.groups()
+                if area != rid.split('-', 1)[0].lower() or anchor != rid.lower():
+                    die(f'{rel(path)}:{n}: row link does not name {rid}')
+                if rid in self.rows:
+                    die(f'{rel(path)}:{n}: duplicate ID {rid}')
+                row = Row(rid, title, area.upper(), status, page, n,
+                          None if name == 'future.md' else release)
+                page.rows.append(row)
+                self.rows[rid] = row
+            self.pages.append(page)
+        self.pages.sort(key=lambda p: p.weight)
+
+    def _details(self):
+        if not os.path.isdir(DETAILS):
+            die(f'{rel(DETAILS)}: missing detail pages')
+        for name in sorted(os.listdir(DETAILS)):
+            if not name.endswith('.md'):
+                continue
+            path = os.path.join(DETAILS, name)
+            text = read(path)
+            at = [(m.start(), m.group(1)) for m in SECTION.finditer(text)]
+            sections = []
+            for i, (start, rid) in enumerate(at):
+                end = at[i + 1][0] if i + 1 < len(at) else len(text)
+                sections.append(Section(rid, text[start:end].partition('\n')[2].strip('\n')))
+            self.details[name[:-3]] = DetailPage(
+                name[:-3], path, text[:at[0][0]] if at else text, sections)
+
+    def chain_pages(self):
+        return [p for p in self.pages if p.name != 'future.md']
+
+    def section(self, row):
+        page = self.details.get(row.area.lower())
+        sec = page.find(row.id) if page else None
+        if not sec:
+            die(f'{row.id}: no detail section on details/{row.area.lower()}.md')
+        return page, sec
+
+    def areas(self):
+        text = read(ROADMAP_MD) if os.path.exists(ROADMAP_MD) else ''
+        m = re.search(r'ID prefix names[^(]*\(([A-Z, ]+)\)', text)
+        if not m:
+            die(f'{rel(ROADMAP_MD)}: cannot read the ID prefix names')
+        return [a.strip() for a in m.group(1).split(',') if a.strip()]
+
+    def check_area(self, area):
+        areas = self.areas()
+        if area.upper() not in areas:
+            die(f'unknown area {area}; expected one of {", ".join(areas)}')
+        return area.upper()
+
+    def max_number(self, area):
+        ids = [int(r.split('-', 1)[1]) for r in self.rows if r.startswith(area + '-')]
+        ids += [s.number for p in self.details.values() for s in p.sections
+                if s.id.startswith(area + '-')]
+        return max(ids, default=0)
+
+    def next_id(self, area):
+        return f'{area}-{self.max_number(area) + 1}'
+
+    def row(self, rid):
+        if rid not in self.rows:
+            die(f'no row with ID {rid}')
+        return self.rows[rid]
+
+
+def git(*args):
+    try:
+        proc = subprocess.run(['git', '-C', REPO, *args], text=True, capture_output=True)
+    except OSError as exc:
+        die(f'cannot run git: {exc}')
+    if proc.returncode:
+        die(f'git {" ".join(args)} failed: {proc.stderr.strip()}')
+    return proc.stdout
+
+
+def title_body(sec, where):
+    m = re.match(r'\*\*(.+?)\*\* - (.*)', sec.clean(), re.S)
+    if not m:
+        die(f'{where}: section {sec.id} must start with **Title** - text')
+    return m.group(1), m.group(2).strip()
+
+
+def commits_for(row):
+    """Trailer commits then title line history, deduped oldest first."""
+    found = {}
+    for args in (('log', '--format=%h %ct', '--grep', f'^Roadmap: {row.id}$'),
+                 ('log', '--format=%h %ct', '-S', f'**{row.title}**', '--',
+                  'docs/content/docs/roadmap')):
+        for line in git(*args).splitlines():
+            if line.strip():
+                sha, _, when = line.partition(' ')
+                found.setdefault(sha, int(when or 0))
+    return [sha for sha, _ in sorted(found.items(), key=lambda kv: kv[1])]
+
+
+def subject(sha):
+    try:
+        proc = subprocess.run(['git', '-C', REPO, 'show', '-s', '--format=%h %s', sha],
+                              text=True, capture_output=True)
+    except OSError:
+        return None
+    out = proc.stdout.strip()
+    return None if proc.returncode else (out.split(' ', 1)[1] if ' ' in out else '')
+
+
+# ── commands ─────────────────────────────────────────────────────────────
+
+def cmd_next(args):
+    ledger = Ledger()
+    for page in ledger.chain_pages():
+        for row in page.rows:
+            if row.status != '⬜':
+                continue
+            if args.json:
+                print(json.dumps({'id': row.id, 'title': row.title, 'area': row.area,
+                                  'status': row.status, 'page': row.page.name,
+                                  'release': row.release, 'detail': row.detail},
+                                 indent=2, ensure_ascii=False))
+            else:
+                print(f'{row.id}\n  chain:   {row.page.name[:-3]} ({rel(page.path)})'
+                      f'\n  release: {row.release}\n  title:   {row.title}'
+                      f'\n  detail:  {row.detail}')
+            return
+    die('no open row on the release chain')
+
+
+def cmd_show(args):
+    ledger = Ledger()
+    row = ledger.row(args.id)
+    page, sec = ledger.section(row)
+    _, body = title_body(sec, rel(page.path))
+    if args.json:
+        commits = [{'hash': h, 'subject': subject(h)} for h in sec.commits()]
+        print(json.dumps({'id': row.id, 'title': row.title, 'area': row.area,
+                          'status': row.status, 'page': row.page.name,
+                          'release': row.release, 'body': body, 'commits': commits},
+                         indent=2, ensure_ascii=False))
+        return
+    print(f'{rel(page.path)}:{row.line}')
+    print(row.page.lines[row.line - 1])
+    print(f'\n## {sec.id}\n\n{sec.clean()}')
+    for h in sec.commits():
+        print()
+        print(f'{h} {subject(h)}' if subject(h) else h)
+
+
+def cmd_next_id(args):
+    ledger = Ledger()
+    print(ledger.next_id(ledger.check_area(args.area)))
+
+
+def cmd_close(args):
+    ledger = Ledger()
+    row = ledger.row(args.id)
+    if row.status != '⬜':
+        die(f'{row.id} is {STATUS[row.status]}; close requires an open row')
+    detail_page, sec = ledger.section(row)
+    title, _ = title_body(sec, rel(detail_page.path))
+    hashes = commits_for(row)
+    if not hashes and not args.force:
+        die(f'no commit names {row.id}; add a `Roadmap: {row.id}` trailer '
+            f'to the fix commit, or pass --force to record it as unrecorded')
+    commit_text = ', '.join(hashes) if hashes else 'unrecorded'
+    if args.dry_run:
+        print(f'would close {row.id} ({title})')
+        print(f'  index:   {rel(row.page.path)}:{row.line} ⬜ -> ✅')
+        print(f'  detail:  {rel(detail_page.path)} (Commits: {commit_text})')
+        return
+    row.page.lines[row.line - 1] = row.page.lines[row.line - 1].replace('| ⬜ |', '| ✅ |', 1)
+    write(row.page.path, '\n'.join(row.page.lines))
+    sec.body = f'{sec.clean()}\n\nCommits: {commit_text}'
+    write(detail_page.path, detail_page.text())
+    print(f'closed {row.id}: ✅ {commit_text}')
+
+
+def cmd_rearea(args):
+    ledger = Ledger()
+    row = ledger.row(args.id)
+    if row.status != '⬜':
+        die(f'{row.id} is {STATUS[row.status]}; rearea only moves open rows')
+    area = ledger.check_area(args.area)
+    if area == row.area:
+        die(f'{row.id} is already in {area}')
+    new_id = ledger.next_id(area)
+    src, dst = ledger.details[row.area.lower()], ledger.details.get(area.lower())
+    sec = src.find(row.id)
+    if not sec or not dst:
+        die(f'{row.id}: detail section or target page is missing')
+    title, _ = title_body(sec, rel(src.path))
+    if args.dry_run:
+        print(f'would rearea {row.id} -> {new_id} ({title})')
+        print(f'  detail:  {rel(src.path)} -> {rel(dst.path)}')
+        print(f'  index:   {rel(row.page.path)}:{row.line} {row.id} -> {new_id}')
+        return
+    dst.insert(Section(new_id, sec.body))
+    src.sections.remove(sec)
+    old = f'[{row.id}](details/{row.area.lower()}.md#{row.id.lower()})'
+    line = row.page.lines[row.line - 1]
+    if old not in line:
+        die(f'{rel(row.page.path)}:{row.line}: row link is not {old}')
+    row.page.lines[row.line - 1] = line.replace(
+        old, f'[{new_id}](details/{area.lower()}.md#{new_id.lower()})', 1)
+    write(row.page.path, '\n'.join(row.page.lines))
+    write(src.path, src.text())
+    write(dst.path, dst.text())
+    changed = []
+    cap_dir = os.path.join(ROOT, 'docs/data/capabilities')
+    for name in sorted(os.listdir(cap_dir)) if os.path.isdir(cap_dir) else []:
+        if not name.endswith('.json'):
+            continue
+        path = os.path.join(cap_dir, name)
+        data = json.loads(read(path))
+        hit = False
+        for cap in data.get('capabilities', []):
+            if cap.get('row') == row.id:
+                cap['row'], hit = new_id, True
+        if hit:
+            write(path, json.dumps(data, indent=2, ensure_ascii=True) + '\n')
+            changed.append(rel(path))
+    print(f'moved {row.id} -> {new_id} ({rel(src.path)} -> {rel(dst.path)})')
+    if changed:
+        print(f'  capabilities: {", ".join(changed)}')
+
+
+def cmd_stats(args):
+    ledger = Ledger()
+    data = {'pages': {}, 'areas': {},
+            'total': {'open': 0, 'done': 0, 'dropped': 0, 'rows': len(ledger.rows)}}
+    for page in ledger.pages:
+        counts = {'open': 0, 'done': 0, 'dropped': 0}
+        for row in page.rows:
+            counts[STATUS[row.status]] += 1
+            data['total'][STATUS[row.status]] += 1
+        data['pages'][page.name] = counts
+    for row in ledger.rows.values():
+        bucket = data['areas'].setdefault(row.area, {'open': 0, 'done': 0, 'dropped': 0})
+        bucket[STATUS[row.status]] += 1
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return
+    print(f'{"page":12} open done dropped')
+    for name, c in data['pages'].items():
+        print(f'{name:12} {c["open"]:4} {c["done"]:4} {c["dropped"]:7}')
+    print(f'{"TOTAL":12} {data["total"]["open"]:4} {data["total"]["done"]:4} '
+          f'{data["total"]["dropped"]:7} ({data["total"]["rows"]} rows)\n')
+    print(f'{"area":12} open done dropped')
+    for area in sorted(data['areas']):
+        c = data['areas'][area]
+        print(f'{area:12} {c["open"]:4} {c["done"]:4} {c["dropped"]:7}')
+
+
+def cmd_release_check(args):
+    ledger = Ledger()
+    hits = [(p, r) for p in ledger.chain_pages() for r in p.rows
+            if r.release and re.match(re.escape(args.prefix) + r'(?: - .*)?$', r.release)]
+    if not hits:
+        die(f'no rows under a `## {args.prefix} - ...` heading')
+    problems = []
+    for page, row in hits:
+        where = f'{rel(page.path)}:{row.line}'
+        if row.status == '⬜':
+            problems.append(f'{where}: {row.id} is open')
+        elif row.status == '✅':
+            lines = [x for x in ledger.section(row)[1].body.split('\n') if COMMIT.match(x)]
+            if len(lines) != 1:
+                problems.append(f'{where}: {row.id} has {len(lines)} Commits: lines')
+            elif args.strict and lines[0].strip() == 'Commits: unrecorded':
+                problems.append(f'{where}: {row.id} is unrecorded')
+    if problems:
+        print(f'release-check {args.prefix}: {len(problems)} problem(s)')
+        for problem in problems:
+            print(f'  {problem}')
+        sys.exit(1)
+    print(f'release-check {args.prefix}: {len(hits)} rows, all closed')
+
+
+def cmd_selftest(args):
+    """Exercise the mutation commands on a throwaway ledger fixture."""
+    import tempfile
+
+    def child(root, *argv):
+        env = dict(os.environ, ROADMAP_ROOT=root)
+        return subprocess.run([sys.executable, os.path.abspath(__file__), *argv],
+                              env=env, text=True, capture_output=True)
+
+    def expect(proc, code, needle, what):
+        out = proc.stdout + proc.stderr
+        if proc.returncode != code or needle not in out:
+            die(f'selftest: {what}: exit {proc.returncode}, wanted {code} and {needle!r}\n{out.strip()}')
+
+    chain = ('---\ntitle: "v0.0 - Fixture"\nweight: 10\n---\n\n'
+             '## v0.0.0 - Fixture\n\n'
+             '| Done | ID | Item |\n|:---:|:---:|---|\n'
+             '| ⬜ | [TEST-1](details/test.md#test-1) | **First fixture row** |\n'
+             '| ⬜ | [TEST-2](details/test.md#test-2) | **Second fixture row** |\n')
+    detail = ('---\ntitle: "Roadmap details - TEST"\nweight: 900\n'
+              'build:\n  list: never\n---\n\nEvery TEST row.\n\n'
+              '## TEST-1\n\n**First fixture row** - first body.\n\n'
+              '## TEST-2\n\n**Second fixture row** - second body.\n')
+    other = ('---\ntitle: "Roadmap details - OTHER"\nweight: 900\n'
+             'build:\n  list: never\n---\n\nEvery OTHER row.\n')
+    caps = {'area': 'TEST', 'capabilities': [
+        {'id': 'test.one', 'statement': 'fixture row join', 'status': 'planned',
+         'row': 'TEST-2'}]}
+    with tempfile.TemporaryDirectory(prefix='roadmap-selftest-') as root:
+        paths = {
+            'ROADMAP.md': '# Roadmap\n\nThe ID prefix names the area (TEST, OTHER).\n',
+            'docs/content/docs/roadmap/v0.0.md': chain,
+            'docs/content/docs/roadmap/details/test.md': detail,
+            'docs/content/docs/roadmap/details/other.md': other,
+            'docs/data/capabilities/TEST.json':
+                json.dumps(caps, indent=2, ensure_ascii=True) + '\n',
+        }
+        for rel, text in paths.items():
+            full = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            write(full, text)
+
+        expect(child(root, 'stats'), 0, '(2 rows)', 'stats counts the fixture')
+        expect(child(root, 'next'), 0, 'TEST-1', 'next picks the first open row')
+        expect(child(root, 'show', 'TEST-1'), 0,
+               '**First fixture row** - first body.', 'show reads the section')
+        expect(child(root, 'close', 'TEST-1'), 1, 'Roadmap: TEST-1',
+               'close refuses without a commit')
+        expect(child(root, 'close', 'TEST-1', '--force'), 0, 'unrecorded',
+               'close --force records the row')
+        expect(child(root, 'show', 'TEST-1'), 0, '| ✅ | [TEST-1]',
+               'close flips the index row')
+        before = read(os.path.join(root, 'docs/content/docs/roadmap/details/test.md'))
+        expect(child(root, 'rearea', 'TEST-2', 'OTHER'), 0, 'OTHER-1',
+               'rearea allocates the target ID')
+        after = read(os.path.join(root, 'docs/content/docs/roadmap/details/test.md'))
+        if '## TEST-2' in after or '## OTHER-1' not in \
+                read(os.path.join(root, 'docs/content/docs/roadmap/details/other.md')):
+            die('selftest: rearea did not move the section')
+        if '## TEST-2' not in before:
+            die('selftest: fixture lost its section before the move')
+        joined = json.loads(read(os.path.join(
+            root, 'docs/data/capabilities/TEST.json')))
+        if joined['capabilities'][0]['row'] != 'OTHER-1':
+            die('selftest: rearea did not rewrite the capability row')
+        expect(child(root, 'next-id', 'OTHER'), 0, 'OTHER-2', 'next-id sees the move')
+        expect(child(root, 'close', 'OTHER-1', '--force'), 0, 'OTHER-1',
+               'the moved row closes')
+        expect(child(root, 'release-check', 'v0.0.0'), 0, 'all closed',
+               'release-check passes with both rows closed')
+        expect(child(root, 'next'), 1, 'no open row', 'next ends when the queue is empty')
+    print('selftest: ok (fixture: next/show/close/rearea/stats/release-check)')
+
+
+def main():
+    ap = argparse.ArgumentParser(prog='roadmap',
+                                 description='Read and update the roadmap ledger.')
+    sub = ap.add_subparsers(dest='command', required=True)
+    p = sub.add_parser('next', help='print the first open row in chain order')
+    p.add_argument('--json', action='store_true')
+    p.set_defaults(func=cmd_next)
+    p = sub.add_parser('show', help='print a row and its detail section')
+    p.add_argument('id', metavar='ID')
+    p.add_argument('--json', action='store_true')
+    p.set_defaults(func=cmd_show)
+    p = sub.add_parser('next-id', help='allocate the next ID for an area')
+    p.add_argument('area', metavar='AREA')
+    p.set_defaults(func=cmd_next_id)
+    p = sub.add_parser('close', help='mark a row done and record its commits')
+    p.add_argument('id', metavar='ID')
+    p.add_argument('--force', action='store_true')
+    p.add_argument('--dry-run', action='store_true')
+    p.set_defaults(func=cmd_close)
+    p = sub.add_parser('rearea', help='move an open row to another area')
+    p.add_argument('id', metavar='ID')
+    p.add_argument('area', metavar='AREA')
+    p.add_argument('--dry-run', action='store_true')
+    p.set_defaults(func=cmd_rearea)
+    p = sub.add_parser('stats', help='count rows per chain page and area')
+    p.add_argument('--json', action='store_true')
+    p.set_defaults(func=cmd_stats)
+    p = sub.add_parser('release-check', help='check the rows under a release')
+    p.add_argument('prefix', metavar='PREFIX')
+    p.add_argument('--strict', action='store_true')
+    p.set_defaults(func=cmd_release_check)
+    p = sub.add_parser('selftest', help='exercise the commands on a fixture (ci-check)')
+    p.set_defaults(func=cmd_selftest)
+    args = ap.parse_args()
+    try:
+        args.func(args)
+    except UserError as exc:
+        print(f'roadmap: {exc}', file=sys.stderr)
+        sys.exit(1)
+    except (OSError, ValueError) as exc:
+        print(f'roadmap: {exc}', file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

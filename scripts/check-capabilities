@@ -6,7 +6,7 @@ record per capability, each carrying what is true (`statement`), the design
 choice behind it (`mechanism`), and whether we have it (`status`). The roadmap
 stays the queue; this file is the state. Nothing generated it, so the failure
 mode is drift: an id that no longer parses, an `evidence` path that moved, a
-`row` that names a roadmap title nobody has, a status outside the vocabulary.
+`row` that names a roadmap ID nobody has, a status outside the vocabulary.
 
 Checks, per file:
 
@@ -22,8 +22,8 @@ Checks, per file:
   * `evidence` names a file that exists in this repo; an anchor after it
     (`:138`, `:CellInfo`) is not checked, because a line number that moves is
     not a defect in what the record claims
-  * `row` names a roadmap row's bold title exactly, so the join to the queue
-    cannot rot silently
+  * `row` is a roadmap row's stable ID (`GUI-12`) that the index still carries,
+    so the join to the queue cannot rot when a title is edited
   * no URL anywhere: the catalogue cites specifications and our own tree, and
     a link is how a vendor name would get in
 
@@ -46,8 +46,8 @@ TOP_KEYS = {"area", "capabilities"}
 RECORD_KEYS = {"id", "statement", "status", "spec", "mechanism", "evidence", "row"}
 REQUIRED = {"id", "statement", "status"}
 ID = re.compile(r"^[a-z][a-z0-9]*(?:\.[a-z0-9][a-z0-9-]*){1,3}$")
-ROW = re.compile(r"^\| (✅|⬜) \| ([A-Z]+) \| (.+) \|$")
-TITLE = re.compile(r"\*\*(.+?)\*\*( - |$)")
+ROW = re.compile(r"^\| (?:✅|⬜|🚫) \| \[([A-Z]+-\d+)\]\(details/[^)]*\) \| \*\*(.+?)\*\* \|$")
+ROW_ID = re.compile(r"^[A-Z]+-\d+$")
 URL = re.compile(r"https?://|www\.", re.I)
 
 STATEMENT_MAX = 200
@@ -55,28 +55,25 @@ MECHANISM_MAX = 500
 
 
 def areas() -> set[str]:
-    """The Area column's vocabulary, from ROADMAP.md's opening text."""
+    """The ID-prefix vocabulary, from ROADMAP.md's opening text."""
     m = re.search(
-        r"Area column names[^(]*\(([A-Z, ]+)\)",
+        r"ID prefix names[^(]*\(([A-Z, ]+)\)",
         (ROOT / "ROADMAP.md").read_text(encoding="utf-8"),
     )
     return {a.strip() for a in m.group(1).split(",")} if m else set()
 
 
-def roadmap_titles() -> set[str]:
-    """Every bold title on every chain page, `**Title**` up to its ` - `."""
-    titles: set[str] = set()
+def roadmap_ids() -> set[str]:
+    """Every stable ID on every chain page's index row, `| status | [ID](details/...) |`."""
+    ids: set[str] = set()
     for path in sorted(ROADMAP_DIR.glob("*.md")):
         if path.name == "_index.md":
             continue
         for line in path.read_text(encoding="utf-8").split("\n"):
             row = ROW.match(line)
-            if not row:
-                continue
-            title = TITLE.match(row.group(3))
-            if title:
-                titles.add(title.group(1))
-    return titles
+            if row:
+                ids.add(row.group(1))
+    return ids
 
 
 def evidence_file(value: str) -> bool:
@@ -98,7 +95,7 @@ def one_line(record: dict, key: str, cap: int, where: str, problems: list[str]) 
         problems.append(f"{where}: `{key}` is {len(value)} characters (cap {cap})")
 
 
-def check_file(path: Path, known_areas: set[str], titles: set[str],
+def check_file(path: Path, known_areas: set[str], rows: set[str],
                seen: dict[str, str], problems: list[str]) -> dict[str, int]:
     name = f"docs/data/capabilities/{path.name}"
     counts = {s: 0 for s in STATUSES}
@@ -163,8 +160,10 @@ def check_file(path: Path, known_areas: set[str], titles: set[str],
             row = record["row"]
             if not isinstance(row, str):
                 problems.append(f"{where}: `row` must be a string")
-            elif row not in titles:
-                problems.append(f"{where}: row {row!r} is not a roadmap row's bold title")
+            elif not ROW_ID.match(row):
+                problems.append(f"{where}: row {row!r} is not a roadmap ID (`AREA-<number>`)")
+            elif row not in rows:
+                problems.append(f"{where}: row {row!r} is not a roadmap ID on any chain page")
     return counts
 
 
@@ -174,9 +173,9 @@ def main() -> int:
     if not known_areas:
         print("check-capabilities: could not read the Area list from ROADMAP.md")
         return 1
-    titles = roadmap_titles()
-    if not titles:
-        print("check-capabilities: could not read roadmap titles")
+    rows = roadmap_ids()
+    if not rows:
+        print("check-capabilities: could not read roadmap IDs")
         return 1
     files = sorted(DATA.glob("*.json")) if DATA.is_dir() else []
     if not files:
@@ -185,7 +184,7 @@ def main() -> int:
     seen: dict[str, str] = {}
     totals = {s: 0 for s in STATUSES}
     for path in files:
-        counts = check_file(path, known_areas, titles, seen, problems)
+        counts = check_file(path, known_areas, rows, seen, problems)
         for status, n in counts.items():
             totals[status] += n
         summary = ", ".join(f"{n} {s}" for s, n in counts.items() if n)

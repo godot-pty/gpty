@@ -201,12 +201,16 @@ them silently.
 
 ## 4. Close the roadmap
 
-`ROADMAP.md` is the index; `docs/content/docs/roadmap/vX.Y.md` holds the chain.
-A shipped row is closed when the work lands, with its evidence, tests and
-measured numbers. Verify no `⬜` remains in the release's section. Anything
-unshipped moves to the next chain's page in priority position, keeps its
-wording, and is tagged `(Deferred from vX.Y.Z.)`. A chain stays `in progress`
-until its last planned release ships.
+`ROADMAP.md` is the index; `docs/content/docs/roadmap/vX.Y.md` holds the queue,
+and each row's record is its `## <ID>` section on `details/<area>.md`. A shipped
+row is closed when the work lands, with its evidence, tests and measured
+numbers in that section; `./scripts/roadmap close <ID>` writes the status and
+the `Commits:` line from the `Roadmap: <ID>` trailers. Verify the release's
+section with `./scripts/roadmap release-check vX.Y.Z` - no `⬜` remains and every
+`✅` has a `Commits:` line; `--strict` also rejects `unrecorded`. Anything
+unshipped moves to the next chain's page in priority position, keeps its ID,
+and is tagged `(Deferred from vX.Y.Z.)`. A dropped row is `🚫` with the reason
+in its detail. A chain stays `in progress` until its last planned release ships.
 
 The release's DOCS row (the changelog page) is release-time work and is checked
 off after the page exists. A row whose work closes on its own tag (the asset-set

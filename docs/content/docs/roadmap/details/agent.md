@@ -1,0 +1,445 @@
+---
+title: "Roadmap details - AGENT"
+weight: 900
+build:
+  list: never
+---
+
+Every AGENT row, by ID and in allocation order. The queue and its priority live on the release chain pages; this page is the evidence behind each row.
+
+## AGENT-1
+
+**Inspector pane** - private, tool-free, iterative OMP Q&A via a session-owned `GptyAi`
+(`session_open` / `session_prompt` / `session_poll` / `session_cancel` / `session_close`); does not
+attach to a terminal-hosted OMP TUI; pane `backend` setting (default `omp`)
+
+Commits: d17bac7
+
+## AGENT-2
+
+**Reasoning pane** - passive projection of documented OMP reasoning from one terminal, selected by
+`source_attachment_id`; never starts jobs or accepts concept captures
+
+Commits: d17bac7
+
+## AGENT-3
+
+**OMP event channel** - second local socket (`gpty-events.sock`) accepting only `ompEvent`,
+authenticated with a per-PTY capability injected at spawn; shipped `@gpty/omp-events` extension
+dormant unless all four `GPTY_EVENT_*` vars are present
+
+Commits: d17bac7
+
+## AGENT-4
+
+**"OMP Workspace" profile** - shipped built-in (Terminal + Inspector + Reasoning), never written to
+the user store and not deletable
+
+Commits: d17bac7
+
+## AGENT-5
+
+**Ecosystem presets** - shipped profiles for herdr, lazygit, nvim, claude, and OMP in
+`profiles.default.json`, backed by per-tile `command` support in profile restore (`command` > legacy
+`shell` > default, all through `sanitize_shell`).
+
+Commits: d17bac7
+
+## AGENT-6
+
+**Agent skill** - ship `skills/gpty/SKILL.md` + `gpty --skill` printing the release-matched copy
+(`include_str!`), with a `GPTY_ENV=1` guardrail; install locations documented for Claude Code,
+codex, opencode, and OMP. MCP schema verified free of a `skill` tool.
+
+Commits: d17bac7
+
+## AGENT-7
+
+**AgentState model** - `AgentState` enum (Idle / Working / NeedsAttention / Completed / Failed) in
+`gpty-core`, with tiered detection: Tier 1 capability-authenticated events (authoritative), Tier 2
+OSC state declaration (published standard; AGENTS.md constraints), Tier 3 regex/idle/exit heuristics
+(display-only). No `ToolRunning`-via-exit-code - foreground-command exits are not reliably
+attributable in a PTY.
+
+Commits: d17bac7
+
+## AGENT-8
+
+**Generic CLI backend** - `CliBackend` in `gpty-ai` (subprocess NDJSON bridge) beside Mock/Omp, with
+a backend/model picker in Inspector pane settings. Adapters use only each CLI's documented hooks -
+never tokens, never TUI scraping.
+
+Commits: d17bac7
+
+## AGENT-9
+
+**Inspector prompt fence** - `gpty-ai/src/prompt.rs` wrapped untrusted capture in a literal
+``` fence with no escaping and interpolates `concept_name`/`source_pane` raw, so a capture containing a fence escapes the data block (omp-only, tool-free backend, so display-level). The fence now outgrows the longest backtick run in the capture (capped at 32) and metadata is flattened to one line.
+
+Commits: d17bac7
+
+## AGENT-10
+
+**`@gpty/omp-events` on Windows** - the premise was stale, and that is the finding: the extension's
+transport was already platform-neutral, down to the `win32` validation branch that shipped with it
+in `013273c` (`net.connect(path)` opens a Unix socket for a socket path and a named pipe for a pipe
+path, so the extension never needed a Windows transport - only proof that it had one). Nothing
+proved it, and both the extension README and AGENTS asserted the opposite, which is exactly how the
+item stayed on the queue. What shipped: (a) the Windows validation branch is tested - a `\\.\pipe\`
+prefix is accepted **from the path alone** (the test passes an `fsModule.statSync` that throws,
+because a pipe cannot be `stat`ed) while a Unix path, a drive path, a bare `\\.\pipe`, and a
+non-prefix substring are refused; (b) a second test pins that the platform path reaches
+`net.createConnection` unchanged, which *is* the Windows leg of the transport; (c) the chain is now
+observed live instead of inferred: `extensions/gpty-omp-events/tools/send-event.mjs` runs the
+extension's real forwarder inside a gpty pane (where the per-PTY `GPTY_EVENT_*` variables live) and
+`scripts/smoke_pane_api.py` asserts the pane reports Tier 1 `working`, so one assertion spans env
+injection → transport → capability check → translation → GDScript drain → agent state. That step
+runs in `ci-check`, the Linux CI job and now `windows-smoke` (it skips only where `node` is absent).
+The tool lives in `tools/` rather than `test/` because the Node runner discovers everything under
+`test/` and a tool that needs a pane would fail the suite. Verified locally: the smoke passes end to
+end with the new step, the tool exits 2 with a clear message when the activation variables are
+missing, and `node --test` reports 7 extension tests. Docs corrected in the extension README, in
+both AGENTS spots that called the extension Unix-only, and in a stale `lib.rs` comment claiming the
+event-channel variables were Unix-only (they are injected on every platform, conditional only on
+registration).
+
+Commits: d17bac7
+
+## AGENT-11
+
+**Tier 2 agent state on Windows** - decided and landed: **the OSC is Unix-only by construction and
+`gpty state <value>` is the declaration path**. The decision rests on what ConPTY is - a re-renderer
+of its own model rather than a relay - so a sequence its VT engine does not implement never reaches
+the pane, and that was measured: in the Windows GUT run a DECSET 2004 from the same PowerShell
+fixture arrives while every `gpty_state` declaration fails. Recovering the OSC would mean
+`PSEUDOCONSOLE_PASSTHROUGH_MODE` (0x8, Windows 11 22H2+, defined-but-unused in portable-pty 0.9.0,
+which passes `INHERIT_CURSOR \| RESIZE_QUIRK \| WIN32_INPUT_MODE` and exposes no flags at all), i.e.
+gpty owning `CreatePseudoConsole` plus a Windows fidelity regression - queued in Future rather than
+smuggled in here. The new command reads the credentials a pane injects (`GPTY_EVENT_SOCKET`,
+`GPTY_TERMINAL_SESSION_ID`, `GPTY_EVENT_CAPABILITY` - the only credential a pane's child holds,
+since `GPTY_SOCKET`/`GPTY_SECRET` are stripped) and submits `gpty.state.declared` → generic
+`state.declared` on the event socket: capability-gated instead of spoofable, display-only like every
+declaration, no new IPC method, and deliberately **not** an MCP tool (`schema.rs` excludes it; the
+MCP contract test fails if that exclusion is dropped, and the call-site seam test now checks
+literals against *both* listeners - a fourth event-listener method fails it deliberately). `seq`
+became optional in the `ompEvent` payload: a process born per declaration has no counter to
+continue, the capability is what authorizes a submission, and `next_seq` now reports the session's
+own counter (identical to `seq + 1` for the extension, which always sends one, so its stream is
+unaffected; a sequenced submission must still advance). Verified: `scripts/smoke_pane_api.py`
+injects `"<cli>" state needs-attention` into a real pane and polls `paneStatus` for
+`agent_state: needs-attention` + `agent_state_tier: 1` - PASS locally (Linux, headless GUI), and it
+now runs in the `windows-smoke` job, where it is the only program-facing declaration path; 2 new
+gdext tests (an unsequenced declaration accepted and queued with `seq: 0`; an unknown value refused
+before the session lookup), 3 new CLI tests (payload shape, credential mapping, an unknown value
+refused before any socket), and the GUT mapping case (a declared value is carried, an absent one
+declares nothing). The three OSC badge tests stay Windows-pended with the pend naming `gpty state`
+as the path. AGENTS.md (OSC bullet + data-flow block) and SECURITY.md carry the decision.
+
+Commits: d17bac7
+
+## AGENT-12
+
+**Agent-state dispatch can duplicate a follower's entry delivery** - `_dispatch_agent_state`
+delivers to every pane whose `agent_state_source_id()` matches, including one the frame's
+`_prime_new_pane_observers` scan has not primed yet: a follower that joins the `panes` group in the
+same frame a terminal's slow poll emits, with the workspace's `_process` (the scan) running after
+that emit, hears the change and then the scan's entry delivery of the same value (needs that
+same-frame ordering and the tracker to be unchanged when the scan runs; display-only, so it is not
+what the flake above observed, but it is the same once-on-entry-plus-every-change contract). Found
+while fixing that flake. Fix direction: dispatch changes only to panes the scan has already primed
+(it runs every frame, so an entry delivery lags at most a frame), or record the last-dispatched
+value per (observer, source); keep the re-point and late-terminal tests green. **Closed:**
+`_agent_state_primed` now stores `[source_id, last_state]` per observer and every delivery goes
+through `_tell_observer`, the one delivery point: the scan's entry goes to the new pane alone (it
+used to broadcast, re-telling settled observers whenever any pane attached), a change dispatch
+reaches only panes already settled for that source (an unprimed follower cannot hear a change first
+and then its entry as a duplicate), and a repeat of the value an observer holds is dropped - the
+dispatcher-side mirror of the terminal's own `_badge_state` rule. The re-point and late-terminal
+paths are unchanged (the source half of the record is what re-primes them). Evidence: three new
+contract tests (a change dispatched before the entry prime → dropped, the entry still delivered
+once; a second follower attaching → the settled one not re-told; a repeated dispatch → dropped, a
+real transition lands), the pre-existing exact-sequence, vocabulary, badge, re-point, late-terminal
+and observes-nothing tests, `gut-check`, and `scripts/ci-check`.
+
+Commits: d17bac7
+
+## AGENT-13
+
+**The OMP event channel is capped at four events a second, so the Reasoning pane and the agent badge run seconds behind the session** - found
+2026-11-14 in daily use and measured against the live event socket: the extension's
+one-connection-per-event client (`extensions/gpty-omp-events/src/transport.js` `sendOne`) wrote its
+request, half-closed, and never read the answer, and a socket only reaches `end`/`close` once its
+readable side has been consumed - so every event sat out the full `DEFAULT_TIMEOUT_MS` (250 ms) and
+the forwarder pumped 4.0 events/s, on Node 26.13.1 and Bun 1.4.4 alike. Reasoning deltas flush every
+16 ms, so a thinking turn outran the channel by ~15x: the 128-slot outbox dropped the oldest chunks
+and `omp.agent.settled` sat behind the whole backlog, which is why the pane kept printing after OMP
+had finished and the badge flipped only when it caught up. Fix: `socket.resume?.()` at connect (the
+answer is discarded; the channel stays fire-and-forget), measured ~4 800 events/s on Node and 5
+769/s on Bun. Test: `test/extension.test.js` "takes the answer off the wire so a connection can
+finish" - a socket double that closes only after its bytes are read, which times out without the
+fix. A running OMP keeps the module it loaded, so the session must restart (as the README already
+says for plugin changes).
+
+Commits: bf04399
+
+## AGENT-14
+
+**A streaming pane re-copies the whole turn for every delta** - code: Inspector `_handle_envelope`
+(`godot/scenes/panes/inspector_pane.gd:146-174`) does `_assembled += str(...)` then
+`_render_markdown(_prompt_quote + _assembled)` per `delta`, two whole-turn copies on top of the
+coalesced render; Reasoning `_append_live_text` (`godot/scenes/panes/reasoning_pane.gd:548`) does
+`rec["text"] = text + delta` per delta, so n deltas copy O(n^2) bytes while `MarkdownView` coalesces
+only the re-parse. The Inspector also `JSON.stringify`s a constant poll payload every frame
+(`inspector_pane.gd:109-125`). Fix: add
+`MarkdownView.set_markdown_parts(prefix: String, parts: PackedStringArray)` that stores the
+prefix/pieces and joins once inside `_apply_pending`; Inspector and Reasoning append deltas to a
+`PackedStringArray`, joining/truncating once at the cap; cache the Inspector poll payload per
+session id. Tests: `test_inspector_pane.gd`/`test_reasoning_pane.gd` pass, rendered text and cap
+behavior identical; `reasoning_bench` 256 KiB burst `burst_ms` down expected >=2x and `catchup_ms`
+not worse; new `godot/tests/bench/inspector_bench.gd` records the same shape. Evidence:
+`TEMP/gdscript-opportunities.md`.
+
+## AGENT-15
+
+**A turn that fails mid-protocol never says what the omp child printed** - found 2026-10-31 while
+closing v0.7.1's logging item, which moved backend stderr to `debug` because program output is not
+log material. `OmpProcess::describe_failure` appends the bounded `StderrTail` to a *start-up*
+failure, but a turn that fails after the handshake emits `AiEvent::Error` with the protocol error
+alone (`omp.rs`, `run_omp_session`'s `if let Err(error) = result`), so the provider error the child
+wrote to stderr is visible neither in the pane nor in the console. The respawn path makes it worse:
+a new `OmpProcess` replaces the old one, so the dying child's tail - the one that explains the crash
+- is dropped with it. Fix: freeze the tail per turn (a slice `run_omp_session` takes before a
+respawn discards the process) and append it to the turn's error message when non-empty, in the
+format `describe_failure` already uses; test with a fake omp that greets `ready`, prints an
+escape-wrapped line to stderr on `prompt` and exits, asserting the pane's error carries the stripped
+text.
+
+## AGENT-16
+
+**Inspector / Reasoning follow-ups** - host-tools bridge and OpenAI-compatible HTTP still planned.
+Provider-specific CLI adapters follow the v0.5.2 generic `CliBackend` lane: documented
+hooks/extensions only, never token reuse or TUI scraping.
+
+## AGENT-17
+
+**A turn blocked on an approval or a question still reads as `working`** - `AgentState::NeedsAttention`
+exists (`crates/gpty-core/src/agent_state.rs`) and the Tier 1 path can dispatch it, but nothing
+emits it: the `@gpty/omp-events` allowlist forwards session/agent/turn/tool lifecycle only, and
+`omp_events.rs` whitelists exactly those nine names plus `state.declared`, so a turn parked on an
+approval prompt or on OMP's `ask` tool keeps the badge at `working` for as long as the user takes to
+notice. OMP publishes both:
+`tool_approval_requested{sessionId,toolCallId,toolName,reason?,approvalMode}` and
+`tool_approval_resolved{...,approved}` are notification events, and a model-issued question arrives
+as `tool_execution_start` with `toolName === "ask"` (`omp://hooks.md`, `omp://tools/ask.md`). Fix:
+subscribe to the two approval events and to `tool_execution_start` filtered on `ask`, forward
+`omp.attention.required{reason:"approval"\|"question", tool_name, approval_mode}` and
+`omp.attention.cleared`, whitelist both in `omp_events.rs` (bounded `tool_name`, mode as a small
+enum), and dispatch `NeedsAttention` through the existing tracker. An approval resolving must not
+fabricate `Working` - it returns the tracker to whatever the last lifecycle event says. Tests:
+extension test asserting the two forward plus the ask filter, Rust translation tests for the bounds,
+GUT precedence test (Tier 1 `NeedsAttention` outranks a Tier 2 `idle` and clears back to it).
+
+## AGENT-18
+
+**A harness with no gPTY integration shows no agent state at all** - Tier 1 is the authenticated
+`ompEvent` socket, and Tier 2 needs the program itself to emit `gpty_state` or OSC 7501 (v0.14.2),
+so every other agent gPTY lists as a guest (claude code, codex, opencode, gemini-cli) reaches only
+Tier 3: a fixed generic regex/idle/exit heuristic (`crates/gpty-core/src/agent_state.rs:1-20`) that
+knows none of their prompts, so a pane parked on "do you want to proceed" reads as idle or working
+and never needs-attention. Fix: a manifest-driven Tier 3 - one engine, one TOML per agent (region
+regex and presence rules over the last N screen lines, plus `osc_title` and `osc_progress`),
+manifests shipped for those four harnesses, a user override directory and a reload verb so a new
+harness is data rather than a release, tuned conservative because a false negative costs nothing and
+a false positive costs a badge flash. It stays display-only under the Tier 2 guarantee - badge and
+nothing else, no concepts, actions, layouts or IPC - because screen text and titles are spoofable.
+Tests: recorded screen fixtures per manifest, a spoof fixture proving a pasted screen changes only
+the badge, and precedence tests against Tiers 1 and 2. A harness that adopts the generic OSC 7501
+channel (v0.14.2) bypasses this lane entirely; the manifests are only for the ones that emit
+neither.
+
+## AGENT-19
+
+**Nothing streams workspace, pane and agent state to a consumer** - the control socket is
+request/response, and the event socket carries `omp` events under a capability scope
+(`crates/gpty-gdext/src/omp_events.rs`), so a consumer outside the app - an orchestrator pane, a
+status bar, a test harness - has to poll `paneStatus` and `list-panes` and diff the results, missing
+every state that changes and reverts between polls. Fix: a `subscribe` verb on the control socket
+streaming typed state changes (pane created, closed, renamed, agent state, badge and unread
+counters) with a monotonic sequence id and a `since` cursor over a bounded replay window,
+capability-scoped like the event socket and additive by construction: no existing method changes,
+MCP untouched, an older client keeps polling. A consumer that falls behind the window is
+disconnected with a typed error instead of silently skipping events. Tests: two clients observe one
+sequence, a reconnect with `since` replays without gaps inside the window, a denied capability is
+refused, and a slow consumer is disconnected rather than losing events.
+
+## AGENT-20
+
+**Everything waiting on the user is scattered across panes and workspaces** - the badge answers
+"what is this pane doing", a toast answers "what just happened", and the v0.9 unread markers answer
+"what did I miss here", so with a full grid the user scans it to find the one blocked pane, and a
+pane on another workspace is invisible. Fix: an Inbox overlay (the existing `OverlayPanel` keyboard
+contract) driven by a pure, testable queue model fed by badge and unread state: needs-attention,
+failed, finished-but-unread, and unread output, oldest-first with jump-to-oldest and next, cleared
+on activation, Enter focusing the pane and doing nothing on its behalf. Accessibility follows the
+badge rule - a distinct shape and a word per state, never colour alone. Answering an agent's
+approval from the Inbox is orchestration and stays out of core per the architecture boundary; if it
+ever lands, agent-supplied text is data - fenced, never an instruction - and only the human can
+answer. Tests: pure-model ordering, dedupe and clear-on-activation, overlay focus return, and an
+assertion that activation never dispatches an action. A 7501 record's `title`/`msg` (v0.14.2) is the
+line the queue shows for an agent pane.
+
+## AGENT-21
+
+**A pane never shows what its turn cost or how full its context is** - both numbers ride seams gPTY
+already listens on: `message_end` carries
+`message.usage.{input,output,cacheRead,cacheWrite,totalTokens}` and `message.usage.cost.total`, and
+`ctx.getContextUsage()` returns `{tokens, contextWindow, percent}` (`omp://hooks.md` notification
+events; RPC's `get_session_stats` is the same data). The extension forwards neither, so a workspace
+running three `omp` panes cannot see which one is at 92% of its window, nor what the last hour cost.
+Fix: on `message_end`/`turn_end`, forward a numbers-only
+`omp.usage.turn{cost_micros, input_tokens, output_tokens, cache_read_tokens, context_tokens, context_window, context_percent}`
+- integers only, no message text, so nothing here is program content - whitelist it in
+`omp_events.rs`, accumulate per terminal in GDScript (counters are monotonic within a session;
+`session.bound` resets them), and render a cost and a context segment in `status_bar.gd` plus the
+pane tooltip. Tests: GUT accumulation across turns, reset on rebind, and 0/100 % boundary
+formatting.
+
+## AGENT-22
+
+**A retry storm, a fallback, or a disabled credential looks like a hang** - `auto_retry_start{attempt,maxAttempts,delayMs,errorMessage}`,
+`auto_retry_end{success,attempt,finalError}`, `retry_fallback_applied{from,to,role}`,
+`retry_fallback_succeeded`, `credential_disabled{provider,disabledCause}`,
+`auto_compaction_start{reason,action}` and the terminal `session_exit{reason,kind}` are all
+notification events; none is forwarded, so a provider 429 with six backoff attempts renders as an
+agent that stopped talking, and a compaction that eats the window is invisible. Fix: forward them as
+`omp.retry.*`, `omp.compaction.*`, `omp.credential.disabled` and `omp.session.exit` (attempt/delay
+as integers, provider as a capped slug), map `auto_retry_start` to `Working` with a source notice,
+`credential_disabled` and an errored `session_exit` to `Failed` with the cause in the notice, and a
+clean `session_exit` to `Completed`. `errorMessage`/`disabledCause` are provider text: they ride the
+notice and never a log line (AGENTS logging rules), and they would be the first allowlist entries
+that are provider-authored text, so `docs/content/docs/agents/security.md`'s observability paragraph
+is amended in the same commit - bounded, display-only, never persisted. Tests: Rust translation
+bounds, GUT notice text per mapping.
+
+## AGENT-23
+
+**An `omp` pane keeps the shell's title, not the session's** - OMP names every session (auto-title,
+`/rename`, `title_change`) and persists it three ways: the fixed 256-byte `title` record at line 1
+of the JSONL, `history.db`'s `session_titles`, and the `session` header's `title`/`titleSource`.
+gPTY titles the tile from the shell's OSC 0/2, so four OMP panes read as the same shell path and the
+user cannot tell which session is which. Fix: forward `omp.session.titled{title}` - the extension
+learns the id from `ctx.sessionManager.getSessionId()` and the directory from `ctx.cwd`, so the file
+is `~/.omp/agent/sessions/<encoded-cwd>/<iso>_<session id>.jsonl` and its line-1 `title` record can
+be read once per binding (cache it; never re-glob per turn) - the extension reads that file locally
+and forwards only the bounded title, never the path or any other record. An auto-title is a model
+summary of the user's own prompt, so the `title` allowlist entry is added to
+`docs/content/docs/agents/security.md` in the same commit (bounded, display-only) - then let
+`TerminalPane` apply an agent-supplied title that wins over OSC while the session is bound, is
+dropped on `session.shutdown`, and is never written to layout/profile/workspace JSON - the same
+user-owned-state rule the Reasoning source id follows. Tests: GUT precedence (shell OSC vs bound
+agent title vs user rename) and the drop-on-shutdown path.
+
+## AGENT-24
+
+**Nothing lists the user's OMP sessions, their cost, or reopens one** - "sessions" are files plus
+three indexes, all readable without touching OMP's state:
+`~/.omp/agent/sessions/<encoded-cwd>/<iso>_<uuid>.jsonl`, `history.db` (`session_titles`,
+`session_recaps`, `history`+FTS5 prompt search), and `stats.db`
+(`session_rollup{session_file,requests,total_tokens,cost_total,models,tool_calls}` over ~100k
+`messages` and ~97k `tool_calls` rows that `omp stats` already parsed). gPTY knows none of it, so
+ten agents run today cannot be found, compared or reopened from the GUI. Fix: a read-only `sessions`
+pane for the workspace directory - title, age, lifecycle status (the tail marker), requests, tokens,
+cost, models - read from `stats.db`/`history.db`, with the JSONL only for the title fallback, plus
+prompt-history search over `history_fts` and exactly two actions, both documented CLI: resume in a
+new terminal via `omp --resume=<id>` through the existing spawn path, and export via `omp --export`.
+The agent dir is resolved once from `PI_CODING_AGENT_DIR`/`--profile`, and every path is gated to
+`<agent dir>/sessions/**` and those DBs opened read-only - never a user-supplied path, because these
+files hold full prompts. `omp session lease --json` marks a session a running `omp` still owns.
+Tests: Rust reader unit tests over fixture rows (title fallback, status mapping, cost aggregation, a
+locked DB during a live write).
+
+## AGENT-25
+
+**A finished session can only be read in the terminal it ran in** - the JSONL is a complete
+structured transcript: assistant text and thinking blocks, `toolCall` blocks with `arguments`,
+`toolResult` messages with `content`/`details.isError`,
+`compaction{tokensBefore,tokensAfter,summary}`, `branch_summary`, `reset_boundary`, `model_change`,
+`mode_change`, all linked by `id`/`parentId`. The Reasoning pane keeps only the live turn's thinking
+and nothing on disk, so reviewing what an agent did after it exits means reopening the TUI -
+`omp render` proves the reconstruction is faithful, and `omp --export` proves it is readable. Fix: a
+read-only Markdown projection of one selected session - walk `id`/`parentId` from the header, draw
+compaction and reset as dividers, render tool calls as collapsed one-line cards that expand to the
+result, keep thinking behind a toggle - reusing `markdown_view.gd` and the sessions pane's gate,
+chunked under the same 1 MiB `text_read` guard per chunk rather than on the file. Display only:
+never logged, never indexed into the wiki or a history DB. Tests: Rust projection tests over
+fixtures (tree order, dividers, a missing parent, a truncated tail line from a killed `omp`), GUT
+render of a 5 MB fixture with the time recorded.
+
+## AGENT-26
+
+**Subscription limits are invisible until a request fails** - `omp usage --json` reports every
+authenticated account's windows
+(`{provider, limits:[{label, window:{id,resetsAt}, amount:{usedFraction,remainingFraction,used,limit}, status}]}`),
+and OMP persists snapshots to `agent.db`'s
+`usage_history(provider,account_key,limit_id,used_fraction,status,resets_at)`; a user running three
+agents against one 5-hour window finds out at the 429. Fix: a status-bar chip ("62% · resets 14:20")
+fed from `usage_history` with no network, plus a manual refresh that runs `omp usage --json` and
+merges the fresher snapshot behind a settings toggle (the command calls provider APIs). The DB
+schema is internal, so a failed read degrades to "unavailable", never an error dialog. Display only
+- no gating, no scheduling, no orchestration - and `email`/`accountId` are dropped at parse time so
+no account identity reaches a widget or a log. Tests: Rust parse test over a fixture report and a
+fixture row, GUT chip formatting at the warning threshold.
+
+## AGENT-27
+
+**Nothing inside an `omp` TUI says which gPTY pane it is running in** - the one channel in the other
+direction. `@gpty/omp-events` is loaded inside the user's TUI process and already holds all four
+`GPTY_EVENT_*` values at spawn (socket, `GPTY_TERMINAL_SESSION_ID`, capability, protocol), so it
+knows its pane; `ctx.ui` is the only insertion point into that pane's screen, because gPTY cannot
+paint over an alternate-screen TUI. `ctx.ui.setStatus(key, text)` is a keyed status-line entry
+(OMP's own authoring doc uses it for a token counter), so
+`setStatus("gpty", "T3 · mosaic · linked")` coexists with OMP's entries;
+`setWidget({widgetLines, widgetPlacement})` costs vertical space a 12-row tile does not have, and
+`setTitle` collides with the OSC 0/2 path the session-title row above reads back. Value is the one
+class of fact a TUI cannot show - which workspace/pane this session belongs to, and whether the
+event socket is live ("linked" vs "events off") - because the evidence lives in other panes.
+Constraints: display only, `ui.*` calls and never `pi.sendMessage`/`sendUserMessage` (that would put
+text into the model's context and cross from display into orchestration), and `ctx.hasUI` is false
+under `--mode rpc\|json\|print`. Unverified: whether an entry survives `session_switch`, and how
+`widgetPlacement` behaves in a short tile - probe with
+`extensions/gpty-omp-events/tools/send-event.mjs` before designing around either. Ordered below the
+seven because it is chrome, not information about the user's work. Tests: extension test asserting
+the status text is derived from the injected ids and cleared on `session_shutdown`; GUT only if a
+gPTY-side setting gates it.
+
+## AGENT-28
+
+**Hosting an `omp` session inside a gPTY pane is not the plan (ACP and RPC evaluated)** - `omp acp`
+(Agent Client Protocol over stdio, one command, no flags) and `omp --mode rpc\|rpc-ui` (versioned
+NDJSON, `omp://rpc.md`, protocol v1 with `rpc_chunk` reassembly for v2) would both let gPTY draw a
+*replacement* OMP TUI: structured assistant text, thinking, tool cards with `tool_result.content`, a
+real approval dialog, todo/plan state, and
+`get_entries`/`get_tree`/`get_messages_page`/`export_html`/`get_session_stats`/`session_info_update`
+for history. The Inspector already speaks a subset of that wire. Rejected for v1 because it moves L4
+into core: hosting the user's session means gPTY owns auth prompts, tool approvals, the message
+queue, compaction and session lifecycle - the orchestration AGENTS.md's ADE boundary leaves to the
+ecosystem - and the pane would drift with every OMP release. Observation through the event socket
+(v0.14.1) plus the Inspector's private tool-free session covers what a display-only layer owes the
+user. Reopening evidence: a user-visible capability that cannot be expressed as observation - the
+plausible one is a structured diff-review surface for `edit`/`ast_edit` results, which needs
+`tool_result.content` rendering rather than session hosting, and would be built as a read-only
+projection over the transcript, not as an embedded agent.
+
+## AGENT-29
+
+**Subagent work is invisible while it runs** - OMP has no per-subagent lifecycle or progress event
+(`omp://hooks.md`'s catalog: no spawn/child-progress entry; an extension's `ctx.agent` only names
+`{kind,id,name,depth,parentId}`), yet one `task` call can run several children for minutes and cost
+more than the parent turn - `stats.db`'s `agent_type='subagent'` rows show children at several times
+the parent's request count in this repo's own sessions. Three read paths exist and none is free:
+children's transcripts land as `<AgentName>.jsonl` in the session's sibling directory,
+`omp ps --json` lists daemon-supervised background jobs (not subagents), and RPC's
+`set_subagent_subscription{level}` streams child progress only in hosting mode (see the row above).
+Evidence that would start this: a user asking where a long turn's time or cost went. The cheap first
+step is a count-only chip ("3 agents") derived from the session directory's `*.jsonl` mtime window,
+never a progress view, because a per-child state machine is orchestration.

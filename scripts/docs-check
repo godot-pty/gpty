@@ -8,9 +8,13 @@ Standard library only; run from anywhere. Exits 1 and lists every problem found.
   * `/images/...` links resolve under docs/static/images/
   * every docs/static/images/issue-*.png is referenced by a markdown page (an
     orphan capture is evidence nothing cites)
-  * roadmap chain pages: front matter, one three-column table row shape
-    (`| done | AREA | **Title** - text |`), a known AREA, no unescaped `|`, titles
-    unique across all chains, and no image inside a table row
+  * roadmap chain pages: front matter and one three-column index row shape
+    (`| done | [AREA-N](details/area.md#area-n) | **Title** |`), a known area
+    prefix, unique IDs and titles, and no image inside a table row
+  * roadmap detail pages: one `## AREA-N` section per row with the same title,
+    a closed row's `Commits:` line, valid code citations, no images
+  * roadmap screenshot pages: front matter and a `## Screenshots` section, and
+    no captures on a queue page
   * ROADMAP.md, CHANGELOG.md and AGENTS.md link exactly the pages under
     docs/content/docs/{roadmap,changelog,agents}/, and nothing links a page that
     does not exist
@@ -230,12 +234,17 @@ for guide in guides:
             bad(guide, f'path does not exist: {token}')
 
 # ── roadmap tables ───────────────────────────────────────────────────────
-m = re.search(r'Area column names[^(]*\(([A-Z, ]+)\)', read('ROADMAP.md'))
+m = re.search(r'ID prefix names[^(]*\(([A-Z, ]+)\)', read('ROADMAP.md'))
 AREAS = {a.strip() for a in m.group(1).split(',')} if m else set()
 if not AREAS:
     bad('ROADMAP.md', 'could not read the Area list from the opening text')
-row_re = re.compile(r'^\| (✅|⬜) \| ([A-Z]+) \| (.+) \|$')
+row_re = re.compile(
+    r'^\| (✅|⬜|🚫) \| \[([A-Z]+-\d+)\]\(details/([a-z]+)\.md#([a-z]+-\d+)\) '
+    r'\| \*\*(.+?)\*\* \|$')
 seen = {}
+index_titles = {}
+index_status = {}
+seen_titles = {}
 rd = 'docs/content/docs/roadmap'
 for p in sorted(os.listdir(os.path.join(ROOT, rd))):
     if not p.endswith('.md') or p == '_index.md':
@@ -248,22 +257,107 @@ for p in sorted(os.listdir(os.path.join(ROOT, rd))):
             bad(where, 'image inside a table row (list it under "## Screenshots" instead)')
         r = row_re.match(line)
         if not r:
-            bad(where, 'row is not `| ✅/⬜ | AREA | **Title** - text |`')
+            bad(where, 'row is not `| ✅/⬜/🚫 | [AREA-N](details/area.md#area-n) | **Title** |`')
             continue
-        done, area, item = r.groups()
-        check_citation(where, item)
-        if area not in AREAS:
-            bad(where, f'unknown area {area}')
-        if re.search(r'(?<!\\)\|', item):
-            bad(where, 'unescaped | inside the item cell')
-        t = re.match(r'\*\*(.+?)\*\*( - |$)', item)
-        if not t:
-            bad(where, 'item must start with **Title** followed by " - text"')
+        status, rid, area_file, anchor, title = r.groups()
+        prefix = rid.split('-', 1)[0]
+        if prefix not in AREAS:
+            bad(where, f'unknown area prefix {prefix} in {rid}')
+        if area_file != prefix.lower() or anchor != rid.lower():
+            bad(where, f'link does not name the row: {rid}')
+        if rid in seen:
+            bad(where, f'ID duplicates {seen[rid]}')
+        seen[rid] = where
+        index_titles[rid] = title
+        index_status[rid] = status
+        if re.search(r'(?<!\\)\|', title):
+            bad(where, 'unescaped | inside the title')
+        if title in seen_titles:
+            bad(where, f'title duplicates {seen_titles[title]}: {title[:60]}')
+        seen_titles[title] = where
+
+commit_re = re.compile(r'^Commits: (unrecorded|[0-9a-f]{7,40}(?:, [0-9a-f]{7,40})*)$')
+details_dir = f'{rd}/details'
+detail_of = {}
+if not os.path.isdir(os.path.join(ROOT, details_dir)):
+    bad(details_dir, 'missing: every row needs a detail section')
+else:
+    for p in sorted(os.listdir(os.path.join(ROOT, details_dir))):
+        if not p.endswith('.md'):
             continue
-        title = t.group(1)
-        if title in seen:
-            bad(where, f'title duplicates {seen[title]}: {title[:60]}')
-        seen[title] = where
+        where = f'{details_dir}/{p}'
+        text = read(where)
+        fm = front_matter(text)
+        for field in ('title', 'weight'):
+            if not fm or field not in fm:
+                bad(where, f'front matter needs {field}')
+        last = 0
+        for m in re.finditer(r'^## ([A-Z]+-\d+)$', text, re.M):
+            rid = m.group(1)
+            line_no = text.count('\n', 0, m.start()) + 1
+            end = text.find('\n## ', m.end())
+            end = len(text) if end < 0 else end
+            block = text[m.end():end].strip('\n')
+            at = f'{where}:{line_no}'
+            number = int(rid.split('-')[1])
+            if number <= last:
+                bad(at, f'section {rid} is out of numeric order')
+            last = number
+            if rid.split('-', 1)[0].lower() != p[:-3]:
+                bad(at, f'{rid} is in {p}; its prefix names the area file')
+            if rid in detail_of:
+                bad(at, f'section duplicates {detail_of[rid][0]}')
+            if rid not in seen:
+                bad(at, f'{rid} has no index row')
+                continue
+            t = re.match(r'\*\*(.+?)\*\* - (\S.*)', block)
+            if not t:
+                bad(at, 'section must start with **Title** - text')
+            elif t.group(1) != index_titles[rid]:
+                bad(at, f'title differs from the index row: '
+                        f'{t.group(1)!r} != {index_titles[rid]!r}')
+            detail_of[rid] = (at, index_titles[rid])
+            check_citation(at, block)
+            if '![' in strip_code(block):
+                bad(at, 'screenshot in a row detail (list it under the chain page\'s Screenshots)')
+            commits = [ln for ln in block.split('\n') if ln.startswith('Commits:')]
+            status = index_status[rid]
+            if status == '✅':
+                if len(commits) != 1:
+                    bad(at, 'a closed row needs exactly one `Commits:` line')
+                elif not commit_re.match(commits[0]):
+                    bad(at, f'bad Commits line: {commits[0][:80]}')
+            elif status == '⬜':
+                if commits:
+                    bad(at, 'an open row must not carry a `Commits:` line')
+            elif commits and not commit_re.match(commits[0]):
+                bad(at, f'bad Commits line: {commits[0][:80]}')
+
+for rid in sorted(set(seen) - set(detail_of)):
+    bad(seen[rid], f'{rid} has no detail section')
+
+# ── roadmap screenshot pages ───────────────────────────────────────────
+# A capture is release-level evidence and often covers rows from several
+# areas, so it lives on its own page per chain; a queue page stays a list of
+# one-line index rows.
+for p in sorted(os.listdir(os.path.join(ROOT, rd))):
+    if p.endswith('.md') and p != '_index.md':
+        if re.search(r'(?m)^## Screenshots$', read(f'{rd}/{p}')):
+            bad(f'{rd}/{p}',
+                'screenshot sections live in screenshots/<page>.md, not on the queue page')
+shots_dir = f'{rd}/screenshots'
+if os.path.isdir(os.path.join(ROOT, shots_dir)):
+    for p in sorted(os.listdir(os.path.join(ROOT, shots_dir))):
+        if not p.endswith('.md'):
+            continue
+        where = f'{shots_dir}/{p}'
+        text = read(where)
+        fm = front_matter(text)
+        for field in ('title', 'weight'):
+            if not fm or field not in fm:
+                bad(where, f'front matter needs {field}')
+        if not re.search(r'(?m)^## Screenshots$', text):
+            bad(where, 'screenshot page needs a `## Screenshots` section')
 
 # ── site paths ───────────────────────────────────────────────────────────
 # The docs site is served from the domain root (docs/hugo.yaml baseURL), so a

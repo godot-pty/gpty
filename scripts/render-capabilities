@@ -17,9 +17,10 @@ answers is "what do we not have yet". `--public` drops the mechanism and the
 evidence and keeps the two fields that describe the product from outside.
 
 `--vault` writes the projection the wiki pane and the link graph consume: one
-note per area index, one per capability, and one per roadmap row a record
+note per area index, one per capability, and one per roadmap ID a record
 points at, with `[[wikilinks]]` joining them (capability -> area, capability ->
-row, row -> capabilities). It refuses a directory that is not empty and does
+row, row -> capabilities). Row notes are filed by ID (`rows/gui-12.md`) and
+labelled `GUI-12 · Title`. It refuses a directory that is not empty and does
 not carry the `.generated` marker it wrote last time, so a typo cannot empty a
 notes vault.
 
@@ -38,9 +39,24 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "docs" / "data" / "capabilities"
+ROADMAP_DIR = ROOT / "docs" / "content" / "docs" / "roadmap"
 MARKER = ".generated"
 
 STATUS_ORDER = ["planned", "partial", "undecided", "done", "rejected"]
+ROW = re.compile(r"^\| (?:✅|⬜|🚫) \| \[([A-Z]+-\d+)\]\(details/[^)]*\) \| \*\*(.+?)\*\* \|$")
+
+
+def roadmap_titles() -> dict[str, str]:
+    """Stable ID -> title, from the chain pages' index rows."""
+    titles: dict[str, str] = {}
+    for path in sorted(ROADMAP_DIR.glob("*.md")):
+        if path.name == "_index.md":
+            continue
+        for line in path.read_text(encoding="utf-8").split("\n"):
+            row = ROW.match(line)
+            if row:
+                titles.setdefault(row.group(1), row.group(2))
+    return titles
 
 
 def load(area: str | None) -> list[dict]:
@@ -92,12 +108,25 @@ def table(areas: list[dict], public: bool) -> str:
     return "\n".join(out)
 
 
-def slug(title: str) -> str:
-    s = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
-    return s[:80] or "row"
+def row_label(row_id: str, titles: dict[str, str]) -> str:
+    """`GUI-12 · Title`, or the bare ID when the roadmap no longer carries it."""
+    title = titles.get(row_id)
+    return f"{row_id} · {title}" if title else row_id
 
 
-def note(record: dict, area: str, rows: dict[str, list[dict]], area_of: dict[str, str]) -> str:
+def row_file(row_id: str) -> str:
+    """A row note's filename: the ID, lowercase (`gui-12`)."""
+    return row_id.lower()
+
+
+def row_order(row_id: str) -> tuple[str, int]:
+    """Sort by area, then by the numeric part, so GUI-2 precedes GUI-10."""
+    prefix, _, num = row_id.rpartition("-")
+    return (prefix, int(num) if num.isdigit() else 0)
+
+
+def note(record: dict, area: str, rows: dict[str, list[dict]],
+         area_of: dict[str, str], titles: dict[str, str]) -> str:
     lines = [
         "---",
         f"id: {record['id']}",
@@ -119,9 +148,10 @@ def note(record: dict, area: str, rows: dict[str, list[dict]], area_of: dict[str
         lines.append(f"**Evidence**: `{record['evidence']}`")
         lines.append("")
     if "row" in record:
-        lines.append(f"**Roadmap**: [[rows/{slug(record['row'])}|{record['row']}]]")
+        row_id = record["row"]
+        lines.append(f"**Roadmap**: [[rows/{row_file(row_id)}|{row_label(row_id, titles)}]]")
         lines.append("")
-        siblings = [r for r in rows[record["row"]] if r["id"] != record["id"]]
+        siblings = [r for r in rows[row_id] if r["id"] != record["id"]]
         if siblings:
             lines.append("## Also from that row")
             lines.append("")
@@ -152,6 +182,7 @@ def vault(areas: list[dict], target: Path) -> int:
             area_of[record["id"]] = area["area"]
             if "row" in record:
                 rows.setdefault(record["row"], []).append(record)
+    titles = roadmap_titles()
 
     index = ["# Capabilities", "", "The product's capability catalogue, one note per fact.", ""]
     for area in areas:
@@ -162,8 +193,8 @@ def vault(areas: list[dict], target: Path) -> int:
         index.append("")
         index.append(f"## Roadmap rows ({len(rows)})")
         index.append("")
-        for title in sorted(rows):
-            index.append(f"- [[rows/{slug(title)}|{title}]]")
+        for row_id in sorted(rows, key=row_order):
+            index.append(f"- [[rows/{row_file(row_id)}|{row_label(row_id, titles)}]]")
     (target / "index.md").write_text("\n".join(index) + "\n", encoding="utf-8")
 
     for area in areas:
@@ -186,25 +217,29 @@ def vault(areas: list[dict], target: Path) -> int:
         (target / name / "index.md").parent.mkdir(parents=True, exist_ok=True)
         (target / name / "index.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
         for r in records:
-            (target / name / f"{r['id']}.md").write_text(note(r, name, rows, area_of), encoding="utf-8")
+            (target / name / f"{r['id']}.md").write_text(
+                note(r, name, rows, area_of, titles), encoding="utf-8"
+            )
 
-    for title, records in rows.items():
+    for row_id, records in sorted(rows.items(), key=lambda kv: row_order(kv[0])):
         lines = [
             "---",
             "kind: roadmap-row",
+            f"row: {row_id}",
             "---",
             "",
-            f"# {title}",
+            f"# {row_label(row_id, titles)}",
             "",
-            "A roadmap row's bold title, joined from the capability catalogue.",
+            "A roadmap row's stable ID and title, joined from the capability catalogue.",
             "",
             "## Capabilities",
             "",
         ]
         for r in sorted(records, key=lambda r: r["id"]):
             lines.append(f"- [[{area_of[r['id']]}/{r['id']}|{r['statement']}]] ({r['status']})")
-        (target / "rows" / f"{slug(title)}.md").parent.mkdir(parents=True, exist_ok=True)
-        (target / "rows" / f"{slug(title)}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        page = target / "rows" / f"{row_file(row_id)}.md"
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     files = len(list(target.rglob("*.md")))
     print(f"render-capabilities: wrote {files} notes to {target}")
