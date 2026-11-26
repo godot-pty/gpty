@@ -13,10 +13,10 @@ set -euo pipefail
 # GDScript or smoke gates test - and CI skips its code workflow for one too
 # (`paths-ignore` in .github/workflows/ci.yml). A path is docs-class when the
 # only gate it can influence is one the Docs workflow already runs: `docs/`,
-# Markdown, the generated bundles, the capability catalogue, the licenses, and
-# the four scripts that are nothing but that workflow's gates
+# the generated bundles, the capability catalogue, the licenses, and
+# the five scripts that are nothing but that workflow's gates
 # (`scripts/docs-check`, `scripts/build-wiki`, `scripts/build-docs`,
-# `scripts/check-capabilities`).
+# `scripts/check-capabilities`, `scripts/roadmap`).
 #
 # A tooling-class change runs the docs gates, the cost gates and a syntax/plan
 # check of the tooling scripts themselves, and stops there. It is an
@@ -134,7 +134,7 @@ changed_paths() {
 docs_class_path() {
     case "$1" in
         docs/*|assets/site-icons/*|*.md|godot/knowledge.json|godot/docs.json|LICENSE) return 0 ;;
-        scripts/docs-check|scripts/build-wiki|scripts/build-docs|scripts/check-capabilities) return 0 ;;
+        scripts/docs-check|scripts/build-wiki|scripts/build-docs|scripts/check-capabilities|scripts/roadmap) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -227,7 +227,7 @@ run_docs_check() {
 
 # The catalogue is data, not markdown: docs-check skips docs/data/, so nothing
 # else reads it. Static and tiny (it stat()s each evidence path and joins each
-# row to a roadmap title), which is why it rides with the docs gates.
+# row to a roadmap ID), which is why it rides with the docs gates.
 run_capability_check() {
     header "capability catalogue"
     if CAP_OUT="$(./scripts/check-capabilities 2>&1)"; then
@@ -245,6 +245,20 @@ run_capability_check() {
     else
         fail "compile scripts/render-capabilities"
         detail "$CAPC_OUT"
+        check_failed
+    fi
+}
+
+run_roadmap_check() {
+    header "roadmap ledger"
+    # scripts/roadmap is the reader/writer the next-task loop starts from. The
+    # selftest exercises next/show/close/rearea on a throwaway fixture; stats
+    # parses the real ledger's index and detail pages.
+    if RM_OUT="$(./scripts/roadmap selftest 2>&1 && ./scripts/roadmap stats 2>&1)"; then
+        pass "roadmap ledger"
+    else
+        fail "roadmap ledger — the tool or the index/detail agreement is broken"
+        detail "$RM_OUT"
         check_failed
     fi
 }
@@ -443,6 +457,7 @@ fi
 # ── Docs: markdown links, roadmap tables, split pages ──────────────────
 run_docs_check
 run_capability_check
+run_roadmap_check
 
 # ── MCP registry descriptor ────────────────────────────────────────────
 # server.json is the claim the registry publishes: the package it names, the

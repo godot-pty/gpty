@@ -1,17 +1,21 @@
 ---
 name: gpty-roadmap-task
-description: "Work one gpty roadmap row end to end: pick and re-verify the row, read the area's guides, reproduce, implement, run the per-area gates once, close the row with evidence, commit. Use when told to proceed with the next roadmap task or to close a row."
+description: "Work one gpty roadmap row end to end by its stable AREA-N ID: pick with scripts/roadmap next, read the detail section, re-verify, implement, run the area's gates once, close with scripts/roadmap close and the evidence. Use when told to proceed with the next roadmap task or to close a row."
 ---
 
 # gpty roadmap task
 
-19 of the 43 archived gpty sessions contain a "next roadmap item" prompt (30 prompts in total). This is that loop: one row, end to end. AGENTS.md stays normative for *which* row is next and how row text is shaped; testing.md for the internals of each gate. This page is the order of operations plus the mistakes that have actually cost time.
+19 of the 43 archived gpty sessions contain a "next roadmap item" prompt (30 prompts in total). This is that loop: one row, end to end. AGENTS.md and `docs/content/docs/agents/roadmap-workflow.md` stay normative for *which* row is next and how the ledger is shaped; testing.md for the internals of each gate. This page is the order of operations plus the mistakes that have actually cost time.
+
+The roadmap is an index plus per-area evidence pages:
+`docs/content/docs/roadmap/v<major>.<minor>.md` is the queue (`| status | [ID](details/area.md#id) | **Title** |`), and `docs/content/docs/roadmap/details/<area>.md` holds the `## ID` section that is the record.
 
 ## 1. Pick, then re-verify the row
 
-- First ⬜ on the earliest unfinished chain page; within a release, row order is the priority.
+- `./scripts/roadmap next` prints the first ⬜ on the earliest unfinished chain page: ID, release, title, detail path. Row order is the priority; the ID is identity, never order.
+- Read the record with `./scripts/roadmap show <ID>` - the detail section and its commits - not the whole chain page.
 - **Rows go stale.** They are written on one build and implemented days later: reproduce the claim on the current build before writing code, and re-locate any `file:line` (numbers drift). The fidelity probe pass found rows already fixed, half-fixed, and describing code that had moved.
-- Already fixed? Close it with the evidence. Narrowed? Rewrite the row to what remains. Never add a "corrections" row.
+- Already fixed? Close it with the evidence. Narrowed? Rewrite the detail section to what remains. Obsolete or superseded? Mark it `🚫` and say why in the detail; never leave a dead row open and never delete it. Never add a "corrections" row.
 
 ## 2. Read the guides the area touches
 
@@ -25,6 +29,7 @@ A fix without a failing-before observation is a guess. Reproduce on a fresh buil
 
 - Smallest change that satisfies the row's contract. Migrate every caller, delete the obsolete path — no shims, aliases or re-exports left behind.
 - If the row names a security property, close the *door*, not the symptom: the test opens the attack, it does not merely assert a flag is set.
+- Cross-references to another roadmap row use its `AREA-N` ID, never `v<page>.md:line` (the line moves with the next edit).
 - Scratch scripts and staged scenes are deleted before the commit; they are not committed unless a row says to promote them.
 
 ## 5. Gates — once, when the change is complete
@@ -37,28 +42,31 @@ A fix without a failing-before observation is a guess. Reproduce on a fresh buil
 | GDScript palette or widget colour | `./scripts/check-theme-tokens` — a class-body `UiPalette.active()` read or an `add_theme_color_override` pins the mode a widget was built under; `# theme-ok: <why>` is the reviewed exception |
 | IPC method / MCP tool | `cargo test -p gpty` — the package is `gpty`; there is no `gpty-cli` package. `mcp.rs` reads the real registrations, the GDScript dispatch arms and every CLI call literal, and `wire.rs` checks translated argument keys against the handler's own |
 | any doc/roadmap edit | `python3 scripts/docs-check`; when the edited page is one the documentation bundle carries (everything reachable from `README.md` - the root guides and the `docs/content/docs/{roadmap,changelog,agents}` pages), also `./scripts/build-docs` so `godot/docs.json` is not stale (`--check` names it) |
-| `docs/data/capabilities/**`, `scripts/check-capabilities`, `scripts/render-capabilities` | `./scripts/check-capabilities` — id grammar, status vocabulary, evidence paths at HEAD, `row` joins to a roadmap title, no URLs; the docs gates in `ci-check` and the `Docs` workflow run it, and the renderer is compiled there too |
+| closing a row | `./scripts/roadmap close <ID>` — it flips the index and writes the `Commits:` line from `Roadmap: <ID>` trailers; `python3 scripts/docs-check` proves the index/detail agreement |
+| `docs/data/capabilities/**`, `scripts/check-capabilities`, `scripts/render-capabilities` | `./scripts/check-capabilities` — id grammar, status vocabulary, evidence paths at HEAD, `row` naming a roadmap ID, no URLs; the docs gates in `ci-check` and the `Docs` workflow run it, and the renderer is compiled there too |
 | app-visible behavior | `python3 scripts/smoke_pane_api.py`, or `skill://gpty-live-gui-smoke`; UI claims → `skill://gpty-ui-review` (`scripts/ui-capture` stages a state; `scripts/ui-capture-check` proves the captures repeat, and needs a display) |
-| README cost figure or the cost chart | `./scripts/measure-cost --check` with a built app (a GPU session; a debug build is not the thing being published), then `./scripts/measure-cost --record` to append the release to `docs/data/cost-history.json` and redraw the SVG — `ci-check` runs both GPU-free halves, `measure-cost --stamp` and `render-cost-chart --check --require-current`, and a change to a tooling script alone is a **tooling-class** range (the class, its scripts and the two lists that must agree are `docs/content/docs/agents/testing.md`'s tooling-class paragraph): the local gate runs the docs and cost gates plus `run_tooling_scripts` (`bash -n`, a compile, a planned backfill) in seconds; the tooling-class gates are local-only, while the workflows that call `install-rust`, `install-godot` and `release-prepare` are covered by the jobs that call them |
+| README cost figure or the cost chart | `./scripts/measure-cost --check` with a built app (a GPU session; a debug build is not the thing being published), then `./scripts/measure-cost --record` to append the release to `docs/data/cost-history.json` and redraw the SVG — `ci-check` runs both GPU-free halves, `measure-cost --stamp` and `render-cost-chart --check --require-current`, and a change to a tooling script alone is a **tooling-class** range (the class, its scripts and the two lists that must agree are `docs/content/docs/agents/testing.md`'s tooling-class paragraph): the local gate runs the docs and cost gates plus `run_tooling_scripts` (`bash -n`, a compile, a planned backfill) in seconds; the tooling-class gates are local-only, while the workflows tha…
 | anything | `./scripts/ci-check` before committing (full: fmt, workflow lint, docs, clippy, ffi surface, log hygiene, theme tokens, test guards, the secret scan, the two GPU-free cost gates, cross-target checks, tests twice, gdext build, import, GUT, live smoke, `cargo audit --deny warnings` over both lockfiles with a `cargo metadata --locked` drift check, `cargo deny check`) |
 
 A missing toolchain SKIPs locally but FAILS under `CI`/`GITHUB_ACTIONS`, so a local PASS can be weaker than CI. Never `--no-verify`. Do not run the full suite mid-flight, and do not re-run a gate that already passed.
 
 ## 6. Close the row
 
-- Flip ⬜ to ✅ **in place**. The text becomes the record: what shipped, measured numbers (not adjectives), the tests by name, the failure mode now closed. A reader must be able to tell whether it is done without opening the commit.
+- Rewrite the **detail section** as the record: what shipped, measured numbers (not adjectives), the tests by name, the failure mode now closed. A reader must be able to tell whether it is done without opening the commit.
+- `./scripts/roadmap close <ID>` flips `⬜`→`✅` in the index and writes the oldest-first `Commits:` list. If it reports no commit, put `Roadmap: <ID>` in the fix commit's body and retry; `--force` writes `unrecorded` and is only for work with no attributable commit.
 - Closing a bug row means the fix commit declares its `Cause:` class (`docs/content/docs/agents/defect-classes.md`). If that class now has a third member and no mechanical control, add the control's roadmap row now - the class page's review loop owns the threshold.
-- Corrections fold into that row.
-- Screenshots: the row ends "Screenshot (under Screenshots below): *Caption*."; the file and its key live in the page's `## Screenshots` - numbered boxes where the image needs pointing at (the numbers live in the image and nothing else explains them), or the controls named in words where one capture shows a single surface whole (the page's preamble says which is which); never an image inside a cell.
+- Corrections fold into that row's detail.
+- Screenshots: the detail ends `Screenshot: *Caption* ([captures](../v<page>.md#screenshots)).`; the file and its key live in the chain page's `## Screenshots` - numbered boxes where the image needs pointing at (the numbers live in the image and nothing else explains them), or the controls named in words where one capture shows a single surface whole. Never an image inside a row.
 - A defect found on the way gets **its own row** in priority position, with the evidence that makes it actionable and the fix direction — not a silent fix, not a comment, not folded into this row unless it is genuinely part of this row's contract.
 - The changelog is written at release time (`docs/content/docs/changelog/vX.Y.Z.md`); a release's DOCS row carries that work. Do not write it mid-cycle — do record the user-facing summary the row will need.
 
 ## 7. Commit, then stop
 
-Work on a branch, never on `main`: create it before the first commit (`git switch -c <type>/<slug>` from `main`), then `skill://commit`; conventional scope; a behavior change and its test land in the same commit; an intentional behavior change gets the reason in the body. Push with `scripts/bot-push`, open the PR with `scripts/bot-pr`, and after the maintainer's approval enqueue it with `gh pr merge --auto --merge`; `scripts/branch-prune` once it landed. A commit made on `main` by mistake moves to a branch with `git switch -c <branch>` and `git branch -f main origin/main` before the push - `main`'s ruleset rejects a direct push. Before the reply: every call site migrated, docs updated or a row queued for them, the changed path exercised for real (tests alone are not proof), scratch files gone, `git status` clean of strays. When the *session* is ending rather than just this row, run `skill://gpty-session-wrap-up` first: it owns the audit a single row does not (doc mirrors beyond the row, the wiki bundle, skills and memory, loose threads).
+Work on a branch, never on `main`: create it before the first commit (`git switch -c <type>/<slug>` from `main`), then `skill://commit`; conventional scope; a behavior change and its test land in the same commit; an intentional behavior change gets the reason in the body. A commit that advances the row carries a `Roadmap: <ID>` trailer (e.g. `Roadmap: GUI-188`); the ledger CLI reads it. Push with `scripts/bot-push`, open the PR with `scripts/bot-pr`, and after the maintainer's approval enqueue it with `gh pr merge --auto --merge`; `scripts/branch-prune` once it landed. A commit made on `main` by mistake moves to a branch with `git switch -c <branch>` and `git branch -f main origin/main` before the push - `main`'s ruleset rejects a direct push. Before the reply: every call site migrated, docs updated or a row queued for them, the changed path exercised for real (tests alone…
 
 ## Maintenance
 
 - The gate table mirrors `scripts/ci-check`; when a step is renamed or added, the script wins — update the table rather than trusting it.
 - The skills are committed at `.omp/skills/<name>/SKILL.md`; OMP's native project provider discovers them at startup, so a clone carries them. Keep that copy authoritative: `~/.omp/agent/managed-skills` is lower precedence, and an edit made there reaches nobody else.
-- **Restructuring chains** - when releases are renumbered or split, preserve the old pages first (`git show HEAD:docs/content/docs/roadmap/<page>.md`), move rows by their unique bold title instead of retyping them, and verify with a global title-set diff: extract the `| ⬜/✅ | AREA | **Title** -` titles from the old and new trees and `comm -23` them. The 2026-11 remap lost one row until that diff caught it. Then sweep `v0.<n>.<m>` outside the roadmap pages - guide text (`testing.md`, `security.md`), blog links and script comments all repeat release numbers - and finish with `scripts/docs-check`.
+- **Restructuring chains** - when releases are renumbered or split, preserve the old pages first (`git show HEAD:docs/content/docs/roadmap/<page>.md`), move index rows by their **ID** instead of retyping them, and verify with a global ID-set diff: extract the `| status | [AREA-N]` IDs from the old and new trees and `comm -23` them. The 2026-11 remap lost one row until that diff caught it. Detail pages are per area and do not move on a chain change; a row whose area is wrong takes a new ID through `./scripts/roadmap rearea`. Then sweep `v0.<n>.<m>` outside the roadmap pages - guide text (`testing.md`, `security.md`), blog links and script comments all repeat release numbers - and finish with `scripts/docs-check`.
+- **Never renumber or reuse an ID.** It is the join key for the capability catalogue, commit trailers, PR bodies and cross-page links; a renumber silently breaks all four.

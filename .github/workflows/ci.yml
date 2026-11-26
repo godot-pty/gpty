@@ -68,7 +68,7 @@ jobs:
           while IFS= read -r path; do
             [ -n "$path" ] || continue
             case "$path" in
-              docs/*|assets/site-icons/*|*.md|godot/knowledge.json|godot/docs.json|LICENSE|LICENSE-EXCEPTIONS.md|scripts/docs-check|scripts/check-capabilities|scripts/build-wiki|scripts/build-docs) ;;
+              docs/*|assets/site-icons/*|*.md|godot/knowledge.json|godot/docs.json|LICENSE|LICENSE-EXCEPTIONS.md|scripts/docs-check|scripts/check-capabilities|scripts/build-wiki|scripts/build-docs|scripts/roadmap) ;;
               *) code=true ;;
             esac
           done < /tmp/changed

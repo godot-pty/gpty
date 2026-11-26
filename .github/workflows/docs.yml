@@ -12,6 +12,7 @@ on:
       - ".github/workflows/docs.yml"
       - "scripts/docs-check"
       - "scripts/check-capabilities"
+      - "scripts/roadmap"
       # The knowledge bundle ships inside the app and is generated from
       # `docs/content/wiki`, so a wiki-only commit changes this file and must
       # still be validated here - CI ignores documentation-only pushes.
@@ -41,6 +42,7 @@ on:
       - ".github/workflows/docs.yml"
       - "scripts/docs-check"
       - "scripts/check-capabilities"
+      - "scripts/roadmap"
       - "godot/knowledge.json"
       - "scripts/build-wiki"
       # The documentation bundle ships inside the app too, generated from the
@@ -102,9 +104,15 @@ jobs:
       - name: Check markdown (links, roadmap tables, split pages)
         run: ./scripts/docs-check
 
+      # The ledger CLI is what the next-task loop reads. The selftest exercises
+      # next/show/close/rearea on a throwaway fixture; stats parses the real
+      # index and detail pages. No writes outside the fixture.
+      - name: Check the roadmap ledger
+        run: ./scripts/roadmap selftest && ./scripts/roadmap stats
+
       # The catalogue is data, not markdown (docs-check skips docs/data/), so
       # nothing else reads it. It stats every evidence path and joins every
-      # `row` to a roadmap title; no build, milliseconds.
+      # `row` to a roadmap ID; no build, milliseconds.
       - name: Check the capability catalogue
         run: ./scripts/check-capabilities
 

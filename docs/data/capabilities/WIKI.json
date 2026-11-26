@@ -7,7 +7,7 @@
       "status": "done",
       "mechanism": "`scan_vault` recurses with `MAX_NOTES` 2000 and `MAX_DEPTH` 16, skips any name starting with `.`, takes only `.md` case-insensitively, and sorts by vault-relative path so the list, the index and the graph agree",
       "evidence": "crates/gpty-core/src/vault.rs",
-      "row": "Vault model"
+      "row": "WIKI-3"
     },
     {
       "id": "vault.walk.containment",
@@ -15,7 +15,7 @@
       "status": "done",
       "mechanism": "the walk canonicalizes every link and directory against the canonical root and keeps only what stays inside; the count travels as `ScanResult.outside` to the pane footer",
       "evidence": "crates/gpty-core/src/vault.rs:269",
-      "row": "The vault walk follows symlinks the note reader refuses"
+      "row": "WIKI-20"
     },
     {
       "id": "vault.index.incremental",
@@ -23,7 +23,7 @@
       "status": "done",
       "mechanism": "`index_vault` compares each walked note's (mtime, size) with the indexed row, re-reads only a mismatch, drops vanished rows only from a complete walk, and rewrites rows and their links in one transaction",
       "evidence": "crates/gpty-core/src/vault.rs:1978",
-      "row": "Vault model"
+      "row": "WIKI-3"
     },
     {
       "id": "vault.store.fts5",
@@ -88,7 +88,7 @@
       "status": "done",
       "mechanism": "`links_for` reads the stored rows in both directions, re-parses the body to attach the fragment the table does not keep, and derives ambiguity candidates by re-running the same resolver",
       "evidence": "crates/gpty-core/src/vault.rs:1698",
-      "row": "Wikilinks & backlinks - the pane half"
+      "row": "WIKI-11"
     },
     {
       "id": "vault.rename.rewrite",
@@ -96,7 +96,7 @@
       "status": "done",
       "mechanism": "a preview returns files, mentions, skipped and truncated counts; the apply rewrites only occurrences that resolved to the moved note, keeps alias, fragment and line endings, and writes each through `write_vault_note`",
       "evidence": "crates/gpty-core/src/vault.rs:775",
-      "row": "Create, rename, and delete notes"
+      "row": "WIKI-12"
     },
     {
       "id": "vault.graph.aggregate",
@@ -118,7 +118,7 @@
       "status": "done",
       "mechanism": "`VaultGraph3D` runs one `RigidBody3D` per node and one spring per drawn edge in an own-world `SubViewport`; depth is a deterministic per-id layer; a drag holds one body and rewrites its incident rest lengths on release; the simulation freezes when settled or hidden and repaints when its workspace is shown again; the canonical `{id: [x, y]}` block rides the pane's layout state capped at 4000 entries, and a deleted note is ignored",
       "evidence": "godot/scenes/ui/vault_graph_3d.gd",
-      "row": "The vault graph is a physical 3D map you can push around"
+      "row": "WIKI-26"
     },
     {
       "id": "vault.graph.build-offscreen",
@@ -126,7 +126,7 @@
       "status": "done",
       "mechanism": "the index query, the model parse and the layout run as one `WorkerThreadPool` task; the pane polls it, and a result for a vault the pane has left is dropped rather than drawn",
       "evidence": "godot/scenes/panes/wiki_pane.gd:745",
-      "row": "Opening the link graph blocks the frame, and `pane-view --graph` inherits it"
+      "row": "WIKI-25"
     },
     {
       "id": "vault.weights.declared",
@@ -134,7 +134,7 @@
       "status": "done",
       "mechanism": "`user://link_weights.json` keyed (vault, source, target) with path-shape and range checks; a bad entry costs itself, and no decision other than display reads a declaration",
       "evidence": "godot/scenes/autoloads/link_weights_store.gd",
-      "row": "Declared edge weights - the authored layer"
+      "row": "WIKI-15"
     },
     {
       "id": "vault.weights.rekey",
@@ -142,7 +142,7 @@
       "status": "done",
       "mechanism": "the rename path calls `rekey_note`, rebuilding both endpoint keys to the new path; an outside move looks like a delete here and its declarations are pruned instead",
       "evidence": "godot/scenes/autoloads/link_weights_store.gd",
-      "row": "A note rename does not re-key its declared link weights"
+      "row": "WIKI-16"
     },
     {
       "id": "vault.weights.outside-move",
@@ -150,7 +150,7 @@
       "status": "planned",
       "mechanism": "it does not: a complete graph prunes declarations whose endpoints vanished, and an outside move cannot be told from a deletion, so following one needs an explicit graph-side action",
       "evidence": "godot/scenes/autoloads/link_weights_store.gd",
-      "row": "Declared link weights cannot follow a note moved outside gPTY"
+      "row": "WIKI-51"
     },
     {
       "id": "note.markdown.render",
@@ -159,7 +159,7 @@
       "status": "done",
       "mechanism": "`GptyMarkdown.render` escapes raw HTML and BBCode, reduces images to alt text, admits only http, https and mailto link targets, and emits indented list lines instead of list tags",
       "evidence": "crates/gpty-gdext/src/markdown.rs",
-      "row": "Safe Markdown rendering"
+      "row": "WIKI-1"
     },
     {
       "id": "note.markdown.cap",
@@ -167,7 +167,7 @@
       "status": "done",
       "mechanism": "`MAX_MARKDOWN_BYTES` is the same 1 MiB the note reader cuts at, and the answer carries `truncated`, `shown` and `size` for the view's notice",
       "evidence": "crates/gpty-gdext/src/markdown.rs:52",
-      "row": "The Markdown preview no longer stops at a cap of its own"
+      "row": "WIKI-8"
     },
     {
       "id": "note.preview.anchors",
@@ -175,7 +175,7 @@
       "status": "done",
       "mechanism": "`MarkdownAnchors` scans ATX headings past frontmatter and fenced blocks, exact text first then case-insensitive, and `MarkdownView` scrolls to the matching rendered line",
       "evidence": "godot/scenes/ui/markdown_anchors.gd:24",
-      "row": "Wikilink navigation polish - heading fragments, line jumps, and nested labels"
+      "row": "WIKI-17"
     },
     {
       "id": "note.preview.setext",
@@ -183,7 +183,7 @@
       "status": "planned",
       "mechanism": "the scanner recognizes ATX headings only, so a title over `===` renders but derives no anchor and the jump falls to the ATX heading above it",
       "evidence": "godot/scenes/ui/markdown_anchors.gd",
-      "row": "Setext headings have no anchor"
+      "row": "WIKI-38"
     },
     {
       "id": "note.edit.modes",
@@ -191,7 +191,7 @@
       "status": "done",
       "mechanism": "edit, split and preview modes persist as the tile's `view_mode`; the preview renders the buffer after a 0.4 s quiet window, and edit mode renders nothing",
       "evidence": "godot/scenes/panes/wiki_pane.gd",
-      "row": "Markdown editor & preview"
+      "row": "WIKI-4"
     },
     {
       "id": "note.edit.close-guard",
@@ -199,7 +199,7 @@
       "status": "done",
       "mechanism": "`request_close` runs the same save-or-discard question as leaving the note, and `has_unsaved_state` lets a caller that cannot answer a dialog refuse instead",
       "evidence": "godot/scenes/panes/wiki_pane.gd:1921",
-      "row": "Closing a pane or quitting the app loses unsaved wiki edits"
+      "row": "WIKI-5"
     },
     {
       "id": "note.scratch.copy",
@@ -207,7 +207,7 @@
       "status": "done",
       "mechanism": "a throttled 1.5 s copy under the state directory is keyed by a stated FNV-1a hash of the canonical root and path, written atomically and owner-only, then offered as Restore, Discard or later on reopen",
       "evidence": "crates/gpty-core/src/vault.rs:1162",
-      "row": "A crash no longer takes the wiki buffer"
+      "row": "WIKI-6"
     },
     {
       "id": "note.frontmatter.title",
@@ -215,7 +215,7 @@
       "status": "done",
       "mechanism": "`note_title` skips a closed `---` block before scanning for a heading and falls back to the file stem; the block itself is indexed and renders as ordinary text",
       "evidence": "crates/gpty-core/src/vault.rs:1060",
-      "row": "A note with frontmatter loses its title in search results"
+      "row": "WIKI-10"
     },
     {
       "id": "pane.wiki.browse",
@@ -223,7 +223,7 @@
       "status": "done",
       "mechanism": "the list is one `vault_index` call with a footer for a capped listing and skipped links; search debounces 0.15 s for 200 hits; `open_note` and `graph` replay once from the saved tile state",
       "evidence": "godot/scenes/panes/wiki_pane.gd",
-      "row": "Wiki pane type"
+      "row": "WIKI-2"
     },
     {
       "id": "vault.root.registry",
@@ -238,7 +238,7 @@
       "status": "planned",
       "mechanism": "no expander exists; the planned token table is closed (date, time, title, vault), expanded in Rust and inserted as an edit so no second write path into the vault opens",
       "evidence": "godot/scenes/panes/wiki_pane.gd",
-      "row": "Templates"
+      "row": "WIKI-40"
     }
   ]
 }

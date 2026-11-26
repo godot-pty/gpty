@@ -85,7 +85,9 @@ records the checkpoints an agent must not skip, not a second runbook.
   and the registry entry instead of running `cargo publish` or
   `gh workflow run mcp-registry.yml` by hand. The AUR tail stays manual: an AUR
   commit without the key on the machine is validated with `makepkg` and
-  reported, never claimed as published. Close the asset-set roadmap row.
+  reported, never claimed as published. Close the asset-set roadmap row with
+  `./scripts/roadmap close <ID>` once the published measurement is in its detail
+  section.
 - **A row only a release can prove stays open until the asset is measured.**
   Close it with the numbers from the shipped file (`zipinfo`, byte size,
   `--version`), not with the fix's description, and put the measurement in the

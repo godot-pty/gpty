@@ -50,7 +50,7 @@
       "status": "done",
       "mechanism": "the type is checked against the pane registry and the reply carries the persisted `attachment_id`",
       "evidence": "godot/scenes/terminal/ipc_handlers.gd",
-      "row": "Stable public pane IDs"
+      "row": "IPC-5"
     },
     {
       "id": "pane.list",
@@ -170,7 +170,7 @@
       "status": "done",
       "mechanism": "the CLI stages the clone and the GUI asks; consent is remembered by the trust store",
       "evidence": "godot/scenes/terminal/ipc_handlers.gd",
-      "row": "Plugin install & lifecycle"
+      "row": "PLUGIN-2"
     },
     {
       "id": "plugin.changed.notify",

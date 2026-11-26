@@ -84,7 +84,7 @@
       "status": "partial",
       "mechanism": "the parser stores the value in the grid's colour table; cells still resolve from the pane's own 16-entry palette",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "A program's palette change is stored by the parser and then ignored by the renderer"
+      "row": "TERM-35"
     },
     {
       "id": "osc.10.foreground-set",
@@ -93,7 +93,7 @@
       "status": "partial",
       "mechanism": "parsed into the grid's colour table, then overwritten by the pane's resolved default",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "A program's palette change is stored by the parser and then ignored by the renderer"
+      "row": "TERM-35"
     },
     {
       "id": "osc.11.background-set",
@@ -102,7 +102,7 @@
       "status": "partial",
       "mechanism": "parsed into the grid's colour table, then overwritten by the pane's resolved default",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "A program's palette change is stored by the parser and then ignored by the renderer"
+      "row": "TERM-35"
     },
     {
       "id": "sgr.attr.strikethrough",
@@ -111,7 +111,7 @@
       "status": "planned",
       "mechanism": "the flag is parsed and dropped: `CellInfo` carries no strikeout bit",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "Text attributes the emulator parses are drawn: strikethrough, dim, hidden, curly/dotted/dashed/double underline and underline colour"
+      "row": "TERM-30"
     },
     {
       "id": "sgr.attr.dim",
@@ -120,7 +120,7 @@
       "status": "planned",
       "mechanism": "the flag is parsed and dropped: `CellInfo` carries no dim bit",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "Text attributes the emulator parses are drawn: strikethrough, dim, hidden, curly/dotted/dashed/double underline and underline colour"
+      "row": "TERM-30"
     },
     {
       "id": "sgr.attr.hidden",
@@ -129,7 +129,7 @@
       "status": "planned",
       "mechanism": "the flag is parsed and dropped: `CellInfo` carries no hidden bit",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "Text attributes the emulator parses are drawn: strikethrough, dim, hidden, curly/dotted/dashed/double underline and underline colour"
+      "row": "TERM-30"
     },
     {
       "id": "sgr.attr.undercurl",
@@ -138,7 +138,7 @@
       "status": "planned",
       "mechanism": "the variant and its colour are parsed and dropped before the packer; `CellInfo` has one underline bit",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "Text attributes the emulator parses are drawn: strikethrough, dim, hidden, curly/dotted/dashed/double underline and underline colour"
+      "row": "TERM-30"
     },
     {
       "id": "sgr.attr.underline-variants",
@@ -147,7 +147,7 @@
       "status": "planned",
       "mechanism": "the variant number is parsed and dropped; the pane draws one solid rule",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "Text attributes the emulator parses are drawn: strikethrough, dim, hidden, curly/dotted/dashed/double underline and underline colour"
+      "row": "TERM-30"
     },
     {
       "id": "sgr.attr.underline-colour",
@@ -156,7 +156,7 @@
       "status": "planned",
       "mechanism": "`CellInfo` has no per-cell underline colour slot; the wire carries one style word",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "Text attributes the emulator parses are drawn: strikethrough, dim, hidden, curly/dotted/dashed/double underline and underline colour"
+      "row": "TERM-30"
     },
     {
       "id": "cell.box-drawing",
@@ -165,7 +165,7 @@
       "status": "planned",
       "mechanism": "the glyph comes from the font, whose advance and ascent do not match the fractional cell size",
       "evidence": "godot/scenes/terminal/terminal_pane.gd",
-      "row": "Box-drawing, block and braille characters are drawn by gPTY, not taken from the font"
+      "row": "TERM-31"
     },
     {
       "id": "cell.block-elements",
@@ -174,7 +174,7 @@
       "status": "planned",
       "mechanism": "the glyph comes from the font and is sized to the font, not to the cell",
       "evidence": "godot/scenes/terminal/terminal_pane.gd",
-      "row": "Box-drawing, block and braille characters are drawn by gPTY, not taken from the font"
+      "row": "TERM-31"
     },
     {
       "id": "cell.braille",
@@ -183,7 +183,7 @@
       "status": "planned",
       "mechanism": "the glyph comes from the font and is sized to the font, not to the cell",
       "evidence": "godot/scenes/terminal/terminal_pane.gd",
-      "row": "Box-drawing, block and braille characters are drawn by gPTY, not taken from the font"
+      "row": "TERM-31"
     },
     {
       "id": "font.fallback-chain",
@@ -191,7 +191,7 @@
       "status": "planned",
       "mechanism": "one font file is loaded per pane and no fallback list is set",
       "evidence": "godot/scenes/terminal/terminal_fonts.gd",
-      "row": "Fonts: a chosen family with a fallback chain, so Nerd Font icons and combining marks render"
+      "row": "TERM-32"
     },
     {
       "id": "cell.combining-marks",
@@ -200,7 +200,7 @@
       "status": "planned",
       "mechanism": "`CellInfo.ch` is one `char`, so a zero-width mark has nowhere to live",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "Fonts: a chosen family with a fallback chain, so Nerd Font icons and combining marks render"
+      "row": "TERM-32"
     },
     {
       "id": "csi.14t.text-area-pixels",
@@ -209,7 +209,7 @@
       "status": "planned",
       "mechanism": "the grid raises the event and the frontend drops it into `_ => {}`",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "Answer the terminal-state queries the emulator raises: OSC 4/10/11/12 colours and text-area size"
+      "row": "TERM-36"
     },
     {
       "id": "csi.18t.text-area-chars",
@@ -218,7 +218,7 @@
       "status": "planned",
       "mechanism": "the grid raises the event and the frontend drops it into `_ => {}`",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "Answer the terminal-state queries the emulator raises: OSC 4/10/11/12 colours and text-area size"
+      "row": "TERM-36"
     },
     {
       "id": "osc.11.background-query",
@@ -227,7 +227,7 @@
       "status": "planned",
       "mechanism": "the query is parsed and no reply is written back to the pty",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "Answer the terminal-state queries the emulator raises: OSC 4/10/11/12 colours and text-area size"
+      "row": "TERM-36"
     },
     {
       "id": "bell.visual",
@@ -236,7 +236,7 @@
       "status": "planned",
       "mechanism": "the event falls into `_ => {}`; nothing reads it",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "The bell is seen"
+      "row": "TERM-37"
     },
     {
       "id": "osc.52.clipboard-write",
@@ -245,7 +245,7 @@
       "status": "planned",
       "mechanism": "the store event is dropped before any policy could be consulted",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "Clipboard writes from programs (OSC 52), consent-gated and write-only"
+      "row": "SEC-47"
     },
     {
       "id": "osc.52.clipboard-read",
@@ -253,7 +253,7 @@
       "spec": "OSC 52 (query)",
       "status": "rejected",
       "mechanism": "a program reading the user's clipboard is an exfiltration path; the store half is gated, the load half stays unimplemented",
-      "row": "Clipboard writes from programs (OSC 52), consent-gated and write-only"
+      "row": "SEC-47"
     },
     {
       "id": "osc.7.cwd-report",
@@ -262,7 +262,7 @@
       "status": "planned",
       "mechanism": "the byte stream is not tapped for it; the `gpty_state` tap is the precedent",
       "evidence": "crates/gpty-core/src/parser.rs",
-      "row": "The shell's working directory is known: OSC 7 as display, \"new pane here\" as the default"
+      "row": "TERM-38"
     },
     {
       "id": "mode.focus-reporting.1004",
@@ -271,7 +271,7 @@
       "status": "planned",
       "mechanism": "no mode negotiation turned up in the keymap or the pane's input path",
       "evidence": "crates/gpty-core/src/keymap.rs",
-      "row": "Verify and fill the modern-TUI protocol set: kitty keyboard, focus reporting, synchronized output"
+      "row": "TERM-39"
     },
     {
       "id": "mode.sync-output.2026",
@@ -280,7 +280,7 @@
       "status": "planned",
       "mechanism": "the begin and end markers are not tracked; the renderer presents on its own cadence",
       "evidence": "crates/gpty-core/src/term.rs",
-      "row": "Verify and fill the modern-TUI protocol set: kitty keyboard, focus reporting, synchronized output"
+      "row": "TERM-39"
     },
     {
       "id": "input.kitty-keyboard",
@@ -289,7 +289,7 @@
       "status": "planned",
       "mechanism": "`keymap.rs` names the protocol in its header, but no mode negotiation exists",
       "evidence": "crates/gpty-core/src/keymap.rs",
-      "row": "Verify and fill the modern-TUI protocol set: kitty keyboard, focus reporting, synchronized output"
+      "row": "TERM-39"
     },
     {
       "id": "shell.default.user-shell",
@@ -297,7 +297,7 @@
       "status": "planned",
       "mechanism": "the default is the literal path `/bin/bash` on every non-Windows platform",
       "evidence": "godot/scenes/autoloads/settings_manager.gd",
-      "row": "The default shell is the user's shell, not `/bin/bash`"
+      "row": "TERM-28"
     },
     {
       "id": "pane.exit.footer",
@@ -305,7 +305,7 @@
       "status": "planned",
       "mechanism": "the exit code is tracked and reported, but the pane draws nothing for it",
       "evidence": "crates/gpty-core/src/engine.rs:138",
-      "row": "A pane whose shell has exited says so and offers Restart or Close"
+      "row": "TERM-29"
     },
     {
       "id": "graphics.sixel",

@@ -7,7 +7,7 @@
       "status": "done",
       "mechanism": "`PaneTypes.ALL` is the closed table every surface reads \u2014 menu, palette, sidebar, restore and the control socket \u2014 and `sanitize_tile` drops a saved tile whose type it does not carry",
       "evidence": "godot/scenes/panes/pane_types.gd",
-      "row": "Tiling grid layout"
+      "row": "GUI-1"
     },
     {
       "id": "gui.tile.split",
@@ -15,7 +15,7 @@
       "status": "done",
       "mechanism": "`_split_for` halves the largest tile on the caller's side or the axis its aspect prefers; on detach an exact neighbour absorbs the freed rect, else one edge group that spans it",
       "evidence": "godot/scenes/terminal/terminal_manager.gd",
-      "row": "Tiling grid layout"
+      "row": "GUI-1"
     },
     {
       "id": "gui.pane.close-guard",
@@ -23,7 +23,7 @@
       "status": "done",
       "mechanism": "every destruction path goes through `PaneBody.request_close`; `_ask_running_then` aggregates `has_running_work` for the set and names the workspace and panes in one dialog",
       "evidence": "godot/scenes/terminal/workspace.gd",
-      "row": "Reset or closing a pane asks before killing running work"
+      "row": "GUI-20"
     },
     {
       "id": "gui.pane.swap",
@@ -31,7 +31,7 @@
       "status": "done",
       "mechanism": "the tile geometry is swapped in place and both wrappers re-lay out; a type change is a separate named action that rebuilds the body through `_swap_pane` and keeps the attachment id",
       "evidence": "godot/scenes/terminal/workspace.gd",
-      "row": "Pane position and type swapping"
+      "row": "GUI-6"
     },
     {
       "id": "gui.pane.minimize",
@@ -39,7 +39,7 @@
       "status": "done",
       "mechanism": "`toggle_pane_minimize` flips the wrapper's visibility only; a restore returns focus to the pane through `_return_focus_to_body`, and a minimize deliberately leaves nothing focused",
       "evidence": "godot/scenes/terminal/terminal_manager.gd",
-      "row": "Pane chrome: distinct icons, a compact action menu, padding and consistent empty states"
+      "row": "GUI-46"
     },
     {
       "id": "gui.tile.divider-drag",
@@ -47,7 +47,7 @@
       "status": "done",
       "mechanism": "`TileDrag` snapshots the line's geometry at the press, previews in whole grid units, and replays the same sequence on release; the workspace keeps the axis resize cursor for the whole drag",
       "evidence": "godot/scenes/terminal/tile_drag.gd",
-      "row": "Resizing a pane is smooth: the resize cursor always shows, no gray band while dragging, no hop on release"
+      "row": "GUI-78"
     },
     {
       "id": "gui.workspace.switch",
@@ -55,7 +55,7 @@
       "status": "done",
       "mechanism": "each workspace owns a grid and a tile manager over one live pane set; the inactive grids are hidden and their process mode disabled, so a hidden pane keeps its child and its grid alive",
       "evidence": "godot/scenes/terminal/workspace.gd",
-      "row": "Workspace switching"
+      "row": "GUI-9"
     },
     {
       "id": "gui.layout.persist",
@@ -63,7 +63,7 @@
       "status": "done",
       "mechanism": "`_gather_tiles` serializes through the same sanitizer a restore runs, and the store is written on quit and on every switch; an empty grid is saved as empty and restores empty",
       "evidence": "godot/scenes/terminal/workspace.gd",
-      "row": "Session auto-save"
+      "row": "GUI-8"
     },
     {
       "id": "gui.layout.restore-notice",
@@ -78,7 +78,7 @@
       "status": "done",
       "mechanism": "`UiTheme.build` reads the active palette and `UiTokens` at build time and is set on the workspace root; a switch rebuilds it there, so every pane, overlay, popup and dialog inherits one copy",
       "evidence": "godot/scenes/ui/ui_theme.gd",
-      "row": "Shared theme, type scale, colour tokens and UI scale"
+      "row": "GUI-36"
     },
     {
       "id": "gui.palette.two-sets",
@@ -86,7 +86,7 @@
       "status": "done",
       "mechanism": "both tables carry the same keys, a missing one fails the unit test, and every widget reads `UiPalette.active()` at draw time, because a cached value keeps the mode it was built under",
       "evidence": "godot/scenes/ui/ui_palette.gd",
-      "row": "The app chrome has a light theme, and it follows the system"
+      "row": "GUI-37"
     },
     {
       "id": "gui.tokens.type-scale",
@@ -94,7 +94,7 @@
       "status": "done",
       "mechanism": "the `FS_*`, `SPACE_*` and `RADIUS` constants replace literals; `ui_scale_ceiling` caps the applied factor so window pixels divided by scale never fall under `MIN_LAYOUT`, and an unmeasurable window is not capped",
       "evidence": "godot/scenes/ui/ui_tokens.gd",
-      "row": "Shared theme, type scale, colour tokens and UI scale"
+      "row": "GUI-36"
     },
     {
       "id": "gui.tokens.contrast",
@@ -103,7 +103,7 @@
       "spec": "WCAG 2.1 contrast ratio",
       "mechanism": "`CONTRAST_PAIRS` lists each pair with its floor and the unit test grades them with `UiTokens.contrast_ratio`, the same alpha-composited maths a measurement quotes",
       "evidence": "godot/scenes/ui/ui_tokens.gd",
-      "row": "Shared theme, type scale, colour tokens and UI scale"
+      "row": "GUI-36"
     },
     {
       "id": "gui.a11y.names",
@@ -118,7 +118,7 @@
       "status": "done",
       "mechanism": "`A11y.publish` replaces a content node under the tile's title bar when the text changes and a polite live node carries announcements; role and value are written only from the control's own accessibility update",
       "evidence": "godot/scenes/ui/accessibility.gd",
-      "row": "A restored terminal publishes no text to the AT-SPI tree"
+      "row": "GUI-74"
     },
     {
       "id": "gui.keyboard.focus",
@@ -126,7 +126,7 @@
       "status": "done",
       "mechanism": "`PaneBody.keyboard_entry` and `WindowChrome.focus_controls` name the entry, `KeyboardFocus.ring` writes the wrapping order, and the theme's focus stylebox is a 1 px accent border",
       "evidence": "godot/scenes/ui/keyboard_focus.gd",
-      "row": "Keyboard focus is explicit and does not leak"
+      "row": "GUI-173"
     },
     {
       "id": "gui.palette.rank",
@@ -134,7 +134,7 @@
       "status": "done",
       "mechanism": "`PaletteModel.filter` scans in three tiers and keeps the model's own order inside a tier, so the cursor's first row after a keystroke is predictable and a name never reorders the list",
       "evidence": "godot/scenes/ui/palette_model.gd",
-      "row": "Command palette: population, selection and honest entries"
+      "row": "GUI-49"
     },
     {
       "id": "gui.shortcuts.catalog",
@@ -149,7 +149,7 @@
       "status": "done",
       "mechanism": "`ShortcutGuide` renders the catalog as grouped cards, cycles the spawn chords read from the registry through a keycap, and is shown exactly when the active workspace has no tiles",
       "evidence": "godot/scenes/ui/shortcut_guide.gd",
-      "row": "The empty workspace teaches every shortcut, with a living keycap"
+      "row": "GUI-107"
     },
     {
       "id": "gui.status-bar",
@@ -164,7 +164,7 @@
       "status": "done",
       "mechanism": "each section is a header plus a list capped at five measured rows, the whole column scrolls when the window is shorter, and a pane row mutates in place and opens the same menu as the pane's title bar",
       "evidence": "godot/scenes/ui/sidebar.gd",
-      "row": "The sidebar's three sections cannot be folded"
+      "row": "GUI-79"
     },
     {
       "id": "gui.chrome.window",
@@ -172,7 +172,7 @@
       "status": "done",
       "mechanism": "`apply_mode` puts the configured mode on the window and swaps the control's glyph and name from the setting; position is saved and restored only in a windowed mode, and a fullscreen toggle returns to borderless windowed",
       "evidence": "godot/scenes/ui/window_chrome.gd",
-      "row": "Window controls never swap maximize/restore"
+      "row": "GUI-42"
     },
     {
       "id": "gui.toast.queue",
@@ -180,7 +180,7 @@
       "status": "done",
       "mechanism": "the visible toast owns its tween and starts the next when it ends; the queue is capped at eight and drops the oldest, so a caller in a loop cannot grow it",
       "evidence": "godot/scenes/ui/toast_overlay.gd",
-      "row": "The toast queue never queues"
+      "row": "GUI-84"
     },
     {
       "id": "gui.scroll.chevrons",
@@ -188,7 +188,7 @@
       "status": "done",
       "mechanism": "`ScrollHints` binds to a scrollbar, a tree or a pane's own offset and shows each chevron from its own predicate, so a body that fits its viewport shows neither",
       "evidence": "godot/scenes/ui/scroll_hints.gd",
-      "row": "Every scrolling pane carries the same two scroll chevrons"
+      "row": "GUI-87"
     },
     {
       "id": "gui.badge.agent-state",
@@ -196,7 +196,7 @@
       "status": "done",
       "mechanism": "four shapes, one per state, with a painted ring for working because a thin glyph arc faded at badge size; the tooltip and exposed name are the state's words, never a codepoint",
       "evidence": "godot/scenes/ui/agent_badge.gd",
-      "row": "The `working` badge is a thin arc that reads as a dim dot at 12 px"
+      "row": "GUI-57"
     },
     {
       "id": "gui.tile.animation",
@@ -204,7 +204,7 @@
       "status": "planned",
       "mechanism": "no motion layer exists: `_apply_layout` writes every rect in one pass, so a new pane appears fully formed, a closed one vanishes and a swap teleports both bodies",
       "evidence": "godot/scenes/terminal/workspace.gd",
-      "row": "Panes animate when they are created, destroyed or swapped"
+      "row": "GUI-109"
     },
     {
       "id": "gui.motion.reduced",
@@ -212,7 +212,7 @@
       "status": "planned",
       "mechanism": "no motion setting exists; the badge's ring and the guide's keycap animate on a wall clock and only the capture harness can pin them",
       "evidence": "godot/scenes/ui/agent_badge.gd",
-      "row": "Panes animate when they are created, destroyed or swapped"
+      "row": "GUI-109"
     },
     {
       "id": "gui.chrome.opacity",
@@ -220,7 +220,7 @@
       "status": "planned",
       "mechanism": "neither setting exists: text sits flush against the pane edge and the grid fills the pane's whole rect",
       "evidence": "godot/scenes/terminal/workspace.gd",
-      "row": "Window fit: opacity and inner padding"
+      "row": "GUI-111"
     },
     {
       "id": "gui.keybindings.configurable",
@@ -228,7 +228,7 @@
       "status": "planned",
       "mechanism": "chords are registered once and the catalog reads them back, but nothing writes a binding from user input",
       "evidence": "godot/scenes/ui/shortcut_catalog.gd",
-      "row": "Keybindings are configurable"
+      "row": "GUI-163"
     },
     {
       "id": "gui.scheme.import",
@@ -236,7 +236,7 @@
       "status": "planned",
       "mechanism": "only three schemes ship and no importer exists; the chrome's dark and light pair is a user choice rather than a reading of the system state",
       "evidence": "godot/scenes/ui/ui_palette.gd",
-      "row": "Colour schemes: import, and light mode that follows the system"
+      "row": "GUI-112"
     },
     {
       "id": "gui.effects.closed-table",
@@ -244,7 +244,7 @@
       "status": "done",
       "mechanism": "`UiEffects` holds the two ambient `preload` shader paths and the Off/Subtle/Full intensity; `PaneEffects` paints the ground through one dedicated effect layer and the row runs at the default background are skipped under it, so text, selection and coloured cells stay opaque",
       "evidence": "godot/scenes/ui/ui_effects.gd",
-      "row": "Dynamic Shaders"
+      "row": "GUI-108"
     },
     {
       "id": "gui.effects.reactive",
@@ -252,7 +252,7 @@
       "status": "done",
       "mechanism": "`UiEffects.REACTIVE` is the closed cue table with one fixed palette tone per cue; the concept drain calls `_flash_concept`, and `PaneEffects` enforces 334 ms per pane, skips hidden panes and draws a tint, a border pulse or a fixed 48-particle burst from a pool allocated once",
       "evidence": "godot/scenes/terminal/pane_effects.gd",
-      "row": "Reactive Environments"
+      "row": "CONCEPT-13"
     }
   ]
 }
