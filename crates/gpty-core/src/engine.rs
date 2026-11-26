@@ -69,32 +69,34 @@ pub struct PtyTerminalHandle {
 }
 
 impl PtyTerminalHandle {
-    /// Queue a line (Enter follows). `false` means the bounded queue is full
-    /// or the task is gone, so nothing was sent.
+    /// Queue a line (Enter follows). `false` means the bounded queue is full,
+    /// the child's writer thread is gone, or the task has ended, so nothing
+    /// was sent.
     pub fn send_line(&self, text: &str) -> bool {
         self.stdin_tx
             .try_send(StdinInput::Line(text.to_string()))
             .is_ok()
     }
 
-    /// Queue raw bytes (no newline). `false` means the queue is full or the
-    /// task is gone, so nothing was sent.
+    /// Queue raw bytes (no newline). `false` means the queue is full, the
+    /// child's writer thread is gone, or the task has ended, so nothing was
+    /// sent.
     pub fn send_text(&self, text: &str) -> bool {
         self.stdin_tx
             .try_send(StdinInput::Raw(text.as_bytes().to_vec()))
             .is_ok()
     }
 
-    /// Resize the PTY. A full queue drops this attempt (the layout will ask
-    /// again on the next settle); it is internal plumbing, not user input, so
-    /// it has no caller to refuse.
+    /// Resize the PTY. A full or closed input path drops this attempt (the
+    /// layout will ask again on the next settle); it is internal plumbing, not
+    /// user input, so it has no caller to refuse.
     pub fn resize_pty(&self, rows: u16, cols: u16) {
         if self
             .stdin_tx
             .try_send(StdinInput::Resize { rows, cols })
             .is_err()
         {
-            log::debug!("[Pane {}] resize dropped: input queue full", self.id);
+            log::debug!("[Pane {}] resize dropped: input not accepted", self.id);
         }
     }
 
@@ -105,7 +107,10 @@ impl PtyTerminalHandle {
             .try_send(StdinInput::FlushCapture(id))
             .is_err()
         {
-            log::debug!("[Pane {}] capture flush dropped: input queue full", self.id);
+            log::debug!(
+                "[Pane {}] capture flush dropped: input not accepted",
+                self.id
+            );
         }
     }
 
@@ -117,7 +122,7 @@ impl PtyTerminalHandle {
             .is_err()
         {
             log::debug!(
-                "[Pane {}] capture acknowledge dropped: input queue full",
+                "[Pane {}] capture acknowledge dropped: input not accepted",
                 self.id
             );
         }
@@ -813,20 +818,32 @@ fn handle_command(
 /// not inside `PtyHandle::send`) keeps the task abortable: the engine's input
 /// channel backs up and finally refuses the caller at `try_send`, while a pane
 /// close can still land on the sleep and drop the handle that kills the child.
+///
+/// The writer thread exits on the same fatal error this sees. Closing the
+/// ingress here is what stops `send_text`/`send_line` from answering `true`
+/// for bytes no thread will write: their `try_send` then answers `Closed`
+/// until the task ends. Buffered commands are still drained (tokio's `close`
+/// refuses new sends but yields what was already queued), so a resize or a
+/// capture flush can land while the read side finishes.
+///
+/// Returns `true` when the bytes were handed to the writer, `false` once it is
+/// gone.
 async fn write_with_backpressure(
     mut write: impl FnMut() -> Result<(), std::io::Error>,
+    stdin_rx: &mut mpsc::Receiver<StdinInput>,
     id: u32,
     what: &str,
-) {
+) -> bool {
     loop {
         match write() {
-            Ok(()) => return,
+            Ok(()) => return true,
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 tokio::time::sleep(Duration::from_millis(1)).await;
             }
             Err(e) => {
                 log::error!("[Pane {id}] PTY write error ({what}): {e}");
-                return;
+                stdin_rx.close();
+                return false;
             }
         }
     }
@@ -862,6 +879,14 @@ async fn run_terminal_task(
     let mut exit_quiet_until: Option<tokio::time::Instant> = None;
     let mut child_poll = tokio::time::interval(Duration::from_millis(CHILD_POLL_MS));
     child_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    // The input gate. A terminal write error means the writer thread exited;
+    // `write_with_backpressure` closes the receiver, so every later
+    // `send_text`/`send_line` answers `false` instead of claiming delivery.
+    // `ingress_open` only disables this select branch once the close has been
+    // drained to `None`; the read side keeps running to the exit code.
+    let mut ingress_open = true;
+    let mut writer_alive = true;
 
     loop {
         tokio::select! {
@@ -1028,8 +1053,14 @@ async fn run_terminal_task(
                     }
                 }
             }
-            msg = stdin_rx.recv() => {
-                let Some(input) = msg else { break; };
+            msg = stdin_rx.recv(), if ingress_open => {
+                let Some(input) = msg else {
+                    // Every sender is gone, or a terminal write error closed
+                    // the ingress. Stop polling the branch; the read side and
+                    // the exit path still run.
+                    ingress_open = false;
+                    continue;
+                };
                 // Only real user input (typed lines or raw keys) may stop an
                 // active capture. Resize (SIGWINCH) and flush/acknowledge
                 // commands share this channel but are internal plumbing —
@@ -1039,7 +1070,7 @@ async fn run_terminal_task(
                     &input,
                     StdinInput::Line(_) | StdinInput::Raw(_)
                 );
-                if is_user_input && ctx.session.is_active() {
+                if is_user_input && writer_alive && ctx.session.is_active() {
                     let matcher = read_or_warn(&ctx.concepts, "concepts");
                     let stops = matcher
                         .as_deref()
@@ -1053,10 +1084,11 @@ async fn run_terminal_task(
                 }
                 match &input {
                     StdinInput::Line(line) => {
-                        // Match UntilStop concepts on user input (Enter).
-                        // This avoids false triggers from Tab completion,
-                        // command echo, and shell output noise.
-                        if !ctx.session.is_active()
+                        // A queued line whose writer is already gone never
+                        // reaches the child: skip the concept match that would
+                        // otherwise fire on input that was not delivered.
+                        if writer_alive
+                            && !ctx.session.is_active()
                             && line.len() <= crate::parser::MAX_LINE_LEN
                         {
                             let matched = read_or_warn(&ctx.concepts, "concepts")
@@ -1066,20 +1098,26 @@ async fn run_terminal_task(
                                 timeout_sleep.as_mut().reset(deadline);
                             }
                         }
-                        write_with_backpressure(
-                            || pty_handle.write_line(line),
-                            ctx.id,
-                            "stdin",
-                        )
-                        .await;
+                        if writer_alive {
+                            writer_alive = write_with_backpressure(
+                                || pty_handle.write_line(line),
+                                &mut stdin_rx,
+                                ctx.id,
+                                "stdin",
+                            )
+                            .await;
+                        }
                     }
                     StdinInput::Raw(data) => {
-                        write_with_backpressure(
-                            || pty_handle.write_bytes(data),
-                            ctx.id,
-                            "raw",
-                        )
-                        .await;
+                        if writer_alive {
+                            writer_alive = write_with_backpressure(
+                                || pty_handle.write_bytes(data),
+                                &mut stdin_rx,
+                                ctx.id,
+                                "raw",
+                            )
+                            .await;
+                        }
                     }
                     StdinInput::Resize { rows, cols } => {
                         if let Err(e) = pty_handle.resize(*rows, *cols) {
@@ -1114,10 +1152,19 @@ async fn run_terminal_task(
             None => Vec::new(),
         };
         for reply in replies {
+            if !writer_alive {
+                break;
+            }
             // A query's answer is not optional: dropping it leaves the TUI
             // re-anchoring against a cursor position it never learned. Retry
             // under the same backpressure as user input.
-            write_with_backpressure(|| pty_handle.write_bytes(&reply), ctx.id, "reply").await;
+            writer_alive = write_with_backpressure(
+                || pty_handle.write_bytes(&reply),
+                &mut stdin_rx,
+                ctx.id,
+                "reply",
+            )
+            .await;
         }
     }
 
@@ -1820,6 +1867,77 @@ mod tests {
             wait_for_state(&spawned).await,
             AgentState::Failed,
             "a shell exiting non-zero must set Failed (Tier 3)"
+        );
+    }
+
+    /// A terminal write error means the writer thread exited. The ingress must
+    /// close with it: `send_text` answering `true` for bytes no thread will
+    /// write is exactly what `inject`/`broadcast` promise callers.
+    #[tokio::test]
+    async fn a_terminal_write_error_closes_the_input_gate() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<StdinInput>(4);
+        let handle = PtyTerminalHandle {
+            id: 7,
+            stdin_tx: tx,
+        };
+        assert!(handle.send_text("queued before the error"));
+
+        let delivered = write_with_backpressure(
+            || {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "writer gone",
+                ))
+            },
+            &mut rx,
+            7,
+            "test",
+        )
+        .await;
+        assert!(!delivered, "a fatal write must report the writer gone");
+        assert!(
+            !handle.send_text("after the writer died"),
+            "input queued after the writer thread exited must be refused"
+        );
+        // Close drains, it does not discard: the task can still process what
+        // was already queued (a resize or a capture flush) while the read side
+        // finishes.
+        assert!(matches!(rx.recv().await, Some(StdinInput::Raw(_))));
+        assert!(rx.recv().await.is_none());
+    }
+
+    /// A transient backpressure answer must keep the gate open: only a fatal
+    /// write means the writer thread is gone.
+    #[tokio::test]
+    async fn a_wouldblock_write_is_retried_and_keeps_the_input_gate_open() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<StdinInput>(4);
+        let handle = PtyTerminalHandle {
+            id: 8,
+            stdin_tx: tx,
+        };
+        let mut attempts = 0;
+        let delivered = write_with_backpressure(
+            || {
+                attempts += 1;
+                if attempts == 1 {
+                    Err(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+                } else {
+                    Ok(())
+                }
+            },
+            &mut rx,
+            8,
+            "test",
+        )
+        .await;
+        assert!(
+            delivered,
+            "a retried write must report it reached the writer"
+        );
+        assert_eq!(attempts, 2, "WouldBlock must be retried, not fatal");
+        assert!(
+            handle.send_text("next"),
+            "a WouldBlock must leave the ingress open"
         );
     }
 

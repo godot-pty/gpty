@@ -23,6 +23,11 @@
 # The state list comes from the harness (`scripts/ui-capture --list`), so a
 # new state is covered without a second list.
 #
+# Every run also proves the arrival-pin gate: one capture is made with a
+# deliberately unpinned arrival (`--unpinned-arrival`), and it must fail with
+# the gate's own message. A passing capture here means the harness photographed
+# a moving frame.
+#
 # Needs a display (see scripts/ui-capture). Not part of ci-check: CI has no
 # display, and a capture is not a unit test — this is the audit gate in
 # docs/content/docs/agents/testing.md.
@@ -159,6 +164,18 @@ elif [[ ${#differing[@]} -eq 0 ]]; then
     fail "the perturbed control changed no image — the harness is not capturing it"
 else
     fail "expected only '$PERTURB' to change, but [${differing[*]}] did"
+fi
+
+echo "== an unpinned arrival must fail the capture"
+UNPINNED_LOG="$WORK/unpinned.log"
+if "$CAPTURE" "${RENDER_ARGS[@]}" "$PERTURB" "$WORK/unpinned" --unpinned-arrival \
+        >"$UNPINNED_LOG" 2>&1; then
+    fail "--unpinned-arrival captured a running arrival (the pin gate did not run)"
+elif grep -q "arrival is still running" "$UNPINNED_LOG"; then
+    echo "  PASS the live arrival was refused"
+else
+    fail "--unpinned-arrival failed for another reason"
+    tail -20 "$UNPINNED_LOG" | sed 's/^/    /'
 fi
 
 echo

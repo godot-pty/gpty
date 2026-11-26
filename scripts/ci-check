@@ -734,6 +734,19 @@ else
     }
     echo "  Importing Godot project..."
     godot --headless --path godot --import 2>&1 || { fail "godot import"; check_failed; }
+    # `godot -s` compiles the entry script's dependencies before the autoloads
+    # exist. A project class named in the capture harness (a typed field, an
+    # `is` check) therefore breaks every capture while GUT stays green - and
+    # `ui-capture-check` cannot run here without a display. `--list` needs no
+    # display and loads the harness through the same compile, so it is the
+    # gate for that trap.
+    echo "  Loading capture harness..."
+    if GODOT="$GODOT" ./scripts/ui-capture --list >/dev/null 2>&1; then
+        pass "capture harness loads"
+    else
+        fail "capture harness loads (a class reference in godot/tests/bench/ui_capture.gd loads before autoloads; see testing.md)"
+        check_failed
+    fi
     echo "  Running GUT tests..."
     # gut-check owns the GUT command and validates the run (a parse error makes
     # GUT abort after a handful of scripts and still exit 0).

@@ -26,6 +26,9 @@ extends SceneTree
 ##   --perturb <name>   shift that one state's topmost overlay (or its first
 ##                      pane) by 16 px; `scripts/ui-capture-check` uses it to
 ##                      prove a capture diff is local to one state
+##   --unpinned-arrival start a shipped arrival on a visible surface and do not
+##                      pin it; the capture must refuse
+##                      (`scripts/ui-capture-check`'s negative control)
 ##   --audit-focus      stage the state, print what keyboard traversal can
 ##                      reach (focus owner, every traversal component, the
 ##                      components/rings/reached totals, focus-none controls)
@@ -57,6 +60,10 @@ extends SceneTree
 ##   - A state that names a mid-motion fraction (`focus_sweep`, `guide_reveal`,
 ##     `empty_arrival`) is pinned there, never waited for: the pin rebuilds the
 ##     shipped curve and stops it at that fraction.
+##   - A capture refuses while a visible `UiMotion.ARRIVAL_META` tween is still
+##     running: a 100-120 ms ramp that happens to finish before the shot is
+##     pixel-identical in two runs, so determinism alone cannot prove it was
+##     pinned. `--unpinned-arrival` is the negative control.
 ##   - A state that names `backdrops` overrides the global backdrop setting per
 ##     terminal, in tile order, so one image can compare flat against gradient
 ##     over identical output.
@@ -765,8 +772,13 @@ func _run(state_name: String, state: Dictionary, args: Dictionary) -> void:
 			await process_frame
 		return
 
-	await _capture(state_name, str(args.get("out", "")))
-	quit(0)
+	if args.get("unpinned_arrival", false):
+		_start_unpinned_arrival()
+
+	if await _capture(state_name, str(args.get("out", ""))):
+		quit(0)
+	else:
+		quit(2)
 
 ## The three motion pins. The guide's typewriter is pinned at the state's
 ## fraction (1.0 completes it); an arrival is pinned on the first staged body,
@@ -880,6 +892,51 @@ func _pin_chrome(state: Dictionary) -> void:
 		layer.pin_hover(0, float(state["divider_hover"]))
 	elif layer._hovered >= 0:
 		layer.pin_hover(layer._hovered, 1.0)
+
+
+## Refuse a capture while a visible arrival is still moving. A short ramp that
+## finishes before the shot is pixel-identical in two runs, so determinism
+## alone cannot prove a ramp was pinned; the running tween is the evidence that
+## this frame is a lucky one. The constant is read through a runtime `load` -
+## naming `UiMotion` here would compile it before the autoloads exist (see
+## `_pin_chrome`).
+func _assert_arrivals_settled() -> bool:
+	var motion: GDScript = load("res://scenes/ui/ui_motion.gd")
+	if motion == null:
+		_fail("cannot load UiMotion for the arrival check")
+		return false
+	var live: Array[String] = []
+	_collect_live_arrivals(_workspace, motion.ARRIVAL_META, live)
+	if live.is_empty():
+		return true
+	_fail("an arrival is still running at capture: %s - pin it in the state or _pin_chrome/_pin_arrivals" % ", ".join(live))
+	return false
+
+func _collect_live_arrivals(node: Node, meta: String, out: Array[String]) -> void:
+	# A hidden ramp cannot change the image, so it is not a capture risk.
+	if node is Control and node.is_visible_in_tree() and node.has_meta(meta):
+		var record = node.get_meta(meta)
+		if record is Dictionary:
+			var tw = record.get("tween")
+			if tw is Tween and (tw as Tween).is_running():
+				out.append(_short_path(node))
+	for child in node.get_children():
+		_collect_live_arrivals(child, meta, out)
+
+
+## Negative control for `_assert_arrivals_settled` (scripts/ui-capture-check):
+## start the shipped arrival on a visible surface and do not pin it, so the
+## capture must refuse. The 2 s duration is deliberate: a 120 ms ramp could
+## finish in the frame before the check and let the control pass by luck.
+func _start_unpinned_arrival() -> void:
+	# UiMotion.FULL: the control must have a tween even if the state turned
+	# motion off.
+	_settings.cfg_motion = 2
+	var motion: GDScript = load("res://scenes/ui/ui_motion.gd")
+	if motion == null or _workspace._status_bar == null:
+		_fail("the unpinned-arrival control cannot start (UiMotion or the status bar is missing)")
+		return
+	motion.arrive(_workspace._status_bar, 2000.0)
 
 
 # ── Seeding ────────────────────────────────────────────────────────────
@@ -2013,30 +2070,37 @@ func _short_path(node: Node) -> String:
 
 # ── Capture ────────────────────────────────────────────────────────────
 
-func _capture(state_name: String, out_dir: String) -> void:
+## Stage the frame and write it. Answers whether the PNG was written: `_fail`
+## already printed the reason, and `_run` must exit non-zero on false — a
+## `quit(2)` inside here was overwritten by `_run`'s own `quit(0)`, so a
+## refused or failed capture reported success to `scripts/ui-capture`.
+func _capture(state_name: String, out_dir: String) -> bool:
 	var focused: Control = _workspace._tm.last_body
 	if _is_terminal(focused):
 		focused._cursor_visible = true
 		focused.queue_redraw()
 	await process_frame
+	if not _assert_arrivals_settled():
+		return false
 	await RenderingServer.frame_post_draw
 	var image: Image = root.get_texture().get_image()
 	if image == null:
 		_fail("the root viewport produced no image (a display driver is required)")
-		return
+		return false
 	if not out_dir.is_absolute_path():
 		_fail("--out must be an absolute directory (got %s)" % out_dir)
-		return
+		return false
 	var err := DirAccess.make_dir_recursive_absolute(out_dir)
 	if err != OK and err != ERR_ALREADY_EXISTS:
 		_fail("cannot create %s (error %d)" % [out_dir, err])
-		return
+		return false
 	var path := out_dir.path_join("%s.png" % state_name)
 	err = image.save_png(path)
 	if err != OK:
 		_fail("cannot write %s (error %d)" % [path, err])
-		return
+		return false
 	print("ui_capture: wrote %s (%dx%d)" % [path, image.get_width(), image.get_height()])
+	return true
 
 func _write_ready(path: String, state_name: String, size: Vector2i) -> void:
 	if path == "":
@@ -2111,6 +2175,8 @@ func _parse_args(raw: PackedStringArray) -> Dictionary:
 				if i >= raw.size():
 					return {"error": "--perturb needs a state name"}
 				out["perturb"] = raw[i]
+			"--unpinned-arrival":
+				out["unpinned_arrival"] = true
 			"--hold":
 				out["hold"] = true
 			"--audit-focus":

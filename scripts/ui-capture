@@ -17,6 +17,10 @@
 # self-test (one control shifted in that state only), and the only caller is
 # scripts/ui-capture-check.
 #
+# `--unpinned-arrival` may follow a capture: it starts a shipped arrival and
+# leaves it running, so the capture must refuse (the arrival-pin gate's
+# negative control). scripts/ui-capture-check is its only caller.
+#
 # The staging procedure is committed at godot/tests/bench/ui_capture.gd; this
 # script only provides the environment it needs (see scripts/ui-sandbox) and
 # the Godot command line. A capture whose engine log carries a SCRIPT ERROR or
@@ -24,7 +28,10 @@
 # writes a PNG, and that image is not a capture of the app (the v0.8.4 harness
 # fix). A real display driver is required for a capture —
 # under `--headless` there is no redraw pass. `--list` and `--compare` are
-# headless and need no display.
+# headless and need no display. `--list` also loads the harness through Godot's
+# own dependency compile, which is the gate for the script-mode autoload trap:
+# a project class named in the harness fails the load before any state is
+# printed. `scripts/ci-check` and CI run it for that reason.
 #
 # Requires: godot on PATH (GODOT=<path> overrides), a graphical session.
 # CAPTURE_TIMEOUT bounds one launch (default 120 s); a launch that produces no
@@ -39,7 +46,7 @@ if [[ -z "$GODOT_BIN" ]]; then
 fi
 
 usage() {
-    echo "usage: ui-capture [--renderer <method>] <state> [<out-dir>] [--perturb <state>] [--save <file>] | --audit-focus <state> | --audit-accessibility <state> | --list | --compare <a.png> <b.png>" >&2
+    echo "usage: ui-capture [--renderer <method>] <state> [<out-dir>] [--perturb <state>] [--unpinned-arrival] [--save <file>] | --audit-focus <state> | --audit-accessibility <state> | --list | --compare <a.png> <b.png>" >&2
     exit 2
 }
 
@@ -124,6 +131,11 @@ while [[ $# -gt 0 ]]; do
             EXTRA+=(--perturb "$2")
             shift 2
             ;;
+        --unpinned-arrival)
+            [[ "$MODE" == capture ]] || usage
+            EXTRA+=(--unpinned-arrival)
+            shift
+            ;;
         --save)
             [[ "$MODE" == capture && $# -ge 2 ]] || usage
             SAVE="$2"
@@ -205,9 +217,31 @@ case "$MODE" in
     list)
         # Godot prints its banner and driver lines on stdout too; a state name
         # is the only kind of line this filter keeps, so callers get one name
-        # per line with no engine noise.
+        # per line with no engine noise. The engine log is judged, not only the
+        # exit code: a harness whose dependency failed to compile (a named app
+        # class against the not-yet-registered autoloads) still runs and prints
+        # every state name, so the dependency's SCRIPT ERROR is the only
+        # evidence - the same rule the capture path applies to its log.
+        LIST_LOG="$(mktemp)"
+        set +e
         "$GODOT_BIN" --headless --path "$ROOT/godot" -s "$HARNESS" -- --list \
-            | grep -E '^[a-z][a-z0-9-]*$'
+            >"$LIST_LOG" 2>&1
+        LIST_STATUS=$?
+        set -e
+        if grep -qE 'SCRIPT ERROR|Failed to load script' "$LIST_LOG"; then
+            echo "ui-capture: the capture harness printed a script error — the load is not clean" >&2
+            grep -E 'SCRIPT ERROR|Failed to load script' "$LIST_LOG" | head -3 >&2
+            rm -f "$LIST_LOG"
+            exit 1
+        fi
+        STATES_OUT="$(grep -E '^[a-z][a-z0-9-]*$' "$LIST_LOG")" || true
+        rm -f "$LIST_LOG"
+        if [[ -z "$STATES_OUT" ]]; then
+            echo "ui-capture: the capture harness listed no states" >&2
+            exit 1
+        fi
+        printf '%s\n' "$STATES_OUT"
+        exit "$LIST_STATUS"
         ;;
     compare)
         "$GODOT_BIN" --headless --path "$ROOT/godot" -s "$HARNESS" -- --compare "$LEFT" "$RIGHT"

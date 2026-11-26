@@ -724,7 +724,7 @@ static func handle(ws, method: String, params: Dictionary):
 			if not body is TerminalPane:
 				return refused("Pane '%s' is not a terminal" % pane_id)
 			if not body._send_line_to_term(text):
-				return refused("Pane '%s' refused input: its queue is full; the child is not reading" % pane_id)
+				return refused("Pane '%s' refused input: the child is not reading, or its writer is gone" % pane_id)
 			return {"success": true}
 		"broadcast":
 			var b_tags: Array = PaneTypes.sanitize_tags(params.get("tags", []))
@@ -748,7 +748,7 @@ static func handle(ws, method: String, params: Dictionary):
 					else:
 						b_refused += 1
 			if b_count == 0 and b_refused > 0:
-				return refused("No pane accepted the broadcast: every matching input queue is full")
+				return refused("No pane accepted the broadcast: every matching input queue is full or its writer is gone")
 			return {"success": true, "count": b_count, "refused": b_refused}
 		"profileSave":
 			var profile_name = str(params.get("name", ""))
