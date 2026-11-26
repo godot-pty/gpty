@@ -96,6 +96,7 @@ godot/
         │   ├── toast_overlay.gd
         │   ├── window_chrome.gd # Titlebar + window-mode/fullscreen handling
         │   ├── renderer_info.gd # The renderer/device record at startup, and the software-rasterizer warning
+        │   ├── display_rate.gd # The window's screen and refresh rate, behind seams
         │   ├── markdown_view.gd # Safe shared Markdown renderer
         │   ├── markdown_anchors.gd # Pure ATX heading scan for fragment/line navigation
         │   ├── docs_bundle.gd  # Validated, lazily loaded view of godot/docs.json

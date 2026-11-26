@@ -230,6 +230,7 @@ gpty/
         │   ├── ui_tokens.gd        # The type scale, spacing, radius and the WCAG contrast maths
         │   ├── ui_motion.gd        # The motion policy (Off/Subtle/Full) every animation reads
         │   ├── ui_effects.gd       # The closed effect table (ambient + cue) and intensity policy
+        │   ├── display_rate.gd     # The window's screen and refresh rate, behind seams
         │   ├── ui_theme.gd         # The one Theme, built from the palette and applied at the root
         │   ├── app_dialog.gd       # The one modal builder (theme, grouped buttons, selectable body)
         │   ├── section_help.gd      # The shared "Help" affordance a section header carries (glyph → action → chord table)

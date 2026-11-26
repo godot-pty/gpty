@@ -3292,18 +3292,42 @@ Commits: 1d9af4b
 
 ## GUI-135
 
-**A window moved to another display keeps the frame cap resolved at launch** - found 2026-11-21
-while reviewing the Windows/macOS paths: `Workspace._apply_fps_setting` and
-`TerminalPane.refresh_sync_interval` read `DisplayServer.window_get_current_screen()` when the
-setting is applied, so they are right at launch, but moving the window to a display with a different
-refresh rate does not re-run either. With `max_fps = Native` the engine cap is the old screen's
-rate: with vsync on, 165 on a 60 Hz display is harmless because the compositor holds 60, while 60 on
-a 165 Hz display caps it at 60 until a settings change or restart; a terminal's follow-the-display
-cadence keeps the old interval in both directions. Fix: notice the current screen changing (a
-low-frequency timer, or a window event where the platform raises one) and re-apply `Engine.max_fps`
-plus each live terminal's `refresh_sync_interval`; an explicit cap is left alone. Tests: a seam that
-supplies the screen and its rate, asserting the cap and cadence follow a move and an explicit cap
-does not; no per-frame polling.
+**A window moved to another display keeps the frame cap resolved at launch** - fixed 2026-11-26.
+`DisplayRate` (`godot/scenes/ui/display_rate.gd`) is now the one reader of the window's screen and
+refresh rate, behind the replaceable `window_screen`/`screen_hz` seams;
+`Workspace._apply_fps_setting`, `TerminalPane.refresh_sync_interval` and `RendererInfo.report` all
+resolve through it. `Workspace` starts a 2 s `Timer` (`SCREEN_POLL_SECONDS`) at ready, after the
+saved window position lands; `_check_display_change` compares (screen, integer rate) and, on a
+change, re-applies `Engine.max_fps` (Native re-resolves; an explicit cap re-applies unchanged) and
+calls `refresh_sync_interval()` on every live terminal in every workspace, hidden ones included. An
+unchanged display costs one screen and rate read and nothing else: there is no per-frame polling
+(the only screen-adjacent engine signal, `Window.dpi_changed`, is macOS/Wayland and about DPI, so
+the timer is the portable notice).
+
+The same pass fixed the launch half. A fresh pane never resolved its cadence at all: Native's -1 is
+clamped to 0 by the pane schema, which equals the pane's field default, so the `max_fps` setter's
+unchanged-value guard never ran `refresh_sync_interval()` and every follow-the-display pane started
+at the hard-coded 1/60 regardless of the display. `TerminalPane._ready` now resolves it.
+
+Failure mode closed: a window moved from 60 Hz to 165 Hz caps the engine at 165 and syncs every live
+pane at 165 within two seconds (and 165 -> 60 follows down), with no settings save or restart; an
+explicit 60 Hz cap and a pane with its own cap keep their numbers. The tests
+(`godot/tests/integration/test_display_rate.gd`, 8 passing) assert a 144 Hz launch resolves
+1/144 s and a move to 60 Hz resolves 1/60 s, and the cap test moves 60 -> 165:
+`test_a_native_cap_follows_the_window_to_a_faster_display`,
+`test_an_explicit_cap_does_not_follow_the_move`,
+`test_a_rate_change_on_the_same_screen_is_noticed`,
+`test_an_unknown_rate_keeps_the_unlimited_cap_and_the_fallback_cadence`,
+`test_an_unchanged_display_reapplies_nothing`,
+`test_a_live_pane_cadence_resolves_at_launch_and_follows_the_move`,
+`test_a_hidden_workspace_pane_follows_the_move`,
+`test_the_screen_watch_is_a_low_frequency_timer`. The physical move is proven through the seam: the
+development runner has one display; the poll's real-OS read runs at launch in every live smoke.
+
+Changelog summary: a window moved to another display now re-resolves its frame cap and every
+terminal's refresh cadence within two seconds; an explicit cap is untouched.
+
+Commits: 5d9c4ec, 18e42af, 8e5e644
 
 ## GUI-136
 

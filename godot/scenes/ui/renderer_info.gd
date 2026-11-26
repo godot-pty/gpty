@@ -116,12 +116,12 @@ static func report(effect: String, intensity: int) -> bool:
 	var adapter := RenderingServer.get_video_adapter_name()
 	# The window can be on a display other than the primary one; its refresh and
 	# scale are the ones the frame rate and the framebuffer actually use.
-	var screen := DisplayServer.window_get_current_screen()
+	var screen := DisplayRate.current_screen()
 	print("[renderer] %s" % describe(adapter,
 		RenderingServer.get_video_adapter_vendor(),
 		RenderingServer.get_current_rendering_method(),
 		RenderingServer.get_current_rendering_driver_name(),
-		DisplayServer.window_get_size(), DisplayServer.screen_get_refresh_rate(screen),
+		DisplayServer.window_get_size(), DisplayRate.rate_for(screen),
 		DisplayServer.screen_get_scale(screen),
 		vsync_label(DisplayServer.window_get_vsync_mode()), Engine.max_fps,
 		effect, intensity))
