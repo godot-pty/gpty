@@ -17,6 +17,10 @@
 # self-test (one control shifted in that state only), and the only caller is
 # scripts/ui-capture-check.
 #
+# `--unpinned-arrival` may follow a capture: it starts a shipped arrival and
+# leaves it running, so the capture must refuse (the arrival-pin gate's
+# negative control). scripts/ui-capture-check is its only caller.
+#
 # The staging procedure is committed at godot/tests/bench/ui_capture.gd; this
 # script only provides the environment it needs (see scripts/ui-sandbox) and
 # the Godot command line. A capture whose engine log carries a SCRIPT ERROR or
@@ -42,7 +46,7 @@ if [[ -z "$GODOT_BIN" ]]; then
 fi
 
 usage() {
-    echo "usage: ui-capture [--renderer <method>] <state> [<out-dir>] [--perturb <state>] [--save <file>] | --audit-focus <state> | --audit-accessibility <state> | --list | --compare <a.png> <b.png>" >&2
+    echo "usage: ui-capture [--renderer <method>] <state> [<out-dir>] [--perturb <state>] [--unpinned-arrival] [--save <file>] | --audit-focus <state> | --audit-accessibility <state> | --list | --compare <a.png> <b.png>" >&2
     exit 2
 }
 
@@ -126,6 +130,11 @@ while [[ $# -gt 0 ]]; do
             [[ "$MODE" == capture && $# -ge 2 ]] || usage
             EXTRA+=(--perturb "$2")
             shift 2
+            ;;
+        --unpinned-arrival)
+            [[ "$MODE" == capture ]] || usage
+            EXTRA+=(--unpinned-arrival)
+            shift
             ;;
         --save)
             [[ "$MODE" == capture && $# -ge 2 ]] || usage
