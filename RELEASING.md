@@ -209,7 +209,7 @@ the `Commits:` line from the `Roadmap: <ID>` trailers. Verify the release's
 section with `./scripts/roadmap release-check vX.Y.Z` - no `⬜` remains and every
 `✅` has a `Commits:` line; `--strict` also rejects `unrecorded`. Anything
 unshipped moves to the next chain's page in priority position, keeps its ID,
-and is tagged `(Deferred from vX.Y.Z.)`. A dropped row is `🚫` with the reason
+and is tagged `(Deferred from vX.Y.Z.)`. A dropped row is `🚫` and a won't-fix row is `❌`, each with the reason
 in its detail. A chain stays `in progress` until its last planned release ships.
 
 The release's DOCS row (the changelog page) is release-time work and is checked

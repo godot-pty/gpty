@@ -15,7 +15,7 @@ The roadmap is an index plus per-area evidence pages:
 - `./scripts/roadmap next` prints the first ⬜ on the earliest unfinished chain page: ID, release, title, detail path. Row order is the priority; the ID is identity, never order.
 - Read the record with `./scripts/roadmap show <ID>` - the detail section and its commits - not the whole chain page.
 - **Rows go stale.** They are written on one build and implemented days later: reproduce the claim on the current build before writing code, and re-locate any `file:line` (numbers drift). The fidelity probe pass found rows already fixed, half-fixed, and describing code that had moved.
-- Already fixed? Close it with the evidence. Narrowed? Rewrite the detail section to what remains. Obsolete or superseded? Mark it `🚫` and say why in the detail; never leave a dead row open and never delete it. Never add a "corrections" row.
+- Already fixed? Close it with the evidence. Narrowed? Rewrite the detail section to what remains. Obsolete or superseded? Mark it `🚫` and say why in the detail; declined by decision? Mark it `❌` and say why. Never leave a dead row open and never delete it. Never add a "corrections" row.
 
 ## 2. Read the guides the area touches
 

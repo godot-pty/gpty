@@ -1073,16 +1073,16 @@ tests asserting constant execution behavior across mismatched lengths.
 
 ## SEC-52
 
-**Scorecard Branch-Protection stays at 8 because a second human approver is the only path to 9-10** - the
-enforcement defect this row carried (admins could bypass `main`) was fixed in 0.8.4 by the
-`main protection` branch ruleset and `enforce_admins`; see **A direct push to `main` is still
-possible because the only branch ruleset covers tags** in v0.8.4. Scorecard v5.6.0 tiers: 8 needs
-one required approval plus a code-owner review, 9 needs two approvals (`minReviews = 2`), and 10
-additionally needs stale-review dismissal, last-push approval and admin enforcement. The repository
-has 1 approval, code-owner review, stale-review dismissal, last-push approval and admin enforcement;
-moving to 9 needs a second human who can approve, not another setting. The `gpty-bot` app authors
-PRs but never approves them, so it cannot supply that second approval. Verification: a Scorecard run
-reports Branch-Protection 8; a second maintainer moves it to 9-10.
+**Scorecard Branch-Protection stays at 8 because a second human approver is the only path to 9-10** - won't fix, decided 2026-11-26.
+The enforcement defect this row once carried (admins could bypass `main`) was fixed in 0.8.4 by the
+`main protection` branch ruleset and `enforce_admins`; the remaining gap is review independence, not
+another setting. Measured 2026-11-26 against Scorecard v5.7.0: Branch-Protection 8, overall 8.7,
+with one warning - `required approving review count is 1 on branch 'main'` - while code-owner
+review, stale-review dismissal, last-push approval, admin enforcement, required status checks and
+the merge queue are all present. Tier 9 needs two approvals (`minReviews = 2`) and tier 10 adds
+nothing this repository lacks. With one maintainer, requiring two approvals would block every pull
+request, Dependabot's included, so the setting stays at 1; a second reviewer raises the score with
+no repository change. The row is the reminder of that arithmetic, not pending work.
 
 ## SEC-53
 
@@ -1092,6 +1092,9 @@ required `ci-gate` on `main` (see the branch-protection row), so the gate exists
 remediation window or suppression rule for a non-exploitable CodeQL/SCA finding (OSPS VM-05/06, L3).
 Fix: state the remediation window and the suppression rule in SECURITY and CONTRIBUTING. Acceptance:
 a PR with a new advisory or CodeQL alert is blocked or explicitly waived with a recorded reason.
+
+Recorded decision: CodeQL alerts 8 and 14 were dismissed as false positives on 2026-11-22 (see
+SEC-54); the suppression wording and remediation window are still to be written.
 
 ## SEC-54
 
@@ -1108,13 +1111,21 @@ effect of an unrelated CI fix: dismiss both as false positives with that reasoni
 rule's suppression comment) and record the decision in **The CodeQL/SCA thresholds and suppression
 policy are not documented**.
 
+Closed 2026-11-26. Both alerts are dismissed as false positives by `1nv1n` on 2026-11-22 - alert 8
+at `20:08:42Z`, alert 14 at `20:08:43Z` - with the comment that `SECRET` is the hardcoded
+`smoke-secret` fixture (`scripts/smoke_pane_api.py:62`) and the sink is the smoke test's own control
+channel, not disk: nothing is persisted and no real credential is involved. The dismissal is the
+recorded decision SEC-53 asked for; its suppression wording remains open.
+
 ## SEC-55
 
-**No `/.well-known/security.txt`** - SECURITY.md is the policy but there is no RFC 9116 discovery
-file on gpty.dev. Fix: add a static `security.txt` with `Contact` (the private advisory URL or
-security email), `Expires`, `Policy` (SECURITY.md), `Preferred-Languages` and `Canonical`, served at
-`https://gpty.dev/.well-known/security.txt`; link it from SECURITY.md. Acceptance: the live URL
-returns 200 with the required fields and the Docs workflow builds it.
+**No `/.well-known/security.txt`** - closed 2026-11-26. `docs/static/.well-known/security.txt`
+carries `Contact: mailto:gpty.dev@outlook.com`, `Expires: 2027-11-01T00:00:00Z`,
+`Preferred-Languages: en`, `Canonical: https://gpty.dev/.well-known/security.txt` and
+`Policy: https://gpty.dev/docs/security/`. Hugo copies the static tree to
+`docs/public/.well-known/security.txt`; `.github/workflows/docs.yml` fails the build when the file,
+its Contact/Canonical lines or its Expires field is missing; SECURITY.md links the live URL.
+Live: https://gpty.dev/.well-known/security.txt.
 
 ## SEC-56
 

@@ -239,7 +239,7 @@ AREAS = {a.strip() for a in m.group(1).split(',')} if m else set()
 if not AREAS:
     bad('ROADMAP.md', 'could not read the Area list from the opening text')
 row_re = re.compile(
-    r'^\| (✅|⬜|🚫) \| \[([A-Z]+-\d+)\]\(details/([a-z]+)\.md#([a-z]+-\d+)\) '
+    r'^\| (✅|⬜|🚫|❌) \| \[([A-Z]+-\d+)\]\(details/([a-z]+)\.md#([a-z]+-\d+)\) '
     r'\| \*\*(.+?)\*\* \|$')
 seen = {}
 index_titles = {}
@@ -257,7 +257,7 @@ for p in sorted(os.listdir(os.path.join(ROOT, rd))):
             bad(where, 'image inside a table row (list it under "## Screenshots" instead)')
         r = row_re.match(line)
         if not r:
-            bad(where, 'row is not `| ✅/⬜/🚫 | [AREA-N](details/area.md#area-n) | **Title** |`')
+            bad(where, 'row is not `| ✅/⬜/🚫/❌ | [AREA-N](details/area.md#area-n) | **Title** |`')
             continue
         status, rid, area_file, anchor, title = r.groups()
         prefix = rid.split('-', 1)[0]
@@ -330,6 +330,9 @@ else:
             elif status == '⬜':
                 if commits:
                     bad(at, 'an open row must not carry a `Commits:` line')
+            elif status == '❌':
+                if commits:
+                    bad(at, "a won't-fix row must not carry a `Commits:` line")
             elif commits and not commit_re.match(commits[0]):
                 bad(at, f'bad Commits line: {commits[0][:80]}')
 

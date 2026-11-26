@@ -1703,6 +1703,14 @@ and make the MCP registry workflow depend on the published crates instead of a m
 Acceptance: a dry run or the next release publishes via OIDC with no registry token secret, and the
 MCP registry job succeeds.
 
+Closed 2026-11-26. `publish-crates` in `.github/workflows/release.yml` authenticates with
+`rust-lang/crates-io-auth-action@v1.0.6` under `id-token: write` and the `release` environment; the
+token is that action's step output and `gh secret list` is empty, so no long-lived registry secret
+exists. The v0.8.6 tag contains the job, its release run finished `publish-crates` and
+`mcp-registry / publish` successfully, and crates.io serves `gpty` and `gpty-core` 0.8.6 (published
+2026-11-24). The registry workflow is chained from `release.yml` with `workflow_call` and polls
+crates.io instead of a manual step.
+
 ## BUILD-82
 
 **Releases carry attestations but no signature asset, so Scorecard's Signed-Releases reads 0** - carried
@@ -1789,6 +1797,14 @@ fuzz lockfile bump whose closure left `libsqlite3-sys` 0.28.0 in the dependency 
 dependency PR, or let the next one supersede it as a draft; never close one after hand-applying the
 same bump - a closed PR stays in the 12-month window. Worth: the two remaining development points at
 70 percent merged (worse than seven merges per three closures), and no repeat of the lockfile drift.
+
+Closed 2026-11-26: measured with `gh pr list --state closed --limit 100 --json mergedAt` - 57 closed,
+44 merged and 13 closed unmerged (77 percent merged), above the 70 percent the row named. The four
+Dependabot closures remain in the 12-month window, so the practice is what changed: a dependency PR
+is merged or left for its grouped successor (BUILD-84), never closed after a hand-applied bump.
+Scorecard `Vulnerabilities` reads 10/10 (0 existing vulnerabilities) on the 2026-11-26 run, the point
+the row blamed on the stale fuzz lockfile (BUILD-83). The Insights API no longer exposes
+`prMergeScore`, so the GitHub count is the reproducible measurement.
 
 ## BUILD-87
 

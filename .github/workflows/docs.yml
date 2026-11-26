@@ -183,6 +183,20 @@ jobs:
             done
           done
 
+      - name: Verify security.txt is served
+        run: |
+          # RFC 9116 discovery for the reporting policy; the file is static, so a
+          # deleted or renamed copy would otherwise deploy silently.
+          file=docs/public/.well-known/security.txt
+          [ -f "$file" ] || { echo "=== $file was not built ==="; exit 1; }
+          for field in 'Contact: mailto:gpty.dev@outlook.com' \
+                       'Canonical: https://gpty.dev/.well-known/security.txt'; do
+            grep -qxF "$field" "$file" \
+              || { echo "=== security.txt is missing: $field ==="; exit 1; }
+          done
+          grep -qE '^Expires: [0-9]{4}-[0-9]{2}-[0-9]{2}T' "$file" \
+            || { echo "=== security.txt has no RFC 9116 Expires ==="; exit 1; }
+
       - name: Verify the plugin catalog rendered
         run: |
           # The catalog fetches the registry at build time and falls back to the
