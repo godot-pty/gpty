@@ -67,6 +67,13 @@ const IMPLIED_WORKSPACE_NAME := "Default"
 ## spend a machine's processes and memory without end.
 const MAX_LIVE_PANES := 96
 
+## How often the window's screen is re-read. A window moved between displays
+## keeps the refresh rate its cap and every pane's cadence were resolved
+## against; Godot raises `Window.dpi_changed` only on macOS and Wayland and has
+## no screen-change signal, so a low-frequency poll is the portable notice. It is
+## a timer, never a per-frame read.
+const SCREEN_POLL_SECONDS := 2.0
+
 ## How long the sidebar shell fades on a mode change. The column's width and
 ## the grid's reflow are written in the same frame (no width tween, no text
 ## moving); only the shell's alpha ramps.
@@ -123,6 +130,11 @@ var _home_tm: TerminalManager
 var _status_bar: StatusBar
 var _titlebar: Control = null
 var _chrome: WindowChrome = null
+## The display the frame cap and every pane's cadence were last resolved
+## against, and the poll that notices a move.
+var _last_screen: int = -1
+var _last_rate: int = 0
+var _screen_watch: Timer = null
 var _workspaces: Array[Dictionary] = []  # {name: String, grid: Control, tm: TerminalManager, profile: String}
 var _active: int = 0
 var _active_profile: String = ""  # active workspace's profile name (sidebar accent; re-derived on every switch)
@@ -333,6 +345,9 @@ func _ready():
 	_apply_window_mode.call_deferred(true)
 	_chrome.apply_opacity.call_deferred()
 	if SettingsManager.cfg_window_mode == 0: _chrome.restore_position()
+	# After the position restore, so the baseline is the display the window
+	# actually opens on; a later move is what the poll is for.
+	_start_screen_watch()
 	# Deferred for the same reason: the report names the window the frame rate
 	# is measured in, and the restored size lands after this call.
 	_report_renderer.call_deferred()
@@ -437,12 +452,46 @@ func _apply_fps_setting():
 	if SettingsManager.cfg_max_fps == -1:
 		# The window's screen, not the primary one: on a multi-monitor setup
 		# the two refresh rates can differ, and the window is the one being
-		# drawn.
-		var screen := DisplayServer.window_get_current_screen()
-		var rr := DisplayServer.screen_get_refresh_rate(screen)
+		# drawn (`DisplayRate` is the one reader, and the one seam).
+		var rr := DisplayRate.current_rate()
 		Engine.max_fps = int(rr) if rr > 0 else 0
 	else:
 		Engine.max_fps = SettingsManager.cfg_max_fps
+
+## Start the low-frequency screen poll. The launch display is the baseline: the
+## cap and cadence were just resolved against it, and `_ready` records it after
+## the saved window position has landed.
+func _start_screen_watch() -> void:
+	_last_screen = DisplayRate.current_screen()
+	_last_rate = int(DisplayRate.current_rate())
+	_screen_watch = Timer.new()
+	_screen_watch.name = "ScreenWatch"
+	_screen_watch.wait_time = SCREEN_POLL_SECONDS
+	_screen_watch.one_shot = false
+	_screen_watch.timeout.connect(_check_display_change)
+	add_child(_screen_watch)
+	_screen_watch.start()
+
+## A display move, or a rate change on the same screen: re-resolve the frame cap
+## and every live terminal's sync cadence against the window's screen now.
+## Hidden workspaces keep live panes, so they are included
+## (`_on_settings_changed`'s walk). An explicit cap re-applies unchanged; an
+## unchanged display costs one screen and rate read and nothing else.
+func _check_display_change() -> void:
+	var screen := DisplayRate.current_screen()
+	var rate := int(DisplayRate.current_rate())
+	# An unknown rate (headless, a driver answering 0) is not a change: keep the
+	# last resolution rather than dropping to unlimited on one bad read.
+	if screen == _last_screen and (rate <= 0 or rate == _last_rate):
+		return
+	_last_screen = screen
+	_last_rate = rate
+	_apply_fps_setting()
+	for ws in _workspaces:
+		for t in ws.tm.tiles:
+			var body = ws.tm._find_body(t.wrapper)
+			if body is TerminalPane:
+				body.refresh_sync_interval()
 
 ## One line names the renderer the frame rate is measured on; a software
 ## fallback also marks the FPS readout, because on it the number is the CPU's.

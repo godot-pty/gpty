@@ -208,16 +208,13 @@ var launch: String = ""
 		max_fps = value
 		refresh_sync_interval()
 
-## Re-derive the sync cadence from the setting and the window's current screen.
-## A pane's `max_fps` of 0 follows the display; the primary screen is not the
-## window's screen on a multi-monitor setup.
+## Re-derive the sync cadence from the setting and the window's display.
+## `max_fps` above 0 is the pane's own cap; 0 (Unlimited) and -1 (Native, which
+## the pane schema clamps to 0) both mean "as often as the display shows it", so
+## a screen the window moves to re-derives this too
+## (`Workspace._check_display_change`).
 func refresh_sync_interval() -> void:
-	var target := float(max_fps)
-	if max_fps <= 0:
-		var screen := DisplayServer.window_get_current_screen()
-		var rate := DisplayServer.screen_get_refresh_rate(screen)
-		target = rate if rate > 0.0 else 60.0
-	_sync_interval = 1.0 / target
+	_sync_interval = 1.0 / (float(max_fps) if max_fps > 0 else DisplayRate.follow_hz())
 
 ## The ambient effect (a `UiEffects` id) and its intensity, pushed by
 ## `SettingsManager.apply_to_terminal`. The id is kept while the intensity is
@@ -603,6 +600,11 @@ func _ready():
 	_font_italic = _load_font(font_italic_path, "res://fonts/DejaVuSansMono-Oblique.ttf")
 
 	_recompute_cell_metrics()
+
+	# The display's rate, not the 1/60 field default: the settings pipeline only
+	# reaches the setter when the value changes, and a fresh pane's
+	# follow-the-display setting (Native clamps to 0) equals its field default.
+	refresh_sync_interval()
 
 	focus_mode = Control.FOCUS_CLICK
 	clip_contents = true
