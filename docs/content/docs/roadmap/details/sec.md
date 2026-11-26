@@ -1117,6 +1117,8 @@ at `20:08:42Z`, alert 14 at `20:08:43Z` - with the comment that `SECRET` is the 
 channel, not disk: nothing is persisted and no real credential is involved. The dismissal is the
 recorded decision SEC-53 asked for; its suppression wording remains open.
 
+Commits: 64866cb, 18e42af, 97d3d90
+
 ## SEC-55
 
 **No `/.well-known/security.txt`** - closed 2026-11-26. `docs/static/.well-known/security.txt`
@@ -1126,6 +1128,8 @@ carries `Contact: mailto:gpty.dev@outlook.com`, `Expires: 2027-11-01T00:00:00Z`,
 `docs/public/.well-known/security.txt`; `.github/workflows/docs.yml` fails the build when the file,
 its Contact/Canonical lines or its Expires field is missing; SECURITY.md links the live URL.
 Live: https://gpty.dev/.well-known/security.txt.
+
+Commits: 39ef2cf, 6cecfd6, 18e42af, 97d3d90
 
 ## SEC-56
 
