@@ -22,7 +22,7 @@ All three reach the same handlers in the running GUI. The CLI is a stateless cli
 | `listPanes` | — | `{panes: [{id, label, type, title, col, row, tags, …}], count}` |
 | `killPane` | `pane_id` | `{success}` |
 | `focusPane` | `pane_id` | `{success}` |
-| `inject` | `pane_id`, `text` | `{success}`, or `-32000` when the pane's bounded input queue is full (its child is not reading) — nothing was sent |
+| `inject` | `pane_id`, `text` | `{success}`, or `-32000` when the pane's input was not accepted (its child is not reading, or the child's PTY writer is gone) — nothing was sent |
 | `paneRead` | `pane_id`, `lines?` (1–2000) | `{text}` — screen plus scrollback |
 | `paneStatus` | `pane_id?` | One status document, or `{panes: [...]}` for every pane |
 | `paneView` | `pane_id`, `graph?`, `note?`, `mode?` | `{success, pane_id, label, type, graph, note, view_mode}` — display-only: changes what a wiki pane shows (link graph, a note, the note view mode) without activating it. Applied note, mode, graph; the answer reads the pane back |
@@ -30,7 +30,7 @@ All three reach the same handlers in the running GUI. The CLI is a stateless cli
 | `paneSettings` | — | `{types: {<type>: {<key>: {kind, file, ipc, min?, max?}}}}` — the closed per-type table, projected from the GUI's own definitions so it cannot drift from what `paneSet` enforces |
 | `paneRun` | `command` | `{pane_id, label, type}` |
 | `paneWait` | `pane_id`, `pattern`, `timeout_ms?` (100–60000) | `{matched, line?}` or `{matched: false, timed_out}` |
-| `broadcast` | `tags`, `text` | `{success, count, refused}` — `count` panes queued the text, `refused` targets whose bounded input queue was full; when every matching target refused, `-32000` |
+| `broadcast` | `tags`, `text` | `{success, count, refused}` — `count` panes queued the text, `refused` targets whose input was not accepted (queue full or writer gone); when every matching target refused, `-32000` |
 | `profileSave` | `name` | `{success, name}` — the name the store kept; a name already taken is stored and answered with a ` (2)`-style suffix |
 | `profileLoad` | `name` | `{success}` |
 | `profileList` | — | `{profiles: [string]}` |
