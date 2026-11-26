@@ -3327,6 +3327,8 @@ development runner has one display; the poll's real-OS read runs at launch in ev
 Changelog summary: a window moved to another display now re-resolves its frame cap and every
 terminal's refresh cadence within two seconds; an explicit cap is untouched.
 
+Commits: 5d9c4ec, 18e42af, 8e5e644
+
 ## GUI-136
 
 **The empty-workspace guide drops its two redundant headings and its keycap answers a real click** - reported
