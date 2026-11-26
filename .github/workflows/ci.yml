@@ -303,6 +303,13 @@ jobs:
       - name: Import project
         run: godot --headless --path godot --import
 
+      - name: Capture harness loads
+        # `godot -s` compiles the entry script before autoloads exist; a
+        # project class referenced in tests/bench/ui_capture.gd breaks every
+        # capture while GUT stays green. --list only loads the harness and
+        # needs no display (ui-capture-check itself cannot run in CI).
+        run: ./scripts/ui-capture --list >/dev/null
+
       - name: Run GUT tests
         # gut-check owns the command and validates the run: GUT exits 0 after
         # a parse error aborts it with most of the suite unexecuted.
