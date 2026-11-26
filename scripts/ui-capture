@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Stage one UI state in a private sandbox and save the app's own viewport.
 #
-# Usage: scripts/ui-capture <state> <out-dir>     # writes <out-dir>/<state>.png
+# Usage: scripts/ui-capture <state> <out-dir> [--save <file>] # writes <out-dir>/<state>.png
+#        scripts/ui-capture <state> --save <file>            # writes only <file>
 #        scripts/ui-capture --audit-focus <state> # print keyboard reachability
 #        scripts/ui-capture --audit-accessibility <state> # print the AT surface
 #        scripts/ui-capture --list                # the state names
@@ -38,7 +39,7 @@ if [[ -z "$GODOT_BIN" ]]; then
 fi
 
 usage() {
-    echo "usage: ui-capture [--renderer <method>] <state> <out-dir> [--perturb <state>] | --audit-focus <state> | --audit-accessibility <state> | --list | --compare <a.png> <b.png>" >&2
+    echo "usage: ui-capture [--renderer <method>] <state> [<out-dir>] [--perturb <state>] [--save <file>] | --audit-focus <state> | --audit-accessibility <state> | --list | --compare <a.png> <b.png>" >&2
     exit 2
 }
 
@@ -73,6 +74,8 @@ STATE=""
 OUT=""
 LEFT=""
 RIGHT=""
+SAVE=""
+TEMP_OUT_DIR=""
 case "${1:-}" in
     --list)
         MODE=list
@@ -101,11 +104,15 @@ case "${1:-}" in
         usage
         ;;
     *)
-        [[ $# -ge 2 ]] || usage
+        [[ "$1" != -* ]] || usage
         MODE=capture
         STATE="$1"
-        OUT="$2"
-        shift 2
+        if [[ $# -ge 2 && "$2" != -* ]]; then
+            OUT="$2"
+            shift 2
+        else
+            shift
+        fi
         ;;
 esac
 
@@ -117,11 +124,23 @@ while [[ $# -gt 0 ]]; do
             EXTRA+=(--perturb "$2")
             shift 2
             ;;
+        --save)
+            [[ "$MODE" == capture && $# -ge 2 ]] || usage
+            SAVE="$2"
+            shift 2
+            ;;
         *)
             usage
             ;;
     esac
 done
+
+if [[ "$MODE" == capture && -z "$OUT" ]]; then
+    [[ -n "$SAVE" ]] || usage
+    # --save alone: the raw capture goes to a scratch dir the trap removes.
+    TEMP_OUT_DIR="$(mktemp -d)"
+    OUT="$TEMP_OUT_DIR"
+fi
 
 if [[ "$MODE" == capture || "$MODE" == audit || "$MODE" == audit_a11y ]]; then
     case "$(uname -s)" in
@@ -137,7 +156,13 @@ fi
 # shellcheck source=scripts/ui-sandbox
 . "$ROOT/scripts/ui-sandbox"
 gpty_sandbox_init
-trap gpty_sandbox_cleanup EXIT
+cleanup_capture() {
+    gpty_sandbox_cleanup
+    if [[ -n "$TEMP_OUT_DIR" ]]; then
+        rm -rf "$TEMP_OUT_DIR"
+    fi
+}
+trap cleanup_capture EXIT
 cd "$ROOT"
 
 # A capture is a few seconds. A launch that never presents a frame must not
@@ -206,6 +231,11 @@ case "$MODE" in
             exit 1
         fi
         rm -f "$CAPTURE_LOG"
+        if [[ -n "$SAVE" && "$CAPTURE_STATUS" -eq 0 ]]; then
+            mkdir -p "$(dirname "$SAVE")"
+            cp "$OUT/$STATE.png" "$SAVE"
+            echo "ui-capture: saved $SAVE"
+        fi
         exit "$CAPTURE_STATUS"
         ;;
     audit)

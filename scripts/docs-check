@@ -6,6 +6,8 @@ Standard library only; run from anywhere. Exits 1 and lists every problem found.
   * every relative link in a markdown file resolves to a file, and its #anchor
     resolves to a heading (links into Hugo shortcodes and absolute URLs are skipped)
   * `/images/...` links resolve under docs/static/images/
+  * every docs/static/images/issue-*.png is referenced by a markdown page (an
+    orphan capture is evidence nothing cites)
   * roadmap chain pages: front matter, one three-column table row shape
     (`| done | AREA | **Title** - text |`), a known AREA, no unescaped `|`, titles
     unique across all chains, and no image inside a table row
@@ -104,6 +106,19 @@ for f in FILES:
             bad(f, f'image not found: {url}')
         if url.startswith('/images/') and not os.path.exists(os.path.join(ROOT, 'docs/static', url.lstrip('/'))):
             bad(f, f'image not found under docs/static/: {url}')
+
+# ── evidence images: every issue-*.png is on a page ──────────────────────
+# A capture saved for a row or a changelog entry is evidence; one no page
+# references is an orphan (the caption was never added, or the page went away).
+# Only `issue-*` is checked: the release and blog images are not evidence.
+IMAGE_REFS = set()
+for f in FILES:
+    for m in img_re.finditer(strip_code(read(f))):
+        IMAGE_REFS.add(os.path.basename(m.group(1).split('#', 1)[0]))
+IMAGES_DIR = os.path.join(ROOT, 'docs/static/images')
+for name in sorted(os.listdir(IMAGES_DIR)):
+    if name.startswith('issue-') and name.endswith('.png') and name not in IMAGE_REFS:
+        bad(f'docs/static/images/{name}', 'evidence image is not referenced by any markdown page')
 
 # ── split-page indexes: root file <-> pages ──────────────────────────────
 for root_md, folder, fields in (
