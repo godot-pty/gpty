@@ -9,19 +9,23 @@ Every SEC row, by ID and in allocation order. The queue and its priority live on
 
 ## SEC-1
 
-**Workspace Trust** - layouts loaded from external sources show a confirmation dialog before spawning PTY processes. Prevents malicious layout files from executing arbitrary commands.
+**Workspace Trust** - layouts loaded from external sources show a confirmation dialog before
+spawning PTY processes. Prevents malicious layout files from executing arbitrary commands.
 
 Commits: d17bac7
 
 ## SEC-2
 
-**IPC security** - peer-UID check, optional `GPTY_SECRET`, request/connection caps, and client-side `GPTY_SOCKET`/`GPTY_GUI` validation against env hijacking
+**IPC security** - peer-UID check, optional `GPTY_SECRET`, request/connection caps, and client-side
+`GPTY_SOCKET`/`GPTY_GUI` validation against env hijacking
 
 Commits: d17bac7
 
 ## SEC-3
 
-**Concept engine security** - shell-quoted template substitution, parse caps (count, lengths, timeout clamp), line and capture bounds (template substitution removed in v0.5.3 along with command execution)
+**Concept engine security** - shell-quoted template substitution, parse caps (count, lengths,
+timeout clamp), line and capture bounds (template substitution removed in v0.5.3 along with command
+execution)
 
 Commits: d17bac7
 
@@ -39,316 +43,1227 @@ Commits: d17bac7
 
 ## SEC-6
 
-**Concept command execution removed** - a concept definition was data that could act: a regex trigger over untrusted terminal output drove a `write_line` into a target pane (event path) and a Ctrl+click handler ran the first matching template in the pane itself. Both paths are gone (`command_template`, `substitute_template`, `shell_quote`, `matching_commands`, `match_concepts_on_line`, `_check_click_concept`), legacy `cmd` keys are ignored on parse and stripped on save, and the settings dialog no longer collects one. Shipped concepts were already capture-only; user-authored ones now can't be anything else.
+**Concept command execution removed** - a concept definition was data that could act: a regex
+trigger over untrusted terminal output drove a `write_line` into a target pane (event path) and a
+Ctrl+click handler ran the first matching template in the pane itself. Both paths are gone
+(`command_template`, `substitute_template`, `shell_quote`, `matching_commands`,
+`match_concepts_on_line`, `_check_click_concept`), legacy `cmd` keys are ignored on parse and
+stripped on save, and the settings dialog no longer collects one. Shipped concepts were already
+capture-only; user-authored ones now can't be anything else.
 
 Commits: d17bac7
 
 ## SEC-7
 
-**Workspace Trust covers everything that executes** - the gate examined only the legacy `shell` key while restore consumed `command` > `shell` and passed `shell_args`/`shell_env` through untouched, so a downloaded profile could run an arbitrary command (`["-c", "curl … \| sh"]`) or a `PROMPT_COMMAND` payload with no prompt. `PaneTypes.tile_spawns_untrusted` now checks program, argv, and environment (compared against the user's own defaults), and the sidebar profile-activation and workspace-restore paths use it. **Correction (second pass):** the `layoutLoad` IPC handler calls `_do_activate` directly, so CLI/MCP-driven loads bypass the gate entirely, and the env clause turned out to gate a path that cannot execute - `_restore_into` applies tile settings *before* `apply_to_terminal`, which overwrites `shell_env` with the user's global, so a restored tile's env never reaches a child. The program/argv coverage is the part that was live; the IPC hole and the ordering bug are tracked below.
+**Workspace Trust covers everything that executes** - the gate examined only the legacy `shell` key
+while restore consumed `command` > `shell` and passed `shell_args`/`shell_env` through untouched, so
+a downloaded profile could run an arbitrary command (`["-c", "curl … \| sh"]`) or a `PROMPT_COMMAND`
+payload with no prompt. `PaneTypes.tile_spawns_untrusted` now checks program, argv, and environment
+(compared against the user's own defaults), and the sidebar profile-activation and workspace-restore
+paths use it. **Correction (second pass):** the `layoutLoad` IPC handler calls `_do_activate`
+directly, so CLI/MCP-driven loads bypass the gate entirely, and the env clause turned out to gate a
+path that cannot execute - `_restore_into` applies tile settings *before* `apply_to_terminal`, which
+overwrites `shell_env` with the user's global, so a restored tile's env never reaches a child. The
+program/argv coverage is the part that was live; the IPC hole and the ordering bug are tracked
+below.
 
 Commits: d17bac7
 
 ## SEC-8
 
-**Startup-evaluation env keys blocked** - `sanitize_envs` grew a second class: `BASH_ENV`, `ENV`, `PROMPT_COMMAND`, `SHELLOPTS`, `PS4`, `ZDOTDIR`, `PERL5OPT`, `PERL5LIB`, `PYTHONSTARTUP`, `NODE_OPTIONS`, `RUBYOPT`, `LESSOPEN`, `GIT_SSH_COMMAND`, `GIT_EXTERNAL_DIFF`, `GIT_PAGER`, `PAGER`. These make a shell or the next tool run what the value contains, so a layout could get code execution without ever naming a command. Users can still set them inside a shell.
+**Startup-evaluation env keys blocked** - `sanitize_envs` grew a second class: `BASH_ENV`, `ENV`,
+`PROMPT_COMMAND`, `SHELLOPTS`, `PS4`, `ZDOTDIR`, `PERL5OPT`, `PERL5LIB`, `PYTHONSTARTUP`,
+`NODE_OPTIONS`, `RUBYOPT`, `LESSOPEN`, `GIT_SSH_COMMAND`, `GIT_EXTERNAL_DIFF`, `GIT_PAGER`, `PAGER`.
+These make a shell or the next tool run what the value contains, so a layout could get code
+execution without ever naming a command. Users can still set them inside a shell.
 
 Commits: d17bac7
 
 ## SEC-9
 
-**Control credentials quarantined from Inspector children** - the OMP/adapter child inherited the GUI's whole environment, including `GPTY_SECRET`/`GPTY_SOCKET` (and, for a GUI started inside a pane, that pane's event capability). `SessionOpenRequest::strip_env` now carries `gpty_core::pty::STRIPPED_INHERITED_ENV_KEYS`, applied by both backends.
+**Control credentials quarantined from Inspector children** - the OMP/adapter child inherited the
+GUI's whole environment, including `GPTY_SECRET`/`GPTY_SOCKET` (and, for a GUI started inside a
+pane, that pane's event capability). `SessionOpenRequest::strip_env` now carries
+`gpty_core::pty::STRIPPED_INHERITED_ENV_KEYS`, applied by both backends.
 
 Commits: d17bac7
 
 ## SEC-10
 
-**Security policy published** - `SECURITY.md` records the threat model, the reporting process, the hardening that must not be weakened, and the known limitations.
+**Security policy published** - `SECURITY.md` records the threat model, the reporting process, the
+hardening that must not be weakened, and the known limitations.
 
 Commits: d17bac7
 
 ## SEC-11
 
-**Workspace Trust shows what it will run** - `PaneTypes.untrusted_plan` renders the program, the argv, and each `environment:` entry it is asking the user to approve (control characters escaped, env lines capped at 8/tile and 24 dialog lines, every env line keeping its label so a value cannot forge a `program:` line), and `_untrusted_details()` feeds it into both the profile-activation and workspace-restore dialogs. 4 unit tests cover content, trusted→empty, labelling, escaping, and the caps.
+**Workspace Trust shows what it will run** - `PaneTypes.untrusted_plan` renders the program, the
+argv, and each `environment:` entry it is asking the user to approve (control characters escaped,
+env lines capped at 8/tile and 24 dialog lines, every env line keeping its label so a value cannot
+forge a `program:` line), and `_untrusted_details()` feeds it into both the profile-activation and
+workspace-restore dialogs. 4 unit tests cover content, trusted→empty, labelling, escaping, and the
+caps.
 
 Commits: d17bac7
 
 ## SEC-12
 
-**Trust gate on the IPC restore path** - `ipc_handlers.gd` `layoutLoad` called `ws._do_activate(profile)` directly while the gate lived in `_activate_profile`, so `gpty layout load <name>` and the `layout-load` MCP tool restore an untrusted profile with no consent step. An untrusted profile is now refused over IPC with an error pointing at the GUI; verified live against a running GUI.
+**Trust gate on the IPC restore path** - `ipc_handlers.gd` `layoutLoad` called
+`ws._do_activate(profile)` directly while the gate lived in `_activate_profile`, so
+`gpty layout load <name>` and the `layout-load` MCP tool restore an untrusted profile with no
+consent step. An untrusted profile is now refused over IPC with an error pointing at the GUI;
+verified live against a running GUI.
 
 Commits: d17bac7
 
 ## SEC-13
 
-**Restored-executable parent-directory check** - `pty::validate_executable` stats the program file only. A binary whose own mode is safe (0755) can still be swapped by another user when it sits in a group/other-writable directory without the sticky bit; `/tmp` is protected by default, other shared directories are not. Walk the parent chain and reject when any directory is writable by others without `+t`, then extend the existing test.
+**Restored-executable parent-directory check** - `pty::validate_executable` stats the program file
+only. A binary whose own mode is safe (0755) can still be swapped by another user when it sits in a
+group/other-writable directory without the sticky bit; `/tmp` is protected by default, other shared
+directories are not. Walk the parent chain and reject when any directory is writable by others
+without `+t`, then extend the existing test.
 
 Commits: d17bac7
 
 ## SEC-14
 
-**Supply-chain follow-ups** - (a) **Actions pinned to commit SHAs** across all three workflows (every third-party `uses:`, version kept in a trailing comment), including the two moving refs, `dtolnay/rust-toolchain@stable` and `rustsec/audit-check@v2` (a branch). (b) **CI downloads are checksum-verified**: Godot editor + export templates against the release's `SHA512-SUMS.txt`, Hugo against `hugo_0.164.0_checksums.txt`; the Linux editor zip and the Hugo tarball were downloaded and hashed locally to confirm the pinned values, and a swapped artifact now fails the job instead of being installed (the tag is mutable; the hash is the pin). (c) **Build-provenance attestations**: `actions/attest-build-provenance` attests every release asset (three archives, `gdextension/*`, `SHA256SUMS`) with `id-token: write` + `attestations: write` on the export job, so `gh attestation verify <asset> --repo godot-pty/gpty` binds a download to the workflow, commit and runner that produced it; README, SECURITY.md and the release notes say so, and SECURITY.md no longer claims "no build attestation" (code signing is still absent and still stated). (d) **`docs/setup.sh` hardened**: remote release metadata is validated (conservative tag pattern plus a `https://github.com/godot-pty/gpty/releases/tag/…` URL) and written as JSON-quoted YAML scalars, so a malformed or compromised API response is skipped with a warning instead of injecting dropdown entries or a `javascript:` href - verified with a stubbed payload carrying a newline-injecting tag and an off-host URL (both skipped, valid entries quoted, site builds). The update-checker body cap landed earlier (`MAX_RESPONSE_BYTES`, 64 KiB). (Deferred from v0.5.3.)
+**Supply-chain follow-ups** - (a) **Actions pinned to commit SHAs** across all three workflows
+(every third-party `uses:`, version kept in a trailing comment), including the two moving refs,
+`dtolnay/rust-toolchain@stable` and `rustsec/audit-check@v2` (a branch). (b) **CI downloads are
+checksum-verified**: Godot editor + export templates against the release's `SHA512-SUMS.txt`, Hugo
+against `hugo_0.164.0_checksums.txt`; the Linux editor zip and the Hugo tarball were downloaded and
+hashed locally to confirm the pinned values, and a swapped artifact now fails the job instead of
+being installed (the tag is mutable; the hash is the pin). (c) **Build-provenance attestations**:
+`actions/attest-build-provenance` attests every release asset (three archives, `gdextension/*`,
+`SHA256SUMS`) with `id-token: write` + `attestations: write` on the export job, so
+`gh attestation verify <asset> --repo godot-pty/gpty` binds a download to the workflow, commit and
+runner that produced it; README, SECURITY.md and the release notes say so, and SECURITY.md no longer
+claims "no build attestation" (code signing is still absent and still stated). (d) **`docs/setup.sh`
+hardened**: remote release metadata is validated (conservative tag pattern plus a
+`https://github.com/godot-pty/gpty/releases/tag/…` URL) and written as JSON-quoted YAML scalars, so
+a malformed or compromised API response is skipped with a warning instead of injecting dropdown
+entries or a `javascript:` href - verified with a stubbed payload carrying a newline-injecting tag
+and an off-host URL (both skipped, valid entries quoted, site builds). The update-checker body cap
+landed earlier (`MAX_RESPONSE_BYTES`, 64 KiB). (Deferred from v0.5.3.)
 
 Commits: d17bac7
 
 ## SEC-15
 
-**Persistence file-mode and symlink hardening** - both halves closed. (a) The store write path (`BasePersistenceManager._write_file`, the choke point every `user://` store goes through) built its temp file at a predictable `<store>.tmp`, and `FileAccess.open(..., WRITE)` **follows a symlink** - measured: with the old code a link planted at that name turned a victim file into the store's JSON. The temp name is now 64 random bits (`_temp_suffix()` via `Crypto.generate_random_bytes`), which cannot be pre-planted (GDScript has no `O_EXCL`, so the *name* is the protection), and the file is created 0600 (`STORE_UNIX_MODE` through `FileAccess.set_unix_permissions`) before the rename; the rename replaces the target itself instead of writing through a link at the store path, and the non-atomic fallback (platforms that refuse rename-over-existing) sets the mode too. (b) The scrollback database was created with the process umask - measured 0644 on the SQLite file **and** its `-wal`/`-shm` siblings - so `history::restrict_to_owner` chmods all three to 0600 from `HistoryStore::open`, which also tightens a store written before this change. Both halves are pinned by tests that fail on the old code: `test_a_planted_symlink_at_the_temp_path_is_not_followed` (mutation back to `path + ".tmp"` → the victim holds `{"payload":true}` and the test fails), `test_a_written_store_is_owner_only`, and `the_store_and_its_wal_siblings_are_owner_only` (no-op mutation → `got 644`). `test_a_failed_write_leaves_the_previous_file_intact` now forces its failure through a `_temp_suffix()` override, since a random name cannot be occupied in advance. SECURITY.md claimed the scrollback mode follows your umask; AGENTS records the rule and why the suffix must stay random.
+**Persistence file-mode and symlink hardening** - both halves closed. (a) The store write path
+(`BasePersistenceManager._write_file`, the choke point every `user://` store goes through) built its
+temp file at a predictable `<store>.tmp`, and `FileAccess.open(..., WRITE)` **follows a symlink** -
+measured: with the old code a link planted at that name turned a victim file into the store's JSON.
+The temp name is now 64 random bits (`_temp_suffix()` via `Crypto.generate_random_bytes`), which
+cannot be pre-planted (GDScript has no `O_EXCL`, so the *name* is the protection), and the file is
+created 0600 (`STORE_UNIX_MODE` through `FileAccess.set_unix_permissions`) before the rename; the
+rename replaces the target itself instead of writing through a link at the store path, and the
+non-atomic fallback (platforms that refuse rename-over-existing) sets the mode too. (b) The
+scrollback database was created with the process umask - measured 0644 on the SQLite file **and**
+its `-wal`/`-shm` siblings - so `history::restrict_to_owner` chmods all three to 0600 from
+`HistoryStore::open`, which also tightens a store written before this change. Both halves are pinned
+by tests that fail on the old code: `test_a_planted_symlink_at_the_temp_path_is_not_followed`
+(mutation back to `path + ".tmp"` → the victim holds `{"payload":true}` and the test fails),
+`test_a_written_store_is_owner_only`, and `the_store_and_its_wal_siblings_are_owner_only` (no-op
+mutation → `got 644`). `test_a_failed_write_leaves_the_previous_file_intact` now forces its failure
+through a `_temp_suffix()` override, since a random name cannot be occupied in advance. SECURITY.md
+claimed the scrollback mode follows your umask; AGENTS records the rule and why the suffix must stay
+random.
 
 Commits: d17bac7
 
 ## SEC-16
 
-**Peer-credential gaps** - every platform with a peer-credential API now fails closed. The check gained three arms: the BSDs share macOS's `getpeereid`, illumos/Solaris use `getpeerucred` + `ucred_geteuid` (freed with `ucred_free`), and **Windows** - which had no check at all - identifies the client with `GetNamedPipeClientProcessId`, opens that process, reads its token's user SID (`TOKEN_USER` via `GetTokenInformation`) and compares it with gPTY's own through `EqualSid`. Raw `extern "system"` declarations in a private module rather than a `windows-sys` dependency, matching `pin_library`'s precedent. Every arm still fails closed on a lookup error, and the accept loop now rejects a mismatched pipe client before spawning its handler. Verification, since those arms are dead code on a Linux runner: the whole crate compiles for `x86_64-unknown-freebsd` (now a `ci-check` step and a CI job step, because nothing else compiles the BSD arm) and the Windows arm compiles through the existing xwin/clang-cl and `rust-windows` checks; the illumos and NetBSD arms are compile-probed against real libc targets (`getpeerucred`/`ucred_geteuid`, `getpeereid`), which is the only option there because the bundled SQLite fails to build for them. The same-UID acceptance path has an explicit test (`peer_credentials_of_this_process_match`, a socket pair) instead of being implied by the round-trip tests, and the `windows-smoke` job exercises it live. SECURITY.md now lists the platforms that check, the ones that still answer "match" (AIX, Haiku, QNX - file permissions remain their only gate), and what the named-pipe ACL does and does not do. The rejection case needs a second user account and remains untested.
+**Peer-credential gaps** - every platform with a peer-credential API now fails closed. The check
+gained three arms: the BSDs share macOS's `getpeereid`, illumos/Solaris use `getpeerucred` +
+`ucred_geteuid` (freed with `ucred_free`), and **Windows** - which had no check at all - identifies
+the client with `GetNamedPipeClientProcessId`, opens that process, reads its token's user SID
+(`TOKEN_USER` via `GetTokenInformation`) and compares it with gPTY's own through `EqualSid`. Raw
+`extern "system"` declarations in a private module rather than a `windows-sys` dependency, matching
+`pin_library`'s precedent. Every arm still fails closed on a lookup error, and the accept loop now
+rejects a mismatched pipe client before spawning its handler. Verification, since those arms are
+dead code on a Linux runner: the whole crate compiles for `x86_64-unknown-freebsd` (now a `ci-check`
+step and a CI job step, because nothing else compiles the BSD arm) and the Windows arm compiles
+through the existing xwin/clang-cl and `rust-windows` checks; the illumos and NetBSD arms are
+compile-probed against real libc targets (`getpeerucred`/`ucred_geteuid`, `getpeereid`), which is
+the only option there because the bundled SQLite fails to build for them. The same-UID acceptance
+path has an explicit test (`peer_credentials_of_this_process_match`, a socket pair) instead of being
+implied by the round-trip tests, and the `windows-smoke` job exercises it live. SECURITY.md now
+lists the platforms that check, the ones that still answer "match" (AIX, Haiku, QNX - file
+permissions remain their only gate), and what the named-pipe ACL does and does not do. The rejection
+case needs a second user account and remains untested.
 
 Commits: d17bac7
 
 ## SEC-17
 
-**Shared-`/tmp` socket fallback** - the fallback chain now prefers a private directory over a shared one: `$XDG_RUNTIME_DIR`, `/run/user/<uid>` (Linux) or `$TMPDIR` (macOS) as before, then `$XDG_STATE_HOME/gpty` or `$HOME/.local/state/gpty` - created 0700, or tightened from a lax umask when it is already ours, and validated with the same rule as a runtime directory - and only then `/tmp/gpty-<uid>.sock`, whose predictable path in a world-writable directory is the squatting vector (a denial of service: the socket's owner and mode are validated before use, so it can never be read or spoofed). `fallback_socket_path()` is the one place that choice lives, shared by Linux, macOS and other Unix targets, and the same derivation feeds the event socket. Tests cover it directly - the fallback is exercised through `fallback_socket_path()` rather than the whole chain, because on any modern Linux `/run/user/<uid>` legitimately resolves first (the earlier attempt to force the chain hung the whole `xdg` test module: `ENV_LOCK` is a plain mutex, so a test taking two `EnvVar` guards deadlocks - hence the new multi-variable `EnvVars::apply` guard). Mutating `private_state_dir` to `None` fails the two tests that pin it; the lazy-umask case is pinned too. SECURITY.md and AGENTS now say which directory wins and why the shared path is last.
+**Shared-`/tmp` socket fallback** - the fallback chain now prefers a private directory over a shared
+one: `$XDG_RUNTIME_DIR`, `/run/user/<uid>` (Linux) or `$TMPDIR` (macOS) as before, then
+`$XDG_STATE_HOME/gpty` or `$HOME/.local/state/gpty` - created 0700, or tightened from a lax umask
+when it is already ours, and validated with the same rule as a runtime directory - and only then
+`/tmp/gpty-<uid>.sock`, whose predictable path in a world-writable directory is the squatting vector
+(a denial of service: the socket's owner and mode are validated before use, so it can never be read
+or spoofed). `fallback_socket_path()` is the one place that choice lives, shared by Linux, macOS and
+other Unix targets, and the same derivation feeds the event socket. Tests cover it directly - the
+fallback is exercised through `fallback_socket_path()` rather than the whole chain, because on any
+modern Linux `/run/user/<uid>` legitimately resolves first (the earlier attempt to force the chain
+hung the whole `xdg` test module: `ENV_LOCK` is a plain mutex, so a test taking two `EnvVar` guards
+deadlocks - hence the new multi-variable `EnvVars::apply` guard). Mutating `private_state_dir` to
+`None` fails the two tests that pin it; the lazy-umask case is pinned too. SECURITY.md and AGENTS
+now say which directory wins and why the shared path is last.
 
 Commits: d17bac7
 
 ## SEC-18
 
-**PATH-resolved programs bypass `validate_executable`** - a bare name was spawned as-is, so a saved tile that also set `PATH` chose which file the name ran; the check saw nothing because the name had no separator. `pty::validate_program` resolves a bare name through the `PATH` the child will actually inherit (the tile's own `shell_env` value when set, otherwise the user's - the same value `execvp` searches, since std replaces `environ` before the exec) and holds the first match to the existing rule: regular file, not group/other-writable, owner check, and no writable ancestor. `PtyHandle::spawn` runs it before anything is spawned, so it covers every pane whatever the caller. Three behaviours matter and are pinned: PATH order decides which file is judged (an unsafe directory *after* a safe match is fine, before it is not); a name that resolves nowhere is passed through, because the spawn then fails exactly as it always did rather than for a second, different reason; and an empty `PATH` entry, which `execvp` reads as the working directory, is refused instead of handing `validate_executable` a relative path it would treat as another bare name (that hole was found by the test for it). `PATH` itself is still allowed - blocking it would break the shipped profiles, which launch `omp`, `lazygit` and `nvim` by name. (Deferred from v0.5.3.)
+**PATH-resolved programs bypass `validate_executable`** - a bare name was spawned as-is, so a saved
+tile that also set `PATH` chose which file the name ran; the check saw nothing because the name had
+no separator. `pty::validate_program` resolves a bare name through the `PATH` the child will
+actually inherit (the tile's own `shell_env` value when set, otherwise the user's - the same value
+`execvp` searches, since std replaces `environ` before the exec) and holds the first match to the
+existing rule: regular file, not group/other-writable, owner check, and no writable ancestor.
+`PtyHandle::spawn` runs it before anything is spawned, so it covers every pane whatever the caller.
+Three behaviours matter and are pinned: PATH order decides which file is judged (an unsafe directory
+*after* a safe match is fine, before it is not); a name that resolves nowhere is passed through,
+because the spawn then fails exactly as it always did rather than for a second, different reason;
+and an empty `PATH` entry, which `execvp` reads as the working directory, is refused instead of
+handing `validate_executable` a relative path it would treat as another bare name (that hole was
+found by the test for it). `PATH` itself is still allowed - blocking it would break the shipped
+profiles, which launch `omp`, `lazygit` and `nvim` by name. (Deferred from v0.5.3.)
 
 Commits: d17bac7
 
 ## SEC-19
 
-**User-owned pane environment** - a file must not carry env. Restore ignores a tile's `shell_env`, and per-pane env becomes a property the *user* grants: an app-written map keyed by `attachment_id` (`user://pane_env.json`, written only by the pane settings UI, never by profiles/workspaces), so a pane's env still survives restarts while no file can supply one. Profiles lose the ability to carry env by design (documented; a profile that needs it points at shell rc or asks the user to set it once). Companion fix: `_restore_into` currently applies tile settings *before* `apply_to_terminal`, which overwrites `shell_env` with the user's global - so per-pane env is silently discarded on restore (a bug) and no file-supplied env reaches a child (an accident, not a control). Fix the ordering only together with this item, or files regain env authority. Migration: restored tiles' env is dropped with a notice listing what was dropped - do NOT auto-adopt it into the store, since that would launder a hostile file's payload into the trusted map. `BLOCKED_ENV_KEYS` stops growing: it becomes the floor for user-authored, ambient, and plugin-supplied env instead of the primary defense, and the plugin lane may carry env in a manifest only behind the plugin review dialog. Rationale - env is spawn-time authority, not display config: module search paths (`PYTHONPATH`, `NODE_PATH`, `RUBYLIB`, `LUA_PATH`, `CLASSPATH`), build-tool override (`RUSTFLAGS`, `GOFLAGS`, `CC`, `LD`, `MAKEFLAGS`), git config-by-env (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_COUNT`/`_KEY_n` → `core.pager`, `alias.*=!cmd`, `core.sshCommand`), credential/agent hijack (`SSH_ASKPASS`, `SSH_AUTH_SOCK`), traffic redirection (`HTTPS_PROXY`, `SSL_CERT_FILE`, `PIP_INDEX_URL`, `NPM_CONFIG_REGISTRY`, `KUBECONFIG`, `DOCKER_HOST`), and credential helpers or agent sockets (`SSH_ASKPASS`, `SUDO_ASKPASS`, `SSH_AUTH_SOCK`, `KRB5CCNAME`, `GPG_AGENT_INFO`). The second pass also found the sanitizer's own gaps: `LD_DEBUG`/`GLIBC_TUNABLES`, `HOME`/`XDG_CONFIG_HOME` (a redirected HOME sources different rc files), `GIT_CONFIG_SYSTEM`, `GIT_DIR`/`GIT_WORK_TREE`, and no cap on the key set past the 64-line window. An enumerated blocklist cannot converge on a class like that. Decided over the cheaper alternative (D: stop persisting per-pane env entirely) because C keeps the user's own env across restarts. **Closed:** `PaneEnvStore` (`user://pane_env.json`, keyed by `attachment_id`, loader caps 128 entries × 4 KiB values, id-pattern keys) is the only per-pane env source, written solely by the pane settings UI path (`workspace.gd`'s `settings_applied` handler, which re-keys the entry when the pane's id changes); `_restore_into` strips a file's `shell_env` with a toast naming what was dropped and adopts nothing; `_get_layout_state` no longer carries env into saved files; `TerminalPane._ready` overlays the store over the user's global at spawn - the id is final there, because uniqueness renames run before the wrapper enters the tree. The trust predicates dropped the dead env clause (`tile_spawns_untrusted`/`untrusted_plan` lost the `default_env` parameter and `TRUST_MAX_ENV_LINES`; the two dialog texts and the `layoutLoad` refusal message updated). Tests: `test_pane_env_store.gd` (roundtrip, id pattern, value/entry caps, wrong-typed keys), `test_pane_env_restore.gd` (a file's env neither reaches the pane nor the store, the toast fires, the store's env overlays the global at spawn, saved state carries no env, the UI writes/moves/clears the entry), and `test_pane_hardening.gd` now pins that the trust gate has **no** env authority. `./scripts/ci-check` green.
+**User-owned pane environment** - a file must not carry env. Restore ignores a tile's `shell_env`,
+and per-pane env becomes a property the *user* grants: an app-written map keyed by `attachment_id`
+(`user://pane_env.json`, written only by the pane settings UI, never by profiles/workspaces), so a
+pane's env still survives restarts while no file can supply one. Profiles lose the ability to carry
+env by design (documented; a profile that needs it points at shell rc or asks the user to set it
+once). Companion fix: `_restore_into` currently applies tile settings *before* `apply_to_terminal`,
+which overwrites `shell_env` with the user's global - so per-pane env is silently discarded on
+restore (a bug) and no file-supplied env reaches a child (an accident, not a control). Fix the
+ordering only together with this item, or files regain env authority. Migration: restored tiles' env
+is dropped with a notice listing what was dropped - do NOT auto-adopt it into the store, since that
+would launder a hostile file's payload into the trusted map. `BLOCKED_ENV_KEYS` stops growing: it
+becomes the floor for user-authored, ambient, and plugin-supplied env instead of the primary
+defense, and the plugin lane may carry env in a manifest only behind the plugin review dialog.
+Rationale - env is spawn-time authority, not display config: module search paths (`PYTHONPATH`,
+`NODE_PATH`, `RUBYLIB`, `LUA_PATH`, `CLASSPATH`), build-tool override (`RUSTFLAGS`, `GOFLAGS`, `CC`,
+`LD`, `MAKEFLAGS`), git config-by-env (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_COUNT`/`_KEY_n` →
+`core.pager`, `alias.*=!cmd`, `core.sshCommand`), credential/agent hijack (`SSH_ASKPASS`,
+`SSH_AUTH_SOCK`), traffic redirection (`HTTPS_PROXY`, `SSL_CERT_FILE`, `PIP_INDEX_URL`,
+`NPM_CONFIG_REGISTRY`, `KUBECONFIG`, `DOCKER_HOST`), and credential helpers or agent sockets
+(`SSH_ASKPASS`, `SUDO_ASKPASS`, `SSH_AUTH_SOCK`, `KRB5CCNAME`, `GPG_AGENT_INFO`). The second pass
+also found the sanitizer's own gaps: `LD_DEBUG`/`GLIBC_TUNABLES`, `HOME`/`XDG_CONFIG_HOME` (a
+redirected HOME sources different rc files), `GIT_CONFIG_SYSTEM`, `GIT_DIR`/`GIT_WORK_TREE`, and no
+cap on the key set past the 64-line window. An enumerated blocklist cannot converge on a class like
+that. Decided over the cheaper alternative (D: stop persisting per-pane env entirely) because C
+keeps the user's own env across restarts. **Closed:** `PaneEnvStore` (`user://pane_env.json`, keyed
+by `attachment_id`, loader caps 128 entries × 4 KiB values, id-pattern keys) is the only per-pane
+env source, written solely by the pane settings UI path (`workspace.gd`'s `settings_applied`
+handler, which re-keys the entry when the pane's id changes); `_restore_into` strips a file's
+`shell_env` with a toast naming what was dropped and adopts nothing; `_get_layout_state` no longer
+carries env into saved files; `TerminalPane._ready` overlays the store over the user's global at
+spawn - the id is final there, because uniqueness renames run before the wrapper enters the tree.
+The trust predicates dropped the dead env clause (`tile_spawns_untrusted`/`untrusted_plan` lost the
+`default_env` parameter and `TRUST_MAX_ENV_LINES`; the two dialog texts and the `layoutLoad` refusal
+message updated). Tests: `test_pane_env_store.gd` (roundtrip, id pattern, value/entry caps,
+wrong-typed keys), `test_pane_env_restore.gd` (a file's env neither reaches the pane nor the store,
+the toast fires, the store's env overlays the global at spawn, saved state carries no env, the UI
+writes/moves/clears the entry), and `test_pane_hardening.gd` now pins that the trust gate has **no**
+env authority. `./scripts/ci-check` green.
 
 Commits: d17bac7
 
 ## SEC-20
 
-**Agent events and agent state cross workspace boundaries, and a renamed pane id leaves its companion pointing at another workspace's terminal** - reported 2026-10-28: after activating the same profile in two workspaces, OMP runs in workspace A's terminal while workspace B's Reasoning pane shows A's stream. `_poll_agent_events` resolves the emitting PTY correctly by `terminal_session_id` (`workspace.gd:1441-1457`) but then fans out by `source.attachment_id` to every receiver in every workspace (`:1477-1478`); `ReasoningPane.receive_agent_event` accepts by that id (`reasoning_pane.gd:238-240`). `_ensure_unique_attachment_id` (`workspace.gd:567`) renames the duplicate id in the second workspace (global uniqueness, `:582`; the sidebar toast reports it and the replacement is a generated `pane-XXXXXXXX` id) but nothing rewrites `source_attachment_id` - only the Reasoning pane reads and writes it - so B's Reasoning keeps pointing at A's `omp-terminal` (**The built-in Agent Workspace still names OMP** renames it to `agent-terminal`), and B's own events arrive under its renamed terminal id and are ignored. `_dispatch_agent_state` (`:1533`), `_terminal_for_agent_state` (`:1525`) and `_prime_new_pane_observers` (`:1504`) use the same global `panes` group and id match, so agent-state observers leak the same way. Fix: (1) scope event and state delivery to the source terminal's owning workspace - hidden workspaces still observe their own terminals; build `session_id -> {body, ws}` and receivers per workspace, and pass the owning workspace into state dispatch/prime; (2) pre-resolve ids for a profile activation or workspace restore - assign final ids for all tiles against existing panes, rewrite intra-set `source_attachment_id` references, then attach (or carry an old-to-new remap into each tile's settings) - so the companion follows its terminal instead of going silent once the leak is closed; carry user-owned state keyed by the old id with the rename - at minimum `PaneEnvStore`, whose migration exists only in the pane-settings `settings_applied` handler (`workspace.gd:59-63`) and not in `_ensure_unique_attachment_id` - or a renamed terminal starts with the wrong environment. Do not relax global id uniqueness: IPC pane resolution is first-match across workspaces (`:562-566`), so duplicates would break `inject`/`pane-read`/`status`/`wait`/`kill`/`focus`; workspace-aware IPC resolution is **A pane label that exists in more than one workspace is resolved to the active workspace's pane, not the caller's**, not this fix. **Fixed 2026-10-28**: event delivery is workspace-scoped - `_route_agent_events(events)`, split out of `_poll_agent_events` so GUT can feed synthetic envelopes, resolves each emitting PTY once by `terminal_session_id` and fans out only to receivers in that terminal's own workspace; `_prime_new_pane_observers`, `_dispatch_agent_state` and `_terminal_for_agent_state` resolve the source inside the observer's workspace (group scan for panes, tile scan for the source), so a companion left pointing at another workspace's id is never primed while a hidden workspace still observes its own. `_restore_into` now sanitizes the whole tile set first: `_resolve_tile_ids` assigns final ids against the panes live in other workspaces and earlier tiles (the first occurrence keeps a repeated id), rewrites the set's `source_attachment_id` through the old->new map, and copies the user's `PaneEnvStore` entry before any body enters the tree, so a renamed terminal spawns with the env set for its logical id; the attach-time check shares `_on_duplicate_rename` (copy + toast). Global uniqueness is unchanged. Tests: `test_agent_event_routing.gd` (two workspaces - each receiver hears only its own terminal's events; the same profile activated twice keeps its companion on the renamed local terminal, binds its `session.bound`, and carries the env), `test_agent_state_contract.gd::test_agent_state_never_crosses_workspaces_and_a_hidden_one_observes_its_own`, `test_pane_env_restore.gd::test_a_collision_rename_copies_the_env_to_the_new_id`; the existing duplicate-rename tests are unchanged. `./scripts/gut-check`: 63 scripts, 804 tests, all passed.
+**Agent events and agent state cross workspace boundaries, and a renamed pane id leaves its companion pointing at another workspace's terminal** - reported
+2026-10-28: after activating the same profile in two workspaces, OMP runs in workspace A's terminal
+while workspace B's Reasoning pane shows A's stream. `_poll_agent_events` resolves the emitting PTY
+correctly by `terminal_session_id` (`workspace.gd:1441-1457`) but then fans out by
+`source.attachment_id` to every receiver in every workspace (`:1477-1478`);
+`ReasoningPane.receive_agent_event` accepts by that id (`reasoning_pane.gd:238-240`).
+`_ensure_unique_attachment_id` (`workspace.gd:567`) renames the duplicate id in the second workspace
+(global uniqueness, `:582`; the sidebar toast reports it and the replacement is a generated
+`pane-XXXXXXXX` id) but nothing rewrites `source_attachment_id` - only the Reasoning pane reads and
+writes it - so B's Reasoning keeps pointing at A's `omp-terminal` (**The built-in Agent Workspace
+still names OMP** renames it to `agent-terminal`), and B's own events arrive under its renamed
+terminal id and are ignored. `_dispatch_agent_state` (`:1533`), `_terminal_for_agent_state`
+(`:1525`) and `_prime_new_pane_observers` (`:1504`) use the same global `panes` group and id match,
+so agent-state observers leak the same way. Fix: (1) scope event and state delivery to the source
+terminal's owning workspace - hidden workspaces still observe their own terminals; build
+`session_id -> {body, ws}` and receivers per workspace, and pass the owning workspace into state
+dispatch/prime; (2) pre-resolve ids for a profile activation or workspace restore - assign final ids
+for all tiles against existing panes, rewrite intra-set `source_attachment_id` references, then
+attach (or carry an old-to-new remap into each tile's settings) - so the companion follows its
+terminal instead of going silent once the leak is closed; carry user-owned state keyed by the old id
+with the rename - at minimum `PaneEnvStore`, whose migration exists only in the pane-settings
+`settings_applied` handler (`workspace.gd:59-63`) and not in `_ensure_unique_attachment_id` - or a
+renamed terminal starts with the wrong environment. Do not relax global id uniqueness: IPC pane
+resolution is first-match across workspaces (`:562-566`), so duplicates would break
+`inject`/`pane-read`/`status`/`wait`/`kill`/`focus`; workspace-aware IPC resolution is **A pane
+label that exists in more than one workspace is resolved to the active workspace's pane, not the
+caller's**, not this fix. **Fixed 2026-10-28**: event delivery is workspace-scoped -
+`_route_agent_events(events)`, split out of `_poll_agent_events` so GUT can feed synthetic
+envelopes, resolves each emitting PTY once by `terminal_session_id` and fans out only to receivers
+in that terminal's own workspace; `_prime_new_pane_observers`, `_dispatch_agent_state` and
+`_terminal_for_agent_state` resolve the source inside the observer's workspace (group scan for
+panes, tile scan for the source), so a companion left pointing at another workspace's id is never
+primed while a hidden workspace still observes its own. `_restore_into` now sanitizes the whole tile
+set first: `_resolve_tile_ids` assigns final ids against the panes live in other workspaces and
+earlier tiles (the first occurrence keeps a repeated id), rewrites the set's `source_attachment_id`
+through the old->new map, and copies the user's `PaneEnvStore` entry before any body enters the
+tree, so a renamed terminal spawns with the env set for its logical id; the attach-time check shares
+`_on_duplicate_rename` (copy + toast). Global uniqueness is unchanged. Tests:
+`test_agent_event_routing.gd` (two workspaces - each receiver hears only its own terminal's events;
+the same profile activated twice keeps its companion on the renamed local terminal, binds its
+`session.bound`, and carries the env),
+`test_agent_state_contract.gd::test_agent_state_never_crosses_workspaces_and_a_hidden_one_observes_its_own`,
+`test_pane_env_restore.gd::test_a_collision_rename_copies_the_env_to_the_new_id`; the existing
+duplicate-rename tests are unchanged. `./scripts/gut-check`: 63 scripts, 804 tests, all passed.
 
 Commits: 6740a98
 
 ## SEC-21
 
-**SECURITY.md states the pane / control-socket position the code actually has** - the audit showed, by running it, that a program in any pane can read and drive every other pane: the CLI inside a pane derives the default socket path from the inherited `XDG_RUNTIME_DIR` (the PTY layer strips only `GPTY_*`), the server's only gate is the peer's user id, and `GPTY_SECRET` is readable from the GUI's `/proc/<pid>/environ` because the pane's shell is the GUI's child - so `inject`, `pane-run`, `broadcast`, `new-pane`, `kill-pane` and `pane-read` (another pane's output as well as its input) are open to any process that can run in a pane, root shells and SSH sessions included; the mechanism was re-read on 2026-10-19 with the code unchanged. The owner decided the position: gPTY's goal is that a process in a pane cannot drive other panes without permission, but that is **not enforced today**, so the documentation now says exactly that instead of implying protection. **Closed (2026-10-19):** SECURITY.md's trust paragraph limits same-user trust to processes *outside* gPTY and says `GPTY_SECRET` protects against other users only; the scope list keeps "a lower-trust pane influencing a higher-trust one" as an in-scope goal marked *not enforced yet*, and the out-of-scope line now reads "processes *outside* gPTY"; a new Known limitations entry gives the mechanism, the reach, what to do until enforcement lands (keep untrusted code and root or SSH sessions apart by running one outside gPTY, since workspaces share one control socket) and why the fix is a per-pane permission rather than removing the surface; the AGENTS.md IPC trust-model bullet and the `gpty-ipc` README's secret bullet carry the same correction, so nothing describes the secret or the `GPTY_*` stripping as a boundary against a pane. Documentation only, no behaviour change. Enforcement is the v0.10.1 item "Panes are separated from the control surface by a permission the user grants".
+**SECURITY.md states the pane / control-socket position the code actually has** - the audit showed,
+by running it, that a program in any pane can read and drive every other pane: the CLI inside a pane
+derives the default socket path from the inherited `XDG_RUNTIME_DIR` (the PTY layer strips only
+`GPTY_*`), the server's only gate is the peer's user id, and `GPTY_SECRET` is readable from the
+GUI's `/proc/<pid>/environ` because the pane's shell is the GUI's child - so `inject`, `pane-run`,
+`broadcast`, `new-pane`, `kill-pane` and `pane-read` (another pane's output as well as its input)
+are open to any process that can run in a pane, root shells and SSH sessions included; the mechanism
+was re-read on 2026-10-19 with the code unchanged. The owner decided the position: gPTY's goal is
+that a process in a pane cannot drive other panes without permission, but that is **not enforced
+today**, so the documentation now says exactly that instead of implying protection. **Closed
+(2026-10-19):** SECURITY.md's trust paragraph limits same-user trust to processes *outside* gPTY and
+says `GPTY_SECRET` protects against other users only; the scope list keeps "a lower-trust pane
+influencing a higher-trust one" as an in-scope goal marked *not enforced yet*, and the out-of-scope
+line now reads "processes *outside* gPTY"; a new Known limitations entry gives the mechanism, the
+reach, what to do until enforcement lands (keep untrusted code and root or SSH sessions apart by
+running one outside gPTY, since workspaces share one control socket) and why the fix is a per-pane
+permission rather than removing the surface; the AGENTS.md IPC trust-model bullet and the `gpty-ipc`
+README's secret bullet carry the same correction, so nothing describes the secret or the `GPTY_*`
+stripping as a boundary against a pane. Documentation only, no behaviour change. Enforcement is the
+v0.10.1 item "Panes are separated from the control surface by a permission the user grants".
 
 Commits: d17bac7, 6cecfd6
 
 ## SEC-22
 
-**A pane label that exists in more than one workspace is resolved to the active workspace's pane, not the caller's** - replaced `Workspace._find_pane_by_label` (active workspace first, then array order) with `Workspace._resolve_pane_target(target) -> {body}` / `{error}`: an `attachment_id` is matched first and always resolves (ids are unique across workspaces by construction); a label resolves only when exactly one pane carries it; a label several panes share is refused with `Pane 'T1' is ambiguous: it names Workspace 1 (pane-…), Workspace 2 (pane-…) - address the pane by its id`, so the caller re-addresses with the id the error names. All six targeting paths go through it - `inject`, `paneRead`, `paneStatus`, `killPane` (`"active"` still means the active workspace's focused pane), `focusPane`, and `paneWait` in `workspace.gd` plus its per-frame pending-wait lookup (which resolves the stored id) - and none falls back to the active workspace silently. Because resolution and readability are now separate steps, `paneRead` on a pane with no readable output and `paneWait` on a non-terminal say so, instead of the old blanket "not found" that sent a caller looking for a pane it could already see in `listPanes`. `listPanes`, `broadcast` and `paneRun` stay inside the active workspace, unchanged. The CLI help, `skills/gpty/SKILL.md` and `agents/gdscript.md` state the rule (an id, or a label unique across workspaces), and SECURITY.md's known-limitation text no longer describes active-workspace-first resolution. Tests in `test_ipc_dispatch_contract.gd`: `test_a_label_two_workspaces_share_is_refused_by_every_targeting_method` builds a `T1` in each of two workspaces and drives all five dispatch methods - each returns an error naming both workspace names and both ids, both panes stay alive, and neither scrollback receives the injected marker; `test_a_unique_label_and_every_id_resolve_from_another_workspace` reads each pane by id from the other workspace and, after the duplicate `T1` is killed, resolves the surviving label. `test_pane_id_uniqueness.gd` follows the renamed resolver. Follow-up queued under v0.10.1: an id that names another workspace's pane resolves, but `focusPane` cannot bring that workspace into view.
+**A pane label that exists in more than one workspace is resolved to the active workspace's pane, not the caller's** - replaced
+`Workspace._find_pane_by_label` (active workspace first, then array order) with
+`Workspace._resolve_pane_target(target) -> {body}` / `{error}`: an `attachment_id` is matched first
+and always resolves (ids are unique across workspaces by construction); a label resolves only when
+exactly one pane carries it; a label several panes share is refused with
+`Pane 'T1' is ambiguous: it names Workspace 1 (pane-…), Workspace 2 (pane-…) - address the pane by its id`,
+so the caller re-addresses with the id the error names. All six targeting paths go through it -
+`inject`, `paneRead`, `paneStatus`, `killPane` (`"active"` still means the active workspace's
+focused pane), `focusPane`, and `paneWait` in `workspace.gd` plus its per-frame pending-wait lookup
+(which resolves the stored id) - and none falls back to the active workspace silently. Because
+resolution and readability are now separate steps, `paneRead` on a pane with no readable output and
+`paneWait` on a non-terminal say so, instead of the old blanket "not found" that sent a caller
+looking for a pane it could already see in `listPanes`. `listPanes`, `broadcast` and `paneRun` stay
+inside the active workspace, unchanged. The CLI help, `skills/gpty/SKILL.md` and
+`agents/gdscript.md` state the rule (an id, or a label unique across workspaces), and SECURITY.md's
+known-limitation text no longer describes active-workspace-first resolution. Tests in
+`test_ipc_dispatch_contract.gd`:
+`test_a_label_two_workspaces_share_is_refused_by_every_targeting_method` builds a `T1` in each of
+two workspaces and drives all five dispatch methods - each returns an error naming both workspace
+names and both ids, both panes stay alive, and neither scrollback receives the injected marker;
+`test_a_unique_label_and_every_id_resolve_from_another_workspace` reads each pane by id from the
+other workspace and, after the duplicate `T1` is killed, resolves the surviving label.
+`test_pane_id_uniqueness.gd` follows the renamed resolver. Follow-up queued under v0.10.1: an id
+that names another workspace's pane resolves, but `focusPane` cannot bring that workspace into view.
 
 Commits: d17bac7, 872260d, 6cecfd6
 
 ## SEC-23
 
-**A layout, profile or settings file can make the GUI `load()` an arbitrary resource, and loading one runs its embedded script** - closed by removing both halves of the road: the open property path and the resource loader. (1) **Closed settings table.** `PaneTypes.settings_schema(type)` lists every key a pane type accepts with a rule (`text`/`int`/`float` with a range, `bool`, `color`, `id`, `tags`, `argv`, `shell`, `font_path`) and `file: false` for keys only the app may set (`shell_command`, `shell_env`, `color_scheme_path`, the three chrome colors). `PaneTypes.sanitize_tile` runs it with `SOURCE_FILE`, keeps the spawn keys (`shell`, `command`, `shell_env`) verbatim for the restore path, and returns `dropped`; `Workspace._restore_into` shows one toast naming the first three (escaped through `PaneTypes._trust_text`), so a typo or a crafted tile is visible instead of silently dropped. `PaneBody._set_typed` is deleted: `apply_settings` runs the table again with `SOURCE_RUNTIME` and is the only generic assignment path (a pane's own override assigns its named keys, and each of those is a table key the drift test checks), so a key outside the table is never assigned generically. `font_bold_path`/`font_italic_path` are not in the table at all - they were the live layout vector, since `_ready`/`_reload_fonts` read them straight into the loader and no save path ever wrote them. (2) **Byte-only font loader.** `TerminalFonts` builds a `FontFile` from bytes: an absolute real file (`res://`/`user://` are absolute to Godot but virtual, so refused), extension gate shared with both pickers via `PaneTypes.font_filter()` (`.ttf`, `.otf`, `.ttc`, `.woff`, `.woff2`), a 32 MiB cap, an sfnt/OpenType/WOFF magic check, and a face-count check; any failure falls back to the bundled face. Only the three compile-time `res://` constants reach `load()`, and that is deliberate: an export carries their imported `.fontdata`, not the source `.ttf`, so reading the bundled font's bytes would fail in a packaged build. The bundled faces are cached per path. (3) **Scheme.** `_apply_stored_scheme` reads through `TextRead.read_prefix` (absolute regular file, 16 KiB cap) instead of opening any path and reading it whole, and `color_scheme_path` is runtime-only: no schemes directory exists in the repo, so a file's scheme path is refused outright rather than restricted to one (the `scheme_path` rule is the single place to extend when schemes ship). It is also no longer written into `_get_layout_state`, because the global appearance is applied after a tile on restore, so a saved value never took effect; `font_path` is saved only when it is a chosen absolute path, not the bundled default. `font_size` is clamped to `PaneTypes.FONT_SIZE_MIN/MAX` (8..32), the same constants the pane panel's spinbox now uses. **Tests:** `godot/tests/fixtures/evil_font.tres` is a resource whose embedded GDScript writes `GPTY_EXPLOIT_SENTINEL` when loaded; `test_terminal_fonts.gd` proves the fixture really executes (a bare `load()` of its `res://` path) so the refusals cannot go vacuous, then asserts the bundled font plus no sentinel for `.tres`, a `.tres` disguised as `.ttf`, junk bytes, a missing file and a `res://` data value; `test_pane_resource_loading.gd` drives the real restore/spawn paths - a layout tile carrying `font_path`/`font_bold_path`/`font_italic_path`, a profile through `ProfileManager`, and `settings.json`'s `cfg_font_path` (the live vector) - asserting the bundled faces come out and the sentinel never appears; `test_pane_hardening.gd` covers the table (unknown/app-only/wrong-type/out-of-range/path rules, spawn keys preserved, drops reported); `test_pane_settings.gd` asserts an unlisted property is never assigned and carries the drift guard `test_every_pane_type_accepts_the_settings_it_saves` (a saved key without a rule fails it). GUT 828/828. Docs: SECURITY.md's Files bullet, `agents/security.md`'s layout-restore bullet, `agents/gdscript.md`'s settings contract, `agents/pitfalls.md`, `overview/testing.md`. Follow-ups queued: an Inspector profile can preconfigure `system_prompt`/`auto_run` (v0.7.1), and a saved per-pane font is still overwritten by the global on restore (v0.9.1).
+**A layout, profile or settings file can make the GUI `load()` an arbitrary resource, and loading one runs its embedded script** - closed
+by removing both halves of the road: the open property path and the resource loader. (1) **Closed
+settings table.** `PaneTypes.settings_schema(type)` lists every key a pane type accepts with a rule
+(`text`/`int`/`float` with a range, `bool`, `color`, `id`, `tags`, `argv`, `shell`, `font_path`) and
+`file: false` for keys only the app may set (`shell_command`, `shell_env`, `color_scheme_path`, the
+three chrome colors). `PaneTypes.sanitize_tile` runs it with `SOURCE_FILE`, keeps the spawn keys
+(`shell`, `command`, `shell_env`) verbatim for the restore path, and returns `dropped`;
+`Workspace._restore_into` shows one toast naming the first three (escaped through
+`PaneTypes._trust_text`), so a typo or a crafted tile is visible instead of silently dropped.
+`PaneBody._set_typed` is deleted: `apply_settings` runs the table again with `SOURCE_RUNTIME` and is
+the only generic assignment path (a pane's own override assigns its named keys, and each of those is
+a table key the drift test checks), so a key outside the table is never assigned generically.
+`font_bold_path`/`font_italic_path` are not in the table at all - they were the live layout vector,
+since `_ready`/`_reload_fonts` read them straight into the loader and no save path ever wrote them.
+(2) **Byte-only font loader.** `TerminalFonts` builds a `FontFile` from bytes: an absolute real file
+(`res://`/`user://` are absolute to Godot but virtual, so refused), extension gate shared with both
+pickers via `PaneTypes.font_filter()` (`.ttf`, `.otf`, `.ttc`, `.woff`, `.woff2`), a 32 MiB cap, an
+sfnt/OpenType/WOFF magic check, and a face-count check; any failure falls back to the bundled face.
+Only the three compile-time `res://` constants reach `load()`, and that is deliberate: an export
+carries their imported `.fontdata`, not the source `.ttf`, so reading the bundled font's bytes would
+fail in a packaged build. The bundled faces are cached per path. (3) **Scheme.**
+`_apply_stored_scheme` reads through `TextRead.read_prefix` (absolute regular file, 16 KiB cap)
+instead of opening any path and reading it whole, and `color_scheme_path` is runtime-only: no
+schemes directory exists in the repo, so a file's scheme path is refused outright rather than
+restricted to one (the `scheme_path` rule is the single place to extend when schemes ship). It is
+also no longer written into `_get_layout_state`, because the global appearance is applied after a
+tile on restore, so a saved value never took effect; `font_path` is saved only when it is a chosen
+absolute path, not the bundled default. `font_size` is clamped to `PaneTypes.FONT_SIZE_MIN/MAX`
+(8..32), the same constants the pane panel's spinbox now uses. **Tests:**
+`godot/tests/fixtures/evil_font.tres` is a resource whose embedded GDScript writes
+`GPTY_EXPLOIT_SENTINEL` when loaded; `test_terminal_fonts.gd` proves the fixture really executes (a
+bare `load()` of its `res://` path) so the refusals cannot go vacuous, then asserts the bundled font
+plus no sentinel for `.tres`, a `.tres` disguised as `.ttf`, junk bytes, a missing file and a
+`res://` data value; `test_pane_resource_loading.gd` drives the real restore/spawn paths - a layout
+tile carrying `font_path`/`font_bold_path`/`font_italic_path`, a profile through `ProfileManager`,
+and `settings.json`'s `cfg_font_path` (the live vector) - asserting the bundled faces come out and
+the sentinel never appears; `test_pane_hardening.gd` covers the table
+(unknown/app-only/wrong-type/out-of-range/path rules, spawn keys preserved, drops reported);
+`test_pane_settings.gd` asserts an unlisted property is never assigned and carries the drift guard
+`test_every_pane_type_accepts_the_settings_it_saves` (a saved key without a rule fails it). GUT
+828/828. Docs: SECURITY.md's Files bullet, `agents/security.md`'s layout-restore bullet,
+`agents/gdscript.md`'s settings contract, `agents/pitfalls.md`, `overview/testing.md`. Follow-ups
+queued: an Inspector profile can preconfigure `system_prompt`/`auto_run` (v0.7.1), and a saved
+per-pane font is still overwritten by the global on restore (v0.9.1).
 
 Commits: d17bac7, 01fbe19, 6cecfd6
 
 ## SEC-24
 
-**The GUI's secret and memory are not readable by the programs running in its panes** - probed first, then shipped for Linux, the only platform where the hypothesis holds. **Before** (GUI headless with `GPTY_SECRET` set, one pane, 2026-10-29): `/proc/<gui>/environ` was owned by the user, the pane's `cat` succeeded, and `GPTY_SECRET=probe-secret-value` came back. **After**: the file is root-owned, the pane's read gets `EACCES`, the secret grep counts 0, `/proc/<gui>/maps` is denied - and a child of the pane shell can still read that shell's environment (the pane's own `exec`ed processes return to dumpable), so a user can still debug their own code. Mechanism: `gpty_core::hardening::harden_process()` (`prctl(PR_SET_DUMPABLE, 0)`) from the GDExtension's `InitStage::Core` and the CLI's `main`, so a long-lived client (`gpty mcp`) does not expose the secret either. Cost: a non-dumpable process produces no core dump and cannot be attached to by a same-user debugger or profiler; the documented opt-out is `GPTY_ALLOW_DEBUG=1`, and the probe re-run with it recovers the old behaviour (owner 1000, secret readable), which is also the smoke step's negative control. Residual: the marking lands a moment after `exec`, so a process polling `/proc` while a client starts can still catch that client's secret. macOS: the hypothesis is wrong there - `ptrace(PT_DENY_ATTACH)` denies a debugger but the environment is readable through `KERN_PROCARGS2`/`ps -E` regardless, so nothing is claimed (see Future). Windows: a same-user process reads the environment through `PROCESS_VM_READ`, which the default process DACL grants - the next row. Tests: `hardening` unit tests (the dumpable bit flips and is restored; the opt-out accepts truthy values only) and the smoke's `process hardening` step (the GUI and `gpty mcp` are denied, the pane shell is allowed; it fails under the opt-out). SECURITY.md's Hardening and Known-limitations sections updated in the same commit.
+**The GUI's secret and memory are not readable by the programs running in its panes** - probed
+first, then shipped for Linux, the only platform where the hypothesis holds. **Before** (GUI
+headless with `GPTY_SECRET` set, one pane, 2026-10-29): `/proc/<gui>/environ` was owned by the user,
+the pane's `cat` succeeded, and `GPTY_SECRET=probe-secret-value` came back. **After**: the file is
+root-owned, the pane's read gets `EACCES`, the secret grep counts 0, `/proc/<gui>/maps` is denied -
+and a child of the pane shell can still read that shell's environment (the pane's own `exec`ed
+processes return to dumpable), so a user can still debug their own code. Mechanism:
+`gpty_core::hardening::harden_process()` (`prctl(PR_SET_DUMPABLE, 0)`) from the GDExtension's
+`InitStage::Core` and the CLI's `main`, so a long-lived client (`gpty mcp`) does not expose the
+secret either. Cost: a non-dumpable process produces no core dump and cannot be attached to by a
+same-user debugger or profiler; the documented opt-out is `GPTY_ALLOW_DEBUG=1`, and the probe re-run
+with it recovers the old behaviour (owner 1000, secret readable), which is also the smoke step's
+negative control. Residual: the marking lands a moment after `exec`, so a process polling `/proc`
+while a client starts can still catch that client's secret. macOS: the hypothesis is wrong there -
+`ptrace(PT_DENY_ATTACH)` denies a debugger but the environment is readable through
+`KERN_PROCARGS2`/`ps -E` regardless, so nothing is claimed (see Future). Windows: a same-user
+process reads the environment through `PROCESS_VM_READ`, which the default process DACL grants - the
+next row. Tests: `hardening` unit tests (the dumpable bit flips and is restored; the opt-out accepts
+truthy values only) and the smoke's `process hardening` step (the GUI and `gpty mcp` are denied, the
+pane shell is allowed; it fails under the opt-out). SECURITY.md's Hardening and Known-limitations
+sections updated in the same commit.
 
 Commits: d17bac7, 81878fa
 
 ## SEC-25
 
-**On Windows a program in a pane can read the GUI's environment, so `GPTY_SECRET` gates nothing there** - closed 2026-10-29 on a green CI run (40961912552, commit `ad3e639`), which pins the whole chain on a real Windows runner. **Evidence:** the smoke logs `the GUI: SMOKE_WIN_TOKEN=S-1-5-21-…-500, SMOKE_WIN_DEBUG_PRIV=ENABLED->DISABLED, SMOKE_WIN_VM_READ=DENIED, SMOKE_WIN_QUERY=YES, SMOKE_WIN_TERMINATE=YES` and the same for a long-lived `gpty mcp` client; `rust-windows` runs `cargo test -p gpty-core --test windows_hardening` (1 passed), which asserts the before state (the default DACL grants `PROCESS_VM_READ`), the `ERROR_ACCESS_DENIED` refusal, the `GetSecurityInfo` read-back (one owner ACE, no memory or thread-injection rights) and the kept peer-check and terminate masks. **The first run (40958202900) failed at the probe** (`SMOKE_WIN_VM_READ=ALLOWED`): the runner's job token had `SeDebugPrivilege` **enabled**, and that privilege overrides any process DACL. Both probes now drop it before opening (a normal pane process does not have it enabled) and the success log shows the transition. The ACL is one `AddAccessAllowedAce` for the process owner - `PROCESS_TERMINATE \| PROCESS_QUERY_LIMITED_INFORMATION \| SYNCHRONIZE \| READ_CONTROL`, withholding `PROCESS_VM_READ`/`PROCESS_VM_WRITE`/`PROCESS_VM_OPERATION`/`PROCESS_CREATE_THREAD` - with no SYSTEM entry (`SYSTEM` holds `SeDebugPrivilege`, and a full grant would re-grant everything when gPTY itself runs as SYSTEM). `PROCESS_QUERY_LIMITED_INFORMATION` stays because `win_peer` opens clients with exactly that mask (the smoke's 100-command loop would fail otherwise). Raw `kernel32`/`advapi32` externs; the mask is a `windows_policy` const with a compile-time assertion and a cross-platform unit test; the module and test compile for `x86_64-pc-windows-msvc` with `-Dwarnings`. **Limits (documented in SECURITY.md):** an elevated token that enables `SeDebugPrivilege` bypasses any DACL; debuggers, profilers and the crash-dump path are blocked by design (`GPTY_ALLOW_DEBUG` opts out); the marking lands a moment after `exec`. Crash-dump behavior under the DACL is queued in v0.9.4. **S–M.**
+**On Windows a program in a pane can read the GUI's environment, so `GPTY_SECRET` gates nothing there** - closed
+2026-10-29 on a green CI run (40961912552, commit `ad3e639`), which pins the whole chain on a real
+Windows runner. **Evidence:** the smoke logs
+`the GUI: SMOKE_WIN_TOKEN=S-1-5-21-…-500, SMOKE_WIN_DEBUG_PRIV=ENABLED->DISABLED, SMOKE_WIN_VM_READ=DENIED, SMOKE_WIN_QUERY=YES, SMOKE_WIN_TERMINATE=YES`
+and the same for a long-lived `gpty mcp` client; `rust-windows` runs
+`cargo test -p gpty-core --test windows_hardening` (1 passed), which asserts the before state (the
+default DACL grants `PROCESS_VM_READ`), the `ERROR_ACCESS_DENIED` refusal, the `GetSecurityInfo`
+read-back (one owner ACE, no memory or thread-injection rights) and the kept peer-check and
+terminate masks. **The first run (40958202900) failed at the probe** (`SMOKE_WIN_VM_READ=ALLOWED`):
+the runner's job token had `SeDebugPrivilege` **enabled**, and that privilege overrides any process
+DACL. Both probes now drop it before opening (a normal pane process does not have it enabled) and
+the success log shows the transition. The ACL is one `AddAccessAllowedAce` for the process owner -
+`PROCESS_TERMINATE \| PROCESS_QUERY_LIMITED_INFORMATION \| SYNCHRONIZE \| READ_CONTROL`, withholding
+`PROCESS_VM_READ`/`PROCESS_VM_WRITE`/`PROCESS_VM_OPERATION`/`PROCESS_CREATE_THREAD` - with no SYSTEM
+entry (`SYSTEM` holds `SeDebugPrivilege`, and a full grant would re-grant everything when gPTY
+itself runs as SYSTEM). `PROCESS_QUERY_LIMITED_INFORMATION` stays because `win_peer` opens clients
+with exactly that mask (the smoke's 100-command loop would fail otherwise). Raw
+`kernel32`/`advapi32` externs; the mask is a `windows_policy` const with a compile-time assertion
+and a cross-platform unit test; the module and test compile for `x86_64-pc-windows-msvc` with
+`-Dwarnings`. **Limits (documented in SECURITY.md):** an elevated token that enables
+`SeDebugPrivilege` bypasses any DACL; debuggers, profilers and the crash-dump path are blocked by
+design (`GPTY_ALLOW_DEBUG` opts out); the marking lands a moment after `exec`. Crash-dump behavior
+under the DACL is queued in v0.9.4. **S–M.**
 
 Commits: 81878fa, ad3e639, 1653359, 6cecfd6
 
 ## SEC-26
 
-**Pasted text can close the bracketed-paste bracket early, and the rest reaches the shell as typed input** - closed by one filter for both branches. `TerminalPane._paste_text` drops C0 controls other than newline and tab, plus DEL, and `build_paste_payload` wraps only what survives: a clipboard holding `ESC[201~` can no longer end a bracketed paste and have a newline after it submit the rest as typing, and dropping ESC also keeps every sequence a bracketed application would interpret out of the paste. The filter is a cached PCRE2 pass, not the per-character loop the plain branch used - measured here (Godot 4.7.2 headless): 1 MiB filtered in **6 ms**, where that loop took **34.8 s** (a per-character `+=` on a String is quadratic), so the branch readline makes common is the fast one too. Tests: `test_paste_payload.gd` rewrites the two bracketed cases (a wrapped paste keeps newlines and tabs; ESC, ^C and DEL are dropped on both branches), adds the exploit shape - `echo ok ESC[201~;whoami\nrm -rf ~` arrives with exactly one opener and one terminator, both the pane's own - pins the whole control range for both branches, and drives the same hostile clipboard through the real Ctrl+Shift+V branch; the range test starts at 1 because a Godot String cannot carry a NUL (`String.chr(0)` yields U+FFFD, `get_string_from_utf8` stops at the byte). `test_bracketed_paste.gd` still reads the mode from a real child and calls the real builder. The rule is written into `docs/content/docs/agents/security.md`, and the v0.9.5 file-drop and link items insert through this same function.
+**Pasted text can close the bracketed-paste bracket early, and the rest reaches the shell as typed input** - closed
+by one filter for both branches. `TerminalPane._paste_text` drops C0 controls other than newline and
+tab, plus DEL, and `build_paste_payload` wraps only what survives: a clipboard holding `ESC[201~`
+can no longer end a bracketed paste and have a newline after it submit the rest as typing, and
+dropping ESC also keeps every sequence a bracketed application would interpret out of the paste. The
+filter is a cached PCRE2 pass, not the per-character loop the plain branch used - measured here
+(Godot 4.7.2 headless): 1 MiB filtered in **6 ms**, where that loop took **34.8 s** (a per-character
+`+=` on a String is quadratic), so the branch readline makes common is the fast one too. Tests:
+`test_paste_payload.gd` rewrites the two bracketed cases (a wrapped paste keeps newlines and tabs;
+ESC, ^C and DEL are dropped on both branches), adds the exploit shape -
+`echo ok ESC[201~;whoami\nrm -rf ~` arrives with exactly one opener and one terminator, both the
+pane's own - pins the whole control range for both branches, and drives the same hostile clipboard
+through the real Ctrl+Shift+V branch; the range test starts at 1 because a Godot String cannot carry
+a NUL (`String.chr(0)` yields U+FFFD, `get_string_from_utf8` stops at the byte).
+`test_bracketed_paste.gd` still reads the mode from a real child and calls the real builder. The
+rule is written into `docs/content/docs/agents/security.md`, and the v0.9.5 file-drop and link items
+insert through this same function.
 
 Commits: d17bac7, 93f77cb, 6cecfd6
 
 ## SEC-27
 
-**A profile file can claim to be built in or plugin-provided, and consent is then looked up by the name it claims** - closed by deriving trust from provenance instead of content. `ProfileManager.get_all_profiles()` is the one place that knows where an entry came from and stamps `_origin` (`builtin`/`plugin`/`user`); `load_profiles()` strips `builtin`, `plugin`, `plugin_id`, `revision` and every `_`-prefixed key from user entries; and `Workspace._profile_consented` branches on the stamp only — an unstamped dict reads as user content and takes the plan walk, so a `profiles.json` entry claiming a builtin's name or a plugin id + approved revision gets the dialog that lists its own tiles. Both identity branches now also require the approval to cover the tiles: a builtin needs its name at this version AND every untrusted tile's plan in `builtin_plans(name, version)`; a plugin needs id + revision AND every plan in `plugin_plans(id, revision)`. The plugin record grew the plans it covers (`{revision, plans}` in `trusted.json`; the old bare `id -> revision` string still loads as an approval that covers no plans, so a pre-upgrade record asks once more), and they arrive from the install review: `plugin.rs::profile_plan_keys` sends each profile's exact spawn plans (the Rust mirror of `PaneTypes.tile_plan_key`, pinned by a table test on both sides), `PluginReviewText.plans` flattens the summary, and `approve_plugin` records them. A plugin profile whose tiles changed under the same revision fails the plan check and re-prompts; confirming it extends an already-approved revision's plans with what the dialog showed, and never creates a revision record — only the install review approves a revision. The trust dialog's builtin confirm now records exactly the plans it showed, and `_tiles_untrusted_without_consent` reuses the same `_plans_covered` walk. Tests: `test_profile_manager.gd` (claims stripped, origins stamped, non-owned fields kept); `test_ipc_dispatch_contract.gd` (a user profile claiming each field with a different tile prompts; an unchanged builtin does not; a builtin's changed tiles do; a plugin profile whose tiles changed under the same revision prompts; a legacy planless record prompts; the IPC `layoutLoad` refusal still holds); `test_trusted_store.gd` (new record shape, legacy string form, plan caps and dedupe); `test_plugin_review_text.gd` (plans flattened, deduped, strings only, older summaries record none); `plugin.rs` (plan-key precedence, argv, dedupe, empty profile). The rule is written into `docs/content/docs/agents/security.md` and the plugin guide; the wiki's trust pages say the same. The remaining coverage gap (a workspace restored from an approved plugin profile still prompts, because the workspace has no provenance) is folded into v0.9.5's **Workspaces can be restored**.
+**A profile file can claim to be built in or plugin-provided, and consent is then looked up by the name it claims** - closed
+by deriving trust from provenance instead of content. `ProfileManager.get_all_profiles()` is the one
+place that knows where an entry came from and stamps `_origin` (`builtin`/`plugin`/`user`);
+`load_profiles()` strips `builtin`, `plugin`, `plugin_id`, `revision` and every `_`-prefixed key
+from user entries; and `Workspace._profile_consented` branches on the stamp only — an unstamped dict
+reads as user content and takes the plan walk, so a `profiles.json` entry claiming a builtin's name
+or a plugin id + approved revision gets the dialog that lists its own tiles. Both identity branches
+now also require the approval to cover the tiles: a builtin needs its name at this version AND every
+untrusted tile's plan in `builtin_plans(name, version)`; a plugin needs id + revision AND every plan
+in `plugin_plans(id, revision)`. The plugin record grew the plans it covers (`{revision, plans}` in
+`trusted.json`; the old bare `id -> revision` string still loads as an approval that covers no
+plans, so a pre-upgrade record asks once more), and they arrive from the install review:
+`plugin.rs::profile_plan_keys` sends each profile's exact spawn plans (the Rust mirror of
+`PaneTypes.tile_plan_key`, pinned by a table test on both sides), `PluginReviewText.plans` flattens
+the summary, and `approve_plugin` records them. A plugin profile whose tiles changed under the same
+revision fails the plan check and re-prompts; confirming it extends an already-approved revision's
+plans with what the dialog showed, and never creates a revision record — only the install review
+approves a revision. The trust dialog's builtin confirm now records exactly the plans it showed, and
+`_tiles_untrusted_without_consent` reuses the same `_plans_covered` walk. Tests:
+`test_profile_manager.gd` (claims stripped, origins stamped, non-owned fields kept);
+`test_ipc_dispatch_contract.gd` (a user profile claiming each field with a different tile prompts;
+an unchanged builtin does not; a builtin's changed tiles do; a plugin profile whose tiles changed
+under the same revision prompts; a legacy planless record prompts; the IPC `layoutLoad` refusal
+still holds); `test_trusted_store.gd` (new record shape, legacy string form, plan caps and dedupe);
+`test_plugin_review_text.gd` (plans flattened, deduped, strings only, older summaries record none);
+`plugin.rs` (plan-key precedence, argv, dedupe, empty profile). The rule is written into
+`docs/content/docs/agents/security.md` and the plugin guide; the wiki's trust pages say the same.
+The remaining coverage gap (a workspace restored from an approved plugin profile still prompts,
+because the workspace has no provenance) is folded into v0.9.5's **Workspaces can be restored**.
 
 Commits: d17bac7, 4a50245, 6cecfd6
 
 ## SEC-28
 
-**A profile can preconfigure an Inspector pane to auto-submit captured output under a file-chosen system prompt** - closed by making the pane's aim app-only runtime state. `PaneTypes.INSPECTOR_SETTINGS` marks `system_prompt`, `auto_run` and `accept_concept_captures` `file: false`, so `sanitize_tile`'s SOURCE_FILE pass drops them (named once in the restore notice) while the pane panel's SOURCE_RUNTIME pass still sets them for the live pane; `_get_layout_state` stops saving the trio, so a layout or profile never writes keys the restore path would only refuse; and `auto_run` now defaults to **false** (captures already default off), so a restored pane cannot auto-submit under anything and the first auto-send is always a gesture the user made in the panel. The prompt still reaches the model at session open exactly as before — the difference is that only the user can put one there. Tests: `test_pane_hardening.gd::test_a_file_cannot_aim_an_inspector_pane` pins the file/runtime split for all three keys (and that `backend`, `model` and `command` still pass from a file, argv under the trust gate); `test_layout_restore.gd::test_restore_cannot_aim_an_inspector_pane` drives the real `_restore_into` with a tile carrying the prompt and both switches and reads the rebuilt pane: empty prompt, `auto_run` false, captures false; `test_inspector_pane.gd` pins the fresh-pane defaults and that `_get_layout_state` carries none of the three. Docs: the settings-table rule in `docs/content/docs/agents/security.md`, the runtime-state rule in the Inspector guide, and the wiki's Inspector page (which now says the three are per-session and a file naming them is ignored). The persistence half — a user's own prompt surviving a restart in a user-owned per-pane store — is queued below.
+**A profile can preconfigure an Inspector pane to auto-submit captured output under a file-chosen system prompt** - closed
+by making the pane's aim app-only runtime state. `PaneTypes.INSPECTOR_SETTINGS` marks
+`system_prompt`, `auto_run` and `accept_concept_captures` `file: false`, so `sanitize_tile`'s
+SOURCE_FILE pass drops them (named once in the restore notice) while the pane panel's SOURCE_RUNTIME
+pass still sets them for the live pane; `_get_layout_state` stops saving the trio, so a layout or
+profile never writes keys the restore path would only refuse; and `auto_run` now defaults to
+**false** (captures already default off), so a restored pane cannot auto-submit under anything and
+the first auto-send is always a gesture the user made in the panel. The prompt still reaches the
+model at session open exactly as before — the difference is that only the user can put one there.
+Tests: `test_pane_hardening.gd::test_a_file_cannot_aim_an_inspector_pane` pins the file/runtime
+split for all three keys (and that `backend`, `model` and `command` still pass from a file, argv
+under the trust gate); `test_layout_restore.gd::test_restore_cannot_aim_an_inspector_pane` drives
+the real `_restore_into` with a tile carrying the prompt and both switches and reads the rebuilt
+pane: empty prompt, `auto_run` false, captures false; `test_inspector_pane.gd` pins the fresh-pane
+defaults and that `_get_layout_state` carries none of the three. Docs: the settings-table rule in
+`docs/content/docs/agents/security.md`, the runtime-state rule in the Inspector guide, and the
+wiki's Inspector page (which now says the three are per-session and a file naming them is ignored).
+The persistence half — a user's own prompt surviving a restart in a user-owned per-pane store — is
+queued below.
 
 Commits: 01fbe19, 9a5d540
 
 ## SEC-29
 
-**A program can grow the GUI's memory without bound by opening an escape string and never closing it** - **measured** today, and it is the first of the audit's two untested memory-growth concerns. `TermGrid::feed` hands raw bytes straight to alacritty's processor, whose `vte` parser keeps an OSC string's payload in an unbounded `Vec` (the 1 KiB cap exists only in vte's no_std build). The 64 KiB cap added to `parser.rs` (`MAX_OSC_BYTES`) covers the *line parser* only; the engine feeds the grid its own copy of the bytes (`feed_grid`), so the grid is unprotected. Probe: a grid fed `ESC ] 0 ;` and then 256 MiB of `x` in 1 MiB chunks went 3.3 MB → 68 → 132 → 198 → 260 MB resident, linear with no ceiling, and a closing BEL afterwards parsed normally (growth, not a wedge). `printf '\033]0;'; yes` or a hostile `cat file` in any pane grows the single GUI process until the OS kills it, taking every pane with it; SECURITY.md lists "denial of service that grows memory without a bound" as in scope, and the per-pane flood throttle bounds the output queue, not parser state. The other concern, the title stack, is bounded: 20 000 pushes of ~1 KB titles added 4.1 MB, flat, consistent with alacritty's 4096-entry cap - but each entry can be as long as the OSC allowed, so its real bound is this one. Measured for OSC only: DCS, APC, PM and SOS strings were not tried. Fix: lift the line parser's string-length guard into one small component placed in front of *both* consumers, so there is one implementation and one test; past the budget it closes the string with a BEL, exactly as the line parser does now. Measure DCS/APC/PM/SOS the same way and extend the guard to any that grow. Tests: the guard emits its terminator at the right offset whatever the chunk boundaries (chunk at every offset of a long string), a following `ESC[31mred` parses afterwards, and a grid fed 8 MiB of an unterminated OSC stays within a small fixed bound (a counting allocator in the test). **Shipped 2026-10-30:** the component is `gpty_core::escstring::EscapeStringGuard` with `MAX_ESCAPE_STRING_BYTES` (64 KiB), fed by `LineParser::feed` and `TermGrid::feed`; the line parser's private `osc_len`/`osc_pending_esc`/`MAX_OSC_BYTES` are gone, so one state machine serves both, and its framing now matches vte exactly (ESC inside a string ends it and dispatches, where the old copy kept counting). Re-measured on the fixed build with the same probe: 256 MiB of unclosed OSC payload in 1 MiB feeds left the grid at 6 212 KB → 6 212 KB with scrollback off (3.3 MB → 267 MB before); with the default 10 000-line scrollback it settles at 24 MB, which is the truncated payload landing in history as visible text, not parser state. DCS/APC/PM/SOS measured flat and are deliberately not counted - their payload goes to `Perform::put`, which `alacritty_terminal` discards, so a legitimate large sixel/kitty payload is read and dropped rather than cut mid-string. The title stack turned out to be unreachable from OSC (alacritty 0.26 has no `push_title` dispatch; a 4 096-push × 60 KiB probe stayed at 4.5 MB), so the OSC budget is the real bound. Cost: 5.7 ms per 8 MiB of plain text, ~7% of a feed vte spends 86 ms on. Tests: `crates/gpty-core/tests/escape_string_bound.rs` (counting allocator, all five string kinds at 8 MiB each, the cap, and post-cap SGR recovery), the guard's unit tests (every split offset, all four terminators, ESC inside a string, introducer split across feeds, a bare `]`), and `term::tests::unterminated_osc_is_cut_and_the_next_sequence_parses` for the grid side; the live pane-API smoke gained an `unterminated OSC` step that floods a real pane with 128 KiB after an unclosed `ESC ]` and reads the marker back through `pane-read` (grid rows), which fails with the budget widened - the flood and its marker vanish from the pane. Docs: SECURITY.md "Terminal parsing" and the parser-memory rule in `docs/content/docs/agents/security.md`.
+**A program can grow the GUI's memory without bound by opening an escape string and never closing it** - **measured**
+today, and it is the first of the audit's two untested memory-growth concerns. `TermGrid::feed`
+hands raw bytes straight to alacritty's processor, whose `vte` parser keeps an OSC string's payload
+in an unbounded `Vec` (the 1 KiB cap exists only in vte's no_std build). The 64 KiB cap added to
+`parser.rs` (`MAX_OSC_BYTES`) covers the *line parser* only; the engine feeds the grid its own copy
+of the bytes (`feed_grid`), so the grid is unprotected. Probe: a grid fed `ESC ] 0 ;` and then 256
+MiB of `x` in 1 MiB chunks went 3.3 MB → 68 → 132 → 198 → 260 MB resident, linear with no ceiling,
+and a closing BEL afterwards parsed normally (growth, not a wedge). `printf '\033]0;'; yes` or a
+hostile `cat file` in any pane grows the single GUI process until the OS kills it, taking every pane
+with it; SECURITY.md lists "denial of service that grows memory without a bound" as in scope, and
+the per-pane flood throttle bounds the output queue, not parser state. The other concern, the title
+stack, is bounded: 20 000 pushes of ~1 KB titles added 4.1 MB, flat, consistent with alacritty's
+4096-entry cap - but each entry can be as long as the OSC allowed, so its real bound is this one.
+Measured for OSC only: DCS, APC, PM and SOS strings were not tried. Fix: lift the line parser's
+string-length guard into one small component placed in front of *both* consumers, so there is one
+implementation and one test; past the budget it closes the string with a BEL, exactly as the line
+parser does now. Measure DCS/APC/PM/SOS the same way and extend the guard to any that grow. Tests:
+the guard emits its terminator at the right offset whatever the chunk boundaries (chunk at every
+offset of a long string), a following `ESC[31mred` parses afterwards, and a grid fed 8 MiB of an
+unterminated OSC stays within a small fixed bound (a counting allocator in the test). **Shipped
+2026-10-30:** the component is `gpty_core::escstring::EscapeStringGuard` with
+`MAX_ESCAPE_STRING_BYTES` (64 KiB), fed by `LineParser::feed` and `TermGrid::feed`; the line
+parser's private `osc_len`/`osc_pending_esc`/`MAX_OSC_BYTES` are gone, so one state machine serves
+both, and its framing now matches vte exactly (ESC inside a string ends it and dispatches, where the
+old copy kept counting). Re-measured on the fixed build with the same probe: 256 MiB of unclosed OSC
+payload in 1 MiB feeds left the grid at 6 212 KB → 6 212 KB with scrollback off (3.3 MB → 267 MB
+before); with the default 10 000-line scrollback it settles at 24 MB, which is the truncated payload
+landing in history as visible text, not parser state. DCS/APC/PM/SOS measured flat and are
+deliberately not counted - their payload goes to `Perform::put`, which `alacritty_terminal`
+discards, so a legitimate large sixel/kitty payload is read and dropped rather than cut mid-string.
+The title stack turned out to be unreachable from OSC (alacritty 0.26 has no `push_title` dispatch;
+a 4 096-push × 60 KiB probe stayed at 4.5 MB), so the OSC budget is the real bound. Cost: 5.7 ms per
+8 MiB of plain text, ~7% of a feed vte spends 86 ms on. Tests:
+`crates/gpty-core/tests/escape_string_bound.rs` (counting allocator, all five string kinds at 8 MiB
+each, the cap, and post-cap SGR recovery), the guard's unit tests (every split offset, all four
+terminators, ESC inside a string, introducer split across feeds, a bare `]`), and
+`term::tests::unterminated_osc_is_cut_and_the_next_sequence_parses` for the grid side; the live
+pane-API smoke gained an `unterminated OSC` step that floods a real pane with 128 KiB after an
+unclosed `ESC ]` and reads the marker back through `pane-read` (grid rows), which fails with the
+budget widened - the flood and its marker vanish from the pane. Docs: SECURITY.md "Terminal parsing"
+and the parser-memory rule in `docs/content/docs/agents/security.md`.
 
 Commits: d17bac7, d8c38a9
 
 ## SEC-30
 
-**The escape-string guard never sees a child's OSC on Windows, and nothing said so** - found 2026-10-30 while the `unterminated OSC` smoke step failed three runs in a row on `windows-smoke` (41050887648 and the two after it): the pane showed the typed command's echo and then **no bytes for the whole 60 s budget** (`idle_ms` 60.5-61.4 s, three different launches - a 233-character `-Command` one-liner, a 125-character `-File` call, and a `pane-run` argv launch of the same script), while cmd built-ins in the same session ran normally. The launch was never the problem: ConPTY's host parses the child's output before gPTY does, and it buffers an unterminated OSC until `BEL`/`ST`, so the introducer, the 92 KiB flood and the marker behind it all disappear inside conhost - the grid legitimately receives zero bytes. The guard is therefore unreachable from a pane on Windows (it protects what gPTY's own parser sees, which there is conhost's re-emission), and SECURITY.md's "output cannot grow the GUI without a bound" was written as if every platform fed the guard. Fix, all in this commit: the smoke's Windows arm now launches a real program through the shell as a control (`powershell -NoProfile -Command echo SMOKE_PW_8D1` via `pane-run`, which nothing else covered) and then says in its output that the flood is skipped because ConPTY buffers it, instead of failing with no explanation; and the caveat is written down in SECURITY.md's terminal-parsing guard and the wiki's [[ansi-escape-sequences]] page. The guard's own coverage is unchanged and stays in Rust (`escstring::tests`, every split and chunk size).
+**The escape-string guard never sees a child's OSC on Windows, and nothing said so** - found
+2026-10-30 while the `unterminated OSC` smoke step failed three runs in a row on `windows-smoke`
+(41050887648 and the two after it): the pane showed the typed command's echo and then **no bytes for
+the whole 60 s budget** (`idle_ms` 60.5-61.4 s, three different launches - a 233-character
+`-Command` one-liner, a 125-character `-File` call, and a `pane-run` argv launch of the same
+script), while cmd built-ins in the same session ran normally. The launch was never the problem:
+ConPTY's host parses the child's output before gPTY does, and it buffers an unterminated OSC until
+`BEL`/`ST`, so the introducer, the 92 KiB flood and the marker behind it all disappear inside
+conhost - the grid legitimately receives zero bytes. The guard is therefore unreachable from a pane
+on Windows (it protects what gPTY's own parser sees, which there is conhost's re-emission), and
+SECURITY.md's "output cannot grow the GUI without a bound" was written as if every platform fed the
+guard. Fix, all in this commit: the smoke's Windows arm now launches a real program through the
+shell as a control (`powershell -NoProfile -Command echo SMOKE_PW_8D1` via `pane-run`, which nothing
+else covered) and then says in its output that the flood is skipped because ConPTY buffers it,
+instead of failing with no explanation; and the caveat is written down in SECURITY.md's
+terminal-parsing guard and the wiki's [[ansi-escape-sequences]] page. The guard's own coverage is
+unchanged and stays in Rust (`escstring::tests`, every split and chunk size).
 
 Commits: a2c5002
 
 ## SEC-31
 
-**A store written before the owner-only write path stays world-readable until it is next saved** - observed on the maintainer's machine: `layout.json` and `profiles.json` 0644, written by an older build, while `concepts.json` and the scrollback database written since are 0600 - the database was tightened on every open, the JSON stores were not, so a store that is never saved again kept its old mode, and the engine-created `user://` root was 0755. Closed by repairing at the two moments every store passes through, with **one** implementation: `gpty_core::owner_only` opens the path with `O_NOFOLLOW`, `fstat`s that descriptor, rewrites only a *looser* mode (group/other bits set) of a file **this user owns**, `fchmod`s it to 0600/0700, and skips a symlink, a missing path, the wrong kind and another account's file instead of reaching through. `BasePersistenceManager._read_file` tightens the store it is about to read; `secure_user_root()` runs once at start-up (from the base autoload's `_ready`, creating the root when the engine has not yet) and sets 0700 before any store loads; a refused change is one warning per store per run (`_mode_failure_reported`, cross-referenced in security.md) and the load proceeds. GDScript reaches it through the static `GptyTerminal.secure_store_path` (`crates/gpty-gdext/src/store_api.rs`), and `history::restrict_to_owner` and `vault`'s recovery-copy directory now call the same primitive rather than each calling `chmod` - so there is one chmod path, not three, and the SQLite store gains the symlink and ownership guards it did not have. Tests: `crates/gpty-core/src/owner_only.rs` - `a_loose_file_is_tightened`, `an_owner_only_file_is_left_alone`, `a_symlink_is_skipped_and_its_target_is_untouched`, `a_loose_directory_is_tightened_and_a_private_one_is_not`, `the_wrong_kind_is_left_alone`, `a_missing_path_is_not_a_failure`, `an_unopenable_path_reports_the_reason`; GUT - `test_a_loose_store_is_tightened_when_it_is_read` (contents unchanged), `test_a_symlinked_store_is_not_tightened_through` (the link's target keeps 0644), `test_the_user_root_is_owner_only` (0755 -> 0700), `test_a_refused_repair_is_reported_once_per_store` (ENOTDIR, twice, one record). Measured live (2026-10-31, headless launch in a sandbox): a 0755 user root holding 0644 `settings.json` and `layout.json` came out 0700 / 0600 / 0600 with the settings intact and no warning in the launch log.
+**A store written before the owner-only write path stays world-readable until it is next saved** - observed
+on the maintainer's machine: `layout.json` and `profiles.json` 0644, written by an older build,
+while `concepts.json` and the scrollback database written since are 0600 - the database was
+tightened on every open, the JSON stores were not, so a store that is never saved again kept its old
+mode, and the engine-created `user://` root was 0755. Closed by repairing at the two moments every
+store passes through, with **one** implementation: `gpty_core::owner_only` opens the path with
+`O_NOFOLLOW`, `fstat`s that descriptor, rewrites only a *looser* mode (group/other bits set) of a
+file **this user owns**, `fchmod`s it to 0600/0700, and skips a symlink, a missing path, the wrong
+kind and another account's file instead of reaching through. `BasePersistenceManager._read_file`
+tightens the store it is about to read; `secure_user_root()` runs once at start-up (from the base
+autoload's `_ready`, creating the root when the engine has not yet) and sets 0700 before any store
+loads; a refused change is one warning per store per run (`_mode_failure_reported`, cross-referenced
+in security.md) and the load proceeds. GDScript reaches it through the static
+`GptyTerminal.secure_store_path` (`crates/gpty-gdext/src/store_api.rs`), and
+`history::restrict_to_owner` and `vault`'s recovery-copy directory now call the same primitive
+rather than each calling `chmod` - so there is one chmod path, not three, and the SQLite store gains
+the symlink and ownership guards it did not have. Tests: `crates/gpty-core/src/owner_only.rs` -
+`a_loose_file_is_tightened`, `an_owner_only_file_is_left_alone`,
+`a_symlink_is_skipped_and_its_target_is_untouched`,
+`a_loose_directory_is_tightened_and_a_private_one_is_not`, `the_wrong_kind_is_left_alone`,
+`a_missing_path_is_not_a_failure`, `an_unopenable_path_reports_the_reason`; GUT -
+`test_a_loose_store_is_tightened_when_it_is_read` (contents unchanged),
+`test_a_symlinked_store_is_not_tightened_through` (the link's target keeps 0644),
+`test_the_user_root_is_owner_only` (0755 -> 0700),
+`test_a_refused_repair_is_reported_once_per_store` (ENOTDIR, twice, one record). Measured live
+(2026-10-31, headless launch in a sandbox): a 0755 user root holding 0644 `settings.json` and
+`layout.json` came out 0700 / 0600 / 0600 with the settings intact and no warning in the launch log.
 
 Commits: d17bac7, 517ea9f
 
 ## SEC-32
 
-**What gets logged is unwritten policy, and agent-backend stderr is logged verbatim** - `gpty-ai` logged each backend stderr line at `warn` (`cli.rs`'s `"cli backend stderr: {line}"` per line, `omp.rs` a whole 4 KiB chunk per read), and those programs can print prompts, paths or credentials in an error; the other 95 `log::*!` calls carried ids, paths, counts and error discriminants, but nothing said so or failed if that changed; Godot's file logging was assumed off, while the `logs` directory under the user data directory existed at 0755 with 0644 files. Closed in three parts. (1) **The rule** is now written down - AGENTS.md's *Logging* section, SECURITY.md's threats-and-limitations list, and the security guide's implementation rules: pane output, a captured buffer, injected or pasted text, env values and backend stderr are never logged above `debug` and never written to a file by default, while ids, paths, counts, PIDs, discriminants and mode bits are fine. (2) **One stderr path**: `gpty_ai::logtext::sanitize`/`spawn_drain` strip escape sequences (CSI, OSC, the two-character forms) and control characters, bound each line to `MAX_LINE_BYTES` (2048) with a `[truncated]` marker, log at `debug`, and fill the bounded `StderrTail` (20 lines) that rides the message a user sees - `cli` answers a non-zero exit with it, and `omp`'s `ready`/negotiation handshake moved into `handshake()` so a start failure kills the child, waits up to 500 ms for the drain and appends the tail (`timeout waiting for omp ready (omp stderr: ...)`) instead of only the timeout. Both backends share that one drain; the second implementation is gone. (3) **Files**: `project.godot` ships with `debug/file_logging` unset, so no log file is written by default; `BasePersistenceManager.secure_user_root` also repairs `user://logs` to 0700 and its `*.log` files to 0600 (bounded to 32 files) through the owner-only primitive the stores use. The existing logs were opened once and recorded: `~/.local/share/godot/app_userdata/gPTY/logs` held five files (0644, in a 0755 directory) - engine banners, the four `Unicode parsing error ... Unexpected NUL character` lines, and stdout from scratch probe scripts (`in_len=17 out_len=14 out=a...`, `loop_ms=34773`), with no pane output, no credential and no argv. Tests: `scripts/check-log-hygiene` (a new `ci-check` step, fast mode) - shown failing on `{line}` and on `{frame.text}`/`{body.prompt}` and passing with `// log-ok:`; `logtext.rs` - `plain_text_is_kept`, `escape_sequences_and_control_characters_are_removed`, `a_long_line_is_truncated_at_the_cap`, `truncation_lands_on_a_char_boundary`, `the_tail_is_bounded_and_ordered`, `an_empty_tail_summarizes_to_nothing`; end-to-end - `cli_stderr_reaches_the_failure_message_stripped_and_bounded` (a coloured line and a 4000-byte line: the text survives, the ESC does not, the cut is marked, the message is under 3000 bytes) and `omp_start_failure_carries_the_child_stderr` (a child that never says ready answers with its own stripped stderr); GUT - `test_the_log_directory_is_tightened_with_the_root` (0755/0644 -> 0700/0600, contents unchanged). Measured live (2026-10-31, headless launch with `--log-file` inside the sandbox): the log directory came out 0700 and `godot.log` 0600. A turn that fails *after* the handshake still reports only the protocol error - queued in v0.13.0.
+**What gets logged is unwritten policy, and agent-backend stderr is logged verbatim** - `gpty-ai`
+logged each backend stderr line at `warn` (`cli.rs`'s `"cli backend stderr: {line}"` per line,
+`omp.rs` a whole 4 KiB chunk per read), and those programs can print prompts, paths or credentials
+in an error; the other 95 `log::*!` calls carried ids, paths, counts and error discriminants, but
+nothing said so or failed if that changed; Godot's file logging was assumed off, while the `logs`
+directory under the user data directory existed at 0755 with 0644 files. Closed in three parts. (1)
+**The rule** is now written down - AGENTS.md's *Logging* section, SECURITY.md's
+threats-and-limitations list, and the security guide's implementation rules: pane output, a captured
+buffer, injected or pasted text, env values and backend stderr are never logged above `debug` and
+never written to a file by default, while ids, paths, counts, PIDs, discriminants and mode bits are
+fine. (2) **One stderr path**: `gpty_ai::logtext::sanitize`/`spawn_drain` strip escape sequences
+(CSI, OSC, the two-character forms) and control characters, bound each line to `MAX_LINE_BYTES`
+(2048) with a `[truncated]` marker, log at `debug`, and fill the bounded `StderrTail` (20 lines)
+that rides the message a user sees - `cli` answers a non-zero exit with it, and `omp`'s
+`ready`/negotiation handshake moved into `handshake()` so a start failure kills the child, waits up
+to 500 ms for the drain and appends the tail (`timeout waiting for omp ready (omp stderr: ...)`)
+instead of only the timeout. Both backends share that one drain; the second implementation is gone.
+(3) **Files**: `project.godot` ships with `debug/file_logging` unset, so no log file is written by
+default; `BasePersistenceManager.secure_user_root` also repairs `user://logs` to 0700 and its
+`*.log` files to 0600 (bounded to 32 files) through the owner-only primitive the stores use. The
+existing logs were opened once and recorded: `~/.local/share/godot/app_userdata/gPTY/logs` held five
+files (0644, in a 0755 directory) - engine banners, the four
+`Unicode parsing error ... Unexpected NUL character` lines, and stdout from scratch probe scripts
+(`in_len=17 out_len=14 out=a...`, `loop_ms=34773`), with no pane output, no credential and no argv.
+Tests: `scripts/check-log-hygiene` (a new `ci-check` step, fast mode) - shown failing on `{line}`
+and on `{frame.text}`/`{body.prompt}` and passing with `// log-ok:`; `logtext.rs` -
+`plain_text_is_kept`, `escape_sequences_and_control_characters_are_removed`,
+`a_long_line_is_truncated_at_the_cap`, `truncation_lands_on_a_char_boundary`,
+`the_tail_is_bounded_and_ordered`, `an_empty_tail_summarizes_to_nothing`; end-to-end -
+`cli_stderr_reaches_the_failure_message_stripped_and_bounded` (a coloured line and a 4000-byte line:
+the text survives, the ESC does not, the cut is marked, the message is under 3000 bytes) and
+`omp_start_failure_carries_the_child_stderr` (a child that never says ready answers with its own
+stripped stderr); GUT - `test_the_log_directory_is_tightened_with_the_root` (0755/0644 -> 0700/0600,
+contents unchanged). Measured live (2026-10-31, headless launch with `--log-file` inside the
+sandbox): the log directory came out 0700 and `godot.log` 0600. A turn that fails *after* the
+handshake still reports only the protocol error - queued in v0.13.0.
 
 Commits: d17bac7, 517ea9f
 
 ## SEC-33
 
-**A workspace file can choose a restored terminal's directory without a trust decision** - closed 2026-10-31. A workspace directory is a trust input only where the plan is already untrusted. `PaneTypes.tile_plan_key(td, cwd)` appends the directory after U+001E (`WorkspaceStore.sanitize_cwd` refuses control bytes, so the last separator always opens the directory and an argv ending in an absolute path cannot serialize as one), `Workspace._spawn_cwd` supplies the directory actually handed to the spawn (sanitized and existing; `""` for a relative or stale value, which is also the backend's fallback), and both gates pass it - `_init_workspaces` per entry and `_profile_consented` for the active workspace, whose new-workspace sibling inherits the same directory. `_remember_profile_consent` records the directory-qualified keys the dialog showed, so editing `workspaces.json` to keep an approved `omp update && exec omp` but move it to another directory re-prompts; the Workspace Trust dialogs now name the directory (grouped per workspace in the multi-workspace dialog) and the folder picker asks when `_tiles_untrusted_without_consent(tiles, new_dir)` refuses, cancelling the change otherwise. Plain shells keep restoring silently in a file-supplied directory (a directory is not executable; asking every launch would train the user to dismiss the dialog) - the accepted exposure now sits in SECURITY.md with its same-UID/synced-file reachability. A tile, profile or plugin still cannot carry a cwd, and the plugin branch of the consent check stays program+argv because the install review runs before any workspace directory exists (a plugin is arbitrary code either way). Tests: `test_plan_key_carries_the_approved_directory` (unit) and `godot/tests/integration/test_workspace_cwd_trust.gd` - a crafted directory prompts and is named, an approved plan does not cover another directory, a plain shell restores silently there, the picker asks only for an untrusted workspace and cancel keeps the old directory, a picked directory persists and restores, a profile tile cannot choose one; the existing picker and restore tests still pass.
+**A workspace file can choose a restored terminal's directory without a trust decision** - closed
+2026-10-31. A workspace directory is a trust input only where the plan is already untrusted.
+`PaneTypes.tile_plan_key(td, cwd)` appends the directory after U+001E (`WorkspaceStore.sanitize_cwd`
+refuses control bytes, so the last separator always opens the directory and an argv ending in an
+absolute path cannot serialize as one), `Workspace._spawn_cwd` supplies the directory actually
+handed to the spawn (sanitized and existing; `""` for a relative or stale value, which is also the
+backend's fallback), and both gates pass it - `_init_workspaces` per entry and `_profile_consented`
+for the active workspace, whose new-workspace sibling inherits the same directory.
+`_remember_profile_consent` records the directory-qualified keys the dialog showed, so editing
+`workspaces.json` to keep an approved `omp update && exec omp` but move it to another directory
+re-prompts; the Workspace Trust dialogs now name the directory (grouped per workspace in the
+multi-workspace dialog) and the folder picker asks when
+`_tiles_untrusted_without_consent(tiles, new_dir)` refuses, cancelling the change otherwise. Plain
+shells keep restoring silently in a file-supplied directory (a directory is not executable; asking
+every launch would train the user to dismiss the dialog) - the accepted exposure now sits in
+SECURITY.md with its same-UID/synced-file reachability. A tile, profile or plugin still cannot carry
+a cwd, and the plugin branch of the consent check stays program+argv because the install review runs
+before any workspace directory exists (a plugin is arbitrary code either way). Tests:
+`test_plan_key_carries_the_approved_directory` (unit) and
+`godot/tests/integration/test_workspace_cwd_trust.gd` - a crafted directory prompts and is named, an
+approved plan does not cover another directory, a plain shell restores silently there, the picker
+asks only for an untrusted workspace and cancel keeps the old directory, a picked directory persists
+and restores, a profile tile cannot choose one; the existing picker and restore tests still pass.
 
 Commits: 4d11883, 707258b, ed9da70
 
 ## SEC-34
 
-**Re-run the audit on the fix build and cover what it did not reach** - closed 2026-10-31. The five proofs of concept are now one re-runnable script, `scripts/audit-probes.py` (`--only <name>`), and all six probes pass on this build. **two-pane-control** launched with `XDG_RUNTIME_DIR` and no `GPTY_SECRET` and ran the real CLI *inside pane A*: it listed all three panes and injected into pane B, both exit 0 - the documented limitation, unchanged, and now measured instead of asserted. **crafted-layout-resource** proved the fixture live first (a bare `load()` of `evil_font.tres` wrote the sentinel), then restored four legacy-`layout.json` tiles aiming `font_path` and `color_scheme_path` at it: four panes restored, no sentinel. **paste-early-close** fed `safe ESC[201~ rm -rf / ^C x DEL` to the shipped `build_paste_payload` and got `\x1b[200~safe[201~rm -rf /x\x1b[201~`: no ESC from the clipboard, one terminator, and it is the pane's own. **osc-flood** ran the counting-allocator bound test (2 passed) and a live 64 MiB unterminated OSC through a pane: **21.6 MiB** GUI growth against a 32 MiB budget, and the shell returned to a prompt. **malformed-batch** measured two shapes: three frames in one write get **one** response and a closed connection (queued as its own row below), while three concurrent requests with the middle `params: [1,2]` get **three** answers, the middle `-32602` naming params and the request behind it served. **Coverage the audit left out:** Windows named-pipe permissions were re-read on this host (executing them is `windows-smoke`'s job) - no security descriptor is passed, so the token's default DACL applies; the peer check runs before any parse on both the control and the event pipe; every `peer_uid_matches` arm fails closed; and the hardening DACL withholds memory rights while keeping exactly `PROCESS_QUERY_LIMITED_INFORMATION`, the mask the pipe gate opens with. The plugin install path is exercised offline: a traversal id is refused (`manifest.id: must be owner/name`), an oversized tile array is refused (`at most 64 entries`), `plugin install file://...` refuses the target before cloning, and nothing is written outside the install roots - the git-clone path remains CI-only. **AI backends:** two real memory defects, both fixed - the OMP stream read its child's stdout with no line bound at all (the CLI bridge had 64 KiB) and assembled one answer without a total cap; both backends now read through one `gpty_ai::frame::read_frame` (three tests), and an answer is capped at 8 MiB. **Yanked crates:** `cargo audit` is clean (1395 advisories loaded, exit 0), and every registry package in `Cargo.lock` was queried against crates.io on 2026-10-31: **none yanked**, 179 registry packages checked, 0 unchecked. **Post-audit surfaces:** three media holes closed - a decoded frame past 4096 px per side and one past 8 channels are now refused on the frame rather than only on the probe, and the resampler's `samples x target_rate / source_rate` output is bounded by `MAX_AUDIO_FRAME_SAMPLES` before allocation (a 4 KiB file claiming 1 Hz asked for about 780 MB per packet); a decode-worker panic now fails the session instead of leaving it on "opening", with four unit tests including a positive 8 kHz case. **Vault verbs:** the review decided the audit's open question by implementing the proposal - `vaultSearch`/`vaultRead`/`vaultWeight` answer only inside a root in `user://vaults.json`, written solely by the pane settings UI, with the shipped knowledge base registering itself; the native handlers read an in-process mirror and refuse with `-32000` plus `data.code = "not_registered"`, and `vaultWeight` consults the same list before writing `link_weights.json`. **Close-confirmation:** every GUI path routes through the ask and the dialog text is app-owned; one gap (a dead I/O task with a live child) was queued below and is closed there. Tests: `scripts/audit-probes.py` 6/6, `cargo test -p gpty-media` and `-p gpty-ai` green (four and three new), `cargo test -p gpty-gdext vault_ipc` 7 passed, GUT 902 passing. Not run on this host: the Windows runtime itself, and fuzzing (the v0.7.2 fuzz row names these targets).
+**Re-run the audit on the fix build and cover what it did not reach** - closed 2026-10-31. The five
+proofs of concept are now one re-runnable script, `scripts/audit-probes.py` (`--only <name>`), and
+all six probes pass on this build. **two-pane-control** launched with `XDG_RUNTIME_DIR` and no
+`GPTY_SECRET` and ran the real CLI *inside pane A*: it listed all three panes and injected into pane
+B, both exit 0 - the documented limitation, unchanged, and now measured instead of asserted.
+**crafted-layout-resource** proved the fixture live first (a bare `load()` of `evil_font.tres` wrote
+the sentinel), then restored four legacy-`layout.json` tiles aiming `font_path` and
+`color_scheme_path` at it: four panes restored, no sentinel. **paste-early-close** fed
+`safe ESC[201~ rm -rf / ^C x DEL` to the shipped `build_paste_payload` and got
+`\x1b[200~safe[201~rm -rf /x\x1b[201~`: no ESC from the clipboard, one terminator, and it is the
+pane's own. **osc-flood** ran the counting-allocator bound test (2 passed) and a live 64 MiB
+unterminated OSC through a pane: **21.6 MiB** GUI growth against a 32 MiB budget, and the shell
+returned to a prompt. **malformed-batch** measured two shapes: three frames in one write get **one**
+response and a closed connection (queued as its own row below), while three concurrent requests with
+the middle `params: [1,2]` get **three** answers, the middle `-32602` naming params and the request
+behind it served. **Coverage the audit left out:** Windows named-pipe permissions were re-read on
+this host (executing them is `windows-smoke`'s job) - no security descriptor is passed, so the
+token's default DACL applies; the peer check runs before any parse on both the control and the event
+pipe; every `peer_uid_matches` arm fails closed; and the hardening DACL withholds memory rights
+while keeping exactly `PROCESS_QUERY_LIMITED_INFORMATION`, the mask the pipe gate opens with. The
+plugin install path is exercised offline: a traversal id is refused
+(`manifest.id: must be owner/name`), an oversized tile array is refused (`at most 64 entries`),
+`plugin install file://...` refuses the target before cloning, and nothing is written outside the
+install roots - the git-clone path remains CI-only. **AI backends:** two real memory defects, both
+fixed - the OMP stream read its child's stdout with no line bound at all (the CLI bridge had 64 KiB)
+and assembled one answer without a total cap; both backends now read through one
+`gpty_ai::frame::read_frame` (three tests), and an answer is capped at 8 MiB. **Yanked crates:**
+`cargo audit` is clean (1395 advisories loaded, exit 0), and every registry package in `Cargo.lock`
+was queried against crates.io on 2026-10-31: **none yanked**, 179 registry packages checked, 0
+unchecked. **Post-audit surfaces:** three media holes closed - a decoded frame past 4096 px per side
+and one past 8 channels are now refused on the frame rather than only on the probe, and the
+resampler's `samples x target_rate / source_rate` output is bounded by `MAX_AUDIO_FRAME_SAMPLES`
+before allocation (a 4 KiB file claiming 1 Hz asked for about 780 MB per packet); a decode-worker
+panic now fails the session instead of leaving it on "opening", with four unit tests including a
+positive 8 kHz case. **Vault verbs:** the review decided the audit's open question by implementing
+the proposal - `vaultSearch`/`vaultRead`/`vaultWeight` answer only inside a root in
+`user://vaults.json`, written solely by the pane settings UI, with the shipped knowledge base
+registering itself; the native handlers read an in-process mirror and refuse with `-32000` plus
+`data.code = "not_registered"`, and `vaultWeight` consults the same list before writing
+`link_weights.json`. **Close-confirmation:** every GUI path routes through the ask and the dialog
+text is app-owned; one gap (a dead I/O task with a live child) was queued below and is closed there.
+Tests: `scripts/audit-probes.py` 6/6, `cargo test -p gpty-media` and `-p gpty-ai` green (four and
+three new), `cargo test -p gpty-gdext vault_ipc` 7 passed, GUT 902 passing. Not run on this host:
+the Windows runtime itself, and fuzzing (the v0.7.2 fuzz row names these targets).
 
 Commits: d17bac7, e158f5f, 9630fb5
 
 ## SEC-35
 
-**A file swapped for a blocking node after the media path check freezes the session** - closed 2026-11-01 by giving FFmpeg a descriptor instead of a path. **Reproduced first** (Linux, pinned FFmpeg 9.0.2, headless): a FIFO planted at the path stayed inside `open(2)` for the whole 2 s probe budget - `validate_path` had already passed when the name was a regular file - and only a writer appearing released it; the 10 s open deadline cannot fire inside a blocked syscall, and `MediaSession::drop` joins that worker, so the Godot thread waited with it. **Fix:** a new `crates/gpty-media/src/source.rs` is the one place a path becomes bytes. `MediaFile::open` opens the descriptor itself (`O_NONBLOCK \| O_NOFOLLOW \| O_CLOEXEC`), verifies **that descriptor** with `fstat` (`File::metadata`) and refuses anything non-regular; a symlink to a regular file stays playable by resolving the link once and opening its target under the same flags. `InputSource` then builds the `AVFormatContext` with a custom `AVIOContext` (`avio_alloc_context` over read/seek callbacks on the descriptor, `AVFMT_FLAG_CUSTOM_IO`) and `avformat_open_input` sees only a probing hint, never a path to open - so a name swapped for a FIFO, device or a different file after the check changes nothing about what the session reads. The open-deadline closure is now owned by `source::Interrupt` and freed with the context. Windows has no FIFO (a plain open cannot wait for a writer); there the `\\.\` device namespace is refused by name because a device open can block in a driver, and the descriptor is still what is verified and read. **Tests:** `source::tests::a_swapped_fifo_never_reaches_ffmpeg` renames a FIFO over the path after the descriptor open and still gets `wav` + a stream - a regression that reopens the path blocks and trips its 5 s budget - plus `a_fifo_is_refused_without_blocking`, `a_symlink_to_a_regular_file_is_playable`, and the public gates `a_fifo_at_the_media_path_is_refused_without_waiting` (< 1 s) and `a_symlink_to_a_regular_file_is_playable` in `tests/session.rs`; the 17-test media suite (format matrix, decode, seek, audio+video) runs over the custom AVIO, and `tests/binding_rules.rs` now bans `input_with_interrupt`, `format::input(` and `format::input_with_dictionary(` so no module can reintroduce a path-based open.
+**A file swapped for a blocking node after the media path check freezes the session** - closed
+2026-11-01 by giving FFmpeg a descriptor instead of a path. **Reproduced first** (Linux, pinned
+FFmpeg 9.0.2, headless): a FIFO planted at the path stayed inside `open(2)` for the whole 2 s probe
+budget - `validate_path` had already passed when the name was a regular file - and only a writer
+appearing released it; the 10 s open deadline cannot fire inside a blocked syscall, and
+`MediaSession::drop` joins that worker, so the Godot thread waited with it. **Fix:** a new
+`crates/gpty-media/src/source.rs` is the one place a path becomes bytes. `MediaFile::open` opens the
+descriptor itself (`O_NONBLOCK \| O_NOFOLLOW \| O_CLOEXEC`), verifies **that descriptor** with
+`fstat` (`File::metadata`) and refuses anything non-regular; a symlink to a regular file stays
+playable by resolving the link once and opening its target under the same flags. `InputSource` then
+builds the `AVFormatContext` with a custom `AVIOContext` (`avio_alloc_context` over read/seek
+callbacks on the descriptor, `AVFMT_FLAG_CUSTOM_IO`) and `avformat_open_input` sees only a probing
+hint, never a path to open - so a name swapped for a FIFO, device or a different file after the
+check changes nothing about what the session reads. The open-deadline closure is now owned by
+`source::Interrupt` and freed with the context. Windows has no FIFO (a plain open cannot wait for a
+writer); there the `\\.\` device namespace is refused by name because a device open can block in a
+driver, and the descriptor is still what is verified and read. **Tests:**
+`source::tests::a_swapped_fifo_never_reaches_ffmpeg` renames a FIFO over the path after the
+descriptor open and still gets `wav` + a stream - a regression that reopens the path blocks and
+trips its 5 s budget - plus `a_fifo_is_refused_without_blocking`,
+`a_symlink_to_a_regular_file_is_playable`, and the public gates
+`a_fifo_at_the_media_path_is_refused_without_waiting` (< 1 s) and
+`a_symlink_to_a_regular_file_is_playable` in `tests/session.rs`; the 17-test media suite (format
+matrix, decode, seek, audio+video) runs over the custom AVIO, and `tests/binding_rules.rs` now bans
+`input_with_interrupt`, `format::input(` and `format::input_with_dictionary(` so no module can
+reintroduce a path-based open.
 
 Commits: e158f5f, 3d33b77
 
 ## SEC-36
 
-**Every media open leaks the interrupt callback's closure** - found 2026-10-31 in the post-audit review; closed 2026-11-01 by the descriptor handoff above, without vendoring the binding. The leak was in `ffmpeg-the-third` 6.0.0's `util/interrupt.rs` (`Box::into_raw` in `new`, no reclaim), reached through `format::input_with_interrupt`, which was `gpty-media`'s only open call. The crate now builds its own context: `source::Interrupt` boxes the deadline closure (`Box<Box<dyn FnMut() -> bool>>`, because FFmpeg stores a thin `*mut c_void`), and its `Drop` reclaims it after the `AVFormatContext` that holds a copy of the callback struct is freed (`InputSource` declares `input` before `_io`, so the input closes first). Nothing in the workspace calls `input_with_interrupt` any more, and `tests/binding_rules.rs` bans it in every module that touches FFmpeg, so a later edit cannot bring the leak back; the decision and its reason are recorded in `source.rs`, `rust.md` and that test.
+**Every media open leaks the interrupt callback's closure** - found 2026-10-31 in the post-audit
+review; closed 2026-11-01 by the descriptor handoff above, without vendoring the binding. The leak
+was in `ffmpeg-the-third` 6.0.0's `util/interrupt.rs` (`Box::into_raw` in `new`, no reclaim),
+reached through `format::input_with_interrupt`, which was `gpty-media`'s only open call. The crate
+now builds its own context: `source::Interrupt` boxes the deadline closure
+(`Box<Box<dyn FnMut() -> bool>>`, because FFmpeg stores a thin `*mut c_void`), and its `Drop`
+reclaims it after the `AVFormatContext` that holds a copy of the callback struct is freed
+(`InputSource` declares `input` before `_io`, so the input closes first). Nothing in the workspace
+calls `input_with_interrupt` any more, and `tests/binding_rules.rs` bans it in every module that
+touches FFmpeg, so a later edit cannot bring the leak back; the decision and its reason are recorded
+in `source.rs`, `rust.md` and that test.
 
 Commits: e158f5f, 3d33b77
 
 ## SEC-37
 
-**The updated RustSec database fails the audit on `pulldown-cmark`'s wikilink parser** - found 2026-11-02 when `ci-check`'s `cargo audit --deny warnings` loaded 1402 advisories instead of the 1395 it had the day before and failed on RUSTSEC-2026-0433 (published 2026-10-28): quadratic parsing of nested image wikilinks, fixed in 0.13.6. Not reachable in this app - the Markdown renderer enables `ENABLE_STRIKETHROUGH`, `ENABLE_TABLES`, `ENABLE_TASKLISTS` and `ENABLE_GFM`, never `ENABLE_WIKILINKS` (wikilinks are pre-substituted with opaque sentinels before the parser sees them) - but the audit gate denies warnings, so no release could pass with it. Bumped `pulldown-cmark` to 0.13.6 in `gpty-gdext` and in both lockfiles (the workspace and the fuzz crate's own), `cargo audit --deny warnings` is clean, and the `markdown` fuzz target rebuilt against 0.13.6 and ran ten seconds without a finding. This class only appears when the advisory database moves, so the audit's dependency on a fresh database is what made it visible.
+**The updated RustSec database fails the audit on `pulldown-cmark`'s wikilink parser** - found
+2026-11-02 when `ci-check`'s `cargo audit --deny warnings` loaded 1402 advisories instead of the
+1395 it had the day before and failed on RUSTSEC-2026-0433 (published 2026-10-28): quadratic parsing
+of nested image wikilinks, fixed in 0.13.6. Not reachable in this app - the Markdown renderer
+enables `ENABLE_STRIKETHROUGH`, `ENABLE_TABLES`, `ENABLE_TASKLISTS` and `ENABLE_GFM`, never
+`ENABLE_WIKILINKS` (wikilinks are pre-substituted with opaque sentinels before the parser sees them)
+- but the audit gate denies warnings, so no release could pass with it. Bumped `pulldown-cmark` to
+0.13.6 in `gpty-gdext` and in both lockfiles (the workspace and the fuzz crate's own),
+`cargo audit --deny warnings` is clean, and the `markdown` fuzz target rebuilt against 0.13.6 and
+ran ten seconds without a finding. This class only appears when the advisory database moves, so the
+audit's dependency on a fresh database is what made it visible.
 
 Commits: 39085e9
 
 ## SEC-38
 
-**The Rust code that reads attacker-controlled bytes is exercised only by hand-written cases** - the unbounded OSC buffer in the grid was found by reading the code, not by a tool, and a parser that has had one such bug probably has another. Shipped 2026-11-01: `fuzz/` is its own workspace (`fuzz/Cargo.toml` with an empty `[workspace]`, so the stable build and its lockfile never see it) with seven cargo-fuzz targets: `grid_feed` (`TermGrid::feed` plus `plain_text`), `line_parser` (the capture-side `LineParser::feed`), `ipc_request` (newline framing plus `serde_json` into `gpty_ipc::protocol::Request`), `vault_links` (`parse_links`, then `resolve_target`/`retarget`), `markdown` (both renderers, after `gpty-gdext` gained an `rlib` and exported the module), `ai_frame` (`gpty_ai::frame::read_frame`, made `pub` for this) and `media_probe` (`gpty_media::probe` over bytes written to a temp `.mkv`, with FFmpeg's per-input container logs silenced). Twenty-three named seeds are committed from the byte strings the existing tests use; libFuzzer's discovered units are 40-hex names and stay out of git. `ci.yml` gained a `fuzz-build` job that installs nightly plus `cargo-fuzz` 0.13.2 (both cached) and runs `cargo fuzz build` on every pull request, so a target that stops compiling fails the change that did it; the new `fuzz.yml` gives each target `-max_total_time=300`, `-max_len=65536`, `-timeout=10` and `-rss_limit_mb=2048` nightly and on dispatch, and uploads `fuzz/artifacts` on failure. Verified locally: all seven build; ten-second runs each executed 16k-853k inputs with no crash (grid 16k, markdown 88k, media 170k, vault 277k, parser 281k, ipc 706k, ai 853k); the media target found a real leak in its first ten seconds (its own row above). The OSC bound's regression test stays `crates/gpty-core/tests/escape_string_bound.rs`, whose measured pre-fix figure is 3.3 MB to 267 MB for 256 × 1 MiB of OSC: libFuzzer's RSS limit cannot see that class because the input and the buffer are the same size, so the target's job there is panics and hangs while the bound test owns the allocation. The v0.13 FFI row still owns fuzzing across the GDExtension boundary itself.
+**The Rust code that reads attacker-controlled bytes is exercised only by hand-written cases** - the
+unbounded OSC buffer in the grid was found by reading the code, not by a tool, and a parser that has
+had one such bug probably has another. Shipped 2026-11-01: `fuzz/` is its own workspace
+(`fuzz/Cargo.toml` with an empty `[workspace]`, so the stable build and its lockfile never see it)
+with seven cargo-fuzz targets: `grid_feed` (`TermGrid::feed` plus `plain_text`), `line_parser` (the
+capture-side `LineParser::feed`), `ipc_request` (newline framing plus `serde_json` into
+`gpty_ipc::protocol::Request`), `vault_links` (`parse_links`, then `resolve_target`/`retarget`),
+`markdown` (both renderers, after `gpty-gdext` gained an `rlib` and exported the module), `ai_frame`
+(`gpty_ai::frame::read_frame`, made `pub` for this) and `media_probe` (`gpty_media::probe` over
+bytes written to a temp `.mkv`, with FFmpeg's per-input container logs silenced). Twenty-three named
+seeds are committed from the byte strings the existing tests use; libFuzzer's discovered units are
+40-hex names and stay out of git. `ci.yml` gained a `fuzz-build` job that installs nightly plus
+`cargo-fuzz` 0.13.2 (both cached) and runs `cargo fuzz build` on every pull request, so a target
+that stops compiling fails the change that did it; the new `fuzz.yml` gives each target
+`-max_total_time=300`, `-max_len=65536`, `-timeout=10` and `-rss_limit_mb=2048` nightly and on
+dispatch, and uploads `fuzz/artifacts` on failure. Verified locally: all seven build; ten-second
+runs each executed 16k-853k inputs with no crash (grid 16k, markdown 88k, media 170k, vault 277k,
+parser 281k, ipc 706k, ai 853k); the media target found a real leak in its first ten seconds (its
+own row above). The OSC bound's regression test stays
+`crates/gpty-core/tests/escape_string_bound.rs`, whose measured pre-fix figure is 3.3 MB to 267 MB
+for 256 × 1 MiB of OSC: libFuzzer's RSS limit cannot see that class because the input and the buffer
+are the same size, so the target's job there is panics and hangs while the bound test owns the
+allocation. The v0.13 FFI row still owns fuzzing across the GDExtension boundary itself.
 
 Commits: d17bac7, 11f5274, d8c38a9, 7a6395b, 39085e9, 6cecfd6
 
 ## SEC-39
 
-**`unsafe` is not fenced, and only the media path guards against a panic crossing the GDExtension boundary** - measured by search: outside tests, `unsafe` appears in `gpty-core` (`cli.rs`, `pty.rs`: `libc` calls such as `geteuid`, `kill` and one block in the spawn path), `gpty-ai/binary.rs` (`geteuid`), `gpty-ipc/server.rs` (peer credentials and the Windows token and pipe calls) and `gpty-gdext/lib.rs`; `gpty-media` and `gpty-cli` have none outside tests. No crate declares that, so a later change can add one unnoticed. `catch_unwind` appears only in `gpty-gdext/media_api.rs` and the engine's panic probe; measured on godot-core 0.5.5, that is not the entry boundary: every GDScript-callable method varcall and virtual callback is already wrapped in `handle_panic` (godot-core 0.5.5's varcall wrapper), which catches a panic and reports it to Godot, so no caller-supplied entry unwinds into the engine. The media path's own catch covers its decode worker, which never crosses the FFI. That half was already closed; the fence this row adds is the lint one. Shipped 2026-11-02: the fence is crate-level. `#![deny(unsafe_op_in_unsafe_fn)]` and `#![deny(clippy::undocumented_unsafe_blocks)]` are declared by `gpty-core`, `gpty-ipc`, `gpty-ai`, `gpty-gdext` and `gpty-media`; the CLI's `main.rs` declares `#![cfg_attr(not(test), forbid(unsafe_code))]`, since its only unsafe is `std::env::set_var` in tests. The inventory above predates the FFI crate — `gpty-media` is where most blocks now live, so it cannot forbid unsafe and takes the two lints instead. Twenty-eight blocks that had no comment now state their invariant (the `geteuid`/`kill` libc calls, the AVIO read buffer, the env-mutation guards in `test_env.rs`, the `ExtensionLibrary` impl), and `cargo clippy --workspace --all-targets -- -D warnings` is clean. Both controls were verified by scratch edit: an `unsafe {}` in the CLI fails with `usage of an unsafe block`, and an undocumented block in `gpty-core` fails with `unsafe block missing a safety comment`. No `#[func]` wrapper was added. Tests: adding `unsafe` to a forbidden crate fails the build and an undocumented block fails clippy (verify each once by a scratch edit); a malformed input to each entry still returns an error.
+**`unsafe` is not fenced, and only the media path guards against a panic crossing the GDExtension boundary** - measured
+by search: outside tests, `unsafe` appears in `gpty-core` (`cli.rs`, `pty.rs`: `libc` calls such as
+`geteuid`, `kill` and one block in the spawn path), `gpty-ai/binary.rs` (`geteuid`),
+`gpty-ipc/server.rs` (peer credentials and the Windows token and pipe calls) and
+`gpty-gdext/lib.rs`; `gpty-media` and `gpty-cli` have none outside tests. No crate declares that, so
+a later change can add one unnoticed. `catch_unwind` appears only in `gpty-gdext/media_api.rs` and
+the engine's panic probe; measured on godot-core 0.5.5, that is not the entry boundary: every
+GDScript-callable method varcall and virtual callback is already wrapped in `handle_panic`
+(godot-core 0.5.5's varcall wrapper), which catches a panic and reports it to Godot, so no
+caller-supplied entry unwinds into the engine. The media path's own catch covers its decode worker,
+which never crosses the FFI. That half was already closed; the fence this row adds is the lint one.
+Shipped 2026-11-02: the fence is crate-level. `#![deny(unsafe_op_in_unsafe_fn)]` and
+`#![deny(clippy::undocumented_unsafe_blocks)]` are declared by `gpty-core`, `gpty-ipc`, `gpty-ai`,
+`gpty-gdext` and `gpty-media`; the CLI's `main.rs` declares
+`#![cfg_attr(not(test), forbid(unsafe_code))]`, since its only unsafe is `std::env::set_var` in
+tests. The inventory above predates the FFI crate — `gpty-media` is where most blocks now live, so
+it cannot forbid unsafe and takes the two lints instead. Twenty-eight blocks that had no comment now
+state their invariant (the `geteuid`/`kill` libc calls, the AVIO read buffer, the env-mutation
+guards in `test_env.rs`, the `ExtensionLibrary` impl), and
+`cargo clippy --workspace --all-targets -- -D warnings` is clean. Both controls were verified by
+scratch edit: an `unsafe {}` in the CLI fails with `usage of an unsafe block`, and an undocumented
+block in `gpty-core` fails with `unsafe block missing a safety comment`. No `#[func]` wrapper was
+added. Tests: adding `unsafe` to a forbidden crate fails the build and an undocumented block fails
+clippy (verify each once by a scratch edit); a malformed input to each entry still returns an error.
 
 Commits: d17bac7, 11f5274, 39085e9
 
 ## SEC-40
 
-**The MCP registry publish job executed the released tag with its OIDC identity** - fixed 2026-11-10 (code scanning alert 13, `actions/untrusted-checkout/critical`, open on `.github/workflows/mcp-registry.yml:84-95`): the publish job holds `id-token: write` and publishes under the project's name, yet it checked out `steps.release.outputs.tag \|\| github.ref` on a `workflow_run` and then ran `python3 scripts/mcp-registry check` from that tree. The job now runs only default-branch code - a literal `ref: main` checkout with `persist-credentials: false` - and reads the tag as data: `server.json` and `crates/gpty-cli/{Cargo.toml,README.md}` through the contents API into `$RUNNER_TEMP/descriptor`, validated by `scripts/mcp-registry check [ROOT]` (the optional root is new, with missing-file guards; `check` with no argument is unchanged for `scripts/ci-check`), and `mcp-publisher` is downloaded into and run from the staging directory, so the released descriptor is validated and published while the released tree is never executed. The ref is a literal because all three checkout queries key on `PRHeadCheckoutStep`, whose heuristics match event-derived refs (step ids, needed-job ids, JSON paths, fields matching `.*(head\|branch\|ref).*`) and taint from any `github.*` context. Verified locally against the staged v0.8.0 tree (pass, tag-mismatch refusal, crates.io 404 refusal) and by the re-scan: `gh api repos/godot-pty/gpty/code-scanning/alerts/13` reads `state: fixed` at 2026-11-10T21:46:05Z, and no `actions/untrusted-checkout/*` alert is open. The release skill's "fires on `release: published`" claim was corrected to the Release workflow's completion.
+**The MCP registry publish job executed the released tag with its OIDC identity** - fixed 2026-11-10
+(code scanning alert 13, `actions/untrusted-checkout/critical`, open on
+`.github/workflows/mcp-registry.yml:84-95`): the publish job holds `id-token: write` and publishes
+under the project's name, yet it checked out `steps.release.outputs.tag \|\| github.ref` on a
+`workflow_run` and then ran `python3 scripts/mcp-registry check` from that tree. The job now runs
+only default-branch code - a literal `ref: main` checkout with `persist-credentials: false` - and
+reads the tag as data: `server.json` and `crates/gpty-cli/{Cargo.toml,README.md}` through the
+contents API into `$RUNNER_TEMP/descriptor`, validated by `scripts/mcp-registry check [ROOT]` (the
+optional root is new, with missing-file guards; `check` with no argument is unchanged for
+`scripts/ci-check`), and `mcp-publisher` is downloaded into and run from the staging directory, so
+the released descriptor is validated and published while the released tree is never executed. The
+ref is a literal because all three checkout queries key on `PRHeadCheckoutStep`, whose heuristics
+match event-derived refs (step ids, needed-job ids, JSON paths, fields matching
+`.*(head\|branch\|ref).*`) and taint from any `github.*` context. Verified locally against the
+staged v0.8.0 tree (pass, tag-mismatch refusal, crates.io 404 refusal) and by the re-scan:
+`gh api repos/godot-pty/gpty/code-scanning/alerts/13` reads `state: fixed` at 2026-11-10T21:46:05Z,
+and no `actions/untrusted-checkout/*` alert is open. The release skill's "fires on
+`release: published`" claim was corrected to the Release workflow's completion.
 
 Commits: ba97924
 
 ## SEC-41
 
-**Security Insights is named `security.yaml`, so LFX reads none of it** - found 2026-11-16: the OSPS scanner (`pvtr-github-repo-scanner` v0.33.2, the plugin behind LFX) discovers only `security-insights.yml`/`security-insights.yaml` at the root or `.github/`, so it reported "Security Insights not present" and BR-03.01 fell back to the homepage/release assets, BR-07.01 depended on an admin-only `security_and_analysis` block, QA-04.01 was Not Applicable (`Repo Status is` empty), and DO-01.01 failed. Fixed 2026-11-16: renamed to `security-insights.yml`, schema 2.2.0, with the 9 public project repositories (core, five plugin profiles, two profile plugins, the plugin inventory), `GitHub Secret Scanning` and `gitleaks` declared as `type: secret`, and `repository.status: active`. Validated with `si.Load` from `github.com/ossf/si-tooling/v2@v2.3.0` (`schema=2.2.0 repos=9 tools=7`) and every URL is `https://`; `SUBPROJECTS.md` is the human-readable copy.
+**Security Insights is named `security.yaml`, so LFX reads none of it** - found 2026-11-16: the OSPS
+scanner (`pvtr-github-repo-scanner` v0.33.2, the plugin behind LFX) discovers only
+`security-insights.yml`/`security-insights.yaml` at the root or `.github/`, so it reported "Security
+Insights not present" and BR-03.01 fell back to the homepage/release assets, BR-07.01 depended on an
+admin-only `security_and_analysis` block, QA-04.01 was Not Applicable (`Repo Status is` empty), and
+DO-01.01 failed. Fixed 2026-11-16: renamed to `security-insights.yml`, schema 2.2.0, with the 9
+public project repositories (core, five plugin profiles, two profile plugins, the plugin inventory),
+`GitHub Secret Scanning` and `gitleaks` declared as `type: secret`, and `repository.status: active`.
+Validated with `si.Load` from `github.com/ossf/si-tooling/v2@v2.3.0`
+(`schema=2.2.0 repos=9 tools=7`) and every URL is `https://`; `SUBPROJECTS.md` is the human-readable
+copy.
 
 Commits: 54e1924
 
 ## SEC-42
 
-**A secret can be committed because nothing scans the index or the history** - found 2026-11-16 while answering OSPS-BR-07.01: native secret scanning and push protection are enabled, but no repository-owned gate scans the local index or the history. Fixed 2026-11-16: `scripts/check-secrets` refuses private-key blocks, AWS access key ids and GitHub/Slack/Google/Stripe token prefixes in the git index; it is in `ci-check --fast` (so `githooks/pre-commit` runs it) and in the full gate. `.github/workflows/secret-scan.yml` downloads gitleaks v8.30.1 with its SHA-256, scans the full history on push, PR and weekly with `--redact`, and is a required check once the branch ruleset lands. `.gitignore` excludes `.env.*`, private keys, keystores and common credential files; `SECURITY.md` states the rotation rule. A full-history scan of 1473 commits found 0 leaks before the gate landed.
+**A secret can be committed because nothing scans the index or the history** - found 2026-11-16
+while answering OSPS-BR-07.01: native secret scanning and push protection are enabled, but no
+repository-owned gate scans the local index or the history. Fixed 2026-11-16:
+`scripts/check-secrets` refuses private-key blocks, AWS access key ids and
+GitHub/Slack/Google/Stripe token prefixes in the git index; it is in `ci-check --fast` (so
+`githooks/pre-commit` runs it) and in the full gate. `.github/workflows/secret-scan.yml` downloads
+gitleaks v8.30.1 with its SHA-256, scans the full history on push, PR and weekly with `--redact`,
+and is a required check once the branch ruleset lands. `.gitignore` excludes `.env.*`, private keys,
+keystores and common credential files; `SECURITY.md` states the rotation rule. A full-history scan
+of 1473 commits found 0 leaks before the gate landed.
 
 Commits: 54e1924
 
 ## SEC-43
 
-**A direct push to `main` is still possible because the only branch ruleset covers tags** - measured 2026-11-16 from OSPS-AC-03.01: classic protection required one approval, a code-owner review and 11 checks, but `enforce_admins` was false and the only ruleset targeted tags, so the maintainer could bypass and LFX's non-admin token could not read the classic settings. Fixed 2026-11-16 (build 0.8.4): the `gpty-bot` GitHub App (ID 5789319, installation 182690027) pushed the throwaway `tmp/bot-smoke` branch and opened PR #10 as `app/gpty-bot`; the `main protection` branch ruleset (id 27405614, no bypass actors, deletion/non-fast-forward/pull_request/12 required checks) is active, and classic protection has `enforce_admins: true`, one code-owner approval, stale-review dismissal, last-push approval and the 11 checks. A direct contents-API push is refused with `409 Repository rule violations found` (`Changes must be made through a pull request`, `12 of 12 required status checks`, signatures). `gh api .../rules/branches/main` lists the four rule types; the local OSPS scan is 17 passed / 0 failed with AC-03.01 and AC-03.02 passing. The one remaining app permission is tracked by **The gpty-bot app granted one permission the release flow does not need**.
+**A direct push to `main` is still possible because the only branch ruleset covers tags** - measured
+2026-11-16 from OSPS-AC-03.01: classic protection required one approval, a code-owner review and 11
+checks, but `enforce_admins` was false and the only ruleset targeted tags, so the maintainer could
+bypass and LFX's non-admin token could not read the classic settings. Fixed 2026-11-16 (build
+0.8.4): the `gpty-bot` GitHub App (ID 5789319, installation 182690027) pushed the throwaway
+`tmp/bot-smoke` branch and opened PR #10 as `app/gpty-bot`; the `main protection` branch ruleset (id
+27405614, no bypass actors, deletion/non-fast-forward/pull_request/12 required checks) is active,
+and classic protection has `enforce_admins: true`, one code-owner approval, stale-review dismissal,
+last-push approval and the 11 checks. A direct contents-API push is refused with
+`409 Repository rule violations found` (`Changes must be made through a pull request`,
+`12 of 12 required status checks`, signatures). `gh api .../rules/branches/main` lists the four rule
+types; the local OSPS scan is 17 passed / 0 failed with AC-03.01 and AC-03.02 passing. The one
+remaining app permission is tracked by **The gpty-bot app granted one permission the release flow
+does not need**.
 
 Commits: 54e1924, 6ca4ee7, 094476d, 13e8bee, d451dac
 
 ## SEC-44
 
-**The gpty-bot app granted one permission the release flow does not need** - closed 2026-11-16: the app and installation 182690027 read back as exactly contents:write, metadata:read and pull_requests:write; `scripts/bot-token --check` exits 0 with no warning, and `scripts/bot-push 0.8.x` pushed this commit with the same installation token.
+**The gpty-bot app granted one permission the release flow does not need** - closed 2026-11-16: the
+app and installation 182690027 read back as exactly contents:write, metadata:read and
+pull_requests:write; `scripts/bot-token --check` exits 0 with no warning, and
+`scripts/bot-push 0.8.x` pushed this commit with the same installation token.
 
 Commits: d451dac
 
 ## SEC-45
 
-**The release job executes the tagged tree with contents:write and OIDC** - fixed 2026-11-16 (build 0.8.4): `release.yml` is split into `release-gate` (read-only: tag format, signed annotated tag via the API's `verification.verified`, ancestor of `main`, crate/server/tag equality, locked metadata, defect-class trailers, docs and knowledge bundle), `export` (read-only build and package; asserts the four GDExtension files; uploads `gpty-release-dist`), and `publish` (contents:write + OIDC; downloads the staged files and runs only pinned actions; waits on the `release` environment whose required reviewer is the maintainer). No project code runs in `publish`, so the write token and OIDC identity are not exposed to the tagged tree's scripts.
+**The release job executes the tagged tree with contents:write and OIDC** - fixed 2026-11-16 (build
+0.8.4): `release.yml` is split into `release-gate` (read-only: tag format, signed annotated tag via
+the API's `verification.verified`, ancestor of `main`, crate/server/tag equality, locked metadata,
+defect-class trailers, docs and knowledge bundle), `export` (read-only build and package; asserts
+the four GDExtension files; uploads `gpty-release-dist`), and `publish` (contents:write + OIDC;
+downloads the staged files and runs only pinned actions; waits on the `release` environment whose
+required reviewer is the maintainer). No project code runs in `publish`, so the write token and OIDC
+identity are not exposed to the tagged tree's scripts.
 
 Commits: 33f1159
 
 ## SEC-46
 
-**The release train's merge, dependency, DCO, tag-signature and SHA-pin policies are unenforced** - fixed 2026-11-16 (build 0.8.4): the `main` ruleset now allows only `merge` and requires 14 checks including `docs` and `commit-lint`; classic protection carries the same 13 (without `secret-scan`); the `tag` ruleset has no bypass actors and requires a signed tag for every actor; Dependabot's three update entries target `0.8.x`; `commit-lint` enforces DCO and Conventional Commits on pull requests; `sha_pinning_required` and `web_commit_signoff_required` are enabled; the stale `tmp/bot-smoke` branch is deleted. Tests: the ruleset readbacks show `["merge"]`, the 14 contexts and no bypass; all 68 action references are full-SHA pinned; a signed `v*` tag remains verifiable.
+**The release train's merge, dependency, DCO, tag-signature and SHA-pin policies are unenforced** - fixed
+2026-11-16 (build 0.8.4): the `main` ruleset now allows only `merge` and requires 14 checks
+including `docs` and `commit-lint`; classic protection carries the same 13 (without `secret-scan`);
+the `tag` ruleset has no bypass actors and requires a signed tag for every actor; Dependabot's three
+update entries target `0.8.x`; `commit-lint` enforces DCO and Conventional Commits on pull requests;
+`sha_pinning_required` and `web_commit_signoff_required` are enabled; the stale `tmp/bot-smoke`
+branch is deleted. Tests: the ruleset readbacks show `["merge"]`, the 14 contexts and no bypass; all
+68 action references are full-SHA pinned; a signed `v*` tag remains verifiable.
 
 Commits: 33f1159
 
 ## SEC-47
 
-**Clipboard writes from programs (OSC 52), consent-gated and write-only** - code: alacritty's clipboard-store event is dropped, so `y` in nvim over SSH, tmux `set-clipboard` and any remote copy never reach the user's clipboard. Reads (the `?` query, clipboard-load) stay unimplemented permanently: a program reading your clipboard is an exfiltration path. Fix: honour store requests under a per-pane policy `ask (default) / allow / deny`; `ask` shows a non-modal toast with the byte count and Allow / Deny / Always-for-this-pane; the payload is base64-validated and decoded in Rust, capped (64 KiB to start), never logged, and only the focused pane may write without a prompt even under `allow`. The policy is user-owned state like `PaneEnvStore`: a layout, profile or plugin manifest cannot carry or pre-grant it. Needs the security review the parser's own comment requires for any new OSC, a line in `SECURITY.md`, and tests that a file cannot set the policy, an oversize or malformed payload is dropped, and a read request gets no reply. On Linux the primary-selection target maps to PRIMARY only once the v0.9.5 mouse-and-clipboard item exists; until then it is ignored.
+**Clipboard writes from programs (OSC 52), consent-gated and write-only** - code: alacritty's
+clipboard-store event is dropped, so `y` in nvim over SSH, tmux `set-clipboard` and any remote copy
+never reach the user's clipboard. Reads (the `?` query, clipboard-load) stay unimplemented
+permanently: a program reading your clipboard is an exfiltration path. Fix: honour store requests
+under a per-pane policy `ask (default) / allow / deny`; `ask` shows a non-modal toast with the byte
+count and Allow / Deny / Always-for-this-pane; the payload is base64-validated and decoded in Rust,
+capped (64 KiB to start), never logged, and only the focused pane may write without a prompt even
+under `allow`. The policy is user-owned state like `PaneEnvStore`: a layout, profile or plugin
+manifest cannot carry or pre-grant it. Needs the security review the parser's own comment requires
+for any new OSC, a line in `SECURITY.md`, and tests that a file cannot set the policy, an oversize
+or malformed payload is dropped, and a read request gets no reply. On Linux the primary-selection
+target maps to PRIMARY only once the v0.9.5 mouse-and-clipboard item exists; until then it is
+ignored.
 
 ## SEC-48
 
-**The GitHub organization requires 2FA** - verified 2026-11-02: `gh api orgs/godot-pty --jq .two_factor_requirement_enabled` returns `true` (it was `false` before the setting). Closes OSPS AC-01.01; no repository change, this row is the record.
+**The GitHub organization requires 2FA** - verified 2026-11-02:
+`gh api orgs/godot-pty --jq .two_factor_requirement_enabled` returns `true` (it was `false` before
+the setting). Closes OSPS AC-01.01; no repository change, this row is the record.
 
 Commits: 39ef2cf, 6cecfd6
 
 ## SEC-49
 
-**SSH commit signing is configured and GitHub verifies it** - verified 2026-11-02: the ED25519 key is registered as a **Signing Key**; GitHub reports `1585b71` and `0d6fc11` as `verified: true` (`reason: valid`), where the same commits previously read `unknown_key`. The row-closing push carries only the PR-rule bypass, not the signature violation. The two earlier plan commits (`39ef2cf`, `8e6ca31`) remain unsigned history (`reason: unsigned`) and would need a force-push to rewrite.
+**SSH commit signing is configured and GitHub verifies it** - verified 2026-11-02: the ED25519 key
+is registered as a **Signing Key**; GitHub reports `1585b71` and `0d6fc11` as `verified: true`
+(`reason: valid`), where the same commits previously read `unknown_key`. The row-closing push
+carries only the PR-rule bypass, not the signature violation. The two earlier plan commits
+(`39ef2cf`, `8e6ca31`) remain unsigned history (`reason: unsigned`) and would need a force-push to
+rewrite.
 
 Commits: 982426b, 6cecfd6
 
 ## SEC-50
 
-**Secret scanning push protection is enabled; the two Secret Protection features are plan-gated** - measured 2026-11-04: `secret_scanning_push_protection` is `enabled` and blocks provider patterns. `secret_scanning_validity_checks` and `secret_scanning_non_provider_patterns` remain `disabled`, are absent from the repository's Code security UI, and a `security_and_analysis` PATCH does not change them. GitHub's docs put validity checks and generic/non-provider patterns behind **GitHub Team with GitHub Secret Protection** for organization-owned repositories; secret scanning and push protection are the free public-repository tier. No repository-side fix exists on the current plan; revisit if the organization enables Secret Protection. OSPS BR-07.01's primary control (push protection) is met.
+**Secret scanning push protection is enabled; the two Secret Protection features are plan-gated** - measured
+2026-11-04: `secret_scanning_push_protection` is `enabled` and blocks provider patterns.
+`secret_scanning_validity_checks` and `secret_scanning_non_provider_patterns` remain `disabled`, are
+absent from the repository's Code security UI, and a `security_and_analysis` PATCH does not change
+them. GitHub's docs put validity checks and generic/non-provider patterns behind **GitHub Team with
+GitHub Secret Protection** for organization-owned repositories; secret scanning and push protection
+are the free public-repository tier. No repository-side fix exists on the current plan; revisit if
+the organization enables Secret Protection. OSPS BR-07.01's primary control (push protection) is
+met.
 
 Commits: b1eeb79
 
 ## SEC-51
 
-**constant_time_eq leaks secret length and lacks compiler optimization barriers** - code: `crates/gpty-ipc/src/server.rs:664-673` implements `constant_time_eq` with `if provided.len() != expected.len() { return false; }`, which returns immediately on a length mismatch and leaks the configured `GPTY_SECRET` length via timing. Furthermore, the byte-wise XOR accumulator (`fold(0_u8, ... \| (a ^ b)) == 0`) uses no optimization barrier (`std::hint::black_box` or volatile reads), allowing LLVM compiler passes to emit early-exit branch instructions or vector compares. Fix: replace with the audited `subtle::ConstantTimeEq` crate (`subtle = "2"`), or compare length in constant time and apply `black_box` to prevent compiler short-circuiting. Tests: `crates/gpty-ipc/src/server.rs::tests::constant_time_eq_matches_bytes_exactly` passes, plus unit tests asserting constant execution behavior across mismatched lengths.
+**constant_time_eq leaks secret length and lacks compiler optimization barriers** - code:
+`crates/gpty-ipc/src/server.rs:664-673` implements `constant_time_eq` with
+`if provided.len() != expected.len() { return false; }`, which returns immediately on a length
+mismatch and leaks the configured `GPTY_SECRET` length via timing. Furthermore, the byte-wise XOR
+accumulator (`fold(0_u8, ... \| (a ^ b)) == 0`) uses no optimization barrier (`std::hint::black_box`
+or volatile reads), allowing LLVM compiler passes to emit early-exit branch instructions or vector
+compares. Fix: replace with the audited `subtle::ConstantTimeEq` crate (`subtle = "2"`), or compare
+length in constant time and apply `black_box` to prevent compiler short-circuiting. Tests:
+`crates/gpty-ipc/src/server.rs::tests::constant_time_eq_matches_bytes_exactly` passes, plus unit
+tests asserting constant execution behavior across mismatched lengths.
 
 ## SEC-52
 
-**Scorecard Branch-Protection stays at 8 because a second human approver is the only path to 9-10** - the enforcement defect this row carried (admins could bypass `main`) was fixed in 0.8.4 by the `main protection` branch ruleset and `enforce_admins`; see **A direct push to `main` is still possible because the only branch ruleset covers tags** in v0.8.4. Scorecard v5.6.0 tiers: 8 needs one required approval plus a code-owner review, 9 needs two approvals (`minReviews = 2`), and 10 additionally needs stale-review dismissal, last-push approval and admin enforcement. The repository has 1 approval, code-owner review, stale-review dismissal, last-push approval and admin enforcement; moving to 9 needs a second human who can approve, not another setting. The `gpty-bot` app authors PRs but never approves them, so it cannot supply that second approval. Verification: a Scorecard run reports Branch-Protection 8; a second maintainer moves it to 9-10.
+**Scorecard Branch-Protection stays at 8 because a second human approver is the only path to 9-10** - the
+enforcement defect this row carried (admins could bypass `main`) was fixed in 0.8.4 by the
+`main protection` branch ruleset and `enforce_admins`; see **A direct push to `main` is still
+possible because the only branch ruleset covers tags** in v0.8.4. Scorecard v5.6.0 tiers: 8 needs
+one required approval plus a code-owner review, 9 needs two approvals (`minReviews = 2`), and 10
+additionally needs stale-review dismissal, last-push approval and admin enforcement. The repository
+has 1 approval, code-owner review, stale-review dismissal, last-push approval and admin enforcement;
+moving to 9 needs a second human who can approve, not another setting. The `gpty-bot` app authors
+PRs but never approves them, so it cannot supply that second approval. Verification: a Scorecard run
+reports Branch-Protection 8; a second maintainer moves it to 9-10.
 
 ## SEC-53
 
-**The CodeQL/SCA thresholds and suppression policy are not documented** - measured 2026-11-04, rechecked 2026-11-23: the four CodeQL analysis jobs, `cargo-audit` and `cargo-deny` feed the required `ci-gate` on `main` (see the branch-protection row), so the gate exists; there is no stated remediation window or suppression rule for a non-exploitable CodeQL/SCA finding (OSPS VM-05/06, L3). Fix: state the remediation window and the suppression rule in SECURITY and CONTRIBUTING. Acceptance: a PR with a new advisory or CodeQL alert is blocked or explicitly waived with a recorded reason.
+**The CodeQL/SCA thresholds and suppression policy are not documented** - measured 2026-11-04,
+rechecked 2026-11-23: the four CodeQL analysis jobs, `cargo-audit` and `cargo-deny` feed the
+required `ci-gate` on `main` (see the branch-protection row), so the gate exists; there is no stated
+remediation window or suppression rule for a non-exploitable CodeQL/SCA finding (OSPS VM-05/06, L3).
+Fix: state the remediation window and the suppression rule in SECURITY and CONTRIBUTING. Acceptance:
+a PR with a new advisory or CodeQL alert is blocked or explicitly waived with a recorded reason.
 
 ## SEC-54
 
-**Two `py/clear-text-storage-sensitive-data` alerts stay open on the smoke and audit scripts** - found 2026-11-10 while closing `actions/untrusted-checkout/critical` alert 13: alert 8 (`scripts/smoke_pane_api.py:414`) and alert 14 (`scripts/audit-probes.py:213`) both flag a clear-text write of `"gpty_secret": SECRET`, a throwaway value (`SECRET = "smoke-secret"`, `smoke_pane_api.py:62`) that is the whole point of the probe - the test asserts a program in a pane cannot recover `GPTY_SECRET` (`SMOKE_SECRET=0`, `smoke_pane_api.py:799-800`) and that a client process does not expose it (`smoke_pane_api.py:838`). Both alert locations are from the scan's commit `8205717`; at `45d9704` the same writes sit at `smoke_pane_api.py:406` and `audit-probes.py:635-639`. Not a real leak, but dismissing it is a security decision, not a side effect of an unrelated CI fix: dismiss both as false positives with that reasoning (or add the rule's suppression comment) and record the decision in **The CodeQL/SCA thresholds and suppression policy are not documented**.
+**Two `py/clear-text-storage-sensitive-data` alerts stay open on the smoke and audit scripts** - found
+2026-11-10 while closing `actions/untrusted-checkout/critical` alert 13: alert 8
+(`scripts/smoke_pane_api.py:414`) and alert 14 (`scripts/audit-probes.py:213`) both flag a
+clear-text write of `"gpty_secret": SECRET`, a throwaway value (`SECRET = "smoke-secret"`,
+`smoke_pane_api.py:62`) that is the whole point of the probe - the test asserts a program in a pane
+cannot recover `GPTY_SECRET` (`SMOKE_SECRET=0`, `smoke_pane_api.py:799-800`) and that a client
+process does not expose it (`smoke_pane_api.py:838`). Both alert locations are from the scan's
+commit `8205717`; at `45d9704` the same writes sit at `smoke_pane_api.py:406` and
+`audit-probes.py:635-639`. Not a real leak, but dismissing it is a security decision, not a side
+effect of an unrelated CI fix: dismiss both as false positives with that reasoning (or add the
+rule's suppression comment) and record the decision in **The CodeQL/SCA thresholds and suppression
+policy are not documented**.
 
 ## SEC-55
 
-**No `/.well-known/security.txt`** - SECURITY.md is the policy but there is no RFC 9116 discovery file on gpty.dev. Fix: add a static `security.txt` with `Contact` (the private advisory URL or security email), `Expires`, `Policy` (SECURITY.md), `Preferred-Languages` and `Canonical`, served at `https://gpty.dev/.well-known/security.txt`; link it from SECURITY.md. Acceptance: the live URL returns 200 with the required fields and the Docs workflow builds it.
+**No `/.well-known/security.txt`** - SECURITY.md is the policy but there is no RFC 9116 discovery
+file on gpty.dev. Fix: add a static `security.txt` with `Contact` (the private advisory URL or
+security email), `Expires`, `Policy` (SECURITY.md), `Preferred-Languages` and `Canonical`, served at
+`https://gpty.dev/.well-known/security.txt`; link it from SECURITY.md. Acceptance: the live URL
+returns 200 with the required fields and the Docs workflow builds it.
 
 ## SEC-56
 
-**Windows crash dumps under the process DACL are unverified** - the v0.7.1 hardening withholds `PROCESS_VM_READ` from every process, including whatever path Godot's crash handler takes when it writes a minidump; the Windows smoke and the integration test never crash the app, so the documented cost (no same-user debugger or profiler, and possibly no dump) is stated but not measured. Measure with WER `LocalDumps` (`DumpFolder`, `DumpType=2`) on a headless Windows run that aborts the GUI: if a dump is still written (dbghelp on the pseudo-handle, or WER running as SYSTEM with `SeDebugPrivilege`), record that in SECURITY.md and close this; if the dump is lost, either accept it as the Windows analogue of Linux's no-core-dumps or exempt the crash path explicitly. `GPTY_ALLOW_DEBUG` is the developer escape hatch meanwhile. Evidence to start: one crash run without the opt-out.
+**Windows crash dumps under the process DACL are unverified** - the v0.7.1 hardening withholds
+`PROCESS_VM_READ` from every process, including whatever path Godot's crash handler takes when it
+writes a minidump; the Windows smoke and the integration test never crash the app, so the documented
+cost (no same-user debugger or profiler, and possibly no dump) is stated but not measured. Measure
+with WER `LocalDumps` (`DumpFolder`, `DumpType=2`) on a headless Windows run that aborts the GUI: if
+a dump is still written (dbghelp on the pseudo-handle, or WER running as SYSTEM with
+`SeDebugPrivilege`), record that in SECURITY.md and close this; if the dump is lost, either accept
+it as the Windows analogue of Linux's no-core-dumps or exempt the crash path explicitly.
+`GPTY_ALLOW_DEBUG` is the developer escape hatch meanwhile. Evidence to start: one crash run without
+the opt-out.
 
 ## SEC-57
 
-**A workspace can be marked sensitive: nothing from it is persisted and the socket cannot see it** - design, resting on the v0.10.1 permission item and on `HistoryStore`. Root shells, production SSH sessions and password-manager CLIs produce output that today lands in the plaintext history database (SECURITY.md: scrollback is plaintext in `user://`), and every pane's programs can reach the control surface; the only advice gPTY can give now is "do not mix them". This makes "root things in one workspace, ordinary things in another" a feature that can be explained. What it is: a flag on a workspace, set and cleared by the user (workspace menu or settings), stored in the user-owned `WorkspaceStore` - a profile, layout, plugin or IPC call can never set or clear it, so a shared file cannot quietly turn a sensitive workspace ordinary. What it does: (1) *no persistence* - its panes write no `HistoryStore` rows (and no shell-integration marks), and flagging a workspace offers to delete the rows its panes already wrote; (2) *GUI-only* - its panes are not listed and cannot be targeted by `inject`, `pane-run`, `pane-read`, `pane-wait`, `broadcast`, `kill-pane` or `focus-pane`, for pane clients and outside clients alike, so the keyboard in the GUI is the only way in (**no exception**: an outside client is refused exactly as a pane client is, no setting, grant or flag allows it, and the rule is a permanent invariant recorded in AGENTS.md - the owner decided this on 2026-10-20, so it is not a choice to revisit at pickup); (3) *a visible marker* - a distinct border or title tint, a lock glyph on the sidebar row and in the window title while active, so a secret is not typed or pasted into the wrong workspace; (4) notifications and activity badges for it carry no output, as they already must. (5) *one choke point, and every other path closed* - a sensitive pane is treated as nonexistent by the single target resolver (`_find_pane_by_label`, the v0.10.1 scope check sits there too), by `list-panes`, by `broadcast`, by `pane-wait`'s pending matches and by `pane-status`, and it is left out of the event stream and of concept matching, so neither `subscribe`/`eventsPoll` nor a matched line can carry its output or its id to another client; the ambiguous-label error from v0.7.1 must skip its panes too, so a sensitive workspace's existence and ids are never disclosed. What it is not: it is not encryption and not a sandbox, and a same-user process that reads the GUI's memory or the terminal's PTY is not stopped - state that in SECURITY.md, with the same speed-bump caveat as the permission model. Tests: with the flag set, no `HistoryStore` rows are appended for its panes and existing rows are removed when the user accepts; `list-panes`, `inject`, `pane-run`, `pane-read`, `pane-wait`, `pane-status`, `kill-pane`, `focus-pane` and `broadcast` do not see or reach its panes by id or label from a pane client **or an outside client** (both get "not found"); a test enumerates every registered method that takes a pane id or label and fails if one reaches a sensitive pane, so a verb added later cannot bypass the rule; an event subscriber and the ambiguous-label error never mention its panes; `layoutLoad`, a profile and `layoutSave` cannot set or clear the flag; the marker is present and the flag survives a restart through `WorkspaceStore`.
+**A workspace can be marked sensitive: nothing from it is persisted and the socket cannot see it** - design,
+resting on the v0.10.1 permission item and on `HistoryStore`. Root shells, production SSH sessions
+and password-manager CLIs produce output that today lands in the plaintext history database
+(SECURITY.md: scrollback is plaintext in `user://`), and every pane's programs can reach the control
+surface; the only advice gPTY can give now is "do not mix them". This makes "root things in one
+workspace, ordinary things in another" a feature that can be explained. What it is: a flag on a
+workspace, set and cleared by the user (workspace menu or settings), stored in the user-owned
+`WorkspaceStore` - a profile, layout, plugin or IPC call can never set or clear it, so a shared file
+cannot quietly turn a sensitive workspace ordinary. What it does: (1) *no persistence* - its panes
+write no `HistoryStore` rows (and no shell-integration marks), and flagging a workspace offers to
+delete the rows its panes already wrote; (2) *GUI-only* - its panes are not listed and cannot be
+targeted by `inject`, `pane-run`, `pane-read`, `pane-wait`, `broadcast`, `kill-pane` or
+`focus-pane`, for pane clients and outside clients alike, so the keyboard in the GUI is the only way
+in (**no exception**: an outside client is refused exactly as a pane client is, no setting, grant or
+flag allows it, and the rule is a permanent invariant recorded in AGENTS.md - the owner decided this
+on 2026-10-20, so it is not a choice to revisit at pickup); (3) *a visible marker* - a distinct
+border or title tint, a lock glyph on the sidebar row and in the window title while active, so a
+secret is not typed or pasted into the wrong workspace; (4) notifications and activity badges for it
+carry no output, as they already must. (5) *one choke point, and every other path closed* - a
+sensitive pane is treated as nonexistent by the single target resolver (`_find_pane_by_label`, the
+v0.10.1 scope check sits there too), by `list-panes`, by `broadcast`, by `pane-wait`'s pending
+matches and by `pane-status`, and it is left out of the event stream and of concept matching, so
+neither `subscribe`/`eventsPoll` nor a matched line can carry its output or its id to another
+client; the ambiguous-label error from v0.7.1 must skip its panes too, so a sensitive workspace's
+existence and ids are never disclosed. What it is not: it is not encryption and not a sandbox, and a
+same-user process that reads the GUI's memory or the terminal's PTY is not stopped - state that in
+SECURITY.md, with the same speed-bump caveat as the permission model. Tests: with the flag set, no
+`HistoryStore` rows are appended for its panes and existing rows are removed when the user accepts;
+`list-panes`, `inject`, `pane-run`, `pane-read`, `pane-wait`, `pane-status`, `kill-pane`,
+`focus-pane` and `broadcast` do not see or reach its panes by id or label from a pane client **or an
+outside client** (both get "not found"); a test enumerates every registered method that takes a pane
+id or label and fails if one reaches a sensitive pane, so a verb added later cannot bypass the rule;
+an event subscriber and the ambiguous-label error never mention its panes; `layoutLoad`, a profile
+and `layoutSave` cannot set or clear the flag; the marker is present and the flag survives a restart
+through `WorkspaceStore`.
 
 ## SEC-58
 
-**Immutable PTY audit log stream for autonomous agent activity** - autonomous coding agents running in terminal panes can execute unmonitored shell commands, create network tunnels, or inspect sensitive files without an enterprise audit trail. Normal scrollback is ephemeral, user-clearable, and stored without cryptographic provenance (`crates/gpty-core/src/store.rs`). Fix: add an opt-in, append-only, non-repudiable audit log stream (Settings → Enterprise → Audit Logging, default off) writing to an owner-only, tamper-evident JSONL or SQLite journal. Each entry records ISO timestamp, pane attachment ID, agent identity (from `agent_state` / `ompEvent`), current working directory, executed argv/input, exit code, and a SHA-256 digest of stdout/stderr chunks. The audit stream cannot be truncated or disabled via IPC, MCP, or in-pane commands. Tests: IPC `clearHistory` cannot delete audit logs, an agent session records every executed command and hash, and a disabled setting produces zero audit overhead.
+**Immutable PTY audit log stream for autonomous agent activity** - autonomous coding agents running
+in terminal panes can execute unmonitored shell commands, create network tunnels, or inspect
+sensitive files without an enterprise audit trail. Normal scrollback is ephemeral, user-clearable,
+and stored without cryptographic provenance (`crates/gpty-core/src/store.rs`). Fix: add an opt-in,
+append-only, non-repudiable audit log stream (Settings → Enterprise → Audit Logging, default off)
+writing to an owner-only, tamper-evident JSONL or SQLite journal. Each entry records ISO timestamp,
+pane attachment ID, agent identity (from `agent_state` / `ompEvent`), current working directory,
+executed argv/input, exit code, and a SHA-256 digest of stdout/stderr chunks. The audit stream
+cannot be truncated or disabled via IPC, MCP, or in-pane commands. Tests: IPC `clearHistory` cannot
+delete audit logs, an agent session records every executed command and hash, and a disabled setting
+produces zero audit overhead.
 
 ## SEC-59
 
-**Administrative security policies and execution guardrails** - in enterprise environments, security operators must restrict rogue or unvetted actions executed by autonomous agents. Fix: introduce system-level policy configuration (read from `/etc/gpty/policy.json` on Linux/macOS or `HKLM\SOFTWARE\Policies\gPTY` on Windows) that outranks user configuration. Supported guardrails: (1) command allowlist/denylist for spawned panes (rejecting disallowed binaries like netcat, curl, or destructive commands), (2) mandatory `GPTY_SECRET` enforcement (rejecting unauthenticated IPC/daemon connections), (3) plugin installation gate (prohibiting unverified third-party plugins from the registry), and (4) disabled network media streaming in media panes. When a policy restricts an action, the UI and IPC report a structured "refused by administrator policy" error. Tests: policy file is read-only to non-root, denied commands fail with the expected error, and user settings cannot override policy values.
+**Administrative security policies and execution guardrails** - in enterprise environments, security
+operators must restrict rogue or unvetted actions executed by autonomous agents. Fix: introduce
+system-level policy configuration (read from `/etc/gpty/policy.json` on Linux/macOS or
+`HKLM\SOFTWARE\Policies\gPTY` on Windows) that outranks user configuration. Supported guardrails:
+(1) command allowlist/denylist for spawned panes (rejecting disallowed binaries like netcat, curl,
+or destructive commands), (2) mandatory `GPTY_SECRET` enforcement (rejecting unauthenticated
+IPC/daemon connections), (3) plugin installation gate (prohibiting unverified third-party plugins
+from the registry), and (4) disabled network media streaming in media panes. When a policy restricts
+an action, the UI and IPC report a structured "refused by administrator policy" error. Tests: policy
+file is read-only to non-root, denied commands fail with the expected error, and user settings
+cannot override policy values.
 
 ## SEC-60
 
-**Panes are separated from the control surface by a permission the user grants** - the enforcement half of the control-socket finding; the documentation half is closed under v0.7.1. Today a program in any pane can read and drive every other pane (SECURITY.md, Known limitations, has the mechanism), and gPTY's stated goal is that it cannot do so without permission. It is sequenced here, after attach/reattach, because the daemon changes who the clients are: a headless daemon or `gpty attach` over SSH has no GUI to show a consent dialog, so the consent channel has to be designed with the client model, not before it. Design: (1) *classify the caller* - a connection whose peer process descends from one of this daemon's pane shells (a parent-chain walk: `/proc/<pid>/stat` on Linux, `proc_pidinfo` on macOS, a process snapshot on Windows; an unsupported platform keeps today's behaviour rather than failing closed) is a **pane client**, anything else is an outside client with today's authority. On Linux prefer **cgroup membership** to the parent walk: run each pane in its own cgroup scope (`systemd-run --user --scope`, or a delegated subtree) and classify the peer by `/proc/<pid>/cgroup`, which survives a process reparenting to init or to a `systemd --user` subreaper; keep the parent walk as the fallback where no scope can be created; (2) *tier every method* - an explicit table next to the method registry puts each IPC method in observe (`list-panes`, `pane-status`, the pane's own state declaration), read (`pane-read`, `pane-wait`, the vault verbs) or control (`inject`, `pane-run`, `broadcast`, `new-pane`, `kill-pane`, layout and concept changes, plugin install), and a test fails when a registered method has no tier, so a new verb cannot ship unclassified; (3) *a user-owned grant* - a pane client gets observe by default and needs a grant for the higher tiers, stored in a user-owned store keyed by attachment id (the `PaneEnvStore` pattern: a file, profile or plugin can never grant it), shown on the pane's row and in its settings and revocable there; (4) *a policy of `allow` (today), `ask` or `deny`* - `ask` raises a consent dialog naming the pane, the method and what it would reach, once, remembered per pane; for a headless daemon the grant is pre-set through the user's own settings, never answered by a pane client. Which policy is the default is the owner's decision at pickup; `ask` is the recommendation, because it keeps the agent workflow (an agent in a pane calling `gpty inject` or `gpty mcp`, v1.0.0's launch demo) one click away while ending silent cross-pane control. (5) *scope is the workspace, with no grant that widens it* - a pane client's reach is its own workspace and nothing else: a command that names a pane in another workspace is answered exactly as a nonexistent pane ("not found", so the other workspace cannot be probed), and there is deliberately no grant, setting or `ask` prompt that crosses the boundary. Rejected alternative: a cross-workspace grant. The workspace is the unit the user already reasons about ("root things here, ordinary things there"); a permission that crosses it is the confused-deputy path, and it multiplies the grant matrix from pane × tier to pane × tier × workspace, which is how a permission model becomes impossible to explain or audit. The legitimate cases do not need it: an agent that runs tests in a pane while the user watches does so inside one workspace, and anything that really spans workspaces is done by the user from the GUI, by an outside client (their own terminal's `gpty`), or by moving the pane (v0.9.5). Outside clients keep today's reach across workspaces. A workspace marked sensitive (v0.9.5) is excluded from the socket altogether, for outside clients too. State the limit in SECURITY.md when it ships: a process that double-forks and reparents to init (or to a `systemd --user` subreaper) escapes the parent walk, and on systems without restrictive ptrace defaults a same-user process can also attach to the daemon or read its memory, so this is a speed bump against opportunistic scripts and injected agents, not a boundary against a determined local attacker. Tests: a pane-descendant client is refused at each tier it has not been granted and served at each it has; an outside client is unaffected; `ask` prompts once and remembers; a revoked grant is refused again; every registered method has a tier; a pane client naming a pane in another workspace, by id or by label, gets "not found" and nothing is delivered; the audit's two-pane probe, kept as a script by the v0.7.1 re-audit item, now fails to inject. On landing, rewrite the Known limitations entry and the in-scope line in SECURITY.md to say what is enforced.
+**Panes are separated from the control surface by a permission the user grants** - the enforcement
+half of the control-socket finding; the documentation half is closed under v0.7.1. Today a program
+in any pane can read and drive every other pane (SECURITY.md, Known limitations, has the mechanism),
+and gPTY's stated goal is that it cannot do so without permission. It is sequenced here, after
+attach/reattach, because the daemon changes who the clients are: a headless daemon or `gpty attach`
+over SSH has no GUI to show a consent dialog, so the consent channel has to be designed with the
+client model, not before it. Design: (1) *classify the caller* - a connection whose peer process
+descends from one of this daemon's pane shells (a parent-chain walk: `/proc/<pid>/stat` on Linux,
+`proc_pidinfo` on macOS, a process snapshot on Windows; an unsupported platform keeps today's
+behaviour rather than failing closed) is a **pane client**, anything else is an outside client with
+today's authority. On Linux prefer **cgroup membership** to the parent walk: run each pane in its
+own cgroup scope (`systemd-run --user --scope`, or a delegated subtree) and classify the peer by
+`/proc/<pid>/cgroup`, which survives a process reparenting to init or to a `systemd --user`
+subreaper; keep the parent walk as the fallback where no scope can be created; (2) *tier every
+method* - an explicit table next to the method registry puts each IPC method in observe
+(`list-panes`, `pane-status`, the pane's own state declaration), read (`pane-read`, `pane-wait`, the
+vault verbs) or control (`inject`, `pane-run`, `broadcast`, `new-pane`, `kill-pane`, layout and
+concept changes, plugin install), and a test fails when a registered method has no tier, so a new
+verb cannot ship unclassified; (3) *a user-owned grant* - a pane client gets observe by default and
+needs a grant for the higher tiers, stored in a user-owned store keyed by attachment id (the
+`PaneEnvStore` pattern: a file, profile or plugin can never grant it), shown on the pane's row and
+in its settings and revocable there; (4) *a policy of `allow` (today), `ask` or `deny`* - `ask`
+raises a consent dialog naming the pane, the method and what it would reach, once, remembered per
+pane; for a headless daemon the grant is pre-set through the user's own settings, never answered by
+a pane client. Which policy is the default is the owner's decision at pickup; `ask` is the
+recommendation, because it keeps the agent workflow (an agent in a pane calling `gpty inject` or
+`gpty mcp`, v1.0.0's launch demo) one click away while ending silent cross-pane control. (5) *scope
+is the workspace, with no grant that widens it* - a pane client's reach is its own workspace and
+nothing else: a command that names a pane in another workspace is answered exactly as a nonexistent
+pane ("not found", so the other workspace cannot be probed), and there is deliberately no grant,
+setting or `ask` prompt that crosses the boundary. Rejected alternative: a cross-workspace grant.
+The workspace is the unit the user already reasons about ("root things here, ordinary things
+there"); a permission that crosses it is the confused-deputy path, and it multiplies the grant
+matrix from pane × tier to pane × tier × workspace, which is how a permission model becomes
+impossible to explain or audit. The legitimate cases do not need it: an agent that runs tests in a
+pane while the user watches does so inside one workspace, and anything that really spans workspaces
+is done by the user from the GUI, by an outside client (their own terminal's `gpty`), or by moving
+the pane (v0.9.5). Outside clients keep today's reach across workspaces. A workspace marked
+sensitive (v0.9.5) is excluded from the socket altogether, for outside clients too. State the limit
+in SECURITY.md when it ships: a process that double-forks and reparents to init (or to a
+`systemd --user` subreaper) escapes the parent walk, and on systems without restrictive ptrace
+defaults a same-user process can also attach to the daemon or read its memory, so this is a speed
+bump against opportunistic scripts and injected agents, not a boundary against a determined local
+attacker. Tests: a pane-descendant client is refused at each tier it has not been granted and served
+at each it has; an outside client is unaffected; `ask` prompts once and remembers; a revoked grant
+is refused again; every registered method has a tier; a pane client naming a pane in another
+workspace, by id or by label, gets "not found" and nothing is delivered; the audit's two-pane probe,
+kept as a script by the v0.7.1 re-audit item, now fails to inject. On landing, rewrite the Known
+limitations entry and the in-scope line in SECURITY.md to say what is enforced.
 
 ## SEC-61
 
-**The trust boundary stays closed** - Games load no files, no network resources and no scripts, and take nothing from a layout beyond their own id, the same stance as the media pane's allow-listed decoders. Games are built in: third-party games are out of scope until a native pane SDK has its own trust design (the architecture boundary's non-goal stands). Tests: a source check in `ci-check` fails when a game script uses `FileAccess`, `HTTPRequest`, `OS.execute` or `load` of a path built from input.
+**The trust boundary stays closed** - Games load no files, no network resources and no scripts, and
+take nothing from a layout beyond their own id, the same stance as the media pane's allow-listed
+decoders. Games are built in: third-party games are out of scope until a native pane SDK has its own
+trust design (the architecture boundary's non-goal stands). Tests: a source check in `ci-check`
+fails when a game script uses `FileAccess`, `HTTPRequest`, `OS.execute` or `load` of a path built
+from input.
 
 ## SEC-62
 
-**On macOS a program in a pane can read `GPTY_SECRET` from the GUI's or a client's environment** - Linux closes this path with a non-dumpable process (v0.7.1, closed above), but macOS exposes every process's environment to same-user readers through `KERN_PROCARGS2` (`ps -E`, `pgrep`), and `ptrace(PT_DENY_ATTACH)` does not change that - it only denies a debugger, which is why the v0.7.1 row claims nothing for macOS. On macOS the secret therefore remains protection against other users only, and SECURITY.md says so. Evidence to start: a measurement showing a client can authenticate without the secret ever entering its initial environment (an inherited file descriptor or a broker handshake), because `unsetenv` only changes the `environ` array, not the initial block those APIs read. Without such a mechanism this stays a documented limitation rather than a task.
+**On macOS a program in a pane can read `GPTY_SECRET` from the GUI's or a client's environment** - Linux
+closes this path with a non-dumpable process (v0.7.1, closed above), but macOS exposes every
+process's environment to same-user readers through `KERN_PROCARGS2` (`ps -E`, `pgrep`), and
+`ptrace(PT_DENY_ATTACH)` does not change that - it only denies a debugger, which is why the v0.7.1
+row claims nothing for macOS. On macOS the secret therefore remains protection against other users
+only, and SECURITY.md says so. Evidence to start: a measurement showing a client can authenticate
+without the secret ever entering its initial environment (an inherited file descriptor or a broker
+handshake), because `unsetenv` only changes the `environ` array, not the initial block those APIs
+read. Without such a mechanism this stays a documented limitation rather than a task.

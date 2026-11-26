@@ -129,7 +129,7 @@ Three separate places, with different jobs:
 | Location | Purpose |
 |---|---|
 | `docs/content/docs/agents/` | Developer guides: Rust, GDScript, security, testing, pitfalls, plugin manifest |
-| `docs/content/docs/roadmap/` and `ROADMAP.md` | One page per release chain; the root file links them |
+| `docs/content/docs/roadmap/` and `ROADMAP.md` | The queue: one page per release chain plus per-area evidence pages under `details/`; `scripts/roadmap` reads and closes rows |
 | `docs/content/docs/changelog/` | One page per release; `CHANGELOG.md` links them |
 | `docs/content/wiki/` | This vault — durable explanation for a reader |
 
