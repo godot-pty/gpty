@@ -21,11 +21,11 @@ RM = os.path.join(ROOT, 'docs/content/docs/roadmap')
 DETAILS = os.path.join(RM, 'details')
 ROADMAP_MD = os.path.join(ROOT, 'ROADMAP.md')
 ROW = re.compile(
-    r'^\| (✅|⬜|🚫) \| \[([A-Z]+-\d+)\]\(details/([a-z]+)\.md#([a-z]+-\d+)\) '
+    r'^\| (✅|⬜|🚫|❌) \| \[([A-Z]+-\d+)\]\(details/([a-z]+)\.md#([a-z]+-\d+)\) '
     r'\| \*\*(.+?)\*\* \|$')
 SECTION = re.compile(r'(?m)^## ([A-Z]+-\d+)$')
 COMMIT = re.compile(r'^Commits: (.*)$')
-STATUS = {'⬜': 'open', '✅': 'done', '🚫': 'dropped'}
+STATUS = {'⬜': 'open', '✅': 'done', '🚫': 'dropped', '❌': 'wontfix'}
 
 
 class UserError(Exception):
@@ -375,28 +375,31 @@ def cmd_rearea(args):
 def cmd_stats(args):
     ledger = Ledger()
     data = {'pages': {}, 'areas': {},
-            'total': {'open': 0, 'done': 0, 'dropped': 0, 'rows': len(ledger.rows)}}
+            'total': {'open': 0, 'done': 0, 'dropped': 0, 'wontfix': 0,
+                      'rows': len(ledger.rows)}}
     for page in ledger.pages:
-        counts = {'open': 0, 'done': 0, 'dropped': 0}
+        counts = {'open': 0, 'done': 0, 'dropped': 0, 'wontfix': 0}
         for row in page.rows:
             counts[STATUS[row.status]] += 1
             data['total'][STATUS[row.status]] += 1
         data['pages'][page.name] = counts
     for row in ledger.rows.values():
-        bucket = data['areas'].setdefault(row.area, {'open': 0, 'done': 0, 'dropped': 0})
+        bucket = data['areas'].setdefault(
+            row.area, {'open': 0, 'done': 0, 'dropped': 0, 'wontfix': 0})
         bucket[STATUS[row.status]] += 1
     if args.json:
         print(json.dumps(data, indent=2))
         return
-    print(f'{"page":12} open done dropped')
+    print(f'{"page":12} open done dropped wontfix')
     for name, c in data['pages'].items():
-        print(f'{name:12} {c["open"]:4} {c["done"]:4} {c["dropped"]:7}')
+        print(f'{name:12} {c["open"]:4} {c["done"]:4} {c["dropped"]:7} {c["wontfix"]:7}')
     print(f'{"TOTAL":12} {data["total"]["open"]:4} {data["total"]["done"]:4} '
-          f'{data["total"]["dropped"]:7} ({data["total"]["rows"]} rows)\n')
-    print(f'{"area":12} open done dropped')
+          f'{data["total"]["dropped"]:7} {data["total"]["wontfix"]:7} '
+          f'({data["total"]["rows"]} rows)\n')
+    print(f'{"area":12} open done dropped wontfix')
     for area in sorted(data['areas']):
         c = data['areas'][area]
-        print(f'{area:12} {c["open"]:4} {c["done"]:4} {c["dropped"]:7}')
+        print(f'{area:12} {c["open"]:4} {c["done"]:4} {c["dropped"]:7} {c["wontfix"]:7}')
 
 
 def cmd_release_check(args):
@@ -442,11 +445,13 @@ def cmd_selftest(args):
              '## v0.0.0 - Fixture\n\n'
              '| Done | ID | Item |\n|:---:|:---:|---|\n'
              '| ⬜ | [TEST-1](details/test.md#test-1) | **First fixture row** |\n'
-             '| ⬜ | [TEST-2](details/test.md#test-2) | **Second fixture row** |\n')
+             '| ⬜ | [TEST-2](details/test.md#test-2) | **Second fixture row** |\n'
+             '| ❌ | [TEST-3](details/test.md#test-3) | **Won\'t-fix fixture row** |\n')
     detail = ('---\ntitle: "Roadmap details - TEST"\nweight: 900\n'
               'build:\n  list: never\n---\n\nEvery TEST row.\n\n'
               '## TEST-1\n\n**First fixture row** - first body.\n\n'
-              '## TEST-2\n\n**Second fixture row** - second body.\n')
+              '## TEST-2\n\n**Second fixture row** - second body.\n\n'
+              '## TEST-3\n\n**Won\'t-fix fixture row** - declined by decision.\n')
     other = ('---\ntitle: "Roadmap details - OTHER"\nweight: 900\n'
              'build:\n  list: never\n---\n\nEvery OTHER row.\n')
     caps = {'area': 'TEST', 'capabilities': [
@@ -466,8 +471,11 @@ def cmd_selftest(args):
             os.makedirs(os.path.dirname(full), exist_ok=True)
             write(full, text)
 
-        expect(child(root, 'stats'), 0, '(2 rows)', 'stats counts the fixture')
+        expect(child(root, 'stats'), 0, '(3 rows)', 'stats counts the fixture')
+        expect(child(root, 'stats'), 0, 'wontfix', "stats names the won't-fix column")
         expect(child(root, 'next'), 0, 'TEST-1', 'next picks the first open row')
+        expect(child(root, 'close', 'TEST-3'), 1, 'TEST-3 is wontfix',
+               "close refuses a won't-fix row")
         expect(child(root, 'show', 'TEST-1'), 0,
                '**First fixture row** - first body.', 'show reads the section')
         expect(child(root, 'close', 'TEST-1'), 1, 'Roadmap: TEST-1',

@@ -26,7 +26,7 @@ observed, the fix, the measured numbers and the tests by name.
 Commits: 1a2b3c4, 5d6e7f8
 ```
 
-- **Status:** `⬜` open, `✅` completed, `🚫` dropped or superseded. A dropped row keeps its detail and says why; it is never picked and is never closed as done.
+- **Status:** `⬜` open, `✅` completed, `🚫` dropped or superseded, `❌` won't fix. A dropped row keeps its detail and says why; a won't-fix row records why the work was declined and carries no `Commits:` line. Neither is picked and neither is closed as done.
 - **IDs:** an uppercase area prefix plus a number (`GUI-188`). The prefix is the area, which is why there is no Area column. An ID is allocated once (`./scripts/roadmap next-id GUI`) and is never renumbered or reused. A row that moves between releases or chains keeps its ID, and its detail section does not move: detail pages are per area, the index is per release. A wrong area is a new ID through `./scripts/roadmap rearea <ID> <AREA>`, open rows only.
 - **Priority:** position on the chain page is the priority. IDs are identity, not order; never sort the queue by ID.
 - **Title:** a pointer, not the record. Keep it a phrase; the sentence, evidence and commit list belong to the detail.

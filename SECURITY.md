@@ -27,6 +27,8 @@ vulnerability**). It opens a private advisory thread visible only to the maintai
 open a public issue, pull request, or discussion for a suspected vulnerability - that exposes every
 user before a fix exists.
 
+Machine-readable discovery: <https://gpty.dev/.well-known/security.txt> (RFC 9116).
+
 If private reporting is unavailable to you, open an issue titled `Security Request` with
 **no technical details** and a maintainer will establish a private channel. In this channel,
 be prepared to privately share:
