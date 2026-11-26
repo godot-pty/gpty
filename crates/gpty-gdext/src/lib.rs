@@ -382,7 +382,8 @@ impl GptyTerminal {
     /// (Enter key), use `send_line()`.
     ///
     /// Answers `false` when the pane's bounded input queue is full (a child
-    /// that stopped reading) or the task is gone; nothing was sent.
+    /// that stopped reading), the child's PTY writer thread is gone, or the
+    /// task has ended; nothing was sent.
     #[func]
     fn send_text(&self, text: GString) -> bool {
         self.spawned
@@ -390,11 +391,12 @@ impl GptyTerminal {
             .is_some_and(|spawned| spawned.handle.send_text(&text.to_string()))
     }
 
-    /// Send a complete line to the PTY (appends `\n`).
+    /// Send a complete line to the PTY (appends `\r` = the Enter key).
     ///
     /// Use this for the Enter key to submit a command, or for concept-triggered
-    /// action commands. Answers `false` when the input queue is full or the
-    /// task is gone; nothing was sent.
+    /// action commands. Answers `false` when the input queue is full, the
+    /// child's PTY writer thread is gone, or the task has ended; nothing was
+    /// sent.
     #[func]
     fn send_line(&self, text: GString) -> bool {
         self.spawned
