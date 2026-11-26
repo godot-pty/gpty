@@ -677,3 +677,28 @@ OSC 7501 to the badge and sidebar. Acceptance: `./scripts/docs-check` and
 
 **Docs** - agent guide, plugin authoring guide, socket API reference (from the existing schema
 generator), 60-second quick start.
+
+## DOCS-53
+
+**The screenshot page is a flat wall with title-only captions** - `screenshots/v0.8.md` is 39 KB and
+325 lines with one `## Screenshots` heading, bold `v0.8.6`/`v0.8.7` paragraphs (no TOC) and captions
+that name rows only by title, so a row rename strands the caption; the chain page's one-line capture
+link sits at the bottom. Fix: promote the capture groups to `##` headings, cite `ID · title` in
+captions, and move the chain-page link near the top.
+## DOCS-54
+
+**The commit and agent guides miss the bulk-commit and context-cost practices** - the 2026-11-26 1
+MB reflow produced ~50 KB and 1,400 lines of commit-helper Review/Selected, the amend summary listed
+the whole commit rather than the delta, and the guides do not say to use `silent`, `drop("**")` plus
+`take`, verify with `git diff <old>..HEAD`, or redirect and tail the long gates. Fix: add a short
+bulk-migration section to `skill://commit` (silent, explicit selection, delta verification) and the
+context-cost practices (summary gates, `show` over whole detail pages, `--json` selectors) to
+`testing.md` or the roadmap guide.
+## DOCS-55
+
+**Gate-runner changes land inside content PRs and pay the full matrix** - PR #54 changed
+`scripts/ci-check`, `githooks/pre-push` and `.github/workflows/ci.yml`, so the ledger, screenshot
+and docs content ran the full matrix and the PR took 25.8 minutes; the docs-only push before it ran
+in 4.6 seconds. A gate PR pays the full matrix once; a content PR stays docs-class. Fix: one
+sentence in `skill://commit` and the roadmap workflow: land gate-runner and workflow changes
+separately from content, and name the class in the PR.
