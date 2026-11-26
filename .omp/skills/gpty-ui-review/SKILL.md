@@ -59,7 +59,7 @@ Check every one on each pass; each maps to at least one row (a closed one says s
 
 ## Output contract
 
-- Findings → roadmap rows in the owning release, each naming the evidence and the severity word; the release's Screenshots section carries the captures.
+- Findings → roadmap rows in the owning release, each naming the evidence and the severity word; the release's `screenshots/<chain>.md` page carries the captures.
 - `docs/static/images/issue-v<build>-<slug>.png` for a finding (a recapture adds a new file, never overwrites); `v<ver>_<n>.png` for the finished release state.
 - A capture surface is a `STATES` entry in `godot/tests/bench/ui_capture.gd`; the driver is committed, so no scratch script or temporary scene is written for an audit. Only the captures a row points at are kept.
 

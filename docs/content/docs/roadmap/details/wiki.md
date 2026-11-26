@@ -799,7 +799,7 @@ an overlapping one dropped by priority, out-of-view skipped, no candidates),
 `test_vault_graph_view.gd` (an 8-node cluster keeps fewer labels than nodes and the open note's, no
 two placed boxes intersect, the fit puts every label inside the view, and a 130-node graph names
 only the open note). Re-captured `wiki-graph` on the built app: 52 notes, labels legible, nothing
-stacked. Screenshot ([captures](../v0.8.md#screenshots)): *Vault link graph* - the 0.7.2 capture of
+stacked. Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *Vault link graph* - the 0.7.2 capture of
 the stacking this row closed.
 
 Commits: 547df56, 7e72797
@@ -873,7 +873,7 @@ ms, force step 0.20 ms, node visuals 0.44 ms, link rebuild 1.2 ms; 2000 notes / 
 170 ms, force step 5.5 ms, node visuals 15.1 ms, link rebuild 15 ms at the fallback 15 Hz; no ticks
 once settled or hidden. Tests: `test_vault_graph_3d.gd` (push/settle, hidden ticks, link endpoints,
 round-trip, deleted note, data unchanged, Motion Off, orbit) plus the model, planar, pane and
-settings suites. Screenshot ([captures](../v0.8.md#screenshots)): *The vault graph as a physical 3D
+settings suites. Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *The vault graph as a physical 3D
 map*.
 
 Commits: 6cecfd6, f6dcb3e
@@ -904,7 +904,7 @@ map and the Physical button is gone; Relayout remains (it resets and fits) and t
 removed. Tests: `test_a_fresh_pane_opens_the_graph`, `test_a_saved_notes_view_is_not_overridden`,
 `test_the_view_buttons_follow_the_surface`, `test_graph_notes_returns_to_the_list`,
 `test_the_mode_button_names_the_other_presentation`, `test_relayout_is_the_only_layout_action`,
-`test_the_new_button_says_new`. Screenshot ([captures](../v0.8.md#screenshots)): *The wiki pane's
+`test_the_new_button_says_new`. Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *The wiki pane's
 view buttons and the graph chrome*.
 
 Commits: 3f1ce6a
@@ -947,7 +947,7 @@ naming the other presentation. Tests:
 `test_a_background_drag_orbits_by_default_and_shift_drag_pans`,
 `test_the_graph_toolbar_has_one_presentation_switch_and_no_orbit_toggle`. The `wiki-graph-depth`
 capture repeats (`ui-capture-check`: 2 states PASS). Screenshot
-([captures](../v0.8.md#screenshots)): *The orbital map after an orbit and a depth travel*.
+([captures](../screenshots/v0.8.md#screenshots)): *The orbital map after an orbit and a depth travel*.
 
 Commits: 570c792
 
@@ -970,7 +970,7 @@ completeness, default values, planetary shape, star determinism, note hues, ring
 `test_the_planetary_theme_swaps_glyphs_without_moving_bodies`,
 `test_pane_set_owns_the_wiki_graph_theme`; the `wiki-graph-planetary`, `wiki-graph-planetary-planar`
 and `light-wiki-graph-planetary` captures repeat (`ui-capture-check`: PASS) and the orbital state
-renders on Compatibility. Screenshot ([captures](../v0.8.md#screenshots)): *The Planetary theme on
+renders on Compatibility. Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *The Planetary theme on
 the orbital map*.
 
 Commits: 570c792

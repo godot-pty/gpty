@@ -13,6 +13,8 @@ Standard library only; run from anywhere. Exits 1 and lists every problem found.
     prefix, unique IDs and titles, and no image inside a table row
   * roadmap detail pages: one `## AREA-N` section per row with the same title,
     a closed row's `Commits:` line, valid code citations, no images
+  * roadmap screenshot pages: front matter and a `## Screenshots` section, and
+    no captures on a queue page
   * ROADMAP.md, CHANGELOG.md and AGENTS.md link exactly the pages under
     docs/content/docs/{roadmap,changelog,agents}/, and nothing links a page that
     does not exist
@@ -333,6 +335,29 @@ else:
 
 for rid in sorted(set(seen) - set(detail_of)):
     bad(seen[rid], f'{rid} has no detail section')
+
+# ── roadmap screenshot pages ───────────────────────────────────────────
+# A capture is release-level evidence and often covers rows from several
+# areas, so it lives on its own page per chain; a queue page stays a list of
+# one-line index rows.
+for p in sorted(os.listdir(os.path.join(ROOT, rd))):
+    if p.endswith('.md') and p != '_index.md':
+        if re.search(r'(?m)^## Screenshots$', read(f'{rd}/{p}')):
+            bad(f'{rd}/{p}',
+                'screenshot sections live in screenshots/<page>.md, not on the queue page')
+shots_dir = f'{rd}/screenshots'
+if os.path.isdir(os.path.join(ROOT, shots_dir)):
+    for p in sorted(os.listdir(os.path.join(ROOT, shots_dir))):
+        if not p.endswith('.md'):
+            continue
+        where = f'{shots_dir}/{p}'
+        text = read(where)
+        fm = front_matter(text)
+        for field in ('title', 'weight'):
+            if not fm or field not in fm:
+                bad(where, f'front matter needs {field}')
+        if not re.search(r'(?m)^## Screenshots$', text):
+            bad(where, 'screenshot page needs a `## Screenshots` section')
 
 # ── site paths ───────────────────────────────────────────────────────────
 # The docs site is served from the domain root (docs/hugo.yaml baseURL), so a

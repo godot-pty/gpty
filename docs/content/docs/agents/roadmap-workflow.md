@@ -53,13 +53,13 @@ Ties break toward the smaller item.
 
 ## Screenshots
 
-Screenshots stay on the chain page under `## Screenshots`, where a capture can cover rows from several areas; a row's detail links the caption and the page anchor:
+Screenshots live on their own page per chain, `docs/content/docs/roadmap/screenshots/<page>.md`, under `## Screenshots`. The chain page is the queue and carries no captures; it links the release page in one line, and a capture that covers rows from several areas stays there instead of being duplicated into each area file. A row's detail links the caption and the page anchor:
 
 ```markdown
-Screenshot: *The light chrome over four terminal panes* ([captures](../v0.8.md#screenshots)).
+Screenshot: *The light chrome over four terminal panes* ([captures](../screenshots/v0.8.md#screenshots)).
 ```
 
-Never embed an image in an index row or a detail section. Release screenshots are `v<version>_<n>.png`; roadmap evidence is `issue-v<build>-<slug>.png`, both under `docs/static/images/`.
+Never embed an image in an index row, a detail section or a chain page. Release screenshots are `v<version>_<n>.png`; roadmap evidence is `issue-v<build>-<slug>.png`, both under `docs/static/images/`.
 
 ## Commit provenance
 
@@ -80,7 +80,7 @@ Never embed an image in an index row or a detail section. Release screenshots ar
 1. Write the record into the detail section: what shipped, measured numbers (not adjectives), the tests by name, the failure mode now closed.
 2. Close with `./scripts/roadmap close <ID>`. If it cannot find a commit, add the `Roadmap: <ID>` trailer to the fix commit and retry; `--force` is for a row whose work genuinely has no commit.
 3. If the row closed a bug, the fix commit carries a `Cause: <class>` trailer matching [Defect classes](defect-classes.md).
-4. A screenshot reference links the chain page's `## Screenshots` as above.
+4. A screenshot reference links the release's `screenshots/<page>.md` as above.
 5. Gates: `python3 scripts/docs-check`, `./scripts/build-docs`; a catalogue edit also runs `./scripts/check-capabilities`.
 
 ## Adding a release chain

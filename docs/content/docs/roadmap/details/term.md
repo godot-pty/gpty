@@ -318,7 +318,7 @@ starts at its own size),
 `engine::tests::the_unstarted_status_document_has_the_keys_a_live_one_has`. Two behaviour changes: a
 pane in a workspace that has never been shown starts its child when the workspace is first shown,
 and a stored or live `rows`/`cols` no longer resizes a grid (the fields are the pre-layout fallback;
-the pixel fit owns the size). Screenshot ([captures](../v0.8.md#screenshots)): *Pane spawn size*.
+the pixel fit owns the size). Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *Pane spawn size*.
 
 Commits: e81de90, 01d5859
 
@@ -343,7 +343,7 @@ configurable-keybindings item in v0.9.5. Tests: `test_scrollback_return.gd` - th
 the offset through the frame sync (shown above 0, hidden at the bottom), a click resets the offset
 to 0 with the selection text unchanged, and a `ScrollProbe` pane reporting DECSET 1000 keeps
 `MOUSE_FILTER_STOP`/`FOCUS_NONE`, sends nothing (`sent == []`) and keeps its selection. Screenshot
-([captures](../v0.8.md#screenshots)): *Scrollback return*.
+([captures](../screenshots/v0.8.md#screenshots)): *Scrollback return*.
 
 Commits: 02343a4, 6cecfd6, d6a67a7
 
@@ -668,7 +668,7 @@ cursor movement.
 **Close the loop: re-run the probes on the v0.9.2 build** - same sandbox, synthetic-input and
 viewport-capture method, same fixtures; save the captures under `docs/static/images/`
 (`v0.9.2_<n>.png` for the finished state, `issue-v0.9.2-<slug>.png` for anything still open, listed
-under a Screenshots section at the bottom of the [v0.9 page](../v0.9.md)); every item above is
+under a Screenshots section in `screenshots/v0.9.md`); every item above is
 closed or explicitly deferred with evidence, and the capture is the release's visual record.
 
 ## TERM-42

@@ -243,7 +243,7 @@ case). Tests: `test_ui_effects.gd`
 `test_removing_a_reactive_rule_clears_it`, `test_off_clears_a_reactive_rule`,
 `test_the_reactive_table_hides_add_at_the_cap`) and `test_settings_manager.gd`
 (`test_reactive_rules_drop_unknown_effects_on_load`). Screenshot
-([captures](../v0.8.md#screenshots)): *A pinned Tint cue on its source pane, and the Effects
+([captures](../screenshots/v0.8.md#screenshots)): *A pinned Tint cue on its source pane, and the Effects
 section's mapping rows.*
 
 Commits: d17bac7, 6cecfd6, 46b68e9, a287210

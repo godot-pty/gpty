@@ -564,7 +564,7 @@ light theme. The pass also found a defect no capture keyed: with an overlay open
 belongs to the terminal behind it - typing `x` with Settings open reached the shell, and Escape
 closed neither Settings nor Pane Settings nor the palette - queued below as **An open overlay
 neither takes keyboard focus nor blocks the terminal behind it**. The ten captures are the
-`issue-v0.7.2-*` images under Screenshots at the bottom of the [v0.8 page](../v0.8.md#screenshots);
+`issue-v0.7.2-*` images under Screenshots on the [v0.8 screenshots page](../screenshots/v0.8.md#screenshots);
 the run again needed a scratch driver (`godot/tmp_capture.gd`, deleted after the pass), which is
 what the capture-harness row below removes.
 
@@ -614,7 +614,7 @@ v0.8.6 recapture. Findings queued as **The keyboard cannot drive pane chrome or 
 **The vault link graph is mouse-only**, **The vault graph's labels overlap at the bundled vault's
 density** and **The agent-state badge distinguishes failed from needs-attention by colour alone**;
 the pane-padding, opaque-overlay, dialog and accessibility rows absorbed the rest. Screenshots
-([captures](../v0.8.md#screenshots)): *Wiki pane with the bundled vault*, *Vault link graph*,
+([captures](../screenshots/v0.8.md#screenshots)): *Wiki pane with the bundled vault*, *Vault link graph*,
 *Concept graph editor*, *Plugin Install Review*, *Workspace Trust*.
 
 Commits: d17bac7, 6cecfd6, 547df56, 8dc74eb, 8c58684
@@ -707,7 +707,7 @@ animation: the spinner cycles at 8 fps and the attention pulse at 1.2 Hz, so the
 by *The `working` badge is a thin arc that reads as a dim dot at 12 px*: the table moved to
 `AgentBadge.STATES` in `ui/agent_badge.gd` and the harness freezes the badge's own clock instead.
 The graph's other signals held: a ghost is a double ring plus an "N missing" count, and the open
-note is named in the status line. Screenshot ([captures](../v0.8.md#screenshots)): *Agent-state
+note is named in the status line. Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *Agent-state
 badges*.
 
 Commits: 547df56, 3754288, 6686ba4
@@ -735,7 +735,7 @@ settings change, with a picker in the Appearance tab; the terminal's own font si
 setting. Tests: `test_ui_tokens.gd` (the 16-pair table, the WCAG reference points, a deliberately
 failing pair), `test_ui_theme.gd` (opaque surfaces, the type scale, class fallbacks, the checkbox
 regression, the embedded title bar), `test_ui_scale.gd` (factor, window scale, loader clamp, the
-workspace applying both). Screenshot ([captures](../v0.8.md#screenshots)): *UI scale at 125 %* and
+workspace applying both). Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *UI scale at 125 %* and
 *First launch on the design system*.
 
 Commits: d17bac7, eb79bc4, 4ae2c65
@@ -780,7 +780,7 @@ through the Settings cards, the Pane Settings card or the graph canvas (the stoc
 background. The panel's `Attachment ID` field gained the sentence that was missing ("The id IPC, MCP
 and agent commands address this pane by"), and every label and hint in both panels is on the token
 type scale. Verified by `test_ui_theme.gd` (`bg_color.a == 1.0` for each type, `== UiTokens.SURFACE`
-for the chrome ones) Screenshots ([captures](../v0.8.md#screenshots)): *Settings, opaque* and *Pane
+for the chrome ones) Screenshots ([captures](../screenshots/v0.8.md#screenshots)): *Settings, opaque* and *Pane
 Settings, opaque and explained*.
 
 Commits: d17bac7, eb79bc4, 547df56, 4ae2c65
@@ -801,7 +801,7 @@ command field gets a 220 px minimum (was 69 px against `/bin/bash`'s 75), the co
 its content's minimum. Tests: `test_app_dialog.gd` (grouping geometry, the leading spacer, a button
 added after construction, the selectable body, the fallback accessor); `test_workspace_cwd_trust.gd`
 and `test_pane_file_sinks.gd` read a dialog's text through `AppDialog.body_of`, same assertions.
-Screenshots ([captures](../v0.8.md#screenshots)): *Save Profile* and *Workspace Trust*.
+Screenshots ([captures](../screenshots/v0.8.md#screenshots)): *Save Profile* and *Workspace Trust*.
 
 Commits: d17bac7, 6cecfd6, eb79bc4, 547df56, 4ae2c65
 
@@ -815,7 +815,7 @@ binding it names. It is visible exactly when the active workspace has no tiles (
 the one sync point every create and kill path already reaches) and leaves on the next spawn; the
 sidebar's `Panes:` heading hides with its list. Tests: `test_workspace_settings.gd` (guide shows
 after Close All, hides on spawn) and `test_sidebar.gd` (heading follows the list). Screenshot
-([captures](../v0.8.md#screenshots)): *Empty workspace after Close All* (the post-fix capture).
+([captures](../screenshots/v0.8.md#screenshots)): *Empty workspace after Close All* (the post-fix capture).
 
 Commits: d17bac7, eb79bc4, 4ae2c65
 
@@ -890,7 +890,7 @@ directory, terminal font and scheme, Settings font); `test_app_dialog.gd` pins t
 close's cancel path and one header across a popup. Escape re-checked:
 `scripts/ui-capture --audit-focus file-dialog` reports `dialog=Working directory for Workspace 1`, a
 picker control as its focus owner and `escape overlay=… closed=true`. Screenshot
-([captures](../v0.8.md#screenshots)): *File picker frame*.
+([captures](../screenshots/v0.8.md#screenshots)): *File picker frame*.
 
 Commits: d85c3ca, 6918477
 
@@ -908,7 +908,7 @@ moved, `WindowChrome._make_titlebar_button`'s hand-built Label was deleted in it
 sidebar's set-directory glyph takes `UiTheme.ACCENT_LABEL` (a Button's own font colours cannot reach
 the child). `test_icons.gd`, `test_ui_theme.gd` (the variation's five styleboxes plus
 `ACCENT_LABEL`) and the accessibility audit (`glyph-buttons=46 unnamed=0` on the sidebar state) pin
-it. Screenshot ([captures](../v0.8.md#screenshots)): *Icon buttons*.
+it. Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *Icon buttons*.
 
 Commits: 9a65141, 8cb09fd, 6918477
 
@@ -938,7 +938,7 @@ order, the no-op current type, a real swap, minimize/restore), `test_code_viewer
 (the empty state, a file replacing it, a capture without a file, the four insets),
 `test_title_bar_keyboard.gd` and `test_sidebar.gd` updated to three controls. Capture state
 `pane-empty-states` in `godot/tests/bench/ui_capture.gd`. Screenshots
-([captures](../v0.8.md#screenshots)): *Pane padding and empty states*.
+([captures](../screenshots/v0.8.md#screenshots)): *Pane padding and empty states*.
 
 Commits: d17bac7, 6cecfd6, eb79bc4, 547df56, 6e579f8
 
@@ -959,7 +959,7 @@ open-failure state is reached without depending on the suite's privileges. A sub
 be listed on first expand toasts the same title and hint instead of staying silently blank; an empty
 subfolder still just has nothing to expand. `test_file_tree.gd` pins all five messages, the
 rows-visible state, and the recovery path (`apply_settings` with a fixed root swaps the sentence for
-the rows). Screenshot ([captures](../v0.8.md#screenshots)): *File Tree, missing root*.
+the rows). Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *File Tree, missing root*.
 
 Commits: 6e579f8, ac1ff06, 333f03a
 
@@ -988,7 +988,7 @@ forced a harness fix: `Input.parse_input_event` takes window coordinates while a
 in layout space, so a synthetic click under a content scale landed 2/3 of the way to its target and
 the panel never opened - the capture driver now maps a click through the root viewport's final
 transform (identity at 100 %, where every committed capture came out byte-identical before and
-after). Screenshot ([captures](../v0.8.md#screenshots)): *Settings → Terminal's scrollbar*.
+after). Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *Settings → Terminal's scrollbar*.
 
 Commits: e81de90, 07a8539
 
@@ -1025,7 +1025,7 @@ name, `unnamed=0`; `--audit-focus palette` - the field is the focus owner, Escap
 overlay, `components=3 rings=1 reached=31` (the rows are `FOCUS_NONE` by design and reached with the
 arrow cursor, not Tab; the count grew from 30 when the sidebar's Help button joined its ring), and
 the `palette` capture repeats pixel-identically (`ui-capture-check palette` PASS). Screenshot
-([captures](../v0.8.md#screenshots)): *Command palette on open*.
+([captures](../screenshots/v0.8.md#screenshots)): *Command palette on open*.
 
 Commits: c7699bc, 0ef6d8c, e5b9cb0, 2145039
 
@@ -1108,7 +1108,7 @@ table), `test_settings_panel.gd` (`open_about` tab, registry spelling, rebuild n
 caption/rows structure), `test_keyboard.gd` (each `term:*` event derived from
 `ShortcutManager._parse_bind(chord(action))` still copies/pastes/searches), and
 `test_discoverability.gd` (a real workspace: sidebar tooltips, Help chords, both window-mode
-dropdowns, the palette row's About list). Screenshots ([captures](../v0.8.md#screenshots)): *Add
+dropdowns, the palette row's About list). Screenshots ([captures](../screenshots/v0.8.md#screenshots)): *Add
 Pane, named*, *Add Pane help* and *Keyboard shortcuts*.
 
 Commits: d17bac7, 0ef6d8c, e5b9cb0
@@ -1146,7 +1146,7 @@ uniform-width test), and
 `::test_search_shows_the_match_count_and_steps_both_ways` (`0/m` → `1/m` → `m/m` →
 `Invalid pattern`) and `::test_spawn_swap_and_close_do_not_toast` (the kept "Cannot close the last
 workspace" refusal is its positive control). The `search` capture state stitches the strip over a
-pane with three matches. Screenshot ([captures](../v0.8.md#screenshots)): *Search bar, fixed*.
+pane with three matches. Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *Search bar, fixed*.
 
 Commits: d17bac7, eb79bc4, 9fab4cf
 
@@ -1285,7 +1285,7 @@ point. Tests: `test_the_working_ring_is_a_closed_band_with_one_notch`,
 `godot/tests/unit/test_agent_badge.gd`), plus `test_every_state_has_its_own_silhouette` and the
 state-swap assertions in `godot/tests/integration/test_agent_badges.gd`; the harness stops the
 badge's own clock, which `scripts/ui-capture-check agent-badges` proves by two pixel-identical runs.
-Screenshot ([captures](../v0.8.md#screenshots)): *Agent-state badges, silhouette weight*.
+Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *Agent-state badges, silhouette weight*.
 
 Commits: ae22ac5, 6686ba4
 
@@ -1526,7 +1526,7 @@ again. All 25 modal sites migrated (`popup_centered()` -> `AppDialog.popup`; the
 its 0.6 ratio). Tests: `test_app_dialog.gd` 18 green (limit maths, `max_size` at the limit, the
 label floor, the clamped body, the clipped engine label) and a new `running-work` capture state at
 800x500 over four busy panes, whose workspace-scoped card lists four names and sits wholly inside
-the frame. Screenshot ([captures](../v0.8.md#screenshots)): *Stop running processes? at 800x500*.
+the frame. Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *Stop running processes? at 800x500*.
 
 Commits: 683d73d
 
@@ -1777,7 +1777,7 @@ would squeeze the layout below the floor. Tests: `test_small_window.gd` (the Set
 title's right edge at or before its buttons' left edge with a title measured wider than the label,
 and the sidebar's last pane row reachable after scrolling, with the pane list still filling a tall
 window) plus the re-pinned floor in `test_ui_scale.gd`, `test_settings_panel.gd` and
-`test_workspace_settings.gd`. Screenshots ([captures](../v0.8.md#screenshots)): *Small window,
+`test_workspace_settings.gd`. Screenshots ([captures](../screenshots/v0.8.md#screenshots)): *Small window,
 800×500* and *Small window, Settings*.
 
 Commits: d17bac7, 6cecfd6, eb79bc4, 611b8f0, f3d2893
@@ -1816,7 +1816,7 @@ immovable divider, GUI picking, preview == commit, the release not consumed, abs
 the `MIN_TILE` clamp, one line moving every tile, and the mid-drag reflow plus the final one);
 `test_the_ground_is_the_grid_background` in `test_terminal_repaint.gd` pins
 `ground_color() == get_background_color()` across a `default_bg` change and a scheme. Screenshot
-([captures](../v0.8.md#screenshots)): *Divider handle* and *Resize drag*.
+([captures](../screenshots/v0.8.md#screenshots)): *Divider handle* and *Resize drag*.
 
 Commits: 66b99a3, 6cecfd6, 7178999
 
@@ -1874,7 +1874,7 @@ refresh never touches the fold, and the Panes host gives up its `SIZE_EXPAND_FIL
 closed section does not hold an empty band open. Docs: `docs/content/wiki/gpty/sidebar.md` ("Shape
 and collapse") and the sidebar bullet in `docs/content/docs/agents/gdscript.md`. Implemented tests:
 `test_sidebar.gd` (43/43) and `test_settings_manager.gd` (17/17), plus the `sidebar-folded` capture
-state. Screenshot ([captures](../v0.8.md#screenshots)): *Foldable sidebar sections*.
+state. Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *Foldable sidebar sections*.
 
 Commits: b4703be, c40f333
 
@@ -2455,7 +2455,7 @@ tab's own content (the `ScrollContainer`'s minimum) and refits on `tab_changed`:
 longer paints the dead band below its last row, and a tall tab keeps the design height and scrolls.
 Tests: `test_filtering_shrinks_the_card_and_keeps_the_field_still` (palette),
 `test_a_short_settings_tab_sizes_the_card_to_its_content`, with the three clamp tests updated to a
-tall tab. Screenshots ([captures](../v0.8.md#screenshots)): *Filtered palette, content-sized* and *A
+tall tab. Screenshots ([captures](../screenshots/v0.8.md#screenshots)): *Filtered palette, content-sized* and *A
 short Settings tab sizes the card*.
 
 Commits: f37fde8, c6d0d8f
@@ -2587,7 +2587,7 @@ window and stays in the Future row. Tests: `test_ui_effects.gd`
 (`test_a_settings_save_broadcasts_the_effect_to_every_terminal`) and `test_settings_panel.gd`
 (`test_the_effects_section_lists_the_closed_table_and_intensity`,
 `test_the_appearance_reset_restores_the_effect_defaults`). Screenshot
-([captures](../v0.8.md#screenshots)): *The CRT effect at Full behind text, the same effect at Subtle
+([captures](../screenshots/v0.8.md#screenshots)): *The CRT effect at Full behind text, the same effect at Subtle
 on the light scheme, and film grain at Full.*
 
 Commits: d17bac7, 6cecfd6, 03dea32, 46b68e9, 1bd3a18
@@ -2712,7 +2712,7 @@ round trip), `palette_resolve_separates_foreground_from_white`,
 import copy, refusal sentence, id suffix, six keys), `test_scheme_settings.gd` (pair resolution,
 light-follows-dark, migration, save drops the old key), `test_pane_scheme_store.gd`, and
 `test_the_ground_is_the_grid_background`'s native-scheme half. Screenshot
-([captures](../v0.8.md#screenshots)): *The terminal's colour pair beside the chrome*.
+([captures](../screenshots/v0.8.md#screenshots)): *The terminal's colour pair beside the chrome*.
 
 Commits: d17bac7, 6cecfd6, 017e1cb, 9571f98
 
@@ -2732,7 +2732,7 @@ image, so no export filter changed and all three platforms get the same frame.
 `test_the_launch_frame_is_a_brand_surface` pins the 3840x2160 texture, the four SURFACE corners, the
 mark/wordmark pixels and the <512 KiB cap. Verification is the window-level capture
 (`scripts/screenshot-gpty` with `SCREENSHOT_CAPTURE=import`, which does not draw the pointer): the
-engine's own frame, not the Godot logo. Screenshot ([captures](../v0.8.md#screenshots)): *The
+engine's own frame, not the Godot logo. Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *The
 branded launch frame*.
 
 Commits: b4703be, 1c3d39e
@@ -2752,7 +2752,7 @@ px less its 16 px inner margins). `test_the_tab_box_is_on_both_types` pins the t
 `test_the_live_tab_bar_uses_the_theme_box` pins the forwarding, and
 `test_all_eight_tabs_fit_the_560x340_floor` pins the clamped card (544 px, bar 512 px) with
 contiguous rects; `settings-560x340` shows `About` on the row with no arrows. Screenshot
-([captures](../v0.8.md#screenshots)): *All eight Settings tabs on the 560x340 floor*.
+([captures](../screenshots/v0.8.md#screenshots)): *All eight Settings tabs on the 560x340 floor*.
 
 Commits: d1d49d0, 1c3d39e
 
@@ -2983,7 +2983,7 @@ against the flat ground: black 1.00, blue 2.23, red 3.60, bright blue 4.43, mage
 `test_workspace_settings.gd::test_a_settings_save_broadcasts_the_backdrop_to_every_terminal`.
 `draw_bench` at 90x30 on the RTX 5070 Ti (median of 3): `forced_us` 1675.8 flat / 1691.1 gradient
 and `draw_us` 1432.1 / 1451.6 - one extra fill inside the run-to-run spread, no per-cell work.
-Screenshot ([captures](../v0.8.md#screenshots)): *The scheme ground can fall off*.
+Screenshot ([captures](../screenshots/v0.8.md#screenshots)): *The scheme ground can fall off*.
 
 Commits: 46b68e9, 9a5aa53
 
@@ -3005,7 +3005,7 @@ pairs are unchanged. Tests: `test_ui_theme.gd`'s `test_a_floating_panel_gets_the
 `test_ui_palette.gd::test_the_light_shadow_is_neutral_not_black`,
 `test_toast_overlay.gd::test_a_toast_is_an_opaque_padded_panel` and
 `test_pane_settings_panel.gd::test_the_floating_cards_wear_the_elevation_variation`. Screenshot
-([captures](../v0.8.md#screenshots)): *A floating card sits above the page*.
+([captures](../screenshots/v0.8.md#screenshots)): *A floating card sits above the page*.
 
 Commits: 46b68e9, 9a5aa53
 
@@ -3189,14 +3189,14 @@ Commits: 60cbace, bd46205
 ## GUI-131
 
 **The finish pass is captured** - the three motion states shipped with their rows and are on the
-[v0.8 page](../v0.8.md#screenshots) (`focus-sweep`, `guide-typewriter`, `chrome-arrival`,
+[v0.8 screenshots page](../screenshots/v0.8.md#screenshots) (`focus-sweep`, `guide-typewriter`, `chrome-arrival`,
 2026-11-24). The backdrop and elevation states shipped with their rows (`backdrop-gradient`,
-`elevation`, 2026-11-24) and are on the [v0.8 page](../v0.8.md#screenshots). What remains: add
+`elevation`, 2026-11-24) and are on the [v0.8 screenshots page](../screenshots/v0.8.md#screenshots). What remains: add
 staged states to `godot/tests/bench/ui_capture.gd` for `settings-rail`, `settings-preview-motion`,
 `settings-preview-effect`, `settings-sidebar-effect`, `sidebar-icons-effect`, `sidebar-expanded`,
 `sidebar-icons`, `sidebar-icons-560x340` and `sidebar-collapsed`, and save `issue-v0.8.7-<slug>.png`
 under `docs/static/images/`, each listed under Screenshots on the [v0.8
-page](../v0.8.md#screenshots) with a caption that names the row(s) and every numbered box. Pin every
+page](../screenshots/v0.8.md#screenshots) with a caption that names the row(s) and every numbered box. Pin every
 animation a capture depends on (`pin_animation()`, `pin_arrival`, `pin_focus_sweep`, or the Motion
 setting's `off` frame) and open the icon flyout on a named section, so two runs are pixel-identical;
 `scripts/ui-capture-check` proves it. closed 2026-11-25: the 13 states were captured
@@ -3204,7 +3204,7 @@ setting's `off` frame) and open the icon flyout on a named section, so two runs 
 `sidebar-icons-effect`, `sidebar-expanded`, `sidebar-icons`, `sidebar-icons-panes`,
 `sidebar-icons-560x340`, `sidebar-collapsed`, plus `effect-sidebar`, `effect-vignette` and
 `effect-dither`), `ui-capture-check` passed for `settings-preview-motion` and for the whole state
-list, the three annotated images and the captions are on the [v0.8 page](../v0.8.md#screenshots),
+list, the three annotated images and the captions are on the [v0.8 screenshots page](../screenshots/v0.8.md#screenshots),
 and the finish pass is closed.
 
 Commits: 46b68e9, 1c63034, 8c58684, eda4f35, 60cbace, 0e6d593, 9a5aa53, bd46205
@@ -3242,7 +3242,7 @@ visibility contract is the one-frame one); `test_the_search_strip_fades_in_and_o
 `test_an_appended_profile_fades_only_the_created_row`,
 `test_motion_off_inserts_the_workspace_row_final`; `test_a_mode_change_fades_the_shell`.
 `docs/content/docs/agents/gdscript.md`'s ScrollHints bullet records the ramp. Screenshot
-([captures](../v0.8.md#screenshots)): *The small chrome arrivals*.
+([captures](../screenshots/v0.8.md#screenshots)): *The small chrome arrivals*.
 
 Commits: 0e6d593, 1d9af4b
 
@@ -3270,7 +3270,7 @@ framing. Tests: `test_the_selected_graph_node_carries_an_accent_ring` (both boxe
 box and the light rebuild); `test_selecting_a_node_moves_nothing`,
 `test_a_selected_node_resolves_the_accent_ring`, `test_frame_all_fits_every_node`,
 `test_frame_all_eases_and_off_lands_on_the_same_transform`,
-`test_an_interrupted_frame_all_leaves_one_tween`. Screenshot ([captures](../v0.8.md#screenshots)):
+`test_an_interrupted_frame_all_leaves_one_tween`. Screenshot ([captures](../screenshots/v0.8.md#screenshots)):
 *The concept graph focus ring*.
 
 Commits: 0e6d593, 1d9af4b

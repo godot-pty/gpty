@@ -16,7 +16,7 @@ gpty/
 ├── RELEASING.md                # Canonical release process; the agent checklist is .omp/skills/release/SKILL.md
 ├── docs/
 │   ├── content/docs/agents/    # Agent guide topic pages (Rust, GDScript, security, ...)
-│   ├── content/docs/roadmap/   # Queue: one page per release chain (v0.N.md, future.md); details/<area>.md holds each row's evidence
+│   ├── content/docs/roadmap/   # Queue: one page per release chain (v0.N.md, future.md); details/<area>.md holds each row's evidence, screenshots/<chain>.md the captures
 │   ├── content/docs/changelog/ # One page per release (vX.Y.Z.md)
 │   ├── content/wiki/           # Knowledge-base vault; scripts/build-wiki packs it into godot/knowledge.json
 │   ├── data/cost-history.json  # Memory-cost ledger; scripts/render-cost-chart draws the README chart from it

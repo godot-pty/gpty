@@ -2370,8 +2370,8 @@ home beside `check-log-hygiene` in `ci-check` and in the gate table in
 
 ## BUILD-124
 
-**Screenshot annotation is manual, and nothing records its style** - every row with a
-`## Screenshots` image needs numbered boxes drawn *into* the PNG, and there is no tool: the
+**Screenshot annotation is manual, and nothing records its style** - every screenshot on a
+`## Screenshots` page needs numbered boxes drawn *into* the PNG, and there is no tool: the
 2026-11-24 v0.8.7 captures copied the style by sampling an existing image (2 px `#ff8080` outline,
 an 80x100 box, a 20 px number) and drew it with a throwaway PIL snippet that finds its way into no
 commit. The caption's `Box 1`/`Box 2` and the drawn numbers are the only link, so a recapture
