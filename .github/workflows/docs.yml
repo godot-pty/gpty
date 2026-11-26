@@ -216,6 +216,9 @@ jobs:
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: docs/public/
+          # RFC 9116 serves .well-known/security.txt; the action excludes hidden
+          # paths unless this is enabled (SEC-55).
+          include-hidden-files: true
 
   # Deploy from its own job so `gh run rerun --failed` re-runs only this job: a
   # rerun of a job that uploads would add a second `github-pages` artifact to
