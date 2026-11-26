@@ -9,8 +9,8 @@ Standard library only; run from anywhere. Exits 1 and lists every problem found.
   * every docs/static/images/issue-*.png is referenced by a markdown page (an
     orphan capture is evidence nothing cites)
   * roadmap chain pages: front matter, one three-column table row shape
-    (`| done | AREA | **Title** - text |`), a known AREA, no unescaped `|`, titles
-    unique across all chains, and no image inside a table row
+    (`| done | AREA-N | **Title** - text |`), a known area prefix, unique IDs and
+    titles, no unescaped `|`, and no image inside a table row
   * ROADMAP.md, CHANGELOG.md and AGENTS.md link exactly the pages under
     docs/content/docs/{roadmap,changelog,agents}/, and nothing links a page that
     does not exist
@@ -230,12 +230,13 @@ for guide in guides:
             bad(guide, f'path does not exist: {token}')
 
 # ── roadmap tables ───────────────────────────────────────────────────────
-m = re.search(r'Area column names[^(]*\(([A-Z, ]+)\)', read('ROADMAP.md'))
+m = re.search(r'ID prefix names[^(]*\(([A-Z, ]+)\)', read('ROADMAP.md'))
 AREAS = {a.strip() for a in m.group(1).split(',')} if m else set()
 if not AREAS:
     bad('ROADMAP.md', 'could not read the Area list from the opening text')
-row_re = re.compile(r'^\| (✅|⬜) \| ([A-Z]+) \| (.+) \|$')
+row_re = re.compile(r'^\| (✅|⬜) \| ([A-Z]+-\d+) \| (.+) \|$')
 seen = {}
+seen_titles = {}
 rd = 'docs/content/docs/roadmap'
 for p in sorted(os.listdir(os.path.join(ROOT, rd))):
     if not p.endswith('.md') or p == '_index.md':
@@ -248,12 +249,16 @@ for p in sorted(os.listdir(os.path.join(ROOT, rd))):
             bad(where, 'image inside a table row (list it under "## Screenshots" instead)')
         r = row_re.match(line)
         if not r:
-            bad(where, 'row is not `| ✅/⬜ | AREA | **Title** - text |`')
+            bad(where, 'row is not `| ✅/⬜ | AREA-N | **Title** - text |`')
             continue
-        done, area, item = r.groups()
+        done, rid, item = r.groups()
+        prefix = rid.split('-', 1)[0]
+        if prefix not in AREAS:
+            bad(where, f'unknown area prefix {prefix} in {rid}')
+        if rid in seen:
+            bad(where, f'ID duplicates {seen[rid]}')
+        seen[rid] = where
         check_citation(where, item)
-        if area not in AREAS:
-            bad(where, f'unknown area {area}')
         if re.search(r'(?<!\\)\|', item):
             bad(where, 'unescaped | inside the item cell')
         t = re.match(r'\*\*(.+?)\*\*( - |$)', item)
@@ -261,9 +266,9 @@ for p in sorted(os.listdir(os.path.join(ROOT, rd))):
             bad(where, 'item must start with **Title** followed by " - text"')
             continue
         title = t.group(1)
-        if title in seen:
-            bad(where, f'title duplicates {seen[title]}: {title[:60]}')
-        seen[title] = where
+        if title in seen_titles:
+            bad(where, f'title duplicates {seen_titles[title]}: {title[:60]}')
+        seen_titles[title] = where
 
 # ── site paths ───────────────────────────────────────────────────────────
 # The docs site is served from the domain root (docs/hugo.yaml baseURL), so a

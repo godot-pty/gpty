@@ -46,7 +46,7 @@ TOP_KEYS = {"area", "capabilities"}
 RECORD_KEYS = {"id", "statement", "status", "spec", "mechanism", "evidence", "row"}
 REQUIRED = {"id", "statement", "status"}
 ID = re.compile(r"^[a-z][a-z0-9]*(?:\.[a-z0-9][a-z0-9-]*){1,3}$")
-ROW = re.compile(r"^\| (✅|⬜) \| ([A-Z]+) \| (.+) \|$")
+ROW = re.compile(r"^\| (✅|⬜) \| ([A-Z]+-\d+) \| (.+) \|$")
 TITLE = re.compile(r"\*\*(.+?)\*\*( - |$)")
 URL = re.compile(r"https?://|www\.", re.I)
 
@@ -55,9 +55,9 @@ MECHANISM_MAX = 500
 
 
 def areas() -> set[str]:
-    """The Area column's vocabulary, from ROADMAP.md's opening text."""
+    """The ID-prefix vocabulary, from ROADMAP.md's opening text."""
     m = re.search(
-        r"Area column names[^(]*\(([A-Z, ]+)\)",
+        r"ID prefix names[^(]*\(([A-Z, ]+)\)",
         (ROOT / "ROADMAP.md").read_text(encoding="utf-8"),
     )
     return {a.strip() for a in m.group(1).split(",")} if m else set()
