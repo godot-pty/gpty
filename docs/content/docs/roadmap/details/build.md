@@ -2389,3 +2389,92 @@ quotes `draw_us` 1432.1 flat / 1451.6 gradient as a median of three because one 
 the numbers only exist in the row text and the shell history. Fix: `BENCH_REPEAT=N` (or
 `--repeat N`) printing per-mode min/median/max and a machine-readable line, so a quoted figure names
 its statistic and a follow-up can re-take it.
+
+## BUILD-126
+
+**The docs-class local gate skips `check-secrets`** - the 2026-11-26 docs-class change put
+workflow-YAML and docs pushes on a 4.6 s path (workflow lint, docs-check, the catalogue, the ledger,
+both bundles and the cost stamp), but `check-secrets` stayed in the full/tooling section. The
+required remote Secret scan catches a key on the PR, yet a docs push can pass locally and fail
+remotely. Fix: run `scripts/check-secrets` in the docs branch (about a second) or state the reliance
+in `testing.md`; add a fixture that plants a fake key and expects the docs path to fail.
+## BUILD-127
+
+**The CI docs class is five copies with no drift check** - the 2026-11-26 change had to update five
+copies of the docs class: the `changes` case in `.github/workflows/ci.yml`, `docs_class_path` in
+`scripts/ci-check`, the class paragraph in `docs/content/docs/agents/testing.md`, and the commit and
+session-wrap-up skills. The two executable lists differ only in redundant entries
+(`LICENSE-EXCEPTIONS.md` is already covered by `*.md`), so a drift check is cheap. Fix:
+`scripts/check-ci-classes` canonicalises the two lists (path or glob, sorted) and fails on drift;
+run it from `ci-check` and the Docs workflow.
+## BUILD-128
+
+**Four tools parse the roadmap index row** - `docs-check`, `scripts/check-capabilities`,
+`scripts/render-capabilities` and `scripts/roadmap` each carry the
+`| status | [ID](details/area.md#id) | **Title** |` row regex, the ID rule and the detail path; the
+2026-11-26 split edited all four and the wrapper added a fifth copy of the line-length rule. Fix:
+one `scripts/roadmap_lib.py` with the row parser, ID regex, detail path and wrap helper, imported by
+all four; the ledger selftest parses the same fixture through it.
+## BUILD-129
+
+**docs-check does not enforce the evidence shape it relies on** - `docs-check` proves index/detail
+set equality, titles, section order and the `Commits:` line, but not a detail line over 768 bytes
+(BUILD-111's 7 KB line was wrapped by a one-off script), not a `screenshots/<page>.md` no page
+links, and not a chain page that has captures but no page link. A new row or screenshot page can
+regress the read or the links with every gate green. Fix: a max line length for detail and
+screenshot pages, a screenshot-page link/orphan check, and a selftest fixture that trips each.
+## BUILD-130
+
+**The ledger has no add, move or record command** - `next-id` allocates, but adding a row still
+hand-places the index row at the priority position, appends the `## ID` section and wraps the body
+(BUILD-111's evidence was placed and wrapped by a TEMP script); moving a row between release
+sections is a manual index edit, and the original BUILD-111 `close --text-file` became "edit the
+detail first". Fix: `roadmap add` (allocate, index, detail, wrap), `roadmap move <ID> <release>`
+(index only; the detail stays), and `roadmap record <ID> --body-file` (replace and wrap the
+evidence).
+## BUILD-131
+
+**The ledger's audit is a parse, not a check** - `docs-check` proves agreement and the `Commits:`
+shape and `roadmap selftest` exercises the happy path, but nothing checks that a `Commits:` hash is
+reachable, that a `🚫` row states why, that a detail line is under 768 bytes, or that an ID cited in
+prose exists; the selftest misses `--json`, `--dry-run`, an unknown ID and a malformed fixture. Fix:
+`roadmap audit` (local; hashes, line length, ID references, dropped reason) plus those selftest
+cases; `release-check --open` is the queue-view row.
+## BUILD-132
+
+**The local gate prints its whole test log on a pass** - the 2026-11-26 full gate printed 6,567
+lines (~308 KB), mostly cargo/GUT/smoke output, while a reader needs the named PASS/FAIL lines; a
+failed step still needs its log. Fix: `ci-check --summary` (or `--quiet`) captures each gate's
+output to a log, prints the named result and the log path, and dumps the log only for a failure;
+`--verbose` keeps today's stream. The pre-push hook prints the same summary.
+## BUILD-133
+
+**A workflow push still needs a hand-built token dance** - the 2026-11-26 branch edited
+`.github/workflows/*`; `bot-push` cannot push it (no `workflows` permission), the SSH push died with
+SIGPIPE after the 6-minute hook, and the working path was `gh auth token` plus a temporary
+`GIT_ASKPASS` and an explicit `git push https://...`. `bot-token --check` also ignores the
+conventional `~/.config/gpty/gpty-bot.pem`, so `--key` was needed on every bot call. Fix:
+`scripts/maintainer-push` (one command, token via askpass) and a `bot-token` default to the
+conventional key path; document the two-push order.
+## BUILD-134
+
+**The pre-push hook treats tags and deletes as full-suite pushes** - the new-branch fallback
+classifies against the merge-base with `origin/main`; a tag ref or a zero local sha has no merge
+base, so the hook falls back to the full suite. Tags and branch deletes never need the app matrix.
+Fix: skip refs that are not `refs/heads/*` and a zero local sha; run the docs gates (or nothing for
+a delete) and say so in the hook comment.
+## BUILD-135
+
+**The docs CI job runs code static checks on a docs-only PR** - the `docs` job in
+`.github/workflows/ci.yml` runs the FFI surface, log hygiene, theme tokens, test guards, release
+versions, the MCP descriptor and the cost stamp on every PR; a docs/workflow-only diff cannot change
+any of them. They are seconds, but they are code checks on an unchanged tree and blur the docs-only
+promise. Fix: move them behind `needs.changes.outputs.code == 'true'` (a `static` job) or into the
+code jobs; keep the docs job to docs-check, the catalogue and the bundles.
+## BUILD-136
+
+**The queue has no summary or filter view** - `ROADMAP.md` lists the chains without open counts,
+`roadmap next` has no `--limit`, `--chain` or `--area`, and `release-check` fails a release without
+listing its remaining rows. A reader must run `stats` or open pages to plan. Fix: generate and check
+the open counts in the release-chain list from `roadmap stats`; add `next --limit/--chain/--area`
+and `release-check --open`; keep the index itself one line per row.
