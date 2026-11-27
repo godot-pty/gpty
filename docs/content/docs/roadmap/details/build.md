@@ -1638,6 +1638,8 @@ against 38m before the split. `build-linux` 58s, `build-macos` arm64 12m32s and 
 headers; that residual is BUILD-99. The `publish-crates` re-run the next day is not
 part of the wall.
 
+Commits: 43283c7, 18e42af, c7bbac7
+
 ## BUILD-78
 
 **A patch release on an archived `X.Y.x` branch cannot pass the release gate** - found 2026-11-17
@@ -1688,6 +1690,8 @@ maintainer `3af51f8`, bot `676ffd2`, and the approval after the bot's push was
 accepted. The temp-repo `selftest` covers the split and the refusal without a network;
 `push --dry-run` prints the two shas.
 
+Commits: 1a1b2dd, 18e42af, 660399d, c03364e, c7bbac7
+
 ## BUILD-80
 
 **Shipping a session is four manual steps with one trap** - the 2026-11-24 session committed two
@@ -1719,6 +1723,8 @@ prunes and prints the merge SHA plus the post-merge Docs/Scorecard/Secret-scan
 conclusions. `bot-push`, `bot-pr`, `pr-wait` and `branch-prune` are deleted and every
 live reference points at the new command; `githooks/pre-commit` refuses `main`, and
 `pr selftest` runs in `scripts/tooling-smoke`.
+
+Commits: f1bbc7e, 3153852, 18e42af, c03364e, c7bbac7
 
 ## BUILD-81
 
@@ -1913,6 +1919,8 @@ job in PR #62 run `45921076617` (job `140251690374`) passed it; planting `if` in
 `scripts/measure-cost` made the same script exit 1 with `bash -n scripts/measure-cost`
 named.
 
+Commits: 84be075, 18e42af, e376411, c7bbac7
+
 ## BUILD-92
 
 **The post-merge Scorecard workflow cannot pull its pinned action image** - measured 2026-11-24 on
@@ -1932,6 +1940,8 @@ Resolved upstream: the pin is still `ossf/scorecard-action@23f22cd… # v2.6.0`,
 workflow now completes. The first green run after the 2026-11-24 failure is
 `45904273781` (2026-11-26T22:21:36Z); `45915037604` and `45917174196` followed in
 about 40s. No retry loop was added: the manifest exists, so the pull is deterministic.
+
+Commits: 9320554, 18e42af, c7bbac7
 
 ## BUILD-93
 
@@ -1969,6 +1979,8 @@ Windows 1m58s, macOS 39s, fuzz 1m07s, with `cargo test --workspace` passing on L
 A PR run restores these keys and saves nothing (`save-if: false` in
 `ci.yml`).
 
+Commits: 84be075, 18e42af, e376411, c7bbac7
+
 ## BUILD-94
 
 **The changed-path classifier is one `code` bit, so a GDScript edit pays for Rust, Windows and macOS** - the
@@ -1998,6 +2010,8 @@ printed all four true, and the merge-group run `45922481491` ran the full matrix
 fixtures in `scripts/tooling-smoke` plus the one-expression `if:` per job; no extra
 closed PRs were opened for them, because that spends the merge-ratio signal BUILD-86
 owns.
+
+Commits: 84be075, 18e42af, e376411, c7bbac7
 
 ## BUILD-95
 
@@ -2090,6 +2104,8 @@ spent 20m39s in `vcpkg install ffmpeg`. The post-merge dispatch on `20c74154` (r
 `45924244247`, Windows job `140261792749`) restored the tree in 16s and `Build media
 dependencies` completed in the same second; the save step skipped on the cache hit.
 Linux and macOS are unchanged.
+
+Commits: 8c58684, 18e42af, 3af51f8, c7bbac7
 
 ## BUILD-100
 
@@ -2211,6 +2227,8 @@ Shipped: `macos` reads `needs.changes.outputs.macos`; the bit is set by
 `dist/ffmpeg/**`, and by any unclassified path. PR #62 run `45921076617`'s `macos` job
 passed in 3m23s; the merge queue always runs it. The fixture `crates/gpty-ipc/src/server.rs`
 sets both `rust` and `macos`.
+
+Commits: 84be075, 18e42af, e376411, c7bbac7
 
 ## BUILD-107
 
@@ -2524,6 +2542,8 @@ point at it instead of copying the list. The drift the row described is structur
 impossible, so no `check-ci-classes` script was added; the classifier fixtures in
 `scripts/tooling-smoke` exercise the patterns.
 
+Commits: 5fbf5b5, e376411, c7bbac7
+
 ## BUILD-128
 
 **Four tools parse the roadmap index row** - `docs-check`, `scripts/check-capabilities`,
@@ -2585,6 +2605,8 @@ already documented), `scripts/git-askpass-token` carries either the maintainer's
 one command that performs the two-push order. `scripts/bot-token --check` passes with
 no environment variable set.
 
+Commits: 5fbf5b5, c03364e, c7bbac7
+
 ## BUILD-134
 
 **The pre-push hook treats tags and deletes as full-suite pushes** - the new-branch fallback
@@ -2608,6 +2630,8 @@ hygiene, theme tokens, test guards, the cost stamp/chart) moved to a `static` jo
 `scripts/tooling-smoke`. PR #62 run `45921076617`'s `static` job passed in 14s, and the
 docs-only close-out PR runs only `changes`, `lint-workflows`, `docs`, `commit-lint` and
 `ci-gate`.
+
+Commits: 5fbf5b5, e376411, c7bbac7
 
 ## BUILD-136
 
