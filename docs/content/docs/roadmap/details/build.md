@@ -2909,3 +2909,5 @@ wait on wall time rather than a frame count before asserting an ease advanced, a
 graph's simulation (`_settle_now`) after placing a dragged body so the physics is not a second
 author of the position. Tests: the three named tests, in the full suite on Linux and `--dir unit` on
 macOS.
+
+Commits: e08a654
