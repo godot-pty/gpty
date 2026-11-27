@@ -18,16 +18,16 @@ RANGE_FROM=""
 RANGE_USABLE=true
 REFS=0
 LOCAL_SHA=""
-while read -r local_ref local_sha _remote_ref remote_sha; do
-    case "$local_ref" in
+while read -r _local_ref local_sha remote_ref remote_sha; do
+    case "$remote_ref" in
         refs/heads/*) ;;
         *)
-            echo "pre-push: $local_ref is not a branch - no gate"
+            echo "pre-push: $remote_ref is not a branch - no gate"
             continue
             ;;
     esac
     if [[ "$local_sha" =~ ^0+$ ]]; then
-        echo "pre-push: deleting $_remote_ref - no gate"
+        echo "pre-push: deleting $remote_ref - no gate"
         continue
     fi
     REFS=$((REFS + 1))

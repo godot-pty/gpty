@@ -265,7 +265,14 @@ EOF
     printf 'refs/heads/x %s refs/heads/x %s\n' "$(git rev-parse HEAD)" "$(git rev-parse HEAD)" \
         | CI_CHECK_BIN="$stub" githooks/pre-push >/dev/null || return 1
     [ "$(cat "$tmp/hook-args" 2>/dev/null)" = "--stamped" ] || {
-        echo "the hook did not call ci-check --stamped"
+        echo "the hook did not call ci-check --stamped for a branch ref"
+        return 1
+    }
+    rm -f "$tmp/hook-args"
+    printf '%s %s refs/heads/x %s\n' "$(git rev-parse HEAD)" "$(git rev-parse HEAD)" "$(git rev-parse HEAD)" \
+        | CI_CHECK_BIN="$stub" githooks/pre-push >/dev/null || return 1
+    [ "$(cat "$tmp/hook-args" 2>/dev/null)" = "--stamped" ] || {
+        echo "the hook skipped a raw-SHA branch push"
         return 1
     }
 }
