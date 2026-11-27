@@ -299,6 +299,27 @@ check "check-secrets" ./scripts/check-secrets
 check "check-ffi-surface selftest" ./scripts/check-ffi-surface --selftest
 check "check-ffi-surface" ./scripts/check-ffi-surface
 
+# The input-refusal causes have two owners: the handler's sentence and the
+# `send_text` README row. GPTY_GEXT_README points the checker at a copy, so a
+# copy missing a token must fail naming the copy and the token (DOCS-29).
+check_ffi_refusal_fixture() {
+    local readme="$tmp/gdext-readme.md" out
+    sed 's/writer/peer/g' crates/gpty-gdext/README.md >"$readme"
+    if out="$(env GPTY_GEXT_README="$readme" ./scripts/check-ffi-surface 2>&1)"; then
+        echo "a send_text row missing 'writer' passed check-ffi-surface"
+        return 1
+    fi
+    grep -q "$readme" <<<"$out" || {
+        printf 'the refusal failure does not name the README copy:\n%s\n' "$out"
+        return 1
+    }
+    grep -q "'writer'" <<<"$out" || {
+        printf "the refusal failure does not name the 'writer' token:\n%s\n" "$out"
+        return 1
+    }
+}
+check "check-ffi-surface refusal fixture" check_ffi_refusal_fixture
+
 # The gate must refuse a planted key, and --root is what lets it judge a
 # fixture's index without touching this repository's.
 check_secret_fixture() {

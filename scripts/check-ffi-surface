@@ -23,6 +23,11 @@ before writing the first call, and a name that never existed costs the same
 round trip as a renamed export — `get_grid_rows()` was named in three places
 and existed in none.
 
+It also checks the refusal sentence a caller sees twice: the `inject` handler's
+cause list and the `send_text` README row must both name `not reading` and
+`writer`, so the wiki can point at them instead of keeping a third copy.
+`GPTY_GEXT_README` points the README half at a fixture copy.
+
 Exit codes: 0 clean, 1 problems found. Reads only; never writes.
 `--selftest` runs the argument walker's own cases and exits 0/1; it reads
 nothing outside this file.
@@ -30,6 +35,7 @@ nothing outside this file.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -89,7 +95,22 @@ DOC_ALLOWED_NAMES = {
 }
 
 DOC_TOKEN_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*)\(")
-GEXT_README = ROOT / "crates" / "gpty-gdext" / "README.md"
+GEXT_README = (
+    Path(os.environ["GPTY_GEXT_README"])
+    if os.environ.get("GPTY_GEXT_README")
+    else ROOT / "crates" / "gpty-gdext" / "README.md"
+)
+IPCHANDLERS = ROOT / "godot" / "scenes" / "terminal" / "ipc_handlers.gd"
+REFUSAL_TOKENS = ("not reading", "writer")
+INJECT_REFUSAL_RE = re.compile(r"refused\(\s*\"Pane '%s' refused input: ([^\"]*)\"")
+
+
+def gext_readme_label() -> str:
+    """The README's path as the gate prints it (relative inside the tree)."""
+    try:
+        return str(GEXT_README.relative_to(ROOT))
+    except ValueError:
+        return str(GEXT_README)
 
 
 def balanced_args(text: str, open_paren: int) -> str:
@@ -261,7 +282,7 @@ def gdscript_handles(text: str, classes: set[str]) -> dict[str, str]:
 
 def crate_docs() -> list[tuple[str, str]]:
     """(label, text) for the crate's own prose: README and doc comments."""
-    docs = [(str(GEXT_README.relative_to(ROOT)), GEXT_README.read_text())]
+    docs = [(gext_readme_label(), GEXT_README.read_text())]
     for path in sorted(GEXT_SRC.glob("*.rs")):
         lines = [
             line.strip()
@@ -291,6 +312,44 @@ def doc_problems(surface: dict[str, dict[str, int]]) -> tuple[int, list[str]]:
             problems.append(
                 f"{label}: `{name}()` — not an export of this crate and not a plain fn"
             )
+    return checked, problems
+
+
+def refusal_problems() -> tuple[int, list[str]]:
+    """The inject refusal and its `send_text` row name the same two causes.
+
+    One fact - why the input was not accepted - was copied into the handler,
+    the README and the wiki, and the wiki copy drifted. The two owners must
+    both name the bounded queue ("not reading") and the dead writer ("writer"),
+    so the wiki can point at them instead of keeping a third copy.
+    """
+    checked, problems = 0, []
+    handler = IPCHANDLERS.read_text()
+    match = INJECT_REFUSAL_RE.search(handler)
+    if match is None:
+        problems.append(
+            f"{IPCHANDLERS.relative_to(ROOT)}: no inject "
+            "`refused(\"Pane '%s' refused input: …\")` sentence"
+        )
+    else:
+        checked += 1
+        for token in REFUSAL_TOKENS:
+            if token not in match.group(1):
+                problems.append(
+                    f"{IPCHANDLERS.relative_to(ROOT)}: the inject refusal no longer says {token!r}"
+                )
+    label = gext_readme_label()
+    row = next(
+        (line for line in GEXT_README.read_text().splitlines() if line.startswith("| `send_text(")),
+        None,
+    )
+    if row is None:
+        problems.append(f"{label}: no `send_text` row")
+    else:
+        checked += 1
+        for token in REFUSAL_TOKENS:
+            if token not in row:
+                problems.append(f"{label}: the send_text row no longer says {token!r}")
     return checked, problems
 
 
@@ -331,6 +390,8 @@ def main() -> int:
 
     doc_checked, doc_issues = doc_problems(surface)
     problems.extend(doc_issues)
+    _, refusal_issues = refusal_problems()
+    problems.extend(refusal_issues)
 
     if problems:
         print(f"check-ffi-surface: {len(problems)} problem(s) across {total_calls} calls")
@@ -341,6 +402,7 @@ def main() -> int:
     classes = ", ".join(f"{c} ({len(m)})" for c, m in sorted(surface.items()))
     print(f"check-ffi-surface: {total_calls} calls match the export surface — {classes}")
     print(f"check-ffi-surface: {doc_checked} names in the crate's prose are real methods")
+    print("check-ffi-surface: the input-refusal sentence and its send_text row name both causes")
     return 0
 
 
