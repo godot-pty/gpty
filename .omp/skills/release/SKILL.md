@@ -54,11 +54,12 @@ records the checkpoints an agent must not skip, not a second runbook.
 - **Review pause:** present the changelog, blog draft, screenshots and
   `/tmp/gpty-release-body.md`; wait for the user's explicit OK.
 - **Release execution:** follow `RELEASING.md` §8–§10. Push the release-prep
-  branch through `scripts/bot-push`, open the PR with `scripts/bot-pr --base
+  branch with `scripts/pr push`, open the PR with `scripts/pr open --base
   main` (or the maintenance branch), wait for the active line's required checks
   (on a maintenance branch, for its CI, CodeQL and secret-scan runs) to be
-  green, approve, then `gh pr merge --auto --merge` (the merge queue) or
-  `gh pr merge --merge` before the queue exists. Never click **Update branch**
+  green, then `scripts/pr land <pr> --approve` (approval, merge queue, prune).
+  For a branch with no merge queue, approve and run `gh pr merge --merge`.
+  Never click **Update branch**
   and never run `gh pr update-branch`. Then create and verify the signed tag on
   `main` (or on the maintenance branch), and push it over **HTTPS with the bot
   token**, not the SSH origin: git opens the remote connection before the

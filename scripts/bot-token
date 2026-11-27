@@ -23,8 +23,11 @@ case "${1:-}" in
 esac
 
 if [ -z "$key" ]; then
-    printf '%s\n' "GPTY_BOT_PRIVATE_KEY is not set. Point it at the gpty-bot private key (the conventional path is ~/.config/gpty/gpty-bot.pem, mode 0600), pass the PEM itself, or pass --key <path> to scripts/bot-push / scripts/bot-pr." >&2
-    exit 2
+    key="$HOME/.config/gpty/gpty-bot.pem"
+    if [ ! -f "$key" ]; then
+        printf 'GPTY_BOT_PRIVATE_KEY is not set and the conventional key %s is missing (mode 0600), or pass the PEM itself.\n' "$key" >&2
+        exit 2
+    fi
 fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/gpty-bot.XXXXXX")

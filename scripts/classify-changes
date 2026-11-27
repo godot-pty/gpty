@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Print the changed-path class bits for a newline-separated path list on stdin.
+#
+# Usage: git diff --name-only BASE HEAD | scripts/classify-changes
+#
+# Output, always four lines: rust=<bool>, godot=<bool>, node=<bool>,
+# macos=<bool>. The patterns live in scripts/ci-classes.env, shared with
+# scripts/ci-check. Empty input prints all false (the docs-only fast path); an
+# unclassified path prints all true so a new directory is never silently
+# skipped.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+# shellcheck source=scripts/ci-classes.env
+. scripts/ci-classes.env
+
+match_any() {
+    local path=$1 pat
+    shift
+    for pat in "$@"; do
+        case "$path" in $pat) return 0 ;; esac
+    done
+    return 1
+}
+
+rust=false
+godot=false
+node=false
+macos=false
+
+while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if match_any "$path" "${DOCS_PATTERNS[@]}"; then
+        continue
+    fi
+    if match_any "$path" "${NODE_PATTERNS[@]}"; then
+        node=true
+        continue
+    fi
+    case "$path" in
+        godot/*)
+            godot=true
+            continue
+            ;;
+    esac
+    if match_any "$path" "${MACOS_PATTERNS[@]}"; then
+        rust=true
+        macos=true
+        continue
+    fi
+    if match_any "$path" "${RUST_PATTERNS[@]}"; then
+        rust=true
+        continue
+    fi
+    rust=true
+    godot=true
+    node=true
+    macos=true
+done
+
+printf 'rust=%s\ngodot=%s\nnode=%s\nmacos=%s\n' "$rust" "$godot" "$node" "$macos"

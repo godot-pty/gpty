@@ -1,0 +1,512 @@
+#!/usr/bin/env bash
+# Ship a work branch as a gpty-bot pull request.
+#
+# Usage:
+#   scripts/pr push   [--key PATH] [--base BRANCH] [--dry-run] [BRANCH]
+#   scripts/pr open   [--key PATH] [--base BRANCH] [--title TITLE] [--body-file FILE]
+#   scripts/pr wait   [PR] [--base BRANCH] [--timeout SEC] [--interval SEC]
+#   scripts/pr land   PR [--approve] [--dry-run] [--base BRANCH] [--timeout SEC] [--interval SEC]
+#   scripts/pr prune  [--dry-run]
+#   scripts/pr selftest
+#
+# `push` splits a branch that edits .github/workflows/**: the newest
+# workflow-touching commit is pushed with the maintainer's credential (the App
+# has no `workflows` permission), then HEAD is pushed as the bot so the bot is
+# the last pusher and the maintainer's approval can count. `open` creates the
+# PR as the bot; `wait` follows the merge queue; `land` checks the bot author,
+# optionally approves, enqueues, waits, prunes and prints the post-merge runs.
+#
+# The script never force-pushes, never approves as the bot, and never bypasses
+# a hook. Tokens are passed through GIT_ASKPASS files, never argv.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+repo=${GPTY_BOT_REPO:-godot-pty/gpty}
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/gpty-pr.XXXXXX")
+cleanup() { rm -rf "$tmp"; }
+trap cleanup EXIT
+
+usage() {
+    cat <<'EOF'
+usage: scripts/pr <command> [options]
+
+commands:
+  push   [--key PATH] [--base BRANCH] [--dry-run] [BRANCH]
+  open   [--key PATH] [--base BRANCH] [--title TITLE] [--body-file FILE]
+  wait   [PR] [--base BRANCH] [--timeout SEC] [--interval SEC]
+  land   PR [--approve] [--dry-run] [--base BRANCH] [--timeout SEC] [--interval SEC]
+  prune  [--dry-run]
+  selftest
+EOF
+}
+
+die() {
+    printf 'pr: %s\n' "$*" >&2
+    exit 1
+}
+
+need_gh() {
+    command -v gh >/dev/null 2>&1 || die "gh is not on PATH"
+    command -v jq >/dev/null 2>&1 || die "jq is not on PATH"
+}
+
+positive() {
+    [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -gt 0 ] || die "$2 must be a positive integer"
+}
+
+token_file() {
+    local f
+    f=$(mktemp "$tmp/token.XXXXXX")
+    chmod 600 "$f"
+    printf '%s\n' "$1" > "$f"
+    printf '%s' "$f"
+}
+
+# The split plan is a pure function so `selftest` can call it without a remote.
+# Output: `none`, `refuse`, or `split <sha>`.
+split_plan() {
+    local base=$1 head=$2 w
+    w=$(git rev-list "$base..$head" -- .github/workflows 2>/dev/null | head -1 || true)
+    if [ -z "$w" ]; then
+        printf 'none\n'
+        return 0
+    fi
+    if [ "$w" = "$(git rev-parse "$head")" ]; then
+        printf 'refuse\n'
+        return 0
+    fi
+    printf 'split %s\n' "$w"
+}
+
+author_refusal() {
+    [ "$1" = "app/gpty-bot" ] || {
+        printf 'pr: PR author is %s, not app/gpty-bot; only a bot-authored PR can be approved by someone other than its last pusher\n' "$1" >&2
+        return 1
+    }
+}
+
+land_refusal() {
+    local author=$1 decision=$2
+    author_refusal "$author" || return 1
+    [ "$decision" = "APPROVED" ] || {
+        printf 'pr: PR is %s; the maintainer must approve it\n' "${decision:-unreviewed}" >&2
+        return 1
+    }
+}
+
+queue_state() {
+    local pr=$1 base=$2 owner=$3 name=$4
+    gh api graphql \
+        -f query="{repository(owner:\"$owner\",name:\"$name\"){mergeQueue(branch:\"$base\"){entries(first:50){nodes{position state pullRequest{number}}}}}}" \
+        --jq ".data.repository.mergeQueue.entries.nodes[]? | select(.pullRequest.number==$pr) | .state" \
+        2>/dev/null || true
+}
+
+merge_runs() {
+    local pr=$1
+    gh run list --event merge_group --limit 50 \
+        --json databaseId,workflowName,status,conclusion,headBranch,url \
+        --jq ".[] | select(.headBranch | contains(\"pr-$pr-\")) | [.databaseId,.workflowName,.status,(.conclusion // \"\"),.url] | @tsv" \
+        2>/dev/null || true
+}
+
+wait_pr() {
+    local pr=$1 base=$2 timeout=$3 interval=$4
+    if [ -z "$pr" ]; then
+        pr=$(gh pr view --json number --jq .number 2>/dev/null) || {
+            printf 'pr: no PR number given and the current branch has no pull request\n' >&2
+            return 2
+        }
+    fi
+    local owner name repo_fields
+    repo_fields=$(gh repo view --json owner,name --jq '.owner.login + " " + .name') || return 2
+    owner=${repo_fields%% *}
+    name=${repo_fields#* }
+
+    local deadline=$((SECONDS + timeout)) last="" pr_json state queue line failed
+    while :; do
+        if ! pr_json=$(gh pr view "$pr" --json state,mergedAt,mergeCommit,autoMergeRequest 2>/dev/null); then
+            printf 'pr: cannot read PR #%s (wrong number, or no access)\n' "$pr" >&2
+            return 2
+        fi
+        state=$(printf '%s' "$pr_json" | jq -r .state)
+        case "$state" in
+            MERGED)
+                local sha
+                sha=$(printf '%s' "$pr_json" | jq -r '.mergeCommit.oid // ""')
+                printf 'pr: #%s merged as %s\n' "$pr" "$sha"
+                merge_runs "$pr" | awk -F'\t' '{
+                    printf "pr: run %s %s %s\n", $1, $2, ($4 == "" ? "in progress" : $4)
+                }'
+                return 0
+                ;;
+            CLOSED)
+                printf 'pr: #%s is closed without merging\n' "$pr" >&2
+                return 2
+                ;;
+        esac
+
+        queue=$(queue_state "$pr" "$base" "$owner" "$name")
+        line="state=$state queue=${queue:-none}"
+        if [ "$line" != "$last" ]; then
+            printf 'pr: %s\n' "$line"
+            last=$line
+        fi
+
+        failed=$(merge_runs "$pr" | awk -F'\t' '$3 == "completed" && $4 != "success" { print $1, $2, $4, $5 }')
+        if [ -n "$failed" ]; then
+            printf 'pr: a merge-group run failed:\n%s\n' "$failed" >&2
+            return 1
+        fi
+
+        if (( SECONDS >= deadline )); then
+            printf 'pr: #%s did not merge within %ss (state=%s queue=%s)\n' \
+                "$pr" "$timeout" "$state" "${queue:-none}" >&2
+            if [ -z "$queue" ]; then
+                if [ "$(printf '%s' "$pr_json" | jq -r '.autoMergeRequest == null')" = "true" ]; then
+                    printf "pr: no queue entry and no auto-merge - approve it, then 'scripts/pr land %s --approve'\n" "$pr" >&2
+                else
+                    printf 'pr: no queue entry yet - the queue takes it once approval and required checks are in\n' >&2
+                fi
+            fi
+            return 1
+        fi
+        sleep "$interval"
+    done
+}
+
+prune_branches() {
+    local dry=$1
+    git fetch --prune origin || return 1
+    local open_prs current branch
+    open_prs=$(gh pr list --state open --json headRefName --jq '.[].headRefName') || {
+        printf 'pr: cannot list open pull requests; refusing to delete branches\n' >&2
+        return 1
+    }
+    current=$(git branch --show-current)
+
+    git for-each-ref --format='%(refname:short)' refs/heads/ | while IFS= read -r branch; do
+        case "$branch" in
+            main|release/*) continue ;;
+        esac
+        if [[ "$branch" == "$current" ]]; then
+            echo "keep   $branch (checked out)"
+            continue
+        fi
+        if printf '%s\n' "$open_prs" | grep -Fxq "$branch"; then
+            echo "keep   $branch (open PR)"
+            continue
+        fi
+        if git merge-base --is-ancestor "$branch" origin/main; then
+            if [ "$dry" = true ]; then
+                echo "delete $branch (merged into origin/main)"
+            else
+                git branch -d "$branch"
+            fi
+        else
+            echo "keep   $branch (unmerged)"
+        fi
+    done
+    git remote prune origin
+}
+
+cmd_push() {
+    local key="" dry=false base=main branch=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --key) [ $# -ge 2 ] || die "push: --key needs a value"; key=$2; shift 2 ;;
+            --base) [ $# -ge 2 ] || die "push: --base needs a value"; base=$2; shift 2 ;;
+            --dry-run) dry=true; shift ;;
+            -h|--help) usage; exit 0 ;;
+            -*) die "push: unknown option $1" ;;
+            *) [ -z "$branch" ] || die "push: one branch only"; branch=$1; shift ;;
+        esac
+    done
+    [ -n "$key" ] && export GPTY_BOT_PRIVATE_KEY="$key"
+    branch=${branch:-$(git branch --show-current)}
+    [ -n "$branch" ] || die "no current branch"
+    case "$branch" in
+        main|master) die "refusing to push $branch; open a release pull request instead" ;;
+    esac
+    git rev-parse --verify --quiet "origin/$base" >/dev/null || die "origin/$base is not fetched; run git fetch origin $base"
+    if ! $dry; then
+        git fetch --no-tags origin "$base" || die "cannot fetch origin/$base"
+    fi
+
+    local head w
+    head=$(git rev-parse HEAD)
+    w=$(git rev-list "origin/$base..HEAD" -- .github/workflows | head -1 || true)
+    if $dry; then
+        printf 'pr: base origin/%s at %s\n' "$base" "$(git rev-parse "origin/$base")"
+        printf 'pr: branch head %s\n' "$head"
+        if [ -z "$w" ]; then
+            echo "pr: no workflow-touching commit; bot push only"
+        elif [ "$w" = "$head" ]; then
+            echo "pr: REFUSED: the newest commit $w touches .github/workflows; add a non-workflow commit after it"
+            exit 2
+        else
+            printf 'pr: maintainer push %s\npr: bot push %s\n' "$w" "$head"
+        fi
+        return 0
+    fi
+
+    local remote
+    remote=$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1) || die "cannot read the remote branch"
+    if [ "$remote" = "$head" ]; then
+        echo "pr: already at HEAD; no push (a new commit is what makes the bot the last pusher)"
+        return 0
+    fi
+    if [ "$w" = "$head" ]; then
+        die "the newest commit touches .github/workflows; add a non-workflow commit after it"
+    fi
+
+    local token bt mt
+    token=$(./scripts/bot-token) || die "cannot mint the bot token"
+    bt=$(token_file "$token")
+    if [ -n "$w" ]; then
+        need_gh
+        token=$(gh auth token) || die "cannot read the maintainer token (run gh auth login)"
+        mt=$(token_file "$token")
+        GIT_ASKPASS="$PWD/scripts/git-askpass-token" GIT_TERMINAL_PROMPT=0 \
+            GPTY_GIT_TOKEN_FILE="$mt" GPTY_BOT_TOKEN_FILE= \
+            git push "https://github.com/$repo.git" "$w:refs/heads/$branch" \
+            || die "maintainer push failed"
+        echo "pr: maintainer push $w"
+    fi
+    GIT_ASKPASS="$PWD/scripts/git-askpass-token" GIT_TERMINAL_PROMPT=0 \
+        GPTY_GIT_TOKEN_FILE= GPTY_BOT_TOKEN_FILE="$bt" \
+        git push "https://x-access-token@github.com/$repo.git" "$head:refs/heads/$branch" \
+        || die "bot push failed"
+    echo "pr: bot push $head"
+}
+
+cmd_open() {
+    local key="" base=main title="" body=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --key) [ $# -ge 2 ] || die "open: --key needs a value"; key=$2; shift 2 ;;
+            --base) [ $# -ge 2 ] || die "open: --base needs a value"; base=$2; shift 2 ;;
+            --title) [ $# -ge 2 ] || die "open: --title needs a value"; title=$2; shift 2 ;;
+            --body-file) [ $# -ge 2 ] || die "open: --body-file needs a value"; body=$2; shift 2 ;;
+            -h|--help) usage; exit 0 ;;
+            *) die "open: unknown option $1" ;;
+        esac
+    done
+    [ -n "$key" ] && export GPTY_BOT_PRIVATE_KEY="$key"
+    local head
+    head=$(git branch --show-current)
+    [ -n "$head" ] || die "no current branch"
+    [ "$head" != "$base" ] || die "refusing to open a PR from $base to itself"
+    need_gh
+
+    local existing
+    existing=$(gh pr list --head "$head" --state open --json number,url,author --jq '.[0] // empty' 2>/dev/null || true)
+    if [ -n "$existing" ]; then
+        local author url num
+        author=$(jq -r '.author.login' <<<"$existing")
+        url=$(jq -r '.url' <<<"$existing")
+        num=$(jq -r '.number' <<<"$existing")
+        if [ "$author" = "app/gpty-bot" ]; then
+            printf 'pr: #%s %s\n' "$num" "$url"
+            return 0
+        fi
+        die "PR #$num ($url) was opened by $author; only a bot-authored PR can be approved by another user"
+    fi
+
+    local token args=()
+    token=$(./scripts/bot-token) || die "cannot mint the bot token"
+    args=(--base "$base" --head "$head")
+    if [ -n "$title" ]; then
+        args+=(--title "$title")
+    else
+        args+=(--fill)
+    fi
+    if [ -n "$body" ]; then
+        args+=(--body-file "$body")
+    fi
+    GH_TOKEN="$token" gh pr create "${args[@]}"
+}
+
+cmd_wait() {
+    local pr="" base=main timeout=1800 interval=15
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --base) [ $# -ge 2 ] || die "wait: --base needs a value"; base=$2; shift 2 ;;
+            --timeout) [ $# -ge 2 ] || die "wait: --timeout needs a value"; timeout=$2; shift 2 ;;
+            --interval) [ $# -ge 2 ] || die "wait: --interval needs a value"; interval=$2; shift 2 ;;
+            -h|--help) usage; exit 0 ;;
+            -*) die "wait: unknown option $1" ;;
+            *) [ -z "$pr" ] || die "wait: one PR number only"; pr=$1; shift ;;
+        esac
+    done
+    positive "$timeout" "wait: --timeout"
+    positive "$interval" "wait: --interval"
+    need_gh
+    wait_pr "$pr" "$base" "$timeout" "$interval"
+}
+
+cmd_land() {
+    local pr="" approve=false dry=false base=main timeout=3600 interval=15
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --approve) approve=true; shift ;;
+            --dry-run) dry=true; shift ;;
+            --base) [ $# -ge 2 ] || die "land: --base needs a value"; base=$2; shift 2 ;;
+            --timeout) [ $# -ge 2 ] || die "land: --timeout needs a value"; timeout=$2; shift 2 ;;
+            --interval) [ $# -ge 2 ] || die "land: --interval needs a value"; interval=$2; shift 2 ;;
+            -h|--help) usage; exit 0 ;;
+            -*) die "land: unknown option $1" ;;
+            *) [ -z "$pr" ] || die "land: one PR number only"; pr=$1; shift ;;
+        esac
+    done
+    [ -n "$pr" ] || die "land: PR number required"
+    positive "$timeout" "land: --timeout"
+    positive "$interval" "land: --interval"
+    need_gh
+
+    local json author decision
+    json=$(gh pr view "$pr" --json author,reviewDecision 2>/dev/null) || die "cannot read PR #$pr"
+    author=$(jq -r '.author.login' <<<"$json")
+    decision=$(jq -r '.reviewDecision // ""' <<<"$json")
+    author_refusal "$author" || exit 2
+
+    if $dry; then
+        if [ "$decision" != "APPROVED" ] && ! $approve; then
+            land_refusal "$author" "$decision" || true
+            exit 2
+        fi
+        if $approve && [ "$decision" != "APPROVED" ]; then
+            echo "pr: would approve"
+        fi
+        echo "pr: would merge"
+        return 0
+    fi
+
+    if $approve && [ "$decision" != "APPROVED" ]; then
+        gh pr review "$pr" --approve --body "Approved after the bot's last push." \
+            || die "cannot approve PR #$pr"
+        local i
+        for i in $(seq 1 30); do
+            decision=$(gh pr view "$pr" --json reviewDecision --jq '.reviewDecision // ""')
+            [ "$decision" = "APPROVED" ] && break
+            sleep 2
+        done
+    fi
+    if [ "$decision" != "APPROVED" ]; then
+        land_refusal "$author" "$decision" || exit 2
+    fi
+
+    gh pr merge "$pr" --auto --merge || die "cannot enqueue PR #$pr"
+    echo "pr: enqueued PR #$pr"
+    local rc=0
+    wait_pr "$pr" "$base" "$timeout" "$interval" || rc=$?
+    [ "$rc" -eq 0 ] || exit "$rc"
+
+    if ! prune_branches false; then
+        echo "pr: warning: branch prune failed" >&2
+    fi
+
+    local sha
+    sha=$(gh pr view "$pr" --json mergeCommit --jq '.mergeCommit.oid // ""')
+    echo "pr: merged as ${sha:-unknown}"
+    local deadline=$((SECONDS + 120)) wf conc
+    for wf in Docs Scorecard "Secret scan"; do
+        conc=""
+        while :; do
+            conc=$(gh run list --commit "$sha" --event push --workflow "$wf" --limit 1 \
+                --json conclusion --jq '.[0].conclusion // ""' 2>/dev/null || true)
+            if [ -n "$conc" ] && [ "$conc" != "null" ]; then
+                break
+            fi
+            if (( SECONDS >= deadline )); then
+                break
+            fi
+            sleep 5
+        done
+        printf 'pr: %s %s\n' "$wf" "${conc:-not started}"
+    done
+}
+
+cmd_prune() {
+    local dry=false
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dry-run) dry=true; shift ;;
+            -h|--help) usage; exit 0 ;;
+            *) die "prune: unknown option $1" ;;
+        esac
+    done
+    need_gh
+    prune_branches "$dry"
+}
+
+clean_git_env() {
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+        GIT_COMMON_DIR GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
+}
+
+cmd_selftest() {
+    local dir="$tmp/selftest"
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    fixture_git() {
+        ( clean_git_env; git -C "$dir" "$@" )
+    }
+    fixture_git init -q -b main
+    mkdir -p "$dir/.no-hooks"
+    fixture_git config core.hooksPath "$dir/.no-hooks"
+    fixture_git config commit.gpgsign false
+    fixture_git config user.email selftest@example.invalid
+    fixture_git config user.name "pr selftest"
+    printf 'base\n' > "$dir/base.txt"
+    fixture_git add -A
+    fixture_git commit -qm base
+    fixture_git switch -qc feature
+    mkdir -p "$dir/.github/workflows"
+    printf 'name: probe\n' > "$dir/.github/workflows/probe.yml"
+    fixture_git add -A
+    fixture_git commit -qm workflow
+    local w h plan
+    w=$(fixture_git rev-parse HEAD)
+    printf 'docs\n' > "$dir/docs.md"
+    fixture_git add -A
+    fixture_git commit -qm docs
+    h=$(fixture_git rev-parse HEAD)
+    plan=$( ( clean_git_env; cd "$dir" && split_plan main HEAD ) )
+    [ "$plan" = "split $w" ] || die "selftest: split plan was '$plan', expected 'split $w'"
+
+    printf 'name: probe2\n' > "$dir/.github/workflows/probe2.yml"
+    fixture_git add -A
+    fixture_git commit -qm "workflow at head"
+    w=$(fixture_git rev-parse HEAD)
+    plan=$( ( clean_git_env; cd "$dir" && split_plan main HEAD ) )
+    [ "$plan" = "refuse" ] || die "selftest: W==HEAD plan was '$plan', expected refuse"
+
+    land_refusal app/gpty-bot APPROVED || die "selftest: a bot PR with APPROVED was refused"
+    if land_refusal 1nv1n APPROVED 2>/dev/null; then
+        die "selftest: a maintainer-authored PR was allowed"
+    fi
+    if land_refusal app/gpty-bot REVIEW_REQUIRED 2>/dev/null; then
+        die "selftest: an unapproved bot PR was allowed"
+    fi
+    printf 'pr: selftest passed (split, W==HEAD refusal, land refusals)\n'
+}
+
+case "${1:-}" in
+    push) shift; cmd_push "$@" ;;
+    open) shift; cmd_open "$@" ;;
+    wait) shift; cmd_wait "$@" ;;
+    land) shift; cmd_land "$@" ;;
+    prune) shift; cmd_prune "$@" ;;
+    selftest) shift; cmd_selftest "$@" ;;
+    -h|--help) usage; exit 0 ;;
+    "")
+        usage >&2
+        exit 2
+        ;;
+    *)
+        printf 'pr: unknown command %s\n' "$1" >&2
+        usage >&2
+        exit 2
+        ;;
+esac

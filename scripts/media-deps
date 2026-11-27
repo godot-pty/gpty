@@ -143,19 +143,24 @@ write_env_vcpkg() {
 }
 
 if [ -f "$PREFIX/.stamp" ] && [ "$(cat "$PREFIX/.stamp")" = "$(stamp)" ]; then
-    step "FFmpeg $VERSION already built"
-    if [ "$PLATFORM" = "windows" ] && [ -n "${VCPKG_ROOT:-}" ] \
-        && [ -d "$VCPKG_ROOT/installed/x64-windows" ]; then
-        # The cached repo prefix supplies the DLLs; vcpkg's tree must still be
-        # there for headers and import libraries.
-        write_env_vcpkg "$VCPKG_ROOT/installed/x64-windows"
-        exit 0
-    elif [ "$PLATFORM" != "windows" ]; then
+    if [ "$PLATFORM" = "windows" ]; then
+        if [ -n "${VCPKG_ROOT:-}" ] \
+            && [ -d "$VCPKG_ROOT/installed/x64-windows" ]; then
+            # The cached repo prefix supplies the DLLs; vcpkg's tree must still
+            # be there for headers and import libraries.
+            step "FFmpeg $VERSION already built"
+            write_env_vcpkg "$VCPKG_ROOT/installed/x64-windows"
+            exit 0
+        fi
+        # The repo prefix only carries the DLLs, not headers or import
+        # libraries, so a missing vcpkg tree still installs. Say that before
+        # the install, never "already built".
+        step "FFmpeg $VERSION cached; installing the vcpkg headers and import libraries"
+    else
+        step "FFmpeg $VERSION already built"
         write_env
         exit 0
     fi
-    # Windows with a missing vcpkg tree falls through to the vcpkg install:
-    # the repo prefix only carries the DLLs, not headers or import libraries.
 fi
 
 if [ "$PLATFORM" = "windows" ]; then

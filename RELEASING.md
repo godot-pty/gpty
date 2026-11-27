@@ -68,9 +68,10 @@ per release.
 - A configured signing key (`git tag -v` must work) and the public key on
   GitHub. The tag ruleset has no bypass: every tag must be a signed annotated
   tag, and a bad tag cannot be moved or deleted. Cut the next patch instead.
-- The `gpty-bot` app installed on `godot-pty/gpty` and
-  `GPTY_BOT_PRIVATE_KEY` set; `./scripts/bot-token --check` passes. The bot
-  pushes the release-prep branch and opens the release PR; it never approves or
+- The `gpty-bot` app installed on `godot-pty/gpty` and its key at the
+  conventional `~/.config/gpty/gpty-bot.pem` (or `GPTY_BOT_PRIVATE_KEY`);
+  `./scripts/bot-token --check` passes. `scripts/pr push`/`open` push the
+  release-prep branch and open the release PR; the app never approves or
   merges.
 - A crates.io Trusted Publisher config for each of `gpty-core`, `gpty-ipc`,
   `gpty-plugin` and `gpty` when the tagged workflow runs `publish-crates`:
@@ -356,9 +357,9 @@ Push it and open the release PR as `gpty-bot`. The base is `main` for the
 active line and `$BRANCH` for a maintenance release:
 
 ```bash
-./scripts/bot-push "release-prep/$RELEASE"
-./scripts/bot-pr --base main --title "$RELEASE" --body-file /tmp/gpty-release-body.md
-# maintenance: --base "$BRANCH"
+./scripts/pr push "release-prep/$RELEASE"
+./scripts/pr open --base main --title "$RELEASE" --body-file /tmp/gpty-release-body.md
+# maintenance: --base "$BRANCH" on both commands
 ```
 
 Wait until the PR's checks are green: on the active line the required checks are
@@ -414,8 +415,8 @@ git checkout "$RELEASE" -- docs/content/docs/changelog/vX.Y.Z.md \
   docs/content/blog/vX.Y.Z 'docs/static/images/vX.Y.Z_*.png'
 # add the CHANGELOG.md link by hand
 git commit -s -m "docs: publish the $RELEASE notes"
-./scripts/bot-push "docs/$RELEASE"
-./scripts/bot-pr --base main --title "docs: publish $RELEASE" --body-file /tmp/gpty-release-docs-body.md
+./scripts/pr push "docs/$RELEASE"
+./scripts/pr open --base main --title "docs: publish $RELEASE" --body-file /tmp/gpty-release-docs-body.md
 ```
 
 Do not port the version bump, `Cargo.lock`, `server.json`,
@@ -442,8 +443,9 @@ privilege is present while project code runs:
   (Windows under `ci.yml`'s key; Linux under an image-scoped
   `Linux-ubuntu22-ffmpeg-*` key, because the release builds on 22.04 for the
   bundle's glibc floor while `ci.yml` builds on 24.04 and a 24.04-built
-  `libav*.so` needs GLIBC_2.38), the Windows vcpkg tree only when that prefix
-  missed, and the release-profile `target` under a
+  `libav*.so` needs GLIBC_2.38), the Windows vcpkg tree on every build (the
+  compile needs its headers and import libraries even when the prefix supplies
+  the DLLs), and the release-profile `target` under a
   `cargo-release-<os>-<arch>-<lock>` key kept apart from the debug caches. A
   tag run only restores: an entry it saves is tag-scoped, unreadable by the
   next tag, and would evict CI's caches from the 10 GB budget. `export` stamps
@@ -461,7 +463,9 @@ privilege is present while project code runs:
   ```
 
   Run it once on the release commit; it publishes nothing and writes
-  `gpty-release-dist` as a run artifact. A dispatch on a cold key is the cold
+  `gpty-release-dist` as a run artifact. On `main` it also saves the FFmpeg
+  prefix, the Windows vcpkg tree and the release-profile cargo cache, so the
+  next pull request and tag restore them. A dispatch on a cold key is the cold
   measurement; the next one (or the tag run after it) is the warm one. Read the
   step timings with `gh run view <id> --json jobs`.
 - **`publish`** writes the GitHub release. It downloads the staged artifact,
@@ -594,9 +598,10 @@ not meet this floor; the first release after the fix is the proof.
   at stabilization; it receives cherry-picked fixes, never feature work. An
   archived line's tag is the shipped tree; its branch may carry a later
   CI-trigger commit.
-- **A release-prep branch never edits a workflow.** `scripts/bot-push` uses the
-  `gpty-bot` app, which cannot create or update `.github/workflows/**`; land a
-  workflow change in its own PR first.
+- **A release-prep branch never edits a workflow.** `scripts/pr push` hands the
+  workflow commit to the maintainer and the final commit to the app, which
+  cannot create or update `.github/workflows/**`; land a workflow change in its
+  own PR first.
 - **An archived line runs the workflow that shipped with it.** A maintenance
   tag's tree starts the release workflow in that tree, not the current one;
   review it before the tag. The tag ruleset still requires a signed annotated

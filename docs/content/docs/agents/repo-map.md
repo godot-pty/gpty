@@ -30,10 +30,8 @@ gpty/
 │   ├── check-macos-minos       # Fail a Mach-O slice built for a newer macOS than the app
 │   ├── check-github-settings   # Read back rulesets, release environment and Actions policy
 │   ├── bot-token               # Mint the gpty-bot app installation token (--check for setup)
-│   ├── bot-push                # Push a branch as gpty-bot
-│   ├── bot-pr                  # Open a pull request as gpty-bot
-│   ├── pr-wait                 # Wait for a PR through main's merge queue; prints the merge commit
-│   ├── git-askpass-token       # GIT_ASKPASS helper used by bot-push
+│   ├── pr                      # Push/open/wait/land a branch through the merge queue
+│   ├── git-askpass-token       # GIT_ASKPASS helper used by scripts/pr
 │   ├── build-wiki              # Pack docs/content/wiki into godot/knowledge.json
 │   ├── build-docs              # Pack the README's Markdown closure into godot/docs.json
 │   ├── roadmap                 # Roadmap ledger: next, show, next-id, close, rearea, stats, release-check

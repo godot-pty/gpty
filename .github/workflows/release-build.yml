@@ -24,9 +24,10 @@ name: Release Build
 #   on main is that key's only writer; until a dispatch (or the nightly) runs
 #   there, the release builds the Linux prefix from source. The path is part
 #   of the cache version, so the two macOS arches cannot restore each other.
-# - the Windows vcpkg tree, restored only when that prefix missed: the fallback
-#   that keeps a media-deps or components edit from rebuilding FFmpeg for 26
-#   minutes.
+# - the Windows vcpkg tree, restored on every build: the compile needs its
+#   headers and import libraries even when the repo prefix supplies the DLLs,
+#   so the prefix hit cannot stand in for it. A cold tree rebuilds FFmpeg from
+#   source for 26 minutes, which this cache and the main-branch save prevent.
 # - `target` and `~/.cargo/registry` under `cargo-release-<os>-<arch>-<lock>`,
 #   deliberately not ci.yml's debug key: this workflow builds the release
 #   profile, and its save must not overwrite the debug cache (nor the two
@@ -299,14 +300,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ffmpeg-
 
-      # The fallback for a prefix miss (a media-deps or components edit). With
-      # the prefix present, media-deps writes the vcpkg environment and never
-      # consults vcpkg; without it, a cold `vcpkg install ffmpeg` rebuilt
-      # FFmpeg from source for 26.5 minutes on 2026-10-30 and a job cap
-      # cancelled the run. Restoring only on a miss keeps a warm run from
-      # spending a minute unpacking a tree it will not read.
+      # Always restored: the repo prefix supplies the DLLs, but the compile
+      # needs vcpkg's headers and import libraries, so a prefix hit does not
+      # mean the tree can be skipped. The save below is the writer on main.
       - name: Restore vcpkg FFmpeg tree
-        if: ${{ steps.ffmpeg-cache.outputs.cache-hit != 'true' }}
+        id: vcpkg-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -322,6 +320,16 @@ jobs:
         env:
           VCPKG_ROOT: ${{ env.VCPKG_INSTALLATION_ROOT || 'C:/vcpkg' }}
         run: ./scripts/media-deps
+
+      - name: Save vcpkg FFmpeg tree
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.vcpkg-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\packages
+            C:\vcpkg\downloads
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
       - name: Build GDExtension (release)
         run: cargo build --locked -p gpty-gdext --release
